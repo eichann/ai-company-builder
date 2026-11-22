@@ -5,7 +5,7 @@
 // the request through `getApproval`). What was opened shows in `#opened`, the ids marked read in
 // `#read`, an approval or a send that reached main in `#acted` (a row must never get there by itself).
 // `window.__acbInbox.approvedElsewhere()`: another PC approved the request — main reads again without it.
-// `?theme=dark` for dark mode. Synthetic data only.
+// `?theme=dark` for dark mode; `?offline=1`: marking read cannot reach the server. Synthetic data only.
 import { useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import '../src/i18n'
@@ -77,6 +77,7 @@ function Preview() {
     getNotificationsState: async () => state,
     onNotificationsChanged: changed.subscribe,
     markNotificationsRead: async (companyId, ids) => {
+      if (params.get('offline') === '1') throw new Error('offline')
       const list = ids === 'all' ? state.notices.items.map(i => i.id) : ids
       setRead(r => [r, list.join(',')].filter(Boolean).join('|'))
       const items = state.notices.items.map(i => (list.includes(i.id) ? { ...i, read: true } : i))

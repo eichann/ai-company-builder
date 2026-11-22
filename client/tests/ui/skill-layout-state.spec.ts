@@ -604,6 +604,33 @@ test.describe('the bottom panel', () => {
     await expect(panel(page)).toBeHidden()
   })
 
+  test('a department not downloaded on this computer: its prompt covers the side, and the panel still opens under it', async ({ page }) => {
+    await open(page)
+    await leftTab(page, 'ファイル').click()
+    await page.getByRole('button', { name: '開発部' }).first().click()
+    await expect(page.getByRole('button', { name: 'ダウンロードして同期を開始' })).toBeVisible()
+    expect(await pressJ(page)).toBe(true)
+    await expect(panel(page)).toBeVisible()
+    const p = await box(panel(page))
+    expect(Math.round(p.x)).toBe(0)
+    expect(Math.round(p.y + p.height)).toBe(page.viewportSize()!.height)
+    await expect(page.getByText('見本の中身です。')).toBeVisible()
+    await page.getByRole('button', { name: '下のパネルを閉じる (⌘J)' }).click()
+    await expect(panel(page)).toBeHidden()
+  })
+
+  test('opening a row from a department not downloaded here shows what was opened (全社), not the prompt', async ({ page }) => {
+    await openPreview(page, 'skill-layout', { inbox: '1' })
+    await leftTab(page, 'ファイル').click()
+    await page.getByRole('button', { name: '開発部' }).first().click()
+    const prompt = page.getByRole('button', { name: 'ダウンロードして同期を開始' })
+    await expect(prompt).toBeVisible()
+    await pressJ(page)
+    await panel(page).locator('[data-inbox-row="notice:n-1"]').getByRole('button', { name: '開く' }).click()
+    await expect(prompt).toBeHidden()
+    await expect(panel(page)).toBeVisible()
+  })
+
   test('the real inbox (I1): ⌘J shows it with an approval that only opens its card', async ({ page }) => {
     await openPreview(page, 'skill-layout', { inbox: '1' })
     await expect(toggle(page)).toBeVisible()

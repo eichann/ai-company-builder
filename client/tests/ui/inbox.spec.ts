@@ -99,6 +99,13 @@ test('できた・未確認 older than 14 days is one line; 「まとめて確�
   await expect(page.getByRole('region', { name: 'あなた待ち' }).getByRole('button', { name: /まとめて/ })).toHaveCount(0)
 })
 
+test('when marking seen cannot reach the server, a plain message says so and nothing pretends it was seen', async ({ page }) => {
+  await openPreview(page, 'inbox', { offline: '1' })
+  await page.locator('[data-inbox-older]').getByRole('button', { name: 'まとめて確認済みにする' }).click()
+  await expect(page.getByRole('alert')).toHaveText('サーバーにつながりませんでした。少し待ってからもう一度お試しください。')
+  await expect(page.locator('[data-inbox-older]')).toBeVisible()
+})
+
 for (const theme of ['light', 'dark'] as const) {
   test(`renders in the ${theme} theme`, async ({ page }) => {
     const state = await openPreview(page, 'inbox', theme === 'dark' ? { theme } : {})

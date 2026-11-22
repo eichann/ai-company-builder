@@ -1,5 +1,5 @@
 import { useMemo, useState, type ReactNode } from 'react'
-import type { NoticesState } from '../../../../shared/notifications-app'
+import { NOTICES_OFFLINE_TEXT, type NoticesState } from '../../../../shared/notifications-app'
 import { markNoticesRead, undoNoticedAiChange, undoNoticedChange } from '../../notifications/api'
 import { InboxChips, InboxList } from '../components/InboxList'
 import { InboxCardDialog } from '../components/InboxCardDialog'
@@ -39,7 +39,7 @@ export function useInboxSlot({ companyId, notices, onOpenRecord, onOpenTasks, on
 
   const markRead = (ids: string[]) => {
     if (ids.length === 0) return
-    void markNoticesRead(companyId, ids).then(r => { if (r && !r.success) setError(r.error) }, () => {})
+    void markNoticesRead(companyId, ids).then(r => { if (!r?.success) setError(r?.error || NOTICES_OFFLINE_TEXT) }, () => setError(NOTICES_OFFLINE_TEXT))
   }
   // Opening is what marks a row's notices seen (as the bell does); approving and sending happen on the card only.
   const open = (item: InboxItem) => {
@@ -53,6 +53,8 @@ export function useInboxSlot({ companyId, notices, onOpenRecord, onOpenTasks, on
       case 'openTasks': onOpenTasks(); break
       case 'openJobs': onOpenJobs(); break
       case 'none': break
+      // Every kind is handled here; a new one (never an approve or a send: model.ts) must be added on purpose.
+      default: { const unhandled: never = a; return unhandled }
     }
   }
   const undo = async (item: InboxItem) => {

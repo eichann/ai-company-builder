@@ -509,10 +509,13 @@ export function AppShell({ bottomPanel }: AppShellProps = {}) {
   // The inbox (features/inbox, I1) is the bottom panel's content: rows from 「あなたの番」 and the notices main
   // already read; its approval and mail rows open the same cards as a task (a preview may hand in a sample instead).
   const inbox = useInboxSlot({
-    companyId: currentCompany?.id, notices, onOpenRecord: id => openTab(recordTabKey(id)), onOpenTasks: openTasks,
+    // From a department not downloaded here (its prompt hides the middle and the list), 全社 shows what was opened.
+    companyId: currentCompany?.id, notices,
+    onOpenRecord: id => { if (isSelectedDeptUnsynced) handleSelectDept(COMPANY_TAB_ID); openTab(recordTabKey(id)) },
+    onOpenTasks: () => { if (isSelectedDeptUnsynced) handleSelectDept(COMPANY_TAB_ID); openTasks() },
     onOpenJobs: () => { setSettingsFocus({ tab: 'jobs', at: Date.now() }); setShowSettings(true) },
     renderApprovalCard: id => approvalCard(id, ''),
-    renderMailDraft: id => currentCompany ? <PreparedMailCard companyId={currentCompany.id} messageId={id} /> : null,
+    renderMailDraft: id => currentCompany ? <PreparedMailCard key={id} companyId={currentCompany.id} messageId={id} /> : null,
   })
   const panel: BottomPanelContent | undefined = bottomPanel ?? inbox
   const hasBottom = panel !== undefined
@@ -629,6 +632,8 @@ export function AppShell({ bottomPanel }: AppShellProps = {}) {
   // Pane sizes as a split tree, saved per company and fitted to the window for the panes on
   // screen (layoutTree.ts); a wide left tab covers the middle, unless the left column is hidden.
   const middleShown = !shownLeft?.wide || hidden.has('fileTree')
+  // The bottom panel sits under the middle only while the middle is really on screen.
+  const panelInMiddle = middleShown && !isSelectedDeptUnsynced
   const paneView = useMemo(() => ({ leftShown: !hidden.has('fileTree'), chatShown: !hidden.has('chat'), middleShown }), [hidden, middleShown])
   const split = useSplitLayout(currentCompany?.id, paneView, paneId => setPaneShown(paneId, false))
   const layout = split.shown
@@ -736,20 +741,22 @@ export function AppShell({ bottomPanel }: AppShellProps = {}) {
           <div
             // Measured for the bottom panel's height: as tall as the middle, which fills this side.
             ref={split.middleRef}
-            className={`flex-1 min-h-0 flex flex-col ${isSelectedDeptUnsynced ? 'invisible' : ''}`}
-            aria-hidden={isSelectedDeptUnsynced || undefined}
+            className="flex-1 min-h-0 flex flex-col"
           >
-            {/* While a wide left tab (スキル…) covers the middle, the bottom panel spans this whole side under it
-                (owner decision (b), 2026-11-22), so the inbox shows from every tab; otherwise it stays under the
-                middle. Both splits are always drawn, so switching tabs remounts neither side. */}
+            {/* While a wide left tab (スキル…) or the not-downloaded prompt covers the middle, the bottom panel
+                spans this whole side under it (owner decision (b), 2026-11-22), so the inbox shows from every
+                tab; otherwise it stays under the middle. Both splits are always drawn, so switching tabs
+                remounts neither side. */}
             <SplitView
               split={layout.middle} limits={PANE_LIMITS} className="h-full w-full min-w-0"
-              collapsed={panel && bottomOpen && !middleShown ? null : 'bottom'}
+              collapsed={panel && bottomOpen && !panelInMiddle ? null : 'bottom'}
               {...splitHandlers}
               renderPane={outer => outer === 'bottom' ? (
-                panel && !middleShown ? <BottomPanel content={panel} onClose={() => setBottomOpen(false)} /> : null
+                panel && !panelInMiddle ? <BottomPanel content={panel} onClose={() => setBottomOpen(false)} /> : null
               ) : (
-            /* The left tab beside the middle (open files and records, plan A); a wide tab covers the middle, which stays mounted. */
+            <div className="relative h-full min-h-0">
+            <div className={`h-full ${isSelectedDeptUnsynced ? 'invisible' : ''}`} aria-hidden={isSelectedDeptUnsynced || undefined}>
+            {/* The left tab beside the middle (open files and records, plan A); a wide tab covers the middle, which stays mounted. */}
             <SplitView
               split={layout.files} limits={PANE_LIMITS} className="h-full min-w-0"
               collapsed={hidden.has('fileTree') ? 'fileTree' : shownLeft?.wide ? 'editor' : null}
@@ -768,10 +775,10 @@ export function AppShell({ bottomPanel }: AppShellProps = {}) {
                 <div className="h-full min-h-0">
                   <SplitView
                     split={layout.middle} limits={PANE_LIMITS} className="h-full w-full min-w-0"
-                    collapsed={panel && bottomOpen && middleShown ? null : 'bottom'}
+                    collapsed={panel && bottomOpen && panelInMiddle ? null : 'bottom'}
                     {...splitHandlers}
                     renderPane={inMiddle => inMiddle === 'bottom' ? (
-                      panel && middleShown ? <BottomPanel content={panel} onClose={() => setBottomOpen(false)} /> : null
+                      panel && panelInMiddle ? <BottomPanel content={panel} onClose={() => setBottomOpen(false)} /> : null
                     ) : (
                       <TabbedEditorPanel
                         openFiles={openFiles}
@@ -801,18 +808,20 @@ export function AppShell({ bottomPanel }: AppShellProps = {}) {
                 </div>
               )}
             />
+            </div>
+            {isSelectedDeptUnsynced && (
+              <DepartmentDownloadPrompt
+                departmentName={selectedDept?.name}
+                color={selectedDept?.color}
+                isDownloading={isDownloading}
+                error={downloadError}
+                onDownload={handleDownloadDepartment}
+              />
+            )}
+            </div>
               )}
             />
           </div>
-          {isSelectedDeptUnsynced && (
-            <DepartmentDownloadPrompt
-              departmentName={selectedDept?.name}
-              color={selectedDept?.color}
-              isDownloading={isDownloading}
-              error={downloadError}
-              onDownload={handleDownloadDepartment}
-            />
-          )}
         </>
         )}
       />

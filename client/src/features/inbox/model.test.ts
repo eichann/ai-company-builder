@@ -2,7 +2,12 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import type { NotificationItem } from '../../../../shared/types/notifications'
 import type { NoticesState, TurnItem } from '../../../shared/notifications-app'
-import { bulkSeenIds, countText, INBOX_ACTION_KINDS, INBOX_MAX_ROWS, inboxView } from './model'
+import { bulkSeenIds, countText, INBOX_MAX_ROWS, inboxView, type InboxAction } from './model'
+
+// Type-level guard (`pnpm typecheck`): no row action may approve or send; such a kind fails to compile here.
+type ActsOutside = Extract<InboxAction['kind'], `${string}${'approve' | 'Approve' | 'send' | 'Send'}${string}`>
+const noRowActsOutside: [ActsOutside] extends [never] ? true : false = true
+void noRowActsOutside
 
 const NOW = new Date('2026-11-22T10:00:00+09:00')
 const turn = (id: string, type: string, state: string | null, due: string | null = null, extra: Partial<TurnItem> = {}): TurnItem => ({ id, type, title: id, state, due, ...extra })
@@ -39,8 +44,7 @@ test('an approval and a mail draft only ever open their card: no row action appr
   assert.deepEqual(v.waiting.map(i => i.action), [{ kind: 'openApprovalCard', approvalId: 'approval-1' }, { kind: 'openMailDraft', messageId: 'outbound_message-1' }])
   assert.deepEqual(v.done[0].action, { kind: 'openApprovalCard', approvalId: 'approval-2' })
   assert.equal(v.waiting[0].actionLabel, '承認する…')
-  for (const i of [...v.waiting, ...v.done]) assert.ok(INBOX_ACTION_KINDS.includes(i.action.kind))
-  assert.ok(!(INBOX_ACTION_KINDS as readonly string[]).some(k => /approve|send/i.test(k)))
+  for (const i of [...v.waiting, ...v.done]) assert.doesNotMatch(i.action.kind, /approve|send/i)
 })
 
 test('one record is one row: its unread notices become its line and are what opening marks seen', () => {
@@ -120,4 +124,52 @@ test('records off with no notices of the company: nothing (no panel); records of
 test('counts stop at 99+', () => {
   assert.equal(countText(99), '99')
   assert.equal(countText(100), '99+')
+})
+
+test('a notice that asks for something waits even when its record is not in the listed turn, and the bulk never clears it', () => {
+  const kinds = ['asked', 'overdue', 'acceptance_waiting', 'request_returned', 'intake_unsure', 'wait_over', 'reply_arrived', 'job_accept_needed'] as const
+  const asks = kinds.map(k => notice(k, k === 'job_accept_needed' ? '' : `task-${k}`, '2026-11-22T00:00:00Z'))
+  // A kind this app does not know yet (a newer server) waits too: the safe side.
+  const unknown = notice('brand_new_kind' as never, 'task-new', '2026-11-22T00:00:00Z')
+  const finished = notice('request_done', 'task-fin', '2026-11-22T00:00:00Z')
+  const v = inboxView(state([], [...asks, unknown, finished]), NOW)
+  assert.deepEqual(v.waiting.map(i => i.key).sort(), [...asks, unknown].map(x => `notice:${x.id}`).sort())
+  assert.deepEqual(bulkSeenIds(v, 'done'), [finished.id])
+  // Gone once opened, like a stop.
+  const read = inboxView(state([], asks.map(a => ({ ...a, read: true }))), NOW)
+  assert.equal(read.waiting.length + read.done.length + read.seenToday.length, 0)
+})
+
+test('with the turn past the server\'s first 200, news about a record may be about a waiting one: it waits', () => {
+  const due = notice('due_changed', 'task-unlisted', '2026-11-22T00:00:00Z')
+  const fin = notice('request_done', 'task-other', '2026-11-22T00:00:00Z')
+  const v = inboxView(state([turn('task-a', 'task', 'todo')], [due, fin], 250), NOW)
+  assert.ok(v.waiting.some(i => i.key === `notice:${due.id}`))
+  assert.deepEqual(bulkSeenIds(v, 'done'), [fin.id])
+  const complete = inboxView(state([turn('task-a', 'task', 'todo')], [due, fin]), NOW)
+  assert.deepEqual(bulkSeenIds(complete, 'done').sort(), [due.id, fin.id].sort())
+})
+
+test('stops look by what they mean for the member: a failure red, one to pick up amber, one skipped on purpose grey and not waiting', () => {
+  const failed = notice('job_failed', '', '2026-11-22T00:00:00Z')
+  const paused = notice('job_paused', '', '2026-11-22T00:00:00Z')
+  const stuck = notice('ai_turn_stuck', 'task-s', '2026-11-22T00:00:00Z')
+  const expired = notice('job_expired', '', '2026-11-22T00:00:00Z')
+  const skipped = notice('job_skipped', '', '2026-11-22T00:00:00Z')
+  const v = inboxView(state([], [failed, paused, stuck, expired, skipped]), NOW)
+  const badge = (id: string) => [...v.waiting, ...v.done].find(i => i.key === `notice:${id}`)!.badge
+  assert.deepEqual(badge(failed.id), { tone: 'failed', word: '止まりました' })
+  for (const id of [paused.id, stuck.id, expired.id]) assert.deepEqual(badge(id), { tone: 'needsAction', word: '止まっています' })
+  assert.deepEqual(badge(skipped.id), { tone: 'stoppedOnPurpose', word: '止めています' })
+  assert.ok(v.done.some(i => i.key === `notice:${skipped.id}`))
+  assert.ok(!v.waiting.some(i => i.key === `notice:${skipped.id}`))
+})
+
+test('a stop about a record already waiting makes that row a stop: its badge and first place', () => {
+  const stuck = notice('ai_turn_stuck', 'task-b', '2026-11-22T00:00:00Z')
+  const v = inboxView(state([turn('approval-a', 'approval', 'pending'), turn('task-b', 'task', 'todo')], [stuck]), NOW)
+  assert.equal(v.waiting.length, 2)
+  assert.equal(v.waiting[0].key, 'record:task-b')
+  assert.deepEqual(v.waiting[0].badge, { tone: 'needsAction', word: '止まっています' })
+  assert.deepEqual(v.waiting[0].unreadNoticeIds, [stuck.id])
 })

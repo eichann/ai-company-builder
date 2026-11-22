@@ -280,7 +280,7 @@ D7–D9, confirmed 2026-10-30).
   chat leaf in the tree is what is left.
   **The bottom panel (B2, 2026-11-22)** is the `middle` column split: the middle's tabs over the
   panel, under the middle only (not the left column, not the chat). **While a wide left tab (スキル, a
-  plugin's tab) covers the middle, the panel spans the whole left side under it** (owner decision (b),
+  plugin's tab) or the not-downloaded prompt covers the middle, the panel spans the whole left side under it** (owner decision (b),
   2026-11-22: the inbox shows from every tab) — the same `middle` split drawn once more around the
   left side; both splits are always drawn and only one shows the panel, so switching tabs remounts
   neither the tab's screen nor the middle, and the panel keeps its height and stays open. Its height

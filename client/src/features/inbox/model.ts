@@ -4,7 +4,7 @@
 // nothing of its own (what the server answered is rebuilt into rows every time), and it never decides
 // who may see what: every row comes from an answer the server already filtered for this member.
 import { UNDOABLE_NOTIFICATION_KINDS, type NotificationItem, type NotificationKind } from '../../../../shared/types/notifications'
-import type { StopMeaning } from '../../../../shared/design-tokens/stop-meaning'
+import { STOP_LOOK, type StopMeaning } from '../../../../shared/design-tokens/stop-meaning'
 import type { NoticesState, TurnItem } from '../../../shared/notifications-app'
 import { jobNoticeTarget } from '../../../shared/jobs'
 import { thingKindOf, thingName, type ThingKind } from '../../../shared/thing-words'
@@ -25,8 +25,6 @@ export type InboxAction =
   | { kind: 'openJobs' }
   /** A notice about nothing that can be opened: opening only marks it seen (its text says it all). */
   | { kind: 'none' }
-
-export const INBOX_ACTION_KINDS: ReadonlyArray<InboxAction['kind']> = ['openRecord', 'openApprovalCard', 'openMailDraft', 'openTasks', 'openJobs', 'none']
 
 /** The badge's look: a stop by its meaning (`STOP_LOOK`), else a plain set. */
 export type InboxTone = StopMeaning | 'success' | 'neutral' | 'ai'
@@ -63,29 +61,25 @@ export const DONE_KEEP_DAYS = 14
 export const INBOX_MAX_ROWS = 100
 
 /**
- * Notices that say something stopped and that only a person can pick up (owner decision ③): あなた待ち
- * while unread, gone once opened (today's read state — no new 「済んだ」 on the server). Their look by
- * what the stop means (design-system.md 「止まっている」の色).
+ * Notices that say something stopped (owner decision ③): あなた待ち while unread, gone once opened (today's
+ * read state — no new 「済んだ」 on the server). Their look by what the stop means for the member
+ * (`STOP_LOOK`, design-system.md 「止まっている」の色): a failure red, something they must pick up amber.
  */
 const STOP_NOTICES: Partial<Record<NotificationKind, StopMeaning>> = {
   job_failed: 'failed',
-  job_expired: 'failed',
-  job_paused: 'failed',
-  ai_turn_stuck: 'failed',
-  job_skipped: 'needsAction',
+  job_paused: 'needsAction',
+  ai_turn_stuck: 'needsAction',
+  job_expired: 'needsAction',
   job_chain_stopped: 'needsAction',
   delegate_stopped: 'needsAction',
   company_restored: 'needsAction',
 }
 
-/** Waits for the member and stays only until opened (no record of its own to follow). */
-const WAITING_NOTICES: Partial<Record<NotificationKind, string>> = {
-  job_accept_needed: '受け取ってください',
-}
-
-/** Notices that are no row at all: the morning summary says what あなた待ち already counts. */
-const NO_ROW_NOTICES: ReadonlySet<NotificationKind> = new Set(['morning_summary'])
-
+/**
+ * Notices that only tell of something finished or changed: できた・未確認 (owner decision ④), the only ones
+ * 「まとめて確認済みにする」 may clear. Every other kind — one that asks for something, and any kind this app
+ * does not know yet — waits for the member (the safe side).
+ */
 const DONE_WORDS: Partial<Record<NotificationKind, { tone: InboxTone; word: string }>> = {
   request_done: { tone: 'success', word: '終わりました' },
   ok_completed: { tone: 'success', word: '完了しました' },
@@ -94,9 +88,45 @@ const DONE_WORDS: Partial<Record<NotificationKind, { tone: InboxTone; word: stri
   replied_done: { tone: 'neutral', word: '完了にしました' },
   mail_left_inbox: { tone: 'neutral', word: '閉じました' },
   mail_archived: { tone: 'neutral', word: 'アーカイブしました' },
+  // Skipped on purpose (the responsible person was absent): nothing to do.
+  job_skipped: { tone: 'stoppedOnPurpose', word: STOP_LOOK.stoppedOnPurpose.word },
+}
+/**
+ * 「変わりました」 news about a record (owner decision ④): できた・未確認 — unless the turn the server listed is
+ * incomplete (past its first 200), when the record may be one waiting for the member: then あなた待ち.
+ */
+const CHANGE_WORDS: Partial<Record<NotificationKind, { tone: InboxTone; word: string }>> = {
+  due_changed: { tone: 'neutral', word: '変わりました' },
+  others: { tone: 'neutral', word: '変わりました' },
   ai_changed: { tone: 'ai', word: 'AI が変えました' },
 }
-const CHANGED = { tone: 'neutral' as const, word: '変わりました' }
+
+/** What a notice that asks for something says on its badge (a kind not listed: 「あなたの番」). */
+const ASK_WORDS: Partial<Record<NotificationKind, string>> = {
+  asked: '頼まれました',
+  from_message: 'やることができました',
+  overdue: '期限を過ぎました',
+  acceptance_waiting: '引き受け待ち',
+  request_returned: '戻ってきました',
+  intake_unsure: '確かめてください',
+  wait_over: '見込みを過ぎました',
+  reply_arrived: '返事が来ました',
+  due_tomorrow: '明日が期限',
+  minutes_arrived: '議事録が届きました',
+  job_accept_needed: '受け取ってください',
+}
+
+/** Notices that are no row at all: the morning summary says what あなた待ち already counts. */
+const NO_ROW_NOTICES: ReadonlySet<NotificationKind> = new Set(['morning_summary'])
+
+/** Where a notice that is not part of a listed row goes. */
+export function noticePlace(kind: NotificationKind, turnComplete: boolean): 'stop' | 'done' | 'waiting' {
+  if (STOP_NOTICES[kind]) return 'stop'
+  if (DONE_WORDS[kind]) return 'done'
+  if (CHANGE_WORDS[kind] && turnComplete) return 'done'
+  return 'waiting'
+}
+
 
 const RANK = { stopped: 0, approval: 2, mail: 3, check: 4, other: 5 } as const
 
@@ -191,27 +221,31 @@ export function inboxView(source: NoticesState, now: Date): InboxView {
   const seenToday: InboxItem[] = []
   const oldIds: string[] = []
   const keepFrom = now.getTime() - DONE_KEEP_DAYS * 24 * 60 * 60 * 1000
-  // Newest first, so a row's line is its newest unread notice. With records off the server still sends the
-  // company's own notices (`available: false`, `bellOnly`): those are rows too.
+  // Newest first, so a row's line is its newest unread notice. With records off, main still hands the company's
+  // own notices (`bellOnly`, the list's `available` false): those are rows too.
   const notices = source.available ? [...source.notices.items].sort((a, b) => b.createdAt.localeCompare(a.createdAt)) : []
+  const turnComplete = turn.total <= turn.items.length
+  const stopBadge = (m: StopMeaning) => ({ tone: m, word: STOP_LOOK[m].word })
   for (const n of notices) {
     if (NO_ROW_NOTICES.has(n.kind)) continue
     const row = n.recordId ? rows.get(n.recordId) : undefined
+    const stop = STOP_NOTICES[n.kind]
     if (row) {
       if (!n.read) {
         if (row.unreadNoticeIds.length === 0) { row.line = n.text; row.at = n.createdAt }
         row.unreadNoticeIds.push(n.id)
+        // A stop about a waiting record makes that row a stop (its look and its place first).
+        if (stop && row.rank !== RANK.stopped) { row.badge = stopBadge(stop); row.rank = RANK.stopped; row.line = n.text }
       }
       continue
     }
-    const stop = STOP_NOTICES[n.kind]
-    const waits = WAITING_NOTICES[n.kind]
-    if (stop || waits) {
-      // Gone once opened: the server keeps no 「済んだ」 for these.
-      if (!n.read) waiting.push(noticeRow(n, 'waiting', stop ? RANK.stopped : RANK.other, stop ? { tone: stop, word: stop === 'failed' ? '止まりました' : '止まっています' } : { tone: 'needsAction', word: waits! }))
+    const place = noticePlace(n.kind, turnComplete)
+    if (place !== 'done') {
+      // Gone once opened: the server keeps no 「済んだ」 for these (decision ③).
+      if (!n.read) waiting.push(place === 'stop' ? noticeRow(n, 'waiting', RANK.stopped, stopBadge(stop!)) : noticeRow(n, 'waiting', RANK.other, { tone: 'neutral', word: ASK_WORDS[n.kind] ?? 'あなたの番' }))
       continue
     }
-    const row2 = noticeRow(n, 'done', 0, DONE_WORDS[n.kind] ?? CHANGED)
+    const row2 = noticeRow(n, 'done', 0, DONE_WORDS[n.kind] ?? CHANGE_WORDS[n.kind]!)
     if (n.read) { if (sameLocalDay(n.createdAt, now)) seenToday.push(row2) }
     else if (new Date(n.createdAt).getTime() < keepFrom) oldIds.push(n.id)
     else done.push(row2)
