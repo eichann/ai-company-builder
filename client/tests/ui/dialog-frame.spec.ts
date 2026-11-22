@@ -160,7 +160,8 @@ test('dark mode links are the lighter link blue, not the old accent #1264a3 on a
 })
 
 // P2d: the deferred spots. 「片づけたタブ」, the settings, the sync preview and its before / after are
-// on the shared frame (its scrim, surface, corner, shadow and keys); ⌘K's palette is drawn like a menu.
+// on the shared frame (its scrim, surface, corner, shadow and keys); ⌘K's palette is drawn like a menu
+// over its own lighter veil.
 const ROOT = '/Users/demo/会社'
 const TIDY_SEED = JSON.stringify({ 'editor:demo': JSON.stringify({
   openFiles: [`${ROOT}/README.md`, `${ROOT}/営業部/営業の進め方.md`, `${ROOT}/総務/備品.md`], activeFilePath: `${ROOT}/README.md`, leftTab: 'files', pinned: [`${ROOT}/README.md`],
@@ -202,13 +203,19 @@ for (const theme of ['light', 'dark'] as const) {
       await expectFrame(page, diff, { title: diff.getByRole('heading', { name: '営業部/提案書.md' }) })
     })
 
-    test('⌘K\'s palette is drawn like a menu: no scrim, the raised surface and the pop shadow on the menus\' layer', async ({ page }) => {
+    test('⌘K\'s palette is drawn like a menu over a light veil: the raised surface and the pop shadow on the menus\' layer', async ({ page }) => {
       await open(page, 'records-table', theme)
       await page.getByRole('button', { name: '⌘K を開く' }).click()
       const palette = page.getByRole('dialog', { name: '探す' })
       await expect(palette).toBeVisible()
       const backdrop = page.locator('[data-palette-backdrop]')
-      expect(await css(backdrop, 'background-color'), 'no scrim').toBe('rgba(0, 0, 0, 0)')
+      const veil = await css(backdrop, 'background-color')
+      expect(veil, 'the palette veil token').toBe(await computedColour(page, await rootVar(page, '--color-scrim-palette')))
+      // Lighter than a dialog's scrim (owner decision 2026-11-22), but there.
+      const alpha = (c: string) => Number(c.match(/rgba\([^)]*,\s*([\d.]+)\)/)?.[1] ?? 1)
+      const dialogScrim = await computedColour(page, await rootVar(page, '--color-scrim'))
+      expect(alpha(veil)).toBeGreaterThan(0)
+      expect(alpha(veil)).toBeLessThan(alpha(dialogScrim))
       expect(await css(backdrop, 'z-index')).toBe(await rootVar(page, '--z-menu'))
       expect(await css(palette, 'background-color')).toBe(await token(page, 'surface-raised'))
       const pop = await page.evaluate(() => {
@@ -228,14 +235,24 @@ for (const theme of ['light', 'dark'] as const) {
   })
 }
 
-test('「片づけたタブ」 keeps the keyboard rules: Tab stays inside, Esc closes it and only it', async ({ page }) => {
-  // Its opener (the tidy notice's button) is gone once the list opens, so there is no focus to return.
+test('「片づけたタブ」 keeps the keyboard rules: Tab stays inside, Esc closes it, focus goes to the open tab', async ({ page }) => {
+  // Its opener (the tidy notice's button) is gone once the list opens: focus goes to the editor's
+  // open tab instead of nowhere (owner decision 2026-11-22). Both by Esc and by the × button.
   const { state, dialog } = await openTidied(page, 'light')
   await expect(dialog).toBeVisible()
   await expectTabStaysInside(page, dialog)
   await page.keyboard.press('Escape')
   await expect(dialog).toHaveCount(0)
-  await expect(page.getByTitle(`${ROOT}/README.md`, { exact: true })).toBeVisible()
+  const openTab = page.getByRole('tablist', { name: '開いているもの' }).getByRole('tab', { selected: true })
+  await expect(openTab).toContainText('README.md')
+  await expect(openTab).toBeFocused()
+
+  await page.getByRole('button', { name: 'タブの操作' }).click()
+  await page.getByRole('menuitem', { name: /^片づけたタブ/ }).click()
+  await expect(dialog).toBeVisible()
+  await dialog.getByRole('button', { name: '閉じる' }).click()
+  await expect(dialog).toHaveCount(0)
+  await expect(openTab).toBeFocused()
   expectNoPageErrors(state)
 })
 

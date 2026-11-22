@@ -84,10 +84,10 @@ export function FindPalette({ onClose, rootPath, companyId, departmentFolder, re
   }
 
   return (
-    // A palette is drawn like a menu (design-system.md, P2d): no scrim (the one scrim is for
-    // dialogs), the raised surface with its border and the pop shadow, on the menus' layer. The
-    // transparent layer only catches the click outside that closes it.
-    <div data-palette-backdrop className="fixed inset-0 z-menu flex items-start justify-center pt-[14vh]" onClick={onClose}>
+    // A palette is drawn like a menu (design-system.md, P2d): the raised surface with its border and
+    // the pop shadow, on the menus' layer, over the light `scrim-palette` veil (lighter than a
+    // dialog's scrim; owner decision 2026-11-22). A click on the veil closes it.
+    <div data-palette-backdrop className="fixed inset-0 z-menu flex items-start justify-center bg-scrim-palette pt-[14vh]" onClick={onClose}>
       <div role="dialog" aria-label="探す" className="w-full max-w-xl overflow-hidden rounded-card border border-[color:var(--color-border)] bg-surface-raised text-text shadow-pop" onClick={e => e.stopPropagation()}>
         <div className="flex items-center gap-2 border-b border-[color:var(--color-border)] px-4 py-3">
           <MagnifyingGlass size={16} className="flex-shrink-0 text-text-subtle" />

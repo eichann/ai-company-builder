@@ -452,12 +452,17 @@ fine), `color-opacity` (`bg-warning/10`).
   `surface-raised` — dark #202024, was zinc-900 —, the nav `bg`, lines `border`; the nav's indigo stays
   for the switch / checkbox PR), `SyncPreviewDialog` (`md`, was 512px; its undo confirm and the
   before / after open on top of it and take Esc first) and `DiffModal` (`DiffViewer.tsx`, wide
-  `custom`; was `z-[60]` over a 60 % scrim). `TidiedTabsDialog` and the settings no longer
+  `custom`; was `z-[60]` over a 60 % scrim). When 「片づけたタブ」 closes and what opened it is gone
+  (the tidy notice's button, a menu item), focus goes to the open tab in the editor's tab bar
+  (owner decision 2026-11-22; the active tab is focusable by script, `tabIndex=-1`, with the
+  focus ring). `TidiedTabsDialog` and the settings no longer
   listen for Esc on the document / window: an Esc a field inside handles (the voice shortcut
   recorder) stops there.
-- **⌘K's palette (`FindPalette`) is drawn like a menu** (proposal: one scrim, for dialogs; menus have
-  none): no scrim (a transparent layer still closes it on a click outside), `z-menu`,
-  `surface-raised`, `border`, corner `card`, `shadow-pop`; rows `selected-bg` / `surface-sunken`.
+- **⌘K's palette (`FindPalette`) is drawn like a menu** over a light veil (owner decision
+  2026-11-22): the token `scrim-palette` (light 20 %, dark 40 %; lighter than the dialog `scrim`
+  45 % / 60 %; a click on it closes the palette), `z-menu`, `surface-raised`, `border`, corner `card`,
+  `shadow-pop`; rows `selected-bg` / `surface-sunken`. A new menu-like panel that needs a veil uses
+  `scrim-palette`, a dialog `scrim`.
 - **Theme-following now** (were white in dark): `ChatAuthSettings` (the chat's settings) — page
   `var(--color-surface)`, lines `border`, option cards `bg` with `border` (the chosen one the
   `selected` set, its icon tile `primary` / `on-primary`, its check `selected-icon`; `aria-pressed`),
@@ -477,14 +482,15 @@ fine), `color-opacity` (`bg-warning/10`).
   colours); preview pages use `bg-primary` / `text-link`.
 - **What changed in light mode**: the diff's red / green text is darker (red-700 / emerald-700 on
   red-50 / emerald-50; was red-400 / green-400, under 3:1) and its panes white (were #f8f8f8); the
-  sync preview's 「変更」 is grey, its surface white (was #f8f8f8), title 15px, padding 20px, width
-  480px; the palette has no grey veil over the screen; 「片づけたタブ」 centred (was near the top),
+  sync preview's 「変更」 is grey (owner: OK), its surface white (was #f8f8f8), title 15px, padding 20px, width
+  480px; the palette's veil is the same 20 % as before (dark 40 %); 「片づけたタブ」 centred (was near the top),
   640px (was 576px), title 15px; the chat settings' option cards show a thin line and the key field's
   corner is 8px (was 12px); the settings' nav #fafafa (was zinc-50 at 80 %). Dark: every one of
   them follows the theme.
 - **Guarded by** `client/tests/ui/dialog-frame.spec.ts` (light and dark: 「片づけたタブ」, the settings,
-  the sync preview and the before / after against the frame tokens; the palette without scrim on
-  `z-menu` with `surface-raised` / `shadow-pop`; Tab stays inside and Esc closes 「片づけたタブ」 and
+  the sync preview and the before / after against the frame tokens; the palette's veil
+  `scrim-palette` (present, lighter than `scrim`) on `z-menu` with `surface-raised` / `shadow-pop`;
+  Tab stays inside and Esc closes 「片づけたタブ」 (focus then on the open tab, by Esc and by ×) and
   the settings, focus back to the settings' opener — `download-folders-ui?closed=1`; Esc closes the
   before / after first, then the preview), `dark-readability.spec.ts` (the chat settings —
   `sign-in-ui?screen=chat-settings&mode=…&claude=…` — with the chosen option `selected-bg`, the sync

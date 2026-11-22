@@ -18,6 +18,19 @@ interface Props {
   checkMissing: (items: readonly TidiedItem[]) => Promise<Set<string>>
 }
 
+/**
+ * Closing: the shared Dialog gives focus back to what opened the list, but that (the tidy notice's
+ * button, a menu item) is usually gone by then; focus then goes to the open tab in the editor's
+ * tab bar, not nowhere (owner decision 2026-11-22).
+ */
+function focusOpenTab() {
+  requestAnimationFrame(() => {
+    const now = document.activeElement
+    if (now && now !== document.body) return
+    document.querySelector<HTMLElement>('[role="tablist"] [role="tab"][aria-selected="true"]')?.focus()
+  })
+}
+
 const time = (iso: string) => {
   const d = new Date(iso)
   return Number.isNaN(d.getTime()) ? '' : d.toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Tokyo' })
@@ -27,7 +40,8 @@ const time = (iso: string) => {
  * 「片づけたタブ」: the tidied tabs by company day, newest first; a day reopens or goes as a whole,
  * an item opens alone. A file or record no longer there is greyed 「見つかりません」, still removable.
  */
-export function TidiedTabsDialog({ groups, onClose, onRestore, onRemoveItems, onRemoveDay, checkMissing }: Props) {
+export function TidiedTabsDialog({ groups, onClose: close, onRestore, onRemoveItems, onRemoveDay, checkMissing }: Props) {
+  const onClose = () => { close(); focusOpenTab() }
   const [missing, setMissing] = useState<ReadonlySet<string>>(new Set())
   const titleId = useId()
   // Checked once when the list mounts (a callback ref: the renderer's effect count is capped).
@@ -42,7 +56,7 @@ export function TidiedTabsDialog({ groups, onClose, onRestore, onRemoveItems, on
   const days = groupsByDay(groups)
 
   return (
-    // The shared frame (design-system.md, P2c): its scrim, surface and keys; a list picker, so no padding.
+    // The shared frame (design-system.md, P2d): its scrim, surface and keys; a list picker, so no padding.
     <Dialog onClose={onClose} labelledBy={titleId} size="lg" padded={false} className="flex max-h-[76vh] flex-col overflow-hidden">
       <div ref={checkRef} className="flex min-h-0 flex-1 flex-col">
         <div className="flex items-center gap-2 border-b border-[color:var(--color-border)] px-4 py-3">

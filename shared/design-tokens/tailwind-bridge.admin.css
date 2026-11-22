@@ -179,6 +179,7 @@
   --color-thing-project: var(--color-thing-project);
   --color-thing-meeting: var(--color-thing-meeting);
   --color-scrim: var(--color-scrim);
+  --color-scrim-palette: var(--color-scrim-palette);
   --radius-small: var(--radius-small);
   --radius-control: var(--radius-control);
   --radius-card: var(--radius-card);
