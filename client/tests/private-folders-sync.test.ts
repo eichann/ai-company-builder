@@ -7,11 +7,12 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { cloneUrlAllowed, readPrivateExcludes, safeScopeDir, sameScopeRemote, writePrivateExcludes } from '../electron/sync/private-folders'
+import { cloneUrlAllowed, privateBackupsDir, readPrivateExcludes, safeScopeDir, sameScopeRemote, writePrivateExcludes } from '../electron/sync/private-folders'
 import { readNestedRepoExcludes, writeNestedRepoExcludes } from '../electron/sync/nested-repos'
 import { createPathChecker, pathPrefixes } from '../electron/sync/path-check'
 import { parseReservedPathRejection } from '../electron/sync/reserved-path'
-import { removeExcludedClone } from '../electron/sync/private-sync'
+import { simpleGit } from 'simple-git'
+import { EXCLUDED_CLONE_KEPT_MESSAGE, removeExcludedClone } from '../electron/sync/private-sync'
 import type { SyncDeps } from '../electron/sync/types'
 
 const scope = { cloneUrl: 'https://acb.example.com/api/git-http/c1/scopes/s1.git', clonePath: '/api/git-http/c1/scopes/s1.git' }
@@ -161,3 +162,45 @@ test('a left-out private folder\'s clone is not removed when git cannot say what
   await assert.rejects(removeExcludedClone(deps, root, dir, '人事/評価'))
   assert.equal(fs.readFileSync(path.join(dir, 'draft.md'), 'utf-8'), 'unsynced\n')
 })
+
+test('a left-out private folder: when moving an ignored folder stops half-way, the backup keeps what already left the clone', async t => {
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'acb-excluded-')))
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }))
+  const dir = path.join(root, '人事', '評価')
+  fs.mkdirSync(dir, { recursive: true })
+  const repo = simpleGit(dir)
+  await repo.init()
+  fs.writeFileSync(path.join(dir, '.gitignore'), '.personal/\n')
+  fs.writeFileSync(path.join(dir, '表.md'), 'shared\n')
+  await repo.add('.')
+  await repo.raw(['-c', 'user.name=t', '-c', 'user.email=t@example.com', 'commit', '-qm', 'one'])
+  await repo.raw(['update-ref', 'refs/remotes/origin/main', 'HEAD'])
+  const personal = path.join(dir, '.personal')
+  fs.mkdirSync(path.join(personal, 'open'), { recursive: true })
+  fs.writeFileSync(path.join(personal, 'a.md'), 'only note\n')
+  fs.writeFileSync(path.join(personal, 'open', 'b.md'), 'open note\n')
+  // Another volume (no rename: copy, then remove), and the removal stops at a
+  // file another app holds after a.md is already gone.
+  const { renameSync, rmSync } = fs
+  t.after(() => Object.assign(fs, { renameSync, rmSync }))
+  Object.assign(fs, {
+    renameSync: (src: fs.PathLike, dest: fs.PathLike) => {
+      if (String(src) === personal) throw Object.assign(new Error('cross-device link'), { code: 'EXDEV' })
+      renameSync(src, dest)
+    },
+    rmSync: (target: fs.PathLike, options?: fs.RmOptions) => {
+      if (String(target) !== personal) return rmSync(target, options)
+      rmSync(path.join(personal, 'a.md'))
+      throw Object.assign(new Error('resource busy'), { code: 'EBUSY' })
+    },
+  })
+  const deps = { createGit: (d: string) => simpleGit(d), log: { log() {}, warn() {}, error() {} }, now: () => new Date('2026-11-22T00:00:00Z') } as unknown as SyncDeps
+  const removal = await removeExcludedClone(deps, root, dir, '人事/評価')
+  Object.assign(fs, { renameSync, rmSync })
+  assert.deepEqual([removal.removed, removal.reason], [false, EXCLUDED_CLONE_KEPT_MESSAGE])
+  assert.equal(fs.readFileSync(path.join(personal, 'open', 'b.md'), 'utf-8'), 'open note\n', 'the clone stays')
+  const backups = privateBackupsDir(root)
+  const saved = fs.readdirSync(backups).map(b => path.join(backups, b, '人事', '評価', '.personal', 'a.md')).filter(f => fs.existsSync(f))
+  assert.deepEqual(saved.map(f => fs.readFileSync(f, 'utf-8')), ['only note\n'], 'a.md, already gone from the clone, is kept in the backup')
+})
+

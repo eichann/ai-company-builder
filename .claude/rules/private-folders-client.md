@@ -56,11 +56,13 @@ everyone else's editing kept, owners / admins never named: `src/features/records
   a status git cannot give counts as "something left"). Files git does not show there — ignored ones:
   `.personal/` notes, `.env`, large files — first move to the private backups
   (`<ts>_private_excluded`, reason `private_folder_excluded`, OS files left out); the report says how
-  many (`setAside`, `backupPath`). If one cannot be moved, what moved goes back, nothing is deleted and
+  many (`setAside`, `backupPath`). If one cannot be moved, what moved goes back where its place is
+  free (a copy-and-remove that stopped half-way leaves its part in the backup, which is removed only
+  when it holds nothing of the member's), nothing is deleted and
   the clone stays with `EXCLUDED_CLONE_KEPT_MESSAGE` (it names no folder; the sync's note adds the
   reader's own 『…』); the next sync tries again. They were deleted silently before (code review
   2026-11-22). Scenarios: 「leaving the private folder out keeps the files it never shares…」, 「…when
-  its never-shared files cannot be saved…」; unit `private-folders-sync.test.ts` (status failing).
+  its never-shared files cannot be saved…」; unit `private-folders-sync.test.ts` (status failing; a move that stops half-way).
 - Backups go to `.git/acb-private-backups/` with the folder's path as prefix; dialogs and
   metadata use company-relative paths; messages say 「非公開フォルダのバックアップ」.
 

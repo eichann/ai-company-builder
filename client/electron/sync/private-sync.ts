@@ -365,6 +365,18 @@ function present(p: string): boolean {
   try { fs.lstatSync(p); return true } catch { return false }
 }
 
+/** Anything but folders under `dir` (links and unreadable entries count). */
+function hasFiles(dir: string): boolean {
+  let st: fs.Stats
+  try { st = fs.lstatSync(dir) } catch { return false }
+  if (!st.isDirectory()) return true
+  try {
+    return fs.readdirSync(dir).some(name => hasFiles(path.join(dir, name)))
+  } catch {
+    return true
+  }
+}
+
 /** Ignored files and folders in a clone (outermost only; OS files left out), repository-relative. */
 async function ignoredInClone(git: SimpleGit): Promise<string[]> {
   const raw = await git.raw(['ls-files', '-z', '--others', '--ignored', '--exclude-standard', '--directory'])
@@ -428,21 +440,22 @@ export async function removeExcludedClone(deps: SyncDeps, repoPath: string, dir:
       for (const entry of ignored) {
         const dest = path.join(backupPath, folder, entry)
         if (present(dest)) throw new Error('already in the backup')
-        moveInto(path.join(dir, entry), dest)
+        // Listed before the move: a copy-and-remove that fails half-way has touched both sides.
         moved.push(entry)
+        moveInto(path.join(dir, entry), dest)
       }
       saved = { backupPath, files }
     } catch (error) {
       deps.log.warn('Git sync: Could not save the ignored files of a left-out private folder; it stays:', error)
-      // What moved goes back; what cannot stays in the backup (its metadata lists it).
-      let allBack = true
+      // What moved goes back where its place is free; the rest stays in the backup (its metadata lists it).
       for (const entry of moved.reverse()) {
+        const kept = path.join(backupPath, folder, entry)
         try {
-          if (present(path.join(dir, entry))) { allBack = false; continue }
-          moveInto(path.join(backupPath, folder, entry), path.join(dir, entry))
-        } catch { allBack = false }
+          if (present(kept) && !present(path.join(dir, entry))) moveInto(kept, path.join(dir, entry))
+        } catch { /* stays in the backup */ }
       }
-      if (backupPath && allBack) fs.rmSync(backupPath, { recursive: true, force: true })
+      // The backup goes only when nothing of the member's is left in it.
+      if (backupPath && !hasFiles(path.join(backupPath, folder))) fs.rmSync(backupPath, { recursive: true, force: true })
       return { removed: false, reason: EXCLUDED_CLONE_KEPT_MESSAGE }
     }
   }
