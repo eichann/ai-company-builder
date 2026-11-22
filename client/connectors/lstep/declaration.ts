@@ -70,7 +70,7 @@ browser:
       lock:
         kind: ${LSTEP_REMINDER_STEP_CHECKER}
       delivers: scheduled
-      shared: 全部の回で共有のリマインダです。前の回の人にも届きます。
+      shared: 全部の回で共有のリマインダです。ほかの回でも、この段をまだ迎えていない人に届きます（もう過ぎた人には届きません）。
       target:
         reminder: id
         step: id

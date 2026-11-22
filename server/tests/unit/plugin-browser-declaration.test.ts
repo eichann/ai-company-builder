@@ -48,7 +48,7 @@ browser:
       checker: lstep.reminder_step_template
       lock: { kind: lstep.reminder_step }
       delivers: none
-      shared: 全部の回で共有のリマインダです。前の回の人にも届きます。
+      shared: 全部の回で共有のリマインダです。ほかの回でも、この段をまだ迎えていない人に届きます（もう過ぎた人には届きません）。
       irreversible: false
       target:
         reminder: id
@@ -119,7 +119,7 @@ describe('a browser connector declaration', () => {
     expect(b.assetHosts).toEqual(['d1nhtjid4lgi9y.cloudfront.net', 'profile.line-scdn.net'])
     expect(b.account).toEqual({ label: 'LINE アカウント' })
     const op = b.operations.reminder_step_template
-    expect(op).toMatchObject({ effect: 'write', checker: 'lstep.reminder_step_template', irreversible: false, shared: '全部の回で共有のリマインダです。前の回の人にも届きます。' })
+    expect(op).toMatchObject({ effect: 'write', checker: 'lstep.reminder_step_template', irreversible: false, shared: '全部の回で共有のリマインダです。ほかの回でも、この段をまだ迎えていない人に届きます（もう過ぎた人には届きません）。' })
     expect(op.target).toEqual({ reminder: 'id', step: 'id' })
     expect(op.writes).toEqual([{
       method: 'POST', path: '/line/episode/step/pack/template', encoding: 'form',
@@ -173,10 +173,10 @@ describe('a browser connector declaration', () => {
     // Bidirectional and zero-width characters make text read differently from what it is.
     for (const ch of ['\\u200b', '\\u200f', '\\u202e', '\\u2066', '\\u061c', '\\ufeff']) {
       expect(errorsOf(edit('      label: リマインダを読む\n', `      label: "読${ch}む"\n`)), ch).toContain('label は 60 文字まで')
-      expect(errorsOf(edit('      shared: 全部の回で共有のリマインダです。前の回の人にも届きます。\n', `      shared: "前の回${ch}"\n`)), ch).toContain('shared は 200 文字まで')
+      expect(errorsOf(edit('      shared: 全部の回で共有のリマインダです。ほかの回でも、この段をまだ迎えていない人に届きます（もう過ぎた人には届きません）。\n', `      shared: "前の回${ch}"\n`)), ch).toContain('shared は 200 文字まで')
       expect(errorsOf(edit('    label: LINE アカウント\n', `    label: "LINE${ch}"\n`)), ch).toContain('account の label')
     }
-    expect(errorsOf(edit('      shared: 全部の回で共有のリマインダです。前の回の人にも届きます。\n', `      shared: "${'あ'.repeat(201)}"\n`))).toContain('shared は 200 文字まで')
+    expect(errorsOf(edit('      shared: 全部の回で共有のリマインダです。ほかの回でも、この段をまだ迎えていない人に届きます（もう過ぎた人には届きません）。\n', `      shared: "${'あ'.repeat(201)}"\n`))).toContain('shared は 200 文字まで')
     expect(errorsOf(edit('      checker: lstep.read_reminder\n', '      checker: lstep\n'))).toContain('checker は「サイト.確かめるもの」')
     expect(errorsOf(edit('      checker: lstep.read_reminder\n', '      checker: "../evil.js"\n'))).toContain('checker は「サイト.確かめるもの」')
     // The key of 2026-11-20 says what replaced it.

@@ -161,6 +161,19 @@ test('the step\'s timing is taken only as one whole visible text in the step\'s 
   assert.equal(await timing('<span>当日 09:00 ごろ届きます</span>'), 'unknown', 'not a whole timing')
   assert.equal(await timing('<span hidden>当日 09:00</span>'), 'unknown', 'hidden')
   assert.equal(await timing('<span style="display:none">当日 09:00</span>'), 'unknown', 'hidden by style')
+  // A template's name is never the timing: a slot named like a timing makes it unknown (in doubt, no
+  // fact), also when it is the only timing-shaped text, wrapped, or a plain link.
+  const slot = (name: string) => `<a onclick="openModal(${REMINDER}, ${STEP}, 2, ${TO_ADD}, 8)">${name}</a>`
+  assert.equal(await timing(slot('当日 09:00')), 'unknown')
+  assert.equal(await timing(`<span>3日前 09:00</span>${slot('当日 09:00')}`), 'unknown')
+  assert.equal(await timing(`<div>${slot('当日 09:00')}</div>`), 'unknown')
+  assert.equal(await timing(`<span onclick="openModal(${REMINDER}, ${STEP}, 2, ${TO_ADD}, 8)"><b>当日 09:00</b></span>`), 'unknown')
+  assert.equal(await timing('<a href="#">当日 09:00</a>'), 'unknown')
+  assert.equal(await timing('<button>当日 09:00</button>'), 'unknown')
+  // An element holding a link is not the timing, even when its text together reads as one.
+  assert.equal(await timing('<div>当日 <a href="#">09:00</a></div>'), 'unknown')
+  // Next to a slot with another name, the timing is still read.
+  assert.deepEqual(await timing(`<span>3日前 09:00</span>${slot('架空テンプレ乙')}`), { timing: '3日前 09:00' })
   // Outside the box (another step's or the page's) is not this step's.
   const outside = await factsOf(site({ [`/line/episode/show/${REMINDER}`]: reminderPage(`<p>当日 09:00</p>${box('')}`) }))
   assert.equal(outside.facts.schedule.status, 'unknown')
@@ -170,6 +183,7 @@ test('the step\'s timing is taken only as one whole visible text in the step\'s 
 test('a page the core could not read whole gives no fact read through its view; the account and the state, read by the run\'s own rules, stay', async () => {
   const twiceId = await factsOf(site({ [`/line/episode/show/${REMINDER}`]: reminderPage(`${box('<span>当日 09:00</span>')}<p id="x">a</p><p id="x">b</p>`) }))
   assert.equal(twiceId.facts.schedule.status, 'unknown')
+  assert.equal(twiceId.facts.names.status, 'unknown', 'the step\'s name is read through the view too')
   assert.deepEqual(valueOf(twiceId.facts, 'state'), { templates: [ON_STEP] })
   assert.deepEqual(valueOf(twiceId.facts, 'account'), { id: '5550001' })
 })
@@ -230,6 +244,26 @@ test('the core reads only declared reads with addresses it builds, at most BROWS
   assert.ok(out.facts)
   assert.equal(out.facts.account.status, 'unknown')
   assert.equal('mood' in out.facts, false)
+  // `rawMarkup` counts only for the account, the parent and the state: another fact so marked, from a
+  // page not read whole, stays unknown.
+  const marking: BrowserChecker = {
+    ...checker,
+    facts: {
+      version: 2,
+      next: () => [{ read: 'reminder', values: { reminder: REMINDER } }],
+      // It reads the page through the view (which finds the repeated id), then marks everything raw.
+      read: (_values, answers) => ({ facts: {
+        ...(answers[0].ok && answers[0].kind === 'html' ? (answers[0].view.find({}), {}) : {}),
+        schedule: { status: 'known', value: { timing: '当日 09:00' }, complete: true, from: 0, rawMarkup: true },
+        account: { status: 'known', value: { id: '1' }, from: 0, rawMarkup: true },
+      } }),
+    },
+  }
+  const notWhole = reminderPage(`${box('<span>当日 09:00</span>')}<p id="x">a</p><p id="x">b</p>`)
+  const marked = await readBrowserFacts(input(site({ [`/line/episode/show/${REMINDER}`]: notWhole }), { checker: marking }).deps)
+  assert.ok(marked.facts)
+  assert.equal(marked.facts.schedule.status, 'unknown')
+  assert.equal(marked.facts.account.status, 'known')
   // Another facts version than the plan's: nothing read.
   const v1 = input(site(), { factsVersion: 1 })
   assert.deepEqual(await readBrowserFacts(v1.deps), { facts: null, problem: 'facts-version' })

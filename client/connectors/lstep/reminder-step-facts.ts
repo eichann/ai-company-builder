@@ -11,19 +11,23 @@
  * | `step_parent`, `state` | the reminder page: the step's box `templateStep<step>` and its `openModal(…)` slots (the run's `view`) | box confirmed §34; slots from the 11/20 capture |
  * | `templates` | `GET /api/templates?group=<folder>&page=<n>` entries `{ id, name, content_text, form_type, group }`, found by id, folder by folder (`/api/template-groups`) | confirmed §34, §36; `form_type` 8 = text (§34), any other → no plan |
  * | `names.reminder` | `GET /api/episodes?group=<folder>&page=<n>` entry `name`, found by id (`/api/episode-groups`) | confirmed §35, §36 |
- * | `schedule.timing`, `names.step` | the step's box: one element whose whole visible text is a timing (「当日 09:00」「3 日前 に送信」) | the text forms are §34's; **where it stands in the box is not confirmed** |
+ * | `schedule.timing`, `names.step` | the step's box: one element whose whole visible text is a timing (「当日 09:00」「3 日前 に送信」), never a link or what holds one (a template's name); a timing inside a link → unknown | the text forms are §34's; **where it stands in the box is not confirmed** |
  * | `shared_with` | — | **not confirmed** where the site lists the 回 using a reminder: always `unknown` (so no plan yet) |
  * | `audience` | — | no reading confirmed to mean "people who will still receive this step": always `unknown` (optional, shown 「読み取れませんでした」) |
  *
  * The folder scans read a folder list, then each folder's pages in order (at most 10, the declared
- * `pages.max`) until every id sought is found; the core caps the reads in all (`BROWSER_FACT_READS`).
- * An entry counts only when every folder id it carries names the folder asked (as the list readers
- * do), an id found twice with different contents is not found, and 「未分類」 (`id 0`) is never
- * asked (not a positive id): a template there is not found → `templates` unknown → no plan.
+ * `pages.max`) until every id sought is found, then stop; the core caps the reads in all
+ * (`BROWSER_FACT_READS`). An entry counts only when every folder id it carries names the folder asked
+ * (as the list readers do: a folder filter the site did not apply shows as entries of other folders,
+ * left out), an id found twice with different contents **among the pages read** is not found — folders
+ * after the one where the last id was found are not read, so a copy there is not seen (ids are the
+ * site's own record numbers; walking every folder would make the cap, and so no facts, likely) — and
+ * 「未分類」 (`id 0`) is never asked (not a positive id): a template there is not found → `templates`
+ * unknown → no plan.
  */
 import { isPlainBrowserText, type BrowserPlanValues } from '../../../shared/core/plugin-browser-declaration'
 import type {
-  BrowserCheckerFacts, BrowserCheckerView, BrowserFactAnswer, BrowserFactDraft, BrowserFactRequest, BrowserJsonValue, BrowserPageRead,
+  BrowserCheckerFacts, BrowserCheckerView, BrowserFactAnswer, BrowserFactDraft, BrowserFactRequest, BrowserJsonValue, BrowserPageElement, BrowserPageRead,
 } from '../../shared/browser-runner'
 
 /** The facts version these readers produce (shared/core/browser-plans.ts `BROWSER_FACT_SCHEMAS`). */
@@ -115,12 +119,27 @@ function scan(spec: ScanSpec, wanted: ReadonlySet<string>, answers: readonly Bro
 const REMINDERS: ScanSpec = { folders: 'reminder_folders', list: 'reminders', param: 'group' }
 const TEMPLATES: ScanSpec = { folders: 'template_folders', list: 'templates', param: 'template_group' }
 
-/** The step's timing in its box: exactly one distinct visible text that is a whole timing, else null. */
+/** Attributes a template's slot call stands in (as ./reminder-steps-reader.ts reads them). */
+const CALL_ATTRIBUTES = ['onclick', 'href', 'data-onclick'] as const
+/** A link or button of the box — a template's slot (`openModal(…)`) or any other: its text is a template's or a control's, never the step's timing. */
+const isLink = (el: BrowserPageElement): boolean =>
+  el.tag === 'a' || el.tag === 'button' || CALL_ATTRIBUTES.some(name => /openModal\s*\(/.test(el.attr(name) ?? ''))
+const holdsLink = (el: BrowserPageElement): boolean => el.find({}).some(isLink)
+
+/**
+ * The step's timing in its box: exactly one distinct visible text that is a whole timing, else null.
+ * Never from a link (a template named 「当日 09:00」 is a template's name) nor from an element holding
+ * one; and a timing-shaped text inside any link makes the timing unknown (where the real one stands
+ * is not confirmed: in doubt, no fact).
+ */
 function timingOf(answer: BrowserFactAnswer, step: string): string | null {
   if (!answer.ok || answer.kind !== 'html' || !POSITIVE_ID.test(step)) return null
   const boxes = answer.view.find({ id: `templateStep${step}` })
   if (boxes.length !== 1) return null
-  const texts = new Set(boxes[0].find({}).map(el => el.text()).filter(t => TIMING_RE.test(t)))
+  // A link whose text (or a part's) is timing-shaped: unknown. So a link is never a candidate below either.
+  const links = boxes[0].find({}).filter(isLink)
+  if (links.some(link => [link, ...link.find({})].some(el => TIMING_RE.test(el.text())))) return null
+  const texts = new Set(boxes[0].find({}).filter(el => !holdsLink(el)).map(el => el.text()).filter(t => TIMING_RE.test(t)))
   if (texts.size !== 1) return null
   const [timing] = [...texts]
   return isPlainBrowserText(timing, 100) ? timing : null
@@ -181,7 +200,9 @@ export function createLstepReminderStepFacts(view: (values: BrowserPlanValues, r
       const reminderFound = checked?.state ? scan(REMINDERS, new Set([values.target.reminder]), answers).found.get(values.target.reminder) : undefined
       const reminderName = reminderFound && reminderFound !== 'ambiguous' ? field(reminderFound.entry, 'name') : undefined
       facts.names = timing && isPlainBrowserText(reminderName, 200) && reminderFound && reminderFound !== 'ambiguous'
-        ? { status: 'known', value: { reminder: reminderName, step: timing }, from: reminderFound.at }
+        // Stamped from the page: the step's name is read there through the view, so a page not read
+        // whole leaves the names unknown too (the core's rule).
+        ? { status: 'known', value: { reminder: reminderName, step: timing }, from: at }
         : unknown()
 
       if (checked?.state) {

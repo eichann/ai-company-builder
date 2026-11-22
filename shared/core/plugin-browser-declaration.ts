@@ -139,7 +139,7 @@ export interface BrowserOperation {
   effect: BrowserOperationEffect
   /** The reviewed checker that confirms the target, the account and the state: `<site>.<thing>`. */
   checker: string
-  /** A note shown on plans that use it (「前の回の人にも届きます」): a warning, nothing blocked. */
+  /** A note shown on plans that use it (「全部の回で共有のリマインダです。…」): a warning, nothing blocked. */
   shared: string | null
   /** True: the person confirms once more right before this step. */
   irreversible: boolean

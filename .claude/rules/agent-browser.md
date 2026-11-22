@@ -859,8 +859,9 @@ before the permit — are read by main through the checker, never taken from the
   anything else (no answer, not 200, not parsed) `ok: false`. Each declared fact gets `readAt` (when its
   answer was read) and `source` (that answer's path, never the query); a fact from a failed answer is
   never known; a fact from a page whose view was not whole is `unknown` unless the checker marks it
-  `rawMarkup` (read by its run-time `view` from the raw markup: the account and the target's state — the
-  same reading the run compares the page with, so `before` is exactly what the run checks); only declared
+  `rawMarkup` **and** it is one of `BROWSER_RAW_MARKUP_FACTS` (`account`, `step_parent`, `state`: read
+  by its run-time `view` from the raw markup — the same reading the run compares the page with, so
+  `before` is exactly what the run checks; any other fact so marked stays unknown); only declared
   facts are kept, a declared one without a draft is `unknown`. The result carries `browserFactsProblem`.
   Second layer kept on purpose: `exploreAddressProblem` on what `explorePath` built.
 - **Lステップ 0.6.0** (`client/connectors/lstep/reminder-step-facts.ts`, in the checker's folder, so in its
@@ -872,11 +873,17 @@ before the permit — are read by main through the checker, never taken from the
   asked and below `last_page`, at most 10): **`form_type` 8 (a number) only = text** (§34; any other → no
   plan, `problem: template-not-text`), name ≤ 200 and body ≤ 5000 plain text, an entry only when every
   folder id it carries is the folder asked, an id found twice with different contents not found, 「未分類」
-  (`id 0`) never asked (a template there → no plan); `names.reminder` from `GET
-  /api/episodes?group=<folder>&page=<n>` the same way (`/api/episode-groups`); `schedule.timing` and
-  `names.step`: the one visible element text in the step's box (`templateStep<step>`, by the core's view)
-  that is a whole timing (「当日 09:00」, 「3日前 09:00」, 「N 日前 に送信」: recognised, never taken apart),
-  exactly one distinct such text, else unknown; `shared_with` and `audience` **always unknown** (no
+  (`id 0`) never asked (a template there → no plan); the walk stops once every id sought is found, so a copy of an id
+  in a later folder is not seen (only the pages read are checked: ids are the site's record numbers, and
+  a filter the site did not apply shows as entries of other folders, left out; walking every folder
+  would make the 50-read cap likely); `names.reminder` from `GET /api/episodes?group=<folder>&page=<n>`
+  the same way (`/api/episode-groups`); `schedule.timing` and `names.step`: the one visible element
+  text in the step's box (`templateStep<step>`, by the core's view) that is a whole timing (「当日
+  09:00」, 「3日前 09:00」, 「N 日前 に送信」: recognised, never taken apart), exactly one distinct such
+  text, never a link (`<a>`, `<button>`, an `openModal(…)` slot — a template named 「当日 09:00」 is a
+  name) nor an element holding one, and a timing-shaped text inside any link makes it unknown (in doubt,
+  no fact); `names` is stamped from the reminder page (its step name is read there), so a page not read
+  whole leaves it unknown too; `shared_with` and `audience` **always unknown** (no
   reading confirmed). Nothing beyond the reminder page is read when the step is not there. So **no plan
   can be made with 0.6.0 today** (`shared_with` is required): availability, never a guessed fact; the
   row is `pending` anyway.
@@ -896,11 +903,12 @@ every confirmed fact known with its source and time, `shared_with` / `audience` 
 the read-after's `expectedAfter`; a non-text template (also `form_type: '8'`), one only in 「未分類」, in
 another folder, twice differently, with a control character, a failed or repeated-key folder answer, a
 misnumbered page → no templates; the timing whole and alone in the box (two, mixed text, hidden, outside
-the box → unknown); a page with a repeated id keeps the account and state but not the timing; no account,
+the box, a template or link named like a timing, wrapped or not, an element holding a link → unknown); a
+page with a repeated id keeps the account and state but not the timing or the names; no account,
 no step (nothing else read), a failed page, a reminder in no folder, a name with a bidirectional mark;
 the cap, undeclared reads, a page past `max`, a page on an unpaginated read, a bad id, another facts
 version, a stop, a careless checker (a fact from a failed answer, an undeclared fact, the same read asked
-again); the re-read: the same site passes, a changed body / name / timing / reminder name / state, a
+again, `rawMarkup` on a fact outside the list); the re-read: the same site passes, a changed body / name / timing / reminder name / state, a
 template gone, the count rising or unknown → known are refused, a fall is not). Each guard
 mutation-checked; second layers kept on purpose: `exploreAddressProblem` after `explorePath`.
 

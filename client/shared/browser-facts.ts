@@ -12,7 +12,8 @@
  * (`problem`); a failed read is an answer `ok: false`, and a fact from it is never known, whatever the
  * checker says; a fact taken from a page whose view was not whole (an id or attribute written twice, a
  * hidden or ambiguous root) is `unknown` unless the checker read it from the raw markup by its run-time
- * rules (`rawMarkup`: the account, the target's state — what a run compares the page with); a read
+ * rules (`rawMarkup`, honoured only for `BROWSER_RAW_MARKUP_FACTS`: the account, the target's parent
+ * and its state — what a run compares the page with); a read
  * already made is never made again; only declared facts are kept, and a declared one the checker gave
  * nothing for is `unknown`. Second layer kept on purpose: `exploreAddressProblem` on the address
  * `explorePath` built (the parser admits only such parts; `exactRead` checks it again).
@@ -26,6 +27,12 @@ import type { BrowserChecker, BrowserFactAnswer, BrowserFactDraft, BrowserPrevie
 
 /** The most reads one reading of the facts makes (a folder scan included); more = no facts. */
 export const BROWSER_FACT_READS = 50
+/**
+ * The only facts a checker may mark `rawMarkup` (read by its run-time `view` from the page's markup):
+ * the outside account, the target's parent and its state — what a run compares the page with. Any
+ * other fact from a page whose view was not whole is unknown, whatever the checker marks.
+ */
+export const BROWSER_RAW_MARKUP_FACTS: readonly string[] = ['account', 'step_parent', 'state']
 
 export type BrowserFactsOutcome =
   | { facts: Record<string, BrowserFact>; problem: string | null; checkerProblem?: string }
@@ -105,7 +112,8 @@ export async function readBrowserFacts(input: BrowserFactsInput): Promise<Browse
     // A fact from a page whose view was not whole (checked after the checker read it) is not known,
     // unless the checker read it from the raw markup by its run-time rules (`rawMarkup`); a fact from
     // an answer that failed is never known.
-    const known = draft?.status === 'known' && draft.value !== undefined && answers[from].ok && (whole() || draft.rawMarkup === true)
+    const raw = draft?.rawMarkup === true && BROWSER_RAW_MARKUP_FACTS.includes(name)
+    const known = draft?.status === 'known' && draft.value !== undefined && answers[from].ok && (whole() || raw)
     facts[name] = known
       ? { status: 'known', value: draft.value, ...(draft.complete !== undefined ? { complete: draft.complete } : {}), readAt, source: path }
       : { status: 'unknown', readAt, source: path }
