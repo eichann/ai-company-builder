@@ -198,8 +198,8 @@ const COMBINATION = { declarationHash: `sha256:${'d'.repeat(64)}`, checkerHash: 
 
 /**
  * The test site's checker with facts the runner can compare (version 2): the account, the step's parent
- * and its state read by the checker's own view from the reminder page (as 0.6.0 does), everything else
- * fixed values stamped from the site's JSON list of reminders (0.6.0's other reads are the unit tests'
+ * and its state read by the checker's own view from the reminder page (as 0.6.1 does), everything else
+ * fixed values stamped from the site's JSON list of reminders (0.6.1's other reads are the unit tests'
  * job, client/tests/browser-execute.test.ts). What is real here is the window: the read and write
  * sessions, the permit inside the write's chunk and the last check right before the request leaves.
  */
@@ -255,7 +255,7 @@ async function runnerScenarios(win: BrowserShellWindow, site: BrowserSiteSetting
   const checker = harnessFacts(lstepCheckers[0])
   const checkers = createBrowserCheckerRegistry([checker])
   const readers = lstepConnector().readers
-  const browser = connector('lstep', '0.6.0')!
+  const browser = connector('lstep', '0.6.1')!
   const operation = browser.operations.reminder_step_add_template
   const records: BrowserStepRecord[] = []
   let stopped = false
@@ -285,7 +285,7 @@ async function runnerScenarios(win: BrowserShellWindow, site: BrowserSiteSetting
     const facts = { ...read.facts! }
     if (over.account) facts.account = { ...facts.account, value: { id: over.account } } as typeof facts.account
     servers[planId] = fakePlansServer({
-      planId, companyId: 'company-1', connector: { id: 'lstep', version: '0.6.0', ...COMBINATION }, operation: 'reminder_step_add_template',
+      planId, companyId: 'company-1', connector: { id: 'lstep', version: '0.6.1', ...COMBINATION }, operation: 'reminder_step_add_template',
       account: over.account ?? 'ACC1', target: values.target, change: values.change, facts, createdAt: Date.now() - 1000,
     }, faults)
   }
@@ -357,7 +357,7 @@ async function runnerScenarios(win: BrowserShellWindow, site: BrowserSiteSetting
   await page.loadURL('https://op.test/line/episode/show/101').catch(() => {})
   await wait(300)
   const gate = createRunGate({
-    host: 'op.test', operation: connector('lstep', '0.6.0')!.operations.reminder_step_add_template,
+    host: 'op.test', operation: connector('lstep', '0.6.1')!.operations.reminder_step_add_template,
     values: { target: { reminder: '101', step: '201' }, change: { template: '304' } },
     readPaths: ['/line/episode/show/101'], stopped: () => false,
   })

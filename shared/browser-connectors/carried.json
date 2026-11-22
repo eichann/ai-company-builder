@@ -3,9 +3,9 @@
   "combinations": [
     {
       "connector": "lstep",
-      "version": "0.6.0",
-      "declarationHash": "sha256:839329ce6638d4a28e74c04dd6b8cf6e6c6f45605dfe12452560e2324b449a21",
-      "checkerHash": "sha256:f247800c831c45594b492b06637be7bc10b89109d7f401f3422b186b8b2faffe",
+      "version": "0.6.1",
+      "declarationHash": "sha256:11b2992fd11cef7e28c8511927ae67c06635a6cdcaf6f5ed211bb1d5dca68795",
+      "checkerHash": "sha256:04ae58448623795ff7746903965501409395a1cf2049157d2283e8e0923c007f",
       "factsVersion": 2
     }
   ]

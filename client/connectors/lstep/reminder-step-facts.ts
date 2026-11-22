@@ -1,8 +1,8 @@
 /**
- * The facts `lstep.reminder_step` reads for a plan, facts version 2 (6b-2b; design 6b-2 §2-3;
+ * The facts `lstep.reminder_step` reads for a plan, facts version 2 (6b-2b, 0.6.1; design 6b-2 §2-3;
  * agent-browser.md "The facts a checker reads"; shapes in shared/core/browser-plans.ts). Only reads
  * `explore` declares (./declaration.ts), only shapes seen on the real site with the owner's login
- * (design memo §34–§36). What is not confirmed is never guessed: it is `unknown`, and a required fact
+ * (design memo §34–§36, §39). What is not confirmed is never guessed: it is `unknown`, and a required fact
  * unknown makes no plan.
  *
  * | Fact | Read from | Status today |
@@ -10,12 +10,12 @@
  * | `account` | the reminder page's `<meta name="lm-account-id">` (`accountFromMeta`, the run's reading) | confirmed §34 |
  * | `step_parent`, `state` | the reminder page: the step's box `templateStep<step>` and its `openModal(…)` slots (the run's `view`) | box confirmed §34; slots from the 11/20 capture |
  * | `templates` | `GET /api/templates?group=<folder>&page=<n>` entries `{ id, name, content_text, form_type, group }`, found by id, folder by folder (`/api/template-groups`) | confirmed §34, §36; `form_type` 8 = text (§34), any other → no plan |
- * | `names.reminder` | `GET /api/episodes?group=<folder>&page=<n>` entry `name`, found by id (`/api/episode-groups`) | confirmed §35, §36 |
- * | `schedule.timing`, `names.step` | the step's box: one element whose whole visible text is a timing (「当日 09:00」「3 日前 に送信」), never a link or what holds one (a template's name); a timing inside a link → unknown | the text forms are §34's; **where it stands in the box is not confirmed** |
- * | `shared_with` | — | **not confirmed** where the site lists the 回 using a reminder: always `unknown` (so no plan yet) |
+ * | `names.reminder` | `GET /api/episodes/<reminder>` `name`, under the same conditions as the timing (0.6.1; 0.6.0 walked the reminder folders for it) | the shape confirmed §39 |
+ * | `schedule.timing`, `names.step` | `GET /api/episodes/<reminder>` (strict JSON): the one step whose `id` is the target step, in this reminder's answer (`id`), not hidden (`hid_at: null`), naming the reminder (`episode_id`); its `step_type` / `step_days` / `step_time` through the fixed table of ./reminder-schedule.ts (`1` / `0` / `HH:MM:00` → 「当日 HH:MM」, anything else unknown) | confirmed §39 (`1` / `0` / `09:00:00` shown 「当日 09:00」); other combinations not seen → unknown |
+ * | `shared_with` | — | Lステップ has no reverse lookup of the 回 using a reminder (people join it from tags, forms, keywords, friend-add, reservations, actions; the owner, 2026-11-22): always `unknown`, **optional since 0.6.1** — the card always shows the declaration's `shared` warning instead |
  * | `audience` | — | no reading confirmed to mean "people who will still receive this step": always `unknown` (optional, shown 「読み取れませんでした」) |
  *
- * The folder scans read a folder list, then each folder's pages in order (at most 10, the declared
+ * The template folder scan reads a folder list, then each folder's pages in order (at most 10, the declared
  * `pages.max`) until every id sought is found, then stop; the core caps the reads in all
  * (`BROWSER_FACT_READS`). An entry counts only when every folder id it carries names the folder asked
  * (as the list readers do: a folder filter the site did not apply shows as entries of other folders,
@@ -27,8 +27,9 @@
  */
 import { isPlainBrowserText, type BrowserPlanValues } from '../../../shared/core/plugin-browser-declaration'
 import type {
-  BrowserCheckerFacts, BrowserCheckerView, BrowserFactAnswer, BrowserFactDraft, BrowserFactRequest, BrowserJsonValue, BrowserPageElement, BrowserPageRead,
+  BrowserCheckerFacts, BrowserCheckerView, BrowserFactAnswer, BrowserFactDraft, BrowserFactRequest, BrowserJsonValue, BrowserPageRead,
 } from '../../shared/browser-runner'
+import { reminderName, reminderStep, stepTiming } from './reminder-schedule'
 
 /** The facts version these readers produce (shared/core/browser-plans.ts `BROWSER_FACT_SCHEMAS`). */
 export const LSTEP_FACTS_VERSION = 2
@@ -37,11 +38,6 @@ const TEXT_FORM_TYPE = 8
 /** The declared `pages.max` of `reminders` and `templates` (./declaration.ts). */
 const MAX_PAGES = 10
 const POSITIVE_ID = /^[1-9][0-9]{0,18}$/
-/**
- * A step's timing as the page shows it — 「当日 09:00」, 「3日前 09:00」, 「N 日前 に送信」 (§34) — recognised
- * whole, never taken apart: the card shows it as it stands (its base differs per person).
- */
-const TIMING_RE = /^(?:当日|[1-9][0-9]{0,2} ?日(?:前|後))(?: ?(?:[01]?[0-9]|2[0-3]):[0-5][0-9])?(?: ?に送信)?$/
 
 type JsonObject = { readonly [key: string]: BrowserJsonValue }
 const jsonObject = (v: BrowserJsonValue | undefined): JsonObject | null => (v !== null && v !== undefined && typeof v === 'object' && !Array.isArray(v) ? v as JsonObject : null)
@@ -116,33 +112,14 @@ function scan(spec: ScanSpec, wanted: ReadonlySet<string>, answers: readonly Bro
   return { next: null, found }
 }
 
-const REMINDERS: ScanSpec = { folders: 'reminder_folders', list: 'reminders', param: 'group' }
 const TEMPLATES: ScanSpec = { folders: 'template_folders', list: 'templates', param: 'template_group' }
 
-/** Attributes a template's slot call stands in (as ./reminder-steps-reader.ts reads them). */
-const CALL_ATTRIBUTES = ['onclick', 'href', 'data-onclick'] as const
-/** A link or button of the box — a template's slot (`openModal(…)`) or any other: its text is a template's or a control's, never the step's timing. */
-const isLink = (el: BrowserPageElement): boolean =>
-  el.tag === 'a' || el.tag === 'button' || CALL_ATTRIBUTES.some(name => /openModal\s*\(/.test(el.attr(name) ?? ''))
-const holdsLink = (el: BrowserPageElement): boolean => el.find({}).some(isLink)
-
-/**
- * The step's timing in its box: exactly one distinct visible text that is a whole timing, else null.
- * Never from a link (a template named 「当日 09:00」 is a template's name) nor from an element holding
- * one; and a timing-shaped text inside any link makes the timing unknown (where the real one stands
- * is not confirmed: in doubt, no fact).
- */
-function timingOf(answer: BrowserFactAnswer, step: string): string | null {
-  if (!answer.ok || answer.kind !== 'html' || !POSITIVE_ID.test(step)) return null
-  const boxes = answer.view.find({ id: `templateStep${step}` })
-  if (boxes.length !== 1) return null
-  // A link whose text (or a part's) is timing-shaped: unknown. So a link is never a candidate below either.
-  const links = boxes[0].find({}).filter(isLink)
-  if (links.some(link => [link, ...link.find({})].some(el => TIMING_RE.test(el.text())))) return null
-  const texts = new Set(boxes[0].find({}).filter(el => !holdsLink(el)).map(el => el.text()).filter(t => TIMING_RE.test(t)))
-  if (texts.size !== 1) return null
-  const [timing] = [...texts]
-  return isPlainBrowserText(timing, 100) ? timing : null
+/** The step's timing from the reminder's JSON answer (./reminder-schedule.ts), else null. */
+function timingOf(answer: BrowserFactAnswer | undefined, reminder: string, step: string): string | null {
+  if (!answer || !answer.ok || answer.kind !== 'json') return null
+  const found = reminderStep(answer.json, reminder, step)
+  const timing = found ? stepTiming(found) : null
+  return timing && isPlainBrowserText(timing, 100) ? timing : null
 }
 
 /**
@@ -152,6 +129,8 @@ function timingOf(answer: BrowserFactAnswer, step: string): string | null {
 export function createLstepReminderStepFacts(view: (values: BrowserPlanValues, reads: readonly BrowserPageRead[]) => BrowserCheckerView): BrowserCheckerFacts {
   const pageAt = (values: BrowserPlanValues, answers: readonly BrowserFactAnswer[]) =>
     answers.findIndex(a => a.read === 'reminder' && a.values.reminder === values.target.reminder)
+  const scheduleAt = (values: BrowserPlanValues, answers: readonly BrowserFactAnswer[]) =>
+    answers.findIndex(a => a.read === 'reminder_schedule' && a.values.reminder === values.target.reminder)
   const stateOf = (values: BrowserPlanValues, answer: BrowserFactAnswer | undefined): BrowserCheckerView | null => {
     if (!answer || !answer.ok || answer.kind !== 'html') return null
     return view(values, [{ path: `/line/episode/show/${values.target.reminder}`, body: answer.body }])
@@ -171,8 +150,7 @@ export function createLstepReminderStepFacts(view: (values: BrowserPlanValues, r
       // No target on the page: nothing else is worth reading (no plan can come of it).
       if (!checked?.state) return []
       const next: BrowserFactRequest[] = []
-      const r = scan(REMINDERS, new Set([reminder]), answers).next
-      if (r) next.push(r)
+      if (scheduleAt(values, answers) < 0) next.push({ read: 'reminder_schedule', values: { reminder } })
       const t = scan(TEMPLATES, templatesSought(values, checked), answers).next
       if (t) next.push(t)
       return next
@@ -194,15 +172,15 @@ export function createLstepReminderStepFacts(view: (values: BrowserPlanValues, r
         facts.state = unknown()
       }
 
-      const timing = checked?.state && page ? timingOf(page, values.target.step ?? '') : null
-      facts.schedule = timing ? { status: 'known', value: { timing }, complete: true, from: at } : unknown()
+      const sAt = scheduleAt(values, answers)
+      const timing = checked?.state && sAt >= 0 ? timingOf(answers[sAt], values.target.reminder, values.target.step ?? '') : null
+      facts.schedule = timing ? { status: 'known', value: { timing }, complete: true, from: sAt } : unknown(sAt >= 0 ? sAt : at)
 
-      const reminderFound = checked?.state ? scan(REMINDERS, new Set([values.target.reminder]), answers).found.get(values.target.reminder) : undefined
-      const reminderName = reminderFound && reminderFound !== 'ambiguous' ? field(reminderFound.entry, 'name') : undefined
-      facts.names = timing && isPlainBrowserText(reminderName, 200) && reminderFound && reminderFound !== 'ambiguous'
-        // Stamped from the page: the step's name is read there through the view, so a page not read
-        // whole leaves the names unknown too (the core's rule).
-        ? { status: 'known', value: { reminder: reminderName, step: timing }, from: at }
+      const scheduleAnswer = sAt >= 0 ? answers[sAt] : undefined
+      const shown = timing && scheduleAnswer?.ok && scheduleAnswer.kind === 'json' ? reminderName(scheduleAnswer.json, values.target.reminder) : null
+      facts.names = timing && isPlainBrowserText(shown, 200)
+        // Stamped from the reminder's JSON answer, where the step's name (its timing) is read.
+        ? { status: 'known', value: { reminder: shown, step: timing }, from: sAt }
         : unknown()
 
       if (checked?.state) {

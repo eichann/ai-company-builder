@@ -123,8 +123,8 @@ const box = (step: string, slots: string[], text = `当日 09:00 に送信`) =>
 const reminderPage = (body: string) => `<!doctype html><html><head><meta name="lm-account-id" content="5550001"><meta name="csrf-token" content="tok"></head>
 <body><input type="hidden" name="_token" value="tok"><script>window.__state = { step: 777, template: 888 }</script>${body}</body></html>`
 
-test('Lステップ\'s declaration 0.6.0 declares its reads — folders, paginated lists with their exact queries, the reminder page — each reviewed, with its reader', () => {
-  const browser = createBrowserConnectors([lstep.declaration])('lstep', '0.6.0')
+test('Lステップ\'s declaration 0.6.1 declares its reads — folders, paginated lists with their exact queries, the reminder page and its steps as JSON — each reviewed, with its reader', () => {
+  const browser = createBrowserConnectors([lstep.declaration])('lstep', '0.6.1')
   assert.ok(browser)
   assert.deepEqual(browser.explore, {
     reminder_folders: { label: 'リマインダのフォルダの一覧', path: '/api/episode-groups', placeholders: [], reader: 'lstep.reminder_folders' },
@@ -138,12 +138,14 @@ test('Lステップ\'s declaration 0.6.0 declares its reads — folders, paginat
       query: [{ name: 'group', field: 'template_group' }], pages: { param: 'page', max: 10 },
     },
     reminder: { label: 'リマインダの中身（段の一覧）', path: '/line/episode/show/{reminder}', placeholders: ['reminder'], reader: reader.id },
+    // 0.6.1 (design memo §39): the JSON the reminder page itself reads, the steps' timing.
+    reminder_schedule: { label: 'リマインダの段の時刻', path: '/api/episodes/{reminder}', placeholders: ['reminder'], reader: 'lstep.reminder_schedule' },
   })
   // Every paginated read's reader is a JSON one (only it reports where a page stands).
   for (const r of Object.values(browser.explore).filter(r => r.pages)) assert.ok(lstep.readers.some(x => x.id === r.reader && 'answer' in x), r.reader)
   // Every declared read has its reader in the connector folder, and nothing else is handed in.
   assert.deepEqual(Object.values(browser.explore).map(r => r.reader).sort(), lstep.readers.map(r => r.id).sort())
-  // 0.6.0: scheduled (design memo §37, the owner: nobody already past the step receives it), facts version 2.
+  // 0.6.1: scheduled (design memo §37, the owner: nobody already past the step receives it), facts version 2.
   assert.equal(browser.operations.reminder_step_add_template.delivers, 'scheduled')
 })
 
@@ -287,4 +289,23 @@ test('a page report reaches the app only as whole numbers that fit together (cur
     assert.equal(r.page, undefined, JSON.stringify(bad))
     assert.equal(r.complete, false, JSON.stringify(bad))
   }
+})
+
+test('Lステップ\'s reader of a reminder\'s steps as JSON (0.6.1, design memo §39) offers this reminder\'s steps only, labelled only with a timing its fixed table maps; another reminder, a hidden one or a step twice is not offered whole', () => {
+  const step = (id: number, over: Record<string, unknown> = {}) => ({ id, order: 1, step_days: 0, step_time: '09:00:00', step_type: 1, step_minutes: 0, skip: 0, initial: 0, egg_id: null, member_query_id: null, action_id: null, episode_id: 7001001, ...over })
+  const episode = (steps: unknown, over: Record<string, unknown> = {}) => ({ id: 7001001, name: '架空のリマインダ', order: 1, type: 1, hid_at: null, steps, ...over })
+  const read = (answer: unknown, reminder = '7001001') => readJson('lstep.reminder_schedule', answer, { reminder })
+  assert.deepEqual(read(episode([step(7002001), step(7002002, { step_days: 3 })])), {
+    items: [{ field: 'step', value: '7002001', label: '当日 09:00' }, { field: 'step', value: '7002002' }], complete: true,
+  }, 'a timing the table does not map gets no label, never a guessed one')
+  // Another reminder's answer, a hidden reminder, no steps list: nothing offered.
+  assert.deepEqual(read(episode([step(7002001)]), '7001002'), { items: [], complete: false })
+  assert.deepEqual(read(episode([step(7002001)], { hid_at: '2026-11-22 10:00:00' })), { items: [], complete: false })
+  const noHidAt: Record<string, unknown> = episode([step(7002001)])
+  delete noHidAt.hid_at
+  assert.deepEqual(read(noHidAt), { items: [], complete: false }, 'hid_at must be there and null')
+  assert.deepEqual(read(episode({})), { items: [], complete: false })
+  // A step standing twice, naming another reminder, or without a plain id: left out, incomplete.
+  assert.deepEqual(read(episode([step(7002001), step(7002001), step(7002002)])), { items: [{ field: 'step', value: '7002002', label: '当日 09:00' }], complete: false })
+  assert.deepEqual(read(episode([step(7002001, { episode_id: 7001002 }), step(0)])), { items: [], complete: false })
 })

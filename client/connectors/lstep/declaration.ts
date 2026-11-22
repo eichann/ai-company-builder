@@ -48,13 +48,26 @@
  * still receive it) optional — unknown is shown as 「読み取れませんでした」, never 0 (6b-2 decision 1).
  * They are read only through the reads `explore` already declares (./reminder-step-facts.ts says from
  * where, and which are not confirmed yet: those stay `unknown`, so no plan is made until they are).
+ *
+ * 0.6.1 reads the step's timing from the JSON the reminder page itself reads (design memo §39, the
+ * owner's login, read-only window: the page's own GETs were recorded, writes stopped, none made), not
+ * from the page's text — which on the real page always failed, the page repeating ids in every step's
+ * form:
+ * - `reminder_schedule`: `GET /api/episodes/{reminder}` (no query) → `step` (reader
+ *   ./reminder-schedule.ts: the steps labelled with their timing through its fixed table). The facts
+ *   take `schedule.timing` and `names.step` from it (./reminder-step-facts.ts). Same type and
+ *   operation, facts version 2. The reminder's name is read from the same answer (no folder walk).
+ * - `shared_with` is **optional** (the owner, 2026-11-22): Lステップ has no reverse lookup of the 回 using
+ *   a reminder (people join it from tags, forms, keywords, friend-add, reservations, actions), so it
+ *   stays unknown; the card always shows the `shared` warning above. `audience` stays optional.
  */
 import { LSTEP_REMINDER_FOLDERS_READER, LSTEP_REMINDERS_READER, LSTEP_TEMPLATE_FOLDERS_READER, LSTEP_TEMPLATES_READER } from './list-readers'
+import { LSTEP_REMINDER_SCHEDULE_READER } from './reminder-schedule'
 import { LSTEP_REMINDER_STEP_CHECKER } from './reminder-step'
 import { LSTEP_REMINDER_STEPS_READER } from './reminder-steps-reader'
 
 export const LSTEP_DECLARATION = `id: lstep
-version: 0.6.0
+version: 0.6.1
 label: Lステップ
 contract: 1
 browser:
@@ -90,7 +103,7 @@ browser:
         names: { required: true }
         templates: { required: true, complete: true }
         schedule: { required: true, complete: true }
-        shared_with: { required: true, complete: true }
+        shared_with: { required: false }
         audience: { required: false }
   explore:
     reminder_folders:
@@ -123,6 +136,11 @@ browser:
       label: リマインダの中身（段の一覧）
       path: "/line/episode/show/{reminder}"
       reader: ${LSTEP_REMINDER_STEPS_READER}
+      no_side_effects: reviewed
+    reminder_schedule:
+      label: リマインダの段の時刻
+      path: "/api/episodes/{reminder}"
+      reader: ${LSTEP_REMINDER_SCHEDULE_READER}
       no_side_effects: reviewed
 `
 

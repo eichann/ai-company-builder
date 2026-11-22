@@ -1,11 +1,12 @@
 /**
  * The facts read for a plan (6b-2b; agent-browser.md "The facts a checker reads"): the core's driver
- * (client/shared/browser-facts.ts) with the real Lステップ 0.6.0 connector against a fake Lステップ in the
+ * (client/shared/browser-facts.ts) with the real Lステップ 0.6.1 connector against a fake Lステップ in the
  * real site's shapes (design memo §34–§36; every name and id made up), pages parsed by the real parser.
  * What is protected: facts come only from declared reads at addresses the core builds; what the site
  * shows is what the person approves (never a guess: unconfirmed facts are unknown and make no plan);
- * text-only templates; the step's timing exactly as shown; a page the core could not read whole gives no
- * view-read fact; the re-read refuses any change (6b-2 §5-2).
+ * text-only templates; the step's timing only through the fixed table from the reminder's JSON (0.6.1,
+ * design memo §39); a page the core could not read whole gives no view-read fact; the re-read refuses
+ * any change (6b-2 §5-2).
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
@@ -18,7 +19,7 @@ import { browserFactsChangedProblem, browserFactsProblem, type BrowserFact } fro
 import { browserFirstVersionProblem, expectedAfter } from '../../shared/core/plugin-browser-declaration'
 
 const lstep = lstepConnector()
-const browser = createBrowserConnectors([lstep.declaration])('lstep', '0.6.0')!
+const browser = createBrowserConnectors([lstep.declaration])('lstep', '0.6.1')!
 const operation = browser.operations.reminder_step_add_template
 const checker = lstep.checkers[0]
 
@@ -35,16 +36,20 @@ const pageOf = (data: unknown[], current = 1, last = 1, total = data.length) =>
   JSON.stringify({ current_page: current, data, last_page: last, per_page: 50, total, links: [], next_page_url: null, prev_page_url: null })
 const template = (id: string, group: number, over: Record<string, unknown> = {}) =>
   ({ id: Number(id), name: `架空テンプレ${id.slice(-1)}`, content_text: `本文${id.slice(-1)}\n2行目`, created_at: 'x', form_type: 8, group: { id: group, name: '架空フォルダ' }, editor_version: 2, ...over })
-const reminderEntry = (id: number, group: number, name: string) => ({ id, name, order: 1, type: 1, created_at: 'x', group_id: group, group: { id: group, name: '架空', order: 1 } })
+/** `GET /api/episodes/<reminder>` in the real site's shape (design memo §39; values made up). */
+const stepJson = (id: string, over: Record<string, unknown> = {}) => ({
+  id: Number(id), order: 1, step_days: 0, step_time: '09:00:00', step_type: 1, step_minutes: 0, skip: 0, initial: 0,
+  egg_id: null, member_query_id: null, action_id: null, episode_id: Number(REMINDER), ...over,
+})
+const episodeJson = (steps: unknown[], over: Record<string, unknown> = {}) =>
+  JSON.stringify({ id: Number(REMINDER), name: '架空のリマインダ', order: 1, type: 1, hid_at: null, steps, ...over })
+const SCHEDULE = `/api/episodes/${REMINDER}`
 
 /** The fake site by exact address (anything else is a 404). */
 function site(over: Record<string, string | null> = {}): Record<string, string> {
   const pages: Record<string, string | null> = {
-    [`/line/episode/show/${REMINDER}`]: reminderPage(box('<span>3日前 09:00</span>')),
-    '/api/episode-groups': JSON.stringify({ data: [{ id: 7100001, name: '架空の配信', order: 1, item_count: 1 }, { id: 7100002, name: '架空の試験', order: 2, item_count: 51 }] }),
-    '/api/episodes?group=7100001&page=1': pageOf([reminderEntry(7009999, 7100001, '別のリマインダ')]),
-    '/api/episodes?group=7100002&page=1': pageOf([reminderEntry(7009998, 7100002, '別のリマインダ二')], 1, 2, 2),
-    '/api/episodes?group=7100002&page=2': pageOf([reminderEntry(Number(REMINDER), 7100002, '架空のリマインダ')], 2, 2, 2),
+    [`/line/episode/show/${REMINDER}`]: reminderPage(box('<span>当日 09:00</span>')),
+    [SCHEDULE]: episodeJson([stepJson('7002000', { order: 0, step_days: 1, step_time: '19:00:00' }), stepJson(STEP)]),
     '/api/template-groups': JSON.stringify({ data: [{ id: 0, name: '未分類', order: 0, item_count: 1 }, { id: 7200001, name: '架空甲', order: 1, item_count: 1 }, { id: 7200002, name: '架空乙', order: 2, item_count: 1 }] }),
     '/api/templates?group=7200001&page=1': pageOf([template(ON_STEP, 7200001)]),
     '/api/templates?group=7200002&page=1': pageOf([template(TO_ADD, 7200002)]),
@@ -72,31 +77,29 @@ async function factsOf(pages: Record<string, string>) {
   return { ...out, facts: out.facts, reads }
 }
 const valueOf = (facts: Record<string, BrowserFact>, name: string) => (facts[name].status === 'known' ? facts[name].value : 'unknown')
-/** Stands in for the `shared_with` reader confirmed at the owner's next login (today always unknown). */
+/** A `shared_with` read (Lステップ has none: the fact is optional since 0.6.1, the owner 2026-11-22); for the re-read's rules only. */
 const withSharedWith = (facts: Record<string, BrowserFact>): Record<string, BrowserFact> =>
   ({ ...facts, shared_with: { status: 'known', value: { count: 1, items: ['架空の第1回'] }, complete: true, readAt: facts.shared_with.readAt, source: facts.shared_with.source } })
 
-test('Lステップ 0.6.0 is scheduled with facts version 2 and passes the first version\'s rule: timing and templates required and read whole, the count optional', () => {
+test('Lステップ 0.6.1 is scheduled with facts version 2 and passes the first version\'s rule: timing and templates required and read whole, the count optional', () => {
   assert.equal(operation.delivers, 'scheduled')
   assert.equal(checker.facts?.version, 2)
   assert.equal(browserFirstVersionProblem(operation), null)
   assert.deepEqual(operation.facts.audience, { required: false, complete: false })
 })
 
-test('the facts come from exactly the declared reads, scanning folders in order until each id is found; confirmed facts are known, unconfirmed ones unknown so no plan is made yet', async () => {
+test('the facts come from exactly the declared reads, scanning template folders in order until each id is found; confirmed facts are known, unconfirmed ones unknown — and the optional ones unknown still make a plan', async () => {
   const { facts, problem, reads } = await factsOf(site())
   assert.deepEqual(reads, [
     `/line/episode/show/${REMINDER}`,
-    '/api/episode-groups', '/api/template-groups',
-    '/api/episodes?group=7100001&page=1', '/api/templates?group=7200001&page=1',
-    '/api/episodes?group=7100002&page=1', '/api/templates?group=7200002&page=1',
-    '/api/episodes?group=7100002&page=2',
-  ], '「未分類」 (0) is never asked; a folder\'s later page only when page 1 says there is one')
+    SCHEDULE, '/api/template-groups',
+    '/api/templates?group=7200001&page=1', '/api/templates?group=7200002&page=1',
+  ], '「未分類」 (0) is never asked; the reminder\'s name comes with its steps (no reminder folder walk)')
   assert.deepEqual(valueOf(facts, 'account'), { id: '5550001' })
   assert.deepEqual(valueOf(facts, 'step_parent'), { reminder: REMINDER })
   assert.deepEqual(valueOf(facts, 'state'), { templates: [ON_STEP] })
-  assert.deepEqual(valueOf(facts, 'schedule'), { timing: '3日前 09:00' })
-  assert.deepEqual(valueOf(facts, 'names'), { reminder: '架空のリマインダ', step: '3日前 09:00' })
+  assert.deepEqual(valueOf(facts, 'schedule'), { timing: '当日 09:00' })
+  assert.deepEqual(valueOf(facts, 'names'), { reminder: '架空のリマインダ', step: '当日 09:00' })
   assert.deepEqual(valueOf(facts, 'templates'), {
     [ON_STEP]: { name: '架空テンプレ1', kind: 'text', body: '本文1\n2行目' },
     [TO_ADD]: { name: '架空テンプレ2', kind: 'text', body: '本文2\n2行目' },
@@ -106,13 +109,17 @@ test('the facts come from exactly the declared reads, scanning folders in order 
   // Where each was read (a path, never the query) and when.
   assert.equal(facts.templates.source, '/api/templates')
   assert.equal(facts.account.source, `/line/episode/show/${REMINDER}`)
+  assert.equal(facts.schedule.source, SCHEDULE)
+  assert.equal(facts.names.source, SCHEDULE)
   assert.ok(Object.values(facts).every(f => !Number.isNaN(Date.parse(f.readAt))))
-  // Not confirmed on the real site: unknown, never guessed — and shared_with is required, so no plan.
+  // Not readable on the real site: unknown, never guessed. Both optional (0.6.1: Lステップ cannot say which
+  // 回 use a reminder; the card shows the shared warning instead), so the facts make a plan.
   assert.equal(facts.shared_with.status, 'unknown')
   assert.equal(facts.audience.status, 'unknown')
-  assert.equal(problem, '「shared_with」をサイトから読み取れていません')
-  // Once shared_with is read, the rest makes a plan, and the read-after expects the template added.
-  assert.equal(browserFactsProblem(operation, 2, withSharedWith(facts), values), null)
+  assert.deepEqual(operation.facts.shared_with, { required: false, complete: false })
+  assert.equal(problem, null)
+  // A shared_with that is read is still held to its shape.
+  assert.equal(browserFactsProblem(operation, 2, { ...facts, shared_with: { ...facts.shared_with, status: 'known', value: { count: -1, items: [] } } }, values), '「shared_with」の値の形が正しくありません')
   assert.deepEqual(expectedAfter(valueOf(facts, 'state') as Record<string, string[]>, operation, values), { templates: [ON_STEP, TO_ADD] })
 })
 
@@ -151,39 +158,49 @@ test('text-only templates: a template of another form_type, one only in 「未�
   assert.equal(misnumbered.reads.includes('/api/templates?group=7200002&page=2'), false)
 })
 
-test('the step\'s timing is taken only as one whole visible text in the step\'s box; otherwise unknown and no plan', async () => {
-  const timing = async (inner: string) => valueOf((await factsOf(site({ [`/line/episode/show/${REMINDER}`]: reminderPage(box(inner)) }))).facts, 'schedule')
-  assert.deepEqual(await timing('<span>当日 09:00</span>'), { timing: '当日 09:00' })
-  assert.deepEqual(await timing('<span>12 日前 に送信</span>'), { timing: '12 日前 に送信' })
-  assert.deepEqual(await timing('<div><span>当日 09:00</span></div>'), { timing: '当日 09:00' }, 'the same text at two levels is one timing')
-  assert.equal(await timing(''), 'unknown')
-  assert.equal(await timing('<span>当日 09:00</span><span>3日前 09:00</span>'), 'unknown', 'two timings')
-  assert.equal(await timing('<span>当日 09:00 ごろ届きます</span>'), 'unknown', 'not a whole timing')
-  assert.equal(await timing('<span hidden>当日 09:00</span>'), 'unknown', 'hidden')
-  assert.equal(await timing('<span style="display:none">当日 09:00</span>'), 'unknown', 'hidden by style')
-  // A template's name is never the timing: a slot named like a timing makes it unknown (in doubt, no
-  // fact), also when it is the only timing-shaped text, wrapped, or a plain link.
-  const slot = (name: string) => `<a onclick="openModal(${REMINDER}, ${STEP}, 2, ${TO_ADD}, 8)">${name}</a>`
-  assert.equal(await timing(slot('当日 09:00')), 'unknown')
-  assert.equal(await timing(`<span>3日前 09:00</span>${slot('当日 09:00')}`), 'unknown')
-  assert.equal(await timing(`<div>${slot('当日 09:00')}</div>`), 'unknown')
-  assert.equal(await timing(`<span onclick="openModal(${REMINDER}, ${STEP}, 2, ${TO_ADD}, 8)"><b>当日 09:00</b></span>`), 'unknown')
-  assert.equal(await timing('<a href="#">当日 09:00</a>'), 'unknown')
-  assert.equal(await timing('<button>当日 09:00</button>'), 'unknown')
-  // An element holding a link is not the timing, even when its text together reads as one.
-  assert.equal(await timing('<div>当日 <a href="#">09:00</a></div>'), 'unknown')
-  // Next to a slot with another name, the timing is still read.
-  assert.deepEqual(await timing(`<span>3日前 09:00</span>${slot('架空テンプレ乙')}`), { timing: '3日前 09:00' })
-  // Outside the box (another step's or the page's) is not this step's.
-  const outside = await factsOf(site({ [`/line/episode/show/${REMINDER}`]: reminderPage(`<p>当日 09:00</p>${box('')}`) }))
-  assert.equal(outside.facts.schedule.status, 'unknown')
-  assert.equal(outside.facts.names.status, 'unknown', 'the step\'s name is its timing')
+test('the step\'s timing comes only from the reminder\'s JSON through the fixed table (step_type 1, step_days 0, HH:MM:00 → 「当日 HH:MM」); anything else is unknown and makes no plan', async () => {
+  const withSteps = async (steps: unknown[], over: Record<string, unknown> = {}) => (await factsOf(site({ [SCHEDULE]: episodeJson(steps, over) }))).facts
+  const timing = async (step: Record<string, unknown>) => valueOf(await withSteps([stepJson(STEP, step)]), 'schedule')
+  // The mapping.
+  assert.deepEqual(await timing({}), { timing: '当日 09:00' }, 'the combination seen on the real site (§39)')
+  assert.deepEqual(await timing({ step_time: '19:05:00' }), { timing: '当日 19:05' })
+  assert.deepEqual(await timing({ step_time: '00:00:00' }), { timing: '当日 00:00' })
+  assert.deepEqual(await timing({ step_time: '23:59:00' }), { timing: '当日 23:59' })
+  // Not seen, so not mapped: another day (either sign), another step_type, seconds, a malformed or
+  // missing time, values written as text.
+  for (const odd of [
+    { step_days: 3 }, { step_days: -3 }, { step_days: 1 }, { step_type: 2 }, { step_type: 0 }, { step_type: '1' }, { step_days: '0' },
+    { step_time: '09:00:30' }, { step_time: '9:00:00' }, { step_time: '24:00:00' }, { step_time: '09:00' }, { step_time: null }, { step_type: undefined },
+  ]) assert.equal(await timing(odd), 'unknown', JSON.stringify(odd))
+  const unread = await withSteps([stepJson(STEP, { step_type: 2 })])
+  assert.equal(unread.names.status, 'unknown', 'the step\'s name is its timing')
+  assert.equal(browserFactsProblem(operation, 2, withSharedWith(unread), values), '「names」をサイトから読み取れていません')
+  // The step must stand exactly once in this reminder's answer, name the reminder, and the reminder be shown.
+  assert.equal(valueOf(await withSteps([stepJson('7002999')]), 'schedule'), 'unknown', 'step not in the list')
+  assert.equal(valueOf(await withSteps([stepJson(STEP), stepJson(STEP)]), 'schedule'), 'unknown', 'step twice (same contents)')
+  assert.equal(valueOf(await withSteps([stepJson(STEP), stepJson(STEP, { step_time: '10:00:00' })]), 'schedule'), 'unknown', 'step twice')
+  assert.equal(valueOf(await withSteps([stepJson(STEP, { episode_id: 7001999 })]), 'schedule'), 'unknown', 'the step names another reminder')
+  assert.equal(valueOf(await withSteps([stepJson(STEP, { id: String(STEP) + '0' })]), 'schedule'), 'unknown')
+  assert.equal(valueOf(await withSteps([stepJson(STEP)], { id: 7001999 }), 'schedule'), 'unknown', 'another reminder\'s answer')
+  assert.equal(valueOf(await withSteps([stepJson(STEP)], { hid_at: '2026-11-01 10:00:00' }), 'schedule'), 'unknown', 'a hidden reminder')
+  const noHidAt = JSON.parse(episodeJson([stepJson(STEP)])) as Record<string, unknown>
+  delete noHidAt.hid_at
+  assert.equal(valueOf((await factsOf(site({ [SCHEDULE]: JSON.stringify(noHidAt) }))).facts, 'schedule'), 'unknown', 'hid_at must be there and null')
+  assert.equal(valueOf(await withSteps(['x', stepJson(STEP)]), 'schedule'), 'unknown', 'a step that is not an object')
+  assert.equal(valueOf(await withSteps([], { steps: { [STEP]: stepJson(STEP) } }), 'schedule'), 'unknown', 'steps not a list')
+  // The answer failing, or not strict JSON (a key written twice: JSON.parse would keep the last copy).
+  assert.equal(valueOf((await factsOf(site({ [SCHEDULE]: null }))).facts, 'schedule'), 'unknown')
+  const repeated = episodeJson([stepJson(STEP, { step_type: 2 })]).replace('"step_type":2', '"step_type":2,"step_type":1')
+  assert.equal(valueOf((await factsOf(site({ [SCHEDULE]: repeated }))).facts, 'schedule'), 'unknown')
+  // The page's text plays no part any more: a timing-looking text in the box changes nothing.
+  const pageText = await factsOf(site({ [`/line/episode/show/${REMINDER}`]: reminderPage(box('<span>3日前 19:00</span>')) }))
+  assert.deepEqual(valueOf(pageText.facts, 'schedule'), { timing: '当日 09:00' })
 })
 
-test('a page the core could not read whole gives no fact read through its view; the account and the state, read by the run\'s own rules, stay', async () => {
-  const twiceId = await factsOf(site({ [`/line/episode/show/${REMINDER}`]: reminderPage(`${box('<span>当日 09:00</span>')}<p id="x">a</p><p id="x">b</p>`) }))
-  assert.equal(twiceId.facts.schedule.status, 'unknown')
-  assert.equal(twiceId.facts.names.status, 'unknown', 'the step\'s name is read through the view too')
+test('a page the core could not read whole (the real page repeats ids in every step\'s form, §39) keeps the account and the state, read by the run\'s own rules, and the timing and names, read from JSON', async () => {
+  const twiceId = await factsOf(site({ [`/line/episode/show/${REMINDER}`]: reminderPage(`${box('<input id="step_time" value="09:00"><input id="step_type" value="1">')}<div><input id="step_time" value="10:00"><input id="step_type" value="1"></div>`) }))
+  assert.deepEqual(valueOf(twiceId.facts, 'schedule'), { timing: '当日 09:00' })
+  assert.deepEqual(valueOf(twiceId.facts, 'names'), { reminder: '架空のリマインダ', step: '当日 09:00' })
   assert.deepEqual(valueOf(twiceId.facts, 'state'), { templates: [ON_STEP] })
   assert.deepEqual(valueOf(twiceId.facts, 'account'), { id: '5550001' })
 })
@@ -198,12 +215,14 @@ test('no account, or no target on the page: unknown, and nothing beyond the page
   // The reminder page failing: every fact unknown, from a failed answer.
   const failed = await factsOf(site({ [`/line/episode/show/${REMINDER}`]: null }))
   assert.ok(Object.values(failed.facts).every(f => f.status === 'unknown'))
-  // A reminder found in no folder: no name.
-  const lost = await factsOf(site({ '/api/episodes?group=7100002&page=2': pageOf([], 2, 2, 2) }))
+  // A reminder answer without a name, or a name that is not plain text (a bidirectional mark, a number): no names.
+  const nameless = JSON.parse(episodeJson([stepJson(STEP)])) as Record<string, unknown>
+  delete nameless.name
+  const lost = await factsOf(site({ [SCHEDULE]: JSON.stringify(nameless) }))
   assert.equal(lost.facts.names.status, 'unknown')
-  // A name that is not plain text (a bidirectional mark) is not read.
-  const marked = await factsOf(site({ '/api/episodes?group=7100002&page=2': pageOf([reminderEntry(Number(REMINDER), 7100002, '架空\u202eのリマインダ')], 2, 2, 2) }))
-  assert.equal(marked.facts.names.status, 'unknown')
+  assert.deepEqual(valueOf(lost.facts, 'schedule'), { timing: '当日 09:00' })
+  assert.equal((await factsOf(site({ [SCHEDULE]: episodeJson([stepJson(STEP)], { name: '架空\u202eのリマインダ' }) }))).facts.names.status, 'unknown')
+  assert.equal((await factsOf(site({ [SCHEDULE]: episodeJson([stepJson(STEP)], { name: 7 }) }))).facts.names.status, 'unknown')
 })
 
 test('the core reads only declared reads with addresses it builds, at most BROWSER_FACT_READS, and only the facts version asked', async () => {
@@ -277,16 +296,27 @@ test('the re-read before the permit refuses any change: a template\'s body or na
   const approved = withSharedWith((await factsOf(site())).facts)
   const again = async (over: Record<string, string | null>) => withSharedWith((await factsOf(site(over))).facts)
   assert.equal(browserFactsChangedProblem(operation, 2, approved, await again({}), values), null, 'the same site')
+  // As the real site reads (shared_with unknown both times, optional): the same, and a plan.
+  const plain = (await factsOf(site())).facts
+  assert.equal(browserFactsChangedProblem(operation, 2, plain, (await factsOf(site())).facts, values), null)
+  // unknown → known is still a change, for an optional fact too.
+  assert.equal(browserFactsChangedProblem(operation, 2, plain, withSharedWith((await factsOf(site())).facts), values), '「shared_with」が承認したときと変わりました')
   assert.equal(browserFactsChangedProblem(operation, 2, approved, await again({ '/api/templates?group=7200002&page=1': pageOf([template(TO_ADD, 7200002, { content_text: '変えた本文' })]) }), values),
     '「templates」が承認したときと変わりました')
   assert.equal(browserFactsChangedProblem(operation, 2, approved, await again({ '/api/templates?group=7200001&page=1': pageOf([template(ON_STEP, 7200001, { name: '変えた名前' })]) }), values),
     '「templates」が承認したときと変わりました')
-  assert.equal(browserFactsChangedProblem(operation, 2, approved, await again({ [`/line/episode/show/${REMINDER}`]: reminderPage(box('<span>当日 09:00</span>')) }), values),
+  // The step's time moved (10:00 instead of 09:00): the timing changed (the names, which carry it, too).
+  assert.equal(browserFactsChangedProblem(operation, 2, approved, await again({ [SCHEDULE]: episodeJson([stepJson(STEP, { step_time: '10:00:00' })]) }), values),
     '「names」が承認したときと変わりました')
-  assert.equal(browserFactsChangedProblem(operation, 2, approved, await again({ '/api/episodes?group=7100002&page=2': pageOf([reminderEntry(Number(REMINDER), 7100002, '改名したリマインダ')], 2, 2, 2) }), values),
+  const moved = withSharedWith((await factsOf(site({ [SCHEDULE]: episodeJson([stepJson(STEP, { step_time: '10:00:00' })]) }))).facts)
+  assert.equal(browserFactsChangedProblem(operation, 2, approved, { ...moved, names: approved.names }, values), '「schedule」が承認したときと変わりました')
+  // The step's time now one the table does not map: the re-read cannot make a plan by itself.
+  assert.equal(browserFactsChangedProblem(operation, 2, approved, await again({ [SCHEDULE]: episodeJson([stepJson(STEP, { step_days: 2 })]) }), values),
+    '「names」をサイトから読み取れていません')
+  assert.equal(browserFactsChangedProblem(operation, 2, approved, await again({ [SCHEDULE]: episodeJson([stepJson('7002000', { order: 0, step_days: 1, step_time: '19:00:00' }), stepJson(STEP)], { name: '改名したリマインダ' }) }), values),
     '「names」が承認したときと変わりました')
   // Someone added the very template meanwhile: the state changed.
-  const added = reminderPage(`<div id="templateStep${STEP}"><span>3日前 09:00</span><a onclick="openModal(${REMINDER}, ${STEP}, 1, ${ON_STEP}, 8)">甲</a><a onclick="openModal(${REMINDER}, ${STEP}, 2, ${TO_ADD}, 8)">乙</a></div>`)
+  const added = reminderPage(`<div id="templateStep${STEP}"><span>当日 09:00</span><a onclick="openModal(${REMINDER}, ${STEP}, 1, ${ON_STEP}, 8)">甲</a><a onclick="openModal(${REMINDER}, ${STEP}, 2, ${TO_ADD}, 8)">乙</a></div>`)
   assert.equal(browserFactsChangedProblem(operation, 2, approved, await again({ [`/line/episode/show/${REMINDER}`]: added }), values), '「state」が承認したときと変わりました')
   // A re-read that cannot make a plan by itself (the template gone) is refused before comparing.
   assert.equal(browserFactsChangedProblem(operation, 2, approved, await again({ '/api/templates?group=7200002&page=1': pageOf([]) }), values), '「templates」をサイトから読み取れていません')

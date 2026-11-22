@@ -346,15 +346,16 @@ server holds ("Executing a plan" below); while the build's switch is off it refu
   are the AI's. **Prefer stable sources** for a new checker: a JSON answer the page itself uses or a
   fixed id marker over the layout of the HTML; a site whose request names the whole target needs no
   target check. What the person approves (`before`) is the state the checker read, not what the AI said.
-- **Lステップ** (`client/connectors/lstep/`): the declaration `lstep@0.6.0` (`declaration.ts`, bundled
+- **Lステップ** (`client/connectors/lstep/`): the declaration `lstep@0.6.1` (`declaration.ts`, bundled
   until the shelf hands browser connectors out; parsed by the core's `parsePluginManifest` like any
   package) with one type, **「リマインダの段にテンプレートを足す」** (`reminder_step_add_template`): effect
   `write`, checker `lstep.reminder_step`, `lock: { kind: lstep.reminder_step }`, `delivers: scheduled`
   (0.6.0, design memo §37, the owner who runs Lステップ: the template reaches only people who have the
   step's time still ahead, at that time, never anyone already past it — the reviewed meaning of the
   type, not read at run time; 0.2.0–0.5.0 said `none`), facts version 2 (`account`, `step_parent`,
-  `names` required; `state`, `templates`, `schedule`, `shared_with` required and complete; `audience`
-  optional — "The facts a checker reads" below), target `{ reminder, step }`, change `{ template }`, one write
+  `names` required; `state`, `templates`, `schedule` required and complete; `shared_with` (0.6.1, the
+  owner: Lステップ cannot say which 回 use a reminder) and `audience` optional — the card always shows the
+  `shared` note — "The facts a checker reads" below), target `{ reminder, step }`, change `{ template }`, one write
   `POST /line/episode/step/pack/template` form `{ content_id: {step}, template_id: {template} }`,
   `ignore_body: [_token, _lm_user_id]`, `expect: [{ list: templates, add: "{template}" }]`, account
   required, the `shared` note (共有のリマインダ). Another operation on a step's templates is a new entry
@@ -392,11 +393,16 @@ server holds ("Executing a plan" below); while the build's switch is off it refu
   pages ("Paginated reads" below; up to 10 pages = 500 items, a longer list is not offered — design
   memo §38, owner), and every entry of a folder's list, on every page, must name the asked folder (`group_id` and `group.id`, each one present equal to it, at least one;
   else left out, incomplete). 「未分類」 in the template folders is `id 0`: **not selectable** (decision,
-  safe side: every id is a positive integer) — left out, the list incomplete. So 0.5.0 (and 0.6.0) passes
+  safe side: every id is a positive integer) — left out, the list incomplete. So 0.5.0 (and 0.6.0, 0.6.1) passes
   `previewProblem` (two id-free reads to start from; `reminder`, `step`, `template` each taken out by a
   reader) and the real connector walks a fake Lステップ to a candidate (`browser-preview.test.ts`); the
   preview stays switched off. Not declared: `/api/landings/<id>` (not this type's). 0.6.0 reads its
-  facts through these same reads ("The facts a checker reads").
+  facts through these same reads ("The facts a checker reads"). 0.6.1 adds `reminder_schedule`
+  `GET /api/episodes/{reminder}` (no query; the JSON the reminder page itself reads, design memo §39,
+  `no_side_effects: reviewed` from the owner's read-only window) with the JSON reader
+  `lstep.reminder_schedule` (`reminder-schedule.ts`): the reminder's steps as `step`, labelled only with
+  a timing its fixed table maps (no label otherwise); another reminder's answer, a hidden one (`hid_at`
+  not `null`), a step twice or naming another reminder → incomplete.
 
 Tests: `client/tests/browser-runner.test.ts` (the gate: not armed, another step / template, an extra /
 repeated / `_method` key, no body, a query, http / another host, an undeclared method, a second send,
@@ -449,8 +455,8 @@ send → report; 6c turns it on for the owner's PC).
   `status` is `pending` / `approved` / `retired`: the script writes a new row **`pending`** (design memo
   §33.5: listed, but the server reads it as not approved, `BROWSER_TYPE_NOT_APPROVED`) until a reviewed
   edit approves it together with its `minAppVersion` (6b: the small PR after 6b-2, the 6b-2 merge's
-  build). Today: `lstep@0.2.0` … `lstep@0.5.0` (their old checker hashes too) `retired`, `lstep@0.6.0`
-  (facts version 2) `pending`;
+  build). Today: `lstep@0.2.0` … `lstep@0.6.0` (their old checker hashes too) `retired`, `lstep@0.6.1`
+  (facts version 2; the timing from JSON) `pending`;
   `declarationHash` = `sha256:` of the declaration text, **and the text itself is in the row**: the
   server reads declarations only from this file (never from `client/`, which `server/src` may not
   import), re-hashes each and parses it with the core's parser (a row that does not match its hash
@@ -691,7 +697,7 @@ setting generation: 6b-2d's `context.ts`), the clocks as `now()` and `monoMs()`.
   (`limits/LimitFrozenAfterCheck`); the seconds between the re-read and the send; the page's own worker or
   WebSocket in the run window is not stopped (writes for the plan go only from the write session).
 
-Tests: `client/tests/browser-execute.test.ts` (the real runner, the real Lステップ 0.6.0 declaration,
+Tests: `client/tests/browser-execute.test.ts` (the real runner, the real Lステップ 0.6.1 declaration,
 checker, facts driver and parser against a fake Lステップ and a fake of the plan routes,
 `tests/browser-plans-fake.ts`: success with one write and one report; an older server, every fixed-content
 mismatch and another combination never run; each re-read change (a body, the timing, a template on the
@@ -900,16 +906,18 @@ long stream, a non-JSON line, an error result, a time-out and a stop; a child th
 it; on the macOS list),
 `browser-preview.test.ts` (the switch: nothing asked, read or started; the loop; what the material holds
 and never holds; ids not taken out refused with nothing read; one JSON object; 8 steps and 4 minutes;
-refusals before anything; a changed context; the window closed or replaced; the real Lステップ 0.6.0
+refusals before anything; a changed context; the window closed or replaced; the real Lステップ 0.6.1
 connector previewable and walking a fake Lステップ — folders → reminders → the reminder page → template
 folders → templates — to a candidate reading exactly the declared addresses, a template's body and
 「未分類」 never offered; a folder not shown, 「未分類」, a template only on the step or an extra parameter
 refused with nothing read), `browser-page.test.ts` (hidden parts, hidden
 inputs / meta / link / base, a hidden root, repeated ids and attributes under any query, mended HTML, references never from text, the kept items, labels, Lステップ's
-reader and 0.6.0's `explore` (paginated reads with JSON readers); strict JSON — a repeated key, too deep, too long, trailing text, keys
+reader and 0.6.1's `explore` (paginated reads with JSON readers); strict JSON — a repeated key, too deep, too long, trailing text, keys
 without a prototype —; the list readers: ids and names only, 「未分類」 left out, another folder or none,
-the page report — whole numbers that fit, else dropped and incomplete —, no page fields, bad ids → incomplete),
-`browser-preview-pages.test.ts` (the real Lステップ 0.6.0 connector against a fake Lステップ of 1, 3, 10
+the page report — whole numbers that fit, else dropped and incomplete —, no page fields, bad ids → incomplete;
+the reminder's steps as JSON (0.6.1): this reminder's steps, a label only from the fixed table, another reminder /
+hidden / no `hid_at` / steps not a list → nothing, a step twice or naming another reminder → left out, incomplete),
+`browser-preview-pages.test.ts` (the real Lステップ 0.6.1 connector against a fake Lステップ of 1, 3, 10
 and 11 pages, every read through the real session chunk and `exactRead`: exactly `…&page=1..N` in
 order; 11 pages, over 500 items or a `total` over 500 on one page → nothing offered; a changed
 `last_page` / `total`, a wrong `current_page`, an id twice across pages or within one, a failing page 2,
@@ -953,8 +961,8 @@ before the permit — are read by main through the checker, never taken from the
   `before` is exactly what the run checks; any other fact so marked stays unknown); only declared
   facts are kept, a declared one without a draft is `unknown`. The result carries `browserFactsProblem`.
   Second layer kept on purpose: `exploreAddressProblem` on what `explorePath` built.
-- **Lステップ 0.6.0** (`client/connectors/lstep/reminder-step-facts.ts`, in the checker's folder, so in its
-  hash): only shapes seen with the owner's login (design memo §34–§36); the rest is never guessed.
+- **Lステップ 0.6.1** (`client/connectors/lstep/reminder-step-facts.ts`, in the checker's folder, so in its
+  hash): only shapes seen with the owner's login (design memo §34–§36, §39); the rest is never guessed.
   `account` (`lm-account-id`), `step_parent` and `state` from the reminder page through the checker's own
   `view`; `templates` — every template on the step and the one to add — from `GET
   /api/templates?group=<folder>&page=<n>` entries `{ id, name, content_text, form_type, group }`, found
@@ -965,39 +973,64 @@ before the permit — are read by main through the checker, never taken from the
   (`id 0`) never asked (a template there → no plan); the walk stops once every id sought is found, so a copy of an id
   in a later folder is not seen (only the pages read are checked: ids are the site's record numbers, and
   a filter the site did not apply shows as entries of other folders, left out; walking every folder
-  would make the 50-read cap likely); `names.reminder` from `GET /api/episodes?group=<folder>&page=<n>`
-  the same way (`/api/episode-groups`); `schedule.timing` and `names.step`: the one visible element
-  text in the step's box (`templateStep<step>`, by the core's view) that is a whole timing (「当日
-  09:00」, 「3日前 09:00」, 「N 日前 に送信」: recognised, never taken apart), exactly one distinct such
-  text, never a link (`<a>`, `<button>`, an `openModal(…)` slot — a template named 「当日 09:00」 is a
-  name) nor an element holding one, and a timing-shaped text inside any link makes it unknown (in doubt,
-  no fact); `names` is stamped from the reminder page (its step name is read there), so a page not read
-  whole leaves it unknown too; `shared_with` and `audience` **always unknown** (no
-  reading confirmed). Nothing beyond the reminder page is read when the step is not there. So **no plan
-  can be made with 0.6.0 today** (`shared_with` is required): availability, never a guessed fact; the
-  row is `pending` anyway.
-- **To confirm at the owner's next login** (read-only window, as §34–§36): where the step's timing stands
-  in the step's box and its exact text (one element, the forms above); where the site lists the 回 using a
-  reminder (`shared_with`: count and names) and whether any read means exactly "people who will still
-  receive this step" (`audience`); that `content_text` is a text template's whole body (not a shortened
-  preview) and `form_type` is a number with 8 = text; that `/api/episodes?group=` entries carry the
-  reminder's name as shown; that the real reminder page reads whole in the core's view (an id written
-  twice anywhere makes the view-read facts unknown); the slots of a step with templates attached (§34:
-  none at the time); whether a template can be removed again before the step's time (design 6b-2 §9).
+  would make the 50-read cap likely); `names.reminder` (0.6.1) from the same answer as the timing below,
+  its `name` under the same conditions, plain text ≤ 200 (0.6.0 walked the reminder folders for it, which
+  could stop at the read cap; a name is for showing only); `schedule.timing` and `names.step` (0.6.1, design memo §39) from
+  `GET /api/episodes/<reminder>` (strict JSON, `reminder-schedule.ts`): the answer's `id` is the
+  reminder, `hid_at` present and `null` (a hidden reminder → unknown), `steps` a list of objects in which
+  the target step's `id` stands **exactly once** and that step's `episode_id` is the reminder; its timing
+  only through the **fixed table** — `step_type` `1`, `step_days` `0` (numbers) and `step_time`
+  `HH:MM:00` → 「当日 HH:MM」 (the combination seen: `1` / `0` / `09:00:00` shown 「当日 09:00」);
+  anything else — a non-zero `step_days` (which sign means 「前」 / 「後」 was not seen), another
+  `step_type`, seconds, values as text — is unknown (no plan). `step_minutes`, `skip`, `initial` are not
+  read. `names` is stamped from that JSON answer. 0.6.0 read the timing from the page's text, which
+  always failed on the real page (it repeats ids in every step's form, so the view is never whole): that
+  reader is removed — the JSON is the one source. `shared_with` and `audience` **always unknown** (no
+  reading exists: Lステップ has no reverse lookup of the 回 using a reminder — people join it from tags,
+  forms, keywords, friend-add, reservations and actions —, owner decision 2026-11-22), both **optional**
+  since 0.6.1: unknown makes a plan, the card shows the declaration's `shared` warning 「全部の回で共有の
+  リマインダです。…」 always and the count as 「読み取れませんでした」; a value read is still held to its
+  shape, and unknown → known at the re-read is a change. Nothing beyond the reminder page is read when the
+  step is not there. So 0.6.1 **can** make a plan from the real site's shapes (a 「当日」 step, text
+  templates outside 「未分類」), behind the switch and the `pending` row. Safety it leans on (the owner:
+  let plans be made where safety holds): `delivers: scheduled`, a template removable before the step's
+  time (§39), the card's approval and the re-read before the permit.
+- **Connector refusals reviewed** (0.6.1, owner: lean toward letting plans be made while safety holds):
+  relaxed — `shared_with` optional, the reminder's name from the reminder's JSON (no folder walk).
+  Kept — 「未分類」 (`/api/templates?group=0` was never read: whether it answers that folder, and with
+  which `group`, is unconfirmed); text only (`form_type` 8: the card shows a text body only, no other
+  kind's shape seen); body ≤ 5000 (LINE's text limit); the 50-read cap and 10 pages a folder (core /
+  declaration bounds on time; raising them is a separate change); the walk stopping at the first folder
+  holding every id; any non-zero `step_days`.
+- **To confirm at the owner's next login** (read-only window, as §34–§36): how a step 「N日前」 / 「N日後」
+  and other `step_type`s look in `/api/episodes/<reminder>` (each mapping added only once seen beside the
+  page's text; also what `step_minutes` and `skip` mean); whether `/api/templates?group=0&page=1` lists
+  「未分類」's templates and how their `group` reads (then 「未分類」 can be walked); whether any read means
+  exactly "people who will still receive this step" (`audience`); that `content_text` is a text
+  template's whole body (not a shortened preview) and `form_type` is a number with 8 = text; that
+  `/api/episodes/<reminder>`'s `name` is the reminder's name as shown; that the real reminder page reads whole in the core's view (an id written
+  twice anywhere makes the view-read facts unknown — §39: it does not, the page repeats form ids; only
+  the timing was read through the view, and it is JSON since 0.6.1); the slots of a step with templates
+  attached (§39: the test step now holds one). Before the step's time a template added to a step can be
+  removed again (§39, the owner).
   Each answer that changes a reader is a new connector version (a new `pending` row).
 
 Tests: `client/tests/browser-facts.test.ts` (the real connector against a fake Lステップ, made-up names:
 exactly the declared reads in order, 「未分類」 never asked, a later page only when page 1 says so;
-every confirmed fact known with its source and time, `shared_with` / `audience` unknown and so no plan;
+every confirmed fact known with its source and time, `shared_with` / `audience` unknown and optional, so a plan (a read
+`shared_with` still held to its shape); the reminder's name from its JSON (missing, a bidirectional mark, a number → no names);
 the read-after's `expectedAfter`; a non-text template (also `form_type: '8'`), one only in 「未分類」, in
 another folder, twice differently, with a control character, a failed or repeated-key folder answer, a
-misnumbered page → no templates; the timing whole and alone in the box (two, mixed text, hidden, outside
-the box, a template or link named like a timing, wrapped or not, an element holding a link → unknown); a
-page with a repeated id keeps the account and state but not the timing or the names; no account,
-no step (nothing else read), a failed page, a reminder in no folder, a name with a bidirectional mark;
+misnumbered page → no templates; the timing from the reminder's JSON through the fixed table (「当日
+HH:MM」; a non-zero day of either sign, another / textual `step_type` or `step_days`, seconds, a malformed
+or missing time → unknown; the step missing, twice, naming another reminder, another reminder's answer, a
+hidden reminder, no `hid_at`, a step that is not an object, `steps` not a list, a failed or repeated-key
+answer → unknown; the page's text plays no part); a page with repeated ids (the real page's form ids)
+keeps the account, state, timing and names; no account,
+no step (nothing else read), a failed page;
 the cap, undeclared reads, a page past `max`, a page on an unpaginated read, a bad id, another facts
 version, a stop, a careless checker (a fact from a failed answer, an undeclared fact, the same read asked
-again, `rawMarkup` on a fact outside the list); the re-read: the same site passes, a changed body / name / timing / reminder name / state, a
+again, `rawMarkup` on a fact outside the list); the re-read: the same site passes, a changed body / name / timing (the step's time in the JSON; `schedule` alone too) / reminder name / state, a timing the table no longer maps, `shared_with` unknown → known, a
 template gone, the count rising or unknown → known are refused, a fall is not). Each guard
 mutation-checked; second layers kept on purpose: `exploreAddressProblem` after `explorePath`.
 

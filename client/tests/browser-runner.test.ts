@@ -117,7 +117,7 @@ test('the page\'s reads in a run follow the run\'s read rule on the operated hos
 
 const NOW = 1_800_000_000_000
 const planInput = (over: Record<string, unknown> = {}) => ({
-  planId: 'plan-1', companyId: 'c1', connector: { id: 'lstep', version: '0.6.0' }, operation: 'reminder_step_add_template',
+  planId: 'plan-1', companyId: 'c1', connector: { id: 'lstep', version: '0.6.1' }, operation: 'reminder_step_add_template',
   account: 'ACC1', target: values.target, change: values.change, before: { templates: ['300'] }, approvedAt: NOW - 1000, expiresAt: NOW + 60_000, ...over,
 })
 
@@ -216,7 +216,7 @@ test('the app\'s own Lステップ checker reads the account from the page\'s lm
 })
 
 test('the bundled declaration passes the core\'s checks, names a reviewed checker, and an unknown checker id is never run', () => {
-  const bundled = connectors('lstep', '0.6.0')
+  const bundled = connectors('lstep', '0.6.1')
   assert.ok(bundled)
   assert.equal(bundled.host, HOST)
   assert.deepEqual(operation.writes, [{ method: 'POST', path: WRITE, encoding: 'form', body: { content_id: { field: 'step' }, template_id: { field: 'template' } }, ignoreBody: ['_token', '_lm_user_id'] }])
