@@ -640,6 +640,9 @@ test.describe('the bottom panel', () => {
     await expect(page.getByRole('dialog', { name: '承認のお願い' })).toBeVisible()
     const calls = await (await layout(page)).evaluate(l => l.calls.map(c => c.name))
     expect(calls.filter(name => /approve|send/i.test(name))).toEqual([])
+    // As the build ships (「ブラウザ操作」 switched off), the inbox has no plan row and never reads the plans.
+    expect(calls.filter(name => name === 'listBrowserPlans')).toEqual([])
+    await expect(panel(page).locator('[data-inbox-row^="browser:"]')).toHaveCount(0)
     await page.keyboard.press('Escape')
     // Opening a done row marks it seen (the bell's same read state).
     await panel(page).locator('[data-inbox-row="notice:n-1"]').getByRole('button', { name: '開く' }).click()

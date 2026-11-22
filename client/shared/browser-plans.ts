@@ -5,7 +5,7 @@
  * renderer hands it, and the fixed words the consultation AI gets back from `browser_request`.
  * Pure: main, preload, the renderer and tests import it.
  */
-import type { BrowserOpenPlans, BrowserPlanView } from '../../shared/types/browser-plans'
+import type { BrowserPlanView } from '../../shared/types/browser-plans'
 import type { BrowserRunResult } from './browser-runner'
 
 /** The consultation AI's request tool (`mcp__acb_browser__browser_request`; electron/browser-request/tools.ts). */
@@ -75,7 +75,8 @@ export interface BrowserPlanCardData {
 
 export type BrowserPlansFailure = { ok: false; offline: boolean; message: string }
 export type BrowserPlanGetResult = { ok: true; card: BrowserPlanCardData } | BrowserPlansFailure
-export type BrowserPlanListResult = { ok: true; plans: BrowserOpenPlans } | BrowserPlansFailure
+/** The inbox's rows of 「ブラウザ操作」 (`browserPlans:list`): the member's own; empty, nothing read, while the switch is off. */
+export type BrowserPlanListResult = { ok: true; inbox: BrowserInboxPlans } | BrowserPlansFailure
 /** ［任せる］: the runner's outcome (approve + claim + the run, one press on this PC). */
 export type BrowserPlanRunAnswer = { ok: true; result: BrowserRunResult } | BrowserPlansFailure
 /** ［やめる］ and ［済んでいた］［されていなかった］. */
@@ -161,4 +162,56 @@ export function readBrowserPlanView(v: unknown): BrowserPlanView | null {
     target: { ...(p.target as Record<string, string>) }, change: { ...(p.change as Record<string, string>) }, facts,
     explanation: p.explanation, createdAt: p.createdAt, expiresAt: p.expiresAt, approvedAt: p.approvedAt, contentHash: p.contentHash, execution,
   }
+}
+
+/** One of the member's own plans still open (`GET /browser-plans-open`), as the inbox lists it. */
+export interface BrowserInboxPlan {
+  planId: string
+  /** draft: waiting for the member's approval; approved: approved, not started yet. */
+  state: 'draft' | 'approved'
+  /** The operation's label (「リマインダの段にテンプレートを足す」). */
+  label: string
+  /** The site's name (Lステップ). */
+  site: string
+  createdAt: string
+}
+
+/** One of the member's own runs whose result is not settled yet (`GET /browser-executions-waiting`). */
+export interface BrowserInboxUnsure {
+  planId: string
+  /** permitted: it may be sending now; unknown: it ended and nobody knows whether it reached the site. */
+  state: 'permitted' | 'unknown'
+  label: string
+  permittedAt: string | null
+  /** From when 「済んでいた」/「されていなかった」 can be pressed (null: not known yet). */
+  confirmableAt: string | null
+  /** The server says the member may press 「済んでいた」/「されていなかった」 now (its clocks, not this PC's). */
+  canConfirm: boolean
+}
+
+export interface BrowserInboxPlans {
+  plans: BrowserInboxPlan[]
+  unsure: BrowserInboxUnsure[]
+}
+
+/**
+ * The inbox's rows from the server's two lists, as main hands them over: only the member's own (an owner's
+ * or admin's waiting list holds everyone's), only the fields a row shows, each of its shape (a copy) — an
+ * item that is not is left out. Null when a list itself is not one.
+ */
+export function readBrowserInboxPlans(open: unknown, waiting: unknown, userId: string): BrowserInboxPlans | null {
+  if (!isMap(open) || !Array.isArray(open.items) || !isMap(waiting) || !Array.isArray(waiting.items)) return null
+  const plans: BrowserInboxPlan[] = []
+  for (const p of open.items as unknown[]) {
+    if (!isMap(p) || !isStr(p.planId) || !BROWSER_PLAN_ID_RE.test(p.planId) || (p.state !== 'draft' && p.state !== 'approved')
+      || !isMap(p.connector) || !isStr(p.connector.label, 200) || !isStr(p.label, 200) || !isStr(p.createdAt, 40)) continue
+    plans.push({ planId: p.planId, state: p.state, label: p.label, site: p.connector.label, createdAt: p.createdAt })
+  }
+  const unsure: BrowserInboxUnsure[] = []
+  for (const e of waiting.items as unknown[]) {
+    if (!isMap(e) || e.userId !== userId || !isStr(e.planId) || !BROWSER_PLAN_ID_RE.test(e.planId) || (e.state !== 'permitted' && e.state !== 'unknown')
+      || !isStr(e.label, 200) || !strOrNull(e.permittedAt, 40) || !strOrNull(e.confirmableAt, 40) || typeof e.canConfirm !== 'boolean') continue
+    unsure.push({ planId: e.planId, state: e.state, label: e.label, permittedAt: e.permittedAt, confirmableAt: e.confirmableAt, canConfirm: e.canConfirm })
+  }
+  return { plans, unsure }
 }

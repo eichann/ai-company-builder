@@ -183,6 +183,8 @@ const api: Partial<ElectronAPI> = {
   exists: async (path: string) => path === ROOT || path === OTHER_ROOT || path in DISK || path in FILES,
   // Opening a company registers its folder (the title bar's switch, features/company/reopen.ts).
   registerAllowedRoot: async (folder: string) => { record('registerAllowedRoot', [folder]); return { success: true } },
+  // 「ブラウザ操作」 ships switched off: the real screen's inbox must never read the plans (agent-browser.md).
+  listBrowserPlans: async (companyId: string) => { record('listBrowserPlans', [companyId]); return { ok: true, inbox: { plans: [], unsure: [] } } },
   getCompanies: async () => {
     record('getCompanies', [])
     const count = Number(params.get('companies'))

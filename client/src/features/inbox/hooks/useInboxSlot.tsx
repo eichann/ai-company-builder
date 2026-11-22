@@ -6,6 +6,7 @@ import { InboxChips, InboxList, type InboxRowButton } from '../components/InboxL
 import { InboxCardDialog } from '../components/InboxCardDialog'
 import { InboxButton } from '../components/InboxButton'
 import { NoticeSettingsDialog } from '../components/NoticeSettingsDialog'
+import { useInboxBrowserPlans, type InboxBrowserPlanList, type InboxPlanStates } from './useInboxBrowserPlans'
 import { bulkSeenIds, hasInboxNews, inboxNewsBaseline, inboxNewsKeys, inboxView, sameKeys, seenWhileShown, type InboxFilter, type InboxItem } from '../model'
 
 /** A meeting of a department without the task list, with its own buttons (the minutes feature's `titleBarMeetings`). */
@@ -31,9 +32,14 @@ interface InboxSlotInput {
   /** The app's own cards (features/chat), composed by AppShell: the inbox only shows them in its dialog. */
   renderApprovalCard: (approvalId: string) => ReactNode
   renderMailDraft: (messageId: string) => ReactNode
+  /**
+   * 「ブラウザ操作」's plans, composed by AppShell only while the build's switch is on (agent-browser.md): absent =
+   * no plan row and nothing read. A row opens the plan's own card (`browser-plans`); only the card acts.
+   */
+  browserPlans?: { list: InboxBrowserPlanList; renderCard: (planId: string) => ReactNode; planStates: InboxPlanStates }
 }
 
-type OpenCard = { kind: 'approval'; id: string } | { kind: 'mail'; id: string } | null
+type OpenCard = { kind: 'approval'; id: string } | { kind: 'mail'; id: string } | { kind: 'browser'; id: string } | null
 
 const NO_MEETINGS: readonly InboxMeeting[] = []
 
@@ -43,7 +49,7 @@ const NO_MEETINGS: readonly InboxMeeting[] = []
  * has no notices (no panel, no button, ⌘J declined: never an empty frame). The chosen chip lives here, so
  * moving the panel (under the middle, or under the whole left side while a wide tab covers the middle) keeps it.
  */
-export function useInboxSlot({ companyId, notices, meetings = NO_MEETINGS, features = DEFAULT_FEATURES, open: shown, ready = true, onToggle, onOpenRecord, onOpenTasks, onOpenJobs, renderApprovalCard, renderMailDraft }: InboxSlotInput):
+export function useInboxSlot({ companyId, notices, meetings = NO_MEETINGS, features = DEFAULT_FEATURES, open: shown, ready = true, onToggle, onOpenRecord, onOpenTasks, onOpenJobs, renderApprovalCard, renderMailDraft, browserPlans }: InboxSlotInput):
   { title: string; heading: ReactNode; body: ReactNode; dialog: ReactNode; titleBarButton: ReactNode } | undefined {
   const [filter, setFilter] = useState<InboxFilter>('all')
   const [card, setCard] = useState<OpenCard>(null)
@@ -57,8 +63,12 @@ export function useInboxSlot({ companyId, notices, meetings = NO_MEETINGS, featu
   const [seen, setSeen] = useState<{ keys: ReadonlySet<string>; fixed: boolean } | null>(null)
   const [beforeOpen, setBeforeOpen] = useState(false)
   const [wasShown, setWasShown] = useState(shown)
-  // Rebuilt from every answer main hands over (nothing of its own is kept); the 14-day line moves with it.
-  const view = useMemo(() => inboxView(notices, new Date(), meetings), [notices, meetings])
+  // The plans are read again when the panel opens and when a card closes (approved or run there, or elsewhere).
+  const [planReadKey, setPlanReadKey] = useState(0)
+  const plans = useInboxBrowserPlans(companyId, browserPlans?.list, planReadKey, browserPlans?.planStates)
+  // Rebuilt from every answer main hands over (nothing of its own is kept); the 14-day line moves with it, and a
+  // run's confirm time with the plans' own read at that time (a new answer).
+  const view = useMemo(() => inboxView(notices, new Date(), meetings, plans.inbox), [notices, meetings, plans.inbox])
   const newsKeys = useMemo(() => inboxNewsKeys(view), [view])
   const shownKeys = useMemo(() => inboxNewsKeys(view, filter), [view, filter])
   const available = !!companyId && notices.available
@@ -67,14 +77,15 @@ export function useInboxSlot({ companyId, notices, meetings = NO_MEETINGS, featu
   // chip shows counts as seen; before every source answered (and nothing was shown) the rows are the baseline.
   if (available) {
     const baseline = new Set(inboxNewsBaseline(view))
+    const allRead = ready && plans.read
     const next = shown ? { keys: seenWhileShown(seen && seen.fixed ? seen.keys : baseline, newsKeys, shownKeys), fixed: true }
-      : !seen ? { keys: baseline, fixed: ready }
-      : !seen.fixed ? { keys: baseline, fixed: ready }
+      : !seen ? { keys: baseline, fixed: allRead }
+      : !seen.fixed ? { keys: baseline, fixed: allRead }
       : null
     if (next && (!seen || seen.fixed !== next.fixed || !sameKeys(seen.keys, next.keys))) setSeen(next)
   }
   // The undo line is about what was just pressed: gone once the panel closes or opens again.
-  if (wasShown !== shown) { setWasShown(shown); setStatus(null) }
+  if (wasShown !== shown) { setWasShown(shown); setStatus(null); if (shown) setPlanReadKey(k => k + 1) }
 
   if (!companyId || !available) return undefined
 
@@ -92,6 +103,7 @@ export function useInboxSlot({ companyId, notices, meetings = NO_MEETINGS, featu
       case 'openRecord': onOpenRecord(a.recordId); break
       case 'openApprovalCard': setCard({ kind: 'approval', id: a.approvalId }); break
       case 'openMailDraft': setCard({ kind: 'mail', id: a.messageId }); break
+      case 'openBrowserPlan': setCard({ kind: 'browser', id: a.planId }); break
       case 'openTasks': onOpenTasks(); break
       case 'openJobs': onOpenJobs(); break
       case 'none': break
@@ -126,9 +138,12 @@ export function useInboxSlot({ companyId, notices, meetings = NO_MEETINGS, featu
   }
   const meetingButtons = (id: string) => meetings.find(m => m.id === id)?.actions ?? []
 
+  const closeCard = () => { setCard(null); setPlanReadKey(k => k + 1) }
   const dialog = card ? (card.kind === 'approval'
-    ? <InboxCardDialog title="承認のお願い" note="一覧からは承認できません。中身・相手・いつ反映されるかを確かめてから押してください。" onClose={() => setCard(null)}>{renderApprovalCard(card.id)}</InboxCardDialog>
-    : <InboxCardDialog title="送るメールの下書き" note="一覧からは送れません。宛先と中身を確かめてから送ってください。" onClose={() => setCard(null)}>{renderMailDraft(card.id)}</InboxCardDialog>)
+    ? <InboxCardDialog title="承認のお願い" note="一覧からは承認できません。中身・相手・いつ反映されるかを確かめてから押してください。" onClose={closeCard}>{renderApprovalCard(card.id)}</InboxCardDialog>
+    : card.kind === 'browser'
+    ? <InboxCardDialog title="承認のお願い（ブラウザ操作）" note="一覧からは任せられません。サイトから読み取った中身と届く時を、カードで確かめてから押してください。" onClose={closeCard}>{browserPlans?.renderCard(card.id)}</InboxCardDialog>
+    : <InboxCardDialog title="送るメールの下書き" note="一覧からは送れません。宛先と中身を確かめてから送ってください。" onClose={closeCard}>{renderMailDraft(card.id)}</InboxCardDialog>)
     : settings && <NoticeSettingsDialog kinds={settings.kinds} error={settings.error} features={features} onSwitch={(k, on) => { void switchKind(k, on) }} onClose={() => setSettings(null)} />
 
   return {
