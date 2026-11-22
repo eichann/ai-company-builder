@@ -314,6 +314,26 @@ describe('the submit: the candidate as stored, by its id and the fingerprint sho
     expect(pushed).toHaveLength(1)
   })
 
+  it('a submitted version’s fingerprint only while the proposer reads what it names (owners / admins always); no guess confirmed', async () => {
+    const { c, p } = await submitted(alice, { reads: ['経理部'] })
+    const mineOf = () => ok(proposals.mine(alice)).proposals.find((x: Json) => x.id === p.id)
+    expect(mineOf().submittedFingerprint).toBe(c.fingerprint)
+    db.prepare("UPDATE scope_rules SET can_read = 0, can_write = 0 WHERE id = 'jp-priv-a'").run()
+    try {
+      expect(mineOf().submittedFingerprint).toBeNull()
+      expect(ok(proposals.list(admin, undefined)).proposals.find((x: Json) => x.id === p.id).submittedFingerprint).toBe(c.fingerprint)
+      // A resend with the right fingerprint and with a guess: the same refusal, nothing told.
+      const right = await proposals.submit(alice, c.id, { fingerprint: c.fingerprint })
+      const guess = await proposals.submit(alice, c.id, { fingerprint: `sha256:${'0'.repeat(64)}` })
+      expect(right).toMatchObject({ ok: false, body: { code: 'JOB_CANDIDATE_PLACE' } })
+      expect(guess).toEqual(right)
+      expect(JSON.stringify(ok(proposals.withdraw(alice, p.id)))).not.toContain(c.fingerprint)
+    } finally {
+      db.prepare("UPDATE scope_rules SET can_read = 1, can_write = 1 WHERE id = 'jp-priv-a'").run()
+    }
+    expect(mineOf().submittedFingerprint).toBe(c.fingerprint)
+  })
+
   it('an owner / admin proposing: the others are told, never themself', async () => {
     const { p } = await submitted(admin)
     expect(proposalNotices(p.id).map(n => n.user_id)).toEqual(['u-admin2', 'u-owner'])
@@ -618,6 +638,16 @@ describe('the routes: the AI’s token makes a candidate, never a run’s; the s
     const created = await call({ token: consultation, method: 'POST', path: '/api/records-ai/job-proposals-ai/candidates', body })
     expect(created.status).toBe(201)
     expect(created.body.data.definition).toMatchObject({ actingUser: 'jq-alice', run: { procedure: { source: 'shelf_skill', item, skill: 'weekly-minutes' } } })
+
+    // Without the shared folder a place exists only as a department or a place set up inside one — never text below one.
+    const placed = (reads: string[]) => call({ token: consultation, method: 'POST', path: '/api/records-ai/job-proposals-ai/candidates', body: input({ skill: item, reads, deliverable: null }) })
+    expect(await placed(['人事部/でっちあげの評価メモ'])).toMatchObject({ status: 409, body: { code: 'JOB_CANDIDATE_PLACE' } })
+    expect(await placed(['人事部/面談'])).toMatchObject({ status: 409, body: { code: 'JOB_CANDIDATE_PLACE' } })
+    expect((await placed(['人事部'])).status).toBe(201)
+    db.prepare("INSERT INTO scopes (id, company_id, path, kind, created_at) VALUES ('jq-interviews', ?, '人事部/面談', 'folder', ?)").run(co, at)
+    db.prepare("INSERT INTO scope_rules (id, company_id, scope_id, subject_type, subject_id, can_read, can_write, created_at) VALUES ('jq-interviews-e', ?, 'jq-interviews', 'everyone', NULL, 1, 1, ?)").run(co, at)
+    expect((await call({ token: consultation, method: 'GET', path: `/api/records-ai/job-proposals-ai/places?under=${encodeURIComponent('人事部')}` })).body.data.folders).toEqual([{ path: '人事部/面談', write: true }])
+    expect((await placed(['人事部/面談'])).status).toBe(201)
 
     // A job's run token (alice's PC job, claimed): refused, nothing kept.
     const pc = {

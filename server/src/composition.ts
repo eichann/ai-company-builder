@@ -324,7 +324,14 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
   const { skillShelf, jobs, jobProposals } = wireJobs({
     repos, shared, hasCompanyFolder: companyFolders.has, permissionViews, push, taskSettings,
     // Member proposals (jobs.md "Member proposals"): the existing folders a candidate may name.
-    placeExists: (companyId, path) => permissionEditor.folderExists(companyId, path, permissionEditor.privatePlaceOf(companyId, path)),
+    // Without the shared folder only a department or a place set up inside one (what the listing offers) exists — never any
+    // text below a department (`folderExists` answers that, for permission rules): its parent's listing names it.
+    placeExists: async (companyId, path) => {
+      if (companyFolders.has(companyId)) return permissionEditor.folderExists(companyId, path, permissionEditor.privatePlaceOf(companyId, path))
+      const cut = path.lastIndexOf('/')
+      const names = await permissionEditor.subfolders(companyId, cut < 0 ? '' : path.slice(0, cut))
+      return names !== null && names.includes(path.slice(cut + 1))
+    },
     placeFolders: (companyId, path) => permissionEditor.subfolders(companyId, path),
     // A pause / the company's stop holds the occurrences (jobs.md "Held"); bound late: built below.
     occurrenceHolds: {

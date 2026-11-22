@@ -129,18 +129,29 @@ export function createJobProposals(deps: JobProposalDeps) {
     return ok({ procedure: { source: 'shelf_skill', item: ref, skill: found.name, fingerprint: found.current }, name: found.name })
   }
 
-  function proposalView(p: JobProposalRow): JobProposalView {
+  /**
+   * May `viewer` be told the submitted version's fingerprint (the job view's own rule, `fingerprintShown`)? An owner / admin
+   * always; anyone else only while they read every place that version names (a sha256 of a known shape lets them test guesses).
+   */
+  function fingerprintShown(viewer: Member, p: JobProposalRow): boolean {
+    if (hasFullAccess(viewer.role)) return true
+    const v = companyData.forCompany(viewer.companyId).jobs.version(p.jobId, p.submittedVersion)
+    const definition = v ? storedJobDefinition(v) : null
+    return definition !== null && deps.jobs.readsAllFor(viewer.companyId, viewer.userId, definition)
+  }
+
+  function proposalView(p: JobProposalRow, viewer: Member): JobProposalView {
     return {
       id: p.id, jobId: p.jobId, proposerId: p.proposerId, candidateId: p.candidateId, submittedVersion: p.submittedVersion,
-      submittedFingerprint: p.submittedFingerprint, state: p.state, returnReason: p.returnReason as JobProposalReturnReason | null,
+      submittedFingerprint: fingerprintShown(viewer, p) ? p.submittedFingerprint : null, state: p.state, returnReason: p.returnReason as JobProposalReturnReason | null,
       decidedBy: p.decidedBy, decidedAt: p.decidedAt, createdAt: p.createdAt,
     }
   }
 
-  function candidateView(row: JobCandidateRow, proposal: JobProposalRow | null): JobCandidateView {
+  function candidateView(row: JobCandidateRow, proposal: JobProposalRow | null, viewer: Member): JobCandidateView {
     return {
       id: row.id, definition: storedJobDefinition({ schema: JOB_PROPOSAL_SCHEMA, definition: row.definition }) as JobDefinition,
-      fingerprint: row.fingerprint, createdAt: row.createdAt, expiresAt: row.expiresAt, proposal: proposal ? proposalView(proposal) : null,
+      fingerprint: row.fingerprint, createdAt: row.createdAt, expiresAt: row.expiresAt, proposal: proposal ? proposalView(proposal, viewer) : null,
     }
   }
 
@@ -210,7 +221,7 @@ export function createJobProposals(deps: JobProposalDeps) {
         return ok(undefined)
       })
       if (!saved.ok) return saved
-      return ok(candidateView(row, null))
+      return ok(candidateView(row, null, member))
     },
 
     /** `GET /me/job-candidates/:candidateId`: the caller's own candidate (anyone else's, expired, another company's: the one 404). */
@@ -223,7 +234,7 @@ export function createJobProposals(deps: JobProposalDeps) {
       // longer read withholds the content and its fingerprint, answered as a candidate that is not there (naming nothing).
       const definition = storedJobDefinition({ schema: JOB_PROPOSAL_SCHEMA, definition: row.definition })
       if (definition === null || !deps.jobs.readsAllFor(member.companyId, member.userId, definition)) return CANDIDATE_NOT_FOUND()
-      return ok(candidateView(row, handle.jobs.proposalOfCandidate(member.userId, candidateId)))
+      return ok(candidateView(row, handle.jobs.proposalOfCandidate(member.userId, candidateId), member))
     },
 
     /**
@@ -236,8 +247,12 @@ export function createJobProposals(deps: JobProposalDeps) {
       if (!isObject(body) || Object.keys(body).length !== 1 || typeof body.fingerprint !== 'string') return BAD_BODY('{ fingerprint }')
       const fingerprint = body.fingerprint
       const handle = companyData.forCompany(member.companyId)
-      const first = (p: JobProposalRow): Outcome<{ proposal: JobProposalView; created: boolean }> =>
-        p.submittedFingerprint === fingerprint ? ok({ proposal: proposalView(p), created: false }) : FINGERPRINT_CHANGED()
+      // The first result — compared with what was sent only where the fingerprint is theirs to see: else the same refusal
+      // whatever was sent (no guess is confirmed).
+      const first = (p: JobProposalRow): Outcome<{ proposal: JobProposalView; created: boolean }> => {
+        if (!fingerprintShown(member, p)) return PLACE_REFUSED()
+        return p.submittedFingerprint === fingerprint ? ok({ proposal: proposalView(p, member), created: false }) : FINGERPRINT_CHANGED()
+      }
       const before = handle.jobs.proposalOfCandidate(member.userId, candidateId)
       if (before) return first(before)
       const row = handle.jobs.candidate(candidateId, member.userId, clock.now())
@@ -276,7 +291,7 @@ export function createJobProposals(deps: JobProposalDeps) {
           id: ids.newId(), userId, kind: 'job_proposal', recordId: '', recordVersion: 0, action: '', actorId: member.userId, actorKind: 'human',
           dedupeKey: `job_proposal:${proposal.id}`, createdAt: at, readAt: null,
         })))
-        return ok({ proposal: proposalView(proposal), created: true })
+        return ok({ proposal: proposalView(proposal, member), created: true })
       })
       if (result.ok && result.value.created) { try { deps.noticesChanged?.(member.companyId, admins) } catch { /* their own check catches up */ } }
       return result
@@ -296,7 +311,7 @@ export function createJobProposals(deps: JobProposalDeps) {
 
     /** `GET /me/job-proposals`: the caller's proposals, newest first. */
     mine(member: Member): Outcome<{ proposals: JobProposalView[] }> {
-      return ok({ proposals: companyData.forCompany(member.companyId).jobs.proposals({ proposerId: member.userId }, PROPOSALS_LISTED).map(proposalView) })
+      return ok({ proposals: companyData.forCompany(member.companyId).jobs.proposals({ proposerId: member.userId }, PROPOSALS_LISTED).map(p => proposalView(p, member)) })
     },
 
     /** `GET /job-proposals?state=` (owner / admin): the company's proposals, newest first. */
@@ -304,7 +319,7 @@ export function createJobProposals(deps: JobProposalDeps) {
       if (!hasFullAccess(member.role)) return refuse('forbidden', JOBS_FORBIDDEN)
       if (state !== undefined && !(JOB_PROPOSAL_STATES as readonly unknown[]).includes(state)) return BAD_BODY('?state=submitted|approved|withdrawn|returned')
       const filter = state === undefined ? {} : { state: state as JobProposalRow['state'] }
-      return ok({ proposals: companyData.forCompany(member.companyId).jobs.proposals(filter, PROPOSALS_LISTED).map(proposalView) })
+      return ok({ proposals: companyData.forCompany(member.companyId).jobs.proposals(filter, PROPOSALS_LISTED).map(p => proposalView(p, member)) })
     },
 
     /** `POST /me/job-proposals/:proposalId/withdraw`: the proposer, only while it waits (anyone else: the one 404). */
@@ -361,7 +376,7 @@ export function createJobProposals(deps: JobProposalDeps) {
           dedupeKey: `job_proposal_returned:${p.id}`, createdAt: at, readAt: null,
         }])
       }
-      return ok({ proposal: proposalView(handle.jobs.proposal(p.id) as JobProposalRow) })
+      return ok({ proposal: proposalView(handle.jobs.proposal(p.id) as JobProposalRow, member) })
     })
     if (result.ok && to === 'returned') { try { deps.noticesChanged?.(member.companyId, [p.proposerId]) } catch { /* their own check catches up */ } }
     return result

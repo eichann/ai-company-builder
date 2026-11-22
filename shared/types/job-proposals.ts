@@ -37,7 +37,8 @@ export interface JobProposalView {
   proposerId: string
   candidateId: string
   submittedVersion: number
-  submittedFingerprint: string
+  /** null for a viewer who is not an owner / admin while that version names a place they cannot read now (the job view's rule). */
+  submittedFingerprint: string | null
   state: JobProposalState
   returnReason: JobProposalReturnReason | null
   decidedBy: string | null

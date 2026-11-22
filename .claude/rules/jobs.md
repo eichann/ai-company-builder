@@ -1419,7 +1419,10 @@ Code: `shared/core/job-proposals.ts` (ids `jc.` / `jp.` + 32 hex, limits, states
   Places (reads, the check's place, the deliverable's place): never a hidden segment (`.claude`, … → 400); **existing folders the member reads** — the deliverable's also one
   they write — one answer for missing / unreadable / not writable (409 `JOB_CANDIDATE_PLACE`, naming nothing); the places route
   lists only readable, non-hidden folders (an unreadable private folder never named; `permissionEditor.subfolders`, unfiltered,
-  filtered by the member's reader). A Skill that is not there → 409 `JOB_SKILL_MISSING` 「先に Skill を作ってから」 (Q1). The
+  filtered by the member's reader). In a company **without the shared folder** a place exists only when its parent's listing
+  names it — a department, or a place set up inside one (a scope with rules) — never any text below a department, which
+  `permissionEditor.folderExists` would answer for permission rules (Codex re-review: free text into a proposal); `composition.ts`
+  `placeExists`. A Skill that is not there → 409 `JOB_SKILL_MISSING` 「先に Skill を作ってから」 (Q1). The
   server pins the Skill (tree / shelf version) now, builds the definition (`proposalDefinition`: `records`, `creates: ['task']`,
   the record reads / minutes route / mail drafts only as chosen, `runsPerDay` 1) and parses it with the one parser (schema 4).
   Kept for its creator alone (`created_by` in SQL: another member's, another company's, an expired one answer the one 404) and
@@ -1435,7 +1438,10 @@ Code: `shared/core/job-proposals.ts` (ids `jc.` / `jp.` + 32 hex, limits, states
   `JOB_PROPOSALS_PER_DAY` (10) submits a company day whatever became of them (409 `JOB_PROPOSALS_DAY_LIMIT`), the draft job
   (version 1 = the candidate's canonical text and fingerprint, `created_by` the member), the proposal record and the notices.
   **Idempotent** by `UNIQUE (company, proposer, candidate)`: a repeat (also at once, also after the content's 24 hours) answers
-  the first result with `created: false` — no job, count or notice more; with another fingerprint 409.
+  the first result with `created: false` — no job, count or notice more; with another fingerprint 409. **A proposal's
+  `submittedFingerprint`** is answered (to the proposer in every answer — `mine`, the candidate's view, the submit, a withdrawal)
+  only while they read every place the submitted version names, the job view's own rule (`fingerprintShown`: owners / admins
+  always; else null); a repeat submit then answers `JOB_CANDIDATE_PLACE` whatever fingerprint was sent (no guess confirmed).
 - **Its states** (§8-4): `submitted` → `approved` (its first approval) / `withdrawn` (the proposer) / `returned` (an owner /
   admin, a fixed reason code, never text) — one wins: every move is a compare-and-set from `submitted` (`decideProposal`) inside
   its transaction; a loser is told 409 `JOB_PROPOSAL_DECIDED` (with the state) or, for an approval, `JOB_PROPOSAL_CLOSED`.
@@ -1479,10 +1485,11 @@ Code: `shared/core/job-proposals.ts` (ids `jc.` / `jp.` + 32 hex, limits, states
   Also (owner decisions and reviews of PR A): the proposer's return notice, the fixed responsible person, a candidate read again
   when read (a place / the shelf Skill's place lost), hidden segments refused, an owner / admin proposer not told, a leaver's
   proposals withdrawn (through the route), an older app's 「AI の番」 token refused at the route.
-  Mutation check: 52 guards removed or inverted one at a time, then 7 for the owner decisions and 11 after the reviews (the route handing the service the token's run now fails a test of its own); each fails
+  Mutation check: 52 guards removed or inverted one at a time, then 7 for the owner decisions, 11 after the reviews and 5 after the Codex re-review (the route handing the service the token's run now fails a test of its own); each fails
   a test except — each alone suffices, both removed fail:
   the places' reader / write checks and the approval's own `rightsFit` at the candidate; the 20-candidate check before and inside
-  the write; — behind another guard: the pre-checks `JOB_PROPOSAL_CLOSED` of edit / approve (a
+  the write; the proposal view's owner / admin branch of `fingerprintShown` (an owner / admin reads every place anyway; kept as the
+  job view's rule); — behind another guard: the pre-checks `JOB_PROPOSAL_CLOSED` of edit / approve (a
   withdrawn / returned job is `retired`, refused first; the checks inside the write are tested by races); — defence: the stored
   candidate's responsible person compared with the submitter (a candidate is only ever found for its creator).
 
