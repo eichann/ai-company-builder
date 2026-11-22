@@ -231,6 +231,18 @@ test('a page the core could not read whole (the real page repeats ids in every s
   assert.deepEqual(valueOf(twiceId.facts, 'account'), { id: '5550001' })
 })
 
+test('the real page\'s rows of attached templates (design memo §40: names, no template ids) not matched by id slots make no state, so no plan; a step with no row and no slot has none', async () => {
+  const row = (hole: number, name: string) => `<tr><td>#1 テンプレート ${name}</td><td><form method="POST" action="https://manager.linestep.net/line/episode/step/pack"><input type="hidden" name="_method" id="_method" value="DELETE"><input type="hidden" name="hole_id" id="hole_id" value="${hole}"><input type="hidden" name="content_id" id="content_id" value="${STEP}"></form></td></tr>`
+  const page = (rows: string, inBox = '') => reminderPage(`<div id="template_confirm_${STEP}"><table>${rows}</table></div><div id="templateStep${STEP}">${inBox}</div>`)
+  const empty = await factsOf(site({ [`/line/episode/show/${REMINDER}`]: page('') }))
+  assert.deepEqual(valueOf(empty.facts, 'state'), { templates: [] })
+  for (const rows of [row(16100001, '架空テンプレ甲'), row(16100001, '架空テンプレ甲') + row(16100002, '架空テンプレ乙'), row(16100001, '架空テンプレ甲') + row(16100002, '架空テンプレ甲')]) {
+    const out = await factsOf(site({ [`/line/episode/show/${REMINDER}`]: page(rows) }))
+    for (const name of ['step_parent', 'state', 'schedule', 'templates']) assert.equal(out.facts[name].status, 'unknown', name)
+    assert.deepEqual(out.reads, [`/line/episode/show/${REMINDER}`], 'nothing else read')
+  }
+})
+
 test('no account, or no target on the page: unknown, and nothing beyond the page is read when the step is not there', async () => {
   const noAccount = await factsOf(site({ [`/line/episode/show/${REMINDER}`]: reminderPage(box('<span>当日 09:00</span>'), '') }))
   assert.equal(noAccount.facts.account.status, 'unknown')

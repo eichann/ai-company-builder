@@ -368,12 +368,26 @@ server holds ("Executing a plan" below); while the build's switch is off it refu
   the box (else no target). The state is the box's template ids (`templates`). Every id of the plan
   (each target and change field, so a later operation's extra id too) is a positive integer (never `0` / `-1`). `_token` / `_lm_user_id` are taken from
   hidden inputs of the markup (`_token` also `meta[name=csrf-token]`), one value each, plain token
-  characters; none → `csrf-missing`, no write. (Whether the real page has its slots in `onclick`
-  attributes, as captured, rather than in a script is not verified beyond the capture — **§40 saw the
-  real step box's template rows as buttons (「コピーして編集」「追加」) without links or data attributes**,
-  so on the real page the state may read empty: then the run stops before the permit with
-  `facts-changed` / `before-changed`, or ends `unknown`, never `failed`; a state read from the box's text
-  or a JSON answer is a later connector version.) The write's form, seen again in §40 (read only, field
+  characters; none → `csrf-missing`, no write. **The real page's rows** (design memo §39, §40, a rendered
+  capture with one template attached): the attached templates are rows in `#template_confirm_<step>` —
+  outside `templateStep<step>`, which there holds only the 「テンプレートから追加」 form — 「#N テンプレート
+  <name>」, 編集 a button, and a delete form `POST /line/episode/step/pack` with hidden `_method=DELETE`,
+  `hole_id`, `content_id=<step>` (element ids repeated on every row). **No row carries a template id**
+  (`hole_id` is the slot, `content_id` the step), so the checker does not read the state from rows (a
+  name is not an id, and the run-time `view` reads only the page): it counts them (`stepHoles`: every
+  form whose action's path is exactly `/line/episode/step/pack` and whose one `content_id` is the step,
+  with one positive `hole_id` and `_method` `DELETE`; another shape, or a hole twice → no target; other
+  steps' forms and the add form are left alone; ids play no part) and, when there is any row, the `openModal(…)`
+  slots read as ids must be exactly as many — else no target: no plan (the facts' `state` unknown), a run
+  stops before writing, the read after a write is `unknown`, never `failed`. No row and no slot = a step
+  with no template. So on the real page as captured, a plan can be made only for a step with no template
+  yet, and its result is 「届いたか分かりません」 for the person to confirm (the row after the write has no
+  id). Whether the page main reads (no scripts run) carries the rows at all is **not known** — the
+  capture is the rendered page and the rows carry Vue markers: if the script draws them, main sees no row
+  and a step with templates reads as empty (remaining limit; to check with one read of the raw page at
+  the owner's next login). Reading the attached templates by id (a JSON answer, or names matched to the
+  template list with ambiguity refused, which needs the state's shape or the checker's reads to change)
+  is a later version. The write's form, seen again in §40 (read only, field
   names, no values): `POST /line/episode/step/pack/template` with `content_id` (the chosen template is
   added by the page's script; `template_id` is the 11/20 capture's name), `_token` (also
   `meta[name=csrf-token]`) and `_lm_user_id` — the declaration agrees. Also seen, not declared: a step's
@@ -405,7 +419,9 @@ server holds ("Executing a plan" below); while the build's switch is off it refu
   **selectable since 0.6.1** (design memo §40: `GET /api/templates?group=0&page=1` answers like any folder,
   its entries with `group: null`) — the only `0` taken (the number 0 in the template folder list; never a
   reminder folder, an item or a plan id), and an entry of 「未分類」 counts only when every folder id it
-  carries is `null` or `0` (at least one). So 0.5.0 (and 0.6.0, 0.6.1) passes
+  carries is `null` or `0` (at least one). The reminder list is always read with `group` (§36 confirmed
+  `GET /api/episodes?group=<folder>&page=<n>` answers): §40's script read without `group` (`?page=1`)
+  got nothing back, which the preview never sends. So 0.5.0 (and 0.6.0, 0.6.1) passes
   `previewProblem` (two id-free reads to start from; `reminder`, `step`, `template` each taken out by a
   reader) and the real connector walks a fake Lステップ to a candidate (`browser-preview.test.ts`); the
   preview stays switched off. Not declared: `/api/landings/<id>` (not this type's). 0.6.0 reads its
@@ -422,7 +438,10 @@ repeated / `_method` key, no body, a query, http / another host, an undeclared m
 a stop; declared reads only, the page's parts without a query; the window's outside rule and read
 rule; the plan's shape, expiry, `approvedAt` and one-day limits; the checker's box (exactly one id
 attribute, not in a comment / script / text area, slots of this reminder and step only, none outside)
-/ ids / token and the account from `lm-account-id` (present, missing, two different values, not a
+/ ids / token, the real page's rows counted against the id slots (no row = none; rows without slots,
+two rows and one slot, a row of another shape — two holes, no or another `_method`, hole 0, two
+`content_id`s —, a hole twice → no target; other steps' rows, the add form, a comment or script left alone),
+the account from `lm-account-id` (present, missing, two different values, not a
 positive integer, only in a comment or script); the bundled declaration, its `expect`, an unknown checker and
 two checkers with one id; the record on disk and fail-closed; the closed AI entry: no module outside
 `features/browser` names the runner, only the controller has `runWindow`, only the runner enters ai
@@ -720,7 +739,7 @@ stop / setting / context change before the permit, each saying what; a re-read t
 clock or a clock set back does not; a stop / closed window / changed context / a throw in the last check
 → failed; a refused permit → nothing reported; no usable permit answer (an error, a malformed one, none in
 5 s) → failed, asked once; a 4xx → unknown; an error, a lost answer applied or not → unknown and never sent
-again, also from another PC; the page after the send decides; reports retried ≤ 3; the record's hint;
+again, also from another PC; the page after the send decides (the real page's rows matched by id slots → succeeded, rows only → unknown); reports retried ≤ 3; the record's hint;
 the type / checker / window checks after the claim; CSRF; the hour running out; one run per window),
 `browser-read-session.test.ts` (the permit only after the write session is prepared; "not sent" only before
 the request is ended), `browser-window-electron.test.ts` (the real window: the happy path through the
@@ -1024,7 +1043,8 @@ before the permit — are read by main through the checker, never taken from the
 - **To confirm at the owner's next login** (read-only window, as §34–§40): the value of
   `step_timing_text` beside the page's text for a 「当日」 and a 「N日前」 step (§40 recorded its shape
   only); what `skip` means (§40: `initial` is 「リマインダ開始時に配信を行う」; `skip`'s field is hidden);
-  how the step box shows its templates for the state (§40: buttons, no `openModal` attribute); whether any read means
+  whether the raw reminder page (as main reads it, no scripts) carries the attached-template rows and any
+  template id for them (§40's capture is the rendered page: rows with names and `hole_id`s only); whether any read means
   exactly "people who will still receive this step" (`audience`; §40: the reminder list reads no counts);
   that `content_text` is a text template's whole body (§40: the longest, 1161 characters, has no 「…」 —
   likely whole) and `form_type` is a number with 8 = text; that
@@ -1047,7 +1067,8 @@ control or bidirectional character, over 100, not text → unknown; another step
 missing or not plain, a failed or repeated-key answer → unknown; the reminder's answer: the step missing,
 twice, naming another reminder, another reminder's answer, a hidden reminder, no `hid_at`, a step that is
 not an object, `steps` not a list, failing → unknown; the step's own fields and the page's text play no part); a page with repeated ids (the real page's form ids)
-keeps the account, state, timing and names; no account,
+keeps the account, state, timing and names; the real page's rows (§40 structure) without id slots — one, two,
+the same name twice — make no state and nothing else is read, no row is an empty step; no account,
 no step (nothing else read), a failed page;
 the cap, undeclared reads, a page past `max`, a page on an unpaginated read, a bad id, another facts
 version, a stop, a careless checker (a fact from a failed answer, an undeclared fact, the same read asked

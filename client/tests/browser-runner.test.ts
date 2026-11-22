@@ -190,6 +190,49 @@ test('Lステップ\'s checker reads the step\'s templates, the account and the 
   assert.equal(checker.view(values, read(lstepPage({ steps: { 201: [] }, token: ['a', 'b'] }))).problem, 'csrf-missing')
 })
 
+/**
+ * A step as the real page renders it (design memo §39, §40; structure from a capture of the test reminder,
+ * names and ids made up): the attached templates' rows in `#template_confirm_<step>` — 「#N テンプレート
+ * <name>」, 編集 as a button, a delete form with `_method` / `hole_id` / `content_id` and the page's repeated
+ * element ids — and `templateStep<step>` holding only the add form. `slots` adds the 11/20 capture's
+ * `openModal(…)` calls (with ids) to the box.
+ */
+function realStep(step: string, rows: Array<{ hole: string; name: string }>, slots: string[] = [], reminder = '101'): string {
+  const row = (r: { hole: string; name: string }, i: number) => `<tr><th style="width: 3em;"><small>#${i + 1}</small></th> <td class="has_emoji"><span class="label label-default">テンプレート</span><span class="tw-px-1">${r.name}</span><br> <span data-v-1d48b846="" class="ib"><p>本文の先頭…</p></span></td> <td><button type="button" class="btn btn-xs btn-success">編集</button></td> <td><form method="POST" action="https://manager.linestep.net/line/episode/step/pack" accept-charset="UTF-8" onsubmit="return confirm(&quot;本当に削除してよろしいですか？&quot;);"><input type="hidden" name="_method" id="_method" autocomplete="off" value="DELETE"><input type="hidden" autocomplete="off" name="_token" value="tok"><input type="hidden" autocomplete="off" name="_lm_user_id" value="u1"> <input type="hidden" name="hole_id" id="hole_id" value="${r.hole}" autocomplete="off"> <input type="hidden" name="content_id" id="content_id" value="${step}" autocomplete="off"> <button type="submit" class="btn btn-xs btn-danger">削除</button></form></td></tr>`
+  return `<div id="template_confirm_${step}"><table class="table"><tbody>${rows.map(row).join(' ')} <tr><td colspan="4"><a href="/line/episode/step/pack/${step}">新規作成して追加</a> <a data-toggle="collapse" href="#templateStep${step}">テンプレートから追加</a></td></tr></tbody></table> <!----></div>
+<div class="collapse" id="templateStep${step}"><div class="well well-sm"><form method="POST" action="https://manager.linestep.net/line/episode/step/pack/template" accept-charset="UTF-8"><input type="hidden" autocomplete="off" name="_token" value="tok"><input type="hidden" autocomplete="off" name="_lm_user_id" value="u1">
+<input type="hidden" name="content_id" id="content_id" value="${step}" autocomplete="off"><vue3-item-selector itemtype="template" export-name="template_id"></vue3-item-selector>
+${slots.map((t, i) => `<a onclick="openModal(${reminder}, ${step}, ${i + 1}, ${t}, 1)">msg</a>`).join('')}<button class="btn btn-default btn-sm btn-block">追加</button></form></div></div>`
+}
+
+test('Lステップ\'s checker on the real page\'s step (design memo §40): rows of attached templates carry no template id, so any row not matched one for one by an id slot is no target; no row and no slot is a step with no template', () => {
+  const state = (body: string) => checker.view(values, read(`<input type="hidden" name="_token" value="tok"><span data-account-id="ACC1"></span>${body}`)).state
+  // No template attached: the step is there, with none.
+  assert.deepEqual(state(realStep('201', [])), { templates: [] })
+  // One, two, or the same name twice attached, shown only as rows (names, no ids): not read — no guessing ids from names.
+  assert.equal(state(realStep('201', [{ hole: '16100001', name: '架空テンプレA' }])), null)
+  assert.equal(state(realStep('201', [{ hole: '16100001', name: '架空テンプレA' }, { hole: '16100002', name: '架空テンプレB' }])), null)
+  assert.equal(state(realStep('201', [{ hole: '16100001', name: '架空テンプレA' }, { hole: '16100002', name: '架空テンプレA' }])), null)
+  // Rows matched one for one by slots with ids (the 11/20 capture's shape): read.
+  assert.deepEqual(state(realStep('201', [{ hole: '16100001', name: '架空テンプレA' }], ['300'])), { templates: ['300'] })
+  assert.deepEqual(state(realStep('201', [{ hole: '16100001', name: 'A' }, { hole: '16100002', name: 'B' }], ['301', '300'])), { templates: ['300', '301'] })
+  assert.equal(state(realStep('201', [{ hole: '16100001', name: 'A' }, { hole: '16100002', name: 'B' }], ['300'])), null, 'two rows, one slot')
+  // Another step's rows play no part; the add form (…/pack/template) is not a row.
+  assert.deepEqual(state(`${realStep('202', [{ hole: '16100009', name: 'よそ' }])}${realStep('201', [])}`), { templates: [] })
+  // A row not of the shape seen: no target (a second hole, no or another _method, a hole like 0, the same hole twice).
+  // (each beside one id slot, so only the row's shape decides)
+  const odd = (form: string) => state(`<div id="template_confirm_201"><form method="POST" action="/line/episode/step/pack">${form}</form></div><div id="templateStep201"><a onclick="openModal(101, 201, 1, 300, 1)">msg</a></div>`)
+  assert.deepEqual(odd('<input type="hidden" name="_method" value="DELETE"><input name="hole_id" value="1"><input name="content_id" value="201">'), { templates: ['300'] }, 'the shape seen')
+  assert.equal(odd('<input type="hidden" name="_method" value="DELETE"><input name="hole_id" value="1"><input name="hole_id" value="2"><input name="content_id" value="201">'), null)
+  assert.equal(odd('<input name="hole_id" value="1"><input name="content_id" value="201">'), null)
+  assert.equal(odd('<input type="hidden" name="_method" value="PUT"><input name="hole_id" value="1"><input name="content_id" value="201">'), null)
+  assert.equal(odd('<input type="hidden" name="_method" value="DELETE"><input name="hole_id" value="0"><input name="content_id" value="201">'), null)
+  assert.equal(odd('<input type="hidden" name="_method" value="DELETE"><input name="hole_id" value="1"><input name="content_id" value="201"><input name="content_id" value="202">'), null)
+  assert.equal(state(realStep('201', [{ hole: '16100001', name: 'A' }, { hole: '16100001', name: 'B' }], ['300', '301'])), null, 'one hole twice')
+  // A row in a comment or a script is not the page.
+  assert.deepEqual(state(`<!-- ${realStep('999', [])} --><script>'<form action="/line/episode/step/pack"><input name="content_id" value="201"><input name="hole_id" value="1"></form>'</script>${realStep('201', [])}`), { templates: [] })
+})
+
 test('the app\'s own Lステップ checker reads the account from the page\'s lm-account-id meta: one value, else none (a run then stops before writing)', () => {
   const account = (head: string) => checkers().get(LSTEP_REMINDER_STEP_CHECKER)!.view(values, read(`<html><head>${head}</head><body>${lstepPage({ steps: { 201: [] } })}</body></html>`)).account
   assert.equal(account('<meta name="lm-account-id" content="5550001">'), '5550001')
