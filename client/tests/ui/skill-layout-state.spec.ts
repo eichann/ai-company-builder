@@ -640,8 +640,9 @@ test.describe('the bottom panel', () => {
     await expect(page.getByRole('dialog', { name: '承認のお願い' })).toBeVisible()
     const calls = await (await layout(page)).evaluate(l => l.calls.map(c => c.name))
     expect(calls.filter(name => /approve|send/i.test(name))).toEqual([])
-    // As the build ships (「ブラウザ操作」 switched off), the inbox has no plan row and never reads the plans.
-    expect(calls.filter(name => name === 'listBrowserPlans')).toEqual([])
+    // 「ブラウザ操作」 switched off on this PC: the inbox may ask main for the plans (the switch is per PC, main
+    // decides) and main answers empty without asking the server (the preview's fake answers likewise), so no
+    // plan row (and nothing above approved or sent).
     await expect(panel(page).locator('[data-inbox-row^="browser:"]')).toHaveCount(0)
     await page.keyboard.press('Escape')
     // Opening a done row marks it seen (the bell's same read state).

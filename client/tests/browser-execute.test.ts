@@ -12,6 +12,12 @@
  */
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
+import { createThisPcSwitch } from '../electron/features/browser/ai-switch'
+import { createBrowserContext } from '../electron/features/browser/context'
+import { BROWSER_AI_OPT_IN_FILE } from '../shared/browser-ai'
 import { parseBrowserHtml } from '../electron/features/browser/html'
 import { createBrowserRunner, type BrowserRunnerDeps, type BrowserRunWindow } from '../electron/features/browser/runner'
 import { createBrowserCheckerRegistry, createBrowserConnectors } from '../shared/browser-checkers'
@@ -404,6 +410,24 @@ test('a stop, a closed window or a changed context between the permit and the se
     assert.deepEqual(h.site.posts, [], label)
     // The server's reason words name a closed window a changed context (6b-2 §5-5).
     assert.deepEqual(h.server.state.reports, [{ result: 'failed', reason: label === 'window-closed' ? 'context-changed' : label }], label)
+  }
+})
+
+test('this PC\'s opt-in removed between the permit and the send (the switch and context as main composes them): failed, nothing sent', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'acb-optin-run-'))
+  try {
+    const file = path.join(dir, BROWSER_AI_OPT_IN_FILE)
+    fs.writeFileSync(file, JSON.stringify({ browserAi: 'this-pc', server: 'https://acb.example', userId: 'u1', until: new Date(Date.now() + 86_400_000).toISOString() }))
+    const aiSwitch = createThisPcSwitch({ file: () => file, server: () => 'https://acb.example', userId: () => 'u1' })
+    const context = createBrowserContext({ userId: () => 'u1', aiSwitch })
+    const faults: FakeServerFaults = {}
+    const h = await harness({ faults, deps: { aiSwitch, context: () => context.capture({ companyId: '' }) } })
+    faults.onPermit = () => { fs.rmSync(file) }
+    assert.deepEqual(await h.run(), { outcome: 'failed', reason: 'context-changed' })
+    assert.deepEqual(h.site.posts, [], 'nothing reached the site')
+    assert.deepEqual(h.server.state.reports, [{ result: 'failed', reason: 'context-changed' }])
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true })
   }
 })
 

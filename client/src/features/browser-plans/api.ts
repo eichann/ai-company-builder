@@ -16,7 +16,7 @@ export function getBrowserPlan(companyId: string, planId: string, reads: Browser
   return reads.getBrowserPlan(companyId, planId)
 }
 
-/** The inbox's rows: the member's own open plans and unsettled runs (empty while the build's switch is off). */
+/** The inbox's rows: the member's own open plans and unsettled runs (empty while the switch is off on this PC). */
 export function listBrowserPlans(companyId: string, reads: BrowserPlanReads = window.electronAPI) {
   return reads.listBrowserPlans(companyId)
 }

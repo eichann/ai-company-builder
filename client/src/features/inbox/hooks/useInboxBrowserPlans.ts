@@ -50,8 +50,8 @@ function createPlanReads() {
 }
 
 /**
- * The member's own open plans and unsettled runs for the inbox's rows. Without a `list` (the build's switch
- * off) there is nothing and nothing is read. Read when the company or `readKey` changes (the slot bumps it when
+ * The member's own open plans and unsettled runs for the inbox's rows. Without a `list` there is nothing and
+ * nothing is read; switched off on this PC, main's list answers empty without asking the server. Read when the company or `readKey` changes (the slot bumps it when
  * the panel opens and when a card closes, so a plan approved or run elsewhere leaves on the next read), when a
  * plan's state moves on any card (［任せる］ in the chat's card), a second after a run's 「済んでいた」/「されていなかった」
  * can first be pressed, and every `PLANS_REREAD_MS` while any plan or run is listed and `PLANS_GRACE_MS` after (then

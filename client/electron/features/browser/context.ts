@@ -1,6 +1,7 @@
 // The context a browser run or a plan's registration holds (agent-browser.md "The card, the IPC and the
 // request tool"; design 6b-2 §5-4): one generation, advanced by the shell's events — sign-out, a sign-in
-// (also as another account), a change of the company's browser setting, the app quitting. Every async
+// (also as another account), a change of the company's browser setting, the app quitting — and the switch
+// itself, asked again on every check (this PC's opt-in removed or run out mid-run). Every async
 // step captures it and asks "still the same?" after each answer (`BrowserRunnerDeps.context`): an answer
 // that arrives after the context moved is dropped (no permit used, nothing sent).
 
@@ -15,7 +16,9 @@ export interface BrowserContext {
   capture(scope: { companyId: string; signal?: AbortSignal }): () => boolean
 }
 
-export function createBrowserContext(deps: { userId: () => string | null }): BrowserContext {
+import type { BrowserAiSwitch } from './ai-switch'
+
+export function createBrowserContext(deps: { userId: () => string | null; aiSwitch: BrowserAiSwitch }): BrowserContext {
   let generation = 0
   let quit = false
   const settings = new Map<string, string>()
@@ -31,7 +34,7 @@ export function createBrowserContext(deps: { userId: () => string | null }): Bro
     capture({ signal }) {
       const user = deps.userId()
       const at = generation
-      return () => !quit && user !== null && deps.userId() === user && generation === at && !(signal?.aborted ?? false)
+      return () => !quit && user !== null && deps.userId() === user && generation === at && !(signal?.aborted ?? false) && deps.aiSwitch()
     },
   }
 }

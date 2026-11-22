@@ -129,7 +129,7 @@ export interface ChatServerConfig extends AgentHost {
   secondOpinionAllowed?: (companyId: string) => Promise<boolean>
   /**
    * 「ブラウザ操作」's request (browser-request/tools.ts; agent-browser.md "The card, the IPC and the request
-   * tool"): undefined while the build's switch is off (6b) — then the tool does not exist. `onPlan` puts the
+   * tool"): undefined while the switch is off (no opt-in on this PC) — then the tool does not exist. `onPlan` puts the
    * plan's card into the reply (a reference; the card reads the server).
    */
   createBrowserRequest?: (input: { companyId: string; conversationId: string | null; signal: AbortSignal; onPlan: (planId: string) => void }) => BrowserRequestTools | undefined
@@ -484,7 +484,7 @@ export async function startChatServer(config: ChatServerConfig) {
     // Choice prompts (Claude Code's AskUserQuestion, Codex's ask_user), per the agent registry.
     const injector = createChunkInjector()
     // 「ブラウザ操作」 (browser-request/tools.ts): only an agent with the operator, never in an unattended step,
-    // and only while the build's switch is on (the factory answers undefined otherwise). It stops with the
+    // and only while the switch is on (the factory answers undefined otherwise). It stops with the
     // turn: the member's stop here, the main process's (an administrator, a job ended, a window closed) once
     // the turn is tracked below — the preview, the facts' reads and the registration all end.
     const browserRequestAbort = new AbortController()

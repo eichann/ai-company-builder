@@ -15,7 +15,7 @@ import path from 'node:path'
 import {
   readOperatorMessage, resolveClaudeBrowserOperatorCli, runClaudeBrowserOperatorStep, type BrowserOperatorCli,
 } from '../electron/agents/claude-browser-operator'
-import { browserOperatorArgs, BROWSER_OPERATOR_SYSTEM_PROMPT } from '../shared/browser-operator'
+import { browserOperatorArgs, BROWSER_OPERATOR_SYSTEM_PROMPT, operatorInitProblem } from '../shared/browser-operator'
 import { AGENTS } from '../shared/agents/registry'
 import { browserOperatorOf } from '../electron/agents/registry'
 
@@ -166,7 +166,15 @@ test('every start is checked: an init that is not the closed one, a missing or s
     [{ init: { slash_commands: ['compact'] } }, 'init-mismatch'],
     [{ init: { skills: ['x'] } }, 'init-mismatch'],
     [{ init: { plugins: [{ name: 'p' }] } }, 'init-mismatch'],
-    [{ init: { agents: ['general-purpose'] } }, 'init-mismatch'],
+    // Only a plugin built into the CLI binary passes (6c, CLI 2.1.330): the member's or a marketplace's never.
+    [{ init: { plugins: [{ name: 'p', path: '/Users/x/.claude/plugins/p', source: 'p@market' }] } }, 'init-mismatch'],
+    [{ init: { plugins: [{ name: 'p', path: 'builtin', source: 'q@builtin' }] } }, 'init-mismatch'],
+    [{ init: { plugins: [{ name: 'p', path: '/Users/x/p', source: 'p@builtin' }] } }, 'init-mismatch'],
+    [{ init: { plugins: [{ name: 'p', path: 'builtin', source: 'p@builtin', hooks: {} }] } }, 'init-mismatch'],
+    [{ init: { plugins: 'builtin' } }, 'init-mismatch'],
+    // Only the CLI's own agents (unusable without a tool): a member's agent never.
+    [{ init: { agents: ['general-purpose', 'my-agent'] } }, 'init-mismatch'],
+    [{ init: { agents: 'Plan' } }, 'init-mismatch'],
     [{ init: { cwd: '/tmp' } }, 'init-mismatch'],
     [{ init: { permissionMode: 'bypassPermissions' } }, 'init-mismatch'],
     [{ init: { model: 'claude-haiku-4-5' } }, 'init-mismatch'],
@@ -200,6 +208,15 @@ test('every start is checked: an init that is not the closed one, a missing or s
   const stop = new AbortController()
   setTimeout(() => stop.abort(), 300)
   assert.deepEqual(await step(cli, {}, 20_000, stop.signal), { ok: false, code: 'cancelled' })
+})
+
+test('the init the real CLI 2.1.330 sends under every flag passes (6c, the owner\'s Mac): its built-in plugins and agents only', () => {
+  const real = {
+    type: 'system', subtype: 'init', cwd: '/w', model: 'claude-opus-5-5', permissionMode: 'dontAsk', tools: [], mcp_servers: [], slash_commands: [], skills: [],
+    plugins: ['cc-plugin-sec-default', 'cc-plugin-agents-md', 'cc-plugin-privacy', 'cc-plugin-plugin-authoring'].map(name => ({ name, path: 'builtin', source: `${name}@builtin` })),
+    agents: ['claude', 'Explore', 'general-purpose', 'Plan'],
+  }
+  assert.equal(operatorInitProblem(real, { cwd: '/w', model: 'claude-opus-5-5[1m]' }), null)
 })
 
 test('a stream message out of order is refused before init, and only Claude Code is an operator', () => {

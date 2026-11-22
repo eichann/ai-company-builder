@@ -34,8 +34,8 @@ interface InboxSlotInput {
   renderApprovalCard: (approvalId: string) => ReactNode
   renderMailDraft: (messageId: string) => ReactNode
   /**
-   * 「ブラウザ操作」's plans, composed by AppShell only while the build's switch is on (agent-browser.md): absent =
-   * no plan row and nothing read. A row opens the plan's own card (`browser-plans`); only the card acts.
+   * 「ブラウザ操作」's plans, composed by AppShell with a company open; main's list answers empty while the switch is
+   * off on this PC (agent-browser.md "This PC's opt-in"). Absent = no plan row and nothing read. A row opens the plan's own card (`browser-plans`); only the card acts.
    */
   browserPlans?: { list: InboxBrowserPlanList; renderCard: (planId: string) => ReactNode; planStates: InboxPlanStates }
 }

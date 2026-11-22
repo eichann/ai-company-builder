@@ -93,6 +93,22 @@ export function browserOperatorEnv(parent: Readonly<Record<string, string | unde
 }
 
 const isStringArray = (v: unknown): v is string[] => Array.isArray(v) && v.every(x => typeof x === 'string')
+
+/**
+ * What the real CLI lists in init even under every flag (6c, §33 1-6 on the owner's Mac, CLI 2.1.330):
+ * the agents built into the CLI — unusable here, the operator has no tool to start one (`tools: []`) —
+ * and plugins built into the CLI binary itself (`path: builtin`, `source: <name>@builtin`: the CLI's own
+ * code, trusted as the CLI is; a plugin from anywhere else — the member's, a marketplace's — still stops
+ * the start). Owner decision 2026-11-22 (the trust model: what Anthropic ships is trusted).
+ */
+export const BROWSER_OPERATOR_BUILTIN_AGENTS: readonly string[] = ['claude', 'Explore', 'general-purpose', 'Plan']
+function builtinPlugin(p: unknown): boolean {
+  if (!p || typeof p !== 'object' || Array.isArray(p)) return false
+  const o = p as Record<string, unknown>
+  const keys = Object.keys(o).sort().join(',')
+  return keys === 'name,path,source' && typeof o.name === 'string' && /^[a-z0-9][a-z0-9-]{0,63}$/.test(o.name)
+    && o.path === 'builtin' && o.source === `${o.name}@builtin`
+}
 const emptyOrAbsent = (v: unknown) => v === undefined || (Array.isArray(v) && v.length === 0)
 
 /**
@@ -104,7 +120,9 @@ const emptyOrAbsent = (v: unknown) => v === undefined || (Array.isArray(v) && v.
 export function operatorInitProblem(init: Record<string, unknown>, expected: { cwd: string; model: string }): string | null {
   if (!isStringArray(init.tools) || init.tools.length !== 0) return 'tools'
   if (!Array.isArray(init.mcp_servers) || init.mcp_servers.length !== 0) return 'mcp_servers'
-  for (const key of ['slash_commands', 'skills', 'plugins', 'agents']) if (!emptyOrAbsent(init[key])) return key
+  for (const key of ['slash_commands', 'skills']) if (!emptyOrAbsent(init[key])) return key
+  if (!(init.plugins === undefined || (Array.isArray(init.plugins) && init.plugins.every(builtinPlugin)))) return 'plugins'
+  if (!(init.agents === undefined || (isStringArray(init.agents) && init.agents.every(a => BROWSER_OPERATOR_BUILTIN_AGENTS.includes(a))))) return 'agents'
   if (init.cwd !== expected.cwd) return 'cwd'
   if (init.permissionMode !== 'dontAsk') return 'permissionMode'
   // The CLI may name the model without the 1M-context suffix it was asked with.

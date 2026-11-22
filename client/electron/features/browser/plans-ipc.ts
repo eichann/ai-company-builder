@@ -62,7 +62,7 @@ export async function browserCardReadiness(companyId: string, plan: BrowserPlanV
 export interface BrowserPlansIpcDeps<E> {
   /** The event came from the main window's main frame (`isMainFrameSender`). */
   fromMainWindow: (event: E) => boolean
-  /** The build's switch (default `buildAiSwitch`): off = the inbox's list is empty and nothing is read. */
+  /** The switch — this PC's opt-in as main composes it (default `buildAiSwitch`, off): off = the inbox's list is empty and nothing is read. */
   aiSwitch?: BrowserAiSwitch
   /** The signed-in member: the inbox lists only their own runs (an admin's waiting list holds everyone's). */
   userId: () => string | null

@@ -90,7 +90,6 @@ import { ApprovalCard } from '../features/chat/components/ApprovalCard'
 import { BrowserPlanCard } from '../features/browser-plans/components/BrowserPlanCard'
 import { listBrowserPlans } from '../features/browser-plans/api'
 import { planStatesVersion, subscribePlanStates } from '../features/browser-plans/planStore'
-import { BROWSER_AI_BUILD_SWITCH } from '../../shared/browser-ai'
 import { FileLinkRow, RecordRow } from '../features/records/components/RecordRows'
 import type { RecordViewSummary } from '../../shared/record-views'
 import { usePluginScreens } from '../features/plugins/hooks/usePluginScreens'
@@ -524,8 +523,9 @@ export function AppShell({ bottomPanel }: AppShellProps = {}) {
     onOpenJobs: () => { setSettingsFocus({ tab: 'jobs', at: Date.now() }); setShowSettings(true) },
     renderApprovalCard: id => approvalCard(id, ''),
     renderMailDraft: id => currentCompany ? <PreparedMailCard key={id} companyId={currentCompany.id} messageId={id} /> : null,
-    // 「ブラウザ操作」's plans only while the build's switch is on: off, the inbox has no way to read them at all.
-    browserPlans: BROWSER_AI_BUILD_SWITCH && currentCompany ? { list: listBrowserPlans, renderCard: id => <BrowserPlanCard key={id} companyId={currentCompany.id} planId={id} />, planStates: PLAN_STATES } : undefined,
+    // 「ブラウザ操作」's plans: main decides (the switch is per PC, agent-browser.md "This PC's opt-in"); switched off,
+    // `browserPlans:list` answers empty and asks the server nothing, so there is no row.
+    browserPlans: currentCompany ? { list: listBrowserPlans, renderCard: id => <BrowserPlanCard key={id} companyId={currentCompany.id} planId={id} />, planStates: PLAN_STATES } : undefined,
   })
   const panel: BottomPanelContent | undefined = bottomPanel ?? inbox
   const hasBottom = panel !== undefined
