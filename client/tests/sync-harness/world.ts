@@ -1397,11 +1397,9 @@ export class Member {
       const repo = this.repoOf(rel)
       if (!fs.existsSync(repo.dir) || !committedIn(repo.dir, ob.blob)) continue
       this.obligations.set(rel, ob)
-      // At this path, not merely somewhere: an ignored file with the bytes of a shared one is not committed.
-      const atPath = execFileSync('git', ['log', '--all', '-1', '--format=%H', `--find-object=${ob.blob}`, '--', repo.rel], {
-        cwd: repo.dir, env: this.world.env(NO_LAZY_FETCH),
-      }).toString().trim()
-      if (atPath) this.committedAt.add(`${pathKey(rel)}\0${ob.blob}`)
+      // At this path, not merely somewhere: an ignored file with the bytes of a shared one is not
+      // committed. (Tracked is not asked: a teammate's rename can have moved a committed file.)
+      if (!this.isIgnored(rel)) this.committedAt.add(`${pathKey(rel)}\0${ob.blob}`)
       // Still pending only if it changed again after this snapshot.
       try {
         if (blobId(this.read(rel)) === ob.blob) this.pending.delete(rel)

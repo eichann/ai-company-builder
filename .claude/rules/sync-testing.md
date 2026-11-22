@@ -94,7 +94,9 @@ the machine is shared — CI runs all of it.
   the `.staged-version` names back) or held for it by the sparse keep (`.git/acb-sparse-keep/`). Only the member's own
   overwrite, `remove` or `rename` of what is on disk there, or access lost (`revokePrivate`),
   releases one; sync moving it away does not. Content a sync committed at that path
-  (`committedAt`) is left to the check above (it knows union and three-way merges); office lock files are skipped (the app removes them on the
+  (`committedAt`: the blob reached the object database and the path is not ignored, so an ignored
+  file with a shared file's bytes never counts; a teammate's rename may move it) is left to the
+  check above (it knows union and three-way merges); office lock files are skipped (the app removes them on the
   member's answer); a test step that removes one by design (a backup aged out) calls
   `releaseLocalWritesUnder`. Delete with `member.remove`, not `fs`, when it is the member's deletion. The committed-only check let SYNC-1 / SYNC-3 (code
   review 2026-11-22: ignored files deleted with a left-out private clone, a sparse keep written over)
