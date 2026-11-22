@@ -1759,7 +1759,8 @@ The server gate is the pair business plugin × operation, and inside a step's ru
   uses a connector (`PluginPackageView.connector`), whether it is connected: 「HubSpot とつながって
   います」 / 「HubSpot との行き来は止まっています：<reason>。記録はそのまま使えます。」
   (`connector-*` and key problems, `CONNECTOR_PROBLEMS` in `admin/src/lib/integrations.ts`; its
-  badge stays 「使っています」), before install what the exchange needs; and its mapping and import.
+  badge stays 「使っています」; the line is amber when the admin has to act — `connector-stopped` —
+  `connectionLineTone`, design-system.md 「止まっている」の色), before install what the exchange needs; and its mapping and import.
   `CONNECTOR_REQUIRED` shows the server's sentence; 「新しいつなぎ先として始める」 on a business's
   import renews the connector's connection. A business inside ACB only shows version and on / off.
 - **The mapping and the import only for a use with records**: `PluginPackageView.connector.records`

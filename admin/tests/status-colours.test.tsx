@@ -3,14 +3,16 @@
 // measured from the CSS Tailwind 4 generates; the three stopped states stay apart in colour, icon
 // and word; the screens use them by meaning — a scheduled job paused by a person is grey and one
 // the server paused because its responsible person left is red, approval and acceptance are amber,
-// 「AI を止めています」 is grey (agent-stop.test.tsx).
+// 「AI を止めています」 is grey (agent-stop.test.tsx); a plugin problem the admin has to act on (the
+// connector off, the write-back fields not confirmed) is amber, by a person grey, on a failure red.
 import { render, screen } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 
 import { Badge, type BadgeVariant } from '@/components/ui/badge'
 import { Callout, type CalloutVariant } from '@/components/ui/callout'
 import { jobBadge } from '@/components/jobs/jobs-page'
-import type { JobView } from '@/lib/api'
+import type { JobView, PluginProblem } from '@/lib/api'
+import { connectionLineTone, PROBLEM_STOP, PROBLEM_TEXT, problemBadge } from '@/lib/integrations'
 import { cn } from '@/lib/utils'
 import { paint, token } from './token-paint'
 
@@ -93,4 +95,23 @@ describe('the screens use them by meaning', () => {
     expect(jobBadge(job({})).variant).toBe('success')
   })
 
+
+  it('a plugin problem: the admin has to act → amber 「止まっています」; a person stopped it → grey; a failure → red', async () => {
+    const needsAction: PluginProblem[] = ['connector-stopped', 'auto-not-acknowledged', 'no-connector', 'not-a-business']
+    for (const p of needsAction) expect(problemBadge(p), p).toEqual({ label: '止まっています', variant: 'warning' })
+    for (const p of ['stopped', 'key-stopped'] as const) expect(problemBadge(p), p).toEqual({ label: '止めています', variant: 'paused' })
+    for (const p of ['not-on-shelf', 'package-changed', 'no-key', 'key-destination', 'mapping-invalid', 'connector-missing', 'connector-mismatch'] as const) {
+      expect(problemBadge(p), p).toEqual({ label: '止まりました', variant: 'failed' })
+    }
+    // Every problem has its colour chosen (the Record), none falls back to an uncoloured outline but オフ.
+    expect(Object.keys(PROBLEM_STOP).sort()).toEqual(Object.keys(PROBLEM_TEXT).sort())
+    // What the badge paints: the warning set, light and dark (with the WarningCircle the page passes).
+    const { unmount } = render(<Badge variant={problemBadge('connector-stopped').variant}>止</Badge>)
+    await expectSet(screen.getByText('止').className, null, 'warning')
+    unmount()
+    // A business's 「〇〇 との行き来は止まっています」 line: amber text when the connector is off, plain otherwise.
+    const line = await paint(connectionLineTone('connector-stopped'))
+    for (const theme of ['light', 'dark'] as const) expect(line[theme].text, theme).toBe(token('warning-text')[theme])
+    expect(connectionLineTone('connector-missing')).toBe('text-muted-foreground')
+  }, 60_000)
 })

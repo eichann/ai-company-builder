@@ -592,6 +592,7 @@ export function AppShell() {
         isLoadingPreview={sync.isLoadingPreview}
         isSyncing={sync.isSyncing}
         syncTitle={autoSync.syncButtonTitle}
+        syncWaitsForYou={autoSync.syncWaitsForMember}
         sharedFolder={sharedFolder}
         onPreview={sync.handlePreview}
         onSync={() => handleSync()}

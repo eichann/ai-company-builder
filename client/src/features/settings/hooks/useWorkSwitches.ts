@@ -9,6 +9,8 @@ import { getWorkSwitches, setWorkSwitch } from '../api'
 export function useWorkSwitches(companyId: string) {
   const [switches, setSwitches] = useState<MyWorkSwitches | null>(null)
   const [error, setError] = useState<string | null>(null)
+  // A change refused because the company stopped that switch: something an admin can help with, not a failure.
+  const [companyOff, setCompanyOff] = useState(false)
   const [busy, setBusy] = useState<WorkSwitch | null>(null)
 
   const reload = useCallback(async () => {
@@ -33,11 +35,13 @@ export function useWorkSwitches(companyId: string) {
   const change = useCallback(async (which: WorkSwitch, on: boolean) => {
     setBusy(which)
     setError(null)
+    setCompanyOff(false)
     try {
       const r = await setWorkSwitch(companyId, which, on)
       if (r.success) setSwitches(r.switches)
       else {
         setError(r.error)
+        setCompanyOff(r.code === 'WORK_SWITCH_COMPANY_OFF')
         // The company may have stopped it since the section opened: show what holds now.
         await reload()
       }
@@ -48,5 +52,5 @@ export function useWorkSwitches(companyId: string) {
     }
   }, [companyId, reload])
 
-  return { loadRef, switches, error, busy, change }
+  return { loadRef, switches, error, companyOff, busy, change }
 }

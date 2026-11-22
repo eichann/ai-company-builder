@@ -115,7 +115,10 @@ live next to the task settings but in their own table: `records.md` "Features on
   `workSwitches:get` / `workSwitches:set` (`client/electron/features/work-switches/ipc.ts`,
   `client/shared/work-switches.ts`). The screen: 設定 → 自分の設定 (the settings open on it;
   `client/src/features/settings/components/MySwitchesSection.tsx`, `hooks/useWorkSwitches.ts`): a switch
-  the company does not allow is greyed out with 「会社の設定で止まっています」 and cannot be turned on;
+  the company does not allow is greyed out and cannot be turned on, with the amber notice
+  「会社の設定で止まっています（使いたいときは、管理者に相談してください）」 (the notice itself is not faded;
+  a change the server refuses with `WORK_SWITCH_COMPANY_OFF` is a warning callout, not an error:
+  design-system.md 「止まっている」の色);
   **a company with neither mail nor chat** (`companyHasMailOrChat`, `client/shared/work-switches.ts`:
   `channels` both false; absent = connected, as before) shows no 受信を読む switch, only the line
   「Gmail・Slack をつなぐと、返事の追いかけを AI がします」 (`CONNECT_MAIL_CHAT_TEXT`; owner decision
