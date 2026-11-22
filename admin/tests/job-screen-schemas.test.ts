@@ -1,8 +1,8 @@
 /**
  * What this console announces is what its form can show, edit and accept (stage 4b-0.5, owner memo 「段4b 設計メモ」 §5-1,
  * jobs.md "Shapes this build does not know"): `ADMIN_JOB_SCHEMAS`, never the shared parser's `JOB_SCHEMAS`. The shared
- * core is stood in here by one that already reads a later shape (`schema: 4`; it stood in as `schema: 3` until this console
- * announced 3 with its form, stage 4b-3): this console must still announce only its own shapes and refuse to build a form
+ * core is stood in here by one that already reads a later shape (`schema: 5`; it stood in as `schema: 3` until this console
+ * announced 3 with its form, stage 4b-3, and as `schema: 4` until it announced 4 with member proposals, PR B): this console must still announce only its own shapes and refuse to build a form
  * from the later one.
  *
  * Guards (each mutation-checked): the header from `ADMIN_JOB_SCHEMAS`; `editableDefinition` / `needsNewerScreen` asking
@@ -10,13 +10,13 @@
  */
 import { describe, expect, it, vi } from 'vitest'
 
-// A core of a later build: it reads schema 4 too.
+// A core of a later build: it reads schema 5 too.
 vi.mock('../../shared/core/jobs', async (importOriginal) => {
   const real = await importOriginal<typeof import('../../shared/core/jobs')>()
   return {
     ...real,
-    JOB_SCHEMAS: [1, 2, 3, 4],
-    knownJobDefinition: (d: unknown) => (d && typeof d === 'object' && [1, 2, 3, 4].includes((d as { schema?: number }).schema as number) ? d : null),
+    JOB_SCHEMAS: [1, 2, 3, 4, 5],
+    knownJobDefinition: (d: unknown) => (d && typeof d === 'object' && [1, 2, 3, 4, 5].includes((d as { schema?: number }).schema as number) ? d : null),
   }
 })
 
@@ -79,6 +79,29 @@ const SAMPLES: Record<number, unknown[]> = {
       },
     },
   ],
+  // PR B: a member's proposal (schema 4) as the server builds it (`proposalDefinition`) — the smallest (a meeting check, no
+  // title words, nothing written) and one with every choice (reads listed before the check's place, which is also among
+  // them; the server-made deliverable folder; mail drafts; the record reads; a shelf Skill; a time off the 5-minute choices'
+  // defaults).
+  4: [
+    {
+      ...base, schema: 4, name: '議事録まとめ（毎週月曜 09:00）', origin: 'member_proposal', trigger: { every: 'week', weekday: 'mon', at: '09:00', businessDaysBefore: 0 },
+      check: { kind: 'new_meetings', titleWords: [] },
+      run: { kind: 'procedure', procedure: { source: 'company_skill', skill: 'minutes-summary', fingerprint: '0'.repeat(40) } }, placement: 'a',
+      grant: { tools: ['records'], creates: ['task'], routes: ['GET /minutes/:recordId/text'], reads: { paths: [], calls: [] }, writes: { area: 'none' }, outbound: 'none', limits: { minutes: 15, runsPerDay: 1 } },
+    },
+    {
+      ...base, schema: 4, name: '週報（毎月 末日 08:30）', origin: 'member_proposal', missed: { policy: 'skip', expiresAfterMinutes: 90 },
+      trigger: { every: 'month', day: 'last', at: '08:30', ifHoliday: 'after' },
+      check: { kind: 'new_files', path: '営業部/議事録' },
+      run: { kind: 'procedure', procedure: { source: 'shelf_skill', item: 'item_weekly', skill: 'weekly-report', fingerprint: '0'.repeat(64) } }, placement: 'a',
+      grant: {
+        tools: ['records', 'files_read', 'files_write', 'outbound_draft'], creates: ['task'], routes: [...RECORD_ROUTES, ...OUTBOUND_ROUTES],
+        reads: { paths: ['営業部/週報', '営業部/議事録'], calls: [] }, writes: { area: 'deliverable', place: '営業部', folder: 'job-0123abcd' }, outbound: 'draft_only',
+        limits: { minutes: 7, runsPerDay: 1 },
+      },
+    },
+  ],
 }
 
 describe('this console announces only the shapes its form round-trips', () => {
@@ -105,12 +128,12 @@ describe('this console announces only the shapes its form round-trips', () => {
   it('with a core that reads a later shape, the requests still announce this console’s shapes only', async () => {
     const { calls } = mockApi({ 'GET /api/companies/c1/jobs': { body: ok({ stopped: false, canManage: true, jobs: [] }) } })
     await jobsApi.list('c1')
-    expect(calls.map((c) => c.headers['X-ACB-Job-Schemas'])).toEqual(['1,2,3'])
-    expect(ADMIN_JOB_SCHEMAS.join(',')).toBe('1,2,3')
+    expect(calls.map((c) => c.headers['X-ACB-Job-Schemas'])).toEqual(['1,2,3,4'])
+    expect(ADMIN_JOB_SCHEMAS.join(',')).toBe('1,2,3,4')
   })
 
   it('a definition of that later shape is never made into a form, whatever the core reads', () => {
-    const later = { ...(SAMPLES[3][0] as object), schema: 4, trigger: { kind: 'record', type: 'task', event: 'state', to: 'done', ai: true } } as unknown as JobDefinition
+    const later = { ...(SAMPLES[3][0] as object), schema: 5, trigger: { kind: 'record', type: 'task', event: 'state', to: 'done', ai: true } } as unknown as JobDefinition
     expect(editableDefinition({ definition: later })).toBeNull()
     expect(needsNewerScreen({ definition: later })).toBe(true)
     // Its own shapes still are.

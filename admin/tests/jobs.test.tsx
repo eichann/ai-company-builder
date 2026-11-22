@@ -409,7 +409,7 @@ describe('a definition of a shape this console does not read', () => {
     renderInCompany(<JobsRoute />)
     await screen.findByRole('listitem', { name: '週の報告' })
     const job = calls.find((c) => c.url.endsWith('/jobs'))!
-    expect(job.headers['X-ACB-Job-Schemas']).toBe('1,2,3')
+    expect(job.headers['X-ACB-Job-Schemas']).toBe('1,2,3,4')
   })
 
   it('the list says 「画面を新しくしてください」 instead of a time, offers no edit, and a trigger of an unknown shape never crashes it', async () => {
@@ -519,7 +519,7 @@ describe('an event job', () => {
     const query = calls.find((c) => c.url.endsWith('/records/query'))!
     expect(query.body).toMatchObject({ type: 'task', fields: { assignee: 'u_member' }, offset: 0 })
     const post = calls.find((c) => c.method === 'POST' && c.url.endsWith('/jobs'))!
-    expect(post.headers['X-ACB-Job-Schemas']).toBe('1,2,3')
+    expect(post.headers['X-ACB-Job-Schemas']).toBe('1,2,3,4')
     expect((post.body as { definition: JobDefinition }).definition).toMatchObject({ schema: 2, trigger: { startRecord: START, to: 'done', followMadeTask: true } })
   })
 
@@ -674,7 +674,7 @@ describe('an event run by the responsible person’s PC AI (schema 3)', () => {
     expect(within(dialog).queryByRole('button', { name: '保存' })).toBeNull()
   })
 
-  it('creating one on the page: the watched やること by name, the Skill, the done mark — schema 3 is sent, announced 1,2,3', async () => {
+  it('creating one on the page: the watched やること by name, the Skill, the done mark — schema 3 is sent, announced 1,2,3,4', async () => {
     const { calls } = mockApi({
       ...companyRoutes(),
       [`GET ${base}/jobs`]: { body: ok({ stopped: false, canManage: true, jobs: [] }) },
@@ -700,7 +700,7 @@ describe('an event run by the responsible person’s PC AI (schema 3)', () => {
     await userEvent.click(within(dialog).getByRole('button', { name: '保存' }))
     await waitFor(() => expect(calls.filter((c) => c.method === 'POST' && c.url.endsWith('/jobs'))).toHaveLength(1))
     const post = calls.find((c) => c.method === 'POST' && c.url.endsWith('/jobs'))!
-    expect(post.headers['X-ACB-Job-Schemas']).toBe('1,2,3')
+    expect(post.headers['X-ACB-Job-Schemas']).toBe('1,2,3,4')
     expect((post.body as { definition: JobDefinition }).definition).toMatchObject({
       schema: 3, placement: 'a', trigger: { startRecord: START, to: 'done' }, check: { kind: 'source_record', doneMark: 'file_linked' },
       missed: { expiresAfterMinutes: 1440 }, grant: { creates: ['task'] },

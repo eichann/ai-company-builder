@@ -941,15 +941,17 @@ Event-triggered jobs (4a) store `schema: 2`. Production may run 4-0 again after 
   §5-1): `ADMIN_JOB_SCHEMAS` (`admin/src/lib/jobs.ts`; also asked by `editableDefinition` / `needsNewerScreen`, so a
   form is never built from a shape the core reads but the form cannot) and `APP_JOB_SCHEMAS` (`client/shared/jobs.ts`;
   the 受け取る shows a definition only of such a shape, `appReadsJobDefinition`) — the admin `[1, 2, 3]` since 4b-3 (with the
-  form that makes and reads schema 3 back), the app `[1, 2, 3]`
+  form that makes and reads schema 3 back) and `[1, 2, 3, 4]` since member proposals' PR B (the form reads a proposal's job back
+  exactly and keeps it schema 4: "Member proposals" "The admin console (PR B)"), the app `[1, 2, 3]`
   since 4b-2 (its words for schema 3: `jobCheckText`'s `source_record`; shipped in the same build that runs such jobs and
   fails closed). The core reads `schema: 3` since 4b-1 (`JOB_SCHEMAS` `[1, 2, 3]`) and `schema: 4` since member proposals (`[1, 2, 3, 4]`; the
   screens do not announce 4 until their PRs B / C). The server's tests of "a shape this build does not know" stand in `schema: 5`
   since then (`schema: 4` before) (`job-schemas.test.ts`, `job-rollback-floor.test.ts` reads the frozen 4b-1 fixture's version one shape later;
   the floor build runs it as written). Tests
-  `admin/tests/job-screen-schemas.test.ts` (the core stood in by one reading `schema: 4` since 4b-3 — `schema: 3` before; every
-  announced schema round-trips through the form: for 3 the smallest grant and one with every choice, both done marks, a shelf
-  Skill, a kept `from`) and `client/tests/job-screen-schemas.test.ts` (every announced schema has its words). An app
+  `admin/tests/job-screen-schemas.test.ts` (the core stood in by one reading `schema: 5` since PR B — `schema: 4` since 4b-3,
+  `schema: 3` before; every announced schema round-trips through the form: for 3 the smallest grant and one with every choice,
+  both done marks, a shelf Skill, a kept `from`; for 4 a proposal as `proposalDefinition` builds it, the smallest and one with
+  every choice — reads listed before the check's place, the server's deliverable folder, a shelf Skill) and `client/tests/job-screen-schemas.test.ts` (every announced schema has its words). An app
   before it gets an event job without its definition and its 受け取る is refused — the same code, but the app (a request
   carrying `X-ACB-Client-Version`) is told 「…アプリを新しくしてください」 (`JOB_NEEDS_NEWER_APP`, `routes/jobs.ts`), a screen
   「画面を新しくしてください」.
@@ -1389,8 +1391,8 @@ timed renew of the same hold, moves it by milliseconds).
 A member asks their AI for a time job; the AI makes a **candidate** the server builds, the member presses 「管理者に出す」, an owner /
 admin approves it (or it is withdrawn / returned), and the proposer still presses 「受け取る」 ("Approving is not accepting"). Only
 existing Skills (Q1), every member (Q2), at most 5 waiting per member (Q4); "ask after 3 repeats" (Q3) is the app's (PR D). The
-admin console (PR B) and the app's card / tool (PR C) announce schema 4 in their own PRs; until then today's screens see such a job
-as one they cannot show (`JOB_NEEDS_NEWER_SCREEN`, also for the proposer's 受け取る in today's app).
+admin console announces schema 4 since PR B ("The admin console (PR B)" below); the app's card / tool (PR C) announces it in its own
+PR — until then the app sees such a job as one it cannot show (`JOB_NEEDS_NEWER_SCREEN`, also for the proposer's 受け取る).
 
 ```
 GET  /api/records-ai/job-proposals-ai/places?under=   the member's AI: the existing folders under `under` they read (+ write)
@@ -1463,8 +1465,9 @@ Code: `shared/core/job-proposals.ts` (ids `jc.` / `jp.` + 32 hex, limits, states
   again and the proposal: `submitted` moves to `approved` (the first approval), `approved` lets a later version be approved as any,
   `withdrawn` / `returned` refuse (`JOB_PROPOSAL_CLOSED`, also for an edit under way). **Its responsible person stays the
   proposer** (owner decision 2026-11-22): an edit naming anyone else is refused inside the write (409
-  `JOB_PROPOSAL_RESPONSIBLE_FIXED`, 「…責任者を変えられません…新しく定期の仕事を作ってください」). Approving still never accepts. Today's screens
-  announce `1,2,3`: their approve / edit of a schema-4 job is `JOB_NEEDS_NEWER_SCREEN` (the old-tab rule). `JobView.proposal`
+  `JOB_PROPOSAL_RESPONSIBLE_FIXED`, 「…責任者を変えられません…新しく定期の仕事を作ってください」). Approving still never accepts. A screen that
+  announces `1,2,3` (the app until PR C, an admin tab from before PR B) gets `JOB_NEEDS_NEWER_SCREEN` for its approve / edit of a
+  schema-4 job (the old-tab rule). `JobView.proposal`
   (additive): `id`, `proposerId` (stored), `submittedVersion`, `state`, `returnReason`.
 - **Notices** (第5版 10-5): `job_proposal` (recordless, on by default) to every owner / admin but the proposer (an owner / admin's
   own proposal is not told to themself) in the submit's transaction, **one row
@@ -1478,6 +1481,50 @@ Code: `shared/core/job-proposals.ts` (ids `jc.` / `jp.` + 32 hex, limits, states
   name by `HIDDEN_JOB_NAME`'s rule — and shown only to the proposer while the proposal is returned. A withdrawal tells nobody.
   **PR C's task** (owner decision 2026-11-22): the app's notice settings must not offer members the owner / admin-only kinds
   (`job_proposal`, and the existing `job_paused`).
+- **The admin console (PR B)** (`admin/src/components/jobs/job-proposals.tsx`, `admin/src/lib/job-proposals.ts`, the form in
+  `admin/src/lib/jobs.ts`; owner memo §7 B, §6 #9, §8-2, §8-4, §10-2). Everything only shows and asks; the server decides.
+  - **「届いた案」** (a card above the jobs, `GET /job-proposals?state=`, waiting first; a filter for 承認した / 差し戻した /
+    取り下げられた): each proposal names its proposer **from the stored `proposerId`** (never the job's responsible person), the
+    job's server-made name (the jobs list's; 「定期の仕事」 if absent), when, the state in an owner / admin's words
+    (`proposalStateText`: 確認を待っています, 承認しました, 出した人が取り下げました, 差し戻しました（理由：<the fixed reason's words>）) and
+    「中身を見る」: **the submitted version** (`submittedVersion`, not the newest) in the shared words through the job's detail — so
+    the server's hiding holds (`JOB_VERSION_HIDDEN`, `JOB_NEEDS_NEWER_SCREEN`); never a fingerprint — and, when an owner / admin
+    made a later version, that it exists. While `submitted`: 「承認する」 opens the job's own approval (the newest version with
+    its fingerprint; **never an acceptance**) and 「差し戻す」 one of `JOB_PROPOSAL_RETURN_REASONS` (radio buttons, **no text
+    box**; the press off until one is chosen; afterwards the jobs list is read again). A server without member proposals (404)
+    shows no card (none can arrive there). The bell's `job_proposal` is the app's; this card keeps every proposal (第5版).
+  - **Which hands made a version** (`proposalVersionText`): the approval says 「第N版：社員が出した版（…さんが出した内容のままです）」
+    for the submitted version and 「管理者が直した版（…さんが出したのは第M版です）」 for a later one (only owners / admins write
+    versions after it); the job's row 「…さんからの案（<state>）」.
+  - **Withdrawn / returned** (`proposalClosed`): the job is retired (no 承認する, 直す off), and the approval and the form — which
+    read the job again — say `PROPOSAL_CLOSED_TEXT` and send nothing, also when the list was read before the withdrawal.
+  - **Editing a proposal's job**: `formFromDefinition` marks it (`JobForm.proposal`); `definitionFromForm` keeps it schema 4
+    with `origin`, a time job run by the PC whatever 「いつ動くか」 / 「すること」 hold; the form offers neither of them nor the
+    responsible person (shown as 「…（案を出した人のままです。変えられません）」 — the server would refuse
+    `JOB_PROPOSAL_RESPONSIBLE_FIXED`). The edit sends `baseVersion` (the version the form was built from) **only for a
+    proposal's job** — a server before member proposals takes `{ definition }` only. `jobEditForm` gives schema 4 the form only
+    when it round-trips exactly (as schema 3; otherwise `JOB_FORM_CANNOT_EDIT`), and the grant keeps the edited version's order
+    of read places (`JobForm.readsOrder`, new places after them): a proposal lists its reads before the check's place and the
+    form put the check's place first, so without it an edit of the name alone would change the consent. The order rule applies
+    to every PC job's edit (versions the form made were in its order already).
+  - **The proposer's 受け取る is in the app**: an owner / admin who proposed it is not offered 「責任者として受け取る」 here; the row
+    and their approval say to accept in the app (decision on the safe side, owner memo §1 例1-5). Until PR C the app refuses it
+    (`JOB_NEEDS_NEWER_SCREEN`).
+  - **Refusals**: the new codes (`JOB_PROPOSAL_ONLY`, `JOB_PROPOSAL_SCHEMA`, `JOB_PROPOSAL_CLOSED`,
+    `JOB_PROPOSAL_RESPONSIBLE_FIXED`, `JOB_VERSION_NOT_LATEST`, `JOB_PROPOSAL_NOT_FOUND`, `JOB_PROPOSAL_DECIDED`) are in
+    `JOB_SENTENCE_CODES` (fixed Japanese, no name or place); a malformed return body is `JOB_REFUSED_GENERAL`.
+  - **Compatibility**: a server without #751 ignores the header's `4`, answers no `proposal` and 404 for `/job-proposals` (no
+    card); edits send `{ definition }` as before. On the rollback floor (6760eef3) a schema-4 version is `needsUpdate` (said as
+    「画面を新しくしてください」, no 直す / 承認する) and there is no card.
+  - Test: `admin/tests/job-proposals.test.tsx`, `admin/tests/job-screen-schemas.test.ts` (schema 4, header `1,2,3,4`),
+    `server/tests/integration/admin-contract.test.ts` (the list, a return's route, an edit with `baseVersion` and a stale one).
+    Mutation check: 30 guards removed or inverted one at a time (the announced `4`, schema 4's round-trip check, the reads'
+    order, the proposal mark read and kept, the shape kept whatever the form holds, the three fields not offered, `baseVersion`
+    sent and only for a proposal, closed in the form / the approval / its button / the helper, the row's 受け取る and its words,
+    the own approval's note, the stored proposer in the card and the row, the submitted version shown, the return's reason and
+    its disabled press, the 404, approve / return only while waiting, the new codes, the version label, the later-version note,
+    the return's words); each fails a test. Not alone: the approval's own `closed` check in `approve` (behind the disabled
+    button).
 - **The rollback floor** (6760eef3, knows `[1, 2]`): a schema-4 job is listed by name only, its versions without definition or
   fingerprints, approve / edit / accept refused (`JOB_SCHEMA_UNKNOWN`), no occurrence made, no `job_proposal` /
   `job_proposal_returned` shown (unknown kinds); it never reads the new tables. Coming back: nothing revived (a withdrawn proposal stays so, its job retired), nothing

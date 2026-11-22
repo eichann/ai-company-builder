@@ -8,7 +8,7 @@
  * parser check the rest.
  */
 import {
-  JOB_EVENT_PC_EXPIRES_DEFAULT_MINUTES, JOB_MINUTES_ROUTE, JOB_NAME_MAX, isRecordTrigger, knownJobDefinition, JOB_OUTBOUND_ROUTES, JOB_TASK_TITLE_MAX, JOB_TITLE_WORDS_MAX, parseJobDefinition,
+  JOB_EVENT_PC_EXPIRES_DEFAULT_MINUTES, JOB_MINUTES_ROUTE, JOB_NAME_MAX, JOB_PROPOSAL_ORIGIN, JOB_PROPOSAL_SCHEMA, isRecordTrigger, knownJobDefinition, JOB_OUTBOUND_ROUTES, JOB_TASK_TITLE_MAX, JOB_TITLE_WORDS_MAX, parseJobDefinition,
   type JobDefinition, type JobDefinitionResult, type JobDoneMark, type JobGrant, type JobWeekday,
 } from '../../../shared/core/jobs'
 import { BUILTIN_CONNECTORS, type DeliveryPlaceKind } from '../../../shared/core/builtin-connectors'
@@ -20,9 +20,11 @@ import { canonicalJson } from '../../../shared/core/fixed-content'
  * what every job request announces (`X-ACB-Job-Schemas`, `api.ts` `JOB_READS`) — never the shared parser's `JOB_SCHEMAS`:
  * a later build's core may read a shape before this form can show it, and then the server must not hand this console its
  * definition nor take an approval, acceptance or edit of it from here. Schema 3 (an event run by the responsible person's PC
- * AI) since stage 4b-3, with the form that makes and reads it back.
+ * AI) since stage 4b-3, with the form that makes and reads it back. Schema 4 (a job a member proposed from the AI chat, jobs.md
+ * "Member proposals") since PR B: the form reads it back exactly (`jobEditForm`) and keeps it schema 4 with its responsible
+ * person fixed; this console never makes a new one (only a member's proposal does).
  */
-export const ADMIN_JOB_SCHEMAS: readonly number[] = [1, 2, 3]
+export const ADMIN_JOB_SCHEMAS: readonly number[] = [1, 2, 3, 4]
 
 /** A definition this console's form reads: a shape the core knows and this console announces. */
 function adminReadsDefinition(d: unknown): JobDefinition | null {
@@ -33,6 +35,12 @@ function adminReadsDefinition(d: unknown): JobDefinition | null {
 export interface JobForm {
   name: string
   actingUser: string
+  /**
+   * A version of a job a member proposed (schema 4, jobs.md "Member proposals"): it stays schema 4 with its mark, a time
+   * job run by the responsible person's PC AI, and its responsible person is the proposer — the form offers neither the
+   * responsible person nor 「いつ動くか」 / 「すること」, and `definitionFromForm` keeps the shape whatever they hold.
+   */
+  proposal: boolean
   /** `task`: the server makes a やること (no AI). `pc`: a Skill runs on the responsible person's PC. */
   kind: 'task' | 'pc'
   /**
@@ -85,6 +93,12 @@ export interface JobForm {
   doneMark: JobDoneMark
   /** Other places the AI may read, one per line. */
   readPaths: string
+  /**
+   * The read places of the version being edited, in its order: the grant keeps that order for the places still chosen
+   * (new ones after them), so an edit that changes no place leaves the grant — and what the responsible person accepted —
+   * as it was (a member's proposal lists its reads before the check's place; the form puts the check's place first).
+   */
+  readsOrder: string[]
   /** May look up the member's own records (やること, 案件…). */
   readRecords: boolean
   /** May make mail drafts (sending is always a person's). */
@@ -129,10 +143,10 @@ const RECORD_READ_ROUTES = ['GET /my-turn', 'POST /query', 'GET /item/:recordId'
 
 export function emptyJobForm(actingUser: string): JobForm {
   return {
-    name: '', actingUser, kind: 'task', when: 'time', eventTo: 'done', eventFrom: '', startRecord: '', followMadeTask: true, every: 'week', hour: '09', minute: '00', businessDaysOnly: true, weekday: 'mon', businessDaysBefore: 0,
+    name: '', actingUser, proposal: false, kind: 'task', when: 'time', eventTo: 'done', eventFrom: '', startRecord: '', followMadeTask: true, every: 'week', hour: '09', minute: '00', businessDaysOnly: true, weekday: 'mon', businessDaysBefore: 0,
     monthDay: 1, ifHoliday: 'before', taskTitle: '', dueBusinessDays: 1, missedPolicy: 'latest_only', expiresAfterMinutes: 720,
     limits: NEW_JOB_LIMITS,
-    skillName: '', shelfItem: '', checkKind: 'new_files', checkPath: '', titleWords: '', doneMark: 'none', readPaths: '', readRecords: true, mailDrafts: false, writePlace: '', writeFolder: '',
+    skillName: '', shelfItem: '', checkKind: 'new_files', checkPath: '', titleWords: '', doneMark: 'none', readPaths: '', readsOrder: [], readRecords: true, mailDrafts: false, writePlace: '', writeFolder: '',
     deliverTo: '',
   }
 }
@@ -191,6 +205,7 @@ function pcFieldsOf(d: JobDefinition, checkPath: string): Partial<JobForm> {
     kind: 'pc',
     skillName: p.source === 'company_skill' ? p.skill : '', shelfItem: p.source === 'shelf_skill' ? p.item : '',
     readPaths: d.grant.reads.paths.filter(x => x !== checkPath).join('\n'),
+    readsOrder: d.grant.reads.paths,
     readRecords: RECORD_READ_ROUTES.some(r => d.grant.routes.includes(r)),
     mailDrafts: d.grant.outbound === 'draft_only',
     writePlace: d.grant.writes.area === 'deliverable' ? d.grant.writes.place : '',
@@ -201,7 +216,7 @@ function pcFieldsOf(d: JobDefinition, checkPath: string): Partial<JobForm> {
 
 /** The form for a version. */
 export function formFromDefinition(d: JobDefinition): JobForm {
-  const base = emptyJobForm(d.actingUser)
+  const base = { ...emptyJobForm(d.actingUser), proposal: d.schema === JOB_PROPOSAL_SCHEMA }
   if (isRecordTrigger(d.trigger)) {
     // An event job: the server's operation (stage 4a) or the responsible person's PC AI (stage 4b-3, schema 3).
     return {
@@ -241,7 +256,9 @@ export function formFromDefinition(d: JobDefinition): JobForm {
  */
 function pcGrant(f: JobForm, event: boolean): JobGrant {
   const checkPaths = !event && f.checkKind === 'new_files' ? lines(f.checkPath) : []
-  const reads = [...new Set([...checkPaths, ...lines(f.readPaths)])]
+  const chosen = [...new Set([...checkPaths, ...lines(f.readPaths)])]
+  // The edited version's order for the places still chosen, then the new ones (`readsOrder`).
+  const reads = [...f.readsOrder.filter(p => chosen.includes(p)), ...chosen.filter(p => !f.readsOrder.includes(p))]
   const writes: JobGrant['writes'] = f.writeFolder.trim() ? { area: 'deliverable', place: f.writePlace.normalize('NFC').trim(), folder: f.writeFolder.trim() } : { area: 'none' }
   const tools = ['records', ...(reads.length > 0 ? ['files_read'] : []), ...(writes.area === 'deliverable' ? ['files_write'] : []), ...(f.mailDrafts ? ['outbound_draft'] : [])]
   const routes = [
@@ -268,7 +285,9 @@ function procedureOf(f: JobForm, shelfSkillName?: string) {
  * The definition the form says, checked by the shared parser (the server checks it again). A PC job's Skill
  * goes with a placeholder fingerprint: the server reads the pinned one (and a shelf Skill's name) itself.
  */
-export function definitionFromForm(f: JobForm, shelfSkillName?: string): JobDefinitionResult {
+export function definitionFromForm(form: JobForm, shelfSkillName?: string): JobDefinitionResult {
+  // A member's proposal stays what it is: a time job run by the responsible person's PC AI (schema 4, below).
+  const f: JobForm = form.proposal ? { ...form, when: 'time', kind: 'pc' } : form
   if (f.when === 'event') {
     if (!f.startRecord) return { ok: false, problems: ['trigger.startRecord.REQUIRED'] }
     const event = {
@@ -320,6 +339,8 @@ export function definitionFromForm(f: JobForm, shelfSkillName?: string): JobDefi
   }
   return parseJobDefinition({
     ...common,
+    // A member's proposal keeps its schema and mark on every version (the server refuses anything else).
+    ...(f.proposal ? { schema: JOB_PROPOSAL_SCHEMA, origin: JOB_PROPOSAL_ORIGIN } : {}),
     check: f.checkKind === 'new_files' ? { kind: 'new_files', path: f.checkPath.normalize('NFC').trim() } : { kind: 'new_meetings', titleWords: words(f.titleWords) },
     run: { kind: 'procedure', procedure: procedureOf(f, shelfSkillName) },
     placement: 'a',
@@ -335,11 +356,12 @@ export const JOB_FORM_CANNOT_EDIT = 'この版は、管理画面の入力欄で�
  * plain choices, so a schema-3 grant made otherwise (e.g. one record route instead of the four 「やることや記録を読む」 gives)
  * would come back **wider** from `definitionFromForm` — what the responsible person accepted widened silently. Schema 3
  * is given the form only when it round-trips exactly (the pinned Skill's fingerprint and a shelf Skill's name are the
- * server's, so they are left out of the comparison). Schemas 1 and 2 keep their behaviour.
+ * server's, so they are left out of the comparison). So is schema 4 (a member's proposal, PR B): what the member submitted
+ * is never widened by an owner / admin's edit of something else. Schemas 1 and 2 keep their behaviour.
  */
 export function jobEditForm(d: JobDefinition): JobForm | null {
   const form = formFromDefinition(d)
-  if (d.schema !== 3) return form
+  if (d.schema !== 3 && d.schema !== JOB_PROPOSAL_SCHEMA) return form
   const shelfName = d.run.kind === 'procedure' && d.run.procedure.source === 'shelf_skill' ? d.run.procedure.skill : undefined
   const back = definitionFromForm(form, shelfName)
   const pinless = (x: JobDefinition) => canonicalJson(x.run.kind === 'procedure' ? { ...x, run: { ...x.run, procedure: { ...x.run.procedure, fingerprint: '' } } } : x)

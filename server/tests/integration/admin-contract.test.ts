@@ -310,6 +310,7 @@ beforeAll(async () => {
   app.route('/api/companies/:companyId', (await import('../../src/routes/minutes')).minutesRoute)
   app.route('/api/companies/:companyId', (await import('../../src/routes/records')).recordsRoute)
   app.route('/api/companies/:companyId', (await import('../../src/routes/jobs')).jobsRoute)
+  app.route('/api/companies/:companyId', (await import('../../src/routes/job-proposals')).jobProposalsRoute)
   app.route('/api', invitationsRoute)
 
   // A push rejection for the overview / history.
@@ -853,6 +854,11 @@ describe('the admin console\'s requests do what the admin means on the server', 
     // An event job's first watched やること (stage 4a): the records query, answered in its shape.
     const choices = await A.jobsApi.startChoices(CO, USERS.owner)
     expect(Array.isArray(choices.records)).toBe(true)
+    // Member proposals (PR B): an edit naming the version it was made from, a stale one refused; the list and a return's route.
+    expect(await A.jobsApi.update(CO, made.id, { ...CONTRACT_JOB, name: '契約の定期 3' } as Parameters<typeof A.jobsApi.update>[2], 2)).toMatchObject({ changed: true, latestVersion: 3 })
+    await expect(A.jobsApi.update(CO, made.id, { ...CONTRACT_JOB, name: '契約の定期 4' } as Parameters<typeof A.jobsApi.update>[2], 2)).rejects.toMatchObject({ code: 'JOB_VERSION_NOT_LATEST' })
+    expect((await A.jobProposalsApi.list(CO, 'submitted')).proposals).toEqual([])
+    await expect(A.jobProposalsApi.returnProposal(CO, 'jp.' + '0'.repeat(32), 'OTHER')).rejects.toMatchObject({ status: 404, code: 'JOB_PROPOSAL_NOT_FOUND' })
   })
 
   it('an invitation gets the role and expiry the admin chose', async () => {

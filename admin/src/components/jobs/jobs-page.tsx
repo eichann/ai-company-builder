@@ -24,6 +24,8 @@ import { JOB_NEEDS_NEWER_SCREEN, JOB_SYSTEM_PAUSE_REASONS, isKnownJobTrigger, is
 import { STOP_LOOK } from '../../../../shared/design-tokens/stop-meaning'
 import { JobAcceptDialog, JobApproveDialog, JobFormDialog } from './job-dialogs'
 import { JobOccurrences } from './job-occurrences'
+import { JobProposals } from './job-proposals'
+import { proposalStateText } from '@/lib/job-proposals'
 
 export const JOBS_INTRO =
   '決まった時間か、見張っているやることが終わったときなどに動く仕事です。やることを作るだけの仕事（例：毎週月曜 9:00 に「週の報告を書く」。AI は使いません）と、責任者の PC の AI が会社の Skill で作業して、終わったらやることを作る仕事があります。作ったあと、オーナーか管理者が承認し、責任者が内容を確かめて「受け取る」を押すと動き始めます。'
@@ -121,6 +123,10 @@ export function JobsPage() {
           )}
         </Card>
       )}
+      {/* 「届いた案」 (jobs.md "Member proposals"): what members sent from the AI chat; approving opens the job's own approval. */}
+      {jobs.data && members.data && (
+        <JobProposals jobs={list} members={memberList} onApprove={(job) => setApproving(job)} onChanged={() => jobs.reload()} />
+      )}
       {jobs.error && !jobs.data ? (
         <ErrorState error={jobs.error} onRetry={jobs.reload} />
       ) : jobs.loading || !jobs.data ? (
@@ -152,6 +158,12 @@ export function JobsPage() {
                           : job.trigger === undefined && <>　{JOB_VERSION_HIDDEN}</>}
                       </p>
                       <p className="text-sm">{jobRunsText(job.waiting, job.pausedReason, job.placement)}</p>
+                      {/* A job from a member's proposal: the stored proposer (never the responsible person read as one) and its state. */}
+                      {job.proposal && (
+                        <p className="text-small text-muted-foreground" aria-label="案">
+                          {personName(byId.get(job.proposal.proposerId))}さんからの案（{proposalStateText(job.proposal)}）
+                        </p>
+                      )}
                       {/* An event job's chain that stopped (owner decision ①): its cause as the server words it for this viewer. */}
                       {job.chainStopped && (
                         <p role="status" className="text-sm text-destructive">
@@ -162,6 +174,8 @@ export function JobsPage() {
                         <p role="status" className="text-sm">
                           {job.deliverTo
                             ? 'あなたが責任者です。あなたのアプリの「設定」→「仕事」→「定期の仕事」で置き先を選んで受け取るまで動きません。'
+                            : job.proposal
+                            ? 'あなたが出した案です。あなたのアプリの「設定」→「仕事」→「定期の仕事」で受け取るまで動きません。'
                             : 'あなたが責任者です。内容を確かめて「責任者として受け取る」を押すまで動きません。'}
                         </p>
                       )}
@@ -184,7 +198,8 @@ export function JobsPage() {
                         <Button size="sm" onClick={() => setApproving(job)}>承認する</Button>
                       )}
                       {/* The viewer is its responsible person and has not accepted it (the server's `you`): their own press. */}
-                      {job.you?.mustAccept === true && !job.deliverTo && (
+                      {/* Not for a member's proposal: its proposer accepts in the app (jobs.md "Member proposals"). */}
+                      {job.you?.mustAccept === true && !job.deliverTo && !job.proposal && (
                         <Button size="sm" variant="secondary" onClick={() => setAccepting(job)}>責任者として受け取る</Button>
                       )}
                       <Button variant="outline" size="sm" onClick={() => setEditing({ job })} disabled={!members.data || job.state === 'retired' || job.needsUpdate === true}>直す</Button>
