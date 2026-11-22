@@ -821,8 +821,12 @@ every start stay. 6b connects every path but ships **off**; 6c turns it on for t
   `--safe-mode`).
 - **Checked on every start** (`operatorInitProblem`, `readOperatorMessage`; any failure SIGKILLs and ends
   the request): one `system`/`init` (none, a second one, or anything but another `system` message before
-  it → `init-mismatch`) with `tools` and `mcp_servers` empty arrays, `slash_commands` / `skills` /
-  `plugins` / `agents` empty or absent, `cwd` the app's folder, `permissionMode: dontAsk`, the model asked
+  it → `init-mismatch`) with `tools` and `mcp_servers` empty arrays, `slash_commands` / `skills` empty
+  or absent, `plugins` absent or only plugins built into the CLI binary (exactly `{ name, path:
+  'builtin', source: '<name>@builtin' }`) and `agents` absent or only the CLI's own
+  (`BROWSER_OPERATOR_BUILTIN_AGENTS`: `claude`, `Explore`, `general-purpose`, `Plan` — unusable, the
+  operator has no tool to start one) — owner decision 2026-11-22 (what Anthropic ships is trusted, as the
+  CLI itself; a member's or a marketplace's plugin and a member's own agent still stop the start), `cwd` the app's folder, `permissionMode: dontAsk`, the model asked
   for (or it without `[1m]`); any `tool_use` / `server_tool_use` → `tool-asked`; a line over 2 MB, a stream
   over 4 MB or a line that is not JSON → `bad-answer`; an error result → `not-signed-in` (login words) or
   `bad-answer`; no answer in time → `timeout`. A managed hook's own system message is not a reason to
@@ -941,8 +945,7 @@ every start stay. 6b connects every path but ships **off**; 6c turns it on for t
   `slash_commands`, `skills` empty, the model named without `[1m]` — but `plugins` lists the four plugins
   built into the CLI (`{ name, path: 'builtin', source: '<name>@builtin' }`) and `agents` the CLI's own
   (`claude`, `Explore`, `general-purpose`, `Plan`), under every flag: today every start there stops with
-  `init-mismatch`. Accepting exactly those (built-in plugins only, the built-in agents only — unusable
-  without a tool) is a loosening of this guard and waits for the owner (not in this PR).
+  `init-mismatch` — hence the built-in plugins and agents accepted above (owner decision 2026-11-22).
 
 Tests: `client/tests/browser-operator.test.ts` (a fake `claude` through the real `/bin/sh` wrapper: the
 exact arguments and the final child environment with secrets in the app's environment, a fresh folder
