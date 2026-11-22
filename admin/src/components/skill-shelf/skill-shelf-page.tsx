@@ -216,7 +216,7 @@ function VersionsDialog({
 
   return (
     <Dialog open={item !== null} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-lg">
+      <DialogContent>
         <DialogHeader>
           <DialogTitle>{item ? `「${itemLabel(item)}」のこれまでの版` : ''}</DialogTitle>
           <DialogDescription>前の版に戻すと、みんなのアプリにもその版が届きます。</DialogDescription>

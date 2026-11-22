@@ -205,7 +205,7 @@ function RequestFilesDialog({ companyId, request, onOpenChange, onStale }: {
   const files = [...(content.data?.files ?? [])].sort((a, b) => (a.path === 'SKILL.md' ? -1 : b.path === 'SKILL.md' ? 1 : a.path.localeCompare(b.path)))
   return (
     <Dialog open={request !== null} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-2xl">
+      <DialogContent size="lg">
         <DialogHeader>
           <DialogTitle>{request ? `「${request.name}」の中身` : ''}</DialogTitle>
           <DialogDescription>{request ? `${personOf(request.requestedBy)}さんが送った Skill のファイルです。` : ''}</DialogDescription>
@@ -251,7 +251,7 @@ function DeclineDialog({ request, onOpenChange, onDecline }: { request: ShelfReq
         onOpenChange(o)
       }}
     >
-      <DialogContent className="sm:max-w-md">
+      <DialogContent>
         <DialogHeader>
           <DialogTitle>{request ? `「${request.name}」のお願いを見送りますか？` : ''}</DialogTitle>
           <DialogDescription>{request ? `${personOf(request.requestedBy)}さんのアプリに「見送られた」と表示されます。理由を書くと、一緒に伝わります。` : ''}</DialogDescription>

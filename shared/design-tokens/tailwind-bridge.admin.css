@@ -170,6 +170,8 @@
   --color-disabled-border: var(--color-disabled-border);
   --color-disabled-icon: var(--color-disabled-icon);
   --color-private-text: var(--color-private-text);
+  --color-private-bg: var(--color-private-bg);
+  --color-private-border: var(--color-private-border);
   --color-toast: var(--color-toast);
   --color-on-toast: var(--color-on-toast);
   --color-thing-task: var(--color-thing-task);

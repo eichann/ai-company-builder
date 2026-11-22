@@ -140,7 +140,7 @@ export default function SettingsPage() {
       </div>
 
       <Dialog open={renaming} onOpenChange={setRenaming}>
-        <DialogContent className="sm:max-w-md">
+        <DialogContent>
           {renaming && c && (
             <RenameForm
               current={c.name}

@@ -25,6 +25,7 @@ import {
 } from '../../../../shared/private-folder-ui'
 import { MANAGERS_MAY_CHANGE_VIEWERS } from '../../../../shared/private-folder-help'
 import { PrivateFolderHelpLink, PrivateFolderHelpPanel } from './PrivateFolderHelp'
+import { Dialog, DialogTitle } from '../../../shared/ui/Dialog'
 // The server's department folder-name rule (private folder names follow it too).
 import { isValidFolderName } from '../../../../../shared/core/names'
 import { createPrivateFolder, getPrivateFolderCreateContext } from '../api'
@@ -76,7 +77,6 @@ function NewFolderForm({ companyId, meId, parentRel, placeLabel, insidePrivate, 
   const [outdated, setOutdated] = useState<{ members: string[]; canForce: boolean } | null>(null)
   const [helpOpen, setHelpOpen] = useState(false)
 
-  useEffect(() => { setTimeout(() => inputRef.current?.focus(), 30) }, [])
 
   // Who may create where, the members and the department's managers — only
   // needed for 非公開, so not inside a private folder.
@@ -163,21 +163,15 @@ function NewFolderForm({ companyId, meId, parentRel, placeLabel, insidePrivate, 
   }
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-zinc-900/30 p-6 backdrop-blur-[1px] dark:bg-black/50"
-      onMouseDown={e => { if (e.target === e.currentTarget && !busy) onCancel() }}
-      onKeyDown={e => { if (e.key === 'Escape' && !busy) { e.stopPropagation(); onCancel() } }}
-    >
+    <>
+    <Dialog onClose={onCancel} labelledBy={titleId} dismissible={!busy} padded={false} className="flex max-h-[calc(100vh-3rem)] flex-col overflow-hidden">
       <form
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby={titleId}
         onSubmit={e => { e.preventDefault(); void submit() }}
-        className="flex max-h-[calc(100vh-3rem)] w-full max-w-[480px] flex-col overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-xl dark:border-white/10 dark:bg-zinc-900"
+        className="flex min-h-0 flex-1 flex-col"
       >
         <div className="flex-1 space-y-4 overflow-y-auto overflow-x-hidden p-5">
           <div>
-            <h3 id={titleId} className="text-[15px] font-semibold text-zinc-900 dark:text-zinc-50">新しいフォルダ</h3>
+            <DialogTitle id={titleId}>新しいフォルダ</DialogTitle>
             <p className="mt-1 text-[12px] text-zinc-500 dark:text-zinc-400">
               場所：<span className="text-zinc-700 dark:text-zinc-300">{placeLabel}</span>
             </p>
@@ -188,6 +182,7 @@ function NewFolderForm({ companyId, meId, parentRel, placeLabel, insidePrivate, 
             <input
               id={nameId}
               ref={inputRef}
+              autoFocus
               value={name}
               onChange={e => { setName(e.target.value); setNameError(null) }}
               placeholder="フォルダ名"
@@ -306,7 +301,7 @@ function NewFolderForm({ companyId, meId, parentRel, placeLabel, insidePrivate, 
           {error && <Callout tone={error === OFFLINE_REASON ? 'offline' : 'danger'}>{error}</Callout>}
         </div>
 
-        <div className="flex justify-end gap-2 border-t border-zinc-100 px-5 py-3 dark:border-white/[0.06]">
+        <div className="flex justify-end gap-2 border-t border-[color:var(--color-border)] px-5 py-3">
           <Button onClick={onCancel} disabled={busy}>キャンセル</Button>
           <Button type="submit" variant="primary" disabled={!canSubmit}>
             {busy ? <SpinnerGap size={14} className="animate-spin" /> : isPrivate ? <LockSimple size={14} weight="fill" /> : null}
@@ -314,8 +309,9 @@ function NewFolderForm({ companyId, meId, parentRel, placeLabel, insidePrivate, 
           </Button>
         </div>
       </form>
-      {helpOpen && <PrivateFolderHelpPanel onClose={() => setHelpOpen(false)} />}
-    </div>
+    </Dialog>
+    {helpOpen && <PrivateFolderHelpPanel onClose={() => setHelpOpen(false)} />}
+    </>
   )
 }
 

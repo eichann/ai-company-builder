@@ -69,7 +69,7 @@ export const SlashCommandDropdown = memo(function SlashCommandDropdown({
               className={`
                 w-full flex items-center gap-3 px-3 py-2 text-left transition-colors
                 ${index === selectedIndex
-                  ? 'bg-accent/10 dark:bg-accent/15'
+                  ? 'bg-selected-bg'
                   : 'hover:bg-gray-50 dark:hover:bg-white/[0.03]'
                 }
               `}

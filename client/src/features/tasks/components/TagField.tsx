@@ -90,7 +90,7 @@ export function TagField({ companyId, title, tags, tagsInUse, canEdit, busy, onS
   }
 
   return (
-    <div ref={setBox} className={`relative rounded-lg bg-gray-50 px-3 py-2 dark:bg-zinc-800/60 ${open ? 'ring-1 ring-accent/40' : ''}`}>
+    <div ref={setBox} className={`relative rounded-lg bg-gray-50 px-3 py-2 dark:bg-zinc-800/60 ${open ? 'ring-1 ring-focus-ring' : ''}`}>
       <div className="flex items-center gap-1 text-[11px] text-gray-500"><Hash size={11} />タグ</div>
       <div className={`mt-0.5 flex min-h-[24px] flex-wrap items-center gap-1 ${canEdit ? 'cursor-text' : ''}`}
         onClick={e => { if (e.target === e.currentTarget) start() }}>
@@ -107,7 +107,7 @@ export function TagField({ companyId, title, tags, tagsInUse, canEdit, busy, onS
         {canEdit && (
           <button type="button" disabled={busy} onClick={() => (open ? close() : start())} aria-expanded={open} aria-haspopup="dialog"
             aria-label={`タグを足す・外す（いま：${tags.length ? tags.join('、') : 'なし'}）`}
-            className="inline-flex h-[22px] items-center gap-0.5 rounded-md px-1.5 text-[12px] border border-dashed border-gray-300 text-gray-500 hover:border-accent/60 hover:text-accent disabled:opacity-50 dark:border-zinc-600 dark:text-zinc-400">
+            className="inline-flex h-[22px] items-center gap-0.5 rounded-md px-1.5 text-[12px] border border-dashed border-gray-300 text-gray-500 hover:border-selected-border hover:text-link disabled:opacity-50 dark:border-zinc-600 dark:text-zinc-400">
             <Plus size={10} weight="bold" />{tags.length === 0 && 'タグ'}
           </button>
         )}
@@ -141,18 +141,18 @@ export function TagField({ companyId, title, tags, tagsInUse, canEdit, busy, onS
                 onMouseEnter={() => setIndex(i)} onMouseDown={e => e.preventDefault()} onClick={() => { if (!busy) choose(r) }}
                 className={`flex cursor-pointer items-center gap-2 rounded-md px-2 py-1 ${i === active ? 'bg-gray-100 dark:bg-zinc-700' : ''}`}>
                 {r.kind === 'new'
-                  ? <><Plus size={12} className="shrink-0 text-accent" /><span className="truncate">「{r.tag}」を作る</span></>
-                  : <><span className="flex w-3 shrink-0 justify-center text-accent">{r.selected && <Check size={12} weight="bold" />}</span>
+                  ? <><Plus size={12} className="shrink-0 text-link" /><span className="truncate">「{r.tag}」を作る</span></>
+                  : <><span className="flex w-3 shrink-0 justify-center text-selected-icon">{r.selected && <Check size={12} weight="bold" />}</span>
                     <span className="truncate"><span className="text-gray-400 dark:text-zinc-500">#</span>{r.tag}</span></>}
               </li>
             ))}
           </ul>
           {(asking || shownSuggestions.length > 0) && (
             <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 border-t border-gray-100 px-2.5 py-1.5 text-[11.5px] text-gray-500 dark:border-zinc-700 dark:text-zinc-400">
-              <Sparkle size={11} weight="fill" className="shrink-0 text-accent/80" />
+              <Sparkle size={11} weight="fill" className="shrink-0 text-ai-icon" />
               {asking ? '合いそうなタグを探しています…' : <>合いそうなタグ：{shownSuggestions.map(t => (
                 <button key={t} type="button" disabled={busy} onClick={() => void add(t)} aria-label={`#${t} を付ける（AI の候補）`}
-                  className="rounded px-0.5 text-accent hover:bg-accent/10 disabled:opacity-50">#{t}</button>
+                  className="rounded px-0.5 text-link hover:bg-selected-bg disabled:opacity-50">#{t}</button>
               ))}</>}
             </div>
           )}
@@ -160,7 +160,7 @@ export function TagField({ companyId, title, tags, tagsInUse, canEdit, busy, onS
             <p role="note" className="border-t border-gray-100 px-2.5 py-1.5 text-[11.5px] text-gray-500 dark:border-zinc-700 dark:text-zinc-400">
               『{named.title}』は{named.typeLabel}の名前です。
               <button type="button" disabled={busy} onClick={() => void onLinkBundle?.(named).then(f => { if (f) setError(f); else setTyped('') })}
-                className="text-accent hover:underline disabled:opacity-50">{named.typeLabel}につなぐ</button>
+                className="text-link hover:underline disabled:opacity-50">{named.typeLabel}につなぐ</button>
             </p>
           )}
           {error && <p role="alert" className="border-t border-gray-100 px-2.5 py-1.5 text-[11.5px] text-red-600 dark:border-zinc-700 dark:text-red-400">{error}</p>}

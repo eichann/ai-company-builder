@@ -74,7 +74,7 @@ export function TaskRow({ item, now, active, ai, busy, onOpen, onFinish, onAccep
   return (
     <div
       data-testid="task-row"
-      className={`group flex items-start gap-2 rounded-lg px-2.5 py-1.5 ${over ? 'outline-dashed outline-2 outline-accent' : ''} ${active ? 'bg-accent/10 dark:bg-accent/20' : 'hover:bg-gray-100 dark:hover:bg-zinc-800'}`}
+      className={`group flex items-start gap-2 rounded-lg px-2.5 py-1.5 ${over ? 'outline-dashed outline-2 outline-primary' : ''} ${active ? 'bg-selected-bg' : 'hover:bg-gray-100 dark:hover:bg-zinc-800'}`}
       // The row itself can be dragged onto a record's 「つながっているもの」 (or another row) to link it.
       draggable
       onDragStart={e => startRecordDrag(e.dataTransfer, { id: item.id, title: item.title, word: item.typeLabel })}
@@ -89,15 +89,15 @@ export function TaskRow({ item, now, active, ai, busy, onOpen, onFinish, onAccep
       onDrop={onDrop ? e => { setOver(false); if (onDrop(e)) e.preventDefault() } : undefined}
     >
       <span className="mt-[2px] shrink-0">
-        {item.turn === 'ai' && !done ? (ai?.state === 'running' ? <CircleNotch size={15} className="animate-spin text-accent" aria-label="AI が進めています" />
+        {item.turn === 'ai' && !done ? (ai?.state === 'running' ? <CircleNotch size={15} className="animate-spin text-ai-icon" aria-label="AI が進めています" />
           : ai?.state === 'failed' ? <WarningOctagon size={15} weight="fill" className={STOP_ICON[AI_STOP.failed]} aria-label="AI が止まりました" />
           : ai?.state === 'not-allowed' ? <Warning size={15} className={STOP_ICON[AI_STOP['not-allowed']]} aria-label={AI_STATE_WORDS['not-allowed']} />
-            : <Robot size={15} className="text-accent" aria-label="AI の番" />)
+            : <Robot size={15} className="text-ai-icon" aria-label="AI の番" />)
           : onFinish ? (
             <button type="button" disabled={busy} onClick={onFinish} title={boxWord} aria-label={`「${item.title}」を${boxWord}`}
               className={`flex h-[15px] w-[15px] items-center justify-center rounded-[4px] border disabled:opacity-40 ${ticked
                 ? 'border-emerald-500 bg-emerald-500 text-white hover:bg-emerald-600'
-                : 'border-gray-400 hover:border-accent hover:bg-accent/10 dark:border-zinc-500'}`}>
+                : 'border-gray-400 hover:border-primary hover:bg-selected-bg dark:border-zinc-500'}`}>
               {ticked && <Check size={10} weight="bold" />}
             </button>
           ) : item.type === 'task' && item.state === 'review' && !done ? (
@@ -122,12 +122,12 @@ export function TaskRow({ item, now, active, ai, busy, onOpen, onFinish, onAccep
             <span role="link" tabIndex={0} title={`${item.bundle.typeLabel ?? ''}を開く`} data-bundle-chip
               onClick={e => { e.stopPropagation(); onOpen(item.bundle!.id) }}
               onKeyDown={e => { if (e.key === 'Enter') { e.stopPropagation(); onOpen(item.bundle!.id) } }}
-              className="inline-flex max-w-[160px] items-center gap-0.5 hover:text-accent">
+              className="inline-flex max-w-[160px] items-center gap-0.5 hover:text-link">
               <ThingIcon kind="bundle" typeLabel={item.bundle.typeLabel} label={item.bundle.typeLabel} size={10} /><span className="truncate">{item.bundle.title}</span>
             </span>
           )}
           {item.due && !done && (
-            <span className={`inline-flex items-center gap-0.5 ${when === 'overdue' ? 'text-red-600 dark:text-red-400 font-medium' : when === 'today' ? 'text-accent' : ''}`}>
+            <span className={`inline-flex items-center gap-0.5 ${when === 'overdue' ? 'text-red-600 dark:text-red-400 font-medium' : when === 'today' ? 'text-link' : ''}`}>
               <Clock size={10} />{when === 'overdue' ? '期限切れ ' : '期限 '}{dueText(item.due, now)}
             </span>
           )}
@@ -135,26 +135,26 @@ export function TaskRow({ item, now, active, ai, busy, onOpen, onFinish, onAccep
         </span>
       </button>
       <span className="flex shrink-0 flex-col items-end gap-0.5">
-        {step && <button type="button" onClick={() => onOpen(item.id)} className="rounded-md border border-gray-300 px-1.5 py-px text-[11px] text-gray-700 hover:border-accent hover:text-accent dark:border-zinc-600 dark:text-zinc-200">{step}</button>}
+        {step && <button type="button" onClick={() => onOpen(item.id)} className="rounded-md border border-gray-300 px-1.5 py-px text-[11px] text-gray-700 hover:border-primary hover:text-link dark:border-zinc-600 dark:text-zinc-200">{step}</button>}
         {item.tags.length > 0 && (
           <span className="flex flex-wrap justify-end gap-0.5">{item.tags.slice(0, 3).map(t => <span key={t} className={`${CHIP} bg-gray-100 dark:bg-zinc-800 text-gray-600 dark:text-zinc-300`}>#{t}</span>)}</span>
         )}
         {onConsult && (
           <button type="button" onClick={onConsult} aria-label="相談する" title="このやることについて相談する"
-            className="rounded p-0.5 text-gray-400 opacity-0 hover:text-accent focus:opacity-100 group-hover:opacity-100">
+            className="rounded p-0.5 text-gray-400 opacity-0 hover:text-link focus:opacity-100 group-hover:opacity-100">
             <ChatCircleDots size={14} />
           </button>
         )}
         {onAccept && <button type="button" disabled={busy} onClick={onAccept} className={`rounded px-2 py-0.5 text-[11px] ${PRIMARY_ACTION}`}>{NEXT_STEP.accept}</button>}
         {extra.length > 0 && (
           <span className="flex flex-wrap justify-end gap-1">
-            {extra.map(x => <button key={x.label} type="button" disabled={busy} onClick={x.run} className="rounded border border-accent/40 px-1.5 text-[10.5px] text-accent hover:bg-accent/10 disabled:opacity-40">{x.label}</button>)}
+            {extra.map(x => <button key={x.label} type="button" disabled={busy} onClick={x.run} className="rounded border border-selected-border px-1.5 text-[10.5px] text-link hover:bg-selected-bg disabled:opacity-40">{x.label}</button>)}
           </span>
         )}
         {(onRetry || onHand) && (
           <span className="flex gap-1">
-            {onRetry && <button type="button" onClick={onRetry} className="rounded border border-gray-300 dark:border-zinc-600 px-1.5 text-[10.5px] hover:border-accent hover:text-accent">もう一度</button>}
-            {onHand && <button type="button" onClick={onHand} className="rounded border border-gray-300 dark:border-zinc-600 px-1.5 text-[10.5px] hover:border-accent hover:text-accent">人に渡す</button>}
+            {onRetry && <button type="button" onClick={onRetry} className="rounded border border-gray-300 dark:border-zinc-600 px-1.5 text-[10.5px] hover:border-primary hover:text-link">もう一度</button>}
+            {onHand && <button type="button" onClick={onHand} className="rounded border border-gray-300 dark:border-zinc-600 px-1.5 text-[10.5px] hover:border-primary hover:text-link">人に渡す</button>}
           </span>
         )}
       </span>

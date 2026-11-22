@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useId, useRef, useState, type ReactNode } from 'react'
+import { Dialog, DialogFooter, DialogTitle } from './Dialog'
 
 interface InputDialogProps {
   isOpen: boolean
@@ -14,8 +15,13 @@ interface InputDialogProps {
   children?: ReactNode
 }
 
-export function InputDialog({
-  isOpen,
+/** A one-field dialog (a name). Mounted fresh at each opening, so it starts from `defaultValue`. */
+export function InputDialog(props: InputDialogProps) {
+  if (!props.isOpen) return null
+  return <OpenInputDialog {...props} />
+}
+
+function OpenInputDialog({
   title,
   placeholder,
   defaultValue = '',
@@ -27,31 +33,8 @@ export function InputDialog({
 }: InputDialogProps) {
   const [value, setValue] = useState(defaultValue)
   const [busy, setBusy] = useState(false)
-  const inputRef = useRef<HTMLInputElement>(null)
-
-  useEffect(() => {
-    if (isOpen) {
-      setValue(defaultValue)
-      // Focus and select text after a short delay to ensure the dialog is rendered
-      setTimeout(() => {
-        inputRef.current?.focus()
-        inputRef.current?.select()
-      }, 50)
-    }
-  }, [isOpen, defaultValue])
-
-  useEffect(() => {
-    function handleKeyDown(e: KeyboardEvent) {
-      if (!isOpen) return
-      if (e.key === 'Escape') {
-        onCancel()
-      }
-    }
-    document.addEventListener('keydown', handleKeyDown)
-    return () => document.removeEventListener('keydown', handleKeyDown)
-  }, [isOpen, onCancel])
-
-  if (!isOpen) return null
+  const selected = useRef(false)
+  const titleId = useId()
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -65,41 +48,41 @@ export function InputDialog({
   }
 
   return (
-    <div className="fixed inset-0 z-dialog flex items-center justify-center bg-scrim">
-      <div className="w-full max-w-md p-4 bg-surface-raised text-text border border-[color:var(--color-border)] rounded-control shadow-dialog">
-        <h3 className="text-lg font-medium text-text mb-4">{title}</h3>
-        <form onSubmit={handleSubmit}>
-          <input
-            ref={inputRef}
-            type="text"
-            value={value}
-            onChange={(e) => setValue(e.target.value)}
-            placeholder={placeholder}
-            aria-invalid={error ? true : undefined}
-            className="w-full px-3 py-2 bg-[var(--color-surface)] border border-border-control rounded-md text-text placeholder:text-text-subtle focus:outline-none focus:border-focus-border"
-          />
-          {children}
-          {error && (
-            <p role="alert" className="mt-2 text-xs text-danger-text whitespace-pre-line">{error}</p>
-          )}
-          <div className="flex justify-end gap-2 mt-4">
-            <button
-              type="button"
-              onClick={onCancel}
-              className="px-4 py-2 text-sm text-text-muted hover:text-text hover:bg-surface-sunken rounded-md transition-colors"
-            >
-              キャンセル
-            </button>
-            <button
-              type="submit"
-              disabled={!value.trim() || busy}
-              className="px-4 py-2 text-sm bg-primary hover:bg-primary-hover disabled:opacity-disabled disabled:cursor-not-allowed text-on-primary rounded-md transition-colors"
-            >
-              {confirmText}
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
+    <Dialog onClose={onCancel} labelledBy={titleId} closeOnScrim={false}>
+      <DialogTitle id={titleId} className="mb-4">{title}</DialogTitle>
+      <form onSubmit={handleSubmit}>
+        <input
+          // Focus and select the name once, when the dialog opens.
+          ref={el => { if (el && !selected.current) { selected.current = true; el.focus(); el.select() } }}
+          type="text"
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          placeholder={placeholder}
+          aria-label={title}
+          aria-invalid={error ? true : undefined}
+          className="w-full px-3 py-2 bg-[var(--color-surface)] border border-border-control rounded-md text-text placeholder:text-text-subtle focus:outline-none focus:border-focus-border"
+        />
+        {children}
+        {error && (
+          <p role="alert" className="mt-2 text-xs text-danger-text whitespace-pre-line">{error}</p>
+        )}
+        <DialogFooter>
+          <button
+            type="button"
+            onClick={onCancel}
+            className="px-4 py-2 text-sm text-text-muted hover:text-text hover:bg-surface-sunken rounded-md transition-colors"
+          >
+            キャンセル
+          </button>
+          <button
+            type="submit"
+            disabled={!value.trim() || busy}
+            className="px-4 py-2 text-sm bg-primary hover:bg-primary-hover disabled:opacity-disabled disabled:cursor-not-allowed text-on-primary rounded-md transition-colors"
+          >
+            {confirmText}
+          </button>
+        </DialogFooter>
+      </form>
+    </Dialog>
   )
 }

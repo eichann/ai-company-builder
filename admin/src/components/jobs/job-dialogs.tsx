@@ -50,7 +50,7 @@ export function JobFormDialog({ job, members, defaultActingUser, onClose, onSave
   const hidden = hiddenVersion(newestVersion)
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="sm:max-w-lg">
+      <DialogContent>
         <DialogHeader>
           <DialogTitle>{job ? `「${job.name}」を直す` : '定期の仕事を作る'}</DialogTitle>
           <DialogDescription>
@@ -356,7 +356,7 @@ export function JobApproveDialog({ job, members, myUserId, onClose, onApproved }
 
   return (
     <Dialog open onOpenChange={(o) => !o && !busy && onClose()}>
-      <DialogContent className="sm:max-w-lg">
+      <DialogContent>
         <DialogHeader>
           <DialogTitle>{newest ? `第${newest.version}版を承認しますか？` : '承認'}</DialogTitle>
           <DialogDescription>承認するのは、下の内容そのものです。あとで直しても、承認した版は変わりません。</DialogDescription>
@@ -435,7 +435,7 @@ export function JobAcceptDialog({ job, members, onClose, onAccepted }: {
 
   return (
     <Dialog open onOpenChange={(o) => !o && !busy && onClose()}>
-      <DialogContent className="sm:max-w-lg">
+      <DialogContent>
         <DialogHeader>
           <DialogTitle>{version ? `第${version.version}版を受け取りますか？` : '受け取る'}</DialogTitle>
           <DialogDescription>責任者として、この仕事をあなたの権限で動かすことに同意します。承認とは別の操作です。</DialogDescription>

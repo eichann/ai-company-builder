@@ -65,7 +65,7 @@ export function OutdatedClientsDialog({
 
   return (
     <Dialog open={state !== null} onOpenChange={(o) => !o && !busy && onClose()}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent>
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Warning size={20} weight="fill" className="shrink-0 text-warning" aria-hidden="true" />
@@ -96,7 +96,7 @@ export function OutdatedClientsDialog({
 
         <Link
           href={`/companies/${companyId}/members`}
-          className="inline-flex items-center gap-1 self-start rounded text-sm font-medium text-brand underline-offset-4 outline-none hover:underline focus-visible:ring-[3px] focus-visible:ring-ring/50"
+          className="inline-flex items-center gap-1 self-start rounded text-sm font-medium text-link underline-offset-4 hover:text-link-hover outline-none hover:underline focus-visible:ring-[3px] focus-visible:ring-ring/50"
         >
           メンバー画面で確認
           <ArrowRight size={14} />

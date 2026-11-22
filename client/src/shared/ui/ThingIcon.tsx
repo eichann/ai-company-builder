@@ -10,8 +10,8 @@ import { bundleLook, ONLY_YOU, thingKindOf, thingName, THING_NAMES, type ThingKi
 
 const LOOKS: Record<Exclude<ThingKind, 'bundle'>, { icon: Icon; color: string }> = {
   // Not a square box: in the list a box means only ☐ pressable / ✓ done (owner 2026-11-02).
-  task: { icon: ListChecks, color: 'text-accent' },
-  minutes_check: { icon: ClipboardText, color: 'text-accent' },
+  task: { icon: ListChecks, color: 'text-thing-task' },
+  minutes_check: { icon: ClipboardText, color: 'text-thing-task' },
   meeting: { icon: UsersThree, color: 'text-sky-600 dark:text-sky-400' },
   decision: { icon: Scales, color: 'text-amber-600 dark:text-amber-400' },
   incoming: { icon: ChatTeardropText, color: 'text-teal-600 dark:text-teal-400' },
@@ -19,7 +19,7 @@ const LOOKS: Record<Exclude<ThingKind, 'bundle'>, { icon: Icon; color: string }>
   sent: { icon: PaperPlaneRight, color: 'text-emerald-600 dark:text-emerald-400' },
   approval: { icon: Stamp, color: 'text-orange-600 dark:text-orange-400' },
   reply_request: { icon: ArrowBendUpLeft, color: 'text-violet-600 dark:text-violet-400' },
-  consultation: { icon: ChatCircleDots, color: 'text-accent' },
+  consultation: { icon: ChatCircleDots, color: 'text-primary' },
   skill: { icon: Lightning, color: 'text-amber-500' },
   counterpart: { icon: Buildings, color: 'text-slate-600 dark:text-slate-300' },
   file: { icon: FileText, color: 'text-gray-500' },
@@ -67,7 +67,7 @@ const SOURCE_LOOKS: Record<ThingSource, { icon: Icon; color: string }> = {
   meet: { icon: VideoCamera, color: 'text-emerald-600' },
   ai: { icon: Robot, color: 'text-violet-500' },
   person: { icon: UserCircle, color: 'text-gray-400' },
-  acb: { icon: SealCheck, color: 'text-accent' },
+  acb: { icon: SealCheck, color: 'text-primary' },
 }
 export function SourceIcon({ source, size = 12 }: { source: ThingSource; size?: number }) {
   const { icon: I, color } = SOURCE_LOOKS[source]

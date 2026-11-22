@@ -299,7 +299,7 @@ test('今日のフォルダを開く: from another department, made when missing
   await page.keyboard.press('ControlOrMeta+Shift+T')
   const day = page.getByRole('button', { name: '20261103', exact: true })
   await expect(day).toBeVisible()
-  await expect(day).toHaveClass(/bg-accent\/20/)
+  await expect(day).toHaveClass(/(^|\s)bg-selected-bg-hover(\s|$)/)
   await expect(page.getByRole('button', { name: 'A社_提案.md' })).toBeVisible()
   expect(await calls(page, 'createDirectory')).toEqual([[`${ROOT}/営業部/.personal/inbox/日付別/2026/20261103`]])
   if (process.env.SCREENSHOTS) await page.screenshot({ path: `${process.env.SCREENSHOTS}/today-folder-tree.png` })

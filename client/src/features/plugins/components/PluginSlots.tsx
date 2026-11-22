@@ -9,6 +9,7 @@ import type { TaskListItem } from '../../../../shared/tasks'
 import type { PluginBridgePort } from '../api'
 import { PEEK_GROUP_LABELS, type FileActionSlot, type RecordSectionSlot } from '../model'
 import { PluginFrame } from './PluginFrame'
+import { Dialog } from '../../../shared/ui/Dialog'
 
 type OpenFromPlugin = (target: BridgeUiOpenArgs) => PluginBridgeAnswer | Promise<PluginBridgeAnswer>
 
@@ -88,7 +89,7 @@ export function PluginRecordSections({ companyId, recordId, sections, onOpen, fr
     <>
       {sections.map(s => (
         <section key={`${s.plugin.id}:${s.entry}`} aria-label={s.label} data-slot="plugin-record-section">
-          <h2 className="mb-2 flex items-center gap-1.5 text-[12px] font-semibold"><PuzzlePiece size={13} className="text-accent" />{s.label}</h2>
+          <h2 className="mb-2 flex items-center gap-1.5 text-[12px] font-semibold"><PuzzlePiece size={13} className="text-primary" />{s.label}</h2>
           <PluginFrame
             companyId={companyId} plugin={s.plugin} entry={s.entry} title={s.label}
             context={{ slot: 'record_section', recordId }} onOpen={onOpen} frameUrl={frameUrl} port={port}
@@ -113,9 +114,7 @@ export function PluginFileActionDialog({ companyId, action, companyPath, isFolde
 }) {
   const name = companyPath.split('/').pop() ?? companyPath
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30" onMouseDown={e => { if (e.target === e.currentTarget) onClose() }}>
-      <div role="dialog" aria-label={action.label} onKeyDown={e => { if (e.key === 'Escape') onClose() }}
-        className="flex h-[480px] w-[560px] max-w-[92vw] flex-col overflow-hidden rounded-xl border border-gray-200 bg-white text-gray-800 shadow-xl dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-100">
+    <Dialog onClose={onClose} label={action.label} size="lg" padded={false} className="flex h-[480px] flex-col overflow-hidden">
         <div className="flex items-center gap-2 border-b border-gray-100 px-3 py-2 text-[12px] text-gray-500 dark:border-zinc-700 dark:text-zinc-400">
           <PuzzlePiece size={13} />
           <span className="min-w-0 flex-1 truncate">{action.label}：「{name}」<span className="ml-1 text-gray-400">（{action.pluginLabel}）</span></span>
@@ -126,7 +125,6 @@ export function PluginFileActionDialog({ companyId, action, companyPath, isFolde
           context={{ slot: 'file_action', path: companyPath, isFolder }} onOpen={onOpen} frameUrl={frameUrl} port={port}
           className="block min-h-0 w-full flex-1 border-0 bg-white dark:bg-zinc-900"
         />
-      </div>
-    </div>
+    </Dialog>
   )
 }

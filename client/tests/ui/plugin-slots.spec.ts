@@ -79,6 +79,10 @@ test('the four slots show the plugin\'s screens where it declared them, and none
   const dialog = page.getByRole('dialog', { name: '企画の資料にする' })
   await expect(dialog).toBeVisible()
   const actionFrame = page.frameLocator('iframe[title="企画の資料にする"]')
+  // The dialog's Tab trap counts the frame: from 閉じる, Tab goes into the plugin, not back to 閉じる.
+  await dialog.getByRole('button', { name: '閉じる' }).focus()
+  await page.keyboard.press('Tab')
+  expect(await page.evaluate(() => document.activeElement?.tagName)).toBe('IFRAME')
   await expect(actionFrame.locator('#context')).toHaveText('{"slot":"file_action","path":"企画/台本.pdf","isFolder":false}')
   await shot(page, 'file-action')
 

@@ -11,7 +11,7 @@ import { MAIN_BUTTON, SMALL_BUTTON } from '../../../shared/ui/RecordPage'
 import { requestMeetingReading, setMeetingAutoSeries, skipMeetingReading, undoMeetingSkip } from '../api'
 import { foldMeetings, madeWords, meetingBanner, meetingRowWords, skippableMeetings } from '../model'
 
-const LINK = 'text-[11px] text-gray-500 underline-offset-2 hover:text-accent hover:underline dark:text-zinc-400'
+const LINK = 'text-[11px] text-gray-500 underline-offset-2 hover:text-link hover:underline dark:text-zinc-400'
 const SHORT = `${MAIN_BUTTON} shrink-0 !px-1.5 !py-0.5 !text-[11px]`
 const QUIET = `${SMALL_BUTTON} shrink-0 !px-1.5 !py-0.5 !text-[11px]`
 /** `busy` while ［まとめて読まない］ goes through the folded meetings. */
@@ -156,7 +156,7 @@ export function MeetingBanners({ companyId, items, aiTurns, onView, onChanged, n
           {banner.kind === 'read'
             ? <CheckCircle size={13} weight="fill" className="shrink-0 text-emerald-600 dark:text-emerald-400" />
             : banner.kind === 'reading' && !banner.problem
-              ? <CircleNotch size={13} className="shrink-0 animate-spin text-accent" />
+              ? <CircleNotch size={13} className="shrink-0 animate-spin text-ai-icon" />
               : <NotePencil size={13} weight="duotone" className="shrink-0 text-sky-600 dark:text-sky-400" />}
           <span title={line} className="min-w-0 flex-1 truncate text-gray-800 dark:text-zinc-100">{line}</span>
           {banner.kind === 'arrived' && <>
@@ -165,7 +165,7 @@ export function MeetingBanners({ companyId, items, aiTurns, onView, onChanged, n
             <button type="button" disabled={locked(m.recordId)} onClick={() => void skip(m)} className={QUIET}>読まない</button>
           </>}
           {banner.kind === 'reading' && <>
-            {!banner.problem && <span className="min-w-0 shrink truncate text-[11px] text-accent">{banner.auto ? '自動で読む定例です。AI が読んでいます…' : banner.reader ? `${banner.reader}さんの AI が読んでいます…` : 'AI が読んでいます…'}</span>}
+            {!banner.problem && <span className="min-w-0 shrink truncate text-[11px] text-ai-text">{banner.auto ? '自動で読む定例です。AI が読んでいます…' : banner.reader ? `${banner.reader}さんの AI が読んでいます…` : 'AI が読んでいます…'}</span>}
             {banner.problem?.canRetry && <button type="button" onClick={() => aiTurns?.retry(m.recordId)} className={QUIET}>もう一度</button>}
             {banner.canSkip && <button type="button" disabled={locked(m.recordId)} onClick={() => void skip(m)} className={QUIET}>読まない</button>}
           </>}

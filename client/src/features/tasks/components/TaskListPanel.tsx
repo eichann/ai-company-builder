@@ -217,7 +217,7 @@ export function TaskListPanel({ companyId, rootPath, list, aiTurns, activeRecord
           <button type="button" aria-expanded={open} onClick={() => setUnfolded(u => ({ ...u, [s.key]: !open }))} className={HEADER}>{header}</button>
         ) : s.bundle ? (
           // 〇〇ごと: the bundle's name opens it, like its chip on a row.
-          <h3><button type="button" data-bundle-head={s.bundle.id} onClick={() => onOpen(s.bundle!.id)} className={`${HEADER} text-gray-700 hover:text-accent dark:text-zinc-200`}>{header}</button></h3>
+          <h3><button type="button" data-bundle-head={s.bundle.id} onClick={() => onOpen(s.bundle!.id)} className={`${HEADER} text-gray-700 hover:text-link dark:text-zinc-200`}>{header}</button></h3>
         ) : <h3 className={HEADER}>{header}</h3>}
         {open && <div className="space-y-0.5">{s.events.map(e => <EventRow key={e.event.id} e={e} />)}{listRows(s.items).map(listRow)}</div>}
       </section>
@@ -247,7 +247,7 @@ export function TaskListPanel({ companyId, rootPath, list, aiTurns, activeRecord
           <span role="group" aria-label="並べ方" className="inline-flex overflow-hidden rounded-md border border-gray-200 text-[11px] dark:border-zinc-700">
             {(['turn', 'bundle', 'date'] as const).map(m => (
               <button key={m} type="button" aria-pressed={mode === m} onClick={() => setMode(m)}
-                className={`px-2 py-0.5 whitespace-nowrap ${mode === m ? 'bg-accent text-white' : 'text-gray-600 hover:bg-gray-100 dark:text-zinc-300 dark:hover:bg-zinc-800'}`}>
+                className={`px-2 py-0.5 whitespace-nowrap ${mode === m ? 'bg-primary text-on-primary' : 'text-gray-600 hover:bg-gray-100 dark:text-zinc-300 dark:hover:bg-zinc-800'}`}>
                 {m === 'turn' ? '番ごと' : m === 'bundle' ? `${bundleWord}ごと` : '日付ごと'}
               </button>
             ))}
@@ -265,7 +265,7 @@ export function TaskListPanel({ companyId, rootPath, list, aiTurns, activeRecord
             <button type="button" aria-pressed={shownTag === null} onClick={() => setTag(null)} className={`rounded-full px-2 py-px ${shownTag === null ? 'bg-gray-800 text-white dark:bg-zinc-100 dark:text-zinc-900' : 'text-gray-500 hover:bg-gray-100 dark:hover:bg-zinc-800'}`}>すべて</button>
             {tags.map(({ tag: t, count }) => (
               <button key={t} type="button" aria-pressed={shownTag === t} onClick={() => setTag(shownTag === t ? null : t)}
-                className={`rounded-full px-2 py-px ${shownTag === t ? 'bg-accent text-white' : 'text-gray-500 hover:bg-gray-100 dark:text-zinc-400 dark:hover:bg-zinc-800'}`}>
+                className={`rounded-full px-2 py-px ${shownTag === t ? 'bg-primary text-on-primary' : 'text-gray-500 hover:bg-gray-100 dark:text-zinc-400 dark:hover:bg-zinc-800'}`}>
                 #{t}<span className="ml-0.5 opacity-60">{count}</span>
               </button>
             ))}

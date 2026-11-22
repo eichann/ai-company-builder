@@ -2,8 +2,9 @@
 // server says they may (the record's 責任者, a 部署の管理役, an owner / admin), groups and departments — and is
 // told first what they will see, that it cannot be taken back, and that the list stays strict. The server
 // checks the member is on the meeting's list, who may add a group or a department, and adds only members.
-import { useState } from 'react'
-import { UserPlus, X } from '@phosphor-icons/react'
+import { useId, useState } from 'react'
+import { UserPlus } from '@phosphor-icons/react'
+import { Dialog, DialogCloseButton, DialogFooter, DialogTitle } from '../../../shared/ui/Dialog'
 import { MAIN_BUTTON, SMALL_BUTTON } from '../../../shared/ui/RecordPage'
 import { INVITE_SETS_NOTE, type InviteSet } from '../../../../shared/minutes-app'
 import { inviteToMeeting } from '../api'
@@ -29,6 +30,7 @@ export function InviteDialog({ companyId, meetingId, version, members, onDone }:
   const choices = useInviteChoices(companyId, meetingId)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const titleId = useId()
   const offered = offeredSets(choices)
   const toggle = (set: (f: (s: ReadonlySet<string>) => ReadonlySet<string>) => void, key: string, on: boolean) =>
     set(s => { const next = new Set(s); if (on) next.add(key); else next.delete(key); return next })
@@ -43,13 +45,12 @@ export function InviteDialog({ companyId, meetingId, version, members, onDone }:
   }
   const listedText = (choices?.listed ?? []).filter(l => l.name !== '').map(l => inviteSetLabel(l, l.name)).join('、')
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onMouseDown={e => { if (e.target === e.currentTarget) onDone(null) }}>
-      <div role="dialog" aria-label="会議に人を招待する" className="w-[420px] max-w-[calc(100vw-32px)] rounded-xl bg-white p-5 shadow-xl dark:bg-zinc-800">
+    <Dialog onClose={() => onDone(null)} labelledBy={titleId} dismissible={!busy}>
         <div className="mb-2 flex items-center">
-          <h2 className="flex-1 text-[15px] font-semibold">会議に人を招待する</h2>
-          <button type="button" aria-label="閉じる" onClick={() => onDone(null)} className="text-gray-400"><X size={14} /></button>
+          <DialogTitle id={titleId} className="flex-1">会議に人を招待する</DialogTitle>
+          <DialogCloseButton onClick={() => onDone(null)} />
         </div>
-        <p className="mb-3 text-[12.5px] leading-relaxed text-gray-600 dark:text-zinc-300">{INVITE_NOTE}</p>
+        <p className="mb-3 text-[12.5px] leading-relaxed text-text-muted">{INVITE_NOTE}</p>
         {listedText !== '' && <p className="mb-2 text-[12px] text-gray-600 dark:text-zinc-300">いま見られる人には、{listedText}も入っています。</p>}
         <ul className="max-h-[240px] space-y-1 overflow-auto">
           {members.map(p => (
@@ -78,11 +79,10 @@ export function InviteDialog({ companyId, meetingId, version, members, onDone }:
           </div>
         )}
         {error && <p role="alert" className="mt-2 text-[12px] text-red-600 dark:text-red-400">{error}</p>}
-        <div className="mt-4 flex justify-end gap-2">
+        <DialogFooter>
           <button type="button" onClick={() => onDone(null)} className={SMALL_BUTTON}>やめる</button>
           <button type="button" disabled={busy || chosen.size + chosenSets.size === 0} onClick={() => void invite()} className={MAIN_BUTTON}><UserPlus size={13} />招待する</button>
-        </div>
-      </div>
-    </div>
+        </DialogFooter>
+    </Dialog>
   )
 }

@@ -116,7 +116,7 @@ export function RelayServicesCard({
       </div>
 
       <Dialog open={editing?.kind === 'new' || editing?.kind === 'edit'} onOpenChange={(o) => !o && setEditing(null)}>
-        <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-xl">
+        <DialogContent size="lg" className="max-h-[90dvh] overflow-y-auto">
           {(editing?.kind === 'new' || editing?.kind === 'edit') && (
             <RelayForm
               existing={editing.kind === 'edit' ? editing.service : undefined}
@@ -132,7 +132,7 @@ export function RelayServicesCard({
       </Dialog>
 
       <Dialog open={editing?.kind === 'remove'} onOpenChange={(o) => !o && setEditing(null)}>
-        <DialogContent className="sm:max-w-md">
+        <DialogContent>
           {editing?.kind === 'remove' && (
             <>
               <DialogHeader>

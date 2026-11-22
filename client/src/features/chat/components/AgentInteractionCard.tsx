@@ -20,7 +20,7 @@ function CodexInteractionCard({ request, onRespond }: { request: Exclude<AgentIn
     catch { setError('回答を送信できませんでした。もう一度お試しください。') }
     finally { setSending(false) }
   }
-  return <section aria-label="Codexからの確認" className="mx-4 mb-3 rounded-xl border border-accent/30 bg-surface-elevated p-4 text-sm max-h-[50vh] overflow-y-auto">
+  return <section aria-label="Codexからの確認" className="mx-4 mb-3 rounded-xl border border-selected-border bg-surface-elevated p-4 text-sm max-h-[50vh] overflow-y-auto">
     <div className="font-medium text-ink mb-3">{request.kind === 'questions' ? 'Codexからの質問 · 回答待ち' : 'Codexからの追加権限の確認 · 回答待ち'}</div>
     {request.kind === 'questions' ? <>
       {request.questions.map(q => <fieldset key={q.id} disabled={sending} className="mb-4 space-y-2">

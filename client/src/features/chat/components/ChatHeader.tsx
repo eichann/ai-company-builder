@@ -51,20 +51,20 @@ export function ChatHeader({ authMode, status, codexStatus, models, modelLocked,
   return (
     <header ref={headerRef} className={`flex-shrink-0 h-12 flex items-center justify-between gap-2 min-w-0 overflow-hidden border-b border-gray-200 dark:border-zinc-800 ${tight ? 'px-2' : 'px-4'}`}>
       <div className={`flex items-center gap-3 ${tight ? 'min-w-0 shrink overflow-hidden' : 'flex-shrink-0'}`}>
-        {!tight && <div className="w-6 h-6 rounded-lg bg-gradient-to-br from-accent to-accent/70 flex items-center justify-center">
+        {!tight && <div className="w-6 h-6 rounded-lg bg-primary flex items-center justify-center">
           <Sparkle size={12} weight="fill" className="text-white" />
         </div>}
         <div className="flex items-center gap-2">
           {/* The model selector already names the agent when space is short. */}
           {!tight && (!narrowHeader || !hasRateLimits(authMode)) && (
-            <span className="text-[10px] font-medium tracking-wider uppercase px-1.5 py-0.5 rounded-md bg-accent/15 text-accent">
+            <span className="text-[10px] font-medium tracking-wider uppercase px-1.5 py-0.5 rounded-md bg-selected-bg text-selected-text">
               {agentShortLabel(authMode)}
             </span>
           )}
           {hasRateLimits(authMode) && <RateLimitMeter provider={authMode} compact={narrowHeader} />}
           {/* Status indicator */}
           {status === 'submitted' && (
-            <span className="flex items-center gap-1 text-[10px] text-accent animate-fade-in whitespace-nowrap" title={t('chat.statusSubmitted')}>
+            <span className="flex items-center gap-1 text-[10px] text-link animate-fade-in whitespace-nowrap" title={t('chat.statusSubmitted')}>
               <CircleNotch size={10} className="animate-spin" />
               {!narrowHeader && t('chat.statusSubmitted')}
             </span>
@@ -104,7 +104,7 @@ export function ChatHeader({ authMode, status, codexStatus, models, modelLocked,
             disabled={modelLocked}
             title={modelLocked ? '応答中はモデルを変更できません' : undefined}
             onChange={(e) => setAIModel(e.target.value as AIModel)}
-            className="h-7 min-w-[5.5rem] shrink text-[11px] font-medium rounded-md border border-gray-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 text-gray-700 dark:text-zinc-300 px-1.5 pr-6 appearance-none cursor-pointer hover:border-accent/50 focus:outline-none focus:ring-1 focus:ring-accent/50 transition-colors disabled:opacity-60 disabled:cursor-not-allowed disabled:hover:border-gray-200 dark:disabled:hover:border-zinc-700"
+            className="h-7 min-w-[5.5rem] shrink text-[11px] font-medium rounded-md border border-gray-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 text-gray-700 dark:text-zinc-300 px-1.5 pr-6 appearance-none cursor-pointer hover:border-selected-border focus:outline-none focus:ring-1 focus:ring-focus-ring transition-colors disabled:opacity-60 disabled:cursor-not-allowed disabled:hover:border-gray-200 dark:disabled:hover:border-zinc-700"
             style={{ backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='M3 5l3 3 3-3' fill='none' stroke='%239CA3AF' stroke-width='1.5'/%3E%3C/svg%3E")`, backgroundRepeat: 'no-repeat', backgroundPosition: 'right 4px center' }}
           >
             {CLAUDE_MODELS.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
@@ -116,7 +116,7 @@ export function ChatHeader({ authMode, status, codexStatus, models, modelLocked,
           <select
             value={aiEffort}
             onChange={(e) => setAIEffort(e.target.value as AIEffort)}
-            className="h-7 min-w-[4.75rem] shrink text-[11px] font-medium rounded-md border border-gray-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 text-gray-700 dark:text-zinc-300 px-1.5 pr-6 appearance-none cursor-pointer hover:border-accent/50 focus:outline-none focus:ring-1 focus:ring-accent/50 transition-colors"
+            className="h-7 min-w-[4.75rem] shrink text-[11px] font-medium rounded-md border border-gray-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 text-gray-700 dark:text-zinc-300 px-1.5 pr-6 appearance-none cursor-pointer hover:border-selected-border focus:outline-none focus:ring-1 focus:ring-focus-ring transition-colors"
             style={{ backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='M3 5l3 3 3-3' fill='none' stroke='%239CA3AF' stroke-width='1.5'/%3E%3C/svg%3E")`, backgroundRepeat: 'no-repeat', backgroundPosition: 'right 4px center' }}
           >
             {MODEL_EFFORT_OPTIONS[aiModel].map((eff) => (
@@ -143,7 +143,7 @@ export function ChatHeader({ authMode, status, codexStatus, models, modelLocked,
           onClick={() => setChatMarkdownRender(!chatMarkdownRender)}
           className={`w-8 h-8 flex-shrink-0 rounded-lg flex items-center justify-center transition-colors ${
             chatMarkdownRender
-              ? 'bg-accent/15 text-accent hover:bg-accent/20'
+              ? 'bg-selected-bg text-selected-text hover:bg-selected-bg-hover'
               : 'hover:bg-gray-100 dark:hover:bg-zinc-800 text-gray-500 dark:text-zinc-400'
           }`}
           title={chatMarkdownRender ? '装飾表示中（クリックでプレーン表示に切替）' : 'プレーン表示中（クリックで装飾表示に切替）'}

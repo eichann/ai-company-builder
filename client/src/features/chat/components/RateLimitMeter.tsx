@@ -13,7 +13,7 @@ import { HoverTooltip } from '../../../shared/ui/HoverTooltip'
 
 const BAR: Record<MeterLevel, string> = {
   unknown: 'bg-gray-300 dark:bg-zinc-600',
-  ok: 'bg-accent',
+  ok: 'bg-primary',
   warn: 'bg-amber-500 dark:bg-amber-400',
   critical: 'bg-red-500 dark:bg-red-400',
 }
@@ -68,7 +68,7 @@ export function RateLimitMeter({ provider, compact = false }: { provider: RateLi
           type="button"
           aria-label={summary}
           aria-describedby={describedBy}
-          className={`h-6 inline-flex items-center gap-2 px-2 rounded-md border text-[10px] tabular-nums transition-colors hover:border-accent/50 focus:outline-none focus-visible:ring-1 focus-visible:ring-accent/50 ${FRAME[view.level]}`}
+          className={`h-6 inline-flex items-center gap-2 px-2 rounded-md border text-[10px] tabular-nums transition-colors hover:border-selected-border focus:outline-none focus-visible:ring-1 focus-visible:ring-focus-ring ${FRAME[view.level]}`}
         >
           {shown.length === 0 ? (
             <span className={`inline-flex items-center gap-1 ${TEXT.unknown}`}>

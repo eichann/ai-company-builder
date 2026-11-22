@@ -245,7 +245,7 @@ const PAIRS = [
   ...['warning', 'success', 'ai'].flatMap(s => [[`${s}-text`, `${s}-bg`, TEXT], [`${s}-text`, 'surface', TEXT]]),
   ['info-text', 'info-bg', TEXT],
   ...['paused', 'failed', 'awaiting', 'readonly'].map(s => [`${s}-text`, `${s}-bg`, TEXT]),
-  ['private-text', 'surface', TEXT], ['on-toast', 'toast', TEXT],
+  ['private-text', 'surface', TEXT], ['private-text', 'private-bg', TEXT], ['on-toast', 'toast', TEXT],
   ['selected-icon', 'selected-bg', UI], ['danger-icon', 'danger-bg', UI], ['readonly-icon', 'readonly-bg', UI],
   ['warning-icon', 'warning-bg', UI], ['success-icon', 'surface', UI], ['ai-icon', 'surface', UI],
   ['focus-ring', 'surface', UI], ['focus-ring', 'bg', UI], ['focus-ring', 'surface-raised', UI],

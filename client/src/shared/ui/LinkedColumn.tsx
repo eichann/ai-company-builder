@@ -73,7 +73,7 @@ export function LinkedColumn({ rows, extras = [], first, drop, notice }: {
   } : {}
   return (
     <aside aria-label="つながっているもの" {...dropProps}
-      className={`space-y-3.5 rounded-lg ${over ? '-m-1.5 bg-accent/5 p-1.5 outline-dashed outline-2 outline-accent' : ''}`}>
+      className={`space-y-3.5 rounded-lg ${over ? '-m-1.5 bg-selected-bg p-1.5 outline-dashed outline-2 outline-primary' : ''}`}>
       <h2 className="flex items-center gap-1.5 text-[12.5px] font-semibold text-gray-700 dark:text-zinc-200"><LinkSimple size={13} />つながっているもの</h2>
       {notice}
       {groups.length === 0 && <p className="text-[11px] text-gray-400">{CALM.emptyLinks}</p>}
@@ -89,7 +89,7 @@ export function LinkedColumn({ rows, extras = [], first, drop, notice }: {
             <ul>{shown.map(r => <Row key={r.key} row={r} typeLabel={typeLabel} />)}</ul>
             {(more > 0 || (isOpen && g.items.length > 3)) && (
               <button type="button" onClick={() => setOpened(o => (isOpen ? o.filter(k => k !== g.title) : [...o, g.title]))}
-                className="ml-2 text-[11px] text-gray-500 hover:text-accent">
+                className="ml-2 text-[11px] text-gray-500 hover:text-link">
                 {isOpen ? 'たたむ' : `ほか ${more} 件`}
               </button>
             )}
@@ -99,7 +99,7 @@ export function LinkedColumn({ rows, extras = [], first, drop, notice }: {
         )
       })}
       {drop && (
-        <div data-link-drop-zone className={`rounded-md border border-dashed px-2 py-2 text-center text-[11px] ${over ? 'border-accent text-accent' : 'border-gray-300 text-gray-400 dark:border-zinc-700'}`}>
+        <div data-link-drop-zone className={`rounded-md border border-dashed px-2 py-2 text-center text-[11px] ${over ? 'border-primary text-link' : 'border-gray-300 text-gray-400 dark:border-zinc-700'}`}>
           {drop.notice && !over && <div className="mb-1.5 text-left">{drop.notice}</div>}
           ここに落とすと、つながります
           {!over && <span className="block text-[10px]">{drop.label}</span>}
@@ -116,7 +116,7 @@ function Row({ row, typeLabel }: { row: LinkedRow; typeLabel?: string }) {
         className="min-w-0 flex-1 rounded-md px-2 py-1 text-left hover:bg-gray-100 disabled:hover:bg-transparent dark:hover:bg-zinc-800">
         <span className="flex min-w-0 items-center gap-1.5 text-[12px]">
           {row.icon ?? <ThingIcon kind={row.kind} typeLabel={typeLabel} label="" size={12} />}
-          <span className={`min-w-0 truncate ${row.done ? 'text-gray-400 line-through' : row.onOpen ? 'text-accent' : 'text-gray-700 dark:text-zinc-200'}`}>{row.label}</span>
+          <span className={`min-w-0 truncate ${row.done ? 'text-gray-400 line-through' : row.onOpen ? 'text-link' : 'text-gray-700 dark:text-zinc-200'}`}>{row.label}</span>
           {row.marks}
         </span>
         {row.sub && <span className="block truncate pl-[18px] text-[10.5px] text-gray-500 dark:text-zinc-400">{row.sub}</span>}

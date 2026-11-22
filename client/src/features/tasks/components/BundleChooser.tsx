@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { MagnifyingGlass, X } from '@phosphor-icons/react'
 import { meetingBundleWords, type BundleChoice } from '../../../../shared/tasks'
 import { useBundleChoices } from '../hooks/useBundleChoices'
+import { Dialog } from '../../../shared/ui/Dialog'
 
 interface Props {
   companyId: string
@@ -32,9 +33,7 @@ export function BundleChooser({ companyId, meetingTitle, word, onChoose, onNoBun
     else onClose()
   }
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30" onMouseDown={e => { if (e.target === e.currentTarget) onClose() }}>
-      <div role="dialog" aria-label={words.question} onKeyDown={e => { if (e.key === 'Escape') onClose() }}
-        className="w-[380px] overflow-hidden rounded-xl border border-gray-200 bg-white text-gray-800 shadow-xl dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-100">
+    <Dialog onClose={onClose} label={words.question} size="sm" padded={false} className="overflow-hidden">
         <div className="flex items-center gap-2 px-3 pb-1 pt-2.5 text-[12px]">
           <span className="min-w-0 flex-1 truncate font-semibold">「{meetingTitle}」は{words.question}</span>
           <button type="button" onClick={onClose} aria-label="閉じる" className="rounded p-0.5 hover:bg-gray-100 dark:hover:bg-zinc-700"><X size={12} /></button>
@@ -64,7 +63,6 @@ export function BundleChooser({ companyId, meetingTitle, word, onChoose, onNoBun
         )}
         {error && <p role="alert" className="border-t border-gray-100 px-3 py-1.5 text-[11.5px] text-red-600 dark:border-zinc-700 dark:text-red-400">{error}</p>}
         <p className="border-t border-gray-100 px-3 py-1.5 text-[10.5px] text-gray-500 dark:border-zinc-700">選ぶと、この会議がその{word}につながります。外のサービス（HubSpot など）には書きません。</p>
-      </div>
-    </div>
+    </Dialog>
   )
 }

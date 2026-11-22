@@ -50,7 +50,7 @@ export function DepartmentFormDialog({
 }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-xl">
+      <DialogContent size="lg">
         {open && (
           <DepartmentForm
             companyId={companyId}

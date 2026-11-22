@@ -199,7 +199,7 @@ function MoveRulesDialog({
 
   return (
     <Dialog open onOpenChange={(o) => !o && !busy && onClose()}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent>
         <DialogHeader>
           <DialogTitle>新しい場所に移す</DialogTitle>
           <DialogDescription>

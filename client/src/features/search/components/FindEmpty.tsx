@@ -19,7 +19,7 @@ function ListTitle({ children }: { children: ReactNode }) {
 function Row({ children, active, onClick, top, data }: { children: ReactNode; active: boolean; onClick: () => void; top?: boolean; data?: string }) {
   return (
     <button type="button" onClick={onClick} data-home-row={data}
-      className={`w-full text-left flex ${top ? 'items-start' : 'items-center'} gap-2 px-3 py-1 ${active ? 'bg-accent/10' : 'hover:bg-gray-100 dark:hover:bg-white/[0.04]'}`}>
+      className={`w-full text-left flex ${top ? 'items-start' : 'items-center'} gap-2 px-3 py-1 ${active ? 'bg-selected-bg' : 'hover:bg-gray-100 dark:hover:bg-white/[0.04]'}`}>
       {children}
     </button>
   )
@@ -86,7 +86,7 @@ export function FindEmpty({ recent, bundles, meetings, bundleWord, today, active
             <Row key={m.record.id} active={activeRecordId === m.record.id} onClick={() => onOpenRecord(m.record.id)} data={m.record.id}>
               <ThingIcon kind="meeting" />
               <span className={`flex-1 min-w-0 truncate text-[12px] ${ago > 0 ? 'text-gray-500 dark:text-zinc-400' : 'text-gray-700 dark:text-zinc-300'}`}>{m.record.title}</span>
-              <span className={`text-[10px] shrink-0 tabular-nums ${ago === 0 ? 'text-accent font-medium' : 'text-gray-400'}`}>{dateWords(at)}</span>
+              <span className={`text-[10px] shrink-0 tabular-nums ${ago === 0 ? 'text-link font-medium' : 'text-gray-400'}`}>{dateWords(at)}</span>
             </Row>
           )
         })}

@@ -775,7 +775,7 @@ function RoleDialog({
 }) {
   return (
     <Dialog open={row !== null} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent>
         {row && <RoleForm key={row.member.userId} row={row} isSelf={isSelf} lastOwner={lastOwner} onCancel={() => onOpenChange(false)} onSave={onSave} />}
       </DialogContent>
     </Dialog>

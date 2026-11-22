@@ -17,7 +17,7 @@ function makeComponents(isDark: boolean, highlight: boolean): Components {
   return {
     ...chatMarkdownSafety.components,
     a: ({ href, children, ...props }: React.AnchorHTMLAttributes<HTMLAnchorElement>) => (
-      <a href={href} {...props} target="_blank" rel="noopener noreferrer" className="text-accent underline underline-offset-2 hover:opacity-80">
+      <a href={href} {...props} target="_blank" rel="noopener noreferrer" className="text-link underline underline-offset-2 hover:opacity-80">
         {children}
       </a>
     ),

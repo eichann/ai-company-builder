@@ -12,6 +12,7 @@ import type { DepartmentConfig } from '../../../types'
 import { diffSelection, downloadedBytes, folderCheckState, formatBytes, sameSelection, toggleFolder } from '../../../shared/lib/download-selection'
 import { normalizeExclusions, pathKey } from '../../../../shared/sparse-paths'
 import { Button, Callout, Card, IndeterminateBar, SectionHeader, TriCheckbox, UsageBar } from '../../../shared/ui/primitives'
+import { Dialog, DialogFooter, DialogTitle } from '../../../shared/ui/Dialog'
 
 interface FolderNode {
   name: string
@@ -453,16 +454,11 @@ export function DownloadFoldersSection({ rootPath, companyId, departments }: Pro
 
 function ConfirmUnsynced({ files, onCancel, onConfirm }: { files: string[]; onCancel: () => void; onConfirm: () => void }) {
   const cancelRef = useRef<HTMLButtonElement>(null)
-  useEffect(() => { cancelRef.current?.focus() }, [])
   const shown = files.slice(0, 6)
   return (
-    <div
-      className="fixed inset-0 z-[60] flex items-center justify-center bg-zinc-900/30 p-6 backdrop-blur-[1px] dark:bg-black/50"
-      onKeyDown={e => { if (e.key === 'Escape') { e.stopPropagation(); onCancel() } }}
-    >
-      <div role="alertdialog" aria-modal="true" aria-labelledby="dl-confirm-title" aria-describedby="dl-confirm-body" className="w-full max-w-[460px] rounded-xl border border-zinc-200 bg-white p-5 shadow-xl dark:border-white/10 dark:bg-zinc-900">
-        <h3 id="dl-confirm-title" className="text-[15px] font-semibold text-zinc-900 dark:text-zinc-50">まだ同期していない変更があります</h3>
-        <div id="dl-confirm-body" className="mt-2 space-y-3 text-[13px] leading-relaxed text-zinc-600 dark:text-zinc-300">
+    <Dialog onClose={onCancel} role="alertdialog" labelledBy="dl-confirm-title" describedBy="dl-confirm-body" initialFocus={cancelRef}>
+        <DialogTitle id="dl-confirm-title">まだ同期していない変更があります</DialogTitle>
+        <div id="dl-confirm-body" className="mt-2 space-y-3 text-[13px] leading-relaxed text-text-muted">
           <p>
             ダウンロードしないようにするフォルダに、同期していない変更が {files.length} 件あります。
             このまま進めると、これらの変更は共有されず、次の同期で <code className="rounded bg-zinc-100 px-1 py-px text-[12px] dark:bg-white/10">.backups</code> フォルダに保存されます（消えることはありません）。
@@ -473,11 +469,10 @@ function ConfirmUnsynced({ files, onCancel, onConfirm }: { files: string[]; onCa
           </ul>
           <p className="text-zinc-500 dark:text-zinc-400">共有したい場合は、先に同期してからダウンロードしない設定にしてください。</p>
         </div>
-        <div className="mt-5 flex justify-end gap-2">
+        <DialogFooter>
           <Button ref={cancelRef} onClick={onCancel}>キャンセル</Button>
           <Button variant="primary" onClick={onConfirm}>.backups に保存して進める</Button>
-        </div>
-      </div>
-    </div>
+        </DialogFooter>
+    </Dialog>
   )
 }

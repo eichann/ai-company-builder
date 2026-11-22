@@ -102,7 +102,7 @@ export function SkillEditorsCard({ companyId, departments, members }: { companyI
         onConfirm={() => setEveryone(true)}
       />
       <Dialog open={editing !== null} onOpenChange={(open) => !open && setEditing(null)}>
-        <DialogContent className="gap-0 p-0 sm:max-w-md">
+        <DialogContent className="gap-0 p-0">
           {editing && (
             <SkillEditorsForm
               companyId={companyId}

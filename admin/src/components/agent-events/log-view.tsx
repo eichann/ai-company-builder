@@ -215,7 +215,7 @@ function ConversationHeader({ onBack }: { onBack: () => void }) {
   return (
     <div className="flex flex-col gap-3 rounded-xl border bg-card px-4 py-3 shadow-xs sm:flex-row sm:items-center sm:justify-between">
       <div className="flex items-start gap-2.5">
-        <ChatsCircle size={20} className="mt-0.5 shrink-0 text-brand" />
+        <ChatsCircle size={20} className="mt-0.5 shrink-0 text-primary" />
         <div>
           <p className="text-sm font-medium">この会話の流れ</p>
           <p className="text-sm text-muted-foreground">1つの会話で AI が行った操作を、古い順に並べています（期間などの絞り込みは使いません）。</p>
@@ -496,7 +496,7 @@ export function EventRow({
             <button
               type="button"
               onClick={() => onOpenConversation(e.conversationId!)}
-              className="rounded text-brand underline-offset-4 outline-none hover:underline focus-visible:ring-[3px] focus-visible:ring-ring/50"
+              className="rounded text-link underline-offset-4 hover:text-link-hover outline-none hover:underline focus-visible:ring-[3px] focus-visible:ring-ring/50"
             >
               この会話の流れ
             </button>

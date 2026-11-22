@@ -133,7 +133,7 @@ export function PrivateFolderPanel({
           )}
           <Link
             href={`/companies/${companyId}/private-folders`}
-            className="ml-auto inline-flex items-center gap-1 rounded text-sm font-medium text-brand underline-offset-4 outline-none hover:underline focus-visible:ring-[3px] focus-visible:ring-ring/50"
+            className="ml-auto inline-flex items-center gap-1 rounded text-sm font-medium text-link underline-offset-4 hover:text-link-hover outline-none hover:underline focus-visible:ring-[3px] focus-visible:ring-ring/50"
           >
             非公開フォルダの一覧
             <ArrowRight size={14} />
