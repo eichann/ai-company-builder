@@ -6,7 +6,7 @@ import { ConfirmDialog } from '../../../shared/ui/ConfirmDialog'
 import { MarkdownDiffView } from '../../doc-review/components/MarkdownDiffView'
 import { useWriteAccess } from '../../../shared/hooks/useWriteAccess'
 import { useAppStore } from '../../../stores/appStore'
-import { fileNameOf, isImageFile, isMarkdownFile, isPdfFile } from '../fileKinds'
+import { fileNameOf, isHtmlFile, isImageFile, isMarkdownFile, isPdfFile } from '../fileKinds'
 import { useOpenFiles } from '../hooks/useOpenFiles'
 import { useFileSaving } from '../hooks/useFileSaving'
 import { useEditorReview } from '../hooks/useEditorReview'
@@ -18,6 +18,7 @@ import { fileTabsOf, recordIdOfTab, viewOfTab, type RecordTabLook, type ViewTabL
 import { EditorError, EditorNotice, ExternalChangeBanner, MissingFileNotice, ReadOnlyNotice } from './EditorNotices'
 import { LocalImage, PdfPreview } from './BinaryPreviews'
 import { MarkdownPreviewPane } from './MarkdownPreviewPane'
+import { HtmlDocumentPane } from './HtmlDocumentPane'
 
 interface TabbedEditorPanelProps {
   openFiles: string[]
@@ -135,9 +136,25 @@ export function TabbedEditorPanel({
     keepFocusInEditor()
   }, [saveCurrentScrollPosition, review.otherInProgressReviews, setMdViewModePersisted])
   const activeIsMarkdown = !!shownFile && isMarkdownFile(shownFile)
+  // HTML opens as 見る (the proposal); the tabs showing 中身 instead, for this run of the app.
+  const [htmlSources, setHtmlSources] = useState<ReadonlySet<string>>(() => new Set())
+  const activeIsHtml = !!shownFile && isHtmlFile(shownFile)
+  // Each HTML tab's document zoom, kept while its viewer comes and goes (another tab, 中身).
+  const htmlZooms = useRef(new Map<string, number>())
+  const showHtmlSource = (path: string, source: boolean) => {
+    saveCurrentScrollPosition()
+    setHtmlSources(prev => {
+      const next = new Set(prev)
+      if (source) next.add(path)
+      else next.delete(path)
+      return next
+    })
+    keepFocusInEditor()
+  }
   useCommandHandler('editor.togglePreview', () => {
     if (activeIsMarkdown) handleSetMdViewMode(mdViewMode === 'preview' ? 'editor' : 'preview')
-  }, { target: paneId, acceptsKey: () => activeIsMarkdown })
+    else if (activeIsHtml && shownFile) showHtmlSource(shownFile, !htmlSources.has(shownFile))
+  }, { target: paneId, acceptsKey: () => activeIsMarkdown || activeIsHtml })
   useCommandHandler('editor.save', () => saving.handleSave(), { target: paneId })
 
   const handleContentChange = useCallback((newContent: string) => {
@@ -249,6 +266,15 @@ export function TabbedEditorPanel({
               />
             </div>
           </div>
+        ) : activeFile && activeFilePath && isHtmlFile(activeFilePath) && !htmlSources.has(activeFilePath) ? (
+          // One view per file and per showing: another tab or 中身 closes it (its scripts stop).
+          <HtmlDocumentPane
+            key={activeFilePath}
+            filePath={activeFilePath}
+            onShowSource={() => showHtmlSource(activeFilePath, true)}
+            zoom={htmlZooms.current.get(activeFilePath)}
+            onZoom={zoom => htmlZooms.current.set(activeFilePath, zoom)}
+          />
         ) : activeFile?.isLoading ? (
           <div className="h-full flex items-center justify-center text-gray-400 dark:text-zinc-500">
             読み込んでいます
@@ -296,7 +322,7 @@ export function TabbedEditorPanel({
               onViewReady={(view) => { scroll.editorViewRef.current = view }}
             />
             {/* Floating view mode toggle for markdown files in editor mode */}
-            {activeFilePath && isMarkdownFile(activeFilePath) && (
+            {activeFilePath && (isMarkdownFile(activeFilePath) || isHtmlFile(activeFilePath)) && (
               <div className="absolute top-3 right-3 flex rounded-md border border-gray-200 dark:border-zinc-700 bg-white/90 dark:bg-zinc-800/90 backdrop-blur-sm shadow-sm overflow-hidden opacity-60 hover:opacity-100 transition-opacity">
                 <button
                   className="flex items-center gap-1 px-2 py-1 text-[11px] transition-colors bg-gray-200 dark:bg-zinc-700 text-gray-800 dark:text-zinc-200"
@@ -305,9 +331,9 @@ export function TabbedEditorPanel({
                   <Code size={12} />
                 </button>
                 <button
-                  onClick={() => handleSetMdViewMode('preview')}
+                  onClick={() => (isHtmlFile(activeFilePath) ? showHtmlSource(activeFilePath, false) : handleSetMdViewMode('preview'))}
                   className="flex items-center gap-1 px-2 py-1 text-[11px] transition-colors text-gray-500 dark:text-zinc-500 hover:text-gray-700 dark:hover:text-zinc-300"
-                  title="プレビュー"
+                  title={isHtmlFile(activeFilePath) ? '見る' : 'プレビュー'}
                 >
                   <Eye size={12} />
                 </button>

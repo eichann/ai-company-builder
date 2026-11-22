@@ -6,7 +6,10 @@
 // the external-change banner — type in the editor first;
 // &view=tabs: tabs close, the last one opened is a preview tab, a long
 // Markdown file, an image and a PDF; window.__acbWrites lists every save and
-// window.__acbPinned every pinned tab).
+// window.__acbPinned every pinned tab;
+// &view=html: an HTML document and one at the company folder's top level; the document views are
+// faked — window.__acbDocCalls lists every docView call, __acbDocEvent(e) sends a docView:event,
+// __acbOpened the links handed to the browser; 「メニューを出す」 draws a menu over the document).
 import { useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import '../src/i18n'
@@ -38,6 +41,19 @@ if (tabsView) {
   files[`${ROOT}/営業部/ロゴ.png`] = ''
   files[`${ROOT}/営業部/契約書.pdf`] = ''
 }
+const htmlView = params.get('view') === 'html'
+const HTML_DOC = `${ROOT}/営業部/報告/11月の売上.html`
+const TOP_DOC = `${ROOT}/会社案内.html`
+if (htmlView) {
+  for (const key of Object.keys(files)) delete files[key]
+  files[HTML_DOC] = '<!doctype html><h1>11月の売上</h1>'
+  files[`${ROOT}/営業部/提案書.md`] = '# 提案書\n\n来期のご提案。'
+  files[TOP_DOC] = '<!doctype html><p>会社案内</p>'
+}
+const docCalls: unknown[][] = []
+const opened: string[] = []
+let docEvent: ((event: unknown) => void) | null = null
+let nextViewId = 7
 const writes: Array<[string, string]> = []
 // Saves of these paths fail (a spec adds them); closing the window as main asks it (close-guard.ts).
 const failWrites = new Set<string>()
@@ -62,6 +78,20 @@ Object.assign(window, {
     readDirectory: async () => [],
     deleteItem: async () => ({ success: true }),
     onFileChanges: (cb: (changes: { type: string; path: string }[]) => void) => { emitChanges = cb; return () => { emitChanges = null } },
+    openDocView: async (filePath: string) => {
+      docCalls.push(['open', filePath])
+      // A slow open (a spec sets it): the member may leave before the view is made.
+      const delay = (window as unknown as { __acbDocDelay?: number }).__acbDocDelay
+      if (delay) await new Promise(resolve => setTimeout(resolve, delay))
+      if (filePath === TOP_DOC) return { ok: false, reason: 'top_level', message: '会社フォルダのいちばん上にある HTML は表示できません。部署などのフォルダに入れてください。' }
+      return { ok: true, viewId: nextViewId++ }
+    },
+    closeDocView: async (viewId: number) => { docCalls.push(['close', viewId]) },
+    setDocViewBounds: async (viewId: number, bounds: unknown) => { docCalls.push(['bounds', viewId, bounds]) },
+    setDocViewZoom: async (viewId: number, factor: number) => { docCalls.push(['zoom', viewId, factor]) },
+    reloadDocView: async (viewId: number) => { docCalls.push(['reload', viewId]) },
+    onDocViewEvent: (cb: (event: unknown) => void) => { docEvent = cb; return () => { if (docEvent === cb) docEvent = null } },
+    openExternal: async (url: string) => { opened.push(url); return { success: true } },
   },
 })
 
@@ -79,17 +109,21 @@ function externalDelete(p: string) {
   emitChanges?.([{ type: 'unlink', path: p }])
 }
 Object.assign(window, { __acbExternalEdit: externalEdit, __acbExternalDelete: externalDelete, __acbFiles: files, __acbWrites: writes, __acbPinned: pinned, __acbHasUnsavedEdits: hasUnsavedEdits,
-  __acbFailWrites: failWrites, __acbCloseAnswers: closeAnswers, __acbRequestClose: () => requestClose?.() })
+  __acbFailWrites: failWrites, __acbDocCalls: docCalls, __acbDocEvent: (e: unknown) => docEvent?.(e), __acbOpened: opened,
+  __acbFileChange: (p: string) => emitChanges?.([{ type: 'change', path: p }]), __acbCloseAnswers: closeAnswers, __acbRequestClose: () => requestClose?.() })
 
 export function Preview() {
   // As AppShell does: shortcuts reach the focused area only.
   useKeybindings()
   const [dept, setDept] = useState(params.get('dept') ?? 'sales')
   const [openFiles, setOpenFiles] = useState(() => Object.keys(files))
-  const [active, setActive] = useState(`${ROOT}/コンテンツG/台本.md`)
+  const [active, setActive] = useState(htmlView ? HTML_DOC : `${ROOT}/コンテンツG/台本.md`)
+  const [menuOpen, setMenuOpen] = useState(false)
+  const [smallMenu, setSmallMenu] = useState(false)
+  const [toast, setToast] = useState(false)
   const [previewTab, setPreviewTab] = useState<string | null>(tabsView ? `${ROOT}/README.md` : null)
   const closeFile = (p: string) => {
-    if (!tabsView) return
+    if (!tabsView && !htmlView) return
     const rest = openFiles.filter(f => f !== p)
     setOpenFiles(rest)
     if (active === p) setActive(rest[0] ?? '')
@@ -110,8 +144,22 @@ export function Preview() {
           <button data-testid="external-delete" className="rounded border px-2 py-1" onClick={() => externalDelete(active)}>AIがこのファイルを削除する</button>
         </div>
       )}
+      {htmlView && (
+        <div style={{ display: 'flex', gap: 8, padding: '4px 12px', fontSize: 12 }}>
+          <button data-testid="open-menu" onClick={() => setMenuOpen(o => !o)}>メニューを出す</button>
+          <button data-testid="open-small-menu" onClick={() => setSmallMenu(o => !o)}>小さいメニュー</button>
+          <button data-testid="open-toast" onClick={() => setToast(o => !o)}>お知らせ</button>
+        </div>
+      )}
+      {menuOpen && (
+        <div role="menu" style={{ position: 'fixed', left: 300, top: 200, width: 120, height: 60, background: '#fff', border: '1px solid #ccc', zIndex: 60 }}>
+          <button role="menuitem" onClick={() => setMenuOpen(false)}>閉じる</button>
+        </div>
+      )}
+      {smallMenu && <div role="menu" aria-label="小さいメニュー" style={{ position: 'fixed', ...(window as unknown as { __acbSmallMenuAt?: object }).__acbSmallMenuAt, width: 12, height: 12, background: '#fff', zIndex: 60 }} />}
+      {toast && <div role="status" style={{ position: 'fixed', ...(window as unknown as { __acbSmallMenuAt?: object }).__acbSmallMenuAt, width: 12, height: 12, background: '#333', zIndex: 70 }} />}
       {/* Tailwind does not scan this page: the tabs view sets its height itself so the preview scrolls. */}
-      <div className="h-[420px] w-[760px]" style={tabsView ? { height: 420 } : undefined}>
+      <div className="h-[420px] w-[760px]" style={tabsView || htmlView ? { height: 420 } : undefined}>
         <TabbedEditorPanel openFiles={openFiles} activeFilePath={active} previewFilePath={previewTab} tabLabels={labels} onSelectFile={setActive} onCloseFile={closeFile} onPinFile={pinFile} />
       </div>
       <WindowCloseGuard />

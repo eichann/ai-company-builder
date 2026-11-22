@@ -16,16 +16,18 @@ export type EditorRefusals = ElectronPort<'reservedPathRefusal'>
 /**
  * The HTML viewer's document views (doc-frame.md): main shows an `.html`
  * file in a view of its own (its own session, no network) and hands back only
- * the view's id; closing it revokes the document's grant.
+ * the view's id; the viewer places it over the tab (null hides it), zooms and
+ * reloads it; closing it revokes the document's grant. Main tells the window
+ * about a link the member pressed in it, or a view that went by itself.
  */
-export type DocViewControls = ElectronPort<'openDocView' | 'closeDocView'>
+export type DocViewControls = ElectronPort<'openDocView' | 'closeDocView' | 'setDocViewBounds' | 'setDocViewZoom' | 'reloadDocView' | 'onDocViewEvent'>
 
-export function openDocView(filePath: string, views: DocViewControls = window.electronAPI) {
-  return views.openDocView(filePath)
-}
+/** Opening a link of a document in the member's browser, after they said yes. */
+export type DocLinkOutbound = ElectronPort<'openExternal'>
 
-export function closeDocView(viewId: number, views: DocViewControls = window.electronAPI) {
-  return views.closeDocView(viewId)
+/** The app's own ports for the viewer (a preview page fakes `window.electronAPI`). */
+export function docViewPorts(): { views: DocViewControls; links: DocLinkOutbound } {
+  return { views: window.electronAPI, links: window.electronAPI }
 }
 
 /** The file's text, or null when it is gone. */

@@ -19,6 +19,7 @@ import type { GoogleFeature } from '../shared/google'
 import type { MailAwaitReply, MailDraftEdit } from '../shared/outbound-mail'
 import type { AbsenceAddInput } from '../shared/absences'
 import type { RecordsTableQuery } from '../shared/records-table'
+import type { DocViewBounds } from '../shared/doc-frame'
 import type { WorkSwitch } from '../shared/work-switches'
 import type { ViewersQuery } from '../shared/viewers'
 import type { InviteSet } from '../shared/minutes-app'
@@ -94,6 +95,10 @@ const api: ElectronAPI = {
   readFileBinary: (path: string) => invoke('fs:readFileBinary', path),
   openDocView: (filePath: string) => invoke('docView:open', filePath),
   closeDocView: (viewId: number) => invoke('docView:close', viewId),
+  setDocViewBounds: (viewId: number, bounds: DocViewBounds | null) => invoke('docView:setBounds', viewId, bounds),
+  setDocViewZoom: (viewId: number, factor: number) => invoke('docView:setZoom', viewId, factor),
+  reloadDocView: (viewId: number) => invoke('docView:reload', viewId),
+  onDocViewEvent: callback => subscribe('docView:event', callback),
   writeFile: (path: string, content: string) => invoke('fs:writeFile', path, content),
   createFile: (path: string, content: string) => invoke('fs:createFile', path, content),
   backupBeforeOverwrite: (rootPath: string, filePath: string) =>

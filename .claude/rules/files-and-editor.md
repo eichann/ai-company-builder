@@ -150,7 +150,9 @@ freeze the window on a 15k-file company. Measurements and the dropped chokidar d
 `local-file://` reads anything in the company folders, so it is for images and PDFs shown by the
 app's own page only. An HTML document never loads through it: it is shown in a view of its own
 on the document session from `acb-doc://`, which serves only that document's own folder under a
-CSP with no network (`doc-frame.md`).
+CSP with no network (`doc-frame.md`). A change of the document or of a file it can load (a served
+type in its folder or below: `htmlViewer.ts` `changeShowsIn`) reloads its view, keeping the scroll
+position and zoom; data files and other folders do not.
 
 ## Skills list freshness (`client/shared/skills-refresh.ts`)
 
@@ -234,7 +236,9 @@ the result, disable their buttons meanwhile and show the reason (`role="alert"`)
   `useEditorReview.ts` (the review of the active document); parts `EditorTabBar`,
   `EditorNotices` (閲覧のみ, deleted, external change, notice, error), `MarkdownPreview` (+
   `hooks/usePreviewSearch.ts`), `MarkdownPreviewPane` (preview + review UI), `BinaryPreviews`
-  (image, PDF); `fileKinds.ts` decides how a file is shown. No band under the editor (owner
+  (image, PDF), `HtmlDocumentPane` (an `.html` / `.htm` file's 見る: its document in a view of its
+  own, `doc-frame.md` "The viewer (A2)"; 中身 is the code editor, ⌘⇧V switches, 見る by default and
+  per tab for the app's run); `fileKinds.ts` decides how a file is shown. No band under the editor (owner
   2026-11-04: it only said 「自動保存」 and took space): unsaved edits are the tab's dot
   (「保存していない変更があります」), a paused autosave is the external-change banner, a failed
   save is `EditorError` above the editor (`editor-panel.spec.ts` 「a failed autosave…」). ⌘S, ⌘⇧V and ⌘F are the commands

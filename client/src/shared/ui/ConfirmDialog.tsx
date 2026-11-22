@@ -1,4 +1,4 @@
-import { useId, useLayoutEffect, useRef, type KeyboardEvent as ReactKeyboardEvent } from 'react'
+import { useId, useLayoutEffect, useRef, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react'
 import { WarningCircle } from '@phosphor-icons/react'
 import { useEventListener } from '../hooks/useEventListener'
 import { useLatestRef } from '../hooks/useLatestRef'
@@ -7,6 +7,8 @@ interface ConfirmDialogProps {
   isOpen: boolean
   title: string
   message: string
+  /** More under the message (what the confirm is about, set apart: a web address's domain). */
+  detail?: ReactNode
   confirmText?: string
   cancelText?: string
   /** Deleting or removing something: the red button, read out as an alert, focus starts on cancel. */
@@ -44,6 +46,7 @@ const FOCUSABLE = 'button:not([disabled]), [href], input:not([disabled]), select
 function OpenConfirmDialog({
   title,
   message,
+  detail,
   confirmText = '確認',
   cancelText = 'キャンセル',
   danger = false,
@@ -136,9 +139,10 @@ function OpenConfirmDialog({
               className="text-danger-icon flex-shrink-0 mt-0.5"
             />
           )}
-          <div>
+          <div className="min-w-0">
             <h3 id={titleId} className="text-title text-text">{title}</h3>
             <p id={messageId} className="mt-2 whitespace-pre-line text-body text-text-muted">{message}</p>
+            {detail}
           </div>
         </div>
         <div className="flex justify-end gap-2 mt-6">

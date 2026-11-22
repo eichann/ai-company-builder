@@ -1,6 +1,9 @@
 // The HTML viewer's document views (doc-frame.md):
 //   docView:open   (filePath) → the id of a view showing the document, or why not (plain Japanese)
 //   docView:close  (viewId)   → the view closes and its grant is revoked
+//   docView:setBounds (viewId, bounds | null) → placed over the tab and shown, or hidden (and muted)
+//   docView:setZoom (viewId, factor) / docView:reload (viewId) → the document's zoom; load it again
+// (main → window: `docView:event`, sent by main.ts: a link the member pressed, a view that went.)
 // Only the main window's own page may ask (not a consultation window, not a frame inside the page),
 // and that is decided before anything is read from the disk. The path goes through the allowed roots.
 // The document's address stays in main: the renderer only ever holds a view id.
@@ -11,7 +14,7 @@ import type { DocViews } from './views'
 
 export interface DocViewsIpcDeps<E> {
   frames: Pick<DocFrames, 'check'>
-  views: Pick<DocViews, 'begin' | 'open' | 'close'>
+  views: Pick<DocViews, 'begin' | 'open' | 'close' | 'place' | 'zoom' | 'reload'>
   /** The event came from the main window's main frame. */
   fromMainWindow: (event: E) => boolean
 }
@@ -30,5 +33,14 @@ export function registerDocViewsIpc<E extends IpcInvokeEvent>(ipc: IpcRegistrar<
   })
   ipc.handle('docView:close', (event, viewId) => {
     if (fromMainWindow(event)) views.close(viewId, event.sender.id)
+  })
+  ipc.handle('docView:setBounds', (event, viewId, bounds) => {
+    if (fromMainWindow(event)) views.place(viewId, event.sender.id, bounds)
+  })
+  ipc.handle('docView:setZoom', (event, viewId, factor) => {
+    if (fromMainWindow(event)) views.zoom(viewId, event.sender.id, factor)
+  })
+  ipc.handle('docView:reload', (event, viewId) => {
+    if (fromMainWindow(event)) views.reload(viewId, event.sender.id)
   })
 }
