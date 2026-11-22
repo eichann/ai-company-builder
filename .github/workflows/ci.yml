@@ -58,6 +58,7 @@ jobs:
       universal: ${{ steps.areas.outputs.universal }}
       server: ${{ steps.areas.outputs.server }}
       admin: ${{ steps.areas.outputs.admin }}
+      model: ${{ steps.areas.outputs.model }}
       # The runner label for every macOS job. The self-hosted Mac
       # (vars.MAC_RUNNER) only for code from this repository: a push, the
       # nightly / manual run, or a pull request whose branch is in this
@@ -416,6 +417,32 @@ jobs:
       - uses: ./.github/actions/setup
       - run: npx vitest run
         working-directory: admin
+
+  model-browser-plan:
+    name: Model (browser plan)
+    # The browser plan lifecycle model (model/browser-plan/, agent-browser.md "The plan model"): the
+    # checker tla-ts explores every reachable state of PlanLife.tla and checks rules R1-R7, the state
+    # count against expected.txt, and that each broken / limit / hole variant fails on its named rule
+    # and each proposal passes (~25 s). Runs when the model or the code it copies changes (area model;
+    # check-areas.mjs keeps that list in step with the files the model cites), on push to main and
+    # nightly. The checker is npm code from outside the pnpm workspace: installed by model/check from
+    # model/browser-plan/package-lock.json with install scripts off, in this job only, which gets no
+    # secrets, the read-only token and no persisted git credentials. Node 22: the version the model
+    # was checked with (tla-ts 0.0.10); nothing here needs the app's Node 20.
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.model != 'false' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: 22
+      - run: model/browser-plan/check
 
   lint-changed:
     name: Lint (changed files)

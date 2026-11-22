@@ -47,6 +47,7 @@ paths:
   - "client/tests/browser-preview.test.ts"
   - "client/tests/browser-page.test.ts"
   - "client/tests/browser-read-session.test.ts"
+  - "model/browser-plan/**"
 ---
 
 # Browser operation (「ブラウザ操作」): sites the chat AI may operate
@@ -548,7 +549,8 @@ send → report; 6c turns it on for the owner's PC).
   stretch between the app's last clock check and the request leaving (§30.1); a site already
   processing a send; a parent / child target (§28.A); a version that changes `lock.kind` or the
   target fields while an execution is open is not held back yet (§30.5's compatibility rule: today
-  one version exists).
+  one version exists); and, not said until 6b-2a fixes it, a server wall clock jumping forward
+  right after a permit (an open hole, "The plan model").
 
 Tests: `server/tests/unit/browser-plans.test.ts` (every row of both state tables, the time-outs on
 touch, claim / permit / confirm once, the service's own compare-and-set losing to a row changed
@@ -565,6 +567,43 @@ and uncached and only in its header, the report without a session, the real memb
 `client/tests/browser-connectors-approved.test.ts`, permission matrix rows + `CROSS`,
 `company-scoped-sql.test.ts` (`HANDLE_TABLES`, the lookup), `jobs-schema.test.ts` (additive tables).
 Each guard mutation-checked.
+
+## The plan model (`model/browser-plan/`: the lifecycle in TLA+, checked in CI)
+
+The plan's life (register → approve → claim → permit → send → report → confirm) is also written as a
+TLA+ model, `model/browser-plan/PlanLife.tla`, with rules R1–R7 (one send per plan; no send without
+approval and a live permit; one open execution per target; failed only if not sent; a "not done"
+confirmation stays true; no change twice; everything can settle). `model/browser-plan/check` explores
+every reachable state with tla-ts (pinned by the folder's own npm lockfile, outside the pnpm
+workspace) and also requires each `broken/` variant (one guard removed) to fail its named rule, so a
+checker that passes everything fails the job. CI job "Model (browser plan)" (`ci.yml`, area `model`),
+README in the folder.
+
+- **A PR that changes the plan lifecycle changes the model in the same PR**: the state transitions,
+  the order of checks (gate, lock, re-read, the last check before sending), what a report may move,
+  or the time contract (`BROWSER_PLAN_TIMES`, which clock decides). Better: change the model first and
+  run `check`. A PR that touches a cited file (area `model`) without touching the model says in its
+  body why the model is unaffected.
+- A changed state count updates `expected.txt` with the reason in the PR; a new guard adds a `broken/`
+  variant that removes it. **Weakening or removing a rule is the owner's call** (the rule set is
+  compared with `expected.txt`; the independent review looks for it).
+- **The model is copied by hand**: each action names the function (`server/src/services/browser-plans.ts`,
+  `shared/core/browser-plans.ts`) or design section it copies, and `check-areas.mjs` keeps every cited
+  file in area `model`, but nothing compares behaviour mechanically, so it can drift; regressions in
+  the code stay the tests' job. The app side copies the 6b-2 design, not shipped code (nothing in the
+  app calls the plans yet); 6b-2's PRs cite their files as they land. Left out on purpose: more than
+  one target / two plans / two PCs, real durations (5 s and 30 s are abstract units), the app's two
+  clocks as separate values, a person confirming wrongly, the facts' fields (folded into
+  before / after / other), a modified app, a site processing a send late, and liveness under fairness
+  (R7 says a path to settled exists).
+- **Open hole, expected to fail until fixed**: `holes/HoleServerClockJumps` — the server's wall clock
+  jumping forward 35 s or more right after a permit lets 6a turn the execution unknown and accept
+  「確かめた：されていなかった」 while the app still sends inside its 5 s (R5 breaks; 6a refuses only a
+  clock going back). The fix (`proposals/FixServerClockJumps`: also require the monotonic elapsed time
+  since the permit, with the boot id) passes every rule; the server PR that makes it (6b-2a) moves it
+  into `PlanLife.tla` and deletes the hole and the proposal with their `expected.txt` lines (README
+  "Open hole"). `limits/LimitFrozenAfterCheck` is the accepted "Remaining limits" stretch between the
+  app's last clock check and the request leaving (fails R2, kept so it does not change unnoticed).
 
 ## The operator and the preview (PR 6b-1: built, switched off; nothing in the app calls it)
 

@@ -49,6 +49,8 @@ server/data/
 
 # Package manager (pnpm only)
 package-lock.json
+# ...except the browser plan model's checker, pinned outside the pnpm workspace (model/browser-plan/README.md)
+!model/browser-plan/package-lock.json
 
 # Test coverage
 coverage/
