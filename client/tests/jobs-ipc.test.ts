@@ -168,7 +168,7 @@ test('a stopped chain: the member\'s own open やること are offered by name, 
 
 // Stage 4a (jobs.md "Event-triggered jobs"): the app shows event jobs, so it says it reads schema 2 on every job call —
 // a server answers an app that does not say so without the definition (and refuses its 受け取る: 「アプリを新しく」).
-test('every job call says which definition shapes this app shows (1 and 2)', async () => {
+test('every job call says which definition shapes this app shows (1, 2 and 3: stage 4b-2)', async () => {
   const headers: Array<Record<string, string>> = []
   const fetch = (async (_url: string, init: RequestInit) => {
     headers.push(init.headers as Record<string, string>)
@@ -177,8 +177,67 @@ test('every job call says which definition shapes this app shows (1 and 2)', asy
   const jobs = createJobsApi({ baseUrl: () => 'https://acb.example', cookies: () => ['s=1'], fetch, log: { warn() {} } })
   await jobs.mine('c1')
   await jobs.pause('c1', J1)
-  assert.ok(headers.length === 2 && headers.every(h => h['X-ACB-Job-Schemas'] === '1,2'))
+  assert.ok(headers.length === 2 && headers.every(h => h['X-ACB-Job-Schemas'] === '1,2,3'))
   // The app's 受け取る is always a press of its own (owner decision 2026-11-18): said on every job call, so the server
   // never takes it for an approval's (it refuses the approver's acceptance without it).
   assert.ok(headers.every(h => h['X-ACB-Job-Accept'] === 'separate'))
+})
+
+// Stage 4b-2 (D11): 「AI が動いた回」 — the event occurrences this PC's AI ran for the member, as the server answers them; a
+// renderer value never changes the path; an older server (404) has none, said as nothing to show.
+const O1 = 'occ.' + 'a'.repeat(32)
+function occurrencesApi(answer: { status: number; data?: unknown }) {
+  const calls: Array<{ method: string; url: string; body?: string }> = []
+  const fetch = (async (url: string, init: RequestInit) => {
+    calls.push({ method: init.method ?? 'GET', url: url.replace('https://acb.example/api/companies/c1', ''), body: init.body as string | undefined })
+    const isList = url.endsWith('/me/job-occurrences')
+    const body = isList ? (answer.status === 200 ? { success: true, data: answer.data } : { error: 'x' }) : { success: true, data: { ok: true } }
+    return new Response(JSON.stringify(body), { status: isList ? answer.status : 200, headers: { 'Content-Type': 'application/json' } })
+  }) as typeof globalThis.fetch
+  return { calls, jobs: createJobsApi({ baseUrl: () => 'https://acb.example', cookies: () => ['s=1'], fetch, log: { warn() {} } }) }
+}
+const occurrence = (over: Record<string, unknown> = {}) => ({
+  id: O1, jobId: J1, name: '面談の報告', jobVersion: 1, dueSlot: '2026-11-22T10:00', timeZone: 'Asia/Tokyo', dueAt: 'x', expiresAt: 'x',
+  state: 'needs_person', outcomeCode: 'RESULT_UNKNOWN', ran: false, updatedAt: 'x', kind: 'event',
+  retry: { allowed: false, why: 'JOB_RESULT_UNKNOWN' }, unknownOperations: [{ key: 'acb-0123', kind: 'drive-put' }], madeBefore: [], ...over,
+})
+
+test('「AI が動いた回」: the server\'s list as answered; only what reaches a path is strict — a later server\'s words never hide 「後始末」', async () => {
+  const ops = Array.from({ length: 60 }, (_, i) => ({ key: `acb-${i}`, kind: 'drive-put' }))
+  const { jobs } = occurrencesApi({ status: 200, data: { occurrences: [
+    occurrence(),
+    occurrence({ id: 'task-0123456789' }), // not an occurrence id: left out (it goes into the path)
+    occurrence({ id: 'occ.' + 'b'.repeat(32), state: 'later_state', outcomeCode: 'later code', retry: { allowed: false, why: 'LATER_REASON' }, unknownOperations: [{ key: '../x', kind: 'drive-put' }, { key: 'acb-9', kind: '??' }] }),
+    occurrence({ id: 'occ.' + 'c'.repeat(32), retry: { allowed: 'yes' }, unknownOperations: ops }),
+  ] } })
+  const r = await jobs.occurrences('c1')
+  assert.ok(r.success && r.supported)
+  assert.deepEqual(r.occurrences.map(o => o.id), [O1, 'occ.' + 'b'.repeat(32), 'occ.' + 'c'.repeat(32)])
+  assert.deepEqual([r.occurrences[0].retry, r.occurrences[0].unknownOperations], [{ allowed: false, why: 'JOB_RESULT_UNKNOWN' }, [{ key: 'acb-0123', kind: 'drive-put' }]])
+  // Unknown state, code and reason: kept, shown as not readable / blocked; the bad key alone left out, the good one kept.
+  assert.deepEqual([r.occurrences[1].state, r.occurrences[1].outcomeCode, r.occurrences[1].retry, r.occurrences[1].unknownOperations],
+    [null, null, { allowed: false, why: 'UNKNOWN' }, [{ key: 'acb-9', kind: 'other' }]])
+  // A malformed retry is no button; a long list is cut, never the occurrence.
+  assert.deepEqual([r.occurrences[2].retry, r.occurrences[2].unknownOperations.length], [null, 50])
+  // Fields the server left out (rights it does not give) stay out: nothing to press.
+  const plain = await occurrencesApi({ status: 200, data: { occurrences: [occurrence({ retry: undefined, unknownOperations: undefined })] } }).jobs.occurrences('c1')
+  assert.ok(plain.success)
+  assert.deepEqual([plain.occurrences[0].retry, plain.occurrences[0].unknownOperations], [null, []])
+  const old = await occurrencesApi({ status: 404 }).jobs.occurrences('c1')
+  assert.deepEqual(old, { success: true, supported: false, occurrences: [] })
+})
+
+test('「もう一度」 and 「後始末」 go to the occurrence\'s own route; a renderer value never changes the path', async () => {
+  const { calls, jobs } = occurrencesApi({ status: 200, data: { occurrences: [] } })
+  assert.ok((await jobs.retryOccurrence('c1', J1, O1)).success)
+  assert.ok((await jobs.reconcileOccurrence('c1', J1, O1, 'acb-0123', false)).success)
+  assert.deepEqual(calls.map(c => [c.method, c.url, c.body]), [
+    ['POST', `/jobs/${J1}/occurrences/${O1}/retry`, undefined],
+    ['POST', `/jobs/${J1}/occurrences/${O1}/operations/acb-0123/reconcile`, JSON.stringify({ done: false })],
+  ])
+  for (const [jobId, occ, key, done] of [[J1, '../x', 'acb-1', true], [J1, O1, '../x', true], [J1, O1, 'acb-1', 'yes'], ['job/../x', O1, 'acb-1', true]] as const) {
+    assert.equal((await jobs.reconcileOccurrence('c1', jobId, occ, key, done)).success, false)
+  }
+  assert.equal((await jobs.retryOccurrence('c1', J1, 'occ.../x')).success, false)
+  assert.equal(calls.length, 2)
 })

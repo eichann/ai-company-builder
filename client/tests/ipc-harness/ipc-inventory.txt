@@ -152,8 +152,11 @@ contract.invoke handoff:get
 contract.invoke handoff:update
 contract.invoke jobs:accept
 contract.invoke jobs:mine
+contract.invoke jobs:occurrences
 contract.invoke jobs:pause
+contract.invoke jobs:reconcileOccurrence
 contract.invoke jobs:resume
+contract.invoke jobs:retryOccurrence
 contract.invoke jobs:rewatch
 contract.invoke jobs:watchChoices
 contract.invoke minutes:arrivals
@@ -444,6 +447,7 @@ contract.type ElectronAPI.getMeetingBundleQuestion = getMeetingBundleQuestion: I
 contract.type ElectronAPI.getMeetingCardState = getMeetingCardState: Invoke<'minutes:meeting'>
 contract.type ElectronAPI.getMinutesNotices = getMinutesNotices: Invoke<'minutes:notices'>
 contract.type ElectronAPI.getMyDepartments = getMyDepartments: Invoke<'companySetup:myDepartments'>
+contract.type ElectronAPI.getMyJobOccurrences = getMyJobOccurrences: Invoke<'jobs:occurrences'>
 contract.type ElectronAPI.getMyJobs = getMyJobs: Invoke<'jobs:mine'>
 contract.type ElectronAPI.getMyPrivateFolders = getMyPrivateFolders: Invoke<'privateFolders:mine'>
 contract.type ElectronAPI.getNotificationSettings = getNotificationSettings: Invoke<'notifications:settings'>
@@ -547,6 +551,7 @@ contract.type ElectronAPI.readFile = readFile: Invoke<'fs:readFile'>
 contract.type ElectronAPI.readFileBinary = readFileBinary: Invoke<'fs:readFileBinary'>
 contract.type ElectronAPI.readStepContinuation = readStepContinuation: Invoke<'pluginSteps:continuation'>
 contract.type ElectronAPI.readStepDeliverables = readStepDeliverables: Invoke<'pluginSteps:deliverables'>
+contract.type ElectronAPI.reconcileJobOccurrence = reconcileJobOccurrence: Invoke<'jobs:reconcileOccurrence'>
 contract.type ElectronAPI.reconcilePluginOperation = reconcilePluginOperation: Invoke<'pluginOperations:reconcile'>
 contract.type ElectronAPI.reconcileTaskRun = reconcileTaskRun: Invoke<'tasks:reconcile'>
 contract.type ElectronAPI.recreatePluginOperation = recreatePluginOperation: Invoke<'pluginOperations:recreate'>
@@ -564,6 +569,7 @@ contract.type ElectronAPI.respondToolApproval = respondToolApproval: Invoke<'too
 contract.type ElectronAPI.restoreCompanySkill = restoreCompanySkill: Invoke<'skillShelf:restoreCompany'>
 contract.type ElectronAPI.resumeJob = resumeJob: Invoke<'jobs:resume'>
 contract.type ElectronAPI.retryAiTurn = retryAiTurn: Invoke<'aiTurns:retry'>
+contract.type ElectronAPI.retryJobOccurrence = retryJobOccurrence: Invoke<'jobs:retryOccurrence'>
 contract.type ElectronAPI.retryTaskRun = retryTaskRun: Invoke<'tasks:retryRun'>
 contract.type ElectronAPI.rewatchJob = rewatchJob: Invoke<'jobs:rewatch'>
 contract.type ElectronAPI.sameAsApproval = sameAsApproval: Invoke<'approvals:sameAs'>
@@ -880,8 +886,11 @@ contract.type IpcInvokeChannels.'handoff:get' = 'handoff:get': { args: [company:
 contract.type IpcInvokeChannels.'handoff:update' = 'handoff:update': { args: [company: string, id: string]; result: void }
 contract.type IpcInvokeChannels.'jobs:accept' = 'jobs:accept': { args: [companyId: string, jobId: string, version: number, fingerprint: string]; result: JobActionResult }
 contract.type IpcInvokeChannels.'jobs:mine' = 'jobs:mine': { args: [companyId: string]; result: MyJobsResult }
+contract.type IpcInvokeChannels.'jobs:occurrences' = 'jobs:occurrences': { args: [companyId: string]; result: MyJobOccurrencesResult }
 contract.type IpcInvokeChannels.'jobs:pause' = 'jobs:pause': { args: [companyId: string, jobId: string]; result: JobActionResult }
+contract.type IpcInvokeChannels.'jobs:reconcileOccurrence' = 'jobs:reconcileOccurrence': { args: [companyId: string, jobId: string, occurrenceId: string, key: string, done: boolean]; result: JobActionResult }
 contract.type IpcInvokeChannels.'jobs:resume' = 'jobs:resume': { args: [companyId: string, jobId: string]; result: JobActionResult }
+contract.type IpcInvokeChannels.'jobs:retryOccurrence' = 'jobs:retryOccurrence': { args: [companyId: string, jobId: string, occurrenceId: string]; result: JobActionResult }
 contract.type IpcInvokeChannels.'jobs:rewatch' = 'jobs:rewatch': { args: [companyId: string, jobId: string, version: number, recordId: string]; result: JobActionResult }
 contract.type IpcInvokeChannels.'jobs:watchChoices' = 'jobs:watchChoices': { args: [companyId: string, text: string]; result: WatchChoicesResult }
 contract.type IpcInvokeChannels.'minutes:arrivals' = 'minutes:arrivals': { args: [companyId: string]; result: MeetingArrivalsResult }
@@ -1201,8 +1210,11 @@ main.handle handoff:get @ features/chat-history/ipc.ts (company: string, id: str
 main.handle handoff:update @ features/chat-history/ipc.ts (company: string, id: string)
 main.handle jobs:accept @ features/jobs/ipc.ts (companyId, jobId, version, fingerprint)
 main.handle jobs:mine @ features/jobs/ipc.ts (companyId)
+main.handle jobs:occurrences @ features/jobs/ipc.ts (companyId)
 main.handle jobs:pause @ features/jobs/ipc.ts (companyId, jobId)
+main.handle jobs:reconcileOccurrence @ features/jobs/ipc.ts (companyId, jobId, occurrenceId, key, done)
 main.handle jobs:resume @ features/jobs/ipc.ts (companyId, jobId)
+main.handle jobs:retryOccurrence @ features/jobs/ipc.ts (companyId, jobId, occurrenceId)
 main.handle jobs:rewatch @ features/jobs/ipc.ts (companyId, jobId, version, recordId)
 main.handle jobs:watchChoices @ features/jobs/ipc.ts (companyId, text)
 main.handle minutes:arrivals @ features/minutes/ipc.ts (companyId)
@@ -1502,6 +1514,8 @@ preload getMinutesNotices -> invoke minutes:notices($0)
 preload getMinutesNotices : (companyId: string) => Promise<MinutesNoticesResult>
 preload getMyDepartments -> invoke companySetup:myDepartments($0)
 preload getMyDepartments : (companyId: string) => Promise<{ success: boolean; departmentIds?: string[] | undefined; }>
+preload getMyJobOccurrences -> invoke jobs:occurrences($0)
+preload getMyJobOccurrences : (companyId: string) => Promise<MyJobOccurrencesResult>
 preload getMyJobs -> invoke jobs:mine($0)
 preload getMyJobs : (companyId: string) => Promise<MyJobsResult>
 preload getMyPrivateFolders -> invoke privateFolders:mine($0)
@@ -1708,6 +1722,8 @@ preload readStepContinuation -> invoke pluginSteps:continuation($0, $1)
 preload readStepContinuation : (companyId: string, recordId: string) => Promise<PluginStepContinuation | null>
 preload readStepDeliverables -> invoke pluginSteps:deliverables($0, $1)
 preload readStepDeliverables : (companyId: string, recordId: string) => Promise<StepDeliverablesView | null>
+preload reconcileJobOccurrence -> invoke jobs:reconcileOccurrence($0, $1, $2, $3, $4)
+preload reconcileJobOccurrence : (companyId: string, jobId: string, occurrenceId: string, key: string, done: boolean) => Promise<JobActionResult>
 preload reconcilePluginOperation -> invoke pluginOperations:reconcile($0, $1, $2)
 preload reconcilePluginOperation : (companyId: string, pluginId: string, operationId: string) => Promise<PluginOperationResult>
 preload reconcileTaskRun -> invoke tasks:reconcile($0, $1, $2, $3)
@@ -1742,6 +1758,8 @@ preload resumeJob -> invoke jobs:resume($0, $1)
 preload resumeJob : (companyId: string, jobId: string) => Promise<JobActionResult>
 preload retryAiTurn -> invoke aiTurns:retry($0, $1)
 preload retryAiTurn : (companyId: string, recordId: string) => Promise<{ ok: boolean; }>
+preload retryJobOccurrence -> invoke jobs:retryOccurrence($0, $1, $2)
+preload retryJobOccurrence : (companyId: string, jobId: string, occurrenceId: string) => Promise<JobActionResult>
 preload retryTaskRun -> invoke tasks:retryRun($0, $1)
 preload retryTaskRun : (companyId: string, runId: string) => Promise<TaskWriteResult>
 preload rewatchJob -> invoke jobs:rewatch($0, $1, $2, $3)

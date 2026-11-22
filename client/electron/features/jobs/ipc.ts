@@ -6,9 +6,18 @@
 //                 Google Picker: `choosePlace`, composed in main.ts — this module never names a connector)
 //   jobs:pause    pause a job they run
 //   jobs:resume   resume a pause they made
+//   jobs:occurrences          the event occurrences this PC's AI ran for them (stage 4b-2, D11: `GET /me/job-occurrences`)
+//   jobs:retryOccurrence      「もう一度」 on one of them (the server decides who may and when)
+//   jobs:reconcileOccurrence  「後始末」: say whether an outside operation of its run was made (作られていた／作られていなかった)
 
-import { APP_JOB_SCHEMAS, JOBS_OFFLINE_TEXT, JOBS_SERVER_TOO_OLD_TEXT, appReadsJobDefinition, type JobActionResult, type JobsFailure, type MyJob, type MyJobsResult, type WatchChoicesResult } from '../../../shared/jobs'
-import { JOB_ACCEPT_HEADER, JOB_ACCEPT_SEPARATE, JOB_SCHEMAS_HEADER, isJobId, type JobDeliveryPlace } from '../../../../shared/core/jobs'
+import {
+  APP_JOB_SCHEMAS, JOBS_OFFLINE_TEXT, JOBS_SERVER_TOO_OLD_TEXT, appReadsJobDefinition,
+  type JobActionResult, type JobsFailure, type MyJob, type MyJobOccurrence, type MyJobOccurrencesResult, type MyJobsResult, type WatchChoicesResult,
+} from '../../../shared/jobs'
+import {
+  JOB_ACCEPT_HEADER, JOB_ACCEPT_SEPARATE, JOB_OCCURRENCE_STATES, JOB_RETRY_BLOCKS, JOB_SCHEMAS_HEADER, isJobId, isOccurrenceId,
+  type JobDeliveryPlace, type JobOccurrenceState, type JobRetryBlock,
+} from '../../../../shared/core/jobs'
 import { RECORD_ID_RE } from '../../../../shared/core/records'
 import type { JobView } from '../../../../shared/types/jobs'
 import type { IpcRegistrar } from '../../ipc/registrar'
@@ -39,6 +48,55 @@ const WATCH_STATES = ['todo', 'in_progress', 'review', 'waiting', 'awaiting_acce
 const WATCH_CHOICES = 50
 
 type Answer = { status: number; json: Record<string, unknown> | null }
+
+/** An outside operation's key as the server's run core makes it (ids only: it goes into the reconcile's path). */
+const OPERATION_KEY = /^[A-Za-z0-9._:-]{1,100}$/
+const SHORT_KIND = /^[A-Za-z0-9._:-]{1,40}$/
+/** At most this many operations or made things are read per occurrence (the rest left out, never the occurrence). */
+const MAX_OPERATIONS = 50
+/** At most this many occurrences are shown (the server answers ≤ 100). */
+const MAX_OCCURRENCES = 100
+
+/**
+ * One occurrence of `GET /me/job-occurrences`, checked (stage 4b-2): what goes into a path (`id`, `jobId`, each operation
+ * `key`) strictly — an occurrence without valid ids is left out, an operation without a valid key is left out alone. Any
+ * other field a later server words differently never hides the entry or its 「後始末」: an unknown state or code is shown as
+ * not readable here, an unknown 「もう一度」 reason as blocked in generic words, a malformed field as absent. Nothing is
+ * derived — the buttons follow `retry` and `unknownOperations` as answered (the server leaves them out where the member's
+ * rights do not reach).
+ */
+export function parseMyJobOccurrence(v: unknown): MyJobOccurrence | null {
+  if (typeof v !== 'object' || v === null) return null
+  const o = v as Record<string, unknown>
+  if (!isOccurrenceId(o.id) || !isJobId(o.jobId)) return null
+  const code = (x: unknown) => (typeof x === 'string' && /^[A-Z_]{1,60}$/.test(x) ? x : null)
+  let retry: MyJobOccurrence['retry'] = null
+  const r = (typeof o.retry === 'object' && o.retry !== null ? o.retry : null) as Record<string, unknown> | null
+  if (r?.allowed === true) retry = { allowed: true }
+  else if (r?.allowed === false) {
+    // A reason this app does not know is still a refusal (said in generic words by `jobRetryBlockText`).
+    retry = { allowed: false, why: (JOB_RETRY_BLOCKS as readonly unknown[]).includes(r.why) ? r.why as JobRetryBlock : 'UNKNOWN' }
+  }
+  const list = (x: unknown) => (Array.isArray(x) ? (x as unknown[]).slice(0, MAX_OPERATIONS) : [])
+  const unknownOperations: MyJobOccurrence['unknownOperations'] = []
+  for (const u of list(o.unknownOperations)) {
+    const x = (typeof u === 'object' && u !== null ? u : {}) as Record<string, unknown>
+    if (typeof x.key !== 'string' || !OPERATION_KEY.test(x.key)) continue
+    unknownOperations.push({ key: x.key, kind: typeof x.kind === 'string' && SHORT_KIND.test(x.kind) ? x.kind : 'other' })
+  }
+  const madeBefore: MyJobOccurrence['madeBefore'] = []
+  for (const m of list(o.madeBefore)) {
+    const x = (typeof m === 'object' && m !== null ? m : {}) as Record<string, unknown>
+    if (typeof x.kind === 'string' && SHORT_KIND.test(x.kind) && typeof x.count === 'number' && Number.isInteger(x.count) && x.count >= 0) madeBefore.push({ kind: x.kind, count: x.count })
+  }
+  return {
+    id: o.id, jobId: o.jobId,
+    name: typeof o.name === 'string' && o.name.length > 0 && o.name.length <= 200 ? o.name : '定期の仕事',
+    dueSlot: typeof o.dueSlot === 'string' && o.dueSlot.length <= 40 ? o.dueSlot : '',
+    state: (JOB_OCCURRENCE_STATES as readonly unknown[]).includes(o.state) ? o.state as JobOccurrenceState : null,
+    outcomeCode: code(o.outcomeCode), retry, unknownOperations, madeBefore,
+  }
+}
 
 export function createJobsApi(deps: JobsDeps) {
   const doFetch = deps.fetch ?? fetch
@@ -182,6 +240,29 @@ export function createJobsApi(deps: JobsDeps) {
       if (typeof recordId !== 'string' || !RECORD_ID_RE.test(recordId)) return BAD_INPUT
       return act('rewatch', companyId, jobId, id => `/me/jobs/${id}/watch`, { version, recordId })
     },
+    /**
+     * The event occurrences this PC's AI ran for the member (stage 4b-2, D11): as the server answers them. A server
+     * before 4b-1 (404) has none to show — said as not supported, never as an error.
+     */
+    async occurrences(companyId: unknown): Promise<MyJobOccurrencesResult> {
+      if (typeof companyId !== 'string' || !COMPANY_ID.test(companyId)) return BAD_INPUT
+      const r = await call(`${company(companyId)}/me/job-occurrences`, 'GET')
+      if (r && r.status === 404) return { success: true, supported: false, occurrences: [] }
+      if (!ok(r)) return failure('occurrences', r)
+      const list = (r.json!.data as { occurrences?: unknown }).occurrences
+      const occurrences = (Array.isArray(list) ? list : []).slice(0, MAX_OCCURRENCES).map(parseMyJobOccurrence).filter((o): o is MyJobOccurrence => o !== null)
+      return { success: true, supported: true, occurrences }
+    },
+    /** 「もう一度」 on an occurrence (the server checks who and when; its refusal's words are shown as they are). */
+    async retryOccurrence(companyId: unknown, jobId: unknown, occurrenceId: unknown): Promise<JobActionResult> {
+      if (!isOccurrenceId(occurrenceId)) return BAD_INPUT
+      return act('retry occurrence', companyId, jobId, id => `/jobs/${id}/occurrences/${occurrenceId}/retry`)
+    },
+    /** 「後始末」: whether the run's outside operation was made. Reconciling never starts the occurrence again (the server's rule). */
+    async reconcileOccurrence(companyId: unknown, jobId: unknown, occurrenceId: unknown, key: unknown, done: unknown): Promise<JobActionResult> {
+      if (!isOccurrenceId(occurrenceId) || typeof key !== 'string' || !OPERATION_KEY.test(key) || typeof done !== 'boolean') return BAD_INPUT
+      return act('reconcile occurrence', companyId, jobId, id => `/jobs/${id}/occurrences/${occurrenceId}/operations/${encodeURIComponent(key)}/reconcile`, { done })
+    },
     pause: (companyId: unknown, jobId: unknown) => act('pause', companyId, jobId, id => `/jobs/${id}/pause`),
     resume: (companyId: unknown, jobId: unknown) => act('resume', companyId, jobId, id => `/jobs/${id}/resume`),
   }
@@ -195,4 +276,7 @@ export function registerJobsIpc(ipc: IpcRegistrar, deps: JobsDeps) {
   ipc.handle('jobs:resume', (_event, companyId, jobId) => api.resume(companyId, jobId))
   ipc.handle('jobs:watchChoices', (_event, companyId, text) => api.watchChoices(companyId, text))
   ipc.handle('jobs:rewatch', (_event, companyId, jobId, version, recordId) => api.rewatch(companyId, jobId, version, recordId))
+  ipc.handle('jobs:occurrences', (_event, companyId) => api.occurrences(companyId))
+  ipc.handle('jobs:retryOccurrence', (_event, companyId, jobId, occurrenceId) => api.retryOccurrence(companyId, jobId, occurrenceId))
+  ipc.handle('jobs:reconcileOccurrence', (_event, companyId, jobId, occurrenceId, key, done) => api.reconcileOccurrence(companyId, jobId, occurrenceId, key, done))
 }

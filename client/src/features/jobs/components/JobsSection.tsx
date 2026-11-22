@@ -3,6 +3,7 @@
 // sentences are the ones the admin approved (shared/core/job-words.ts); the server decides everything.
 import { SpinnerGap } from '@phosphor-icons/react'
 import { Button, Callout, Card, SectionHeader, SubHeading } from '../../../shared/ui/primitives'
+import { JobOccurrences } from './JobOccurrences'
 import { RewatchPicker } from './RewatchPicker'
 import {
   JOB_CHAIN_STOPPED_ASK, JOB_EVENT_NOTE, jobCheckText, jobGrantLines, jobMissedText, jobPlacementText, jobRunText, jobRunsText, jobSlotText, jobTriggerText,
@@ -90,6 +91,8 @@ export function JobsSection({ companyId }: { companyId: string }) {
           {message && <p role="status" className="text-[12px] text-zinc-600 dark:text-zinc-300">{message}</p>}
         </>
       )}
+      {/* Stage 4b-2: also after a hand-over (the job is no longer listed above, its occurrences they ran still are). */}
+      <JobOccurrences companyId={companyId} />
     </div>
   )
 }

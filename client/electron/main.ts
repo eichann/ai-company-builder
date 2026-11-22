@@ -464,9 +464,13 @@ const skillUses = createSkillUseReporter({
   git: (root, args) => appGit.create(root, { GIT_NO_LAZY_FETCH: '1' }).raw(args),
   shelfVersion: (root, rel) => (workingFolders.has(root) ? skillShelf.versionOf(root, rel) : undefined),
 })
+// A job's run whose token call says the run is over stops its AI (stage 4b-2, jobs.md "Fail closed"): the AI-turn claims
+// are made below (they need this API); bound once they exist, long before any turn runs.
+let jobRunRefused: (companyId: string, conversationId: string, runId: string, status: number, code: string | undefined) => void = () => {}
 const recordsApi = createRecordsApi({
   baseUrl: getServerApiUrl, cookies: session.cookies, log: console, runOf: aiRunRegistry.runOf,
   beforeWrite: conversationId => skillUses.settled(conversationId),
+  onRunRefused: (companyId, conversationId, run, status, code) => jobRunRefused(companyId, conversationId, run.id, status, code),
 })
 // 「AI の番」 run automatically (features/ai-turns): the hidden consultation runs in the main
 // window; main claims the server's execution run and the record by its version, and settles it afterwards.
@@ -519,6 +523,7 @@ const aiTurnClaims = createAiTurnClaims({
     stopTurn: conversationId => { chatTurns?.abort(info => info.appSessionId === conversationId, 'job-ended') },
   },
 })
+jobRunRefused = aiTurnClaims.runRefused
 registerAiTurnsIpc(ipc, {
   claims: aiTurnClaims,
   isMainWindow: senderId => mainWindowHost.isWindow(senderId),

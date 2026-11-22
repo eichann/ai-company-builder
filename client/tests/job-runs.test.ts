@@ -37,8 +37,9 @@ const turn = (over: Record<string, unknown> = {}) => ({
   checkSince: '2026-11-10T00:00:00.000Z', procedure: { source: 'company_skill', skill: 'interview-report', fingerprint: 'b'.repeat(40) }, grant: GRANT, ...over,
 })
 
-function fakeServer(opts: { claim?: number; claimCode?: string; renew?: number; finish?: number; createdAt?: string; serverNow?: string; serverAheadMs?: number; noServerTime?: boolean; claimAnswerDelayMs?: number; autoRun?: boolean; turnOver?: Record<string, unknown> } = {}) {
+function fakeServer(opts: { claim?: number; claimCode?: string; renew?: number; finish?: number; createdAt?: string; serverNow?: string; serverAheadMs?: number; noServerTime?: boolean; claimAnswerDelayMs?: number; renewAfterStart?: number; autoRun?: boolean; turnOver?: Record<string, unknown> } = {}) {
   const calls: Array<{ method: string; path: string; body: Record<string, unknown> }> = []
+  let renews = 0
   const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } })
   const fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(String(input))
@@ -56,7 +57,9 @@ function fakeServer(opts: { claim?: number; claimCode?: string; renew?: number; 
       const stamps = opts.noServerTime ? {} : { createdAt: opts.createdAt ?? serverNow, updatedAt: serverNow }
       return json(201, { data: { run: { id: 'run-j1', generation: 1, ...stamps }, turn: turn({ state: 'running', ...opts.turnOver }) } })
     }
-    if (p === '/ai-runs/run-j1/renew') return json(opts.renew ?? 200, {})
+    // `renewAfterStart`: the last check before the AI starts (stage 4b-2, the first renew) is answered, later ones not.
+    if (p === '/ai-runs/run-j1/renew' && opts.renewAfterStart && renews++ > 0) return json(opts.renewAfterStart, {})
+    if (p === '/ai-runs/run-j1/renew') return (opts.renew ?? 200) === 200 ? json(200, { data: { run: { id: 'run-j1', generation: 1 } } }) : json(opts.renew as number, {})
     if (p === '/ai-runs/run-j1/finish') return json(opts.finish ?? 200, opts.finish ? { code: 'RUN_SUPERSEDED' } : { data: {} })
     return json(404, { code: 'NOT_FOUND' })
   }) as typeof fetch
@@ -330,7 +333,7 @@ test('the deadline is the server\'s: this PC\'s clock running ahead does not cut
 })
 
 test('the server takes the run away (a pause, the stop, another PC): the renew\'s 409 stops the AI here', async () => {
-  const server = fakeServer({ renew: 409 })
+  const server = fakeServer({ renewAfterStart: 409 })
   const { claims, stopped } = claimsFor(server, { renewEveryMs: 20 })
   await claims.jobTurns(COMPANY)
   assert.ok((await claims.claim(COMPANY, OCC, 1, 'conv-job-00001')).claimed)
@@ -684,4 +687,33 @@ test('the time limit\'s clock difference never counts the answer\'s travel as th
   await new Promise(resolve => setTimeout(resolve, 1_100))
   assert.deepEqual(stopped, ['conv-job-00001'])
   await claims.settle(COMPANY, OCC)
+})
+
+test('a job\'s run lost while its turn was being prepared never runs: the turn, once tracked, is stopped as job-ended', async () => {
+  // Review of 4b-2 (M1): the run was lost (a renew refused, the watch's window) during the awaits between the ceiling and
+  // the turn's registration — main's stop found no turn then. The chat server asks the ceiling again once it tracks it.
+  const { startChatServer } = await import('../electron/chat-server')
+  let asked = 0
+  const server = await startChatServer({
+    getAuthMode: () => 'claude-code', getApiKey: () => undefined, buildSystemPrompt: () => '', getShellEnv: () => ({}),
+    getPermissionMode: () => 'default', isClaudeCodeAuthenticated: () => true, getClaudeCodeCliPath: () => '/test/claude', listenPort: 0,
+    // Held when the turn starts, gone by the time it is tracked.
+    pluginStepTools: () => (asked++ === 0 ? { allowsRecordTool: () => true, builtinTools: [] } : null),
+    getWriteGuard: async () => ({ root: os.tmpdir(), getAccess: () => undefined }),
+    stepWriteArea: async () => ({ nowhere: true, reads: [] }),
+    createRecordTools: async () => ({ specs: [], execute: async () => '', close: async () => {}, instructions: '', readTask: async () => null, linkNewFile: async () => false }) as never,
+  })
+  try {
+    const res = await fetch(`http://127.0.0.1:${server.port}/api/chat`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${server.authToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ messages: [{ id: 'm', role: 'user', parts: [{ type: 'text', text: 'hi' }] }], companyId: 'co', companyRootPath: os.tmpdir(), appSessionId: 'conv-job-00020', aiTurnStep: 'job-procedure' }),
+    })
+    const text = await res.text()
+    assert.ok(asked >= 2, `the ceiling is asked again after tracking (${asked})`)
+    assert.match(text, /定期の仕事/, text.slice(0, 400))
+    assert.equal(server.turns.runningCount(), 0)
+  } finally {
+    server.server.close()
+  }
 })

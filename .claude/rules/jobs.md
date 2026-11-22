@@ -21,6 +21,8 @@ paths:
   - "client/electron/features/ai-turns/job-runs.ts"
   - "client/electron/features/ai-turns/job-report-tool.ts"
   - "client/tests/job-runs.test.ts"
+  - "client/tests/job-runs-fail-closed.test.ts"
+  - "client/electron/features/ai-turns/claims.ts"
   - "server/src/services/job-retry.ts"
   - "server/src/services/job-events.ts"
   - "server/src/services/ai-runs.ts"
@@ -40,7 +42,7 @@ server, and a Skill pinned from the Skill shelf. PR 5a-2: the clock makes PC occ
 runner"), the meeting check ("The meeting check"), and the admin form makes PC jobs. PR 5a-3: a deliverable place
 outside ("A deliverable place outside": a Drive folder the responsible person picks). PR 5b: 「もう一度」 ("「もう一度」"
 below). Event-triggered jobs: 4a (server only), 4b-0.5 (the rollback floor), 4b-1 (the server side of the PC's AI on events,
-"Event jobs on the PC").**
+"Event jobs on the PC"), 4b-2 (the app runs them, fails closed, and shows 「もう一度」 / 「後始末」: "The app's runner").**
 
 ## Tables (`server/src/db/schema/jobs.ts`, handle `jobs`, `ports/jobs.ts`, `adapters/sqlite/jobs.ts`)
 
@@ -579,9 +581,87 @@ consultation, claim / hold / renew / finish (`claims.ts`), the same unattended C
   this PC's time **when the claim was sent** — so the answer's travel never moves the end later; the server refuses
   every call after the deadline anyway) end — not started at all with less left —, through the chat turns' `abort` with
   reason `job-ended` (the reply says 「※ 定期の仕事の時間が来たか、仕事が止められたため、AI を止めました。」); settle then
-  finishes `bad-input` `TIME_LIMIT` (→ `needs_person` `RUN_FAILED`, told). A renew answered 409 (a pause, the
-  company's stop, the deadline, another PC) stops the AI the same way and settle gives the run back (`RUN_LOST`; the
-  server already ended it). A refused finish leaves the consultation open (outcome `failed`).
+  finishes `bad-input` `TIME_LIMIT` (→ `needs_person` `RUN_FAILED`, told). A renew answered 401 / 403 / 404 / 409 (a pause,
+  the company's stop, the deadline, another PC, an event's condition, a run the server no longer shows — "Fail closed"
+  below) stops the AI the same way and settle gives the run back (`RUN_LOST`; the server already ended it). A refused
+  finish leaves the consultation open (outcome `failed`).
+- **Fail closed** (stage 4b-2, owner memo 「段4b 設計メモ」 §6 / D12 — time jobs and event jobs alike; `claims.ts` `hold`'s
+  `guard`, `renewOnce`, `arm`; constants in `job-runs.ts`): a job's run has nobody watching, so its AI goes on only while
+  the server keeps confirming it. **The renew has a deadline** (`JOB_RENEW_TIMEOUT_MS`, 30 s, owner decision 2026-11-22). A confirmation is a renew
+  answered 2xx **within that deadline, naming this run and generation**, counted from when that renew **was sent**; the
+  claim's own send counts as the first. **Age = the larger of the monotonic and the wall elapsed time** (`since` over a
+  `ClockStamp`): a wall clock set back never extends it, and the time a Mac slept — which `performance.now` does not count
+  (review of 4b-2, M2) — or a wall clock moved forward always counts. The watch reads the age at least every
+  `JOB_WATCH_TICK_MS` (15 s), so after a wake (timers pause in sleep) the run stops within a tick; the deadline check of a
+  renew uses the same age. **A run past the window is never revived** (Codex re-review of 4b-2): asleep longer than the
+  window but within the server's lease (or a clock moved forward), the renew timer may fire before the watch looks and the
+  server still answers 200 — so a renew is not sent, and its answer not accepted, when the confirmation it would replace was
+  already older than the window at its send (`ageAt`); the hold is lost instead. The only other place a confirmation is set
+  is `hold`'s first one (the claim's own send). Test: `job-runs-fail-closed.test.ts` "waking after more than the window";
+  the check before sending and the one before accepting compare the same instant, so each alone suffices — both removed,
+  the test fails. **No two renews race on one hold**: the deadline (30 s) is shorter than the renew interval
+  (`AI_RUN_RENEW_EVERY_MS`, 60 s), a hold sends no timed renew while its previous one is still out (`guard.renewing`), and
+  a confirmation only ever moves forward (a slower answer to an earlier send never moves it back); the claim's last check
+  may run beside a timed renew of the same hold — both are that hold's, so either answer is a true confirmation of it.
+  **When the last confirmation is older than `JOB_CONFIRM_MAX_AGE_MS` (3 min)** — offline, the server unreachable or hung,
+  renews failing with 5xx — the run is lost here: released (its tokens unbound) and its AI stopped through the same path as
+  the time limit (`stopTurn` → the chat turns' `abort`, reason `job-ended`; never an ad-hoc kill). Renewed every minute, so
+  two renews may fail in a row; well inside the server's 5-minute lease (after which it refuses the token anyway); a run
+  lost so is listed again and re-claimed once the server answers (D12: 「あとで」, tried again). **Stop at once** on a renew
+  answered 401 / 403 / 404 / 409 (`jobRunGoneOnRenew`; 404 = the rollback floor, which freezes schema 3, or a record the
+  member no longer reads), also when that answer came late; and on a call of the run's token refused for a reason that ends
+  the run (`jobRunGoneOnCall`: any 401; 403 / 404 / 409 / 503 only with `NOT_IN_STEP`, `RUN_SUPERSEDED`, `RUN_NOT_FOUND`,
+  `JOB_EVENT_ENDED`, `JOB_NOT_FOUND`, `RECORD_TOKEN_INVALID`, `AI_STOPPED`, `ACB_STOPPED`) — the records API reports every
+  refused run-bound call (`onRunRefused`, wired in `main.ts`) and `claims.runRefused` decides. Other refusals of a call are
+  the tool's answer and the run goes on (a Drive overwrite refused `DRIVE_FILE_CHANGED_SINCE` → "put a new file"; a record
+  not found). **Late answers never extend a newer run**: an answer counts only for the hold that sent it (a run released,
+  or held again by a later claim, is neither extended nor stopped by an older request's answer — compared by the hold
+  itself, not the run id, so a re-claim of the same run is a new hold); a success past its deadline, or naming another run
+  or generation, confirms nothing. The same for the claim itself (review L1): `hold` answers an opaque handle and
+  `holds` / `confirm` take it, so an older claim still preparing never takes a newer claim's hold of the same run as its
+  own — it starts nothing and finishes nothing (its give-backs, the `NOT_SYNCED` and `nothing` finishes only while its own
+  hold is live).
+- **Lost while its turn is prepared** (review of 4b-2, M1; `chat-server.ts`): a run lost during the awaits between the
+  ceiling check and the turn's registration found no turn to stop; once the turn is tracked the chat server asks the job's
+  ceiling again (`pluginStepTools`) and, gone, stops it at once with `job-ended` (as the emergency stop's re-check does).
+- **No start after the cutoff** (Codex re-review of 4b-2): the time limit's timer can stop nothing while the claim's last
+  check is out or before the turn is tracked. So after the last check the claim looks again — the timer fired or no time
+  left before `JOB_STOP_BEFORE_MS` → nothing starts, the run is finished `bad-input` `TIME_LIMIT` (as with too little
+  left before the claim); and a run past its stop time has no ceiling (`toolsOf`), so the chat server's re-check after
+  tracking stops a turn that slipped through. Tests: `job-runs-fail-closed.test.ts` "the stop time coming while the last
+  check is out" / "…before the turn is tracked"; the whole check and the ceiling's `timedOut` each fail a test, the two
+  halves of the check (`timedOut`, the time recomputed) each alone suffice (the timer fires when that time reaches zero). **The last check right before the AI starts** (`deps.confirm`): after the check and the
+  procedure, one renew now (it runs an event's conditions on the server, `renewRefusal`); refused → lost, nothing starts;
+  not answered in time → given back `temporary` `NOT_CONFIRMED`, nothing starts. Record runs and plugin steps are
+  unchanged (their renew's 409 only). Decision on the safe side: a `NOT_IN_STEP` from a route outside the grant stops the
+  run too (the gate names nothing, so it cannot be told from a condition that failed; the tool ceiling already keeps the AI
+  to granted routes).
+- **Event occurrences** (stage 4b-2, schema 3, "Event jobs on the PC"): the list asks `GET /me/job-turns?kinds=time,event`
+  (an older server ignores it or lists `time`); a time turn may also say `kind: 'time'` / `source: null`; an event turn
+  (`kind: 'event'`, `source.recordId`) is parsed in an event
+  frame (`EVENT_FRAME`: the `source_record` check only on an event turn, an event turn only with it, its grant creating the
+  one やること), a time turn as before; a malformed `kind` / `source` drops the turn. **Only an event's claim** names
+  `kinds: ['time','event']` and adds `source_record` to `checks` (the server's two locks); a time slot's claim stays byte for
+  byte what every earlier app sent (no `kinds`), so a server before stage 4-0 never sees the key. The claim's turn must be
+  of the listed kind (else given back `TURN_NOT_READABLE`). No check runs on the PC: the server checked the record at the
+  claim and does at every call and renew; the first message starts from the record (`found.kind: 'record'`, its id;
+  `records_get` named only when the grant lets it read it). Never `nothing` (the server refuses it for an event).
+  Compatibility (§7): against the floor server (4b-0.5) no event turn is listed and a claim is refused; a run held across a
+  rollback gets 404 on its next renew and stops. An older app is never handed one (it names neither lock).
+- **「もう一度」 and 「後始末」 in the app** (stage 4b-2, D11, owner memo §4-3; `features/jobs/components/JobOccurrences.tsx`,
+  IPC `jobs:occurrences` / `jobs:retryOccurrence` / `jobs:reconcileOccurrence`): Settings → 「定期の仕事」 lists 「AI が動いた回で、
+  確かめが要るもの」 from `GET /me/job-occurrences` (the event occurrences pinned to a version naming the member, also after a
+  hand-over) — **only what the server answered**: an occurrence is shown only when it carries `retry` or
+  `unknownOperations` (the server leaves them out where the member's rights do not reach); 「もう一度」 only where `retry` is
+  `allowed` (else 「「もう一度」はできません：」 + `jobRetryBlockText`), ［作られていた］［作られていなかった］ for each unknown
+  operation (also on a held one); each asks first (`ConfirmDialog`, saying a reconcile never starts it and what earlier runs
+  made), then posts to the occurrence's own route; a refusal shows the server's words. Main checks every id before it
+  reaches a path (`isJobId`, `isOccurrenceId`, the operation key `^[A-Za-z0-9._:-]{1,100}$`); everything else is lenient
+  so a later server's words never hide 「後始末」 (`parseMyJobOccurrence`, review L2): an entry without valid ids is left out,
+  an operation without a valid key alone, at most 50 operations; an unknown state is shown as 「このアプリでは表示できない状態
+  です」, an unknown 「もう一度」 reason as blocked (`UNKNOWN`, generic words), a malformed `retry` as no button. A server
+  before 4b-1 (404) shows nothing (`supported: false`), never an error. Time jobs: owner / admin only, as before (the admin
+  console).
 - **Closing the consultation** (`ai-turns.md`, #674): done → closed when nothing of the member's is there; a
   failure, a stop or the time limit keep it open (listed by the job's name; ending its やること does not close it —
   the automatic consultations are remembered by the occurrence's id, which no record has).
@@ -596,10 +676,11 @@ consultation, claim / hold / renew / finish (`claims.ts`), the same unattended C
 - **Known limit (decision)**: a member invited to a meeting **after** its record was made (「招待する」, or the calendar
   adding them later) is never found by a later meeting check — the window counts when the record was made.
 - **An unknown outside result** (`RESULT_UNKNOWN`, decision for the owner): a job's run reaches outside only by a
-  mail **draft** (`outbound: draft_only`), so an unknown result means "a draft may or may not have been made". No
-  screen is added: the occurrence's state and the bell's `job_failed` tell the responsible person and the job's
-  creator; the person looks at 送るもの (the drafts) themselves, and an owner / admin records what they found on the
-  occurrence (5b, "「もう一度」": 作られていた／作られていなかった) before pressing 「もう一度」.
+  mail **draft** (`outbound: draft_only`) or a put into its chosen place, so an unknown result means "it may or may not
+  have been made". The occurrence's state and the bell's `job_failed` tell the responsible person and the job's
+  creator; the person looks at 送るもの (the drafts) themselves; for a time job an owner / admin records what they found on
+  the occurrence (5b, "「もう一度」": 作られていた／作られていなかった) before pressing 「もう一度」; for an event job its
+  pinned responsible person can record it in the app (stage 4b-2, "「もう一度」 and 「後始末」 in the app" above).
 
 ## Occurrences in the API (3b)
 
@@ -850,9 +931,10 @@ Event-triggered jobs (4a) store `schema: 2`. Production may run 4-0 again after 
   **A screen announces what it can show, edit and accept, never what the shared parser reads** (stage 4b-0.5, owner memo
   §5-1): `ADMIN_JOB_SCHEMAS` (`admin/src/lib/jobs.ts`; also asked by `editableDefinition` / `needsNewerScreen`, so a
   form is never built from a shape the core reads but the form cannot) and `APP_JOB_SCHEMAS` (`client/shared/jobs.ts`;
-  the 受け取る shows a definition only of such a shape, `appReadsJobDefinition`) — both `[1, 2]` now. The core reads
-  `schema: 3` since 4b-1 (`JOB_SCHEMAS` `[1, 2, 3]`); the screens keep announcing `1,2` until their forms and words handle it
-  (4b-2 the app, 4b-3 the admin console). The server's tests of "a shape this build does not know" stand in `schema: 4`
+  the 受け取る shows a definition only of such a shape, `appReadsJobDefinition`) — the admin `[1, 2]`, the app `[1, 2, 3]`
+  since 4b-2 (its words for schema 3: `jobCheckText`'s `source_record`; shipped in the same build that runs such jobs and
+  fails closed). The core reads `schema: 3` since 4b-1 (`JOB_SCHEMAS` `[1, 2, 3]`); the admin console announces it with
+  its form (4b-3). The server's tests of "a shape this build does not know" stand in `schema: 4`
   since then (`job-schemas.test.ts`, `job-rollback-floor.test.ts` reads the frozen 4b-1 fixture's version one shape later;
   the floor build runs it as written). Tests
   `admin/tests/job-screen-schemas.test.ts` (the core stood in by one reading schema 3; every announced schema
@@ -1066,7 +1148,8 @@ acts), `jobs.ts` (save, approve, accept, what each viewer sees).
 The server side of 「見張っているやることが完了したら、責任者の PC の AI が会社の Skill を動かす」. **4b-1 promises server-side
 effects only**: a failed condition ends the run, fences its tokens and refuses every later call, outside operation, finish
 and やること. Stopping the AI on the PC when the server cannot be reached (an authorisation deadline, stopping on 404 /
-403) is the app's, 4b-2. No screen makes such a job yet (4b-3); the screens announce `1,2`.
+403) is the app's, 4b-2 (done: "The app's runner" "Fail closed", "Event occurrences"). No screen makes such a job yet
+(4b-3); the admin console announces `1,2`, the app `1,2,3` since 4b-2.
 
 - **What runs** (`schema: 3`, D2): the event of 4a (one watched record, `followMadeTask`, each target once, the scan, the
   day's limit, gaps, generations — "Event-triggered jobs") makes the occurrence; the responsible person's app claims it
@@ -1170,6 +1253,33 @@ and やること. Stopping the AI on the PC when the server cannot be reached (a
   the run at the Drive route's call first, so removing them alone changes nothing (as its time-job check, "A deliverable
   place outside"). After the independent review: `hides` ending the run, the claim's 404 before the locks and its
   write only for an app of the kind, `viewFor`'s retry-only view, `mine`'s paging — 5 mutations, each fails.
+
+- **Not built (left out of 4b-2)**: a second notice when a chain stays stopped for days (owner memo: remind the responsible
+  person once more). It is the server's clock and the bell (a new key shape the rollback floor's reader must also hide), so
+  it is its own small server PR; today the stop is told once and stays visible in the app's 「定期の仕事」 until chosen again.
+- Test (4b-2): `client/tests/job-runs-fail-closed.test.ts` (A1: renew 404 / 403 / 409 / 401, a renew that hangs, no server, 5xx
+  past the window, a token call refused for a run-ending reason — and not for a tool's own refusal; A2: a late success, a
+  success naming another run, an older hold's late 200 / 409 after a re-claim; A3: the list's and the event claim's names, a
+  time claim unchanged, the last check refused / unanswered, a claim turn of another kind; the event turn's parsing; a
+  record's run unchanged), `client/tests/job-runs.test.ts` (the renew answer now names the run; a 409 after the start),
+  `client/tests/jobs-ipc.test.ts` (「AI が動いた回」: the server's list, malformed entries left out, 404 not an error; the
+  occurrence's routes, renderer values never in the path; the header `1,2,3`), `client/tests/job-screen-schemas.test.ts`
+  (schema 3's words, both done marks), `client/src/features/jobs/model.test.ts` (rows only from the server's fields).
+  Mutation check: 27 guards removed or inverted one at a time; each fails a test except the hold identity check in
+  `renewOnce` and the one in `lose` — each alone suffices (an answer's confirmation and loss both land on its own hold); both
+  removed together fail A2's re-claim test. After the review (M1, M2, L1–L4): `job-runs.test.ts` "a job's run lost while
+  its turn was being prepared never runs", `job-runs-fail-closed.test.ts` M2 (asleep: the wall clock counts, read within a
+  tick; set back: the monotonic one counts) and L1 (only one of two claims of the same run starts), the time turn's harmless
+  forms, the time claim's whole body, `jobs-ipc.test.ts` (unknown state / reason / long lists keep the entry and its
+  「後始末」, keys still strict), `model.test.ts`. Not caught alone, kept as defence: the `arm` inside `hold` (review L5 —
+  every job claim confirms before its AI starts, and `confirm` arms the watch; the hold's own arm only covers the
+  preparation, where nothing runs yet); `confirm`'s own hold comparison (the claim checks `live` — the same comparison — in
+the same synchronous stretch right before it). The rest — the clocks' max (each direction), the watch tick, the chat
+server's re-check, `holds` by the hold, the give-backs only for the own hold, the time turn's two forms, each lenient field
+of `parseMyJobOccurrence` and the key still strict — each fails a test (16 mutations). The 30 s deadline (owner decision):
+the deadline shorter than the interval and the window holding two renews, and no second timed renew while one is out —
+each fails a test; the confirmation moving only forward is defence (the only overlap left, the claim's last check beside a
+timed renew of the same hold, moves it by milliseconds).
 
 ## Tests (each guard mutation-checked, with the exceptions named)
 

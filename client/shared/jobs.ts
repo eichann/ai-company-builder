@@ -1,4 +1,4 @@
-import { knownJobDefinition, type JobDefinition, type JobPauseReason, type JobPlacement, type JobState, type JobTrigger } from '../../shared/core/jobs'
+import { knownJobDefinition, type JobDefinition, type JobOccurrenceState, type JobPauseReason, type JobPlacement, type JobRetryBlock, type JobState, type JobTrigger } from '../../shared/core/jobs'
 import type { JobWaiting } from '../../shared/types/jobs'
 
 /**
@@ -12,9 +12,10 @@ import type { JobWaiting } from '../../shared/types/jobs'
  * every job request announces (`X-ACB-Job-Schemas`, `electron/features/jobs/ipc.ts`), never the shared parser's
  * `JOB_SCHEMAS` — a later core may read a shape (4b-1's `schema: 3`) before this app can show it, and the server must
  * then neither hand it its definition nor take its 受け取る. Each one's words are checked by
- * `client/tests/job-screen-schemas.test.ts`.
+ * `client/tests/job-screen-schemas.test.ts`. `3` since stage 4b-2 (an event run by this PC's AI), in the same build
+ * that runs it (fail closed, the event claim's locks: `electron/features/ai-turns/job-runs.ts`).
  */
-export const APP_JOB_SCHEMAS: readonly number[] = [1, 2]
+export const APP_JOB_SCHEMAS: readonly number[] = [1, 2, 3]
 
 /** A definition this app shows: a shape the core knows and this app announces; anything else is shown as hidden. */
 export function appReadsJobDefinition(d: unknown): JobDefinition | null {
@@ -85,3 +86,29 @@ export function jobNoticeTarget(kind: string): 'jobs' | 'none' | null {
   if (kind === 'job_expired' || kind === 'job_skipped' || kind === 'job_failed' || kind === 'job_paused' || kind === 'company_restored') return 'none'
   return null
 }
+
+/**
+ * One occurrence of an event job this PC's AI ran for the member (stage 4b-2, owner memo 「段4b 設計メモ」 §4-3 / D11; `GET
+ * /me/job-occurrences`, the server's `MyJobOccurrenceView`): what the server returns and nothing derived — `retry` and
+ * `unknownOperations` only where the member's rights cover them (the server leaves them out otherwise). `name` is the
+ * name of the version they ran (「定期の仕事」 when it names a place they cannot read now).
+ */
+export interface MyJobOccurrence {
+  id: string
+  jobId: string
+  name: string
+  dueSlot: string
+  /** null: a state this app does not know (a later server's). */
+  state: JobOccurrenceState | null
+  outcomeCode: string | null
+  /** `why`: a `JobRetryBlock`, or `UNKNOWN` for a reason this app does not know (`jobRetryBlockText` says it in generic words). */
+  retry: { allowed: true } | { allowed: false; why: JobRetryBlock | 'UNKNOWN' } | null
+  unknownOperations: Array<{ key: string; kind: string }>
+  madeBefore: Array<{ kind: string; count: number }>
+}
+
+/** `jobs:occurrences`. `supported: false`: a server before stage 4b-1 (nothing to show, said as nothing). */
+export type MyJobOccurrencesResult = { success: true; supported: boolean; occurrences: MyJobOccurrence[] } | JobsFailure
+
+/** 「後始末」's question for an outside operation whose result nobody knows, in plain words. */
+export const JOB_RECONCILE_ASK = 'が作られたか分かりません。あなたの「送るもの」や置き先で確かめて、どちらかを押してください。押しても、この回は動き出しません。'

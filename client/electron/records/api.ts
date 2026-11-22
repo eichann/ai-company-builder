@@ -40,6 +40,11 @@ export interface RecordsApiDeps {
    * (records.md "Which Skill"). Bounded by the reporter; never throws.
    */
   beforeWrite?: (conversationId: string) => Promise<void>
+  /**
+   * A call of a run-bound token answered a refusal (4xx; stage 4b-2): main tells the AI-turn claims, which stop a
+   * scheduled job's AI when the refusal says its run may not go on (`claims.ts` `runRefused`). Never the body.
+   */
+  onRunRefused?: (companyId: string, conversationId: string, run: BoundRun, status: number, code: string | undefined) => void
   /** Per request (default 20 s). */
   timeoutMs?: number
   log?: Pick<Console, 'warn'>
@@ -152,6 +157,10 @@ export function createRecordsApi(deps: RecordsApiDeps): RecordsApi {
           const replay = r.status === 200 && (r.body.data as { replayed?: unknown } | undefined)?.replayed === true
             ? replayReadPath(path, (r.body.data as { ref?: { kind?: unknown; id?: unknown } | null }).ref ?? null) : null
           if (replay) r = await send('GET', replay, undefined, signal)
+          if (run && (r.status < 200 || r.status >= 300)) {
+            const code = typeof r.body.code === 'string' && /^[A-Z_]{1,60}$/.test(r.body.code) ? r.body.code : undefined
+            try { deps.onRunRefused?.(companyId, conversationId, run, r.status, code) } catch { /* the tool's answer goes on */ }
+          }
           if (r.status >= 500) throw new RecordsApiError('SERVER_ERROR', `サーバーでエラーが起きました（HTTP ${r.status}）。`)
           if (r.status < 200 || r.status >= 300) {
             const { error, code, ...details } = r.body

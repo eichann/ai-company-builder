@@ -22,6 +22,13 @@ const base = { name: 'x', actingUser: 'me', missed: { policy: 'skip', expiresAft
 const SAMPLES: Record<number, unknown[]> = {
   1: [{ ...base, schema: 1, trigger: { every: 'day', at: '09:00', businessDaysOnly: true } }],
   2: [{ ...base, schema: 2, trigger: { kind: 'record', type: 'task', event: 'state', to: 'done', assignee: 'responsible', startRecord: 'task-0123456789abcdef', followMadeTask: true } }],
+  // Stage 4b-2: an event run by the responsible person's PC AI (the done mark both ways).
+  3: ['none', 'file_linked'].map(doneMark => ({
+    ...base, schema: 3, placement: 'a', check: { kind: 'source_record', doneMark },
+    trigger: { kind: 'record', type: 'task', event: 'state', to: 'done', assignee: 'responsible', startRecord: 'task-0123456789abcdef', followMadeTask: true },
+    run: { kind: 'procedure', procedure: { source: 'company_skill', skill: 'interview-report', fingerprint: 'b'.repeat(40) } },
+    grant: { ...NONE_GRANT, tools: ['records'], routes: ['GET /item/:recordId'], limits: { minutes: 30, runsPerDay: 3 } },
+  })),
 }
 
 test('every schema this app announces has definitions it shows in words', () => {
@@ -59,7 +66,7 @@ function api(definition: unknown, headers: Array<Record<string, string>> = []) {
 }
 
 test('a definition of a shape this app does not announce is shown as one it cannot show, also when the server sends it', async () => {
-  const later = { ...(SAMPLES[2][0] as object), schema: 3, trigger: { kind: 'record', type: 'task', event: 'state', to: 'done', ai: true } }
+  const later = { ...(SAMPLES[2][0] as object), schema: 4, trigger: { kind: 'record', type: 'task', event: 'state', to: 'done', ai: true } }
   const r = await api(later).mine('c1')
   assert.ok(r.success)
   assert.equal(r.jobs[0].toAccept?.definition, null)
@@ -85,14 +92,14 @@ test('a definition of a shape this app does not announce is shown as one it cann
 test('every job call announces exactly this app’s shapes (whatever the shared parser reads)', async () => {
   const headers: Array<Record<string, string>> = []
   await api(null, headers).mine('c1')
-  assert.ok(headers.length > 0 && headers.every(h => h['X-ACB-Job-Schemas'] === '1,2'))
+  assert.ok(headers.length > 0 && headers.every(h => h['X-ACB-Job-Schemas'] === '1,2,3'))
   // Taken from this app's own list, not the core's: a schema added to the list (as a later app will) is what is sent.
   const list = APP_JOB_SCHEMAS as number[]
   list.push(9)
   try {
     const later: Array<Record<string, string>> = []
     await api(null, later).mine('c1')
-    assert.ok(later.every(h => h['X-ACB-Job-Schemas'] === '1,2,9'))
+    assert.ok(later.every(h => h['X-ACB-Job-Schemas'] === '1,2,3,9'))
   } finally {
     list.pop()
   }

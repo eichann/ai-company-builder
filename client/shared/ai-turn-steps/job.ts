@@ -30,6 +30,13 @@ export interface QueuedJobTurn {
   expiresAt: string
   /** `due`, or `running` when its run may be claimed again (the queue's `state`: a re-listed one is another try). */
   state: 'due' | 'running'
+  /**
+   * Stage 4b-2: `event` — an event occurrence (schema 3, `jobs.md` "Event jobs on the PC"): its check is the server's
+   * (`source_record`), made again at the claim and at every call; `source` the record the event happened to. Absent: a
+   * time slot.
+   */
+  kind?: 'event'
+  source?: { recordId: string }
   check: JobCheck
   checkSince: string
   /** Where the check stops (the occurrence's own time); absent from an older server. */
@@ -54,6 +61,16 @@ export interface QueuedJobTurn {
 const str = (v: unknown, max: number): v is string => typeof v === 'string' && v.length > 0 && v.length <= max
 const iso = (v: unknown): v is string => typeof v === 'string' && v.length <= 40 && !Number.isNaN(Date.parse(v))
 const RECORD_ID = /^[a-z][a-z0-9_]{0,39}-[0-9a-z]{6,32}$/
+/**
+ * The definition a turn's parts are checked within (the one parser): a time trigger for a time occurrence, a record
+ * event for an event occurrence (schema 3). Only the check, the procedure and the grant come from the server; the rest
+ * is a stand-in the parser needs, never shown or used — so a `source_record` check is read only on an event turn and an
+ * event turn only with that check (the parser's own pairing, `check.SOURCE_RECORD_EVENTS_ONLY` / `…EVENT_NEEDS_SOURCE_RECORD`).
+ */
+const TIME_FRAME = { schema: 1, trigger: { every: 'day', at: '09:00', businessDaysOnly: false } } as const
+const EVENT_FRAME = {
+  schema: 3, trigger: { kind: 'record', type: 'task', event: 'state', to: 'done', assignee: 'responsible', startRecord: 'task-000000', followMadeTask: false },
+} as const
 /** An operation's kind or what it made: ids only (letters, digits, . _ : -), never text. */
 const SHORT_ID = /^[A-Za-z0-9._:-]+$/
 /** At most this many things made before are named to the AI (the rest counted). */
@@ -72,10 +89,17 @@ export function parseJobTurn(v: unknown): QueuedJobTurn | null {
   if (t.checkUntil !== undefined && !iso(t.checkUntil)) return null
   const commit = (v: unknown) => v === undefined || v === null || (typeof v === 'string' && /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(v))
   if (!commit(t.sinceCommit) || !commit(t.checkedCommit)) return null
+  // Stage 4b-2: an event occurrence names the record its event happened to; any other kind is not a turn this app runs.
+  // A time slot may say so (`kind: 'time'`, `source: null` — harmless forms a server may send); an event is strict.
+  if (t.kind !== undefined && t.kind !== 'event' && t.kind !== 'time') return null
+  const event = t.kind === 'event'
+  const source = (typeof t.source === 'object' && t.source !== null ? t.source : null) as Record<string, unknown> | null
+  if (event && (!source || !str(source.recordId, 80) || !RECORD_ID.test(source.recordId))) return null
+  if (!event && t.source !== undefined && t.source !== null) return null
   const parsed = parseJobDefinition({
-    schema: 1, name: '定期の仕事', actingUser: 'u', trigger: { every: 'day', at: '09:00', businessDaysOnly: false },
+    ...(event ? EVENT_FRAME : TIME_FRAME), name: '定期の仕事', actingUser: 'u',
     check: t.check, run: { kind: 'procedure', procedure: t.procedure }, placement: 'a',
-    missed: { policy: 'latest_only', expiresAfterMinutes: 60 }, grant: t.grant,
+    missed: { policy: event ? 'skip' : 'latest_only', expiresAfterMinutes: 60 }, grant: t.grant,
   })
   if (!parsed.ok || parsed.definition.run.kind !== 'procedure') return null
   const { check, grant } = parsed.definition
@@ -118,6 +142,7 @@ export function parseJobTurn(v: unknown): QueuedJobTurn | null {
   }
   return {
     occurrenceId: t.occurrenceId, jobId: t.jobId, name: t.name, dueAt: t.dueAt, expiresAt: t.expiresAt, state: t.state,
+    ...(event && source ? { kind: 'event' as const, source: { recordId: source.recordId as string } } : {}),
     check, checkSince: t.checkSince, ...(typeof t.checkUntil === 'string' ? { checkUntil: t.checkUntil } : {}),
     ...(typeof t.sinceCommit === 'string' ? { sinceCommit: t.sinceCommit } : {}), ...(typeof t.checkedCommit === 'string' ? { checkedCommit: t.checkedCommit } : {}), procedure: parsed.definition.run.procedure, grant, ...(meetings ? { meetings } : {}),
     ...(deliverTo ? { deliverTo } : {}),
@@ -204,8 +229,12 @@ export function jobWriteArea(grant: JobGrant): JobWriteArea {
   return grant.writes.area === 'deliverable' ? { place: grant.writes.place, folder: grant.writes.folder, reads } : { nowhere: true, reads }
 }
 
-/** What the check found, as the first message names it. */
+/**
+ * What the check found, as the first message names it. `record` (stage 4b-2): an event occurrence — the server checked
+ * its record (`source_record`) at the claim; the run starts from that record.
+ */
 export type JobFound = { kind: 'files'; files: string[] } | { kind: 'meetings'; meetings: Array<{ id: string; title: string; at: string }> }
+  | { kind: 'record'; recordId: string }
 
 /**
  * The run's first message: the job, what the check found (meetings' titles quoted as outside text), the
@@ -220,6 +249,12 @@ export function jobFirstMessage(input: { name: string; found: JobFound; procedur
   const { found, grant } = input
   const foundLines = found.kind === 'files'
     ? ['前の回のあとに新しく入ったファイル：', ...found.files.slice(0, 50).map(f => `- ${f}`), ...(found.files.length > 50 ? [`（ほか ${found.files.length - 50} 件）`] : [])]
+    : found.kind === 'record'
+    ? [
+      `きっかけ：見張っていたやること（${found.recordId}）が、決めた状態になりました。`,
+      ...(grant.tools.includes('records') && jobRunRouteAllowed(grant, 'GET /item/:recordId', () => false) ? ['そのやることの中身は records_get で読めます。'] : []),
+      '途中でそのやることが変わったとき（状態・担当など）は、この仕事は止められます。',
+    ]
     : [
       '前の回のあとにあった、あなたが出た会議（minutes_read で読めるのはこの会議の議事録だけです）：',
       ...found.meetings.map(m => `- ${m.id}：${outsideTitle(m.title)}（${m.at}）`),
@@ -233,7 +268,7 @@ export function jobFirstMessage(input: { name: string; found: JobFound; procedur
     ...foundLines,
     '',
     ...(input.madeBefore && input.madeBefore.length > 0 ? [
-      'この回は、管理者が「もう一度」を押してやり直しています。前回すでに次のものを作りました（同じものをもう一つ作らないでください。直すときは、それを直してください）：',
+      'この回は、「もう一度」が押されてやり直しています。前回すでに次のものを作りました（同じものをもう一つ作らないでください。直すときは、それを直してください）：',
       ...input.madeBefore.map(m => m.file && input.deliverTo
         ? `- ${jobOperationKindText(m.kind)} ${outsideTitle(m.file.name)}（fileId: ${m.file.id}）`
         : `- ${jobOperationKindText(m.kind)}${m.ref ? `（${m.ref.id}）` : ''}`),
