@@ -577,7 +577,7 @@ browser:
       label: リマインダの段のテンプレートを付け替える   # one line, ≤ 60
       effect: write                          # read | write | delete (the site's level caps it: levelAllows)
       checker: lstep.reminder_step           # ^[a-z0-9_]+\.[a-z0-9_]+$ (the app checks it exists); `adapter` is refused with that reason
-      shared: 全部の回で共有のリマインダです。前の回の人にも届きます。   # optional note, ≤ 200: a warning, blocks nothing
+      shared: 全部の回で共有のリマインダです。ほかの回でも、この段をまだ迎えていない人に届きます（もう過ぎた人には届きません）。   # optional note, ≤ 200: a warning, blocks nothing
       irreversible: false                    # true: one more confirmation right before the step (never on a read; required on a delete)
       target: { reminder: id, step: id }     # what identifies the thing; never empty; id | text, ≤ 10
       change: { template: id }               # the values the plan sets (none on a read)
@@ -692,7 +692,7 @@ browser:
 - **Not on the shelf yet**: the shelf refuses a package with `browser` (「a browser connector (browser) is not
   used yet」, `services/plugin-shelf.ts`), so no company installs it, `pluginsFor` never lists it and no
   app fetches it; `combineUse` refuses one, so no business plugin uses it. A released app's older parser
-  does not know `browser` (an unknown key: unusable). The first declaration (`lstep@0.5.0`, 「リマインダの段に
+  does not know `browser` (an unknown key: unusable). The current declaration (`lstep@0.6.0`, 「リマインダの段に
   テンプレートを足す」) ships **inside the app** with its checker (`client/connectors/lstep/`),
   parsed by `parsePluginManifest`; the runner exists but nothing starts it. The server accepts plans
   only for a combination listed in `shared/browser-connectors/approved.json` (the declaration's text

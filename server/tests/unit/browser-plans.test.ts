@@ -36,8 +36,9 @@ const owner: Member = { companyId: CO, userId: 'u-owner', role: 'owner' }
 const admin: Member = { companyId: CO, userId: 'u-admin', role: 'admin' }
 const alice: Member = { companyId: CO, userId: 'u-alice', role: 'member' }
 const bob: Member = { companyId: CO, userId: 'u-bob', role: 'member' }
-// The current Lステップ row (written `pending` until a reviewed edit approves it, design memo §33.5), as approved.
-const APPROVED: ApprovedCombinationRow = { ...fileBrowserConnectorCatalog().combinations().find(r => r.status !== 'retired')!, status: 'approved' }
+// A real Lステップ row of facts version 1 and `delivers: none` (0.5.0; retired since 0.6.0 reads version 2),
+// as approved: these tests' facts are version 1's; the scheduled version-2 type is built from it below.
+const APPROVED: ApprovedCombinationRow = { ...fileBrowserConnectorCatalog().combinations().find(r => r.connector === 'lstep' && r.version === '0.5.0')!, status: 'approved' }
 const OP = 'reminder_step_add_template'
 const SITE = { host: 'manager.linestep.net', level: 'write' as const, assetHosts: ['d1nhtjid4lgi9y.cloudfront.net', 'profile.line-scdn.net'] }
 

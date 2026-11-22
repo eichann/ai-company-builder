@@ -70,7 +70,7 @@ const candidate = (step: string) => ({
   factsVersion: APPROVED.factsVersion, target: { reminder: '11', step }, change: { template: '7' },
   facts: {
     account: fact({ id: 'acc1' }), step_parent: fact({ reminder: '11' }), state: fact({ templates: [] }), names: fact({ reminder: 'R', step: 'S' }),
-    template_bodies: fact({ 7: '本文' }), shared_with: fact({ count: 0, items: [] }),
+    templates: fact({ 7: { name: 'T', kind: 'text', body: '本文' } }), schedule: fact({ timing: '当日 09:00' }), shared_with: fact({ count: 0, items: [] }),
   },
 })
 

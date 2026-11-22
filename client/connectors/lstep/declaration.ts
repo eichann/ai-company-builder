@@ -10,9 +10,9 @@
  * `_token=<csrf>&_lm_user_id=<session>&content_id=<step>&template_id=<template>`; afterwards the step
  * shows one more `openModal(...)` with that template and a new hole.
  *
- * Adding a template to a reminder's step sends nothing to anyone by itself (`delivers: none`): the
- * step's messages go out on the reminder's schedule. The facts its checker reads for a plan are the
- * table of design memo §31.3 (shared/core/browser-plans.ts holds their shapes).
+ * Adding a template to a reminder's step sends nothing at once: the step's messages go out on the
+ * reminder's schedule (0.2.0–0.5.0 said `delivers: none`; 0.6.0 `scheduled`, below). The facts its
+ * checker reads for a plan: shared/core/browser-plans.ts holds their shapes.
  *
  * 0.3.0 (PR 6b-1) adds `explore`, the pages the operator AI may ask main to read during the preview
  * (design memo §33 2-2), each with its reviewed reader and its reviewed "no side effects" mark:
@@ -36,15 +36,25 @@
  * `reminders` and `templates` declare `pages: { param: page, max: 10 }` instead of the fixed `page=1`,
  * so the app — never the AI — reads `…&page=1`, `…&page=2`, … up to `last_page`, at most 10 pages (500
  * items); a longer list is not offered. Not declared: `/api/landings/<id>` (not this
- * type's). `delivers` stays `none`: what a step's time means for people already past it is not known
- * yet (§34), so no `scheduled` type exists.
+ * type's).
+ *
+ * 0.6.0 (6b-2b) makes the type `delivers: scheduled` and reads facts version 2 (design 6b-2 §2-3):
+ * adding a template to a step reaches only people who have the step's time still ahead of them, at that
+ * time, and never anyone already past it — confirmed by the owner, who runs Lステップ (design memo §37);
+ * that is the reviewed meaning of `scheduled` here, not something read at run time. The facts:
+ * `templates` (name, kind and body of the one to add and of every one on the step; text only — a
+ * `form_type` other than 8 makes no plan) and `schedule` (the step's timing as the page shows it), both
+ * required and read whole (the first version's rule for `scheduled`), and `audience` (how many will
+ * still receive it) optional — unknown is shown as 「読み取れませんでした」, never 0 (6b-2 decision 1).
+ * They are read only through the reads `explore` already declares (./reminder-step-facts.ts says from
+ * where, and which are not confirmed yet: those stay `unknown`, so no plan is made until they are).
  */
 import { LSTEP_REMINDER_FOLDERS_READER, LSTEP_REMINDERS_READER, LSTEP_TEMPLATE_FOLDERS_READER, LSTEP_TEMPLATES_READER } from './list-readers'
 import { LSTEP_REMINDER_STEP_CHECKER } from './reminder-step'
 import { LSTEP_REMINDER_STEPS_READER } from './reminder-steps-reader'
 
 export const LSTEP_DECLARATION = `id: lstep
-version: 0.5.0
+version: 0.6.0
 label: Lステップ
 contract: 1
 browser:
@@ -59,8 +69,8 @@ browser:
       checker: ${LSTEP_REMINDER_STEP_CHECKER}
       lock:
         kind: ${LSTEP_REMINDER_STEP_CHECKER}
-      delivers: none
-      shared: 全部の回で共有のリマインダです。前の回の人にも届きます。
+      delivers: scheduled
+      shared: 全部の回で共有のリマインダです。ほかの回でも、この段をまだ迎えていない人に届きます（もう過ぎた人には届きません）。
       target:
         reminder: id
         step: id
@@ -78,8 +88,10 @@ browser:
         step_parent: { required: true }
         state: { required: true, complete: true }
         names: { required: true }
-        template_bodies: { required: true, complete: true }
+        templates: { required: true, complete: true }
+        schedule: { required: true, complete: true }
         shared_with: { required: true, complete: true }
+        audience: { required: false }
   explore:
     reminder_folders:
       label: リマインダのフォルダの一覧

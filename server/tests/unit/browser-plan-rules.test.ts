@@ -13,7 +13,7 @@
  */
 import { describe, expect, it } from 'vitest'
 import {
-  BROWSER_FACTS_VERSION, BROWSER_REPORT_REASONS, browserFactsAccount, browserFactsChangedProblem, browserFactsDeclarationProblem, browserFactsProblem,
+  BROWSER_REPORT_REASONS, browserFactsAccount, browserFactsChangedProblem, browserFactsDeclarationProblem, browserFactsProblem,
   browserFactsState, browserLockKey,
 } from '../../../shared/core/browser-plans'
 import { browserFirstVersionProblem, parsePluginManifest, type BrowserOperation } from '../../../shared/core/plugins'
@@ -246,8 +246,10 @@ const goodFacts = () => ({
   template_bodies: fact({ 5: '本文A', 7: '本文B\n2行目' }),
   shared_with: fact({ count: 2, items: ['第1回', '第2回'] }),
 })
+/** These facts are version 1's shapes (the current version moved on to 2 with lstep@0.6.0). */
+const V1 = 1
 const values = { target: { reminder: '11', step: '22' }, change: { template: '7' } }
-const problem = (facts: unknown, v = values) => browserFactsProblem(op(), BROWSER_FACTS_VERSION, facts, v)
+const problem = (facts: unknown, v = values) => browserFactsProblem(op(), V1, facts, v)
 
 describe('facts (facts version 1, lstep.reminder_step)', () => {
   it('a full set read whole passes, and gives the account and the state', () => {
@@ -307,10 +309,10 @@ describe('facts (facts version 1, lstep.reminder_step)', () => {
 
   it('a declared fact the facts version does not know makes the type unusable', () => {
     const withExtra = op(edit('        names: { required: true }\n', '        names: { required: true }\n        mood: { required: false }\n'))
-    expect(browserFactsDeclarationProblem(withExtra, BROWSER_FACTS_VERSION)).toContain('mood')
-    expect(browserFactsDeclarationProblem({ ...op(), checker: 'other.thing' }, BROWSER_FACTS_VERSION)).toContain('other.thing')
+    expect(browserFactsDeclarationProblem(withExtra, V1)).toContain('mood')
+    expect(browserFactsDeclarationProblem({ ...op(), checker: 'other.thing' }, V1)).toContain('other.thing')
     expect(browserFactsDeclarationProblem(op(), 99)).toContain('版 99')
-    expect(browserFactsProblem(withExtra, BROWSER_FACTS_VERSION, goodFacts(), values)).toContain('mood')
+    expect(browserFactsProblem(withExtra, V1, goodFacts(), values)).toContain('mood')
   })
 })
 

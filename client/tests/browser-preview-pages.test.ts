@@ -1,6 +1,6 @@
 /**
  * Paginated declared reads in the preview (electron/features/browser/preview.ts `readPages`;
- * agent-browser.md "The operator and the preview", design memo §38): the real Lステップ 0.5.0
+ * agent-browser.md "The operator and the preview", design memo §38): the real Lステップ 0.6.0
  * connector against a fake Lステップ whose lists have 1, 3, 10 or 11 pages, every read going through
  * the real read-session chunk with its real `exactRead` hook (a fake page-less session that sends only
  * what the hook lets through). What is protected: the app — never the operator — chooses the page
@@ -101,7 +101,7 @@ function harness(site: Record<string, string | { status: number; body: string }>
     ...o.deps,
   }
   const request: BrowserPreviewRequest = {
-    companyId: 'c1', connector: { id: 'lstep', version: '0.5.0' }, operation: 'reminder_step_add_template',
+    companyId: 'c1', connector: { id: 'lstep', version: '0.6.0' }, operation: 'reminder_step_add_template',
     hints: { targetHints: { reminder: 'リマインダ' }, changeHints: { template: 'テンプレ' }, reason: '試験' }, signal: new AbortController().signal,
   }
   /** The reminders as the operator got them on the step after the list was read. */
@@ -326,10 +326,10 @@ test('later pages stay within the request\'s 4 minutes: time running out between
 })
 
 test('a read declared without pages (0.4.0\'s fixed page=1) is whole only as its only page, whatever its reader says of its own entries', async () => {
-  const old = lstep.declaration.replace('version: 0.5.0', 'version: 0.4.9')
+  const old = lstep.declaration.replace('version: 0.6.0', 'version: 0.5.9')
     .replace('        - { name: group, value: "{group}" }\n      pages: { param: page, max: 10 }', '        - { name: group, value: "{group}" }\n        - { name: page, value: "1" }')
   const h = harness(list(2), walk, { deps: { connector: createBrowserConnectors([old]) } })
-  await runBrowserPreview({ ...h.request, connector: { id: 'lstep', version: '0.4.9' } }, h.deps)
+  await runBrowserPreview({ ...h.request, connector: { id: 'lstep', version: '0.5.9' } }, h.deps)
   assert.deepEqual(h.sentPaths().slice(1), [pageAddress(1)])
   assert.equal(h.remindersSeen().ids.length, 50)
   assert.equal(h.remindersSeen().complete, false)

@@ -17,10 +17,10 @@ import {
 
 /**
  * The facts version the approved list's script writes for a new combination (part of each approved
- * combination). Version 2 (6b-2) exists for `delivers: scheduled` types; the script moves to it with
- * the connector that reads it (6b-2b), since a version-1 declaration names facts version 2 lacks.
+ * combination). Version 2 (6b-2) since the connector that reads it (`lstep@0.6.0`, 6b-2b); rows
+ * already written keep the version they were written with (version 1 stays readable by the server).
  */
-export const BROWSER_FACTS_VERSION = 1
+export const BROWSER_FACTS_VERSION = 2
 
 export type BrowserFactStatus = 'known' | 'unknown'
 

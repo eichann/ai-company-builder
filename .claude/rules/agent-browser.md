@@ -329,13 +329,15 @@ inventory and the agents / chat server / renderer). PR 6 adds the approval (the 
   are the AI's. **Prefer stable sources** for a new checker: a JSON answer the page itself uses or a
   fixed id marker over the layout of the HTML; a site whose request names the whole target needs no
   target check. What the person approves (`before`) is the state the checker read, not what the AI said.
-- **Lステップ** (`client/connectors/lstep/`): the declaration `lstep@0.5.0` (`declaration.ts`, bundled
+- **Lステップ** (`client/connectors/lstep/`): the declaration `lstep@0.6.0` (`declaration.ts`, bundled
   until the shelf hands browser connectors out; parsed by the core's `parsePluginManifest` like any
   package) with one type, **「リマインダの段にテンプレートを足す」** (`reminder_step_add_template`): effect
-  `write`, checker `lstep.reminder_step`, `lock: { kind: lstep.reminder_step }`, `delivers: none`
-  (adding a template sends nothing by itself; the step goes out on the reminder's schedule), the facts
-  of design memo §31.3 (`account`, `step_parent`, `names` required; `state`, `template_bodies`,
-  `shared_with` required and complete), target `{ reminder, step }`, change `{ template }`, one write
+  `write`, checker `lstep.reminder_step`, `lock: { kind: lstep.reminder_step }`, `delivers: scheduled`
+  (0.6.0, design memo §37, the owner who runs Lステップ: the template reaches only people who have the
+  step's time still ahead, at that time, never anyone already past it — the reviewed meaning of the
+  type, not read at run time; 0.2.0–0.5.0 said `none`), facts version 2 (`account`, `step_parent`,
+  `names` required; `state`, `templates`, `schedule`, `shared_with` required and complete; `audience`
+  optional — "The facts a checker reads" below), target `{ reminder, step }`, change `{ template }`, one write
   `POST /line/episode/step/pack/template` form `{ content_id: {step}, template_id: {template} }`,
   `ignore_body: [_token, _lm_user_id]`, `expect: [{ list: templates, add: "{template}" }]`, account
   required, the `shared` note (共有のリマインダ). Another operation on a step's templates is a new entry
@@ -373,13 +375,11 @@ inventory and the agents / chat server / renderer). PR 6 adds the approval (the 
   pages ("Paginated reads" below; up to 10 pages = 500 items, a longer list is not offered — design
   memo §38, owner), and every entry of a folder's list, on every page, must name the asked folder (`group_id` and `group.id`, each one present equal to it, at least one;
   else left out, incomplete). 「未分類」 in the template folders is `id 0`: **not selectable** (decision,
-  safe side: every id is a positive integer) — left out, the list incomplete. So 0.5.0 passes
+  safe side: every id is a positive integer) — left out, the list incomplete. So 0.5.0 (and 0.6.0) passes
   `previewProblem` (two id-free reads to start from; `reminder`, `step`, `template` each taken out by a
   reader) and the real connector walks a fake Lステップ to a candidate (`browser-preview.test.ts`); the
-  preview stays switched off. Not declared: `/api/landings/<id>` (not this type's). `delivers` stays
-  `none` and the facts stay version 1 in 0.5.0: the core has `scheduled` and facts version 2 since 6b-2a
-  (the owner confirmed for this type that nobody already past the step receives it, design memo §37);
-  the connector reading them is `lstep@0.6.0` (6b-2b).
+  preview stays switched off. Not declared: `/api/landings/<id>` (not this type's). 0.6.0 reads its
+  facts through these same reads ("The facts a checker reads").
 
 Tests: `client/tests/browser-runner.test.ts` (the gate: not armed, another step / template, an extra /
 repeated / `_method` key, no body, a query, http / another host, an undeclared method, a second send,
@@ -438,7 +438,8 @@ send → report; 6c turns it on for the owner's PC).
   `status` is `pending` / `approved` / `retired`: the script writes a new row **`pending`** (design memo
   §33.5: listed, but the server reads it as not approved, `BROWSER_TYPE_NOT_APPROVED`) until a reviewed
   edit approves it together with its `minAppVersion` (6b: the small PR after 6b-2, the 6b-2 merge's
-  build). Today: `lstep@0.2.0`, `lstep@0.3.0` and `lstep@0.4.0` (their old checker hashes too) `retired`, `lstep@0.5.0` `pending`;
+  build). Today: `lstep@0.2.0` … `lstep@0.5.0` (their old checker hashes too) `retired`, `lstep@0.6.0`
+  (facts version 2) `pending`;
   `declarationHash` = `sha256:` of the declaration text, **and the text itself is in the row**: the
   server reads declarations only from this file (never from `client/`, which `server/src` may not
   import), re-hashes each and parses it with the core's parser (a row that does not match its hash
@@ -570,7 +571,8 @@ send → report; 6c turns it on for the owner's PC).
   every one on the step) + `schedule` (`{ timing }` as the page shows it, ≤ 100, never parsed) +
   `audience` (`{ count ≥ 0 }`; the declaration makes it optional: unknown makes a plan and is shown as
   「読み取れませんでした」, never 0 — decision 1). `BROWSER_FACTS_VERSION` (what the approved list's script
-  writes) stays 1 until the connector reading v2 arrives (6b-2b). **The re-read**
+  writes for a new row) is 2 since the connector reading it (`lstep@0.6.0`, 6b-2b); rows already
+  written keep their version, and version 1 stays readable by the server. **The re-read**
   (`browserFactsChangedProblem`, the app's, 6b-2c): the re-read must make a plan by itself, then every
   declared fact the same status; known ones the same value (canonical JSON), except `audience` (may fall,
   never rise — decision 8) and `shared_with.items` (a multiset: any order, each as often); unknown → known is a change (decision 9).
@@ -792,8 +794,8 @@ every start stay. 6b connects every path but ships **off**; 6c turns it on for t
   goes on the CLI's stdin, whose size nothing caps (the 2 / 4 MiB limits are the answer's) — a material
   too large for the model ends the step (`failed`), never a looser read.
 - **Not done here** (6b-2 and later): no chat tool, IPC or wiring in `main.ts` (nothing in the app
-  imports `preview.ts`), registering the plan, the facts read for it (the checker's `factPaths` /
-  `facts`), the card, claim → permit → send → report.
+  imports `preview.ts`), registering the plan (the facts read for it: 6b-2b, "The facts a checker
+  reads", nothing calls it yet), the card, claim → permit → send → report.
 - **To check once on a real machine** (§33 1-6; a completion condition of 6b-1 not yet done — it needs
   the owner's Team login and seeding their own `~/.claude`): the member's own hooks, CLAUDE.md, memory,
   MCP, plugins and Skills seeded with marker words do nothing and do not show in init or the answer, and
@@ -809,16 +811,16 @@ long stream, a non-JSON line, an error result, a time-out and a stop; a child th
 it; on the macOS list),
 `browser-preview.test.ts` (the switch: nothing asked, read or started; the loop; what the material holds
 and never holds; ids not taken out refused with nothing read; one JSON object; 8 steps and 4 minutes;
-refusals before anything; a changed context; the window closed or replaced; the real Lステップ 0.5.0
+refusals before anything; a changed context; the window closed or replaced; the real Lステップ 0.6.0
 connector previewable and walking a fake Lステップ — folders → reminders → the reminder page → template
 folders → templates — to a candidate reading exactly the declared addresses, a template's body and
 「未分類」 never offered; a folder not shown, 「未分類」, a template only on the step or an extra parameter
 refused with nothing read), `browser-page.test.ts` (hidden parts, hidden
 inputs / meta / link / base, a hidden root, repeated ids and attributes under any query, mended HTML, references never from text, the kept items, labels, Lステップ's
-reader and 0.5.0's `explore` (paginated reads with JSON readers); strict JSON — a repeated key, too deep, too long, trailing text, keys
+reader and 0.6.0's `explore` (paginated reads with JSON readers); strict JSON — a repeated key, too deep, too long, trailing text, keys
 without a prototype —; the list readers: ids and names only, 「未分類」 left out, another folder or none,
 the page report — whole numbers that fit, else dropped and incomplete —, no page fields, bad ids → incomplete),
-`browser-preview-pages.test.ts` (the real Lステップ 0.5.0 connector against a fake Lステップ of 1, 3, 10
+`browser-preview-pages.test.ts` (the real Lステップ 0.6.0 connector against a fake Lステップ of 1, 3, 10
 and 11 pages, every read through the real session chunk and `exactRead`: exactly `…&page=1..N` in
 order; 11 pages, over 500 items or a `total` over 500 on one page → nothing offered; a changed
 `last_page` / `total`, a wrong `current_page`, an id twice across pages or within one, a failing page 2,
@@ -838,6 +840,78 @@ declared read's query reaches the site exactly as built, an encoded one is never
 `server/tests/unit/plugin-browser-declaration.test.ts` (`explore`; a query: accepted shapes, every refusal, the built address, `exploreAddressProblem`; `pages`: accepted, every refusal, the page appended last only 1..max), `browser-plans.test.ts` (`pending`).
 Each guard mutation-checked; kept on purpose (second layers no test can tell apart): `explorePath`'s own address check (the parser already admits only such parts) and the window's address check before a preview read (`exactRead` refuses the same address in the request hook).
 
+## The facts a checker reads (6b-2b: built; nothing in the app calls it yet)
+
+Design 6b-2 §2-3 (owner approved): the facts a plan is registered with — and compared with again right
+before the permit — are read by main through the checker, never taken from the AI.
+
+- **Pieces.** `BrowserChecker.facts` (`BrowserCheckerFacts`, types in `client/shared/browser-runner.ts`):
+  `version` (the facts version it reads), `next(values, answers)` — which declared reads to make next,
+  worked out again from the answers each time (`[]` = done) — and `read(values, answers)` → drafts
+  `{ status, value?, complete?, from, rawMarkup? }` and an optional fixed `problem` word. The core's
+  driver `readBrowserFacts` (`client/shared/browser-facts.ts`; 6b-2c calls it with the preview surface's
+  `read`, `parseBrowserHtml` and the clock): every request must be an `explore` read of the declaration
+  (`undeclared-read`), its address built by `explorePath` with exactly its `{name}`s and, for a paginated
+  read, a page 1..max (`bad-address`; a page on a read without `pages` too); at most
+  `BROWSER_FACT_READS` (50) reads (`too-many-reads`); a read already made is not made again; a checker of
+  another facts version reads nothing (`facts-version`); `stop` ends it. Answers: HTML as its text and the
+  core's page view (`createPageView` over the parsed tree), JSON parsed strictly (`parseStrictJson`),
+  anything else (no answer, not 200, not parsed) `ok: false`. Each declared fact gets `readAt` (when its
+  answer was read) and `source` (that answer's path, never the query); a fact from a failed answer is
+  never known; a fact from a page whose view was not whole is `unknown` unless the checker marks it
+  `rawMarkup` **and** it is one of `BROWSER_RAW_MARKUP_FACTS` (`account`, `step_parent`, `state`: read
+  by its run-time `view` from the raw markup — the same reading the run compares the page with, so
+  `before` is exactly what the run checks; any other fact so marked stays unknown); only declared
+  facts are kept, a declared one without a draft is `unknown`. The result carries `browserFactsProblem`.
+  Second layer kept on purpose: `exploreAddressProblem` on what `explorePath` built.
+- **Lステップ 0.6.0** (`client/connectors/lstep/reminder-step-facts.ts`, in the checker's folder, so in its
+  hash): only shapes seen with the owner's login (design memo §34–§36); the rest is never guessed.
+  `account` (`lm-account-id`), `step_parent` and `state` from the reminder page through the checker's own
+  `view`; `templates` — every template on the step and the one to add — from `GET
+  /api/templates?group=<folder>&page=<n>` entries `{ id, name, content_text, form_type, group }`, found
+  by id folder by folder (`/api/template-groups` in order; pages in order while `current_page` is the page
+  asked and below `last_page`, at most 10): **`form_type` 8 (a number) only = text** (§34; any other → no
+  plan, `problem: template-not-text`), name ≤ 200 and body ≤ 5000 plain text, an entry only when every
+  folder id it carries is the folder asked, an id found twice with different contents not found, 「未分類」
+  (`id 0`) never asked (a template there → no plan); the walk stops once every id sought is found, so a copy of an id
+  in a later folder is not seen (only the pages read are checked: ids are the site's record numbers, and
+  a filter the site did not apply shows as entries of other folders, left out; walking every folder
+  would make the 50-read cap likely); `names.reminder` from `GET /api/episodes?group=<folder>&page=<n>`
+  the same way (`/api/episode-groups`); `schedule.timing` and `names.step`: the one visible element
+  text in the step's box (`templateStep<step>`, by the core's view) that is a whole timing (「当日
+  09:00」, 「3日前 09:00」, 「N 日前 に送信」: recognised, never taken apart), exactly one distinct such
+  text, never a link (`<a>`, `<button>`, an `openModal(…)` slot — a template named 「当日 09:00」 is a
+  name) nor an element holding one, and a timing-shaped text inside any link makes it unknown (in doubt,
+  no fact); `names` is stamped from the reminder page (its step name is read there), so a page not read
+  whole leaves it unknown too; `shared_with` and `audience` **always unknown** (no
+  reading confirmed). Nothing beyond the reminder page is read when the step is not there. So **no plan
+  can be made with 0.6.0 today** (`shared_with` is required): availability, never a guessed fact; the
+  row is `pending` anyway.
+- **To confirm at the owner's next login** (read-only window, as §34–§36): where the step's timing stands
+  in the step's box and its exact text (one element, the forms above); where the site lists the 回 using a
+  reminder (`shared_with`: count and names) and whether any read means exactly "people who will still
+  receive this step" (`audience`); that `content_text` is a text template's whole body (not a shortened
+  preview) and `form_type` is a number with 8 = text; that `/api/episodes?group=` entries carry the
+  reminder's name as shown; that the real reminder page reads whole in the core's view (an id written
+  twice anywhere makes the view-read facts unknown); the slots of a step with templates attached (§34:
+  none at the time); whether a template can be removed again before the step's time (design 6b-2 §9).
+  Each answer that changes a reader is a new connector version (a new `pending` row).
+
+Tests: `client/tests/browser-facts.test.ts` (the real connector against a fake Lステップ, made-up names:
+exactly the declared reads in order, 「未分類」 never asked, a later page only when page 1 says so;
+every confirmed fact known with its source and time, `shared_with` / `audience` unknown and so no plan;
+the read-after's `expectedAfter`; a non-text template (also `form_type: '8'`), one only in 「未分類」, in
+another folder, twice differently, with a control character, a failed or repeated-key folder answer, a
+misnumbered page → no templates; the timing whole and alone in the box (two, mixed text, hidden, outside
+the box, a template or link named like a timing, wrapped or not, an element holding a link → unknown); a
+page with a repeated id keeps the account and state but not the timing or the names; no account,
+no step (nothing else read), a failed page, a reminder in no folder, a name with a bidirectional mark;
+the cap, undeclared reads, a page past `max`, a page on an unpaginated read, a bad id, another facts
+version, a stop, a careless checker (a fact from a failed answer, an undeclared fact, the same read asked
+again, `rawMarkup` on a fact outside the list); the re-read: the same site passes, a changed body / name / timing / reminder name / state, a
+template gone, the count rising or unknown → known are refused, a fall is not). Each guard
+mutation-checked; second layers kept on purpose: `exploreAddressProblem` after `explorePath`.
+
 ## Not yet (later PRs)
 
 **Keeping a login on disk** (`browserLoginStorage`, kept in `shared/core` for that PR): deferred until
@@ -849,9 +923,9 @@ turns against the same userData unenclosed; and a refused policy refresh (403) w
 
 The AI does not operate the window yet: the runner, the first type and the server's plans (6a,
 above) exist but nothing starts a run. Still to come: **6b** — the operator AI and the preview's reads
-are built (6b-1, "The operator and the preview", switched off); still the facts read for a plan (where `account`, `step_parent`,
-`names`, `template_bodies` and `shared_with` are read on the real site is confirmed with the owner's
-login), register / the approval card / claim → permit → send → report from main with the context
+are built (6b-1, "The operator and the preview", switched off) and the facts read for a plan (6b-2b,
+"The facts a checker reads": the unconfirmed ones read as unknown until the owner's next login); still
+register / the approval card / claim → permit → send → report from main with the context
 check and both clocks (design memo §30.1–2), the post-send judgement (§29.6) and `failed` only when
 stopped before sending, and how the app knows its own checker hash; **6c** — the `browser_request`
 tool for the chat AI, on the owner's PC only; `irreversible` types and more than one write (refused
