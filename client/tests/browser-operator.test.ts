@@ -69,8 +69,9 @@ const PARENT = {
   PATH: `${path.dirname(process.execPath)}:/usr/bin:/bin`,
   HOME: os.homedir(), USER: 'member', LOGNAME: 'member',
   HTTPS_PROXY: 'http://proxy.example:8080', https_proxy: 'http://proxy.example:8080', NODE_EXTRA_CA_CERTS: '/etc/ca.pem',
-  ANTHROPIC_API_KEY: 'sk-secret', CLAUDE_CONFIG_DIR: '/elsewhere', CLAUDE_CODE_USE_BEDROCK: '1', CLAUDE_AGENT_SDK_X: '1',
-  XDG_CONFIG_HOME: '/x', AWS_SECRET_ACCESS_KEY: 'aws', GITHUB_TOKEN: 'gh', SHELL: '/bin/zsh', TERM: 'xterm',
+  // Long unique markers: a short value ("gh", "aws") can appear by chance in a random temp folder's name.
+  ANTHROPIC_API_KEY: 'sk-ant-PLANTED-SECRET-3d8e', CLAUDE_CONFIG_DIR: '/elsewhere-PLANTED-CONFIG-5b17', CLAUDE_CODE_USE_BEDROCK: '1', CLAUDE_AGENT_SDK_X: '1',
+  XDG_CONFIG_HOME: '/x', AWS_SECRET_ACCESS_KEY: 'aws-PLANTED-SECRET-91c2', GITHUB_TOKEN: 'ghp-PLANTED-SECRET-7f3a', SHELL: '/bin/zsh', TERM: 'xterm',
 }
 
 before(() => {
@@ -117,7 +118,7 @@ test('the operator starts with exactly the closed arguments, in a fresh empty fo
   assert.equal(env.CLAUDE_CODE_DISABLE_AUTO_MEMORY, '1')
   assert.equal(env.LANG, 'en_US.UTF-8')
   assert.equal(env.PATH, `${path.join(dir, 'bin')}:${fs.realpathSync(path.dirname(process.execPath))}:/usr/bin:/bin`)
-  for (const secret of ['sk-secret', '/elsewhere', 'aws', 'gh']) assert.ok(!JSON.stringify(call.env).includes(secret), secret)
+  for (const secret of ['sk-ant-PLANTED-SECRET-3d8e', '/elsewhere-PLANTED-CONFIG-5b17', 'aws-PLANTED-SECRET-91c2', 'ghp-PLANTED-SECRET-7f3a']) assert.ok(!JSON.stringify(call.env).includes(secret), secret)
   // A new empty folder that is gone afterwards; TMPDIR another one.
   assert.notEqual(call.cwd, env.TMPDIR)
   assert.equal(fs.existsSync(call.cwd), false)
