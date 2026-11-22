@@ -19,6 +19,8 @@ import { DriveOverwriteCard } from './DriveOverwriteCard'
 import { PluginOperationCard } from './PluginOperationCard'
 import { APPROVAL_PART_TYPE, readApprovalCardRef } from '../../../../shared/approvals'
 import { ApprovalCard } from './ApprovalCard'
+import { BROWSER_PLAN_PART_TYPE, readBrowserPlanCardRef } from '../../../../shared/browser-plans'
+import { BrowserPlanCard } from '../../browser-plans/components/BrowserPlanCard'
 import { MINUTES_BUNDLE_CHOICE_PART_TYPE, readMinutesBundleChoiceCard } from '../../../../shared/minutes-app'
 import { MinutesBundleChoiceCard } from './MinutesBundleChoiceCard'
 import { SteerInstructionView } from './SteerInstruction'
@@ -136,6 +138,10 @@ export function AssistantMessageParts({ parts, isStreaming, markdown }: { parts:
         if (part.type === APPROVAL_PART_TYPE) {
           const ref = readApprovalCardRef((part as { data?: unknown }).data)
           return ref ? <ApprovalCard key={item.key} card={ref} /> : null
+        }
+        if (part.type === BROWSER_PLAN_PART_TYPE) {
+          const ref = readBrowserPlanCardRef((part as { data?: unknown }).data)
+          return ref ? <BrowserPlanCard key={item.key} companyId={ref.companyId} planId={ref.planId} /> : null
         }
         if (part.type === MINUTES_BUNDLE_CHOICE_PART_TYPE) {
           const card = readMinutesBundleChoiceCard((part as { data?: unknown }).data)

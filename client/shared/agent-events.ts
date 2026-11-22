@@ -22,6 +22,7 @@ import type { AuthMode } from './agent'
 import { CODEX_CHOICE_SERVER, CODEX_CHOICE_TOOL, CLAUDE_CHOICE_TOOL } from './choice-prompt'
 import { REVIEW_SERVER } from './review-request'
 import { WEB_RESEARCH_SERVER, WEB_RESEARCH_TOOL } from './web-research'
+import { BROWSER_REQUEST_SERVER, BROWSER_REQUEST_TOOL } from './browser-plans'
 import { commandHosts, type SandboxConcern, type SandboxViolation } from './agents/sandbox-policy'
 import {
   AGENT_EVENT_VERSION,
@@ -86,6 +87,8 @@ export function categorizeTool(toolName: string): ToolCategory {
     if (mcp.server === CODEX_CHOICE_SERVER && mcp.tool === CODEX_CHOICE_TOOL) return 'question'
     // 「Web で調べる」 (web-research.ts): the app's tool, but what it does is reach the web.
     if (mcp.server === WEB_RESEARCH_SERVER && mcp.tool === WEB_RESEARCH_TOOL) return 'web'
+    // 「ブラウザ操作」's request reads an outside site (the stop's `web` kind stops it, as `browserAiStopped`).
+    if (mcp.server === BROWSER_REQUEST_SERVER && mcp.tool === BROWSER_REQUEST_TOOL) return 'web'
     return APP_MCP_SERVERS.includes(mcp.server) ? 'app-tool' : 'mcp-external'
   }
   return Object.prototype.hasOwnProperty.call(TOOL_CATEGORIES, toolName) ? TOOL_CATEGORIES[toolName] : 'other'

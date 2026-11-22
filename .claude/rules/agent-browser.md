@@ -48,6 +48,13 @@ paths:
   - "client/tests/browser-page.test.ts"
   - "client/tests/browser-read-session.test.ts"
   - "model/browser-plan/**"
+  - "shared/browser-connectors/**"
+  - "client/shared/browser-plans.ts"
+  - "client/electron/browser-request/**"
+  - "client/src/features/browser-plans/**"
+  - "client/tests/browser-plans-app.test.ts"
+  - "client/tests/browser-plan-card-ui.tsx"
+  - "client/tests/ui/browser-plan-card.spec.ts"
 ---
 
 # Browser operation (「ブラウザ操作」): sites the chat AI may operate
@@ -225,11 +232,12 @@ without a site, the notes, 「開いてログイン」, 「ログインを消す
 ## The runner (PR 5a: built and tested; the AI cannot reach it)
 
 Owner plan 2026-11-20: every automated operation goes through one gate; only per-site operation types
-(the connector's declaration + a reviewed checker, "The checker"); the AI's entry stays **closed**: nothing
-in the app imports `features/browser/runner.ts` (no IPC channel, preload method, chat tool or agent;
-`browser-runner.test.ts` 「nothing in the app can start a run yet」 checks the importers, the IPC
-inventory and the agents / chat server / renderer). Since 6b-2c it runs a plan the server holds
-("Executing a plan" below); 6b-2d wires the card's press to it.
+(the connector's declaration + a reviewed checker, "The checker"); the AI's entry stays **closed**: the
+runner is made only by `features/browser/wire.ts` and run only by the card's ［任せる］ (`browserPlans:run`,
+main window only, 6b-2d); no agent, chat tool, chat server, preload or renderer code names it
+(`browser-runner.test.ts` 「only the card's ［任せる］ reaches the runner」 checks the importers, the one
+handler, the IPC inventory and the agents / chat server / renderer). Since 6b-2c it runs a plan the
+server holds ("Executing a plan" below); while the build's switch is off it refuses at once (`off`).
 
 - **Pieces.** `client/shared/browser-runner.ts` (pure: the plan `parseBrowserRunPlan`, the claim
   `parseBrowserClaim` / `parseFixedContent` / `fixedContentMismatch` / `permitValidMs`, `createRunGate`,
@@ -318,7 +326,7 @@ inventory and the agents / chat server / renderer). Since 6b-2c it runs a plan t
   says the server did not process it — HTTP/2 `REFUSED_STREAM` or a `GOAWAY` naming a later stream, and
   similar for HTTP/3 / QUIC. The site's own failure to keep that promise could apply a write twice;
   the page's re-read would then show another state (`unknown`), never `succeeded`.
-- **The step record** (`run-records.ts`, `<file>` given by its user; nothing wires it yet): plan id,
+- **The step record** (`run-records.ts`, `<userData>/browser-runs/records.json` since 6b-2d's wiring): plan id,
   operation name, step, `claimed` / `permit-asked` / `succeeded` / `failed` / `unknown` (6b-2c; a file
   with the older `pending` / `sent` reads as unreadable — nothing ever wrote one outside tests), a fixed
   reason word, a time — never an account, a template, a token, the secret or any other value (refused).
@@ -622,15 +630,15 @@ uncached and own only, the report without a session, the real member removal),
 `company-scoped-sql.test.ts` (`HANDLE_TABLES`, the lookup), `jobs-schema.test.ts` (additive tables).
 Each guard mutation-checked.
 
-## Executing a plan (6b-2c: built, switched off; nothing in the app calls it yet)
+## Executing a plan (6b-2c: built; 6b-2d: wired behind the card, switched off)
 
 Design 6b-2 §3, §5 (owner approved every recommendation): `createBrowserRunner(deps).run({ companyId,
 planId, contentHash })` (`features/browser/runner.ts`) runs one plan the member approves on the card —
 the card's press is all it takes (never a fact, a hash of its own or the AI's word). No Electron; the
 server comes in as `BrowserPlansApi` (approve / claim / cancel / permit with the session, report with
-the secret; the HTTP client is 6b-2d's, none retries by itself), the window as `BrowserRunWindow`
+the secret; the HTTP client is 6b-2d's `plans-api.ts`, none retries by itself), the window as `BrowserRunWindow`
 (`run` + `preview` of one window), the context as `context()` → "still the same?" (sign-in, company,
-setting generation, conversation: 6b-2d hands it in), the clocks as `now()` and `monoMs()`.
+setting generation: 6b-2d's `context.ts`), the clocks as `now()` and `monoMs()`.
 
 - **Order** (each step names a `model/browser-plan/PlanLife.tla` action): the switch (off → nothing
   asked) → the input's shape → this PC's record (any record → `already-ran`) → `approve { contentHash }`
@@ -875,9 +883,8 @@ every start stay. 6b connects every path but ships **off**; 6c turns it on for t
   ~150 KB of material (500 items, 80-character labels), so the 8 rounds' material can reach ~1 MB; it
   goes on the CLI's stdin, whose size nothing caps (the 2 / 4 MiB limits are the answer's) — a material
   too large for the model ends the step (`failed`), never a looser read.
-- **Not done here** (6b-2 and later): no chat tool, IPC or wiring in `main.ts` (nothing in the app
-  imports `preview.ts`), registering the plan (the facts read for it: 6b-2b, "The facts a checker
-  reads"), the card; claim → permit → send → report is 6b-2c's ("Executing a plan", nothing calls it yet).
+- **Wired in 6b-2d** ("The card, the IPC and the request tool"): `wire.ts` runs the preview for the
+  consultation AI's request and registers its candidate with the facts the checker reads; still switched off.
 - **To check once on a real machine** (§33 1-6; a completion condition of 6b-1 not yet done — it needs
   the owner's Team login and seeding their own `~/.claude`): the member's own hooks, CLAUDE.md, memory,
   MCP, plugins and Skills seeded with marker words do nothing and do not show in init or the answer, and
@@ -994,6 +1001,99 @@ again, `rawMarkup` on a fact outside the list); the re-read: the same site passe
 template gone, the count rising or unknown → known are refused, a fall is not). Each guard
 mutation-checked; second layers kept on purpose: `exploreAddressProblem` after `explorePath`.
 
+## The card, the IPC and the request tool (6b-2d: built, switched off)
+
+Design 6b-2 §2–§4, decisions 1, 4–10 (owner approved). `features/browser/wire.ts` (`wireBrowserPlans`, no
+Electron; called once from `main.ts` with the window controller, the policy store's stop, the session and
+the bundled connectors) makes everything below. **The build's switch stays off** (`BROWSER_AI_BUILD_SWITCH`):
+the request tool does not exist, a request makes nothing, ［任せる］ is refused at once (`off`) and the card
+says 「この機能は、このアプリではまだ使えません」 — no site read, no operator started, no server call
+(`browser-plans-app.test.ts` 「as it ships」). The card's reads, ［やめる］ and the confirm are clean-up
+paths and never ask the switch.
+
+- **The server client** (`plans-api.ts`, `createBrowserPlansHttp`): the runner's `BrowserPlansApi` plus
+  register / get / open / confirm. The member's session for every company route; **the report carries
+  the execution's secret alone, no session**; the secret goes only in `X-ACB-Browser-Execution`, never
+  an address or a body. Ids are put in an address only in the server's own shapes (`bp_` / `bx_` + 32
+  hex, a company id of `[A-Za-z0-9_-]`): anything else is refused before a request. 2xx with `data` →
+  ok, 4xx → refused with the server's code, anything else (5xx, no connection, a time-out) → no answer.
+  No call retries.
+- **The context** (`context.ts`): one generation, advanced by sign-out, a sign-in, a failed policy
+  refresh, a change of a company's browser setting (the same setting again does not) and quitting; a
+  capture also reads the signed-in member and, for a request, the turn's signal. The runner's
+  `context()` and the registration's reads use it.
+- **This build's combination** (`combination.ts`): `shared/browser-connectors/carried.json`, written by
+  `client/scripts/browser-connectors.ts` beside approved.json (the current folder's rows only; approved.json
+  may list several checker hashes for one version) and held to the folders by
+  `browser-connectors-approved.test.ts`. A row is used only when its declaration hash is the hash of the
+  declaration text the app bundles, and only when it is the one row of that id and version.
+- **Registration** (`register.ts`, `registerBrowserPlan`): the switch → this build's combination and
+  checker (else `notAllowed`, nothing started) → the preview (6b-1) → the facts read by the checker
+  through the window's page-less read session (6b-2b), the context checked before and after each read →
+  any facts problem or the checker's own problem = no plan → `POST /browser-plans` with the combination,
+  the candidate's ids, the facts and the operator's explanation (an explanation, never a fact). The plan
+  then waits for the member; nothing here approves, claims or sends.
+- **The request tool** (`electron/browser-request/tools.ts`, `browser_request` on `acb_browser`,
+  `mcp__acb_browser__browser_request`): offered only when `browserRequestForTurn` gives one — the wiring
+  present and the switch on — and only to an agent with `capabilities.browserOperator` (Claude Code, in
+  process, `alwaysLoad`, auto-allowed), never in an unattended step. Input: `site`, `operation`,
+  `target_hints`, `change_hints` (names as the user said them), `reason`. **The AI gets the plan's number and
+  fixed words only** (`BROWSER_REQUEST_WORDS`): never a fact, a hash, the page's text, the operator's
+  question or a run's result (decision 7); it cannot approve, run, report or confirm (no such tool). Its
+  category is `web` (the emergency stop's `web` kind stops it, as `browserAiStopped`). A plan made puts
+  the card's reference in the reply (`data-browser-plan`, `BrowserPlanCardRef`, stored as `browserPlans`).
+- **IPC** (`plans-ipc.ts`; main window's main frame only, `isMainFrameSender`; every argument checked at
+  the entry before anything is asked): `browserPlans:list` (the member's own waiting plans, for the inbox's
+  rows — a follow-up), `browserPlans:get` (the server's view + `ready` + `stoppedHere` + `runningHere` +
+  the site's host), `browserPlans:run { companyId, planId, contentHash }` — approve + claim + the run in one
+  press on this PC (decision 5), nothing else ever reaches the runner (no fact, target or AI word), one run
+  per plan at a time —, `browserPlans:cancel`, `browserPlans:confirm { executionId, done | not_done }`.
+- **Whether ［任せる］ can be pressed** (`browserCardReadiness`, decision 4): the switch on, the plan a
+  draft, the site listed by the member's current policy, the AI not stopped, the site's window open here,
+  and the page (read through the window's page-less read session with the checker's declared reads)
+  showing the plan's own account; else a plain reason on the card (no window → 「開いてログイン」). Only a
+  hint for the button: the runner checks everything again after the press.
+- **The card** (`client/src/features/browser-plans/`: `components/BrowserPlanCard.tsx` opened by
+  `{ companyId, planId }` from anywhere — the chat's reply today, the inbox later —, `planStore.ts` +
+  `hooks/useBrowserPlan.ts` (read whenever a card shows it again — cards shown together share one read —,
+  no effect of its own; an unsettled execution — claimed, permitted, unknown — is read again every 15 s,
+  so the server's time-outs and the confirm's opening show without a restart), `model.ts` the words,
+  `api.ts` small ports. Decision (safe side, the IPC is main window only): in a consultation's own window
+  the card shows only 「このカードは、アプリのメインの窓の相談で開いてください」. The copy is kept per
+  signed-in member, through the server being out of reach only — a refusal or not-found drops it). Read from the server's fixed view only: what / where / to whom / when under 「サイトから読み取った
+  情報」 — the account, the reminder and the step, the templates on the step and the one to add (name and
+  body), 「届く時」 as the page shows it (never parsed) with 「この段の時刻をこれから迎える人に、その時刻に
+  届きます。すでに過ぎた人には届きません。」 for `delivers: scheduled`, 「これから届く人数」 N人 or
+  **「読み取れませんでした」 in amber, never 0** (decision 1), the 回 using it, the read time —, the
+  declaration's shared note as a warning callout, then 「AI の説明（サイトから読んだ情報ではありません）」.
+  Amber while awaiting approval. After a run: 「計画どおりの状態になっています。」 / 「送る前に止めました。この
+  操作の送信は行っていません。」 / 「…送りませんでした。」 (with the reason while the press is fresh) /
+  **「届いたか分かりません。」 with what to check in the site** (the reminder, the step, the template) and
+  ［済んでいた］［されていなかった］ only from `confirmableAt` (before: 「HH:MM から…」); this PC's record
+  as a hint only (decision 10). **No resend button anywhere** (decision 6): 「もう一度は送りません。もう一度
+  やるときは、相談で頼み直してください。」. Never: 「安全です」, a hash, a token, the secret.
+- **Remaining limits** (said): the readiness read is a hint (a logout between it and the press stops the
+  run before the permit with `account-unknown`); `browser_request` is Claude Code only (Codex has no
+  operator); the inbox's row for a plan (［承認する…］ opening this card) is a follow-up.
+
+Tests: `client/tests/browser-plans-app.test.ts` (the switch off: no preview, read or server call; a plan
+registered with this build's combination and the checker's facts, the AI's words only as the explanation;
+a required fact unread, the context moving during the read, no combination, the operator not finding it
+→ nothing registered; the tool's fixed words and no operator question; the secret only in its header and
+the report without a session; ids outside the server's shapes never sent; 4xx / 5xx / thrown; the IPC from
+another window or with bad arguments asks nothing, ［任せる］ hands exactly company, plan and hash, one run
+per plan; readiness by switch, state, site, stop, window and account; the context's generation; the
+combination's checks; as it ships nothing reaches a site, the operator or the server and the turn gets no
+tool), `src/features/browser-plans/model.test.ts` (an unread count never 0; awaiting only for a draft; a
+result nobody knows says what to check, no resend, confirm only after its time; plain reasons),
+`client/tests/ui/browser-plan-card.spec.ts` (preview `browser-plan-card-ui.html`: the facts, the
+timing sentence, 「読み取れませんでした」, the shared warning; ［任せる］ sends only the plan and the shown
+hash; disabled with the reason and 「開いてログイン」; ［やめる］; unknown before and after its time, the
+confirm opening by itself on a fake clock; the plain results; no jargon), `src/features/browser-plans/planStore.test.ts`
+(a card shown again reads again, a failure recovers, two cards share one read; a copy survives only the server being out of reach), `browser-runner.test.ts` (the one way in). Each guard mutation-checked; second
+layer kept on purpose: the registration's context check before each read (the check after each answer
+catches the same change).
+
 ## Not yet (later PRs)
 
 **Keeping a login on disk** (`browserLoginStorage`, kept in `shared/core` for that PR): deferred until
@@ -1007,14 +1107,10 @@ The AI does not operate the window yet: the runner, the first type and the serve
 above) exist but nothing starts a run. Still to come: **6b** — the operator AI and the preview's reads
 are built (6b-1, "The operator and the preview", switched off) and the facts read for a plan (6b-2b,
 "The facts a checker reads": the unconfirmed ones read as unknown until the owner's next login) and
-the execution (6b-2c, "Executing a plan": claim → re-read → permit → send → report, switched off); still
-register / the approval card / the plans' HTTP client / the context module (`context()`) and how the app
-knows its own combination (`deps.combination`) (6b-2d); **6c** — the `browser_request`
-tool for the chat AI, on the owner's PC only; `irreversible` types and more than one write (refused
-by the first version's rule today); wiring the runner in `main.ts` (deps: `controller.siteNow`
-/ `runWindow`, `browserAiStopped(policy.stop(companyId))`, `createBrowserRunRecords(<userData>/…)`,
-`lstepConnector()`'s declaration and checkers through `createBrowserConnectors` /
-`createBrowserCheckerRegistry`), **the method override and the swap** (design memo §24: a write may
+the execution (6b-2c, "Executing a plan": claim → re-read → permit → send → report) and the registration,
+the card, its IPC and the request tool (6b-2d, "The card, the IPC and the request tool"), all switched
+off; the inbox's row for a plan (a follow-up of inbox I2); **6c** — the switch on, on the owner's PC only;
+`irreversible` types and more than one write (refused by the first version's rule today); **the method override and the swap** (design memo §24: a write may
 declare `method: DELETE` / `PATCH` with `override: form_field`, sent as POST with `_method=<method>` in the
 body; `matchDeclaredWrite` would then match the effective method and the declared `_method` pair, still
 refusing `_method` from anything else and every override header; an effective DELETE needs `effect:

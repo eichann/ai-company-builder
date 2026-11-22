@@ -7,6 +7,8 @@ import { RECORDS_SERVER, recordToolId } from '../records/tools'
 import { WEB_RESEARCH_SERVER, WEB_RESEARCH_TOOL, webResearchDescription, webResearchSchema } from '../web-research/tools'
 import { SECOND_OPINION_SERVER, secondOpinionSchema } from './second-opinion'
 import { WEB_RESEARCH_TOOL_ID } from '../../shared/web-research'
+import { BROWSER_REQUEST_SERVER, BROWSER_REQUEST_TOOL, browserRequestDescription, browserRequestSchema } from '../browser-request/tools'
+import { BROWSER_REQUEST_TOOL_ID } from '../../shared/browser-plans'
 import { wrapLanguageModel } from 'ai'
 import { MissingAgentSession } from './recovery'
 import { claudeCode } from 'ai-sdk-provider-claude-code'
@@ -176,13 +178,14 @@ export function createClaudeConnection(config: ClaudeConnectionConfig, createMod
       const text = value?.data?.stderr || value?.message || ''
       return text.split('\n').some(line => line.trim() === `No conversation found with session ID: ${sessionId}`)
     },
-    createChatModel({ workingDirectory, appSessionId, modelId, effort, resumeId: existingCliSessionId, references: givenReferences, companyFiles: givenCompanyFiles, review: givenReview, appCommands: givenAppCommands, records, webResearch: givenWebResearch, secondOpinion: givenSecondOpinion, writeGuard, privateReads, askUser: givenAskUser, onEvent, steering: givenSteering, onPromptSuggestion: givenSuggestion, toolEventContext, sandbox, turnEnv, toolStop, unattended }) {
+    createChatModel({ workingDirectory, appSessionId, modelId, effort, resumeId: existingCliSessionId, references: givenReferences, companyFiles: givenCompanyFiles, review: givenReview, appCommands: givenAppCommands, records, webResearch: givenWebResearch, browserRequest: givenBrowserRequest, secondOpinion: givenSecondOpinion, writeGuard, privateReads, askUser: givenAskUser, onEvent, steering: givenSteering, onPromptSuggestion: givenSuggestion, toolEventContext, sandbox, turnEnv, toolStop, unattended }) {
       // An unattended step (ai-turns.md) gets only its record tools: nothing else the app adds, nobody to ask.
       const references = unattended ? undefined : givenReferences
       const companyFiles = unattended ? undefined : givenCompanyFiles
       const review = unattended ? undefined : givenReview
       const appCommands = unattended ? undefined : givenAppCommands
       const webResearch = unattended ? undefined : givenWebResearch
+      const browserRequest = unattended ? undefined : givenBrowserRequest
       const secondOpinion = unattended ? undefined : givenSecondOpinion
       const askUser = unattended ? undefined : givenAskUser
       const steering = unattended ? undefined : givenSteering
@@ -384,7 +387,7 @@ export function createClaudeConnection(config: ClaudeConnectionConfig, createMod
         // Web research changes nothing in the company; after private reads the
         // PreToolUse hook has already asked the member (private-read-guard.ts).
         const readOnlyTools = ['Read', 'ListDirectory', 'Glob', 'Grep', 'View']
-        if (readOnlyTools.includes(toolName) || (references && Object.keys(referenceSchemas).some(name => toolName === `mcp__acb_consultations__${name}`)) || (companyFiles && COMPANY_FILE_TOOL_NAMES.some(name => toolName === companyFileToolId(name))) || (review && toolName === REVIEW_TOOL_ID) || (appCommands && appCommands.tools.some(t => t.id === toolName)) || (webResearch && toolName === WEB_RESEARCH_TOOL_ID) || (secondOpinion && secondOpinion.tools.some(t => t.id === toolName))) {
+        if (readOnlyTools.includes(toolName) || (references && Object.keys(referenceSchemas).some(name => toolName === `mcp__acb_consultations__${name}`)) || (companyFiles && COMPANY_FILE_TOOL_NAMES.some(name => toolName === companyFileToolId(name))) || (review && toolName === REVIEW_TOOL_ID) || (appCommands && appCommands.tools.some(t => t.id === toolName)) || (webResearch && toolName === WEB_RESEARCH_TOOL_ID) || (browserRequest && toolName === BROWSER_REQUEST_TOOL_ID) || (secondOpinion && secondOpinion.tools.some(t => t.id === toolName))) {
           return verdict({ behavior: 'allow' as const, updatedInput: toolInput }, 'auto-allowed')
         }
         // Request approval from UI
@@ -442,6 +445,8 @@ export function createClaudeConnection(config: ClaudeConnectionConfig, createMod
         const recordsServer = records ? createSdkMcpServer({ name: RECORDS_SERVER, instructions: recordsToolSearchInstructions(records.specs), tools: records.specs.map(s => tool(s.name, s.description, s.schema.shape, async args => ({ content: [{ type: 'text' as const, text: await records.execute(s.name, args) }] }), { annotations: { readOnlyHint: s.readOnly, destructiveHint: false, openWorldHint: false }, alwaysLoad: !s.onDemand })) }) : undefined
         // 「Web で調べる」: a separate reader reads the web (web-research/tools.ts).
         const webResearchServer = webResearch ? createSdkMcpServer({ name: WEB_RESEARCH_SERVER, alwaysLoad: true, tools: [tool(WEB_RESEARCH_TOOL, webResearchDescription, webResearchSchema.shape, async args => ({ content: [{ type: 'text' as const, text: await webResearch.execute(args) }] }), { annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true } })] }) : undefined
+        // 「ブラウザ操作」's request (browser-request/tools.ts): makes a plan and its card; it never sends.
+        const browserRequestServer = browserRequest ? createSdkMcpServer({ name: BROWSER_REQUEST_SERVER, alwaysLoad: true, tools: [tool(BROWSER_REQUEST_TOOL, browserRequestDescription, browserRequestSchema.shape, async args => ({ content: [{ type: 'text' as const, text: await browserRequest.execute(args) }] }), { annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true } })] }) : undefined
         // 「もう一方の AI に聞く」 (second-opinion.ts): only the agents the member named this turn.
         const secondOpinionServer = secondOpinion ? createSdkMcpServer({ name: SECOND_OPINION_SERVER, alwaysLoad: true, tools: secondOpinion.tools.map(t => tool(t.name, t.description, secondOpinionSchema.shape, async args => ({ content: [{ type: 'text' as const, text: await secondOpinion.execute(t.name, args) }] }), { annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true } })) }) : undefined
         const mcpServers = {
@@ -451,6 +456,7 @@ export function createClaudeConnection(config: ClaudeConnectionConfig, createMod
           ...(appCommandsServer ? { [APP_COMMANDS_SERVER]: appCommandsServer } : {}),
           ...(recordsServer ? { [RECORDS_SERVER]: recordsServer } : {}),
           ...(webResearchServer ? { [WEB_RESEARCH_SERVER]: webResearchServer } : {}),
+          ...(browserRequestServer ? { [BROWSER_REQUEST_SERVER]: browserRequestServer } : {}),
           ...(secondOpinionServer ? { [SECOND_OPINION_SERVER]: secondOpinionServer } : {}),
         }
         const allowedTools = [
@@ -461,6 +467,7 @@ export function createClaudeConnection(config: ClaudeConnectionConfig, createMod
           // Never asked: the type's `who` and the server decide (records.md); an action needing prior approval is none of today's.
           ...(records ? records.specs.map(s => recordToolId(s.name)) : []),
           ...(webResearchServer ? [WEB_RESEARCH_TOOL_ID] : []),
+          ...(browserRequestServer ? [BROWSER_REQUEST_TOOL_ID] : []),
           ...(secondOpinionServer && secondOpinion ? secondOpinion.tools.map(t => t.id) : []),
         ]
         const state = { missingSession: false, autoRejected: false, sandboxUnavailable: false }
