@@ -492,9 +492,13 @@ send → report; 6c turns it on for the owner's PC).
   `.DS_Store`: sha256 per file, the listing in name order, sha256 of it — `pluginFingerprintV2`);
   `status` is `pending` / `approved` / `retired`: the script writes a new row **`pending`** (design memo
   §33.5: listed, but the server reads it as not approved, `BROWSER_TYPE_NOT_APPROVED`) until a reviewed
-  edit approves it together with its `minAppVersion` (6b: the small PR after 6b-2, the 6b-2 merge's
-  build). Today: `lstep@0.2.0` … `lstep@0.6.0` (their old checker hashes too) `retired`, `lstep@0.6.1`
-  (facts version 2; the timing from JSON) `pending`;
+  edit approves it together with its `minAppVersion` = the first build that carries everything the
+  combination needs. Today: `lstep@0.2.0` … `lstep@0.6.0` (their old checker hashes too) `retired`,
+  `lstep@0.6.1` (facts version 2; the timing from JSON) **`approved`** (owner decision 2026-11-22, the
+  owner the only user; 6c) with `minAppVersion` `0.0.1+0d2fe19.20261122105658` — the commit adding the
+  operator's init fix on top of this PC's opt-in (the enable PR): builds order by commit date, so the
+  merge's build and every later one pass; a main build made between that commit and the merge passes too
+  but has no opt-in (its switch is the constant, off) and makes no plan;
   `declarationHash` = `sha256:` of the declaration text, **and the text itself is in the row**: the
   server reads declarations only from this file (never from `client/`, which `server/src` may not
   import), re-hashes each and parses it with the core's parser (a row that does not match its hash
@@ -1047,7 +1051,7 @@ before the permit — are read by main through the checker, never taken from the
   リマインダです。…」 always and the count as 「読み取れませんでした」; a value read is still held to its
   shape, and unknown → known at the re-read is a change. Nothing beyond the reminder page is read when the
   step is not there. So 0.6.1 **can** make a plan from the real site's shapes (any step whose timing
-  text the site gives, text templates in any folder, a step with or without templates already — §41), behind the switch and the `pending` row. Safety it leans on (the owner:
+  text the site gives, text templates in any folder, a step with or without templates already — §41), behind the switch (this PC's opt-in) and the `approved` row. Safety it leans on (the owner:
   let plans be made where safety holds): `delivers: scheduled`, a template removable before the step's
   time (§39), the card's approval and the re-read before the permit.
 - **Connector refusals reviewed** (0.6.1, owner: lean toward letting plans be made while safety holds):
@@ -1249,7 +1253,7 @@ everyone else, and leaves that registration as the condition before anyone else 
   admin console and the member's override (`browserOperationsAllowed`, app and server), the AI stop,
   the member's **type grant** (`PUT /browser-type-grants/:userId`, owner / admin, per declaration hash —
   no admin page yet: the 6c notes give the call), the approved combination (`approved.json` `approved`
-  with its `minAppVersion`; `lstep@0.6.1` is `pending` until the owner approves it), the card's approval
+  with its `minAppVersion`; `lstep@0.6.1` approved in this PR), the card's approval
   and the re-read before the permit. Turning off: delete the file, or the company's setting 「使わない」 /
   the site removed (the context moves, the server's permit refuses), or the emergency stop.
 - **Weakness (said)**: the file is the person's own; an AI turn outside the sandbox (`record-only`, the

@@ -16,8 +16,8 @@ vi.mock('../../src/lib/auth', () => ({
   auth: { handler: vi.fn().mockResolvedValue(new Response('', { status: 200 })), api: { getSession: vi.fn().mockResolvedValue(null) } },
 }))
 
-// The current Lステップ row is written `pending` (design memo §33.5: approved by a reviewed edit with
-// the first app build carrying all of 6b); this test runs the real file with that row approved.
+// A new Lステップ row is written `pending` (design memo §33.5: approved by a reviewed edit with the
+// first app build carrying everything it needs); this test runs the real file with such a row approved.
 vi.mock('../../src/adapters/browser-connector-catalog', async importOriginal => {
   const real = await importOriginal<typeof import('../../src/adapters/browser-connector-catalog')>()
   return {
@@ -57,7 +57,8 @@ async function call(user: string | null, method: string, path: string, body?: un
   currentUser.id = user
   const res = await app.request(path, {
     method,
-    headers: { ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}), ...headers },
+    // The app's build as every app request carries it: the approved row's own minimum (a build at least it).
+    headers: { ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}), ...(APPROVED.minAppVersion ? { 'X-ACB-Client-Version': APPROVED.minAppVersion } : {}), ...headers },
     ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
   })
   const json: Json = await res.json().catch(() => null)
