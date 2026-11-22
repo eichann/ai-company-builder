@@ -14,10 +14,10 @@ import os from 'node:os'
 import path from 'node:path'
 import { AllowedRoots } from '../electron/allowed-roots'
 import { createDocFrames, type DocFrameDeps } from '../electron/features/doc-frames/protocol'
-import { createDocViews, MAX_VIEWS_PER_WINDOW, type DocViewHandle, type DocViewPort } from '../electron/features/doc-frames/views'
+import { createDocViews, MAX_VIEWS_PER_WINDOW, type DocViewHandle, type DocViewHooks, type DocViewPort, LINK_INTERVAL_MS } from '../electron/features/doc-frames/views'
 import { registerDocViewsIpc } from '../electron/features/doc-frames/ipc'
 import {
-  docFrameCsp, docFramePolicy, docFileType, docSessionRequestAllowed, docViewNavigationAllowed, parseDocFrameUrl, DOC_MAX_FILE_BYTES,
+  docFrameCsp, docFramePolicy, docFileType, docSessionRequestAllowed, docViewBounds, docViewNavigationAllowed, docViewOnScreen, parseDocFrameUrl, DOC_MAX_FILE_BYTES,
 } from '../shared/doc-frame'
 
 const quiet = { warn: () => {} }
@@ -281,24 +281,38 @@ function fakeShell(options: { fail?: boolean; hold?: boolean } = {}) {
   const shown = new Map<number, string>()
   const destroyed: number[] = []
   const watched: number[] = []
-  const gone = new Map<number, (id: number) => void>()
+  const hooksOf = new Map<number, DocViewHooks>()
+  /** What the registry asked of each view: placements, zooms, reloads. */
+  const calls: Array<[number, string, unknown?]> = []
   const waiting: Array<() => void> = []
   const made = { count: 0 }
   let reset: (windowId: number) => void = () => {}
   const port: DocViewPort = {
     onWindowReset: listener => { reset = listener },
     watch: windowId => { watched.push(windowId) },
-    async create(_windowId, onGone): Promise<DocViewHandle | null> {
+    async create(_windowId, hooks): Promise<DocViewHandle | null> {
       if (options.hold) await new Promise<void>(resolve => waiting.push(resolve))
       if (options.fail) return null
       made.count++
       const id = next++
-      gone.set(id, onGone)
-      return { id, show: url => { shown.set(id, url) }, destroy: () => { destroyed.push(id); gone.get(id)?.(id) } }
+      hooksOf.set(id, hooks)
+      return {
+        id,
+        show: url => { shown.set(id, url) },
+        destroy: () => { destroyed.push(id); hooksOf.get(id)?.onGone(id) },
+        place: bounds => { calls.push([id, 'place', bounds]) },
+        zoom: factor => { calls.push([id, 'zoom', factor]) },
+        reload: () => { calls.push([id, 'reload']) },
+      }
     },
   }
   const release = async () => { for (const resolve of waiting.splice(0)) resolve(); await new Promise(resolve => setImmediate(resolve)) }
-  return { port, shown, destroyed, watched, made, release, crash: (id: number) => gone.get(id)?.(id), resetWindow: (windowId: number) => reset(windowId) }
+  return {
+    port, shown, destroyed, watched, made, release, calls,
+    crash: (id: number) => hooksOf.get(id)?.onGone(id),
+    link: (id: number, url: string) => hooksOf.get(id)?.onLink(id, url),
+    resetWindow: (windowId: number) => reset(windowId),
+  }
 }
 
 const reportDoc = async (w: ReturnType<typeof world>) => {
@@ -461,4 +475,96 @@ test('the file opened is the file at the real location: a swap while the request
     fsp.realpath = realRealpath
   }
   assert.equal((await w.get(w.under(doc, 'style.css'))).status, 200, 'control: unswapped it is served')
+})
+
+test('a view is placed, zoomed and reloaded only by its own window; a placement that is not four sane numbers hides it', async () => {
+  const w = world()
+  const shell = fakeShell()
+  const views = createDocViews({ frames: w.frames, shell: shell.port })
+  const id = (await views.open(await reportDoc(w), views.begin(MAIN)))!
+  views.place(id, MAIN + 1, { x: 0, y: 0, width: 100, height: 100 })
+  views.zoom(id, MAIN + 1, 2)
+  views.reload(id, MAIN + 1)
+  views.place(999, MAIN, { x: 0, y: 0, width: 100, height: 100 })
+  assert.deepEqual(shell.calls, [], 'another window (or an unknown view) changes nothing')
+  views.place(id, MAIN, { x: 10.4, y: 20.6, width: 300, height: 200 })
+  views.place(id, MAIN, null)
+  for (const bad of [{ x: 0, y: 0, width: 0, height: 10 }, { x: NaN, y: 0, width: 10, height: 10 }, { x: 0, y: 0, width: 1e9, height: 10 }, { x: '0', y: 0, width: 10, height: 10 }, 'full', undefined]) {
+    views.place(id, MAIN, bad)
+  }
+  assert.deepEqual(shell.calls, [
+    [id, 'place', { x: 10, y: 21, width: 300, height: 200 }],
+    [id, 'place', null],
+    ...Array.from({ length: 6 }, () => [id, 'place', null]),
+  ], 'a placement that is not four sane numbers hides the view rather than placing it somewhere')
+  shell.calls.length = 0
+  views.zoom(id, MAIN, 40)
+  views.zoom(id, MAIN, 0.01)
+  views.zoom(id, MAIN, 'big')
+  views.reload(id, MAIN)
+  assert.deepEqual(shell.calls, [[id, 'zoom', 3], [id, 'zoom', 0.5], [id, 'reload']], 'zoom kept within the steps; a non-number ignored')
+})
+
+test('where a placement lands: the app page\'s zoom applied, cut to the window, nothing when it is off the window', () => {
+  assert.deepEqual(docViewOnScreen({ x: 100, y: 50, width: 400, height: 300 }, 1, [1200, 800]), { x: 100, y: 50, width: 400, height: 300 })
+  assert.deepEqual(docViewOnScreen({ x: 100, y: 50, width: 400, height: 300 }, 1.5, [1200, 800]), { x: 150, y: 75, width: 600, height: 450 })
+  assert.deepEqual(docViewOnScreen({ x: -20, y: 700, width: 400, height: 300 }, 1, [1200, 800]), { x: 0, y: 700, width: 380, height: 100 })
+  assert.equal(docViewOnScreen({ x: 1300, y: 0, width: 400, height: 300 }, 1, [1200, 800]), null)
+  assert.equal(docViewBounds({ x: 1, y: 1, width: 0.2, height: 5 }), null)
+})
+
+test('the window hears of a link the member pressed (web only, at most one a second) and of a view that went by itself', async () => {
+  const w = world()
+  const shell = fakeShell()
+  let clock = 10_000
+  const told: Array<[number, unknown]> = []
+  const views = createDocViews({ frames: w.frames, shell: shell.port, notify: (windowId, event) => told.push([windowId, event]), now: () => clock })
+  const doc = await reportDoc(w)
+  const a = (await views.open(doc, views.begin(MAIN)))!
+  const b = (await views.open(doc, views.begin(MAIN + 1)))!
+  for (const url of ['file:///etc/passwd', 'javascript:alert(1)', 'mailto:a@example.com', 'acb-plugin://p/x', 'not a url']) shell.link(a, url)
+  assert.deepEqual(told, [], 'only a web address may reach the member\'s browser')
+  shell.link(a, 'https://example.com/report?from=doc')
+  shell.link(a, 'https://evil.example/again')
+  clock += LINK_INTERVAL_MS - 1
+  shell.link(a, 'https://evil.example/again')
+  clock += 1
+  shell.link(b, 'http://example.org/')
+  shell.link(a, 'https://example.com/2')
+  assert.deepEqual(told, [
+    [MAIN, { viewId: a, kind: 'link', url: 'https://example.com/report?from=doc' }],
+    [MAIN + 1, { viewId: b, kind: 'link', url: 'http://example.org/' }],
+    [MAIN, { viewId: a, kind: 'link', url: 'https://example.com/2' }],
+  ], 'a page cannot queue confirmations; each window hears of its own views only')
+  told.length = 0
+  views.close(a, MAIN)
+  shell.link(a, 'https://example.com/3')
+  assert.deepEqual(told, [], 'closed by its window: nothing to tell, and a closed view asks nothing')
+  shell.crash(b)
+  assert.deepEqual(told, [[MAIN + 1, { viewId: b, kind: 'gone' }]])
+  // The cap: the oldest closes without its window asking, so the window is told.
+  told.length = 0
+  const first = (await views.open(doc, views.begin(MAIN)))!
+  for (let i = 0; i < MAX_VIEWS_PER_WINDOW; i++) await views.open(doc, views.begin(MAIN))
+  assert.deepEqual(told, [[MAIN, { viewId: first, kind: 'gone' }]])
+})
+
+test('docView:setBounds / setZoom / reload are the main window\'s page\'s only', async () => {
+  const w = world()
+  const shell = fakeShell()
+  const views = createDocViews({ frames: w.frames, shell: shell.port })
+  const handlers = new Map<string, (event: unknown, ...args: unknown[]) => unknown>()
+  const ipc = { handle: (channel: string, fn: (event: unknown, ...args: unknown[]) => unknown) => { handlers.set(channel, fn) }, on: () => {} }
+  registerDocViewsIpc(ipc as never, { frames: w.frames, views, fromMainWindow: ((event: { main: boolean }) => event.main) as never })
+  const id = (await views.open(await reportDoc(w), views.begin(MAIN)))!
+  const ev = (main: boolean) => ({ main, sender: { id: MAIN } })
+  const box = { x: 0, y: 0, width: 50, height: 50 }
+  await handlers.get('docView:setBounds')!(ev(false), id, box)
+  await handlers.get('docView:setZoom')!(ev(false), id, 2)
+  await handlers.get('docView:reload')!(ev(false), id)
+  assert.deepEqual(shell.calls, [], 'a frame inside the page or another window changes nothing')
+  await handlers.get('docView:setBounds')!(ev(true), id, box)
+  await handlers.get('docView:setZoom')!(ev(true), id, 2)
+  await handlers.get('docView:reload')!(ev(true), id)
+  assert.deepEqual(shell.calls, [[id, 'place', box], [id, 'zoom', 2], [id, 'reload']])
 })

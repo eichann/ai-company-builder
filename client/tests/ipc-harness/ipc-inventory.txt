@@ -7,6 +7,7 @@ contract.events chat-server:info
 contract.events chatHistory:changed
 contract.events chatWindow:changed
 contract.events chatWindow:fileRequested
+contract.events docView:event
 contract.events fs:changes
 contract.events handoff:changed
 contract.events minutes:changed
@@ -97,6 +98,9 @@ contract.invoke config:validateServerUrl
 contract.invoke dialog:selectDirectory
 contract.invoke docView:close
 contract.invoke docView:open
+contract.invoke docView:reload
+contract.invoke docView:setBounds
+contract.invoke docView:setZoom
 contract.invoke editor:backupBeforeOverwrite
 contract.invoke env:status
 contract.invoke env:update
@@ -518,6 +522,7 @@ contract.type ElectronAPI.onChatHistoryChanged = onChatHistoryChanged: Subscribe
 contract.type ElectronAPI.onChatServerInfo = onChatServerInfo: Subscribe<'chat-server:info'>
 contract.type ElectronAPI.onChatWindowsChanged = onChatWindowsChanged: Subscribe<'chatWindow:changed'>
 contract.type ElectronAPI.onCloseRequested = onCloseRequested: Subscribe<'app:closeRequested'>
+contract.type ElectronAPI.onDocViewEvent = onDocViewEvent: Subscribe<'docView:event'>
 contract.type ElectronAPI.onFileChange = onFileChange: (callback: (data: FileChangeEvent) => void) => () => void
 contract.type ElectronAPI.onFileChanges = onFileChanges: Subscribe<'fs:changes'>
 contract.type ElectronAPI.onFileRequestedFromChatWindow = onFileRequestedFromChatWindow: Subscribe<'chatWindow:fileRequested'>
@@ -556,6 +561,7 @@ contract.type ElectronAPI.reconcilePluginOperation = reconcilePluginOperation: I
 contract.type ElectronAPI.reconcileTaskRun = reconcileTaskRun: Invoke<'tasks:reconcile'>
 contract.type ElectronAPI.recreatePluginOperation = recreatePluginOperation: Invoke<'pluginOperations:recreate'>
 contract.type ElectronAPI.registerAllowedRoot = registerAllowedRoot: Invoke<'fs:registerAllowedRoot'>
+contract.type ElectronAPI.reloadDocView = reloadDocView: Invoke<'docView:reload'>
 contract.type ElectronAPI.removeAbsence = removeAbsence: Invoke<'absences:remove'>
 contract.type ElectronAPI.removeOutboundMailAttachment = removeOutboundMailAttachment: Invoke<'outboundMail:removeAttachment'>
 contract.type ElectronAPI.renameItem = renameItem: Invoke<'fs:rename'>
@@ -583,6 +589,8 @@ contract.type ElectronAPI.sendOutboundMail = sendOutboundMail: Invoke<'outboundM
 contract.type ElectronAPI.setAgentEnvPassthrough = setAgentEnvPassthrough: Invoke<'config:setAgentEnvPassthrough'>
 contract.type ElectronAPI.setApiKey = setApiKey: Invoke<'config:setApiKey'>
 contract.type ElectronAPI.setAuthMode = setAuthMode: Invoke<'config:setAuthMode'>
+contract.type ElectronAPI.setDocViewBounds = setDocViewBounds: Invoke<'docView:setBounds'>
+contract.type ElectronAPI.setDocViewZoom = setDocViewZoom: Invoke<'docView:setZoom'>
 contract.type ElectronAPI.setGoogleArchive = setGoogleArchive: Invoke<'google:setArchive'>
 contract.type ElectronAPI.setGoogleDrive = setGoogleDrive: Invoke<'google:setDrive'>
 contract.type ElectronAPI.setGoogleRelay = setGoogleRelay: Invoke<'google:setRelay'>
@@ -740,6 +748,7 @@ contract.type IpcEventChannels.'chat-server:info' = 'chat-server:info': [info: C
 contract.type IpcEventChannels.'chatHistory:changed' = 'chatHistory:changed': [data: ChatHistoryChange]
 contract.type IpcEventChannels.'chatWindow:changed' = 'chatWindow:changed': [change: ChatWindowsChange]
 contract.type IpcEventChannels.'chatWindow:fileRequested' = 'chatWindow:fileRequested': [request: ChatWindowFileRequest]
+contract.type IpcEventChannels.'docView:event' = 'docView:event': [event: DocViewEvent]
 contract.type IpcEventChannels.'fs:changes' = 'fs:changes': [changes: FileChangeEvent[]]
 contract.type IpcEventChannels.'handoff:changed' = 'handoff:changed': [scope: { companyId: string; sessionId: string }]
 contract.type IpcEventChannels.'minutes:changed' = 'minutes:changed': [data: { companyId: string }]
@@ -831,6 +840,9 @@ contract.type IpcInvokeChannels.'config:validateServerUrl' = 'config:validateSer
 contract.type IpcInvokeChannels.'dialog:selectDirectory' = 'dialog:selectDirectory': { args: []; result: string | null }
 contract.type IpcInvokeChannels.'docView:close' = 'docView:close': { args: [viewId: number]; result: void }
 contract.type IpcInvokeChannels.'docView:open' = 'docView:open': { args: [filePath: string]; result: DocViewOpenResult }
+contract.type IpcInvokeChannels.'docView:reload' = 'docView:reload': { args: [viewId: number]; result: void }
+contract.type IpcInvokeChannels.'docView:setBounds' = 'docView:setBounds': { args: [viewId: number, bounds: DocViewBounds | null]; result: void }
+contract.type IpcInvokeChannels.'docView:setZoom' = 'docView:setZoom': { args: [viewId: number, factor: number]; result: void }
 contract.type IpcInvokeChannels.'editor:backupBeforeOverwrite' = 'editor:backupBeforeOverwrite': { args: [rootPath: string, filePath: string]; result: EditorBackupResult }
 contract.type IpcInvokeChannels.'env:status' = 'env:status': { args: [rootPath: string]; result: EnvStatusResult }
 contract.type IpcInvokeChannels.'env:update' = 'env:update': { args: [rootPath: string, changes: Record<string, string | null>]; result: SimpleResult }
@@ -1155,6 +1167,9 @@ main.handle config:validateServerUrl @ features/settings/ipc.ts (url: string)
 main.handle dialog:selectDirectory @ features/fs/ipc.ts ()
 main.handle docView:close @ features/doc-frames/ipc.ts (viewId)
 main.handle docView:open @ features/doc-frames/ipc.ts (filePath)
+main.handle docView:reload @ features/doc-frames/ipc.ts (viewId)
+main.handle docView:setBounds @ features/doc-frames/ipc.ts (viewId, bounds)
+main.handle docView:setZoom @ features/doc-frames/ipc.ts (viewId, factor)
 main.handle editor:backupBeforeOverwrite @ features/fs/ipc.ts (rootPath: string, filePath: string)
 main.handle env:status @ features/env/ipc.ts (rootPath: string)
 main.handle env:update @ features/env/ipc.ts (rootPath: string, changes: Record<string, string | null>)
@@ -1335,6 +1350,7 @@ main.send chat-server:info @ main.ts
 main.send chatHistory:changed @ features/chat-history/ipc.ts
 main.send chatWindow:changed @ features/chat-windows/ipc.ts
 main.send chatWindow:fileRequested @ features/chat-windows/ipc.ts
+main.send docView:event @ main.ts
 main.send fs:changes @ features/fs/ipc.ts
 main.send handoff:changed @ main.ts
 main.send minutes:changed @ main.ts
@@ -1656,6 +1672,8 @@ preload onChatWindowsChanged -> on chatWindow:changed(<fn>) ; removeListener cha
 preload onChatWindowsChanged : (callback: (change: ChatWindowsChange) => void) => () => void
 preload onCloseRequested -> on app:closeRequested(<fn>) ; removeListener app:closeRequested(<fn>)
 preload onCloseRequested : (callback: () => void) => () => void
+preload onDocViewEvent -> on docView:event(<fn>) ; removeListener docView:event(<fn>)
+preload onDocViewEvent : (callback: (event: DocViewEvent) => void) => () => void
 preload onFileChange -> on fs:changes(<fn>) ; removeListener fs:changes(<fn>)
 preload onFileChange : (callback: (data: FileChangeEvent) => void) => () => void
 preload onFileChanges -> on fs:changes(<fn>) ; removeListener fs:changes(<fn>)
@@ -1732,6 +1750,8 @@ preload recreatePluginOperation -> invoke pluginOperations:recreate($0, $1, $2, 
 preload recreatePluginOperation : (companyId: string, pluginId: string, operationId: string, confirm: boolean, conversationId?: string | undefined) => Promise<PluginOperationResult>
 preload registerAllowedRoot -> invoke fs:registerAllowedRoot($0)
 preload registerAllowedRoot : (path: string) => Promise<{ success: boolean; }>
+preload reloadDocView -> invoke docView:reload($0)
+preload reloadDocView : (viewId: number) => Promise<void>
 preload removeAbsence -> invoke absences:remove($0, $1)
 preload removeAbsence : (companyId: string, absenceId: string) => Promise<AbsenceRemoveResult>
 preload removeOutboundMailAttachment -> invoke outboundMail:removeAttachment($0, $1, $2, $3)
@@ -1786,6 +1806,10 @@ preload setApiKey -> invoke config:setApiKey($0)
 preload setApiKey : (apiKey: string) => Promise<SimpleResult>
 preload setAuthMode -> invoke config:setAuthMode($0)
 preload setAuthMode : (mode: AuthMode) => Promise<boolean>
+preload setDocViewBounds -> invoke docView:setBounds($0, $1)
+preload setDocViewBounds : (viewId: number, bounds: DocViewBounds | null) => Promise<void>
+preload setDocViewZoom -> invoke docView:setZoom($0, $1)
+preload setDocViewZoom : (viewId: number, factor: number) => Promise<void>
 preload setGoogleArchive -> invoke google:setArchive($0, $1)
 preload setGoogleArchive : (companyId: string, on: boolean) => Promise<GoogleStatusResult>
 preload setGoogleDrive -> invoke google:setDrive($0, $1)

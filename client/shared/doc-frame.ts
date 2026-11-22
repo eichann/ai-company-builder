@@ -201,6 +201,61 @@ export function docViewNavigationAllowed(token: string | null, url: string, isMa
   return target !== null && target.token === token && isHtmlDocumentName(target.segments[target.segments.length - 1])
 }
 
+/**
+ * Where the viewer places a document view (`docView:setBounds`): the tab's
+ * content area in the app page's CSS pixels (main scales by the page's zoom).
+ * `null` hides it again (an overlay, a hidden tab): hidden and muted.
+ */
+export interface DocViewBounds { x: number; y: number; width: number; height: number }
+
+/** No side of a view is ever larger than this (CSS px): a sanity bound, not a layout rule. */
+const MAX_VIEW_SIDE = 16384
+
+/**
+ * Read a placement from the renderer: four finite numbers, a size of at least
+ * one pixel each way, rounded to whole pixels; anything else is null (the
+ * view is then hidden, never placed somewhere unexpected).
+ */
+export function docViewBounds(input: unknown): DocViewBounds | null {
+  if (typeof input !== 'object' || input === null) return null
+  const { x, y, width, height } = input as Record<string, unknown>
+  const values = [x, y, width, height]
+  if (!values.every(v => typeof v === 'number' && Number.isFinite(v))) return null
+  const [rx, ry, rw, rh] = (values as number[]).map(Math.round)
+  if (rw < 1 || rh < 1 || rw > MAX_VIEW_SIDE || rh > MAX_VIEW_SIDE || Math.abs(rx) > MAX_VIEW_SIDE || Math.abs(ry) > MAX_VIEW_SIDE) return null
+  return { x: rx, y: ry, width: rw, height: rh }
+}
+
+/**
+ * Where a placement lands in the window (DIP): the app page's CSS pixels times
+ * its zoom, cut to the window's content area; null when nothing of it is left.
+ */
+export function docViewOnScreen(bounds: DocViewBounds, pageZoom: number, [contentWidth, contentHeight]: number[]): DocViewBounds | null {
+  const zoom = Number.isFinite(pageZoom) && pageZoom > 0 ? pageZoom : 1
+  const left = Math.max(0, Math.round(bounds.x * zoom))
+  const top = Math.max(0, Math.round(bounds.y * zoom))
+  const right = Math.min(contentWidth, Math.round((bounds.x + bounds.width) * zoom))
+  const bottom = Math.min(contentHeight, Math.round((bounds.y + bounds.height) * zoom))
+  return right - left >= 1 && bottom - top >= 1 ? { x: left, y: top, width: right - left, height: bottom - top } : null
+}
+
+/** The document's zoom steps (［－］［＋］); 1 is 「元の大きさ」. */
+export const DOC_ZOOM_STEPS: readonly number[] = [0.5, 0.67, 0.75, 0.8, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2, 2.5, 3]
+
+/** A zoom factor from the renderer, kept within the steps' range; null when not a number. */
+export function docZoomFactor(input: unknown): number | null {
+  if (typeof input !== 'number' || !Number.isFinite(input)) return null
+  return Math.min(DOC_ZOOM_STEPS[DOC_ZOOM_STEPS.length - 1], Math.max(DOC_ZOOM_STEPS[0], input))
+}
+
+/**
+ * What main tells the main window about one of its document views
+ * (`docView:event`): the member pressed a link to the web inside it (`link`:
+ * the app asks before the member's browser opens it), or the view went by
+ * itself (`gone`: its page crashed, or more views were opened than a window keeps).
+ */
+export type DocViewEvent = { viewId: number; kind: 'link'; url: string } | { viewId: number; kind: 'gone' }
+
 /** `docView:open`: the view showing the document (the renderer never sees its address), or why not. */
 export type DocViewOpenResult = { ok: true; viewId: number } | DocFrameRefused
 

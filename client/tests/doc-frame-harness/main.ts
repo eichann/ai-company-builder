@@ -43,6 +43,9 @@ function probes(): string {
   return `
 const r = { inlineRan: true }
 window.__r = null
+// A document that tries to take the keyboard: autofocus (below) and focus() over and over.
+setInterval(() => { try { window.focus(); document.getElementById('grab').focus() } catch (e) {} }, 100)
+document.addEventListener('keydown', e => { window.__keys = (window.__keys || '') + e.key })
 const settle = p => p.then(() => 'reached', e => 'refused')
 const add = (rel, href, as) => { const l = document.createElement('link'); l.rel = rel; l.href = href; if (as) l.as = as; document.head.appendChild(l) }
 r.electronAPI = typeof window.electronAPI
@@ -96,7 +99,7 @@ function setUp() {
   fs.writeFileSync(path.join(folder, 'report.html'), `<!doctype html><html><head><meta charset="utf-8">
 <link rel="stylesheet" href="style.css"><link rel="stylesheet" href="${WEB('style')}/web.css">
 <script src="${WEB('script')}/cdn.js"></script><script type="module" src="mod.js"></script>
-</head><body><p>資料</p><script>${probes()}</script></body></html>`)
+</head><body><p>資料</p><input id="grab" autofocus><div style="height:3000px"></div><script>${probes()}</script></body></html>`)
   fs.writeFileSync(path.join(folder, 'page2.html'), '<!doctype html><p>2</p>')
   fs.writeFileSync(path.join(folder, 'style.css'), 'p { color: red }')
   fs.writeFileSync(path.join(folder, 'mod.js'), 'window.moduleRan = true\n')
@@ -106,7 +109,7 @@ function setUp() {
   fs.writeFileSync(path.join(company, 'other', 'other.html'), '<!doctype html><p>other</p>')
   fs.symlinkSync('../other/secret.png', path.join(folder, 'link.png'))
   fs.writeFileSync(path.join(dir, 'preload.js'), "require('electron').contextBridge.exposeInMainWorld('electronAPI', { marker: 'acb' })\n")
-  fs.writeFileSync(path.join(dir, 'app.html'), '<!doctype html><p>app</p>')
+  fs.writeFileSync(path.join(dir, 'app.html'), '<!doctype html><p>app</p><input id="typing"><script>document.getElementById("typing").focus()</script>')
   return { company, folder }
 }
 
@@ -137,6 +140,7 @@ async function run() {
     log: { warn: () => {} },
   })
   const shown = new Map<number, string>()
+  const events: unknown[] = []
   // The first preparation of the session fails (its proxy cannot be set); the next open must recover.
   let proxyTries = 0
   const shell = createDocViewShell({
@@ -146,15 +150,19 @@ async function run() {
   })
   const views = createDocViews({
     frames: docFrames,
+    notify: (_windowId, event) => { events.push(event) },
     // Remember each view's address (the renderer never gets it) to probe it after the view is gone.
-    shell: { onWindowReset: listener => shell.onWindowReset(listener), watch: windowId => shell.watch(windowId), create: async (windowId, onGone) => {
-      const handle = await shell.create(windowId, onGone)
-      return handle && { id: handle.id, destroy: handle.destroy, show: url => { shown.set(handle.id, url); handle.show(url) } }
+    shell: { onWindowReset: listener => shell.onWindowReset(listener), watch: windowId => shell.watch(windowId), create: async (windowId, hooks) => {
+      const handle = await shell.create(windowId, hooks)
+      return handle && { ...handle, show: url => { shown.set(handle.id, url); handle.show(url) } }
     } },
   })
 
-  const win = new BrowserWindow({ show: false, webPreferences: { preload: path.join(dir, 'preload.js'), contextIsolation: true, sandbox: true } })
+  // Shown and focused: the keyboard focus is measured (a hidden window has none).
+  const win = new BrowserWindow({ show: true, width: 900, height: 700, webPreferences: { preload: path.join(dir, 'preload.js'), contextIsolation: true, sandbox: true } })
   await win.loadFile(path.join(dir, 'app.html'))
+  win.focus()
+  win.webContents.focus()
   const openView = async (file: string) => {
     const checked = await docFrames.check(file)
     if (!checked.ok) throw new Error(`check refused: ${checked.reason}`)
@@ -174,6 +182,58 @@ async function run() {
   result.doc = await js('window.__r')
   // Until the viewer shows it (A2): hidden and silent.
   result.hidden = { muted: doc.contents.isAudioMuted(), visibility: await js('document.visibilityState') }
+  // Loading focuses a view (measured), and the page calls focus() and has autofocus: the keyboard stays the app's.
+  const keyboard = () => ({ app: win.webContents.isFocused(), doc: doc.contents.isFocused() })
+  result.focusWhileHidden = keyboard()
+  const viewOf = (id: number) => win.contentView.children.find(v => (v as { webContents?: { id: number } }).webContents?.id === id)!
+  // The viewer shows it over its tab: placed (times the app page's zoom), visible, unmuted.
+  win.webContents.setZoomFactor(1.25)
+  views.place(doc.viewId, win.webContents.id, { x: 40, y: 30, width: 400, height: 300 })
+  await wait(800)
+  result.shown = { bounds: viewOf(doc.viewId).getBounds(), visible: viewOf(doc.viewId).getVisible(), muted: doc.contents.isAudioMuted(), visibility: await js('document.visibilityState'), keyboard: keyboard() }
+  win.webContents.setZoomFactor(1)
+  // A placement from another window, or not four sane numbers, never moves it somewhere else.
+  views.place(doc.viewId, win.webContents.id + 1000, { x: 0, y: 0, width: 800, height: 600 })
+  result.otherWindowPlace = viewOf(doc.viewId).getBounds()
+  views.place(doc.viewId, win.webContents.id, { x: 0, y: 0, width: 800, height: 600 })
+  // The member clicks into it: the keyboard is the document's (slides take ← →).
+  doc.contents.sendInputEvent({ type: 'mouseDown', x: 20, y: 20, button: 'left', clickCount: 1 })
+  doc.contents.sendInputEvent({ type: 'mouseUp', x: 20, y: 20, button: 'left', clickCount: 1 })
+  doc.contents.focus()
+  await wait(500)
+  result.focusAfterClick = keyboard()
+  // Full screen (the viewer's 「全画面」 is the app page's HTML full screen): Escape in the document leaves it.
+  win.webContents.focus()
+  await win.webContents.executeJavaScript('document.documentElement.requestFullscreen()', true).catch(() => {})
+  await wait(1500)
+  const fullScreenBefore = win.isFullScreen()
+  doc.contents.sendInputEvent({ type: 'mouseDown', x: 20, y: 20, button: 'left', clickCount: 1 })
+  doc.contents.focus()
+  await wait(300)
+  doc.contents.sendInputEvent({ type: 'keyDown', keyCode: 'Escape' })
+  doc.contents.sendInputEvent({ type: 'keyUp', keyCode: 'Escape' })
+  await wait(1500)
+  result.fullScreen = { before: fullScreenBefore, after: win.isFullScreen(), pageFullScreen: await win.webContents.executeJavaScript('!!document.fullscreenElement'), keyboard: keyboard() }
+  // Hidden again (an overlay): hidden, muted, and the keyboard the document had goes back to the app.
+  doc.contents.sendInputEvent({ type: 'mouseDown', x: 20, y: 20, button: 'left', clickCount: 1 })
+  doc.contents.focus()
+  await wait(300)
+  const before = keyboard()
+  views.place(doc.viewId, win.webContents.id, null)
+  await wait(300)
+  result.hiddenAgain = { focusedBefore: before.doc, visible: viewOf(doc.viewId).getVisible(), muted: doc.contents.isAudioMuted(), visibility: await js('document.visibilityState'), keyboard: keyboard() }
+  // Zoom and reload: the zoom stays, and the scroll position is kept.
+  views.place(doc.viewId, win.webContents.id, { x: 0, y: 0, width: 800, height: 600 })
+  views.zoom(doc.viewId, win.webContents.id, 2)
+  await js('window.scrollTo(0, 600)')
+  await wait(300)
+  await js('window.__beforeReload = true')
+  views.reload(doc.viewId, win.webContents.id)
+  for (let i = 0; i < 50 && (await js('window.__beforeReload === true').catch(() => true)); i++) await wait(100)
+  for (let i = 0; i < 50 && doc.contents.isLoading(); i++) await wait(100)
+  await wait(500)
+  result.reloaded = { zoom: doc.contents.getZoomFactor(), scrollY: await js('window.scrollY'), keyboard: keyboard() }
+  views.zoom(doc.viewId, win.webContents.id, 1)
   result.hostAPI = await win.webContents.executeJavaScript('typeof window.electronAPI', true)
   result.windowsAfterPopup = BrowserWindow.getAllWindows().length
   // Give preconnect and WebRTC time to try.
@@ -213,6 +273,24 @@ async function run() {
   await wait(800)
   navigations.ownPage = doc.contents.getURL().endsWith('/page2.html') ? 'moved' : 'stayed'
   result.navigations = navigations
+
+  // A link to the web: the page navigating by itself asks nobody; right after the member's click it is
+  // handed to the window (which asks the member); the navigation stays refused either way.
+  events.length = 0
+  await wait(1100)
+  await js(`location.href = ${JSON.stringify(`${WEB('nav')}/by-itself`)}`).catch(() => {})
+  await wait(400)
+  doc.contents.sendInputEvent({ type: 'mouseDown', x: 20, y: 20, button: 'left', clickCount: 1 })
+  doc.contents.sendInputEvent({ type: 'mouseUp', x: 20, y: 20, button: 'left', clickCount: 1 })
+  await js(`location.href = ${JSON.stringify(`${WEB('nav')}/pressed?from=doc`)}`).catch(() => {})
+  await wait(400)
+  result.links = { events: [...events], stayed: doc.contents.getURL().endsWith('/page2.html') }
+  // Another view's page crashes: the window is told (the tab says so instead of an empty area).
+  events.length = 0
+  if (other) other.contents.forcefullyCrashRenderer()
+  await wait(800)
+  result.crashEvents = [...events]
+  result.otherViewId = other?.viewId ?? null
 
   // The app's page reloads: every view of the window closes and its grant goes.
   win.webContents.reload()

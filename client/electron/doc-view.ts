@@ -11,10 +11,35 @@
 // UDP of its own, its one request hook cancels everything but the document's scheme, every
 // permission and download is refused. A view navigates only to an .html page of its own grant;
 // popups, webviews, redirects elsewhere, logins and client certificates are refused.
+//
+// Placing and showing (A2): the viewer places the view over its tab (`place`), hidden and muted
+// otherwise. The keyboard stays the app's unless the member clicked into the document: loading a
+// page focuses its view (measured, Electron 45 — even hidden, even a page with no script), so a
+// focus the member did not cause by a click goes back to the app's page, and hiding a focused view
+// hands the keyboard back too. A link to the web the member pressed is handed to the registry
+// (which asks the member first); Escape in a document shown full screen leaves full screen.
 import { BrowserWindow, session, WebContentsView, webContents as allWebContents, type Session, type WebContents } from 'electron'
-import { DOC_SCHEME, docSessionRequestAllowed, docViewNavigationAllowed, parseDocFrameUrl } from '../shared/doc-frame'
+import { DOC_SCHEME, docSessionRequestAllowed, docViewNavigationAllowed, docViewOnScreen, parseDocFrameUrl } from '../shared/doc-frame'
 import { startRefusingProxy } from './browser-window'
-import type { DocViewHandle, DocViewPort } from './features/doc-frames/views'
+import type { DocViewBounds } from '../shared/doc-frame'
+import type { DocViewHandle, DocViewHooks, DocViewPort } from './features/doc-frames/views'
+
+/** A focus of the view counts as the member's when a click (or touch) in it came this close to it. */
+export const FOCUS_CLICK_WINDOW_MS = 600
+/** How long after the view took the focus it is judged (the click's input may arrive just after). */
+const FOCUS_CHECK_DELAY_MS = 150
+/** A navigation to the web counts as the member pressing a link this soon after a click or key in the view. */
+const LINK_INPUT_WINDOW_MS = 1000
+/** The isolated world the app reads and restores a document's scroll position in (the page's own scripts cannot see or replace it). */
+const SCROLL_WORLD = 1001
+/** A reload waits at most this long for the scroll position (a page spinning its CPU never answers). */
+const SCROLL_READ_MS = 300
+
+/** A scroll position read from a document: two finite numbers, else none. */
+function scrollPosition(value: unknown): [number, number] | null {
+  if (!Array.isArray(value) || value.length !== 2 || !value.every(v => typeof v === 'number' && Number.isFinite(v))) return null
+  return [Math.max(0, Math.round(value[0])), Math.max(0, Math.round(value[1]))]
+}
 
 /** In memory (no `persist:`): nothing a document stores outlives the app run. */
 export const DOC_PARTITION = 'acb-doc'
@@ -39,6 +64,8 @@ export function createDocViewShell(options: DocViewShellOptions): DocViewPort {
   const log = options.log ?? console
   let prepared: Promise<Session> | null = null
   const watchedWindows = new Set<number>()
+  /** Windows whose page is full screen through the HTML API (the viewer's 「全画面」). */
+  const htmlFullScreen = new Set<number>()
   let schemesServed = false
   const resetListeners: Array<(windowId: number) => void> = []
   const windowReset = (windowId: number) => { for (const listener of resetListeners) listener(windowId) }
@@ -104,8 +131,11 @@ export function createDocViewShell(options: DocViewShellOptions): DocViewPort {
       if (event.isMainFrame && !event.isSameDocument) windowReset(windowId)
     })
     owner.on('render-process-gone', () => windowReset(windowId))
+    owner.on('enter-html-full-screen', () => htmlFullScreen.add(windowId))
+    owner.on('leave-html-full-screen', () => htmlFullScreen.delete(windowId))
     owner.once('destroyed', () => {
       watchedWindows.delete(windowId)
+      htmlFullScreen.delete(windowId)
       windowReset(windowId)
     })
   }
@@ -115,7 +145,7 @@ export function createDocViewShell(options: DocViewShellOptions): DocViewPort {
       resetListeners.push(listener)
     },
     watch: watchWindow,
-    async create(windowId, onGone): Promise<DocViewHandle | null> {
+    async create(windowId, hooks: DocViewHooks): Promise<DocViewHandle | null> {
       const owner = allWebContents.fromId(windowId)
       const win = owner ? BrowserWindow.fromWebContents(owner) : null
       if (!win || win.isDestroyed()) return null
@@ -144,14 +174,61 @@ export function createDocViewShell(options: DocViewShellOptions): DocViewPort {
       const id = contents.id
       let token: string | null = null
       let gone = false
+      let shown = false
+      let zoomFactor = 1
+      /** Where the document was scrolled when it was reloaded, put back once it has loaded again. */
+      let keepScroll: [number, number] | null = null
+      /** When the member last clicked / touched (pointer) or pressed a key (any) in the view. */
+      let lastPointerAt = -Infinity
+      let lastInputAt = -Infinity
       const finish = () => {
         if (gone) return
         gone = true
         if (!win.isDestroyed()) win.contentView.removeChildView(view)
         if (!contents.isDestroyed()) contents.close()
-        onGone(id)
+        hooks.onGone(id)
+      }
+      /** The keyboard back to the app's page (its own focused element keeps its place). */
+      const focusApp = () => {
+        if (!win.isDestroyed() && owner && !owner.isDestroyed()) owner.focus()
       }
       guard(contents, () => token)
+      contents.on('input-event', (_event, input) => {
+        const at = Date.now()
+        if (input.type === 'mouseDown' || input.type === 'touchStart' || input.type === 'gestureTap') lastPointerAt = at
+        if (input.type === 'mouseDown' || input.type === 'touchStart' || input.type === 'gestureTap' || input.type === 'keyDown' || input.type === 'rawKeyDown') lastInputAt = at
+      })
+      // Focus stealing: a page load, `focus()` or `autofocus` must not take the member's keyboard.
+      contents.on('focus', () => {
+        if (!shown) { focusApp(); return }
+        setTimeout(() => {
+          if (gone || contents.isDestroyed() || !contents.isFocused()) return
+          if (!shown || Date.now() - lastPointerAt > FOCUS_CLICK_WINDOW_MS) focusApp()
+        }, FOCUS_CHECK_DELAY_MS)
+      })
+      // A link to the web the member pressed: the navigation lock refused it (guard); the app asks
+      // the member before the browser opens it. A page navigating by itself is not asked about.
+      contents.on('will-frame-navigate', event => {
+        if (!event.isMainFrame || !shown || Date.now() - lastInputAt > LINK_INPUT_WINDOW_MS) return
+        if (docViewNavigationAllowed(token, event.url, true)) return
+        hooks.onLink(id, event.url)
+      })
+      // Escape while the viewer is full screen leaves it, also when the document has the keyboard.
+      contents.on('before-input-event', (event, input) => {
+        if (input.type !== 'keyDown' || input.key !== 'Escape' || !htmlFullScreen.has(windowId) || win.isDestroyed()) return
+        event.preventDefault()
+        focusApp()
+        win.setFullScreen(false)
+      })
+      // The document's zoom stays across its own reloads and pages.
+      contents.on('did-navigate', () => { if (!contents.isDestroyed()) contents.setZoomFactor(zoomFactor) })
+      contents.on('did-finish-load', () => {
+        const position = keepScroll
+        keepScroll = null
+        if (position && !contents.isDestroyed()) {
+          contents.executeJavaScriptInIsolatedWorld(SCROLL_WORLD, [{ code: `window.scrollTo(${position[0]}, ${position[1]})` }]).catch(() => {})
+        }
+      })
       contents.once('destroyed', finish)
       contents.on('render-process-gone', finish)
       // Placed and shown by the viewer (A2); until then hidden (throttled as a background page),
@@ -167,6 +244,38 @@ export function createDocViewShell(options: DocViewShellOptions): DocViewPort {
           contents.loadURL(url).catch(() => {})
         },
         destroy: finish,
+        place(bounds: DocViewBounds | null) {
+          if (gone || win.isDestroyed()) return
+          const area = bounds && docViewOnScreen(bounds, owner?.getZoomFactor() ?? 1, win.getContentSize())
+          if (!area) {
+            const hadKeyboard = contents.isFocused()
+            shown = false
+            view.setVisible(false)
+            view.setBounds({ x: 0, y: 0, width: 0, height: 0 })
+            contents.setAudioMuted(true)
+            if (hadKeyboard) focusApp()
+            return
+          }
+          view.setBounds(area)
+          view.setVisible(true)
+          contents.setAudioMuted(false)
+          shown = true
+        },
+        zoom(factor) {
+          zoomFactor = factor
+          if (!gone) contents.setZoomFactor(factor)
+        },
+        reload() {
+          if (gone || !token) return
+          // The file changed: load it again where the member was (Chromium does not keep it on reload here).
+          const read = contents.executeJavaScriptInIsolatedWorld(SCROLL_WORLD, [{ code: '[window.scrollX, window.scrollY]' }]).catch(() => null)
+          const late = new Promise(resolve => setTimeout(() => resolve(null), SCROLL_READ_MS))
+          void Promise.race([read, late]).then(position => {
+            if (gone || contents.isDestroyed()) return
+            keepScroll = scrollPosition(position)
+            contents.reload()
+          })
+        },
       }
     },
   }

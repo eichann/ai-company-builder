@@ -660,7 +660,12 @@ registerBackupsIpc(ipc, { paths: allowedRoots, shell: desktopShell, writeRefusal
 // The HTML viewer (doc-frame.md): each document in a view of its own on the document session, which
 // alone serves acb-doc:// — only that document's folder, granted to that view and revoked with it.
 const docFrames = createDocFrames({ paths: allowedRoots, notDownloaded: root => readSparseConfig(root).excluded })
-const docViews = createDocViews({ frames: docFrames, shell: createDocViewShell({ serve: request => docFrames.serve(request) }) })
+// Views open in the main window only (the IPC's sender check), so their events go to it.
+const docViews = createDocViews({
+  frames: docFrames,
+  shell: createDocViewShell({ serve: request => docFrames.serve(request) }),
+  notify: (_windowId, event) => appWindow.send('docView:event', event),
+})
 registerDocViewsIpc(ipc, { frames: docFrames, views: docViews, fromMainWindow: event => isMainFrameSender(event, id => mainWindowHost.isWindow(id)) })
 
 // Startup runs last, once every store and service above is initialised: the

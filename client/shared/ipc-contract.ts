@@ -56,7 +56,7 @@ import type { AiTurnClaimResult, AiTurnSettleResult, AutoTurnSettings } from './
 import type { MailAttachmentOpenResult, MailAwaitReply, MailDraftEdit, OutboundMailResult } from './outbound-mail'
 import type { AppCommandAnswer, AppCommandRequest } from './app-commands'
 import type { CompanyFolderKind } from './company-folder'
-import type { DocViewOpenResult } from './doc-frame'
+import type { DocViewBounds, DocViewEvent, DocViewOpenResult } from './doc-frame'
 // Lanes (ipc-and-main-process.md "Lane markers"): add only right under your lane's ▼.
 // lane A ▼
 import type { GoogleRelayResult } from './google'
@@ -509,6 +509,12 @@ export interface IpcInvokeChannels {
   'docView:open': { args: [filePath: string]; result: DocViewOpenResult }
   /** The view closes; its grant is revoked. */
   'docView:close': { args: [viewId: number]; result: void }
+  /** Place the view over the tab's content area (CSS px of the app page) and show it; null hides and mutes it. */
+  'docView:setBounds': { args: [viewId: number, bounds: DocViewBounds | null]; result: void }
+  /** The document's own zoom factor (kept within `DOC_ZOOM_STEPS`). */
+  'docView:setZoom': { args: [viewId: number, factor: number]; result: void }
+  /** Load the document again (its file changed on disk). */
+  'docView:reload': { args: [viewId: number]; result: void }
   'fs:writeFile': { args: [path: string, content: string]; result: boolean }
   'fs:createFile': { args: [path: string, content: string]; result: FileOpResult }
   'editor:backupBeforeOverwrite': { args: [rootPath: string, filePath: string]; result: EditorBackupResult }
@@ -888,6 +894,8 @@ export interface IpcEventChannels {
   'voice:event': [event: VoiceEvent]
   // One batch per ~100 ms from the company watcher.
   'fs:changes': [changes: FileChangeEvent[]]
+  /** One of the main window's document views: a link the member pressed in it, or the view went by itself. */
+  'docView:event': [event: DocViewEvent]
   'writeAccess:changed': [data: { companyId: string; access: WriteAccess }]
   /** The received minutes of this company may have changed: re-read them (`minutes:notices`). */
   'minutes:changed': [data: { companyId: string }]
@@ -976,6 +984,10 @@ export interface ElectronAPI {
   readFileBinary: Invoke<'fs:readFileBinary'>
   openDocView: Invoke<'docView:open'>
   closeDocView: Invoke<'docView:close'>
+  setDocViewBounds: Invoke<'docView:setBounds'>
+  setDocViewZoom: Invoke<'docView:setZoom'>
+  reloadDocView: Invoke<'docView:reload'>
+  onDocViewEvent: Subscribe<'docView:event'>
   writeFile: Invoke<'fs:writeFile'>
   /** Never replaces an existing file (`code: 'name_taken'`). */
   createFile: Invoke<'fs:createFile'>

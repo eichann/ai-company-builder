@@ -36,6 +36,16 @@ interface Result {
   connections: Record<string, number>
   hidden: { muted: boolean; visibility: string }
   firstOpenWithoutProxy: number | null
+  focusWhileHidden: { app: boolean; doc: boolean }
+  shown: { bounds: Record<string, number>; visible: boolean; muted: boolean; visibility: string; keyboard: { app: boolean; doc: boolean } }
+  otherWindowPlace: Record<string, number>
+  focusAfterClick: { app: boolean; doc: boolean }
+  fullScreen: { before: boolean; after: boolean; pageFullScreen: boolean; keyboard: { app: boolean; doc: boolean } }
+  hiddenAgain: { focusedBefore: boolean; visible: boolean; muted: boolean; visibility: string; keyboard: { app: boolean; doc: boolean } }
+  reloaded: { zoom: number; scrollY: number; keyboard: { app: boolean; doc: boolean } }
+  links: { events: unknown[]; stayed: boolean }
+  crashEvents: unknown[]
+  otherViewId: number | null
 }
 
 function freePort(): Promise<number> {
@@ -140,4 +150,38 @@ test('until the viewer shows it the view is hidden and muted; a session that cou
 
 test('the app\'s page reloading closes its document views and revokes their grants', { skip }, () => {
   assert.deepEqual(result.afterReload, { viewGone: true, served: 404 })
+})
+
+test('a document never takes the keyboard by itself (its load, focus(), autofocus), hidden or shown; a click gives it the keyboard', { skip }, () => {
+  assert.deepEqual(result.focusWhileHidden, { app: true, doc: false }, 'loading focuses a view (Electron 45): the keyboard goes back to the app')
+  assert.deepEqual(result.shown.keyboard, { app: true, doc: false }, 'shown, its focus() calls do not take the keyboard either')
+  assert.deepEqual(result.focusAfterClick, { app: false, doc: true }, 'control: the member clicked into it')
+})
+
+test('shown over its tab: placed at the app page\'s zoom, visible and unmuted; another window cannot move it', { skip }, () => {
+  assert.deepEqual(result.shown.bounds, { x: 50, y: 38, width: 500, height: 375 }, 'CSS px × the app page zoom 1.25')
+  assert.deepEqual([result.shown.visible, result.shown.muted, result.shown.visibility], [true, false, 'visible'])
+  assert.deepEqual(result.otherWindowPlace, result.shown.bounds)
+})
+
+test('hidden again (an overlay, another tab): hidden, muted, and the keyboard the document had goes back to the app', { skip }, () => {
+  assert.equal(result.hiddenAgain.focusedBefore, true, 'control: the document had the keyboard')
+  assert.deepEqual({ ...result.hiddenAgain, focusedBefore: undefined }, { focusedBefore: undefined, visible: false, muted: true, visibility: 'hidden', keyboard: { app: true, doc: false } })
+})
+
+test('Escape in a document shown full screen leaves full screen and gives the keyboard back to the app', { skip }, () => {
+  assert.equal(result.fullScreen.before, true, 'control: the app page went full screen')
+  assert.deepEqual({ after: result.fullScreen.after, page: result.fullScreen.pageFullScreen, keyboard: result.fullScreen.keyboard }, { after: false, page: false, keyboard: { app: true, doc: false } })
+})
+
+test('reloading after the file changed keeps the document\'s zoom and scroll position', { skip }, () => {
+  assert.equal(result.reloaded.zoom, 2)
+  assert.equal(result.reloaded.scrollY, 600)
+  assert.deepEqual(result.reloaded.keyboard, { app: true, doc: false }, 'the reload does not take the keyboard')
+})
+
+test('a link to the web is handed to the window only right after the member pressed something; the page never leaves', { skip }, () => {
+  assert.deepEqual(result.links.events, [{ viewId: result.links.events.length ? (result.links.events[0] as { viewId: number }).viewId : -1, kind: 'link', url: 'https://nav.test/pressed?from=doc' }])
+  assert.equal(result.links.stayed, true)
+  assert.deepEqual(result.crashEvents, [{ viewId: result.otherViewId, kind: 'gone' }])
 })

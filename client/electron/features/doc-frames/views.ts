@@ -14,6 +14,8 @@
  * grant. The cap is applied when a view is registered, so opens running at
  * the same time cannot pass it.
  */
+import { docViewBounds, docZoomFactor, type DocViewBounds, type DocViewEvent } from '../../../shared/doc-frame'
+import { webLinkForBrowser } from '../../external-url'
 import type { DocFrames, OpenableDocument } from './protocol'
 
 export interface DocViewHandle {
@@ -23,6 +25,24 @@ export interface DocViewHandle {
   show(url: string): void
   /** Close the view and its page. `onGone` follows. */
   destroy(): void
+  /**
+   * Place the view over the tab's content area and show it (unmuted), or
+   * hide it (`null`: 0×0, hidden, muted; the keyboard goes back to the app's
+   * page if the document had it).
+   */
+  place(bounds: DocViewBounds | null): void
+  /** The document's own zoom (not the app's). */
+  zoom(factor: number): void
+  /** Load the document again (its file changed on disk). */
+  reload(): void
+}
+
+/** What the shell tells the registry about one view. */
+export interface DocViewHooks {
+  /** The view went, for any reason (once). */
+  onGone(viewId: number): void
+  /** The member pressed a link to somewhere outside the document (the shell refused the navigation). */
+  onLink(viewId: number, url: string): void
 }
 
 export interface DocViewPort {
@@ -31,9 +51,9 @@ export interface DocViewPort {
   /**
    * A new empty view in window `windowId`, on the document session with its
    * guards; null when it cannot be made (the window is gone, the session could
-   * not be prepared). `onGone` runs once when the view goes, for any reason.
+   * not be prepared). `hooks.onGone` runs once when the view goes, for any reason.
    */
-  create(windowId: number, onGone: (viewId: number) => void): Promise<DocViewHandle | null>
+  create(windowId: number, hooks: DocViewHooks): Promise<DocViewHandle | null>
   /** Tell `listener` when a watched window reloads its page, its page crashes or it closes. */
   onWindowReset(listener: (windowId: number) => void): void
 }
@@ -47,7 +67,21 @@ export interface DocViewTicket {
 /** At most this many document views per window; one more closes the oldest. */
 export const MAX_VIEWS_PER_WINDOW = 32
 
-export function createDocViews(deps: { frames: Pick<DocFrames, 'grant' | 'revoke'>; shell: DocViewPort }) {
+/** A view asks the member about a link at most once in this long (a page cannot queue confirmations). */
+export const LINK_INTERVAL_MS = 1000
+
+export interface DocViewsDeps {
+  frames: Pick<DocFrames, 'grant' | 'revoke'>
+  shell: DocViewPort
+  /** Tell the window about one of its views (`docView:event`). */
+  notify?: (windowId: number, event: DocViewEvent) => void
+  now?: () => number
+}
+
+export function createDocViews(deps: DocViewsDeps) {
+  const now = deps.now ?? Date.now
+  /** View id → when it last asked about a link. */
+  const lastLink = new Map<number, number>()
   /** View id → its window and handle, in the order registered. */
   const views = new Map<number, { windowId: number; handle: DocViewHandle }>()
   /** Window → how many times its page reset (reloaded, crashed, closed). */
@@ -56,8 +90,32 @@ export function createDocViews(deps: { frames: Pick<DocFrames, 'grant' | 'revoke
 
   const forget = (viewId: number) => {
     views.delete(viewId)
+    lastLink.delete(viewId)
     deps.frames.revoke(viewId)
   }
+  // The shell's word that a view went. Still registered = nobody here closed it (its page
+  // crashed, it was destroyed): its window is told, so the tab does not show an empty area.
+  const hooks: DocViewHooks = {
+    onGone(viewId) {
+      const view = views.get(viewId)
+      forget(viewId)
+      if (view) deps.notify?.(view.windowId, { viewId, kind: 'gone' })
+    },
+    onLink(viewId, url) {
+      const view = views.get(viewId)
+      // Only the web goes to the member's browser (never file:, javascript:, a custom scheme).
+      const link = webLinkForBrowser(url)
+      if (!view || !link) return
+      const at = now()
+      const last = lastLink.get(viewId)
+      if (last !== undefined && at - last < LINK_INTERVAL_MS) return
+      lastLink.set(viewId, at)
+      deps.notify?.(view.windowId, { viewId, kind: 'link', url: link })
+    },
+  }
+  /** The view, when `windowId` holds it. */
+  const own = (viewId: unknown, windowId: number) =>
+    typeof viewId === 'number' && views.get(viewId)?.windowId === windowId ? views.get(viewId)! : null
   const close = (viewId: number) => {
     const view = views.get(viewId)
     forget(viewId)
@@ -81,22 +139,44 @@ export function createDocViews(deps: { frames: Pick<DocFrames, 'grant' | 'revoke
     /** A view of a checked document for the page `ticket` names, with a grant of its own; its id, or null. */
     async open(doc: OpenableDocument, ticket: DocViewTicket): Promise<number | null> {
       if (stale(ticket)) return null
-      const handle = await deps.shell.create(ticket.windowId, forget)
+      const handle = await deps.shell.create(ticket.windowId, hooks)
       if (!handle) return null
       if (stale(ticket)) {
         handle.destroy()
         return null
       }
       views.set(handle.id, { windowId: ticket.windowId, handle })
-      const own = [...views].filter(([, v]) => v.windowId === ticket.windowId)
-      for (const [viewId] of own.slice(0, Math.max(0, own.length - MAX_VIEWS_PER_WINDOW))) close(viewId)
+      const ofWindow = [...views].filter(([, v]) => v.windowId === ticket.windowId)
+      for (const [viewId] of ofWindow.slice(0, Math.max(0, ofWindow.length - MAX_VIEWS_PER_WINDOW))) {
+        close(viewId)
+        deps.notify?.(ticket.windowId, { viewId, kind: 'gone' })
+      }
       handle.show(deps.frames.grant(doc, handle.id))
       return handle.id
     },
 
     /** Close a view; only its own window may (anything else is ignored). */
     close(viewId: unknown, windowId: number): void {
-      if (typeof viewId === 'number' && views.get(viewId)?.windowId === windowId) close(viewId)
+      if (own(viewId, windowId)) close(viewId as number)
+    },
+
+    /**
+     * Place and show a view, or hide it (`null`, or a placement that is not
+     * four sane numbers); only its own window may (anything else is ignored).
+     */
+    place(viewId: unknown, windowId: number, bounds: unknown): void {
+      own(viewId, windowId)?.handle.place(bounds === null ? null : docViewBounds(bounds))
+    },
+
+    /** The document's zoom, within the steps' range; only its own window may. */
+    zoom(viewId: unknown, windowId: number, factor: unknown): void {
+      const value = docZoomFactor(factor)
+      if (value !== null) own(viewId, windowId)?.handle.zoom(value)
+    },
+
+    /** Load the document again; only its own window may. */
+    reload(viewId: unknown, windowId: number): void {
+      own(viewId, windowId)?.handle.reload()
     },
   }
 }

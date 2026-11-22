@@ -20,4 +20,10 @@ export function isMarkdownFile(filePath: string): boolean {
   return ext === 'md' || ext === 'mdx'
 }
 
+/** An HTML document: shown (見る) in a view of its own by default, its source (中身) in the editor. */
+export function isHtmlFile(filePath: string): boolean {
+  const ext = filePath.split('.').pop()?.toLowerCase() || ''
+  return ext === 'html' || ext === 'htm'
+}
+
 export const fileNameOf = (path: string) => path.split('/').pop() || ''
