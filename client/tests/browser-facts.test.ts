@@ -44,12 +44,19 @@ const stepJson = (id: string, over: Record<string, unknown> = {}) => ({
 const episodeJson = (steps: unknown[], over: Record<string, unknown> = {}) =>
   JSON.stringify({ id: Number(REMINDER), name: '架空のリマインダ', order: 1, type: 1, hid_at: null, steps, ...over })
 const SCHEDULE = `/api/episodes/${REMINDER}`
+/** `GET /api/episode-steps/<step>` in the real site's shape (design memo §40; values made up): the site's own timing text. */
+const TIMING = `/api/episode-steps/${STEP}`
+const timingJson = (text: unknown = '3日前 19:00', over: Record<string, unknown> = {}) =>
+  JSON.stringify({ episode_id: Number(REMINDER), episode_group_id: 7100002, episode_name: '架空のリマインダ', episode_step_id: Number(STEP), step_timing_text: text, ...over })
+const UNCATEGORISED = '/api/templates?group=0&page=1'
 
 /** The fake site by exact address (anything else is a 404). */
 function site(over: Record<string, string | null> = {}): Record<string, string> {
   const pages: Record<string, string | null> = {
     [`/line/episode/show/${REMINDER}`]: reminderPage(box('<span>当日 09:00</span>')),
     [SCHEDULE]: episodeJson([stepJson('7002000', { order: 0, step_days: 1, step_time: '19:00:00' }), stepJson(STEP)]),
+    [TIMING]: timingJson(),
+    [UNCATEGORISED]: pageOf([]),
     '/api/template-groups': JSON.stringify({ data: [{ id: 0, name: '未分類', order: 0, item_count: 1 }, { id: 7200001, name: '架空甲', order: 1, item_count: 1 }, { id: 7200002, name: '架空乙', order: 2, item_count: 1 }] }),
     '/api/templates?group=7200001&page=1': pageOf([template(ON_STEP, 7200001)]),
     '/api/templates?group=7200002&page=1': pageOf([template(TO_ADD, 7200002)]),
@@ -92,14 +99,14 @@ test('the facts come from exactly the declared reads, scanning template folders 
   const { facts, problem, reads } = await factsOf(site())
   assert.deepEqual(reads, [
     `/line/episode/show/${REMINDER}`,
-    SCHEDULE, '/api/template-groups',
-    '/api/templates?group=7200001&page=1', '/api/templates?group=7200002&page=1',
-  ], '「未分類」 (0) is never asked; the reminder\'s name comes with its steps (no reminder folder walk)')
+    SCHEDULE, TIMING, '/api/template-groups',
+    UNCATEGORISED, '/api/templates?group=7200001&page=1', '/api/templates?group=7200002&page=1',
+  ], '「未分類」 (0) walked like any folder (§40); the reminder\'s name comes with its steps (no reminder folder walk)')
   assert.deepEqual(valueOf(facts, 'account'), { id: '5550001' })
   assert.deepEqual(valueOf(facts, 'step_parent'), { reminder: REMINDER })
   assert.deepEqual(valueOf(facts, 'state'), { templates: [ON_STEP] })
-  assert.deepEqual(valueOf(facts, 'schedule'), { timing: '当日 09:00' })
-  assert.deepEqual(valueOf(facts, 'names'), { reminder: '架空のリマインダ', step: '当日 09:00' })
+  assert.deepEqual(valueOf(facts, 'schedule'), { timing: '3日前 19:00' })
+  assert.deepEqual(valueOf(facts, 'names'), { reminder: '架空のリマインダ', step: '3日前 19:00' })
   assert.deepEqual(valueOf(facts, 'templates'), {
     [ON_STEP]: { name: '架空テンプレ1', kind: 'text', body: '本文1\n2行目' },
     [TO_ADD]: { name: '架空テンプレ2', kind: 'text', body: '本文2\n2行目' },
@@ -109,7 +116,7 @@ test('the facts come from exactly the declared reads, scanning template folders 
   // Where each was read (a path, never the query) and when.
   assert.equal(facts.templates.source, '/api/templates')
   assert.equal(facts.account.source, `/line/episode/show/${REMINDER}`)
-  assert.equal(facts.schedule.source, SCHEDULE)
+  assert.equal(facts.schedule.source, TIMING)
   assert.equal(facts.names.source, SCHEDULE)
   assert.ok(Object.values(facts).every(f => !Number.isNaN(Date.parse(f.readAt))))
   // Not readable on the real site: unknown, never guessed. Both optional (0.6.1: Lステップ cannot say which
@@ -123,7 +130,7 @@ test('the facts come from exactly the declared reads, scanning template folders 
   assert.deepEqual(expectedAfter(valueOf(facts, 'state') as Record<string, string[]>, operation, values), { templates: [ON_STEP, TO_ADD] })
 })
 
-test('text-only templates: a template of another form_type, one only in 「未分類」, one naming another folder or one found twice differently is not read, so no plan', async () => {
+test('text-only templates: a template of another form_type, one naming another folder or one found twice differently is not read, so no plan; one in 「未分類」 (group null) is', async () => {
   const notText = await factsOf(site({ '/api/templates?group=7200002&page=1': pageOf([template(TO_ADD, 7200002, { form_type: 9 })]) }))
   assert.equal(notText.facts.templates.status, 'unknown')
   assert.equal(notText.checkerProblem, 'template-not-text')
@@ -132,10 +139,26 @@ test('text-only templates: a template of another form_type, one only in 「未�
   assert.equal((await factsOf(site({ '/api/templates?group=7200002&page=1': pageOf([template(TO_ADD, 7200002, { form_type: '8' })]) }))).facts.templates.status, 'unknown')
   // The one on the step is not text: also no plan.
   assert.equal((await factsOf(site({ '/api/templates?group=7200001&page=1': pageOf([template(ON_STEP, 7200001, { form_type: 3 })]) }))).facts.templates.status, 'unknown')
-  // Only in 「未分類」 (never asked): not found.
-  const uncategorised = await factsOf(site({ '/api/templates?group=7200002&page=1': pageOf([]), '/api/templates?group=0&page=1': pageOf([template(TO_ADD, 0)]) }))
-  assert.equal(uncategorised.facts.templates.status, 'unknown')
-  assert.equal(uncategorised.reads.includes('/api/templates?group=0&page=1'), false)
+  // In 「未分類」 (§40: `group: null`): found.
+  const inUncategorised = template(TO_ADD, 0, { group: null })
+  const uncategorised = await factsOf(site({ '/api/templates?group=7200002&page=1': pageOf([]), [UNCATEGORISED]: pageOf([inUncategorised]) }))
+  assert.deepEqual(valueOf(uncategorised.facts, 'templates'), {
+    [ON_STEP]: { name: '架空テンプレ1', kind: 'text', body: '本文1\n2行目' },
+    [TO_ADD]: { name: '架空テンプレ2', kind: 'text', body: '本文2\n2行目' },
+  })
+  assert.equal(uncategorised.problem, null)
+  // A 「未分類」 entry naming a folder (or none at all): not 「未分類」's, left out.
+  for (const over of [{ group: { id: 7200002, name: 'x' } }, { group: 7200002 }, { group_id: 7200002, group: null }]) {
+    assert.equal((await factsOf(site({ '/api/templates?group=7200002&page=1': pageOf([]), [UNCATEGORISED]: pageOf([template(TO_ADD, 0, over)]) }))).facts.templates.status, 'unknown', JSON.stringify(over))
+  }
+  const noGroup: Record<string, unknown> = { ...inUncategorised }
+  delete noGroup.group
+  assert.equal((await factsOf(site({ '/api/templates?group=7200002&page=1': pageOf([]), [UNCATEGORISED]: pageOf([noGroup]) }))).facts.templates.status, 'unknown', 'no folder named at all')
+  // 「未分類」 entries with `group: 0` count too; a template there still must be text.
+  assert.equal((await factsOf(site({ '/api/templates?group=7200002&page=1': pageOf([]), [UNCATEGORISED]: pageOf([template(TO_ADD, 0, { group: 0 })]) }))).facts.templates.status, 'known')
+  assert.equal((await factsOf(site({ '/api/templates?group=7200002&page=1': pageOf([]), [UNCATEGORISED]: pageOf([template(TO_ADD, 0, { group: null, form_type: 2 })]) }))).facts.templates.status, 'unknown')
+  // A positive folder's entry claiming 「未分類」 is not that folder's.
+  assert.equal((await factsOf(site({ '/api/templates?group=7200002&page=1': pageOf([template(TO_ADD, 7200002, { group: null })]) }))).facts.templates.status, 'unknown')
   // An entry naming another folder than the one asked.
   assert.equal((await factsOf(site({ '/api/templates?group=7200002&page=1': pageOf([template(TO_ADD, 7200001)]) }))).facts.templates.status, 'unknown')
   // The same id twice with different contents.
@@ -158,52 +181,52 @@ test('text-only templates: a template of another form_type, one only in 「未�
   assert.equal(misnumbered.reads.includes('/api/templates?group=7200002&page=2'), false)
 })
 
-test('the step\'s timing comes only from the reminder\'s JSON through the fixed table (step_type 1, step_days 0, HH:MM:00 → 「当日 HH:MM」); anything else is unknown and makes no plan', async () => {
-  const withSteps = async (steps: unknown[], over: Record<string, unknown> = {}) => (await factsOf(site({ [SCHEDULE]: episodeJson(steps, over) }))).facts
-  const timing = async (step: Record<string, unknown>) => valueOf(await withSteps([stepJson(STEP, step)]), 'schedule')
-  // The mapping.
-  assert.deepEqual(await timing({}), { timing: '当日 09:00' }, 'the combination seen on the real site (§39)')
-  assert.deepEqual(await timing({ step_time: '19:05:00' }), { timing: '当日 19:05' })
-  assert.deepEqual(await timing({ step_time: '00:00:00' }), { timing: '当日 00:00' })
-  assert.deepEqual(await timing({ step_time: '23:59:00' }), { timing: '当日 23:59' })
-  // Not seen, so not mapped: another day (either sign), another step_type, seconds, a malformed or
-  // missing time, values written as text.
-  for (const odd of [
-    { step_days: 3 }, { step_days: -3 }, { step_days: 1 }, { step_type: 2 }, { step_type: 0 }, { step_type: '1' }, { step_days: '0' },
-    { step_time: '09:00:30' }, { step_time: '9:00:00' }, { step_time: '24:00:00' }, { step_time: '09:00' }, { step_time: null }, { step_type: undefined },
-    // Only the skip / initial / step_minutes seen on the real site (§39: 1 / 0 / null); their meaning is not confirmed.
-    { skip: 0 }, { skip: 2 }, { skip: '1' }, { skip: true }, { skip: undefined }, { initial: 1 }, { initial: '0' }, { initial: undefined },
-    { step_minutes: 0 }, { step_minutes: 30 }, { step_minutes: undefined },
-  ]) assert.equal(await timing(odd), 'unknown', JSON.stringify(odd))
-  const unread = await withSteps([stepJson(STEP, { step_type: 2 })])
+test('the step\'s timing is the site\'s own text (/api/episode-steps, §40) verbatim, for this step of this reminder only, and only when the reminder\'s answer holds the step once and is not hidden', async () => {
+  const timing = async (answer: string | null, over: Record<string, string | null> = {}) => valueOf((await factsOf(site({ [TIMING]: answer, ...over }))).facts, 'schedule')
+  // Verbatim (trimmed): never parsed or rebuilt, whatever the form.
+  assert.deepEqual(await timing(timingJson('当日 09:00')), { timing: '当日 09:00' })
+  assert.deepEqual(await timing(timingJson('  12日後 08:30  ')), { timing: '12日後 08:30' })
+  assert.deepEqual(await timing(timingJson('開始から 3 時間後')), { timing: '開始から 3 時間後' })
+  // Not one plain line of 1–100 characters, or not text: unknown.
+  for (const odd of ['', '   ', '当日\n09:00', 'a\u202eb', 'a\u0007b', 'あ'.repeat(101), null, 9, ['当日']]) {
+    assert.equal(await timing(timingJson(odd)), 'unknown', JSON.stringify(odd))
+  }
+  assert.deepEqual(await timing(timingJson('あ'.repeat(100))), { timing: 'あ'.repeat(100) })
+  // Another step's or another reminder's answer, ids missing or not plain, the text missing.
+  for (const over of [{ episode_step_id: 7002999 }, { episode_id: 7001999 }, { episode_step_id: undefined }, { episode_id: undefined }, { episode_step_id: 0 }, { episode_id: '7001001 ' }, { step_timing_text: undefined }]) {
+    assert.equal(await timing(timingJson('当日 09:00', over)), 'unknown', JSON.stringify(over))
+  }
+  // The answer failing, or not strict JSON (a key written twice).
+  assert.equal(await timing(null), 'unknown')
+  assert.equal(await timing(timingJson('当日 09:00').replace('"step_timing_text"', '"step_timing_text":"x","step_timing_text"')), 'unknown')
+  const unread = (await factsOf(site({ [TIMING]: timingJson('') }))).facts
   assert.equal(unread.names.status, 'unknown', 'the step\'s name is its timing')
-  assert.equal(browserFactsProblem(operation, 2, withSharedWith(unread), values), '「names」をサイトから読み取れていません')
-  // The step must stand exactly once in this reminder's answer, name the reminder, and the reminder be shown.
-  assert.equal(valueOf(await withSteps([stepJson('7002999')]), 'schedule'), 'unknown', 'step not in the list')
-  assert.equal(valueOf(await withSteps([stepJson(STEP), stepJson(STEP)]), 'schedule'), 'unknown', 'step twice (same contents)')
-  assert.equal(valueOf(await withSteps([stepJson(STEP), stepJson(STEP, { step_time: '10:00:00' })]), 'schedule'), 'unknown', 'step twice')
-  assert.equal(valueOf(await withSteps([stepJson(STEP, { episode_id: 7001999 })]), 'schedule'), 'unknown', 'the step names another reminder')
-  assert.equal(valueOf(await withSteps([stepJson(STEP, { id: String(STEP) + '0' })]), 'schedule'), 'unknown')
-  assert.equal(valueOf(await withSteps([stepJson(STEP)], { id: 7001999 }), 'schedule'), 'unknown', 'another reminder\'s answer')
-  assert.equal(valueOf(await withSteps([stepJson(STEP)], { hid_at: '2026-11-01 10:00:00' }), 'schedule'), 'unknown', 'a hidden reminder')
+  assert.equal(browserFactsProblem(operation, 2, unread, values), '「names」をサイトから読み取れていません')
+  // The reminder's answer must hold the step exactly once, naming the reminder, and not be hidden.
+  const withSteps = async (steps: unknown[], over: Record<string, unknown> = {}) => valueOf((await factsOf(site({ [SCHEDULE]: episodeJson(steps, over) }))).facts, 'schedule')
+  assert.equal(await withSteps([stepJson('7002999')]), 'unknown', 'step not in the list')
+  assert.equal(await withSteps([stepJson(STEP), stepJson(STEP)]), 'unknown', 'step twice (same contents)')
+  assert.equal(await withSteps([stepJson(STEP, { episode_id: 7001999 })]), 'unknown', 'the step names another reminder')
+  assert.equal(await withSteps([stepJson(STEP)], { id: 7001999 }), 'unknown', 'another reminder\'s answer')
+  assert.equal(await withSteps([stepJson(STEP)], { hid_at: '2026-11-01 10:00:00' }), 'unknown', 'a hidden reminder')
   const noHidAt = JSON.parse(episodeJson([stepJson(STEP)])) as Record<string, unknown>
   delete noHidAt.hid_at
-  assert.equal(valueOf((await factsOf(site({ [SCHEDULE]: JSON.stringify(noHidAt) }))).facts, 'schedule'), 'unknown', 'hid_at must be there and null')
-  assert.equal(valueOf(await withSteps(['x', stepJson(STEP)]), 'schedule'), 'unknown', 'a step that is not an object')
-  assert.equal(valueOf(await withSteps([], { steps: { [STEP]: stepJson(STEP) } }), 'schedule'), 'unknown', 'steps not a list')
-  // The answer failing, or not strict JSON (a key written twice: JSON.parse would keep the last copy).
-  assert.equal(valueOf((await factsOf(site({ [SCHEDULE]: null }))).facts, 'schedule'), 'unknown')
-  const repeated = episodeJson([stepJson(STEP, { step_type: 2 })]).replace('"step_type":2', '"step_type":2,"step_type":1')
-  assert.equal(valueOf((await factsOf(site({ [SCHEDULE]: repeated }))).facts, 'schedule'), 'unknown')
-  // The page's text plays no part any more: a timing-looking text in the box changes nothing.
-  const pageText = await factsOf(site({ [`/line/episode/show/${REMINDER}`]: reminderPage(box('<span>3日前 19:00</span>')) }))
-  assert.deepEqual(valueOf(pageText.facts, 'schedule'), { timing: '当日 09:00' })
+  assert.equal(await timing(timingJson(), { [SCHEDULE]: JSON.stringify(noHidAt) }), 'unknown', 'hid_at must be there and null')
+  assert.equal(await withSteps(['x', stepJson(STEP)]), 'unknown', 'a step that is not an object')
+  assert.equal(await withSteps([], { steps: { [STEP]: stepJson(STEP) } }), 'unknown', 'steps not a list')
+  assert.equal(await timing(timingJson(), { [SCHEDULE]: null }), 'unknown', 'the reminder\'s answer failing')
+  // The step's own fields in the reminder's answer play no part (the site's text replaces them).
+  assert.deepEqual(await withSteps([stepJson(STEP, { step_days: -3, step_type: 9, skip: 0, step_minutes: 5 })]), { timing: '3日前 19:00' })
+  // Nor does the page's text.
+  const pageText = await factsOf(site({ [`/line/episode/show/${REMINDER}`]: reminderPage(box('<span>当日 09:00</span>')) }))
+  assert.deepEqual(valueOf(pageText.facts, 'schedule'), { timing: '3日前 19:00' })
+  assert.equal(pageText.facts.schedule.source, TIMING)
 })
 
 test('a page the core could not read whole (the real page repeats ids in every step\'s form, §39) keeps the account and the state, read by the run\'s own rules, and the timing and names, read from JSON', async () => {
   const twiceId = await factsOf(site({ [`/line/episode/show/${REMINDER}`]: reminderPage(`${box('<input id="step_time" value="09:00"><input id="step_type" value="1">')}<div><input id="step_time" value="10:00"><input id="step_type" value="1"></div>`) }))
-  assert.deepEqual(valueOf(twiceId.facts, 'schedule'), { timing: '当日 09:00' })
-  assert.deepEqual(valueOf(twiceId.facts, 'names'), { reminder: '架空のリマインダ', step: '当日 09:00' })
+  assert.deepEqual(valueOf(twiceId.facts, 'schedule'), { timing: '3日前 19:00' })
+  assert.deepEqual(valueOf(twiceId.facts, 'names'), { reminder: '架空のリマインダ', step: '3日前 19:00' })
   assert.deepEqual(valueOf(twiceId.facts, 'state'), { templates: [ON_STEP] })
   assert.deepEqual(valueOf(twiceId.facts, 'account'), { id: '5550001' })
 })
@@ -223,7 +246,7 @@ test('no account, or no target on the page: unknown, and nothing beyond the page
   delete nameless.name
   const lost = await factsOf(site({ [SCHEDULE]: JSON.stringify(nameless) }))
   assert.equal(lost.facts.names.status, 'unknown')
-  assert.deepEqual(valueOf(lost.facts, 'schedule'), { timing: '当日 09:00' })
+  assert.deepEqual(valueOf(lost.facts, 'schedule'), { timing: '3日前 19:00' })
   assert.equal((await factsOf(site({ [SCHEDULE]: episodeJson([stepJson(STEP)], { name: '架空\u202eのリマインダ' }) }))).facts.names.status, 'unknown')
   assert.equal((await factsOf(site({ [SCHEDULE]: episodeJson([stepJson(STEP)], { name: 7 }) }))).facts.names.status, 'unknown')
 })
@@ -276,7 +299,7 @@ test('the core reads only declared reads with addresses it builds, at most BROWS
       // It reads the page through the view (which finds the repeated id), then marks everything raw.
       read: (_values, answers) => ({ facts: {
         ...(answers[0].ok && answers[0].kind === 'html' ? (answers[0].view.find({}), {}) : {}),
-        schedule: { status: 'known', value: { timing: '当日 09:00' }, complete: true, from: 0, rawMarkup: true },
+        schedule: { status: 'known', value: { timing: '3日前 19:00' }, complete: true, from: 0, rawMarkup: true },
         account: { status: 'known', value: { id: '1' }, from: 0, rawMarkup: true },
       } }),
     },
@@ -308,13 +331,13 @@ test('the re-read before the permit refuses any change: a template\'s body or na
     '「templates」が承認したときと変わりました')
   assert.equal(browserFactsChangedProblem(operation, 2, approved, await again({ '/api/templates?group=7200001&page=1': pageOf([template(ON_STEP, 7200001, { name: '変えた名前' })]) }), values),
     '「templates」が承認したときと変わりました')
-  // The step's time moved (10:00 instead of 09:00): the timing changed (the names, which carry it, too).
-  assert.equal(browserFactsChangedProblem(operation, 2, approved, await again({ [SCHEDULE]: episodeJson([stepJson(STEP, { step_time: '10:00:00' })]) }), values),
+  // The step's time moved: the timing changed (the names, which carry it, too).
+  assert.equal(browserFactsChangedProblem(operation, 2, approved, await again({ [TIMING]: timingJson('3日前 20:00') }), values),
     '「names」が承認したときと変わりました')
-  const moved = withSharedWith((await factsOf(site({ [SCHEDULE]: episodeJson([stepJson(STEP, { step_time: '10:00:00' })]) }))).facts)
+  const moved = withSharedWith((await factsOf(site({ [TIMING]: timingJson('3日前 20:00') }))).facts)
   assert.equal(browserFactsChangedProblem(operation, 2, approved, { ...moved, names: approved.names }, values), '「schedule」が承認したときと変わりました')
-  // The step's time now one the table does not map: the re-read cannot make a plan by itself.
-  assert.equal(browserFactsChangedProblem(operation, 2, approved, await again({ [SCHEDULE]: episodeJson([stepJson(STEP, { step_days: 2 })]) }), values),
+  // The step's time no longer readable: the re-read cannot make a plan by itself.
+  assert.equal(browserFactsChangedProblem(operation, 2, approved, await again({ [TIMING]: timingJson('') }), values),
     '「names」をサイトから読み取れていません')
   assert.equal(browserFactsChangedProblem(operation, 2, approved, await again({ [SCHEDULE]: episodeJson([stepJson('7002000', { order: 0, step_days: 1, step_time: '19:00:00' }), stepJson(STEP)], { name: '改名したリマインダ' }) }), values),
     '「names」が承認したときと変わりました')

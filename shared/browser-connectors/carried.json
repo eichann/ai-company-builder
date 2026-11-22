@@ -4,8 +4,8 @@
     {
       "connector": "lstep",
       "version": "0.6.1",
-      "declarationHash": "sha256:11b2992fd11cef7e28c8511927ae67c06635a6cdcaf6f5ed211bb1d5dca68795",
-      "checkerHash": "sha256:529dcf074ceace7ac6ea4388db97dff75e65f9db6114617c007dfe540ec7bf80",
+      "declarationHash": "sha256:714703a3efb4d814c88d7c28ad26dfedb827f0061e9bf72f064a3b30c0938fa6",
+      "checkerHash": "sha256:82e8d501d46935b444407174e761360b8f63245a044fd03a3cd087c18fcd4547",
       "factsVersion": 2
     }
   ]
