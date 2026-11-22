@@ -229,11 +229,11 @@ tracked. The sync message still counts the newly ignored files. Threshold:
   list labels both (`BackupHistorySlideOver`), though a working folder has no backups panel today.
 - Private folders' backups live in `.git/acb-private-backups/` (`_private`, `_protected`,
   `_write_denied`, `_editor_overwrite`, `_made_public`, `_private_folder_existing`,
-  `_outside_checkout`, `_before_recovery`, `_private_excluded`: the ignored files of a left-out private
+  `_outside_checkout`, `_before_recovery`, `_private_excluded` (never pruned by age): the ignored files of a left-out private
   folder's clone, moved there before the clone is removed), never in the working tree, so no `.gitignore` edit can share them.
 - `backup:list` shows both places (private ids start with `private:`). Backups older than 30 days
   are pruned in both places at the start of each sync, before the recovery copy (a full disk gets
-  its space back first).
+  its space back first) — except `_private_excluded` ones, the only copy of what they hold.
 - 復元 (`backup:restore`) and 「元に戻す」 (`git:revertFile`, added / modified) first keep the file
   on disk with `features/backups/keep-current.ts` (the private backups for a private folder or a
   nested repository); if that fails nothing changes

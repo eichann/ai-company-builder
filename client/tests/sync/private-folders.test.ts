@@ -15,7 +15,7 @@ import path from 'node:path'
 import { World, DEFAULT_SCOPES, FAKE_AWS_KEY, privateMarker, type Member, type SyncOutcome } from '../sync-harness/world'
 import { settleAndCheck, assertPrivacy } from '../sync-harness/invariants'
 import { privateBackupsDir, readPrivateExcludes } from '../../electron/sync/private-folders'
-import { EXCLUDED_CLONE_KEPT_MESSAGE } from '../../electron/sync/private-sync'
+import { excludedCloneMessage } from '../../electron/sync/private-sync'
 import { checkWritePath, decideReservedWrite } from '../../electron/write-guard'
 
 const CONCURRENCY = Number(process.env.SYNC_HARNESS_CONCURRENCY) || 4
@@ -423,7 +423,12 @@ describe('git:sync private folders', { concurrency: CONCURRENCY }, () => {
     assert.equal(inBackup(`${HR}/.personal/memo.md`), 'my own note\n')
     assert.equal(inBackup(`${HR}/.env`), 'TOKEN=mine\n')
     assert.equal(reports[0].backupPath, path.join(privateBackupsDir(reader.dir), saved.folder.slice('private:'.length)))
+    assert.match(reports[0].message ?? '', /「バックアップ」の一覧で見られます。自動では消えません/)
+    // The only copy: never pruned with the backups older than 30 days.
+    const old = new Date(Date.now() - 40 * 24 * 60 * 60 * 1000)
+    fs.utimesSync(reports[0].backupPath!, old, old)
     ok(await reader.sync(), 'reader')
+    assert.equal(inBackup(`${HR}/.personal/memo.md`), 'my own note\n')
     assertPrivacy(world)
     await settleAndCheck(world)
   })
@@ -438,7 +443,8 @@ describe('git:sync private folders', { concurrency: CONCURRENCY }, () => {
     assert.equal((await reader.excludeFolder(HR)).success, true)
     const reports = await reader.applyPrivateFolderChoices()
     assert.deepEqual(reports.map(r => [r.path, r.success, r.removed]), [[HR, true, false]])
-    assert.equal(reports[0].message, EXCLUDED_CLONE_KEPT_MESSAGE)
+    assert.equal(reports[0].message, excludedCloneMessage({ removed: false, failure: 'failed' }))
+    assert.match(reports[0].message ?? '', /移せなかったため、この PC から削除せずに残しました。何も削除していません。/)
     assert.doesNotMatch(reports[0].message ?? '', /人事|評価/, 'the sentence itself names no folder (the report adds the reader\'s own)')
     assert.equal(reader.readText(`${HR}/.personal/memo.md`), 'my own note\n')
     assert.ok(reader.exists(`${HR}/評価表.md`) && reader.exists(`${HR}/.git`), 'the clone stays whole')

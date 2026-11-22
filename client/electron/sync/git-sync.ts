@@ -78,7 +78,7 @@ import {
   preparePrivateFolders,
   removeExcludedClone,
   syncReadOnlyScope,
-  EXCLUDED_CLONE_KEPT_MESSAGE,
+  isPrivateExcludedBackup,
   excludedCloneMessage,
   type ExcludedCloneRemoval,
 } from './private-sync'
@@ -273,6 +273,8 @@ async function runSync(deps: SyncDeps, repoPath: string, companyId: string, comm
         try {
           const backupFolders = await fs.promises.readdir(dir)
           for (const folder of backupFolders) {
+            // A left-out private folder's ignored files exist only there: never pruned by age.
+            if (isPrivateExcludedBackup(folder)) continue
             const folderPath = path.join(dir, folder)
             try {
               const stat = await fs.promises.stat(folderPath)
@@ -1955,7 +1957,7 @@ export function createGitSync(deps: SyncDeps): GitSync {
         const removal: ExcludedCloneRemoval = r.success
           ? await locked(placement.dir, () => removeExcludedClone(d, repoPath, placement.dir, scope.path)).catch((error: unknown) => {
               d.log.warn('Git sync: Could not remove a left-out private folder; it stays:', error)
-              return { removed: false, reason: EXCLUDED_CLONE_KEPT_MESSAGE }
+              return { removed: false, failure: 'failed' as const }
             })
           : { removed: false }
         const note = excludedCloneMessage(removal)
