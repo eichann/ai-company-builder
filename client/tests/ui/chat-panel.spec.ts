@@ -494,7 +494,7 @@ test('not signed in: 「ほかの AI を選ぶ（設定）」 on the setup scree
   await openSettings.click()
   await expect(settings).toBeVisible()
   await expect(openSettings).toBeHidden()
-  await settings.getByRole('button', { name: '✕' }).click()
+  await settings.getByRole('button', { name: '閉じる' }).click()
   await expect(settings).toHaveCount(0)
   await expect(openSettings).toBeVisible()
 })
