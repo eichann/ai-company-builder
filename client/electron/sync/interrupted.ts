@@ -208,6 +208,8 @@ interface PlannedCopy {
   /** A file on disk, or else `blob`: a version git holds. */
   disk?: string
   blob?: string
+  /** The copy got a `.staged-version` / `.committed-version` name of sync's own (listed as it is). */
+  versionName?: boolean
 }
 
 /**
@@ -257,7 +259,7 @@ async function planCopies(options: RecoveryOptions, tips: Tips): Promise<Planned
     const name = taken.has(pathKey(file)) ? `${file}.${label}` : file
     if (taken.has(pathKey(name))) return
     taken.add(pathKey(name))
-    copies.push({ shown: shownName(file), dest: destName(name), blob })
+    copies.push({ shown: shownName(file), dest: destName(name), blob, ...(name !== file ? { versionName: true } : {}) })
   }
   const addFolder = (folder: string, top: string) => {
     for (const entry of fs.readdirSync(path.join(repoPath, folder), { withFileTypes: true })) {
@@ -360,7 +362,7 @@ async function keepChangedFiles(options: RecoveryOptions, plan: PlannedCopy[]): 
         throw new CopyFailed(copy.shown, error)
       }
       const rel = path.relative(backupPath, target).split(path.sep).join('/')
-      if (rel === copy.dest.split(path.sep).join('/') && rel !== copy.shown && !/\.(staged|committed)-version$/.test(rel)) copies[copy.shown] = rel
+      if (rel === copy.dest.split(path.sep).join('/') && rel !== copy.shown && !copy.versionName) copies[copy.shown] = rel
       if (!files.includes(copy.shown)) files.push(copy.shown)
     }
     if (files.length === 0) return null
