@@ -127,8 +127,8 @@ export function AppDialogs(props: Props) {
 
         {/* Tool Viewer */}
         {skillsTab.activeTool && (
-          <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-8">
-            <div className="w-full h-full max-w-6xl max-h-[90vh] rounded-xl overflow-hidden shadow-2xl">
+          <div className="fixed inset-0 z-dialog bg-scrim flex items-center justify-center p-8">
+            <div className="w-full h-full max-w-6xl max-h-[90vh] rounded-card overflow-hidden shadow-dialog">
               <ToolViewer
                 tool={skillsTab.activeTool.tool}
                 port={skillsTab.activeTool.port}

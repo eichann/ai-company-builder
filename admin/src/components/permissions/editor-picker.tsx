@@ -47,7 +47,7 @@ export function EditorPicker({
   )
 
   const check = (on: boolean) => (
-    <Check size={16} weight="bold" className={on ? 'ml-auto text-brand' : 'ml-auto opacity-0'} aria-hidden="true" />
+    <Check size={16} weight="bold" className={on ? 'ml-auto text-selected-icon' : 'ml-auto opacity-0'} aria-hidden="true" />
   )
 
   return (

@@ -18,9 +18,9 @@ import { PRIMARY_ACTION } from '../../../shared/ui/buttonStyles'
 function ThinkingIndicator() {
   return (
     <div className="flex items-center gap-1.5 py-1">
-      <span className="w-1.5 h-1.5 rounded-full bg-accent animate-pulse-soft" style={{ animationDelay: '0ms' }} />
-      <span className="w-1.5 h-1.5 rounded-full bg-accent animate-pulse-soft" style={{ animationDelay: '300ms' }} />
-      <span className="w-1.5 h-1.5 rounded-full bg-accent animate-pulse-soft" style={{ animationDelay: '600ms' }} />
+      <span className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse-soft" style={{ animationDelay: '0ms' }} />
+      <span className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse-soft" style={{ animationDelay: '300ms' }} />
+      <span className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse-soft" style={{ animationDelay: '600ms' }} />
     </div>
   )
 }
@@ -98,7 +98,7 @@ function UserMessageBubble({
           value={editText}
           onChange={(e) => setEditText(e.target.value)}
           onKeyDown={handleEditKeyDown}
-          className="w-full rounded-2xl rounded-br-md px-4 py-3 text-[14px] leading-relaxed bg-accent/20 text-gray-900 dark:text-zinc-100 border border-accent/50 resize-y outline-none focus:border-accent min-h-[60px] max-h-[200px]"
+          className="w-full rounded-2xl rounded-br-md px-4 py-3 text-[14px] leading-relaxed bg-selected-bg text-text border border-selected-border resize-y outline-none focus:border-focus-border min-h-[60px] max-h-[200px]"
           rows={3}
         />
         <div className="flex justify-end gap-2 mt-1.5">
@@ -127,7 +127,7 @@ function UserMessageBubble({
       {droppedRecords.length > 0 && (
         <div className="mb-1.5 flex flex-col items-end gap-1" data-dropped-records>
           {droppedRecords.map(r => (
-            <span key={r.id} className="inline-flex max-w-full items-center gap-1 px-2 py-0.5 rounded-md text-[11px] bg-accent/15 text-accent dark:bg-accent/20 dark:text-accent/90 border border-accent/20">
+            <span key={r.id} className="inline-flex max-w-full items-center gap-1 px-2 py-0.5 rounded-md text-[11px] bg-selected-bg text-selected-text border border-selected-border">
               <ListChecks size={10} className="flex-shrink-0" aria-hidden />
               <span className="truncate">{droppedRecordLine(r, true)}</span>
             </span>
@@ -141,7 +141,7 @@ function UserMessageBubble({
             {(showAllFiles ? referenceFiles : referenceFiles.slice(0, VISIBLE_FILE_COUNT)).map((filePath, i) => (
               <span
                 key={i}
-                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] bg-accent/15 text-accent dark:bg-accent/20 dark:text-accent/90 border border-accent/20"
+                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] bg-selected-bg text-selected-text border border-selected-border"
                 title={filePath}
               >
                 <File size={10} className="flex-shrink-0" />
@@ -151,7 +151,7 @@ function UserMessageBubble({
             {referenceFiles.length > VISIBLE_FILE_COUNT && !showAllFiles && (
               <button
                 onClick={() => setShowAllFiles(true)}
-                className="inline-flex items-center px-2 py-0.5 rounded-md text-[11px] bg-accent/10 text-accent/70 hover:bg-accent/20 transition-colors"
+                className="inline-flex items-center px-2 py-0.5 rounded-md text-[11px] bg-selected-bg text-selected-text hover:bg-selected-bg-hover transition-colors"
               >
                 +{referenceFiles.length - VISIBLE_FILE_COUNT}
               </button>
@@ -159,7 +159,7 @@ function UserMessageBubble({
             {showAllFiles && referenceFiles.length > VISIBLE_FILE_COUNT && (
               <button
                 onClick={() => setShowAllFiles(false)}
-                className="inline-flex items-center px-2 py-0.5 rounded-md text-[11px] bg-accent/10 text-accent/70 hover:bg-accent/20 transition-colors"
+                className="inline-flex items-center px-2 py-0.5 rounded-md text-[11px] bg-selected-bg text-selected-text hover:bg-selected-bg-hover transition-colors"
               >
                 <CaretUp size={10} />
               </button>
@@ -167,7 +167,7 @@ function UserMessageBubble({
           </div>
         </div>
       )}
-      <div className="relative rounded-2xl px-4 py-3 text-[14px] leading-relaxed bg-accent text-white rounded-br-md">
+      <div className="relative rounded-2xl px-4 py-3 text-[14px] leading-relaxed bg-primary text-on-primary rounded-br-md">
         {images && images.length > 0 && (
           <div className="flex gap-1.5 mb-2 flex-wrap">
             {images.map((url, i) => (
@@ -236,7 +236,7 @@ const MessageItem = memo(function MessageItem({ message, isStreaming, timestamp,
         {/* Role indicator for assistant */}
         {!isUser && (
           <div className="flex items-center gap-2 mb-2">
-            <div className="w-5 h-5 rounded-md bg-gradient-to-br from-accent to-accent/70 flex items-center justify-center shadow-glow">
+            <div className="w-5 h-5 rounded-md bg-primary flex items-center justify-center shadow-glow">
               <Sparkle size={11} weight="fill" className="text-white" />
             </div>
             <span className="text-[11px] font-medium tracking-wide uppercase text-gray-500 dark:text-zinc-400">
@@ -357,7 +357,7 @@ export const MessageList = memo(function MessageList({
           <button
             type="button"
             onClick={showEarlier}
-            className="rounded-lg border border-gray-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 px-3 py-1.5 text-xs font-medium text-gray-600 dark:text-zinc-300 hover:bg-gray-100 dark:hover:bg-zinc-700 focus-visible:outline-accent"
+            className="rounded-lg border border-gray-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 px-3 py-1.5 text-xs font-medium text-gray-600 dark:text-zinc-300 hover:bg-gray-100 dark:hover:bg-zinc-700 focus-visible:outline-focus-ring"
           >
             {t('chat.showEarlierMessages', { n: start })}
           </button>
@@ -392,7 +392,7 @@ export const MessageList = memo(function MessageList({
       {status === 'submitted' && (
         <div className="animate-fade-in">
           <div className="flex items-center gap-2 mb-2">
-            <div className="w-5 h-5 rounded-md bg-gradient-to-br from-accent to-accent/70 flex items-center justify-center">
+            <div className="w-5 h-5 rounded-md bg-primary flex items-center justify-center">
               <Sparkle size={11} weight="fill" className="text-white" />
             </div>
             <span className="text-[11px] font-medium tracking-wide uppercase text-ink-muted">

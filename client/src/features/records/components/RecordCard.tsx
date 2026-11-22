@@ -185,7 +185,7 @@ export function RecordCard({ companyId, rootPath, recordId, renderSections, rend
     {notice && (
       <p role="status" className="flex flex-wrap items-center gap-2 rounded-md bg-gray-100 px-2 py-1 text-[11.5px] dark:bg-zinc-800">
         {notice.text}
-        {notice.undo && <button type="button" onClick={() => void undo(notice.undo!)} className="text-accent hover:underline">取り消す</button>}
+        {notice.undo && <button type="button" onClick={() => void undo(notice.undo!)} className="text-link hover:underline">取り消す</button>}
       </p>
     )}
   </>

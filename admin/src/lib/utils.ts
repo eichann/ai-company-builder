@@ -10,6 +10,8 @@ const twMerge = extendTailwindMerge({
       'font-weight': [{ font: ['strong'] }],
       rounded: [{ rounded: ['small', 'control', 'card'] }],
       shadow: [{ shadow: ['card', 'pop', 'dialog'] }],
+      p: [{ p: ['dialog', 'card', 'callout', 'menu'] }],
+      z: [{ z: ['overlay', 'dialog', 'menu', 'toast'] }],
     },
   },
 })

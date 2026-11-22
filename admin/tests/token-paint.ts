@@ -63,3 +63,25 @@ export async function paint(className: string): Promise<{ light: Paint, dark: Pa
   const res = (v: Record<string, string>) => Object.fromEntries(Object.entries(raw).map(([k, x]) => [k, resolve(v, x!)])) as Paint
   return { light: res(LIGHT), dark: res(DARK) }
 }
+
+/**
+ * Every declaration Tailwind 4 generates for the classes of `className` (each plain `.class` rule, a
+ * breakpoint's included), resolved through the tokens: `{ light: { 'border-radius': '12px', … }, dark }`.
+ * For the frame values a colour does not cover (corner, shadow, padding, width, type size).
+ */
+export async function styles(className: string): Promise<{ light: Record<string, string>, dark: Record<string, string> }> {
+  const input = fs.readFileSync(globals, 'utf8')
+    .replace('@import "tailwindcss";', `@import "tailwindcss" source(none);\n@source inline("${className.replace(/"/g, '\\"')}");`)
+  const { css } = await postcss([tailwind({ base: path.resolve(__dirname, '..') })]).process(input, { from: globals })
+  const raw: Record<string, string> = {}
+  const classes = new Set(className.split(/\s+/).filter(Boolean).map(c => `.${c}`))
+  const walk = (n: Node) => {
+    if (n.type === 'rule' && classes.has(n.selector!.replace(/\\/g, ''))) {
+      for (const d of n.nodes ?? []) if (d.type === 'decl') raw[d.prop!] = d.value!
+    }
+    for (const c of n.nodes ?? []) walk(c)
+  }
+  walk(postcss.parse(css))
+  const res = (v: Record<string, string>) => Object.fromEntries(Object.entries(raw).map(([k, x]) => [k, resolve(v, x)]))
+  return { light: res(LIGHT), dark: res(DARK) }
+}

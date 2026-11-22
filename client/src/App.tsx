@@ -114,7 +114,7 @@ function App() {
   if (serverUrl === undefined) {
     return (
       <div className="h-full bg-editor-bg flex items-center justify-center">
-        <SpinnerGap size={48} className="animate-spin text-accent" />
+        <SpinnerGap size={48} className="animate-spin text-primary" />
       </div>
     )
   }
@@ -134,7 +134,7 @@ function App() {
   if (!isInitialized || isLoading) {
     return (
       <div className="h-full bg-editor-bg flex items-center justify-center">
-        <SpinnerGap size={48} className="animate-spin text-accent" />
+        <SpinnerGap size={48} className="animate-spin text-primary" />
       </div>
     )
   }

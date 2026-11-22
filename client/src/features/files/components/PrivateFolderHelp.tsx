@@ -1,8 +1,9 @@
 // 「非公開フォルダについて」 — what a private folder does and does not protect.
 // The text lives in shared/private-folder-help.ts (the admin shows the same).
-import { useEffect, useId, useRef } from 'react'
+import { useId, useRef } from 'react'
 import { Question, X } from '@phosphor-icons/react'
 import { Button } from '../../../shared/ui/primitives'
+import { Dialog, DialogTitle } from '../../../shared/ui/Dialog'
 import { PRIVATE_FOLDER_HELP, PRIVATE_FOLDER_HELP_TITLE } from '../../../../shared/private-folder-help'
 
 /** The link that opens the help (inside the 「新しいフォルダ」 dialog). */
@@ -11,7 +12,7 @@ export function PrivateFolderHelpLink({ onOpen }: { onOpen: () => void }) {
     <button
       type="button"
       onClick={onOpen}
-      className="inline-flex items-center gap-1 rounded text-[12px] font-medium text-indigo-600 underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/60 dark:text-indigo-400"
+      className="inline-flex items-center gap-1 rounded-small text-[12px] font-medium text-link underline-offset-2 hover:text-link-hover hover:underline focus-visible:outline-none focus-visible:ring-focus focus-visible:ring-focus-ring"
     >
       <Question size={13} />
       {PRIVATE_FOLDER_HELP_TITLE}
@@ -23,30 +24,19 @@ export function PrivateFolderHelpLink({ onOpen }: { onOpen: () => void }) {
 export function PrivateFolderHelpPanel({ onClose }: { onClose: () => void }) {
   const titleId = useId()
   const closeRef = useRef<HTMLButtonElement>(null)
-  useEffect(() => { closeRef.current?.focus() }, [])
 
   return (
-    <div
-      className="fixed inset-0 z-[60] flex items-center justify-center bg-zinc-900/30 p-6 dark:bg-black/50"
-      onMouseDown={e => { if (e.target === e.currentTarget) onClose() }}
-      onKeyDown={e => { if (e.key === 'Escape') { e.stopPropagation(); onClose() } }}
-    >
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby={titleId}
-        className="flex max-h-[calc(100vh-3rem)] w-full max-w-[460px] flex-col overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-xl dark:border-white/10 dark:bg-zinc-900"
-      >
+    <Dialog onClose={onClose} labelledBy={titleId} padded={false} initialFocus={closeRef} className="flex max-h-[calc(100vh-3rem)] flex-col overflow-hidden">
         <div className="flex items-start justify-between gap-3 px-5 pt-5">
           <div>
-            <h3 id={titleId} className="text-[15px] font-semibold text-zinc-900 dark:text-zinc-50">{PRIVATE_FOLDER_HELP_TITLE}</h3>
-            <p className="mt-1 text-[12px] text-zinc-500 dark:text-zinc-400">選んだ人だけに届くフォルダです。守れることと、守れないことがあります。</p>
+            <DialogTitle id={titleId}>{PRIVATE_FOLDER_HELP_TITLE}</DialogTitle>
+            <p className="mt-1 text-small text-text-muted">選んだ人だけに届くフォルダです。守れることと、守れないことがあります。</p>
           </div>
           <button
             type="button"
             onClick={onClose}
             aria-label="閉じる"
-            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-white/10 dark:hover:text-zinc-200"
+            className="flex size-7 shrink-0 items-center justify-center rounded-control text-text-subtle hover:bg-surface-sunken hover:text-text"
           >
             <X size={14} />
           </button>
@@ -64,10 +54,9 @@ export function PrivateFolderHelpPanel({ onClose }: { onClose: () => void }) {
             </li>
           ))}
         </ol>
-        <div className="flex justify-end border-t border-zinc-100 px-5 py-3 dark:border-white/[0.06]">
+        <div className="flex justify-end border-t border-[color:var(--color-border)] px-5 py-3">
           <Button ref={closeRef} onClick={onClose}>閉じる</Button>
         </div>
-      </div>
-    </div>
+    </Dialog>
   )
 }

@@ -87,7 +87,7 @@ export function QuickAdd({ companyId, now, tagsInUse, me, members = [], bundleWo
     setLine(l => l.replace(new RegExp(`[#＃]${from.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?=\\s|$)`), `#${to}`))
   const chip = (p: Picker, on: boolean, children: ReactNode) => (
     <button type="button" data-quick-chip={p} aria-expanded={open === p} onMouseDown={e => e.preventDefault()} onClick={() => toggle(p)}
-      className={`${CHIP} ${on ? 'border-accent/40 bg-accent/10 text-accent' : 'border-gray-200 text-gray-500 hover:border-accent hover:text-accent dark:border-zinc-700 dark:text-zinc-400'}`}>
+      className={`${CHIP} ${on ? 'border-selected-border bg-selected-bg text-selected-text' : 'border-gray-200 text-gray-500 hover:border-primary hover:text-link dark:border-zinc-700 dark:text-zinc-400'}`}>
       {children}
     </button>
   )
@@ -96,7 +96,7 @@ export function QuickAdd({ companyId, now, tagsInUse, me, members = [], bundleWo
 
   return (
     <div ref={rootRef} className="flex-shrink-0 space-y-1.5 border-b border-gray-100 px-3 pb-1.5 pt-2 dark:border-zinc-800">
-      <div className="flex items-center gap-1.5 rounded-lg border border-gray-200 px-2 py-1 focus-within:border-accent dark:border-zinc-700">
+      <div className="flex items-center gap-1.5 rounded-lg border border-gray-200 px-2 py-1 focus-within:border-focus-border dark:border-zinc-700">
         <Plus size={13} className="shrink-0 text-gray-400" />
         <input
           value={line}
@@ -118,7 +118,7 @@ export function QuickAdd({ companyId, now, tagsInUse, me, members = [], bundleWo
                 <div className="flex flex-wrap gap-1">
                   {[['今日', now.date], ['明日', addDays(now.date, 1)], ['あさって', addDays(now.date, 2)]].map(([l, d]) => (
                     <button key={l} type="button" onClick={() => setPickedDue(timeOf(due) ? `${d}T${timeOf(due)}` : d)}
-                      className={`rounded border px-1.5 ${dayOf(due) === d && due ? 'border-accent bg-accent text-white' : 'border-gray-200 hover:border-accent dark:border-zinc-700'}`}>{l}</button>
+                      className={`rounded border px-1.5 ${dayOf(due) === d && due ? 'border-primary bg-primary text-on-primary' : 'border-gray-200 hover:border-primary dark:border-zinc-700'}`}>{l}</button>
                   ))}
                   <input type="date" aria-label="日付" value={due ? dayOf(due) : ''} onChange={e => { if (e.target.value) setPickedDue(timeOf(due) ? `${e.target.value}T${timeOf(due)}` : e.target.value) }}
                     className="rounded border border-gray-200 bg-transparent px-1 text-[11px] dark:border-zinc-700" />
@@ -126,9 +126,9 @@ export function QuickAdd({ companyId, now, tagsInUse, me, members = [], bundleWo
                 <div className="flex flex-wrap items-center gap-1"><span className="text-[10.5px] text-gray-500">時刻</span>
                   {TIMES.map(t => (
                     <button key={t} type="button" onClick={() => { setPickedDue(`${dayOf(due)}T${t}`); setOpen(null) }}
-                      className={`rounded border px-1 text-[10.5px] ${timeOf(due) === t ? 'border-accent text-accent' : 'border-gray-200 hover:border-accent dark:border-zinc-700'}`}>{t}</button>
+                      className={`rounded border px-1 text-[10.5px] ${timeOf(due) === t ? 'border-primary text-link' : 'border-gray-200 hover:border-primary dark:border-zinc-700'}`}>{t}</button>
                   ))}
-                  {pickedDue && <button type="button" onClick={() => { setPickedDue(null); setOpen(null) }} className="ml-auto text-[10.5px] text-gray-500 hover:text-accent">選び直す</button>}
+                  {pickedDue && <button type="button" onClick={() => { setPickedDue(null); setOpen(null) }} className="ml-auto text-[10.5px] text-gray-500 hover:text-link">選び直す</button>}
                 </div>
               </div>
             )}
@@ -175,18 +175,18 @@ export function QuickAdd({ companyId, now, tagsInUse, me, members = [], bundleWo
           {draft.tags.map(t => <span key={t} className={`${CHIP} border-gray-200 text-gray-600 dark:border-zinc-700 dark:text-zinc-300`}><Hash size={10} />{t}</span>)}
           {choices.length > 0 && (
             <span className="inline-flex items-center gap-1">今あるタグ：{choices.map(t => (
-              <button key={t} type="button" onClick={() => setLine(l => l.replace(/[#＃][^\s#＃]*$/, `#${t} `))} className="rounded border border-gray-200 px-1 hover:border-accent hover:text-accent dark:border-zinc-700">#{t}</button>
+              <button key={t} type="button" onClick={() => setLine(l => l.replace(/[#＃][^\s#＃]*$/, `#${t} `))} className="rounded border border-gray-200 px-1 hover:border-primary hover:text-link dark:border-zinc-700">#{t}</button>
             ))}</span>
           )}
           {suggested.length > 0 && (
             <span className="inline-flex items-center gap-1" aria-label="タグの候補">
-              <Sparkle size={10} weight="fill" className="text-accent" />タグの候補：{suggested.map(t => (
-                <button key={t} type="button" onClick={() => setLine(l => `${l.trimEnd()} #${t} `)} className="rounded border border-accent/40 px-1 text-accent hover:bg-accent/10">#{t}</button>
+              <Sparkle size={10} weight="fill" className="text-ai-icon" />タグの候補：{suggested.map(t => (
+                <button key={t} type="button" onClick={() => setLine(l => `${l.trimEnd()} #${t} `)} className="rounded border border-selected-border px-1 text-link hover:bg-selected-bg">#{t}</button>
               ))}
             </span>
           )}
           {similar && (
-            <span className="inline-flex items-center gap-1 rounded bg-accent/10 px-1.5 py-px text-accent">
+            <span className="inline-flex items-center gap-1 rounded bg-selected-bg px-1.5 py-px text-selected-text">
               <Sparkle size={10} weight="fill" />「#{similar.from}」は今ある「#{similar.to}」と同じですか？
               <button type="button" onClick={() => replaceTag(similar.from, similar.to!)} className="underline">#{similar.to} にする</button>
             </span>

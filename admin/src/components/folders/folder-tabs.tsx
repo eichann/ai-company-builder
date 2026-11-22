@@ -37,7 +37,7 @@ export function FolderTabs({ current }: { current: FolderTab }) {
             aria-current={active ? 'page' : undefined}
             className={cn(
               '-mb-px flex items-center gap-1.5 border-b-2 px-3 py-2 text-sm transition-colors outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50',
-              active ? 'border-brand font-medium text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground'
+              active ? 'border-primary font-medium text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground'
             )}
           >
             <Icon size={15} weight={active ? 'fill' : 'regular'} />

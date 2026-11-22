@@ -9,7 +9,7 @@ import { slotMergedNote } from '../../../../../shared/core/source-slot-candidate
 import { runCommand } from '../../../shared/commands/commands'
 import { SimilarHint } from './SimilarHint'
 
-const QUIET = 'inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[11.5px] text-gray-500 hover:bg-gray-100 hover:text-accent disabled:opacity-50 dark:text-zinc-400 dark:hover:bg-zinc-800'
+const QUIET = 'inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[11.5px] text-gray-500 hover:bg-gray-100 hover:text-link disabled:opacity-50 dark:text-zinc-400 dark:hover:bg-zinc-800'
 
 interface Props {
   busy: boolean

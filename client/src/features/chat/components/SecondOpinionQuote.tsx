@@ -15,7 +15,7 @@ export const SecondOpinionQuote = memo(function SecondOpinionQuote({ record }: {
         type="button"
         onClick={() => setOpen(!open)}
         aria-expanded={open}
-        className="inline-flex items-center gap-1 text-gray-500 dark:text-zinc-400 hover:text-accent"
+        className="inline-flex items-center gap-1 text-gray-500 dark:text-zinc-400 hover:text-link"
       >
         {open ? <CaretDown size={11} /> : <CaretRight size={11} />}
         {secondOpinionQuoteLabel(record.agent)}

@@ -141,7 +141,7 @@ function SetupCard({ setup, base, hasCompanyFolder }: { setup: NonNullable<Admin
             const isNext = step === next
             const href = `${base}/${words.path}`
             return (
-              <li key={step.id} className={cn('flex items-start gap-2.5 rounded-lg px-2 py-2', isNext && 'bg-brand/5')}>
+              <li key={step.id} className={cn('flex items-start gap-2.5 rounded-lg px-2 py-2', isNext && 'bg-selected-bg')}>
                 {step.done ? (
                   <CheckCircle size={18} weight="fill" className="mt-px shrink-0 text-success" aria-label="終わった" />
                 ) : (
@@ -399,7 +399,7 @@ function FooterLink({ href, children }: { href: string; children: ReactNode }) {
   return (
     <Link
       href={href}
-      className="inline-flex items-center gap-1 rounded text-sm font-medium text-brand underline-offset-4 outline-none hover:underline focus-visible:ring-[3px] focus-visible:ring-ring/50"
+      className="inline-flex items-center gap-1 rounded text-sm font-medium text-link underline-offset-4 hover:text-link-hover outline-none hover:underline focus-visible:ring-[3px] focus-visible:ring-ring/50"
     >
       {children}
       <ArrowRight size={14} />

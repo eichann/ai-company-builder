@@ -75,7 +75,7 @@ export function PrivateFoldersView() {
       <p className="-mt-2 mb-4 text-sm text-muted-foreground">選んだ人だけに届くフォルダです。見られない人の手元には、名前も中身も届きません。</p>
 
       <div className="mb-6 flex gap-3 rounded-xl border bg-muted/40 px-4 py-3 text-sm">
-        <Info size={18} className="mt-0.5 shrink-0 text-brand" />
+        <Info size={18} className="mt-0.5 shrink-0 text-primary" />
         <div className="space-y-1">
           <p>
             いまあるフォルダを非公開に変えることはできません。守りたいファイルは、新しく作った非公開フォルダへ移してください。
@@ -117,7 +117,7 @@ export function PrivateFoldersView() {
             <ul aria-label="非公開フォルダ" className="divide-y">
               {rows.map((f) => (
                 <li key={f.scopeId} className="flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3.5 sm:flex-nowrap">
-                  <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-brand/10 text-brand">
+                  <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-selected-bg text-selected-icon">
                     <LockSimple size={18} weight="fill" />
                   </span>
                   <div className="min-w-0 flex-1">

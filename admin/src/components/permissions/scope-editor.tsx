@@ -317,7 +317,7 @@ export function ScopeEditor({
           <div
             className={cn(
               'rounded-lg border transition-colors',
-              draft.mode === 'specific' && 'border-brand/50 bg-brand/5'
+              draft.mode === 'specific' && 'border-selected-border bg-selected-bg'
             )}
           >
             <ModeOption
@@ -481,7 +481,7 @@ function ModeOption({
       className={cn(
         'flex cursor-pointer items-start gap-3 px-3 py-2.5 has-[:disabled]:cursor-default',
         !bare && 'rounded-lg border transition-colors',
-        !bare && checked && 'border-brand/50 bg-brand/5'
+        !bare && checked && 'border-selected-border bg-selected-bg'
       )}
     >
       <input

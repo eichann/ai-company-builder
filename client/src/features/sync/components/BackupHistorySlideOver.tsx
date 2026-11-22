@@ -116,13 +116,13 @@ export function BackupHistorySlideOver({ isOpen, onClose, rootPath }: BackupHist
     <>
       {/* Backdrop */}
       <div
-        className="fixed inset-0 bg-black/30 z-40 transition-opacity"
+        className="fixed inset-0 bg-scrim z-overlay transition-opacity"
         onClick={onClose}
       />
 
       {/* Slide Over Panel */}
-      <div className="fixed inset-y-0 right-0 z-50 w-full max-w-md">
-        <div className="h-full flex flex-col bg-white dark:bg-zinc-900 shadow-2xl animate-in slide-in-from-right duration-300">
+      <div className="fixed inset-y-0 right-0 z-dialog w-full max-w-md">
+        <div className="h-full flex flex-col bg-white dark:bg-zinc-900 shadow-dialog animate-in slide-in-from-right duration-300">
           {/* Header */}
           <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 dark:border-zinc-800">
             <div className="flex items-center gap-3">

@@ -13,7 +13,7 @@ export const SteerInstructionView = memo(function SteerInstructionView({ record 
         <ArrowBendDownRight size={12} weight="bold" aria-hidden="true" />
         <span>{STEER_LABEL}</span>
       </div>
-      <div aria-label={STEER_LABEL} className="max-w-[85%] rounded-2xl rounded-br-md px-4 py-2.5 text-[14px] leading-relaxed bg-accent text-white whitespace-pre-wrap break-words">
+      <div aria-label={STEER_LABEL} className="max-w-[85%] rounded-2xl rounded-br-md px-4 py-2.5 text-[14px] leading-relaxed bg-primary text-on-primary whitespace-pre-wrap break-words">
         {record.text}
       </div>
     </div>

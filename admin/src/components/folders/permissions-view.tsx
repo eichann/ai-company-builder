@@ -182,7 +182,7 @@ export function PermissionsView() {
       <FolderTabs current="edit" />
 
       <div className="mb-6 flex gap-3 rounded-xl border bg-muted/40 px-4 py-3 text-sm">
-        <Info size={18} className="mt-0.5 shrink-0 text-brand" />
+        <Info size={18} className="mt-0.5 shrink-0 text-primary" />
         <div className="space-y-1">
           <p>
             場所ごとに<strong className="font-medium">「上の階層と同じ」「全員」「指定した人だけ」</strong>から編集できる人を選べます。選ばれなかった人は閲覧のみになります。一部の人にだけ見せたいファイルは、<LockSimple size={14} weight="fill" className="inline align-[-2px] text-brand" aria-hidden="true" />非公開フォルダを作ってそこに置きます。
@@ -381,7 +381,7 @@ function TreeRow({
             ) : department && (kind === 'department' || !scope) && department.folder.normalize('NFC') === path ? (
               <DepartmentIcon icon={department.icon} color={department.color} size="sm" />
             ) : isPrivate ? (
-              <span className="flex size-6 items-center justify-center text-brand">
+              <span className="flex size-6 items-center justify-center text-private-text">
                 <LockSimple size={18} weight="fill" aria-label="非公開" />
               </span>
             ) : (

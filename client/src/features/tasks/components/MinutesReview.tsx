@@ -20,7 +20,7 @@ import { ThingIcon } from '../../../shared/ui/ThingIcon'
 import { useTaskProposals } from '../hooks/useTaskProposals'
 import { MeetingTaskAdd } from './MeetingTaskAdd'
 
-const QUIET = 'inline-flex shrink-0 items-center rounded-md px-2 py-0.5 text-[11.5px] text-gray-500 hover:bg-gray-100 hover:text-accent disabled:opacity-50 dark:text-zinc-400 dark:hover:bg-zinc-800'
+const QUIET = 'inline-flex shrink-0 items-center rounded-md px-2 py-0.5 text-[11.5px] text-gray-500 hover:bg-gray-100 hover:text-link disabled:opacity-50 dark:text-zinc-400 dark:hover:bg-zinc-800'
 
 const shortDue = (due: string | null) => {
   const m = due?.match(/^\d{4}-(\d{2})-(\d{2})(?:T(\d{2}:\d{2}))?/)
@@ -75,7 +75,7 @@ export function MinutesReview({ companyId, review, busy, onAct, onMeetingCard = 
   const proposalList = (
     <section aria-label={listTitle}>
       <div className="mb-2 flex flex-wrap items-center gap-1.5">
-        <Sparkle size={14} weight="fill" className="text-accent" />
+        <Sparkle size={14} weight="fill" className="text-ai-icon" />
         <h2 className="mr-auto text-[13px] font-semibold text-gray-700 dark:text-zinc-200">{listTitle}</h2>
         {!picking && <>
           {addable.length > 0 && <button type="button" disabled={busy} onClick={() => void act(addable, 'adopt')} className={MAIN_BUTTON}>全部足す</button>}
@@ -124,7 +124,7 @@ export function MinutesReview({ companyId, review, busy, onAct, onMeetingCard = 
           <ul className="space-y-1 text-[13px]">
             {proposed.map(d => (
               <li key={d.id} className="flex items-center gap-2">
-                <button type="button" onClick={() => runCommand('record.open', { recordId: d.id })} className="min-w-0 truncate text-left hover:text-accent hover:underline">{d.title}</button>
+                <button type="button" onClick={() => runCommand('record.open', { recordId: d.id })} className="min-w-0 truncate text-left hover:text-link hover:underline">{d.title}</button>
                 {d.may.confirm && <button type="button" disabled={busy} onClick={() => void act([d], 'confirm')} className={SMALL_BUTTON}>そうです</button>}
                 {d.may.reject && <button type="button" disabled={busy} onClick={() => void act([d], 'reject')} className={QUIET}>違う</button>}
                 {!d.may.confirm && <Chip>責任者の確認待ち</Chip>}
@@ -142,7 +142,7 @@ export function MinutesReview({ companyId, review, busy, onAct, onMeetingCard = 
           <ul className="space-y-1 text-[13px]">
             {decided.map(d => (
               <li key={d.id} className="flex items-center gap-2">
-                <button type="button" onClick={() => runCommand('record.open', { recordId: d.id })} className="min-w-0 truncate text-left hover:text-accent hover:underline">{d.title}</button>
+                <button type="button" onClick={() => runCommand('record.open', { recordId: d.id })} className="min-w-0 truncate text-left hover:text-link hover:underline">{d.title}</button>
                 <Chip tone="green"><CheckCircle size={11} weight="fill" />決まった</Chip>
               </li>
             ))}
@@ -157,7 +157,7 @@ export function MinutesReview({ companyId, review, busy, onAct, onMeetingCard = 
       {!onMeetingCard && <section aria-label="要約（AI）" className="rounded-lg bg-gray-50 px-3.5 py-2.5 text-[13px] leading-relaxed dark:bg-zinc-800/50">
         <div className="mb-0.5 text-[11px] text-gray-500">要約（AI）</div>
         <p className="whitespace-pre-wrap">{review.summary ?? 'AI はまだ議事録を読んでいません。'}</p>
-        <button type="button" onClick={() => runCommand('record.open', { recordId: review.meetingId })} className="text-[11.5px] text-accent hover:underline">会議の記録を開く</button>
+        <button type="button" onClick={() => runCommand('record.open', { recordId: review.meetingId })} className="text-[11.5px] text-link hover:underline">会議の記録を開く</button>
       </section>}
       {onMeetingCard && hasDecisions && decisionList}
       {proposalList}
@@ -169,7 +169,7 @@ export function MinutesReview({ companyId, review, busy, onAct, onMeetingCard = 
 function MadeRow({ t }: { t: RecordViewSummary }) {
   return (
     <li className="rounded-lg border border-gray-200 px-3 py-2 text-[12.5px] dark:border-zinc-700">
-      <button type="button" onClick={() => runCommand('record.open', { recordId: t.id })} className="flex w-full min-w-0 items-center gap-2 text-left hover:text-accent">
+      <button type="button" onClick={() => runCommand('record.open', { recordId: t.id })} className="flex w-full min-w-0 items-center gap-2 text-left hover:text-link">
         <ThingIcon kind="task" size={13} label="" />
         <span className={`min-w-0 flex-1 truncate font-medium ${t.finished ? 'text-gray-400 line-through' : ''}`}>{t.title}</span>
       </button>

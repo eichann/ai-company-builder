@@ -212,7 +212,7 @@ function RetentionCard({ draft, setDraft, invalid }: { draft: Draft; setDraft: (
                 onClick={() => setDraft((d) => ({ ...d, choice: c }))}
                 className={cn(
                   'rounded-lg border px-3.5 py-1.5 text-sm transition-colors outline-none hover:bg-accent focus-visible:ring-[3px] focus-visible:ring-ring/50',
-                  checked && 'border-brand bg-brand/10 font-medium text-foreground hover:bg-brand/10'
+                  checked && 'border-selected-border bg-selected-bg font-medium text-foreground hover:bg-selected-bg-hover'
                 )}
               >
                 {c === 'custom' ? 'カスタム' : retentionLabel(c)}
@@ -270,7 +270,7 @@ function ViewersCard({ value, onChange }: { value: AgentEventViewerMode; onChang
               key={mode}
               className={cn(
                 'flex flex-col rounded-xl border transition-colors',
-                checked ? 'border-brand ring-1 ring-brand/40' : 'hover:border-foreground/20'
+                checked ? 'border-selected-border bg-selected-bg' : 'hover:border-foreground/20'
               )}
               onMouseEnter={() => setPeek(mode)}
               onMouseLeave={() => setPeek((p) => (p === mode ? null : p))}
@@ -288,10 +288,10 @@ function ViewersCard({ value, onChange }: { value: AgentEventViewerMode; onChang
                   aria-hidden="true"
                   className={cn(
                     'mt-0.5 flex size-4 shrink-0 items-center justify-center rounded-full border',
-                    checked ? 'border-brand' : 'border-input'
+                    checked ? 'border-primary' : 'border-input'
                   )}
                 >
-                  {checked && <span className="size-2 rounded-full bg-brand" />}
+                  {checked && <span className="size-2 rounded-full bg-primary" />}
                 </span>
                 <span className="text-sm font-medium">
                   {VIEWER_MODE_LABELS[mode]}

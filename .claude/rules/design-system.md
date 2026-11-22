@@ -117,7 +117,7 @@ included), `shadow-scale` (anything but `shadow-card / pop / dialog / none`; any
 fine), `color-opacity` (`bg-warning/10`).
 
 - **No new raw values.** Today's findings (2026-11-21: app 6,872, admin 1,235; after P2b app 6,371,
-  admin 1,104) are recorded per
+  admin 1,104; after P2c app 6,010, admin 1,078) are recorded per
   file and rule in `design-lint-baseline.txt`. CI ("Lint (changed files)", step "Design tokens and
   design lint") fails when a rule gains findings, when the tree differs from the baseline without
   it being updated (the list only shrinks), and (`--base <sha>`) when the committed baseline was
@@ -179,7 +179,7 @@ fine), `color-opacity` (`bg-warning/10`).
   (Radix gives Tab and Esc); `destructive` (still the default) is an `alertdialog` that a scrim
   click does not close, focus starts on キャンセル, otherwise on the main action; focus returns to
   the opener although callers open it without a Radix trigger. `admin/tests/confirm-dialog.test.tsx`.
-- The hand-made dialogs keep their own frames until the dialog-frame PR (P2).
+- Its frame and keys are the app's `Dialog` since P2c ("Dialog frames, link and selected").
 
 ## Dark-mode readability (P1b, done)
 
@@ -277,20 +277,10 @@ fine), `color-opacity` (`bg-warning/10`).
   pages `confirm-dialog-ui`, `task-card-ui` and `mail-draft-card-ui` read `?theme=dark`) and
   `admin/tests/primary-action.test.tsx` (the CSS Tailwind 4 generates for the rendered Button /
   confirm, resolved through the token files in light and dark).
-- **Still `accent` in the app** (later PRs, by meaning; the bridge keeps `accent` = #1264a3 in both
-  themes until they are gone): links and text buttons (`text-accent`, `hover:text-accent` ~120
-  uses: `ChatMessageList`, `TaskRow`, `QuickAdd`, `FoundRows`, `ChatHeader`, …) → `link`; selected
-  rows, chips and tabs (`bg-accent/10` `/20` `/5` `/15`, `border-accent`, the full `bg-accent` of
-  `QuickAdd`'s day chip, `TaskListPanel`'s mode / tag toggles, `ChatAuthSettings`' chosen sign-in
-  radio, `TreeRow`, `ChatSidebar`, `FoundRows`, `FindEmpty`) → `selected-*`; focus outlines
-  (`outline-accent`, `ring-accent`, `focus:border-accent`) → `focus-ring` / `focus-border`; AI marks
-  (`TaskCard` / `TaskRow` / `QuickAdd` sparkle and robot, AI boxes `border-accent/30 bg-accent/5`)
-  → `ai-*`; counts (`LeftPanelTabs`) → `primary` (new dots are `unread` since P2b); the member's own chat
-  bubbles (`ChatMessageList`, `ChoicePrompt`, `SteerInstruction`), the AI avatar gradient
-  (`ChatHeader`, `ChatMessageList`), the typing dots / cursor, `RateLimitMeter`'s bar and
-  `ResizeHandle`'s drag line → a decision each (likely `primary` / `selected`); `ThingIcon`'s task
-  colour → `thing-task`. Also not primary actions and left: the app `Switch` / `Checkbox` and the
-  settings nav (indigo; P2 switch / checkbox), `CompletedReviewBanner`'s 「変更表示中」 toggle.
+- **`accent` in the app**: gone outside the paths other work held and `ChatAuthSettings` in P2c (by meaning, see "Dialog
+  frames, link and selected (P2c, done)"); the bridge keeps `accent` = #1264a3 until the last two
+  files move. Also not primary actions and left: the app `Switch` / `Checkbox` and the settings nav
+  (indigo; P2 switch / checkbox), `CompletedReviewBanner`'s 「変更表示中」 toggle.
 
 ## Callouts and status badges (P2b, done)
 
@@ -380,11 +370,84 @@ fine), `color-opacity` (`bg-warning/10`).
   status dots, `RateLimitMeter`, `DiffViewer`, `ReviewSidePanel`, `MarkdownDiffView`, `BackupHistorySlideOver`,
   `TaskRow`'s CHIP and review mark, `QuickAdd` / `WaitParts` / `TagField` chips (pressable: the chip PR),
   `ChatSidebar`'s 「あなたの番」 heading and amber icons, `TitleBarNotices`' 「あなたの番」 pill, the
-  `ExternalChangeBanner` buttons), the AI boxes (`border-accent/30 bg-accent/5` → `ai`), the admin's
+  `ExternalChangeBanner` buttons), the admin's
   hand-written 「管理役」 marks (`text-[10px]`: scope-editor, editor-picker, audience-fields), its
   `ErrorState` and red text lines, `permissions-view`'s 「制限あり」 (`warning`: a decision), the
   explanation boxes without a border (`bg-muted/40`: place-readers, scope-editor), `departments` table
   header.
+
+## Dialog frames, link and selected (P2c, done)
+
+- **One dialog frame per app** (proposal 「ダイアログの枠」): scrim `scrim` (no blur), surface
+  `surface-raised`, border `border`, corner `card` (12px), shadow `dialog`, padding `dialog` (20px),
+  title `title` (15px, 600), three widths `--size-dialog-sm|md|lg` (400 / 480 / 640). Button row:
+  right-aligned, 「やめる」 first (left), the main action last (right).
+  - **App** `Dialog` (`client/src/shared/ui/Dialog.tsx`, with `DialogTitle`, `DialogFooter`,
+    `DialogCloseButton`): `role` `dialog` / `alertdialog`, `aria-modal`, labelled by its title (or
+    `label`); the P1a keys for every dialog — Tab / Shift+Tab wrap inside, Esc closes and stops there,
+    focus that strays out comes back, nothing listens for Enter on the document, focus returns to the
+    opener, stacked dialogs: only the top one acts (a dialog drawn inside another handles its own
+    keys). An ordinary dialog closes on a scrim click (which never takes focus), an `alertdialog`
+    and the confirm never do; `dismissible={false}` while something runs (and for the skill wizard,
+    whose typing Esc must not throw away; and the first-run 「仕事の道具をつなぐ」, answered only by
+    its buttons). Focus starts on `initialFocus`, else on a field that focused itself (`autoFocus`),
+    else on the dialog. `padded={false}` for list pickers (their compact header stays; P3), `size=
+    "custom"` for the two wide two-pane ones (`CopySkillModal` 768px, the settings).
+    `ConfirmDialog` and `InputDialog` are built on it; moved onto it: `NewFolderDialog`,
+    `PrivateFolderHelp`, `TooLargeFileHelp`, `DownloadFoldersSection`'s confirm, `InviteDialog`,
+    `BundleActions`, `MakePrivateDialog`, `TaskActions` (both), `WaitParts`, `NewBundleDialog`,
+    `BundleChooser`, `BundleField`'s picker, `LinkToTaskDialog`, `PluginSlots`' file action,
+    `ConnectToolsScreen` (first run), `NewSkillWizard`, `CopySkillModal`. Tokens only (scrim, z,
+    corner, shadow; own surface and keys kept): `SettingsPanel`, the tool viewer (`AppDialogs`),
+    `BackupHistorySlideOver` (slide-over), `HandoffControl` (native `<dialog>`). Visible changes:
+    titles 14 / 18px → 15px, padding 16 / 24px → 20px, corners 16px → 12px, widths to the nearest
+    step, the dark surface zinc-800 / 900 → #202024, one scrim (45% / dark 60%, no blur), Esc and Tab
+    now work in the task / record dialogs.
+  - **Admin** `DialogContent` (`admin/src/components/ui/dialog.tsx`): the same tokens (`bg-surface-raised
+    p-dialog rounded-card shadow-dialog`, overlay `bg-scrim`, title `text-title`, description
+    `text-body`) and `size` `sm` / `md` (default) / `lg` instead of each caller's `sm:max-w-*`
+    (md / lg → md, xl / 2xl → lg); the sheet's overlay is the scrim. Radix keeps the keys. `cn()`
+    knows the token paddings and z-indexes, so a caller's `p-0` replaces `p-dialog`.
+- **Accent split by meaning** (owner decision 2026-11-21): text links and text buttons → `link` /
+  `link-hover` (dark: the lighter #6cb0ea, was #1264a3 on a dark surface); picked rows, chips,
+  options → the `selected` set (`selected-bg`, `-border`, `-text`, `-icon`; the file tree's chosen row
+  `selected-bg-hover`, a step stronger, because the tree sits on the grey side panel; its focus ring
+  shows on keyboard focus only); focus → `focus-ring` / `focus-border`; spinners, the chat's own
+  bubbles, avatar, typing dots and cursor, the rate meter's bar, drop outlines and the solid "on"
+  toggles (`TaskListPanel` mode and tag, `QuickAdd`'s day) → `primary` (same blue as before; the
+  proposal's table gives "on" the primary colour); `ThingIcon` task → `thing-task`. Admin: the indigo
+  `brand` → `link` for links (`Button variant="link"` too), `selected-*` for chosen radio cards and
+  options, `border-primary` for the chosen folder tab's underline and a radio's dot, `primary` for
+  information icons.
+- **「AI が用意したもの」 is the AI set** (violet, quiet): the task card's and a step's prepared box
+  (`ai-bg` / `ai-border`, Sparkle `ai-icon`), the task row's AI turn (Robot, running spinner), the
+  minutes review's and tag suggestions' Sparkle, 「AI が読んでいます…」 and the bundle's AI working
+  line. The topic-switch and link-drop questions (not AI-made) are the `info` box.
+- **A private place is amber in both apps** (owner decision 2026-11-22, the app is the reference: its
+  「あなただけ」 is amber): the admin's 非公開 lock (`subfolder-picker`, `place-picker`, `permissions-view`)
+  is `private-text`, and the 「n 人にだけ届きます」 box (`AudienceSummary`) `private-bg` / `private-border`
+  (new tokens: amber-50 / amber-200, dark the amber `d` steps; pair `private-text` on `private-bg`). Was
+  the indigo `brand`.
+- **Owner decisions 2026-11-22 on P2c**: the list's 「番ごと／案件ごと」 and the chosen tag stay the solid
+  `primary` (not the proposal's raised segment); the skill wizard does not close on Esc or the scrim.
+- **Guarded by** `client/tests/ui/dialog-frame.spec.ts` (light and dark: the confirm, name, new folder,
+  waiting and invite dialogs against the scrim / surface / corner / shadow / 15px title tokens and the
+  button order; Tab wrap, Esc, focus return on a moved dialog; the scrim closes an ordinary dialog,
+  not a confirm; the tree's chosen row, the task card's links and its AI box against `selected` /
+  `link` / `ai`; dark links #6cb0ea) and `admin/tests/dialog-frame.test.tsx` (the generated CSS of
+  `DialogContent` and the confirm: surface, scrim, 12px, shadow, 20px, 15px title, the three widths,
+  the button order; a link button and a chosen radio card; the private box and lock in amber). Each fails when its guard is reverted
+  (checked by mutation).
+- **Left, in paths other work held** (next PR there): `features/editor/components/TidiedTabsDialog.tsx`
+  (frame), `features/workspace/components/LeftPanelTabs.tsx` (the count bubble → `primary`, the chosen
+  tab's underline `border-accent` → `primary`), `features/workspace/components/ResizeHandle.tsx` (drag
+  line → `primary`); `ChatAuthSettings` (always light — fixed `surface` / `ink` — so the theme-following
+  `selected` set would put dark text on a dark fill: it moves with its dark-mode work); then drop
+  `accent` from the app bridge. Also left: `SyncPreviewDialog` and
+  `DiffViewer` (still the old fixed light tokens inside: their frame moves with their dark-mode
+  work), `FindPalette` (a palette: its lighter scrim stays until the menus / palette PR),
+  `SettingsPanel`'s own surface and keys, the admin's activity chart bar and `permissions-view`'s
+  「制限あり」 (P2b list). `--brand` stays `keep` until they move.
 
 ## Order of the next PRs (from the proposal)
 

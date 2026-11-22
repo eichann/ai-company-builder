@@ -6,11 +6,12 @@ import { CheckCircle, Clock, PencilSimpleLine, Warning } from '@phosphor-icons/r
 import type { TaskCardData } from '../../../../shared/task-card'
 import { cameBackLine, defaultWaitUntil, waitChoices, waitingLine, waitUntilText, type TaskActInput } from '../../../../shared/tasks'
 import { MAIN_BUTTON, SMALL_BUTTON } from '../../../shared/ui/RecordPage'
+import { Dialog, DialogFooter, DialogTitle } from '../../../shared/ui/Dialog'
 
 const FIELD = 'w-full rounded border border-gray-300 bg-transparent px-2 py-1 text-[12.5px] dark:border-zinc-600'
 const CHIP = 'rounded-full border px-2.5 py-0.5 text-[12px]'
-const CHIP_ON = 'border-accent bg-accent/10 text-accent'
-const CHIP_OFF = 'border-gray-300 text-gray-700 hover:border-accent dark:border-zinc-600 dark:text-zinc-200'
+const CHIP_ON = 'border-selected-border bg-selected-bg text-selected-text'
+const CHIP_OFF = 'border-gray-300 text-gray-700 hover:border-primary dark:border-zinc-600 dark:text-zinc-200'
 
 type Run = (steps: Array<Omit<TaskActInput, 'expectedVersion'>>, done?: string) => Promise<string | null>
 
@@ -52,25 +53,25 @@ export function WaitDialog({ card, today, again, busy, onClose, onRun }: { card:
     else onClose()
   }
   return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/25" onClick={onClose}>
-      <div role="dialog" aria-label={title} onClick={e => e.stopPropagation()} className="w-[440px] space-y-3 rounded-xl bg-white p-4 text-[13px] text-gray-800 shadow-2xl dark:bg-zinc-800 dark:text-zinc-100">
-        <div className="text-[14px] font-semibold">{title}</div>
-        <dl className="space-y-1.5 text-[12.5px]">
-          <div className="flex gap-2"><dt className="w-[84px] shrink-0 text-gray-500">何が起きるか</dt><dd>あなたの番から外れ、「ほかの人の番・返事待ち」に移ります。見込みを過ぎたら、あなたの番に戻ります</dd></div>
-          <div className="flex gap-2"><dt className="w-[84px] shrink-0 text-gray-500">知らせる人</dt><dd>だれにも知らせません</dd></div>
-        </dl>
-        <label className="block space-y-1">
-          <span className="text-[12px] text-gray-600 dark:text-zinc-300">何を待っていますか</span>
-          <input aria-label="待っているもの" value={on} onChange={e => setOn(e.target.value)} placeholder="例：先方からの見積の返事" className={FIELD} />
-        </label>
-        <WaitChooser today={today} holidays={card.holidays} value={until} onChange={setUntil} />
-        {error && <p role="alert" className="text-[12px] text-red-600 dark:text-red-400">{error}</p>}
-        <div className="flex justify-end gap-2">
+    <Dialog onClose={onClose} label={title} size="md" className="text-[13px]">
+        <DialogTitle>{title}</DialogTitle>
+        <div className="mt-3 space-y-3">
+          <dl className="space-y-1.5 text-[12.5px]">
+            <div className="flex gap-2"><dt className="w-[84px] shrink-0 text-gray-500">何が起きるか</dt><dd>あなたの番から外れ、「ほかの人の番・返事待ち」に移ります。見込みを過ぎたら、あなたの番に戻ります</dd></div>
+            <div className="flex gap-2"><dt className="w-[84px] shrink-0 text-gray-500">知らせる人</dt><dd>だれにも知らせません</dd></div>
+          </dl>
+          <label className="block space-y-1">
+            <span className="text-[12px] text-gray-600 dark:text-zinc-300">何を待っていますか</span>
+            <input aria-label="待っているもの" value={on} onChange={e => setOn(e.target.value)} placeholder="例：先方からの見積の返事" className={FIELD} />
+          </label>
+          <WaitChooser today={today} holidays={card.holidays} value={until} onChange={setUntil} />
+          {error && <p role="alert" className="text-[12px] text-red-600 dark:text-red-400">{error}</p>}
+        </div>
+        <DialogFooter>
           <button type="button" onClick={onClose} className={SMALL_BUTTON}>やめておく</button>
           <button type="button" disabled={busy} onClick={() => void run()} className={MAIN_BUTTON}>{again ? 'もう少し待つ' : '返事待ちにする'}</button>
-        </div>
-      </div>
-    </div>
+        </DialogFooter>
+    </Dialog>
   )
 }
 

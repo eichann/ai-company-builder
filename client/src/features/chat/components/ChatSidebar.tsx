@@ -52,7 +52,7 @@ function StatusIcon({ status }: { status?: ConsultationStatus }) {
       : status.kind === 'review'
         ? <Eye size={14} weight="bold" aria-hidden className="shrink-0 text-amber-500" />
         : <ChatCircleDots size={14} weight="fill" aria-hidden className="shrink-0 text-amber-500" />
-    case 'working': return <CircleNotch size={14} aria-hidden className="shrink-0 animate-spin text-accent" />
+    case 'working': return <CircleNotch size={14} aria-hidden className="shrink-0 animate-spin text-primary" />
     case 'unseen': return <Sparkle size={14} weight="fill" aria-hidden className="shrink-0 text-unread" />
     case 'failed': return <WarningOctagon size={14} weight="fill" aria-hidden className="shrink-0 text-failed-icon" />
     default: return <CheckCircle size={14} aria-hidden className="shrink-0 text-gray-400" />
@@ -72,7 +72,7 @@ function GroupHeading({ group, first, count, folded, unread, onToggle }: { group
   const sticky = `sticky top-0 z-10 bg-gray-50 dark:bg-zinc-900 ${first ? 'mt-1' : 'mt-3'} mb-1`
   const tone = `flex w-full items-center justify-between rounded-md border-l-2 px-2 py-1.5 text-[11px] font-semibold ${group.key === 'needs-you'
     ? 'border-amber-500/60 bg-amber-500/15 text-amber-800 dark:text-amber-300'
-    : 'border-accent/40 bg-gray-200/70 dark:bg-zinc-800 text-gray-600 dark:text-zinc-300'}`
+    : 'border-selected-border bg-gray-200/70 dark:bg-zinc-800 text-gray-600 dark:text-zinc-300'}`
   const content = <>
     <span className="flex items-center gap-1">
       {foldable && <CaretDown size={11} weight="bold" aria-hidden className={`transition-transform ${folded ? '-rotate-90' : ''}`} />}
@@ -84,7 +84,7 @@ function GroupHeading({ group, first, count, folded, unread, onToggle }: { group
   if (!foldable) return <h3 className={sticky}><div className={tone}>{content}</div></h3>
   return <h3 className={sticky}>
     <button type="button" onClick={() => onToggle(group.key)} aria-expanded={!folded} aria-controls={`conversation-group-${group.key}`}
-      className={`${tone} text-left hover:brightness-95 focus-visible:outline-accent`}>{content}</button>
+      className={`${tone} text-left hover:brightness-95 focus-visible:outline-focus-ring`}>{content}</button>
   </h3>
 }
 
@@ -218,11 +218,11 @@ export function ChatSidebar({ companyId, tabs, activeTabId, onSelectTab, onOpenS
       {focused
         ? <p className="flex flex-wrap items-center gap-x-2 text-xs text-gray-500" aria-live="polite">
           <span className="min-w-0 truncate">「{focused.title}」についての相談</span>
-          <button type="button" onClick={() => setShowAllFor(focused.recordId)} className="shrink-0 text-accent hover:underline">すべて表示</button>
+          <button type="button" onClick={() => setShowAllFor(focused.recordId)} className="shrink-0 text-link hover:underline">すべて表示</button>
         </p>
         : <p className="flex items-center gap-2 text-xs text-gray-500" aria-live="polite">
           {loading ? '読み込んでいます' : query.trim() ? `${rows.length}件` : `${rows.length}件の相談`}
-          {focus && showAllFor === focus.recordId && !query.trim() && <button type="button" onClick={() => setShowAllFor(null)} className="text-accent hover:underline">「{focus.title}」の相談だけにする</button>}
+          {focus && showAllFor === focus.recordId && !query.trim() && <button type="button" onClick={() => setShowAllFor(null)} className="text-link hover:underline">「{focus.title}」の相談だけにする</button>}
         </p>}
     </div>
     {error && <div role="alert" className="px-3 pb-2 text-xs text-red-600">{error}<button onClick={() => refreshRef.current()} className="block underline mt-1">再読み込み</button></div>}
@@ -245,21 +245,21 @@ export function ChatSidebar({ companyId, tabs, activeTabId, onSelectTab, onOpenS
           const empty = !!tab && !live && isEmptyConversation(session)
           const preview = session?.draftInput?.trim() || session?.preview || '新しい相談を始めましょう'
           const line = live ? live.line : `${session?.draftInput?.trim() ? '下書き：' : ''}${preview.replace(/\[Tool:[^\]]*\]/g, '').replace(/\s+/g, ' ').trim().slice(0, 120)}`
-          return <div key={row.key} className={`mb-1 rounded-lg border ${active ? 'bg-accent/10 border-accent/30' : 'border-transparent hover:bg-gray-100 dark:hover:bg-zinc-800'}`} data-conversation-id={session?.id ?? tab?.sessionId ?? row.key} data-status={live?.state ?? 'idle'}
+          return <div key={row.key} className={`mb-1 rounded-lg border ${active ? 'bg-selected-bg border-selected-border' : 'border-transparent hover:bg-gray-100 dark:hover:bg-zinc-800'}`} data-conversation-id={session?.id ?? tab?.sessionId ?? row.key} data-status={live?.state ?? 'idle'}
             // A saved consultation dragged onto a やること's 「つながっているもの」 becomes one about it (owner decision 2026-11-03).
             draggable={!!session && editing !== session.id}
             onDragStart={session ? e => startConsultationDrag(e.dataTransfer, { sessionId: session.id, title: row.title, ...(session.topicRecordId ? { topicRecordId: session.topicRecordId } : {}) }) : undefined}>
             {editing === session?.id && session ? <form className="p-2" onSubmit={e => { e.preventDefault(); if (title.trim()) void patch(session.id, { title: title.trim(), titleAutoGenerated: false }) }}>
-              <input autoFocus aria-label="相談名" value={title} onChange={e => setTitle(e.target.value)} onKeyDown={e => { if (e.key === 'Escape') setEditing(null) }} className="w-full rounded border border-accent p-1 text-sm bg-white dark:bg-zinc-800" />
-              <div className="flex gap-3 mt-2 text-xs"><button type="submit" disabled={!title.trim()} className="text-accent">保存</button><button type="button" onClick={() => setEditing(null)}>キャンセル</button></div>
-            </form> : <button onClick={() => elsewhere ? onOpenInWindow?.(elsewhere) : tab ? onSelectTab(tab.id) : session && onOpenSession(session.id)} aria-current={active ? 'page' : undefined} className="block w-full text-left p-2 focus-visible:outline-accent rounded-lg">
+              <input autoFocus aria-label="相談名" value={title} onChange={e => setTitle(e.target.value)} onKeyDown={e => { if (e.key === 'Escape') setEditing(null) }} className="w-full rounded border border-focus-border p-1 text-sm bg-white dark:bg-zinc-800" />
+              <div className="flex gap-3 mt-2 text-xs"><button type="submit" disabled={!title.trim()} className="text-link">保存</button><button type="button" onClick={() => setEditing(null)}>キャンセル</button></div>
+            </form> : <button onClick={() => elsewhere ? onOpenInWindow?.(elsewhere) : tab ? onSelectTab(tab.id) : session && onOpenSession(session.id)} aria-current={active ? 'page' : undefined} className="block w-full text-left p-2 focus-visible:outline-focus-ring rounded-lg">
               <div className="text-sm font-medium flex items-center gap-1.5" title={row.title}>{(live || session) && <StatusIcon status={live} />}<span className="truncate"><Marked text={row.title} query={query} /></span>{live?.state === 'unseen' && <NewDot className="ml-auto" />}</div>
               {row.linked && <p className="mt-0.5 flex min-w-0 items-center gap-1 text-[11px] text-gray-500 dark:text-zinc-400" data-linked-record={row.linked.id}>
                 <LinkSimple size={10} className="shrink-0 text-gray-400" aria-hidden /><ThingIcon kind={row.linked.thing} typeLabel={row.linked.typeLabel} label={row.linked.kindName} size={11} />
                 <span className="truncate"><Marked text={row.linked.title} query={query} /></span>
               </p>}
               <p className={`text-xs truncate mt-1 ${live ? LINE_TONE[live.state] ?? 'text-gray-500 dark:text-zinc-400' : 'text-gray-500 dark:text-zinc-400'}`}>{line}</p>
-              <div className="flex gap-2 mt-1 text-[10px] text-gray-500"><span>{session ? new Date(session.updatedAt).toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '未送信'}</span>{elsewhere ? <span className="inline-flex items-center gap-0.5 text-accent"><AppWindow size={11} aria-hidden />別ウィンドウで表示中</span> : active ? <span className="text-accent">表示中</span> : tab ? <span>開いています</span> : null}</div>
+              <div className="flex gap-2 mt-1 text-[10px] text-gray-500"><span>{session ? new Date(session.updatedAt).toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '未送信'}</span>{elsewhere ? <span className="inline-flex items-center gap-0.5 text-link"><AppWindow size={11} aria-hidden />別ウィンドウで表示中</span> : active ? <span className="text-accent">表示中</span> : tab ? <span>開いています</span> : null}</div>
             </button>}
             <div className="flex items-center justify-end gap-1 px-2 pb-1">
               {session && <>
@@ -275,7 +275,7 @@ export function ChatSidebar({ companyId, tabs, activeTabId, onSelectTab, onOpenS
         </div>
       </section>)}
       {remaining > 0 && !collapsed.has('done') && <button type="button" onClick={() => setHistoryLimit(value => value + 20)}
-        className="mt-2 w-full rounded-lg border border-gray-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 px-3 py-2 text-xs font-medium text-gray-600 dark:text-zinc-300 hover:bg-gray-100 dark:hover:bg-zinc-700 focus-visible:outline-accent">
+        className="mt-2 w-full rounded-lg border border-gray-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 px-3 py-2 text-xs font-medium text-gray-600 dark:text-zinc-300 hover:bg-gray-100 dark:hover:bg-zinc-700 focus-visible:outline-focus-ring">
         続きを読み込む<span className="ml-1 font-normal text-gray-500">（残り{remaining}件）</span>
       </button>}
     </div>

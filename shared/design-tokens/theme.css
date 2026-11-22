@@ -182,6 +182,8 @@
   --color-disabled-border: var(--zinc-200);
   --color-disabled-icon: var(--zinc-400);
   --color-private-text: var(--amber-700);
+  --color-private-bg: var(--amber-50);
+  --color-private-border: var(--amber-200);
   --color-toast: var(--zinc-900);
   --color-on-toast: var(--zinc-50);
   --color-thing-task: var(--blue-600);
@@ -262,6 +264,8 @@
   --color-disabled-border-rgb: 228 228 231;
   --color-disabled-icon-rgb: 161 161 170;
   --color-private-text-rgb: 180 83 9;
+  --color-private-bg-rgb: 255 251 235;
+  --color-private-border-rgb: 253 230 138;
   --color-toast-rgb: 24 24 27;
   --color-on-toast-rgb: 250 250 250;
   --color-thing-task-rgb: 18 100 163;
@@ -341,6 +345,8 @@
   --color-disabled-border: var(--zinc-750);
   --color-disabled-icon: var(--zinc-550);
   --color-private-text: var(--amber-400);
+  --color-private-bg: var(--amber-d-bg);
+  --color-private-border: var(--amber-d-line);
   --color-toast: var(--zinc-100);
   --color-on-toast: var(--zinc-900);
   --color-thing-task: var(--blue-400);
@@ -421,6 +427,8 @@
   --color-disabled-border-rgb: 46 46 51;
   --color-disabled-icon-rgb: 107 107 116;
   --color-private-text-rgb: 251 191 36;
+  --color-private-bg-rgb: 42 34 17;
+  --color-private-border-rgb: 88 67 22;
   --color-toast-rgb: 244 244 245;
   --color-on-toast-rgb: 24 24 27;
   --color-thing-task-rgb: 108 176 234;

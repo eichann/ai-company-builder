@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { CheckCircle, LinkSimple, MagnifyingGlass, X } from '@phosphor-icons/react'
 import type { TaskListItem } from '../../../../shared/tasks'
 import { linkableTasks } from '../model'
+import { Dialog } from '../../../shared/ui/Dialog'
 
 interface Props {
   /** The file or folder, as the company names it (`営業/見積.xlsx`). */
@@ -29,9 +30,7 @@ export function LinkToTaskDialog({ companyPath, items, onLink, onClose }: Props)
     else setLinked(t.title)
   }
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30" onMouseDown={e => { if (e.target === e.currentTarget) onClose() }}>
-      <div role="dialog" aria-label="やることにつなぐ" className="w-[380px] overflow-hidden rounded-xl border border-gray-200 bg-white text-gray-800 shadow-xl dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-100"
-        onKeyDown={e => { if (e.key === 'Escape') onClose() }}>
+    <Dialog onClose={onClose} label="やることにつなぐ" size="sm" padded={false} className="overflow-hidden">
         <div className="flex items-center gap-2 px-3 pb-1 pt-2.5 text-[12px] text-gray-500 dark:text-zinc-400">
           <LinkSimple size={13} /><span className="min-w-0 flex-1 truncate">「{name}」をつなぐやること</span>
           <button type="button" onClick={onClose} aria-label="閉じる" className="rounded p-0.5 hover:bg-gray-100 dark:hover:bg-zinc-700"><X size={12} /></button>
@@ -62,7 +61,6 @@ export function LinkToTaskDialog({ companyPath, items, onLink, onClose }: Props)
             <p className="border-t border-gray-100 px-3 py-1.5 text-[10.5px] text-gray-500 dark:border-zinc-700">ファイルをやることの行やカードにドラッグしても、つなげます。</p>
           </>
         )}
-      </div>
-    </div>
+    </Dialog>
   )
 }

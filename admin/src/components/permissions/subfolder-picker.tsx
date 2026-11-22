@@ -60,7 +60,7 @@ export function SubfolderPicker({
                     }}
                   >
                     {f.private ? (
-                      <LockSimple size={16} weight="fill" className="text-brand" aria-label="非公開" />
+                      <LockSimple size={16} weight="fill" className="text-private-text" aria-label="非公開" />
                     ) : (
                       <Folder size={16} className="text-muted-foreground" />
                     )}

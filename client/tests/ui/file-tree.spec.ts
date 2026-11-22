@@ -204,7 +204,7 @@ test('when some items of a multi-delete fail, the rest are deleted and the faile
   await expect(page.getByText('「README.md」を削除できませんでした。ほかのものは削除しました。開いているアプリがあれば閉じてから、もう一度試してください。')).toBeVisible()
   await expect(row(page, 'ロゴ.png')).toHaveCount(0)
   await expect(row(page, 'README.md')).toBeVisible()
-  await expect(row(page, 'README.md')).toHaveClass(/bg-accent\/20/) // still selected
+  await expect(row(page, 'README.md')).toHaveClass(/(^|\s)bg-selected-bg-hover(\s|$)/) // still selected
 })
 
 test('「やることにつなぐ…」 hands the file to the task chooser; no item where the company shows no task list', async ({ page }) => {

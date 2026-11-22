@@ -70,7 +70,7 @@ export function Chip({ children, tone = 'gray' }: { children: ReactNode; tone?: 
 }
 
 export const MAIN_BUTTON = `inline-flex shrink-0 items-center gap-1.5 rounded-md px-3 py-1.5 text-[12.5px] font-medium ${PRIMARY_ACTION}`
-export const SMALL_BUTTON = 'inline-flex shrink-0 items-center gap-1 rounded-md border border-gray-300 bg-white px-2 py-0.5 text-[11.5px] text-gray-700 hover:border-accent hover:text-accent disabled:opacity-50 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-200'
+export const SMALL_BUTTON = 'inline-flex shrink-0 items-center gap-1 rounded-md border border-gray-300 bg-white px-2 py-0.5 text-[11.5px] text-gray-700 hover:border-primary hover:text-link disabled:opacity-50 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-200'
 
 /** A section folded until opened (details on demand). */
 export function Fold({ title, icon, count, children, open: shown, onToggle }: {
@@ -84,7 +84,7 @@ export function Fold({ title, icon, count, children, open: shown, onToggle }: {
   return (
     <section aria-label={title} className="border-t border-gray-100 pt-3 dark:border-zinc-800">
       <button type="button" onClick={() => setOpen(o => !o)} aria-expanded={open}
-        className="flex w-full items-center gap-1.5 text-[12.5px] font-semibold text-gray-700 hover:text-accent dark:text-zinc-200">
+        className="flex w-full items-center gap-1.5 text-[12.5px] font-semibold text-gray-700 hover:text-link dark:text-zinc-200">
         {open ? <CaretDown size={12} /> : <CaretRight size={12} />}{icon}{title}
         {count !== undefined && <span className="font-normal text-gray-400">（{count}）</span>}
       </button>

@@ -43,8 +43,8 @@ export function ClaudeSignInCard({ status, root, onRecheck }: { status: ClaudeCo
         <p className="text-sm font-medium text-ink">このパソコンに Claude Code が入っていません</p>
         <p className="text-xs text-ink-muted">AI に相談するには、Anthropic の Claude Code が必要です。入れ方のページを開き、案内のとおりに入れてから「もう一度確かめる」を押してください。</p>
         <div className="flex gap-3 pt-1">
-          <button type="button" onClick={() => void openInBrowser(CLAUDE_SETUP_GUIDE_URL)} className="text-xs text-accent">入れ方を見る</button>
-          <button type="button" onClick={onRecheck} className="text-xs text-accent">もう一度確かめる</button>
+          <button type="button" onClick={() => void openInBrowser(CLAUDE_SETUP_GUIDE_URL)} className="text-xs text-link">入れ方を見る</button>
+          <button type="button" onClick={onRecheck} className="text-xs text-link">もう一度確かめる</button>
         </div>
       </div>
     )
@@ -57,11 +57,11 @@ export function ClaudeSignInCard({ status, root, onRecheck }: { status: ClaudeCo
         {waiting ? (
           <>
             <p className="flex items-center gap-2 text-xs text-ink-muted" role="status">
-              <CircleNotch size={14} className="animate-spin text-accent" />
+              <CircleNotch size={14} className="animate-spin text-primary" />
               ブラウザで Anthropic のログイン画面を開きました。会社の Claude のアカウントでログインすると、ここに自動で戻ります。
             </p>
             <div className="flex gap-3 pt-1">
-              <button type="button" onClick={() => void openPageAgain()} className="text-xs text-accent">ブラウザが開かないとき</button>
+              <button type="button" onClick={() => void openPageAgain()} className="text-xs text-link">ブラウザが開かないとき</button>
               <button type="button" onClick={() => void cancelClaudeSignIn()} className="text-xs text-ink-muted">やめる</button>
             </div>
             {pageMissing && <p className="text-xs text-ink-muted">まだログイン画面の準備ができていません。少し待ってからもう一度押してください。</p>}
