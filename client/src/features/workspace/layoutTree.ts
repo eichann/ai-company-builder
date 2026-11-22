@@ -7,7 +7,9 @@
 //   - the left column is 200 px up to half the window (at most 720 px);
 //   - the middle is never narrower than MIDDLE_MIN while the window has room for every minimum;
 //     a smaller window takes the room from the consultation first, then the left column, never
-//     below their minimums (what is saved stays: a wider window shows it again).
+//     below their minimums (what is saved stays: a wider window shows it again);
+//   - the bottom panel (B2) sits under the middle only, 120 px up to where the middle's tabs keep
+//     TABS_MIN_HEIGHT; only its height is saved (it starts closed at every start: AppShell state).
 //
 // What is saved is stale input (another window, another version): checked and clamped when read
 // (`parseLayout`), and fitted to the window every time it is drawn (`fitLayout`).
@@ -32,17 +34,27 @@ export interface PaneLimits {
   collapseAfter?: number
 }
 
-/** The splits of the screen: `screen` (the whole window) and `files` (the left column and the middle). */
-export interface WorkspaceLayout { screen: SplitNode; files: SplitNode }
+/**
+ * The splits of the screen: `screen` (the whole window), `files` (the left column and the middle)
+ * and `middle` (the open files and records over the bottom panel).
+ */
+export interface WorkspaceLayout { screen: SplitNode; files: SplitNode; middle: SplitNode }
+export type SplitId = keyof WorkspaceLayout
 
 /** Which panes are on screen: the member hid the left column or the consultation; a wide left tab covers the middle. */
 export interface PaneView { leftShown: boolean; chatShown: boolean; middleShown: boolean }
 
-/** 2: the consultation has the fixed width, the side the rest (1: the side was fixed). */
+/**
+ * 2: the consultation has the fixed width, the side the rest (1: the side was fixed). A tree added
+ * later (`middle`, B2) is optional within a version: missing → its first look; an app that does not
+ * know it reads the others unchanged. A new version is for a tree whose meaning changes.
+ */
 export const LAYOUT_VERSION = 2
 
 /** The middle (open files and records) never gets narrower than this while the window has room. */
 export const MIDDLE_MIN = 360
+/** The middle's tabs (and a few lines of the document under them) keep this height above the bottom panel. */
+export const TABS_MIN_HEIGHT = 160
 const LEFT_MAX = 720
 const LEFT_MAX_SHARE = 0.5
 // What the window spends besides the panes: a divider (ResizeHandle, w-1) and a hidden pane's strip (w-6).
@@ -55,6 +67,9 @@ export const PANE_LIMITS: Readonly<Record<string, PaneLimits>> = {
   chat: { min: 280, collapseAfter: 60 },
   // min: the five standard left tabs fit stacked (icon over an 11 px name) without scrolling.
   fileTree: { min: 200, max: LEFT_MAX },
+  // min: the panel's heading and two rows.
+  bottom: { min: 120 },
+  tabs: { min: TABS_MIN_HEIGHT },
 }
 
 /** `hidden` with `paneId` shown or hidden (toggled when `shown` is not given); the same set when nothing changes. */
@@ -75,6 +90,7 @@ const pane = (id: string): PaneNode => ({ type: 'pane', id })
 export const DEFAULT_LAYOUT: WorkspaceLayout = {
   screen: { type: 'split', id: 'screen', direction: 'row', children: [pane('side'), pane('chat')], sizes: [null, 416] },
   files: { type: 'split', id: 'files', direction: 'row', children: [pane('fileTree'), pane('editor')], sizes: [260, null] },
+  middle: { type: 'split', id: 'middle', direction: 'column', children: [pane('tabs'), pane('bottom')], sizes: [null, 260] },
 }
 
 export function paneSize(split: SplitNode, paneId: string): number | null {
@@ -108,14 +124,22 @@ const sideNeed = (view: PaneView) => (view.middleShown ? MIDDLE_MIN : PANE_LIMIT
 /** The window's width taken by the left column (its divider or strip included) when the middle is beside it. */
 const leftRoom = (fileTree: number, view: PaneView) => (!view.middleShown ? 0 : view.leftShown ? fileTree + DIVIDER : STRIP)
 const chatRoom = (chat: number, view: PaneView) => (view.chatShown ? chat + DIVIDER : STRIP)
+/** The bottom panel's tallest in a middle this high (unknown height: no limit but its own). */
+const bottomMax = (middleHeight: number | undefined) =>
+  middleHeight !== undefined && Number.isFinite(middleHeight) && middleHeight > 0
+    ? Math.max(PANE_LIMITS.bottom.min!, middleHeight - TABS_MIN_HEIGHT - DIVIDER)
+    : Number.POSITIVE_INFINITY
 
 /**
  * The sizes drawn in a window this wide: the saved ones within the limits, the left column at most
  * half the window, and, when the panes do not fit, the consultation then the left column made
- * smaller (never below their minimums) so the middle keeps MIDDLE_MIN. Never written back.
+ * smaller (never below their minimums) so the middle keeps MIDDLE_MIN; the bottom panel no taller
+ * than leaves the middle's tabs TABS_MIN_HEIGHT of a middle `middleHeight` high. Never written back.
  */
-export function fitLayout(layout: WorkspaceLayout, windowWidth: number, view: PaneView): WorkspaceLayout {
-  if (!Number.isFinite(windowWidth) || windowWidth <= 0) return layout
+export function fitLayout(layout: WorkspaceLayout, windowWidth: number, view: PaneView, middleHeight?: number): WorkspaceLayout {
+  const bottomSaved = paneSize(layout.middle, 'bottom') ?? PANE_LIMITS.bottom.min!
+  const middle = withPaneSize(layout.middle, 'bottom', clampWidth(bottomSaved, PANE_LIMITS.bottom.min!, bottomMax(middleHeight)))
+  if (!Number.isFinite(windowWidth) || windowWidth <= 0) return { ...layout, middle }
   const chatMin = PANE_LIMITS.chat.min!
   const treeMin = PANE_LIMITS.fileTree.min!
   let chat = Math.max(chatMin, paneSize(layout.screen, 'chat') ?? chatMin)
@@ -127,15 +151,17 @@ export function fitLayout(layout: WorkspaceLayout, windowWidth: number, view: Pa
     chat = smaller
   }
   if (over > 0 && view.leftShown && view.middleShown) tree = Math.max(treeMin, tree - over)
-  return { screen: withPaneSize(layout.screen, 'chat', chat), files: withPaneSize(layout.files, 'fileTree', tree) }
+  return { screen: withPaneSize(layout.screen, 'chat', chat), files: withPaneSize(layout.files, 'fileTree', tree), middle }
 }
 
 /**
  * How far a pane may be dragged in this window, given what the others show now (`shown`, from
- * `fitLayout`): dragging one divider never moves another pane, and the middle keeps MIDDLE_MIN.
+ * `fitLayout`): dragging one divider never moves another pane, the middle keeps MIDDLE_MIN, and its
+ * tabs keep TABS_MIN_HEIGHT over the bottom panel.
  */
-export function paneRange(paneId: string, shown: WorkspaceLayout, windowWidth: number, view: PaneView): { min: number; max: number } {
+export function paneRange(paneId: string, shown: WorkspaceLayout, windowWidth: number, view: PaneView, middleHeight?: number): { min: number; max: number } {
   const min = PANE_LIMITS[paneId]?.min ?? 0
+  if (paneId === 'bottom') return { min, max: bottomMax(middleHeight) }
   if (paneId === 'fileTree') {
     const room = windowWidth - chatRoom(paneSize(shown.screen, 'chat') ?? 0, view) - MIDDLE_MIN - DIVIDER
     return { min, max: Math.max(min, Math.min(leftMax(windowWidth), room)) }
@@ -152,10 +178,10 @@ export function paneRange(paneId: string, shown: WorkspaceLayout, windowWidth: n
  * `fitLayout`) with that pane changed, so a pane drawn smaller than saved stays as drawn and one
  * divider never moves another. `saved` itself when nothing changes.
  */
-export function layoutAfterResize(saved: WorkspaceLayout, drawn: WorkspaceLayout, splitId: 'screen' | 'files', paneId: string, size: number): WorkspaceLayout {
+export function layoutAfterResize(saved: WorkspaceLayout, drawn: WorkspaceLayout, splitId: SplitId, paneId: string, size: number): WorkspaceLayout {
   const next = { ...drawn, [splitId]: withPaneSize(drawn[splitId], paneId, size) }
   const same = (a: SplitNode, b: SplitNode) => a.sizes.every((s, i) => s === b.sizes[i])
-  return same(next.screen, saved.screen) && same(next.files, saved.files) ? saved : next
+  return same(next.screen, saved.screen) && same(next.files, saved.files) && same(next.middle, saved.middle) ? saved : next
 }
 
 /**
@@ -214,12 +240,13 @@ export function parseLayout(raw: string | null, windowWidth?: number): Workspace
     const parsed = JSON.parse(raw) as { version?: unknown; trees?: Record<string, unknown> } | null
     if (!parsed || !parsed.trees || typeof parsed.trees !== 'object') return DEFAULT_LAYOUT
     if (parsed.version === 1) {
-      return { screen: screenFromV1(parsed.trees.screen, windowWidth), files: restoreSizes(DEFAULT_LAYOUT.files, parsed.trees.files) }
+      return { screen: screenFromV1(parsed.trees.screen, windowWidth), files: restoreSizes(DEFAULT_LAYOUT.files, parsed.trees.files), middle: DEFAULT_LAYOUT.middle }
     }
     if (parsed.version !== LAYOUT_VERSION) return DEFAULT_LAYOUT
     return {
       screen: restoreSizes(DEFAULT_LAYOUT.screen, parsed.trees.screen),
       files: restoreSizes(DEFAULT_LAYOUT.files, parsed.trees.files),
+      middle: restoreSizes(DEFAULT_LAYOUT.middle, parsed.trees.middle),
     }
   } catch {
     return DEFAULT_LAYOUT
@@ -230,8 +257,8 @@ export function serializeLayout(layout: WorkspaceLayout): string {
   return JSON.stringify({ version: LAYOUT_VERSION, trees: layout })
 }
 
-/** The divider's size as the member reads it while dragging: 「340px（画面の 27%）」. */
-export function sizeText(size: number, windowWidth: number): string {
-  const share = windowWidth > 0 ? Math.round((size / windowWidth) * 100) : 0
-  return `${Math.round(size)}px（画面の ${share}%）`
+/** The divider's size as the member reads it while dragging: 「340px（画面の 27%）」, a height 「260px（画面の高さの 33%）」. */
+export function sizeText(size: number, windowSize: number, dimension: 'width' | 'height' = 'width'): string {
+  const share = windowSize > 0 ? Math.round((size / windowSize) * 100) : 0
+  return `${Math.round(size)}px（画面の${dimension === 'height' ? '高さの' : ''} ${share}%）`
 }

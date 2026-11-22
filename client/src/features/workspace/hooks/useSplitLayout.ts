@@ -3,13 +3,14 @@ import { useEventListener } from '../../../shared/hooks/useEventListener'
 import { useLatestRef } from '../../../shared/hooks/useLatestRef'
 import {
   DEFAULT_LAYOUT, dragPane, fitLayout, layoutAfterResize, paneRange, paneSize, parseLayout, resizedBy, serializeLayout, sizeText,
-  type PaneView, type SplitNode, type WorkspaceLayout,
+  type PaneView, type SplitId, type SplitNode, type WorkspaceLayout,
 } from '../layoutTree'
 
 // Per company in localStorage `layout:<company id>` (layoutTree.ts holds the shape and every size rule).
 const LAYOUT_KEY_PREFIX = 'layout:'
 
 const windowWidth = () => (typeof window === 'undefined' ? 0 : window.innerWidth)
+const windowHeight = () => (typeof window === 'undefined' ? 0 : window.innerHeight)
 
 function readLayout(companyId: string | undefined): WorkspaceLayout {
   if (!companyId) return parseLayout(null)
@@ -21,16 +22,18 @@ function readLayout(companyId: string | undefined): WorkspaceLayout {
 }
 
 /** The pane a divider resizes in what is drawn, and how far it may go now. */
-function dividerTarget(drawn: WorkspaceLayout, view: PaneView, width: number, splitId: string, dividerIndex: number) {
+function dividerTarget(drawn: WorkspaceLayout, view: PaneView, width: number, middleHeight: number, splitId: string, dividerIndex: number) {
   const split = topSplit(drawn, splitId)
   const by = split && resizedBy(split, dividerIndex)
   if (!split || !by) return null
-  return { ...by, size: paneSize(split, by.paneId) ?? 0, range: paneRange(by.paneId, drawn, width, view) }
+  return { ...by, size: paneSize(split, by.paneId) ?? 0, range: paneRange(by.paneId, drawn, width, view, middleHeight) }
 }
+
+const isSplitId = (splitId: string): splitId is SplitId => splitId === 'screen' || splitId === 'files' || splitId === 'middle'
 
 // Drags reach the top split of each tree; nested splits come with the multi-pane chat.
 function topSplit(layout: WorkspaceLayout, splitId: string): SplitNode | null {
-  return splitId === 'screen' || splitId === 'files' ? layout[splitId] : null
+  return isSplitId(splitId) ? layout[splitId] : null
 }
 
 /** What a divider shows and accepts: the size of the pane it resizes, its range now, and that size in words. */
@@ -59,13 +62,27 @@ export function useSplitLayout(companyId: string | undefined, view: PaneView, on
   const [width, setWidth] = useState(windowWidth)
   useEventListener(typeof window === 'undefined' ? null : window, 'resize', () => setWidth(windowWidth()))
 
-  const shown = useMemo(() => fitLayout(state.layout, width, view), [state.layout, width, view])
-  const latest = useLatestRef({ shown, view })
+  // The middle's height (tabs + bottom panel), measured: what the bottom panel may take depends on it.
+  // A hidden middle (a wide left tab) measures 0 and keeps the last height.
+  const [middleHeight, setMiddleHeight] = useState(0)
+  const observerRef = useRef<ResizeObserver | null>(null)
+  const middleRef = useCallback((element: HTMLElement | null) => {
+    observerRef.current?.disconnect()
+    observerRef.current = null
+    if (!element || typeof ResizeObserver === 'undefined') return
+    const measure = () => { const h = element.getBoundingClientRect().height; if (h > 0) setMiddleHeight(Math.round(h)) }
+    observerRef.current = new ResizeObserver(measure)
+    observerRef.current.observe(element)
+    measure()
+  }, [])
+
+  const shown = useMemo(() => fitLayout(state.layout, width, view, middleHeight), [state.layout, width, view, middleHeight])
+  const latest = useLatestRef({ shown, view, middleHeight })
   const onCollapseRef = useLatestRef(onCollapse)
 
   // The other panes keep the size they are drawn at (layoutTree.ts `layoutAfterResize`).
   const setSize = useCallback((splitId: string, paneId: string, size: number) => {
-    if (splitId !== 'screen' && splitId !== 'files') return
+    if (!isSplitId(splitId)) return
     const drawn = latest.current.shown
     setState(s => {
       const next = layoutAfterResize(s.layout, drawn, splitId, paneId, size)
@@ -74,7 +91,7 @@ export function useSplitLayout(companyId: string | undefined, view: PaneView, on
   }, [latest])
 
   const target = useCallback((splitId: string, dividerIndex: number) =>
-    dividerTarget(latest.current.shown, latest.current.view, windowWidth(), splitId, dividerIndex), [latest])
+    dividerTarget(latest.current.shown, latest.current.view, windowWidth(), latest.current.middleHeight, splitId, dividerIndex), [latest])
 
   // Each drag snapshots the drawn size at pointerdown and derives the size from the pointer's
   // total offset (panelResize.ts); dragging the consultation well under its minimum hides it.
@@ -111,9 +128,10 @@ export function useSplitLayout(companyId: string | undefined, view: PaneView, on
   }, [])
 
   const divider = useCallback((splitId: string, dividerIndex: number): DividerState | null => {
-    const t = dividerTarget(shown, view, width, splitId, dividerIndex)
-    return t && { value: t.size, min: t.range.min, max: t.range.max, text: sizeText(t.size, width) }
-  }, [shown, view, width])
+    const t = dividerTarget(shown, view, width, middleHeight, splitId, dividerIndex)
+    const text = splitId === 'middle' ? sizeText(t?.size ?? 0, windowHeight(), 'height') : sizeText(t?.size ?? 0, width)
+    return t && { value: t.size, min: t.range.min, max: t.range.max, text }
+  }, [shown, view, width, middleHeight])
 
-  return { shown, startResize, resize, nudge, resetDivider, resetSizes, divider }
+  return { shown, middleRef, startResize, resize, nudge, resetDivider, resetSizes, divider }
 }

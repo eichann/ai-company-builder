@@ -447,3 +447,126 @@ test.describe('panel dividers', () => {
     })
   }
 })
+
+// The bottom panel (B2): a frame under the middle for what a feature hands in (the inbox, I1).
+// `bottom: '1'` gives the preview something to show; without it the app has no bottom panel at all.
+test.describe('the bottom panel', () => {
+  const panel = (page: Page) => page.getByRole('region', { name: '受け箱' })
+  const divider = (page: Page) => page.getByRole('separator', { name: 'エディタと下のパネルの境目' })
+  const treeDivider = (page: Page) => page.getByRole('separator', { name: 'ファイルツリーとエディタの境目' })
+  const chatDivider = (page: Page) => page.getByRole('separator', { name: '左の欄とチャットの境目' })
+  const toggle = (page: Page) => page.getByRole('group', { name: '画面の形' }).getByRole('button', { name: '下のパネル (⌘J)' })
+  const open = (page: Page, query: Record<string, string> = {}) => openPreview(page, 'skill-layout', { bottom: '1', ...query })
+  /** ⌘J (or Ctrl+J) as the browser reports it, at the focused element; whether the app took the key. */
+  const pressJ = (page: Page, mods: { metaKey?: boolean; ctrlKey?: boolean } = { metaKey: true }) => page.evaluate(m => {
+    const event = new KeyboardEvent('keydown', { key: 'j', bubbles: true, cancelable: true, ...m })
+    ;(document.activeElement ?? document.body).dispatchEvent(event)
+    return event.defaultPrevented
+  }, mods)
+  const box = async (locator: Locator) => (await locator.boundingBox())!
+  const height = async (page: Page) => Math.round((await box(panel(page))).height)
+
+  test('with nothing to show there is no panel, no button, and ⌘J is left alone', async ({ page }) => {
+    await openPreview(page, 'skill-layout')
+    await leftTab(page, 'ファイル').click()
+    await expect(page.getByRole('group', { name: '画面の形' }).getByRole('button', { name: '左の欄 (⌘B)' })).toBeVisible()
+    expect(await pressJ(page)).toBe(false)
+    await expect(panel(page)).toHaveCount(0)
+    await expect(toggle(page)).toHaveCount(0)
+    await expect(divider(page)).toHaveCount(0)
+  })
+
+  test('⌘J opens it under the middle only and closes it; the title bar button and 閉じる do the same; every start begins closed', async ({ page }) => {
+    await open(page)
+    await leftTab(page, 'ファイル').click()
+    await expect(panel(page)).toBeHidden()
+    await expect(toggle(page)).toHaveAttribute('aria-pressed', 'false')
+
+    expect(await pressJ(page)).toBe(true)
+    await expect(panel(page)).toBeVisible()
+    await expect(page.getByText('見本の中身です。')).toBeVisible()
+    await expect(toggle(page)).toHaveAttribute('aria-pressed', 'true')
+    // Under the middle only: from the tree divider to the chat divider, down to the window's bottom.
+    const p = await box(panel(page))
+    expect(Math.round(p.x)).toBe(Math.round((await box(treeDivider(page))).x) + 4)
+    // (the left side's 1 px border stands between it and the chat divider)
+    expect(Math.round(p.x + p.width)).toBe(Math.round((await box(chatDivider(page))).x) - 1)
+    expect(Math.round(p.y + p.height)).toBe(page.viewportSize()!.height)
+    expect(Math.round(p.height)).toBe(260)
+
+    await pressJ(page)
+    await expect(panel(page)).toBeHidden()
+    await toggle(page).click()
+    await expect(panel(page)).toBeVisible()
+    await page.getByRole('button', { name: '下のパネルを閉じる (⌘J)' }).click()
+    await expect(panel(page)).toBeHidden()
+
+    // Left open, the next start still begins closed.
+    await toggle(page).click()
+    await expect(panel(page)).toBeVisible()
+    await open(page, { keep: '1' })
+    await leftTab(page, 'ファイル').click()
+    await expect(panel(page)).toBeHidden()
+    await expect(toggle(page)).toHaveAttribute('aria-pressed', 'false')
+  })
+
+  test('on a Mac, Ctrl+J in a text field stays the field\'s own key', async ({ page }) => {
+    await page.addInitScript(() => Object.defineProperty(navigator, 'platform', { get: () => 'MacIntel' }))
+    await open(page)
+    await leftTab(page, '探す').click()
+    await searchBox(page).focus()
+    expect(await pressJ(page, { ctrlKey: true }), 'Ctrl+J reaches the field untouched').toBe(false)
+    await expect(panel(page)).toBeHidden()
+    expect(await pressJ(page)).toBe(true)
+    await expect(panel(page)).toBeVisible()
+  })
+
+  test('its divider: drag with the size shown, keys, double-click; the height comes back; the tabs keep 160 px', async ({ page }) => {
+    await open(page)
+    await leftTab(page, 'ファイル').click()
+    await pressJ(page)
+    const d = await box(divider(page))
+    const x = d.x + d.width / 2
+    const y = d.y + d.height / 2
+    await page.mouse.move(x, y)
+    await page.mouse.down()
+    await page.mouse.move(x, y - 50, { steps: 3 })
+    await page.mouse.move(x, y - 100, { steps: 3 })
+    const windowHeight = page.viewportSize()!.height
+    await expect(page.locator('[data-size-tip]')).toHaveText(`360px（画面の高さの ${Math.round((360 / windowHeight) * 100)}%）`)
+    await page.mouse.up()
+    await expect.poll(() => height(page)).toBe(360)
+
+    // The height is kept for the next start (the panel itself starts closed).
+    await open(page, { keep: '1' })
+    await leftTab(page, 'ファイル').click()
+    await pressJ(page)
+    await expect.poll(() => height(page)).toBe(360)
+
+    // Keys move the divider as they do the others (up, Home = towards the top): up grows the panel by
+    // 16, End takes it down to its 120 px minimum, Home up to where the tabs keep 160 px.
+    await divider(page).focus()
+    await page.keyboard.press('ArrowUp')
+    await expect.poll(() => height(page)).toBe(376)
+    await expect(divider(page)).toHaveAttribute('aria-valuemin', '120')
+    await page.keyboard.press('End')
+    await expect.poll(() => height(page)).toBe(120)
+    await page.keyboard.press('Home')
+    const max = Number(await divider(page).getAttribute('aria-valuemax'))
+    await expect.poll(() => height(page)).toBe(max)
+    // The middle (the divider's parent) minus the panel and its 4 px divider: what its tabs keep.
+    const middleHeight = await divider(page).evaluate(el => Math.round(el.parentElement!.getBoundingClientRect().height))
+    expect(middleHeight - max - 4).toBe(160)
+
+    // A double-click puts it back at 260; 「いつもの形に戻す」 closes it and the first height returns.
+    await divider(page).dblclick()
+    await expect.poll(() => height(page)).toBe(260)
+    await divider(page).focus()
+    await page.keyboard.press('ArrowUp')
+    await expect.poll(() => height(page)).toBe(276)
+    await page.getByRole('button', { name: 'いつもの形に戻す' }).click()
+    await expect(panel(page)).toBeHidden()
+    await pressJ(page)
+    await expect.poll(() => height(page)).toBe(260)
+  })
+})

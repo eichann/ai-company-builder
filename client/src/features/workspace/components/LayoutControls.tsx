@@ -1,24 +1,32 @@
-import { ArrowCounterClockwise, ChatCircle, SidebarSimple } from '@phosphor-icons/react'
+import { ArrowCounterClockwise, ChatCircle, SidebarSimple, SquareHalfBottom } from '@phosphor-icons/react'
 
 interface Props {
   leftShown: boolean
   chatShown: boolean
   onToggleLeft: () => void
   onToggleChat: () => void
+  /** The bottom panel's button, only while something is there to show (BottomPanel.tsx). */
+  bottom?: { shown: boolean; onToggle: () => void }
   /** 「いつもの形に戻す」: the first sizes, every pane shown. */
   onReset: () => void
 }
 
 const TOGGLE = 'p-2 rounded-control text-text-muted hover:bg-surface-sunken hover:text-text aria-pressed:text-selected-text transition-colors'
 
-/** The title bar's layout buttons: show / hide the left column and the consultation, and back to the usual look. */
-export function LayoutControls({ leftShown, chatShown, onToggleLeft, onToggleChat, onReset }: Props) {
+/** The title bar's layout buttons: show / hide the left column, the bottom panel and the consultation, and back to the usual look. */
+export function LayoutControls({ leftShown, chatShown, onToggleLeft, onToggleChat, bottom, onReset }: Props) {
   return (
     <div role="group" aria-label="画面の形" className="flex items-center gap-1">
       <button type="button" className={TOGGLE} aria-pressed={leftShown} onClick={onToggleLeft}
         title={leftShown ? '左の欄をしまう (⌘B)' : '左の欄を出す (⌘B)'} aria-label="左の欄 (⌘B)">
         <SidebarSimple size={18} weight={leftShown ? 'fill' : 'regular'} />
       </button>
+      {bottom && (
+        <button type="button" className={TOGGLE} aria-pressed={bottom.shown} onClick={bottom.onToggle}
+          title={bottom.shown ? '下のパネルを閉じる (⌘J)' : '下のパネルを開く (⌘J)'} aria-label="下のパネル (⌘J)">
+          <SquareHalfBottom size={18} weight={bottom.shown ? 'fill' : 'regular'} />
+        </button>
+      )}
       <button type="button" className={TOGGLE} aria-pressed={chatShown} onClick={onToggleChat}
         title={chatShown ? 'AIチャットをしまう (⌘⇧C)' : 'AIチャットを表示 (⌘⇧C)'} aria-label="AIチャット (⌘⇧C)">
         <ChatCircle size={18} weight={chatShown ? 'fill' : 'regular'} />

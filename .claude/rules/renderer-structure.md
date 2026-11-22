@@ -248,7 +248,7 @@ D7–D9, confirmed 2026-10-30).
   tree of row / column splits, the chat pane one leaf: `src/features/workspace/layoutTree.ts`
   (tree, limits, saved shape and **every size rule**), `hooks/useSplitLayout.ts` (per company in
   localStorage `layout:<company id>` = `{ version: 2, trees: { screen: [side null, chat px],
-  files: [fileTree px, editor null] } }`, written only when the member drags, presses a divider's
+  files: [fileTree px, editor null], middle: [tabs null, bottom px] } }`, written only when the member drags, presses a divider's
   keys, double-clicks it or 「いつもの形に戻す」) and `components/SplitView.tsx` on the in-house
   `ResizeHandle` (`react-resizable-panels` was prototyped and not taken: its collapse model
   differs from ours, it stores percentages, and it released weekly with API breaks across majors).
@@ -276,8 +276,20 @@ D7–D9, confirmed 2026-10-30).
   longer assumes one panel on screen (refactor 5-7, `chat-ui-and-history.md` 「Several chat
   panes」): a tab is `isShown` in its pane, the voice key and `chat.*` commands go to the pane
   used last, a consultation is open in one pane at most, tabs are remembered per pane. A second
-  chat leaf in the tree is what is left (the bottom panel, B2, adds a column split under the middle).
-  Changing the saved shape means a new `version` and reading the old one.
+  chat leaf in the tree is what is left.
+  **The bottom panel (B2, 2026-11-22)** is the `middle` column split: the middle's tabs over the
+  panel, under the middle only (not the left column, not the chat; a wide left tab covers it with the
+  middle). Its height is 120 px up to where the tabs keep `TABS_MIN_HEIGHT` (160 px) of the middle's
+  measured height (`useSplitLayout` `middleRef`, a ResizeObserver; not measured yet → the saved
+  height), first height 260; the same divider behaviour (keys, double-click, 「260px（画面の高さの 33%）」).
+  Only the height is saved: the panel **starts closed at every start** (owner decision 6) and
+  「いつもの形に戻す」 closes it. It shows what a feature hands to `AppShell` as `bottomPanel`
+  (`components/BottomPanel.tsx` `BottomPanelContent`: a name and one body, no tabs — the inbox, I1);
+  **with nothing handed in there is no panel, no title bar button and ⌘J is declined** (never an
+  empty frame; until I1 the app shows none). `skill-layout-ui.html?bottom=1` gives the preview a
+  sample. A tree added later is optional within a version (missing → its first look; `trees.middle`
+  arrived in version 2, so an app without it reads the other trees unchanged and keeps working);
+  changing the meaning or shape of an existing tree means a new `version` and reading the old one.
   A pane that takes the remaining space (and the left side while the chat is hidden) has
   `min-width` = its limit or 0, never the flex default `auto`: otherwise wide content (many tabs,
   a long source line) stretched it past the window, leaving the document in a sliver at the

@@ -142,6 +142,12 @@ export const COMMANDS = defineCommands([
     args: z.object({}), keybinding: { key: 'mod+b', area: 'app' },
   },
   {
+    // ⌘J as in VS Code: no editor or composer of the app binds it (CodeMirror has no Mod-j). Does nothing
+    // while no feature gives the bottom panel content (BottomPanel.tsx).
+    id: 'layout.toggleBottom', title: '下のパネルを開く・閉じる', class: 'view',
+    args: z.object({}), keybinding: { key: 'mod+j', area: 'app' },
+  },
+  {
     // 探す ⌘K: open anything by its name (やること, 案件, ファイル…) — the same window as ⌘P.
     id: 'find.byName', title: '名前で探して開く', class: 'view',
     args: z.object({}), keybinding: { key: 'mod+k', area: 'app' },
