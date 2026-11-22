@@ -84,7 +84,8 @@ original text: `docs/architecture/sync.md` (internal; may be absent).
 3    ensure .gitignore essentials: .backups/, .workspace/, node_modules/, .env*,
      **/.personal/* + !**/.personal/.gitignore
 5    nested git repositories → ask the member BEFORE changing anything; "don't share" (default)
-     → this computer's .git/info/exclude, never the shared .gitignore (nested-repos.ts)
+     → this computer's .git/info/exclude, never the shared .gitignore (nested-repos.ts);
+     folders a tracked .gitignore ignores (.personal/ …) are neither asked about nor walked
 3.9  lines older apps wrote into the shared .gitignore for THIS member move to .git/info/exclude
      (local-ignores.ts): a large-file line whose file is here and over the limit, a
      private-skill line whose folder is here and not shared; local line first, then the shared
@@ -105,7 +106,8 @@ original text: `docs/architecture/sync.md` (internal; may be absent).
 9    keep the app's temporary save files and office lock files ignored (.git/info/exclude blocks) → git add --sparse .
      → unstage anything under .backups/, .workspace/ or a private folder, any temporary
      save file and any new office lock file (index only) → commit (AI message, below) → record localHash
-9.5  files at paths of a locally excluded nested repo that origin/main now has (a teammate's
+9.5  files at paths of a locally excluded nested repo (or of a folder a tracked .gitignore ignores,
+     not searched in step 5) that origin/main now has (a teammate's
      same-path folder) and that differ → copied to .backups/<ts>_nested_repo/ (the pull would
      overwrite them: they are ignored); a failed check stops before the pull. The same for
      large files kept on this computer → .backups/<ts>_large_file/

@@ -776,6 +776,7 @@ export class Member {
   private pushHooks: Array<() => Promise<void> | void> = []
   private pushFaults: Array<PushFault | null> = []
   private pullFaults = 0
+  private rawFaults: Array<{ matches: (args: string[]) => boolean; message: string }> = []
   /** Paths written since they were last committed by a sync. */
   private readonly pending = new Set<string>()
   /** Latest committed content of every path this member wrote. */
@@ -1032,6 +1033,12 @@ export class Member {
     return this
   }
 
+  /** The next `git.raw` call whose arguments `matches` accepts fails with `message` (git's own words). */
+  failNextRaw(matches: (args: string[]) => boolean, message: string): this {
+    this.rawFaults.push({ matches, message })
+    return this
+  }
+
   failNextPush(fault: PushFault, options: { times?: number; skip?: number } = {}): this {
     for (let i = 0; i < (options.skip ?? 0); i++) this.pushFaults.push(null)
     for (let i = 0; i < (options.times ?? 1); i++) this.pushFaults.push(fault)
@@ -1048,6 +1055,14 @@ export class Member {
               this.pullFaults--
               throw new Error('error: The following untracked working tree files would be overwritten by merge')
             }
+            return (value as (...a: unknown[]) => Promise<unknown>).apply(target, args)
+          }
+        }
+        if (prop === 'raw' && typeof value === 'function') {
+          return async (...args: unknown[]) => {
+            const flat = (args.flat() as unknown[]).filter((a): a is string => typeof a === 'string')
+            const i = this.rawFaults.findIndex(f => f.matches(flat))
+            if (i !== -1) throw new Error(this.rawFaults.splice(i, 1)[0].message)
             return (value as (...a: unknown[]) => Promise<unknown>).apply(target, args)
           }
         }

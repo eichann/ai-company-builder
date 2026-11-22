@@ -36,6 +36,9 @@ const MACOS = {
   // Link-escape and path guards assert the case- and normalization-insensitive
   // volume (NFC spelling reaching an NFD-named link, DOCS = docs) only on darwin.
   'tests/ipc-fs.test.ts': 'darwin-only assertions on a case/NFD-insensitive volume',
+  // A folder named in NFD on disk matched by an NFC ignore line (git's
+  // core.precomposeunicode, set only on a Mac).
+  'tests/nested-repos.test.ts': 'NFD folder names on APFS with git precomposing them',
   // A real Electron window (「ブラウザ操作」, agent-browser.md): Linux runners have no display, so
   // the test skips itself there and would pass without guarding anything.
   'tests/browser-window-electron.test.ts': 'launches the real Electron app, which needs a display',

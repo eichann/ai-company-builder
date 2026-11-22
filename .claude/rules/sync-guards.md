@@ -171,6 +171,31 @@ what git actually sees through the app's `createGit`.
   are copied to `.backups/<ts>_nested_repo/` — git would overwrite them silently. A local
   exclusion is dropped when its folder is gone (not when only its `.git` is). Dialogs end
   with 「会社として管理したい場合は、管理者に『外部リポジトリ』として登録してもらってください。」.
+  A nested repository inside a folder a **shared rule** ignores is not asked about and that
+  folder is not walked (2026-11-22: a clone under `.personal/` stopped 自動で送る at the question,
+  and every sync walked the ignored tree). `git check-ignore -v` decides, level by level (never a
+  re-implementation; negations honoured), and only when the deciding line is in a `.gitignore`
+  the repository tracks: teammates have that rule too, so nobody shares files over the clone.
+  A folder ignored only here (`.git/info/exclude`, global excludes, an untracked `.gitignore`) is
+  still asked about — a teammate may share that path, and without the exclusion the pull would
+  overwrite the clone's ignored files with no `_nested_repo` backup (Codex review). The skipped
+  folders still go through the pre-pull backup (step 9.5, `onIgnored`): the tracked rule may be
+  newer here than on the server (a teammate shared files there before it arrived); the backup
+  asks git once per batch of 200 folders, not per folder (`--literal-pathspecs`, so a folder
+  named `:(glob)x` cannot fail its batch), counts a folder inside another guarded one once, and
+  a listing that fails stops sync before the pull (no origin/main yet: nothing to back up). Paths go to check-ignore as `./<path>` (a folder named `:foo` is not
+  pathspec magic) and the deciding source is matched against the `.gitignore` files above the
+  path, never guessed from colons. A folder
+  holding a tracked file is never ignored for check-ignore (no `--no-index`), so a stray `.git`
+  in a shared folder is still asked about; the member's own exclusions (local block, legacy
+  lines) are still reported for the backup and gitlink steps; git failing means nothing counts
+  as ignored (asks, as before). The stop
+  messages name the folder and the way out in plain words (`externalNestedRepoStopMessage`,
+  `sharedNestedRepoStopMessage`, starting 「同期を中止しました」). Scenarios: "a nested repository
+  inside an ignored folder → …", "…ignored only on this computer is still asked about…", "an ignore
+  line newer here than on the server…", "…but holding shared files → still asked…"; unit
+  `client/tests/nested-repos.test.ts` (ignored tree not read, tracked files, negation + NFD,
+  local-only ignores, own exclusions, git failing).
 - Legacy: `/<path>/` lines older apps wrote into the shared `.gitignore` (under "# Auto-ignored:
   nested Git repositories") are **never removed automatically** — that would start sharing
   those folders for everyone — and still count as "already excluded". An owner can delete such

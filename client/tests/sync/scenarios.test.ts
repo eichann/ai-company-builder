@@ -207,7 +207,7 @@ describe('git:sync multi-member scenarios', { concurrency: CONCURRENCY }, () => 
     const headBefore = a.head()
     const cancelled = await a.sync()
     assert.equal(cancelled.result.success, false)
-    assert.match(cancelled.result.error ?? '', /同期を中止しました（「tools\/外部ツール」は外部Gitリポジトリです）/)
+    assert.equal(cancelled.result.error, '同期を中止しました（「tools/外部ツール」は、このアプリとは別に管理されているフォルダです。共有せずにこのPCだけに置くこともできます。「サーバーと同期」を押すと選べます）')
     assert.equal(a.readText('.gitignore'), gitignoreBefore, 'nothing modified before consent')
     assert.equal(fs.existsSync(excludeFile) ? fs.readFileSync(excludeFile, 'utf-8') : null, excludeBefore)
     assert.equal(a.head(), headBefore)
@@ -302,6 +302,113 @@ describe('git:sync multi-member scenarios', { concurrency: CONCURRENCY }, () => 
     a.write('ext/note.md', 'now a normal folder\n')
     ok(await a.sync(), 'a')
     assert.equal(world.serverFile('ext/note.md')?.toString(), 'now a normal folder\n')
+    ok(await b.sync(), 'b')
+    await settleAndCheck(world)
+  })
+
+  // Guard (2026-11-22 incident): a nested repository inside a folder git
+  // ignores is never asked about — nothing there is shared, and 自動で送る
+  // stopped at the question.
+  test('a nested repository inside an ignored folder → sync goes through without asking, nothing shared (also 自動で送る)', async t => {
+    const world = World.create(t, {
+      members: [{ name: 'a' }, { name: 'b' }],
+      departments: ['コンテンツ'],
+      legacySeed: { 'コンテンツ/.personal/.gitignore': '# Personal workspace — not synced\n*\n!.gitignore\n' },
+    })
+    const [a, b] = world.members
+    const repo = 'コンテンツ/.personal/inbox/日付別/2026/20261121/署名の試作/work/pkgrepo'
+    a.initNestedRepo(repo, { 'package.json': '{"name":"pkg"}\n' }).write('コンテンツ/共有メモ.md', 'shared\n')
+    const answer = await a.autoSync('send')
+    const result = answer.status === 'sent' ? answer.result : assert.fail(JSON.stringify(answer))
+    assert.equal(result.success, true, JSON.stringify(result))
+    assert.deepEqual(a.lastDialogs(), [], 'nothing asked')
+    assert.deepEqual(result.excludedNestedRepos ?? [], [])
+    assert.deepEqual(readNestedRepoExcludes(a.dir), [], 'no exclusion written: git already ignores it')
+    assert.equal(world.serverFile('コンテンツ/共有メモ.md')?.toString(), 'shared\n')
+    assert.ok(![...world.serverTree().keys()].some(p => p.includes('pkgrepo') || p.includes('/inbox/')), 'nothing of the folder reaches the server')
+    assert.ok(a.exists(`${repo}/.git`), 'the member\'s repository is left as it is')
+
+    // Negations are git's to decide: a re-included folder is still asked about.
+    a.write('.gitignore', `${a.readText('.gitignore')}\nscratch/*\n!scratch/keep/\n`)
+    a.initNestedRepo('scratch/other/repo').initNestedRepo('scratch/keep/repo')
+    const out = ok(await a.sync(), 'a')
+    assert.deepEqual(out.dialogs.map(d => [d.kind, d.answer]), [['externalNestedRepo', 'exclude']], 'asked about the re-included one only')
+    assert.match(out.dialogs[0].options.message, /scratch\/keep\/repo/)
+    assert.deepEqual(out.result.excludedNestedRepos, ['scratch/keep/repo'])
+    assert.ok(![...world.serverTree().keys()].some(p => p.startsWith('scratch/')))
+    ok(await b.sync(), 'b')
+    await settleAndCheck(world)
+  })
+
+  test('a nested repository in a folder ignored only on this computer is still asked about; a teammate sharing that path cannot overwrite it unseen', async t => {
+    const world = World.create(t, { members: [{ name: 'a' }, { name: 'b' }] })
+    const [a, b] = world.members
+    fs.mkdirSync(path.join(a.dir, '.git', 'info'), { recursive: true })
+    fs.appendFileSync(path.join(a.dir, '.git', 'info', 'exclude'), '\nmine/\n')
+    a.initNestedRepo('mine/tool', { 'README.md': 'a\'s clone\n' })
+    const out = ok(await a.sync(), 'a')
+    assert.deepEqual(out.dialogs.map(d => [d.kind, d.answer]), [['externalNestedRepo', 'exclude']], 'b has no such rule, so a is asked')
+    b.write('mine/tool/README.md', 'b\'s notes\n')
+    ok(await b.sync(), 'b')
+    const again = ok(await a.sync(), 'a')
+    assert.deepEqual(again.result.nestedRepoBackupFiles, ['mine/tool/README.md'])
+    const [backup] = a.backups().filter(x => x.metadata.reason === 'nested_repo_overwrite')
+    assert.equal(fs.readFileSync(path.join(a.dir, '.backups', backup.folder, 'mine/tool/README.md'), 'utf-8'), 'a\'s clone\n')
+    await settleAndCheck(world)
+  })
+
+  test('an ignore line newer here than on the server: the clone is not asked about, and what a teammate already shared there does not overwrite it unseen', async t => {
+    const world = World.create(t, { members: [{ name: 'a' }, { name: 'b' }] })
+    const [a, b] = world.members
+    b.write('scratch/tool/README.md', 'b\'s notes\n')
+    ok(await b.sync(), 'b')
+    // a has not pulled yet: ignores scratch/ and clones a tool there.
+    a.write('.gitignore', `${a.readText('.gitignore')}\nscratch/\n`)
+    a.initNestedRepo('scratch/tool', { 'README.md': 'a\'s clone\n' })
+    const out = ok(await a.sync(), 'a')
+    assert.deepEqual(out.dialogs, [], 'a tracked .gitignore ignores it: not asked')
+    assert.deepEqual(out.result.nestedRepoBackupFiles, ['scratch/tool/README.md'])
+    const [backup] = a.backups().filter(x => x.metadata.reason === 'nested_repo_overwrite')
+    assert.equal(fs.readFileSync(path.join(a.dir, '.backups', backup.folder, 'scratch/tool/README.md'), 'utf-8'), 'a\'s clone\n')
+    assert.equal(world.serverFile('scratch/tool/README.md')?.toString(), 'b\'s notes\n')
+    await settleAndCheck(world)
+  })
+
+  test('the check before the pull fails: sync stops before the pull with one plain sentence (git\'s words only in the log), the work stays', async t => {
+    const world = World.create(t, { members: [{ name: 'a' }, { name: 'b' }], gitignore: `${ESSENTIAL_GITIGNORE}\nscratch/\n` })
+    const [a] = world.members
+    a.write('scratch/notes.md', 'mine\n').write('memo.md', 'to share\n')
+    a.failNextRaw(args => args.includes('ls-tree') && args.includes('--literal-pathspecs'), 'fatal: unable to read tree 0123abcd')
+    const out = await a.sync()
+    assert.equal(out.result.success, false)
+    assert.equal(out.result.error, '共有していないフォルダのファイルを確認できなかったため、同期を中止しました。変更はこのPCに保存されています。もう一度同期しても直らないときは、管理者に連絡してください。')
+    assert.ok(logged(out, 'Could not back up files of excluded nested repositories'))
+    assert.equal(world.serverFile('memo.md'), null, 'nothing pushed before the check')
+    assert.equal(a.readText('scratch/notes.md'), 'mine\n')
+    ok(await a.sync(), 'a')
+    assert.equal(world.serverFile('memo.md')?.toString(), 'to share\n')
+    await settleAndCheck(world)
+  })
+
+  test('a nested repository inside an ignored folder but holding shared files → still asked; cancelling changes nothing', async t => {
+    const world = World.create(t, {
+      members: [{ name: 'a' }, { name: 'b' }],
+      gitignore: `${ESSENTIAL_GITIGNORE}\nscratch/\n`,
+      legacySeed: { 'scratch/notes/a.md': 'shared despite the ignore line\n' },
+    })
+    const [a, b] = world.members
+    a.initNestedRepo('scratch/notes', { 'clone.md': 'from a clone\n' }).willAnswer('sharedNestedRepo', 'cancel')
+    const headBefore = a.head()
+    const cancelled = await a.sync()
+    assert.equal(cancelled.result.success, false)
+    assert.deepEqual(cancelled.dialogs.map(d => d.kind), ['sharedNestedRepo'])
+    assert.equal(cancelled.result.error, '同期を中止しました（共有中のフォルダ「scratch/notes」に、このアプリとは別に管理するための情報が入っています。このPCで増えたファイルだけ共有しないこともできます。「サーバーと同期」を押すと選べます）')
+    assert.equal(a.head(), headBefore)
+    assert.deepEqual(readNestedRepoExcludes(a.dir), [])
+    const out = ok(await a.sync(), 'a')
+    assert.deepEqual(out.dialogs.map(d => [d.kind, d.answer]), [['sharedNestedRepo', 'exclude']])
+    assert.equal(world.serverFile('scratch/notes/a.md')?.toString(), 'shared despite the ignore line\n')
+    assert.equal(world.serverFile('scratch/notes/clone.md'), null)
     ok(await b.sync(), 'b')
     await settleAndCheck(world)
   })

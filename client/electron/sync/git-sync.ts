@@ -43,12 +43,14 @@ import { classifyConflicts } from './conflicts'
 import { pushLandedDespiteError } from './push-landed'
 import {
   backUpBeforeServerOverwrite,
+  externalNestedRepoStopMessage,
   findNestedGitRepos,
   gitlinksUnder,
   legacySharedExclusions,
   nestedRepoOverwriteMessage,
   largeFileOverwriteMessage,
   readNestedRepoExcludes,
+  sharedNestedRepoStopMessage,
   writeNestedRepoExcludes,
   type NestedRepoOverwriteResult,
 } from './nested-repos'
@@ -424,27 +426,35 @@ async function runSync(deps: SyncDeps, repoPath: string, companyId: string, comm
     const untrackedGitlinks: string[] = []
     // Folders excluded on this computer only (block of .git/info/exclude), still on disk.
     let localExcluded: string[] = []
+    // Folders a shared .gitignore ignores, not searched for nested repositories (topmost only).
+    const ignoredFolders: string[] = []
     try {
       // Private folders' clones are legitimate nested repositories (their
       // origin was checked when they were placed), and a nested repository
       // at a reserved folder name is moved to .backups/ below — neither is
       // offered for exclusion.
-      const nestedRepos: string[] = []
-      for (const repo of await findNestedGitRepos(repoPath)) {
-        if (isUnderAny(privatePaths, repo)) continue
-        if (opts.checkUsable && [...(await opts.checkUsable(pathPrefixes(repo))).values()].includes(false)) continue
-        nestedRepos.push(repo)
-      }
       // Local exclusions of folders that are gone (the member deleted the
       // clone) are dropped; a folder whose .git was removed stays excluded
       // until the member deletes it — nothing starts being shared on its own.
       localExcluded = readNestedRepoExcludes(repoPath)
         .filter(repo => { try { return fs.lstatSync(path.join(repoPath, repo)).isDirectory() } catch { return false } })
+      const currentGitignore = fs.existsSync(gitignorePath) ? fs.readFileSync(gitignorePath, 'utf-8') : ''
+      // `/<path>/` lines older apps wrote into the shared .gitignore: kept
+      // (removing one would share the folder for everyone) and honoured.
+      const legacy = legacySharedExclusions(currentGitignore)
+      // Folders a shared .gitignore ignores (`.personal/` …) are not asked
+      // about: nobody's sync shares anything there (nested-repos.ts). The
+      // member's earlier exclusions are still reported, for the steps below.
+      // The ignored folders still get the backup before the pull (9.5): the
+      // rule may be newer here than on the server.
+      const nestedRepos: string[] = []
+      const onIgnored = (folder: string) => { if (!isUnderAny(privatePaths, folder)) ignoredFolders.push(folder) }
+      for (const repo of await findNestedGitRepos(repoPath, { git, known: [...localExcluded, ...legacy], onIgnored })) {
+        if (isUnderAny(privatePaths, repo)) continue
+        if (opts.checkUsable && [...(await opts.checkUsable(pathPrefixes(repo))).values()].includes(false)) continue
+        nestedRepos.push(repo)
+      }
       if (nestedRepos.length > 0) {
-        const currentGitignore = fs.existsSync(gitignorePath) ? fs.readFileSync(gitignorePath, 'utf-8') : ''
-        // `/<path>/` lines older apps wrote into the shared .gitignore: kept
-        // (removing one would share the folder for everyone) and honoured.
-        const legacy = legacySharedExclusions(currentGitignore)
         const alreadyExcluded = (repo: string) => legacy.has(repo.normalize('NFC')) || localExcluded.includes(repo.normalize('NFC'))
         const newRepos = nestedRepos.filter(repo => !alreadyExcluded(repo))
         const canAsk = deps.dialog.canAsk()
@@ -463,7 +473,7 @@ async function runSync(deps: SyncDeps, repoPath: string, companyId: string, comm
           if (isShared) {
             const choice = await deps.dialog.confirmSharedNestedRepo(repo)
             if (choice === 'cancel') {
-              return { success: false, error: `同期を中止しました（「${repo}」に別のGitリポジトリが含まれています）` }
+              return { success: false, error: sharedNestedRepoStopMessage(repo) }
             }
             if (choice === 'keep-sharing') {
               fs.rmSync(path.join(repoPath, repo, '.git'), { recursive: true, force: true })
@@ -474,7 +484,7 @@ async function runSync(deps: SyncDeps, repoPath: string, companyId: string, comm
           } else {
             const choice = await deps.dialog.confirmExternalNestedRepo(repo)
             if (choice === 'cancel') {
-              return { success: false, error: `同期を中止しました（「${repo}」は外部Gitリポジトリです）` }
+              return { success: false, error: externalNestedRepoStopMessage(repo) }
             }
           }
           newlyExcludedNestedRepos.push(repo)
@@ -741,7 +751,11 @@ async function runSync(deps: SyncDeps, repoPath: string, companyId: string, comm
     //      teammate at the same path: the pull would silently overwrite this
     //      computer's (ignored) files there. Back them up first; stop if that
     //      cannot be checked (the commit stays local, nothing else changed).
-    const overwriteGuarded = [...new Set([...excludedNestedRepoPaths, ...localExcluded, ...newlyExcludedNestedRepos])]
+    //      Also the folders a shared .gitignore ignores, which nested-repo
+    //      detection no longer searches: a clone there was never asked about,
+    //      and the rule may be newer here than on the server (a teammate
+    //      already shared files at that path).
+    const overwriteGuarded = [...new Set([...excludedNestedRepoPaths, ...localExcluded, ...newlyExcludedNestedRepos, ...ignoredFolders])]
     if (overwriteGuarded.length > 0) {
       try {
         effects.nestedRepoOverwrite = await backUpBeforeServerOverwrite({
@@ -749,11 +763,11 @@ async function runSync(deps: SyncDeps, repoPath: string, companyId: string, comm
           backupPrefix: opts.backupPrefix, now: deps.now(), log,
         })
       } catch (backupError) {
+        // git's own (English) words stay in the log; the member reads one sentence.
         log.error('Git sync: Could not back up files of excluded nested repositories:', backupError)
-        const msg = backupError instanceof Error ? backupError.message : String(backupError)
         return {
           success: false,
-          error: `共有していないフォルダのファイルを確認できなかったため、同期を中止しました。変更はこのPCに保存されています。\n${msg}`,
+          error: '共有していないフォルダのファイルを確認できなかったため、同期を中止しました。変更はこのPCに保存されています。もう一度同期しても直らないときは、管理者に連絡してください。',
         }
       }
     }
@@ -771,10 +785,9 @@ async function runSync(deps: SyncDeps, repoPath: string, companyId: string, comm
       }
     } catch (backupError) {
       log.error('Git sync: Could not back up large files kept on this computer:', backupError)
-      const msg = backupError instanceof Error ? backupError.message : String(backupError)
       return {
         success: false,
-        error: `このPCだけに置いている大きなファイルを確認できなかったため、同期を中止しました。変更はこのPCに保存されています。\n${msg}`,
+        error: 'このPCだけに置いている大きなファイルを確認できなかったため、同期を中止しました。変更はこのPCに保存されています。もう一度同期しても直らないときは、管理者に連絡してください。',
       }
     }
 
