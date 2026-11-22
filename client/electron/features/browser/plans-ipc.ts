@@ -12,7 +12,7 @@ import type { BrowserOpenPlans, BrowserPlanView } from '../../../../shared/types
 import type { PluginBrowser } from '../../../../shared/core/plugin-browser-declaration'
 import type { BrowserSiteSetting } from '../../../../shared/core/browser-operation'
 import {
-  BROWSER_COMPANY_ID_RE, BROWSER_EXECUTION_ID_RE, BROWSER_PLAN_ID_RE, BROWSER_PLAN_IPC_WORDS as W,
+  BROWSER_COMPANY_ID_RE, BROWSER_EXECUTION_ID_RE, BROWSER_PLAN_ID_RE, BROWSER_PLAN_IPC_WORDS as W, readBrowserPlanView,
   type BrowserPlanCardData, type BrowserPlansFailure,
 } from '../../../shared/browser-plans'
 import { CONTENT_HASH_RE, type BrowserChecker, type BrowserPageRead, type BrowserPreviewSurface, type BrowserRunResult } from '../../../shared/browser-runner'
@@ -90,8 +90,6 @@ function failure(answer: BrowserApiAnswer): BrowserPlansFailure {
 
 const companyOk = (v: unknown): v is string => typeof v === 'string' && BROWSER_COMPANY_ID_RE.test(v)
 const planOk = (v: unknown): v is string => typeof v === 'string' && BROWSER_PLAN_ID_RE.test(v)
-const isPlanView = (v: unknown): v is BrowserPlanView => !!v && typeof v === 'object' && planOk((v as { id?: unknown }).id)
-  && typeof (v as { contentHash?: unknown }).contentHash === 'string' && typeof (v as { state?: unknown }).state === 'string'
 
 export function registerBrowserPlansIpc<E extends IpcInvokeEvent>(ipc: IpcRegistrar<E, IpcMessageEvent>, deps: BrowserPlansIpcDeps<E>): void {
   const running = new Set<string>()
@@ -108,8 +106,9 @@ export function registerBrowserPlansIpc<E extends IpcInvokeEvent>(ipc: IpcRegist
     if (!deps.fromMainWindow(event)) return NOT_MAIN
     if (!companyOk(companyId) || !planOk(planId)) return BAD_INPUT
     const answer = await deps.plans.get(companyId, planId)
-    if (answer.kind !== 'ok' || !isPlanView(answer.value) || answer.value.id !== planId) return failure(answer)
-    const plan = answer.value
+    // Only the fields the card reads, each of its shape (a copy): nothing else of the answer reaches the renderer.
+    const plan = answer.kind === 'ok' ? readBrowserPlanView(answer.value) : null
+    if (!plan || plan.id !== planId) return answer.kind === 'ok' ? { ok: false as const, offline: false, message: W.serverError } : failure(answer)
     const runningHere = running.has(planId)
     const ready: BrowserPlanCardData['ready'] = runningHere ? { ok: false, reason: 'busy' } : await deps.readiness(companyId, plan)
     return { ok: true as const, card: { plan, ready, stoppedHere: deps.stoppedHere(planId), runningHere, siteHost: deps.siteHost(plan.connector.id, plan.connector.version) } }

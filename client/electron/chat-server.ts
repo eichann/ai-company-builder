@@ -447,10 +447,15 @@ export async function startChatServer(config: ChatServerConfig) {
     // Choice prompts (Claude Code's AskUserQuestion, Codex's ask_user), per the agent registry.
     const injector = createChunkInjector()
     // 「ブラウザ操作」 (browser-request/tools.ts): only an agent with the operator, never in an unattended step,
-    // and only while the build's switch is on (the factory answers undefined otherwise).
+    // and only while the build's switch is on (the factory answers undefined otherwise). It stops with the
+    // turn: the member's stop here, the main process's (an administrator, a job ended, a window closed) once
+    // the turn is tracked below — the preview, the facts' reads and the registration all end.
+    const browserRequestAbort = new AbortController()
+    const stopBrowserRequest = () => browserRequestAbort.abort()
+    if (c.req.raw.signal.aborted) stopBrowserRequest(); else c.req.raw.signal.addEventListener('abort', stopBrowserRequest, { once: true })
     const browserRequest = !aiTurnStep && connection.ownsConversation && can.browserOperator && companyId
       ? config.createBrowserRequest?.({
-        companyId, conversationId: appSessionId || null, signal: c.req.raw.signal,
+        companyId, conversationId: appSessionId || null, signal: browserRequestAbort.signal,
         onPlan: planId => {
           const ref: BrowserPlanCardRef = { id: planId, companyId, conversationId: appSessionId || null, planId, at: new Date().toISOString() }
           injector.push({ type: BROWSER_PLAN_PART_TYPE, id: `browser-plan-${planId}`, data: ref })
@@ -727,6 +732,7 @@ export async function startChatServer(config: ChatServerConfig) {
     // The renderer's stop (the request's signal) or the main process's (chat-turns abort).
     const running = chatTurns.track({ appSessionId, companyId }, c.req.raw.signal, injector)
     if (running.signal.aborted) stopSecondOpinion(); else running.signal.addEventListener('abort', stopSecondOpinion, { once: true })
+    if (running.signal.aborted) stopBrowserRequest(); else running.signal.addEventListener('abort', stopBrowserRequest, { once: true })
     let released = false
     const release = (outcome: 'finished' | 'failed' = 'failed') => {
       if (released) return

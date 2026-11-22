@@ -49,6 +49,8 @@ export interface BrowserRegistrationDeps {
   window(companyId: string, host: string): BrowserPreviewSurface | null
   parse(html: string): BrowserHtmlDocument
   plans: { register(companyId: string, input: BrowserPlanInput): Promise<BrowserApiAnswer> }
+  /** The emergency stop for the company's AI (`browserAiStopped`): asked again before each read and before registering. */
+  stopped(companyId: string): boolean
   /** The context now; the answer says whether it still holds (sign-in, company setting, the turn). */
   context(scope: { companyId: string; signal?: AbortSignal }): () => boolean
   now(): number
@@ -67,7 +69,9 @@ export async function registerBrowserPlan(request: BrowserRegistrationRequest, d
   if (!connector || !combination || !operation) return notMade('notAllowed')
   const checker = deps.checker(operation.checker)
   if (!checker || checker.id !== operation.checker || !checker.facts || checker.facts.version !== combination.factsVersion) return notMade('notAllowed')
-  const current = deps.context({ companyId, signal: request.signal })
+  const captured = deps.context({ companyId, signal: request.signal })
+  // The emergency stop (`browserAiStopped`: whole AI, web, outside MCP) also ends a request under way.
+  const current = () => captured() && !deps.stopped(companyId)
 
   const preview = await deps.preview({ companyId, connector: key, operation: operationName, hints: request.hints, signal: request.signal }, current)
   if (preview.outcome === 'refused') {
@@ -101,6 +105,7 @@ export async function registerBrowserPlan(request: BrowserRegistrationRequest, d
   if (!read.facts) return notMade(read.problem === 'stop' ? 'failed' : 'facts')
   // A required fact unknown or not read whole, or the checker's own problem: no plan (availability, never a guess).
   if (read.problem || read.checkerProblem) return notMade('facts')
+  // Right before the plan is sent to the server: the context and the stop once more.
   if (!current()) return notMade('failed')
 
   const answer = await deps.plans.register(companyId, {

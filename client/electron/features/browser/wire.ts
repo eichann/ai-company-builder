@@ -109,7 +109,7 @@ export function wireBrowserPlans<E extends IpcInvokeEvent>(ipc: IpcRegistrar<E, 
         parse: parseBrowserHtml, stillCurrent, now,
       }),
       connector, combination, checker: id => checkers.get(id), reader: id => readers.get(id),
-      window: deps.windows.previewWindow, parse: parseBrowserHtml, plans: http,
+      window: deps.windows.previewWindow, parse: parseBrowserHtml, plans: http, stopped: deps.stopped,
       context: scope => context.capture(scope), now, log: deps.log,
     })
   }

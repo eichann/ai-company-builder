@@ -68,7 +68,7 @@ function fakeChecker(o: { unknown?: string[]; twoReads?: boolean } = {}): Browse
   }
 }
 
-function registrationHarness(o: { switchOn?: boolean; checker?: BrowserChecker; candidate?: Partial<{ explanation: string }>; preview?: BrowserRegistrationDeps['preview']; onRead?: () => void; combination?: boolean } = {}) {
+function registrationHarness(o: { switchOn?: boolean; checker?: BrowserChecker; candidate?: Partial<{ explanation: string }>; preview?: BrowserRegistrationDeps['preview']; onRead?: () => void; combination?: boolean; stopped?: () => boolean } = {}) {
   const calls = { preview: 0, reads: [] as string[], register: [] as unknown[] }
   const checker = o.checker ?? fakeChecker()
   const deps: BrowserRegistrationDeps = {
@@ -84,6 +84,7 @@ function registrationHarness(o: { switchOn?: boolean; checker?: BrowserChecker; 
     parse: () => { throw new Error('no HTML here') },
     plans: { register: async (_c, input) => { calls.register.push(input); return { kind: 'ok', value: { id: PLAN } } } },
     context: () => () => true,
+    stopped: o.stopped ?? (() => false),
     now: () => Date.parse('2026-11-22T03:00:00.000Z'),
     log: { warn() {} },
   }
@@ -134,6 +135,29 @@ test('the context changes while the facts are read: no plan registered', async (
   deps.context = () => () => current
   assert.deepEqual(await registerBrowserPlan(request(), deps), { outcome: 'not-made', why: 'failed' })
   // No further page is read once the context moved, and nothing is registered.
+  assert.deepEqual([calls.reads, calls.register], [['/api/episode-groups'], []])
+})
+
+test('the emergency stop during a request: no further page read, nothing registered', async () => {
+  // Stopped while the facts are read (after the first page) …
+  let stop = false
+  const during = registrationHarness({ checker: fakeChecker({ twoReads: true }), onRead: () => { stop = true }, stopped: () => stop })
+  assert.deepEqual(await registerBrowserPlan(request(), during.deps), { outcome: 'not-made', why: 'failed' })
+  assert.deepEqual([during.calls.reads, during.calls.register], [['/api/episode-groups'], []])
+  // … and stopped right after the preview: not one page read for the facts.
+  let afterPreview = false
+  const after = registrationHarness({ stopped: () => afterPreview })
+  const preview = after.deps.preview
+  after.deps.preview = async (req, current) => { const r = await preview(req, current); afterPreview = true; return r }
+  assert.deepEqual(await registerBrowserPlan(request(), after.deps), { outcome: 'not-made', why: 'failed' })
+  assert.deepEqual([after.calls.reads, after.calls.register], [[], []])
+})
+
+test('the turn stopped (the member, an administrator) while the facts are read: nothing registered', async () => {
+  const turn = new AbortController()
+  const { deps, calls } = registrationHarness({ checker: fakeChecker({ twoReads: true }), onRead: () => turn.abort('stopped-by-admin') })
+  deps.context = scope => createBrowserContext({ userId: () => 'u1' }).capture(scope)
+  assert.deepEqual(await registerBrowserPlan(request(turn.signal), deps), { outcome: 'not-made', why: 'failed' })
   assert.deepEqual([calls.reads, calls.register], [['/api/episode-groups'], []])
 })
 
@@ -282,6 +306,20 @@ test('［任せる］ hands the runner exactly the company, the plan and the sho
   assert.equal(h.runs.length, 1)
 })
 
+test('the card gets only the fields it reads, each of its shape; anything else of the answer stays in main', async () => {
+  const extra = { ...planView(), secret: SECRET, content: '{"x":1}', execution: null }
+  const h = ipcHarness({ plans: { get: async () => ({ kind: 'ok', value: extra }), open: async () => ({ kind: 'no-answer' }), cancel: async () => ({ kind: 'no-answer' }), confirm: async () => ({ kind: 'no-answer' }) } })
+  const got = await h.call('browserPlans:get', 1, COMPANY, PLAN) as { ok: true; card: { plan: Record<string, unknown> } }
+  assert.equal(got.ok, true)
+  assert.equal(JSON.stringify(got.card.plan).includes(SECRET), false)
+  assert.equal('content' in got.card.plan, false)
+  for (const bad of [{ ...planView(), contentHash: 'x' }, { ...planView(), state: 'sent' }, { ...planView(), target: { reminder: 7 } },
+    { ...planView(), facts: { a: { status: 'known', value: 1 } } }, { ...planView(), execution: { id: '../bx_1', state: 'unknown', claimedAt: '2026-11-22T03:00:00.000Z', permittedAt: null, settledAt: null, confirmableAt: null, voidReason: null, confirmedBy: null } }]) {
+    const odd = ipcHarness({ plans: { get: async () => ({ kind: 'ok', value: bad }), open: async () => ({ kind: 'no-answer' }), cancel: async () => ({ kind: 'no-answer' }), confirm: async () => ({ kind: 'no-answer' }) } })
+    assert.equal((await odd.call('browserPlans:get', 1, COMPANY, PLAN) as { ok: boolean }).ok, false, JSON.stringify(bad).slice(0, 80))
+  }
+})
+
 test('a plan the server says is not there reads as not found; an unreachable server as offline', async () => {
   const gone = ipcHarness({ plans: { get: async () => ({ kind: 'refused', code: 'BROWSER_PLAN_NOT_FOUND' }), open: async () => ({ kind: 'no-answer' }), cancel: async () => ({ kind: 'refused', code: 'BROWSER_TOO_EARLY' }), confirm: async () => ({ kind: 'refused', code: 'BROWSER_TOO_EARLY' }) } })
   assert.deepEqual(await gone.call('browserPlans:get', 1, COMPANY, PLAN), { ok: false, offline: false, message: 'この計画は見つかりませんでした。' })
@@ -390,7 +428,14 @@ test('as it ships (the build\'s switch off): ［任せる］, the request and th
     assert.equal(wired.requestAvailable(), false)
     // The consultation's turn gets no tool at all (chat-server.ts offers `acb_browser` only when this is given).
     assert.equal(browserRequestForTurn(wired, { companyId: COMPANY, conversationId: null, signal: new AbortController().signal, onPlan: () => {} }), undefined)
-    assert.ok(browserRequestForTurn({ ...wired, requestAvailable: () => true }, { companyId: COMPANY, conversationId: null, signal: new AbortController().signal, onPlan: () => {} }))
+    // Switched on, the turn's tool hands the request the turn's own company, consultation and signal (its stop).
+    const asked: Array<{ companyId: string; conversationId: string | null; signal: AbortSignal; site: string }> = []
+    const turn = new AbortController()
+    const tool = browserRequestForTurn({ requestAvailable: () => true, request: async input => { asked.push(input); return { outcome: 'not-made', why: 'off' } } },
+      { companyId: COMPANY, conversationId: 'conv-9', signal: turn.signal, onPlan: () => {} })
+    assert.equal(await tool?.execute({ site: 'lstep', operation: 'reminder_step_add_template', target_hints: {}, change_hints: {}, reason: 'x' }), BROWSER_REQUEST_WORDS.off)
+    assert.equal(asked.length, 1)
+    assert.deepEqual([asked[0].companyId, asked[0].conversationId, asked[0].site, asked[0].signal === turn.signal], [COMPANY, 'conv-9', 'lstep', true])
     assert.deepEqual(await wired.request({ companyId: COMPANY, conversationId: null, site: 'lstep', operation: 'reminder_step_add_template', hints: { targetHints: {}, changeHints: {}, reason: '' }, signal: new AbortController().signal }),
       { outcome: 'not-made', why: 'off' })
     assert.deepEqual(touched, [])

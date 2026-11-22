@@ -1029,14 +1029,21 @@ paths and never ask the switch.
   declaration text the app bundles, and only when it is the one row of that id and version.
 - **Registration** (`register.ts`, `registerBrowserPlan`): the switch → this build's combination and
   checker (else `notAllowed`, nothing started) → the preview (6b-1) → the facts read by the checker
-  through the window's page-less read session (6b-2b), the context checked before and after each read →
-  any facts problem or the checker's own problem = no plan → `POST /browser-plans` with the combination,
-  the candidate's ids, the facts and the operator's explanation (an explanation, never a fact). The plan
-  then waits for the member; nothing here approves, claims or sends.
+  through the window's page-less read session (6b-2b), the context **and the emergency stop**
+  (`browserAiStopped`) checked before and after each read → any facts problem or the checker's own
+  problem = no plan → the context and the stop once more → `POST /browser-plans` with the combination,
+  the candidate's ids and the facts. **The operator's explanation** goes as `explanation` (≤ 2000, plain
+  text): kept as it is, shown on the card under its own label 「AI の説明（サイトから読んだ情報ではありません）」,
+  never a fact and never compared at the re-read (the server hashes the fixed content, explanation
+  included, so the card shows exactly what was approved). The plan then waits for the member; nothing here
+  approves, claims or sends.
 - **The request tool** (`electron/browser-request/tools.ts`, `browser_request` on `acb_browser`,
   `mcp__acb_browser__browser_request`): offered only when `browserRequestForTurn` gives one — the wiring
   present and the switch on — and only to an agent with `capabilities.browserOperator` (Claude Code, in
-  process, `alwaysLoad`, auto-allowed), never in an unattended step. Input: `site`, `operation`,
+  process, `alwaysLoad`, auto-allowed), never in an unattended step. **It stops with the turn**: its signal
+  follows the request's (the member's stop) and, once the turn is tracked, the turn's own (`chatTurns`: an
+  administrator's stop, a job ended, a window closed) — the preview, the facts' reads and the registration
+  all end. Input: `site`, `operation`,
   `target_hints`, `change_hints` (names as the user said them), `reason`. **The AI gets the plan's number and
   fixed words only** (`BROWSER_REQUEST_WORDS`): never a fact, a hash, the page's text, the operator's
   question or a run's result (decision 7); it cannot approve, run, report or confirm (no such tool). Its
@@ -1044,15 +1051,19 @@ paths and never ask the switch.
   the card's reference in the reply (`data-browser-plan`, `BrowserPlanCardRef`, stored as `browserPlans`).
 - **IPC** (`plans-ipc.ts`; main window's main frame only, `isMainFrameSender`; every argument checked at
   the entry before anything is asked): `browserPlans:list` (the member's own waiting plans, for the inbox's
-  rows — a follow-up), `browserPlans:get` (the server's view + `ready` + `stoppedHere` + `runningHere` +
-  the site's host), `browserPlans:run { companyId, planId, contentHash }` — approve + claim + the run in one
+  rows — a follow-up), `browserPlans:get` (the server's view — every field the card reads checked for its
+  shape and copied alone, `readBrowserPlanView`; anything else of the answer stays in main — + `ready` +
+  `stoppedHere` + `runningHere` + the site's host), `browserPlans:run { companyId, planId, contentHash }` — approve + claim + the run in one
   press on this PC (decision 5), nothing else ever reaches the runner (no fact, target or AI word), one run
   per plan at a time —, `browserPlans:cancel`, `browserPlans:confirm { executionId, done | not_done }`.
 - **Whether ［任せる］ can be pressed** (`browserCardReadiness`, decision 4): the switch on, the plan a
   draft, the site listed by the member's current policy, the AI not stopped, the site's window open here,
   and the page (read through the window's page-less read session with the checker's declared reads)
   showing the plan's own account; else a plain reason on the card (no window → 「開いてログイン」). Only a
-  hint for the button: the runner checks everything again after the press.
+  hint for the button: the runner checks everything again after the press. **Showing a draft card
+  therefore reads the site** — the checker's declared reads each time a draft card is shown (the 15 s
+  re-read is for unsettled executions only, which make no site read) — only while the switch is on and the AI not stopped (owner OK,
+  2026-11-22).
 - **The card** (`client/src/features/browser-plans/`: `components/BrowserPlanCard.tsx` opened by
   `{ companyId, planId }` from anywhere — the chat's reply today, the inbox later —, `planStore.ts` +
   `hooks/useBrowserPlan.ts` (read whenever a card shows it again — cards shown together share one read —,
@@ -1078,13 +1089,15 @@ paths and never ask the switch.
 
 Tests: `client/tests/browser-plans-app.test.ts` (the switch off: no preview, read or server call; a plan
 registered with this build's combination and the checker's facts, the AI's words only as the explanation;
-a required fact unread, the context moving during the read, no combination, the operator not finding it
-→ nothing registered; the tool's fixed words and no operator question; the secret only in its header and
+a required fact unread, the context moving, the emergency stop or the turn's stop during the reads or
+right after the preview, no combination, the operator not finding it → nothing registered; the plan view
+copied to the card only in its shape; the tool's fixed words and no operator question; the secret only in its header and
 the report without a session; ids outside the server's shapes never sent; 4xx / 5xx / thrown; the IPC from
 another window or with bad arguments asks nothing, ［任せる］ hands exactly company, plan and hash, one run
 per plan; readiness by switch, state, site, stop, window and account; the context's generation; the
 combination's checks; as it ships nothing reaches a site, the operator or the server and the turn gets no
-tool), `src/features/browser-plans/model.test.ts` (an unread count never 0; awaiting only for a draft; a
+tool; switched on, the tool hands the request the turn's company, consultation and signal),
+`agent-stop.test.ts` (an administrator's stop of the turn reaches the request's signal), `src/features/browser-plans/model.test.ts` (an unread count never 0; awaiting only for a draft; a
 result nobody knows says what to check, no resend, confirm only after its time; plain reasons),
 `client/tests/ui/browser-plan-card.spec.ts` (preview `browser-plan-card-ui.html`: the facts, the
 timing sentence, 「読み取れませんでした」, the shared warning; ［任せる］ sends only the plan and the shown

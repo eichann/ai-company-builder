@@ -589,6 +589,30 @@ test('the chat server refuses a new turn while the AI is stopped, before any age
   }
 })
 
+test('「ブラウザ操作」 request: an administrator\'s stop of the turn reaches the request (its preview, reads and registration end)', async () => {
+  const { startChatServer } = await import('../electron/chat-server')
+  let signal: AbortSignal | undefined
+  const server: Awaited<ReturnType<typeof startChatServer>> = await startChatServer({
+    getAuthMode: () => 'claude-code', getApiKey: () => undefined, buildSystemPrompt: () => '', getShellEnv: () => ({}),
+    getPermissionMode: () => 'default', isClaudeCodeAuthenticated: () => true, getClaudeCodeCliPath: () => '/test/claude', listenPort: 0,
+    createBrowserRequest: turn => { signal = turn.signal; return undefined },
+    // Right after the turn is tracked: an administrator stops it.
+    onChatActivity: (_token, active) => { if (active) server.turns.abortAll('stopped-by-admin') },
+  })
+  try {
+    const res = await fetch(`http://127.0.0.1:${server.port}/api/chat`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${server.authToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ messages: [{ id: 'm', role: 'user', parts: [{ type: 'text', text: 'hi' }] }], companyId: 'co', appSessionId: 'conv' }),
+    })
+    await res.text().catch(() => '')
+    assert.ok(signal, 'the request tool was asked for')
+    assert.equal(signal.aborted, true)
+  } finally {
+    server.server.close()
+  }
+})
+
 // ---------------------------------------------------------------------------
 // AI outside conversations stops too (owner decision 2026-10-31): no AI call,
 // a quiet fallback.
