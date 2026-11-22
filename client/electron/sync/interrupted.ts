@@ -17,7 +17,7 @@ import path from 'path'
 import type { SimpleGit } from 'simple-git'
 import { pathKey } from '../../shared/sparse-paths'
 import { gitRunningIn } from './live-git'
-import { backupCopyName } from './backup-names'
+import { backupCopyName, type BackupCopies } from './backup-names'
 import type { SyncLogger } from './types'
 
 /**
@@ -314,13 +314,13 @@ async function planCopies(options: RecoveryOptions, tips: Tips): Promise<Planned
 const NAME_CLASHES = new Set(['EEXIST', 'ENOTDIR', 'EISDIR'])
 
 /** Write at `dest`, or under a folder of its own when the name is in use. Never over anything. */
-async function placeCopy(backupPath: string, dest: string, write: (target: string) => Promise<void>): Promise<void> {
+async function placeCopy(backupPath: string, dest: string, write: (target: string) => Promise<void>): Promise<string> {
   for (let n = 0; ; n++) {
     const target = n === 0 ? path.join(backupPath, dest) : path.join(backupPath, `_same-name-${n}`, dest)
     try {
       await fs.promises.mkdir(path.dirname(target), { recursive: true })
       await write(target)
-      return
+      return target
     } catch (error) {
       const code = (error as NodeJS.ErrnoException).code ?? ''
       if (!NAME_CLASHES.has(code) || n >= 50) throw error
@@ -340,22 +340,27 @@ async function keepChangedFiles(options: RecoveryOptions, plan: PlannedCopy[]): 
   if (plan.length === 0) return null
   const backupPath = freshFolder(options.backupPath)
   const files: string[] = []
+  // A member's `_metadata…json` copied under another name (backupCopyName): the list and 復元 read it from here.
+  const copies: BackupCopies = {}
   try {
     for (const copy of plan) {
+      let target: string
       try {
         const { disk, blob } = copy
         if (disk) {
-          await placeCopy(backupPath, copy.dest, target => fs.promises.copyFile(disk, target, fs.constants.COPYFILE_EXCL | fs.constants.COPYFILE_FICLONE))
+          target = await placeCopy(backupPath, copy.dest, t => fs.promises.copyFile(disk, t, fs.constants.COPYFILE_EXCL | fs.constants.COPYFILE_FICLONE))
         } else {
           // Read first: a version that cannot be read must leave no empty folder in the way of another copy.
           // (A commit's version stays under refs/acb-recovery/ anyway.)
           const content = await git.binaryCatFile(['-p', blob as string]).catch(() => null)
           if (!content) continue
-          await placeCopy(backupPath, copy.dest, target => fs.promises.writeFile(target, content, { flag: 'wx' }))
+          target = await placeCopy(backupPath, copy.dest, t => fs.promises.writeFile(t, content, { flag: 'wx' }))
         }
       } catch (error) {
         throw new CopyFailed(copy.shown, error)
       }
+      const rel = path.relative(backupPath, target).split(path.sep).join('/')
+      if (rel === copy.dest.split(path.sep).join('/') && rel !== copy.shown && !/\.(staged|committed)-version$/.test(rel)) copies[copy.shown] = rel
       if (!files.includes(copy.shown)) files.push(copy.shown)
     }
     if (files.length === 0) return null
@@ -363,6 +368,7 @@ async function keepChangedFiles(options: RecoveryOptions, plan: PlannedCopy[]): 
       timestamp: now.toISOString(),
       reason: 'before_recovery',
       files,
+      ...(Object.keys(copies).length > 0 ? { copies } : {}),
       note: 'on disk when sync cleaned up an operation that had stopped half-way',
     }, null, 2))
   } catch (error) {

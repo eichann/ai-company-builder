@@ -166,6 +166,8 @@ describe('git:sync multi-member scenarios', { concurrency: CONCURRENCY }, () => 
     assert.equal(read(latest.folder, '_metadata (member).json'), '{"mine":2}\n')
     // The member's own file of the copy's name gets a name of its own: neither replaces the other.
     assert.equal(read(latest.folder, '_metadata (member) (member).json'), 'mine too\n')
+    // …recorded, so the list and 復元 use the member's names (nothing guessed from file names).
+    assert.deepEqual(latest.metadata.copies, { '_metadata.json': '_metadata (member).json', '_metadata (member).json': '_metadata (member) (member).json' })
     assert.deepEqual([...(latest.metadata.conflictFiles as string[])].sort(), ['_metadata (member).json', '_metadata.json'], 'the backup keeps its own metadata')
     const earlier = conflicts.find(c => c.metadata.note)!
     assert.equal(read(earlier.folder, '_metadata (member).json'), '{"mine":1}\n')

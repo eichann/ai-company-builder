@@ -214,9 +214,11 @@ tracked. The sync message still counts the newly ignored files. Threshold:
   backup folder sync copies the member's files into: one function names the copy
   (`backupCopyName`, `sync/backup-names.ts`: a root segment `_metadata[ (member)…].json` gets one
   more ` (member)`, so a member's own `_metadata (member).json` does not meet the copy either),
-  used by the conflict copies (`<ts>/` and the earlier versions' `<ts>_<round>/`), the recovery
-  copy and 復元 (it reads the renamed copy when there is one; asking for a backup's root
-  `_metadata.json` never restores the backup's own file). A member's
+  used by the conflict copies (`<ts>/` and the earlier versions' `<ts>_<round>/`) and the recovery
+  copy, which record each renamed copy in the metadata's `copies` (member's path → copy). The
+  backup list shows the member's path and 復元 reads the copy through `copies` only — never guessed
+  from names, so older backups keep their meaning; a backup's root `_metadata.json` without an entry
+  is never restored (it is the backup's own file). The list hides only the root `_metadata.json`. A member's
   `_metadata.json` was once overwritten by the conflict backup's metadata (code review 2026-11-22).
   Scenario: 「a member's own top-level _metadata.json survives a conflict backup…」
   (`scenarios.test.ts`); restore: `ipc-git.test.ts` 「backup:list / backup:restore…」.

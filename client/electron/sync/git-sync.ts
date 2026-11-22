@@ -83,7 +83,7 @@ import {
   type ExcludedCloneRemoval,
 } from './private-sync'
 import type { SyncDeps, SyncDialog } from './types'
-import { BACKUP_METADATA_FILE, backupCopyName } from './backup-names'
+import { BACKUP_METADATA_FILE, backupCopyName, renamedCopies } from './backup-names'
 import { readExcludeLines, writeExcludeLines, type ExcludeBlock } from './local-excludes'
 import { isTempSaveFile, TEMP_SAVE_EXCLUDE_PATTERN } from '../../shared/temp-save-file'
 import { isOfficeLockFile, OFFICE_LOCK_EXCLUDE_PATTERNS } from '../../shared/office-lock-files'
@@ -849,6 +849,7 @@ async function runSync(deps: SyncDeps, repoPath: string, companyId: string, comm
         // a round finishes classifying, so `deletedConflictFiles` is never
         // stale (it is only known *after* the round resolves its conflicts).
         const writeBackupMetadata = () => {
+          const copies = renamedCopies([...conflictFiles, ...deletedConflictFiles], backupPrefix)
           fs.writeFileSync(
             path.join(backupPath, BACKUP_METADATA_FILE),
             JSON.stringify({
@@ -856,7 +857,8 @@ async function runSync(deps: SyncDeps, repoPath: string, companyId: string, comm
               reason: 'conflict',
               conflictFiles: conflictFiles.map(shownPath),
               deletedConflictFiles: deletedConflictFiles.map(shownPath),
-              message: commitMessage || 'Sync from AI Company Builder'
+              message: commitMessage || 'Sync from AI Company Builder',
+              ...(Object.keys(copies).length > 0 ? { copies } : {}),
             }, null, 2)
           )
         }
@@ -930,6 +932,7 @@ async function runSync(deps: SyncDeps, repoPath: string, companyId: string, comm
             fs.writeFileSync(destPath, content)
             markSaved(file, content)
           }
+          const copies = renamedCopies(replaced.map(r => r.file), backupPrefix)
           fs.writeFileSync(
             path.join(roundPath, BACKUP_METADATA_FILE),
             JSON.stringify({
@@ -939,6 +942,7 @@ async function runSync(deps: SyncDeps, repoPath: string, companyId: string, comm
               deletedConflictFiles: [],
               message: commitMessage || 'Sync from AI Company Builder',
               note: 'earlier local version replaced while replaying unpushed commits',
+              ...(Object.keys(copies).length > 0 ? { copies } : {}),
             }, null, 2)
           )
           log.log(`Git sync: Backed up ${replaced.length} earlier local version(s) to ${roundPath}`)
