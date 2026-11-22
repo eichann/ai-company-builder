@@ -42,7 +42,8 @@ server, and a Skill pinned from the Skill shelf. PR 5a-2: the clock makes PC occ
 runner"), the meeting check ("The meeting check"), and the admin form makes PC jobs. PR 5a-3: a deliverable place
 outside ("A deliverable place outside": a Drive folder the responsible person picks). PR 5b: 「もう一度」 ("「もう一度」"
 below). Event-triggered jobs: 4a (server only), 4b-0.5 (the rollback floor), 4b-1 (the server side of the PC's AI on events,
-"Event jobs on the PC"), 4b-2 (the app runs them, fails closed, and shows 「もう一度」 / 「後始末」: "The app's runner").**
+"Event jobs on the PC"), 4b-2 (the app runs them, fails closed, and shows 「もう一度」 / 「後始末」: "The app's runner"), 4b-3 (the admin
+console makes, approves and presses them: "Event jobs on the PC" "The admin console (4b-3)").**
 
 ## Tables (`server/src/db/schema/jobs.ts`, handle `jobs`, `ports/jobs.ts`, `adapters/sqlite/jobs.ts`)
 
@@ -725,7 +726,9 @@ sentences the admin approved.
     minutes per run; `records` and `creates: ['task']` always (the one やること), the meeting check adds
     `JOB_MINUTES_ROUTE`. It runs the shared parser before sending (`definitionFromForm`; problems as plain sentences,
     never values). Editing the server's operation keeps the version's `limits` (the form does not offer them), so a
-    name / time / due / missed change keeps the consent and needs no new acceptance.
+    name / time / due / missed change keeps the consent and needs no new acceptance. An event job (4a: the server's
+    operation; 4b-3: the PC's AI, schema 3 — "Event jobs on the PC" "The admin console (4b-3)") is the same form with
+    「いつ動くか」 → 出来事.
   - **The list's 責任者** is who it runs as now (`approved.responsibleUserId`); a newer draft naming someone
     else says 「次の版では責任者が…さんになります（未承認）」. Whether it runs is `jobRunsText` (a PC job: 「動いています
     （責任者のアプリが開いていて「自動で進める」が入っているときに動きます）」, badge 「PC で動きます」).
@@ -931,14 +934,15 @@ Event-triggered jobs (4a) store `schema: 2`. Production may run 4-0 again after 
   **A screen announces what it can show, edit and accept, never what the shared parser reads** (stage 4b-0.5, owner memo
   §5-1): `ADMIN_JOB_SCHEMAS` (`admin/src/lib/jobs.ts`; also asked by `editableDefinition` / `needsNewerScreen`, so a
   form is never built from a shape the core reads but the form cannot) and `APP_JOB_SCHEMAS` (`client/shared/jobs.ts`;
-  the 受け取る shows a definition only of such a shape, `appReadsJobDefinition`) — the admin `[1, 2]`, the app `[1, 2, 3]`
+  the 受け取る shows a definition only of such a shape, `appReadsJobDefinition`) — the admin `[1, 2, 3]` since 4b-3 (with the
+  form that makes and reads schema 3 back), the app `[1, 2, 3]`
   since 4b-2 (its words for schema 3: `jobCheckText`'s `source_record`; shipped in the same build that runs such jobs and
-  fails closed). The core reads `schema: 3` since 4b-1 (`JOB_SCHEMAS` `[1, 2, 3]`); the admin console announces it with
-  its form (4b-3). The server's tests of "a shape this build does not know" stand in `schema: 4`
+  fails closed). The core reads `schema: 3` since 4b-1 (`JOB_SCHEMAS` `[1, 2, 3]`). The server's tests of "a shape this build does not know" stand in `schema: 4`
   since then (`job-schemas.test.ts`, `job-rollback-floor.test.ts` reads the frozen 4b-1 fixture's version one shape later;
   the floor build runs it as written). Tests
-  `admin/tests/job-screen-schemas.test.ts` (the core stood in by one reading schema 3; every announced schema
-  round-trips through the form) and `client/tests/job-screen-schemas.test.ts` (every announced schema has its words). An app
+  `admin/tests/job-screen-schemas.test.ts` (the core stood in by one reading `schema: 4` since 4b-3 — `schema: 3` before; every
+  announced schema round-trips through the form: for 3 the smallest grant and one with every choice, both done marks, a shelf
+  Skill, a kept `from`) and `client/tests/job-screen-schemas.test.ts` (every announced schema has its words). An app
   before it gets an event job without its definition and its 受け取る is refused — the same code, but the app (a request
   carrying `X-ACB-Client-Version`) is told 「…アプリを新しくしてください」 (`JOB_NEEDS_NEWER_APP`, `routes/jobs.ts`), a screen
   「画面を新しくしてください」.
@@ -1188,8 +1192,8 @@ acts), `jobs.ts` (save, approve, accept, what each viewer sees).
 The server side of 「見張っているやることが完了したら、責任者の PC の AI が会社の Skill を動かす」. **4b-1 promises server-side
 effects only**: a failed condition ends the run, fences its tokens and refuses every later call, outside operation, finish
 and やること. Stopping the AI on the PC when the server cannot be reached (an authorisation deadline, stopping on 404 /
-403) is the app's, 4b-2 (done: "The app's runner" "Fail closed", "Event occurrences"). No screen makes such a job yet
-(4b-3); the admin console announces `1,2`, the app `1,2,3` since 4b-2.
+403) is the app's, 4b-2 (done: "The app's runner" "Fail closed", "Event occurrences"). The admin console makes such a job
+since 4b-3 ("The admin console (4b-3)" below); it and the app announce `1,2,3`.
 
 - **What runs** (`schema: 3`, D2): the event of 4a (one watched record, `followMadeTask`, each target once, the scan, the
   day's limit, gaps, generations — "Event-triggered jobs") makes the occurrence; the responsible person's app claims it
@@ -1294,6 +1298,61 @@ and やること. Stopping the AI on the PC when the server cannot be reached (a
   place outside"). After the independent review: `hides` ending the run, the claim's 404 before the locks and its
   write only for an app of the kind, `viewFor`'s retry-only view, `mine`'s paging — 5 mutations, each fails.
 
+- **The admin console (4b-3)** (`admin/src/lib/jobs.ts`, `components/jobs/`; owner memo 「段4b 設計メモ」 §6 / D6, decisions
+  2026-11-21). Everything below only shows and asks; the server decides.
+  - **The form**: 「いつ動くか」 → 出来事 with 「すること」 → 「Skill を責任者の PC の AI で動かす」 makes schema 3 — the watched やること
+    (the same list as 4a: the responsible person's open やること this viewer reads, `startChoices`), きっかけ, 「作ったやることも続けて
+    見張る」, 1日の上限, the Skill (a company Skill, or the shelf's in a company without the shared folder), **済みの印**
+    (`doneMark`: なし / 「見張っているやることにファイルがもうつながっていたら、AI を動かさない」, with `jobCheckText`'s sentence),
+    read places, 「やることや記録を読む」, mail drafts, the deliverable folder and the place outside, the minutes per run. The check is
+    always `source_record` — a time job's check left on the form (a place, meeting words) grants nothing (`pcGrant(f, true)`:
+    no check place in the reads, no minutes route). **`grant.creates.EVENT_NEEDS_TASK` by construction**: every PC grant
+    the form makes creates `task` with `records`. A **new** job becoming an event run by the PC (`switchJobForm`, `newJob`)
+    sets the wait for the app to **one day** (`JOB_EVENT_PC_EXPIRES_DEFAULT_MINUTES`, D6; still a choice); editing never
+    changes a version's own wait, also when すること is switched away and back. A PC job's minutes become at least 15.
+    **The form never widens a grant** (`jobEditForm`, independent review): a schema-3 version is given the edit form only
+    when `definitionFromForm(formFromDefinition(d))` is `d` (the pinned fingerprint and a shelf Skill's name — the server's —
+    left out of the comparison); one made otherwise (e.g. one record route instead of the four 「やることや記録を読む」 gives)
+    says `JOB_FORM_CANNOT_EDIT` and has no 保存. Schemas 1 and 2 keep their behaviour (their round-trip widening, e.g. the
+    record routes of a time PC job made through the API, is known and left as it was). Under the trigger the form says the sentence the approval and the app say
+    (`jobRecordTriggerText`), with 「最初は「…」を見張ります。」 — that name only from this viewer's own list, never from a definition.
+  - **Words**: the approval and 受け取る show schema 3 through the shared words (`jobTriggerText`, `jobCheckText`,
+    `jobGrantLines` — for an event run by the PC the minutes per run too: 「上限：1回 15分・1日 1回まで（…）」, told apart by
+    the grant having tools, which the server's operation never has —, `jobMissedText`). The list says an approved event
+    job's next occurrence as 「見張っているやることが、きっかけの状態になったとき」 (no slot); a version hidden from the viewer as
+    「表示できません」, and its 「もう一度」 confirmation (placement unknown to them) in words naming neither the server nor the PC.
+  - **A hidden version** (`hiddenVersion`: a shape this console reads, answered without definition and fingerprints — a
+    start record this owner / admin cannot read, `readsStart`): the list, 直す, 承認する and 受け取る say `JOB_VERSION_HIDDEN`
+    (「この版には、あなたが見られないものが含まれているため、内容を表示・編集できません。」 — never what it names, nor that it is a
+    やること); no form is built over it and nothing is approved or accepted (no fingerprint to send; none is guessed — the
+    server would not compare it either, `fingerprintShown`). Decision on the safe side: an owner / admin cannot write a new
+    version over a version hidden from them here, though the server would take one.
+  - **Refusals in plain Japanese** (`describeJobError`, `admin/src/lib/errors.ts`): `BAD_JOB_DEFINITION` by its problem codes
+    (`jobProblemText`: also `schema.UNKNOWN` — the rollback floor refusing schema 3 — 「…いまのサーバーではまだ作れません（サーバー
+    の更新が必要です）」, `EVENT_NEEDS_TASK`, the schema-3 pairing codes, `doneMark`), the job codes whose server sentence is
+    fixed Japanese (`JOB_SENTENCE_CODES`) as the server wrote them, a 「もう一度」 refusal by its code (`jobRetryBlockText`), any
+    other as `describeError`'s sentence for its status (401, 403, 404, 409, 5xx) — and an unknown code or none on any other
+    status (400, 422, 429…) as `JOB_REFUSED_GENERAL`, never the server's text (`describeError`'s fallback would print it). Used by every job dialog, the list's presses and 回の記録.
+  - **Occurrences**: exactly the server's list and fields (D11 decides who sees an event occurrence and which 「もう一度」 fields
+    it carries); an event one is marked 「出来事」 (its slot is the event's time), its 「もう一度」 confirmation says it runs only
+    while the watched やること still asks for it, and every press goes to the occurrence routes (`…/occurrences/:id/retry`,
+    `…/operations/:key/reconcile`), never `/ai-runs`.
+  - **Compatibility**: a tab left open from before (announcing `1,2`) gets schema 3 without its definition, says
+    「画面を新しくしてください」 and offers no 直す / 承認する (the server refuses them too: `job-event-runs.test.ts` 「a screen that
+    announces 1,2 …」). This console on the rollback floor (6760eef3, which knows `[1, 2]`): a schema-3 version is
+    `needsUpdate` there (said as 「画面を新しくしてください」 — safe, though the cause is the server), and creating one is refused
+    `BAD_JOB_DEFINITION` `schema.UNKNOWN`, said as above.
+  - Test: `admin/tests/jobs.test.tsx` "an event run by the responsible person’s PC AI (schema 3)" and
+    `admin/tests/job-screen-schemas.test.ts`. Mutation check: 22 guards removed or inverted one at a time (the announced `3`, the done
+    mark read back, `creates: ['task']`, the event grant ignoring a left-over check — place, minutes route, the flag —, the
+    one-day default and only on becoming one, the hidden version in the form, the approval and the list, each branch of
+    `describeJobError` and showing an unknown code's text, the form using it, the event retry sentence and mark, the minutes
+    line, the event next-occurrence words, the PC fields offered for events, the form making schema 3); each fails a test.
+    After the independent review: 9 more (an unknown code on 400 / 422 / 429 general and 409 kept, the round-trip
+    comparison, schema 3 only, the pin left out of it, the dialog's gate, the hidden next occurrence, the neutral 「もう一度」
+    words, the one-day default for a new job only); each fails a test.
+    Not alone: `hidden` in the approve / accept buttons' `disabled` (a hidden version has no fingerprint, which disables
+    them already); the accept dialog's hidden sentence (same code path as the approval's, not tested separately).
 - Test (4b-2): `client/tests/job-runs-fail-closed.test.ts` (A1: renew 404 / 403 / 409 / 401, a renew that hangs, no server, 5xx
   past the window, a token call refused for a run-ending reason — and not for a tool's own refusal; A2: a late success, a
   success naming another run, an older hold's late 200 / 409 after a re-claim; A3: the list's and the event claim's names, a

@@ -16,16 +16,17 @@ import { Card } from '@/components/ui/card'
 import { companiesApi, jobsApi, type JobView, type Member } from '@/lib/api'
 import { useAuth } from '@/lib/auth-context'
 import { useCompany } from '@/lib/company-context'
-import { describeError } from '@/lib/errors'
+import { describeJobError } from '@/lib/errors'
+import { JOB_VERSION_HIDDEN } from '@/lib/jobs'
 import { useQuery } from '@/lib/use-query'
 import { JOB_CHAIN_STOPPED_ASK, jobOccurrenceText, jobRunsText, jobSlotText, jobTriggerText } from '../../../../shared/core/job-words'
-import { JOB_NEEDS_NEWER_SCREEN, JOB_SYSTEM_PAUSE_REASONS, isKnownJobTrigger } from '../../../../shared/core/jobs'
+import { JOB_NEEDS_NEWER_SCREEN, JOB_SYSTEM_PAUSE_REASONS, isKnownJobTrigger, isRecordTrigger } from '../../../../shared/core/jobs'
 import { STOP_LOOK } from '../../../../shared/design-tokens/stop-meaning'
 import { JobAcceptDialog, JobApproveDialog, JobFormDialog } from './job-dialogs'
 import { JobOccurrences } from './job-occurrences'
 
 export const JOBS_INTRO =
-  '決まった時間に動く仕事です。やることを作るだけの仕事（例：毎週月曜 9:00 に「週の報告を書く」。AI は使いません）と、責任者の PC の AI が会社の Skill で作業して、終わったらやることを作る仕事があります。作ったあと、オーナーか管理者が承認し、責任者が内容を確かめて「受け取る」を押すと動き始めます。'
+  '決まった時間か、見張っているやることが終わったときなどに動く仕事です。やることを作るだけの仕事（例：毎週月曜 9:00 に「週の報告を書く」。AI は使いません）と、責任者の PC の AI が会社の Skill で作業して、終わったらやることを作る仕事があります。作ったあと、オーナーか管理者が承認し、責任者が内容を確かめて「受け取る」を押すと動き始めます。'
 
 const personName = (m: { name: string | null; email: string | null } | undefined) => (m ? m.name || m.email || '名前未設定' : 'もういない人')
 
@@ -77,7 +78,7 @@ export function JobsPage() {
       replace(await run())
       toast.success(what)
     } catch (err) {
-      toast.error('できませんでした', { description: describeError(err) })
+      toast.error('できませんでした', { description: describeJobError(err) })
     }
   }
   const setStopped = async (stopped: boolean) => {
@@ -86,7 +87,7 @@ export function JobsPage() {
       jobs.reload()
       toast.success(stopped ? '定期の仕事をすべて止めました' : '定期の仕事を動かせるようにしました')
     } catch (err) {
-      toast.error('できませんでした', { description: describeError(err) })
+      toast.error('できませんでした', { description: describeJobError(err) })
       throw err
     }
   }
@@ -145,7 +146,10 @@ export function JobsPage() {
                       </p>
                       <p className="text-sm text-muted-foreground">
                         責任者：{personName(byId.get(runsAs))}
-                        {job.needsUpdate ? <>　{JOB_NEEDS_NEWER_SCREEN}</> : isKnownJobTrigger(job.trigger) && <>　いつ：{jobTriggerText(job.trigger)}</>}
+                        {job.needsUpdate ? <>　{JOB_NEEDS_NEWER_SCREEN}</> : isKnownJobTrigger(job.trigger) ? <>　いつ：{jobTriggerText(job.trigger)}</>
+                          // No trigger and not a shape it cannot show: the version is hidden from this viewer (it names a
+                          // やること or a place they cannot read) — said as such, never what it names.
+                          : job.trigger === undefined && <>　{JOB_VERSION_HIDDEN}</>}
                       </p>
                       <p className="text-sm">{jobRunsText(job.waiting, job.pausedReason, job.placement)}</p>
                       {/* An event job's chain that stopped (owner decision ①): its cause as the server words it for this viewer. */}
@@ -168,7 +172,10 @@ export function JobsPage() {
                         </p>
                       )}
                       <p className="text-xs text-muted-foreground">
-                        次の回：{job.nextSlot ? jobSlotText(job.nextSlot) : job.approvedVersion === null ? '承認すると決まります' : 'ありません'}
+                        次の回：{job.nextSlot ? jobSlotText(job.nextSlot) : job.approvedVersion === null ? '承認すると決まります'
+                          : isRecordTrigger(job.trigger) ? '見張っているやることが、きっかけの状態になったとき'
+                          // A version hidden from this viewer (no trigger, not a shape it cannot show): nothing it names is said.
+                          : job.trigger === undefined && !job.needsUpdate ? '表示できません' : 'ありません'}
                         {'　'}前の回：{job.lastOccurrence && last ? `${jobSlotText(job.lastOccurrence.dueSlot)}　${last.label}` : 'まだありません'}
                       </p>
                     </div>

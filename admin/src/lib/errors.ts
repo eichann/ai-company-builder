@@ -1,4 +1,7 @@
 import { ApiError, ApiTimeoutError, INVALID_RESPONSE } from './api'
+import { jobProblemText } from './jobs'
+import { JOB_RETRY_BLOCKS } from '../../../shared/core/jobs'
+import { jobRetryBlockText } from '../../../shared/core/job-words'
 
 // The API answers in English for developers; the people using this panel are
 // non-engineers, so each failure is restated in Japanese with what to do next.
@@ -109,4 +112,41 @@ export function describeError(err: unknown): string {
 
 export function isForbidden(err: unknown): boolean {
   return err instanceof ApiError && err.status === 403
+}
+
+/**
+ * The job codes whose `error` the server writes as one fixed Japanese sentence for the person (`server/src/services/jobs.ts`,
+ * `job-retry.ts`: never a name, a place or a value) — shown as is by 「定期の仕事」 (stage 4b-3: before, a refusal such as
+ * 「画面に出ていた内容と違います…」 read as the generic 「ほかの変更と競合しました」).
+ */
+const JOB_SENTENCE_CODES: ReadonlySet<string> = new Set([
+  'JOB_NOT_FOUND', 'JOB_VERSION_NOT_FOUND', 'JOB_VERSION_FINGERPRINT', 'JOB_OWNER_NOT_MEMBER', 'JOB_GRANT_EXCEEDS', 'JOB_SKILL_MISSING',
+  'JOB_SKILL_NOT_HERE', 'JOB_SKILL_CHANGED', 'JOB_NOT_RESPONSIBLE', 'JOB_RETIRED', 'JOB_PLACE_NEEDED', 'JOB_PLACE_NOT_USABLE',
+  'JOB_SCHEMA_UNKNOWN', 'JOB_NEEDS_NEWER_SCREEN', 'JOB_TRIGGER_NOT_ALLOWED', 'JOB_ACCEPT_SEPARATELY', 'JOB_NOT_APPROVED',
+  'JOB_PAUSED_BY_OTHER', 'JOB_NOT_ACCEPTED', 'JOB_DRAFT_WAITING',
+])
+
+/** A job request refused with a code (or none) this console does not know, whatever the status: never the server's text. */
+export const JOB_REFUSED_GENERAL = 'できませんでした。ページを再読み込みしてから、もう一度ためしてください。'
+
+/**
+ * A refused job request in plain Japanese (「定期の仕事」, jobs.md "The screens"): a definition the server refused by its
+ * problem codes (`jobProblemText`, the form's own words — never a value); a job code with the server's fixed sentence as
+ * the server wrote it; a 「もう一度」 refusal by its code (`jobRetryBlockText`); anything else as `describeError`, except
+ * that its fallback for an unhandled 4xx (「操作できませんでした（<the server's text>）」) becomes `JOB_REFUSED_GENERAL` —
+ * an unknown code's text is never shown (independent review of 4b-3).
+ */
+export function describeJobError(err: unknown): string {
+  if (err instanceof ApiError && err.code) {
+    if (err.code === 'BAD_JOB_DEFINITION') {
+      const problems = Array.isArray(err.body?.problems) ? (err.body.problems as unknown[]).filter((p): p is string => typeof p === 'string') : []
+      return jobProblemText(problems)
+    }
+    if (JOB_SENTENCE_CODES.has(err.code) && err.message) return err.message
+    if ((JOB_RETRY_BLOCKS as readonly string[]).includes(err.code)) return `${jobRetryBlockText(err.code)}。`
+  }
+  // `describeError`'s own sentences for a status (401, 403, 404, 409, 5xx), a broken answer, a timeout or no network stay;
+  // its fallback would print the server's text.
+  if (err instanceof ApiError && err.code !== INVALID_RESPONSE && err.status < 500 && ![401, 403, 404, 409].includes(err.status)) return JOB_REFUSED_GENERAL
+  return describeError(err)
 }

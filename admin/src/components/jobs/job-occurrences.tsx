@@ -3,6 +3,8 @@
 // A job's occurrences (回の記録, jobs.md "The screens") and 「もう一度」 (B PR 5b): only on an occurrence the server says
 // may run again (`retry`), after a confirmation; otherwise why not, in plain words. An outside operation whose result
 // is unknown is settled first (作られていた／作られていなかった), as the responsible person found it. The server decides.
+// An event occurrence (stage 4a / 4b-3) is listed only for a viewer who reads its record (the server leaves the others out),
+// with exactly the fields the server's D11 rights give this viewer; it is pressed on the occurrence routes only.
 import { useState } from 'react'
 import { toast } from 'sonner'
 
@@ -11,7 +13,7 @@ import { ListSkeleton } from '@/components/app/states'
 import { Button } from '@/components/ui/button'
 import { jobsApi, type JobOccurrenceView } from '@/lib/api'
 import { useCompany } from '@/lib/company-context'
-import { describeError } from '@/lib/errors'
+import { describeJobError } from '@/lib/errors'
 import { useQuery } from '@/lib/use-query'
 import { jobMadeBeforeText, jobOccurrenceText, jobOperationKindText, jobRetryBlockText, jobSlotText } from '../../../../shared/core/job-words'
 
@@ -26,12 +28,21 @@ function whenText(iso: string): string {
   return `${d.getMonth() + 1}月${d.getDate()}日 ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
 }
 
-/** What the confirmation says will happen after 「もう一度」 (and, first, what earlier runs already made). */
-export function retryConfirmText(placement: 'e' | 'a' | null | undefined, made: ReadonlyArray<{ kind: string; count: number }> = []): string {
+/**
+ * What the confirmation says will happen after 「もう一度」 (and, first, what earlier runs already made). An event occurrence
+ * on the PC (`event`, stage 4b-3) runs only while its watched やること still asks for it — the server checks before the AI
+ * starts and at every call, and stops it otherwise.
+ */
+export function retryConfirmText(placement: 'e' | 'a' | null | undefined, made: ReadonlyArray<{ kind: string; count: number }> = [], event = false): string {
   const before = jobMadeBeforeText(made)
-  return (before ? `${before}もう一度すると、また作られることがあります。` : '') + (placement === 'a'
+  return (before ? `${before}もう一度すると、また作られることがあります。` : '') + (placement === 'a' && event
+    ? 'この回を、もう一度動かします。責任者のアプリが開いていて「自動で進める」が入っているときに、責任者の PC の AI が始めます。きっかけのやることが今もその状態で、担当が責任者のままのときだけ動きます（途中で変わったら止めます）。期限は今から数え直します。やることが作られるのは、この回で1つだけです。'
+    : placement === 'a'
     ? 'この回を、もう一度動かします。責任者のアプリが開いていて「自動で進める」が入っているときに、責任者の PC の AI が始めます。期限は今から数え直します。やることが作られるのは、この回で1つだけです。'
-    : 'この回を、もう一度動かします。数分のうちに、やることを作り直します（この回で1つだけです）。期限は今から数え直します。')
+    : placement === 'e'
+    ? 'この回を、もう一度動かします。数分のうちに、やることを作り直します（この回で1つだけです）。期限は今から数え直します。'
+    // Where it runs is not shown to this viewer (a hidden version): neither the server's nor the PC's words.
+    : 'この回を、もう一度動かします。期限は今から数え直します。やることが作られるのは、この回で1つだけです。')
 }
 
 /** A job's occurrences (newest first): when, what became of it and why, in plain words — and 「もう一度」 where it works. */
@@ -56,13 +67,13 @@ export function JobOccurrences({ jobId, placement, nameOf }: {
       }
       list.reload()
     } catch (err) {
-      toast.error('できませんでした', { description: describeError(err) })
+      toast.error('できませんでした', { description: describeJobError(err) })
       list.reload()
       throw err
     }
   }
 
-  if (list.error && !list.data) return <p role="alert" className="text-sm text-destructive">{describeError(list.error)}</p>
+  if (list.error && !list.data) return <p role="alert" className="text-sm text-destructive">{describeJobError(list.error)}</p>
   if (!list.data) return <ListSkeleton rows={2} />
   if (list.data.occurrences.length === 0) return <p className="text-sm text-muted-foreground">まだ回がありません。</p>
   return (
@@ -75,6 +86,8 @@ export function JobOccurrences({ jobId, placement, nameOf }: {
             <li key={o.id} className="space-y-1" aria-label={`${slot}の回`}>
               <div className="flex flex-wrap gap-x-3">
                 <span className="tabular-nums">{slot}</span>
+                {/* An event occurrence: its slot is the event's time (never its delivery number, never the record). */}
+                {o.kind === 'event' && <span className="text-small text-muted-foreground">出来事</span>}
                 <span className="font-medium">{words.label}</span>
                 {words.why && <span className="text-muted-foreground">{words.why}</span>}
                 <span className="text-xs text-muted-foreground">第{o.jobVersion}版</span>
@@ -115,7 +128,7 @@ export function JobOccurrences({ jobId, placement, nameOf }: {
           ? (asking.done
             ? '作られていたことにします。もう一度動かしたとき、AI がまた作ることがあります。'
             : '作られていなかったことにします。もう一度動かすと、AI がもう一度作ります。')
-          : retryConfirmText(placement, asking?.occ.madeBefore ?? [])}
+          : retryConfirmText(placement, asking?.occ.madeBefore ?? [], asking?.occ.kind === 'event')}
         confirmLabel={asking?.kind === 'reconcile' ? 'はい' : 'もう一度'}
         onConfirm={confirm}
       />

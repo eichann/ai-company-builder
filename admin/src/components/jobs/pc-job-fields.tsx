@@ -6,6 +6,7 @@ import type { ReactNode } from 'react'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { DELIVERY_PLACE_CHOICES, PC_JOB_MINUTES, type JobForm } from '@/lib/jobs'
+import { jobCheckText } from '../../../../shared/core/job-words'
 
 const SELECT = 'rounded-md border bg-background px-2 py-1 text-sm'
 
@@ -20,13 +21,15 @@ function Row({ label, children }: { label: string; children: ReactNode }) {
 
 /**
  * A PC job's choices (jobs.md "The screens"): the Skill, what is checked before the AI runs, and what it may
- * read, write and draft. Each is a plain choice; the shared parser and the server decide.
+ * read, write and draft. Each is a plain choice; the shared parser and the server decide. An event job (`event`, stage
+ * 4b-3, schema 3) is checked on its watched やること by the server, so instead of a check it offers the done mark.
  */
-export function PcJobFields({ f, set, hasCompanyFolder, shelfSkills }: {
+export function PcJobFields({ f, set, hasCompanyFolder, shelfSkills, event = false }: {
   f: JobForm
   set: <K extends keyof JobForm>(k: K, v: JobForm[K]) => void
   hasCompanyFolder: boolean
   shelfSkills: Array<{ id: string; name: string; department: { name: string } | null }>
+  event?: boolean
 }) {
   return (
     <>
@@ -40,21 +43,35 @@ export function PcJobFields({ f, set, hasCompanyFolder, shelfSkills }: {
           </select>
         )}
       </Row>
-      <Row label="AI を動かす前に確かめること">
-        <select aria-label="確かめること" className={SELECT} value={f.checkKind} onChange={(e) => set('checkKind', e.target.value as JobForm['checkKind'])}>
-          <option value="new_files">決めた場所に新しいファイルがあるか</option>
-          <option value="new_meetings">責任者が出た会議があったか</option>
-        </select>
-        {f.checkKind === 'new_files' ? (
-          <Input aria-label="確かめる場所" value={f.checkPath} onChange={(e) => set('checkPath', e.target.value)} placeholder="例：人事部/面談" />
-        ) : (
-          <Input aria-label="会議の名前に含む言葉" value={f.titleWords} onChange={(e) => set('titleWords', e.target.value)} placeholder="例：面談、1on1（空ならすべての会議）" />
-        )}
-      </Row>
-      {f.checkKind === 'new_meetings' && (
-        <p className="text-xs text-muted-foreground">AI が読めるのは、前の回のあとに責任者が出た会議（言葉を入れたときは名前にその言葉を含むもの）の議事録だけです。</p>
+      {event ? (
+        <>
+          <Row label="済みの印">
+            <select aria-label="済みの印" className={SELECT} value={f.doneMark} onChange={(e) => set('doneMark', e.target.value as JobForm['doneMark'])}>
+              <option value="none">なし（そのたびに AI を動かす）</option>
+              <option value="file_linked">見張っているやることにファイルがもうつながっていたら、AI を動かさない</option>
+            </select>
+          </Row>
+          <p className="text-small text-muted-foreground">{jobCheckText({ kind: 'source_record', doneMark: f.doneMark })}</p>
+        </>
+      ) : (
+        <>
+          <Row label="AI を動かす前に確かめること">
+            <select aria-label="確かめること" className={SELECT} value={f.checkKind} onChange={(e) => set('checkKind', e.target.value as JobForm['checkKind'])}>
+              <option value="new_files">決めた場所に新しいファイルがあるか</option>
+              <option value="new_meetings">責任者が出た会議があったか</option>
+            </select>
+            {f.checkKind === 'new_files' ? (
+              <Input aria-label="確かめる場所" value={f.checkPath} onChange={(e) => set('checkPath', e.target.value)} placeholder="例：人事部/面談" />
+            ) : (
+              <Input aria-label="会議の名前に含む言葉" value={f.titleWords} onChange={(e) => set('titleWords', e.target.value)} placeholder="例：面談、1on1（空ならすべての会議）" />
+            )}
+          </Row>
+          {f.checkKind === 'new_meetings' && (
+            <p className="text-xs text-muted-foreground">AI が読めるのは、前の回のあとに責任者が出た会議（言葉を入れたときは名前にその言葉を含むもの）の議事録だけです。</p>
+          )}
+        </>
       )}
-      <Row label="ほかに読んでよい場所（1行に1つ）">
+      <Row label={event ? '読んでよい場所（1行に1つ）' : 'ほかに読んでよい場所（1行に1つ）'}>
         <textarea aria-label="読んでよい場所" className="min-h-16 w-full rounded-md border bg-background px-2 py-1 text-sm" value={f.readPaths} onChange={(e) => set('readPaths', e.target.value)} />
       </Row>
       <Row label="できること">
@@ -87,7 +104,7 @@ export function PcJobFields({ f, set, hasCompanyFolder, shelfSkills }: {
           {[...new Set([...PC_JOB_MINUTES, f.limits.minutes])].sort((a, b) => a - b).map((m) => <option key={m} value={m}>{m}分</option>)}
         </select>
       </Row>
-      <p className="text-xs text-muted-foreground">終わると、責任者だけに見えるやることが1つできます。責任者のアプリが開いていて「自動で進める」が入っているときに動きます。</p>
+      <p className="text-xs text-muted-foreground">終わると、責任者だけに見えるやることが1つできます。責任者のアプリが開いていて「自動で進める」が入っているときに動きます。{event && '責任者のアプリが閉じていて動けなかった出来事は、下の期限を過ぎると見送ります。'}</p>
     </>
   )
 }
