@@ -39,8 +39,17 @@ export function createJobRepeatAsks(deps: JobRepeatAsksDeps) {
   const isCompanySkill = deps.isCompanySkill
     ?? ((root: string, wd: string | undefined, name: string) => 'rel' in locateCompanySkill(root, wd, name, deps.home))
   let cache: RepeatFile | null = null
-  // A file that exists but cannot be read: nothing is asked or written (an asked mark may be in it), until it is fixed.
-  let unreadable = false
+  // A file that exists but cannot be read: nothing is asked or written (an asked mark may be in it) until it changes —
+  // its identity when it failed is kept, and a later look reads it again once that differs (fixed, replaced or removed).
+  let unreadable: string | null = null
+  const identity = (): string => {
+    try {
+      const st = fs.statSync(deps.file())
+      return `${st.dev}:${st.ino}:${st.size}:${st.mtimeMs}:${st.ctimeMs}`
+    } catch (err) {
+      return (err as NodeJS.ErrnoException)?.code === 'ENOENT' ? 'missing' : 'unknown'
+    }
+  }
   let warned = false
   const warn = (why: string) => {
     if (warned) return
@@ -50,20 +59,23 @@ export function createJobRepeatAsks(deps: JobRepeatAsksDeps) {
 
   function load(): RepeatFile | null {
     if (cache) return cache
-    if (unreadable) return null
+    if (unreadable !== null) {
+      if (identity() === unreadable) return null
+      unreadable = null
+    }
     let text: string
     try {
       text = fs.readFileSync(deps.file(), 'utf8')
     } catch (err) {
       if ((err as NodeJS.ErrnoException)?.code === 'ENOENT') return (cache = emptyRepeatFile())
-      unreadable = true
+      unreadable = identity()
       warn('the store could not be read; nothing is asked')
       return null
     }
     let parsed: RepeatFile | null = null
     try { parsed = readRepeatFile(JSON.parse(text)) } catch { parsed = null }
     if (!parsed) {
-      unreadable = true
+      unreadable = identity()
       warn('the store is not usable; nothing is asked')
       return null
     }
@@ -103,15 +115,17 @@ export function createJobRepeatAsks(deps: JobRepeatAsksDeps) {
       const file = key ? load() : null
       if (!key || !file || file.members[key]?.off) return undefined
       const day = localDay(now())
-      // Only Skills that are still the company's (a Skill removed, a private folder's or a personal one is never named).
-      const named = new Set(repeatAskable(file.members[key], day).filter(s => isCompanySkill(t.companyRoot, t.workingDirectory, s)))
+      // Only Skills that are still the company's (a Skill removed, a private folder's or a personal one is never named),
+      // filtered before the per-turn cap so such Skills never take the places.
+      const named = new Set(repeatAskable(file.members[key], day, s => isCompanySkill(t.companyRoot, t.workingDirectory, s)))
       return {
         instructions: repeatAskInstructions([...named]),
         skillUsed: (skill: string) => {
           try {
             if (!isCompanySkill(t.companyRoot, t.workingDirectory, skill)) return
             const today = localDay(now())
-            // The question went with this turn and the AI loaded the Skill: asked for good, whatever it did or was told.
+            // The question went with this turn and the AI loaded the Skill: asked for good, whatever it did or was told —
+            // also when the turn is stopped or fails afterwards and nothing was asked (fails quiet: never asked twice).
             update(key, m => (named.has(skill) ? markRepeatAsked(m, skill, today) : noteRepeatUse(m, skill, today)))
           } catch { /* informational: never in the AI's path */ }
         },

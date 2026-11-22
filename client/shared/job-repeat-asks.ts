@@ -85,6 +85,14 @@ export function readRepeatFile(raw: unknown): RepeatFile | null {
   return out
 }
 
+/**
+ * A Skill's entry, only when it is the member's own: a Skill folder name may be an `Object.prototype` name (`constructor`),
+ * which a plain lookup would answer with what the object inherits.
+ */
+function ownSkill(member: RepeatMember, skill: string): RepeatSkill | undefined {
+  return Object.prototype.hasOwnProperty.call(member.skills, skill) ? member.skills[skill] : undefined
+}
+
 const lastDay = (s: RepeatSkill) => ('asked' in s ? s.asked : s.days[s.days.length - 1] ?? '')
 
 /** Keeps a member's entries within the limits (the least recently used counted Skill, then the oldest asked mark go first). */
@@ -98,7 +106,7 @@ function bounded(member: RepeatMember): RepeatMember {
 /** A use of `skill` on `day`: one more distinct day (the same day again changes nothing); an asked Skill stays asked. */
 export function noteRepeatUse(member: RepeatMember, skill: string, day: string): RepeatMember {
   if (member.off || !isSkillUseName(skill) || !DAY_RE.test(day)) return member
-  const s = member.skills[skill]
+  const s = ownSkill(member, skill)
   if (s && 'asked' in s) return member
   const days = s ? s.days : []
   if (days.includes(day)) return member
@@ -112,17 +120,22 @@ export function markRepeatAsked(member: RepeatMember, skill: string, day: string
 }
 
 /**
- * The Skills a turn on `day` may ask about: not asked yet, and used on enough **other** days that loading it in this turn
- * makes `JOB_REPEAT_ASK_DAYS` distinct days. Most recently used first, at most `JOB_REPEAT_ASK_PER_TURN`. None while off.
+ * The Skills a turn on `day` may ask about: not asked yet, used on enough **other** days that loading it in this turn
+ * makes `JOB_REPEAT_ASK_DAYS` distinct days, and `usable` here (a company Skill this consultation reaches) — checked
+ * **before** the cap, so Skills removed or out of reach never take the places. Most recently used first, at most
+ * `JOB_REPEAT_ASK_PER_TURN`. None while off.
  */
-export function repeatAskable(member: RepeatMember | undefined, day: string): string[] {
+export function repeatAskable(member: RepeatMember | undefined, day: string, usable: (skill: string) => boolean = () => true): string[] {
   if (!member || member.off) return []
   return Object.entries(member.skills)
-    .filter(([, s]) => !('asked' in s) && s.days.filter(d => d !== day).length >= JOB_REPEAT_ASK_DAYS - 1)
+    .filter(([name, s]) => !('asked' in s) && s.days.filter(d => d !== day).length >= JOB_REPEAT_ASK_DAYS - 1 && usable(name))
     .sort((a, b) => lastDay(b[1]).localeCompare(lastDay(a[1])))
     .slice(0, JOB_REPEAT_ASK_PER_TURN)
     .map(([name]) => name)
 }
+
+/** The question the member reads (the owner's wording, memo 例2; owner decision pending on changes). */
+export const JOB_REPEAT_ASK_QUESTION = 'この仕事は、これまでにも何度か同じように頼まれています。毎週（または毎日・毎月）同じ時間に、定期の仕事としてやりましょうか？'
 
 /** The turn's instruction for the Skills `repeatAskable` named (empty for none). Names are Skill folder names only. */
 export function repeatAskInstructions(skills: readonly string[]): string {
@@ -130,12 +143,15 @@ export function repeatAskInstructions(skills: readonly string[]): string {
   if (named.length === 0) return ''
   const list = named.map(s => `「${s}」`).join('・')
   return '\n\n【定期の仕事にするか、1回だけ聞く】' +
-    `この返事で Skill ツールを使って ${list} のどれかを使い、その仕事を終えたときだけ、返事の最後に1回だけ、使った Skill について` +
-    '「この仕事は、これまでにも何度か同じように頼まれています。毎週（または毎日・毎月）同じ時間に、定期の仕事としてやりましょうか？」と短く聞いてください。' +
-    'この返事でそれらの Skill を使わなかったときは、このことに一切ふれないでください。聞くのはこの返事だけで、二度と同じことは聞きません。' +
+    `この返事の中で、メンバーに頼まれた仕事のために Skill ツールで ${list} のどれかを使い、その仕事を終えたときだけ、` +
+    '返事の最後に1回だけ、使った Skill について' +
+    `「${JOB_REPEAT_ASK_QUESTION}」と短く聞いてください。` +
+    'この指示のために Skill を使わないでください。この返事でそれらの Skill を使わなかったときは、このことに一切ふれないでください。' +
+    '聞くのはこの返事だけで、二度と同じことは聞きません。' +
     'メンバーが「はい」と言ったら、いつ・何があったら動くかを確かめてから job_proposal_places と job_proposal_create で定期の仕事の案を作ってください（出すのはメンバーがカードで押したときだけ）。' +
     '「いいえ」や、ほかの話を続けたときは、それ以上すすめないでください。' +
-    '\n[Ask once] Only if you load one of these Skills with the Skill tool in this reply and finish that work: at the end of the reply, ask once, briefly, ' +
-    'whether to make it a regular time job. Otherwise do not mention it. Never ask again. On "yes", confirm when and what makes it run, then make a candidate ' +
+    '\n[Ask once] Only if, for the work the member asked for, you load one of these Skills with the Skill tool in this reply and finish that work: ' +
+    'at the end of the reply, ask once, briefly, ' +
+    'whether to make it a regular time job. Never load a Skill for this instruction. Otherwise do not mention it. Never ask again. On "yes", confirm when and what makes it run, then make a candidate ' +
     'with job_proposal_places / job_proposal_create; on "no" drop it.'
 }

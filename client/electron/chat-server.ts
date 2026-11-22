@@ -261,10 +261,12 @@ export function withSkillSightings<H extends Pick<ChatServerConfig, 'onToolEvent
  */
 export function repeatAskForTurn(
   ask: ChatServerConfig['jobRepeatAsk'],
-  turn: { unattended: boolean; records: Pick<RecordTools, 'specs'> | undefined; companyId?: string; companyRoot?: string; workingDirectory?: string },
+  turn: { unattended: boolean; sightings: boolean; records: Pick<RecordTools, 'specs'> | undefined; companyId?: string; companyRoot?: string; workingDirectory?: string },
   sink: { current?: (skill: string) => void },
 ): string {
-  if (!ask || turn.unattended || !turn.companyId || !turn.companyRoot) return ''
+  // `sightings`: the turn's tool events reach the sink (`withSkillSightings` wrapped it). Without that the Skill could
+  // never be marked asked, so the question would come back every turn: none.
+  if (!ask || turn.unattended || !turn.sightings || !turn.companyId || !turn.companyRoot) return ''
   if (!turn.records?.specs.some(spec => spec.name === JOB_PROPOSAL_CREATE_TOOL)) return ''
   let answer: ReturnType<NonNullable<ChatServerConfig['jobRepeatAsk']>>
   try { answer = ask({ companyId: turn.companyId, companyRoot: turn.companyRoot, workingDirectory: turn.workingDirectory }) } catch { return '' }
@@ -388,8 +390,9 @@ export async function startChatServer(config: ChatServerConfig) {
     // 「毎週同じ時間にやりましょうか？」's count (jobs.md "Asking after repeats (PR D)"): connected below, only when this turn
     // offers the job proposal tools — an unattended run's or a step's Skill never counts.
     const repeatSkill: { current?: (skill: string) => void } = {}
-    const host = withSkillSightings(config, companyId && appSessionId && companyRootPath && !requestedStep
-      ? { companyId, conversationId: appSessionId, companyRoot: companyRootPath, workingDirectory } : undefined, repeatSkill)
+    const sightingTurn = companyId && appSessionId && companyRootPath && !requestedStep
+      ? { companyId, conversationId: appSessionId, companyRoot: companyRootPath, workingDirectory } : undefined
+    const host = withSkillSightings(config, sightingTurn, repeatSkill)
     const connection = createAgentConnection(authMode, host)
     const can = AGENTS[authMode].capabilities
     // An unattended 「AI の番」 step (ai-turns.md): only its tools, only an agent that takes record actions.
@@ -599,7 +602,7 @@ export async function startChatServer(config: ChatServerConfig) {
         ? allRecords.execute(name, input) : Promise.resolve('この自動の作業では、この道具（またはこの種類の記録）は使えません。'),
     } : allRecords
     if (records) finalSystemPrompt = (finalSystemPrompt || '') + records.instructions
-    const repeatAsk = repeatAskForTurn(config.jobRepeatAsk, { unattended: !!aiTurnStep, records, companyId, companyRoot: companyRootPath, workingDirectory }, repeatSkill)
+    const repeatAsk = repeatAskForTurn(config.jobRepeatAsk, { unattended: !!aiTurnStep, sightings: !!sightingTurn, records, companyId, companyRoot: companyRootPath, workingDirectory }, repeatSkill)
     if (repeatAsk) finalSystemPrompt = (finalSystemPrompt || '') + repeatAsk
     // A consultation about a task (consultation-task.ts): new files are linked to it; a task only the
     // member sees keeps them in the member's 今日のフォルダ. Unattended steps are left as they are.

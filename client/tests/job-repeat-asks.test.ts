@@ -14,7 +14,8 @@ import path from 'node:path'
 import { createJobRepeatAsks } from '../electron/features/jobs/repeat-asks'
 import { repeatAskForTurn, withSkillSightings } from '../electron/chat-server'
 import { JOB_PROPOSAL_CREATE_TOOL } from '../electron/records/job-proposal-tools'
-import { readRepeatFile } from '../shared/job-repeat-asks'
+import { JOB_REPEAT_ASK_QUESTION, readRepeatFile, repeatAskInstructions } from '../shared/job-repeat-asks'
+import { isSkillUseName } from '../../shared/core/skill-uses'
 import type { AgentToolEvent } from '../shared/agent-events'
 
 function world() {
@@ -60,6 +61,15 @@ test('the 3rd distinct day carries the question once; loading it then marks it a
   // Used again on more days afterwards: still never asked (an asked Skill is not counted again).
   for (const d of [23, 30, 37]) { w.day(d); assert.equal(turnUsing(w, 'minutes'), '') }
   w.day(44); assert.equal(turnUsing(w), '')
+})
+
+test('the instruction: the condition first, the owner\'s question, and never a Skill loaded for it', () => {
+  const text = repeatAskInstructions(['minutes'])
+  assert.ok(text.indexOf('ときだけ') < text.indexOf(JOB_REPEAT_ASK_QUESTION))
+  assert.ok(text.includes(`「${JOB_REPEAT_ASK_QUESTION}」`))
+  assert.ok(text.includes('この指示のために Skill を使わないでください'))
+  assert.equal(JOB_REPEAT_ASK_QUESTION, 'この仕事は、これまでにも何度か同じように頼まれています。毎週（または毎日・毎月）同じ時間に、定期の仕事としてやりましょうか？')
+  assert.equal(repeatAskInstructions(['Bad Name']), '')
 })
 
 test('several uses on one day count once', () => {
@@ -154,11 +164,40 @@ test('a store that cannot be read: nothing is asked or written over it', () => {
   assert.equal(w.turn(), undefined)
   assert.deepEqual(w.asks.setOn('co', false), { success: false })
   assert.equal(fs.readFileSync(w.file, 'utf8'), '{ not json')
+  assert.equal(w.turn(), undefined, 'still the same file: not read as empty')
+  // Fixed (written again) → read again at the next look, without a restart.
+  fs.writeFileSync(w.file, JSON.stringify({ version: 1, members: { 'u1/co': { skills: { minutes: { days: ['2026-10-01', '2026-10-02'] } } } } }))
+  assert.match(w.turn()!.instructions, /「minutes」/)
   // One that exists but cannot be read at all (here a folder in its place) is not taken as empty either.
   const v = world()
   fs.mkdirSync(v.file, { recursive: true })
   assert.equal(v.turn(), undefined)
   assert.deepEqual(v.asks.setting('co'), { success: false })
+})
+
+test('removed or unreachable Skills never take the per-turn places', () => {
+  const w = world()
+  for (const n of ['a1', 'a2', 'a3', 'a4']) w.skill(n)
+  w.day(2); turnUsing(w, 'minutes')
+  w.day(3); turnUsing(w, 'minutes', 'a1', 'a2', 'a3', 'a4')
+  // Four Skills used more recently than minutes (days 3 and 4), then removed: minutes is still named on day 5.
+  w.day(4); turnUsing(w, 'a1', 'a2', 'a3', 'a4')
+  for (const n of ['a1', 'a2', 'a3', 'a4']) fs.rmSync(path.join(w.company, '.claude', 'skills', n), { recursive: true })
+  w.day(5)
+  assert.match(turnUsing(w), /「minutes」/)
+})
+
+test('a Skill named like an Object.prototype member (`constructor`) is counted and asked like any', () => {
+  const w = world()
+  const names = ['constructor', 'tostring', 'valueof'].filter(n => isSkillUseName(n)) // at most the per-turn cap
+  assert.ok(names.includes('constructor'))
+  for (const n of names) w.skill(n)
+  for (const d of [2, 3]) { w.day(d); assert.equal(turnUsing(w, ...names), '') }
+  w.day(4)
+  const t = w.turn()!
+  assert.match(t.instructions, /「constructor」/)
+  for (const n of names) t.skillUsed(n)
+  assert.equal(turnUsing(w, ...names), '', 'asked for good')
 })
 
 test('the turn\'s sink gets only a Skill the AI really loaded', () => {
@@ -179,13 +218,14 @@ test('a turn offering the tools gets the question and connects its Skill sink; a
   const used: string[] = []
   const ask = () => ({ instructions: '\n\n【ask】', skillUsed: (s: string) => used.push(s) })
   const offered = { specs: [{ name: 'records_get' }, { name: JOB_PROPOSAL_CREATE_TOOL }] } as never
-  const turn = { unattended: false, records: offered, companyId: 'co', companyRoot: '/c' }
+  const turn = { unattended: false, sightings: true, records: offered, companyId: 'co', companyRoot: '/c' }
   const sink: { current?: (s: string) => void } = {}
   assert.equal(repeatAskForTurn(ask, turn, sink), '\n\n【ask】')
   sink.current?.('minutes')
   assert.deepEqual(used, ['minutes'])
   for (const [why, t] of [
     ['an unattended step', { ...turn, unattended: true }],
+    ['no consultation id: its Skill loads never reach the sink, so it would be asked every turn', { ...turn, sightings: false }],
     ['no job proposal tools', { ...turn, records: { specs: [{ name: 'records_get' }] } as never }],
     ['no record tools', { ...turn, records: undefined }],
   ] as const) {
@@ -228,6 +268,7 @@ async function chatTurn(body: Record<string, unknown>, extra: Record<string, unk
 test('asked only in a turn that offers the job proposal tools — never a job run, 「AI の番」 or a step', async () => {
   assert.equal(await chatTurn({ appSessionId: 'conv-plain-0001' }), 1)
   assert.equal(await chatTurn({ appSessionId: 'conv-plain-0002' }, {}, false), 0, 'the tools not offered (a read token, a run-bound token)')
+  assert.equal(await chatTurn({}), 0, 'no consultation id: its Skill loads could never mark it asked')
   const ceiling = { pluginStepTools: () => ({ allowsRecordTool: () => true, builtinTools: [] }), stepWriteArea: async () => ({ nowhere: true, reads: [] }) }
   assert.equal(await chatTurn({ appSessionId: 'conv-job-00001', aiTurnStep: 'job-procedure' }, ceiling), 0)
   assert.equal(await chatTurn({ appSessionId: 'conv-turn-0001', aiTurnStep: 'minutes-reading' }), 0)
