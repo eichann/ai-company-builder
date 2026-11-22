@@ -37,8 +37,9 @@ const turn = (over: Record<string, unknown> = {}) => ({
   checkSince: '2026-11-10T00:00:00.000Z', procedure: { source: 'company_skill', skill: 'interview-report', fingerprint: 'b'.repeat(40) }, grant: GRANT, ...over,
 })
 
-function fakeServer(opts: { claim?: number; claimCode?: string; renew?: number; finish?: number; createdAt?: string; serverNow?: string; serverAheadMs?: number; noServerTime?: boolean; claimAnswerDelayMs?: number; autoRun?: boolean; turnOver?: Record<string, unknown> } = {}) {
+function fakeServer(opts: { claim?: number; claimCode?: string; renew?: number; finish?: number; createdAt?: string; serverNow?: string; serverAheadMs?: number; noServerTime?: boolean; claimAnswerDelayMs?: number; renewAfterStart?: number; autoRun?: boolean; turnOver?: Record<string, unknown> } = {}) {
   const calls: Array<{ method: string; path: string; body: Record<string, unknown> }> = []
+  let renews = 0
   const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } })
   const fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(String(input))
@@ -56,7 +57,9 @@ function fakeServer(opts: { claim?: number; claimCode?: string; renew?: number; 
       const stamps = opts.noServerTime ? {} : { createdAt: opts.createdAt ?? serverNow, updatedAt: serverNow }
       return json(201, { data: { run: { id: 'run-j1', generation: 1, ...stamps }, turn: turn({ state: 'running', ...opts.turnOver }) } })
     }
-    if (p === '/ai-runs/run-j1/renew') return json(opts.renew ?? 200, {})
+    // `renewAfterStart`: the last check before the AI starts (stage 4b-2, the first renew) is answered, later ones not.
+    if (p === '/ai-runs/run-j1/renew' && opts.renewAfterStart && renews++ > 0) return json(opts.renewAfterStart, {})
+    if (p === '/ai-runs/run-j1/renew') return (opts.renew ?? 200) === 200 ? json(200, { data: { run: { id: 'run-j1', generation: 1 } } }) : json(opts.renew as number, {})
     if (p === '/ai-runs/run-j1/finish') return json(opts.finish ?? 200, opts.finish ? { code: 'RUN_SUPERSEDED' } : { data: {} })
     return json(404, { code: 'NOT_FOUND' })
   }) as typeof fetch
@@ -330,7 +333,7 @@ test('the deadline is the server\'s: this PC\'s clock running ahead does not cut
 })
 
 test('the server takes the run away (a pause, the stop, another PC): the renew\'s 409 stops the AI here', async () => {
-  const server = fakeServer({ renew: 409 })
+  const server = fakeServer({ renewAfterStart: 409 })
   const { claims, stopped } = claimsFor(server, { renewEveryMs: 20 })
   await claims.jobTurns(COMPANY)
   assert.ok((await claims.claim(COMPANY, OCC, 1, 'conv-job-00001')).claimed)

@@ -530,8 +530,12 @@ ceiling, the first message).
 A PC job's occurrence is a candidate of the same queue (`aiTurnQueue`'s `jobs`, `job: true`, `notUrgent`), run by the
 same runner and hidden consultation, with step `job-procedure` (`JOB_PC_STEP`). main's claim (`claims.ts`) routes an
 occurrence id (`occ.…`, never a record id) to `job-runs.ts` after the same refusals (main window, emergency stop,
-`recordActions`, the stop policy confirmed); `claims.ts` hands it its session, `hold` (renew; a 409 also calls the
-job's `onLost`, which stops its AI) and `finishRun` (a job's done carries `jobResult`). Its ceiling is asked by the
+`recordActions`, the stop policy confirmed); `claims.ts` hands it its session, `hold` (renew; for a job's run with a
+`guard` — stage 4b-2, `jobs.md` "Fail closed": the renew has a deadline, a 401 / 403 / 404 / 409 or no confirmation for
+`JOB_CONFIRM_MAX_AGE_MS` calls the job's `onLost`, which stops its AI; an answer counts only for the hold that sent it),
+`confirm` (one renew right before the AI starts), `runRefused` (a run-bound token call refused, reported by the records
+API's `onRunRefused`) and `finishRun` (a job's done carries `jobResult`). A record's run and a plugin step keep the plain
+renew (only a 409 loses it). Its ceiling is asked by the
 chat server like a business plugin step's (`pluginStepTools` → `jobTools`), its write area and read places through
 `stepWriteArea`; `aiTurns:retry` gives nothing back for an occurrence (its 「もう一度」 is the server's, 5b; since stage
 4b-1 the server answers a job's run-level `…/retry` and `…/reconcile` 404, `jobs.md` "Event jobs on the PC"). Records'

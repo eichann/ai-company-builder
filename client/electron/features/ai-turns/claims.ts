@@ -24,7 +24,7 @@ import { readAutoTurnSettings, readOwnAutoRun, type AiTurnClaimResult, type AiTu
 import type { RecordsApi } from '../../records/api'
 import type { RunRegistry } from '../../records/runs'
 import { isOccurrenceId, type JobRunResult } from '../../../../shared/core/jobs'
-import { createJobRuns, type JobRunDeps } from './job-runs'
+import { JOB_CONFIRM_MAX_AGE_MS, JOB_RENEW_TIMEOUT_MS, createJobRuns, jobRunGoneOnCall, jobRunGoneOnRenew, type JobRunDeps } from './job-runs'
 // lane C ▼
 import {
   isPluginRunStep, parsePluginStepTurns, parsePluginStepsOn, parseProcedurePin, pluginStepFirstMessage, pluginStepToolAccess,
@@ -59,6 +59,15 @@ export interface AiTurnClaimsDeps {
   recordMovedOn?: (companyId: string) => void
   /** How often a running claim is renewed (default 60 s; the server's claim lasts 5 minutes). */
   renewEveryMs?: number
+  /**
+   * A scheduled job's run fails closed (stage 4b-2, jobs.md "The app's runner" "Fail closed"): how long its renew may
+   * take before its answer is ignored (default `JOB_RENEW_TIMEOUT_MS`), and how long after the last confirmed renew its
+   * AI is stopped (default `JOB_CONFIRM_MAX_AGE_MS`). Tests shorten them.
+   */
+  jobRenewTimeoutMs?: number
+  jobConfirmMaxAgeMs?: number
+  /** A monotonic clock in ms (default `performance.now`): a wall clock set back never keeps a run going. */
+  monotonicNow?: () => number
   fetch?: typeof fetch
   log?: Pick<Console, 'warn'>
   // lane C ▼
@@ -80,11 +89,28 @@ export interface AiTurnClaimsDeps {
 const COMPANY = /^[A-Za-z0-9_-]{1,100}$/
 const CONVERSATION = /^[A-Za-z0-9-]{8,100}$/
 
+/**
+ * A run this app instance holds. `guard` (a scheduled job's run only, stage 4b-2): when the server last confirmed it may
+ * go on (a renew answered within its deadline, timed from when that renew was sent, on the monotonic clock) and the
+ * timer that stops it once that is `JOB_CONFIRM_MAX_AGE_MS` ago.
+ */
+interface HeldRun {
+  runId: string
+  generation: number
+  conversationId: string
+  timer: ReturnType<typeof setInterval>
+  onLost?: () => void
+  guard?: { confirmedAt: number; watch: ReturnType<typeof setTimeout> | null }
+}
+
 export function createAiTurnClaims(deps: AiTurnClaimsDeps) {
   const doFetch = deps.fetch ?? fetch
   const log = deps.log ?? console
+  const mono = deps.monotonicNow ?? (() => performance.now())
+  const renewTimeoutMs = deps.jobRenewTimeoutMs ?? JOB_RENEW_TIMEOUT_MS
+  const confirmMaxAgeMs = deps.jobConfirmMaxAgeMs ?? JOB_CONFIRM_MAX_AGE_MS
   /** Runs this app instance holds: record → its run, generation, consultation and renewal timer. */
-  const held = new Map<string, { runId: string; generation: number; conversationId: string; timer: ReturnType<typeof setInterval> }>()
+  const held = new Map<string, HeldRun>()
   const heldKey = (companyId: string, recordId: string) => `${companyId}\n${recordId}`
   // lane C ▼
   /** The member's records at a plugin's ai_turn step, as last listed (company → record → turn). */
@@ -102,6 +128,7 @@ export function createAiTurnClaims(deps: AiTurnClaimsDeps) {
     const h = held.get(heldKey(companyId, recordId))
     if (!h) return null
     clearInterval(h.timer)
+    if (h.guard?.watch) clearTimeout(h.guard.watch)
     held.delete(heldKey(companyId, recordId))
     deps.runs.clear(companyId, h.conversationId)
     pluginTools.delete(h.conversationId)
@@ -118,13 +145,13 @@ export function createAiTurnClaims(deps: AiTurnClaimsDeps) {
     return r
   }
 
-  async function session(companyId: string, method: 'GET' | 'POST', path: string, body?: unknown): Promise<{ status: number; data: unknown; code?: string } | null> {
+  async function session(companyId: string, method: 'GET' | 'POST', path: string, body?: unknown, timeoutMs = 20_000): Promise<{ status: number; data: unknown; code?: string } | null> {
     const base = deps.baseUrl().replace(/\/+$/, '')
     const cookies = deps.cookies()
     if (!base || cookies.length === 0) return null
     try {
       const res = await doFetch(`${base}/api/companies/${encodeURIComponent(companyId)}${path}`, {
-        method, redirect: 'error', signal: AbortSignal.timeout(20_000),
+        method, redirect: 'error', signal: AbortSignal.timeout(timeoutMs),
         headers: { Cookie: cookies.join('; '), ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}) },
         ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
       })
@@ -149,22 +176,77 @@ export function createAiTurnClaims(deps: AiTurnClaimsDeps) {
     return record?.title ? { outcome, title: record.title } : { outcome }
   }
 
-  /** Hold a claimed run: register it for the consultation's tokens and renew it while running. */
-  function hold(companyId: string, recordId: string, conversationId: string, run: { id: string; generation: number }, onLost?: () => void) {
+  /** The run is lost here: released (its tokens unbound, no more renewals) and its holder told (a job's AI stops). */
+  function lose(companyId: string, recordId: string, entry: HeldRun) {
+    if (held.get(heldKey(companyId, recordId)) !== entry) return
+    release(companyId, recordId)
+    entry.onLost?.()
+  }
+
+  /**
+   * A job's run stops once the server last confirmed it more than `confirmMaxAgeMs` ago (stage 4b-2, fail closed): the
+   * timer is set for that moment and moved on by every confirmation.
+   */
+  function arm(companyId: string, recordId: string, entry: HeldRun) {
+    const guard = entry.guard
+    if (!guard) return
+    if (guard.watch) clearTimeout(guard.watch)
+    guard.watch = setTimeout(() => {
+      guard.watch = null
+      if (held.get(heldKey(companyId, recordId)) !== entry) return
+      if (mono() - guard.confirmedAt >= confirmMaxAgeMs) lose(companyId, recordId, entry)
+      else arm(companyId, recordId, entry)
+    }, Math.max(0, guard.confirmedAt + confirmMaxAgeMs - mono()))
+    guard.watch.unref?.()
+  }
+
+  /**
+   * One renew of the held run. A record's run: a 409 (taken over, or ended) loses it, as before. A job's run (stage 4b-2,
+   * jobs.md "Fail closed"): the request has a deadline; an answer counts only for **this** hold (a run released, or held
+   * again since — another claim — is neither extended nor stopped by an older request's answer); a success counts only
+   * when it arrived within the deadline and names this run and generation, and then it confirms the run from when the
+   * request was sent; a refusal (`jobRunGoneOnRenew`: 401 / 403 / 404 / 409) loses it, also late. True: confirmed now.
+   */
+  async function renewOnce(companyId: string, recordId: string, entry: HeldRun): Promise<boolean> {
+    const sent = mono()
+    const r = await session(companyId, 'POST', `/ai-runs/${encodeURIComponent(entry.runId)}/renew`, { generation: entry.generation }, entry.guard ? renewTimeoutMs : undefined)
+    if (held.get(heldKey(companyId, recordId)) !== entry) return false
+    if (!entry.guard) {
+      // Taken over by another PC (or ended): this PC's tokens are refused from now on; stop renewing.
+      if (r && r.status === 409) lose(companyId, recordId, entry)
+      return false
+    }
+    if (r && jobRunGoneOnRenew(r.status)) {
+      lose(companyId, recordId, entry)
+      return false
+    }
+    // Late (past its deadline): never an extension — the AI may already have gone on unconfirmed for that long.
+    if (mono() - sent > renewTimeoutMs) return false
+    const run = r && r.status >= 200 && r.status < 300 ? (r.data as { run?: { id?: unknown; generation?: unknown } } | undefined)?.run : undefined
+    if (!run || run.id !== entry.runId || run.generation !== entry.generation) return false
+    entry.guard.confirmedAt = Math.max(entry.guard.confirmedAt, sent)
+    arm(companyId, recordId, entry)
+    return true
+  }
+
+  /**
+   * Hold a claimed run: register it for the consultation's tokens and renew it while running. `confirmedAt` (a job's
+   * run, stage 4b-2): the monotonic time the claim was sent — the run then fails closed from there (`renewOnce`, `arm`).
+   */
+  function hold(companyId: string, recordId: string, conversationId: string, run: { id: string; generation: number }, onLost?: () => void, guard?: { confirmedAt: number }) {
     release(companyId, recordId)
     deps.runs.set(companyId, conversationId, { id: run.id, generation: run.generation })
-    const timer = setInterval(() => {
-      void session(companyId, 'POST', `/ai-runs/${encodeURIComponent(run.id)}/renew`, { generation: run.generation }).then(r => {
-        // Taken over by another PC (or ended): this PC's tokens are refused from now on; stop renewing.
-        // A job's run also stops its AI (a pause, the company's stop, its time limit: jobs.md).
-        if (r && r.status === 409 && held.get(heldKey(companyId, recordId))?.runId === run.id) {
-          release(companyId, recordId)
-          onLost?.()
-        }
-      })
-    }, deps.renewEveryMs ?? 60_000)
+    const timer = setInterval(() => { const entry = held.get(heldKey(companyId, recordId)); if (entry?.timer === timer) void renewOnce(companyId, recordId, entry) }, deps.renewEveryMs ?? 60_000)
     timer.unref?.()
-    held.set(heldKey(companyId, recordId), { runId: run.id, generation: run.generation, conversationId, timer })
+    const entry: HeldRun = { runId: run.id, generation: run.generation, conversationId, timer, ...(onLost ? { onLost } : {}), ...(guard ? { guard: { confirmedAt: guard.confirmedAt, watch: null } } : {}) }
+    held.set(heldKey(companyId, recordId), entry)
+    arm(companyId, recordId, entry)
+  }
+
+  /** A job's run, asked right before its AI starts (stage 4b-2): renewed now — true only when the server confirmed it. */
+  async function confirm(companyId: string, recordId: string, runId: string): Promise<boolean> {
+    const entry = held.get(heldKey(companyId, recordId))
+    return !!entry?.guard && entry.runId === runId && renewOnce(companyId, recordId, entry)
   }
 
   // lane C ▼
@@ -240,7 +322,7 @@ export function createAiTurnClaims(deps: AiTurnClaimsDeps) {
 
   // A scheduled job's run (job-runs.ts): this module's claim, hold and finish, with what only main knows.
   const jobs = deps.jobs ? createJobRuns({
-    session, hold, finishRun, deviceId: deps.deviceId, log,
+    session, hold, finishRun, confirm, monotonicNow: mono, deviceId: deps.deviceId, log,
     holds: (companyId, key, runId) => held.get(heldKey(companyId, key))?.runId === runId,
     readCompanySkill: (companyId, skill, tree, companyRoot) =>
       deps.readProcedure?.(companyId, { source: 'company_skill', skill, fingerprint: tree }, 'SKILL.md', companyRoot) ?? Promise.resolve(null),
@@ -263,6 +345,19 @@ export function createAiTurnClaims(deps: AiTurnClaimsDeps) {
     /** A job run's `job_report` for its consultation; null for any other. */
     jobReporter(conversationId: string) {
       return jobs?.reporter(conversationId) ?? null
+    },
+    /**
+     * A call of a run-bound record token was refused (records/api.ts `onRunRefused`, stage 4b-2): when it is a job's run
+     * this app holds for that consultation and the refusal says the run may not go on (`jobRunGoneOnCall`), the run is
+     * lost here and its AI stops. A record's run is unchanged (the server's fence refuses its later calls).
+     */
+    runRefused(companyId: string, conversationId: string, runId: string, status: number, code: string | undefined) {
+      if (!jobRunGoneOnCall(status, code)) return
+      for (const [key, entry] of held) {
+        if (entry.guard && entry.conversationId === conversationId && entry.runId === runId && key.startsWith(`${companyId}\n`)) {
+          lose(companyId, key.slice(companyId.length + 1), entry)
+        }
+      }
     },
 
     // lane C ▼

@@ -6,13 +6,17 @@
 //     files in the grant's path, or the meetings the server found — before any AI: nothing found → the run
 //     finishes `nothing` and no message is sent; then the pinned Skill read (a company Skill from the pinned
 //     tree, a shelf Skill fetched and verified by its version) and the first message;
+//   - event occurrences (stage 4b-2, schema 3): listed and claimed only by naming the kind `event` and the check
+//     `source_record`; the server checks the record (no check here); the first message starts from that record;
+//   - before the AI starts, the server confirms the run once more (a renew); refused or not answered → nothing starts;
 //   - while it runs: the grant's tool ceiling and write area for that consultation only, its `job_report`,
-//     a stop just before the approved minutes run out, and a stop when the server takes the run away;
+//     a stop just before the approved minutes run out, and a stop when the server takes the run away — or cannot be
+//     reached to confirm it (fail closed: claims.ts `hold`'s guard, `JOB_CONFIRM_MAX_AGE_MS`);
 //   - settle: done with the reported title (the server makes the one やること), else a failure the server
 //     sends where it belongs.
 import path from 'node:path'
 import { readdir, realpath, stat } from 'node:fs/promises'
-import { JOB_PC_CHECK_KINDS, isOccurrenceId, parseJobRunResult, type JobRunResult } from '../../../../shared/core/jobs'
+import { JOB_EVENT_CHECK_KINDS, JOB_PC_CHECK_KINDS, isOccurrenceId, parseJobRunResult, type JobRunResult } from '../../../../shared/core/jobs'
 import { jobPathProblem } from '../../../../shared/core/jobs'
 import { diskKey } from '../../../../shared/core/paths'
 import {
@@ -21,13 +25,18 @@ import {
 } from '../../../shared/ai-turn-steps/job'
 import type { AiTurnClaimResult, AiTurnSettleResult } from '../../../shared/ai-turns'
 
-type Session = (companyId: string, method: 'GET' | 'POST', path: string, body?: unknown) => Promise<{ status: number; data: unknown; code?: string } | null>
+type Session = (companyId: string, method: 'GET' | 'POST', path: string, body?: unknown, timeoutMs?: number) => Promise<{ status: number; data: unknown; code?: string } | null>
 type Failure = { class: 'temporary' | 'bad-input' | 'permission' | 'unknown-result'; code: string }
 
 export interface JobRunDeps {
   /** claims.ts's own: the member's session call, holding a run (registry + renewal) and finishing it. */
   session: Session
-  hold: (companyId: string, key: string, conversationId: string, run: { id: string; generation: number }, onLost: () => void) => void
+  /** `guard.confirmedAt`: when the claim was sent (monotonic) — the run fails closed from there (stage 4b-2). */
+  hold: (companyId: string, key: string, conversationId: string, run: { id: string; generation: number }, onLost: () => void, guard: { confirmedAt: number }) => void
+  /** Renew the held run now: true only when the server confirmed it within the deadline (stage 4b-2, before the AI starts). */
+  confirm: (companyId: string, key: string, runId: string) => Promise<boolean>
+  /** The monotonic clock the hold's guard is timed on. */
+  monotonicNow: () => number
   finishRun: (companyId: string, key: string, failure: Failure | null, extra?: { jobResult: JobRunResult }) => Promise<{ status: number } | null>
   /** Whether this app still holds that run (registered for the consultation's tokens, not taken away). */
   holds: (companyId: string, key: string, runId: string) => boolean
@@ -85,6 +94,41 @@ export const JOB_REPORT_REFUSED = '仕事が止められていたか、時間が
 /** How long before the approved minutes run out the app stops its AI (the server refuses every call after them). */
 export const JOB_STOP_BEFORE_MS = 60_000
 
+/**
+ * Fail closed (stage 4b-2, owner memo 「段4b 設計メモ」 §6 / D12, jobs.md "The app's runner" "Fail closed"): a job's run has
+ * nobody watching, so its AI goes on only while the server keeps confirming it may. A renew is answered within
+ * `JOB_RENEW_TIMEOUT_MS` or its answer does not count (a late success never extends the run); the AI stops once the last
+ * confirmation was sent more than `JOB_CONFIRM_MAX_AGE_MS` ago — offline, the server unreachable or hung, renews failing
+ * with 5xx. Renewed every minute, so two renews may fail in a row; well inside the server's 5-minute lease, after which
+ * it refuses the run's token anyway.
+ */
+export const JOB_RENEW_TIMEOUT_MS = 15_000
+/** The occurrence kinds this app runs (stage 4b-2): time slots and events (`?kinds=` on the list, `kinds` on an event's claim). */
+const JOB_KINDS_RUN = ['time', 'event'] as const
+export const JOB_CONFIRM_MAX_AGE_MS = 3 * 60_000
+
+/**
+ * A renew's answer that says the run may not go on: 401 (signed out), 403 (refused), 404 (no such run for this member:
+ * a record they no longer read, an older server that froze the shape — the rollback floor), 409 (taken over, ended, a
+ * condition failed: `JOB_EVENT_ENDED`, `RUN_SUPERSEDED`). A 5xx or no answer is "not confirmed", left to the window.
+ */
+export function jobRunGoneOnRenew(status: number): boolean {
+  return status === 401 || status === 403 || status === 404 || status === 409
+}
+
+/**
+ * The refusals of a run-bound token's call that say the run is over (stage 4b-2): any 401; a 403 / 404 / 409 / 503 only
+ * with one of these codes — the gate (`NOT_IN_STEP`: also every refused condition at the call), the fence
+ * (`RUN_SUPERSEDED`), the run missing, an event that ended, the emergency stop. Other refusals of a call are the tool's
+ * own answer and the run goes on (a Drive overwrite refused `DRIVE_FILE_CHANGED_SINCE` 409 → "put a new file"; a record
+ * not found 404).
+ */
+const RUN_GONE_CODES = new Set(['NOT_IN_STEP', 'RUN_SUPERSEDED', 'RUN_NOT_FOUND', 'JOB_EVENT_ENDED', 'JOB_NOT_FOUND', 'RECORD_TOKEN_INVALID', 'AI_STOPPED', 'ACB_STOPPED'])
+export function jobRunGoneOnCall(status: number, code: string | undefined): boolean {
+  if (status === 401) return true
+  return (status === 403 || status === 404 || status === 409 || status === 503) && code !== undefined && RUN_GONE_CODES.has(code)
+}
+
 interface Held {
   companyId: string
   occurrenceId: string
@@ -130,6 +174,9 @@ export function createJobRuns(deps: JobRunDeps) {
 
   async function findings(turn: QueuedJobTurn, companyRoot: string | null, point: { commit: string | null } | null, offset: ClockOffset | null): Promise<JobFound | null | 'not-synced' | 'clock'> {
     if (turn.check.kind === 'new_meetings') return { kind: 'meetings', meetings: turn.meetings ?? [] }
+    // An event occurrence (stage 4b-2): the server checked its record at the claim (and does at every call); nothing is
+    // looked at here. Never `nothing` (an event run may not finish so: the server's conditions decide it is not needed).
+    if (turn.check.kind === 'source_record') return turn.kind === 'event' && turn.source ? { kind: 'record', recordId: turn.source.recordId } : null
     if (turn.check.kind === 'new_files') {
       if (point === null) return null
       // A working folder (no commit): files by this PC's clock, so it must be known to agree with the server's —
@@ -151,7 +198,9 @@ export function createJobRuns(deps: JobRunDeps) {
   return {
     /** The occurrences this app can run now; not readable (offline, an older server) → the last list. */
     async turns(companyId: string): Promise<QueuedJobTurn[]> {
-      const r = await deps.session(companyId, 'GET', '/me/job-turns')
+      // Stage 4b-2: this app runs event occurrences too (`?kinds=` — absent, a server lists time slots only; a server
+      // before stage 4-0 ignores it and lists time slots).
+      const r = await deps.session(companyId, 'GET', `/me/job-turns?kinds=${JOB_KINDS_RUN.join(',')}`)
       const turns = r?.status === 200 ? parseJobTurns(r.data) : null
       if (turns === null) return [...(listed.get(companyId)?.values() ?? [])]
       const ids = new Set(turns.map(t => t.occurrenceId))
@@ -188,8 +237,13 @@ export function createJobRuns(deps: JobRunDeps) {
         point = p
       }
       const sentAt = now()
+      const sentMono = deps.monotonicNow()
+      // An event occurrence's claim names the kind and its check (the two locks of jobs.md "Old apps never run it"); a time
+      // slot's claim stays as every earlier app sent it (only a server that listed an event ever gets `kinds`).
+      const event = listedTurn.kind === 'event'
       const answer = await deps.session(companyId, 'POST', '/job-run-claims', {
-        occurrenceId, deviceId: deps.deviceId, conversationId, checks: [...JOB_PC_CHECK_KINDS], ...(point?.commit ? { checkedCommit: point.commit } : {}),
+        occurrenceId, deviceId: deps.deviceId, conversationId, checks: [...JOB_PC_CHECK_KINDS, ...(event ? JOB_EVENT_CHECK_KINDS : [])],
+        ...(event ? { kinds: [...JOB_KINDS_RUN] } : {}), ...(point?.commit ? { checkedCommit: point.commit } : {}),
       })
       if (!answer || answer.status >= 500) return { claimed: false, reason: 'unavailable' }
       // Waiting behind an earlier occurrence of the job: not taken — asked again a little later (it stays listed).
@@ -209,16 +263,17 @@ export function createJobRuns(deps: JobRunDeps) {
       const serverNow = serverMs(run.updatedAt)
       const offset: ClockOffset | null = serverNow !== null ? { min: serverNow - claimedAt, max: serverNow - sentAt } : null
       const held: Held = { companyId, occurrenceId, runId: run.id, access: { allowsRecordTool: () => false, builtinTools: [] }, area: { nowhere: true, reads: [] }, reported: null, timedOut: false, lost: false, timer: null }
-      // Taken away by the server (a pause, the company's stop, the time limit, another PC): the AI stops here too.
+      // Taken away by the server (a pause, the company's stop, the time limit, another PC, a condition of an event that
+      // failed), or not confirmed by it for too long (fail closed): the AI stops here too.
       deps.hold(companyId, occurrenceId, conversationId, { id: run.id, generation: run.generation }, () => {
         held.lost = true
         if (byConversation.get(conversationId) === held) deps.stopTurn(conversationId)
-      })
+      }, { confirmedAt: sentMono })
       const giveUp = async (failure: Failure): Promise<AiTurnClaimResult> => {
         await deps.finishRun(companyId, occurrenceId, failure)
         return { claimed: false, reason: 'unavailable' }
       }
-      if (!turn || turn.occurrenceId !== occurrenceId) return giveUp({ class: 'bad-input', code: 'TURN_NOT_READABLE' })
+      if (!turn || turn.occurrenceId !== occurrenceId || turn.kind !== listedTurn.kind) return giveUp({ class: 'bad-input', code: 'TURN_NOT_READABLE' })
       // The check, before any AI (D6).
       const found = await findings(turn, companyRoot, point, offset)
       if (found === null) return giveUp({ class: 'bad-input', code: 'CHECK_NOT_POSSIBLE' })
@@ -229,7 +284,7 @@ export function createJobRuns(deps: JobRunDeps) {
         await deps.finishRun(companyId, occurrenceId, { class: 'temporary', code: 'NOT_SYNCED' })
         return { claimed: false, reason: 'unavailable', retryAfterMs: NOT_SYNCED_RETRY_MS }
       }
-      if ((found.kind === 'files' ? found.files.length : found.meetings.length) === 0) {
+      if (found.kind !== 'record' && (found.kind === 'files' ? found.files.length : found.meetings.length) === 0) {
         const r = await deps.finishRun(companyId, occurrenceId, null, { jobResult: 'nothing' })
         if (!r || r.status >= 300) log.warn(`[jobs] finish (nothing): answered ${r?.status ?? 'nothing'}`)
         unlist(companyId, occurrenceId)
@@ -258,6 +313,14 @@ export function createJobRuns(deps: JobRunDeps) {
       // Taken away while the check or the procedure was being read: nothing starts (the run is the server's again).
       if (!live(held)) {
         clearTimeout(held.timer)
+        return { claimed: false, reason: 'unavailable' }
+      }
+      // The last check right before the AI starts (stage 4b-2): the server confirms the run once more — a renew, which
+      // also checks an event's conditions. Refused → the run is lost (nothing starts); not answered → given back, tried
+      // later (never started on an old confirmation).
+      if (!(await deps.confirm(companyId, occurrenceId, run.id)) || !live(held)) {
+        clearTimeout(held.timer)
+        if (live(held)) return giveUp({ class: 'temporary', code: 'NOT_CONFIRMED' })
         return { claimed: false, reason: 'unavailable' }
       }
       byConversation.set(conversationId, held)
