@@ -228,16 +228,20 @@ Owner plan 2026-11-20: every automated operation goes through one gate; only per
 (the connector's declaration + a reviewed checker, "The checker"); the AI's entry stays **closed**: nothing
 in the app imports `features/browser/runner.ts` (no IPC channel, preload method, chat tool or agent;
 `browser-runner.test.ts` 「nothing in the app can start a run yet」 checks the importers, the IPC
-inventory and the agents / chat server / renderer). PR 6 adds the approval (the plan provider).
+inventory and the agents / chat server / renderer). Since 6b-2c it runs a plan the server holds
+("Executing a plan" below); 6b-2d wires the card's press to it.
 
-- **Pieces.** `client/shared/browser-runner.ts` (pure: the plan `parseBrowserRunPlan`, `createRunGate`,
-  the checker interface `BrowserChecker`, `BrowserRunSurface`, the step record, `BROWSER_RUN_WORDS`);
+- **Pieces.** `client/shared/browser-runner.ts` (pure: the plan `parseBrowserRunPlan`, the claim
+  `parseBrowserClaim` / `parseFixedContent` / `fixedContentMismatch` / `permitValidMs`, `createRunGate`,
+  the checker interface `BrowserChecker`, `BrowserRunSurface` with `BrowserWriteSteps` /
+  `BrowserWriteOutcome`, the step record, `stoppedBeforeSending`, `BROWSER_RUN_WORDS`);
   `client/shared/browser-checkers.ts` (`createBrowserCheckerRegistry` over the checkers it is **given**
   — an id not given is never run, two with one id refused — `createBrowserConnectors` over the
   declaration texts it is given, `parseBrowserDeclaration`); `client/electron/features/browser/runner.ts`
-  (`createBrowserRunner`: the steps, no Electron), `run-records.ts` (the step record on disk); the
-  window's `run` surface in `browser-window.ts`; `controller.ts` `siteNow` / `runWindow` (what the
-  runner's deps will be). `shared/core/plugin-browser-declaration.ts` `expectedAfter` (the state after).
+  (`createBrowserRunner`: the steps, no Electron), `run-records.ts` (the step record on disk),
+  `read-session.ts` `writeThroughSession` (the write's chunk); the window's `run` surface in
+  `browser-window.ts`; `controller.ts` `siteNow` / `runWindow` / `previewWindow` (what the runner's deps
+  will be). `shared/core/plugin-browser-declaration.ts` `expectedAfter` (the state after).
 - **Site code lives outside the core** (owner decision 2026-11-21, design memo §24): `client/connectors/<site>/`
   holds a site's checkers and its bundled declaration (`client/connectors/lstep/`: `reminder-step.ts`,
   `declaration.ts`, `index.ts` `lstepConnector({ account })`). A connector folder imports only itself,
@@ -246,16 +250,15 @@ inventory and the agents / chat server / renderer). PR 6 adds the approval (the 
   connector (`architecture-boundaries.test.ts` 「the browser core knows no site」; `client/tsconfig.json`
   includes `connectors`). It is a stand-in until checkers run isolated and signed, handed out with
   their declaration from the shelf (design memo §25): moving a site out is moving its folder.
-- **A plan** (from an injected `approvedPlan(planId)`): `planId`, `companyId`, connector `{ id, version }`
+- **A plan** (the server's claim, `BrowserClaim.plan`, checked against its fixed content): `planId`, `companyId`, connector `{ id, version }`
   (exact), `operation`, `account` (the outside account's id as the checker reads it), `target`, `change`,
   `before` (the target's state the person saw: named lists of ids only), `approvedAt` (a plan approved
   more than a day ago never runs, whatever its expiry; one "approved" over a minute in the future is
   refused), `expiresAt` (never more than a day ahead). Its values must fit the type (`browserPlanProblem`).
-  **Single use is only per PC here**: the step record lives on this computer, so the same plan could
-  run once on each PC of the member. The server's plans (6a, "Plans, executions, permits and locks")
-  make a plan single-use on the server (claimed once, a permit per send); 6b must hand the runner only
-  a claimed plan and ask for the permit right before the write.
-- **One run**, refusing with nothing sent at each check: the plan; the step record (a plan with any
+  Single use: the server claims a plan once and permits its execution once ("Plans, executions,
+  permits and locks"); the step record on this PC adds that this PC never runs a plan it has any
+  record of.
+- **One run** (the checks of PR 5a, inside the flow of "Executing a plan"), refusing with nothing sent at each check: the plan; the step record (a plan with any
   record never runs again — also one cut off by a crash); the connector declaration at that version; the
   operation (this PR: one form write, not irreversible); the checker (`checker.id` must equal the
   declaration's `checker`, else `unknown-checker`); **every target field no declared write carries is
@@ -267,19 +270,19 @@ inventory and the agents / chat server / renderer). PR 6 adds the approval (the 
   refused one → `no-visible-change`, never run); the
   company's setting now (`browserOperationsAllowed` against the site the member's
   current valid policy lists: on, asset hosts, level); the AI stop; the member's open window; one run
-  per window. Then `pending` is kept, the window enters `ai` mode with the run's gate (true only once
-  DevTools Fetch sees the page), the checker's declared reads are made, and the run **stops before
-  writing** for: an account that cannot be read (`account-unknown`) or is not the plan's
-  (`account-mismatch`), a target that is not exactly one existing item, a state other than `before`,
-  a missing CSRF field, a stop / setting change / expiry / closed window since (also checked by the
-  gate per request). Then `sent` is kept (**before** the send; not kept = not sent), the one declared
-  write is armed and sent, and the page is read again: the state `expectedAfter` gave = `succeeded`; **`failed` only
-  when the site answered the write with a 4xx (419, 422…) and the page shows `before`**; everything
-  else — another state, `before` after a 2xx / 3xx / 5xx (`unchanged-unrefused`), no slot before and
-  none after (`empty-state`: the checker may not read the real page as we think), no answer, no
-  re-read — is **`unknown` (結果が分からない), never sent again** by the runner. The window always goes
-  back to `human`. Every reason is a word of `BROWSER_RUN_REASONS`; a checker's `problem` that is not
-  one becomes `checker-problem` (a checker's or a site's text never reaches a record or a result).
+  per window. Then the facts are read again ("Executing a plan"), the window enters `ai` mode with the
+  run's gate (true only once DevTools Fetch sees the page), the checker's declared reads are made, and
+  the run **stops before writing** for: an account that cannot be read (`account-unknown`) or is not the
+  plan's (`account-mismatch`), a target that is not exactly one existing item, a state other than
+  `before`, a missing CSRF field, a stop / setting change / expiry / closed window since (also checked
+  by the gate per request). Then the one declared write is armed and sent (the permit, the last check:
+  "Executing a plan"), and the page is read again: exactly the state `expectedAfter` gave =
+  `succeeded`; **everything else once the request left** — a 4xx with the page unchanged, another
+  state, another account, no target, no answer, no re-read — is **`unknown` (結果が分からない), never
+  sent again** by the runner (6b-2c removed the old `failed`-on-4xx branch: the write did reach the
+  site; `model/browser-plan` `BrokenFailedOn4xx`). The window always goes back to `human`. Every reason
+  is a word of `BROWSER_RUN_REASONS`; a checker's `problem` that is not one becomes `checker-problem` (a
+  checker's or a site's text never reaches a record or a result).
 - **The gate** (`createRunGate`, the one rule for every request of a run): the page's own writes are
   refused for the whole run (the window's write decider says no; a page's fetch / XHR / timer / form of
   the very same write included); the page's reads of the operated host pass only for its parts
@@ -293,7 +296,7 @@ inventory and the agents / chat server / renderer). PR 6 adds the approval (the 
   read (undefined = an upload / blob: refused), no query, through `matchDeclaredWrite` (exact method,
   raw path, the plan's values, no other key but `ignore_body`, no repeated key or `_method`), in
   declared order, **at most once**; nothing while stopped. The runner sends the write from main
-  through the window's login, never through the page (`run.request`): the page's script cannot see,
+  through the window's login, never through the page (`run.write`; reads `run.request`): the page's script cannot see,
   change or answer it, and its hidden fields play no part (the body is built from the declaration,
   the plan and the CSRF value the checker read in the server's HTML).
 - **A write gets a connection of its own** (verified on Electron 45): Chromium **resends a request whose
@@ -316,9 +319,15 @@ inventory and the agents / chat server / renderer). PR 6 adds the approval (the 
   similar for HTTP/3 / QUIC. The site's own failure to keep that promise could apply a write twice;
   the page's re-read would then show another state (`unknown`), never `succeeded`.
 - **The step record** (`run-records.ts`, `<file>` given by its user; nothing wires it yet): plan id,
-  operation name, step, `pending` / `sent` / `succeeded` / `failed` / `unknown`, a fixed reason word,
-  a time — never an account, a template, a token or any other value (refused). Kept two days (a plan
-  lives at most one). A file that exists but cannot be read refuses every run.
+  operation name, step, `claimed` / `permit-asked` / `succeeded` / `failed` / `unknown` (6b-2c; a file
+  with the older `pending` / `sent` reads as unreadable — nothing ever wrote one outside tests), a fixed
+  reason word, a time — never an account, a template, a token, the secret or any other value (refused).
+  `permit-asked` is written right before the permit is asked: from then on the write may have left. No
+  `sent` mark (decision: writing it would sit between the last check and the request leaving — the
+  accepted limit's stretch —, and `permit-asked` already means "maybe sent"). `failed` = provably never
+  left; `stoppedBeforeSending` (the latest record is `failed`) is the card's only hint, never a confirm
+  (6b-2 decision 10). Kept two days (a plan lives at most one). A file that exists but cannot be read
+  refuses every run.
 - **The checker** (`BrowserChecker`, design memo §24): `id` (`<site>.<thing>`, named by a declaration's
   `checker`), `confirms` (the target fields it confirms on the page), `readPaths(values)` (the exact
   paths, no query, it reads), `view(values, reads)` → `{ account, state, ignored, problem }`. It has
@@ -352,7 +361,7 @@ inventory and the agents / chat server / renderer). PR 6 adds the approval (the 
   hidden inputs of the markup (`_token` also `meta[name=csrf-token]`), one value each, plain token
   characters; none → `csrf-missing`, no write. (Whether the real page has its slots in `onclick`
   attributes, as captured, rather than in a script is not verified beyond the capture: if not, the
-  state reads empty and the run stops with `before-changed` or ends `empty-state`, never `failed`.)
+  state reads empty and the run stops before the permit with `facts-changed` / `before-changed`, or ends `unknown`, never `failed`.)
 - **The account** (6b-1; confirmed on the real site with the owner's login, design memo §34): every page
   carries `<meta name="lm-account-id" content="<id>">`; the checker's default reader `accountFromMeta`
   takes it from real markup only — whole start tags, so a tag spelled inside an attribute value is not
@@ -388,21 +397,15 @@ rule; the plan's shape, expiry, `approvedAt` and one-day limits; the checker's b
 attribute, not in a comment / script / text area, slots of this reminder and step only, none outside)
 / ids / token and the account from `lm-account-id` (present, missing, two different values, not a
 positive integer, only in a comment or script); the bundled declaration, its `expect`, an unknown checker and
-two checkers with one id; the runner: judged by the type's `expect` (a removal of what was not there
-never starts, `cannot-come-true`; nor one whose page would look the same, `no-visible-change`; a page
-that ends otherwise is `other-state`);
-success with exactly one write, never twice even after a lost answer, wrong / unknown account,
-missing target, changed state, a target field neither written nor confirmed, a stop, a policy change,
-an expiry and an old approval during the run, refusals before anything starts, nothing sent unless the
-record was kept first, `failed` only after a 4xx and unchanged, `empty-state`, fixed reason words, one
-run per window; the record on disk and fail-closed; the closed AI entry: no module outside
+two checkers with one id; the record on disk and fail-closed; the closed AI entry: no module outside
 `features/browser` names the runner, only the controller has `runWindow`, only the runner enters ai
 mode) and `client/tests/browser-window-electron.test.ts` with a
 Lステップ-like site in `tests/browser-window-harness/sites.ts` (exactly one POST with the planned ids
 and the page confirms it; while the run operates the page's fetch, XHR, timer autosave, tampered form
 and undeclared read reach nothing; another LINE account and a stop during the run send nothing; a lost
 answer reaches the site exactly once and the plan never runs again; an answer over 5 MiB is a failed
-read; the write needs a cookie scoped to its own path and leaves nothing in its session, one write
+read; a permit 5 s old by the last check: the write session never ends the request, nothing reaches the
+site, the server is told failed; the write needs a cookie scoped to its own path and leaves nothing in its session, one write
 session for every write; on the real window the armed write alone, once, another step / template /
 extra key refused, undeclared reads refused for the runner and the page). Each guard mutation-checked;
 kept on purpose: awaiting the write session's clear after the write (Chromium queues it before any later
@@ -619,6 +622,74 @@ uncached and own only, the report without a session, the real member removal),
 `company-scoped-sql.test.ts` (`HANDLE_TABLES`, the lookup), `jobs-schema.test.ts` (additive tables).
 Each guard mutation-checked.
 
+## Executing a plan (6b-2c: built, switched off; nothing in the app calls it yet)
+
+Design 6b-2 §3, §5 (owner approved every recommendation): `createBrowserRunner(deps).run({ companyId,
+planId, contentHash })` (`features/browser/runner.ts`) runs one plan the member approves on the card —
+the card's press is all it takes (never a fact, a hash of its own or the AI's word). No Electron; the
+server comes in as `BrowserPlansApi` (approve / claim / cancel / permit with the session, report with
+the secret; the HTTP client is 6b-2d's, none retries by itself), the window as `BrowserRunWindow`
+(`run` + `preview` of one window), the context as `context()` → "still the same?" (sign-in, company,
+setting generation, conversation: 6b-2d hands it in), the clocks as `now()` and `monoMs()`.
+
+- **Order** (each step names a `model/browser-plan/PlanLife.tla` action): the switch (off → nothing
+  asked) → the input's shape → this PC's record (any record → `already-ran`) → `approve { contentHash }`
+  (a lost answer still tries the claim) → `claim` (refused / lost → `refused`, nothing else possible: a
+  lost claim's plan is used up). From the claim on, **every stop before the permit gives the plan back**
+  (`cancel`: the server makes the execution void; record `failed`; outcome `stopped`): a claim without
+  `fixed` (**an older server: never run**, `server-too-old`); `fixed.content` must hash (`sha256:` of its
+  UTF-8) to `fixed.contentHash`, equal the hash the person approved, be exactly the canonical JSON of what
+  it parses to, and agree with the claim's plan field by field (company, connector, operation, account —
+  also the `account` fact —, target, change, expiry, facts version, `before` = the `state` fact:
+  `fixedContentMismatch`) — else `fixed-mismatch`; record `claimed`; the PR 5a checks ("The runner")
+  plus **the build's own combination** (`deps.combination`: declaration and checker hashes and facts
+  version equal the fixed content's, the checker's `facts.version` too — else `connector`); the setting,
+  the stop, the expiry, the context; the window, one run per window; **the full re-read**
+  (`readBrowserFacts` through the window's page-less read session, then
+  `browserFactsChangedProblem(approved facts, re-read)`: any difference, a fact unreadable, a checker
+  problem → `facts-changed`; a count may fall, never rise; unknown → known is a change); `ai` mode and the
+  checker's view (`checkBefore`: account, target, state, CSRF).
+- **The write** (`run.write`, typed so it cannot be sent without its two steps; shell:
+  `writeThroughSession` + `sendOnce`): the write session is prepared first (connections closed, storage
+  cleared, its hook, the cookies) — those seconds never eat into the permit —, then `ready`: record
+  `permit-asked`, both clocks read, the permit asked **once** (5 s, `askWithin`; a refusal → the server
+  voided it, nothing reported, `stopped` `permit-refused`; no usable answer → `failed`
+  `permit-unanswered`), then `beforeSend` synchronously right before `request.end`, no await between:
+  monotonic **and** wall elapsed since just before asking both in `[0, min(validMs, 5000))` (a sleep stops
+  the first, a clock set back makes the second negative → `permit-late`), the context, the stop, the
+  setting, the expiry, the window. False or a throw → the request is never ended → **`failed`, reported
+  failed** (the only way to `failed`: "the app stopped before sending", provably). The shell's send
+  rejects with `BrowserNotSentError` only before `request.end`; every other failure is `sent` with no
+  answer.
+- **After the send**: no answer / an error / a disconnect / an exception once the permit was asked →
+  **`unknown`** (`no-answer`); otherwise the page read again decides: exactly `expectedAfter` →
+  `succeeded`; another account, no target, a checker problem, any other state — **a 4xx with the page
+  unchanged included** — → `unknown`. Never `failed` once the request may have left; **never sent again**
+  (no resend path; the plan is claimed once and permitted once; this PC's record refuses it; a new try is a
+  new request in the chat → new facts → new approval, 6b-2 decision 6).
+- **The report** (secret in its header): the result and a word of `BROWSER_REPORT_REASONS` (a closed
+  window, a setting change and an expiry are said as `context-changed`), sent at most 3 times with the
+  same body, only while unanswered; all lost → the server's time-out makes it `unknown`. The secret lives
+  in memory only (decision 8): a crash = the server's time-outs and a person's confirm.
+- **Remaining limits** (said): the app freezing between `beforeSend` and the request leaving
+  (`limits/LimitFrozenAfterCheck`); the seconds between the re-read and the send; the page's own worker or
+  WebSocket in the run window is not stopped (writes for the plan go only from the write session).
+
+Tests: `client/tests/browser-execute.test.ts` (the real runner, the real Lステップ 0.6.0 declaration,
+checker, facts driver and parser against a fake Lステップ and a fake of the plan routes,
+`tests/browser-plans-fake.ts`: success with one write and one report; an older server, every fixed-content
+mismatch and another combination never run; each re-read change (a body, the timing, a template on the
+step, the account, the count rising, unknown → known) stops before the permit, a falling count runs; a
+stop / setting / context change before the permit; the record not kept; 4999 ms sends, 5000 ms on either
+clock or a clock set back does not; a stop / closed window / changed context / a throw in the last check
+→ failed; a refused permit → nothing reported; no usable permit answer (an error, a malformed one, none in
+5 s) → failed, asked once; a 4xx → unknown; an error, a lost answer applied or not → unknown and never sent
+again, also from another PC; the page after the send decides; reports retried ≤ 3; the record's hint;
+the type / checker / window checks after the claim; CSRF; the hour running out; one run per window),
+`browser-read-session.test.ts` (the permit only after the write session is prepared; "not sent" only before
+the request is ended), `browser-window-electron.test.ts` (the real window: the happy path through the
+permit, a permit 5 s old by the last check sends nothing). Each guard mutation-checked.
+
 ## The plan model (`model/browser-plan/`: the lifecycle in TLA+, checked in CI)
 
 The plan's life (register → approve → claim → permit → send → report → confirm) is also written as a
@@ -641,8 +712,10 @@ README in the folder.
 - **The model is copied by hand**: each action names the function (`server/src/services/browser-plans.ts`,
   `shared/core/browser-plans.ts`) or design section it copies, and `check-areas.mjs` keeps every cited
   file in area `model`, but nothing compares behaviour mechanically, so it can drift; regressions in
-  the code stay the tests' job. The app side copies the 6b-2 design, not shipped code (nothing in the
-  app calls the plans yet); 6b-2's PRs cite their files as they land. Left out on purpose: more than
+  the code stay the tests' job. The app side copies the runner of 6b-2c ("Executing a plan":
+  `runner.ts`, `browser-runner.ts`, `read-session.ts`, each action naming its step; built and switched
+  off, nothing in the app calls it yet); `broken/BrokenFailedAfterSendError` (an error after the request
+  left reported failed) must fail R4. Left out on purpose: more than
   one target / two plans / two PCs, real durations (5 s and 30 s are abstract units), the app's two
   clocks as separate values, a person confirming wrongly, the facts' fields (folded into
   before / after / other), a modified app, a site processing a send late, and liveness under fairness
@@ -795,7 +868,7 @@ every start stay. 6b connects every path but ships **off**; 6c turns it on for t
   too large for the model ends the step (`failed`), never a looser read.
 - **Not done here** (6b-2 and later): no chat tool, IPC or wiring in `main.ts` (nothing in the app
   imports `preview.ts`), registering the plan (the facts read for it: 6b-2b, "The facts a checker
-  reads", nothing calls it yet), the card, claim → permit → send → report.
+  reads"), the card; claim → permit → send → report is 6b-2c's ("Executing a plan", nothing calls it yet).
 - **To check once on a real machine** (§33 1-6; a completion condition of 6b-1 not yet done — it needs
   the owner's Team login and seeding their own `~/.claude`): the member's own hooks, CLAUDE.md, memory,
   MCP, plugins and Skills seeded with marker words do nothing and do not show in init or the answer, and
@@ -924,10 +997,10 @@ turns against the same userData unenclosed; and a refused policy refresh (403) w
 The AI does not operate the window yet: the runner, the first type and the server's plans (6a,
 above) exist but nothing starts a run. Still to come: **6b** — the operator AI and the preview's reads
 are built (6b-1, "The operator and the preview", switched off) and the facts read for a plan (6b-2b,
-"The facts a checker reads": the unconfirmed ones read as unknown until the owner's next login); still
-register / the approval card / claim → permit → send → report from main with the context
-check and both clocks (design memo §30.1–2), the post-send judgement (§29.6) and `failed` only when
-stopped before sending, and how the app knows its own checker hash; **6c** — the `browser_request`
+"The facts a checker reads": the unconfirmed ones read as unknown until the owner's next login) and
+the execution (6b-2c, "Executing a plan": claim → re-read → permit → send → report, switched off); still
+register / the approval card / the plans' HTTP client / the context module (`context()`) and how the app
+knows its own combination (`deps.combination`) (6b-2d); **6c** — the `browser_request`
 tool for the chat AI, on the owner's PC only; `irreversible` types and more than one write (refused
 by the first version's rule today); wiring the runner in `main.ts` (deps: `controller.siteNow`
 / `runWindow`, `browserAiStopped(policy.stop(companyId))`, `createBrowserRunRecords(<userData>/…)`,

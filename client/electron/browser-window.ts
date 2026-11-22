@@ -28,7 +28,7 @@ import {
 } from '../shared/browser-operation'
 import type { BrowserGateDecision, BrowserPreviewSurface, BrowserRunSurface, BrowserSessionRequest } from '../shared/browser-runner'
 import type { BrowserShell, BrowserWindowHandle, BrowserWindowSpec } from './features/browser/controller'
-import { createSessionLanes, exactRead, throughSession, type PagelessSession } from './features/browser/read-session'
+import { BrowserNotSentError, createSessionLanes, exactRead, throughSession, writeThroughSession, type PagelessSession } from './features/browser/read-session'
 
 /** What `ai` mode needs: the approved step's decider (none = no write) and the emergency stop. */
 export interface BrowserAiGate {
@@ -52,34 +52,52 @@ const RUN_ANSWER_MAX = 5 * 1024 * 1024
 /**
  * One request through a session, its answer or a rejection (no answer). A redirect is an answer: its
  * status is returned and it is not followed (a redirect after a save points back at a page; reading
- * it is the runner's own, declared read).
+ * it is the runner's own, declared read). With `beforeSend` (a run's write, 6b-2c), it is asked
+ * synchronously right before `request.end` — no await between them —: false, a throw, or anything
+ * failing before the request is ended rejects with `BrowserNotSentError` (the request never left);
+ * every failure after `request.end` is an ordinary rejection (it may have left).
  */
-function sendOnce(ses: Session, r: { method: string; url: string; contentType?: string; body?: string }, signal?: AbortSignal): Promise<{ status: number; body: string }> {
+function sendOnce(ses: Session, r: { method: string; url: string; contentType?: string; body?: string }, signal?: AbortSignal, beforeSend?: () => boolean): Promise<{ status: number; body: string }> {
   return new Promise((resolve, reject) => {
-    const request = electronNet.request({ method: r.method, url: r.url, session: ses, credentials: 'include', redirect: 'manual', cache: 'no-store' })
     let done = false
     let timer: ReturnType<typeof setTimeout> | undefined
+    let request: Electron.ClientRequest | null = null
     const finish = (fn: () => void) => { if (!done) { done = true; clearTimeout(timer); signal?.removeEventListener('abort', onAbort); fn() } }
-    function onAbort() { finish(() => { request.abort(); reject(new Error('aborted')) }) }
-    signal?.addEventListener('abort', onAbort, { once: true })
-    timer = setTimeout(() => finish(() => { request.abort(); reject(new Error('no answer in time')) }), RUN_REQUEST_MS)
-    request.on('redirect', status => finish(() => { request.abort(); resolve({ status, body: '' }) }))
-    request.on('response', response => {
-      const chunks: Buffer[] = []
-      let size = 0
-      // An answer larger than any page a checker reads is refused whole (never read cut short).
-      response.on('data', chunk => {
-        size += chunk.length
-        if (size > RUN_ANSWER_MAX) finish(() => { request.abort(); reject(new Error('answer too large')) })
-        else chunks.push(chunk)
+    function onAbort() { finish(() => { request?.abort(); reject(new Error('aborted')) }) }
+    let made: Electron.ClientRequest
+    try {
+      made = electronNet.request({ method: r.method, url: r.url, session: ses, credentials: 'include', redirect: 'manual', cache: 'no-store' })
+      request = made
+      signal?.addEventListener('abort', onAbort, { once: true })
+      timer = setTimeout(() => finish(() => { made.abort(); reject(new Error('no answer in time')) }), RUN_REQUEST_MS)
+      made.on('redirect', status => finish(() => { made.abort(); resolve({ status, body: '' }) }))
+      made.on('response', response => {
+        const chunks: Buffer[] = []
+        let size = 0
+        // An answer larger than any page a checker reads is refused whole (never read cut short).
+        response.on('data', chunk => {
+          size += chunk.length
+          if (size > RUN_ANSWER_MAX) finish(() => { made.abort(); reject(new Error('answer too large')) })
+          else chunks.push(chunk)
+        })
+        response.on('end', () => finish(() => resolve({ status: response.statusCode, body: Buffer.concat(chunks).toString('utf8') })))
+        response.on('error', () => finish(() => reject(new Error('answer cut off'))))
       })
-      response.on('end', () => finish(() => resolve({ status: response.statusCode, body: Buffer.concat(chunks).toString('utf8') })))
-      response.on('error', () => finish(() => reject(new Error('answer cut off'))))
-    })
-    request.on('error', () => finish(() => reject(new Error('no answer'))))
-    request.on('abort', () => finish(() => reject(new Error('aborted'))))
-    if (r.contentType) request.setHeader('content-type', r.contentType)
-    request.end(r.body)
+      made.on('error', () => finish(() => reject(new Error('no answer'))))
+      made.on('abort', () => finish(() => reject(new Error('aborted'))))
+      if (r.contentType) made.setHeader('content-type', r.contentType)
+    } catch {
+      finish(() => { request?.abort(); reject(new BrowserNotSentError('the request could not be made')) })
+      return
+    }
+    // The last check of a run's write: nothing awaits between it and the request leaving.
+    let go = true
+    if (beforeSend) { try { go = beforeSend() === true } catch { go = false } }
+    if (!go) {
+      finish(() => { made.abort(); reject(new BrowserNotSentError('stopped right before sending')) })
+      return
+    }
+    made.end(r.body)
   })
 }
 
@@ -217,7 +235,7 @@ export function createBrowserWindowShell(options: { log?: Pick<Console, 'warn'>;
           })
         }
       },
-      send: (request, signal) => sendOnce(ses, request, signal),
+      send: (request, signal, beforeSend) => sendOnce(ses, request, signal, beforeSend),
     }
   }
 
@@ -395,17 +413,23 @@ export function createBrowserWindowShell(options: { log?: Pick<Console, 'warn'>;
           if (state.contentsId === contentsId) await setMode('human')
         },
         // Never through the page nor the window's session: no script of the page sees, changes or answers it.
-        async request({ method, path, contentType, body }) {
+        async request({ method, path }) {
           if (closed() || !path.startsWith('/')) throw new Error('window closed')
           const gate = runGate
           if (!gate) throw new Error('no run')
+          if (!isReadMethod(method)) throw new Error('a write goes through write()')
           const url = `https://${state.site!.host}${path}`
           // This window's own run only: the session's window is still this one and in `ai` mode.
           const asks = (r: BrowserSessionRequest) => state.contentsId === contentsId && state.mode === 'ai' && r.url === url && gate(r).allow
-          const open = () => !closed()
           // A read through the read session (page-less: a worker of the page cannot ask the same path
           // and have its answer taken for main's, design memo §33 2-4).
-          if (isReadMethod(method)) return throughSession(lanes, readKey, reads, { method, url }, asks, undefined, open)
+          return throughSession(lanes, readKey, reads, { method, url }, asks, undefined, () => !closed())
+        },
+        async write({ method, path, contentType, body }, steps) {
+          const gate = runGate
+          if (closed() || !path.startsWith('/') || !gate || isReadMethod(method)) return { sent: false, stage: 'prepare' }
+          const url = `https://${state.site!.host}${path}`
+          const asks = (r: BrowserSessionRequest) => state.contentsId === contentsId && state.mode === 'ai' && r.url === url && gate(r).allow
           // A write goes on a connection of its own (agent-browser.md "The runner"): Chromium resends a
           // request whose reused keep-alive connection dropped before the answer — below the request
           // hook, so the gate's "once" never sees it (verified on Electron 45: one lost answer reached
@@ -415,8 +439,10 @@ export function createBrowserWindowShell(options: { log?: Pick<Console, 'warn'>;
           // cookies for the write's own address, path-scoped ones included), the site's proxy rule and
           // ONE request hook, the run's gate (Electron keeps the last one: replaced each write). What
           // the site sets in its answer (Set-Cookie) is not carried back to the window (decision: the
-          // runner re-reads with the window's own login; a rotated cookie stays the window's).
-          return throughSession(lanes, writeKey, writes, { method, url, contentType, body }, asks, undefined, open)
+          // runner re-reads with the window's own login; a rotated cookie stays the window's). The
+          // session is prepared first; then `steps.ready` (the permit), then `steps.beforeSend`
+          // synchronously right before the request leaves (6b-2c, `sendOnce`).
+          return writeThroughSession(lanes, writeKey, writes, { method, url, contentType, body }, asks, steps, () => !closed())
         },
         closed,
       }

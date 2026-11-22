@@ -209,6 +209,7 @@ const idsOf = (body: string) => { const f = new URLSearchParams(body); return `$
 test('a run sends exactly one write with the planned ids through the member\'s login, and the page confirms it', { skip }, () => {
   const r = result.runner
   assert.deepEqual(r.happy, { outcome: 'succeeded' })
+  assert.deepEqual(r.happyReports, [{ result: 'succeeded' }])
   assert.deepEqual(r.stepAfterHappy, ['300', '301'])
   const happy = writesOfRuns().filter(h => idsOf(h.body) === '201/301')
   assert.equal(happy.length, 1, 'one POST, the runner\'s')
@@ -228,7 +229,7 @@ test('while a run operates, the page\'s own write (fetch, XHR, a timer\'s autosa
 
 test('a run stops before writing for another LINE account or an emergency stop during the run', { skip }, () => {
   const r = result.runner
-  assert.deepEqual(r.wrongAccount, { outcome: 'stopped', reason: 'account-mismatch' })
+  assert.deepEqual(r.wrongAccount, { outcome: 'stopped', reason: 'facts-changed' })
   assert.deepEqual(r.stoppedMidRun, { outcome: 'stopped', reason: 'stopped' })
   assert.equal(writesOfRuns().some(h => ['201/302', '201/303'].includes(idsOf(h.body))), false)
 })
@@ -236,17 +237,25 @@ test('a run stops before writing for another LINE account or an emergency stop d
 test('a write whose answer is lost is unknown and never sent again', { skip }, () => {
   const r = result.runner
   assert.deepEqual(r.lost, { outcome: 'unknown', reason: 'no-answer' })
+  assert.deepEqual(r.lostReports, [{ result: 'unknown', reason: 'no-answer' }])
   assert.deepEqual(r.lostAgain, { outcome: 'refused', reason: 'already-ran' })
   assert.equal(writesOfRuns().filter(h => idsOf(h.body) === '201/999').length, 1)
   assert.deepEqual(r.records, [
-    'plan-a:pending', 'plan-a:sent', 'plan-a:succeeded', 'plan-b:pending', 'plan-b:failed',
-    'plan-c:pending', 'plan-c:failed', 'plan-d:pending', 'plan-d:sent', 'plan-d:unknown',
-    'plan-e:pending', 'plan-e:failed',
+    'a:claimed', 'a:permit-asked', 'a:succeeded', 'b:claimed', 'b:failed', 'c:claimed', 'c:failed',
+    'd:claimed', 'd:permit-asked', 'd:unknown', 'e:claimed', 'e:failed', 'f:claimed', 'f:permit-asked', 'f:failed',
   ])
 })
 
+test('a permit that is 5 s old by the last check right before sending: the window\'s write session never ends the request — nothing reaches the site — and the server is told failed', { skip }, () => {
+  const r = result.runner
+  assert.deepEqual(r.late, { outcome: 'failed', reason: 'permit-late' })
+  assert.deepEqual(r.lateReports, [{ result: 'failed', reason: 'permit-late' }])
+  assert.equal(writesOfRuns().some(h => idsOf(h.body) === '201/306'), false)
+})
+
 test('an answer over the size the runner reads is refused whole, never read cut short', { skip }, () => {
-  assert.deepEqual(result.runner.oversize, { outcome: 'stopped', reason: 'read-failed' })
+  // The facts read again through the read session: the page is refused whole, so they cannot be compared.
+  assert.deepEqual(result.runner.oversize, { outcome: 'stopped', reason: 'facts-changed' })
   assert.equal(writesOfRuns().some(h => idsOf(h.body) === '201/305'), false)
 })
 

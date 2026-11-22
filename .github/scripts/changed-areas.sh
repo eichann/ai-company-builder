@@ -116,7 +116,7 @@ ADMIN=(admin/ shared/)
 # here (each action names the code it copies), so a lifecycle change always runs the model.
 MODEL=(
   model/browser-plan/ shared/core/browser-plans.ts server/src/services/browser-plans.ts
-  client/shared/browser-runner.ts client/electron/features/browser/runner.ts
+  client/shared/browser-runner.ts client/electron/features/browser/runner.ts client/electron/features/browser/read-session.ts
 )
 
 pathspecs() {

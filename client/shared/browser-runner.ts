@@ -13,6 +13,8 @@ import {
   BROWSER_ID_VALUE_RE, BROWSER_NAME_RE, matchDeclaredWrite,
   type BrowserOperation, type BrowserPlanValues,
 } from '../../shared/core/plugin-browser-declaration'
+import { browserFactsAccount, browserFactsState } from '../../shared/core/browser-plans'
+import { canonicalJson } from '../../shared/core/fixed-content'
 
 // ---------------------------------------------------------------------------
 // The approved plan
@@ -22,9 +24,10 @@ import {
 export type BrowserTargetState = Readonly<Record<string, readonly string[]>>
 
 /**
- * A plan a person approved (the approval itself is a later PR; here it comes from an injected
- * provider). Fixed: the connector at one version, one operation type, the outside account it is
- * bound to, the target and change values, the state the person saw before (`before`), an expiry.
+ * A plan a person approved, as the server's claim hands it (`BrowserClaim.plan`, 6b-2c; checked
+ * against the claim's fixed content, `fixedContentMismatch`). Fixed: the connector at one version,
+ * one operation type, the outside account it is bound to, the target and change values, the state the
+ * person saw before (`before`), an expiry.
  */
 export interface BrowserRunPlan {
   planId: string
@@ -96,6 +99,105 @@ export function parseBrowserRunPlan(input: unknown, now: number): { value: Brows
   if (typeof approvedAt !== 'number' || !Number.isFinite(approvedAt) || approvedAt > now + CLOCK_SKEW_MS) return { error: 'approvedAt' }
   if (now - approvedAt > BROWSER_PLAN_MAX_AHEAD_MS) return { error: 'expired' }
   return { value: { planId, companyId, connector: { id: connector.id, version: connector.version }, operation, account, target: t, change: c, before: b, approvedAt, expiresAt } }
+}
+
+// ---------------------------------------------------------------------------
+// The server's claim (6b-2c; agent-browser.md "Plans, executions, permits and locks")
+// ---------------------------------------------------------------------------
+
+/** The server's `sha256:` + hex of the canonical content (server/src/lib/content-hash.ts). */
+export const CONTENT_HASH_RE = /^sha256:[0-9a-f]{64}$/
+const EXECUTION_ID_RE = /^[A-Za-z0-9_-]{1,80}$/
+/** The execution's secret goes in a header: plain token characters only, as long as the server takes. */
+const SECRET_RE = /^[A-Za-z0-9_-]{32,200}$/
+
+/** A claim the runner may work with: the execution, its secret (memory only), the plan and the fixed content. */
+export interface BrowserClaimed {
+  executionId: string
+  secret: string
+  plan: BrowserRunPlan
+  fixed: { content: string; contentHash: string; factsVersion: number }
+}
+
+/**
+ * The claim answer (`BrowserClaim`) checked field by field. No `fixed` (a server older than 6b-2a) is
+ * `fixed-missing`: the app then never runs the plan (it cannot check what the person approved).
+ */
+export function parseBrowserClaim(input: unknown, now: number): { value: BrowserClaimed } | { error: 'claim' | 'fixed-missing' | 'expired' } {
+  if (!isRecord(input)) return { error: 'claim' }
+  const { executionId, secret, plan, fixed } = input
+  if (typeof executionId !== 'string' || !EXECUTION_ID_RE.test(executionId)) return { error: 'claim' }
+  if (typeof secret !== 'string' || !SECRET_RE.test(secret)) return { error: 'claim' }
+  if (fixed === undefined || fixed === null) return { error: 'fixed-missing' }
+  if (!isRecord(fixed) || typeof fixed.content !== 'string' || fixed.content.length > 2_000_000
+    || typeof fixed.contentHash !== 'string' || !CONTENT_HASH_RE.test(fixed.contentHash)
+    || !Number.isSafeInteger(fixed.factsVersion) || (fixed.factsVersion as number) < 1) return { error: 'claim' }
+  if (!isRecord(plan) || typeof plan.approvedAt !== 'string' || typeof plan.expiresAt !== 'string') return { error: 'claim' }
+  const parsed = parseBrowserRunPlan({ ...plan, approvedAt: Date.parse(plan.approvedAt), expiresAt: Date.parse(plan.expiresAt) }, now)
+  if ('error' in parsed) return { error: parsed.error === 'expired' ? 'expired' : 'claim' }
+  return { value: { executionId, secret, plan: parsed.value, fixed: { content: fixed.content, contentHash: fixed.contentHash, factsVersion: fixed.factsVersion as number } } }
+}
+
+/** A plan's fixed content as the server stored and hashed it (`BrowserPlanContent`, format 1), what the runner reads of it. */
+export interface BrowserFixedContent {
+  company: string
+  connector: { id: string; version: string; declarationHash: string; checkerHash: string; factsVersion: number }
+  operation: string
+  account: string
+  target: Record<string, string>
+  change: Record<string, string>
+  facts: Record<string, unknown>
+  expiresAt: string
+}
+
+/**
+ * The fixed content's text → its parts, or null. The text must be exactly the canonical JSON of what
+ * it parses to (`canonicalJson`: no key written twice, no other spelling), so what the runner reads is
+ * what was hashed and approved.
+ */
+export function parseFixedContent(text: string): BrowserFixedContent | null {
+  let value: unknown
+  try { value = JSON.parse(text) } catch { return null }
+  try { if (canonicalJson(value) !== text) return null } catch { return null }
+  if (!isRecord(value) || value.format !== 1) return null
+  const { company, connector, operation, account, target, change, facts, expiresAt } = value
+  if (typeof company !== 'string' || typeof operation !== 'string' || typeof account !== 'string' || typeof expiresAt !== 'string') return null
+  if (!isRecord(connector) || typeof connector.id !== 'string' || typeof connector.version !== 'string'
+    || typeof connector.declarationHash !== 'string' || typeof connector.checkerHash !== 'string' || !Number.isSafeInteger(connector.factsVersion)) return null
+  const t = stringRecord(target)
+  const c = stringRecord(change)
+  if (!t || !c || !isRecord(facts)) return null
+  return {
+    company, operation, account, target: t, change: c, facts, expiresAt,
+    connector: { id: connector.id, version: connector.version, declarationHash: connector.declarationHash, checkerHash: connector.checkerHash, factsVersion: connector.factsVersion as number },
+  }
+}
+
+/**
+ * Why the claim's plan is not the fixed content the person approved, or null: the company, connector,
+ * operation, account, target, change, expiry, the facts version, and `before` = the `state` fact
+ must all agree, so the runner never acts on a field the hash did not cover.
+ */
+export function fixedContentMismatch(content: BrowserFixedContent, claimed: BrowserClaimed): string | null {
+  const { plan, fixed } = claimed
+  const sameRecord = (a: Readonly<Record<string, string>>, b: Readonly<Record<string, string>>) =>
+    Object.keys(a).length === Object.keys(b).length && Object.entries(a).every(([k, v]) => own(b, k) && b[k] === v)
+  if (content.company !== plan.companyId) return 'company'
+  if (content.connector.id !== plan.connector.id || content.connector.version !== plan.connector.version) return 'connector'
+  if (content.connector.factsVersion !== fixed.factsVersion) return 'facts-version'
+  if (content.operation !== plan.operation) return 'operation'
+  if (content.account !== plan.account || browserFactsAccount(content.facts) !== plan.account) return 'account'
+  if (!sameRecord(content.target, plan.target) || !sameRecord(content.change, plan.change)) return 'values'
+  if (Date.parse(content.expiresAt) !== plan.expiresAt) return 'expiresAt'
+  const state = browserFactsState(content.facts)
+  if (!state || !sameTargetState(state, plan.before)) return 'before'
+  return null
+}
+
+/** The server's permit answer (`BrowserPermit`) → how long it is good for, or null when it is not one. */
+export function permitValidMs(input: unknown): number | null {
+  if (!isRecord(input) || typeof input.permittedAt !== 'string' || !Number.isFinite(Date.parse(input.permittedAt))) return null
+  return Number.isSafeInteger(input.validMs) && (input.validMs as number) > 0 ? input.validMs as number : null
 }
 
 /** The same lists with the same entries (order inside a list ignored: a page may list them in any order). */
@@ -329,17 +431,46 @@ export interface BrowserRunGateHooks {
   sessionRequest(request: BrowserSessionRequest): BrowserGateDecision
 }
 
+/**
+ * The two steps a write waits on (6b-2c, design 6b-2 §5-3). `ready` runs once the write session is
+ * prepared (connections closed, storage cleared, its one request hook and the window's cookies in) —
+ * the runner asks the server's permit there, so the preparation's seconds never eat into the permit's
+ * 5 s; false (or a throw) = nothing is sent. `beforeSend` runs synchronously right before the request
+ * leaves (`request.end`), with no await between them: false (or a throw) = nothing is sent.
+ */
+export interface BrowserWriteSteps {
+  ready(): Promise<boolean>
+  beforeSend(): boolean
+}
+
+/**
+ * What became of a write. `sent: false` only when the request provably never left: it stopped in the
+ * preparation, at `ready`, or at `beforeSend` (the request was never ended). Once the request was
+ * ended, it is `sent: true` — with the answer, or `answer: null` when none came (an error, a
+ * disconnect, a time-out, a refusal of the session's hook): the write may have reached the site.
+ */
+export type BrowserWriteOutcome =
+  | { sent: false; stage: 'prepare' | 'ready' | 'before-send' }
+  | { sent: true; answer: { status: number; body: string } | null }
+
 /** The window as a run uses it (electron/browser-window.ts). */
 export interface BrowserRunSurface {
   /** `ai` mode with the run's gate; true only once the gate sees every request of the page. */
   enterAi(hooks: BrowserRunGateHooks): Promise<boolean>
   leaveAi(): Promise<void>
   /**
-   * A request with the window's login, never through the page nor the window's session: a read
-   * through the window's read session, a write through its write session (page-less, one request
-   * at a time each, agent-browser.md "The operator and the preview"); rejects = no answer.
+   * A read (GET) with the window's login, never through the page nor the window's session: through
+   * the window's page-less read session (one request at a time, agent-browser.md "The operator and
+   * the preview"); rejects = no answer. Not for writes (refused).
    */
-  request(request: { method: string; path: string; contentType?: string; body?: string }): Promise<{ status: number; body: string }>
+  request(request: { method: string; path: string }): Promise<{ status: number; body: string }>
+  /**
+   * The one write of a run through the window's page-less write session, which cannot be sent
+   * without its steps: `ready` (the permit) after the session is prepared, `beforeSend` (the last
+   * check) synchronously right before the request leaves. Never rejects for a write that did not
+   * leave (`sent: false`); a rejection is a write that may have left.
+   */
+  write(request: { method: string; path: string; contentType: string; body: string }, steps: BrowserWriteSteps): Promise<BrowserWriteOutcome>
   closed(): boolean
 }
 
@@ -474,20 +605,29 @@ export function declaredWriteBody(operation: BrowserOperation, index: number, va
 // What a run reports, and what is kept of each step
 // ---------------------------------------------------------------------------
 
-/** One step's state, kept on this PC (ids and reasons only, never a value). */
-export type BrowserStepState = 'pending' | 'sent' | 'succeeded' | 'failed' | 'unknown'
+/**
+ * One step's state, kept on this PC (ids and reasons only, never a value; 6b-2 §7-1). `claimed`: the
+ * server's claim answered; `permit-asked`: written right before the permit is asked — from here on the
+ * write may have left, so a crash leaves this and the plan never runs again here; `failed`: it
+ * provably never left (the only state the card may show as a hint, `stoppedBeforeSending`);
+ * `succeeded` / `unknown`: sent, judged by the read after it. (No `sent` mark: writing one would sit
+ * between the last check and the request leaving; `permit-asked` already means "may have been sent".)
+ */
+export type BrowserStepState = 'claimed' | 'permit-asked' | 'succeeded' | 'failed' | 'unknown'
 
-/** The only reason words a step record or a result carries (never a checker's or a site's text). */
+/** The only reason words a step record or a result carries (never a checker's, a site's or the server's text). */
 export const BROWSER_RUN_REASONS = [
-  // before anything starts
-  'off', 'already-running', 'no-plan', 'plan', 'expired', 'already-ran', 'connector', 'operation', 'not-supported',
-  'unknown-checker', 'target-unconfirmed', 'stopped', 'policy', 'no-window', 'busy', 'records-unavailable',
-  // started, nothing sent
-  'window-not-ready', 'window-closed', 'read-failed', 'account-unknown', 'account-mismatch', 'target-missing',
-  'before-changed', 'csrf-missing', 'checker-problem', 'cannot-come-true', 'no-visible-change',
-  // sent
-  'refused-by-site', 'no-answer', 'not-confirmed-sent', 'reread-failed', 'unchanged-unrefused', 'empty-state',
-  'other-state', 'error',
+  // nothing claimed (nothing to send)
+  'off', 'input', 'already-running', 'already-ran', 'records-unavailable', 'approve-refused', 'claim-refused', 'claim-unanswered',
+  // claimed, given back before any permit (the server makes the execution void)
+  'server-too-old', 'fixed-mismatch', 'connector', 'operation', 'not-supported', 'unknown-checker', 'target-unconfirmed', 'plan',
+  'expired', 'stopped', 'policy', 'no-window', 'busy', 'facts-changed', 'context-changed', 'window-not-ready', 'window-closed',
+  'read-failed', 'account-unknown', 'account-mismatch', 'target-missing', 'before-changed', 'csrf-missing', 'checker-problem',
+  'cannot-come-true', 'no-visible-change', 'permit-refused',
+  // permit asked, stopped before the request left (reported `failed`)
+  'permit-unanswered', 'permit-late', 'error',
+  // the request left (reported `unknown` unless the read after it shows the plan)
+  'no-answer', 'reread-failed', 'account-after', 'target-after', 'other-state',
 ] as const
 export type BrowserRunReason = typeof BROWSER_RUN_REASONS[number]
 export const isBrowserRunReason = (v: unknown): v is BrowserRunReason => (BROWSER_RUN_REASONS as readonly unknown[]).includes(v)
@@ -502,23 +642,30 @@ export interface BrowserStepRecord {
   at: number
 }
 
+/** True only when this PC's latest record of the plan says it stopped before sending (a hint for the card, never a confirm). */
+export function stoppedBeforeSending(records: readonly BrowserStepRecord[], planId: string): boolean {
+  const mine = records.filter(r => r.planId === planId)
+  return mine.length > 0 && mine[mine.length - 1].state === 'failed'
+}
+
 export type BrowserRunResult =
-  /** Nothing started, nothing sent (the plan, the setting, the window, the type). */
-  | { outcome: 'refused'; reason: BrowserRunReason }
-  /** Started, stopped before anything was sent. */
+  /** Nothing claimed: the plan was not taken (off, the input, this PC's record, the server refused). */
+  | { outcome: 'refused'; reason: BrowserRunReason; code?: string }
+  /** Claimed, then given back before any permit (or the permit was refused): nothing sent. */
   | { outcome: 'stopped'; reason: BrowserRunReason }
+  /** The permit was asked, and the write stopped before it left (reported `failed`): nothing sent. */
+  | { outcome: 'failed'; reason: BrowserRunReason }
   /** Sent, and the page shows exactly the planned change. */
   | { outcome: 'succeeded' }
-  /** Sent, the site answered it with a refusal (4xx) and the page shows the state from before. */
-  | { outcome: 'failed'; reason: BrowserRunReason }
-  /** Sent (or maybe sent) and the result cannot be told: never sent again by itself. */
+  /** Sent (or maybe sent) and the result cannot be told: never sent again; a person confirms. */
   | { outcome: 'unknown'; reason: BrowserRunReason }
 
+/** The card's words (6b-2 §4). */
 export const BROWSER_RUN_WORDS = {
-  succeeded: '変更しました。',
-  failed: '変更されませんでした。サイトの画面で確かめてください。',
-  unknown: '結果が分からないままです。もう一度は送りません。サイトの画面で確かめてください。',
-  stopped: '送る前に止めました。サイトには何も送っていません。',
+  succeeded: '計画どおりの状態になっています。',
+  failed: '送る前に止めました。この操作の送信は行っていません。',
+  unknown: '結果が分かりません。サイトの画面で確かめてください。もう一度は送りません。',
+  stopped: '送りませんでした。もう一度やるときは、相談で頼み直してください。',
   refused: 'この操作は、いまは実行できません。サイトには何も送っていません。',
 } as const
 

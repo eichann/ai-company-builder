@@ -4,10 +4,12 @@
 \* copies. A PR that changes the lifecycle changes this file in the same PR (agent-browser.md "The plan model").
 \*   Server: server/src/services/browser-plans.ts (PR 6a; the clock fix of 6b-2a), with the states and times of
 \*           shared/core/browser-plans.ts (BrowserPlanState, BrowserExecutionState, BROWSER_PLAN_TIMES).
-\*   App:    the approved 6b-2 design (internal design memo, 6b-2 §3 and §5). Nothing in the app calls
-\*           the server's plans yet: today's runner (client/electron/features/browser/runner.ts, with
-\*           client/shared/browser-runner.ts) is replaced by 6b-2; until then the App actions below
-\*           describe the design, not shipped code (README "What the model copies").
+\*   App:    the runner of 6b-2c, client/electron/features/browser/runner.ts (createBrowserRunner's run),
+\*           with client/shared/browser-runner.ts (the claim, the fixed content, the permit's answer) and
+\*           client/electron/features/browser/read-session.ts (writeThroughSession: the permit inside the
+\*           write's prepared session, the last check right before the request leaves); each App action
+\*           names the step it copies. Built and tested, switched off: nothing in the app calls it yet
+\*           (6b-2d wires the card's press to it).
 \* One target (one reminder step). Two plans (p2 = the person asks again, or two asked at once).
 \* Two apps (a2 = the same member's second PC, or the app restarted). Time is counted as "elapsed since
 \* the permit", capped. What is left out: README "What the model leaves out".
@@ -183,23 +185,28 @@ Tick ==
     /\ el' = [a \in Apps |-> IF ph[a] \in {"asking", "permitted"} THEN Min(el[a] + 1, PERMIT) ELSE el[a]]
     /\ UNCHANGED <<planSt, approvedEver, exSt, holder, lock, permitReq, rep, ph, ap, siteVars>>
 
-\* =========================== app (6b-2 design) ===========================
+\* =========================== app (6b-2c: runner.ts) ===========================
 
-\* The app crashes or quits at any step. The secret lives only in memory and is lost (no report:
-\* the server's time-outs settle it).
+\* The app crashes or quits at any step. The secret lives only in memory (runner.ts keeps the claim in
+\* a local of run, never on disk) and is lost (no report: the server's time-outs settle it). The
+\* "permit-asked" record written right before the permit keeps this PC from running the plan again.
 AppCrashes(a) ==
     /\ ph[a] # "idle"
     /\ ToIdle(a)
     /\ UNCHANGED <<srvVars, permitReq, rep, siteVars>>
 
-\* Design 6b-2 §5.2: after the claim, re-read every fixed fact and compare. Unchanged: may ask for the permit.
+\* runner.ts run, after the claim: the fixed content hashed and compared (parseBrowserClaim,
+\* parseFixedContent, fixedContentMismatch), the type and combination checked, then every fixed fact
+\* read again through the checker (readBrowserFacts) and compared (browserFactsChangedProblem), then the
+\* window in ai mode and the checker's view (checkBefore). Unchanged: may ask for the permit.
 AppRereadSame(a) ==
     /\ ph[a] = "claimed" /\ site = "before"
     /\ ph' = [ph EXCEPT ![a] = "checked"]
     /\ UNCHANGED <<srvVars, permitReq, rep, ap, el, siteVars>>
 
-\* Stop before the permit: facts changed, context changed, the conversation stopped, the member pressed
-\* 「やめる」. Sends cancel (void if it arrives; otherwise void 2 minutes after the claim). No report.
+\* runner.ts giveBack: any stop before the permit is asked (an older server's claim without fixed, a
+\* mismatch, facts changed, the context, the stop, the setting, the window, the record not kept). Sends
+\* cancel (void if it arrives; otherwise void 2 minutes after the claim). No report.
 AppDropsBeforePermit(a) ==
     /\ ph[a] \in {"claimed", "checked"}
     /\ ToIdle(a)
@@ -207,22 +214,25 @@ AppDropsBeforePermit(a) ==
        \/ UNCHANGED <<exSt, lock, planSt>>
     /\ UNCHANGED <<approvedEver, holder, srvAge, realAge, permitReq, rep, siteVars>>
 
-\* Ask for the permit (both clocks read just before; no automatic retry)
+\* runner.ts ready (called by writeThroughSession once the write session is prepared): the record
+\* "permit-asked", both clocks read, the permit asked once (askWithin, 5 s; no automatic retry)
 AppAsksPermit(a) ==
     /\ ph[a] = "checked"
     /\ ph' = [ph EXCEPT ![a] = "asking"] /\ el' = [el EXCEPT ![a] = 0]
     /\ permitReq' = [permitReq EXCEPT ![ap[a]] = TRUE]
     /\ UNCHANGED <<srvVars, rep, ap, siteVars>>
 
-\* No permit answer within 5 s: do not send; report failed (permit-unanswered). The request may still arrive.
+\* runner.ts ready: no (usable) permit answer within 5 s → not sent; settle('failed', 'permit-unanswered').
+\* The request may still arrive at the server.
 AppPermitUnanswered(a) ==
     /\ ph[a] = "asking" /\ el[a] >= PERMIT
     /\ rep' = [rep EXCEPT ![ap[a]] = "failed"]
     /\ ToIdle(a)
     /\ UNCHANGED <<srvVars, permitReq, siteVars>>
 
-\* Send (beforeSend: under 5 s by both clocks, same context, not stopped; then request.end with no await
-\* in between). The write is lost, or arrives and the site changes, or arrives and the site refuses it.
+\* runner.ts beforeSend (under the permit by both clocks, same context, not stopped, the setting, the
+\* window), asked by the shell's sendOnce right before request.end with no await in between. The write
+\* is lost, or arrives and the site changes, or arrives and the site refuses it.
 AppSends(a) ==
     /\ ph[a] = "permitted" /\ el[a] < PERMIT
     /\ LET p == ap[a] IN
@@ -235,23 +245,25 @@ AppSends(a) ==
     /\ ph' = [ph EXCEPT ![a] = "sent"]
     /\ UNCHANGED <<srvVars, permitReq, rep, ap, el, edited>>
 
-\* After the permit, the last check before sending stops it (permit-late, context-changed, stopped):
-\* nothing went out. Report failed.
+\* runner.ts: the write's outcome is sent: false after the permit (beforeSend said no or threw:
+\* permit-late, context-changed, stopped) — the request was never ended. settle('failed').
 AppStopsBeforeSend(a) ==
     /\ ph[a] = "permitted"
     /\ rep' = [rep EXCEPT ![ap[a]] = "failed"]
     /\ ToIdle(a)
     /\ UNCHANGED <<srvVars, permitReq, siteVars>>
 
-\* After the send: everything read and as planned (after) = succeeded. Anything else (unreadable, 4xx,
-\* unchanged, another state) = unknown — never failed once the write may have gone out.
+\* runner.ts after a sent outcome with an answer: the page read again (readView); exactly the planned
+\* state (expectedAfter) = succeeded. Anything else (a 4xx with the page unchanged, another account, no
+\* target, another state) = unknown — never failed once the write may have gone out.
 AppReadsAfter(a) ==
     /\ ph[a] = "sent"
     /\ rep' = [rep EXCEPT ![ap[a]] = IF site = "after" THEN "succeeded" ELSE "unknown"]
     /\ ToIdle(a)
     /\ UNCHANGED <<srvVars, permitReq, siteVars>>
 
-\* The read after the send failed (reread-failed): unknown
+\* runner.ts: sent with no answer (an error, a disconnect, a time-out after request.end: no-answer), an
+\* exception after the permit was asked, or the read after the send failed (reread-failed): unknown
 AppRereadAfterFails(a) ==
     /\ ph[a] = "sent"
     /\ rep' = [rep EXCEPT ![ap[a]] = "unknown"]

@@ -1,8 +1,8 @@
 ---- MODULE BrokenFailedOn4xx ----
 \* Broken variant (must fail R4): after sending, when the site refuses (4xx) and the re-read looks
-\* unchanged, the app reports failed ("not sent"). This is the branch today's runner has
-\* (client/electron/features/browser/runner.ts: the state from before = failed, reason refused-by-site);
-\* the 6b-2 design removes it. The write did reach the site, so "not sent" is false.
+\* unchanged, the app reports failed ("not sent"). The runner before 6b-2c had this branch (reason
+\* refused-by-site); client/electron/features/browser/runner.ts now judges a sent write only by the page
+\* read after it (succeeded or unknown). The write did reach the site, so "not sent" is false.
 EXTENDS PlanLife
 
 BrokenAppReadsAfter(a) ==
