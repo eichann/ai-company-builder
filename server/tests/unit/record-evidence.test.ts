@@ -143,6 +143,28 @@ describe('writing evidence', () => {
     expect(ledgerOf(t.id)).toHaveLength(1)
   })
 
+  it('precedents and the decision replaced follow the same rule as record materials, with the same answer', async () => {
+    makePrivate()
+    index({ '.acb/types/memo.md': MEMO_TYPE })
+    index({ '評価.md': '---\nid: memo-priv0001\ntype: memo\n---\n# 評価のまとめ\n' }, { id: 'a-priv', prefix: PRIVATE })
+    ok(await act(m('u-carol'), 'memo-priv0001', 'close', { expectedVersion: 0 }))
+    const theirs = ok(create(m('u-alice'), { type: 'task', title: 'alice だけ', personal: true })).record
+    const readable = sharedTask()
+    const t = sharedTask()
+    const complete = (decision: Body) => act(m('u-carol'), t.id, 'complete', { expectedVersion: 1, decision })
+    const missing = await complete({ precedents: ['task-nothere00000000@1'] })
+    expect(missing).toMatchObject({ ok: false, kind: 'bad-request', body: { code: 'BAD_MATERIAL' } })
+    // A record inside a private folder u-carol reads (out of reach of a record outside it), and someone else's owner-only one.
+    for (const ref of ['memo-priv0001@1', `${theirs.id}@1`]) {
+      expect(await complete({ precedents: [ref] })).toEqual(missing)
+      expect(await complete({ supersedes: ref })).toEqual(missing)
+      expect(await complete({ materials: [{ kind: 'record', id: ref.split('@')[0], version: 1 }] })).toEqual(missing)
+    }
+    expect(JSON.stringify(missing)).not.toMatch(/評価|memo-priv/)
+    expect(ledgerOf(t.id)).toHaveLength(1)
+    ok(await complete({ precedents: [`${readable.id}@1`], supersedes: `${readable.id}@1` }))
+  })
+
   it('an attached version of a link into a private folder (stored before the rule) is refused like a file not linked', async () => {
     // Linked while 営業部/評価 was an ordinary folder; it became private afterwards.
     const t = sharedTask({ links: { files: [`${PRIVATE}/査定.md`] } })
@@ -213,6 +235,23 @@ describe('reading evidence (経緯)', () => {
     for (const who of [m('u-bob'), m('u-carol'), owner(), admin()]) expect(JSON.stringify(historyOf(who, t.id))).not.toContain(mine.id)
     // What is stored is unchanged.
     expect(JSON.stringify(ledgerOf(t.id))).toBe(stored)
+  })
+
+  it('a members-only record named as evidence is hidden from everyone off its list — owners and admins included', async () => {
+    const listed = ok(create(m('u-alice'), { type: 'task', title: '面談の準備', members: ['u-carol'], fields: { assignee: 'u-alice' } })).record
+    const t = sharedTask()
+    ok(await act(m('u-alice'), t.id, 'complete', {
+      expectedVersion: 1, note: '面談どおり',
+      decision: { materials: [{ kind: 'record', id: listed.id, version: 1 }], precedents: [`${listed.id}@1`], supersedes: `${listed.id}@1` },
+    }))
+    for (const who of [owner(), admin(), m('u-bob')]) {
+      expect(JSON.stringify(historyOf(who, t.id))).not.toContain(listed.id)
+      expect(evidenceOf(who, t.id)[0].decision).toEqual({ materials: [], precedents: [], supersedes: null })
+    }
+    // u-carol is on the list: she sees all of it.
+    expect(evidenceOf(m('u-carol'), t.id)[0].decision).toEqual({
+      materials: [{ kind: 'record', id: listed.id, version: 1 }], precedents: [`${listed.id}@1`], supersedes: `${listed.id}@1`,
+    })
   })
 
   it('follows the reader’s current access: added to the folder later sees its file, taken off no longer does', async () => {

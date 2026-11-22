@@ -7,8 +7,8 @@
  * it"; private-folders.md decision B):
  *
  * - on write (`act.ts`): a company file only when the actor reads it and the record may link to it,
- *   a record only when the actor reads it and the record may reach it — one answer for both, naming
- *   no place;
+ *   a record (material, precedent, supersedes) only when the actor reads it and the record may reach
+ *   it — one answer for each kind, naming no place;
  * - on read: each entry is filtered by **the reader's current** access (what was stored is never
  *   changed): a company file they cannot read now (a private folder they are not in — also one made
  *   private after the entry, or an entry written before this rule), a record they cannot read, and
@@ -57,7 +57,8 @@ export function evidenceToShow(reader: RecordReader, records: RecordRepository):
   }
 }
 
-const refId = (ref: string) => ref.slice(0, ref.lastIndexOf('@'))
+/** The record id of a `<record id>@<version>` reference (precedents, supersedes). */
+export const refId = (ref: string) => ref.slice(0, ref.lastIndexOf('@'))
 
 /** The entries' evidence as `viewerId` may see it; an entry with nothing hidden is returned as it was. */
 export function scrubEvidence<E extends LedgerEntry>(entries: readonly E[], viewerId: string, check: EvidenceCheck): E[] {

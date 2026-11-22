@@ -481,10 +481,11 @@ A decision's `materials`, `precedents` / `supersedes` and an action's attached v
 
 - **Write** (`act.ts`, `evidenceToWrite`): a company file only when the actor reads it **and** the
   record may link to it (`linkAllowed`: never a file inside a private folder from a record outside
-  it — owners / admins and the folder's own readers included); a record only when the actor reads it
-  and the record may reach it. A file the actor cannot read and a private folder's file get one
-  answer, 400 `BAD_MATERIAL` (`MATERIAL_NOT_USABLE`, plain Japanese, naming no place); a record
-  material keeps its `BAD_MATERIAL` answer for a missing / unreadable / unreachable one alike; an
+  it — owners / admins and the folder's own readers included); a record — a record material, each
+  of `precedents` and `supersedes` — only when the actor reads it and the record may reach it. A file
+  the actor cannot read and a private folder's file get one answer, 400 `BAD_MATERIAL`
+  (`MATERIAL_NOT_USABLE`, plain Japanese, naming no place); a record keeps one `BAD_MATERIAL` answer
+  for a missing / unreadable / unreachable one alike (a precedent's version is not checked); an
   attached version of a link into a private folder (a link stored before the rule) answers the same
   400 `BAD_ATTACHMENT` as a file the record does not link. Nothing is written.
 - **Read** (`history.ts`, `evidenceToShow` + `scrubEvidence`, after `scrubLedger`): each entry by the

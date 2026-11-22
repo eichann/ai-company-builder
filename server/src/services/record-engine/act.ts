@@ -19,7 +19,7 @@ import { applyAcceptance } from './acceptance'
 import { BUNDLE_PLACED_TYPES, bundleLinkName, placeWithin, WIDER_THAN_BUNDLE } from './bundle-place'
 import { linkAllowed, type RecordReader } from '../record-access'
 import type { EngineContext } from './context'
-import { evidenceToWrite } from './evidence'
+import { evidenceToWrite, refId } from './evidence'
 import { linkLedgerValue, MAX_LINK_TARGETS, withLinkTargets } from './links'
 import { ASSIGNEE_CANNOT_READ, MATERIAL_NOT_USABLE, REVIEWER_CANNOT_READ, bad, conflict, fileLinksUnavailable, OK_BY_CANNOT_READ, featureOffRefusal, runFenceRefusal, serviceStateOnly, STATE_CHANGED_BY_SERVICE } from './refusals'
 import { callVia, type ActorInput } from './types'
@@ -97,6 +97,9 @@ export function whoWithFallback(action: ActionDef, who: string[], own: { readers
  * (`linkAllowed`): the members a `link:<name>.<field>` who-entry names. Read from stored values, never
  * through the caller's reader — whether the 責任者 exists is the same answer for everyone.
  */
+/** A record named as evidence (material, precedent, supersedes) that is missing, unreadable or out of reach: one answer. */
+const RECORD_MATERIAL_REFUSED = 'materials: a record you can read, at a version it has had'
+
 export function linkedPeopleOf(records: RecordRepository, row: RecordRow, name: string, field: string): string[] {
   const targets = records.linksFrom([row.id]).filter(l => l.name === name && l.targetId !== null).map(l => l.targetId as string)
   if (targets.length === 0) return []
@@ -374,7 +377,7 @@ export function acting(ctx: EngineContext) {
           if (m.kind === 'record') {
             const r = evidence.record(m.id) ? records.byIds([m.id])[0] : undefined
             const v = r ? (records.states([r.id])[0]?.version ?? 0) : 0
-            if (!r || m.version > v) return bad('materials: a record you can read, at a version it has had', 'BAD_MATERIAL')
+            if (!r || m.version > v) return bad(RECORD_MATERIAL_REFUSED, 'BAD_MATERIAL')
           } else if (m.kind === 'drive') {
             // A Drive file the record links (any company, owner decision 2026-11-13), fixed at the
             // revision and fingerprint kept when it was linked.
@@ -393,6 +396,11 @@ export function acting(ctx: EngineContext) {
         const precedents = d.precedents === undefined ? [] : d.precedents
         if (!Array.isArray(precedents) || precedents.length > 20 || !precedents.every(p => typeof p === 'string' && REF_RE.test(p))) return bad('precedents: up to 20 `<record id>@<version>`')
         if (d.supersedes !== undefined && d.supersedes !== null && (typeof d.supersedes !== 'string' || !REF_RE.test(d.supersedes))) return bad('supersedes: `<record id>@<version>`')
+        // Precedents and the decision replaced are records named in 経緯 too: the same rule as record materials,
+        // the same answer for a missing, unreadable or unreachable one (records.md "Evidence").
+        if ([...precedents as string[], ...(typeof d.supersedes === 'string' ? [d.supersedes] : [])].some(p => !evidence.record(refId(p)))) {
+          return bad(RECORD_MATERIAL_REFUSED, 'BAD_MATERIAL')
+        }
         if (d.policyVersion !== undefined && d.policyVersion !== null && (typeof d.policyVersion !== 'string' || d.policyVersion.length > 100)) return bad('policyVersion: up to 100 characters')
         decision = {
           reason: note, materials, policyVersion: (d.policyVersion as string | undefined) ?? null,
