@@ -821,6 +821,63 @@ describe('SERVERCORE-1: a resume checks the pause again after its await (jobs.md
     expect(pauseRow(id)).toMatchObject({ state: 'active', paused_reason: null, paused_by: null })
   })
 
+  it('retired while the resume awaits: stays retired, the answer is the retired job, nothing written', async () => {
+    const id = await bobsJob('使わなくなる')
+    expect(held.pause(owner, id).ok).toBe(true)
+    const before = slotsHeld
+    const at = points.held('skill')
+    const resuming = held.resume(owner, id)
+    await at.arrived
+    // As a withdrawn or returned proposal does (job-proposals.ts): the stop's own unconditional write.
+    sqliteCompanyData(db).forCompany(CO).jobs.setState(id, 'retired', null, 'u-owner', new Date().toISOString())
+    const stamped = (db.prepare('SELECT updated_at FROM ai_jobs WHERE company_id = ? AND id = ?').get(CO, id) as Json).updated_at
+    at.release()
+    const r = await resuming
+    expect(r.ok && r.value.state).toBe('retired')
+    expect(pauseRow(id)).toMatchObject({ state: 'retired' })
+    expect((db.prepare('SELECT updated_at FROM ai_jobs WHERE company_id = ? AND id = ?').get(CO, id) as Json).updated_at).toBe(stamped)
+    expect(slotsHeld).toBe(before)
+  })
+
+  it('an admin demoted while their resume awaits cannot resume: answered as a member now (not found), still paused', async () => {
+    const id = await bobsJob('降格される管理者')
+    expect(held.pause(owner, id).ok).toBe(true)
+    const dan = { companyId: CO, userId: 'u-dan', role: 'admin' }
+    const at = points.held('skill')
+    const resuming = held.resume(dan, id)
+    await at.arrived
+    db.prepare("UPDATE memberships SET role = 'member' WHERE company_id = ? AND user_id = 'u-dan'").run(CO)
+    try {
+      at.release()
+      const r = await resuming
+      expect(!r.ok && [r.kind, r.body.code]).toEqual(['not-found', 'JOB_NOT_FOUND'])
+      expect(pauseRow(id)).toMatchObject({ state: 'paused', paused_reason: 'ADMIN', paused_by: 'u-owner' })
+    } finally {
+      db.prepare("UPDATE memberships SET role = 'admin' WHERE company_id = ? AND user_id = 'u-dan'").run(CO)
+    }
+  })
+
+  it('an admin demoted meanwhile who is the job\'s responsible person: refused as not their pause, still paused', async () => {
+    const made = await jobsWithSkill('tree-a').create(owner, { definition: { ...procedureJob('u-dan', '総務/面談'), name: '降格される責任者' } })
+    if (!made.ok) throw new Error(JSON.stringify(made.body))
+    const id = made.value.id
+    if (!(await jobsWithSkill('tree-a').approve(owner, id, { version: 1 })).ok) throw new Error('approve')
+    expect(held.pause(owner, id).ok).toBe(true)
+    const dan = { companyId: CO, userId: 'u-dan', role: 'admin' }
+    const at = points.held('skill')
+    const resuming = held.resume(dan, id)
+    await at.arrived
+    db.prepare("UPDATE memberships SET role = 'member' WHERE company_id = ? AND user_id = 'u-dan'").run(CO)
+    try {
+      at.release()
+      const r = await resuming
+      expect(!r.ok && [r.kind, r.body.code]).toEqual(['forbidden', 'JOB_PAUSED_BY_OTHER'])
+      expect(pauseRow(id)).toMatchObject({ state: 'paused', paused_reason: 'ADMIN' })
+    } finally {
+      db.prepare("UPDATE memberships SET role = 'admin' WHERE company_id = ? AND user_id = 'u-dan'").run(CO)
+    }
+  })
+
   it('a plain resume still works (nothing lands in the await)', async () => {
     const id = await bobsJob('ふつうの再開')
     expect(held.pause(bob, id).ok).toBe(true)

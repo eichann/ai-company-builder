@@ -821,9 +821,9 @@ export function createJobService(deps: JobServiceDeps) {
       if (job.state !== 'paused') return ok(view(member, handle, job, true, reads))
       // A non-admin resumes only a pause they made themselves, while still the approved version's
       // responsible person (someone a later draft names may see the job, not lift another's pause).
-      const mayResume = (j: JobRow) => hasFullAccess(member.role)
+      const mayResume = (j: JobRow, role: string) => hasFullAccess(role)
         || (j.pausedReason === 'BY_RESPONSIBLE' && j.pausedBy === member.userId && controls(handle, j, member.userId))
-      if (!mayResume(job)) return PAUSED_BY_OTHER()
+      if (!mayResume(job, member.role)) return PAUSED_BY_OTHER()
       // The pause this press lifts, as read now: the write below happens only while the job still holds exactly it.
       const from: JobPauseSnapshot = { pausedReason: job.pausedReason, pausedBy: job.pausedBy, pausedAt: job.pausedAt, approvedVersion: job.approvedVersion }
       if (job.approvedVersion !== null) {
@@ -836,11 +836,16 @@ export function createJobService(deps: JobServiceDeps) {
       }
       // Re-checked after the await (SERVERCORE-1, jobs.md "Resume checks again"): a stop that landed meanwhile — an
       // admin's, the server's (the responsible person left, lost rights), another reason or person, another approved
-      // version — always wins; a second resume of the same pause writes nothing.
-      const result = transactions.run((): Outcome<'resumed' | 'already'> => {
+      // version — always wins; a second resume of the same pause writes nothing. Who presses is read again too: an
+      // owner / admin demoted (or removed) meanwhile is answered as a press arriving now would be, and the answer's view
+      // is built for the member as they are now.
+      const result = transactions.run((): Outcome<Member> => {
+        const role = memberships.roleOf(member.companyId, member.userId)
         const current = handle.jobs.find(jobId) as JobRow
-        if (current.state !== 'paused') return ok('already')
-        if (!mayResume(current)) return PAUSED_BY_OTHER()
+        if (role === null || (!hasFullAccess(role) && !isResponsible(handle, current, member.userId))) return NOT_FOUND()
+        const now: Member = { ...member, role }
+        if (current.state !== 'paused') return ok(now)
+        if (!mayResume(current, role)) return PAUSED_BY_OTHER()
         if (!samePause(current, from)) return PAUSE_CHANGED()
         if (current.approvedVersion !== null) {
           const approved = handle.jobs.version(jobId, current.approvedVersion) as JobVersionRow
@@ -850,10 +855,10 @@ export function createJobService(deps: JobServiceDeps) {
         if (!handle.jobs.resume(jobId, from, current.approvedVersion === null ? 'draft' : 'active', clock.now())) return PAUSE_CHANGED()
         // A slot that passed while it was paused is held, never made due afterwards.
         deps.occurrenceHolds?.holdPassedSlot(member.companyId, jobId, 'JOB_PAUSED')
-        return ok('resumed')
+        return ok(now)
       })
       if (!result.ok) return result
-      return ok(view(member, handle, handle.jobs.find(jobId) as JobRow, true, reads))
+      return ok(view(result.value, handle, handle.jobs.find(jobId) as JobRow, true, reads))
     },
 
     /** `PUT /jobs-stop { stopped }` (owner/admin): 「定期の仕事をすべて止める」 (owner decision D8). */

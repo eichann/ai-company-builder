@@ -279,8 +279,11 @@ and starting the runner. It reads no content and calls nothing outside.
 that lands in that await must win, so (`services/jobs.ts` `resume`):
 
 - **The pause as read** (`JobPauseSnapshot`: `pausedReason`, `pausedBy`, `pausedAt`, `approvedVersion`) is what the press
-  lifts. Inside the write's transaction the job is read again: no longer paused → nothing written, the current job
-  answered (as a press arriving after: a double resume writes once); a non-admin whose pause is no longer their own → 403
+  lifts. Inside the write's transaction **who presses** is read again first (`memberships.roleOf`: an owner / admin
+  demoted or removed during the await is answered as a press arriving now — the one 404 `JOB_NOT_FOUND` when the job is
+  no longer theirs to see, else as a member — and the answer's view is built for them as they are now); then the job: no
+  longer paused (resumed, retired) → nothing written, the current job answered (as a press arriving after: a double
+  resume writes once); a non-admin whose pause is no longer their own → 403
   `JOB_PAUSED_BY_OTHER` (the answer of a later press); any other change of the four → 409 `JOB_PAUSE_CHANGED`
   (「再開の確認をしている間に、…ほかの理由で止められたか、内容が変わりました…」; the admin console shows the sentence); then the
   rights (`withinRights`) as before.
@@ -294,9 +297,12 @@ that lands in that await must win, so (`services/jobs.ts` `resume`):
   was read before).
 - Test: `tests/integration/jobs.test.ts` "SERVERCORE-1" — the Skill port wrapped with `tests/helpers/hold.ts`
   `stopAfter`: an admin's stop during the responsible person's resume (still paused by the admin), the server's pause
-  with another reason, another stopper, another approved version (each refused), a double resume (one write, one slot
-  held), a plain resume. Mutation check: the "no longer paused" answer and the in-transaction who-check each fail a test;
-  the re-read and the compare-and-set, as above.
+  with another reason, another stopper, another approved version (each refused), retired meanwhile (stays retired, the
+  retired job answered, nothing written), an admin demoted meanwhile (not their job now: 404; their job: 403, still
+  paused), a double resume (one write, one slot held), a plain resume. Mutation check: the "no longer paused" answer, the
+  in-transaction who-check, the role read again and the visibility check in the transaction each fail a test; the re-read
+  and the compare-and-set, as above. Not caught alone: the view built for the member as they are now (defence: a demoted
+  caller who still sees the job only reaches it on the "no longer paused" answer).
 
 ## The runner (3b, `createJobRunner` + `runOccurrence`)
 
