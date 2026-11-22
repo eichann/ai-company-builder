@@ -43,6 +43,7 @@ interface Result {
   fullScreen: { before: boolean; after: boolean; pageFullScreen: boolean; keyboard: { app: boolean; doc: boolean } }
   hiddenAgain: { focusedBefore: boolean; visible: boolean; muted: boolean; visibility: string; keyboard: { app: boolean; doc: boolean } }
   reloaded: { zoom: number; scrollY: number; keyboard: { app: boolean; doc: boolean } }
+  lateAutofocus: { shown: { scrollY: number; focused: string }; hiddenTwice: number }
   backToApp: { clickedIn: { app: boolean; doc: boolean }; after: { app: boolean; doc: boolean } }
   links: { events: unknown[]; stayed: boolean }
   crashEvents: unknown[]
@@ -58,6 +59,7 @@ interface Result {
   }
   closedWithKeyboard: { before: { app: boolean; doc: boolean }; appAfter: boolean }
   blocked: Array<{ viewId: number; kind: string; count: number; hosts: string[]; hostCount: number }>
+  blockedGaps: number[]
   blockedAfterOwnPage: { viewId: number; kind: string; count: number; hosts: string[]; hostCount: number } | undefined
 }
 
@@ -100,13 +102,15 @@ before(async () => {
     let err = ''
     child.stdout.on('data', chunk => { out += chunk })
     child.stderr.on('data', chunk => { err += chunk })
-    const timer = setTimeout(() => { child.kill('SIGKILL'); reject(new Error(`the Electron harness did not finish:\n${out}\n${err.slice(-4000)}`)) }, 130_000)
-    child.on('exit', () => { clearTimeout(timer); resolve(out + (out.includes('RESULT ') ? '' : `\n${err.slice(-4000)}`)) })
+    const timer = setTimeout(() => { child.kill('SIGKILL'); reject(new Error(`the Electron harness did not finish:\n${out}\n${err.slice(-4000)}`)) }, 180_000)
+    // `close`: the process exited and its output streams ended; the result file was renamed into place before.
+    child.on('close', () => { clearTimeout(timer); resolve(`${out}\n${err.slice(-4000)}`) })
   })
+  const resultFile = path.join(dir, 'result.json')
+  const text = fs.existsSync(resultFile) ? fs.readFileSync(resultFile, 'utf8') : null
   fs.rmSync(dir, { recursive: true, force: true })
-  const line = output.split('\n').find(l => l.startsWith('RESULT '))
-  assert.ok(line, `no result from the Electron harness:\n${output}`)
-  result = JSON.parse(line.slice('RESULT '.length)) as Result
+  assert.ok(text !== null, `no result from the Electron harness:\n${output}`)
+  result = JSON.parse(text) as Result
   assert.equal(result.error, undefined, result.error)
 })
 
@@ -196,6 +200,9 @@ test('reloading after the file changed keeps the document\'s zoom and scroll pos
   assert.equal(result.reloaded.zoom, 2)
   assert.equal(result.reloaded.scrollY, 600)
   assert.deepEqual(result.reloaded.keyboard, { app: true, doc: false }, 'the reload does not take the keyboard')
+  assert.equal(result.lateAutofocus.shown.focused, 'late', 'control: the page focused its autofocus field after the load')
+  assert.equal(result.lateAutofocus.shown.scrollY, 900, 'put back after the page\'s first frame, not scrolled back to its autofocus field')
+  assert.equal(result.lateAutofocus.hiddenTwice, 900, 'reloaded twice while hidden (no frame drawn): the position not yet put back is kept')
 })
 
 test('a link to the web is handed to the window only right after the member pressed something; the page never leaves', { skip }, () => {
@@ -234,7 +241,8 @@ test('what a document wanted from the internet reaches the window as hosts and a
   for (const host of ['style.test', 'script.test', 'fetch.test', 'xhr.test', 'ws.test', 'beacon.test', 'img.test']) assert.ok(last.hosts.includes(host), host)
   // Never a path, a query or a scheme: an address can carry what the page holds.
   assert.doesNotMatch(JSON.stringify(result.blocked), /secret|\/|\?|https|wss/)
-  assert.ok(result.blocked.length <= 8, `told at most every BLOCKED_INTERVAL_MS, not per request (${result.blocked.length} events)`)
+  // How many events depends on how long the page takes to ask (longer on a busy computer); the gaps do not.
+  assert.ok(result.blockedGaps.every(gap => gap >= 450), `told at most every BLOCKED_INTERVAL_MS, not per request (gaps ${result.blockedGaps.map(Math.round).join(', ')} ms)`)
   assert.ok(result.blocked.every(e => e.viewId === last.viewId && e.kind === 'blocked'))
 })
 
