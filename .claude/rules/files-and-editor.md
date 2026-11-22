@@ -395,7 +395,7 @@ and by the AI: **do not change them by one character** (no renamed key, no reord
   same tab list as files and records. `TabbedEditorPanel` draws it with the screen's `renderView(name)`
   and its tab with `viewLooks[name]` (title, icon); it never loads text or saves (`fileTabsOf` leaves it
   out), has no side column, drags only within the bar, and stands in the kind group その他.
-- **Not kept**: a restart drops it (`useEditorPersistence`), 「タブを片づける」 closes it without listing it,
+- **Not kept**: a restart drops it and any pin saved on it (`useEditorPersistence`), 「タブを片づける」 closes it without listing it,
   and the AI's `tabs.list` leaves it out — it is no file or record to open again; its screen opens it in
   one press. Tests: `editorTabs.test.ts`, `tests/ui/records-table.spec.ts` (main screen).
 - One user today: 「記録の一覧」 (`tasks-ui.md` "The records table (B4)"). Not a framework: a second kind of

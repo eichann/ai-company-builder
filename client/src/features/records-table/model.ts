@@ -59,9 +59,9 @@ export function shownColumns(columns: readonly RecordsTableColumn[], picked: rea
   return picked ? columns.filter(c => picked.includes(c.field)) : columns.filter(c => c.shown)
 }
 
-/** 「全 N 件のうち M 件」, and whether 「さらに読む」 has more to read. */
-export function pageNote(loaded: number, total: number): { text: string; more: boolean } {
-  if (total <= loaded) return { text: `${total} 件`, more: false }
+/** 「全 N 件のうち M 件」, and whether 「さらに読む」 has more to read (by the server's offset reached, `consumed`). */
+export function pageNote(loaded: number, total: number, consumed = loaded): { text: string; more: boolean } {
+  if (total <= consumed) return { text: `${total} 件`, more: false }
   return { text: `全 ${total} 件のうち ${loaded} 件を読み込みました（並べ替え・絞り込みは読み込んだ分の中で行います）`, more: true }
 }
 

@@ -11,6 +11,10 @@ import { thingName } from './thing-words'
 
 /** One page per call: the server's largest page. 「さらに読む」 asks for the next one. */
 export const RECORDS_TABLE_PAGE = 200
+/** The query's largest offset (`RecordQuery.offset` 0–10000): past it the table says to narrow instead. */
+export const RECORDS_TABLE_MAX_OFFSET = 10_000
+/** The query's longest state list (`POST /records/query`: 1–20 names). */
+const MAX_QUERY_STATES = 20
 
 /** A kind the member can choose above the table. */
 export interface RecordsTableKind { name: string; label: string }
@@ -61,6 +65,8 @@ export type RecordsTablePage =
     total: number
     offset: number
     rows: RecordsTableRow[]
+    /** Said above the rows when 「済み以外」 could not be asked of the server (every row is shown). */
+    notice?: string
   }
   | { success: false; offline: boolean; error: string }
 
@@ -88,10 +94,20 @@ export function kindsOf(defs: readonly TypeDefinition[]): RecordsTableKind[] {
     .map(d => ({ name: d.name, label: thingName({ type: d.name, typeLabel: d.label, implements: d.implements, state: null }) }))
 }
 
-/** The states 「済み以外」 asks the server for; null when the kind has no final state (nothing to leave out). */
-export function openStatesOf(def: TypeDefinition): string[] | null {
-  if (def.final.length === 0) return null
-  return def.states.filter(s => !def.final.includes(s))
+/** 「済み以外」 could not be asked for this kind: every record is shown, and the member is told why. */
+export const OPEN_ONLY_TOO_MANY_STATES = 'この種類は状態が多いため「済み以外」で絞れません。すべてを出しています。'
+
+/**
+ * What 「済み以外」 asks the server for (`state`: 1–20 names, the server's rule): the kind's non-final
+ * states; `all` when nothing is final (no filter needed); `none` when every state is final (nothing
+ * to ask: no row is open); `tooMany` past the query's limit (no filter, said in words).
+ */
+export function openStatesOf(def: TypeDefinition): { states: string[] } | { all: true } | { none: true } | { tooMany: true } {
+  if (def.final.length === 0) return { all: true }
+  const states = def.states.filter(s => !def.final.includes(s))
+  if (states.length === 0) return { none: true }
+  if (states.length > MAX_QUERY_STATES) return { tooMany: true }
+  return { states }
 }
 
 function sortValue(f: FieldDef, value: RecordFieldValue, text: string | null): string | number | null {

@@ -13,6 +13,7 @@ import { recordIdOfTab, recordTabKey, viewTabKey } from '../src/features/editor/
 import { FindPalette } from '../src/features/search/components/FindPalette'
 import { RECORDS_TABLE_PALETTE_ACTION, RECORDS_TABLE_TAB_LOOK, RECORDS_TABLE_VIEW, renderRecordsTable, startRecordsTable } from '../src/features/records-table/entry'
 import { useAppStore } from '../src/stores/appStore'
+import { useAuthStore } from '../src/stores/authStore'
 import { useKeybindings } from '../src/shared/commands/commands'
 import type { RecordsTablePage, RecordsTableQuery, RecordsTableRow } from '../shared/records-table'
 import { installElectronAPI } from './ui/fixtures/electron-api'
@@ -71,6 +72,8 @@ installElectronAPI({
   gitListFiles: async () => ({ success: true, files: [] }),
 })
 Object.assign(window, { __acbAsked: asked })
+// The member signed in (the table is tied to one member × company).
+useAuthStore.setState({ user: { id: 'u-demo', email: 'demo@example.com', name: 'デモ', image: null, emailVerified: true } })
 useAppStore.setState({ currentCompany: { id: 'demo', name: '株式会社デモ', rootPath: ROOT, departments: [], createdAt: new Date() } })
 
 const TABLE = viewTabKey(RECORDS_TABLE_VIEW)

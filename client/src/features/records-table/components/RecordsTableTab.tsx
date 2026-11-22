@@ -4,10 +4,10 @@ import { useMemo, useState, type KeyboardEvent } from 'react'
 import { ArrowClockwise, CaretDown, CaretUp, Columns, Lock, UsersThree } from '@phosphor-icons/react'
 import { Callout, StatusBadge } from '../../../shared/ui/primitives'
 import { useAuthStore } from '../../../stores/authStore'
-import type { RecordsTableColumn, RecordsTableRow } from '../../../../shared/records-table'
+import { RECORDS_TABLE_MAX_OFFSET, type RecordsTableColumn, type RecordsTableRow } from '../../../../shared/records-table'
 import type { RecordsTableReads } from '../api'
 import { filterRows, isOverdue, nextSort, pageNote, shortDate, shortDay, shownColumns, sortRows, todayOf, type SortKey } from '../model'
-import { chooseKind, chooseOpenOnly, pickColumns, readMore, reloadTable, setSort, setText, useRecordsTableState } from '../tableState'
+import { chooseKind, chooseOpenOnly, pickColumns, readMore, reloadTable, scopeOf, setSort, setText, useRecordsTableState } from '../tableState'
 
 interface Props {
   companyId: string
@@ -20,14 +20,20 @@ interface Props {
 }
 
 const CONTROL = 'inline-flex h-control-sm items-center gap-1 rounded-control border border-border-control bg-bg px-control-sm-x text-small text-text hover:bg-surface-sunken disabled:opacity-disabled'
+/** Why 「さらに読む」 stopped, in the member's words. */
+const STOPPED = {
+  changed: '読んでいる間に一覧が変わりました（足された・消えた記録があります）。続きは最初から読み直してください。',
+  limit: 'これ以上は読めません（1万件まで）。「済み以外」で絞り込んでください。',
+  kindGone: 'この種類は今は読めません。最初から読み直してください。',
+} as const
 const CELL = 'border-b border-[color:var(--color-border)] px-table-cell-x py-1.5 text-left align-top'
 
 export function RecordsTableTab({ companyId, onOpenRecord, reads, now = Date.now }: Props) {
-  const userId = useAuthStore(s => s.user?.id ?? '')
-  const scope = `${userId}:${companyId}`
+  const userId = useAuthStore(s => s.user?.id ?? null)
+  const scope = scopeOf(userId, companyId)
   const s = useRecordsTableState()
-  // Another member or company than the state's: nothing of it is shown.
-  const mine = s.scope === scope
+  // Another member or company than the state's (or nobody signed in): nothing of it is shown.
+  const mine = scope !== null && s.scope === scope
   const page = mine ? s.page : null
   const [columnsOpen, setColumnsOpen] = useState(false)
   const today = todayOf(now())
@@ -35,7 +41,9 @@ export function RecordsTableTab({ companyId, onOpenRecord, reads, now = Date.now
   const columns = useMemo(() => page ? shownColumns(page.columns, s.picked[page.kind]) : [], [page, s.picked])
   const rows = useMemo(() => page ? sortRows(filterRows(page.rows, s.text, columns), s.sort) : [], [page, s.text, s.sort, columns])
   const kindLabel = page?.kinds.find(k => k.name === page.kind)?.label ?? ''
-  const note = page ? pageNote(page.rows.length, page.total) : null
+  const note = page ? pageNote(page.rows.length, page.total, page.consumed) : null
+  // Past the query's reach the next page is never asked: the foot says so at once.
+  const stopped = page?.stopped ?? (note?.more && page && page.consumed > RECORDS_TABLE_MAX_OFFSET ? 'limit' : undefined)
 
   const header = (key: SortKey, label: string) => {
     const dir = s.sort?.key === key ? s.sort.dir : null
@@ -72,12 +80,14 @@ export function RecordsTableTab({ companyId, onOpenRecord, reads, now = Date.now
 
   // A tab shown again without its question (opened from ← →, or after another member signed in): ask anew.
   const reloadAfterScope = () => {
+    if (!scope) return Promise.resolve()
     useRecordsTableState.setState(st => st.scope === scope ? {} : { scope, page: null, error: null, text: '', sort: null, picked: {} })
     return reloadTable(companyId, reads)
   }
 
   const body = () => {
     const loadButton = (onClick: () => void) => <div className="px-4 py-6"><button type="button" className={CONTROL} onClick={onClick}>一覧を読み込む</button></div>
+    if (!scope) return <p className="px-4 py-6 text-body text-text-muted">サインインすると記録の一覧が見られます。</p>
     if (!mine) return loadButton(() => { void reloadAfterScope() })
     if (!page && s.loading) return <p className="px-4 py-6 text-body text-text-muted">読み込んでいます</p>
     if (!page && s.error) return <div className="p-4"><Callout tone={s.error.offline ? 'offline' : 'danger'} action={<button type="button" className={CONTROL} onClick={() => { void reloadTable(companyId, reads) }}>もう一度</button>}>{s.error.text}</Callout></div>
@@ -161,6 +171,7 @@ export function RecordsTableTab({ companyId, onOpenRecord, reads, now = Date.now
           )}
         </div>
       )}
+      {page?.notice && <div className="px-4 pb-2"><Callout tone="info">{page.notice}</Callout></div>}
       {s.error && page && <div className="px-4 pb-2"><Callout tone={s.error.offline ? 'offline' : 'danger'}>{s.error.text}</Callout></div>}
       <div className="min-h-0 flex-1 overflow-auto">
         {body()}
@@ -168,10 +179,12 @@ export function RecordsTableTab({ companyId, onOpenRecord, reads, now = Date.now
           <p className="px-4 py-4 text-body text-text-muted">「{s.text}」に合う行はありません（読み込んだ {page.rows.length} 件の中で探しています）。</p>
         )}
       </div>
-      {note?.more && page && (
+      {page && (note?.more || stopped) && (
         <div className="flex flex-shrink-0 flex-wrap items-center gap-2 border-t border-[color:var(--color-border)] px-4 py-1.5 text-caption text-text-muted">
-          <span data-testid="records-table-page-note">{note.text}</span>
-          <button type="button" className={CONTROL} disabled={!!s.loading} onClick={() => { void readMore(companyId, reads) }}>{s.loading === 'more' ? '読み込んでいます' : 'さらに読む'}</button>
+          <span data-testid="records-table-page-note">{stopped ? STOPPED[stopped] : note?.text}</span>
+          {stopped === 'limit' ? null
+            : stopped ? <button type="button" className={CONTROL} disabled={!!s.loading} onClick={() => { void reloadTable(companyId, reads) }}>最初から読み直す</button>
+            : <button type="button" className={CONTROL} disabled={!!s.loading} onClick={() => { void readMore(companyId, reads) }}>{s.loading === 'more' ? '読み込んでいます' : 'さらに読む'}</button>}
         </div>
       )}
     </section>

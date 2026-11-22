@@ -38,7 +38,8 @@ function safeReadEditorState(companyId: string, defaultLeftTab: string): Persist
       activeFilePath: typeof parsed.activeFilePath === 'string' ? parsed.activeFilePath : null,
       leftTab: typeof parsed.leftTab === 'string' && parsed.leftTab ? parsed.leftTab : defaultLeftTab,
       records: parseRecordLooks(parsed.records),
-      pinned: Array.isArray(parsed.pinned) ? parsed.pinned.filter((p: unknown): p is string => typeof p === 'string') : [],
+      // A screen tab is never restored, so its pin is not either.
+      pinned: Array.isArray(parsed.pinned) ? parsed.pinned.filter((p: unknown): p is string => typeof p === 'string' && !viewOfTab(p)) : [],
     }
   } catch {
     return null

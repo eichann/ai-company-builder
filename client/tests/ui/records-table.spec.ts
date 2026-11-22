@@ -158,3 +158,13 @@ test('main screen: an app restart does not bring the table tab back; the task ta
   await expect(page.getByRole('tab', { name: /A社 提案書を仕上げる/ })).toBeVisible()
   await expect(page.getByRole('tab', { name: /記録の一覧/ })).toHaveCount(0)
 })
+
+test('main screen: a pin saved on the table tab is not restored (the tab opens unpinned)', async ({ page }) => {
+  const editor = JSON.stringify({ openFiles: ['/Users/demo/会社/README.md'], activeFilePath: '/Users/demo/会社/README.md', leftTab: 'tasks', pinned: ['/Users/demo/会社/README.md', 'acb-view:records-table'] })
+  await openPreview(page, 'skill-layout', { tasks: '1', seed: JSON.stringify({ 'editor:demo': editor }) })
+  await page.getByRole('button', { name: '表で見る' }).click()
+  const tableTab = page.getByRole('tab', { name: /記録の一覧/ })
+  await expect(tableTab).toHaveAttribute('aria-selected', 'true')
+  await expect(tableTab).not.toHaveAttribute('data-pinned', /.*/)
+  await expect(page.locator('[data-pinned]')).toHaveCount(1)
+})

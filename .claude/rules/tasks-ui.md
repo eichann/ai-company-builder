@@ -991,8 +991,12 @@ switch, and lives in its own places with a few doors.
   the member sees**: owner-only, members-only and private-folder records are absent from its answer; the
   app never filters visibility itself, and the rows shown are exactly the answers' (`tableState.ts`
   appends 「さらに読む」 pages, each record once). 「済み以外」 is the query's `state` (the kind's non-final
-  states, `openStatesOf`), asked of the server. Nothing is kept on disk; the table's state is memory only,
-  tied to one member × company (another one starts from nothing, `openRecordsTable`).
+  states, `openStatesOf`), asked of the server within its rule (1–20 names): every state final → nothing
+  is asked (no row is open); no final state → no filter needed; more than 20 → no filter, and the table
+  says 「この種類は状態が多いため「済み以外」で絞れません。すべてを出しています。」. Nothing is kept on disk; the
+  table's state is memory only, tied to one member × company (another one starts from nothing,
+  `openRecordsTable`); nobody signed in reads nothing, and signing out (or another member signing in)
+  forgets the rows and drops answers on their way.
 - **Columns** come from the kind's declared server fields that fit a line (person, date, datetime,
   choice, number, tags, boolean, text — no long text or record ids; `columnsOf`), 担当 / 責任者 / 期限 first,
   five shown until the member picks others with 「列」 (memory only). Always 状態, 題名 and 更新日.
@@ -1004,6 +1008,12 @@ switch, and lives in its own places with a few doors.
 - **Answers out of order**: every load is numbered; an answer to an older question (a kind switched to
   fast, 読み直す twice) is dropped; a failure keeps the same question's rows (with the reason above) and
   never leaves another kind's rows under the new heading.
+- **Pages count by the server's offset** (`consumed`), not by the rows shown. 「さらに読む」 stops — and
+  never asks the same tail again — when the list changed between pages (the total moved, or the next
+  page repeats a record already read: one came, went or moved ahead, so another may be skipped): the
+  foot says so and offers ［最初から読み直す］. It also stops, keeping the rows read, when the server
+  answers another kind (the kind is gone), and before asking past the query's offset 10000
+  (「これ以上は読めません（1万件まで）。「済み以外」で絞り込んでください。」; main refuses past it too).
 - **States in plain Japanese** with the P2b `Callout`: loading, records off (「この会社では、やることや決めた
   ことなどの記録を使っていません。」), offline / failed (the server text + ［もう一度］), empty
   (「済んでいない〇〇はありません。」), no row matching the filter.
@@ -1030,12 +1040,14 @@ delete `client/src/features/records-table/`, `client/electron/features/records-t
 (it shows nothing without a `renderView`) or go with it.
 
 Tests: `src/features/records-table/model.test.ts` (sorting, filter, 期限切れ, columns, page note),
-`tableState.test.ts` (rows only from the answer, out-of-order answers dropped, another member starts
-empty, さらに読む once each, failures), `client/tests/records-table.test.ts` (main: the query asked,
-rows as answered, input checked, records off / offline, columns and kinds order),
-`records-table-removable.test.ts`, `tests/ui/records-table.spec.ts` (`records-table-ui.html`: doors,
+`tableState.test.ts` (rows exactly the answer's, out-of-order answers dropped, another member starts
+empty, nobody reads nothing, sign-out forgets, さらに読む by offset and once each, stopping when the list
+changed / the kind is gone / past 10000, failures), `client/tests/records-table.test.ts` (main: the query asked,
+rows as answered, 済み以外 within the 1–20 rule, input checked (offset ≤ 10000), records off / offline,
+columns and kinds order),
+`records-table-removable.test.ts` (imports, and the channel's name only in the listed files), `tests/ui/records-table.spec.ts` (`records-table-ui.html`: doors,
 sorting, filter, opening a row, keys, a fast kind switch, states, paging, dark; the real `AppShell` on
-`skill-layout-ui.html?tasks=1`: one tab, tidy / the AI / a restart leave it out).
+`skill-layout-ui.html?tasks=1`: one tab, tidy / the AI / a restart leave it out, a saved pin is dropped).
 
 ## Tests
 

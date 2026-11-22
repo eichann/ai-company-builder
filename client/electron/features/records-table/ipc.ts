@@ -7,7 +7,7 @@
 import { ONTOLOGY_NAME_RE, type TypeDefinition } from '../../../../shared/core/record-types'
 import type { RecordQueryResult, RecordTypeView } from '../../../../shared/types/records'
 import { RECORD_VIEWS_OFFLINE_TEXT } from '../../../shared/record-views'
-import { columnsOf, kindsOf, openStatesOf, RECORDS_TABLE_PAGE, rowOf, type RecordsTablePage, type RecordsTableQuery } from '../../../shared/records-table'
+import { columnsOf, kindsOf, OPEN_ONLY_TOO_MANY_STATES, openStatesOf, RECORDS_TABLE_MAX_OFFSET, RECORDS_TABLE_PAGE, rowOf, type RecordsTablePage, type RecordsTableQuery } from '../../../shared/records-table'
 import type { IpcRegistrar } from '../../ipc/registrar'
 
 export interface RecordsTableDeps {
@@ -20,7 +20,6 @@ export interface RecordsTableDeps {
 
 const COMPANY = /^[A-Za-z0-9_-]{1,100}$/
 const BAD_INPUT = { success: false as const, offline: false, error: '入力が正しくありません。' }
-const MAX_OFFSET = 10_000
 
 type Answer = { status: number; json: { data?: unknown; code?: unknown } | null } | null
 
@@ -74,18 +73,21 @@ export function createRecordsTableApi(deps: RecordsTableDeps) {
     // A kind gone since the member chose it (a plugin turned off): the first one there is.
     const def: TypeDefinition | undefined = defs.find(d => d.name === query.kind) ?? defs.find(d => d.name === kinds[0]?.name)
     if (!def) return { success: true, available: true, kinds, kind: query.kind, columns: [], total: 0, offset: 0, rows: [] }
-    const states = query.openOnly ? openStatesOf(def) : null
+    const open = query.openOnly ? openStatesOf(def) : { all: true as const }
+    const columns = columnsOf(def)
+    // Every state of the kind is final: no record is open, nothing to ask.
+    if ('none' in open) return { success: true, available: true, kinds, kind: def.name, columns, total: 0, offset: query.offset, rows: [] }
     const [a, names] = await Promise.all([
-      call(`${company}/records/query`, 'POST', { type: def.name, ...(states ? { state: states } : {}), limit: RECORDS_TABLE_PAGE, offset: query.offset }),
+      call(`${company}/records/query`, 'POST', { type: def.name, ...('states' in open ? { state: open.states } : {}), limit: RECORDS_TABLE_PAGE, offset: query.offset }),
       people(companyId),
     ])
     if (disabled(a)) return off(def.name)
     if (a?.status !== 200) return failure(a)
     const result = a.json?.data as RecordQueryResult
-    const columns = columnsOf(def)
     return {
       success: true, available: true, kinds, kind: def.name, columns, total: result.total, offset: query.offset,
       rows: result.records.map(r => rowOf(r, def, columns, names)),
+      ...('tooMany' in open ? { notice: OPEN_ONLY_TOO_MANY_STATES } : {}),
     }
   }
 
@@ -94,7 +96,7 @@ export function createRecordsTableApi(deps: RecordsTableDeps) {
       const q = query as Partial<RecordsTableQuery> | null
       if (typeof companyId !== 'string' || !COMPANY.test(companyId) || !q || typeof q !== 'object') return BAD_INPUT
       if (typeof q.kind !== 'string' || !ONTOLOGY_NAME_RE.test(q.kind) || typeof q.openOnly !== 'boolean') return BAD_INPUT
-      if (typeof q.offset !== 'number' || !Number.isInteger(q.offset) || q.offset < 0 || q.offset > MAX_OFFSET) return BAD_INPUT
+      if (typeof q.offset !== 'number' || !Number.isInteger(q.offset) || q.offset < 0 || q.offset > RECORDS_TABLE_MAX_OFFSET) return BAD_INPUT
       return page(companyId, { kind: q.kind, openOnly: q.openOnly, offset: q.offset })
     },
   }

@@ -5,7 +5,7 @@
 import { Table } from '@phosphor-icons/react'
 import { useAuthStore } from '../../stores/authStore'
 import { RecordsTableTab } from './components/RecordsTableTab'
-import { openRecordsTable } from './tableState'
+import { openRecordsTable, scopeOf } from './tableState'
 
 /** The middle tab's name (the editor's screen tab `viewTabKey(RECORDS_TABLE_VIEW)`). */
 export const RECORDS_TABLE_VIEW = 'records-table'
@@ -18,8 +18,7 @@ export const RECORDS_TABLE_PALETTE_ACTION = { id: 'recordsTable', title: '記録
 
 /** Starts a fresh read of `kind` (or the kind shown last); the caller then opens the tab. */
 export function startRecordsTable(companyId: string, kind?: string): void {
-  const scope = `${useAuthStore.getState().user?.id ?? ''}:${companyId}`
-  void openRecordsTable(scope, companyId, kind)
+  void openRecordsTable(scopeOf(useAuthStore.getState().user?.id, companyId), companyId, kind)
 }
 
 /** The tab's page; a row opens its record in a tab beside it. */

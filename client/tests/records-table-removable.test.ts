@@ -83,6 +83,32 @@ test('nothing outside 「記録の一覧」 reaches into it except its listed do
   }
 })
 
+// The channel and its preload method by name: a leftover mention (a fake, a hand-written call) outside
+// these files (and the feature's own places) would outlive a removal unnoticed.
+const CHANNEL_NAMES = /recordsTable:page|getRecordsTablePage/
+const CHANNEL_FILES = new Set([
+  'shared/ipc-contract.ts', 'electron/preload.ts',
+  'tests/ipc-harness/ipc-inventory.txt', 'tests/records-table-ui.tsx', 'tests/skill-layout-ui.tsx', 'tests/records-table-removable.test.ts',
+])
+
+function textFiles(dir: string): string[] {
+  if (!existsSync(dir)) return []
+  return readdirSync(dir).flatMap(name => {
+    const p = join(dir, name)
+    if (statSync(p).isDirectory()) return name === 'node_modules' || name.startsWith('dist') || name === 'test-results' ? [] : textFiles(p)
+    return /\.(tsx?|mjs|cjs|js|txt|json|html)$/.test(name) ? [p] : []
+  })
+}
+
+test('the channel\'s name appears only in the listed files', () => {
+  const found = ['src', 'electron', 'shared', 'tests', 'connectors', 'scripts'].flatMap(d => textFiles(join(CLIENT, d)))
+    .map(f => relative(CLIENT, f))
+    .filter(f => !OWN.some(o => f.startsWith(o)))
+    .filter(f => CHANNEL_NAMES.test(readFileSync(join(CLIENT, f), 'utf8')))
+  assert.deepEqual(found.filter(f => !CHANNEL_FILES.has(f)), [], 'remove the leftover mention, or list the file with the rule\'s removal steps')
+  for (const f of CHANNEL_FILES) assert.ok(found.includes(f), `${f} no longer names the channel: update the list`)
+})
+
 test('the check sees a stray import (self-test)', () => {
   assert.deepEqual(strayImports([
     ['src/features/tasks/components/TaskListPanel.tsx', 'src/features/records-table/entry'],
