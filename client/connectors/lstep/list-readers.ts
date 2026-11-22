@@ -9,9 +9,11 @@
  * - `GET /api/episode-groups` → `{ data: [{ id, name, order, item_count }] }` (no pages): the reminder
  *   folders (`group`).
  * - `GET /api/template-groups` → `{ data: [{ id, name, order, item_count }] }` (no pages): the template
- *   folders (`template_group`). It lists 「未分類」 as `id 0`: **not selectable** (decision, safe side:
- *   every id a plan or a read carries is a positive integer, as everywhere on Lステップ — `0` / `-1`
- *   are never "one item"), so it is left out and the list says it is not whole.
+ *   folders (`template_group`). It lists 「未分類」 as `id 0`: selectable since 0.6.1 (design memo §40:
+ *   `GET /api/templates?group=0&page=1` answers like any folder, its entries with `group: null`), the
+ *   only `0` taken anywhere — the reminder folders and every item id stay positive integers.
+ * - `GET /api/templates?group=0&page=<n>`: 「未分類」's templates; an entry counts only when every folder
+ *   id it carries is `null` or `0` (at least one).
  * - `GET /api/episodes?group=<folder>&page=<n>` → `{ current_page, data, …, last_page, per_page: 50,
  *   total }`, each `{ id, name, order, type, created_at, group_id, group: { id, name, order } }`: the
  *   reminders (`reminder`).
@@ -69,7 +71,12 @@ interface ListRule {
   paginated: boolean
   /** The folder (a `{name}` of the read) every entry must name. */
   folder?: string
+  /** 「未分類」 (`0`) is a folder here: listed (a folder list) or asked (a folder's entries, which then name no folder). */
+  uncategorised?: boolean
 }
+
+/** 「未分類」's id (design memo §36, §40). */
+const UNCATEGORISED = '0'
 
 function listReader(rule: ListRule): BrowserJsonExploreReader {
   return {
@@ -82,19 +89,22 @@ function listReader(rule: ListRule): BrowserJsonExploreReader {
       const data = jsonField(answer, 'data')
       if (!Array.isArray(data)) return { items: [], complete: false }
       const folder = rule.folder === undefined ? undefined : values[rule.folder]
-      if (rule.folder !== undefined && (folder === undefined || !POSITIVE_ID.test(folder))) return { items: [], complete: false }
+      const folderOk = (f: string) => POSITIVE_ID.test(f) || (rule.uncategorised === true && f === UNCATEGORISED)
+      if (rule.folder !== undefined && (folder === undefined || !folderOk(folder))) return { items: [], complete: false }
       const page = rule.paginated ? pageOf(answer) : null
       let complete = rule.paginated ? page !== null : jsonField(answer, 'last_page') === undefined
       const items: BrowserExploreItem[] = []
       for (const entry of data as readonly BrowserJsonValue[]) {
         const o = jsonObject(entry)
-        const id = idOf(jsonField(o, 'id'))
+        const rawId = jsonField(o, 'id')
+        const id = rule.uncategorised === true && rule.folder === undefined && rawId === 0 ? UNCATEGORISED : idOf(rawId)
         const name = jsonField(o, 'name')
         // A name that is empty once spaces, zero-width and bidi marks are removed cannot tell the entry apart.
         if (!id || typeof name !== 'string' || name.replace(/[\s\u061c\u200b-\u200f\u202a-\u202e\u2066-\u2069\ufeff]/g, '') === '') { complete = false; continue }
         if (folder !== undefined) {
           const named = foldersOf(o)
-          if (named.length === 0 || named.some(g => idOf(g) !== folder)) { complete = false; continue }
+          const wrong = (g: BrowserJsonValue | undefined) => (folder === UNCATEGORISED ? !(g === null || g === 0) : idOf(g) !== folder)
+          if (named.length === 0 || named.some(wrong)) { complete = false; continue }
         }
         items.push({ field: rule.field, value: id, label: name })
       }
@@ -107,7 +117,7 @@ export function createLstepListReaders(): BrowserJsonExploreReader[] {
   return [
     listReader({ id: LSTEP_REMINDER_FOLDERS_READER, field: 'group', paginated: false }),
     listReader({ id: LSTEP_REMINDERS_READER, field: 'reminder', paginated: true, folder: 'group' }),
-    listReader({ id: LSTEP_TEMPLATE_FOLDERS_READER, field: 'template_group', paginated: false }),
-    listReader({ id: LSTEP_TEMPLATES_READER, field: 'template', paginated: true, folder: 'template_group' }),
+    listReader({ id: LSTEP_TEMPLATE_FOLDERS_READER, field: 'template_group', paginated: false, uncategorised: true }),
+    listReader({ id: LSTEP_TEMPLATES_READER, field: 'template', paginated: true, folder: 'template_group', uncategorised: true }),
   ]
 }

@@ -48,13 +48,32 @@
  * still receive it) optional — unknown is shown as 「読み取れませんでした」, never 0 (6b-2 decision 1).
  * They are read only through the reads `explore` already declares (./reminder-step-facts.ts says from
  * where, and which are not confirmed yet: those stay `unknown`, so no plan is made until they are).
+ *
+ * 0.6.1 reads the step's timing from JSON Lステップ's own pages read (design memo §39, §40, the owner's
+ * login, read-only windows: only GETs, writes stopped, none made), not from the page's text — which on
+ * the real page always failed, the page repeating ids in every step's form:
+ * - `reminder_schedule`: `GET /api/episodes/{reminder}` (no query) → `step` (reader
+ *   ./reminder-schedule.ts): the facts check the step stands in it exactly once and the reminder is not
+ *   hidden, and take the reminder's name from it (no folder walk).
+ * - `step_timing`: `GET /api/episode-steps/{step}` (no query, §40) → `step` labelled with the site's
+ *   `step_timing_text`, which the facts show verbatim as `schedule.timing` / `names.step` (never parsed).
+ * - 「未分類」 (`group=0`, §40: answers like any folder, entries `group: null`) is a template folder like
+ *   the others (./list-readers.ts, ./reminder-step-facts.ts).
+ * - `shared_with` is **optional** (the owner, 2026-11-22): Lステップ has no reverse lookup of the 回 using
+ *   a reminder (people join it from tags, forms, keywords, friend-add, reservations, actions), so it
+ *   stays unknown; the card always shows the `shared` warning above. `audience` stays optional.
+ * Same type and operation, facts version 2. The write is unchanged; §40 saw its form again (read only,
+ * names of fields, no values): `POST /line/episode/step/pack/template` with `content_id` and the page's
+ * script adding the chosen template, `_token` (also `meta[name=csrf-token]`) and `_lm_user_id` — the
+ * `template_id` field name is the 11/20 capture's.
  */
 import { LSTEP_REMINDER_FOLDERS_READER, LSTEP_REMINDERS_READER, LSTEP_TEMPLATE_FOLDERS_READER, LSTEP_TEMPLATES_READER } from './list-readers'
+import { LSTEP_REMINDER_SCHEDULE_READER, LSTEP_STEP_TIMING_READER } from './reminder-schedule'
 import { LSTEP_REMINDER_STEP_CHECKER } from './reminder-step'
 import { LSTEP_REMINDER_STEPS_READER } from './reminder-steps-reader'
 
 export const LSTEP_DECLARATION = `id: lstep
-version: 0.6.0
+version: 0.6.1
 label: Lステップ
 contract: 1
 browser:
@@ -90,7 +109,7 @@ browser:
         names: { required: true }
         templates: { required: true, complete: true }
         schedule: { required: true, complete: true }
-        shared_with: { required: true, complete: true }
+        shared_with: { required: false }
         audience: { required: false }
   explore:
     reminder_folders:
@@ -123,6 +142,16 @@ browser:
       label: リマインダの中身（段の一覧）
       path: "/line/episode/show/{reminder}"
       reader: ${LSTEP_REMINDER_STEPS_READER}
+      no_side_effects: reviewed
+    reminder_schedule:
+      label: リマインダの段の時刻
+      path: "/api/episodes/{reminder}"
+      reader: ${LSTEP_REMINDER_SCHEDULE_READER}
+      no_side_effects: reviewed
+    step_timing:
+      label: 段の時刻（サイトの表示）
+      path: "/api/episode-steps/{step}"
+      reader: ${LSTEP_STEP_TIMING_READER}
       no_side_effects: reviewed
 `
 

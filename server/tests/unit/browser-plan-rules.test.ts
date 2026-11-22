@@ -128,6 +128,23 @@ describe('the first version\'s rule', () => {
     // The facts alone do not make another delivery runnable.
     expect(browserFirstVersionProblem({ ...scheduled(whole, whole), delivers: 'immediate' })).toContain('すぐ人に届く')
   })
+
+  it('a type that does not read who else uses the target as a required fact must carry its shared warning (lstep 0.6.1, owner 2026-11-22): the card\'s warning cannot silently go', () => {
+    const withShared = (rule: { required: boolean; complete: boolean } | undefined, shared: string | null) => {
+      const facts: Record<string, { required: boolean; complete: boolean }> = { ...op().facts }
+      if (rule) facts.shared_with = rule
+      else delete facts.shared_with
+      return { ...op(), shared, facts }
+    }
+    const optional = { required: false, complete: false }
+    expect(browserFirstVersionProblem(withShared(optional, '全部の回で共有です。'))).toBeNull()
+    expect(browserFirstVersionProblem(withShared(optional, null))).toContain('共有の注意書き')
+    // Not declared at all: the same (nothing read says who else uses it).
+    expect(browserFirstVersionProblem(withShared(undefined, null))).toContain('共有の注意書き')
+    expect(browserFirstVersionProblem(withShared(undefined, '全部の回で共有です。'))).toBeNull()
+    // Read as required: the note is the connector's choice.
+    expect(browserFirstVersionProblem(withShared({ required: true, complete: true }, null))).toBeNull()
+  })
 })
 
 const omit = <T extends Record<string, unknown>>(o: T, key: string): Partial<T> => Object.fromEntries(Object.entries(o).filter(([k]) => k !== key)) as Partial<T>

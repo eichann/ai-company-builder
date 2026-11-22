@@ -647,7 +647,10 @@ export function parseBrowserConnector(raw: { [k: string]: YamlValue }, err: (m: 
  * only a type that delivers nothing at once (`delivers: none`) or only on the target's schedule
  * (`delivers: scheduled`, and then only when its checker reads that schedule as a required, complete
  * fact `schedule`, so the person sees when it goes out), is not irreversible, sends exactly one write
- * and does not delete. Asked by the server at every step of a plan (register, approve, claim, permit).
+ * and does not delete. A type must carry its `shared` note unless it reads `shared_with` (who else uses
+ * the target) as a **required** fact — optional or not declared at all: when nothing read says who else
+ * uses the target, the card's warning is what tells the person (lstep 0.6.1, owner decision 2026-11-22).
+ * Asked by the server at every step of a plan (register, approve, claim, permit).
  */
 export function browserFirstVersionProblem(operation: BrowserOperation): string | null {
   if (operation.effect === 'delete') return 'この操作は消す操作なので、まだ任せられません'
@@ -661,6 +664,8 @@ export function browserFirstVersionProblem(operation: BrowserOperation): string 
     }
     if (!whole('schedule') || !whole('templates')) return 'この操作は届く時と届く中身を必ず全部読み取る型ではないので、まだ任せられません'
   } else if (operation.delivers !== 'none') return 'この操作はすぐ人に届く（または届くか分からない）ので、まだ任せられません'
+  const sharedWith = Object.prototype.hasOwnProperty.call(operation.facts, 'shared_with') ? operation.facts.shared_with : undefined
+  if (!sharedWith?.required && !operation.shared) return 'この操作はほかに使っているところを読み取らない型なのに、共有の注意書き（shared）がないので、まだ任せられません'
   if (operation.writes.length !== 1) return 'この操作は書き込みが1つではないので、まだ任せられません'
   if (!operation.lock) return 'この操作には作業中の印（lock）がないので、任せられません'
   return null

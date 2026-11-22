@@ -123,8 +123,8 @@ const box = (step: string, slots: string[], text = `当日 09:00 に送信`) =>
 const reminderPage = (body: string) => `<!doctype html><html><head><meta name="lm-account-id" content="5550001"><meta name="csrf-token" content="tok"></head>
 <body><input type="hidden" name="_token" value="tok"><script>window.__state = { step: 777, template: 888 }</script>${body}</body></html>`
 
-test('Lステップ\'s declaration 0.6.0 declares its reads — folders, paginated lists with their exact queries, the reminder page — each reviewed, with its reader', () => {
-  const browser = createBrowserConnectors([lstep.declaration])('lstep', '0.6.0')
+test('Lステップ\'s declaration 0.6.1 declares its reads — folders, paginated lists with their exact queries, the reminder page and its steps as JSON — each reviewed, with its reader', () => {
+  const browser = createBrowserConnectors([lstep.declaration])('lstep', '0.6.1')
   assert.ok(browser)
   assert.deepEqual(browser.explore, {
     reminder_folders: { label: 'リマインダのフォルダの一覧', path: '/api/episode-groups', placeholders: [], reader: 'lstep.reminder_folders' },
@@ -138,12 +138,16 @@ test('Lステップ\'s declaration 0.6.0 declares its reads — folders, paginat
       query: [{ name: 'group', field: 'template_group' }], pages: { param: 'page', max: 10 },
     },
     reminder: { label: 'リマインダの中身（段の一覧）', path: '/line/episode/show/{reminder}', placeholders: ['reminder'], reader: reader.id },
+    // 0.6.1 (design memo §39): the JSON the reminder page itself reads, the steps' timing.
+    reminder_schedule: { label: 'リマインダの段の時刻', path: '/api/episodes/{reminder}', placeholders: ['reminder'], reader: 'lstep.reminder_schedule' },
+    // 0.6.1 (design memo §40): the site's own timing text of a step.
+    step_timing: { label: '段の時刻（サイトの表示）', path: '/api/episode-steps/{step}', placeholders: ['step'], reader: 'lstep.step_timing' },
   })
   // Every paginated read's reader is a JSON one (only it reports where a page stands).
   for (const r of Object.values(browser.explore).filter(r => r.pages)) assert.ok(lstep.readers.some(x => x.id === r.reader && 'answer' in x), r.reader)
   // Every declared read has its reader in the connector folder, and nothing else is handed in.
   assert.deepEqual(Object.values(browser.explore).map(r => r.reader).sort(), lstep.readers.map(r => r.id).sort())
-  // 0.6.0: scheduled (design memo §37, the owner: nobody already past the step receives it), facts version 2.
+  // 0.6.1: scheduled (design memo §37, the owner: nobody already past the step receives it), facts version 2.
   assert.equal(browser.operations.reminder_step_add_template.delivers, 'scheduled')
 })
 
@@ -237,11 +241,20 @@ test('a JSON answer is parsed strictly before a reader sees it: a key written tw
   assert.deepEqual(readJson('lstep.reminder_folders', { data: [{ id: 29529, name: '\u200b\u202e ' }] }), { items: [], complete: false })
 })
 
-test('Lステップ\'s folder lists hand on ids with their names only; 「未分類」 (id 0) is not selectable and the list then says it is not whole', () => {
+test('Lステップ\'s folder lists hand on ids with their names only; 「未分類」 (id 0) is a template folder (§40), never a reminder folder', () => {
   const folders = readJson('lstep.reminder_folders', { data: [{ id: 29529, name: '【試験用】フォルダ', order: 1, item_count: 1 }, { id: 30000, name: '別のフォルダ', order: 2, item_count: 4 }] })
   assert.deepEqual(folders, { items: [{ field: 'group', value: '29529', label: '【試験用】フォルダ' }, { field: 'group', value: '30000', label: '別のフォルダ' }], complete: true })
   const templateFolders = readJson('lstep.template_folders', { data: [{ id: 0, name: '未分類', order: 0, item_count: 9 }, { id: 1085812, name: 'テスト用', order: 1, item_count: 2 }] })
-  assert.deepEqual(templateFolders, { items: [{ field: 'template_group', value: '1085812', label: 'テスト用' }], complete: false })
+  assert.deepEqual(templateFolders, { items: [{ field: 'template_group', value: '0', label: '未分類' }, { field: 'template_group', value: '1085812', label: 'テスト用' }], complete: true })
+  // Only the number 0 is 「未分類」; a reminder folder 0, a text '0' or -1 are not ids.
+  assert.deepEqual(readJson('lstep.template_folders', { data: [{ id: '0', name: 'a' }, { id: -1, name: 'b' }] }), { items: [], complete: false })
+  assert.deepEqual(readJson('lstep.reminder_folders', { data: [{ id: 0, name: '未分類' }] }), { items: [], complete: false })
+  // 「未分類」's templates (§40: `group: null`): an entry naming a folder is not 「未分類」's; a reminder folder 0 is never asked.
+  const uncategorised = readJson('lstep.templates', page1([{ ...templateEntry(11, 'a'), group: null }, { ...templateEntry(12, 'b'), group: 0 }, templateEntry(13, 'c'), { ...templateEntry(14, 'd'), group_id: 5, group: null }]), { template_group: '0' })
+  assert.deepEqual(uncategorised, { items: [{ field: 'template', value: '11', label: 'a' }, { field: 'template', value: '12', label: 'b' }], complete: false, page: { current: 1, last: 1, total: 4 } })
+  assert.deepEqual(readJson('lstep.reminders', page1([{ ...reminderEntry(1, 'a'), group_id: null, group: null }]), { group: '0' }), { items: [], complete: false })
+  // A positive folder's entry with `group: null` is not that folder's.
+  assert.equal(readJson('lstep.templates', page1([{ ...templateEntry(11, 'a'), group: null }]), { template_group: '1085812' }).complete, false)
   // Another shape: nothing guessed.
   for (const odd of [{ items: [] }, [], 'x', { data: 'x' }, { data: [{ id: 1, name: 'a' }], last_page: 2 }]) {
     assert.equal(readJson('lstep.reminder_folders', odd).complete, false, JSON.stringify(odd))
@@ -286,5 +299,32 @@ test('a page report reaches the app only as whole numbers that fit together (cur
     const r = run(bad)
     assert.equal(r.page, undefined, JSON.stringify(bad))
     assert.equal(r.complete, false, JSON.stringify(bad))
+  }
+})
+
+test('Lステップ\'s readers of a reminder\'s steps and of a step\'s timing as JSON (0.6.1, design memo §39, §40): this reminder\'s steps only; the site\'s timing text as the label, for this step only', () => {
+  const step = (id: number, over: Record<string, unknown> = {}) => ({ id, order: 1, step_days: 0, step_time: '09:00:00', step_type: 1, step_minutes: null, skip: 1, initial: 0, egg_id: null, member_query_id: null, action_id: null, episode_id: 7001001, ...over })
+  const episode = (steps: unknown, over: Record<string, unknown> = {}) => ({ id: 7001001, name: '架空のリマインダ', order: 1, type: 1, hid_at: null, steps, ...over })
+  const read = (answer: unknown, reminder = '7001001') => readJson('lstep.reminder_schedule', answer, { reminder })
+  assert.deepEqual(read(episode([step(7002001), step(7002002, { step_days: 3 })])), {
+    items: [{ field: 'step', value: '7002001' }, { field: 'step', value: '7002002' }], complete: true,
+  }, 'no label built from the step\'s fields')
+  // Another reminder's answer, a hidden reminder, no steps list: nothing offered.
+  assert.deepEqual(read(episode([step(7002001)]), '7001002'), { items: [], complete: false })
+  assert.deepEqual(read(episode([step(7002001)], { hid_at: '2026-11-22 10:00:00' })), { items: [], complete: false })
+  const noHidAt: Record<string, unknown> = episode([step(7002001)])
+  delete noHidAt.hid_at
+  assert.deepEqual(read(noHidAt), { items: [], complete: false }, 'hid_at must be there and null')
+  assert.deepEqual(read(episode({})), { items: [], complete: false })
+  // A step standing twice, naming another reminder, or without a plain id: left out, incomplete.
+  assert.deepEqual(read(episode([step(7002001), step(7002001), step(7002002)])), { items: [{ field: 'step', value: '7002002' }], complete: false })
+  assert.deepEqual(read(episode([step(7002001, { episode_id: 7001002 }), step(0)])), { items: [], complete: false })
+  // A step's timing: the site's text as the label, for the step asked only.
+  const timing = (answer: unknown, stepId = '7002001') => readJson('lstep.step_timing', answer, { step: stepId })
+  const stepAnswer = (over: Record<string, unknown> = {}) => ({ episode_id: 7001001, episode_group_id: 1, episode_name: '架空', episode_step_id: 7002001, step_timing_text: '3日前 19:00', ...over })
+  assert.deepEqual(timing(stepAnswer()), { items: [{ field: 'step', value: '7002001', label: '3日前 19:00' }], complete: true })
+  assert.deepEqual(timing(stepAnswer(), '7002002'), { items: [], complete: false }, 'another step\'s answer')
+  for (const over of [{ step_timing_text: '' }, { step_timing_text: 'a\nb' }, { episode_id: 0 }, { episode_step_id: '7002001x' }]) {
+    assert.deepEqual(timing(stepAnswer(over)), { items: [], complete: false }, JSON.stringify(over))
   }
 })
