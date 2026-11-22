@@ -36,6 +36,7 @@ import type { PluginPackageRef } from '../shared/plugin-bridge'
 // lane B ▼
 // lane B ▲
 // lane C ▼
+import type { BrowserConfirmResult } from '../shared/browser-plans'
 // lane C ▲
 // Use require for CommonJS compatibility in Electron preload
 // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -441,6 +442,11 @@ const api: ElectronAPI = {
   openBrowserSite: (companyId: string, host: string) => invoke('browser:open', companyId, host),
   clearBrowserLogin: (companyId: string, host: string) => invoke('browser:clearLogin', companyId, host),
   onBrowserChanged: callback => subscribe('browser:changed', callback),
+  listBrowserPlans: (companyId: string) => invoke('browserPlans:list', companyId),
+  getBrowserPlan: (companyId: string, planId: string) => invoke('browserPlans:get', companyId, planId),
+  runBrowserPlan: (companyId: string, planId: string, contentHash: string) => invoke('browserPlans:run', companyId, planId, contentHash),
+  cancelBrowserPlan: (companyId: string, planId: string) => invoke('browserPlans:cancel', companyId, planId),
+  confirmBrowserExecution: (companyId: string, executionId: string, result: BrowserConfirmResult) => invoke('browserPlans:confirm', companyId, executionId, result),
   listPluginStepTurns: (companyId: string) => invoke('aiTurns:pluginTurns', companyId),
   listPersonSteps: (companyId: string, recordId: string) => invoke('pluginSteps:onRecord', companyId, recordId),
   startPersonStep: (companyId: string, recordId: string, pluginId: string, step: string, companyRoot?: string) => invoke('pluginSteps:start', companyId, recordId, pluginId, step, companyRoot),

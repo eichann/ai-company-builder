@@ -10,11 +10,17 @@ import assert from 'node:assert/strict'
 import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { APPROVED_FILE, CONNECTORS_DIR, approvedFileText, currentRows, declarationHash, folderHash, mergeApproved } from '../scripts/browser-connectors'
+import { APPROVED_FILE, CARRIED_FILE, CONNECTORS_DIR, approvedFileText, carriedFileText, currentRows, declarationHash, folderHash, mergeApproved } from '../scripts/browser-connectors'
 
 test('approved.json is what the script writes for the connector folders now', async () => {
   const existing = readFileSync(APPROVED_FILE, 'utf8')
   assert.equal(await approvedFileText(existing), existing, 'run `cd client && npx tsx scripts/browser-connectors.ts` and review the new row')
+})
+
+// The app knows its own combination from carried.json (features/browser/combination.ts): a stale file
+// would make the app register plans under another build's checker hash.
+test('carried.json is what the script writes: exactly the combinations of the connector folders now', async () => {
+  assert.equal(await carriedFileText(), readFileSync(CARRIED_FILE, 'utf8'), 'run `cd client && npx tsx scripts/browser-connectors.ts`')
 })
 
 test('every current declaration × checker folder has an approved row with its declaration text', async () => {

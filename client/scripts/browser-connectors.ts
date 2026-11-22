@@ -37,6 +37,8 @@ import { parsePluginManifest } from '../../shared/core/plugins'
 const HERE = dirname(fileURLToPath(import.meta.url))
 export const CONNECTORS_DIR = resolve(HERE, '../connectors')
 export const APPROVED_FILE = resolve(HERE, '../../shared/browser-connectors/approved.json')
+/** The combinations THIS build carries (the app's `deps.combination`, features/browser/combination.ts). */
+export const CARRIED_FILE = resolve(HERE, '../../shared/browser-connectors/carried.json')
 
 export interface ApprovedRow {
   connector: string
@@ -113,18 +115,32 @@ export async function approvedFileText(existingText: string | null, connectorsDi
   return mergeApproved(existingText, await currentRows(connectorsDir))
 }
 
+/**
+ * The file the app bundles to know its own combinations (agent-browser.md "The card, the IPC and the
+ * request tool"): the current rows without status or text. approved.json may list several checker
+ * hashes for one version (older builds'); this says which one this build's folder has.
+ */
+export async function carriedFileText(connectorsDir = CONNECTORS_DIR): Promise<string> {
+  const rows = (await currentRows(connectorsDir)).map(({ connector, version, declarationHash, checkerHash, factsVersion }) => ({ connector, version, declarationHash, checkerHash, factsVersion }))
+  return `${JSON.stringify({ format: 1, combinations: rows }, null, 2)}\n`
+}
+
 async function main() {
   let existing: string | null = null
   try { existing = readFileSync(APPROVED_FILE, 'utf8') } catch { existing = null }
   const next = await approvedFileText(existing)
+  let carried: string | null = null
+  try { carried = readFileSync(CARRIED_FILE, 'utf8') } catch { carried = null }
+  const nextCarried = await carriedFileText()
   if (process.argv.includes('--check')) {
-    if (next !== existing) {
-      console.error('shared/browser-connectors/approved.json does not match client/connectors/: run `cd client && npx tsx scripts/browser-connectors.ts`')
+    if (next !== existing || nextCarried !== carried) {
+      console.error('shared/browser-connectors/approved.json or carried.json does not match client/connectors/: run `cd client && npx tsx scripts/browser-connectors.ts`')
       process.exit(1)
     }
     return
   }
   if (next !== existing) writeFileSync(APPROVED_FILE, next)
+  if (nextCarried !== carried) writeFileSync(CARRIED_FILE, nextCarried)
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) await main()

@@ -59,7 +59,9 @@ Full text: `docs/architecture/main-process-and-ipc.md` (internal).
   (absences:get / add / remove: the member's own absences and delegate, with the session;
   `records.md` "Absence and the delegate"), `browser` (browser:sites / open / clearLogin and the event
   `browser:changed`: Settings → 「ブラウザ操作」, main window's main frame only, the host checked against
-  the current policy; the window itself is the shell's `browser-window.ts`, `agent-browser.md`), `jobs` (jobs:mine / accept / pause / resume: the
+  the current policy; the window itself is the shell's `browser-window.ts`, `agent-browser.md`; and
+  browserPlans:list / get / run / cancel / confirm: the plan card, main window only, `features/browser/wire.ts`,
+  `agent-browser.md` "The card, the IPC and the request tool"), `jobs` (jobs:mine / accept / pause / resume: the
   scheduled jobs the member is responsible for, with the session; `jobs.md` "The screens"), `ai-turns`
   (aiTurns:settings / claim / settle: the automatic 「AI の番」's claim by version and settle, main
   window only; the run itself is a hidden consultation in the renderer, `ai-turns.md`). `tasks`

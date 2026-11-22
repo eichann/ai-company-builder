@@ -71,6 +71,7 @@ import type { PluginScreensResult } from './plugin-screens'
 // lane B ▲
 // lane C ▼
 import type { BrowserActionResult, BrowserSitesResult } from './browser-operation'
+import type { BrowserConfirmResult, BrowserPlanActAnswer, BrowserPlanGetResult, BrowserPlanListResult, BrowserPlanRunAnswer } from './browser-plans'
 import type { SkillShelfMark, SkillShelfRequestInfo, SkillShelfRestoreResult, SkillShelfSendResult } from './skill-shelf'
 import type { PluginStepButton, PluginStepContinuation, PluginStepContinueResult, PluginStepStartResult, QueuedPluginStep } from './ai-turn-steps/plugin'
 import type { StepDeliverablesView } from './step-deliverables'
@@ -862,6 +863,16 @@ export interface IpcInvokeChannels {
   'browser:open': { args: [companyId: string, host: string]; result: BrowserActionResult }
   /** 「ログインを消す」: the site's window closes and its login is cleared (main window only). */
   'browser:clearLogin': { args: [companyId: string, host: string]; result: BrowserActionResult }
+  /** 「ブラウザ操作」's plans: the member's own still waiting (main window only; agent-browser.md "The card, the IPC and the request tool"). */
+  'browserPlans:list': { args: [companyId: string]; result: BrowserPlanListResult }
+  /** One plan's card: the server's fixed view + whether ［任せる］ can be pressed on this PC (main window only). */
+  'browserPlans:get': { args: [companyId: string, planId: string]; result: BrowserPlanGetResult }
+  /** ［任せる］: approve the shown hash + claim + run, on this PC, in one press (main window only). */
+  'browserPlans:run': { args: [companyId: string, planId: string, contentHash: string]; result: BrowserPlanRunAnswer }
+  /** ［やめる］ (main window only). */
+  'browserPlans:cancel': { args: [companyId: string, planId: string]; result: BrowserPlanActAnswer }
+  /** ［済んでいた］［されていなかった］ on a result nobody knows (main window only). */
+  'browserPlans:confirm': { args: [companyId: string, executionId: string, result: BrowserConfirmResult]; result: BrowserPlanActAnswer }
   /** The member's records at a business plugin's ai_turn step (C5, plugin-steps.md); main remembers them for the claim. */
   'aiTurns:pluginTurns': { args: [companyId: string]; result: QueuedPluginStep[] }
   /** The `start: person` steps at a record's state (its card's buttons). */
@@ -1295,6 +1306,11 @@ export interface ElectronAPI {
   openBrowserSite: Invoke<'browser:open'>
   clearBrowserLogin: Invoke<'browser:clearLogin'>
   onBrowserChanged: Subscribe<'browser:changed'>
+  listBrowserPlans: Invoke<'browserPlans:list'>
+  getBrowserPlan: Invoke<'browserPlans:get'>
+  runBrowserPlan: Invoke<'browserPlans:run'>
+  cancelBrowserPlan: Invoke<'browserPlans:cancel'>
+  confirmBrowserExecution: Invoke<'browserPlans:confirm'>
   listPluginStepTurns: Invoke<'aiTurns:pluginTurns'>
   listPersonSteps: Invoke<'pluginSteps:onRecord'>
   startPersonStep: Invoke<'pluginSteps:start'>

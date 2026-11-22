@@ -85,7 +85,8 @@ the draft with `resolveAccess` itself, the deciding place as the one scope with 
 `shared/types/` holds API contracts (`private-folders.ts`, `company-files.ts`, `agent-events.ts`,
 `records.ts`, `plugins.ts`, `task-settings.ts`, `browser-plans.ts`, `index.ts`).
 `shared/browser-connectors/approved.json` is data, not a rule module: the approved browser connector
-combinations the server reads (`agent-browser.md`).
+combinations the server reads (`agent-browser.md`); `carried.json` beside it is the combinations this
+app build carries (the app's own, written by the same script).
 `shared/package.json` is `"type": "module"` so tsx sees named exports.
 
 ## Naming rules (`names.ts`)
