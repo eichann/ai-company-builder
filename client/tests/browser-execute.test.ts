@@ -1,7 +1,7 @@
 /**
  * Executing a plan (6b-2c; agent-browser.md "Executing a plan", design 6b-2 §3, §5; the lifecycle in
  * model/browser-plan/PlanLife.tla): the real runner (client/electron/features/browser/runner.ts) with the
- * real Lステップ 0.6.0 declaration and checker, the real facts driver and page parser, against a fake
+ * real Lステップ 0.6.1 declaration and checker, the real facts driver and page parser, against a fake
  * Lステップ in the real site's shapes (made-up names and ids) and a fake of the server's plan routes.
  *
  * What is protected: a plan runs only with the server's fixed content, hashed to what the person
@@ -35,7 +35,7 @@ const ACCOUNT = '5550001'
 const values = { target: { reminder: REMINDER, step: STEP }, change: { template: TO_ADD } }
 const lstep = lstepConnector()
 const declaration = createBrowserConnectors([lstep.declaration])
-const browser = declaration('lstep', '0.6.0')!
+const browser = declaration('lstep', '0.6.1')!
 const operation = browser.operations.reminder_step_add_template
 const COMBINATION = { declarationHash: `sha256:${'d'.repeat(64)}`, checkerHash: `sha256:${'c'.repeat(64)}`, factsVersion: 2 }
 const SITE_SETTING = { host: HOST, level: 'write' as const, assetHosts: ['d1nhtjid4lgi9y.cloudfront.net', 'profile.line-scdn.net'] }
@@ -47,7 +47,8 @@ const SITE_SETTING = { host: HOST, level: 'write' as const, assetHosts: ['d1nhtj
 interface FakeLstep {
   account: string
   steps: Record<string, string[]>
-  timing: string
+  /** The site's own timing text of the step, `GET /api/episode-steps/<step>` `step_timing_text` (design memo §40). */
+  timingText: string
   bodies: Record<string, string>
   /** What the test stand-in for the not yet confirmed count reads (null = unknown, as today). */
   audience: number | null
@@ -64,11 +65,16 @@ interface FakeLstep {
   token: boolean
   /** Templates that are no longer text only (another form type). */
   notText: string[]
+  /**
+   * The real page's rows of attached templates (design memo §41, the raw page): none (the 11/20 capture's
+   * slots in the box), the table's rows with their `openModal` ids, or rows whose openModal is missing.
+   */
+  rows?: 'raw' | 'raw-no-call'
 }
 
 function fakeLstep(over: Partial<FakeLstep> = {}): FakeLstep {
   return {
-    account: ACCOUNT, steps: { [STEP]: [ON_STEP] }, timing: '3日前 09:00',
+    account: ACCOUNT, steps: { [STEP]: [ON_STEP] }, timingText: '3日前 09:00',
     bodies: { [ON_STEP]: '本文1\n2行目', [TO_ADD]: '本文2\n2行目' }, audience: null, posts: [], write: 'apply', token: true, notText: [], ...over,
   }
 }
@@ -83,12 +89,19 @@ function reminderPage(site: FakeLstep): string {
   const slots = (site.steps[STEP] ?? []).map(t => `<a onclick="openModal(${REMINDER}, ${STEP}, ${hole++}, ${t}, 8)">架空テンプレ</a>`).join('')
   return `<!doctype html><html><head><meta name="lm-account-id" content="${site.account}">${site.token ? '<meta name="csrf-token" content="tok">' : ''}</head><body>`
     + (site.token ? `<input type="hidden" name="_token" value="tok"><input type="hidden" name="_lm_user_id" value="u1">` : '')
-    + (site.steps[STEP] ? `<div class="step" id="templateStep${STEP}"><span>${site.timing}</span>${slots}</div>` : '') + '</body></html>'
+    + (site.steps[STEP] && site.rows
+      ? `<div id="template_confirm_${STEP}"><table>${(site.steps[STEP] ?? []).map((_t, i) => `<tr><th><small>#${i + 1}</small></th><td>テンプレート 架空テンプレ</td><td><button type="button"${site.rows === 'raw' ? ` @click="openModal(${REMINDER}, ${STEP}, ${16100001 + i}, ${_t}, 8)"` : ''}>編集</button></td><td><form method="POST" action="https://manager.linestep.net/line/episode/step/pack"><input type="hidden" name="_method" id="_method" value="DELETE"><input type="hidden" name="hole_id" id="hole_id" value="${16100001 + i}"><input type="hidden" name="content_id" id="content_id" value="${STEP}"></form></td></tr>`).join('')}</table></div>`
+      : '')
+    + (site.steps[STEP] ? `<div class="step" id="templateStep${STEP}"><span>当日</span>${site.rows ? '' : slots}</div>` : '') + '</body></html>'
 }
 
 function siteAnswer(site: FakeLstep, address: string): { status: number; body: string } {
   if (address === `/line/episode/show/${REMINDER}`) { site.onPage?.(); return { status: 200, body: reminderPage(site) } }
   const pages: Record<string, string> = {
+    [`/api/episode-steps/${STEP}`]: JSON.stringify({ episode_id: Number(REMINDER), episode_group_id: 7100001, episode_name: '架空のリマインダ', episode_step_id: Number(STEP), step_timing_text: site.timingText }),
+    [`/api/episodes/${REMINDER}`]: JSON.stringify({ id: Number(REMINDER), name: '架空のリマインダ', order: 1, type: 1, hid_at: null, steps: Object.keys(site.steps).map((id, i) => ({
+      id: Number(id), order: i, step_days: 0, step_time: '09:00:00', step_type: 1, step_minutes: null, skip: 1, initial: 0, egg_id: null, member_query_id: null, action_id: null, episode_id: Number(REMINDER),
+    })) }),
     '/api/episode-groups': JSON.stringify({ data: [{ id: 7100001, name: '架空の配信', order: 1, item_count: 1 }] }),
     '/api/episodes?group=7100001&page=1': pageOf([{ id: Number(REMINDER), name: '架空のリマインダ', order: 1, type: 1, created_at: 'x', group_id: 7100001, group: { id: 7100001, name: '架空', order: 1 } }]),
     '/api/template-groups': JSON.stringify({ data: [{ id: 7200001, name: '架空甲', order: 1, item_count: 2 }] }),
@@ -97,7 +110,7 @@ function siteAnswer(site: FakeLstep, address: string): { status: number; body: s
   return Object.prototype.hasOwnProperty.call(pages, address) ? { status: 200, body: pages[address] } : { status: 404, body: '' }
 }
 
-/** The real checker; its facts as 0.6.0 reads them, plus the not yet confirmed `shared_with` / `audience` from the fake (a test stand-in). */
+/** The real checker; its facts as 0.6.1 reads them, plus the not yet confirmed `shared_with` / `audience` from the fake (a test stand-in). */
 function checkerFor(site: FakeLstep): BrowserChecker {
   const real = lstep.checkers[0]
   const facts = real.facts!
@@ -186,7 +199,7 @@ async function harness(o: { site?: Partial<FakeLstep>; faults?: FakeServerFaults
   const site = fakeLstep(o.site)
   const facts = await approvedFacts(site)
   const server = fakePlansServer({
-    planId: PLAN, companyId: COMPANY, connector: { id: 'lstep', version: '0.6.0', ...COMBINATION }, operation: 'reminder_step_add_template',
+    planId: PLAN, companyId: COMPANY, connector: { id: 'lstep', version: '0.6.1', ...COMBINATION }, operation: 'reminder_step_add_template',
     account: ACCOUNT, target: values.target, change: values.change, facts: o.approved ? o.approved(facts) : facts, createdAt: Date.now() - 60_000,
   }, o.faults)
   const window = fakeWindow(site)
@@ -198,7 +211,7 @@ async function harness(o: { site?: Partial<FakeLstep>; faults?: FakeServerFaults
     aiSwitch: () => true,
     plans: server.api,
     connector: declaration,
-    combination: (id, version) => (id === 'lstep' && version === '0.6.0' ? COMBINATION : null),
+    combination: (id, version) => (id === 'lstep' && version === '0.6.1' ? COMBINATION : null),
     checker: id => checkers.get(id),
     reader: id => lstep.readers.find(r => r.id === id),
     site: () => live.policy,
@@ -288,7 +301,7 @@ test('with the build\'s switch (off in 6b) nothing is asked: no server call, no 
 test('anything the person approved that changed on the site stops the run before the permit, saying what: nothing sent, the plan given back', async () => {
   const changes: Array<[string, (h: Awaited<ReturnType<typeof harness>>) => void, string]> = [
     ['a template body', h => { h.site.bodies[TO_ADD] = '変えた本文' }, 'facts-changed'],
-    ['the step\'s timing', h => { h.site.timing = '当日 09:00' }, 'facts-changed'],
+    ['the step\'s timing', h => { h.site.timingText = '3日前 10:00' }, 'facts-changed'],
     ['another template on the step', h => { h.site.steps[STEP].push(TO_ADD) }, 'before-changed'],
     ['the LINE account', h => { h.site.account = '5550002' }, 'account-mismatch'],
     // The re-read cannot make a plan by itself: the site could not be read whole.
@@ -464,6 +477,13 @@ test('the page read after the send decides: only exactly the planned state is su
   const stopped = await harness({ site: { afterWrite: () => { stopped.live.stopped = true } } })
   assert.deepEqual(await stopped.run(), { outcome: 'unknown', reason: 'reread-failed' })
   for (const h of [other, gone, account, stopped]) assert.equal(h.site.posts.length, 1)
+  // The real page's rows (design memo §41): the new template's id in its row after the send — success, on a
+  // step that already had one; a row without its openModal after the send — unknown, never failed.
+  const rows = await harness({ site: { rows: 'raw' } })
+  assert.deepEqual(await rows.run(), { outcome: 'succeeded' })
+  const rowsOnly = await harness({ site: { rows: 'raw', afterWrite: () => { rowsOnly.site.rows = 'raw-no-call' } } })
+  assert.deepEqual(await rowsOnly.run(), { outcome: 'unknown', reason: 'target-after' })
+  assert.deepEqual(rowsOnly.server.state.reports, [{ result: 'unknown', reason: 'target-after' }])
 })
 
 test('a lost report is sent again with the same body, at most 3 times; a refused one is not', async () => {
@@ -542,7 +562,7 @@ test('one run per window at a time: a second plan for the same window is given b
   // The second plan, its own server, the same runner and window.
   const SECOND = 'bp_fedcba9876543210fedcba9876543210'
   const other = fakePlansServer({
-    planId: SECOND, companyId: COMPANY, connector: { id: 'lstep', version: '0.6.0', ...COMBINATION }, operation: 'reminder_step_add_template',
+    planId: SECOND, companyId: COMPANY, connector: { id: 'lstep', version: '0.6.1', ...COMBINATION }, operation: 'reminder_step_add_template',
     account: ACCOUNT, target: values.target, change: values.change, facts: await approvedFacts(second.site), createdAt: Date.now() - 60_000,
   })
   let release: () => void = () => {}

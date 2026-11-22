@@ -7,12 +7,13 @@ import type { BrowserChecker, BrowserPreviewReader } from '../../shared/browser-
 import { LSTEP_DECLARATION } from './declaration'
 import { accountFromMeta, createLstepReminderStepChecker, type AccountReader } from './reminder-step'
 import { createLstepReminderStepsReader } from './reminder-steps-reader'
+import { createLstepReminderScheduleReader, createLstepStepTimingReader } from './reminder-schedule'
 import { createLstepListReaders } from './list-readers'
 
 export function lstepConnector(readers: { account?: AccountReader } = {}): { declaration: string; checkers: BrowserChecker[]; readers: BrowserPreviewReader[] } {
   return {
     declaration: LSTEP_DECLARATION,
     checkers: [createLstepReminderStepChecker(readers.account ?? accountFromMeta)],
-    readers: [...createLstepListReaders(), createLstepReminderStepsReader()],
+    readers: [...createLstepListReaders(), createLstepReminderStepsReader(), createLstepReminderScheduleReader(), createLstepStepTimingReader()],
   }
 }

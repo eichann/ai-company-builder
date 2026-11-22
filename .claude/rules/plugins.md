@@ -631,7 +631,9 @@ browser:
   `delivers` is refused, with the reason. **The first version runs** only `delivers: none` — or
   `scheduled` (6b-2a: it reaches people only on the target's own schedule, never anyone already past
   it, reviewed with the connector) when `facts.schedule` and `facts.templates` are `required` and `complete` —, not
-  irreversible, exactly one write, not delete (`browserFirstVersionProblem`, asked by the server).
+  irreversible, exactly one write, not delete, and with a `shared` note unless `facts.shared_with` is
+  declared required (optional or not declared: the card's warning then stands in for who else uses the target)
+  (`browserFirstVersionProblem`, asked by the server).
 - **`explore`** (6b-1, design memo §33 2-2; `browser.explore`, optional): the pages the operator AI may
   ask the app to read during the preview, ≤ 10, each `{ label, path, query?, pages?, reader, no_side_effects:
   reviewed }` — a path of literal segments and whole `{name}` segments (no fragment, `..` or `//`); an
@@ -692,8 +694,8 @@ browser:
 - **Not on the shelf yet**: the shelf refuses a package with `browser` (「a browser connector (browser) is not
   used yet」, `services/plugin-shelf.ts`), so no company installs it, `pluginsFor` never lists it and no
   app fetches it; `combineUse` refuses one, so no business plugin uses it. A released app's older parser
-  does not know `browser` (an unknown key: unusable). The current declaration (`lstep@0.6.0`, 「リマインダの段に
-  テンプレートを足す」) ships **inside the app** with its checker (`client/connectors/lstep/`),
+  does not know `browser` (an unknown key: unusable). The current declaration (`lstep@0.6.1`, 「リマインダの段に
+  テンプレートを足す」; 0.6.1 adds the reads `GET /api/episodes/{reminder}` and `GET /api/episode-steps/{step}` for the step and its timing text, design memo §39, §40) ships **inside the app** with its checker (`client/connectors/lstep/`),
   parsed by `parsePluginManifest`; the runner exists but nothing starts it. The server accepts plans
   only for a combination listed in `shared/browser-connectors/approved.json` (the declaration's text
   with its hash, the site folder's hash, the facts version; `agent-browser.md` "Plans, executions,
