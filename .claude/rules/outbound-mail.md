@@ -115,10 +115,20 @@ In this order, nothing sent unless all pass:
    read): unreadable → 409 `RECIPIENTS_UNVERIFIABLE` 「…確かめられないため送れません…」;
    gone → 409 `RECIPIENT_GONE` + `goneRefs`;
 5. each attached file is read again from storage and must match the version (size, sha256, `%PDF-`),
-   else 409 `ATTACHMENT_CHANGED`; then **one send per source** ("One send per source" below: 409
-   `ALREADY_SENT_FOR_SOURCE` unless a reason was given) and, in the same synchronous stretch, the
+   else 409 `ATTACHMENT_CHANGED`; then, in **one transaction with no `await`** (`claimSend`, both
+   channels): the draft is **read again** — steps 3 and 4 awaited Google and the sources, and
+   meanwhile it may have been edited or discarded (SEND-1, 2026-11-22) — and must still be a
+   `draft` (else 409 `NOT_DRAFT`) with the version and hash the person confirmed (else 409
+   `CONTENT_CHANGED` with the current draft); **one send per source** ("One send per source" below: 409
+   `ALREADY_SENT_FOR_SOURCE` unless a reason was given); and the
    send row (`outbound_sends`, outcome `sending`, with the source's key) is written **before** Gmail
-   is called — at most one live send per draft (`startSend`), else 409 `SEND_IN_PROGRESS`;
+   is called — at most one live send per draft (`startSend`), else 409 `SEND_IN_PROGRESS`. From
+   that row on the content is fixed: an edit or a file change (checked again inside its own
+   transaction, `newVersion`, so one that began before the send and awaited its sources is caught
+   too) and a discard are refused while the draft's last send is `sending` (409 `SEND_IN_PROGRESS`)
+   or `sent` / `unknown` (409 `NOT_DRAFT`; a discard of a record in `unknown` with an `unknown` send
+   is still the person's choice) — `acceptedSend`. The result of the send moves the record from the
+   version read in that transaction;
 6. the RFC 2822 message (`lib/mail-message.ts`: UTF-8, RFC 2047 subject words ≤ 60 characters,
    base64 body, From = the version's, To / Cc from the version; it throws on anything that is not
    one plain address or a subject with a control character — no header injection) →
@@ -142,6 +152,14 @@ The AI emergency stop does not block a person's send (design §4-5); the Google 
 does stop the AI's drafting: every record token is refused while the company's AI is stopped
 (403 `ACB_STOPPED`, `records.md`).
 `POST …/discard` (draft / unknown → `discarded`) is the person's too.
+
+Test of step 5's re-read: `outbound-mail.test.ts` 「SEND-1」 (the service with its awaits held open by
+deferred promises: a recipient taken off or the body edited during the account check / the source
+read → `CONTENT_CHANGED`, nothing sent, no send row; discarded during either → `NOT_DRAFT`; an edit
+that began before the send and ends after it was accepted → refused, the confirmed version left; while
+`sending` and beside a `sent` row whose record stayed a draft, edit and discard refused; a double press
+→ one mail) — mutation-checked: the content re-read, the state re-read, `newVersion`'s check,
+`acceptedSend`'s `sent` / `unknown`, the discard's check, the record version read at the claim.
 
 ## A send left half-done (a crash, a restart, a restore)
 
