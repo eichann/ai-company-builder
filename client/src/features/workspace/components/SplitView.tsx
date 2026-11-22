@@ -1,8 +1,10 @@
 import { Fragment, type ReactNode } from 'react'
 import { ResizeHandle } from './ResizeHandle'
 import type { PaneLimits, SplitNode } from '../layoutTree'
+import type { DividerState } from '../hooks/useSplitLayout'
 
 interface SplitViewProps {
+  /** The sizes to draw (already fitted to the window: layoutTree.ts `fitLayout`). */
   split: SplitNode
   limits: Readonly<Record<string, PaneLimits>>
   /** A pane hidden (still mounted); its fixed-size sibling takes the room. */
@@ -14,13 +16,17 @@ interface SplitViewProps {
   renderCollapsed?: (paneId: string) => ReactNode
   /** Accessible name of the divider after child `index` of split `splitId`. */
   dividerLabel: (splitId: string, index: number) => string
+  /** The divider's value (size and range of the pane it resizes), for keys and assistive technology. */
+  dividerState?: (splitId: string, dividerIndex: number) => DividerState | null
   onResizeStart: (splitId: string, dividerIndex: number) => void
   onResize: (splitId: string, dividerIndex: number, offset: number) => void
+  onNudge?: (splitId: string, dividerIndex: number, delta: number) => void
+  onReset?: (splitId: string, dividerIndex: number) => void
 }
 
 /** One split of the layout tree: its children in order with a divider between each two. */
 export function SplitView(props: SplitViewProps) {
-  const { split, limits, collapsed, className = '', paneClassName, renderPane, renderCollapsed, dividerLabel, onResizeStart, onResize } = props
+  const { split, limits, collapsed, className = '', paneClassName, renderPane, renderCollapsed, dividerLabel, dividerState, onResizeStart, onResize, onNudge, onReset } = props
   const row = split.direction === 'row'
   const anyCollapsed = split.children.some(child => child.id === collapsed)
   return (
@@ -33,16 +39,14 @@ export function SplitView(props: SplitViewProps) {
         const sizing = isCollapsed ? 'hidden' : fills ? 'flex-1' : 'flex-shrink-0'
         // A pane taking the remaining space stops at its limit, never at its content's width
         // (wide tabs or lines would push it past the window: flex items default to min-width auto).
-        // A fixed pane never takes the room its siblings keep (a window made smaller after the
-        // width was chosen squeezed the chat to nothing): CSS min against the split's width.
-        const keep = limits[child.id]?.keepForSiblings
         const style = isCollapsed
           ? undefined
           : fills
             ? (row ? { minWidth: min ?? 0 } : { minHeight: min ?? 0 })
-            : (row ? { width: keep && !anyCollapsed ? `min(${size}px, calc(100% - ${keep}px))` : size! } : { height: size! })
+            : (row ? { width: size! } : { height: size! })
         const next = split.children[i + 1]
         const nextIsCollapsed = next != null && next.id === collapsed
+        const state = next != null && !isCollapsed && !nextIsCollapsed ? dividerState?.(split.id, i) : null
         return (
           <Fragment key={child.id}>
             <div className={`${paneClassName?.(child.id) ?? ''} ${sizing}`} style={style}>
@@ -56,6 +60,9 @@ export function SplitView(props: SplitViewProps) {
                   onResize={offset => onResize(split.id, i, offset)}
                   direction={row ? 'horizontal' : 'vertical'}
                   label={dividerLabel(split.id, i)}
+                  value={state ? { now: state.value, min: state.min, max: state.max, text: state.text } : undefined}
+                  onNudge={onNudge && (delta => onNudge(split.id, i, delta))}
+                  onReset={onReset && (() => onReset(split.id, i))}
                 />
               ))}
           </Fragment>

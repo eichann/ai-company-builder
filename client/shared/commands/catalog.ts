@@ -137,6 +137,11 @@ export const COMMANDS = defineCommands([
     args: z.object({}), keybinding: { key: 'mod+shift+c', area: 'app' },
   },
   {
+    // ⌘B as in VS Code: no editor or composer of the app binds it (CodeMirror has no Mod-b, nothing is rich text).
+    id: 'layout.toggleLeft', title: '左の欄の表示を切り替える', class: 'view',
+    args: z.object({}), keybinding: { key: 'mod+b', area: 'app' },
+  },
+  {
     // 探す ⌘K: open anything by its name (やること, 案件, ファイル…) — the same window as ⌘P.
     id: 'find.byName', title: '名前で探して開く', class: 'view',
     args: z.object({}), keybinding: { key: 'mod+k', area: 'app' },
