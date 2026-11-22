@@ -314,6 +314,13 @@ nothing lost, nothing made twice by the clock, held stays held, the stopped chai
 reconciled on the occurrences by their responsible person without resuming anything. `2-floor.test.ts` is copied into the
 floor's worktree, so it uses only what the floor build has (its routes and services); keep it so when the floor moves.
 It fails on a build that does not freeze schema 3 (checked: step 2 run with 4b-1's own code fails at the first listing).
+Since member proposals (PR A, jobs.md "Member proposals") the three steps also carry **schema-4 jobs** (a proposal waiting,
+one withdrawn — its job retired —, one approved; their `job_proposal` notices): the floor (which knows `[1, 2]`) shows only
+their names (versions without definition or fingerprints), refuses approve / edit / accept (`JOB_SCHEMA_UNKNOWN`), makes no
+occurrence of them and shows no `job_proposal` / `job_proposal_returned` notice (unknown kinds; a returned proposal's notice
+to its proposer is checked); `snapshot.ts` keeps `ai_job_proposals` and the
+proposals' `ai_jobs` rows as written; back here the withdrawn one stays withdrawn and unapprovable, a resend of the waiting
+one answers its first result and adds no job or notice, and it is still approved once.
 The older fixture test (`job-rollback-floor.test.ts` F11 on `stage4b1-shaped-jobs.sql`) stays as the floor's own.
 
 ### The previous floor (stage 4-0.1)

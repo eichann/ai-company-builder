@@ -321,8 +321,18 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
   const actsFor = (companyId: string, userId: string) => absences.actsFor(companyId, userId)
   // The Skill shelf and 定期の仕事 (jobs.md; composition/jobs.ts): definitions and approval (PR 3a);
   // occurrences and the server's operation below (PR 3b).
-  const { skillShelf, jobs } = wireJobs({
+  const { skillShelf, jobs, jobProposals } = wireJobs({
     repos, shared, hasCompanyFolder: companyFolders.has, permissionViews, push, taskSettings,
+    // Member proposals (jobs.md "Member proposals"): the existing folders a candidate may name.
+    // Without the shared folder only a department or a place set up inside one (what the listing offers) exists — never any
+    // text below a department (`folderExists` answers that, for permission rules): its parent's listing names it.
+    placeExists: async (companyId, path) => {
+      if (companyFolders.has(companyId)) return permissionEditor.folderExists(companyId, path, permissionEditor.privatePlaceOf(companyId, path))
+      const cut = path.lastIndexOf('/')
+      const names = await permissionEditor.subfolders(companyId, cut < 0 ? '' : path.slice(0, cut))
+      return names !== null && names.includes(path.slice(cut + 1))
+    },
+    placeFolders: (companyId, path) => permissionEditor.subfolders(companyId, path),
     // A pause / the company's stop holds the occurrences (jobs.md "Held"); bound late: built below.
     occurrenceHolds: {
       holdDue: (companyId, jobId, code) => jobOccurrences.holdDue(companyId, jobId, code),
@@ -341,6 +351,8 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     jobOccurrenceNoticeOf: (member, jobId, occurrenceId) => jobs.occurrenceNotice(member, jobId, occurrenceId),
     jobChainStoppedOf: (member, jobId, at) => jobs.chainStopNotice(member, jobId, at),
     jobAcceptNoticeOf: (member, jobId, version) => jobs.acceptNotice(member, jobId, version),
+    jobProposalNoticeOf: (member, proposalId) => jobProposals.proposalNotice(member, proposalId),
+    jobProposalReturnedOf: (member, proposalId) => jobProposals.proposalReturned(member, proposalId),
     coverOf: (companyId, userId) => absences.coverOf(companyId, userId),
     managersOf: (companyId, userId) => absences.managersOf(companyId, userId),
     activeAbsences: companyId => absences.activeToday(companyId),
@@ -744,6 +756,8 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
       indexRecords: companyId => recordIndexer.schedule(companyId),
       // The responsible person of a scheduled job left or lost rights: the job pauses (jobs.md).
       onMemberLeft: (companyId, userId, actorId) => {
+        // Their waiting proposals of a time job are withdrawn first (jobs.md "Member proposals"), so the pause skips them.
+        jobProposals.memberLeft(companyId, userId, actorId)
         jobs.memberLeft(companyId, userId, actorId)
         // …and their browser plans close, a claimed execution is void, their type grants go (agent-browser.md).
         browserPlans.memberLeft(companyId, userId)
@@ -857,6 +871,7 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     // 見える人のまとまり (server.md "Groups"): owners/admins keep them; rules name them.
     groups: createGroupService({ ...repos, ...shared }),
     jobs,
+    jobProposals,
     jobRuns,
     jobRetry,
     // The clock's part of scheduled jobs (jobs.md "The clock"): reached by the server clock; named here for the tests.

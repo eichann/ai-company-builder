@@ -23,6 +23,7 @@ import type { AgentStopService } from '../services/agent-stops'
 import type { AiRunService } from '../services/ai-runs'
 import { companyTimeToUtc, createJobOccurrences, createJobRunner, type JobOccurrenceDeps } from '../services/job-occurrences'
 import { createJobRetry, type JobRetryDeps } from '../services/job-retry'
+import { createJobProposals, type JobProposalDeps } from '../services/job-proposals'
 import { createJobService, type JobService, type JobServiceDeps } from '../services/jobs'
 import { companyNow } from '../services/notifications'
 import type { PermissionViewService } from '../services/permission-views'
@@ -48,6 +49,9 @@ export interface JobsWiringDeps<R extends { memberships: MembershipRepository }>
   occurrenceRetry: NonNullable<JobServiceDeps['occurrenceRetry']>
   /** Event-triggered jobs: a business plugin step's 「AI の番」 states (built later: the plugins' lane). */
   aiStepStates: NonNullable<JobServiceDeps['aiStepStates']>
+  /** Member proposals: whether a folder exists and its sub-folders (the permission editor's, over the repositories). */
+  placeExists: JobProposalDeps['placeExists']
+  placeFolders: JobProposalDeps['placeFolders']
 }
 
 export function wireJobs<R extends { memberships: MembershipRepository }>(deps: JobsWiringDeps<R>) {
@@ -82,7 +86,19 @@ export function wireJobs<R extends { memberships: MembershipRepository }>(deps: 
     aiStepStates: deps.aiStepStates,
   })
 
-  return { skillShelf, jobs }
+  // A member proposes a time job from the AI chat (jobs.md "Member proposals"): candidates, the submit, withdraw / return.
+  const jobProposals = createJobProposals({
+    ...repos, ...shared, jobs,
+    skillTree: (companyId, name) => (companyFolders.has(companyId) ? companySkillTree(companyId, name) : Promise.resolve(null)),
+    hasCompanyFolder: companyFolders.has,
+    shelfSkill: (who, itemId) => skillShelf.jobSkill(who, itemId),
+    placeExists: deps.placeExists,
+    placeFolders: deps.placeFolders,
+    timeZoneOf: () => DEFAULT_COMPANY_TIME_ZONE,
+    noticesChanged: (companyId, userIds) => push.notify(companyId, userIds, { kind: 'notifications', version: shared.ids.newToken().slice(0, 32) }),
+  })
+
+  return { skillShelf, jobs, jobProposals }
 }
 
 export interface JobRetryWiringDeps {

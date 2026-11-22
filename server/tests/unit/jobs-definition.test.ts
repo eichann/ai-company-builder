@@ -339,3 +339,21 @@ describe('an event run by the PC AI (schema 3, stage 4b-1, owner memo 「段4b �
     expect(JSON.parse(jobConsentCanonical(parsed(pcJob())))).not.toHaveProperty('check')
   })
 })
+
+describe('a member’s proposal (schema 4, jobs.md "Member proposals")', () => {
+  const proposed = () => ({ ...pcJob(), schema: 4, origin: 'member_proposal' })
+  it('schema 1’s content with its mark: parsed, the mark kept; without it, with another value, or on another schema: refused', () => {
+    expect(parsed(proposed())).toMatchObject({ schema: 4, origin: 'member_proposal' })
+    expect(problems({ ...pcJob(), schema: 4 })).toContain('definition.origin.MISSING')
+    expect(problems({ ...proposed(), origin: 'admin' })).toContain('origin.BAD')
+    expect(problems({ ...pcJob(), origin: 'member_proposal' })).toContain('definition.UNKNOWN_KEY')
+    expect(problems({ ...serverJob(), schema: 3, origin: 'member_proposal' })).toContain('definition.UNKNOWN_KEY')
+  })
+  it('only a time and a Skill on the PC: never the server’s operation, never an event', () => {
+    expect(problems({ ...serverJob(), schema: 4, origin: 'member_proposal' })).toContain('run.PROPOSAL_PC_ONLY')
+    expect(problems({ ...proposed(), trigger: { kind: 'record', type: 'task', event: 'state', to: 'done', assignee: 'responsible', startRecord: 'task-0000000000000001', followMadeTask: false } })).not.toEqual([])
+  })
+  it('the consent is schema 1’s (the mark is not part of what the responsible person accepts)', () => {
+    expect(jobConsentCanonical(parsed(proposed()))).toBe(jobConsentCanonical(parsed(pcJob())))
+  })
+})

@@ -27,6 +27,9 @@ paths:
   - "server/src/services/job-events.ts"
   - "server/src/services/ai-runs.ts"
   - "admin/src/lib/api.ts"
+  - "server/src/**/job-proposals.ts"
+  - "shared/core/job-proposals.ts"
+  - "shared/types/job-proposals.ts"
 ---
 
 # Scheduled jobs (定期の仕事, B 「実行を記録から分ける」)
@@ -108,6 +111,9 @@ versions the shape (a later shape is `schema: 2`; stored versions are never re-r
 - `jobConsentCanonical`: who (`actingUser`), `run`, `placement`, `grant` — what the responsible person
   accepts (D4). A name, trigger, check or missed policy change needs no new acceptance. An event job adds its trigger
   (schema 2) and, run by the PC (schema 3), its trigger and its check (the done mark decides when the AI is called).
+- Schema 4 (member proposals, "Member proposals" below): schema 1's content — a time trigger, a procedure (`run.PROPOSAL_PC_ONLY`)
+  on the PC — plus the mark `origin: 'member_proposal'` (required on 4, refused on any other schema: `definition.UNKNOWN_KEY` /
+  `origin.BAD`); its consent is schema 1's (the mark is not consented to).
 - Schema 3 (stage 4b-1, "Event jobs on the PC"): a record trigger, a procedure on the PC, and the check
   `source_record { doneMark: none | file_linked }` — that check is schema 3's alone (`check.SOURCE_RECORD_EVENTS_ONLY`), a
   schema-3 run is a procedure (`run.EVENT_PC_ONLY`) checked by it (`check.EVENT_NEEDS_SOURCE_RECORD`); schema 2 stays the
@@ -937,8 +943,9 @@ Event-triggered jobs (4a) store `schema: 2`. Production may run 4-0 again after 
   the 受け取る shows a definition only of such a shape, `appReadsJobDefinition`) — the admin `[1, 2, 3]` since 4b-3 (with the
   form that makes and reads schema 3 back), the app `[1, 2, 3]`
   since 4b-2 (its words for schema 3: `jobCheckText`'s `source_record`; shipped in the same build that runs such jobs and
-  fails closed). The core reads `schema: 3` since 4b-1 (`JOB_SCHEMAS` `[1, 2, 3]`). The server's tests of "a shape this build does not know" stand in `schema: 4`
-  since then (`job-schemas.test.ts`, `job-rollback-floor.test.ts` reads the frozen 4b-1 fixture's version one shape later;
+  fails closed). The core reads `schema: 3` since 4b-1 (`JOB_SCHEMAS` `[1, 2, 3]`) and `schema: 4` since member proposals (`[1, 2, 3, 4]`; the
+  screens do not announce 4 until their PRs B / C). The server's tests of "a shape this build does not know" stand in `schema: 5`
+  since then (`schema: 4` before) (`job-schemas.test.ts`, `job-rollback-floor.test.ts` reads the frozen 4b-1 fixture's version one shape later;
   the floor build runs it as written). Tests
   `admin/tests/job-screen-schemas.test.ts` (the core stood in by one reading `schema: 4` since 4b-3 — `schema: 3` before; every
   announced schema round-trips through the form: for 3 the smallest grant and one with every choice, both done marks, a shelf
@@ -1376,6 +1383,121 @@ of `parseMyJobOccurrence` and the key still strict — each fails a test (16 mut
 the deadline shorter than the interval and the window holding two renews, and no second timed renew while one is out —
 each fails a test; the confirmation moving only forward is defence (the only overlap left, the claim's last check beside a
 timed renew of the same hold, moves it by milliseconds).
+
+## Member proposals (「AIへの相談」から定期の仕事, PR A: the server; owner memo 2026-11-22 第1〜5版, decisions Q1–Q4)
+
+A member asks their AI for a time job; the AI makes a **candidate** the server builds, the member presses 「管理者に出す」, an owner /
+admin approves it (or it is withdrawn / returned), and the proposer still presses 「受け取る」 ("Approving is not accepting"). Only
+existing Skills (Q1), every member (Q2), at most 5 waiting per member (Q4); "ask after 3 repeats" (Q3) is the app's (PR D). The
+admin console (PR B) and the app's card / tool (PR C) announce schema 4 in their own PRs; until then today's screens see such a job
+as one they cannot show (`JOB_NEEDS_NEWER_SCREEN`, also for the proposer's 受け取る in today's app).
+
+```
+GET  /api/records-ai/job-proposals-ai/places?under=   the member's AI: the existing folders under `under` they read (+ write)
+POST /api/records-ai/job-proposals-ai/candidates      (act) { skill, trigger, check, reads, deliverable, readRecords, mailDrafts, minutes, missed } → 201
+GET  /me/job-candidates/:candidateId                  the session: the caller's own candidate (and its proposal once submitted)
+POST /me/job-candidates/:candidateId/submit { fingerprint }   the session → 201 (200 when submitted already)
+GET  /me/job-proposals                                the caller's proposals
+POST /me/job-proposals/:proposalId/withdraw           the proposer, only while submitted
+GET  /job-proposals?state=                            owner / admin
+POST /job-proposals/:proposalId/return { reason }     owner / admin, a fixed reason code (JOB_PROPOSAL_RETURN_REASONS), only while submitted
+```
+
+Code: `shared/core/job-proposals.ts` (ids `jc.` / `jp.` + 32 hex, limits, states, return reasons and words,
+`parseJobCandidateInput`, `proposalDefinition`, `proposalJobName`), `services/job-proposals.ts`, `routes/job-proposals.ts`, tables
+`ai_job_candidates` / `ai_job_proposals` (additive, behind the `jobs` handle), and in `services/jobs.ts` the rules of a proposal's job.
+
+- **A candidate** (owner memo §8-3 / §10-1): from a consultation's record token only — **a token bound to any execution run is
+  refused before anything is read** (403 `JOB_PROPOSAL_NOT_IN_RUN`: nobody watches those). **This check is the only guard** for a
+  business plugin step's run and for a record's 「AI の番」 run claimed by an older app (the route scope applies to neither:
+  `ai-runs.ts` `routeRefusal`); a scheduled job's run is also refused first by its grant's route ceiling (`NOT_IN_STEP`). The
+  route hands the service the token's run (`h.run`). The responsible person is the
+  signed-in member, fixed **before** the Skill is read (no key can name anyone; a shelf Skill is read as theirs). **No free text**:
+  every key from a list (an unknown key → 400 `BAD_JOB_CANDIDATE` `UNKNOWN_KEY`: no name, folder, title words, responsible person);
+  `check` is `new_files` (a place) or `new_meetings` **without title words** (an owner / admin may add them later by an edit);
+  the name 「<Skill>（<いつ>）」 (`proposalJobName`) and the deliverable folder `job-<8 hex of the candidate id>` are the server's.
+  Places (reads, the check's place, the deliverable's place): never a hidden segment (`.claude`, … → 400); **existing folders the member reads** — the deliverable's also one
+  they write — one answer for missing / unreadable / not writable (409 `JOB_CANDIDATE_PLACE`, naming nothing); the places route
+  lists only readable, non-hidden folders (an unreadable private folder never named; `permissionEditor.subfolders`, unfiltered,
+  filtered by the member's reader — **read again after the repository is asked** (Codex 4th pass: the membership and scopes
+  reloaded after the existence / listing awaits, the parent and every child checked again, so a folder made private or a reader
+  removed meanwhile is never named; a candidate's places likewise, and the approval's `rightsFit` runs inside the candidate's
+  write). In a company **without the shared folder** a place exists only when its parent's listing
+  names it — a department, or a place set up inside one (a scope with rules) — never any text below a department, which
+  `permissionEditor.folderExists` would answer for permission rules (Codex re-review: free text into a proposal); `composition.ts`
+  `placeExists`. A Skill that is not there → 409 `JOB_SKILL_MISSING` 「先に Skill を作ってから」 (Q1). The
+  server pins the Skill (tree / shelf version) now, builds the definition (`proposalDefinition`: `records`, `creates: ['task']`,
+  the record reads / minutes route / mail drafts only as chosen, `runsPerDay` 1) and parses it with the one parser (schema 4).
+  Kept for its creator alone (`created_by` in SQL: another member's, another company's, an expired one answer the one 404) and
+  **read again when read** (`GET /me/job-candidates/:id`, Codex review of PR A): a place it names — or its shelf Skill's place —
+  that the member no longer reads (`jobs.readsAllFor`, the view's own rule) withholds it, content and fingerprint, as the same 404,
+  24 hours (`JOB_CANDIDATE_TTL_MS`; content deleted when anyone's next candidate is made), at most 20 live a member (checked
+  before and inside the write). Never a job: no job list, detail or version history shows it.
+- **The submit** (the session only: no record-token route reaches it — a record token alone is not signed in, 401):
+  `{ fingerprint }` exactly; the candidate **as stored**, never resolved again; **first** whether the member still reads every
+  place it names (its shelf Skill's place too: `readsAllFor`) — else 409 `JOB_CANDIDATE_PLACE` whatever fingerprint was sent, as
+  the candidate's own view withholds it (Codex 3rd pass: no guessing oracle) —, then the fingerprint the card showed (409
+  `JOB_VERSION_FINGERPRINT`); the places and the Skill checked again (`JOB_CANDIDATE_PLACE`, `JOB_SKILL_CHANGED` → ask the AI for a
+  new candidate); then **one transaction**: the idempotency record again, the member's rights (`jobs.rightsFit`, the approval's own
+  check → 409 `JOB_GRANT_EXCEEDS`), at most `JOB_PROPOSALS_WAITING_MAX` (5) `submitted` (409 `JOB_PROPOSALS_WAITING_LIMIT`) and
+  `JOB_PROPOSALS_PER_DAY` (10) submits a company day whatever became of them (409 `JOB_PROPOSALS_DAY_LIMIT`), the draft job
+  (version 1 = the candidate's canonical text and fingerprint, `created_by` the member), the proposal record and the notices.
+  **Idempotent** by `UNIQUE (company, proposer, candidate)`: a repeat (also at once, also after the content's 24 hours) answers
+  the first result with `created: false` — no job, count or notice more; with another fingerprint 409. **A proposal's
+  `submittedFingerprint`** is answered (to the proposer in every answer — `mine`, the candidate's view, the submit, a withdrawal)
+  only while they read every place the submitted version names, the job view's own rule (`fingerprintShown`: owners / admins
+  always; else null); a repeat submit then answers `JOB_CANDIDATE_PLACE` whatever fingerprint was sent (no guess confirmed).
+- **Its states** (§8-4): `submitted` → `approved` (its first approval) / `withdrawn` (the proposer) / `returned` (an owner /
+  admin, a fixed reason code, never text) — one wins: every move is a compare-and-set from `submitted` (`decideProposal`) inside
+  its transaction; a loser is told 409 `JOB_PROPOSAL_DECIDED` (with the state) or, for an approval, `JOB_PROPOSAL_CLOSED`.
+  Withdraw / return also set the job `retired` (so no build — the floor included — edits, accepts, pauses or runs it). Who: withdraw
+  the proposer only (anyone else, another company's id: the one 404 `JOB_PROPOSAL_NOT_FOUND`), return owner / admin (403
+  `JOBS_FORBIDDEN` before the body). **The proposer leaving the company** (`companies.removeMember`'s `onMemberLeft`, in its
+  transaction, before the jobs' own pause) withdraws their waiting proposals (by the remover) and retires those jobs — nobody could
+  approve or accept them; no `job_paused` is told for them.
+- **A proposal's job in services/jobs.ts** (§8-2 / §10-2 / 第5版): `POST /jobs` never makes schema 4 (409 `JOB_PROPOSAL_ONLY`, whatever
+  the screen announces); `PUT` keeps every version of a proposal's job schema 4 and makes no other job one (409
+  `JOB_PROPOSAL_SCHEMA`), needs `baseVersion` for a proposal's job (400 without; accepted and checked on any job) and refuses a
+  stale one inside the write (409 `JOB_VERSION_NOT_LATEST`); approval of a proposal's job needs the fingerprint (400 without) and
+  the newest version (409 `JOB_VERSION_NOT_LATEST`), and inside the write — after the asynchronous Skill check — the newest version
+  again and the proposal: `submitted` moves to `approved` (the first approval), `approved` lets a later version be approved as any,
+  `withdrawn` / `returned` refuse (`JOB_PROPOSAL_CLOSED`, also for an edit under way). **Its responsible person stays the
+  proposer** (owner decision 2026-11-22): an edit naming anyone else is refused inside the write (409
+  `JOB_PROPOSAL_RESPONSIBLE_FIXED`, 「…責任者を変えられません…新しく定期の仕事を作ってください」). Approving still never accepts. Today's screens
+  announce `1,2,3`: their approve / edit of a schema-4 job is `JOB_NEEDS_NEWER_SCREEN` (the old-tab rule). `JobView.proposal`
+  (additive): `id`, `proposerId` (stored), `submittedVersion`, `state`, `returnReason`.
+- **Notices** (第5版 10-5): `job_proposal` (recordless, on by default) to every owner / admin but the proposer (an owner / admin's
+  own proposal is not told to themself) in the submit's transaction, **one row
+  per recipient** (its own id; `dedupe_key = job_proposal:<proposal id>`, unique per recipient — a resend adds none), then the
+  push to them; text built when read (`jobProposals.proposalNotice`: the job's server-made name, the proposer as the notice's
+  actor) and shown only while the proposal is `submitted` and the reader an owner / admin. 「すべて既読」 also reads a new one (as
+  for every kind, decided in 第5版); the admin console's list of waiting proposals (PR B) keeps it. **A return is told to the
+  proposer** (owner decision 2026-11-22): `job_proposal_returned` (recordless, on by default), written in the return's
+  transaction to the proposer only, one per proposal (`job_proposal_returned:<proposal id>`), then the push to them; worded when
+  read — 「出した定期の仕事の案「…」は差し戻されました（理由：…）…」 with the fixed reason's words (`jobProposalReturnReasonText`), the
+  name by `HIDDEN_JOB_NAME`'s rule — and shown only to the proposer while the proposal is returned. A withdrawal tells nobody.
+  **PR C's task** (owner decision 2026-11-22): the app's notice settings must not offer members the owner / admin-only kinds
+  (`job_proposal`, and the existing `job_paused`).
+- **The rollback floor** (6760eef3, knows `[1, 2]`): a schema-4 job is listed by name only, its versions without definition or
+  fingerprints, approve / edit / accept refused (`JOB_SCHEMA_UNKNOWN`), no occurrence made, no `job_proposal` /
+  `job_proposal_returned` shown (unknown kinds); it never reads the new tables. Coming back: nothing revived (a withdrawn proposal stays so, its job retired), nothing
+  duplicated (the cross-build check, `deployment.md`).
+- Test: `server/tests/integration/job-proposals.test.ts` (§9 / §11 / 第5版: another person as responsible, another company's ids,
+  rights removed before the submit, unreadable / missing places, a free name / folder / title words, an old fingerprint / version,
+  6 submits at once, the three-way race, a run-bound token, a non-session token submitting, candidates absent from admin lists, an
+  old admin tab, the first approval and later versions, withdrawn / returned edits, a resend after expiry, 2 admins with their own
+  read state), `jobs-definition.test.ts` "a member's proposal (schema 4)", permission matrix + `CROSS`, the cross-build check.
+  Also (owner decisions and reviews of PR A): the proposer's return notice, the fixed responsible person, a candidate read again
+  when read (a place / the shelf Skill's place lost), hidden segments refused, an owner / admin proposer not told, a leaver's
+  proposals withdrawn (through the route), an older app's 「AI の番」 token refused at the route.
+  Mutation check: 52 guards removed or inverted one at a time, then 7 for the owner decisions, 11 after the reviews, 5 after the Codex re-review, 2 after its 3rd pass and 4 after its 4th (the route handing the service the token's run now fails a test of its own); each fails
+  a test except — each alone suffices, both removed fail:
+  the places' reader / write checks and the approval's own `rightsFit` at the candidate (also their re-reads after the awaits:
+  the places' fresh reader and `rightsFit` inside the write); the 20-candidate check before and inside
+  the write; the proposal view's owner / admin branch of `fingerprintShown` (an owner / admin reads every place anyway; kept as the
+  job view's rule); — behind another guard: the pre-checks `JOB_PROPOSAL_CLOSED` of edit / approve (a
+  withdrawn / returned job is `retired`, refused first; the checks inside the write are tested by races); — defence: the stored
+  candidate's responsible person compared with the submitter (a candidate is only ever found for its creator).
 
 ## Tests (each guard mutation-checked, with the exceptions named)
 

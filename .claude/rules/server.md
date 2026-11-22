@@ -337,6 +337,10 @@ GET  /api/config                                  setup state (no auth)
                               GET /jobs/:jobId/occurrences, GET /me/job-turns, POST /job-run-claims,
                               POST /jobs/:jobId/occurrences/:occurrenceId/retry | …/operations/:key/reconcile   jobs.ts
                                                                 (定期の仕事: jobs.md)
+                              GET /me/job-candidates/:candidateId, POST …/submit, GET /me/job-proposals,
+                              POST /me/job-proposals/:proposalId/withdraw, GET /job-proposals,
+                              POST /job-proposals/:proposalId/return                  job-proposals.ts
+                                                                (社員の案: jobs.md "Member proposals")
                               GET /plugins, GET|PUT /plugins/:pluginId, PUT …/enabled,
                               PUT …/mapping, POST …/mapping/restore, POST …/mapping/check, POST …/import,
                               POST …/connection/renew,
@@ -369,6 +373,8 @@ GET  /api/config                                  setup state (no auth)
                               POST /plugins/:pluginId/records/:recordId/operations/:operation,
                               GET /plugins/:pluginId/operations/:operationId,
                               POST /outbound-recipients, POST /outbound, GET|PUT /outbound/:messageId,
+                              GET /job-proposals-ai/places, POST /job-proposals-ai/candidates (a member's AI's
+                              candidate of a time job; job-proposals.ts, jobs.md "Member proposals"),
                               POST /outbound/:messageId/attachments, DELETE …/attachments/:sha256
                               (drafts only: no send, no download) — the AI's
                               routes (record token instead of a session; records.md) records-ai.ts

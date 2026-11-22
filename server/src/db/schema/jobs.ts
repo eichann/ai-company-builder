@@ -271,6 +271,43 @@ export const jobSchema = `
     -- The runner's and the clock's look-up of what is still due (held / done rows pile up, one per job and slot).
     CREATE INDEX IF NOT EXISTS idx_ai_job_occurrences_due ON ai_job_occurrences(company_id, state, due_at);
 
+    -- Member proposals (jobs.md "Member proposals"): a member's candidate — a schema-4 definition the server built and
+    -- pinned, readable by its creator alone, its content kept 24 hours — and the permanent record of a submitted one (one
+    -- per company, proposer and candidate: a repeated submit answers the first result, also after the content is gone).
+    -- state: submitted / approved / withdrawn / returned (only from submitted, one wins); return_reason: a fixed code.
+    -- An older build (the rollback floor) never reads either table; its job of schema 4 is frozen there.
+    CREATE TABLE IF NOT EXISTS ai_job_candidates (
+      company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+      id TEXT NOT NULL CHECK (length(id) = 35 AND substr(id, 1, 3) = 'jc.' AND substr(id, 4) NOT GLOB '*[^0-9a-f]*'),
+      created_by TEXT NOT NULL,
+      definition TEXT NOT NULL,
+      fingerprint TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      expires_at TEXT NOT NULL,
+      PRIMARY KEY (company_id, id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_ai_job_candidates_creator ON ai_job_candidates(company_id, created_by, expires_at);
+    CREATE TABLE IF NOT EXISTS ai_job_proposals (
+      company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+      id TEXT NOT NULL CHECK (length(id) = 35 AND substr(id, 1, 3) = 'jp.' AND substr(id, 4) NOT GLOB '*[^0-9a-f]*'),
+      job_id TEXT NOT NULL,
+      proposer_id TEXT NOT NULL,
+      candidate_id TEXT NOT NULL,
+      submitted_version INTEGER NOT NULL CHECK (submitted_version >= 1),
+      submitted_fingerprint TEXT NOT NULL,
+      state TEXT NOT NULL CHECK (state IN ('submitted', 'approved', 'withdrawn', 'returned')),
+      return_reason TEXT CHECK (return_reason IS NULL OR return_reason IN ('NOT_NEEDED', 'TOO_BROAD', 'SKILL_NOT_READY', 'TALK_FIRST', 'OTHER')),
+      decided_by TEXT,
+      decided_at TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY (company_id, id),
+      UNIQUE (company_id, proposer_id, candidate_id),
+      UNIQUE (company_id, job_id),
+      FOREIGN KEY (company_id, job_id) REFERENCES ai_jobs(company_id, id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_ai_job_proposals_proposer ON ai_job_proposals(company_id, proposer_id, state, created_at);
+
     -- 「定期の仕事をすべて止める」 (owner decision D8: its own switch, apart from the AI's emergency stop).
     -- No row = not stopped.
     CREATE TABLE IF NOT EXISTS ai_job_settings (

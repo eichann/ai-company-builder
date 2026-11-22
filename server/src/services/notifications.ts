@@ -87,6 +87,16 @@ export interface NotificationServiceDeps {
    * version still waits for this member's acceptance, else null (not shown). Absent → never shown.
    */
   jobAcceptNoticeOf?: (member: Member, jobId: string, version: number) => { name: string; contentChanged: boolean; choosesPlace?: boolean } | null
+  /**
+   * 「定期の仕事の案が届いています」 (`job_proposal`, jobs.md "Member proposals"): the proposed job's name while the proposal
+   * still waits and the reader is an owner / admin, else null. Absent → never shown.
+   */
+  jobProposalNoticeOf?: (member: Member, proposalId: string) => { name: string } | null
+  /**
+   * 「定期の仕事の案が差し戻されました」 (`job_proposal_returned`): the job's name (as the proposer may read it) and the fixed reason's
+   * words, while the reader is the proposer and it is returned, else null. Absent → never shown.
+   */
+  jobProposalReturnedOf?: (member: Member, proposalId: string) => { name: string; reason: string } | null
   /** The member's role in the company, or null (a notice goes only to someone who reads the record). */
   roleOf: (companyId: string, userId: string) => string | null
   /** The company's time zone for a due without one (records.md "Due with a time"); Japan by default. */
@@ -957,6 +967,10 @@ export function createNotificationService(deps: NotificationServiceDeps) {
         const [, jobId = '', version = ''] = (r.dedupeKey ?? '').split(':')
         return /^[1-9][0-9]{0,8}$/.test(version) ? deps.jobAcceptNoticeOf?.(member, jobId, Number(version)) ?? null : null
       }
+      // A member's proposal: `job_proposal:<proposal id>`, shown only while it waits and the reader is an owner / admin.
+      const proposalNotice = (r: NotificationRow) => deps.jobProposalNoticeOf?.(member, (r.dedupeKey ?? '').split(':')[1] ?? '') ?? null
+      // Its return, to the proposer: `job_proposal_returned:<proposal id>`.
+      const returnedNotice = (r: NotificationRow) => deps.jobProposalReturnedOf?.(member, (r.dedupeKey ?? '').split(':')[1] ?? '') ?? null
       const jobOccurrenceKinds = new Set<string>(JOB_OCCURRENCE_NOTIFICATION_KINDS)
       // An event job's stopped chain: `job_chain_stopped:<job id>:<at>` (the time has `:` in it: the rest of the key).
       const chainStopped = (r: NotificationRow) => {
@@ -972,6 +986,8 @@ export function createNotificationService(deps: NotificationServiceDeps) {
         if (r.kind === 'job_chain_stopped') return r.recordId === '' && chainStopped(r) !== null
         if (r.kind === 'job_paused') return r.recordId === '' && jobNotice(r) !== null
         if (r.kind === 'job_accept_needed') return r.recordId === '' && acceptNotice(r) !== null
+        if (r.kind === 'job_proposal') return r.recordId === '' && proposalNotice(r) !== null
+        if (r.kind === 'job_proposal_returned') return r.recordId === '' && returnedNotice(r) !== null
         // After a restore (deployment.md): only while the member is an owner / admin (they alone can resume).
         if (r.kind === 'company_restored') return r.recordId === '' && hasFullAccess(member.role)
         if (jobOccurrenceKinds.has(r.kind)) return r.recordId === '' && occurrenceNotice(r) !== null
@@ -1026,6 +1042,17 @@ export function createNotificationService(deps: NotificationServiceDeps) {
             : `定期の仕事「${job.name}」の責任者になりました。内容を確かめて「受け取る」を押してください（受け取るまで動きません）`
           // Choosing the place outside needs an app that can (an older one shows no such button).
           const text = job.choosesPlace ? `${base}。できたものを置く先もそこで選びます（新しいアプリが必要です）` : base
+          return { id: r.id, kind: r.kind, recordId: '', recordType: '', recordTitle: '', version: 0, text, createdAt: r.createdAt, read }
+        }
+        if (r.kind === 'job_proposal') {
+          // Built now, with no free text: the proposer (the notice's actor) and the job's name the server made.
+          const job = proposalNotice(r) as { name: string }
+          const text = `${personText(r.actorId, names)}から定期の仕事の案「${job.name}」が届いています。管理画面の「定期の仕事」で確かめてください`
+          return { id: r.id, kind: r.kind, recordId: '', recordType: '', recordTitle: '', version: 0, text, createdAt: r.createdAt, read }
+        }
+        if (r.kind === 'job_proposal_returned') {
+          const p = returnedNotice(r) as { name: string; reason: string }
+          const text = `出した定期の仕事の案「${p.name}」は差し戻されました（理由：${p.reason}）。必要なら、AI にもう一度頼んでください`
           return { id: r.id, kind: r.kind, recordId: '', recordType: '', recordTitle: '', version: 0, text, createdAt: r.createdAt, read }
         }
         if (jobOccurrenceKinds.has(r.kind)) {

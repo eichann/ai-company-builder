@@ -92,6 +92,40 @@ export interface JobOccurrenceRow {
   updatedAt: string
 }
 
+/**
+ * A member's candidate (案の候補, jobs.md "Member proposals"): a schema-4 definition the server built and pinned for its
+ * creator alone, kept until `expiresAt` (24 h); never a job, never in any job list.
+ */
+export interface JobCandidateRow {
+  id: string
+  createdBy: string
+  /** The canonical JSON of the schema-4 definition. */
+  definition: string
+  /** sha256 of it: what the card showed and the submit names. */
+  fingerprint: string
+  createdAt: string
+  expiresAt: string
+}
+
+/**
+ * A submitted candidate (jobs.md "Member proposals"): permanent, one per (proposer, candidate) — it outlives the
+ * candidate's content, so a repeated submit answers the first result. Its job is the draft the submit made.
+ */
+export interface JobProposalRow {
+  id: string
+  jobId: string
+  proposerId: string
+  candidateId: string
+  submittedVersion: number
+  submittedFingerprint: string
+  state: 'submitted' | 'approved' | 'withdrawn' | 'returned'
+  returnReason: string | null
+  decidedBy: string | null
+  decidedAt: string | null
+  createdAt: string
+  updatedAt: string
+}
+
 /** A stretch no event of a job runs in (stage 4a): delivery numbers in (`from`, `until`]; `until` null while it lasts. */
 export interface JobEventGap { from: number; until: number | null }
 
@@ -255,4 +289,28 @@ export interface JobRepository {
    * frozen occurrence too (a later build's PC run on it is a missing run here).
    */
   isHiddenOccurrence(occurrenceId: string): boolean
+
+  // Member proposals (jobs.md "Member proposals"): candidates (their creator's alone, 24 h) and the permanent proposal records.
+  /** A candidate of `createdBy` still kept at `now` (expired, someone else's or another company's: null). */
+  candidate(candidateId: string, createdBy: string, now: string): JobCandidateRow | null
+  /** How many candidates `createdBy` has kept at `now`. */
+  liveCandidates(createdBy: string, now: string): number
+  insertCandidate(row: JobCandidateRow): void
+  /** The content of every candidate of the company past its time is deleted (the proposal records stay). How many. */
+  dropExpiredCandidates(now: string): number
+  proposal(proposalId: string): JobProposalRow | null
+  /** The proposal a job was made from, or null (a job an owner / admin made). */
+  proposalOfJob(jobId: string): JobProposalRow | null
+  /** The proposal `proposerId` made of `candidateId`, or null: a submit's idempotency. */
+  proposalOfCandidate(proposerId: string, candidateId: string): JobProposalRow | null
+  /** Proposals, newest first, at most `limit`: of one proposer and / or in one state. */
+  proposals(filter: { proposerId?: string; state?: JobProposalRow['state'] }, limit: number): JobProposalRow[]
+  /** How many proposals of `proposerId`: in `state` (when given), made at or after `since` (when given). */
+  countProposals(proposerId: string, filter: { state?: JobProposalRow['state']; since?: string }): number
+  insertProposal(row: JobProposalRow): void
+  /**
+   * From `submitted` to an end (compare-and-set): false = it was not `submitted` any more (someone else decided first;
+   * nothing written).
+   */
+  decideProposal(proposalId: string, to: 'approved' | 'withdrawn' | 'returned', change: { reason: string | null; by: string; at: string }): boolean
 }

@@ -74,6 +74,24 @@ describe.skipIf(!CROSS_DB)('cross-build 3/3: this build again', () => {
     expect(db.prepare("SELECT state FROM ai_run_operations WHERE company_id = ? AND run_id = ? AND key = 'put-1'").get(CO, m.runs.r1)).toEqual({ state: 'done' })
     expect(db.prepare('SELECT state FROM ai_runs WHERE company_id = ? AND id = ?').get(CO, m.runs.r1)).toEqual({ state: 'waiting_reconcile' })
     expect(stateOf(o1)).toBe('held')
+    // The proposals: the withdrawn one stays withdrawn (its job retired, never approved), a resend of the waiting one answers
+    // the first result and adds nothing, and the waiting one is still the owner's / admins' to approve once.
+    const { p1, p2 } = m.proposals
+    expect(db.prepare('SELECT state FROM ai_job_proposals WHERE company_id = ? AND id = ?').get(CO, p2.id)).toEqual({ state: 'withdrawn' })
+    const owner = { companyId: CO, userId: 'xb-owner', role: 'owner' }
+    const fp = (job: string) => (db.prepare('SELECT fingerprint FROM ai_job_versions WHERE company_id = ? AND job_id = ? AND version = 1').get(CO, job) as Json).fingerprint
+    expect((await services.jobs.approve(owner, p2.jobId, { version: 1, fingerprint: fp(p2.jobId) }, [1, 2, 3, 4])).ok).toBe(false)
+    const counts = () => db.prepare("SELECT (SELECT COUNT(*) FROM ai_jobs WHERE company_id = ?) AS jobs, (SELECT COUNT(*) FROM notifications WHERE company_id = ? AND kind = 'job_proposal') AS notices").get(CO, CO)
+    const before = counts()
+    const again = await services.jobProposals.submit(alice, p1.candidate, { fingerprint: p1.fingerprint }) as Json
+    expect(again).toMatchObject({ ok: true, value: { created: false, proposal: { id: p1.id, state: 'submitted' } } })
+    expect(counts()).toEqual(before)
+    expect((await services.jobs.approve(owner, p1.jobId, { version: 1, fingerprint: fp(p1.jobId) }, [1, 2, 3, 4])).ok).toBe(true)
+    expect(db.prepare('SELECT state FROM ai_job_proposals WHERE company_id = ? AND id = ?').get(CO, p1.id)).toEqual({ state: 'approved' })
+    // The return the floor did not show is bob's again, in its fixed words.
+    const bobItems = (services.notifications.list({ companyId: CO, userId: 'xb-bob', role: 'member' }) as Json).value.items.filter((i: Json) => i.kind === 'job_proposal_returned')
+    expect(bobItems).toEqual([expect.objectContaining({ text: expect.stringContaining('差し戻されました（理由：読む場所や置く場所、できることが広すぎる）') })])
+
     // The watch J2 moved to is where 4b-1 left it.
     expect((db.prepare('SELECT watch_generation AS g FROM ai_job_event_cursors WHERE company_id = ? AND job_id = ?').get(CO, j2) as Json).g)
       .toBe(m.before.watch.find((w: Json) => w.job_id === j2).watch_generation)

@@ -68,7 +68,9 @@ describe('watch generations are additive', () => {
     // since the fixture was frozen) are not this migration's, but no new job object may appear.
     const changed = once.filter(o => before.some(b => b.name === o.name) && !before.some(b => b.name === o.name && b.sql === o.sql))
     expect(changed.map(o => o.name).sort()).toEqual(['ai_job_event_cursors', 'ai_job_occurrences'])
-    expect(once.filter(o => !before.some(b => b.name === o.name) && /ai_job/.test(o.name))).toEqual([])
+    // (Member proposals' own tables, jobs.md "Member proposals", came later than the fixture: theirs, not this migration's.)
+    const proposals = /^(ai_job_candidates|ai_job_proposals)$/
+    expect(once.filter(o => !before.some(b => b.name === o.name) && /ai_job/.test(o.name) && !proposals.test(o.tbl_name))).toEqual([])
     for (const o of changed) {
       const was = before.find(b => b.name === o.name)?.sql as string
       expect(o.sql).toContain(', watch_generation INTEGER')

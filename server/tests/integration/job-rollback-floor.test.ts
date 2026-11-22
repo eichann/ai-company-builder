@@ -2,7 +2,7 @@
  * The rollback floor (stage 4b-0.5, owner memo 「段4b 設計メモ」 第4版 §5, jobs.md "Shapes this build does not know"):
  * production may run this build again after a later one (4b-1) wrote versions of a shape this build does not know
  * (`schema: 3`, an event job run by the responsible person's PC AI) and their occurrences, runs, notices. Since stage 4b-1
- * this build knows schema 3 itself, so the tests stand in the next shape (`LATER_SCHEMA`, 4) for "a shape this build does
+ * this build knows schema 3 itself, so the tests stand in the next shape (`LATER_SCHEMA`, 5 — schema 4 is a member's proposal since PR A) for "a shape this build does
  * not know": the freeze is the same mechanism (the floor build runs this file with schema 3 as written). Such an
  * occurrence is **frozen** here: never shown, counted, told, expired, run, claimed, retried or reconciled — left out in
  * SQL before every limit — and only a pause, the company's stop or a restore reaches it (held, its run ended, nothing
@@ -95,7 +95,7 @@ function publishSkill(): string {
  * A shape this build does not know. On the floor (4b-0.5) that was 4b-1's schema 3; since 4b-1 this build reads schema 3,
  * so the next one stands in for it (the freeze does not depend on which number is unknown).
  */
-const LATER_SCHEMA = 4
+const LATER_SCHEMA = 5
 /** What a later build stores: an event job run by the PC's AI — a shape this build does not know. */
 const as4b1 = (d: Json): Json => ({ ...d, schema: LATER_SCHEMA, placement: 'a', trigger: { kind: 'record', type: 'task', event: 'state', to: 'done', startRecord: 'task-0000000000000001', ai: true } })
 

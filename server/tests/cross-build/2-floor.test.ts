@@ -129,6 +129,25 @@ describe.skipIf(!CROSS_DB)('cross-build 2/3: the rollback floor on it', () => {
     expect(noticeCount()).toBe(before.notices)
     expect(madeCount()).toBe(before.made)
 
+    // The proposals' jobs (schema 4, which the floor does not know): their names only, never a definition or a fingerprint;
+    // editing, approving and accepting refused; nothing made of them by the clock (above) and no proposal notice shown.
+    const { p1, p2, p3 } = m.proposals
+    for (const p of [p1, p2, p3]) {
+      const seen = await as('xb-owner', 'GET', `/jobs/${p.jobId}`)
+      expect(seen.status).toBe(200)
+      expect(seen.body.data.name).toMatch(/^interview-report（/)
+      for (const v of seen.body.data.versions) expect(v).toMatchObject({ definition: null, fingerprint: null, consentFingerprint: null })
+      expect(await services.jobs.approve(owner, p.jobId, { version: 1 }, [1, 2, 3, 4])).toMatchObject({ ok: false, body: { code: 'JOB_SCHEMA_UNKNOWN' } })
+      expect((await services.jobs.update(owner, p.jobId, { definition: { schema: 1 } }, [1, 2, 3, 4])).ok).toBe(false)
+      expect((db.prepare('SELECT COUNT(*) AS n FROM ai_job_occurrences WHERE company_id = ? AND job_id = ?').get(CO, p.jobId) as Json).n).toBe(0)
+    }
+    expect(await services.jobs.accept(member('xb-bob', 'member'), p3.jobId, { version: 1 }, [1, 2, 3, 4], true)).toMatchObject({ ok: false, body: { code: 'JOB_SCHEMA_UNKNOWN' } })
+    for (const who of [owner, member('xb-admin', 'admin'), member('xb-bob', 'member')]) {
+      const listed = services.notifications.list(who) as Json
+      expect(listed.ok).toBe(true)
+      expect(listed.value.items.filter((i: Json) => i.kind === 'job_proposal' || i.kind === 'job_proposal_returned')).toEqual([])
+    }
+
     // What 4b-1 needs to go on is as it wrote it.
     expect(crossBuildSnapshot(db, CO)).toEqual(m.before)
     saveDb(db, m)
