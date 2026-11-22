@@ -402,3 +402,18 @@ test('the stop time coming before the turn is tracked: the ceiling is gone, so t
   assert.deepEqual(await claims.settle(COMPANY, OCC), { outcome: 'failed' })
   assert.deepEqual(server.calls.filter(c => c.path.endsWith('/finish')).map(c => c.body), [{ generation: 1, outcome: 'failed', failure: { class: 'bad-input', code: 'TIME_LIMIT' } }])
 })
+
+test('waking after more than the window: a renew that wins the race against the watch never revives the run', async () => {
+  // Asleep 4 minutes (the window is 3, the server's lease 5): the renew timer fires first after waking and the server
+  // still answers 200; the watch's next look is far away. The run must be lost, not confirmed again.
+  let wallOffset = 0
+  const frozen = performance.now()
+  const server = fakeServer()
+  const { claims, stopped } = claimsFor(server, { monotonicNow: () => frozen, wallNow: () => Date.now() + wallOffset, renewEveryMs: 30, jobWatchTickMs: 60_000 })
+  await claims.jobTurns(COMPANY)
+  assert.ok((await claims.claim(COMPANY, OCC, 1, 'conv-event-0120')).claimed)
+  wallOffset = 4 * 60_000
+  await wait(120)
+  assert.deepEqual(stopped, ['conv-event-0120'])
+  assert.equal(claims.jobTools('conv-event-0120', 'job-procedure'), null)
+})

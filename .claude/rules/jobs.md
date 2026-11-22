@@ -593,7 +593,13 @@ consultation, claim / hold / renew / finish (`claims.ts`), the same unattended C
   `ClockStamp`): a wall clock set back never extends it, and the time a Mac slept — which `performance.now` does not count
   (review of 4b-2, M2) — or a wall clock moved forward always counts. The watch reads the age at least every
   `JOB_WATCH_TICK_MS` (15 s), so after a wake (timers pause in sleep) the run stops within a tick; the deadline check of a
-  renew uses the same age. **No two renews race on one hold**: the deadline (30 s) is shorter than the renew interval
+  renew uses the same age. **A run past the window is never revived** (Codex re-review of 4b-2): asleep longer than the
+  window but within the server's lease (or a clock moved forward), the renew timer may fire before the watch looks and the
+  server still answers 200 — so a renew is not sent, and its answer not accepted, when the confirmation it would replace was
+  already older than the window at its send (`ageAt`); the hold is lost instead. The only other place a confirmation is set
+  is `hold`'s first one (the claim's own send). Test: `job-runs-fail-closed.test.ts` "waking after more than the window";
+  the check before sending and the one before accepting compare the same instant, so each alone suffices — both removed,
+  the test fails. **No two renews race on one hold**: the deadline (30 s) is shorter than the renew interval
   (`AI_RUN_RENEW_EVERY_MS`, 60 s), a hold sends no timed renew while its previous one is still out (`guard.renewing`), and
   a confirmation only ever moves forward (a slower answer to an earlier send never moves it back); the claim's last check
   may run beside a timed renew of the same hold — both are that hold's, so either answer is a true confirmation of it.

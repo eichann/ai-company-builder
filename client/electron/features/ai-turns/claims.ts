@@ -120,7 +120,8 @@ export function createAiTurnClaims(deps: AiTurnClaimsDeps) {
   const wall = deps.wallNow ?? Date.now
   const stamp = (): ClockStamp => ({ mono: mono(), wall: wall() })
   /** Time since `from`: the larger of the monotonic and the wall elapsed time (sleep and a clock moved forward count; set back never shortens it). */
-  const since = (from: ClockStamp) => Math.max(mono() - from.mono, wall() - from.wall)
+  const ageAt = (from: ClockStamp, at: ClockStamp) => Math.max(at.mono - from.mono, at.wall - from.wall)
+  const since = (from: ClockStamp) => ageAt(from, stamp())
   const renewTimeoutMs = deps.jobRenewTimeoutMs ?? JOB_RENEW_TIMEOUT_MS
   const confirmMaxAgeMs = deps.jobConfirmMaxAgeMs ?? JOB_CONFIRM_MAX_AGE_MS
   const watchTickMs = deps.jobWatchTickMs ?? JOB_WATCH_TICK_MS
@@ -225,6 +226,12 @@ export function createAiTurnClaims(deps: AiTurnClaimsDeps) {
    */
   async function renewOnce(companyId: string, recordId: string, entry: HeldRun): Promise<boolean> {
     const sent = stamp()
+    // Past the window already (asleep longer, a clock moved forward, before the watch's next look): lost, never revived
+    // by a renew sent now (Codex re-review of 4b-2).
+    if (entry.guard && ageAt(entry.guard.confirmedAt, sent) >= confirmMaxAgeMs) {
+      lose(companyId, recordId, entry)
+      return false
+    }
     if (entry.guard) entry.guard.renewing = true
     const r = await session(companyId, 'POST', `/ai-runs/${encodeURIComponent(entry.runId)}/renew`, { generation: entry.generation }, entry.guard ? renewTimeoutMs : undefined)
       .finally(() => { if (entry.guard) entry.guard.renewing = false })
@@ -242,6 +249,11 @@ export function createAiTurnClaims(deps: AiTurnClaimsDeps) {
     if (since(sent) > renewTimeoutMs) return false
     const run = r && r.status >= 200 && r.status < 300 ? (r.data as { run?: { id?: unknown; generation?: unknown } } | undefined)?.run : undefined
     if (!run || run.id !== entry.runId || run.generation !== entry.generation) return false
+    // Accepted only while the confirmation it replaces was still in force when it was sent — else lost, never revived.
+    if (ageAt(entry.guard.confirmedAt, sent) >= confirmMaxAgeMs) {
+      lose(companyId, recordId, entry)
+      return false
+    }
     // From when it was sent, never moved back.
     if (sent.mono >= entry.guard.confirmedAt.mono) entry.guard.confirmedAt = sent
     arm(companyId, recordId, entry)
