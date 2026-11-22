@@ -420,8 +420,9 @@ is public, so anyone can open a PR; code from a fork must never run on that Mac.
 - Since Electron 42 the `electron` package downloads its binary on first use (`npx electron`,
   `require('electron')`, `pnpm dev`), not in `postinstall`; `npx install-electron` fetches it
   ahead of time, and `ELECTRON_SKIP_BINARY_DOWNLOAD` no longer exists. The package wants Node
-  22.12+ for that download; CI stays on Node 20 and launches Electron in one test only
-  (`client/tests/browser-window-electron.test.ts`, "Client tests 2/2 (macOS)", after the step
+  22.12+ for that download; CI stays on Node 20 and launches Electron in two tests only
+  (`client/tests/browser-window-electron.test.ts`, `client/tests/doc-frame-electron.test.ts`,
+  "Client tests 2/2 (macOS)", after the step
   "Fetch the Electron binary": `npx --no install-electron`). A checkout's binary
   lands in `node_modules/.pnpm/electron@<version>/node_modules/electron/dist/`.
 - Electron 45's sandboxed preload has no Node shims (`Buffer`, `events`, `timers`, `url`,

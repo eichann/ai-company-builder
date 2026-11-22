@@ -25,7 +25,10 @@ import { readCliVersionOutput } from './agents/codex-version'
 import { killAgentProcess, spawnAgentProcess } from './agents/process'
 import { createClaudeCli } from './services/claude-cli'
 import { createClaudeSignIn } from './services/claude-sign-in'
-import { createAppPages, createBroadcastPort, createChatWindowHost, createMainWindowHost, createMessageBoxHost, desktopShell, guardEverySession, receiveAppLinks, secretBox, registerLocalFileScheme, serveLocalFiles } from './electron-adapter'
+import { createAppPages, createBroadcastPort, createChatWindowHost, createMainWindowHost, createMessageBoxHost, desktopShell, guardDocFrameNetwork, guardEverySession, receiveAppLinks, secretBox, registerLocalFileScheme, serveDocFrames, serveLocalFiles } from './electron-adapter'
+import { createDocFrames } from './features/doc-frames/protocol'
+import { registerDocFramesIpc } from './features/doc-frames/ipc'
+import { readSparseConfig } from './sync/sparse'
 import { diskFiles, registerChatWindowsIpc } from './features/chat-windows/ipc'
 import { createSession } from './services/session'
 import { createInFlightReads } from './services/in-flight-reads'
@@ -647,6 +650,16 @@ registerDownloadChoicesIpc(ipc, { paths: allowedRoots, appGit, session, serverUr
 
 registerBackupsIpc(ipc, { paths: allowedRoots, shell: desktopShell, writeRefusal: absPath => privateFolderGuards.writeRefusal(absPath) })
 
+// The HTML viewer (doc-frame.md): acb-doc:// serves only an opened document's own folder, granted
+// to the main window's page; a grant of a window that is gone is revoked.
+const docFrames = createDocFrames({
+  paths: allowedRoots,
+  notDownloaded: root => readSparseConfig(root).excluded,
+  ownerAlive: id => mainWindowHost.isWindow(id),
+})
+registerDocFramesIpc(ipc, { docFrames, fromMainWindow: event => isMainFrameSender(event, id => mainWindowHost.isWindow(id)) })
+serveDocFrames(docFrames)
+
 // Startup runs last, once every store and service above is initialised: the
 // chat server config below captures them, and keeping the use after the
 // declaration makes no-use-before-define (TDZ) hold by construction.
@@ -654,6 +667,7 @@ app.whenReady().then(async () => {
   if (!hasInstanceLock) return
   registerVoiceInput(claudeCli.path, shellEnv.env, () => ({ authMode: config.authMode(), apiKey: apiKey.read() }), () => agentControl.stop.oneShotAiAllowed())
   serveLocalFiles(allowedRoots)
+  guardDocFrameNetwork()
   // Start embedded Hono chat server
   try {
     const serverConfig = createChatServerConfig({

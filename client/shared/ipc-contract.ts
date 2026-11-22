@@ -56,6 +56,7 @@ import type { AiTurnClaimResult, AiTurnSettleResult, AutoTurnSettings } from './
 import type { MailAttachmentOpenResult, MailAwaitReply, MailDraftEdit, OutboundMailResult } from './outbound-mail'
 import type { AppCommandAnswer, AppCommandRequest } from './app-commands'
 import type { CompanyFolderKind } from './company-folder'
+import type { DocFrameOpenResult } from './doc-frame'
 // Lanes (ipc-and-main-process.md "Lane markers"): add only right under your lane's ▼.
 // lane A ▼
 import type { GoogleRelayResult } from './google'
@@ -501,6 +502,10 @@ export interface IpcInvokeChannels {
   'fs:readDirectoryTree': { args: [path: string, maxDepth: number]; result: DirectoryTreeNode[] }
   'fs:readFile': { args: [path: string]; result: string | null }
   'fs:readFileBinary': { args: [path: string]; result: ArrayBuffer | null }
+  /** The HTML viewer: a grant for one document's folder, as its `acb-doc://` address (doc-frame.md). Main window only. */
+  'docFrames:open': { args: [filePath: string]; result: DocFrameOpenResult }
+  /** The view closed: its grant is revoked. */
+  'docFrames:close': { args: [url: string]; result: void }
   'fs:writeFile': { args: [path: string, content: string]; result: boolean }
   'fs:createFile': { args: [path: string, content: string]; result: FileOpResult }
   'editor:backupBeforeOverwrite': { args: [rootPath: string, filePath: string]; result: EditorBackupResult }
@@ -960,6 +965,8 @@ export interface ElectronAPI {
   readDirectoryTree: (path: string, maxDepth?: number) => Promise<InvokeResult<'fs:readDirectoryTree'>>
   readFile: Invoke<'fs:readFile'>
   readFileBinary: Invoke<'fs:readFileBinary'>
+  openDocFrame: Invoke<'docFrames:open'>
+  closeDocFrame: Invoke<'docFrames:close'>
   writeFile: Invoke<'fs:writeFile'>
   /** Never replaces an existing file (`code: 'name_taken'`). */
   createFile: Invoke<'fs:createFile'>

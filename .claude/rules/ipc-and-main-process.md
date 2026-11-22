@@ -64,7 +64,9 @@ Full text: `docs/architecture/main-process-and-ipc.md` (internal).
   (aiTurns:settings / claim / settle: the automatic 「AI の番」's claim by version and settle, main
   window only; the run itself is a hidden consultation in the renderer, `ai-turns.md`). `tasks`
   (tasks:list / create / act / card / linkFile / unlinkFile / retryRun / reconcile: the task list and card, read and
-  changed with the session; `tasks-ui.md`).
+  changed with the session; `tasks-ui.md`). `doc-frames` (docFrames:open / close: the HTML
+  viewer's grant for one document's folder as an `acb-doc://` address, main window's main frame
+  only; `features/doc-frames/protocol.ts` serves the scheme, `doc-frame.md`).
 - `electron/features/<domain>/wire.ts` — a feature's wiring that would otherwise sit in `main.ts`:
   `wire<Feature>(ipc?, deps)` creates the feature's services from injected ports, registers its
   IPC and its quit hooks (`AppLifecycle` in `features/ports.ts`), and returns what other features
@@ -127,8 +129,10 @@ Full text: `docs/architecture/main-process-and-ipc.md` (internal).
 - `electron/electron-adapter.ts` — Electron's implementations of the ports (`DesktopShell`,
   `WindowPort`, `SecretBox` (safeStorage), sync's message boxes), the windows (`createAppPages`:
   the page and web preferences; `createMainWindowHost`: the main window with its close guard;
-  `createChatWindowHost`), the `local-file://` protocol registration and `acb-plugin://` (a
-  plugin's screen: `servePluginFiles`, frame navigation; `plugin-frame.md`).
+  `createChatWindowHost`), the `local-file://` protocol registration, `acb-plugin://` (a
+  plugin's screen: `servePluginFiles`, frame navigation; `plugin-frame.md`) and `acb-doc://` (the
+  HTML viewer: `serveDocFrames`, and `guardDocFrameNetwork`, the default session's one
+  `onBeforeRequest`; `doc-frame.md`).
 - `main.ts` (~320 lines) — the composition root: creates services and stores in dependency
   order, calls each `register…Ipc` / `wire…`, owns the app lifecycle, `app:closeResponse` and
   `chat-server:getInfo`, starts voice input and the chat server in `app.whenReady`.

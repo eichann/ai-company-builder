@@ -13,6 +13,21 @@ export type EditorWrites = ElectronPort<'writeFile' | 'createDirectory' | 'backu
 /** Why a save was refused, in a sentence for the member (a skill file they may not change, …). */
 export type EditorRefusals = ElectronPort<'reservedPathRefusal'>
 
+/**
+ * The HTML viewer's document frames (doc-frame.md): a grant for one `.html`
+ * file's folder, as the `acb-doc://` address the sandboxed frame loads, and
+ * its revocation when the view closes.
+ */
+export type DocFrameGrants = ElectronPort<'openDocFrame' | 'closeDocFrame'>
+
+export function openDocFrame(filePath: string, grants: DocFrameGrants = window.electronAPI) {
+  return grants.openDocFrame(filePath)
+}
+
+export function closeDocFrame(url: string, grants: DocFrameGrants = window.electronAPI) {
+  return grants.closeDocFrame(url)
+}
+
 /** The file's text, or null when it is gone. */
 export function readFile(filePath: string, reads: EditorReads = window.electronAPI) {
   return reads.readFile(filePath)

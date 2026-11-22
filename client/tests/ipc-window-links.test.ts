@@ -7,7 +7,7 @@ import { test, after, before } from 'node:test'
 import assert from 'node:assert/strict'
 import { pathToFileURL } from 'node:url'
 import { loadMain, type MainHarness } from './ipc-harness/main-harness.ts'
-import { BrowserWindow, fake } from './ipc-harness/fake-electron.ts'
+import { BrowserWindow, fake, session } from './ipc-harness/fake-electron.ts'
 
 let h: MainHarness
 
@@ -51,6 +51,27 @@ test('acb-plugin:// is registered without CSP bypass or fetch, and served once t
   assert.deepEqual(fake.privilegedSchemes.find(s => (s as { scheme: string }).scheme === 'acb-plugin'),
     { scheme: 'acb-plugin', privileges: { standard: true, secure: true, corsEnabled: true } })
   assert.ok(fake.protocolHandlers.get('acb-plugin'))
+})
+
+// The HTML viewer (doc-frame.md): acb-doc gets the plugin scheme's privileges and nothing more, its
+// answers are served once the app is ready, and the default session cancels every web request a
+// document frame (or a frame inside one) makes — the wall behind the CSP.
+test('acb-doc:// is registered without CSP bypass or fetch; the session cancels a document\'s web requests', async () => {
+  assert.deepEqual(fake.privilegedSchemes.find(s => (s as { scheme: string }).scheme === 'acb-doc'),
+    { scheme: 'acb-doc', privileges: { standard: true, secure: true, corsEnabled: true } })
+  const served = await fake.protocolHandlers.get('acb-doc')!(new Request(`acb-doc://${'0'.repeat(32)}/a.html`))
+  assert.equal(served.status, 404)
+  assert.equal(served.headers.get('x-content-type-options'), 'nosniff')
+
+  const guard = session.defaultSession.beforeRequest
+  assert.ok(guard, 'the default session has the document guard')
+  assert.deepEqual(guard.filter.urls, ['http://*/*', 'https://*/*', 'ws://*/*', 'wss://*/*'])
+  const decide = (frame: unknown) => new Promise<boolean>(resolve => guard.listener({ url: 'https://example.com/x', frame }, answer => resolve(answer.cancel === true)))
+  const doc = { url: `acb-doc://${'0'.repeat(32)}/a.html`, parent: { url: 'file:///app/index.html', parent: null } }
+  assert.equal(await decide(doc), true, 'the document itself (fetch, image, its own navigation)')
+  assert.equal(await decide({ url: 'about:srcdoc', parent: doc }), true, 'a frame inside the document')
+  assert.equal(await decide({ url: 'file:///app/index.html', parent: null }), false, 'the app\'s own page')
+  assert.equal(await decide(undefined), false, 'a request of no frame (main process)')
 })
 
 test('a plugin\'s frame cannot navigate, and its window.open never reaches the browser', () => {

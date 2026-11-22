@@ -206,6 +206,11 @@ type PermissionCheckHandler = (webContents: unknown, permission: string, request
 export class FakeSession {
   requestHandler: PermissionRequestHandler | null = null
   checkHandler: PermissionCheckHandler | null = null
+  /** The one `webRequest.onBeforeRequest` listener main installed (Electron keeps one per session). */
+  beforeRequest: { filter: { urls: string[] }; listener: (details: unknown, callback: (answer: { cancel?: boolean }) => void) => void } | null = null
+  readonly webRequest = {
+    onBeforeRequest: (filter: { urls: string[] }, listener: (details: unknown, callback: (answer: { cancel?: boolean }) => void) => void) => { this.beforeRequest = { filter, listener } },
+  }
   setPermissionRequestHandler(handler: PermissionRequestHandler | null): void { this.requestHandler = handler }
   setPermissionCheckHandler(handler: PermissionCheckHandler | null): void { this.checkHandler = handler }
   /** What a page at `requestingUrl` is answered when it asks for `permission`. */

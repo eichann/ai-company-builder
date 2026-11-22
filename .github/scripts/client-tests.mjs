@@ -39,6 +39,8 @@ const MACOS = {
   // A real Electron window (「ブラウザ操作」, agent-browser.md): Linux runners have no display, so
   // the test skips itself there and would pass without guarding anything.
   'tests/browser-window-electron.test.ts': 'launches the real Electron app, which needs a display',
+  // The HTML viewer's document frame in a real Electron (doc-frame.md): same reason.
+  'tests/doc-frame-electron.test.ts': 'launches the real Electron app, which needs a display',
 }
 
 const os = process.argv[2]
