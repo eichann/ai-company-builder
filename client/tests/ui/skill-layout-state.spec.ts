@@ -1,6 +1,6 @@
 // What the main screen remembers and restores (tests/skill-layout-ui.tsx):
 // open file tabs and the left tab per company, the chosen department, and the
-// panel dividers (their widths saved per company). These pin the behaviour the AppShell (formerly SkillCentricLayout) split
+// panel dividers (their widths saved per company, fitted to the window; layoutTree.ts). These pin the behaviour the AppShell (formerly SkillCentricLayout) split
 // (Phase 4) moves into hooks and the split-tree layout. `keep: '1'` reloads
 // the page without clearing storage — an app restart; `seed` writes what an
 // earlier version of the app saved, so old saved state keeps restoring.
@@ -121,9 +121,13 @@ test.describe('panel dividers', () => {
   const treeDivider = (page: Page) => page.getByRole('separator', { name: 'ファイルツリーとエディタの境目' })
   const chatDivider = (page: Page) => page.getByRole('separator', { name: '左の欄とチャットの境目' })
   const showChat = (page: Page) => page.getByRole('button', { name: 'AIチャットを表示 (⌘⇧C)' })
+  const showLeft = (page: Page) => page.getByRole('button', { name: '左の欄を出す (⌘B)' })
+  const leftToggle = (page: Page) => page.getByRole('group', { name: '画面の形' }).getByRole('button', { name: '左の欄 (⌘B)' })
   // The screen starts at x = 0, so a divider's x is the width of what is left of it.
   const at = async (divider: Locator) => Math.round((await divider.boundingBox())!.x)
-  async function drag(page: Page, divider: Locator, dx: number) {
+  /** The middle: from the tree divider's right edge to the chat divider. */
+  const middle = async (page: Page) => (await at(chatDivider(page))) - (await at(treeDivider(page))) - 4
+  async function drag(page: Page, divider: Locator, dx: number, { release = true } = {}) {
     const box = (await divider.boundingBox())!
     const x = box.x + box.width / 2
     const y = box.y + box.height / 2
@@ -131,60 +135,173 @@ test.describe('panel dividers', () => {
     await page.mouse.down()
     await page.mouse.move(x + dx / 2, y, { steps: 3 })
     await page.mouse.move(x + dx, y, { steps: 3 })
-    await page.mouse.up()
+    if (release) await page.mouse.up()
   }
-  // ⌘⇧C as the browser reports it on macOS (key 'c' with meta and shift).
-  const toggleChatShortcut = (page: Page) => page.evaluate(() => {
-    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'c', metaKey: true, shiftKey: true, bubbles: true }))
-  })
+  // ⌘⇧C and ⌘B as the browser reports them on macOS (key with meta).
+  const shortcut = (page: Page, key: string, shiftKey: boolean) => page.evaluate(({ key, shiftKey }) => {
+    document.dispatchEvent(new KeyboardEvent('keydown', { key, metaKey: true, shiftKey, bubbles: true }))
+  }, { key, shiftKey })
+  const toggleChatShortcut = (page: Page) => shortcut(page, 'c', true)
+  const toggleLeftShortcut = (page: Page) => shortcut(page, 'b', false)
+  const savedLayout = (page: Page) => page.evaluate(() => JSON.parse(localStorage.getItem('layout:demo') ?? 'null') as unknown)
 
-  // A first start fits the 1280 px window (layoutTree.ts firstLayout, I.8): the chat keeps 420 px.
-  test('first start: the left side is 860 px (the chat keeps 420) and the narrow column 260 px', async ({ page }) => {
+  test('first start looks as before: the chat after 860 px, the narrow column 260 px', async ({ page }) => {
     await openPreview(page, 'skill-layout')
     await leftTab(page, 'ファイル').click()
     expect(await at(chatDivider(page))).toBe(860)
     expect(await at(treeDivider(page))).toBe(260)
   })
 
-  test('the file tree follows the pointer within 200–400 px (200: the left tabs fit stacked)', async ({ page }) => {
+  test('widening the window grows the middle; the chat and the left column keep their widths', async ({ page }) => {
+    await openPreview(page, 'skill-layout')
+    await leftTab(page, 'ファイル').click()
+    const before = await middle(page)
+    await page.setViewportSize({ width: 1600, height: 800 })
+    await expect.poll(() => at(chatDivider(page))).toBe(1180)
+    expect(await at(treeDivider(page))).toBe(260)
+    expect(await middle(page)).toBe(before + 320)
+  })
+
+  test('the narrow column follows the pointer from 200 px; it stops where the middle keeps 360 px, and at half the window', async ({ page }) => {
     await openPreview(page, 'skill-layout')
     await leftTab(page, 'ファイル').click()
     await drag(page, treeDivider(page), 100)
     await expect.poll(() => at(treeDivider(page))).toBe(360)
-    await drag(page, treeDivider(page), 300)
-    await expect.poll(() => at(treeDivider(page))).toBe(400)
-    await drag(page, treeDivider(page), -500)
+    await drag(page, treeDivider(page), 500)
+    await expect.poll(() => middle(page)).toBe(360)
+    await drag(page, treeDivider(page), -800)
     await expect.poll(() => at(treeDivider(page))).toBe(200)
+    // With the chat hidden, half the 1280 px window.
+    await toggleChatShortcut(page)
+    await drag(page, treeDivider(page), 900)
+    await expect.poll(() => at(treeDivider(page))).toBe(640)
   })
 
-  test('the left side follows the pointer from 300 px up to the room the chat needs; 60 px past that hides the chat, which comes back at that width', async ({ page }) => {
+  test('the chat follows the pointer from 280 px to where the middle keeps 360 px; 60 px under its minimum hides it, and it comes back at 280', async ({ page }) => {
     await openPreview(page, 'skill-layout')
+    await leftTab(page, 'ファイル').click()
     await drag(page, chatDivider(page), -150)
     await expect.poll(() => at(chatDivider(page))).toBe(710)
     await drag(page, chatDivider(page), -600)
-    await expect.poll(() => at(chatDivider(page))).toBe(300)
-    // 1280 px window: the chat keeps 280 px (+10), so the left side stops at 990 px.
-    await drag(page, chatDivider(page), 740)
-    await expect.poll(() => at(chatDivider(page))).toBe(990)
+    await expect.poll(() => middle(page)).toBe(360)
+    // 1280 px window: the chat keeps 280 px, so its divider stops at 996 (50 px further still shows it).
+    await drag(page, chatDivider(page), (996 - (await at(chatDivider(page)))) + 50)
+    await expect.poll(() => at(chatDivider(page))).toBe(996)
     await expect(showChat(page)).toHaveCount(0)
 
     await drag(page, chatDivider(page), 80)
     await expect(showChat(page)).toBeVisible()
     await expect(chatDivider(page)).toHaveCount(0)
     await showChat(page).click()
-    await expect.poll(() => at(chatDivider(page))).toBe(990)
+    await expect.poll(() => at(chatDivider(page))).toBe(996)
+  })
+
+  test('while dragging, the size shows beside the pointer', async ({ page }) => {
+    await openPreview(page, 'skill-layout')
+    await leftTab(page, 'ファイル').click()
+    await drag(page, treeDivider(page), 80, { release: false })
+    await expect(page.locator('[data-size-tip]')).toHaveText('340px（画面の 27%）')
+    await page.mouse.up()
+    await expect(page.locator('[data-size-tip]')).toHaveCount(0)
+  })
+
+  test('a double-click puts that divider back where it started, and only that one', async ({ page }) => {
+    await openPreview(page, 'skill-layout')
+    await leftTab(page, 'ファイル').click()
+    await drag(page, treeDivider(page), 100)
+    await drag(page, chatDivider(page), -100)
+    await expect.poll(() => at(treeDivider(page))).toBe(360)
+    await expect.poll(() => at(chatDivider(page))).toBe(760)
+    await treeDivider(page).dblclick()
+    await expect.poll(() => at(treeDivider(page))).toBe(260)
+    expect(await at(chatDivider(page))).toBe(760)
+    await chatDivider(page).dblclick()
+    await expect.poll(() => at(chatDivider(page))).toBe(860)
+    // And the reset is what comes back at the next start.
+    await restart(page)
+    await leftTab(page, 'ファイル').click()
+    await expect.poll(() => at(chatDivider(page))).toBe(860)
+    expect(await at(treeDivider(page))).toBe(260)
+  })
+
+  test('the dividers move by keys: arrows by 16 px (Shift 64), Home and End as far as they go', async ({ page }) => {
+    await openPreview(page, 'skill-layout')
+    await leftTab(page, 'ファイル').click()
+    const tree = treeDivider(page)
+    await tree.focus()
+    await page.keyboard.press('ArrowRight')
+    await page.keyboard.press('Shift+ArrowRight')
+    await expect.poll(() => at(tree)).toBe(340)
+    await expect(tree).toHaveAttribute('aria-valuenow', '340')
+    await expect(tree).toHaveAttribute('aria-valuemin', '200')
+    await page.keyboard.press('Home')
+    await expect.poll(() => at(tree)).toBe(200)
+    await page.keyboard.press('End')
+    await expect.poll(() => middle(page)).toBe(360)
+    // The chat's divider: left grows the chat (with room for it in the middle).
+    await page.keyboard.press('Home')
+    const chat = chatDivider(page)
+    await chat.focus()
+    await page.keyboard.press('ArrowLeft')
+    await expect.poll(() => at(chat)).toBe(844)
+  })
+
+  test('⌘B hides the left column and brings it back at its width; the strip and the title bar button do the same', async ({ page }) => {
+    await openPreview(page, 'skill-layout')
+    await leftTab(page, 'ファイル').click()
+    await drag(page, treeDivider(page), 40)
+    await expect.poll(() => at(treeDivider(page))).toBe(300)
+    await expect(leftToggle(page)).toHaveAttribute('aria-pressed', 'true')
+
+    await toggleLeftShortcut(page)
+    await expect(treeDivider(page)).toHaveCount(0)
+    await expect(showLeft(page)).toBeVisible()
+    await expect(leftToggle(page)).toHaveAttribute('aria-pressed', 'false')
+    // The chat keeps its place; the middle starts after the 24 px strip at the window's left edge.
+    expect(await at(chatDivider(page))).toBe(860)
+    const strip = (await showLeft(page).boundingBox())!
+    expect([Math.round(strip.x), Math.round(strip.width)]).toEqual([0, 24])
+
+    await toggleLeftShortcut(page)
+    await expect.poll(() => at(treeDivider(page))).toBe(300)
+    await leftToggle(page).click()
+    await expect(showLeft(page)).toBeVisible()
+    await showLeft(page).click()
+    await expect.poll(() => at(treeDivider(page))).toBe(300)
+
+    // A left tab asked for while the column is hidden (探す ⌘⇧F) brings it back.
+    await toggleLeftShortcut(page)
+    await expect(showLeft(page)).toBeVisible()
+    await shortcut(page, 'f', true)
+    await expect(searchBox(page)).toBeVisible()
+    await expect(showLeft(page)).toHaveCount(0)
+  })
+
+  test('「いつもの形に戻す」 puts every size back and shows every pane', async ({ page }) => {
+    await openPreview(page, 'skill-layout')
+    await leftTab(page, 'ファイル').click()
+    await drag(page, treeDivider(page), 100)
+    await drag(page, chatDivider(page), -100)
+    await toggleLeftShortcut(page)
+    await toggleChatShortcut(page)
+    await expect(showChat(page)).toBeVisible()
+    await page.getByRole('button', { name: 'いつもの形に戻す' }).click()
+    await expect.poll(() => at(chatDivider(page))).toBe(860)
+    expect(await at(treeDivider(page))).toBe(260)
+    await expect(showLeft(page)).toHaveCount(0)
   })
 
   test('widths come back per company at the next start; a company with nothing saved opens at the first look', async ({ page }) => {
     await openPreview(page, 'skill-layout')
     await leftTab(page, 'ファイル').click()
     await drag(page, treeDivider(page), 100)
-    await drag(page, chatDivider(page), -150)
-    await expect.poll(() => at(chatDivider(page))).toBe(710)
+    await drag(page, chatDivider(page), -100)
+    await expect.poll(() => at(chatDivider(page))).toBe(760)
     await expect.poll(() => at(treeDivider(page))).toBe(360)
+    expect(await savedLayout(page)).toMatchObject({ version: 2, trees: { screen: { sizes: [null, 516] }, files: { sizes: [360, null] } } })
 
     await restart(page)
-    await expect.poll(() => at(chatDivider(page))).toBe(710)
+    await expect.poll(() => at(chatDivider(page))).toBe(760)
     await expect.poll(() => at(treeDivider(page))).toBe(360)
 
     await switchCompany(page, 'other')
@@ -193,34 +310,38 @@ test.describe('panel dividers', () => {
     await expect.poll(() => at(treeDivider(page))).toBe(260)
 
     await switchCompany(page, 'demo')
-    await expect.poll(() => at(chatDivider(page))).toBe(710)
+    await expect.poll(() => at(chatDivider(page))).toBe(760)
     await expect.poll(() => at(treeDivider(page))).toBe(360)
   })
 
-  for (const [what, saved] of [
-    ['unreadable', '{"version":1,"trees":'],
-    ['from a version this app does not know', JSON.stringify({ version: 99, trees: { screen: { sizes: [900, null] } } })],
-  ] as const) {
-    test(`a saved layout ${what} opens with the first look's widths, and dragging still works`, async ({ page }) => {
-      await openPreview(page, 'skill-layout', { seed: JSON.stringify({ 'layout:demo': saved }) })
-      await leftTab(page, 'ファイル').click()
-      expect(await at(chatDivider(page))).toBe(860)
-      expect(await at(treeDivider(page))).toBe(260)
-      await drag(page, chatDivider(page), -50)
-      await expect.poll(() => at(chatDivider(page))).toBe(810)
-    })
-  }
+  test('what an earlier version saved (the side fixed, version 1) opens with the dividers where they were', async ({ page }) => {
+    const v1 = JSON.stringify({ version: 1, trees: {
+      screen: { type: 'split', id: 'screen', direction: 'row', children: [{ type: 'pane', id: 'side' }, { type: 'pane', id: 'chat' }], sizes: [740, null] },
+      files: { type: 'split', id: 'files', direction: 'row', children: [{ type: 'pane', id: 'fileTree' }, { type: 'pane', id: 'editor' }], sizes: [300, null] },
+    } })
+    await openPreview(page, 'skill-layout', { seed: JSON.stringify({ 'layout:demo': v1 }) })
+    await leftTab(page, 'ファイル').click()
+    await expect.poll(() => at(chatDivider(page))).toBe(740)
+    expect(await at(treeDivider(page))).toBe(300)
+    // Nothing is rewritten until the member changes something.
+    expect(await savedLayout(page)).toMatchObject({ version: 1 })
+  })
 
-  test('⌘⇧C hides the chat and brings it back at the width it had', async ({ page }) => {
-    await openPreview(page, 'skill-layout')
-    await drag(page, chatDivider(page), -100)
-    await expect.poll(() => at(chatDivider(page))).toBe(760)
-    await toggleChatShortcut(page)
-    await expect(chatDivider(page)).toHaveCount(0)
-    await expect(showChat(page)).toBeVisible()
-    await toggleChatShortcut(page)
-    await expect(showChat(page)).toHaveCount(0)
-    await expect.poll(() => at(chatDivider(page))).toBe(760)
+  test('at 1280 px nothing becomes unusable, and a smaller window takes the room from the chat first, then the left column', async ({ page }) => {
+    const big = JSON.stringify({ version: 2, trees: {
+      screen: { type: 'split', id: 'screen', direction: 'row', children: [{ type: 'pane', id: 'side' }, { type: 'pane', id: 'chat' }], sizes: [null, 900] },
+      files: { type: 'split', id: 'files', direction: 'row', children: [{ type: 'pane', id: 'fileTree' }, { type: 'pane', id: 'editor' }], sizes: [700, null] },
+    } })
+    await openPreview(page, 'skill-layout', { seed: JSON.stringify({ 'layout:demo': big }) })
+    await leftTab(page, 'ファイル').click()
+    // 1280: the left column at most half (640); the chat gives way to 280 px and the left column to keep the middle at 360.
+    expect(1280 - (await at(chatDivider(page))) - 4).toBe(280)
+    expect(await middle(page)).toBe(360)
+    expect(await at(treeDivider(page))).toBe(1280 - 280 - 4 - 360 - 4)
+    // A wider window shows what was saved again (it was never overwritten).
+    await page.setViewportSize({ width: 2400, height: 800 })
+    await expect.poll(async () => 2400 - (await at(chatDivider(page))) - 4).toBe(900)
+    expect(await at(treeDivider(page))).toBe(700)
   })
 
   // With the chat hidden the left side takes the rest of the window. Wide content (a long
@@ -271,9 +392,9 @@ test.describe('panel dividers', () => {
 
       await toggleChatShortcut(page)
       await expect(showChat(page)).toHaveCount(0)
-      // In the smaller window the left side gives way so the chat keeps its room (280 px + 10).
-      expect(await at(chatDivider(page))).toBe(1000 - 290)
+      // In the smaller window the chat gives way so the middle keeps 360 px; the narrow column keeps its width.
       expect(await at(treeDivider(page))).toBe(260)
+      expect(await middle(page)).toBe(360)
     })
   }
 })

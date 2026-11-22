@@ -243,20 +243,37 @@ D7–D9, confirmed 2026-10-30).
   kept (an extension's tab may register later; `skill-layout-state.spec.ts`). An extension's
   entry will carry the text its manifest declares and render the app's isolated frame, never its
   own React. Same idea as the agent registry (`client/shared/agents/registry.ts`).
-- **Split-tree layout (built, Phase 4-3).** Pane sizes are a tree of row / column splits, the
-  chat pane one leaf: `src/features/workspace/layoutTree.ts` (tree, limits, saved shape),
-  `hooks/useSplitLayout.ts` (per company in localStorage `layout:<company id>` =
-  `{ version: 1, trees: { screen, files } }`, written only when the member drags; nothing saved,
-  unreadable, another version or another tree shape → today's look; sizes clamped to the limits in
-  code; which pane is hidden is not saved) and `components/SplitView.tsx` on the in-house
+- **Split-tree layout (built, Phase 4-3; sizes reworked by B1, 2026-11-22).** Pane sizes are a
+  tree of row / column splits, the chat pane one leaf: `src/features/workspace/layoutTree.ts`
+  (tree, limits, saved shape and **every size rule**), `hooks/useSplitLayout.ts` (per company in
+  localStorage `layout:<company id>` = `{ version: 2, trees: { screen: [side null, chat px],
+  files: [fileTree px, editor null] } }`, written only when the member drags, presses a divider's
+  keys, double-clicks it or 「いつもの形に戻す」) and `components/SplitView.tsx` on the in-house
   `ResizeHandle` (`react-resizable-panels` was prototyped and not taken: its collapse model
-  differs from "drag 60 px past the max hides the chat", it stores percentages, and it released
-  weekly with API breaks across majors). Today the tree has the screen's look only; the chat no
+  differs from ours, it stores percentages, and it released weekly with API breaks across majors).
+  The rules, each with its test (`layoutTree.test.ts`, `client/tests/ui/skill-layout-state.spec.ts`):
+  the chat keeps the width the member chose and **widening the window grows the middle**; the left
+  column (`fileTree`) is 200 px up to **half the window, at most 720 px**; the middle never goes under
+  `MIDDLE_MIN` (360 px) while the window has room for every minimum — a smaller window takes the room
+  from the chat (min 280) first, then the left column; a drag never moves another pane and stops
+  where the middle would go under 360. What is saved is stale input: `parseLayout` checks the shape
+  and clamps to the static limits; `fitLayout` fits it to the window every time it is drawn and is
+  never written back (a wider window shows the saved sizes again). Version 1 (the side fixed) is
+  read as the same look in the window of that start (chat = window − side − 4) and is not
+  rewritten until the member changes something; nothing saved, unreadable, another version or
+  another tree shape → the first look (left 260, chat 416: today's first look). A divider is
+  keyboard-operable (`role="separator"` with `aria-valuenow/min/max`, arrows 16 px, Shift 64, Home /
+  End), double-click puts that pane back to its first size, and while dragging the size shows beside
+  the pointer (「340px（画面の 27%）」). **Hidden panes**: the left column (⌘B `layout.toggleLeft`, the
+  title bar's 「画面の形」 buttons, the 24 px strip) and the chat (⌘⇧C, the same buttons, dragging it
+  60 px under its minimum) are hidden in `AppShell` state and **not saved** (every pane shows at the
+  next start); a left tab chosen while the column is hidden (⌘⇧F, 今日のフォルダ, 「あなたの番」)
+  shows it again. Today the tree has the screen's look only; the chat no
   longer assumes one panel on screen (refactor 5-7, `chat-ui-and-history.md` 「Several chat
   panes」): a tab is `isShown` in its pane, the voice key and `chat.*` commands go to the pane
   used last, a consultation is open in one pane at most, tabs are remembered per pane. A second
-  chat leaf in the tree is what is left. Changing the saved shape means a new
-  `version` and reading the old one (`layoutTree.test.ts`, `client/tests/ui/skill-layout-state.spec.ts`).
+  chat leaf in the tree is what is left (the bottom panel, B2, adds a column split under the middle).
+  Changing the saved shape means a new `version` and reading the old one.
   A pane that takes the remaining space (and the left side while the chat is hidden) has
   `min-width` = its limit or 0, never the flex default `auto`: otherwise wide content (many tabs,
   a long source line) stretched it past the window, leaving the document in a sliver at the

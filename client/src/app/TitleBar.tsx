@@ -28,12 +28,14 @@ interface Props {
   notices?: ReactNode
   /** The company's name as a menu to switch companies (features/company), drawn instead of the plain name. */
   companySwitcher?: ReactNode
+  /** Show / hide the left column and the consultation, 「いつもの形に戻す」 (features/workspace). */
+  layoutControls?: ReactNode
 }
 
 const ICON_BUTTON = 'p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-zinc-800 text-gray-500 dark:text-zinc-400 hover:text-gray-700 dark:hover:text-zinc-200 transition-colors'
 
 /** The window's title bar (draggable): the company, 変更を確認 / 同期, backups, language, theme, settings, sign-out. */
-export function TitleBar({ companyName, isLoadingPreview, isSyncing, syncTitle = 'サーバーと同期', syncWaitsForYou = false, sharedFolder = true, onPreview, onSync, onShowBackups, onShowSettings, onLogout, extra, notices, companySwitcher }: Props) {
+export function TitleBar({ companyName, isLoadingPreview, isSyncing, syncTitle = 'サーバーと同期', syncWaitsForYou = false, sharedFolder = true, onPreview, onSync, onShowBackups, onShowSettings, onLogout, extra, notices, companySwitcher, layoutControls }: Props) {
   const { t } = useTranslation()
   const hasCompany = useAppStore((s) => s.currentCompany) != null
   const theme = useAppStore((s) => s.theme)
@@ -93,6 +95,7 @@ export function TitleBar({ companyName, isLoadingPreview, isSyncing, syncTitle =
         </>}
         {extra}
         <div className="w-px h-4 bg-gray-200 dark:bg-zinc-700" />
+        {layoutControls && <>{layoutControls}<div className="w-px h-4 bg-border-strong" /></>}
         {sharedFolder && (
         <button
           onClick={onShowBackups}

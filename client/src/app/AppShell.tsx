@@ -1,6 +1,6 @@
 import { Suspense, useState, useMemo, useCallback, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Lightning, FolderSimple, MagnifyingGlass, ChatCircle, CaretLeft, ListChecks, HandPointing } from '@phosphor-icons/react'
+import { Lightning, FolderSimple, MagnifyingGlass, ChatCircle, CaretLeft, CaretRight, ListChecks, HandPointing } from '@phosphor-icons/react'
 import { ChatPanel } from '../features/chat/components/ChatPanel'
 import { useLinkedConsultations } from '../features/chat/recordConsultationsStore'
 import { useConsultationTopics } from '../features/chat/consultationTopicsStore'
@@ -34,11 +34,12 @@ import { LeftPanelTabs } from '../features/workspace/components/LeftPanelTabs'
 import { resolveLeftPanel, type LeftPanel } from '../features/workspace/leftPanels'
 import { SkillsPanel } from '../features/skills/components/SkillsPanel'
 import { SplitView } from '../features/workspace/components/SplitView'
+import { LayoutControls } from '../features/workspace/components/LayoutControls'
 import { DepartmentBar } from '../features/workspace/components/DepartmentBar'
 import { useSplitLayout } from '../features/workspace/hooks/useSplitLayout'
 import { useDepartmentSelection } from '../features/workspace/hooks/useDepartmentSelection'
 import { useDepartmentAvailability } from '../features/workspace/hooks/useDepartmentAvailability'
-import { PANE_LIMITS } from '../features/workspace/layoutTree'
+import { PANE_LIMITS, withPaneShown } from '../features/workspace/layoutTree'
 import { useEditorPersistence, type RestoredTabs } from '../features/editor/hooks/useEditorPersistence'
 import { useEditorTabs } from '../features/editor/hooks/useEditorTabs'
 import { useTabTidying } from '../features/editor/hooks/useTabTidying'
@@ -177,9 +178,11 @@ export function AppShell() {
     selectedDeptId: isCompanyWide ? null : selectedDeptId,
   }), [openFiles, rootPath, departments, isCompanyWide, selectedDeptId])
 
-  // Pane sizes as a split tree, saved per company; the chat is one leaf and can be hidden.
-  const { layout, collapsed: collapsedPane, toggleCollapsed, startResize, resize } = useSplitLayout(currentCompany?.id)
-  const toggleChat = useCallback(() => toggleCollapsed('chat'), [toggleCollapsed])
+  // Which panes the member hid, the left column and the chat (not saved: every pane shows at the next start).
+  const [hidden, setHidden] = useState<ReadonlySet<string>>(() => new Set())
+  const setPaneShown = useCallback((paneId: string, shown?: boolean) => setHidden(h => withPaneShown(h, paneId, shown)), [])
+  const toggleChat = useCallback(() => setPaneShown('chat'), [setPaneShown])
+  const toggleLeft = useCallback(() => setPaneShown('fileTree'), [setPaneShown])
 
   const searchInputRef = useRef<HTMLInputElement>(null)
   const [showFileSearch, setShowFileSearch] = useState(false)
@@ -290,8 +293,6 @@ export function AppShell() {
   })
   useCommandHandler('file.search', () => setShowFileSearch(true))
   useCommandHandler('find.byName', () => setShowFileSearch(true))
-  // Just typed in the chat: ⌘⇧C stays with the chat input instead of hiding it.
-  useCommandHandler('layout.toggleChat', toggleChat, { acceptsKey: () => !isChatInputRecentlyActive() })
   useCommandHandler('settings.openOwnKey', ({ service }) => {
     setSettingsFocus({ service, at: Date.now() })
     setShowSettings(true)
@@ -464,7 +465,7 @@ export function AppShell() {
     return all.filter(s => listed.has(s.id)).map(s => ({ id: s.id, title: s.title, updatedAt: s.updatedAt, ...(s.topicRecordId ? { topicRecordId: s.topicRecordId } : {}) }))
   }) : undefined, [companyId])
   const openConsultation = (sessionId: string) => {
-    if (collapsedPane === 'chat') toggleChat()
+    setPaneShown('chat', true)
     void runCommand('chat.openConsultation', { sessionId }).catch(() => {})
   }
   const departmentNames = useMemo(() => Object.fromEntries(departments.map(d => [d.folder, d.name])), [departments])
@@ -585,6 +586,27 @@ export function AppShell() {
   const shownLeft = leftPanels.find(p => p.id === resolveLeftPanel(leftTab, leftPanels))
   middleHidden.current = !!shownLeft?.wide
 
+  // Pane sizes as a split tree, saved per company and fitted to the window for the panes on
+  // screen (layoutTree.ts); a wide left tab covers the middle.
+  const middleShown = !shownLeft?.wide
+  const paneView = useMemo(() => ({ leftShown: !hidden.has('fileTree'), chatShown: !hidden.has('chat'), middleShown }), [hidden, middleShown])
+  const split = useSplitLayout(currentCompany?.id, paneView, paneId => setPaneShown(paneId, false))
+  const layout = split.shown
+  const resetLayout = () => { split.resetSizes(); setHidden(new Set()) }
+  // Just typed in the chat: ⌘⇧C stays with the chat input instead of hiding it.
+  useCommandHandler('layout.toggleChat', toggleChat, { acceptsKey: () => !isChatInputRecentlyActive() })
+  useCommandHandler('layout.toggleLeft', toggleLeft)
+  // A left tab chosen while the column is hidden (⌘⇧F, 今日のフォルダ, 「あなたの番」) brings the column back.
+  const [tabWhenShown, setTabWhenShown] = useState(leftTab)
+  if (tabWhenShown !== leftTab) {
+    setTabWhenShown(leftTab)
+    setPaneShown('fileTree', true)
+  }
+  const splitHandlers = {
+    paneClassName, dividerLabel, dividerState: split.divider, onResizeStart: split.startResize, onResize: split.resize,
+    onNudge: split.nudge, onReset: split.resetDivider,
+  }
+
   return (
     <div className="h-screen flex flex-col bg-gray-100 dark:bg-zinc-950">
       <TitleBar
@@ -612,6 +634,8 @@ export function AppShell() {
           />
         ) : undefined}
         extra={meetings.titleBarButton}
+        layoutControls={<LayoutControls leftShown={!hidden.has('fileTree')} chatShown={!hidden.has('chat')}
+          onToggleLeft={toggleLeft} onToggleChat={toggleChat} onReset={resetLayout} />}
         notices={currentCompany ? (
           <TitleBarNotices
             companyId={currentCompany.id}
@@ -639,12 +663,9 @@ export function AppShell() {
       <SplitView
         split={layout.screen}
         limits={PANE_LIMITS}
-        collapsed={collapsedPane}
+        collapsed={hidden.has('chat') ? 'chat' : null}
         className="flex-1 overflow-hidden"
-        paneClassName={paneClassName}
-        dividerLabel={dividerLabel}
-        onResizeStart={startResize}
-        onResize={resize}
+        {...splitHandlers}
         renderCollapsed={() => (
           <button
             onClick={toggleChat}
@@ -680,8 +701,15 @@ export function AppShell() {
             {/* The left tab beside the middle (open files and records, plan A); a wide tab covers the middle, which stays mounted. */}
             <SplitView
               split={layout.files} limits={PANE_LIMITS} className="h-full min-w-0"
-              collapsed={shownLeft?.wide ? 'editor' : null}
-              paneClassName={paneClassName} dividerLabel={dividerLabel} onResizeStart={startResize} onResize={resize}
+              collapsed={hidden.has('fileTree') ? 'fileTree' : shownLeft?.wide ? 'editor' : null}
+              {...splitHandlers}
+              renderCollapsed={id => id === 'fileTree' ? (
+                <button type="button" onClick={toggleLeft} title="左の欄を出す (⌘B)"
+                  className="flex-shrink-0 w-6 flex flex-col items-center justify-center gap-1 bg-surface-sunken border-r border-border-strong text-text-subtle hover:text-text transition-colors">
+                  <CaretRight size={14} />
+                  <FolderSimple size={16} />
+                </button>
+              ) : null}
               renderPane={id => id === 'fileTree' ? (
                 <div className="h-full flex flex-col min-w-0"><LeftPanelTabs panels={leftPanels} selectedId={leftTab} onSelect={selectLeftTab} /></div>
               ) : (

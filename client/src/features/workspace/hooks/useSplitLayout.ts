@@ -1,21 +1,31 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useEventListener } from '../../../shared/hooks/useEventListener'
+import { useLatestRef } from '../../../shared/hooks/useLatestRef'
 import {
-  PANE_LIMITS, dragPane, paneSize, parseLayout, resizedBy, serializeLayout, withPaneSize,
-  type SplitNode, type WorkspaceLayout,
+  DEFAULT_LAYOUT, dragPane, fitLayout, paneRange, paneSize, parseLayout, resizedBy, serializeLayout, sizeText, withPaneSize,
+  type PaneView, type SplitNode, type WorkspaceLayout,
 } from '../layoutTree'
 
-// Per company in localStorage `layout:<company id>` (layoutTree.ts holds the shape).
+// Per company in localStorage `layout:<company id>` (layoutTree.ts holds the shape and every size rule).
 const LAYOUT_KEY_PREFIX = 'layout:'
 
-// Nothing saved: the first look for this window's width (layoutTree.ts `firstLayout`).
+const windowWidth = () => (typeof window === 'undefined' ? 0 : window.innerWidth)
+
 function readLayout(companyId: string | undefined): WorkspaceLayout {
-  const width = typeof window === 'undefined' ? undefined : window.innerWidth
-  if (!companyId) return parseLayout(null, width)
+  if (!companyId) return parseLayout(null)
   try {
-    return parseLayout(localStorage.getItem(`${LAYOUT_KEY_PREFIX}${companyId}`), width)
+    return parseLayout(localStorage.getItem(`${LAYOUT_KEY_PREFIX}${companyId}`), windowWidth())
   } catch {
-    return parseLayout(null, width)
+    return parseLayout(null)
   }
+}
+
+/** The pane a divider resizes in what is drawn, and how far it may go now. */
+function dividerTarget(drawn: WorkspaceLayout, view: PaneView, width: number, splitId: string, dividerIndex: number) {
+  const split = topSplit(drawn, splitId)
+  const by = split && resizedBy(split, dividerIndex)
+  if (!split || !by) return null
+  return { ...by, size: paneSize(split, by.paneId) ?? 0, range: paneRange(by.paneId, drawn, width, view) }
 }
 
 // Drags reach the top split of each tree; nested splits come with the multi-pane chat.
@@ -23,17 +33,18 @@ function topSplit(layout: WorkspaceLayout, splitId: string): SplitNode | null {
   return splitId === 'screen' || splitId === 'files' ? layout[splitId] : null
 }
 
+/** What a divider shows and accepts: the size of the pane it resizes, its range now, and that size in words. */
+export interface DividerState { value: number; min: number; max: number; text: string }
+
 /**
- * The split tree of the open company: its pane sizes (saved per company as
- * they change), divider drags, and which pane is hidden (not saved: the chat
- * shows again at the next start).
+ * The split tree of the open company: the sizes the member chose (saved per company as they
+ * change), the sizes drawn in this window for the panes on screen (`shown`, fitted by
+ * layoutTree.ts), divider drags and keys. `onCollapse`: the consultation was dragged well under
+ * its minimum (the screen hides it).
  */
-export function useSplitLayout(companyId: string | undefined) {
+export function useSplitLayout(companyId: string | undefined, view: PaneView, onCollapse: (paneId: string) => void) {
   const [state, setState] = useState(() => ({ companyId, layout: readLayout(companyId), loaded: true }))
   if (state.companyId !== companyId) setState({ companyId, layout: readLayout(companyId), loaded: true })
-  const layout = state.layout
-  const layoutRef = useRef(layout)
-  useEffect(() => { layoutRef.current = layout }, [layout])
 
   // Only a change by the member is written: opening a company leaves its entry as it was.
   useEffect(() => {
@@ -45,36 +56,62 @@ export function useSplitLayout(companyId: string | undefined) {
     }
   }, [state])
 
-  const [collapsed, setCollapsed] = useState<string | null>(null)
-  const toggleCollapsed = useCallback((paneId: string) => {
-    setCollapsed(current => (current === paneId ? null : paneId))
+  const [width, setWidth] = useState(windowWidth)
+  useEventListener(typeof window === 'undefined' ? null : window, 'resize', () => setWidth(windowWidth()))
+
+  const shown = useMemo(() => fitLayout(state.layout, width, view), [state.layout, width, view])
+  const latest = useLatestRef({ shown, view })
+  const onCollapseRef = useLatestRef(onCollapse)
+
+  const setSize = useCallback((splitId: string, paneId: string, size: number) => {
+    setState(s => {
+      const split = topSplit(s.layout, splitId)
+      const next = split && withPaneSize(split, paneId, size)
+      return !next || next === split ? s : { ...s, layout: { ...s.layout, [splitId]: next }, loaded: false }
+    })
   }, [])
 
-  // Each drag snapshots the pane's size at pointerdown and derives the size
-  // from the pointer's total offset (panelResize.ts).
+  const target = useCallback((splitId: string, dividerIndex: number) =>
+    dividerTarget(latest.current.shown, latest.current.view, windowWidth(), splitId, dividerIndex), [latest])
+
+  // Each drag snapshots the drawn size at pointerdown and derives the size from the pointer's
+  // total offset (panelResize.ts); dragging the consultation well under its minimum hides it.
   const dragStartRef = useRef(0)
   const startResize = useCallback((splitId: string, dividerIndex: number) => {
-    const split = topSplit(layoutRef.current, splitId)
-    if (!split) return
-    const target = resizedBy(split, dividerIndex)
-    dragStartRef.current = target ? (paneSize(split, target.paneId) ?? 0) : 0
-  }, [])
+    dragStartRef.current = target(splitId, dividerIndex)?.size ?? 0
+  }, [target])
   const resize = useCallback((splitId: string, dividerIndex: number, offset: number) => {
-    const split = topSplit(layoutRef.current, splitId)
-    const target = split && resizedBy(split, dividerIndex)
-    if (!split || !target) return
-    const { size, collapseSibling } = dragPane(dragStartRef.current, target.sign * offset, PANE_LIMITS[target.paneId] ?? {}, window.innerWidth)
-    const next = withPaneSize(split, target.paneId, size)
-    if (next !== split) {
-      layoutRef.current = { ...layoutRef.current, [splitId]: next }
-      setState(s => ({ ...s, layout: { ...s.layout, [splitId]: next }, loaded: false }))
-    }
-    if (collapseSibling) {
-      // The divider unmounts with the hidden pane, which ends this drag.
-      const sibling = split.children.find(child => child.id !== target.paneId && paneSize(split, child.id) == null)
-      if (sibling) setCollapsed(sibling.id)
-    }
+    const t = target(splitId, dividerIndex)
+    if (!t) return
+    const { size, collapse } = dragPane(t.paneId, dragStartRef.current, t.sign * offset, t.range)
+    setSize(splitId, t.paneId, size)
+    // The divider unmounts with the hidden pane, which ends this drag.
+    if (collapse) onCollapseRef.current(t.paneId)
+  }, [target, setSize, onCollapseRef])
+
+  /** The divider moved by keys: `delta` px along the window (never hides a pane). */
+  const nudge = useCallback((splitId: string, dividerIndex: number, delta: number) => {
+    const t = target(splitId, dividerIndex)
+    if (!t) return
+    setSize(splitId, t.paneId, Math.max(t.range.min, Math.min(t.range.max, t.size + t.sign * delta)))
+  }, [target, setSize])
+
+  /** A double-clicked divider: the pane it resizes back to its first size. */
+  const resetDivider = useCallback((splitId: string, dividerIndex: number) => {
+    const t = target(splitId, dividerIndex)
+    const first = t && topSplit(DEFAULT_LAYOUT, splitId) && paneSize(topSplit(DEFAULT_LAYOUT, splitId)!, t.paneId)
+    if (t && first != null) setSize(splitId, t.paneId, first)
+  }, [target, setSize])
+
+  /** 「いつもの形に戻す」: the first sizes (the screen shows every pane again). */
+  const resetSizes = useCallback(() => {
+    setState(s => ({ ...s, layout: DEFAULT_LAYOUT, loaded: false }))
   }, [])
 
-  return { layout, collapsed, toggleCollapsed, startResize, resize }
+  const divider = useCallback((splitId: string, dividerIndex: number): DividerState | null => {
+    const t = dividerTarget(shown, view, width, splitId, dividerIndex)
+    return t && { value: t.size, min: t.range.min, max: t.range.max, text: sizeText(t.size, width) }
+  }, [shown, view, width])
+
+  return { shown, startResize, resize, nudge, resetDivider, resetSizes, divider }
 }
