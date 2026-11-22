@@ -9,6 +9,10 @@ export type JobsReads = ElectronPort<'getMyJobs'>
 export type JobTurnReads = ElectronPort<'listJobTurns'>
 /** The member's own acts on them: accepting, pausing, resuming (kept on the server). */
 export type JobsWrites = ElectronPort<'acceptJob' | 'pauseJob' | 'resumeJob' | 'rewatchJob'>
+/** The event occurrences this PC's AI ran for the member (stage 4b-2, D11). */
+export type JobOccurrenceReads = ElectronPort<'getMyJobOccurrences'>
+/** 「もう一度」 and 「後始末」 on them (the server decides who may and when). */
+export type JobOccurrenceWrites = ElectronPort<'retryJobOccurrence' | 'reconcileJobOccurrence'>
 /** An event job's next watched やること: the member's own open ones (stage 4a ①). */
 export type WatchReads = ElectronPort<'getWatchChoices'>
 
@@ -39,4 +43,16 @@ export function getWatchChoices(companyId: string, text: string, reads: WatchRea
 
 export function rewatchJob(companyId: string, jobId: string, version: number, recordId: string, writes: JobsWrites = window.electronAPI) {
   return writes.rewatchJob(companyId, jobId, version, recordId)
+}
+
+export function getMyJobOccurrences(companyId: string, reads: JobOccurrenceReads = window.electronAPI) {
+  return reads.getMyJobOccurrences(companyId)
+}
+
+export function retryJobOccurrence(companyId: string, jobId: string, occurrenceId: string, writes: JobOccurrenceWrites = window.electronAPI) {
+  return writes.retryJobOccurrence(companyId, jobId, occurrenceId)
+}
+
+export function reconcileJobOccurrence(companyId: string, jobId: string, occurrenceId: string, key: string, done: boolean, writes: JobOccurrenceWrites = window.electronAPI) {
+  return writes.reconcileJobOccurrence(companyId, jobId, occurrenceId, key, done)
 }
