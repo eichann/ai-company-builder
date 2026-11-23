@@ -209,9 +209,9 @@ test('「頼む」 from the one line: shared with the department\'s readers (nev
   })
   await h.api.create('co1', { title: '見積を直す', assignee: 'u-tanaka', folder: '営業部' })
   assert.equal((sent() as { folder?: string }).folder, '営業部')
-  // 知らせるだけ is the default; 全社 (no folder) is the whole company, as records made before.
+  // 知らせるだけ is the default; 全社 (no folder) is the whole company, said on purpose (records.md "全社 is a choice").
   await h.api.create('co1', { title: '資料を送る', assignee: 'u-tanaka' })
-  assert.deepEqual(sent(), { type: 'task', title: '資料を送る', fields: { assignee: 'u-tanaka', when_done: 'notify' } })
+  assert.deepEqual(sent(), { type: 'task', title: '資料を送る', place: 'company', fields: { assignee: 'u-tanaka', when_done: 'notify' } })
   // The member themselves as 担当 is their own task: owner-only, no 終わったら.
   await h.api.create('co1', { title: '自分の', assignee: ME, whenDone: 'check' })
   assert.deepEqual(sent(), { type: 'task', title: '自分の', personal: true, fields: { assignee: ME } })

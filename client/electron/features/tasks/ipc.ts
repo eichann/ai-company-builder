@@ -678,7 +678,8 @@ export function createTasksApi(deps: TasksDeps) {
       if (!me) return { success: false, offline: true, code: null, error: TASKS_OFFLINE_TEXT }
       // The 責任者 is not filled in by the server: the member who makes it.
       const a = await call(companyId, 'POST', '/records/item', {
-        type: input.type, title, fields: { owner: me }, ...(folder ? { folder } : {}),
+        // 全社 is said on purpose (records.md "全社 is a choice"): nothing given is not read as 全社 for ever.
+        type: input.type, title, fields: { owner: me }, ...(folder ? { folder } : { place: 'company' }),
         ...(input.counterpart ? { links: { counterpart: input.counterpart } } : {}),
       })
       const record = (a?.json?.data as { record?: { id?: unknown } } | undefined)?.record
@@ -715,8 +716,9 @@ export function createTasksApi(deps: TasksDeps) {
         type: 'task', title, fields,
         // For a 案件・プロジェクト the server gives it that 案件's 見える範囲 (records.md "A task and its
         // 案件・プロジェクト"), and from a meeting the meeting's (its people): no folder of the screen's then,
-        // and never owner-only from a meeting (its people work on it together).
-        ...(meetingId ? {} : asking ? (folder && !input.bundleId ? { folder } : {}) : { personal: true }),
+        // and never owner-only from a meeting (its people work on it together). 全社 (no folder) is said on
+        // purpose, `place: 'company'` (records.md "全社 is a choice"; an older server ignores the key: the same).
+        ...(meetingId || (asking && input.bundleId) ? {} : asking ? (folder ? { folder } : { place: 'company' }) : { personal: true }),
         ...(Object.keys(links).length > 0 ? { links } : {}),
       }
       const a = await call(companyId, 'POST', '/records/item', body)
