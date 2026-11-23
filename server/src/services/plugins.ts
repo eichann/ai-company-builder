@@ -288,6 +288,11 @@ export function createPluginService(deps: PluginServiceDeps) {
       // another version, a new connection, an account bound or a mapping saved meanwhile is never written back.
       const written = transactions.run((): Outcome<'written' | 'same'> => {
         if (manifest.role === 'connector' && before && dependentsKey(member.companyId, pluginId) !== dependentsSeen) return pluginChanged()
+        if (manifest.role === 'business') {
+          // Again here: another business plugin installed during the awaits may own a type this version adds.
+          const conflict = typeOwnerConflict(member.companyId, pluginId, found.pkg)
+          if (conflict) return refuse('conflict', conflict, { code: 'TYPE_OWNED_ELSEWHERE' })
+        }
         if (row.enabled && manifest.role === 'business') {
           // A company's extension of a type must survive a newer version: report, never store over it (plugins.md ④).
           const conflict = typeExtensionConflict(member.companyId, found.pkg)

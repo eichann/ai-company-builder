@@ -1309,7 +1309,7 @@ POST /plugins/:pluginId/mapping/check    { text? } 「HubSpot に聞いて確か
   (version, fingerprint, key, on / off, connection), and `turnOff`, **unconditional** (a stop always wins).
   The write runs in one `transactions.run` that also re-reads what it adds (the recommended mapping only
   while the mapping version is still 0) and, for a connector's change, compares the turned-on business
-  plugins using it with those the dependents' check judged. Changed meanwhile → 409 `PLUGIN_CHANGED`
+  plugins using it with those the dependents' check judged, and a business plugin's types with the other installs' owners (`TYPE_OWNED_ELSEWHERE`). Changed meanwhile → 409 `PLUGIN_CHANGED`
   (nothing written; the admin shows 「ほかの人がこの設定を変えたため…」); the same change made by someone
   else first → ok, written once. A first install's automatic turning on happens only while the install is
   still the one just made (else it stays as the other owner / admin left it). An account bound or a

@@ -107,6 +107,11 @@ beforeAll(async () => {
   putBusinessPackage('crm-sales@0.1.0')
   putBusinessPackage('crm-sales@0.2.0')
   putMemoPackage()
+  // crm-sales 0.3.0 adds crm-memo's type `memo`.
+  putBusinessPackage('crm-sales@0.3.0')
+  const sales3 = join(shelfDir, 'crm-sales@0.3.0')
+  writeFileSync(join(sales3, 'plugin.yaml'), readFileSync(join(sales3, 'plugin.yaml'), 'utf8').replace('types: [deal, customer]', 'types: [deal, customer, memo]'))
+  cpSync(join(shelfDir, 'crm-memo@0.1.0', 'types', 'memo.md'), join(sales3, 'types', 'memo.md'))
 
   const dbModule = await import('../../src/db')
   dbModule.initDatabase()
@@ -223,6 +228,18 @@ describe('SERVERCORE-4: a plugin change writes only its own fields, and only on 
     expect(row(c.co, 'crm-hub').managed_since).toBe(before.managed_since)
   })
 
+  it('an admin turning a connector off while its version change is checked: the stop stays, the change is refused', async () => {
+    const c = await company()
+    await connectorOn(c)
+    const at = points.held('stop-file')
+    const changing = held.install(c.owner, 'crm-hub', { version: '0.2.0', keyId: c.key })
+    await at.arrived
+    expect((await services.plugins.setEnabled(c.admin, 'crm-hub', { enabled: false })).ok).toBe(true)
+    at.release()
+    expect(await changing).toMatchObject({ ok: false, kind: 'conflict', body: { code: 'PLUGIN_CHANGED' } })
+    expect(row(c.co, 'crm-hub')).toMatchObject({ version: '0.1.0', enabled: 0 })
+  })
+
   it('a business plugin turned on while a connector change is judged: refused, so its use of the connector does not stop', async () => {
     const c = await company()
     await connectorOn(c)
@@ -260,6 +277,19 @@ describe('SERVERCORE-4: a plugin change writes only its own fields, and only on 
     expect(historyActions(c.co, 'crm-sales')).not.toContain('enable')
     // Not turned on, so its types were not stored either.
     expect(db.prepare("SELECT COUNT(*) AS n FROM record_types WHERE company_id = ? AND source = 'plugin'").get(c.co).n).toBe(0)
+  })
+
+  it('a business plugin installed while another\'s version change is checked keeps its type: the version adding it is refused', async () => {
+    const c = await company()
+    expect((await services.plugins.install(c.owner, 'crm-sales', { version: '0.1.0', keyId: null })).ok).toBe(true)
+    const at = points.held('stop-file')
+    const changing = held.install(c.owner, 'crm-sales', { version: '0.3.0', keyId: null })
+    await at.arrived
+    // Judged against crm-sales 0.1.0 (no memo): crm-memo may own `memo`.
+    expect((await services.plugins.install(c.admin, 'crm-memo', { version: '0.1.0', keyId: null })).ok).toBe(true)
+    at.release()
+    expect(await changing).toMatchObject({ ok: false, kind: 'conflict', body: { code: 'TYPE_OWNED_ELSEWHERE' } })
+    expect(row(c.co, 'crm-sales').version).toBe('0.1.0')
   })
 
   it('two admins choosing the same version at once: both succeed, it is written once', async () => {
