@@ -71,6 +71,13 @@ export function developerAssetHostsShown(): boolean {
 export const BROWSER_DEVELOPER_PARTS_HELP =
   '開発用の設定です。サイトの決まりにない部品の読み込み先を、開発中のアプリでだけ足します（ふつうのアプリでは使いません）。1行に1つ書きます。'
 
+/**
+ * What an admin wrote before plan B stays stored and shown, read only, with 「前に書いたものを消す」: a
+ * current app ignores it, an app from before plan B still loads from it until it is updated.
+ */
+export const BROWSER_STORED_PARTS_NOTE =
+  '今のアプリでは使いません。更新していない古いアプリは、更新されるまでこの先からも部品を読み込みます。要らなければ消してください。'
+
 export const BROWSER_LOGIN_NOTE =
   'サイトへのログインは PC に保存されません。メンバーはアプリを起動し直すたびにログインし直します（AI が実行するコマンドからログイン情報を読まれないようにするためです）。'
 

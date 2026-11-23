@@ -395,3 +395,12 @@ export function browserWindowSite(site: BrowserSiteSetting, declared: readonly s
   }
   return { host: site.host, level: site.level, assetHosts }
 }
+
+/**
+ * Whether this app adds the company's free-text asset hosts (the developer setting, agent-browser.md
+ * "Asset hosts"): only an unpackaged (development) build **and** only when started with
+ * `ACB_BROWSER_DEVELOPER_ASSET_HOSTS=1`. A released app never does, whatever its environment says.
+ */
+export function developerAssetHostsOn(build: { packaged: boolean }, env: Readonly<Record<string, string | undefined>>): boolean {
+  return !build.packaged && env.ACB_BROWSER_DEVELOPER_ASSET_HOSTS === '1'
+}

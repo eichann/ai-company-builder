@@ -8,7 +8,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import type { BrowserSiteSetting } from '../../shared/core/browser-operation'
 import type { AgentPolicy } from '../../shared/types/agent-sandbox'
-import { browserWindowSite, decideWindowRequest, type BrowserWindowState } from '../shared/browser-operation'
+import { browserWindowSite, decideWindowRequest, developerAssetHostsOn, type BrowserWindowState } from '../shared/browser-operation'
 import { browserAssetHosts, createBrowserConnectors } from '../shared/browser-checkers'
 import { LSTEP_DECLARATION } from '../connectors/lstep/declaration'
 import { createBrowserController, type BrowserShell, type BrowserWindowSpec } from '../electron/features/browser/controller'
@@ -28,6 +28,14 @@ test('the window\'s asset hosts are the declaration\'s; the company\'s free-text
   // Only exact hosts, never the operated host, each once — also from a declaration handed in carelessly.
   assert.deepEqual(browserWindowSite(site, [HOST, 'Fonts.Gstatic.com', '*.gstatic.com', 'fonts.gstatic.com', 'fonts.gstatic.com', 'localhost'], false).assetHosts, ['fonts.gstatic.com'])
   assert.deepEqual(browserWindowSite({ ...site, assetHosts: [HOST, 'cdn.example.net'] }, [], true).assetHosts, ['cdn.example.net'])
+})
+
+test('only an unpackaged build started with the flag adds the company\'s list; a released app never does', () => {
+  const flag = { ACB_BROWSER_DEVELOPER_ASSET_HOSTS: '1' }
+  assert.equal(developerAssetHostsOn({ packaged: false }, flag), true)
+  assert.equal(developerAssetHostsOn({ packaged: true }, flag), false, 'a released app, even with the flag')
+  assert.equal(developerAssetHostsOn({ packaged: false }, {}), false)
+  assert.equal(developerAssetHostsOn({ packaged: false }, { ACB_BROWSER_DEVELOPER_ASSET_HOSTS: 'true' }), false)
 })
 
 function world(options: { assetHostsOf?: (host: string) => readonly string[]; developerAssetHosts?: boolean } = {}) {

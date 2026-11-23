@@ -108,6 +108,7 @@ import { createBrowserController } from './features/browser/controller'
 import { removeLeftoverBrowserPartitions } from './features/browser/leftovers'
 import { isMainFrameSender, registerBrowserIpc } from './features/browser/ipc'
 import { bundledAssetHosts, bundledLoginHelpers, wireBrowserPlans } from './features/browser/wire'
+import { developerAssetHostsOn } from '../shared/browser-operation'
 import { createThisPcSwitch } from './features/browser/ai-switch'
 import { BROWSER_AI_OPT_IN_FILE } from '../shared/browser-ai'
 import { lstepConnector } from '../connectors/lstep'
@@ -582,7 +583,7 @@ const browser = createBrowserController({
   // Where its pages load parts from (fonts, images): the same declaration's, never the company's free text —
   // a developer setting, honoured only by a development build started with ACB_BROWSER_DEVELOPER_ASSET_HOSTS=1.
   assetHostsOf: bundledAssetHosts([lstep.declaration]),
-  developerAssetHosts: !app.isPackaged && process.env.ACB_BROWSER_DEVELOPER_ASSET_HOSTS === '1',
+  developerAssetHosts: developerAssetHostsOn({ packaged: app.isPackaged }, process.env),
   userId: session.userId,
   onChanged: companyId => appWindow.send('browser:changed', { companyId }),
 })

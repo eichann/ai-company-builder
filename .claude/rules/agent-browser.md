@@ -590,11 +590,13 @@ typed there broke the login, #768).
 - **The company's list is a developer setting** (kept, never deleted; data already stored keeps its
   shape): `BrowserSiteSetting.assetHosts` is still validated, stored, sent in the policy and saved back
   unchanged by the admin page. The app adds it to the declaration's only when **both** `!app.isPackaged`
-  **and** `ACB_BROWSER_DEVELOPER_ASSET_HOSTS=1` (`main.ts` → `developerAssetHosts`): a released app never
-  does, whatever is stored. The admin page shows the field only in a console built with
-  `NEXT_PUBLIC_ACB_BROWSER_DEVELOPER=1` (`developerAssetHostsShown`; inlined at build time, the production
-  image does not set it); otherwise it says where the hosts come from (`BROWSER_PARTS_NOTE`) and a save
-  sends the stored list back as it was. The server API still accepts the list from any owner / admin (no
+  **and** `ACB_BROWSER_DEVELOPER_ASSET_HOSTS=1` (`developerAssetHostsOn`, composed in `main.ts` →
+  `developerAssetHosts`): a released app never does, whatever is stored. The admin page shows the field
+  only in a console built with `NEXT_PUBLIC_ACB_BROWSER_DEVELOPER=1` (`developerAssetHostsShown`; inlined at
+  build time, the production image does not set it); otherwise it says where the hosts come from
+  (`BROWSER_PARTS_NOTE`), shows a site's stored list read only (「画面の部品を取る先（前に書いたもの）」,
+  `BROWSER_STORED_PARTS_NOTE`: unused by a current app, still read by an older one) with
+  「前に書いたものを消す」, and a save sends the stored list back as it was unless cleared there. The server API still accepts the list from any owner / admin (no
   released app of this version honours it). **A released app from before plan B** still applies the stored
   list (and, with its own core, still requires the declared hosts to be listed) until it is updated.
 - **The core** (`browserOperationsAllowed`): the setting on, the site listed, the level — no asset-host
@@ -617,13 +619,17 @@ typed there broke the login, #768).
   wherever they write the opt-in file).
 
 Tests: `client/tests/browser-asset-hosts.test.ts` (the window's site: the declaration's hosts, the company's
-list only for a development build, exact / not the operated host / once; the controller hands the window
+list only for a development build, exact / not the operated host / once; only an unpackaged build with
+the flag adds it (`developerAssetHostsOn`); the controller hands the window
 and `siteNow` the declaration's hosts and ignores a changed stored list; Lステップ 0.6.3's fonts and images
 load in both modes, as parts only, its trackers refused; hosts only from a carried and approved declaration —
 pending, retired, another text → none), `browser-window.test.ts` (a development build's list reaches an open
 window), `server/tests/unit/plugin-browser-declaration.test.ts` (a site listing none of the declared hosts
 runs its types; `asset_hosts` exact and ≤ 10), `admin/tests/agent-browser.test.tsx` (no address field
-without the developer console, a save keeps the stored list; the field's checks in the developer console).
+without the developer console, a save keeps the stored list, the stored list shown read only and cleared
+by 「前に書いたものを消す」; the field's checks in the developer console). Second layer kept on purpose:
+`bundledAssetHosts`' wiring through `approvedBundledDeclarations` (tested through its parts, as
+`bundledLoginHelpers`).
 Each guard mutation-checked.
 
 ## Plans, executions, permits and locks (PR 6a, 6b-2a: the server side; nothing in the app calls it yet)

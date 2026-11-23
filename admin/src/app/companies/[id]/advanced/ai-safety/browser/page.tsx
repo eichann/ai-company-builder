@@ -32,6 +32,7 @@ import {
   BROWSER_MODE_LABELS,
   BROWSER_NOT_YET_NOTE,
   BROWSER_DEVELOPER_PARTS_HELP,
+  BROWSER_STORED_PARTS_NOTE,
   BROWSER_PARTS_NOTE,
   BROWSER_SITES_HELP,
   BROWSER_SITE_LIMIT,
@@ -43,6 +44,7 @@ import {
   siteProblems,
   type SiteDraft,
 } from '@/lib/agent-browser'
+import { linesOf } from '@/lib/agent-sandbox'
 import { useCompany } from '@/lib/company-context'
 import { describeError } from '@/lib/errors'
 import { formatDateTime } from '@/lib/format'
@@ -194,6 +196,16 @@ function SettingsForm({ saved, onSaved }: { saved: AgentBrowserView; onSaved: (n
                     />
                     <span className="block text-small text-muted-foreground">{BROWSER_DEVELOPER_PARTS_HELP}</span>
                   </label>
+                )}
+                {!developer && linesOf(site.assetHosts).length > 0 && (
+                  <div role="group" aria-label={`サイト ${n} の前に書いた部品を取る先`} className="space-y-2 rounded-control border p-3 text-body">
+                    <p className="font-medium">画面の部品を取る先（前に書いたもの）</p>
+                    <p className="font-mono">{linesOf(site.assetHosts).join('、')}</p>
+                    <p className="text-small text-muted-foreground">{BROWSER_STORED_PARTS_NOTE}</p>
+                    <Button variant="outline" size="sm" onClick={() => edit(i, { assetHosts: '' })}>
+                      前に書いたものを消す
+                    </Button>
+                  </div>
                 )}
                 {problems[i].length > 0 && (
                   <ul className="text-sm text-destructive" role="alert">

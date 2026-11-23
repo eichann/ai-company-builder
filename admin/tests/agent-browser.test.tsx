@@ -86,6 +86,21 @@ describe('ブラウザ操作', () => {
     expect(calls.find((c) => c.method === 'PUT')!.body).toEqual({ mode: 'on', sites: [stored] })
   })
 
+  it('what an admin wrote before is shown read only, and 「前に書いたものを消す」 clears it (an older app still loads from it)', async () => {
+    const stored = { host: 'manager.linestep.net', level: 'write' as const, assetHosts: ['www.google.com'] }
+    const calls = stubApi(ownerCapabilities, {
+      [`PUT ${base}/agent-browser`]: (call) => ({ body: ok({ ...view, settings: call.body }) }),
+    }, { ...view, settings: { mode: 'on', sites: [stored] } })
+    renderInCompany(<AgentBrowserPage />)
+    const group = await screen.findByRole('group', { name: 'サイト 1 の前に書いた部品を取る先' })
+    expect(group).toHaveTextContent('www.google.com')
+    await userEvent.click(within(group).getByRole('button', { name: '前に書いたものを消す' }))
+    expect(screen.queryByRole('group', { name: 'サイト 1 の前に書いた部品を取る先' })).toBeNull()
+    await userEvent.click(screen.getByRole('button', { name: '保存' }))
+    await waitFor(() => expect(calls.some((c) => c.method === 'PUT')).toBe(true))
+    expect(calls.find((c) => c.method === 'PUT')!.body).toEqual({ mode: 'on', sites: [{ ...stored, assetHosts: [] }] })
+  })
+
   it('a wildcard parts host, or the operated host as a parts host, cannot be saved (the developer setting)', async () => {
     developerConsole()
     const calls = stubApi(ownerCapabilities)
