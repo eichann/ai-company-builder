@@ -67,6 +67,40 @@ actions:
 ---
 `
 const CLIP = RECORDING.replace('label: 収録', 'label: 切り抜き').replace('inverse: recordings', 'inverse: clips')
+/** A company's own まとまり that follows its 番組 (a 企画 of a programme). */
+const SERIES = `---
+label: 企画
+version: 1
+storage: server
+implements: [bundle]
+fields:
+  owner: { label: 責任者, kind: person, source: server }
+  purpose: { label: 目的, kind: text, source: server }
+links:
+  program: { label: 番組, target: program, cardinality: one, inverse: series }
+states: [active, done]
+final: [done]
+place_follows: program
+---
+`
+/** A business plugin's request that follows its 番組 (出演の依頼). */
+const BOOKING = `---
+label: 出演の依頼
+version: 1
+storage: server
+implements: [request]
+fields:
+  requested_by: { label: 頼んだ人, kind: person, source: server }
+  assignee: { label: 担当, kind: person, source: server }
+  next_actor: { label: 次に動く人, kind: person, source: server }
+  waiting_on: { label: 待っているもの, kind: text, source: server }
+  due: { label: 期限, kind: date, source: server }
+links:
+  program: { label: 番組, target: program, cardinality: one, inverse: bookings }
+states: [open]
+place_follows: program
+---
+`
 
 function ok<T>(r: { ok: true; value: T } | { ok: false; body: unknown }): T {
   if (!r.ok) throw new Error(JSON.stringify(r.body))
@@ -113,6 +147,8 @@ beforeEach(() => {
   store('program', PROGRAM, 'file')
   store('recording', RECORDING, 'plugin')
   store('clip', CLIP, 'file')
+  store('series', SERIES, 'file')
+  store('booking', BOOKING, 'plugin')
 })
 
 const program = (place: Record<string, unknown>, who = 'u-alice') => ok(engine.create(m(who), HUMAN, { type: 'program', title: '朝の番組', ...place })).record
@@ -219,6 +255,18 @@ describe('the AI making a business plugin’s follower without its parent', () =
     // With its parent: the parent's place, not the screen's.
     const p = program({ folder: '秘書室' })
     expect(ok(engine.createByAi(m('u-alice'), AI, { type: 'recording', title: '第3回', links: { program: p.id }, defaultFolder: '営業部' })).placed?.folder).toBe('秘書室')
+  })
+
+  it('a request type: the screen’s department with the member as its assignee, else refused', () => {
+    const r = ok(engine.createByAi(m('u-alice'), AI, { type: 'booking', title: '出演のお願い', defaultFolder: '営業部' }))
+    expect(r.placed).toEqual({ personal: false, folder: '営業部' })
+    expect(r.record.fields.assignee).toBe('u-alice')
+    expect(code(engine.createByAi(m('u-alice'), AI, { type: 'booking', title: '出演のお願い2' }))).toBe('PLACE_REQUIRED')
+  })
+
+  it('a まとまり that follows a parent takes the parent’s place, not the member’s department', () => {
+    const p = program({ folder: '秘書室' })
+    expect(ok(engine.createByAi(m('u-alice'), AI, { type: 'series', title: '特集', links: { program: p.id }, defaultFolder: '営業部' })).placed?.folder).toBe('秘書室')
   })
 })
 

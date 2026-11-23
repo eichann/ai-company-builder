@@ -49,9 +49,14 @@ export function creating(ctx: EngineContext) {
     const placeSaid = (rest.folder !== undefined && rest.folder !== null) || (rest.place !== undefined && rest.place !== null)
     const opened = open(member)
     const def = opened && typeof rest.type === 'string' ? currentTypes(opened.records).get(rest.type)?.definition : undefined
+    const links = rest.links
+    // Made for its parent (`place_follows`: a やること for its まとまり, a 収録 for its 番組): it takes the parent's
+    // place (create), never the consultation's department nor a new まとまり's default one.
+    const followLink = def ? followLinkName(def) : null
+    const forParent = followLink !== null && typeof links === 'object' && links !== null && (links as Record<string, unknown>)[followLink] != null
     // A new まとまり (案件・プロジェクト) belongs to the member's own department (所属) unless the AI names
     // one (records.md "A task and its 案件・プロジェクト"): the one on screen when it is theirs, else their first.
-    if (opened && def && def.implements.includes('bundle') && !placeSaid && rest.personal !== true) {
+    if (opened && def && def.implements.includes('bundle') && !placeSaid && !forParent && rest.personal !== true) {
       const handle = companyData.forCompany(member.companyId)
       const folder = defaultBundleFolder({
         departments: handle.departments.list().map(d => ({ id: d.id, folder: d.folder })),
@@ -61,15 +66,12 @@ export function creating(ctx: EngineContext) {
       // No department of the member's and the 全社 tab on screen: 全社, as the screen says.
       return folder !== null ? { ...rest, folder } : onCompanyTab ? { ...rest, place: 'company' } : rest
     }
-    const links = rest.links
-    // Made for its parent (`place_follows`: a やること for its まとまり, a 収録 for its 番組): it takes the parent's
-    // place (create), never the consultation's department.
-    const followLink = def ? followLinkName(def) : null
-    const forParent = followLink !== null && typeof links === 'object' && links !== null && (links as Record<string, unknown>)[followLink] != null
     // A business plugin's type that follows a parent, made without one (step 2b, the owner's open question; the
     // safe side): never owner-only (not for its type), so the screen's place — the department on screen, or the
-    // 全社 tab —, else nothing added and `create` refuses (`AI_PLACE_REQUIRED`) whatever the gate says.
-    if (opened && def && followLink !== null && !forParent && !placeSaid && rest.personal === undefined
+    // 全社 tab —, else nothing added and `create` refuses (`AI_PLACE_REQUIRED`) whatever the gate says. A request
+    // type gets the same from the request defaults below (with its assignee filled).
+    const isRequest = def?.implements.includes('request') === true && def.fields.assignee?.source === 'server'
+    if (opened && def && followLink !== null && !forParent && !placeSaid && rest.personal === undefined && !isRequest
       && opened.records.typeVersions().some(t => t.name === def.name && t.source === 'plugin')) {
       if (typeof defaultFolder === 'string' && defaultFolder.trim() !== '') return { ...rest, folder: defaultFolder }
       return onCompanyTab ? { ...rest, place: 'company' } : rest
