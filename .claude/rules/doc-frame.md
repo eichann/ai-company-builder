@@ -210,7 +210,7 @@ carrying a secret in its user name reached a local listener). Each document is s
 - **One owner of the view**: `docViewSession.ts` (`DocViewSession`, read with
   `useSyncExternalStore`, the area attached by a callback ref — no effect). The view is opened when
   the area appears and **closed when it goes**: another tab, 中身, the tab closed (a wide left tab
-  such as スキル over the middle only hides it, as an overlay does). Hidden tabs keep no document running (中身 included);
+  such as Skill over the middle only hides it, as an overlay does). Hidden tabs keep no document running (中身 included);
   coming back opens it afresh (from the top; from 中身, where the member was: above). An open answered after the area went closes its view.
 - **Placing**: every animation frame something may have changed (the area's size —
   `ResizeObserver`: window, B1 dividers, the bottom panel —, any DOM change — `MutationObserver` on

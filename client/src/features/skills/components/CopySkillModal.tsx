@@ -166,14 +166,14 @@ export function CopySkillModal({
     try {
       setCopyError(await onCopy(selectedSkill.skillPath, name.trim(), folderName))
     } catch {
-      setCopyError('スキルをコピーできませんでした。もう一度試してください。')
+      setCopyError('Skill をコピーできませんでした。もう一度試してください。')
     } finally {
       setIsCopying(false)
     }
   }
 
   return (
-    <Dialog onClose={onClose} label="他の部署からスキルをコピー" size="custom" padded={false} className="max-w-3xl overflow-hidden max-h-[80vh] flex flex-col">
+    <Dialog onClose={onClose} label="他の部署から Skill をコピー" size="custom" padded={false} className="max-w-3xl overflow-hidden max-h-[80vh] flex flex-col">
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 dark:border-zinc-800 flex-shrink-0">
           <div className="flex items-center gap-3">
@@ -185,10 +185,10 @@ export function CopySkillModal({
             </div>
             <div>
               <h2 className="text-sm font-semibold text-gray-900 dark:text-zinc-100">
-                他の部署からスキルをコピー
+                他の部署から Skill をコピー
               </h2>
               <p className="text-xs text-gray-500 dark:text-zinc-500">
-                公開スキルを選択してコピーできます
+                公開 Skill を選択してコピーできます
               </p>
             </div>
           </div>
@@ -235,7 +235,7 @@ export function CopySkillModal({
               ) : skills.length === 0 ? (
                 <div className="flex flex-col items-center justify-center py-8 text-gray-400 dark:text-zinc-500">
                   <Lightning size={24} className="mb-2" />
-                  <p className="text-sm">公開スキルがありません</p>
+                  <p className="text-sm">公開 Skill がありません</p>
                 </div>
               ) : (
                 <div className="p-2 space-y-0.5">
@@ -299,13 +299,13 @@ export function CopySkillModal({
                 <div className="flex-shrink-0 p-4 border-t border-gray-200 dark:border-zinc-800 space-y-3 bg-gray-50 dark:bg-zinc-900/50">
                   <div>
                     <label className="block text-xs font-medium text-gray-600 dark:text-zinc-400 mb-1">
-                      スキル名
+                      Skill の名前
                     </label>
                     <input
                       type="text"
                       value={name}
                       onChange={(e) => handleNameChange(e.target.value)}
-                      placeholder="コピー後のスキル名"
+                      placeholder="コピー後の Skill の名前"
                       className="w-full px-3 py-2 rounded-control bg-white dark:bg-zinc-800 border border-gray-200 dark:border-zinc-700 text-sm text-gray-900 dark:text-zinc-100 placeholder:text-gray-400 dark:placeholder:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-focus-ring"
                     />
                   </div>
@@ -348,7 +348,7 @@ export function CopySkillModal({
               <div className="flex-1 flex items-center justify-center text-gray-400 dark:text-zinc-600">
                 <div className="text-center">
                   <Lightning size={32} className="mx-auto mb-2" />
-                  <p className="text-sm">スキルを選択してください</p>
+                  <p className="text-sm">Skill を選択してください</p>
                 </div>
               </div>
             )}

@@ -195,6 +195,8 @@ export const CodeMirrorChatInput = memo(function CodeMirrorChatInput({
         <button
           onClick={handleSend}
           disabled={disabled}
+          aria-label="送る"
+          title="送る"
           className={`
             flex-shrink-0 w-9 h-9 rounded-control
             disabled:cursor-not-allowed

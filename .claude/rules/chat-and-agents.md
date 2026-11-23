@@ -302,7 +302,9 @@ Types and answer mapping: `client/shared/choice-prompt.ts`; glue: `agents/choice
   `seq` (their place among the reply's questions and instructions, live order). At the same `at`,
   `seq` decides; records without `seq` (older history) keep the stored order.
 - The dangerous-command approval banner (`tool-approval-request`) is a separate channel; both can
-  show at once. Pending cards survive tab switches; closing the tab cancels them.
+  show at once. Pending cards survive tab switches; closing the tab cancels them. The commands
+  Claude Code's hook asks about, with each one's plain words for the banner, are one list:
+  `client/shared/dangerous-commands.ts` (`chat-ui-and-history.md` "The approval banner").
 - Preview `client/tests/choice-prompt-ui.html` (`?theme=dark`, `?state=answered`); tests
   `client/tests/choice-prompt.test.ts`.
 

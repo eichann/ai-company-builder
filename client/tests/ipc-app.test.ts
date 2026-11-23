@@ -464,7 +464,7 @@ test('skills:makePrivate never marks a skill the company already has: shared her
   git(h.base, root, ['reset', '-q', '--hard', 'HEAD~1'])
   const exclude = () => { try { return fs.readFileSync(path.join(root, '.git', 'info', 'exclude'), 'utf-8') } catch { return '' } }
   const before = exclude()
-  const refused = { success: false, error: 'このスキルはすでに会社で共有されているため、非公開にはできません。', code: 'already_shared' }
+  const refused = { success: false, error: 'この Skill はすでに会社で共有されているため、非公開にはできません。', code: 'already_shared' }
   assert.deepEqual(await h.invoke('skills:makePrivate', root, '営業/.claude/skills/shared/'), refused)
   assert.deepEqual(await h.invoke('skills:makePrivate', root, '営業/.claude/skills/theirs/'), refused)
   assert.equal(exclude(), before)

@@ -48,7 +48,7 @@ export const SlashCommandDropdown = memo(function SlashCommandDropdown({
         {/* Header */}
         <div className="px-3 py-1.5 border-b border-gray-100 dark:border-zinc-700/50">
           <span className="text-[10px] font-medium text-gray-400 dark:text-zinc-500 uppercase tracking-wider">
-            スキル
+            Skill
           </span>
           {query && (
             <span className="text-[10px] text-gray-400 dark:text-zinc-500 ml-2">

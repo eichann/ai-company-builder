@@ -1,5 +1,5 @@
 // The left panel's tabs as a list of registered panels (owner decision D7):
-// today's three (スキル / ファイル / 検索) are entries like any other, so
+// today's three (Skill / ファイル / 検索) are entries like any other, so
 // a later extension adds a tab by adding an entry, not by editing the screen.
 import type { ReactNode } from 'react'
 import type { Icon } from '@phosphor-icons/react'
@@ -23,7 +23,7 @@ export interface LeftPanel {
   mount: 'always' | 'once-opened'
   /**
    * Takes the whole left side, covering the middle (open files and records), which stays mounted:
-   * スキル and a plugin's screen. Otherwise the panel is the narrow column beside the middle (plan A).
+   * Skill and a plugin's screen. Otherwise the panel is the narrow column beside the middle (plan A).
    */
   wide?: boolean
   /** Extra classes on the panel's container. */

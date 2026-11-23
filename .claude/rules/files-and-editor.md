@@ -239,7 +239,10 @@ the result, disable their buttons meanwhile and show the reason (`role="alert"`)
   preview pane is keyed by file so each file restores its own),
   `useEditorReview.ts` (the review of the active document); parts `EditorTabBar`,
   `EditorNotices` (閲覧のみ, deleted, external change, notice, error), `MarkdownPreview` (+
-  `hooks/usePreviewSearch.ts`), `MarkdownPreviewPane` (preview + review UI), `BinaryPreviews`
+  `hooks/usePreviewSearch.ts`; a file's `---` frontmatter is left out of the preview and its `name` /
+  `description` shown in a small quiet box above it — `markdownFrontmatter.ts`, owner 2026-11-23: a
+  SKILL.md's block read as a bold underlined heading; the source view is unchanged;
+  test `markdownFrontmatter.test.ts`), `MarkdownPreviewPane` (preview + review UI), `BinaryPreviews`
   (image, PDF), `HtmlDocumentPane` (an `.html` / `.htm` file's 見る: its document in a view of its
   own, `doc-frame.md` "The viewer (A2)"; 中身 is the code editor under the same ［見る｜中身］
   (`HtmlViewToggle`; back to 見る where the member was reading), ⌘⇧V switches, 見る by default and
@@ -259,7 +262,7 @@ the result, disable their buttons meanwhile and show the reason (`role="alert"`)
 - **Files and records share the middle's tabs** (plan A, 新しい画面のデモ 2026-11-02): the left
   tab (ファイル, やること, 探す…) is the narrow column of the `files` split and the middle
   (`TabbedEditorPanel`) is beside it for every left tab, so switching the left tab keeps what is
-  open; a `wide` panel (スキル, a plugin's screen; `leftPanels.ts`) covers the middle, which stays
+  open; a `wide` panel (Skill, a plugin's screen; `leftPanels.ts`) covers the middle, which stays
   mounted. A record is a tab under the key `acb-record:<id>` (`editorTabs.ts` `recordTabKey`; no
   path can have it), drawn with its kind's icon and title (`RecordTabLook`, told by the card once
   read: `onLoaded`), and its card is drawn by the screen (`renderRecord`); only file tabs load
@@ -496,7 +499,7 @@ Hidden there: 「やることにつなぐ…」 and, on a task card, ［＋フ�
 card or a task row is linked as the member's own (「あなただけ」); the card's ［Google Drive の
 ファイルをつなぐ］ is offered in every company (`tasks-ui.md` "Linking files", `records.md` "Drive and PC file links"). Also hidden: the file's side column
 (つながっているもの, 前の版), the 「大きすぎて共有されていません」 marks and 閲覧のみ. 探す and Cmd+P read the
-disk (`electron/plain-search.ts`). Skills show 「この PC だけのスキルです」 instead of 共有.
+disk (`electron/plain-search.ts`). Skills show 「この PC だけの Skill です」 instead of 共有.
 
 ## Search, Cmd+P and a file's history (`client/electron/git-search.ts`, `features/git-history/ipc.ts`)
 

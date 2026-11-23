@@ -15,7 +15,7 @@ export interface PaletteItem {
   path?: string
   recordId?: string
   record?: ThingRecord
-  /** A skill (its id in the スキル tab's list) or an AI consultation (its conversation id). */
+  /** A skill (its id in the Skill tab's list) or an AI consultation (its conversation id). */
   skillId?: string
   consultationId?: string
   /** One of the screen's own lists (「片づけたタブ」), opened by the screen. */
@@ -26,7 +26,7 @@ export interface PaletteItem {
   kindName: string
 }
 
-/** A skill the member has (the スキル tab's list and the company-wide ones behind slash commands). */
+/** A skill the member has (the Skill tab's list and the company-wide ones behind slash commands). */
 export interface PaletteSkill { id: string; name: string; /** Its folder name, the slash command. */ command: string; group?: string }
 /** A list of the screen's own found by its name or other words (「片づけたタブ」: タブ, 片づけ…). */
 export interface PaletteAction { id: string; title: string; words: readonly string[] }

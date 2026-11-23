@@ -50,12 +50,12 @@ export function AgentEnvSettings() {
         <SubHeading>AIに追加で渡す環境変数の名前</SubHeading>
         <p id={descriptionId} className="mt-1 text-body leading-relaxed text-zinc-500 dark:text-zinc-400">
           AI（Claude Code・Codex）には、動作に必要な環境変数（<code className={CODE}>PATH</code>・<code className={CODE}>HOME</code>・言語設定・プロキシなど）だけを渡しています。
-          スキルがほかの環境変数を必要とするときだけ、その名前を1行に1つ書いてください。値はこのPCの環境から読まれます。
+          Skill がほかの環境変数を必要とするときだけ、その名前を1行に1つ書いてください。値はこのPCの環境から読まれます。
         </p>
       </div>
       <Callout tone="warning" title="ここに書いた環境変数は、AIと、AIが実行するコマンドから見えるようになります">
         トークン・パスワード・APIキーのような名前（<code className={CODE}>…_TOKEN</code>・<code className={CODE}>…_SECRET</code>・<code className={CODE}>…_API_KEY</code>・<code className={CODE}>AWS_…</code> など）は追加できません。
-        スキルが使うAPIキーは「APIキー」（.env）に保存してください。
+        Skill が使うAPIキーは「APIキー」（.env）に保存してください。
       </Callout>
       <textarea
         id={inputId}

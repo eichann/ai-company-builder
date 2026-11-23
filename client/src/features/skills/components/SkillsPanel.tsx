@@ -26,7 +26,7 @@ interface Props {
   ruleClashes?: string[]
 }
 
-/** The スキル tab: the department's skills, and the chosen one's details beside them. */
+/** The Skill tab: the department's skills, and the chosen one's details beside them. */
 export function SkillsPanel(props: Props) {
   const { skills, isLoading, color, selectedSkill, selectedSkillId } = props
   return (

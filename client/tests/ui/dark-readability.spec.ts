@@ -120,7 +120,7 @@ for (const theme of ['dark', 'light'] as const) {
       await open(page, 'keep-work', theme, { view: 'skills' })
       await page.getByRole('button', { name: '新しいスキル' }).click()
       await page.getByPlaceholder('例: 提案書作成').fill('提案書')
-      await expectReadable(theme, page.getByRole('heading', { name: '新しいSKILLを作成' }), page.locator('label', { hasText: 'スキル名' }), page.getByPlaceholder('例: 提案書作成'))
+      await expectReadable(theme, page.getByRole('heading', { name: '新しい Skill を作成' }), page.locator('label', { hasText: 'Skill の名前' }), page.getByPlaceholder('例: 提案書作成'))
       // A step not reached yet: its number in the grey circle still reads.
       await expectReadable(theme, page.getByText('2', { exact: true }))
     })

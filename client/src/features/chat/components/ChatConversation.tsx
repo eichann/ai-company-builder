@@ -551,6 +551,7 @@ export const ChatPanelChat = memo(function ChatPanelChat({ tabId, isShown, depar
       {pendingApproval && (
         <ToolApprovalBanner
           request={pendingApproval}
+          rootPath={currentCompany?.rootPath}
           onRespond={respondToApproval}
         />
       )}

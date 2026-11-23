@@ -43,7 +43,7 @@ export function DepartmentBar({ departments, isLoading, selectedId, onSelect, un
         <div className="flex-shrink-0 flex items-center gap-2 px-6 py-2 bg-indigo-50 dark:bg-indigo-950/30 border-b border-indigo-100 dark:border-indigo-900/50 text-sm text-indigo-700 dark:text-indigo-300">
           <Info size={16} className="flex-shrink-0" />
           <span>
-            一部の部署がダウンロードされていません。ファイルツリーとAIチャットの対象はダウンロード済みの部署に限られます。
+            ダウンロードしていない部署があります。ファイルの一覧と AI への相談で扱えるのは、ダウンロードした部署だけです。
           </span>
           <button
             onClick={onOpenSettings}

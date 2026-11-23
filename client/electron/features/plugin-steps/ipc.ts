@@ -34,7 +34,7 @@ export interface PluginStepsIpcDeps {
  * to place the Skill and sync, which such a company cannot do (company Skills are not handed out
  * to it yet), so the member is told plainly instead.
  */
-export const STEP_SKILL_NOT_HERE = 'この手順は会社のスキルを使いますが、全社フォルダを使わない会社では、会社のスキルをまだ使えません。管理者に相談してください。'
+export const STEP_SKILL_NOT_HERE = 'この手順は会社の Skill を使いますが、全社フォルダを使わない会社では、会社の Skill をまだ使えません。管理者に相談してください。'
 
 const COMPANY = /^[A-Za-z0-9_-]{1,100}$/
 const ID = /^[a-z0-9][a-z0-9_-]{0,79}$/

@@ -26,9 +26,10 @@ const restart = (page: Page) => openPreview(page, 'skill-layout', { keep: '1' })
 
 const editorTab = (page: Page, path: string) => page.getByTitle(path, { exact: true })
 const deptTab = (page: Page, name: string) => page.getByRole('button', { name, exact: true }).first()
-const leftTab = (page: Page, name: 'スキル' | 'ファイル' | '探す') => page.getByRole('button', { name, exact: true })
+const leftTab = (page: Page, name: 'Skill' | 'ファイル' | '探す') => page.getByRole('button', { name, exact: true })
 // Shown only on the 全社 tab while some department is not downloaded (開発部 here).
-const companyWideBanner = (page: Page) => page.getByText('一部の部署がダウンロードされていません。', { exact: false })
+// In members' words (owner 2026-11-23): never 「ファイルツリー」 or 「AIチャット」.
+const companyWideBanner = (page: Page) => page.getByText('ダウンロードしていない部署があります。ファイルの一覧と AI への相談で扱えるのは、ダウンロードした部署だけです。', { exact: true })
 
 test.describe('open files and the left tab', () => {
   test('come back per company from the first frame, with no empty editor in between', async ({ page }) => {
@@ -74,7 +75,7 @@ test.describe('open files and the left tab', () => {
     await expect(searchBox(page)).toBeVisible()
   })
 
-  test('a saved left tab this version does not know opens スキル, and the rest of the saved state still restores', async ({ page }) => {
+  test('a saved left tab this version does not know opens Skill, and the rest of the saved state still restores', async ({ page }) => {
     await openPreview(page, 'skill-layout', { seed: JSON.stringify({ 'editor:demo': editorState([GUIDE], GUIDE, 'tasks') }) })
     await expect(page.getByRole('heading', { name: 'weekly-report' })).toBeVisible()
     await expect(searchBox(page), 'no other tab was opened').toHaveCount(0)
@@ -303,9 +304,9 @@ test.describe('panel dividers', () => {
     await expect(searchBox(page)).toBeVisible()
   })
 
-  test('with スキル chosen and the left column hidden, the middle shows and keeps 360 px beside the strip', async ({ page }) => {
+  test('with Skill chosen and the left column hidden, the middle shows and keeps 360 px beside the strip', async ({ page }) => {
     await openPreview(page, 'skill-layout')
-    await leftTab(page, 'スキル').click()
+    await leftTab(page, 'Skill').click()
     await toggleLeftShortcut(page)
     await expect(showLeft(page)).toBeVisible()
     await drag(page, chatDivider(page), -900)
@@ -569,11 +570,11 @@ test.describe('the bottom panel', () => {
     await expect.poll(() => height(page)).toBe(260)
   })
 
-  // Owner decision (b), 2026-11-22: a wide left tab (スキル) covers the middle, and the panel then spans the
+  // Owner decision (b), 2026-11-22: a wide left tab (Skill) covers the middle, and the panel then spans the
   // whole left side under it, so the inbox shows from every tab.
   test('under a wide tab it spans the whole left side; switching tabs keeps it open, its height and the tab\'s screen', async ({ page }) => {
     await open(page)
-    await leftTab(page, 'スキル').click()
+    await leftTab(page, 'Skill').click()
     const skillShown = page.getByText(/proposal|weekly-report/).first()
     await expect(skillShown).toBeVisible()
     expect(await pressJ(page)).toBe(true)
@@ -595,7 +596,7 @@ test.describe('the bottom panel', () => {
     expect(Math.round((await box(panel(page))).x)).toBe(Math.round((await box(treeDivider(page))).x) + 4)
     await expect.poll(() => height(page)).toBe(276)
     await expect(divider(page)).toHaveCount(1)
-    await leftTab(page, 'スキル').click()
+    await leftTab(page, 'Skill').click()
     await expect(panel(page)).toBeVisible()
     await expect.poll(() => height(page)).toBe(276)
     await pressJ(page)
@@ -680,7 +681,7 @@ test.describe('the bottom panel', () => {
       await pressJ(page)
       await expect(panel(page)).toBeVisible()
       if (process.env.INBOX_SHOTS) await page.screenshot({ path: `${process.env.INBOX_SHOTS}/inbox-screen-${theme}.png`, animations: 'disabled' })
-      await leftTab(page, 'スキル').click()
+      await leftTab(page, 'Skill').click()
       await expect(panel(page)).toBeVisible()
       if (process.env.INBOX_SHOTS) await page.screenshot({ path: `${process.env.INBOX_SHOTS}/inbox-wide-tab-${theme}.png`, animations: 'disabled' })
     })

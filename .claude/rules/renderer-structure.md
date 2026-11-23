@@ -234,7 +234,7 @@ These are the owner's decisions for the skeleton work (splitting `src/app/AppShe
 D7–D9, confirmed 2026-10-30).
 
 - **Panel registry (built, Phase 4-6).** The left panel's tabs are a list of registered panels,
-  today's three (スキル / ファイル / 検索; the 履歴 tab gave way to a file's 「前の版」) included: `src/features/workspace/leftPanels.ts`
+  today's three (Skill / ファイル / 検索; the 履歴 tab gave way to a file's 「前の版」) included: `src/features/workspace/leftPanels.ts`
   (`LeftPanel`: id, title, icon, optional badge count and visibility, mount policy, `onOpen`,
   `render`; `resolveLeftPanel`) drawn by `components/LeftPanelTabs.tsx`. Every tab
   always shows its name on one line (owner 2026-11-02: never icons only, never a name broken
@@ -274,13 +274,13 @@ D7–D9, confirmed 2026-10-30).
   60 px under its minimum) are hidden in `AppShell` state and **not saved** (every pane shows at the
   next start); a left tab asked for while the column is hidden (⌘⇧F, 今日のフォルダ, 「あなたの番」, a folder
   link, a click), even the one already chosen, shows it again (`showLeftTab`). With the column
-  hidden the middle shows even under a wide tab (スキル) and keeps its 360 px beside the strip. Today the tree has the screen's look only; the chat no
+  hidden the middle shows even under a wide tab (Skill) and keeps its 360 px beside the strip. Today the tree has the screen's look only; the chat no
   longer assumes one panel on screen (refactor 5-7, `chat-ui-and-history.md` 「Several chat
   panes」): a tab is `isShown` in its pane, the voice key and `chat.*` commands go to the pane
   used last, a consultation is open in one pane at most, tabs are remembered per pane. A second
   chat leaf in the tree is what is left.
   **The bottom panel (B2, 2026-11-22)** is the `middle` column split: the middle's tabs over the
-  panel, under the middle only (not the left column, not the chat). **While a wide left tab (スキル, a
+  panel, under the middle only (not the left column, not the chat). **While a wide left tab (Skill, a
   plugin's tab) or the not-downloaded prompt covers the middle, the panel spans the whole left side under it** (owner decision (b),
   2026-11-22: the inbox shows from every tab) — the same `middle` split drawn once more around the
   left side; both splits are always drawn and only one shows the panel, so switching tabs remounts

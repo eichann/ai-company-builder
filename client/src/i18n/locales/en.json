@@ -58,33 +58,33 @@
     "empty": "No skills",
     "emptyDescription": "No skills registered for this department yet.",
     "createNew": "Create new skill",
-    "addNew": "Add new SKILL",
+    "addNew": "Add new Skill",
     "addDescription": "Define what AI can do",
     "execute": "Run",
     "settings": "Settings",
     "count": "{{count}} items"
   },
   "skillDetail": {
-    "title": "SKILL Settings",
-    "executeButton": "Run this SKILL",
+    "title": "Skill Settings",
+    "executeButton": "Run this Skill",
     "overview": "Overview",
     "rules": "Rules",
     "references": "References",
     "scripts": "Scripts",
     "description": "Description",
-    "definitionFile": "SKILL Definition File",
+    "definitionFile": "Skill Definition File",
     "noRules": "No rule files",
     "noReferences": "No reference files",
     "noScripts": "No scripts"
   },
   "skillWizard": {
-    "title": "Create New SKILL",
+    "title": "Create New Skill",
     "subtitle": "Add a new skill to {{department}} department",
     "nameLabel": "Skill Name",
     "namePlaceholder": "e.g. Create Proposal",
     "descriptionLabel": "Description",
     "descriptionPlaceholder": "Briefly describe what this skill does",
-    "createButton": "Create SKILL",
+    "createButton": "Create Skill",
     "editHint": "After creation, you can edit SKILL.md to define AI behavior in detail."
   },
   "chat": {
@@ -126,7 +126,7 @@
     "statusStreaming": "Responding...",
     "statusError": "Error",
     "stop": "Stop",
-    "toolApprovalTitle": "Tool Execution Approval",
+    "toolApprovalTitle": "The AI asks before doing this",
     "toolApprovalAllow": "Allow",
     "toolApprovalDeny": "Deny"
   },

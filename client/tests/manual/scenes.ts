@@ -79,7 +79,7 @@ const SIGN_IN = { page: 'sign-in', viewport: { width: 760, height: 620 } } as co
 const CLOSE_LIST: SceneStep = { click: 'role=complementary[name="AIへの相談"] >> role=button[name="AIへの相談の一覧を閉じる"]' }
 const SALES_TAB = 'role=button[name="営業部" s]'
 const FILES_TAB = 'role=button[name="ファイル" s]'
-const SKILLS_TAB = 'role=button[name="スキル" s]'
+const SKILLS_TAB = 'role=button[name="Skill" s]'
 const SYNC = 'role=button[name="サーバーと同期" s]'
 const SYNC_WAITS = 'role=button[name="サーバーと同期（自動同期は止まっています）"]'
 const PREVIEW = 'role=button[name="変更を確認" s]'
@@ -321,7 +321,7 @@ export const scenes: Scene[] = [
     annotations: [
       { box: SYNC }, { marker: { target: SYNC, label: '1', at: 'below' } },
       { marker: { target: SALES_TAB, label: '2' } },
-      { box: 'xpath=//button[normalize-space()="スキル"]/..' }, { marker: { target: 'xpath=//button[normalize-space()="スキル"]/..', label: '3' } },
+      { box: 'xpath=//button[normalize-space()="Skill"]/..' }, { marker: { target: 'xpath=//button[normalize-space()="Skill"]/..', label: '3' } },
       { box: CHAT_PANE }, { marker: { target: CHAT_PANE, label: '4' } },
     ],
   },
@@ -365,7 +365,7 @@ export const scenes: Scene[] = [
   },
   {
     id: 'left-tab-skills',
-    about: 'The left pane’s スキル tab: 営業部’s Skill.',
+    about: 'The left pane’s Skill tab: 営業部’s Skill.',
     ...MAIN,
     steps: [CLOSE_LIST, { click: SALES_TAB }, { click: SKILLS_TAB }, { waitFor: 'text=提案書の骨子を作る' }],
     crop: { region: { x: 0, y: 100, width: 560, height: 400 } },

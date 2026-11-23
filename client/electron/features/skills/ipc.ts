@@ -120,10 +120,10 @@ export interface SkillsDeps {
 }
 
 /** skills:publish in a company without the shared folder. */
-export const SKILL_NOT_SHARED_HERE = 'この会社では、スキルはこの PC の中だけで使われます（ほかの人には共有されません）。'
+export const SKILL_NOT_SHARED_HERE = 'この会社では、Skill はこの PC の中だけで使われます（ほかの人には共有されません）。'
 
 /** skills:makePrivate on a skill the company already has. */
-export const SKILL_ALREADY_SHARED = 'このスキルはすでに会社で共有されているため、非公開にはできません。'
+export const SKILL_ALREADY_SHARED = 'この Skill はすでに会社で共有されているため、非公開にはできません。'
 
 export interface SkillsFeature {
   /** A skill the AI (or anything else) created, changed or removed is scanned afresh by the next skills:list. */
