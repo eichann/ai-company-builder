@@ -1492,7 +1492,9 @@ and makes occurrences, PR3 the report and its やること, PR4 the plugin steps
   case —, labels one NFC line ≤ 40, ≤ 16 KB) — the caller's is replaced. A Skill that is not there → 409 `JOB_SKILL_MISSING`; no
   valid `decision.json` → 409 `JOB_SKILL_DECISION_MISSING`; a company without the shared folder → `JOB_SKILL_NOT_HERE`.
   Approval, acceptance and a resume check every pinned tree is still the current one (`skillPinned` → `JOB_SKILL_CHANGED`:
-  a changed Skill is a new version, a new consent and a new 受け取る, O5; `decision.json` is inside the tree).
+  a changed Skill is a new version, a new consent and a new 受け取る, O5; `decision.json` is inside the tree), **as the
+  responsible person reads it** (as for a shelf Skill, independent review): a Skill at a place they do not read answers
+  `JOB_SKILL_MISSING` whether it changed or not, so the answer never tells them anything about it.
 - **The consent** (§2-6, T8): `jobConsentCanonical` of schema 5 is who, `run`, `placement`, `grant` (with the Skills read),
   the whole `trigger` (words, causes and their rule, unit, guards), the `check` and `decision` — any change asks for a new
   受け取る; the name does not. Schemas 1–4 consent byte for byte what they did (sha256 pinned in the test).

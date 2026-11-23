@@ -35,6 +35,7 @@ vi.mock('../../src/lib/auth', () => ({
 import { Hono } from 'hono'
 import { db, initDatabase } from '../../src/db'
 import { companiesRoute } from '../../src/routes/companies'
+import { permissionRulesRoute } from '../../src/routes/permission-rules'
 import { services } from '../../src/composition'
 import { createJobService } from '../../src/services/jobs'
 import { sqliteCompanyData } from '../../src/adapters/sqlite/company-data'
@@ -50,6 +51,7 @@ vi.setConfig({ testTimeout: 60_000, hookTimeout: 120_000 })
 
 const app = new Hono()
 app.route('/api/companies', companiesRoute)
+app.route('/api/companies/:companyId', permissionRulesRoute)
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Json = any
@@ -354,6 +356,29 @@ describe('a changed Skill is a new version and a new consent (O5, T8)', () => {
     expect(updated.changed).toBe(true)
     expect(versionOf(job, 2).consent_fingerprint).not.toBe(versionOf(job, 1).consent_fingerprint)
     expect(updated.latestConsentAccepted).toBe(false)
+  })
+})
+
+describe('a Skill the responsible person cannot read tells them nothing about it (independent review)', () => {
+  it('changed or not, an unreadable department Skill answers as missing at acceptance and resume', async () => {
+    const job = await made()
+    ok(await jobs.approve(owner(), job, { version: 1 }, READS))
+    db.prepare('INSERT OR IGNORE INTO departments (id, company_id, name, folder, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)').run(`d-${CO}-sales`, CO, DEPT, DEPT, at(), at())
+    currentUser.id = 'sw-owner'
+    const put = await app.request(`/api/companies/${CO}/permissions/scopes/by-path`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path: DEPT, rules: [{ subjectType: 'everyone', canRead: false, canWrite: false }, { subjectType: 'user', subjectId: 'sw-bob', canRead: true, canWrite: true }] }),
+    })
+    expect(put.status).toBe(200)
+    try {
+      expect(codeOf(await jobs.accept(alice(), job, { version: 1 }, READS, true))).toBe('JOB_SKILL_MISSING')
+      putSkills({ original: '# 提案書（直した）\n' })
+      expect(codeOf(await jobs.accept(alice(), job, { version: 1 }, READS, true))).toBe('JOB_SKILL_MISSING')
+    } finally {
+      db.prepare('DELETE FROM scope_rules WHERE company_id = ? AND scope_id IN (SELECT id FROM scopes WHERE company_id = ? AND path = ?)').run(CO, CO, DEPT)
+    }
+    // Readable again, the change is said as such.
+    expect(codeOf(await jobs.accept(alice(), job, { version: 1 }, READS, true))).toBe('JOB_SKILL_CHANGED')
   })
 })
 

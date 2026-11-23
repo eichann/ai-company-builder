@@ -19,7 +19,7 @@
  *   (notice `job_paused`), in the same transaction as the change.
  */
 import {
-  JOB_ACCEPT_SEPARATELY, JOB_ACTOR, JOB_NEEDS_NEWER_SCREEN, JOB_PROPOSAL_SCHEMA, JOB_SCHEMAS, JOB_SET_WATCH_SCHEMA, JOB_SYSTEM_PAUSE_REASONS, isJobId, isRecordTrigger, isSetTrigger, isTimeTrigger, storedJobDefinition, jobConsentCanonical, jobDefinitionCanonical, jobDefinitionPaths, jobDeliveryLabel, jobPinnedDepartmentSkills, jobSetWatchOpened, newJobId, parseJobAcceptedPlace,
+  JOB_ACCEPT_SEPARATELY, JOB_ACTOR, JOB_NEEDS_NEWER_SCREEN, JOB_PROPOSAL_SCHEMA, JOB_SCHEMAS, JOB_SET_WATCH_SCHEMA, JOB_SYSTEM_PAUSE_REASONS, isJobId, isRecordTrigger, isSetTrigger, isTimeTrigger, storedJobDefinition, jobConsentCanonical, jobDefinitionCanonical, jobDefinitionPaths, jobDeliveryLabel, departmentSkillPath, jobPinnedDepartmentSkills, jobSetWatchOpened, newJobId, parseJobAcceptedPlace,
   parseJobDecisionFile, parseJobDefinition, type JobDefinition, type JobDeliveryPlace, type JobPauseReason,
 } from '../../shared/core/jobs'
 import type { JobList, JobOccurrenceView, JobState, JobVersionView, JobView, JobWaiting } from '../../shared/types/jobs'
@@ -319,7 +319,12 @@ export function createJobService(deps: JobServiceDeps) {
       // A set watch (schema 5): the Skill it runs and every Skill it reads, each still at its pinned tree (a changed Skill is
       // a new version to approve and accept, O5 — the decision.json is inside the tree, so its reasons are pinned with it).
       if (!deps.hasCompanyFolder(companyId)) return SKILL_NOT_HERE()
+      // As the responsible person reads them (as for a shelf Skill): a Skill at a place they do not read is not there for
+      // them — one answer whether it changed or not, so the answer never tells them about a Skill they cannot read.
+      const role = memberships.roleOf(companyId, definition.actingUser)
+      const reader = role === null ? null : recordReader({ companyId, userId: definition.actingUser, role }, companyData.forCompany(companyId).scopes.listWithRules())
       for (const pin of jobPinnedDepartmentSkills(definition)) {
+        if (!reader?.file(departmentSkillPath(pin))) return DEPARTMENT_SKILL_MISSING()
         const found = await deps.departmentSkill?.(companyId, pin.place, pin.skill)
         if (!found) return DEPARTMENT_SKILL_MISSING()
         if (found.tree !== pin.fingerprint) return SKILL_CHANGED()
