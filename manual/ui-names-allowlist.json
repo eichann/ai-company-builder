@@ -1,1 +1,4 @@
-{}
+{
+  "終える": "a プロジェクト's main button: the core type's action label in shared/core/core-types.ts (type definition text, not a TypeScript string), drawn by the record card's BundleActions",
+  "もう一度始める": "a finished プロジェクト's button: the core type's action label in shared/core/core-types.ts (type definition text, not a TypeScript string), drawn by the record card's BundleActions"
+}

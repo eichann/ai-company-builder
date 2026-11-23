@@ -28,8 +28,11 @@ import { installElectronAPI } from './ui/fixtures/electron-api'
 import { fakeDropLink } from './ui/fixtures/link-drop'
 
 const defs = new Map(coreTypeDefinitions().map(d => [d.name, d]))
-const people = { 'u-sato': '佐藤', 'u-abe': '阿部' }
 const params = new URLSearchParams(location.search)
+// `?manual=1`: the user manual's story (client/tests/manual/scenes.ts, chapters 22 and 25): the member is 山田さん of 営業部
+// (the same ids, other names); the プロジェクト 「A社 研修導入」 with its やること; the 来た連絡 from C社's 木村さん. Fictional data only.
+const MANUAL = params.get('manual') === '1'
+const people = MANUAL ? { 'u-sato': '山田', 'u-abe': '高橋' } : { 'u-sato': '佐藤', 'u-abe': '阿部' }
 const kind = params.get('record') ?? 'meeting'
 const rec = (id: string, type: string, title: string, state: string | null, fields: RecordSummary['fields'] = {}, summary = ''): RecordSummary =>
   ({ id, type, typeVersion: 1, title, summary, path: null, state, fields, version: 3, updatedAt: '2026-11-05T06:00:00.000Z' })
@@ -44,7 +47,7 @@ const meeting = rec('meeting-0000aa', 'meeting', 'A社 研修導入のお打ち�
 // It is the member's (u-sato): ［済んだ］ / ［取り込まない］ move it as the server would (owner FB #20); an end the
 // screen is told of (its tab and automatic consultations close, owner FB #29) is listed as `ended <id>`.
 let slack = rec('interaction-0000bb', 'interaction', '資料送付のお願い', 'unsure', {
-  channel: 'chat', occurred_at: '2026-11-05T17:30:00Z', counterpart_text: '山田 様（C社）', needs_reply: true, source_ref: 'slack:C0123ABCD:1730800000.123456', assignee: 'u-sato',
+  channel: 'chat', occurred_at: MANUAL ? '2026-11-19T08:30:00Z' : '2026-11-05T17:30:00Z', counterpart_text: MANUAL ? '木村 様（C社）' : '山田 様（C社）', needs_reply: true, source_ref: 'slack:C0123ABCD:1730800000.123456', assignee: 'u-sato',
 }, '先日の打ち合わせ資料を送ってほしいとのこと。')
 const slackBefore: RecordSummary[] = []
 const ME = 'u-sato'
@@ -58,15 +61,22 @@ const replyDef = params.get('type') === 'v4'
 const ownerParam = params.get('owner')
 // `&purpose=url`: なんのため is one long URL (FB #36: it ran into 進み具合).
 const LONG_URL = 'https://docs.google.com/document/d/1AbCdEfGhIjKlMnOpQrStUvWxYz0123456789abcdefghijklmnopqrstuvwxyz/edit?tab=t.0#heading=h.abcdefghijkl'
-let project = rec('project-0000p1', 'project', '新人研修の見直し', 'active', {
+let project = rec('project-0000p1', 'project', MANUAL ? 'A社 研修導入' : '新人研修の見直し', 'active', {
   ...(ownerParam === 'none' ? {} : { owner: ownerParam === 'other' ? 'u-abe' : ME }),
-  purpose: params.get('purpose') === 'url' ? `資料：${LONG_URL}` : '研修を3日に縮める', due: '2026-12-01',
+  purpose: params.get('purpose') === 'url' ? `資料：${LONG_URL}` : MANUAL ? 'A社の新人研修を4月から始められるようにする' : '研修を3日に縮める', due: MANUAL ? '2026-12-18' : '2026-12-01',
 })
+// `?manual=1`: the プロジェクト's やること, one in each place.
+const projectTasks = MANUAL ? [
+  rec('task-0000m1', 'task', 'お礼メールを確かめて送る', 'todo', { assignee: 'u-sato', due: '2026-11-20T17:00' }),
+  rec('task-0000m2', 'task', '日程の候補を探す', 'preparing', { assignee: 'u-sato' }),
+  rec('task-0000m3', 'task', 'セキュリティ資料を送る', 'awaiting_acceptance', { assignee: 'u-abe', requested_by: 'u-sato', due: '2026-11-24' }),
+  rec('task-0000m4', 'task', '見積を出す', 'done', { assignee: 'u-sato' }),
+] : []
 const projectBefore: RecordSummary[] = []
 const driveMode = params.get('drive') !== null
 const projectCard = () => {
   const actions = bundleActionsOf(defs.get('project'), project.state, project.fields, ME, people)
-  return { record: view(project), version: project.version, detail: { ...bundleDetailOf(project, [], ME, people), ...(actions ? { actions } : {}) }, fields: [], history: [], links: [], viewers: { kind: 'department' as const, text: '営業部のみんな', count: 4 },
+  return { record: view(project), version: project.version, detail: { ...bundleDetailOf(project, projectTasks, ME, people), ...(actions ? { actions } : {}) }, fields: [], history: [], links: projectTasks.map(t => ({ label: 'プロジェクト', record: view(t) })), viewers: { kind: 'department' as const, text: '営業部のみんな', count: 4 },
     ...(driveMode ? { driveLink: true as const, driveFiles: [{ fileId: '1ProjDocMine0001', mine: true, name: '研修の進め方（作業中）' }, { fileId: '1ProjDocOther001', mine: false, name: null }] } : {}) }
 }
 const replyCard = () => ({ record: view(reply), version: reply.version, detail: recordDetailOf(reply, people, ME, replyDef) ?? undefined, fields: [], history: [], links: [], viewers: { kind: 'only-you' as const, text: 'あなただけ', count: 1 } })
@@ -191,12 +201,12 @@ function Preview() {
     <main className="min-h-screen bg-white text-gray-900">
       <pre id="opened" className="text-[10px]" />
       <RecordCard companyId="co-preview" rootPath="/Users/me/company" recordId={kind === 'reply' ? reply.id : kind === 'project' ? project.id : record.id}
-        renderSource={r => (r.type === 'interaction' ? <div data-testid="thread">スレッドの前後と返事の下書き：{r.title}</div> : null)}
+        renderSource={r => (r.type === 'interaction' && !MANUAL ? <div data-testid="thread">スレッドの前後と返事の下書き：{r.title}</div> : null)}
         renderApproval={id => <div data-testid="approval">承認のお願いのカード：{id}</div>}
         consultations={params.get('consult') === 'none' ? [] : [{ sessionId: 's-1', title: 'A社 打ち合わせのあと', updatedAt: '2026-11-05T07:00:00.000Z' }]}
         onConsult={(r, fresh) => { opened.push(`consult ${r.id} ${fresh}`); document.getElementById('opened')!.textContent = opened.join('\n') }}
         onEnded={id => say(`ended ${id}`)}
-        renderBundleField={f => (realField
+        renderBundleField={f => (realField || MANUAL
           ? renderRecordBundleField('co-preview', f, { type: 'project', name: 'プロジェクト', source: 'core' }, '営業部')
           : <div data-testid="bundle-field">{f.bundle?.title ?? 'なし'}・{f.removable ? '外せる' : '外せない'}</div>)} />
     </main>

@@ -1,0 +1,30 @@
+<!-- The manual's chapter 20: asking someone through ACB — 頼む, 引き受け待ち, 引き受ける or 受けられない,
+     完了, and the notice back. Shot by shoot.spec.ts (scenes.ts). -->
+<style>
+  body { margin: 0; background: var(--color-surface); font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Hiragino Kaku Gothic ProN", sans-serif; color: var(--color-text); }
+  #diagram { width: 960px; padding: 28px 30px 30px; box-sizing: border-box; background: var(--color-surface); }
+  .row { display: flex; align-items: stretch; }
+  .box { flex: 1; padding: 12px 10px 14px; border-radius: 14px; border: 2px solid var(--color-border-strong); background: var(--color-bg); text-align: center; }
+  .box .who { display: inline-block; padding: 2px 10px; border-radius: 9999px; font-size: 12px; font-weight: 700; background: var(--color-surface-sunken); color: var(--color-text-muted); }
+  .box.you .who { background: var(--color-primary); color: var(--color-on-primary); }
+  .box .title { margin-top: 8px; font-size: 16px; font-weight: 700; }
+  .box .what { margin-top: 6px; font-size: 13px; line-height: 1.6; color: var(--color-text-muted); }
+  .box.you { border-color: var(--color-primary); background: var(--color-selected-bg); }
+  .arrow { width: 28px; display: flex; align-items: center; justify-content: center; }
+  .ask { margin-top: 14px; display: flex; gap: 12px; align-items: center; padding: 12px 16px; border-radius: 10px; background: var(--color-warning-bg); border: 1px solid var(--color-warning-border); color: var(--color-warning-text); font-size: 14px; line-height: 1.6; }
+  .ask b { white-space: nowrap; }
+  .note { margin-top: 12px; padding: 12px 16px; border-radius: 10px; background: var(--color-success-bg); border: 1px solid var(--color-success-border); color: var(--color-success-text); font-size: 14px; font-weight: 700; text-align: center; }
+</style>
+<div id="diagram">
+  <div class="row">
+    <div class="box you"><span class="who">山田さん</span><div class="title">1 頼む</div><div class="what">1行に書いて<br>［担当］で<br>高橋さんを選ぶ</div></div>
+    <div class="arrow"><svg width="22" height="20" viewBox="0 0 22 20" aria-hidden="true"><path d="M1 10 H12" stroke="var(--color-primary)" stroke-width="3" /><path d="M10 3 L20 10 L10 17 z" fill="var(--color-primary)" /></svg></div>
+    <div class="box"><span class="who">高橋さん</span><div class="title">2 引き受ける</div><div class="what">「引き受け待ち」の<br>［引き受ける］を押す</div></div>
+    <div class="arrow"><svg width="22" height="20" viewBox="0 0 22 20" aria-hidden="true"><path d="M1 10 H12" stroke="var(--color-primary)" stroke-width="3" /><path d="M10 3 L20 10 L10 17 z" fill="var(--color-primary)" /></svg></div>
+    <div class="box"><span class="who">高橋さん</span><div class="title">3 仕事をする</div><div class="what">終わったら<br>［完了にする］</div></div>
+    <div class="arrow"><svg width="22" height="20" viewBox="0 0 22 20" aria-hidden="true"><path d="M1 10 H12" stroke="var(--color-primary)" stroke-width="3" /><path d="M10 3 L20 10 L10 17 z" fill="var(--color-primary)" /></svg></div>
+    <div class="box you"><span class="who">山田さん</span><div class="title">4 知らせが届く</div><div class="what">［受け箱］の<br>「できた・未確認」に<br>「完了にしました」</div></div>
+  </div>
+  <div class="ask"><b>受けられないとき</b><span>高橋さんはカードの「…」から、理由を書いて頼んだ人に返します。やることは山田さんの番に戻り、理由も届きます。</span></div>
+  <div class="note">頼んでから終わるまで、山田さんの一覧の「ほかの人の番」に残ります。忘れません。</div>
+</div>

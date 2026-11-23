@@ -2,9 +2,10 @@
 // manual's text cites as ［名前］ still exists in the app's screens, so renaming a control in the app
 // fails CI instead of leaving members looking for a button that is no longer there.
 //
-// A name counts as present when the screens' source (client/src, the questions sync asks in the Mac's
-// own dialogs (client/electron/sync), the admin console's pages for the invitation page, the
-// Japanese locale in client/src/i18n) holds it as one whole piece of text: a string literal, JSX
+// A name counts as present when the screens' source (client/src, the words the screens take from
+// client/shared (thing-words.ts' buttons such as 「引き受ける」「済んだ」, the mail card's 「直す」), the questions
+// sync asks in the Mac's own dialogs (client/electron/sync), the admin console's pages for the invitation page,
+// the Japanese locale in client/src/i18n) holds it as one whole piece of text: a string literal, JSX
 // text or a JSON value — not merely inside a longer sentence. A name the manual shows with a count
 // (［選んだ部署をダウンロード（1）］) matches the source's template (`…（${n}）`). Names on screens
 // this repository does not draw are listed in manual/ui-names-allowlist.json with their reason.
@@ -25,7 +26,9 @@ const ALLOWLIST = path.join(ROOT, 'manual/ui-names-allowlist.json')
 // .github/scripts/changed-areas.sh's CLIENT, so changing it runs this test.
 // Sync's questions (「同期をやめる（おすすめ）」…) are native dialogs the main process draws
 // (client/electron/sync/message-box-dialog.ts): the manual's chapter 9 cites their buttons.
-const SOURCES = ['client/src', 'client/electron/sync', 'admin/src/app/invite']
+// The words module client/shared/thing-words.ts (and the other client/shared modules the screens read their
+// labels from) holds the buttons of the 2日目 chapters (17–27): 「引き受ける」「済んだ」「終わりにする」….
+const SOURCES = ['client/src', 'client/shared', 'client/electron/sync', 'admin/src/app/invite']
 
 /** The ［…］ names a manual page cites (full-width brackets are the manual's convention for controls). */
 export function citedNames(markdown: string): string[] {

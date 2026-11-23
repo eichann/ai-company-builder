@@ -28,14 +28,27 @@ import type { LedgerEntry } from '../../shared/core/record-ledger'
 import type { AiRunView } from '../../shared/types/ai-runs'
 import type { RecordSummary } from '../../shared/types/records'
 import { taskCardOf } from '../shared/task-card'
+import { PreparedMailCard } from '../src/features/chat/components/PreparedMailCard'
+import type { OutboundMailView } from '../../shared/types/outbound-mail'
 import { installElectronAPI } from './ui/fixtures/electron-api'
 import { commands } from '../src/shared/commands/commands'
 import { fakeDropLink } from './ui/fixtures/link-drop'
 
 const defs = new Map(coreTypeDefinitions().map(d => [d.name, d]))
 const ME = 'u-sato'
-const people = { [ME]: '佐藤', 'u-abe': '阿部', 'u-tanaka': '田中' }
 const params = new URLSearchParams(location.search)
+// `?manual=1`: the user manual's story (client/tests/manual/scenes.ts, chapters 18–24): the same cards seen by 山田さん of
+// 営業部 (the member), asked by 高橋さん, with 佐藤さん; 営業部 makes プロジェクト; the AI's mail draft drawn by the real card.
+// Fictional data only.
+const MANUAL = params.get('manual') === '1'
+/** A person's name as this page shows it (the manual renames the same people). */
+const nm = (name: string) => (MANUAL ? ({ 佐藤: '山田', 阿部: '高橋', 田中: '佐藤' } as Record<string, string>)[name] ?? name : name)
+const people = { [ME]: nm('佐藤'), 'u-abe': nm('阿部'), 'u-tanaka': nm('田中') }
+// `&own=1` (with manual=1): a task 山田さん added for himself (「あなただけ」, ［部署に出す］); otherwise one 高橋さん asked of him,
+// seen by 営業部.
+const OWN = MANUAL && params.get('own') === '1'
+const BUNDLE_TYPE = MANUAL ? 'project' : 'deal'
+const BUNDLE_TITLE = MANUAL ? 'A社 研修導入' : 'A社 問い合わせ対応の効率化'
 // `?theme=dark` for dark mode (the primary-action spec reads the main action in both themes).
 if (params.get('theme') === 'dark') document.documentElement.classList.add('dark')
 const done = params.get('task') === 'done'
@@ -74,13 +87,18 @@ const typedLinks = [
 ]
 const rec = (id: string, type: string, title: string, state: string | null, fields: RecordSummary['fields'] = {}, extra: Partial<RecordSummary> = {}): RecordSummary =>
   ({ id, type, typeVersion: 1, title, summary: '', path: null, state, fields, version: 3, updatedAt: '2026-11-05T06:00:00.000Z', ...extra })
-const task = rec('task-0000aa', 'task', 'A社 見積書を 150万円 で作り直す', done ? 'done' : 'todo', {
-  // 終わったら：確かめてから (task version 9): the assignee completes only by naming whose OK.
-  assignee: ME, requested_by: 'u-abe', when_done: 'check', due: '2026-11-07T17:00', tags: '["営業","見積"]',
-  prep_summary: '前回の見積と議事録を確かめ、窓口を3つにした下書きを作りました。',
-  ...(done ? { ok_by: 'u-abe', ok_note: '電話で' } : {}),
-}, shared ? {} : { personal: true })
+const task = OWN ? rec('task-0000aa', 'task', '見積を直す', 'todo', { assignee: ME, requested_by: ME, when_done: 'notify', due: '2026-11-23T15:00', tags: '["営業"]' }, { personal: true })
+  : rec('task-0000aa', 'task', 'A社 見積書を 150万円 で作り直す', done ? 'done' : 'todo', {
+    // 終わったら：確かめてから (task version 9): the assignee completes only by naming whose OK.
+    assignee: ME, requested_by: 'u-abe', when_done: 'check', due: MANUAL ? '2026-11-24T17:00' : '2026-11-07T17:00', tags: '["営業","見積"]',
+    prep_summary: '前回の見積と議事録を確かめ、窓口を3つにした下書きを作りました。',
+    ...(done ? { ok_by: 'u-abe', ok_note: '電話で' } : {}),
+  }, shared || MANUAL ? {} : { personal: true })
 const entries = (conflict ? [{ version: 4, action: 'set_due', actorId: 'u-abe', actorKind: 'human', at: '2026-11-05T07:00:00.000Z', note: '', fromState: null, toState: null, changes: [{ field: 'due', before: '2026-11-07T17:00', after: '2026-11-08T12:00' }] }] : done ? [{ version: 4, action: 'complete', actorId: ME, actorKind: 'human', at: '2026-11-05T07:00:00.000Z', note: '', fromState: 'in_progress', toState: 'done', changes: [{ field: 'ok_by', before: null, after: 'u-abe' }, { field: 'ok_note', before: null, after: '電話で' }] }] : []) as unknown as LedgerEntry[]
+// `?manual=1`: the AI made it from the meeting, with the line it read there (「会議『…』から AI が作りました」 and ［根拠を見る］).
+const shownEntries = MANUAL && !OWN
+  ? [{ version: 1, action: 'create', actorId: 'ai', actorKind: 'ai', at: '2026-11-19T06:00:00.000Z', note: '「見積は150万円で作り直して、来週の火曜までにお送りします」（山田さんの発言）', fromState: null, toState: 'todo', changes: [] } as unknown as LedgerEntry, ...entries]
+  : entries
 const runs = [{ id: 'run-1', recordId: 'task-0000aa', needsPerson: true, label: '外への操作の結果が分かりません。相手先で確かめてから続きを進めます', operations: [{ key: 'mail-send-1', kind: 'outbound', state: 'unknown', ref: null, updatedAt: '' }] }] as unknown as AiRunView[]
 const meeting = rec('meeting-0000mm', 'meeting', 'A社 研修導入のお打ち合わせ', 'read', { summary_text: '窓口を3つに増やす方向で合意。' })
 const reviewCard = taskCardOf({
@@ -94,22 +112,22 @@ const reviewCard = taskCardOf({
   ], decisionChecks: {
     // The server's answer (decision version 6): the member decides the first (a meeting reader, no 責任者 who reads it);
     // the second waits for its 責任者; 阿部さん (a 責任者) cannot read this meeting.
-    'decision-000001': { may: { confirm: true, reject: true, retract: false }, responsible: [], cannotRead: ['u-abe'] },
+    'decision-000001': { may: { confirm: true, reject: true, retract: false }, responsible: [], cannotRead: MANUAL ? [] : ['u-abe'] },
     'decision-000002': { may: { confirm: false, reject: false, retract: false }, responsible: ['u-tanaka'], cannotRead: [] },
     'decision-000003': { may: { confirm: false, reject: false, retract: false }, responsible: [], cannotRead: [] },
   } },
 })
 const waitEntries = [
-  { version: 1, action: 'create', actorId: 'u-abe', actorKind: 'human', at: '2026-11-02T00:00:00.000Z', note: '', fromState: null, toState: 'todo', changes: [] },
-  { version: 2, action: 'wait', actorId: ME, actorKind: 'human', at: '2026-11-02T01:00:00.000Z', note: '', fromState: 'todo', toState: 'waiting', changes: [] },
-  ...(waitMode === 'back' ? [{ version: 3, action: 'wait_over', actorId: 'acb:clock', actorKind: 'external', actorSource: 'ACB の時計', at: '2026-11-06T15:00:00.000Z', note: '返事の見込み（11/6）を過ぎました', fromState: 'waiting', toState: 'todo', changes: [] }] : []),
+  { version: 1, action: 'create', actorId: 'u-abe', actorKind: 'human', at: MANUAL ? '2026-11-16T00:00:00.000Z' : '2026-11-02T00:00:00.000Z', note: '', fromState: null, toState: 'todo', changes: [] },
+  { version: 2, action: 'wait', actorId: ME, actorKind: 'human', at: MANUAL ? '2026-11-17T01:00:00.000Z' : '2026-11-02T01:00:00.000Z', note: '', fromState: 'todo', toState: 'waiting', changes: [] },
+  ...(waitMode === 'back' ? [{ version: 3, action: 'wait_over', actorId: 'acb:clock', actorKind: 'external', actorSource: 'ACB の時計', at: MANUAL ? '2026-11-19T15:00:00.000Z' : '2026-11-06T15:00:00.000Z', note: MANUAL ? '返事の見込み（11/19）を過ぎました' : '返事の見込み（11/6）を過ぎました', fromState: 'waiting', toState: 'todo', changes: [] }] : []),
 ] as unknown as LedgerEntry[]
 const waitCard = waitMode ? taskCardOf({
   me: ME, defs, def: defs.get('task'), people, runs: [], teamMode: waitMode !== 'todo-own', holidays: [],
   entries: plainTodo ? [] : waitEntries,
   detail: { record: rec('task-0000ww', 'task', 'A社 見積の回答をもらう', waitMode === 'waiting' ? 'waiting' : 'todo', {
-    assignee: ME, requested_by: waitMode === 'todo-own' ? ME : 'u-abe', due: '2026-11-13',
-    ...(plainTodo ? {} : { waiting_on: '先方からの返事', wait_until: '2026-11-06' }),
+    assignee: ME, requested_by: waitMode === 'todo-own' ? ME : 'u-abe', due: MANUAL ? '2026-11-27' : '2026-11-13',
+    ...(plainTodo ? {} : { waiting_on: '先方からの返事', wait_until: MANUAL ? '2026-11-19' : '2026-11-06' }),
   }), links: [] },
 }) : null
 // The menu decisions of 2026-11-03: a task the member asked, nobody holding it yet; or archived.
@@ -122,13 +140,13 @@ const menuCard = menuMode ? taskCardOf({
   detail: { record: rec('task-0000un', 'task', '展示会の備品をそろえる', menuMode === 'archived' ? 'cancelled' : 'todo', { requested_by: ME, when_done: 'notify', due: '2026-11-13' }), links: [] },
 }) : null
 const shownCard = menuCard ?? waitCard ?? (reviewing ? reviewCard : taskCardOf({
-  me: ME, defs, def: defs.get('task'), people, entries, runs: done ? [] : runs,
+  me: ME, defs, def: defs.get('task'), people, entries: shownEntries, runs: done || MANUAL ? [] : runs,
   ...(withFolders ? { cannotOpen: { '経理/月次': 2 } } : {}),
   detail: {
     record: task,
-    links: [
+    links: OWN ? [] : [
       { name: 'prepared', direction: 'out', record: rec('outbound_message-01', 'outbound_message', 'お礼メール', 'draft') },
-      ...(noBundle ? [] : [{ name: 'bundle', direction: 'out' as const, record: rec('deal-0001ab', 'deal', 'A社 問い合わせ対応の効率化', 'open') }]),
+      ...(noBundle ? [] : [{ name: 'bundle', direction: 'out' as const, record: rec(`${BUNDLE_TYPE}-0001ab`, BUNDLE_TYPE, BUNDLE_TITLE, MANUAL ? 'active' : 'open') }]),
       { name: 'tasks', direction: 'in', record: rec('decision-0002', 'decision', '今回だけ20%値引き', 'confirmed', { exception: true }, { exceptionNotice: '例外' }) },
       ...(noFolder ? typedLinks : [
         { name: 'files', direction: 'out' as const, path: '営業/見積書_v2.xlsx', broken: false },
@@ -138,12 +156,20 @@ const shownCard = menuCard ?? waitCard ?? (reviewing ? reviewCard : taskCardOf({
       { name: 'related', direction: 'out', record: rec('task-0000bb', 'task', 'スケジュール案を出す', 'todo') },
       // The server says `folder: true` for a folder on the shared branch (records.md "Folder links").
       ...(withFolders ? [{ name: 'files', direction: 'out' as const, path: '経理/月次', broken: false, folder: true as const }, { name: 'files', direction: 'out' as const, path: '総務', broken: false }] : []),
-      { name: 'meeting', direction: 'out', fixed: true, record: rec('meeting-0000cc', 'meeting', 'A社 打ち合わせ', 'read') },
+      { name: 'meeting', direction: 'out', fixed: true, record: rec('meeting-0000cc', 'meeting', 'A社 打ち合わせ', 'read', MANUAL ? { meeting_at: '2026-11-19T14:00' } : {}) },
       ...(withSource ? [{ name: 'interaction', direction: 'out' as const, fixed: true as const, record: rec('interaction-0000ii', 'interaction', 'Re: 見積のご相談', 'handled') }] : []),
     ],
   },
 }))
-const card = reviewing || waitCard || menuCard ? shownCard : { ...shownCard, viewers: { kind: 'only-you' as const, text: 'あなただけ', count: 1 } }
+const card = reviewing || waitCard || menuCard ? shownCard : { ...shownCard, viewers: MANUAL && !OWN ? { kind: 'department' as const, text: '営業部のみんな', count: 6 } : { kind: 'only-you' as const, text: 'あなただけ', count: 1 } }
+// `?manual=1`: the thank-you mail the AI prepared, as the real draft card reads it.
+const manualDraft: OutboundMailView = {
+  id: 'outbound_message-01', state: 'draft', version: 2, hash: `sha256:${'a1'.repeat(32)}`, channel: 'email', interactionId: null, from: 'yamada@kensho-a.example',
+  to: [{ ref: `r${'1'.repeat(24)}`, email: 'tamura@a-sha.example', name: '田村 様', source: 'calendar', firstTime: false }], cc: [],
+  subject: '本日のお打ち合わせのお礼', body: '田村様\n\n本日はお時間をいただき、ありがとうございました。\nお話しした見積は、来週までにお送りいたします。\n\n検証A社 営業部 山田\n',
+  bodyDeleted: false, linkCount: 0, meetingId: 'meeting-0000cc', bundleId: null, sentAt: null, providerMessageId: null,
+  lastChangedBy: 'ai', updatedAt: '2026-11-20T01:00:00Z', awaitReply: { expected: false, defaultUntil: '2026-11-25', chosenUntil: null },
+}
 const acted: string[] = []
 const show = (id: string, line: string) => { acted.push(line); document.getElementById(id)!.textContent = acted.join(',') }
 
@@ -162,21 +188,24 @@ installElectronAPI({
     return { success: true, recordId, entryVersion: input.expectedVersion + 1 }
   },
   unlinkRecordFromRecord: async (_c, recordId, input) => { show('acted', `unlink ${recordId} ${input.link}=${input.target}@${input.expectedVersion}`); return { success: true, recordId, entryVersion: input.expectedVersion + 1 } },
-  getBundleChoices: async () => ({ success: true, bundles: [{ id: 'deal-0001ab', title: 'A社 問い合わせ対応の効率化', typeLabel: '案件' }, { id: 'deal-0002cd', title: 'B社 新人研修', typeLabel: '案件' }] }),
+  getBundleChoices: async () => (MANUAL
+    ? { success: true, bundles: [{ id: 'project-0001ab', title: 'A社 研修導入', typeLabel: 'プロジェクト' }, { id: 'project-0002cd', title: 'B社 新人研修', typeLabel: 'プロジェクト' }] }
+    : { success: true, bundles: [{ id: 'deal-0001ab', title: 'A社 問い合わせ対応の効率化', typeLabel: '案件' }, { id: 'deal-0002cd', title: 'B社 新人研修', typeLabel: '案件' }] }),
+  getOutboundMail: async () => ({ success: true, draft: manualDraft }),
   // `?proposals=none`: a member the type's `who` does not let press (an older server's type, not the requester).
   getTaskProposals: async () => {
     const may = params.get('proposals') === 'none'
       ? { adopt: false, dismiss: false, proposeAgain: false, keepApart: false }
       : { adopt: true, dismiss: true, proposeAgain: true, keepApart: true }
-    return { success: true, readerId: ME, readerName: '佐藤', proposals: [
-      { id: 'task-0000p1', title: '見積を直す', state: 'proposed', version: 1, assignee: ME, assigneeName: '佐藤', due: '2026-11-07T17:00',
-        basis: '来週までに修正した見積をお送りします', addedBy: ME, addedByName: '佐藤', similarTo: null, may },
-      { id: 'task-0000p2', title: 'セキュリティ資料を送る', state: 'proposed', version: 1, assignee: 'u-abe', assigneeName: '阿部', due: null,
-        basis: 'セキュリティの資料もいただけますか', addedBy: 'u-abe', addedByName: '阿部', similarTo: null, may },
-      { id: 'task-0000p4', title: '見積を直して送る', state: 'proposed', version: 1, assignee: ME, assigneeName: '佐藤', due: null,
-        basis: '見積は金額を直してから送る', addedBy: 'u-abe', addedByName: '阿部', similarTo: { id: 'task-0000p1', title: '見積を直す' }, may },
-      { id: 'task-0000p3', title: '会食の店を探す', state: 'dismissed', version: 2, assignee: ME, assigneeName: '佐藤', due: null,
-        basis: null, addedBy: ME, addedByName: '佐藤', similarTo: null, may },
+    return { success: true, readerId: ME, readerName: nm('佐藤'), proposals: [
+      { id: 'task-0000p1', title: '見積を直す', state: 'proposed', version: 1, assignee: ME, assigneeName: nm('佐藤'), due: MANUAL ? '2026-11-24T17:00' : '2026-11-07T17:00',
+        basis: '来週までに修正した見積をお送りします', addedBy: ME, addedByName: nm('佐藤'), similarTo: null, may },
+      { id: 'task-0000p2', title: 'セキュリティ資料を送る', state: 'proposed', version: 1, assignee: 'u-abe', assigneeName: nm('阿部'), due: null,
+        basis: 'セキュリティの資料もいただけますか', addedBy: 'u-abe', addedByName: nm('阿部'), similarTo: null, may },
+      { id: 'task-0000p4', title: '見積を直して送る', state: 'proposed', version: 1, assignee: ME, assigneeName: nm('佐藤'), due: null,
+        basis: '見積は金額を直してから送る', addedBy: 'u-abe', addedByName: nm('阿部'), similarTo: { id: 'task-0000p1', title: '見積を直す' }, may },
+      { id: 'task-0000p3', title: '会食の店を探す', state: 'dismissed', version: 2, assignee: ME, assigneeName: nm('佐藤'), due: null,
+        basis: null, addedBy: ME, addedByName: nm('佐藤'), similarTo: null, may },
     ] }
   },
   actOnTask: async (_c, recordId, input) => {
@@ -250,12 +279,12 @@ function Preview() {
   return (
     <main className="min-h-screen bg-white text-gray-900 dark:bg-zinc-900 dark:text-zinc-100">
       <pre id="acted" className="text-[10px]" />
-      <TaskCard companyId="co-preview" rootPath="/Users/me/company" recordId={card.record.id} renderPrepared={r => <div data-testid="prepared">用意したもの：{r.title}</div>}
+      <TaskCard companyId="co-preview" rootPath="/Users/me/company" recordId={card.record.id} renderPrepared={r => (MANUAL ? <PreparedMailCard companyId="co-preview" messageId={r.id} /> : <div data-testid="prepared">用意したもの：{r.title}</div>)}
         renderSource={r => <div>元のメール：{r.title}</div>}
-        shareFolders={[{ folder: '営業', name: '営業部' }, { folder: '経理', name: '経理部' }]}
+        shareFolders={MANUAL ? [{ folder: '営業部', name: '営業部' }] : [{ folder: '営業', name: '営業部' }, { folder: '経理', name: '経理部' }]}
         onConsult={(r, fresh) => show('acted', `consult ${r.id}${fresh ? ' fresh' : ''}`)}
         onNudge={r => show('acted', `nudge ${r.id}`)}
-        bundleKind={{ type: 'deal', name: '案件', source: 'plugin' }} bundleFolder="営業部"
+        bundleKind={MANUAL ? { type: 'project', name: 'プロジェクト', source: 'core' } : { type: 'deal', name: '案件', source: 'plugin' }} bundleFolder="営業部"
         {...(withPlaces ? { bundlePlaces: { defaultFolder: '開発部', choices: [
           { folder: '営業部', name: '営業部', kind: { type: 'deal', name: '案件', source: 'plugin' as const }, departmentId: 'd-sales' },
           { folder: '開発部', name: '開発部', kind: { type: 'project', name: 'プロジェクト', source: 'core' as const }, departmentId: 'd-dev' },

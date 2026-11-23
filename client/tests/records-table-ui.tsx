@@ -20,7 +20,10 @@ import { installElectronAPI } from './ui/fixtures/electron-api'
 
 const params = new URLSearchParams(location.search)
 if (params.get('theme') === 'dark') document.documentElement.classList.add('dark')
-const ROOT = '/Users/demo/会社'
+// `?manual=1`: the user manual's story (client/tests/manual/scenes.ts, chapter 17): 検証A社's やること and 決めたこと as
+// 山田さん of 営業部 reads them. Fictional data only.
+const MANUAL = params.get('manual') === '1'
+const ROOT = MANUAL ? '/Users/yamada/AI Company Builder/検証A社' : '/Users/demo/会社'
 /** A calendar day in the page's own time zone (the app compares due dates there; a UTC day is off by one for 9 hours). */
 const day = (offset: number) => {
   const d = new Date()
@@ -33,7 +36,16 @@ const task = (id: string, title: string, state: string, assignee: string | null,
   id, title, stateLabel: state, finished: state === '完了', updatedAt: `${day(-1)}T09:00:00Z`,
   cells: { assignee: cell(assignee), due: cell(due), requested_by: cell('阿部') }, ...extra,
 })
-const TASKS: RecordsTableRow[] = params.get('many')
+const MANUAL_TASKS: RecordsTableRow[] = [
+  task('task-m1', 'お礼メールを確かめて送る', 'まだ', '山田', day(0), { cells: { assignee: cell('山田'), due: cell(day(0)), requested_by: cell('山田') } }),
+  task('task-m2', 'セキュリティ資料を送る', '引き受け待ち', '高橋', day(4), { cells: { assignee: cell('高橋'), due: cell(day(4)), requested_by: cell('山田') } }),
+  task('task-m3', 'A社 見積の回答をもらう', '返事待ち', '山田', day(7), { cells: { assignee: cell('山田'), due: cell(day(7)), requested_by: cell('高橋') } }),
+  task('task-m4', '訪問メモのひな形を直す', '進めている', '佐藤', day(-2), { cells: { assignee: cell('佐藤'), due: cell(day(-2)), requested_by: cell('佐藤') } }),
+  task('task-m5', '展示会の資料をそろえる', 'まだ', '高橋', day(10), { cells: { assignee: cell('高橋'), due: cell(day(10)), requested_by: cell('山田') } }),
+  task('task-m6', '見積を直す', 'まだ', '山田', day(3), { personal: true, cells: { assignee: cell('山田'), due: cell(day(3)), requested_by: cell('山田') } }),
+  task('task-m7', '見積を出す', '完了', '山田', day(-1), { cells: { assignee: cell('山田'), due: cell(day(-1)), requested_by: cell('高橋') } }),
+]
+const TASKS: RecordsTableRow[] = MANUAL ? MANUAL_TASKS : params.get('many')
   ? Array.from({ length: 450 }, (_, i) => task(`task-${String(i).padStart(3, '0')}`, `やること ${i + 1}`, 'まだ', i % 2 ? '佐藤' : '田中', day(i % 30)))
   : [
     task('task-kitayama', '北山工業に事例集を送る', '進めている', '高橋', day(-3)),
@@ -43,7 +55,10 @@ const TASKS: RecordsTableRow[] = params.get('many')
     task('task-kenshu', '研修の日程案を出す', 'まだ', null, null),
     task('task-done', '先週の議事録を共有する', '完了', '高橋', day(-8)),
   ]
-const DECISIONS: RecordsTableRow[] = [
+const DECISIONS: RecordsTableRow[] = MANUAL ? [
+  { id: 'decision-m1', title: '訪問メモは翌日までに共有する', stateLabel: '決まった', finished: false, updatedAt: `${day(0)}T03:00:00Z`, cells: { decided_by: cell('山田') } },
+  { id: 'decision-m2', title: 'A社の見積は150万円で出す', stateLabel: '決まった', finished: false, updatedAt: `${day(-1)}T06:00:00Z`, cells: { decided_by: cell('高橋') } },
+] : [
   { id: 'decision-1', title: '見積もりは税込で出す', stateLabel: '決まり', finished: false, updatedAt: `${day(-2)}T09:00:00Z`, cells: { decided_by: cell('阿部') } },
 ]
 const COLUMNS = {
@@ -78,11 +93,11 @@ installElectronAPI({
 })
 Object.assign(window, { __acbAsked: asked })
 // The member signed in (the table is tied to one member × company).
-useAuthStore.setState({ user: { id: 'u-demo', email: 'demo@example.com', name: 'デモ', image: null, emailVerified: true } })
-useAppStore.setState({ currentCompany: { id: 'demo', name: '株式会社デモ', rootPath: ROOT, departments: [], createdAt: new Date() } })
+useAuthStore.setState({ user: { id: 'u-demo', email: MANUAL ? 'yamada@kensho-a.example' : 'demo@example.com', name: MANUAL ? '山田 太郎' : 'デモ', image: null, emailVerified: true } })
+useAppStore.setState({ currentCompany: { id: 'demo', name: MANUAL ? '検証A社' : '株式会社デモ', rootPath: ROOT, departments: [], createdAt: new Date() } })
 
 const TABLE = viewTabKey(RECORDS_TABLE_VIEW)
-const FILE = `${ROOT}/営業部/議事録.md`
+const FILE = `${ROOT}/営業部/${MANUAL ? '訪問メモ_1120.md' : '議事録.md'}`
 
 export function Preview() {
   useKeybindings()
