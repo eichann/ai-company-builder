@@ -119,7 +119,9 @@ versions the shape (a later shape is `schema: 2`; stored versions are never re-r
 - **The deliverable folder's name** (`writes.folder`, owner decision 2026-11-23, every job — time and event, every
   schema): one folder name by **the department folder rule** (`isValidFolderName`, `shared/core/names.ts`: ASCII word
   characters, hiragana, katakana, kanji, then also `.` `_` `-`; never a leading `.` / `-`, a `/`, `\`, space, control,
-  invisible or full / half width character), in NFC (an NFD spelling is refused, not normalized: the admin form sends NFC),
+  zero-width / bidi or full / half width character — the hiragana block's bare combining marks U+3099 / U+309A are taken,
+  as for a department: no escape, the guard and the disk fold them alike; a trailing `.` too, which Windows drops, so there
+  every write is refused, fail closed, as for a step's folder), in NFC (an NFD spelling is refused, not normalized: the admin form sends NFC),
   at most `DELIVERABLE_FOLDER_MAX` (60) — `deliverableFolderProblem` (`shared/core/plugin-step-runs.ts`), the same check a
   plugin step's folder and the app's write guard (`insideDeliverableAt`) apply, so the parser and the guard cannot drift.
   Until then `^[a-z0-9][a-z0-9_-]{0,63}$`; a stored 61–64 letter name could never be written to (the guard already
