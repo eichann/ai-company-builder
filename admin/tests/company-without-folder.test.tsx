@@ -139,6 +139,10 @@ describe.each(['git', 'none'] as const)('wording for a %s company', (kind) => {
     const dialog = await screen.findByRole('dialog')
     expect(within(dialog).queryByText(/同期できなくなります/) !== null).toBe(!none)
     expect(within(dialog).queryByText(/やること・記録などを見られなくなります/) !== null).toBe(none)
+    // A company with the shared folder: private folders do leave the PC (private-folders-client.md),
+    // so the dialog must not promise that nothing on the PC is deleted.
+    expect(within(dialog).queryByText(/非公開フォルダは、本人が次に同期したときにPCから削除されます/) !== null).toBe(!none)
+    expect(within(dialog).queryByText(/本人のPCにあるファイルは削除されません/) !== null).toBe(none)
   })
 
   it('the role window says what a member can use', async () => {
@@ -183,5 +187,9 @@ describe.each(['git', 'none'] as const)('wording for a %s company', (kind) => {
     const dialog = await screen.findByRole('dialog')
     expect(within(dialog).queryByText(/同期できなくなります/) !== null).toBe(!none)
     expect(within(dialog).queryByText(/やること・記録などを見られなくなります/) !== null).toBe(none)
+    // A company with the shared folder: private folders do leave the PC (private-folders-client.md),
+    // so the dialog must not promise that nothing on the PC is deleted.
+    expect(within(dialog).queryByText(/非公開フォルダは、次に同期したときにPCから削除されます/) !== null).toBe(!none)
+    expect(within(dialog).queryByText(/PCにあるファイルは削除されません/) !== null).toBe(none)
   })
 })

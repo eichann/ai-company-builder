@@ -165,7 +165,7 @@ export default function SettingsPage() {
         open={leaving}
         onOpenChange={setLeaving}
         title="この会社から退出"
-        description={hasCompanyFolder ? '退出すると、この会社のファイルやAIスキルを同期できなくなります。PCにあるファイルは削除されません。' : NO_FOLDER_WORDS.leaveCompany}
+        description={hasCompanyFolder ? '退出すると、この会社のファイルやAIスキルを同期できなくなります。PCにある会社のフォルダは残りますが、非公開フォルダは、次に同期したときにPCから削除されます。そのとき、まだ届けていない変更も一緒に消えます。' : NO_FOLDER_WORDS.leaveCompany}
         confirmText={c?.name ?? ''}
         confirmLabel="退出する"
         onConfirm={leave}
