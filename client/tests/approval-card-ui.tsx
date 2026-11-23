@@ -22,29 +22,29 @@ const HASH = `sha256:${'9c1e'.repeat(16)}`
 
 const updateView: ApprovalView = {
   id: 'approval-preview0001', state: 'pending', recordVersion: 1, pluginId: 'hubspot', operation: 'update_deal',
-  operationLabel: '案件の欄を HubSpot に書き戻す', systemLabel: 'HubSpot', recordId: 'deal-preview01', recordTitle: '研修導入（プレビュー株式会社）',
+  operationLabel: '案件の欄を HubSpot に書き戻す', systemLabel: 'HubSpot', recordId: 'deal-preview01', recordTitle: '研修導入（検証A社）',
   changes: [{ field: 'amount', label: '金額', before: 1200000, after: 1500000, beforeShown: '1,200,000', afterShown: '1,500,000', changePercent: 25 }],
   create: null, similar: null,
   basis: { meetingId: 'meeting-preview01', meetingTitle: '11/5 商談', quote: 'チャット窓口も最初から入れたい' },
   precedents: { total: 1, items: [{ approvalId: 'approval-preview0000', at: '2026-09-02T10:00:00.000Z', state: 'approved', fields: [{ label: '金額', beforeShown: '800,000', afterShown: '1,000,000' }], reason: '対象部署が増えたため', nowShown: [{ label: '金額', shown: '1,000,000' }] }] },
-  materials: [{ kind: 'record', recordId: 'deal-preview01', title: '研修導入（プレビュー株式会社）', version: 9 }, { kind: 'meeting', recordId: 'meeting-preview01', title: '11/5 商談', version: null }],
+  materials: [{ kind: 'record', recordId: 'deal-preview01', title: '研修導入（検証A社）', version: 9 }, { kind: 'meeting', recordId: 'meeting-preview01', title: '11/5 商談', version: null }],
   proposedReason: '先方が対象を広げたいと言ったため', requestedBy: 'u-sato', requestedByAi: true, approver: 'u-abe', approverRule: 'dept_manager', approverRuleLabel: '部署の管理役',
   hash: HASH, version: 1, createdAt: '2026-11-05T06:41:00.000Z', viewerMayApprove: approver, viewerIsRequester: !approver, outcome: null,
 }
 const createView: ApprovalView = {
   ...updateView, operation: 'create_deal', operationLabel: '取引を新しく作る', recordId: null, recordTitle: null, changes: [],
-  create: { title: '生成AI研修（プレビュー株式会社）', fields: [{ label: '次のアクション', shown: '提案書を送る' }] },
+  create: { title: '生成AI研修（検証A社）', fields: [{ label: '次のアクション', shown: '提案書を送る' }] },
   similar: {
     typeLabel: '案件', outside: 'checked',
     items: [
-      { recordId: 'deal-preview02', title: '研修導入（プレビュー株式会社）', status: '提案', assignee: 'u-sato', updatedAt: '2026-10-30T01:00:00.000Z', matchedBy: 'counterpart' },
+      { recordId: 'deal-preview02', title: '研修導入（検証A社）', status: '提案', assignee: 'u-sato', updatedAt: '2026-10-30T01:00:00.000Z', matchedBy: 'counterpart' },
       { recordId: 'deal-preview03', title: '生成AI研修 2期（見本商事）', status: '初回面談', assignee: null, updatedAt: '2026-10-01T01:00:00.000Z', matchedBy: 'name' },
     ],
   },
   precedents: { total: 0, items: [] }, materials: [],
 }
 const view = params.get('kind') === 'create' ? createView : updateView
-const names = { 'u-sato': '佐藤', 'u-abe': '阿部' }
+const names = { 'u-sato': '佐藤', 'u-abe': '山田' }
 
 function Preview() {
   const [sent, setSent] = useState<string>('')
