@@ -15,7 +15,8 @@
 //   channels  none = the company has neither mail nor chat connected (no 受信を読む switch, one line instead)
 //   google ready = the company offers Google and the member has not allowed it yet (設定 →「Google」 with
 //          ［Google で許可］; the manual's picture, client/tests/manual/scenes.ts); otherwise the Google status is offline
-//   manual 1 = the user manual's company name (検証A社) instead of 株式会社デモ
+//   manual 1 = the user manual's company (検証A社: 全社のファイル, 営業部 with 過去資料 left out, 総務部)
+//          instead of 株式会社デモ's folders
 //   closed 1 = start with the settings closed: a 「設定を開く」 button (always there) opens them (Esc closes, focus returns)
 import { useState } from 'react'
 import { createRoot } from 'react-dom/client'
@@ -44,12 +45,20 @@ let repeatAskOn = true
 if (theme === 'dark') document.documentElement.classList.add('dark')
 
 const ROOT = '/Users/demo/会社'
-const COMPANY_NAME = params.get('manual') === '1' ? '検証A社' : '株式会社デモ'
+const MANUAL = params.get('manual') === '1'
+const COMPANY_NAME = MANUAL ? '検証A社' : '株式会社デモ'
 const GB = 1024 ** 3
 const MB = 1024 ** 2
 
 // The company: department → sub-folders with sizes (bytes).
-const TREE: Record<string, number> = {
+const TREE: Record<string, number> = MANUAL ? {
+  '営業部/提案書': 86 * MB,
+  '営業部/下書き': 4 * MB,
+  '営業部/過去資料': 2.3 * GB,
+  '総務部/規程': 12 * MB,
+  '総務部/申請書': 26 * MB,
+  '.claude/skills': 1 * MB,
+} : {
   'コンテンツ/動画/2025年度': 3.2 * GB,
   'コンテンツ/動画/2026年度/撮影素材': 2.4 * GB,
   'コンテンツ/動画/2026年度/編集済み': 0.9 * GB,
@@ -78,7 +87,7 @@ const childrenOf = (p: string) => {
   })
 }
 
-let excluded = ['営業部', 'コンテンツ/動画/2025年度']
+let excluded = MANUAL ? ['営業部/過去資料'] : ['営業部', 'コンテンツ/動画/2025年度']
 // The company .env on this computer (status only) and the member's own-key view on the server.
 const envVars: Record<string, { set: boolean; last4?: string }> = { ANTHROPIC_API_KEY: { set: true, last4: 'ab12' } }
 const ownKeys = {
@@ -93,7 +102,10 @@ const ownKeys = {
 const progressListeners = new Set<(d: { repoPath: string; receivedBytes: number }) => void>()
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms))
 
-const DEPARTMENTS = [
+const DEPARTMENTS = MANUAL ? [
+  { id: 'd_sales', name: '営業部', folder: '営業部', icon: 'folder', color: '#0ea5e9', sortOrder: 0, isActive: true },
+  { id: 'd_ga', name: '総務部', folder: '総務部', icon: 'folder', color: '#f59e0b', sortOrder: 1, isActive: true },
+] : [
   { id: 'd1', name: 'コンテンツ', folder: 'コンテンツ', icon: 'folder', color: '#6366f1', sortOrder: 0, isActive: true },
   { id: 'd2', name: '営業部', folder: '営業部', icon: 'folder', color: '#0ea5e9', sortOrder: 1, isActive: true },
   { id: 'd3', name: '開発部', folder: '開発部', icon: 'folder', color: '#22c55e', sortOrder: 2, isActive: true },

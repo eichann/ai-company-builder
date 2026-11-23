@@ -1,0 +1,40 @@
+<!-- The manual's chapter 6: one press of the sync button sends the member's changes to the company
+     and brings the others' changes back; receiving also happens by itself while the app is open.
+     Shot by shoot.spec.ts (scenes.ts). -->
+<style>
+  body { margin: 0; background: var(--color-surface); font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Hiragino Kaku Gothic ProN", sans-serif; color: var(--color-text); }
+  #diagram { width: 960px; padding: 30px 32px 34px; box-sizing: border-box; background: var(--color-surface); }
+  .row { display: flex; align-items: stretch; }
+  .box { width: 250px; padding: 18px 16px 20px; border-radius: 14px; border: 2px solid var(--color-border-strong); background: var(--color-bg); text-align: center; }
+  .box .title { font-size: 17px; font-weight: 700; }
+  .box .what { margin-top: 8px; font-size: 14px; line-height: 1.6; color: var(--color-text-muted); }
+  .box.pc { border-color: var(--color-primary); background: var(--color-selected-bg); }
+  .middle { flex: 1; display: flex; flex-direction: column; justify-content: center; gap: 22px; padding: 0 14px; }
+  .lane { display: flex; flex-direction: column; align-items: center; gap: 6px; }
+  .label { padding: 4px 12px; border-radius: 9999px; font-size: 14px; font-weight: 700; white-space: nowrap; }
+  .label.send { background: var(--color-surface); color: var(--color-selected-text); border: 2px solid var(--color-primary); }
+  .label.receive { background: var(--color-success-bg); color: var(--color-success-text); border: 1px solid var(--color-success-border); }
+  .sub { font-size: 13px; color: var(--color-text-muted); text-align: center; white-space: nowrap; }
+  .press { margin: 0 auto 18px; width: max-content; padding: 8px 18px; border-radius: 10px; border: 2px solid var(--color-primary); color: var(--color-selected-text); font-size: 15px; font-weight: 700; background: var(--color-bg); }
+  .note { margin-top: 20px; padding: 12px 16px; border-radius: 10px; background: var(--color-warning-bg); border: 1px solid var(--color-warning-border); color: var(--color-warning-text); font-size: 14px; line-height: 1.6; text-align: center; }
+</style>
+<div id="diagram">
+  <div class="press">［サーバーと同期］を1回押すと、この2つをまとめて行います</div>
+  <div class="row">
+    <div class="box pc"><div class="title">山田さんの PC</div><div class="what">直した訪問メモ<br>作った見積の下書き</div></div>
+    <div class="middle">
+      <div class="lane">
+        <span class="label send">① あなたの変更を送る</span>
+        <svg width="380" height="20" viewBox="0 0 380 20" aria-hidden="true"><path d="M4 10 H366" stroke="var(--color-primary)" stroke-width="3" /><path d="M362 3 L374 10 L362 17 z" fill="var(--color-primary)" /></svg>
+        <span class="sub">はじめの設定では、送るのはボタンを押したときだけ</span>
+      </div>
+      <div class="lane">
+        <svg width="380" height="20" viewBox="0 0 380 20" aria-hidden="true"><path d="M376 10 H14" stroke="var(--color-success-icon)" stroke-width="3" /><path d="M18 3 L6 10 L18 17 z" fill="var(--color-success-icon)" /></svg>
+        <span class="label receive">② ほかの人の変更を受け取る</span>
+        <span class="sub">アプリを開いている間は自動でも受け取ります（はじめは15分ごと）</span>
+      </div>
+    </div>
+    <div class="box"><div class="title">会社のサーバー</div><div class="what">佐藤さんや<br>ほかの人の変更も<br>ここに集まります</div></div>
+  </div>
+  <div class="note">押し終わると、あなたの PC と会社のサーバーの中身がそろいます。区切りのいいときと、帰る前に押しましょう。</div>
+</div>

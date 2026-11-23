@@ -67,6 +67,8 @@ export interface Scene {
 const MAIN = { page: 'skill-layout', query: { companies: '2', manual: '1' } } as const
 // The screens before a company opens, at a size that frames their centred card.
 const SELECTOR = { page: 'company-selector', query: { manual: '1' }, viewport: { width: 760, height: 680 } } as const
+// 10章: 総務部 downloaded (閲覧のみ), 営業部/過去資料 not downloaded, the private folder 営業部/提案前メモ.
+const MARKS = { page: 'skill-layout', query: { companies: '2', manual: '1', folders: 'marks' } } as const
 const SIGN_IN = { page: 'sign-in', viewport: { width: 760, height: 620 } } as const
 
 // 「AIへの相談」 opens with its list over a narrow chat (as in the app): closed for a picture of the screen.
@@ -75,6 +77,10 @@ const SALES_TAB = 'role=button[name="営業部" s]'
 const FILES_TAB = 'role=button[name="ファイル" s]'
 const SKILLS_TAB = 'role=button[name="スキル" s]'
 const SYNC = 'role=button[name="サーバーと同期" s]'
+const SYNC_WAITS = 'role=button[name="サーバーと同期（自動同期は止まっています）"]'
+const PREVIEW = 'role=button[name="変更を確認" s]'
+/** One change's row in 「変更を確認」 (its file name, then 「変更を元に戻す」). */
+const PREVIEW_ROW = (name: string) => `role=dialog >> div.cursor-pointer:has(span[title$="${name}"])`
 const TITLE_BAR = 'header:has(button[aria-label="サーバーと同期"])'
 const SALES_FILES: SceneStep[] = [CLOSE_LIST, { click: SALES_TAB }, { click: FILES_TAB }]
 const VISIT_MEMO = 'role=button[name=/^訪問メモ_1123\\.md/]'
@@ -442,6 +448,232 @@ export const scenes: Scene[] = [
     annotations: [
       { marker: { target: 'role=dialog >> role=textbox', label: '1' } },
       { box: 'role=dialog >> role=button[name="名前を変更"]' }, { marker: { target: 'role=dialog >> role=button[name="名前を変更"]', label: '2', at: 'right' } },
+    ],
+  },
+
+  // ── 6章 同期ボタン ───────────────────────────────────────────────────────
+  {
+    id: 'sync-what-happens',
+    about: 'Diagram: one press sends the member’s changes and brings the others’ changes.',
+    diagram: true,
+  },
+  {
+    id: 'sync-running',
+    about: 'Just after pressing 「サーバーと同期」: the button turns while sync runs.',
+    ...MAIN,
+    query: { ...MAIN.query, sync: 'manual' },
+    steps: [CLOSE_LIST, { click: SYNC }],
+    crop: { region: { x: 560, y: 0, width: 720, height: 110 } },
+    annotations: [{ box: SYNC }, { note: { target: SYNC, text: '① 同期中（くるくる回ります）' } }],
+  },
+  {
+    id: 'sync-done',
+    about: 'The notice after a sync with nothing to set aside: 同期が完了しました (it hides itself).',
+    ...MAIN,
+    steps: [CLOSE_LIST, { click: SYNC }, { waitFor: 'text=同期が完了しました' }],
+    crop: { region: { x: 640, y: 600, width: 640, height: 200 } },
+    annotations: [{ box: 'text=同期が完了しました' }, { marker: { target: 'text=同期が完了しました', label: '1', at: 'left' } }],
+  },
+  {
+    id: 'settings-auto-sync',
+    about: '設定 →「自動同期」: 自動で受け取る (on) and 自動で送る (off), as a member first finds them.',
+    page: 'download-folders',
+    query: { tab: 'autosync', manual: '1' },
+    steps: [{ waitFor: 'role=switch[name="自動で受け取る"]' }],
+    annotations: [
+      { marker: { target: 'role=switch[name="自動で受け取る"]', label: '1', at: 'left' } },
+      { marker: { target: 'role=switch[name="自動で送る"]', label: '2', at: 'left' } },
+    ],
+  },
+
+  // ── 7章 送る前に確かめる ─────────────────────────────────────────────────
+  {
+    id: 'sync-preview',
+    about: '「変更を確認」: the two changes, undo, the 作業メモ and この内容で同期.',
+    ...MAIN,
+    steps: [CLOSE_LIST, { click: PREVIEW }, { waitFor: 'role=dialog' }],
+    crop: { target: 'role=dialog', padding: 24 },
+    annotations: [
+      { box: PREVIEW_ROW('訪問メモ_1123.md') }, { marker: { target: PREVIEW_ROW('訪問メモ_1123.md'), label: '1', at: 'left' } },
+      { box: `${PREVIEW_ROW('見積_下書き.md')} >> role=button[name="変更を元に戻す"]` },
+      { marker: { target: `${PREVIEW_ROW('見積_下書き.md')} >> role=button[name="変更を元に戻す"]`, label: '2', at: 'right' } },
+      { marker: { target: 'role=dialog >> role=textbox', label: '3', at: 'left' } },
+      { box: 'role=button[name="この内容で同期"]' }, { marker: { target: 'role=button[name="この内容で同期"]', label: '4', at: 'left' } },
+    ],
+  },
+  {
+    id: 'sync-preview-diff',
+    about: 'A change opened from 「変更を確認」: the line added to 訪問メモ_1123.md.',
+    ...MAIN,
+    steps: [CLOSE_LIST, { click: PREVIEW }, { click: PREVIEW_ROW('訪問メモ_1123.md') }, { waitFor: 'text=次回：12/1 に見積を持って再訪問' }],
+    crop: { region: { x: 0, y: 50, width: 1280, height: 210 } },
+    annotations: [{ box: 'text=次回：12/1 に見積を持って再訪問' }, { marker: { target: 'text=次回：12/1 に見積を持って再訪問', label: '1', at: 'below' } }],
+  },
+  {
+    id: 'sync-revert-confirm',
+    about: '「元に戻す」 on the added file: what will happen, and that the current content is kept.',
+    ...MAIN,
+    steps: [CLOSE_LIST, { click: PREVIEW }, { click: `${PREVIEW_ROW('見積_下書き.md')} >> role=button[name="変更を元に戻す"]` }, { waitFor: 'text=変更を元に戻しますか？' }],
+    crop: { target: 'role=alertdialog', padding: 24 },
+    annotations: [
+      { marker: { target: 'text=/今の内容は .backups に保存します/', label: '1', at: 'left' } },
+      { box: 'role=alertdialog >> role=button[name="元に戻す"]' }, { marker: { target: 'role=alertdialog >> role=button[name="元に戻す"]', label: '2', at: 'below' } },
+    ],
+  },
+
+  // ── 8章 同じファイルを二人が直したとき ───────────────────────────────────
+  {
+    id: 'same-file-diagram',
+    about: 'Diagram: 佐藤さん syncs first; 山田さん’s sync keeps the server’s version and saves his to the backups.',
+    diagram: true,
+  },
+  {
+    id: 'sync-conflict-notice',
+    about: 'The notice when the server’s version was kept: it stays until closed, with 履歴を見る.',
+    ...MAIN,
+    query: { ...MAIN.query, result: 'conflict' },
+    steps: [CLOSE_LIST, { click: SYNC }, { waitFor: 'text=/1ファイルが競合しました/' }],
+    crop: { region: { x: 760, y: 560, width: 520, height: 240 } },
+    annotations: [
+      { marker: { target: 'text=/1ファイルが競合しました/', label: '1', at: 'left' } },
+      { box: 'role=button[name="履歴を見る"]' }, { marker: { target: 'role=button[name="履歴を見る"]', label: '2', at: 'below' } },
+    ],
+  },
+  {
+    id: 'backup-history',
+    about: '「バックアップ履歴」 with the kept version opened: the file, 復元 and the folder.',
+    ...MAIN,
+    steps: [CLOSE_LIST, { click: 'role=button[name="バックアップ履歴"]' }, { click: 'text="競合"' }, { waitFor: 'role=button[name="復元"]' }],
+    crop: { region: { x: 768, y: 0, width: 512, height: 420 } },
+    annotations: [
+      { marker: { target: 'text="競合"', label: '1', at: 'left' } },
+      { box: 'role=button[name="復元"]' }, { marker: { target: 'role=button[name="復元"]', label: '2', at: 'below' } },
+      { marker: { target: 'role=button[name="フォルダを開く"] >> nth=0', label: '3', at: 'left' } },
+    ],
+  },
+  {
+    id: 'backup-restore-confirm',
+    about: '「復元」 asks first: the file is replaced, its current content kept in the backups.',
+    ...MAIN,
+    steps: [CLOSE_LIST, { click: 'role=button[name="バックアップ履歴"]' }, { click: 'text="競合"' }, { click: 'role=button[name="復元"]' }, { waitFor: 'text=バックアップから復元しますか？' }],
+    crop: { target: 'role=dialog', padding: 24 },
+    annotations: [
+      { marker: { target: 'text=/今の内容は .backups に保存してから置き換えます/', label: '1', at: 'left' } },
+      { box: 'role=button[name="復元する"]' }, { marker: { target: 'role=button[name="復元する"]', label: '2', at: 'below' } },
+    ],
+  },
+
+  // ── 9章 同期が止まったとき ───────────────────────────────────────────────
+  {
+    id: 'sync-stop-guide',
+    about: 'Diagram: what each stop looks like and what to do (the Mac’s own questions included).',
+    diagram: true,
+  },
+  {
+    id: 'sync-stop-denied',
+    about: 'Cancelled at 「編集できないファイルがあります」: sync stopped, the file named, nothing changed.',
+    ...MAIN,
+    query: { ...MAIN.query, result: 'denied' },
+    steps: [CLOSE_LIST, { click: SYNC }, { waitFor: 'text=/同期を中止しました/' }],
+    crop: { region: { x: 760, y: 520, width: 520, height: 280 } },
+    annotations: [{ marker: { target: 'text=/同期を中止しました/', label: '1', at: 'left' } }],
+  },
+  {
+    id: 'sync-stop-restored',
+    about: 'After 「元に戻して残りを同期」: that file put back, the member’s version in the backups.',
+    ...MAIN,
+    query: { ...MAIN.query, result: 'restored' },
+    steps: [CLOSE_LIST, { click: SYNC }, { waitFor: 'text=/元に戻しました/' }],
+    crop: { region: { x: 760, y: 560, width: 520, height: 240 } },
+    annotations: [
+      { marker: { target: 'text=/元に戻しました/', label: '1', at: 'left' } },
+      { box: 'role=button[name="履歴を見る"]' }, { marker: { target: 'role=button[name="履歴を見る"]', label: '2', at: 'below' } },
+    ],
+  },
+  {
+    id: 'sync-stop-offline',
+    about: 'The sync could not reach the server: the work stays on this PC, sent at the next sync.',
+    ...MAIN,
+    query: { ...MAIN.query, result: 'offline' },
+    steps: [CLOSE_LIST, { click: SYNC }, { waitFor: 'text=/次回の同期で再試行します/' }],
+    crop: { region: { x: 760, y: 600, width: 520, height: 200 } },
+    annotations: [{ marker: { target: 'text=/次回の同期で再試行します/', label: '1', at: 'left' } }],
+  },
+  {
+    id: 'sync-waits-for-you',
+    about: 'The sync button when automatic sync waits for the member (warning colour and mark).',
+    ...MAIN,
+    query: { ...MAIN.query, seed: JSON.stringify({ 'acb.autoSync.state:demo': JSON.stringify({ needsMember: true }) }) },
+    steps: [CLOSE_LIST],
+    crop: { region: { x: 560, y: 0, width: 720, height: 110 } },
+    annotations: [{ box: SYNC_WAITS }, { note: { target: SYNC_WAITS, text: '① サーバーと同期（自動同期は止まっています）' } }],
+  },
+
+  // ── 10章 フォルダの見え方 ────────────────────────────────────────────────
+  {
+    id: 'tree-read-only',
+    about: 'The 全社 tab: 総務部 marked 閲覧のみ for 山田さん.',
+    ...MARKS,
+    steps: [CLOSE_LIST, { click: 'role=button[name="全社" s]' }, { click: FILES_TAB }, { click: '[data-tree-path$="/営業部"]' }, { waitFor: 'text=閲覧のみ' }],
+    crop: { region: { x: 0, y: 100, width: 430, height: 200 } },
+    annotations: [{ box: 'text=閲覧のみ' }, { marker: { target: 'text=閲覧のみ', label: '1', at: 'right' } }],
+  },
+  {
+    id: 'tree-marks',
+    about: 'The 営業部 tab: a private folder (lock) and a folder not downloaded (未ダウンロード).',
+    ...MARKS,
+    steps: [CLOSE_LIST, { click: SALES_TAB }, { click: FILES_TAB }, { waitFor: 'text=未ダウンロード' }],
+    crop: { region: { x: 0, y: 100, width: 430, height: 330 } },
+    annotations: [
+      { marker: { target: '[data-private-folder]', label: '1', at: 'right' } },
+      { box: 'text=未ダウンロード' }, { marker: { target: 'text=未ダウンロード', label: '2', at: 'right' } },
+    ],
+  },
+  {
+    id: 'tree-not-downloaded-menu',
+    about: 'Right-clicking 過去資料 (not downloaded): ダウンロード.',
+    ...MARKS,
+    steps: [CLOSE_LIST, { click: SALES_TAB }, { click: FILES_TAB }, { rightClick: 'role=button[name="過去資料（未ダウンロード）"]' }],
+    crop: { region: { x: 0, y: 100, width: 430, height: 400 } },
+    annotations: [{ box: 'role=button[name="ダウンロード"] >> nth=-1' }, { marker: { target: 'role=button[name="ダウンロード"] >> nth=-1', label: '1', at: 'right' } }],
+  },
+  {
+    id: 'editor-read-only',
+    about: 'A file of 総務部 opened: the 閲覧のみ notice above it.',
+    ...MARKS,
+    steps: [CLOSE_LIST, { click: 'role=button[name="総務部" s]' }, { click: FILES_TAB }, { click: 'role=button[name=/^申請書のひな形\\.md/]' }, { waitFor: 'text=/このフォルダは閲覧のみです/' }],
+    crop: { region: { x: 0, y: 100, width: 1000, height: 300 } },
+    annotations: [{ box: 'text=/このフォルダは閲覧のみです/' }, { marker: { target: 'text=/このフォルダは閲覧のみです/', label: '1', at: 'below' } }],
+  },
+  {
+    id: 'tree-private-reader',
+    about: 'Inside 提案前メモ (read by 3 people): the 非公開 band says how many.',
+    ...MARKS,
+    steps: [CLOSE_LIST, { click: SALES_TAB }, { click: FILES_TAB }, { click: 'role=button[name=/^C社_検討メモ\\.md/]' }, { waitFor: 'text=/非公開：3人だけが見られます/' }],
+    crop: { region: { x: 0, y: 100, width: 430, height: 330 } },
+    annotations: [
+      { box: 'text=/非公開：3人だけが見られます/' }, { marker: { target: 'text=/非公開：3人だけが見られます/', label: '1', at: 'below' } },
+      { marker: { target: '[data-private-folder]', label: '2', at: 'right' } },
+    ],
+  },
+  {
+    id: 'tree-private-other',
+    about: 'The same 営業部 for someone who does not read 提案前メモ: it is not in the list at all.',
+    ...MAIN,
+    query: { ...MAIN.query, folders: 'other' },
+    steps: [CLOSE_LIST, { click: SALES_TAB }, { click: FILES_TAB }, { waitFor: 'text=未ダウンロード' }],
+    crop: { region: { x: 0, y: 100, width: 430, height: 330 } },
+    annotations: [],
+  },
+  {
+    id: 'settings-download-folders',
+    about: '設定 →「ダウンロードするフォルダ」: sizes, what is downloaded, 過去資料 left out.',
+    page: 'download-folders',
+    query: { manual: '1' },
+    steps: [{ waitFor: 'text=/をダウンロード済み/' }],
+    annotations: [
+      { marker: { target: 'text=/をダウンロード済み/', label: '1', at: 'right' } },
+      { marker: { target: 'text="営業部"', label: '2', at: 'left' } },
     ],
   },
 

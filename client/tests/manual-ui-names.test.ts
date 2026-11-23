@@ -2,8 +2,9 @@
 // manual's text cites as ［名前］ still exists in the app's screens, so renaming a control in the app
 // fails CI instead of leaving members looking for a button that is no longer there.
 //
-// A name counts as present when the screens' source (client/src, the admin console's pages for the
-// invitation page, the Japanese locale in client/src/i18n) holds it as one whole piece of text: a string literal, JSX
+// A name counts as present when the screens' source (client/src, the questions sync asks in the Mac's
+// own dialogs (client/electron/sync), the admin console's pages for the invitation page, the
+// Japanese locale in client/src/i18n) holds it as one whole piece of text: a string literal, JSX
 // text or a JSON value — not merely inside a longer sentence. A name the manual shows with a count
 // (［選んだ部署をダウンロード（1）］) matches the source's template (`…（${n}）`). Names on screens
 // this repository does not draw are listed in manual/ui-names-allowlist.json with their reason.
@@ -22,7 +23,9 @@ const PAGES = path.join(ROOT, 'manual/pages')
 const ALLOWLIST = path.join(ROOT, 'manual/ui-names-allowlist.json')
 // The admin console's invitation page is where a member starts (chapter 2); it is listed in
 // .github/scripts/changed-areas.sh's CLIENT, so changing it runs this test.
-const SOURCES = ['client/src', 'admin/src/app/invite']
+// Sync's questions (「同期をやめる（おすすめ）」…) are native dialogs the main process draws
+// (client/electron/sync/message-box-dialog.ts): the manual's chapter 9 cites their buttons.
+const SOURCES = ['client/src', 'client/electron/sync', 'admin/src/app/invite']
 
 /** The ［…］ names a manual page cites (full-width brackets are the manual's convention for controls). */
 export function citedNames(markdown: string): string[] {

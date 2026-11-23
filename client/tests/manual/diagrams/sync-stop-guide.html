@@ -1,0 +1,52 @@
+<!-- The manual's chapter 9: the ways a sync stops or asks, and what the member does in each.
+     The first three are the Mac's own dialogs (client/electron/sync/message-box-dialog.ts), which
+     the preview pages cannot show, so they are listed here by their titles and buttons.
+     Shot by shoot.spec.ts (scenes.ts). -->
+<style>
+  body { margin: 0; background: var(--color-surface); font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Hiragino Kaku Gothic ProN", sans-serif; color: var(--color-text); }
+  #diagram { width: 960px; padding: 26px 30px 30px; box-sizing: border-box; background: var(--color-surface); }
+  table { width: 100%; border-collapse: separate; border-spacing: 0 8px; font-size: 14px; line-height: 1.6; }
+  th { text-align: left; font-size: 13px; color: var(--color-text-muted); font-weight: 700; padding: 0 12px; }
+  td { vertical-align: top; padding: 10px 12px; background: var(--color-bg); border-top: 1px solid var(--color-border-strong); border-bottom: 1px solid var(--color-border-strong); }
+  td:first-child { border-left: 1px solid var(--color-border-strong); border-radius: 10px 0 0 10px; width: 300px; }
+  td:last-child { border-right: 1px solid var(--color-border-strong); border-radius: 0 10px 10px 0; }
+  .num { display: inline-flex; width: 22px; height: 22px; margin-right: 6px; border-radius: 9999px; background: var(--color-primary); color: var(--color-on-primary); font-weight: 700; font-size: 13px; align-items: center; justify-content: center; }
+  .kind { display: block; margin-top: 2px; font-size: 12px; color: var(--color-text-muted); }
+  .say { font-weight: 700; }
+  .btn { display: inline-block; padding: 0 6px; border-radius: 6px; border: 1px solid var(--color-primary); color: var(--color-selected-text); background: var(--color-selected-bg); font-weight: 700; white-space: nowrap; }
+  .red { color: var(--color-danger-text); }
+  .note { margin-top: 10px; padding: 12px 16px; border-radius: 10px; background: var(--color-success-bg); border: 1px solid var(--color-success-border); color: var(--color-success-text); font-size: 15px; font-weight: 700; text-align: center; }
+</style>
+<div id="diagram">
+  <table>
+    <thead><tr><th>画面に出るもの</th><th>どういうことか</th><th>すること</th></tr></thead>
+    <tbody>
+      <tr>
+        <td><span class="num">1</span><span class="say">ほかのアプリで開いているファイルがあります</span><span class="kind">Mac の確認の画面</span></td>
+        <td>ほかの人が直したファイルを、Excel などで開いたままにしている</td>
+        <td><span class="btn">同期をやめる（おすすめ）</span>を押す → そのファイルを閉じて、もう一度同期</td>
+      </tr>
+      <tr>
+        <td><span class="num">2</span><span class="say">ファイルの削除を検出</span><span class="kind">Mac の確認の画面</span></td>
+        <td>あなたの PC でファイルを消した。同期すると、みんなの PC からも消える</td>
+        <td>消してよければ <span class="btn">削除を含めて同期</span>、うっかりなら <span class="btn">削除を取り消して同期</span></td>
+      </tr>
+      <tr>
+        <td><span class="num">3</span><span class="say">編集できないファイルがあります</span><span class="kind">Mac の確認の画面（「管理者だけが変更できるファイル」のときも同じ）</span></td>
+        <td>あなたが書けない場所のファイルを直していた</td>
+        <td><span class="btn">元に戻して残りを同期</span>（または <span class="btn">サーバーの状態に戻して同期する（推奨）</span>）。あなたの版はバックアップ履歴に残る</td>
+      </tr>
+      <tr>
+        <td><span class="num">4</span><span class="say red">赤い知らせ「…次回の同期で再試行します」</span><span class="kind">右下の知らせ</span></td>
+        <td>会社のサーバーにつながらなかった</td>
+        <td>インターネットにつながってから、もう一度同期</td>
+      </tr>
+      <tr>
+        <td><span class="num">5</span><span class="say red">それ以外の赤い知らせ</span><span class="kind">右下の知らせ</span></td>
+        <td>同期が途中で止まった</td>
+        <td>消したり直したりせず、画面をそのまま管理者に見せる</td>
+      </tr>
+    </tbody>
+  </table>
+  <div class="note">どの場合も、あなたが直したファイルは PC に残っています。慌てて消さなくて大丈夫です。</div>
+</div>
