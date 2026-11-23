@@ -30,6 +30,9 @@ import { ok, refuse, type Outcome } from './outcome'
 
 export const MAX_MANAGERS_PER_DEPARTMENT = 50
 
+/** 409 MANAGERS_CHANGED: someone changed the managers after the caller read them. */
+export const MANAGERS_CHANGED_MESSAGE = 'ほかの人がこの部署の管理役を変えました。いまの管理役を読み込み直したので、もう一度選んでから保存してください。'
+
 export const INVALID_FOLDER_NAME_ERROR =
   'Invalid folder name. Use letters, numbers, Japanese characters, dots, hyphens, and underscores.'
 
@@ -355,8 +358,15 @@ export function createDepartmentService(deps: DepartmentServiceDeps) {
 
     managers,
 
-    /** Replace the managers (owner/admin acting); every one must be a member. */
-    replaceManagers(member: Member, departmentId: string, userIds: string[]): Outcome<ManagerView[]> {
+    /**
+     * Replace the managers (owner/admin acting); every one must be a member.
+     * `expectedUserIds` is the list the caller saw (the admin console's dialog
+     * sends it): when today's managers differ from it as a set, nothing is
+     * written and 409 `MANAGERS_CHANGED` answers with today's list. Read and
+     * write stay in one synchronous stretch, so no other request interleaves.
+     * Absent (an older admin page, an API caller) = replace unconditionally, as before.
+     */
+    replaceManagers(member: Member, departmentId: string, userIds: string[], expectedUserIds?: string[]): Outcome<ManagerView[]> {
       const unique = [...new Set(userIds)]
       if (unique.length > MAX_MANAGERS_PER_DEPARTMENT) {
         return refuse('bad-request', `A department can have at most ${MAX_MANAGERS_PER_DEPARTMENT} managers`)
@@ -364,6 +374,13 @@ export function createDepartmentService(deps: DepartmentServiceDeps) {
       const notMembers = unique.filter(id => memberships.roleOf(member.companyId, id) === null)
       if (notMembers.length > 0) {
         return refuse('bad-request', `Not members of this company: ${notMembers.join(', ')}`)
+      }
+      if (expectedUserIds !== undefined) {
+        const today = new Set(scopesOf(member.companyId).departmentManagerIds(departmentId))
+        const seen = new Set(expectedUserIds)
+        if (today.size !== seen.size || [...seen].some(id => !today.has(id))) {
+          return refuse('conflict', MANAGERS_CHANGED_MESSAGE, { code: 'MANAGERS_CHANGED', managers: managers(member, departmentId) })
+        }
       }
       scopesOf(member.companyId).replaceDepartmentManagers(departmentId, unique, member.userId)
       return ok(managers(member, departmentId))

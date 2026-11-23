@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { toast } from 'sonner'
 
+import { ErrorState } from '@/components/app/states'
 import { MemberChecklist } from '@/components/departments/member-checklist'
 import { Button } from '@/components/ui/button'
 import {
@@ -13,16 +14,27 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import { departmentsApi, type Department, type DepartmentManager, type Member } from '@/lib/api'
+import { ApiError, departmentsApi, type Department, type DepartmentManager, type Member } from '@/lib/api'
 import { describeError } from '@/lib/errors'
 
-/** Multi-select of company members as managers (部署の管理役) of one department. */
+/**
+ * Multi-select of company members as managers (部署の管理役) of one department.
+ *
+ * Saving replaces the whole list, so the form exists only on a loaded list:
+ * `current` undefined means "not known yet" (loading, or it failed: `loadError`),
+ * never "nobody" — an empty start would remove every manager on save. The form
+ * is keyed to the list it started from, so a reload that changed it starts the
+ * form again, and the save sends that list (`expectedUserIds`): if someone
+ * changed it meanwhile the server writes nothing (409 MANAGERS_CHANGED).
+ */
 export function ManagersDialog({
   open,
   onOpenChange,
   companyId,
   department,
   current,
+  loadError,
+  onRetry,
   members,
   onSaved,
 }: {
@@ -30,20 +42,48 @@ export function ManagersDialog({
   onOpenChange: (open: boolean) => void
   companyId: string
   department: Department | null
-  current: DepartmentManager[]
+  /** The department's managers as loaded; undefined while unknown. */
+  current: DepartmentManager[] | undefined
+  loadError: unknown
+  onRetry: () => void
   members: Member[]
+  /** Today's list: after a save, or the server's when it refused a stale one. */
   onSaved: (managers: DepartmentManager[]) => void
 }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="gap-0 p-0">
-        {open && department && (
+        {open && department && current === undefined && (
+          <>
+            <DialogHeader className="p-6 pb-4">
+              <DialogTitle>「{department.name}」の管理役</DialogTitle>
+              <DialogDescription>いまの管理役を確かめてから選べます。</DialogDescription>
+            </DialogHeader>
+            <div className="px-6 pb-6">
+              {loadError ? (
+                <ErrorState error={loadError} onRetry={onRetry} title="いまの管理役を読み込めませんでした" />
+              ) : (
+                <p className="text-body text-muted-foreground" role="status" aria-busy="true">
+                  いまの管理役を読み込んでいます…
+                </p>
+              )}
+            </div>
+            <DialogFooter className="p-4">
+              <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+                閉じる
+              </Button>
+            </DialogFooter>
+          </>
+        )}
+        {open && department && current !== undefined && (
           <ManagersForm
+            key={`${department.id}:${listKey(current)}`}
             companyId={companyId}
             department={department}
             current={current}
             members={members}
             onCancel={() => onOpenChange(false)}
+            onChanged={onSaved}
             onSaved={(m) => {
               onSaved(m)
               onOpenChange(false)
@@ -55,12 +95,32 @@ export function ManagersDialog({
   )
 }
 
+/** The same people in any order give the same key. */
+function listKey(list: DepartmentManager[]): string {
+  return list
+    .map((m) => m.userId)
+    .sort()
+    .join(',')
+}
+
+/** Today's managers in a 409 MANAGERS_CHANGED answer, when well formed. */
+function managersOfConflict(err: unknown): DepartmentManager[] | null {
+  if (!(err instanceof ApiError) || err.status !== 409 || err.code !== 'MANAGERS_CHANGED') return null
+  const list = err.body?.managers
+  if (!Array.isArray(list)) return null
+  const wellFormed = list.every(
+    (m) => typeof m === 'object' && m !== null && typeof (m as { userId?: unknown }).userId === 'string'
+  )
+  return wellFormed ? (list as DepartmentManager[]) : null
+}
+
 function ManagersForm({
   companyId,
   department,
   current,
   members,
   onCancel,
+  onChanged,
   onSaved,
 }: {
   companyId: string
@@ -68,6 +128,8 @@ function ManagersForm({
   current: DepartmentManager[]
   members: Member[]
   onCancel: () => void
+  /** Someone else changed the list: today's list (the form starts again from it). */
+  onChanged: (managers: DepartmentManager[]) => void
   onSaved: (managers: DepartmentManager[]) => void
 }) {
   const [selected, setSelected] = useState<Set<string>>(() => new Set(current.map((m) => m.userId)))
@@ -84,11 +146,18 @@ function ManagersForm({
   const save = async () => {
     setBusy(true)
     try {
-      const res = await departmentsApi.setManagers(companyId, department.id, [...selected])
+      const res = await departmentsApi.setManagers(
+        companyId,
+        department.id,
+        [...selected],
+        current.map((m) => m.userId)
+      )
       toast.success(`「${department.name}」の管理役を更新しました`)
       onSaved(res.managers)
     } catch (err) {
       toast.error('管理役を更新できませんでした', { description: describeError(err) })
+      const today = managersOfConflict(err)
+      if (today) onChanged(today)
     } finally {
       setBusy(false)
     }

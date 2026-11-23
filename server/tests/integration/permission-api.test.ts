@@ -235,6 +235,27 @@ describe('department managers', () => {
     expect((await as('pa-owner', 'GET', path(ids.sales))).body.data).toEqual({ managers: [] })
   })
 
+  it('PUT with the list the admin saw: replaced only while it is still today\'s list (409 MANAGERS_CHANGED otherwise)', async () => {
+    const ids_ = (r: { body: { data?: unknown } }) => (r.body.data as { managers: Array<{ userId: string }> }).managers.map(m => m.userId).sort()
+    await as('pa-owner', 'PUT', path(ids.sales), { userIds: ['pa-member', 'pa-admin'] })
+    // Seen in any order, duplicates included: the same set → replaced.
+    let r = await as('pa-owner', 'PUT', path(ids.sales), { userIds: ['pa-member', 'pa-manager'], expectedUserIds: ['pa-admin', 'pa-member', 'pa-admin'] })
+    expect(r.status).toBe(200)
+    expect(ids_(r)).toEqual(['pa-manager', 'pa-member'])
+    // A stale view (one missing, one extra, or nothing at all) → nothing written, today's list answered.
+    for (const expectedUserIds of [['pa-member'], ['pa-member', 'pa-admin'], ['pa-member', 'pa-manager', 'pa-admin'], []]) {
+      r = await as('pa-admin', 'PUT', path(ids.sales), { userIds: [], expectedUserIds })
+      expect(r.status, JSON.stringify(expectedUserIds)).toBe(409)
+      expect(r.body.code).toBe('MANAGERS_CHANGED')
+      expect((r.body.managers as Array<{ userId: string }>).map(m => m.userId).sort()).toEqual(['pa-manager', 'pa-member'])
+      expect(ids_(await as('pa-owner', 'GET', path(ids.sales)))).toEqual(['pa-manager', 'pa-member'])
+    }
+    expect((await as('pa-owner', 'PUT', path(ids.sales), { userIds: [], expectedUserIds: 'pa-member' })).status).toBe(400)
+    // Without it, as before: replaced unconditionally.
+    r = await as('pa-owner', 'PUT', path(ids.sales), { userIds: [] })
+    expect(r.body.data).toEqual({ managers: [] })
+  })
+
   it('a department of another company or an unknown id is 404', async () => {
     expect((await as('pa-owner', 'GET', path(ids.otherDept))).status).toBe(404)
     expect((await as('pa-owner', 'PUT', path(ids.otherDept), { userIds: [] })).status).toBe(404)

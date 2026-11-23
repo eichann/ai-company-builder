@@ -50,7 +50,7 @@ const UpdateDepartmentBody = z.object({
 const ReorderBody = z.object({
   items: z.array(z.object({ id: z.string(), sortOrder: z.number(), parentId: z.string().nullable().optional() })),
 })
-const ManagersBody = z.object({ userIds: z.array(z.string().min(1)) })
+const ManagersBody = z.object({ userIds: z.array(z.string().min(1)), expectedUserIds: z.array(z.string().min(1)).optional() })
 const INVALID_BODY = 'Invalid request body'
 
 const errorMessage = (error: unknown) => (error instanceof Error ? error.message : 'Unknown error')
@@ -278,6 +278,7 @@ departmentsRoute.get('/:id/managers', companyMember, async (c) => {
 })
 
 // PUT /api/companies/:companyId/departments/:id/managers - owner/admin; replaces the set
+// (`expectedUserIds`, optional: the list the caller saw; changed since → 409 MANAGERS_CHANGED)
 departmentsRoute.put('/:id/managers', companyMember, serviceBody, async (c) => {
   const deptId = c.req.param('id')
   const member = c.var.member
@@ -290,7 +291,7 @@ departmentsRoute.put('/:id/managers', companyMember, serviceBody, async (c) => {
   const parsed = ManagersBody.safeParse(c.var.body)
   if (!parsed.success) return c.json({ error: 'userIds must be an array of user IDs' }, 400)
 
-  const managers = departments.replaceManagers(actor.value, deptId, parsed.data.userIds)
+  const managers = departments.replaceManagers(actor.value, deptId, parsed.data.userIds, parsed.data.expectedUserIds)
   if (!managers.ok) return refusal(c, managers)
 
   return c.json({ success: true, data: { managers: managers.value } })

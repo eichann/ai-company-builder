@@ -65,7 +65,7 @@ const KNOWN_MESSAGES: Array<[RegExp, string]> = [
 
 /** Error codes whose `error` the server writes in Japanese for the person (shown as is). */
 const JAPANESE_CODES: ReadonlySet<string> = new Set([
-  'GROUP_NAME_TAKEN', 'BAD_GROUP_NAME', 'GROUP_IN_USE', 'RESTRICTED_PLACES_INSIDE', 'READERS_OWNER_ONLY',
+  'GROUP_NAME_TAKEN', 'BAD_GROUP_NAME', 'GROUP_IN_USE', 'RESTRICTED_PLACES_INSIDE', 'READERS_OWNER_ONLY', 'MANAGERS_CHANGED',
 ])
 
 /** A Japanese sentence explaining a failed request and the next step. */
