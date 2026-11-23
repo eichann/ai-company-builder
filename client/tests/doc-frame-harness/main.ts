@@ -387,10 +387,15 @@ async function run() {
   const third = await open(path.join(folder, 'page2.html'))
   views.place(third.viewId, win.webContents.id, { x: 0, y: 0, width: 800, height: 600 })
   await wait(300)
-  third.contents.sendInputEvent({ type: 'mouseDown', x: 20, y: 20, button: 'left', clickCount: 1 })
-  third.contents.sendInputEvent({ type: 'mouseUp', x: 20, y: 20, button: 'left', clickCount: 1 })
-  third.contents.focus()
-  await wait(300)
+  // Give the document the keyboard by a click (as the member does). On a busy CI Mac one click was not
+  // always enough (the control below failed twice on PR #796): click again until it holds, at most
+  // ~3 s, so the test measures the close, not the click's timing.
+  for (let i = 0; i < 10 && !third.contents.isFocused(); i++) {
+    third.contents.sendInputEvent({ type: 'mouseDown', x: 20, y: 20, button: 'left', clickCount: 1 })
+    third.contents.sendInputEvent({ type: 'mouseUp', x: 20, y: 20, button: 'left', clickCount: 1 })
+    third.contents.focus()
+    await wait(300)
+  }
   const closedHad = { app: win.webContents.isFocused(), doc: third.contents.isFocused() }
   views.close(third.viewId, win.webContents.id)
   await wait(500)
