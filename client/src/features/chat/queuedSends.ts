@@ -43,3 +43,24 @@ export function mergeQueuedSends(queue: readonly QueuedSend[]): { text: string; 
 export function draftWith(draft: string, texts: readonly string[]): string {
   return [draft, ...texts].filter(text => text.trim()).join('\n\n')
 }
+
+/** What the composer holds: its text and what is attached. */
+export interface ComposerContents {
+  text: string
+  files: File[]
+  filePaths: string[]
+}
+
+/**
+ * The composer after messages that did not go out come back into it (取り消す,
+ * a stop or an error, a send cut short): what it already holds first, then each
+ * message in order — texts as draftWith, every image kept (none dropped, no
+ * limit), file references once each, like mergeQueuedSends.
+ */
+export function returnedToInput(input: ComposerContents, items: readonly QueuedSend[]): ComposerContents {
+  return {
+    text: draftWith(input.text, items.map(item => item.text)),
+    files: [...input.files, ...items.flatMap(item => item.files ?? [])],
+    filePaths: [...new Set([...input.filePaths, ...items.flatMap(item => item.filePaths ?? [])])],
+  }
+}

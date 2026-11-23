@@ -1,6 +1,6 @@
 import { memo, useCallback, useEffect, useImperativeHandle, useRef, type MutableRefObject } from 'react'
 import { ArrowUp } from '@phosphor-icons/react'
-import type { ChatInputApi } from '../hooks/useChatDraft'
+import type { ChatTextInputApi } from '../hooks/useChatDraft'
 import { PRIMARY_ACTION } from '../../../shared/ui/buttonStyles'
 
 interface LegacyTextareaChatInputProps {
@@ -13,7 +13,7 @@ interface LegacyTextareaChatInputProps {
   hint: string
   onCompositionStateChange?: (isComposing: boolean) => void
   onInputActivity?: () => void
-  apiRef?: MutableRefObject<ChatInputApi | null>
+  apiRef?: MutableRefObject<ChatTextInputApi | null>
 }
 
 /** Plain textarea fallback, enabled with the `chatInputBare` perf flag for debugging. */

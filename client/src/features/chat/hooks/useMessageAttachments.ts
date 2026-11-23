@@ -2,6 +2,33 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { UIMessage } from 'ai'
 import { historyThumbnail } from '../historyThumbnail'
 
+/** Images read for a send: base64 for the request, a small copy for the bubble and the history. */
+export interface ReadImages {
+  parts: Array<{ mediaType: string; data: string }>
+  thumbnails: string[]
+}
+
+/** Converts images to base64 for the request; the bubble and the history keep a small copy. Rejects when one cannot be read. */
+export async function readImages(files: readonly File[]): Promise<ReadImages> {
+  const parts: ReadImages['parts'] = []
+  const thumbnails: string[] = []
+  for (const file of files) {
+    // A file that cannot be read (moved, deleted, unreadable) rejects: the
+    // send stops and the composer gets the text back (ChatConversation).
+    const dataUrl = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader()
+      reader.onload = () => resolve(reader.result as string)
+      reader.onerror = () => reject(reader.error ?? new Error('image read failed'))
+      reader.onabort = () => reject(new Error('image read aborted'))
+      reader.readAsDataURL(file)
+    })
+    // The AI gets the full image; the bubble and the history keep a small copy.
+    thumbnails.push(await historyThumbnail(dataUrl))
+    parts.push({ mediaType: file.type, data: dataUrl.split(',')[1] })
+  }
+  return { parts, thumbnails }
+}
+
 /**
  * Images and file-tree references attached to a message. Two halves:
  * - what the next request sends (`pendingImagesRef`, `pendingFilePathsRef`:
@@ -27,26 +54,10 @@ export function useMessageAttachments() {
   // Pending file paths for display (kept separately so transport body clearing doesn't lose them)
   const pendingDisplayFilePathsRef = useRef<string[]>([])
 
-  /** Convert images to base64 for the request; the bubble and the history keep a small copy. Rejects when one cannot be read. */
-  const stageImages = useCallback(async (files: File[]) => {
-    const imageParts: Array<{ mediaType: string; data: string }> = []
-    const dataUrls: string[] = []
-    for (const file of files) {
-      // A file that cannot be read (moved, deleted, unreadable) rejects: the
-      // send stops and the composer gets the text back (ChatConversation).
-      const dataUrl = await new Promise<string>((resolve, reject) => {
-        const reader = new FileReader()
-        reader.onload = () => resolve(reader.result as string)
-        reader.onerror = () => reject(reader.error ?? new Error('image read failed'))
-        reader.onabort = () => reject(new Error('image read aborted'))
-        reader.readAsDataURL(file)
-      })
-      // The AI gets the full image; the bubble and the history keep a small copy.
-      dataUrls.push(await historyThumbnail(dataUrl))
-      imageParts.push({ mediaType: file.type, data: dataUrl.split(',')[1] })
-    }
-    pendingImagesRef.current = imageParts
-    pendingImageDataUrlsRef.current = dataUrls
+  /** What the next request sends and its bubble shows (staged once the send is sure to go on). */
+  const stageImages = useCallback((images: ReadImages) => {
+    pendingImagesRef.current = images.parts
+    pendingImageDataUrlsRef.current = images.thumbnails
   }, [])
 
   /** File paths for the request (sent as referenceFiles in the system prompt) and the bubble. */

@@ -10,7 +10,7 @@ import { perfMark } from '../../../shared/lib/perfDiagnostics'
 import { useLatestRef } from '../../../shared/hooks/useLatestRef'
 import { useSlashCommands } from '../hooks/useSlashCommands'
 import { SlashCommandDropdown, type SlashCommandItem } from './SlashCommandDropdown'
-import type { ChatInputApi } from '../hooks/useChatDraft'
+import type { ChatTextInputApi } from '../hooks/useChatDraft'
 import { PRIMARY_ACTION } from '../../../shared/ui/buttonStyles'
 
 interface CodeMirrorChatInputProps {
@@ -24,7 +24,7 @@ interface CodeMirrorChatInputProps {
   onCompositionStateChange?: (isComposing: boolean) => void
   onInputActivity?: () => void
   slashCommands?: SlashCommandItem[]
-  apiRef?: MutableRefObject<ChatInputApi | null>
+  apiRef?: MutableRefObject<ChatTextInputApi | null>
   suggestion?: string | null
   onSuggestionCleared?: () => void
 }

@@ -38,6 +38,23 @@ async function send(page: Page, text: string) {
 const chat = async <T>(page: Page, fn: (control: Control) => T) => (await page.evaluateHandle(() => window.__acbChat)).evaluate(fn)
 const paths = (page: Page) => chat(page, c => c.requests.map(r => r.path))
 const turnStarted = (page: Page) => expect.poll(() => chat(page, c => c.open())).toBe(true)
+const composer = (page: Page) => page.locator('[data-composer-drop]').locator('visible=true')
+const composerImages = (page: Page) => composer(page).locator('img[alt]').evaluateAll(images => images.map(image => image.getAttribute('alt')))
+/** Drops an image file on the visible composer (as pasting or dragging one in does). */
+async function attachImage(page: Page, name: string) {
+  const data = await page.evaluateHandle(name => {
+    const dt = new DataTransfer()
+    dt.items.add(new File([new Uint8Array([137, 80, 78, 71])], name, { type: 'image/png' }))
+    return dt
+  }, name)
+  await composer(page).dispatchEvent('drop', { dataTransfer: data })
+}
+/** Images take a while to read (a large screenshot): the send is still preparing meanwhile. */
+const slowImageReads = (page: Page, ms: number) => page.addInitScript(ms => {
+  const read = FileReader.prototype.readAsDataURL
+  FileReader.prototype.readAsDataURL = function (this: FileReader, blob: Blob) { setTimeout(() => read.call(this, blob), ms) }
+}, ms)
+const chatRequestBodies = (page: Page) => chat(page, c => c.requests.filter(r => r.path === '/api/chat').map(r => JSON.stringify(r.body)))
 
 test.describe('a running turn', () => {
   test('Claude Code: subagent row with its live progress line, usage meter, stop button, model locked', async ({ page }) => {
@@ -180,6 +197,42 @@ test.describe('instructions while the AI works', () => {
     await typed(page).toBe('一つ目')
     expect((await paths(page)).filter(p => p === '/api/chat')).toHaveLength(1)
   })
+
+  test('a waiting message comes back whole: 取り消す and a stop return its images with its text, several in order', async ({ page }) => {
+    // Only the text came back before: a pasted screenshot was lost.
+    await openPreview(page, 'chat-header', { turn: 'manual' })
+    await chat(page, c => { c.steerStatus = 'unavailable' })
+    await send(page, '見積書を作って')
+    await turnStarted(page)
+    await input(page).click()
+    await page.keyboard.insertText('この画面も見て')
+    await attachImage(page, 'screen.png')
+    await expect.poll(() => composerImages(page)).toEqual(['screen.png'])
+    await page.keyboard.press('Meta+Enter')
+    const waiting = page.getByRole('listitem').filter({ hasText: '応答が終わったら送ります' })
+    await expect(waiting).toContainText('この画面も見て')
+    await expect.poll(() => composerImages(page)).toEqual([])
+
+    await waiting.getByRole('button', { name: '取り消す' }).click()
+    await expect(waiting).toHaveCount(0)
+    await typed(page).toBe('この画面も見て')
+    await expect.poll(() => composerImages(page)).toEqual(['screen.png'])
+
+    // Waiting again, with a second message and its own image; the AI is stopped: both come back.
+    await page.keyboard.press('Meta+Enter')
+    await expect(waiting).toHaveCount(1)
+    await input(page).click()
+    await page.keyboard.insertText('二つ目')
+    await attachImage(page, 'second.png')
+    await page.keyboard.press('Meta+Enter')
+    await expect(waiting).toHaveCount(2)
+    await expect.poll(() => composerImages(page)).toEqual([])
+    await page.getByRole('banner').getByRole('button', { name: '停止' }).click()
+    await expect(waiting).toHaveCount(0)
+    await typed(page).toBe('この画面も見て\n\n二つ目')
+    await expect.poll(() => composerImages(page)).toEqual(['screen.png', 'second.png'])
+    expect((await paths(page)).filter(p => p === '/api/chat')).toHaveLength(1)
+  })
 })
 
 test('a next-prompt suggestion is asked for after a finished turn and offered as ghost text', async ({ page }) => {
@@ -285,6 +338,58 @@ test('a new conversation left for another with nothing typed goes away; one with
   await sent.click()
   await expect(rows).toHaveCount(1)
   await expect(sent).toHaveAttribute('aria-current', 'page')
+})
+
+test('a first message with an image still goes out when the member moves to another conversation while the image is read', async ({ page }) => {
+  // The blank-tab check did not count a send still reading its images: the tab closed and the text and image were lost.
+  await slowImageReads(page, 800)
+  await openPreview(page, 'chat-header', { turn: 'manual' })
+  const sidebar = page.getByRole('complementary', { name: 'AIへの相談' })
+  await expect(input(page)).toBeVisible()
+  await input(page).click()
+  await page.keyboard.insertText('この画像の内容をまとめて')
+  await attachImage(page, 'screen.png')
+  await page.keyboard.press('Meta+Enter')
+  await sidebar.getByRole('button', { name: 'AIに相談する', exact: true }).click()
+  await expect.poll(async () => (await chatRequestBodies(page)).length).toBe(1)
+  const [body] = await chatRequestBodies(page)
+  expect(body).toContain('この画像の内容をまとめて')
+  expect(body).toContain('iVBORw')
+  // The conversation stays (working now) beside the new one.
+  await expect(sidebar.getByRole('region', { name: 'AIが作業中' }).getByRole('button', { name: /^この画像の内容をまとめて/ })).toBeVisible()
+})
+
+test('a new consultation started in the tab while an image is read does not get the earlier message; it comes back into the input', async ({ page }) => {
+  await slowImageReads(page, 1500)
+  await openPreview(page, 'chat-header', { turn: 'manual' })
+  await expect(input(page)).toBeVisible()
+  await input(page).click()
+  await page.keyboard.insertText('この画像の内容をまとめて')
+  await attachImage(page, 'screen.png')
+  await page.keyboard.press('Meta+Enter')
+  await page.evaluate(() => (window as unknown as { __acbCommands: { run: (id: string, args: unknown) => Promise<unknown> } }).__acbCommands.run('chat.newConsultation', { message: '/monthly-report ' }))
+  await expect(page.getByText('画像の準備中に新しい相談を始めたため、前の相談へのメッセージは送りませんでした。入力した文と画像は入力欄に戻してあります。')).toBeVisible()
+  await typed(page).toBe('この画像の内容をまとめて')
+  await expect.poll(() => composerImages(page)).toEqual(['screen.png'])
+  await page.waitForTimeout(300)
+  const bodies = await chatRequestBodies(page)
+  expect(bodies).toHaveLength(1)
+  expect(bodies[0]).toContain('/monthly-report')
+  expect(bodies[0]).not.toContain('この画像の内容をまとめて')
+  expect(bodies[0]).not.toContain('iVBORw')
+
+  // Nothing of it was left staged: the member's next message without the image goes without it.
+  await turnStarted(page)
+  await chat(page, c => c.finish())
+  await composer(page).locator('img[alt="screen.png"]').hover()
+  await composer(page).getByRole('button', { name: '×' }).click()
+  await expect.poll(() => composerImages(page)).toEqual([])
+  await input(page).click()
+  await page.keyboard.press('Meta+A')
+  await page.keyboard.insertText('別の質問です')
+  await page.keyboard.press('Meta+Enter')
+  await expect.poll(async () => (await chatRequestBodies(page)).length).toBe(2)
+  expect((await chatRequestBodies(page))[1]).not.toContain('iVBORw')
 })
 
 test('a group heading folds its rows, stays folded after a reload, and a search still shows its matches', async ({ page }) => {

@@ -118,6 +118,13 @@ export function useComposerAttachments(
     update({ ...current, filePaths: current.filePaths.filter((_, i) => i !== index) })
   }, [update])
 
+  // Read and set by the conversation (ChatInputApi): what a waiting message or a stopped send
+  // gives back is set as it was, past the drop limit — it was accepted once, nothing is dropped.
+  const getAttachments = useCallback(() => ({ files: [...currentRef.current.images], filePaths: [...currentRef.current.filePaths] }), [])
+  const setAttachments = useCallback((value: { files: File[]; filePaths: string[] }) => {
+    update({ images: [...value.files], filePaths: [...value.filePaths] })
+  }, [update])
+
   const sendWithAttachments = useCallback((text: string) => {
     const { images, filePaths } = currentRef.current
     onSend(text, images.length > 0 ? [...images] : undefined, filePaths.length > 0 ? [...filePaths] : undefined)
@@ -133,5 +140,7 @@ export function useComposerAttachments(
     removeImage,
     removeFilePath,
     sendWithAttachments,
+    getAttachments,
+    setAttachments,
   }
 }

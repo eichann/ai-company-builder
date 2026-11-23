@@ -15,7 +15,7 @@ export interface LeftConversation {
   draft: string
   /** Images or files attached in its input and not sent. */
   attachments: number
-  /** A turn runs, messages wait to go out, the AI waits for an answer, or a hand-off request is open. */
+  /** A turn runs, a send is still reading its images, messages wait to go out, the AI waits for an answer, or a hand-off request is open. */
   busy: boolean
 }
 

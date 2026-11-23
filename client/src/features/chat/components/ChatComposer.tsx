@@ -1,4 +1,4 @@
-import { memo, useState, type ReactNode } from 'react'
+import { memo, useImperativeHandle, useRef, useState, type ReactNode } from 'react'
 import { ListChecks, X } from '@phosphor-icons/react'
 import type { DroppedRecordRef } from '../../../../shared/record-drop'
 import type { DraggedRecord } from '../../../shared/lib/dragTypes'
@@ -10,7 +10,7 @@ import { ComposerAttachments } from './ComposerAttachments'
 import type { SlashCommandItem } from './SlashCommandDropdown'
 import { isPerfCutEnabled } from '../../../shared/lib/perfDiagnostics'
 import { useComposerAttachments } from '../hooks/useComposerAttachments'
-import type { ChatInputApi } from '../hooks/useChatDraft'
+import type { ChatInputApi, ChatTextInputApi } from '../hooks/useChatDraft'
 
 interface ChatInputProps {
   initialDraft?: string
@@ -26,7 +26,7 @@ interface ChatInputProps {
   onCompositionStateChange?: (isComposing: boolean) => void
   onInputActivity?: () => void
   slashCommands?: SlashCommandItem[]
-  /** Filled by the input: drafts, voice input and chat.insertText go through it. */
+  /** Filled by the composer (text input + attachments): drafts, voice input, chat.insertText and returned waiting messages go through it. */
   apiRef?: React.MutableRefObject<ChatInputApi | null>
   /** Next-prompt suggestion shown as ghost text (promptSuggestion.ts). */
   suggestion?: string | null
@@ -73,6 +73,18 @@ export const ChatInput = memo(function ChatInput({
   const [voiceBusy, setVoiceBusy] = useState(false)
   const isLegacyTextareaMode = isPerfCutEnabled('chatInputBare')
   const attachments = useComposerAttachments(onSend, onAttachmentsChange, onDropRecord)
+  // The text input fills its own handle; the conversation gets it together with the attachments.
+  const textApiRef = useRef<ChatTextInputApi | null>(null)
+  const { getAttachments, setAttachments } = attachments
+  useImperativeHandle(apiRef, () => ({
+    focus: () => textApiRef.current?.focus(),
+    captureInsertion: () => textApiRef.current?.captureInsertion() ?? (() => false),
+    getValue: () => textApiRef.current?.getValue() ?? '',
+    setValue: (text: string) => textApiRef.current?.setValue(text),
+    replaceText: (text: string) => textApiRef.current?.replaceText(text) ?? false,
+    getAttachments,
+    setAttachments,
+  }), [getAttachments, setAttachments])
 
   const inputComponent = isLegacyTextareaMode ? (
     <LegacyTextareaChatInput
@@ -85,7 +97,7 @@ export const ChatInput = memo(function ChatInput({
       hint={hint}
       onCompositionStateChange={onCompositionStateChange}
       onInputActivity={onInputActivity}
-      apiRef={apiRef}
+      apiRef={textApiRef}
     />
   ) : (
     <CodeMirrorChatInput
@@ -99,7 +111,7 @@ export const ChatInput = memo(function ChatInput({
       onCompositionStateChange={onCompositionStateChange}
       onInputActivity={onInputActivity}
       slashCommands={slashCommands}
-      apiRef={apiRef}
+      apiRef={textApiRef}
       suggestion={voiceBusy ? null : suggestion}
       onSuggestionCleared={onSuggestionCleared}
     />
