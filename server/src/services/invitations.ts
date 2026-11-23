@@ -29,7 +29,7 @@ import type { CompanyRepository, CompanyRow } from '../ports/companies'
 import type { CompanyDataSource } from '../ports/company-data'
 import type { InvitationTokenLookup, InvitationWithCompany } from '../ports/invitations'
 import type { MembershipRepository } from '../ports/memberships'
-import type { Transactions } from '../ports/transactions'
+import type { TrackReaderChange } from './holding-tickets'
 import { isOwner, type Member } from './access'
 import { ok, refuse, type Outcome } from './outcome'
 
@@ -79,13 +79,14 @@ export interface InvitationServiceDeps {
   companies: CompanyRepository
   memberships: MembershipRepository
   accounts: AccountDirectory
-  transactions: Transactions
   clock: Clock
   ids: IdGenerator
+  /** Joining changes who reads private folders: accepting runs inside it (services/holding-tickets.ts). */
+  trackReaderChange: TrackReaderChange
 }
 
 export function createInvitationService(deps: InvitationServiceDeps) {
-  const { invitationTokens, companyData, companies, memberships, accounts, transactions, clock, ids } = deps
+  const { invitationTokens, companyData, companies, memberships, accounts, clock, ids, trackReaderChange } = deps
   // The company's invitations: the member's company, or the one the token row names.
   const invitationsOf = (companyId: string) => companyData.forCompany(companyId).invitations
 
@@ -225,7 +226,9 @@ export function createInvitationService(deps: InvitationServiceDeps) {
 
       const membershipId = ids.newId()
       const timestamp = clock.now()
-      const joined = transactions.run(() => {
+      // Joining can give private folders back (an invited owner / admin reads every one): a holding
+      // ticket left when they were removed is cancelled in the same transaction.
+      const joined = trackReaderChange(invitation.company_id, { cause: 'role', byUser: invitation.created_by }, () => {
         if (!invitationsOf(invitation.company_id).consume(invitation.id, userId)) return false
         memberships.insert({ id: membershipId, userId, companyId: invitation.company_id, role: invitation.role, createdAt: timestamp })
         // 所属 chosen by who invited them (departments deleted since are skipped).

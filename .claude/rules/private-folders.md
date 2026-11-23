@@ -11,6 +11,12 @@ paths:
   - "shared/types/private-folders.ts"
   - "shared/core/reserved-paths.ts"
   - "server/tests/**/private-folders.test.ts"
+  - "server/src/services/holding-tickets.ts"
+  - "server/src/lib/reader-change-gate.ts"
+  - "server/src/ports/holding.ts"
+  - "server/src/adapters/sqlite/holding.ts"
+  - "server/src/db/schema/holding.ts"
+  - "server/tests/**/holding-tickets.test.ts"
   - "admin/src/lib/private-folders.ts"
   - "admin/src/lib/private-folder-help.ts"
   - "admin/src/app/**/private*/**"
@@ -96,6 +102,57 @@ or who can see it. So:
   against its scope repository, skip the outdated-app guard, and moving rules into/out of one is
   refused. `GET /permissions/folders` lists private folders only to those who may edit them.
 
+## Access removed: holding tickets (owner decision 2026-11-23 「B」, stage S1)
+
+Someone who stops reading a private folder may hold work for it on their PC that never reached
+the server; their app removes the folder (owner decision Q1). The plan (design memo
+`docs/private-folder-holding-design.md`, internal): before it does, the app hands that work to a
+server-side holding place for the folder's managers to take in or discard. S1 (this) is only the
+server's record of who may do so — **no endpoint reads it yet**; the app still deletes as before.
+
+- **A ticket** (`holding_tickets`, behind the handle `holding`: `ports/holding.ts`,
+  `adapters/sqlite/holding.ts`) per member × private folder whose read access ended: `scope_id`,
+  `repo_id`, `folder_path` (server-only — never to be answered to that member), `cause`
+  (`readers` taken off its readers, `left-company`, `folder-deleted` (owners / admins and the
+  deleter included: the folder is gone for all), `role` (an owner/admin demoted reads only the
+  folders a rule names them on), `rules` (the permission editor)), `state` open / used /
+  cancelled / expired, `expires_at` = 30 days. One open ticket per member and folder (partial
+  unique index): losing it again while one is open renews it. Reading the folder again cancels
+  the open one, on every path: added back to its readers or by a rule, made public (everyone who
+  reads it now; a former member keeps theirs), or joining the company again (`POST /members`, an
+  accepted invitation — an owner / admin reads every private folder; a plain member reads none
+  until added, their rules went when they left). A folder made public is no loss; an editor made
+  a viewer still reads.
+- **Written in the same transaction as the change**, by the one wrapper
+  `services/holding-tickets.ts` `track(companyId, { cause, byUser }, mutate)`: who reads each
+  private folder (`canReadPrivateScope` over the members) before and after, the difference
+  becomes tickets / cancellations, each recorded in `permission_history` (`holding-ticket`:
+  `ticketId`, `scopeId`, `path`, `userId`, `cause`, `expiresAt`; `holding-ticket-cancel`). Used by
+  `PUT /private-folders/:id/members`, `DELETE /private-folders/:id` and `POST
+  /private-folders/:id/make-public` (the port's `delete` / `makePublic` take `trackRows`: their
+  one row transaction, after the archive / the company commit, runs inside it), `DELETE
+  /members/:userId`, `PUT /members/:userId/role`, `POST /members`, accepting an invitation,
+  creating a company, and every rule change of the permission editor (`recordChange`). A refused
+  or failed change rolls back with its tickets. A `track` inside another of the same company joins
+  it (one comparison over the whole change, each ticket written once, the outer cause).
+- **The gate** (`lib/reader-change-gate.ts`, made once by the composition root): the storage
+  steps that can take reading away — `scopes.replaceRules` / `upsertRule` / `updateRuleAccess` /
+  `deleteRule` / `clearRules` / `deleteUserRules`, `privateFolders.replaceRules`, the rows of
+  `privateFolders.delete` / `makePublic`, `memberships.insert` / `updateRole` / `delete` — throw
+  `UntrackedReaderChangeError` outside `track` of that company. A new path that forgets the
+  wrapper fails in its first test (500, nothing changed) instead of leaving a member without a
+  ticket. Handles built without the gate (operator commands, unit tests) are not asked; that the
+  composition root passes it is itself tested (the composed storage refuses outside `track`).
+- Expiry: the server clock (`expireHoldingTickets`, every company, records on or off) closes open
+  tickets past `expires_at`; running twice changes nothing more.
+- Tests: `server/tests/unit/holding-tickets.test.ts` (each gated step refuses outside `track`;
+  renew / cancel / made public / joining again / nested `track` / rollback / other company /
+  expiry and the clock), `server/tests/integration/holding-tickets.test.ts` (`READER_CHANGES`: one
+  row per route that can take a private folder away — a new such route gets a row; changes that
+  keep everyone reading leave none; access back cancels — readers, make-public, `POST /members`,
+  an invitation; the composed storage refuses outside `track`, also a delete / make-public whose
+  `trackRows` does not track). Each guard mutation-checked.
+
 ## Repositories and git-http
 
 - `server/src/lib/git-server/scope-repo.ts`: `<REPOS_DIR>/<companyId>.scopes/<repoId>.git`,
@@ -148,7 +205,8 @@ or who can see it. So:
   rule there readable (write unchanged) and clear `repo_id`, then delete the scope repo.
 - `DELETE /private-folders/:scopeId?confirm=<last path segment, NFC>` (owner/admin; else 400
   `CONFIRMATION_REQUIRED`): stop pushes, archive, remove rules/scopes at and under the path and
-  the `scope_repos` row in one transaction, then the repo → `{ path, archived: true }`.
+  the `scope_repos` row in one transaction (with every reader's holding ticket, "Access removed"
+  above), then the repo → `{ path, archived: true }`.
 - Archive (`archivePrivateFolder`, before delete and make-public; on failure nothing is removed):
   `git bundle create --all` into `PRIVATE_FOLDER_ARCHIVE_DIR` (default
   `<DATA_DIR>/backups/private-folders`)`/<companyId>/<time>_<action>_<scopeId>.bundle` + `.json`

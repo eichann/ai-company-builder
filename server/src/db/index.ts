@@ -22,6 +22,7 @@ import { migrateMemberAbsenceHistory, migrateMemberWorkSwitches, taskSchema } fr
 import { migrateSkillUseColumns, skillUseSchema } from './schema/skill-uses'
 import { securityAlertSchema } from './schema/security-alerts'
 import { migrateShelfHistoryRequester, skillShelfSchema } from './schema/skill-shelf'
+import { holdingSchema } from './schema/holding'
 
 // Lanes (server.md "Lane markers"): add only right under your lane's ▼.
 // lane A ▼
@@ -95,6 +96,8 @@ const SCHEMA = [
   securityAlertSchema,
   // The Skill shelf of a company without the shared folder (plugins.md "The Skill shelf").
   skillShelfSchema,
+  // Holding tickets: who stopped reading which private folder (private-folders.md "Access removed").
+  holdingSchema,
   // Lanes (server.md "Lane markers"): add only right under your lane's ▼.
   // lane A ▼
   // The Slack connection (slack-connector.md).

@@ -10,6 +10,7 @@ import { tmpdir } from 'os'
 import { join } from 'path'
 import type Database from 'better-sqlite3'
 import type { PrivateFolderRecord, PrivateFolderRepository, PrivateRuleSet, FolderAccess } from '../ports/private-folders'
+import type { ReaderChangeGate } from '../ports/holding'
 import { createScopeRepo, removeScopeRepo, SERVER_GIT_IDENTITY } from '../lib/git-server'
 import { gitAsync } from '../lib/git-exec'
 import { companyRepoPath } from '../lib/config'
@@ -193,10 +194,18 @@ export class MakePublicError extends Error {
  *      a member pushed meanwhile; if the path already holds exactly that tree
  *      (a previous attempt got this far), nothing is written;
  *   3. in one transaction: rules readable for everyone (write unchanged),
- *      repo_id cleared, scope_repos row removed;
+ *      repo_id cleared, scope_repos row removed — and, through `trackRows`,
+ *      the open holding tickets of everyone who reads it now cancelled;
  *   4. delete the scope repository.
  */
-export async function makePrivateFolderPublic(conn: Conn, companyId: string, folder: PrivateFolderRecord, by: string | null = null): Promise<{ path: string; commit: string }> {
+export async function makePrivateFolderPublic(
+  conn: Conn,
+  companyId: string,
+  folder: PrivateFolderRecord,
+  by: string | null = null,
+  trackRows: (changeRows: () => void) => void = run => run(),
+  gate?: ReaderChangeGate,
+): Promise<{ path: string; commit: string }> {
   const scopeId = folder.scope.id
   const scopeRepo = privateRepoPath(companyId, folder.repoId)
   const bare = companyRepoPath(companyId)
@@ -257,15 +266,19 @@ export async function makePrivateFolderPublic(conn: Conn, companyId: string, fol
       await gitAsync(['-C', scopeRepo, 'update-ref', '-d', exportRef]).catch(() => '')
     }
 
-    conn.transaction(() => {
-      const subtree = (conn.prepare(`SELECT id, path FROM scopes WHERE company_id = ?`).all(companyId) as Array<{ id: string; path: string }>)
-        .filter(s => isSameOrAncestorPath(folder.scope.path, s.path))
-      for (const s of subtree) {
-        conn.prepare(`UPDATE scope_rules SET can_read = 1 WHERE scope_id = ? AND company_id = ?`).run(s.id, companyId)
-      }
-      conn.prepare(`UPDATE scopes SET repo_id = NULL WHERE id = ? AND company_id = ?`).run(scopeId, companyId)
-      conn.prepare(`DELETE FROM scope_repos WHERE id = ? AND company_id = ?`).run(folder.repoId, companyId)
-    })()
+    // Holding tickets of everyone who reads it now are cancelled in this same transaction (trackRows).
+    trackRows(() => {
+      gate?.assertWithin(companyId, 'privateFolders.makePublic')
+      conn.transaction(() => {
+        const subtree = (conn.prepare(`SELECT id, path FROM scopes WHERE company_id = ?`).all(companyId) as Array<{ id: string; path: string }>)
+          .filter(s => isSameOrAncestorPath(folder.scope.path, s.path))
+        for (const s of subtree) {
+          conn.prepare(`UPDATE scope_rules SET can_read = 1 WHERE scope_id = ? AND company_id = ?`).run(s.id, companyId)
+        }
+        conn.prepare(`UPDATE scopes SET repo_id = NULL WHERE id = ? AND company_id = ?`).run(scopeId, companyId)
+        conn.prepare(`DELETE FROM scope_repos WHERE id = ? AND company_id = ?`).run(folder.repoId, companyId)
+      })()
+    })
     await removeScopeRepo(scopeRepo)
     return { path: folder.scope.path, commit }
   } finally {
@@ -300,12 +313,20 @@ async function archivePrivateFolder(
  *   2. archive the repository (archivePrivateFolder) — nothing is deleted
  *      if that fails;
  *   3. in one transaction: the rules and scopes at and under its path, the
- *      scope_repos row (= the reservation in the company repository);
+ *      scope_repos row (= the reservation in the company repository) — and,
+ *      through `trackRows`, a holding ticket for everyone who read it;
  *   4. delete the scope repository.
- * Members who could read it see it disappear like losing access (their app
- * keeps nothing it can still sync to).
+ * Members who could read it lose it like losing access; their ticket lets
+ * their app hand over what it never sent (private-folders.md "Access removed").
  */
-export async function deletePrivateFolder(conn: Conn, companyId: string, folder: PrivateFolderRecord, by: string): Promise<{ path: string }> {
+export async function deletePrivateFolder(
+  conn: Conn,
+  companyId: string,
+  folder: PrivateFolderRecord,
+  by: string,
+  trackRows: (removeRows: () => void) => void = run => run(),
+  gate?: ReaderChangeGate,
+): Promise<{ path: string }> {
   const scopeId = folder.scope.id
   closeScope(scopeId)
   try {
@@ -313,12 +334,16 @@ export async function deletePrivateFolder(conn: Conn, companyId: string, folder:
       throw new MakePublicError('BUSY', 'A push to this folder is still running; try again in a moment')
     }
     await archivePrivateFolder(conn, companyId, folder, 'delete', by)
-    conn.transaction(() => {
-      const subtree = (conn.prepare(`SELECT id, path FROM scopes WHERE company_id = ?`).all(companyId) as Array<{ id: string; path: string }>)
-        .filter(s => isSameOrAncestorPath(folder.scope.path, s.path))
-      for (const s of subtree) deleteScopeAndRules(conn, companyId, s.id)
-      conn.prepare(`DELETE FROM scope_repos WHERE id = ? AND company_id = ?`).run(folder.repoId, companyId)
-    })()
+    // Its readers' holding tickets are written in this same transaction (trackRows).
+    trackRows(() => {
+      gate?.assertWithin(companyId, 'privateFolders.delete')
+      conn.transaction(() => {
+        const subtree = (conn.prepare(`SELECT id, path FROM scopes WHERE company_id = ?`).all(companyId) as Array<{ id: string; path: string }>)
+          .filter(s => isSameOrAncestorPath(folder.scope.path, s.path))
+        for (const s of subtree) deleteScopeAndRules(conn, companyId, s.id)
+        conn.prepare(`DELETE FROM scope_repos WHERE id = ? AND company_id = ?`).run(folder.repoId, companyId)
+      })()
+    })
     await removeScopeRepo(privateRepoPath(companyId, folder.repoId))
     return { path: folder.scope.path }
   } finally {
@@ -331,7 +356,7 @@ export async function deletePrivateFolder(conn: Conn, companyId: string, folder:
  * rows, scope repositories, the race protections. Refusals become results;
  * any other error propagates.
  */
-export function sqlitePrivateFolderRepository(conn: Database.Database, companyId: string): PrivateFolderRepository {
+export function sqlitePrivateFolderRepository(conn: Database.Database, companyId: string, gate?: ReaderChangeGate): PrivateFolderRepository {
   return {
     list: scopes => listPrivateFolders(conn, companyId, scopes),
     get: scopeId => getPrivateFolder(conn, companyId, scopeId),
@@ -351,20 +376,23 @@ export function sqlitePrivateFolderRepository(conn: Database.Database, companyId
       }
     },
 
-    replaceRules: (scopeId, rules, by) => replacePrivateFolderRules(conn, companyId, scopeId, rules, by),
+    replaceRules: (scopeId, rules, by) => {
+      gate?.assertWithin(companyId, 'privateFolders.replaceRules')
+      replacePrivateFolderRules(conn, companyId, scopeId, rules, by)
+    },
 
-    async makePublic(folder, by) {
+    async makePublic(folder, by, trackRows) {
       try {
-        return { ok: true, value: await makePrivateFolderPublic(conn, companyId, folder, by) }
+        return { ok: true, value: await makePrivateFolderPublic(conn, companyId, folder, by, trackRows, gate) }
       } catch (err) {
         if (err instanceof MakePublicError) return { ok: false, reason: err.code, message: err.message }
         throw err
       }
     },
 
-    async delete(folder, by) {
+    async delete(folder, by, trackRows) {
       try {
-        return { ok: true, value: await deletePrivateFolder(conn, companyId, folder, by) }
+        return { ok: true, value: await deletePrivateFolder(conn, companyId, folder, by, trackRows, gate) }
       } catch (err) {
         if (err instanceof MakePublicError) return { ok: false, reason: err.code, message: err.message }
         throw err

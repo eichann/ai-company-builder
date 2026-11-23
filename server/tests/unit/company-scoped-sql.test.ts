@@ -67,6 +67,8 @@ const HANDLE_TABLES: Record<string, string[]> = {
   member_groups: ['adapters/sqlite/groups.ts'],
   member_group_members: ['adapters/sqlite/groups.ts'],
   permission_history: ['adapters/sqlite/groups.ts'],
+  // Who stopped reading which private folder (private-folders.md "Access removed: holding tickets").
+  holding_tickets: ['adapters/sqlite/holding.ts'],
   orphaned_scopes: ['adapters/orphaned-scopes.ts'],
   // The company map (records.md). record-contents.ts: the startup move of older texts into the content store.
   record_settings: ['adapters/sqlite/records.ts', 'adapters/sqlite/record-contents.ts'],
@@ -192,6 +194,7 @@ const HANDLE_FACTORIES = [
   'sqliteSecurityAlertRepository',
   'sqliteSkillShelfRepository',
   'sqliteGroupRepository', 'sqlitePermissionHistoryRepository',
+  'sqliteHoldingTicketRepository',
   'sqliteJobRepository',
   // Lanes (server.md "Lane markers"): add only right under your lane's ▼.
   // lane A ▼

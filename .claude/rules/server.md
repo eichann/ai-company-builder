@@ -475,7 +475,9 @@ The admin console's calls are pinned by `server/tests/integration/admin-contract
   list (`RecordRepository.forgetMember`, `records.md` "Members-only records"; a group or department on a
   list follows who is in it), so re-adding them starts from nothing; a
   promotion to owner/admin deletes them too. `everyone` rules are untouched, so nothing starts
-  inheriting.
+  inheriting. A removal and a role change run inside `holdingTickets.track`: every private folder
+  the person stops reading gets a holding ticket in the same transaction (`private-folders.md`
+  "Access removed").
 - Invitations are single-use (`services/invitations.ts` `signUp`): a sign-up with `X-Invitation-Token`
   claims the invitation atomically (`signup_claimed_at`, released if the sign-up fails) and
   records the account (`signup_user_id`); a second sign-up with the link is refused; accepting is
@@ -695,7 +697,9 @@ restriction there stays private folders; groups cannot be named in their rules).
   /private-folders/:id/members`); a department deleted (`department-delete`: `departmentId`,
   `folder`, `members` = who belonged, in the delete's transaction) and a private folder created
   (`private-folder-create`: `scopeId`, `path`, `after` = its first viewers and editors; owners /
-  admins are implicit, as in `private-folder-members`). No endpoint reads it yet.
+  admins are implicit, as in `private-folder-members`), and holding tickets opened or cancelled
+  when someone stops / starts reading a private folder again (`holding-ticket`,
+  `holding-ticket-cancel`: `private-folders.md` "Access removed"). No endpoint reads it yet.
 - Tests: `tests/unit/permissions-groups.test.ts`, `tests/integration/restricted-places.test.ts`
   (each guard mutation-checked; 所属 history, a department deleted), `private-folders.test.ts` (a
   folder's creation), `company-without-folder.test.ts`, `plugin-steps.test.ts` (the note),

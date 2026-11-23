@@ -15,6 +15,7 @@ import type { PermissionHistoryEntry } from '../ports/groups'
 import type { Clock } from '../ports/clock'
 
 import type { NotPromise, Transactions } from '../ports/transactions'
+import type { TrackReaderChange } from './holding-tickets'
 import { supportsWriteDeniedRecovery } from '../lib/client-version'
 import { membersLosingWrite } from '../lib/write-loss'
 import {
@@ -138,12 +139,14 @@ export interface PermissionEditorDeps {
   companyFolders: CompanyFolders
   transactions: Transactions
   clock: Clock
+  /** A rule on a private folder decides who reads it: every rule change runs inside it (services/holding-tickets.ts). */
+  trackReaderChange: TrackReaderChange
   /** Folders (NFC) of the departments the user manages (permission-views.ts). */
   managedFolders(companyId: string, userId: string): string[]
 }
 
 export function createPermissionEditorService(deps: PermissionEditorDeps) {
-  const { companyData, memberships, clientActivity, pushRejections, accounts, repoStore, companyFolders, transactions, clock, managedFolders } = deps
+  const { companyData, memberships, clientActivity, pushRejections, accounts, repoStore, companyFolders, transactions, clock, managedFolders, trackReaderChange } = deps
   // Company handles (ports/company-data.ts): the company is always the member's / the one just checked.
   const scopesOf = (companyId: string) => companyData.forCompany(companyId).scopes
   const privateFoldersOf = (companyId: string) => companyData.forCompany(companyId).privateFolders
@@ -197,7 +200,8 @@ export function createPermissionEditorService(deps: PermissionEditorDeps) {
       const s = scopes.getByPath(p)
       return s ? scopes.rulesOf(s.id).map(ruleShape) : []
     }
-    return transactions.run(() => {
+    // A rule on a private folder decides who reads it: holding tickets for whoever stops (services/holding-tickets.ts).
+    return trackReaderChange(actor.companyId, { cause: 'rules', byUser: actor.userId }, () => {
       const before = paths.map(rulesAt)
       const result = mutate()
       companyData.forCompany(actor.companyId).permissionHistory.append({

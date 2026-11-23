@@ -43,6 +43,8 @@ const LATER_TABLES = [
   'browser_execution_reports',
   'browser_target_locks',
   'browser_type_grants',
+  // private-folders.md "Access removed: holding tickets": who stopped reading which private folder.
+  'holding_tickets',
 ]
 /** Indexes later builds add on a table that was there before. */
 const LATER_INDEXES = [

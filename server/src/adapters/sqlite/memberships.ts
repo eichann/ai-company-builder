@@ -1,7 +1,14 @@
 import type Database from 'better-sqlite3'
 import type { MembershipRepository, MembershipRow } from '../../ports/memberships'
+import type { ReaderChangeGate } from '../../ports/holding'
 
-export function sqliteMembershipRepository(conn: Database.Database): MembershipRepository {
+/**
+ * `gate` (the composition root's, lib/reader-change-gate.ts): joining, a role change and a
+ * removal change who reads private folders, so they run only inside holdingTickets.track (a
+ * loss opens a holding ticket, getting a folder back cancels it). Absent (operator
+ * commands, unit tests building the adapter alone): not asked.
+ */
+export function sqliteMembershipRepository(conn: Database.Database, gate?: ReaderChangeGate): MembershipRepository {
   return {
     roleOf(companyId, userId) {
       const row = conn.prepare(`
@@ -36,6 +43,8 @@ export function sqliteMembershipRepository(conn: Database.Database): MembershipR
     },
 
     insert(m) {
+      // Joining (again) can give back private folders: a holding ticket waiting for them is cancelled.
+      gate?.assertWithin(m.companyId, 'memberships.insert')
       conn.prepare(`
         INSERT INTO memberships (id, user_id, company_id, role, created_at, updated_at)
         VALUES (?, ?, ?, ?, ?, ?)
@@ -43,11 +52,13 @@ export function sqliteMembershipRepository(conn: Database.Database): MembershipR
     },
 
     updateRole(companyId, userId, role, updatedAt) {
+      gate?.assertWithin(companyId, 'memberships.updateRole')
       conn.prepare('UPDATE memberships SET role = ?, updated_at = ? WHERE user_id = ? AND company_id = ?')
         .run(role, updatedAt, userId, companyId)
     },
 
     delete(companyId, userId) {
+      gate?.assertWithin(companyId, 'memberships.delete')
       conn.prepare(`
         DELETE FROM memberships WHERE user_id = ? AND company_id = ?
       `).run(userId, companyId)
