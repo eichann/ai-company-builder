@@ -63,5 +63,21 @@ describe('login page', () => {
       await vi.waitFor(() => expect(replace).toHaveBeenCalledWith('/manual/guide.html'))
       expect(nav.replace).not.toHaveBeenCalled()
     })
+
+    it('does not bounce an already signed-in reader back to the manual by itself (a manual that refused them would loop), but offers a link', async () => {
+      const replace = vi.fn()
+      vi.stubGlobal('location', { ...window.location, replace })
+      nav.search = 'redirect=%2Fmanual%2Fguide.html'
+      mockApi({
+        'GET /api/me': { body: { success: true, data: { id: 'u1', email: 'a@example.com', name: 'A' } } },
+        'GET /api/config': { body: { success: true, data: { name: 'ACB', version: '1', setupComplete: true } } },
+      })
+      render(<AuthProvider><LoginPage /></AuthProvider>)
+      const open = await screen.findByRole('button', { name: '使い方を開く' })
+      expect(replace).not.toHaveBeenCalled()
+      expect(nav.replace).not.toHaveBeenCalled()
+      await userEvent.click(open)
+      expect(replace).toHaveBeenCalledWith('/manual/guide.html')
+    })
   })
 })

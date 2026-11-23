@@ -220,7 +220,7 @@ app.route('/api/broker', brokerRelayRoute)
 app.route('/api/git', gitRoute)
 app.route('/api/git-http', gitHttpRoute)
 app.route('/api', invitationsRoute)
-// The user manual (取説, server.md "The user manual"): public static pages built into the image.
+// The user manual (取説, server.md "The user manual"): static pages built into the image, for signed-in accounts only.
 app.route('/manual', manualRoute)
 // Lanes (server.md "Lane markers"): add only right under your lane's ▼.
 // lane A ▼

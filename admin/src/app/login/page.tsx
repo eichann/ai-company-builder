@@ -51,9 +51,12 @@ function LoginForm() {
     else router.replace(redirectTo)
   }, [forManual, router, redirectTo])
 
+  // Already signed in when the page opens: back to the console page at once. Not to the manual: had
+  // the manual refused this session (a cookie not reaching it), that would bounce between the two
+  // pages for ever, so the reader is offered a link instead.
   useEffect(() => {
-    if (!authLoading && user) goBack()
-  }, [authLoading, user, goBack])
+    if (!authLoading && user && !forManual) router.replace(redirectTo)
+  }, [authLoading, user, forManual, router, redirectTo])
 
   const isSetup = setupComplete === false
 
@@ -83,6 +86,21 @@ function LoginForm() {
     )
   }
   if (setupComplete === null || authLoading) return <FullPageLoading />
+  if (forManual && user && !submitting) {
+    return (
+      <AuthLayout>
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-title">ログインしています</CardTitle>
+            <CardDescription>使い方のページを開けます。</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Button className="w-full" onClick={goBack}>使い方を開く</Button>
+          </CardContent>
+        </Card>
+      </AuthLayout>
+    )
+  }
 
   return (
     <AuthLayout>
