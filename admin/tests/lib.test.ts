@@ -5,7 +5,7 @@ import { describeRules, draftFromRules, losingEdit, previewAccess, rulesFromDraf
 import { describeError } from '@/lib/errors'
 import { isValidFolderName, suggestFolderName } from '@/lib/folder-name'
 import { compareBuilds, formatBuild, formatRelative, latest, parseBuild, parseServerDate } from '@/lib/format'
-import { isManualPath, safeRedirect } from '@/lib/redirect'
+import { isManualPath, manualSiteOf, safeRedirect } from '@/lib/redirect'
 import { explainRejection } from '@/lib/rejections'
 import { members } from './fixtures'
 // The server's parser and order (server/src/lib/client-version.ts re-exports
@@ -145,6 +145,17 @@ describe('redirects', () => {
     expect(isManualPath(safeRedirect('/manual/guide.html'))).toBe(true)
     expect(isManualPath(safeRedirect('/manual/../dashboard'))).toBe(false)
     expect(isManualPath(safeRedirect('/manual/%2e%2e/companies'))).toBe(false)
+  })
+
+  it('tells the administrator guide from the manual, only on the normalised path (server.md "The administrator guide")', () => {
+    expect(manualSiteOf(safeRedirect('/manual-admin/03-busho.html'))).toBe('manual-admin')
+    expect(manualSiteOf(safeRedirect('/manual/guide.html'))).toBe('manual')
+    expect(manualSiteOf(safeRedirect('/manual-admin/../dashboard'))).toBe(null)
+    expect(manualSiteOf(safeRedirect('/manual-admin/%2e%2e/companies'))).toBe(null)
+    expect(manualSiteOf(safeRedirect('/manual-admin//evil.example'))).toBe('manual-admin') // same origin, a path under the guide
+    expect(manualSiteOf(safeRedirect('//evil.example/manual-admin/x.html'))).toBe(null)
+    expect(manualSiteOf(safeRedirect('/manual-adminx/x.html'))).toBe(null)
+    expect(manualSiteOf('/manual-admin')).toBe(null)
   })
 })
 

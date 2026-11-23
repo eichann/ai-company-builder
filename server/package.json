@@ -15,7 +15,8 @@
     "fake:google": "tsx tests/fakes/google/serve.ts",
     "fake:slack": "tsx tests/fakes/slack/serve.ts",
     "fake:portal": "tsx tests/fakes/portal/serve.ts",
-    "manual:build": "tsx src/cli/build-manual.ts ../manual manual-site"
+    "manual:build": "tsx src/cli/build-manual.ts manual ../manual manual-site",
+    "manual-admin:build": "tsx src/cli/build-manual.ts manual-admin ../manual-admin manual-admin-site"
   },
   "dependencies": {
     "@hono/node-server": "^1.19.17",

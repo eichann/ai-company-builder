@@ -14,7 +14,9 @@
  *   (company id, user id, role, all from the server) and `c.var.user`; it never
  *   reads `companyId` from the URL itself.
  * - `signedIn`: a session only (routes without a company: /api/me, …);
- *   `signedInElse(refuse)` the same with the endpoint's own refusal (the manual's).
+ *   `signedInElse(refuse)` the same with the endpoint's own refusal (the manual's);
+ *   `fullAccessSomewhereElse(signedOut, refuse)` a session of an owner / admin of any
+ *   company (the administrator guide's).
  * - `publicRoute(reason)`: no ACB session on purpose; the handler checks its own
  *   proof (a signature, an OAuth state, an invitation token). Each one is also
  *   listed in tests/security/auth-guards.test.ts PUBLIC_ENDPOINTS.
@@ -97,6 +99,23 @@ export function signedInElse(refuse: (c: Context) => Response) {
   return tagged('signed-in', createMiddleware<SignedInEnv>(async (c, next) => {
     const user = await getUserFromRequest(c.req.raw)
     if (!user) return refuse(c)
+    c.set('user', user)
+    await next()
+  }))
+}
+
+/**
+ * A session of an owner or admin of at least one company on this server, whichever (the
+ * administrator guide: `routes/manual.ts`; server.md "The administrator guide"), checked on
+ * every request. `signedOut` answers without a session (as `signedInElse`), `refuse` a signed-in
+ * account that is owner / admin nowhere (the guide answers its plain 404, so a member cannot
+ * tell it exists). No company is asked or set: the guide is the same for every company.
+ */
+export function fullAccessSomewhereElse(signedOut: (c: Context) => Response, refuse: (c: Context) => Response) {
+  return tagged('full-access-somewhere', createMiddleware<SignedInEnv>(async (c, next) => {
+    const user = await getUserFromRequest(c.req.raw)
+    if (!user) return signedOut(c)
+    if (!services.access.hasFullAccessSomewhere(user.id)) return refuse(c)
     c.set('user', user)
     await next()
   }))

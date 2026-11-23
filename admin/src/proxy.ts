@@ -12,7 +12,8 @@ import { NextResponse, type NextRequest } from 'next/server'
 //
 // /manual and /manual/* (the user manual, served by the API to signed-in accounts: server.md "The
 // user manual") go the same way, so the public address shows it behind a Caddy that sends only /api/*
-// to the API; the rewrite passes the browser's session cookie on, as for /api/*.
+// to the API; the rewrite passes the browser's session cookie on, as for /api/*. So do /manual-admin and
+// /manual-admin/* (the administrator guide, for owners and admins: server.md "The administrator guide").
 export function proxy(request: NextRequest) {
   const target = process.env.API_PROXY_URL || 'http://localhost:3001'
   const url = new URL(request.nextUrl.pathname + request.nextUrl.search, target)
@@ -20,5 +21,5 @@ export function proxy(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ['/api/:path*', '/manual', '/manual/:path*'],
+  matcher: ['/api/:path*', '/manual', '/manual/:path*', '/manual-admin', '/manual-admin/:path*'],
 }

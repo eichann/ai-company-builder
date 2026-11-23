@@ -1,7 +1,7 @@
 /**
- * One page of the user manual (取説): Markdown → a whole, static HTML page
- * (`src/cli/build-manual.ts` runs it when the server image is built;
- * `.claude/rules/server.md` "The user manual").
+ * One page of the user manual (取説) or of the administrator guide (管理者・FDE の手引き):
+ * Markdown → a whole, static HTML page (`src/cli/build-manual.ts` runs it when the server
+ * image is built; `.claude/rules/server.md` "The user manual", "The administrator guide").
  *
  * What the page can carry is decided here, not by who wrote the Markdown:
  * - raw HTML in the Markdown is dropped (remark-rehype without
@@ -43,7 +43,6 @@ export interface RenderedManualPage {
 
 export class ManualBuildError extends Error {}
 
-const SITE_TITLE = 'AI Company Builder の使い方'
 
 // GitHub's schema, except heading ids are kept as written (no `user-content-` prefix): the app
 // opens a page at a heading by that id.
@@ -71,7 +70,7 @@ function rewriteReferences(pageId: string, knownPages: ReadonlySet<string>, imag
         const href = String(node.properties?.href ?? '')
         if (href.startsWith('#') || /^https?:\/\//i.test(href) || /^mailto:/i.test(href)) return
         const page = PAGE_LINK.exec(href)
-        if (!page || !knownPages.has(page[1])) throw new ManualBuildError(`${pageId}.md: a link that is not a page of the manual: ${href}`)
+        if (!page || !knownPages.has(page[1])) throw new ManualBuildError(`${pageId}.md: a link that is not a page of this site: ${href}`)
         node.properties!.href = manualPageFile(page[1]) + (page[2] ?? '')
       }
       if (node.tagName === 'img') {
@@ -91,8 +90,12 @@ const el = (tagName: string, properties: Record<string, unknown>, children: HNod
   ({ type: 'element', tagName, properties, children })
 const text = (value: string): HNode => ({ type: 'text', value })
 
-/** Renders `markdown` (the page `pageId`) into a whole HTML document. */
-export function renderManualPage(pageId: string, markdown: string, knownPages: ReadonlySet<string>): RenderedManualPage {
+/**
+ * Renders `markdown` (the page `pageId`) into a whole HTML document. `siteTitle` is the site's
+ * name in each page's `<title>` (the members' manual or the administrator guide: `manual-build.ts`
+ * `MANUAL_SITES`).
+ */
+export function renderManualPage(pageId: string, markdown: string, knownPages: ReadonlySet<string>, siteTitle: string): RenderedManualPage {
   if (!isManualPageId(pageId)) throw new ManualBuildError(`not a page name (a-z, 0-9, -): ${pageId}`)
   const images = new Set<string>()
   const processor = unified()
@@ -118,7 +121,7 @@ export function renderManualPage(pageId: string, markdown: string, knownPages: R
           el('meta', { charSet: 'utf-8' }),
           el('meta', { name: 'viewport', content: 'width=device-width, initial-scale=1' }),
           el('meta', { name: 'referrer', content: 'no-referrer' }),
-          el('title', {}, [text(title === SITE_TITLE ? title : `${title} — ${SITE_TITLE}`)]),
+          el('title', {}, [text(title === siteTitle ? title : `${title} — ${siteTitle}`)]),
           el('link', { rel: ['stylesheet'], href: 'manual.css' }),
         ]),
         el('body', {}, [...nav, el('main', {}, body.children ?? [])]),

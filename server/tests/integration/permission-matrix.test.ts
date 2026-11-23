@@ -575,6 +575,9 @@ const MATRIX: Row[] = [
   r('GET /api/records-ai/google/drive/puts/:putId', () => ({ path: '/api/records-ai/google/drive/puts/drive-put-nosuch' }), [401, 401, 401, 401, 401, 401], 'a session is not a record token'),
   r('GET /manual', () => ({ path: '/manual' }), [301, 301, 301, 301, 301, 401], 'the user manual, for any signed-in account (owner decision 2026-11-23); /manual → /manual/index.html'),
   r('GET /manual/*', () => ({ path: '/manual/index.html' }), [200, 200, 200, 200, 200, 401], 'the user manual (built from manual/ for this test), the same for every signed-in account, whatever its company; none without a session (owner decision 2026-11-23)'),
+  // The outsider owns another company: an owner / admin anywhere reads the guide (it is the same for every company).
+  r('GET /manual-admin', () => ({ path: '/manual-admin' }), [301, 301, 404, 404, 301, 401], 'the administrator guide, for owners and admins of any company; anyone else signed in gets the 404 of a path that names nothing; /manual-admin → /manual-admin/index.html'),
+  r('GET /manual-admin/*', () => ({ path: '/manual-admin/index.html' }), [200, 200, 404, 404, 200, 401], 'the administrator guide (built from manual-admin/ for this test): owners and admins of this or another company (the outsider owns one); a member or 部署の管理役 gets 404, as for a page that does not exist; none without a session'),
   r('GET /api/google-picker', () => ({ path: '/api/google-picker' }), [200, 200, 200, 200, 200, 200], 'public: the static Picker page; it holds no secret (the pick ticket is in the URL fragment)'),
   r('POST /api/google-picker/config', () => ({ path: '/api/google-picker/config', body: {} }), [410, 410, 410, 410, 410, 410], 'public: the one-time pick ticket is the proof; no ticket, nothing'),
   r('POST /api/google-picker/result', () => ({ path: '/api/google-picker/result', body: {} }), [410, 410, 410, 410, 410, 410], 'public: the one-time pick ticket is the proof; no ticket, nothing'),
@@ -947,6 +950,9 @@ process.env.PLUGINS_DIR = shelfDir
 // The user manual as the image builds it (server.md "The user manual"): the repository's own manual/.
 const manualSite = join(mkdtempSync(join(tmpdir(), 'acb-matrix-manual-')), 'site')
 process.env.MANUAL_DIR = manualSite
+// The administrator guide as the image builds it (server.md "The administrator guide"): manual-admin/.
+const manualAdminSite = join(join(manualSite, '..'), 'admin-site')
+process.env.MANUAL_ADMIN_DIR = manualAdminSite
 
 function headersFor(role: Role): Record<string, string> {
   if (role === 'signedOut') return {}
@@ -1238,7 +1244,8 @@ async function answer(method: string, req: Req, hide: string): Promise<{ status:
 
 beforeAll(async () => {
   const { buildManualSite } = await import('../../src/lib/manual-build')
-  buildManualSite(join(__dirname, '../../../manual'), manualSite, join(__dirname, '../../shared/design-tokens'))
+  buildManualSite(join(__dirname, '../../../manual'), manualSite, join(__dirname, '../../shared/design-tokens'), 'manual')
+  buildManualSite(join(__dirname, '../../../manual-admin'), manualAdminSite, join(__dirname, '../../shared/design-tokens'), 'manual-admin')
   kekDir = mkdtempSync(join(tmpdir(), 'acb-matrix-kek-'))
   writeFileSync(join(kekDir, 'kek'), randomBytes(32).toString('base64'))
   chmodSync(join(kekDir, 'kek'), 0o600)
@@ -1255,6 +1262,7 @@ afterAll(() => {
   rmSync(shelfDir, { recursive: true, force: true })
   rmSync(join(manualSite, '..'), { recursive: true, force: true })
   delete process.env.MANUAL_DIR
+  delete process.env.MANUAL_ADMIN_DIR
   delete process.env.BROKER_KEK_FILE
 })
 

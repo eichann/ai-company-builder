@@ -54,6 +54,16 @@ export function manualDir(): string {
   return process.env.MANUAL_DIR?.trim() || join(process.cwd(), 'manual-site')
 }
 
+/**
+ * The administrator guide's built site (`src/cli/build-manual.ts manual-admin`; server.md "The
+ * administrator guide"), served at /manual-admin/ to owners and admins. Read per call. Default
+ * `<cwd>/manual-admin-site`: `/app/manual-admin-site` in the image, `server/manual-admin-site`
+ * after `pnpm manual-admin:build`.
+ */
+export function manualAdminDir(): string {
+  return process.env.MANUAL_ADMIN_DIR?.trim() || join(process.cwd(), 'manual-admin-site')
+}
+
 /** Lifetime of a broker token in minutes (clamped to 15–60 by shared/core/key-broker.ts; default 30). */
 export const BROKER_TOKEN_TTL_MINUTES = Number(process.env.BROKER_TOKEN_TTL_MINUTES) || 30
 

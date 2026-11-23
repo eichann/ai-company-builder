@@ -6,7 +6,7 @@
 import { createMiddleware } from 'hono/factory'
 import type { MiddlewareHandler } from 'hono'
 
-export type GuardKind = 'company' | 'signed-in' | 'record-token' | 'own-credential' | 'public'
+export type GuardKind = 'company' | 'signed-in' | 'full-access-somewhere' | 'record-token' | 'own-credential' | 'public'
 
 const GUARDS = new WeakMap<object, GuardKind>()
 

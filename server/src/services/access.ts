@@ -44,6 +44,12 @@ export interface AccessPolicy {
   memberOf(companyId: string, userId: string): Member | null
   member(companyId: string, userId: string): Outcome<Member>
   fullAccessMember(companyId: string, userId: string, error: string): Outcome<Member>
+  /**
+   * Whether the user is an owner or admin of at least one company on this server (the
+   * administrator guide, server.md "The administrator guide"). Read from the memberships each
+   * time: a role taken away or a membership removed counts at once.
+   */
+  hasFullAccessSomewhere(userId: string): boolean
 }
 
 export function createAccessPolicy(memberships: MembershipRepository): AccessPolicy {
@@ -60,6 +66,12 @@ export function createAccessPolicy(memberships: MembershipRepository): AccessPol
     fullAccessMember(companyId, userId, error) {
       const m = memberOf(companyId, userId)
       return m && hasFullAccess(m.role) ? ok(m) : refuse('forbidden', error)
+    },
+    hasFullAccessSomewhere(userId) {
+      return memberships.companyIdsOf(userId).some(companyId => {
+        const role = memberships.roleOf(companyId, userId)
+        return role !== null && hasFullAccess(role)
+      })
     },
   }
 }

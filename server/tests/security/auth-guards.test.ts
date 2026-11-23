@@ -11,7 +11,7 @@
  * PUBLIC_ENDPOINTS with their reason.
  *
  * Every endpoint also names one of src/routes/guards.ts's guards as its first
- * handler (companyMember, signedIn, publicRoute), so a forgotten check cannot
+ * handler (companyMember, signedIn, fullAccessSomewhereElse, publicRoute, …), so a forgotten check cannot
  * be written (server.md "Route guards").
  */
 import { describe, it, expect, vi, beforeAll } from 'vitest'
@@ -42,7 +42,7 @@ const PUBLIC_ENDPOINTS: Record<string, string> = {
   'oauth.ts GET /:provider/callback': 'the provider (Google, Slack) sends the member\'s browser back without an ACB session; the state (single use, 10 min, found only inside its own company and for that provider) is the proof',
 }
 
-interface Endpoint { file: string; method: string; path: string; app: Hono; guard: ReturnType<typeof guardKind> }
+interface Endpoint { file: string; exported: string; method: string; path: string; app: Hono; guard: ReturnType<typeof guardKind> }
 
 const endpoints: Endpoint[] = []
 
@@ -50,7 +50,7 @@ beforeAll(async () => {
   (await import('../../src/db')).initDatabase()
   for (const file of readdirSync(ROUTES_DIR).filter(f => f.endsWith('.ts')).sort()) {
     const mod = await import(join(ROUTES_DIR, file)) as Record<string, unknown>
-    for (const value of Object.values(mod)) {
+    for (const [exported, value] of Object.entries(mod)) {
       if (!(value instanceof Hono)) continue
       const app = new Hono().route('/', value)
       const seen = new Set<string>()
@@ -60,7 +60,7 @@ beforeAll(async () => {
         const key = `${r.method} ${r.path}`
         if (seen.has(key)) continue
         seen.add(key)
-        endpoints.push({ file, method: r.method, path: r.path, app, guard: guardKind(r.handler) })
+        endpoints.push({ file, exported, method: r.method, path: r.path, app, guard: guardKind(r.handler) })
       }
     }
   }
@@ -117,6 +117,12 @@ describe('Authentication guards', () => {
     }
     expect(missing, 'Endpoints without a guard from src/routes/guards.ts as their first handler').toEqual([])
     expect(wrongPublic, 'publicRoute(...) is for exactly the PUBLIC_ENDPOINTS, and they use it').toEqual([])
+  })
+
+  it('the administrator guide asks for an owner or admin of some company, not only a session (server.md "The administrator guide")', () => {
+    const guide = endpoints.filter(e => e.file === 'manual.ts' && e.exported === 'manualAdminRoute')
+    expect(guide.map(e => `${e.method} ${e.path}`).sort()).toEqual(['GET /', 'GET /*'])
+    for (const e of guide) expect(e.guard, `${e.method} ${e.path}`).toBe('full-access-somewhere')
   })
 
 })
