@@ -127,6 +127,24 @@ export class AllowedRoots implements Iterable<string> {
     throw new Error(LINK_ESCAPE_MESSAGE)
   }
 
+  /**
+   * Whether `inputPath` lies inside a registered root by name OR by its real
+   * location (a link outside pointing in counts) — for writes that must stay
+   * out of every company folder (the manual's export). True when its real
+   * location cannot be read: unsure counts as inside.
+   */
+  touches(inputPath: string): boolean {
+    const resolved = path.resolve(inputPath)
+    if (this.lexicalRoots(resolved).length > 0) return true
+    let real: string
+    try { real = realLocation(resolved) } catch { return true }
+    for (const root of this.roots) {
+      if (inside(real, root)) return true
+      try { if (inside(real, this.realRoot(root))) return true } catch { return true }
+    }
+    return false
+  }
+
   /** The registered root `resolved` lies in (the innermost), or null. */
   rootOf(inputPath: string): string | null {
     const roots = this.lexicalRoots(path.resolve(inputPath))

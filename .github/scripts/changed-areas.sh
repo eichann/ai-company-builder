@@ -111,7 +111,7 @@ UNIVERSAL=(client/scripts/universal-git.mjs client/package.json)
 # keep it covered there if those lists ever narrow `shared/`.
 # staging/: the staging kit's helpers, tested by server/tests/unit/staging-kit.test.ts.
 # The rollback floor's pin and its cross-build check (deployment.md "Rolling back production") run in the server job.
-SERVER=(server/ shared/ staging/ .github/rollback-floor-commit .github/scripts/rollback-floor-check.sh)
+SERVER=(server/ shared/ staging/ manual/ .github/rollback-floor-commit .github/scripts/rollback-floor-check.sh)
 ADMIN=(admin/ shared/)
 # The browser plan lifecycle model (model/browser-plan/, agent-browser.md "The plan model"): the model
 # itself and the code it copies by hand. check-areas.mjs fails when the model cites a file not listed

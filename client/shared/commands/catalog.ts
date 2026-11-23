@@ -8,6 +8,7 @@
 import { z } from 'zod'
 import { defineCommands } from './define'
 import { TAB_KIND_GROUPS } from '../thing-words'
+import { isManualPageId } from '../../../shared/core/manual'
 
 export const COMMANDS = defineCommands([
   {
@@ -212,6 +213,15 @@ export const COMMANDS = defineCommands([
     args: z.object({ pane: z.string().optional().describe('The editor pane; the one used last when left out') }),
     target: { arg: 'pane', area: 'editor' },
     keybinding: { key: 'mod+shift+v', area: 'editor' },
+  },
+  {
+    // 「使い方」 (the user manual, files-and-editor.md "The user manual"): the middle's 使い方 tab at a
+    // page (and heading). A screen links to its chapter with `{ page: '<id>' }`.
+    id: 'help.openManual', title: '使い方を開く', class: 'view',
+    args: z.object({
+      page: z.string().refine(isManualPageId).optional().describe('The page id (manual/pages/<id>.md); the index when left out'),
+      anchor: z.string().min(1).max(200).optional().describe('A heading id on that page'),
+    }),
   },
   {
     // The chat's ［見る］ on a line where the AI wrote an HTML file: its tab, as 見る even if it showed 中身.

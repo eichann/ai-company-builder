@@ -99,6 +99,9 @@ export const fake = {
   protocolHandlers: new Map<string, (request: Request) => Promise<Response> | Response>(),
   privilegedSchemes: [] as unknown[],
   openDialogResults: [] as Array<{ canceled: boolean; filePaths: string[] }>,
+  /** showSaveDialog's answers, in order (none: cancelled), and the options each call got. */
+  saveDialogResults: [] as Array<{ canceled: boolean; filePath?: string }>,
+  saveDialogs: [] as unknown[],
   messageBoxes: [] as unknown[],
   /** The buttons the next message boxes answer (default 0, the first button). */
   messageBoxResponses: [] as number[],
@@ -148,6 +151,7 @@ export const app = {
 
 export const dialog = {
   showOpenDialog: async () => fake.openDialogResults.shift() ?? { canceled: true, filePaths: [] },
+  showSaveDialog: async (...args: unknown[]) => { fake.saveDialogs.push(args); return fake.saveDialogResults.shift() ?? { canceled: true } },
   showMessageBox: async (...args: unknown[]) => { fake.messageBoxes.push(args); return { response: fake.messageBoxResponses.shift() ?? 0, checkboxChecked: false } },
 }
 

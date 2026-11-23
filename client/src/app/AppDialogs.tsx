@@ -4,6 +4,8 @@ import { CopySkillModal } from '../features/skills/components/CopySkillModal'
 import { ToolViewer } from '../features/skills/components/ToolViewer'
 import { FindPalette } from '../features/search/components/FindPalette'
 import { RECORDS_TABLE_PALETTE_ACTION } from '../features/records-table/entry'
+import { MANUAL_PALETTE_ACTION } from '../features/editor/manual'
+import { runCommand } from '../shared/commands/commands'
 import type { PaletteAction, PaletteConsultation, PaletteRecent, PaletteSkill } from '../features/search/model'
 import type { useTabTidying } from '../features/editor/hooks/useTabTidying'
 import { TabTidyingList } from '../features/editor/components/TabTidyingControls'
@@ -18,7 +20,7 @@ import type { useSync } from '../features/sync/hooks/useSync'
 import type { DepartmentConfig } from '../types'
 
 // 探す ⌘K finds 「片づけたタブ」 by these words too.
-const PALETTE_ACTIONS: PaletteAction[] = [{ id: 'tidiedTabs', title: '片づけたタブ', words: ['タブ', '片づけ', '片付け', 'かたづけ', 'tab'] }, RECORDS_TABLE_PALETTE_ACTION]
+const PALETTE_ACTIONS: PaletteAction[] = [{ id: 'tidiedTabs', title: '片づけたタブ', words: ['タブ', '片づけ', '片付け', 'かたづけ', 'tab'] }, RECORDS_TABLE_PALETTE_ACTION, MANUAL_PALETTE_ACTION]
 // ⌘K 「受け箱」 (I2), also by the words of what it replaced in the title bar (あなたの番, the bell's 知らせ).
 const INBOX_PALETTE_ACTION: PaletteAction = { id: 'inbox', title: '受け箱', words: ['受け箱', 'うけばこ', 'あなた待ち', 'あなたの番', '知らせ', '通知', 'ベル', 'inbox'] }
 
@@ -109,6 +111,7 @@ export function AppDialogs(props: Props) {
               if (id === 'tidiedTabs') props.tidying.openList()
               else if (id === RECORDS_TABLE_PALETTE_ACTION.id) props.onShowRecordsTable()
               else if (id === INBOX_PALETTE_ACTION.id) props.onOpenInbox?.()
+              else if (id === MANUAL_PALETTE_ACTION.id) void runCommand('help.openManual', {})
             }}
           />
         )}

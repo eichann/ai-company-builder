@@ -30,6 +30,8 @@ import { createDocViewShell } from './doc-view'
 import { createDocFrames } from './features/doc-frames/protocol'
 import { createDocViews } from './features/doc-frames/views'
 import { registerDocViewsIpc } from './features/doc-frames/ipc'
+import { createManualSite } from './features/manual/site'
+import { registerManualIpc } from './features/manual/ipc'
 import { readSparseConfig } from './sync/sparse'
 import { diskFiles, registerChatWindowsIpc } from './features/chat-windows/ipc'
 import { createSession } from './services/session'
@@ -711,6 +713,16 @@ const docViews = createDocViews({
   notify: (_windowId, event) => appWindow.send('docView:event', event),
 })
 registerDocViewsIpc(ipc, { frames: docFrames, views: docViews, fromMainWindow: event => isMainFrameSender(event, id => mainWindowHost.isWindow(id)) })
+// The user manual (files-and-editor.md "The user manual"): this computer's copy of the server's /manual/,
+// shown through the same document views (a grant for that copy alone) and written only outside company folders.
+registerManualIpc(ipc, {
+  site: createManualSite({ serverUrl: getServerApiUrl, cacheRoot: path.join(userDataDir(), 'manual') }),
+  views: docViews,
+  fromMainWindow: event => isMainFrameSender(event, id => mainWindowHost.isWindow(id)),
+  chooseFolder: options => desktopShell.selectSavePath(options),
+  defaultFolder: () => app.getPath('downloads'),
+  insideCompanyFolder: target => allowedRoots.touches(target),
+})
 
 // Startup runs last, once every store and service above is initialised: the
 // chat server config below captures them, and keeping the use after the

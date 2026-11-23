@@ -32,6 +32,8 @@ export interface DesktopShell {
   openExternal(url: string): Promise<void>
   /** The folder picker; null when cancelled. */
   selectDirectory(): Promise<string | null>
+  /** The save dialog (a new name in a folder the member picks); null when cancelled. */
+  selectSavePath(options: { title: string; defaultPath: string; buttonLabel: string }): Promise<string | null>
   /** Start a native drag of a (validated) file out of the window that sent the request. */
   startDrag(sender: IpcSender, file: string): void
   /**

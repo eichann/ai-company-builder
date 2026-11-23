@@ -138,13 +138,14 @@ export interface DocFramePolicy {
   frameSources: readonly string[]
 }
 
-export function docFramePolicy(token: string): DocFramePolicy {
+export function docFramePolicy(token: string, options: { scripts?: boolean } = {}): DocFramePolicy {
   const origin = `${DOC_SCHEME}://${token}`
   return {
     origin,
     // Inline scripts run (owner decision 2026-11-22: slides and charts need them);
     // they reach no network, storage or app (opaque origin, the directives below).
-    scriptSources: [origin, "'unsafe-inline'"],
+    // A grant that needs none (the user manual) runs none: `scripts: false`.
+    scriptSources: options.scripts === false ? [] : [origin, "'unsafe-inline'"],
     styleSources: [origin, "'unsafe-inline'"],
     imgSources: [origin, 'data:', 'blob:'],
     fontSources: [origin, 'data:'],

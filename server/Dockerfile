@@ -60,6 +60,18 @@ RUN pnpm install --frozen-lockfile \
     && test -x node_modules/.bin/tsx
 
 # ---------------------------------------------------------------------------
+# manual: the user manual's static site, built from manual/ (server.md "The
+# user manual"). A page that does not render fails the image build. Only the
+# built site reaches the runtime image.
+# ---------------------------------------------------------------------------
+FROM deps AS manual
+COPY server/package.json server/tsconfig.json ./
+COPY server/src ./src
+COPY shared ./shared
+COPY manual ./manual
+RUN node --import tsx src/cli/build-manual.ts manual manual-site
+
+# ---------------------------------------------------------------------------
 # runtime
 # ---------------------------------------------------------------------------
 FROM node:20-slim
@@ -91,6 +103,8 @@ COPY server/package.json server/tsconfig.json ./
 COPY server/src ./src
 # The server imports ../../shared (types and the shared rules, shared/core).
 COPY shared ./shared
+# The user manual, served at /manual/ (MANUAL_DIR defaults to <cwd>/manual-site).
+COPY --from=manual /app/manual-site ./manual-site
 
 # /app/data is a mount point (compose mounts ./data there). Owned by the
 # image's unprivileged user so a plain `docker run` without the mount works.

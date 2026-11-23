@@ -3,6 +3,7 @@ paths:
   - "server/src/**"
   - "server/tests/**"
   - "server/package.json"
+  - "manual/**"
 ---
 
 # Server (Hono API): layers, routes, accounts, departments, database
@@ -398,6 +399,8 @@ GET  /api/config                                  setup state (no auth)
 /api/companies/:companyId     GET /approvals, GET /approvals/:approvalId,
                               POST /approvals/:approvalId/approve | send-back | withdraw
                               (session only; approvals.md)                    approvals.ts
+/manual                       GET /manual (→ /manual/index.html), GET /manual/* — the user manual, public
+                              (no session: "The user manual" below)            manual.ts
 /api                          GET|POST /companies/:companyId/invitations,
                               DELETE …/invitations/:id, GET /invitations/:token,
                               POST /invitations/:token/accept                 invitations.ts
@@ -716,6 +719,50 @@ admin console's home (管理画面の見直し 2-1): 「最初にやること」
   members who belong to the departments they manage. Blocked syncs and orphaned rules are left
   out (their paths may name a private folder the manager does not read). Anyone else 403.
   Test: `tests/integration/admin-home.test.ts`.
+
+## The user manual (取説, owner decision 2026-11-23)
+
+The members' manual is Markdown in the repository (`manual/pages/<page>.md`, Japanese; pictures
+`manual/images/<scene-id>.png`, named from a page as `../images/<scene-id>.png`; the pictures are made
+by the UI screenshot generator), built into a static site when the server image is built and served
+by that server at `/manual/` — so a self-hosted server shows the manual of its own version.
+
+- **Build** (`src/cli/build-manual.ts` → `lib/manual-build.ts`, `lib/manual-render.ts`; the
+  Dockerfile's `manual` stage; by hand `pnpm --filter @ai-company-builder/server manual:build` →
+  `server/manual-site/`, gitignored): unified + remark (GFM) → rehype, **raw HTML dropped** (no
+  `allowDangerousHtml`), heading ids (rehype-slug, unprefixed so the app can open a heading), then
+  rehype-sanitize's GitHub schema, then our own page frame (title, `manual.css`, ← 目次). A link must be
+  another page (`x.md` / `./x.md#…` → `x.html…`, which must exist), an anchor, `http(s)://` or
+  `mailto:`; a picture `../images/<name>.png|jpg|jpeg|webp` that exists (→ `images/<name>`): anything
+  else **stops the build** (a broken manual never ships). Only pictures a page shows are copied.
+  `manual.css` = the design tokens' `primitives.css` + `theme.css` (the `.dark` block moved under
+  `prefers-color-scheme: dark`: no script) + the page's own rules. The site is flat:
+  `<page>.html`, `manual.css`, `images/…` and `manifest.json` (format 1: pages with titles, every
+  file's path, sha256 and size; written last). Its file-name rule and parser are
+  `shared/core/manual.ts` (`isManualFilePath`, `parseManualManifest`), the app's too.
+- **Serving** (`routes/manual.ts`, `lib/manual-site.ts`; `MANUAL_DIR`, default `<cwd>/manual-site` =
+  `/app/manual-site` in the image, read per request): `publicRoute` (listed in `PUBLIC_ENDPOINTS`;
+  no secret in it, and members need it when they cannot sign in). **Only a file the manifest names**
+  is answered, opened with `O_NOFOLLOW` as a regular file ≤ 20 MB; everything else — a file that only
+  sits in the folder, a folder (no listing), `..` raw or encoded, a hidden name, another case, a link —
+  is 404 `Not found` (or the app's own 404 when the path never reaches the route). Headers: CSP
+  `default-src 'none'; style-src 'self'; img-src 'self'; base-uri 'none'; form-action 'none';
+  frame-ancestors 'none'` (no script source at all), `nosniff`, `X-Frame-Options: DENY`,
+  `Referrer-Policy: no-referrer`, `Cross-Origin-Resource-Policy: same-origin`, `Cache-Control:
+  no-cache` + a strong ETag (the sha256; `If-None-Match` → 304), so a new version shows at once.
+  `/manual` redirects to `/manual/index.html` (not `/manual/`: Next.js would send that back to
+  `/manual`). Not built → 404 everywhere.
+- Behind Caddy only `/api/*` reaches the api; the admin console forwards `/manual` and
+  `/manual/*` to it (`admin/src/proxy.ts` matcher), so `PUBLIC_URL/manual/` works without a Caddy
+  change (`deployment.md`).
+- The app shows it in the HTML viewer and exports it (`files-and-editor.md` "The user manual").
+- Tests: `tests/integration/manual.test.ts` (no script survives whatever the Markdown holds; links /
+  pictures rewritten and refused; the build never replaces a folder it did not make; every file
+  served without a session with the headers; 304; files beside the site, listings, traversal raw and
+  encoded, hidden names, a link in place of a listed file: 404; not built: 404 — each guard
+  mutation-checked, except rehype-sanitize, a layer kept on purpose behind the raw-HTML drop and the
+  link / picture rules, which already hold every case it would), the permission matrix's two rows
+  (200 / 301 for every caller, built from the repository's `manual/`).
 
 ## Request log
 

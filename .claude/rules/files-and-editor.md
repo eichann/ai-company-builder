@@ -1,6 +1,10 @@
 ---
 paths:
   - "client/electron/company-watcher.ts"
+  - "client/electron/features/manual/**"
+  - "client/shared/manual.ts"
+  - "client/tests/manual.test.ts"
+  - "client/tests/ui/manual.spec.ts"
   - "client/electron/features/fs/**"
   - "client/electron/file-guards.ts"
   - "client/electron/features/skills/**"
@@ -408,8 +412,52 @@ and by the AI: **do not change them by one character** (no renamed key, no reord
 - **Not kept**: a restart drops it and any pin saved on it (`useEditorPersistence`), 「タブを片づける」 closes it without listing it,
   and the AI's `tabs.list` leaves it out — it is no file or record to open again; its screen opens it in
   one press. Tests: `editorTabs.test.ts`, `tests/ui/records-table.spec.ts` (main screen).
-- One user today: 「記録の一覧」 (`tasks-ui.md` "The records table (B4)"). Not a framework: a second kind of
-  screen tab decides what it needs when it comes.
+- Users: 「記録の一覧」 (`tasks-ui.md` "The records table (B4)") and 「使い方」 ("The user manual" below). Not a
+  framework: another kind of screen tab decides what it needs when it comes.
+
+## The user manual (「使い方」, owner decision 2026-11-23)
+
+The server's manual (`server.md` "The user manual": static pages built from `manual/`, public at
+`/manual/`) opened **inside the app**, in the middle, through the HTML viewer's document view — not
+an external browser.
+
+- **Opening**: the title bar's 「使い方」 (?) button, ⌘K 「使い方」, or any screen running the command
+  `help.openManual { page?, anchor? }` (a chapter: the page id of `manual/pages/<id>.md`, and a heading's
+  id) opens the screen tab `acb-view:manual` (`features/editor/manual.tsx`, `components/ManualPane.tsx`)
+  at that page; each request mounts a new pane (`key`), so asking for another page opens it afresh.
+  The pane is `DocViewSession` with a `DocViewSource` that asks `manual:open(pageId, anchor)` instead of
+  `docView:open(path)` (no file events reload it); toolbar: zoom, ［書き出す］, ［もう一度表示する］; a web
+  link pressed in it gets the viewer's confirmation (「外のサイトを開きますか？」).
+- **Why through main and the document view** (the safe design): the doc session refuses every network
+  request, so main (`electron/features/manual/site.ts`) fetches the server's `manifest.json` and the
+  files it names into this computer's copy (`<userData>/manual/<sha256 of the server origin>/site`):
+  each file's path must pass `isManualFilePath` and its size and sha256 must match the manifest;
+  redirects are refused; each request waits at most 8 s (then the kept copy shows); a refresh is
+  built beside the copy and renamed into place, the old copy put back if the second rename fails,
+  and a refresh cut between the two renames is put right on the next look (`recover`: the retired
+  copy back, leftovers removed); unchanged files are reused; refreshes and exports run one at a
+  time. Then `manual:open` opens a document view with **a grant for that copy's folder alone**
+  (`views.open(doc, ticket, fragment)`: the heading as `#…`, encoded by main) **with no script**
+  (`noScripts`: `script-src 'none'`, the manual has none — whatever a server put in its copy), with
+  every other guard of `doc-frame.md` (no network, opaque origin, no app, no other file). Offline: the copy kept is shown; nothing kept → 「使い方を
+  読み込めませんでした…」; a server with no manual (404) → 「このサーバーには使い方がまだありません。」.
+  The renderer sends only a page id (and heading text); only the view's id comes back.
+- **「書き出す」** (`manual:export`, no argument): main asks the shell's save dialog
+  (`DesktopShell.selectSavePath`, starting at Downloads with 「ACB の使い方」) **every time**; the chosen
+  path must not lie in a company folder by name or by real location (`AllowedRoots.touches`; a
+  company folder syncs to everyone) — checked before and again after the folder is made — and must be
+  a new folder or an empty one (never a file, never a folder holding something). Main then writes
+  the copy's files (sha256 checked again, each created with `wx`: nothing replaced; on a failure what
+  it wrote is removed again, and the folder too when this export made it) and answers the folder; the pane says 「…に書き出しました。中の
+  index.html をブラウザで開くと、インターネットなしでも読めます。」 (links are relative). Cancelled → nothing.
+- Tests: `client/tests/manual.test.ts` (the copy: only manifest files, checked, a tampered file or a
+  bad manifest path changes nothing, a refresh cut between its renames put right, offline / none /
+  missing; the page's CSP without scripts; a failed export leaves no folder; the IPC: main window only before any
+  fetch, dialog or write; a page through the grant at its heading, the copy's other files reachable,
+  `..` and `manifest.json` not; unknown page ids refused; the export into the chosen folder only,
+  never a company folder — also through a link —, a folder holding something, a file, or on cancel —
+  each guard mutation-checked), `tests/ui/manual.spec.ts` (the title bar's button opens one tab at the
+  index, again afresh, the refusal shown, ［書き出す］ says where).
 
 ## Places, ← → and the file's side column (milestone 5 U8, design §7)
 

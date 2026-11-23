@@ -22,6 +22,7 @@ import { usePrivateFolderStore } from '../features/files/hooks/usePrivateFolders
 import { isChatInputRecentlyActive } from '../shared/lib/chatInputActivity'
 import { recordIdOfTab, recordTabKey, tabDepartmentLabels, viewTabKey, type RecordTabLook } from '../features/editor/editorTabs'
 import { RECORDS_TABLE_TAB_LOOK, RECORDS_TABLE_VIEW, renderRecordsTable, startRecordsTable } from '../features/records-table/entry'
+import { MANUAL_TAB_LOOK, MANUAL_VIEW, renderManual, type ManualTarget } from '../features/editor/manual'
 import { COMPANY_TAB_ID } from '../shared/lib/departments'
 import { TitleBar } from './TitleBar'
 import { FileTreePanel, type FileTreeControls } from '../features/files/components/FileTreePanel'
@@ -392,6 +393,13 @@ export function AppShell({ bottomPanel }: AppShellProps = {}) {
     startRecordsTable(currentCompany.id, kind)
     openTab(viewTabKey(RECORDS_TABLE_VIEW))
   }
+  // 「使い方」 (the user manual): the title bar's button, ⌘K and any screen (`help.openManual { page }`)
+  // open its tab at that page; each request opens it afresh.
+  const [manualTarget, setManualTarget] = useState<ManualTarget>({ page: 'index', anchor: null, request: 0 })
+  useCommandHandler('help.openManual', ({ page, anchor }) => {
+    setManualTarget(t => ({ page: page ?? 'index', anchor: anchor ?? null, request: t.request + 1 }))
+    openTab(viewTabKey(MANUAL_VIEW))
+  })
   // A task list row opens its item as the preview tab, like a single click in the file tree.
   const openListItem = useCallback((item: { id: string; title: string; type: string; typeLabel: string; state: string | null; implements?: string[] }) => {
     noteRecordLook(item.id, { title: item.title, type: item.type, typeLabel: item.typeLabel, state: item.state, ...(item.implements ? { implements: item.implements } : {}) })
@@ -675,6 +683,7 @@ export function AppShell({ bottomPanel }: AppShellProps = {}) {
         onSync={() => handleSync()}
         onShowBackups={() => setShowBackupHistory(true)}
         onShowSettings={() => setShowSettings(true)}
+        onShowManual={() => { void runCommand('help.openManual', {}) }}
         onLogout={() => { void handleLogout() }}
         companySwitcher={currentCompany ? (
           <CompanySwitcher
@@ -793,8 +802,9 @@ export function AppShell({ bottomPanel }: AppShellProps = {}) {
                         onPinFile={handlePinFile}
                         navigation={<PlaceNavigation canBack={places.canBack} canForward={places.canForward} onBack={places.back} onForward={places.forward} />}
                         renderRecord={recordCard}
-                        viewLooks={{ [RECORDS_TABLE_VIEW]: RECORDS_TABLE_TAB_LOOK }}
-                        renderView={name => name === RECORDS_TABLE_VIEW && currentCompany ? renderRecordsTable(currentCompany.id, id => openTab(recordTabKey(id))) : null}
+                        viewLooks={{ [RECORDS_TABLE_VIEW]: RECORDS_TABLE_TAB_LOOK, [MANUAL_VIEW]: MANUAL_TAB_LOOK }}
+                        renderView={name => name === MANUAL_VIEW ? renderManual(manualTarget)
+                          : name === RECORDS_TABLE_VIEW && currentCompany ? renderRecordsTable(currentCompany.id, id => openTab(recordTabKey(id))) : null}
                         gotoLine={gotoLine?.path === activeFilePath ? gotoLine.line : null}
                         aside={activeFilePath && !activeRecordId && rootPath && sharedFolder
                           ? <FileSidePanel companyId={currentCompany?.id} rootPath={rootPath} filePath={activeFilePath} />

@@ -25,6 +25,17 @@ export type DocViewControls = ElectronPort<'openDocView' | 'closeDocView' | 'set
 /** Opening a link of a document in the member's browser, after they said yes. */
 export type DocLinkOutbound = ElectronPort<'openExternal'>
 
+/**
+ * The user manual (files-and-editor.md "The user manual"): a page opened in a document view (main
+ * fetches the server's manual and shows its copy; only the view's id comes back), and written to a
+ * new folder the member picks in main's save dialog (the renderer never names a path).
+ */
+export type ManualControls = ElectronPort<'openManual' | 'exportManual'>
+
+export function manualPorts(): ManualControls {
+  return window.electronAPI
+}
+
 /** The app's own ports for the viewer (a preview page fakes `window.electronAPI`). */
 export function docViewPorts(): { views: DocViewControls; links: DocLinkOutbound } {
   return { views: window.electronAPI, links: window.electronAPI }

@@ -573,6 +573,8 @@ const MATRIX: Row[] = [
   r('GET /api/records-ai/job-proposals-ai/places', () => ({ path: '/api/records-ai/job-proposals-ai/places' }), [401, 401, 401, 401, 401, 401], 'a session is not a record token'),
   r('POST /api/records-ai/job-proposals-ai/candidates', () => ({ path: '/api/records-ai/job-proposals-ai/candidates', body: {} }), [401, 401, 401, 401, 401, 401], 'a session is not a record token'),
   r('GET /api/records-ai/google/drive/puts/:putId', () => ({ path: '/api/records-ai/google/drive/puts/drive-put-nosuch' }), [401, 401, 401, 401, 401, 401], 'a session is not a record token'),
+  r('GET /manual', () => ({ path: '/manual' }), [301, 301, 301, 301, 301, 301], 'public: the user manual; /manual → /manual/index.html'),
+  r('GET /manual/*', () => ({ path: '/manual/index.html' }), [200, 200, 200, 200, 200, 200], 'public: the user manual (built from manual/ for this test), the same for everyone, signed in or not'),
   r('GET /api/google-picker', () => ({ path: '/api/google-picker' }), [200, 200, 200, 200, 200, 200], 'public: the static Picker page; it holds no secret (the pick ticket is in the URL fragment)'),
   r('POST /api/google-picker/config', () => ({ path: '/api/google-picker/config', body: {} }), [410, 410, 410, 410, 410, 410], 'public: the one-time pick ticket is the proof; no ticket, nothing'),
   r('POST /api/google-picker/result', () => ({ path: '/api/google-picker/result', body: {} }), [410, 410, 410, 410, 410, 410], 'public: the one-time pick ticket is the proof; no ticket, nothing'),
@@ -942,6 +944,9 @@ let kekDir: string
 // The plugin shelf, read when the composition is first imported (in seed()).
 const shelfDir = mkdtempSync(join(tmpdir(), 'acb-matrix-shelf-'))
 process.env.PLUGINS_DIR = shelfDir
+// The user manual as the image builds it (server.md "The user manual"): the repository's own manual/.
+const manualSite = join(mkdtempSync(join(tmpdir(), 'acb-matrix-manual-')), 'site')
+process.env.MANUAL_DIR = manualSite
 
 function headersFor(role: Role): Record<string, string> {
   if (role === 'signedOut') return {}
@@ -1232,6 +1237,8 @@ async function answer(method: string, req: Req, hide: string): Promise<{ status:
 }
 
 beforeAll(async () => {
+  const { buildManualSite } = await import('../../src/lib/manual-build')
+  buildManualSite(join(__dirname, '../../../manual'), manualSite, join(__dirname, '../../shared/design-tokens'))
   kekDir = mkdtempSync(join(tmpdir(), 'acb-matrix-kek-'))
   writeFileSync(join(kekDir, 'kek'), randomBytes(32).toString('base64'))
   chmodSync(join(kekDir, 'kek'), 0o600)
@@ -1246,6 +1253,8 @@ beforeAll(async () => {
 afterAll(() => {
   rmSync(kekDir, { recursive: true, force: true })
   rmSync(shelfDir, { recursive: true, force: true })
+  rmSync(join(manualSite, '..'), { recursive: true, force: true })
+  delete process.env.MANUAL_DIR
   delete process.env.BROKER_KEK_FILE
 })
 
