@@ -10,7 +10,7 @@ import {
 } from '../src/features/chat/chatSessionMessages'
 import { buildChatRequestBody, type ChatRequestSources } from '../src/features/chat/chatRequestBody'
 import { persistedChatTabs, restoreChatTabs, safeReadChatTabs, safeWriteChatTabs, CHAT_TABS_KEY_PREFIX } from '../src/features/chat/chatTabsStorage'
-import { draftWith, mergeQueuedSends, steerPartId, unreadSteerParts, withoutSteerParts } from '../src/features/chat/queuedSends'
+import { draftWith, mergeQueuedSends, returnedToInput, steerPartId, unreadSteerParts, withoutSteerParts } from '../src/features/chat/queuedSends'
 import { STEER_PART_TYPE } from '../shared/steer'
 import { CHOICE_PART_TYPE } from '../shared/choice-prompt'
 import { agentInputMessages } from '../electron/agents/session'
@@ -218,4 +218,18 @@ test('waiting messages: merged into one send (texts joined, files kept, paths de
   assert.equal(withoutSteerParts(messages, new Set()), messages)
   assert.equal(draftWith('下書き', ['一つ目', '  ', '二つ目']), '下書き\n\n一つ目\n\n二つ目')
   assert.equal(draftWith('', ['一つ目']), '一つ目')
+})
+
+test('waiting messages back in the input keep their images and files: the input\'s own first, then each message in order, none dropped', () => {
+  const [own, a1, a2, b1, b2, b3] = ['own', 'a1', 'a2', 'b1', 'b2', 'b3'].map(name => ({ name }) as File)
+  // Two messages with images (together past the composer's 4-image drop limit) and an overlapping reference.
+  const back = returnedToInput(
+    { text: '下書き', files: [own], filePaths: ['x.md'] },
+    [{ text: '一つ目', files: [a1, a2], filePaths: ['x.md', 'a.md'] }, { text: '', files: [b1, b2, b3], filePaths: ['b.md'] }, { text: '三つ目' }],
+  )
+  assert.equal(back.text, '下書き\n\n一つ目\n\n三つ目')
+  assert.deepEqual(back.files, [own, a1, a2, b1, b2, b3])
+  assert.deepEqual(back.filePaths, ['x.md', 'a.md', 'b.md'])
+  // An image-only message into an empty input.
+  assert.deepEqual(returnedToInput({ text: '', files: [], filePaths: [] }, [{ text: '', files: [a1] }]), { text: '', files: [a1], filePaths: [] })
 })

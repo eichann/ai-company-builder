@@ -4,8 +4,16 @@ import type { AuthMode } from '../../../../shared/agent'
 import { agentCan } from '../../../../shared/agents/registry'
 import { canSteerText } from '../../../../shared/steer'
 import type { ChatServerClient } from '../chatServerClient'
-import { draftWith, mergeQueuedSends, steerPartId, unreadSteerParts, withoutSteerParts, type QueuedSend } from '../queuedSends'
+import { mergeQueuedSends, returnedToInput, steerPartId, unreadSteerParts, withoutSteerParts, type QueuedSend } from '../queuedSends'
 import type { ChatInputApi } from './useChatDraft'
+
+/** Messages that did not go out return to the composer whole: text, images and file references. */
+export function returnToInput(input: ChatInputApi | null, items: readonly QueuedSend[]): void {
+  if (!input) return
+  const back = returnedToInput({ text: input.getValue(), ...input.getAttachments() }, items)
+  input.setValue(back.text)
+  input.setAttachments({ files: back.files, filePaths: back.filePaths })
+}
 
 export interface SteeringOptions {
   chatServer: ChatServerClient
@@ -43,13 +51,12 @@ export function useSteering({ chatServer, authModeRef, appSessionIdRef, inputApi
     }
   }, [chatServer, authModeRef, appSessionIdRef])
 
-  /** 取り消す: the waiting message goes back into the input. */
+  /** 取り消す: the waiting message goes back into the input, its images and files too. */
   const cancelQueuedSend = useCallback((index: number) => {
     const item = queuedSends[index]
     if (!item) return
     setQueuedSends(queue => queue.filter((_, i) => i !== index))
-    const draft = inputApiRef.current?.getValue() ?? ''
-    inputApiRef.current?.setValue(draftWith(draft, [item.text]))
+    returnToInput(inputApiRef.current, [item])
     inputApiRef.current?.focus()
   }, [queuedSends, inputApiRef])
 
@@ -60,7 +67,7 @@ export type Steering = ReturnType<typeof useSteering>
 
 /**
  * The turn ended: waiting sends go out together as the next message — or,
- * after a stop or an error, back into the input. An instruction the agent did
+ * after a stop or an error, back into the input (with their attachments). An instruction the agent did
  * not read leaves the reply first (it is sent again as a normal message).
  */
 export function useQueuedSendFlush(
@@ -77,8 +84,7 @@ export function useQueuedSendFlush(
       setMessages(current => withoutSteerParts(current, unread))
     }
     if (status === 'error' || lastTurnAbortedRef.current) {
-      const draft = inputApiRef.current?.getValue() ?? ''
-      inputApiRef.current?.setValue(draftWith(draft, queuedSends.map(item => item.text)))
+      returnToInput(inputApiRef.current, queuedSends)
       setQueuedSends([])
       return
     }

@@ -91,16 +91,18 @@ export function useComposerAttachments(
       } catch { /* fall through to image handling */ }
     }
 
-    // Image files (max 4, max 2MB each)
+    // Image files (max 4 attached by dropping, max 2MB each)
     const validFiles = Array.from(e.dataTransfer.files).filter(f => IMAGE_MIME_TYPES.includes(f.type))
     const oversized = validFiles.filter(f => f.size > MAX_IMAGE_SIZE)
     const files = validFiles.filter(f => f.size <= MAX_IMAGE_SIZE)
     const warnings: string[] = []
     if (oversized.length > 0) warnings.push(`${oversized.length}件の画像が2MBを超えています`)
     if (files.length > 0) {
-      const combined = [...current.images, ...files]
-      if (combined.length > MAX_IMAGES) warnings.push(`画像は最大${MAX_IMAGES}枚までです`)
-      update({ ...current, images: combined.slice(0, MAX_IMAGES) })
+      // The limit applies to what is dropped now: images already attached stay — returned waiting
+      // messages may hold more than the limit, and dropping one more must not remove any of them.
+      const room = Math.max(0, MAX_IMAGES - current.images.length)
+      if (files.length > room) warnings.push(`画像は最大${MAX_IMAGES}枚までです`)
+      if (room > 0) update({ ...current, images: [...current.images, ...files.slice(0, room)] })
     }
     if (warnings.length > 0) {
       setImageWarning(warnings.join('、'))
@@ -118,6 +120,13 @@ export function useComposerAttachments(
     update({ ...current, filePaths: current.filePaths.filter((_, i) => i !== index) })
   }, [update])
 
+  // Read and set by the conversation (ChatInputApi): what a waiting message or a stopped send
+  // gives back is set as it was, past the drop limit — it was accepted once, nothing is dropped.
+  const getAttachments = useCallback(() => ({ files: [...currentRef.current.images], filePaths: [...currentRef.current.filePaths] }), [])
+  const setAttachments = useCallback((value: { files: File[]; filePaths: string[] }) => {
+    update({ images: [...value.files], filePaths: [...value.filePaths] })
+  }, [update])
+
   const sendWithAttachments = useCallback((text: string) => {
     const { images, filePaths } = currentRef.current
     onSend(text, images.length > 0 ? [...images] : undefined, filePaths.length > 0 ? [...filePaths] : undefined)
@@ -133,5 +142,7 @@ export function useComposerAttachments(
     removeImage,
     removeFilePath,
     sendWithAttachments,
+    getAttachments,
+    setAttachments,
   }
 }

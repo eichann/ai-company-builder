@@ -60,12 +60,23 @@ one place an added agent brings its own controls; everything else asks the regis
   `useStreamingChat` + `useRateLimitsRefresh`, `useChatAutoScroll`, `useConsultationStatus`, `useAgentModelSelection`,
   `useChatTabs`, `useAgentAuth`, `useChatServer`; the composer's `useComposerAttachments` and
   `useSlashCommands`.
-- The composer's input fills `apiRef` (`ChatInputApi` in `useChatDraft.ts`, through
-  `useImperativeHandle`); the conversation writes drafts, voice text and `chat.insertText`
-  (`replaceText`) through it. The CodeMirror editor is made once and reads props through
+- The composer fills `apiRef` (`ChatInputApi` in `useChatDraft.ts`, through
+  `useImperativeHandle` in `ChatComposer.tsx`: the text input's own `ChatTextInputApi` plus the
+  attachments, `getAttachments` / `setAttachments`); the conversation writes drafts, voice text and
+  `chat.insertText` (`replaceText`) through it. The CodeMirror editor is made once and reads props through
   `useLatestRef` (`src/shared/hooks/`); only editability, placeholder and suggestion are pushed in.
   `useComposerAttachments` reports the attachment count when it changes (`onAttachmentsChange`,
   read when the member leaves a tab). Tests: `tests/ui/chat-composer.spec.ts`.
+- **A message that did not go out comes back whole** (text, images, file references): 取り消す on
+  a waiting message, a stop or an error with messages waiting (`useSteering` `returnToInput`), and
+  a send cut short because a new conversation started in the tab while its images were read. The
+  rule is `queuedSends.ts` `returnedToInput`: what the composer holds first, then each message in
+  order, every image kept (past the 4-image drop limit: it was accepted once), file references once
+  each. The drop limit counts only what is dropped now (`useComposerAttachments`: the room left,
+  the rest refused with 「画像は最大4枚までです」) and never removes an attached image; a send takes
+  all attached images (no count limit after the composer). Tests: `tests/chat-panel-helpers.test.ts`,
+  `tests/ui/chat-panel.spec.ts` 「a waiting message comes back whole…」, 「images returned past the
+  drop limit…」.
 - Other features reach the chat only through commands: `chat.newConsultation` (a skill's 実行)
   and `chat.insertText`, handled per pane in `ChatPanel.tsx` and passed to the shown tab as
   `inputRequest` (`commands.md`), which `ChatPanelChat` carries out; there is no store field for
@@ -192,8 +203,9 @@ one place an added agent brings its own controls; everything else asks the regis
   (a row, 「AIに相談する」, opening a conversation); quitting, other panels and company switches
   unmount it or keep it active — and the tab's live state is blank (`features/chat/model.ts`
   `discardWhenLeft`: history restored, no message besides the greeting, no draft text, no
-  attached images or files, no running turn, waiting send, approval, question or hand-off
-  request) and its stored summary is empty, its tab closes and its stored copy is deleted. It
+  attached images or files, no running turn, send still reading its images, waiting send, approval,
+  question or hand-off request — `tabBusy` in `ChatConversation.tsx`, the same rule that keeps an
+  automatic run's tab open) and its stored summary is empty, its tab closes and its stored copy is deleted. It
   re-checks after reading the summaries (the member may have come back), never deletes the last
   tab (`closeTab`), and fails silently like closing. Tests: `src/features/chat/model.test.ts`,
   `tests/ui/chat-panel.spec.ts`.
@@ -201,6 +213,12 @@ one place an added agent brings its own controls; everything else asks the regis
   (UIMessage ↔ history, conversion cache, title transcript), `chatRequestBody.ts` (the
   `/api/chat` body: same fields and order, pending attachments consumed once),
   `chatTabsStorage.ts` (remembered tabs), `queuedSends.ts` (merging waiting messages).
+- A send with images reads them before anything is staged (`readImages`, then `stageImages`):
+  if the tab closed meanwhile nothing more is done; if a new conversation started in the tab
+  (`chat.newConsultation`; the conversation id is compared) the message is not sent into it,
+  nothing stays staged for its requests, and the words and images go back into the input with
+  「画像の準備中に新しい相談を始めたため、…」. Tests: `tests/ui/chat-panel.spec.ts` 「a first message
+  with an image still goes out…」, 「a new consultation started in the tab while an image is read…」.
 - Editing a message and resending goes through the normal send path (`sendTurn` in
   `ChatConversation.tsx`): a synchronous save of the conversation cut before the edited message +
   the new one, then send. The edited message's file references are sent again; images are not

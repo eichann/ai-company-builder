@@ -27,10 +27,10 @@ import { useChatDraft } from '../hooks/useChatDraft'
 import { completeHandoffTurn, persistAgentSession, stampNewMessages, useConversation } from '../hooks/useConversation'
 import { useChatHistory } from '../hooks/useChatHistory'
 import { useTitleGeneration } from '../hooks/useTitleGeneration'
-import { useAttachToLatestUserMessage, useMessageAttachments } from '../hooks/useMessageAttachments'
+import { readImages, useAttachToLatestUserMessage, useMessageAttachments } from '../hooks/useMessageAttachments'
 import { useChatRequestContext, useChatTransport } from '../hooks/useChatTransport'
 import { useAgentInteractions, useToolApprovals } from '../hooks/useAgentInteractions'
-import { useQueuedSendFlush, useSteering } from '../hooks/useSteering'
+import { returnToInput, useQueuedSendFlush, useSteering } from '../hooks/useSteering'
 import { usePromptSuggestion } from '../hooks/usePromptSuggestion'
 import { useChatAutoScroll } from '../hooks/useChatAutoScroll'
 import { useConsultationStatus } from '../hooks/useConsultationStatus'
@@ -53,6 +53,7 @@ import { appInstructionOf, type AppInstruction } from '../../../../shared/app-in
 // Over 300 lines on purpose: the hook order is one sequence (chat-ui-and-history.md), read in one place.
 
 const IMAGE_READ_FAILED = '添付した画像を読み込めなかったため、送信しませんでした。入力した文は残してあります。画像を添付し直してから、もう一度送信してください。'
+const SEND_OUTLIVED_CONVERSATION = '画像の準備中に新しい相談を始めたため、前の相談へのメッセージは送りませんでした。入力した文と画像は入力欄に戻してあります。'
 
 export interface ChatPanelChatProps {
   /** The tab this conversation is shown in (its status in the 「AIへの相談」 list). */
@@ -277,11 +278,14 @@ export const ChatPanelChat = memo(function ChatPanelChat({ tabId, isShown, depar
     lastTurnAbortedRef.current = false
     // From here until the request is on its way the composer is already empty: the tab is busy.
     preparingSendsRef.current += 1
+    // The conversation this message belongs to (a new one may start in this tab while images are read).
+    const conversationId = appSessionIdRef.current
     try {
       // Images (base64) and file paths for the request body and the bubble
       if (files && files.length > 0) {
+        let images
         try {
-          await stageImages(files)
+          images = await readImages(files)
         } catch {
           // Nothing was sent: the typed text goes back into the composer.
           if (!editing) chatInputApiRef.current?.setValue(text)
@@ -290,6 +294,14 @@ export const ChatPanelChat = memo(function ChatPanelChat({ tabId, isShown, depar
         }
         // The tab was closed meanwhile: nothing more is done for it (its save on closing already ran).
         if (unmountedRef.current) return
+        // A new conversation started here meanwhile (chat.newConsultation): it does not get this
+        // message; nothing is staged for its requests, and the words and images go back into the input.
+        if (appSessionIdRef.current !== conversationId) {
+          returnToInput(chatInputApiRef.current, [{ text, files, filePaths }])
+          setHistoryError(SEND_OUTLIVED_CONVERSATION)
+          return
+        }
+        stageImages(images)
       }
       if (filePaths && filePaths.length > 0) stageFilePaths(filePaths)
       // Dropped records go with this message once (main reads them now); its bubble says so.
@@ -347,6 +359,10 @@ export const ChatPanelChat = memo(function ChatPanelChat({ tabId, isShown, depar
   useQueuedSendFlush(steering, status, handleSend, setMessages, chatInputApiRef)
 
   const running = status === 'submitted' || status === 'streaming'
+  // Something of the member's is on its way or waits on them: a turn runs, a send is still reading
+  // its images (the composer is already empty), messages wait for the turn, or an approval or a
+  // question is open. One rule for closing an automatic run's tab and for discarding a blank tab.
+  const tabBusy = () => running || preparingSendsRef.current > 0 || queuedSends.length > 0 || !!pendingApproval || !!currentInteraction
   const offeredSuggestion = !running && !currentInteraction && !pendingApproval ? suggestions.promptSuggestion : null
 
   // What the tab holds, read live when an automatic run or its record ends (closing it must lose nothing).
@@ -356,7 +372,7 @@ export const ChatPanelChat = memo(function ChatPanelChat({ tabId, isShown, depar
     draft: draftInputRef.current,
     unsent: unsentAttachmentsRef.current + pendingRecordsRef.current.length + (topicSwitch ? 1 : 0) + editingMessagesRef.current.size,
     // Not the hand-off receipt: every turn leaves one (its memo update goes on after a close).
-    busy: running || preparingSendsRef.current > 0 || queuedSends.length > 0 || !!pendingApproval || !!currentInteraction,
+    busy: tabBusy(),
     userMessageIds: messagesRef.current.filter(message => message.role === 'user').map(message => message.id),
     shown: isShown,
   })
@@ -372,7 +388,7 @@ export const ChatPanelChat = memo(function ChatPanelChat({ tabId, isShown, depar
       hasMessages: messagesRef.current.some(message => message.id !== '1' || message.role === 'user'),
       draft: draftInputRef.current,
       attachments: unsentAttachmentsRef.current,
-      busy: running || queuedSends.length > 0 || !!pendingApproval || !!currentInteraction || !!handoffRequestRef.current,
+      busy: tabBusy() || !!handoffRequestRef.current,
     }),
     close: () => onLeftBlank?.(),
   })
