@@ -1,0 +1,31 @@
+<!-- The manual's chapter 14: a Skill is the AI's work instructions; someone who may change
+     Skills writes it in the company folder, sync brings it to everyone, and each member's AI
+     follows it when asked. Shot by shoot.spec.ts (scenes.ts). -->
+<style>
+  body { margin: 0; background: var(--color-surface); font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Hiragino Kaku Gothic ProN", sans-serif; color: var(--color-text); }
+  #diagram { width: 960px; padding: 28px 30px 30px; box-sizing: border-box; background: var(--color-surface); }
+  .row { display: flex; align-items: stretch; }
+  .box { flex: 1; padding: 14px 12px 16px; border-radius: 14px; border: 2px solid var(--color-border-strong); background: var(--color-bg); text-align: center; }
+  .box .title { font-size: 16px; font-weight: 700; }
+  .box .what { margin-top: 6px; font-size: 13px; line-height: 1.6; color: var(--color-text-muted); }
+  .box.doc { border-color: var(--color-primary); background: var(--color-selected-bg); }
+  .doc .paper { margin: 8px auto 0; width: 170px; padding: 8px 10px; border-radius: 6px; background: var(--color-surface); border: 1px solid var(--color-border-strong); text-align: left; font-size: 12px; line-height: 1.7; color: var(--color-text); }
+  .arrow { width: 120px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; }
+  .arrow .when { padding: 3px 10px; border-radius: 9999px; font-size: 12px; font-weight: 700; white-space: nowrap; background: var(--color-surface); color: var(--color-selected-text); border: 2px solid var(--color-primary); }
+  .members { display: flex; flex-direction: column; gap: 10px; flex: 1; }
+  .members .box { flex: none; }
+  .note { margin-top: 16px; padding: 12px 16px; border-radius: 10px; background: var(--color-warning-bg); border: 1px solid var(--color-warning-border); color: var(--color-warning-text); font-size: 14px; text-align: center; }
+</style>
+<div id="diagram">
+  <div class="row">
+    <div class="box"><div class="title">上手な人のやり方</div><div class="what">「お礼メールは、件名・お礼・<br>次の約束の順に書く」</div></div>
+    <div class="arrow"><span class="when">手順書にする</span><svg width="100" height="20" viewBox="0 0 100 20" aria-hidden="true"><path d="M4 10 H88" stroke="var(--color-primary)" stroke-width="3" /><path d="M84 3 L96 10 L84 17 z" fill="var(--color-primary)" /></svg></div>
+    <div class="box doc"><div class="title">Skill（AI 用の手順書）</div><div class="paper">thank-you-mail<br>1. 訪問メモを読む<br>2. 件名をつける<br>3. お礼と次の約束を書く</div></div>
+    <div class="arrow"><span class="when">同期で届く</span><svg width="100" height="20" viewBox="0 0 100 20" aria-hidden="true"><path d="M4 10 H88" stroke="var(--color-primary)" stroke-width="3" /><path d="M84 3 L96 10 L84 17 z" fill="var(--color-primary)" /></svg></div>
+    <div class="members">
+      <div class="box"><div class="title">山田さんの AI</div><div class="what">手順どおりに下書きを作る</div></div>
+      <div class="box"><div class="title">佐藤さんの AI</div><div class="what">同じ手順で下書きを作る</div></div>
+    </div>
+  </div>
+  <div class="note">会社の Skill を書いたり直したりできるのは、会社が決めた人だけです。あなたは、届いた Skill を見て、使えます。</div>
+</div>

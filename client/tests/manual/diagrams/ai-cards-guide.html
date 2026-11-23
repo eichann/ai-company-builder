@@ -1,0 +1,49 @@
+<!-- The manual's chapter 13: the ways the AI stops and asks the member in 「AIへの相談」, and what
+     the member does in each (the names as the screens show them). Shot by shoot.spec.ts (scenes.ts). -->
+<style>
+  body { margin: 0; background: var(--color-surface); font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Hiragino Kaku Gothic ProN", sans-serif; color: var(--color-text); }
+  #diagram { width: 960px; padding: 26px 30px 30px; box-sizing: border-box; background: var(--color-surface); }
+  table { width: 100%; border-collapse: separate; border-spacing: 0 8px; font-size: 14px; line-height: 1.6; }
+  th { text-align: left; font-size: 13px; color: var(--color-text-muted); font-weight: 700; padding: 0 12px; }
+  td { vertical-align: top; padding: 10px 12px; background: var(--color-bg); border-top: 1px solid var(--color-border-strong); border-bottom: 1px solid var(--color-border-strong); }
+  td:first-child { border-left: 1px solid var(--color-border-strong); border-radius: 10px 0 0 10px; width: 270px; }
+  td:last-child { border-right: 1px solid var(--color-border-strong); border-radius: 0 10px 10px 0; }
+  .num { display: inline-flex; width: 22px; height: 22px; margin-right: 6px; border-radius: 9999px; background: var(--color-primary); color: var(--color-on-primary); font-weight: 700; font-size: 13px; align-items: center; justify-content: center; }
+  .kind { display: block; margin-top: 2px; font-size: 12px; color: var(--color-text-muted); }
+  .say { font-weight: 700; }
+  .btn { display: inline-block; padding: 0 6px; border-radius: 6px; border: 1px solid var(--color-primary); color: var(--color-selected-text); background: var(--color-selected-bg); font-weight: 700; white-space: nowrap; }
+  .note { margin-top: 10px; padding: 12px 16px; border-radius: 10px; background: var(--color-success-bg); border: 1px solid var(--color-success-border); color: var(--color-success-text); font-size: 15px; font-weight: 700; text-align: center; }
+</style>
+<div id="diagram">
+  <table>
+    <thead><tr><th>画面に出るもの</th><th>どういうことか</th><th>すること</th></tr></thead>
+    <tbody>
+      <tr>
+        <td><span class="num">1</span><span class="say">Claudeからの質問 · 回答待ち</span><span class="kind">入力欄の上のカード</span></td>
+        <td>AI が、どちらにするか迷っている</td>
+        <td>選んで <span class="btn">回答する</span>。合うものがなければ「その他」に書く</td>
+      </tr>
+      <tr>
+        <td><span class="num">2</span><span class="say">ツール実行の確認</span><span class="kind">相談の上の黄色い帯</span></td>
+        <td>ファイルを消すような操作の前に、アプリが止めて聞いている</td>
+        <td>何をするのか読んでから <span class="btn">許可</span> か <span class="btn">拒否</span>。分からなければ <span class="btn">拒否</span> でよい</td>
+      </tr>
+      <tr>
+        <td><span class="num">3</span><span class="say">確認をお願いします</span><span class="kind">AI の返事の中のカード</span></td>
+        <td>AI が作ったものを見てから進めたい</td>
+        <td>ファイルを開いて読み、<span class="btn">この内容で進めて</span> か <span class="btn">直してほしい</span></td>
+      </tr>
+      <tr>
+        <td><span class="num">4</span><span class="say">承認のお願い</span><span class="kind">会社によって出るカード</span></td>
+        <td>会社の外への操作など、決まった人の承認が要る</td>
+        <td>中身を読んで、承認する人が判断する</td>
+      </tr>
+      <tr>
+        <td><span class="num">5</span><span class="say">「できませんでした」と AI の説明</span><span class="kind">AI の作業の行と返事</span></td>
+        <td>あなたが書けないフォルダに、AI が書こうとして止められた</td>
+        <td>AI の説明を読み、別の場所に置いてよいか答える</td>
+      </tr>
+    </tbody>
+  </table>
+  <div class="note">カードが出ている間、AI は待っています。決めるのはいつもあなたです。</div>
+</div>

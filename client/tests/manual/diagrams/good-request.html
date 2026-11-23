@@ -1,0 +1,27 @@
+<!-- The manual's chapter 12: the three things a good request says (what, from which files, where
+     to put it), with 山田さん's example. Shot by shoot.spec.ts (scenes.ts). -->
+<style>
+  body { margin: 0; background: var(--color-surface); font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Hiragino Kaku Gothic ProN", sans-serif; color: var(--color-text); }
+  #diagram { width: 960px; padding: 28px 30px 30px; box-sizing: border-box; background: var(--color-surface); }
+  .row { display: flex; gap: 14px; }
+  .box { flex: 1; padding: 14px 16px 16px; border-radius: 14px; border: 2px solid var(--color-border-strong); background: var(--color-bg); }
+  .box .head { display: flex; align-items: center; gap: 8px; font-size: 17px; font-weight: 700; }
+  .num { display: inline-flex; width: 24px; height: 24px; border-radius: 9999px; background: var(--color-primary); color: var(--color-on-primary); font-weight: 700; font-size: 14px; align-items: center; justify-content: center; }
+  .box .what { margin-top: 8px; font-size: 14px; line-height: 1.6; color: var(--color-text-muted); }
+  .box .ex { margin-top: 10px; padding: 8px 10px; border-radius: 8px; background: var(--color-selected-bg); color: var(--color-selected-text); font-size: 14px; line-height: 1.6; font-weight: 700; }
+  .whole { margin-top: 16px; padding: 14px 18px; border-radius: 14px; border: 2px solid var(--color-primary); background: var(--color-surface); font-size: 15px; line-height: 1.8; }
+  .whole .label { font-size: 13px; font-weight: 700; color: var(--color-text-muted); }
+  .whole mark { padding: 1px 4px; border-radius: 4px; background: var(--color-selected-bg); color: var(--color-selected-text); font-weight: 700; }
+  .whole sup { font-size: 11px; color: var(--color-primary); font-weight: 700; margin-left: 2px; }
+</style>
+<div id="diagram">
+  <div class="row">
+    <div class="box"><div class="head"><span class="num">1</span>何をしてほしいか</div><div class="what">作る・まとめる・調べる・直す。<br>だれに向けたものか、何のためかも</div><div class="ex">A社の田村さんへの<br>お礼メールの下書き</div></div>
+    <div class="box"><div class="head"><span class="num">2</span>どれを見てほしいか</div><div class="what">もとにするファイルやフォルダの名前。<br>入力欄にファイルを落としてもよい</div><div class="ex">営業部の<br>訪問メモ_1123.md</div></div>
+    <div class="box"><div class="head"><span class="num">3</span>どこに置いてほしいか</div><div class="what">できたものを置くフォルダ。<br>決まった名前があればそれも</div><div class="ex">営業部/下書き/</div></div>
+  </div>
+  <div class="whole">
+    <div class="label">3つをつなげると</div>
+    「<mark>営業部の訪問メモ_1123.md</mark><sup>2</sup> を読んで、<mark>A社の田村さんへのお礼メールの下書き</mark><sup>1</sup> を <mark>営業部/下書き/</mark><sup>3</sup> に作ってください。」
+  </div>
+</div>

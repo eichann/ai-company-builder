@@ -1,0 +1,35 @@
+<!-- The manual's chapter 11: how a request to the AI goes. The AI works in the member's company
+     folder on this PC (reads, makes, changes files there), asks with a card when it needs the
+     member, and nothing reaches the others until the member syncs. Shot by shoot.spec.ts (scenes.ts). -->
+<style>
+  body { margin: 0; background: var(--color-surface); font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Hiragino Kaku Gothic ProN", sans-serif; color: var(--color-text); }
+  #diagram { width: 960px; padding: 28px 30px 30px; box-sizing: border-box; background: var(--color-surface); }
+  .row { display: flex; align-items: stretch; }
+  .box { flex: 1; padding: 14px 12px 16px; border-radius: 14px; border: 2px solid var(--color-border-strong); background: var(--color-bg); text-align: center; }
+  .box .step { display: inline-flex; width: 24px; height: 24px; border-radius: 9999px; background: var(--color-primary); color: var(--color-on-primary); font-weight: 700; font-size: 14px; align-items: center; justify-content: center; }
+  .box .title { margin-top: 6px; font-size: 16px; font-weight: 700; }
+  .box .what { margin-top: 6px; font-size: 13px; line-height: 1.6; color: var(--color-text-muted); }
+  .box.you { border-color: var(--color-primary); background: var(--color-selected-bg); }
+  .arrow { width: 36px; display: flex; align-items: center; justify-content: center; }
+  .pc { margin-top: 14px; padding: 10px 14px 12px; border-radius: 14px; border: 2px dashed var(--color-primary); }
+  .pc .label { font-size: 13px; font-weight: 700; color: var(--color-selected-text); margin-bottom: 8px; }
+  .ask { margin-top: 14px; display: flex; gap: 12px; align-items: center; padding: 12px 16px; border-radius: 10px; background: var(--color-warning-bg); border: 1px solid var(--color-warning-border); color: var(--color-warning-text); font-size: 14px; line-height: 1.6; }
+  .ask b { white-space: nowrap; }
+  .note { margin-top: 12px; padding: 12px 16px; border-radius: 10px; background: var(--color-success-bg); border: 1px solid var(--color-success-border); color: var(--color-success-text); font-size: 14px; font-weight: 700; text-align: center; }
+</style>
+<div id="diagram">
+  <div class="pc">
+    <div class="label">あなたの PC の中（会社フォルダ）</div>
+    <div class="row">
+      <div class="box you"><span class="step">1</span><div class="title">あなたが頼む</div><div class="what">右の「AIへの相談」に<br>ふだんの言葉で書く</div></div>
+      <div class="arrow"><svg width="28" height="20" viewBox="0 0 28 20" aria-hidden="true"><path d="M2 10 H18" stroke="var(--color-primary)" stroke-width="3" /><path d="M16 3 L26 10 L16 17 z" fill="var(--color-primary)" /></svg></div>
+      <div class="box"><span class="step">2</span><div class="title">AI がファイルを読む</div><div class="what">会社フォルダの中の<br>メモや資料を開いて読む</div></div>
+      <div class="arrow"><svg width="28" height="20" viewBox="0 0 28 20" aria-hidden="true"><path d="M2 10 H18" stroke="var(--color-primary)" stroke-width="3" /><path d="M16 3 L26 10 L16 17 z" fill="var(--color-primary)" /></svg></div>
+      <div class="box"><span class="step">3</span><div class="title">作る・直す</div><div class="what">ファイルを作ったり、<br>直したりする</div></div>
+      <div class="arrow"><svg width="28" height="20" viewBox="0 0 28 20" aria-hidden="true"><path d="M2 10 H18" stroke="var(--color-primary)" stroke-width="3" /><path d="M16 3 L26 10 L16 17 z" fill="var(--color-primary)" /></svg></div>
+      <div class="box you"><span class="step">4</span><div class="title">あなたが確かめる</div><div class="what">できたファイルを<br>開いて読む</div></div>
+    </div>
+  </div>
+  <div class="ask"><b>途中で聞かれたら</b><span>AI が迷ったときや、ファイルを消すような操作の前には、AI が止まってカードで聞いてきます。決めるのはあなたです（8章）。</span></div>
+  <div class="note">AI が作ったファイルも、まずはあなたの PC の中だけ。みんなに届くのは［サーバーと同期］を押したときです。</div>
+</div>

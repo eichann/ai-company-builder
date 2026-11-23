@@ -30,6 +30,10 @@
 //               this PC's in the backups) | offline (the send failed) | denied (a file in 総務部, which
 //               this member only reads: sync stopped) | restored (that file put back, the rest sent);
 //               absent = 同期が完了しました. 「変更を確認」 lists two changes, 「バックアップ履歴」 two backups.
+//     chat      live = a new consultation whose sent messages get a fixed reply chosen by their words
+//               (the manual's chapters 6–9: reading and writing files, an extra instruction while
+//               the AI works, a choice question, a command to confirm, a refused write, a review
+//               request, a Skill), and three earlier consultations in the list
 //     folders   marks = 総務部 downloaded (閲覧のみ), 営業部/過去資料 not downloaded and the private
 //               folder 営業部/提案前メモ this member reads; other = the same for someone who does not read it
 //
@@ -48,6 +52,12 @@ import { useAppStore } from '../src/stores/appStore'
 import { useAuthStore } from '../src/stores/authStore'
 import { AppShell } from '../src/app/AppShell'
 import { emitter, installElectronAPI, type ElectronAPI } from './ui/fixtures/electron-api'
+import type { AgentInteractionRequest } from '../shared/agent-interaction'
+import type { ToolApprovalRequest } from '../shared/ipc-contract'
+import { parseChoiceQuestions } from '../shared/choice-prompt'
+import { REVIEW_PART_TYPE } from '../shared/review-request'
+import { STEER_PART_TYPE } from '../shared/steer'
+import { readOnlyMessage } from '../shared/write-access'
 
 const params = new URLSearchParams(location.search)
 // A sample for the bottom panel's frame (B2) in place of the inbox (I1), which needs records on (?inbox=1).
@@ -65,6 +75,8 @@ try {
 if (params.get('notice') !== '1') markAgentLogNoticeSeen('u_me')
 
 const MANUAL = params.get('manual') === '1'
+// ?manual=1&chat=live: 「AIへの相談」 answers what the member sends with a fixed reply (liveChat below).
+const LIVE = MANUAL && params.get('chat') === 'live'
 const ROOT = MANUAL ? '/Users/yamada/AI Company Builder/検証A社' : '/Users/demo/会社'
 const COMPANY = 'demo'
 // A second company (with no departments of its own on disk) for per-company state.
@@ -478,6 +490,168 @@ if (params.get('inbox') === '1') {
     },
   } satisfies Partial<ElectronAPI>)
 }
+// ?manual=1&chat=live: what 「AIへの相談」 answers (the manual's chapters 6–9). A request opens a
+// reply stream; its words choose the fixed reply (LIVE_REPLIES), which may stay open (the AI still
+// working, a question or a confirmation waiting) until the picture is taken.
+const liveQuestions = emitter<AgentInteractionRequest>()
+const liveApprovals = emitter<ToolApprovalRequest>()
+const LIVE_PAST = [
+  { id: 'past-visit', title: '訪問メモの整理', minutesAgo: 60 * 26, preview: '今週の訪問メモを、会社ごとに1つの表にまとめました。' },
+  { id: 'past-outline', title: 'B社 研修の提案の骨子', minutesAgo: 60 * 50, preview: '研修の提案の骨子を、ねらい・進め方・費用の順に作りました。' },
+  { id: 'past-estimate', title: '見積の進め方の相談', minutesAgo: 60 * 75, preview: '見積は、前回の単価をもとに、数量だけ変えるのがよさそうです。' },
+].map(p => {
+  const at = new Date(Date.now() - p.minutesAgo * 60_000).toISOString()
+  return { id: p.id, companyId: COMPANY, title: p.title, createdAt: at, updatedAt: at, messageCount: 4, sent: true, preview: p.preview }
+})
+type LiveStep = { chunk: unknown } | { wait: number } | { write: string } | { ask: unknown[] } | { approve: ToolApprovalRequest['toolInput'] } | { end: true }
+// What main puts on a tool call (its plain-Japanese line with a company-relative path).
+const line = (label: string, running: string, detail: string) => ({ acb: { display: { label, running, many: `${label}（{n} 回）`, detail } } })
+const READ = (id: string, path: string): LiveStep[] => [
+  { chunk: { type: 'tool-input-available', toolCallId: id, toolName: 'Read', dynamic: true, providerExecuted: true, input: { file_path: `${ROOT}/${path}` }, providerMetadata: line('ファイルを読みました', 'ファイルを読んでいます', path) } },
+  { wait: 80 },
+  { chunk: { type: 'tool-output-available', toolCallId: id, dynamic: true, providerExecuted: true, output: 'ok' } },
+]
+const WRITE = (id: string, path: string): LiveStep[] => [
+  { chunk: { type: 'tool-input-available', toolCallId: id, toolName: 'Write', dynamic: true, providerExecuted: true, input: { file_path: `${ROOT}/${path}` }, providerMetadata: line('ファイルに書きました', 'ファイルに書いています', path) } },
+  { wait: 80 },
+  { write: path },
+  { chunk: { type: 'tool-output-available', toolCallId: id, dynamic: true, providerExecuted: true, output: 'ok' } },
+]
+const SAY = (id: string, text: string): LiveStep[] => [
+  { chunk: { type: 'text-start', id } }, { chunk: { type: 'text-delta', id, delta: text } }, { chunk: { type: 'text-end', id } },
+]
+const THANKS = '営業部/下書き/お礼メール_A社.md'
+/** What the AI's files hold once written. */
+const LIVE_WRITTEN: Record<string, string> = {
+  [THANKS]: [
+    '件名：本日のお打ち合わせのお礼',
+    '',
+    'A社 購買部',
+    '田村様',
+    '',
+    '本日はお忙しいところ、お時間をいただきありがとうございました。',
+    'ご提案の内容におおむねご賛同いただき、大変うれしく思います。',
+    '',
+    'お話しいただいたとおり、見積を来週までにお送りいたします。',
+    '3月末の納期に間に合うよう、進め方もあわせてご相談させてください。',
+    '',
+    '引き続きどうぞよろしくお願いいたします。',
+    '',
+    '検証A社 営業部',
+    '山田 太郎',
+  ].join('\n'),
+  '営業部/提案書/提案書_A社向け_骨子.md': '# A社向け 提案書（骨子）\n\n## ねらい\n\n## 進め方\n\n## 費用\n',
+}
+const MEMO = '営業部/訪問メモ_1123.md'
+const LIVE_REPLIES: Array<{ when: RegExp; steps: LiveStep[] }> = [
+  // A Skill chosen with 「/」 (chapter 14).
+  { when: /^\/thank-you-mail/, steps: [
+    { chunk: { type: 'tool-input-available', toolCallId: 's1', toolName: 'Skill', dynamic: true, providerExecuted: true, input: { skill: 'thank-you-mail' }, providerMetadata: line('スキルを使いました', 'スキルを使っています', 'thank-you-mail') } },
+    { chunk: { type: 'tool-output-available', toolCallId: 's1', dynamic: true, providerExecuted: true, output: 'ok' } },
+    ...READ('r1', MEMO), ...WRITE('w1', THANKS),
+    ...SAY('t1', '「thank-you-mail」の手順どおりに、お礼メールの下書きを「営業部/下書き/お礼メール_A社.md」に作りました。件名、お礼、次の約束（見積を来週お送りすること）の順に書いています。'),
+    { end: true },
+  ] },
+  // The first request (chapter 11): read the visit notes, write the draft.
+  { when: /お礼メールの下書き/, steps: [
+    ...READ('r1', MEMO), ...WRITE('w1', THANKS),
+    ...SAY('t1', 'お礼メールの下書きを「営業部/下書き/お礼メール_A社.md」に作りました。見積を来週お送りすることと、3月末の納期に向けて進めることにもふれています。'),
+    { end: true },
+  ] },
+  // Still working (chapter 12: an instruction added meanwhile).
+  { when: /見積の下書き/, steps: [
+    ...SAY('t0', '訪問メモと提案書を見てから、見積の下書きを作ります。'),
+    ...READ('r1', MEMO),
+    { chunk: { type: 'tool-input-available', toolCallId: 'r2', toolName: 'Read', dynamic: true, providerExecuted: true, input: { file_path: `${ROOT}/営業部/提案書/提案書_A社向け.md` }, providerMetadata: line('ファイルを読みました', 'ファイルを読んでいます', '営業部/提案書/提案書_A社向け.md') } },
+  ] },
+  // A choice question (chapter 13).
+  { when: /書き直して/, steps: [
+    ...SAY('t0', 'お礼メールを書き直す前に、1つ確かめさせてください。'),
+    { chunk: { type: 'tool-input-available', toolCallId: 'q1', toolName: 'AskUserQuestion', dynamic: true, providerExecuted: true, input: {} } },
+    { ask: [{ question: 'お礼メールの宛名はどれにしますか？', header: '宛名', multiSelect: false, options: [
+      { label: '田村様', description: '訪問でお会いした購買部の田村さんだけに送ります' },
+      { label: '購買部の皆さま', description: '購買部の方々にまとめてお送りします' },
+    ] }] },
+  ] },
+  // A command the app asks about first (chapter 13): deleting a file.
+  { when: /消して/, steps: [
+    ...SAY('t0', '古い下書きを消します。'),
+    { chunk: { type: 'tool-input-available', toolCallId: 'b1', toolName: 'Bash', dynamic: true, providerExecuted: true, input: { command: 'rm "営業部/下書き/お礼メール_A社_古い版.md"', description: '古い下書きを消す' } } },
+    { approve: { command: 'rm "営業部/下書き/お礼メール_A社_古い版.md"' } },
+  ] },
+  // A write into a folder this member only reads (chapter 13): refused before it runs.
+  { when: /総務部/, steps: [
+    { chunk: { type: 'tool-input-available', toolCallId: 'w1', toolName: 'Write', dynamic: true, providerExecuted: true, input: { file_path: `${ROOT}/総務部/お礼メールの書き方.md` }, providerMetadata: line('ファイルに書きました', 'ファイルに書いています', '総務部/お礼メールの書き方.md') } },
+    { chunk: { type: 'tool-output-error', toolCallId: 'w1', dynamic: true, providerExecuted: true, errorText: readOnlyMessage('総務部') } },
+    ...SAY('t1', '総務部のフォルダは閲覧のみのため、保存できませんでした。かわりに「営業部/下書き/お礼メールの書き方.md」に保存してもよいですか？'),
+    { end: true },
+  ] },
+  // A review request (chapter 13).
+  { when: /確認をお願い/, steps: [
+    ...READ('r1', MEMO), ...WRITE('w1', '営業部/提案書/提案書_A社向け_骨子.md'),
+    ...SAY('t1', '提案書の骨子を作りました。中身を見て、このまま進めてよいか教えてください。'),
+    { chunk: { type: REVIEW_PART_TYPE, id: 'review-1', data: { id: 'rv1', title: 'A社向け 提案書の骨子', files: ['営業部/提案書/提案書_A社向け_骨子.md'], points: ['3つの進め方の順番', '費用の書き方'] } } },
+    { end: true },
+  ] },
+]
+const liveEncoder = new TextEncoder()
+let liveStream: ReadableStreamDefaultController<Uint8Array> | null = null
+let liveSteers = 0
+const livePut = (chunk: unknown) => liveStream?.enqueue(liveEncoder.encode(`data: ${JSON.stringify(chunk)}\n\n`))
+function lastUserText(body: Record<string, unknown> | null): string {
+  const messages = (body?.messages ?? []) as Array<{ role?: string; parts?: Array<{ type?: string; text?: string }> }>
+  const last = [...messages].reverse().find(m => m.role === 'user')
+  return (last?.parts ?? []).filter(p => p.type === 'text').map(p => p.text ?? '').join('')
+}
+async function playLive(steps: LiveStep[], sessionId: string) {
+  for (const step of steps) {
+    if ('chunk' in step) livePut(step.chunk)
+    else if ('wait' in step) await sleep(step.wait)
+    else if ('write' in step) {
+      // The AI's file lands on the fake disk and the watcher reports it (the list shows it).
+      const full = `${ROOT}/${step.write}`
+      const folder = full.slice(0, full.lastIndexOf('/'))
+      ;(DISK[folder] ??= []).push(file(step.write.split('/').pop()!))
+      FILES[full] = LIVE_WRITTEN[step.write] ?? '# 下書き'
+      fileChanges.emit([{ type: 'add', path: full }])
+    } else if ('ask' in step) {
+      liveQuestions.emit({ id: 'ask-q1', appSessionId: sessionId, kind: 'choices', agent: 'claude-code', toolCallId: 'q1', questions: parseChoiceQuestions(step.ask) })
+    } else if ('approve' in step) {
+      liveApprovals.emit({ toolUseId: 'b1', toolName: 'Bash', toolInput: step.approve, appSessionId: sessionId })
+    } else {
+      livePut({ type: 'finish-step' })
+      livePut({ type: 'finish', finishReason: 'stop' })
+      liveStream?.close()
+      liveStream = null
+    }
+  }
+}
+function liveChat(path: string, init?: RequestInit): Response {
+  const json = (value: unknown) => new Response(JSON.stringify(value), { headers: { 'content-type': 'application/json' } })
+  const body = typeof init?.body === 'string' ? JSON.parse(init.body) as Record<string, unknown> : null
+  if (path === '/api/rate-limits') return json({ rateLimits: null })
+  if (path === '/api/generate-title') return json({ title: 'A社へのお礼メール' })
+  if (path === '/api/steer') {
+    // Delivered: the chat server puts the instruction into the running reply.
+    const id = `s${++liveSteers}`
+    livePut({ type: STEER_PART_TYPE, id: `steer-${id}`, data: { id, text: body?.text } })
+    return json({ status: 'delivered', id })
+  }
+  if (path !== '/api/chat') return json({})
+  const text = lastUserText(body)
+  const sessionId = typeof body?.appSessionId === 'string' ? body.appSessionId : ''
+  const reply = LIVE_REPLIES.find(r => r.when.test(text))
+  const stream = new ReadableStream<Uint8Array>({
+    start(controller) {
+      liveStream = controller
+      livePut({ type: 'start', messageId: `assistant-${Date.now()}` })
+      livePut({ type: 'start-step' })
+      void playLive(reply?.steps ?? [...SAY('t0', 'わかりました。'), { end: true }], sessionId)
+    },
+  })
+  return new Response(stream, { headers: { 'content-type': 'text/event-stream', 'x-vercel-ai-ui-message-stream': 'v1' } })
+}
+
 // ?manual=1: one consultation to read in 「AIへの相談」 (the manual's chapter 1). The chat server
 // is faked only so the panel opens; a message sent here gets no reply.
 if (MANUAL) {
@@ -493,12 +667,13 @@ if (MANUAL) {
     ],
   }
   try {
-    localStorage.setItem(`chatTabs:${COMPANY}`, JSON.stringify({ tabs: [{ title: session.title, sessionId: session.id }], activeIndex: 0 }))
+    // ?chat=live starts on a new, empty consultation (the stored one is in the list).
+    if (!LIVE) localStorage.setItem(`chatTabs:${COMPANY}`, JSON.stringify({ tabs: [{ title: session.title, sessionId: session.id }], activeIndex: 0 }))
   } catch { /* preview only */ }
   Object.assign(api, {
     getChatServerInfo: async () => ({ port: PORT, authToken: 'preview' }),
     getChatSession: async (_company: string, id: string) => (id === session.id ? session : null),
-    getChatSessionSummaries: async () => [{ id: session.id, companyId: COMPANY, title: session.title, createdAt: session.createdAt, updatedAt: session.updatedAt, messageCount: 2, sent: true, preview: '' }],
+    getChatSessionSummaries: async () => [{ id: session.id, companyId: COMPANY, title: session.title, createdAt: session.createdAt, updatedAt: session.updatedAt, messageCount: 2, sent: true, preview: LIVE ? session.messages[1].content : '' }, ...(LIVE ? LIVE_PAST : [])],
     getPermissionMode: async () => 'auto',
     getHandoff: async () => ({ status: 'waiting', message: '', canUpdate: false, pendingTurns: 0 }),
     saveChatSession: async () => ({ status: 'saved', revision: 1 }),
@@ -591,10 +766,46 @@ if (MANUAL) {
       } satisfies Partial<ElectronAPI>)
     }
   }
+  if (LIVE) {
+    // The draft the AI will write starts missing, so the list shows it appear.
+    DISK[`${ROOT}/営業部/下書き`] = []
+    delete FILES[`${ROOT}/営業部/下書き/お礼メール_A社.md`]
+    // Each Skill's SKILL.md opens in the editor (as main answers it: an absolute path).
+    for (const list of Object.values(SKILLS)) {
+      for (const s of list) {
+        s.skillPath = s.skillPath.replace('//', '/')
+        s.files.skillMd = `${s.skillPath}/SKILL.md`
+      }
+    }
+    FILES[`${ROOT}/.claude/skills/thank-you-mail/SKILL.md`] = [
+      '---',
+      'name: thank-you-mail',
+      'description: 訪問のあとのお礼メールを下書きする',
+      '---',
+      '',
+      '# 訪問のあとのお礼メール',
+      '',
+      '1. 訪問メモを読み、会った人・決まったこと・次の約束を確かめる',
+      '2. 件名は「本日のお打ち合わせのお礼」とする',
+      '3. お礼、決まったこと、次の約束の順に、短く書く',
+      '4. 下書きは、その部署の「下書き」フォルダに置く',
+    ].join('\n')
+    Object.assign(api, {
+      getChatSession: async (_company: string, id: string) => {
+        const past = LIVE_PAST.find(p => p.id === id)
+        return id === session.id ? session : past ? { ...past, revision: 1, messages: [] } : null
+      },
+      onAgentInteraction: liveQuestions.subscribe,
+      respondAgentInteraction: async () => true,
+      onToolApprovalRequest: liveApprovals.subscribe,
+      respondToolApproval: async () => true,
+    } satisfies Partial<ElectronAPI>)
+  }
   const realFetch = window.fetch.bind(window)
   window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
     if (!url.startsWith(`http://127.0.0.1:${PORT}/`)) return realFetch(input, init)
+    if (LIVE) return liveChat(new URL(url).pathname, init)
     return new Response(JSON.stringify(new URL(url).pathname === '/api/rate-limits' ? { rateLimits: null } : {}), { headers: { 'content-type': 'application/json' } })
   }
 }
