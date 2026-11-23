@@ -483,6 +483,7 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
   const externalRecords = createExternalRecordWriter({
     ...shared,
     isMember: (companyId, userId) => access.memberOf(companyId, userId) !== null,
+    roleOf: (companyId, userId) => access.memberOf(companyId, userId)?.role ?? null,
     notify: notifyRecords,
     recordChanged,
   })

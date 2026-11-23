@@ -26,7 +26,7 @@ import { meetingFolder, meetingMembers, membersList, withNamedPeople } from './m
 import { placeOfRow } from './service-writer'
 import { coreStepCreateTypes } from '../../../shared/core/ai-runs'
 import { defaultBundleFolder } from '../../../shared/core/bundle-place'
-import { BUNDLE_PLACED_TYPES, bundleLinkName, linkedBundle, placeWithin, WIDER_THAN_BUNDLE } from './bundle-place'
+import { followLinkMisses, followLinkName, followLinkRefusal, followWords, linkedParent, PLACE_NOT_FOR_TYPE, placeWithin, WIDER_THAN_BUNDLE } from './bundle-place'
 import { notInStep } from '../not-in-step'
 
 export function creating(ctx: EngineContext) {
@@ -49,9 +49,14 @@ export function creating(ctx: EngineContext) {
     const placeSaid = (rest.folder !== undefined && rest.folder !== null) || (rest.place !== undefined && rest.place !== null)
     const opened = open(member)
     const def = opened && typeof rest.type === 'string' ? currentTypes(opened.records).get(rest.type)?.definition : undefined
+    const links = rest.links
+    // Made for its parent (`place_follows`: a やること for its まとまり, a 収録 for its 番組): it takes the parent's
+    // place (create), never the consultation's department nor a new まとまり's default one.
+    const followLink = def ? followLinkName(def) : null
+    const forParent = followLink !== null && typeof links === 'object' && links !== null && (links as Record<string, unknown>)[followLink] != null
     // A new まとまり (案件・プロジェクト) belongs to the member's own department (所属) unless the AI names
     // one (records.md "A task and its 案件・プロジェクト"): the one on screen when it is theirs, else their first.
-    if (opened && def && def.implements.includes('bundle') && !placeSaid && rest.personal !== true) {
+    if (opened && def && def.implements.includes('bundle') && !placeSaid && !forParent && rest.personal !== true) {
       const handle = companyData.forCompany(member.companyId)
       const folder = defaultBundleFolder({
         departments: handle.departments.list().map(d => ({ id: d.id, folder: d.folder })),
@@ -61,12 +66,18 @@ export function creating(ctx: EngineContext) {
       // No department of the member's and the 全社 tab on screen: 全社, as the screen says.
       return folder !== null ? { ...rest, folder } : onCompanyTab ? { ...rest, place: 'company' } : rest
     }
+    // A business plugin's type that follows a parent, made without one (step 2b, the owner's open question; the
+    // safe side): never owner-only (not for its type), so the screen's place — the department on screen, or the
+    // 全社 tab —, else nothing added and `create` refuses (`AI_PLACE_REQUIRED`) whatever the gate says. A request
+    // type gets the same from the request defaults below (with its assignee filled).
+    const isRequest = def?.implements.includes('request') === true && def.fields.assignee?.source === 'server'
+    if (opened && def && followLink !== null && !forParent && !placeSaid && rest.personal === undefined && !isRequest
+      && opened.records.typeVersions().some(t => t.name === def.name && t.source === 'plugin')) {
+      if (typeof defaultFolder === 'string' && defaultFolder.trim() !== '') return { ...rest, folder: defaultFolder }
+      return onCompanyTab ? { ...rest, place: 'company' } : rest
+    }
     if (!opened || !def || !def.implements.includes('request') || def.fields.assignee?.source !== 'server') return rest
-    const links = rest.links
     if (typeof links === 'object' && links !== null && (links as Record<string, unknown>).meeting !== undefined) return rest
-    // Made for a まとまり: it takes the まとまり's place (create), never the consultation's department.
-    const bundleLink = bundleLinkName(def)
-    const forBundle = bundleLink !== null && typeof links === 'object' && links !== null && (links as Record<string, unknown>)[bundleLink] != null
     if (rest.fields !== undefined && (typeof rest.fields !== 'object' || rest.fields === null || Array.isArray(rest.fields))) return rest
     const fields = { ...(rest.fields as Record<string, unknown> | undefined) }
     const said = fields.assignee
@@ -76,7 +87,7 @@ export function creating(ctx: EngineContext) {
     if (noAssignee) fields.assignee = member.userId
     if (rest.personal === true) return { ...rest, fields }
     if (rest.personal === undefined && !placeSaid && !someoneElse && personalAllowed) return { ...rest, personal: true, fields }
-    if (placeSaid || forBundle) return { ...rest, fields }
+    if (placeSaid || forParent) return { ...rest, fields }
     if (typeof defaultFolder === 'string' && defaultFolder.trim() !== '') return { ...rest, fields, folder: defaultFolder }
     return { ...rest, fields, ...(onCompanyTab ? { place: 'company' } : {}) }
   }
@@ -299,7 +310,8 @@ export function creating(ctx: EngineContext) {
             // missing one get the same answer (none of them is named or confirmed). An interface link
             // is answered by its own check below (BAD_LINK, also one answer for missing / unreadable /
             // of another kind), so each link has exactly one refusal for an unseen target.
-            if (!l.targetIsInterface && !records.byIds([t]).some(r => reader.record(r))) {
+            // The parent a record follows has its own one answer (`BAD_LINK`, below).
+            if (!l.targetIsInterface && name !== followLinkName(def) && !records.byIds([t]).some(r => reader.record(r))) {
               return bad(LINK_TARGET_NOT_FOUND.error, LINK_TARGET_NOT_FOUND.code)
             }
             links.push({ sourceId: id, name, position: links.length, targetId: t, targetPath: null })
@@ -308,6 +320,12 @@ export function creating(ctx: EngineContext) {
         if (interfaceLinkMisses(records, l, targets as string[], r => reader.record(r)).length > 0) {
           const r = interfaceLinkRefusal(name, l)
           return refuse('bad-request', r.error, { code: r.code })
+        }
+        // The parent a record follows (`place_follows`) is a live record of the link's type that the creator reads:
+        // missing, unreadable, removed and of another kind get the one answer `BAD_LINK` (nothing about it leaks).
+        if (name === followLinkName(def) && followLinkMisses(records, l, targets as string[], r => reader.record(r)).length > 0) {
+          const r = followLinkRefusal(records, name, l)
+          return refuse('bad-request', r.error, { code: r.code, link: r.link })
         }
       }
       // Made from a members-only meeting: members-only too — the meeting's list and the people named
@@ -325,15 +343,18 @@ export function creating(ctx: EngineContext) {
         members = withNamedPeople([member.userId, ...inherited.users], def, fields)
         memberSets = inherited.sets
       }
-      // A task that belongs to a まとまり is never seen by more people than the まとまり (records.md "A task
-      // and its 案件・プロジェクト"): with no place of its own it takes the まとまり's (`placeOfRow`'s three
-      // kinds); a place given is kept only when it is within. Owner-only stays owner-only.
-      // A place came from what it links (a まとまり, a meeting): not "nothing given" (below).
+      // A record whose type follows its parent (`place_follows`: a やること its まとまり, a 収録 its 番組) is never
+      // seen by more people than the parent (records.md "Following the parent's 見える範囲", "A task and its
+      // 案件・プロジェクト"): with no place of its own it takes the parent's (`placeOfRow`'s three kinds); a place
+      // given is kept only when it is within. Owner-only stays owner-only. A type that may be neither owner-only
+      // nor members-only (a business plugin's) is refused under such a parent (`PLACE_NOT_FOR_TYPE`).
+      // A place came from what it links (a parent, a meeting): not "nothing given" (below).
       let inheritedPlace = false
-      if (BUNDLE_PLACED_TYPES.includes(def.name) && personalOwner === null) {
-        const bundle = linkedBundle(records, def, links, r => reader.record(r))
+      if (followLinkName(def) !== null && personalOwner === null) {
+        const bundle = linkedParent(records, def, links, r => reader.record(r))
         if (bundle && folder === null && members === null && !companySaid) {
           const from = placeOfRow(bundle)
+          if (!('folder' in from) && isPluginType) return bad(PLACE_NOT_FOR_TYPE.error, PLACE_NOT_FOR_TYPE.code)
           if ('personalOwner' in from) personalOwner = from.personalOwner
           else if ('members' in from) { members = [...from.members]; memberSets = [...(from.memberSets ?? [])] }
           else folder = from.folder
@@ -342,7 +363,8 @@ export function creating(ctx: EngineContext) {
           const scopes = companyData.forCompany(member.companyId).scopes.listWithRules()
           const task = { id: '', type: def.name, scopeId: null, path: null, folder, personalOwner, members, memberSets }
           if (!placeWithin(member.companyId, scopes, id => deps.roleOf(member.companyId, id), task, bundle)) {
-            return bad(WIDER_THAN_BUNDLE.error, WIDER_THAN_BUNDLE.code)
+            const r = followWords(def.name, WIDER_THAN_BUNDLE)
+            return bad(r.error, r.code)
           }
         }
       }
@@ -355,7 +377,11 @@ export function creating(ctx: EngineContext) {
         const fromMeeting = meetingFolder(records, links)
         if (fromMeeting && 'folder' in fromMeeting) folder = fromMeeting.folder
         else if (fromMeeting && 'personalOwner' in fromMeeting && fromMeeting.personalOwner === member.userId && !isPluginType) personalOwner = member.userId
-        else if (actor.kind === 'ai' && !isPluginType && b.personal !== false
+        else if (actor.kind === 'ai' && isPluginType && followLinkName(def) !== null) {
+          // The AI made a business plugin's record that follows a parent without one and said nowhere (nor did the
+          // screen: `aiPlacement`): refused, never quietly the whole company (step 2b, the owner's open question).
+          return bad(AI_PLACE_REQUIRED.error, AI_PLACE_REQUIRED.code)
+        } else if (actor.kind === 'ai' && !isPluginType && b.personal !== false
           && withNamedPeople([member.userId], def, fields).length === 1) {
           // The AI said nowhere and nobody else is named: the member's own (本人だけ); the answer's `placed` says so.
           personalOwner = member.userId

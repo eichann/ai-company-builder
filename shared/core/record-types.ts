@@ -277,9 +277,9 @@ export interface TypeDefinition {
    * cardinality `one` that is not an origin link (interface or type target); the type is stored on
    * the server (not `storage: file`). Removing it or naming another link is breaking
    * (`compareTypeDefinitions`): what is made next would no longer be held to its parent.
-   * **Declaration only for now**: the engine does not read it yet (step 2b moves `task` onto it
-   * and replaces `BUNDLE_PLACED_TYPES`). Absent = none (left out of the definition then, so
-   * stored definitions of other types compare equal).
+   * The engine applies it (step 2b: server/src/services/record-engine/bundle-place.ts
+   * `followLinkName`; the core `task` declares `bundle`). Absent = none (left out of the
+   * definition then, so stored definitions of other types compare equal).
    */
   placeFollows?: string
   actions: Record<string, ActionDef>

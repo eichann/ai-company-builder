@@ -1,26 +1,26 @@
 /**
- * A task and the 案件・プロジェクト it belongs to (records.md "A task and its 案件・プロジェクト",
- * owner decision 2026-11-06): no new kind of permission — a task is seen by the readers of its own
- * place (company, a department, a private folder, owner-only, members-only), and when it belongs to
- * a まとまり (`bundle` link) it is **never seen by more people than the まとまり**.
+ * A record and the parent it follows (records.md "Following the parent's 見える範囲", "A task and its
+ * 案件・プロジェクト", owner decisions 2026-11-06 / 2026-11-23): no new kind of permission — a record is seen
+ * by the readers of its own place (company, a department, a private folder, owner-only, members-only),
+ * and when its type declares `place_follows: <link>` and that link names a parent, it is **never seen by
+ * more people than the parent**. The core's やること follows its まとまり (`place_follows: bundle`, task
+ * version 14); a business plugin's type may follow its own parent (a 収録 its 番組).
  *
- * "Wider" is the existing reader evaluation (`recordReader`): the task is within the まとまり when
- * every member who reads the task also reads the まとまり. An owner-only task is never wider (the
+ * "Wider" is the existing reader evaluation (`recordReader`): the record is within the parent when
+ * every member who reads the record also reads the parent. An owner-only record is never wider (the
  * owner wants personal tasks linkable to a project). Rather than walk every membership, it asks a
  * set of representatives that covers every distinct answer the readers can give: everyone a rule,
  * a department or group rule or either record's list names, plus one plain member and one owner/admin that
  * nothing names (any other member reads exactly what one of those two reads).
  */
+import { coreTypeDefinitions } from '../../../shared/core/core-types'
 import type { ScopeWithRules } from '../../../shared/core/permissions'
-import type { TypeDefinition } from '../../../shared/core/record-types'
+import { INTERFACES, type LinkDef, type TypeDefinition } from '../../../shared/core/record-types'
 import type { RecordAccessRow, RecordLinkRow, RecordRepository } from '../../ports/records'
 import { listedUserIds, recordReader } from '../record-access'
 import { currentTypes } from '../record-index'
 
-/** The types whose place follows their まとまり (the core's やること). */
-export const BUNDLE_PLACED_TYPES: readonly string[] = ['task']
-
-/** A task's place that is wider than its まとまり's (400; names no place, so no private name leaks). */
+/** A record's place that is wider than its parent's (400; names no place, so no private name leaks). The task's words; `followWords` for other types. */
 export const WIDER_THAN_BUNDLE = {
   error: 'このやることは、つなぐ先より多くの人に見えています。つなぐ先と同じ人たちだけに見えるようにしてから、つないでください',
   code: 'WIDER_THAN_BUNDLE',
@@ -39,7 +39,7 @@ export const INVITE_WIDER_THAN_BUNDLE = {
   code: WIDER_THAN_BUNDLE.code,
 } as const
 
-/** Someone the task names (担当・頼んだ人・確かめる人…) would no longer see it in the narrower place. */
+/** Someone the record names (担当・頼んだ人・確かめる人…) would no longer see it in the narrower place. */
 export const NAMED_PERSON_CANNOT_READ = {
   error: 'このやることにかかわる人（担当・頼んだ人・確かめる人など）が、つなぐ先を見られません。その人が見られるようにしてから、もう一度つないでください',
   code: 'NAMED_PERSON_CANNOT_READ',
@@ -81,30 +81,81 @@ export function placeWithin(
   })
 }
 
-/** The name of the type's link to a まとまり (an `interface: bundle` link), or null. */
-export function bundleLinkName(def: TypeDefinition): string | null {
-  const found = Object.entries(def.links).find(([, l]) => l.targetIsInterface && l.target === 'bundle')
-  return found ? found[0] : null
+/**
+ * A parent that is owner-only or members-only, for a type that cannot be (a business plugin's: other
+ * records take their readers from it). 400; names no place, title or person.
+ */
+export const PLACE_NOT_FOR_TYPE = {
+  error: 'つなぐ先は限られた人だけに見えるものなので、この種類の記録はそこにつなげません。会社や部署に見えているものにつないでください',
+  code: 'PLACE_NOT_FOR_TYPE',
+} as const
+
+/** The refusal in words for `type`: the task's say やること, any other type's say 記録. */
+export function followWords<T extends { error: string; code: string }>(type: string, refusal: T): T {
+  return type === 'task' ? refusal : { ...refusal, error: refusal.error.replace('このやること', 'この記録') }
+}
+
+let corePlaceFollows: ReadonlyMap<string, string> | null = null
+/** What each core type declares (task: `bundle`), so a company's extension in force cannot drop it. */
+function coreFollowOf(type: string): string | undefined {
+  corePlaceFollows ??= new Map(coreTypeDefinitions().filter(d => d.placeFollows).map(d => [d.name, d.placeFollows as string]))
+  return corePlaceFollows.get(type)
 }
 
 /**
- * Every live まとまり a record's links name, whoever reads them: the invariant holds for a まとまり the
- * acting member no longer reads too (its readers are still the bound).
+ * The link through which a record of this type follows its parent's 見える範囲 (`place_follows`), or
+ * null. A core type keeps its core declaration even when the definition in force (a company's own
+ * extension stored before the declaration) lacks it — never quietly wider. Only a record link of
+ * cardinality one counts (the parser's rule, asked again of what is in force).
  */
-export function linkedBundles(
+export function followLinkName(def: TypeDefinition): string | null {
+  const name = def.placeFollows ?? coreFollowOf(def.name)
+  if (!name || !Object.prototype.hasOwnProperty.call(def.links, name)) return null
+  const l = def.links[name]
+  return l.target !== 'file' && l.cardinality === 'one' ? name : null
+}
+
+/** Is `row` a live record the link may hold as a parent (of its type, or implementing its interface)? */
+function parentFits(types: ReturnType<typeof currentTypes>, link: LinkDef, row: { type: string; removedAt: string | null }): boolean {
+  if (row.removedAt !== null) return false
+  return link.targetIsInterface ? types.get(row.type)?.definition.implements.includes(link.target) === true : row.type === link.target
+}
+
+/**
+ * The targets of the follow link a create may not hold: not a live record of the link's type (or
+ * interface), or one the creator cannot read — one answer for all of them (`followLinkRefusal`).
+ */
+export function followLinkMisses(records: RecordRepository, link: LinkDef, targets: string[], readable: (r: RecordAccessRow) => boolean): string[] {
+  if (targets.length === 0) return []
+  const types = currentTypes(records)
+  const fit = new Set(records.byIds(targets).filter(r => parentFits(types, link, r) && readable(r)).map(r => r.id))
+  return targets.filter(t => !fit.has(t))
+}
+
+/** One answer whether the parent does not exist, cannot be read or is of another kind (nothing about it leaks). */
+export function followLinkRefusal(records: RecordRepository, name: string, link: LinkDef) {
+  const label = link.targetIsInterface ? (INTERFACES[link.target]?.label ?? link.target) : (currentTypes(records).get(link.target)?.definition.label ?? link.target)
+  return { error: `つながり「${link.label}」には、あなたが見られる「${label}」の記録だけをつなげます`, code: 'BAD_LINK', link: name }
+}
+
+/**
+ * Every live parent a record's follow link names, whoever reads them: the invariant holds for a parent
+ * the acting member no longer reads too (its readers are still the bound).
+ */
+export function linkedParents(
   records: RecordRepository, def: TypeDefinition, links: readonly Pick<RecordLinkRow, 'name' | 'targetId'>[],
 ): RecordAccessRow[] {
-  const name = bundleLinkName(def)
+  const name = followLinkName(def)
   if (!name) return []
   const ids = links.filter(l => l.name === name && l.targetId !== null).map(l => l.targetId as string)
   if (ids.length === 0) return []
   const types = currentTypes(records)
-  return records.byIds(ids).filter(r => r.removedAt === null && types.get(r.type)?.definition.implements.includes('bundle'))
+  return records.byIds(ids).filter(r => parentFits(types, def.links[name], r))
 }
 
-/** The live まとまり a record's links name (the first readable one), or null. */
-export function linkedBundle(
+/** The live parent a record's follow link names (the first readable one), or null. */
+export function linkedParent(
   records: RecordRepository, def: TypeDefinition, links: readonly Pick<RecordLinkRow, 'name' | 'targetId'>[], readable: (r: RecordAccessRow) => boolean,
 ): RecordAccessRow | null {
-  return linkedBundles(records, def, links).find(readable) ?? null
+  return linkedParents(records, def, links).find(readable) ?? null
 }

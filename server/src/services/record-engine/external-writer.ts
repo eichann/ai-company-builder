@@ -1,7 +1,8 @@
 import type { ExternalReceipt, LedgerChange, LedgerEntry, LedgerValue } from '../../../shared/core/record-ledger'
 import { newRecordId, RECORD_ID_RE } from '../../../shared/core/records'
-import type { RecordLinkRow } from '../../ports/records'
+import type { RecordAccessRow, RecordLinkRow } from '../../ports/records'
 import { currentTypes } from '../record-index'
+import { followLinkName, linkedParents, placeWithin } from './bundle-place'
 import { interfaceLinkMisses } from './links'
 import type { RecordEngineDeps } from './types'
 import { checkValue } from './values'
@@ -53,7 +54,7 @@ export type ExternalRecordResult =
  * compare-and-set on the version, tell whom the record names — and nothing
  * else: it sends nothing outside, computes nothing, writes no file.
  */
-export function createExternalRecordWriter(deps: Pick<RecordEngineDeps, 'companyData' | 'transactions' | 'clock' | 'ids' | 'isMember' | 'notify' | 'recordChanged'>) {
+export function createExternalRecordWriter(deps: Pick<RecordEngineDeps, 'companyData' | 'transactions' | 'clock' | 'ids' | 'isMember' | 'roleOf' | 'notify' | 'recordChanged'>) {
   return {
     apply(companyId: string, input: ExternalRecordInput): ExternalRecordResult {
       const records = deps.companyData.forCompany(companyId).records
@@ -71,12 +72,28 @@ export function createExternalRecordWriter(deps: Pick<RecordEngineDeps, 'company
       }
       const at = deps.clock.now()
       const actor = input.actor ?? { id: input.source, kind: 'external' as const, source: input.source, conversationId: null }
-      const linkRows = (id: string): RecordLinkRow[] => Object.entries(input.links).flatMap(([name, targets]) => {
+      const follow = followLinkName(def)
+      const linkRows = (id: string, place: RecordAccessRow): RecordLinkRow[] => Object.entries(input.links).flatMap(([name, targets]) => {
         const valid = targets.filter(t => RECORD_ID_RE.test(t))
         // An interface link (`interface: bundle`) keeps only records implementing it, as every other writer.
         const link = Object.prototype.hasOwnProperty.call(def.links, name) ? def.links[name] : undefined
         const misses = link ? interfaceLinkMisses(records, link, valid) : []
-        return valid.filter(t => !misses.includes(t)).map((t, i) => ({ sourceId: id, name, position: i, targetId: t, targetPath: null }))
+        let kept = valid.filter(t => !misses.includes(t))
+        // A parent the record follows (`place_follows`, records.md "Following the parent's 見える範囲"): an import never
+        // widens a record past its parent — a new parent it would be wider than is not linked (the record stays where
+        // the mapping puts it) and a problem says so; a parent already linked is kept as it is.
+        if (name === follow) {
+          const already = new Set(records.linksFrom([id]).filter(l => l.name === name).map(l => l.targetId))
+          const fresh = kept.filter(t => !already.has(t))
+          const parents = linkedParents(records, def, fresh.map(t => ({ name, targetId: t })))
+          const scopes = parents.length > 0 ? deps.companyData.forCompany(companyId).scopes.listWithRules() : []
+          const wider = new Set(parents.filter(p => !placeWithin(companyId, scopes, u => deps.roleOf(companyId, u), place, p)).map(p => p.id))
+          if (wider.size > 0) {
+            problems.push(`つながり「${def.links[name].label}」の相手より多くの人に見える場所にあるため、つなぎませんでした`)
+            kept = kept.filter(t => !wider.has(t))
+          }
+        }
+        return kept.map((t, i) => ({ sourceId: id, name, position: i, targetId: t, targetPath: null }))
       })
       const tellAbout = (values: Record<string, LedgerValue>, entry: LedgerEntry) => {
         try { deps.recordChanged?.(companyId, entry.recordId) } catch { /* the app's own check catches up */ }
@@ -98,12 +115,13 @@ export function createExternalRecordWriter(deps: Pick<RecordEngineDeps, 'company
           typeVersion: def.version, reversesVersion: null, proposedBy: null, conversationId: actor.conversationId, receipt: input.receipt,
           runId: 'runId' in actor && actor.kind === 'ai' ? actor.runId ?? null : null,
         }
+        const newLinks = linkRows(id, { id, type: def.name, scopeId: null, path: null, folder: input.folder, personalOwner: null, members: null })
         deps.transactions.run(() => {
           records.upsert({
             id, type: def.name, typeVersion: def.version, scopeId: null, path: null, folder: input.folder, personalOwner: null, members: null,
             title: title || def.label, summary: '', createdAt: at, updatedAt: at, removedAt: null,
           })
-          records.replaceLinks(id, linkRows(id))
+          records.replaceLinks(id, newLinks)
           if (!records.writeState({ recordId: id, state: def.initial, fields: JSON.stringify(fields), version: 1, updatedAt: at }, 0)) throw new Error('record id taken')
           records.appendLedger(entry)
         })
@@ -124,7 +142,7 @@ export function createExternalRecordWriter(deps: Pick<RecordEngineDeps, 'company
         if (before !== after) changes.push({ field, before, after })
       }
       const titleChanged = title !== null && title !== row.title
-      const wanted = linkRows(row.id)
+      const wanted = linkRows(row.id, row)
       const linksChanged = Object.keys(input.links).length > 0
         && JSON.stringify(records.linksFrom([row.id]).filter(l => l.name in input.links).map(l => [l.name, l.targetId]))
           !== JSON.stringify(wanted.map(l => [l.name, l.targetId]))

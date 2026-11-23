@@ -16,7 +16,7 @@ import { RECORD_NOT_FOUND, RECORDS_DISABLED } from '../records'
 import { acceptanceOf, argDefaultOf, argDefaultValue, isActorArg } from '../../../shared/core/core-types'
 import { DEFAULT_COMPANY_TIME_ZONE } from '../../../shared/core/calendar'
 import { applyAcceptance } from './acceptance'
-import { BUNDLE_PLACED_TYPES, bundleLinkName, placeWithin, WIDER_THAN_BUNDLE } from './bundle-place'
+import { followLinkName, followWords, placeWithin, WIDER_THAN_BUNDLE } from './bundle-place'
 import { linkAllowed, type RecordReader } from '../record-access'
 import type { EngineContext } from './context'
 import { evidenceToWrite, refId } from './evidence'
@@ -309,12 +309,16 @@ export function acting(ctx: EngineContext) {
             const label = l.targetIsInterface ? (INTERFACES[l.target]?.label ?? l.target) : (types.get(l.target)?.definition.label ?? l.target)
             return refuse('bad-request', `つながり「${l.label}」には、あなたが見られる「${label}」の記録だけをつなげます`, { code: 'BAD_LINK', link: name })
           }
-          // A task never seen by more people than its まとまり (records.md "A task and its 案件・プロジェクト"):
-          // the action only links; narrowing is the person's, on the card (record-links' `narrow`).
-          if (BUNDLE_PLACED_TYPES.includes(row.type) && name === bundleLinkName(def) && ids.length > 0) {
+          // A record never seen by more people than the parent it follows (`place_follows`; records.md "Following the
+          // parent's 見える範囲", a task's まとまり: set_bundle): the action only links; narrowing is the person's, on the
+          // card (record-links' `narrow`).
+          if (name === followLinkName(def) && ids.length > 0) {
             const scopes = companyData.forCompany(member.companyId).scopes.listWithRules()
             const wider = records.byIds(ids).some(t => !placeWithin(member.companyId, scopes, id => deps.roleOf(member.companyId, id), row, t))
-            if (wider) return bad(WIDER_THAN_BUNDLE.error, WIDER_THAN_BUNDLE.code)
+            if (wider) {
+              const r = followWords(row.type, WIDER_THAN_BUNDLE)
+              return bad(r.error, r.code)
+            }
           }
           linkChanges.push({ name, targets: ids })
         }

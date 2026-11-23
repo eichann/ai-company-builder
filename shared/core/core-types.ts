@@ -68,6 +68,10 @@
  * `similar_to` (an earlier proposal of the same meeting whose title is close: 「似ている案があります」)
  * and `apart_by` (who said 「別のもの」: action `keep_apart`, filled with the person acting, ACTOR_ARGS).
  *
+ * Version 14 (owner decision 2026-11-23, step 2b, additive): `place_follows: bundle` — a task follows its
+ * まとまり's 見える範囲 (made for it → its place; never wider), the rule the engine had hard-coded for `task`
+ * (records.md "A task and its 案件・プロジェクト"), now read from the definition like any type's.
+ *
  * Version 10 (owner decision 2026-11-02, つなぐ・外す): the links that say where a task came
  * from — `meeting`, `interaction`, `prepared` — are marked `origin` (出どころ) and are never
  * linked or removed by hand; the others (bundle, counterpart, related, files) are filing and
@@ -159,7 +163,7 @@ import { parseTypeFile, type TypeDefinition } from './record-types'
 export const CORE_TYPE_FILES: Record<string, string> = {
   task: `---
 label: タスク
-version: 13
+version: 14
 implements: [request]
 storage: server
 fields:
@@ -195,6 +199,7 @@ initial: todo
 create_states: [preparing, proposed]
 proposal_states: [proposed]
 final: [done, cancelled, dismissed]
+place_follows: bundle
 actions:
   start:          { label: 進めている印をつける, from: [todo, waiting], to: in_progress, who: [assignee, ai], hand_to: assignee }
   request_review: { label: 終わったので見てもらう, from: [todo, in_progress, waiting, awaiting_acceptance], to: review, who: [assignee, ai], args: { reviewer: person }, notify: reviewer, attach: [files], note: optional, hand_to: reviewer }
@@ -658,7 +663,7 @@ export const ACCEPTANCE: Readonly<Record<string, {
  * `migrateCompanyTaskVersion`): the core definition of that version is stored first, then each task's
  * index row says it (no value changes, so no ledger entry).
  */
-export const TASK_VERSION = 13
+export const TASK_VERSION = 14
 
 /**
  * The decision version every decision is moved to at startup (decision version 6, the

@@ -145,7 +145,11 @@ The dependency points one way: **business → connector**. (#372's first cut had
 ## A plugin is data only
 
 - A package = `plugin.yaml` (the **declaration**) + `types/<name>.md` (a business plugin's types,
-  same format as `.acb/types/`) + optional `mapping.yaml` (a business plugin's recommended
+  same format as `.acb/types/`; a type may declare `place_follows: <its parent link>` — a 収録 follows its
+  番組's 見える範囲: made with the parent and no place it takes the parent's, and it is never seen by more
+  people than the parent; under an owner-only or members-only parent it is refused, `PLACE_NOT_FOR_TYPE`;
+  an import never links a parent it would be wider than — `records.md` "Following the parent's 見える範囲",
+  step 2b; no core change per plugin) + optional `mapping.yaml` (a business plugin's recommended
   **mapping**, checked against its connector when it runs). No program:
   the core's one connector (P5) makes the calls the declaration describes. This keeps other
   people's code off the server (0.15) and the line between the AGPL core and paid plugins clear
@@ -343,7 +347,7 @@ definition in force is the company's (`record_types.source = 'file'`); it compar
 higher, or the company's definition lacking / changing something the new plugin type has
 (`compareTypeDefinitions` breaking, field / link / state / action / shared type / storage, and a
 `place_follows` the new plugin type has that the company's drops or points elsewhere — `records.md`
-"Following the parent's 見える範囲"; a declaration only until step 2b). Installing
+"Following the parent's 見える範囲"; the engine applies it since step 2b). Installing
 another version while on, or turning on, with a conflict → 409 `TYPE_EXTENSION_CONFLICT` +
 `conflicts` (Japanese sentences naming the type), nothing changed; the company (div's FDE) updates
 its `.acb/types/<name>.md` first. The import's `storeBusinessTypes` skips such a type the same way.
@@ -1458,7 +1462,9 @@ plugin's switch:
 - Records are written by the engine's **external entry** (`createExternalRecordWriter`,
   `records.md` "Outside systems"): **server-only, no file, no commit** (owner rule §8-3), folder =
   the mapping's `visible_to_folder`, ledger actor `external` / the business plugin's id with a
-  **receipt** (`kind: observed`: who changed it outside is not known). An outside object another
+  **receipt** (`kind: observed`: who changed it outside is not known). A type that follows a parent
+  (`place_follows`): a parent the record would be wider than is left unlinked and reported as a problem
+  (「…つなぎませんでした」), never widened (`records.md` "Following the parent's 見える範囲"). An outside object another
   business plugin already brought in is skipped (「ほかの業務の記録」). The business plugin's types
   are stored when it is turned on, and again here if a newer version came meanwhile.
 - The report says what happened, not more (review §6.8): per object `seen / created / updated /

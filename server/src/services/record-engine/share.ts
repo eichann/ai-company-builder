@@ -20,7 +20,7 @@ import { NOTE_MAX, provenance } from './values'
 import type { TypeDefinition } from '../../../shared/core/record-types'
 import type { RecordRepository } from '../../ports/records'
 import {
-  BUNDLE_PLACED_TYPES, INVITE_WIDER_THAN_BUNDLE, NAMED_PERSON_CANNOT_READ, SHARE_WIDER_THAN_BUNDLE, linkedBundle, linkedBundles, placeWithin,
+  followLinkName, followWords, INVITE_WIDER_THAN_BUNDLE, NAMED_PERSON_CANNOT_READ, SHARE_WIDER_THAN_BUNDLE, linkedParent, linkedParents, placeWithin,
 } from './bundle-place'
 import { pathKey } from '../../../shared/core/paths'
 import { similarInSlot } from '../source-slot-candidates'
@@ -72,15 +72,16 @@ export function sharing(ctx: EngineContext) {
   }
 
   /**
-   * A task that belongs to a まとまり is never seen by more people than the まとまり (records.md "A task and
-   * its 案件・プロジェクト"). Asked inside the write's transaction, of the row as just written, so the check
-   * and the write read the same state; every linked まとまり counts, also one the member no longer reads.
+   * A record whose type follows its parent (`place_follows`: a task's まとまり) is never seen by more people
+   * than the parent (records.md "Following the parent's 見える範囲", "A task and its 案件・プロジェクト"). Asked
+   * inside the write's transaction, of the row as just written, so the check and the write read the same
+   * state; every linked parent counts, also one the member no longer reads.
    */
   function withinItsBundles(companyId: string, records: RecordRepository, def: TypeDefinition, recordId: string): boolean {
-    if (!BUNDLE_PLACED_TYPES.includes(def.name)) return true
+    if (followLinkName(def) === null) return true
     const now = records.byIds([recordId])[0]
     if (!now) return false
-    const bundles = linkedBundles(records, def, records.linksFrom([recordId]))
+    const bundles = linkedParents(records, def, records.linksFrom([recordId]))
     if (bundles.length === 0) return true
     const scopes = companyData.forCompany(companyId).scopes.listWithRules()
     return bundles.every(b => placeWithin(companyId, scopes, id => deps.roleOf(companyId, id), now, b))
@@ -117,7 +118,7 @@ export function sharing(ctx: EngineContext) {
       // ［プロジェクトの人に見せる］ (records.md "A task and its 案件・プロジェクト"): the まとまり the task
       // links to gives the place — its folder, a private one included (the member reads the まとまり, so
       // its folder), or the whole company. `toBundle: true` names it without a path.
-      const bundle = BUNDLE_PLACED_TYPES.includes(row.type) ? linkedBundle(records, def, records.linksFrom([row.id]), r => reader.record(r)) : null
+      const bundle = linkedParent(records, def, records.linksFrom([row.id]), r => reader.record(r))
       let folder: string | null
       if (b.toBundle === true) {
         if (!bundle) return bad('つながっている案件・プロジェクトがありません', 'NO_BUNDLE')
@@ -162,7 +163,7 @@ export function sharing(ctx: EngineContext) {
         })
       } catch (err) {
         if (err === STOP) return conflict(STALE, 'VERSION_CONFLICT')
-        if (err === WIDER) return bad(SHARE_WIDER_THAN_BUNDLE.error, SHARE_WIDER_THAN_BUNDLE.code)
+        if (err === WIDER) return bad(followWords(row.type, SHARE_WIDER_THAN_BUNDLE).error, SHARE_WIDER_THAN_BUNDLE.code)
         throw err
       }
       changed(member.companyId, row.id)
@@ -234,7 +235,7 @@ export function sharing(ctx: EngineContext) {
         })
       } catch (err) {
         if (err === STOP) return conflict(STALE, 'VERSION_CONFLICT')
-        if (err === WIDER) return bad(INVITE_WIDER_THAN_BUNDLE.error, INVITE_WIDER_THAN_BUNDLE.code)
+        if (err === WIDER) return bad(followWords(row.type, INVITE_WIDER_THAN_BUNDLE).error, INVITE_WIDER_THAN_BUNDLE.code)
         throw err
       }
       changed(member.companyId, row.id)
