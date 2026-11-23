@@ -461,7 +461,7 @@ function ConfirmUnsynced({ files, onCancel, onConfirm }: { files: string[]; onCa
         <div id="dl-confirm-body" className="mt-2 space-y-3 text-body leading-relaxed text-text-muted">
           <p>
             ダウンロードしないようにするフォルダに、同期していない変更が {files.length} 件あります。
-            このまま進めると、これらの変更は共有されず、次の同期で <code className="rounded-small bg-zinc-100 px-1 py-px text-small dark:bg-white/10">.backups</code> フォルダに保存されます（消えることはありません）。
+            このまま進めると、これらの変更は共有されず、次の同期でバックアップに保存されます（消えることはありません。タイトルバーの［バックアップ履歴］で見られます）。
           </p>
           <ul className="max-h-36 overflow-y-auto rounded-control border border-zinc-100 bg-zinc-50 px-3 py-2 font-mono text-small text-zinc-700 dark:border-white/[0.06] dark:bg-white/[0.03] dark:text-zinc-300">
             {shown.map(f => <li key={f} className="truncate">{f.normalize('NFC')}</li>)}
@@ -471,7 +471,7 @@ function ConfirmUnsynced({ files, onCancel, onConfirm }: { files: string[]; onCa
         </div>
         <DialogFooter>
           <Button ref={cancelRef} onClick={onCancel}>キャンセル</Button>
-          <Button variant="primary" onClick={onConfirm}>.backups に保存して進める</Button>
+          <Button variant="primary" onClick={onConfirm}>バックアップに保存して進める</Button>
         </DialogFooter>
     </Dialog>
   )

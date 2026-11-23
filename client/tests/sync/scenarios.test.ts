@@ -70,13 +70,52 @@ describe('git:sync multi-member scenarios', { concurrency: CONCURRENCY }, () => 
     const aOut = ok(await a.sync(), 'a')
     assert.equal(aOut.result.hadConflicts, true)
     assert.deepEqual(aOut.result.deletedConflictFiles, ['営業部/提案書.md'])
-    assert.match(aOut.result.message ?? '', /1件はサーバー側で削除されていたため削除/)
+    assert.match(aOut.result.message ?? '', /1件のファイルは、あなたが変えている間にほかの人が削除していたため、削除しました。/)
     const backup = conflictBackup(a)
     assert.deepEqual(backup.files, ['営業部/提案書.md'])
     assert.deepEqual(backup.metadata.deletedConflictFiles, ['営業部/提案書.md'])
     assert.equal(fs.readFileSync(path.join(a.dir, '.backups', backup.folder, '営業部/提案書.md'), 'utf-8'), 'v0\nmember edit\n')
     assert.equal(a.exists('営業部/提案書.md'), false)
     assert.equal(world.serverFile('営業部/見積.md')?.toString(), 'q1\n')
+    await settleAndCheck(world)
+  })
+
+  // Guard: a sync that never reached the server does not say 「同期が完了しました」.
+  test('offline with nothing to send: says the server could not be reached, not that sync finished; online again it syncs', async t => {
+    const world = World.create(t, { members: [{ name: 'a' }, { name: 'b' }], seed: { 'x.md': '0\n' } })
+    const [a, b] = world.members
+    b.write('x.md', 'from b\n')
+    ok(await b.sync(), 'b')
+    a.offline()
+    const out = await a.sync()
+    assert.equal(out.result.success, false)
+    assert.equal(out.result.errorType, 'network')
+    assert.match(String(out.result.error), /^サーバーにつながらなかったため、同期できませんでした。/)
+    assert.equal(a.readText('x.md'), '0\n', 'nothing changed here')
+    a.online()
+    ok(await a.sync(), 'a')
+    assert.equal(a.readText('x.md'), 'from b\n')
+    await settleAndCheck(world)
+  })
+
+  // Guard: an expired sign-in (git-http 401 / 403) is told as such, not as a lost connection.
+  test('sign-in refused with nothing to send: says to sign in again (auth), not to check the internet; then it syncs', async t => {
+    const world = World.create(t, { members: [{ name: 'a' }, { name: 'b' }], seed: { 'x.md': '0\n' } })
+    const [a, b] = world.members
+    b.write('x.md', 'from b\n')
+    ok(await b.sync(), 'b')
+    for (const refusal of [undefined, "fatal: unable to access 'http://127.0.0.1:3001/git/company.git/': The requested URL returned error: 403"]) {
+      a.refuseSignIn(refusal)
+      const out = await a.sync()
+      assert.equal(out.result.success, false)
+      assert.equal(out.result.errorType, 'auth', refusal)
+      assert.match(String(out.result.error), /^サーバーへのログインが切れたため、同期できませんでした。.*ログインし直してから/)
+      assert.doesNotMatch(String(out.result.error), /インターネット|[A-Za-z]{4}/)
+      assert.equal(a.readText('x.md'), '0\n', 'nothing changed here')
+    }
+    a.acceptSignIn()
+    ok(await a.sync(), 'a')
+    assert.equal(a.readText('x.md'), 'from b\n')
     await settleAndCheck(world)
   })
 
@@ -203,7 +242,7 @@ describe('git:sync multi-member scenarios', { concurrency: CONCURRENCY }, () => 
     const [question] = out.dialogs
     assert.equal(question.options.defaultId, 0)
     assert.match(question.options.buttons[0], /共有しない（おすすめ）/)
-    assert.match(question.options.detail, /管理者に『外部リポジトリ』として登録してもらってください/)
+    assert.match(question.options.detail, /会社として共有したい場合は、管理者に相談してください。/)
     assert.deepEqual(out.result.excludedNestedRepos, ['営業部/資料'])
     assert.ok(a.exists('営業部/資料/.git'), 'the member\'s repository is left as it is')
     assert.deepEqual(readNestedRepoExcludes(a.dir), ['営業部/資料'])
@@ -243,7 +282,7 @@ describe('git:sync multi-member scenarios', { concurrency: CONCURRENCY }, () => 
 
     const out = ok(await a.sync(), 'a')
     assert.deepEqual(out.dialogs.map(d => [d.kind, d.answer]), [['externalNestedRepo', 'exclude']])
-    assert.match(out.dialogs[0].options.detail, /管理者に『外部リポジトリ』として登録してもらってください/)
+    assert.match(out.dialogs[0].options.detail, /会社として共有したい場合は、管理者に相談してください。/)
     assert.deepEqual(out.result.excludedNestedRepos, ['tools/外部ツール'])
     assert.equal(a.readText('.gitignore'), gitignoreBefore, 'the name never reaches the shared .gitignore')
     assert.deepEqual(readNestedRepoExcludes(a.dir), ['tools/外部ツール'])
@@ -269,7 +308,7 @@ describe('git:sync multi-member scenarios', { concurrency: CONCURRENCY }, () => 
     const out = ok(await a.sync(), 'a')
     assert.deepEqual(out.dialogs, [], 'not asked again')
     assert.deepEqual(out.result.nestedRepoBackupFiles, ['tools/外部ツール/README.md'])
-    assert.match(out.result.message ?? '', /共有していないフォルダ（tools\/外部ツール）に、ほかのメンバーが同じ名前のファイルを共有したため、このPCにあった版を \.backups に保存しました（1件）/)
+    assert.match(out.result.message ?? '', /共有していないフォルダ（tools\/外部ツール）に、ほかのメンバーが同じ名前のファイルを共有したため、このPCにあった版をバックアップに保存しました（1件）（タイトルバーの［バックアップ履歴］で見られます）/)
     const [backup] = a.backups().filter(x => x.metadata.reason === 'nested_repo_overwrite')
     assert.ok(backup, 'backup with metadata')
     assert.equal(fs.readFileSync(path.join(a.dir, '.backups', backup.folder, 'tools/外部ツール/README.md'), 'utf-8'), 'a\'s clone\n')
@@ -568,6 +607,8 @@ describe('git:sync multi-member scenarios', { concurrency: CONCURRENCY }, () => 
     a.offline().write('offline.md', 'written offline\n')
     const failed = await a.sync()
     assert.equal(failed.result.errorType, 'push_failed')
+    // The member's words: kept on this computer, not delivered, press the button again (no Git words).
+    assert.match(String(failed.result.error), /^このPCには保存しましたが、サーバーに届けられませんでした。.*もう一度［サーバーと同期］を押してください。$/)
     assert.equal(a.hasPendingPush(), true)
     a.online()
     const out = ok(await a.sync(), 'a')

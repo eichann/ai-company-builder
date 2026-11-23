@@ -45,6 +45,7 @@ import { readSparseConfig } from './sparse'
 import { isNotDownloaded, pathKey } from '../../shared/sparse-paths'
 import { recoverInterruptedState, recoveryNote } from './interrupted'
 import { findOpenFiles, openFilesStoppedMessage, removeLockFiles } from './open-files'
+import type { BackupReason } from '../../shared/backup-reasons'
 
 export interface PrivatePrep {
   /** The answer in effect for this sync (fresh, or the cached one when the server could not be asked). */
@@ -201,7 +202,7 @@ export async function preparePrivateFolders(deps: SyncDeps, repoPath: string, co
           prep.madePublicBackup = { path: backupPath, files }
           fs.writeFileSync(path.join(backupPath, '_metadata.json'), JSON.stringify({
             timestamp: deps.now().toISOString(),
-            reason: 'made_public',
+            reason: 'made_public' satisfies BackupReason,
             folders: [...prep.madePublic, scope.path],
             files,
             note: 'edits not synced before the private folder was made public; the folder now syncs with the company folder',
@@ -308,7 +309,7 @@ export async function placePrivateFolders(deps: SyncDeps, repoPath: string, scop
   return out
 }
 
-function moveAside(deps: SyncDeps, repoPath: string, folder: string, backupName: string, reason: string): string {
+function moveAside(deps: SyncDeps, repoPath: string, folder: string, backupName: string, reason: BackupReason): string {
   // Kept inside .git: whatever sits at a private folder's path is handled
   // like private content (never in the working tree, never staged).
   const backupPath = path.join(privateBackupsDir(repoPath), backupName)
@@ -466,7 +467,7 @@ export async function removeExcludedClone(deps: SyncDeps, repoPath: string, dir:
       const files = ignored.map(e => `${folder}/${e}`)
       fs.writeFileSync(path.join(backupPath, '_metadata.json'), JSON.stringify({
         timestamp: deps.now().toISOString(),
-        reason: 'private_folder_excluded',
+        reason: 'private_folder_excluded' satisfies BackupReason,
         folders: [folder],
         files,
         note: 'not synced files of a private folder left out on this computer, saved before its copy here was removed',
@@ -608,7 +609,7 @@ export async function syncReadOnlyScope(deps: SyncDeps, repoPath: string, scope:
       }
       fs.writeFileSync(path.join(backupPath, '_metadata.json'), JSON.stringify({
         timestamp: deps.now().toISOString(),
-        reason: 'write_denied',
+        reason: 'write_denied' satisfies BackupReason,
         writeDeniedFiles: shown,
         backedUpFiles: shown,
         note: 'edits in a private folder this member may only read; put back to the server version',

@@ -55,7 +55,7 @@ test('edits + a change on disk: banner, autosave paused, diff, keep mine, then s
   await expect(banner(page)).toContainText('編集を続けられます（自動保存は止めています）')
   await banner(page).getByRole('button', { name: '保存…' }).click()
   await page.getByRole('button', { name: '外部の変更を上書きして保存' }).click()
-  await expect(page.getByText(/外部で変更された内容をバックアップしてから上書きしました（\/Users\/demo\/会社\/\.backups\//)).toBeVisible()
+  await expect(page.getByText('外部で変更された内容をバックアップしてから上書きしました（タイトルバーの［バックアップ履歴］で見られます）')).toBeVisible()
   await expect(banner(page)).toHaveCount(0)
   expect(await disk(page)).toContain('私の追記')
 })

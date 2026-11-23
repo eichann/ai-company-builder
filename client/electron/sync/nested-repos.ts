@@ -3,6 +3,7 @@ import path from 'path'
 import type { SimpleGit } from 'simple-git'
 import { diskKey } from '../../../shared/core/paths'
 import { readExcludeBlock, writeExcludeBlock, type ExcludeBlock } from './local-excludes'
+import type { BackupReason } from '../../shared/backup-reasons'
 
 /** Paths per git call (the argument list stays far below any OS limit). */
 const GIT_PATHS_BATCH = 200
@@ -258,9 +259,9 @@ export function sharedNestedRepoStopMessage(repo: string): string {
   return `同期を中止しました（共有中のフォルダ「${repo}」に、このアプリとは別に管理するための情報が入っています。このPCで増えたファイルだけ共有しないこともできます。「サーバーと同期」を押すと選べます）`
 }
 
-export const NESTED_REPO_OVERWRITE_REASON = 'nested_repo_overwrite'
+export const NESTED_REPO_OVERWRITE_REASON = 'nested_repo_overwrite' satisfies BackupReason
 /** A large file kept on this computer (sync/local-ignores.ts) that a teammate shared at the same path. */
-export const LARGE_FILE_OVERWRITE_REASON = 'large_file_overwrite'
+export const LARGE_FILE_OVERWRITE_REASON = 'large_file_overwrite' satisfies BackupReason
 
 export interface NestedRepoOverwriteResult {
   /** Paths whose local version was copied to the backup (company-relative for a private folder). */
@@ -272,12 +273,12 @@ export interface NestedRepoOverwriteResult {
 
 /** What the member is told when a large file kept here was backed up (appended to the sync message). */
 export function largeFileOverwriteMessage(result: Pick<NestedRepoOverwriteResult, 'files'>): string {
-  return `このPCだけに置いていた大きなファイルと同じ名前のファイルを、ほかのメンバーが共有したため、このPCにあった版を .backups に保存しました（${result.files.length}件）。`
+  return `このPCだけに置いていた大きなファイルと同じ名前のファイルを、ほかのメンバーが共有したため、このPCにあった版をバックアップに保存しました（${result.files.length}件）（タイトルバーの［バックアップ履歴］で見られます）。`
 }
 
 /** What the member is told (appended to the sync message). */
 export function nestedRepoOverwriteMessage(result: Pick<NestedRepoOverwriteResult, 'files' | 'repos'>): string {
-  return `共有していないフォルダ（${result.repos.join('、')}）に、ほかのメンバーが同じ名前のファイルを共有したため、このPCにあった版を .backups に保存しました（${result.files.length}件）。`
+  return `共有していないフォルダ（${result.repos.join('、')}）に、ほかのメンバーが同じ名前のファイルを共有したため、このPCにあった版をバックアップに保存しました（${result.files.length}件）（タイトルバーの［バックアップ履歴］で見られます）。`
 }
 
 /**

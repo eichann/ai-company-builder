@@ -52,7 +52,7 @@ test.describe('settings', () => {
     await expect(footer(page)).toHaveText('未適用の変更：1 個をダウンロードしない')
 
     await page.getByRole('button', { name: '適用', exact: true }).click()
-    await page.getByRole('alertdialog').getByRole('button', { name: '.backups に保存して進める' }).click()
+    await page.getByRole('alertdialog').getByRole('button', { name: 'バックアップに保存して進める' }).click()
     await expect(footer(page)).toHaveCount(0)
     await expect(box(page, '開発部')).not.toBeChecked()
   })

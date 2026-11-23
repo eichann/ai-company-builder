@@ -64,11 +64,11 @@ for (const theme of ['light', 'dark'] as const) {
       await expectPrimary(page, card.getByRole('button', { name: '確かめて送る' }), { hover: true })
     })
 
-    test('「.backups に保存して進める」 proceeds as the primary action, not as a danger', async ({ page }) => {
+    test('「バックアップに保存して進める」 proceeds as the primary action, not as a danger', async ({ page }) => {
       await open(page, 'download-folders', theme, { state: 'confirm' })
       await page.getByRole('checkbox', { name: /開発部/ }).first().click()
       await page.getByRole('button', { name: '適用', exact: true }).click()
-      const proceed = page.getByRole('alertdialog').getByRole('button', { name: '.backups に保存して進める' })
+      const proceed = page.getByRole('alertdialog').getByRole('button', { name: 'バックアップに保存して進める' })
       await expectPrimary(page, proceed)
       expect(await background(proceed)).not.toBe(await token(page, 'danger'))
     })

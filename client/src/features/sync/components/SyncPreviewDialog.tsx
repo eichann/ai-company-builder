@@ -27,8 +27,8 @@ type FileStatus = 'added' | 'modified' | 'deleted'
 
 /** What 「元に戻す」 will do to this file, in the member's words. */
 function revertConfirmMessage(displayName: string, status: FileStatus): string {
-  if (status === 'added') return `「${displayName}」は追加したファイルです。元に戻すと、このファイルは削除されます。\n今の内容は .backups に保存します。`
-  if (status === 'modified') return `「${displayName}」を最後に同期したときの内容に戻します。\n今の内容は .backups に保存します。`
+  if (status === 'added') return `「${displayName}」は追加したファイルです。元に戻すと、このファイルは削除されます。\n今の内容は［バックアップ履歴］に保存します。`
+  if (status === 'modified') return `「${displayName}」を最後に同期したときの内容に戻します。\n今の内容は［バックアップ履歴］に保存します。`
   return `削除した「${displayName}」を、最後に同期したときの内容で戻します。`
 }
 

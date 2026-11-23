@@ -7,7 +7,7 @@ export function ReadOnlyNotice() {
   return (
     <div className="flex-shrink-0 flex items-center gap-2 px-4 py-1.5 border-b border-readonly-border bg-readonly-bg text-caption font-normal text-readonly-text">
       <ReadOnlyBadge />
-      <span className="truncate">このフォルダは閲覧のみです。変更しても共有されず、同期すると元に戻ります（変更は .backups/ に保存されます）。</span>
+      <span className="truncate">このフォルダは閲覧のみです。変更しても共有されず、同期すると元に戻ります（変更は［バックアップ履歴］に保存されます）。</span>
     </div>
   )
 }

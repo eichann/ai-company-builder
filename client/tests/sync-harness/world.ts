@@ -776,6 +776,8 @@ export class Member {
   private readonly sync_: SyncFn
   /** offline() was called: the server API (and every remote) is unreachable. */
   private isOffline = false
+  /** Between offline() and online(): what a random run's oracle may expect of this member's sync. */
+  get offlineNow(): boolean { return this.isOffline }
   /** GET /me/scopes fails (server trouble) while git still works. */
   scopesApiDown = false
   /** POST /paths/check fails (server trouble, rate limit) while git still works. */
@@ -791,6 +793,7 @@ export class Member {
   private pushHooks: Array<() => Promise<void> | void> = []
   private pushFaults: Array<PushFault | null> = []
   private pullFaults = 0
+  private signInRefusal: string | null = null
   private rawFaults: Array<{ matches: (args: string[]) => boolean; message: string }> = []
   /** Paths written since they were last committed by a sync. */
   private readonly pending = new Set<string>()
@@ -1082,10 +1085,28 @@ export class Member {
     return this
   }
 
+  /**
+   * The server refuses this member's sync pass (an expired session over git-http): every
+   * fetch, pull and push fails with `message`, git's words for it, until `acceptSignIn()`.
+   */
+  refuseSignIn(message = "fatal: Authentication failed for 'http://127.0.0.1:3001/git/company.git/'"): this {
+    this.signInRefusal = message
+    return this
+  }
+
+  acceptSignIn(): this {
+    this.signInRefusal = null
+    return this
+  }
+
   private wrapGit(git: SimpleGit): SimpleGit {
     return new Proxy(git, {
       get: (target, prop, receiver) => {
         const value = Reflect.get(target, prop, receiver)
+        if ((prop === 'fetch' || prop === 'pull' || prop === 'push') && typeof value === 'function' && this.signInRefusal !== null) {
+          const refusal = this.signInRefusal
+          return async () => { throw new Error(refusal) }
+        }
         if (prop === 'pull' && typeof value === 'function') {
           return async (...args: unknown[]) => {
             if (this.pullFaults > 0) {

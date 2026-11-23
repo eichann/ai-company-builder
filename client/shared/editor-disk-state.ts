@@ -8,6 +8,7 @@
  * pauses autosave, and a save whose disk version is no longer the one the tab
  * loaded asks first — and backs the disk version up before overwriting it.
  */
+import type { BackupReason } from './backup-reasons'
 
 export type ExternalChange =
   | { kind: 'changed'; diskContent: string }
@@ -95,14 +96,14 @@ export function canAutosave(file: EditorFileState): boolean {
 // Backup of the disk version before the member overwrites it
 // ---------------------------------------------------------------------------
 
-export const EDITOR_OVERWRITE_REASON = 'editor_overwrite'
+export const EDITOR_OVERWRITE_REASON = 'editor_overwrite' satisfies BackupReason
 
 /**
  * Why the app kept a file's current version before replacing it: the editor
  * overwrote a changed file, a backup was restored over it, or 「元に戻す」 in
  * the sync preview undid it. Also the backup folder's suffix.
  */
-export type KeepCurrentReason = typeof EDITOR_OVERWRITE_REASON | 'before_restore' | 'before_revert'
+export type KeepCurrentReason = Extract<BackupReason, typeof EDITOR_OVERWRITE_REASON | 'before_restore' | 'before_revert'>
 
 export interface EditorOverwriteBackupMetadata {
   timestamp: string

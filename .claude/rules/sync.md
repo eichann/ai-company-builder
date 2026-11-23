@@ -57,7 +57,23 @@ original text: `docs/architecture/sync.md` (internal; may be absent).
   removes it; a later warning joins a recovery notice (`mustSee`) instead of replacing it, and a
   notice of a company no longer on the screen waits for that company (`lastingNotice.ts`, written
   before anything slow: the window may be closing, waiting only for this sync); the notice in
-  `components/SyncNotification.tsx`.
+  `components/SyncNotification.tsx` (its line breaks shown, `whitespace-pre-line`; 「フォルダを開く」
+  shows the backup folder in Finder through `BackupOutbound`, and when main refuses it the backup
+  history opens instead — `keep-work.spec.ts` `?view=notice`).
+- **The member's words** (owner, 2026-11-23): no Git words (コミット, プッシュ, 競合, ローカル,
+  `.backups/` …) in what sync says about a failed delivery or a file two people changed. Those
+  sentences live in `client/shared/sync-notice-text.ts` (main writes them, the renderer's fallbacks
+  reuse them) and `client/tests/sync-notice-text.test.ts` reads every export for Git words. A push
+  that failed: 「このPCには保存しましたが、サーバーに届けられませんでした。…もう一度［サーバーと同期］を
+  押してください。」; a file someone else changed too: 「N件のファイルは、ほかの人も同じところを変えて
+  いたため、サーバーの版を残しました。」 (+ deletions separately) and 「あなたが変えていた版は、タイトル
+  バーの［バックアップ履歴］に保存してあります。」. Everything else the app says about sync, its stops and
+  the copies it keeps (dialogs, the read-only band, 「元に戻す」 / 復元, the not-downloaded and reserved-name
+  holds, the close guard) points to ［バックアップ履歴］ the same way, never the `.backups` path: the same test
+  reads every Japanese string of those files with the TypeScript parser (`MEMBER_TEXT_SOURCES`; the
+  sentences about the member's own files *inside* `.backups` / `.workspace` name the folder on purpose,
+  `NAMES_THE_FOLDER`). The Skill shelf of a company without the shared folder still names 「.backups」:
+  it has no backup history panel.
 - Automatic sync: see "Automatic sync" below (`sync/receive.ts`, `sync/auto-sync.ts`,
   `sync/auto-message.ts`; renderer `hooks/useAutoSync.ts`, `autoSyncSchedule.ts`).
 
@@ -150,8 +166,8 @@ tracked. The sync message still counts the newly ignored files. Threshold:
   same pick failed on every sync. After the rebase, gitlinks of excluded nested repos are
   untracked again (one extra commit; a backstop, the server refuses gitlinks anyway).
 - A conflict copy that cannot be written stops the sync: the rebase is undone (the local work is
-  committed, so all of it stays) and the member reads 「競合したファイルのバックアップを保存できなかった
-  ため…」. Only a version git does not have counts as nothing to save.
+  committed, so all of it stays) and the member reads 「ほかの人も同じところを変えていたファイルの、
+  あなたの版を保存できなかったため…」. Only a version git does not have counts as nothing to save.
 - Back up with `git cat-file -p <localHash>:<file>` into a Buffer (`binaryCatFile`), never
   `git show` (a string corrupts pptx/png). Fallbacks: `:3:<file>` when the file is gone at
   `localHash`; an *earlier* local version that a pick replaces goes to
@@ -162,6 +178,16 @@ tracked. The sync message still counts the newly ignored files. Threshold:
 ## Push results (step 13)
 
 - A failed push writes `.git/PENDING_PUSH`; the local commit is never rolled back.
+- Nothing to send while neither the fetch (step 6) nor the pull (step 10) reached the server
+  (offline, the server down): `success: false`, `errorType: 'network'`, 「サーバーにつながらなかったため、
+  同期できませんでした。…」 — it used to say 「同期が完了しました」 having checked nothing. Nothing on disk
+  differs from before; like any `network` failure it sets no automatic-sync stop. When the fetch's
+  error is git-http refusing the sign-in (`isSignInRefusal`: Authentication / a whole-word 401 or 403 /
+  credential, the final catch's rule too) it is `auth` with 「サーバーへのログインが切れたため、…ログインし直して
+  から…」 instead. Whatever moved aside before the stop (files in a not-downloaded folder, a
+  restored permission's copy) keeps its backup on the failure notice (`model.ts` `movedTo`), so the
+  notice stays until dismissed. Scenarios 「offline with nothing to send…」, 「sign-in refused with
+  nothing to send…」 (`scenarios.test.ts`, the harness's `refuseSignIn`).
 - A push that throws may still have landed (watchdog kill during a long hook, connection lost
   after acceptance). Every push goes through `pushToServer` → `pushLandedDespiteError`
   (`push-landed.ts`): unless the error is a recognised rejection (hook markers, `[rejected]`,
@@ -237,12 +263,16 @@ tracked. The sync message still counts the newly ignored files. Threshold:
 - 復元 (`backup:restore`) and 「元に戻す」 (`git:revertFile`, added / modified) first keep the file
   on disk with `features/backups/keep-current.ts` (the private backups for a private folder or a
   nested repository); if that fails nothing changes
-  (「今の内容を .backups に保存できなかったため、復元しませんでした。何も変更していません。」 /
+  (「今の内容をバックアップに保存できなかったため、復元しませんでした。何も変更していません。」 /
   「…元に戻しませんでした。…」). 復元 is refused where every other write is (not downloaded, a
   reserved name). Both ask in an in-app dialog first (Enter does not confirm) and show failures in
   the panel / dialog; the preview's 作業メモ lives in `useSync` (`commitMemo`) and is cleared only by
   a successful sync. Tests: `ipc-git.test.ts`, `tests/ui/keep-work.spec.ts`
   (`keep-work-ui.html?view=preview|backups`).
+- Every backup's `reason` is a `BackupReason` (`client/shared/backup-reasons.ts`; each writer
+  types it with `satisfies` / the type), and the backup history shows `backupReasonLabel`: a new
+  reason cannot be added without its plain words (the label record is total; unknown → 「その他の
+  バックアップ」, never the code). Test: `client/tests/sync-notice-text.test.ts`.
 - The renderer reaches backups through `src/features/sync/api.ts`: `BackupReads` (list),
   `BackupWrites` (put a file back) and `BackupOutbound` (open the folder in Finder / Explorer:
   main hands it to another app, so it is a port of its own). The sync button uses

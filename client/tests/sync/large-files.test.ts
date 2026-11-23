@@ -264,7 +264,7 @@ describe('git:sync large files', { concurrency: CONCURRENCY }, () => {
     ok(await b.sync(), 'b')
     assert.equal(world.serverFile('media/clip.mov')?.toString(), SMALL, 'the line no longer stops a teammate\'s file')
     const out = ok(await a.sync(), 'a')
-    assert.match(out.result.message ?? '', /このPCだけに置いていた大きなファイルと同じ名前のファイルを、ほかのメンバーが共有したため、このPCにあった版を \.backups に保存しました（1件）/)
+    assert.match(out.result.message ?? '', /このPCだけに置いていた大きなファイルと同じ名前のファイルを、ほかのメンバーが共有したため、このPCにあった版をバックアップに保存しました（1件）（タイトルバーの［バックアップ履歴］で見られます）/)
     const [backup] = a.backups().filter(x => x.metadata.reason === 'large_file_overwrite')
     assert.ok(backup, 'backed up before the pull')
     assert.deepEqual(backup.metadata.files, ['media/clip.mov'])

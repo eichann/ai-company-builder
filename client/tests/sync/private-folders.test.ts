@@ -294,7 +294,7 @@ describe('git:sync private folders', { concurrency: CONCURRENCY }, () => {
     ok(await boss.sync(), 'boss')
     reader.write(`${HR}/評価表.md`, `${privateMarker(folder)}\nreader version\n`)
     const out = ok(await reader.sync(), 'reader')
-    assert.match(out.result.message ?? '', /『人事\/評価』: 同期完了。1ファイルが競合しました/)
+    assert.match(out.result.message ?? '', /『人事\/評価』: 同期完了。1件のファイルは、ほかの人も同じところを変えていたため、サーバーの版を残しました。/)
     assert.match(reader.readText(`${HR}/評価表.md`), /boss version/)
     const conflict = reader.backups().find(b => b.metadata.reason === 'conflict')
     assert.ok(conflict)

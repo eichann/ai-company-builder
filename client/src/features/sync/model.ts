@@ -1,6 +1,7 @@
 // What the member is told after 「サーバーと同期」, from what sync reported.
 import type { GitResult } from '../../../shared/ipc-contract'
 import type { ReceiveResult } from '../../../shared/auto-sync'
+import { sameFileChangedMessage } from '../../../shared/sync-notice-text'
 
 export interface SyncNotice {
   type: 'success' | 'warning' | 'error'
@@ -33,6 +34,10 @@ function movedTo(result: GitResult): string | undefined {
     result.nestedRepoBackupPath ||
     result.largeFileBackupPath ||
     result.privateFolders?.find(folder => folder.setAside && folder.backupPath)?.backupPath ||
+    // Also on a failed sync (offline, a push that did not go through): what moved before the stop.
+    result.outsideCheckoutBackupPath ||
+    result.writeDeniedBackupPath ||
+    result.protectedBackupPath ||
     result.backupPath
 }
 
@@ -82,14 +87,17 @@ function noticeFor(result: GitResult): SyncNotice {
     // Files created in a folder this computer has not downloaded were set aside, not shared
     return {
       type: 'warning',
-      message: result.message || `ダウンロードしていないフォルダに作られたファイルを .backups に保存しました: ${result.outsideCheckoutFiles.join(', ')}`,
+      message: result.message || `ダウンロードしていないフォルダに作られたファイルを、共有せずに［バックアップ履歴］に保存しました: ${result.outsideCheckoutFiles.join(', ')}`,
       backupPath: result.outsideCheckoutBackupPath || result.backupPath
     }
   }
   if (result.hadConflicts) {
     return {
       type: 'warning',
-      message: result.message || `${result.conflictFiles?.length || 0}ファイルが競合しました。サーバー版で上書きしました。`,
+      message: result.message || sameFileChangedMessage(
+        (result.conflictFiles?.length ?? 0) - (result.deletedConflictFiles?.length ?? 0),
+        result.deletedConflictFiles?.length ?? 0,
+      ),
       backupPath: result.backupPath
     }
   }

@@ -34,9 +34,10 @@ import { reservedPathMessage } from '../../../shared/types/private-folders'
 import { moveInto, pruneEmptyUp } from './private-folders'
 import { pathPrefixes } from './path-check'
 import { pathKey } from '../../shared/sparse-paths'
+import type { BackupReason } from '../../shared/backup-reasons'
 
 export const RESERVED_PATH_MARKER = '[RESERVED_PATH]'
-export const RESERVED_PATH_REASON = 'reserved_path'
+export const RESERVED_PATH_REASON = 'reserved_path' satisfies BackupReason
 
 export function isReservedPathRejection(errorMessage: string): boolean {
   return errorMessage.includes(RESERVED_PATH_MARKER)
@@ -87,7 +88,7 @@ export function reservedPathNote(options: { files: string[]; folders: string[]; 
   const reasons = options.reasons && options.reasons.length > 0
     ? options.reasons
     : options.folders.map(f => reservedPathMessage(f))
-  return `使えない名前のフォルダに作られたファイル（${options.files.length}件）は共有せずに .backups に移しました。別の名前のフォルダに保存し直してから同期してください。\n${reasons.join('\n')}`
+  return `使えない名前のフォルダに作られたファイル（${options.files.length}件）は共有せずにバックアップに移しました（タイトルバーの［バックアップ履歴］で見られます）。別の名前のフォルダに保存し直してから同期してください。\n${reasons.join('\n')}`
 }
 
 export interface ReservedHoldBack {

@@ -22,8 +22,20 @@ test('whatever sync set aside is a warning that stays until dismissed, pointing 
   }
 })
 
-test('the conflict notice says how many files and that the server version won', () => {
-  assert.equal(syncNoticeFor(result({ hadConflicts: true, conflictFiles: ['a.md', 'b.md'] })).message, '2ファイルが競合しました。サーバー版で上書きしました。')
+test('the notice for files someone else changed too says how many, that the server version stayed and where the member\'s is, without Git words', () => {
+  const message = syncNoticeFor(result({ hadConflicts: true, conflictFiles: ['a.md', 'b.md', 'c.md'], deletedConflictFiles: ['c.md'] })).message
+  assert.match(message, /^2件のファイルは、ほかの人も同じところを変えていたため、サーバーの版を残しました。1件のファイルは、あなたが変えている間にほかの人が削除していたため、削除しました。/)
+  assert.match(message, /［バックアップ履歴］/)
+  assert.doesNotMatch(message, /競合|ローカル|\.backups/)
+})
+
+test('a failed sync that had already moved files aside still points at their backup, so the notice stays and offers the folder', () => {
+  // Offline: files made in a not-downloaded folder went to the backups before the fetch failed.
+  const offline = syncNoticeFor(result({ success: false, errorType: 'network', error: 'サーバーにつながらなかったため…', outsideCheckoutFiles: ['開発部/new.md'], outsideCheckoutBackupPath: '/b/outside' }))
+  assert.equal(offline.backupPath, '/b/outside')
+  // A push that did not go through after files were put back for a refused permission.
+  assert.equal(syncNoticeFor(result({ success: false, errorType: 'push_failed', error: 'このPCには保存しましたが…', restoredWriteDeniedFiles: ['総務/規程.md'], writeDeniedBackupPath: '/b/denied' })).backupPath, '/b/denied')
+  assert.equal(syncNoticeFor(result({ success: false, errorType: 'push_failed', error: 'このPCには保存しましたが…', restoredProtectedFiles: ['.mcp.json'], protectedBackupPath: '/b/protected' })).backupPath, '/b/protected')
 })
 
 test('restored folders, large files and imported repositories warn without hiding', () => {

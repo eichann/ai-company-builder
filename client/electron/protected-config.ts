@@ -31,6 +31,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import type { SimpleGit } from 'simple-git'
 import { isSkillFile } from '../../shared/core/skill-files'
+import type { BackupReason } from '../shared/backup-reasons'
 
 export const PROTECTED_CONFIG_MARKER = '[PROTECTED_CONFIG]'
 
@@ -129,7 +130,7 @@ export class ProtectedConfigRecoveryError extends Error {}
 
 export const WRITE_DENIED_MARKER = '[WRITE_DENIED]'
 
-export type RestoreReason = 'protected_config' | 'write_denied'
+export type RestoreReason = Extract<BackupReason, 'protected_config' | 'write_denied'>
 
 export function isWriteDeniedRejection(errorMessage: string): boolean {
   return errorMessage.includes(WRITE_DENIED_MARKER)

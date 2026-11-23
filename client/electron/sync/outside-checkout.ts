@@ -28,8 +28,9 @@ import { createHash } from 'crypto'
 import type { SimpleGit } from 'simple-git'
 import { appliedExclusions } from './sparse'
 import { pathKey } from '../../shared/sparse-paths'
+import type { BackupReason } from '../../shared/backup-reasons'
 
-export const OUTSIDE_CHECKOUT_REASON = 'outside_checkout'
+export const OUTSIDE_CHECKOUT_REASON = 'outside_checkout' satisfies BackupReason
 
 export interface OutsideCheckoutResult {
   /** Repository-relative paths moved to the backup, sorted. */
@@ -43,7 +44,7 @@ export interface OutsideCheckoutResult {
 
 /** What the member is told (appended to the sync message). */
 export function outsideCheckoutMessage(result: Pick<OutsideCheckoutResult, 'files' | 'folders'>): string {
-  return `ダウンロードしていないフォルダ（${result.folders.join('、')}）にファイルが作られていたため、共有せずに .backups に保存しました（${result.files.length}件）。必要ならそのフォルダをダウンロードしてから保存し直してください。`
+  return `ダウンロードしていないフォルダ（${result.folders.join('、')}）にファイルが作られていたため、共有せずにバックアップに保存しました（${result.files.length}件）（タイトルバーの［バックアップ履歴］で見られます）。必要ならそのフォルダをダウンロードしてから保存し直してください。`
 }
 
 const CHUNK = 200

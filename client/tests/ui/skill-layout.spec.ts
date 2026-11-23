@@ -94,8 +94,22 @@ test('read-only folders carry 閲覧のみ in the tree and above an open file', 
   await expect(page.getByRole('button', { name: /^営業部/ }).filter({ hasText: '閲覧のみ' })).toHaveCount(0)
 
   await deptTab(page, '総務').click()
+  // The header's 「ファイル」 stays on one line beside 閲覧のみ and clear of the toolbar (it wrapped before).
+  const title = page.locator('[data-tree-title]').filter({ visible: true })
+  await expect(title).toHaveText('ファイル')
+  const fit = () => title.evaluate(el => {
+    const box = el.getBoundingClientRect()
+    const badge = el.parentElement!.querySelector('[data-badge="readonly"]')!.getBoundingClientRect()
+    const toolbar = el.parentElement!.nextElementSibling!.getBoundingClientRect()
+    const apart = badge.right <= toolbar.left || badge.bottom <= toolbar.top
+    return { lines: Math.round(box.height / parseFloat(getComputedStyle(el).lineHeight)), apart }
+  })
+  expect(await fit()).toEqual({ lines: 1, apart: true })
+  // At the column's narrowest (Home on the divider) too.
+  await page.getByRole('separator', { name: 'ファイルツリーとエディタの境目' }).press('Home')
+  expect(await fit()).toEqual({ lines: 1, apart: true })
   await page.getByRole('button', { name: '備品.md' }).click()
-  await expect(page.getByText('このフォルダは閲覧のみです。変更しても共有されず、同期すると元に戻ります（変更は .backups/ に保存されます）。')).toBeVisible()
+  await expect(page.getByText('このフォルダは閲覧のみです。変更しても共有されず、同期すると元に戻ります（変更は［バックアップ履歴］に保存されます）。')).toBeVisible()
 })
 
 test('探す: one row per file, the cap note when truncated, searched again in another department; a hit opens the file in the middle', async ({ page }) => {

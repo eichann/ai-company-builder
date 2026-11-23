@@ -24,9 +24,10 @@ export function FileTreeHeader({
 }: FileTreeHeaderProps) {
   const { t } = useTranslation()
   return (
-    <div className="flex items-center justify-between px-3 py-2 border-b border-gray-200 dark:border-zinc-800/50">
-      <span className="flex items-center gap-1.5 min-w-0">
-        <span className="text-xs font-medium text-gray-500 dark:text-zinc-500 uppercase tracking-wider">
+    // A narrow column puts the toolbar on its own line rather than squeezing 「ファイル」 and 閲覧のみ under it.
+    <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1 px-3 py-2 border-b border-gray-200 dark:border-zinc-800/50">
+      <span className="flex shrink-0 items-center gap-1.5">
+        <span data-tree-title className="shrink-0 whitespace-nowrap text-xs font-medium text-gray-500 dark:text-zinc-500 uppercase tracking-wider">
           {t('fileTree.title')}
         </span>
         {readOnly && <ReadOnlyBadge compact />}

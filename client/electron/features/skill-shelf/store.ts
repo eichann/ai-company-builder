@@ -38,6 +38,7 @@ import {
 import { isSkillArtifactPath } from '../../../shared/skill-leftovers'
 import { backupStamp } from '../../../shared/editor-disk-state'
 import { sha256Hex, type ShelfClient, type ShelfFile } from './client'
+import type { BackupReason } from '../../../shared/backup-reasons'
 
 export interface SkillShelfDeps {
   /** `<userData>/skill-shelf`. */
@@ -226,9 +227,9 @@ type RestoreAnswer = { ok: true; backup: string | null; id: string } | { ok: fal
 export type RestoredOutcome = 'back' | 'later' | 'not-delivered' | 'occupied'
 
 /** The backup folder's suffix of 「会社の版に戻す」 (`.backups/<ts>_skill_edit/<the Skill folder>`). */
-export const SKILL_EDIT_BACKUP_REASON = 'skill_edit'
+export const SKILL_EDIT_BACKUP_REASON = 'skill_edit' satisfies BackupReason
 /** The backup folder's suffix of 外して出す (`.backups/<ts>_skill_outputs/<the Skill folder>/<file>`). */
-export const SKILL_OUTPUTS_BACKUP_REASON = 'skill_outputs'
+export const SKILL_OUTPUTS_BACKUP_REASON = 'skill_outputs' satisfies BackupReason
 
 /** A `moveToBackup` that failed after `moved` (possibly none) were already in the backup. */
 export class PartialMove extends Error {
@@ -246,7 +247,7 @@ export class PartialMove extends Error {
  * (`moved`: those before it, which stay in the backup, named in its `_metadata.json`); the
  * folders made only for the failed one are taken away again, empty.
  */
-function moveToBackup(root: string, reason: string, rels: readonly string[], at: Date): string | 'backups' {
+function moveToBackup(root: string, reason: BackupReason, rels: readonly string[], at: Date): string | 'backups' {
   const backups = path.join(root, '.backups')
   try {
     if (!fs.lstatSync(backups).isDirectory()) return 'backups'

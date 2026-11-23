@@ -19,7 +19,7 @@ test('「元に戻す」 asks in the app first, says what happens to the file, a
   await page.getByRole('button', { name: '元に戻す' }).first().click()
   await expect(page.getByRole('heading', { name: '変更を元に戻しますか？' })).toBeVisible()
   await expect(page.getByText('「新規メモ.md」は追加したファイルです。元に戻すと、このファイルは削除されます。')).toBeVisible()
-  await expect(page.getByText('今の内容は .backups に保存します。')).toBeVisible()
+  await expect(page.getByText('今の内容は［バックアップ履歴］に保存します。')).toBeVisible()
   await page.getByRole('button', { name: 'キャンセル' }).click()
   expect(await calls(page)).toEqual([])
   // Enter does not confirm (the member may be typing the memo).
@@ -59,21 +59,42 @@ test('the 作業メモ survives a failed sync and is cleared only by a successfu
 
 test('復元 asks first and says the current content is kept; a failure is shown, not an alert', async ({ page }) => {
   const state = await openPreview(page, 'keep-work', { view: 'backups' })
-  await page.getByText('競合').click()
+  await page.getByText('ほかの人も同じところを変えていたため、サーバーの版を残したときのあなたの版').click()
   await page.getByRole('button', { name: '復元' }).click()
   await expect(page.getByRole('heading', { name: 'バックアップから復元しますか？' })).toBeVisible()
-  await expect(page.getByText('今の内容は .backups に保存してから置き換えます。')).toBeVisible()
+  await expect(page.getByText('今の内容もこの履歴に保存してから置き換えます。')).toBeVisible()
   await page.getByRole('button', { name: 'キャンセル' }).click()
   expect(await calls(page)).toEqual([])
 
   await page.getByRole('button', { name: '復元' }).click()
   await page.getByRole('button', { name: '復元する' }).click()
-  await expect(page.getByRole('status')).toHaveText('「営業部/提案書.md」を復元しました。それまでの内容は .backups に保存しました。')
+  await expect(page.getByRole('status')).toHaveText('「営業部/提案書.md」を復元しました。それまでの内容もこの履歴に保存しました。')
 
   await failNext(page, 'backupRestore')
   await page.getByRole('button', { name: '復元', exact: true }).click()
   await page.getByRole('button', { name: '復元する' }).click()
-  await expect(page.getByRole('alert')).toHaveText('今の内容を .backups に保存できなかったため、復元しませんでした。何も変更していません。')
+  await expect(page.getByRole('alert')).toHaveText('今の内容をバックアップに保存できなかったため、復元しませんでした。何も変更していません。')
+  expectNoPageErrors(state)
+})
+
+test('the notice after a sync that kept the member\'s version: one line per sentence, 「フォルダを開く」 shows the folder in Finder (no alert), and a folder main will not open falls back to the backup history', async ({ page }) => {
+  const state = await openPreview(page, 'keep-work', { view: 'notice' })
+  let alerted = false
+  page.on('dialog', dialog => { alerted = true; void dialog.dismiss() })
+  const message = page.getByText(/ほかの人も同じところを変えていたため、サーバーの版を残しました/)
+  await expect(message).toContainText('［バックアップ履歴］')
+  // Two sentences joined by a line break are drawn on two lines, not run together.
+  expect(await message.evaluate(el => getComputedStyle(el).whiteSpace)).toBe('pre-line')
+  await expect(message).toContainText('部署フォルダを復元しました: 人事部')
+
+  await page.getByRole('button', { name: 'フォルダを開く' }).click()
+  await expect.poll(() => calls(page)).toEqual([['backupOpenFolder', '/Users/demo/会社/.backups/2026-10-30T09-00-00-000']])
+  await expect(page.getByRole('status', { name: 'バックアップ履歴' })).toHaveText('')
+  expect(alerted).toBe(false)
+
+  await failNext(page, 'backupOpenFolder')
+  await page.getByRole('button', { name: 'フォルダを開く' }).click()
+  await expect(page.getByRole('status', { name: 'バックアップ履歴' })).toHaveText('開いています')
   expectNoPageErrors(state)
 })
 

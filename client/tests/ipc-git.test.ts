@@ -398,7 +398,7 @@ test('backup:restore keeps what is there now before replacing it, and refuses wh
   fs.writeFileSync(path.join(repo, '営業', '提案.md'), 'newer work')
   fs.chmodSync(path.join(repo, '.backups'), 0o555)
   try {
-    assert.deepEqual(await h.invoke('backup:restore', repo, id, '営業/提案.md'), { success: false, error: '今の内容を .backups に保存できなかったため、復元しませんでした。何も変更していません。' })
+    assert.deepEqual(await h.invoke('backup:restore', repo, id, '営業/提案.md'), { success: false, error: '今の内容をバックアップに保存できなかったため、復元しませんでした。何も変更していません。' })
   } finally {
     fs.chmodSync(path.join(repo, '.backups'), 0o755)
   }
