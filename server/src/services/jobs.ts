@@ -19,8 +19,8 @@
  *   (notice `job_paused`), in the same transaction as the change.
  */
 import {
-  JOB_ACCEPT_SEPARATELY, JOB_ACTOR, JOB_NEEDS_NEWER_SCREEN, JOB_PROPOSAL_SCHEMA, JOB_SCHEMAS, JOB_SYSTEM_PAUSE_REASONS, isJobId, isRecordTrigger, isTimeTrigger, storedJobDefinition, jobConsentCanonical, jobDefinitionCanonical, jobDefinitionPaths, jobDeliveryLabel, newJobId, parseJobAcceptedPlace,
-  parseJobDefinition, type JobDefinition, type JobDeliveryPlace, type JobPauseReason,
+  JOB_ACCEPT_SEPARATELY, JOB_ACTOR, JOB_NEEDS_NEWER_SCREEN, JOB_PROPOSAL_SCHEMA, JOB_SCHEMAS, JOB_SET_WATCH_SCHEMA, JOB_SYSTEM_PAUSE_REASONS, isJobId, isRecordTrigger, isSetTrigger, isTimeTrigger, storedJobDefinition, jobConsentCanonical, jobDefinitionCanonical, jobDefinitionPaths, jobDeliveryLabel, departmentSkillPath, jobPinnedDepartmentSkills, jobSetWatchOpened, newJobId, parseJobAcceptedPlace,
+  parseJobDecisionFile, parseJobDefinition, type JobDefinition, type JobDeliveryPlace, type JobPauseReason,
 } from '../../shared/core/jobs'
 import type { JobList, JobOccurrenceView, JobState, JobVersionView, JobView, JobWaiting } from '../../shared/types/jobs'
 import type { Clock, IdGenerator } from '../ports/clock'
@@ -94,6 +94,16 @@ const RESPONSIBLE_FIXED = () => refuse('conflict', '社員の案から生まれ�
 const NOT_LATEST = () => refuse('conflict', 'この仕事は、画面を開いたあとにほかの人が直しました。読み直してから、もう一度ためしてください。', { code: 'JOB_VERSION_NOT_LATEST' })
 const isClosed = (p: JobProposalRow | null) => p !== null && (p.state === 'withdrawn' || p.state === 'returned')
 const NOT_EVENT_JOB = () => refuse('conflict', 'この定期の仕事は、出来事で動く仕事ではありません。', { code: 'JOB_NOT_EVENT' })
+/**
+ * The set watch (schema 5, 4b-4 PR1, jobs.md "The set watch (schema 5)"). A stored version whose combination is not opened
+ * (any more) in `JOB_SET_WATCH_OPENED` is never approved, accepted or resumed; one per responsible person; never beside a
+ * business plugin step set to run the same Skill (§3 ④); a department Skill must exist and declare its reasons.
+ */
+const SET_WATCH_NOT_OPENED = () => refuse('conflict', 'この定期の仕事の条件は、いまのサーバーで使える組み合わせではないため、承認・受け取り・再開できません。', { code: 'JOB_SET_WATCH_NOT_OPENED' })
+const SET_WATCH_ONE_PER_PERSON = () => refuse('conflict', 'この責任者には、同じ形（これから来る、条件に合うもの全部）の定期の仕事がもう動いています。1人に1つだけです。先にそちらを止めてください。', { code: 'JOB_SET_WATCH_ONE_PER_PERSON' })
+const SET_WATCH_STEP_SKILL = () => refuse('conflict', '業務プラグインの手順が、この仕事と同じ Skill を使う設定になっています。手順の Skill の設定を外してから、もう一度ためしてください。', { code: 'JOB_SET_WATCH_STEP_SKILL' })
+const DEPARTMENT_SKILL_MISSING = () => refuse('conflict', '部署の Skill が見つかりません。部署のフォルダの .claude/skills/ に置いて同期してから、もう一度ためしてください。', { code: 'JOB_SKILL_MISSING' })
+const DECISION_MISSING = () => refuse('conflict', '手順の Skill に、判断の理由の一覧（decision.json）が無いか、書き方が正しくありません。Skill を直して同期してから、もう一度ためしてください。', { code: 'JOB_SKILL_DECISION_MISSING' })
 /** What a client reads when it names no schemas (every screen before stage 4-0). */
 const SCHEMA_1_ONLY: readonly number[] = [1]
 
@@ -105,6 +115,12 @@ export interface JobServiceDeps {
   ids: IdGenerator
   /** The git tree id of a company Skill now (`.claude/skills/<name>`), or null (none, or no shared folder). */
   skillTree: (companyId: string, name: string) => Promise<string | null>
+  /**
+   * A department's Skill now (`<place>/.claude/skills/<name>` on the shared branch, a set watch's: jobs.md "The set watch
+   * (schema 5)"): its tree id and its `decision.json` text (null: none); null when there is no such Skill (or no shared folder).
+   * Absent → every department Skill is missing.
+   */
+  departmentSkill?: (companyId: string, place: string, name: string) => Promise<{ tree: string; decision: string | null } | null>
   /** Has the company the shared company folder? Without it a Skill is pinned from the Skill shelf (`shelfSkill`). */
   hasCompanyFolder: (companyId: string) => boolean
   /**
@@ -176,6 +192,12 @@ export function versionRow(jobId: string, version: number, definition: JobDefini
   }
 }
 const isObject = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v)
+/**
+ * The Skill names a set watch runs and reads (4b-4 §3): a business plugin step whose company Skill has one of these names is the
+ * same work run another way — told by the name, wherever the Skill folder is (a step pins `.claude/skills/<name>`, the job a
+ * department's), on the safe side.
+ */
+const setWatchSkillNames = (definition: JobDefinition): string[] => [...new Set(jobPinnedDepartmentSkills(definition).map(p => p.skill))]
 
 export function createJobService(deps: JobServiceDeps) {
   const { companyData, memberships, transactions, clock, ids } = deps
@@ -293,6 +315,22 @@ export function createJobService(deps: JobServiceDeps) {
   async function skillPinned(companyId: string, definition: JobDefinition): Promise<Outcome<void>> {
     if (definition.run.kind !== 'procedure') return ok(undefined)
     const procedure = definition.run.procedure
+    if (procedure.source === 'department_skill') {
+      // A set watch (schema 5): the Skill it runs and every Skill it reads, each still at its pinned tree (a changed Skill is
+      // a new version to approve and accept, O5 — the decision.json is inside the tree, so its reasons are pinned with it).
+      if (!deps.hasCompanyFolder(companyId)) return SKILL_NOT_HERE()
+      // As the responsible person reads them (as for a shelf Skill): a Skill at a place they do not read is not there for
+      // them — one answer whether it changed or not, so the answer never tells them about a Skill they cannot read.
+      const role = memberships.roleOf(companyId, definition.actingUser)
+      const reader = role === null ? null : recordReader({ companyId, userId: definition.actingUser, role }, companyData.forCompany(companyId).scopes.listWithRules())
+      for (const pin of jobPinnedDepartmentSkills(definition)) {
+        if (!reader?.file(departmentSkillPath(pin))) return DEPARTMENT_SKILL_MISSING()
+        const found = await deps.departmentSkill?.(companyId, pin.place, pin.skill)
+        if (!found) return DEPARTMENT_SKILL_MISSING()
+        if (found.tree !== pin.fingerprint) return SKILL_CHANGED()
+      }
+      return ok(undefined)
+    }
     if (procedure.source === 'shelf_skill') {
       if (deps.hasCompanyFolder(companyId)) return SHELF_NOT_HERE()
       // As the responsible person reads it: a Skill at a place they do not read is not there for them.
@@ -305,6 +343,21 @@ export function createJobService(deps: JobServiceDeps) {
     const tree = await deps.skillTree(companyId, procedure.skill)
     if (tree === null) return SKILL_MISSING()
     return tree === procedure.fingerprint ? ok(undefined) : SKILL_CHANGED()
+  }
+
+  /**
+   * A set watch's own rules (schema 5, owner memo 「4b-4」 §2-1 / §2-4 / §3 ④), asked inside the write's transaction of an
+   * approval, an acceptance and a resume; any other schema passes. Its combination is still one the core opened (a stored
+   * version is never parsed again, so a line taken out of `JOB_SET_WATCH_OPENED` must stop it here); no other active job of
+   * this shape names the same responsible person (one per person: one meeting never runs twice, nor the day's limit
+   * twice); and no business plugin step is set to run one of its Skills now (the company runs it one way only).
+   */
+  function setWatchRefusal(handle: CompanyData, jobId: string, definition: JobDefinition): Outcome<void> {
+    if (definition.schema !== JOB_SET_WATCH_SCHEMA) return ok(undefined)
+    if (!isSetTrigger(definition.trigger) || !jobSetWatchOpened(definition.trigger)) return SET_WATCH_NOT_OPENED()
+    if (handle.jobs.activeApprovedOf(JOB_SET_WATCH_SCHEMA, definition.actingUser).some(id => id !== jobId)) return SET_WATCH_ONE_PER_PERSON()
+    if (handle.pluginSteps.stepsWithSkill(setWatchSkillNames(definition)).length > 0) return SET_WATCH_STEP_SKILL()
+    return ok(undefined)
   }
 
   /** The responsible person: of the approved version once there is one, else of the newest. */
@@ -451,6 +504,40 @@ export function createJobService(deps: JobServiceDeps) {
    * The body's definition, checked and pinned: a procedure's Skill fingerprint is the server's (read
    * now), never the caller's; the responsible person must be a member now.
    */
+  /**
+   * A set watch's department Skills, pinned into `input` (changed in place): `run.procedure.fingerprint` and each
+   * `grant.reads.skills[].fingerprint` the tree read now, and — for schema 5 — `decision` the reasons of the run's Skill. A
+   * Skill that is not there (an invalid place or name too) → `JOB_SKILL_MISSING`; the run's Skill without a valid
+   * `decision.json` → `JOB_SKILL_DECISION_MISSING`.
+   */
+  async function pinDepartmentSkills(companyId: string, input: Record<string, unknown>): Promise<Outcome<void>> {
+    if (!deps.hasCompanyFolder(companyId)) return SKILL_NOT_HERE()
+    const read = async (pin: Record<string, unknown>) => (typeof pin.place === 'string' && typeof pin.skill === 'string'
+      ? (await deps.departmentSkill?.(companyId, pin.place, pin.skill)) ?? null : null)
+    const run = input.run as Record<string, unknown>
+    const procedure = run.procedure as Record<string, unknown>
+    const found = await read(procedure)
+    if (!found) return DEPARTMENT_SKILL_MISSING()
+    input.run = { ...run, procedure: { ...procedure, fingerprint: found.tree } }
+    if (input.schema === JOB_SET_WATCH_SCHEMA) {
+      const decision = found.decision === null ? null : parseJobDecisionFile(found.decision)
+      if (!decision) return DECISION_MISSING()
+      input.decision = decision
+    }
+    const grant = input.grant
+    if (isObject(grant) && isObject(grant.reads) && Array.isArray(grant.reads.skills)) {
+      const skills: unknown[] = []
+      for (const pin of grant.reads.skills as unknown[]) {
+        if (!isObject(pin)) { skills.push(pin); continue }
+        const f = await read(pin)
+        if (!f) return DEPARTMENT_SKILL_MISSING()
+        skills.push({ ...pin, fingerprint: f.tree })
+      }
+      input.grant = { ...grant, reads: { ...grant.reads, skills } }
+    }
+    return ok(undefined)
+  }
+
   async function definitionFrom(companyId: string, body: unknown, withBase = false): Promise<Outcome<{ definition: JobDefinition; canonical: string }>> {
     // An edit may name the version it was made from (`baseVersion`, required for a job from a member's proposal).
     if (!isObject(body) || !isObject(body.definition) || !Object.keys(body).every(k => k === 'definition' || (withBase && k === 'baseVersion'))) {
@@ -461,7 +548,12 @@ export function createJobService(deps: JobServiceDeps) {
     let missing = SKILL_MISSING
     if (isObject(input.run) && input.run.kind === 'procedure' && isObject(input.run.procedure)) {
       const procedure = input.run.procedure
-      if (procedure.source === 'shelf_skill') {
+      if (procedure.source === 'department_skill') {
+        // A set watch (schema 5): the server pins the department Skill it runs and each it reads at their trees now, and copies
+        // the reasons the run's Skill declares (`decision.json`) — never the caller's fingerprints or reasons.
+        const pinned = await pinDepartmentSkills(companyId, input)
+        if (!pinned.ok) return pinned
+      } else if (procedure.source === 'shelf_skill') {
         // A company without the shared folder (B PR 5a): the shelf Skill `item`, at its current version, as
         // the responsible person reads it — the server fills its name and version, never the caller.
         if (deps.hasCompanyFolder(companyId)) return SHELF_NOT_HERE()
@@ -700,6 +792,8 @@ export function createJobService(deps: JobServiceDeps) {
         // Checked again inside the write: the membership or the rules may have changed meanwhile.
         const rights = withinRights(handle, definition)
         if (!rights.ok) return rights
+        const setWatch = setWatchRefusal(handle, jobId, definition)
+        if (!setWatch.ok) return setWatch
         const job = handle.jobs.find(jobId) as JobRow
         if (proposal) {
           // The proposal now: its first approval moves it (submitted → approved, compare-and-set — a withdrawal or a return
@@ -713,6 +807,10 @@ export function createJobService(deps: JobServiceDeps) {
         const state: JobState = job.state === 'draft' ? 'active' : job.state
         const at = clock.now()
         handle.jobs.approve(jobId, v.version, v.fingerprint, member.userId, at, state)
+        // A set watch takes its Skills over from business plugin steps (4b-4 §3 ③): their open requests pinned to one of them
+        // are closed here, whenever asked — a pause never closes them, so a request left open would come back to life if the
+        // company later went back to the step. The approval waits for nothing (a run already going ends within its deadline).
+        if (definition.schema === JOB_SET_WATCH_SCHEMA) handle.pluginSteps.closeRequestsForSkills(setWatchSkillNames(definition), jobId, at)
         // 「受け取りが要ります」 (jobs.md "The acceptance notice"): the responsible person, when this version's
         // consent is not the one they accepted — also when they approved it themself: approving is not accepting
         // (owner decision 2026-11-18), and the ask stays until their own 「受け取る」.
@@ -773,6 +871,8 @@ export function createJobService(deps: JobServiceDeps) {
       const result = transactions.run((): Outcome<void> => {
         const rights = withinRights(handle, definition)
         if (!rights.ok) return rights
+        const setWatch = setWatchRefusal(handle, jobId, definition)
+        if (!setWatch.ok) return setWatch
         // The place must be theirs and usable now (their own live pick): the run later puts only there.
         if (place && !deps.places?.live(member.companyId, member.userId, place)) return PLACE_NOT_USABLE()
         const at = clock.now()
@@ -849,8 +949,12 @@ export function createJobService(deps: JobServiceDeps) {
         if (!samePause(current, from)) return PAUSE_CHANGED()
         if (current.approvedVersion !== null) {
           const approved = handle.jobs.version(jobId, current.approvedVersion) as JobVersionRow
-          const rights = withinRights(handle, definitionOf(approved))
+          const definition = definitionOf(approved)
+          const rights = withinRights(handle, definition)
           if (!rights.ok) return rights
+          // `withinRights` refused an unknown shape: the definition is there.
+          const setWatch = setWatchRefusal(handle, jobId, definition as JobDefinition)
+          if (!setWatch.ok) return setWatch
         }
         if (!handle.jobs.resume(jobId, from, current.approvedVersion === null ? 'draft' : 'active', clock.now())) return PAUSE_CHANGED()
         // A slot that passed while it was paused is held, never made due afterwards.

@@ -159,6 +159,11 @@ export interface JobRepository {
   list(): JobRow[]
   /** The jobs whose newest or approved version names the member as responsible person. */
   listFor(userId: string): JobRow[]
+  /**
+   * The ids of the active jobs whose approved version is of `schema` and names `userId` as responsible person (4b-4: one
+   * set watch per responsible person, checked inside the approval's, acceptance's and resume's transaction).
+   */
+  activeApprovedOf(schema: number, userId: string): string[]
   find(jobId: string): JobRow | null
   /** A job with its first version, in one transaction (the caller's). */
   create(job: JobRow, first: JobVersionRow): void

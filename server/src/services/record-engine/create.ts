@@ -11,7 +11,7 @@ import type { Member } from '../access'
 import { ok, refuse, type Outcome } from '../outcome'
 import { currentTypes } from '../record-index'
 import { RECORDS_DISABLED } from '../records'
-import { acceptanceOf, messageOriginLinks, proposalOf, SLOT_FIELDS } from '../../../shared/core/core-types'
+import { acceptanceOf, messageOriginLinks, proposalOf, SLOT_FIELDS, TASK_KIND_FIELD } from '../../../shared/core/core-types'
 import { DEFAULT_TASK_SETTINGS, replyTarget } from '../../../shared/core/task-settings'
 import { applyAcceptance } from './acceptance'
 import type { EngineContext } from './context'
@@ -260,6 +260,9 @@ export function creating(ctx: EngineContext) {
         if (name === acceptanceOf(def.name)?.acceptedBy) return bad(`${name} is set by accepting`, 'BAD_VALUE')
         // 「似ている案」 and 「別のもの」 are the slot's and the person's (task version 13), never a create's.
         if (name === SLOT_FIELDS.similarTo || name === SLOT_FIELDS.apartBy) return bad(`${name} is set by the server`, 'BAD_VALUE')
+        // A task's kind (「議事録を確認する」) is the minutes service's alone (records.md "Task version 11"): a set watch tells such a
+        // やること by it (jobs.md "The set watch (schema 5)"), so neither a person nor an AI may make one that looks like it.
+        if (def.name === 'task' && name === TASK_KIND_FIELD) return bad(`${name} is set by the server`, 'BAD_VALUE')
         // Money (`money: true`) is written only through an approval request (plugins.md "Money"), never by a create.
         if (f.money) return bad(`「${f.label}」はお金の欄です。承認のお願いを通してだけ書けます`, 'MONEY_NEEDS_APPROVAL')
         const v = checkValue(f.kind, value, f.options, isMember)

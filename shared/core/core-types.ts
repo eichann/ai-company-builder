@@ -698,6 +698,8 @@ export function proposalOf(type: string) {
 
 /** `task_kind` of 「議事録を確認する」 (minutes.md "The review task"). */
 export const MINUTES_REVIEW_KIND = 'minutes_review'
+/** The task field that says its kind: written by the minutes service only, never by a create (`record-engine/create.ts`). */
+export const TASK_KIND_FIELD = 'task_kind'
 
 /** The item key of a meeting's review task (its id is derived from it, `meetingOutputId`: one per meeting). */
 export const MINUTES_REVIEW_KEY = 'minutes-review'

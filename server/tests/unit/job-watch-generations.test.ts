@@ -66,7 +66,11 @@ describe('watch generations are additive', () => {
     expect(objects(conn)).toEqual(once)
     // Of what the frozen schema had, only the two tables change; tables later areas add (another PR's migration on main
     // since the fixture was frozen) are not this migration's, but no new job object may appear.
-    const changed = once.filter(o => before.some(b => b.name === o.name) && !before.some(b => b.name === o.name && b.sql === o.sql))
+    // A column a later area adds to a table of the frozen schema is that area's too (`plugin_step_requests.done_by_job`,
+    // jobs.md "The set watch (schema 5)"): taken out before comparing, nothing else of the table may differ.
+    const LATER_COLUMNS: Record<string, string> = { plugin_step_requests: ', done_by_job TEXT' }
+    const withoutLater = (o: { name: string; sql: string | null }) => (LATER_COLUMNS[o.name] && o.sql ? o.sql.replace(LATER_COLUMNS[o.name], '') : o.sql)
+    const changed = once.filter(o => before.some(b => b.name === o.name) && !before.some(b => b.name === o.name && b.sql === withoutLater(o)))
     expect(changed.map(o => o.name).sort()).toEqual(['ai_job_event_cursors', 'ai_job_occurrences'])
     // (Member proposals' own tables, jobs.md "Member proposals", came later than the fixture: theirs, not this migration's.)
     const proposals = /^(ai_job_candidates|ai_job_proposals)$/

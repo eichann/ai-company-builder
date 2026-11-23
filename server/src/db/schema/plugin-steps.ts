@@ -5,6 +5,8 @@
  * Part of the one schema run by db/index.ts initDatabase. Behind the company
  * handle (ports/plugin-steps.ts).
  */
+import type Database from 'better-sqlite3'
+
 export const pluginStepSchema = `
     -- One pin per record × plugin step, written at the step's first run (claim or a person's start).
     CREATE TABLE IF NOT EXISTS plugin_step_pins (
@@ -72,3 +74,14 @@ export const pluginStepSchema = `
       PRIMARY KEY (company_id, record_id, plugin_id, step)
     );
 `
+
+/**
+ * Who closed a step's request without a run (4b-4 PR1, jobs.md "The set watch (schema 5)"): `done_by_job` — the scheduled job
+ * whose approval closed it because that job takes over the same Skill (「定期の仕事が受け持つため閉じました」); null for a request
+ * a finished run answered. Additive: an older build neither reads nor writes it (a request such a build opens again keeps the
+ * value, which then only says that a job once closed it).
+ */
+export function migratePluginStepRequestCloser(conn: Database.Database): void {
+  const cols = new Set((conn.prepare('PRAGMA table_info(plugin_step_requests)').all() as Array<{ name: string }>).map(c => c.name))
+  if (!cols.has('done_by_job')) conn.exec('ALTER TABLE plugin_step_requests ADD COLUMN done_by_job TEXT')
+}

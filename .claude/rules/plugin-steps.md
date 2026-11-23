@@ -160,7 +160,10 @@ the company Skill `sales-proposal-v1`.
   not know `auto` skips it: its parser takes only `ai_turn`). A run finished `done` answers the
   request made at or before the run's creation (`afterDoneRun`, from `ai-runs.ts` `finish`); a
   failed run leaves it open (retried as any run). Turning the setting off: no turn, no claim
-  (`NOT_AI_TURN`), even with a request open.
+  (`NOT_AI_TURN`), even with a request open. **A set watch takes the Skill over** (4b-4 PR1, `jobs.md` "The set watch
+  (schema 5)"): approving such a job closes every open request whose work's pin is a company Skill of one of the job's
+  Skill names (`closeRequestsForSkills`, no time condition, `done_by_job` = the job), and is refused while a step's company
+  Skill setting names one (`JOB_SET_WATCH_STEP_SKILL`); the steps' own refusals while such a job exists come with PR4.
 - **The automatic ceiling** (`automaticStepCeiling`, one copy): it reads outside text (minutes)
   with nobody watching, so it never gets a tool that reaches outside — `web_research` is dropped and
   only connector roles that only read stay (`mail.read`, not `mail.send` / bare `mail`). Applied in

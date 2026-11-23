@@ -63,6 +63,8 @@ const LATER_COLUMNS: Record<string, string[]> = {
   google_drive_puts: ['updated_file_id TEXT', 'doc_fingerprint TEXT', 'doc_revision TEXT', 'doc_revision_at TEXT', 'doc_baseline_at TEXT'],
   // records.md "Delivery order": each row's delivery number and origin mark.
   record_ledger: ['delivery_seq INTEGER', 'origin TEXT'],
+  // jobs.md "The set watch (schema 5)": the scheduled job whose approval closed a plugin step's request.
+  plugin_step_requests: ['done_by_job TEXT'],
 }
 
 const objects = (conn: Database.Database) => (conn.prepare(`SELECT type, name, tbl_name, sql FROM sqlite_master ORDER BY type, name`).all() as Array<{ type: string; name: string; tbl_name: string; sql: string | null }>)

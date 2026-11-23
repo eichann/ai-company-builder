@@ -306,9 +306,11 @@ export function createJobRuns(deps: JobRunDeps) {
         unlist(companyId, occurrenceId)
         return { claimed: false, reason: 'taken' }
       }
-      const procedure = turn.procedure.source === 'company_skill'
-        ? await deps.readCompanySkill(companyId, turn.procedure.skill, turn.procedure.fingerprint, companyRoot).catch(() => null)
-        : await deps.readShelfSkill(companyId, turn.procedure.item, turn.procedure.skill, turn.procedure.fingerprint).catch(() => null)
+      // A department Skill (a set watch, schema 5) never comes here: the turn's parser refuses it (schema 1 / 3 frames).
+      const p = turn.procedure
+      const procedure = p.source === 'company_skill'
+        ? await deps.readCompanySkill(companyId, p.skill, p.fingerprint, companyRoot).catch(() => null)
+        : p.source === 'shelf_skill' ? await deps.readShelfSkill(companyId, p.item, p.skill, p.fingerprint).catch(() => null) : null
       // Not on this PC yet (not synced, the shelf unreachable): tried again later.
       if (procedure === null) return giveUp({ class: 'temporary', code: 'PROCEDURE_NOT_HERE' })
       // The approved minutes count from the run's first claim, on the server's clock; on this PC's clock that is
