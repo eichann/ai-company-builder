@@ -3,6 +3,7 @@ import { X, FolderOpen, ArrowCounterClockwise, Clock, File, Warning } from '@pho
 import { listBackups, openBackupFolder, restoreBackupFile } from '../api'
 import type { BackupInfo } from '../../../../shared/ipc-contract'
 import { ConfirmDialog } from '../../../shared/ui/ConfirmDialog'
+import { backupReasonLabel } from '../../../../shared/backup-reasons'
 
 interface BackupHistorySlideOverProps {
   isOpen: boolean
@@ -89,29 +90,6 @@ export function BackupHistorySlideOver({ isOpen, onClose, rootPath }: BackupHist
     }
   }
 
-  const getReasonLabel = (reason: string) => {
-    switch (reason) {
-      case 'conflict':
-        return '競合'
-      case 'editor_overwrite':
-        return '上書き保存の前の内容'
-      case 'before_restore':
-        return '復元の前の内容'
-      case 'before_revert':
-        return '「元に戻す」の前の内容'
-      case 'before_recovery':
-        return '同期が途中で止まっていた間の内容'
-      case 'private_folder_excluded':
-        return 'ダウンロードしないにした非公開フォルダの、同期しないファイル'
-      case 'skill_edit':
-        return '「会社の版に戻す」の前の Skill'
-      case 'skill_outputs':
-        return 'Skill から外した成果物'
-      default:
-        return reason
-    }
-  }
-
   if (!isOpen) return null
 
   return (
@@ -167,7 +145,7 @@ export function BackupHistorySlideOver({ isOpen, onClose, rootPath }: BackupHist
                 <Clock size={48} className="mb-4 opacity-30" />
                 <p>バックアップはありません</p>
                 <p className="text-sm mt-2 text-gray-400 dark:text-zinc-500">
-                  同期時に競合が発生すると、ここに保存されます
+                  ほかの人と同じところを変えていたときなどに、あなたの版がここに保存されます
                 </p>
               </div>
             ) : (
@@ -185,7 +163,7 @@ export function BackupHistorySlideOver({ isOpen, onClose, rootPath }: BackupHist
                         <div className="flex items-center gap-2">
                           <Warning size={16} className="text-amber-500" />
                           <span className="text-sm font-medium text-gray-900 dark:text-white">
-                            {getReasonLabel(backup.reason)}
+                            {backupReasonLabel(backup.reason)}
                           </span>
                           <span className="text-xs text-gray-500 dark:text-zinc-400 bg-gray-100 dark:bg-zinc-800 px-2 py-0.5 rounded-small">
                             {backup.files.length}ファイル

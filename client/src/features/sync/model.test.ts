@@ -22,8 +22,11 @@ test('whatever sync set aside is a warning that stays until dismissed, pointing 
   }
 })
 
-test('the conflict notice says how many files and that the server version won', () => {
-  assert.equal(syncNoticeFor(result({ hadConflicts: true, conflictFiles: ['a.md', 'b.md'] })).message, '2ファイルが競合しました。サーバー版で上書きしました。')
+test('the notice for files someone else changed too says how many, that the server version stayed and where the member\'s is, without Git words', () => {
+  const message = syncNoticeFor(result({ hadConflicts: true, conflictFiles: ['a.md', 'b.md', 'c.md'], deletedConflictFiles: ['c.md'] })).message
+  assert.match(message, /^2件のファイルは、ほかの人も同じところを変えていたため、サーバーの版を残しました。1件のファイルは、あなたが変えている間にほかの人が削除していたため、削除しました。/)
+  assert.match(message, /［バックアップ履歴］/)
+  assert.doesNotMatch(message, /競合|ローカル|\.backups/)
 })
 
 test('restored folders, large files and imported repositories warn without hiding', () => {

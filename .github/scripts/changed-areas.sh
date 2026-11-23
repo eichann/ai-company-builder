@@ -40,7 +40,7 @@ COMMON=(
 SYNC=(
   client/electron/sync/ client/electron/protected-config.ts client/electron/write-guard.ts
   client/shared/auto-sync.ts client/shared/sparse-paths.ts client/shared/temp-save-file.ts client/shared/office-lock-files.ts
-  client/shared/skill-leftovers.ts client/shared/skill-shelf.ts client/shared/write-access.ts
+  client/shared/skill-leftovers.ts client/shared/skill-shelf.ts client/shared/write-access.ts client/shared/sync-notice-text.ts
   client/tests/sync/ client/tests/sync-harness/
   client/package.json ':(glob)client/tsconfig*.json'
   server/src/lib/push-check/ server/src/lib/git-exec.ts server/src/lib/git-server/

@@ -90,6 +90,8 @@ import { isOfficeLockFile, OFFICE_LOCK_EXCLUDE_PATTERNS } from '../../shared/off
 import { findOpenFiles, openFilesStoppedMessage, removeLockFiles } from './open-files'
 import { isSkillLeftover, skillExcludeLines, SKILL_LEFTOVER_PATTERNS } from '../../shared/skill-leftovers'
 import { NEEDS_MEMBER_ERROR, type ReceiveResult } from '../../shared/auto-sync'
+import { PUSH_FAILED_MESSAGE, refusedThenPushFailedMessage, SAME_FILE_UNRESOLVED_MESSAGE, sameFileChangedMessage, SERVER_UNREACHABLE_MESSAGE } from '../../shared/sync-notice-text'
+import type { BackupReason } from '../../shared/backup-reasons'
 import { receiveIntoRepo, type RepoReceiveOutcome } from './receive'
 import { stagedAutoCommitMessage } from './auto-message'
 import { clearStaleLocks, isDiskFull, lockFailureMessage, pruneRecoveryRefs, recoverInterruptedState, recoveryNote, REPOSITORY_BUSY_MESSAGE, type KeptBeforeRecovery } from './interrupted'
@@ -567,9 +569,13 @@ async function runSync(deps: SyncDeps, repoPath: string, companyId: string, comm
 
     // 1. Fetch from origin
     log.log('Git sync: Fetching from origin...')
+    // Both this fetch and the pull below failing means the server was never
+    // reached: with nothing to send, the result must not read as a finished sync.
+    let fetchFailed = false
     try {
       await git.fetch(['--progress', 'origin'])
     } catch (fetchError) {
+      fetchFailed = true
       log.warn('Git sync: Fetch failed (may be offline):', fetchError)
     }
 
@@ -805,6 +811,7 @@ async function runSync(deps: SyncDeps, repoPath: string, companyId: string, comm
     // separately because the user has to be told the file was *removed*, not
     // overwritten, or its disappearance looks like data loss.
     const deletedConflictFiles: string[] = []
+    let pullFailed = false
 
     // Windows: another process (running skill tool, editor, AV scan) holding
     // a file makes rebase fail with a transient lock error that clears
@@ -838,6 +845,7 @@ async function runSync(deps: SyncDeps, repoPath: string, companyId: string, comm
       if (!rebaseInProgress()) {
         // Not a conflict — e.g. network error or no remote tracking branch
         log.warn('Git sync: Pull failed but no rebase in progress:', pullError)
+        pullFailed = true
         // The fetch saw server changes this pull did not bring in: going on
         // would report a finished sync while the member misses them. (A push
         // would be refused anyway.) Nothing of theirs moved.
@@ -856,7 +864,7 @@ async function runSync(deps: SyncDeps, repoPath: string, companyId: string, comm
             path.join(backupPath, BACKUP_METADATA_FILE),
             JSON.stringify({
               timestamp: deps.now().toISOString(),
-              reason: 'conflict',
+              reason: 'conflict' satisfies BackupReason,
               conflictFiles: conflictFiles.map(shownPath),
               deletedConflictFiles: deletedConflictFiles.map(shownPath),
               message: commitMessage || 'Sync from AI Company Builder',
@@ -939,7 +947,7 @@ async function runSync(deps: SyncDeps, repoPath: string, companyId: string, comm
             path.join(roundPath, BACKUP_METADATA_FILE),
             JSON.stringify({
               timestamp: deps.now().toISOString(),
-              reason: 'conflict',
+              reason: 'conflict' satisfies BackupReason,
               conflictFiles: replaced.map(r => shownPath(r.file)),
               deletedConflictFiles: [],
               message: commitMessage || 'Sync from AI Company Builder',
@@ -1030,7 +1038,7 @@ async function runSync(deps: SyncDeps, repoPath: string, companyId: string, comm
               return {
                 success: false,
                 errorType: 'conflict',
-                error: `競合を自動で解消できませんでした。変更はローカルに保存されています。競合したファイルのローカル版は .backups/ に保存済みです。\n${msg}`
+                error: `${SAME_FILE_UNRESOLVED_MESSAGE}\n${msg}`
               }
             }
           }
@@ -1170,6 +1178,19 @@ async function runSync(deps: SyncDeps, repoPath: string, companyId: string, comm
       // No origin/main yet (first sync) — hasLocalChanges decides as before.
     }
     if (!hasLocalChanges && !hadConflicts && unpushedCommits === 0) {
+      // Nothing to send and the server never answered (offline, the server
+      // down): say so instead of 「同期が完了しました」. Nothing changed here
+      // that is not also reported; the next sync simply tries again.
+      if (fetchFailed && pullFailed) {
+        return {
+          success: false,
+          errorType: 'network' as const,
+          error: SERVER_UNREACHABLE_MESSAGE,
+          restoredFolders,
+          ignoredLargeFiles,
+          excludedNestedRepos: newlyExcludedNestedRepos
+        }
+      }
       // No local changes and no conflicts — just pulled remote changes
       let successMessage = restoredFolders.length > 0
         ? `部署フォルダを復元しました: ${restoredFolders.join(', ')}`
@@ -1373,7 +1394,7 @@ async function runSync(deps: SyncDeps, repoPath: string, companyId: string, comm
             if (squash.committed) await pushToServer()
             if (fs.existsSync(pendingPushFile)) fs.unlinkSync(pendingPushFile)
             const parts = [`同期完了。${refusedWhat}内容は最新の版には残っていなかったため、ファイルは戻さずにそのまま共有しました。`]
-            if (hadConflicts) parts.push(`${conflictFiles.length}ファイルが競合したため、サーバー版を採用しました（競合前のローカル版も .backups/ にあります）。`)
+            if (hadConflicts) parts.push(sameFileChangedMessage(conflictFiles.length - deletedConflictFiles.length, deletedConflictFiles.length))
             parts.push(personalNote())
             if (!squash.committed) parts.push('共有する変更は他にありませんでした。')
             return {
@@ -1421,7 +1442,7 @@ async function runSync(deps: SyncDeps, repoPath: string, companyId: string, comm
             fs.writeFileSync(pendingPushFile, deps.now().toISOString())
             return {
               success: false,
-              error: 'ローカルにコミットしましたが、プッシュに失敗しました。次回の同期で再試行します。',
+              error: PUSH_FAILED_MESSAGE,
               errorType: 'push_failed' as const,
               pushFailed: true,
             }
@@ -1494,9 +1515,7 @@ async function runSync(deps: SyncDeps, repoPath: string, companyId: string, comm
             fs.writeFileSync(pendingPushFile, deps.now().toISOString())
             return {
               success: false,
-              error: hasProtected && !hasWriteDenied
-                ? `${refusedWhat}ファイルをサーバーの状態に戻しましたが、プッシュに失敗しました。次回の同期で再試行します。`
-                : `${refusedWhat}ファイルを元に戻しましたが、プッシュに失敗しました。次回の同期で再試行します。`,
+              error: refusedThenPushFailedMessage(refusedWhat, hasProtected && !hasWriteDenied),
               errorType: 'push_failed' as const,
               pushFailed: true,
               ...reverted,
@@ -1509,7 +1528,7 @@ async function runSync(deps: SyncDeps, repoPath: string, companyId: string, comm
         if (hasProtected) parts.push(`${onlySkillFiles(revertedProtected) ? '変更できないスキルの' : '管理者だけが変更できる'}ファイル（${revertedProtected.length}件）はサーバーの状態に戻しました。`)
         if (hasWriteDenied) parts.push(`編集する権限がないフォルダのファイル（${revertedWriteDenied.length}件）は元に戻しました。`)
         if (recoveryBackupPath) parts.push('あなたが編集した版は .backups/ に保存してあります。')
-        if (hadConflicts) parts.push(`${conflictFiles.length}ファイルが競合したため、サーバー版を採用しました（競合前のローカル版も .backups/ にあります）。`)
+        if (hadConflicts) parts.push(sameFileChangedMessage(conflictFiles.length - deletedConflictFiles.length, deletedConflictFiles.length))
         parts.push(personalNote())
         parts.push(committed ? 'その他の変更は正常に反映されました。' : '共有する変更は他にありませんでした。')
         return {
@@ -1593,7 +1612,7 @@ async function runSync(deps: SyncDeps, repoPath: string, companyId: string, comm
           fs.writeFileSync(pendingPushFile, deps.now().toISOString())
           return {
             success: false,
-            error: 'ローカルにコミットしましたが、プッシュに失敗しました。次回の同期で再試行します。',
+            error: PUSH_FAILED_MESSAGE,
             errorType: 'push_failed' as const,
             pushFailed: true,
             hadConflicts,
@@ -1625,7 +1644,7 @@ async function runSync(deps: SyncDeps, repoPath: string, companyId: string, comm
           fs.writeFileSync(pendingPushFile, deps.now().toISOString())
           return {
             success: false,
-            error: 'ローカルにコミットしましたが、プッシュに失敗しました。次回の同期で再試行します。',
+            error: PUSH_FAILED_MESSAGE,
             errorType: 'push_failed' as const,
             pushFailed: true,
             hadConflicts,
@@ -1650,14 +1669,9 @@ async function runSync(deps: SyncDeps, repoPath: string, companyId: string, comm
       // A file the server deleted has to be reported as deleted, not as
       // "overwritten" — otherwise the user cannot tell why it vanished.
       const overwrittenFiles = conflictFiles.filter(f => !deletedConflictFiles.includes(f))
-      const outcomes: string[] = []
-      if (overwrittenFiles.length > 0) outcomes.push(`${overwrittenFiles.length}件はサーバー版で上書き`)
-      if (deletedConflictFiles.length > 0) {
-        outcomes.push(`${deletedConflictFiles.length}件はサーバー側で削除されていたため削除`)
-      }
       return {
         success: true,
-        message: `同期完了。${conflictFiles.length}ファイルが競合しました（${outcomes.join('、')}）。競合前のローカル版は .backups/ に保存してあります。${personalNote()}${secretNote()}その他の変更は正常に反映されました。`,
+        message: `同期完了。${sameFileChangedMessage(overwrittenFiles.length, deletedConflictFiles.length)}${personalNote()}${secretNote()}その他の変更は正常に反映されました。`,
         untrackedPersonalFiles: personalUntrack?.untracked,
         hadConflicts: true,
         conflictFiles,

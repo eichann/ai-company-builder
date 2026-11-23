@@ -3,6 +3,7 @@ import path from 'path'
 import type { SimpleGit } from 'simple-git'
 import { diskKey } from '../../../shared/core/paths'
 import { readExcludeBlock, writeExcludeBlock, type ExcludeBlock } from './local-excludes'
+import type { BackupReason } from '../../shared/backup-reasons'
 
 /** Paths per git call (the argument list stays far below any OS limit). */
 const GIT_PATHS_BATCH = 200
@@ -258,9 +259,9 @@ export function sharedNestedRepoStopMessage(repo: string): string {
   return `同期を中止しました（共有中のフォルダ「${repo}」に、このアプリとは別に管理するための情報が入っています。このPCで増えたファイルだけ共有しないこともできます。「サーバーと同期」を押すと選べます）`
 }
 
-export const NESTED_REPO_OVERWRITE_REASON = 'nested_repo_overwrite'
+export const NESTED_REPO_OVERWRITE_REASON = 'nested_repo_overwrite' satisfies BackupReason
 /** A large file kept on this computer (sync/local-ignores.ts) that a teammate shared at the same path. */
-export const LARGE_FILE_OVERWRITE_REASON = 'large_file_overwrite'
+export const LARGE_FILE_OVERWRITE_REASON = 'large_file_overwrite' satisfies BackupReason
 
 export interface NestedRepoOverwriteResult {
   /** Paths whose local version was copied to the backup (company-relative for a private folder). */

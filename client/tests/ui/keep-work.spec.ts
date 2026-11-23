@@ -59,7 +59,7 @@ test('the 作業メモ survives a failed sync and is cleared only by a successfu
 
 test('復元 asks first and says the current content is kept; a failure is shown, not an alert', async ({ page }) => {
   const state = await openPreview(page, 'keep-work', { view: 'backups' })
-  await page.getByText('競合').click()
+  await page.getByText('ほかの人も同じところを変えていたため、サーバーの版を残したときのあなたの版').click()
   await page.getByRole('button', { name: '復元' }).click()
   await expect(page.getByRole('heading', { name: 'バックアップから復元しますか？' })).toBeVisible()
   await expect(page.getByText('今の内容は .backups に保存してから置き換えます。')).toBeVisible()
@@ -74,6 +74,27 @@ test('復元 asks first and says the current content is kept; a failure is shown
   await page.getByRole('button', { name: '復元', exact: true }).click()
   await page.getByRole('button', { name: '復元する' }).click()
   await expect(page.getByRole('alert')).toHaveText('今の内容を .backups に保存できなかったため、復元しませんでした。何も変更していません。')
+  expectNoPageErrors(state)
+})
+
+test('the notice after a sync that kept the member\'s version: one line per sentence, 「フォルダを開く」 shows the folder in Finder (no alert), and a folder main will not open falls back to the backup history', async ({ page }) => {
+  const state = await openPreview(page, 'keep-work', { view: 'notice' })
+  let alerted = false
+  page.on('dialog', dialog => { alerted = true; void dialog.dismiss() })
+  const message = page.getByText(/ほかの人も同じところを変えていたため、サーバーの版を残しました/)
+  await expect(message).toContainText('［バックアップ履歴］')
+  // Two sentences joined by a line break are drawn on two lines, not run together.
+  expect(await message.evaluate(el => getComputedStyle(el).whiteSpace)).toBe('pre-line')
+  await expect(message).toContainText('部署フォルダを復元しました: 人事部')
+
+  await page.getByRole('button', { name: 'フォルダを開く' }).click()
+  await expect.poll(() => calls(page)).toEqual([['backupOpenFolder', '/Users/demo/会社/.backups/2026-10-30T09-00-00-000']])
+  await expect(page.getByRole('status', { name: 'バックアップ履歴' })).toHaveText('')
+  expect(alerted).toBe(false)
+
+  await failNext(page, 'backupOpenFolder')
+  await page.getByRole('button', { name: 'フォルダを開く' }).click()
+  await expect(page.getByRole('status', { name: 'バックアップ履歴' })).toHaveText('開いています')
   expectNoPageErrors(state)
 })
 

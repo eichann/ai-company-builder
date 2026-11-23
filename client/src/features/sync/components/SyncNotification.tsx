@@ -1,21 +1,23 @@
 import { ClockCounterClockwise, FolderOpen, X } from '@phosphor-icons/react'
 import type { SyncNotice } from '../model'
+import { openBackupFolder, type BackupOutbound } from '../api'
 
 interface Props {
   notice: SyncNotice
   onDismiss: () => void
   /** 「履歴を見る」: the backup history (the notice closes). */
   onShowBackups: () => void
-}
-
-function copyBackupPath(backupPath: string) {
-  // Use shell.openPath equivalent - for now just copy path
-  navigator.clipboard.writeText(backupPath)
-  alert(`バックアップパスをコピーしました:\n${backupPath}`)
+  /** Shows the backup folder in Finder / Explorer: the backup history's port (main opens only a backup folder). */
+  outbound?: BackupOutbound
 }
 
 /** Bottom-right notice after a sync or a preview; points at the backup when sync set something aside. */
-export function SyncNotification({ notice, onDismiss, onShowBackups }: Props) {
+export function SyncNotification({ notice, onDismiss, onShowBackups, outbound }: Props) {
+  // A folder main will not open (gone, or not a backup folder) is still reachable in the backup history.
+  const openFolder = async (backupPath: string) => {
+    const opened = await openBackupFolder(backupPath, outbound).catch(() => null)
+    if (!opened?.success) onShowBackups()
+  }
   return (
     <div className="fixed bottom-4 right-4 z-50 max-w-md animate-in slide-in-from-bottom-2">
       <div className={`
@@ -29,11 +31,11 @@ export function SyncNotification({ notice, onDismiss, onShowBackups }: Props) {
       `}>
         <div className="flex items-start gap-3">
           <div className="flex-1">
-            <p className="text-sm font-medium">{notice.message}</p>
+            <p className="text-sm font-medium whitespace-pre-line">{notice.message}</p>
             {notice.backupPath && (
               <div className="mt-2 flex items-center gap-3">
                 <button
-                  onClick={() => copyBackupPath(notice.backupPath!)}
+                  onClick={() => { void openFolder(notice.backupPath!) }}
                   className="flex items-center gap-1 text-xs hover:underline"
                 >
                   <FolderOpen size={14} />

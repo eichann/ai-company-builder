@@ -28,8 +28,9 @@ import { createHash } from 'crypto'
 import type { SimpleGit } from 'simple-git'
 import { appliedExclusions } from './sparse'
 import { pathKey } from '../../shared/sparse-paths'
+import type { BackupReason } from '../../shared/backup-reasons'
 
-export const OUTSIDE_CHECKOUT_REASON = 'outside_checkout'
+export const OUTSIDE_CHECKOUT_REASON = 'outside_checkout' satisfies BackupReason
 
 export interface OutsideCheckoutResult {
   /** Repository-relative paths moved to the backup, sorted. */

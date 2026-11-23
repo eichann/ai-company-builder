@@ -12,6 +12,7 @@ import type { IpcRegistrar } from '../../ipc/registrar'
 import type { DesktopShell, PathGuard } from '../ports'
 import { notDownloadedRefusal } from '../../file-guards'
 import { keepCurrentVersion } from './keep-current'
+import type { BackupReason } from '../../../shared/backup-reasons'
 
 /** backup:list ids of private folders' backups (kept in .git, privateBackupsDir). */
 export const PRIVATE_BACKUP_ID_PREFIX = 'private:'
@@ -83,7 +84,7 @@ export function registerBackupsIpc(ipc: IpcRegistrar, { paths, shell, writeRefus
             backups.push({
               id: `${idPrefix}${entry.name}`,
               timestamp: metadata.timestamp || entry.name,
-              reason: metadata.reason || 'unknown',
+              reason: metadata.reason || ('unknown' satisfies BackupReason),
               files: metadata.conflictFiles || files,
               path: backupPath
             })

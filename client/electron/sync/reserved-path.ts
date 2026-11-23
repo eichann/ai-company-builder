@@ -34,9 +34,10 @@ import { reservedPathMessage } from '../../../shared/types/private-folders'
 import { moveInto, pruneEmptyUp } from './private-folders'
 import { pathPrefixes } from './path-check'
 import { pathKey } from '../../shared/sparse-paths'
+import type { BackupReason } from '../../shared/backup-reasons'
 
 export const RESERVED_PATH_MARKER = '[RESERVED_PATH]'
-export const RESERVED_PATH_REASON = 'reserved_path'
+export const RESERVED_PATH_REASON = 'reserved_path' satisfies BackupReason
 
 export function isReservedPathRejection(errorMessage: string): boolean {
   return errorMessage.includes(RESERVED_PATH_MARKER)

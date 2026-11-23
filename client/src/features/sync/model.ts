@@ -1,6 +1,7 @@
 // What the member is told after 「サーバーと同期」, from what sync reported.
 import type { GitResult } from '../../../shared/ipc-contract'
 import type { ReceiveResult } from '../../../shared/auto-sync'
+import { sameFileChangedMessage } from '../../../shared/sync-notice-text'
 
 export interface SyncNotice {
   type: 'success' | 'warning' | 'error'
@@ -89,7 +90,10 @@ function noticeFor(result: GitResult): SyncNotice {
   if (result.hadConflicts) {
     return {
       type: 'warning',
-      message: result.message || `${result.conflictFiles?.length || 0}ファイルが競合しました。サーバー版で上書きしました。`,
+      message: result.message || sameFileChangedMessage(
+        (result.conflictFiles?.length ?? 0) - (result.deletedConflictFiles?.length ?? 0),
+        result.deletedConflictFiles?.length ?? 0,
+      ),
       backupPath: result.backupPath
     }
   }

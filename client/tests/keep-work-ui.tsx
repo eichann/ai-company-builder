@@ -5,6 +5,7 @@
 //   ?view=backups  the backup history: 復元
 //   ?view=skills   新しいスキル / コピー (real useSkillsTab + the two dialogs)
 //   ?view=diff     a change's before / after (DiffModal, as the sync preview and 「前の版」 open it)
+//   ?view=notice   the notice after a sync that kept the member's version (SyncNotification)
 //   ?theme=dark    dark mode
 //
 // window.__acbCalls  every write asked for, as [method, ...args]
@@ -17,6 +18,8 @@ import { useSync } from '../src/features/sync/hooks/useSync'
 import { useSkillsTab } from '../src/features/skills/hooks/useSkillsTab'
 import { SyncPreviewDialog } from '../src/features/sync/components/SyncPreviewDialog'
 import { BackupHistorySlideOver } from '../src/features/sync/components/BackupHistorySlideOver'
+import { SyncNotification } from '../src/features/sync/components/SyncNotification'
+import { syncNoticeFor } from '../src/features/sync/model'
 import { NewSkillWizard } from '../src/features/skills/components/NewSkillWizard'
 import { CopySkillModal } from '../src/features/skills/components/CopySkillModal'
 import { DiffModal } from '../src/shared/ui/DiffViewer'
@@ -59,6 +62,10 @@ installElectronAPI({
     success: true,
     backups: [{ id: '2026-10-30T09-00-00-000', timestamp: '2026-10-30T09:00:00.000Z', reason: 'conflict', files: ['営業部/提案書.md'], path: `${ROOT}/.backups/2026-10-30T09-00-00-000` }],
   }),
+  backupOpenFolder: async p => {
+    calls.push(['backupOpenFolder', p])
+    return failing('backupOpenFolder') ? { success: false, error: 'Not a backup folder' } : { success: true }
+  },
   backupRestore: async (_root, id, file) => {
     calls.push(['backupRestore', id, file])
     if (failing('backupRestore')) return { success: false, error: '今の内容を .backups に保存できなかったため、復元しませんでした。何も変更していません。' }
@@ -111,6 +118,22 @@ function PreviewView() {
   )
 }
 
+// A sync that kept the server's version of one file, with a second line (a restored department).
+const KEPT = syncNoticeFor({
+  success: true, hadConflicts: true, conflictFiles: ['営業部/提案書.md'], restoredFolders: ['人事部'],
+  backupPath: `${ROOT}/.backups/2026-10-30T09-00-00-000`,
+})
+
+function NoticeView() {
+  const [history, setHistory] = useState(false)
+  return (
+    <div className="p-6">
+      <output aria-label="バックアップ履歴" className="block text-xs">{history ? '開いています' : ''}</output>
+      <SyncNotification notice={KEPT} onDismiss={() => {}} onShowBackups={() => setHistory(true)} />
+    </div>
+  )
+}
+
 function SkillsView() {
   const [selected, setSelected] = useState('')
   const tab = useSkillsTab({ rootPath: ROOT, departments: DEPARTMENTS, departmentFolder: '営業部', departmentId: 'd-sales-営業部', skills: [], refreshSkills: () => {} })
@@ -134,6 +157,7 @@ function Preview() {
       {view === 'preview' && <PreviewView />}
       {view === 'backups' && <BackupHistorySlideOver isOpen onClose={() => {}} rootPath={ROOT} />}
       {view === 'skills' && <SkillsView />}
+      {view === 'notice' && <NoticeView />}
       {view === 'diff' && <DiffModal isOpen onClose={() => {}} title="営業部/提案書.md" diffProps={{ mode: 'staged', rootPath: ROOT, filePath: `${ROOT}/営業部/提案書.md`, fileStatus: 'modified' }} />}
     </main>
   )

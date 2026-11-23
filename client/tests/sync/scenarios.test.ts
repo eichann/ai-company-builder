@@ -70,13 +70,31 @@ describe('git:sync multi-member scenarios', { concurrency: CONCURRENCY }, () => 
     const aOut = ok(await a.sync(), 'a')
     assert.equal(aOut.result.hadConflicts, true)
     assert.deepEqual(aOut.result.deletedConflictFiles, ['営業部/提案書.md'])
-    assert.match(aOut.result.message ?? '', /1件はサーバー側で削除されていたため削除/)
+    assert.match(aOut.result.message ?? '', /1件のファイルは、あなたが変えている間にほかの人が削除していたため、削除しました。/)
     const backup = conflictBackup(a)
     assert.deepEqual(backup.files, ['営業部/提案書.md'])
     assert.deepEqual(backup.metadata.deletedConflictFiles, ['営業部/提案書.md'])
     assert.equal(fs.readFileSync(path.join(a.dir, '.backups', backup.folder, '営業部/提案書.md'), 'utf-8'), 'v0\nmember edit\n')
     assert.equal(a.exists('営業部/提案書.md'), false)
     assert.equal(world.serverFile('営業部/見積.md')?.toString(), 'q1\n')
+    await settleAndCheck(world)
+  })
+
+  // Guard: a sync that never reached the server does not say 「同期が完了しました」.
+  test('offline with nothing to send: says the server could not be reached, not that sync finished; online again it syncs', async t => {
+    const world = World.create(t, { members: [{ name: 'a' }, { name: 'b' }], seed: { 'x.md': '0\n' } })
+    const [a, b] = world.members
+    b.write('x.md', 'from b\n')
+    ok(await b.sync(), 'b')
+    a.offline()
+    const out = await a.sync()
+    assert.equal(out.result.success, false)
+    assert.equal(out.result.errorType, 'network')
+    assert.match(String(out.result.error), /^サーバーにつながらなかったため、同期できませんでした。/)
+    assert.equal(a.readText('x.md'), '0\n', 'nothing changed here')
+    a.online()
+    ok(await a.sync(), 'a')
+    assert.equal(a.readText('x.md'), 'from b\n')
     await settleAndCheck(world)
   })
 
@@ -568,6 +586,8 @@ describe('git:sync multi-member scenarios', { concurrency: CONCURRENCY }, () => 
     a.offline().write('offline.md', 'written offline\n')
     const failed = await a.sync()
     assert.equal(failed.result.errorType, 'push_failed')
+    // The member's words: kept on this computer, not delivered, press the button again (no Git words).
+    assert.match(String(failed.result.error), /^このPCには保存しましたが、サーバーに届けられませんでした。.*もう一度［サーバーと同期］を押してください。$/)
     assert.equal(a.hasPendingPush(), true)
     a.online()
     const out = ok(await a.sync(), 'a')

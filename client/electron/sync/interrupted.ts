@@ -19,6 +19,7 @@ import { pathKey } from '../../shared/sparse-paths'
 import { gitRunningIn } from './live-git'
 import { backupCopyName, type BackupCopies } from './backup-names'
 import type { SyncLogger } from './types'
+import type { BackupReason } from '../../shared/backup-reasons'
 
 /**
  * A lock older than this with no git on the repository is a crash's leftover.
@@ -368,7 +369,7 @@ async function keepChangedFiles(options: RecoveryOptions, plan: PlannedCopy[]): 
     if (files.length === 0) return null
     await fs.promises.writeFile(path.join(backupPath, '_metadata.json'), JSON.stringify({
       timestamp: now.toISOString(),
-      reason: 'before_recovery',
+      reason: 'before_recovery' satisfies BackupReason,
       files,
       ...(Object.keys(copies).length > 0 ? { copies } : {}),
       note: 'on disk when sync cleaned up an operation that had stopped half-way',
