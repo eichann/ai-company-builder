@@ -178,7 +178,7 @@ function fakeShell() {
     watch: () => {},
     async create(): Promise<DocViewHandle> {
       const id = next++
-      return { id, show: url => { shown.set(id, url) }, destroy: () => {}, place: () => {}, zoom: () => {}, reload: () => {} }
+      return { id, show: url => { shown.set(id, url) }, destroy: () => {}, closeKeepingPlace: async () => null, place: () => {}, zoom: () => {}, reload: () => {} }
     },
   }
   return { port, shown }

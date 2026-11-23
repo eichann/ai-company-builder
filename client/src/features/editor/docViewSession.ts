@@ -19,13 +19,18 @@ import { blockedBandShown, changeShowsIn, nextZoom, placementOf, sameBounds, typ
  */
 export interface DocViewSource {
   open(): Promise<{ ok: true; viewId: number } | { ok: false; message: string }>
+  /**
+   * Asked as the area goes: the member is leaving the document for its 中身, so main keeps where it
+   * was scrolled and opens it there next time (main's own: the position never reaches this page).
+   */
+  keepsPlace?(): boolean
   /** Whether a file change shows in the document (reload it); absent: nothing on disk the member edits. */
   showsChange?(path: string): boolean
 }
 
 /** A document of the company folder: opened by its path; its own folder's changes reload it. */
-export function fileDocument(filePath: string, views: Pick<DocViewControls, 'openDocView'>): DocViewSource {
-  return { open: () => views.openDocView(filePath), showsChange: path => changeShowsIn(filePath, path) }
+export function fileDocument(filePath: string, views: Pick<DocViewControls, 'openDocView'>, keepsPlace?: () => boolean): DocViewSource {
+  return { open: () => views.openDocView(filePath), showsChange: path => changeShowsIn(filePath, path), keepsPlace }
 }
 
 export type DocViewStatus =
@@ -147,13 +152,14 @@ export class DocViewSession {
     if (this.mutationTimer) clearTimeout(this.mutationTimer)
     this.mutationTimer = null
     this.mutationPending = false
-    this.closeView()
+    this.closeView(this.source.keepsPlace?.() === true)
     if (this.snapshot.fullScreen) this.setFullScreen(false)
     this.area = null
   }
 
-  private closeView() {
-    if (this.viewId !== null) void this.views.closeDocView(this.viewId).catch(() => {})
+  /** `keepPlace`: left for 中身, main keeps where the document was scrolled for its next open. */
+  private closeView(keepPlace = false) {
+    if (this.viewId !== null) void (keepPlace ? this.views.closeDocView(this.viewId, true) : this.views.closeDocView(this.viewId)).catch(() => {})
     this.viewId = null
     this.placed = null
   }

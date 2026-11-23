@@ -511,8 +511,11 @@ export interface IpcInvokeChannels {
    * with a grant for the document's folder; the renderer gets only the view's id. Main window only.
    */
   'docView:open': { args: [filePath: string]; result: DocViewOpenResult }
-  /** The view closes; its grant is revoked. */
-  'docView:close': { args: [viewId: number]; result: void }
+  /**
+   * The view closes; its grant is revoked. `keepPlace` (the member left it for 中身): main keeps where
+   * its document was scrolled and puts it back on its next open in this window (never sent here).
+   */
+  'docView:close': { args: [viewId: number, keepPlace?: boolean]; result: void }
   /** Place the view over the tab's content area (CSS px of the app page) and show it; null hides and mutes it. */
   'docView:setBounds': { args: [viewId: number, bounds: DocViewBounds | null]; result: void }
   /** The document's own zoom factor (kept within `DOC_ZOOM_STEPS`). */

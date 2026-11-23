@@ -282,6 +282,10 @@ test('a document view goes only to an .html page of its own grant, never elsewhe
 function fakeShell(options: { fail?: boolean; hold?: boolean } = {}) {
   let next = 100
   const shown = new Map<number, string>()
+  /** Where each view was told to put its document back (a place kept when it was left for 中身). */
+  const shownAt = new Map<number, unknown>()
+  /** What the next view closed for 中身 answers as its scroll position. */
+  const scroll: { at: readonly [number, number] | null } = { at: null }
   const destroyed: number[] = []
   const watched: number[] = []
   const hooksOf = new Map<number, DocViewHooks>()
@@ -301,8 +305,9 @@ function fakeShell(options: { fail?: boolean; hold?: boolean } = {}) {
       hooksOf.set(id, hooks)
       return {
         id,
-        show: url => { shown.set(id, url) },
+        show: (url, at) => { shown.set(id, url); shownAt.set(id, at ?? null) },
         destroy: () => { destroyed.push(id); hooksOf.get(id)?.onGone(id) },
+        closeKeepingPlace: async () => { calls.push([id, 'closeKeepingPlace']); destroyed.push(id); hooksOf.get(id)?.onGone(id); return scroll.at },
         place: bounds => { calls.push([id, 'place', bounds]) },
         zoom: factor => { calls.push([id, 'zoom', factor]) },
         reload: () => { calls.push([id, 'reload']) },
@@ -311,7 +316,7 @@ function fakeShell(options: { fail?: boolean; hold?: boolean } = {}) {
   }
   const release = async () => { for (const resolve of waiting.splice(0)) resolve(); await new Promise(resolve => setImmediate(resolve)) }
   return {
-    port, shown, destroyed, watched, made, release, calls,
+    port, shown, shownAt, scroll, destroyed, watched, made, release, calls,
     crash: (id: number) => hooksOf.get(id)?.onGone(id),
     link: (id: number, url: string) => hooksOf.get(id)?.onLink(id, url),
     shortcut: (id: number, key: KeyInput) => hooksOf.get(id)?.onShortcut(id, key),
@@ -509,6 +514,46 @@ test('a view is placed, zoomed and reloaded only by its own window; a placement 
   views.zoom(id, MAIN, 'big')
   views.reload(id, MAIN)
   assert.deepEqual(shell.calls, [[id, 'zoom', 3], [id, 'zoom', 0.5], [id, 'reload']], 'zoom kept within the steps; a non-number ignored')
+})
+
+test('left for 中身, a document opens again where it was scrolled: that document, in that window, once; its grant goes at once', async () => {
+  const w = world()
+  const shell = fakeShell()
+  const views = createDocViews({ frames: w.frames, shell: shell.port })
+  const report = await reportDoc(w)
+  fs.writeFileSync(path.join(w.root, '営業/other.html'), '<!doctype html>')
+  const checked = await w.frames.check(path.join(w.root, '営業/other.html'))
+  assert.ok(checked.ok)
+  const other = checked.doc
+  const openIn = async (doc: typeof report, windowId = MAIN) => (await views.open(doc, views.begin(windowId)))!
+  // Closed for another reason (another tab, ［止める］, the tab closed): nothing kept, from the top.
+  const a = await openIn(report)
+  views.close(a, MAIN)
+  const b = await openIn(report)
+  assert.equal(shell.shownAt.get(b), null)
+  // Left for 中身: read, closed, its grant revoked at once; the next open of that document is put back there.
+  shell.scroll.at = [0, 640]
+  const url = shell.shown.get(b)!
+  views.close(b, MAIN + 1, true)
+  assert.deepEqual(shell.calls, [], 'only its own window may')
+  views.close(b, MAIN, true)
+  assert.deepEqual(shell.calls, [[b, 'closeKeepingPlace']])
+  await refusedAs(w, url)
+  assert.equal(await openIn(other).then(id => shell.shownAt.get(id)), null, 'another document starts at its top')
+  assert.equal(await openIn(report, MAIN + 1).then(id => shell.shownAt.get(id)), null, 'another window starts at its top')
+  const c = await openIn(report)
+  assert.deepEqual(shell.shownAt.get(c), [0, 640])
+  assert.equal(await openIn(report).then(id => shell.shownAt.get(id)), null, 'taken once')
+  // `keepPlace` is only `true`: anything else from the window closes plainly.
+  shell.calls.length = 0
+  views.close(c, MAIN, 'yes')
+  assert.deepEqual(shell.calls, [])
+  assert.ok(shell.destroyed.includes(c))
+  // The window's page reloading forgets what it kept.
+  const d = await openIn(report)
+  views.close(d, MAIN, true)
+  shell.resetWindow(MAIN)
+  assert.equal(await openIn(report).then(id => shell.shownAt.get(id)), null)
 })
 
 test('where a placement lands: the app page\'s zoom applied, cut to the window, nothing when it is off the window', () => {

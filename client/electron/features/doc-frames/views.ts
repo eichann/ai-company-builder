@@ -23,10 +23,18 @@ import type { DocFrames, OpenableDocument } from './protocol'
 export interface DocViewHandle {
   /** The view's own id (its page's webContents id): the grant's owner. */
   readonly id: number
-  /** Load the document's address (main keeps it; the renderer never sees it). */
-  show(url: string): void
+  /**
+   * Load the document's address (main keeps it; the renderer never sees it), scrolled to `at` once
+   * loaded when given (where the member was reading when they left for 中身).
+   */
+  show(url: string, at?: DocScroll | null): void
   /** Close the view and its page. `onGone` follows. */
   destroy(): void
+  /**
+   * Hide the view at once, read where its document is scrolled (a time limit: a page that does not
+   * answer gives nothing), then close it as `destroy` does. Main keeps the answer; it never leaves main.
+   */
+  closeKeepingPlace(): Promise<DocScroll | null>
   /**
    * Place the view over the tab's content area and show it (unmuted), or
    * hide it (`null`: 0×0, hidden, muted; the keyboard goes back to the app's
@@ -70,6 +78,9 @@ export interface DocViewPort {
   onWindowReset(listener: (windowId: number) => void): void
 }
 
+/** Where a document was scrolled (x, y): read and put back by main only. */
+export type DocScroll = readonly [number, number]
+
 /** The window's page as it was when an open began. */
 export interface DocViewTicket {
   readonly windowId: number
@@ -110,6 +121,9 @@ interface BlockedTally {
   cancel: (() => void) | null
 }
 
+/** The same document for a kept place: its folder and name (main's own; never sent). */
+const placeKey = (doc: OpenableDocument) => `${doc.root}\0${doc.folder}\0${doc.name}`
+
 export function createDocViews(deps: DocViewsDeps) {
   const now = deps.now ?? Date.now
   const later = deps.later ?? ((fn, ms) => { const timer = setTimeout(fn, ms); return () => clearTimeout(timer) })
@@ -118,7 +132,13 @@ export function createDocViews(deps: DocViewsDeps) {
   /** View id → what its page wanted from the internet. */
   const blocked = new Map<number, BlockedTally>()
   /** View id → its window and handle, in the order registered. */
-  const views = new Map<number, { windowId: number; handle: DocViewHandle }>()
+  const views = new Map<number, { windowId: number; handle: DocViewHandle; place: string }>()
+  /**
+   * Window → the document (`placeKey`) → where it was scrolled when the member left it for 中身,
+   * until it is opened again in that window (once). The newest `MAX_VIEWS_PER_WINDOW` per window;
+   * gone with the window's page. Never sent anywhere: only put back into the same document.
+   */
+  const places = new Map<number, Map<string, Promise<DocScroll | null>>>()
   /** Window → how many times its page reset (reloaded, crashed, closed). */
   const generations = new Map<number, number>()
   const generationOf = (windowId: number) => generations.get(windowId) ?? 0
@@ -205,6 +225,7 @@ export function createDocViews(deps: DocViewsDeps) {
   // and an open still under way for the page that is gone registers nothing.
   deps.shell.onWindowReset(windowId => {
     generations.set(windowId, generationOf(windowId) + 1)
+    places.delete(windowId)
     for (const [viewId, v] of [...views]) if (v.windowId === windowId) close(viewId)
   })
   const stale = (ticket: DocViewTicket) => generationOf(ticket.windowId) !== ticket.generation
@@ -222,25 +243,44 @@ export function createDocViews(deps: DocViewsDeps) {
      */
     async open(doc: OpenableDocument, ticket: DocViewTicket, fragment = ''): Promise<number | null> {
       if (stale(ticket)) return null
-      const handle = await deps.shell.create(ticket.windowId, hooks)
+      // Left for 中身 earlier in this window: opened where the member was reading (taken once).
+      const place = placeKey(doc)
+      const kept = places.get(ticket.windowId)?.get(place) ?? null
+      places.get(ticket.windowId)?.delete(place)
+      const [handle, at] = await Promise.all([deps.shell.create(ticket.windowId, hooks), kept])
       if (!handle) return null
       if (stale(ticket)) {
         handle.destroy()
         return null
       }
-      views.set(handle.id, { windowId: ticket.windowId, handle })
+      views.set(handle.id, { windowId: ticket.windowId, handle, place })
       const ofWindow = [...views].filter(([, v]) => v.windowId === ticket.windowId)
       for (const [viewId] of ofWindow.slice(0, Math.max(0, ofWindow.length - MAX_VIEWS_PER_WINDOW))) {
         close(viewId)
         deps.notify?.(ticket.windowId, { viewId, kind: 'gone' })
       }
-      handle.show(deps.frames.grant(doc, handle.id) + (fragment.startsWith('#') ? fragment : ''))
+      handle.show(deps.frames.grant(doc, handle.id) + (fragment.startsWith('#') ? fragment : ''), at)
       return handle.id
     },
 
-    /** Close a view; only its own window may (anything else is ignored). */
-    close(viewId: unknown, windowId: number): void {
-      if (own(viewId, windowId)) close(viewId as number)
+    /**
+     * Close a view; only its own window may (anything else is ignored). `keepPlace` (the member left
+     * it for 中身): where its document was scrolled is kept for its next open in this window. Its
+     * grant goes at once either way.
+     */
+    close(viewId: unknown, windowId: number, keepPlace?: unknown): void {
+      const view = own(viewId, windowId)
+      if (!view) return
+      if (keepPlace !== true) {
+        close(viewId as number)
+        return
+      }
+      forget(viewId as number)
+      let ofWindow = places.get(windowId)
+      if (!ofWindow) places.set(windowId, ofWindow = new Map())
+      ofWindow.delete(view.place)
+      ofWindow.set(view.place, view.handle.closeKeepingPlace())
+      for (const old of [...ofWindow.keys()].slice(0, Math.max(0, ofWindow.size - MAX_VIEWS_PER_WINDOW))) ofWindow.delete(old)
     },
 
     /**

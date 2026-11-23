@@ -1,7 +1,7 @@
 // The 見る side of an .html tab (doc-frame.md "The viewer (A2)"): the toolbar and the area the
 // document's own view covers. The document is never drawn by this page; `DocViewSession` owns it.
 import { useState, useSyncExternalStore } from 'react'
-import { ArrowsIn, ArrowsOut, Code, Eye, LockSimple, Minus, Plus, Stop, ArrowClockwise } from '@phosphor-icons/react'
+import { ArrowsIn, ArrowsOut, Eye, LockSimple, Minus, Plus, Stop, ArrowClockwise } from '@phosphor-icons/react'
 import { ConfirmDialog } from '../../../shared/ui/ConfirmDialog'
 import { docViewPorts } from '../api'
 import { DocViewSession, fileDocument } from '../docViewSession'
@@ -9,6 +9,7 @@ import { rebuildRequestOf } from '../htmlViewer'
 import { runCommand, useCommandAvailable } from '../../../shared/commands/commands'
 import { useAppStore } from '../../../stores/appStore'
 import { BlockedPartsBand } from './BlockedPartsBand'
+import { HTML_TAB_BAR, HtmlViewToggle } from './HtmlViewToggle'
 
 const TOOL = 'inline-flex items-center gap-1 h-control-sm px-control-sm-x rounded-control text-small text-text-muted hover:text-text hover:bg-surface-sunken disabled:opacity-disabled disabled:pointer-events-none focus-visible:outline-none focus-visible:ring-focus focus-visible:ring-focus-ring'
 
@@ -25,16 +26,21 @@ interface HtmlDocumentPaneProps {
   filePath: string
   /** ［中身］: the file's source in the code editor. */
   onShowSource: () => void
+  /**
+   * Whether the view, as it closes, is being left for 中身 (asked then): main keeps where the document
+   * was scrolled and its next open starts there. Another tab, the tab closed, ［止める］: from the top.
+   */
+  leavingForSource?: () => boolean
   /** The tab's zoom, kept by the panel while this pane comes and goes. */
   zoom?: number
   onZoom?: (zoom: number) => void
 }
 
-export function HtmlDocumentPane({ filePath, onShowSource, zoom: tabZoom, onZoom }: HtmlDocumentPaneProps) {
+export function HtmlDocumentPane({ filePath, onShowSource, leavingForSource, zoom: tabZoom, onZoom }: HtmlDocumentPaneProps) {
   // One session per file (the pane is keyed by file): it owns the document's view.
   const [session] = useState(() => {
     const ports = docViewPorts()
-    return new DocViewSession(fileDocument(filePath, ports.views), ports.views, ports.links, tabZoom, onZoom)
+    return new DocViewSession(fileDocument(filePath, ports.views, leavingForSource), ports.views, ports.links, tabZoom, onZoom)
   })
   const { status, zoom, fullScreen, refreshed, link, blocked, bandShown } = useSyncExternalStore(session.subscribe, session.getSnapshot)
   const canAskAi = useCommandAvailable('chat.insertText')
@@ -46,15 +52,8 @@ export function HtmlDocumentPane({ filePath, onShowSource, zoom: tabZoom, onZoom
       data-testid="html-viewer"
       className={fullScreen ? 'fixed inset-0 z-overlay flex flex-col bg-bg' : 'h-full flex flex-col min-w-0'}
     >
-      <div role="toolbar" aria-label="資料の表示" className="flex-shrink-0 flex flex-wrap items-center gap-1 px-2 py-1 border-b border-[color:var(--color-border)] bg-surface-raised">
-        <div role="group" aria-label="表示の切り替え" className="flex rounded-control border border-border-control overflow-hidden">
-          <button type="button" aria-pressed="true" className="inline-flex items-center gap-1 h-control-sm px-control-sm-x text-small bg-selected-bg text-selected-text">
-            <Eye size={14} aria-hidden />見る
-          </button>
-          <button type="button" aria-pressed="false" onClick={onShowSource} className="inline-flex items-center gap-1 h-control-sm px-control-sm-x text-small text-text-muted hover:text-text hover:bg-surface-sunken">
-            <Code size={14} aria-hidden />中身
-          </button>
-        </div>
+      <div role="toolbar" aria-label="資料の表示" className={HTML_TAB_BAR}>
+        <HtmlViewToggle showing="document" onShowSource={onShowSource} />
         <span aria-hidden className="mx-1 h-4 border-l border-[color:var(--color-border)]" />
         <button type="button" className={TOOL} title="縮小" aria-label="縮小" disabled={!running} onClick={() => session.zoomBy(-1)}><Minus size={14} aria-hidden /></button>
         <span aria-live="polite" className="text-small text-text-muted tabular-nums">{Math.round(zoom * 100)}%</span>

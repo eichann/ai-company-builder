@@ -44,6 +44,7 @@ interface Result {
   hiddenAgain: { focusedBefore: boolean; visible: boolean; muted: boolean; visibility: string; keyboard: { app: boolean; doc: boolean } }
   reloaded: { zoom: number; scrollY: number; keyboard: { app: boolean; doc: boolean } }
   lateAutofocus: { shown: { scrollY: number; focused: string }; hiddenTwice: number }
+  backFromSource: { hiddenAtOnce: boolean; oldGone: boolean; oldServed: number; scrollY: number; plainCloseThenOpen: number }
   backToApp: { clickedIn: { app: boolean; doc: boolean }; after: { app: boolean; doc: boolean } }
   links: { events: unknown[]; stayed: boolean }
   crashEvents: unknown[]
@@ -203,6 +204,14 @@ test('reloading after the file changed keeps the document\'s zoom and scroll pos
   assert.equal(result.lateAutofocus.shown.focused, 'late', 'control: the page focused its autofocus field after the load')
   assert.equal(result.lateAutofocus.shown.scrollY, 900, 'put back after the page\'s first frame, not scrolled back to its autofocus field')
   assert.equal(result.lateAutofocus.hiddenTwice, 900, 'reloaded twice while hidden (no frame drawn): the position not yet put back is kept')
+})
+
+test('left for 中身 and back to 見る, the document opens where the member was reading; another close keeps nothing', { skip }, () => {
+  const b = result.backFromSource
+  assert.equal(b.hiddenAtOnce, true, 'out of sight at once: the tab shows 中身')
+  assert.deepEqual({ gone: b.oldGone, served: b.oldServed }, { gone: true, served: 404 }, 'the view and its grant go')
+  assert.equal(b.scrollY, 1200)
+  assert.equal(b.plainCloseThenOpen, 0, 'control: a plain close (another tab) starts from the top')
 })
 
 test('a link to the web is handed to the window only right after the member pressed something; the page never leaves', { skip }, () => {

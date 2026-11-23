@@ -108,7 +108,7 @@ Object.assign(window, {
       if (filePath === TOP_DOC) return { ok: false, reason: 'top_level', message: '会社フォルダのいちばん上にある HTML は表示できません。部署などのフォルダに入れてください。' }
       return { ok: true, viewId: nextViewId++ }
     },
-    closeDocView: async (viewId: number) => { docCalls.push(['close', viewId]) },
+    closeDocView: async (viewId: number, keepPlace?: boolean) => { docCalls.push(keepPlace === undefined ? ['close', viewId] : ['close', viewId, keepPlace]) },
     setDocViewBounds: async (viewId: number, bounds: unknown) => { docCalls.push(['bounds', viewId, bounds]) },
     setDocViewZoom: async (viewId: number, factor: number) => { docCalls.push(['zoom', viewId, factor]) },
     reloadDocView: async (viewId: number) => { docCalls.push(['reload', viewId]) },

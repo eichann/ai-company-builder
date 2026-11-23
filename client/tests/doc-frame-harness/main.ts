@@ -173,7 +173,7 @@ async function run() {
     // Remember each view's address (the renderer never gets it) to probe it after the view is gone.
     shell: { onWindowReset: listener => shell.onWindowReset(listener), watch: windowId => shell.watch(windowId), create: async (windowId, hooks) => {
       const handle = await shell.create(windowId, hooks)
-      return handle && { ...handle, show: url => { shown.set(handle.id, url); handle.show(url) } }
+      return handle && { ...handle, show: (url, at) => { shown.set(handle.id, url); handle.show(url, at) } }
     } },
   })
 
@@ -421,6 +421,34 @@ async function run() {
   await framesDrawn(late.contents)
   result.lateAutofocus = { shown: lateShown, hiddenTwice: await lateJs('window.scrollY') }
   views.close(late.viewId, win.webContents.id)
+
+  // 中身 and back to 見る: the view left for 中身 is hidden at once and closed; the next open of that
+  // document starts where the member was (after its late autofocus too). Another close keeps nothing.
+  const firstFinish = (contents: WebContents) => new Promise(resolve => contents.once('did-finish-load', resolve))
+  const reading = await open(path.join(folder, 'late.html'))
+  views.place(reading.viewId, win.webContents.id, { x: 0, y: 0, width: 800, height: 600 })
+  await framesDrawn(reading.contents)
+  await reading.contents.executeJavaScript('window.scrollTo(0, 1200)', true)
+  views.close(reading.viewId, win.webContents.id, true)
+  const hiddenAtOnce = !viewOf(reading.viewId)?.getVisible()
+  const back = await open(path.join(folder, 'late.html'))
+  if (back.contents.isLoading()) await firstFinish(back.contents)
+  views.place(back.viewId, win.webContents.id, { x: 0, y: 0, width: 800, height: 600 })
+  await framesDrawn(back.contents)
+  await framesDrawn(back.contents)
+  const backY = await back.contents.executeJavaScript('window.scrollY', true)
+  views.close(back.viewId, win.webContents.id)
+  const again = await open(path.join(folder, 'late.html'))
+  views.place(again.viewId, win.webContents.id, { x: 0, y: 0, width: 800, height: 600 })
+  await framesDrawn(again.contents)
+  result.backFromSource = {
+    hiddenAtOnce,
+    oldGone: !allWebContents.fromId(reading.viewId) || allWebContents.fromId(reading.viewId)!.isDestroyed(),
+    oldServed: (await docFrames.serve({ url: reading.url, method: 'GET' })).status,
+    scrollY: backY,
+    plainCloseThenOpen: await again.contents.executeJavaScript('window.scrollY', true),
+  }
+  views.close(again.viewId, win.webContents.id)
 
   // The app's page reloads: every view of the window closes and its grant goes.
   win.webContents.reload()
