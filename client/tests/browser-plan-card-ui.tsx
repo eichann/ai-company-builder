@@ -5,6 +5,8 @@
 // `?ready=ok` (default) | `no-window` | `not-logged-in` | `off`; `?audience=<n>` (default: unread);
 // `?shared=1` the shared-reminder note; `?hint=1` this PC stopped before sending; `?theme=dark`.
 // What ［任せる］ / ［やめる］ / a confirm sent is shown in `#sent` for the spec.
+// `?manual=1`: the user manual's story (client/tests/manual/scenes.ts, chapter 32): a made-up 配信ツール at
+// haishin.example.net and 検証A社's seminar reminder (no real site or service is named). Fictional data only.
 import { useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import type { UIMessage } from 'ai'
@@ -24,8 +26,21 @@ const now = Date.now()
 const iso = (ms: number) => new Date(ms).toISOString()
 const fact = (value: unknown): BrowserFact => ({ status: 'known', value, readAt: iso(now - 60_000), source: '/line/episode/show/7001001' })
 const audience = params.get('audience')
+const MANUAL = params.get('manual') === '1'
 
-const facts: Record<string, BrowserFact> = {
+const facts: Record<string, BrowserFact> = MANUAL ? {
+  account: fact({ id: '検証A社 公式' }),
+  step_parent: fact({ reminder: '8001001' }),
+  names: fact({ reminder: '12月 説明会のリマインダ', step: '前日' }),
+  state: fact({ templates: ['8003001'] }),
+  templates: fact({
+    8003001: { name: '前日のご案内', kind: 'text', body: '明日は説明会です。\n開始の10分前までにお入りください。' },
+    8003002: { name: '持ち物のご案内', kind: 'text', body: '当日は筆記用具をお持ちください。' },
+  }),
+  schedule: fact({ timing: '1日前 19:00' }),
+  shared_with: fact({ count: 2, items: ['12/3回', '12/10回'] }),
+  audience: audience === null ? { status: 'unknown', readAt: iso(now - 60_000), source: '/line/episode/show/7001001' } : fact({ count: Number(audience) }),
+} : {
   account: fact({ id: '5550001' }),
   step_parent: fact({ reminder: '7001001' }),
   names: fact({ reminder: '見本セミナーのリマインダ', step: '前日' }),
@@ -45,11 +60,11 @@ const exec = (state: BrowserExecutionView['state'], confirmableAt: number | null
 })
 
 const base: BrowserPlanView = {
-  id: PLAN, state: 'draft', closeReason: null, connector: { id: 'lstep', version: '0.6.0', label: 'Lステップ' }, operation: 'reminder_step_add_template',
+  id: PLAN, state: 'draft', closeReason: null, connector: MANUAL ? { id: 'haishin', version: '0.1.0', label: '配信ツール' } : { id: 'lstep', version: '0.6.0', label: 'Lステップ' }, operation: 'reminder_step_add_template',
   label: 'リマインダの段にテンプレートを足す',
   sharedNote: params.get('shared') === '1' ? '全部の回で共有のリマインダです。ほかの回でも、この段をまだ迎えていない人に届きます（もう過ぎた人には届きません）。' : null,
-  delivers: 'scheduled', account: '5550001', target: { reminder: '7001001', step: '7002001' }, change: { template: '7003002' }, facts,
-  explanation: '「前日」の段に、持ち物のお知らせを足す案です。', createdAt: iso(now - 300_000), expiresAt: iso(now + 3_300_000), approvedAt: null,
+  delivers: 'scheduled', account: '5550001', target: { reminder: '7001001', step: '7002001' }, change: { template: MANUAL ? '8003002' : '7003002' }, facts,
+  explanation: MANUAL ? '「前日」の段に、持ち物のご案内を足す案です。来週の説明会に申し込んだ人に届きます。' : '「前日」の段に、持ち物のお知らせを足す案です。', createdAt: iso(now - 300_000), expiresAt: iso(now + 3_300_000), approvedAt: null,
   contentHash: HASH, execution: null,
 }
 
@@ -69,7 +84,7 @@ let view: BrowserPlanView = { ...base, ...(byState[params.get('state') ?? 'draft
 
 function Preview() {
   const [sent, setSent] = useState('')
-  const card = (v: BrowserPlanView): BrowserPlanCardData => ({ plan: v, ready, stoppedHere: params.get('hint') === '1', runningHere: false, siteHost: 'manager.linestep.net' })
+  const card = (v: BrowserPlanView): BrowserPlanCardData => ({ plan: v, ready, stoppedHere: params.get('hint') === '1', runningHere: false, siteHost: MANUAL ? 'haishin.example.net' : 'manager.linestep.net' })
   installElectronAPI({
     getBrowserPlan: async () => ({ ok: true, card: card(view) }),
     runBrowserPlan: async (companyId, planId, contentHash) => {
@@ -90,7 +105,7 @@ function Preview() {
     openBrowserSite: async (_companyId, host) => { setSent(JSON.stringify({ open: host })); return { ok: true } },
   })
   const ref: BrowserPlanCardRef = { id: PLAN, companyId: 'co-preview', conversationId: 'conv-1', planId: PLAN, at: iso(now) }
-  const parts = [{ type: 'text', text: '承認のカードを出しました。中身を確かめてください。' }, { type: BROWSER_PLAN_PART_TYPE, id: `browser-plan-${PLAN}`, data: ref }] as UIMessage['parts']
+  const parts = [{ type: 'text', text: MANUAL ? '配信ツールの計画を作りました。中身を確かめてください。' : '承認のカードを出しました。中身を確かめてください。' }, { type: BROWSER_PLAN_PART_TYPE, id: `browser-plan-${PLAN}`, data: ref }] as UIMessage['parts']
   return (
     <main className="min-h-screen bg-bg p-8 text-text">
       <p className="mb-4 text-small text-text-muted">表示確認用の人工データ。本番の相談やサイトには接続しません。</p>

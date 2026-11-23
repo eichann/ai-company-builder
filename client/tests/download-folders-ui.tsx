@@ -19,6 +19,10 @@
 //          instead of 株式会社デモ's folders
 //   jobs   (with manual=1, tab=jobs) the manual's job 「weekly-report（毎週月曜 09:00）」 waiting for 「受け取る」 (default) |
 //          accepted = running, with ［止める］; the proposal that made it listed as approved
+//   (manual=1) google=connected: 山田さん allowed 予定と議事録・受信を読む・Drive, not yet メールを送る; the company also offers
+//          済んだメールを Gmail でもアーカイブする and the spreadsheet relay; one 「もう聞かない」 folder (chapters 28–29)
+//   (manual=1) slack=connected: 山田さん allowed Slack (DMs and mentions, 「あなたの番」 by DM), not yet 返事を送る (chapter 28)
+//   (manual=1) tab=ownkeys: Gemini, which members may bring their own key for, with none yet (chapter 28)
 //   closed 1 = start with the settings closed: a 「設定を開く」 button (always there) opens them (Esc closes, focus returns)
 import { useState } from 'react'
 import { createRoot } from 'react-dom/client'
@@ -99,13 +103,21 @@ const childrenOf = (p: string) => {
   })
 }
 
+// ?manual=1&google=connected: 設定 →「Google」 after 山田さん allowed it (chapters 28–29).
+const MANUAL_GOOGLE = MANUAL && params.get('google') === 'connected' ? {
+  available: true, reason: null, connected: true, status: 'active', googleEmail: 'yamada@kensho-a.example', features: ['minutes', 'inbox', 'drive'], featuresOff: [],
+  domain: 'kensho-a.example', practice: false, companyFeatures: ['minutes', 'mail', 'inbox', 'drive'], seen: ['minutes', 'mail', 'inbox', 'drive'], offeredByName: ['inbox_archive', 'sheets'],
+} : null
+
 let excluded = MANUAL ? ['営業部/過去資料'] : ['営業部', 'コンテンツ/動画/2025年度']
 // The company .env on this computer (status only) and the member's own-key view on the server.
 const envVars: Record<string, { set: boolean; last4?: string }> = { ANTHROPIC_API_KEY: { set: true, last4: 'ab12' } }
 const ownKeys = {
   enabled: true,
   memberKeysAllowed: true,
-  services: [
+  services: MANUAL && params.get('tab') === 'ownkeys' ? [
+    { service: 'gemini', label: 'Google Gemini', category: 'tool', rule: 'company-first', ownKey: { allowed: true, hosts: ['generativelanguage.googleapis.com'] }, companyKeys: [], key: null },
+  ] : [
     { service: 'anthropic', label: 'Anthropic（Claude API）', category: 'tool', rule: 'company-first', ownKey: { allowed: true, hosts: ['api.anthropic.com'] }, companyKeys: [], key: null },
     // `?ownkey=stopped`: an own key an admin stopped (a person stopped it: the grey 「止めています」 badge).
     ...(params.get('ownkey') === 'stopped' ? [{ service: 'gemini', label: 'Gemini', category: 'tool', rule: 'company-first', ownKey: { allowed: true, hosts: ['generativelanguage.googleapis.com'] }, companyKeys: [], key: { id: 'k-own', displayName: '自分の鍵', last4: 'zz99', hosts: ['generativelanguage.googleapis.com'], status: 'disabled', secretUpdatedAt: '2026-11-01T00:00:00.000Z' } }] : []),
@@ -157,8 +169,13 @@ Object.assign(window, {
     getGoogleStatus: async () => (params.get('google') === 'ready'
       ? { success: true, data: { available: true, reason: null, connected: false, status: null, googleEmail: null, features: [], featuresOff: [], domain: 'kensho-a.example', practice: false, companyFeatures: ['minutes', 'mail'], seen: [] } }
       : { success: false, offline: true, error: 'サーバーにつながりませんでした。' }),
-    // ?google=ready: the company offers no spreadsheet relay (its card stays hidden).
-    getGoogleRelay: async () => ({ success: true, data: { available: true, reason: null, services: [], stopped: null, capPerDay: 0, usedToday: 0, records: [] } }),
+    ...(MANUAL_GOOGLE ? { getGoogleStatus: async () => ({ success: true, data: MANUAL_GOOGLE }) } : {}),
+    // ?google=ready: the company offers no spreadsheet relay (its card stays hidden); ?manual=1&google=connected: offered, not allowed yet.
+    getGoogleRelay: async () => ({ success: true, data: { available: true, reason: null, services: MANUAL_GOOGLE ? [{ service: 'sheets', offered: true, allowed: false, turnedOff: false }] : [], stopped: null, capPerDay: MANUAL_GOOGLE ? 500 : 0, usedToday: 0, records: [] } }),
+    getDriveTrustedFolders: async () => ({ success: true, folders: MANUAL_GOOGLE ? [{ folderId: 'f-manual-1', folderName: 'A社と共有', outsideDomains: ['a-sha.example'], createdAt: '2026-11-18T01:00:00.000Z' }] : [] }),
+    ...(MANUAL && params.get('slack') === 'connected' ? {
+      getSlackStatus: async () => ({ success: true, data: { available: true, reason: null, connected: true, status: 'active', features: ['read', 'notices'], featuresOff: [], practice: false, seen: ['read', 'notices'] } }),
+    } : {}),
     getWorkSwitches: async () => ({ success: true, switches: mySwitches() }),
     // 「AI から定期の仕事を提案してもらう」: this PC's own setting (on).
     getJobRepeatAsk: async () => ({ success: true, on: repeatAskOn }),

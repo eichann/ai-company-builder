@@ -129,6 +129,19 @@ const MINUTES_BLOCK = 'role=region[name="議事録が届きました"]'
 // 17章: 「記録の一覧」 as 山田さん reads it (records-table-ui.html ?manual=1).
 const TABLE = { page: 'records-table', query: { manual: '1' }, viewport: { width: 1100, height: 700 } } as const
 const CARD_MORE = 'role=button[name="その他の操作"] >> nth=0'
+// 28〜29章: 設定 →「Google」 after 山田さん allowed it (download-folders-ui.html ?manual=1&google=connected).
+const GOOGLE_SETTINGS = { page: 'download-folders', query: { tab: 'google', google: 'connected', manual: '1', role: 'member' }, viewport: { width: 1100, height: 1000 } } as const
+// 30章: 山田さん's mails after the meeting with A社 (mail-draft-card-ui.html ?manual=1), one card each.
+const MAIL = { page: 'mail-draft-card', query: { manual: '1' }, viewport: { width: 900, height: 2000 } } as const
+const THANKS_MAIL = 'role=group[name="メール：本日の打ち合わせのお礼"]'
+const FILES_MAIL = 'role=group[name="メール：研修のご提案書をお送りします"]'
+const SECOND_MAIL = 'role=group[name="メール：打ち合わせのお礼（山田より）"]'
+// 31章: the manual's 法人営業 screens and 案件 (plugin-slots-ui.html ?manual=1).
+const DEAL_SCREENS = { page: 'plugin-slots', query: { manual: '1' }, viewport: { width: 1100, height: 700 } } as const
+// 32章: the plan card of a made-up 配信ツール (browser-plan-card-ui.html ?manual=1).
+// 29章: the Drive card's first line in 設定 →「Google」.
+const DRIVE_TEXT = 'text=/^あなたが Google Drive で選んだ/'
+const PLAN_CARD = 'role=group[name="承認のお願い（ブラウザ操作）"]'
 const SKILL_CARD = (name: string) => `xpath=//*[normalize-space()="${name}"]/ancestor::div[.//button[normalize-space()="実行"]][1]`
 
 export const scenes: Scene[] = [
@@ -1510,6 +1523,359 @@ export const scenes: Scene[] = [
   {
     id: 'daily-flow-diagram',
     about: 'Diagram: one working day — the morning\'s two places, during the day, after a meeting, before going home.',
+    diagram: true,
+  },
+  // ── 28章〜 つなぐと広がる ─────────────────────────────────────────────────────
+  // 28章: 「仕事の道具をつなぐ」 as a new member of 検証A社 first sees it (connect-tools-ui.html ?manual=1).
+  {
+    id: 'connect-tools-first',
+    about: '「仕事の道具をつなぐ」 after the first sign-in: what Google and Slack add, ［Google でつなぐ］［Slack でつなぐ］［あとで］.',
+    page: 'connect-tools',
+    query: { state: 'first', manual: '1' },
+    viewport: { width: 900, height: 820 },
+    steps: [{ waitFor: 'role=button[name="Google でつなぐ"]' }, SETTLE],
+    crop: { target: 'role=dialog', padding: 0 },
+    annotations: [
+      { marker: { target: 'text=/^ふだん使っている Google や Slack/', label: '1', at: 'left' } },
+      { box: 'role=button[name="Google でつなぐ"]' }, { marker: { target: 'role=button[name="Google でつなぐ"]', label: '2', at: 'right' } },
+      { box: 'role=button[name="Slack でつなぐ"]' }, { marker: { target: 'role=button[name="Slack でつなぐ"]', label: '3', at: 'right' } },
+      { box: 'role=button[name="あとで"]' }, { marker: { target: 'role=button[name="あとで"]', label: '4', at: 'left' } },
+    ],
+  },
+  // 設定 →「Google」 after 山田さん allowed it (download-folders-ui.html ?manual=1&google=connected).
+  {
+    id: 'settings-google-allowed',
+    about: '設定 →「Google」 allowed: what is allowed, ［メールを送る許可も足す］, ［許可をやめる］ and the Gmail archive card.',
+    ...GOOGLE_SETTINGS,
+    steps: [{ waitFor: 'text=許可していること' }, SETTLE],
+    crop: { target: 'role=dialog', padding: 0 },
+    annotations: [
+      { marker: { target: 'text=許可していること', label: '1', at: 'left' } },
+      { box: 'role=button[name="メールを送る許可も足す"]' }, { marker: { target: 'role=button[name="メールを送る許可も足す"]', label: '2', at: 'below' } },
+      { box: 'role=button[name="許可をやめる"]' }, { marker: { target: 'role=button[name="許可をやめる"]', label: '3', at: 'below' } },
+      { marker: { target: 'text=済んだメールを Gmail でもアーカイブする', label: '4', at: 'left' } },
+    ],
+  },
+  {
+    id: 'settings-slack',
+    about: '設定 →「Slack」 allowed: DMs and mentions, 「あなたの番」 by DM, ［返事を送る許可も足す］.',
+    page: 'download-folders',
+    query: { tab: 'slack', slack: 'connected', manual: '1', role: 'member' },
+    viewport: { width: 1100, height: 760 },
+    steps: [{ waitFor: 'role=button[name="返事を送る許可も足す"]' }, SETTLE],
+    crop: { target: 'role=dialog', padding: 0 },
+    annotations: [
+      { marker: { target: 'text=許可していること', label: '1', at: 'left' } },
+      { marker: { target: 'role=checkbox', label: '2', at: 'left' } },
+      { box: 'role=button[name="返事を送る許可も足す"]' }, { marker: { target: 'role=button[name="返事を送る許可も足す"]', label: '3', at: 'below' } },
+    ],
+  },
+  {
+    id: 'broker-key-card',
+    about: 'In a consultation: 「Google Gemini の鍵がありません」 with the way to 設定 →「自分の鍵」.',
+    page: 'broker-key-card',
+    viewport: { width: 900, height: 700 },
+    steps: [{ waitFor: 'role=group[name="Google Gemini の鍵がありません"] >> role=button' }],
+    crop: { target: 'role=group[name="Google Gemini の鍵がありません"]', padding: { x: 16, y: 4 } },
+    annotations: [
+      { box: 'role=group[name="Google Gemini の鍵がありません"] >> role=button' }, { marker: { target: 'role=group[name="Google Gemini の鍵がありません"] >> role=button', label: '1', at: 'right' } },
+    ],
+  },
+  {
+    id: 'settings-own-keys',
+    about: '設定 →「自分の鍵」: the key stays on the company server; ［自分の鍵を登録］.',
+    page: 'download-folders',
+    query: { tab: 'ownkeys', manual: '1', role: 'member' },
+    viewport: { width: 1100, height: 700 },
+    steps: [{ waitFor: 'role=button[name="自分の鍵を登録"]' }, SETTLE],
+    crop: { target: 'role=dialog', padding: 0 },
+    annotations: [
+      { marker: { target: 'text=/^AI が Skill の中で外部サービス/', label: '1', at: 'left' } },
+      { box: 'role=button[name="自分の鍵を登録"]' }, { marker: { target: 'role=button[name="自分の鍵を登録"]', label: '2', at: 'left' } },
+    ],
+  },
+  {
+    id: 'connect-what-diagram',
+    about: 'Diagram: what connecting Google and Slack adds, what stays yours (sending), and where to stop it.',
+    diagram: true,
+  },
+  // 29章: the Drive card of 設定 →「Google」 with one 「もう聞かない」 folder, the relay, a put into a folder A社 can see
+  // (chat-outside-cards-ui.html) and a プロジェクト's Drive files (record-card-ui.html &drive=1).
+  {
+    id: 'settings-google-drive',
+    about: '設定 →「Google」: the Drive card (only what you chose), ［オフにする］, and 「もう聞かない」 folders with ［聞くように戻す］.',
+    ...GOOGLE_SETTINGS,
+    steps: [{ waitFor: 'role=button[name="聞くように戻す"]' }, { run: 'document.querySelector(\'[data-testid="drive-trusted-folders"]\').scrollIntoView({ block: "center" })' }, SETTLE],
+    crop: { target: `${DRIVE_TEXT} >> xpath=..`, padding: { x: 40, y: 12 } },
+    annotations: [
+      { marker: { target: DRIVE_TEXT, label: '1', at: 'left' } },
+      { box: 'role=button[name="オフにする"]' }, { marker: { target: 'role=button[name="オフにする"]', label: '2', at: 'right' } },
+      { box: 'role=button[name="聞くように戻す"]' }, { marker: { target: 'role=button[name="聞くように戻す"]', label: '3', at: 'left' } },
+    ],
+  },
+  {
+    id: 'settings-google-relay',
+    about: '設定 →「Google」: 「スプレッドシートを中継で使う」 the company allows, with ［許可する］.',
+    ...GOOGLE_SETTINGS,
+    steps: [{ waitFor: 'text=会社が許可しています' }, { run: 'document.querySelector(\'[data-testid="google-relay"]\').scrollIntoView({ block: "center" })' }, SETTLE],
+    crop: { target: '[data-testid="google-relay"]', padding: { x: 40, y: 12 } },
+    annotations: [
+      { marker: { target: 'text=会社が許可しています', label: '1', at: 'right' } },
+      { box: '[data-testid="google-relay"] >> role=button[name="許可する"]' }, { marker: { target: '[data-testid="google-relay"] >> role=button[name="許可する"]', label: '2', at: 'right' } },
+    ],
+  },
+  {
+    id: 'drive-put-card',
+    about: 'The card before the AI puts a file where people outside can see it: who sees it, 「もう聞かない」, ［置く］［やめる］.',
+    page: 'chat-outside-cards',
+    viewport: { width: 900, height: 900 },
+    crop: { target: 'role=group[name="社外の人も見られる場所に置きます"]', padding: { x: 40, y: 16 } },
+    annotations: [
+      { marker: { target: 'text=/^社外の人（a-sha.example の人）も見られます/', label: '1', at: 'left' } },
+      { marker: { target: 'text=/^このフォルダはもう聞かない/', label: '2', at: 'left' } },
+      { box: 'role=button[name="置く"]' }, { marker: { target: 'role=button[name="置く"]', label: '3', at: 'below' } },
+      { marker: { target: 'role=button[name="やめる"]', label: '4', at: 'below' } },
+    ],
+  },
+  {
+    id: 'record-drive-links',
+    about: 'A プロジェクト\'s files: ［Google Drive のファイルをつなぐ］, 山田さん\'s Drive file by name, someone else\'s as 「Google Drive のファイル」.',
+    page: 'record-card',
+    query: { record: 'project', manual: '1', drive: '1' },
+    viewport: { width: 1100, height: 1400 },
+    steps: [{ waitFor: 'role=button[name=/Google Drive のファイルをつなぐ/]' }],
+    crop: { region: { x: 812, y: 222, width: 288, height: 250 } },
+    annotations: [
+      { box: 'role=button[name=/Google Drive のファイルをつなぐ/]' }, { marker: { target: 'role=button[name=/Google Drive のファイルをつなぐ/]', label: '1', at: 'left' } },
+      { marker: { target: 'text=研修の進め方（作業中）', label: '2', at: 'left' } },
+      { marker: { target: 'text="Google Drive のファイル"', label: '3', at: 'left' } },
+    ],
+  },
+  // 30章: 山田さん's mails after the meeting with A社 (mail-draft-card-ui.html ?manual=1).
+  {
+    id: 'mail-draft-card',
+    about: 'The mail draft card: from, to with where each address came from, the whole body, ［確かめて送る］［直す］［捨てる］.',
+    ...MAIL,
+    crop: { target: THANKS_MAIL, padding: { x: 40, y: 16 } },
+    annotations: [
+      { marker: { target: `${THANKS_MAIL} >> role=list[name="宛先"]`, label: '1', at: 'right' } },
+      { marker: { target: `${THANKS_MAIL} >> [aria-label="本文"]`, label: '2', at: 'left' } },
+      { box: `${THANKS_MAIL} >> role=button[name="確かめて送る"]` }, { marker: { target: `${THANKS_MAIL} >> role=button[name="確かめて送る"]`, label: '3', at: 'below' } },
+      { marker: { target: `${THANKS_MAIL} >> role=button[name="直す"]`, label: '4', at: 'below' } },
+      { marker: { target: `${THANKS_MAIL} >> role=button[name="捨てる"]`, label: '5', at: 'below' } },
+    ],
+  },
+  {
+    id: 'mail-edit',
+    about: 'After ［直す］: To / CC chosen from checked addresses, ［入力した宛先を足す］, the subject and body, ［保存する］.',
+    ...MAIL,
+    viewport: { width: 900, height: 1100 },
+    steps: [{ click: `${THANKS_MAIL} >> role=button[name="直す"]` }, { waitFor: 'role=button[name="入力した宛先を足す"]' }],
+    crop: { target: THANKS_MAIL, padding: { x: 40, y: 16 } },
+    annotations: [
+      { marker: { target: 'text=宛先・CC（確かめた宛先から選びます）', label: '1', at: 'left' } },
+      { box: 'role=button[name="入力した宛先を足す"]' }, { marker: { target: 'role=button[name="入力した宛先を足す"]', label: '2', at: 'right' } },
+      { box: 'role=button[name="保存する"]' }, { marker: { target: 'role=button[name="保存する"]', label: '3', at: 'left' } },
+    ],
+  },
+  {
+    id: 'mail-confirm',
+    about: 'After ［確かめて送る］: 「送る前に、もう一度確かめてください」, 「返事を待つ」, ［この内容で送る］.',
+    ...MAIL,
+    steps: [{ click: `${THANKS_MAIL} >> role=button[name="確かめて送る"]` }, { waitFor: 'role=button[name="この内容で送る"]' }],
+    crop: { target: THANKS_MAIL, padding: { x: 40, y: 16 } },
+    annotations: [
+      { marker: { target: 'text=送る前に、もう一度確かめてください', label: '1', at: 'left' } },
+      { marker: { target: 'text=/^返事を待つ（来なければ/', label: '2', at: 'left' } },
+      { box: 'role=button[name="この内容で送る"]' }, { marker: { target: 'role=button[name="この内容で送る"]', label: '3', at: 'below' } },
+    ],
+  },
+  {
+    id: 'mail-attachments',
+    about: 'A mail with two PDFs: 「付いているファイル」, ［開いて確かめる］ and ［外す］.',
+    ...MAIL,
+    crop: { target: FILES_MAIL, padding: { x: 40, y: 16 } },
+    annotations: [
+      { marker: { target: `${FILES_MAIL} >> text=付いているファイル`, label: '1', at: 'left' } },
+      { box: 'role=button[name="提案書（A社様）.pdfを開いて確かめる"]' }, { marker: { target: 'role=button[name="提案書（A社様）.pdfを開いて確かめる"]', label: '2' } },
+      { box: 'role=button[name="提案書（A社様）.pdfを外す"]' }, { marker: { target: 'role=button[name="提案書（A社様）.pdfを外す"]', label: '3' } },
+    ],
+  },
+  {
+    id: 'mail-already-sent',
+    about: 'A second thank-you for the same meeting: who sent the first and when, 「それでも送る理由」, ［それでも送る］［送らない］.',
+    ...MAIL,
+    steps: [
+      { click: `${SECOND_MAIL} >> role=button[name="確かめて送る"]` },
+      { click: `${SECOND_MAIL} >> role=button[name="この内容で送る"]` },
+      { waitFor: 'role=group[name="先に送られたメール"]' },
+    ],
+    crop: { target: SECOND_MAIL, padding: { x: 40, y: 16 } },
+    annotations: [
+      { marker: { target: 'text=/^この会議のお礼メールは高橋さんが/', label: '1', at: 'left' } },
+      { marker: { target: 'text=それでも送る理由', label: '2', at: 'left' } },
+      { box: 'role=button[name="それでも送る"]' }, { marker: { target: 'role=button[name="それでも送る"]', label: '3', at: 'below' } },
+      { marker: { target: 'role=button[name="送らない"]', label: '4', at: 'below' } },
+    ],
+  },
+  {
+    id: 'mail-unknown',
+    about: 'A mail nobody knows arrived: 「届いたか分かりません。Gmail の送信済みを確かめてください。」, ［送られていた］［送られていなかった］.',
+    ...MAIL,
+    crop: { target: 'role=group[name="メール：日程のご連絡"]', padding: { x: 40, y: 16 } },
+    annotations: [
+      { marker: { target: 'role=group[name="メール：日程のご連絡"] >> text=/^届いたか分かりません。Gmail/', label: '1', at: 'left' } },
+      { box: 'role=button[name="送られていた"]' }, { marker: { target: 'role=button[name="送られていた"]', label: '2', at: 'below' } },
+      { marker: { target: 'role=button[name="送られていなかった"]', label: '3', at: 'below' } },
+    ],
+  },
+  {
+    id: 'slack-reply-draft',
+    about: 'A Slack reply draft: 「元の Slack のスレッドに、あなたとして返します。」 and the same buttons.',
+    ...MAIL,
+    crop: { target: 'role=group[name="Slack の返事の下書き"]', padding: { x: 40, y: 16 } },
+    annotations: [
+      { marker: { target: 'text=元の Slack のスレッドに、あなたとして返します。', label: '1', at: 'left' } },
+      { box: 'role=group[name="Slack の返事の下書き"] >> role=button[name="確かめて送る"]' }, { marker: { target: 'role=group[name="Slack の返事の下書き"] >> role=button[name="確かめて送る"]', label: '2', at: 'below' } },
+    ],
+  },
+  {
+    id: 'mail-flow-diagram',
+    about: 'Diagram: the AI drafts, you check and send from your Gmail, ACB waits for the answer; the AI never sends.',
+    diagram: true,
+  },
+  // 31章: 法人営業's screens (plugin-slots-ui.html ?manual=1) and the customer list's writes (chat-outside-cards-ui.html).
+  {
+    id: 'plugin-tab',
+    about: 'The left pane\'s tabs with the business screen\'s 「案件」 next to 「ファイル」.',
+    ...DEAL_SCREENS,
+    steps: [{ waitFor: 'role=button[name=/案件/]' }],
+    crop: { region: { x: 0, y: 0, width: 300, height: 120 } },
+    annotations: [{ box: 'role=button[name=/案件/]' }, { marker: { target: 'role=button[name=/案件/]', label: '1', at: 'right' } }],
+  },
+  {
+    id: 'plugin-file-menu',
+    about: 'A file\'s right-click menu with the business screen\'s item at its end.',
+    ...DEAL_SCREENS,
+    steps: [{ waitFor: 'role=button[name=/案件/]' }, { rightClick: 'role=button[name="提案書_A社向け.pdf"]' }, { waitFor: 'role=button[name="案件の資料にする"]' }],
+    crop: { region: { x: 0, y: 0, width: 300, height: 250 } },
+    annotations: [{ box: 'role=button[name="案件の資料にする"]' }, { marker: { target: 'role=button[name="案件の資料にする"]', label: '1', at: 'right' } }],
+  },
+  {
+    id: 'deal-step-button',
+    about: 'A 案件\'s card with the step button 「提案書を用意する」 above it.',
+    ...DEAL_SCREENS,
+    steps: [{ waitFor: 'role=region[name="手順"] >> role=button' }, { waitFor: 'text=A社 研修導入' }],
+    crop: { region: { x: 160, y: 0, width: 940, height: 240 } },
+    annotations: [{ box: 'role=region[name="手順"] >> role=button' }, { marker: { target: 'role=region[name="手順"] >> role=button', label: '1', at: 'right' } }],
+  },
+  {
+    id: 'deal-continue',
+    about: 'After the AI prepared the step: ［続きをする］ and 「AI が用意したもの」 with 確かめる点 and the files.',
+    ...DEAL_SCREENS,
+    query: { manual: '1', prepared: '1' },
+    steps: [{ waitFor: 'role=button[name="続きをする"]' }, { waitFor: 'text=確かめる点' }],
+    crop: { region: { x: 160, y: 0, width: 940, height: 440 } },
+    annotations: [
+      { box: 'role=button[name="続きをする"]' }, { marker: { target: 'role=button[name="続きをする"]', label: '1', at: 'right' } },
+      { marker: { target: 'text=確かめる点', label: '2', at: 'left' } },
+      { marker: { target: 'role=region[name="AI が用意したもの"] >> text=ファイル >> nth=0', label: '3', at: 'left' } },
+    ],
+  },
+  {
+    id: 'plugin-operation-applied',
+    about: 'The card after the AI updated the customer list: the field before → after, 「AI が記録」, ［変更前の値を書き戻す］.',
+    page: 'chat-outside-cards',
+    viewport: { width: 900, height: 900 },
+    crop: { target: 'role=group[name="HubSpot を更新しました"]', padding: { x: 40, y: 16 } },
+    annotations: [
+      { marker: { target: 'role=group[name="HubSpot を更新しました"] >> role=list[name="変更した欄"]', label: '1', at: 'left' } },
+      { marker: { target: 'role=group[name="HubSpot を更新しました"] >> text=AI が記録', label: '2', at: 'left' } },
+      { box: 'role=button[name="変更前の値を書き戻す"]' }, { marker: { target: 'role=button[name="変更前の値を書き戻す"]', label: '3', at: 'right' } },
+    ],
+  },
+  {
+    id: 'plugin-operation-unknown',
+    about: 'A write whose answer was lost: 「HubSpot に届いたか分かりません」 and ［もう一度確かめる］.',
+    page: 'chat-outside-cards',
+    viewport: { width: 900, height: 900 },
+    crop: { target: 'role=group[name="HubSpot に届いたか分かりません"]', padding: { x: 40, y: 16 } },
+    annotations: [
+      { box: 'role=button[name="もう一度確かめる"]' }, { marker: { target: 'role=button[name="もう一度確かめる"]', label: '1', at: 'right' } },
+    ],
+  },
+  // 32章: ブラウザ操作 with a made-up 配信ツール (download-folders-ui ?tab=browser&browser=1, browser-plan-card-ui ?manual=1).
+  {
+    id: 'settings-browser',
+    about: '設定 →「ブラウザ操作」: the allowed site, ［開いてログイン］［ログインを消す］, 「AI はまだこの窓を操作しません。」.',
+    page: 'download-folders',
+    query: { tab: 'browser', browser: '1', manual: '1', role: 'member' },
+    viewport: { width: 1100, height: 700 },
+    steps: [{ waitFor: 'role=button[name="開いてログイン"]' }, SETTLE],
+    crop: { target: 'role=dialog', padding: 0 },
+    annotations: [
+      { marker: { target: 'text=manager.example.net', label: '1', at: 'left' } },
+      { box: 'role=button[name="開いてログイン"]' }, { marker: { target: 'role=button[name="開いてログイン"]', label: '2', at: 'below' } },
+      { box: 'role=button[name="ログインを消す"]' }, { marker: { target: 'role=button[name="ログインを消す"]', label: '3', at: 'below' } },
+    ],
+  },
+  {
+    id: 'browser-plan-card',
+    about: 'The plan\'s card: what was read from the site, 「これから届く人数」, the AI\'s explanation apart, ［任せる］［やめる］.',
+    page: 'browser-plan-card',
+    query: { manual: '1', audience: '42' },
+    viewport: { width: 900, height: 1100 },
+    steps: [{ waitFor: 'role=button[name="任せる"]' }],
+    crop: { target: PLAN_CARD, padding: { x: 40, y: 16 } },
+    annotations: [
+      { marker: { target: 'text=サイトから読み取った情報', label: '1', at: 'left' } },
+      { marker: { target: 'text=これから届く人数', label: '2', at: 'left' } },
+      { marker: { target: 'text=AI の説明（サイトから読んだ情報ではありません）', label: '3', at: 'left' } },
+      { box: 'role=button[name="任せる"]' }, { marker: { target: 'role=button[name="任せる"]', label: '4', at: 'below' } },
+      { marker: { target: 'role=button[name="やめる"]', label: '5', at: 'below' } },
+    ],
+  },
+  {
+    id: 'browser-plan-unread',
+    about: 'A count the site did not show: 「読み取れませんでした」 in yellow, never 0.',
+    page: 'browser-plan-card',
+    query: { manual: '1' },
+    viewport: { width: 900, height: 1100 },
+    steps: [{ waitFor: '[data-audience="unknown"]' }],
+    crop: { target: PLAN_CARD, padding: { x: 40, y: 16 } },
+    annotations: [{ box: '[data-audience="unknown"]' }, { marker: { target: '[data-audience="unknown"]', label: '1', at: 'right' } }],
+  },
+  {
+    id: 'browser-plan-unknown',
+    about: 'A run nobody knows the result of: 「届いたか分かりません。」, where to look, ［済んでいた］［されていなかった］, no resend.',
+    page: 'browser-plan-card',
+    query: { manual: '1', state: 'unknown', audience: '42' },
+    viewport: { width: 900, height: 1200 },
+    steps: [{ waitFor: 'role=button[name="済んでいた"]' }],
+    crop: { target: PLAN_CARD, padding: { x: 40, y: 16 } },
+    annotations: [
+      { marker: { target: `${PLAN_CARD} >> role=status`, label: '1', at: 'left' } },
+      { box: 'role=button[name="済んでいた"]' }, { marker: { target: 'role=button[name="済んでいた"]', label: '2' } },
+      { marker: { target: 'role=button[name="されていなかった"]', label: '3', at: 'right' } },
+      { marker: { target: 'text=/^もう一度は送りません/', label: '4', at: 'left' } },
+    ],
+  },
+  {
+    id: 'inbox-browser-rows',
+    about: 'The inbox with the 配信ツール\'s plan waiting (［承認する…］) and one nobody knows (［確かめる…］).',
+    page: 'inbox',
+    query: { manual: '1', plans: '1' },
+    viewport: { width: 1000, height: 800 },
+    steps: [{ waitFor: 'role=button[name=/^確かめる…/]' }],
+    crop: { target: 'role=region[name="受け箱"]', padding: 0 },
+    annotations: [
+      { box: 'role=button[name=/^承認する…/]' }, { marker: { target: 'role=button[name=/^承認する…/]', label: '1', at: 'left' } },
+      { box: 'role=button[name=/^確かめる…/]' }, { marker: { target: 'role=button[name=/^確かめる…/]', label: '2', at: 'left' } },
+    ],
+  },
+  {
+    id: 'browser-flow-diagram',
+    about: 'Diagram: you log in yourself, the AI makes a plan, you read and press ［任せる］, it runs once as planned.',
     diagram: true,
   },
 ]

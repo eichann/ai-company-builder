@@ -1,0 +1,27 @@
+<!-- The manual's chapter 30: a mail the AI drafted — the AI drafts, the member checks and sends from
+     their own Gmail, ACB waits for the answer. The AI never sends. Shot by shoot.spec.ts (scenes.ts). -->
+<style>
+  body { margin: 0; background: var(--color-surface); font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Hiragino Kaku Gothic ProN", sans-serif; color: var(--color-text); }
+  #diagram { width: 960px; padding: 28px 30px 30px; box-sizing: border-box; background: var(--color-surface); }
+  .row { display: flex; align-items: stretch; }
+  .box { flex: 1; padding: 14px 12px 16px; border-radius: 14px; border: 2px solid var(--color-border-strong); background: var(--color-bg); text-align: center; }
+  .box .step { display: inline-flex; width: 24px; height: 24px; border-radius: 9999px; background: var(--color-primary); color: var(--color-on-primary); font-weight: 700; font-size: 14px; align-items: center; justify-content: center; }
+  .box .title { margin-top: 6px; font-size: 16px; font-weight: 700; }
+  .box .what { margin-top: 6px; font-size: 13px; line-height: 1.6; color: var(--color-text-muted); }
+  .box.you { border-color: var(--color-primary); background: var(--color-selected-bg); }
+  .box.ai { border-color: var(--color-ai-border); background: var(--color-ai-bg); }
+  .arrow { width: 32px; display: flex; align-items: center; justify-content: center; }
+  .note { margin-top: 14px; padding: 12px 16px; border-radius: 10px; background: var(--color-success-bg); border: 1px solid var(--color-success-border); color: var(--color-success-text); font-size: 14px; font-weight: 700; text-align: center; }
+</style>
+<div id="diagram">
+  <div class="row">
+    <div class="box ai"><span class="step">1</span><div class="title">AI が下書き</div><div class="what">相談の中に<br>「メールの下書き」の<br>カードが出る</div></div>
+    <div class="arrow"><svg width="26" height="20" viewBox="0 0 26 20" aria-hidden="true"><path d="M2 10 H16" stroke="var(--color-primary)" stroke-width="3" /><path d="M14 3 L24 10 L14 17 z" fill="var(--color-primary)" /></svg></div>
+    <div class="box you"><span class="step">2</span><div class="title">読んで直す</div><div class="what">宛先・本文・添付を<br>全部読む。<br>直すなら［直す］</div></div>
+    <div class="arrow"><svg width="26" height="20" viewBox="0 0 26 20" aria-hidden="true"><path d="M2 10 H16" stroke="var(--color-primary)" stroke-width="3" /><path d="M14 3 L24 10 L14 17 z" fill="var(--color-primary)" /></svg></div>
+    <div class="box you"><span class="step">3</span><div class="title">確かめて送る</div><div class="what">［確かめて送る］→<br>［この内容で送る］。<br>あなたの Gmail から出る</div></div>
+    <div class="arrow"><svg width="26" height="20" viewBox="0 0 26 20" aria-hidden="true"><path d="M2 10 H16" stroke="var(--color-primary)" stroke-width="3" /><path d="M14 3 L24 10 L14 17 z" fill="var(--color-primary)" /></svg></div>
+    <div class="box"><span class="step">4</span><div class="title">返事を待つ</div><div class="what">来なければ決めた日に<br>知らせる。催促の下書きは<br>AI、送るのはあなた</div></div>
+  </div>
+  <div class="note">AI はメールを送れません。送るボタンを押すのは、いつもあなたです。</div>
+</div>

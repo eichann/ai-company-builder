@@ -1,0 +1,45 @@
+<!-- The manual's chapter 28: what connecting Google and Slack adds to ACB, what stays the member's
+     (sending is always theirs), and where it stops. Shot by shoot.spec.ts (scenes.ts). -->
+<style>
+  body { margin: 0; background: var(--color-surface); font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Hiragino Kaku Gothic ProN", sans-serif; color: var(--color-text); }
+  #diagram { width: 960px; padding: 28px 30px 30px; box-sizing: border-box; background: var(--color-surface); }
+  .row { display: flex; gap: 16px; align-items: stretch; }
+  .col { flex: 1; padding: 14px 16px 16px; border-radius: 14px; border: 2px solid var(--color-border-strong); background: var(--color-bg); }
+  .col h3 { margin: 0 0 8px; font-size: 17px; }
+  .col ul { margin: 0; padding-left: 18px; font-size: 14px; line-height: 1.75; }
+  .col .chapter { color: var(--color-text-muted); font-size: 12px; }
+  .col.you { border-color: var(--color-primary); background: var(--color-selected-bg); }
+  .note { margin-top: 14px; padding: 12px 16px; border-radius: 10px; background: var(--color-success-bg); border: 1px solid var(--color-success-border); color: var(--color-success-text); font-size: 14px; font-weight: 700; text-align: center; }
+  .stop { margin-top: 10px; padding: 10px 16px; border-radius: 10px; background: var(--color-surface-sunken); color: var(--color-text-muted); font-size: 13px; text-align: center; }
+</style>
+<div id="diagram">
+  <div class="row">
+    <div class="col">
+      <h3>Google をつなぐと</h3>
+      <ul>
+        <li>今日の予定が［やること］の上に出る <span class="chapter">17章</span></li>
+        <li>会議の議事録が届く <span class="chapter">24章</span></li>
+        <li>届いたメールを AI が読む（許可したときだけ） <span class="chapter">25章</span></li>
+        <li>あなたが選んだドライブのファイルを使う <span class="chapter">29章</span></li>
+      </ul>
+    </div>
+    <div class="col">
+      <h3>Slack をつなぐと</h3>
+      <ul>
+        <li>あなたあての DM とメンションが届く <span class="chapter">25章</span></li>
+        <li>「あなたの番」を Slack の DM で知らせる（件名だけ）</li>
+        <li>スレッドに返事を送れる（返事を送る許可を足したときだけ） <span class="chapter">30章</span></li>
+      </ul>
+    </div>
+    <div class="col you">
+      <h3>いつもあなたがすること</h3>
+      <ul>
+        <li>メールや Slack の返事を<b>送る</b> <span class="chapter">30章</span></li>
+        <li>社外の人も見る場所に<b>置く</b> <span class="chapter">29章</span></li>
+        <li>機能ごとに<b>オン・オフ</b>する</li>
+      </ul>
+    </div>
+  </div>
+  <div class="note">許すのは機能ごと。AI が勝手に送ることはありません。</div>
+  <div class="stop">やめたいときは、設定の「Google」「Slack」で［許可をやめる］。いつでも止められます。</div>
+</div>

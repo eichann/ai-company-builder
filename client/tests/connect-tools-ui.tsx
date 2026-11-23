@@ -4,7 +4,8 @@
 // turned 受信 on since), `seen` (nothing new: the screen stays closed), `noslack` (the company
 // has no Slack), `settings` (opened from 設定). 「Google でつなぐ」 here grants everything but
 // メール (the member unticked it on Google's page). `&theme=dark` for the dark look. `&calendar=1`
-// also mounts the task list's today's-calendar hook (one meeting once Google is allowed).
+// also mounts the task list's today's-calendar hook (one meeting once Google is allowed). `&manual=1`: the user
+// manual's company (検証A社's domain and 山田さん's address, client/tests/manual/scenes.ts chapter 28).
 import { useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import '../src/i18n'
@@ -17,15 +18,18 @@ import { installElectronAPI } from './ui/fixtures/electron-api'
 
 const params = new URLSearchParams(location.search)
 const state = params.get('state') ?? 'first'
+const MANUAL = params.get('manual') === '1'
+const DOMAIN = MANUAL ? 'kensho-a.example' : 'div.example'
+const EMAIL = MANUAL ? 'yamada@kensho-a.example' : 'sato@div.example'
 if (params.get('theme') === 'dark') document.documentElement.classList.add('dark')
 
 let google: MyGoogle = {
   available: true, reason: null, connected: false, status: null, googleEmail: null, features: [], featuresOff: [],
-  domain: 'div.example', practice: false, companyFeatures: ['minutes', 'mail', 'drive', 'inbox'], seen: [],
+  domain: DOMAIN, practice: false, companyFeatures: ['minutes', 'mail', 'drive', 'inbox'], seen: [],
 }
 let slack: MySlack = { available: state !== 'noslack', reason: state === 'noslack' ? 'not-configured' : null, connected: false, status: null, features: [], featuresOff: [], practice: false, seen: [] }
 if (state === 'new' || state === 'seen') {
-  google = { ...google, connected: true, status: 'active', googleEmail: 'sato@div.example', features: ['minutes', 'mail', 'drive'], seen: ['minutes', 'mail', 'drive', ...(state === 'seen' ? ['inbox' as const] : [])] }
+  google = { ...google, connected: true, status: 'active', googleEmail: EMAIL, features: ['minutes', 'mail', 'drive'], seen: ['minutes', 'mail', 'drive', ...(state === 'seen' ? ['inbox' as const] : [])] }
   slack = { ...slack, connected: true, status: 'active', features: ['read', 'notices'], seen: ['read', 'notices'] }
 }
 
@@ -38,7 +42,7 @@ installElectronAPI({
   connectGoogleAll: async () => {
     calls.push('connectGoogleAll')
     // The member unticked メールを送る on Google's page.
-    google = { ...google, connected: true, status: 'active', googleEmail: 'sato@div.example', features: google.companyFeatures.filter(f => f !== 'mail'), seen: [...google.companyFeatures] }
+    google = { ...google, connected: true, status: 'active', googleEmail: EMAIL, features: google.companyFeatures.filter(f => f !== 'mail'), seen: [...google.companyFeatures] }
     return { success: true }
   },
   connectSlack: async (_companyId, features) => { calls.push(`connectSlack:${features.join(',')}`); return { success: true } },
