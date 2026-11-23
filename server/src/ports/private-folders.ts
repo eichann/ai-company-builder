@@ -47,7 +47,13 @@ export interface PrivateFolderRepository {
 
   /** 'unavailable' = the path is taken; 'BUSY' = a company push did not finish in time. Nothing created then. */
   create(input: { path: string; rules: PrivateRuleSet; createdBy: string }): Promise<{ ok: true; scopeId: string } | PrivateFolderRefusal>
+  /** Takes readers away: call inside holdingTickets.track (private-folders.md "Access removed: holding tickets"). */
   replaceRules(scopeId: string, rules: PrivateRuleSet, by: string): void
   makePublic(folder: PrivateFolderRecord, by: string): Promise<{ ok: true; value: { path: string; commit: string } } | PrivateFolderRefusal>
-  delete(folder: PrivateFolderRecord, by: string): Promise<{ ok: true; value: { path: string } } | PrivateFolderRefusal>
+  /**
+   * `trackRows` runs the one transaction that removes the folder's rows (after the archive,
+   * before the repository goes): the caller wraps it in holdingTickets.track, so every reader's
+   * ticket is written with the removal or not at all.
+   */
+  delete(folder: PrivateFolderRecord, by: string, trackRows: (removeRows: () => void) => void): Promise<{ ok: true; value: { path: string } } | PrivateFolderRefusal>
 }

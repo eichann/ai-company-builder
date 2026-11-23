@@ -21,6 +21,7 @@
  * I. a mail / Slack reply a stopped process left `sending` → `unknown`, for the person to answer (`interruptedSends`,
  *    outbound-mail.md "A send left half-done"; never re-sent);
  * 0. looks for suspicious activity (「気になる動き」, `securitySweep`, security-alerts.md), records on or off;
+ * H. closes holding tickets past their 30 days (`expireHoldingTickets`, private-folders.md "Access removed"), records on or off;
  * 5. finds each member's meetings of the last days on their calendar (`pollMeetings`,
  *    minutes.md "Meetings for their attendees": ids and versions, never the minutes' text).
  * J. makes scheduled jobs' occurrences (`makeOccurrences`, jobs.md "The clock"), first, for every
@@ -81,6 +82,8 @@ export interface ServerClockDeps {
    * outside. Run for every company first, records on or off. The number made or expired.
    */
   makeOccurrences?: (companyId: string) => number
+  /** Holding tickets past their expiry (private-folders.md "Access removed: holding tickets"): the number expired. Every company. */
+  expireHoldingTickets?: (companyId: string) => number
   /** Start the jobs' runner (services/job-occurrences.ts `createJobRunner`): never awaited by the clock. */
   startJobRunner?: () => void
   /** Let the event loop serve requests between companies. */
@@ -104,6 +107,8 @@ export interface ClockRun {
   occurrences: number
   /** Sends left `sending` by a stopped process, made `unknown`. */
   interrupted: number
+  /** Holding tickets past their expiry, closed. */
+  ticketsExpired: number
   failedCompanies: number
 }
 
@@ -156,6 +161,7 @@ export function createServerClock(deps: ServerClockDeps) {
   }
 
   async function runCompany(companyId: string, run: ClockRun) {
+    if (deps.expireHoldingTickets) run.ticketsExpired += deps.expireHoldingTickets(companyId)
     if (deps.securitySweep) run.alerts += await deps.securitySweep(companyId)
     deps.driveSweep?.(companyId)
     const handle = deps.companyData.forCompany(companyId)
@@ -200,7 +206,7 @@ export function createServerClock(deps: ServerClockDeps) {
      * jobs' part (`ran: false`).
      */
     async runOnce(): Promise<ClockRun> {
-      const run: ClockRun = { ran: false, moved: 0, notices: 0, expired: 0, mailRead: 0, meetingsFound: 0, alerts: 0, occurrences: 0, interrupted: 0, failedCompanies: 0 }
+      const run: ClockRun = { ran: false, moved: 0, notices: 0, expired: 0, mailRead: 0, meetingsFound: 0, alerts: 0, occurrences: 0, interrupted: 0, ticketsExpired: 0, failedCompanies: 0 }
       // Scheduled jobs first, with their own guard: a pass whose slow work (mail, calendar) still hangs
       // never keeps a later run from making occurrences or starting the runner.
       await jobsPass(run)
@@ -233,8 +239,8 @@ export function createServerClock(deps: ServerClockDeps) {
       } finally {
         running = false
       }
-      if (run.moved + run.notices + run.expired + run.mailRead + run.meetingsFound + run.alerts + run.occurrences + run.interrupted + run.failedCompanies > 0) {
-        log(`[server-clock] moved ${run.moved}, notices ${run.notices}, expired ${run.expired}, mail read ${run.mailRead}, meetings ${run.meetingsFound}, alerts ${run.alerts}, occurrences ${run.occurrences}${run.interrupted ? `, interrupted sends ${run.interrupted}` : ''}${run.failedCompanies ? `, ${run.failedCompanies} company(ies) failed` : ''}`)
+      if (run.moved + run.notices + run.expired + run.mailRead + run.meetingsFound + run.alerts + run.occurrences + run.interrupted + run.ticketsExpired + run.failedCompanies > 0) {
+        log(`[server-clock] moved ${run.moved}, notices ${run.notices}, expired ${run.expired}, mail read ${run.mailRead}, meetings ${run.meetingsFound}, alerts ${run.alerts}, occurrences ${run.occurrences}${run.interrupted ? `, interrupted sends ${run.interrupted}` : ''}${run.ticketsExpired ? `, holding tickets expired ${run.ticketsExpired}` : ''}${run.failedCompanies ? `, ${run.failedCompanies} company(ies) failed` : ''}`)
       }
       return run
     },

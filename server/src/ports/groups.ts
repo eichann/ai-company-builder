@@ -46,6 +46,13 @@ export interface PermissionHistoryEntry {
     | 'private-folder-create'
     /** A members-only record's list changed by a person (records.md "Members-only records"): who / which groups and departments. */
     | 'record-members'
+    /**
+     * Someone stopped reading a private folder: their holding ticket opened or renewed (`ticketId`,
+     * `scopeId`, `path`, `userId`, `cause`, `expiresAt`; private-folders.md "Access removed").
+     */
+    | 'holding-ticket'
+    /** They read the folder again: their open holding ticket cancelled (`scopeId`, `path`, `userId`). */
+    | 'holding-ticket-cancel'
   /**
    * What changed, as JSON-able data (ids, names, a place's path, rules before / after; for a
    * group's or a department's members `before` / `after` ids and, when not an edit of the list

@@ -14,8 +14,9 @@ import type { CompanyDataSource } from '../ports/company-data'
 import type { MembershipRepository } from '../ports/memberships'
 import type { PrivateFolderRecord, PrivateRuleSet } from '../ports/private-folders'
 import type { RepoStore } from '../ports/repo-store'
-import type { CompanyLock, Transactions } from '../ports/transactions'
+import type { CompanyLock } from '../ports/transactions'
 import type { Clock } from '../ports/clock'
+import type { TrackReaderChange } from './holding-tickets'
 import { supportsPrivateFolders } from '../lib/client-version'
 import {
   canReadPrivateScope,
@@ -57,12 +58,13 @@ export interface PrivateFolderServiceDeps {
   accounts: AccountDirectory
   repoStore: RepoStore
   companyLock: CompanyLock
-  transactions: Transactions
+  /** Who reads a folder changes, or the folder goes: inside it, with the readers' holding tickets (services/holding-tickets.ts). */
+  trackReaderChange: TrackReaderChange
   clock: Clock
 }
 
 export function createPrivateFolderService(deps: PrivateFolderServiceDeps) {
-  const { companyData, memberships, clientActivity, accounts, repoStore, companyLock, transactions, clock } = deps
+  const { companyData, memberships, clientActivity, accounts, repoStore, companyLock, clock, trackReaderChange } = deps
   // Company handles (ports/company-data.ts): the company is always the member's / the one just checked.
   const scopesOf = (companyId: string) => companyData.forCompany(companyId).scopes
   const privateFoldersOf = (companyId: string) => companyData.forCompany(companyId).privateFolders
@@ -262,8 +264,9 @@ export function createPrivateFolderService(deps: PrivateFolderServiceDeps) {
     },
 
     replaceMembers(actor: Member, folder: PrivateFolderRecord, rules: PrivateRuleSet): PrivateFolderDetail {
-      // Recorded with the other changes of who reads (permission_history, server.md "Groups").
-      transactions.run(() => {
+      // Recorded with the other changes of who reads (permission_history, server.md "Groups"); whoever
+      // stops reading gets a holding ticket in the same transaction (private-folders.md "Access removed").
+      trackReaderChange(actor.companyId, { cause: 'readers', byUser: actor.userId }, () => {
         const before = readersOf(privateFoldersOf(actor.companyId).get(folder.scope.id)?.scope)
         privateFoldersOf(actor.companyId).replaceRules(folder.scope.id, rules, actor.userId)
         const after = readersOf(privateFoldersOf(actor.companyId).get(folder.scope.id)?.scope)
@@ -290,7 +293,9 @@ export function createPrivateFolderService(deps: PrivateFolderServiceDeps) {
       const result = await companyLock.run(actor.companyId, async () => {
         const current = privateFoldersOf(actor.companyId).get(folder.scope.id)
         if (!current) return null
-        return privateFoldersOf(actor.companyId).delete(current, actor.userId)
+        // Every reader's holding ticket is written in the transaction that removes the rows.
+        return privateFoldersOf(actor.companyId).delete(current, actor.userId,
+          removeRows => trackReaderChange(actor.companyId, { cause: 'folder-deleted', byUser: actor.userId }, removeRows))
       })
       if (!result) return notFound()
       return result.ok ? ok(result.value) : refusalOf(result)

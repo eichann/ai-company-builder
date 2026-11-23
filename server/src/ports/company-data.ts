@@ -30,6 +30,7 @@ import type { DepartmentRepository } from './departments'
 import type { GoogleDriveRepository } from './google-drive'
 import type { FixedPayloadRepository } from './fixed-payloads'
 import type { GroupRepository, PermissionHistoryRepository } from './groups'
+import type { HoldingTicketRepository } from './holding'
 import type { InvitationRepository } from './invitations'
 import type { JobRepository } from './jobs'
 import type { NotificationRepository } from './notifications'
@@ -69,6 +70,8 @@ export interface CompanyData {
   readonly groups: GroupRepository
   /** Who changed groups and permission rules, when, what (append-only, ports/groups.ts). */
   readonly permissionHistory: PermissionHistoryRepository
+  /** Who stopped reading which private folder: holding tickets (ports/holding.ts, private-folders.md "Access removed"). */
+  readonly holding: HoldingTicketRepository
   /** Rules whose folder disappeared from the shared branch (git + orphaned_scopes). */
   readonly orphanedScopes: OrphanedScopeReader
   /** The company map of the light ontology: switch, types, record index, links, state (ports/records.ts). */

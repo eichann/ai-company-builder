@@ -22,6 +22,7 @@ import type { CompanyDataSource } from '../ports/company-data'
 import type { MembershipRepository } from '../ports/memberships'
 import type { RepoStore } from '../ports/repo-store'
 import type { Transactions } from '../ports/transactions'
+import type { TrackReaderChange } from './holding-tickets'
 import { DEFAULT_COMPANY_FOLDER_KIND, hasCompanyFolder, type CompanyFolderKind } from '../../shared/core/company-folder'
 import { clientBuildOf, parseClientVersion, supportsAgentEvents } from '../lib/client-version'
 import { isOwner, type Member } from './access'
@@ -106,6 +107,11 @@ export interface CompanyServiceDeps {
   transactions: Transactions
   clock: Clock
   ids: IdGenerator
+  /**
+   * A role change or a removal can take private folders away: run inside it, with the holding
+   * tickets it leaves (services/holding-tickets.ts, private-folders.md "Access removed").
+   */
+  trackReaderChange: TrackReaderChange
   /** COMPANY_CREATION_POLICY (services/company-creation-policy.ts); only `operator` exists today. */
   creationPolicy: CompanyCreationPolicy
   /** A server operator (OPERATOR_USER_IDS, lib/config.ts): may create companies. */
@@ -131,7 +137,7 @@ function createSlug(name: string): string {
 }
 
 export function createCompanyService(deps: CompanyServiceDeps) {
-  const { companies, memberships, companyData, clientActivity, accounts, repoStore, transactions, clock, ids, creationPolicy, isOperator } = deps
+  const { companies, memberships, companyData, clientActivity, accounts, repoStore, transactions, clock, ids, creationPolicy, isOperator, trackReaderChange } = deps
   // Company handles (ports/company-data.ts): the company is always the member's / the one just checked.
   const scopesOf = (companyId: string) => companyData.forCompany(companyId).scopes
 
@@ -352,7 +358,8 @@ export function createCompanyService(deps: CompanyServiceDeps) {
         return refuse('not-found', 'Member not found')
       }
       if (current !== role) {
-        const changed = transactions.run(() => {
+        // A demoted owner/admin reads only the private folders a rule names them on (holding tickets for the rest).
+        const changed = trackReaderChange(companyId, { cause: 'role', byUser: actor.userId }, () => {
           if (current === 'owner' && memberships.countOwners(companyId) <= 1) return false
           memberships.updateRole(companyId, targetUserId, role, clock.now())
           // Owner/admin read and write everything; rules naming them are moot
@@ -379,7 +386,8 @@ export function createCompanyService(deps: CompanyServiceDeps) {
       if (memberships.roleOf(companyId, targetUserId) === 'owner') {
         return refuse('forbidden', 'Cannot remove the owner')
       }
-      transactions.run(() => {
+      // Every private folder they read is lost to them: a holding ticket each, in this transaction.
+      trackReaderChange(companyId, { cause: 'left-company', byUser: actor.userId }, () => {
         memberships.delete(companyId, targetUserId)
         scopesOf(companyId).removeManagerFromCompany(targetUserId)
         scopesOf(companyId).removeSkillEditorFromCompany(targetUserId)

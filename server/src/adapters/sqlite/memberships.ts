@@ -1,7 +1,13 @@
 import type Database from 'better-sqlite3'
 import type { MembershipRepository, MembershipRow } from '../../ports/memberships'
+import type { ReaderChangeGate } from '../../ports/holding'
 
-export function sqliteMembershipRepository(conn: Database.Database): MembershipRepository {
+/**
+ * `gate` (the composition root's, lib/reader-change-gate.ts): a role change and a removal can
+ * take private folders away, so they run only inside holdingTickets.track. Absent (operator
+ * commands, unit tests building the adapter alone): not asked.
+ */
+export function sqliteMembershipRepository(conn: Database.Database, gate?: ReaderChangeGate): MembershipRepository {
   return {
     roleOf(companyId, userId) {
       const row = conn.prepare(`
@@ -43,11 +49,13 @@ export function sqliteMembershipRepository(conn: Database.Database): MembershipR
     },
 
     updateRole(companyId, userId, role, updatedAt) {
+      gate?.assertWithin(companyId, 'memberships.updateRole')
       conn.prepare('UPDATE memberships SET role = ?, updated_at = ? WHERE user_id = ? AND company_id = ?')
         .run(role, updatedAt, userId, companyId)
     },
 
     delete(companyId, userId) {
+      gate?.assertWithin(companyId, 'memberships.delete')
       conn.prepare(`
         DELETE FROM memberships WHERE user_id = ? AND company_id = ?
       `).run(userId, companyId)

@@ -40,6 +40,8 @@ import { createDecisionService, type DecisionService } from '../../src/services/
 import { createOutboundMailService, type OutboundMailService } from '../../src/services/outbound-mail'
 import { createFixedPayloads } from '../../src/services/fixed-payloads'
 import { createCompanyService } from '../../src/services/companies'
+import { createHoldingTicketService } from '../../src/services/holding-tickets'
+import { createReaderChangeGate } from '../../src/lib/reader-change-gate'
 import type { Member } from '../../src/services/access'
 import type { PushEvent } from '../../../shared/types/agent-stop'
 import { canonicalTypeJson, parseTypeFile } from '../../../shared/core/record-types'
@@ -585,6 +587,10 @@ describe('who sees it, who hears of it, who leaves', () => {
       companies: null as never, memberships: sqliteMembershipRepository(conn), companyData: source, clientActivity: null as never,
       accounts: null as never, repoStore: null as never, transactions: sqliteTransactions(conn), clock: { now: () => TS, nowMs: () => 0 },
       ids: null as never, creationPolicy: null as never, isOperator: () => false,
+      trackReaderChange: createHoldingTicketService({
+        companyData: source, memberships: sqliteMembershipRepository(conn), transactions: sqliteTransactions(conn),
+        clock: { now: () => TS, nowMs: () => 0 }, ids: { newId: () => crypto.randomUUID(), newToken: () => 't' }, readerChanges: createReaderChangeGate(),
+      }).track,
     })
     ok(companies.removeMember(m('u-owner'), 'u-bob'))
     expect(source.forCompany('a').records.find(record.id)?.members).toEqual(['u-alice'])

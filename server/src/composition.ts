@@ -92,6 +92,8 @@ import { createJobRuns } from './services/job-runs'
 import { createSkillUseService } from './services/skill-uses'
 import { createGroupService } from './services/groups'
 import { createServerClock } from './services/server-clock'
+import { createHoldingTicketService } from './services/holding-tickets'
+import { createReaderChangeGate } from './lib/reader-change-gate'
 import { createRestorePause } from './services/restore-pause'
 import { createSecurityAlertService } from './services/security-alerts'
 import { createTaskAcceptance } from './services/task-acceptance'
@@ -179,9 +181,12 @@ export interface ServiceOptions {
 }
 
 export function createServices(conn: Database.Database, brokerCipher: BrokerCipherState = brokerCipherFromEnv(), options: ServiceOptions = {}) {
+  // Every storage step that can take a private folder away from someone runs inside
+  // holdingTickets.track, or throws (lib/reader-change-gate.ts, private-folders.md "Access removed").
+  const readerChanges = createReaderChangeGate()
   const repos = {
     companies: sqliteCompanyRepository(conn),
-    memberships: sqliteMembershipRepository(conn),
+    memberships: sqliteMembershipRepository(conn, readerChanges),
     invitationTokens: sqliteInvitationTokens(conn),
     clientActivity: sqliteClientActivityRepository(conn),
     pushRejections: sqlitePushRejectionRepository(conn),
@@ -195,13 +200,16 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
   }
   const shared = {
     // Company handles (ports/company-data.ts): services only; routes never get one.
-    companyData: sqliteCompanyData(conn),
+    companyData: sqliteCompanyData(conn, { readerChanges }),
     accounts: betterAuthAccountDirectory(),
     transactions: sqliteTransactions(conn),
     clock: systemClock,
     ids: randomIds,
   }
   const repoStore = localRepoStore()
+  // Holding tickets: whoever stops reading a private folder may hand over what they never sent (private-folders.md "Access removed").
+  const holdingTickets = createHoldingTicketService({ ...repos, ...shared, readerChanges })
+  const trackReaderChange = holdingTickets.track
   // With or without the shared company folder (owner decision 2026-11-07): what needs the repository asks.
   const companyFolders = createCompanyFolders({ companies: repos.companies, companyData: shared.companyData })
 
@@ -209,6 +217,7 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
   const permissionEditor = createPermissionEditorService({
     ...repos,
     ...shared,
+    trackReaderChange,
     repoStore,
     companyFolders,
     managedFolders: permissionViews.managedFolders,
@@ -757,7 +766,7 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     pluginMappingCheck,
     approvals,
     fixedPayloads,
-    companies: createCompanyService({ ...repos, ...shared, repoStore,
+    companies: createCompanyService({ ...repos, ...shared, repoStore, trackReaderChange,
       creationPolicy: companyCreationPolicyFromEnv(),
       isOperator: userId => operatorUserIds().has(userId),
       indexRecords: companyId => recordIndexer.schedule(companyId),
@@ -807,6 +816,8 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
       driveSweep: companyId => googleDrive.sweep(companyId),
       // A mail / Slack reply left `sending` by a stopped process → unknown, for its person (outbound-mail.md).
       interruptedSends: companyId => outboundMail.settleInterrupted(companyId),
+      // Holding tickets past their 30 days (private-folders.md "Access removed"): every company.
+      expireHoldingTickets: companyId => holdingTickets.expire(companyId),
       yieldNow: () => new Promise<void>(resolve => setImmediate(resolve)),
     }),
     permissionViews,
@@ -827,7 +838,7 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
       },
     }),
     permissionEditor,
-    privateFolders: createPrivateFolderService({ ...repos, ...shared, repoStore, companyLock: processCompanyLock }),
+    privateFolders: createPrivateFolderService({ ...repos, ...shared, repoStore, companyLock: processCompanyLock, trackReaderChange }),
     companyFolders,
     agentEvents,
     agentSandbox,
