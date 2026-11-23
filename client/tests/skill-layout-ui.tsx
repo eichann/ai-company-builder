@@ -25,7 +25,13 @@
 //   manual    1 = the user manual's fictional company (client/tests/manual/scenes.ts): 検証A社 (other: 検証B社),
 //             山田 太郎 in 営業部 (訪問メモ, 提案書, 下書き), 総務部 not downloaded, three Skills, and one
 //             consultation (お礼メールの下書き) in 「AIへの相談」 with a chat server faked for reading it
-//             (sending is not answered). The other parameters still apply.
+//             (sending is not answered). The other parameters still apply. With manual=1 also:
+//     result    what 「サーバーと同期」 answers: conflict (a file both changed: the server's version kept,
+//               this PC's in the backups) | offline (the send failed) | denied (a file in 総務部, which
+//               this member only reads: sync stopped) | restored (that file put back, the rest sent);
+//               absent = 同期が完了しました. 「変更を確認」 lists two changes, 「バックアップ履歴」 two backups.
+//     folders   marks = 総務部 downloaded (閲覧のみ), 営業部/過去資料 not downloaded and the private
+//               folder 営業部/提案前メモ this member reads; other = the same for someone who does not read it
 //
 // 今日のフォルダ: the member belongs to 開発部 (not downloaded) and 営業部, so it is in 営業部;
 // `createDirectory` makes folders on the fake disk (recorded).
@@ -504,6 +510,87 @@ if (MANUAL) {
       onEvent: () => () => {}, onLevel: () => () => {}, onState: () => () => {},
     } as never,
   } satisfies Partial<ElectronAPI>)
+  // 「変更を確認」: what 山田さん changed in chapter 5 (company-relative, as main answers them).
+  const changes = { added: ['営業部/下書き/見積_下書き.md'], modified: ['営業部/訪問メモ_1123.md'], deleted: [] as string[] }
+  const DIFFS: Record<string, string> = {
+    '営業部/訪問メモ_1123.md': '@@ -5,3 +5,4 @@\n - 提案書の内容におおむね賛成\n - 見積を来週までに送る\n - 納期は3月末を希望\n+- 次回：12/1 に見積を持って再訪問',
+    '営業部/下書き/見積_下書き.md': '@@ -0,0 +1,3 @@\n+# A社 見積（下書き）\n+\n+- 研修の進め方の見直し一式',
+  }
+  const BACKUPS = `${ROOT}/.backups`
+  const result = params.get('result')
+  const deniedFile = '総務部/備品の申請.md'
+  Object.assign(api, {
+    gitPreview: async () => ({ success: true, hasChanges: changes.added.length + changes.modified.length > 0, changes: { ...changes }, totalCount: changes.added.length + changes.modified.length }),
+    gitFileDiff: async (_root: string, file: string, status: 'added' | 'modified' | 'deleted') => ({ success: true, diff: DIFFS[file] ?? '', isNewFile: status === 'added' }),
+    gitRevertFile: async (_root: string, file: string, status: string) => {
+      record('gitRevertFile', [file, status])
+      changes.added = changes.added.filter(f => f !== file)
+      changes.modified = changes.modified.filter(f => f !== file)
+      return { success: true }
+    },
+    backupList: async () => ({
+      success: true,
+      backups: [
+        { id: '2026-11-20T01-28-00-000Z', timestamp: '2026-11-20T01:28:00.000Z', reason: 'conflict', files: ['営業部/訪問メモ_1123.md'], path: `${BACKUPS}/2026-11-20T01-28-00-000Z` },
+        { id: '2026-11-19T08-15-00-000Z_before_revert', timestamp: '2026-11-19T08:15:00.000Z', reason: 'before_revert', files: ['営業部/下書き/見積_下書き.md'], path: `${BACKUPS}/2026-11-19T08-15-00-000Z_before_revert` },
+      ],
+    }),
+    backupRestore: async (_root: string, id: string, file: string) => {
+      record('backupRestore', [id, file])
+      return { success: true, message: `Restored: ${file}`, keptPath: `${BACKUPS}/2026-11-20T01-30-00-000Z_before_restore` }
+    },
+    backupOpenFolder: async (path: string) => { record('backupOpenFolder', [path]); return { success: true } },
+    gitSync: async () => {
+      record('gitSync', [])
+      if (params.get('sync') === 'manual') await new Promise<void>(resolve => { finishSync = resolve })
+      else await sleep(150)
+      // The texts git-sync.ts answers in these cases (electron/sync/git-sync.ts, protected-config.ts).
+      if (result === 'conflict') {
+        return {
+          success: true, hadConflicts: true, conflictFiles: ['営業部/訪問メモ_1123.md'], deletedConflictFiles: [],
+          backupPath: `${BACKUPS}/2026-11-20T01-28-00-000Z`,
+          message: '同期完了。1ファイルが競合しました（1件はサーバー版で上書き）。競合前のローカル版は .backups/ に保存してあります。その他の変更は正常に反映されました。',
+        }
+      }
+      if (result === 'offline') return { success: false, errorType: 'push_failed', pushFailed: true, error: 'ローカルにコミットしましたが、プッシュに失敗しました。次回の同期で再試行します。' }
+      if (result === 'denied') {
+        return { success: false, errorType: 'write_denied', writeDeniedFiles: [deniedFile], error: `同期を中止しました。\n\n編集できないファイルがあります。\n次のファイルは、あなたに編集する権限がないフォルダにあるため、変更を共有できません。\n\n・${deniedFile}` }
+      }
+      if (result === 'restored') {
+        return {
+          success: true, restoredWriteDeniedFiles: [deniedFile], writeDeniedBackupPath: `${BACKUPS}/2026-11-20T01-29-00-000Z_write_denied`, backupPath: `${BACKUPS}/2026-11-20T01-29-00-000Z_write_denied`,
+          message: '同期完了。編集する権限がないフォルダのファイル（1件）は元に戻しました。あなたが編集した版は .backups/ に保存してあります。その他の変更は正常に反映されました。',
+        }
+      }
+      return { success: true, message: '同期が完了しました' }
+    },
+  } satisfies Partial<ElectronAPI>)
+  // ?folders=marks|other: the three marks of the file list (chapter 10).
+  const folders = params.get('folders')
+  if (folders === 'marks' || folders === 'other') {
+    excluded = ['営業部/過去資料']
+    DISK[ROOT].splice(1, 0, dir('総務部'))
+    DISK[`${ROOT}/総務部`] = [dir('規程'), file('備品の申請.md'), file('申請書のひな形.md')]
+    DISK[`${ROOT}/総務部/規程`] = [file('就業規則.md')]
+    FILES[`${ROOT}/総務部/申請書のひな形.md`] = '# 申請書のひな形\n\n- 申請する人：\n- 申請する日：\n- 内容：'
+    FILES[`${ROOT}/総務部/備品の申請.md`] = '# 備品の申請\n\n申請書のひな形に書いて、総務部に出してください。'
+    FILES[`${ROOT}/総務部/規程/就業規則.md`] = '# 就業規則\n\n第1条 目的'
+    if (folders === 'marks') {
+      DISK[`${ROOT}/営業部`].splice(2, 0, dir('提案前メモ'))
+      DISK[`${ROOT}/営業部/提案前メモ`] = [file('C社_検討メモ.md')]
+      FILES[`${ROOT}/営業部/提案前メモ/C社_検討メモ.md`] = '# C社 検討メモ\n\n- 提案の前に、値引きの幅を相談する'
+      Object.assign(api, {
+        getMyPrivateFolders: async () => ({ success: true, folders: [{
+          scopeId: 's_memo', path: '営業部/提案前メモ', canWrite: true, viewerCount: 3,
+          viewers: [
+            { userId: 'u_me', name: '山田 太郎', role: 'member' },
+            { userId: 'u_sato', name: '佐藤 花子', role: 'admin' },
+            { userId: 'u_takahashi', name: '高橋 美咲', role: 'member' },
+          ],
+        }] }),
+      } satisfies Partial<ElectronAPI>)
+    }
+  }
   const realFetch = window.fetch.bind(window)
   window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url

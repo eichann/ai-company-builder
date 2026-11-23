@@ -57,7 +57,8 @@ The text writes the name of a button or label the member presses or reads as ［
 brackets), exactly as the screen shows it (a count as the screen shows it too:
 ［選んだ部署をダウンロード（1）］). `client/tests/manual-ui-names.test.ts` (client tests, in CI)
 checks that every such name is still one whole piece of text in the app's screens (`client/src`,
-the admin console's invitation page `admin/src/app/invite/`), so the pull request that renames a
+sync's questions in the Mac's own dialogs `client/electron/sync/`, the admin console's invitation
+page `admin/src/app/invite/`), so the pull request that renames a
 control fails until the manual says the new name. Use ［…］ only for names on screens; quote
 other words with 「…」. A name on a screen this repository does not draw goes in
 `ui-names-allowlist.json` as `"名前": "why it is not in the app's source"` (the test refuses an
