@@ -13,6 +13,7 @@ import {
 } from '../../../shared/core/jobs'
 import { BUILTIN_CONNECTORS, type DeliveryPlaceKind } from '../../../shared/core/builtin-connectors'
 import { canonicalJson } from '../../../shared/core/fixed-content'
+import { DELIVERABLE_FOLDER_MAX } from '../../../shared/core/plugin-step-runs'
 
 /**
  * The definition shapes **this console** shows, edits and accepts (stage 4b-0.5, owner memo 「段4b 設計メモ」 §5-1): its form
@@ -259,7 +260,7 @@ function pcGrant(f: JobForm, event: boolean): JobGrant {
   const chosen = [...new Set([...checkPaths, ...lines(f.readPaths)])]
   // The edited version's order for the places still chosen, then the new ones (`readsOrder`).
   const reads = [...f.readsOrder.filter(p => chosen.includes(p)), ...chosen.filter(p => !f.readsOrder.includes(p))]
-  const writes: JobGrant['writes'] = f.writeFolder.trim() ? { area: 'deliverable', place: f.writePlace.normalize('NFC').trim(), folder: f.writeFolder.trim() } : { area: 'none' }
+  const writes: JobGrant['writes'] = f.writeFolder.trim() ? { area: 'deliverable', place: f.writePlace.normalize('NFC').trim(), folder: f.writeFolder.normalize('NFC').trim() } : { area: 'none' }
   const tools = ['records', ...(reads.length > 0 ? ['files_read'] : []), ...(writes.area === 'deliverable' ? ['files_write'] : []), ...(f.mailDrafts ? ['outbound_draft'] : [])]
   const routes = [
     ...(f.readRecords ? RECORD_READ_ROUTES : []),
@@ -388,7 +389,8 @@ export function jobProblemText(problems: string[]): string {
   if (problems.includes('check.path.BAD') || problems.includes('check.path.NOT_IN_READS')) return '新しいファイルを確かめる場所を、会社のフォルダの中の場所で入れてください（例：営業部/面談）。'
   if (problems.includes('check.titleWords.BAD')) return `会議の名前に含む言葉は${JOB_TITLE_WORDS_MAX}つまで、1つ40文字までにしてください。`
   if (problems.includes('grant.reads.paths.BAD')) return '読んでよい場所は、会社のフォルダの中の場所を1行に1つ入れてください。'
-  if (problems.some(p => p.startsWith('grant.writes'))) return '置き場所は、会社のフォルダの中の場所と、半角の英小文字・数字・- _ のフォルダ名で入れてください。'
+  if (problems.includes('grant.writes.folder.BAD')) return `置き場所のフォルダ名は、部署のフォルダと同じ決まりで入れてください（日本語も使えます。${DELIVERABLE_FOLDER_MAX}文字まで、記号は . _ - だけ。/ や空白は使えず、. で始めることもできません）。`
+  if (problems.some(p => p.startsWith('grant.writes'))) return '置き場所は、会社のフォルダの中の場所で入れてください（例：人事部）。'
   if (problems.includes('grant.deliverTo.NEEDS_DELIVERABLE')) return 'できたものを外に置くには、先に「作ったファイルの置き場所」を入れてください（AI はそこで作ってから置きます）。'
   if (problems.some(p => p.startsWith('grant.deliverTo'))) return 'できたものを置く先を選び直してください。'
   return '内容に正しくないところがあります。選び直してください。'

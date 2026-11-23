@@ -22,6 +22,7 @@ import { BUILTIN_CONNECTORS, isBuiltinConnectorId, type DeliveryPlaceKind } from
 import { canonicalJson } from './fixed-content'
 import { isValidSkillName } from './names'
 import { PLUGIN_STEP_TOOLS } from './plugin-flow-declaration'
+import { deliverableFolderProblem } from './plugin-step-runs'
 import { RECORD_ID_RE } from './records'
 
 /**
@@ -235,7 +236,7 @@ export interface JobDeliveryPlace {
  * The grant (実行契約, design memo §4-1): the most a run of this version may do, on top of the
  * responsible person's own rights. `routes` are names from `AI_ROUTES` (no conditions in schema 1);
  * `reads.calls` (connector reads) stays empty; `writes`: nothing, or only the deliverable folder
- * `<place>/.personal/<folder>/` on the PC; `outbound`: `none`, or drafts only (sending is always a
+ * `<place>/.personal/<folder>/` on the PC (`<folder>`: one department-rule folder name, `deliverableFolderProblem`); `outbound`: `none`, or drafts only (sending is always a
  * person's); `limits`: minutes per run and runs per day. `deliverTo` (absent = none): a place outside ACB
  * the run may also put its deliverables (made in the deliverable folder first) into — and nothing else there.
  */
@@ -274,7 +275,6 @@ const FINGERPRINT_RE = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/
 const SHELF_VERSION_RE = /^[0-9a-f]{64}$/
 /** A shelf item's id (the server's own: a UUID today). */
 export const SHELF_ITEM_ID_RE = /^[A-Za-z0-9_-]{1,100}$/
-const DELIVERABLE_FOLDER_RE = /^[a-z0-9][a-z0-9_-]{0,63}$/
 /** An accepted place's `ref` (a connector's own id: a Drive folder id today). */
 const PLACE_REF_RE = /^[A-Za-z0-9_-]{1,200}$/
 const MAX_PATHS = 20
@@ -534,8 +534,11 @@ function parseGrant(v: unknown, problems: string[]): JobGrant | null {
   } else if (isObj(w) && w.area === 'deliverable') {
     if (keysExactly(w, ['area', 'place', 'folder'], 'grant.writes', problems)) {
       if (jobPathProblem(w.place)) problems.push('grant.writes.place.BAD')
-      if (typeof w.folder !== 'string' || !DELIVERABLE_FOLDER_RE.test(w.folder)) problems.push('grant.writes.folder.BAD')
-      if (!jobPathProblem(w.place) && typeof w.folder === 'string' && DELIVERABLE_FOLDER_RE.test(w.folder)) writes = { area: 'deliverable', place: w.place as string, folder: w.folder }
+      // The folder: one name by the department folder rule (Japanese too, owner decision 2026-11-23), NFC, at most
+      // `DELIVERABLE_FOLDER_MAX` — the same rule a step's deliverable folder and the app's write guard (`insideDeliverableAt`) use.
+      const folderOk = deliverableFolderProblem(w.folder) === null
+      if (!folderOk) problems.push('grant.writes.folder.BAD')
+      if (!jobPathProblem(w.place) && folderOk) writes = { area: 'deliverable', place: w.place as string, folder: w.folder as string }
     }
   } else problems.push('grant.writes.BAD')
   if (v.outbound !== 'none' && v.outbound !== 'draft_only') problems.push('grant.outbound.BAD')

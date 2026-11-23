@@ -116,6 +116,25 @@ versions the shape (a later shape is `schema: 2`; stored versions are never re-r
   Each power is named once where it is granted (`files_read` ⇔ read paths, `files_write` ⇔ deliverable,
   `outbound_draft` ⇔ `draft_only`, a procedure's `creates` needs `records`). Paths: company paths,
   never the root, `..`, `\`, `.personal` / `.backups` / `.workspace`.
+- **The deliverable folder's name** (`writes.folder`, owner decision 2026-11-23, every job — time and event, every
+  schema): one folder name by **the department folder rule** (`isValidFolderName`, `shared/core/names.ts`: ASCII word
+  characters, hiragana, katakana, kanji, then also `.` `_` `-`; never a leading `.` / `-`, a `/`, `\`, space, control,
+  zero-width / bidi or full / half width character — the hiragana block's bare combining marks U+3099 / U+309A are taken,
+  as for a department: no escape, the guard and the disk fold them alike; a trailing `.` too, which Windows drops, so there
+  every write is refused, fail closed, as for a step's folder), in NFC (an NFD spelling is refused, not normalized: the admin form sends NFC),
+  at most `DELIVERABLE_FOLDER_MAX` (60) — `deliverableFolderProblem` (`shared/core/plugin-step-runs.ts`), the same check a
+  plugin step's folder and the app's write guard (`insideDeliverableAt`) apply, so the parser and the guard cannot drift.
+  Until then `^[a-z0-9][a-z0-9_-]{0,63}$`; a stored 61–64 letter name could never be written to (the guard already
+  held 60) and a new app no longer runs it (its turn is refused: the occurrence expires, told). The schema number did not
+  change (owner: 「広げないメリットがない」), so the builds before this one meet a Japanese folder as follows: **an older
+  server** never re-parses a stored version (`storedJobDefinition`) — it keeps, shows, approves and runs such a saved
+  version as is (the approval's rights check names the place, not the folder) — but refuses to save one newly
+  (`grant.writes.folder.BAD`: an older admin console cannot create or edit it); **an older app** parses every turn with its
+  own copy of the parser (`parseJobTurn`) and so never claims or runs it (the occurrence expires, the responsible person
+  and the creator told); **a newer app on an older server** runs it with the same write guard, which already took the
+  department rule. Tests: `jobs-definition.test.ts` "the deliverable folder's name", `client/tests/job-runs.test.ts` 「a
+  Japanese deliverable folder」 (the turn parsed; NFC / NFD of one name are one folder; `..`, a link, another place or
+  name refused), `admin/tests/jobs.test.tsx` (the form sends NFC, plain words for a bad name).
 - `jobConsentCanonical`: who (`actingUser`), `run`, `placement`, `grant` — what the responsible person
   accepts (D4). A name, trigger, check or missed policy change needs no new acceptance. An event job adds its trigger
   (schema 2) and, run by the PC (schema 3), its trigger and its check (the done mark decides when the AI is called).
@@ -1778,7 +1797,7 @@ membership can fail).
 
 - `server/tests/unit/jobs-definition.test.ts` — strict parser (unknown keys / values at every level,
   tools and routes vocabulary, no connector reads, paths), what runs where, D6, the consent part, an
-  occurrence id never a record id.
+  occurrence id never a record id, the deliverable folder's name (the department folder rule).
 - `server/tests/unit/jobs-schema.test.ts` — on `tests/fixtures/app-schema-before-jobs.sql` (frozen):
   additive and idempotent, same as a new database; one occurrence per slot; id CHECKs; versions never
   rewritten, approved / accepted once.

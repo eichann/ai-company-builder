@@ -357,3 +357,34 @@ describe('a member’s proposal (schema 4, jobs.md "Member proposals")', () => {
     expect(jobConsentCanonical(parsed(proposed()))).toBe(jobConsentCanonical(parsed(pcJob())))
   })
 })
+
+describe('the deliverable folder\'s name (owner decision 2026-11-23: the department folder rule, for every job)', () => {
+  const withFolder = (base: Record<string, unknown>, folder: unknown) => edit(base, 'grant.writes.folder', folder)
+  const eventPcJob = (): Record<string, unknown> => ({
+    ...pcJob(), schema: 3, check: { kind: 'source_record', doneMark: 'none' },
+    trigger: { kind: 'record', type: 'task', event: 'state', to: 'done', assignee: 'responsible', startRecord: 'task-0123456789abcdef', followMadeTask: true },
+  })
+
+  it('a Japanese name (or any department folder name) is taken as given, for a time job and an event job alike', () => {
+    for (const base of [pcJob(), eventPcJob()]) {
+      for (const folder of ['面談報告書', '提案書_A社', 'Reports', '2026年度.報告', 'ひらがな-カタカナ', 'reports']) {
+        expect(parsed(withFolder(base, folder)).grant.writes).toEqual({ area: 'deliverable', place: '支援', folder })
+      }
+    }
+  })
+
+  it('one plain folder name only: never a path, a hidden or dot name, a space, a control or invisible character, another width, NFD or too long', () => {
+    const refused = [
+      '', '.', '..', '.personal', '.git', '面談/報告', '../人事部', '面談\\報告', '面談 報告', ' 面談', '面談\n', '面談\u0000',
+      'a​b', '面談‮', '﻿面談', 'ＲＥＰＯＲＴＳ', '．ｐｅｒｓｏｎａｌ', 'ﾚﾎﾟｰﾄ', '-reports', '報告:1', '報告*',
+      'ガイド'.normalize('NFD'), '報'.repeat(61), 1, null,
+    ]
+    for (const folder of refused) expect(problems(withFolder(pcJob(), folder)), JSON.stringify(folder)).toEqual(['grant.writes.folder.BAD'])
+    // At the limit it is taken (the step folders' `DELIVERABLE_FOLDER_MAX`, which the app's write guard holds too).
+    expect(parsed(withFolder(pcJob(), '報'.repeat(60))).grant.writes).toMatchObject({ folder: '報'.repeat(60) })
+  })
+
+  it('the consent changes with the folder: a version naming another folder asks the responsible person again', () => {
+    expect(jobConsentCanonical(parsed(withFolder(pcJob(), '面談報告書')))).not.toBe(jobConsentCanonical(parsed(pcJob())))
+  })
+})
