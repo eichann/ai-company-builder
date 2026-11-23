@@ -158,6 +158,26 @@ test('⌘F in a Markdown preview finds text: count, next, previous, Escape close
   await expect(page.locator('mark[data-search-highlight]')).toHaveCount(0)
 })
 
+test('⌘F in a preview also finds the name and description shown from the file\'s frontmatter', async ({ page }) => {
+  await open(page)
+  // A SKILL.md-like file: the `---` block becomes the quiet box above the text.
+  await page.evaluate(p => {
+    const w = window as unknown as { __acbFiles: Record<string, string>; __acbFileChange: (path: string) => void }
+    w.__acbFiles[p] = '---\nname: proposal-writer\ndescription: 提案書の骨子を作る\n---\n\n# 議事録\n\n本文です。'
+    w.__acbFileChange(p)
+  }, LONG_DOC)
+  await tab(page, LONG_DOC).click()
+  await page.getByRole('button', { name: 'プレビュー' }).click()
+  await expect(page.getByRole('note', { name: 'このファイルの情報' })).toContainText('proposal-writer')
+  await expect.poll(() => page.evaluate(() => !!document.activeElement?.closest('[data-command-area="editor"]'))).toBe(true)
+  await shortcut(page, { key: 'f' })
+  const box = page.getByPlaceholder('検索...')
+  await box.fill('proposal-writer')
+  await expect(page.getByText('1/1')).toBeVisible()
+  await box.fill('骨子')
+  await expect(page.getByText('1/1')).toBeVisible()
+})
+
 test('the preview keeps its scroll position when the member opens another file and comes back', async ({ page }) => {
   await open(page)
   await tab(page, LONG_DOC).click()

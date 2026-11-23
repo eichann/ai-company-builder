@@ -133,13 +133,14 @@ export const MarkdownPreview = React.forwardRef<HTMLDivElement, {
             </button>
           </div>
         )}
-        {front.info && (
-          <div className="max-w-3xl mx-auto mb-4 rounded-control border border-[color:var(--color-border)] bg-surface-sunken px-3 py-2 text-small text-text-muted" role="note" aria-label="このファイルの情報" data-frontmatter>
-            {front.info.name && <div className="font-strong text-text">{front.info.name}</div>}
-            {front.info.description && <div className="mt-0.5 whitespace-pre-wrap">{front.info.description}</div>}
-          </div>
-        )}
         <div ref={bodyRef} className="max-w-3xl mx-auto markdown-body">
+          {/* Inside the searched body: ⌘F finds the name and description too. */}
+          {front.info && (
+            <div className="mb-4 rounded-control border border-[color:var(--color-border)] bg-surface-sunken px-3 py-2 text-small text-text-muted" role="note" aria-label="このファイルの情報" data-frontmatter>
+              {front.info.name && <div className="font-strong text-text">{front.info.name}</div>}
+              {front.info.description && <div className="mt-0.5 whitespace-pre-wrap">{front.info.description}</div>}
+            </div>
+          )}
           <Markdown remarkPlugins={[remarkGfm]} components={components}>
             {front.body}
           </Markdown>

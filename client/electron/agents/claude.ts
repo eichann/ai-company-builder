@@ -267,9 +267,11 @@ export function createClaudeConnection(config: ClaudeConnectionConfig, createMod
               // If UI approval is available, ask the user
               if (config.requestToolApproval) {
                 const toolUseId = input.tool_use_id || crypto.randomUUID()
+                // Claude's own one-line description rides along for the banner only (display, not what is approved).
+                const description = typeof input.tool_input?.description === 'string' ? input.tool_input.description : undefined
                 const result = await config.requestToolApproval(
                   input.tool_name,
-                  { command: cmd },
+                  { command: cmd, ...(description ? { description } : {}) },
                   toolUseId,
                   appSessionId,
                 )

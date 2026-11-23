@@ -431,9 +431,12 @@ request / status shapes and their checks, `closeStopsTheAI`), the window registr
   (`client/shared/tool-approval-words.ts` `approvalWordsOf`): a command the hook asks about by its
   entry in `client/shared/dangerous-commands.ts` (the list `agents/claude.ts` asks with, so the two never
   drift: 「ファイルを消すコマンドを実行します」), any other command 「コマンドを実行します」, another tool its row label
-  as 「…します」, an unknown one 「ほかの道具を使います」. The tool's name and the exact command / path stay
-  behind 「くわしく」 (`<details>`). The list's 「許可を待っています：…」 uses the same words. Presentation
-  only: what is asked and what 許可 allows are unchanged. Test: `src/features/chat/tool-approval.test.ts`.
+  as 「…します」, an unknown one 「ほかの道具を使います」. Under it, Claude's own one-line `description` of the
+  command (the hook passes it in the request's `toolInput` for display only), masked by `shortText`.
+  The tool's name and the exact command / path stay behind 「くわしく」 (`<details>`). The list's
+  「許可を待っています：…」 uses the same words. Presentation only: what is asked and what 許可 allows are
+  unchanged. Tests: `src/features/chat/tool-approval.test.ts`, `tests/dangerous-command-hook.test.ts`
+  (one example per entry through the real hook asks; the list's length pinned at 20; the description).
 - Per-turn tool payload cap (`electron/ui-stream-limits.ts` `turnBudget`): after 2 MB of tool
   inputs/outputs in one turn (api-key mode 8 MB), later payloads are cut to 1 KB and input deltas
   stop; rows, states, errors, answer text and data parts are untouched.
