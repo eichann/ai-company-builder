@@ -100,7 +100,7 @@ function ask(by: string, assignee: string, opts: { co?: string; actor?: typeof H
 
 function meeting(attendees: string[], co = 'a') {
   const r = writer.create(co, {
-    type: 'meeting', title: '定例', fields: { assignee: 'u-alice', attendees: JSON.stringify(attendees) }, links: {}, actor: { id: 'u-alice', kind: 'human' },
+    type: 'meeting', title: '定例', folder: null, fields: { assignee: 'u-alice', attendees: JSON.stringify(attendees) }, links: {}, actor: { id: 'u-alice', kind: 'human' },
   })
   if (!r.ok) throw new Error(r.reason)
   return r.record.id

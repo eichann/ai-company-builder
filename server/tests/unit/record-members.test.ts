@@ -319,7 +319,7 @@ describe('creating one', () => {
     expect(writer.check('a', { type: 'meeting', title: 'x', members: ['u-alice'], fields: { assignee: 'u-carol' }, actor })).toMatchObject({ reason: 'assignee-cannot-read' })
     const mt = meeting()
     expect(writer.check('a', { type: 'task', title: 'x', folder: '営業部', links: { meeting: [mt.id] }, fields: { assignee: 'u-alice' }, actor })).toMatchObject({ reason: 'bad-place' })
-    const review = writer.create('a', { type: 'task', title: '議事録を確認する', links: { meeting: [mt.id] }, fields: { assignee: 'u-alice' }, actor })
+    const review = writer.create('a', { type: 'task', title: '議事録を確認する', folder: null, links: { meeting: [mt.id] }, fields: { assignee: 'u-alice' }, actor })
     if (!review.ok) throw new Error(review.reason)
     expect(source.forCompany('a').records.find(review.record.id)?.members).toEqual(['u-alice', 'u-bob'])
   })

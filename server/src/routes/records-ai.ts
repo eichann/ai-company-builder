@@ -9,7 +9,7 @@
  *   GET  /types   GET /my-turn   GET /ai-turn   POST /query   GET /item/:recordId
  *   GET  /item/:recordId/history
  *   (these look-ups add `people`: id → display name of the company members they name, services/people-names.ts)
- *   POST /item                                  (act) — with the AI's defaults (`createByAi`); `defaultFolder` = the consultation's department
+ *   POST /item                                  (act) — with the AI's defaults (`createByAi`); `defaultFolder` = the consultation's department, `defaultPlace: 'company'` = its 全社 tab
  *   POST /decisions                             (act) record a decision (services/decisions.ts)
  *   POST /item/:recordId/actions/:action         (act)
  *   POST /item/:recordId/file-links (+ /remove)  (act) link a file later / remove it (types letting the AI act)

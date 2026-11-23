@@ -121,7 +121,7 @@ beforeEach(() => {
 /** An approval for u-bob to approve, made by the service writer (as G6 will). */
 function newApproval(co = 'a') {
   const r = writer.create(co, {
-    type: 'approval', title: '金額の変更', fields: { assignee: 'u-bob', operation: 'hubspot.update_deal', payload_hash: 'sha256:aa', payload_version: 1 },
+    type: 'approval', title: '金額の変更', folder: null, fields: { assignee: 'u-bob', operation: 'hubspot.update_deal', payload_hash: 'sha256:aa', payload_version: 1 },
     actor: { id: 'u-alice', kind: 'ai', source: 'claude-code' },
   })
   if (!r.ok) throw new Error(r.reason)

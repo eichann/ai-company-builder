@@ -125,7 +125,7 @@ function receivedMeeting(co = 'a') {
 /** A 返事のお願い waiting for their reply, expected by `waitUntil`. */
 function waitingReplyRequest(waitUntil: string, co = 'a') {
   const r = writer.create(co, {
-    type: 'reply_request', title: '見積の返事', state: 'waiting_reply',
+    type: 'reply_request', title: '見積の返事', folder: null, state: 'waiting_reply',
     fields: { assignee: 'u-alice', requested_by: 'u-alice', wait_until: waitUntil, waiting_on: '先方の返事' },
     actor: { id: 'u-alice', kind: 'human', source: null },
   })
@@ -214,7 +214,7 @@ describe('「見るだけ」 and turning back on', () => {
 
   it('受信 off: a 返事のお願い leaves 「あなたの番」 and takes no action, no new one is made — a sent mail\'s receipt still is', async () => {
     const r = writer.create('a', {
-      type: 'reply_request', title: '見積の返事', state: 'waiting_reply',
+      type: 'reply_request', title: '見積の返事', folder: null, state: 'waiting_reply',
       fields: { assignee: 'u-alice', requested_by: 'u-alice', waiting_on: '先方' },
       actor: { id: 'u-alice', kind: 'human', source: null },
     })
@@ -226,11 +226,11 @@ describe('「見るだけ」 and turning back on', () => {
     expect(ok(records.myTurn(m('u-alice'))).records.map(x => x.id)).not.toContain(r.record.id)
     expect(refusedCode(await engine.act(m('u-alice'), HUMAN, r.record.id, 'close', { expectedVersion: 2 }))).toBe('FEATURE_OFF')
     expect(writer.create('a', {
-      type: 'reply_request', title: '別の返事', fields: { assignee: 'u-alice' }, actor: { id: 'u-alice', kind: 'human', source: null },
+      type: 'reply_request', title: '別の返事', folder: null, fields: { assignee: 'u-alice' }, actor: { id: 'u-alice', kind: 'human', source: null },
     })).toMatchObject({ ok: false, reason: 'feature-off' })
     // The receipt of a mail sent from ACB: sending stays on.
     expect(writer.create('a', {
-      type: 'interaction', title: '送ったメール', fields: { channel: 'email' }, actor: { id: 'u-alice', kind: 'human', source: null },
+      type: 'interaction', title: '送ったメール', folder: null, fields: { channel: 'email' }, actor: { id: 'u-alice', kind: 'human', source: null },
     }).ok).toBe(true)
 
     turnOn('inbox')

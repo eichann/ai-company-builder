@@ -16,13 +16,13 @@ import { DEFAULT_TASK_SETTINGS, replyTarget } from '../../../shared/core/task-se
 import { applyAcceptance } from './acceptance'
 import type { EngineContext } from './context'
 import { interfaceLinkMisses, interfaceLinkRefusal } from './links'
-import { ASSIGNEE_CANNOT_READ, REVIEWER_CANNOT_READ, bad, FILE_NOT_LINKABLE, fileLinksUnavailable, FOLDER_NOT_PLACEABLE, featureOffRefusal, LINK_TARGET_NOT_FOUND, runFenceRefusal, TYPE_CREATED_BY_SERVICE } from './refusals'
+import { ASSIGNEE_CANNOT_READ, REVIEWER_CANNOT_READ, bad, FILE_NOT_LINKABLE, fileLinksUnavailable, FOLDER_NOT_PLACEABLE, featureOffRefusal, LINK_TARGET_NOT_FOUND, PLACE_REQUIRED, AI_PLACE_REQUIRED, runFenceRefusal, TYPE_CREATED_BY_SERVICE } from './refusals'
 import type { ActorInput } from './types'
 import { checkValue, provenance } from './values'
 import { MEETING_OUTPUT_KEY_MAX } from '../../../shared/core/meeting-outputs'
 import { slotQuote } from '../../../shared/core/source-slot-candidates'
 import { decideSlot, similarInSlot, slotScope } from '../source-slot-candidates'
-import { meetingMembers, membersList, withNamedPeople } from './members'
+import { meetingFolder, meetingMembers, membersList, withNamedPeople } from './members'
 import { placeOfRow } from './service-writer'
 import { coreStepCreateTypes } from '../../../shared/core/ai-runs'
 import { defaultBundleFolder } from '../../../shared/core/bundle-place'
@@ -35,26 +35,31 @@ export function creating(ctx: EngineContext) {
    * What the member's AI makes, placed as the member would expect (records.md "Where the AI puts
    * a request", owner decision 2026-11-03): a request about the member alone → owner-only with
    * the member as assignee; another person named, or a department asked for → the department of
-   * the consultation (`defaultFolder`, sent by the app; none = the whole company), assignee as said
-   * or the member. A meeting's outputs keep their own place (minutes.md).
+   * the consultation (`defaultFolder`, sent by the app; `defaultPlace: 'company'` = the 全社 tab), assignee
+   * as said or the member. A meeting's outputs keep their own place (minutes.md). Nothing that fits →
+   * nothing added: `create` then decides (owner-only, or refused: records.md "全社 is a choice").
    */
   function aiPlacement(member: Member, body: unknown): unknown {
     if (typeof body !== 'object' || body === null || Array.isArray(body)) return body
-    const { defaultFolder, ...rest } = body as Record<string, unknown>
+    const { defaultFolder, defaultPlace, ...rest } = body as Record<string, unknown>
     // A list of members says where it goes (records.md "Members-only records"): no defaults added.
     if (rest.members !== undefined && rest.members !== null) return rest
+    // The app's 全社 tab: used only where the screen's department would have been (a department on screen comes first).
+    const onCompanyTab = defaultPlace === 'company'
+    const placeSaid = (rest.folder !== undefined && rest.folder !== null) || (rest.place !== undefined && rest.place !== null)
     const opened = open(member)
     const def = opened && typeof rest.type === 'string' ? currentTypes(opened.records).get(rest.type)?.definition : undefined
     // A new まとまり (案件・プロジェクト) belongs to the member's own department (所属) unless the AI names
     // one (records.md "A task and its 案件・プロジェクト"): the one on screen when it is theirs, else their first.
-    if (opened && def && def.implements.includes('bundle') && (rest.folder === undefined || rest.folder === null) && rest.personal !== true) {
+    if (opened && def && def.implements.includes('bundle') && !placeSaid && rest.personal !== true) {
       const handle = companyData.forCompany(member.companyId)
       const folder = defaultBundleFolder({
         departments: handle.departments.list().map(d => ({ id: d.id, folder: d.folder })),
         mine: handle.tasks.departmentIdsOf(member.userId),
         onScreen: typeof defaultFolder === 'string' && defaultFolder.trim() !== '' ? defaultFolder : null,
       })
-      return folder !== null ? { ...rest, folder } : rest
+      // No department of the member's and the 全社 tab on screen: 全社, as the screen says.
+      return folder !== null ? { ...rest, folder } : onCompanyTab ? { ...rest, place: 'company' } : rest
     }
     if (!opened || !def || !def.implements.includes('request') || def.fields.assignee?.source !== 'server') return rest
     const links = rest.links
@@ -67,13 +72,13 @@ export function creating(ctx: EngineContext) {
     const said = fields.assignee
     const noAssignee = said === undefined || said === null
     const someoneElse = typeof said === 'string' && said !== member.userId
-    const folderSaid = rest.folder !== undefined && rest.folder !== null
     const personalAllowed = !opened.records.typeVersions().some(t => t.name === def.name && t.source === 'plugin')
     if (noAssignee) fields.assignee = member.userId
     if (rest.personal === true) return { ...rest, fields }
-    if (rest.personal === undefined && !folderSaid && !someoneElse && personalAllowed) return { ...rest, personal: true, fields }
-    const folder = folderSaid ? rest.folder : !forBundle && typeof defaultFolder === 'string' && defaultFolder.trim() !== '' ? defaultFolder : undefined
-    return { ...rest, fields, ...(folder !== undefined ? { folder } : {}) }
+    if (rest.personal === undefined && !placeSaid && !someoneElse && personalAllowed) return { ...rest, personal: true, fields }
+    if (placeSaid || forBundle) return { ...rest, fields }
+    if (typeof defaultFolder === 'string' && defaultFolder.trim() !== '') return { ...rest, fields, folder: defaultFolder }
+    return { ...rest, fields, ...(onCompanyTab ? { place: 'company' } : {}) }
   }
 
   /**
@@ -214,6 +219,12 @@ export function creating(ctx: EngineContext) {
         if (!Array.isArray(list)) return bad(list.error, list.code)
         members = [...new Set([member.userId, ...list])]
       }
+      // `place: 'company'` = 全社, said on purpose (records.md "全社 is a choice"): never with another place.
+      if (b.place !== undefined && b.place !== null && b.place !== 'company') return bad('place: "company" (the whole company) or left out', 'BAD_PLACE')
+      const companySaid = b.place === 'company'
+      if (companySaid && (personalOwner !== null || members !== null || (b.folder !== undefined && b.folder !== null))) {
+        return bad('会社全体と、自分用・部署・見る人は一緒に指定できません', 'PLACE_CONFLICT')
+      }
       let folder: string | null = null
       if (b.folder !== undefined && b.folder !== null) {
         // A 非公開 案件・プロジェクト (records.md "Private 案件・プロジェクト"): a まとまり made by a person in its own
@@ -309,7 +320,7 @@ export function creating(ctx: EngineContext) {
       }
       const inherited = members === null ? meetingList : null
       if (inherited !== null) {
-        if (folder !== null) return bad('見る人が決まった会議からできた記録には、部署を指定できません', 'MEMBERS_WITH_PLACE')
+        if (folder !== null || companySaid) return bad('見る人が決まった会議からできた記録には、部署を指定できません', 'MEMBERS_WITH_PLACE')
         if (isPluginType) return bad('この種類の記録は見る人を選んで作れません', 'MEMBERS_NOT_FOR_TYPE')
         members = withNamedPeople([member.userId, ...inherited.users], def, fields)
         memberSets = inherited.sets
@@ -317,19 +328,42 @@ export function creating(ctx: EngineContext) {
       // A task that belongs to a まとまり is never seen by more people than the まとまり (records.md "A task
       // and its 案件・プロジェクト"): with no place of its own it takes the まとまり's (`placeOfRow`'s three
       // kinds); a place given is kept only when it is within. Owner-only stays owner-only.
+      // A place came from what it links (a まとまり, a meeting): not "nothing given" (below).
+      let inheritedPlace = false
       if (BUNDLE_PLACED_TYPES.includes(def.name) && personalOwner === null) {
         const bundle = linkedBundle(records, def, links, r => reader.record(r))
-        if (bundle && folder === null && members === null) {
+        if (bundle && folder === null && members === null && !companySaid) {
           const from = placeOfRow(bundle)
           if ('personalOwner' in from) personalOwner = from.personalOwner
           else if ('members' in from) { members = [...from.members]; memberSets = [...(from.memberSets ?? [])] }
           else folder = from.folder
+          inheritedPlace = true
         } else if (bundle) {
           const scopes = companyData.forCompany(member.companyId).scopes.listWithRules()
           const task = { id: '', type: def.name, scopeId: null, path: null, folder, personalOwner, members, memberSets }
           if (!placeWithin(member.companyId, scopes, id => deps.roleOf(member.companyId, id), task, bundle)) {
             return bad(WIDER_THAN_BUNDLE.error, WIDER_THAN_BUNDLE.code)
           }
+        }
+      }
+      // 全社 is a choice (records.md "全社 is a choice", owner decision 2026-11-23): nothing given is no
+      // longer quietly the whole company.
+      if (folder === null && personalOwner === null && members === null && !companySaid && !inheritedPlace) {
+        // Made from a meeting (made before members-only meetings): where the meeting is — its folder as stored (the
+        // member reads the meeting, so never wider than it; not checked by `placeFolder`, which is for a folder given),
+        // the whole company, or its owner's alone (the member, who reads it; never a plugin's type).
+        const fromMeeting = meetingFolder(records, links)
+        if (fromMeeting && 'folder' in fromMeeting) folder = fromMeeting.folder
+        else if (fromMeeting && 'personalOwner' in fromMeeting && fromMeeting.personalOwner === member.userId && !isPluginType) personalOwner = member.userId
+        else if (actor.kind === 'ai' && !isPluginType && b.personal !== false
+          && withNamedPeople([member.userId], def, fields).length === 1) {
+          // The AI said nowhere and nobody else is named: the member's own (本人だけ); the answer's `placed` says so.
+          personalOwner = member.userId
+        } else {
+          // Released apps send nothing for 全社 (a person's create, the AI's tool, which cannot say `place`): still the
+          // whole company, until every active member's app says 全社 explicitly (`placeRequired`); then refused.
+          const r = actor.kind === 'ai' ? AI_PLACE_REQUIRED : PLACE_REQUIRED
+          if (deps.placeRequired?.(member.companyId)) return bad(r.error, r.code)
         }
       }
       const place = { id: '', type: def.name, scopeId: null, path: null, folder, personalOwner, members, memberSets }

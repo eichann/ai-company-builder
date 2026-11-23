@@ -471,21 +471,29 @@ function fileLinkTools(typeNames: string[]): RecordToolSpec[] {
 const PLACEMENT_WORDS = 'やること（依頼）の置き場所：メンバー本人だけのこと（ほかの人の名前が出ない、部署に置くよう言われていない）なら、personal も assignee も folder も省く（本人だけに見える自分用になり、担当は本人）。' +
   'ほかの人に頼む・担当にするときは assignee にその人の id（部署は相談を始めた部署になる）。「部署のやることにして」と言われたら personal: false（担当を言われなければ本人）。ほかの部署を名指しされたときだけ folder。' +
   '案件・プロジェクト（links.bundle）のやることは、その案件と同じ人たちに見える場所に入る（folder は省く。案件より多くの人に見える場所は断られる）。新しい案件・プロジェクトは、folder を省くとメンバーの所属する部署に入る。責任者（fields.owner）はメンバー本人の id にする（ほかの人を責任者にと言われたときだけその人。省いても本人になる）。' +
+  'やること以外の記録も、置き場所（folder / personal / place）を言わず、ほかの人の名前も出ないときは、本人だけに見える自分用になる。会社のみんなに見せるのは、メンバーが会社全体・全社と言ったときだけ place: "company"。置き場所が決まらず断られたら（PLACE_REQUIRED）、どこに置くかメンバーに聞く。' +
   '作ったあとは、どこに入れたかを必ずメンバーに伝える（答えの placed と tellMember）。\n'
 const PLACEMENT_WORDS_EN = ' Placement of a request (task): about the member alone (no other person named, no department asked for) → leave personal, assignee and folder out (it becomes owner-only, assigned to the member). ' +
   'Someone else as assignee → their id in fields.assignee (it goes to the department the consultation is in). "Make it the department\'s" → personal: false. folder only when the member names another department. ' +
   'A task for a 案件・プロジェクト (links.bundle) goes where that 案件 is seen (leave folder out; a place seen by more people is refused). A new 案件・プロジェクト without folder goes to the member\'s own department; its 責任者 (fields.owner) is the member\'s id unless they name someone else (left out, it is the member). ' +
+  'Any other record made without a place (folder / personal / place) and naming nobody else becomes owner-only too. place: "company" (the whole company) only when the member asks for the whole company. Refused with PLACE_REQUIRED → ask the member where it goes. ' +
   'Afterwards always tell the member where it went (the answer\'s placed / tellMember).'
 
 /** records_create's answer, with the sentence that tells the member where it went. */
 function createdAnswer(answer: unknown): string {
-  const a = answer as { placed?: { personal?: unknown; folder?: unknown }; record?: { fields?: Record<string, unknown> } } | undefined
+  const a = answer as { placed?: { personal?: unknown; folder?: unknown; membersOnly?: unknown }; record?: { type?: unknown; fields?: Record<string, unknown> } } | undefined
   const placed = a?.placed
   const f = a?.record?.fields ?? {}
   const whose = f.assignee !== undefined && f.assignee !== null && f.assignee === f.requested_by ? 'あなたの担当で' : '<担当の名前>さんの担当で'
+  // A task is a やること; any other record is said without the task's words (records.md "全社 is a choice").
+  const task = a?.record?.type === undefined || a.record.type === 'task'
   const where = !placed ? null
-    : placed.personal === true ? 'あなただけに見えるやることに入れました（部署に出すときはカードの［部署に出す］から）'
-      : `${typeof placed.folder === 'string' ? `「${placed.folder}」` : '会社全体'}のやることに、${whose}入れました`
+    : placed.personal === true
+      ? (task ? 'あなただけに見えるやることに入れました（部署に出すときはカードの［部署に出す］から）' : 'あなただけに見える記録として置きました（ほかの人には見えません）')
+      // A members-only one (a meeting's people) is not the whole company: never told so.
+      : placed.membersOnly === true ? (task ? `決まった人だけに見えるやることに、${whose}入れました` : '決まった人だけに見える記録として置きました')
+        : task ? `${typeof placed.folder === 'string' ? `「${placed.folder}」` : '会社全体'}のやることに、${whose}入れました`
+          : `${typeof placed.folder === 'string' ? `「${placed.folder}」を見られる人` : '会社のみんな'}に見える記録として置きました`
   const tellMember = where && where.includes('<担当の名前>') ? `${where}（<担当の名前> は担当にした人の名前に置き換える）` : where
   const out = JSON.stringify(tellMember ? { ...(answer as object), tellMember } : answer)
   return out.length > MAX_OUTPUT ? `${out.slice(0, MAX_OUTPUT)}…（長いため切り詰めました / truncated）` : out
@@ -511,7 +519,7 @@ export function narrowCreateTypes<T extends RecordToolDescriptor>(spec: T, types
  * (the server refuses them anyway) — and a feature's own tools (decisions_record,
  * minutes_link_bundle) are offered only while it is on, whatever types exist.
  */
-export function actionToolSpecs(types: TypeDefinition[], place: { department?: string | null } = {}, features: CompanyFeatures = DEFAULT_FEATURES): RecordToolSpec[] {
+export function actionToolSpecs(types: TypeDefinition[], place: { department?: string | null; companyScreen?: boolean } = {}, features: CompanyFeatures = DEFAULT_FEATURES): RecordToolSpec[] {
   const specs: RecordToolSpec[] = []
   const live = types.filter(t => !typeIsViewOnly(t.name, features))
   // Service-owned types (議事録・承認のお願い・送るメール・決めたこと) are made by the server's own steps only.
@@ -529,6 +537,7 @@ export function actionToolSpecs(types: TypeDefinition[], place: { department?: s
           .describe('サーバーの欄。タグの欄は文字の並び / server fields; a tags field takes a list of strings'), links: z.record(z.string(), z.union([z.string(), z.array(z.string()).max(50)])).optional(),
         personal: z.boolean().optional().describe('省く＝おまかせ（ほかの人が出てこなければ自分用）。true = 自分用（メンバー本人だけが見る。管理者にも見えない。担当は本人だけ）。false = 部署のやること / leave out = decided for you (owner-only unless someone else is involved); true = owner-only; false = a department\'s'),
         folder: z.string().min(1).max(200).optional().describe('置く部署のフォルダ（メンバーがほかの部署を名指ししたときだけ。省くと相談を始めた部署） / the department folder, only when the member names another department (default: the consultation\'s)'),
+        place: z.literal('company').optional().describe('"company" = 会社のみんなに見せる（メンバーが会社全体・全社と言ったときだけ。folder・personal と一緒にはしない） / "company" = the whole company, only when the member asks for it (never with folder or personal)'),
         quote: z.string().min(MINUTES_QUOTE_MIN).max(MINUTES_QUOTE_MAX).optional().describe('会議から作るとき（links.meeting と一緒に）：根拠になった議事録の文をそのまま写す（作り話や要約はだめ）。同じ会議で同じ根拠の案がもうあれば新しくは作られず、それが返る（reused・「同じ根拠の案がもうあります」）。件名が似た案があれば両方残り similar が付く。通し番号の目印（task:1 など）は付けない / for an output of a meeting (with links.meeting): the minutes text it rests on, copied exactly. The same basis in the same meeting returns the existing candidate (reused); a close title is kept and marked `similar`. Never invent serial keys such as task:1'),
         state: z.string().max(40).optional().describe('始める状態（型の create_states のどれか。例 task の preparing＝AI が下ごしらえしてから担当に渡す）。ふつうは省く / the state to start in (one of the type\'s create_states, e.g. task preparing: the AI prepares first, then hands it over); normally leave out'),
       }).strict(),
@@ -537,8 +546,15 @@ export function actionToolSpecs(types: TypeDefinition[], place: { department?: s
         PLACEMENT_WORDS +
         `Create a server-only record (${creatable.join(', ')}). Name people and customers by id. \`links\` takes only the type's own link names (${linkNames}); any other is refused. ` +
         PLACEMENT_WORDS_EN,
-      // The consultation's department goes along as the server's default place (records.md "Where the AI puts a request").
-      request: input => ({ method: 'POST', path: '/item', body: place.department ? { ...input, defaultFolder: place.department } : input }),
+      // The consultation's department goes along as the server's default place (records.md "Where the AI puts a request");
+      // on the 全社 tab, 全社 said on purpose (records.md "全社 is a choice"); an unattended run says neither.
+      // 全社 said by the AI goes without the screen's hints and as 「部署のやること」 (`personal: false`), so a server from
+      // before `place` (which ignores it) places a request in the whole company too, never in the screen's department.
+      request: input => ({
+        method: 'POST', path: '/item',
+        body: input.place === 'company' ? { ...input, personal: input.personal ?? false }
+          : place.department ? { ...input, defaultFolder: place.department } : place.companyScreen ? { ...input, defaultPlace: 'company' } : input,
+      }),
       format: createdAnswer,
     })
   }
@@ -899,6 +915,11 @@ export interface RecordToolsOptions {
   /** The department folder the consultation is in (null / absent = 全社): where a request for someone else goes by default. */
   department?: string | null
   /**
+   * The member is on the 全社 tab (a consultation with no department on screen — not an unattended run or a
+   * step): sent as `defaultPlace: 'company'`, so 全社 is said on purpose (records.md "全社 is a choice").
+   */
+  companyScreen?: boolean
+  /**
    * The turn's model has a one-million-token context (`modelHasLargeContext`): it is handed up to
    * `MINUTES_READ_CHARS_LARGE` of long minutes, else `MINUTES_READ_CHARS_STANDARD` (minutes.md "Long minutes").
    */
@@ -945,7 +966,7 @@ export async function createRecordTools(access: RecordTurnAccess, signal?: Abort
   // A feature's tools follow the feature, not whether its type exists (the types stay installed).
   const specs: RecordToolSpec[] = [
     ...LOOKUPS, ...(types.some(t => t.name === 'meeting') ? [minutesReadTool(features)] : []), ...(types.some(t => t.name === 'approval') ? APPROVAL_LOOKUPS : []),
-    ...(access.scope === 'act' ? actionToolSpecs(types, { department: options.department }, features) : []), ...pluginToolSpecs(plugins, access.scope === 'act'), ...pluginCallToolSpecs(plugins), ...mail,
+    ...(access.scope === 'act' ? actionToolSpecs(types, { department: options.department, companyScreen: options.companyScreen }, features) : []), ...pluginToolSpecs(plugins, access.scope === 'act'), ...pluginCallToolSpecs(plugins), ...mail,
     ...(offersJobProposals ? jobProposalToolSpecs() : []),
   ].filter(spec => toolAllowed(spec.name, features))
   const newId = options.newId ?? (() => crypto.randomUUID())

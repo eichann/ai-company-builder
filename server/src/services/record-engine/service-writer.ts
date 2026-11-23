@@ -31,39 +31,39 @@ export interface ServiceActor {
   via?: LedgerVia | null
 }
 
-/** A new record of a service-owned type (`SERVICE_OWNED_TYPES`). */
-export interface ServiceCreateInput {
+/**
+ * Where a new service record is read — **always said** (records.md "全社 is a choice"): leaving it out
+ * does not compile, so no service lands a record company-wide by forgetting. Exactly one of:
+ * - `folder`: the readers' folder, never a private folder and never `''`; **`null` = the whole company,
+ *   written out on purpose** (a copied place of a company-wide record, `placeOfRow`). A record linked to a
+ *   members-only meeting is members-only by itself (its list and the people named) — then a folder is
+ *   refused (`bad-place`), and `folder: null` is how a service says "the meeting's people" there.
+ * - `personalOwner` (「持ち主だけ」): the one member who may read it — the inbox's record of someone's own
+ *   mail (inbox.md); every person named must be that member.
+ * - `members` (「この人たちだけ」, records.md "Members-only records"): the members who may read it (each a
+ *   member of the company, at most 200); every person named must be listed. `memberSets`: the groups and
+ *   departments on that list, copied from the record it is placed like (`placeOfRow`).
+ */
+export type ServiceCreatePlace =
+  | { folder: string | null; personalOwner?: never; members?: never; memberSets?: never }
+  | { personalOwner: string; folder?: never; members?: never; memberSets?: never }
+  | { members: readonly string[]; memberSets?: readonly RecordMemberSet[]; folder?: never; personalOwner?: never }
+
+/** A new record of a service-owned type (`SERVICE_OWNED_TYPES`), with its place (`ServiceCreatePlace`). */
+export type ServiceCreateInput = ServiceCreateFields & ServiceCreatePlace
+
+interface ServiceCreateFields {
   type: string
   /** A chosen id (e.g. derived from an idempotency key); default: a new one. */
   id?: string
   title: string
   summary?: string
-  /** The record's readers' folder (null = everyone); never a private folder. Service records are server only. */
-  folder?: string | null
   /** Server fields, checked by the type's kinds; every person named must be able to read the record. */
   fields?: Record<string, LedgerValue>
   /** Link name → record ids. */
   links?: Record<string, string[]>
   actor: ServiceActor
   note?: string
-  /**
-   * Owner-only (「持ち主だけ」): the one member who may read it — the inbox's
-   * record of someone's own mail (inbox.md). Not with `folder`; every person
-   * named must be that member (no one else can read it).
-   */
-  personalOwner?: string
-  /**
-   * Members-only (「この人たちだけ」, records.md "Members-only records"): the members who may read
-   * it (each a member of the company, at most 200). Not with `folder` / `personalOwner`; every
-   * person named must be listed. A record linked to a members-only meeting is members-only by
-   * itself (its list and the people named) — then a `folder` is refused (`bad-place`).
-   */
-  members?: readonly string[]
-  /**
-   * With `members`: the groups and departments on that list, copied from the record it is placed
-   * like (`placeOfRow`), so the copy follows them as the original does. Only with `members`.
-   */
-  memberSets?: readonly RecordMemberSet[]
   /**
    * Start in this state instead of the type's initial one: only a state the
    * initial one may move to along `SERVICE_TRANSITIONS` (as if created, then
@@ -137,7 +137,8 @@ export type ServicePlace = { folder: string | null } | { personalOwner: string }
 export function placeOfRow(row: Pick<RecordAccessRow, 'folder' | 'personalOwner' | 'members' | 'memberSets'>): ServicePlace {
   if (row.personalOwner !== null) return { personalOwner: row.personalOwner }
   if (row.members !== null) return { members: row.members, ...(row.memberSets && row.memberSets.length > 0 ? { memberSets: row.memberSets } : {}) }
-  return { folder: row.folder }
+  // A row stored with `''` (the company root, before the writer refused it) is the whole company: copied as `null`.
+  return { folder: row.folder || null }
 }
 
 /**
@@ -249,10 +250,13 @@ export function createServiceRecordWriter(deps: Pick<RecordEngineDeps, 'companyD
     const summary = (input.summary ?? '').normalize('NFC').slice(0, 300)
     const scopes = companyData.forCompany(companyId).scopes.listWithRules()
     if (def.storage === 'file') return fail('bad-place', 'records of this type are files')
+    // The place is always said (`ServiceCreatePlace`; a caller typed loosely is held to it here too): none → refused.
+    if (input.folder === undefined && input.personalOwner === undefined && input.members === undefined) return fail('bad-place')
     let folder: string | null = null
     if (input.folder !== undefined && input.folder !== null) {
       folder = normalizeRepoPath(input.folder)
-      if (folder === null || findPrivateScope(scopes, folder)) return fail('bad-place')
+      // `''` would read as the company root (everyone): the whole company is `null`, said on purpose.
+      if (!folder || findPrivateScope(scopes, folder)) return fail('bad-place')
     }
     const personalOwner = input.personalOwner ?? null
     if (personalOwner !== null && (folder !== null || !deps.isMember(companyId, personalOwner))) return fail('bad-place')

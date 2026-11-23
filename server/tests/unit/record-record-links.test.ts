@@ -76,7 +76,7 @@ function company(id: string) {
 const effort = (title: string, member = m('u-alice'), folder?: string) =>
   ok(engine.create(member, HUMAN, { type: 'effort', title, ...(folder ? { folder } : {}), fields: { owner: member.userId } })).record
 function meeting(co = 'a') {
-  const r = writer.create(co, { type: 'meeting', title: '定例', fields: { assignee: 'u-alice' }, links: {}, actor: { id: 'u-alice', kind: 'human' } })
+  const r = writer.create(co, { type: 'meeting', title: '定例', folder: null, fields: { assignee: 'u-alice' }, links: {}, actor: { id: 'u-alice', kind: 'human' } })
   if (!r.ok) throw new Error(r.reason)
   return r.record
 }

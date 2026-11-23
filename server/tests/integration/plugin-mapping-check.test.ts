@@ -130,6 +130,11 @@ describe('「HubSpot に聞いて確かめる」', () => {
     expect(invalid.ok).toBe(false)
     expect(invalid.body.code).toBe('MAPPING_INVALID')
 
+    // The text being edited is checked as saving it would be: who sees the records must be said (records.md "全社 is a choice").
+    const unplaced = await check(owner, { text: MAPPING.replace('  visible_to_folder: 営業部\n', '') })
+    expect(unplaced.body.code).toBe('MAPPING_INVALID')
+    expect(JSON.stringify(unplaced.body)).toContain('visible_to_folder を書いてください')
+
     // No mapping saved and none given: nothing to check.
     const none = await check(owner, {})
     expect(none.ok).toBe(false)

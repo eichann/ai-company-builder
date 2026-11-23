@@ -178,3 +178,37 @@ export function supportsAgentEvents(
   if (!parsed || !parsed.commitDate) return false
   return parsed.commitDate >= cutoff
 }
+
+/**
+ * Committer date (UTC, YYYYMMDDHHmmss) of the first main commit whose desktop app always says where
+ * a record a person makes goes — `place: 'company'` for 全社 (records.md "全社 is a choice"). Null
+ * until that commit is on main: until then the server keeps reading "nothing given" from a person
+ * as the whole company, as every released app means it. Set it (one line, computed like
+ * WRITE_DENIED_RECOVERY_COMMIT_DATE from the merge commit) once the change is merged; the refusal
+ * then starts for a company when all its active members run such a build (`placeRequired`).
+ */
+export const EXPLICIT_PLACE_CLIENT_COMMIT_DATE: string | null = null
+
+let explicitPlaceCutoffOverride: { value: string | null } | null = null
+
+/** The cutoff in effect: EXPLICIT_PLACE_CLIENT_COMMIT_DATE unless a test overrode it. */
+export function explicitPlaceClientCutoff(): string | null {
+  return explicitPlaceCutoffOverride ? explicitPlaceCutoffOverride.value : EXPLICIT_PLACE_CLIENT_COMMIT_DATE
+}
+
+/** Tests only: pretend released apps name 全社 explicitly from this commit date (undefined = back to the constant). */
+export function setExplicitPlaceClientCutoffForTests(value: string | null | undefined): void {
+  explicitPlaceCutoffOverride = value === undefined ? null : { value }
+}
+
+/**
+ * Does this desktop-app build always name the place of what a person makes? Same rules as
+ * supportsPrivateFolders: by the build's commit date alone; unknown (no version, unparsable, no
+ * commit date) = no, and always no while the cutoff is null.
+ */
+export function sendsExplicitPlace(version: string | null | undefined, cutoff: string | null = explicitPlaceClientCutoff()): boolean {
+  if (cutoff === null) return false
+  const parsed = parseClientVersion(version)
+  if (!parsed || !parsed.commitDate) return false
+  return parsed.commitDate >= cutoff
+}

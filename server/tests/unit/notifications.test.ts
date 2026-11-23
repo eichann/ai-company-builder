@@ -184,7 +184,7 @@ describe('notices from the engine', () => {
 
   it('an approval’s result is the requester’s notice', async () => {
     const created = writer.create('a', {
-      type: 'approval', title: '金額の変更', fields: { assignee: 'u-bob', operation: 'hubspot.update_deal', payload_hash: 'sha256:aa', payload_version: 1 },
+      type: 'approval', title: '金額の変更', folder: null, fields: { assignee: 'u-bob', operation: 'hubspot.update_deal', payload_hash: 'sha256:aa', payload_version: 1 },
       actor: { id: 'u-alice', kind: 'human', source: null },
     })
     if (!created.ok) throw new Error(created.reason)

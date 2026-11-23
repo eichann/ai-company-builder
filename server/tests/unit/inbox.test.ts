@@ -997,7 +997,7 @@ describe('B5: 追いかけ (following up)', () => {
 describe('we sent first: 返事を待つ (outbound-mail.md "Waiting for their answer")', () => {
   const OURS = '<acb.send-1@acme.example>'
   /** A task in 営業部 (u-carol cannot read it), assigned to `assignee`. */
-  function task(assignee: string, folder = '営業部') {
+  function task(assignee: string, folder: string | null = '営業部') {
     const t = serviceWriter.create('a', {
       type: 'task', title: '見積を出す', folder, fields: { assignee, requested_by: assignee },
       actor: { id: assignee, kind: 'human', source: null }, quiet: true,
@@ -1112,7 +1112,7 @@ describe('we sent first: 返事を待つ (outbound-mail.md "Waiting for their an
   })
 
   it('a task assignee who cannot read the 返事のお願い is not told', () => {
-    const { rr } = sentWaiting(task('u-carol', ''))
+    const { rr } = sentWaiting(task('u-carol', null))
     inbox.receive('a', 'u-alice', mail({ references: [OURS] }))
     expect(stateOf(rr).state).toBe('checking')
     expect(notices()).toEqual([{ userId: 'u-alice', kind: 'reply_arrived' }])

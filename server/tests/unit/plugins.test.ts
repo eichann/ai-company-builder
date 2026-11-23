@@ -25,7 +25,7 @@ import { existsSync, readFileSync, readdirSync } from 'fs'
 import { join } from 'path'
 import {
   acbToExternal, approverFor, checkMappingAgainstProperties, closingMoveFields, combineUse, effectiveFieldPolicy, effectiveOperationPolicy, externalToAcb,
-  parsePluginManifest, parsePluginMapping, pluginAvailableTo, typeNameLayerProblem, validatePluginPackage,
+  mappingPlaceProblems, parsePluginManifest, parsePluginMapping, pluginAvailableTo, typeNameLayerProblem, validatePluginPackage,
   type PluginMapping, type PluginPackage,
 } from '../../../shared/core/plugins'
 
@@ -439,6 +439,16 @@ describe('mapping checks', () => {
     expect(errorsOf('deal:\n  fields:\n    assignee: { from: owner_id, people: owners }\npeople:\n  owners: { "1": 田中 太郎 }\n')).not.toEqual([])
     expect(errorsOf('ticket:\n  fields: {}\n').join()).toContain('対象ではありません')
     expect(errorsOf('deal:\n  visible_to_folder: ../営業\n')).not.toEqual([])
+  })
+
+  it('who sees the records is said: a folder or null (全社 on purpose); left out is a problem when saving (records.md "全社 is a choice")', () => {
+    const problems = (text: string) => { const r = parsePluginMapping(text, p); if (!r.ok) throw new Error(r.errors.join()); return mappingPlaceProblems(r.value) }
+    expect(problems('deal:\n  fields: {}\n').join()).toContain('「deal」の visible_to_folder を書いてください')
+    expect(problems('deal:\n  visible_to_folder: null\n  fields: {}\n')).toEqual([])
+    expect(problems('deal:\n  visible_to_folder: 営業\n  fields: {}\n')).toEqual([])
+    // null reads as the whole company, as an older server reads it.
+    const r = parsePluginMapping('deal:\n  visible_to_folder: null\n  fields: {}\n', p)
+    expect(r.ok && r.value.objects.deal.visibleToFolder).toBeNull()
   })
 
   it('write: true needs an update operation for the object', () => {

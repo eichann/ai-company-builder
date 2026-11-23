@@ -1039,7 +1039,7 @@ GET     /records/item/:recordId    any member: the record + its readable links (
 
 Who sees a record: **an owner** in `records.personal_owner` → that member only; **a folder** mark
 → the readers of that folder; **neither** (every record made before) → the whole company,
-unchanged. Column added by `migrateRecordPersonalOwner` (nullable, no data migration).
+unchanged (storage keeps that meaning; what a create may leave unsaid is "全社 is a choice" below). Column added by `migrateRecordPersonalOwner` (nullable, no data migration).
 
 - **Not owners or admins either** — the one exception to "owner/admin see everything" (CLAUDE.md
   Roles); not department managers, delegates or anyone moving tasks. One branch at the top of
@@ -1256,20 +1256,93 @@ folder the creator's own department ("A task and its 案件・プロジェクト
 - **Another person, or a department asked for** — an assignee other than the member, or
   `personal: false` (「部署のやることにして」) → `folder` = the one the AI named, else the app's
   `defaultFolder` (the department on screen when the message was sent: `chat-server.ts` passes
-  `activeDepartment.folder` to the record tools, which add it to the body; 全社 = none = the whole
-  company); assignee as said, else the member. The default folder is checked like any `folder`
+  `activeDepartment.folder` to the record tools, which add it to the body; the 全社 tab of a consultation
+  sends `defaultPlace: 'company'` = the whole company, "全社 is a choice" below); assignee as said, else the
+  member. The default folder is checked like any `folder`
   (`placeFolder`: a private one is refused, `FOLDER_NOT_PLACEABLE` — never placed company-wide instead); an assignee who
   cannot read it is refused (`ASSIGNEE_CANNOT_READ`).
 - A request made with an origin link to a message (a task's `interaction`) always gets a `due`: the
   AI's, else the company's reply 目安 (`messageDue`; `inbox.md` "A task from a message").
-- The answer carries `placed: { personal, folder }` (every create's), and the tool adds
+- The answer carries `placed: { personal, folder, membersOnly? }` (every create's), and the tool adds
   `tellMember` — 「あなただけに見えるやることに入れました（部署に出すときはカードの［部署に出す］から）」 /
-  「「コンテンツ」のやることに、<担当>さんの担当で入れました」; the tool's description tells the AI
-  when to name someone or a department and to always say where it went.
+  「「コンテンツ」のやることに、<担当>さんの担当で入れました」 / 「決まった人だけに見えるやることに…」 (a meeting's
+  list: never told as the whole company), and for another kind of record 「あなただけに見える記録として置きました
+  （ほかの人には見えません）」 / 「「<folder>」を見られる人に見える記録として置きました」 / 「会社のみんなに見える記録として
+  置きました」; the tool's description tells the AI when to name someone or a department, that 全社 is
+  `place: "company"` only when the member asks for it, to ask the member on `PLACE_REQUIRED`, and to always say
+  where it went.
 - Tests: `server/tests/unit/record-ai-placement.test.ts` (defaults, nobody else sees the personal
   one — owner and admin included, the department and 全社 cases, the private default refused, a
-  person's create untouched), `client/tests/records-tools.test.ts` (`defaultFolder` sent, the
+  person's create untouched), `client/tests/records-tools.test.ts` (`defaultFolder` / `defaultPlace` sent, the
   description, `tellMember`).
+
+### 全社 is a choice (step 1, owner decisions 2026-11-23)
+
+Where record visibility is going, step by step: every record has one parent (a folder or a parent
+record) and inherits who sees it; the one exception narrows it to a list of people; **"nothing given"
+never means company-wide**. Storage is unchanged in this step: `folder = NULL` with no owner and no list
+still reads as the whole company (`record-access.ts`; ≈20 places compare `folder === null`), so an older
+server build reads every new row the same way. What changes is what a **create** may leave unsaid.
+
+- **The marker**: `place: 'company'` on `POST /records/item` and the AI's `records_create` = the whole
+  company, said on purpose. Only that word (else 400 `BAD_PLACE`); never with `folder`, `personal: true` or
+  `members` (400 `PLACE_CONFLICT`); with a members-only meeting it is refused like a folder
+  (`MEMBERS_WITH_PLACE`), with a まとまり it must be within it (`WIDER_THAN_BUNDLE`). The create body is not
+  strict, so an older server ignores the key: a person's 全社 means the same there; the AI's `place` is sent with
+  `personal: false` and without the screen's hints, so an older server places a request company-wide too (a new
+  まとまり there still goes to the member's department — narrower, never wider). The AI path's screen hint is
+  `defaultPlace: 'company'` (the 全社 tab of a consultation the member is in: `chat-server.ts`
+  `companyScreen` — never with a department on screen, never in an unattended run or a step), used only
+  where `defaultFolder` would have been (`aiPlacement`: a request for someone else / `personal: false`; a new
+  まとまり of a member who belongs to no department).
+- **"Nothing given"** = no folder, not owner-only, no list, no `place`, and nothing inherited (a まとまり's
+  place, a members-only meeting's list, or — new — **the place of a meeting that is not members-only**: a
+  task made from a meeting made before members-only meetings (11/4) takes that meeting's folder as stored (the
+  member reads the meeting, so never wider; `placeFolder` is for a folder given, not this), the whole company
+  when the meeting is company-wide, or owner-only when the meeting is the member's own (not a plugin's type),
+  instead of landing company-wide by default; meetings in two places → nothing inherited; `meetingFolder`,
+  `record-engine/members.ts`). A person named who cannot read that place is refused as always
+  (`ASSIGNEE_CANNOT_READ`).
+  `create.ts` then decides:
+  - **the AI** (`createByAi`), when the type may be owner-only (not a business plugin's), `personal` is not
+    `false` and no person field names anyone but the member → **owner-only (本人だけ)**, the answer's `placed`
+    says so and `tellMember` tells the member (owner decision 2026-11-23). Otherwise (a plugin's type, someone
+    else named, `personal: false`) → as before, the whole company, **until the gate** (a released app's tool
+    cannot say `place`, and sends `defaultFolder` on a department tab, so the screen hint cannot tell old from new);
+    then 400 `PLACE_REQUIRED` (`AI_PLACE_REQUIRED`: name a `folder` or `place: "company"`, or ask the member).
+  - **a person**: the whole company, as every released app means it (its 全社 sends nothing), **until the
+    gate**; then 400 `PLACE_REQUIRED` 「見せる範囲が決まっていません。部署を選ぶか、会社全体にするかを選んでください。」,
+    nothing written.
+  - Neither refusal names a place or a title.
+- **The gate** (`RecordEngineDeps.placeRequired`, composition): `EXPLICIT_PLACE_CLIENT_COMMIT_DATE`
+  (`lib/client-version.ts`) is **null** until the commit that makes the app send the marker is on main —
+  then nothing is ever refused. Once it is set (a one-line PR with that merge commit's date, like the other
+  build gates), a company's creates must say where once **every member active in the last 14 days runs a
+  build at or after it** (`clientActivity.activeMembersSupport` + `sendsExplicitPlace`: by commit date; an
+  active member on an unknown build keeps the gate shut — fails toward today's behaviour; members not heard
+  from in 14 days do not count). The app now always sends a place: 「頼む」 on the 全社 tab and 「新しい〇〇にする」
+  without a department send `place: 'company'` (`tasks:create`, `tasks:createBundle`); a 「頼む」 for a まとまり
+  or from a meeting still sends nothing (it inherits). Step 2 (not here): make "nothing given" refused
+  everywhere and the stored NULL mean "inherit".
+- **Service writer**: the place is a required union (`ServiceCreatePlace`: `folder` — `null` = the whole
+  company written out —, `personalOwner` or `members`), so a service that forgets it does not compile; at run
+  time one with none, or `folder: ''` (it would read as the company root), is `bad-place`. A place copied from a
+  row stored with `''` before (`placeOfRow`) is the whole company, `null`; the approval of a create whose mapping
+  names no `visible_to_folder` passes `null` (it passed `''`).
+- **Plugin mappings**: a mapping **saved** from now on (`PUT …/mapping`) names `visible_to_folder` for every
+  object — a folder, or `null` for the whole company on purpose (an older server reads `null` the same) — else
+  400 `MAPPING_INVALID` (`mappingPlaceProblems`, `shared/core/plugin-mapping.ts`; 「確かめる」 on a text being edited
+  answers the same, `forChecking`). A mapping in force without it,
+  a restored version and the package's recommended mapping keep working as before (imports and creates still
+  read its absence as the whole company).
+- Tests: `server/tests/unit/record-company-place.test.ts` (the marker and its refusals, a person before / after
+  the gate, inheritance not being "nothing given", a department meeting's task, an owner-only meeting's, the
+  service writer and a copied empty folder), `record-ai-placement.test.ts` (the AI's owner-only default for any kind, a plugin's type
+  refused, `place` / `defaultPlace`, a released app's 全社 tab before / after the gate, no name in the refusal),
+  `server/tests/integration/company-place-gate.test.ts` (the gate through the routes and the composition:
+  cutoff unset, older / unknown / inactive members, the AI), `plugins.test.ts` (unit and integration: a mapping
+  without `visible_to_folder`), `plugin-mapping-check.test.ts`, `client/tests/tasks-list.test.ts`, `bundle-create.test.ts`,
+  `records-tools.test.ts`, `company-screen-place.test.ts` — each guard mutation-checked.
 
 ### Who can see it (見られる人, plan「新しい画面のデモ」K サーバー乙 ②, owner decision 2026-11-02)
 
@@ -1591,9 +1664,10 @@ an approval), `client/tests/records-tools.test.ts` — mutation-checked.
 
 The engine's entry for the core services (approvals G6, minutes G7, mail G8, decisions). Like the
 external writer, composition.ts hands it to those services only (`serviceRecords`, not in
-`services`). `create(companyId, { type, id?, title, summary?, folder?, fields, links, actor,
+`services`). `create(companyId, { type, id?, title, summary?, folder | personalOwner | members, fields, links, actor,
 note? })` — service-owned types only, server records only (`folder`: the readers' place, never a
-private folder; or `personalOwner`, or `members` — each a member, not with a folder — and a record
+private folder, never `''`, `null` = the whole company written out; or `personalOwner`, or `members` — each a
+member, not with a folder; the place is required by the type, "全社 is a choice" — and a record
 linked to a members-only meeting is members-only by itself, a folder then `bad-place`: "Members-only
 records"); `check(companyId, input)` is the same validation without writing (ask it before
 outside work, e.g. the minutes intake). `transition(companyId, { recordId, action, expectedVersion, to | null, fields?, links?,

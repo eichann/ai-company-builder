@@ -844,7 +844,7 @@ describe('what a meeting\'s reading makes is made once (FB 29)', () => {
     const sato = { companyId: CO, userId: 'mn-sato', role: 'member' }
     const copies: string[] = []
     for (let i = 0; i < 2; i++) {
-      const r = engine.create(sato, { kind: 'ai', source: 'claude-code' }, { type: 'task', title: TITLE, fields: { assignee: 'mn-sato' } })
+      const r = engine.create(sato, { kind: 'ai', source: 'claude-code' }, { type: 'task', title: TITLE, fields: { assignee: 'mn-sato' }, place: 'company' })
       expect(r.ok, JSON.stringify(r)).toBe(true)
       const id = (r as Json).value.record.id as string
       db.prepare("INSERT INTO record_links (company_id, source_id, name, position, target_id, target_path) VALUES (?, ?, 'meeting', 0, ?, NULL)").run(CO, id, salesId)

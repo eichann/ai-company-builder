@@ -109,7 +109,7 @@ export {
 } from './plugin-browser-declaration'
 export { combineUse, validatePluginPackage } from './plugin-package'
 export {
-  DEFAULT_APPROVERS, MAPPING_IMPORT_MAX, MAPPING_SECTIONS, checkMappingAgainstProperties, parsePluginMapping,
+  DEFAULT_APPROVERS, MAPPING_IMPORT_MAX, MAPPING_SECTIONS, checkMappingAgainstProperties, mappingPlaceProblems, parsePluginMapping,
   type ExternalPropertyInfo, type MappingField, type MappingObject, type PluginMapping,
 } from './plugin-mapping'
 export { approverFor, closingMoveFields, closingMoveProperties, effectiveFieldPolicy, effectiveOperationPolicy } from './plugin-policies'

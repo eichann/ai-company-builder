@@ -1158,7 +1158,9 @@ company never reaches any of it: the store knows a company only from
   installed at a version it accepts, else 409 `CONNECTOR_REQUIRED` naming it). Top level: one key per
   object with a record type, plus `people` and `policy`.
 - Per object: `visible_to_folder` (a company path; not a private folder — checked by the server in
-  P4), `import { pipelines, updated_within_days (1–3650), max (≤ 10,000, default 500) }`,
+  P4; `null` = the whole company. A mapping **saved** from now on must write it for every object — a folder
+  or `null` on purpose — else 400 `MAPPING_INVALID`; one in force, restored or recommended without it still
+  reads as the whole company: `records.md` "全社 is a choice"), `import { pipelines, updated_within_days (1–3650), max (≤ 10,000, default 500) }`,
   `fields: { <ACB field>: { from, write, values?, people? } }`, `links: { <link of the type>:
   { from_association } }` (the design's `customer: { from_association }` sits under `links`).
 - Fields name the type's server fields (or `title` / `summary`, never written back). A choice

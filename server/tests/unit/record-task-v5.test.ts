@@ -148,7 +148,7 @@ describe('preparing: the AI’s turn before the person’s', () => {
     expect(engine.create(m('u-alice'), HUMAN, { type: 'task', title: 'x', state: 'done' })).toMatchObject({ ok: false, body: { code: 'BAD_STATE' } })
 
     const mail = (co: string, folder?: string) => {
-      const r = writer.create(co, { type: 'outbound_message', title: 'お礼', ...(folder ? { folder } : {}), fields: { requested_by: 'u-alice', assignee: 'u-alice' }, links: {}, actor: { id: 'u-alice', kind: 'ai', source: 'claude-code' } })
+      const r = writer.create(co, { type: 'outbound_message', title: 'お礼', folder: folder ?? null, fields: { requested_by: 'u-alice', assignee: 'u-alice' }, links: {}, actor: { id: 'u-alice', kind: 'ai', source: 'claude-code' } })
       if (!r.ok) throw new Error(r.reason)
       return r.record.id
     }

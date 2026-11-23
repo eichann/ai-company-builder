@@ -497,32 +497,50 @@ test('records_create: the consultation\'s department goes along as the server\'s
   await tools!.execute('records_create', { type: 'task', title: 'テスト自分用' })
   const sent = seen.find(s => s.url.endsWith('/api/records-ai/item'))!
   assert.deepEqual(JSON.parse(sent.body!), { type: 'task', title: 'テスト自分用', defaultFolder: 'コンテンツ' })
-  // 全社 (no department): nothing is added.
+  // The 全社 tab: 全社 said on purpose (records.md "全社 is a choice").
   const { api: api2, seen: seen2 } = fakeServer('act')
-  const company = await createRecordTools((await api2.openTurn('co', { conversationId: 'c', agent: 'claude-code', scope: 'act' }))!, undefined, { department: null })
+  const company = await createRecordTools((await api2.openTurn('co', { conversationId: 'c', agent: 'claude-code', scope: 'act' }))!, undefined, { department: null, companyScreen: true })
   await company!.execute('records_create', { type: 'task', title: 'x' })
-  assert.deepEqual(JSON.parse(seen2.find(s => s.url.endsWith('/api/records-ai/item'))!.body!), { type: 'task', title: 'x' })
+  assert.deepEqual(JSON.parse(seen2.find(s => s.url.endsWith('/api/records-ai/item'))!.body!), { type: 'task', title: 'x', defaultPlace: 'company' })
+  // No screen (an unattended run): nothing is added, so the server never reads it as 全社 by the app's word.
+  const { api: api3, seen: seen3 } = fakeServer('act')
+  const run = await createRecordTools((await api3.openTurn('co', { conversationId: 'c', agent: 'claude-code', scope: 'act' }))!, undefined, { department: null })
+  await run!.execute('records_create', { type: 'task', title: 'x' })
+  assert.deepEqual(JSON.parse(seen3.find(s => s.url.endsWith('/api/records-ai/item'))!.body!), { type: 'task', title: 'x' })
+  // 全社 said by the AI goes without the screen's department and as personal: false (an older server then places it company-wide too).
+  await tools!.execute('records_create', { type: 'task', title: '全員へ', place: 'company' })
+  assert.deepEqual(JSON.parse(seen.filter(s => s.url.endsWith('/api/records-ai/item')).at(-1)!.body!), { type: 'task', title: '全員へ', place: 'company', personal: false })
+  // The AI may say 全社 itself, only as that one word; the description says when.
+  assert.equal(create.schema.safeParse({ type: 'task', title: 'x', place: 'company' }).success, true)
+  assert.equal(create.schema.safeParse({ type: 'task', title: 'x', place: 'everyone' }).success, false)
+  assert.match(create.description, /place: "company"/)
+  assert.match(create.description, /PLACE_REQUIRED/)
 })
 
 test('records_create\'s answer: where it went, in the member\'s words', async () => {
-  const answered = (placed: unknown, fields: Record<string, string>) => {
+  const answered = (placed: unknown, fields: Record<string, string>, type?: string) => {
     const fetch = (async (url: string) => {
       const json = (status: number, data: unknown) => new Response(JSON.stringify({ success: true, data }), { status })
       if (url.endsWith('/me/record-tokens')) return json(201, { token: 'acb_rec_co.' + 'a'.repeat(64), tokenId: 'tok-1', scope: 'act', expiresAt: 'x' })
       if (url.endsWith('/api/records-ai/types')) return json(200, { types: TYPES.map(definition => ({ definition, source: 'core', versions: [1] })) })
-      if (url.endsWith('/api/records-ai/item')) return json(201, { record: { id: 'task-abcdef12', fields }, placed })
+      if (url.endsWith('/api/records-ai/item')) return json(201, { record: { id: 'task-abcdef12', fields, ...(type ? { type } : {}) }, placed })
       return json(200, {})
     }) as unknown as typeof globalThis.fetch
     return createRecordsApi({ baseUrl: () => 'https://acb.example.jp', cookies: () => ['s=1'], fetch })
   }
-  const say = async (placed: unknown, fields: Record<string, string>) => {
-    const tools = await createRecordTools((await answered(placed, fields).openTurn('co', { conversationId: 'c', agent: 'claude-code', scope: 'act' }))!)
+  const say = async (placed: unknown, fields: Record<string, string>, type?: string) => {
+    const tools = await createRecordTools((await answered(placed, fields, type).openTurn('co', { conversationId: 'c', agent: 'claude-code', scope: 'act' }))!)
     return JSON.parse(await tools!.execute('records_create', { type: 'task', title: 'x' })).tellMember as string
   }
   assert.equal(await say({ personal: true, folder: null }, { assignee: 'u-me', requested_by: 'u-me' }), 'あなただけに見えるやることに入れました（部署に出すときはカードの［部署に出す］から）')
   assert.match(await say({ personal: false, folder: 'コンテンツ' }, { assignee: 'u-tanaka', requested_by: 'u-me' }), /^「コンテンツ」のやることに、<担当の名前>さんの担当で入れました/)
   assert.equal(await say({ personal: false, folder: 'コンテンツ' }, { assignee: 'u-me', requested_by: 'u-me' }), '「コンテンツ」のやることに、あなたの担当で入れました')
   assert.match(await say({ personal: false, folder: null }, { assignee: 'u-tanaka', requested_by: 'u-me' }), /^会社全体のやることに/)
+  // A meeting's people only is never told as the whole company.
+  assert.match(await say({ personal: false, folder: null, membersOnly: true }, { assignee: 'u-tanaka', requested_by: 'u-me' }), /^決まった人だけに見えるやることに/)
+  // Another kind of record the AI kept for the member alone (records.md "全社 is a choice"): said so, without the task's words.
+  assert.equal(await say({ personal: true, folder: null }, { owner: 'u-me' }, 'project'), 'あなただけに見える記録として置きました（ほかの人には見えません）')
+  assert.equal(await say({ personal: false, folder: null }, { owner: 'u-me' }, 'project'), '会社のみんなに見える記録として置きました')
 })
 
 test('a record written by the member\'s own AI tells the app at once (the task list re-reads); a look-up or a refusal does not', async () => {
