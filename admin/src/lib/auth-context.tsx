@@ -79,7 +79,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       await authApi.signOut()
     } catch (err) {
-      // 401: the server holds no session for this browser any more, so it is signed out. Anything
+      // 401 (Better Auth itself answers 200 without a session; a 401 comes from something in front of
+      // it): no session for this browser, so it is signed out. Anything
       // else (offline, timeout, 5xx) may have left the session alive for days: showing the console
       // as signed out would let the next person on a shared PC reload straight back in.
       if (!(err instanceof ApiError && err.status === 401)) {
