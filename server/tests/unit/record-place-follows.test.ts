@@ -220,6 +220,20 @@ describe('linked to its parent later', () => {
     expect(await reads('u-carol', r.id)).toBe(false)
   })
 
+  it('an undo never brings back a parent the record has become wider than', async () => {
+    const p = program({ folder: '秘書室' })
+    const c = ok(engine.create(m('u-alice'), HUMAN, { type: 'clip', title: '切り抜き', personal: true, links: { program: p.id } })).record
+    ok(engine.recordLink(m('u-alice'), HUMAN, c.id, 'unlink', { link: 'program', target: p.id, expectedVersion: 1 }))
+    ok(engine.share(m('u-alice'), HUMAN, c.id, { folder: '営業部', expectedVersion: 2 }))
+    expect(code(await engine.undo(m('u-alice'), HUMAN, c.id, { version: 2, expectedVersion: 3 }))).toBe('WIDER_THAN_BUNDLE')
+    expect(source.forCompany(CO).records.linksFrom([c.id])).toHaveLength(0)
+    // Within it, the undo brings it back as before.
+    const d = ok(engine.create(m('u-alice'), HUMAN, { type: 'clip', title: '切り抜き2', links: { program: p.id } })).record
+    ok(engine.recordLink(m('u-alice'), HUMAN, d.id, 'unlink', { link: 'program', target: p.id, expectedVersion: 1 }))
+    ok(await engine.undo(m('u-alice'), HUMAN, d.id, { version: 2, expectedVersion: 2 }))
+    expect(source.forCompany(CO).records.linksFrom([d.id]).map(l => l.targetId)).toEqual([p.id])
+  })
+
   it('a business plugin’s record is never narrowed to owner-only', () => {
     const p = program({ personal: true })
     const r = ok(engine.create(m('u-alice'), HUMAN, { type: 'recording', title: '第1回', place: 'company' })).record
@@ -309,6 +323,12 @@ describe('the writers no route reaches', () => {
     expect(writer.transition(CO, { recordId: wide.id, action: 'reply_check', expectedVersion: 1, to: 'done', links: { bundle: [bundle.id] }, actor: input.actor }))
       .toMatchObject({ ok: false, reason: 'bad-place' })
     expect(writer.transition(CO, { recordId: wide.id, action: 'reply_check', expectedVersion: 1, to: 'done', links: { bundle: [] }, actor: input.actor })).toMatchObject({ ok: true })
+    // People added to a members-only follower's list by a service: only those who read its parent.
+    const listed = ok(engine.create(m('u-alice'), HUMAN, { type: 'project', title: '少人数の案件', members: ['u-bob'], fields: { owner: 'u-alice' } })).record
+    const t = ok(engine.create(m('u-alice'), HUMAN, { type: 'task', title: '少人数の', fields: { assignee: 'u-alice' }, links: { bundle: listed.id } })).record
+    expect(writer.transition(CO, { recordId: t.id, action: 'reply_check', expectedVersion: 1, to: 'done', addMembers: ['u-carol'], actor: input.actor }))
+      .toMatchObject({ ok: false, reason: 'bad-place' })
+    expect(writer.transition(CO, { recordId: t.id, action: 'reply_check', expectedVersion: 1, to: 'done', addMembers: ['u-bob'], actor: input.actor })).toMatchObject({ ok: true })
   })
 })
 

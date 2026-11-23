@@ -10,6 +10,7 @@ import { ok, refuse, type Outcome } from '../outcome'
 import { currentTypes } from '../record-index'
 import { RECORD_NOT_FOUND, RECORDS_DISABLED } from '../records'
 import type { EngineContext } from './context'
+import { followLinkName, followWords, linkedParents, placeWithin, WIDER_THAN_BUNDLE } from './bundle-place'
 import { isPlaceOrLinkChange, linkLedgerValue, linkTargetsOf, withLinkTargets } from './links'
 import { personalPathsSeen, scrubLedger } from './personal-links'
 import { bad, conflict, featureOffRefusal, serviceStateOnly, STATE_CHANGED_BY_SERVICE } from './refusals'
@@ -96,6 +97,20 @@ export function undoing(ctx: EngineContext) {
           // A file brought back is the one who took it off's (only its maker could see it to take it off).
           nextLinks = withLinkTargets(row.id, nextLinks ?? currentLinks, l.name, l.target, targets, target.actorId)
         } else nextFields[c.field] = c.after
+      }
+      // A parent the record follows (`place_follows`) brought back by an undo: only when the record is within it
+      // now (it may have been shared wider meanwhile) — never wider than its parent, as when linking (record-links).
+      const follow = def ? followLinkName(def) : null
+      if (def && follow !== null && nextLinks) {
+        const fresh = nextLinks.filter(x => x.name === follow && x.targetId !== null && !currentLinks.some(c => c.name === follow && c.targetId === x.targetId))
+        const parents = linkedParents(records, def, fresh)
+        if (parents.length > 0) {
+          const scopes = ctx.companyData.forCompany(member.companyId).scopes.listWithRules()
+          if (parents.some(p => !placeWithin(member.companyId, scopes, id => ctx.deps.roleOf(member.companyId, id), row, p))) {
+            const r = followWords(row.type, WIDER_THAN_BUNDLE)
+            return bad(r.error, r.code)
+          }
+        }
       }
       const at = clock.now()
       const entry: LedgerEntry = {

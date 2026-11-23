@@ -247,8 +247,11 @@ missing or not `false` is on —, `TYPE_FEATURE`, `FEATURE_TOOLS`, `FEATURE_NOTI
   writer, a plugin's import or operation): a parent the record would be wider than is **not linked** —
   the record stays where the mapping puts it, a problem 「…つなぎませんでした」 is returned, a parent already
   linked is kept — chosen over refusing the whole import (the record's other fields keep syncing) and
-  over widening. **The service writer**: a create whose place is wider than its parent, or a transition
-  linking a new parent the record is wider than, → `bad-place` (services always say a place; nothing is
+  over widening. **An undo** that would bring back a parent link the record is now wider than (unlinked, then
+  shared wider, then undone) → 400 `WIDER_THAN_BUNDLE` (`undo.ts`; before step 2b an undo restored it
+  unchecked, tasks too). **The service writer**: a create whose place is wider than its parent, or a
+  transition linking a new parent the record is wider than or adding people (`addMembers`) who would not
+  read its parent, → `bad-place` (services always say a place; nothing is
   narrowed there). **Records made before** a type declared it are not moved (the place is copied at
   creation, as for tasks before the rule): nothing re-checks them until a change asks — linking a parent,
   sharing, inviting (each judges the record as it would be after the change, as for tasks). **Older

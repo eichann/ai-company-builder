@@ -429,12 +429,17 @@ export function createServiceRecordWriter(deps: Pick<RecordEngineDeps, 'companyD
       const replacedLinks = input.links
         ? [...currentLinks.filter(x => !(x.name in (input.links as Record<string, string[]>))), ...newLinks].map((x, i) => ({ ...x, position: i }))
         : null
-      // Linking a parent the record follows (`place_follows`): only when it is within it (never narrowed here). A
-      // parent already linked is not asked again (a record from before its type followed stays as it is).
+      // Linking a parent the record follows (`place_follows`), or adding people to its list: only when it stays
+      // within its parents (never narrowed here). Without such a change a parent already linked is not asked again
+      // (a record from before its type followed stays as it is).
       const follow = followLinkName(def)
-      if (follow !== null && input.links && follow in input.links) {
-        const fresh = newLinks.filter(x => x.name === follow && !currentLinks.some(c => c.name === follow && c.targetId === x.targetId))
-        if (!withinParents(companyId, records, def, row, fresh)) return fail('bad-place')
+      if (follow !== null) {
+        const after: RecordAccessRow = joined.length > 0 ? { ...row, members: [...(row.members ?? []), ...joined] } : row
+        const kept = replacedLinks ?? currentLinks
+        const asked = joined.length > 0
+          ? kept.filter(x => x.name === follow)
+          : kept.filter(x => x.name === follow && !currentLinks.some(c => c.name === follow && c.targetId === x.targetId))
+        if (!withinParents(companyId, records, def, after, asked)) return fail('bad-place')
       }
       const at = deps.clock.now()
       const isDecision = input.decisionReason !== undefined
