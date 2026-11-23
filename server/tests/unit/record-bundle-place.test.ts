@@ -361,10 +361,14 @@ describe('「部署に出す」 and 「招待する」 keep a linked task within
     ok(engine.invite(m('u-alice'), HUMAN, t.id, { add: ['u-owner'], expectedVersion: 1 }))
   })
 
-  it('招待する on a members-only task with no まとまり is unaffected', async () => {
+  it('招待する on a members-only task with no まとまり, or of a company-wide まとまり, is unaffected', async () => {
     const t = ok(engine.create(m('u-alice'), HUMAN, { type: 'task', title: '二人の', members: ['u-bob'], fields: { assignee: 'u-alice' } })).record
     ok(engine.invite(m('u-alice'), HUMAN, t.id, { add: ['u-carol'], expectedVersion: 1 }))
     expect(await reads('u-carol', t.id)).toBe(true)
+    const everyone = project('全社の', null)
+    const linked = ok(engine.create(m('u-alice'), HUMAN, { type: 'task', title: '全社の二人の', members: ['u-bob'], fields: { assignee: 'u-alice' }, links: { bundle: everyone.id } })).record
+    ok(engine.invite(m('u-alice'), HUMAN, linked.id, { add: ['u-carol'], expectedVersion: 1 }))
+    expect(await reads('u-carol', linked.id)).toBe(true)
   })
 })
 

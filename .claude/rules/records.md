@@ -1346,6 +1346,11 @@ Words on screen: 見える範囲 / 見られる人, never 置き場所.
   so the check and the write read the same state. Never narrows (widening is refused, not turned into
   something else). A task with no まとまり, and other types, are unaffected; an owner-only まとまり's task can
   no longer be shown to a department (only `toBundle`'s `BUNDLE_NOT_PLACED` said so before).
+  **Checked at the moment of the change only** (open owner decision, 2026-11-23 review): a group or department
+  put on a linked task's list is judged by who is in it now; someone who joins it later reads the task even
+  when they cannot read the まとまり, and nothing checks again — the same as a まとまり's participants or a
+  list changed later ("At creation only" below). Refusing such sets unless the まとまり is bound by the same
+  set would be a new rule, left to the owner.
 - **The department a new まとまり belongs to** (`defaultBundleFolder`, `shared/core/bundle-place.ts`, one
   copy for the server and the app): the creator's own department (所属) — the one on screen when it is
   theirs, else their first in the tabs' order; belonging to none (an owner) or not known → the one on
