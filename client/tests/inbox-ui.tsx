@@ -46,7 +46,8 @@ const note = (id: string, kind: NotificationItem['kind'], recordId: string, reco
 
 const changed = emitter<{ companyId: string }>()
 // `?manual=1`: the user manual's story (client/tests/manual/scenes.ts, chapter 25): 山田さん's inbox — a draft to check
-// and send, a minutes check, a task 佐藤さん asked, and what 高橋さん and 佐藤さん did. Fictional data only.
+// and send, a minutes check, a task 佐藤さん asked, and what 高橋さん and 佐藤さん did; with `&plans=1` the plans are a
+// made-up 配信ツール's (chapter 32). Fictional data only.
 const MANUAL = params.get('manual') === '1'
 const manualState: NoticesState = {
   available: true,
@@ -106,12 +107,12 @@ let approved = false
 const DRAFT = `bp_${'1a'.repeat(16)}`
 const UNSURE = `bp_${'2b'.repeat(16)}`
 let browserInbox: BrowserInboxPlans = {
-  plans: [{ planId: DRAFT, state: 'draft', label: 'リマインダの段にテンプレートを足す', site: 'Lステップ', createdAt: at(0, 9) }],
+  plans: [{ planId: DRAFT, state: 'draft', label: 'リマインダの段にテンプレートを足す', site: MANUAL ? '配信ツール' : 'Lステップ', createdAt: at(0, 9) }],
   unsure: [{ planId: UNSURE, state: 'unknown', label: 'リマインダの段にテンプレートを足す', permittedAt: at(0, 8), confirmableAt: justPast(), canConfirm: true }],
 }
 let draftRan = false
 const planView = (id: string): BrowserPlanView => ({
-  id, state: id === DRAFT && !draftRan ? 'draft' : 'claimed', closeReason: null, connector: { id: 'lstep', version: '0.6.0', label: 'Lステップ' },
+  id, state: id === DRAFT && !draftRan ? 'draft' : 'claimed', closeReason: null, connector: MANUAL ? { id: 'haishin', version: '0.1.0', label: '配信ツール' } : { id: 'lstep', version: '0.6.0', label: 'Lステップ' },
   operation: 'reminder_step_add_template', label: 'リマインダの段にテンプレートを足す', sharedNote: null, delivers: 'scheduled', account: '5550001',
   target: { reminder: '7001001', step: '7002001' }, change: { template: '7003002' }, facts: {}, explanation: null,
   createdAt: at(0, 9), expiresAt: new Date(Date.now() + 3_000_000).toISOString(), approvedAt: null, contentHash: `sha256:${'7a'.repeat(32)}`,
@@ -127,7 +128,7 @@ function Preview() {
   const [planReads, setPlanReads] = useState(0)
   installElectronAPI({
     listBrowserPlans: async () => { setPlanReads(n => n + 1); return { ok: true, inbox: browserInbox } },
-    getBrowserPlan: async (_companyId, planId) => ({ ok: true, card: { plan: planView(planId), ready: { ok: true }, stoppedHere: false, runningHere: false, siteHost: 'manager.linestep.net' } }),
+    getBrowserPlan: async (_companyId, planId) => ({ ok: true, card: { plan: planView(planId), ready: { ok: true }, stoppedHere: false, runningHere: false, siteHost: MANUAL ? 'haishin.example.net' : 'manager.linestep.net' } }),
     runBrowserPlan: async () => {
       setActed('run')
       // The run's answer was lost: the draft became a run nobody knows the result of (the server's lists move with it).

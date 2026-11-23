@@ -2,6 +2,9 @@
 // Preview page for the chat's mail card (outbound-mail.md): a reply whose data parts are mail
 // drafts the AI made. The fake main answers a send with `sent` and writes the hash and the
 // 「返事を待つ」 choice it received into lines of their own, so the spec can check what the send carried.
+// `?manual=1`: the user manual's story (client/tests/manual/scenes.ts, chapter 30): 山田さん of 検証A社 and the mails
+// after the meeting with A社 — the thank-you (the calendar's attendee, 返事を待つ offered), the proposal with two PDFs,
+// a second thank-you 高橋さん already sent, one nobody knows arrived, and a Slack reply. Fictional data only.
 import { useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import type { UIMessage } from 'ai'
@@ -60,9 +63,57 @@ const EARLIER = {
   message: 'この会議のお礼メールは佐藤さんが 11/05 15:30 に送りました',
 }
 
+const MANUAL = new URLSearchParams(location.search).get('manual') === '1'
+const r = (n: string) => `r${n.repeat(24)}`
+const TAMURA = { ref: r('5'), email: 'tamura@a-sha.example', name: '田村 様', source: 'calendar' as const, firstTime: false }
+const mDraft: OutboundMailView = {
+  id: 'outbound_message-a1a1a1a1a1a1a1a1', state: 'draft', version: 1, hash: `sha256:${'b1'.repeat(32)}`, channel: 'email', interactionId: null, from: 'yamada@kensho-a.example',
+  to: [TAMURA], cc: [{ ref: r('6'), email: 'takahashi@kensho-a.example', name: '高橋', source: 'member', firstTime: false }],
+  subject: '本日の打ち合わせのお礼', body: 'A社 田村様\n\n本日はお時間をいただき、ありがとうございました。\nご相談いただいた研修の進め方は、来週中に見積とあわせてお送りします。\n\n引き続きよろしくお願いいたします。\n\n検証A社 営業部 山田\n',
+  bodyDeleted: false, linkCount: 0, meetingId: 'meeting-a1a1a1a1a1a1a1a1', bundleId: null, sentAt: null, providerMessageId: null,
+  lastChangedBy: 'ai', updatedAt: '2026-11-20T01:10:00Z', awaitReply: { expected: true, defaultUntil: '2026-11-25', chosenUntil: null },
+}
+const mFiles: OutboundMailView = {
+  ...mDraft, id: 'outbound_message-a2a2a2a2a2a2a2a2', hash: `sha256:${'b2'.repeat(32)}`, subject: '研修のご提案書をお送りします', meetingId: null,
+  body: 'A社 田村様\n\n先日お話しした研修のご提案書と見積をお送りします。\nご確認のうえ、ご不明な点があればお知らせください。\n\n検証A社 営業部 山田\n', cc: [], awaitReply: undefined,
+  attachments: [
+    { name: '提案書（A社様）.pdf', size: 1_250_000, sha256: 'e'.repeat(64), bytesDeleted: false },
+    { name: '別紙_見積.pdf', size: 52_000, sha256: 'f'.repeat(64), bytesDeleted: false },
+  ],
+}
+const mSecond: OutboundMailView = { ...mDraft, id: 'outbound_message-a3a3a3a3a3a3a3a3', hash: `sha256:${'b3'.repeat(32)}`, subject: '打ち合わせのお礼（山田より）', cc: [], awaitReply: undefined }
+const mUnknown: OutboundMailView = { ...mDraft, id: 'outbound_message-a4a4a4a4a4a4a4a4', state: 'unknown', subject: '日程のご連絡', body: 'A社 田村様\n\n次回の打ち合わせは 12月1日（月）10時からでお願いいたします。\n\n検証A社 営業部 山田\n', cc: [], awaitReply: undefined, lastChangedBy: 'human' }
+const mSlack: OutboundMailView = {
+  ...mDraft, id: 'outbound_message-a5a5a5a5a5a5a5a5', channel: 'slack', subject: '', to: [], cc: [], interactionId: 'interaction-a5a5a5a5a5a5a5a5', meetingId: null, awaitReply: undefined,
+  body: '佐藤さん、ありがとうございます。A社の件は今日中に見積の案をお送りします。',
+}
+const mCard = (id: string, draft: OutboundMailView): MailDraftCard => ({ id, companyId: 'co-preview', conversationId: 'conv-1', draft, byAi: true, at: '2026-11-20T01:10:00Z' })
+const M_EARLIER = {
+  messageId: 'outbound_message-0e0e0e0e0e0e0e0e', by: 'u-takahashi', byName: '高橋', at: '2026-11-20T01:05:00Z', kind: 'meeting' as const,
+  message: 'この会議のお礼メールは高橋さんが 11/20 10:05 に送りました',
+}
+const manualMessage: UIMessage = {
+  id: 'm', role: 'assistant',
+  parts: [
+    { type: 'text', text: '打ち合わせのお礼メールの下書きを作りました。まだ送っていません。' }, { type: MAIL_DRAFT_PART_TYPE, id: 'mail-draft-manual-1', data: mCard('card-m1', mDraft) },
+    { type: 'text', text: '提案書と見積を付けたメールです。' }, { type: MAIL_DRAFT_PART_TYPE, id: 'mail-draft-manual-2', data: mCard('card-m2', mFiles) },
+    { type: 'text', text: 'お礼メールをもう1通作りました。' }, { type: MAIL_DRAFT_PART_TYPE, id: 'mail-draft-manual-3', data: mCard('card-m3', mSecond) },
+    { type: 'text', text: '先ほどのメールです。' }, { type: MAIL_DRAFT_PART_TYPE, id: 'mail-draft-manual-4', data: mCard('card-m4', mUnknown) },
+    { type: 'text', text: 'Slack の返事の下書きです。' }, { type: MAIL_DRAFT_PART_TYPE, id: 'mail-draft-manual-5', data: mCard('card-m5', mSlack) },
+  ] as UIMessage['parts'],
+}
+const manualRecipients = [TAMURA, mDraft.cc[0], { ref: r('7'), email: 'suzuki@a-sha.example', name: '鈴木 様', source: 'calendar' as const, firstTime: false }]
+
 let report: (hash: string, awaitReply: string, shown?: string, reason?: string) => void = () => {}
 let opened: (sha256: string) => void = () => {}
-installElectronAPI({
+if (MANUAL) installElectronAPI({
+  getOutboundMailRecipients: async (_companyId, messageId) => ({ success: true, draft: messageId === mDraft.id ? mDraft : mSecond, recipients: { recipients: manualRecipients, unreadable: [] } }),
+  openOutboundMailAttachment: async () => ({ success: true }),
+  sendOutboundMail: async (_companyId, messageId, _hash, _awaitReply, _shown, resendReason) => (messageId === mSecond.id && !resendReason
+    ? { success: false, offline: false, code: 'ALREADY_SENT_FOR_SOURCE', error: M_EARLIER.message, alreadySent: M_EARLIER }
+    : { success: true, outcome: 'sent', draft: { ...mDraft, state: 'sent', sentAt: '2026-11-20T01:30:00Z', providerMessageId: 'gm-m' } }),
+})
+else installElectronAPI({
   openOutboundMailAttachment: async (_companyId, _messageId, sha256) => { opened(sha256); return { success: true } },
   removeOutboundMailAttachment: async (_companyId, _messageId, sha256, expectedVersion) => (
     sha256 === ESTIMATE && expectedVersion === withFiles.version
@@ -107,7 +158,7 @@ function Preview() {
   return (
     <main className="min-h-screen bg-white p-8 text-gray-900 dark:bg-zinc-900 dark:text-zinc-100">
       <p className="mb-4 text-xs text-gray-500">表示確認用の人工データ。本番のメールは送りません。</p>
-      <section className="mx-auto max-w-xl"><AssistantMessageParts parts={message.parts} isStreaming={false} markdown /></section>
+      <section className="mx-auto max-w-xl"><AssistantMessageParts parts={(MANUAL ? manualMessage : message).parts} isStreaming={false} markdown /></section>
       {received !== null && <p aria-label="受け取った印">{received}</p>}
       {awaited !== null && <p aria-label="受け取った返事待ち">{awaited}</p>}
       {files !== null && <p aria-label="受け取ったファイル">{files}</p>}
