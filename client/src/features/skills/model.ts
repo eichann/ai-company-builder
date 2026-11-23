@@ -67,7 +67,7 @@ export function shelfSendAnswer(result: { success: boolean; error?: string; outp
 
 /** The SKILL.md of a new skill (frontmatter + the sections the wizard fills in). */
 export function newSkillMarkdown(data: NewSkillInput): string {
-  const promptContent = data.prompt || `この Skill を実行すると、AIアシスタントが「${data.name}」タスクを実行します。`
+  const promptContent = data.prompt || `この Skill を実行すると、AIアシスタントが「${data.name}」を進めます。`
   return `---
 name: ${yamlQuoted(data.name)}
 description: ${yamlQuoted(data.description)}

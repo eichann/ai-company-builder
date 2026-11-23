@@ -132,7 +132,7 @@ test('the owner\'s examples read as plain sentences', async () => {
     return l.detail ? `${l.label}：${l.detail}` : l.label
   }
   assert.equal(line('decisions_record', { title: '研修対象を営業部全体に広げる' }), '決めたことを残しました：研修対象を営業部全体に広げる')
-  assert.equal(line('records_create', { type: 'task', title: '修正見積を送る' }), '記録を作りました：タスク「修正見積を送る」')
+  assert.equal(line('records_create', { type: 'task', title: '修正見積を送る' }), '記録を作りました：やること「修正見積を送る」')
   assert.equal(line('mail_draft_create', { toRefs: ['r' + 'a'.repeat(24), 'r' + 'b'.repeat(24)], subject: '件名', body: '本文' }), 'メールの下書きを作りました：宛先 2 人')
   assert.equal(line('mail_recipients', {}), '宛先の候補を調べました')
   assert.equal(toolLineOf('Skill', { skill: '提案書作成' }).detail, '提案書作成')

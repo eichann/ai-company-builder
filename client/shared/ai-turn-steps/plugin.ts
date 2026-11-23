@@ -168,7 +168,7 @@ export function pluginStepFirstMessage(input: {
     `手順「${input.label}」を、記録 ${input.recordId} について進めてください。`,
     ...(input.version !== null ? [`この記録のいまの version は ${input.version} です。記録の操作の expectedVersion にはこれを使ってください。`] : []),
     '',
-    input.source === 'company_skill' ? '会社の手順書（スキル）:' : '手順書:',
+    input.source === 'company_skill' ? '会社の手順書（Skill）:' : '手順書:',
     '-----',
     input.procedure.trim(),
     '-----',
@@ -295,7 +295,7 @@ export function pluginStepContinueMessage(input: {
 export function pluginStepPersonMessage(input: { label: string; recordId: string; procedure: string; source: PluginStepProcedurePin['source']; deliverableFolder?: string }): string {
   return [
     ...(input.deliverableFolder ? [`（この相談でファイルを保存できるのは「（部署のフォルダ）/.personal/${input.deliverableFolder}/」の中だけです）`, ''] : []),
-    `手順「${input.label}」を、記録 ${input.recordId} について一緒に進めたいです。まず records_get で記録を確かめてから、次の${input.source === 'company_skill' ? '会社の手順書（スキル）' : '手順書'}に沿って進めてください。`,
+    `手順「${input.label}」を、記録 ${input.recordId} について一緒に進めたいです。まず records_get で記録を確かめてから、次の${input.source === 'company_skill' ? '会社の手順書（Skill）' : '手順書'}に沿って進めてください。`,
     '',
     '-----',
     input.procedure.trim(),

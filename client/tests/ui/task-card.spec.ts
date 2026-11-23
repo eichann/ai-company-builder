@@ -490,7 +490,7 @@ test('「議事録を確認する」: the summary, the AI\'s proposals added all
   const card = page.getByTestId('task-card')
   await expect(card.getByRole('region', { name: '要約（AI）' })).toContainText('窓口を3つに増やす方向で合意。')
   await expect(card.getByRole('button', { name: '確認を終える' })).toBeVisible()
-  const proposals = card.getByRole('region', { name: 'AI のタスクの案' })
+  const proposals = card.getByRole('region', { name: 'AI のやることの案' })
   await expect(proposals).toContainText('見積を直す佐藤さん・11/7 17:00')
   // Who read it and how many are open; each proposal's basis, and whose AI added it when not the reader's.
   await expect(proposals).toContainText('佐藤さんの AI が読みました・案 3 件')
@@ -534,7 +534,7 @@ test('「議事録を確認する」: the summary, the AI\'s proposals added all
 
 test('「議事録を確認する」: the proposal buttons follow the type\'s who — none where the member may not press', async ({ page }) => {
   const state = await openPreview(page, 'task-card', { task: 'review', proposals: 'none' })
-  const proposals = page.getByTestId('task-card').getByRole('region', { name: 'AI のタスクの案' })
+  const proposals = page.getByTestId('task-card').getByRole('region', { name: 'AI のやることの案' })
   await expect(proposals).toContainText('見積を直す')
   await expect(proposals).toContainText('似ている案があります')
   for (const name of ['全部足す', '選んで足す', '要らない', '足す', '戻す', '同じ', '別のもの']) {

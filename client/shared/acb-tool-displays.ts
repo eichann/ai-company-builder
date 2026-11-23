@@ -19,6 +19,7 @@ import { companyPath, countOf, shortText } from './tool-display-text'
 import type { ToolDisplay } from './tool-display'
 import { AGENTS, AGENT_IDS } from './agents/registry'
 import { secondOpinionToolId } from './agents/second-opinion'
+import { thingName } from './thing-words'
 
 // --- Past tense and progressive of an action label (dictionary form) -----------------------
 const E_OR_I_ROW = 'えけげせぜてでねへべぺめれいきぎしじちぢにひびぴみり'
@@ -97,6 +98,12 @@ export const CORE_ACTION_LABELS: Readonly<Record<string, string>> = {
   project__finish: '終える', project__cancel: 'やめる', project__reopen: 'もう一度始める', project__set_owner: '責任者を替える', project__set_purpose: 'なんのためを書く', project__set_due: '期限を変える',
 }
 
+/** A core type in members' words (thing-words.ts: a task is 「やること」), never its definition label. */
+function coreThingName(type: unknown): string | undefined {
+  const t = String(type)
+  return CORE_TYPE_LABELS[t] ? thingName({ type: t, typeLabel: CORE_TYPE_LABELS[t] }) : undefined
+}
+
 const say = (label: string, running: string, many: string, describe?: ToolDisplay['describe']): ToolDisplay => ({ label, running, many, ...(describe ? { describe } : {}) })
 const records = (name: string) => `mcp__acb_records__${name}`
 
@@ -124,7 +131,7 @@ export const ACB_TOOL_DISPLAYS: Readonly<Record<string, ToolDisplay>> = {
   [records('records_history')]: say('記録の台帳を見ました', '記録の台帳を見ています', '記録の台帳を {n} 件見ました'),
   [records('records_types')]: say('記録の種類を確かめました', '記録の種類を確かめています', '記録の種類を {n} 回確かめました'),
   [records('records_create')]: say('記録を作りました', '記録を作っています', '記録を {n} 件作りました', input => {
-    const kind = CORE_TYPE_LABELS[String(input.type)]
+    const kind = coreThingName(input.type)
     const title = shortText(input.title, 30)
     return kind && title ? `${kind}「${title}」` : title
   }),
@@ -200,7 +207,7 @@ export function acbToolDisplay(toolName: string): ToolDisplay | undefined {
   const [, owner, action] = m
   const declared = CORE_ACTION_LABELS[`${owner}__${action}`]
   if (declared) return actionToolDisplay(declared)
-  const typeLabel = CORE_TYPE_LABELS[owner]
+  const typeLabel = coreThingName(owner)
   const word = OPERATION_WORDS.find(([re]) => re.test(`${action}_`))?.[1]
   return typeLabel
     ? actionToolDisplay(word ? `${typeLabel}を${word}` : `${typeLabel}の作業をする`)
