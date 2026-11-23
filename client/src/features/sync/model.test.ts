@@ -29,6 +29,15 @@ test('the notice for files someone else changed too says how many, that the serv
   assert.doesNotMatch(message, /競合|ローカル|\.backups/)
 })
 
+test('a failed sync that had already moved files aside still points at their backup, so the notice stays and offers the folder', () => {
+  // Offline: files made in a not-downloaded folder went to the backups before the fetch failed.
+  const offline = syncNoticeFor(result({ success: false, errorType: 'network', error: 'サーバーにつながらなかったため…', outsideCheckoutFiles: ['開発部/new.md'], outsideCheckoutBackupPath: '/b/outside' }))
+  assert.equal(offline.backupPath, '/b/outside')
+  // A push that did not go through after files were put back for a refused permission.
+  assert.equal(syncNoticeFor(result({ success: false, errorType: 'push_failed', error: 'このPCには保存しましたが…', restoredWriteDeniedFiles: ['総務/規程.md'], writeDeniedBackupPath: '/b/denied' })).backupPath, '/b/denied')
+  assert.equal(syncNoticeFor(result({ success: false, errorType: 'push_failed', error: 'このPCには保存しましたが…', restoredProtectedFiles: ['.mcp.json'], protectedBackupPath: '/b/protected' })).backupPath, '/b/protected')
+})
+
 test('restored folders, large files and imported repositories warn without hiding', () => {
   for (const fields of [{ restoredFolders: ['営業部'] }, { ignoredLargeFiles: ['big.mov'] }, { excludedNestedRepos: ['tool'] }]) {
     const r = result(fields)

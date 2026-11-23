@@ -181,8 +181,13 @@ tracked. The sync message still counts the newly ignored files. Threshold:
 - Nothing to send while neither the fetch (step 6) nor the pull (step 10) reached the server
   (offline, the server down): `success: false`, `errorType: 'network'`, 「サーバーにつながらなかったため、
   同期できませんでした。…」 — it used to say 「同期が完了しました」 having checked nothing. Nothing on disk
-  differs from before; like any `network` failure it sets no automatic-sync stop. Scenario 「offline with
-  nothing to send…」 (`scenarios.test.ts`).
+  differs from before; like any `network` failure it sets no automatic-sync stop. When the fetch's
+  error is git-http refusing the sign-in (`isSignInRefusal`: Authentication / a whole-word 401 or 403 /
+  credential, the final catch's rule too) it is `auth` with 「サーバーへのログインが切れたため、…ログインし直して
+  から…」 instead. Whatever moved aside before the stop (files in a not-downloaded folder, a
+  restored permission's copy) keeps its backup on the failure notice (`model.ts` `movedTo`), so the
+  notice stays until dismissed. Scenarios 「offline with nothing to send…」, 「sign-in refused with
+  nothing to send…」 (`scenarios.test.ts`, the harness's `refuseSignIn`).
 - A push that throws may still have landed (watchdog kill during a long hook, connection lost
   after acceptance). Every push goes through `pushToServer` → `pushLandedDespiteError`
   (`push-landed.ts`): unless the error is a recognised rejection (hook markers, `[rejected]`,

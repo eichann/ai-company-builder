@@ -90,13 +90,21 @@ import { isOfficeLockFile, OFFICE_LOCK_EXCLUDE_PATTERNS } from '../../shared/off
 import { findOpenFiles, openFilesStoppedMessage, removeLockFiles } from './open-files'
 import { isSkillLeftover, skillExcludeLines, SKILL_LEFTOVER_PATTERNS } from '../../shared/skill-leftovers'
 import { NEEDS_MEMBER_ERROR, type ReceiveResult } from '../../shared/auto-sync'
-import { PUSH_FAILED_MESSAGE, refusedThenPushFailedMessage, SAME_FILE_UNRESOLVED_MESSAGE, sameFileChangedMessage, SERVER_UNREACHABLE_MESSAGE, YOUR_EDITED_VERSION_IN_BACKUP_HISTORY } from '../../shared/sync-notice-text'
+import { PUSH_FAILED_MESSAGE, refusedThenPushFailedMessage, SAME_FILE_UNRESOLVED_MESSAGE, sameFileChangedMessage, SERVER_UNREACHABLE_MESSAGE, SIGN_IN_REFUSED_MESSAGE, YOUR_EDITED_VERSION_IN_BACKUP_HISTORY } from '../../shared/sync-notice-text'
 import type { BackupReason } from '../../shared/backup-reasons'
 import { receiveIntoRepo, type RepoReceiveOutcome } from './receive'
 import { stagedAutoCommitMessage } from './auto-message'
 import { clearStaleLocks, isDiskFull, lockFailureMessage, pruneRecoveryRefs, recoverInterruptedState, recoveryNote, REPOSITORY_BUSY_MESSAGE, type KeptBeforeRecovery } from './interrupted'
 
 const PULL_FAILED_MESSAGE = 'サーバーの最新の内容を受け取れなかったため、同期を完了できませんでした。このPCの変更はそのまま残っています。もう一度同期しても直らないときは、管理者に連絡してください。'
+
+/**
+ * git's words when the server refused the session's sync pass (expired, revoked): errorType `auth`.
+ * The status as a whole word, so a folder name holding the digits (a temp folder) does not count.
+ */
+function isSignInRefusal(message: string): boolean {
+  return message.includes('Authentication') || /\b40[13]\b/.test(message) || message.includes('credential')
+}
 
 /** Does origin/main, as last fetched, hold commits HEAD does not? False without it (the first push of a company). */
 async function upstreamNotMerged(git: SimpleGit): Promise<boolean> {
@@ -571,11 +579,12 @@ async function runSync(deps: SyncDeps, repoPath: string, companyId: string, comm
     log.log('Git sync: Fetching from origin...')
     // Both this fetch and the pull below failing means the server was never
     // reached: with nothing to send, the result must not read as a finished sync.
-    let fetchFailed = false
+    // Its text tells an expired sign-in (401 / 403) from no connection.
+    let fetchFailure: string | null = null
     try {
       await git.fetch(['--progress', 'origin'])
     } catch (fetchError) {
-      fetchFailed = true
+      fetchFailure = fetchError instanceof Error ? fetchError.message : String(fetchError)
       log.warn('Git sync: Fetch failed (may be offline):', fetchError)
     }
 
@@ -1181,11 +1190,12 @@ async function runSync(deps: SyncDeps, repoPath: string, companyId: string, comm
       // Nothing to send and the server never answered (offline, the server
       // down): say so instead of 「同期が完了しました」. Nothing changed here
       // that is not also reported; the next sync simply tries again.
-      if (fetchFailed && pullFailed) {
+      if (fetchFailure !== null && pullFailed) {
+        const signInRefused = isSignInRefusal(fetchFailure)
         return {
           success: false,
-          errorType: 'network' as const,
-          error: SERVER_UNREACHABLE_MESSAGE,
+          errorType: signInRefused ? 'auth' as const : 'network' as const,
+          error: signInRefused ? SIGN_IN_REFUSED_MESSAGE : SERVER_UNREACHABLE_MESSAGE,
           restoredFolders,
           ignoredLargeFiles,
           excludedNestedRepos: newlyExcludedNestedRepos
@@ -1708,7 +1718,7 @@ async function runSync(deps: SyncDeps, repoPath: string, companyId: string, comm
     let errorType = 'unknown'
     if (errorMsg.includes('Could not resolve host') || errorMsg.includes('unable to access') || errorMsg.includes('network')) {
       errorType = 'network'
-    } else if (errorMsg.includes('Authentication') || errorMsg.includes('401') || errorMsg.includes('403') || errorMsg.includes('credential')) {
+    } else if (isSignInRefusal(errorMsg)) {
       errorType = 'auth'
     } else if (errorMsg.includes('CONFLICT') || errorMsg.includes('conflict') || errorMsg.includes('rebase')) {
       errorType = 'conflict'

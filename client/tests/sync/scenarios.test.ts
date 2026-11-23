@@ -98,6 +98,27 @@ describe('git:sync multi-member scenarios', { concurrency: CONCURRENCY }, () => 
     await settleAndCheck(world)
   })
 
+  // Guard: an expired sign-in (git-http 401 / 403) is told as such, not as a lost connection.
+  test('sign-in refused with nothing to send: says to sign in again (auth), not to check the internet; then it syncs', async t => {
+    const world = World.create(t, { members: [{ name: 'a' }, { name: 'b' }], seed: { 'x.md': '0\n' } })
+    const [a, b] = world.members
+    b.write('x.md', 'from b\n')
+    ok(await b.sync(), 'b')
+    for (const refusal of [undefined, "fatal: unable to access 'http://127.0.0.1:3001/git/company.git/': The requested URL returned error: 403"]) {
+      a.refuseSignIn(refusal)
+      const out = await a.sync()
+      assert.equal(out.result.success, false)
+      assert.equal(out.result.errorType, 'auth', refusal)
+      assert.match(String(out.result.error), /^サーバーへのログインが切れたため、同期できませんでした。.*ログインし直してから/)
+      assert.doesNotMatch(String(out.result.error), /インターネット|[A-Za-z]{4}/)
+      assert.equal(a.readText('x.md'), '0\n', 'nothing changed here')
+    }
+    a.acceptSignIn()
+    ok(await a.sync(), 'a')
+    assert.equal(a.readText('x.md'), 'from b\n')
+    await settleAndCheck(world)
+  })
+
   // Guard: conflict resolution is a loop, not a single round.
   test('several conflicting picks in one rebase are all resolved, no commit is dropped', async t => {
     const world = World.create(t, {

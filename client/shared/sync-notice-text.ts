@@ -30,6 +30,9 @@ export function refusedThenPushFailedMessage(refusedWhat: string, toServerVersio
  */
 export const SERVER_UNREACHABLE_MESSAGE = 'サーバーにつながらなかったため、同期できませんでした。このPCの内容はそのまま残っています。インターネットにつながっているか確かめて、もう一度［サーバーと同期］を押してください。'
 
+/** Nothing to send, and the server refused this app's sign-in (an expired session): reaching it is not the problem. */
+export const SIGN_IN_REFUSED_MESSAGE = 'サーバーへのログインが切れたため、同期できませんでした。このPCの内容はそのまま残っています。ログインし直してから、もう一度［サーバーと同期］を押してください。'
+
 /**
  * Files someone else changed at the same place: the server's version was kept
  * (`kept`), or the server had deleted it and the deletion was followed (`deleted`).

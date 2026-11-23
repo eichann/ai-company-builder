@@ -34,6 +34,10 @@ function movedTo(result: GitResult): string | undefined {
     result.nestedRepoBackupPath ||
     result.largeFileBackupPath ||
     result.privateFolders?.find(folder => folder.setAside && folder.backupPath)?.backupPath ||
+    // Also on a failed sync (offline, a push that did not go through): what moved before the stop.
+    result.outsideCheckoutBackupPath ||
+    result.writeDeniedBackupPath ||
+    result.protectedBackupPath ||
     result.backupPath
 }
 
