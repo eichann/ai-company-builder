@@ -1140,12 +1140,14 @@ owner-only one, before every role or folder rule).
   404 `RECORD_NOT_FOUND`); not members-only → 409 `NOT_MEMBERS_ONLY`; each a member (400
   `BAD_MEMBER`, ≤ 200). Ledger action `invite`, change `place.members` before / after (ids,
   comma-separated), version + 1 (`VERSION_CONFLICT`), answer `added` (the newly listed). **Never
-  undone** (`place.*`). No notice kind: the `records` signal reaches the added. Groups, departments
+  undone** (`place.*`). A task linked to a まとまり keeps within it (400 `WIDER_THAN_BUNDLE`: "A task and its
+  案件・プロジェクト"). No notice kind: the `records` signal reaches the added. Groups, departments
   and removing: "Groups and departments on the list" below. The app: the meeting card's ［招待する］
   (`minutes:invite`, `minutes:inviteChoices`, `minutes.md` "In the app").
 - **Share** 「部署に出す」 (`share`, "Owner-only records"): also from members-only, by any listed
   member; ledger `place.members` (the list → null) and `place.folder`. Its assignee / reviewer must
-  read the folder (400 `ASSIGNEE_CANNOT_READ` / `REVIEWER_CANNOT_READ`). The folder's readers then see
+  read the folder (400 `ASSIGNEE_CANNOT_READ` / `REVIEWER_CANNOT_READ`); a task linked to a まとまり is never
+  shared wider than it (400 `WIDER_THAN_BUNDLE`). The folder's readers then see
   the record and its 経緯, including who was on the list: intended (owner decision 2026-11-04) —
   sharing is the listed member's own act, and the ledger must be accurate, so `place.members`
   before keeps the previous list.
@@ -1334,6 +1336,21 @@ Words on screen: 見える範囲 / 見られる人, never 置き場所.
   keeps the one answer `FOLDER_NOT_PLACEABLE` (a member taken off the participants gets it too). The
   route's first check (`checkPlace`) leaves a private folder the member reads to the engine (it is not in
   the company repository); an unreadable one still answers like a missing folder.
+- **「部署に出す」 and 「招待する」 keep it within** (2026-11-23; before, both skipped the check): a share of a
+  linked task to any folder, and an invite of people, groups or departments to a members-only linked task,
+  must leave it within **every live まとまり its `bundle` link names — also one the member no longer reads**
+  (`linkedBundles`; its readers are still the bound), else 400 `WIDER_THAN_BUNDLE` with words for that action
+  (`SHARE_WIDER_THAN_BUNDLE` / `INVITE_WIDER_THAN_BUNDLE`, `bundle-place.ts`; naming no place, title or
+  person), nothing written (no ledger entry, no `permission_history`). Asked inside the write's transaction
+  of the row as just written (`share.ts` `withinItsBundles`: a group's or department's people read with it),
+  so the check and the write read the same state. Never narrows (widening is refused, not turned into
+  something else). A task with no まとまり, and other types, are unaffected; an owner-only まとまり's task can
+  no longer be shown to a department (only `toBundle`'s `BUNDLE_NOT_PLACED` said so before).
+  **Checked at the moment of the change only** (open owner decision, 2026-11-23 review): a group or department
+  put on a linked task's list is judged by who is in it now; someone who joins it later reads the task even
+  when they cannot read the まとまり, and nothing checks again — the same as a まとまり's participants or a
+  list changed later ("At creation only" below). Refusing such sets unless the まとまり is bound by the same
+  set would be a new rule, left to the owner.
 - **The department a new まとまり belongs to** (`defaultBundleFolder`, `shared/core/bundle-place.ts`, one
   copy for the server and the app): the creator's own department (所属) — the one on screen when it is
   theirs, else their first in the tabs' order; belonging to none (an owner) or not known → the one on
@@ -1386,7 +1403,9 @@ Words on screen: 見える範囲 / 見られる人, never 置き場所.
 - Tests: `server/tests/unit/record-bundle-place.test.ts` (the default department, inherit on create, an
   owner-only task stays owner-only, wider refused or narrowed, named people kept, set_bundle, the share
   to the まとまり's folder for a linked task of a reader only, no name to a non-reader, the route's first
-  check) — mutation-checked; `client/src/features/tasks/model.test.ts` (`bundlePlacesOf`),
+  check; 「部署に出す」 / 「招待する」 wider than the まとまり refused — a private, members-only and owner-only
+  まとまり, one the member no longer reads, a department on the list —, within ones and a task with no まとまり
+  unchanged) — mutation-checked; `client/src/features/tasks/model.test.ts` (`bundlePlacesOf`),
   `client/tests/ui/task-card.spec.ts` (the dialog's department, the narrowing question, ［〇〇の人に見せる］).
 
 ### Private 案件・プロジェクト (非公開（参加者だけ）, owner decision 2026-11-06)

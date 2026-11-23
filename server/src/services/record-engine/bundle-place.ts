@@ -26,6 +26,19 @@ export const WIDER_THAN_BUNDLE = {
   code: 'WIDER_THAN_BUNDLE',
 } as const
 
+/**
+ * 「部署に出す」 / 「招待する」 that would make a linked task wider than its まとまり (400, the same code; words
+ * for those actions, naming no place, title or person).
+ */
+export const SHARE_WIDER_THAN_BUNDLE = {
+  error: 'このやることがつながっている先を見られない人にまで見えてしまうため、そこには出せません。つながっている先と同じ人たちに見える場所を選んでください',
+  code: WIDER_THAN_BUNDLE.code,
+} as const
+export const INVITE_WIDER_THAN_BUNDLE = {
+  error: '足そうとした人の中に、このやることがつながっている先を見られない人がいるため、足せません。つながっている先を見られる人だけを足してください',
+  code: WIDER_THAN_BUNDLE.code,
+} as const
+
 /** Someone the task names (担当・頼んだ人・確かめる人…) would no longer see it in the narrower place. */
 export const NAMED_PERSON_CANNOT_READ = {
   error: 'このやることにかかわる人（担当・頼んだ人・確かめる人など）が、つなぐ先を見られません。その人が見られるようにしてから、もう一度つないでください',
@@ -74,14 +87,24 @@ export function bundleLinkName(def: TypeDefinition): string | null {
   return found ? found[0] : null
 }
 
+/**
+ * Every live まとまり a record's links name, whoever reads them: the invariant holds for a まとまり the
+ * acting member no longer reads too (its readers are still the bound).
+ */
+export function linkedBundles(
+  records: RecordRepository, def: TypeDefinition, links: readonly Pick<RecordLinkRow, 'name' | 'targetId'>[],
+): RecordAccessRow[] {
+  const name = bundleLinkName(def)
+  if (!name) return []
+  const ids = links.filter(l => l.name === name && l.targetId !== null).map(l => l.targetId as string)
+  if (ids.length === 0) return []
+  const types = currentTypes(records)
+  return records.byIds(ids).filter(r => r.removedAt === null && types.get(r.type)?.definition.implements.includes('bundle'))
+}
+
 /** The live まとまり a record's links name (the first readable one), or null. */
 export function linkedBundle(
   records: RecordRepository, def: TypeDefinition, links: readonly Pick<RecordLinkRow, 'name' | 'targetId'>[], readable: (r: RecordAccessRow) => boolean,
 ): RecordAccessRow | null {
-  const name = bundleLinkName(def)
-  if (!name) return null
-  const ids = links.filter(l => l.name === name && l.targetId !== null).map(l => l.targetId as string)
-  if (ids.length === 0) return null
-  const types = currentTypes(records)
-  return records.byIds(ids).find(r => r.removedAt === null && readable(r) && types.get(r.type)?.definition.implements.includes('bundle')) ?? null
+  return linkedBundles(records, def, links).find(readable) ?? null
 }

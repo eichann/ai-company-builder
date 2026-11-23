@@ -17,7 +17,11 @@ import type { RecordSetSubject } from '../../ports/records'
 import { ASSIGNEE_CANNOT_READ, REVIEWER_CANNOT_READ, bad, conflict } from './refusals'
 import type { ActorInput } from './types'
 import { NOTE_MAX, provenance } from './values'
-import { BUNDLE_PLACED_TYPES, NAMED_PERSON_CANNOT_READ, linkedBundle } from './bundle-place'
+import type { TypeDefinition } from '../../../shared/core/record-types'
+import type { RecordRepository } from '../../ports/records'
+import {
+  BUNDLE_PLACED_TYPES, INVITE_WIDER_THAN_BUNDLE, NAMED_PERSON_CANNOT_READ, SHARE_WIDER_THAN_BUNDLE, linkedBundle, linkedBundles, placeWithin,
+} from './bundle-place'
 import { pathKey } from '../../../shared/core/paths'
 import { similarInSlot } from '../source-slot-candidates'
 
@@ -67,6 +71,24 @@ export function sharing(ctx: EngineContext) {
     return deps.managedFolders(member.companyId, member.userId).length > 0
   }
 
+  /**
+   * A task that belongs to a まとまり is never seen by more people than the まとまり (records.md "A task and
+   * its 案件・プロジェクト"). Asked inside the write's transaction, of the row as just written, so the check
+   * and the write read the same state; every linked まとまり counts, also one the member no longer reads.
+   */
+  function withinItsBundles(companyId: string, records: RecordRepository, def: TypeDefinition, recordId: string): boolean {
+    if (!BUNDLE_PLACED_TYPES.includes(def.name)) return true
+    const now = records.byIds([recordId])[0]
+    if (!now) return false
+    const bundles = linkedBundles(records, def, records.linksFrom([recordId]))
+    if (bundles.length === 0) return true
+    const scopes = companyData.forCompany(companyId).scopes.listWithRules()
+    return bundles.every(b => placeWithin(companyId, scopes, id => deps.roleOf(companyId, id), now, b))
+  }
+  /** Thrown inside a transaction to roll it back: the version moved, or the task would be wider than its まとまり. */
+  const STOP = new Error('stale')
+  const WIDER = new Error('wider than bundle')
+
   return {
     /**
      * 「部署に出す／案件につなぐ」 (records.md "Owner-only records", "Members-only records"): an
@@ -78,6 +100,7 @@ export function sharing(ctx: EngineContext) {
      * `place.folder` before / after; never undone. Made from a meeting (its `meeting` link): the answer
      * adds `similar` when a live item of that meeting the member reads has a close title
      * (「似ているやることがあります」, 出どころの枠 §10 — a hint only, the share is never refused).
+     * A task linked to a まとまり is never placed wider than it (400 `WIDER_THAN_BUNDLE`, nothing written).
      */
     share(member: Member, actor: ActorInput, recordId: string, body: unknown): Outcome<{ record: RecordSummary; entry: LedgerEntry; similar?: { id: string; title: string } }> {
       const found = readable(member, recordId)
@@ -130,13 +153,18 @@ export function sharing(ctx: EngineContext) {
         ],
         attachments: [], decision: null, isDecision: false, typeVersion: row.typeVersion, reversesVersion: null, ...provenance(actor),
       }
-      const written = transactions.run(() => {
-        if (!records.writeState({ recordId: row.id, state: current.state, fields: JSON.stringify(current.fields), version: entry.version, updatedAt: at }, expected)) return false
-        records.setPlace(row.id, { folder, personalOwner: null }, at)
-        records.appendLedger(entry)
-        return true
-      })
-      if (!written) return conflict(STALE, 'VERSION_CONFLICT')
+      try {
+        transactions.run(() => {
+          if (!records.writeState({ recordId: row.id, state: current.state, fields: JSON.stringify(current.fields), version: entry.version, updatedAt: at }, expected)) throw STOP
+          records.setPlace(row.id, { folder, personalOwner: null }, at)
+          if (!withinItsBundles(member.companyId, records, def, row.id)) throw WIDER
+          records.appendLedger(entry)
+        })
+      } catch (err) {
+        if (err === STOP) return conflict(STALE, 'VERSION_CONFLICT')
+        if (err === WIDER) return bad(SHARE_WIDER_THAN_BUNDLE.error, SHARE_WIDER_THAN_BUNDLE.code)
+        throw err
+      }
       changed(member.companyId, row.id)
       const meetingId = def.links.meeting?.target === 'meeting' ? records.linksFrom([row.id]).find(l => l.name === 'meeting' && l.targetId)?.targetId ?? null : null
       const similar = meetingId ? similarInSlot(records, r => reader.record(r), { slot: { sourceId: meetingId, linkName: 'meeting', kind: row.type }, title: row.title, self: row.id }) : null
@@ -152,7 +180,8 @@ export function sharing(ctx: EngineContext) {
      * find it (403 `LIST_WIDENING_NOT_ALLOWED`). Only the person, with their session (no AI route).
      * A ledger entry `invite` with `place.members` before / after; never undone (the added may have
      * seen it). The added hear of it through the `records` signal; the change also goes to
-     * `permission_history` (`record-members`).
+     * `permission_history` (`record-members`). A task linked to a まとまり keeps within it: everyone the
+     * grown list reads must read the まとまり (400 `WIDER_THAN_BUNDLE`, nothing written).
      */
     invite(member: Member, actor: ActorInput, recordId: string, body: unknown): Outcome<{
       record: RecordSummary; entry: LedgerEntry; added: string[]; addedSets: RecordSetSubject[]
@@ -188,20 +217,26 @@ export function sharing(ctx: EngineContext) {
       }
       let added: string[] = []
       let addedSets: RecordSetSubject[] = []
-      const written = transactions.run(() => {
-        if (!records.writeState({ recordId: row.id, state: current.state, fields: JSON.stringify(current.fields), version: entry.version, updatedAt: at }, expected)) return false
-        added = records.addMembers(row.id, list.users, member.userId, at)
-        addedSets = list.sets.length > 0 ? records.addMemberSets(row.id, list.sets, member.userId, at) : []
-        records.appendLedger(entry)
-        if (added.length + addedSets.length > 0) {
-          handle.permissionHistory.append({
-            action: 'record-members', at, byUser: member.userId,
-            detail: { recordId: row.id, via: 'invite', added: { users: added, sets: addedSets } },
-          })
-        }
-        return true
-      })
-      if (!written) return conflict(STALE, 'VERSION_CONFLICT')
+      try {
+        transactions.run(() => {
+          if (!records.writeState({ recordId: row.id, state: current.state, fields: JSON.stringify(current.fields), version: entry.version, updatedAt: at }, expected)) throw STOP
+          added = records.addMembers(row.id, list.users, member.userId, at)
+          addedSets = list.sets.length > 0 ? records.addMemberSets(row.id, list.sets, member.userId, at) : []
+          // The list as written (a group's or department's people read with it).
+          if (!withinItsBundles(member.companyId, records, def, row.id)) throw WIDER
+          records.appendLedger(entry)
+          if (added.length + addedSets.length > 0) {
+            handle.permissionHistory.append({
+              action: 'record-members', at, byUser: member.userId,
+              detail: { recordId: row.id, via: 'invite', added: { users: added, sets: addedSets } },
+            })
+          }
+        })
+      } catch (err) {
+        if (err === STOP) return conflict(STALE, 'VERSION_CONFLICT')
+        if (err === WIDER) return bad(INVITE_WIDER_THAN_BUNDLE.error, INVITE_WIDER_THAN_BUNDLE.code)
+        throw err
+      }
       changed(member.companyId, row.id)
       return ok({ record: summaryOf(records, row.id), entry, added, addedSets })
     },

@@ -11,6 +11,8 @@
  *   and never when someone the task names would lose it; the AI's set_bundle is refused alike;
  * - 「プロジェクトの人に見せる」: the share reaches the まとまり's private folder only for a task linked
  *   to it and only for a reader of it;
+ * - 「部署に出す」 and 「招待する」 never make a linked task wider than its まとまり (refused, nothing written,
+ *   also when the member no longer reads the まとまり); a task with no まとまり is unaffected;
  * - nothing names a private まとまり to someone who cannot read it.
  */
 import { beforeEach, describe, expect, it } from 'vitest'
@@ -277,6 +279,96 @@ describe('「プロジェクトの人に見せる」 (share to the まとまり�
     const missing = engine.share(m('u-alice'), HUMAN, t.id, { folder: '開発部/別件', expectedVersion: 1 })
     expect(code(r)).toBe('FOLDER_NOT_PLACEABLE')
     expect(r).toEqual(missing)
+  })
+})
+
+describe('「部署に出す」 and 「招待する」 keep a linked task within its まとまり', () => {
+  const ownLinked = (p: { id: string }, who = 'u-alice') =>
+    ok(engine.create(m(who), HUMAN, { type: 'task', title: '自分の', personal: true, fields: { assignee: who }, links: { bundle: p.id } })).record
+  const fewLinked = (p: { id: string }) =>
+    ok(engine.create(m('u-alice'), HUMAN, { type: 'task', title: '二人の', fields: { assignee: 'u-alice' }, links: { bundle: p.id } })).record
+  const ledgerOf = (id: string) => source.forCompany(CO).records.ledger(id)
+
+  it('部署に出す to a department wider than a private まとまり: refused, nothing written, nobody new reads it', async () => {
+    const p = privateProject('極秘の新製品')
+    const t = ownLinked(p)
+    const r = engine.share(m('u-alice'), HUMAN, t.id, { folder: '営業部', expectedVersion: 1 })
+    expect(code(r)).toBe('WIDER_THAN_BUNDLE')
+    expect(JSON.stringify(r)).not.toMatch(/極秘|新製品|営業部/)
+    expect(placeOf(t.id)).toEqual({ folder: null, personalOwner: 'u-alice', members: null })
+    expect(ledgerOf(t.id)).toHaveLength(1)
+    expect(await reads('u-carol', t.id)).toBe(false)
+  })
+
+  it('a members-only task of a members-only まとまり: 部署に出す refused', async () => {
+    const p = project('少人数', '営業部')
+    conn.prepare("UPDATE records SET personal_owner = '@members', folder = NULL WHERE company_id = ? AND id = ?").run(CO, p.id)
+    for (const u of ['u-alice', 'u-bob']) conn.prepare('INSERT INTO record_viewers (company_id, record_id, user_id, added_at, added_by) VALUES (?, ?, ?, ?, ?)').run(CO, p.id, u, TS, 'u-alice')
+    const t = fewLinked(p)
+    expect(placeOf(t.id).members).toEqual(expect.arrayContaining(['u-alice', 'u-bob']))
+    expect(code(engine.share(m('u-bob'), HUMAN, t.id, { folder: '開発部', expectedVersion: 1 }))).toBe('WIDER_THAN_BUNDLE')
+    expect(await reads('u-carol', t.id)).toBe(false)
+  })
+
+  it('an owner-only まとまり: its owner-only task is not shown to a department', () => {
+    const p = ok(engine.create(m('u-alice'), HUMAN, { type: 'project', title: '自分だけの', personal: true, fields: { owner: 'u-alice' } })).record
+    const t = ownLinked(p)
+    expect(code(engine.share(m('u-alice'), HUMAN, t.id, { folder: '営業部', expectedVersion: 1 }))).toBe('WIDER_THAN_BUNDLE')
+  })
+
+  it('no longer a reader of the まとまり: still refused (the まとまり keeps its readers), naming nothing', () => {
+    const p = privateProject('極秘の新製品')
+    const t = ownLinked(p)
+    conn.prepare("DELETE FROM scope_rules WHERE id = 'p-a'").run()
+    const r = engine.share(m('u-alice'), HUMAN, t.id, { folder: '営業部', expectedVersion: 1 })
+    expect(code(r)).toBe('WIDER_THAN_BUNDLE')
+    expect(JSON.stringify(r)).not.toMatch(/極秘|新製品/)
+    expect(placeOf(t.id).personalOwner).toBe('u-alice')
+  })
+
+  it('within stays allowed: the まとまり’s own department, a company-wide まとまり to any department, a task with no まとまり', async () => {
+    const d = project('部署の', '開発部', 'u-bob')
+    ok(engine.share(m('u-bob'), HUMAN, ownLinked(d, 'u-bob').id, { folder: '開発部', expectedVersion: 1 }))
+    const everyone = project('全社の', null)
+    const t = ownLinked(everyone)
+    ok(engine.share(m('u-alice'), HUMAN, t.id, { folder: '営業部', expectedVersion: 1 }))
+    expect(placeOf(t.id).folder).toBe('営業部')
+    const alone = ok(engine.create(m('u-alice'), HUMAN, { type: 'task', title: 'ひとりの', personal: true, fields: { assignee: 'u-alice' } })).record
+    ok(engine.share(m('u-alice'), HUMAN, alone.id, { folder: '営業部', expectedVersion: 1 }))
+    expect(await reads('u-carol', alone.id)).toBe(true)
+  })
+
+  it('招待する someone who cannot read the まとまり: refused, nothing written, they never read it', async () => {
+    const p = privateProject('極秘の新製品')
+    const t = fewLinked(p)
+    expect(placeOf(t.id).folder).toBe(PRIVATE)
+    // A members-only task of the private まとまり (a meeting's list, say): alice and bob.
+    conn.prepare("UPDATE records SET personal_owner = '@members', folder = NULL WHERE company_id = ? AND id = ?").run(CO, t.id)
+    for (const u of ['u-alice', 'u-bob']) conn.prepare('INSERT INTO record_viewers (company_id, record_id, user_id, added_at, added_by) VALUES (?, ?, ?, ?, ?)').run(CO, t.id, u, TS, 'u-alice')
+    const r = engine.invite(m('u-alice'), HUMAN, t.id, { add: ['u-carol'], expectedVersion: 1 })
+    expect(code(r)).toBe('WIDER_THAN_BUNDLE')
+    expect(JSON.stringify(r)).not.toMatch(/極秘|新製品/)
+    expect(placeOf(t.id).members).not.toContain('u-carol')
+    expect(ledgerOf(t.id)).toHaveLength(1)
+    expect(source.forCompany(CO).permissionHistory.recent(50).filter(h => h.action === 'record-members')).toHaveLength(0)
+    expect(await reads('u-carol', t.id)).toBe(false)
+    // A department with someone outside the まとまり in it: refused alike.
+    conn.prepare('INSERT INTO department_members (company_id, department_id, user_id, created_at) VALUES (?, ?, ?, ?)').run(CO, 'd-dev', 'u-carol', TS)
+    const dept = engine.invite(m('u-alice'), HUMAN, t.id, { add: [{ subjectType: 'department', subjectId: 'd-dev' }], expectedVersion: 1 })
+    expect(code(dept)).toBe('WIDER_THAN_BUNDLE')
+    expect(await reads('u-carol', t.id)).toBe(false)
+    // Someone who reads the まとまり (an owner) is added as before.
+    ok(engine.invite(m('u-alice'), HUMAN, t.id, { add: ['u-owner'], expectedVersion: 1 }))
+  })
+
+  it('招待する on a members-only task with no まとまり, or of a company-wide まとまり, is unaffected', async () => {
+    const t = ok(engine.create(m('u-alice'), HUMAN, { type: 'task', title: '二人の', members: ['u-bob'], fields: { assignee: 'u-alice' } })).record
+    ok(engine.invite(m('u-alice'), HUMAN, t.id, { add: ['u-carol'], expectedVersion: 1 }))
+    expect(await reads('u-carol', t.id)).toBe(true)
+    const everyone = project('全社の', null)
+    const linked = ok(engine.create(m('u-alice'), HUMAN, { type: 'task', title: '全社の二人の', members: ['u-bob'], fields: { assignee: 'u-alice' }, links: { bundle: everyone.id } })).record
+    ok(engine.invite(m('u-alice'), HUMAN, linked.id, { add: ['u-carol'], expectedVersion: 1 }))
+    expect(await reads('u-carol', linked.id)).toBe(true)
   })
 })
 
