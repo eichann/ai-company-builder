@@ -484,14 +484,25 @@ the AI operates** (`ai` mode, a run's `enterAi` … `leaveAi`) they are shut. Th
   `client/shared/browser-checkers.ts`: a host two declarations name gets none). Lステップ 0.6.2: `www.google.com` under `/recaptcha/` (frame, post) and
   `www.gstatic.com` under `/recaptcha/` (parts only). Tag manager, error / chat services and web fonts the
   page also asks for are not needed to log in and stay refused.
-- **The rule** (`decideLoginHelper`, reached from `decideWindowRequest` only for a request the site's rule
-  refused for its host, `client/shared/browser-operation.ts`): https on the default port, no user, the
+- **The rule** (`decideLoginHelper`, reached from `decideWindowRequest` for every request on a helper's host
+  that the site's rule refused, whatever its reason, `client/shared/browser-operation.ts`): https on the default port, no user, the
   helper's exact host, the path (as the address parser gives it: dot segments resolved; any `%2f` / `%5c` /
   `%2e` refused) under the prefix; then only in `human` mode (`ai` → `ai-login-helper`), only from the
   window's page (not a service worker), GET / HEAD of script, stylesheet, image, font, media, XHR / fetch,
   other (a worker's script); a subframe only where `frame`; a POST only by XHR / fetch and only where
   `post`. Never a top-level navigation, a WebSocket, a beacon, a plug-in object. Out of the prefix the log
   says `login-helper-path` (so a missing path shows as such, host only).
+- **A helper's host the admin also lists as an asset host** (seen on a real machine, 2026-11-23: the admin
+  listed `www.google.com` as a parts host too, the asset rule refused the reCAPTCHA frame with `asset-use`
+  before the helper rule was asked, and nobody could log in). Precedence: the site's rule first — what it
+  allows (the asset rule's GET / HEAD of script, stylesheet, font, image, in and out of the prefix, in
+  both modes) stays allowed —; whatever it refuses on that host is decided by the helper rule alone. So in
+  `human` mode the helper's frame and declared POST work under its prefix; in `ai` mode the helper rule
+  refuses everything (`ai-login-helper`), so `ai` mode gets exactly what the asset rule allows, never more.
+  Frames: an asset host is never a frame of the site's rule, so the helper's frame rule above applies
+  unchanged. The proxy: an asset host is DIRECT in both modes as before (`ai` mode's request rule still
+  refuses what is not a part). The declaration itself still may not name one of its own asset hosts as a
+  helper.
 - **Frames** (`windowNavigationAllowed`, the window's `will-frame-navigate` / `will-redirect`): the site's
   rule, plus in `human` mode a subframe to a helper with `frame`, under its prefix.
 - **The proxy** (`browserProxyScript(site, port, proxyHelperHosts(state))`): the helpers' hosts DIRECT in
@@ -547,8 +558,10 @@ refused frames leave the page clean; a sandboxed `srcdoc` frame made by the page
 `ai` → the run stops before the permit, made while the permit is asked → `failed` at the last check, and
 its own write and read to the site reach nothing, logged `ai-other-frame`). Each guard mutation-checked;
 survivors kept on purpose: re-routing the proxy on a mode change (the request rule refuses every helper
-request in `ai` mode first; the proxy only also stops a bare connection such as a preconnect) and the
-rule's "only for a host refusal" (the helper's own https / port / user check refuses the same).
+request in `ai` mode first; the proxy only also stops a bare connection such as a preconnect). The table
+also covers a helper's host listed as an asset host by the admin (every mode × kind × prefix × page: the
+asset rule's parts in both modes, the helper rule for the rest, `ai` refused) — fails when the helper rule
+is asked only for a `host` refusal, and when it is asked before the site's rule allows.
 
 ## Plans, executions, permits and locks (PR 6a, 6b-2a: the server side; nothing in the app calls it yet)
 
