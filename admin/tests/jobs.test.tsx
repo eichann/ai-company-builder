@@ -143,6 +143,22 @@ describe('the form', () => {
     const plain = definitionFromForm({ ...form, deliverTo: '' }, 'interview-report')
     expect(plain.ok && 'deliverTo' in plain.definition.grant).toBe(false)
   })
+
+  it('the deliverable folder takes a Japanese name (owner decision 2026-11-23); a name that is not one folder is said plainly', () => {
+    const form = { ...emptyJobForm('u_member'), name: '面談報告書', kind: 'pc' as const, shelfItem: 'item-1', checkKind: 'new_meetings' as const, writePlace: '人事部' }
+    // Typed as a Mac may hand it (NFD): sent as NFC, the one spelling the parser takes.
+    const parsed = definitionFromForm({ ...form, writeFolder: ' 面談ガイド '.normalize('NFD') }, 'interview-report')
+    expect(parsed.ok).toBe(true)
+    if (!parsed.ok) return
+    expect(parsed.definition.grant.writes).toEqual({ area: 'deliverable', place: '人事部', folder: '面談ガイド' })
+    expect(formFromDefinition(parsed.definition).writeFolder).toBe('面談ガイド')
+    const bad = definitionFromForm({ ...form, writeFolder: '面談/報告' }, 'interview-report')
+    expect(bad.ok).toBe(false)
+    if (!bad.ok) expect(jobProblemText(bad.problems)).toMatch(/^置き場所のフォルダ名は、部署のフォルダと同じ決まりで/)
+    const badPlace = definitionFromForm({ ...form, writePlace: '人事部/.personal', writeFolder: '面談' }, 'interview-report')
+    expect(badPlace.ok).toBe(false)
+    if (!badPlace.ok) expect(jobProblemText(badPlace.problems)).toMatch(/^置き場所は、会社のフォルダの中の場所で/)
+  })
 })
 
 describe('the page', () => {

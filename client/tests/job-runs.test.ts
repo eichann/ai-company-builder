@@ -377,6 +377,41 @@ test('the write guard: a job writes only in its grant\'s place, or nowhere; it r
   }
 })
 
+test('a Japanese deliverable folder (owner decision 2026-11-23): the turn runs, and every write stays in <place>/.personal/<folder>/', () => {
+  const grant: JobGrant = { ...GRANT, writes: { area: 'deliverable', place: '人事部', folder: '面談報告書' } }
+  // The app takes the turn (the one parser), and refuses a folder that is not one plain name: such a turn never runs.
+  assert.deepEqual(parseJobTurn(turn({ grant }))?.grant.writes, grant.writes)
+  for (const folder of ['..', '../営業部', '面談/報告', '.personal', 'ガイド'.normalize('NFD'), '面談 報告', 'a​b']) {
+    assert.equal(parseJobTurn(turn({ grant: { ...GRANT, writes: { area: 'deliverable', place: '人事部', folder } } })), null, JSON.stringify(folder))
+  }
+  const root = realpathSync(mkdtempSync(path.join(os.tmpdir(), 'acb-job-guard-ja-')))
+  try {
+    mkdirSync(path.join(root, '人事部', '.personal', '面談報告書'), { recursive: true })
+    mkdirSync(path.join(root, '営業部'), { recursive: true })
+    symlinkSync(path.join(root, '営業部'), path.join(root, '人事部', '.personal', '面談報告書', 'link'))
+    const area = jobWriteArea(grant)
+    const getAccess = () => ({ version: 1, role: 'member', all: true, scopes: [] })
+    const guard: WriteGuard = { root, getAccess, writeArea: area, readArea: area.reads }
+    const write = (p: string) => decideToolWrite(guard, 'Write', { file_path: path.join(root, p), content: 'x' }).deny
+    assert.equal(write('人事部/.personal/面談報告書/2026-11-23.md'), false)
+    // NFC and NFD spellings of the same name are one folder (as the disk folds them); another name is not.
+    assert.equal(write('人事部/.personal/面談報告書/ガイド.md'.normalize('NFD')), false)
+    assert.equal(write('人事部/.personal/面談報告/x.md'), true)
+    assert.equal(write('人事部/.personal/面談報告書x/x.md'), true)
+    assert.equal(write('人事部/.personal/面談報告書'), true, 'the folder itself is not a file to write')
+    assert.equal(write('営業部/.personal/面談報告書/x.md'), true)
+    assert.equal(write('人事部/面談報告書/x.md'), true, 'never outside .personal')
+    assert.equal(write('人事部/.personal/面談報告書/../x.md'), true, '.. climbs out')
+    assert.equal(write('人事部/.personal/面談報告書/link/x.md'), true, 'a link cannot lead out')
+    // A guard handed a folder that is not one plain name (an edited answer) writes nowhere.
+    const bad: WriteGuard = { root, getAccess, writeArea: { place: '人事部', folder: '../営業部' } }
+    assert.equal(decideToolWrite(bad, 'Write', { file_path: path.join(root, '営業部/x.md'), content: 'x' }).deny, true)
+    assert.equal(decideToolWrite(bad, 'Write', { file_path: path.join(root, '人事部/.personal/../営業部/x.md'), content: 'x' }).deny, true)
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
 test('new files in the shared folder: by what is reachable, never by commit dates; only once this PC has what the server has', async () => {
   const tmp = realpathSync(mkdtempSync(path.join(os.tmpdir(), 'acb-job-git-')))
   try {

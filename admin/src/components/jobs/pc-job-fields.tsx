@@ -86,7 +86,7 @@ export function PcJobFields({ f, set, hasCompanyFolder, shelfSkills, event = fal
       </Row>
       <Row label="作ったファイルの置き場所（責任者だけのフォルダ。空なら保存しない）">
         <Input aria-label="置き場所の場所" value={f.writePlace} onChange={(e) => set('writePlace', e.target.value)} placeholder="例：人事部" />
-        <Input aria-label="置き場所のフォルダ名" value={f.writeFolder} onChange={(e) => set('writeFolder', e.target.value)} placeholder="例：interview-reports" />
+        <Input aria-label="置き場所のフォルダ名" value={f.writeFolder} onChange={(e) => set('writeFolder', e.target.value)} placeholder="例：面談報告書" />
       </Row>
       <Row label="できたものを外にも置く">
         <select aria-label="できたものを置く先" className={SELECT} value={f.deliverTo} onChange={(e) => set('deliverTo', e.target.value)}>
