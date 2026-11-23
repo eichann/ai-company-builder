@@ -72,8 +72,11 @@ one place an added agent brings its own controls; everything else asks the regis
   a send cut short because a new conversation started in the tab while its images were read. The
   rule is `queuedSends.ts` `returnedToInput`: what the composer holds first, then each message in
   order, every image kept (past the 4-image drop limit: it was accepted once), file references once
-  each. Tests: `tests/chat-panel-helpers.test.ts`, `tests/ui/chat-panel.spec.ts` 「a waiting message
-  comes back whole…」.
+  each. The drop limit counts only what is dropped now (`useComposerAttachments`: the room left,
+  the rest refused with 「画像は最大4枚までです」) and never removes an attached image; a send takes
+  all attached images (no count limit after the composer). Tests: `tests/chat-panel-helpers.test.ts`,
+  `tests/ui/chat-panel.spec.ts` 「a waiting message comes back whole…」, 「images returned past the
+  drop limit…」.
 - Other features reach the chat only through commands: `chat.newConsultation` (a skill's 実行)
   and `chat.insertText`, handled per pane in `ChatPanel.tsx` and passed to the shown tab as
   `inputRequest` (`commands.md`), which `ChatPanelChat` carries out; there is no store field for

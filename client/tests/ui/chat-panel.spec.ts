@@ -40,13 +40,13 @@ const paths = (page: Page) => chat(page, c => c.requests.map(r => r.path))
 const turnStarted = (page: Page) => expect.poll(() => chat(page, c => c.open())).toBe(true)
 const composer = (page: Page) => page.locator('[data-composer-drop]').locator('visible=true')
 const composerImages = (page: Page) => composer(page).locator('img[alt]').evaluateAll(images => images.map(image => image.getAttribute('alt')))
-/** Drops an image file on the visible composer (as pasting or dragging one in does). */
-async function attachImage(page: Page, name: string) {
-  const data = await page.evaluateHandle(name => {
+/** Drops image files on the visible composer (as dragging them in does). */
+async function attachImage(page: Page, ...names: string[]) {
+  const data = await page.evaluateHandle(names => {
     const dt = new DataTransfer()
-    dt.items.add(new File([new Uint8Array([137, 80, 78, 71])], name, { type: 'image/png' }))
+    for (const name of names) dt.items.add(new File([new Uint8Array([137, 80, 78, 71])], name, { type: 'image/png' }))
     return dt
-  }, name)
+  }, names)
   await composer(page).dispatchEvent('drop', { dataTransfer: data })
 }
 /** Images take a while to read (a large screenshot): the send is still preparing meanwhile. */
@@ -232,6 +232,37 @@ test.describe('instructions while the AI works', () => {
     await typed(page).toBe('この画面も見て\n\n二つ目')
     await expect.poll(() => composerImages(page)).toEqual(['screen.png', 'second.png'])
     expect((await paths(page)).filter(p => p === '/api/chat')).toHaveLength(1)
+  })
+
+  test('images returned past the drop limit all stay when one more is dropped; the new one is refused with a notice', async ({ page }) => {
+    // The drop limit cut the whole list to 4: two of the returned images went silently.
+    await openPreview(page, 'chat-header', { turn: 'manual' })
+    await chat(page, c => { c.steerStatus = 'unavailable' })
+    await send(page, '見積書を作って')
+    await turnStarted(page)
+    const waiting = page.getByRole('listitem').filter({ hasText: '応答が終わったら送ります' })
+    for (const [text, names] of [['一枚目から', ['a1.png', 'a2.png', 'a3.png']], ['二通目', ['b1.png', 'b2.png', 'b3.png']]] as const) {
+      await input(page).click()
+      await page.keyboard.insertText(text)
+      await attachImage(page, ...names)
+      await expect.poll(() => composerImages(page)).toEqual(names)
+      await page.keyboard.press('Meta+Enter')
+      await expect(waiting.filter({ hasText: text })).toHaveCount(1)
+    }
+    await page.getByRole('banner').getByRole('button', { name: '停止' }).click()
+    const returned = ['a1.png', 'a2.png', 'a3.png', 'b1.png', 'b2.png', 'b3.png']
+    await expect.poll(() => composerImages(page)).toEqual(returned)
+
+    await attachImage(page, 'late.png')
+    await expect(composer(page).getByText('画像は最大4枚までです')).toBeVisible()
+    await expect.poll(() => composerImages(page)).toEqual(returned)
+
+    // All six go out with the next message.
+    await input(page).click()
+    await page.keyboard.press('Meta+Enter')
+    await expect.poll(async () => (await chatRequestBodies(page)).length).toBe(2)
+    const sent = await chat(page, c => c.requests.filter(r => r.path === '/api/chat')[1].body as { images?: unknown[] })
+    expect(sent.images).toHaveLength(6)
   })
 })
 
