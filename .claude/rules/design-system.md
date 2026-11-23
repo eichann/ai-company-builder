@@ -256,7 +256,7 @@ fine), `color-opacity` (`bg-warning/10`).
   つなぐ, `LinkDropNotice`, `ReviewSidePanel`. `ConfirmDialog`'s main action was already the set
   (P1a). A new primary button uses `Button variant="primary"` or `PRIMARY_ACTION`, never a colour
   of its own.
-- **Proceed anyway is not danger**: 「.backups に保存して進める」 (`DownloadFoldersSection`, the
+- **Proceed anyway is not danger**: 「バックアップに保存して進める」 (`DownloadFoldersSection`, the
   confirm's main action: nothing is lost) is primary; 「それでも作成する」 (`NewFolderDialog`, inside
   the warning callout, beside the dialog's own primary 「非公開フォルダを作成」) is an ordinary
   (secondary) button — one primary per dialog. Red stays for delete / remove (P1a).

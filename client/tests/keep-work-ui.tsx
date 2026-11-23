@@ -68,7 +68,7 @@ installElectronAPI({
   },
   backupRestore: async (_root, id, file) => {
     calls.push(['backupRestore', id, file])
-    if (failing('backupRestore')) return { success: false, error: '今の内容を .backups に保存できなかったため、復元しませんでした。何も変更していません。' }
+    if (failing('backupRestore')) return { success: false, error: '今の内容をバックアップに保存できなかったため、復元しませんでした。何も変更していません。' }
     return { success: true, message: `Restored: ${file}`, keptPath: `${ROOT}/.backups/2026-10-31T00-00-00-000_before_restore` }
   },
   exists: async p => existing.has(p),

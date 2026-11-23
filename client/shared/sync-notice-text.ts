@@ -10,6 +10,9 @@ export const BACKUP_HISTORY_BUTTON = '［バックアップ履歴］'
 /** Where the member finds their own version of a file the server's version replaced. */
 export const YOUR_VERSION_IN_BACKUP_HISTORY = `あなたが変えていた版は、タイトルバーの${BACKUP_HISTORY_BUTTON}に保存してあります。`
 
+/** A file put back to the server's version (permission refused): where the member's edit went. */
+export const YOUR_EDITED_VERSION_IN_BACKUP_HISTORY = `あなたが編集した版は、タイトルバーの${BACKUP_HISTORY_BUTTON}に保存してあります。`
+
 /**
  * The member's work is committed on this computer but did not reach the server
  * (offline, the server down, a teammate's push in between): the next sync sends it.

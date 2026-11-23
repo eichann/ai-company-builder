@@ -273,12 +273,12 @@ export interface NestedRepoOverwriteResult {
 
 /** What the member is told when a large file kept here was backed up (appended to the sync message). */
 export function largeFileOverwriteMessage(result: Pick<NestedRepoOverwriteResult, 'files'>): string {
-  return `このPCだけに置いていた大きなファイルと同じ名前のファイルを、ほかのメンバーが共有したため、このPCにあった版を .backups に保存しました（${result.files.length}件）。`
+  return `このPCだけに置いていた大きなファイルと同じ名前のファイルを、ほかのメンバーが共有したため、このPCにあった版をバックアップに保存しました（${result.files.length}件）（タイトルバーの［バックアップ履歴］で見られます）。`
 }
 
 /** What the member is told (appended to the sync message). */
 export function nestedRepoOverwriteMessage(result: Pick<NestedRepoOverwriteResult, 'files' | 'repos'>): string {
-  return `共有していないフォルダ（${result.repos.join('、')}）に、ほかのメンバーが同じ名前のファイルを共有したため、このPCにあった版を .backups に保存しました（${result.files.length}件）。`
+  return `共有していないフォルダ（${result.repos.join('、')}）に、ほかのメンバーが同じ名前のファイルを共有したため、このPCにあった版をバックアップに保存しました（${result.files.length}件）（タイトルバーの［バックアップ履歴］で見られます）。`
 }
 
 /**

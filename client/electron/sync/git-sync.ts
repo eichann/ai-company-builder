@@ -90,7 +90,7 @@ import { isOfficeLockFile, OFFICE_LOCK_EXCLUDE_PATTERNS } from '../../shared/off
 import { findOpenFiles, openFilesStoppedMessage, removeLockFiles } from './open-files'
 import { isSkillLeftover, skillExcludeLines, SKILL_LEFTOVER_PATTERNS } from '../../shared/skill-leftovers'
 import { NEEDS_MEMBER_ERROR, type ReceiveResult } from '../../shared/auto-sync'
-import { PUSH_FAILED_MESSAGE, refusedThenPushFailedMessage, SAME_FILE_UNRESOLVED_MESSAGE, sameFileChangedMessage, SERVER_UNREACHABLE_MESSAGE } from '../../shared/sync-notice-text'
+import { PUSH_FAILED_MESSAGE, refusedThenPushFailedMessage, SAME_FILE_UNRESOLVED_MESSAGE, sameFileChangedMessage, SERVER_UNREACHABLE_MESSAGE, YOUR_EDITED_VERSION_IN_BACKUP_HISTORY } from '../../shared/sync-notice-text'
 import type { BackupReason } from '../../shared/backup-reasons'
 import { receiveIntoRepo, type RepoReceiveOutcome } from './receive'
 import { stagedAutoCommitMessage } from './auto-message'
@@ -126,7 +126,7 @@ const OFFICE_LOCK_EXCLUDES: ExcludeBlock = {
 
 /** The member's version of a conflicted file could not be saved: the rebase was undone, nothing was replaced. */
 function conflictBackupFailedMessage(error: unknown): string {
-  const stopped = '競合したファイルのバックアップを保存できなかったため、同期を中止しました。変更はこのPCに残っています。'
+  const stopped = 'ほかの人も同じところを変えていたファイルの、あなたの版を保存できなかったため、同期を中止しました。変更はこのPCに残っています。'
   return isDiskFull(error) ? `${stopped}ディスクの空きを増やしてから、もう一度同期してください。` : `${stopped}もう一度同期しても直らないときは、管理者に連絡してください。`
 }
 
@@ -971,7 +971,7 @@ async function runSync(deps: SyncDeps, repoPath: string, companyId: string, comm
             return {
               success: false,
               errorType: 'conflict',
-              error: '競合の自動解消が収束しませんでした。変更はローカルに保存されています。もう一度同期してください。'
+              error: 'ほかの人も同じところを変えていたファイルを、自動でそろえきれませんでした。あなたの変更はこのPCに残っています。もう一度同期してください。'
             }
           }
 
@@ -1064,7 +1064,7 @@ async function runSync(deps: SyncDeps, repoPath: string, companyId: string, comm
               return {
                 success: false,
                 errorType: 'conflict',
-                error: `同期を安全に完了できませんでした（rebaseを継続できません）。変更はローカルに保存されています。\n${msg}`
+                error: `同期を安全に完了できなかったため、途中で止めました。あなたの変更はこのPCに残っています。\n${msg}`
               }
             }
             // else: the next pick conflicted — the loop resolves it next round
@@ -1527,7 +1527,7 @@ async function runSync(deps: SyncDeps, repoPath: string, companyId: string, comm
         const parts = ['同期完了。']
         if (hasProtected) parts.push(`${onlySkillFiles(revertedProtected) ? '変更できないスキルの' : '管理者だけが変更できる'}ファイル（${revertedProtected.length}件）はサーバーの状態に戻しました。`)
         if (hasWriteDenied) parts.push(`編集する権限がないフォルダのファイル（${revertedWriteDenied.length}件）は元に戻しました。`)
-        if (recoveryBackupPath) parts.push('あなたが編集した版は .backups/ に保存してあります。')
+        if (recoveryBackupPath) parts.push(YOUR_EDITED_VERSION_IN_BACKUP_HISTORY)
         if (hadConflicts) parts.push(sameFileChangedMessage(conflictFiles.length - deletedConflictFiles.length, deletedConflictFiles.length))
         parts.push(personalNote())
         parts.push(committed ? 'その他の変更は正常に反映されました。' : '共有する変更は他にありませんでした。')
@@ -1942,13 +1942,10 @@ export function createGitSync(deps: SyncDeps): GitSync {
           })
         : await lockState(dir, d) === 'busy' ? repositoryBusy : await syncReadOnlyScope(scopeDeps, repoPath, scope, dir)
       const view = r as { success: boolean; message?: string; error?: string; errorType?: string; recoveredFiles?: string[]; recoveryBackupPath?: string; backupPath?: string; outsideCheckoutBackupPath?: string; writeDeniedBackupPath?: string }
-      // A private folder's backups are kept inside .git (privateBackupsDir),
-      // not in .backups/: say so in the shared wording.
-      const where = (text?: string) => text?.replace(/\.backups\/?/g, '非公開フォルダのバックアップ')
       // Anything but the plain success message is something sync did to the member's files.
       const setAside = !!view.recoveredFiles?.length || (view.success && !!view.message && view.message !== '同期が完了しました')
       const backupPath = view.recoveryBackupPath ?? view.backupPath ?? view.outsideCheckoutBackupPath ?? view.writeDeniedBackupPath
-      return { path: scope.path, success: view.success, message: where(view.message), error: where(view.error), errorType: view.errorType, setAside, backupPath }
+      return { path: scope.path, success: view.success, message: view.message, error: view.error, errorType: view.errorType, setAside, backupPath }
     })
 
   /** Place every readable private folder and sync (or retire) each clone. */

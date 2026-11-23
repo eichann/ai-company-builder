@@ -25,7 +25,7 @@ export interface BackupsDeps {
 }
 
 /** Shown when the current version could not be kept: the restore did not run. */
-export const RESTORE_KEEP_FAILED = '今の内容を .backups に保存できなかったため、復元しませんでした。何も変更していません。'
+export const RESTORE_KEEP_FAILED = '今の内容をバックアップに保存できなかったため、復元しませんでした。何も変更していません。'
 
 export function registerBackupsIpc(ipc: IpcRegistrar, { paths, shell, writeRefusal }: BackupsDeps): void {
   // Get backup history

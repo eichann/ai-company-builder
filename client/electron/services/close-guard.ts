@@ -18,7 +18,7 @@ export type CloseDuringSyncChoice = 'wait' | 'stay' | 'quit-now'
 export const CLOSE_DURING_SYNC_QUESTION = {
   title: '同期の途中です',
   message: '同期の途中です。終わるまで待ちますか？',
-  detail: '今すぐ終了すると、アプリが終了して同期が途中で止まります。止まっていた間に変わったファイルは、次の同期で .backups に保存されます。',
+  detail: '今すぐ終了すると、アプリが終了して同期が途中で止まります。止まっていた間に変わったファイルは、次の同期でバックアップに保存されます（タイトルバーの［バックアップ履歴］で見られます）。',
   buttons: ['終わったら閉じる', '閉じない', 'すぐに終了する'],
   defaultId: 0,
   cancelId: 1,

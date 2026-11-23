@@ -64,7 +64,7 @@ export function useFileSaving({ activeFilePath, fileContents, fileContentsRef, u
         if (!interactive) return false
         const ok = await askConfirm({
           title: 'このファイルは外部で変更されています',
-          message: 'このタブで開いてから、AI やほかのメンバーの同期などでファイルの内容が変わりました。\n上書きすると、いまのディスクの内容はバックアップ（.backups、非公開フォルダならその専用の場所）に保存してから、あなたの編集で置き換えます。',
+          message: 'このタブで開いてから、AI やほかのメンバーの同期などでファイルの内容が変わりました。\n上書きすると、いまのディスクの内容をバックアップに保存してから（タイトルバーの［バックアップ履歴］で見られます）、あなたの編集で置き換えます。',
           confirmText: '外部の変更を上書きして保存',
           danger: true,
         })
@@ -76,7 +76,7 @@ export function useFileSaving({ activeFilePath, fileContents, fileContentsRef, u
             return false
           }
           if (backup.backupPath) {
-            setNotice(`外部で変更された内容をバックアップしてから上書きしました（${backup.backupPath}）`)
+            setNotice('外部で変更された内容をバックアップしてから上書きしました（タイトルバーの［バックアップ履歴］で見られます）')
           }
         }
       }

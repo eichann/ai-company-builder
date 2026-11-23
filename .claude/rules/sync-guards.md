@@ -170,7 +170,7 @@ what git actually sees through the app's `createGit`.
   same path stay shared, and before the pull this computer's differing (ignored) files there
   are copied to `.backups/<ts>_nested_repo/` — git would overwrite them silently. A local
   exclusion is dropped when its folder is gone (not when only its `.git` is). Dialogs end
-  with 「会社として管理したい場合は、管理者に『外部リポジトリ』として登録してもらってください。」.
+  with 「会社として共有したい場合は、管理者に相談してください。」.
   A nested repository inside a folder a **shared rule** ignores is not asked about and that
   folder is not walked (2026-11-22: a clone under `.personal/` stopped 自動で送る at the question,
   and every sync walked the ignored tree). `git check-ignore -v` decides, level by level (never a
@@ -363,7 +363,7 @@ what git actually sees through the app's `createGit`.
   `sync/outside-checkout.ts`): before the reconcile and before `git add`, every non-ignored file
   there that is new or differs from the index moves to `.backups/<ts>_outside_checkout/`,
   skip-worktree is set again, emptied folders are removed; the member sees
-  「ダウンロードしていないフォルダ（…）にファイルが作られていたため、共有せずに .backups に保存しました（N件）。…」.
+  「ダウンロードしていないフォルダ（…）にファイルが作られていたため、共有せずにバックアップに保存しました（N件）（タイトルバーの［バックアップ履歴］で見られます）。…」.
   If the check fails, sync stops before staging. Reason: the member cannot see teammates' files
   there, and a write silently replaced a teammate's file on the server. It runs before the
   reconcile because `set` with a changed file there downloads the teammate's version. Tests:

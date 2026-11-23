@@ -639,7 +639,7 @@ describe('a sync that never finished', { concurrency: CONCURRENCY }, () => {
     const report = out.result.privateFolders?.find(f => f.path === '秘密')
     assert.equal(report?.setAside, true)
     assert.equal(report?.backupPath, path.join(privateBackupsDir(a.dir), recoveryBackup(a).folder.replace(/^private:/, '')))
-    assert.match(String(out.result.message), /非公開フォルダのバックアップ/)
+    assert.match(String(out.result.message), /やり直す前の内容をバックアップに保存しました（タイトルバーの［バックアップ履歴］で見られます）/)
     await settleAndCheck(world)
   })
 
@@ -676,7 +676,7 @@ describe('a conflict backup that fails', { concurrency: CONCURRENCY }, () => {
     const failed = await a.sync()
 
     assert.equal(failed.result.success, false)
-    assert.match(String(failed.result.error), /バックアップを保存できなかったため、同期を中止しました/)
+    assert.match(String(failed.result.error), /ほかの人も同じところを変えていたファイルの、あなたの版を保存できなかったため、同期を中止しました/)
     assert.doesNotMatch(String(failed.result.error), /[A-Za-z]{4}/, 'no git message for the member')
     assert.doesNotMatch(String(failed.result.error), /ディスク/, 'a folder that refuses writing is not a full disk')
     assert.equal(a.readText('x.md'), 'a\n')
@@ -701,7 +701,7 @@ describe('a conflict backup that fails', { concurrency: CONCURRENCY }, () => {
     const failed = await a.sync()
 
     assert.equal(failed.result.success, false)
-    assert.match(String(failed.result.error), /バックアップを保存できなかった/)
+    assert.match(String(failed.result.error), /あなたの版を保存できなかった/)
     assert.equal(a.readText('x.md'), 'a\n')
 
     a.clock = null
@@ -724,7 +724,7 @@ describe('an earlier version that cannot be saved', { concurrency: CONCURRENCY }
     const failed = await a.sync()
 
     assert.equal(failed.result.success, false)
-    assert.match(String(failed.result.error), /バックアップを保存できなかった/)
+    assert.match(String(failed.result.error), /あなたの版を保存できなかった/)
     assert.equal(a.readText('x.md'), 'second\n')
 
     a.clock = null

@@ -221,7 +221,7 @@ describe('git:sync multi-member scenarios', { concurrency: CONCURRENCY }, () => 
     const [question] = out.dialogs
     assert.equal(question.options.defaultId, 0)
     assert.match(question.options.buttons[0], /共有しない（おすすめ）/)
-    assert.match(question.options.detail, /管理者に『外部リポジトリ』として登録してもらってください/)
+    assert.match(question.options.detail, /会社として共有したい場合は、管理者に相談してください。/)
     assert.deepEqual(out.result.excludedNestedRepos, ['営業部/資料'])
     assert.ok(a.exists('営業部/資料/.git'), 'the member\'s repository is left as it is')
     assert.deepEqual(readNestedRepoExcludes(a.dir), ['営業部/資料'])
@@ -261,7 +261,7 @@ describe('git:sync multi-member scenarios', { concurrency: CONCURRENCY }, () => 
 
     const out = ok(await a.sync(), 'a')
     assert.deepEqual(out.dialogs.map(d => [d.kind, d.answer]), [['externalNestedRepo', 'exclude']])
-    assert.match(out.dialogs[0].options.detail, /管理者に『外部リポジトリ』として登録してもらってください/)
+    assert.match(out.dialogs[0].options.detail, /会社として共有したい場合は、管理者に相談してください。/)
     assert.deepEqual(out.result.excludedNestedRepos, ['tools/外部ツール'])
     assert.equal(a.readText('.gitignore'), gitignoreBefore, 'the name never reaches the shared .gitignore')
     assert.deepEqual(readNestedRepoExcludes(a.dir), ['tools/外部ツール'])
@@ -287,7 +287,7 @@ describe('git:sync multi-member scenarios', { concurrency: CONCURRENCY }, () => 
     const out = ok(await a.sync(), 'a')
     assert.deepEqual(out.dialogs, [], 'not asked again')
     assert.deepEqual(out.result.nestedRepoBackupFiles, ['tools/外部ツール/README.md'])
-    assert.match(out.result.message ?? '', /共有していないフォルダ（tools\/外部ツール）に、ほかのメンバーが同じ名前のファイルを共有したため、このPCにあった版を \.backups に保存しました（1件）/)
+    assert.match(out.result.message ?? '', /共有していないフォルダ（tools\/外部ツール）に、ほかのメンバーが同じ名前のファイルを共有したため、このPCにあった版をバックアップに保存しました（1件）（タイトルバーの［バックアップ履歴］で見られます）/)
     const [backup] = a.backups().filter(x => x.metadata.reason === 'nested_repo_overwrite')
     assert.ok(backup, 'backup with metadata')
     assert.equal(fs.readFileSync(path.join(a.dir, '.backups', backup.folder, 'tools/外部ツール/README.md'), 'utf-8'), 'a\'s clone\n')

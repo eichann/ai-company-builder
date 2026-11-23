@@ -20,7 +20,7 @@ import { grepPlainFiles, listPlainFiles } from '../../plain-search'
 import type { WorkingFolders } from '../../services/working-folders'
 
 /** Shown when the member's version could not be kept: nothing was undone. */
-export const REVERT_KEEP_FAILED = '今の内容を .backups に保存できなかったため、元に戻しませんでした。何も変更していません。'
+export const REVERT_KEEP_FAILED = '今の内容をバックアップに保存できなかったため、元に戻しませんでした。何も変更していません。'
 
 /**
  * The repository holding a company path: a readable private folder is its own clone inside

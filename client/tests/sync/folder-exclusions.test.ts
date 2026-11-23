@@ -173,7 +173,7 @@ describe('git:sync folder-level download choices', { concurrency: CONCURRENCY },
         assert.deepEqual(backup.metadata.serverFiles, [`${VIDEO}/編集/cut.md`])
         assert.equal(fs.readFileSync(x.path(`.backups/${backup.folder}/${VIDEO}/編集/cut.md`), 'utf-8'), 'AI draft\n')
         assert.equal(fs.readFileSync(x.path(`.backups/${backup.folder}/${VIDEO}/新規/メモ.md`), 'utf-8'), 'memo\n')
-        assert.match(out.result.message ?? '', /ダウンロードしていないフォルダ（コンテンツ\/動画）にファイルが作られていたため、共有せずに \.backups に保存しました（2件）。必要ならそのフォルダをダウンロードしてから保存し直してください。/)
+        assert.match(out.result.message ?? '', /ダウンロードしていないフォルダ（コンテンツ\/動画）にファイルが作られていたため、共有せずにバックアップに保存しました（2件）（タイトルバーの［バックアップ履歴］で見られます）。必要ならそのフォルダをダウンロードしてから保存し直してください。/)
         assert.equal(x.exists(VIDEO), false)
         if (x.partial) assert.deepEqual(downloadedUnder(world, x, `${VIDEO}/`).filter(f => !f.endsWith('cut.md') && !f.endsWith('intro.mp4') && !f.endsWith('台本.md')), [])
         await settleAndCheck(world)

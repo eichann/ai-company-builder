@@ -19,7 +19,7 @@ test('「元に戻す」 asks in the app first, says what happens to the file, a
   await page.getByRole('button', { name: '元に戻す' }).first().click()
   await expect(page.getByRole('heading', { name: '変更を元に戻しますか？' })).toBeVisible()
   await expect(page.getByText('「新規メモ.md」は追加したファイルです。元に戻すと、このファイルは削除されます。')).toBeVisible()
-  await expect(page.getByText('今の内容は .backups に保存します。')).toBeVisible()
+  await expect(page.getByText('今の内容は［バックアップ履歴］に保存します。')).toBeVisible()
   await page.getByRole('button', { name: 'キャンセル' }).click()
   expect(await calls(page)).toEqual([])
   // Enter does not confirm (the member may be typing the memo).
@@ -62,18 +62,18 @@ test('復元 asks first and says the current content is kept; a failure is shown
   await page.getByText('ほかの人も同じところを変えていたため、サーバーの版を残したときのあなたの版').click()
   await page.getByRole('button', { name: '復元' }).click()
   await expect(page.getByRole('heading', { name: 'バックアップから復元しますか？' })).toBeVisible()
-  await expect(page.getByText('今の内容は .backups に保存してから置き換えます。')).toBeVisible()
+  await expect(page.getByText('今の内容もこの履歴に保存してから置き換えます。')).toBeVisible()
   await page.getByRole('button', { name: 'キャンセル' }).click()
   expect(await calls(page)).toEqual([])
 
   await page.getByRole('button', { name: '復元' }).click()
   await page.getByRole('button', { name: '復元する' }).click()
-  await expect(page.getByRole('status')).toHaveText('「営業部/提案書.md」を復元しました。それまでの内容は .backups に保存しました。')
+  await expect(page.getByRole('status')).toHaveText('「営業部/提案書.md」を復元しました。それまでの内容もこの履歴に保存しました。')
 
   await failNext(page, 'backupRestore')
   await page.getByRole('button', { name: '復元', exact: true }).click()
   await page.getByRole('button', { name: '復元する' }).click()
-  await expect(page.getByRole('alert')).toHaveText('今の内容を .backups に保存できなかったため、復元しませんでした。何も変更していません。')
+  await expect(page.getByRole('alert')).toHaveText('今の内容をバックアップに保存できなかったため、復元しませんでした。何も変更していません。')
   expectNoPageErrors(state)
 })
 

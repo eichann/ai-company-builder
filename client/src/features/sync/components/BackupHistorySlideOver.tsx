@@ -61,7 +61,7 @@ export function BackupHistorySlideOver({ isOpen, onClose, rootPath }: BackupHist
         setRestoreNotice({
           ok: true,
           text: result.keptPath
-            ? `「${filePath}」を復元しました。それまでの内容は .backups に保存しました。`
+            ? `「${filePath}」を復元しました。それまでの内容もこの履歴に保存しました。`
             : `「${filePath}」を復元しました。`,
         })
         void loadBackups()
@@ -217,7 +217,7 @@ export function BackupHistorySlideOver({ isOpen, onClose, rootPath }: BackupHist
           {/* Footer */}
           <div className="px-6 py-4 border-t border-gray-200 dark:border-zinc-800 bg-gray-50 dark:bg-zinc-900">
             <p className="text-xs text-gray-500 dark:text-zinc-400">
-              バックアップは .backups フォルダに保存されています。
+              バックアップはこのPCの中だけにあり、ほかの人には共有されません。
               30日経過したバックアップは自動削除されます。
             </p>
           </div>
@@ -227,7 +227,7 @@ export function BackupHistorySlideOver({ isOpen, onClose, rootPath }: BackupHist
       <ConfirmDialog
         isOpen={restoreAsk !== null}
         title="バックアップから復元しますか？"
-        message={restoreAsk ? `「${restoreAsk.filePath}」を、このバックアップの内容に置き換えます。\n今の内容は .backups に保存してから置き換えます。` : ''}
+        message={restoreAsk ? `「${restoreAsk.filePath}」を、このバックアップの内容に置き換えます。\n今の内容もこの履歴に保存してから置き換えます。` : ''}
         confirmText="復元する"
         confirmOnEnter={false}
         onConfirm={() => { if (restoreAsk) void handleRestoreFile(restoreAsk.backupId, restoreAsk.filePath) }}

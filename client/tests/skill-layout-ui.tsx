@@ -724,17 +724,17 @@ if (MANUAL) {
         return {
           success: true, hadConflicts: true, conflictFiles: ['営業部/訪問メモ_1123.md'], deletedConflictFiles: [],
           backupPath: `${BACKUPS}/2026-11-20T01-28-00-000Z`,
-          message: '同期完了。1ファイルが競合しました（1件はサーバー版で上書き）。競合前のローカル版は .backups/ に保存してあります。その他の変更は正常に反映されました。',
+          message: '同期完了。1件のファイルは、ほかの人も同じところを変えていたため、サーバーの版を残しました。あなたが変えていた版は、タイトルバーの［バックアップ履歴］に保存してあります。その他の変更は正常に反映されました。',
         }
       }
-      if (result === 'offline') return { success: false, errorType: 'push_failed', pushFailed: true, error: 'ローカルにコミットしましたが、プッシュに失敗しました。次回の同期で再試行します。' }
+      if (result === 'offline') return { success: false, errorType: 'push_failed', pushFailed: true, error: 'このPCには保存しましたが、サーバーに届けられませんでした。インターネットにつながっているか確かめて、もう一度［サーバーと同期］を押してください。' }
       if (result === 'denied') {
         return { success: false, errorType: 'write_denied', writeDeniedFiles: [deniedFile], error: `同期を中止しました。\n\n編集できないファイルがあります。\n次のファイルは、あなたに編集する権限がないフォルダにあるため、変更を共有できません。\n\n・${deniedFile}` }
       }
       if (result === 'restored') {
         return {
           success: true, restoredWriteDeniedFiles: [deniedFile], writeDeniedBackupPath: `${BACKUPS}/2026-11-20T01-29-00-000Z_write_denied`, backupPath: `${BACKUPS}/2026-11-20T01-29-00-000Z_write_denied`,
-          message: '同期完了。編集する権限がないフォルダのファイル（1件）は元に戻しました。あなたが編集した版は .backups/ に保存してあります。その他の変更は正常に反映されました。',
+          message: '同期完了。編集する権限がないフォルダのファイル（1件）は元に戻しました。あなたが編集した版は、タイトルバーの［バックアップ履歴］に保存してあります。その他の変更は正常に反映されました。',
         }
       }
       return { success: true, message: '同期が完了しました' }

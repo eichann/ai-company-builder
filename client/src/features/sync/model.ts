@@ -83,7 +83,7 @@ function noticeFor(result: GitResult): SyncNotice {
     // Files created in a folder this computer has not downloaded were set aside, not shared
     return {
       type: 'warning',
-      message: result.message || `ダウンロードしていないフォルダに作られたファイルを .backups に保存しました: ${result.outsideCheckoutFiles.join(', ')}`,
+      message: result.message || `ダウンロードしていないフォルダに作られたファイルを、共有せずに［バックアップ履歴］に保存しました: ${result.outsideCheckoutFiles.join(', ')}`,
       backupPath: result.outsideCheckoutBackupPath || result.backupPath
     }
   }

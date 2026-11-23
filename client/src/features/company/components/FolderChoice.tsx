@@ -65,7 +65,7 @@ export function NewFolderChoice({ company, error, parentFolder, isPreparing, onP
   return (
     <div className="space-y-6">
       <ScreenHeading icon={CloudArrowDown} title="作業フォルダを設定">
-        「{company.name}」のローカル作業フォルダを選択してください
+        「{company.name}」の作業フォルダ（このPCの中の置き場所）を選択してください
       </ScreenHeading>
 
       <ErrorNotice error={error} />

@@ -44,7 +44,7 @@ export interface OutsideCheckoutResult {
 
 /** What the member is told (appended to the sync message). */
 export function outsideCheckoutMessage(result: Pick<OutsideCheckoutResult, 'files' | 'folders'>): string {
-  return `ダウンロードしていないフォルダ（${result.folders.join('、')}）にファイルが作られていたため、共有せずに .backups に保存しました（${result.files.length}件）。必要ならそのフォルダをダウンロードしてから保存し直してください。`
+  return `ダウンロードしていないフォルダ（${result.folders.join('、')}）にファイルが作られていたため、共有せずにバックアップに保存しました（${result.files.length}件）（タイトルバーの［バックアップ履歴］で見られます）。必要ならそのフォルダをダウンロードしてから保存し直してください。`
 }
 
 const CHUNK = 200

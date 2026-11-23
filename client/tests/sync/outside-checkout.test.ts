@@ -72,7 +72,7 @@ function assertHeldBack(m: Member, out: SyncOutcome, files: Record<string, strin
   }
   assert.deepEqual([...(backup.metadata.files as string[])].sort(), Object.keys(files).sort())
   assert.deepEqual([...(out.result.outsideCheckoutFiles ?? [])].sort(), Object.keys(files).sort())
-  assert.match(out.result.message ?? '', /ダウンロードしていないフォルダ（営業部）にファイルが作られていたため、共有せずに \.backups に保存しました/)
+  assert.match(out.result.message ?? '', /ダウンロードしていないフォルダ（営業部）にファイルが作られていたため、共有せずにバックアップに保存しました/)
   assert.equal(out.dialogs.filter(d => d.kind === 'deletedFiles').length, 0, 'no deletion warning')
 }
 
