@@ -44,11 +44,11 @@ export interface NewSkillInput { name: string; description: string; prompt: stri
 export type SkillActionResult = { id: string } | { error: string }
 
 export function skillNameTakenMessage(folderName: string): string {
-  return `フォルダ名「${folderName}」のスキルはすでにあります。別のフォルダ名にしてください（今あるスキルはそのままです）。`
+  return `フォルダ名「${folderName}」の Skill はすでにあります。別のフォルダ名にしてください（今ある Skill はそのままです）。`
 }
-export const SKILL_ALREADY_SHARED_MESSAGE = 'このフォルダ名のスキルはすでに会社で共有されています。別のフォルダ名にしてください。'
-export const SKILL_CREATE_FAILED = 'スキルを作成できませんでした。もう一度試してください。'
-export const SKILL_COPY_FAILED = 'スキルをコピーできませんでした。もう一度試してください。'
+export const SKILL_ALREADY_SHARED_MESSAGE = 'このフォルダ名の Skill はすでに会社で共有されています。別のフォルダ名にしてください。'
+export const SKILL_CREATE_FAILED = 'Skill を作成できませんでした。もう一度試してください。'
+export const SKILL_COPY_FAILED = 'Skill をコピーできませんでした。もう一度試してください。'
 export const SKILL_PUBLISH_FAILED = 'できませんでした。もう一度試してください。'
 
 /**
@@ -67,7 +67,7 @@ export function shelfSendAnswer(result: { success: boolean; error?: string; outp
 
 /** The SKILL.md of a new skill (frontmatter + the sections the wizard fills in). */
 export function newSkillMarkdown(data: NewSkillInput): string {
-  const promptContent = data.prompt || `このスキルを実行すると、AIアシスタントが「${data.name}」タスクを実行します。`
+  const promptContent = data.prompt || `この Skill を実行すると、AIアシスタントが「${data.name}」タスクを実行します。`
   return `---
 name: ${yamlQuoted(data.name)}
 description: ${yamlQuoted(data.description)}

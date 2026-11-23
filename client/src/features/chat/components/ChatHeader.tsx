@@ -133,6 +133,7 @@ export function ChatHeader({ authMode, status, codexStatus, models, modelLocked,
             onClick={() => onStop()}
             className="w-8 h-8 flex-shrink-0 rounded-control hover:bg-red-100 dark:hover:bg-red-900/30 flex items-center justify-center transition-colors"
             title={t('chat.stop')}
+            aria-label={t('chat.stop')}
           >
             <X size={16} className="text-red-500" />
           </button>

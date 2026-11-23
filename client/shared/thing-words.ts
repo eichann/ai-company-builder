@@ -25,7 +25,7 @@ export const THING_NAMES: Readonly<Record<Exclude<ThingKind, 'bundle' | 'other'>
   approval: '承認のお願い',
   reply_request: '返事のお願い',
   consultation: 'AIへの相談',
-  skill: 'スキル',
+  skill: 'Skill',
   counterpart: '相手',
   file: 'ファイル',
   folder: 'フォルダ',

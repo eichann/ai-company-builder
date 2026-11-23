@@ -173,7 +173,7 @@ export function AppShell({ bottomPanel }: AppShellProps = {}) {
     useDepartmentAvailability(syncedRoot, departments, selectedDept, isCompanyWide, sparseCheckout)
 
   // Open tabs (files and records side by side), the active one and the left tab, saved per company.
-  // Set while a wide left tab (スキル…) covers the middle. The daily tidy hears when a company's tabs are restored (set below).
+  // Set while a wide left tab (Skill…) covers the middle. The daily tidy hears when a company's tabs are restored (set below).
   const middleHidden = useRef(false)
   const tabsRestored = useRef<(companyId: string, tabs: RestoredTabs) => void>(() => {})
   const onTabsRestored = useCallback((companyId: string, tabs: RestoredTabs) => tabsRestored.current(companyId, tabs), [])
@@ -368,7 +368,7 @@ export function AppShell({ bottomPanel }: AppShellProps = {}) {
     await treeControls.current?.reveal(path)
   })
 
-  // The middle (open files and records) is beside the left tab, except while a wide tab (スキル…) covers it.
+  // The middle (open files and records) is beside the left tab, except while a wide tab (Skill…) covers it.
   const showMiddle = useCallback(() => { if (middleHidden.current) setLeftTab('files') }, [setLeftTab])
   const handleEditFile = (filePath: string) => {
     setLeftTab('files')
@@ -495,7 +495,7 @@ export function AppShell({ bottomPanel }: AppShellProps = {}) {
     const path = rootPath ? companyPathOf(key, rootPath) : null
     return path ? [{ key, path }] : []
   })
-  // 探す ⌘K's skills: the ones the スキル tab shows, then the company-wide ones (both already loaded).
+  // 探す ⌘K's skills: the ones the Skill tab shows, then the company-wide ones (both already loaded).
   const paletteSkills = useMemo(() => [...skills, ...(isCompanyWide ? [] : companySkills)]
     .map(s => ({ id: s.id, name: s.name, command: s.skillPath?.split('/').pop() ?? '', group: s.group })), [skills, companySkills, isCompanyWide])
   const companyId = currentCompany?.id
@@ -541,7 +541,7 @@ export function AppShell({ bottomPanel }: AppShellProps = {}) {
   // The morning's 「今日のあなたの番」 Mac notification and ⌘K 「受け箱」 open the inbox (I2); without one, the task list.
   const showInbox = () => { if (hasBottom) setBottomOpen(true); else openTasks() }
   useOpenTasksRequest(currentCompany?.id, showInbox)
-  // A skill opens where a click in the スキル tab opens it; a company-wide one under 全社.
+  // A skill opens where a click in the Skill tab opens it; a company-wide one under 全社.
   const openSkillFromPalette = (id: string) => {
     if (!skills.some(s => s.id === id)) handleSelectDept(COMPANY_TAB_ID)
     skillsTab.selectSkill(id)
@@ -644,7 +644,7 @@ export function AppShell({ bottomPanel }: AppShellProps = {}) {
         notDownloaded={sparseCheckout.enabled ? sparseCheckout.excludedPaths : undefined}
         onOpenFile={(path, line) => { if (line !== undefined) setGotoLine({ path, line }); openTab(path) }} />,
     },
-    // A business plugin's screen takes the whole left side, like スキル.
+    // A business plugin's screen takes the whole left side, like Skill.
     ...plugins.tabs.map(tab => ({ ...tab, wide: true })),
   ]
   const shownLeft = leftPanels.find(p => p.id === resolveLeftPanel(leftTab, leftPanels))
@@ -754,7 +754,7 @@ export function AppShell({ bottomPanel }: AppShellProps = {}) {
             ref={split.middleRef}
             className="flex-1 min-h-0 flex flex-col"
           >
-            {/* While a wide left tab (スキル…) or the not-downloaded prompt covers the middle, the bottom panel
+            {/* While a wide left tab (Skill…) or the not-downloaded prompt covers the middle, the bottom panel
                 spans this whole side under it (owner decision (b), 2026-11-22), so the inbox shows from every
                 tab; otherwise it stays under the middle. Both splits are always drawn, so switching tabs
                 remounts neither side. */}

@@ -229,7 +229,7 @@ export function SkillGrid({
                 {t('skills.copyFromOther', '他からコピー')}
               </p>
               <p className="text-xs text-gray-400 dark:text-zinc-600 mt-1">
-                {t('skills.copyDescription', '他の部署や全社のスキルをコピー')}
+                {t('skills.copyDescription', '他の部署や全社の Skill をコピー')}
               </p>
             </div>
           </button>

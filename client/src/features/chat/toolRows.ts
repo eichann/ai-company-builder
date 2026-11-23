@@ -1,7 +1,5 @@
 import type { UIMessage } from 'ai'
 import { RESTORED_TOOL_PART_TYPE, failureOf, readToolLine, toolLineOf, type ToolLine } from '../../../shared/tool-display'
-import { secondOpinionTargetOf } from '../../../shared/agents/second-opinion'
-import { agentShortLabel } from '../../../shared/agents/registry'
 
 /**
  * Render plan for an assistant message's parts (pure, no React).
@@ -28,31 +26,6 @@ export const RUN_COLLAPSE_THRESHOLD = 8
 export const RUN_VISIBLE_TAIL = 3
 /** Inner rows of an expanded subagent group shown at once (the latest ones). */
 export const GROUP_PAGE_SIZE = 50
-
-export function getToolDisplayName(toolName: string): string {
-  const names: Record<string, string> = {
-    mcp__acb_consultations__search_consultations: '過去の相談を検索',
-    mcp__acb_consultations__read_consultation: '過去の相談を参照',
-    mcp__acb_company_files__company_search: '会社全体を検索',
-    mcp__acb_company_files__company_read_file: '会社のファイルを参照',
-    mcp__acb_company_files__company_list: '会社のフォルダを一覧',
-    AskUserQuestion: 'ユーザーに質問',
-    mcp__acb_ask__ask_user: 'ユーザーに質問',
-    mcp__acb_review__request_review: '確認をお願いする',
-    readFile: 'ファイル読取',
-    writeFile: 'ファイル書込',
-    listDirectory: 'ディレクトリ一覧',
-    executeCommand: 'コマンド実行',
-    readSkillFile: 'スキルファイル読取',
-  }
-  if (names[toolName]) return names[toolName]
-  // 「もう一方の AI に聞く」: the approval asks before the call, in the present (「Codex に聞く」).
-  const otherAi = secondOpinionTargetOf(toolName)
-  if (otherAi) return `${agentShortLabel(otherAi)} に聞く`
-  // A tool the app has no name for (a member's own MCP server): never the raw `mcp__…` id.
-  const mcp = /^mcp__(.+?)__(.+)$/.exec(toolName)
-  return mcp ? `道具（${mcp[1]}・${mcp[2]}）` : toolName
-}
 
 export interface ToolRow {
   toolCallId: string

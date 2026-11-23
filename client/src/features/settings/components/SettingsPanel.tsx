@@ -400,7 +400,7 @@ export function SettingsPanel({ onClose, initialTab = 'mine', focusService, mine
               </div>
             ) : loading ? loadingState : activeTab === 'apikeys' ? (
               <div className="space-y-5 px-8 pb-8 pt-7">
-                <SectionHeader title="APIキー（このPC）" description="スキルやスクリプトが使う外部サービスのキーです。このPCの .env にだけ保存され、同期されません。" />
+                <SectionHeader title="APIキー（このPC）" description="Skill やスクリプトが使う外部サービスのキーです。このPCの .env にだけ保存され、同期されません。" />
                 <LegacyKeysNote onOpenOwnKeys={() => setActiveTab('ownkeys')} />
                 <MoveEnvKeysCard companyId={currentCompany.id} rootPath={currentCompany.rootPath} env={envStatus} onMoved={reloadEnvStatus} />
                 <Card className="divide-y divide-zinc-100 dark:divide-white/[0.06]">

@@ -17,7 +17,7 @@ declare global { interface Window { __acbLayout: Layout } }
 const ROOT = '/Users/demo/会社'
 const calls = (page: Page, name: string) => page.evaluate(n => window.__acbLayout.calls.filter(c => c.name === n).map(c => c.args), name)
 const deptTab = (page: Page, name: string) => page.getByRole('button', { name, exact: true }).first()
-const leftTab = (page: Page, name: 'スキル' | 'ファイル' | '探す') => page.getByRole('button', { name, exact: true })
+const leftTab = (page: Page, name: 'Skill' | 'ファイル' | '探す') => page.getByRole('button', { name, exact: true })
 const overlay = (page: Page) => page.getByRole('button', { name: 'ダウンロードして同期を開始' })
 
 test('switching departments keeps the file tree mounted with what was expanded or collapsed, without a cold re-read', async ({ page }) => {
@@ -241,7 +241,7 @@ test('shortcuts: ⌘P and ⌘K open 探す by name, ⌘⇧F the 探す tab with 
   await expect(page.getByPlaceholder('覚えている言葉で探す')).toBeFocused()
 })
 
-test('⌘K finds skills (the shown department\'s and the company-wide ones) and consultations by name; a skill opens in the スキル tab', async ({ page }) => {
+test('⌘K finds skills (the shown department\'s and the company-wide ones) and consultations by name; a skill opens in the Skill tab', async ({ page }) => {
   await openPreview(page, 'skill-layout', { consultations: '1' })
   await deptTab(page, '営業部').click()
   const press = () => page.evaluate(() => {
@@ -254,11 +254,11 @@ test('⌘K finds skills (the shown department\'s and the company-wide ones) and 
   await nameSearch.fill('見積')
   await expect(options.filter({ hasText: '見積の相談' })).toContainText('AIへの相談')
   await page.keyboard.press('Escape')
-  // A company-wide skill while 営業部 is shown: chosen, it opens under 全社 in the スキル tab.
+  // A company-wide skill while 営業部 is shown: chosen, it opens under 全社 in the Skill tab.
   await press()
   await nameSearch.fill('WEEKLY')
   await expect(options.first()).toContainText('weekly-report')
-  await expect(options.first()).toContainText('スキル')
+  await expect(options.first()).toContainText('Skill')
   await nameSearch.press('Enter')
   await expect(nameSearch).toHaveCount(0)
   // Its card under 全社 (営業部's skills gone) and, chosen, its detail beside it: the heading twice.
@@ -268,7 +268,7 @@ test('⌘K finds skills (the shown department\'s and the company-wide ones) and 
 
 test('a file link clicked in a consultation\'s own window opens here, in the files tab, as a kept tab (file.open)', async ({ page }) => {
   await openPreview(page, 'skill-layout')
-  await leftTab(page, 'スキル').click()
+  await leftTab(page, 'Skill').click()
   const file = `${ROOT}/総務/備品.md`
   await page.evaluate(path => window.__acbLayout.fileFromChatWindow(path), file)
   await expect(page.getByTitle(file, { exact: true })).toBeVisible()
@@ -295,7 +295,7 @@ test('今日のフォルダを開く: from another department, made when missing
   await page.clock.install({ time: new Date('2026-11-03T00:00:00Z') })
   await openPreview(page, 'skill-layout')
   await deptTab(page, '総務').click()
-  await leftTab(page, 'スキル').click()
+  await leftTab(page, 'Skill').click()
   await page.keyboard.press('ControlOrMeta+Shift+T')
   const day = page.getByRole('button', { name: '20261103', exact: true })
   await expect(day).toBeVisible()
@@ -358,7 +358,7 @@ test('without the shared folder: a company Skill says so and offers only 自分�
   await expect(page.getByRole('status').filter({ hasText: '会社の決まり' })).toContainText('会社の決まり（tone）と同じ名前のファイルがあるため')
   await expect(page.getByRole('button', { name: '会社に公開' })).toHaveCount(0)
   await expect(page.getByText('ステータス')).toBeHidden()
-  await expect(page.getByText('この PC だけのスキルです')).toHaveCount(0)
+  await expect(page.getByText('この PC だけの Skill です')).toHaveCount(0)
   await expect(page.getByRole('button', { name: '会社の版に戻す' })).toHaveCount(0)
   await page.getByRole('button', { name: '自分用に直す' }).click()
   await expect(page.getByText('この PC だけで、あなたが直した版を使うようにします。')).toBeVisible()
@@ -371,7 +371,7 @@ test('without the shared folder: a local Skill stays 「この PC だけ」 and 
   await openPreview(page, 'skill-layout', { kind: 'none' })
   await deptTab(page, '営業部').click()
   await page.getByRole('heading', { name: 'proposal' }).click()
-  await expect(page.getByText('この PC だけのスキルです（ほかの人には共有されません）。')).toBeVisible()
+  await expect(page.getByText('この PC だけの Skill です（ほかの人には共有されません）。')).toBeVisible()
   await page.getByRole('button', { name: '会社に公開' }).click()
   await expect(page.getByText('会社の Skill として公開します。')).toBeVisible()
   await page.getByRole('button', { name: 'キャンセル' }).click()
@@ -448,7 +448,7 @@ test('without the shared folder: a Skill under 自分用に直す is one card th
   await expect(card.getByRole('button', { name: '会社に公開' })).toBeVisible()
   await expect(page.getByText(/フォルダを消/)).toHaveCount(0)
   await expect(page.getByText('会社にも同じ名前の Skill があります。')).toHaveCount(0)
-  await expect(page.getByText('この PC だけのスキルです')).toHaveCount(0)
+  await expect(page.getByText('この PC だけの Skill です')).toHaveCount(0)
   await card.getByRole('button', { name: '会社に公開' }).click()
   await expect(page.getByText('会社の同じ名前の Skill を、この内容に置き換えます。')).toBeVisible()
 })
@@ -493,7 +493,7 @@ test('without the shared folder: 会社に公開 is not offered where the server
   await openPreview(page, 'skill-layout', { kind: 'none', publish: 'no', download: 'done' })
   await deptTab(page, '営業部').click()
   await page.getByRole('heading', { name: 'proposal' }).click()
-  await expect(page.getByText('この PC だけのスキルです（ほかの人には共有されません）。')).toBeVisible()
+  await expect(page.getByText('この PC だけの Skill です（ほかの人には共有されません）。')).toBeVisible()
   await expect(page.getByRole('button', { name: '会社に公開' })).toHaveCount(0)
   await deptTab(page, '開発部').click()
   await page.getByRole('heading', { name: 'release-note' }).click()

@@ -79,7 +79,7 @@ const SIGN_IN = { page: 'sign-in', viewport: { width: 760, height: 620 } } as co
 const CLOSE_LIST: SceneStep = { click: 'role=complementary[name="AIへの相談"] >> role=button[name="AIへの相談の一覧を閉じる"]' }
 const SALES_TAB = 'role=button[name="営業部" s]'
 const FILES_TAB = 'role=button[name="ファイル" s]'
-const SKILLS_TAB = 'role=button[name="スキル" s]'
+const SKILLS_TAB = 'role=button[name="Skill" s]'
 const SYNC = 'role=button[name="サーバーと同期" s]'
 const SYNC_WAITS = 'role=button[name="サーバーと同期（自動同期は止まっています）"]'
 const PREVIEW = 'role=button[name="変更を確認" s]'
@@ -107,7 +107,7 @@ const SEND = `${COMPOSER_BOX} >> button >> nth=-1`
 const ASK = (text: string): SceneStep[] => [{ typeAtEnd: COMPOSER, text }, { press: 'ControlOrMeta+Enter' }]
 const FIRST_REQUEST = '営業部の訪問メモ_1123.md を読んで、A社の田村さんへのお礼メールの下書きを 営業部/下書き/ に作ってください。'
 const THANKS_FILE = 'role=button[name=/^お礼メール_A社\\.md/]'
-/** A Skill's card in the スキル tab, by its name. */
+/** A Skill's card in the Skill tab, by its name. */
 /** The chat pane, with room on its left for markers. */
 const CHAT_CROP = { target: CHAT_PANE, padding: { x: 32, y: 0 } }
 /** Lets a panel that slides in come to rest before its parts are measured. */
@@ -321,7 +321,7 @@ export const scenes: Scene[] = [
     annotations: [
       { box: SYNC }, { marker: { target: SYNC, label: '1', at: 'below' } },
       { marker: { target: SALES_TAB, label: '2' } },
-      { box: 'xpath=//button[normalize-space()="スキル"]/..' }, { marker: { target: 'xpath=//button[normalize-space()="スキル"]/..', label: '3' } },
+      { box: 'xpath=//button[normalize-space()="Skill"]/..' }, { marker: { target: 'xpath=//button[normalize-space()="Skill"]/..', label: '3' } },
       { box: CHAT_PANE }, { marker: { target: CHAT_PANE, label: '4' } },
     ],
   },
@@ -365,7 +365,7 @@ export const scenes: Scene[] = [
   },
   {
     id: 'left-tab-skills',
-    about: 'The left pane’s スキル tab: 営業部’s Skill.',
+    about: 'The left pane’s Skill tab: 営業部’s Skill.',
     ...MAIN,
     steps: [CLOSE_LIST, { click: SALES_TAB }, { click: SKILLS_TAB }, { waitFor: 'text=提案書の骨子を作る' }],
     crop: { region: { x: 0, y: 100, width: 560, height: 400 } },
@@ -818,10 +818,10 @@ export const scenes: Scene[] = [
     id: 'card-tool-approval',
     about: 'A command the app asks about first (deleting a file): 許可 / 拒否.',
     ...LIVE,
-    steps: [...SALES_FILES, ...ASK('下書きフォルダの古いお礼メール（お礼メール_A社_古い版.md）を消してください。'), { waitFor: 'text=ツール実行の確認' }, SETTLE],
+    steps: [...SALES_FILES, ...ASK('下書きフォルダの古いお礼メール（お礼メール_A社_古い版.md）を消してください。'), { waitFor: 'text=AI がこの操作をしてよいか確認しています' }, SETTLE],
     crop: CHAT_CROP,
     annotations: [
-      { marker: { target: 'text=/^rm "営業部/', label: '1', at: 'left' } },
+      { marker: { target: 'text=ファイルを消すコマンドを実行します', label: '1', at: 'left' } },
       { box: 'role=button[name="許可"]' }, { marker: { target: 'role=button[name="許可"]', label: '2', at: 'below' } },
       { marker: { target: 'role=button[name="拒否"]', label: '3', at: 'below' } },
     ],
@@ -871,7 +871,7 @@ export const scenes: Scene[] = [
   },
   {
     id: 'skills-list',
-    about: 'The 全社 tab’s スキル: the company’s two Skills, each with 実行 and 設定.',
+    about: 'The 全社 tab’s Skill tab: the company’s two Skills, each with 実行 and 設定.',
     ...LIVE,
     steps: [CLOSE_LIST, { click: 'role=button[name="全社" s]' }, { click: SKILLS_TAB }, { waitFor: 'text=thank-you-mail' }],
     crop: { region: { x: 0, y: 48, width: 860, height: 560 } },
@@ -884,12 +884,12 @@ export const scenes: Scene[] = [
   },
   {
     id: 'skill-detail',
-    about: 'A Skill’s 設定: what it does, its SKILL.md, このSKILLを実行.',
+    about: 'A Skill’s 設定: what it does, its SKILL.md, この Skill を実行.',
     ...LIVE,
-    steps: [CLOSE_LIST, { click: 'role=button[name="全社" s]' }, { click: SKILLS_TAB }, { click: `${SKILL_CARD('thank-you-mail')} >> role=button[name="設定"]` }, { waitFor: 'text=SKILL設定' }, SETTLE],
+    steps: [CLOSE_LIST, { click: 'role=button[name="全社" s]' }, { click: SKILLS_TAB }, { click: `${SKILL_CARD('thank-you-mail')} >> role=button[name="設定"]` }, { waitFor: 'text=Skill の設定' }, SETTLE],
     crop: { region: { x: 0, y: 120, width: 1050, height: 680 } },
     annotations: [
-      { box: 'role=button[name="このSKILLを実行"]' }, { marker: { target: 'role=button[name="このSKILLを実行"]', label: '1', at: 'left' } },
+      { box: 'role=button[name="この Skill を実行"]' }, { marker: { target: 'role=button[name="この Skill を実行"]', label: '1', at: 'left' } },
       { marker: { target: 'text="公開中"', label: '2', at: 'left' } },
       { marker: { target: 'text="説明"', label: '3', at: 'left' } },
       { box: 'role=button[name=/^SKILL\\.md/]' }, { marker: { target: 'role=button[name=/^SKILL\\.md/]', label: '4', at: 'left' } },
@@ -924,7 +924,7 @@ export const scenes: Scene[] = [
     crop: CHAT_CROP,
     annotations: [
       { marker: { target: 'text=/^\\/thank-you-mail/', label: '1', at: 'left' } },
-      { box: 'role=button[name=/^スキルを使いました/]' }, { marker: { target: 'role=button[name=/^スキルを使いました/]', label: '2', at: 'left' } },
+      { box: 'role=button[name=/^Skill を使いました/]' }, { marker: { target: 'role=button[name=/^Skill を使いました/]', label: '2', at: 'left' } },
     ],
   },
 

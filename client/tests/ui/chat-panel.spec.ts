@@ -73,6 +73,14 @@ test.describe('a running turn', () => {
     await expect(header.getByRole('combobox', { name: '応答中はモデルを変更できません' })).toBeDisabled()
   })
 
+  test('the send (↑) and stop (×) buttons carry names a screen reader reads', async ({ page }) => {
+    await openPreview(page, 'chat-header')
+    await input(page).click()
+    await page.keyboard.insertText('見積書を作って')
+    await page.getByRole('button', { name: '送る', exact: true }).click()
+    await expect(page.getByRole('banner').getByRole('button', { name: '停止', exact: true })).toBeVisible()
+  })
+
   test('Codex: its own model pickers, meter window, and no subagent progress line', async ({ page }) => {
     await openPreview(page, 'chat-header', { agent: 'codex' })
     const header = page.getByRole('banner')
@@ -354,7 +362,7 @@ test('a new conversation left for another with nothing typed goes away; one with
   await newConversation.click()
   await expect(rows).toHaveCount(2)
   // (The preview's history store keeps nothing, so the row shows no 下書き line: pick the other tab.)
-  await open.locator('button:not([aria-current])', { hasText: '新しい会話' }).click()
+  await open.locator('button:not([aria-current])', { hasText: '新しい相談' }).click()
   await expect(rows).toHaveCount(1)
   await typed(page).toBe('来週の会議の議題')
   // Nothing went to 「終わったもの」 on the way.
@@ -427,7 +435,7 @@ test('a group heading folds its rows, stays folded after a reload, and a search 
   await openPreview(page, 'chat-header', { turn: 'manual', storage: 'keep' })
   const sidebar = page.getByRole('complementary', { name: 'AIへの相談' })
   const heading = sidebar.getByRole('button', { name: /^開いている相談/ })
-  const row = sidebar.getByRole('button', { name: /^新しい会話/ })
+  const row = sidebar.getByRole('button', { name: /^新しい相談/ })
   await expect(row).toBeVisible()
   await expect(heading).toHaveAttribute('aria-expanded', 'true')
 
@@ -602,8 +610,8 @@ test.describe('a long restored conversation', () => {
     await expect(page.getByRole('button', { name: /^以前のメッセージを表示/ })).toBeVisible({ timeout: 15_000 })
     await list(page).evaluate(el => { el.scrollTop = 0 })
 
-    // The blank tab restored as 「別の相談」 (renamed 「新しい会話」 once it is set up).
-    await sidebar.getByRole('button', { name: /^(別の相談|新しい会話) / }).click()
+    // The blank tab restored as 「別の相談」 (renamed 「新しい相談」 once it is set up).
+    await sidebar.getByRole('button', { name: /^(別の相談|新しい相談) / }).click()
     await expect(userQuestions(page)).toHaveCount(0)
     // The long conversation is hidden, not unmounted.
     await expect(page.getByText(/^質問120: /)).toBeAttached()
@@ -616,7 +624,7 @@ test.describe('a long restored conversation', () => {
     // Showing a conversation again opens it at the latest message.
     await expect.poll(() => list(page).evaluate(el => el.scrollHeight - el.scrollTop - el.clientHeight)).toBeLessThan(5)
 
-    await sidebar.getByRole('button', { name: /^(別の相談|新しい会話) / }).click()
+    await sidebar.getByRole('button', { name: /^(別の相談|新しい相談) / }).click()
     await typed(page).toBe('別の相談の下書き')
   })
 })

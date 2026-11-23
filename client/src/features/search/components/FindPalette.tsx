@@ -18,7 +18,7 @@ interface Props {
   recent: PaletteRecent[]
   onSelectFile: (filePath: string) => void
   onOpenRecord: (recordId: string) => void
-  /** The skills already loaded for the スキル tab (and slash commands): found by name, opened there. */
+  /** The skills already loaded for the Skill tab (and slash commands): found by name, opened there. */
   skills?: readonly PaletteSkill[]
   onOpenSkill?: (skillId: string) => void
   /** 「AIへの相談」, read once when the window opens; one chosen opens in the chat. */
@@ -31,7 +31,7 @@ interface Props {
 
 /**
  * 探す ⌘K (Windows Ctrl+K; ⌘P too): open anything by its name — やること, 案件, 会議の記録,
- * スキル, AIへの相談, ファイル… — with the same icons as everywhere. Rendered only while open, so it starts empty.
+ * Skill, AIへの相談, ファイル… — with the same icons as everywhere. Rendered only while open, so it starts empty.
  */
 export function FindPalette({ onClose, rootPath, companyId, departmentFolder, recent, onSelectFile, onOpenRecord, skills, onOpenSkill, loadConsultations, onOpenConsultation, actions, onAction }: Props) {
   const [query, setQuery] = useState('')

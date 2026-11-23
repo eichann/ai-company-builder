@@ -22,7 +22,7 @@
     "darkMode": "ダークモード"
   },
   "tabs": {
-    "skills": "スキル",
+    "skills": "Skill",
     "files": "ファイル"
   },
   "departments": {
@@ -53,43 +53,43 @@
     "unsavedChanges": "保存されていない変更があります。閉じますか？"
   },
   "skills": {
-    "title": "スキル",
-    "loading": "スキルを読み込み中...",
-    "empty": "スキルがありません",
-    "emptyDescription": "この部署にはまだスキルが登録されていません。",
-    "createNew": "新しいスキルを作成",
-    "addNew": "新しいSKILLを追加",
+    "title": "Skill",
+    "loading": "Skill を読み込み中...",
+    "empty": "Skill がありません",
+    "emptyDescription": "この部署にはまだ Skill が登録されていません。",
+    "createNew": "新しい Skill を作成",
+    "addNew": "新しい Skill を追加",
     "addDescription": "AIができることを定義する",
     "execute": "実行",
     "settings": "設定",
     "count": "{{count}}件"
   },
   "skillDetail": {
-    "title": "SKILL設定",
-    "executeButton": "このSKILLを実行",
+    "title": "Skill の設定",
+    "executeButton": "この Skill を実行",
     "overview": "概要",
     "rules": "ルール",
     "references": "参照",
     "scripts": "スクリプト",
     "description": "説明",
-    "definitionFile": "SKILL定義ファイル",
+    "definitionFile": "Skill の定義ファイル",
     "noRules": "ルールファイルがありません",
     "noReferences": "参照ファイルがありません",
     "noScripts": "スクリプトがありません"
   },
   "skillWizard": {
-    "title": "新しいSKILLを作成",
-    "subtitle": "{{department}}部署に新しいスキルを追加",
-    "nameLabel": "スキル名",
+    "title": "新しい Skill を作成",
+    "subtitle": "{{department}}部署に新しい Skill を追加",
+    "nameLabel": "Skill の名前",
     "namePlaceholder": "例: 提案書作成",
     "descriptionLabel": "説明",
-    "descriptionPlaceholder": "このスキルが何をするか簡潔に説明してください",
-    "createButton": "SKILLを作成",
+    "descriptionPlaceholder": "この Skill が何をするか簡潔に説明してください",
+    "createButton": "Skill を作成",
     "editHint": "作成後、SKILL.mdファイルを編集してAIの振る舞いを詳細に定義できます。"
   },
   "chat": {
     "assistant": "アシスタント",
-    "newChat": "新しい会話",
+    "newChat": "新しい相談",
     "history": "履歴",
     "recentChats": "最近の会話",
     "noHistory": "履歴がありません",
@@ -113,9 +113,9 @@
     "queuedCancel": "取り消す",
     "suggestionHint": "→ または Tab で候補を入力 • Esc で消す • ⌘+Enter で送信",
     "skillExecuting": "を実行中",
-    "endSkill": "スキル実行を終了",
+    "endSkill": "Skill の実行を終了",
     "greeting": "こんにちは。{{company}}のAIアシスタントです。\n\nどのようなお手伝いができますか？",
-    "skillGreeting": "「{{skill}}」スキルを実行します。\n\n{{description}}\n\n何をお手伝いしましょうか？",
+    "skillGreeting": "「{{skill}}」の Skill を実行します。\n\n{{description}}\n\n何をお手伝いしましょうか？",
     "errorOccurred": "エラーが発生しました: {{error}}",
     "retryError": "エラーが発生しました。もう一度お試しください。",
     "regenerate": "再生成",
@@ -126,7 +126,7 @@
     "statusStreaming": "応答中...",
     "statusError": "エラー",
     "stop": "停止",
-    "toolApprovalTitle": "ツール実行の確認",
+    "toolApprovalTitle": "AI がこの操作をしてよいか確認しています",
     "toolApprovalAllow": "許可",
     "toolApprovalDeny": "拒否"
   },

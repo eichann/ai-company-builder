@@ -306,7 +306,7 @@ function CompanyShelfSection({ skill, actions, onEditFile, onRefused }: { skill:
   }
   return (
     <div className={box}>
-      <div>この PC だけのスキルです（ほかの人には共有されません）。</div>
+      <div>この PC だけの Skill です（ほかの人には共有されません）。</div>
       {skill.shelf?.state === 'clash' && <div>{SHELF_CLASH_NOTE}</div>}
       {requestState}
       {withAi}

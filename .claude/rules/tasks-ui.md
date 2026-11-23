@@ -1073,4 +1073,4 @@ the real `AppShell`): the list is the narrow column, a task opens as a tab besid
 stays when the left tab changes, ← → go between them and a restart brings it back.
 With `&plugin=1` (a fifth tab, 番組) it also holds the left tabs' rule at 1440×900: every name
 shown on one line, under its icon in the narrow column (also at its 200 px minimum), beside it
-when スキル covers the left side (`renderer-structure.md`, panel registry).
+when Skill covers the left side (`renderer-structure.md`, panel registry).

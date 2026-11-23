@@ -1,10 +1,11 @@
 import type { UIMessage } from 'ai'
 import type { AgentInteraction } from '../../../shared/agent-interaction'
-import { getToolDisplayName, isRunningState, SUBAGENT_TOOL_NAMES, toolRowOf } from './toolRows'
+import { isRunningState, SUBAGENT_TOOL_NAMES, toolRowOf } from './toolRows'
 import type { buildConversationRows } from './conversationRows'
 import { pendingReviewOf } from './reviewRequest'
 import { REVIEW_TOOL_ID } from '../../../shared/review-request'
 import { toolLineOf, type ToolLine } from '../../../shared/tool-display'
+import { approvalWordsOf } from '../../../shared/tool-approval-words'
 
 /**
  * Whose turn a conversation is and what its AI is doing (the 「AIへの相談」
@@ -89,7 +90,7 @@ export function toolActivity(toolName: string, input: unknown, rootPath?: string
   if (toolName.startsWith('mcp__acb_consultations__')) return '過去の相談を見ています'
   if (toolName === 'TodoWrite') return '作業の段取りを立てています'
   if (toolName === REVIEW_TOOL_ID) return '確認のお願いを出しています'
-  if (toolName === 'Skill') return at('スキルを使っています', text(inp.skill) || text(inp.command))
+  if (toolName === 'Skill') return at('Skill を使っています', text(inp.skill) || text(inp.command))
   // The app's own tools carry their line (tool-display.ts); never a raw tool id.
   return line ? line.running : toolLineOf(toolName, inp).running
 }
@@ -130,7 +131,7 @@ export function deriveConsultationStatus(inputs: StatusInputs): ConsultationStat
   if (inputs.approval) {
     const inp = inputs.approval.toolInput ?? {}
     const file = text(inp.file_path) || text(inp.path)
-    const what = getToolDisplayName(inputs.approval.toolName)
+    const what = approvalWordsOf(inputs.approval.toolName, inp).action
     return { state: 'needs-you', kind: 'approve', line: `許可を待っています：${file ? shortPath(file, inputs.rootPath) : what}` }
   }
   if (inputs.status === 'submitted' || inputs.status === 'streaming') {

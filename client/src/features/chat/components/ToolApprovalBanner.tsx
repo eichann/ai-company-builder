@@ -1,6 +1,6 @@
 import { useTranslation } from 'react-i18next'
 import { ShieldWarning } from '@phosphor-icons/react'
-import { getToolDisplayName } from '../toolRows'
+import { approvalWordsOf } from '../../../../shared/tool-approval-words'
 import type { ToolApprovalRequest } from '../../../../shared/ipc-contract'
 import { PRIMARY_ACTION } from '../../../shared/ui/buttonStyles'
 
@@ -8,25 +8,25 @@ import { PRIMARY_ACTION } from '../../../shared/ui/buttonStyles'
 // Tool Approval Banner
 // ============================================================================
 
+/**
+ * Asks the member before the AI makes a call. It says what will happen in plain Japanese
+ * (tool-approval-words.ts); the tool's own name and the exact command stay behind 「くわしく」.
+ */
 export function ToolApprovalBanner({
   request,
+  rootPath,
   onRespond,
 }: {
   request: ToolApprovalRequest
+  /** The company folder: a path inside it is shown relative to it. */
+  rootPath?: string
   onRespond: (toolUseId: string, approved: boolean) => void
 }) {
   const { t } = useTranslation()
-
-  const displayName = getToolDisplayName(request.toolName) || request.toolName
-  let inputSummary = ''
-  if (request.toolInput) {
-    const input = request.toolInput
-    const first = [input.command, input.file_path, input.notebook_path, input.path, input.url, input.query].find(v => typeof v === 'string' && v)
-    if (first) inputSummary = String(first)
-  }
+  const words = approvalWordsOf(request.toolName, request.toolInput, rootPath)
 
   return (
-    <div className="flex-shrink-0 px-4 py-3 bg-amber-500/10 border-b border-amber-500/20 animate-fade-in">
+    <div className="flex-shrink-0 px-4 py-3 bg-amber-500/10 border-b border-amber-500/20 animate-fade-in" role="group" aria-label={t('chat.toolApprovalTitle')}>
       <div className="flex items-start gap-3">
         <ShieldWarning size={18} weight="fill" className="text-amber-400 flex-shrink-0 mt-0.5" />
         <div className="flex-1 min-w-0">
@@ -38,14 +38,21 @@ export function ToolApprovalBanner({
               {request.reason}
             </div>
           )}
-          <div className="text-xs text-gray-600 dark:text-zinc-300 font-medium">
-            {displayName}
+          <div className="text-xs text-gray-600 dark:text-zinc-300 font-medium" data-approval-action>
+            {words.action}
           </div>
-          {inputSummary && (
-            <div className="text-xs text-gray-500 dark:text-zinc-400 font-mono truncate mt-0.5">
-              {inputSummary}
+          {words.detail && (
+            <div className="text-small text-text-muted truncate mt-0.5">
+              {words.detail}
             </div>
           )}
+          <details className="mt-1 text-small text-text-muted">
+            <summary className="cursor-pointer select-none">くわしく</summary>
+            <div className="mt-1">道具の名前：{words.technical}</div>
+            {words.exact && (
+              <div className="font-mono whitespace-pre-wrap break-all mt-0.5">{words.exact}</div>
+            )}
+          </details>
         </div>
         <div className="flex items-center gap-2 flex-shrink-0">
           <button

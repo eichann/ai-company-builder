@@ -64,8 +64,8 @@ test('a task opens as a tab beside the files; it stays when the left tab changes
   await page.getByRole('button', { name: '進む' }).click()
   await expect(taskTab).toHaveAttribute('aria-selected', 'true')
 
-  // A wide tab (スキル) covers the middle; coming back shows the same tabs.
-  await leftTab(page, /^スキル$/).click()
+  // A wide tab (Skill) covers the middle; coming back shows the same tabs.
+  await leftTab(page, /^Skill$/).click()
   await expect(card).toBeHidden()
   await leftTab(page, /^やること/).click()
   await expect(card).toBeVisible()
@@ -142,7 +142,7 @@ test('a task tab switched back to shows its card at once (no loading) and then u
 // Staging, 1440×900 (FB): the left tabs broke their names one character per line in the narrow
 // column; then (#516) showed icons only. Owner 2026-11-02: the names always show. Narrow: the name
 // (11 px, one line) under its icon, every tab inside the column even at its minimum; wide: side by side.
-const NAMES = ['スキル', 'ファイル', 'やること', '探す', '番組']
+const NAMES = ['Skill', 'ファイル', 'やること', '探す', '番組']
 
 async function leftTabsLook(page: Page) {
   const strip = page.locator('[data-left-tabs]')
@@ -190,8 +190,8 @@ test('at 1440×900 every left tab shows its name on one line: stacked in the nar
   await strip.locator('button[title="探す"]').click()
   await expect(page.getByPlaceholder('覚えている言葉で探す')).toBeVisible()
 
-  // スキル covers the whole left side: room for icon and name side by side.
-  await strip.locator('button[title="スキル"]').click()
+  // Skill covers the whole left side: room for icon and name side by side.
+  await strip.locator('button[title="Skill"]').click()
   expect(await leftTabsLook(page)).toEqual(NAMES.map(() => 'side by side'))
   await page.screenshot({ path: 'test-results/left-tabs-wide.png' })
   expectNoPageErrors(state)

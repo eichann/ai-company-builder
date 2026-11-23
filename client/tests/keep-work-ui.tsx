@@ -68,7 +68,7 @@ installElectronAPI({
   makeSkillPrivate: async (_root, rel) => {
     calls.push(['makeSkillPrivate', rel])
     return rel.includes('/shared-one/')
-      ? { success: false, error: 'このスキルはすでに会社で共有されているため、非公開にはできません。', code: 'already_shared' as const }
+      ? { success: false, error: 'この Skill はすでに会社で共有されているため、非公開にはできません。', code: 'already_shared' as const }
       : { success: true }
   },
   createDirectory: async p => { calls.push(['createDirectory', p]); return true },

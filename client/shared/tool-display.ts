@@ -59,7 +59,7 @@ const BUILTIN: Record<string, ToolDisplay> = {
   Read: { label: 'ファイルを読みました', running: 'ファイルを読んでいます', many: 'ファイルを {n} 件読みました', describe: fileDetail },
   NotebookRead: { label: 'ファイルを読みました', running: 'ファイルを読んでいます', many: 'ファイルを {n} 件読みました', describe: fileDetail },
   readFile: { label: 'ファイルを読みました', running: 'ファイルを読んでいます', many: 'ファイルを {n} 件読みました', describe: fileDetail },
-  readSkillFile: { label: 'スキルのファイルを読みました', running: 'スキルのファイルを読んでいます', many: 'スキルのファイルを {n} 件読みました', describe: fileDetail },
+  readSkillFile: { label: 'Skill のファイルを読みました', running: 'Skill のファイルを読んでいます', many: 'Skill のファイルを {n} 件読みました', describe: fileDetail },
   Write: {
     label: 'ファイルに書きました', running: 'ファイルに書いています', many: 'ファイルに {n} 回書きました',
     // Codex reports a file change as one item with its changed files.
@@ -87,8 +87,8 @@ const BUILTIN: Record<string, ToolDisplay> = {
   Task: { label: '手分けして作業しました', running: '手分けして作業しています', many: '{n} 件の作業を手分けしました', describe: input => shortText(input.description) },
   Agent: { label: '手分けして作業しました', running: '手分けして作業しています', many: '{n} 件の作業を手分けしました', describe: input => shortText(input.description) },
   TodoWrite: { label: '作業の段取りを立てました', running: '作業の段取りを立てています', many: '作業の段取りを {n} 回立てました' },
-  Skill: { label: 'スキルを使いました', running: 'スキルを使っています', many: 'スキルを {n} 回使いました', describe: input => shortText(input.skill ?? input.command) },
-  SlashCommand: { label: 'スキルを使いました', running: 'スキルを使っています', many: 'スキルを {n} 回使いました', describe: input => shortText(input.command) },
+  Skill: { label: 'Skill を使いました', running: 'Skill を使っています', many: 'Skill を {n} 回使いました', describe: input => shortText(input.skill ?? input.command) },
+  SlashCommand: { label: 'Skill を使いました', running: 'Skill を使っています', many: 'Skill を {n} 回使いました', describe: input => shortText(input.command) },
   AskUserQuestion: { label: '質問しました', running: '質問しています', many: '{n} 回質問しました' },
   ExitPlanMode: { label: '進め方をまとめました', running: '進め方をまとめています', many: '進め方を {n} 回まとめました' },
   ToolSearch: { label: '使える道具を調べました', running: '使える道具を調べています', many: '使える道具を {n} 回調べました' },

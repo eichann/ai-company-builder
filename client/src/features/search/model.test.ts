@@ -27,7 +27,7 @@ test('⌘K: skills match by name or slash command and consultations by title, af
   ]
   const consultations = [{ id: 's1', title: '週報の書き方' }, { id: 's2', title: '見積の相談' }]
   const items = paletteItems('週報', ['営業/週報.md'], [rec('task-a', 'task', 'やること')], [], { skills, consultations })
-  assert.deepEqual(items.map(i => [i.title, i.kindName]), [['task-a', 'やること'], ['週報をまとめる', 'スキル'], ['週報の書き方', 'AIへの相談'], ['週報.md', 'ファイル']])
+  assert.deepEqual(items.map(i => [i.title, i.kindName]), [['task-a', 'やること'], ['週報をまとめる', 'Skill'], ['週報の書き方', 'AIへの相談'], ['週報.md', 'ファイル']])
   assert.equal(items[1].skillId, 'company-weekly')
   assert.equal(items[1].detail, '全社')
   assert.equal(items[2].consultationId, 's1')

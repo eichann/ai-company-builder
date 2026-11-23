@@ -4,6 +4,7 @@ import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { LocalImage } from './BinaryPreviews'
 import { usePreviewSearch } from '../hooks/usePreviewSearch'
+import { previewFrontmatter } from '../markdownFrontmatter'
 
 export interface HighlightRange {
   text: string
@@ -36,6 +37,8 @@ export const MarkdownPreview = React.forwardRef<HTMLDivElement, {
       ),
     }), [basePath])
 
+    // The `---` block is data, not text: a quiet box with its name and description instead.
+    const front = useMemo(() => previewFrontmatter(content), [content])
     const search = usePreviewSearch(innerRef, bodyRef, content, paneId)
 
     // Restore scroll position by ratio after mount
@@ -131,8 +134,15 @@ export const MarkdownPreview = React.forwardRef<HTMLDivElement, {
           </div>
         )}
         <div ref={bodyRef} className="max-w-3xl mx-auto markdown-body">
+          {/* Inside the searched body: ⌘F finds the name and description too. */}
+          {front.info && (
+            <div className="mb-4 rounded-control border border-[color:var(--color-border)] bg-surface-sunken px-3 py-2 text-small text-text-muted" role="note" aria-label="このファイルの情報" data-frontmatter>
+              {front.info.name && <div className="font-strong text-text">{front.info.name}</div>}
+              {front.info.description && <div className="mt-0.5 whitespace-pre-wrap">{front.info.description}</div>}
+            </div>
+          )}
           <Markdown remarkPlugins={[remarkGfm]} components={components}>
-            {content}
+            {front.body}
           </Markdown>
         </div>
       </div>

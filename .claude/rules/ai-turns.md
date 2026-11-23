@@ -549,7 +549,7 @@ four times in nine seconds and used up the pass; the real claim came ten minutes
 toward `AI_TURN_PASS_CAP`, and one not won (not allowed now, unreachable, not synced) is not asked again before its
 `retryAfterMs` or `CLAIM_RETRY_MS` (60 s; `notDeferred`) — for records too. The hidden consultation of a claim not won
 (or won after the runner gave up, or with no message) is closed **and its stored copy deleted** (`deleteChatSession`),
-so empty 「新しい会話」 never pile up. Tests: `aiTurns.test.ts`, `tests/ui/ai-turns.spec.ts` (`?autoturn=later`,
+so empty 「新しい相談」 never pile up. Tests: `aiTurns.test.ts`, `tests/ui/ai-turns.spec.ts` (`?autoturn=later`,
 `?autoturn=taken`). Test: `client/tests/job-runs.test.ts`, `aiTurns.test.ts`
 (mutation-checked).
 

@@ -6,7 +6,7 @@ import { ThingIcon } from '../../../shared/ui/ThingIcon'
 import { NewDot } from '../../../shared/ui/primitives'
 
 import { startConsultationDrag } from '../../../shared/lib/dragTypes'
-import { paginateConversationRows, buildConversationRows, focusConversationRows, isEmptyConversation, markMatches, type ConversationTab } from '../conversationRows'
+import { paginateConversationRows, buildConversationRows, conversationLine, focusConversationRows, isEmptyConversation, markMatches, type ConversationTab } from '../conversationRows'
 import { useConsultationTopics } from '../consultationTopicsStore'
 import { groupConversationRows, type ConsultationStatus, type ConversationGroupKey } from '../consultationStatus'
 import { useConsultationStatuses } from '../consultationStatusStore'
@@ -243,8 +243,7 @@ export function ChatSidebar({ companyId, tabs, activeTabId, onSelectTab, onOpenS
           const live = status && status.state !== 'idle' ? status : undefined
           // Nothing sent and no draft: closing it leaves nothing in the history.
           const empty = !!tab && !live && isEmptyConversation(session)
-          const preview = session?.draftInput?.trim() || session?.preview || '新しい相談を始めましょう'
-          const line = live ? live.line : `${session?.draftInput?.trim() ? '下書き：' : ''}${preview.replace(/\[Tool:[^\]]*\]/g, '').replace(/\s+/g, ' ').trim().slice(0, 120)}`
+          const line = live ? live.line : conversationLine(session)
           return <div key={row.key} className={`mb-1 rounded-control border ${active ? 'bg-selected-bg border-selected-border' : 'border-transparent hover:bg-gray-100 dark:hover:bg-zinc-800'}`} data-conversation-id={session?.id ?? tab?.sessionId ?? row.key} data-status={live?.state ?? 'idle'}
             // A saved consultation dragged onto a やること's 「つながっているもの」 becomes one about it (owner decision 2026-11-03).
             draggable={!!session && editing !== session.id}
@@ -258,7 +257,7 @@ export function ChatSidebar({ companyId, tabs, activeTabId, onSelectTab, onOpenS
                 <LinkSimple size={10} className="shrink-0 text-gray-400" aria-hidden /><ThingIcon kind={row.linked.thing} typeLabel={row.linked.typeLabel} label={row.linked.kindName} size={11} />
                 <span className="truncate"><Marked text={row.linked.title} query={query} /></span>
               </p>}
-              <p className={`text-xs truncate mt-1 ${live ? LINE_TONE[live.state] ?? 'text-gray-500 dark:text-zinc-400' : 'text-gray-500 dark:text-zinc-400'}`}>{line}</p>
+              {line && <p className={`text-xs truncate mt-1 ${live ? LINE_TONE[live.state] ?? 'text-gray-500 dark:text-zinc-400' : 'text-gray-500 dark:text-zinc-400'}`}>{line}</p>}
               <div className="flex gap-2 mt-1 text-[10px] text-gray-500"><span>{session ? new Date(session.updatedAt).toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '未送信'}</span>{elsewhere ? <span className="inline-flex items-center gap-0.5 text-link"><AppWindow size={11} aria-hidden />別ウィンドウで表示中</span> : active ? <span className="text-selected-text">表示中</span> : tab ? <span>開いています</span> : null}</div>
             </button>}
             <div className="flex items-center justify-end gap-1 px-2 pb-1">

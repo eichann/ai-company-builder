@@ -76,7 +76,7 @@ export function NewSkillWizard({
     try {
       setError(await onComplete({ name: name.trim(), description: description.trim(), prompt: prompt.trim(), folderName }))
     } catch {
-      setError('スキルを作成できませんでした。もう一度試してください。')
+      setError('Skill を作成できませんでした。もう一度試してください。')
     } finally {
       setBusy(false)
     }
@@ -254,7 +254,7 @@ export function NewSkillWizard({
                   {t('skillWizard.promptLabel', 'AIへの指示')}
                 </label>
                 <p className="text-xs text-text-muted mb-3">
-                  {t('skillWizard.promptHint', 'このスキルを実行するとき、AIがどのように振る舞うべきか詳しく書いてください。')}
+                  {t('skillWizard.promptHint', 'この Skill を実行するとき、AIがどのように振る舞うべきか詳しく書いてください。')}
                 </p>
                 <textarea
                   value={prompt}

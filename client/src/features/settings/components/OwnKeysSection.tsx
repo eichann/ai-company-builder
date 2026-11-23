@@ -18,7 +18,7 @@ export function OwnKeysSection({ companyId, focusService }: { companyId: string;
     <div className="space-y-5 px-8 pb-8 pt-7">
       <SectionHeader
         title="自分の鍵"
-        description="AI がスキルの中で外部サービス（Gemini・OpenAI など）を使うときの鍵です。鍵は会社のサーバーで暗号化して預かり、このPCにも AI にも渡しません。AI には短い時間だけ使える通行証が渡されます。"
+        description="AI が Skill の中で外部サービス（Gemini・OpenAI など）を使うときの鍵です。鍵は会社のサーバーで暗号化して預かり、このPCにも AI にも渡しません。AI には短い時間だけ使える通行証が渡されます。"
       />
       {loading && !data ? (
         <div className="flex items-center gap-2 py-10 text-body text-zinc-500"><SpinnerGap size={16} className="animate-spin" />読み込み中…</div>

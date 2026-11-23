@@ -55,7 +55,7 @@ export function DepartmentPicker({ departments, onBack, onDownload }: {
       </div>
 
       <p className="text-xs text-text-muted">
-        全社で共有しているファイル（スキルなど）は常にダウンロードされます。部署を選ばない場合は、すべての部署をダウンロードします。
+        全社で共有しているファイル（Skill など）は常にダウンロードされます。部署を選ばない場合は、すべての部署をダウンロードします。
       </p>
 
       <div className="flex gap-3">

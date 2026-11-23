@@ -29,6 +29,7 @@ import { createDeniedCallWatcher, recordCanUseTool, recordPreToolUse, recordTool
 import { withoutBrokerEnv } from '../../shared/broker-env'
 import { categorizeTool } from '../../shared/agent-events'
 import { AGENT_STOP_MESSAGES } from '../../shared/agent-stop'
+import { DANGEROUS_COMMANDS } from '../../shared/dangerous-commands'
 import { CLAUDE_SANDBOX_UNAVAILABLE_RE, SANDBOX_MESSAGES, claudeSandboxOptions, parseSandboxViolation, skillWriteRefusalContext, sandboxConcern, sandboxRefusalContext } from '../../shared/agents/sandbox-policy'
 
 type StreamPart = Awaited<ReturnType<ReturnType<typeof claudeCode>['doStream']>>['stream'] extends ReadableStream<infer P> ? P : never
@@ -67,35 +68,8 @@ export function recordsToolSearchInstructions(specs: readonly { name: string; on
     'A keyword search returns only the first few matches. Never tell the member a record tool is missing before trying select: with its exact name.'
 }
 
-const DANGEROUS_PATTERNS: RegExp[] = [
-  // Direct deletion commands
-  /\brm\s/,                          // rm (file deletion)
-  /\bunlink\s/,                      // unlink
-  /\bshred\s/,                       // shred (secure delete)
-  /\bfind\b.*\s-delete\b/,           // find ... -delete
-  /\bfind\b.*-exec\s+rm\b/,          // find ... -exec rm
-
-  // Scripted deletion (Python, Node, etc.)
-  /\bos\.remove\s*\(/,               // Python os.remove()
-  /\bos\.unlink\s*\(/,               // Python os.unlink()
-  /\bshutil\.rmtree\s*\(/,           // Python shutil.rmtree()
-  /\bpathlib\b.*\.unlink\s*\(/,      // Python pathlib unlink
-  /\bfs\.unlink/,                    // Node fs.unlink
-  /\bfs\.rm\b/,                      // Node fs.rm / fs.rmSync
-  /\bfs\.rmdir/,                     // Node fs.rmdir
-
-  // Git destructive
-  /\bgit\s+reset\s+--hard/,          // git reset --hard
-  /\bgit\s+push\s+--force/,          // git push --force
-  /\bgit\s+push\s+-f\b/,             // git push -f
-  /\bgit\s+clean\s+-f/,              // git clean -f
-
-  // System-level destructive
-  /\bchmod\s+777\b/,                 // chmod 777
-  /\bmkfs\b/,                        // mkfs
-  /\bdd\s+if=/,                      // dd if=
-  /(?<!\d)>\s*\//,                    // > / (redirect to root, but not 2>/dev/null)
-]
+// What the hook asks the member about, with the banner's words (client/shared/dangerous-commands.ts).
+const DANGEROUS_PATTERNS: readonly RegExp[] = DANGEROUS_COMMANDS.map(entry => entry.pattern)
 
 // UI model keys → exact CLI model strings, and the xhigh clamp: the agent
 // registry (shared/agents/registry.ts) holds every model id.
@@ -293,9 +267,11 @@ export function createClaudeConnection(config: ClaudeConnectionConfig, createMod
               // If UI approval is available, ask the user
               if (config.requestToolApproval) {
                 const toolUseId = input.tool_use_id || crypto.randomUUID()
+                // Claude's own one-line description rides along for the banner only (display, not what is approved).
+                const description = typeof input.tool_input?.description === 'string' ? input.tool_input.description : undefined
                 const result = await config.requestToolApproval(
                   input.tool_name,
-                  { command: cmd },
+                  { command: cmd, ...(description ? { description } : {}) },
                   toolUseId,
                   appSessionId,
                 )

@@ -124,6 +124,11 @@ one place an added agent brings its own controls; everything else asks the regis
   by itself when its run ends well, or when the member ends its record, unless it holds anything of
   the member's (`ai-turns.md` "Closing the consultation"). Tests:
   `client/src/features/chat/consultation-status.test.ts`, `tests/ui/chat-panel.spec.ts`.
+- A row's second line while no turn runs (`conversationLine`, `conversationRows.ts`): the draft
+  (「下書き：…」), else the last words (`sessionPreview` skips a reply that was only tool work);
+  「（まだ何も書いていません）」 only while the member has sent nothing; a consultation already had with no
+  words to show (one the app started) has no line — never an invitation to start. A new consultation is
+  titled 「新しい相談」 (`chat.newChat`; saved titles stay). Test: `src/features/chat/conversation-line.test.ts`.
 - Each group heading except あなたの番 folds its rows (owner, 2026-10-30): a button with
   `aria-expanded` and a chevron, the count still shown. あなたの番 never folds, so what the AI waits
   for cannot be folded away; a folded group with an unread reply shows 新着 on its heading.
@@ -421,6 +426,17 @@ request / status shapes and their checks, `closeStopsTheAI`), the window registr
   viewer never opens by itself. Tests: `tests/tool-rows-real-path.test.ts` (the real main → renderer
   path of an AI turn, with and without main's lines, restored), `tests/tool-display.test.ts`,
   `src/features/chat/tool-rows.test.ts`, `tests/chat-panel-helpers.test.ts`.
+- **The approval banner** (`ToolApprovalBanner.tsx`, owner 2026-11-23: members never see developer
+  words) is titled 「AI がこの操作をしてよいか確認しています」 and says what will happen in plain Japanese
+  (`client/shared/tool-approval-words.ts` `approvalWordsOf`): a command the hook asks about by its
+  entry in `client/shared/dangerous-commands.ts` (the list `agents/claude.ts` asks with, so the two never
+  drift: 「ファイルを消すコマンドを実行します」), any other command 「コマンドを実行します」, another tool its row label
+  as 「…します」, an unknown one 「ほかの道具を使います」. Under it, Claude's own one-line `description` of the
+  command (the hook passes it in the request's `toolInput` for display only), masked by `shortText`.
+  The tool's name and the exact command / path stay behind 「くわしく」 (`<details>`). The list's
+  「許可を待っています：…」 uses the same words. Presentation only: what is asked and what 許可 allows are
+  unchanged. Tests: `src/features/chat/tool-approval.test.ts`, `tests/dangerous-command-hook.test.ts`
+  (one example per entry through the real hook asks; the list's length pinned at 20; the description).
 - Per-turn tool payload cap (`electron/ui-stream-limits.ts` `turnBudget`): after 2 MB of tool
   inputs/outputs in one turn (api-key mode 8 MB), later payloads are cut to 1 KB and input deltas
   stop; rows, states, errors, answer text and data parts are untouched.

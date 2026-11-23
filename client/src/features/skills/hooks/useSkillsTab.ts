@@ -17,7 +17,7 @@ interface Options {
 }
 
 /**
- * The スキル tab's state: the chosen skill, the new-skill and copy dialogs, a
+ * The Skill tab's state: the chosen skill, the new-skill and copy dialogs, a
  * skill's tool shown full screen, and running a skill (a new consultation
  * that sends its slash command).
  */
