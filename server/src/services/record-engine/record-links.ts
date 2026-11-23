@@ -18,7 +18,7 @@ import { linkLedgerValue, MAX_LINK_TARGETS, withLinkTargets } from './links'
 import { bad, conflict, featureOffRefusal, serviceStateOnly, STATE_CHANGED_BY_SERVICE } from './refusals'
 import type { ActorInput } from './types'
 import { NOTE_MAX, provenance } from './values'
-import { BUNDLE_PLACED_TYPES, bundleLinkName, NAMED_PERSON_CANNOT_READ, placeWithin, WIDER_THAN_BUNDLE } from './bundle-place'
+import { followLinkName, followWords, NAMED_PERSON_CANNOT_READ, PLACE_NOT_FOR_TYPE, placeWithin, WIDER_THAN_BUNDLE } from './bundle-place'
 import { placeOfRow } from './service-writer'
 import { listLedgerValue } from './members'
 
@@ -103,20 +103,28 @@ export function recordLinking(ctx: EngineContext) {
       }
 
       const current = stateOf(records, row, def)
-      // A task never seen by more people than its まとまり (records.md "A task and its 案件・プロジェクト"):
-      // a wider task is linked only when the person asks to narrow it to the まとまり's place
-      // (`narrow: true`, the card's 「プロジェクトと同じ人たちだけに見えるようにしますか？」) — in the same entry.
+      // A record never seen by more people than the parent it follows (`place_follows`; records.md "Following the
+      // parent's 見える範囲", a task's まとまり): a wider one is linked only when the person asks to narrow it to the
+      // parent's place (`narrow: true`, the card's 「プロジェクトと同じ人たちだけに見えるようにしますか？」) — in the same entry.
       let narrowTo: { folder: string | null; personalOwner: string | null } | null = null
-      if (targetRow && BUNDLE_PLACED_TYPES.includes(row.type) && name === bundleLinkName(def)) {
+      if (targetRow && name === followLinkName(def)) {
         const scopes = companyData.forCompany(member.companyId).scopes.listWithRules()
         if (!placeWithin(member.companyId, scopes, id => deps.roleOf(member.companyId, id), row, targetRow)) {
           const from = placeOfRow(targetRow)
+          const wider = followWords(row.type, WIDER_THAN_BUNDLE)
           // A list cannot be given to a record that has none (never quietly wider): refused as wider.
-          if (b.narrow !== true || 'members' in from) return bad(WIDER_THAN_BUNDLE.error, WIDER_THAN_BUNDLE.code)
+          if (b.narrow !== true || 'members' in from) return bad(wider.error, wider.code)
+          // A business plugin's record is never owner-only (other records take their readers from it).
+          if ('personalOwner' in from && records.typeVersions().some(t => t.name === row.type && t.source === 'plugin')) {
+            return bad(PLACE_NOT_FOR_TYPE.error, PLACE_NOT_FOR_TYPE.code)
+          }
           narrowTo = 'personalOwner' in from ? { folder: null, personalOwner: from.personalOwner } : { folder: from.folder, personalOwner: null }
           const place = { ...row, ...narrowTo, members: null }
           const named = Object.entries(current.fields).filter(([f, v]) => def.fields[f]?.kind === 'person' && typeof v === 'string' && v !== '')
-          if (named.some(([, v]) => !canRead(member.companyId, v as string, place))) return bad(NAMED_PERSON_CANNOT_READ.error, NAMED_PERSON_CANNOT_READ.code)
+          if (named.some(([, v]) => !canRead(member.companyId, v as string, place))) {
+            const r = followWords(row.type, NAMED_PERSON_CANNOT_READ)
+            return bad(r.error, r.code)
+          }
         }
       }
       // A 決めたこと linked later to an owner-only / members-only まとまり (records.md "Other records made for a

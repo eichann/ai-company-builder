@@ -229,10 +229,31 @@ missing or not `false` is on —, `TYPE_FEATURE`, `FEATURE_TOOLS`, `FEATURE_NOTI
   `version`); dropping it or naming another link is breaking (it would let what is made next be
   wider than its parent) — refused by the push checker for owners too, and a conflict for a
   company's extension of a plugin type whose new version has it (`companyExtensionConflicts`).
-  **Step 2a: a declaration only — the engine does not read it yet.** Until step 2b moves `task`
-  onto it (its `bundle` link) and makes the engine apply it in place of the hard-coded
-  `BUNDLE_PLACED_TYPES` ("A task and its 案件・プロジェクト"), a type declaring it gets nothing from
-  it; no core or shipped plugin type declares it before then. **Older builds**: their parser
+  **The engine applies it (step 2b, 2026-11-23)**, for every type alike — the rules of "A task and
+  its 案件・プロジェクト" (made for its parent → the parent's place; never wider: create, linking later,
+  `set_bundle`-like action links, 「部署に出す」, 「招待する」, 「非公開にする」, the service writer, the
+  external writer) read the declaration (`followLinkName`, `linkedParents` in
+  `services/record-engine/bundle-place.ts`) instead of the hard-coded `BUNDLE_PLACED_TYPES` that list
+  replaced; the core `task` declares `place_follows: bundle` ("Task version 14"). A core type keeps its
+  core declaration even when the definition in force (a company's extension stored earlier) lacks it.
+  What differs for **a business plugin's type** (it may be neither owner-only nor members-only): under
+  an owner-only or members-only parent it is refused (400 `PLACE_NOT_FOR_TYPE`, words naming no place,
+  title or person) — never made restricted, never left wider; narrowing it on 「つなぐ」 to an owner-only
+  parent is refused the same way. **The parent link's one answer**: at create, the parent must be a live
+  record of the link's type (or interface) that the creator reads — missing, unreadable, removed or of
+  another kind all get 400 `BAD_LINK` (a link to a type is otherwise only a label, and the generic
+  `LINK_TARGET_NOT_FOUND` is not used for this link), before any place check. The refusals' words say
+  「この記録」 for other types (`followWords`; a task's stay 「このやること」). **Imports** (the external
+  writer, a plugin's import or operation): a parent the record would be wider than is **not linked** —
+  the record stays where the mapping puts it, a problem 「…つなぎませんでした」 is returned, a parent already
+  linked is kept — chosen over refusing the whole import (the record's other fields keep syncing) and
+  over widening. **The service writer**: a create whose place is wider than its parent, or a transition
+  linking a new parent the record is wider than, → `bad-place` (services always say a place; nothing is
+  narrowed there). **Records made before** a type declared it are not moved (the place is copied at
+  creation, as for tasks before the rule): nothing re-checks them until a change asks — linking a parent,
+  sharing, inviting (each judges the record as it would be after the change, as for tasks). **Older
+  builds** of step 2a still hard-code `task` (so tasks stay bound after a rollback) and ignore the key
+  for other types. **Older builds**: their parser
   does not know the key, so a `.acb/types/` file with it is reported `invalid_type` by the index
   (the last valid version stays in force) and passes their push checker uncompared (only
   definitions that parse before and after are compared); a plugin package with it is refused on
@@ -553,6 +574,16 @@ A decision's `materials`, `precedents` / `supersedes` and an action's attached v
   replaced; moved exactly once, never before, with the line; もう少し待つ; the mark; old waiting tasks
   untouched; `waitCameBack` cases) — mutation-checked; `server-clock.test.ts`, `ai-runs.test.ts`.
 
+### Task version 14: a task follows its まとまり by declaration (owner decision 2026-11-23, step 2b)
+
+Additive over version 13: one key, `place_follows: bundle` ("Following the parent's 見える範囲"). What a
+task does is unchanged — the engine read the same rule from the hard-coded `BUNDLE_PLACED_TYPES` before;
+it now reads the declaration, the same path a business plugin's type takes. Migration: `TASK_VERSION` 14
+(the "Task version 9" mechanism: the core definition stored once, every task's index row moved, no ledger
+entry). Tests: the unchanged `record-bundle-place.test.ts`, `bundle-place-leaks.test.ts`,
+`record-make-private.test.ts`, `record-members.test.ts`; `source-slot-candidates.test.ts` (the migration);
+`record-place-follows.test.ts` "the declaration".
+
 ### Task version 13: the meeting's slot (owner decision 2026-11-06 「出どころの枠」 §10)
 
 Additive over version 12 (three fields, one action, a wider `who`, one new who-entry kind):
@@ -729,8 +760,8 @@ Additive over version 8 (who / from / notify / labels widened, one field, two ac
   entry carries `accepted_by` (`ACCEPTANCE.finishes`, `services/record-engine/acceptance.ts` with
   the action's `fromState`). The requester completing it does not.
 - **Migration** (`migrateTaskVersion` in `db/index.ts` → `adapters/sqlite/records.ts`
-  `migrateCompanyTaskVersion`, `TASK_VERSION` = the core task version, 13 since "Task version
-  13"): at startup, every company whose map has the task type stores that core version when
+  `migrateCompanyTaskVersion`, `TASK_VERSION` = the core task version, 14 since "Task version
+  14"): at startup, every company whose map has the task type stores that core version when
   nothing as new is stored, then every task's index row says it (`type_version`). No value changes, so no ledger entry. Idempotent.
 - Test: `server/tests/unit/record-task-v9.test.ts` (from 未着手 with no start made up, requester
   told and reopening; never from 準備中; the AI never; 確かめてから hands over from 未着手 and the
@@ -1411,9 +1442,11 @@ Words on screen: 見える範囲 / 見られる人, never 置き場所.
   member of a department a rule names, both records' lists and owner, plus one plain member and one
   owner/admin nothing names. An owner-only task is never wider (its owner reads the まとまり to link it;
   the explicit branch is also covered by the general rule). A members-only task is within when all its
-  members read the まとまり. Only `task` (`BUNDLE_PLACED_TYPES`); meetings and other types keep their own
-  rules. (A type's `place_follows` — "Type definitions" — will replace this list in step 2b; until
-  then the engine reads only the list.)
+  members read the まとまり. Which types: those declaring `place_follows` ("Type definitions" →
+  "Following the parent's 見える範囲", step 2b) — the core `task` through its `bundle` link (task version
+  14), and any business plugin's or company's type through its own parent link; everything below applies
+  to them alike (a business plugin's type is refused under an owner-only / members-only parent,
+  `PLACE_NOT_FOR_TYPE`). Meetings and other types keep their own rules.
 - **Made for a まとまり** (create with its `bundle` link — the list's line, the card's 「頼む」, the AI's
   `records_create`): no place given → the まとまり's (`placeOfRow`: folder, private folder included,
   owner, list); `personal: true` stays owner-only (the owner wants personal tasks linkable to a
@@ -1438,7 +1471,7 @@ Words on screen: 見える範囲 / 見られる人, never 置き場所.
 - **「部署に出す」 and 「招待する」 keep it within** (2026-11-23; before, both skipped the check): a share of a
   linked task to any folder, and an invite of people, groups or departments to a members-only linked task,
   must leave it within **every live まとまり its `bundle` link names — also one the member no longer reads**
-  (`linkedBundles`; its readers are still the bound), else 400 `WIDER_THAN_BUNDLE` with words for that action
+  (`linkedParents`; its readers are still the bound), else 400 `WIDER_THAN_BUNDLE` with words for that action
   (`SHARE_WIDER_THAN_BUNDLE` / `INVITE_WIDER_THAN_BUNDLE`, `bundle-place.ts`; naming no place, title or
   person), nothing written (no ledger entry, no `permission_history`). Asked inside the write's transaction
   of the row as just written (`share.ts` `withinItsBundles`: a group's or department's people read with it),
@@ -1449,7 +1482,14 @@ Words on screen: 見える範囲 / 見られる人, never 置き場所.
   put on a linked task's list is judged by who is in it now; someone who joins it later reads the task even
   when they cannot read the まとまり, and nothing checks again — the same as a まとまり's participants or a
   list changed later ("At creation only" below). Refusing such sets unless the まとまり is bound by the same
-  set would be a new rule, left to the owner.
+  set would be a new rule, left to the owner. The same holds for every type that follows a parent (a
+  members-only list inherited from a 番組 with a group on it).
+- **The AI making a business plugin's follower without its parent** (step 2b, open owner decision; the
+  safe side): such a type cannot be owner-only, so `aiPlacement` uses the screen's place — the department
+  on screen (`defaultFolder`), or the 全社 tab (`defaultPlace: 'company'`) — and with neither `create`
+  answers 400 `PLACE_REQUIRED` (`AI_PLACE_REQUIRED`) whatever the gate says, never the whole company by
+  default. With its parent given it takes the parent's place. A person's create and other types are as in
+  "全社 is a choice".
 - **The department a new まとまり belongs to** (`defaultBundleFolder`, `shared/core/bundle-place.ts`, one
   copy for the server and the app): the creator's own department (所属) — the one on screen when it is
   theirs, else their first in the tabs' order; belonging to none (an owner) or not known → the one on
@@ -1505,7 +1545,13 @@ Words on screen: 見える範囲 / 見られる人, never 置き場所.
   check; 「部署に出す」 / 「招待する」 wider than the まとまり refused — a private, members-only and owner-only
   まとまり, one the member no longer reads, a department on the list —, within ones and a task with no まとまり
   unchanged) — mutation-checked; `client/src/features/tasks/model.test.ts` (`bundlePlacesOf`),
-  `client/tests/ui/task-card.spec.ts` (the dialog's department, the narrowing question, ［〇〇の人に見せる］).
+  `client/tests/ui/task-card.spec.ts` (the dialog's department, the narrowing question, ［〇〇の人に見せる］);
+  `server/tests/unit/record-place-follows.test.ts` (step 2b: a plugin's 収録 following its 番組 through a link
+  to a type — inherits the folder, a wider place refused in a record's words, owner-only / members-only
+  parents followed or refused (`PLACE_NOT_FOR_TYPE`), an unreadable / missing / other-kind parent one
+  `BAD_LINK`, linked later and by an action, narrowing never to owner-only for a plugin's type, share and
+  invite, the AI without a parent, an import leaving the link out, the service writer's create and
+  transition, the core declaration kept) — each guard mutation-checked.
 
 ### Private 案件・プロジェクト (非公開（参加者だけ）, owner decision 2026-11-06)
 
@@ -1571,8 +1617,8 @@ those who read the 案件 — the reader check on the linked record, `records.ts
   department's, one another 案件 is in, an older one, another member's new one, one with a file record, a
   missing one: the one answer 400 `FOLDER_NOT_PLACEABLE` (never names or confirms a folder). (A file the member
   themself pushed into their own new folder within those minutes is not looked for: its readers are the same.)
-- **Its やること** ("A task and its 案件・プロジェクト"): each live linked task (`BUNDLE_PLACED_TYPES`, its
-  `bundle` link) that would be seen by more people than the 案件 there (`placeWithin`) is **narrowed** to the
+- **Its やること** ("A task and its 案件・プロジェクト"): each live linked task (any record whose type follows its
+  parent — `place_follows` — through a link naming the 案件; a task's `bundle` link) that would be seen by more people than the 案件 there (`placeWithin`) is **narrowed** to the
   folder in the same transaction — only a true narrowing: the caller reads it, it is placed by a folder (a
   members-only list is never turned into a folder), and every reader of the new place already reads it
   (`placeWithin(newPlace, task)`: no participant gains a やること they could not see, e.g. one in another

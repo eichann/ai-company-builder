@@ -20,7 +20,7 @@ import { ok, refuse, type Outcome } from '../outcome'
 import { listedUserIds, type RecordReader } from '../record-access'
 import { currentTypes } from '../record-index'
 import { RECORD_NOT_FOUND, RECORDS_DISABLED } from '../records'
-import { BUNDLE_PLACED_TYPES, bundleLinkName, placeWithin } from './bundle-place'
+import { followLinkName, placeWithin } from './bundle-place'
 import type { EngineContext } from './context'
 import { bad, conflict, featureOffRefusal, FOLDER_NOT_PLACEABLE } from './refusals'
 import type { ActorInput } from './types'
@@ -114,13 +114,13 @@ export function makingPrivate(ctx: EngineContext) {
     const may = FULL_ACCESS_ROLES.has(member.role)
       || (dept !== null && deps.managedFolders(member.companyId, member.userId).some(d => pathKey(d) === pathKey(dept)))
     if (!may) return refuse('forbidden', MAKE_PRIVATE_REFUSALS.notAllowed.error, { code: MAKE_PRIVATE_REFUSALS.notAllowed.code })
-    // Its やること: live records of the placed types whose まとまり link names it.
+    // Its やること: live records whose type follows its parent (`place_follows`) through a link that names it.
     const sources = records.linksTo([row.id]).filter(l => l.targetId === row.id)
     const candidates = records.byIds([...new Set(sources.map(l => l.sourceId))])
     const tasks = candidates.filter(t => {
-      if (t.removedAt !== null || !BUNDLE_PLACED_TYPES.includes(t.type)) return false
+      if (t.removedAt !== null) return false
       const tdef = types.get(t.type)?.definition
-      const name = tdef ? bundleLinkName(tdef) : null
+      const name = tdef ? followLinkName(tdef) : null
       return name !== null && sources.some(l => l.sourceId === t.id && l.name === name)
     })
     // Every other live record linking to it that is placed by a folder: it never follows (only やること

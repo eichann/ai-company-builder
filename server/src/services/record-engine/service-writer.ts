@@ -5,10 +5,11 @@ import type { TypeDefinition } from '../../../shared/core/record-types'
 import { SYSTEM_ACTOR_PREFIX, type LedgerChange, type LedgerEntry, type LedgerValue, type LedgerVia } from '../../../shared/core/record-ledger'
 import { newRecordId, RECORD_ID_RE } from '../../../shared/core/records'
 import type { RecordSummary } from '../../../shared/types/records'
-import type { RecordAccessRow, RecordLinkRow, RecordMemberSet } from '../../ports/records'
+import type { RecordAccessRow, RecordLinkRow, RecordMemberSet, RecordRepository } from '../../ports/records'
 import { listedUserIds, recordReader } from '../record-access'
 import { currentTypes } from '../record-index'
 import { recordSummaries } from '../records'
+import { followLinkName, linkedParents, placeWithin } from './bundle-place'
 import { interfaceLinkMisses } from './links'
 import { MEMBERS_MAX, meetingMembers, withNamedPeople } from './members'
 import { ASSIGNEE_CANNOT_READ } from './refusals'
@@ -215,7 +216,15 @@ export function createServiceRecordWriter(deps: Pick<RecordEngineDeps, 'companyD
     })
   }
 
-  function checkFields(companyId: string, def: TypeDefinition, raw: Record<string, LedgerValue> | undefined): { values: Record<string, LedgerValue> } | ServiceWriteFailed {
+  /** Is `place` within every live parent `links` names through the type's follow link (none: true)? */
+  function withinParents(companyId: string, records: RecordRepository, def: TypeDefinition, place: RecordAccessRow, links: readonly RecordLinkRow[]): boolean {
+    const parents = linkedParents(records, def, links)
+    if (parents.length === 0) return true
+    const scopes = companyData.forCompany(companyId).scopes.listWithRules()
+    return parents.every(p => placeWithin(companyId, scopes, id => deps.roleOf(companyId, id), place, p))
+  }
+
+  function checkFields(companyId: string, def: TypeDefinition, raw:Record<string, LedgerValue> | undefined): { values: Record<string, LedgerValue> } | ServiceWriteFailed {
     const values: Record<string, LedgerValue> = {}
     for (const [name, value] of Object.entries(raw ?? {})) {
       const f = Object.prototype.hasOwnProperty.call(def.fields, name) ? def.fields[name] : undefined
@@ -301,6 +310,9 @@ export function createServiceRecordWriter(deps: Pick<RecordEngineDeps, 'companyD
     }
     // Owner-only / members-only only when the calling service says whose (the inbox) or a meeting's list is inherited.
     const place: RecordAccessRow = { id, type: def.name, scopeId: null, path: null, folder, personalOwner, members, memberSets }
+    // A type that follows its parent (`place_follows`, records.md "Following the parent's 見える範囲"): the place a
+    // service says is never wider than the parent it links (else `bad-place`, nothing written; never narrowed here).
+    if (!withinParents(companyId, records, def, place, links)) return fail('bad-place')
     if (!readersOk(companyId, place, values, def)) return fail('assignee-cannot-read', ASSIGNEE_CANNOT_READ)
     const existing = records.find(id)
     if (existing && (existing.type !== def.name || records.states([id]).length > 0)) return fail('exists')
@@ -417,6 +429,13 @@ export function createServiceRecordWriter(deps: Pick<RecordEngineDeps, 'companyD
       const replacedLinks = input.links
         ? [...currentLinks.filter(x => !(x.name in (input.links as Record<string, string[]>))), ...newLinks].map((x, i) => ({ ...x, position: i }))
         : null
+      // Linking a parent the record follows (`place_follows`): only when it is within it (never narrowed here). A
+      // parent already linked is not asked again (a record from before its type followed stays as it is).
+      const follow = followLinkName(def)
+      if (follow !== null && input.links && follow in input.links) {
+        const fresh = newLinks.filter(x => x.name === follow && !currentLinks.some(c => c.name === follow && c.targetId === x.targetId))
+        if (!withinParents(companyId, records, def, row, fresh)) return fail('bad-place')
+      }
       const at = deps.clock.now()
       const isDecision = input.decisionReason !== undefined
       const entry: LedgerEntry = {

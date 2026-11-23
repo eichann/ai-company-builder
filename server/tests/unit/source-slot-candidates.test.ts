@@ -312,7 +312,7 @@ describe('the titles a person is asked about', () => {
   })
 })
 
-describe('startup moves every task to version 13', () => {
+describe('startup moves every task to the core task version (13 and later)', () => {
   it('stores the core definition once and moves the tasks once', () => {
     const t = ok(engine.create(m('u-alice'), HUMAN, { type: 'task', title: '前からある', fields: { assignee: 'u-alice' } })).record
     const json = (conn.prepare("SELECT definition FROM record_types WHERE company_id = 'a' AND name = 'task' AND version = ?").get(TASK_VERSION) as { definition: string }).definition
@@ -320,12 +320,12 @@ describe('startup moves every task to version 13', () => {
     conn.prepare("INSERT INTO record_types (company_id, name, version, definition, source, commit_sha, created_at) VALUES ('a', 'task', 12, ?, 'core', NULL, ?)")
       .run(JSON.stringify({ ...JSON.parse(json), version: 12 }), TS)
     conn.prepare("UPDATE records SET type_version = 12 WHERE company_id = 'a' AND type = 'task'").run()
-    expect(TASK_VERSION).toBe(13)
+    expect(TASK_VERSION).toBeGreaterThanOrEqual(13)
     migrateTaskVersion(conn)
-    const stored = () => (conn.prepare("SELECT COUNT(*) AS n FROM record_types WHERE company_id = 'a' AND name = 'task' AND version = 13").get() as { n: number }).n
+    const stored = () => (conn.prepare("SELECT COUNT(*) AS n FROM record_types WHERE company_id = 'a' AND name = 'task' AND version = ?").get(TASK_VERSION) as { n: number }).n
     expect(stored()).toBe(1)
     expect(currentTypes(source.forCompany('a').records).get('task')?.definition.actions.adopt.who).toContain('link:meeting')
-    expect((conn.prepare("SELECT type_version AS v FROM records WHERE company_id = 'a' AND id = ?").get(t.id) as { v: number }).v).toBe(13)
+    expect((conn.prepare("SELECT type_version AS v FROM records WHERE company_id = 'a' AND id = ?").get(t.id) as { v: number }).v).toBe(TASK_VERSION)
     expect(source.forCompany('a').records.ledger(t.id)).toHaveLength(1)
     migrateTaskVersion(conn)
     expect(stored()).toBe(1)
