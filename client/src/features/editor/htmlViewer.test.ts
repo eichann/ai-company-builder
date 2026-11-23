@@ -2,7 +2,7 @@
 // is noticed (the native view would hide it); which file changes reload the document.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { blockedBandShown, changeShowsIn, COVER_STEP, rebuildRequestOf, samplePoints } from './htmlViewer'
+import { areaCovered, blockedBandShown, changeShowsIn, COVER_STEP, rebuildRequestOf, samplePoints } from './htmlViewer'
 
 test('the band shows while the page wanted something from the internet, until each host was dismissed; a new host brings it back', () => {
   const parts = { count: 3, hosts: ['cdn.example.com', 'fonts.example.net'], hostCount: 2 }
@@ -44,6 +44,27 @@ test('every overlay at least COVER_STEP wide and tall, anywhere over the area, i
       }
     }
   }
+})
+
+test('a divider\'s grab strip over the area (data-under-document) is not an overlay; what lies under it, or anything it holds, still is', () => {
+  // Stand-ins for elements with a parent: what the check may ask of them (attributes, closest, contains).
+  type Fake = { marked: boolean; parent: Fake | null }
+  const el = (marked = false, parent: Fake | null = null): Element => {
+    const self: Fake = { marked, parent }
+    const has = (f: Fake | null, n: string): boolean => f !== null && n === 'data-under-document' && f.marked
+    return Object.assign(self, {
+      hasAttribute: (n: string) => has(self, n),
+      closest: (selector: string) => { for (let f: Fake | null = self; f; f = f.parent) if (selector.includes('data-under-document') && f.marked) return f; return null },
+      contains: (other: unknown) => other === self,
+    }) as unknown as Element
+  }
+  const area = el()
+  const strip = el(true)
+  const rect = { x: 0, y: 0, width: 100, height: 80 }
+  assert.equal(areaCovered(area, rect, () => [strip, area]), false)
+  assert.equal(areaCovered(area, rect, () => [strip, el(), area]), true, 'something of the app under the strip, over the area')
+  const held = el(false, strip as unknown as Fake)
+  assert.equal(areaCovered(area, rect, () => [held, strip, area]), true, 'something the strip holds over the area')
 })
 
 test('a change reloads the document only when it shows in it: the file, or a served file of its folder or below', () => {

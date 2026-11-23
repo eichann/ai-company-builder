@@ -6,7 +6,9 @@
  * judged by hit-testing a grid of points over the area: the first thing at
  * each point must be the area itself (or inside it). Tooltips do not count
  * (they would make the document blink while the pointer moves over the
- * toolbar); they are drawn behind the document where they overlap it.
+ * toolbar); they are drawn behind the document where they overlap it. Nor
+ * does an element marked `data-under-document` (a divider's grab strip reaching
+ * a few px over the area's edge): the document is drawn over it, too.
  */
 import { docFileType, type DocBlockedParts, type DocViewBounds } from '../../../shared/doc-frame'
 import { isPathWithin, normalizePathSeparators } from '../../shared/lib/path'
@@ -36,6 +38,12 @@ export type StackAt = (x: number, y: number) => readonly Element[]
 
 const isTooltip = (el: Element) => el.closest('[role="tooltip"]') !== null
 
+/**
+ * May lie under the document, not an overlay: a tooltip, or an element marked `data-under-document`
+ * — that element only, never what it holds (a menu opened inside it still covers).
+ */
+const liesUnder = (el: Element) => isTooltip(el) || el.hasAttribute('data-under-document')
+
 /** The app's overlays that say what they are: found by their box, however small. */
 export const OVERLAY_SELECTOR = '[role="menu"], [role="listbox"], [role="dialog"], [role="alertdialog"], [aria-modal="true"], [role="status"], [role="alert"], [data-overlay]'
 
@@ -51,7 +59,7 @@ export function areaCovered(area: Element, rect: DocViewBounds, stackAt: StackAt
     if (el !== area && !area.contains(el) && !el.contains(area) && overlaps(rect, el.getBoundingClientRect())) return true
   }
   for (const [x, y] of samplePoints(rect)) {
-    const top = stackAt(x, y).find(el => !isTooltip(el))
+    const top = stackAt(x, y).find(el => !liesUnder(el))
     if (top && top !== area && !area.contains(top)) return true
   }
   return false

@@ -209,7 +209,12 @@ carrying a secret in its user name reached a local listener). Each document is s
   anything at a grid of points ~48 px apart over the area (at most 640 points; on a 4K area at
   most 3 steps apart; `document.elementsFromPoint`: the first element at a point must be the area
   or inside it). Tooltips do not count, so the document does not blink under the toolbar's
-  tooltips; an overlay with no role smaller than the grid both ways may slip between the points
+  tooltips. Nor does an element marked `data-under-document` — that element only, not what it
+  holds: a divider's (`ResizeHandle`) grab strip reaches 4 px over its neighbours, over the points
+  2 px inside the area, and hid the document whenever the left column, the chat or the bottom panel
+  was beside it (2026-11-23; `editor-html-viewer.spec.ts`, `htmlViewer.test.ts`). The document
+  is drawn over that part of the strip; the divider is still grabbed by its own line and the other
+  side. Mark only what is not an overlay. An overlay with no role smaller than the grid both ways may slip between the points
   (`htmlViewer.test.ts`), and an element with `pointer-events: none` is invisible to
   `elementsFromPoint` — such an overlay needs a role or `data-overlay`. **Main does not check
   where a placement lies** beyond the window's content area (it does not know the layout): a

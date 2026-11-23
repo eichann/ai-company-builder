@@ -143,8 +143,10 @@ export function ResizeHandle({ onResizeStart, onResize, direction = 'horizontal'
           {value.text}
         </div>
       )}
-      {/* Wider hit area */}
+      {/* Wider hit area. It reaches 4 px over the neighbours: over an HTML document (a native view
+          drawn above the page) it lies under the document, not covering it (editor/htmlViewer.ts). */}
       <div
+        data-under-document
         className={`
           absolute
           ${direction === 'horizontal'

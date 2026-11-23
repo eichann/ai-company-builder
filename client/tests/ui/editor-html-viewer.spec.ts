@@ -65,6 +65,22 @@ test('anything of the app drawn over the document hides its view until it goes (
   expectNoPageErrors(state)
 })
 
+test('the document shows between the dividers around the editor (left column, chat, bottom panel), and follows a drag of the left one', async ({ page }) => {
+  // Each divider's grab strip reaches 4 px over the editor's edge, over the points the cover check
+  // samples 2 px inside the area: it lies under the document, it is not an overlay.
+  const state = await open(page)
+  await expect(area(page)).not.toContainText('メニューやダイアログを閉じると、資料に戻ります。')
+  const before = (await lastBounds(page))!
+  const divider = (await page.getByRole('separator', { name: 'ファイルツリーとエディタの境目' }).boundingBox())!
+  await page.mouse.move(divider.x + divider.width / 2, divider.y + divider.height / 2)
+  await page.mouse.down()
+  await page.mouse.move(divider.x + 60, divider.y + divider.height / 2, { steps: 4 })
+  await page.mouse.up()
+  await expect.poll(async () => Math.round((await lastBounds(page))?.x ?? 0)).toBe(Math.round(before.x + 60 - divider.width / 2))
+  expect((await lastBounds(page))!.width).toBeLessThan(before.width)
+  expectNoPageErrors(state)
+})
+
 test('a view that is made after the member left (another tab, 中身) is closed at once', async ({ page }) => {
   const state = await open(page)
   await page.evaluate(() => { (window as unknown as { __acbDocDelay: number }).__acbDocDelay = 400 })
