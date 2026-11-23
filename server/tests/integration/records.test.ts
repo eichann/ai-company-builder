@@ -11,8 +11,9 @@
  * - only owners/admins may change `.acb/types/` (a member's push is refused
  *   in [PROTECTED_CONFIG], the repository unchanged);
  * - for owners too, a definition change that removes a state is refused
- *   (reason line under the path); adding one with a higher version, and
- *   deleting a definition, are accepted;
+ *   (reason line under the path), and so is one that drops `place_follows`;
+ *   adding either with a higher version, and deleting a definition, are
+ *   accepted;
  * - a task is a server record: an attached file version is checked against
  *   the repository; a company's own file-backed type gets its milestone line
  *   committed through the push checker;
@@ -231,6 +232,33 @@ describe('the company map, end to end', () => {
     expect(list.map(t => t.definition.name)).toContain('customer')
     const problems = await api('u-owner', 'GET', '/problems')
     expect(problems.body.data?.problems).toContainEqual(expect.objectContaining({ path: '.acb/types/customer.md', kind: 'type_file_removed' }))
+  })
+
+  it('owners too cannot drop place_follows (what is made next would no longer follow its parent); adding it with a higher version is accepted', async () => {
+    resetToRemote()
+    const EPISODE = (version: number, placeFollows: boolean) => `---
+label: 収録
+version: ${version}
+storage: server
+links:
+  program: { label: 番組, target: program, cardinality: one }
+states: [open]
+${placeFollows ? 'place_follows: program\n' : ''}---
+`
+    write('.acb/types/episode.md', EPISODE(1, false))
+    commit('a type without place_follows')
+    expect(pushAs('owner').ok).toBe(true)
+    write('.acb/types/episode.md', EPISODE(2, true))
+    commit('add place_follows')
+    expect(pushAs('owner').ok).toBe(true)
+
+    write('.acb/types/episode.md', EPISODE(3, false))
+    commit('drop place_follows')
+    const refused = pushAs('owner')
+    expect(refused.ok).toBe(false)
+    expect(refused.output).toContain('- .acb/types/episode.md')
+    expect(refused.output).toContain('place_follows: program）をやめる')
+    resetToRemote()
   })
 
   it('a task through the engine: attached version checked against the repository; a file type’s milestone line committed through the push checker', async () => {

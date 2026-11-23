@@ -207,14 +207,39 @@ missing or not `false` is on —, `TYPE_FEATURE`, `FEATURE_TOOLS`, `FEATURE_NOTI
   `domain` and `email` (text) on the server; `prepared` (AI が用意したもの) needs `requested_by` and
   `assignee` (person) — `outbound_message` and `approval` implement it; `outside_event` (外で起きたこと)
   needs `occurred_at` (datetime) on the server — "Outside time"; `interfaceProblems`), `storage`
-  (`file` / `server` / `either`). Any other key is an error — there is no place for an
+  (`file` / `server` / `either`), `place_follows` ("Following the parent's 見える範囲" below).
+  Any other key is an error — there is no place for an
   expression, computed field, cascade, timer or outside send. `args` name server fields of the
   same kind (an action sets them; nothing is computed).
 - Versions (0.18-3): `compareTypeDefinitions` — adding is free but a changed definition needs a
   higher `version`; removing or renaming a field / link / state / action / interface, or
-  changing a field's kind / source / target, a link's target / cardinality, or `storage`, is
+  changing a field's kind / source / target, a link's target / cardinality, or `storage`, or
+  dropping `place_follows` or pointing it at another link, is
   **breaking** and refused until a migration tool exists. Every accepted version is kept
   (`record_types`); a record remembers the version it was indexed under.
+- **Following the parent's 見える範囲** (`place_follows: <link name>`, `TypeDefinition.placeFollows`;
+  owner decision 2026-11-23: every record has one parent and its visibility comes from it — copied
+  when it is made, never wider than the parent; the one exception is narrowing to a list of people).
+  The key says which link is the parent: a **record link of this type with cardinality `one`** — to
+  a type (a plugin's 番組 for its 収録) or to an interface (`bundle`) — that is not an origin link,
+  on a type stored on the server (`server` / `either`; a file record's place is its file's). A
+  `many` link, a file link, an origin link, a name that is no link of the type, and `storage: file`
+  are parser errors with a sentence for the type's author. Absent = none (left out of the
+  definition, so stored definitions compare equal). Adding it is an ordinary change (a higher
+  `version`); dropping it or naming another link is breaking (it would let what is made next be
+  wider than its parent) — refused by the push checker for owners too, and a conflict for a
+  company's extension of a plugin type whose new version has it (`companyExtensionConflicts`).
+  **Step 2a: a declaration only — the engine does not read it yet.** Until step 2b moves `task`
+  onto it (its `bundle` link) and makes the engine apply it in place of the hard-coded
+  `BUNDLE_PLACED_TYPES` ("A task and its 案件・プロジェクト"), a type declaring it gets nothing from
+  it; no core or shipped plugin type declares it before then. **Older builds**: their parser
+  does not know the key, so a `.acb/types/` file with it is reported `invalid_type` by the index
+  (the last valid version stays in force) and passes their push checker uncompared (only
+  definitions that parse before and after are compared); a plugin package with it is refused on
+  their shelf; a stored definition carrying it is read with the key ignored, so a server rolled
+  back to such a build would not refuse a later push that drops it. Released apps read definitions
+  as JSON from `GET /records/types` and ignore the key. Test: `tests/unit/record-types.test.ts`
+  "place_follows", `tests/integration/records.test.ts` (the push checker) — mutation-checked.
 - Who: only owner/admin change `.acb/types/` (0.23-3), enforced by the push checker
   (`push-check.md`): non-admins get `[PROTECTED_CONFIG]` (own sub-list, existing client
   recovery); a breaking change is refused for owner/admin too (a reason line under the path).
@@ -1387,7 +1412,8 @@ Words on screen: 見える範囲 / 見られる人, never 置き場所.
   owner/admin nothing names. An owner-only task is never wider (its owner reads the まとまり to link it;
   the explicit branch is also covered by the general rule). A members-only task is within when all its
   members read the まとまり. Only `task` (`BUNDLE_PLACED_TYPES`); meetings and other types keep their own
-  rules.
+  rules. (A type's `place_follows` — "Type definitions" — will replace this list in step 2b; until
+  then the engine reads only the list.)
 - **Made for a まとまり** (create with its `bundle` link — the list's line, the card's 「頼む」, the AI's
   `records_create`): no place given → the まとまり's (`placeOfRow`: folder, private folder included,
   owner, list); `personal: true` stays owner-only (the owner wants personal tasks linkable to a
