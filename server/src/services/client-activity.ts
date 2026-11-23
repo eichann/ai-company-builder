@@ -151,6 +151,24 @@ export function createClientActivityService(deps: {
 
     activeMembersBuildCheck,
 
+    /**
+     * Does every member active within `activeWithinDays` (default 14) run a build `supports` accepts?
+     * The window and "only current members" of activeMembersBuildCheck, for a gate decided by a
+     * build's commit date (lib/client-version.ts) rather than by a minimum version. An active
+     * member whose build is unknown counts as not supported (fails closed: the gate stays shut).
+     */
+    activeMembersSupport(companyId: string, supports: (version: string | null) => boolean, options: BuildCheckOptions = {}): boolean {
+      const days = options.activeWithinDays ?? 14
+      const nowDate = options.now ?? new Date(clock.nowMs())
+      const activeSince = new Date(nowDate.getTime() - days * 24 * 60 * 60 * 1000).toISOString()
+      const activity = clientActivity.forCompany(companyId)
+      return memberships.listByCompany(companyId).every(m => {
+        const row = activity.get(m.user_id)
+        const last = row ? latest(row.last_seen_at, row.last_fetch_at, row.last_push_at) : null
+        return !last || last < activeSince || supports(row?.client_version ?? null)
+      })
+    },
+
     /** Boolean shorthand for activeMembersBuildCheck(...).ok. */
     areActiveMembersOnBuild(companyId: string, minimum: string, options: BuildCheckOptions = {}): boolean {
       return activeMembersBuildCheck(companyId, minimum, options).ok

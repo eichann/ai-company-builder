@@ -109,6 +109,13 @@ export interface RecordEngineDeps {
    * or a lease that ran out during the request's awaits writes nothing. Absent → not asked.
    */
   runFence?: (member: Member, run: { id: string; generation: number }) => Refusal | null
+  /**
+   * 全社 is a choice (records.md "全社 is a choice"): must a create now say where it goes? True once
+   * every active member's app names 全社 explicitly (`place: 'company'`, lib/client-version.ts
+   * `EXPLICIT_PLACE_CLIENT_COMMIT_DATE`); then nothing given is refused (400 `PLACE_REQUIRED`) instead
+   * of read as the whole company, as released apps mean it. Absent → false (the transition's start).
+   */
+  placeRequired?: (companyId: string) => boolean
 }
 
 /**

@@ -39,7 +39,7 @@
  * and this module installs, turns on / off, sets the read scope and saves mappings.
  */
 import type { PluginPackage } from '../../shared/core/plugins'
-import { MAPPING_SECTIONS } from '../../shared/core/plugin-mapping'
+import { MAPPING_SECTIONS, mappingPlaceProblems } from '../../shared/core/plugin-mapping'
 import { normalizeRepoPath } from '../../shared/core/paths'
 import { isYamlMap, parseYamlLite } from '../../shared/core/yaml-lite'
 import type { PluginDetail, PluginListItem, PluginProblem } from '../../shared/types/plugins'
@@ -538,6 +538,10 @@ export function createPluginService(deps: PluginServiceDeps) {
     }
     const parsed = parseForCompany(member.companyId, editing.use, text)
     if (!parsed.ok) return refuse('bad-request', '読み替え表を保存できません', { code: 'MAPPING_INVALID', errors: parsed.errors })
+    // 全社 is a choice (records.md): a new text names who sees each object's records; restoring a version
+    // that was in force before stays possible (it keeps meaning what it meant).
+    const unplaced = action === 'mapping' ? mappingPlaceProblems(parsed.mapping) : []
+    if (unplaced.length > 0) return refuse('bad-request', '読み替え表を保存できません', { code: 'MAPPING_INVALID', errors: unplaced })
     // A field that would write automatically needs the acknowledgement, recorded with who and when.
     const missing = unacknowledgedAuto(member.companyId, pluginId, editing.use, parsed.mapping)
     const unconfirmed = missing.filter(f => !acknowledge.includes(f.field))

@@ -605,7 +605,7 @@ export function createApprovalService(deps: ApprovalDeps) {
           const fixedNow = fixed.fix(member.companyId, 'approval', id, canonical)
           if (!fixedNow) throw new Error('fixed-content-exists')
           const made = writer.create(member.companyId, {
-            type: TYPE, id, title, folder: folder ?? null,
+            type: TYPE, id, title, folder: folder || null,
             fields: {
               requested_by: member.userId, assignee: approver, next_actor: approver, operation: opName,
               approver_rule: roleOfSpec(rule) !== null ? 'role' : rule, approver_role: roleOfSpec(rule),

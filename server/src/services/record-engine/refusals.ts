@@ -66,6 +66,21 @@ export const FOLDER_NOT_PLACEABLE = {
 } as const
 
 /**
+ * 全社 is a choice (records.md "全社 is a choice"): a create that says nowhere — no folder, not
+ * owner-only, no list, not `place: 'company'`, nothing inherited — once that is no longer read as the
+ * whole company. One sentence for a person, one for the AI (which can name the place itself); neither
+ * names a place or a title.
+ */
+export const PLACE_REQUIRED = {
+  error: '見せる範囲が決まっていません。部署を選ぶか、会社全体にするかを選んでください。',
+  code: 'PLACE_REQUIRED',
+} as const
+export const AI_PLACE_REQUIRED = {
+  error: 'どこに置くかが決まっていません。ほかの人に頼むときや、部署・会社全体のものにするときは、folder（部署のフォルダ）か place: "company"（会社全体）を指定してください。どちらか分からなければ、メンバーに聞いてください。',
+  code: 'PLACE_REQUIRED',
+} as const
+
+/**
  * A company without the shared folder (services/company-folder.ts): a file path names a place on
  * one member's PC, which nobody else can open or check — new file links, attached versions and
  * file materials are refused. Null when the company has its folder (or the engine was not told).

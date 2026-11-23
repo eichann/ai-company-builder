@@ -60,6 +60,23 @@ export function meetingMembers(records: RecordRepository, links: readonly Pick<R
   return { users: common, sets: [], readers: common }
 }
 
+/**
+ * The place a record linked to meetings placed by a folder takes when it is given none (records.md
+ * "全社 is a choice"): a meeting made before members-only meetings (11/4) sits in a department folder
+ * or company-wide, and what is made from it belongs where it is — not company-wide when the meeting is
+ * a department's. Only when every linked live meeting is placed by a folder and all by the same one
+ * (null = the whole company); a members-only or owner-only meeting, or two places → null (the caller's
+ * other rules decide: `meetingMembers` for lists, nothing inherited otherwise).
+ */
+export function meetingFolder(records: RecordRepository, links: readonly Pick<RecordLinkRow, 'targetId'>[]): { folder: string | null } | null {
+  const ids = [...new Set(links.map(l => l.targetId).filter((t): t is string => t !== null))]
+  if (ids.length === 0) return null
+  const meetings = records.byIds(ids).filter(r => r.type === MEETING_TYPE && r.removedAt === null)
+  if (meetings.length === 0 || meetings.some(r => r.members !== null || r.personalOwner !== null || r.path !== null)) return null
+  const folders = [...new Set(meetings.map(r => r.folder))]
+  return folders.length === 1 ? { folder: folders[0] } : null
+}
+
 /** `list` plus every member a person field of `def` names in `values` (in that order, no repeats). */
 export function withNamedPeople(list: readonly string[], def: TypeDefinition, values: Record<string, LedgerValue>): string[] {
   const named = Object.entries(values)

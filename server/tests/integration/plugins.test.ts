@@ -221,6 +221,10 @@ describe('connector plugins: install, turn on, mapping', () => {
     expect(notMember.body.errors.join()).toMatch(/pl-other-owner はこの会社のメンバーではありません/)
     const privateFolder = await services.plugins.saveMapping(admin, 'crm-sales', { text: MAPPING('pl-member', '営業部/評価/2026') })
     expect(privateFolder.body.errors.join()).toMatch(/非公開のフォルダ/)
+    // 全社 is a choice (records.md): a new mapping names who sees each object's records; left out → refused.
+    const unsaid = await services.plugins.saveMapping(admin, 'crm-sales', { text: MAPPING().replace('  visible_to_folder: 営業部\n', ''), acknowledgeAuto: ['confidence', 'next_step'] })
+    expect(unsaid).toMatchObject({ ok: false, body: { code: 'MAPPING_INVALID' } })
+    expect(unsaid.body.errors.join()).toMatch(/「deal」の visible_to_folder を書いてください/)
     // Fields that would write automatically need the recorded acknowledgement (no HubSpot workflow behind them).
     const unconfirmed = await services.plugins.saveMapping(admin, 'crm-sales', { text: MAPPING(), acknowledgeAuto: ['confidence'] })
     expect(unconfirmed).toMatchObject({ ok: false, body: { code: 'AUTO_NEEDS_ACKNOWLEDGEMENT', fields: ['next_step'] } })

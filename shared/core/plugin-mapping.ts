@@ -26,6 +26,12 @@ export interface MappingField {
 export interface MappingObject {
   /** Records are readable by members who can read this folder; null = everyone. Not a private folder (checked by the server). */
   visibleToFolder: string | null
+  /**
+   * Whether the mapping wrote `visible_to_folder` at all — a folder, or `null` for the whole company on
+   * purpose (records.md "全社 is a choice"). A mapping saved from now on must (`mappingPlaceProblems`);
+   * one saved before without it keeps meaning the whole company.
+   */
+  visibleToSaid: boolean
   import: { pipelines: string[]; updatedWithinDays: number | null; max: number }
   fields: Record<string, MappingField>
   /** Links of the record's type, filled from the outside system's associations. */
@@ -187,7 +193,7 @@ export function parsePluginMapping(text: string, pkg: { manifest: PluginManifest
       }
       links[lname] = { fromAssociation: l.from_association }
     }
-    objects[oname] = { visibleToFolder, import: importRule, fields, links }
+    objects[oname] = { visibleToFolder, visibleToSaid: Object.prototype.hasOwnProperty.call(o, 'visible_to_folder'), import: importRule, fields, links }
   }
 
   const closingStages: string[] = []
@@ -281,4 +287,16 @@ export function checkMappingAgainstProperties(
     }
   }
   return { errors, warnings }
+}
+
+/**
+ * 全社 is a choice (records.md "全社 is a choice"): a mapping saved from now on names who sees each
+ * object's records — `visible_to_folder: <folder>`, or `visible_to_folder: null` for the whole company,
+ * written out. Left out it would quietly mean the whole company. Asked when a new mapping is saved only:
+ * a mapping in force without it keeps working (and an older server reads `null` the same way).
+ */
+export function mappingPlaceProblems(mapping: Pick<PluginMapping, 'objects'>): string[] {
+  return Object.entries(mapping.objects)
+    .filter(([, o]) => !o.visibleToSaid)
+    .map(([name]) => `「${name}」の visible_to_folder を書いてください（見せる部署のフォルダ。会社のみんなに見せるときは null と書きます）`)
 }

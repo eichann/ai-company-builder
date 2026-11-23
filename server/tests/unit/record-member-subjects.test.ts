@@ -431,7 +431,7 @@ describe('what is made from a record with a group on its list', () => {
     source.forCompany('n').groups.replaceMembers(group('n'), ['u-bob', 'u-carol'], 'u-owner', TS)
     for (const id of [mt.record.id, task.id]) expect((await service.get(m('u-carol', 'n'), id)).ok, id).toBe(true)
     // The service writer's outputs of the meeting (the review task) inherit it the same way.
-    const review = writer.create('n', { type: 'task', title: '議事録を確認する', links: { meeting: [mt.record.id] }, fields: { assignee: 'u-alice' }, actor })
+    const review = writer.create('n', { type: 'task', title: '議事録を確認する', folder: null, links: { meeting: [mt.record.id] }, fields: { assignee: 'u-alice' }, actor })
     if (!review.ok) throw new Error(review.reason)
     expect((await service.get(m('u-carol', 'n'), review.record.id)).ok).toBe(true)
     // A place copied from it (a reply, a mail's やりとり: `placeOfRow`) keeps the group too.

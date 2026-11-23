@@ -45,6 +45,7 @@ import { createCompanyService } from './services/companies'
 import { parseCompanyCreationPolicy, type CompanyCreationPolicy } from './services/company-creation-policy'
 import { createInvitationService } from './services/invitations'
 import { createClientActivityService } from './services/client-activity'
+import { explicitPlaceClientCutoff, sendsExplicitPlace } from './lib/client-version'
 import { createPushRejectionRecorder } from './services/push-rejections'
 import { createCompanyFolders } from './services/company-folder'
 import { createDepartmentService } from './services/departments'
@@ -378,6 +379,8 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
   const recordChanged = createRecordSignal({ ...shared, memberships: repos.memberships, push })
   // Acceptance (引き受け, records.md "Acceptance"): the company's setting decides when a request waits.
   const taskAcceptance = createTaskAcceptance({ ...shared, settingsOf: companyId => taskSettings.settingsOf(companyId) })
+  // Which app builds members run (built here: the record engine's 全社 gate asks it; records.md "全社 is a choice").
+  const clientActivity = createClientActivityService({ ...repos, ...shared })
   const recordEngine = createRecordEngine({
     ...shared,
     files: gitRecordFileWriter(),
@@ -418,6 +421,9 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     featureOff: typeOff,
     // The execution run's fence at the write (records.md "Execution runs"; built below, called only after construction).
     runFence: (member, run) => aiRuns.writeFence(member, run),
+    // 全社 is a choice: nothing given is refused once every active member's app names 全社 explicitly (records.md);
+    // never while no released app does (the cutoff unset), whoever is active.
+    placeRequired: companyId => explicitPlaceClientCutoff() !== null && clientActivity.activeMembersSupport(companyId, v => sendsExplicitPlace(v)),
   })
 
   // The engine's entry for the core services of milestone 4 (minutes, approvals, outbound mail,
@@ -849,7 +855,7 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
       personRelays: service => (service === 'google' ? googleRelay.relay : null),
     }),
     ownBrokerKeys: createOwnBrokerKeyService({ ...repos, ...shared, brokerVault, keyBroker }),
-    clientActivity: createClientActivityService({ ...repos, ...shared }),
+    clientActivity,
     pushRejections: createPushRejectionRecorder(repos),
     companyFiles: companyFileViews(shared.companyData),
     /** git-http's push snapshot, private-folder lookups and orphan checks, for a member. */

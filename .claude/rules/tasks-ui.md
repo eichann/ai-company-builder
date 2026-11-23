@@ -72,11 +72,12 @@ meetings), `notifications.md` (「あなたの番」 in the inbox and the title 
   list's one line makes a task **only the member sees** (`personal: true`, assignee = the member;
   `records.md` "Owner-only records"). With another member as `assignee` it is **「頼む」** (task v9):
   never owner-only (they could not read it), shown to the readers of `folder` (the department on
-  screen; 全社 = none, the whole company), `when_done` (`notify` = 知らせるだけ by default, `check` =
+  screen; 全社 = `place: 'company'`, said on purpose: `records.md` "全社 is a choice"), `when_done` (`notify` = 知らせるだけ by default, `check` =
   確かめてから with the member as `reviewer`). `bundleId` links what it belongs to; 「頼む」 with one sends
   no folder (the server gives it the 案件's 見える範囲, `records.md` "A task and its 案件・プロジェクト").
   `meetingId` (the meeting card's 「やることを足す」, "Similar items" below) links `meeting` and is never
-  owner-only and sends no folder (the meeting's people see it). The answer carries the new record's
+  owner-only and sends no folder (the meeting's people see it; a meeting placed in a department folder
+  gives its folder). The answer carries the new record's
   `state` and the server's `similar`, checked by `similarOf` (a record id and a title, else dropped);
   `tasks:share` / `tasks:shareToBundle` carry `similar` the same way. Main
   sends only a member id, a `fileLinkPath`-checked folder and record ids.
@@ -836,7 +837,7 @@ meeting's or the 連絡's title, the 相手 from its `counterpart` link, 「こ�
 unfinished tasks; on at first), and 「似た〇〇があります」 with ［そちらにつなぐ］ — existing ones the
 member reads sharing a word of the name (`similarBundles`; the server's own check answers only inside
 an approval). 作る → `tasks:createBundle` (`POST /records/item { type: kind.type, title, fields: { owner:
-the member }, folder: the department's, links: { counterpart } }`; the server does not fill in the
+the member }, folder: the department's (全社: place: 'company', records.md "全社 is a choice"), links: { counterpart } }`; the server does not fill in the
 責任者), then the record is linked (a meeting through `minutes:linkBundle`) and each 宿題 gets the new one
 as its `bundle` at its version. Tests: `client/tests/bundle-create.test.ts`,
 `src/features/tasks/similarBundles.test.ts`, `tests/ui/record-card.spec.ts` (`?field=real`). Main sends only a path inside the
