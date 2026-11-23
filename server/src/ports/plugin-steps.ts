@@ -51,4 +51,13 @@ export interface PluginStepRepository {
   openRequests(pluginId: string, step: string): string[]
   /** A finished run answers the request made at or before `startedAt` (a later request stays open). */
   answerRequest(recordId: string, pluginId: string, step: string, startedAt: string, at: string): void
+  /** The steps (of any plugin) whose company Skill setting names one of `skills` now. */
+  stepsWithSkill(skills: readonly string[]): Array<{ pluginId: string; step: string }>
+  /**
+   * Close every open request whose work's pin of that step is a company Skill named in `skills` (pinned by an earlier
+   * setting: the setting itself naming one refuses the approval first, `stepsWithSkill`), whenever it was asked — no time
+   * condition, so a request a later meeting opened again after its run began is closed too — marking `jobId` as who closed
+   * it (4b-4 §3 ③). The number closed.
+   */
+  closeRequestsForSkills(skills: readonly string[], jobId: string, at: string): number
 }

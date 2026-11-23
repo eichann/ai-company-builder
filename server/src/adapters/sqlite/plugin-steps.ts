@@ -104,5 +104,19 @@ export function sqlitePluginStepRepository(conn: Database.Database, companyId: s
         WHERE company_id = ? AND record_id = ? AND plugin_id = ? AND step = ? AND done_at IS NULL AND requested_at <= ?`)
         .run(at, companyId, recordId, pluginId, step, startedAt)
     },
+    stepsWithSkill(skills) {
+      const rows = conn.prepare(`SELECT plugin_id, step FROM plugin_step_skills
+        WHERE company_id = ? AND skill IN (SELECT value FROM json_each(?)) ORDER BY plugin_id, step`)
+        .all(companyId, JSON.stringify(skills)) as Array<{ plugin_id: string; step: string }>
+      return rows.map(r => ({ pluginId: r.plugin_id, step: r.step }))
+    },
+    closeRequestsForSkills(skills, jobId, at) {
+      return conn.prepare(`UPDATE plugin_step_requests SET done_at = ?, done_by_job = ?
+        WHERE company_id = ? AND done_at IS NULL
+          AND EXISTS (SELECT 1 FROM plugin_step_pins p WHERE p.company_id = ? AND p.record_id = plugin_step_requests.record_id
+            AND p.plugin_id = plugin_step_requests.plugin_id AND p.step = plugin_step_requests.step AND p.source = 'company_skill'
+            AND p.skill IN (SELECT value FROM json_each(?)))`)
+        .run(at, jobId, companyId, companyId, JSON.stringify(skills)).changes
+    },
   }
 }

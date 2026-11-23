@@ -644,7 +644,9 @@ Additive over version 10 (two states, one field, three actions, a wider `dismiss
   proposed). The meeting duplicates list leaves `dismissed` out like `cancelled`.
 - Field `task_kind` (choice `minutes_review`): 「議事録を確認する」, made by the server
   (minutes.md "The review task") through the service writer, which may now also create `task`
-  (`SERVICE_MADE_TYPES`).
+  (`SERVICE_MADE_TYPES`). Nobody else writes it (4b-4 PR1: a set watch tells such a やること by it, `jobs.md` "The set watch
+  (schema 5)"): a person's or an AI's create naming `task_kind` is 400 `BAD_VALUE` (`create.ts`, `TASK_KIND_FIELD`), and no
+  action takes it as an argument.
 - Test: `server/tests/unit/meeting-proposals.test.ts` (proposal or task by the setting, a
   person's never; nobody's turn and nobody told; adopt / dismiss by people only, the assignee told;
   a second reading reuses the put-away one; the review task once, linked as origin, open until

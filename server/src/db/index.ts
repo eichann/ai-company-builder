@@ -35,7 +35,7 @@ import { inboxSchema, migrateInboxArchiveColumns, migrateInboxMessageSourceRef }
 import { migrateRecordLedgerVia } from './schema/plugin-bridge'
 // lane B ▲
 // lane C ▼
-import { pluginStepSchema } from './schema/plugin-steps'
+import { migratePluginStepRequestCloser, pluginStepSchema } from './schema/plugin-steps'
 import { pluginRoleSchema } from './schema/plugin-roles'
 import { browserPlanSchema, migrateBrowserExecutionMonotonic, migrateBrowserPlanSummary } from './schema/browser-plans'
 // lane C ▲
@@ -208,6 +208,8 @@ export function initDatabase(conn: Database.Database = sqlite) {
   // Groups and departments on members-only lists (records.md "Members-only records"); after the
   // groups and departments tables, whose deletion takes them off the lists.
   migrateRecordViewerSets(conn)
+  // A step's request closed by a scheduled job's approval (jobs.md "The set watch (schema 5)").
+  migratePluginStepRequestCloser(conn)
   // lane C ▲
   // Each member's own switches (自分の設定); after the connector migrations (it reads their grants).
   migrateMemberWorkSwitches(conn)

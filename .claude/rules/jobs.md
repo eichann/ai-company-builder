@@ -145,6 +145,10 @@ versions the shape (a later shape is `schema: 2`; stored versions are never re-r
   `source_record { doneMark: none | file_linked }` — that check is schema 3's alone (`check.SOURCE_RECORD_EVENTS_ONLY`), a
   schema-3 run is a procedure (`run.EVENT_PC_ONLY`) checked by it (`check.EVENT_NEEDS_SOURCE_RECORD`); schema 2 stays the
   server's operation (`trigger.EVENT_SERVER_ONLY`).
+- Schema 5 (4b-4 PR1, "The set watch (schema 5)" below): the trigger `record_set` (a combination of fixed words, only an
+  opened one), a department Skill (`run.procedure.source: department_skill`), the Skills it reads (`grant.reads.skills`),
+  the check `matched_record` and `decision` (the Skill's reasons) — each schema 5's alone; its consent adds the trigger, the
+  check and the reasons. Schemas 1–4 are byte for byte what they were (definition and consent).
 
 ## API (`routes/jobs.ts` → `services/jobs.ts`, contract `shared/types/jobs.ts`)
 
@@ -1004,10 +1008,11 @@ Event-triggered jobs (4a) store `schema: 2`. Production may run 4-0 again after 
   since 4b-2 (its words for schema 3: `jobCheckText`'s `source_record`; shipped in the same build that runs such jobs and
   fails closed) and `[1, 2, 3, 4]` since member proposals' PR C (schema 4 is schema 1's content: the same words, its 受け取る
   as any: "Member proposals" "The app (PR C)"). The core reads `schema: 3` since 4b-1 (`JOB_SCHEMAS` `[1, 2, 3]`) and `schema: 4` since member proposals (`[1, 2, 3, 4]`; the
-  screens announce 4 since their PRs B / C). The server's tests of "a shape this build does not know" stand in `schema: 5`
-  since then (`schema: 4` before) (`job-schemas.test.ts`, `job-rollback-floor.test.ts` reads the frozen 4b-1 fixture's version one shape later;
+  screens announce 4 since their PRs B / C) and `schema: 5` since 4b-4 PR1 (`[1, 2, 3, 4, 5]`, "The set watch (schema 5)";
+  no screen announces it yet). The server's tests of "a shape this build does not know" stand in `schema: 6`
+  since then (`schema: 5` before 4b-4 PR1, `schema: 4` before that) (`job-schemas.test.ts`, `job-rollback-floor.test.ts` reads the frozen 4b-1 fixture's version one shape later;
   the floor build runs it as written). Tests
-  `admin/tests/job-screen-schemas.test.ts` (the core stood in by one reading `schema: 5` since PR B — `schema: 4` since 4b-3,
+  `admin/tests/job-screen-schemas.test.ts` (the core stood in by one reading `schema: 6` since 4b-4 PR1 — `schema: 5` since PR B, `schema: 4` since 4b-3,
   `schema: 3` before; every announced schema round-trips through the form: for 3 the smallest grant and one with every choice,
   both done marks, a shelf Skill, a kept `from`; for 4 a proposal as `proposalDefinition` builds it, the smallest and one with
   every choice — reads listed before the check's place, the server's deliverable folder, a shelf Skill) and `client/tests/job-screen-schemas.test.ts` (every announced schema has its words). An app
@@ -1444,6 +1449,80 @@ of `parseMyJobOccurrence` and the key still strict — each fails a test (16 mut
 the deadline shorter than the interval and the window holding two renews, and no second timed renew while one is out —
 each fails a test; the confirmation moving only forward is defence (the only overlap left, the claim's last check beside a
 timed renew of the same hold, moves it by milliseconds).
+
+## The set watch (schema 5, 4b-4 PR1; owner memo 「4b-4 商談から提案書」 第6版 §2 / §3 / §4 / 付録 B)
+
+「これから来る、条件に合うもの全部」 — a second way to watch, beside the one watched record of schemas 2 / 3 (which stay exactly
+as they are). **PR1 is the definition, the consent and the approval only: nothing runs.** The clock never makes an occurrence
+of a schema-5 job (`makeOccurrences` takes time triggers, the event scan record triggers), no app names its check, and no
+screen announces 5 yet (`ADMIN_JOB_SCHEMAS` / `APP_JOB_SCHEMAS` stay `[1, 2, 3, 4]`: such a version is answered without its
+definition, `needsUpdate`, and a create, approval or acceptance from them is `JOB_NEEDS_NEWER_SCREEN`). PR2 finds the records
+and makes occurrences, PR3 the report and its やること, PR4 the plugin steps' side, PR5 / PR6 the app, PR7 the admin console.
+
+- **The trigger is words, not a condition language** (owner decision 2026-11-23, §2-1): `{ kind: 'record_set', recordType,
+  taskKind, origin, causes, causeRule, assignee, event, unit, guards }`, each key from its own list (`JOB_SET_WATCH_WORDS`,
+  else `trigger.<key>.BAD`; `causes` never empty), and **the whole combination exactly one of `JOB_SET_WATCH_OPENED`**
+  (`shared/core/jobs.ts`, `jobSetWatchOpened`: every key, every list in the order written there), else
+  `trigger.NOT_OPENED`. The one line today is 4b-4's: a やること (`task`) of kind 「議事録を確認する」 (`minutes_review`) that came
+  from a meeting (`meeting`: its one `links.meeting` and the id `meetingOutputId` gives — never a title), counted causes
+  `human` under `ledger_v1` (exactly `ledgerRowIsEvent`: a person or their own consultation AI; never a migration, `acb:`
+  actor, run, outside writer or business plugin screen), `responsible_from_creation` (its assignee was the responsible
+  person from its first version), `first_done` (the first `done` of its whole ledger), `unit: record` (one occurrence per
+  record, over versions and jobs), and the guards `after_acceptance`, `attendee_responsible`, `outside_attendee`,
+  `people_only_meeting`, `plugin_step_exclusive` (§2-3 / §2-5 / §3: what PR2 enforces; written into the definition so the
+  responsible person consents to them and a changed list is another combination). Opening another combination is one more
+  line with its own guards and tests; **a line taken out stops its jobs** (the parser refuses them, and approval,
+  acceptance and resume ask `jobSetWatchOpened` again on the stored version: `JOB_SET_WATCH_NOT_OPENED`). Words:
+  `jobSetTriggerText` (a combination not opened is never described as the opened one).
+- **What runs** (§4, 案A): a department Skill `run.procedure = { source: 'department_skill', place, skill, fingerprint }`
+  (`place` one department folder, `isValidFolderName`, NFC; `skill` the ASCII rule) and the Skills it reads
+  `grant.reads.skills = [{ place, skill, fingerprint }]` (1–4, each once; absent elsewhere, so every other grant is byte for
+  byte what it was), both at their git trees (`<place>/.claude/skills/<skill>`, `lib/skill-trees.ts` `departmentSkill`); the
+  check `matched_record` (kept out of `JOB_PC_CHECK_KINDS` / `JOB_EVENT_CHECK_KINDS`, so no released app claims one);
+  `creates: ['task']` (`grant.creates.SET_WATCH_NEEDS_TASK`), no mail draft (`grant.outbound.SET_WATCH_NONE`), no place
+  outside (`grant.deliverTo.SET_WATCH_NONE`), and the minutes route alone (`grant.routes.SET_WATCH_MINUTES_ONLY`). Each piece
+  is schema 5's alone (`run.procedure.DEPARTMENT_SKILL_SET_WATCH_ONLY`, `grant.reads.skills.SET_WATCH_ONLY`,
+  `check.MATCHED_RECORD_SET_WATCH_ONLY`, `decision` an unknown key elsewhere) and schema 5 takes only them
+  (`run.SET_WATCH_DEPARTMENT_SKILL`, `check.SET_WATCH_NEEDS_MATCHED_RECORD`). Both Skills' paths are places the responsible
+  person must read (`jobDefinitionPaths`: rights, hiding, `OWNER_RIGHTS_CHANGED` as for any place). What judges behind the
+  app's one gate (Claude now, a local model later, §5-0) is in neither the definition nor the consent.
+- **The server pins, never the caller** (`services/jobs.ts` `pinDepartmentSkills`): when a version is made, the trees read now
+  replace every fingerprint sent, and `decision` is the run's Skill's `decision.json` (`parseJobDecisionFile`: `{ reasons:
+  [{ code, label }] }`, 1–20, codes `^[a-z][a-z0-9_]{0,39}$` unique — ACB's own outcomes such as `GATE_UNAVAILABLE` are upper
+  case —, labels one NFC line ≤ 40, ≤ 16 KB) — the caller's is replaced. A Skill that is not there → 409 `JOB_SKILL_MISSING`; no
+  valid `decision.json` → 409 `JOB_SKILL_DECISION_MISSING`; a company without the shared folder → `JOB_SKILL_NOT_HERE`.
+  Approval, acceptance and a resume check every pinned tree is still the current one (`skillPinned` → `JOB_SKILL_CHANGED`:
+  a changed Skill is a new version, a new consent and a new 受け取る, O5; `decision.json` is inside the tree).
+- **The consent** (§2-6, T8): `jobConsentCanonical` of schema 5 is who, `run`, `placement`, `grant` (with the Skills read),
+  the whole `trigger` (words, causes and their rule, unit, guards), the `check` and `decision` — any change asks for a new
+  受け取る; the name does not. Schemas 1–4 consent byte for byte what they did (sha256 pinned in the test).
+- **Approval, acceptance and resume** (`setWatchRefusal`, inside each write's transaction, after the rights): the combination
+  still opened (`JOB_SET_WATCH_NOT_OPENED`); **one per responsible person** — no other `active` job whose approved version is
+  schema 5 names the same person (`JobRepository.activeApprovedOf`; 409 `JOB_SET_WATCH_ONE_PER_PERSON`: one meeting never
+  runs twice and the day's limit is never doubled, §2-4; a paused one does not count, so the second is approved once the
+  first is paused, and the first is then not resumed or accepted); **no business plugin step set to run one of its Skills**
+  (`plugin_step_skills` naming the run's or a read Skill's name, wherever its folder is — told by the name, on the safe side;
+  409 `JOB_SET_WATCH_STEP_SKILL`, §3 ④: removing the setting is enough, so nothing is stuck). **The approval closes the
+  steps' open requests** pinned to one of those Skills (`plugin_step_pins` `company_skill`; `closeRequestsForSkills`) in its
+  own transaction, whenever they were asked — not `answerRequest`'s time condition, so a request a later meeting opened again
+  is closed too — marking `done_by_job` (additive, `migratePluginStepRequestCloser`; 「定期の仕事が受け持つため閉じました」);
+  it waits for no request or run (§3 ③: a run already going ends within its deadline, and its meeting is before the
+  boundary PR2 enforces). Refused for any other reason → nothing closed (one transaction). PR4 adds the steps' side
+  (choosing, enabling, asking and taking the Skill refused while such a job is approved).
+- **Telling the record by its kind** (§2-2): `task_kind` is written by the minutes service only — a person's or an AI's
+  create naming it is 400 `BAD_VALUE` (`record-engine/create.ts`), and no action takes it as an argument.
+- **Compatibility** (T11): an older server (the floor, 4b-0.5, and every build before this) does not know schema 5 and
+  freezes such a version ("Shapes this build does not know"); the server's tests of an unknown shape stand in `schema: 6` since
+  this PR (`job-schemas.test.ts`, `job-rollback-floor.test.ts`, `admin/tests/job-screen-schemas.test.ts`,
+  `client/tests/job-screen-schemas.test.ts`). An older app parses a turn in schema 1 / 3 frames, which refuse a department
+  Skill (none is listed anyway). The admin form has none (`formFromDefinition` throws on one; `editableDefinition` never
+  hands it one).
+- Tests: `server/tests/unit/job-set-watch-definition.test.ts` (words key by key, a combination not opened, a line taken
+  out, each piece schema 5's alone and schema 5 only those, the Skill pins, `decision.json`, the consent and schemas 1–4's
+  sha256, the places, the words) and `server/tests/integration/job-set-watch.test.ts` (on a real bare repository: the pins and
+  reasons replaced, missing Skill / reasons / folder, a combination not opened at save, approval, acceptance and resume, one
+  per responsible person, the step setting and the requests closed without a time condition, a changed Skill, older screens,
+  no occurrence made, `task_kind` refused). Mutation check: see the PR.
 
 ## Member proposals (「AIへの相談」から定期の仕事, PR A: the server; owner memo 2026-11-22 第1〜5版, decisions Q1–Q4)
 

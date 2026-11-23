@@ -141,6 +141,14 @@ export function sqliteJobRepository(conn: Database.Database, companyId: string):
         ORDER BY j.created_at DESC, j.id
       `).all(companyId, userId, companyId, userId) as JobDbRow[]).map(jobOf)
     },
+    activeApprovedOf(schema, userId) {
+      return (conn.prepare(`
+        SELECT j.id FROM ai_jobs j WHERE j.company_id = ? AND j.state = 'active' AND EXISTS (
+          SELECT 1 FROM ai_job_versions v WHERE v.company_id = ? AND v.job_id = j.id AND v.version = j.approved_version
+            AND v.schema = ? AND v.acting_user_id = ?)
+        ORDER BY j.id
+      `).all(companyId, companyId, schema, userId) as Array<{ id: string }>).map(r => r.id)
+    },
     find(jobId) {
       const r = conn.prepare(`SELECT ${JOB_COLUMNS} FROM ai_jobs WHERE company_id = ? AND id = ?`).get(companyId, jobId) as JobDbRow | undefined
       return r ? jobOf(r) : null

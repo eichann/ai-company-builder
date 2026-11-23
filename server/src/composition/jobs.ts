@@ -16,7 +16,7 @@ import { DEFAULT_COMPANY_TIME_ZONE } from '../../shared/core/calendar'
 import { latestJobSlot, nextJobSlot } from '../../shared/core/job-schedule'
 import { isTimeTrigger } from '../../shared/core/jobs'
 import { sha256Bytes } from '../adapters/system'
-import { companySkillTree } from '../lib/skill-trees'
+import { companySkillTree, departmentSkill } from '../lib/skill-trees'
 import type { CompanyRepository } from '../ports/companies'
 import type { MembershipRepository } from '../ports/memberships'
 import type { AgentStopService } from '../services/agent-stops'
@@ -71,6 +71,8 @@ export function wireJobs<R extends { memberships: MembershipRepository }>(deps: 
     ...repos, ...shared,
     skillTree: (companyId, name) => (companyFolders.has(companyId) ? companySkillTree(companyId, name) : Promise.resolve(null)),
     hasCompanyFolder: companyFolders.has,
+    // A set watch pins department Skills (jobs.md "The set watch (schema 5)"): only in a company with the shared folder.
+    departmentSkill: (companyId, place, name) => (companyFolders.has(companyId) ? departmentSkill(companyId, place, name) : Promise.resolve(null)),
     // A company without the shared folder pins a Skill of the shelf (jobs.md "A Skill from the shelf").
     shelfSkill: (who, itemId, version) => skillShelf.jobSkill(who, itemId, version),
     noticesChanged: (companyId, userIds) => push.notify(companyId, userIds, { kind: 'notifications', version: shared.ids.newToken().slice(0, 32) }),
