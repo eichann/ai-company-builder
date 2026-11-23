@@ -137,7 +137,8 @@ export type ServicePlace = { folder: string | null } | { personalOwner: string }
 export function placeOfRow(row: Pick<RecordAccessRow, 'folder' | 'personalOwner' | 'members' | 'memberSets'>): ServicePlace {
   if (row.personalOwner !== null) return { personalOwner: row.personalOwner }
   if (row.members !== null) return { members: row.members, ...(row.memberSets && row.memberSets.length > 0 ? { memberSets: row.memberSets } : {}) }
-  return { folder: row.folder }
+  // A row stored with `''` (the company root, before the writer refused it) is the whole company: copied as `null`.
+  return { folder: row.folder || null }
 }
 
 /**

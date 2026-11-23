@@ -11,7 +11,8 @@
  *   (`defaultPlace: 'company'`) → the whole company; a released app's 全社 tab (no default at all) → the
  *   whole company only until every active member's app says 全社 (`placeRequired`), then refused;
  * - nothing given and nobody else named (any type the member may keep for themself) → owner-only, and the
- *   answer says so; a plugin's type → refused (`PLACE_REQUIRED`), never company-wide quietly;
+ *   answer says so; otherwise (a plugin's type, someone else) as released apps send it until the gate,
+ *   then refused (`PLACE_REQUIRED`, naming nothing);
  * - `place: 'company'` said by the AI → the whole company; never with another place;
  * - a folder the AI names wins over the default; the default is checked like any folder (a private
  *   one is refused, never placed company-wide instead);
@@ -203,35 +204,38 @@ describe('全社 is a choice: the AI giving no place (records.md "全社 is a ch
     const made = ok(engine.createByAi(m('u-alice'), AI, { type: 'task', title: '全員へ', place: 'company', defaultFolder: 'コンテンツ' }))
     expect(made.placed).toEqual({ personal: false, folder: null })
     expect(ids('u-mallory')).toContain(made.record.id)
+    // As the app sends it (with personal: false, for older servers): the same.
+    expect(ok(engine.createByAi(m('u-alice'), AI, { type: 'task', title: '全員へ2', place: 'company', personal: false })).placed).toEqual({ personal: false, folder: null })
     expect(engine.createByAi(m('u-alice'), AI, { type: 'task', title: 'x', place: 'company', folder: 'コンテンツ' })).toMatchObject({ ok: false, body: { code: 'PLACE_CONFLICT' } })
     expect(engine.createByAi(m('u-alice'), AI, { type: 'task', title: 'x', place: 'company', personal: true })).toMatchObject({ ok: false, body: { code: 'PLACE_CONFLICT' } })
     expect(engine.createByAi(m('u-alice'), AI, { type: 'task', title: 'x', place: 'everyone' })).toMatchObject({ ok: false, body: { code: 'BAD_PLACE' } })
   })
 
-  it('any other kind of record about the member alone → owner-only; naming someone else → refused', () => {
+  it('any other kind of record about the member alone → owner-only; naming someone else → as released apps until the gate, then refused', () => {
     const mine = ok(engine.createByAi(m('u-alice'), AI, { type: 'memo', title: '覚え書き', defaultFolder: 'コンテンツ' }))
     expect(mine.placed).toEqual({ personal: true, folder: null })
     expect(ok(service.query(m('u-owner'), { type: 'memo' })).records).toEqual([])
-    const other = engine.createByAi(m('u-alice'), AI, { type: 'memo', title: 'x', fields: { writer: 'u-bob' }, defaultFolder: 'コンテンツ' })
-    expect(other).toMatchObject({ ok: false, body: { code: 'PLACE_REQUIRED' } })
-    expect(ok(service.query(m('u-bob'), { type: 'memo' })).records).toEqual([])
+    const other = { type: 'memo', title: 'x', fields: { writer: 'u-bob' }, defaultFolder: 'コンテンツ' }
+    expect(ok(engine.createByAi(m('u-alice'), AI, other)).placed).toEqual({ personal: false, folder: null })
+    expect(withDeps({ placeRequired: () => true }).createByAi(m('u-alice'), AI, { ...other, title: 'y' })).toMatchObject({ ok: false, body: { code: 'PLACE_REQUIRED' } })
+    expect(ok(service.query(m('u-bob'), { type: 'memo' })).records.map(r => r.title)).toEqual(['x'])
   })
 
-  it('a business plugin’s type (never owner-only) with no place → refused when the app said its screen, never company-wide', () => {
-    for (const hint of [{ defaultFolder: 'コンテンツ' }, { defaultPlace: 'company' }]) {
-      expect(engine.createByAi(m('u-alice'), AI, { type: 'deal', title: 'x', ...hint })).toMatchObject({ ok: false, body: { code: 'PLACE_REQUIRED' } })
+  it('a business plugin’s type (never owner-only) with no place: as released apps send it until the gate, then refused', () => {
+    const gated = withDeps({ placeRequired: () => true })
+    // Released apps send `defaultFolder` on a department tab and nothing on 全社, and their tool cannot say `place`.
+    for (const hint of [{ defaultFolder: 'コンテンツ' }, {}, { defaultPlace: 'company' }]) {
+      expect(ok(engine.createByAi(m('u-alice'), AI, { type: 'deal', title: 'x', ...hint })).placed).toEqual({ personal: false, folder: null })
+      expect(gated.createByAi(m('u-alice'), AI, { type: 'deal', title: 'x', ...hint })).toMatchObject({ ok: false, body: { code: 'PLACE_REQUIRED' } })
     }
-    expect(ok(service.query(m('u-alice'), { type: 'deal' })).records).toEqual([])
-    // Said: a folder or 全社 on purpose.
-    expect(ok(engine.createByAi(m('u-alice'), AI, { type: 'deal', title: 'x', folder: 'コンテンツ' })).placed).toEqual({ personal: false, folder: 'コンテンツ' })
-    expect(ok(engine.createByAi(m('u-alice'), AI, { type: 'deal', title: 'y', place: 'company' })).placed).toEqual({ personal: false, folder: null })
-    // A released app that says nothing of its screen: as before until the gate, then refused.
-    expect(ok(engine.createByAi(m('u-alice'), AI, { type: 'deal', title: 'z' })).placed).toEqual({ personal: false, folder: null })
-    expect(withDeps({ placeRequired: () => true }).createByAi(m('u-alice'), AI, { type: 'deal', title: 'z' })).toMatchObject({ ok: false, body: { code: 'PLACE_REQUIRED' } })
+    // Said: a folder or 全社 on purpose, also after the gate.
+    expect(ok(gated.createByAi(m('u-alice'), AI, { type: 'deal', title: 'x', folder: 'コンテンツ' })).placed).toEqual({ personal: false, folder: 'コンテンツ' })
+    expect(ok(gated.createByAi(m('u-alice'), AI, { type: 'deal', title: 'y', place: 'company' })).placed).toEqual({ personal: false, folder: null })
   })
 
   it('the refusal names no place or title', () => {
-    const r = engine.createByAi(m('u-alice'), AI, { type: 'deal', title: '秘密の案件', defaultFolder: 'コンテンツ' })
+    const r = withDeps({ placeRequired: () => true }).createByAi(m('u-alice'), AI, { type: 'deal', title: '秘密の案件', defaultFolder: 'コンテンツ' })
+    expect(r).toMatchObject({ ok: false, body: { code: 'PLACE_REQUIRED' } })
     const text = JSON.stringify(r)
     expect(text).not.toContain('秘密の案件')
     expect(text).not.toContain('コンテンツ')

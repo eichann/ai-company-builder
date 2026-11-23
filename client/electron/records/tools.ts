@@ -548,9 +548,12 @@ export function actionToolSpecs(types: TypeDefinition[], place: { department?: s
         PLACEMENT_WORDS_EN,
       // The consultation's department goes along as the server's default place (records.md "Where the AI puts a request");
       // on the 全社 tab, 全社 said on purpose (records.md "全社 is a choice"); an unattended run says neither.
+      // 全社 said by the AI goes without the screen's hints and as 「部署のやること」 (`personal: false`), so a server from
+      // before `place` (which ignores it) places a request in the whole company too, never in the screen's department.
       request: input => ({
         method: 'POST', path: '/item',
-        body: place.department ? { ...input, defaultFolder: place.department } : place.companyScreen ? { ...input, defaultPlace: 'company' } : input,
+        body: input.place === 'company' ? { ...input, personal: input.personal ?? false }
+          : place.department ? { ...input, defaultFolder: place.department } : place.companyScreen ? { ...input, defaultPlace: 'company' } : input,
       }),
       format: createdAnswer,
     })

@@ -500,6 +500,9 @@ export function createPluginService(deps: PluginServiceDeps) {
       if (source === null) return { ok: false, problem: 'mapping-invalid', errors: ['読み替え表がまだありません'] }
       const parsed = parseForCompany(companyId, c.use, source)
       if (!parsed.ok) return { ok: false, problem: 'mapping-invalid', errors: parsed.errors }
+      // A text being edited is checked as saving it would be (全社 is a choice: records.md); the mapping in force is not.
+      const unplaced = text !== undefined && text !== null ? mappingPlaceProblems(parsed.mapping) : []
+      if (unplaced.length > 0) return { ok: false, problem: 'mapping-invalid', errors: unplaced }
       return { ok: true, plugin: activeOf(install, c.install, c.use, parsed.mapping) }
     },
 

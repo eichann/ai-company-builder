@@ -507,6 +507,9 @@ test('records_create: the consultation\'s department goes along as the server\'s
   const run = await createRecordTools((await api3.openTurn('co', { conversationId: 'c', agent: 'claude-code', scope: 'act' }))!, undefined, { department: null })
   await run!.execute('records_create', { type: 'task', title: 'x' })
   assert.deepEqual(JSON.parse(seen3.find(s => s.url.endsWith('/api/records-ai/item'))!.body!), { type: 'task', title: 'x' })
+  // 全社 said by the AI goes without the screen's department and as personal: false (an older server then places it company-wide too).
+  await tools!.execute('records_create', { type: 'task', title: '全員へ', place: 'company' })
+  assert.deepEqual(JSON.parse(seen.filter(s => s.url.endsWith('/api/records-ai/item')).at(-1)!.body!), { type: 'task', title: '全員へ', place: 'company', personal: false })
   // The AI may say 全社 itself, only as that one word; the description says when.
   assert.equal(create.schema.safeParse({ type: 'task', title: 'x', place: 'company' }).success, true)
   assert.equal(create.schema.safeParse({ type: 'task', title: 'x', place: 'everyone' }).success, false)

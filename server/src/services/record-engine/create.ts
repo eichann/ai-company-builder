@@ -163,17 +163,14 @@ export function creating(ctx: EngineContext) {
     createByAi(member: Member, actor: ActorInput, body: unknown) {
       const outsideStep = builtInStepRefusal(member, actor, body)
       if (outsideStep) return outsideStep
-      // Whether the app said which screen the consultation is on: a released app's 全社 tab (and a run) says nothing.
-      const b = typeof body === 'object' && body !== null ? body as Record<string, unknown> : {}
-      const screenSaid = (typeof b.defaultFolder === 'string' && b.defaultFolder.trim() !== '') || b.defaultPlace === 'company'
-      return api.create(member, actor, messageDue(member, aiPlacement(member, body)), { screenSaid })
+      return api.create(member, actor, messageDue(member, aiPlacement(member, body)))
     },
 
     /**
      * A record that lives on the server (types with storage `server` or
      * `either`; a company's own file-backed type is created by writing its file).
      */
-    create(member: Member, actor: ActorInput, body: unknown, ai: { screenSaid: boolean } = { screenSaid: false }): Outcome<{ record: RecordSummary; entry: LedgerEntry | null; reused?: true; note?: string; similar?: { id: string; title: string }; placed?: { personal: boolean; folder: string | null; membersOnly?: true } }> {
+    create(member: Member, actor: ActorInput, body: unknown): Outcome<{ record: RecordSummary; entry: LedgerEntry | null; reused?: true; note?: string; similar?: { id: string; title: string }; placed?: { personal: boolean; folder: string | null; membersOnly?: true } }> {
       const opened = open(member)
       if (!opened) return refuse('not-found', RECORDS_DISABLED.error, { code: RECORDS_DISABLED.code })
       const { records, reader } = opened
@@ -352,20 +349,21 @@ export function creating(ctx: EngineContext) {
       // 全社 is a choice (records.md "全社 is a choice", owner decision 2026-11-23): nothing given is no
       // longer quietly the whole company.
       if (folder === null && personalOwner === null && members === null && !companySaid && !inheritedPlace) {
-        // Made from a meeting placed by a folder (made before members-only meetings): where the meeting is.
+        // Made from a meeting (made before members-only meetings): where the meeting is — its folder as stored (the
+        // member reads the meeting, so never wider than it; not checked by `placeFolder`, which is for a folder given),
+        // the whole company, or its owner's alone (the member, who reads it; never a plugin's type).
         const fromMeeting = meetingFolder(records, links)
-        if (fromMeeting) folder = fromMeeting.folder
+        if (fromMeeting && 'folder' in fromMeeting) folder = fromMeeting.folder
+        else if (fromMeeting && 'personalOwner' in fromMeeting && fromMeeting.personalOwner === member.userId && !isPluginType) personalOwner = member.userId
         else if (actor.kind === 'ai' && !isPluginType && b.personal !== false
           && withNamedPeople([member.userId], def, fields).length === 1) {
           // The AI said nowhere and nobody else is named: the member's own (本人だけ); the answer's `placed` says so.
           personalOwner = member.userId
         } else {
-          // A released app's 全社 (a person's create, the AI on its 全社 tab) sends nothing: still the whole company,
-          // until every active member's app says 全社 explicitly (`placeRequired`). Then, and from the AI of an app
-          // that said its screen, refused.
-          const released = (actor.kind === 'human' || !ai.screenSaid) && !deps.placeRequired?.(member.companyId)
+          // Released apps send nothing for 全社 (a person's create, the AI's tool, which cannot say `place`): still the
+          // whole company, until every active member's app says 全社 explicitly (`placeRequired`); then refused.
           const r = actor.kind === 'ai' ? AI_PLACE_REQUIRED : PLACE_REQUIRED
-          if (!released) return bad(r.error, r.code)
+          if (deps.placeRequired?.(member.companyId)) return bad(r.error, r.code)
         }
       }
       const place = { id: '', type: def.name, scopeId: null, path: null, folder, personalOwner, members, memberSets }

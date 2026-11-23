@@ -10,7 +10,8 @@
  *   nothing written once `placeRequired` says so;
  * - a record made from a meeting placed in a department folder (made before members-only meetings) with no
  *   place of its own takes the meeting's folder — not the whole company — for a person and the AI; one
- *   from a company-wide meeting stays company-wide (also after the gate: inherited, not "nothing given");
+ *   from a company-wide meeting stays company-wide, one from an owner-only meeting its owner's (also after the gate:
+ *   inherited, not "nothing given");
  * - the service writer refuses a create that names no place (a caller typed loosely) and `folder: ''`
  *   (it would read as the company root); `folder: null` is the whole company, said on purpose.
  */
@@ -21,7 +22,7 @@ import { sqliteCompanyData } from '../../src/adapters/sqlite/company-data'
 import { sqliteTransactions } from '../../src/adapters/sqlite/transactions'
 import type { CompanyDataSource } from '../../src/ports/company-data'
 import { ensureCoreTypes } from '../../src/services/record-index'
-import { createRecordEngine, createServiceRecordWriter, type ActorInput, type RecordEngine, type ServiceCreateInput } from '../../src/services/record-engine'
+import { createRecordEngine, createServiceRecordWriter, placeOfRow, type ActorInput, type RecordEngine, type ServiceCreateInput } from '../../src/services/record-engine'
 import { createRecordService, type RecordService } from '../../src/services/records'
 import type { Member } from '../../src/services/access'
 
@@ -145,10 +146,11 @@ describe('made from a meeting placed by a folder (before members-only meetings)'
     expect(seen('u-mallory', made.record.id)).toBe(false)
   })
 
-  it('an owner-only meeting gives no place: after the gate its task must say one (never company-wide by inheritance)', () => {
+  it('an owner-only meeting’s task is its owner’s alone (inherited, also after the gate); someone else as assignee cannot read it', () => {
+    const e = engineWith({ placeRequired: () => true })
     const mine = meeting({ personalOwner: 'u-alice' })
-    const r = engineWith({ placeRequired: () => true }).create(m('u-alice'), HUMAN, { type: 'task', title: 'x', fields: { assignee: 'u-alice' }, links: { meeting: mine } })
-    expect(r).toMatchObject({ ok: false, body: { code: 'PLACE_REQUIRED' } })
+    expect(ok(e.create(m('u-alice'), HUMAN, { type: 'task', title: 'x', fields: { assignee: 'u-alice' }, links: { meeting: mine } })).placed).toEqual({ personal: true, folder: null })
+    expect(e.create(m('u-alice'), HUMAN, { type: 'task', title: 'y', fields: { assignee: 'u-bob' }, links: { meeting: mine } })).toMatchObject({ ok: false, body: { code: 'ASSIGNEE_CANNOT_READ' } })
   })
 
   it('a company-wide meeting’s task stays company-wide (inherited, also after the gate)', () => {
@@ -167,5 +169,10 @@ describe('the service writer always says where', () => {
     expect(writer().create('a', { ...base, folder: '/' })).toEqual({ ok: false, reason: 'bad-place' })
     const made = writer().create('a', { ...base, folder: null })
     expect(made.ok).toBe(true)
+  })
+
+  it('a place copied from a row stored with an empty folder (the company root, before the refusal) is the whole company', () => {
+    expect(placeOfRow({ folder: '', personalOwner: null, members: null })).toEqual({ folder: null })
+    expect(writer().create('a', { ...base, ...placeOfRow({ folder: '', personalOwner: null, members: null }) }).ok).toBe(true)
   })
 })

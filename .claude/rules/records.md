@@ -1288,23 +1288,28 @@ server build reads every new row the same way. What changes is what a **create**
   company, said on purpose. Only that word (else 400 `BAD_PLACE`); never with `folder`, `personal: true` or
   `members` (400 `PLACE_CONFLICT`); with a members-only meeting it is refused like a folder
   (`MEMBERS_WITH_PLACE`), with a まとまり it must be within it (`WIDER_THAN_BUNDLE`). The create body is not
-  strict, so an older server ignores the key — the same meaning. The AI path's screen hint is
+  strict, so an older server ignores the key: a person's 全社 means the same there; the AI's `place` is sent with
+  `personal: false` and without the screen's hints, so an older server places a request company-wide too (a new
+  まとまり there still goes to the member's department — narrower, never wider). The AI path's screen hint is
   `defaultPlace: 'company'` (the 全社 tab of a consultation the member is in: `chat-server.ts`
   `companyScreen` — never with a department on screen, never in an unattended run or a step), used only
   where `defaultFolder` would have been (`aiPlacement`: a request for someone else / `personal: false`; a new
   まとまり of a member who belongs to no department).
 - **"Nothing given"** = no folder, not owner-only, no list, no `place`, and nothing inherited (a まとまり's
-  place, a members-only meeting's list, or — new — **the folder of a meeting placed by a folder**: a task
-  made from a meeting made before members-only meetings (11/4) takes that meeting's department folder, or the
-  whole company when the meeting is company-wide, instead of landing company-wide by default; meetings in
-  two places, an owner-only meeting → nothing inherited; `meetingFolder`, `record-engine/members.ts`).
+  place, a members-only meeting's list, or — new — **the place of a meeting that is not members-only**: a
+  task made from a meeting made before members-only meetings (11/4) takes that meeting's folder as stored (the
+  member reads the meeting, so never wider; `placeFolder` is for a folder given, not this), the whole company
+  when the meeting is company-wide, or owner-only when the meeting is the member's own (not a plugin's type),
+  instead of landing company-wide by default; meetings in two places → nothing inherited; `meetingFolder`,
+  `record-engine/members.ts`). A person named who cannot read that place is refused as always
+  (`ASSIGNEE_CANNOT_READ`).
   `create.ts` then decides:
   - **the AI** (`createByAi`), when the type may be owner-only (not a business plugin's), `personal` is not
     `false` and no person field names anyone but the member → **owner-only (本人だけ)**, the answer's `placed`
     says so and `tellMember` tells the member (owner decision 2026-11-23). Otherwise (a plugin's type, someone
-    else named, `personal: false`): when the app said nothing of its screen (a released app's 全社 tab, a run)
-    → as before, the whole company, **until the gate**; else 400 `PLACE_REQUIRED` (`AI_PLACE_REQUIRED`: name a
-    `folder` or `place: "company"`, or ask the member).
+    else named, `personal: false`) → as before, the whole company, **until the gate** (a released app's tool
+    cannot say `place`, and sends `defaultFolder` on a department tab, so the screen hint cannot tell old from new);
+    then 400 `PLACE_REQUIRED` (`AI_PLACE_REQUIRED`: name a `folder` or `place: "company"`, or ask the member).
   - **a person**: the whole company, as every released app means it (its 全社 sends nothing), **until the
     gate**; then 400 `PLACE_REQUIRED` 「見せる範囲が決まっていません。部署を選ぶか、会社全体にするかを選んでください。」,
     nothing written.
@@ -1321,19 +1326,22 @@ server build reads every new row the same way. What changes is what a **create**
   everywhere and the stored NULL mean "inherit".
 - **Service writer**: the place is a required union (`ServiceCreatePlace`: `folder` — `null` = the whole
   company written out —, `personalOwner` or `members`), so a service that forgets it does not compile; at run
-  time one with none, or `folder: ''` (it would read as the company root), is `bad-place`.
+  time one with none, or `folder: ''` (it would read as the company root), is `bad-place`. A place copied from a
+  row stored with `''` before (`placeOfRow`) is the whole company, `null`; the approval of a create whose mapping
+  names no `visible_to_folder` passes `null` (it passed `''`).
 - **Plugin mappings**: a mapping **saved** from now on (`PUT …/mapping`) names `visible_to_folder` for every
   object — a folder, or `null` for the whole company on purpose (an older server reads `null` the same) — else
-  400 `MAPPING_INVALID` (`mappingPlaceProblems`, `shared/core/plugin-mapping.ts`). A mapping in force without it,
+  400 `MAPPING_INVALID` (`mappingPlaceProblems`, `shared/core/plugin-mapping.ts`; 「確かめる」 on a text being edited
+  answers the same, `forChecking`). A mapping in force without it,
   a restored version and the package's recommended mapping keep working as before (imports and creates still
   read its absence as the whole company).
 - Tests: `server/tests/unit/record-company-place.test.ts` (the marker and its refusals, a person before / after
-  the gate, inheritance not being "nothing given", a department meeting's task, an owner-only meeting, the
-  service writer), `record-ai-placement.test.ts` (the AI's owner-only default for any kind, a plugin's type
+  the gate, inheritance not being "nothing given", a department meeting's task, an owner-only meeting's, the
+  service writer and a copied empty folder), `record-ai-placement.test.ts` (the AI's owner-only default for any kind, a plugin's type
   refused, `place` / `defaultPlace`, a released app's 全社 tab before / after the gate, no name in the refusal),
   `server/tests/integration/company-place-gate.test.ts` (the gate through the routes and the composition:
   cutoff unset, older / unknown / inactive members, the AI), `plugins.test.ts` (unit and integration: a mapping
-  without `visible_to_folder`), `client/tests/tasks-list.test.ts`, `bundle-create.test.ts`,
+  without `visible_to_folder`), `plugin-mapping-check.test.ts`, `client/tests/tasks-list.test.ts`, `bundle-create.test.ts`,
   `records-tools.test.ts`, `company-screen-place.test.ts` — each guard mutation-checked.
 
 ### Who can see it (見られる人, plan「新しい画面のデモ」K サーバー乙 ②, owner decision 2026-11-02)
