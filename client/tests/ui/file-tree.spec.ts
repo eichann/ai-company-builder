@@ -17,11 +17,12 @@ async function open(page: Page) {
   return state
 }
 
-async function nameDialog(page: Page, title: string, value: string) {
+/** Types the name and confirms: ［作成］ for a new file or folder, ［名前を変更］ for a rename (the manual cites both). */
+async function nameDialog(page: Page, title: string, value: string, confirm = '作成') {
   await expect(page.getByRole('heading', { name: title })).toBeVisible()
   const input = page.getByRole('textbox')
   await input.fill(value)
-  await page.getByRole('button', { name: '作成' }).click()
+  await page.getByRole('dialog').getByRole('button', { name: confirm, exact: true }).click()
 }
 
 /** An internal drag: dragstart on the source row, drop on the target (HTML5 DnD, one DataTransfer). */
@@ -82,7 +83,7 @@ test('F2 renames and Del deletes only that item, each after a dialog', async ({ 
   await row(page, 'README.md').focus()
   await page.keyboard.press('F2')
   await expect(page.getByRole('textbox')).toHaveValue('README.md')
-  await nameDialog(page, '名前を変更', 'はじめに.md')
+  await nameDialog(page, '名前を変更', 'はじめに.md', '名前を変更')
   await expect(row(page, 'はじめに.md')).toBeVisible()
 
   await row(page, 'ロゴ.png').focus()
@@ -174,7 +175,7 @@ test('a new file or a rename onto a name that is taken is refused in the dialog;
   await row(page, 'ロゴ.png').click({ button: 'right' })
   await page.getByRole('button', { name: /^名前を変更/ }).click()
   await expect(page.getByRole('textbox')).toHaveValue('ロゴ.png')
-  await nameDialog(page, '名前を変更', 'README.md')
+  await nameDialog(page, '名前を変更', 'README.md', '名前を変更')
   await expect(page.getByRole('alert')).toHaveText(taken)
   await page.getByRole('button', { name: 'キャンセル' }).click()
   await expect(row(page, 'ロゴ.png')).toBeVisible()

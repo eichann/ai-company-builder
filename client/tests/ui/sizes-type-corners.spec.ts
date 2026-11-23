@@ -71,7 +71,7 @@ for (const theme of ['light', 'dark'] as const) {
       await page.getByRole('button', { name: /^名前を変更/ }).click()
       const name = page.getByRole('dialog', { name: '名前を変更' })
       await expectButtonSize(page, name.getByRole('button', { name: 'キャンセル' }), 'md')
-      await expectButtonSize(page, name.getByRole('button', { name: '作成' }), 'md')
+      await expectButtonSize(page, name.getByRole('button', { name: '名前を変更', exact: true }), 'md')
       expect(await css(name.getByRole('textbox'), 'border-top-left-radius'), 'name field corner').toBe(await tokenAs(page, 'border-top-left-radius', 'radius-control'))
 
       // A task dialog: its 「やめておく」 used to be a 20px-high chip beside a 30px main action.

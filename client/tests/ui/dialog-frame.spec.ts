@@ -59,7 +59,7 @@ for (const theme of ['light', 'dark'] as const) {
       const name = page.getByRole('dialog', { name: '名前を変更' })
       await expectFrame(page, name, { title: name.getByRole('heading', { name: '名前を変更' }) })
       await expect(name.getByRole('textbox')).toBeFocused()
-      expect(await name.locator('[data-dialog-footer] button').allTextContents()).toEqual(['キャンセル', '作成'])
+      expect(await name.locator('[data-dialog-footer] button').allTextContents()).toEqual(['キャンセル', '名前を変更'])
       expectNoPageErrors(state)
     })
 
