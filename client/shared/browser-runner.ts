@@ -459,6 +459,13 @@ export interface BrowserRunSurface {
   enterAi(hooks: BrowserRunGateHooks): Promise<boolean>
   leaveAi(): Promise<void>
   /**
+   * True while every frame of the page is one the page's write gate sees (the operated origin, the main
+   * frame's process): no login helper's frame left, no sandboxed or other-site frame. Synchronous, so the
+   * run asks it in every check up to the last one right before the write leaves (agent-browser.md "Login
+   * helpers"). A closed window is never clean.
+   */
+  pageClean(): boolean
+  /**
    * A read (GET) with the window's login, never through the page nor the window's session: through
    * the window's page-less read session (one request at a time, agent-browser.md "The operator and
    * the preview"); rejects = no answer. Not for writes (refused).
@@ -621,7 +628,7 @@ export const BROWSER_RUN_REASONS = [
   'off', 'input', 'already-running', 'already-ran', 'records-unavailable', 'approve-refused', 'claim-refused', 'claim-unanswered',
   // claimed, given back before any permit (the server makes the execution void)
   'server-too-old', 'fixed-mismatch', 'connector', 'operation', 'not-supported', 'unknown-checker', 'target-unconfirmed', 'plan',
-  'expired', 'stopped', 'policy', 'no-window', 'busy', 'facts-changed', 'context-changed', 'window-not-ready', 'window-closed',
+  'expired', 'stopped', 'policy', 'no-window', 'busy', 'facts-changed', 'context-changed', 'window-not-ready', 'window-closed', 'foreign-frames',
   'read-failed', 'account-unknown', 'account-mismatch', 'target-missing', 'before-changed', 'csrf-missing', 'checker-problem',
   'cannot-come-true', 'no-visible-change', 'permit-refused',
   // permit asked, stopped before the request left (reported `failed`)

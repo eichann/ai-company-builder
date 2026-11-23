@@ -32,7 +32,7 @@ export interface FakeServerFaults {
   tamperClaim?: (claim: Record<string, unknown>) => void
   /** The permit: refused, never answered, answered with this value, or after a callback (to move the clocks). */
   permit?: 'refuse' | 'hang' | 'throw' | { value: unknown }
-  onPermit?: () => void
+  onPermit?: () => void | Promise<void>
   /** The content the server stores and hashes, spelled otherwise than canonically (a server bug): it still hashes to what was approved. */
   contentText?: (canonical: string) => string
   /** How many report calls are lost before one arrives. */
@@ -95,7 +95,7 @@ export function fakePlansServer(plan: FakePlanInput, faults: FakeServerFaults = 
     async permit(_companyId, execution, secret, signal) {
       state.calls.push('permit')
       if (execution !== executionId || secret !== state.secret) return refused('NOT_FOUND')
-      faults.onPermit?.()
+      await faults.onPermit?.()
       if (faults.permit === 'throw') throw new Error('network')
       if (faults.permit === 'hang') return new Promise(resolve => signal.addEventListener('abort', () => resolve({ kind: 'no-answer' })))
       if (state.execution !== 'claimed') return refused(final(state.execution) ? 'BROWSER_EXECUTION_CLOSED' : 'BROWSER_PERMIT_USED')

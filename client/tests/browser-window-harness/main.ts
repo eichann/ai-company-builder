@@ -16,7 +16,7 @@ import { createBrowserWindowShell, type BrowserShellWindow } from '../../electro
 import { browserPartition } from '../../electron/features/browser/controller'
 import { createBrowserRunner } from '../../electron/features/browser/runner'
 import type { BrowserSiteSetting } from '../../../shared/core/browser-operation'
-import { createBrowserCheckerRegistry, createBrowserConnectors } from '../../shared/browser-checkers'
+import { browserLoginHelpers, createBrowserCheckerRegistry, createBrowserConnectors } from '../../shared/browser-checkers'
 import { lstepConnector } from '../../connectors/lstep'
 import { LSTEP_DECLARATION } from '../../connectors/lstep/declaration'
 import { browserReadPartition, browserWritePartition } from '../../shared/browser-operation'
@@ -28,9 +28,9 @@ import { startSites, type Sites } from './sites'
 
 const dir = process.env.BROWSER_TEST_DIR!
 const [port, evilPort, udpPort] = (process.env.BROWSER_TEST_PORTS ?? '').split(',').map(Number)
-const TRUSTED = ['op.test', 'assets.test', 'evil.test']
+const TRUSTED = ['op.test', 'assets.test', 'evil.test', 'helper.test', 'helper-parts.test']
 app.commandLine.appendSwitch('host-rules', [
-  ...['op.test', 'assets.test', 'untrusted.test'].map(h => `MAP ${h} 127.0.0.1:${port}`),
+  ...['op.test', 'assets.test', 'untrusted.test', 'helper.test', 'helper-parts.test'].map(h => `MAP ${h} 127.0.0.1:${port}`),
   `MAP evil.test 127.0.0.1:${evilPort}`,
 ].join(', '))
 app.setPath('userData', path.join(dir, 'userData'))
@@ -78,7 +78,12 @@ function loaded(win: BrowserShellWindow): Promise<void> {
 async function run() {
   const sites = await startSites(dir, { site: port, evil: evilPort, udp: udpPort })
   const refusalLog: string[] = []
-  const shell = createBrowserWindowShell({ show: false, log: { warn: line => { refusalLog.push(String(line)) } } })
+  // The bundled Lステップ declaration's login helpers, with test hosts for Google's (helper.test framed and
+  // posted to, helper-parts.test its parts) and op.test for the site.
+  const loginHelpers = browserLoginHelpers([LSTEP_DECLARATION.replace('host: manager.linestep.net', 'host: op.test')
+    .replace('[d1nhtjid4lgi9y.cloudfront.net, profile.line-scdn.net]', '[assets.test]')
+    .replace('host: www.google.com', 'host: helper.test').replace('host: www.gstatic.com', 'host: helper-parts.test')])
+  const shell = createBrowserWindowShell({ show: false, log: { warn: line => { refusalLog.push(String(line)) } }, loginHelpers })
   const site: BrowserSiteSetting = { host: 'op.test', level: 'write', assetHosts: ['assets.test'] }
   const partition = browserPartition('user-1', 'company-1', 'op.test')
   result.partitionInMemory = !partition.startsWith('persist:')
@@ -151,6 +156,7 @@ async function run() {
   await win.setMode('human')
   result.humanAgain = await js(`fetch('/human-again', { method: 'POST', body: 'h' }).then(r => r.status, () => 'refused')`)
 
+  result.helpers = await helperScenarios(win, js)
   result.runner = await runnerScenarios(win, site, sites, js, partition)
 
   // The login: a cookie and storage of the site, then cleared.
@@ -188,12 +194,78 @@ async function run() {
   app.quit()
 }
 
+/**
+ * Login helpers (agent-browser.md "Login helpers") on a login page with a CAPTCHA-like frame
+ * (sites.ts `/login-captcha`): they work in `human` mode; entering `ai` mode with the frame still there
+ * leaves the page not clean (the run stops: `pageClean`); in `ai` mode on a page without it, the page's new frame, script and fetch of the helpers
+ * reach nothing; back in `human` they work again.
+ */
+async function helperScenarios(win: BrowserShellWindow, js: (code: string) => Promise<unknown>) {
+  const out: Record<string, unknown> = {}
+  const page = win.webContents
+  const hooks = { stopped: () => false, pageRead: () => true, sessionRequest: () => ({ allow: false as const, reason: 'none' }) }
+  const subframes = () => page.mainFrame.framesInSubtree.filter(f => f !== page.mainFrame).map(f => f.url)
+  // The site's start page frames hosts it does not list (refused, never loaded): no reason to stop the AI.
+  await page.loadURL('https://op.test/').catch(() => {})
+  await wait(1000)
+  out.refusedFrames = subframes()
+  out.enteredWithRefusedFrames = await win.run.enterAi(hooks)
+  out.cleanWithRefusedFrames = win.run.pageClean()
+  await win.run.leaveAi()
+  await page.loadURL('https://op.test/login-captcha').catch(() => {})
+  await wait(2000)
+  out.humanFrames = subframes()
+  out.humanApiScript = await js('window.helperApi === true')
+  out.humanFrameDone = await js(`new Promise(r => { const f = document.getElementById('captcha'); let n = 0; const t = setInterval(() => { if (window.__captchaDone || ++n > 30) { clearInterval(t); r(window.__captchaDone ?? null) } }, 100) })`)
+  out.cleanWithFrameInHuman = win.run.pageClean()
+  // In ai mode the frame is still there: the page is not clean (a run stops at its next check), and the
+  // helpers are shut meanwhile.
+  out.enteredWithFrame = await win.run.enterAi(hooks)
+  out.cleanWithFrameInAi = win.run.pageClean()
+  out.helperFetchInAiWithFrame = await js(`fetch('https://helper.test/recaptcha/api.js?during=1').then(r => r.status, () => 'refused')`)
+  await win.run.leaveAi()
+  // A page without the frame: the AI starts; nothing the page does reaches a helper meanwhile.
+  await page.loadURL('https://op.test/after-login').catch(() => {})
+  await wait(500)
+  out.enterClean = await win.run.enterAi(hooks)
+  out.cleanAfterLogin = win.run.pageClean()
+  out.aiScript = await js(`new Promise(r => { const s = document.createElement('script'); s.src = 'https://helper-parts.test/recaptcha/frame.js?ai=1'; s.onload = () => r('loaded'); s.onerror = () => r('refused'); document.head.append(s) })`)
+  out.aiFetch = await js(`fetch('https://helper.test/recaptcha/reload?ai=1', { method: 'POST', body: 'r' }).then(r => r.status, () => 'refused')`)
+  await js(`(() => { const f = document.createElement('iframe'); f.src = 'https://helper.test/recaptcha/anchor?ai=1'; document.body.append(f); return 1 })()`)
+  await wait(1500)
+  out.aiFrames = subframes()
+  await win.run.leaveAi()
+  // Back to the member: the same frame loads again.
+  await page.loadURL('https://op.test/after-login').catch(() => {})
+  await wait(300)
+  await js(`(() => { const f = document.createElement('iframe'); f.src = 'https://helper.test/recaptcha/anchor?again=1'; document.body.append(f); return 1 })()`)
+  await wait(1500)
+  out.againFrames = subframes()
+  await page.loadURL('https://op.test/').catch(() => {})
+  await wait(300)
+  return out
+}
+
 const PLAN_A = 'bp_00000000000000000000000000000a0a'
 const PLAN_B = 'bp_00000000000000000000000000000b0b'
 const PLAN_C = 'bp_00000000000000000000000000000c0c'
 const PLAN_D = 'bp_00000000000000000000000000000d0d'
 const PLAN_E = 'bp_00000000000000000000000000000e0e'
 const PLAN_F = 'bp_00000000000000000000000000000f0f'
+const PLAN_G = 'bp_00000000000000000000000000000101'
+const PLAN_H = 'bp_00000000000000000000000000000202'
+/**
+ * A sandboxed frame the page makes while the AI operates (opaque origin, possibly a process of its own —
+ * DevTools Fetch on the page does not see such a frame), whose script at once tries a write and a read
+ * of the operated host (agent-browser.md "Login helpers").
+ */
+const SANDBOXED_FRAME = `(() => {
+  const f = document.createElement('iframe')
+  f.setAttribute('sandbox', 'allow-scripts')
+  f.srcdoc = '<script>fetch("https://op.test/line/frame-write", { method: "POST", body: "x", mode: "no-cors" }).catch(() => {}); fetch("https://op.test/line/frame-read", { mode: "no-cors" }).catch(() => {})<' + '/script>'
+  document.body.append(f)
+  return 1
+})()`
 const COMBINATION = { declarationHash: `sha256:${'d'.repeat(64)}`, checkerHash: `sha256:${'c'.repeat(64)}`, factsVersion: 2 }
 
 /**
@@ -255,7 +327,7 @@ async function runnerScenarios(win: BrowserShellWindow, site: BrowserSiteSetting
   const checker = harnessFacts(lstepCheckers[0])
   const checkers = createBrowserCheckerRegistry([checker])
   const readers = lstepConnector().readers
-  const browser = connector('lstep', '0.6.1')!
+  const browser = connector('lstep', '0.6.2')!
   const operation = browser.operations.reminder_step_add_template
   const records: BrowserStepRecord[] = []
   let stopped = false
@@ -285,7 +357,7 @@ async function runnerScenarios(win: BrowserShellWindow, site: BrowserSiteSetting
     const facts = { ...read.facts! }
     if (over.account) facts.account = { ...facts.account, value: { id: over.account } } as typeof facts.account
     servers[planId] = fakePlansServer({
-      planId, companyId: 'company-1', connector: { id: 'lstep', version: '0.6.1', ...COMBINATION }, operation: 'reminder_step_add_template',
+      planId, companyId: 'company-1', connector: { id: 'lstep', version: '0.6.2', ...COMBINATION }, operation: 'reminder_step_add_template',
       account: over.account ?? 'ACC1', target: values.target, change: values.change, facts, createdAt: Date.now() - 1000,
     }, faults)
   }
@@ -351,13 +423,27 @@ async function runnerScenarios(win: BrowserShellWindow, site: BrowserSiteSetting
   await plan(PLAN_F, { change: { template: '306' } }, { onPermit: () => { monoJump += 5000 } })
   out.late = await runPlan(PLAN_F)
   out.lateReports = servers[PLAN_F].state.reports
+  // A script left in the page makes a sandboxed frame once the window is in ai mode (right before the run's
+  // first read): the run stops before the permit.
+  const frameFacts = () => ({ main: page.mainFrame.processId, frames: page.mainFrame.framesInSubtree.filter(f => f !== page.mainFrame).map(f => ({ origin: f.origin, processId: f.processId })) })
+  await page.loadURL('https://op.test/line/episode/show/101').catch(() => {})
+  await wait(300)
+  await plan(PLAN_G, { change: { template: '307' } })
+  beforeRead = async () => { await js(SANDBOXED_FRAME); await wait(500); out.sandboxedFrame = frameFacts() }
+  out.frameBeforeRead = await runPlan(PLAN_G)
+  // The same frame made while the permit is asked: the last check before the request leaves stops it.
+  await page.loadURL('https://op.test/line/episode/show/101').catch(() => {})
+  await wait(300)
+  await plan(PLAN_H, { change: { template: '308' } }, { onPermit: async () => { await js(SANDBOXED_FRAME); await wait(500) } })
+  out.frameAtPermit = await runPlan(PLAN_H)
+  out.frameAtPermitReports = servers[PLAN_H].state.reports
   out.records = records.map(r => `${r.planId.slice(-1)}:${r.state}`)
 
   // The gate itself on the real window: an armed write of step 201 / template 304.
   await page.loadURL('https://op.test/line/episode/show/101').catch(() => {})
   await wait(300)
   const gate = createRunGate({
-    host: 'op.test', operation: connector('lstep', '0.6.1')!.operations.reminder_step_add_template,
+    host: 'op.test', operation: connector('lstep', '0.6.2')!.operations.reminder_step_add_template,
     values: { target: { reminder: '101', step: '201' }, change: { template: '304' } },
     readPaths: ['/line/episode/show/101'], stopped: () => false,
   })

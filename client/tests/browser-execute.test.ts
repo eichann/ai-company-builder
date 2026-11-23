@@ -41,7 +41,7 @@ const ACCOUNT = '5550001'
 const values = { target: { reminder: REMINDER, step: STEP }, change: { template: TO_ADD } }
 const lstep = lstepConnector()
 const declaration = createBrowserConnectors([lstep.declaration])
-const browser = declaration('lstep', '0.6.1')!
+const browser = declaration('lstep', '0.6.2')!
 const operation = browser.operations.reminder_step_add_template
 const COMBINATION = { declarationHash: `sha256:${'d'.repeat(64)}`, checkerHash: `sha256:${'c'.repeat(64)}`, factsVersion: 2 }
 const SITE_SETTING = { host: HOST, level: 'write' as const, assetHosts: ['d1nhtjid4lgi9y.cloudfront.net', 'profile.line-scdn.net'] }
@@ -153,9 +153,11 @@ function fakeWindow(site: FakeLstep) {
   let hooks: BrowserRunGateHooks | null = null
   const calls: string[] = []
   let closed = false
+  const page = { clean: true }
   const win: BrowserRunWindow = {
     run: {
       async enterAi(h) { hooks = h; calls.push('ai'); return true },
+      pageClean: () => !closed && page.clean,
       async leaveAi() { hooks = null; calls.push('human') },
       async request({ method, path }) {
         if (closed || !hooks || !hooks.sessionRequest({ method, url: `https://${HOST}${path}` }).allow) throw new Error('refused')
@@ -194,7 +196,7 @@ function fakeWindow(site: FakeLstep) {
       closed: () => closed,
     },
   }
-  return { win, calls, close: () => { closed = true } }
+  return { win, calls, page, close: () => { closed = true } }
 }
 
 // ---------------------------------------------------------------------------
@@ -205,7 +207,7 @@ async function harness(o: { site?: Partial<FakeLstep>; faults?: FakeServerFaults
   const site = fakeLstep(o.site)
   const facts = await approvedFacts(site)
   const server = fakePlansServer({
-    planId: PLAN, companyId: COMPANY, connector: { id: 'lstep', version: '0.6.1', ...COMBINATION }, operation: 'reminder_step_add_template',
+    planId: PLAN, companyId: COMPANY, connector: { id: 'lstep', version: '0.6.2', ...COMBINATION }, operation: 'reminder_step_add_template',
     account: ACCOUNT, target: values.target, change: values.change, facts: o.approved ? o.approved(facts) : facts, createdAt: Date.now() - 60_000,
   }, o.faults)
   const window = fakeWindow(site)
@@ -217,7 +219,7 @@ async function harness(o: { site?: Partial<FakeLstep>; faults?: FakeServerFaults
     aiSwitch: () => true,
     plans: server.api,
     connector: declaration,
-    combination: (id, version) => (id === 'lstep' && version === '0.6.1' ? COMBINATION : null),
+    combination: (id, version) => (id === 'lstep' && version === '0.6.2' ? COMBINATION : null),
     checker: id => checkers.get(id),
     reader: id => lstep.readers.find(r => r.id === id),
     site: () => live.policy,
@@ -357,6 +359,25 @@ test('a stop, a setting change or a changed context before the permit gives the 
     assert.deepEqual(h.site.posts, [], label)
     assert.equal(h.server.state.calls.includes('permit'), false, label)
   }
+})
+
+test('a frame the page\'s write gate does not see (a login helper\'s, a sandboxed one) stops the run as it enters ai mode: the plan given back, nothing sent, the window back to the member', async () => {
+  const h = await harness()
+  const enter = h.window.win.run.enterAi
+  h.window.win.run.enterAi = async hooks => { const ok = await enter(hooks); h.window.page.clean = false; return ok }
+  assert.deepEqual(await h.run(), { outcome: 'stopped', reason: 'foreign-frames' })
+  assert.deepEqual(h.site.posts, [])
+  assert.equal(h.server.state.calls.includes('permit'), false)
+  assert.equal(h.server.state.calls.at(-1), 'cancel')
+  assert.equal(h.window.calls.at(-1), 'human', 'back to the member\'s mode: the login helpers work again')
+})
+
+test('such a frame appearing while the permit is asked stops the write at the last check: failed, never sent, the server told', async () => {
+  const h = await harness({ faults: { onPermit: () => { h.window.page.clean = false } } })
+  assert.deepEqual(await h.run(), { outcome: 'failed', reason: 'foreign-frames' })
+  assert.deepEqual(h.site.posts, [])
+  assert.equal(h.window.calls.includes('sent'), false)
+  assert.deepEqual(h.server.state.reports, [{ result: 'failed', reason: 'context-changed' }])
 })
 
 test('nothing is asked of the permit when this PC cannot keep its record first', async () => {
@@ -586,7 +607,7 @@ test('one run per window at a time: a second plan for the same window is given b
   // The second plan, its own server, the same runner and window.
   const SECOND = 'bp_fedcba9876543210fedcba9876543210'
   const other = fakePlansServer({
-    planId: SECOND, companyId: COMPANY, connector: { id: 'lstep', version: '0.6.1', ...COMBINATION }, operation: 'reminder_step_add_template',
+    planId: SECOND, companyId: COMPANY, connector: { id: 'lstep', version: '0.6.2', ...COMBINATION }, operation: 'reminder_step_add_template',
     account: ACCOUNT, target: values.target, change: values.change, facts: await approvedFacts(second.site), createdAt: Date.now() - 60_000,
   })
   let release: () => void = () => {}

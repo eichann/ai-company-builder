@@ -119,7 +119,7 @@ const SERVER_CODE_RE = /^[A-Z][A-Z0-9_]{0,63}$/
 /** A report is sent at most this many times, the same body each time (design 6b-2 §3 step 13). */
 const REPORT_TRIES = 3
 /** A run's own word → the report's (one list with the server, `BROWSER_REPORT_REASONS`): what changed the context. */
-const REPORT_WORDS: Partial<Record<BrowserRunReason, string>> = { 'window-closed': 'context-changed', policy: 'context-changed', expired: 'context-changed' }
+const REPORT_WORDS: Partial<Record<BrowserRunReason, string>> = { 'window-closed': 'context-changed', policy: 'context-changed', expired: 'context-changed', 'foreign-frames': 'context-changed' }
 const sha256 = (text: string) => `sha256:${createHash('sha256').update(text, 'utf8').digest('hex')}`
 
 export function createBrowserRunner(deps: BrowserRunnerDeps) {
@@ -219,7 +219,8 @@ export function createBrowserRunner(deps: BrowserRunnerDeps) {
       const win = deps.window(plan.companyId, connector.host)
       if (!win || win.run.closed() || win.preview.closed()) return giveBack('no-window')
       const surface = win.run
-      const abort = (): BrowserRunReason | null => why() ?? (surface.closed() ? 'window-closed' : null)
+      // A frame the page's write gate does not see stops the run at every check, the last one included.
+      const abort = (): BrowserRunReason | null => why() ?? (surface.closed() ? 'window-closed' : surface.pageClean() ? null : 'foreign-frames')
       const windowKey = `${plan.companyId}\0${connector.host}`
       if (busyWindows.has(windowKey)) return giveBack('busy')
       busyWindows.add(windowKey)

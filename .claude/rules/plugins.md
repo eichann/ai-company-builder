@@ -661,6 +661,16 @@ browser:
       reader: lstep.reminders
       no_side_effects: reviewed
   ```
+- **`login_helpers`** (2026-11-23, `agent-browser.md` "Login helpers"; optional): hosts a person's login
+  on the site needs (a CAPTCHA), ≤ 5 `{ host, path_prefix, frame?, post? }` — an exact host, never the
+  operated host or an asset host, once each; `path_prefix` whole plain segments, starting and ending with
+  `/` (never `/` alone; no `.` / `..`, `//`, `%`, `?`, `#`; ≤ 100); `frame` / `post` booleans (absent =
+  false). The window lets them through only while the person operates it, never while the AI does.
+  ```yaml
+  login_helpers:
+    - { host: www.google.com, path_prefix: "/recaptcha/", frame: true, post: true }
+    - { host: www.gstatic.com, path_prefix: "/recaptcha/" }
+  ```
 - **`ignore_body` is trusted**: whatever it names passes with any value. A reviewer checks that each
   entry is a CSRF / session field and nothing that changes what the request does.
 - **`effect: delete` requires `irreversible: true`** (the person confirms right before the deletion).
@@ -694,8 +704,8 @@ browser:
 - **Not on the shelf yet**: the shelf refuses a package with `browser` (「a browser connector (browser) is not
   used yet」, `services/plugin-shelf.ts`), so no company installs it, `pluginsFor` never lists it and no
   app fetches it; `combineUse` refuses one, so no business plugin uses it. A released app's older parser
-  does not know `browser` (an unknown key: unusable). The current declaration (`lstep@0.6.1`, 「リマインダの段に
-  テンプレートを足す」; 0.6.1 adds the reads `GET /api/episodes/{reminder}` and `GET /api/episode-steps/{step}` for the step and its timing text, design memo §39, §40) ships **inside the app** with its checker (`client/connectors/lstep/`),
+  does not know `browser` (an unknown key: unusable). The current declaration (`lstep@0.6.2`, 「リマインダの段に
+  テンプレートを足す」; 0.6.2 adds its `login_helpers`, below; 0.6.1 adds the reads `GET /api/episodes/{reminder}` and `GET /api/episode-steps/{step}` for the step and its timing text, design memo §39, §40) ships **inside the app** with its checker (`client/connectors/lstep/`),
   parsed by `parsePluginManifest`; the runner exists but nothing starts it. The server accepts plans
   only for a combination listed in `shared/browser-connectors/approved.json` (the declaration's text
   with its hash, the site folder's hash, the facts version; `agent-browser.md` "Plans, executions,

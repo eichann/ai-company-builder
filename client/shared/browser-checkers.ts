@@ -4,7 +4,7 @@
  * module names no site. A checker id not handed in is never run: a declaration naming it is refused.
  */
 import { parsePluginManifest } from '../../shared/core/plugins'
-import type { PluginBrowser } from '../../shared/core/plugin-browser-declaration'
+import type { BrowserLoginHelper, PluginBrowser } from '../../shared/core/plugin-browser-declaration'
 import type { BrowserChecker } from './browser-runner'
 
 export interface BrowserCheckerRegistry {
@@ -32,4 +32,17 @@ export function parseBrowserDeclaration(text: string): { id: string; version: st
 export function createBrowserConnectors(texts: readonly string[]) {
   const parsed = texts.map(parseBrowserDeclaration).filter((d): d is NonNullable<typeof d> => !!d)
   return (id: string, version: string): PluginBrowser | null => parsed.find(d => d.id === id && d.version === version)?.browser ?? null
+}
+
+/**
+ * The login helpers of a site's host, from the declarations the app bundles (main hands them to the
+ * window, agent-browser.md "Login helpers"). A host two declarations name gets none (which one is
+ * meant cannot be told); a declaration that does not parse gives none.
+ */
+export function browserLoginHelpers(texts: readonly string[]): (host: string) => readonly BrowserLoginHelper[] {
+  const parsed = texts.map(parseBrowserDeclaration).filter((d): d is NonNullable<typeof d> => !!d)
+  return host => {
+    const of = parsed.filter(d => d.browser.host === host)
+    return of.length === 1 ? of[0].browser.loginHelpers : []
+  }
 }
