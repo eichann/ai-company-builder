@@ -78,12 +78,19 @@ export interface HoldingItem {
   folderPath: string
   baseCommit: string | null
   state: HoldingItemState
-  /** The accepted distinct contents' bytes (reserved against the caps). */
+  /** The distinct contents stored now, in bytes (what counts against the ticket's and the company's room). */
   totalBytes: number
   createdAt: string
   finishedAt: string | null
   blobsDeletedAt: string | null
 }
+
+/**
+ * Why an entry sent with content is not held: `too-large` (a file, item or ticket cap — kept as a
+ * name), `secret` (never kept — a name), `company-full` (the company's room is full now: the app
+ * keeps its copy and tries again later).
+ */
+export type HoldingDropped = 'too-large' | 'secret' | 'company-full'
 
 export interface HoldingFile {
   idx: number
@@ -93,7 +100,7 @@ export interface HoldingFile {
   sha256: string | null
   label: string | null
   stored: boolean
-  dropped: 'too-large' | 'secret' | null
+  dropped: HoldingDropped | null
 }
 
 export interface NewHoldingItem {
@@ -104,7 +111,6 @@ export interface NewHoldingItem {
   scopeId: string
   folderPath: string
   baseCommit: string | null
-  totalBytes: number
   at: string
 }
 
@@ -113,16 +119,21 @@ export interface HoldingItemRepository {
   get(itemId: string): HoldingItem | null
   forDevice(ticketId: string, deviceKey: string): HoldingItem | null
   countForTicket(ticketId: string): number
-  /** Bytes reserved by the items that still hold contents (receiving, waiting, taking), but `exceptItemId`. */
-  heldBytes(exceptItemId?: string): number
+  /** Bytes stored by the company's items that still hold contents (receiving, waiting, taking), but `exceptItemId`. */
+  storedBytes(exceptItemId?: string): number
+  /** The same, for one ticket's items (its member's PCs). */
+  ticketStoredBytes(ticketId: string, exceptItemId?: string): number
   create(item: NewHoldingItem, files: HoldingFile[]): void
   /** A receiving item's manifest replaced (`stored` flags as given). False when it is not receiving. */
-  replaceFiles(itemId: string, files: HoldingFile[], totalBytes: number, at: string): boolean
+  replaceFiles(itemId: string, files: HoldingFile[], at: string): boolean
   files(itemId: string): HoldingFile[]
-  /** The content entries with this sha256 of a receiving item are stored. False when it is not receiving. */
+  /**
+   * The not-dropped content entries with this sha256 of a receiving item are stored. False when it
+   * is not receiving or no such entry is left (the manifest changed meanwhile).
+   */
   markStored(itemId: string, sha256: string, at: string): boolean
-  /** A secret found in this content: its entries become names only (`secret`, sha256 kept, never the bytes), with the new total. */
-  dropContent(itemId: string, sha256: string, totalBytes: number, at: string): void
+  /** This content is not held: its entries are dropped for `reason` (`secret` also makes them names only; sha256 kept). */
+  dropContent(itemId: string, sha256: string, reason: 'secret' | 'company-full', at: string): void
   /** receiving → waiting (compare-and-set). */
   finish(itemId: string, at: string): boolean
   /** waiting items finished at or before `before` → expired (compare-and-set); their ids. */
@@ -138,11 +149,29 @@ export interface HoldingItemRepository {
   erase(itemId: string, at: string): boolean
 }
 
-/** Where held contents are kept: `<root>/<companyId>/<itemId>/<sha256>` (adapters/holding-blobs.ts). */
+/** A content received into a temporary file of its item's directory, not yet under its name. */
+export interface ReceivedBlob {
+  temp: string
+  bytes: number
+  sha256: string
+}
+
+/**
+ * Where held contents are kept: `<root>/<companyId>/<itemId>/<sha256>` (adapters/holding-blobs.ts).
+ * A content arrives into a temporary file of its own (one per request), is hashed as it streams,
+ * and only then gets its name; a request that loses only ever removes its own temporary file.
+ */
 export interface HoldingBlobStore {
-  /** Write a content (temp file then rename; directories 0700, files 0600). */
-  put(companyId: string, itemId: string, sha256: string, bytes: Uint8Array): Promise<void>
+  /** Stream into a new temporary file (0600; directories 0700). Null when more than `maxBytes` came (nothing kept). */
+  receive(companyId: string, itemId: string, chunks: AsyncIterable<Uint8Array>, maxBytes: number): Promise<ReceivedBlob | null>
+  /** The temporary file gets the content's name (a rename; the same content already there is replaced by itself). */
+  commit(companyId: string, itemId: string, temp: string, sha256: string): Promise<void>
+  /** Remove a temporary file this request made. */
+  discard(companyId: string, itemId: string, temp: string): Promise<void>
+  has(companyId: string, itemId: string, sha256: string): Promise<boolean>
   remove(companyId: string, itemId: string, sha256: string): Promise<void>
+  /** The files of an item's directory: contents by sha256 and temporary files, with their age. */
+  entries(companyId: string, itemId: string): Promise<Array<{ name: string; temp: boolean; mtimeMs: number }>>
   /** The item's directory and everything in it. */
   removeItem(companyId: string, itemId: string): Promise<void>
   /** Item directories present for the company. */

@@ -13,7 +13,7 @@
 import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from 'vitest'
 import { createHash } from 'crypto'
 import { execFileSync } from 'child_process'
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'fs'
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
 
@@ -61,12 +61,13 @@ const answered: string[] = []
 const sha = (b: Uint8Array | string) => createHash('sha256').update(b).digest('hex')
 const git = (args: string[], cwd?: string) => execFileSync('git', args, { stdio: 'pipe', ...(cwd ? { cwd } : {}) }).toString()
 
-async function as(user: string | null, method: string, path: string, body?: unknown, raw?: Uint8Array) {
+async function as(user: string | null, method: string, path: string, body?: unknown, raw?: Uint8Array, length?: number) {
   const headers: Record<string, string> = user ? { 'x-test-user': `u-${user}` } : {}
   const init: RequestInit = { method, headers }
   if (raw) {
     init.body = raw
     headers['Content-Type'] = 'application/octet-stream'
+    headers['Content-Length'] = String(length ?? raw.byteLength)
   } else if (body !== undefined) {
     init.body = JSON.stringify(body)
     headers['Content-Type'] = 'application/json'
@@ -116,6 +117,44 @@ function manifest(extra: Loose[] = []) {
 
 const item = (ticket: string, body: unknown) => as('v1', 'POST', `/api/me/holding/tickets/${ticket}/items`, body)
 const put = (user: string, itemId: string, bytes: Uint8Array, hash = sha(bytes)) => as(user, 'PUT', `/api/me/holding/items/${itemId}/blobs/${hash}`, undefined, bytes)
+
+/**
+ * A PUT whose body is sent slowly: its first byte, then the rest when `release()` is called.
+ * `pulls()` says how far the server read (0 = never asked for the body).
+ */
+function heldPut(user: string, itemId: string, bytes: Uint8Array, hash = sha(bytes), length = bytes.byteLength) {
+  let release!: () => void
+  const gate = new Promise<void>(resolve => { release = resolve })
+  let pulls = 0
+  const stream = new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      pulls++
+      if (pulls === 1) { controller.enqueue(bytes.subarray(0, 1)); return }
+      await gate
+      controller.enqueue(bytes.subarray(1))
+      controller.close()
+    },
+  }, { highWaterMark: 0 })
+  const answer = (async () => {
+    const res: Response = await app.request(`http://acb.test/api/me/holding/items/${itemId}/blobs/${hash}`, {
+      method: 'PUT', body: stream, duplex: 'half',
+      headers: { 'x-test-user': `u-${user}`, 'Content-Type': 'application/octet-stream', 'Content-Length': String(length) },
+    } as RequestInit)
+    const text = await res.text()
+    answered.push(text)
+    let json: Loose = null
+    try { json = JSON.parse(text) } catch { /* empty */ }
+    return { status: res.status, body: json }
+  })()
+  return { answer, release, pulls: () => pulls }
+}
+
+/** Until the server has read the first part of a held body (it now waits in the middle). */
+async function untilReading(held: { pulls: () => number }) {
+  for (let i = 0; i < 2000 && held.pulls() < 2; i++) await new Promise(resolve => setTimeout(resolve, 5))
+  expect(held.pulls()).toBeGreaterThanOrEqual(2)
+}
+
 const itemDir = (itemId: string, co = CO) => join(HOLDING_ROOT, co, itemId)
 const filesOf = (itemId: string) => db.prepare(`SELECT idx, path, kind, sha256, stored, dropped FROM holding_files WHERE company_id = ? AND item_id = ? ORDER BY idx`).all(CO, itemId) as Loose[]
 const itemRow = (itemId: string) => db.prepare(`SELECT * FROM holding_items WHERE id = ?`).get(itemId) as Loose
@@ -200,7 +239,7 @@ describe('the member\'s tickets', () => {
     const t = mine.body.data.tickets.find((x: Loose) => x.ticketId === tickets.v1)
     expect(t).toEqual({
       ticketId: tickets.v1, companyId: CO, scopeId, state: 'open', expiresAt: expect.any(String),
-      limits: { fileBytes: 50 * 1024 * 1024, itemBytes: 500 * 1024 * 1024, files: 5000, devices: 3 },
+      limits: { fileBytes: 50 * 1024 * 1024, itemBytes: 500 * 1024 * 1024, ticketBytes: 1024 * 1024 * 1024, files: 5000, devices: 3 },
     })
     // Someone else's tickets are not theirs to see.
     const keeper = await as('keeper', 'GET', '/api/me/holding/tickets')
@@ -287,10 +326,14 @@ describe('upload', () => {
     expect(filesOf(itemId)[5]).toMatchObject({ kind: 'names-only', sha256: null, dropped: 'secret' })
     expect(filesOf(itemId)[4]).toMatchObject({ kind: 'names-only', sha256: null, dropped: null })
 
-    // A content that is not the one named.
+    // A content that is not the one named: another size, and the same size with other bytes.
     const wrong = await put('v1', itemId, new TextEncoder().encode('別の中身'), sha(TEXT_A))
     expect(wrong.status).toBe(400)
     expect(wrong.body.code).toBe('HASH_MISMATCH')
+    const forged = await put('v1', itemId, new Uint8Array(TEXT_A.length).fill(65), sha(TEXT_A))
+    expect(forged.status).toBe(400)
+    expect(forged.body.code).toBe('HASH_MISMATCH')
+    expect(existsSync(join(itemDir(itemId), sha(TEXT_A)))).toBe(false)
     // A content the manifest never named.
     expect((await put('v1', itemId, new TextEncoder().encode('知らない'))).status).toBe(404)
 
@@ -343,11 +386,13 @@ describe('upload', () => {
     expect((await put('v1', itemId, secret)).status).toBe(204)
     expect(existsSync(join(itemDir(itemId), sha(secret)))).toBe(false)
     expect(filesOf(itemId)[0]).toMatchObject({ kind: 'names-only', dropped: 'secret', stored: 0 })
-    expect(itemRow(itemId).total_bytes).toBe(TEXT_A.length)
+    // What counts against the room is what is stored: nothing yet.
+    expect(itemRow(itemId).total_bytes).toBe(0)
     // Sent again: nothing kept, nothing more wanted.
     expect((await put('v1', itemId, secret)).status).toBe(204)
     expect(existsSync(join(itemDir(itemId), sha(secret)))).toBe(false)
     expect((await put('v1', itemId, TEXT_A)).status).toBe(204)
+    expect(itemRow(itemId).total_bytes).toBe(TEXT_A.length)
     expect((await as('v1', 'POST', `/api/me/holding/items/${itemId}/finish`)).status).toBe(200)
   })
 
@@ -371,28 +416,73 @@ describe('upload', () => {
     ] })
     expect(over.body.data.itemId).toBe(big.body.data.itemId)
     expect(over.body.data.namesOnly).toEqual([10])
-    expect(itemRow(over.body.data.itemId).total_bytes).toBe(10 * 49 * MB)
+    expect(over.body.data.missing).toHaveLength(10)
 
     // A body over the file cap: 413, nothing stored.
-    const tooBig = await put('v1', over.body.data.itemId, new Uint8Array(50 * MB + 1), hex(0))
+    // A Content-Length over the file cap: 413 before the body is read.
+    const tooBig = await as('v1', 'PUT', `/api/me/holding/items/${over.body.data.itemId}/blobs/${hex(0)}`, undefined, new Uint8Array(8), 50 * MB + 1)
     expect(tooBig.status).toBe(413)
     expect(tooBig.body.code).toBe('TOO_LARGE')
     expect(existsSync(itemDir(over.body.data.itemId))).toBe(false)
   })
 
-  it('the company\'s 2 GB of waiting items is shared: a new item past it keeps names only', async () => {
+  it('the company\'s room counts stored contents only; with no room an entry is company-full, kept by the app, and nothing finishes (M3)', async () => {
+    const { tickets } = await ticketsFor(['v1', 'v2'])
+    const MB = 1024 * 1024
+    const now = new Date().toISOString()
+    // A big announcement that never uploads takes no room from anyone.
+    const big = await as('v2', 'POST', `/api/me/holding/tickets/${tickets.v2}/items`, { deviceKey: 'device-v2-big', baseCommit: null, manifest: [
+      ...Array.from({ length: 10 }, (_, i) => ({ path: `big${i}.bin`, kind: 'changed', size: 49 * MB, sha256: i.toString(16).padStart(64, 'c') })),
+    ] })
+    expect(big.body.data.companyFull).toEqual([])
+    expect(itemRow(big.body.data.itemId).total_bytes).toBe(0)
+    // The company's stored contents fill its room (another member's waiting item).
+    const held = () => (db.prepare(`SELECT COALESCE(SUM(total_bytes), 0) AS n FROM holding_items WHERE company_id = ? AND state IN ('receiving', 'waiting', 'taking')`).get(CO) as { n: number }).n
+    db.prepare(`INSERT INTO holding_items (id, company_id, ticket_id, user_id, device_key, scope_id, folder_path, state, total_bytes, created_at, updated_at)
+      VALUES ('filler-co', ?, ?, 'u-v2', 'device-filler-co', 's', 'x', 'waiting', ?, ?, ?)`).run(CO, tickets.v2, 2 * 1024 * MB - held() - 5, now, now)
+    const body = { deviceKey: 'device-v1-full', baseCommit: null, manifest: [
+      { path: 'fits.md', kind: 'changed', size: 5, sha256: sha('12345') },
+      { path: 'no-room.md', kind: 'changed', size: TEXT_A.length, sha256: sha(TEXT_A) },
+    ] }
+    const r = await item(tickets.v1, body)
+    expect(r.body.data.namesOnly).toEqual([])
+    expect(r.body.data.companyFull).toEqual([1])
+    expect(r.body.data.missing).toEqual([sha('12345')])
+    const { itemId } = r.body.data
+    expect((await put('v1', itemId, new TextEncoder().encode('12345'))).status).toBe(204)
+    const noRoom = await put('v1', itemId, TEXT_A)
+    expect(noRoom.status).toBe(409)
+    expect(noRoom.body.code).toBe('COMPANY_FULL')
+    // Not finished half-held: the app keeps its copy.
+    const finish = await as('v1', 'POST', `/api/me/holding/items/${itemId}/finish`)
+    expect(finish.status).toBe(409)
+    expect(finish.body.code).toBe('COMPANY_FULL')
+    // Room again later: the same PC asks again and the entry is wanted; what arrived stays.
+    db.prepare(`DELETE FROM holding_items WHERE id = 'filler-co'`).run()
+    const again = await item(tickets.v1, body)
+    expect(again.body.data).toMatchObject({ itemId, companyFull: [], missing: [sha(TEXT_A)] })
+    // Full again when the content arrives: decided on what is stored, under the lock.
+    db.prepare(`INSERT INTO holding_items (id, company_id, ticket_id, user_id, device_key, scope_id, folder_path, state, total_bytes, created_at, updated_at)
+      VALUES ('filler-co2', ?, ?, 'u-v2', 'device-filler-co2', 's', 'x', 'waiting', ?, ?, ?)`).run(CO, tickets.v2, 2 * 1024 * MB - held(), now, now)
+    const late = await put('v1', itemId, TEXT_A)
+    expect(late.body.code).toBe('COMPANY_FULL')
+    expect(existsSync(join(itemDir(itemId), sha(TEXT_A)))).toBe(false)
+    expect(filesOf(itemId)[1]).toMatchObject({ dropped: 'company-full', stored: 0 })
+    db.prepare(`DELETE FROM holding_items WHERE id = 'filler-co2'`).run()
+  })
+
+  it('one member\'s ticket has a share of its own (1 GB, all its PCs): beyond it a name only (M3)', async () => {
     const { tickets } = await ticketsFor(['v1'])
     const MB = 1024 * 1024
-    const held = (db.prepare(`SELECT COALESCE(SUM(total_bytes), 0) AS n FROM holding_items WHERE company_id = ? AND state IN ('receiving', 'waiting', 'taking')`).get(CO) as { n: number }).n
+    const now = new Date().toISOString()
     db.prepare(`INSERT INTO holding_items (id, company_id, ticket_id, user_id, device_key, scope_id, folder_path, state, total_bytes, created_at, updated_at)
-      VALUES ('filler-2', ?, ?, 'u-v1', 'device-filler-2', 's', 'x', 'waiting', ?, ?, ?)`).run(CO, tickets.v1, 2 * 1024 * MB - held - 10, new Date().toISOString(), new Date().toISOString())
-    const r = await item(tickets.v1, { deviceKey: 'device-v1-co', baseCommit: null, manifest: [
+      VALUES ('filler-ticket', ?, ?, 'u-v1', 'device-filler-t', 's', 'x', 'waiting', ?, ?, ?)`).run(CO, tickets.v1, 1024 * MB - 10, now, now)
+    const r = await item(tickets.v1, { deviceKey: 'device-v1-share', baseCommit: null, manifest: [
       { path: 'small.md', kind: 'changed', size: 10, sha256: 'a'.repeat(64) },
       { path: 'one-more.md', kind: 'changed', size: 1, sha256: 'b'.repeat(64) },
     ] })
-    expect(r.body.data.namesOnly).toEqual([1])
-    expect(r.body.data.missing).toEqual(['a'.repeat(64)])
-    db.prepare(`DELETE FROM holding_items WHERE id = 'filler-2'`).run()
+    expect(r.body.data).toMatchObject({ namesOnly: [1], companyFull: [], missing: ['a'.repeat(64)] })
+    db.prepare(`DELETE FROM holding_items WHERE id = 'filler-ticket'`).run()
   })
 
   it('one item per PC, at most three PCs; a repeat while receiving replaces the manifest and keeps what arrived', async () => {
@@ -447,6 +537,135 @@ describe('upload', () => {
     setHoldingRatesForTests({ writesPerHour: 120, blobsPerHour: 0 })
     const ok = await item(tickets.v1, { deviceKey: 'device-v1-rate', baseCommit: null, manifest: manifest() })
     expect((await put('v1', ok.body.data.itemId, TEXT_A)).status).toBe(429)
+  })
+})
+
+describe('uploads at the same time and before the body (P1, P2, M2, L1, L3)', () => {
+  it('a second PUT of the same content that loses the race never removes the content a received item holds (P1)', async () => {
+    const { tickets } = await ticketsFor(['v1'])
+    const { itemId } = (await item(tickets.v1, { deviceKey: 'device-v1-race', baseCommit: null, manifest: [
+      { path: 'a.md', kind: 'changed', size: TEXT_A.length, sha256: sha(TEXT_A) },
+    ] })).body.data
+    const slow = heldPut('v1', itemId, TEXT_A)
+    await untilReading(slow)
+    // Meanwhile the same content arrives whole, and the item is finished.
+    expect((await put('v1', itemId, TEXT_A)).status).toBe(204)
+    expect((await as('v1', 'POST', `/api/me/holding/items/${itemId}/finish`)).status).toBe(200)
+    slow.release()
+    const late = await slow.answer
+    expect(late.status).toBe(409)
+    expect(late.body.code).toBe('ALREADY_RECEIVED')
+    // The received item still has its content, and no temporary file is left.
+    expect(readFileSync(join(itemDir(itemId), sha(TEXT_A)))).toEqual(Buffer.from(TEXT_A))
+    expect(readdirSync(itemDir(itemId))).toEqual([sha(TEXT_A)])
+  })
+
+  it('a content the manifest stopped naming while it arrived is not kept, and the sweep removes files no stored entry names (P2)', async () => {
+    const { tickets } = await ticketsFor(['v1'])
+    const body = (manifest: Loose[]) => ({ deviceKey: 'device-v1-p2', baseCommit: null, manifest })
+    const { itemId } = (await item(tickets.v1, body([
+      { path: 'a.md', kind: 'changed', size: TEXT_A.length, sha256: sha(TEXT_A) },
+      { path: 'b.md', kind: 'changed', size: TEXT_B.length, sha256: sha(TEXT_B) },
+    ]))).body.data
+    const slow = heldPut('v1', itemId, TEXT_A)
+    await untilReading(slow)
+    await item(tickets.v1, body([{ path: 'b.md', kind: 'changed', size: TEXT_B.length, sha256: sha(TEXT_B) }]))
+    slow.release()
+    expect((await slow.answer).status).toBe(404)
+    expect(existsSync(join(itemDir(itemId), sha(TEXT_A)))).toBe(false)
+    expect(itemRow(itemId).total_bytes).toBe(0)
+    // Files in a live item's directory that no stored entry names, and old temporary files: the sweep removes them.
+    expect((await put('v1', itemId, TEXT_B)).status).toBe(204)
+    writeFileSync(join(itemDir(itemId), 'f'.repeat(64)), 'stray')
+    writeFileSync(join(itemDir(itemId), '.tmp-0123456789abcdef'), 'left by a stopped upload')
+    const old = new Date(Date.now() - 2 * 60 * 60 * 1000)
+    utimesSync(join(itemDir(itemId), '.tmp-0123456789abcdef'), old, old)
+    writeFileSync(join(itemDir(itemId), '.tmp-fedcba9876543210'), 'an upload running now')
+    await services.privateHolding.sweep(CO)
+    expect(readdirSync(itemDir(itemId)).sort()).toEqual(['.tmp-fedcba9876543210', sha(TEXT_B)].sort())
+    // The storage step itself: a content no not-dropped entry names is never marked stored (the
+    // service then removes it) — also when the manifest changes during the rename.
+    const { sqliteCompanyData } = await import('../../src/adapters/sqlite/company-data')
+    const items = sqliteCompanyData(db).forCompany(CO).holdingItems
+    expect(items.markStored(itemId, sha(TEXT_A), new Date().toISOString())).toBe(false)
+    items.dropContent(itemId, sha(TEXT_B), 'company-full', new Date().toISOString())
+    expect(items.markStored(itemId, sha(TEXT_B), new Date().toISOString())).toBe(false)
+    expect(itemRow(itemId).total_bytes).toBe(0)
+  })
+
+  it('refuses before reading the body: someone else\'s item, no or a wrong Content-Length, over the cap, too many uploads (M2)', async () => {
+    const { tickets } = await ticketsFor(['v1', 'v2'])
+    const big = new Uint8Array(64).fill(7)
+    const v2Item = (await as('v2', 'POST', `/api/me/holding/tickets/${tickets.v2}/items`, { deviceKey: 'device-v2-m2', baseCommit: null, manifest: [
+      { path: 'x.bin', kind: 'changed', size: big.length, sha256: sha(big) },
+    ] })).body.data.itemId
+    const notMine = heldPut('v1', v2Item, big)
+    expect((await notMine.answer).status).toBe(404)
+    expect(notMine.pulls()).toBe(0)
+
+    const { itemId } = (await item(tickets.v1, { deviceKey: 'device-v1-m2', baseCommit: null, manifest: [
+      { path: 'x.bin', kind: 'changed', size: big.length, sha256: sha(big) },
+      { path: 'y.md', kind: 'changed', size: TEXT_A.length, sha256: sha(TEXT_A) },
+      { path: 'z.md', kind: 'changed', size: TEXT_B.length, sha256: sha(TEXT_B) },
+    ] })).body.data
+    const wrongLength = heldPut('v1', itemId, big, sha(big), big.length + 1)
+    expect((await wrongLength.answer).body.code).toBe('HASH_MISMATCH')
+    expect(wrongLength.pulls()).toBe(0)
+    const overCap = heldPut('v1', itemId, big, sha(big), 50 * 1024 * 1024 + 1)
+    expect((await overCap.answer).status).toBe(413)
+    expect(overCap.pulls()).toBe(0)
+    const noLength = await app.request(`http://acb.test/api/me/holding/items/${itemId}/blobs/${sha(big)}`, {
+      method: 'PUT', headers: { 'x-test-user': 'u-v1' }, body: new ReadableStream({ start(c) { c.close() } }), duplex: 'half',
+    } as RequestInit)
+    expect(noLength.status).toBe(400)
+
+    // Two uploads of this member are running: a third waits its turn.
+    const one = heldPut('v1', itemId, big)
+    const two = heldPut('v1', itemId, TEXT_A)
+    await untilReading(one)
+    await untilReading(two)
+    const three = heldPut('v1', itemId, TEXT_B)
+    const busy = await three.answer
+    expect(busy.status).toBe(429)
+    expect(busy.body.code).toBe('BUSY')
+    expect(three.pulls()).toBe(0)
+    one.release()
+    two.release()
+    expect((await one.answer).status).toBe(204)
+    expect((await two.answer).status).toBe(204)
+    expect((await put('v1', itemId, TEXT_B)).status).toBe(204)
+
+    // And a few for the whole server.
+    const { setHoldingRatesForTests } = await import('../../src/services/private-holding')
+    setHoldingRatesForTests({ uploadsPerServer: 1 })
+    const { itemId: other } = (await as('v2', 'POST', `/api/me/holding/tickets/${tickets.v2}/items`, { deviceKey: 'device-v2-m2b', baseCommit: null, manifest: [
+      { path: 'n.md', kind: 'changed', size: NOTE.length, sha256: sha(NOTE) },
+    ] })).body.data
+    const running = heldPut('v1', v2Item, big)
+    expect((await running.answer).status).toBe(404) // not theirs: never counted
+    const first = heldPut('v2', v2Item, big)
+    await untilReading(first)
+    const second = heldPut('v2', other, NOTE)
+    expect((await second.answer).body.code).toBe('BUSY')
+    first.release()
+    expect((await first.answer).status).toBe(204)
+  })
+
+  it('a secret is found in a binary content too, and a content lost from the disk is taken again (L1, L3)', async () => {
+    const { tickets } = await ticketsFor(['v1'])
+    const binary = new Uint8Array([0, 1, 2, 0, ...new TextEncoder().encode(`ghp_${'a'.repeat(36)}`), 0, 9])
+    const { itemId } = (await item(tickets.v1, { deviceKey: 'device-v1-l1', baseCommit: null, manifest: [
+      { path: 'blob.bin', kind: 'changed', size: binary.length, sha256: sha(binary) },
+      { path: 'a.md', kind: 'changed', size: TEXT_A.length, sha256: sha(TEXT_A) },
+    ] })).body.data
+    expect((await put('v1', itemId, binary)).status).toBe(204)
+    expect(existsSync(join(itemDir(itemId), sha(binary)))).toBe(false)
+    expect(filesOf(itemId)[0]).toMatchObject({ kind: 'names-only', dropped: 'secret' })
+
+    expect((await put('v1', itemId, TEXT_A)).status).toBe(204)
+    rmSync(join(itemDir(itemId), sha(TEXT_A)))
+    expect((await put('v1', itemId, TEXT_A)).status).toBe(204)
+    expect(readFileSync(join(itemDir(itemId), sha(TEXT_A)))).toEqual(Buffer.from(TEXT_A))
   })
 })
 

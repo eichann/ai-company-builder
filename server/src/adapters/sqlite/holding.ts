@@ -112,6 +112,14 @@ export function sqliteHoldingItemRepository(conn: Database.Database, companyId: 
     `)
     for (const f of files) insert.run(companyId, itemId, f.idx, f.path, f.kind, f.size, f.sha256, f.label, f.stored ? 1 : 0, f.dropped)
   }
+  /** total_bytes = the item's distinct contents stored now. */
+  const recount = (itemId: string) => conn.prepare(`
+    UPDATE holding_items SET total_bytes = (
+      SELECT COALESCE(SUM(size), 0) FROM (
+        SELECT DISTINCT sha256, size FROM holding_files WHERE company_id = ? AND item_id = ? AND stored = 1 AND dropped IS NULL
+      )
+    ) WHERE company_id = ? AND id = ?
+  `).run(companyId, itemId, companyId, itemId)
   const ids = (sql: string, ...args: unknown[]) => (conn.prepare(sql).all(...args) as Array<{ id: string }>).map(r => r.id)
 
   return {
@@ -130,30 +138,39 @@ export function sqliteHoldingItemRepository(conn: Database.Database, companyId: 
       return (conn.prepare(`SELECT COUNT(*) AS n FROM holding_items WHERE company_id = ? AND ticket_id = ?`).get(companyId, ticketId) as { n: number }).n
     },
 
-    heldBytes(exceptItemId) {
+    storedBytes(exceptItemId) {
       return (conn.prepare(`
         SELECT COALESCE(SUM(total_bytes), 0) AS n FROM holding_items
         WHERE company_id = ? AND state IN ('receiving', 'waiting', 'taking') AND id != ?
       `).get(companyId, exceptItemId ?? '') as { n: number }).n
     },
 
+    ticketStoredBytes(ticketId, exceptItemId) {
+      return (conn.prepare(`
+        SELECT COALESCE(SUM(total_bytes), 0) AS n FROM holding_items
+        WHERE company_id = ? AND ticket_id = ? AND state IN ('receiving', 'waiting', 'taking') AND id != ?
+      `).get(companyId, ticketId, exceptItemId ?? '') as { n: number }).n
+    },
+
     create(item, files) {
       conn.transaction(() => {
         conn.prepare(`
           INSERT INTO holding_items (id, company_id, ticket_id, user_id, device_key, scope_id, folder_path, base_commit, state, total_bytes, created_at, updated_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'receiving', ?, ?, ?)
-        `).run(item.id, companyId, item.ticketId, item.userId, item.deviceKey, item.scopeId, item.folderPath, item.baseCommit, item.totalBytes, item.at, item.at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'receiving', 0, ?, ?)
+        `).run(item.id, companyId, item.ticketId, item.userId, item.deviceKey, item.scopeId, item.folderPath, item.baseCommit, item.at, item.at)
         insertFiles(item.id, files)
+        recount(item.id)
       })()
     },
 
-    replaceFiles(itemId, files, totalBytes, at) {
+    replaceFiles(itemId, files, at) {
       return conn.transaction(() => {
-        const changed = conn.prepare(`UPDATE holding_items SET total_bytes = ?, updated_at = ? WHERE company_id = ? AND id = ? AND state = 'receiving'`)
-          .run(totalBytes, at, companyId, itemId).changes
+        const changed = conn.prepare(`UPDATE holding_items SET updated_at = ? WHERE company_id = ? AND id = ? AND state = 'receiving'`)
+          .run(at, companyId, itemId).changes
         if (changed === 0) return false
         conn.prepare(`DELETE FROM holding_files WHERE company_id = ? AND item_id = ?`).run(companyId, itemId)
         insertFiles(itemId, files)
+        recount(itemId)
         return true
       })()
     },
@@ -164,23 +181,27 @@ export function sqliteHoldingItemRepository(conn: Database.Database, companyId: 
 
     markStored(itemId, sha256, at) {
       return conn.transaction(() => {
-        const changed = conn.prepare(`UPDATE holding_items SET updated_at = ? WHERE company_id = ? AND id = ? AND state = 'receiving'`).run(at, companyId, itemId).changes
-        if (changed === 0) return false
-        conn.prepare(`
+        const receiving = conn.prepare(`SELECT 1 FROM holding_items WHERE company_id = ? AND id = ? AND state = 'receiving'`).get(companyId, itemId)
+        if (!receiving) return false
+        const marked = conn.prepare(`
           UPDATE holding_files SET stored = 1
-          WHERE company_id = ? AND item_id = ? AND sha256 = ? AND kind IN ('changed', 'backup', 'personal')
-        `).run(companyId, itemId, sha256)
+          WHERE company_id = ? AND item_id = ? AND sha256 = ? AND dropped IS NULL AND kind IN ('changed', 'backup', 'personal')
+        `).run(companyId, itemId, sha256).changes
+        if (marked === 0) return false
+        conn.prepare(`UPDATE holding_items SET updated_at = ? WHERE company_id = ? AND id = ?`).run(at, companyId, itemId)
+        recount(itemId)
         return true
       })()
     },
 
-    dropContent(itemId, sha256, totalBytes, at) {
+    dropContent(itemId, sha256, reason, at) {
       conn.transaction(() => {
-        conn.prepare(`
-          UPDATE holding_files SET kind = 'names-only', dropped = 'secret', stored = 0
-          WHERE company_id = ? AND item_id = ? AND sha256 = ?
-        `).run(companyId, itemId, sha256)
-        conn.prepare(`UPDATE holding_items SET total_bytes = ?, updated_at = ? WHERE company_id = ? AND id = ?`).run(totalBytes, at, companyId, itemId)
+        conn.prepare(reason === 'secret'
+          ? `UPDATE holding_files SET kind = 'names-only', dropped = 'secret', stored = 0 WHERE company_id = ? AND item_id = ? AND sha256 = ?`
+          : `UPDATE holding_files SET dropped = 'company-full', stored = 0 WHERE company_id = ? AND item_id = ? AND sha256 = ? AND dropped IS NULL`,
+        ).run(companyId, itemId, sha256)
+        conn.prepare(`UPDATE holding_items SET updated_at = ? WHERE company_id = ? AND id = ?`).run(at, companyId, itemId)
+        recount(itemId)
       })()
     },
 

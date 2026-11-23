@@ -16,19 +16,28 @@
  * - **Nothing names the folder**: no answer and no log line carries its path or name (the ticket's
  *   `folder_path` stays server-side); entry paths are the member's own, relative to the folder,
  *   and are never answered back (indexes are).
- * - **Caps** (owner decision, question 4): 50 MB a file, 500 MB an item, 5,000 entries, 2 GB of a
- *   company's waiting items, reserved when the manifest arrives (one synchronous stretch, so two
- *   manifests cannot both take the last room). Over a cap an entry is kept as its name only
- *   (`too-large`); 413 only for a blob body over the file cap (the route's body limit).
+ * - **A blob is admitted before its body is read**: rate, owner, item and ticket state, the content
+ *   named and still wanted, `Content-Length` equal to its size and within the file cap, and room
+ *   among the uploads running (2 per member, 8 per server). Then it streams into a temporary file
+ *   of its own, hashed and scanned as it arrives (never held in memory).
+ * - **Caps** (owner decision, question 4): 50 MB a file, 500 MB an item, 1 GB a ticket (all its
+ *   PCs), 5,000 entries — over one an entry is a name only (`too-large`). The company's room
+ *   (2 GB) counts what is **stored**, not what a manifest announced, so nobody's announcement can
+ *   squeeze others out; an entry with no room now is `company-full`: the app keeps its copy and
+ *   tries again later (never removed on that answer).
  * - **No secret is kept** (I7): a secret's file name (`.env`, `.env.*`) is a name only; every
- *   text content is scanned with shared/core/secret-patterns.ts when it arrives and, on a hit,
- *   dropped (its entries become names only, `secret`). The app filters too; the server decides.
+ *   content is scanned with shared/core/secret-patterns.ts as it arrives (all bytes, binary too) and,
+ *   on a hit, dropped (its entries become names only, `secret`). The app filters too; the server decides.
+ * - **Never a received item without its content** (I2): the step that names a content and marks it
+ *   stored runs under the company's holding lock (with the sweep and erasure), after the item is read
+ *   again; a request that finds the item finished or the content no longer wanted removes only its
+ *   own temporary file. `finish` needs every wanted content stored and nothing `company-full`.
  * - **Idempotent**: one item per (ticket, PC key), at most 3 PCs; a repeat while receiving
  *   replaces the manifest (contents already stored stay); a blob PUT by its sha256 (stored → 204);
  *   `finish` again while waiting → the same 200, after a decision → 409 `ALREADY_RECEIVED`.
  * - **Retention** (I8, the server clock): receiving items older than 2 days are removed (a later
  *   upload starts again), waiting ones expire 30 days after arrival, and contents of every item
- *   done with them are deleted; directories no row holds are removed too. Rows stay as the record.
+ *   done with them are deleted; files no stored entry names and old temporary files go too.
  */
 import { normalizeRepoPath } from '../../shared/core/paths'
 import { isSecretFileName, secretIn } from '../../shared/core/secret-patterns'
@@ -49,16 +58,18 @@ const DAY_MS = 24 * 60 * 60 * 1000
 export const HOLDING_ITEM_DAYS = 30
 /** A receiving item left unfinished this long is removed; the app's next try starts again. */
 export const HOLDING_RECEIVING_DAYS = 2
+/** A temporary file this old belongs to no running upload (an upload stopped halfway): the sweep removes it. */
+const TEMP_FILE_MAX_AGE_MS = 60 * 60 * 1000
 /** Tickets closed this long ago are still listed (the app learns why it may not hand over). */
 const CLOSED_TICKETS_LISTED_DAYS = 90
 const MAX_PATH = 1024
 const MAX_LABEL = 200
 
 /**
- * Per member and hour (in memory, per server). Blob PUTs: one full item (5,000 entries) fits;
- * the bytes are bounded by the caps. Items and finishes: a few PCs retrying for an hour.
+ * Per member and hour (in memory, per server): blob PUTs (one full item of 5,000 entries fits; the
+ * bytes are bounded by the caps) and items / finishes. Uploads running at once: per member and per server.
  */
-const rates = { blobsPerHour: 6000, writesPerHour: 120 }
+const rates = { blobsPerHour: 6000, writesPerHour: 120, uploadsPerUser: 2, uploadsPerServer: 8 }
 const RATE_WINDOW_MS = 60 * 60 * 1000
 
 /** Tests only. */
@@ -73,15 +84,13 @@ export interface PrivateHoldingDeps {
   transactions: Transactions
   clock: Clock
   ids: IdGenerator
-  /** sha256 of bytes, lower-case hex (composition: node's crypto). */
-  sha256(bytes: Uint8Array): string
-  /** Let the event loop serve other requests (between chunks of a secret scan). */
-  yieldNow(): Promise<void>
 }
 
 const NOT_FOUND = () => refuse('not-found', 'Not found')
-const INVALID = () => refuse('bad-request', 'Invalid request', { code: HOLDING_CODES.invalid })
+const INVALID = (error = 'Invalid request') => refuse('bad-request', error, { code: HOLDING_CODES.invalid })
 const ALREADY_RECEIVED = () => refuse('conflict', 'Already received', { code: HOLDING_CODES.alreadyReceived })
+const COMPANY_FULL = () => refuse('conflict', 'The holding place is full for now; keep the files and try again later', { code: HOLDING_CODES.companyFull })
+const HASH_MISMATCH = () => refuse('bad-request', 'The content is not the one named', { code: HOLDING_CODES.hashMismatch })
 
 const SHA = /^[0-9a-f]{64}$/
 const DEVICE_KEY = /^[A-Za-z0-9_-]{8,128}$/
@@ -133,51 +142,82 @@ function parseItem(body: unknown): ParsedItem | null {
 }
 
 /**
- * Which entries keep their content, within the caps: in manifest order, each distinct content
- * counted once. Returns the rows (with `stored` from `alreadyStored`) and the bytes reserved.
+ * Which entries keep their content: in manifest order, each distinct content counted once, within
+ * the file, item and ticket caps (else a name only) and the company's room (else `company-full`).
+ * `ticketOther` / `companyOther`: bytes stored by the ticket's / company's other items.
  */
-function acceptEntries(entries: ParsedEntry[], otherHeldBytes: number, alreadyStored: Set<string>): { files: HoldingFile[]; totalBytes: number } {
+function acceptEntries(entries: ParsedEntry[], room: { ticketOther: number; companyOther: number }, alreadyStored: Set<string>): HoldingFile[] {
   let total = 0
-  const accepted = new Set<string>()
-  const refused = new Set<string>()
-  const files = entries.map((e, idx): HoldingFile => {
+  const decided = new Map<string, HoldingFile['dropped']>()
+  return entries.map((e, idx): HoldingFile => {
     const nameOnly = (dropped: HoldingFile['dropped']): HoldingFile =>
       ({ idx, path: e.path, kind: 'names-only', size: e.size, sha256: null, label: e.label, stored: false, dropped })
     if (idx >= HOLDING_LIMITS.files) return nameOnly(e.sha256 ? 'too-large' : null)
     if (!e.sha256) return { idx, path: e.path, kind: e.kind, size: e.size, sha256: null, label: e.label, stored: false, dropped: null }
     if (isSecretFileName(e.path)) return nameOnly('secret')
     const sha = e.sha256
-    if (!accepted.has(sha)) {
-      if (refused.has(sha) || e.size > HOLDING_LIMITS.fileBytes || total + e.size > HOLDING_LIMITS.itemBytes
-        || otherHeldBytes + total + e.size > HOLDING_COMPANY_BYTES) {
-        refused.add(sha)
-        return nameOnly('too-large')
+    if (!decided.has(sha)) {
+      let dropped: HoldingFile['dropped'] = null
+      if (e.size > HOLDING_LIMITS.fileBytes || total + e.size > HOLDING_LIMITS.itemBytes || room.ticketOther + total + e.size > HOLDING_LIMITS.ticketBytes) {
+        dropped = 'too-large'
+      } else if (room.companyOther + total + e.size > HOLDING_COMPANY_BYTES) {
+        dropped = 'company-full'
+      } else {
+        total += e.size
       }
-      accepted.add(sha)
-      total += e.size
+      decided.set(sha, dropped)
     }
-    return { idx, path: e.path, kind: e.kind, size: e.size, sha256: sha, label: e.label, stored: alreadyStored.has(sha), dropped: null }
+    const dropped = decided.get(sha) ?? null
+    if (dropped === 'too-large') return nameOnly('too-large')
+    // company-full keeps its kind and sha256: the next manifest judges it again.
+    return { idx, path: e.path, kind: e.kind, size: e.size, sha256: sha, label: e.label, stored: dropped === null && alreadyStored.has(sha), dropped }
   })
-  return { files, totalBytes: total }
 }
 
-/** The contents still wanted (accepted, not stored), each once. */
+/** The contents still wanted (not dropped, not stored), each once. */
 const missingOf = (files: HoldingFile[]) => [...new Set(files.filter(f => f.sha256 && !f.stored && !f.dropped).map(f => f.sha256 as string))]
 
-/** git's own test for "binary": a NUL byte in the first 8000 bytes. Only text is scanned for secrets. */
-function looksBinary(bytes: Uint8Array): boolean {
-  const end = Math.min(bytes.length, 8000)
-  for (let i = 0; i < end; i++) if (bytes[i] === 0) return true
-  return false
-}
-
-const SCAN_CHUNK = 1024 * 1024
 /** Longer than any secret pattern's match, so one cut between chunks never hides it. */
 const SCAN_OVERLAP = 512
+
+/** Pass the chunks through, scanning each (with the end of the one before) for a secret. */
+async function* scanned(chunks: AsyncIterable<Uint8Array>, found: { secret: boolean }): AsyncGenerator<Uint8Array> {
+  let tail = ''
+  for await (const chunk of chunks) {
+    // latin1: one character per byte; the patterns are ASCII, as the push checker reads git's bytes.
+    // Every content, binary too (a hit there becomes a name only: the safe side).
+    const text = tail + Buffer.from(chunk.buffer, chunk.byteOffset, chunk.byteLength).toString('latin1')
+    if (!found.secret && secretIn(text)) found.secret = true
+    tail = text.slice(-SCAN_OVERLAP)
+    yield chunk
+  }
+}
 
 export function createPrivateHoldingService(deps: PrivateHoldingDeps) {
   const { companyData, ticketLookup, blobs, transactions, clock, ids } = deps
   const budgets = new Map<string, { windowStart: number; used: number }>()
+  const uploading = new Map<string, number>()
+  let uploadingAll = 0
+  const locks = new Map<string, Promise<void>>()
+
+  /**
+   * One company's holding storage steps, one at a time: naming and marking a content, the sweep, the
+   * erasure. (Receiving a body runs outside it, into the request's own temporary file.)
+   */
+  async function withLock<T>(companyId: string, fn: () => Promise<T>): Promise<T> {
+    const before = locks.get(companyId) ?? Promise.resolve()
+    let release!: () => void
+    const mine = new Promise<void>(resolve => { release = resolve })
+    const chain = before.then(() => mine)
+    locks.set(companyId, chain)
+    await before
+    try {
+      return await fn()
+    } finally {
+      release()
+      if (locks.get(companyId) === chain) locks.delete(companyId)
+    }
+  }
 
   /** Null when there is room; else the seconds to wait. */
   function takeBudget(kind: 'blobs' | 'writes', userId: string): number | null {
@@ -241,24 +281,30 @@ export function createPrivateHoldingService(deps: PrivateHoldingDeps) {
     }
   }
 
-  /** Does this content hold a secret (text only, scanned in chunks with a yield between)? */
-  async function holdsSecret(bytes: Uint8Array): Promise<boolean> {
-    if (looksBinary(bytes)) return false
-    const buf = Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength)
-    for (let start = 0; start < buf.length; start += SCAN_CHUNK) {
-      // latin1: one character per byte; the patterns are ASCII, as the push checker reads git's bytes.
-      const chunk = buf.subarray(Math.max(0, start - SCAN_OVERLAP), Math.min(buf.length, start + SCAN_CHUNK)).toString('latin1')
-      if (secretIn(chunk)) return true
-      if (start + SCAN_CHUNK < buf.length) await deps.yieldNow()
+  /** Under the company's lock: is this content still wanted by the receiving item, and is there room? Then name it and mark it stored. */
+  async function commitBlob(handle: CompanyData, itemId: string, sha256: string, size: number, temp: string): Promise<Outcome<null>> {
+    const companyId = handle.companyId
+    const item = handle.holdingItems.get(itemId)
+    // Received, removed or erased meanwhile (another PUT of the same content finished first): only
+    // this request's temporary file goes — never a content an item names.
+    if (!item) { await blobs.discard(companyId, itemId, temp); return NOT_FOUND() }
+    if (item.state !== 'receiving') { await blobs.discard(companyId, itemId, temp); return ALREADY_RECEIVED() }
+    const rows = handle.holdingItems.files(itemId).filter(f => f.sha256 === sha256 && !f.dropped)
+    if (rows.length === 0) { await blobs.discard(companyId, itemId, temp); return NOT_FOUND() }
+    if (rows.every(f => f.stored) && await blobs.has(companyId, itemId, sha256)) { await blobs.discard(companyId, itemId, temp); return ok(null) }
+    // The company's room counts what is stored (never announcements), read here under the lock.
+    if (!rows.some(f => f.stored) && handle.holdingItems.storedBytes() + size > HOLDING_COMPANY_BYTES) {
+      await blobs.discard(companyId, itemId, temp)
+      handle.holdingItems.dropContent(itemId, sha256, 'company-full', clock.now())
+      return COMPANY_FULL()
     }
-    return false
-  }
-
-  /** The distinct accepted contents' bytes of these rows. */
-  const bytesOf = (files: HoldingFile[]) => {
-    const seen = new Map<string, number>()
-    for (const f of files) if (f.sha256 && !f.dropped) seen.set(f.sha256, f.size)
-    return [...seen.values()].reduce((a, b) => a + b, 0)
+    await blobs.commit(companyId, itemId, temp, sha256)
+    if (!handle.holdingItems.markStored(itemId, sha256, clock.now())) {
+      // The manifest changed during the rename: keep the file only if a stored entry names it.
+      if (!handle.holdingItems.files(itemId).some(f => f.sha256 === sha256 && f.stored)) await blobs.remove(companyId, itemId, sha256)
+      return handle.holdingItems.get(itemId)?.state === 'receiving' ? NOT_FOUND() : ALREADY_RECEIVED()
+    }
+    return ok(null)
   }
 
   return {
@@ -298,28 +344,38 @@ export function createPrivateHoldingService(deps: PrivateHoldingDeps) {
           return refuse('conflict', 'This ticket has its items from enough PCs', { code: HOLDING_CODES.tooManyDevices })
         }
         const stored = new Set(current ? handle.holdingItems.files(current.id).filter(f => f.stored && f.sha256).map(f => f.sha256 as string) : [])
-        const { files, totalBytes } = acceptEntries(parsed.manifest, handle.holdingItems.heldBytes(current?.id), stored)
+        const files = acceptEntries(parsed.manifest, {
+          ticketOther: handle.holdingItems.ticketStoredBytes(ticket.id, current?.id),
+          companyOther: handle.holdingItems.storedBytes(current?.id),
+        }, stored)
         const itemId = current?.id ?? ids.newId()
         if (current) {
-          if (!handle.holdingItems.replaceFiles(itemId, files, totalBytes, at)) return ALREADY_RECEIVED()
+          if (!handle.holdingItems.replaceFiles(itemId, files, at)) return ALREADY_RECEIVED()
         } else {
           handle.holdingItems.create({
             id: itemId, ticketId: ticket.id, userId, deviceKey: parsed.deviceKey, scopeId: ticket.scopeId,
-            folderPath: ticket.folderPath, baseCommit: parsed.baseCommit, totalBytes, at,
+            folderPath: ticket.folderPath, baseCommit: parsed.baseCommit, at,
           }, files)
         }
-        const dropped = [...stored].filter(sha => !files.some(f => f.sha256 === sha))
-        return ok({ itemId, files, dropped })
+        return ok({ itemId, files })
       })
       if (!result.ok) return result
-      const { itemId, files, dropped } = result.value
-      // Contents the new manifest no longer names: not kept (best effort; the clock removes the rest with the item).
-      for (const sha of dropped) void blobs.remove(handle.companyId, itemId, sha).catch(() => undefined)
-      return ok({ itemId, missing: missingOf(files), namesOnly: files.filter(f => f.dropped !== null).map(f => f.idx) })
+      const { itemId, files } = result.value
+      // Contents the new manifest no longer names are removed by the sweep (under the company's lock).
+      return ok({
+        itemId,
+        missing: missingOf(files),
+        namesOnly: files.filter(f => f.dropped === 'too-large' || f.dropped === 'secret').map(f => f.idx),
+        companyFull: files.filter(f => f.dropped === 'company-full').map(f => f.idx),
+      })
     },
 
-    /** PUT /api/me/holding/items/:itemId/blobs/:sha256: one content (the route limits the body). */
-    async putBlob(userId: string, itemId: string, sha256: string, bytes: Uint8Array): Promise<Outcome<null>> {
+    /**
+     * PUT /api/me/holding/items/:itemId/blobs/:sha256. Everything that can refuse is asked before
+     * `body()` is read; the body then streams into this request's own temporary file.
+     */
+    async putBlob(userId: string, itemId: string, sha256: string, contentLength: string | undefined,
+      body: () => AsyncIterable<Uint8Array> | null): Promise<Outcome<null>> {
       const wait = takeBudget('blobs', userId)
       if (wait !== null) return rateLimited(wait)
       const found = itemFor(userId, itemId)
@@ -332,32 +388,60 @@ export function createPrivateHoldingService(deps: PrivateHoldingDeps) {
       const named = handle.holdingItems.files(item.id).filter(f => f.sha256 === sha256)
       if (named.length === 0) return NOT_FOUND()
       const wanted = named.filter(f => !f.dropped)
-      // Dropped as a secret already: nothing more to send for it, and nothing is kept.
-      if (wanted.length === 0) return ok(null)
-      if (wanted.every(f => f.stored)) return ok(null)
-      if (bytes.byteLength !== wanted[0].size || deps.sha256(bytes) !== sha256) {
-        return refuse('bad-request', 'The content is not the one named', { code: HOLDING_CODES.hashMismatch })
+      if (wanted.length === 0) {
+        // Dropped as a secret: nothing more to send for it, nothing is kept. No room: try again later.
+        return named.some(f => f.dropped === 'company-full') ? COMPANY_FULL() : ok(null)
       }
-      if (await holdsSecret(bytes)) {
-        // I7: never kept. Its entries become names only; the bytes go nowhere.
-        transactions.run(() => {
-          const rest = handle.holdingItems.files(item.id).filter(f => f.sha256 !== sha256)
-          handle.holdingItems.dropContent(item.id, sha256, bytesOf(rest), clock.now())
-        })
-        return ok(null)
+      // Stored and on disk: nothing to read. (A content lost from the disk is taken again.)
+      if (wanted.every(f => f.stored) && await blobs.has(handle.companyId, item.id, sha256)) return ok(null)
+      const size = wanted[0].size
+      const length = contentLength !== undefined && /^\d{1,16}$/.test(contentLength) ? Number(contentLength) : null
+      if (length === null) return INVALID('Content-Length is required')
+      if (length > HOLDING_LIMITS.fileBytes) return refuse('too-large', 'The content is too large', { code: HOLDING_CODES.tooLarge })
+      if (length !== size) return HASH_MISMATCH()
+      const mine = uploading.get(userId) ?? 0
+      if (mine >= rates.uploadsPerUser || uploadingAll >= rates.uploadsPerServer) {
+        return refuse('rate-limited', 'Enough uploads are running; try again shortly', { code: HOLDING_CODES.busy, retryAfterSeconds: 5 })
       }
+      const source = body()
+      if (!source) return INVALID()
+      uploading.set(userId, mine + 1)
+      uploadingAll++
       try {
-        await blobs.put(handle.companyId, item.id, sha256, bytes)
-      } catch (error) {
-        logError('holding', 'could not store a held content', error, { company: handle.companyId, item: item.id })
-        return refuse('unavailable', 'Could not store the content; try again', { code: 'STORE_FAILED' })
+        const found = { secret: false }
+        let received
+        try {
+          received = await blobs.receive(handle.companyId, item.id, scanned(source, found), size)
+        } catch (error) {
+          // The connection broke or the disk failed: nothing kept (the store removed its temporary file).
+          logError('holding', 'could not receive a held content', error, { company: handle.companyId, item: item.id })
+          return refuse('unavailable', 'Could not store the content; try again', { code: 'STORE_FAILED' })
+        }
+        if (!received) return HASH_MISMATCH()
+        if (received.bytes !== size || received.sha256 !== sha256) {
+          await blobs.discard(handle.companyId, item.id, received.temp)
+          return HASH_MISMATCH()
+        }
+        if (found.secret) {
+          // I7: never kept. Its entries become names only; the bytes go nowhere.
+          await blobs.discard(handle.companyId, item.id, received.temp)
+          handle.holdingItems.dropContent(item.id, sha256, 'secret', clock.now())
+          return ok(null)
+        }
+        const temp = received.temp
+        try {
+          return await withLock(handle.companyId, () => commitBlob(handle, item.id, sha256, size, temp))
+        } catch (error) {
+          await blobs.discard(handle.companyId, item.id, temp).catch(() => undefined)
+          logError('holding', 'could not store a held content', error, { company: handle.companyId, item: item.id })
+          return refuse('unavailable', 'Could not store the content; try again', { code: 'STORE_FAILED' })
+        }
+      } finally {
+        uploadingAll--
+        const left = (uploading.get(userId) ?? 1) - 1
+        if (left > 0) uploading.set(userId, left)
+        else uploading.delete(userId)
       }
-      // Read again after the await: the item may have been finished, removed or erased meanwhile.
-      if (!handle.holdingItems.markStored(item.id, sha256, clock.now())) {
-        await blobs.remove(handle.companyId, item.id, sha256).catch(() => undefined)
-        return handle.holdingItems.get(item.id) ? ALREADY_RECEIVED() : NOT_FOUND()
-      }
-      return ok(null)
     },
 
     /** POST /api/me/holding/items/:itemId/finish: received; it waits for the folder's managers. */
@@ -371,18 +455,21 @@ export function createPrivateHoldingService(deps: PrivateHoldingDeps) {
       if (item.state !== 'receiving') return ALREADY_RECEIVED()
       const shut = closed(ticket)
       if (shut) return shut
-      const missing = missingOf(handle.holdingItems.files(item.id))
+      const files = handle.holdingItems.files(item.id)
+      // Something the company had no room for: the app keeps its copy and comes back (never finished half-held).
+      if (files.some(f => f.dropped === 'company-full')) return COMPANY_FULL()
+      const missing = missingOf(files)
       if (missing.length > 0) return refuse('conflict', 'Some contents have not arrived', { code: HOLDING_CODES.missingFiles, missing })
       const at = clock.now()
       const done = transactions.run(() => {
         if (!handle.holdingItems.finish(item.id, at)) return false
-        const files = handle.holdingItems.files(item.id)
+        const now = handle.holdingItems.files(item.id)
         handle.permissionHistory.append({
           action: 'holding-received',
           detail: {
             itemId: item.id, ticketId: ticket.id, scopeId: item.scopeId, userId,
-            files: files.length, held: files.filter(f => f.stored).length, namesOnly: files.filter(f => f.kind === 'names-only').length,
-            bytes: bytesOf(files),
+            files: now.length, held: now.filter(f => f.stored).length, namesOnly: now.filter(f => f.kind === 'names-only').length,
+            bytes: handle.holdingItems.get(item.id)?.totalBytes ?? 0,
           },
           at,
           byUser: userId,
@@ -398,52 +485,65 @@ export function createPrivateHoldingService(deps: PrivateHoldingDeps) {
 
     /**
      * The server clock (I8), one company: receiving items left for 2 days removed, waiting items
-     * expired after 30 days, then the contents of every item done with them deleted, and any
-     * directory no row holds. Running twice changes nothing more. Returns the items expired or removed.
+     * expired after 30 days, then the contents of every item done with them deleted, any directory
+     * no row holds removed, and in a live item's directory every file no stored entry names and every
+     * temporary file older than an hour. Under the company's lock. Running twice changes nothing
+     * more. Returns the items expired or removed.
      */
     async sweep(companyId: string): Promise<number> {
-      const handle = companyData.forCompany(companyId)
-      const nowMs = clock.nowMs()
-      const at = clock.now()
-      const abandoned = handle.holdingItems.removeAbandoned(new Date(nowMs - HOLDING_RECEIVING_DAYS * DAY_MS).toISOString())
-      const expired = transactions.run(() => {
-        const ids = handle.holdingItems.expireWaiting(new Date(nowMs - HOLDING_ITEM_DAYS * DAY_MS).toISOString(), at)
-        for (const id of ids) {
-          const item = handle.holdingItems.get(id)
-          handle.permissionHistory.append({
-            action: 'holding-expired', detail: { itemId: id, ticketId: item?.ticketId, scopeId: item?.scopeId, userId: item?.userId }, at, byUser: CLOCK_ACTOR.id,
-          })
+      return withLock(companyId, async () => {
+        const handle = companyData.forCompany(companyId)
+        const nowMs = clock.nowMs()
+        const at = clock.now()
+        const abandoned = handle.holdingItems.removeAbandoned(new Date(nowMs - HOLDING_RECEIVING_DAYS * DAY_MS).toISOString())
+        const expired = transactions.run(() => {
+          const ids = handle.holdingItems.expireWaiting(new Date(nowMs - HOLDING_ITEM_DAYS * DAY_MS).toISOString(), at)
+          for (const id of ids) {
+            const item = handle.holdingItems.get(id)
+            handle.permissionHistory.append({
+              action: 'holding-expired', detail: { itemId: id, ticketId: item?.ticketId, scopeId: item?.scopeId, userId: item?.userId }, at, byUser: CLOCK_ACTOR.id,
+            })
+          }
+          return ids
+        })
+        for (const id of handle.holdingItems.blobsToDelete()) {
+          await blobs.removeItem(companyId, id)
+          handle.holdingItems.markBlobsDeleted(id, clock.now())
         }
-        return ids
+        const live = new Set(handle.holdingItems.holdingContents())
+        for (const id of await blobs.itemIds(companyId)) {
+          if (!live.has(id)) { await blobs.removeItem(companyId, id); continue }
+          const kept = new Set(handle.holdingItems.files(id).filter(f => f.stored && f.sha256 && !f.dropped).map(f => f.sha256 as string))
+          for (const e of await blobs.entries(companyId, id)) {
+            if (e.temp ? clock.nowMs() - e.mtimeMs > TEMP_FILE_MAX_AGE_MS : !kept.has(e.name)) {
+              if (e.temp) await blobs.discard(companyId, id, e.name)
+              else await blobs.remove(companyId, id, e.name)
+            }
+          }
+        }
+        return abandoned.length + expired.length
       })
-      for (const id of handle.holdingItems.blobsToDelete()) {
-        await blobs.removeItem(companyId, id)
-        handle.holdingItems.markBlobsDeleted(id, clock.now())
-      }
-      const keep = new Set(handle.holdingItems.holdingContents())
-      for (const id of await blobs.itemIds(companyId)) {
-        // Read again: an item may have been started since the list above.
-        if (!keep.has(id) && !handle.holdingItems.holdingContents().includes(id)) await blobs.removeItem(companyId, id)
-      }
-      return abandoned.length + expired.length
     },
 
     /**
      * The operator's erasure (src/cli/erase-content.ts `holding`): the item's file rows and
-     * contents go, the item stays as discarded (so the app's retry is told it was received).
+     * contents go, the item stays as discarded (so the app's retry is told it was received — also
+     * for an item still receiving: an owner decision left open, private-folders.md).
      */
     async erase(companyId: string, itemId: string, reason: string): Promise<boolean> {
-      const handle = companyData.forCompany(companyId)
-      const at = clock.now()
-      const erased = transactions.run(() => {
-        if (!handle.holdingItems.erase(itemId, at)) return false
-        handle.permissionHistory.append({ action: 'holding-erased', detail: { itemId, reason }, at, byUser: 'operator' })
+      return withLock(companyId, async () => {
+        const handle = companyData.forCompany(companyId)
+        const at = clock.now()
+        const erased = transactions.run(() => {
+          if (!handle.holdingItems.erase(itemId, at)) return false
+          handle.permissionHistory.append({ action: 'holding-erased', detail: { itemId, reason }, at, byUser: 'operator' })
+          return true
+        })
+        if (!erased) return false
+        await blobs.removeItem(companyId, itemId)
+        handle.holdingItems.markBlobsDeleted(itemId, clock.now())
         return true
       })
-      if (!erased) return false
-      await blobs.removeItem(companyId, itemId)
-      handle.holdingItems.markBlobsDeleted(itemId, clock.now())
-      return true
     },
   }
 }

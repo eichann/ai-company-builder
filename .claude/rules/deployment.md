@@ -284,7 +284,10 @@ admin console); lifting the jobs stop holds the slot that passed meanwhile, so n
   ```
 
   then `docker compose up -d api`, re-apply the erasure log (`records.md`), and tell the owners / admins. The
-  command needs the api's settings (`AUTH_SECRET` …), which `docker compose run` gives it.
+  command needs the api's settings (`AUTH_SECRET` …), which `docker compose run` gives it. The holding place's
+  contents (`data/holding/`, `private-folders.md` "Holding: the member's upload") must come from the same snapshot
+  as the database: a stored entry whose file is missing is taken again only while its item is still receiving (the
+  member's app sends it once more); a waiting item's missing content is lost — the reviewers see its name only.
 - Test: `restore-pause.test.ts` (a slot that ran before the copy is never run again, also after the stop is lifted;
   the whole AI stopped once; owners / admins told, members not), `job-runs.test.ts` 「after a restore」 (a running PC
   occurrence held, its run ended), `company-archive.test.ts` 「the restore command…」 (the CLI's restore and

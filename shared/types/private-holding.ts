@@ -36,6 +36,8 @@ export interface HoldingLimits {
   fileBytes: number
   /** One item's bytes (distinct contents). */
   itemBytes: number
+  /** One ticket's bytes, all its PCs' items together (one member cannot fill the company's room). */
+  ticketBytes: number
   /** Entries per item: the ones after it are kept as names only. */
   files: number
   /** Items per ticket (one per PC). */
@@ -45,11 +47,15 @@ export interface HoldingLimits {
 export const HOLDING_LIMITS: HoldingLimits = Object.freeze({
   fileBytes: 50 * 1024 * 1024,
   itemBytes: 500 * 1024 * 1024,
+  ticketBytes: 1024 * 1024 * 1024,
   files: 5000,
   devices: 3,
 })
 
-/** Waiting items of one company, together (above it: names only). Server-side; not in the answer. */
+/**
+ * The contents one company holds at once (stored bytes of its items still holding contents).
+ * Server-side; not in the answer. Above it an entry is `company-full`: see `HoldingItemResponse`.
+ */
 export const HOLDING_COMPANY_BYTES = 2 * 1024 * 1024 * 1024
 
 /** The refusal codes the app reads (fixed strings). */
@@ -62,13 +68,21 @@ export const HOLDING_CODES = Object.freeze({
   alreadyReceived: 'ALREADY_RECEIVED',
   /** 409: `finish` before every content arrived; `missing` lists the sha256 still wanted. */
   missingFiles: 'MISSING_FILES',
+  /**
+   * 409: the company's holding place is full right now (blob PUT, finish). **The app keeps its
+   * local copy and tries again later** — it must not finish, nor remove anything (owner principle:
+   * a member's work is never lost). A later `POST …/items` with the same `deviceKey` judges again.
+   */
+  companyFull: 'COMPANY_FULL',
   /** 409: the ticket has its items from `devices` PCs already. */
   tooManyDevices: 'TOO_MANY_DEVICES',
   /** 413: a blob body above `fileBytes`. */
   tooLarge: 'TOO_LARGE',
   /** 400: the body's sha256 or size is not the one in the URL / manifest. */
   hashMismatch: 'HASH_MISMATCH',
-  /** 400: the request is not valid. */
+  /** 429: this member (or the server) has enough uploads running; wait `Retry-After` seconds. */
+  busy: 'BUSY',
+  /** 400: the request is not valid (also a blob PUT without `Content-Length`). */
   invalid: 'INVALID',
   /** 429: too many requests of this member; wait `Retry-After` seconds. */
   rateLimited: 'RATE_LIMITED',
@@ -120,17 +134,24 @@ export interface HoldingItemRequest {
 
 /**
  * The item for this ticket and PC (the same one on a repeat; while it is still receiving, a new
- * manifest replaces the old one). `missing`: sha256 of contents to PUT. `namesOnly`: indexes of
- * manifest entries kept as their name only (too large, over a cap, a secret's file name).
+ * manifest replaces the old one and the server judges every entry again). `missing`: sha256 of
+ * contents to PUT. `namesOnly`: indexes of manifest entries kept as their name only (too large,
+ * over a cap, a secret's file name) — the app may remove those.
+ *
+ * `companyFull`: indexes of entries the company's holding place has no room for **now**. While any
+ * is listed, the app must not finish the item and must keep its whole local copy; it tries again
+ * later with the same `deviceKey` (the contents already stored stay).
  */
 export interface HoldingItemResponse {
   itemId: string
   missing: string[]
   namesOnly: number[]
+  companyFull: number[]
 }
 
 // ----------------------------------------------------------------------------
-// PUT /api/me/holding/items/:itemId/blobs/:sha256   raw body (≤ fileBytes) → 204
+// PUT /api/me/holding/items/:itemId/blobs/:sha256   raw body with Content-Length = the entry's size
+//   (≤ fileBytes; above it 413 before the body is read) → 204. At most 2 uploads at once per member.
 // POST /api/me/holding/items/:itemId/finish          → 200 HoldingFinishResponse
 // ----------------------------------------------------------------------------
 

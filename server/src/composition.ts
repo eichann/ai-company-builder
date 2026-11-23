@@ -30,7 +30,7 @@ import { betterAuthAccountDirectory, betterAuthAccountIdByEmail } from './adapte
 import { localRepoStore } from './adapters/git-repo-store'
 import { companyFileViews } from './adapters/company-files'
 import { gitRecordFileSource, gitRecordFileWriter } from './adapters/record-files'
-import { processCompanyLock, randomIds, sha256Bytes, sha256TokenDigest, systemClock, systemMonotonicClock } from './adapters/system'
+import { processCompanyLock, randomIds, sha256TokenDigest, systemClock, systemMonotonicClock } from './adapters/system'
 import { loadKekFile } from './adapters/kek-file'
 import { localSecretCipher } from './adapters/local-secret-cipher'
 import { httpsUpstream } from './adapters/upstream-https'
@@ -215,8 +215,7 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
   const trackReaderChange = holdingTickets.track
   // With a ticket, what their PC never sent is handed over here (private-folders.md "Holding: the member's upload").
   const privateHolding = createPrivateHoldingService({
-    ...shared, ticketLookup: sqliteHoldingTicketLookup(conn), blobs: diskHoldingBlobStore(HOLDING_DIR), sha256: sha256Bytes,
-    yieldNow: () => new Promise<void>(resolve => setImmediate(resolve)),
+    ...shared, ticketLookup: sqliteHoldingTicketLookup(conn), blobs: diskHoldingBlobStore(HOLDING_DIR),
   })
   // With or without the shared company folder (owner decision 2026-11-07): what needs the repository asks.
   const companyFolders = createCompanyFolders({ companies: repos.companies, companyData: shared.companyData })

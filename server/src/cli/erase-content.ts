@@ -65,11 +65,11 @@ async function main(argv: string[]): Promise<number> {
     const { HOLDING_DIR } = await import('../lib/config')
     const { diskHoldingBlobStore } = await import('../adapters/holding-blobs')
     const { sqliteHoldingTicketLookup } = await import('../adapters/sqlite/holding')
-    const { randomIds, sha256Bytes } = await import('../adapters/system')
+    const { randomIds } = await import('../adapters/system')
     const { createPrivateHoldingService } = await import('../services/private-holding')
     const holding = createPrivateHoldingService({
       companyData: sqliteCompanyData(db), ticketLookup: sqliteHoldingTicketLookup(db), blobs: diskHoldingBlobStore(HOLDING_DIR),
-      transactions: sqliteTransactions(db), clock: systemClock, ids: randomIds, sha256: sha256Bytes, yieldNow: async () => undefined,
+      transactions: sqliteTransactions(db), clock: systemClock, ids: randomIds,
     })
     if (!(await holding.erase(args[0], args[1], args[2]))) { console.error('No such held item in this company.'); return 1 }
     console.log(`erased ${args[0]} holding ${args[1]}`)

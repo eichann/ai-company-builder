@@ -32,8 +32,8 @@ export const holdingSchema = `
     -- "Holding: the member's upload"). folder_path is copied from the ticket (server-only).
     -- state: receiving (contents arriving) → waiting (finished, for the managers) → taking /
     -- taken / discarded (later PRs) or expired (the server clock, 30 days after arrival).
-    -- total_bytes = the accepted distinct contents (reserved against the caps when the manifest
-    -- arrived). Rows stay after the blobs are deleted (blobs_deleted_at): who, when, names.
+    -- total_bytes = the distinct contents stored now (what counts against the ticket's and the company's
+    -- room). Rows stay after the blobs are deleted (blobs_deleted_at): who, when, names.
     CREATE TABLE IF NOT EXISTS holding_items (
       id TEXT PRIMARY KEY,
       company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
@@ -59,8 +59,8 @@ export const holdingSchema = `
 
     -- The entries of an item's manifest, in order (idx). kind: changed / deleted / backup /
     -- personal / names-only; sha256 only for content (kept on an entry dropped as a secret, never
-    -- its bytes); stored = its blob arrived; dropped = why
-    -- an entry is a name only although sent with content ('too-large', 'secret').
+    -- its bytes); stored = its blob arrived; dropped = why it is not held ('too-large', 'secret': a
+    -- name only; 'company-full': the company's room was full, the app keeps its copy and retries).
     CREATE TABLE IF NOT EXISTS holding_files (
       company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
       item_id TEXT NOT NULL REFERENCES holding_items(id) ON DELETE CASCADE,
@@ -71,7 +71,7 @@ export const holdingSchema = `
       sha256 TEXT,
       label TEXT,
       stored INTEGER NOT NULL DEFAULT 0,
-      dropped TEXT CHECK (dropped IS NULL OR dropped IN ('too-large', 'secret')),
+      dropped TEXT CHECK (dropped IS NULL OR dropped IN ('too-large', 'secret', 'company-full')),
       PRIMARY KEY (item_id, idx)
     );
     CREATE INDEX IF NOT EXISTS idx_holding_files_company ON holding_files(company_id, item_id);
