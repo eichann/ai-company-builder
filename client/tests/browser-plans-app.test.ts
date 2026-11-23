@@ -92,7 +92,7 @@ function registrationHarness(o: { switchOn?: boolean; checker?: BrowserChecker; 
 }
 
 const request = (signal = new AbortController().signal) => ({
-  companyId: COMPANY, conversationId: 'conv-1', connector: { id: 'lstep', version: '0.6.2' }, operation: 'reminder_step_add_template',
+  companyId: COMPANY, conversationId: 'conv-1', connector: { id: 'lstep', version: '0.6.3' }, operation: 'reminder_step_add_template',
   hints: { targetHints: { reminder: '11月' }, changeHints: { template: '持ち物' }, reason: '頼まれた' }, signal,
 })
 
@@ -113,7 +113,7 @@ test('a plan is registered with this build\'s combination and the facts the chec
   const body = calls.register[0] as Record<string, unknown>
   assert.deepEqual(
     { connector: body.connector, operation: body.operation, declarationHash: body.declarationHash, checkerHash: body.checkerHash, factsVersion: body.factsVersion, target: body.target, change: body.change, conversationId: body.conversationId },
-    { connector: { id: 'lstep', version: '0.6.2' }, operation: 'reminder_step_add_template', ...COMBINATION, target: { reminder: REMINDER, step: STEP }, change: { template: TO_ADD }, conversationId: 'conv-1' })
+    { connector: { id: 'lstep', version: '0.6.3' }, operation: 'reminder_step_add_template', ...COMBINATION, target: { reminder: REMINDER, step: STEP }, change: { template: TO_ADD }, conversationId: 'conv-1' })
   const facts = body.facts as Record<string, { status: string; value?: unknown; source: string }>
   assert.deepEqual(facts.schedule.value, { timing: '当日 09:00' })
   assert.equal(facts.schedule.source, '/api/episode-groups')
@@ -246,7 +246,7 @@ test('a 4xx is the server\'s refusal with its code; a 5xx, a thrown request or n
 
 function planView(over: Partial<BrowserPlanView> = {}): BrowserPlanView {
   return {
-    id: PLAN, state: 'draft', closeReason: null, connector: { id: 'lstep', version: '0.6.2', label: 'Lステップ' }, operation: 'reminder_step_add_template',
+    id: PLAN, state: 'draft', closeReason: null, connector: { id: 'lstep', version: '0.6.3', label: 'Lステップ' }, operation: 'reminder_step_add_template',
     label: 'リマインダの段にテンプレートを足す', sharedNote: null, delivers: 'scheduled', account: ACCOUNT,
     target: { reminder: REMINDER, step: STEP }, change: { template: TO_ADD }, facts: {}, explanation: null,
     createdAt: '2026-11-22T03:00:00.000Z', expiresAt: '2026-11-22T04:00:00.000Z', approvedAt: null, contentHash: HASH, execution: null, ...over,
@@ -429,14 +429,14 @@ test('a capture reads false after a sign-in change, a changed browser setting, a
 test('the build\'s combination is carried.json\'s row whose declaration hash is the bundled text\'s; anything doubtful is none', () => {
   const carried = JSON.parse(fs.readFileSync(path.join(ROOT, 'shared/browser-connectors/carried.json'), 'utf8'))
   const approved = JSON.parse(fs.readFileSync(path.join(ROOT, 'shared/browser-connectors/approved.json'), 'utf8')) as { combinations: Array<Record<string, unknown>> }
-  const real = createCarriedCombinations(carried, [lstep.declaration])('lstep', '0.6.2')
+  const real = createCarriedCombinations(carried, [lstep.declaration])('lstep', '0.6.3')
   assert.ok(real)
   assert.ok(approved.combinations.some(r => r.declarationHash === real.declarationHash && r.checkerHash === real.checkerHash && r.factsVersion === real.factsVersion))
   assert.equal(createCarriedCombinations(carried, [lstep.declaration])('lstep', '0.5.0'), null)
   const row = carried.combinations[0]
-  assert.equal(createCarriedCombinations({ format: 1, combinations: [{ ...row, declarationHash: `sha256:${'0'.repeat(64)}` }] }, [lstep.declaration])('lstep', '0.6.2'), null)
-  assert.equal(createCarriedCombinations({ format: 1, combinations: [row, { ...row, checkerHash: `sha256:${'1'.repeat(64)}` }] }, [lstep.declaration])('lstep', '0.6.2'), null)
-  assert.equal(createCarriedCombinations(carried, [])('lstep', '0.6.2'), null)
+  assert.equal(createCarriedCombinations({ format: 1, combinations: [{ ...row, declarationHash: `sha256:${'0'.repeat(64)}` }] }, [lstep.declaration])('lstep', '0.6.3'), null)
+  assert.equal(createCarriedCombinations({ format: 1, combinations: [row, { ...row, checkerHash: `sha256:${'1'.repeat(64)}` }] }, [lstep.declaration])('lstep', '0.6.3'), null)
+  assert.equal(createCarriedCombinations(carried, [])('lstep', '0.6.3'), null)
 })
 
 // ---------------------------------------------------------------------------

@@ -40,9 +40,26 @@ export function createBrowserConnectors(texts: readonly string[]) {
  * meant cannot be told); a declaration that does not parse gives none.
  */
 export function browserLoginHelpers(texts: readonly string[]): (host: string) => readonly BrowserLoginHelper[] {
+  const of = declarationOfHost(texts)
+  return host => of(host)?.loginHelpers ?? []
+}
+
+/**
+ * The asset hosts of a site's host (scripts, styles, fonts, images the pages load), from the
+ * declarations the app bundles: since plan B the declaration alone decides them (agent-browser.md
+ * "Asset hosts"). The same rule as the login helpers: a host two declarations name gets none, a
+ * declaration that does not parse gives none.
+ */
+export function browserAssetHosts(texts: readonly string[]): (host: string) => readonly string[] {
+  const of = declarationOfHost(texts)
+  return host => of(host)?.assetHosts ?? []
+}
+
+/** The one declaration whose operated host is `host`, or null (none, or two: which is meant cannot be told). */
+function declarationOfHost(texts: readonly string[]): (host: string) => PluginBrowser | null {
   const parsed = texts.map(parseBrowserDeclaration).filter((d): d is NonNullable<typeof d> => !!d)
   return host => {
     const of = parsed.filter(d => d.browser.host === host)
-    return of.length === 1 ? of[0].browser.loginHelpers : []
+    return of.length === 1 ? of[0].browser : null
   }
 }

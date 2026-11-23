@@ -8,10 +8,13 @@
 //   validate = off until the next valid one (`policyFailed` closes the company's windows).
 // - A valid answer that drops a site or turns the mode off closes its window and clears its login.
 // - Signing out clears every login; signing in as another account clears the others'.
+// - A site's asset hosts are its reviewed declaration's (`assetHostsOf`), never the company's free-text
+//   list, which only a development build that asks for it adds (`developerAssetHosts`; agent-browser.md
+//   "Asset hosts").
 import { createHash } from 'node:crypto'
 import type { BrowserSiteSetting } from '../../../../shared/core/browser-operation'
 import type { AgentPolicy } from '../../../../shared/types/agent-sandbox'
-import { BROWSER_WORDS, type BrowserActionResult, type BrowserSitesResult } from '../../../shared/browser-operation'
+import { BROWSER_WORDS, browserWindowSite, type BrowserActionResult, type BrowserSitesResult } from '../../../shared/browser-operation'
 import type { BrowserPreviewSurface, BrowserRunSurface } from '../../../shared/browser-runner'
 
 export interface BrowserWindowSpec {
@@ -62,6 +65,13 @@ export interface BrowserControllerDeps {
   userId: () => string | null
   /** The member's sites for this company may have changed (the settings re-read). */
   onChanged?: (companyId: string) => void
+  /**
+   * The asset hosts of a site's host from the reviewed declaration this build carries and the approved
+   * list approves (main composes it, `bundledAssetHosts`); absent = none.
+   */
+  assetHostsOf?: (host: string) => readonly string[]
+  /** A development build that asks for it also adds the company's free-text asset hosts (a developer setting). */
+  developerAssetHosts?: boolean
   log?: Pick<Console, 'warn'>
 }
 
@@ -106,7 +116,7 @@ export function createBrowserController(deps: BrowserControllerDeps) {
     policyAnswered(companyId: string, policy: AgentPolicy) {
       const user = deps.userId()
       if (!user) return
-      const sites = browserSitesOf(policy)
+      const sites = browserSitesOf(policy).map(s => browserWindowSite(s, deps.assetHostsOf?.(s.host) ?? [], deps.developerAssetHosts === true))
       const before = known.get(keyOf(user, companyId))
       known.set(keyOf(user, companyId), sites)
       const site = (host: string) => sites.find(s => s.host === host)

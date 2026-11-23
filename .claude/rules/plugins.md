@@ -698,14 +698,18 @@ browser:
   - the adapter confirms the target is **one existing item** before the write (an id like `0` or
     `-1` is never "all").
 - **`browserOperationsAllowed(browser, settings)`**: the company's setting (`browser-operation.ts`) on,
-  the operated host one of its sites, every declared asset host among that site's, each type's effect
-  within the site's level; the rest come back with `off` / `site-not-allowed` /
-  `asset-host-not-allowed` (+ `missingAssetHosts`) / `level`.
+  the operated host one of its sites, each type's effect within the site's level; the rest come back
+  with `off` / `site-not-allowed` / `level`. The asset hosts are the declaration's alone since plan B
+  (2026-11-23; `agent-browser.md` "Asset hosts"): the company's list is a developer setting and plays no
+  part here.
+- **`asset_hosts`**: ≤ 10 (`BROWSER_DECLARATION_LIMITS.assetHosts`), exact hosts in their very spelling,
+  never the operated host or a login helper's host, once each; the window's only parts hosts for the site
+  (GET / HEAD of scripts, styles, fonts, images, in both modes).
 - **Not on the shelf yet**: the shelf refuses a package with `browser` (「a browser connector (browser) is not
   used yet」, `services/plugin-shelf.ts`), so no company installs it, `pluginsFor` never lists it and no
   app fetches it; `combineUse` refuses one, so no business plugin uses it. A released app's older parser
-  does not know `browser` (an unknown key: unusable). The current declaration (`lstep@0.6.2`, 「リマインダの段に
-  テンプレートを足す」; 0.6.2 adds its `login_helpers`, below; 0.6.1 adds the reads `GET /api/episodes/{reminder}` and `GET /api/episode-steps/{step}` for the step and its timing text, design memo §39, §40) ships **inside the app** with its checker (`client/connectors/lstep/`),
+  does not know `browser` (an unknown key: unusable). The current declaration (`lstep@0.6.3`, 「リマインダの段に
+  テンプレートを足す」; 0.6.3 adds the web fonts to its `asset_hosts`; 0.6.2 adds its `login_helpers`, below; 0.6.1 adds the reads `GET /api/episodes/{reminder}` and `GET /api/episode-steps/{step}` for the step and its timing text, design memo §39, §40) ships **inside the app** with its checker (`client/connectors/lstep/`),
   parsed by `parsePluginManifest`; the runner exists but nothing starts it. The server accepts plans
   only for a combination listed in `shared/browser-connectors/approved.json` (the declaration's text
   with its hash, the site folder's hash, the facts version; `agent-browser.md` "Plans, executions,

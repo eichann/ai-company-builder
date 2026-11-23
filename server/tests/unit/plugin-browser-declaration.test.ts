@@ -164,6 +164,15 @@ describe('a browser connector declaration', () => {
     expect(errorsOf(edit('profile.line-scdn.net]', '"*.line-scdn.net"]'))).toContain('asset_hosts')
     expect(errorsOf(edit('profile.line-scdn.net]', 'manager.linestep.net]'))).toContain('操作するサイトのホストは書けません')
     expect(errorsOf(edit('profile.line-scdn.net]', 'd1nhtjid4lgi9y.cloudfront.net]'))).toContain('2回あります')
+    expect(errorsOf(edit('profile.line-scdn.net]', 'localhost]'))).toContain('asset_hosts')
+    expect(errorsOf(edit('profile.line-scdn.net]', '"fonts.gstatic.com."]'))).toContain('asset_hosts')
+    expect(errorsOf(edit('profile.line-scdn.net]', '"https://fonts.gstatic.com"]'))).toContain('asset_hosts')
+  })
+
+  it('asset hosts stay few: at most 10, since the declaration alone decides them (agent-browser.md "Asset hosts")', () => {
+    const hosts = (n: number) => Array.from({ length: n }, (_, i) => `cdn${i}.example.net`).join(', ')
+    expect(errorsOf(edit('[d1nhtjid4lgi9y.cloudfront.net, profile.line-scdn.net]', `[${hosts(10)}]`))).toBe('')
+    expect(errorsOf(edit('[d1nhtjid4lgi9y.cloudfront.net, profile.line-scdn.net]', `[${hosts(11)}]`))).toContain('10 個まで')
   })
 
   it('login helpers: exact https hosts, a narrow path prefix, frame / post only as declared booleans (agent-browser.md "Login helpers")', () => {
@@ -471,13 +480,15 @@ describe('browserOperationsAllowed: the company setting decides which types may 
     expect(read.refused.map(x => x.reason)).toEqual(['level', 'level'])
   })
 
-  it('nothing runs when off, on a site not allowed, or with an asset host the site does not list', () => {
+  it('nothing runs when off or on a site not allowed', () => {
     expect(browserOperationsAllowed(browser(), settings({}, 'off'))).toMatchObject({ usable: [], refused: expect.arrayContaining([{ operation: 'read_reminder', reason: 'off' }]) })
     expect(browserOperationsAllowed(browser(), settings({ host: 'manager2.linestep.net' }))).toMatchObject({ site: null, usable: [], refused: expect.arrayContaining([{ operation: 'read_reminder', reason: 'site-not-allowed' }]) })
-    const missing = browserOperationsAllowed(browser(), settings({ assetHosts: ['d1nhtjid4lgi9y.cloudfront.net'] }))
-    expect(missing.usable).toEqual([])
-    expect(missing.missingAssetHosts).toEqual(['profile.line-scdn.net'])
-    expect(missing.refused.every(x => x.reason === 'asset-host-not-allowed')).toBe(true)
+  })
+
+  it('the asset hosts are the declaration\'s alone: a site whose company list names none of them still runs its types (plan B, agent-browser.md "Asset hosts")', () => {
+    const none = browserOperationsAllowed(browser(), settings({ assetHosts: [] }))
+    expect(none.usable.sort()).toEqual(['read_reminder', 'reminder_step_template', 'remove_step'])
+    expect(none.refused).toEqual([])
   })
 })
 

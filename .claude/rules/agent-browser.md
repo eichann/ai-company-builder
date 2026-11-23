@@ -36,6 +36,7 @@ paths:
   - "client/src/features/settings/components/BrowserSection.tsx"
   - "client/src/features/settings/hooks/useBrowserSites.ts"
   - "client/tests/browser-window.test.ts"
+  - "client/tests/browser-asset-hosts.test.ts"
   - "client/tests/browser-window-electron.test.ts"
   - "client/tests/browser-window-harness/**"
   - "client/shared/browser-ai.ts"
@@ -64,8 +65,9 @@ only through per-site operation types (later PRs), never by free clicking. Owner
 (2026-11-20, internal design memo §2, §13, §17, §18):
 
 - **Admin-approved sites only.** Each site has one host the AI operates (writes go only there)
-  and the exact hosts its pages load parts from (GET of scripts, styles, fonts, images only);
-  every other request is refused. No `*.` wildcards.
+  and the exact hosts its pages load parts from (GET of scripts, styles, fonts, images only) —
+  since plan B the reviewed declaration's, not the admin's ("Asset hosts"); every other request is
+  refused. No `*.` wildcards.
 - **Per-site operation types, split in two (owner decision 2026-11-21, design memo §24).** An
   operation type is **data** (the connector's declaration: what is sent, `writes`, and what the
   target must show afterwards, `expect`); the only code per site is a **checker** ("The checker"):
@@ -109,8 +111,10 @@ only through per-site operation types (later PRs), never by free clicking. Owner
   anyone). The join time is one row: `MembershipRepository.joinedAt`.
 - Admin 「ブラウザ操作」 (`admin/src/app/companies/[id]/advanced/ai-safety/browser/page.tsx`,
   「詳しい設定 › AI の安全」, owner/admin): 会社全体 (使わない / 使う), サイトの一覧 (操作するサイト,
-  段階, 画面の部品を取る先 one per line; add / remove; invalid lines, a duplicate site or the
-  operated host as a parts host are shown and block saving), the login note (kept only for
+  段階; add / remove; a duplicate site blocks saving; `BROWSER_PARTS_NOTE` says the parts and login
+  hosts come from the site's reviewed declaration — the 画面の部品を取る先 field is the developer
+  setting, shown only in a console built with `NEXT_PUBLIC_ACB_BROWSER_DEVELOPER=1`, "Asset hosts"; there
+  invalid lines or the operated host as a parts host are shown and block saving), the login note (kept only for
   members whose 「AI の囲い」 is 「囲う」), 「メンバーごとの動作」 (会社と同じ / 使わない / 使う) and the
   change history. Words: `admin/src/lib/agent-browser.ts`. Types: `shared/types/agent-browser.ts`
   re-exported from `admin/src/lib/api.ts`, pinned by `admin-contract.test.ts`. 「詳しい設定」 shows
@@ -148,7 +152,7 @@ the item is not there otherwise): each site with 「開いてログイン」 and
   clears the others'. 「ログインを消す」 closes the window and answers only once the session is cleared
   (`clearFailed` 「ログインを消せませんでした。…」 otherwise). Clearing = `clearStorageData` (cookies, local
   storage, IndexedDB, service workers, cache storage…), `clearCache`, `clearAuthCache`, `clearData`. A
-  changed site (its asset hosts) reaches the open window at once (`updateSite`: the rules and the proxy).
+  changed site (its level; a development build's asset hosts) reaches the open window at once (`updateSite`: the rules and the proxy).
   **The app's close cannot be cancelled by the page**: the session's permission is revoked first (the
   request hook then refuses everything) and the window is destroyed (no `beforeunload`).
 - **The window** (`browser-window.ts`): never the app pages' web preferences — no preload, `sandbox`,
@@ -278,7 +282,7 @@ server holds ("Executing a plan" below); while the build's switch is off it refu
   would look the same afterwards — a value added and taken away again — cannot tell a done write from a
   refused one → `no-visible-change`, never run); the
   company's setting now (`browserOperationsAllowed` against the site the member's
-  current valid policy lists: on, asset hosts, level); the AI stop; the member's open window; one run
+  current valid policy lists: on, level); the AI stop; the member's open window; one run
   per window. Then the facts are read again ("Executing a plan"), the window enters `ai` mode with the
   run's gate (true only once DevTools Fetch sees the page), the checker's declared reads are made, and
   the run **stops before writing** for: an account that cannot be read (`account-unknown`) or is not the
@@ -347,7 +351,7 @@ server holds ("Executing a plan" below); while the build's switch is off it refu
   are the AI's. **Prefer stable sources** for a new checker: a JSON answer the page itself uses or a
   fixed id marker over the layout of the HTML; a site whose request names the whole target needs no
   target check. What the person approves (`before`) is the state the checker read, not what the AI said.
-- **Lステップ** (`client/connectors/lstep/`): the declaration `lstep@0.6.2` (0.6.1 + its login helpers, "Login helpers"; `declaration.ts`, bundled
+- **Lステップ** (`client/connectors/lstep/`): the declaration `lstep@0.6.3` (0.6.1 + its login helpers, "Login helpers", 0.6.2; + the web fonts among its asset hosts, "Asset hosts", 0.6.3; `declaration.ts`, bundled
   until the shelf hands browser connectors out; parsed by the core's `parsePluginManifest` like any
   package) with one type, **「リマインダの段にテンプレートを足す」** (`reminder_step_add_template`): effect
   `write`, checker `lstep.reminder_step`, `lock: { kind: lstep.reminder_step }`, `delivers: scheduled`
@@ -481,9 +485,9 @@ the AI operates** (`ai` mode, a run's `enterAi` … `leaveAi`) they are shut. Th
   Reviewed and versioned with the connector (a change is a new version and a new approved row); the admin
   types nothing, and no vendor name is in the core. Main hands the window the helpers of the bundled
   declaration of the site's host — approved and carried only, below — (`browserLoginHelpers`,
-  `client/shared/browser-checkers.ts`: a host two declarations name gets none). Lステップ 0.6.2: `www.google.com` under `/recaptcha/` (frame, post) and
-  `www.gstatic.com` under `/recaptcha/` (parts only). Tag manager, error / chat services and web fonts the
-  page also asks for are not needed to log in and stay refused.
+  `client/shared/browser-checkers.ts`: a host two declarations name gets none). Lステップ 0.6.2 / 0.6.3: `www.google.com` under `/recaptcha/` (frame, post) and
+  `www.gstatic.com` under `/recaptcha/` (parts only). Tag manager, error / chat services the page also
+  asks for are not needed to log in and stay refused (web fonts are asset hosts since 0.6.3, "Asset hosts").
 - **The rule** (`decideLoginHelper`, reached from `decideWindowRequest` for every request on a helper's host
   that the site's rule refused, whatever its reason (only https, its default port, no user ever counts as a helper's host, so a scheme / port / user refusal is never re-decided), `client/shared/browser-operation.ts`): https on the default port, no user, the
   helper's exact host, the path (as the address parser gives it: dot segments resolved; any `%2f` / `%5c` /
@@ -492,7 +496,8 @@ the AI operates** (`ai` mode, a run's `enterAi` … `leaveAi`) they are shut. Th
   other (a worker's script); a subframe only where `frame`; a POST only by XHR / fetch and only where
   `post`. Never a top-level navigation, a WebSocket, a beacon, a plug-in object. Out of the prefix the log
   says `login-helper-path` (so a missing path shows as such, host only).
-- **A helper's host the admin also lists as an asset host** (seen on a real machine, 2026-11-23: the admin
+- **A helper's host also listed as an asset host by the company's list** (since plan B only the developer
+  setting, "Asset hosts"; seen on a real machine, 2026-11-23: the admin
   listed `www.google.com` as a parts host too, the asset rule refused the reCAPTCHA frame with `asset-use`
   before the helper rule was asked, and nobody could log in). Precedence: the site's rule first — what it
   allows (the asset rule's GET / HEAD of script, stylesheet, font, image, in and out of the prefix, in
@@ -536,15 +541,14 @@ the AI operates** (`ai` mode, a run's `enterAi` … `leaveAi`) they are shut. Th
 - **Remaining limits** (said): a helper's script runs with the login page's authority while the person
   logs in (GET-only loading would not make it harmless either; reviewed per helper, per path); SSO
   (Google / Microsoft account login) is not a helper — it needs its own reviewed flow (top-level
-  navigation, return addresses) when a site needs it; asset hosts are still typed by the admin (moving them
-  to the declaration is plan B's next PR); a site that frames another origin on its pages after login can
+  navigation, return addresses) when a site needs it; a site that frames another origin on its pages after login can
   never be operated (availability, never a looser check).
 
 Tests: `client/tests/browser-login-helpers.test.ts` (the rule as a table: every mode × resource kind ×
 method × in / out of the prefix × from the page or not × frame / post flag; `ai` refuses every helper
 request; exact host, https, default port, no user, the prefix literally — encoded `/`, `\`, `.` and dot
 segments; the site's own rules unchanged; frame navigation; the proxy per mode; `frameSeenByPageGate` by
-origin and process, `foreignFrameCount`; `ai-other-frame`; Lステップ 0.6.2's helpers; two declarations for
+origin and process, `foreignFrameCount`; `ai-other-frame`; Lステップ 0.6.3's helpers; two declarations for
 one host → none; helpers only from a carried and approved declaration — pending, retired, another text,
 another checker, two rows, not carried → none), `server/tests/unit/plugin-browser-declaration.test.ts`
 (`login_helpers` accepted and every refusal), `client/tests/browser-execute.test.ts` (a frame not seen
@@ -562,6 +566,65 @@ request in `ai` mode first; the proxy only also stops a bare connection such as 
 also covers a helper's host listed as an asset host by the admin (every mode × kind × prefix × page: the
 asset rule's parts in both modes, the helper rule for the rest, `ai` refused) — fails when the helper rule
 is asked only for a `host` refusal, and when it is asked before the site's rule allows.
+
+## Asset hosts (plan B's second step, 2026-11-23: the declaration decides, the admin types nothing)
+
+Owner decision 2026-11-23 (「ブラウザ操作の始め方の改良案」 §6-2): the hosts a site's pages load parts
+from (fonts, images, scripts, styles) and its login helpers are decided by **the site's reviewed
+declaration only**. Before, the admin typed them (「画面の部品を取る先」) and every declared asset host had
+to be among them (`browserOperationsAllowed`'s `asset-host-not-allowed`): the side that knows the site
+least had to find them, and a wrong line widened the window for everyone (2026-11-23: `www.google.com`
+typed there broke the login, #768).
+
+- **The window's site** (`browserWindowSite(site, declared, developer)`, `client/shared/browser-operation.ts`,
+  applied once by the controller to every site of a valid policy answer — so the window, its proxy, its
+  read / write sessions and `siteNow` see the same site): `host` and `level` from the policy; `assetHosts`
+  = the declaration's (`assetHostsOf`; main composes `bundledAssetHosts` = `browserAssetHosts` over
+  `approvedBundledDeclarations`: a bundled declaration this build carries whose row is `approved` for that
+  exact text and checker hash — pending, retired, another text: none; two declarations for one host:
+  none), each exact (`normalizeBrowserHost`, its very spelling), never the operated host, once. A site
+  with no such declaration loads from its operated host only (its pages may look incomplete: availability,
+  never a looser window). The rules that use the asset hosts are unchanged (`decideBrowserRequest`: GET /
+  HEAD of script, stylesheet, font, image, in both modes; never a frame, fetch, write or WebSocket; DIRECT
+  in the proxy; the login helpers' precedence above).
+- **The company's list is a developer setting** (kept, never deleted; data already stored keeps its
+  shape): `BrowserSiteSetting.assetHosts` is still validated, stored, sent in the policy and saved back
+  unchanged by the admin page. The app adds it to the declaration's only when **both** `!app.isPackaged`
+  **and** `ACB_BROWSER_DEVELOPER_ASSET_HOSTS=1` (`main.ts` → `developerAssetHosts`): a released app never
+  does, whatever is stored. The admin page shows the field only in a console built with
+  `NEXT_PUBLIC_ACB_BROWSER_DEVELOPER=1` (`developerAssetHostsShown`; inlined at build time, the production
+  image does not set it); otherwise it says where the hosts come from (`BROWSER_PARTS_NOTE`) and a save
+  sends the stored list back as it was. The server API still accepts the list from any owner / admin (no
+  released app of this version honours it). **A released app from before plan B** still applies the stored
+  list (and, with its own core, still requires the declared hosts to be listed) until it is updated.
+- **The core** (`browserOperationsAllowed`): the setting on, the site listed, the level — no asset-host
+  condition, in the app and in the server's plan gate alike (`missingAssetHosts` and
+  `asset-host-not-allowed` are gone).
+- **The declaration's `asset_hosts`** (`plugins.md` "Browser connectors"): ≤ 10
+  (`BROWSER_DECLARATION_LIMITS.assetHosts`), exact hosts in their very spelling (no `*.`, IP, localhost,
+  scheme, trailing dot), never the operated host, never a login helper's host, once each. Reviewed and
+  versioned with the connector like everything in it. **Lステップ 0.6.3**: `d1nhtjid4lgi9y.cloudfront.net`,
+  `profile.line-scdn.net` (images, scripts), `fonts.googleapis.com` (the icon fonts' stylesheet) and
+  `fonts.gstatic.com` (the font files) — the real run (6c) showed the icons as words (`chevron_right`)
+  without the fonts; googletagmanager, bugsnag, datadog and chatplus stay refused.
+- **Remaining limits** (said): a declared parts host also receives what a stylesheet or image GET carries
+  (its address, the cookies the browser holds for that host) in both modes — reviewed per host, as before
+  with the admin's list; a site whose pages need a host its declaration does not list looks incomplete
+  until a new declaration version is reviewed (the learning mode stays diagnosis only, §6-4).
+- **Who may use a site** (plan B's 「使える人」): not in this step. The server's per-member type grant
+  (`PUT /browser-type-grants/:userId`) has no admin page yet; a button for it waits for the PC
+  registration (§33.3; "This PC's opt-in" weakness: a grant to a second member before it turns them on
+  wherever they write the opt-in file).
+
+Tests: `client/tests/browser-asset-hosts.test.ts` (the window's site: the declaration's hosts, the company's
+list only for a development build, exact / not the operated host / once; the controller hands the window
+and `siteNow` the declaration's hosts and ignores a changed stored list; Lステップ 0.6.3's fonts and images
+load in both modes, as parts only, its trackers refused; hosts only from a carried and approved declaration —
+pending, retired, another text → none), `browser-window.test.ts` (a development build's list reaches an open
+window), `server/tests/unit/plugin-browser-declaration.test.ts` (a site listing none of the declared hosts
+runs its types; `asset_hosts` exact and ≤ 10), `admin/tests/agent-browser.test.tsx` (no address field
+without the developer console, a save keeps the stored list; the field's checks in the developer console).
+Each guard mutation-checked.
 
 ## Plans, executions, permits and locks (PR 6a, 6b-2a: the server side; nothing in the app calls it yet)
 
@@ -600,7 +663,10 @@ send → report; 6c turns it on for the owner's PC).
   but has no opt-in (its switch is the constant, off) and makes no plan; `lstep@0.6.2` (0.6.1 + the login
   helpers) **`approved`** with `minAppVersion` = the login helpers' code commit (its PR, 2026-11-23; kept
   `pending` if the owner says so) — 0.6.1 stays approved for the build already installed (nothing of it is
-  less safe; a type grant is per declaration hash, so 0.6.2 needs its own grant);
+  less safe; a type grant is per declaration hash, so 0.6.2 needs its own grant); `lstep@0.6.3` (0.6.2 +
+  the web fonts as asset hosts, "Asset hosts") **`approved`** with `minAppVersion` = the asset hosts' code
+  commit (its PR, 2026-11-23) — 0.6.1 and 0.6.2 stay approved for builds already installed, and 0.6.3
+  needs its own grant;
   `declarationHash` = `sha256:` of the declaration text, **and the text itself is in the row**: the
   server reads declarations only from this file (never from `client/`, which `server/src` may not
   import), re-hashes each and parses it with the core's parser (a row that does not match its hash
@@ -1355,7 +1421,7 @@ everyone else, and leaves that registration as the condition before anyone else 
   admin console and the member's override (`browserOperationsAllowed`, app and server), the AI stop,
   the member's **type grant** (`PUT /browser-type-grants/:userId`, owner / admin, per declaration hash —
   no admin page yet: the 6c notes give the call), the approved combination (`approved.json` `approved`
-  with its `minAppVersion`; `lstep@0.6.1` approved in this PR, `lstep@0.6.2` since "Login helpers"), the card's approval
+  with its `minAppVersion`; `lstep@0.6.1` approved in this PR, `lstep@0.6.2` since "Login helpers", `lstep@0.6.3` since "Asset hosts"), the card's approval
   and the re-read before the permit. Turning off: delete the file, or the company's setting 「使わない」 /
   the site removed (the context moves, the server's permit refuses), or the emergency stop.
 - **Weakness (said)**: **the per-PC file is not access control — the server's type grant is.** The file
@@ -1396,7 +1462,7 @@ are built (6b-1, "The operator and the preview", switched off) and the facts rea
 the execution (6b-2c, "Executing a plan": claim → re-read → permit → send → report) and the registration,
 the card, its IPC and the request tool (6b-2d, "The card, the IPC and the request tool"), all switched
 off, and the inbox's rows (switched off too); **6c** — on for the owner's PC only through "This PC's
-opt-in" (built, `lstep@0.6.2` approved: "Login helpers" lets the person log in), and **the server's PC
+opt-in" (built, `lstep@0.6.3` approved: "Login helpers" lets the person log in, "Asset hosts" draws the page), and **the server's PC
 registration** (design memo §33.3: server × company × member × PC, `X-ACB-Browser-Device`, enabled by an
 owner / admin, checked at register / approve / claim / permit) before it is on for anyone else;
 `irreversible` types and more than one write (refused by the first version's rule today); **the method override and the swap** (design memo §24: a write may
@@ -1415,11 +1481,12 @@ one). Until the AI operates, the admin page says next to the mode choice what �
 `admin/tests/agent-browser.test.tsx`).
 
 Tests: `server/tests/integration/agent-browser.test.ts` (owner/admin only, refusals of a
-wildcard / duplicate / operated host as a parts host / unknown level, no row = off, an unchanged
+wildcard / duplicate / operated host as a parts host (the developer setting) / unknown level, no row = off, an unchanged
 save records nothing, a save reaches every member's policy with a new version, an override
 changes only that member and only members can have one, a departed member's override neither
 shows nor applies after they come back, the push announcement, an invalid stored row reads as
 off), permission matrix + `CROSS` rows, `admin-contract.test.ts`, `admin/tests/agent-browser.test.tsx`
-(linked from 「AI の安全」, member never loads it, words from the lib, invalid parts hosts / the
-operated host / a duplicate site block saving, what a save sends, an override changes one
+(linked from 「AI の安全」, member never loads it, words from the lib, no parts field outside the developer
+console and the stored list saved back, invalid parts hosts / the operated host (developer console) / a
+duplicate site block saving, what a save sends, an override changes one
 member), `admin/tests/advanced.test.ts` (「変えています」).

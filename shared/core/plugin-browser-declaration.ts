@@ -21,7 +21,7 @@
  * yet (the shelf refuses one, `combineUse` refuses one).
  */
 import {
-  BROWSER_OPERATION_LIMITS, levelAllows, normalizeBrowserHost,
+  levelAllows, normalizeBrowserHost,
   type BrowserOperationEffect, type BrowserOperationSettings, type BrowserSiteSetting,
 } from './browser-operation'
 import { noFlow, type CommonPart, type PluginManifest } from './plugin-declaration'
@@ -64,6 +64,11 @@ export const BROWSER_DECLARATION_LIMITS = {
   exploreQuery: 5,
   /** A paginated read: at most this many pages (design memo §38: 10 pages of 50 = 500 items). */
   explorePages: 10,
+  /**
+   * Hosts a site's pages load parts from (`asset_hosts`: GET / HEAD of scripts, styles, fonts and images,
+   * in both modes). The declaration alone decides them since plan B (2026-11-23), so they stay few.
+   */
+  assetHosts: 10,
   /** Hosts a human login needs (`login_helpers`, e.g. a CAPTCHA): few, each narrowed to a path. */
   loginHelpers: 5,
   loginHelperPath: 100,
@@ -226,7 +231,10 @@ export const BROWSER_LOGIN_HELPER_PATH_RE = /^(?:\/[A-Za-z0-9_~-][A-Za-z0-9_.~-]
 export interface PluginBrowser {
   /** The operated host (exact, `normalizeBrowserHost`). */
   host: string
-  /** Hosts its pages load parts from (exact; never the operated host). */
+  /**
+   * Hosts its pages load parts from (exact; never the operated host nor a login helper): the window's
+   * asset hosts for the site, decided by this reviewed declaration alone (agent-browser.md "Asset hosts").
+   */
   assetHosts: string[]
   /** Hosts a person's login needs, narrowed to a path (`login_helpers`; none when not declared). */
   loginHelpers: BrowserLoginHelper[]
@@ -652,7 +660,7 @@ export function parseBrowserPart(raw: YamlValue | undefined, err: (m: string) =>
   const assetHosts: string[] = []
   if (raw.asset_hosts !== undefined) {
     const list = raw.asset_hosts
-    if (!Array.isArray(list) || list.length > BROWSER_OPERATION_LIMITS.assetHosts) err(`browser の asset_hosts はホスト名の並びです（${BROWSER_OPERATION_LIMITS.assetHosts} 個まで）`)
+    if (!Array.isArray(list) || list.length > BROWSER_DECLARATION_LIMITS.assetHosts) err(`browser の asset_hosts はホスト名の並びです（${BROWSER_DECLARATION_LIMITS.assetHosts} 個まで）`)
     else for (const item of list) {
       const asset = normalizeBrowserHost(item)
       if (!asset || asset !== item) err(`browser の asset_hosts の「${String(item)}」はホスト名ではありません（*. は使えません）`)
@@ -885,7 +893,7 @@ export function matchDeclaredWrite(operation: BrowserOperation, plan: BrowserPla
 // The declaration against the company's setting
 // ---------------------------------------------------------------------------
 
-export type BrowserOperationRefusal = 'off' | 'site-not-allowed' | 'asset-host-not-allowed' | 'level'
+export type BrowserOperationRefusal = 'off' | 'site-not-allowed' | 'level'
 
 export interface BrowserDeclarationUse {
   /** The company's entry for the declaration's host, or null. */
@@ -893,29 +901,27 @@ export interface BrowserDeclarationUse {
   /** Operation types that may run under this setting. */
   usable: string[]
   refused: Array<{ operation: string; reason: BrowserOperationRefusal }>
-  /** Declared asset hosts the company's site does not list (the reason for `asset-host-not-allowed`). */
-  missingAssetHosts: string[]
 }
 
 /**
  * Which of a browser connector's operation types the company's browser setting
- * lets run: the setting on, the operated host an allowed site, every declared
- * asset host among that site's, and each type's effect within the site's level
- * (`levelAllows`). The rest come back with their reason.
+ * lets run: the setting on, the operated host an allowed site, and each type's
+ * effect within the site's level (`levelAllows`). The rest come back with their
+ * reason. The hosts a site's pages load parts from are the reviewed
+ * declaration's alone (owner decision 2026-11-23, plan B): the company no longer
+ * has to list them, so they play no part here (agent-browser.md "Asset hosts").
  */
 export function browserOperationsAllowed(browser: PluginBrowser, settings: BrowserOperationSettings): BrowserDeclarationUse {
   const names = Object.keys(browser.operations)
   const site = settings.sites.find(s => s.host === browser.host) ?? null
-  const missingAssetHosts = site ? browser.assetHosts.filter(h => !site.assetHosts.includes(h)) : []
-  const all = (reason: BrowserOperationRefusal): BrowserDeclarationUse => ({ site, usable: [], refused: names.map(operation => ({ operation, reason })), missingAssetHosts })
+  const all = (reason: BrowserOperationRefusal): BrowserDeclarationUse => ({ site, usable: [], refused: names.map(operation => ({ operation, reason })) })
   if (settings.mode !== 'on') return all('off')
   if (!site) return all('site-not-allowed')
-  if (missingAssetHosts.length > 0) return all('asset-host-not-allowed')
   const usable: string[] = []
   const refused: BrowserDeclarationUse['refused'] = []
   for (const [name, op] of Object.entries(browser.operations)) {
     if (levelAllows(site.level, op.effect)) usable.push(name)
     else refused.push({ operation: name, reason: 'level' })
   }
-  return { site, usable, refused, missingAssetHosts }
+  return { site, usable, refused }
 }

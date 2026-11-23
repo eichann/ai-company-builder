@@ -379,3 +379,19 @@ export async function decideAiWrite(
     return { allow: false, reason: 'decider-failed' }
   }
 }
+
+/**
+ * The site as its window applies it (agent-browser.md "Asset hosts"; owner decision 2026-11-23, plan B):
+ * the asset hosts are the reviewed declaration's for the site's host (`declared`, from an approved and
+ * carried bundled declaration only — main composes it), never the company's free-text list — that list is
+ * a developer setting, added only when `developer` is true (a development build that asks for it). Each
+ * kept host is exact (`normalizeBrowserHost`, its very spelling) and never the operated host; the rest of
+ * the policy's site (host, level) is kept as it is.
+ */
+export function browserWindowSite(site: BrowserSiteSetting, declared: readonly string[], developer: boolean): BrowserSiteSetting {
+  const assetHosts: string[] = []
+  for (const host of [...declared, ...(developer ? site.assetHosts : [])]) {
+    if (normalizeBrowserHost(host) === host && host !== site.host && !assetHosts.includes(host)) assetHosts.push(host)
+  }
+  return { host: site.host, level: site.level, assetHosts }
+}
