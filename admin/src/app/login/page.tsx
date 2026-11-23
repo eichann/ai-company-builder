@@ -13,15 +13,23 @@ import { Label } from '@/components/ui/label'
 import { configApi } from '@/lib/api'
 import { useAuth } from '@/lib/auth-context'
 import { describeError } from '@/lib/errors'
-import { isManualPath, safeRedirect } from '@/lib/redirect'
+import { manualSiteOf, safeRedirect, type ManualSite } from '@/lib/redirect'
+
+/** How the sign-in page names the site a reader came from (`manualSiteOf`). */
+const MANUAL_WORDS: Record<ManualSite, { name: string; why: string }> = {
+  manual: { name: '使い方', why: 'ログインすると使い方を見られます。' },
+  'manual-admin': { name: '管理者の手引き', why: 'ログインすると管理者の手引きを見られます。' },
+}
 
 function LoginForm() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const redirectTo = safeRedirect(searchParams.get('redirect'))
-  // The user manual (server.md "The user manual") sends a reader here when not signed in. It is
-  // served by the API, not this console, so it is opened as a whole page, not by the router.
-  const forManual = isManualPath(redirectTo)
+  // The user manual and the administrator guide (server.md "The user manual", "The administrator
+  // guide") send a reader here when not signed in. They are served by the API, not this console,
+  // so they are opened as a whole page, not by the router.
+  const manualSite = manualSiteOf(redirectTo)
+  const forManual = manualSite !== null
   const { signIn, signUp, user, loading: authLoading } = useAuth()
   // null until /api/config answers; false means no account exists yet.
   const [setupComplete, setSetupComplete] = useState<boolean | null>(null)
@@ -86,16 +94,16 @@ function LoginForm() {
     )
   }
   if (setupComplete === null || authLoading) return <FullPageLoading />
-  if (forManual && user && !submitting) {
+  if (manualSite && user && !submitting) {
     return (
       <AuthLayout>
         <Card>
           <CardHeader>
             <CardTitle className="text-title">ログインしています</CardTitle>
-            <CardDescription>使い方のページを開けます。</CardDescription>
+            <CardDescription>{MANUAL_WORDS[manualSite].name}のページを開けます。</CardDescription>
           </CardHeader>
           <CardContent>
-            <Button className="w-full" onClick={goBack}>使い方を開く</Button>
+            <Button className="w-full" onClick={goBack}>{MANUAL_WORDS[manualSite].name}を開く</Button>
           </CardContent>
         </Card>
       </AuthLayout>
@@ -110,8 +118,8 @@ function LoginForm() {
           <CardDescription>
             {isSetup
               ? 'このサーバーにはまだアカウントがありません。最初に作成したアカウントで会社を作成できます。'
-              : forManual
-                ? 'ログインすると使い方を見られます。'
+              : manualSite
+                ? MANUAL_WORDS[manualSite].why
                 : '管理画面にログインします。'}
           </CardDescription>
         </CardHeader>

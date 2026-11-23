@@ -1,7 +1,24 @@
-/** A page of the user manual (`/manual/…`, served by the API: server.md "The user manual"). */
-export function isManualPath(path: string): boolean {
-  return path.startsWith('/manual/')
+/**
+ * The static sites the API serves (not this console): the user manual (`/manual/…`, server.md
+ * "The user manual") and the administrator guide (`/manual-admin/…`, server.md "The administrator
+ * guide"). The sign-in page sends a reader back to them as a whole page.
+ */
+export type ManualSite = 'manual' | 'manual-admin'
+
+/** Which site a (normalised: `safeRedirect`) path is a page of, or null for anything else. */
+export function manualSiteOf(path: string): ManualSite | null {
+  if (path.startsWith('/manual/')) return 'manual'
+  if (path.startsWith('/manual-admin/')) return 'manual-admin'
+  return null
 }
+
+/** A page of the user manual or of the administrator guide. */
+export function isManualPath(path: string): boolean {
+  return manualSiteOf(path) !== null
+}
+
+/** The administrator guide's first page (opened in a new tab from the console's menu). */
+export const ADMIN_GUIDE_PATH = '/manual-admin/index.html'
 
 const FALLBACK = '/dashboard'
 // A fixed stand-in for this console's own origin: only whether the parsed result stays on it counts.
@@ -17,7 +34,7 @@ function acceptable(path: string): boolean {
 
 /**
  * Only same-origin paths, so ?redirect= cannot send people to another site. Returns the path as
- * the URL parser normalises it (dot segments resolved), so a caller's check — `isManualPath` —
+ * the URL parser normalises it (dot segments resolved), so a caller's check — `manualSiteOf` —
  * judges the path the browser will actually open. The same checks hold once percent-decoded, so an
  * encoded tab, newline, backslash or slash (`/%09/x`, `/%2F/x`) is refused too.
  */

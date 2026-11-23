@@ -6,6 +6,8 @@ node_modules/
 dist/
 # The user manual's built site (server: pnpm manual:build)
 server/manual-site/
+# The administrator guide's built site (server: pnpm manual-admin:build)
+server/manual-admin-site/
 # Playwright UI tests (client/tests/ui)
 client/test-results/
 client/playwright-report/

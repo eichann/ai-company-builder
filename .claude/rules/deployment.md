@@ -51,8 +51,11 @@ Self-hosting guides (English and Japanese, published): `docs/self-hosting/`. Ful
   purpose: the pre-receive hook runs `push-check/entry.ts` with the server's node and tsx loader.
   The user manual is built in the Dockerfile's `manual` stage from `manual/` (a page that does not
   render fails the image build) and only the built site is copied to `/app/manual-site`, served at
-  `/manual/` (`server.md` "The user manual"). The Docker images workflow runs on `manual/**` too,
-  and so does the server job (`changed-areas.sh`: the permission matrix builds the manual).
+  `/manual/` (`server.md` "The user manual"); the same stage builds the administrator guide from
+  `manual-admin/` into `/app/manual-admin-site`, served at `/manual-admin/` to owners and admins
+  (`server.md` "The administrator guide"). The Docker images workflow runs on `manual/**` and
+  `manual-admin/**` too (its smoke step reads both as the CI owner, and 401 without a session), and
+  so does the server job (`changed-areas.sh`: the permission matrix builds both).
 - **No root, no capabilities** (both compose files and `staging/compose.yml`): `api` runs as
   `user: ${ACB_UID:-1000}:${ACB_GID:-1000}` (the image itself ends with `USER node`, uid 1000),
   `admin` as the image's `node`; both `cap_drop: [ALL]`, `no-new-privileges:true`, read-only
@@ -78,8 +81,9 @@ Self-hosting guides (English and Japanese, published): `docs/self-hosting/`. Ful
   it is internet-facing and must not run `next dev`. Rebuild after admin changes
   (`docker compose up -d --build admin`), or use `pnpm dev:admin` on the host for hot reload.
   `/api/*` is forwarded by `admin/src/proxy.ts`, which reads `API_PROXY_URL` at run time
-  (`http://api:3001` on the compose network); so are `/manual` and `/manual/*` (the user manual,
-  served by the api: production's Caddy sends only `/api/*` there, the rest to the admin). The admin Dockerfile copies `shared/` into its
+  (`http://api:3001` on the compose network); so are `/manual`, `/manual/*`, `/manual-admin` and
+  `/manual-admin/*` (the user manual and the administrator guide, served by the api: production's
+  Caddy sends only `/api/*` there, the rest to the admin). The admin Dockerfile copies `shared/` into its
   build stage.
 - Optional key broker KEK: `BROKER_KEK_HOST_FILE` (host path, owned by `ACB_UID`, mode `0600`
   — `kek-file.ts` refuses any group/other bit, so a group-readable root file is no option —

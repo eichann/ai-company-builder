@@ -1,9 +1,12 @@
 /**
- * Builds the user manual's static site from `manual/` (`src/cli/build-manual.ts`,
- * run when the server image is built; `.claude/rules/server.md` "The user manual"):
+ * Builds a static site from a folder of Markdown pages (`src/cli/build-manual.ts`, run when
+ * the server image is built): the members' manual from `manual/` and the administrator guide
+ * from `manual-admin/` (`MANUAL_SITES`; `.claude/rules/server.md` "The user manual", "The
+ * administrator guide"). Both are built and checked by the same rules:
  *
- *   manual/pages/<page>.md     → <out>/<page>.html  (manual-render.ts)
- *   manual/images/<name>.png   → <out>/images/<name>.png  (only pictures a page shows)
+ *   <source>/pages/<page>.md     → <out>/<page>.html  (manual-render.ts)
+ *   <source>/images/<name>.png   → <out>/images/<name>.png  (only pictures a page shows; the
+ *                                   folder may be missing while no page shows one)
  *   design tokens               → <out>/manual.css
  *   the list of all of it       → <out>/manifest.json (sha256 and size of each file; written last)
  *
@@ -13,7 +16,7 @@
  */
 import { createHash } from 'crypto'
 import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'fs'
-import { join } from 'path'
+import { basename, join } from 'path'
 import {
   isManualFilePath, isManualPageId, manualPageFile, MANUAL_INDEX_PAGE, MANUAL_MANIFEST, MANUAL_MANIFEST_FORMAT,
   parseManualManifest, type ManualFile, type ManualManifest, type ManualPage,
@@ -55,16 +58,35 @@ export function manualStylesheet(tokensDir: string): string {
   return `${primitives}\n${theme.slice(0, start)}${dark}${theme.slice(end + 2)}\n${MANUAL_CSS}`
 }
 
+/** The sites built from the repository: each one's name in a page's `<title>`. */
+export const MANUAL_SITES = {
+  /** The members' manual (`manual/`, served at /manual/ to any signed-in account). */
+  manual: { title: 'AI Company Builder の使い方' },
+  /** The administrator / FDE guide (`manual-admin/`, served at /manual-admin/ to owners and admins). */
+  'manual-admin': { title: 'AI Company Builder 管理者・FDE の手引き' },
+} as const
+
+export type ManualSiteName = keyof typeof MANUAL_SITES
+
+export function isManualSiteName(value: string): value is ManualSiteName {
+  return Object.prototype.hasOwnProperty.call(MANUAL_SITES, value)
+}
+
 const sha256 = (bytes: Buffer | string) => createHash('sha256').update(bytes).digest('hex')
 
-/** Builds the site into `outDir` (made new; a previous build there is replaced) and returns its manifest. */
-export function buildManualSite(sourceDir: string, outDir: string, tokensDir: string): ManualManifest {
+/**
+ * Builds the site `site` from `sourceDir` into `outDir` (made new; a previous build there is
+ * replaced) and returns its manifest.
+ */
+export function buildManualSite(sourceDir: string, outDir: string, tokensDir: string, site: ManualSiteName): ManualManifest {
+  const { title: siteTitle } = MANUAL_SITES[site]
+  const source = basename(sourceDir)
   const pagesDir = join(sourceDir, 'pages')
   const imagesDir = join(sourceDir, 'images')
   const sources = readdirSync(pagesDir).filter(name => name.endsWith('.md') && !name.startsWith('.')).sort()
   const ids = sources.map(name => name.slice(0, -'.md'.length))
-  for (const id of ids) if (!isManualPageId(id)) throw new ManualBuildError(`manual/pages/${id}.md: page names are a-z, 0-9 and -`)
-  if (!ids.includes(MANUAL_INDEX_PAGE)) throw new ManualBuildError('manual/pages/index.md is missing')
+  for (const id of ids) if (!isManualPageId(id)) throw new ManualBuildError(`${source}/pages/${id}.md: page names are a-z, 0-9 and -`)
+  if (!ids.includes(MANUAL_INDEX_PAGE)) throw new ManualBuildError(`${source}/pages/index.md is missing`)
 
   if (existsSync(outDir)) {
     // Only a folder this build made before (it holds a manifest) is replaced, never anything else.
@@ -83,22 +105,23 @@ export function buildManualSite(sourceDir: string, outDir: string, tokensDir: st
     files.push({ path, sha256: sha256(bytes), size: Buffer.byteLength(bytes) })
   }
   for (const id of ids) {
-    const page = renderManualPage(id, readFileSync(join(pagesDir, `${id}.md`), 'utf8'), known)
+    const page = renderManualPage(id, readFileSync(join(pagesDir, `${id}.md`), 'utf8'), known, siteTitle)
     put(manualPageFile(id), page.html)
     pages.push({ id, title: page.title })
     for (const image of page.images) images.add(image)
   }
   for (const image of [...images].sort()) {
     const from = join(imagesDir, image.slice('images/'.length))
-    // A link in manual/images is not followed: the build copies files, nothing they point to.
-    if (!existsSync(from) || !lstatSync(from).isFile()) throw new ManualBuildError(`a page shows ${image}, but manual/${image} is not a file`)
+    // A link in <source>/images is not followed: the build copies files, nothing they point to. A
+    // missing images folder (no pictures yet) is only an error when a page shows one.
+    if (!existsSync(from) || !lstatSync(from).isFile()) throw new ManualBuildError(`a page shows ${image}, but ${source}/${image} is not a file`)
     put(image, readFileSync(from))
   }
   put('manual.css', manualStylesheet(tokensDir))
   // The index first, then the rest by name.
   pages.sort((a, b) => (a.id === MANUAL_INDEX_PAGE ? -1 : b.id === MANUAL_INDEX_PAGE ? 1 : a.id.localeCompare(b.id)))
   const manifest: ManualManifest = { format: MANUAL_MANIFEST_FORMAT, pages, files }
-  if (!parseManualManifest(manifest)) throw new ManualBuildError('the manual is larger than the limits allow')
+  if (!parseManualManifest(manifest)) throw new ManualBuildError(`${source} is larger than the limits allow`)
   writeFileSync(join(outDir, MANUAL_MANIFEST), `${JSON.stringify(manifest, null, 2)}\n`)
   return manifest
 }

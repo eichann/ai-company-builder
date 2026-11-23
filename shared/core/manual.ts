@@ -8,6 +8,9 @@
  * The built site is flat: `<page>.html` and `manual.css` at its top, pictures
  * in `images/`. Sources are `manual/pages/<page>.md` and `manual/images/<scene>.png`
  * (a page names a picture as `../images/<scene>.png`; the build makes it `images/…`).
+ *
+ * The administrator guide (`manual-admin/`, served at `/manual-admin/` to owners and admins:
+ * server.md "The administrator guide") is built and served by the same rules and this file's.
  */
 
 /** `manifest.json`'s `format`; another number is not read. */

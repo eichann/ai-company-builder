@@ -61,15 +61,18 @@ RUN pnpm install --frozen-lockfile \
 
 # ---------------------------------------------------------------------------
 # manual: the user manual's static site, built from manual/ (server.md "The
-# user manual"). A page that does not render fails the image build. Only the
-# built site reaches the runtime image.
+# user manual"), and the administrator guide's, built from manual-admin/ (server.md
+# "The administrator guide"). A page that does not render fails the image build.
+# Only the built sites reach the runtime image.
 # ---------------------------------------------------------------------------
 FROM deps AS manual
 COPY server/package.json server/tsconfig.json ./
 COPY server/src ./src
 COPY shared ./shared
 COPY manual ./manual
-RUN node --import tsx src/cli/build-manual.ts manual manual-site
+COPY manual-admin ./manual-admin
+RUN node --import tsx src/cli/build-manual.ts manual manual manual-site \
+    && node --import tsx src/cli/build-manual.ts manual-admin manual-admin manual-admin-site
 
 # ---------------------------------------------------------------------------
 # runtime
@@ -105,6 +108,9 @@ COPY server/src ./src
 COPY shared ./shared
 # The user manual, served at /manual/ (MANUAL_DIR defaults to <cwd>/manual-site).
 COPY --from=manual /app/manual-site ./manual-site
+# The administrator guide, served at /manual-admin/ to owners and admins (MANUAL_ADMIN_DIR
+# defaults to <cwd>/manual-admin-site).
+COPY --from=manual /app/manual-admin-site ./manual-admin-site
 
 # /app/data is a mount point (compose mounts ./data there). Owned by the
 # image's unprivileged user so a plain `docker run` without the mount works.

@@ -50,7 +50,7 @@ import { minutesRoute } from './routes/minutes'
 import { notificationsRoute } from './routes/notifications'
 import { calendarRoute } from './routes/calendar'
 import { oauthRoute } from './routes/oauth'
-import { manualRoute } from './routes/manual'
+import { manualAdminRoute, manualRoute } from './routes/manual'
 // Lanes (server.md "Lane markers"): add only right under your lane's ▼.
 // lane A ▼
 import { coreConnectorsRoute } from './routes/core-connectors'
@@ -222,6 +222,8 @@ app.route('/api/git-http', gitHttpRoute)
 app.route('/api', invitationsRoute)
 // The user manual (取説, server.md "The user manual"): static pages built into the image, for signed-in accounts only.
 app.route('/manual', manualRoute)
+// The administrator guide (管理者・FDE の手引き, server.md "The administrator guide"): owners and admins of any company only.
+app.route('/manual-admin', manualAdminRoute)
 // Lanes (server.md "Lane markers"): add only right under your lane's ▼.
 // lane A ▼
 // 「つないでいるサービス」: the core connectors and the roles they serve (connector-roles.md).

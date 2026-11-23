@@ -5,6 +5,8 @@ import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import { useTheme } from 'next-themes'
 import {
+  ArrowSquareOut,
+  BookOpenText,
   Buildings,
   CalendarCheck,
   CaretUpDown,
@@ -46,7 +48,8 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { useAuth } from '@/lib/auth-context'
 import { useCompany } from '@/lib/company-context'
 import { offersCompanyCreation } from '@/lib/company-creation'
-import { roleLabel } from '@/lib/format'
+import { isAdminRole, roleLabel } from '@/lib/format'
+import { ADMIN_GUIDE_PATH } from '@/lib/redirect'
 import { cn } from '@/lib/utils'
 
 interface NavItem {
@@ -96,6 +99,17 @@ export const NAV_ITEMS: NavItem[] = [
 /** 「詳しい設定」: owners and admins (owner decision 2026-11-02: shown to admins, tucked away). */
 export const ADVANCED_ITEM: NavItem = { segment: 'advanced', label: '詳しい設定', icon: GearSix, visible: (c) => c.isAdmin }
 
+/**
+ * 「管理者の手引き」 (server.md "The administrator guide") is shown to whoever the server lets read
+ * it: an owner or admin of this company or of any other one in their list. Members and 部署の管理役
+ * do not see it (the server answers them 404 anyway).
+ */
+export function showsAdminGuide(currentRole: string | null, companies: readonly { role?: string }[] | undefined): boolean {
+  return isAdminRole(currentRole) || (companies ?? []).some((c) => isAdminRole(c.role))
+}
+
+const NAV_LINK_CLASS = 'flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-sm text-muted-foreground transition-colors outline-none hover:bg-sidebar-accent hover:text-sidebar-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50'
+
 export function AppShell({ children }: { children: ReactNode }) {
   const [mobileOpen, setMobileOpen] = useState(false)
   const { company } = useCompany()
@@ -137,7 +151,7 @@ export function AppShell({ children }: { children: ReactNode }) {
 
 function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
   const pathname = usePathname()
-  const { companyId, isAdmin, managedDepartmentIds, canViewAgentEvents, hasCompanyFolder, isSkillEditor } = useCompany()
+  const { companyId, isAdmin, managedDepartmentIds, canViewAgentEvents, hasCompanyFolder, isSkillEditor, role, companies } = useCompany()
   const navContext: NavContext = { isAdmin, isManager: managedDepartmentIds.length > 0, canViewAgentEvents, hasCompanyFolder, isSkillEditor }
   const base = `/companies/${companyId}`
 
@@ -154,6 +168,16 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
       {ADVANCED_ITEM.visible?.(navContext) && (
         <nav aria-label="詳しい設定" className="px-3 pb-2">
           <NavLink item={ADVANCED_ITEM} base={base} pathname={pathname} onNavigate={onNavigate} />
+        </nav>
+      )}
+      {showsAdminGuide(role, companies.data) && (
+        <nav aria-label="ヘルプ" className="px-3 pb-2">
+          {/* Served by the API (/manual-admin/, owners and admins only), in a tab of its own. */}
+          <a href={ADMIN_GUIDE_PATH} target="_blank" rel="noopener noreferrer" onClick={onNavigate} className={NAV_LINK_CLASS}>
+            <BookOpenText size={18} />
+            <span className="flex-1">管理者の手引き</span>
+            <ArrowSquareOut size={14} aria-hidden="true" />
+          </a>
         </nav>
       )}
       <div className="border-t border-sidebar-border p-3">
@@ -173,7 +197,7 @@ function NavLink({ item, base, pathname, onNavigate }: { item: NavItem; base: st
       onClick={onNavigate}
       aria-current={active ? 'page' : undefined}
       className={cn(
-        'flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-sm text-muted-foreground transition-colors outline-none hover:bg-sidebar-accent hover:text-sidebar-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50',
+        NAV_LINK_CLASS,
         active && 'bg-sidebar-accent font-medium text-sidebar-foreground'
       )}
     >

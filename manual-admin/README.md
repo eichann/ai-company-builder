@@ -12,10 +12,11 @@ manual-admin/
 
 Status:
 
-- **Not served yet.** The plan is to serve it to signed-in owners and admins from the admin
-  console, like `/manual/` is served to signed-in accounts. Wiring it into a build, a server
-  route or an admin page is a separate, reviewed change; nothing reads this folder today
-  (`client/tests/manual-pages.test.ts` and the manual build read only `manual/`).
+- **Served** at `/manual-admin/` by the server, to accounts that are an owner or admin of at least
+  one company (`.claude/rules/server.md` "The administrator guide"); the admin console's menu has
+  「管理者の手引き」 for them. Built into the server image by the members' manual's build
+  (`server/src/cli/build-manual.ts manual-admin …`): a link to a missing page or a picture that is
+  not there stops the image build. By hand: `pnpm --filter @ai-company-builder/server manual-admin:build`.
 - **No pictures yet.** Where a picture belongs, a page has a placeholder line
   `［写真：<admin page path> — 何を写すか］`. Replace it with `![説明](../images/<name>.png)`
   once the picture exists; do not add an image link before the file is there.

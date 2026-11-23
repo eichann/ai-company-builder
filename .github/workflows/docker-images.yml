@@ -27,8 +27,10 @@ on:
       # The api image bakes the server's code in (no source mount)
       - 'server/src/**'
       - 'server/tsconfig.json'
-      # ... and the user manual built from manual/ (server.md "The user manual")
+      # ... and the user manual built from manual/ (server.md "The user manual") and the
+      # administrator guide from manual-admin/ (server.md "The administrator guide")
       - 'manual/**'
+      - 'manual-admin/**'
       # The admin image runs `next build` on the admin's source and config
       - 'admin/src/**'
       - 'admin/public/**'
@@ -151,6 +153,15 @@ jobs:
           curl -fsS -X POST "$api/api/companies" -H "Origin: $origin" -H 'Content-Type: application/json' \
             -b "$work/cookies" -o "$work/company.json" -d '{"name":"CI smoke"}'
           cid=$(node -e 'const j=require(process.argv[1]); console.log((j.data ?? j).id)' "$work/company.json")
+          # The image carries both built sites (server.md "The user manual", "The administrator
+          # guide"): the owner reads them, nobody without a session does.
+          curl -fsS -b "$work/cookies" -o "$work/manual.html" "$api/manual/index.html"
+          curl -fsS -b "$work/cookies" -o "$work/guide.html" "$api/manual-admin/index.html"
+          grep -qF '管理者・FDE の手引き' "$work/guide.html" || { echo "::error::/manual-admin/ did not serve the administrator guide"; exit 1; }
+          for path in /manual/index.html /manual-admin/index.html; do
+            code=$(curl -sS -o /dev/null -w '%{http_code}' "$api$path")
+            [ "$code" = 401 ] || { echo "::error::$path answered $code without a session"; exit 1; }
+          done
           url="http://ci:$token@127.0.0.1:3001/api/git-http/$cid.git"
           git -c init.defaultBranch=main clone -q "$url" "$work/a"
           mkdir -p "$work/a/smoke"

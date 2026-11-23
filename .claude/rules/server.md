@@ -4,6 +4,7 @@ paths:
   - "server/tests/**"
   - "server/package.json"
   - "manual/**"
+  - "manual-admin/**"
 ---
 
 # Server (Hono API): layers, routes, accounts, departments, database
@@ -122,7 +123,7 @@ route.post('/hook', publicRoute('what proves the caller'), (c) => …)          
 Also: `companyAdmin(error)` (owner/admin only; members and non-members alike get 403 `{ error }` —
 the endpoints that always answered so: invitations, adding / removing members),
 `companyMemberNotFound(body)` (the endpoint's own 404 body for a non-member: `/api/git`),
-`signedInOr(error)` (the endpoint's own 401 text), `signedInElse(refuse)` (the endpoint's own refusal without a session: the manual's 401 or sign-in redirect), `aiReads` / `aiActs` (a record token on
+`signedInOr(error)` (the endpoint's own 401 text), `signedInElse(refuse)` (the endpoint's own refusal without a session: the manual's 401 or sign-in redirect), `fullAccessSomewhereElse(signedOut, refuse)` (a session of an owner / admin of any company, checked per request through `services.access.hasFullAccessSomewhere`; the administrator guide), `aiReads` / `aiActs` (a record token on
 /api/records-ai, `c.var.holder`; records.md), `ownCredential(reason)` (git-http's Basic auth, the
 key broker's relay token; still 401 without it). Company routes always name the company
 `:companyId` (companies.ts too). Where a role check must answer before the body (403 before 400),
@@ -401,6 +402,9 @@ GET  /api/config                                  setup state (no auth)
                               (session only; approvals.md)                    approvals.ts
 /manual                       GET /manual (→ /manual/index.html), GET /manual/* — the user manual, any
                               signed-in account ("The user manual" below)      manual.ts
+/manual-admin                 GET /manual-admin (→ /manual-admin/index.html), GET /manual-admin/* — the
+                              administrator guide, owners / admins of any company; others 404
+                              ("The administrator guide" below)                manual.ts
 /api                          GET|POST /companies/:companyId/invitations,
                               DELETE …/invitations/:id, GET /invitations/:token,
                               POST /invitations/:token/accept                 invitations.ts
@@ -752,7 +756,7 @@ by that server at `/manual/` — so a self-hosted server shows the manual of its
   answer, so nothing tells which files exist: a browser opening a page (`Accept` holding
   `text/html`) → 302 to the admin console's `/login?redirect=<path>` (its `safeRedirect` takes only
   same-origin paths — control characters, line separators and `\` refused, raw or percent-encoded,
-  and the URL-parsed path returned, so `isManualPath` judges what will open; the page then opens
+  and the URL-parsed path returned, so `manualSiteOf` judges what will open; the page then opens
   the manual as a whole page, `admin/src/app/login/page.tsx`,
   and says 「ログインすると使い方を見られます。」); the return path is the requested file when
   `isManualFilePath` accepts it, else `/manual/index.html` — never outside `/manual/`. Anything else
@@ -787,6 +791,46 @@ by that server at `/manual/` — so a self-hosted server shows the manual of its
   (200 / 301 for every signed-in caller, 401 signed out; built from the repository's `manual/`),
   `tests/security/auth-guards.test.ts` (no longer public), `admin/tests/login.test.tsx` (back to the
   manual as a whole page).
+
+## The administrator guide (管理者・FDE の手引き, 2026-11-24)
+
+`manual-admin/pages/<page>.md` (and `manual-admin/images/`, none yet: the build needs the folder only
+when a page shows a picture) is the counterpart of the user manual for owners, admins and FDEs.
+Everything of "The user manual" above holds for it — the build (`build-manual.ts manual-admin
+manual-admin <out>`, `MANUAL_SITES` in `lib/manual-build.ts`: only the `<title>`'s site name
+differs; `pnpm … manual-admin:build` → `server/manual-admin-site/`, gitignored; the Dockerfile's
+`manual` stage builds both, a broken page fails the image), the file rules and manifest
+(`shared/core/manual.ts`), the serving (`routes/manual.ts` builds both sites' routes from one
+`siteRoute`; `MANUAL_ADMIN_DIR`, default `<cwd>/manual-admin-site` = `/app/manual-admin-site`), the
+headers, `private, no-cache` + ETag, the signed-out answers (401, or the sign-in redirect whose return
+path stays inside `/manual-admin/`), the admin console's proxy (`/manual-admin`, `/manual-admin/:path*`)
+— except who reads it:
+
+- **An owner or admin of at least one company on this server**, whichever (`fullAccessSomewhereElse`,
+  `services.access.hasFullAccessSomewhere` over the memberships port, **on every request**: a role taken
+  away counts at once). The guide is the same for every company, so no company is named or checked.
+- **Anyone else signed in** (a member, a 部署の管理役, an account in no company) gets, for every path —
+  the bare prefix, a page, the manifest, with or without `Accept: text/html` or a kept ETag — exactly
+  the answer of a path that names nothing: 404 `Not found`, the strict headers, `no-store`, no ETag,
+  no `Vary`. Why 404, not 403: a member then cannot tell the guide (or which pages) is there, as a
+  non-member cannot tell a company exists (`companyMember`); and a 403 would read as "ask for access",
+  which is not something to grant. The guard runs before the ETag check.
+- The admin console's sign-in page goes back to a `/manual-admin/…` path as a whole page
+  (`manualSiteOf` in `admin/src/lib/redirect.ts`, on the path `safeRedirect` normalised) and says
+  「ログインすると管理者の手引きを見られます。」. The menu shows 「管理者の手引き」 (a new tab on
+  `/manual-admin/index.html`) to an owner / admin of this company or of any company in their list
+  (`showsAdminGuide`, `admin/src/components/app/app-shell.tsx`).
+- Tests: `tests/integration/manual-admin.test.ts` (owner, admin, a member here who is admin elsewhere,
+  an admin of another company only → every file with the headers, 301, 304; a member, a manager, an
+  account in no company, a member of two companies → the not-found answer for every path and header;
+  an admin demoted → refused at once; traversal raw and encoded; not built → 404; signed out → 401 /
+  the redirect inside `/manual-admin/`; built with no images folder; the repository's `manual-admin/`
+  builds — each guard mutation-checked), the permission matrix's two rows (owner / admin / the
+  outsider, who owns another company: 200 / 301; member, manager: 404; signed out: 401; built from
+  the repository's `manual-admin/`), `tests/security/auth-guards.test.ts` (its routes start with
+  `fullAccessSomewhereElse`), `admin/tests/admin-guide.test.tsx` (who sees the menu entry),
+  `admin/tests/login.test.tsx`, `admin/tests/lib.test.ts` (`manualSiteOf`), and the Docker images
+  workflow's smoke step (both sites in the image, 401 without a session).
 
 ## Request log
 

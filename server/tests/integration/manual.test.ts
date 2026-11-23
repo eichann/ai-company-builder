@@ -78,7 +78,7 @@ beforeAll(async () => {
     'guide.md': '# ファイル\n\n## ファイルを開く\n\n本文\n',
   }, { 'files-tab.png': PNG, 'unused.png': PNG })
   const { buildManualSite } = await import('../../src/lib/manual-build')
-  buildManualSite(source, site, TOKENS)
+  buildManualSite(source, site, TOKENS, 'manual')
   // Beside the built files, never listed in the manifest: none of these may be served.
   writeFileSync(join(site, 'notes.txt'), 'not part of the manual')
   writeFileSync(join(site, 'extra.html'), '<p>not listed</p>')
@@ -130,12 +130,12 @@ describe('building the manual', () => {
     for (const [name, text] of Object.entries(cases)) {
       const dir = join(root, `bad-${name.replace(/ /g, '-')}`)
       writeSource(dir, { 'index.md': text }, { 'a.svg': Buffer.from('<svg/>') })
-      expect(() => buildManualSite(dir, join(dir, 'out'), TOKENS), name).toThrow()
+      expect(() => buildManualSite(dir, join(dir, 'out'), TOKENS, 'manual'), name).toThrow()
     }
     const notOurs = join(root, 'not-ours')
     mkdirSync(notOurs)
     writeFileSync(join(notOurs, 'keep.txt'), 'keep')
-    expect(() => buildManualSite(source, notOurs, TOKENS)).toThrow()
+    expect(() => buildManualSite(source, notOurs, TOKENS, 'manual')).toThrow()
     expect(readFileSync(join(notOurs, 'keep.txt'), 'utf8')).toBe('keep')
   })
 })
