@@ -27,6 +27,8 @@ on:
       # The api image bakes the server's code in (no source mount)
       - 'server/src/**'
       - 'server/tsconfig.json'
+      # ... and the user manual built from manual/ (server.md "The user manual")
+      - 'manual/**'
       # The admin image runs `next build` on the admin's source and config
       - 'admin/src/**'
       - 'admin/public/**'

@@ -4,6 +4,8 @@ node_modules/
 
 # Build outputs
 dist/
+# The user manual's built site (server: pnpm manual:build)
+server/manual-site/
 # Playwright UI tests (client/tests/ui)
 client/test-results/
 client/playwright-report/

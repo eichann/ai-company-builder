@@ -13,6 +13,21 @@ import { subscribeFileChanges } from '../../shared/lib/fileEvents'
 import type { DocLinkOutbound, DocViewControls } from './api'
 import { blockedBandShown, changeShowsIn, nextZoom, placementOf, sameBounds, type DismissedParts } from './htmlViewer'
 
+/**
+ * What the session shows: an `.html` file of the company folder (`fileDocument`), or the user
+ * manual's page (`ManualPane`). Main makes the view either way; only its id comes back.
+ */
+export interface DocViewSource {
+  open(): Promise<{ ok: true; viewId: number } | { ok: false; message: string }>
+  /** Whether a file change shows in the document (reload it); absent: nothing on disk the member edits. */
+  showsChange?(path: string): boolean
+}
+
+/** A document of the company folder: opened by its path; its own folder's changes reload it. */
+export function fileDocument(filePath: string, views: Pick<DocViewControls, 'openDocView'>): DocViewSource {
+  return { open: () => views.openDocView(filePath), showsChange: path => changeShowsIn(filePath, path) }
+}
+
 export type DocViewStatus =
   | { kind: 'opening' }
   /** `covered`: shown, but hidden while something of the app is over it (a menu, a dialog). */
@@ -63,7 +78,7 @@ export class DocViewSession {
 
   /** `zoom` and `onZoom`: the tab's zoom outlives this session (another tab, 中身, and back). */
   constructor(
-    private readonly filePath: string,
+    private readonly source: DocViewSource,
     private readonly views: DocViewControls,
     private readonly links: DocLinkOutbound,
     zoom = 1,
@@ -105,9 +120,10 @@ export class DocViewSession {
     }
     document.addEventListener('fullscreenchange', onFullScreen)
     const offEvents = this.views.onDocViewEvent(event => this.onEvent(event))
-    const offFiles = subscribeFileChanges(changes => {
-      if (changes.some(change => changeShowsIn(this.filePath, change.path))) this.reloadSoon()
-    })
+    const showsChange = this.source.showsChange
+    const offFiles = showsChange ? subscribeFileChanges(changes => {
+      if (changes.some(change => showsChange(change.path))) this.reloadSoon()
+    }) : () => {}
     this.stops = [
       () => resize.disconnect(),
       () => mutations.disconnect(),
@@ -147,7 +163,7 @@ export class DocViewSession {
     // A new view (also ［もう一度表示する］ after ［止める］ or a crash): a new band; ［×］ holds for its reloads only.
     this.dismissed = null
     this.set({ status: { kind: 'opening' }, link: null, blocked: null, bandShown: false })
-    const result = await this.views.openDocView(this.filePath).catch(() => null)
+    const result = await this.source.open().catch(() => null)
     if (generation !== this.generation) {
       // Another tab, 中身 or ［止める］ came first: this view is nobody's.
       if (result?.ok) void this.views.closeDocView(result.viewId).catch(() => {})

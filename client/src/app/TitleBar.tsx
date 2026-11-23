@@ -1,6 +1,6 @@
 import { useCallback, useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
-import { ClockCounterClockwise, CloudArrowUp, GearSix, Globe, House, ListChecks, Moon, SignOut, SpinnerGap, Sun, WarningCircle } from '@phosphor-icons/react'
+import { ClockCounterClockwise, CloudArrowUp, GearSix, Globe, House, ListChecks, Moon, Question, SignOut, SpinnerGap, Sun, WarningCircle } from '@phosphor-icons/react'
 import { useAppStore } from '../stores/appStore'
 import { WORKING_FOLDER_BACKUP_NOTE, WORKING_FOLDER_NOTE } from '../../shared/company-folder'
 import { useDismiss } from '../shared/hooks/useDismiss'
@@ -20,6 +20,8 @@ interface Props {
   onSync: () => void
   onShowBackups: () => void
   onShowSettings: () => void
+  /** 「使い方」: the user manual in the middle (absent: no button). */
+  onShowManual?: () => void
   /** Sign out (saves the open tabs first: AppShell). */
   onLogout: () => void
   /** A feature's button next to sync (「議事録を確かめる」 while Google may read minutes). */
@@ -35,7 +37,7 @@ interface Props {
 const ICON_BUTTON = 'p-2 rounded-control hover:bg-gray-100 dark:hover:bg-zinc-800 text-gray-500 dark:text-zinc-400 hover:text-gray-700 dark:hover:text-zinc-200 transition-colors'
 
 /** The window's title bar (draggable): the company, 変更を確認 / 同期, backups, language, theme, settings, sign-out. */
-export function TitleBar({ companyName, isLoadingPreview, isSyncing, syncTitle = 'サーバーと同期', syncWaitsForYou = false, sharedFolder = true, onPreview, onSync, onShowBackups, onShowSettings, onLogout, extra, inbox, companySwitcher, layoutControls }: Props) {
+export function TitleBar({ companyName, isLoadingPreview, isSyncing, syncTitle = 'サーバーと同期', syncWaitsForYou = false, sharedFolder = true, onPreview, onSync, onShowBackups, onShowSettings, onShowManual, onLogout, extra, inbox, companySwitcher, layoutControls }: Props) {
   const { t } = useTranslation()
   const hasCompany = useAppStore((s) => s.currentCompany) != null
   const theme = useAppStore((s) => s.theme)
@@ -121,6 +123,16 @@ export function TitleBar({ companyName, isLoadingPreview, isSyncing, syncTitle =
         >
           {theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
         </button>
+        {onShowManual && (
+        <button
+          onClick={onShowManual}
+          className={ICON_BUTTON}
+          title="使い方"
+          aria-label="使い方"
+        >
+          <Question size={18} />
+        </button>
+        )}
         <button
           onClick={onShowSettings}
           className={ICON_BUTTON}

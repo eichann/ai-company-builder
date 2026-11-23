@@ -45,6 +45,15 @@ export const BROKER_KEK_FILE = process.env.BROKER_KEK_FILE?.trim() || null
  */
 export const PLUGINS_DIR = process.env.PLUGINS_DIR?.trim() || null
 
+/**
+ * The user manual's built site (`src/cli/build-manual.ts`; server.md "The user manual"), served
+ * at /manual/. Read per call (tests point it at a site of their own). Default `<cwd>/manual-site`:
+ * `/app/manual-site` in the image, `server/manual-site` after `pnpm manual:build`.
+ */
+export function manualDir(): string {
+  return process.env.MANUAL_DIR?.trim() || join(process.cwd(), 'manual-site')
+}
+
 /** Lifetime of a broker token in minutes (clamped to 15–60 by shared/core/key-broker.ts; default 30). */
 export const BROKER_TOKEN_TTL_MINUTES = Number(process.env.BROKER_TOKEN_TTL_MINUTES) || 30
 

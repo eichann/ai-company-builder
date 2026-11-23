@@ -164,6 +164,15 @@ const calls: Array<{ name: string; args: unknown[] }> = []
 const record = (name: string, args: unknown[]) => { calls.push({ name, args }) }
 
 const api: Partial<ElectronAPI> = {
+  // 「使い方」: main would show the page in a view of its own; here it answers why not, so the pane shows it.
+  openManual: async (pageId: string, anchor: string | null) => {
+    record('openManual', [pageId, anchor])
+    return { ok: false, message: `プレビューでは使い方を表示しません（${pageId}）` }
+  },
+  exportManual: async () => {
+    record('exportManual', [])
+    return { ok: true, folder: '/Users/member/Downloads/ACB の使い方' }
+  },
   getDepartments: async () => ({ success: true, data: DEPARTMENTS }),
   sparseGetExclusions: async () => ({ success: true, enabled: excluded.length > 0, excluded: [...excluded] }) as never,
   sparseSetExclusions: async (_root: string, next: string[]) => {

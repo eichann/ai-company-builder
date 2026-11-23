@@ -49,6 +49,10 @@ Self-hosting guides (English and Japanese, published): `docs/self-hosting/`. Ful
   what it runs. A new place the server writes at run time goes under `DATA_DIR`, or `/tmp` for
   scratch; anything else fails on the read-only filesystem. The image stays TypeScript + tsx on
   purpose: the pre-receive hook runs `push-check/entry.ts` with the server's node and tsx loader.
+  The user manual is built in the Dockerfile's `manual` stage from `manual/` (a page that does not
+  render fails the image build) and only the built site is copied to `/app/manual-site`, served at
+  `/manual/` (`server.md` "The user manual"). The Docker images workflow runs on `manual/**` too,
+  and so does the server job (`changed-areas.sh`: the permission matrix builds the manual).
 - **No root, no capabilities** (both compose files and `staging/compose.yml`): `api` runs as
   `user: ${ACB_UID:-1000}:${ACB_GID:-1000}` (the image itself ends with `USER node`, uid 1000),
   `admin` as the image's `node`; both `cap_drop: [ALL]`, `no-new-privileges:true`, read-only
@@ -74,7 +78,8 @@ Self-hosting guides (English and Japanese, published): `docs/self-hosting/`. Ful
   it is internet-facing and must not run `next dev`. Rebuild after admin changes
   (`docker compose up -d --build admin`), or use `pnpm dev:admin` on the host for hot reload.
   `/api/*` is forwarded by `admin/src/proxy.ts`, which reads `API_PROXY_URL` at run time
-  (`http://api:3001` on the compose network). The admin Dockerfile copies `shared/` into its
+  (`http://api:3001` on the compose network); so are `/manual` and `/manual/*` (the user manual,
+  served by the api: production's Caddy sends only `/api/*` there, the rest to the admin). The admin Dockerfile copies `shared/` into its
   build stage.
 - Optional key broker KEK: `BROKER_KEK_HOST_FILE` (host path, owned by `ACB_UID`, mode `0600`
   — `kek-file.ts` refuses any group/other bit, so a group-readable root file is no option —

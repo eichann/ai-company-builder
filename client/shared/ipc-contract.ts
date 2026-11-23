@@ -59,6 +59,7 @@ import type { MailAttachmentOpenResult, MailAwaitReply, MailDraftEdit, OutboundM
 import type { AppCommandAnswer, AppCommandRequest } from './app-commands'
 import type { CompanyFolderKind } from './company-folder'
 import type { DocViewBounds, DocViewEvent, DocViewOpenResult } from './doc-frame'
+import type { ManualExportResult, ManualOpenResult } from './manual'
 // Lanes (ipc-and-main-process.md "Lane markers"): add only right under your lane's ▼.
 // lane A ▼
 import type { GoogleRelayResult } from './google'
@@ -518,6 +519,14 @@ export interface IpcInvokeChannels {
   'docView:setZoom': { args: [viewId: number, factor: number]; result: void }
   /** Load the document again (its file changed on disk). */
   'docView:reload': { args: [viewId: number]; result: void }
+  /**
+   * The user manual (files-and-editor.md "The user manual"): its page (and heading) in a document view
+   * of its own, from this computer's copy of the server's manual (refreshed first when the server
+   * answers). Then placed, zoomed and closed as any document view. Main window only.
+   */
+  'manual:open': { args: [pageId: string, anchor: string | null]; result: ManualOpenResult }
+  /** Write the manual (pages and pictures) to a new folder the member chooses in a save dialog. Main window only. */
+  'manual:export': { args: []; result: ManualExportResult }
   'fs:writeFile': { args: [path: string, content: string]; result: boolean }
   'fs:createFile': { args: [path: string, content: string]; result: FileOpResult }
   'editor:backupBeforeOverwrite': { args: [rootPath: string, filePath: string]; result: EditorBackupResult }
@@ -1017,6 +1026,8 @@ export interface ElectronAPI {
   setDocViewZoom: Invoke<'docView:setZoom'>
   reloadDocView: Invoke<'docView:reload'>
   onDocViewEvent: Subscribe<'docView:event'>
+  openManual: Invoke<'manual:open'>
+  exportManual: Invoke<'manual:export'>
   writeFile: Invoke<'fs:writeFile'>
   /** Never replaces an existing file (`code: 'name_taken'`). */
   createFile: Invoke<'fs:createFile'>

@@ -4,7 +4,7 @@ import { useState, useSyncExternalStore } from 'react'
 import { ArrowsIn, ArrowsOut, Code, Eye, LockSimple, Minus, Plus, Stop, ArrowClockwise } from '@phosphor-icons/react'
 import { ConfirmDialog } from '../../../shared/ui/ConfirmDialog'
 import { docViewPorts } from '../api'
-import { DocViewSession } from '../docViewSession'
+import { DocViewSession, fileDocument } from '../docViewSession'
 import { rebuildRequestOf } from '../htmlViewer'
 import { runCommand, useCommandAvailable } from '../../../shared/commands/commands'
 import { useAppStore } from '../../../stores/appStore'
@@ -34,7 +34,7 @@ export function HtmlDocumentPane({ filePath, onShowSource, zoom: tabZoom, onZoom
   // One session per file (the pane is keyed by file): it owns the document's view.
   const [session] = useState(() => {
     const ports = docViewPorts()
-    return new DocViewSession(filePath, ports.views, ports.links, tabZoom, onZoom)
+    return new DocViewSession(fileDocument(filePath, ports.views), ports.views, ports.links, tabZoom, onZoom)
   })
   const { status, zoom, fullScreen, refreshed, link, blocked, bandShown } = useSyncExternalStore(session.subscribe, session.getSnapshot)
   const canAskAi = useCommandAvailable('chat.insertText')

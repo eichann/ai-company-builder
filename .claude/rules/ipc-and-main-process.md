@@ -75,7 +75,11 @@ Full text: `docs/architecture/main-process-and-ipc.md` (internal).
   viewer's document in a view of its own with a grant for its folder; only the view's id goes
   back; main window's main frame only, decided before any file is read; `protocol.ts` serves the
   scheme, `views.ts` ties grants to views; the views and their session are the shell's
-  `doc-view.ts`, `doc-frame.md`).
+  `doc-view.ts`, `doc-frame.md`). `manual` (manual:open / export: the user manual — this computer's
+  copy of the server's `/manual/` (`site.ts`) shown through the same document views, and written to
+  a new folder the member picks in the shell's save dialog (`DesktopShell.selectSavePath`), never
+  inside a company folder; main window's main frame only, decided before anything is fetched,
+  asked or written; `files-and-editor.md` "The user manual").
 - `electron/features/<domain>/wire.ts` — a feature's wiring that would otherwise sit in `main.ts`:
   `wire<Feature>(ipc?, deps)` creates the feature's services from injected ports, registers its
   IPC and its quit hooks (`AppLifecycle` in `features/ports.ts`), and returns what other features

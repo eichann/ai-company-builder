@@ -120,6 +120,10 @@ carrying a secret in its user name reached a local listener). Each document is s
   Refusals are plain Japanese (`DOC_FRAME_WORDS`; `unavailable` when no view could be made). Each
   view is its own grant: two views of one file, two tokens. Renderer port:
   `src/features/editor/api.ts` `DocViewControls`.
+- **The user manual** (`manual:open`, `files-and-editor.md` "The user manual") opens a view the same
+  way, through `views.open` with an `OpenableDocument` main built for its own copy of the server's
+  manual (grant folder = that copy; never a company folder, so `check` does not apply) and an optional
+  `fragment` (`#` + the encoded heading, main's own) added to the loaded address.
 - **`docView:setBounds(viewId, bounds | null)`, `docView:setZoom(viewId, factor)`,
   `docView:reload(viewId)`** (A2; main window's main frame only, and only for a view of that
   window — anything else is ignored): a placement that is not four finite numbers of at least

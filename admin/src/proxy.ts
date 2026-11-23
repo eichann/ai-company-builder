@@ -9,6 +9,9 @@ import { NextResponse, type NextRequest } from 'next/server'
 // rewrites are evaluated by `next build` and written into the build output,
 // so a production image would keep whatever API_PROXY_URL was set (or not) at
 // build time. Proxy runs per request, so the variable is read at runtime.
+//
+// /manual and /manual/* (the user manual, served by the API: server.md "The user manual") go the
+// same way, so the public address shows it behind a Caddy that sends only /api/* to the API.
 export function proxy(request: NextRequest) {
   const target = process.env.API_PROXY_URL || 'http://localhost:3001'
   const url = new URL(request.nextUrl.pathname + request.nextUrl.search, target)
@@ -16,5 +19,5 @@ export function proxy(request: NextRequest) {
 }
 
 export const config = {
-  matcher: '/api/:path*',
+  matcher: ['/api/:path*', '/manual', '/manual/:path*'],
 }

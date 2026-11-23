@@ -175,6 +175,8 @@ contract.invoke jobs:resume
 contract.invoke jobs:retryOccurrence
 contract.invoke jobs:rewatch
 contract.invoke jobs:watchChoices
+contract.invoke manual:export
+contract.invoke manual:open
 contract.invoke minutes:arrivals
 contract.invoke minutes:autoSeries
 contract.invoke minutes:bundleQuestion
@@ -426,6 +428,7 @@ contract.type ElectronAPI.dismissAppLinkServer = dismissAppLinkServer: Invoke<'a
 contract.type ElectronAPI.dropLinkOnRecord = dropLinkOnRecord: Invoke<'tasks:dropLink'>
 contract.type ElectronAPI.editCompanySkillLocally = editCompanySkillLocally: Invoke<'skillShelf:editLocally'>
 contract.type ElectronAPI.exists = exists: Invoke<'fs:exists'>
+contract.type ElectronAPI.exportManual = exportManual: Invoke<'manual:export'>
 contract.type ElectronAPI.findRecords = findRecords: Invoke<'recordViews:find'>
 contract.type ElectronAPI.findRecordsHome = findRecordsHome: Invoke<'recordViews:findHome'>
 contract.type ElectronAPI.flushChatSession = flushChatSession: (...args: SyncArgs<'chatHistory:flushSession'>) => ChatSaveReceipt
@@ -564,6 +567,7 @@ contract.type ElectronAPI.openCompanySkillBackup = openCompanySkillBackup: Invok
 contract.type ElectronAPI.openDocView = openDocView: Invoke<'docView:open'>
 contract.type ElectronAPI.openExternal = openExternal: Invoke<'shell:openExternal'>
 contract.type ElectronAPI.openFileInMainWindow = openFileInMainWindow: Invoke<'chatWindow:openFile'>
+contract.type ElectronAPI.openManual = openManual: Invoke<'manual:open'>
 contract.type ElectronAPI.openOutboundMailAttachment = openOutboundMailAttachment: Invoke<'outboundMail:openAttachment'>
 contract.type ElectronAPI.openWorkingFolder = openWorkingFolder: Invoke<'companySetup:openWorkingFolder'>
 contract.type ElectronAPI.patchChatSession = patchChatSession: Invoke<'chatHistory:patchSession'>
@@ -941,6 +945,8 @@ contract.type IpcInvokeChannels.'jobs:resume' = 'jobs:resume': { args: [companyI
 contract.type IpcInvokeChannels.'jobs:retryOccurrence' = 'jobs:retryOccurrence': { args: [companyId: string, jobId: string, occurrenceId: string]; result: JobActionResult }
 contract.type IpcInvokeChannels.'jobs:rewatch' = 'jobs:rewatch': { args: [companyId: string, jobId: string, version: number, recordId: string]; result: JobActionResult }
 contract.type IpcInvokeChannels.'jobs:watchChoices' = 'jobs:watchChoices': { args: [companyId: string, text: string]; result: WatchChoicesResult }
+contract.type IpcInvokeChannels.'manual:export' = 'manual:export': { args: []; result: ManualExportResult }
+contract.type IpcInvokeChannels.'manual:open' = 'manual:open': { args: [pageId: string, anchor: string | null]; result: ManualOpenResult }
 contract.type IpcInvokeChannels.'minutes:arrivals' = 'minutes:arrivals': { args: [companyId: string]; result: MeetingArrivalsResult }
 contract.type IpcInvokeChannels.'minutes:autoSeries' = 'minutes:autoSeries': { args: [companyId: string, meetingId: string, auto: boolean]; result: MinutesActionResult }
 contract.type IpcInvokeChannels.'minutes:bundleQuestion' = 'minutes:bundleQuestion': { args: [companyId: string, minutesId: string]; result: MeetingBundleQuestionResult }
@@ -1280,6 +1286,8 @@ main.handle jobs:resume @ features/jobs/ipc.ts (companyId, jobId)
 main.handle jobs:retryOccurrence @ features/jobs/ipc.ts (companyId, jobId, occurrenceId)
 main.handle jobs:rewatch @ features/jobs/ipc.ts (companyId, jobId, version, recordId)
 main.handle jobs:watchChoices @ features/jobs/ipc.ts (companyId, text)
+main.handle manual:export @ features/manual/ipc.ts ()
+main.handle manual:open @ features/manual/ipc.ts (pageId, anchor)
 main.handle minutes:arrivals @ features/minutes/ipc.ts (companyId)
 main.handle minutes:autoSeries @ features/minutes/ipc.ts (companyId, meetingId, auto)
 main.handle minutes:bundleQuestion @ features/minutes/ipc.ts (companyId, minutesId)
@@ -1504,6 +1512,8 @@ preload editCompanySkillLocally -> invoke skillShelf:editLocally($0, $1)
 preload editCompanySkillLocally : (rootPath: string, skillPath: string) => Promise<SimpleResult>
 preload exists -> invoke fs:exists($0)
 preload exists : (path: string) => Promise<boolean>
+preload exportManual -> invoke manual:export()
+preload exportManual : () => Promise<ManualExportResult>
 preload findRecords -> invoke recordViews:find($0, $1, $2)
 preload findRecords : (companyId: string, text: string, today: string) => Promise<FindResult>
 preload findRecordsHome -> invoke recordViews:findHome($0, $1, $2, $3)
@@ -1780,6 +1790,8 @@ preload openExternal -> invoke shell:openExternal($0)
 preload openExternal : (url: string) => Promise<SimpleResult>
 preload openFileInMainWindow -> invoke chatWindow:openFile($0)
 preload openFileInMainWindow : (filePath: string) => Promise<ChatWindowOpenFileResult>
+preload openManual -> invoke manual:open($0, $1)
+preload openManual : (pageId: string, anchor: string | null) => Promise<ManualOpenResult>
 preload openOutboundMailAttachment -> invoke outboundMail:openAttachment($0, $1, $2)
 preload openOutboundMailAttachment : (companyId: string, messageId: string, sha256: string) => Promise<MailAttachmentOpenResult>
 preload openWorkingFolder -> invoke companySetup:openWorkingFolder($0, $1)

@@ -214,6 +214,15 @@ export const COMMANDS = defineCommands([
     keybinding: { key: 'mod+shift+v', area: 'editor' },
   },
   {
+    // 「使い方」 (the user manual, files-and-editor.md "The user manual"): the middle's 使い方 tab at a
+    // page (and heading). A screen links to its chapter with `{ page: '<id>' }`.
+    id: 'help.openManual', title: '使い方を開く', class: 'view',
+    args: z.object({
+      page: z.string().regex(/^[a-z0-9][a-z0-9-]{0,63}$/).optional().describe('The page id (manual/pages/<id>.md); the index when left out'),
+      anchor: z.string().min(1).max(200).optional().describe('A heading id on that page'),
+    }),
+  },
+  {
     // The chat's ［見る］ on a line where the AI wrote an HTML file: its tab, as 見る even if it showed 中身.
     id: 'editor.viewDocument', title: 'HTML の資料を見る', class: 'view',
     args: z.object({

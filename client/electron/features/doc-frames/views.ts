@@ -216,8 +216,11 @@ export function createDocViews(deps: DocViewsDeps) {
       return { windowId, generation: generationOf(windowId) }
     },
 
-    /** A view of a checked document for the page `ticket` names, with a grant of its own; its id, or null. */
-    async open(doc: OpenableDocument, ticket: DocViewTicket): Promise<number | null> {
+    /**
+     * A view of a checked document for the page `ticket` names, with a grant of its own; its id, or
+     * null. `fragment` (`#…`, main's own: the manual's heading) is added to the address it loads.
+     */
+    async open(doc: OpenableDocument, ticket: DocViewTicket, fragment = ''): Promise<number | null> {
       if (stale(ticket)) return null
       const handle = await deps.shell.create(ticket.windowId, hooks)
       if (!handle) return null
@@ -231,7 +234,7 @@ export function createDocViews(deps: DocViewsDeps) {
         close(viewId)
         deps.notify?.(ticket.windowId, { viewId, kind: 'gone' })
       }
-      handle.show(deps.frames.grant(doc, handle.id))
+      handle.show(deps.frames.grant(doc, handle.id) + (fragment.startsWith('#') ? fragment : ''))
       return handle.id
     },
 

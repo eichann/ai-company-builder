@@ -31,6 +31,10 @@ export const desktopShell: DesktopShell = {
     })
     return result.filePaths[0] || null
   },
+  async selectSavePath({ title, defaultPath, buttonLabel }) {
+    const result = await dialog.showSaveDialog({ title, defaultPath, buttonLabel, properties: ['createDirectory', 'showOverwriteConfirmation'] })
+    return result.canceled ? null : result.filePath || null
+  },
   // Native drag to external apps (browser, Finder, Slack, etc.)
   startDrag(sender, file) {
     (sender as WebContents).startDrag({
