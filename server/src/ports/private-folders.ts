@@ -49,7 +49,12 @@ export interface PrivateFolderRepository {
   create(input: { path: string; rules: PrivateRuleSet; createdBy: string }): Promise<{ ok: true; scopeId: string } | PrivateFolderRefusal>
   /** Takes readers away: call inside holdingTickets.track (private-folders.md "Access removed: holding tickets"). */
   replaceRules(scopeId: string, rules: PrivateRuleSet, by: string): void
-  makePublic(folder: PrivateFolderRecord, by: string): Promise<{ ok: true; value: { path: string; commit: string } } | PrivateFolderRefusal>
+  /**
+   * `trackRows` runs the one transaction that turns the rows public (after the company commit):
+   * the caller wraps it in holdingTickets.track, so the open holding tickets of everyone who now
+   * reads the folder are cancelled with it.
+   */
+  makePublic(folder: PrivateFolderRecord, by: string, trackRows: (changeRows: () => void) => void): Promise<{ ok: true; value: { path: string; commit: string } } | PrivateFolderRefusal>
   /**
    * `trackRows` runs the one transaction that removes the folder's rows (after the archive,
    * before the repository goes): the caller wraps it in holdingTickets.track, so every reader's

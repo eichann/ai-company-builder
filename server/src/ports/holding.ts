@@ -60,4 +60,6 @@ export interface ReaderChangeGate {
   within<T>(companyId: string, fn: () => T): T
   /** Throws unless a tracked change of this company is running. `what` names the storage step. */
   assertWithin(companyId: string, what: string): void
+  /** Is a tracked change of this company running (a nested `track` joins it)? */
+  isWithin(companyId: string): boolean
 }

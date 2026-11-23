@@ -3,8 +3,9 @@ import type { MembershipRepository, MembershipRow } from '../../ports/membership
 import type { ReaderChangeGate } from '../../ports/holding'
 
 /**
- * `gate` (the composition root's, lib/reader-change-gate.ts): a role change and a removal can
- * take private folders away, so they run only inside holdingTickets.track. Absent (operator
+ * `gate` (the composition root's, lib/reader-change-gate.ts): joining, a role change and a
+ * removal change who reads private folders, so they run only inside holdingTickets.track (a
+ * loss opens a holding ticket, getting a folder back cancels it). Absent (operator
  * commands, unit tests building the adapter alone): not asked.
  */
 export function sqliteMembershipRepository(conn: Database.Database, gate?: ReaderChangeGate): MembershipRepository {
@@ -42,6 +43,8 @@ export function sqliteMembershipRepository(conn: Database.Database, gate?: Reade
     },
 
     insert(m) {
+      // Joining (again) can give back private folders: a holding ticket waiting for them is cancelled.
+      gate?.assertWithin(m.companyId, 'memberships.insert')
       conn.prepare(`
         INSERT INTO memberships (id, user_id, company_id, role, created_at, updated_at)
         VALUES (?, ?, ?, ?, ?, ?)

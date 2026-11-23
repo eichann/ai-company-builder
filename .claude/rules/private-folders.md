@@ -118,30 +118,40 @@ server's record of who may do so — **no endpoint reads it yet**; the app still
   folders a rule names them on), `rules` (the permission editor)), `state` open / used /
   cancelled / expired, `expires_at` = 30 days. One open ticket per member and folder (partial
   unique index): losing it again while one is open renews it. Reading the folder again cancels
-  the open one. A folder made public is no loss; an editor made a viewer still reads.
+  the open one, on every path: added back to its readers or by a rule, made public (everyone who
+  reads it now; a former member keeps theirs), or joining the company again (`POST /members`, an
+  accepted invitation — an owner / admin reads every private folder; a plain member reads none
+  until added, their rules went when they left). A folder made public is no loss; an editor made
+  a viewer still reads.
 - **Written in the same transaction as the change**, by the one wrapper
   `services/holding-tickets.ts` `track(companyId, { cause, byUser }, mutate)`: who reads each
   private folder (`canReadPrivateScope` over the members) before and after, the difference
   becomes tickets / cancellations, each recorded in `permission_history` (`holding-ticket`:
   `ticketId`, `scopeId`, `path`, `userId`, `cause`, `expiresAt`; `holding-ticket-cancel`). Used by
-  `PUT /private-folders/:id/members`, `DELETE /private-folders/:id` (the port's `delete` takes
-  `trackRows`: the row removal after the archive runs inside it), `DELETE /members/:userId`,
-  `PUT /members/:userId/role` and every rule change of the permission editor (`recordChange`).
-  A refused or failed change rolls back with its tickets.
+  `PUT /private-folders/:id/members`, `DELETE /private-folders/:id` and `POST
+  /private-folders/:id/make-public` (the port's `delete` / `makePublic` take `trackRows`: their
+  one row transaction, after the archive / the company commit, runs inside it), `DELETE
+  /members/:userId`, `PUT /members/:userId/role`, `POST /members`, accepting an invitation,
+  creating a company, and every rule change of the permission editor (`recordChange`). A refused
+  or failed change rolls back with its tickets. A `track` inside another of the same company joins
+  it (one comparison over the whole change, each ticket written once, the outer cause).
 - **The gate** (`lib/reader-change-gate.ts`, made once by the composition root): the storage
   steps that can take reading away — `scopes.replaceRules` / `upsertRule` / `updateRuleAccess` /
   `deleteRule` / `clearRules` / `deleteUserRules`, `privateFolders.replaceRules`, the rows of
-  `privateFolders.delete`, `memberships.updateRole` / `delete` — throw
+  `privateFolders.delete` / `makePublic`, `memberships.insert` / `updateRole` / `delete` — throw
   `UntrackedReaderChangeError` outside `track` of that company. A new path that forgets the
   wrapper fails in its first test (500, nothing changed) instead of leaving a member without a
-  ticket. Handles built without the gate (operator commands, unit tests) are not asked.
+  ticket. Handles built without the gate (operator commands, unit tests) are not asked; that the
+  composition root passes it is itself tested (the composed storage refuses outside `track`).
 - Expiry: the server clock (`expireHoldingTickets`, every company, records on or off) closes open
   tickets past `expires_at`; running twice changes nothing more.
 - Tests: `server/tests/unit/holding-tickets.test.ts` (each gated step refuses outside `track`;
-  renew / cancel / made public / rollback / other company / expiry),
-  `server/tests/integration/holding-tickets.test.ts` (`READER_CHANGES`: one row per route that
-  can take a private folder away — a new such route gets a row; changes that keep everyone
-  reading leave none; access back cancels). Each guard mutation-checked.
+  renew / cancel / made public / joining again / nested `track` / rollback / other company /
+  expiry and the clock), `server/tests/integration/holding-tickets.test.ts` (`READER_CHANGES`: one
+  row per route that can take a private folder away — a new such route gets a row; changes that
+  keep everyone reading leave none; access back cancels — readers, make-public, `POST /members`,
+  an invitation; the composed storage refuses outside `track`, also a delete / make-public whose
+  `trackRows` does not track). Each guard mutation-checked.
 
 ## Repositories and git-http
 

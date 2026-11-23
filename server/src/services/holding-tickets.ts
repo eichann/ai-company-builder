@@ -9,17 +9,19 @@
  * ticket is what lets it first hand that work to the server's holding place (later PRs), for
  * the folder's managers to take in or discard.
  *
- * `track` is the one way such a change is made: it runs the change in a transaction, compares
+ * `track` is the one way such a change is made (joining included: coming back can give folders
+ * back): it runs the change in a transaction, compares
  * who reads which private folder before and after, and in the same transaction
  *   - opens a ticket (30 days) for each lost reader — or renews the open one — and records it
  *     in permission_history (`holding-ticket`);
  *   - cancels the open ticket of each reader who reads the folder again
  *     (`holding-ticket-cancel`).
- * A folder made public is not a loss (everyone reads it now). The storage steps that can take
+ * A folder made public is not a loss: whoever reads it now has their open ticket cancelled. A
+ * `track` inside another of the same company joins it. The storage steps that can take
  * access away refuse to run outside `track` (lib/reader-change-gate.ts), so a new path that
  * forgets it fails loudly instead of leaving a member without a ticket.
  */
-import { canReadPrivateScope } from '../../shared/core/permissions'
+import { canReadPrivateScope, resolveAccess, type PermissionRepository } from '../../shared/core/permissions'
 import type { CompanyDataSource } from '../ports/company-data'
 import type { Clock, IdGenerator } from '../ports/clock'
 import type { HoldingTicketCause, ReaderChangeGate } from '../ports/holding'
@@ -80,8 +82,10 @@ export function createHoldingTicketService(deps: HoldingTicketServiceDeps) {
         lost = [...was.users]
         cause = 'folder-deleted'
       } else {
-        // Still a scope but no longer private: made public, everyone reads it.
+        // Still a scope but no longer private: made public. Nobody lost it; whoever reads it now
+        // gets it back, so their open ticket for it is cancelled.
         lost = []
+        cancelFor(companyId, scopeId, was.path, readersOfPublic(companyId, was.path), change.byUser, at)
       }
       for (const userId of lost) {
         const { ticketId, extended } = handle.holding.open({
@@ -97,19 +101,33 @@ export function createHoldingTicketService(deps: HoldingTicketServiceDeps) {
     }
     for (const [scopeId, is] of after) {
       const was = before.get(scopeId)
-      for (const userId of is.users) {
-        if (was?.users.has(userId)) continue
-        if (handle.holding.cancelOpen(userId, scopeId, at) > 0) {
-          handle.permissionHistory.append({
-            action: 'holding-ticket-cancel', detail: { scopeId, path: is.path, userId }, at, byUser: change.byUser,
-          })
-        }
+      cancelFor(companyId, scopeId, is.path, [...is.users].filter(u => !was?.users.has(u)), change.byUser, at)
+    }
+  }
+
+  /** The members who read `path` now (an ordinary folder: the company's rules). */
+  function readersOfPublic(companyId: string, path: string): string[] {
+    const members = memberships.listByCompany(companyId)
+    const roles = new Map(members.map(m => [m.user_id, m.role]))
+    const scopes = companyData.forCompany(companyId).scopes.listWithRules()
+    const repo: PermissionRepository = { getMemberRole: (_c, u) => roles.get(u) ?? null, listScopes: () => scopes }
+    return members.filter(m => resolveAccess(companyId, m.user_id, path, repo).read).map(m => m.user_id)
+  }
+
+  /** They read the folder (again): each one's open ticket for it is cancelled, with permission_history. */
+  function cancelFor(companyId: string, scopeId: string, path: string, userIds: string[], byUser: string, at: string): void {
+    const handle = companyData.forCompany(companyId)
+    for (const userId of userIds) {
+      if (handle.holding.cancelOpen(userId, scopeId, at) > 0) {
+        handle.permissionHistory.append({ action: 'holding-ticket-cancel', detail: { scopeId, path, userId }, at, byUser })
       }
     }
   }
 
   const track: TrackReaderChange = (companyId, change, mutate) =>
-    transactions.run(() => readerChanges.within(companyId, () => {
+    // Inside a tracked change of the same company already: join it. The outer one compares before
+    // and after the whole change, so a second comparison here would only write every ticket twice.
+    readerChanges.isWithin(companyId) ? mutate() : transactions.run(() => readerChanges.within(companyId, () => {
       const before = readersNow(companyId)
       const result = mutate()
       settle(companyId, before, readersNow(companyId), change)

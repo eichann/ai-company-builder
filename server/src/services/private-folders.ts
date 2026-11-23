@@ -282,7 +282,9 @@ export function createPrivateFolderService(deps: PrivateFolderServiceDeps) {
       const result = await companyLock.run(actor.companyId, async () => {
         const current = privateFoldersOf(actor.companyId).get(folder.scope.id)
         if (!current) return null
-        return privateFoldersOf(actor.companyId).makePublic(current, actor.userId)
+        // Everyone reads it now: their open holding tickets are cancelled with the rows' change.
+        return privateFoldersOf(actor.companyId).makePublic(current, actor.userId,
+          changeRows => trackReaderChange(actor.companyId, { cause: 'readers', byUser: actor.userId }, changeRows))
       })
       if (!result) return notFound()
       return result.ok ? ok(result.value) : refusalOf(result)

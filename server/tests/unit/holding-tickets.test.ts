@@ -85,6 +85,7 @@ describe('the gate: storage steps that can take a private folder away run only i
     ['privateFolders.replaceRules', () => source.forCompany('a').privateFolders.replaceRules('s-eval', viewers('v2'), 'owner')],
     ['memberships.updateRole', () => sqliteMembershipRepository(conn, gate).updateRole('a', 'admin', 'member', 'x')],
     ['memberships.delete', () => sqliteMembershipRepository(conn, gate).delete('a', 'v1')],
+    ['memberships.insert', () => sqliteMembershipRepository(conn, gate).insert({ id: 'm-new', userId: 'new', companyId: 'a', role: 'admin', createdAt: 'x' })],
   ]
   for (const [what, step] of steps) {
     it(`${what} throws outside track and changes nothing`, () => {
@@ -95,8 +96,7 @@ describe('the gate: storage steps that can take a private folder away run only i
     })
   }
 
-  it('a deleted folder\'s rows are removed only through trackRows inside track (the delete itself: integration test)', () => {
-    // The gate is per company: a change tracked for company b does not open company a.
+  it('the gate is per company: a change tracked for company b does not let company a\'s steps run', () => {
     expect(() => gate.within('b', () => source.forCompany('a').scopes.deleteUserRules('v1'))).toThrow(UntrackedReaderChangeError)
   })
 })
@@ -140,6 +140,43 @@ describe('track: tickets for whoever stops reading', () => {
       conn.prepare(`DELETE FROM scopes WHERE id = 's-eval'`).run()
     })
     expect(tickets('a').map(t => [t.userId, t.cause]).sort()).toEqual([['admin', 'folder-deleted'], ['owner', 'folder-deleted'], ['v1', 'folder-deleted'], ['v2', 'folder-deleted']])
+  })
+
+  it('a track inside another of the same company joins it: one comparison, each ticket written once', () => {
+    holding.track('a', { cause: 'left-company', byUser: 'owner' }, () => {
+      holding.track('a', { cause: 'readers', byUser: 'owner' }, () => source.forCompany('a').privateFolders.replaceRules('s-eval', viewers('v2'), 'owner'))
+      sqliteMembershipRepository(conn, gate).updateRole('a', 'admin', 'member', 'x')
+    })
+    // The outer change's cause, one history entry per lost reader (not an `extended` second one).
+    expect(tickets('a').map(t => [t.userId, t.cause]).sort()).toEqual([['admin', 'left-company'], ['v1', 'left-company']])
+    expect(history('a').map(h => [h.action, h.userId, h.extended ?? false]).sort()).toEqual([['holding-ticket', 'admin', false], ['holding-ticket', 'v1', false]])
+  })
+
+  it('made public: whoever reads it now has their open ticket cancelled; a former member keeps theirs', () => {
+    member('a', 'gone')
+    holding.track('a', { cause: 'readers', byUser: 'owner' }, () => source.forCompany('a').privateFolders.replaceRules('s-eval', viewers('v2', 'gone'), 'owner'))
+    holding.track('a', { cause: 'left-company', byUser: 'owner' }, () => {
+      sqliteMembershipRepository(conn, gate).delete('a', 'gone')
+      source.forCompany('a').scopes.deleteUserRules('gone')
+    })
+    expect(tickets('a').map(t => [t.userId, t.state]).sort()).toEqual([['gone', 'open'], ['v1', 'open']])
+    conn.prepare(`INSERT INTO scopes (id, company_id, path, kind, created_at) VALUES ('s-co', 'a', '', 'company', 'x')`).run()
+    conn.prepare(`INSERT INTO scope_rules (id, company_id, scope_id, subject_type, subject_id, can_read, can_write, created_at) VALUES ('r-co', 'a', 's-co', 'everyone', NULL, 1, 1, 'x')`).run()
+    holding.track('a', { cause: 'readers', byUser: 'admin' }, () => {
+      conn.prepare(`UPDATE scope_rules SET can_read = 1 WHERE scope_id = 's-eval'`).run()
+      conn.prepare(`UPDATE scopes SET repo_id = NULL WHERE id = 's-eval'`).run()
+    })
+    expect(tickets('a').map(t => [t.userId, t.state]).sort()).toEqual([['gone', 'open'], ['v1', 'cancelled']])
+    expect(history('a').at(-1)).toEqual({ action: 'holding-ticket-cancel', by: 'admin', scopeId: 's-eval', path: '人事/評価', userId: 'v1' })
+  })
+
+  it('a member who comes back reading the folder (here: as an admin) has their open ticket cancelled when they join', () => {
+    holding.track('a', { cause: 'left-company', byUser: 'owner' }, () => {
+      sqliteMembershipRepository(conn, gate).delete('a', 'v1')
+      source.forCompany('a').scopes.deleteUserRules('v1')
+    })
+    holding.track('a', { cause: 'role', byUser: 'owner' }, () => sqliteMembershipRepository(conn, gate).insert({ id: 'm-back', userId: 'v1', companyId: 'a', role: 'admin', createdAt: 'x' }))
+    expect(tickets('a').map(t => [t.userId, t.state])).toEqual([['v1', 'cancelled']])
   })
 
   it('a folder made public is no loss: everyone reads it now', () => {

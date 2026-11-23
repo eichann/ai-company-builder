@@ -194,10 +194,18 @@ export class MakePublicError extends Error {
  *      a member pushed meanwhile; if the path already holds exactly that tree
  *      (a previous attempt got this far), nothing is written;
  *   3. in one transaction: rules readable for everyone (write unchanged),
- *      repo_id cleared, scope_repos row removed;
+ *      repo_id cleared, scope_repos row removed — and, through `trackRows`,
+ *      the open holding tickets of everyone who reads it now cancelled;
  *   4. delete the scope repository.
  */
-export async function makePrivateFolderPublic(conn: Conn, companyId: string, folder: PrivateFolderRecord, by: string | null = null): Promise<{ path: string; commit: string }> {
+export async function makePrivateFolderPublic(
+  conn: Conn,
+  companyId: string,
+  folder: PrivateFolderRecord,
+  by: string | null = null,
+  trackRows: (changeRows: () => void) => void = run => run(),
+  gate?: ReaderChangeGate,
+): Promise<{ path: string; commit: string }> {
   const scopeId = folder.scope.id
   const scopeRepo = privateRepoPath(companyId, folder.repoId)
   const bare = companyRepoPath(companyId)
@@ -258,15 +266,19 @@ export async function makePrivateFolderPublic(conn: Conn, companyId: string, fol
       await gitAsync(['-C', scopeRepo, 'update-ref', '-d', exportRef]).catch(() => '')
     }
 
-    conn.transaction(() => {
-      const subtree = (conn.prepare(`SELECT id, path FROM scopes WHERE company_id = ?`).all(companyId) as Array<{ id: string; path: string }>)
-        .filter(s => isSameOrAncestorPath(folder.scope.path, s.path))
-      for (const s of subtree) {
-        conn.prepare(`UPDATE scope_rules SET can_read = 1 WHERE scope_id = ? AND company_id = ?`).run(s.id, companyId)
-      }
-      conn.prepare(`UPDATE scopes SET repo_id = NULL WHERE id = ? AND company_id = ?`).run(scopeId, companyId)
-      conn.prepare(`DELETE FROM scope_repos WHERE id = ? AND company_id = ?`).run(folder.repoId, companyId)
-    })()
+    // Holding tickets of everyone who reads it now are cancelled in this same transaction (trackRows).
+    trackRows(() => {
+      gate?.assertWithin(companyId, 'privateFolders.makePublic')
+      conn.transaction(() => {
+        const subtree = (conn.prepare(`SELECT id, path FROM scopes WHERE company_id = ?`).all(companyId) as Array<{ id: string; path: string }>)
+          .filter(s => isSameOrAncestorPath(folder.scope.path, s.path))
+        for (const s of subtree) {
+          conn.prepare(`UPDATE scope_rules SET can_read = 1 WHERE scope_id = ? AND company_id = ?`).run(s.id, companyId)
+        }
+        conn.prepare(`UPDATE scopes SET repo_id = NULL WHERE id = ? AND company_id = ?`).run(scopeId, companyId)
+        conn.prepare(`DELETE FROM scope_repos WHERE id = ? AND company_id = ?`).run(folder.repoId, companyId)
+      })()
+    })
     await removeScopeRepo(scopeRepo)
     return { path: folder.scope.path, commit }
   } finally {
@@ -369,9 +381,9 @@ export function sqlitePrivateFolderRepository(conn: Database.Database, companyId
       replacePrivateFolderRules(conn, companyId, scopeId, rules, by)
     },
 
-    async makePublic(folder, by) {
+    async makePublic(folder, by, trackRows) {
       try {
-        return { ok: true, value: await makePrivateFolderPublic(conn, companyId, folder, by) }
+        return { ok: true, value: await makePrivateFolderPublic(conn, companyId, folder, by, trackRows, gate) }
       } catch (err) {
         if (err instanceof MakePublicError) return { ok: false, reason: err.code, message: err.message }
         throw err

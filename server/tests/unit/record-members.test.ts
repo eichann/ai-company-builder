@@ -585,7 +585,7 @@ describe('who sees it, who hears of it, who leaves', () => {
     const { record } = await listedTask()
     const companies = createCompanyService({
       companies: null as never, memberships: sqliteMembershipRepository(conn), companyData: source, clientActivity: null as never,
-      accounts: null as never, repoStore: null as never, transactions: sqliteTransactions(conn), clock: { now: () => TS, nowMs: () => 0 },
+      accounts: null as never, repoStore: null as never, clock: { now: () => TS, nowMs: () => 0 },
       ids: null as never, creationPolicy: null as never, isOperator: () => false,
       trackReaderChange: createHoldingTicketService({
         companyData: source, memberships: sqliteMembershipRepository(conn), transactions: sqliteTransactions(conn),

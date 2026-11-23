@@ -42,5 +42,6 @@ export function createReaderChangeGate(): ReaderChangeGate {
     assertWithin(companyId, what) {
       if (!depth.has(companyId)) throw new UntrackedReaderChangeError(what)
     },
+    isWithin: companyId => depth.has(companyId),
   }
 }

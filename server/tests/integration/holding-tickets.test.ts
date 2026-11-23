@@ -33,7 +33,29 @@ vi.mock('../../src/lib/auth', () => ({
   },
 }))
 
+// The composed storage (composition.ts), caught as it is built: the wiring of the gate is checked on it.
+const composed = vi.hoisted(() => ({ sources: [] as unknown[], memberships: [] as unknown[] }))
+vi.mock('../../src/adapters/sqlite/company-data', async (importOriginal) => {
+  const original = await importOriginal<typeof import('../../src/adapters/sqlite/company-data')>()
+  return { ...original, sqliteCompanyData: (...a: Parameters<typeof original.sqliteCompanyData>) => {
+    const source = original.sqliteCompanyData(...a)
+    composed.sources.push(source)
+    return source
+  } }
+})
+vi.mock('../../src/adapters/sqlite/memberships', async (importOriginal) => {
+  const original = await importOriginal<typeof import('../../src/adapters/sqlite/memberships')>()
+  return { ...original, sqliteMembershipRepository: (...a: Parameters<typeof original.sqliteMembershipRepository>) => {
+    const repo = original.sqliteMembershipRepository(...a)
+    composed.memberships.push(repo)
+    return repo
+  } }
+})
+
 import { configureBareRepo } from '../../src/routes/git'
+import { UntrackedReaderChangeError } from '../../src/lib/reader-change-gate'
+import type { CompanyDataSource } from '../../src/ports/company-data'
+import type { MembershipRepository } from '../../src/ports/memberships'
 
 vi.setConfig({ testTimeout: 120_000, hookTimeout: 120_000 })
 
@@ -41,9 +63,11 @@ vi.setConfig({ testTimeout: 120_000, hookTimeout: 120_000 })
 type Loose = any
 
 const CO = 'htco'
-const USERS = ['owner', 'admin', 'admin2', 'v1', 'v2', 'leaver', 'other'] as const
+const USERS = ['owner', 'admin', 'admin2', 'v1', 'v2', 'leaver', 'other', 'back1', 'back2', 'back3'] as const
 type User = typeof USERS[number]
-const ROLE: Record<User, string> = { owner: 'owner', admin: 'admin', admin2: 'admin', v1: 'member', v2: 'member', leaver: 'member', other: 'member' }
+const ROLE: Record<User, string> = {
+  owner: 'owner', admin: 'admin', admin2: 'admin', v1: 'member', v2: 'member', leaver: 'member', other: 'member', back1: 'member', back2: 'member', back3: 'admin',
+}
 const base = `/api/companies/${CO}`
 
 let workDir: string
@@ -128,10 +152,12 @@ beforeAll(async () => {
 
   const { Hono } = await import('hono')
   const { companiesRoute } = await import('../../src/routes/companies')
+  const { invitationsRoute } = await import('../../src/routes/invitations')
   const { permissionRulesRoute } = await import('../../src/routes/permission-rules')
   const { privateFoldersRoute } = await import('../../src/routes/private-folders')
   app = new Hono()
   app.route('/api/companies', companiesRoute)
+  app.route('/api', invitationsRoute)
   app.route('/api/companies/:companyId', permissionRulesRoute)
   app.route('/api/companies/:companyId', privateFoldersRoute)
 })
@@ -291,13 +317,86 @@ describe('getting access back', () => {
     expect(ticketsOf(f.scopeId).map(t => t.state).sort()).toEqual(['cancelled', 'open'])
   })
 
-  it('a removed member invited back and re-added does not cancel the old ticket by being a member (they read nothing yet)', async () => {
-    const f = await newFolder(['other'])
+  it('made public: the open tickets of everyone who reads it now are cancelled; someone who left the company keeps theirs', async () => {
+    const f = await newFolder(['v1', 'v2', 'other'])
+    await as('owner', 'PUT', `${base}/private-folders/${f.scopeId}/members`, { viewers: ['u-v2', 'u-other'] })
     await as('owner', 'DELETE', `${base}/members/u-other`)
-    expect(ticketsOf(f.scopeId).map(t => [t.user_id, t.state])).toEqual([['u-other', 'open']])
-    addMember('other', 'member')
-    // Their rules went with the membership: they read nothing until someone adds them again.
-    await as('owner', 'PUT', `${base}/private-folders/${f.scopeId}/members`, { viewers: [] })
-    expect(ticketsOf(f.scopeId).map(t => [t.user_id, t.state])).toEqual([['u-other', 'open']])
+    expect(ticketsOf(f.scopeId).map(t => [t.user_id, t.state])).toEqual([['u-other', 'open'], ['u-v1', 'open']])
+    const r = await as('owner', 'POST', `${base}/private-folders/${f.scopeId}/make-public`)
+    expect(r.status).toBe(200)
+    expect(ticketsOf(f.scopeId).map(t => [t.user_id, t.state])).toEqual([['u-other', 'open'], ['u-v1', 'cancelled']])
+    expect(ticketHistory(f.scopeId).at(-1)).toMatchObject({ action: 'holding-ticket-cancel', userId: 'u-v1', by: 'u-owner' })
+  })
+
+  /** An invitation `user` once accepted (what POST /members asks for), or a fresh one to accept. */
+  function invitation(token: string, role: string, usedBy: string | null) {
+    const now = new Date().toISOString()
+    db.prepare(`INSERT INTO invitations (id, company_id, token, role, created_by, used_by, used_at, expires_at, created_at) VALUES (?, ?, ?, ?, 'u-owner', ?, ?, ?, ?)`)
+      .run(`inv-${token}`, CO, token, role, usedBy, usedBy ? now : null, new Date(Date.now() + 86_400_000).toISOString(), now)
+  }
+
+  it('removed, then added back as an admin (POST /members): the ticket is cancelled in that request (an admin reads every private folder)', async () => {
+    const f = await newFolder(['back1'])
+    await as('owner', 'DELETE', `${base}/members/u-back1`)
+    expect(ticketsOf(f.scopeId).map(t => [t.user_id, t.state])).toEqual([['u-back1', 'open']])
+    invitation('t-back1', 'member', 'u-back1')
+    const r = await as('owner', 'POST', `${base}/members`, { userId: 'u-back1', role: 'admin' })
+    expect(r.status).toBe(201)
+    expect(ticketsOf(f.scopeId).map(t => [t.user_id, t.state])).toEqual([['u-back1', 'cancelled']])
+  })
+
+  it('removed, then back through an invitation as an admin: the ticket is cancelled when they accept', async () => {
+    const f = await newFolder([])
+    await as('owner', 'DELETE', `${base}/members/u-back3`)
+    expect(ticketsOf(f.scopeId).map(t => [t.user_id, t.state])).toEqual([['u-back3', 'open']])
+    invitation('t-back3', 'admin', null)
+    const r = await as('back3', 'POST', '/api/invitations/t-back3/accept')
+    expect(r.status).toBe(200)
+    expect(ticketsOf(f.scopeId).map(t => [t.user_id, t.state])).toEqual([['u-back3', 'cancelled']])
+  })
+
+  it('back as a plain member, they read nothing yet (their rules went with them): the ticket stays open', async () => {
+    const f = await newFolder(['back2'])
+    await as('owner', 'DELETE', `${base}/members/u-back2`)
+    invitation('t-back2', 'member', 'u-back2')
+    expect((await as('owner', 'POST', `${base}/members`, { userId: 'u-back2', role: 'member' })).status).toBe(201)
+    expect(ticketsOf(f.scopeId).map(t => [t.user_id, t.state])).toEqual([['u-back2', 'open']])
+    // Added to the folder again: now cancelled.
+    await as('owner', 'PUT', `${base}/private-folders/${f.scopeId}/members`, { viewers: ['u-back2'] })
+    expect(ticketsOf(f.scopeId).map(t => [t.user_id, t.state])).toEqual([['u-back2', 'cancelled']])
+  })
+})
+
+describe('the composed storage refuses a change of who reads outside track (composition.ts passes the gate)', () => {
+  const source = () => composed.sources[0] as CompanyDataSource
+  const memberships = () => composed.memberships[0] as MembershipRepository
+  const viewersOf = (scopeId: string) => (db.prepare(`SELECT subject_id FROM scope_rules WHERE company_id = ? AND scope_id = ? AND subject_type = 'user'`).all(CO, scopeId) as Array<{ subject_id: string }>).map(r => r.subject_id)
+
+  it('scopes.deleteUserRules and memberships.delete / insert throw, nothing changes', async () => {
+    const f = await newFolder(['v2'])
+    expect(composed.sources).toHaveLength(1)
+    expect(composed.memberships).toHaveLength(1)
+    expect(() => source().forCompany(CO).scopes.deleteUserRules('u-v2')).toThrow(UntrackedReaderChangeError)
+    expect(() => memberships().delete(CO, 'u-v2')).toThrow(UntrackedReaderChangeError)
+    expect(() => memberships().insert({ id: 'm-x', userId: 'u-x', companyId: CO, role: 'admin', createdAt: 'x' })).toThrow(UntrackedReaderChangeError)
+    expect(viewersOf(f.scopeId)).toEqual(['u-v2'])
+    expect(memberships().roleOf(CO, 'u-v2')).toBe('member')
+    expect(memberships().roleOf(CO, 'u-x')).toBeNull()
+  })
+
+  it('a folder\'s rows are not removed by a delete whose trackRows does not track (the folder and its readers stay)', async () => {
+    const f = await newFolder(['v2'])
+    const folder = source().forCompany(CO).privateFolders.get(f.scopeId)!
+    await expect(source().forCompany(CO).privateFolders.delete(folder, 'u-owner', removeRows => removeRows())).rejects.toThrow(UntrackedReaderChangeError)
+    expect(source().forCompany(CO).privateFolders.get(f.scopeId)).not.toBeNull()
+    expect(viewersOf(f.scopeId)).toEqual(['u-v2'])
+    expect(ticketsOf(f.scopeId)).toEqual([])
+  })
+
+  it('…nor turned public by a make-public whose trackRows does not track', async () => {
+    const f = await newFolder(['v2'])
+    const folder = source().forCompany(CO).privateFolders.get(f.scopeId)!
+    await expect(source().forCompany(CO).privateFolders.makePublic(folder, 'u-owner', changeRows => changeRows())).rejects.toThrow(UntrackedReaderChangeError)
+    expect(source().forCompany(CO).privateFolders.get(f.scopeId)).not.toBeNull()
   })
 })

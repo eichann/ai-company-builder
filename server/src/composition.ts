@@ -785,7 +785,7 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
      * core types reach them (a company with the folder gets them at its next push). Never rejects.
      */
     indexCompaniesWithoutFolder: () => Promise.all(repos.companies.allIds().filter(id => !companyFolders.has(id)).map(id => recordIndexer.schedule(id))).then(() => undefined),
-    invitations: createInvitationService({ ...repos, ...shared }),
+    invitations: createInvitationService({ ...repos, ...shared, trackReaderChange }),
     departments: createDepartmentService({ ...repos, ...shared, repoStore, companyFolders }),
     taskSettings,
     features,

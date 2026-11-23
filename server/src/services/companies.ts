@@ -21,7 +21,6 @@ import type { CompanyRepository, CompanyRow } from '../ports/companies'
 import type { CompanyDataSource } from '../ports/company-data'
 import type { MembershipRepository } from '../ports/memberships'
 import type { RepoStore } from '../ports/repo-store'
-import type { Transactions } from '../ports/transactions'
 import type { TrackReaderChange } from './holding-tickets'
 import { DEFAULT_COMPANY_FOLDER_KIND, hasCompanyFolder, type CompanyFolderKind } from '../../shared/core/company-folder'
 import { clientBuildOf, parseClientVersion, supportsAgentEvents } from '../lib/client-version'
@@ -104,12 +103,12 @@ export interface CompanyServiceDeps {
   clientActivity: ClientActivityRepository
   accounts: AccountDirectory
   repoStore: RepoStore
-  transactions: Transactions
   clock: Clock
   ids: IdGenerator
   /**
-   * A role change or a removal can take private folders away: run inside it, with the holding
-   * tickets it leaves (services/holding-tickets.ts, private-folders.md "Access removed").
+   * Joining, a role change or a removal changes who reads private folders: each runs inside it,
+   * with the holding tickets it opens or cancels (services/holding-tickets.ts, private-folders.md
+   * "Access removed").
    */
   trackReaderChange: TrackReaderChange
   /** COMPANY_CREATION_POLICY (services/company-creation-policy.ts); only `operator` exists today. */
@@ -137,7 +136,7 @@ function createSlug(name: string): string {
 }
 
 export function createCompanyService(deps: CompanyServiceDeps) {
-  const { companies, memberships, companyData, clientActivity, accounts, repoStore, transactions, clock, ids, creationPolicy, isOperator, trackReaderChange } = deps
+  const { companies, memberships, companyData, clientActivity, accounts, repoStore, clock, ids, creationPolicy, isOperator, trackReaderChange } = deps
   // Company handles (ports/company-data.ts): the company is always the member's / the one just checked.
   const scopesOf = (companyId: string) => companyData.forCompany(companyId).scopes
 
@@ -211,7 +210,8 @@ export function createCompanyService(deps: CompanyServiceDeps) {
         repoPath = await repoStore.createCompanyRepo(id)
         await repoStore.seedCompanyRepo(id, repoPath, DEFAULT_DEPARTMENTS.map(d => d.folder))
       }
-      transactions.run(() => {
+      // Joining is a change of who reads (nothing to read yet here): memberships.insert runs only inside track.
+      trackReaderChange(id, { cause: 'role', byUser: ownerId }, () => {
         companies.insert({ id, name: name.trim(), slug, ownerId, repoPath, createdAt: timestamp, folderKind })
         memberships.insert({ id: ids.newId(), userId: ownerId, companyId: id, role: 'owner', createdAt: timestamp })
         initializeDefaultDepartments(id, ownerId)
@@ -342,7 +342,10 @@ export function createCompanyService(deps: CompanyServiceDeps) {
       }
       const id = ids.newId()
       const timestamp = clock.now()
-      memberships.insert({ id, userId, companyId: actor.companyId, role, createdAt: timestamp })
+      // Coming back can give private folders back (an owner / admin reads every one): the holding
+      // ticket left when they were removed is cancelled in the same transaction.
+      trackReaderChange(actor.companyId, { cause: 'role', byUser: actor.userId }, () =>
+        memberships.insert({ id, userId, companyId: actor.companyId, role, createdAt: timestamp }))
       return ok({ id, userId, companyId: actor.companyId, role, createdAt: timestamp })
     },
 
