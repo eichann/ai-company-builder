@@ -471,18 +471,89 @@ describe('upload', () => {
     db.prepare(`DELETE FROM holding_items WHERE id = 'filler-co2'`).run()
   })
 
-  it('one member\'s ticket has a share of its own (1 GB, all its PCs): beyond it a name only (M3)', async () => {
+  it('one member\'s ticket has a share of its own (1 GB, all its PCs): beyond it no room now, kept by the app — at the manifest and again at each upload', async () => {
     const { tickets } = await ticketsFor(['v1'])
     const MB = 1024 * 1024
     const now = new Date().toISOString()
-    db.prepare(`INSERT INTO holding_items (id, company_id, ticket_id, user_id, device_key, scope_id, folder_path, state, total_bytes, created_at, updated_at)
-      VALUES ('filler-ticket', ?, ?, 'u-v1', 'device-filler-t', 's', 'x', 'waiting', ?, ?, ?)`).run(CO, tickets.v1, 1024 * MB - 10, now, now)
+    const insertFiller = (id: string, bytes: number) => db.prepare(`INSERT INTO holding_items (id, company_id, ticket_id, user_id, device_key, scope_id, folder_path, state, total_bytes, created_at, updated_at)
+      VALUES (?, ?, ?, 'u-v1', ?, 's', 'x', 'waiting', ?, ?, ?)`).run(id, CO, tickets.v1, `device-${id}`, bytes, now, now)
+    insertFiller('filler-ticket', 1024 * MB - 10)
     const r = await item(tickets.v1, { deviceKey: 'device-v1-share', baseCommit: null, manifest: [
       { path: 'small.md', kind: 'changed', size: 10, sha256: 'a'.repeat(64) },
       { path: 'one-more.md', kind: 'changed', size: 1, sha256: 'b'.repeat(64) },
     ] })
-    expect(r.body.data).toMatchObject({ namesOnly: [1], companyFull: [], missing: ['a'.repeat(64)] })
+    expect(r.body.data).toMatchObject({ namesOnly: [], companyFull: [1], missing: ['a'.repeat(64)] })
     db.prepare(`DELETE FROM holding_items WHERE id = 'filler-ticket'`).run()
+
+    // Announced while there was room; another of the member's PCs filled the share before the upload.
+    const { itemId } = (await item(tickets.v1, { deviceKey: 'device-v1-share2', baseCommit: null, manifest: [
+      { path: 'a.md', kind: 'changed', size: TEXT_A.length, sha256: sha(TEXT_A) },
+    ] })).body.data
+    insertFiller('filler-ticket2', 1024 * MB - TEXT_A.length + 1)
+    const late = await put('v1', itemId, TEXT_A)
+    expect(late.status).toBe(409)
+    expect(late.body.code).toBe('COMPANY_FULL')
+    expect(existsSync(join(itemDir(itemId), sha(TEXT_A)))).toBe(false)
+    expect(filesOf(itemId)[0]).toMatchObject({ dropped: 'company-full', stored: 0 })
+    db.prepare(`DELETE FROM holding_items WHERE id = 'filler-ticket2'`).run()
+
+    // The item's own cap is asked again too (a backstop: manifests keep it, on verified sizes).
+    const { itemId: full } = (await item(tickets.v1, { deviceKey: 'device-v1-share3', baseCommit: null, manifest: [
+      { path: 'b.md', kind: 'changed', size: TEXT_B.length, sha256: sha(TEXT_B) },
+    ] })).body.data
+    db.prepare(`UPDATE holding_items SET total_bytes = ? WHERE id = ?`).run(500 * MB, full)
+    const over = await put('v1', full, TEXT_B)
+    expect(over.status).toBe(413)
+    expect(filesOf(full)[0]).toMatchObject({ kind: 'names-only', dropped: 'too-large', stored: 0 })
+    expect(existsSync(join(itemDir(full), sha(TEXT_B)))).toBe(false)
+  })
+
+  it('a content\'s verified size stays: a manifest naming a stored content with another size is refused, and an upload whose entry changed size is not kept', async () => {
+    const { tickets } = await ticketsFor(['v1'])
+    const body = (manifest: Loose[]) => ({ deviceKey: 'device-v1-size', baseCommit: null, manifest })
+    const { itemId } = (await item(tickets.v1, body([
+      { path: 'a.md', kind: 'changed', size: TEXT_A.length, sha256: sha(TEXT_A) },
+      { path: 'b.md', kind: 'changed', size: TEXT_B.length, sha256: sha(TEXT_B) },
+    ]))).body.data
+    expect((await put('v1', itemId, TEXT_A)).status).toBe(204)
+    const shrunk = await item(tickets.v1, body([{ path: 'a.md', kind: 'changed', size: 0, sha256: sha(TEXT_A) }]))
+    expect(shrunk.status).toBe(400)
+    expect(itemRow(itemId).total_bytes).toBe(TEXT_A.length)
+    expect(filesOf(itemId)).toHaveLength(2)
+
+    // The entry of a content still arriving is re-declared with another size meanwhile.
+    const slow = heldPut('v1', itemId, TEXT_B)
+    await untilReading(slow)
+    await item(tickets.v1, body([
+      { path: 'a.md', kind: 'changed', size: TEXT_A.length, sha256: sha(TEXT_A) },
+      { path: 'b.md', kind: 'changed', size: TEXT_B.length + 7, sha256: sha(TEXT_B) },
+    ]))
+    slow.release()
+    expect((await slow.answer).body.code).toBe('HASH_MISMATCH')
+    expect(existsSync(join(itemDir(itemId), sha(TEXT_B)))).toBe(false)
+    expect(itemRow(itemId).total_bytes).toBe(TEXT_A.length)
+  })
+
+  it('finish and the manifest\'s answer look for stored contents on the disk: one gone is wanted again, never acknowledged (restore)', async () => {
+    const { tickets } = await ticketsFor(['v1'])
+    const body = { deviceKey: 'device-v1-disk', baseCommit: null, manifest: [
+      { path: 'a.md', kind: 'changed', size: TEXT_A.length, sha256: sha(TEXT_A) },
+      { path: 'b.md', kind: 'changed', size: TEXT_B.length, sha256: sha(TEXT_B) },
+    ] }
+    const { itemId } = (await item(tickets.v1, body)).body.data
+    for (const bytes of [TEXT_A, TEXT_B]) expect((await put('v1', itemId, bytes)).status).toBe(204)
+    // HOLDING_DIR put back from an older copy: the rows say stored, the file is gone.
+    rmSync(join(itemDir(itemId), sha(TEXT_A)))
+    const finish = await as('v1', 'POST', `/api/me/holding/items/${itemId}/finish`)
+    expect(finish.status).toBe(409)
+    expect(finish.body).toMatchObject({ code: 'MISSING_FILES', missing: [sha(TEXT_A)] })
+    expect(itemRow(itemId).state).toBe('receiving')
+    expect(itemRow(itemId).total_bytes).toBe(TEXT_B.length)
+    // The manifest's answer too.
+    rmSync(join(itemDir(itemId), sha(TEXT_B)))
+    expect((await item(tickets.v1, body)).body.data.missing.sort()).toEqual([sha(TEXT_A), sha(TEXT_B)].sort())
+    for (const bytes of [TEXT_A, TEXT_B]) expect((await put('v1', itemId, bytes)).status).toBe(204)
+    expect((await as('v1', 'POST', `/api/me/holding/items/${itemId}/finish`)).status).toBe(200)
   })
 
   it('one item per PC, at most three PCs; a repeat while receiving replaces the manifest and keeps what arrived', async () => {

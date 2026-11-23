@@ -143,10 +143,12 @@ function parseItem(body: unknown): ParsedItem | null {
 
 /**
  * Which entries keep their content: in manifest order, each distinct content counted once, within
- * the file, item and ticket caps (else a name only) and the company's room (else `company-full`).
+ * the file and item caps (else a name only) and the room now — the ticket's share and the
+ * company's (else `company-full`: the app keeps its copy and tries again; the ticket's share frees
+ * up when the folder's managers decide its other items, so it is not a cap that loses work).
  * `ticketOther` / `companyOther`: bytes stored by the ticket's / company's other items.
  */
-function acceptEntries(entries: ParsedEntry[], room: { ticketOther: number; companyOther: number }, alreadyStored: Set<string>): HoldingFile[] {
+function acceptEntries(entries: ParsedEntry[], room: { ticketOther: number; companyOther: number }, alreadyStored: Map<string, number>): HoldingFile[] {
   let total = 0
   const decided = new Map<string, HoldingFile['dropped']>()
   return entries.map((e, idx): HoldingFile => {
@@ -158,9 +160,9 @@ function acceptEntries(entries: ParsedEntry[], room: { ticketOther: number; comp
     const sha = e.sha256
     if (!decided.has(sha)) {
       let dropped: HoldingFile['dropped'] = null
-      if (e.size > HOLDING_LIMITS.fileBytes || total + e.size > HOLDING_LIMITS.itemBytes || room.ticketOther + total + e.size > HOLDING_LIMITS.ticketBytes) {
+      if (e.size > HOLDING_LIMITS.fileBytes || total + e.size > HOLDING_LIMITS.itemBytes) {
         dropped = 'too-large'
-      } else if (room.companyOther + total + e.size > HOLDING_COMPANY_BYTES) {
+      } else if (room.ticketOther + total + e.size > HOLDING_LIMITS.ticketBytes || room.companyOther + total + e.size > HOLDING_COMPANY_BYTES) {
         dropped = 'company-full'
       } else {
         total += e.size
@@ -283,6 +285,7 @@ export function createPrivateHoldingService(deps: PrivateHoldingDeps) {
 
   /** Under the company's lock: is this content still wanted by the receiving item, and is there room? Then name it and mark it stored. */
   async function commitBlob(handle: CompanyData, itemId: string, sha256: string, size: number, temp: string): Promise<Outcome<null>> {
+    // `size` is the verified one: the bytes received, whose sha256 is the one named.
     const companyId = handle.companyId
     const item = handle.holdingItems.get(itemId)
     // Received, removed or erased meanwhile (another PUT of the same content finished first): only
@@ -291,12 +294,23 @@ export function createPrivateHoldingService(deps: PrivateHoldingDeps) {
     if (item.state !== 'receiving') { await blobs.discard(companyId, itemId, temp); return ALREADY_RECEIVED() }
     const rows = handle.holdingItems.files(itemId).filter(f => f.sha256 === sha256 && !f.dropped)
     if (rows.length === 0) { await blobs.discard(companyId, itemId, temp); return NOT_FOUND() }
+    // The manifest was replaced during the upload with another size for this content: not this one.
+    if (rows.some(f => f.size !== size)) { await blobs.discard(companyId, itemId, temp); return HASH_MISMATCH() }
     if (rows.every(f => f.stored) && await blobs.has(companyId, itemId, sha256)) { await blobs.discard(companyId, itemId, temp); return ok(null) }
-    // The company's room counts what is stored (never announcements), read here under the lock.
-    if (!rows.some(f => f.stored) && handle.holdingItems.storedBytes() + size > HOLDING_COMPANY_BYTES) {
-      await blobs.discard(companyId, itemId, temp)
-      handle.holdingItems.dropContent(itemId, sha256, 'company-full', clock.now())
-      return COMPANY_FULL()
+    // Every cap again, on what is stored (never announcements), read here under the lock: several
+    // PCs of one member, or several members, announcing in parallel cannot pass them together.
+    if (!rows.some(f => f.stored)) {
+      if (item.totalBytes + size > HOLDING_LIMITS.itemBytes) {
+        await blobs.discard(companyId, itemId, temp)
+        handle.holdingItems.dropContent(itemId, sha256, 'too-large', clock.now())
+        return refuse('too-large', 'The content is too large', { code: HOLDING_CODES.tooLarge })
+      }
+      if (handle.holdingItems.ticketStoredBytes(item.ticketId) + size > HOLDING_LIMITS.ticketBytes
+        || handle.holdingItems.storedBytes() + size > HOLDING_COMPANY_BYTES) {
+        await blobs.discard(companyId, itemId, temp)
+        handle.holdingItems.dropContent(itemId, sha256, 'company-full', clock.now())
+        return COMPANY_FULL()
+      }
     }
     await blobs.commit(companyId, itemId, temp, sha256)
     if (!handle.holdingItems.markStored(itemId, sha256, clock.now())) {
@@ -305,6 +319,15 @@ export function createPrivateHoldingService(deps: PrivateHoldingDeps) {
       return handle.holdingItems.get(itemId)?.state === 'receiving' ? NOT_FOUND() : ALREADY_RECEIVED()
     }
     return ok(null)
+  }
+
+  /** Under the company's lock: entries marked stored whose file is gone are unmarked. The item's entries after it. */
+  async function storedOnDisk(handle: CompanyData, itemId: string): Promise<HoldingFile[]> {
+    const shas = new Set(handle.holdingItems.files(itemId).filter(f => f.stored && f.sha256).map(f => f.sha256 as string))
+    for (const sha of shas) {
+      if (!await blobs.has(handle.companyId, itemId, sha)) handle.holdingItems.unmarkStored(itemId, sha, clock.now())
+    }
+    return handle.holdingItems.files(itemId)
   }
 
   return {
@@ -322,7 +345,7 @@ export function createPrivateHoldingService(deps: PrivateHoldingDeps) {
     },
 
     /** POST /api/me/holding/tickets/:ticketId/items: the item for this ticket and PC, with the contents still wanted. */
-    startItem(userId: string, ticketId: string, body: unknown): Outcome<HoldingItemResponse> {
+    async startItem(userId: string, ticketId: string, body: unknown): Promise<Outcome<HoldingItemResponse>> {
       const wait = takeBudget('writes', userId)
       if (wait !== null) return rateLimited(wait)
       const found = ticketFor(userId, ticketId)
@@ -343,7 +366,9 @@ export function createPrivateHoldingService(deps: PrivateHoldingDeps) {
         if (!current && handle.holdingItems.countForTicket(ticket.id) >= HOLDING_LIMITS.devices) {
           return refuse('conflict', 'This ticket has its items from enough PCs', { code: HOLDING_CODES.tooManyDevices })
         }
-        const stored = new Set(current ? handle.holdingItems.files(current.id).filter(f => f.stored && f.sha256).map(f => f.sha256 as string) : [])
+        // Contents already stored keep their verified size: a manifest naming one with another size is refused.
+        const stored = new Map(current ? handle.holdingItems.files(current.id).filter(f => f.stored && f.sha256 && !f.dropped).map(f => [f.sha256 as string, f.size]) : [])
+        if (parsed.manifest.some(e => e.sha256 && stored.has(e.sha256) && stored.get(e.sha256) !== e.size)) return INVALID()
         const files = acceptEntries(parsed.manifest, {
           ticketOther: handle.holdingItems.ticketStoredBytes(ticket.id, current?.id),
           companyOther: handle.holdingItems.storedBytes(current?.id),
@@ -360,8 +385,10 @@ export function createPrivateHoldingService(deps: PrivateHoldingDeps) {
         return ok({ itemId, files })
       })
       if (!result.ok) return result
-      const { itemId, files } = result.value
-      // Contents the new manifest no longer names are removed by the sweep (under the company's lock).
+      const { itemId } = result.value
+      // What is wanted is what is really there: a content marked stored but gone from the disk is
+      // asked for again. Contents the new manifest no longer names are removed by the sweep.
+      const files = await withLock(handle.companyId, () => storedOnDisk(handle, itemId))
       return ok({
         itemId,
         missing: missingOf(files),
@@ -445,7 +472,7 @@ export function createPrivateHoldingService(deps: PrivateHoldingDeps) {
     },
 
     /** POST /api/me/holding/items/:itemId/finish: received; it waits for the folder's managers. */
-    finish(userId: string, itemId: string): Outcome<HoldingFinishResponse> {
+    async finish(userId: string, itemId: string): Promise<Outcome<HoldingFinishResponse>> {
       const wait = takeBudget('writes', userId)
       if (wait !== null) return rateLimited(wait)
       const found = itemFor(userId, itemId)
@@ -455,32 +482,36 @@ export function createPrivateHoldingService(deps: PrivateHoldingDeps) {
       if (item.state !== 'receiving') return ALREADY_RECEIVED()
       const shut = closed(ticket)
       if (shut) return shut
-      const files = handle.holdingItems.files(item.id)
-      // Something the company had no room for: the app keeps its copy and comes back (never finished half-held).
-      if (files.some(f => f.dropped === 'company-full')) return COMPANY_FULL()
-      const missing = missingOf(files)
-      if (missing.length > 0) return refuse('conflict', 'Some contents have not arrived', { code: HOLDING_CODES.missingFiles, missing })
-      const at = clock.now()
-      const done = transactions.run(() => {
-        if (!handle.holdingItems.finish(item.id, at)) return false
-        const now = handle.holdingItems.files(item.id)
-        handle.permissionHistory.append({
-          action: 'holding-received',
-          detail: {
-            itemId: item.id, ticketId: ticket.id, scopeId: item.scopeId, userId,
-            files: now.length, held: now.filter(f => f.stored).length, namesOnly: now.filter(f => f.kind === 'names-only').length,
-            bytes: handle.holdingItems.get(item.id)?.totalBytes ?? 0,
-          },
-          at,
-          byUser: userId,
+      // Under the lock, every content marked stored is looked for on the disk first: one that is gone
+      // (a restore from an older copy) is wanted again, so the app never removes what is not held.
+      return withLock(handle.companyId, async (): Promise<Outcome<HoldingFinishResponse>> => {
+        const files = await storedOnDisk(handle, item.id)
+        // Something there is no room for: the app keeps its copy and comes back (never finished half-held).
+        if (files.some(f => f.dropped === 'company-full')) return COMPANY_FULL()
+        const missing = missingOf(files)
+        if (missing.length > 0) return refuse('conflict', 'Some contents have not arrived', { code: HOLDING_CODES.missingFiles, missing })
+        const at = clock.now()
+        const done = transactions.run(() => {
+          if (!handle.holdingItems.finish(item.id, at)) return false
+          const now = handle.holdingItems.files(item.id)
+          handle.permissionHistory.append({
+            action: 'holding-received',
+            detail: {
+              itemId: item.id, ticketId: ticket.id, scopeId: item.scopeId, userId,
+              files: now.length, held: now.filter(f => f.stored).length, namesOnly: now.filter(f => f.kind === 'names-only').length,
+              bytes: handle.holdingItems.get(item.id)?.totalBytes ?? 0,
+            },
+            at,
+            byUser: userId,
+          })
+          return true
         })
-        return true
+        if (!done) {
+          const now = handle.holdingItems.get(item.id)
+          return now?.state === 'waiting' ? ok({ state: 'waiting' }) : now ? ALREADY_RECEIVED() : NOT_FOUND()
+        }
+        return ok({ state: 'waiting' })
       })
-      if (!done) {
-        const now = handle.holdingItems.get(item.id)
-        return now?.state === 'waiting' ? ok({ state: 'waiting' }) : now ? ALREADY_RECEIVED() : NOT_FOUND()
-      }
-      return ok({ state: 'waiting' })
     },
 
     /**

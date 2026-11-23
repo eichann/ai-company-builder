@@ -196,10 +196,18 @@ export function sqliteHoldingItemRepository(conn: Database.Database, companyId: 
 
     dropContent(itemId, sha256, reason, at) {
       conn.transaction(() => {
-        conn.prepare(reason === 'secret'
-          ? `UPDATE holding_files SET kind = 'names-only', dropped = 'secret', stored = 0 WHERE company_id = ? AND item_id = ? AND sha256 = ?`
-          : `UPDATE holding_files SET dropped = 'company-full', stored = 0 WHERE company_id = ? AND item_id = ? AND sha256 = ? AND dropped IS NULL`,
-        ).run(companyId, itemId, sha256)
+        conn.prepare(reason === 'company-full'
+          ? `UPDATE holding_files SET dropped = 'company-full', stored = 0 WHERE company_id = ? AND item_id = ? AND sha256 = ? AND dropped IS NULL`
+          : `UPDATE holding_files SET kind = 'names-only', dropped = ?, stored = 0 WHERE company_id = ? AND item_id = ? AND sha256 = ?`,
+        ).run(...(reason === 'company-full' ? [companyId, itemId, sha256] : [reason, companyId, itemId, sha256]))
+        conn.prepare(`UPDATE holding_items SET updated_at = ? WHERE company_id = ? AND id = ?`).run(at, companyId, itemId)
+        recount(itemId)
+      })()
+    },
+
+    unmarkStored(itemId, sha256, at) {
+      conn.transaction(() => {
+        conn.prepare(`UPDATE holding_files SET stored = 0 WHERE company_id = ? AND item_id = ? AND sha256 = ?`).run(companyId, itemId, sha256)
         conn.prepare(`UPDATE holding_items SET updated_at = ? WHERE company_id = ? AND id = ?`).run(at, companyId, itemId)
         recount(itemId)
       })()

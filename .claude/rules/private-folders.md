@@ -192,13 +192,17 @@ calls it yet (C1).
   `deleted`, `backup`, `personal` (`.personal/`), `names-only`. One content has one size. JSON body
   ≤ 1 MB (413 `TOO_LARGE`).
 - **Caps** (owner decision, question 4; `HOLDING_LIMITS`, `HOLDING_COMPANY_BYTES`): 50 MB a file,
-  500 MB an item, 1 GB a ticket (all its PCs' items together, so one leaver cannot fill the
-  company), 5,000 entries (the rest names only) — over one the entry is `names-only` with `dropped:
-  'too-large'`. The company's room, 2 GB, counts **only what is stored** (`total_bytes` = an item's
+  500 MB an item, 5,000 entries (the rest names only) — over one the entry is `names-only` with
+  `dropped: 'too-large'`. A ticket's **share** of 1 GB (all its PCs' items together, so one leaver
+  cannot fill the company) is not such a cap: beyond it the entry has **no room now**, like the
+  company's room below (`company-full`; the share frees up when the managers decide the member's
+  other items — chosen over a name only, which would lose the member's work). The company's room, 2 GB, counts **only what is stored** (`total_bytes` = an item's
   distinct contents stored now, over the items still holding contents) — a manifest reserves
   nothing, so a large announcement never squeezes others out. Judged when the manifest arrives (in
-  manifest order, each distinct content once, one transaction) and again when each content arrives,
-  under the company's holding lock. An entry with no room **now** is `dropped: 'company-full'` (kind
+  manifest order, each distinct content once, one transaction) and **every cap again when each
+  content arrives** — the item's, the ticket's share and the company's room, on stored bytes, under
+  the company's holding lock — so PCs or members announcing in parallel cannot pass them together
+  (an item over its cap then: that entry a name only, 413 `TOO_LARGE`; no room: `COMPANY_FULL`). An entry with no room **now** is `dropped: 'company-full'` (kind
   and sha256 kept; answered in `companyFull`, PUT and `finish` → 409 `COMPANY_FULL`): **the app keeps
   its whole local copy, does not finish, and tries again later** with the same `deviceKey` (the next
   manifest judges every entry again; contents already stored stay) — the safe side for members' work
@@ -227,11 +231,15 @@ calls it yet (C1).
   the PUT answers 204.
 - **Idempotent**: one item per (ticket, `deviceKey`) — at most 3 PCs per ticket (409
   `TOO_MANY_DEVICES`); a repeat while `receiving` replaces the manifest and keeps the contents
-  already stored that it still names; a finished one → 409 `ALREADY_RECEIVED` (also after the ticket
+  already stored that it still names — with their **verified size**: a manifest naming a stored
+  content with another size is refused (400 `INVALID`), and an upload whose entry was re-declared
+  with another size meanwhile is not kept (400 `HASH_MISMATCH`); a finished one → 409 `ALREADY_RECEIVED` (also after the ticket
   expired: it was received). A blob PUT is by sha256 (bytes and size must match, else 400
   `HASH_MISMATCH`; one not named → 404; stored and on disk → 204 without reading the body).
-  `finish` needs nothing `company-full` and every wanted content stored (409 `MISSING_FILES` with
-  `missing`), then `receiving → waiting` (compare-and-set) with `permission_history`
+  `finish` needs nothing `company-full` and every wanted content stored **and on the disk** —
+  under the company's holding lock each content marked stored is looked for, and one that is gone
+  (a restore of `HOLDING_DIR` from an older copy) is unmarked and wanted again (409
+  `MISSING_FILES` with `missing`; the manifest's answer reports `missing` the same way), then `receiving → waiting` (compare-and-set) with `permission_history`
   `holding-received` (ids, counts, bytes); again while waiting → the same 200; after a decision or
   expiry → 409 `ALREADY_RECEIVED`. The ticket stays open (other PCs) until it expires or is cancelled
   (`used` is never set in S2).

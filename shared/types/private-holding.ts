@@ -36,7 +36,10 @@ export interface HoldingLimits {
   fileBytes: number
   /** One item's bytes (distinct contents). */
   itemBytes: number
-  /** One ticket's bytes, all its PCs' items together (one member cannot fill the company's room). */
+  /**
+   * One ticket's bytes, all its PCs' items together (one member cannot fill the company's room).
+   * Not a cap that loses work: beyond it an entry is `companyFull` (keep and try again).
+   */
   ticketBytes: number
   /** Entries per item: the ones after it are kept as names only. */
   files: number
@@ -69,7 +72,8 @@ export const HOLDING_CODES = Object.freeze({
   /** 409: `finish` before every content arrived; `missing` lists the sha256 still wanted. */
   missingFiles: 'MISSING_FILES',
   /**
-   * 409: the company's holding place is full right now (blob PUT, finish). **The app keeps its
+   * 409: no room right now — the company's holding place, or this ticket's share (all the
+   * member's PCs together), is full (blob PUT, finish). **The app keeps its
    * local copy and tries again later** — it must not finish, nor remove anything (owner principle:
    * a member's work is never lost). A later `POST …/items` with the same `deviceKey` judges again.
    */
@@ -138,7 +142,8 @@ export interface HoldingItemRequest {
  * contents to PUT. `namesOnly`: indexes of manifest entries kept as their name only (too large,
  * over a cap, a secret's file name) — the app may remove those.
  *
- * `companyFull`: indexes of entries the company's holding place has no room for **now**. While any
+ * `companyFull`: indexes of entries there is no room for **now** (the company's holding place, or
+ * this ticket's share — it frees up when the folder's managers decide the member's other items). While any
  * is listed, the app must not finish the item and must keep its whole local copy; it tries again
  * later with the same `deviceKey` (the contents already stored stay).
  */

@@ -35,8 +35,8 @@ privateHoldingRoute.get('/tickets', signedIn, (c) => {
   return c.json({ success: true, data: result.value })
 })
 
-privateHoldingRoute.post('/tickets/:ticketId/items', signedIn, manifestBodyLimit, serviceBody, (c) => {
-  const result = privateHolding.startItem(c.var.user.id, c.req.param('ticketId'), c.var.body)
+privateHoldingRoute.post('/tickets/:ticketId/items', signedIn, manifestBodyLimit, serviceBody, async (c) => {
+  const result = await privateHolding.startItem(c.var.user.id, c.req.param('ticketId'), c.var.body)
   if (!result.ok) return refusal(c, result)
   return c.json({ success: true, data: result.value })
 })
@@ -65,8 +65,8 @@ privateHoldingRoute.put('/items/:itemId/blobs/:sha256', signedIn, async (c) => {
   return c.body(null, 204)
 })
 
-privateHoldingRoute.post('/items/:itemId/finish', signedIn, (c) => {
-  const result = privateHolding.finish(c.var.user.id, c.req.param('itemId'))
+privateHoldingRoute.post('/items/:itemId/finish', signedIn, async (c) => {
+  const result = await privateHolding.finish(c.var.user.id, c.req.param('itemId'))
   if (!result.ok) return refusal(c, result)
   return c.json({ success: true, data: result.value })
 })

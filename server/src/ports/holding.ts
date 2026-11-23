@@ -132,8 +132,10 @@ export interface HoldingItemRepository {
    * is not receiving or no such entry is left (the manifest changed meanwhile).
    */
   markStored(itemId: string, sha256: string, at: string): boolean
-  /** This content is not held: its entries are dropped for `reason` (`secret` also makes them names only; sha256 kept). */
-  dropContent(itemId: string, sha256: string, reason: 'secret' | 'company-full', at: string): void
+  /** This content is not held: its entries are dropped for `reason` (`secret` / `too-large` also make them names only; sha256 kept). */
+  dropContent(itemId: string, sha256: string, reason: 'secret' | 'too-large' | 'company-full', at: string): void
+  /** Its file is not on the disk (a restore from an older copy): the entries with this sha256 are not stored any more. */
+  unmarkStored(itemId: string, sha256: string, at: string): void
   /** receiving → waiting (compare-and-set). */
   finish(itemId: string, at: string): boolean
   /** waiting items finished at or before `before` → expired (compare-and-set); their ids. */
