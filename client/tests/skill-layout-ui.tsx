@@ -22,6 +22,10 @@
 //   sync      manual = 「サーバーと同期」 runs until window.__acbLayout.finishSync()
 //   bottom    1 = a sample in the bottom panel instead of the inbox; absent = the inbox when main has one (see inbox)
 //   inbox     1 = records on with one approval waiting and one notice: the real inbox (I1) in the bottom panel
+//   manual    1 = the user manual's fictional company (client/tests/manual/scenes.ts): 検証A社 (other: 検証B社),
+//             山田 太郎 in 営業部 (訪問メモ, 提案書, 下書き), 総務部 not downloaded, three Skills, and one
+//             consultation (お礼メールの下書き) in 「AIへの相談」 with a chat server faked for reading it
+//             (sending is not answered). The other parameters still apply.
 //
 // 今日のフォルダ: the member belongs to 開発部 (not downloaded) and 営業部, so it is in 営業部;
 // `createDirectory` makes folders on the fake disk (recorded).
@@ -54,18 +58,59 @@ try {
 // The one-time AI action log notice only with ?notice=1 (it would cover the chat in the other specs).
 if (params.get('notice') !== '1') markAgentLogNoticeSeen('u_me')
 
-const ROOT = '/Users/demo/会社'
+const MANUAL = params.get('manual') === '1'
+const ROOT = MANUAL ? '/Users/yamada/AI Company Builder/検証A社' : '/Users/demo/会社'
 const COMPANY = 'demo'
 // A second company (with no departments of its own on disk) for per-company state.
-const OTHER_ROOT = '/Users/demo/別会社'
+const OTHER_ROOT = MANUAL ? '/Users/yamada/AI Company Builder/検証B社' : '/Users/demo/別会社'
 const COMPANIES: Record<string, { name: string; rootPath: string; folderKind?: 'none' }> = {
-  [COMPANY]: { name: '株式会社デモ', rootPath: ROOT, ...(params.get('kind') === 'none' ? { folderKind: 'none' as const } : {}) },
-  other: { name: '別会社', rootPath: OTHER_ROOT },
+  [COMPANY]: { name: MANUAL ? '検証A社' : '株式会社デモ', rootPath: ROOT, ...(params.get('kind') === 'none' ? { folderKind: 'none' as const } : {}) },
+  other: { name: MANUAL ? '検証B社' : '別会社', rootPath: OTHER_ROOT },
 }
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
 
 type Entry = { name: string; isDirectory: boolean }
-const DISK: Record<string, Entry[]> = {
+const dir = (name: string): Entry => ({ name, isDirectory: true })
+const file = (name: string): Entry => ({ name, isDirectory: false })
+// ?manual=1: what the manual's pictures show (fictional; manual/README.md).
+const MANUAL_DISK: Record<string, Entry[]> = {
+  [ROOT]: [dir('営業部'), file('はじめに.md')],
+  [`${ROOT}/営業部`]: [dir('下書き'), dir('提案書'), file('営業の進め方.md'), file('訪問メモ_1120.md'), file('訪問メモ_1123.md')],
+  [`${ROOT}/営業部/下書き`]: [file('お礼メール_A社.md')],
+  [`${ROOT}/営業部/提案書`]: [file('提案書_A社向け.md'), file('提案書_B社向け.md')],
+  [OTHER_ROOT]: [file('議事録.md')],
+}
+const MANUAL_FILES: Record<string, string> = {
+  [`${ROOT}/はじめに.md`]: '# 検証A社の共有フォルダ\n\n部署ごとのフォルダに、仕事のファイルを置きます。',
+  [`${ROOT}/営業部/営業の進め方.md`]: '# 営業の進め方\n\n毎週月曜の朝会で、今週の訪問先を共有します。',
+  [`${ROOT}/営業部/訪問メモ_1120.md`]: '# 訪問メモ 11/20 B社\n\n- 担当：山田\n- 来年度の研修の相談を受けた',
+  [`${ROOT}/営業部/訪問メモ_1123.md`]: [
+    '# 訪問メモ 11/23 A社',
+    '',
+    '- 担当：山田',
+    '- 先方：購買部の田村さん',
+    '- 提案書の内容におおむね賛成',
+    '- 見積を来週までに送る',
+    '- 納期は3月末を希望',
+  ].join('\n'),
+  [`${ROOT}/営業部/提案書/提案書_A社向け.md`]: [
+    '# A社向け 提案書',
+    '',
+    '## ねらい',
+    '',
+    '受発注の手作業を減らし、商談の時間を増やします。',
+    '',
+    '## 進め方',
+    '',
+    '1. 今の手順を一緒に書き出す（12月）',
+    '2. 試しに一部の部署で使う（1月）',
+    '3. 全社で使い始める（3月）',
+  ].join('\n'),
+  [`${ROOT}/営業部/提案書/提案書_B社向け.md`]: '# B社向け 提案書\n\n研修の進め方の案です。',
+  [`${ROOT}/営業部/下書き/お礼メール_A社.md`]: '# A社 田村様へのお礼（下書き）\n\n田村様\n\n本日はお時間をいただき、ありがとうございました。',
+  [`${OTHER_ROOT}/議事録.md`]: '# 議事録\n\n検証B社の定例。',
+}
+const DISK: Record<string, Entry[]> = MANUAL ? MANUAL_DISK : {
   [ROOT]: [{ name: '営業部', isDirectory: true }, { name: '総務', isDirectory: true }, { name: 'README.md', isDirectory: false }],
   [`${ROOT}/営業部`]: [{ name: '提案書', isDirectory: true }, { name: '顧客', isDirectory: true }, { name: '営業の進め方.md', isDirectory: false }, { name: '売上表.md', isDirectory: false }],
   [`${ROOT}/営業部/提案書`]: [{ name: 'A社_提案.md', isDirectory: false }, { name: 'B社_提案.md', isDirectory: false }],
@@ -74,7 +119,7 @@ const DISK: Record<string, Entry[]> = {
   [`${ROOT}/総務/規程`]: [{ name: '就業規則.md', isDirectory: false }],
   [OTHER_ROOT]: [{ name: '議事録.md', isDirectory: false }],
 }
-const FILES: Record<string, string> = {
+const FILES: Record<string, string> = MANUAL ? MANUAL_FILES : {
   [`${ROOT}/総務/備品.md`]: '# 備品\n\nコピー用紙は総務へ。',
   [`${ROOT}/営業部/営業の進め方.md`]: '# 営業の進め方\n\n毎週月曜に共有します。',
   [`${OTHER_ROOT}/議事録.md`]: '# 議事録\n\n別会社の定例。',
@@ -101,13 +146,18 @@ type TreeNode = { name: string; isDirectory: boolean; path: string; children?: T
 const tree = (dir: string, depth: number, max: number): TreeNode[] =>
   listDir(dir).map(e => (e.isDirectory && depth < max ? { ...e, children: tree(e.path, depth + 1, max) } : e))
 
-const DEPARTMENTS = [
+const DEPARTMENTS = (MANUAL ? [
+  { id: 'd_sales', name: '営業部', folder: '営業部', color: '#0ea5e9' },
+  { id: 'd_ga', name: '総務部', folder: '総務部', color: '#f59e0b' },
+] : [
   { id: 'd_sales', name: '営業部', folder: '営業部', color: '#0ea5e9' },
   { id: 'd_dev', name: '開発部', folder: '開発部', color: '#22c55e' },
   { id: 'd_ga', name: '総務', folder: '総務', color: '#f59e0b' },
-].map((d, i) => ({ ...d, companyId: COMPANY, parentId: null, nameEn: null, icon: 'folder', description: null, sortOrder: i, isActive: true, createdAt: '2026-10-01T00:00:00Z', updatedAt: '2026-10-01T00:00:00Z' }))
+]).map((d, i) => ({ ...d, companyId: COMPANY, parentId: null, nameEn: null, icon: 'folder', description: null, sortOrder: i, isActive: true, createdAt: '2026-10-01T00:00:00Z', updatedAt: '2026-10-01T00:00:00Z' }))
 
-let excluded = ['開発部']
+let excluded = [MANUAL ? '総務部' : '開発部']
+/** The file a department brings when it is downloaded (sparseSetExclusions). */
+const DOWNLOADED_FILE = MANUAL ? '申請書のひな形.md' : '設計.md'
 
 const skill = (folder: string, name: string, description: string) => ({
   id: `${folder}:${name}`, name, description, departmentId: DEPARTMENTS.find(d => d.folder === folder)?.id ?? 'company',
@@ -131,14 +181,21 @@ const SHELF_REQUEST_LAST = params.get('request') === 'pending'
   : params.get('request') === 'declined'
     ? { name: 'x', departmentFolder: null, state: 'declined' as const, requestedAt: new Date(2026, 10, 8, 9, 30).toISOString(), decidedAt: new Date(2026, 10, 9, 10, 0).toISOString(), reason: 'いまは使わないため' }
     : undefined
-const SKILLS: Record<string, ReturnType<typeof skill>[]> = {
+const SKILLS: Record<string, ReturnType<typeof skill>[]> = MANUAL ? {
+  '': [skill('', 'thank-you-mail', '訪問のあとのお礼メールを下書きする'), skill('', 'minutes-summary', '会議のメモを議事録にまとめる')],
+  営業部: [skill('営業部', 'proposal-outline', '提案書の骨子を作る')],
+  総務部: [],
+} : {
   '': [skill('', 'weekly-report', '週報をまとめる')],
   営業部: [skill('営業部', 'proposal', '提案書のたたき台を作る')],
   開発部: [skill('開発部', 'release-note', 'リリースノートを書く')],
   総務: [],
 }
 
-const COMMITS = [
+const COMMITS = MANUAL ? [
+  { hash: 'c2'.padEnd(40, '0'), hashShort: 'c2000000', message: '提案書の進め方を直しました', author: '山田 太郎', date: '2026-11-19T17:40:00+09:00' },
+  { hash: 'c1'.padEnd(40, '0'), hashShort: 'c1000000', message: '提案書を追加しました', author: '佐藤 花子', date: '2026-11-18T09:10:00+09:00' },
+] : [
   { hash: 'c2'.padEnd(40, '0'), hashShort: 'c2000000', message: '提案書を更新', author: '田中 太郎', date: '2026-10-22T09:00:00+09:00' },
   { hash: 'c1'.padEnd(40, '0'), hashShort: 'c1000000', message: '顧客一覧を追加', author: '山田 花子', date: '2026-10-21T09:00:00+09:00' },
 ]
@@ -181,9 +238,9 @@ const api: Partial<ElectronAPI> = {
     if (downloadOffline) return { success: false, offline: true, error: 'offline' } as never
     for (const folder of excluded.filter(e => !next.includes(e))) {
       DISK[ROOT].push({ name: folder, isDirectory: true })
-      DISK[`${ROOT}/${folder}`] = [{ name: '設計.md', isDirectory: false }]
+      DISK[`${ROOT}/${folder}`] = [{ name: DOWNLOADED_FILE, isDirectory: false }]
       // The checkout writes the files; the company watcher reports them.
-      fileChanges.emit([{ type: 'addDir', path: `${ROOT}/${folder}` }, { type: 'add', path: `${ROOT}/${folder}/設計.md` }])
+      fileChanges.emit([{ type: 'addDir', path: `${ROOT}/${folder}` }, { type: 'add', path: `${ROOT}/${folder}/${DOWNLOADED_FILE}` }])
     }
     excluded = [...next]
     return { success: true, enabled: next.length > 0, excluded: [...next] } as never
@@ -201,7 +258,7 @@ const api: Partial<ElectronAPI> = {
     const info = (id: string) => ({ id, name: COMPANIES[id].name, role: 'member', slug: id, ownerId: 'u_owner', repoPath: null, createdAt: '2026-10-01T00:00:00.000Z', updatedAt: '2026-10-01T00:00:00.000Z', ...(COMPANIES[id].folderKind ? { folderKind: COMPANIES[id].folderKind } : {}) })
     return { success: true, data: [COMPANY, 'other'].slice(0, count).map(info) }
   },
-  getMyDepartments: async () => ({ success: true, departmentIds: ['d_dev', 'd_sales'] }),
+  getMyDepartments: async () => ({ success: true, departmentIds: MANUAL ? ['d_sales'] : ['d_dev', 'd_sales'] }),
   createDirectory: async (path: string) => {
     record('createDirectory', [path])
     // mkdir -p: every missing level appears in its parent.
@@ -241,7 +298,7 @@ const api: Partial<ElectronAPI> = {
       ...(SHELF_MARKS[s.name]?.state === 'company' && params.get('backup') === '1' ? { shelfBackup: true } : {}),
     })) }
   },
-  getWriteAccess: async () => ({ version: 'v1', role: 'member', all: false, scopes: [{ path: '', write: true }, { path: '総務', write: false }] }),
+  getWriteAccess: async () => ({ version: 'v1', role: 'member', all: false, scopes: [{ path: '', write: true }, { path: MANUAL ? '総務部' : '総務', write: false }] }),
   onWriteAccessChanged: () => () => {},
   getMyPrivateFolders: async () => ({ success: true, folders: [] }),
   gitGrep: async (_root: string, query: string, folder: string) => {
@@ -415,6 +472,45 @@ if (params.get('inbox') === '1') {
     },
   } satisfies Partial<ElectronAPI>)
 }
+// ?manual=1: one consultation to read in 「AIへの相談」 (the manual's chapter 1). The chat server
+// is faked only so the panel opens; a message sent here gets no reply.
+if (MANUAL) {
+  const PORT = 4799
+  const at = (minutesAgo: number) => new Date(Date.now() - minutesAgo * 60_000).toISOString()
+  const session = {
+    id: 'thanks-mail', companyId: COMPANY, title: 'A社へのお礼メール', createdAt: at(12), updatedAt: at(10), revision: 1,
+    messages: [
+      { id: 'm1', role: 'user' as const, timestamp: at(12),
+        content: '営業部の訪問メモ_1123.md を読んで、A社の田村さんへのお礼メールの下書きを 営業部/下書き/ に作ってください。' },
+      { id: 'm2', role: 'assistant' as const, timestamp: at(10),
+        content: '訪問メモを読みました。お礼メールの下書きを「営業部/下書き/お礼メール_A社.md」に作りました。見積を来週お送りすることと、3月末の納期に向けて進めることにもふれています。' },
+    ],
+  }
+  try {
+    localStorage.setItem(`chatTabs:${COMPANY}`, JSON.stringify({ tabs: [{ title: session.title, sessionId: session.id }], activeIndex: 0 }))
+  } catch { /* preview only */ }
+  Object.assign(api, {
+    getChatServerInfo: async () => ({ port: PORT, authToken: 'preview' }),
+    getChatSession: async (_company: string, id: string) => (id === session.id ? session : null),
+    getChatSessionSummaries: async () => [{ id: session.id, companyId: COMPANY, title: session.title, createdAt: session.createdAt, updatedAt: session.updatedAt, messageCount: 2, sent: true, preview: '' }],
+    getPermissionMode: async () => 'auto',
+    getHandoff: async () => ({ status: 'waiting', message: '', canUpdate: false, pendingTurns: 0 }),
+    saveChatSession: async () => ({ status: 'saved', revision: 1 }),
+    voiceInput: {
+      // Off without a sentence: a preview-only reason (or the first-time microphone setup) would show in the pictures.
+      capabilities: async () => ({ available: false, reason: '', retryable: false }),
+      devices: async () => ({ ok: true, devices: [] }),
+      start: async () => {}, stop: async () => {}, cancel: async () => {},
+      onEvent: () => () => {}, onLevel: () => () => {}, onState: () => () => {},
+    } as never,
+  } satisfies Partial<ElectronAPI>)
+  const realFetch = window.fetch.bind(window)
+  window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
+    if (!url.startsWith(`http://127.0.0.1:${PORT}/`)) return realFetch(input, init)
+    return new Response(JSON.stringify(new URL(url).pathname === '/api/rate-limits' ? { rateLimits: null } : {}), { headers: { 'content-type': 'application/json' } })
+  }
+}
 installElectronAPI(api)
 
 Object.assign(window, {
@@ -482,7 +578,7 @@ Object.assign((window as unknown as { __acbLayout: object }).__acbLayout, {
   },
 })
 
-useAuthStore.setState({ user: { id: 'u_me', email: 'yamada@example.com', name: '山田 花子', image: null, emailVerified: true } })
+useAuthStore.setState({ user: { id: 'u_me', email: 'yamada@example.com', name: MANUAL ? '山田 太郎' : '山田 花子', image: null, emailVerified: true } })
 openCompany(COMPANY)
 
 // App.tsx shows the screen only while a company is open.

@@ -1,0 +1,61 @@
+<!-- The manual's chapter 1: the company's server holds the original files; each member's PC holds a
+     copy in its company folder, and the AI works inside the PC. Shot by shoot.spec.ts (scenes.ts). -->
+<style>
+  body { margin: 0; background: var(--color-surface); font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Hiragino Kaku Gothic ProN", sans-serif; color: var(--color-text); }
+  #diagram { width: 960px; padding: 32px 40px 36px; box-sizing: border-box; background: var(--color-surface); }
+  .server { margin: 0 auto; width: 420px; padding: 18px 20px; border: 2px solid var(--color-primary); border-radius: 14px; background: var(--color-selected-bg); text-align: center; }
+  .title { font-size: 20px; font-weight: 700; }
+  .sub { margin-top: 4px; font-size: 14px; color: var(--color-text-muted); }
+  .files { display: flex; justify-content: center; gap: 8px; margin-top: 12px; }
+  .file { padding: 4px 10px; border-radius: 6px; background: var(--color-surface); border: 1px solid var(--color-selected-border); font-size: 13px; }
+  .links { position: relative; height: 150px; }
+  .links svg { position: absolute; inset: 0; }
+  .label { position: absolute; top: 58px; padding: 4px 12px; border-radius: 9999px; background: var(--color-surface); border: 2px solid var(--color-primary); color: var(--color-selected-text); font-size: 15px; font-weight: 700; }
+  .pcs { display: flex; justify-content: space-between; }
+  .pc { width: 390px; padding: 16px 18px 18px; border: 2px solid var(--color-border-strong); border-radius: 14px; background: var(--color-bg); }
+  .pc .title { font-size: 18px; }
+  .folder { margin-top: 12px; padding: 12px 14px; border-radius: 10px; border: 1px dashed var(--color-border-strong); background: var(--color-surface); }
+  .folder .name { font-size: 14px; font-weight: 700; }
+  .folder .files { justify-content: flex-start; margin-top: 8px; }
+  .ai { display: flex; align-items: center; gap: 10px; margin-top: 12px; padding: 10px 14px; border-radius: 10px; border: 1px solid var(--color-ai-border); background: var(--color-ai-bg); color: var(--color-ai-text); font-size: 14px; }
+  .ai b { font-size: 15px; }
+  .badge { display: inline-flex; width: 26px; height: 26px; border-radius: 9999px; align-items: center; justify-content: center; background: var(--color-ai-icon); color: var(--color-on-primary); font-weight: 700; font-size: 13px; flex-shrink: 0; }
+</style>
+<div id="diagram">
+  <div class="server">
+    <div class="title">会社のサーバー</div>
+    <div class="sub">会社のファイルの大もと（24時間動いているコンピュータ）</div>
+    <div class="files"><span class="file">営業部</span><span class="file">総務部</span><span class="file">スキル</span></div>
+  </div>
+  <div class="links">
+    <svg width="880" height="150" viewBox="0 0 880 150" aria-hidden="true">
+      <defs>
+        <marker id="head" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" fill="var(--color-primary)" />
+        </marker>
+      </defs>
+      <path d="M380 8 C 300 60, 220 80, 195 142" fill="none" stroke="var(--color-primary)" stroke-width="3" marker-start="url(#head)" marker-end="url(#head)" />
+      <path d="M500 8 C 580 60, 660 80, 685 142" fill="none" stroke="var(--color-primary)" stroke-width="3" marker-start="url(#head)" marker-end="url(#head)" />
+    </svg>
+    <span class="label" style="left: 150px">同期でそろえる</span>
+    <span class="label" style="left: 600px">同期でそろえる</span>
+  </div>
+  <div class="pcs">
+    <div class="pc">
+      <div class="title">山田さんの PC</div>
+      <div class="folder">
+        <div class="name">会社フォルダ（写し）</div>
+        <div class="files"><span class="file">営業部</span><span class="file">スキル</span></div>
+      </div>
+      <div class="ai"><span class="badge">AI</span><span>ファイルを読んで、書いて、作る</span></div>
+    </div>
+    <div class="pc">
+      <div class="title">佐藤さんの PC</div>
+      <div class="folder">
+        <div class="name">会社フォルダ（写し）</div>
+        <div class="files"><span class="file">総務部</span><span class="file">スキル</span></div>
+      </div>
+      <div class="ai"><span class="badge">AI</span><span>ファイルを読んで、書いて、作る</span></div>
+    </div>
+  </div>
+</div>

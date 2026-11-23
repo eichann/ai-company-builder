@@ -37,14 +37,31 @@ A scene is data in `client/tests/manual/scenes.ts`:
 
 - `page` (+ `query`): which preview page to open (`client/tests/<page>-ui.html`, the real React
   components with the app's background parts faked; the same pages the UI tests use).
-- `steps`: clicks and waits to reach the state to show.
+- `steps`: clicks, right clicks, typing (`fill`, `typeAtEnd`), keys, a preview page's own hook
+  (`run`) and waits to reach the state to show.
 - `crop`: an element (with padding) or a region to cut out; the whole window when absent.
-- `annotations`: red frames (`box`) and numbered red markers (`marker`, placed top-left, left,
-  right or below the target). The text of the page refers to the numbers.
+- `annotations`: red frames (`box`), numbered red markers (`marker`, placed top-left, left,
+  right or below the target) and red-framed labels under icon-only buttons (`note`, the name
+  their tooltip shows). The text of the page refers to the numbers.
+
+Pictures have no caption under them: the page's text says what each number is, and the alt text
+describes the picture.
+
+The main screen and the screens before a company opens show the manual's own company with
+`manual: '1'` (`skill-layout-ui.html`, `company-selector-ui.html`): 検証A社, 山田 太郎 in 営業部,
+総務部 not downloaded, one consultation in 「AIへの相談」.
+
+### Diagrams
+
+A diagram (`diagram: true`) is static HTML in `client/tests/manual/diagrams/<id>.html`, drawn on
+the design tokens' colours (the shoot puts `primitives.css` and `theme.css` in front of it) and
+shot to `images/<id>.png` like a screen. The site takes pictures only as PNG/JPEG/WebP (no SVG,
+which could carry a script: `shared/core/manual.ts`), so diagrams become PNG here rather than the
+site accepting another format. Plain words only (no Git terms), Japanese labels.
 
 Targets are Playwright selectors, preferably by role and visible name
 (`role=button[name="サーバーと同期"]`), so they keep working when the look changes.
 
-Everything shown must be fictional (株式会社デモ, 検証A社, 山田さん): no real people, companies or
+Everything shown must be fictional (検証A社, 山田さん, 佐藤さん): no real people, companies or
 private-folder names. When a preview page lacks the state you need, add it to that page behind a
 query parameter (and keep its UI spec passing) rather than changing app code for the manual.
