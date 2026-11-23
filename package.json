@@ -19,7 +19,8 @@
     "staging:remove": "node staging/bootstrap.mjs remove",
     "build": "pnpm -r build",
     "lint": "pnpm -r lint",
-    "typecheck": "pnpm -r typecheck"
+    "typecheck": "pnpm -r typecheck",
+    "manual:shoot": "pnpm --filter client manual:shoot"
   },
   "keywords": ["ai", "agent", "electron", "workflow"],
   "author": "",

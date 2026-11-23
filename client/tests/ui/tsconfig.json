@@ -1,5 +1,6 @@
 {
-  // Type-checks the Playwright UI tests and the preview pages they drive
+  // Type-checks the Playwright UI tests, the preview pages they drive and the
+  // manual's screenshot scenes
   // (`npx tsc -p tests/ui`, run by the "Renderer UI tests" CI job).
   "extends": "../../tsconfig.json",
   "compilerOptions": {
@@ -8,6 +9,8 @@
   "include": [
     "./**/*.ts",
     "../*-ui.tsx",
+    // The manual's screenshot scenes (pnpm manual:shoot) use the same helpers.
+    "../manual/*.ts",
     // Declares Window['electronAPI'] (the typed fake in fixtures/electron-api.ts).
     "../../src/shared/ipc/electron-api.ts"
   ]

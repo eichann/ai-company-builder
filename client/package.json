@@ -17,7 +17,8 @@
     "handoff:probe": "tsx scripts/handoff/run.ts",
     "handoff:probe-absence": "tsx scripts/handoff/probe-absence.ts",
     "test:handoff": "tsx --test tests/handoff.test.ts",
-    "test:ui": "playwright test"
+    "test:ui": "playwright test",
+    "manual:shoot": "playwright test -c tests/manual/playwright.config.ts"
   },
   "build": {
     "appId": "com.ai-company-builder.client",

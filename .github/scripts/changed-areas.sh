@@ -57,9 +57,10 @@ SYNC=(
 )
 # Client node tests on Linux (most of client/tests/*.test.ts and the colocated
 # renderer tests). They import server/src/lib (git-server, push-check rules)
-# and admin/src/lib/folder-name.ts.
+# and admin/src/lib/folder-name.ts; manual-pages.test.ts reads manual/.
 CLIENT=(
   client/ shared/ server/src/lib/ server/package.json admin/src/lib/
+  manual/
   .github/scripts/client-tests.mjs
 )
 # Client tests that stay on macOS (.github/scripts/client-tests.mjs, list
@@ -82,9 +83,10 @@ CLIENT_MAC=(
   .github/scripts/client-tests.mjs
 )
 # Renderer UI tests (Playwright) and the renderer bundle size, both on Linux; the bundle job also
-# checks the preloads the same build emits (check-preloads.mjs).
+# checks the preloads the same build emits (check-preloads.mjs). tests/manual/: the manual's
+# screenshot scenes, type-checked by the UI job (tsc -p tests/ui).
 UI=(
-  client/src/ client/shared/ client/tests/ui/ ':(glob)client/tests/*-ui.*'
+  client/src/ client/shared/ client/tests/ui/ client/tests/manual/ ':(glob)client/tests/*-ui.*'
   client/playwright.config.ts client/vite.config.ts client/tailwind.config.js
   client/postcss.config.js client/index.html ':(glob)client/tsconfig*.json'
   client/package.json client/scripts/check-bundle-size.mjs shared/
