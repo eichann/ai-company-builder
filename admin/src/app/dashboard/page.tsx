@@ -61,8 +61,7 @@ function CompanyRedirect() {
           type="button"
           className="inline-flex items-center gap-1 underline-offset-4 hover:underline"
           onClick={async () => {
-            await signOut()
-            router.replace('/login')
+            if (await signOut()) router.replace('/login')
           }}
         >
           <SignOut size={12} />

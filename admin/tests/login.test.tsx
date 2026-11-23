@@ -2,8 +2,11 @@ import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
+import { toast } from 'sonner'
+
+import DashboardPage from '@/app/dashboard/page'
 import LoginPage from '@/app/login/page'
-import { AuthProvider } from '@/lib/auth-context'
+import { AuthProvider, SIGN_OUT_FAILED } from '@/lib/auth-context'
 import { mockApi } from './mock-api'
 
 const nav = vi.hoisted(() => ({ search: '', replace: vi.fn() }))
@@ -79,5 +82,53 @@ describe('login page', () => {
       await userEvent.click(open)
       expect(replace).toHaveBeenCalledWith('/manual/guide.html')
     })
+  })
+})
+
+// A sign-out that did not reach the server leaves the session alive (7 days): showing the console as
+// signed out would let the next person on a shared PC reload straight back in.
+describe('signing out', () => {
+  afterEach(() => {
+    nav.replace.mockReset()
+    vi.restoreAllMocks()
+  })
+
+  const signedIn = { body: { success: true, data: { id: 'u1', email: 'a@example.com', name: 'A', canCreateCompany: false } } }
+
+  async function openDashboard(signOutReply: Parameters<typeof mockApi>[0][string]) {
+    mockApi({
+      'GET /api/me': signedIn,
+      'GET /api/companies': { body: { success: true, data: [] } },
+      'POST /api/auth/sign-out': signOutReply,
+    })
+    render(<AuthProvider><DashboardPage /></AuthProvider>)
+    return screen.findByRole('button', { name: 'ログアウト' })
+  }
+
+  it.each([
+    ['the network fails', () => Promise.reject(new TypeError('Failed to fetch'))],
+    ['the server fails', { status: 500, body: { error: 'Internal error' } }],
+  ] as const)('when %s, keeps the user signed in and says so', async (_name, reply) => {
+    const error = vi.spyOn(toast, 'error')
+    const button = await openDashboard(reply)
+    await userEvent.click(button)
+    await vi.waitFor(() => expect(error).toHaveBeenCalledWith(SIGN_OUT_FAILED))
+    expect(nav.replace).not.toHaveBeenCalled()
+    // Still the signed-in page, not the sign-in form.
+    expect(screen.getByRole('button', { name: 'ログアウト' })).toBeInTheDocument()
+    expect(screen.getByText('まだ会社に参加していません')).toBeInTheDocument()
+  })
+
+  it.each([
+    ['succeeds', { body: { success: true } }],
+    ['finds no session any more (401)', { status: 401, body: { error: 'Unauthorized' } }],
+  ] as const)('when it %s, clears the user and goes to the sign-in page', async (_name, reply) => {
+    const error = vi.spyOn(toast, 'error')
+    const button = await openDashboard(reply)
+    await userEvent.click(button)
+    await vi.waitFor(() => expect(nav.replace).toHaveBeenCalledWith('/login'))
+    expect(error).not.toHaveBeenCalled()
+    // RequireAuth no longer shows the page to a signed-out user.
+    await vi.waitFor(() => expect(screen.queryByText('まだ会社に参加していません')).not.toBeInTheDocument())
   })
 })

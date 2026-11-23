@@ -1,7 +1,11 @@
 'use client'
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
-import { authApi, meApi, type User } from './api'
+import { toast } from 'sonner'
+
+import { ApiError, authApi, meApi, type User } from './api'
+
+export const SIGN_OUT_FAILED = 'ログアウトできませんでした。通信を確かめて、もう一度押してください。'
 
 interface AuthContextType {
   user: User | null
@@ -9,7 +13,12 @@ interface AuthContextType {
   signIn: (email: string, password: string) => Promise<void>
   /** Signs up (first user, or with an invitation token) and loads the session. */
   signUp: (email: string, password: string, name: string, invitationToken?: string) => Promise<void>
-  signOut: () => Promise<void>
+  /**
+   * Ends the session. Resolves true when it ended (callers then leave the page); on a failure the
+   * session may still be alive on the server, so the user stays signed in here, a message says so,
+   * and it resolves false.
+   */
+  signOut: () => Promise<boolean>
   refresh: () => Promise<void>
 }
 
@@ -69,9 +78,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const signOut = useCallback(async () => {
     try {
       await authApi.signOut()
-    } finally {
-      setUser(null)
+    } catch (err) {
+      // 401: the server holds no session for this browser any more, so it is signed out. Anything
+      // else (offline, timeout, 5xx) may have left the session alive for days: showing the console
+      // as signed out would let the next person on a shared PC reload straight back in.
+      if (!(err instanceof ApiError && err.status === 401)) {
+        toast.error(SIGN_OUT_FAILED)
+        return false
+      }
     }
+    setUser(null)
+    return true
   }, [])
 
   const value = useMemo(

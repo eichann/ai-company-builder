@@ -5,7 +5,7 @@ import { describeRules, draftFromRules, losingEdit, previewAccess, rulesFromDraf
 import { describeError } from '@/lib/errors'
 import { isValidFolderName, suggestFolderName } from '@/lib/folder-name'
 import { compareBuilds, formatBuild, formatRelative, latest, parseBuild, parseServerDate } from '@/lib/format'
-import { safeRedirect } from '@/lib/redirect'
+import { isManualPath, safeRedirect } from '@/lib/redirect'
 import { explainRejection } from '@/lib/rejections'
 import { members } from './fixtures'
 // The server's parser and order (server/src/lib/client-version.ts re-exports
@@ -97,6 +97,54 @@ describe('redirects', () => {
     expect(safeRedirect('https://evil.example')).toBe('/dashboard')
     expect(safeRedirect('/\\evil.example')).toBe('/dashboard')
     expect(safeRedirect(null)).toBe('/dashboard')
+  })
+
+  // Each would leave this console after sign-in once the URL parser strips a tab / newline or reads
+  // `\` as `/` (`/<TAB>/evil.example` → `//evil.example`), or is not a path at all.
+  it.each([
+    ['tab', '/\t/evil.example'],
+    ['newline', '/\n/evil.example'],
+    ['carriage return', '/\r/evil.example'],
+    ['tab inside', '/a/../\t/evil.example'],
+    ['NUL', '/\u0000/evil.example'],
+    ['DEL', '/\u007f/evil.example'],
+    ['line separator', '/\u2028/evil.example'],
+    ['paragraph separator', '/\u2029/evil.example'],
+    ['encoded tab', '/%09/evil.example'],
+    ['encoded newline', '/%0a/evil.example'],
+    ['encoded CR', '/%0D/evil.example'],
+    ['encoded backslash', '/%5cevil.example'],
+    ['encoded slash', '/%2F/evil.example'],
+    ['backslash', '\\evil.example'],
+    ['slash backslash', '/\\evil.example'],
+    ['slash two backslashes', '/\\\\evil.example'],
+    ['backslash later', '/dashboard\\..\\..\\evil'],
+    ['protocol-relative', '//evil.example'],
+    ['https', 'https://evil.example'],
+    ['javascript', 'javascript:alert(1)'],
+    ['leading space', ' /dashboard'],
+    ['leading space before //', ' //evil.example'],
+    ['dot segments to //', '/x/..//evil.example'],
+    ['manual dot segments to tab', '/manual/../%09/evil.example'],
+    ['manual dot segments to //', '/manual/..//evil.example'],
+    ['malformed escape', '/%E0%A4%A'],
+    ['empty', ''],
+  ])('refuses %s', (_name, value) => {
+    expect(safeRedirect(value)).toBe('/dashboard')
+  })
+
+  it('keeps ordinary paths with their query and hash, normalised', () => {
+    expect(safeRedirect('/companies/c1/members?tab=all#top')).toBe('/companies/c1/members?tab=all#top')
+    expect(safeRedirect('/invite/abc?x=1')).toBe('/invite/abc?x=1')
+    expect(safeRedirect('/companies/c1/../c2')).toBe('/companies/c2')
+  })
+
+  it('keeps a manual page, and judges isManualPath on the normalised path', () => {
+    expect(safeRedirect('/manual/guide.html')).toBe('/manual/guide.html')
+    expect(safeRedirect('/manual/guide.html#sync')).toBe('/manual/guide.html#sync')
+    expect(isManualPath(safeRedirect('/manual/guide.html'))).toBe(true)
+    expect(isManualPath(safeRedirect('/manual/../dashboard'))).toBe(false)
+    expect(isManualPath(safeRedirect('/manual/%2e%2e/companies'))).toBe(false)
   })
 })
 
