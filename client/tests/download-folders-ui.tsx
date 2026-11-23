@@ -17,6 +17,8 @@
 //          ［Google で許可］; the manual's picture, client/tests/manual/scenes.ts); otherwise the Google status is offline
 //   manual 1 = the user manual's company (検証A社: 全社のファイル, 営業部 with 過去資料 left out, 総務部)
 //          instead of 株式会社デモ's folders
+//   jobs   (with manual=1, tab=jobs) the manual's job 「weekly-report（毎週月曜 09:00）」 waiting for 「受け取る」 (default) |
+//          accepted = running, with ［止める］; the proposal that made it listed as approved
 //   closed 1 = start with the settings closed: a 「設定を開く」 button (always there) opens them (Esc closes, focus returns)
 import { useState } from 'react'
 import { createRoot } from 'react-dom/client'
@@ -26,6 +28,7 @@ import { useAppStore } from '../src/stores/appStore'
 import { SettingsPanel } from '../src/features/settings/components/SettingsPanel'
 import { FileTreePanel } from '../src/features/files/components/FileTreePanel'
 import { dispatchFileChanges } from '../src/shared/lib/fileEvents'
+import { MANUAL_JOB_CANDIDATE, MANUAL_JOB_DEFINITION, MANUAL_JOB_FINGERPRINT } from './ui/fixtures/manual-job'
 
 const params = new URLSearchParams(location.search)
 const view = params.get('view') ?? 'settings'
@@ -73,6 +76,15 @@ const TREE: Record<string, number> = MANUAL ? {
   'shared': 12 * MB,
   '.claude/skills': 2 * MB,
 }
+// ?manual=1: the job the manual's 山田さん proposed (chapter 26), waiting for 「受け取る」 or running.
+const JOB_ID = `job.${'1'.repeat(32)}`
+const jobAccepted = params.get('jobs') === 'accepted'
+const manualJobs = () => [{
+  id: JOB_ID, name: MANUAL_JOB_DEFINITION.name, state: 'active' as const, waiting: jobAccepted ? null : 'NOT_ACCEPTED' as const, pausedReason: null,
+  trigger: MANUAL_JOB_DEFINITION.trigger, placement: MANUAL_JOB_DEFINITION.placement, nextSlot: jobAccepted ? '2026-11-23T09:00' : null,
+  toAccept: jobAccepted ? null : { version: 1, fingerprint: MANUAL_JOB_FINGERPRINT, definition: MANUAL_JOB_DEFINITION, why: 'accept' as const },
+  deliverTo: null, controls: true, chainStopped: null, approvedVersion: 1,
+}]
 const sizeUnder = (p: string) => Object.entries(TREE).filter(([k]) => k === p || k.startsWith(`${p}/`)).reduce((n, [, v]) => n + v, 0)
 const childrenOf = (p: string) => {
   const set = new Set<string>()
@@ -159,6 +171,17 @@ Object.assign(window, {
       return { success: true, switches: mySwitches() }
     },
     getEnvStatus: async () => ({ success: true, vars: { ...envVars } }),
+    // ?manual=1: settings →「定期の仕事」 (chapter 26).
+    ...(MANUAL ? {
+      getMyJobs: async () => ({ success: true, jobs: manualJobs() }),
+      getMyJobProposals: async () => ({ success: true, supported: true, proposals: [{
+        id: `jp.${'b'.repeat(32)}`, jobId: JOB_ID, proposerId: 'u-yamada', candidateId: MANUAL_JOB_CANDIDATE, submittedVersion: 1, submittedFingerprint: MANUAL_JOB_FINGERPRINT,
+        state: 'approved', returnReason: null, decidedBy: 'u-sato', decidedAt: '2026-11-19T06:00:00.000Z', createdAt: '2026-11-18T06:00:00.000Z',
+      }] }),
+      getMyJobOccurrences: async () => ({ success: true, supported: true, occurrences: [] }),
+      acceptJob: async () => ({ success: true }),
+      pauseJob: async () => ({ success: true }),
+    } : {}),
     listOwnBrokerKeys: async () => ({ success: true, data: ownKeys }),
     // Main reads the value, sends it and removes it from the .env once the server kept it.
     moveEnvKeyToServer: async (_companyId: string, _root: string, name: string) => {

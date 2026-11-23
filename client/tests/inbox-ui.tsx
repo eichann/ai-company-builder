@@ -45,7 +45,30 @@ const note = (id: string, kind: NotificationItem['kind'], recordId: string, reco
   ({ id, kind, recordId, recordType, recordTitle, version: 4, text, createdAt, read })
 
 const changed = emitter<{ companyId: string }>()
-let state: NoticesState = {
+// `?manual=1`: the user manual's story (client/tests/manual/scenes.ts, chapter 25): 山田さん's inbox — a draft to check
+// and send, a minutes check, a task 佐藤さん asked, and what 高橋さん and 佐藤さん did. Fictional data only.
+const MANUAL = params.get('manual') === '1'
+const manualState: NoticesState = {
+  available: true,
+  myTurn: {
+    total: 3,
+    items: [
+      { id: 'outbound_message-manual01', type: 'outbound_message', title: 'A社 田村様へのお礼メール', state: 'draft', due: null },
+      { id: 'task-review0001', type: 'task', title: '議事録を確認する：営業部 定例', state: 'todo', due: null },
+      { id: 'task-asked0001', type: 'task', title: 'セキュリティのチェックシートを埋める', state: 'awaiting_acceptance', due: '2026-11-25' },
+    ],
+    resting: 2,
+  },
+  notices: {
+    available: true, unread: 3,
+    items: [
+      note('n-asked', 'asked', 'task-asked0001', 'task', 'セキュリティのチェックシートを埋める', '佐藤さんから「セキュリティのチェックシートを埋める」を頼まれました。引き受けるか、受けられないかを決めてください', at(0, 9)),
+      note('n-accepted', 'request_accepted', 'task-sec00001', 'task', 'セキュリティ資料を送る', '高橋さんが「セキュリティ資料を送る」を引き受けました', at(0, 8)),
+      note('n-approved', 'approval_result', 'approval-manual01', 'approval', '金額の変更（A社 研修導入）', '「金額の変更（A社 研修導入）」が承認されました（佐藤さん）', at(1, 16)),
+    ],
+  },
+}
+let state: NoticesState = MANUAL ? manualState : {
   available: true,
   myTurn: {
     total: 4,

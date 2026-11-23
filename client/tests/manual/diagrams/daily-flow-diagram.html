@@ -1,0 +1,27 @@
+<!-- The manual's chapter 27: one working day with ACB — the morning's two places to look, adding
+     and asking during the day, checking the AI's proposals after a meeting, syncing before going
+     home. Shot by shoot.spec.ts (scenes.ts). -->
+<style>
+  body { margin: 0; background: var(--color-surface); font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Hiragino Kaku Gothic ProN", sans-serif; color: var(--color-text); }
+  #diagram { width: 960px; padding: 28px 30px 30px; box-sizing: border-box; background: var(--color-surface); }
+  .row { display: flex; align-items: stretch; }
+  .box { flex: 1; padding: 14px 12px 16px; border-radius: 14px; border: 2px solid var(--color-border-strong); background: var(--color-bg); text-align: center; }
+  .box .when { display: inline-block; padding: 2px 10px; border-radius: 9999px; background: var(--color-primary); color: var(--color-on-primary); font-weight: 700; font-size: 13px; }
+  .box .title { margin-top: 8px; font-size: 16px; font-weight: 700; }
+  .box .what { margin-top: 6px; font-size: 13px; line-height: 1.6; color: var(--color-text-muted); text-align: left; }
+  .box.you { border-color: var(--color-primary); background: var(--color-selected-bg); }
+  .arrow { width: 30px; display: flex; align-items: center; justify-content: center; }
+  .note { margin-top: 14px; padding: 12px 16px; border-radius: 10px; background: var(--color-success-bg); border: 1px solid var(--color-success-border); color: var(--color-success-text); font-size: 14px; font-weight: 700; text-align: center; }
+</style>
+<div id="diagram">
+  <div class="row">
+    <div class="box you"><span class="when">朝</span><div class="title">2か所を見る</div><div class="what">・上の［受け箱］の数<br>・左の［やること］の<br>　「あなたの番」</div></div>
+    <div class="arrow"><svg width="24" height="20" viewBox="0 0 24 20" aria-hidden="true"><path d="M2 10 H14" stroke="var(--color-primary)" stroke-width="3" /><path d="M12 3 L22 10 L12 17 z" fill="var(--color-primary)" /></svg></div>
+    <div class="box"><span class="when">仕事中</span><div class="title">足す・頼む・相談</div><div class="what">・思いついたら1行で足す<br>・人に頼む、返事を待つ<br>・AI に相談する</div></div>
+    <div class="arrow"><svg width="24" height="20" viewBox="0 0 24 20" aria-hidden="true"><path d="M2 10 H14" stroke="var(--color-primary)" stroke-width="3" /><path d="M12 3 L22 10 L12 17 z" fill="var(--color-primary)" /></svg></div>
+    <div class="box"><span class="when">会議のあと</span><div class="title">案を確かめる</div><div class="what">・AI に議事録を読ませる<br>・やることの案を足す<br>・決めたことの案を確かめる</div></div>
+    <div class="arrow"><svg width="24" height="20" viewBox="0 0 24 20" aria-hidden="true"><path d="M2 10 H14" stroke="var(--color-primary)" stroke-width="3" /><path d="M12 3 L22 10 L12 17 z" fill="var(--color-primary)" /></svg></div>
+    <div class="box you"><span class="when">帰る前</span><div class="title">終わらせて、同期</div><div class="what">・済んだものに印をつける<br>・［サーバーと同期］を押す</div></div>
+  </div>
+  <div class="note">AI が用意したものは、読んでから送る・承認する。押すのは、いつもあなたです。</div>
+</div>

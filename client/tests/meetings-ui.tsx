@@ -28,12 +28,20 @@ import { emitter, installElectronAPI } from './ui/fixtures/electron-api'
 
 const params = new URLSearchParams(location.search)
 const ME = params.get('viewer') === 'suzuki' ? 'u-suzuki' : 'u-abe'
-const people: Record<string, string> = { 'u-abe': '阿部', 'u-suzuki': '鈴木', 'u-tamura': '田村', 'u-boss': '田中部長' }
+// `?manual=1`: the user manual's story (client/tests/manual/scenes.ts, chapter 24): the member is 山田さん of 営業部 (the same
+// ids, other names), A社 打ち合わせ and 営業部 定例, プロジェクト instead of 案件. Fictional data only.
+const MANUAL = params.get('manual') === '1'
+const people: Record<string, string> = MANUAL
+  ? { 'u-abe': '山田', 'u-suzuki': '高橋', 'u-tamura': '佐藤', 'u-boss': '木下部長' }
+  : { 'u-abe': '阿部', 'u-suzuki': '鈴木', 'u-tamura': '田村', 'u-boss': '田中部長' }
 const defs = new Map(coreTypeDefinitions().map(d => [d.name, d]))
 const today = (h: number) => { const d = new Date(); d.setHours(h, 0, 0, 0); return d.toISOString() }
 
 interface Meeting { id: string; title: string; at: string; state: string; version: number; by: string | null; series: boolean; members: string[] }
-const meetings: Meeting[] = [
+const meetings: Meeting[] = MANUAL ? [
+  { id: 'meeting-teirei01', title: '営業部 定例', at: today(9), state: 'arrived', version: 1, by: null, series: true, members: ['u-abe', 'u-suzuki', 'u-tamura'] },
+  { id: 'meeting-mensetu1', title: 'A社 打ち合わせ', at: today(10), state: 'arrived', version: 1, by: null, series: false, members: ['u-abe', 'u-suzuki'] },
+] : [
   { id: 'meeting-teirei01', title: '定例ミーティング', at: today(12), state: 'arrived', version: 1, by: null, series: true, members: ['u-abe', 'u-suzuki', 'u-tamura'] },
   { id: 'meeting-mensetu1', title: '採用面接', at: today(10), state: ME === 'u-suzuki' ? 'skipped' : 'arrived', version: ME === 'u-suzuki' ? 2 : 1, by: ME === 'u-suzuki' ? 'u-abe' : null, series: false, members: ['u-abe', 'u-suzuki'] },
 ]
@@ -49,7 +57,13 @@ const changed = emitter<{ companyId: string }>()
 const tell = () => changed.emit({ companyId: 'co' })
 const rec = (id: string, type: string, title: string, state: string, fields: RecordSummary['fields'] = {}): RecordSummary =>
   ({ id, type, typeVersion: 1, title, summary: '', path: null, state, fields, version: 1, updatedAt: '2026-11-04T04:00:00.000Z' })
-const outputs = (m: Meeting) => m.state !== 'read' ? [] : [
+const outputs = (m: Meeting) => m.state !== 'read' ? [] : MANUAL ? [
+  rec('decision-dec00001', 'decision', '訪問メモは翌日までに共有する', 'unconfirmed', { owner: 'u-abe' }),
+  rec('decision-dec00002', 'decision', '12月の展示会には2人で出る', 'unconfirmed', { owner: 'u-abe' }),
+  rec('task-prop0001', 'task', '展示会の申し込みをする', 'proposed', { assignee: 'u-abe' }),
+  rec('task-prop0002', 'task', '展示会の資料をそろえる', 'proposed', { assignee: 'u-suzuki' }),
+  rec('task-prop0003', 'task', '訪問メモのひな形を直す', 'proposed', { assignee: 'u-tamura' }),
+] : [
   rec('decision-dec00001', 'decision', '日報は 11月から AI の下書きを使う', 'unconfirmed', { owner: 'u-abe' }),
   rec('decision-dec00002', 'decision', '勉強会は月1回・第2水曜にする', 'unconfirmed', { owner: 'u-abe' }),
   rec('task-prop0001', 'task', '新しい日報の書き方を部署に案内する', 'proposed', { assignee: 'u-abe' }),
@@ -58,13 +72,13 @@ const outputs = (m: Meeting) => m.state !== 'read' ? [] : [
 ]
 const meetingRecord = (m: Meeting) => rec(m.id, 'meeting', m.title, m.state === 'asked' ? 'received' : m.state, {
   meeting_at: m.at, attendees: JSON.stringify(m.members), ...(m.by && m.state !== 'skipped' ? { assignee: m.by } : {}),
-  ...(m.state === 'read' ? { summary_text: '日報の書き方を見直し、11月から AI の下書きを使うことにしました。' } : {}),
+  ...(m.state === 'read' ? { summary_text: MANUAL ? '今週の訪問の振り返りと、12月の展示会の分担を話し合いました。' : '日報の書き方を見直し、11月から AI の下書きを使うことにしました。' } : {}),
   source_ref: JSON.stringify({ conference: 'c1', event: 'e1', docs: [{ kind: 'notes', id: 'notesDoc12345' }, { kind: 'transcript', id: 'transcriptDoc123' }] }),
 })
 // What a read meeting links besides: a proposal put away, one already added, and its 「議事録を確認する」.
-const putAway = rec('task-prop0004', 'task', '議事録の置き場所を決める', 'dismissed', { assignee: 'u-abe' })
-const added = rec('task-made0001', 'task', '日報のひな形を直す', 'todo', { assignee: 'u-abe' })
-const reviewTask = rec('task-review01', 'task', '議事録を確認する：定例ミーティング', 'todo', { assignee: 'u-abe', task_kind: 'minutes_review' })
+const putAway = rec('task-prop0004', 'task', MANUAL ? '会議室を予約する' : '議事録の置き場所を決める', 'dismissed', { assignee: 'u-abe' })
+const added = rec('task-made0001', 'task', MANUAL ? '先週の訪問メモを共有する' : '日報のひな形を直す', 'todo', { assignee: 'u-abe' })
+const reviewTask = rec('task-review01', 'task', MANUAL ? '議事録を確認する：営業部 定例' : '議事録を確認する：定例ミーティング', 'todo', { assignee: 'u-abe', task_kind: 'minutes_review' })
 const cardLinks = (m: Meeting) => (m.state !== 'read' ? [] : [...outputs(m), putAway, added, reviewTask].map(r => ({ label: '会議', recordVersion: 1, record: summaryView(r, defs.get(r.type)) })))
 const detailOf = (m: Meeting) => ({ record: { ...meetingRecord(m), version: m.version }, links: outputs(m).map(r => ({ name: 'meeting', direction: 'in' as const, record: r })) })
 const arrivalOf = (m: Meeting): MeetingArrival => ({
@@ -113,8 +127,8 @@ installElectronAPI({
   },
   // The server decides who may add a group or a department (record-member-subjects.test.ts); here: this member may.
   getInviteChoices: async () => ({
-    success: true, maySets: true, groups: [{ id: 'grp-1', name: '採用チーム' }], departments: [{ id: 'dep-1', name: '営業部' }],
-    listed: [{ type: 'group', id: 'grp-0', name: '面接官' }],
+    success: true, maySets: !MANUAL, groups: MANUAL ? [] : [{ id: 'grp-1', name: '採用チーム' }], departments: [{ id: 'dep-1', name: '営業部' }],
+    listed: MANUAL ? [] : [{ type: 'group', id: 'grp-0', name: '面接官' }],
   }),
   getRecordCard: async (_c, id) => {
     const m = find(id)
@@ -156,9 +170,9 @@ function Preview() {
       </aside>
       <section className="min-w-0 flex-1">
         {open && <RecordCard key={open} companyId="co" rootPath="/Users/me/company" recordId={open}
-          renderBundleField={f => renderRecordBundleField('co', f, { type: 'deal', name: '案件', source: 'plugin' }, '営業部')}
+          renderBundleField={f => renderRecordBundleField('co', f, MANUAL ? { type: 'project', name: 'プロジェクト', source: 'core' } : { type: 'deal', name: '案件', source: 'plugin' }, '営業部')}
           renderMeeting={(r, parts) => renderMeetingPanel('co', r.id, {
-            parts, members: Object.entries(people).filter(([id]) => id !== ME).map(([id, name]) => ({ id, name })),
+            parts, members: MANUAL ? [{ id: 'u-boss', name: '木下部長' }, { id: 'u-nakamura', name: '中村' }] : Object.entries(people).filter(([id]) => id !== ME).map(([id, name]) => ({ id, name })),
             onConsult: m => say(`consult ${m.id}`), onChanged: reload,
           })} />}
         {!open && <button type="button" className="m-4 text-small text-link" onClick={() => setOpen('meeting-teirei01')}>定例ミーティングを開く</button>}

@@ -33,7 +33,10 @@
 //     chat      live = a new consultation whose sent messages get a fixed reply chosen by their words
 //               (the manual's chapters 6–9: reading and writing files, an extra instruction while
 //               the AI works, a choice question, a command to confirm, a refused write, a review
-//               request, a Skill), and three earlier consultations in the list
+//               request, a Skill; chapters 18 and 26: a やること the AI makes, the time-job question and its
+//               proposal card), and three earlier consultations in the list
+//     tasks     manual = (instead of tasks=1) 山田さん's やること (chapter 17): the tab, today's meeting and the
+//               title bar's ［受け箱］ with what waits for him
 //     folders   marks = 総務部 downloaded (閲覧のみ), 営業部/過去資料 not downloaded and the private
 //               folder 営業部/提案前メモ this member reads; other = the same for someone who does not read it
 //
@@ -58,6 +61,8 @@ import { parseChoiceQuestions } from '../shared/choice-prompt'
 import { REVIEW_PART_TYPE } from '../shared/review-request'
 import { STEER_PART_TYPE } from '../shared/steer'
 import { readOnlyMessage } from '../shared/write-access'
+import { JOB_PROPOSAL_PART_TYPE } from '../shared/job-proposals'
+import { MANUAL_JOB_CANDIDATE, MANUAL_JOB_DEFINITION, MANUAL_JOB_FINGERPRINT } from './ui/fixtures/manual-job'
 
 const params = new URLSearchParams(location.search)
 // A sample for the bottom panel's frame (B2) in place of the inbox (I1), which needs records on (?inbox=1).
@@ -222,6 +227,23 @@ const RECORD_TASK = { id: 'task-aaaaaa1', type: 'task', typeLabel: 'タスク', 
 const RECORD_PROJECT = { id: 'project-aaaaaa1', type: 'project', typeLabel: 'プロジェクト', kind: 'bundle' as const, thing: 'bundle' as const, title: '新人研修の見直し', summary: '', stateLabel: '進めている', updatedAt: '2026-10-30T10:00:00Z' }
 const RECORD_DECISION = { id: 'decision-bbbbbb1', type: 'decision', typeLabel: '決めたこと', kind: 'decision' as const, thing: 'decision' as const, title: 'A社には150万円で出す', summary: '', stateLabel: '確かめた', updatedAt: '2026-10-30T10:00:00Z' }
 
+// ?manual=1&tasks=manual: 山田さん's やること (chapter 17; the list's own page has more of them).
+const taskItem = (id: string, title: string, turn: 'mine' | 'acceptance' | 'ai' | 'others', extra: Record<string, unknown> = {}) => ({
+  id, type: 'task', typeLabel: 'やること', title, turn, state: 'todo', version: 1, due: null as string | null, tags: [] as string[], waitingFor: null as string | null,
+  personal: false, own: false, actingFor: null, bundle: null as { id: string; title: string; typeLabel?: string } | null, finishedAt: null, stateLabel: null, ...extra,
+})
+const MANUAL_TASK_ITEMS = (() => {
+  const d = new Date()
+  const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+  const project = { id: 'project-a00001', title: 'A社 研修導入', typeLabel: 'プロジェクト' }
+  return [
+    taskItem('task-macc01', 'セキュリティのチェックシートを埋める', 'acceptance', { state: 'awaiting_acceptance', due: '2026-11-25' }),
+    taskItem('task-mmine1', 'お礼メールを確かめて送る', 'mine', { due: `${today}T17:00`, tags: ['営業'], bundle: project, check: { action: 'complete' } }),
+    taskItem('task-mmine2', 'B社 訪問メモをまとめる', 'mine', { due: '2026-11-23T15:00', tags: ['営業'], own: true, personal: true, check: { action: 'complete' } }),
+    taskItem('task-mai001', 'C社 日程の候補を探す', 'ai', { state: 'preparing' }),
+    taskItem('task-mask01', 'セキュリティ資料を送る', 'others', { state: 'awaiting_acceptance', waitingFor: '高橋さんに頼んだ・引き受け待ち', askedOfOthers: true, bundle: project }),
+  ]
+})()
 const fileChanges = emitter<Array<{ type: string; path: string }>>()
 // A file link clicked in a consultation's own window, after main checked it.
 const fileRequests = emitter<{ path: string }>()
@@ -416,6 +438,11 @@ const api: Partial<ElectronAPI> = {
         { id: 'task-prep0001', type: 'task', typeLabel: 'やること', title: '見積の下書きを確かめる', turn: 'mine' as const, state: 'todo', version: 1, due: null, tags: [], waitingFor: null, personal: false, own: true, actingFor: null, bundle: null, finishedAt: null, stateLabel: null, aiPrepared: true as const },
         { id: 'task-plain001', type: 'task', typeLabel: 'やること', title: 'ふつうのやること', turn: 'mine' as const, state: 'todo', version: 1, due: null, tags: [], waitingFor: null, personal: false, own: true, actingFor: null, bundle: null, finishedAt: null, stateLabel: null },
       ] } }
+    : MANUAL && params.get('tasks') === 'manual'
+    ? { success: true, data: { available: true, listDepartmentIds: null, me: 'u_me',
+      bundleKinds: { core: { type: 'project', name: 'プロジェクト', source: 'core' as const }, departments: [], kinds: [] },
+      members: [{ id: 'u_me', name: '山田' }, { id: 'u_takahashi', name: '高橋' }, { id: 'u_sato', name: '佐藤' }],
+      items: MANUAL_TASK_ITEMS } }
     : params.get('tasks') === '1'
     ? { success: true, data: { available: true, listDepartmentIds: null, items: Array.from({ length: 3 }, (_, i) => ({
       id: i === 0 ? RECORD_TASK.id : `task-row00${i}`, type: 'task', typeLabel: 'タスク', title: i === 0 ? RECORD_TASK.title : `やること ${i + 1}`, turn: 'mine' as const, state: 'todo', version: i === 0 ? taskVersion : 1, due: null,
@@ -469,6 +496,25 @@ const api: Partial<ElectronAPI> = {
   getMeetingArrivals: async () => featuresParam.includes('listoff')
     ? { available: true, items: [{ recordId: 'meeting-0000cc', title: 'A社 定例', version: 2, meetingAt: '2026-11-02T01:00:00Z', status: 'arrived' as const, attendeeCount: 2, by: null, byYou: false, series: false, autoSeries: false, made: null }] }
     : { available: false, items: [] },
+}
+// ?manual=1&tasks=manual: the title bar's ［受け箱］ counts what waits for 山田さん (chapter 17).
+if (MANUAL && params.get('tasks') === 'manual') {
+  Object.assign(api, {
+    watchNotifications: async () => {},
+    onNotificationsChanged: () => () => {},
+    getNotificationsState: async () => ({
+      available: true,
+      myTurn: { total: 3, items: MANUAL_TASK_ITEMS.filter(i => i.turn === 'mine' || i.turn === 'acceptance').map(i => ({ id: i.id, type: i.type, title: i.title, state: i.state, due: i.due })) },
+      notices: { available: true, unread: 1, items: [{ id: 'n-1', kind: 'request_accepted', recordId: 'task-mask01', recordType: 'task', recordTitle: 'セキュリティ資料を送る', version: 2, text: '高橋さんが「セキュリティ資料を送る」を引き受けました', createdAt: new Date().toISOString(), read: false }] },
+    }),
+    getCalendarToday: async () => {
+      const d = new Date()
+      const day = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+      return { success: true, data: { date: day, timeZone: 'Asia/Tokyo', reason: null, events: [
+        { id: 'ev-m', title: 'A社 打ち合わせ', start: `${day}T14:00:00+09:00`, end: `${day}T15:00:00+09:00`, allDay: false, online: true, hasExternalAttendees: true, attendeeCount: 4 },
+      ] } } as never
+    },
+  } satisfies Partial<ElectronAPI>)
 }
 // ?inbox=1: the real inbox (I1) from a turn and a notice main read (records on, no task list here).
 if (params.get('inbox') === '1') {
@@ -544,6 +590,28 @@ const LIVE_WRITTEN: Record<string, string> = {
 }
 const MEMO = '営業部/訪問メモ_1123.md'
 const LIVE_REPLIES: Array<{ when: RegExp; steps: LiveStep[] }> = [
+  // A やること the AI makes (chapter 18): the record tool's line and what the tool told it to say.
+  { when: /やることに入れて/, steps: [
+    { chunk: { type: 'tool-input-available', toolCallId: 'c1', toolName: 'mcp__acb_records__records_create', dynamic: true, providerExecuted: true, input: { type: 'task', title: '見積を直す' }, providerMetadata: line('記録を作りました', '記録を作っています', 'タスク「見積を直す」') } },
+    { wait: 80 },
+    { chunk: { type: 'tool-output-available', toolCallId: 'c1', dynamic: true, providerExecuted: true, output: 'ok' } },
+    ...SAY('t1', '「見積を直す」を、あなただけに見えるやることに入れました（期限：11/23（月）15:00）。部署に出すときは、やることのカードの［部署に出す］から出してください。'),
+    { end: true },
+  ] },
+  // The third day with the same Skill (chapter 26): the work, then the one question about a time job.
+  { when: /^\/weekly-report/, steps: [
+    { chunk: { type: 'tool-input-available', toolCallId: 's1', toolName: 'Skill', dynamic: true, providerExecuted: true, input: { skill: 'weekly-report' }, providerMetadata: line('スキルを使いました', 'スキルを使っています', 'weekly-report') } },
+    { chunk: { type: 'tool-output-available', toolCallId: 's1', dynamic: true, providerExecuted: true, output: 'ok' } },
+    ...READ('r1', MEMO), ...WRITE('w1', '営業部/週報/週報_1120.md'),
+    ...SAY('t1', '今週の訪問メモから、週報を「営業部/週報/週報_1120.md」にまとめました。\n\nこの仕事は、これまでにも何度か同じように頼まれています。毎週（または毎日・毎月）同じ時間に、定期の仕事としてやりましょうか？'),
+    { end: true },
+  ] },
+  // 「はい」 to it (chapter 26): the proposal card (the server's candidate, read by the card itself).
+  { when: /毎週月曜の朝9時/, steps: [
+    ...SAY('t1', '毎週月曜の 9:00 に、新しい訪問メモがあるときだけ週報をまとめる案を作りました。内容を確かめて、よければ［これで管理者に出す］を押してください。'),
+    { chunk: { type: JOB_PROPOSAL_PART_TYPE, id: 'job-proposal-1', data: { id: 'jp-card-1', companyId: COMPANY, conversationId: null, candidateId: MANUAL_JOB_CANDIDATE, at: new Date().toISOString() } } },
+    { end: true },
+  ] },
   // A Skill chosen with 「/」 (chapter 14).
   { when: /^\/thank-you-mail/, steps: [
     { chunk: { type: 'tool-input-available', toolCallId: 's1', toolName: 'Skill', dynamic: true, providerExecuted: true, input: { skill: 'thank-you-mail' }, providerMetadata: line('スキルを使いました', 'スキルを使っています', 'thank-you-mail') } },
@@ -675,6 +743,8 @@ if (MANUAL) {
     getChatSession: async (_company: string, id: string) => (id === session.id ? session : null),
     getChatSessionSummaries: async () => [{ id: session.id, companyId: COMPANY, title: session.title, createdAt: session.createdAt, updatedAt: session.updatedAt, messageCount: 2, sent: true, preview: LIVE ? session.messages[1].content : '' }, ...(LIVE ? LIVE_PAST : [])],
     getPermissionMode: async () => 'auto',
+    // The proposal card's candidate (chapter 26), as the server answers it.
+    getJobCandidate: async () => ({ success: true, candidate: { id: MANUAL_JOB_CANDIDATE, definition: MANUAL_JOB_DEFINITION, fingerprint: MANUAL_JOB_FINGERPRINT, expiresAt: '2026-11-21T01:30:00.000Z', timeZone: 'Asia/Tokyo' }, proposal: null }),
     getHandoff: async () => ({ status: 'waiting', message: '', canUpdate: false, pendingTurns: 0 }),
     saveChatSession: async () => ({ status: 'saved', revision: 1 }),
     voiceInput: {

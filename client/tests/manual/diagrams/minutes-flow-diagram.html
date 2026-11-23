@@ -1,0 +1,27 @@
+<!-- The manual's chapter 24: after a recorded meeting — the minutes arrive, the member's AI reads
+     them, proposes やること and 決めたこと, and people decide. Shot by shoot.spec.ts (scenes.ts). -->
+<style>
+  body { margin: 0; background: var(--color-surface); font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Hiragino Kaku Gothic ProN", sans-serif; color: var(--color-text); }
+  #diagram { width: 960px; padding: 28px 30px 30px; box-sizing: border-box; background: var(--color-surface); }
+  .row { display: flex; align-items: stretch; }
+  .box { flex: 1; padding: 14px 12px 16px; border-radius: 14px; border: 2px solid var(--color-border-strong); background: var(--color-bg); text-align: center; }
+  .box .step { display: inline-flex; width: 24px; height: 24px; border-radius: 9999px; background: var(--color-primary); color: var(--color-on-primary); font-weight: 700; font-size: 14px; align-items: center; justify-content: center; }
+  .box .title { margin-top: 6px; font-size: 16px; font-weight: 700; }
+  .box .what { margin-top: 6px; font-size: 13px; line-height: 1.6; color: var(--color-text-muted); }
+  .box.you { border-color: var(--color-primary); background: var(--color-selected-bg); }
+  .box.ai { border-color: var(--color-ai-border); background: var(--color-ai-bg); }
+  .arrow { width: 32px; display: flex; align-items: center; justify-content: center; }
+  .note { margin-top: 14px; padding: 12px 16px; border-radius: 10px; background: var(--color-success-bg); border: 1px solid var(--color-success-border); color: var(--color-success-text); font-size: 14px; font-weight: 700; text-align: center; }
+</style>
+<div id="diagram">
+  <div class="row">
+    <div class="box"><span class="step">1</span><div class="title">議事録が届く</div><div class="what">Google Meet で<br>記録した会議。<br>出た人の［やること］の上に<br>「議事録が届きました」</div></div>
+    <div class="arrow"><svg width="26" height="20" viewBox="0 0 26 20" aria-hidden="true"><path d="M2 10 H16" stroke="var(--color-primary)" stroke-width="3" /><path d="M14 3 L24 10 L14 17 z" fill="var(--color-primary)" /></svg></div>
+    <div class="box you"><span class="step">2</span><div class="title">読ませる</div><div class="what">だれか1人が<br>［AI に読ませる］を押す</div></div>
+    <div class="arrow"><svg width="26" height="20" viewBox="0 0 26 20" aria-hidden="true"><path d="M2 10 H16" stroke="var(--color-primary)" stroke-width="3" /><path d="M14 3 L24 10 L14 17 z" fill="var(--color-primary)" /></svg></div>
+    <div class="box ai"><span class="step">3</span><div class="title">AI が案を出す</div><div class="what">要約と、<br>やることの案・<br>決めたことの案</div></div>
+    <div class="arrow"><svg width="26" height="20" viewBox="0 0 26 20" aria-hidden="true"><path d="M2 10 H16" stroke="var(--color-primary)" stroke-width="3" /><path d="M14 3 L24 10 L14 17 z" fill="var(--color-primary)" /></svg></div>
+    <div class="box you"><span class="step">4</span><div class="title">人が決める</div><div class="what">やること：<br>［足す］／［要らない］<br>決めたこと：<br>［そうです］／［違う］</div></div>
+  </div>
+  <div class="note">AI は案を出すだけ。「決まった」になるのは、決める立場の人が［そうです］を押したときです。</div>
+</div>

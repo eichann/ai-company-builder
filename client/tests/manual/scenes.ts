@@ -70,16 +70,17 @@ export interface Scene {
 // 営業部, 総務部 not downloaded, one consultation in 「AIへの相談」).
 const MAIN = { page: 'skill-layout', query: { companies: '2', manual: '1' } } as const
 // The screens before a company opens, at a size that frames their centred card.
-const SELECTOR = { page: 'company-selector', query: { manual: '1' }, viewport: { width: 760, height: 680 } } as const
+const SELECTOR = { page: 'company-selector', query: { manual: '1' }, viewport: { width: 830, height: 680 } } as const
 // 15章: 総務部 downloaded (閲覧のみ), 営業部/過去資料 not downloaded, the private folder 営業部/提案前メモ.
 const MARKS = { page: 'skill-layout', query: { companies: '2', manual: '1', folders: 'marks' } } as const
-const SIGN_IN = { page: 'sign-in', viewport: { width: 760, height: 620 } } as const
+const SIGN_IN = { page: 'sign-in', viewport: { width: 830, height: 620 } } as const
 
 // 「AIへの相談」 opens with its list over a narrow chat (as in the app): closed for a picture of the screen.
 const CLOSE_LIST: SceneStep = { click: 'role=complementary[name="AIへの相談"] >> role=button[name="AIへの相談の一覧を閉じる"]' }
 const SALES_TAB = 'role=button[name="営業部" s]'
 const FILES_TAB = 'role=button[name="ファイル" s]'
 const SKILLS_TAB = 'role=button[name="Skill" s]'
+const TASKS_TAB = 'role=button[name=/^やること/] >> nth=0'
 const SYNC = 'role=button[name="サーバーと同期" s]'
 const SYNC_WAITS = 'role=button[name="サーバーと同期（自動同期は止まっています）"]'
 const PREVIEW = 'role=button[name="変更を確認" s]'
@@ -114,6 +115,20 @@ const CHAT_CROP = { target: CHAT_PANE, padding: { x: 32, y: 0 } }
 const SETTLE: SceneStep = { run: 'new Promise(resolve => setTimeout(resolve, 600))' }
 /** Folds the editor's side panel (つながっているもの・前の版): the preview's history is not this file's. */
 const FOLD_SIDE = 'role=button[name="つながっているもの・前の版をたたむ"]'
+// 17〜21章: the task list as 山田さん sees it (tasks-list-ui.html ?manual=1), a narrow column as in the app.
+const TASKS = { page: 'tasks-list', query: { manual: '1' }, viewport: { width: 420, height: 880 } } as const
+/** A section's heading of the task list, by its title. */
+const TASK_SECTION = (title: string) => `role=region[name="${title}"] >> h3 >> span >> nth=0`
+const QUICK_ADD = 'role=textbox[name="やることを足す"]'
+const QUICK_CHIP = (which: 'due' | 'who' | 'bundle' | 'whenDone') => `[data-quick-chip="${which}"]`
+// 18〜24章: a task's card as 山田さん sees it (task-card-ui.html ?manual=1).
+const CARD = { page: 'task-card', query: { manual: '1' }, viewport: { width: 1100, height: 900 } } as const
+// 24章: the meetings 山田さん attended (meetings-ui.html ?manual=1).
+const MEETINGS = { page: 'meetings', query: { manual: '1' }, viewport: { width: 1100, height: 900 } } as const
+const MINUTES_BLOCK = 'role=region[name="議事録が届きました"]'
+// 17章: 「記録の一覧」 as 山田さん reads it (records-table-ui.html ?manual=1).
+const TABLE = { page: 'records-table', query: { manual: '1' }, viewport: { width: 1100, height: 700 } } as const
+const CARD_MORE = 'role=button[name="その他の操作"] >> nth=0'
 const SKILL_CARD = (name: string) => `xpath=//*[normalize-space()="${name}"]/ancestor::div[.//button[normalize-space()="実行"]][1]`
 
 export const scenes: Scene[] = [
@@ -706,7 +721,7 @@ export const scenes: Scene[] = [
     about: '「AIへの相談」 before Claude is signed in: ［Claude にログインする］.',
     page: 'chat-header',
     query: { auth: 'none' },
-    viewport: { width: 760, height: 560 },
+    viewport: { width: 830, height: 560 },
     steps: [{ waitFor: 'role=button[name="Claude にログインする"]' }],
     crop: { target: 'text=Claude へのログインが必要です >> xpath=..', padding: 24 },
     annotations: [{ box: 'role=button[name="Claude にログインする"]' }, { marker: { target: 'role=button[name="Claude にログインする"]', label: '1', at: 'left' } }],
@@ -938,5 +953,563 @@ export const scenes: Scene[] = [
     annotations: [
       { box: 'role=button[name="Google で許可"]' }, { marker: { target: 'role=button[name="Google で許可"]', label: '1', at: 'right' } },
     ],
+  },
+
+  // ── 17章〜 2日目から：毎日の仕事 ───────────────────────────────────────────
+  // The task list as 山田さん sees it (tasks-list-ui.html ?manual=1: 営業部, プロジェクト, 高橋さん and 佐藤さん).
+  {
+    id: 'tasks-list-by-turn',
+    about: 'The task list by turn: 引き受け待ち, あなたの番 (with today\'s meeting), AI の番, ほかの人の番・返事待ち.',
+    ...TASKS,
+    annotations: [
+      { marker: { target: TASK_SECTION('引き受け待ち'), label: '1', at: 'right' } },
+      { marker: { target: TASK_SECTION('あなたの番'), label: '2', at: 'right' } },
+      { marker: { target: TASK_SECTION('AI の番'), label: '3', at: 'right' } },
+      { marker: { target: TASK_SECTION('ほかの人の番・返事待ち'), label: '4', at: 'right' } },
+      { marker: { target: TASK_SECTION('今日終わったこと'), label: '5', at: 'right' } },
+    ],
+  },
+  {
+    id: 'tasks-list-header',
+    about: 'The top of the task list: how it is arranged (番ごと / プロジェクトごと / 日付ごと), ［表で見る］ and the tags.',
+    ...TASKS,
+    crop: { region: { x: 0, y: 0, width: 420, height: 112 } },
+    annotations: [
+      { box: 'role=group[name="並べ方"]' }, { marker: { target: 'role=group[name="並べ方"]', label: '1', at: 'right' } },
+      { box: 'role=button[name="表で見る"]' }, { marker: { target: 'role=button[name="表で見る"]', label: '2', at: 'left' } },
+      { box: 'role=group[name="タグで絞る"]' }, { marker: { target: 'role=group[name="タグで絞る"]', label: '3', at: 'right' } },
+    ],
+  },
+  {
+    id: 'quick-add-chips',
+    about: 'The one line: 「見積を直す 明日15時まで #営業」 typed, its due and tag read into the chips.',
+    ...TASKS,
+    steps: [{ click: QUICK_ADD }, { fill: QUICK_ADD, text: '見積を直す 月曜15時まで #営業' }, SETTLE],
+    keepFocus: true,
+    crop: { region: { x: 0, y: 40, width: 420, height: 92 } },
+    annotations: [
+      { box: QUICK_ADD }, { marker: { target: QUICK_ADD, label: '1', at: 'left' } },
+      { marker: { target: QUICK_CHIP('due'), label: '2' } },
+      { marker: { target: QUICK_CHIP('who'), label: '3' } },
+      { marker: { target: 'text=あなただけに見えます', label: '4', at: 'right' } },
+    ],
+  },
+  {
+    id: 'quick-add-added',
+    about: 'After Enter: the new task in あなたの番, 「あなただけ」.',
+    ...TASKS,
+    steps: [{ click: QUICK_ADD }, { fill: QUICK_ADD, text: '見積を直す 月曜15時まで #営業' }, { press: 'Enter' }, { waitFor: 'role=button[name=/^見積を直す/]' }, SETTLE],
+    crop: { target: 'role=region[name="あなたの番"]', padding: { x: 0, y: 8 } },
+    annotations: [
+      { box: 'role=button[name=/^見積を直す/] >> xpath=..' },
+    ],
+  },
+  {
+    id: 'task-check-done',
+    about: 'The ☐ pressed: the task moves to 今日終わったこと, struck through, with the green ✓ (やり直す).',
+    ...TASKS,
+    steps: [{ click: 'role=button[name="「お礼メールを確かめて送る」を完了にする"]' }, { waitFor: 'role=button[name="「お礼メールを確かめて送る」をやり直す"]' }, SETTLE],
+    crop: { target: 'role=region[name="今日終わったこと"]', padding: { x: 0, y: 8 } },
+    annotations: [
+      { box: 'role=button[name="「お礼メールを確かめて送る」をやり直す"]' },
+    ],
+  },
+  {
+    id: 'tasks-archive',
+    about: 'The folded アーカイブ opened: the tasks archived in the last 30 days.',
+    ...TASKS,
+    steps: [{ click: 'role=button[name=/^アーカイブ/]' }, { waitFor: 'text=名刺の注文' }, SETTLE],
+    crop: { target: 'role=region[name="アーカイブ"]', padding: { x: 0, y: 8 } },
+    annotations: [{ box: 'role=button[name=/^アーカイブ/]' }],
+  },
+  {
+    id: 'quick-add-ask',
+    about: 'Asking 高橋さん from the one line: ［高橋さんに頼む］ and ［終わったら：知らせるだけ］.',
+    ...TASKS,
+    steps: [{ click: QUICK_ADD }, { fill: QUICK_ADD, text: 'セキュリティ資料を送る 火曜まで' }, { click: QUICK_CHIP('who') }, { click: '[data-quick-person="高橋"]' }, SETTLE],
+    keepFocus: true,
+    crop: { region: { x: 0, y: 40, width: 420, height: 98 } },
+    annotations: [
+      { box: QUICK_CHIP('who') }, { marker: { target: QUICK_CHIP('who'), label: '1', at: 'right' } },
+      { box: QUICK_CHIP('whenDone') }, { marker: { target: QUICK_CHIP('whenDone'), label: '2', at: 'right' } },
+    ],
+  },
+  {
+    id: 'tasks-list-asked',
+    about: 'What 山田さん asked of others: 「高橋さんに頼んだ・引き受け待ち」 with the 「人に頼んだもの」 mark, and a 返事待ち.',
+    ...TASKS,
+    crop: { target: 'role=region[name="ほかの人の番・返事待ち"]', padding: { x: 0, y: 8 } },
+    annotations: [
+      { box: 'role=img[name="人に頼んだもの"]' }, { marker: { target: 'text=高橋さんに頼んだ・引き受け待ち', label: '1', at: 'right' } },
+      { marker: { target: 'text=/^返事待ち：/', label: '2', at: 'right' } },
+    ],
+  },
+  {
+    id: 'task-accept',
+    about: 'A task 佐藤さん asked of 山田さん, in 引き受け待ち with ［引き受ける］.',
+    ...TASKS,
+    crop: { target: 'role=region[name="引き受け待ち"]', padding: { x: 0, y: 8 } },
+    annotations: [{ box: 'role=button[name="引き受ける"]' }, { marker: { target: 'role=button[name="引き受ける"]', label: '1', at: 'left' } }],
+  },
+  {
+    id: 'tasks-list-delegate',
+    about: '山田さん covers 高橋さん while he is away: 「高橋さんの代わり」 on the row.',
+    ...TASKS,
+    query: { manual: '1', absent: '1' },
+    crop: { target: 'role=region[name="あなたの番"]', padding: { x: 0, y: 8 } },
+    annotations: [{ box: 'text=高橋さんの代わり' }],
+  },
+  {
+    id: 'tasks-list-ai-turn',
+    about: 'AI の番: one the AI is working on, one it could not finish with ［もう一度］［人に渡す］.',
+    ...TASKS,
+    crop: { target: 'role=region[name="AI の番"]', padding: { x: 0, y: 8 } },
+    annotations: [
+      { marker: { target: 'text=AI が進めています', label: '1', at: 'right' } },
+      { box: 'role=button[name="もう一度"]' }, { marker: { target: 'role=button[name="もう一度"]', label: '2', at: 'below' } },
+      { box: 'role=button[name="人に渡す"]' }, { marker: { target: 'role=button[name="人に渡す"]', label: '3', at: 'below' } },
+    ],
+  },
+  {
+    id: 'task-card-origin',
+    about: 'A task the AI made from a meeting: 「会議『…』から AI が作りました」, ［根拠を見る］ opened.',
+    ...CARD,
+    steps: [{ click: 'role=button[name="根拠を見る"]' }, SETTLE],
+    crop: { region: { x: 0, y: 0, width: 830, height: 150 } },
+    annotations: [
+      { marker: { target: 'text=/からAI が作りました/', label: '1', at: 'left' } },
+      { box: 'role=button[name="根拠をたたむ"] >> xpath=..' },
+    ],
+  },
+  {
+    id: 'task-postpone',
+    about: '延ばす on the due: the choices (1時間あと, 今日の夕方, あしたの朝…).',
+    ...CARD,
+    steps: [{ click: 'role=button[name="延ばす"]' }, { waitFor: 'role=group[name="延ばす"]' }],
+    crop: { target: 'role=group[name="延ばす"]', padding: { x: 60, y: 90 } },
+    annotations: [
+      { box: 'role=button[name="延ばす"]' }, { marker: { target: 'role=button[name="延ばす"]', label: '1', at: 'right' } },
+      { box: 'role=group[name="延ばす"]' }, { marker: { target: 'role=group[name="延ばす"]', label: '2', at: 'right' } },
+    ],
+  },
+  {
+    id: 'task-archive-menu',
+    about: 'The card\'s 「…」 with ［アーカイブ］ and its line: 一覧から外します。消しません。',
+    ...CARD,
+    query: { manual: '1', task: 'todo-own' },
+    steps: [{ click: CARD_MORE }, { waitFor: 'role=menu' }],
+    crop: { target: 'role=menu', padding: { x: 60, y: 70 } },
+    annotations: [{ box: 'role=menuitem[name=/^アーカイブ/]' }, { marker: { target: 'role=menuitem[name=/^アーカイブ/]', label: '1', at: 'left' } }],
+  },
+  {
+    id: 'task-only-you',
+    about: 'A task 山田さん added: 「あなただけ」 top right and ［部署に出す］ below.',
+    ...CARD,
+    query: { manual: '1', own: '1' },
+    crop: { region: { x: 0, y: 0, width: 830, height: 330 } },
+    annotations: [
+      { box: 'text=あなただけ >> nth=0' }, { marker: { target: 'text=あなただけ >> nth=0', label: '1', at: 'left' } },
+      { box: 'role=button[name="部署に出す"]' }, { marker: { target: 'role=button[name="部署に出す"]', label: '2', at: 'right' } },
+    ],
+  },
+  {
+    id: 'task-share-department',
+    about: '［部署に出す］ opened: the department, 「あとから「あなただけ」には戻せません」, ［この部署に出す］.',
+    ...CARD,
+    query: { manual: '1', own: '1' },
+    viewport: { width: 1100, height: 1000 },
+    steps: [{ click: 'role=button[name="部署に出す"]' }, { waitFor: 'role=group[name="部署に出す"]' }],
+    crop: { target: 'role=group[name="部署に出す"]', padding: { x: 40, y: 20 } },
+    annotations: [
+      { marker: { target: 'role=group[name="部署に出す"] >> role=combobox', label: '1', at: 'right' } },
+      { box: 'text=/には戻せません/' },
+      { marker: { target: 'role=button[name="この部署に出す"]', label: '2', at: 'below' } },
+    ],
+  },
+  {
+    id: 'task-share-similar',
+    about: 'After ［部署に出す］: 「似ているやることがあります」 with ［まとめる］［このまま］.',
+    ...CARD,
+    query: { manual: '1', own: '1', similar: '1' },
+    viewport: { width: 1100, height: 1000 },
+    steps: [{ click: 'role=button[name="部署に出す"]' }, { click: 'role=button[name="この部署に出す"]' }, { waitFor: 'text=/似ているやることがあります/' }, SETTLE],
+    crop: { target: 'text=/似ているやることがあります/ >> xpath=..', padding: { x: 24, y: 16 } },
+    annotations: [{ box: 'role=button[name="まとめる"]' }, { box: 'role=button[name="このまま"]' }],
+  },
+  {
+    id: 'task-seen-department',
+    about: 'A task shown to 営業部: 「営業部のみんな」 top right.',
+    ...CARD,
+    crop: { region: { x: 0, y: 0, width: 830, height: 100 } },
+    annotations: [{ box: 'text=営業部のみんな' }],
+  },
+  {
+    id: 'task-decline-dialog',
+    about: '「…」→［受けられない］: what happens, who is told, the reason.',
+    ...CARD,
+    steps: [{ click: CARD_MORE }, { click: 'role=menuitem[name=/^受けられない/]' }, { waitFor: 'role=textbox[name="理由"]' }, { fill: 'role=textbox[name="理由"]', text: '今週は展示会の準備で手が回りません。来週なら引き受けられます。' }, SETTLE],
+    crop: { target: 'role=dialog', padding: 16 },
+    annotations: [
+      { marker: { target: 'role=dialog >> text=何が起きるか', label: '1', at: 'left' } },
+      { marker: { target: 'role=dialog >> text=知らせる人', label: '2', at: 'left' } },
+      { box: 'role=textbox[name="理由"]' }, { marker: { target: 'role=textbox[name="理由"]', label: '3', at: 'left' } },
+    ],
+  },
+  {
+    id: 'task-wait-dialog',
+    about: '「…」→［返事待ちにする］: what it waits for and when it may come (明日 / 3日後 / 来週 / 日を選ぶ).',
+    ...CARD,
+    query: { manual: '1', task: 'todo-own' },
+    steps: [{ click: CARD_MORE }, { click: 'role=menuitem[name=/^返事待ちにする/]' }, { waitFor: 'text=いつごろ来そうか' }, { fill: 'role=dialog >> role=textbox >> nth=0', text: '先方からの見積の返事' }, { click: 'role=button[name=/^3日後/]' }, SETTLE],
+    crop: { target: 'role=dialog', padding: 16 },
+    annotations: [
+      { marker: { target: 'text=何を待っていますか', label: '1', at: 'left' } },
+      { marker: { target: 'text=いつごろ来そうか', label: '2', at: 'left' } },
+      { box: 'role=button[name=/^3日後/]' },
+    ],
+  },
+  {
+    id: 'task-wait-came-back',
+    about: 'The 見込み passed: 「先方からの返事が来ていません」 and ［催促の下書きを作る］［もう少し待つ］［完了にする］.',
+    ...CARD,
+    query: { manual: '1', task: 'back' },
+    crop: { region: { x: 0, y: 0, width: 830, height: 330 } },
+    annotations: [
+      { marker: { target: 'text=/返事が来ていません/', label: '1', at: 'right' } },
+      { box: 'role=button[name="催促の下書きを作る"]' },
+    ],
+  },
+  {
+    id: 'task-done-on-ok',
+    about: 'A task completed on someone\'s OK: 「山田さんが高橋さんの了承を得たとして完了にしました（電話で）」.',
+    ...CARD,
+    query: { manual: '1', task: 'done' },
+    crop: { region: { x: 0, y: 0, width: 830, height: 200 } },
+    annotations: [{ box: 'text=/了承を得たとして完了にしました/ >> nth=0' }],
+  },
+  {
+    id: 'task-ai-prepared',
+    about: 'AI が用意したもの at the top of the card: the thank-you mail draft, ［確かめて送る］ is the person\'s.',
+    ...CARD,
+    crop: { target: 'role=region[name="AI が用意したもの"]', padding: { x: 40, y: 16 } },
+    annotations: [
+      { marker: { target: 'role=region[name="AI が用意したもの"] >> text=AI が用意したもの', label: '1', at: 'right' } },
+      { box: 'role=button[name="確かめて送る"]' }, { marker: { target: 'role=button[name="確かめて送る"]', label: '2', at: 'below' } },
+    ],
+  },
+  {
+    id: 'task-consult',
+    about: 'The card\'s right column: 「AIへの相談」 with ［相談する］, and the files with ［＋ファイル・フォルダをつなぐ］［＋新しいファイル］.',
+    ...CARD,
+    query: { manual: '1', own: '1', consult: 'none' },
+    crop: { region: { x: 840, y: 0, width: 260, height: 560 } },
+    annotations: [
+      { box: 'role=button[name=/ファイル・フォルダをつなぐ/]' }, { marker: { target: 'role=button[name=/ファイル・フォルダをつなぐ/]', label: '1', at: 'left' } },
+      { box: 'role=button[name=/新しいファイル/]' }, { marker: { target: 'role=button[name=/新しいファイル/]', label: '2', at: 'left' } },
+      { box: 'role=button[name=/^相談する/]' }, { marker: { target: 'role=button[name=/^相談する/]', label: '3', at: 'left' } },
+    ],
+  },
+  {
+    id: 'task-bundle-field',
+    about: 'A task in no プロジェクト yet: ［プロジェクトにつなぐ］［新しいプロジェクトにする］.',
+    ...CARD,
+    query: { manual: '1', own: '1' },
+    crop: { region: { x: 0, y: 90, width: 830, height: 140 } },
+    annotations: [
+      { box: 'role=button[name="プロジェクトにつなぐ"]' }, { marker: { target: 'role=button[name="プロジェクトにつなぐ"]', label: '1', at: 'below' } },
+      { box: 'role=button[name="新しいプロジェクトにする"]' }, { marker: { target: 'role=button[name="新しいプロジェクトにする"]', label: '2', at: 'below' } },
+    ],
+  },
+  {
+    id: 'minutes-review',
+    about: '「議事録を確認する」: the AI\'s proposals (［全部足す］［選んで足す］［要らない］) and the decisions (［そうです］［違う］).',
+    ...CARD,
+    query: { manual: '1', task: 'review' },
+    viewport: { width: 1100, height: 1150 },
+    crop: { region: { x: 0, y: 0, width: 830, height: 880 } },
+    annotations: [
+      { box: 'role=button[name="全部足す"]' }, { marker: { target: 'role=button[name="全部足す"]', label: '1', at: 'left' } },
+      { marker: { target: 'text=/の根拠|「来週までに修正した見積をお送りします」/ >> nth=0', label: '2', at: 'right' } },
+      { box: 'role=button[name="そうです"] >> nth=0' }, { marker: { target: 'role=button[name="違う"] >> nth=0', label: '3', at: 'right' } },
+      { marker: { target: 'text=責任者の確認待ち >> nth=0', label: '4', at: 'right' } },
+    ],
+  },
+  {
+    id: 'project-card',
+    about: 'A プロジェクト whose 責任者 is 山田さん: なんのため, 責任者, 進み具合, みんなのやること, ［終える］.',
+    page: 'record-card',
+    query: { record: 'project', manual: '1' },
+    viewport: { width: 1100, height: 900 },
+    crop: { region: { x: 0, y: 0, width: 830, height: 500 } },
+    annotations: [
+      { marker: { target: 'text=なんのため', label: '1', at: 'left' } },
+      { marker: { target: 'text=進み具合', label: '2', at: 'left' } },
+      { marker: { target: 'text=みんなのやること', label: '3', at: 'left' } },
+      { box: 'role=button[name="終える"]' }, { marker: { target: 'role=button[name="終える"]', label: '4', at: 'left' } },
+    ],
+  },
+  {
+    id: 'project-stop-dialog',
+    about: '「…」→［やめる］ on a プロジェクト: 「一覧から外れ、このタブは閉じます。消しません（経緯は残ります）」.',
+    page: 'record-card',
+    query: { record: 'project', manual: '1' },
+    viewport: { width: 1100, height: 900 },
+    steps: [{ click: CARD_MORE }, { click: 'role=menuitem[name=/^やめる/]' }, SETTLE],
+    crop: { target: 'role=dialog', padding: 16 },
+  },
+  {
+    id: 'incoming-unsure',
+    about: 'A 来た連絡 the AI was unsure about: who, 要約（本文は Slack にあります）, ［済んだ］ and 「…」.',
+    page: 'record-card',
+    query: { record: 'slack', manual: '1' },
+    viewport: { width: 1100, height: 700 },
+    crop: { region: { x: 0, y: 0, width: 830, height: 330 } },
+    annotations: [
+      { box: 'role=button[name="済んだ"]' }, { marker: { target: 'role=button[name="済んだ"]', label: '1', at: 'below' } },
+      { marker: { target: CARD_MORE, label: '2', at: 'below' } },
+    ],
+  },
+  {
+    id: 'reply-request-card',
+    about: 'A 返事のお願い: ［終わりにする］, and ［もう返した］ in 「…」.',
+    page: 'record-card',
+    query: { record: 'reply', manual: '1' },
+    viewport: { width: 1100, height: 700 },
+    steps: [{ click: CARD_MORE }, { waitFor: 'role=menu' }],
+    crop: { region: { x: 0, y: 0, width: 830, height: 170 } },
+    annotations: [
+      { box: 'role=button[name="終わりにする"]' },
+      { box: 'role=menuitem[name=/^もう返した/]' },
+    ],
+  },
+  {
+    id: 'minutes-arrived',
+    about: '「議事録が届きました」 above the list: ［AI に読ませる］［読まない］ on each meeting.',
+    ...MEETINGS,
+    crop: { target: MINUTES_BLOCK, padding: { x: 0, y: 4 } },
+    annotations: [
+      { box: 'role=button[name="AI に読ませる"] >> nth=1' },
+      { box: 'role=button[name="読まない"] >> nth=1' },
+    ],
+  },
+  {
+    id: 'minutes-read-done',
+    about: 'The AI read it: 「読み終わりました …：決めたことN・やることの案N」 with ［見る］.',
+    ...MEETINGS,
+    steps: [{ click: 'role=button[name="AI に読ませる"] >> nth=1' }, { waitFor: 'text=/が読んでいます/' }, { run: "window.__acbMeetings.finish('meeting-mensetu1')" }, { waitFor: 'role=button[name="見る"]' }, SETTLE],
+    crop: { target: MINUTES_BLOCK, padding: { x: 0, y: 4 } },
+    annotations: [{ box: 'role=button[name="見る"]' }],
+  },
+  {
+    id: 'meeting-card',
+    about: 'The meeting\'s card: who attended and who can see it, the summary, the AI\'s proposals, ［招待する］.',
+    ...MEETINGS,
+    steps: [{ run: "window.__acbMeetings.finish('meeting-teirei01')" }, { click: 'role=button[name="見る"] >> nth=0' }, { waitFor: 'role=button[name="招待する"]' }, SETTLE],
+    crop: { region: { x: 300, y: 0, width: 800, height: 900 } },
+    annotations: [
+      { marker: { target: 'text=/参加者のうち ACB の人/', label: '1', at: 'left' } },
+      { marker: { target: 'text=決めたことの案 >> nth=0', label: '2', at: 'right' } },
+      { marker: { target: 'text=やることの案 >> nth=0', label: '3', at: 'right' } },
+      { marker: { target: 'text=この定例は次から自動で読みますか？', label: '4', at: 'left' } },
+      { box: 'role=button[name="招待する"]' }, { marker: { target: 'role=button[name="招待する"]', label: '5', at: 'right' } },
+      { marker: { target: 'text=/の会議ですか？/', label: '6', at: 'left' } },
+    ],
+  },
+  {
+    id: 'meeting-invite',
+    about: '［招待する］: who to add, 「一度招待すると、取り消すことはできません」.',
+    ...MEETINGS,
+    steps: [{ run: "window.__acbMeetings.finish('meeting-teirei01')" }, { click: 'role=button[name="見る"] >> nth=0' }, { click: 'role=button[name="招待する"]' }, { waitFor: 'role=dialog' }, SETTLE],
+    crop: { target: 'role=dialog', padding: 16 },
+  },
+  {
+    id: 'title-bar-inbox',
+    about: 'The title bar\'s ［受け箱］: the number of things waiting for you and the dot for something new.',
+    page: 'title-bar-notices',
+    viewport: { width: 760, height: 400 },
+    crop: { region: { x: 520, y: 0, width: 240, height: 80 } },
+    annotations: [
+      { marker: { target: '[data-inbox-count]', label: '1', at: 'below' } },
+      { marker: { target: '[data-testid="inbox-news-dot"]', label: '2', at: 'below' } },
+    ],
+  },
+  {
+    id: 'inbox-panel',
+    about: 'The inbox (受け箱) opened below: the chips, あなた待ち first, the buttons that only open a card.',
+    page: 'inbox',
+    query: { manual: '1' },
+    viewport: { width: 1000, height: 800 },
+    crop: { target: 'role=region[name="受け箱"]', padding: 0 },
+    annotations: [
+      { box: 'role=button[name=/^あなた待ち/]' }, { marker: { target: 'role=button[name=/^あなた待ち/]', label: '1', at: 'below' } },
+      { box: 'role=button[name=/^確かめて送る/] >> nth=0' }, { marker: { target: 'role=button[name=/^確かめて送る/] >> nth=0', label: '2', at: 'left' } },
+      { marker: { target: 'role=button[name="知らせの設定"]', label: '3', at: 'below' } },
+    ],
+  },
+  {
+    id: 'inbox-done',
+    about: 'できた・未確認: what others finished, and ［まとめて確認済みにする］.',
+    page: 'inbox',
+    query: { manual: '1' },
+    viewport: { width: 1000, height: 800 },
+    steps: [{ click: 'role=button[name=/^できた・未確認/]' }, SETTLE],
+    crop: { target: 'role=region[name="受け箱"]', padding: 0 },
+    annotations: [{ box: 'role=button[name="まとめて確認済みにする"]' }],
+  },
+  {
+    id: 'inbox-settings',
+    about: '「知らせの設定」: one switch per kind of notice.',
+    page: 'title-bar-notices',
+    viewport: { width: 900, height: 900 },
+    steps: [{ click: '[data-inbox-button]' }, { click: 'role=button[name="知らせの設定"]' }, { waitFor: 'role=dialog' }, SETTLE],
+    crop: { target: 'role=dialog', padding: 16 },
+  },
+  {
+    id: 'records-table',
+    about: '記録の一覧 (［表で見る］): the kinds, 状態 済み以外, the text filter, ［列］, sortable headers.',
+    ...TABLE,
+    steps: [{ click: 'role=button[name="表で見る（やること）"]' }, { waitFor: 'role=row[name="お礼メールを確かめて送る"]' }, SETTLE],
+    crop: { region: { x: 0, y: 44, width: 1100, height: 380 } },
+    annotations: [
+      { box: 'role=group[name="種類"]' }, { marker: { target: 'role=group[name="種類"]', label: '1', at: 'right' } },
+      { marker: { target: 'section[aria-label="記録の一覧"] select', label: '2' } },
+      { marker: { target: 'role=searchbox[name="文字で絞り込む"]', label: '3' } },
+      { marker: { target: 'role=button[name="列"]', label: '4', at: 'left' } },
+      { box: 'role=columnheader[name=/期限/]' }, { marker: { target: 'role=columnheader[name=/期限/]', label: '5' } },
+    ],
+  },
+  {
+    id: 'records-table-filter',
+    about: 'The table narrowed by a word (高橋) and sorted by 期限.',
+    ...TABLE,
+    steps: [{ click: 'role=button[name="表で見る（やること）"]' }, { waitFor: 'role=row[name="お礼メールを確かめて送る"]' }, { fill: 'role=searchbox[name="文字で絞り込む"]', text: '高橋' }, SETTLE],
+    crop: { region: { x: 0, y: 44, width: 1100, height: 300 } },
+    annotations: [{ box: 'role=searchbox[name="文字で絞り込む"]' }],
+  },
+  {
+    id: 'records-table-palette',
+    about: '⌘K: typing 「記録」 offers 「記録の一覧」.',
+    ...TABLE,
+    steps: [{ click: 'role=button[name="⌘K を開く"]' }, { fill: 'role=dialog >> input >> nth=0', text: '記録' }, SETTLE],
+    keepFocus: true,
+    crop: { target: 'role=dialog', padding: 16 },
+    annotations: [{ box: 'role=dialog >> text=記録の一覧 >> nth=0' }],
+  },
+  {
+    id: 'approval-card-requester',
+    about: 'The approval request as 山田さん, who asked, sees it: 「佐藤さんの承認待ち」 and ［取り下げる］.',
+    page: 'approval-card',
+    query: { manual: '1', viewer: 'requester' },
+    crop: { target: 'section', padding: { x: 32, y: 16 } },
+    annotations: [
+      { box: 'text=佐藤さんの承認待ち' }, { marker: { target: 'text=佐藤さんの承認待ち', label: '1', at: 'left' } },
+      { box: 'role=button[name="取り下げる"]' }, { marker: { target: 'role=button[name="取り下げる"]', label: '2', at: 'left' } },
+    ],
+  },
+  {
+    id: 'approval-card-approver',
+    about: 'The same request as 佐藤さん, who decides, sees it: the change, the reason to write, ［承認］［差し戻す］.',
+    page: 'approval-card',
+    query: { manual: '1', approver: 'sato' },
+    crop: { target: 'section', padding: { x: 32, y: 16 } },
+    annotations: [
+      { box: 'text=1,500,000 >> nth=0' }, { marker: { target: 'text=1,500,000 >> nth=0', label: '1', at: 'right' } },
+      { box: 'role=textbox' }, { marker: { target: 'role=textbox', label: '2', at: 'left' } },
+      { box: 'role=button[name="承認" s]' }, { marker: { target: 'role=button[name="承認" s]', label: '3', at: 'left' } },
+      { box: 'role=button[name="差し戻す"]' }, { marker: { target: 'role=button[name="差し戻す"]', label: '4', at: 'right' } },
+    ],
+  },
+  {
+    id: 'tasks-whole',
+    about: 'The main screen in the morning: ［受け箱］ in the title bar, the left tab ［やること］ and its list.',
+    page: 'skill-layout',
+    query: { companies: '2', manual: '1', tasks: 'manual' },
+    steps: [CLOSE_LIST, { click: SALES_TAB }, { click: TASKS_TAB }, { waitFor: 'text=セキュリティのチェックシートを埋める' }, SETTLE],
+    annotations: [
+      { box: '[data-inbox-button]' }, { marker: { target: '[data-inbox-button]', label: '1', at: 'below' } },
+      { box: TASKS_TAB }, { marker: { target: TASKS_TAB, label: '2', at: 'right' } },
+      { box: LEFT_PANE }, { marker: { target: 'text=引き受け待ち >> nth=0', label: '3', at: 'right' } },
+    ],
+  },
+  {
+    id: 'chat-task-made',
+    about: '「…をやることに入れて」 in 「AIへの相談」: the AI made it and says it is 「あなただけ」.',
+    ...LIVE,
+    steps: [CLOSE_LIST, ...ASK('A社の見積を直す件を、月曜15時までのやることに入れて。'), { waitFor: 'text=/あなただけに見えるやることに入れました/' }, SETTLE],
+    crop: CHAT_CROP,
+    annotations: [
+      { box: 'role=button[name=/^記録を作りました/]' }, { marker: { target: 'role=button[name=/^記録を作りました/]', label: '1', at: 'left' } },
+      { marker: { target: 'text=/あなただけに見えるやることに入れました/', label: '2', at: 'left' } },
+    ],
+  },
+  {
+    id: 'chat-job-question',
+    about: 'The third day with the same Skill: after the work, the AI asks once whether to make it a time job.',
+    ...LIVE,
+    steps: [CLOSE_LIST, ...ASK('/weekly-report 今週の訪問メモから週報をまとめてください。'), { waitFor: 'text=/定期の仕事としてやりましょうか/' }, SETTLE],
+    crop: CHAT_CROP,
+    annotations: [{ box: 'text=/定期の仕事としてやりましょうか/' }],
+  },
+  {
+    id: 'job-proposal-card',
+    about: 'After 「はい」: the proposal card — when, what makes it run, what it does — ［これで管理者に出す］［やめる］.',
+    ...LIVE,
+    viewport: { width: 1280, height: 1800 },
+    steps: [CLOSE_LIST, ...ASK('はい。毎週月曜の朝9時にお願いします。'), { waitFor: 'role=button[name="これで管理者に出す"]' }, SETTLE,
+      { run: "[...document.querySelectorAll('button')].find(b => b.textContent === 'これで管理者に出す')?.scrollIntoView({ block: 'center' })" }, SETTLE],
+    crop: { target: 'role=button[name="これで管理者に出す"] >> xpath=ancestor::*[.//text()[contains(., "定期の仕事の案")]][1]', padding: { x: 32, y: 16 } },
+    annotations: [
+      { box: 'role=button[name="これで管理者に出す"]' }, { marker: { target: 'role=button[name="これで管理者に出す"]', label: '1', at: 'left' } },
+      { box: 'role=button[name="やめる"]' }, { marker: { target: 'role=button[name="やめる"]', label: '2', at: 'right' } },
+    ],
+  },
+  {
+    id: 'settings-my-switches',
+    about: '設定 →「自分の設定」: 「AI が自動で進める」, 「受信を読む」 and 「AI から定期の仕事を提案してもらう」.',
+    page: 'download-folders',
+    query: { tab: 'mine', manual: '1', role: 'member' },
+    viewport: { width: 1100, height: 1000 },
+    steps: [{ waitFor: 'text=AI が自動で進める' }, SETTLE],
+    crop: { target: 'role=dialog', padding: 0 },
+    annotations: [
+      { marker: { target: 'text=受信を読む >> nth=0', label: '1', at: 'left' } },
+      { marker: { target: 'text=AI が自動で進める >> nth=0', label: '2', at: 'left' } },
+      { marker: { target: 'text=AI から定期の仕事を提案してもらう >> nth=0', label: '3', at: 'left' } },
+    ],
+  },
+  {
+    id: 'settings-jobs',
+    about: '設定 →「定期の仕事」: the approved job waiting for ［受け取る］, and 「出した案」.',
+    page: 'download-folders',
+    query: { tab: 'jobs', manual: '1', role: 'member' },
+    viewport: { width: 1100, height: 1000 },
+    steps: [{ waitFor: 'role=button[name="受け取る"]' }, SETTLE],
+    crop: { target: 'role=dialog', padding: 0 },
+    annotations: [{ box: 'role=button[name="受け取る"]' }, { marker: { target: 'role=button[name="受け取る"]', label: '1', at: 'left' } }],
+  },
+  {
+    id: 'settings-jobs-running',
+    about: 'After ［受け取る］: 「あなたの定期の仕事」 with ［止める］.',
+    page: 'download-folders',
+    query: { tab: 'jobs', manual: '1', role: 'member', jobs: 'accepted' },
+    viewport: { width: 1100, height: 1000 },
+    steps: [{ waitFor: 'role=button[name="止める"]' }, SETTLE],
+    crop: { target: 'role=dialog', padding: 0 },
+    annotations: [{ box: 'role=button[name="止める"]' }, { marker: { target: 'role=button[name="止める"]', label: '1', at: 'left' } }],
+  },
+  {
+    id: 'ask-flow-diagram',
+    about: 'Diagram: asking 高橋さん — 頼む, 引き受け待ち, 引き受ける / 受けられない, 完了, the notice back.',
+    diagram: true,
+  },
+  {
+    id: 'minutes-flow-diagram',
+    about: 'Diagram: after a meeting — minutes arrive, someone has the AI read them, the AI proposes, people decide.',
+    diagram: true,
+  },
+  {
+    id: 'daily-flow-diagram',
+    about: 'Diagram: one working day — the morning\'s two places, during the day, after a meeting, before going home.',
+    diagram: true,
   },
 ]
