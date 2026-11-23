@@ -76,6 +76,22 @@ export interface PluginInstallRow {
   updatedBy: string
 }
 
+/**
+ * What a change of an install was decided on: the row's version, package, key, switch and connection
+ * as read before the change's awaits (`changeInstall` writes only while they still hold).
+ */
+export type PluginInstallSeen = Pick<PluginInstallRow, 'version' | 'fingerprint' | 'keyId' | 'enabled' | 'connectionId'>
+
+/** The fields an install (version, package, key) or a switch (on, with the managed connection's start) writes. */
+export interface PluginInstallChange {
+  version?: string
+  fingerprint?: string
+  keyId?: string | null
+  enabled?: boolean
+  /** Turning a connector on: the managed connection starts now, unless it started before (never cleared). */
+  managed?: true
+}
+
 export interface PluginMappingRow {
   pluginId: string
   version: number
@@ -203,8 +219,24 @@ export interface PluginRepository {
   prunePaced(beforeHour: string): void
   install(pluginId: string): PluginInstallRow | null
   installs(): PluginInstallRow[]
-  /** Insert or replace the install row and add a history row (one transaction). */
-  saveInstall(row: PluginInstallRow, history: PluginHistoryRow): void
+  /**
+   * A first install: insert the row and add a history row (one transaction). False when the company
+   * already has an install of the plugin (another owner / admin installed it first): nothing written.
+   */
+  addInstall(row: PluginInstallRow, history: PluginHistoryRow): boolean
+  /**
+   * Change only the fields an install or a switch owns (SERVERCORE-4): version, fingerprint, key,
+   * on / off, and the start of a managed connection (`managed`: set once, never cleared). The account,
+   * connection, mapping version and every other column stay what the row holds now. A compare-and-set
+   * on `seen` — what the caller checked before its awaits —, with a history row, in one transaction;
+   * false when the row no longer matches `seen` (or is gone): nothing written.
+   */
+  changeInstall(pluginId: string, seen: PluginInstallSeen, change: PluginInstallChange, at: string, by: string, history: PluginHistoryRow): boolean
+  /**
+   * Turn an install off, unconditionally (a stop always wins: it acts on the row as it is now, never on
+   * something read earlier), with a history row. False when it was off already (or is gone): nothing written.
+   */
+  turnOff(pluginId: string, at: string, by: string, history: PluginHistoryRow): boolean
   /** A mapping version, with its text. */
   mapping(pluginId: string, version: number): PluginMappingRow | null
   /** Every version, newest first, without the text. */

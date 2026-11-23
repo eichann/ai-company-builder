@@ -59,7 +59,7 @@ src/cli/           operator commands (generate-broker-kek.ts, company-archive.ts
   through `any` (rolled back; better-sqlite3 12 refuses one too). A wrapper that hands its callback to
   `run` types it `() => NotPromise<T>` (`permission-editor.ts`, `outbound-mail.ts`). What a service
   read **before an await** is stale in the transaction after it: read it again there and write with a
-  compare-and-set (`records.writeState(row, expectedVersion)`, `jobs.resume(jobId, from, …)`), except
+  compare-and-set (`records.writeState(row, expectedVersion)`, `jobs.resume(jobId, from, …)`, `plugins.changeInstall(pluginId, seen, …)`), except
   a stop, which always wins unconditionally (`jobs.md` "Resume checks again"). Race tests hold a real
   port with `tests/helpers/hold.ts` (`stopBefore` / `stopAfter`), never a hook in `src`. Test:
   `tests/unit/transactions.test.ts` (the type, with the compiler; the run-time refusal). A move to Postgres would turn these

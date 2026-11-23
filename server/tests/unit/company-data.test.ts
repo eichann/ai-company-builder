@@ -184,7 +184,7 @@ describe('company handle: connector plugins', () => {
   it('reads and writes only its own company’s installs, mappings and history', () => {
     brokerKey('b', 'key-b')
     const b = source.forCompany('b').plugins
-    b.saveInstall(install('key-b'), h('h-b'))
+    expect(b.addInstall(install('key-b'), h('h-b'))).toBe(true)
     b.addMapping({ pluginId: 'sample-crm', version: 1, text: 'deal: {}', createdAt: TS, createdBy: 'u' }, h('h-b2'))
     const a = source.forCompany('a').plugins
     expect(a.install('sample-crm')).toBeNull()
@@ -201,11 +201,11 @@ describe('company handle: connector plugins', () => {
     brokerKey('b', 'key-b')
     brokerKey('a', 'own-a', 'user')
     const a = source.forCompany('a').plugins
-    expect(() => a.saveInstall(install('key-b'), h('h1'))).toThrow(/company key of the same company/)
-    expect(() => a.saveInstall(install('own-a'), h('h2'))).toThrow(/company key of the same company/)
+    expect(() => a.addInstall(install('key-b'), h('h1'))).toThrow(/company key of the same company/)
+    expect(() => a.addInstall(install('own-a'), h('h2'))).toThrow(/company key of the same company/)
     brokerKey('a', 'key-a')
-    a.saveInstall(install('key-a'), h('h3'))
-    expect(() => a.saveInstall(install('key-b'), h('h4'))).toThrow(/company key of the same company/)
+    expect(a.addInstall(install('key-a'), h('h3'))).toBe(true)
+    expect(() => a.changeInstall('sample-crm', { version: '0.1.0', fingerprint: 'f', keyId: 'key-a', enabled: true, connectionId: 'conn-1' }, { keyId: 'key-b' }, TS, 'u', h('h4'))).toThrow(/company key of the same company/)
     expect(a.install('sample-crm')?.keyId).toBe('key-a')
     expect(() => conn.prepare(`UPDATE plugin_installs SET company_id = 'b' WHERE company_id = 'a'`).run()).toThrow(/never move/)
   })

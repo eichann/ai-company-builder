@@ -43,7 +43,7 @@ import { MAPPING_SECTIONS } from '../../shared/core/plugin-mapping'
 import { normalizeRepoPath } from '../../shared/core/paths'
 import { isYamlMap, parseYamlLite } from '../../shared/core/yaml-lite'
 import type { PluginDetail, PluginListItem, PluginProblem } from '../../shared/types/plugins'
-import type { PluginInstallRow, PluginHistoryRow } from '../ports/plugins'
+import type { PluginInstallRow, PluginInstallSeen, PluginHistoryRow } from '../ports/plugins'
 import { requireFullAccess, type Member } from './access'
 import { ok, refuse, type Outcome } from './outcome'
 import { createPluginAiTools } from './plugin-ai-tools'
@@ -65,9 +65,11 @@ const ackList = (v: unknown): string[] | null =>
   v === undefined ? [] : Array.isArray(v) && v.length <= 100 && v.every(x => typeof x === 'string' && x.length <= 40) ? v as string[] : null
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v)
 const MAPPING_MAX = 128 * 1024
+/** Someone changed the install while a change of it was being checked (SERVERCORE-4): nothing written. */
+const PLUGIN_CHANGED = { error: 'ほかの人がこのプラグインの設定を変えました。画面を読み直してから、もう一度ためしてください', code: 'PLUGIN_CHANGED' } as const
 
 export function createPluginService(deps: PluginServiceDeps) {
-  const { companyData, clock, shelf } = deps
+  const { companyData, clock, shelf, transactions } = deps
   const evaluation = createPluginEvaluation(deps)
   const { parseForCompany, keyProblem, unacknowledgedAuto, packageProblem, connectorUse, useForEditing, evaluate } = evaluation
   const { listItem, detail } = createPluginViews({ ...deps, evaluation })
@@ -76,6 +78,22 @@ export function createPluginService(deps: PluginServiceDeps) {
 
   const history = (pluginId: string, action: string, by: string, at: string, change: Record<string, unknown>): PluginHistoryRow =>
     ({ id: deps.ids.newId(), pluginId, action, at, by, change: JSON.stringify(change) })
+
+  /** What a change of an install is decided on (SERVERCORE-4): the write is a compare-and-set on it. */
+  const seenOf = (r: PluginInstallRow): PluginInstallSeen =>
+    ({ version: r.version, fingerprint: r.fingerprint, keyId: r.keyId, enabled: r.enabled, connectionId: r.connectionId })
+  const sameSeen = (a: PluginInstallSeen, b: PluginInstallSeen) =>
+    a.version === b.version && a.fingerprint === b.fingerprint && a.keyId === b.keyId && a.enabled === b.enabled && a.connectionId === b.connectionId
+  /** 409 PLUGIN_CHANGED: someone changed the install while this change was being checked; nothing written. */
+  const pluginChanged = () => refuse('conflict', PLUGIN_CHANGED.error, { code: PLUGIN_CHANGED.code })
+  /**
+   * The turned-on business plugins using connector `connectorId`, with their version and package — what
+   * `dependentsStoppedBy` judges — as one comparable string.
+   */
+  const dependentsKey = (companyId: string, connectorId: string): string =>
+    companyData.forCompany(companyId).plugins.installs()
+      .filter(i => i.enabled && i.pluginId !== connectorId && shelf.find(companyId, i.pluginId, i.version)?.pkg.manifest.uses?.connector.id === connectorId)
+      .map(i => `${i.pluginId}@${i.version}#${i.fingerprint}`).join('\n')
 
   /** The install, or the package this company may see; else the same 404 as an id that exists nowhere. */
   function known(companyId: string, pluginId: string): boolean {
@@ -250,6 +268,9 @@ export function createPluginService(deps: PluginServiceDeps) {
         const problem = p.problem ?? (manifest.role === 'connector' ? keyProblem(member.companyId, manifest, keyId) : null)
         if (problem) return refuse('conflict', 'この設定ではプラグインが動かないため、変えていません（先にオフにしてください）', { code: 'PLUGIN_WOULD_STOP', problem })
       }
+      // A business plugin using this connector, as the check below sees it: one turned on or changed
+      // while it is judged makes the change refused in the write's transaction.
+      const dependentsSeen = manifest.role === 'connector' && before ? dependentsKey(member.companyId, pluginId) : ''
       if (manifest.role === 'connector' && before) {
         // A business plugin using this connector must not lose it by a version or key change (turn it off first).
         const dependents = await dependentsStoppedBy(member.companyId, pluginId, row)
@@ -258,31 +279,61 @@ export function createPluginService(deps: PluginServiceDeps) {
             { code: 'PLUGIN_WOULD_STOP', problem: 'connector-mismatch', dependents })
         }
       }
-      if (row.enabled && manifest.role === 'business') {
-        // A company's extension of a type must survive a newer version: report, never store over it (plugins.md ④).
-        const conflict = typeExtensionConflict(member.companyId, found.pkg)
-        if (conflict) return conflict
-      }
       const change = before
         ? { version: { before: before.version, after: row.version }, keyId: { before: before.keyId, after: keyId }, fingerprint: row.fingerprint }
         : { version: row.version, keyId, fingerprint: row.fingerprint }
-      repo.saveInstall(row, history(pluginId, before ? 'change' : 'install', member.userId, at, change))
-      if (row.mappingVersion === 0 && found.recommendedMapping !== null) {
-        // Start from the package's recommended mapping (checked against this company and the connector when it runs).
-        repo.addMapping({ pluginId, version: 1, text: found.recommendedMapping, createdAt: at, createdBy: member.userId },
-          history(pluginId, 'mapping', member.userId, at, { version: 1, from: 'recommended' }))
-      }
-      if (row.enabled && manifest.role === 'business') storeBusinessTypes(companyData, member.companyId, found.pkg.types, at)
+      // SERVERCORE-4: every check above was decided on `before`, read before the awaits. The write runs in
+      // one transaction that checks again what can be checked without waiting, and writes only the fields an
+      // install owns (version, package, key) as a compare-and-set on `before`: an owner / admin's stop,
+      // another version, a new connection, an account bound or a mapping saved meanwhile is never written back.
+      const written = transactions.run((): Outcome<'written' | 'same'> => {
+        if (manifest.role === 'connector' && before && dependentsKey(member.companyId, pluginId) !== dependentsSeen) return pluginChanged()
+        if (manifest.role === 'business') {
+          // Again here: another business plugin installed during the awaits may own a type this version adds.
+          const conflict = typeOwnerConflict(member.companyId, pluginId, found.pkg)
+          if (conflict) return refuse('conflict', conflict, { code: 'TYPE_OWNED_ELSEWHERE' })
+        }
+        if (row.enabled && manifest.role === 'business') {
+          // A company's extension of a type must survive a newer version: report, never store over it (plugins.md ④).
+          const conflict = typeExtensionConflict(member.companyId, found.pkg)
+          if (conflict) return conflict
+        }
+        const entry = history(pluginId, before ? 'change' : 'install', member.userId, at, change)
+        const done = before
+          ? repo.changeInstall(pluginId, seenOf(before), { version: row.version, fingerprint: row.fingerprint, keyId }, at, member.userId, entry)
+          : repo.addInstall(row, entry)
+        if (!done) {
+          // Someone else got there first. Exactly what was asked already: nothing more to write.
+          const now = repo.install(pluginId)
+          return now && now.version === row.version && now.fingerprint === row.fingerprint && now.keyId === keyId ? ok('same') : pluginChanged()
+        }
+        if (repo.install(pluginId)?.mappingVersion === 0 && found.recommendedMapping !== null) {
+          // Start from the package's recommended mapping (checked against this company and the connector when it runs).
+          repo.addMapping({ pluginId, version: 1, text: found.recommendedMapping, createdAt: at, createdBy: member.userId },
+            history(pluginId, 'mapping', member.userId, at, { version: 1, from: 'recommended' }))
+        }
+        if (row.enabled && manifest.role === 'business') storeBusinessTypes(companyData, member.companyId, found.pkg.types, at)
+        return ok('written')
+      })
+      if (!written.ok) return written
+      if (written.value === 'same') return ok(await detail(member.companyId, pluginId))
       if (!before && manifest.role === 'business') {
         // 「使い始める」 is 「オン」 too (管理画面の見直し 2-4): a first install that can run is turned on
         // at once, as PUT …/enabled would; one that cannot stays off and says why on the page.
         // Read back: adding the recommended mapping moved the install's mapping version.
-        const on = { ...(repo.install(pluginId) ?? row), enabled: true }
-        const p = await packageProblem(member.companyId, on, false)
-        if (!p.problem && !typeExtensionConflict(member.companyId, found.pkg)) {
-          repo.saveInstall(on, history(pluginId, 'enable', member.userId, at, { version: on.version, from: 'install' }))
-          storeBusinessTypes(companyData, member.companyId, found.pkg.types, at)
-          deps.recordsOn?.(member)
+        const seen = repo.install(pluginId)
+        if (seen && !seen.enabled) {
+          const p = await packageProblem(member.companyId, { ...seen, enabled: true }, false)
+          // Only while the install is still the one just made: an owner / admin who changed it during the
+          // check (another version, turned on and off) keeps what they chose; the page shows it.
+          const turnedOn = !p.problem && transactions.run(() => {
+            if (typeExtensionConflict(member.companyId, found.pkg)) return false
+            if (!repo.changeInstall(pluginId, seenOf(seen), { enabled: true }, at, member.userId,
+              history(pluginId, 'enable', member.userId, at, { version: seen.version, from: 'install' }))) return false
+            storeBusinessTypes(companyData, member.companyId, found.pkg.types, at)
+            return true
+          })
+          if (turnedOn) deps.recordsOn?.(member)
         }
         if (manifest.uses) seedStartingValues(member, manifest.uses.connector.id, [pluginId])
       }
@@ -309,36 +360,49 @@ export function createPluginService(deps: PluginServiceDeps) {
       if (!install) return refuse('conflict', '先にプラグインを入れてください（版と鍵を選ぶ）', { code: 'NOT_INSTALLED' })
       if (install.enabled === body.enabled) return ok(await detail(member.companyId, pluginId))
       const at = clock.now()
-      if (isBusinessInstall(member.companyId, install)) {
-        const row = { ...install, enabled: body.enabled, updatedAt: at, updatedBy: member.userId }
-        if (body.enabled) {
-          const p = await packageProblem(member.companyId, row, false)
-          if (p.problem) return refuse('conflict', 'まだオンにできません', { code: 'PLUGIN_NOT_READY', problem: p.problem })
-          const conflict = typeExtensionConflict(member.companyId, p.found.pkg)
-          if (conflict) return conflict
-          repo.saveInstall(row, history(pluginId, 'enable', member.userId, at, { version: row.version }))
-          // Its types are the company's from now on (owner decision 2026-11-01), import or not.
-          storeBusinessTypes(companyData, member.companyId, p.found.pkg.types, at)
-          // Its types and operations need the records feature (管理画面の見直し 2-4).
-          deps.recordsOn?.(member)
-        } else {
-          repo.saveInstall(row, history(pluginId, 'disable', member.userId, at, {}))
-        }
+      if (!body.enabled) {
+        // A stop always wins: unconditional, on the row as it is now — never on something read earlier.
+        repo.turnOff(pluginId, at, member.userId, history(pluginId, 'disable', member.userId, at, {}))
         return ok(await detail(member.companyId, pluginId))
       }
-      const row = { ...install, enabled: body.enabled, managedSince: install.managedSince ?? (body.enabled ? at : null), updatedAt: at, updatedBy: member.userId }
-      if (body.enabled) {
-        const evaluated = await evaluate(member.companyId, row)
-        if (evaluated.problem) return refuse('conflict', 'まだオンにできません', { code: 'PLUGIN_NOT_READY', problem: evaluated.problem })
+      // Turning on was decided on `install`, read before the awaits (SERVERCORE-4): the write is a
+      // compare-and-set on it and writes the switch only (a connector's also the managed connection's start).
+      const turnOn = (managed: boolean): 'on' | 'same' | 'changed' => {
+        if (repo.changeInstall(pluginId, seenOf(install), { enabled: true, ...(managed ? { managed: true as const } : {}) }, at, member.userId,
+          history(pluginId, 'enable', member.userId, at, { version: install.version }))) return 'on'
+        // Someone turned the same install on first: nothing more to write. Anything else changed: refused.
+        const now = repo.install(pluginId)
+        return now?.enabled && sameSeen(seenOf({ ...now, enabled: false }), seenOf(install)) ? 'same' : 'changed'
+      }
+      if (isBusinessInstall(member.companyId, install)) {
+        const p = await packageProblem(member.companyId, { ...install, enabled: true }, false)
+        if (p.problem) return refuse('conflict', 'まだオンにできません', { code: 'PLUGIN_NOT_READY', problem: p.problem })
+        const turned = transactions.run((): Outcome<'on' | 'same'> => {
+          const conflict = typeExtensionConflict(member.companyId, p.found.pkg)
+          if (conflict) return conflict
+          const result = turnOn(false)
+          if (result === 'changed') return pluginChanged()
+          // Its types are the company's from now on (owner decision 2026-11-01), import or not.
+          if (result === 'on') storeBusinessTypes(companyData, member.companyId, p.found.pkg.types, at)
+          return ok(result)
+        })
+        if (!turned.ok) return turned
+        // Its types and operations need the records feature (管理画面の見直し 2-4).
+        if (turned.value === 'on') deps.recordsOn?.(member)
+        return ok(await detail(member.companyId, pluginId))
+      }
+      const evaluated = await evaluate(member.companyId, { ...install, enabled: true, managedSince: install.managedSince ?? at })
+      if (evaluated.problem) return refuse('conflict', 'まだオンにできません', { code: 'PLUGIN_NOT_READY', problem: evaluated.problem })
+      const turned = transactions.run((): Outcome<'on' | 'same'> => {
         // Who may read through the relay must be decided: a forgotten setting never opens it to everyone.
-        if (!relayScope.closedConnector(member.companyId, row) && repo.readScope(pluginId, install.connectionId).length === 0) {
+        if (!relayScope.closedConnector(member.companyId, install) && repo.readScope(pluginId, install.connectionId).length === 0) {
           return refuse('conflict', '先に「中継で読める人」（部署かメンバー）を決めてください', { code: 'READ_SCOPE_REQUIRED' })
         }
-        repo.saveInstall(row, history(pluginId, 'enable', member.userId, at, { version: row.version }))
-        deps.relayReadOnly(member, row.service)
-      } else {
-        repo.saveInstall(row, history(pluginId, 'disable', member.userId, at, {}))
-      }
+        const result = turnOn(true)
+        return result === 'changed' ? pluginChanged() : ok(result)
+      })
+      if (!turned.ok) return turned
+      if (turned.value === 'on') deps.relayReadOnly(member, install.service)
       return ok(await detail(member.companyId, pluginId))
     },
 
