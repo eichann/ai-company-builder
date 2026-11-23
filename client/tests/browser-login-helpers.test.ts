@@ -103,6 +103,53 @@ test('the site\'s own rules are unchanged by helpers: an asset host is still par
   assert.equal(allowed(human, 'https://manager.example.net/save', 'POST', 'xhr'), true)
 })
 
+test('a helper\'s host the admin also lists as an asset host: the helper rule decides what the asset rule refuses, the asset rule\'s GET of parts stays allowed in both modes, ai mode gets nothing more — every case', () => {
+  // Seen on a real machine: the admin listed the CAPTCHA's host as a parts host too, the asset rule refused
+  // its frame (`asset-use`) before the helper rule was asked, and the person could not log in.
+  const overlap: BrowserSiteSetting = { ...site, assetHosts: [...site.assetHosts, FRAMED.host, PARTS.host] }
+  const assetAllows = (kind: typeof KINDS[number]) => ['GET', 'HEAD'].includes(kind.method) && ['script', 'stylesheet', 'font', 'image'].includes(kind.type)
+  for (const helper of helpers) {
+    for (const mode of ['human', 'ai'] as const) {
+      for (const kind of KINDS) {
+        for (const [inPrefix, url] of [[true, `https://${helper.host}/recaptcha/api2/anchor?k=1`], [false, `https://${helper.host}/search?q=1`]] as const) {
+          for (const fromWindow of [true, false]) {
+            const want = assetAllows(kind) || (mode === 'human' && inPrefix && fromWindow && expected(helper, kind))
+            assert.equal(allowed(state(mode, { site: overlap }), url, kind.method, kind.type, fromWindow), want, `${helper.host} ${mode} ${kind.method} ${kind.type} prefix=${inPrefix} page=${fromWindow}`)
+          }
+        }
+      }
+    }
+  }
+  const human = state('human', { site: overlap })
+  const ai = state('ai', { site: overlap })
+  const req = (s: BrowserWindowState, url: string, method: string, resourceType: string) =>
+    decideWindowRequest(s, { url, method, resourceType, fromWindow: true, pageFrame: true })
+  // The login works: the frame and its check by XHR POST, under the prefix, while a person logs in.
+  assert.deepEqual(req(human, 'https://captcha.example.com/recaptcha/api2/anchor?ar=1&k=x', 'GET', 'subFrame'), { allow: true })
+  assert.deepEqual(req(human, 'https://captcha.example.com/recaptcha/api2/reload?k=x', 'POST', 'xhr'), { allow: true })
+  assert.deepEqual(req(human, 'https://parts.example.com/recaptcha/api2/reload?k=x', 'POST', 'xhr'), { allow: false, reason: 'login-helper-use' }, 'no POST where the helper does not declare it')
+  assert.deepEqual(req(human, 'https://captcha.example.com/search', 'GET', 'subFrame'), { allow: false, reason: 'login-helper-path' })
+  // While the AI operates: refused as before (the helper's reason instead of the asset rule's).
+  assert.deepEqual(req(ai, 'https://captcha.example.com/recaptcha/api2/anchor?ar=1&k=x', 'GET', 'subFrame'), { allow: false, reason: 'ai-login-helper' })
+  assert.deepEqual(req(ai, 'https://captcha.example.com/recaptcha/api2/reload?k=x', 'POST', 'xhr'), { allow: false, reason: 'ai-login-helper' })
+  assert.deepEqual(req(ai, 'https://captcha.example.com/recaptcha/api.js', 'GET', 'xhr'), { allow: false, reason: 'ai-login-helper' })
+  // What the admin allowed as a read of parts stays allowed, in and out of the prefix, in both modes.
+  for (const s of [human, ai]) {
+    assert.deepEqual(req(s, 'https://captcha.example.com/images/logo.png', 'GET', 'image'), { allow: true })
+    assert.deepEqual(req(s, 'https://parts.example.com/recaptcha/releases/abc/recaptcha__ja.js', 'GET', 'script'), { allow: true })
+  }
+  // A host that is only an asset host keeps the asset rule alone.
+  assert.deepEqual(req(human, 'https://cdn.example.net/recaptcha/frame', 'GET', 'subFrame'), { allow: false, reason: 'asset-use' })
+  // Frames: the helper's frame in human mode only. The proxy: an asset host is DIRECT in both modes, as before.
+  assert.equal(windowNavigationAllowed(human, 'https://captcha.example.com/recaptcha/api2/anchor?k=1', false), true)
+  assert.equal(windowNavigationAllowed(ai, 'https://captcha.example.com/recaptcha/api2/anchor?k=1', false), false)
+  assert.equal(windowNavigationAllowed(human, 'https://parts.example.com/recaptcha/x', false), false)
+  for (const mode of ['human', 'ai'] as const) {
+    const find = new Function(`${browserProxyScript(overlap, 4321, proxyHelperHosts(state(mode)))}; return FindProxyForURL`)() as (url: string, host: string) => string
+    assert.equal(find('https://captcha.example.com/', 'captcha.example.com'), 'DIRECT', mode)
+  }
+})
+
 test('a frame may navigate to a helper only in human mode, only a subframe, only a helper that may be framed, only under its prefix', () => {
   const url = 'https://captcha.example.com/recaptcha/api2/anchor?k=1'
   assert.equal(windowNavigationAllowed(state('human'), url, false), true)

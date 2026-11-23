@@ -97,12 +97,15 @@ export const isReadMethod = (method: string): boolean => READ_METHODS.has(method
 export function decideWindowRequest(state: BrowserWindowState, request: BrowserWindowRequest): BrowserWindowDecision {
   if (!state.site) return { allow: false, reason: 'closed' }
   const decided = decideBrowserRequest(state.site, request)
-  // A host the site does not list may still be one of its login helpers (human mode, under its path).
-  if (!decided.allow && decided.reason === 'host') {
+  // What the site's rule refuses on a login helper's host is the helper rule's (human mode, under its
+  // path), whatever the refusal: a host the site does not list, or a host the admin also lists as an
+  // asset host (its GET of parts was already allowed above and stays so; the rest, such as the
+  // CAPTCHA's frame, is the helper's). In ai mode the helper rule refuses all, so ai mode gets
+  // nothing beyond the site's rule (agent-browser.md "Login helpers").
+  if (!decided.allow) {
     const helper = loginHelperOf(state.helpers, request.url)
     return helper ? decideLoginHelper(state.mode, helper, request) : decided
   }
-  if (!decided.allow) return decided
   if (state.mode === 'ai' && decided.use === 'operate') {
     if (request.resourceType === 'webSocket' || /^wss:/i.test(request.url)) return { allow: false, reason: 'ai-websocket' }
     // Same path as main's read or not: a page-less session reads for main, never this one (design memo §33 2-4).
