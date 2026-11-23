@@ -85,7 +85,7 @@ test('a view that is made after the member left (another tab, 中身) is closed 
   const state = await open(page)
   await page.evaluate(() => { (window as unknown as { __acbDocDelay: number }).__acbDocDelay = 400 })
   await page.getByRole('button', { name: '中身' }).click()
-  await page.getByTitle('見る', { exact: true }).click()
+  await page.getByRole('toolbar', { name: '資料の中身' }).getByRole('button', { name: '見る' }).click()
   await expect.poll(async () => (await calls(page)).filter(c => c[0] === 'open').length).toBe(2)
   await tab(page, MD).click()
   await expect.poll(async () => (await calls(page)).filter(c => c[0] === 'close')).toContainEqual(['close', 8])
@@ -104,11 +104,44 @@ test('中身 shows the source and closes the view; ⌘⇧V goes back to 見る a
   const state = await open(page)
   await page.getByRole('button', { name: '中身' }).click()
   await expect(page.locator('.cm-content[role="textbox"]')).toContainText('11月の売上')
-  expect(await calls(page)).toContainEqual(['close', 7])
+  expect(await calls(page)).toContainEqual(['close', 7, true])
   await page.locator('.cm-content[role="textbox"]').click()
   await page.evaluate(() => (document.activeElement ?? document).dispatchEvent(new KeyboardEvent('keydown', { key: 'v', shiftKey: true, metaKey: true, bubbles: true, cancelable: true })))
   await expect(page.getByRole('toolbar', { name: '資料の表示' })).toBeVisible()
   await expect.poll(async () => (await calls(page)).filter(c => c[0] === 'open').length).toBe(2)
+  expectNoPageErrors(state)
+})
+
+test('中身 keeps the labelled 「見る｜中身」 at the same top-left place; 見る shows the document again where the member was reading', async ({ page }) => {
+  // The owner (2026-11-23): 「中身に切り替えたら、戻らなくなっちゃいました」 — the toggle lived only in the
+  // document's toolbar, which 中身 closes.
+  const state = await open(page)
+  const viewBar = page.getByRole('toolbar', { name: '資料の表示' })
+  const at = (await viewBar.getByRole('button', { name: '見る' }).boundingBox())!
+  await viewBar.getByRole('button', { name: '中身' }).click()
+  await expect(page.locator('.cm-content[role="textbox"]')).toContainText('11月の売上')
+  const sourceBar = page.getByRole('toolbar', { name: '資料の中身' })
+  const back = sourceBar.getByRole('button', { name: '見る' })
+  await expect(back).toBeVisible()
+  await expect(back).toHaveAttribute('aria-pressed', 'false')
+  await expect(sourceBar.getByRole('button', { name: '中身' })).toHaveAttribute('aria-pressed', 'true')
+  const box = (await back.boundingBox())!
+  expect(Math.abs(box.x - at.x)).toBeLessThan(1)
+  expect(Math.abs(box.y - at.y)).toBeLessThan(1)
+  // Leaving for 中身 asks main to keep where the document was scrolled (main keeps it; the page never sees it).
+  expect(await calls(page)).toContainEqual(['close', 7, true])
+  await back.click()
+  await expect(viewBar).toBeVisible()
+  await expect(sourceBar).toHaveCount(0)
+  await expect.poll(async () => (await calls(page)).filter(c => c[0] === 'open').length).toBe(2)
+  await expect.poll(async () => (await calls(page)).at(-1)).toEqual(['bounds', 8, expect.anything()])
+  // Another tab or ［止める］ keeps nothing: the document opens from its top next time, as before.
+  await tab(page, MD).click()
+  await expect.poll(async () => (await calls(page)).filter(c => c[0] === 'close' && c[1] === 8)).toEqual([['close', 8]])
+  await expect(page.getByRole('toolbar', { name: '資料の中身' })).toHaveCount(0)
+  await tab(page, DOC).click()
+  await viewBar.getByRole('button', { name: '止める' }).click()
+  expect((await calls(page)).filter(c => c[0] === 'close' && c[1] === 9)).toEqual([['close', 9]])
   expectNoPageErrors(state)
 })
 
@@ -122,7 +155,7 @@ test('an app shortcut pressed while the document has the keyboard runs as if pre
   await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur())
   await sendEvent(page, { viewId: 7, kind: 'shortcut', key })
   await expect(page.locator('.cm-content[role="textbox"]')).toContainText('11月の売上')
-  expect(await calls(page)).toContainEqual(['close', 7])
+  expect(await calls(page)).toContainEqual(['close', 7, true])
   expectNoPageErrors(state)
 })
 
@@ -187,7 +220,7 @@ test('the tab keeps its zoom when the member goes to another tab or 中身 and c
   const state = await open(page)
   await page.getByRole('button', { name: '拡大' }).click()
   await page.getByRole('button', { name: '中身' }).click()
-  await page.getByTitle('見る', { exact: true }).click()
+  await page.getByRole('toolbar', { name: '資料の中身' }).getByRole('button', { name: '見る' }).click()
   await expect(page.getByText('110%')).toBeVisible()
   await tab(page, MD).click()
   await tab(page, DOC).click()

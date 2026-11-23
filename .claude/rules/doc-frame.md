@@ -10,6 +10,7 @@ paths:
   - "client/src/features/editor/components/HtmlDocumentPane.tsx"
   - "client/tests/ui/editor-html-viewer.spec.ts"
   - "client/src/features/editor/components/BlockedPartsBand.tsx"
+  - "client/src/features/editor/components/HtmlViewToggle.tsx"
   - "client/src/features/chat/documentLink*.ts"
 ---
 
@@ -149,7 +150,7 @@ carrying a secret in its user name reached a local listener). Each document is s
   member pressed one of the app's shortcuts in it (below), only for a registered view;
   `{ kind: 'blocked', count, hosts, hostCount }` — what its page wanted from the internet and did not get
   ("The band of blocked internet parts (A3)"), hosts only, only for a registered view.
-- **Revocation goes with the view** (`views.ts`): `docView:close(viewId)` by its own window; the
+- **Revocation goes with the view** (`views.ts`): `docView:close(viewId, keepPlace?)` by its own window; the
   view destroyed or its page crashed (`onGone`); the window's page reloading, crashing or closing
   (`onWindowReset`: every view of that window closes); at most `MAX_VIEWS_PER_WINDOW` (32) per
   window, the oldest closed — applied when a view is registered, so opens running at the same time
@@ -189,13 +190,28 @@ carrying a secret in its user name reached a local listener). Each document is s
 - An `.html` / `.htm` tab opens as **見る** (`HtmlDocumentPane`): a toolbar (［見る｜中身］, －
   100 % ＋, 元の大きさ, 「変わったら自動で更新」 / 「ファイルが変わったので、表示を新しくしました」, the
   「資料の中だけで動いています」 label, 全画面, ［止める］ / ［もう一度表示する］) over an area the document's
-  own view is placed over. 中身 is the code editor (autosave as for any file); ⌘⇧V switches; 見る is
-  the default and the choice is per tab for the app's run (not saved).
+  own view is placed over. 中身 is the code editor (autosave as for any file) under a band with the
+  same ［見る｜中身］ at the same top-left place (`HtmlViewToggle.tsx` `HtmlSourceBar`, toolbar
+  「資料の中身」; before 2026-11-23 the way back was two faint icons at the text's top right and the
+  owner could not find it); ⌘⇧V switches; 見る is the default and the choice is per tab for the app's
+  run (not saved). Markdown keeps its own floating preview toggle.
+- **Back from 中身, where the member was reading** (owner, 2026-11-23): the view left for 中身 is
+  closed with `docView:close(viewId, true)` (`DocViewSource.keepsPlace`, asked as the area goes;
+  `TabbedEditorPanel` knows the tab was switched to 中身). Main (`views.ts` `close` → the shell's
+  `closeKeepingPlace`) revokes the grant at once, hides the view, reads its scroll position in the
+  isolated world (at most `SCROLL_READ_MS`; no answer → none), then closes it; the position is kept
+  per window and document (newest 32, gone with the window's page) and given to the **next open of
+  that document in that window, once** — put back after the load as on a reload (above). The
+  position never leaves main (the renderer only says "keep"; `keepPlace` other than `true` is a
+  plain close), so the document has no new way to the app. Another tab, the tab closed, ［止める］
+  keep nothing (from the top). Tests: `doc-frame-protocol.test.ts` 「left for 中身…」,
+  `doc-frame-electron.test.ts` 「left for 中身 and back to 見る…」, `editor-html-viewer.spec.ts`
+  「中身 keeps the labelled…」.
 - **One owner of the view**: `docViewSession.ts` (`DocViewSession`, read with
   `useSyncExternalStore`, the area attached by a callback ref — no effect). The view is opened when
   the area appears and **closed when it goes**: another tab, 中身, the tab closed (a wide left tab
-  such as スキル over the middle only hides it, as an overlay does). Hidden tabs keep no document running;
-  coming back opens it afresh (from the top). An open answered after the area went closes its view.
+  such as スキル over the middle only hides it, as an overlay does). Hidden tabs keep no document running (中身 included);
+  coming back opens it afresh (from the top; from 中身, where the member was: above). An open answered after the area went closes its view.
 - **Placing**: every animation frame something may have changed (the area's size —
   `ResizeObserver`: window, B1 dividers, the bottom panel —, any DOM change — `MutationObserver` on
   the body: menus, dialogs, tabs; checked at once for the first change, then at most every

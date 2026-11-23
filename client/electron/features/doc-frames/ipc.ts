@@ -1,6 +1,7 @@
 // The HTML viewer's document views (doc-frame.md):
 //   docView:open   (filePath) → the id of a view showing the document, or why not (plain Japanese)
-//   docView:close  (viewId)   → the view closes and its grant is revoked
+//   docView:close  (viewId, keepPlace?) → the view closes and its grant is revoked; `true` (left for
+//                  中身): main keeps where its document was scrolled for its next open in this window
 //   docView:setBounds (viewId, bounds | null) → placed over the tab and shown, or hidden (and muted)
 //   docView:setZoom (viewId, factor) / docView:reload (viewId) → the document's zoom; load it again
 // (main → window: `docView:event`, sent by main.ts: a link the member pressed, a view that went, an
@@ -32,8 +33,8 @@ export function registerDocViewsIpc<E extends IpcInvokeEvent>(ipc: IpcRegistrar<
     const viewId = await views.open(checked.doc, ticket)
     return viewId === null ? refuseDoc('unavailable') : { ok: true, viewId }
   })
-  ipc.handle('docView:close', (event, viewId) => {
-    if (fromMainWindow(event)) views.close(viewId, event.sender.id)
+  ipc.handle('docView:close', (event, viewId, keepPlace) => {
+    if (fromMainWindow(event)) views.close(viewId, event.sender.id, keepPlace)
   })
   ipc.handle('docView:setBounds', (event, viewId, bounds) => {
     if (fromMainWindow(event)) views.place(viewId, event.sender.id, bounds)

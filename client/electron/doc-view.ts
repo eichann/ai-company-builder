@@ -308,23 +308,44 @@ export function createDocViewShell(options: DocViewShellOptions): DocViewPort {
       view.setVisible(false)
       win.contentView.addChildView(view)
       view.setBounds({ x: 0, y: 0, width: 0, height: 0 })
+      /** The view out of sight: 0×0, hidden, muted; the keyboard it had goes back to the app. */
+      const hide = () => {
+        const hadKeyboard = contents.isFocused()
+        shown = false
+        view.setVisible(false)
+        view.setBounds({ x: 0, y: 0, width: 0, height: 0 })
+        contents.setAudioMuted(true)
+        if (hadKeyboard) focusApp()
+      }
       return {
         id,
-        show(url) {
+        show(url, at = null) {
           token = parseDocFrameUrl(url)?.token ?? null
+          // Where the member was reading when they left for 中身: put back after the load, as for a reload.
+          keepScroll = at && scrollPosition(at)
           contents.loadURL(url).catch(() => {})
         },
         destroy: finish,
+        closeKeepingPlace() {
+          if (gone || contents.isDestroyed()) return Promise.resolve(null)
+          // Asked before the view is hidden (a hidden, throttled page may answer late), then out of
+          // sight at once: the tab shows 中身 now. At most SCROLL_READ_MS, then closed either way.
+          const read = contents.executeJavaScriptInIsolatedWorld(SCROLL_WORLD, [{ code: '[window.scrollX, window.scrollY]' }])
+            .then(scrollPosition, () => null)
+          hide()
+          let timer: ReturnType<typeof setTimeout> | undefined
+          const limit = new Promise<null>(resolve => { timer = setTimeout(() => resolve(null), SCROLL_READ_MS) })
+          return Promise.race([read, limit]).then(position => {
+            clearTimeout(timer)
+            finish()
+            return position
+          })
+        },
         place(bounds: DocViewBounds | null) {
           if (gone || win.isDestroyed()) return
           const area = bounds && docViewOnScreen(bounds, owner?.getZoomFactor() ?? 1, win.getContentSize())
           if (!area) {
-            const hadKeyboard = contents.isFocused()
-            shown = false
-            view.setVisible(false)
-            view.setBounds({ x: 0, y: 0, width: 0, height: 0 })
-            contents.setAudioMuted(true)
-            if (hadKeyboard) focusApp()
+            hide()
             return
           }
           view.setBounds(area)
