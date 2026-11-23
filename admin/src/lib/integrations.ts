@@ -135,6 +135,8 @@ export function integrationRefusal(code: string | undefined, body: Record<string
       if (Array.isArray(body?.dependents)) return 'この版にすると、このつなぎ先を使っている業務との行き来が止まるため、変えていません（先にその業務をオフにしてください）'
       return 'この設定にすると止まってしまうため、変えていません（先にオフにするか、読み替え表を直してください）'
     case 'NOT_INSTALLED': return '先に版と鍵を選んで保存してください'
+    // Someone changed the install while this change was checked (SERVERCORE-4): nothing was written.
+    case 'PLUGIN_CHANGED': return 'ほかの人がこの設定を変えたため、変えていません。ページを読み直してから、もう一度ためしてください'
     case 'READ_SCOPE_REQUIRED': return '先に「読める人」（部署かメンバー）を選んで保存してください。誰も選ばないままではオンにできず、オンの間は空にできません'
     case 'READ_SCOPE_INVALID': return 'この会社にない部署か、メンバーではない人が含まれています'
     case 'KEY_NOT_USABLE': return 'この鍵は使えません（「API キー」で登録した、このサービスの会社の鍵を選んでください）'

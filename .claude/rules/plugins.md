@@ -1301,6 +1301,20 @@ POST /plugins/:pluginId/mapping/check    { text? } 「HubSpot に聞いて確か
   for a key, read scope or `connection/renew`; a connector answers `NOT_A_BUSINESS` to a mapping
   and `not-a-business` to import / operations; a business plugin without `connector`
   `NO_CONNECTOR` / `no-connector`.
+- **A change writes only its own fields, on what it checked** (SERVERCORE-4, 2026-11-23): installing /
+  changing a version or key and turning on await (the operator's stop file, the connector's evaluation)
+  between reading the install and writing it. There is no whole-row save: `addInstall` (a first install;
+  someone first → refused), `changeInstall` (version, fingerprint, key, on, a managed connection's start —
+  never the account, connection or mapping version) as a compare-and-set on what the checks read
+  (version, fingerprint, key, on / off, connection), and `turnOff`, **unconditional** (a stop always wins).
+  The write runs in one `transactions.run` that also re-reads what it adds (the recommended mapping only
+  while the mapping version is still 0) and, for a connector's change, compares the turned-on business
+  plugins using it with those the dependents' check judged. Changed meanwhile → 409 `PLUGIN_CHANGED`
+  (nothing written; the admin shows 「ほかの人がこの設定を変えたため…」); the same change made by someone
+  else first → ok, written once. A first install's automatic turning on happens only while the install is
+  still the one just made (else it stays as the other owner / admin left it). An account bound or a
+  mapping saved meanwhile is kept. Test: `tests/integration/plugin-install-race.test.ts` (holds the shelf's
+  stop-file read with `tests/helpers/hold.ts`; each guard mutation-checked).
 - **`active(companyId, businessPluginId)`** — the business plugin's use of its connector
   (`ActivePlugin`: the combined manifest, its types and mapping, the connector's key, connection
   and account, `fingerprint` = `<business>+<connector>`), for the connector (P5) and the typed

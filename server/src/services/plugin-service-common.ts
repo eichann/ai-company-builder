@@ -9,6 +9,7 @@ import { canonicalTypeJson, storedTypeDefinition, type TypeDefinition } from '..
 import type { PluginProblem } from '../../shared/types/plugins'
 import type { Clock, IdGenerator } from '../ports/clock'
 import type { CompanyDataSource } from '../ports/company-data'
+import type { Transactions } from '../ports/transactions'
 import type { Member } from './access'
 import type { PluginShelf } from './plugin-shelf'
 
@@ -94,6 +95,8 @@ export interface PluginServiceDeps {
   companyData: CompanyDataSource
   clock: Clock
   ids: IdGenerator
+  /** An install's change re-reads and writes in one synchronous transaction after its awaits (SERVERCORE-4). */
+  transactions: Transactions
   shelf: PluginShelf
   /** The company's broker key `keyId`, or null (another company's key id finds nothing). */
   companyKey: (companyId: string, keyId: string) => PluginKeyInfo | null

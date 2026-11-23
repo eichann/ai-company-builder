@@ -64,20 +64,44 @@ export function sqlitePluginRepository(conn: Database.Database, companyId: strin
     installs() {
       return (conn.prepare(`SELECT ${INSTALL_COLUMNS} FROM plugin_installs WHERE company_id = ? ORDER BY plugin_id`).all(companyId) as InstallRow[]).map(toInstall)
     },
-    saveInstall(row, history) {
-      conn.transaction(() => {
-        conn.prepare(`
+    addInstall(row, history) {
+      return conn.transaction(() => {
+        const added = conn.prepare(`
           INSERT INTO plugin_installs (company_id, plugin_id, version, fingerprint, service, connection_id, account_id, enabled, managed_since,
             key_id, mapping_version, updated_at, updated_by)
           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-          ON CONFLICT(company_id, plugin_id) DO UPDATE SET version = excluded.version, fingerprint = excluded.fingerprint,
-            service = excluded.service, connection_id = excluded.connection_id, account_id = excluded.account_id,
-            enabled = excluded.enabled, managed_since = COALESCE(plugin_installs.managed_since, excluded.managed_since),
-            key_id = excluded.key_id, mapping_version = excluded.mapping_version,
-            updated_at = excluded.updated_at, updated_by = excluded.updated_by
+          ON CONFLICT(company_id, plugin_id) DO NOTHING
         `).run(companyId, row.pluginId, row.version, row.fingerprint, row.service, row.connectionId, row.accountId, row.enabled ? 1 : 0,
-          row.managedSince, row.keyId, row.mappingVersion, row.updatedAt, row.updatedBy)
-        addHistory(history)
+          row.managedSince, row.keyId, row.mappingVersion, row.updatedAt, row.updatedBy).changes === 1
+        if (added) addHistory(history)
+        return added
+      })()
+    },
+    changeInstall(pluginId, seen, change, at, by, history) {
+      return conn.transaction(() => {
+        const sets: string[] = []
+        const values: Array<string | number | null> = []
+        if (change.version !== undefined) { sets.push('version = ?'); values.push(change.version) }
+        if (change.fingerprint !== undefined) { sets.push('fingerprint = ?'); values.push(change.fingerprint) }
+        if (change.keyId !== undefined) { sets.push('key_id = ?'); values.push(change.keyId) }
+        if (change.enabled !== undefined) { sets.push('enabled = ?'); values.push(change.enabled ? 1 : 0) }
+        if (change.managed) { sets.push('managed_since = COALESCE(managed_since, ?)'); values.push(at) }
+        // Only the columns named above change; the account, connection and mapping version stay the row's.
+        // `key_id IS ?` also matches a null key.
+        const changed = conn.prepare(`
+          UPDATE plugin_installs SET ${[...sets, 'updated_at = ?', 'updated_by = ?'].join(', ')}
+          WHERE company_id = ? AND plugin_id = ? AND version = ? AND fingerprint = ? AND key_id IS ? AND enabled = ? AND connection_id = ?
+        `).run(...values, at, by, companyId, pluginId, seen.version, seen.fingerprint, seen.keyId, seen.enabled ? 1 : 0, seen.connectionId).changes === 1
+        if (changed) addHistory(history)
+        return changed
+      })()
+    },
+    turnOff(pluginId, at, by, history) {
+      return conn.transaction(() => {
+        const changed = conn.prepare('UPDATE plugin_installs SET enabled = 0, updated_at = ?, updated_by = ? WHERE company_id = ? AND plugin_id = ? AND enabled = 1')
+          .run(at, by, companyId, pluginId).changes === 1
+        if (changed) addHistory(history)
+        return changed
       })()
     },
     mapping(pluginId, version) {
