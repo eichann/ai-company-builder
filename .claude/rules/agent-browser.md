@@ -485,7 +485,7 @@ the AI operates** (`ai` mode, a run's `enterAi` … `leaveAi`) they are shut. Th
   `www.gstatic.com` under `/recaptcha/` (parts only). Tag manager, error / chat services and web fonts the
   page also asks for are not needed to log in and stay refused.
 - **The rule** (`decideLoginHelper`, reached from `decideWindowRequest` for every request on a helper's host
-  that the site's rule refused, whatever its reason, `client/shared/browser-operation.ts`): https on the default port, no user, the
+  that the site's rule refused, whatever its reason (only https, its default port, no user ever counts as a helper's host, so a scheme / port / user refusal is never re-decided), `client/shared/browser-operation.ts`): https on the default port, no user, the
   helper's exact host, the path (as the address parser gives it: dot segments resolved; any `%2f` / `%5c` /
   `%2e` refused) under the prefix; then only in `human` mode (`ai` → `ai-login-helper`), only from the
   window's page (not a service worker), GET / HEAD of script, stylesheet, image, font, media, XHR / fetch,
