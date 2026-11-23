@@ -716,7 +716,7 @@ registerDocViewsIpc(ipc, { frames: docFrames, views: docViews, fromMainWindow: e
 // The user manual (files-and-editor.md "The user manual"): this computer's copy of the server's /manual/,
 // shown through the same document views (a grant for that copy alone) and written only outside company folders.
 registerManualIpc(ipc, {
-  site: createManualSite({ serverUrl: getServerApiUrl, cacheRoot: path.join(userDataDir(), 'manual') }),
+  site: createManualSite({ serverUrl: getServerApiUrl, cookies: session.cookies, cacheRoot: path.join(userDataDir(), 'manual') }),
   views: docViews,
   fromMainWindow: event => isMainFrameSender(event, id => mainWindowHost.isWindow(id)),
   chooseFolder: options => desktopShell.selectSavePath(options),

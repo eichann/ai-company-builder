@@ -1,15 +1,17 @@
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import LoginPage from '@/app/login/page'
 import { AuthProvider } from '@/lib/auth-context'
 import { mockApi } from './mock-api'
 
+const nav = vi.hoisted(() => ({ search: '', replace: vi.fn() }))
+
 vi.mock('next/navigation', () => ({
-  useRouter: () => ({ push: vi.fn(), replace: vi.fn(), back: vi.fn() }),
+  useRouter: () => ({ push: vi.fn(), replace: nav.replace, back: vi.fn() }),
   usePathname: () => '/login',
-  useSearchParams: () => new URLSearchParams(),
+  useSearchParams: () => new URLSearchParams(nav.search),
 }))
 
 describe('login page', () => {
@@ -30,5 +32,52 @@ describe('login page', () => {
     configUp = true
     await userEvent.click(screen.getByRole('button', { name: /再読み込み|もう一度/ }))
     expect(await screen.findByText('最初の管理者アカウントを作成')).toBeInTheDocument()
+  })
+
+  describe('coming from the user manual (server.md "The user manual")', () => {
+    afterEach(() => {
+      nav.search = ''
+      nav.replace.mockReset()
+      vi.unstubAllGlobals()
+    })
+
+    it('goes back to the manual page as a whole page (the API serves it, not this console), and says why to sign in', async () => {
+      const replace = vi.fn()
+      vi.stubGlobal('location', { ...window.location, replace })
+      nav.search = 'redirect=%2Fmanual%2Fguide.html'
+      mockApi({
+        'GET /api/me': { status: 401, body: { error: 'Unauthorized' } },
+        'GET /api/config': { body: { success: true, data: { name: 'ACB', version: '1', setupComplete: true } } },
+        'POST /api/auth/sign-in/email': { body: {} },
+      })
+      render(<AuthProvider><LoginPage /></AuthProvider>)
+      expect(await screen.findByText('ログインすると使い方を見られます。')).toBeInTheDocument()
+      mockApi({
+        'GET /api/me': { body: { success: true, data: { id: 'u1', email: 'a@example.com', name: 'A' } } },
+        'GET /api/config': { body: { success: true, data: { name: 'ACB', version: '1', setupComplete: true } } },
+        'POST /api/auth/sign-in/email': { body: {} },
+      })
+      await userEvent.type(screen.getByLabelText('メールアドレス'), 'a@example.com')
+      await userEvent.type(screen.getByLabelText('パスワード'), 'password1')
+      await userEvent.click(screen.getByRole('button', { name: 'ログイン' }))
+      await vi.waitFor(() => expect(replace).toHaveBeenCalledWith('/manual/guide.html'))
+      expect(nav.replace).not.toHaveBeenCalled()
+    })
+
+    it('does not bounce an already signed-in reader back to the manual by itself (a manual that refused them would loop), but offers a link', async () => {
+      const replace = vi.fn()
+      vi.stubGlobal('location', { ...window.location, replace })
+      nav.search = 'redirect=%2Fmanual%2Fguide.html'
+      mockApi({
+        'GET /api/me': { body: { success: true, data: { id: 'u1', email: 'a@example.com', name: 'A' } } },
+        'GET /api/config': { body: { success: true, data: { name: 'ACB', version: '1', setupComplete: true } } },
+      })
+      render(<AuthProvider><LoginPage /></AuthProvider>)
+      const open = await screen.findByRole('button', { name: '使い方を開く' })
+      expect(replace).not.toHaveBeenCalled()
+      expect(nav.replace).not.toHaveBeenCalled()
+      await userEvent.click(open)
+      expect(replace).toHaveBeenCalledWith('/manual/guide.html')
+    })
   })
 })

@@ -2,6 +2,8 @@
 // - this computer's copy (`features/manual/site.ts`) takes only files the server's manifest names,
 //   each checked by size and sha256; a bad file, a bad manifest or an unreachable server leaves the
 //   copy as it was (offline: the copy is shown); a server without a manual says so;
+// - every request carries the member's session; signed out or refused (401), the kept copy stays
+//   whole and is shown, never a refusal written into it; with none kept, the member is told to sign in;
 // - `manual:open` / `manual:export` answer only the main window's page, before anything is fetched,
 //   shown or written; a page is opened through the HTML viewer's own grant (its folder's files only,
 //   the heading as the address's fragment) and only a view id goes back;
@@ -23,6 +25,7 @@ import { MANUAL_WORDS } from '../shared/manual'
 const quiet = { warn: () => {} }
 const MAIN = 1
 const SERVER = 'https://acb.example.com'
+const SESSION = 'better-auth.session_token=tok.sig'
 const PNG = Buffer.from('89504e470d0a1a0a', 'hex')
 
 const sha = (b: Buffer | string) => createHash('sha256').update(b).digest('hex')
@@ -45,12 +48,14 @@ function builtSite(files: Record<string, string | Buffer> = {}) {
 }
 
 /** A fake server answering /manual/*; `requests` lists what was asked. */
-function fakeServer(site: ReturnType<typeof builtSite> | null, options: { offline?: boolean; tamper?: string; manifest?: unknown } = {}) {
+function fakeServer(site: ReturnType<typeof builtSite> | null, options: { offline?: boolean; tamper?: string; manifest?: unknown; session?: string } = {}) {
   const requests: string[] = []
   const fetchImpl = (async (url: string, init?: RequestInit) => {
     requests.push(url)
     assert.equal(init?.redirect, 'error', 'redirects are refused')
     if (options.offline) throw new TypeError('fetch failed')
+    // The server answers only the session it knows (server.md "The user manual"): the same 401 for every path.
+    if ((init?.headers as Record<string, string> | undefined)?.Cookie !== (options.session ?? SESSION)) return new Response('Unauthorized', { status: 401 })
     if (!site) return new Response('Not found', { status: 404 })
     const p = url.slice(`${SERVER}/manual/`.length)
     if (p === 'manifest.json') return new Response(JSON.stringify(options.manifest ?? site.manifest))
@@ -66,8 +71,8 @@ function tmp(): string {
   return fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'acb-manual-')))
 }
 
-function siteWith(server: ReturnType<typeof fakeServer>, cacheRoot: string): ManualSite {
-  return createManualSite({ serverUrl: () => `${SERVER}/`, cacheRoot, fetch: server.fetch, log: quiet })
+function siteWith(server: ReturnType<typeof fakeServer>, cacheRoot: string, cookies: string[] = [SESSION]): ManualSite {
+  return createManualSite({ serverUrl: () => `${SERVER}/`, cookies: () => cookies, cacheRoot, fetch: server.fetch, log: quiet })
 }
 
 test('the copy holds exactly the files the manifest names, each checked; unchanged files are not fetched again', async () => {
@@ -122,6 +127,45 @@ test('offline the kept copy is shown; with none, nothing; a server without a man
   await siteWith(fakeServer(builtSite()), cache).current()
   assert.equal((await siteWith(fakeServer(builtSite(), { offline: true }), cache).current()).kind, 'copy')
   assert.equal((await siteWith(fakeServer(null), cache).current()).kind, 'missing')
+})
+
+test('signed out or refused, the kept copy stays whole and is shown; with none kept, the member is told to sign in', async () => {
+  const cache = tmp()
+  // Nothing kept: signed out (no session: nothing is even asked), or a session the server refuses.
+  const unasked = fakeServer(builtSite())
+  assert.equal((await siteWith(unasked, cache, []).current()).kind, 'signed-out')
+  assert.deepEqual(unasked.requests, [], 'nothing is asked without a session')
+  assert.equal((await siteWith(fakeServer(builtSite(), { session: 'other' }), cache).current()).kind, 'signed-out')
+  // A copy kept while signed in.
+  const first = await siteWith(fakeServer(builtSite()), cache).current()
+  assert.equal(first.kind, 'copy')
+  if (first.kind !== 'copy') return
+  const before = Object.fromEntries(fs.readdirSync(first.dir, { recursive: true }).map(String).sort().map(f => {
+    const p = path.join(first.dir, f)
+    return [f, fs.statSync(p).isFile() ? sha(fs.readFileSync(p)) : 'dir']
+  }))
+  // The session ended: the server refuses every file, a new version included. The copy is shown as it was.
+  for (const cookies of [[SESSION], []]) {
+    const refused = await siteWith(fakeServer(builtSite({ 'guide.html': '<h1>v2</h1>' }), { session: 'renewed' }), cache, cookies).current()
+    assert.equal(refused.kind, 'copy')
+    if (refused.kind !== 'copy') return
+    const after = Object.fromEntries(fs.readdirSync(refused.dir, { recursive: true }).map(String).sort().map(f => {
+      const p = path.join(refused.dir, f)
+      return [f, fs.statSync(p).isFile() ? sha(fs.readFileSync(p)) : 'dir']
+    }))
+    assert.deepEqual(after, before, 'no refusal is written into the copy')
+  }
+  // Refused part-way (the manifest answered, then a file refused): the old copy stays whole too.
+  let calls = 0
+  const cutOff = fakeServer(builtSite({ 'guide.html': '<h1>v3</h1>' }))
+  const partWay = createManualSite({
+    serverUrl: () => `${SERVER}/`, cookies: () => [SESSION], cacheRoot: cache, log: quiet,
+    fetch: (async (url: string, init?: RequestInit) => (calls++ === 0 ? cutOff.fetch(url, init) : new Response('Unauthorized', { status: 401 }))) as unknown as typeof fetch,
+  })
+  const shown = await partWay.current()
+  assert.equal(shown.kind, 'copy')
+  assert.equal(fs.readFileSync(path.join(first.dir, 'guide.html'), 'utf8'), '<h1>ファイル</h1>')
+  assert.deepEqual(fs.readdirSync(path.dirname(first.dir)), ['site'], 'no staging folder left behind')
 })
 
 // --- the IPC ---------------------------------------------------------------------------------
@@ -193,6 +237,24 @@ test('manual:open shows the page through a grant for the copy alone, at its head
     assert.equal(answer.ok, false, page)
   }
   assert.equal(w.shell.shown.size, 1)
+})
+
+test('manual:open signed out with nothing kept tells the member to sign in', async () => {
+  const base = tmp()
+  const handlers = new Map<string, (event: unknown, ...args: unknown[]) => Promise<unknown>>()
+  registerManualIpc({ handle: (channel: string, fn: never) => { handlers.set(channel, fn) }, on: () => {} } as never, {
+    site: siteWith(fakeServer(builtSite()), path.join(base, 'cache'), []),
+    views: { begin: () => 0, open: async () => null } as never,
+    fromMainWindow: () => true,
+    chooseFolder: async () => path.join(base, 'export'),
+    defaultFolder: () => base,
+    insideCompanyFolder: () => false,
+    log: quiet,
+  })
+  const ev = { sender: { id: MAIN } }
+  assert.deepEqual(await handlers.get('manual:open')!(ev, 'index', null), { ok: false, message: MANUAL_WORDS.signedOut })
+  assert.deepEqual(await handlers.get('manual:export')!(ev), { ok: false, message: MANUAL_WORDS.signedOut })
+  assert.equal(fs.existsSync(path.join(base, 'export')), false)
 })
 
 test('manual:open offline with nothing kept says so', async () => {

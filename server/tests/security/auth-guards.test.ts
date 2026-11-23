@@ -39,8 +39,6 @@ const PUBLIC_ENDPOINTS: Record<string, string> = {
   'google-drive.ts POST /config': 'the Google Picker page in the member\'s browser (google-drive.md): the one-time pick ticket the member\'s app asked for with its session is the proof',
   'google-drive.ts POST /result': 'the Google Picker page in the member\'s browser (google-drive.md): the one-time pick ticket is the proof; only Drive ids, checked for the ticket\'s member',
   'slack-connection.ts POST /events/:companyId': 'Slack sends a company\'s events without an ACB session; the company\'s own signing secret (HMAC of the exact body, 5 minutes) is the proof — anything unsigned answers an empty 401 (slack-connector.md)',
-  'manual.ts GET /': 'the user manual (取説): /manual → its index page, static pages holding no secret, read by members who cannot sign in (server.md "The user manual")',
-  'manual.ts GET /*': 'the user manual (取説): only the files its built manifest names, static, no secret (server.md "The user manual")',
   'oauth.ts GET /:provider/callback': 'the provider (Google, Slack) sends the member\'s browser back without an ACB session; the state (single use, 10 min, found only inside its own company and for that provider) is the proof',
 }
 

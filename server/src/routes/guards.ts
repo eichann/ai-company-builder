@@ -13,7 +13,8 @@
  *   answer as a company that does not exist). The handler reads `c.var.member`
  *   (company id, user id, role, all from the server) and `c.var.user`; it never
  *   reads `companyId` from the URL itself.
- * - `signedIn`: a session only (routes without a company: /api/me, …).
+ * - `signedIn`: a session only (routes without a company: /api/me, …);
+ *   `signedInElse(refuse)` the same with the endpoint's own refusal (the manual's).
  * - `publicRoute(reason)`: no ACB session on purpose; the handler checks its own
  *   proof (a signature, an OAuth state, an invitation token). Each one is also
  *   listed in tests/security/auth-guards.test.ts PUBLIC_ENDPOINTS.
@@ -88,14 +89,22 @@ export function companyAdmin(error: string) {
   return memberGuard(notMemberAnswer, { error })
 }
 
-/** A session only. `error` is the endpoint's own 401 text when it always had one. */
-export function signedInOr(error: string) {
+/**
+ * A session only; `refuse` builds the answer without one (always a refusal: a 401, or for a
+ * browser opening a page, the way to the sign-in page — `routes/manual.ts`).
+ */
+export function signedInElse(refuse: (c: Context) => Response) {
   return tagged('signed-in', createMiddleware<SignedInEnv>(async (c, next) => {
     const user = await getUserFromRequest(c.req.raw)
-    if (!user) return c.json({ error }, 401)
+    if (!user) return refuse(c)
     c.set('user', user)
     await next()
   }))
+}
+
+/** A session only. `error` is the endpoint's own 401 text when it always had one. */
+export function signedInOr(error: string) {
+  return signedInElse((c) => c.json({ error }, 401))
 }
 
 export const signedIn = signedInOr('Unauthorized')

@@ -1,6 +1,6 @@
 'use client'
 
-import { Suspense, useEffect, useState } from 'react'
+import { Suspense, useCallback, useEffect, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 
 import { AuthLayout } from '@/components/app/brand'
@@ -13,12 +13,15 @@ import { Label } from '@/components/ui/label'
 import { configApi } from '@/lib/api'
 import { useAuth } from '@/lib/auth-context'
 import { describeError } from '@/lib/errors'
-import { safeRedirect } from '@/lib/redirect'
+import { isManualPath, safeRedirect } from '@/lib/redirect'
 
 function LoginForm() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const redirectTo = safeRedirect(searchParams.get('redirect'))
+  // The user manual (server.md "The user manual") sends a reader here when not signed in. It is
+  // served by the API, not this console, so it is opened as a whole page, not by the router.
+  const forManual = isManualPath(redirectTo)
   const { signIn, signUp, user, loading: authLoading } = useAuth()
   // null until /api/config answers; false means no account exists yet.
   const [setupComplete, setSetupComplete] = useState<boolean | null>(null)
@@ -43,9 +46,17 @@ function LoginForm() {
     }
   }, [configAttempt])
 
+  const goBack = useCallback(() => {
+    if (forManual) window.location.replace(redirectTo)
+    else router.replace(redirectTo)
+  }, [forManual, router, redirectTo])
+
+  // Already signed in when the page opens: back to the console page at once. Not to the manual: had
+  // the manual refused this session (a cookie not reaching it), that would bounce between the two
+  // pages for ever, so the reader is offered a link instead.
   useEffect(() => {
-    if (!authLoading && user) router.replace(redirectTo)
-  }, [authLoading, user, router, redirectTo])
+    if (!authLoading && user && !forManual) router.replace(redirectTo)
+  }, [authLoading, user, forManual, router, redirectTo])
 
   const isSetup = setupComplete === false
 
@@ -59,7 +70,7 @@ function LoginForm() {
       } else {
         await signIn(email, password)
       }
-      router.replace(redirectTo)
+      goBack()
     } catch (err) {
       setError(describeError(err))
     } finally {
@@ -75,6 +86,21 @@ function LoginForm() {
     )
   }
   if (setupComplete === null || authLoading) return <FullPageLoading />
+  if (forManual && user && !submitting) {
+    return (
+      <AuthLayout>
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-title">ログインしています</CardTitle>
+            <CardDescription>使い方のページを開けます。</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Button className="w-full" onClick={goBack}>使い方を開く</Button>
+          </CardContent>
+        </Card>
+      </AuthLayout>
+    )
+  }
 
   return (
     <AuthLayout>
@@ -84,7 +110,9 @@ function LoginForm() {
           <CardDescription>
             {isSetup
               ? 'このサーバーにはまだアカウントがありません。最初に作成したアカウントで会社を作成できます。'
-              : '管理画面にログインします。'}
+              : forManual
+                ? 'ログインすると使い方を見られます。'
+                : '管理画面にログインします。'}
           </CardDescription>
         </CardHeader>
         <CardContent>
