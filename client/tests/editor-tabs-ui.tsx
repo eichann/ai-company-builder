@@ -8,11 +8,12 @@
 // Markdown file, an image and a PDF; window.__acbWrites lists every save and
 // window.__acbPinned every pinned tab;
 // &view=html: an HTML document and one at the company folder's top level; the document views are
-// faked — window.__acbDocCalls lists every docView call, __acbDocEvent(e) sends a docView:event,
+// faked and the editor sits between dividers as in the app (the left column's and the chat's beside it,
+// the bottom panel's under it; the left one drags) — window.__acbDocCalls lists every docView call, __acbDocEvent(e) sends a docView:event,
 // __acbOpened the links handed to the browser; 「メニューを出す」 draws a menu over the document;
 // under the editor, the AI's tool rows of a reply (the chat's ［見る］, A3) — files.open and
 // chat.insertText are handled as the app does, __acbInserted lists what reached the chat's input).
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import '../src/i18n'
 import '../src/index.css'
@@ -25,6 +26,7 @@ import { planParts } from '../src/features/chat/toolRows'
 import type { UIMessage } from 'ai'
 import { hasUnsavedEdits } from '../src/shared/lib/unsavedEdits'
 import { WindowCloseGuard } from '../src/app/WindowCloseGuard'
+import { ResizeHandle } from '../src/features/workspace/components/ResizeHandle'
 
 const params = new URLSearchParams(location.search)
 if (params.get('theme') === 'dark') document.documentElement.classList.add('dark')
@@ -141,6 +143,8 @@ export function Preview() {
   const [menuOpen, setMenuOpen] = useState(false)
   const [smallMenu, setSmallMenu] = useState(false)
   const [toast, setToast] = useState(false)
+  const [leftWidth, setLeftWidth] = useState(160)
+  const leftAtStart = useRef(leftWidth)
   const [previewTab, setPreviewTab] = useState<string | null>(tabsView ? `${ROOT}/README.md` : null)
   const closeFile = (p: string) => {
     if (!tabsView && !htmlView) return
@@ -185,9 +189,27 @@ export function Preview() {
       {smallMenu && <div role="menu" aria-label="小さいメニュー" style={{ position: 'fixed', ...(window as unknown as { __acbSmallMenuAt?: object }).__acbSmallMenuAt, width: 12, height: 12, background: '#fff', zIndex: 60 }} />}
       {toast && <div role="status" style={{ position: 'fixed', ...(window as unknown as { __acbSmallMenuAt?: object }).__acbSmallMenuAt, width: 12, height: 12, background: '#333', zIndex: 70 }} />}
       {/* Tailwind does not scan this page: the tabs view sets its height itself so the preview scrolls. */}
-      <div className="h-[420px] w-[760px]" style={tabsView || htmlView ? { height: 420 } : undefined}>
-        <TabbedEditorPanel openFiles={openFiles} activeFilePath={active} previewFilePath={previewTab} tabLabels={labels} onSelectFile={setActive} onCloseFile={closeFile} onPinFile={pinFile} />
-      </div>
+      {htmlView ? (
+        // As AppShell lays the middle out: the left column, the chat and the bottom panel beside the
+        // editor, each behind a divider whose grab strip reaches 4 px over the editor's edge.
+        <div style={{ display: 'flex', height: 420, width: 1000 }}>
+          <div data-testid="left-column" style={{ width: leftWidth, flexShrink: 0 }} />
+          <ResizeHandle label="ファイルツリーとエディタの境目" onResizeStart={() => { leftAtStart.current = leftWidth }} onResize={offset => setLeftWidth(leftAtStart.current + offset)} />
+          <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
+            <div style={{ flex: 1, minHeight: 0 }}>
+              <TabbedEditorPanel openFiles={openFiles} activeFilePath={active} previewFilePath={previewTab} tabLabels={labels} onSelectFile={setActive} onCloseFile={closeFile} onPinFile={pinFile} />
+            </div>
+            <ResizeHandle direction="vertical" label="エディタと下のパネルの境目" onResizeStart={() => {}} onResize={() => {}} />
+            <div style={{ height: 40, flexShrink: 0 }} />
+          </div>
+          <ResizeHandle label="左の欄とチャットの境目" onResizeStart={() => {}} onResize={() => {}} />
+          <div style={{ width: 60, flexShrink: 0 }} />
+        </div>
+      ) : (
+        <div className="h-[420px] w-[760px]" style={tabsView ? { height: 420 } : undefined}>
+          <TabbedEditorPanel openFiles={openFiles} activeFilePath={active} previewFilePath={previewTab} tabLabels={labels} onSelectFile={setActive} onCloseFile={closeFile} onPinFile={pinFile} />
+        </div>
+      )}
       {htmlView && (
         <section aria-label="AI の作業" className="w-[760px] px-3 py-2">
           {CHAT_LINES.map(item => (item.kind === 'run' ? <ToolRunGroup key={item.key} item={item} /> : null))}
