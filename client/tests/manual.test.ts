@@ -103,6 +103,19 @@ test('a file that differs from the manifest, or a manifest naming another path, 
   assert.deepEqual(fs.readdirSync(path.join(cache, folder)), ['site'])
 })
 
+test('a refresh stopped between its two renames leaves the old copy, which the next look puts back', async () => {
+  const cache = tmp()
+  const first = await siteWith(fakeServer(builtSite()), cache).current()
+  assert.equal(first.kind, 'copy')
+  if (first.kind !== 'copy') return
+  // What a quit right after the first rename leaves: the copy retired, no `site`, a staging folder.
+  fs.renameSync(first.dir, `${first.dir}.old-abc123`)
+  fs.mkdirSync(`${first.dir}.new-def456`)
+  const offline = await siteWith(fakeServer(builtSite(), { offline: true }), cache).current()
+  assert.equal(offline.kind, 'copy')
+  assert.deepEqual(fs.readdirSync(path.dirname(first.dir)), ['site'])
+})
+
 test('offline the kept copy is shown; with none, nothing; a server without a manual says so', async () => {
   const cache = tmp()
   assert.equal((await siteWith(fakeServer(builtSite(), { offline: true }), cache).current()).kind, 'none')
@@ -169,6 +182,8 @@ test('manual:open shows the page through a grant for the copy alone, at its head
   assert.match(url, /^acb-doc:\/\/[0-9a-f]{32}\/index\.html#%E3%81%AF%E3%81%98%E3%82%81%E3%81%AB$/)
   const origin = url.slice(0, url.indexOf('/index.html'))
   const get = (p: string) => w.frames.serve({ url: `${origin}/${p}`, method: 'GET' })
+  const page = await get('index.html')
+  assert.match(page.headers.get('content-security-policy') ?? '', /script-src 'none'/, 'the manual runs no script, whatever its copy holds')
   assert.equal((await get('images/shot.png')).status, 200)
   assert.equal((await get('guide.html')).status, 200)
   for (const p of ['manifest.json', '..%2fcompany', '%2e%2e/cache', '../../company']) assert.equal((await get(p)).status, 404, p)
@@ -192,6 +207,21 @@ test('manual:export writes the manual into the new folder the member chose, star
   assert.deepEqual(fs.readdirSync(answer.folder!).sort(), ['guide.html', 'images', 'index.html', 'manual.css'])
   assert.deepEqual(fs.readFileSync(path.join(answer.folder!, 'images/shot.png')), PNG)
   assert.equal((w.dialogs[0] as { defaultPath: string }).defaultPath, path.join(w.base, 'Downloads', MANUAL_WORDS.defaultFolderName))
+})
+
+test('a failed export leaves nothing behind: not even the folder it made', async () => {
+  const base = tmp()
+  const target = path.join(base, 'export')
+  const handlers = new Map<string, (event: unknown, ...args: unknown[]) => Promise<unknown>>()
+  const real = siteWith(fakeServer(builtSite()), path.join(base, 'cache'))
+  registerManualIpc({ handle: (c: string, fn: never) => { handlers.set(c, fn) }, on: () => {} } as never, {
+    site: { current: () => real.current(), writeTo: async () => { throw Object.assign(new Error('disk full'), { code: 'ENOSPC' }) } },
+    views: { begin: () => ({ windowId: MAIN, generation: 0 }), open: async () => null },
+    fromMainWindow: (() => true) as never, chooseFolder: async () => target, defaultFolder: () => base,
+    insideCompanyFolder: () => false, log: quiet,
+  })
+  assert.deepEqual(await handlers.get('manual:export')!({ sender: { id: MAIN } }), { ok: false, message: MANUAL_WORDS.writeFailed })
+  assert.equal(fs.existsSync(target), false)
 })
 
 test('manual:export never writes inside a company folder (also through a link), into a folder holding something, or when cancelled', async () => {

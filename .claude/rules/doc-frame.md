@@ -123,7 +123,8 @@ carrying a secret in its user name reached a local listener). Each document is s
 - **The user manual** (`manual:open`, `files-and-editor.md` "The user manual") opens a view the same
   way, through `views.open` with an `OpenableDocument` main built for its own copy of the server's
   manual (grant folder = that copy; never a company folder, so `check` does not apply) and an optional
-  `fragment` (`#` + the encoded heading, main's own) added to the loaded address.
+  `fragment` (`#` + the encoded heading, main's own) added to the loaded address, and `noScripts`:
+  its grant's answers carry `docFramePolicy(token, { scripts: false })` (`script-src 'none'`).
 - **`docView:setBounds(viewId, bounds | null)`, `docView:setZoom(viewId, factor)`,
   `docView:reload(viewId)`** (A2; main window's main frame only, and only for a view of that
   window — anything else is ignored): a placement that is not four finite numbers of at least
@@ -330,7 +331,8 @@ carrying a secret in its user name reached a local listener). Each document is s
 no `'unsafe-eval'`); `style-src` origin + inline; `img-src` origin, `data:`, `blob:`; `font-src`
 origin, `data:`; `media-src`, `frame-src`, `connect-src`, `child-src`, `worker-src`,
 `object-src`, `manifest-src`, `form-action`, `base-uri` `'none'`; `sandbox allow-scripts`. The
-policy has **no network source** (test: 「the default policy names no network source…」).
+policy has **no network source** (test: 「the default policy names no network source…」). A grant
+made with `noScripts` (the user manual) gets `script-src 'none'` instead (`client/tests/manual.test.ts`).
 
 **Later (owner, 2026-11-22; planned, not built).** Each adds sources to the policy object only,
 never loosens another directive (the session's proxy and request hook then need the same exact

@@ -8,6 +8,7 @@
 import { z } from 'zod'
 import { defineCommands } from './define'
 import { TAB_KIND_GROUPS } from '../thing-words'
+import { isManualPageId } from '../../../shared/core/manual'
 
 export const COMMANDS = defineCommands([
   {
@@ -218,7 +219,7 @@ export const COMMANDS = defineCommands([
     // page (and heading). A screen links to its chapter with `{ page: '<id>' }`.
     id: 'help.openManual', title: '使い方を開く', class: 'view',
     args: z.object({
-      page: z.string().regex(/^[a-z0-9][a-z0-9-]{0,63}$/).optional().describe('The page id (manual/pages/<id>.md); the index when left out'),
+      page: z.string().refine(isManualPageId).optional().describe('The page id (manual/pages/<id>.md); the index when left out'),
       anchor: z.string().min(1).max(200).optional().describe('A heading id on that page'),
     }),
   },

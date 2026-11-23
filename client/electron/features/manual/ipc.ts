@@ -30,16 +30,16 @@ export interface ManualIpcDeps<E> {
 
 const refuse = (message: string) => ({ ok: false as const, message })
 
-/** An empty real folder that may be written into, a missing one (made here), or why not. */
-async function prepareFolder(target: string): Promise<string | null> {
+/** An empty real folder that may be written into, a missing one (made here: `made`), or why not. */
+async function prepareFolder(target: string): Promise<{ refusal: string } | { made: boolean }> {
   const st = await fs.lstat(target).catch(() => null)
   if (!st) {
     // Its parent must exist: the dialog chose it. Not recursive: nothing else is made.
     await fs.mkdir(target)
-    return null
+    return { made: true }
   }
-  if (!st.isDirectory() || (await fs.readdir(target)).length > 0) return MANUAL_WORDS.notEmpty
-  return null
+  if (!st.isDirectory() || (await fs.readdir(target)).length > 0) return { refusal: MANUAL_WORDS.notEmpty }
+  return { made: false }
 }
 
 export function registerManualIpc<E extends IpcInvokeEvent>(ipc: IpcRegistrar<E>, deps: ManualIpcDeps<E>): void {
@@ -63,7 +63,8 @@ export function registerManualIpc<E extends IpcInvokeEvent>(ipc: IpcRegistrar<E>
     }
     // The grant is the copy's folder: its pages, its stylesheet and its pictures, nothing else.
     const fragment = isManualAnchor(anchor) ? `#${encodeURIComponent(anchor)}` : ''
-    const viewId = await deps.views.open({ root: copy.dir, folder: copy.dir, realFolder, name }, ticket, fragment)
+    // The manual runs no script of its own, so none runs here either (a server answering otherwise included).
+    const viewId = await deps.views.open({ root: copy.dir, folder: copy.dir, realFolder, name, noScripts: true }, ticket, fragment)
     return viewId === null ? refuse(MANUAL_WORDS.unavailable) : { ok: true, viewId }
   })
 
@@ -81,15 +82,22 @@ export function registerManualIpc<E extends IpcInvokeEvent>(ipc: IpcRegistrar<E>
     const copy = await deps.site.current()
     if (copy.kind === 'none') return refuse(MANUAL_WORDS.unreachable)
     if (copy.kind === 'missing') return refuse(MANUAL_WORDS.missing)
+    let made = false
     try {
-      const refusal = await prepareFolder(target)
-      if (refusal) return refuse(refusal)
+      const prepared = await prepareFolder(target)
+      if ('refusal' in prepared) return refuse(prepared.refusal)
+      made = prepared.made
       // Checked again once the folder exists: a link put there meanwhile must not lead into a company folder.
-      if (deps.insideCompanyFolder(target)) return refuse(MANUAL_WORDS.insideCompany)
+      if (deps.insideCompanyFolder(target)) {
+        if (made) await fs.rmdir(target).catch(() => {})
+        return refuse(MANUAL_WORDS.insideCompany)
+      }
       await deps.site.writeTo(copy, target)
       return { ok: true, folder: target }
     } catch (err) {
       log.warn(`[manual] Could not write the manual (${err instanceof Error ? (err as NodeJS.ErrnoException).code ?? err.name : 'error'})`)
+      // The folder this call made goes too (rmdir: only while empty — `writeTo` removed what it wrote).
+      if (made) await fs.rmdir(target).catch(() => {})
       return refuse(MANUAL_WORDS.writeFailed)
     }
   })

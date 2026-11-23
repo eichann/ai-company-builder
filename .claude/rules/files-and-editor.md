@@ -432,11 +432,14 @@ an external browser.
   request, so main (`electron/features/manual/site.ts`) fetches the server's `manifest.json` and the
   files it names into this computer's copy (`<userData>/manual/<sha256 of the server origin>/site`):
   each file's path must pass `isManualFilePath` and its size and sha256 must match the manifest;
-  redirects are refused; a refresh is built beside the copy and renamed into place (a cut refresh
-  leaves the old copy whole); unchanged files are reused; one refresh at a time. Then `manual:open`
-  opens a document view with **a grant for that copy's folder alone** (`views.open(doc, ticket,
-  fragment)`: the heading as `#…`, encoded by main), with every guard of `doc-frame.md` (no network,
-  opaque origin, no app, no other file). Offline: the copy kept is shown; nothing kept → 「使い方を
+  redirects are refused; each request waits at most 8 s (then the kept copy shows); a refresh is
+  built beside the copy and renamed into place, the old copy put back if the second rename fails,
+  and a refresh cut between the two renames is put right on the next look (`recover`: the retired
+  copy back, leftovers removed); unchanged files are reused; refreshes and exports run one at a
+  time. Then `manual:open` opens a document view with **a grant for that copy's folder alone**
+  (`views.open(doc, ticket, fragment)`: the heading as `#…`, encoded by main) **with no script**
+  (`noScripts`: `script-src 'none'`, the manual has none — whatever a server put in its copy), with
+  every other guard of `doc-frame.md` (no network, opaque origin, no app, no other file). Offline: the copy kept is shown; nothing kept → 「使い方を
   読み込めませんでした…」; a server with no manual (404) → 「このサーバーには使い方がまだありません。」.
   The renderer sends only a page id (and heading text); only the view's id comes back.
 - **「書き出す」** (`manual:export`, no argument): main asks the shell's save dialog
@@ -444,11 +447,12 @@ an external browser.
   path must not lie in a company folder by name or by real location (`AllowedRoots.touches`; a
   company folder syncs to everyone) — checked before and again after the folder is made — and must be
   a new folder or an empty one (never a file, never a folder holding something). Main then writes
-  the copy's files (sha256 checked again, each created with `wx`: nothing replaced; what it wrote is
-  removed again on a failure) and answers the folder; the pane says 「…に書き出しました。中の
+  the copy's files (sha256 checked again, each created with `wx`: nothing replaced; on a failure what
+  it wrote is removed again, and the folder too when this export made it) and answers the folder; the pane says 「…に書き出しました。中の
   index.html をブラウザで開くと、インターネットなしでも読めます。」 (links are relative). Cancelled → nothing.
 - Tests: `client/tests/manual.test.ts` (the copy: only manifest files, checked, a tampered file or a
-  bad manifest path changes nothing, offline / none / missing; the IPC: main window only before any
+  bad manifest path changes nothing, a refresh cut between its renames put right, offline / none /
+  missing; the page's CSP without scripts; a failed export leaves no folder; the IPC: main window only before any
   fetch, dialog or write; a page through the grant at its heading, the copy's other files reachable,
   `..` and `manifest.json` not; unknown page ids refused; the export into the chosen folder only,
   never a company folder — also through a link —, a folder holding something, a file, or on cancel —

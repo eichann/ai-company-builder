@@ -61,6 +61,8 @@ interface Grant {
   folder: string
   /** Its real path when opened: a folder swapped for a link later serves nothing. */
   realFolder: string
+  /** No script runs in it (`script-src 'none'`): the user manual, which has none of its own. */
+  noScripts?: boolean
 }
 
 /** A document `check` let through, before it is granted. */
@@ -207,7 +209,7 @@ export function createDocFrames(deps: DocFrameDeps) {
     grant(doc: OpenableDocument, ownerId: number): string {
       let token = newToken()
       while (grants.has(token)) token = newToken()
-      grants.set(token, { ownerId, root: doc.root, folder: doc.folder, realFolder: doc.realFolder })
+      grants.set(token, { ownerId, root: doc.root, folder: doc.folder, realFolder: doc.realFolder, noScripts: doc.noScripts })
       return docFrameUrl(token, doc.name)
     },
 
@@ -236,7 +238,7 @@ export function createDocFrames(deps: DocFrameDeps) {
         headers: {
           ...BASE_HEADERS,
           'Content-Type': type,
-          'Content-Security-Policy': docFrameCsp(docFramePolicy(parsed.token)),
+          'Content-Security-Policy': docFrameCsp(docFramePolicy(parsed.token, { scripts: !grant.noScripts })),
         },
       })
     },
