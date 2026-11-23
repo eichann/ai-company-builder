@@ -8,7 +8,7 @@
  * parser check the rest.
  */
 import {
-  JOB_EVENT_PC_EXPIRES_DEFAULT_MINUTES, JOB_MINUTES_ROUTE, JOB_NAME_MAX, JOB_PROPOSAL_ORIGIN, JOB_PROPOSAL_SCHEMA, isRecordTrigger, knownJobDefinition, JOB_OUTBOUND_ROUTES, JOB_TASK_TITLE_MAX, JOB_TITLE_WORDS_MAX, parseJobDefinition,
+  JOB_EVENT_PC_EXPIRES_DEFAULT_MINUTES, JOB_MINUTES_ROUTE, JOB_NAME_MAX, JOB_PROPOSAL_ORIGIN, JOB_PROPOSAL_SCHEMA, isRecordTrigger, isSetTrigger, knownJobDefinition, JOB_OUTBOUND_ROUTES, JOB_TASK_TITLE_MAX, JOB_TITLE_WORDS_MAX, parseJobDefinition,
   type JobDefinition, type JobDefinitionResult, type JobDoneMark, type JobGrant, type JobWeekday,
 } from '../../../shared/core/jobs'
 import { BUILTIN_CONNECTORS, type DeliveryPlaceKind } from '../../../shared/core/builtin-connectors'
@@ -227,6 +227,8 @@ export function formFromDefinition(d: JobDefinition): JobForm {
       ...(d.check.kind === 'source_record' ? { doneMark: d.check.doneMark } : {}),
     }
   }
+  // A set watch (schema 5) has no form in this console yet (not in `ADMIN_JOB_SCHEMAS`: `editableDefinition` never hands one here).
+  if (isSetTrigger(d.trigger)) throw new Error('formFromDefinition: no form for a set watch in this console')
   const [hour, minute] = d.trigger.at.split(':')
   const t = d.trigger
   const common: JobForm = {

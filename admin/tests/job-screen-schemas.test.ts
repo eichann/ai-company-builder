@@ -1,8 +1,9 @@
 /**
  * What this console announces is what its form can show, edit and accept (stage 4b-0.5, owner memo 「段4b 設計メモ」 §5-1,
  * jobs.md "Shapes this build does not know"): `ADMIN_JOB_SCHEMAS`, never the shared parser's `JOB_SCHEMAS`. The shared
- * core is stood in here by one that already reads a later shape (`schema: 5`; it stood in as `schema: 3` until this console
- * announced 3 with its form, stage 4b-3, and as `schema: 4` until it announced 4 with member proposals, PR B): this console must still announce only its own shapes and refuse to build a form
+ * core is stood in here by one that already reads a later shape (`schema: 6`; it stood in as `schema: 3` until this console
+ * announced 3 with its form, stage 4b-3, as `schema: 4` until it announced 4 with member proposals, PR B, and as `schema: 5` until the
+ * core read the set watch, 4b-4 PR1): this console must still announce only its own shapes and refuse to build a form
  * from the later one.
  *
  * Guards (each mutation-checked): the header from `ADMIN_JOB_SCHEMAS`; `editableDefinition` / `needsNewerScreen` asking
@@ -10,13 +11,13 @@
  */
 import { describe, expect, it, vi } from 'vitest'
 
-// A core of a later build: it reads schema 5 too.
+// A core of a later build: it reads schema 6 too.
 vi.mock('../../shared/core/jobs', async (importOriginal) => {
   const real = await importOriginal<typeof import('../../shared/core/jobs')>()
   return {
     ...real,
-    JOB_SCHEMAS: [1, 2, 3, 4, 5],
-    knownJobDefinition: (d: unknown) => (d && typeof d === 'object' && [1, 2, 3, 4, 5].includes((d as { schema?: number }).schema as number) ? d : null),
+    JOB_SCHEMAS: [1, 2, 3, 4, 5, 6],
+    knownJobDefinition: (d: unknown) => (d && typeof d === 'object' && [1, 2, 3, 4, 5, 6].includes((d as { schema?: number }).schema as number) ? d : null),
   }
 })
 
@@ -133,7 +134,7 @@ describe('this console announces only the shapes its form round-trips', () => {
   })
 
   it('a definition of that later shape is never made into a form, whatever the core reads', () => {
-    const later = { ...(SAMPLES[3][0] as object), schema: 5, trigger: { kind: 'record', type: 'task', event: 'state', to: 'done', ai: true } } as unknown as JobDefinition
+    const later = { ...(SAMPLES[3][0] as object), schema: 6, trigger: { kind: 'record', type: 'task', event: 'state', to: 'done', ai: true } } as unknown as JobDefinition
     expect(editableDefinition({ definition: later })).toBeNull()
     expect(needsNewerScreen({ definition: later })).toBe(true)
     // Its own shapes still are.

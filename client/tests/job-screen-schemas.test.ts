@@ -78,7 +78,7 @@ function api(definition: unknown, headers: Array<Record<string, string>> = []) {
 }
 
 test('a definition of a shape this app does not announce is shown as one it cannot show, also when the server sends it', async () => {
-  const later = { ...(SAMPLES[2][0] as object), schema: 5, trigger: { kind: 'record', type: 'task', event: 'state', to: 'done', ai: true } }
+  const later = { ...(SAMPLES[2][0] as object), schema: 6, trigger: { kind: 'record', type: 'task', event: 'state', to: 'done', ai: true } }
   const r = await api(later).mine('c1')
   assert.ok(r.success)
   assert.equal(r.jobs[0].toAccept?.definition, null)
