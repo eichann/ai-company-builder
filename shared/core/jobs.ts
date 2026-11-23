@@ -20,7 +20,7 @@
 import { AI_ROUTES, AI_TURN_BASE_ROUTES } from './ai-turn-routes'
 import { BUILTIN_CONNECTORS, isBuiltinConnectorId, type DeliveryPlaceKind } from './builtin-connectors'
 import { canonicalJson } from './fixed-content'
-import { isValidSkillName } from './names'
+import { isValidFolderName, isValidSkillName } from './names'
 import { PLUGIN_STEP_TOOLS } from './plugin-flow-declaration'
 import { deliverableFolderProblem } from './plugin-step-runs'
 import { RECORD_ID_RE } from './records'
@@ -32,16 +32,20 @@ import { RECORD_ID_RE } from './records'
  * `source_record`); `4` (member proposals, owner memo 「AIへの相談から定期の仕事」 第4版 §10-3) — schema 1's content (a time of day,
  * a Skill run by the responsible person's PC AI) with the mark `origin: 'member_proposal'`: a job a member proposed from the AI
  * chat. Every version of such a job stays schema 4 and only the proposal entrance makes one (jobs.md "Member proposals"), so the
- * rollback floor, which does not know 4, freezes it. A version of a schema is made only by a client that announced it reads
- * that schema (`JOB_SCHEMAS_HEADER`): the screens announce what they can show (`ADMIN_JOB_SCHEMAS` / `APP_JOB_SCHEMAS`), never
- * this list.
+ * rollback floor, which does not know 4, freezes it; `5` (4b-4 PR1, owner memo 「4b-4 商談から提案書」 第6版 §2-1) — the set
+ * watch 「これから来る、条件に合うもの全部」 (`JobSetTrigger`): a combination of fixed words that must be one of
+ * `JOB_SET_WATCH_OPENED`, a department Skill run by the responsible person's PC AI. A version of a schema is made only by a client
+ * that announced it reads that schema (`JOB_SCHEMAS_HEADER`): the screens announce what they can show (`ADMIN_JOB_SCHEMAS` /
+ * `APP_JOB_SCHEMAS`), never this list.
  */
-export const JOB_SCHEMAS = [1, 2, 3, 4] as const
+export const JOB_SCHEMAS = [1, 2, 3, 4, 5] as const
 export type JobSchema = typeof JOB_SCHEMAS[number]
 /** The schema of a job a member proposed (jobs.md "Member proposals"): schema 1's content plus `origin`. */
 export const JOB_PROPOSAL_SCHEMA = 4
 /** The mark a schema-4 definition carries (and no other schema may). */
 export const JOB_PROPOSAL_ORIGIN = 'member_proposal'
+/** The schema of a set watch (「これから来る、条件に合うもの全部」, jobs.md "The set watch (schema 5)"). */
+export const JOB_SET_WATCH_SCHEMA = 5
 
 /** A job's state: a draft until first approved; paused / retired keep it from running. */
 export type JobState = 'draft' | 'active' | 'paused' | 'retired'
@@ -122,11 +126,85 @@ export interface JobRecordTrigger {
   followMadeTask: boolean
 }
 
-export type JobTrigger = JobTimeTrigger | JobRecordTrigger
+/**
+ * Schema 5 (4b-4 PR1, owner memo 「4b-4 商談から提案書」 第6版 §2-1 / 付録 B): the set watch — 「これから来る、条件に合うもの
+ * 全部」, beside the one watched record of schemas 2 / 3 (which stay as they are). Not a condition language: every key takes
+ * words from its own list (`JOB_SET_WATCH_WORDS`), and the whole combination must be one the core opened
+ * (`JOB_SET_WATCH_OPENED`, exact match) — else it is never saved, approved, accepted or resumed. What the words mean:
+ * - `recordType` / `taskKind`: what the record is (a やること whose `task_kind` is 「議事録を確認する」 — a server field no
+ *   person's or AI's create may write, records.md "Task version 11").
+ * - `origin`: where it came from — `meeting`: its one `links.meeting`, and its id the one the meeting's output id gives
+ *   (`minutes-review.ts`); never told by a title.
+ * - `causes` + `causeRule`: which changes count — `human` under `ledger_v1`: exactly `ledgerRowIsEvent` (a person, or their own
+ *   consultation AI; never a migration, the server's own actors, a run, an outside writer or a business plugin's screen).
+ * - `assignee`: `responsible_from_creation` — its assignee was the job's responsible person from its first version on.
+ * - `event`: `first_done` — the first `done` in the record's whole ledger (never a later one after a reopen).
+ * - `unit`: `record` — one occurrence per record at most, over every version and every job (the server's mark, PR2).
+ * - `guards`: what the opened combination also checks (PR2 enforces them; written here so the responsible person consents to
+ *   them and a changed list is a changed combination): `people_only_meeting` (the meeting has its own attendee list, so one
+ *   from before 2026-11-04 is out), `attendee_responsible` (the responsible person attends the meeting or is its assignee, and
+ *   reads it now), `outside_attendee` (at least one attendee from outside the company), `after_acceptance` (the meeting first
+ *   read and the record made after the job was accepted), `plugin_step_exclusive` (no business plugin step runs the same Skill).
+ */
+export interface JobSetTrigger {
+  kind: 'record_set'
+  recordType: string
+  taskKind: string
+  origin: string
+  causes: string[]
+  causeRule: string
+  assignee: string
+  event: string
+  unit: string
+  guards: string[]
+}
 
-/** A trigger of schema 2 (a record's event). */
+export type JobTrigger = JobTimeTrigger | JobRecordTrigger | JobSetTrigger
+
+/** A trigger of schema 2 / 3 (one watched record's event). */
 export function isRecordTrigger(t: unknown): t is JobRecordTrigger {
   return !!t && typeof t === 'object' && (t as { kind?: unknown }).kind === 'record'
+}
+
+/** A trigger of schema 5 (the set watch). */
+export function isSetTrigger(t: unknown): t is JobSetTrigger {
+  return !!t && typeof t === 'object' && (t as { kind?: unknown }).kind === 'record_set'
+}
+
+/**
+ * The words a set watch is written in (schema 5), each key its own list; a value outside it is `trigger.<key>.BAD`. Adding a
+ * word here opens nothing: only `JOB_SET_WATCH_OPENED` does.
+ */
+export const JOB_SET_WATCH_WORDS = {
+  recordType: ['task'],
+  taskKind: ['minutes_review'],
+  origin: ['meeting'],
+  causes: ['human'],
+  causeRule: ['ledger_v1'],
+  assignee: ['responsible_from_creation'],
+  event: ['first_done'],
+  unit: ['record'],
+  guards: ['after_acceptance', 'attendee_responsible', 'outside_attendee', 'people_only_meeting', 'plugin_step_exclusive'],
+} as const satisfies Record<Exclude<keyof JobSetTrigger, 'kind'>, readonly string[]>
+
+/**
+ * The combinations a set watch may be (owner decision 2026-11-23, memo 第6版 §2-1): saved, approved, accepted and resumed only
+ * when its trigger is exactly one of these, lists in the order written here. The first and only one is 4b-4's: 「自分が担当の
+ * 『議事録を確認する』が、その一生で初めて完了したとき」. Opening another combination is one more line here, with its own guards
+ * and tests reviewed then; removing a line stops every job of it (never approved, accepted or resumed again).
+ */
+export const JOB_SET_WATCH_OPENED: readonly JobSetTrigger[] = [
+  {
+    kind: 'record_set', recordType: 'task', taskKind: 'minutes_review', origin: 'meeting', causes: ['human'], causeRule: 'ledger_v1',
+    assignee: 'responsible_from_creation', event: 'first_done', unit: 'record',
+    guards: ['after_acceptance', 'attendee_responsible', 'outside_attendee', 'people_only_meeting', 'plugin_step_exclusive'],
+  },
+]
+
+/** Is this set watch exactly one of the opened combinations (every key, every list in its order)? */
+export function jobSetWatchOpened(trigger: JobSetTrigger): boolean {
+  const text = canonicalJson(trigger)
+  return JOB_SET_WATCH_OPENED.some(o => canonicalJson(o) === text)
 }
 
 /**
@@ -150,7 +228,7 @@ export const JOB_EVENT_TYPES: readonly string[] = Object.keys(JOB_EVENT_STATES)
  * when the grant names `JOB_MINUTES_ROUTE` (part of what the responsible person accepts).
  */
 export type JobCheck = { kind: 'none' } | { kind: 'new_files'; path: string } | { kind: 'new_meetings'; titleWords: string[] }
-  | { kind: 'source_record'; doneMark: JobDoneMark }
+  | { kind: 'source_record'; doneMark: JobDoneMark } | { kind: 'matched_record' }
 
 /**
  * The done mark of an event job run by the PC (schema 3, owner memo 「段4b 設計メモ」 D3): what, on the watched record, says
@@ -172,6 +250,12 @@ export type JobPcCheckKind = typeof JOB_PC_CHECK_KINDS[number]
  */
 export const JOB_EVENT_CHECK_KINDS = ['source_record'] as const
 /**
+ * The check of a set watch (schema 5, 4b-4): `matched_record` — the server checks, before the AI and at every call, that the
+ * record its occurrence was made for still matches the combination and its guards (PR2). Kept out of `JOB_PC_CHECK_KINDS` and
+ * `JOB_EVENT_CHECK_KINDS`, which released apps name on their claims: only an app that runs set watches (PR5) will name it.
+ */
+export const JOB_SET_CHECK_KIND = 'matched_record'
+/**
  * How long an event occurrence run by the PC waits for the responsible person's app by default (owner memo D6: one day;
  * `missed.expiresAfterMinutes`). The admin form's default (stage 4b-3); the parser keeps the range of every job.
  */
@@ -191,6 +275,20 @@ export const JOB_MINUTES_ROUTE = 'GET /minutes/:recordId/text'
 export type JobProcedure =
   | { source: 'company_skill'; skill: string; fingerprint: string }
   | { source: 'shelf_skill'; item: string; skill: string; fingerprint: string }
+  | ({ source: 'department_skill' } & JobSkillPin)
+
+/**
+ * A department's Skill pinned at its tree (schema 5, 4b-4 §4-4): `<place>/.claude/skills/<skill>` on the shared branch, `place`
+ * one department folder (`isValidFolderName`, NFC). The procedure of a set watch and each Skill its run may read
+ * (`grant.reads.skills`): the server fills `fingerprint` (the tree id) when the version is made, never the caller.
+ */
+export interface JobSkillPin { place: string; skill: string; fingerprint: string }
+/** At most this many Skills a set watch's run may read besides its procedure. */
+export const JOB_READ_SKILLS_MAX = 4
+/** Where a department Skill lives: the path its reader must read, and where the server's git reads it. */
+export function departmentSkillPath(pin: { place: string; skill: string }): string {
+  return `${pin.place}/.claude/skills/${pin.skill}`
+}
 
 /**
  * What runs. `operation` (placement `e`, on the server, no AI): today only `create_task` — a やること for
@@ -244,7 +342,8 @@ export interface JobGrant {
   tools: string[]
   creates: string[]
   routes: string[]
-  reads: { paths: string[]; calls: never[] }
+  /** `skills`: schema 5 only, and absent elsewhere (every other grant is byte for byte what it was) — department Skills the run reads. */
+  reads: { paths: string[]; calls: never[]; skills?: JobSkillPin[] }
   writes: { area: 'none' } | { area: 'deliverable'; place: string; folder: string }
   outbound: 'none' | 'draft_only'
   limits: { minutes: number; runsPerDay: number }
@@ -264,6 +363,46 @@ export interface JobDefinition {
   grant: JobGrant
   /** Schema 4 only (and required there): the job came from a member's proposal (jobs.md "Member proposals"). */
   origin?: typeof JOB_PROPOSAL_ORIGIN
+  /**
+   * Schema 5 only (and required there): the reasons the procedure's Skill declares for its judgement (`decision.json`, read by
+   * the server from the pinned tree when the version is made — never the caller's). A run's report names one of them (PR3).
+   */
+  decision?: JobDecision
+}
+
+/** A judgement's reason the Skill declares: an ASCII code and its words for the person. */
+export interface JobDecisionReason { code: string; label: string }
+export interface JobDecision { reasons: JobDecisionReason[] }
+export const JOB_DECISION_REASONS_MAX = 20
+export const JOB_DECISION_LABEL_MAX = 40
+/** The file a set watch's procedure Skill declares its reasons in (`<skill folder>/decision.json`). */
+export const JOB_DECISION_FILE = 'decision.json'
+const DECISION_CODE_RE = /^[a-z][a-z0-9_]{0,39}$/
+
+/**
+ * The reasons of a decision, strictly: `{ reasons: [{ code, label }] }`, 1–20, codes lower-case ASCII and unique (ACB's own
+ * outcomes, such as `GATE_UNAVAILABLE`, are upper case and never one of them), labels one NFC line of at most 40. Null otherwise.
+ */
+export function parseJobDecision(v: unknown): JobDecision | null {
+  if (!isObj(v) || Object.keys(v).length !== 1 || !Array.isArray(v.reasons)) return null
+  if (v.reasons.length === 0 || v.reasons.length > JOB_DECISION_REASONS_MAX) return null
+  const reasons: JobDecisionReason[] = []
+  for (const r of v.reasons as unknown[]) {
+    if (!isObj(r) || Object.keys(r).length !== 2 || typeof r.code !== 'string' || typeof r.label !== 'string') return null
+    if (!DECISION_CODE_RE.test(r.code)) return null
+    const label = r.label.normalize('NFC').trim()
+    // eslint-disable-next-line no-control-regex
+    if (label.length === 0 || label.length > JOB_DECISION_LABEL_MAX || label !== r.label || /[\u0000-\u001f\u007f\u2028\u2029]/.test(label)) return null
+    reasons.push({ code: r.code, label })
+  }
+  if (new Set(reasons.map(r => r.code)).size !== reasons.length) return null
+  return { reasons }
+}
+
+/** A Skill's `decision.json` text as a decision, or null (larger than 16 KB, not JSON, not one). */
+export function parseJobDecisionFile(text: string): JobDecision | null {
+  if (text.length > 16 * 1024) return null
+  try { return parseJobDecision(JSON.parse(text)) } catch { return null }
 }
 
 /** A refusal's codes only — never the values (a path could name a private folder). */
@@ -338,8 +477,43 @@ function parseRecordTrigger(v: Obj, problems: string[]): JobRecordTrigger | null
   }
 }
 
+const SET_WATCH_ONE_WORD = ['recordType', 'taskKind', 'origin', 'causeRule', 'assignee', 'event', 'unit'] as const
+const SET_WATCH_LISTS = ['causes', 'guards'] as const
+
+/** Schema 5: every key from its own list, then the whole combination one of `JOB_SET_WATCH_OPENED` (`trigger.NOT_OPENED`). */
+function parseSetTrigger(v: Obj, problems: string[]): JobSetTrigger | null {
+  if (!keysExactly(v, ['kind', ...SET_WATCH_ONE_WORD, ...SET_WATCH_LISTS], 'trigger', problems)) return null
+  const start = problems.length
+  for (const k of SET_WATCH_ONE_WORD) {
+    const words: readonly string[] = JOB_SET_WATCH_WORDS[k]
+    if (typeof v[k] !== 'string' || !words.includes(v[k] as string)) problems.push(`trigger.${k}.BAD`)
+  }
+  const lists: Partial<Record<typeof SET_WATCH_LISTS[number], string[]>> = {}
+  for (const k of SET_WATCH_LISTS) {
+    const words: readonly string[] = JOB_SET_WATCH_WORDS[k]
+    const list = uniqueStrings(v[k], s => words.includes(s), words.length)
+    // At least one counted cause: a set watch that counts no change would be a different thing, never "everything".
+    if (!list || (k === 'causes' && list.length === 0)) problems.push(`trigger.${k}.BAD`)
+    else lists[k] = list
+  }
+  if (problems.length > start) return null
+  const trigger: JobSetTrigger = {
+    kind: 'record_set', recordType: v.recordType as string, taskKind: v.taskKind as string, origin: v.origin as string,
+    causes: lists.causes as string[], causeRule: v.causeRule as string, assignee: v.assignee as string, event: v.event as string,
+    unit: v.unit as string, guards: lists.guards as string[],
+  }
+  // Words alone open nothing: only a combination the core opened is a set watch (owner decision 2026-11-23, §2-1).
+  if (!jobSetWatchOpened(trigger)) { problems.push('trigger.NOT_OPENED'); return null }
+  return trigger
+}
+
 function parseTrigger(v: unknown, schema: unknown, problems: string[]): JobTrigger | null {
   if (!isObj(v)) { problems.push('trigger.BAD'); return null }
+  // Schema 5 is the set watch, and only that.
+  if (schema === JOB_SET_WATCH_SCHEMA) {
+    if (v.kind !== 'record_set') { problems.push('trigger.kind.BAD'); return null }
+    return parseSetTrigger(v, problems)
+  }
   // Schemas 2 and 3 are a record's event, and only that; schema 1 a time of day, and only that.
   if (schema === 2 || schema === 3) {
     if (v.kind !== 'record') { problems.push('trigger.kind.BAD'); return null }
@@ -392,8 +566,19 @@ function parseCheck(v: unknown, problems: string[]): JobCheck | null {
     if (!(JOB_DONE_MARKS as readonly unknown[]).includes(v.doneMark)) { problems.push('check.doneMark.BAD'); return null }
     return { kind: 'source_record', doneMark: v.doneMark as JobDoneMark }
   }
+  if (v.kind === JOB_SET_CHECK_KIND) return keysExactly(v, ['kind'], 'check', problems) ? { kind: JOB_SET_CHECK_KIND } : null
   problems.push('check.kind.BAD')
   return null
+}
+
+/** A department Skill's place, name and tree id (`JobSkillPin`); its keys are checked by the caller. */
+function parseSkillPin(p: Obj, where: string, problems: string[]): JobSkillPin | null {
+  const start = problems.length
+  // One department folder (the department folder rule), as written in the repository (NFC).
+  if (typeof p.place !== 'string' || p.place.length > 100 || p.place !== p.place.normalize('NFC') || !isValidFolderName(p.place)) problems.push(`${where}.place.BAD`)
+  if (typeof p.skill !== 'string' || !isValidSkillName(p.skill) || p.skill.length > 64) problems.push(`${where}.skill.BAD`)
+  if (typeof p.fingerprint !== 'string' || !FINGERPRINT_RE.test(p.fingerprint)) problems.push(`${where}.fingerprint.BAD`)
+  return problems.length > start ? null : { place: p.place as string, skill: p.skill as string, fingerprint: p.fingerprint as string }
 }
 
 function parseRun(v: unknown, problems: string[]): JobRun | null {
@@ -412,6 +597,11 @@ function parseRun(v: unknown, problems: string[]): JobRun | null {
     if (!keysExactly(v, ['kind', 'procedure'], 'run', problems)) return null
     const p = v.procedure
     if (!isObj(p)) { problems.push('run.procedure.BAD'); return null }
+    if (p.source === 'department_skill') {
+      if (!keysExactly(p, ['source', 'place', 'skill', 'fingerprint'], 'run.procedure', problems)) return null
+      const pin = parseSkillPin(p, 'run.procedure', problems)
+      return pin ? { kind: 'procedure', procedure: { source: 'department_skill', ...pin } } : null
+    }
     const shelf = p.source === 'shelf_skill'
     if (!keysExactly(p, shelf ? ['source', 'item', 'skill', 'fingerprint'] : ['source', 'skill', 'fingerprint'], 'run.procedure', problems)) return null
     const start = problems.length
@@ -505,6 +695,21 @@ export function jobDeliveryLabel(place: { connector: string; kind: string }): st
   return deliveryKind(place.connector, place.kind)?.label ?? null
 }
 
+/** `grant.reads.skills`: 1–`JOB_READ_SKILLS_MAX` department Skills, each once (place and name). */
+function parseReadSkills(v: unknown, problems: string[]): JobSkillPin[] | null {
+  if (!Array.isArray(v) || v.length === 0 || v.length > JOB_READ_SKILLS_MAX) { problems.push('grant.reads.skills.BAD'); return null }
+  const pins: JobSkillPin[] = []
+  for (const p of v as unknown[]) {
+    if (!isObj(p)) { problems.push('grant.reads.skills.BAD'); return null }
+    if (!keysExactly(p, ['place', 'skill', 'fingerprint'], 'grant.reads.skills', problems)) return null
+    const pin = parseSkillPin(p, 'grant.reads.skills', problems)
+    if (!pin) return null
+    pins.push(pin)
+  }
+  if (new Set(pins.map(departmentSkillPath)).size !== pins.length) { problems.push('grant.reads.skills.BAD'); return null }
+  return pins
+}
+
 function parseGrant(v: unknown, problems: string[]): JobGrant | null {
   // `deliverTo` is optional (absent = none): a definition without it is exactly what it was before.
   const grantKeys = ['tools', 'creates', 'routes', 'reads', 'writes', 'outbound', 'limits', ...(isObj(v) && Object.prototype.hasOwnProperty.call(v, 'deliverTo') ? ['deliverTo'] : [])]
@@ -520,12 +725,15 @@ function parseGrant(v: unknown, problems: string[]): JobGrant | null {
   const routes = uniqueStrings(v.routes, s => (AI_ROUTES as readonly string[]).includes(s), MAX_ROUTES)
   if (!routes) problems.push('grant.routes.BAD')
   let reads: JobGrant['reads'] | null = null
-  if (isObj(v.reads) && keysExactly(v.reads, ['paths', 'calls'], 'grant.reads', problems)) {
+  // `skills` is optional (absent = none, schema 5 only: checked by the definition): without it a grant is what it was.
+  const withSkills = isObj(v.reads) && Object.prototype.hasOwnProperty.call(v.reads, 'skills')
+  if (isObj(v.reads) && keysExactly(v.reads, ['paths', 'calls', ...(withSkills ? ['skills'] : [])], 'grant.reads', problems)) {
     const paths = uniqueStrings(v.reads.paths, s => jobPathProblem(s) === null, MAX_PATHS)
     if (!paths) problems.push('grant.reads.paths.BAD')
     // Connector reads: refused to a run today (plugins' `callStepRefusal`), so none may be granted (memo D5 / §4-1).
     if (!Array.isArray(v.reads.calls) || v.reads.calls.length !== 0) problems.push('grant.reads.calls.BAD')
-    if (paths && Array.isArray(v.reads.calls) && v.reads.calls.length === 0) reads = { paths, calls: [] }
+    const skills = withSkills ? parseReadSkills(v.reads.skills, problems) : undefined
+    if (paths && Array.isArray(v.reads.calls) && v.reads.calls.length === 0 && skills !== null) reads = { paths, calls: [], ...(skills ? { skills } : {}) }
   } else if (!isObj(v.reads)) problems.push('grant.reads.BAD')
   let writes: JobGrant['writes'] | null = null
   const w = v.writes
@@ -572,9 +780,13 @@ export function parseJobDefinition(input: unknown): JobDefinitionResult {
   if (!isObj(input)) return { ok: false, problems: ['BAD'] }
   // Schema 4 (a member's proposal) carries its mark, and only schema 4 may.
   const proposal = input.schema === JOB_PROPOSAL_SCHEMA
-  const keys = ['schema', 'name', 'actingUser', 'trigger', 'check', 'run', 'placement', 'missed', 'grant', ...(proposal ? ['origin'] : [])]
+  // Schema 5 (the set watch) carries its Skill's reasons, and only schema 5 may.
+  const setWatch = input.schema === JOB_SET_WATCH_SCHEMA
+  const keys = ['schema', 'name', 'actingUser', 'trigger', 'check', 'run', 'placement', 'missed', 'grant', ...(proposal ? ['origin'] : []), ...(setWatch ? ['decision'] : [])]
   keysExactly(input, keys, 'definition', problems)
   if (proposal && Object.prototype.hasOwnProperty.call(input, 'origin') && input.origin !== JOB_PROPOSAL_ORIGIN) problems.push('origin.BAD')
+  const decision = setWatch && Object.prototype.hasOwnProperty.call(input, 'decision') ? parseJobDecision(input.decision) : null
+  if (setWatch && Object.prototype.hasOwnProperty.call(input, 'decision') && !decision) problems.push('decision.BAD')
   if (!(JOB_SCHEMAS as readonly unknown[]).includes(input.schema)) problems.push('schema.UNKNOWN')
   const name = typeof input.name === 'string' ? input.name.normalize('NFC').trim() : ''
   // eslint-disable-next-line no-control-regex
@@ -616,10 +828,26 @@ export function parseJobDefinition(input: unknown): JobDefinitionResult {
   // Schema 4 (a member's proposal, owner decision Q1): a time of day (parseTrigger), an existing Skill run by the responsible
   // person's PC AI — never the server's operation.
   if (proposal && run.kind !== 'procedure') problems.push('run.PROPOSAL_PC_ONLY')
+  // Schema 5, the set watch (4b-4, owner memo 第6版 §2 / §4 / 案A): a department Skill on the responsible person's PC, checked by
+  // the server on the matched record, with the one やること; its AI reads the files and Skills granted and that meeting's
+  // minutes only — no mail draft, no place outside, no other route. Each piece is schema 5's alone.
+  const procedure = run.kind === 'procedure' ? run.procedure : null
+  if (setWatch && procedure?.source !== 'department_skill') problems.push('run.SET_WATCH_DEPARTMENT_SKILL')
+  if (!setWatch && procedure?.source === 'department_skill') problems.push('run.procedure.DEPARTMENT_SKILL_SET_WATCH_ONLY')
+  if (!setWatch && grant.reads.skills !== undefined) problems.push('grant.reads.skills.SET_WATCH_ONLY')
+  if (setWatch && check.kind !== JOB_SET_CHECK_KIND) problems.push('check.SET_WATCH_NEEDS_MATCHED_RECORD')
+  if (!setWatch && check.kind === JOB_SET_CHECK_KIND) problems.push('check.MATCHED_RECORD_SET_WATCH_ONLY')
+  if (setWatch && !grant.creates.includes('task')) problems.push('grant.creates.SET_WATCH_NEEDS_TASK')
+  if (setWatch && grant.deliverTo) problems.push('grant.deliverTo.SET_WATCH_NONE')
+  if (setWatch && grant.outbound !== 'none') problems.push('grant.outbound.SET_WATCH_NONE')
+  if (setWatch && (grant.routes.length !== 1 || grant.routes[0] !== JOB_MINUTES_ROUTE)) problems.push('grant.routes.SET_WATCH_MINUTES_ONLY')
   if (problems.length > 0) return { ok: false, problems }
   return {
     ok: true,
-    definition: { schema: input.schema as JobSchema, name, actingUser: input.actingUser as string, trigger, check, run, placement, missed, grant, ...(proposal ? { origin: JOB_PROPOSAL_ORIGIN } : {}) },
+    definition: {
+      schema: input.schema as JobSchema, name, actingUser: input.actingUser as string, trigger, check, run, placement, missed, grant,
+      ...(proposal ? { origin: JOB_PROPOSAL_ORIGIN } : {}), ...(setWatch && decision ? { decision } : {}),
+    },
   }
 }
 
@@ -634,6 +862,15 @@ export function jobDefinitionCanonical(definition: JobDefinition): string {
  * policy, the check changed) needs no new acceptance; any change to it does.
  */
 export function jobConsentCanonical(definition: JobDefinition): string {
+  // A set watch (schema 5, owner memo 「4b-4」 §2-6): which records it takes (the whole combination: the words, the counted causes
+  // and their rule, the unit, the guards), the check, and the Skill's reasons are consented to with who, what, where and the
+  // grant. Never what judges behind the app's one gate (Claude now, a local model later: §5-0) — the definition has no such key.
+  if (definition.schema === JOB_SET_WATCH_SCHEMA) {
+    return canonicalJson({
+      actingUser: definition.actingUser, run: definition.run, placement: definition.placement, grant: definition.grant,
+      trigger: definition.trigger, check: definition.check, decision: definition.decision ?? null,
+    })
+  }
   // Schema 1: byte for byte what it always was (a time job's name or time change needs no new acceptance).
   if (!isRecordTrigger(definition.trigger)) {
     return canonicalJson({ actingUser: definition.actingUser, run: definition.run, placement: definition.placement, grant: definition.grant })
@@ -823,7 +1060,19 @@ export function jobDefinitionPaths(definition: JobDefinition): string[] {
   const paths = [...definition.grant.reads.paths]
   if (definition.check.kind === 'new_files') paths.push(definition.check.path)
   if (definition.grant.writes.area === 'deliverable') paths.push(definition.grant.writes.place)
+  // A set watch's department Skills (schema 5): the one it runs and the ones it reads — the responsible person must read each.
+  if (definition.run.kind === 'procedure' && definition.run.procedure.source === 'department_skill') paths.push(departmentSkillPath(definition.run.procedure))
+  for (const pin of definition.grant.reads.skills ?? []) paths.push(departmentSkillPath(pin))
   return [...new Set(paths)]
+}
+
+/**
+ * The department Skills a set watch pins (schema 5): the procedure and the ones it reads, by place and name. Empty for any other
+ * job. A business plugin's step that runs one of these names (as its company Skill) is the same work run another way (4b-4 §3).
+ */
+export function jobPinnedDepartmentSkills(definition: JobDefinition): JobSkillPin[] {
+  const run = definition.run.kind === 'procedure' && definition.run.procedure.source === 'department_skill' ? [definition.run.procedure] : []
+  return [...run, ...(definition.grant.reads.skills ?? [])].map(p => ({ place: p.place, skill: p.skill, fingerprint: p.fingerprint }))
 }
 
 /** Why a job is paused (short codes, never text). */

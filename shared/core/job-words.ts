@@ -6,7 +6,7 @@
  * Words only: no rule is decided here (the parser is `jobs.ts`, the slots `job-schedule.ts`). Pure
  * (server/tests/unit/core-purity.test.ts).
  */
-import { JOB_MINUTES_ROUTE, isRecordTrigger, jobDeliveryLabel, type JobCheck, type JobRecordTrigger, type JobDefinition, type JobGrant, type JobMissed, type JobOccurrenceState, type JobPauseReason, type JobRun, type JobTrigger, type JobWeekday } from './jobs'
+import { JOB_MINUTES_ROUTE, isRecordTrigger, isSetTrigger, jobDeliveryLabel, jobSetWatchOpened, type JobCheck, type JobSetTrigger, type JobRecordTrigger, type JobDefinition, type JobGrant, type JobMissed, type JobOccurrenceState, type JobPauseReason, type JobRun, type JobTrigger, type JobWeekday } from './jobs'
 
 const WEEKDAY_WORDS: Record<JobWeekday, string> = { mon: '月曜', tue: '火曜', wed: '水曜', thu: '木曜', fri: '金曜', sat: '土曜', sun: '日曜' }
 
@@ -37,6 +37,15 @@ export function jobRecordTriggerText(trigger: JobRecordTrigger): string {
 }
 
 /**
+ * A set watch (schema 5, owner memo 「4b-4」 §2-1): the one combination opened today in its words; any other (a later build's, or
+ * one no longer opened) is never described as if it were that one.
+ */
+export function jobSetTriggerText(trigger: JobSetTrigger): string {
+  if (!jobSetWatchOpened(trigger)) return 'この画面では説明できない条件です（画面を新しくしてください）'
+  return '自分が担当の「議事録を確認する」を初めて完了したとき（これから来る、条件に合うもの全部。社外の人が出た会議だけ、1つの会議につき1回）'
+}
+
+/**
  * What an event-triggered job never runs for (owner decision ②, the memo's 「制約として画面と例に書く」): shown with its
  * trigger on every screen that shows one.
  */
@@ -45,6 +54,7 @@ export const JOB_EVENT_NOTE = '見張るのは選んだやること1つだけで
 /** 「毎週火曜の1営業日前 09:00」, 「毎営業日 09:00」, 「毎月末日 09:00（休みの日なら前の営業日）」; an event: `jobRecordTriggerText`. */
 export function jobTriggerText(trigger: JobTrigger): string {
   if (isRecordTrigger(trigger)) return jobRecordTriggerText(trigger)
+  if (isSetTrigger(trigger)) return jobSetTriggerText(trigger)
   if (trigger.every === 'day') return `${trigger.businessDaysOnly ? '毎営業日' : '毎日'} ${trigger.at}`
   if (trigger.every === 'week') {
     const day = WEEKDAY_WORDS[trigger.weekday]
@@ -61,7 +71,9 @@ export function jobRunText(run: JobRun): string {
     const due = run.dueBusinessDays === null ? '期限なし' : run.dueBusinessDays === 0 ? '期限はその日' : `期限は${run.dueBusinessDays}営業日後`
     return `責任者に、やること「${run.title}」を作ります（${due}）。AI は使いません`
   }
-  const skill = run.procedure.source === 'shelf_skill' ? `会社の Skill の棚の「${run.procedure.skill}」` : `会社の Skill「${run.procedure.skill}」`
+  const p = run.procedure
+  const skill = p.source === 'shelf_skill' ? `会社の Skill の棚の「${p.skill}」`
+    : p.source === 'department_skill' ? `「${p.place}」の Skill「${p.skill}」` : `会社の Skill「${p.skill}」`
   return `${skill}を、責任者の PC の AI が動かします`
 }
 
@@ -76,6 +88,7 @@ export function jobCheckText(check: JobCheck): string | null {
     const mark = check.doneMark === 'file_linked' ? '。そのやることにファイルがもうつながっていれば、AI は動きません' : ''
     return `見張っているやることが今もその状態で、担当が責任者のままのときだけ、AI が動きます（途中で変わったら止めます）${mark}`
   }
+  if (check.kind === 'matched_record') return 'その会議を今も読めて、条件に合っているときだけ、AI がその会議の議事録だけを読みます（途中で変わったら止めます）'
   return null
 }
 
