@@ -45,6 +45,9 @@ const LATER_TABLES = [
   'browser_type_grants',
   // private-folders.md "Access removed: holding tickets": who stopped reading which private folder.
   'holding_tickets',
+  // private-folders.md "Holding: the member's upload": what members handed over with their tickets.
+  'holding_items',
+  'holding_files',
 ]
 /** Indexes later builds add on a table that was there before. */
 const LATER_INDEXES = [

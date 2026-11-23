@@ -47,7 +47,10 @@ Self-hosting guides (English and Japanese, published): `docs/self-hosting/`. Ful
   (a `restart` runs the old code); hot reload is `pnpm dev:server` on the host. Why: the server
   will hold members' API keys (key broker), so whoever can write the checkout must not change
   what it runs. A new place the server writes at run time goes under `DATA_DIR`, or `/tmp` for
-  scratch; anything else fails on the read-only filesystem. The image stays TypeScript + tsx on
+  scratch; anything else fails on the read-only filesystem. (The holding place's contents,
+  `HOLDING_DIR`, default to `data/holding`, like the private-folder archives in
+  `data/backups/private-folders`: inside the data volume and its backups, no compose change; do not
+  point it outside `DATA_DIR`.) The image stays TypeScript + tsx on
   purpose: the pre-receive hook runs `push-check/entry.ts` with the server's node and tsx loader.
   The user manual is built in the Dockerfile's `manual` stage from `manual/` (a page that does not
   render fails the image build) and only the built site is copied to `/app/manual-site`, served at
@@ -213,7 +216,9 @@ DATA_DIR=/tmp/acb-scratch AUTH_SECRET=… node --import tsx src/cli/company-arch
     as `empty`).
 
   Kept private-folder archives under `PRIVATE_FOLDER_ARCHIVE_DIR/<company>/` are listed in the
-  manifest, not copied. Nothing of another company is in it.
+  manifest, not copied, and so are the holding place's contents under `HOLDING_DIR/<company>/`
+  (`heldContents`, `private-folders.md` "Holding: the member's upload"; its rows are in `rows/`).
+  Nothing of another company is in it.
 - Secrets:
   - Key broker keys stay sealed. They open only on a server with the same KEK (`kekIds` in the
     manifest; the KEK is per server today), so restoring elsewhere means keys must be

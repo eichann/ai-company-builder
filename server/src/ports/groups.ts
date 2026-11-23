@@ -53,6 +53,15 @@ export interface PermissionHistoryEntry {
     | 'holding-ticket'
     /** They read the folder again: their open holding ticket cancelled (`scopeId`, `path`, `userId`). */
     | 'holding-ticket-cancel'
+    /**
+     * A member's PC handed over what it never sent (`itemId`, `ticketId`, `scopeId`, `userId`,
+     * counts `files` / `held` / `namesOnly`, `bytes`; private-folders.md "Holding: the member's upload").
+     */
+    | 'holding-received'
+    /** A waiting item's 30 days passed: its contents deleted by the server clock (`itemId`, `ticketId`, `scopeId`, `userId`). */
+    | 'holding-expired'
+    /** The operator erased an item's contents and names (`itemId`, `reason`; src/cli/erase-content.ts). */
+    | 'holding-erased'
   /**
    * What changed, as JSON-able data (ids, names, a place's path, rules before / after; for a
    * group's or a department's members `before` / `after` ids and, when not an edit of the list

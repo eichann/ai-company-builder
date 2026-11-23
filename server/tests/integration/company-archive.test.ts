@@ -8,7 +8,7 @@
  * is refused with nothing written.
  */
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
-import { chmodSync, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'fs'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'fs'
 import { createHash, randomBytes } from 'crypto'
 import { tmpdir } from 'os'
 import { join } from 'path'
@@ -122,7 +122,12 @@ describe('per-company export and restore', () => {
 
   it('exports every row of the company and its repositories, with counts per table', async () => {
     out = join(work, 'archive-a')
-    manifest = await archive.exportCompany({ conn: db, reposDir, companyId: co.A, outDir: out })
+    // The holding place's contents (private-folders.md "Holding: the member's upload"): listed, never copied, the company's own only.
+    const holdingDir = join(work, 'holding')
+    mkdirSync(join(holdingDir, co.A, 'item-a'), { recursive: true })
+    mkdirSync(join(holdingDir, co.B, 'item-b'), { recursive: true })
+    manifest = await archive.exportCompany({ conn: db, reposDir, companyId: co.A, outDir: out, holdingDir })
+    expect(manifest.heldContents).toEqual([join(holdingDir, co.A, 'item-a')])
     const source = companyRows(db, co.A)
     for (const [table, rows] of Object.entries(source)) {
       if (table === 'broker_tokens') continue

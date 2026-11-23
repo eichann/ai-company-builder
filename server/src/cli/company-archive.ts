@@ -28,7 +28,7 @@
  *      except private_folder_archives (no foreign key: delete its rows by
  *      company_id explicitly);
  *   4. remove <REPOS_DIR>/<id>.git, <REPOS_DIR>/<id>.scopes/ and
- *      <PRIVATE_FOLDER_ARCHIVE_DIR>/<id>/;
+ *      <PRIVATE_FOLDER_ARCHIVE_DIR>/<id>/ and <HOLDING_DIR>/<id>/ (held contents);
  *   5. leave Better Auth accounts alone (they may belong to other companies);
  *   6. backups still hold the company until they expire — the retention
  *      promised to the customer; per-company keys (later) let it be made
@@ -39,12 +39,12 @@ import type { RestorePause } from '../services/restore-pause'
 
 async function main(argv: string[]): Promise<number> {
   const [command, ...args] = argv
-  const { DATA_DIR, REPOS_DIR } = await import('../lib/config')
+  const { DATA_DIR, HOLDING_DIR, REPOS_DIR } = await import('../lib/config')
   const { privateFolderArchiveDir } = await import('../lib/private-folders')
   if (command === 'export' && args.length === 2) {
     const { db } = await import('../db')
     const manifest = await exportCompany({
-      conn: db, reposDir: REPOS_DIR, companyId: args[0], outDir: args[1], privateFolderArchiveDir: privateFolderArchiveDir(),
+      conn: db, reposDir: REPOS_DIR, companyId: args[0], outDir: args[1], privateFolderArchiveDir: privateFolderArchiveDir(), holdingDir: HOLDING_DIR,
     })
     const rows = Object.values(manifest.counts).reduce((a, b) => a + b, 0)
     console.log(`Exported company ${manifest.companyId}: ${rows} rows in ${Object.keys(manifest.counts).length} tables, ${manifest.repos.length} repositories → ${args[1]}`)

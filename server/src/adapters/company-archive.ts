@@ -57,6 +57,8 @@ export interface CompanyArchiveManifest {
   repos: ArchivedRepo[]
   /** Archives of deleted / made-public private folders kept on the server (listed, not copied). */
   privateFolderArchives: string[]
+  /** Directories of the holding place's contents (private-folders.md "Holding: the member's upload"), one per item: listed, not copied. */
+  heldContents: string[]
   /** sha256 of every file in the archive (path relative to the archive). */
   files: Record<string, string>
   notes: {
@@ -97,6 +99,8 @@ export interface ExportOptions {
   outDir: string
   /** <PRIVATE_FOLDER_ARCHIVE_DIR>, to list this company's kept private-folder archives. */
   privateFolderArchiveDir?: string
+  /** <HOLDING_DIR>, to list this company's held contents. */
+  holdingDir?: string
   now?: () => Date
 }
 
@@ -133,6 +137,12 @@ export async function exportCompany(opts: ExportOptions): Promise<CompanyArchive
     const dir = join(opts.privateFolderArchiveDir, companyId)
     if (existsSync(dir)) privateFolderArchives = (await readdir(dir)).sort().map(f => join(dir, f))
   }
+  // The holding place's contents, like the kept archives: listed, not copied (the rows are in rows/).
+  let heldContents: string[] = []
+  if (opts.holdingDir) {
+    const dir = join(opts.holdingDir, companyId)
+    if (existsSync(dir)) heldContents = (await readdir(dir)).sort().map(f => join(dir, f))
+  }
 
   const files: Record<string, string> = {}
   for (const sub of ['rows', join('repos'), join('repos', 'scopes')]) {
@@ -152,6 +162,7 @@ export async function exportCompany(opts: ExportOptions): Promise<CompanyArchive
     counts,
     repos,
     privateFolderArchives,
+    heldContents,
     files,
     notes: {
       brokerKeys: 'sealed as stored (envelope encryption); usable only on a server with the same KEK (kekIds)',

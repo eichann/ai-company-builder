@@ -130,6 +130,9 @@ interface World {
     /** A 「ブラウザ操作」 plan of the other company's member, approved, and its permitted execution (agent-browser.md). */
     browserPlan: string
     browserExecution: string
+    /** A holding ticket and item of the other company's member (private-folders.md "Holding: the member's upload"). */
+    holdingTicket: string
+    holdingItem: string
   }
 }
 
@@ -161,6 +164,7 @@ const OTHER_CANDIDATE = `jc.${'e'.repeat(32)}`
 const OTHER_PROPOSAL = `jp.${'e'.repeat(32)}`
 const OTHER_PLAN = `bp_${'e'.repeat(32)}`
 const OTHER_EXECUTION = `bx_${'e'.repeat(32)}`
+const NO_SUCH_HOLDING = '00000000-0000-4000-8000-0000000401d0'
 
 const MATRIX: Row[] = [
   // Public
@@ -180,6 +184,12 @@ const MATRIX: Row[] = [
   r('POST /api/companies', () => ({ path: '/api/companies', body: {} }), [403, 403, 403, 403, 400, 401],
     'the outsider is a server operator', ['outsider']),
   r('POST /api/invitations/:token/accept', () => ({ path: '/api/invitations/no-such-token/accept', body: {} }), [404, 404, 404, 404, 404, 401]),
+  // The holding place (private-folders.md "Holding: the member's upload"): signed in, no membership; only one's own ticket.
+  r('GET /api/me/holding/tickets', () => ({ path: '/api/me/holding/tickets' }), ALL_SIGNED_IN),
+  r('POST /api/me/holding/tickets/:ticketId/items', () => ({ path: `/api/me/holding/tickets/${NO_SUCH_HOLDING}/items`, body: {} }), [404, 404, 404, 404, 404, 401],
+    'nobody holds a ticket: the same 404 for everyone'),
+  r('PUT /api/me/holding/items/:itemId/blobs/:sha256', () => ({ path: `/api/me/holding/items/${NO_SUCH_HOLDING}/blobs/${'a'.repeat(64)}`, body: 'x' }), [404, 404, 404, 404, 404, 401]),
+  r('POST /api/me/holding/items/:itemId/finish', () => ({ path: `/api/me/holding/items/${NO_SUCH_HOLDING}/finish` }), [404, 404, 404, 404, 404, 401]),
 
   // Companies
   r('GET /api/companies/:companyId', w => ({ path: C(w) }), MEMBERS),
@@ -873,6 +883,10 @@ const CROSS: CrossRow[] = [
   x('POST /api/companies/:companyId/browser-plans/:planId/claim', (w, id) => ({ path: `${C(w)}/browser-plans/${id}/claim` }), w => w.other.browserPlan, NO_SUCH_PLAN),
   x('POST /api/companies/:companyId/browser-executions/:executionId/send-permit', (w, id) => ({ path: `${C(w)}/browser-executions/${id}/send-permit` }), w => w.other.browserExecution, NO_SUCH_EXECUTION),
   x('POST /api/companies/:companyId/browser-executions/:executionId/confirm', (w, id) => ({ path: `${C(w)}/browser-executions/${id}/confirm`, body: { result: 'done' } }), w => w.other.browserExecution, NO_SUCH_EXECUTION),
+  // The holding place: no company in the URL; the other company's member's ticket / item asked for by this company's owner.
+  x('POST /api/me/holding/tickets/:ticketId/items', (_w, id) => ({ path: `/api/me/holding/tickets/${id}/items`, body: { deviceKey: 'device-owner-1', baseCommit: null, manifest: [{ path: 'a.md', kind: 'deleted', size: 0, sha256: null }] } }), w => w.other.holdingTicket),
+  x('PUT /api/me/holding/items/:itemId/blobs/:sha256', (_w, id) => ({ path: `/api/me/holding/items/${id}/blobs/${'a'.repeat(64)}`, body: 'x' }), w => w.other.holdingItem),
+  x('POST /api/me/holding/items/:itemId/finish', (_w, id) => ({ path: `/api/me/holding/items/${id}/finish` }), w => w.other.holdingItem),
   x('PUT /api/companies/:companyId/browser-type-grants/:userId', (w, id) => ({ path: `${C(w)}/browser-type-grants/${id}`, body: { connector: 'lstep', operation: 'reminder_step_add_template', declarationHash: `sha256:${'a'.repeat(64)}`, allowed: true } }), w => w.other.member, 'pm-nobody'),
   // lane C ▲
 ]
@@ -1168,6 +1182,13 @@ async function seed(): Promise<World> {
     .run(other, OTHER_CANDIDATE, USER.owner, expires, '2999-01-01T00:00:00.000Z')
   db.prepare(`INSERT INTO ai_job_proposals (company_id, id, job_id, proposer_id, candidate_id, submitted_version, submitted_fingerprint, state, created_at, updated_at)
     VALUES (?, ?, ?, ?, ?, 1, 'sha256:f', 'submitted', ?, ?)`).run(other, OTHER_PROPOSAL, OTHER_JOB, USER.owner, OTHER_CANDIDATE, expires, expires)
+  // A holding ticket and a receiving item of the other company's member (rows as adapters/sqlite/holding.ts writes them).
+  db.prepare(`INSERT INTO holding_tickets (id, company_id, user_id, scope_id, repo_id, folder_path, cause, state, created_at, updated_at, expires_at, by_user)
+    VALUES ('holding-ticket-other-1', ?, ?, ?, NULL, '機密', 'readers', 'open', ?, ?, '2999-01-01T00:00:00.000Z', ?)`).run(other, otherMember, otherPf.scopeId, expires, expires, USER.outsider)
+  db.prepare(`INSERT INTO holding_items (id, company_id, ticket_id, user_id, device_key, scope_id, folder_path, state, total_bytes, created_at, updated_at)
+    VALUES ('holding-item-other-1', ?, 'holding-ticket-other-1', ?, 'device-other-1', ?, '機密', 'receiving', 1, ?, ?)`).run(other, otherMember, otherPf.scopeId, expires, expires)
+  db.prepare(`INSERT INTO holding_files (company_id, item_id, idx, path, kind, size, sha256) VALUES (?, 'holding-item-other-1', 0, 'a.md', 'changed', 1, ?)`)
+    .run(other, 'a'.repeat(64))
   // A pending request to publish a Skill on the other company's shelf (rows as adapters/sqlite/skill-shelf.ts writes them).
   db.prepare(`INSERT INTO shelf_requests (id, company_id, department_id, name, requested_by, requested_at, version, files, file_count, total_bytes, autorun, state)
     VALUES ('shelf-request-other-1', ?, NULL, 'other-request', ?, ?, ?, '[]', 0, 0, 0, 'pending')`).run(other, otherMember, expires, 'a'.repeat(64))
@@ -1212,6 +1233,8 @@ async function seed(): Promise<World> {
       trustedFolder: 'folderOtherTrusted01',
       browserPlan: OTHER_PLAN,
       browserExecution: OTHER_EXECUTION,
+      holdingTicket: 'holding-ticket-other-1',
+      holdingItem: 'holding-item-other-1',
 
     },
   }

@@ -12,6 +12,8 @@ import { db } from './db'
 import { sqliteCompanyRepository } from './adapters/sqlite/companies'
 import { sqliteMembershipRepository } from './adapters/sqlite/memberships'
 import { sqliteInvitationTokens } from './adapters/sqlite/invitations'
+import { sqliteHoldingTicketLookup } from './adapters/sqlite/holding'
+import { diskHoldingBlobStore } from './adapters/holding-blobs'
 import { sqliteCompanyData } from './adapters/sqlite/company-data'
 import { sqliteClientActivityRepository } from './adapters/sqlite/client-activity'
 import { sqlitePushRejectionRepository } from './adapters/sqlite/push-rejections'
@@ -28,7 +30,7 @@ import { betterAuthAccountDirectory, betterAuthAccountIdByEmail } from './adapte
 import { localRepoStore } from './adapters/git-repo-store'
 import { companyFileViews } from './adapters/company-files'
 import { gitRecordFileSource, gitRecordFileWriter } from './adapters/record-files'
-import { processCompanyLock, randomIds, sha256TokenDigest, systemClock, systemMonotonicClock } from './adapters/system'
+import { processCompanyLock, randomIds, sha256Bytes, sha256TokenDigest, systemClock, systemMonotonicClock } from './adapters/system'
 import { loadKekFile } from './adapters/kek-file'
 import { localSecretCipher } from './adapters/local-secret-cipher'
 import { httpsUpstream } from './adapters/upstream-https'
@@ -37,7 +39,7 @@ import { timedUpstream } from './adapters/upstream-timed'
 import { timeSqliteCalls } from './adapters/sqlite/timing'
 import { requestOperations } from './lib/request-log'
 import { diskPluginShelf } from './adapters/plugin-shelf'
-import { BROKER_DAY_UTC_OFFSET_MINUTES, BROKER_KEK_FILE, BROKER_KEY_CHECK, BROKER_MAX_REQUEST_MB, BROKER_TOKEN_TTL_MINUTES, BROKER_UPSTREAM_TIMEOUT_SECONDS, COMPANY_CREATION_POLICY, DATA_DIR, PLUGINS_DIR, PRACTICE_UPSTREAMS, operatorUserIds, publicUrl, type PracticeUpstreams } from './lib/config'
+import { BROKER_DAY_UTC_OFFSET_MINUTES, BROKER_KEK_FILE, BROKER_KEY_CHECK, BROKER_MAX_REQUEST_MB, BROKER_TOKEN_TTL_MINUTES, BROKER_UPSTREAM_TIMEOUT_SECONDS, COMPANY_CREATION_POLICY, DATA_DIR, HOLDING_DIR, PLUGINS_DIR, PRACTICE_UPSTREAMS, operatorUserIds, publicUrl, type PracticeUpstreams } from './lib/config'
 import type { BrokerCipherState } from './ports/key-broker'
 import type { UpstreamClient } from './ports/upstream'
 import { createAccessPolicy } from './services/access'
@@ -93,6 +95,7 @@ import { createSkillUseService } from './services/skill-uses'
 import { createGroupService } from './services/groups'
 import { createServerClock } from './services/server-clock'
 import { createHoldingTicketService } from './services/holding-tickets'
+import { createPrivateHoldingService } from './services/private-holding'
 import { createReaderChangeGate } from './lib/reader-change-gate'
 import { createRestorePause } from './services/restore-pause'
 import { createSecurityAlertService } from './services/security-alerts'
@@ -210,6 +213,11 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
   // Holding tickets: whoever stops reading a private folder may hand over what they never sent (private-folders.md "Access removed").
   const holdingTickets = createHoldingTicketService({ ...repos, ...shared, readerChanges })
   const trackReaderChange = holdingTickets.track
+  // With a ticket, what their PC never sent is handed over here (private-folders.md "Holding: the member's upload").
+  const privateHolding = createPrivateHoldingService({
+    ...shared, ticketLookup: sqliteHoldingTicketLookup(conn), blobs: diskHoldingBlobStore(HOLDING_DIR), sha256: sha256Bytes,
+    yieldNow: () => new Promise<void>(resolve => setImmediate(resolve)),
+  })
   // With or without the shared company folder (owner decision 2026-11-07): what needs the repository asks.
   const companyFolders = createCompanyFolders({ companies: repos.companies, companyData: shared.companyData })
 
@@ -818,6 +826,8 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
       interruptedSends: companyId => outboundMail.settleInterrupted(companyId),
       // Holding tickets past their 30 days (private-folders.md "Access removed"): every company.
       expireHoldingTickets: companyId => holdingTickets.expire(companyId),
+      // The holding place's retention (private-folders.md "Holding: the member's upload"): every company.
+      sweepHolding: companyId => privateHolding.sweep(companyId),
       yieldNow: () => new Promise<void>(resolve => setImmediate(resolve)),
     }),
     permissionViews,
@@ -838,6 +848,8 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
       },
     }),
     permissionEditor,
+    // The holding place, the member's upload (private-folders.md "Holding: the member's upload").
+    privateHolding,
     privateFolders: createPrivateFolderService({ ...repos, ...shared, repoStore, companyLock: processCompanyLock, trackReaderChange }),
     companyFolders,
     agentEvents,

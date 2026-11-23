@@ -7,6 +7,7 @@
  *   node --import tsx src/cli/erase-content.ts record  <companyId> <recordId> <reason>
  *   node --import tsx src/cli/erase-content.ts content <companyId> <reason> <contentId>...
  *   node --import tsx src/cli/erase-content.ts expired
+ *   node --import tsx src/cli/erase-content.ts holding <companyId> <itemId> <reason>   (a held item: contents and names)
  *
  * Uses DATA_DIR as the server does. `reason` is a short word (`request`,
  * `ticket-123`): never the person's name — the request itself belongs in the
@@ -59,8 +60,24 @@ async function main(argv: string[]): Promise<number> {
     console.log(`Erased ${r.erased.length} expired content(s).`)
     return 0
   }
+  if (command === 'holding' && args.length === 3 && known(args[0])) {
+    // The holding place (private-folders.md "Holding: the member's upload"): one item's contents and names.
+    const { HOLDING_DIR } = await import('../lib/config')
+    const { diskHoldingBlobStore } = await import('../adapters/holding-blobs')
+    const { sqliteHoldingTicketLookup } = await import('../adapters/sqlite/holding')
+    const { randomIds, sha256Bytes } = await import('../adapters/system')
+    const { createPrivateHoldingService } = await import('../services/private-holding')
+    const holding = createPrivateHoldingService({
+      companyData: sqliteCompanyData(db), ticketLookup: sqliteHoldingTicketLookup(db), blobs: diskHoldingBlobStore(HOLDING_DIR),
+      transactions: sqliteTransactions(db), clock: systemClock, ids: randomIds, sha256: sha256Bytes, yieldNow: async () => undefined,
+    })
+    if (!(await holding.erase(args[0], args[1], args[2]))) { console.error('No such held item in this company.'); return 1 }
+    console.log(`erased ${args[0]} holding ${args[1]}`)
+    return 0
+  }
   console.error([
     'Usage:',
+    '  erase-content.ts holding <companyId> <itemId> <reason>   (a held item of the holding place)',
     '  erase-content.ts list    <companyId> <recordId>',
     '  erase-content.ts record  <companyId> <recordId> <reason>',
     '  erase-content.ts content <companyId> <reason> <contentId>...',

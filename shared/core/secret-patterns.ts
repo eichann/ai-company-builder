@@ -1,8 +1,10 @@
 /**
  * Secrets nobody may share (the push checker's [SECRET_DETECTED], `.claude/rules/push-check.md`
  * "Secrets"): one list for the push checker (`server/src/lib/push-check/rules.ts`, which applies
- * it to git's raw bytes — the patterns are ASCII, so bytewise and text matching agree) and the
- * server's Skill shelf (a file of a Skill, an instruction text or a rule file).
+ * it to git's raw bytes — the patterns are ASCII, so bytewise and text matching agree), the
+ * server's Skill shelf (a file of a Skill, an instruction text or a rule file) and the holding
+ * place of private folders (private-folders.md "Holding: the member's upload"), which never keeps
+ * a secret's content.
  *
  * Pure: imports nothing.
  */
@@ -21,4 +23,16 @@ export const SECRET_PATTERNS: ReadonlyArray<{ name: string; re: RegExp }> = [
 export function secretIn(text: string): string | null {
   for (const p of SECRET_PATTERNS) if (p.re.test(text)) return p.name
   return null
+}
+
+/**
+ * A settings file that holds secrets by its name: `.env` and `.env.<anything>` (A–Z folded),
+ * except the shared templates `.env.example` / `.env.sample` — the same names the company
+ * folder's `.gitignore` keeps local (client/electron/sync/git-sync.ts). `path` is '/'-separated;
+ * only its last segment counts.
+ */
+export function isSecretFileName(path: string): boolean {
+  const name = (path.split('/').pop() ?? '').replace(/[A-Z]+/g, m => m.toLowerCase())
+  if (name === '.env.example' || name === '.env.sample') return false
+  return name === '.env' || name.startsWith('.env.')
 }

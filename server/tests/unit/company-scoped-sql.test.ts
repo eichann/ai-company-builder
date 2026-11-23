@@ -69,6 +69,9 @@ const HANDLE_TABLES: Record<string, string[]> = {
   permission_history: ['adapters/sqlite/groups.ts'],
   // Who stopped reading which private folder (private-folders.md "Access removed: holding tickets").
   holding_tickets: ['adapters/sqlite/holding.ts'],
+  // What members handed over with their tickets (private-folders.md "Holding: the member's upload").
+  holding_items: ['adapters/sqlite/holding.ts'],
+  holding_files: ['adapters/sqlite/holding.ts'],
   orphaned_scopes: ['adapters/orphaned-scopes.ts'],
   // The company map (records.md). record-contents.ts: the startup move of older texts into the content store.
   record_settings: ['adapters/sqlite/records.ts', 'adapters/sqlite/record-contents.ts'],
@@ -194,7 +197,7 @@ const HANDLE_FACTORIES = [
   'sqliteSecurityAlertRepository',
   'sqliteSkillShelfRepository',
   'sqliteGroupRepository', 'sqlitePermissionHistoryRepository',
-  'sqliteHoldingTicketRepository',
+  'sqliteHoldingTicketRepository', 'sqliteHoldingItemRepository',
   'sqliteJobRepository',
   // Lanes (server.md "Lane markers"): add only right under your lane's ▼.
   // lane A ▼
@@ -227,6 +230,9 @@ const UNSCOPED: Record<string, Array<[sql: string, reason: string]>> = {
   ],
   'adapters/sqlite/google-drive.ts': [
     ['SELECT company_id FROM google_drive_pick_tickets WHERE ticket_hash = ?', BY_TOKEN],
+  ],
+  'adapters/sqlite/holding.ts': [
+    ['SELECT id, company_id FROM holding_tickets WHERE user_id = ? ORDER BY created_at DESC, id', 'a person who left the company has no membership to find it by: their own holding tickets, by their own user id, are what finds the company (control plane; private-folders.md "Holding: the member\'s upload")'],
   ],
   'adapters/sqlite/invitations.ts': [
     ['SELECT i.*, c.name as company_name FROM invitations i JOIN companies c ON i.company_id = c.id WHERE i.token = ?', BY_TOKEN],

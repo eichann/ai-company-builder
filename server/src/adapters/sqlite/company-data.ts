@@ -12,7 +12,7 @@ import { sqliteDepartmentRepository } from './departments'
 import { sqliteGoogleDriveRepository } from './google-drive'
 import { sqliteFixedPayloadRepository } from './fixed-payloads'
 import { sqliteGroupRepository, sqlitePermissionHistoryRepository } from './groups'
-import { sqliteHoldingTicketRepository } from './holding'
+import { sqliteHoldingItemRepository, sqliteHoldingTicketRepository } from './holding'
 import { sqliteInvitationRepository } from './invitations'
 import { sqliteJobRepository } from './jobs'
 import { sqliteNotificationRepository } from './notifications'
@@ -75,6 +75,7 @@ export function sqliteCompanyData(conn: Database.Database, options: { readerChan
         groups: sqliteGroupRepository(conn, companyId),
         permissionHistory: sqlitePermissionHistoryRepository(conn, companyId),
         holding: sqliteHoldingTicketRepository(conn, companyId),
+        holdingItems: sqliteHoldingItemRepository(conn, companyId),
         orphanedScopes: gitOrphanedScopeReader(conn, companyId),
         records: sqliteRecordRepository(conn, companyId),
         plugins: sqlitePluginRepository(conn, companyId),
