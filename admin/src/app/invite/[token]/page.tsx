@@ -237,8 +237,7 @@ export default function InvitePage({ params }: { params: Promise<{ token: string
                 variant="ghost"
                 size="sm"
                 onClick={async () => {
-                  await signOut()
-                  setStep('account')
+                  if (await signOut()) setStep('account')
                 }}
               >
                 別のアカウントで参加する

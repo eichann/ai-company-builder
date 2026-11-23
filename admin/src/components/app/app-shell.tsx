@@ -300,8 +300,7 @@ function UserMenu() {
         <DropdownMenuSeparator />
         <DropdownMenuItem
           onSelect={async () => {
-            await signOut()
-            router.replace('/login')
+            if (await signOut()) router.replace('/login')
           }}
         >
           <SignOut />

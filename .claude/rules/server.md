@@ -747,7 +747,9 @@ by that server at `/manual/` — so a self-hosted server shows the manual of its
   every path — `/manual`, a page, a picture, the manifest, one that names nothing — gets the same
   answer, so nothing tells which files exist: a browser opening a page (`Accept` holding
   `text/html`) → 302 to the admin console's `/login?redirect=<path>` (its `safeRedirect` takes only
-  same-origin paths; the page then opens the manual as a whole page, `admin/src/app/login/page.tsx`,
+  same-origin paths — control characters, line separators and `\` refused, raw or percent-encoded,
+  and the URL-parsed path returned, so `isManualPath` judges what will open; the page then opens
+  the manual as a whole page, `admin/src/app/login/page.tsx`,
   and says 「ログインすると使い方を見られます。」); the return path is the requested file when
   `isManualFilePath` accepts it, else `/manual/index.html` — never outside `/manual/`. Anything else
   → 401 `Unauthorized` (text). Both carry the headers below, `Cache-Control: no-store` and
