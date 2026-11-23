@@ -43,7 +43,9 @@ const createView: ApprovalView = {
   },
   precedents: { total: 0, items: [] }, materials: [],
 }
-const view = params.get('kind') === 'create' ? createView : updateView
+// `?manual=1`: the user manual's picture (manual/README.md): a fictional system name, nothing real.
+const manualView: ApprovalView = { ...updateView, pluginId: 'customer-ledger', operationLabel: '案件の金額を顧客台帳に書き戻す', systemLabel: '顧客台帳' }
+const view = params.get('kind') === 'create' ? createView : params.get('manual') === '1' ? manualView : updateView
 const names = { 'u-sato': '佐藤', 'u-abe': '山田' }
 
 function Preview() {

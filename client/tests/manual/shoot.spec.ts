@@ -105,6 +105,7 @@ function diagramPage(id: string): string {
 async function runStep(page: Page, step: SceneStep): Promise<void> {
   if ('click' in step) await (await one(page, step.click)).click()
   else if ('rightClick' in step) await (await one(page, step.rightClick)).click({ button: 'right' })
+  else if ('drag' in step) await (await one(page, step.drag)).dragTo(await one(page, step.to))
   else if ('fill' in step) await (await one(page, step.fill)).fill(step.text)
   else if ('typeAtEnd' in step) {
     await (await one(page, step.typeAtEnd)).click()
@@ -131,7 +132,7 @@ for (const scene of scenes) {
     await page.evaluate(() => document.fonts.ready)
     // Hover and focus rings belong to the pointer, not the screen being explained.
     await page.mouse.move(0, 0)
-    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur())
+    if (!scene.keepFocus) await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur())
     const clip = await clipFor(page, scene)
     await annotate(page, scene)
     expectNoPageErrors(state)

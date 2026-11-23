@@ -35,6 +35,8 @@ export type SceneStep =
   | { typeAtEnd: string; text: string }
   /** Presses a key (Playwright key name, e.g. `Escape`). */
   | { press: string }
+  /** Drags the target onto `to` (a file from the list onto the chat's input). */
+  | { drag: string; to: string }
   /** Runs a preview page's own hook (e.g. `window.__acbCompany.progress(…)`). */
   | { run: string }
   | { waitFor: string }
@@ -60,6 +62,8 @@ export interface Scene {
   /** Crop the shot to an element (plus padding in CSS pixels, default 16; `{ x, y }` for different sides) or to a region (CSS pixels) instead of the whole viewport. */
   crop?: { target: string; padding?: number | { x: number; y: number } } | { region: { x: number; y: number; width: number; height: number } }
   annotations?: SceneAnnotation[]
+  /** Keep the focus where the steps left it (a list that closes when its input loses focus). */
+  keepFocus?: true
 }
 
 // The main screen with the manual's company (skill-layout-ui.html ?manual=1: 検証A社, 山田 太郎 in
@@ -67,7 +71,7 @@ export interface Scene {
 const MAIN = { page: 'skill-layout', query: { companies: '2', manual: '1' } } as const
 // The screens before a company opens, at a size that frames their centred card.
 const SELECTOR = { page: 'company-selector', query: { manual: '1' }, viewport: { width: 760, height: 680 } } as const
-// 10章: 総務部 downloaded (閲覧のみ), 営業部/過去資料 not downloaded, the private folder 営業部/提案前メモ.
+// 15章: 総務部 downloaded (閲覧のみ), 営業部/過去資料 not downloaded, the private folder 営業部/提案前メモ.
 const MARKS = { page: 'skill-layout', query: { companies: '2', manual: '1', folders: 'marks' } } as const
 const SIGN_IN = { page: 'sign-in', viewport: { width: 760, height: 620 } } as const
 
@@ -92,6 +96,25 @@ const ADDED_LINE = '\n次回：12/1 に見積を持って再訪問'
 const LEFT_PANE = 'xpath=//*[@aria-label="ファイルツリーとエディタの境目"]/preceding-sibling::*[1]'
 const EDITOR_PANE = 'xpath=//*[@aria-label="ファイルツリーとエディタの境目"]/following-sibling::*[1]'
 const CHAT_PANE = 'xpath=//*[@aria-label="左の欄とチャットの境目"]/following-sibling::*[1]'
+// 6〜9章: 「AIへの相談」 answering what is sent with a fixed reply (skill-layout-ui.html ?chat=live),
+// starting on a new consultation with three earlier ones in the list.
+const LIVE = { page: 'skill-layout', query: { companies: '2', manual: '1', chat: 'live' } } as const
+const COMPOSER = `${CHAT_PANE} >> .cm-content[role="textbox"]`
+/** The input's frame (the text and the send button). */
+const COMPOSER_BOX = `${COMPOSER} >> xpath=ancestor::div[.//button][1]`
+const SEND = `${COMPOSER_BOX} >> button >> nth=-1`
+/** Types a request into 「AIへの相談」 and sends it (⌘Enter). */
+const ASK = (text: string): SceneStep[] => [{ typeAtEnd: COMPOSER, text }, { press: 'ControlOrMeta+Enter' }]
+const FIRST_REQUEST = '営業部の訪問メモ_1123.md を読んで、A社の田村さんへのお礼メールの下書きを 営業部/下書き/ に作ってください。'
+const THANKS_FILE = 'role=button[name=/^お礼メール_A社\\.md/]'
+/** A Skill's card in the スキル tab, by its name. */
+/** The chat pane, with room on its left for markers. */
+const CHAT_CROP = { target: CHAT_PANE, padding: { x: 32, y: 0 } }
+/** Lets a panel that slides in come to rest before its parts are measured. */
+const SETTLE: SceneStep = { run: 'new Promise(resolve => setTimeout(resolve, 600))' }
+/** Folds the editor's side panel (つながっているもの・前の版): the preview's history is not this file's. */
+const FOLD_SIDE = 'role=button[name="つながっているもの・前の版をたたむ"]'
+const SKILL_CARD = (name: string) => `xpath=//*[normalize-space()="${name}"]/ancestor::div[.//button[normalize-space()="実行"]][1]`
 
 export const scenes: Scene[] = [
   // ── The sample page (manual/pages/sample.md) ──────────────────────────────
@@ -451,7 +474,7 @@ export const scenes: Scene[] = [
     ],
   },
 
-  // ── 6章 同期ボタン ───────────────────────────────────────────────────────
+  // ── 11章 同期ボタン ──────────────────────────────────────────────────────
   {
     id: 'sync-what-happens',
     about: 'Diagram: one press sends the member’s changes and brings the others’ changes.',
@@ -486,7 +509,7 @@ export const scenes: Scene[] = [
     ],
   },
 
-  // ── 7章 送る前に確かめる ─────────────────────────────────────────────────
+  // ── 12章 送る前に確かめる ────────────────────────────────────────────────
   {
     id: 'sync-preview',
     about: '「変更を確認」: the two changes, undo, the 作業メモ and この内容で同期.',
@@ -521,7 +544,7 @@ export const scenes: Scene[] = [
     ],
   },
 
-  // ── 8章 同じファイルを二人が直したとき ───────────────────────────────────
+  // ── 13章 同じファイルを二人が直したとき ──────────────────────────────────
   {
     id: 'same-file-diagram',
     about: 'Diagram: 佐藤さん syncs first; 山田さん’s sync keeps the server’s version and saves his to the backups.',
@@ -563,7 +586,7 @@ export const scenes: Scene[] = [
     ],
   },
 
-  // ── 9章 同期が止まったとき ───────────────────────────────────────────────
+  // ── 14章 同期が止まったとき ──────────────────────────────────────────────
   {
     id: 'sync-stop-guide',
     about: 'Diagram: what each stop looks like and what to do (the Mac’s own questions included).',
@@ -609,7 +632,7 @@ export const scenes: Scene[] = [
     annotations: [{ box: SYNC_WAITS }, { note: { target: SYNC_WAITS, text: '① サーバーと同期（自動同期は止まっています）' } }],
   },
 
-  // ── 10章 フォルダの見え方 ────────────────────────────────────────────────
+  // ── 15章 フォルダの見え方 ───────────────────────────────────────────────
   {
     id: 'tree-read-only',
     about: 'The 全社 tab: 総務部 marked 閲覧のみ for 山田さん.',
@@ -674,6 +697,234 @@ export const scenes: Scene[] = [
     annotations: [
       { marker: { target: 'text=/をダウンロード済み/', label: '1', at: 'right' } },
       { marker: { target: 'text="営業部"', label: '2', at: 'left' } },
+    ],
+  },
+
+  // ── 6章 AI に頼む（はじめて） ──────────────────────────────────────────
+  {
+    id: 'chat-claude-signin',
+    about: '「AIへの相談」 before Claude is signed in: ［Claude にログインする］.',
+    page: 'chat-header',
+    query: { auth: 'none' },
+    viewport: { width: 760, height: 560 },
+    steps: [{ waitFor: 'role=button[name="Claude にログインする"]' }],
+    crop: { target: 'text=Claude へのログインが必要です >> xpath=..', padding: 24 },
+    annotations: [{ box: 'role=button[name="Claude にログインする"]' }, { marker: { target: 'role=button[name="Claude にログインする"]', label: '1', at: 'left' } }],
+  },
+  {
+    id: 'ai-request-flow',
+    about: 'Diagram: ask, the AI reads and makes files on this PC, asks with a card when needed, the member checks; sync sends.',
+    diagram: true,
+  },
+  {
+    id: 'chat-first-type',
+    about: 'The first request typed into 「AIへの相談」, before sending.',
+    ...LIVE,
+    steps: [...SALES_FILES, { typeAtEnd: COMPOSER, text: FIRST_REQUEST }],
+    crop: CHAT_CROP,
+    annotations: [
+      { box: COMPOSER_BOX }, { marker: { target: COMPOSER_BOX, label: '1' } },
+      { marker: { target: SEND, label: '2', at: 'below' } },
+    ],
+  },
+  {
+    id: 'chat-first-reply',
+    about: 'The AI read the visit notes and wrote the draft: its rows, its answer, and the new file in the list.',
+    ...LIVE,
+    steps: [...SALES_FILES, ...ASK(FIRST_REQUEST), { waitFor: 'text=/に作りました。見積を来週/' }, SETTLE],
+    annotations: [
+      { marker: { target: 'role=button[name=/^ファイルを読みました/]', label: '1', at: 'left' } },
+      { box: 'role=button[name=/^ファイルに書きました/]' }, { marker: { target: 'role=button[name=/^ファイルに書きました/]', label: '2', at: 'left' } },
+      { box: THANKS_FILE }, { marker: { target: THANKS_FILE, label: '3', at: 'right' } },
+    ],
+  },
+  {
+    id: 'chat-first-open',
+    about: 'The draft the AI made, opened from the list.',
+    ...LIVE,
+    steps: [...SALES_FILES, ...ASK(FIRST_REQUEST), { waitFor: 'text=/に作りました。見積を来週/' }, { click: THANKS_FILE }, { waitFor: 'text=本日のお打ち合わせのお礼' }, { click: FOLD_SIDE }, SETTLE],
+    annotations: [
+      { marker: { target: THANKS_FILE, label: '1', at: 'right' } },
+      { marker: { target: '.cm-line:has-text("見積を来週までにお送りいたします")', label: '2', at: 'left' } },
+    ],
+  },
+
+  // ── 7章 上手な頼み方 ───────────────────────────────────────────────────
+  {
+    id: 'good-request',
+    about: 'Diagram: a request says what, from which files, and where to put it.',
+    diagram: true,
+  },
+  {
+    id: 'chat-attach-file',
+    about: 'A file dragged from the list onto the input waits there as a chip.',
+    ...LIVE,
+    steps: [...SALES_FILES, { drag: VISIT_MEMO, to: COMPOSER }, { typeAtEnd: COMPOSER, text: 'このメモをもとに、見積で確かめることを箇条書きにしてください。' }],
+    crop: { region: { x: 860, y: 560, width: 420, height: 240 } },
+    annotations: [
+      { box: `${CHAT_PANE} >> [title$="訪問メモ_1123.md"]` }, { marker: { target: `${CHAT_PANE} >> [title$="訪問メモ_1123.md"]`, label: '1', at: 'left' } },
+    ],
+  },
+  {
+    id: 'chat-add-instruction',
+    about: 'While the AI works: an instruction added from the input joins the running reply; 停止 stops it.',
+    ...LIVE,
+    steps: [
+      ...SALES_FILES, ...ASK('訪問メモ_1123.md をもとに、A社への見積の下書きを 営業部/下書き/ に作ってください。'),
+      { waitFor: 'role=button[name=/^ファイルを読んでいます/]' },
+      ...ASK('値引きは書かないでください'),
+      { waitFor: 'text=作業中に追加した指示' },
+      SETTLE,
+    ],
+    crop: CHAT_CROP,
+    annotations: [
+      { marker: { target: 'role=button[name=/^ファイルを読んでいます/]', label: '1', at: 'left' } },
+      { box: 'text=作業中に追加した指示 >> xpath=..' }, { marker: { target: 'text=作業中に追加した指示 >> xpath=..', label: '2', at: 'left' } },
+      { box: `${CHAT_PANE} >> role=button[name="停止"]` }, { note: { target: `${CHAT_PANE} >> role=button[name="停止"]`, text: '③ 停止' } },
+    ],
+  },
+  {
+    id: 'chat-history-list',
+    about: 'The list of consultations: a new one, search, earlier ones to continue.',
+    ...LIVE,
+    steps: [{ waitFor: 'text=見積の進め方の相談' }],
+    crop: CHAT_CROP,
+    annotations: [
+      { marker: { target: 'role=button[name="AIに相談する"]', label: '1', at: 'left' } },
+      { box: 'role=textbox[name="相談を検索"]' }, { marker: { target: 'role=textbox[name="相談を検索"]', label: '2', at: 'left' } },
+      { box: 'role=button[name=/^A社へのお礼メール/]' }, { marker: { target: 'role=button[name=/^A社へのお礼メール/]', label: '3', at: 'left' } },
+    ],
+  },
+
+  // ── 8章 AI が聞いてくるカード ─────────────────────────────────────────
+  {
+    id: 'ai-cards-guide',
+    about: 'Diagram: the ways the AI stops and asks, and what the member does in each.',
+    diagram: true,
+  },
+  {
+    id: 'card-choice',
+    about: 'A choice question above the input: pick one (or その他) and 回答する.',
+    ...LIVE,
+    steps: [...SALES_FILES, ...ASK('A社へのお礼メールを、見積のお知らせも入れて書き直してください。'), { waitFor: 'text=お礼メールの宛名はどれにしますか？' }, { click: 'text=田村様 >> nth=0' }, SETTLE],
+    crop: CHAT_CROP,
+    annotations: [
+      { marker: { target: 'text=お礼メールの宛名はどれにしますか？', label: '1', at: 'left' } },
+      { marker: { target: 'text="その他"', label: '2', at: 'left' } },
+      { box: 'role=button[name="回答する"]' }, { marker: { target: 'role=button[name="回答する"]', label: '3', at: 'below' } },
+    ],
+  },
+  {
+    id: 'card-tool-approval',
+    about: 'A command the app asks about first (deleting a file): 許可 / 拒否.',
+    ...LIVE,
+    steps: [...SALES_FILES, ...ASK('下書きフォルダの古いお礼メール（お礼メール_A社_古い版.md）を消してください。'), { waitFor: 'text=ツール実行の確認' }, SETTLE],
+    crop: CHAT_CROP,
+    annotations: [
+      { marker: { target: 'text=/^rm "営業部/', label: '1', at: 'left' } },
+      { box: 'role=button[name="許可"]' }, { marker: { target: 'role=button[name="許可"]', label: '2', at: 'below' } },
+      { marker: { target: 'role=button[name="拒否"]', label: '3', at: 'below' } },
+    ],
+  },
+  {
+    id: 'card-review',
+    about: '「確認をお願いします」: the file to look at, the points, この内容で進めて / 直してほしい.',
+    ...LIVE,
+    steps: [...SALES_FILES, ...ASK('訪問メモ_1123.md をもとに、A社への提案書の骨子を 営業部/提案書/ に作ってください。できたら確認をお願いします。'), { waitFor: 'role=group[name="確認をお願いします"]' }, SETTLE],
+    crop: CHAT_CROP,
+    annotations: [
+      { marker: { target: 'role=list[name="見てほしいファイル"]', label: '1', at: 'left' } },
+      { marker: { target: 'text=特に見てほしいところ', label: '2', at: 'left' } },
+      { box: 'role=button[name="この内容で進めて"]' }, { marker: { target: 'role=button[name="この内容で進めて"]', label: '3', at: 'left' } },
+      { marker: { target: 'role=button[name="直してほしい"]', label: '4', at: 'right' } },
+    ],
+  },
+  {
+    id: 'card-approval',
+    about: '承認のお願い (only where the company uses it): the fixed content, the reason, 承認.',
+    page: 'approval-card',
+    query: { manual: '1' },
+    crop: { target: 'section', padding: { x: 32, y: 16 } },
+    annotations: [
+      { box: 'text=1,500,000' }, { marker: { target: 'text=1,500,000', label: '1', at: 'right' } },
+      { box: 'role=button[name="承認" s]' }, { marker: { target: 'role=button[name="承認" s]', label: '2', at: 'left' } },
+    ],
+  },
+  {
+    id: 'chat-write-guard',
+    about: 'The AI tried to save into 総務部 (read only for 山田さん): refused before writing, and it asks.',
+    ...LIVE,
+    query: { ...LIVE.query, folders: 'marks' },
+    steps: [...SALES_FILES, ...ASK('お礼メールの書き方のメモを、総務部のフォルダに保存してください。'), { waitFor: 'text=/保存してもよいですか/' }, SETTLE],
+    crop: CHAT_CROP,
+    annotations: [
+      { marker: { target: 'role=button[name=/^できませんでした/]', label: '1', at: 'left' } },
+      { box: 'text=/保存してもよいですか/' }, { marker: { target: 'text=/保存してもよいですか/', label: '2', at: 'left' } },
+    ],
+  },
+
+  // ── 9章 Skill を使う ──────────────────────────────────────────────────
+  {
+    id: 'skill-what',
+    about: 'Diagram: a skilled way of working becomes a Skill, sync brings it to everyone, each AI follows it.',
+    diagram: true,
+  },
+  {
+    id: 'skills-list',
+    about: 'The 全社 tab’s スキル: the company’s two Skills, each with 実行 and 設定.',
+    ...LIVE,
+    steps: [CLOSE_LIST, { click: 'role=button[name="全社" s]' }, { click: SKILLS_TAB }, { waitFor: 'text=thank-you-mail' }],
+    crop: { region: { x: 0, y: 48, width: 860, height: 560 } },
+    annotations: [
+      { marker: { target: 'role=button[name="全社" s]', label: '1', at: 'below' } },
+      { box: SKILLS_TAB }, { marker: { target: SKILLS_TAB, label: '2' } },
+      { box: SKILL_CARD('thank-you-mail') }, { marker: { target: SKILL_CARD('thank-you-mail'), label: '3' } },
+      { marker: { target: `${SKILL_CARD('thank-you-mail')} >> role=button[name="実行"]`, label: '4', at: 'below' } },
+    ],
+  },
+  {
+    id: 'skill-detail',
+    about: 'A Skill’s 設定: what it does, its SKILL.md, このSKILLを実行.',
+    ...LIVE,
+    steps: [CLOSE_LIST, { click: 'role=button[name="全社" s]' }, { click: SKILLS_TAB }, { click: `${SKILL_CARD('thank-you-mail')} >> role=button[name="設定"]` }, { waitFor: 'text=SKILL設定' }, SETTLE],
+    crop: { region: { x: 0, y: 120, width: 1050, height: 680 } },
+    annotations: [
+      { box: 'role=button[name="このSKILLを実行"]' }, { marker: { target: 'role=button[name="このSKILLを実行"]', label: '1', at: 'left' } },
+      { marker: { target: 'text="公開中"', label: '2', at: 'left' } },
+      { marker: { target: 'text="説明"', label: '3', at: 'left' } },
+      { box: 'role=button[name=/^SKILL\\.md/]' }, { marker: { target: 'role=button[name=/^SKILL\\.md/]', label: '4', at: 'left' } },
+    ],
+  },
+  {
+    id: 'skill-md-open',
+    about: 'The Skill’s SKILL.md opened in the editor: the AI’s instructions in plain words.',
+    ...LIVE,
+    steps: [CLOSE_LIST, { click: 'role=button[name="全社" s]' }, { click: SKILLS_TAB }, { click: `${SKILL_CARD('thank-you-mail')} >> role=button[name="設定"]` }, { click: 'role=button[name=/^SKILL\\.md/]' }, { waitFor: 'text=/件名は「本日のお打ち合わせのお礼」/' }, { click: FOLD_SIDE }, SETTLE],
+    crop: { region: { x: 260, y: 120, width: 600, height: 380 } },
+    annotations: [{ marker: { target: '.cm-line:has-text("1. 訪問メモを読み")', label: '1', at: 'left' } }],
+  },
+  {
+    id: 'chat-slash-skill',
+    about: '「/」 in the input lists the Skills to choose.',
+    ...LIVE,
+    steps: [...SALES_FILES, { typeAtEnd: COMPOSER, text: '/' }, { waitFor: 'text=訪問のあとのお礼メールを下書きする' }],
+    // The list closes when the input loses focus.
+    keepFocus: true,
+    crop: { region: { x: 860, y: 400, width: 420, height: 400 } },
+    annotations: [
+      { marker: { target: `${COMPOSER} >> text=/`, label: '1', at: 'left' } },
+      { box: 'role=button[name=/thank-you-mail/] >> nth=-1' }, { marker: { target: 'role=button[name=/thank-you-mail/] >> nth=-1', label: '2', at: 'left' } },
+    ],
+  },
+  {
+    id: 'chat-skill-run',
+    about: 'The Skill chosen with 「/」 and a request: the AI used the Skill, read the notes and wrote the draft.',
+    ...LIVE,
+    steps: [...SALES_FILES, ...ASK('/thank-you-mail 訪問メモ_1123.md をもとにお願いします。'), { waitFor: 'text=/の手順どおりに/' }, SETTLE],
+    crop: CHAT_CROP,
+    annotations: [
+      { marker: { target: 'text=/^\\/thank-you-mail/', label: '1', at: 'left' } },
+      { box: 'role=button[name=/^スキルを使いました/]' }, { marker: { target: 'role=button[name=/^スキルを使いました/]', label: '2', at: 'left' } },
     ],
   },
 
