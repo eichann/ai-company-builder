@@ -227,6 +227,7 @@ export default function DepartmentsPage() {
                     department={d}
                     managers={managers.data?.[d.id]}
                     managersLoading={managers.loading}
+                    managersFailed={!!managers.error}
                     editable={isAdmin}
                     isMine={managedDepartmentIds.includes(d.id)}
                     onEdit={() => {
@@ -289,7 +290,9 @@ export default function DepartmentsPage() {
             onOpenChange={(open) => !open && setManagersFor(null)}
             companyId={companyId}
             department={managersFor}
-            current={(managersFor && managers.data?.[managersFor.id]) || []}
+            current={managersFor ? managers.data?.[managersFor.id] : undefined}
+            loadError={managers.error}
+            onRetry={managers.reload}
             members={members.data ?? []}
             onSaved={(list) =>
               managersFor && managers.setData((prev) => ({ ...(prev ?? {}), [managersFor.id]: list }))
@@ -334,6 +337,7 @@ function DepartmentRow({
   department: d,
   managers,
   managersLoading,
+  managersFailed,
   editable,
   isMine,
   onEdit,
@@ -343,8 +347,10 @@ function DepartmentRow({
   onReaders,
 }: {
   department: Department
+  /** undefined = not known (loading, failed, or a department added since the last load): never "nobody". */
   managers: DepartmentManager[] | undefined
   managersLoading: boolean
+  managersFailed: boolean
   editable: boolean
   isMine: boolean
   onEdit: () => void
@@ -407,9 +413,11 @@ function DepartmentRow({
       </div>
 
       <div className="hidden min-w-0 items-center gap-2 sm:flex">
-        {managersLoading ? (
-          <span className="text-sm text-muted-foreground">…</span>
-        ) : managers && managers.length > 0 ? (
+        {managers === undefined ? (
+          <span className="text-sm text-muted-foreground">
+            {managersFailed && !managersLoading ? '管理役を読み込めませんでした' : '…'}
+          </span>
+        ) : managers.length > 0 ? (
           <Tooltip>
             <TooltipTrigger asChild>
               <span className="flex items-center gap-2 text-sm" tabIndex={0}>
@@ -442,7 +450,8 @@ function DepartmentRow({
               <PencilSimple />
               名前・表示を編集
             </DropdownMenuItem>
-            <DropdownMenuItem onSelect={onManagers}>
+            {/* Opens only on a loaded list: saving replaces it (the dialog never starts from "nobody"). */}
+            <DropdownMenuItem onSelect={onManagers} disabled={managers === undefined}>
               <UserGear />
               管理役を設定
             </DropdownMenuItem>

@@ -1155,10 +1155,15 @@ export const departmentsApi = {
   getManagers: (companyId: string, departmentId: string) =>
     getData(`${deptBase(companyId)}/${enc(departmentId)}/managers`, managersSchema),
 
-  setManagers: (companyId: string, departmentId: string, userIds: string[]) =>
+  /**
+   * Replace the managers. `expectedUserIds` is the list the admin saw: when
+   * someone changed it since, the server writes nothing and answers 409
+   * `MANAGERS_CHANGED` with today's list (`body.managers`).
+   */
+  setManagers: (companyId: string, departmentId: string, userIds: string[], expectedUserIds: string[]) =>
     getData(`${deptBase(companyId)}/${enc(departmentId)}/managers`, managersSchema, {
       method: 'PUT',
-      body: { userIds },
+      body: { userIds, expectedUserIds },
     }),
 
   /**

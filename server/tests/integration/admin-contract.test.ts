@@ -687,7 +687,7 @@ describe('the admin console\'s requests do what the admin means on the server', 
     const dept = await A.departmentsApi.create(CO, { name: '総務部', folder: '総務部', icon: 'Folder', color: '#3b82f6' })
     await A.departmentsApi.reorder(CO, [{ id: dept.id, sortOrder: 7 }])
     expect(row('SELECT sort_order FROM departments WHERE id = ?', dept.id).sort_order).toBe(7)
-    await A.departmentsApi.setManagers(CO, dept.id, [USERS.member])
+    await A.departmentsApi.setManagers(CO, dept.id, [USERS.member], [])
     expect(db.prepare('SELECT user_id FROM department_managers WHERE department_id = ?').all(dept.id)).toEqual([{ user_id: USERS.member }])
     expect((await A.departmentsApi.getManagers(CO, dept.id)).managers.map(m => m.userId)).toEqual([USERS.member])
     await A.departmentsApi.setMembers(CO, dept.id, [USERS.member, USERS.admin])

@@ -506,6 +506,16 @@ The admin console's calls are pinned by `server/tests/integration/admin-contract
   and read-restricted places"), `user`. Managers (`departments/:id/managers`) may manage their
 
   departments' private folders and instruction files, and the skill files in their departments.
+- `PUT …/departments/:id/managers` replaces the whole list, so it acts on what the admin saw
+  (2026-11-23, review R5-2): `expectedUserIds` (optional) is that list; when today's managers
+  differ from it as a set, nothing is written and 409 `MANAGERS_CHANGED` (Japanese `error`)
+  answers with today's `managers` (read and write in one synchronous stretch; checked before the
+  membership check, so a manager who left since answers 409, not 400). Absent = replace
+  as before (older admin pages, API callers). The admin's 「管理役を設定」 opens only on a loaded
+  list (the menu item is disabled while it loads or after it failed, the row says
+  「管理役を読み込めませんでした」 instead of 「管理役なし」), always sends it, and starts the form
+  again from the 409's list. Tests: `tests/integration/permission-api.test.ts`,
+  `admin/tests/managers-dialog.test.tsx` (mutation-checked).
 - 「Skill を直せる人」 (`skill_editors`, `department_id` NULL = the whole company; `ScopeRepository`,
   `departments.replaceSkillEditors`, `permissionViews.skillEditing`): who else may change skill
   files (`push-check.md`). Owner/admin keep the lists (`GET|PUT /skill-editors`, admin 「フォルダ」);
