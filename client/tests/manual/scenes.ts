@@ -421,11 +421,39 @@ export const scenes: Scene[] = [
     ],
   },
   {
-    id: 'file-rename',
+    id: 'file-rename-menu',
     about: 'Right-clicking a file: 名前を変更.',
     ...MAIN,
     steps: [...SALES_FILES, { rightClick: 'role=button[name=/^訪問メモ_1120\\.md/]' }],
     crop: { region: { x: 0, y: 100, width: 430, height: 420 } },
     annotations: [{ box: 'role=button[name=/^名前を変更/]' }, { marker: { target: 'role=button[name=/^名前を変更/]', label: '1', at: 'right' } }],
+  },
+  {
+    id: 'file-rename',
+    about: '「名前を変更」 with the new name typed and its ［名前を変更］ button.',
+    ...MAIN,
+    steps: [
+      ...SALES_FILES,
+      { rightClick: 'role=button[name=/^訪問メモ_1120\\.md/]' },
+      { click: 'role=button[name=/^名前を変更/]' },
+      { fill: 'role=dialog >> role=textbox', text: '訪問メモ_1120_B社.md' },
+    ],
+    crop: { target: 'role=dialog', padding: 40 },
+    annotations: [
+      { marker: { target: 'role=dialog >> role=textbox', label: '1' } },
+      { box: 'role=dialog >> role=button[name="名前を変更"]' }, { marker: { target: 'role=dialog >> role=button[name="名前を変更"]', label: '2', at: 'right' } },
+    ],
+  },
+
+  // ── 2章 (Google) ─────────────────────────────────────────────────────────
+  {
+    id: 'google-settings',
+    about: '設定 →「Google」 before allowing: ［Google で許可］.',
+    page: 'download-folders',
+    query: { tab: 'google', google: 'ready', manual: '1' },
+    steps: [{ waitFor: 'role=button[name="Google で許可"]' }],
+    annotations: [
+      { box: 'role=button[name="Google で許可"]' }, { marker: { target: 'role=button[name="Google で許可"]', label: '1', at: 'right' } },
+    ],
   },
 ]
