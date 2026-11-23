@@ -1,0 +1,31 @@
+<!-- The manual's chapter 4: the main window as three areas (choose a file, read and write it, ask the
+     AI) under the title bar and the department tabs. Shot by shoot.spec.ts (scenes.ts). -->
+<style>
+  body { margin: 0; background: var(--color-surface); font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Hiragino Kaku Gothic ProN", sans-serif; color: var(--color-text); }
+  #diagram { width: 960px; padding: 28px 32px 32px; box-sizing: border-box; background: var(--color-surface); }
+  .window { border: 2px solid var(--color-border-strong); border-radius: 14px; overflow: hidden; background: var(--color-bg); }
+  .bar { display: flex; align-items: center; justify-content: space-between; height: 46px; padding: 0 18px; border-bottom: 1px solid var(--color-border); background: var(--color-surface); font-size: 14px; }
+  .bar .sync { padding: 3px 12px; border-radius: 9999px; border: 2px solid var(--color-primary); color: var(--color-selected-text); font-weight: 700; }
+  .tabs { display: flex; gap: 10px; padding: 10px 18px; border-bottom: 1px solid var(--color-border); background: var(--color-surface); font-size: 14px; }
+  .tab { padding: 4px 14px; border-radius: 9999px; background: var(--color-surface-sunken); }
+  .tab.on { background: var(--color-primary); color: var(--color-on-primary); }
+  .areas { display: grid; grid-template-columns: 220px 1fr 280px; gap: 12px; padding: 14px; height: 300px; }
+  .area { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; border-radius: 12px; border: 2px solid var(--color-border-control); background: var(--color-surface); text-align: center; padding: 12px; }
+  .area .name { font-size: 18px; font-weight: 700; }
+  .area .what { font-size: 14px; color: var(--color-text-muted); line-height: 1.6; }
+  .area.files { border-color: var(--color-primary); }
+  .area.ai { border-color: var(--color-ai-border); background: var(--color-ai-bg); }
+  .area.ai .name { color: var(--color-ai-text); }
+  .small { font-size: 12px; color: var(--color-text-subtle); }
+</style>
+<div id="diagram">
+  <div class="window">
+    <div class="bar"><span>検証A社　<span class="small">（タイトルバー）</span></span><span class="sync">サーバーと同期</span></div>
+    <div class="tabs"><span class="tab">全社</span><span class="tab on">営業部</span><span class="tab">総務部</span><span class="small" style="align-self:center">← 部署のタブ</span></div>
+    <div class="areas">
+      <div class="area files"><div class="name">ファイルを<br>選ぶところ</div><div class="what">左の欄<br>（ファイル・スキル）</div></div>
+      <div class="area"><div class="name">読んだり書いたり<br>するところ</div><div class="what">選んだファイルが<br>ここに開きます</div></div>
+      <div class="area ai"><div class="name">AI に頼むところ</div><div class="what">「AIへの相談」<br>ファイルを見ながら頼めます</div></div>
+    </div>
+  </div>
+</div>

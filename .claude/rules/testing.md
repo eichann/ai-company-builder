@@ -95,7 +95,9 @@ npx vite -c tests/ui/vite.config.ts    # look at a page: http://localhost:5174/t
   scenes as data in `client/tests/manual/scenes.ts`, `pnpm manual:shoot` (its own Playwright
   config, not run in CI) writes `manual/images/*.png`. A preview page change that breaks a scene
   (a renamed control it targets) fails the shoot; re-shoot and commit the PNGs after a visual
-  change. `tests/manual-pages.test.ts` checks every picture a manual page shows exists. Data in
+  change. `tests/manual-pages.test.ts` checks every picture a manual page shows exists. `tests/manual-ui-names.test.ts`
+  checks every ［名前］ the manual cites is still a name in the app's screens (allowlist:
+  `manual/ui-names-allowlist.json`, each with a reason). Data in
   a preview page a scene uses stays fictional (no real people or companies).
 - `playwright test` starts and stops `vite preview` itself (port 4179). `UI_TEST_REUSE=1` reuses
   one you started (rebuild after changes); stop it, and any `vite -c tests/ui/vite.config.ts`,

@@ -279,6 +279,8 @@ export function FileTreePanel({
         defaultValue={ops.inputDialog.defaultValue}
         error={ops.inputDialog.error}
         placeholder={ops.inputDialog.mode === 'newFile' ? 'filename.txt' : ops.inputDialog.mode === 'newFolder' ? 'folder-name' : ''}
+        // A rename confirms with the menu item's own words (the manual names this button); creating stays 「作成」.
+        confirmText={ops.inputDialog.mode === 'rename' ? t('fileTree.rename') : '作成'}
         onConfirm={ops.confirmInput}
         onCancel={ops.cancelInput}
       />

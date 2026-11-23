@@ -7,12 +7,15 @@
 // the caret off. The annotations are an overlay added to the preview page just
 // before the shot; the app's code knows nothing about them.
 import { test, expect, type Locator, type Page } from '@playwright/test'
+import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { expectNoPageErrors, openPreview } from '../ui/helpers'
-import { scenes, type Scene } from './scenes'
+import { scenes, type Scene, type SceneStep } from './scenes'
 
-const IMAGES = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../manual/images')
+const HERE = path.dirname(fileURLToPath(import.meta.url))
+const IMAGES = path.resolve(HERE, '../../../manual/images')
+const TOKENS = path.resolve(HERE, '../../../shared/design-tokens')
 /** The clock every scene sees (relative dates such as 「3日前」 stay put). */
 const NOW = new Date('2026-11-20T10:30:00+09:00')
 
@@ -23,16 +26,18 @@ async function one(page: Page, selector: string): Promise<Locator> {
   return target
 }
 
-type Drawn = { kind: 'box' | 'marker'; x: number; y: number; width: number; height: number; label?: string; at?: string }
+type Drawn = { kind: 'box' | 'marker' | 'note'; x: number; y: number; width: number; height: number; label?: string; at?: string }
 
 async function annotate(page: Page, scene: Scene): Promise<void> {
   const drawn: Drawn[] = []
   for (const a of scene.annotations ?? []) {
-    const selector = a.box ?? a.marker?.target
+    const selector = a.box ?? a.marker?.target ?? a.note?.target
     if (!selector) continue
     const box = await (await one(page, selector)).boundingBox()
     if (!box) throw new Error(`scene ${scene.id}: ${selector} has no box`)
-    drawn.push(a.box ? { kind: 'box', ...box } : { kind: 'marker', ...box, label: a.marker!.label, at: a.marker!.at ?? 'top-left' })
+    drawn.push(a.box ? { kind: 'box', ...box }
+      : a.note ? { kind: 'note', ...box, label: a.note.text, at: String(a.note.row ?? 1) }
+        : { kind: 'marker', ...box, label: a.marker!.label, at: a.marker!.at ?? 'top-left' })
   }
   await page.evaluate((items: Drawn[]) => {
     // Manual annotation colours (not app UI, so not design tokens).
@@ -44,8 +49,17 @@ async function annotate(page: Page, scene: Scene): Promise<void> {
     for (const item of items) {
       const el = document.createElement('div')
       if (item.kind === 'box') {
+        // A frame around a whole pane stays inside the window, so all four sides show.
         const pad = 3
-        el.style.cssText = `position:absolute;left:${item.x - pad}px;top:${item.y - pad}px;width:${item.width + pad * 2}px;height:${item.height + pad * 2}px;border:3px solid ${RED};border-radius:8px;box-sizing:border-box`
+        const left = Math.max(1, item.x - pad)
+        const top = Math.max(1, item.y - pad)
+        const right = Math.min(window.innerWidth - 1, item.x + item.width + pad)
+        const bottom = Math.min(window.innerHeight - 1, item.y + item.height + pad)
+        el.style.cssText = `position:absolute;left:${left}px;top:${top}px;width:${right - left}px;height:${bottom - top}px;border:3px solid ${RED};border-radius:8px;box-sizing:border-box`
+      } else if (item.kind === 'note') {
+        // Centred under the target, kept inside the window.
+        el.textContent = item.label ?? ''
+        el.style.cssText = `position:absolute;top:${item.y + item.height + 8 + (item.at === '2' ? 28 : 0)}px;left:${item.x + item.width / 2}px;transform:translateX(-50%);white-space:nowrap;padding:2px 8px;border:2px solid ${RED};border-radius:6px;background:#fff;color:#1f1f1f;font:600 12px/18px system-ui,sans-serif;box-shadow:0 1px 4px rgba(0,0,0,.2)`
       } else {
         const midY = item.y + item.height / 2 - size / 2
         const [left, top] = item.at === 'left' ? [item.x - size - 6, midY]
@@ -64,6 +78,7 @@ async function annotate(page: Page, scene: Scene): Promise<void> {
 }
 
 async function clipFor(page: Page, scene: Scene) {
+  if (!scene.crop && scene.diagram) return clipFor(page, { ...scene, diagram: undefined, crop: { target: '#diagram', padding: 0 } })
   if (!scene.crop) return undefined
   if ('region' in scene.crop) return scene.crop.region
   const box = await (await one(page, scene.crop.target)).boundingBox()
@@ -80,16 +95,38 @@ async function clipFor(page: Page, scene: Scene) {
   }
 }
 
+/** A diagram's page: its HTML after the design tokens' stylesheets (light theme). */
+function diagramPage(id: string): string {
+  const css = ['primitives.css', 'theme.css'].map(name => fs.readFileSync(path.join(TOKENS, name), 'utf8')).join('\n')
+  const body = fs.readFileSync(path.join(HERE, 'diagrams', `${id}.html`), 'utf8')
+  return `<!doctype html><html lang="ja"><head><meta charset="utf-8"><style>${css}</style></head><body>${body}</body></html>`
+}
+
+async function runStep(page: Page, step: SceneStep): Promise<void> {
+  if ('click' in step) await (await one(page, step.click)).click()
+  else if ('rightClick' in step) await (await one(page, step.rightClick)).click({ button: 'right' })
+  else if ('fill' in step) await (await one(page, step.fill)).fill(step.text)
+  else if ('typeAtEnd' in step) {
+    await (await one(page, step.typeAtEnd)).click()
+    await page.keyboard.press('ControlOrMeta+End')
+    await page.keyboard.type(step.text)
+  } else if ('press' in step) await page.keyboard.press(step.press)
+  else if ('run' in step) await page.evaluate(step.run)
+  else await one(page, step.waitFor)
+}
+
 for (const scene of scenes) {
   test(scene.id, async ({ page }) => {
     if (scene.viewport) await page.setViewportSize(scene.viewport)
     await page.clock.setFixedTime(NOW)
-    const state = await openPreview(page, scene.page, scene.query ?? {})
-    await page.waitForLoadState('networkidle')
-    for (const step of scene.steps ?? []) {
-      if ('click' in step) await (await one(page, step.click)).click()
-      else await one(page, step.waitFor)
+    let state = { errors: [] as string[] }
+    if (scene.diagram) await page.setContent(diagramPage(scene.id))
+    else {
+      if (!scene.page) throw new Error(`scene ${scene.id}: no page`)
+      state = await openPreview(page, scene.page, scene.query ?? {})
     }
+    await page.waitForLoadState('networkidle')
+    for (const step of scene.steps ?? []) await runStep(page, step)
     await page.waitForLoadState('networkidle')
     await page.evaluate(() => document.fonts.ready)
     // Hover and focus rings belong to the pointer, not the screen being explained.

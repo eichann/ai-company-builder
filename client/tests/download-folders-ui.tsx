@@ -13,6 +13,9 @@
 //            shown allowed, turning it on is refused with WORK_SWITCH_COMPANY_OFF)
 //   mail   no = Google has not let ACB read the member's mail yet
 //   channels  none = the company has neither mail nor chat connected (no 受信を読む switch, one line instead)
+//   google ready = the company offers Google and the member has not allowed it yet (設定 →「Google」 with
+//          ［Google で許可］; the manual's picture, client/tests/manual/scenes.ts); otherwise the Google status is offline
+//   manual 1 = the user manual's company name (検証A社) instead of 株式会社デモ
 //   closed 1 = start with the settings closed: a 「設定を開く」 button (always there) opens them (Esc closes, focus returns)
 import { useState } from 'react'
 import { createRoot } from 'react-dom/client'
@@ -41,6 +44,7 @@ let repeatAskOn = true
 if (theme === 'dark') document.documentElement.classList.add('dark')
 
 const ROOT = '/Users/demo/会社'
+const COMPANY_NAME = params.get('manual') === '1' ? '検証A社' : '株式会社デモ'
 const GB = 1024 ** 3
 const MB = 1024 ** 2
 
@@ -125,8 +129,12 @@ Object.assign(window, {
     onBrowserChanged: () => () => {},
     openBrowserSite: async (_companyId: string, host: string) => { (window as unknown as { browserOpened: string[] }).browserOpened = [...((window as unknown as { browserOpened?: string[] }).browserOpened ?? []), host]; return { ok: true } },
     clearBrowserLogin: async () => (params.get('browser') === 'clearFails' ? { ok: false, message: 'ログインを消せませんでした。もう一度お試しください。' } : { ok: true }),
-    // 自分の設定 → 「Google で許可する」 opens the Google section: offline here, it says so.
-    getGoogleStatus: async () => ({ success: false, offline: true, error: 'サーバーにつながりませんでした。' }),
+    // 自分の設定 → 「Google で許可する」 opens the Google section: offline here, it says so (?google=ready: not allowed yet).
+    getGoogleStatus: async () => (params.get('google') === 'ready'
+      ? { success: true, data: { available: true, reason: null, connected: false, status: null, googleEmail: null, features: [], featuresOff: [], domain: 'kensho-a.example', practice: false, companyFeatures: ['minutes', 'mail'], seen: [] } }
+      : { success: false, offline: true, error: 'サーバーにつながりませんでした。' }),
+    // ?google=ready: the company offers no spreadsheet relay (its card stays hidden).
+    getGoogleRelay: async () => ({ success: true, data: { available: true, reason: null, services: [], stopped: null, capPerDay: 0, usedToday: 0, records: [] } }),
     getWorkSwitches: async () => ({ success: true, switches: mySwitches() }),
     // 「AI から定期の仕事を提案してもらう」: this PC's own setting (on).
     getJobRepeatAsk: async () => ({ success: true, on: repeatAskOn }),
@@ -149,7 +157,7 @@ Object.assign(window, {
     // The member's role in the company (the settings page asks it before offering the .gitignore editor).
     getCompanies: async () => {
       ;(window as unknown as { __acbRoleAnswered: boolean }).__acbRoleAnswered = true
-      return { success: true, data: [{ id: 'demo', name: '株式会社デモ', slug: 'demo', ownerId: 'u1', repoPath: null, role, createdAt: '', updatedAt: '' }] }
+      return { success: true, data: [{ id: 'demo', name: COMPANY_NAME, slug: 'demo', ownerId: 'u1', repoPath: null, role, createdAt: '', updatedAt: '' }] }
     },
     readFile: async () => '.backups/\n.env*\nnode_modules/\n',
     writeFile: async (p: string, content: string) => {
@@ -211,7 +219,7 @@ Object.assign(window, {
   },
 })
 
-useAppStore.setState({ currentCompany: { id: 'demo', name: '株式会社デモ', rootPath: ROOT, departments: [], createdAt: new Date() } })
+useAppStore.setState({ currentCompany: { id: 'demo', name: COMPANY_NAME, rootPath: ROOT, departments: [], createdAt: new Date() } })
 
 function Preview() {
   const [settingsOpen, setSettingsOpen] = useState(params.get('closed') !== '1')

@@ -12,6 +12,9 @@
 //   ?kind=none               阿部商店 has no shared company folder (folderKind none); ?working=fail main refuses its folder
 //   ?theme=dark              dark mode
 //   ?choose=c2               switched to from the title bar (appStore companyToChoose): 山田工務店 starts chosen
+//   ?manual=1                the user manual's fictional names (client/tests/manual/scenes.ts): 検証A社 and 検証B社,
+//                            山田 太郎 (a member who may not create a company unless ?create=yes), departments
+//                            営業部・総務部・企画部, folders under /Users/yamada/AI Company Builder; the other parameters still apply
 // Calls the page made are in window.__acbCompany.calls; the opened company is
 // shown under 「開いた会社」.
 import { createRoot } from 'react-dom/client'
@@ -24,6 +27,9 @@ import type { CompanyInfo, DepartmentInfo, DirectoryEntry } from '../shared/ipc-
 import { emitter, installElectronAPI } from './ui/fixtures/electron-api'
 
 const params = new URLSearchParams(location.search)
+const MANUAL = params.get('manual') === '1'
+const [FIRST, SECOND] = MANUAL ? ['検証A社', '検証B社'] : ['阿部商店', '山田工務店']
+const HOME = MANUAL ? '/Users/yamada' : '/Users/demo'
 if (params.get('theme') === 'dark') document.documentElement.classList.add('dark')
 const calls: unknown[][] = []
 const progress = emitter<{ repoPath: string; receivedBytes: number }>()
@@ -45,8 +51,8 @@ const department = (id: string, name: string, folder: string): DepartmentInfo =>
 const entry = (folder: string, name: string, isDirectory = true): DirectoryEntry => ({ name, isDirectory, path: `${folder}/${name}` })
 
 const companies = params.get('companies') === 'empty' ? []
-  : params.get('companies') === 'one' ? [company('c1', '阿部商店', 'member')]
-    : [company('c1', '阿部商店', 'owner'), company('c2', '山田工務店', 'member')]
+  : params.get('companies') === 'one' ? [company('c1', FIRST, 'member')]
+    : [company('c1', FIRST, MANUAL ? 'member' : 'owner'), company('c2', SECOND, 'member')]
 const decisions = {
   empty: { action: 'firstSetup' as const },
   clone: { action: 'existingClone' as const },
@@ -57,8 +63,9 @@ const folder = params.get('folder') ?? 'empty'
 
 useAuthStore.setState({
   user: {
-    id: 'u1', email: 'demo@example.com', name: '阿部', image: null, emailVerified: true,
-    ...(params.has('create') ? { canCreateCompany: params.get('create') === 'yes' } : {}),
+    id: 'u1', email: MANUAL ? 'yamada@example.com' : 'demo@example.com', name: MANUAL ? '山田 太郎' : '阿部', image: null, emailVerified: true,
+    // The manual's member may not create a company (operators do): no 「新しい会社を作成」.
+    ...(params.has('create') ? { canCreateCompany: params.get('create') === 'yes' } : MANUAL ? { canCreateCompany: false } : {}),
   },
   signOut: async () => { calls.push(['signOut']) },
 })
@@ -76,7 +83,7 @@ installElectronAPI({
   },
   selectDirectory: async () => {
     calls.push(['selectDirectory'])
-    return params.get('pick') === 'cancel' ? null : '/Users/demo/作業'
+    return params.get('pick') === 'cancel' ? null : MANUAL ? `${HOME}/AI Company Builder` : `${HOME}/作業`
   },
   gitInspectCompanyFolder: async (path, companyId) => {
     calls.push(['gitInspectCompanyFolder', path, companyId])
@@ -86,7 +93,9 @@ installElectronAPI({
   getDepartments: async companyId => {
     calls.push(['getDepartments', companyId])
     if (params.get('depts') === '0') return { success: true, data: [] }
-    return { success: true, data: [department('d1', '営業部', '営業部'), department('d2', '開発', 'development'), department('d3', '入れ子', '営業部/東京')] }
+    return { success: true, data: MANUAL
+      ? [department('d1', '営業部', '営業部'), department('d2', '総務部', '総務部'), department('d3', '企画部', '企画部')]
+      : [department('d1', '営業部', '営業部'), department('d2', '開発', 'development'), department('d3', '入れ子', '営業部/東京')] }
   },
   getMyDepartments: async companyId => {
     calls.push(['getMyDepartments', companyId])
@@ -95,7 +104,7 @@ installElectronAPI({
   },
   getDefaultParentFolder: async () => {
     calls.push(['getDefaultParentFolder'])
-    return { success: true, folder: '/Users/demo/AI Company Builder' }
+    return { success: true, folder: `${HOME}/AI Company Builder` }
   },
   createDirectory: async path => { calls.push(['createDirectory', path]); return true },
   openWorkingFolder: async (path, companyId) => {
