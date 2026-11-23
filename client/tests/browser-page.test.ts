@@ -124,7 +124,7 @@ const reminderPage = (body: string) => `<!doctype html><html><head><meta name="l
 <body><input type="hidden" name="_token" value="tok"><script>window.__state = { step: 777, template: 888 }</script>${body}</body></html>`
 
 test('Lステップ\'s declaration 0.6.1 declares its reads — folders, paginated lists with their exact queries, the reminder page and its steps as JSON — each reviewed, with its reader', () => {
-  const browser = createBrowserConnectors([lstep.declaration])('lstep', '0.6.2')
+  const browser = createBrowserConnectors([lstep.declaration])('lstep', '0.6.3')
   assert.ok(browser)
   assert.deepEqual(browser.explore, {
     reminder_folders: { label: 'リマインダのフォルダの一覧', path: '/api/episode-groups', placeholders: [], reader: 'lstep.reminder_folders' },

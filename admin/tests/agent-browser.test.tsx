@@ -3,11 +3,11 @@
 // that a member's override changes only that member, and that the words come from the lib.
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import AiSafetyPage from '@/app/companies/[id]/advanced/ai-safety/page'
 import AgentBrowserPage from '@/app/companies/[id]/advanced/ai-safety/browser/page'
-import { BROWSER_INTRO, BROWSER_LEVEL_LABELS, BROWSER_LOGIN_NOTE, BROWSER_MODE_LABELS, BROWSER_NOT_YET_NOTE } from '@/lib/agent-browser'
+import { BROWSER_INTRO, BROWSER_LEVEL_LABELS, BROWSER_LOGIN_NOTE, BROWSER_MODE_LABELS, BROWSER_NOT_YET_NOTE, BROWSER_PARTS_NOTE } from '@/lib/agent-browser'
 import type { AgentBrowserView, Capabilities } from '@/lib/api'
 import { base, companyRoutes, renderInCompany } from './company-harness'
 import { managerCapabilities, ok, ownerCapabilities } from './fixtures'
@@ -43,7 +43,12 @@ function stubApi(caps: Capabilities, extra: Record<string, Reply | ((call: Call)
   return calls
 }
 
+/** The free-text parts hosts are a developer setting: shown only in a console built with this flag. */
+const developerConsole = () => vi.stubEnv('NEXT_PUBLIC_ACB_BROWSER_DEVELOPER', '1')
+
 describe('ブラウザ操作', () => {
+  afterEach(() => vi.unstubAllEnvs())
+
   it('is linked from 「AI の安全」, and a member never loads the setting', async () => {
     stubApi(ownerCapabilities)
     const { unmount } = renderInCompany(<AiSafetyPage />)
@@ -66,7 +71,38 @@ describe('ブラウザ操作', () => {
     expect(screen.getByText('まだサイトはありません。')).toBeInTheDocument()
   })
 
-  it('a wildcard parts host, or the operated host as a parts host, cannot be saved', async () => {
+  it('the parts hosts are the site\'s reviewed declaration\'s: no address field, and a save keeps what an admin stored before (plan B)', async () => {
+    const stored = { host: 'manager.linestep.net', level: 'write' as const, assetHosts: ['d1nhtjid4lgi9y.cloudfront.net', 'www.google.com'] }
+    const calls = stubApi(ownerCapabilities, {
+      [`PUT ${base}/agent-browser`]: (call) => ({ body: ok({ ...view, settings: call.body }) }),
+    }, { ...view, settings: { mode: 'off', sites: [stored] } })
+    renderInCompany(<AgentBrowserPage />)
+    expect(await screen.findByText(BROWSER_PARTS_NOTE)).toBeInTheDocument()
+    expect(screen.queryByRole('textbox', { name: 'サイト 1 の画面の部品を取る先' })).toBeNull()
+    await userEvent.click(screen.getByRole('radio', { name: new RegExp(`^${BROWSER_MODE_LABELS.on}`) }))
+    await userEvent.click(screen.getByRole('button', { name: '保存' }))
+    await waitFor(() => expect(calls.some((c) => c.method === 'PUT')).toBe(true))
+    // Stored data stays as it was (a released app before plan B still reads it); the current app ignores it.
+    expect(calls.find((c) => c.method === 'PUT')!.body).toEqual({ mode: 'on', sites: [stored] })
+  })
+
+  it('what an admin wrote before is shown read only, and 「前に書いたものを消す」 clears it (an older app still loads from it)', async () => {
+    const stored = { host: 'manager.linestep.net', level: 'write' as const, assetHosts: ['www.google.com'] }
+    const calls = stubApi(ownerCapabilities, {
+      [`PUT ${base}/agent-browser`]: (call) => ({ body: ok({ ...view, settings: call.body }) }),
+    }, { ...view, settings: { mode: 'on', sites: [stored] } })
+    renderInCompany(<AgentBrowserPage />)
+    const group = await screen.findByRole('group', { name: 'サイト 1 の前に書いた部品を取る先' })
+    expect(group).toHaveTextContent('www.google.com')
+    await userEvent.click(within(group).getByRole('button', { name: '前に書いたものを消す' }))
+    expect(screen.queryByRole('group', { name: 'サイト 1 の前に書いた部品を取る先' })).toBeNull()
+    await userEvent.click(screen.getByRole('button', { name: '保存' }))
+    await waitFor(() => expect(calls.some((c) => c.method === 'PUT')).toBe(true))
+    expect(calls.find((c) => c.method === 'PUT')!.body).toEqual({ mode: 'on', sites: [{ ...stored, assetHosts: [] }] })
+  })
+
+  it('a wildcard parts host, or the operated host as a parts host, cannot be saved (the developer setting)', async () => {
+    developerConsole()
     const calls = stubApi(ownerCapabilities)
     renderInCompany(<AgentBrowserPage />)
     await userEvent.click(await screen.findByRole('button', { name: 'サイトを追加' }))
@@ -94,6 +130,7 @@ describe('ブラウザ操作', () => {
   })
 
   it('saving sends the whole setting, normalized, with the mode and level chosen', async () => {
+    developerConsole()
     const calls = stubApi(ownerCapabilities, {
       [`PUT ${base}/agent-browser`]: (call) => ({ body: ok({ ...view, settings: call.body }) }),
     })

@@ -41,7 +41,7 @@ const ACCOUNT = '5550001'
 const values = { target: { reminder: REMINDER, step: STEP }, change: { template: TO_ADD } }
 const lstep = lstepConnector()
 const declaration = createBrowserConnectors([lstep.declaration])
-const browser = declaration('lstep', '0.6.2')!
+const browser = declaration('lstep', '0.6.3')!
 const operation = browser.operations.reminder_step_add_template
 const COMBINATION = { declarationHash: `sha256:${'d'.repeat(64)}`, checkerHash: `sha256:${'c'.repeat(64)}`, factsVersion: 2 }
 const SITE_SETTING = { host: HOST, level: 'write' as const, assetHosts: ['d1nhtjid4lgi9y.cloudfront.net', 'profile.line-scdn.net'] }
@@ -207,7 +207,7 @@ async function harness(o: { site?: Partial<FakeLstep>; faults?: FakeServerFaults
   const site = fakeLstep(o.site)
   const facts = await approvedFacts(site)
   const server = fakePlansServer({
-    planId: PLAN, companyId: COMPANY, connector: { id: 'lstep', version: '0.6.2', ...COMBINATION }, operation: 'reminder_step_add_template',
+    planId: PLAN, companyId: COMPANY, connector: { id: 'lstep', version: '0.6.3', ...COMBINATION }, operation: 'reminder_step_add_template',
     account: ACCOUNT, target: values.target, change: values.change, facts: o.approved ? o.approved(facts) : facts, createdAt: Date.now() - 60_000,
   }, o.faults)
   const window = fakeWindow(site)
@@ -219,7 +219,7 @@ async function harness(o: { site?: Partial<FakeLstep>; faults?: FakeServerFaults
     aiSwitch: () => true,
     plans: server.api,
     connector: declaration,
-    combination: (id, version) => (id === 'lstep' && version === '0.6.2' ? COMBINATION : null),
+    combination: (id, version) => (id === 'lstep' && version === '0.6.3' ? COMBINATION : null),
     checker: id => checkers.get(id),
     reader: id => lstep.readers.find(r => r.id === id),
     site: () => live.policy,
@@ -607,7 +607,7 @@ test('one run per window at a time: a second plan for the same window is given b
   // The second plan, its own server, the same runner and window.
   const SECOND = 'bp_fedcba9876543210fedcba9876543210'
   const other = fakePlansServer({
-    planId: SECOND, companyId: COMPANY, connector: { id: 'lstep', version: '0.6.2', ...COMBINATION }, operation: 'reminder_step_add_template',
+    planId: SECOND, companyId: COMPANY, connector: { id: 'lstep', version: '0.6.3', ...COMBINATION }, operation: 'reminder_step_add_template',
     account: ACCOUNT, target: values.target, change: values.change, facts: await approvedFacts(second.site), createdAt: Date.now() - 60_000,
   })
   let release: () => void = () => {}

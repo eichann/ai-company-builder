@@ -48,7 +48,35 @@ export const BROWSER_LEVEL_HELP: Record<BrowserOperationLevel, string> = {
 }
 
 export const BROWSER_SITES_HELP =
-  '「操作するサイト」は AI が操作するサイトのアドレス（例: crm.example.com）です。「画面の部品を取る先」は、そのサイトの画面を表示するのに必要な部品（画像・文字の形・見た目の設定など）を読み込む先で、1行に1つ書きます。部品を取る先からは読み込むだけで、そこで何かを操作することはありません。'
+  '「操作するサイト」は AI が操作するサイトのアドレス（例: crm.example.com）です。'
+
+/**
+ * Since plan B (owner decision 2026-11-23) where a site's pages load their parts from — and what its
+ * login needs — is the site's reviewed declaration's: the admin types no address (agent-browser.md
+ * "Asset hosts").
+ */
+export const BROWSER_PARTS_NOTE =
+  '画面の表示に使う部品（画像・文字の形など）を読み込む先と、ログインの確かめに使う先は、サイトごとに用意され確かめ済みの決まりで決まります。ここで書く必要はありません。部品の読み込み先からは読み込むだけで、計測や広告の通信は止めます。'
+
+/**
+ * The company's free-text parts hosts are a developer setting (owner decision 2026-11-23: kept, not
+ * shown in the normal console). Shown only in a console built with NEXT_PUBLIC_ACB_BROWSER_DEVELOPER=1
+ * (Next inlines it at build time; the production image does not set it), and honoured only by a
+ * development build of the app started with ACB_BROWSER_DEVELOPER_ASSET_HOSTS=1.
+ */
+export function developerAssetHostsShown(): boolean {
+  return process.env.NEXT_PUBLIC_ACB_BROWSER_DEVELOPER === '1'
+}
+
+export const BROWSER_DEVELOPER_PARTS_HELP =
+  '開発用の設定です。サイトの決まりにない部品の読み込み先を、開発中のアプリでだけ足します（ふつうのアプリでは使いません）。1行に1つ書きます。'
+
+/**
+ * What an admin wrote before plan B stays stored and shown, read only, with 「前に書いたものを消す」: a
+ * current app ignores it, an app from before plan B still loads from it until it is updated.
+ */
+export const BROWSER_STORED_PARTS_NOTE =
+  '今のアプリでは使いません。更新していない古いアプリは、更新されるまでこの先からも部品を読み込みます。要らなければ消してください。'
 
 export const BROWSER_LOGIN_NOTE =
   'サイトへのログインは PC に保存されません。メンバーはアプリを起動し直すたびにログインし直します（AI が実行するコマンドからログイン情報を読まれないようにするためです）。'

@@ -101,7 +101,7 @@ function harness(site: Record<string, string | { status: number; body: string }>
     ...o.deps,
   }
   const request: BrowserPreviewRequest = {
-    companyId: 'c1', connector: { id: 'lstep', version: '0.6.2' }, operation: 'reminder_step_add_template',
+    companyId: 'c1', connector: { id: 'lstep', version: '0.6.3' }, operation: 'reminder_step_add_template',
     hints: { targetHints: { reminder: 'リマインダ' }, changeHints: { template: 'テンプレ' }, reason: '試験' }, signal: new AbortController().signal,
   }
   /** The reminders as the operator got them on the step after the list was read. */
@@ -326,7 +326,7 @@ test('later pages stay within the request\'s 4 minutes: time running out between
 })
 
 test('a read declared without pages (0.4.0\'s fixed page=1) is whole only as its only page, whatever its reader says of its own entries', async () => {
-  const old = lstep.declaration.replace('version: 0.6.2', 'version: 0.5.9')
+  const old = lstep.declaration.replace('version: 0.6.3', 'version: 0.5.9')
     .replace('        - { name: group, value: "{group}" }\n      pages: { param: page, max: 10 }', '        - { name: group, value: "{group}" }\n        - { name: page, value: "1" }')
   const h = harness(list(2), walk, { deps: { connector: createBrowserConnectors([old]) } })
   await runBrowserPreview({ ...h.request, connector: { id: 'lstep', version: '0.5.9' } }, h.deps)

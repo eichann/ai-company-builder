@@ -31,15 +31,20 @@ import {
   BROWSER_MODE_HELP,
   BROWSER_MODE_LABELS,
   BROWSER_NOT_YET_NOTE,
+  BROWSER_DEVELOPER_PARTS_HELP,
+  BROWSER_STORED_PARTS_NOTE,
+  BROWSER_PARTS_NOTE,
   BROWSER_SITES_HELP,
   BROWSER_SITE_LIMIT,
   BROWSER_TITLE,
   browserChangeLines,
+  developerAssetHostsShown,
   draftBrowserSettings,
   siteDrafts,
   siteProblems,
   type SiteDraft,
 } from '@/lib/agent-browser'
+import { linesOf } from '@/lib/agent-sandbox'
 import { useCompany } from '@/lib/company-context'
 import { describeError } from '@/lib/errors'
 import { formatDateTime } from '@/lib/format'
@@ -91,6 +96,7 @@ function SettingsForm({ saved, onSaved }: { saved: AgentBrowserView; onSaved: (n
   const [busy, setBusy] = useState(false)
 
   const problems = sites.map((s, i) => siteProblems(s, sites.slice(0, i)))
+  const developer = developerAssetHostsShown()
   const invalid = problems.some((p) => p.length > 0)
   const after = draftBrowserSettings(mode, sites)
   const lines = browserChangeLines(saved.settings, after)
@@ -141,6 +147,7 @@ function SettingsForm({ saved, onSaved }: { saved: AgentBrowserView; onSaved: (n
             サイトの一覧
           </CardTitle>
           <CardDescription>{BROWSER_SITES_HELP}</CardDescription>
+          <CardDescription>{BROWSER_PARTS_NOTE}</CardDescription>
         </CardHeader>
         <div className="space-y-4 border-t px-5 py-4">
           {sites.length === 0 && <p className="text-sm text-muted-foreground">まだサイトはありません。</p>}
@@ -176,17 +183,30 @@ function SettingsForm({ saved, onSaved }: { saved: AgentBrowserView; onSaved: (n
                     <p className="text-xs text-muted-foreground">{BROWSER_LEVEL_HELP[site.level]}</p>
                   </div>
                 </div>
-                <label className="block space-y-1 text-sm">
-                  <span className="font-medium">画面の部品を取る先（1行に1つ）</span>
-                  <Textarea
-                    aria-label={`サイト ${n} の画面の部品を取る先`}
-                    aria-invalid={problems[i].length > 0 || undefined}
-                    className="min-h-20 font-mono"
-                    placeholder="cdn.example.net"
-                    value={site.assetHosts}
-                    onChange={(e) => edit(i, { assetHosts: e.target.value })}
-                  />
-                </label>
+                {developer && (
+                  <label className="block space-y-1 text-sm">
+                    <span className="font-medium">画面の部品を取る先（開発用）</span>
+                    <Textarea
+                      aria-label={`サイト ${n} の画面の部品を取る先`}
+                      aria-invalid={problems[i].length > 0 || undefined}
+                      className="min-h-20 font-mono"
+                      placeholder="cdn.example.net"
+                      value={site.assetHosts}
+                      onChange={(e) => edit(i, { assetHosts: e.target.value })}
+                    />
+                    <span className="block text-small text-muted-foreground">{BROWSER_DEVELOPER_PARTS_HELP}</span>
+                  </label>
+                )}
+                {!developer && linesOf(site.assetHosts).length > 0 && (
+                  <div role="group" aria-label={`サイト ${n} の前に書いた部品を取る先`} className="space-y-2 rounded-control border p-3 text-body">
+                    <p className="font-medium">画面の部品を取る先（前に書いたもの）</p>
+                    <p className="font-mono">{linesOf(site.assetHosts).join('、')}</p>
+                    <p className="text-small text-muted-foreground">{BROWSER_STORED_PARTS_NOTE}</p>
+                    <Button variant="outline" size="sm" onClick={() => edit(i, { assetHosts: '' })}>
+                      前に書いたものを消す
+                    </Button>
+                  </div>
+                )}
                 {problems[i].length > 0 && (
                   <ul className="text-sm text-destructive" role="alert">
                     {problems[i].map((p) => (

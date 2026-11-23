@@ -148,7 +148,7 @@ const policy = (browser: unknown): AgentPolicy =>
   ({ version: 'v', sandbox: { mode: 'enforce', allowedDomains: [], deniedReadPaths: [], onUnavailable: 'record-only', source: 'company' }, ...(browser ? { browser } : {}) }) as AgentPolicy
 const on = (sites: BrowserSiteSetting[] = [site]) => ({ mode: 'on', sites, source: 'company' })
 
-function world(options: { clearFails?: boolean; slow?: boolean } = {}) {
+function world(options: { clearFails?: boolean; slow?: boolean; developerAssetHosts?: boolean } = {}) {
   const opened: Array<BrowserWindowSpec & { closed: boolean; site: BrowserSiteSetting }> = []
   const cleared: string[] = []
   let releaseClear: () => void = () => {}
@@ -171,7 +171,7 @@ function world(options: { clearFails?: boolean; slow?: boolean } = {}) {
     },
   }
   let user: string | null = 'user-1'
-  const browser = createBrowserController({ shell, userId: () => user, log: { warn() {} } })
+  const browser = createBrowserController({ shell, userId: () => user, developerAssetHosts: options.developerAssetHosts, log: { warn() {} } })
   return { browser, opened, cleared, setUser: (u: string | null) => { user = u }, release: () => releaseClear() }
 }
 
@@ -181,7 +181,8 @@ test('a run finds only the signed-in member\'s open window of a site their curre
   assert.equal(w.browser.runWindow('c1', site.host), null, 'not opened yet: the member opens it and logs in first')
   w.browser.open('c1', site.host)
   assert.ok(w.browser.runWindow('c1', site.host))
-  assert.deepEqual(w.browser.siteNow('c1', site.host), site)
+  // The company's free-text asset hosts are not the window's (agent-browser.md "Asset hosts").
+  assert.deepEqual(w.browser.siteNow('c1', site.host), { ...site, assetHosts: [] })
   w.browser.policyAnswered('c2', policy(on()))
   assert.equal(w.browser.runWindow('c2', site.host), null, 'another company\'s window of the same site')
   w.setUser('user-2')
@@ -252,11 +253,11 @@ test('a site removed or the mode turned off closes its window and clears its log
   assert.deepEqual(w.cleared, [w.opened[0].partition, w.opened[1].partition])
 })
 
-test('a changed site (its asset hosts) reaches the open window at once', () => {
-  const w = world()
+test('a changed site (its level, a development build\'s asset hosts) reaches the open window at once', () => {
+  const w = world({ developerAssetHosts: true })
   w.browser.policyAnswered('c1', policy(on()))
   w.browser.open('c1', site.host)
-  const next = { ...site, assetHosts: ['cdn2.example.net'] }
+  const next = { ...site, level: 'read' as const, assetHosts: ['cdn2.example.net'] }
   w.browser.policyAnswered('c1', policy(on([next])))
   assert.deepEqual(w.opened[0].site, next)
   assert.equal(w.opened[0].closed, false)

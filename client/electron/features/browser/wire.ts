@@ -7,7 +7,7 @@
 import path from 'node:path'
 import type { IpcInvokeEvent, IpcMessageEvent, IpcRegistrar } from '../../ipc/registrar'
 import type { BrowserSiteSetting } from '../../../../shared/core/browser-operation'
-import { browserLoginHelpers, createBrowserCheckerRegistry, createBrowserConnectors, parseBrowserDeclaration } from '../../../shared/browser-checkers'
+import { browserAssetHosts, browserLoginHelpers, createBrowserCheckerRegistry, createBrowserConnectors, parseBrowserDeclaration } from '../../../shared/browser-checkers'
 import type { BrowserLoginHelper } from '../../../../shared/core/plugin-browser-declaration'
 import { stoppedBeforeSending, type BrowserChecker, type BrowserPreviewReader, type BrowserPreviewSurface, type BrowserRunSurface } from '../../../shared/browser-runner'
 import approved from '../../../../shared/browser-connectors/approved.json'
@@ -55,6 +55,14 @@ export interface BrowserPlansWireDeps<E> {
  */
 export function bundledLoginHelpers(declarations: readonly string[]): (host: string) => readonly BrowserLoginHelper[] {
   return browserLoginHelpers(approvedBundledDeclarations(approved, carried, declarations))
+}
+
+/**
+ * The asset hosts the window uses for a site's host: those of the same approved, carried bundled
+ * declarations (agent-browser.md "Asset hosts"; the company's free-text list is a developer setting).
+ */
+export function bundledAssetHosts(declarations: readonly string[]): (host: string) => readonly string[] {
+  return browserAssetHosts(approvedBundledDeclarations(approved, carried, declarations))
 }
 
 export function wireBrowserPlans<E extends IpcInvokeEvent>(ipc: IpcRegistrar<E, IpcMessageEvent>, deps: BrowserPlansWireDeps<E>) {

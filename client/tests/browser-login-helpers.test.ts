@@ -201,7 +201,7 @@ test('while the AI operates the window refuses every request of a frame its writ
 })
 
 test('Lステップ\'s declaration lists Google\'s reCAPTCHA as its only login helpers, under /recaptcha/, framed and posted to on www.google.com only', () => {
-  const browser = createBrowserConnectors([LSTEP_DECLARATION])('lstep', '0.6.2')
+  const browser = createBrowserConnectors([LSTEP_DECLARATION])('lstep', '0.6.3')
   assert.ok(browser)
   assert.deepEqual(browser.loginHelpers, [
     { host: 'www.google.com', pathPrefix: '/recaptcha/', frame: true, post: true },
@@ -218,12 +218,12 @@ test('Lステップ\'s declaration lists Google\'s reCAPTCHA as its only login h
 
 test('helpers come only from a declaration this build carries and the approved list approves, the same text and checker: pending, retired, another text or two rows lend none', () => {
   const rows = (approvedFile as { combinations: Array<Record<string, unknown>> }).combinations
-  const own = { ...rows.find(r => r.connector === 'lstep' && r.version === '0.6.2')!, status: 'approved' }
+  const own = { ...rows.find(r => r.connector === 'lstep' && r.version === '0.6.3')!, status: 'approved' }
   const withRow = (row: Record<string, unknown> | null, extra: Array<Record<string, unknown>> = []) =>
     approvedBundledDeclarations({ format: 1, combinations: [...(row ? [row] : []), ...extra] }, carriedFile, [LSTEP_DECLARATION])
   assert.deepEqual(withRow(own), [LSTEP_DECLARATION])
   // As the app composes it, with this build's own list: helpers exactly when its row is approved.
-  const shipped = rows.find(r => r.connector === 'lstep' && r.version === '0.6.2')!.status
+  const shipped = rows.find(r => r.connector === 'lstep' && r.version === '0.6.3')!.status
   assert.equal(bundledLoginHelpers([LSTEP_DECLARATION])('manager.linestep.net').length, shipped === 'approved' ? 2 : 0)
   assert.deepEqual(withRow({ ...own, status: 'pending' }), [])
   assert.deepEqual(withRow({ ...own, status: 'retired' }), [])

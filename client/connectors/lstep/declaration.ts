@@ -74,6 +74,15 @@
  * in (never while the AI operates); the frame and its POSTs only on `www.google.com`. The other hosts the
  * page asks for (tag manager, error and chat services, web fonts) are not needed to log in and stay
  * refused. Nothing else changes.
+ *
+ * 0.6.3 makes the declaration the one place for the hosts the pages load parts from (plan B's second
+ * step, owner decision 2026-11-23: the company no longer types them; agent-browser.md "Asset hosts").
+ * The real run (6c, 2026-11-23) showed the page also needs Google's web fonts for its icons — without
+ * them the icons show as words such as `chevron_right` —, so `asset_hosts` adds `fonts.googleapis.com`
+ * (the stylesheet) and `fonts.gstatic.com` (the font files) beside the CloudFront and LINE profile image
+ * hosts: GET / HEAD of scripts, styles, fonts and images only, in both modes, never a frame, a fetch or a
+ * write. Tag manager, error, monitoring and chat services (googletagmanager, bugsnag, datadog, chatplus)
+ * stay refused. The login helpers and everything else are unchanged.
  */
 import { LSTEP_REMINDER_FOLDERS_READER, LSTEP_REMINDERS_READER, LSTEP_TEMPLATE_FOLDERS_READER, LSTEP_TEMPLATES_READER } from './list-readers'
 import { LSTEP_REMINDER_SCHEDULE_READER, LSTEP_STEP_TIMING_READER } from './reminder-schedule'
@@ -81,12 +90,12 @@ import { LSTEP_REMINDER_STEP_CHECKER } from './reminder-step'
 import { LSTEP_REMINDER_STEPS_READER } from './reminder-steps-reader'
 
 export const LSTEP_DECLARATION = `id: lstep
-version: 0.6.2
+version: 0.6.3
 label: Lステップ
 contract: 1
 browser:
   host: manager.linestep.net
-  asset_hosts: [d1nhtjid4lgi9y.cloudfront.net, profile.line-scdn.net]
+  asset_hosts: [d1nhtjid4lgi9y.cloudfront.net, profile.line-scdn.net, fonts.googleapis.com, fonts.gstatic.com]
   login_helpers:
     - { host: www.google.com, path_prefix: "/recaptcha/", frame: true, post: true }
     - { host: www.gstatic.com, path_prefix: "/recaptcha/" }

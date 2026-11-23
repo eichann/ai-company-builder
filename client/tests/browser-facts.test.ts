@@ -19,7 +19,7 @@ import { browserFactsChangedProblem, browserFactsProblem, type BrowserFact } fro
 import { browserFirstVersionProblem, expectedAfter } from '../../shared/core/plugin-browser-declaration'
 
 const lstep = lstepConnector()
-const browser = createBrowserConnectors([lstep.declaration])('lstep', '0.6.2')!
+const browser = createBrowserConnectors([lstep.declaration])('lstep', '0.6.3')!
 const operation = browser.operations.reminder_step_add_template
 const checker = lstep.checkers[0]
 

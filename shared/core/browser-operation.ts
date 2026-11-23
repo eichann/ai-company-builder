@@ -28,7 +28,13 @@ export interface BrowserSiteSetting {
   /** The host the AI operates (exact, no `*.`): the only host requests may change things on. */
   host: string
   level: BrowserOperationLevel
-  /** Hosts the pages load parts from (exact): GET of scripts, styles, fonts and images only. */
+  /**
+   * Extra hosts the pages load parts from (exact): GET of scripts, styles, fonts and images only.
+   * Since plan B (owner decision 2026-11-23) a site's asset hosts are its reviewed declaration's; this
+   * free-text list is a **developer setting**, kept and stored as before but hidden in the admin console
+   * and honoured only by a development build of the app that asks for it (agent-browser.md "Asset
+   * hosts"). A released app before plan B still reads it.
+   */
   assetHosts: string[]
 }
 
