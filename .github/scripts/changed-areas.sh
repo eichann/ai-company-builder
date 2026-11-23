@@ -57,10 +57,11 @@ SYNC=(
 )
 # Client node tests on Linux (most of client/tests/*.test.ts and the colocated
 # renderer tests). They import server/src/lib (git-server, push-check rules)
-# and admin/src/lib/folder-name.ts; manual-pages.test.ts reads manual/.
+# and admin/src/lib/folder-name.ts; manual-pages.test.ts reads manual/, manual-ui-names.test.ts
+# also the invitation page (admin/src/app/invite/) for the button names the manual cites.
 CLIENT=(
   client/ shared/ server/src/lib/ server/package.json admin/src/lib/
-  manual/
+  manual/ admin/src/app/invite/
   .github/scripts/client-tests.mjs
 )
 # Client tests that stay on macOS (.github/scripts/client-tests.mjs, list
