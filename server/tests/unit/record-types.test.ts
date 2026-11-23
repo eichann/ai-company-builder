@@ -21,12 +21,17 @@
  *   interface is;
  * - `money: true` only on a server number field, never set by an action
  *   (money is written only through an approval request), and removing it is
- *   a breaking change.
+ *   a breaking change;
+ * - `place_follows` names a record link of the type with cardinality one (not
+ *   a file, many or origin link) on a server type; it is absent from the
+ *   definition when not written; removing it or naming another link is
+ *   breaking, also for a company's extension of a plugin type.
  */
 import { describe, expect, it } from 'vitest'
 import { parseYamlLite } from '../../../shared/core/yaml-lite'
-import { compareTypeDefinitions, normalizeTagsValue, parseTagsValue, parseTypeFile, TAG_MAX_LENGTH, TAGS_MAX_COUNT, type TypeDefinition } from '../../../shared/core/record-types'
+import { canonicalTypeJson, compareTypeDefinitions, normalizeTagsValue, parseTagsValue, parseTypeFile, TAG_MAX_LENGTH, TAGS_MAX_COUNT, type TypeDefinition } from '../../../shared/core/record-types'
 import { newRecordId, parseRecordFile } from '../../../shared/core/records'
+import { companyExtensionConflicts } from '../../../shared/core/plugin-type-upgrade'
 
 const TASK = `---
 label: タスク
@@ -337,5 +342,73 @@ describe('where an action may be called from (via, plan 4b §5-13)', () => {
     const r = result('finish: { label: 終える, to: done, who: [owner], approval: prior, via: [screen, plugin] }')
     expect(r.ok ? '' : r.errors.join('\n')).toMatch(/via に plugin は書けません/)
     expect(result('finish: { label: 終える, to: done, who: [owner], approval: prior, via: [screen, run] }').ok).toBe(true)
+  })
+})
+
+describe('a record that follows its parent’s 見える範囲 (place_follows, step 2a: declaration only)', () => {
+  // A 収録 under a 番組: its link to the 番組 decides who may see it (the engine reads it from step 2b on).
+  const recording = (placeFollows: string | null, { version = 1, storage = 'server', links = '' } = {}) => `---
+label: 収録
+version: ${version}
+storage: ${storage}
+fields:
+  owner: { label: 担当, kind: person, source: server }
+links:
+  program:  { label: 番組, target: program, cardinality: one }
+  bundle:   { label: まとまり, interface: bundle, cardinality: one }
+  guests:   { label: ゲスト, target: guest, cardinality: many }
+  files:    { label: 資料, target: file, cardinality: one }
+  meeting:  { label: もとの会議, target: meeting, cardinality: one, origin: true }
+${links}states: [open, done]
+${placeFollows === null ? '' : `place_follows: ${placeFollows}\n`}---
+`
+  const parsed = (text: string) => {
+    const r = parseTypeFile('recording', text)
+    if (!r.ok) throw new Error(r.errors.join('\n'))
+    return r.definition
+  }
+  const errorsOf = (text: string) => { const r = parseTypeFile('recording', text); return r.ok ? '' : r.errors.join('\n') }
+
+  it('names a record link of this type with cardinality one: to a type or to an interface', () => {
+    expect(parsed(recording('program')).placeFollows).toBe('program')
+    expect(parsed(recording('bundle')).placeFollows).toBe('bundle')
+  })
+
+  it('a many link, a file link, an origin link or a name that is no link is refused, with a sentence for the type’s author', () => {
+    expect(errorsOf(recording('guests'))).toMatch(/place_follows の「guests」は cardinality: one のつながりにしてください/)
+    expect(errorsOf(recording('files'))).toMatch(/place_follows の「files」はファイルへのつながりです/)
+    expect(errorsOf(recording('meeting'))).toMatch(/place_follows の「meeting」は出どころ（origin: true）のつながりです/)
+    expect(errorsOf(recording('sponsor'))).toMatch(/place_follows の「sponsor」という つながり がありません/)
+    expect(errorsOf(recording('[program]'))).toMatch(/place_follows には、見える範囲をそろえる相手のつながりの名前を書いてください/)
+  })
+
+  it('only on a type kept on the server (a file record’s place is its file’s)', () => {
+    expect(errorsOf(recording('program', { storage: 'file' }))).toMatch(/place_follows は storage: server か either の型だけ/)
+    expect(parsed(recording('program', { storage: 'either' })).placeFollows).toBe('program')
+  })
+
+  it('left out of the definition when not written, so the stored JSON of every other type stays the same', () => {
+    const plain = parsed(recording(null))
+    expect(plain).not.toHaveProperty('placeFollows')
+    expect(canonicalTypeJson(plain)).not.toContain('placeFollows')
+    expect(parsed(recording('null'))).not.toHaveProperty('placeFollows')
+  })
+
+  it('adding it needs a higher version and is not breaking; removing it or naming another link is breaking', () => {
+    const plain = parsed(recording(null))
+    const follows = parsed(recording('program', { version: 2 }))
+    expect(compareTypeDefinitions(plain, follows)).toMatchObject({ changed: true, breaking: [], versionProblem: null })
+    expect(compareTypeDefinitions(plain, { ...follows, version: 1 }).versionProblem).toMatch(/version を上げてください/)
+    expect(compareTypeDefinitions(follows, { ...plain, version: 3 }).breaking).toEqual(['見える範囲をそろえる相手（place_follows: program）をやめる'])
+    expect(compareTypeDefinitions(follows, parsed(recording('bundle', { version: 3 }))).breaking)
+      .toEqual(['見える範囲をそろえる相手（place_follows）を「program」から「bundle」に変える'])
+    expect(compareTypeDefinitions(follows, parsed(recording('program', { version: 3, links: '  sponsor: { label: スポンサー, target: sponsor, cardinality: many }\n' }))).breaking).toEqual([])
+  })
+
+  it('a company’s extension of a plugin type that drops it conflicts with the plugin’s new version', () => {
+    const pluginNew = parsed(recording('program', { version: 2 }))
+    const company = parsed(recording(null, { version: 5 }))
+    expect(companyExtensionConflicts(company, pluginNew).join('\n')).toMatch(/place_follows: program）をやめる/)
+    expect(companyExtensionConflicts(parsed(recording('program', { version: 5 })), pluginNew)).toEqual([])
   })
 })

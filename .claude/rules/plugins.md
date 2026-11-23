@@ -341,7 +341,9 @@ answer.
 definition in force is the company's (`record_types.source = 'file'`); it compares them with
 `companyExtensionConflicts` (`shared/core/plugin-type-upgrade.ts`): the company's version no longer
 higher, or the company's definition lacking / changing something the new plugin type has
-(`compareTypeDefinitions` breaking, field / link / state / action / shared type / storage). Installing
+(`compareTypeDefinitions` breaking, field / link / state / action / shared type / storage, and a
+`place_follows` the new plugin type has that the company's drops or points elsewhere — `records.md`
+"Following the parent's 見える範囲"; a declaration only until step 2b). Installing
 another version while on, or turning on, with a conflict → 409 `TYPE_EXTENSION_CONFLICT` +
 `conflicts` (Japanese sentences naming the type), nothing changed; the company (div's FDE) updates
 its `.acb/types/<name>.md` first. The import's `storeBusinessTypes` skips such a type the same way.

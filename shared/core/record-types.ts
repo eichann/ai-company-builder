@@ -270,6 +270,18 @@ export interface TypeDefinition {
    * become work). Absent = none (so stored definitions compare equal). `noTurnStates`.
    */
   proposalStates?: string[]
+  /**
+   * YAML `place_follows: <link name>` (owner decision 2026-11-23, step 2a): a record of this type
+   * belongs to the record that link points to, and its 見える範囲 follows that parent's — copied
+   * when it is made, never wider than the parent. Names a record link of this type with
+   * cardinality `one` that is not an origin link (interface or type target); the type is stored on
+   * the server (not `storage: file`). Removing it or naming another link is breaking
+   * (`compareTypeDefinitions`): what is made next would no longer be held to its parent.
+   * **Declaration only for now**: the engine does not read it yet (step 2b moves `task` onto it
+   * and replaces `BUNDLE_PLACED_TYPES`). Absent = none (left out of the definition then, so
+   * stored definitions of other types compare equal).
+   */
+  placeFollows?: string
   actions: Record<string, ActionDef>
 }
 
@@ -464,7 +476,7 @@ export function validateTypeDefinition(name: string, raw: YamlValue): TypeParseR
   const err = (m: string) => { if (errors.length < 50) errors.push(m) }
   if (!ONTOLOGY_NAME_RE.test(name)) err(`型の名前「${name}」は英小文字・数字・_ で書いてください`)
   if (!isYamlMap(raw)) return { ok: false, errors: ['定義は「項目名: 値」の形で書いてください'] }
-  const known = new Set(['label', 'version', 'implements', 'storage', 'fields', 'links', 'states', 'initial', 'final', 'create_states', 'proposal_states', 'actions', 'description'])
+  const known = new Set(['label', 'version', 'implements', 'storage', 'fields', 'links', 'states', 'initial', 'final', 'create_states', 'proposal_states', 'place_follows', 'actions', 'description'])
   for (const k of Object.keys(raw)) if (!known.has(k)) err(`知らない項目「${k}」があります`)
 
   if (!isStr(raw.label)) err('label（画面に出す名前）を書いてください')
@@ -545,6 +557,19 @@ export function validateTypeDefinition(name: string, raw: YamlValue): TypeParseR
         ...(l.origin === true ? { origin: true as const } : {}),
       }
     }
+  }
+
+  let placeFollows: string | undefined
+  if (raw.place_follows !== undefined && raw.place_follows !== null) {
+    const pf = raw.place_follows
+    const link = typeof pf === 'string' && Object.prototype.hasOwnProperty.call(links, pf) ? links[pf] : undefined
+    if (typeof pf !== 'string' || !ONTOLOGY_NAME_RE.test(pf)) err('place_follows には、見える範囲をそろえる相手のつながりの名前を書いてください')
+    else if (!link) err(`place_follows の「${pf}」という つながり がありません（links に書いたつながりの名前を書いてください）`)
+    else if (link.target === 'file') err(`place_follows の「${pf}」はファイルへのつながりです。記録へのつながり（cardinality: one）を書いてください`)
+    else if (link.cardinality !== 'one') err(`place_follows の「${pf}」は cardinality: one のつながりにしてください（相手が1つに決まらないと、見える範囲をそろえられません）`)
+    else if (link.origin) err(`place_follows の「${pf}」は出どころ（origin: true）のつながりです。所属する相手へのつながりを書いてください`)
+    else if (storage === 'file') err('place_follows は storage: server か either の型だけに書けます（ファイルの記録の見える範囲は、ファイルの置き場所で決まります）')
+    else placeFollows = pf
   }
 
   const statesRaw = list(raw.states)
@@ -753,6 +778,7 @@ export function validateTypeDefinition(name: string, raw: YamlValue): TypeParseR
       final,
       ...(createStates ? { createStates } : {}),
       ...(proposalStates ? { proposalStates } : {}),
+      ...(placeFollows ? { placeFollows } : {}),
       actions,
     },
   }
@@ -796,6 +822,11 @@ export function compareTypeDefinitions(prev: TypeDefinition, next: TypeDefinitio
   for (const a of Object.keys(prev.actions)) if (!(a in next.actions)) breaking.push(`操作「${a}」を消す（名前を変える）`)
   for (const i of prev.implements) if (!next.implements.includes(i)) breaking.push(`共通の型「${i}」をやめる`)
   if (prev.storage !== next.storage) breaking.push('記録の置き場所（storage）を変える')
+  // Adding it only narrows what is made next (a version bump, like any change); dropping it or
+  // pointing it at another link would let what is made next be wider than its parent.
+  if (prev.placeFollows && prev.placeFollows !== next.placeFollows) {
+    breaking.push(next.placeFollows ? `見える範囲をそろえる相手（place_follows）を「${prev.placeFollows}」から「${next.placeFollows}」に変える` : `見える範囲をそろえる相手（place_follows: ${prev.placeFollows}）をやめる`)
+  }
 
   const strip = (d: TypeDefinition) => canonicalTypeJson({ ...d, version: 0 })
   const changed = strip(prev) !== strip(next)

@@ -12,7 +12,8 @@
  * A conflict is: the company's version is no longer higher than the plugin's
  * new one, or the company's definition lacks / changes the meaning of
  * something the plugin's new definition has (a field, link, state, action,
- * shared type or the storage) — the same comparison the index applies to a
+ * shared type, the storage or the parent it follows, `place_follows`) — the
+ * same comparison the index applies to a
  * company's own type change (`compareTypeDefinitions`).
  */
 import { compareTypeDefinitions, type TypeDefinition } from './record-types'
