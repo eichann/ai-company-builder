@@ -99,7 +99,7 @@ src/cli/           operator commands (generate-broker-kek.ts, company-archive.ts
   `/api/auth/**` rows and the Docker smoke test's sign-up fail when this happens.
 - Cross-company axis (same file, `CROSS`): every route whose URL takes an object id (department,
   rule, scope, private folder incl. its git routes, member, sandbox override, emergency stop,
-  key, relay service, token, invitation) is called by this company's owner with ANOTHER
+  key, relay service, token, invitation; the holding place's ticket and item, whose URL has no company) is called by this company's owner with ANOTHER
   company's object in this company's URL; the status and body must equal those for an id that
   exists nowhere, and every row of the other company (all tables with `company_id`) and its
   private folder's repository must be unchanged afterwards. A route with an object parameter
@@ -196,7 +196,8 @@ construction, not by remembering a check (owner plan 0.13–0.14).
   occurrences, the stop switch; `adapters/sqlite/jobs.ts`, `jobs.md`) and `securityAlerts` (「気になる動き」: alerts, their Slack setting,
   members' hourly download counts, the rules' read-only queries; `security-alerts.md`) and
   `skillShelf` (the Skill shelf of a company without the shared folder: items, versions, history, requests to publish;
-  `plugins.md` "The Skill shelf").
+  `plugins.md` "The Skill shelf") and `holding` / `holdingItems` (holding tickets, and what members handed over with
+  them: items and their files; `adapters/sqlite/holding.ts`, `private-folders.md` "Access removed", "Holding: the member's upload").
   Every company table has `company_id`, and handle statements filter by it directly. New tables
   (stage 4: types, company map, state engine…) are created behind the handle from the start,
   with `company_id`.
@@ -229,7 +230,9 @@ construction, not by remembering a check (owner plan 0.13–0.14).
   that find the company — a browser execution by its secret's hash (`BrowserExecutionLookup`, the
   report: `agent-browser.md`), an invitation by token (`InvitationTokenLookup`:
   `findByToken`, `claimForSignup`, which returns the company; everything after uses that
-  company's handle) and a key-broker token by hash. A Google Picker pick ticket is found the same way, by its
+  company's handle) and a key-broker token by hash. A member's holding tickets are found by their own user id across companies
+  (`HoldingTicketLookup`: a person who left the company has no membership to find it by; `private-folders.md` "Holding:
+  the member's upload"). A Google Picker pick ticket is found the same way, by its
   sha256 (`sqlitePickTicketDirectory`, `google-drive.md`). The OAuth `state` names its company and is
   looked up only inside it by the sha256 of the whole value (`member-oauth.md`).
 - Do not add a repository method that reads or writes a company's rows without its company
@@ -238,7 +241,7 @@ construction, not by remembering a check (owner plan 0.13–0.14).
   statement touches a company-owned table without a bound company (`company_id = ?` /
   `company_id IN (…)`, also in a subquery; a join such as `i.company_id = c.id` does not count;
   an INSERT names `company_id`), unless listed in `UNSCOPED` with a lasting reason: invitation /
-  broker token lookups that find the company, the operator's KEK re-wrap, retention's list of
+  broker token lookups that find the company (and a member's holding tickets by their own user id), the operator's KEK re-wrap, retention's list of
   companies, server-wide cleanup of expired broker tokens and old usage counters, the startup
   backfill of rows from before `company_id` (only `company_id IS NULL` rows), WHERE built by a
   helper starting with `company_id = ?`. The list only shrinks. It also checks that every table
@@ -257,6 +260,10 @@ GET  /api/config                                  setup state (no auth)
 *    /api/auth/**                                 Better Auth; sign-up after the first user
                                                   needs X-Invitation-Token
 /api/me                       GET                 me.ts (no PATCH: it never saved)
+/api/me/holding               GET /tickets, POST /tickets/:ticketId/items, PUT /items/:itemId/blobs/:sha256,
+                              POST /items/:itemId/finish — signed in, no membership: a member hands over
+                              what their PC never sent with their own holding ticket
+                              (private-folders.md "Holding: the member's upload")   private-holding.ts
 /api/companies                GET /, GET /:companyId, POST /, PATCH /:companyId,
                               GET /:companyId/members, POST /:companyId/members,
                               PUT /:companyId/members/:userId/role, DELETE /:companyId/members/:userId,
@@ -703,7 +710,8 @@ restriction there stays private folders; groups cannot be named in their rules).
   (`private-folder-create`: `scopeId`, `path`, `after` = its first viewers and editors; owners /
   admins are implicit, as in `private-folder-members`), and holding tickets opened or cancelled
   when someone stops / starts reading a private folder again (`holding-ticket`,
-  `holding-ticket-cancel`: `private-folders.md` "Access removed"). No endpoint reads it yet.
+  `holding-ticket-cancel`: `private-folders.md` "Access removed"). The holding place adds `holding-received`, `holding-expired`, `holding-erased` (`private-folders.md` "Holding: the
+  member's upload"). No endpoint reads it yet.
 - Tests: `tests/unit/permissions-groups.test.ts`, `tests/integration/restricted-places.test.ts`
   (each guard mutation-checked; 所属 history, a department deleted), `private-folders.test.ts` (a
   folder's creation), `company-without-folder.test.ts`, `plugin-steps.test.ts` (the note),
@@ -900,7 +908,8 @@ Started once per process by `index.ts` (never by `composition.ts`, which tests i
 unref'd: the AI action log's retention (daily), outbound mail bodies' retention (daily) and the
 **server clock** (`services/server-clock.ts`, every 5 minutes; `notifications.md` "The server
 clock"; it also runs 「気になる動き」's sweep, `security-alerts.md`, and makes scheduled jobs' occurrences, then
-starts their runner without awaiting it, `jobs.md` "The clock"; and settles sends / Drive puts a stopped process left
+starts their runner without awaiting it, `jobs.md` "The clock"; closes holding tickets and keeps the holding place's
+retention, `private-folders.md`; and settles sends / Drive puts a stopped process left
 `sending`: `outbound-mail.md` "A send left half-done", `google-drive.md` "A put left half-done"),
 and the `[load]` line (every minute, "Request log"; it only reads counters). A new time-based job goes into the server clock rather than a timer of its own, and
 keeps its rules: never runs the AI, writes records only through the engine's writers, takes
@@ -922,7 +931,7 @@ changes nothing more).
   (`migrateRecordContents`); tests import every migration from `src/db`.
 - Paths: `lib/config.ts` is the one place reading `DATA_DIR` (default `<cwd>/data`), `REPOS_DIR`
   (`<DATA_DIR>/repos`), the key broker's `BROKER_KEK_FILE` (outside `DATA_DIR`,
-  `key-broker.md`), the plugin shelf's `PLUGINS_DIR` (outside `DATA_DIR`, `plugins.md`), `COMPANY_CREATION_POLICY` and `OPERATOR_USER_IDS` (read per call). `<DATA_DIR>/workdirs` (the old working clones) is no longer used; a
+  `key-broker.md`), the plugin shelf's `PLUGINS_DIR` (outside `DATA_DIR`, `plugins.md`), `COMPANY_CREATION_POLICY` and `OPERATOR_USER_IDS` (read per call), the holding place's `HOLDING_DIR` (default `<DATA_DIR>/holding`, `private-folders.md`). `<DATA_DIR>/workdirs` (the old working clones) is no longer used; a
   leftover one can be deleted.
 - Imports from `shared/` go through the `server/shared` symlink (`/app/shared` in the image):
   `import … from '../../shared/types'`, `'../../shared/core/permissions'`.

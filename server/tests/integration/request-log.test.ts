@@ -83,12 +83,23 @@ describe('request log', () => {
     await send('GET', `${base}/no-such-route/${q(SECRET_FOLDER)}`)
     await send('GET', `/api/broker/gemini/v1beta/models?key=${RELAY_TOKEN}`)
     await send('GET', `/api/invitations/${INVITATION_TOKEN}`)
+    // The holding place (private-folders.md "Holding: the member's upload"): a manifest naming the
+    // member's files, sent with their own ticket; only the ticket id may be printed.
+    const { db } = await import('../../src/db')
+    const at = new Date().toISOString()
+    db.prepare(`INSERT INTO holding_tickets (id, company_id, user_id, scope_id, repo_id, folder_path, cause, state, created_at, updated_at, expires_at, by_user)
+      VALUES ('rl-ticket', ?, ?, 'rl-scope', NULL, ?, 'readers', 'open', ?, ?, '2999-01-01T00:00:00.000Z', ?)`).run(co, OWNER, `営業部/${SECRET_FOLDER}`, at, at, OWNER)
+    const held = await send('POST', '/api/me/holding/tickets/rl-ticket/items', {
+      deviceKey: 'rl-device-1', baseCommit: null, manifest: [{ path: `${SECRET_FOLDER}/査定.md`, kind: 'changed', size: 3, sha256: 'a'.repeat(64) }],
+    })
+    expect(held.status).toBe(200)
 
     const all = printed.join('\n')
     for (const secret of [SECRET_FOLDER, q(SECRET_FOLDER), SEARCH_TERM, q(SEARCH_TERM), '査定', RELAY_TOKEN, INVITATION_TOKEN, '?']) {
       expect(all, secret).not.toContain(secret)
     }
-    expect(printed.filter(l => l.startsWith('[http] '))).toHaveLength(8)
+    expect(printed.filter(l => l.startsWith('[http] '))).toHaveLength(9)
+    expect(all).toContain('ticketId=rl-ticket')
   })
 
   it('an error during a request is logged without its text, with the request id', async () => {

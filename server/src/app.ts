@@ -9,6 +9,7 @@ import { HTTPException } from 'hono/http-exception'
 import { auth, authDb } from './lib/auth'
 import { serverAuthSettings } from './lib/auth-settings'
 import { meRoute } from './routes/me'
+import { privateHoldingRoute } from './routes/private-holding'
 import { companiesRoute } from './routes/companies'
 import { departmentsRoute } from './routes/departments'
 import { folderSizesRoute } from './routes/folder-sizes'
@@ -170,6 +171,8 @@ async function signInEmail(req: Request): Promise<string | null> {
 
 // Routes
 app.route('/api/me', meRoute)
+// The holding place, the member's upload (signed in, no membership: private-folders.md "Holding: the member's upload").
+app.route('/api/me/holding', privateHoldingRoute)
 app.route('/api/companies', companiesRoute)
 app.route('/api/companies/:companyId/departments', departmentsRoute)
 app.route('/api/companies/:companyId/folder-sizes', folderSizesRoute)

@@ -34,7 +34,7 @@ server, push checker and admin alike. `server/tests/unit/core-purity.test.ts` en
 | `skill-files.ts` | everything under `.claude/skills|agents|commands` and `.agents/skills` (`SKILL_FOLDERS`, `SKILL_FOLDER_PATTERN`): `isSkillFile`, who may change it (`mayChangeSkillFile`, `skillFileAllowed`, `SkillEditing`) |
 | `skill-autorun.ts` | the auto-run parts of a Skill's Markdown (`autorunFindingsInText`): the push checker (`rules.ts` `autorunFindings`) and the Skill shelf |
 | `skill-shelf.ts` | the server's Skill shelf of a company without the shared folder (`plugins.md` "The Skill shelf"): kinds, names, upload paths, `shelfPlacePath`, `shelfChangeProblems` (the push checker's file rules asked of the place path), `shelfListing` (the version), requests to publish (`SHELF_REQUEST_LIMITS`, `shelfRequestProblems`: what only an owner/admin may publish, refused when a request is sent), `outputLikePaths` (files of a Skill that look like outputs — folders `output(s)` / `result(s)` / `成果物` / `出力` directly in it, a `.pdf` / `.docx` / `.xlsx` / `.pptx` at its top: asked about by the app, refused by the server when publishing or asking; `OUTPUT_FOLDER_NAMES`, `OUTPUT_FILE_EXTENSIONS`) |
-| `secret-patterns.ts` | `SECRET_PATTERNS` (`[SECRET_DETECTED]`, re-exported by `rules.ts`) and `secretIn` (the Skill shelf) |
+| `secret-patterns.ts` | `SECRET_PATTERNS` (`[SECRET_DETECTED]`, re-exported by `rules.ts`), `secretIn` (the Skill shelf, the holding place's contents) and `isSecretFileName` (`.env` / `.env.*` but the templates: the holding place keeps their names only, `private-folders.md`) |
 | `agent-config.ts` | what the agents load and run, owner/admin only: the named config (`AGENT_CONFIG_PATTERN`) and the default-deny of the rest of `.claude/` / `.agents/` (`AGENT_FOLDER_PATTERN`): `isAgentConfig`; the push checker builds its bytewise regexes from the patterns |
 | `write-access.ts` | `evaluateWrite` (the app's answer from `GET /me/write-access`), `foldScopePaths` (the push check's A–Z-folded pass) |
 | `client-version.ts` | desktop-app build identity: `parseClientVersion`, `compareClientVersions` (the server's version gates re-export them from `server/src/lib/client-version.ts`), `ClientBuild` / `clientBuildOf` / `parseClientBuild` / `compareClientBuilds` (the API's parsed build; the admin members page ranks with them) |
@@ -84,7 +84,7 @@ The admin console's permission preview (`admin/src/lib/edit-access.ts` `previewA
 the draft with `resolveAccess` itself, the deciding place as the one scope with rules — no copy.
 
 `shared/types/` holds API contracts (`private-folders.ts`, `company-files.ts`, `agent-events.ts`,
-`records.ts`, `plugins.ts`, `task-settings.ts`, `browser-plans.ts`, `index.ts`).
+`records.ts`, `plugins.ts`, `task-settings.ts`, `browser-plans.ts`, `private-holding.ts`, `index.ts`).
 `shared/browser-connectors/approved.json` is data, not a rule module: the approved browser connector
 combinations the server reads (`agent-browser.md`); `carried.json` beside it is the combinations this
 app build carries (the app's own, written by the same script).

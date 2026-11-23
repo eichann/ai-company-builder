@@ -17,6 +17,11 @@ paths:
   - "server/src/adapters/sqlite/holding.ts"
   - "server/src/db/schema/holding.ts"
   - "server/tests/**/holding-tickets.test.ts"
+  - "server/src/services/private-holding.ts"
+  - "server/src/routes/private-holding.ts"
+  - "server/src/adapters/holding-blobs.ts"
+  - "shared/types/private-holding.ts"
+  - "server/tests/**/private-holding.test.ts"
   - "admin/src/lib/private-folders.ts"
   - "admin/src/lib/private-folder-help.ts"
   - "admin/src/app/**/private*/**"
@@ -107,8 +112,9 @@ or who can see it. So:
 Someone who stops reading a private folder may hold work for it on their PC that never reached
 the server; their app removes the folder (owner decision Q1). The plan (design memo
 `docs/private-folder-holding-design.md`, internal): before it does, the app hands that work to a
-server-side holding place for the folder's managers to take in or discard. S1 (this) is only the
-server's record of who may do so — **no endpoint reads it yet**; the app still deletes as before.
+server-side holding place for the folder's managers to take in or discard. S1 (this) is the
+server's record of who may do so; the upload that reads it is S2 ("Holding: the member's upload"
+below). The app still deletes as before (C1 not yet).
 
 - **A ticket** (`holding_tickets`, behind the handle `holding`: `ports/holding.ts`,
   `adapters/sqlite/holding.ts`) per member × private folder whose read access ended: `scope_id`,
@@ -152,6 +158,125 @@ server's record of who may do so — **no endpoint reads it yet**; the app still
   keep everyone reading leave none; access back cancels — readers, make-public, `POST /members`,
   an invitation; the composed storage refuses outside `track`, also a delete / make-public whose
   `trackRows` does not track). Each guard mutation-checked.
+
+## Holding: the member's upload (stage S2)
+
+With a ticket, and only with it, the member's app hands over what their PC never sent. These are
+the first endpoints that take company data from someone who may no longer be a member. Contract
+(released apps will call it; `protocol: 1`, fixed kinds and codes): `shared/types/private-holding.ts`.
+Code: `routes/private-holding.ts` → `services/private-holding.ts` → the handle's `holding` /
+`holdingItems` (`adapters/sqlite/holding.ts`) and the blob store (`adapters/holding-blobs.ts`).
+Nothing reviews or takes in an item yet (S3: admin endpoints; A1: the 「預かり」 tab), and no app
+calls it yet (C1).
+
+- **Routes** (`/api/me/holding`, `signedIn`, **no membership**: a person removed from the company
+  still hands over): `GET /tickets` (open ones and those closed in the last 90 days: `ticketId`,
+  `companyId`, `scopeId`, `state` open / expired / cancelled — an open one past `expires_at` reads
+  expired —, `expiresAt`, `limits`), `POST /tickets/:ticketId/items { deviceKey, baseCommit,
+  manifest[] }` → `{ itemId, missing, namesOnly }`, `PUT /items/:itemId/blobs/:sha256` (raw body) →
+  204, `POST /items/:itemId/finish` → `{ state: 'waiting' }`.
+- **One entry check** (I3): the company is found from the caller's own tickets — the control-plane
+  lookup `HoldingTicketLookup.ofUser` (by user id across companies; `UNSCOPED` in
+  `company-scoped-sql.test.ts` with its reason) — then everything through that company's handle; an
+  item only among the caller's own tickets' companies, its `user_id` the caller's. A ticket or item
+  that is not the caller's, unknown, or another company's → the same 404 `{ error: 'Not found' }`.
+  Expired (state, or `expires_at` passed before the clock closed it) → 410 `EXPIRED`; cancelled (they
+  read the folder again) → 410 `CANCELLED`; only the ticket's own member gets either. Check order:
+  rate → who → (an item already finished: 409 `ALREADY_RECEIVED`, whatever the ticket says now) →
+  ticket state → body (one fixed 400 `INVALID`) → rules.
+- **Nothing names the folder**: no answer carries `folder_path` (it stays on the ticket and item rows
+  for S3), entry paths are never answered back (`namesOnly` are manifest indexes), the request log
+  prints only `ticketId` / `itemId` (`OPAQUE_PARAMS`), and `permission_history` records ids and counts.
+- **Manifest**: entries `{ path (relative to the folder, `normalizeRepoPath`, ≤ 1024, no control
+  characters), kind, size, sha256 (content kinds only), label? (≤ 200) }`; kinds `changed`,
+  `deleted`, `backup`, `personal` (`.personal/`), `names-only`. One content has one size. JSON body
+  ≤ 1 MB (413 `TOO_LARGE`).
+- **Caps** (owner decision, question 4; `HOLDING_LIMITS`, `HOLDING_COMPANY_BYTES`): 50 MB a file,
+  500 MB an item, 5,000 entries (the rest names only) — over one the entry is `names-only` with
+  `dropped: 'too-large'`. A ticket's **share** of 1 GB (all its PCs' items together, so one leaver
+  cannot fill the company) is not such a cap: beyond it the entry has **no room now**, like the
+  company's room below (`company-full`; the share frees up when the managers decide the member's
+  other items — chosen over a name only, which would lose the member's work). The company's room, 2 GB, counts **only what is stored** (`total_bytes` = an item's
+  distinct contents stored now, over the items still holding contents) — a manifest reserves
+  nothing, so a large announcement never squeezes others out. Judged when the manifest arrives (in
+  manifest order, each distinct content once, one transaction) and **every cap again when each
+  content arrives** — the item's, the ticket's share and the company's room, on stored bytes, under
+  the company's holding lock — so PCs or members announcing in parallel cannot pass them together
+  (an item over its cap then: that entry a name only, 413 `TOO_LARGE`; no room: `COMPANY_FULL`). An entry with no room **now** is `dropped: 'company-full'` (kind
+  and sha256 kept; answered in `companyFull`, PUT and `finish` → 409 `COMPANY_FULL`): **the app keeps
+  its whole local copy, does not finish, and tries again later** with the same `deviceKey` (the next
+  manifest judges every entry again; contents already stored stay) — the safe side for members' work
+  (C1 must implement exactly this; never remove on `COMPANY_FULL`).
+- **A blob is admitted before its body is read** (`putBlob`; the route hands over the body lazily,
+  no body-limit middleware): rate, owner, item `receiving`, ticket open, the sha256 named and still
+  wanted (dropped as a secret → 204; `company-full` → 409), `Content-Length` present (else 400
+  `INVALID`), ≤ the file cap (else 413 `TOO_LARGE`) and equal to the entry's size (else 400
+  `HASH_MISMATCH`), and room among the uploads running — 2 per member, 8 per server (else 429 `BUSY`
+  + `Retry-After`). Only then does the body stream into a temporary file of its own
+  (`<item dir>/.tmp-<random>`, 0600), hashed and scanned as it arrives (never held in memory; more
+  bytes than announced → 400, nothing kept).
+- **Never a received item without its content** (Codex P1/P2, 2026-11-24): naming a content and
+  marking it stored run **under the company's holding lock** (one per company, in the service; the
+  sweep and the erasure take it too), after the item and its entries are read again: a finished item,
+  or a content no entry wants any more, makes the request remove **only its own temporary file**
+  (`ALREADY_RECEIVED` / 404). `markStored` marks only not-dropped content entries and answers false
+  when none was marked; a content then kept by no stored entry is removed. A stored entry whose file
+  is gone from the disk (a restore from an older copy) takes the content again while the item is
+  receiving.
+- **No secret is kept** (I7, the server decides): an entry named `.env` / `.env.*` (not
+  `.env.example` / `.env.sample`; `isSecretFileName`, `shared/core/secret-patterns.ts`) is a name only
+  (`dropped: 'secret'`); **every** content — binary too: a false positive only makes it a name — is
+  scanned with `secretIn` as it streams (latin1 view, each chunk with the previous 512 characters)
+  and on a hit is never named: its entries become names only (sha256 kept, `dropped: 'secret'`) and
+  the PUT answers 204.
+- **Idempotent**: one item per (ticket, `deviceKey`) — at most 3 PCs per ticket (409
+  `TOO_MANY_DEVICES`); a repeat while `receiving` replaces the manifest and keeps the contents
+  already stored that it still names — with their **verified size**: a manifest naming a stored
+  content with another size is refused (400 `INVALID`), and an upload whose entry was re-declared
+  with another size meanwhile is not kept (400 `HASH_MISMATCH`); a finished one → 409 `ALREADY_RECEIVED` (also after the ticket
+  expired: it was received). A blob PUT is by sha256 (bytes and size must match, else 400
+  `HASH_MISMATCH`; one not named → 404; stored and on disk → 204 without reading the body).
+  `finish` needs nothing `company-full` and every wanted content stored **and on the disk** —
+  under the company's holding lock each content marked stored is looked for, and one that is gone
+  (a restore of `HOLDING_DIR` from an older copy) is unmarked and wanted again (409
+  `MISSING_FILES` with `missing`; the manifest's answer reports `missing` the same way), then `receiving → waiting` (compare-and-set) with `permission_history`
+  `holding-received` (ids, counts, bytes); again while waiting → the same 200; after a decision or
+  expiry → 409 `ALREADY_RECEIVED`. The ticket stays open (other PCs) until it expires or is cancelled
+  (`used` is never set in S2).
+- **Rate limit** per member and hour (in memory): 6,000 blob PUTs (a whole item fits), 120 item /
+  finish requests → 429 `RATE_LIMITED` + `Retry-After` (`setHoldingRatesForTests`, also the uploads
+  running at once).
+- **Storage** (`db/schema/holding.ts`): `holding_items` (ticket, user, device key, scope, the
+  ticket's folder path, base commit, state receiving / waiting / taking / taken / discarded /
+  expired, `total_bytes` = distinct contents stored, times, decision columns for S3,
+  `blobs_deleted_at`; UNIQUE (company, ticket, device key)), `holding_files` (index, path, kind,
+  size, sha256, label, stored, dropped `too-large` / `secret` / `company-full`). Contents:
+  `HOLDING_DIR` (`lib/config.ts`, default `<DATA_DIR>/holding`) `/<companyId>/<itemId>/<sha256>`,
+  directories 0700, files 0600; never served by path. No encryption at rest (open question 11).
+- **Retention** (I8; the server clock's `sweepHolding`, every company, records on or off, under the
+  company's holding lock): a `receiving` item created 2 days ago is deleted with its rows (the app's
+  next try starts again), a `waiting` one finished 30 days ago becomes `expired` (`holding-expired`,
+  by `acb:clock`); then the contents of every item done with them (taken, discarded, expired) are
+  deleted (`blobs_deleted_at`), any item directory no row holds contents for is removed, and in a
+  live item's directory every content no stored entry names and every temporary file older than an
+  hour. Rows stay (names, sizes, who). Running twice changes nothing more.
+- **Archive and erasure**: `company-archive.ts export` lists the company's held item directories
+  (`heldContents`, like kept private-folder archives: listed, not copied; the rows travel as every
+  `company_id` table). `erase-content.ts holding <companyId> <itemId> <reason>`: the item's contents
+  and file rows go, the item stays `discarded` (so the app's retry hears `ALREADY_RECEIVED`),
+  `holding-erased` in `permission_history`. **Open owner decision** (review L4, 2026-11-24): erasing
+  an item that is still `receiving` also answers `ALREADY_RECEIVED`, so that member's app removes
+  its local copy too — left as is for the owner to decide (the alternative: answer so the app keeps it).
+- **For S3** (not here): before taking an item in, re-validate every manifest path with the push
+  checker's rules (as the reviewer's push does); S2 only normalises them.
+- Tests: `server/tests/integration/private-holding.test.ts` (every rule above through the real app,
+  with bodies held open mid-upload for the races — a second PUT losing to a finished item, a manifest
+  changed during an upload — and the admission checks asserted to never read the body; no holding
+  answer or log line names the folder or an entry path; each guard mutation-checked),
+  `permission-matrix.test.ts` (rows: any signed-in caller without a ticket 404, signed out 401;
+  `CROSS`: another company's member's ticket / item = unknown), `company-scoped-sql.test.ts`,
+  `request-log.test.ts` (a manifest with paths; only `ticketId` printed), `company-archive.test.ts`
+  (`heldContents`).
 
 ## Repositories and git-http
 

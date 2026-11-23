@@ -143,7 +143,7 @@ export function appBuildField(raw: string | undefined): string[] {
 /** Route parameters that hold opaque ids (or a service name), safe to print. */
 const OPAQUE_PARAMS = new Set([
   'companyId', 'company', 'id', 'userId', 'ruleId', 'scopeId', 'stopId', 'keyId', 'tokenId',
-  'invitationId', 'repo', 'service',
+  'invitationId', 'repo', 'service', 'ticketId', 'itemId',
 ])
 
 /** What an id looks like; any other value (a name, a path, Japanese text) is not printed. */

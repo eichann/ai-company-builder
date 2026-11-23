@@ -27,6 +27,13 @@ export const APP_DB_PATH = join(DATA_DIR, 'app.sqlite')
 export const AUTH_DB_PATH = join(DATA_DIR, 'auth.sqlite')
 
 /**
+ * The holding place's contents (private-folders.md "Holding: the member's upload"):
+ * `<HOLDING_DIR>/<companyId>/<itemId>/<sha256>`, never served by path. Default
+ * <DATA_DIR>/holding, so it lives in the data volume and its backups.
+ */
+export const HOLDING_DIR = process.env.HOLDING_DIR?.trim() || join(DATA_DIR, 'holding')
+
+/**
  * The key broker's key-encryption key (KEK): a file holding 32 random bytes
  * as base64 (`src/cli/generate-broker-kek.ts` writes one). Unset → the broker
  * is off. Keep it outside the repository and outside DATA_DIR (so a database
