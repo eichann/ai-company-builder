@@ -22,6 +22,8 @@ export function isManualAnchor(value: unknown): value is string {
 export const MANUAL_WORDS = {
   /** Nothing to show: the server could not be reached and nothing was kept on this computer. */
   unreachable: '使い方を読み込めませんでした。サーバーにつながっているか確かめて、もう一度お試しください。',
+  /** Not signed in (the server shows the manual to signed-in accounts only) and nothing kept on this computer. */
+  signedOut: 'ログインすると使い方を見られます。',
   /** The server has no manual (an older server, or one built without it). */
   missing: 'このサーバーには使い方がまだありません。',
   noPage: 'その使い方のページは見つかりませんでした。',

@@ -417,8 +417,8 @@ and by the AI: **do not change them by one character** (no renamed key, no reord
 
 ## The user manual (「使い方」, owner decision 2026-11-23)
 
-The server's manual (`server.md` "The user manual": static pages built from `manual/`, public at
-`/manual/`) opened **inside the app**, in the middle, through the HTML viewer's document view — not
+The server's manual (`server.md` "The user manual": static pages built from `manual/`, at
+`/manual/` for signed-in accounts) opened **inside the app**, in the middle, through the HTML viewer's document view — not
 an external browser.
 
 - **Opening**: the title bar's 「使い方」 (?) button, ⌘K 「使い方」, or any screen running the command
@@ -430,7 +430,8 @@ an external browser.
   link pressed in it gets the viewer's confirmation (「外のサイトを開きますか？」).
 - **Why through main and the document view** (the safe design): the doc session refuses every network
   request, so main (`electron/features/manual/site.ts`) fetches the server's `manifest.json` and the
-  files it names into this computer's copy (`<userData>/manual/<sha256 of the server origin>/site`):
+  files it names, with the member's session cookies (`cookies: session.cookies`, as the other server
+  calls; none → nothing asked), into this computer's copy (`<userData>/manual/<sha256 of the server origin>/site`):
   each file's path must pass `isManualFilePath` and its size and sha256 must match the manifest;
   redirects are refused; each request waits at most 8 s (then the kept copy shows); a refresh is
   built beside the copy and renamed into place, the old copy put back if the second rename fails,
@@ -441,6 +442,9 @@ an external browser.
   (`noScripts`: `script-src 'none'`, the manual has none — whatever a server put in its copy), with
   every other guard of `doc-frame.md` (no network, opaque origin, no app, no other file). Offline: the copy kept is shown; nothing kept → 「使い方を
   読み込めませんでした…」; a server with no manual (404) → 「このサーバーには使い方がまだありません。」.
+  Signed out, or the server refuses the session (401 / 403): nothing of the answer is read or written,
+  the copy kept is shown; nothing kept → 「ログインすると使い方を見られます。」 (`signed-out`). The
+  export writes the copy kept the same way.
   The renderer sends only a page id (and heading text); only the view's id comes back.
 - **「書き出す」** (`manual:export`, no argument): main asks the shell's save dialog
   (`DesktopShell.selectSavePath`, starting at Downloads with 「ACB の使い方」) **every time**; the chosen
@@ -452,7 +456,8 @@ an external browser.
   index.html をブラウザで開くと、インターネットなしでも読めます。」 (links are relative). Cancelled → nothing.
 - Tests: `client/tests/manual.test.ts` (the copy: only manifest files, checked, a tampered file or a
   bad manifest path changes nothing, a refresh cut between its renames put right, offline / none /
-  missing; the page's CSP without scripts; a failed export leaves no folder; the IPC: main window only before any
+  missing; signed out or refused — also part-way — the copy byte for byte as it was, none kept →
+  `signed-out` and its words from open and export; the page's CSP without scripts; a failed export leaves no folder; the IPC: main window only before any
   fetch, dialog or write; a page through the grant at its heading, the copy's other files reachable,
   `..` and `manifest.json` not; unknown page ids refused; the export into the chosen folder only,
   never a company folder — also through a link —, a folder holding something, a file, or on cancel —

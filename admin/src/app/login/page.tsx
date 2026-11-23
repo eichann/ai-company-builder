@@ -1,6 +1,6 @@
 'use client'
 
-import { Suspense, useEffect, useState } from 'react'
+import { Suspense, useCallback, useEffect, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 
 import { AuthLayout } from '@/components/app/brand'
@@ -13,12 +13,15 @@ import { Label } from '@/components/ui/label'
 import { configApi } from '@/lib/api'
 import { useAuth } from '@/lib/auth-context'
 import { describeError } from '@/lib/errors'
-import { safeRedirect } from '@/lib/redirect'
+import { isManualPath, safeRedirect } from '@/lib/redirect'
 
 function LoginForm() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const redirectTo = safeRedirect(searchParams.get('redirect'))
+  // The user manual (server.md "The user manual") sends a reader here when not signed in. It is
+  // served by the API, not this console, so it is opened as a whole page, not by the router.
+  const forManual = isManualPath(redirectTo)
   const { signIn, signUp, user, loading: authLoading } = useAuth()
   // null until /api/config answers; false means no account exists yet.
   const [setupComplete, setSetupComplete] = useState<boolean | null>(null)
@@ -43,9 +46,14 @@ function LoginForm() {
     }
   }, [configAttempt])
 
+  const goBack = useCallback(() => {
+    if (forManual) window.location.replace(redirectTo)
+    else router.replace(redirectTo)
+  }, [forManual, router, redirectTo])
+
   useEffect(() => {
-    if (!authLoading && user) router.replace(redirectTo)
-  }, [authLoading, user, router, redirectTo])
+    if (!authLoading && user) goBack()
+  }, [authLoading, user, goBack])
 
   const isSetup = setupComplete === false
 
@@ -59,7 +67,7 @@ function LoginForm() {
       } else {
         await signIn(email, password)
       }
-      router.replace(redirectTo)
+      goBack()
     } catch (err) {
       setError(describeError(err))
     } finally {
@@ -84,7 +92,9 @@ function LoginForm() {
           <CardDescription>
             {isSetup
               ? 'このサーバーにはまだアカウントがありません。最初に作成したアカウントで会社を作成できます。'
-              : '管理画面にログインします。'}
+              : forManual
+                ? 'ログインすると使い方を見られます。'
+                : '管理画面にログインします。'}
           </CardDescription>
         </CardHeader>
         <CardContent>

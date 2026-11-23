@@ -52,6 +52,7 @@ export function registerManualIpc<E extends IpcInvokeEvent>(ipc: IpcRegistrar<E>
     const ticket = deps.views.begin(event.sender.id)
     const copy = await deps.site.current()
     if (copy.kind === 'none') return refuse(MANUAL_WORDS.unreachable)
+    if (copy.kind === 'signed-out') return refuse(MANUAL_WORDS.signedOut)
     if (copy.kind === 'missing') return refuse(MANUAL_WORDS.missing)
     const name = manualPageFile(pageId)
     if (!copy.manifest.files.some(f => f.path === name)) return refuse(MANUAL_WORDS.noPage)
@@ -81,6 +82,7 @@ export function registerManualIpc<E extends IpcInvokeEvent>(ipc: IpcRegistrar<E>
     if (!path.isAbsolute(chosen) || deps.insideCompanyFolder(target)) return refuse(MANUAL_WORDS.insideCompany)
     const copy = await deps.site.current()
     if (copy.kind === 'none') return refuse(MANUAL_WORDS.unreachable)
+    if (copy.kind === 'signed-out') return refuse(MANUAL_WORDS.signedOut)
     if (copy.kind === 'missing') return refuse(MANUAL_WORDS.missing)
     let made = false
     try {

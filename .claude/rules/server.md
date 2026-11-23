@@ -122,7 +122,7 @@ route.post('/hook', publicRoute('what proves the caller'), (c) => …)          
 Also: `companyAdmin(error)` (owner/admin only; members and non-members alike get 403 `{ error }` —
 the endpoints that always answered so: invitations, adding / removing members),
 `companyMemberNotFound(body)` (the endpoint's own 404 body for a non-member: `/api/git`),
-`signedInOr(error)` (the endpoint's own 401 text), `aiReads` / `aiActs` (a record token on
+`signedInOr(error)` (the endpoint's own 401 text), `signedInElse(refuse)` (the endpoint's own refusal without a session: the manual's 401 or sign-in redirect), `aiReads` / `aiActs` (a record token on
 /api/records-ai, `c.var.holder`; records.md), `ownCredential(reason)` (git-http's Basic auth, the
 key broker's relay token; still 401 without it). Company routes always name the company
 `:companyId` (companies.ts too). Where a role check must answer before the body (403 before 400),
@@ -399,8 +399,8 @@ GET  /api/config                                  setup state (no auth)
 /api/companies/:companyId     GET /approvals, GET /approvals/:approvalId,
                               POST /approvals/:approvalId/approve | send-back | withdraw
                               (session only; approvals.md)                    approvals.ts
-/manual                       GET /manual (→ /manual/index.html), GET /manual/* — the user manual, public
-                              (no session: "The user manual" below)            manual.ts
+/manual                       GET /manual (→ /manual/index.html), GET /manual/* — the user manual, any
+                              signed-in account ("The user manual" below)      manual.ts
 /api                          GET|POST /companies/:companyId/invitations,
                               DELETE …/invitations/:id, GET /invitations/:token,
                               POST /invitations/:token/accept                 invitations.ts
@@ -740,29 +740,47 @@ by that server at `/manual/` — so a self-hosted server shows the manual of its
   `<page>.html`, `manual.css`, `images/…` and `manifest.json` (format 1: pages with titles, every
   file's path, sha256 and size; written last). Its file-name rule and parser are
   `shared/core/manual.ts` (`isManualFilePath`, `parseManualManifest`), the app's too.
+- **Signed-in accounts only** (owner decision 2026-11-23, replacing the first "public on purpose"):
+  `signedInElse(…)` (`routes/guards.ts`, the usual session check: the browser's cookie or the app's
+  session cookies) on `/manual` and `/manual/*`. **Any account signed in on this server**, whatever its
+  company: the manual is the same for every company, so no membership is asked. Without a session
+  every path — `/manual`, a page, a picture, the manifest, one that names nothing — gets the same
+  answer, so nothing tells which files exist: a browser opening a page (`Accept` holding
+  `text/html`) → 302 to the admin console's `/login?redirect=<path>` (its `safeRedirect` takes only
+  same-origin paths; the page then opens the manual as a whole page, `admin/src/app/login/page.tsx`,
+  and says 「ログインすると使い方を見られます。」); the return path is the requested file when
+  `isManualFilePath` accepts it, else `/manual/index.html` — never outside `/manual/`. Anything else
+  → 401 `Unauthorized` (text). Both carry the headers below, `Cache-Control: no-store` and
+  `Vary: Accept`; the guard runs before the ETag check, so a kept ETag opens nothing.
 - **Serving** (`routes/manual.ts`, `lib/manual-site.ts`; `MANUAL_DIR`, default `<cwd>/manual-site` =
-  `/app/manual-site` in the image, read per request): `publicRoute` (listed in `PUBLIC_ENDPOINTS`;
-  no secret in it, and members need it when they cannot sign in). **Only a file the manifest names**
+  `/app/manual-site` in the image, read per request). **Only a file the manifest names**
   is answered, opened with `O_NOFOLLOW` as a regular file ≤ 20 MB; everything else — a file that only
   sits in the folder, a folder (no listing), `..` raw or encoded, a hidden name, another case, a link —
   is 404 `Not found` (or the app's own 404 when the path never reaches the route). Headers: CSP
   `default-src 'none'; style-src 'self'; img-src 'self'; base-uri 'none'; form-action 'none';
   frame-ancestors 'none'` (no script source at all), `nosniff`, `X-Frame-Options: DENY`,
   `Referrer-Policy: no-referrer`, `Cross-Origin-Resource-Policy: same-origin`, `Cache-Control:
-  no-cache` + a strong ETag (the sha256; `If-None-Match` → 304), so a new version shows at once.
+  private, no-cache` (no shared cache keeps it for someone not signed in) + a strong ETag (the
+  sha256; `If-None-Match` → 304), so a new version shows at once.
   `/manual` redirects to `/manual/index.html` (not `/manual/`: Next.js would send that back to
   `/manual`). Not built → 404 everywhere.
 - Behind Caddy only `/api/*` reaches the api; the admin console forwards `/manual` and
-  `/manual/*` to it (`admin/src/proxy.ts` matcher), so `PUBLIC_URL/manual/` works without a Caddy
+  `/manual/*` to it (`admin/src/proxy.ts` matcher; a rewrite passes the request's headers, the
+  session cookie included, as for `/api/*`), so `PUBLIC_URL/manual/` works without a Caddy
   change (`deployment.md`).
 - The app shows it in the HTML viewer and exports it (`files-and-editor.md` "The user manual").
 - Tests: `tests/integration/manual.test.ts` (no script survives whatever the Markdown holds; links /
   pictures rewritten and refused; the build never replaces a folder it did not make; every file
-  served without a session with the headers; 304; files beside the site, listings, traversal raw and
-  encoded, hidden names, a link in place of a listed file: 404; not built: 404 — each guard
+  served to a signed-in account with the headers; 304; files beside the site, listings, traversal raw and
+  encoded, hidden names, a link in place of a listed file: 404; not built: 404; without a session
+  the same 401 for index, page, picture, stylesheet, manifest, unknown paths and a kept ETag, and for
+  a browser the sign-in redirect whose return path stays inside `/manual/` (`//`, `%2F`, `..%2F`,
+  `%5C`, `https:` paths → the index) — each guard
   mutation-checked, except rehype-sanitize, a layer kept on purpose behind the raw-HTML drop and the
   link / picture rules, which already hold every case it would), the permission matrix's two rows
-  (200 / 301 for every caller, built from the repository's `manual/`).
+  (200 / 301 for every signed-in caller, 401 signed out; built from the repository's `manual/`),
+  `tests/security/auth-guards.test.ts` (no longer public), `admin/tests/login.test.tsx` (back to the
+  manual as a whole page).
 
 ## Request log
 

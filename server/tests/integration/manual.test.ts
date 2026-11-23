@@ -5,23 +5,29 @@
  *   no script whatever the Markdown holds (raw HTML, event attributes,
  *   `javascript:` links), rewrites page links and ../images/ pictures, and stops
  *   on a link or picture that is not the manual's own.
- * - `/manual/` answers every file of the built site to a caller with no session,
- *   with the strict CSP, nosniff and ETag; and nothing else: no file that only
- *   sits in the folder, no listing, no `..` (encoded or not), no link.
+ * - `/manual/` answers every file of the built site to a signed-in caller, with
+ *   the strict CSP, nosniff, `private, no-cache` and ETag; and nothing else: no
+ *   file that only sits in the folder, no listing, no `..` (encoded or not), no link.
+ * - Without a session every path gets the same answer (401, or for a browser
+ *   opening a page the sign-in page with a way back inside `/manual/` only), with
+ *   the same strict headers and nothing cached.
  */
-import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest'
+import { describe, it, expect, vi, beforeAll, afterAll, beforeEach, afterEach } from 'vitest'
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { request as httpRequest } from 'http'
 import type { AddressInfo } from 'net'
 
+// Who the request is signed in as (null: no session); each test sets it.
+const session = vi.hoisted(() => ({ user: null as null | { id: string; email: string; name: string; image: null; emailVerified: boolean } }))
+
 vi.mock('../../src/lib/auth', async () => {
   const Database = (await import('better-sqlite3')).default
   const { join: joinPath } = await import('path')
   return {
     authDb: new Database(joinPath(process.env.DATA_DIR!, 'auth.sqlite')),
-    getUserFromRequest: vi.fn().mockResolvedValue(null),
+    getUserFromRequest: vi.fn(async () => session.user),
     getUsersByIds: vi.fn().mockReturnValue(new Map()),
     auth: {
       handler: vi.fn().mockResolvedValue(new Response('{}', { status: 200 })),
@@ -134,8 +140,13 @@ describe('building the manual', () => {
   })
 })
 
-describe('GET /manual/', () => {
-  it('answers every built file without a session, with the strict headers', async () => {
+const MEMBER = { id: 'user-reader', email: 'reader@example.com', name: '読む人', image: null, emailVerified: true }
+
+describe('GET /manual/ signed in', () => {
+  beforeEach(() => { session.user = MEMBER })
+  afterEach(() => { session.user = null })
+
+  it('answers every built file to a signed-in account, with the strict headers', async () => {
     const expected: Record<string, string> = {
       '/manual/': 'text/html; charset=utf-8',
       '/manual/index.html': 'text/html; charset=utf-8',
@@ -151,7 +162,7 @@ describe('GET /manual/', () => {
       expect(res.headers.get('content-security-policy'), path).toMatch(/^default-src 'none'; style-src 'self'; img-src 'self';/)
       expect(res.headers.get('content-security-policy'), path).not.toMatch(/script-src/)
       expect(res.headers.get('x-content-type-options'), path).toBe('nosniff')
-      expect(res.headers.get('cache-control'), path).toBe('no-cache')
+      expect(res.headers.get('cache-control'), path).toBe('private, no-cache')
       expect(res.headers.get('etag'), path).toMatch(/^"[0-9a-f]{64}"$/)
     }
     const png = await app.request('/manual/images/files-tab.png')
@@ -228,6 +239,67 @@ describe('GET /manual/', () => {
       expect((await app.request('/manual/')).status).toBe(404)
     } finally {
       process.env.MANUAL_DIR = site
+    }
+  })
+})
+
+describe('GET /manual/ without a session', () => {
+  // A page, a picture, the stylesheet, the manifest, /manual itself, a file beside the site and a
+  // path that names nothing: no answer may tell them apart.
+  const PATHS = [
+    '/manual', '/manual/', '/manual/index.html', '/manual/guide.html', '/manual/images/files-tab.png', '/manual/manual.css',
+    '/manual/manifest.json', '/manual/notes.txt', '/manual/no-such-page.html', '/manual/images/', '/manual/images/unused.png', '/manual/Index.html',
+  ]
+
+  function expectStrictHeaders(res: Response, path: string) {
+    expect(res.headers.get('content-security-policy'), path).toMatch(/^default-src 'none'; style-src 'self'; img-src 'self';/)
+    expect(res.headers.get('x-content-type-options'), path).toBe('nosniff')
+    expect(res.headers.get('x-frame-options'), path).toBe('DENY')
+    expect(res.headers.get('cache-control'), path).toBe('no-store')
+    expect(res.headers.get('etag'), path).toBeNull()
+  }
+
+  it('answers 401 with one body to every path, the strict headers and nothing to cache', async () => {
+    for (const path of PATHS) {
+      const res = await app.request(path)
+      expect(res.status, path).toBe(401)
+      expect(await res.text(), path).toBe('Unauthorized')
+      expectStrictHeaders(res, path)
+    }
+    // An ETag a browser kept from a signed-in visit opens nothing either.
+    session.user = MEMBER
+    const etag = (await app.request('/manual/guide.html')).headers.get('etag')!
+    session.user = null
+    expect((await app.request('/manual/guide.html', { headers: { 'If-None-Match': etag } })).status).toBe(401)
+  })
+
+  it('sends a browser opening a page to the sign-in page, back to that page or the index, never outside /manual/', async () => {
+    const back = (location: string | null) => {
+      const url = new URL(location!, 'https://acb.example')
+      expect(url.origin + url.pathname).toBe('https://acb.example/login')
+      return url.searchParams.get('redirect')
+    }
+    const html = { headers: { Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8' } }
+    const expected: Record<string, string> = {
+      '/manual': '/manual/index.html',
+      '/manual/': '/manual/index.html',
+      '/manual/guide.html': '/manual/guide.html',
+      '/manual/no-such-page.html': '/manual/no-such-page.html', // the same shape as a real page: nothing told
+      '/manual/images/files-tab.png': '/manual/images/files-tab.png',
+      // Anything that is not one of the manual's file names goes back to the index.
+      '/manual//evil.example': '/manual/index.html',
+      '/manual/%2F%2Fevil.example': '/manual/index.html',
+      '/manual/..%2F..%2Flogin': '/manual/index.html',
+      '/manual/%5Cevil.example': '/manual/index.html',
+      '/manual/https:%2F%2Fevil.example': '/manual/index.html',
+      '/manual/notes.txt': '/manual/index.html',
+      '/manual/images/': '/manual/index.html',
+    }
+    for (const [path, target] of Object.entries(expected)) {
+      const res = await app.request(path, html)
+      expect(res.status, path).toBe(302)
+      expect(back(res.headers.get('location')), path).toBe(target)
+      expectStrictHeaders(res, path)
     }
   })
 })

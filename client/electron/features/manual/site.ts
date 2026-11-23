@@ -4,6 +4,10 @@
  * app's own data folder per server, so the HTML viewer shows it from disk and
  * it still opens offline. No Electron here.
  *
+ * - The server answers only a signed-in account (server.md "The user manual"): every request
+ *   carries the member's session (`cookies`, as the app's other server calls). Signed out or
+ *   refused (401 / 403): nothing is written and the copy kept stays and is shown; with none,
+ *   `signed-out`, so the member is told to sign in.
  * - Only what the server's manifest names is fetched, and each file is kept
  *   only when its size and sha256 match the manifest; one that does not stops
  *   the refresh and the copy on disk stays as it was. Redirects are refused.
@@ -22,6 +26,8 @@ import { MANUAL_MANIFEST, parseManualManifest, type ManualManifest } from '../..
 export interface ManualSiteDeps {
   /** The server's address (config.json); its origin is used. */
   serverUrl: () => string
+  /** The member's session cookies ([] when signed out: then nothing is asked). */
+  cookies: () => string[]
   /** Where copies are kept (`<userData>/manual`). */
   cacheRoot: string
   fetch?: typeof fetch
@@ -37,10 +43,16 @@ export type ManualCopy =
   | { kind: 'missing' }
   /** The server could not be reached and nothing was kept for it. */
   | { kind: 'none' }
+  /** Not signed in (or the server refused the session) and nothing was kept for it. */
+  | { kind: 'signed-out' }
 
 const sha256 = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex')
 
 class RefreshFailed extends Error {}
+/** The server wants a session: signed out, or the session ended. */
+class SignedOut extends RefreshFailed {}
+
+const refusesSession = (status: number) => status === 401 || status === 403
 
 /** The origin of the server's address, or null when it is not an http(s) address. */
 function originOf(url: string): string | null {
@@ -69,7 +81,14 @@ export function createManualSite(deps: ManualSiteDeps) {
   const folderOf = (origin: string) => path.join(deps.cacheRoot, createHash('sha256').update(origin).digest('hex').slice(0, 16))
 
   async function get(origin: string, file: string): Promise<Response> {
-    return fetchImpl(`${origin}/manual/${file}`, { redirect: 'error', signal: AbortSignal.timeout(timeoutMs) })
+    const cookies = deps.cookies()
+    if (cookies.length === 0) throw new SignedOut('signed out')
+    const res = await fetchImpl(`${origin}/manual/${file}`, {
+      headers: { Cookie: cookies.join('; ') }, redirect: 'error', signal: AbortSignal.timeout(timeoutMs),
+    })
+    // Its body is a refusal, never a file of the manual: nothing of it is read or written.
+    if (refusesSession(res.status)) throw new SignedOut(`status ${res.status}`)
+    return res
   }
 
   async function bytesOf(res: Response, maxBytes: number): Promise<Uint8Array> {
@@ -163,10 +182,11 @@ export function createManualSite(deps: ManualSiteDeps) {
     try {
       return await refreshInto(origin, site)
     } catch (err) {
-      // Offline, or the server answered something else: what was kept for this server, if anything.
+      // Offline, signed out, or the server answered something else: what was kept for this server, if anything.
       log.warn(`[manual] Could not refresh the manual (${err instanceof RefreshFailed ? err.message : err instanceof Error ? err.name : 'error'})`)
       const kept = await readManifest(site)
-      return kept ? { kind: 'copy', dir: site, manifest: kept } : { kind: 'none' }
+      if (kept) return { kind: 'copy', dir: site, manifest: kept }
+      return err instanceof SignedOut ? { kind: 'signed-out' } : { kind: 'none' }
     }
   }
 
