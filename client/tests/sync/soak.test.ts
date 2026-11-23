@@ -41,6 +41,7 @@ import path from 'node:path'
 import { World, privateMarker, type HarnessPrivateFolder, type Member, type Role } from '../sync-harness/world'
 import { assertConverged, assertNoLostLocalFiles, assertNoLostWork, assertPrivacy } from '../sync-harness/invariants'
 import { readSparseConfig } from '../../electron/sync/sparse'
+import { SERVER_UNREACHABLE_MESSAGE } from '../../shared/sync-notice-text'
 import { isNotDownloaded } from '../../shared/sparse-paths'
 
 const SEEDS = (process.env.SYNC_SOAK_SEEDS ?? '1,2').split(',').map(s => Number(s.trim())).filter(Number.isFinite)
@@ -85,9 +86,13 @@ const BINARY_PATHS = ['営業部/図.png', 'shared/logo.png']
 /** Sub-folders members leave out (or download again) in the mixed world. */
 const SUB_FOLDERS = ['営業部/顧客', '開発部/資料']
 
-/** Failure shapes that are expected mid-run; anything else is a bug. */
-function expectedFailure(result: { error?: string; errorType?: string; secretDetected?: boolean }): boolean {
+/**
+ * Failure shapes that are expected mid-run; anything else is a bug. An offline member with
+ * nothing to send is told the server could not be reached (`network`); online it never is.
+ */
+function expectedFailure(result: { error?: string; errorType?: string; secretDetected?: boolean }, member: { offlineNow: boolean }): boolean {
   if (result.errorType === 'push_failed' || result.errorType === 'protected_config') return true
+  if (result.errorType === 'network' && member.offlineNow) return (result.error ?? '').startsWith(SERVER_UNREACHABLE_MESSAGE)
   return /^同期を中止しました|^同期がキャンセルされました/.test(result.error ?? '')
 }
 
@@ -270,7 +275,7 @@ async function soak(seed: number, t: { after: (fn: () => void) => void; diagnost
         log(`${m.name} sync → ${out.result.success ? 'ok' : `${out.result.errorType ?? 'fail'}: ${(out.result.error ?? '').split('\n')[0]}`}` +
           `${out.dialogs.length ? ` [${out.dialogs.map(d => `${d.kind}:${d.answer}`).join(', ')}]` : ''}`)
         if (!out.result.success) {
-          assert.ok(expectedFailure(out.result), `unexpected failure: ${JSON.stringify(out.result)}`)
+          assert.ok(expectedFailure(out.result, m), `unexpected failure: ${JSON.stringify(out.result)}`)
         }
       }
       assertNoLostWork(world, { allowUnpushed: true })
@@ -408,7 +413,7 @@ async function privateSoak(seed: number, t: { after: (fn: () => void) => void; d
         log(`${m.name} sync → ${out.result.success ? 'ok' : `${out.result.errorType ?? 'fail'}: ${(out.result.error ?? '').split('\n').slice(0, 2).join(' / ')}`}`)
         if (out.result.success) revokedPending.delete(m.name)
         else {
-          assert.ok(['push_failed', 'network', 'write_denied'].includes(out.result.errorType ?? '') || expectedFailure(out.result),
+          assert.ok(['push_failed', 'network', 'write_denied'].includes(out.result.errorType ?? '') || expectedFailure(out.result, m),
             `unexpected failure: ${JSON.stringify(out.result)}`)
           if (revokedPending.has(m.name) && out.result.lostPrivateFolders) revokedPending.delete(m.name)
         }

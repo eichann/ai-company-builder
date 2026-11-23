@@ -776,6 +776,8 @@ export class Member {
   private readonly sync_: SyncFn
   /** offline() was called: the server API (and every remote) is unreachable. */
   private isOffline = false
+  /** Between offline() and online(): what a random run's oracle may expect of this member's sync. */
+  get offlineNow(): boolean { return this.isOffline }
   /** GET /me/scopes fails (server trouble) while git still works. */
   scopesApiDown = false
   /** POST /paths/check fails (server trouble, rate limit) while git still works. */
