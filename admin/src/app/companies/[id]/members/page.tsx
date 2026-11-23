@@ -404,7 +404,7 @@ export default function MembersPage() {
           <>
             <p>
               {removing?.name}
-              {hasCompanyFolder ? ' さんは、この会社のファイルやAIスキルを同期できなくなります。本人のPCにあるファイルは削除されません。' : ` ${NO_FOLDER_WORDS.removeMember}`}
+              {hasCompanyFolder ? ' さんは、この会社のファイルやAIスキルを同期できなくなります。本人のPCにある会社のフォルダは残りますが、非公開フォルダは、本人が次に同期したときにPCから削除されます。そのとき、まだ届けていない変更も一緒に消えます。' : ` ${NO_FOLDER_WORDS.removeMember}`}
             </p>
             <p className="mt-2">もう一度参加してもらうには、新しい招待リンクが必要です。</p>
           </>
