@@ -268,6 +268,10 @@ describe('department managers', () => {
     expect((await as('pa-owner', 'DELETE', `/api/companies/${CO}/members/pa-leaver`)).status).toBe(200)
     expect((await as('pa-owner', 'GET', path(ids.sales))).body.data).toEqual({ managers: [] })
     expect(db.prepare('SELECT COUNT(*) AS n FROM department_managers WHERE user_id = ?').get('pa-leaver')).toEqual({ n: 0 })
+    // A dialog opened before they left still holds them: told the list changed (with today's), not 400.
+    const r = await as('pa-owner', 'PUT', path(ids.sales), { userIds: ['pa-leaver', 'pa-member'], expectedUserIds: ['pa-leaver'] })
+    expect(r.status).toBe(409)
+    expect(r.body).toMatchObject({ code: 'MANAGERS_CHANGED', managers: [] })
   })
 })
 

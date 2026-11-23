@@ -509,7 +509,8 @@ The admin console's calls are pinned by `server/tests/integration/admin-contract
 - `PUT …/departments/:id/managers` replaces the whole list, so it acts on what the admin saw
   (2026-11-23, review R5-2): `expectedUserIds` (optional) is that list; when today's managers
   differ from it as a set, nothing is written and 409 `MANAGERS_CHANGED` (Japanese `error`)
-  answers with today's `managers` (read and write in one synchronous stretch). Absent = replace
+  answers with today's `managers` (read and write in one synchronous stretch; checked before the
+  membership check, so a manager who left since answers 409, not 400). Absent = replace
   as before (older admin pages, API callers). The admin's 「管理役を設定」 opens only on a loaded
   list (the menu item is disabled while it loads or after it failed, the row says
   「管理役を読み込めませんでした」 instead of 「管理役なし」), always sends it, and starts the form

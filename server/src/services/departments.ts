@@ -371,16 +371,18 @@ export function createDepartmentService(deps: DepartmentServiceDeps) {
       if (unique.length > MAX_MANAGERS_PER_DEPARTMENT) {
         return refuse('bad-request', `A department can have at most ${MAX_MANAGERS_PER_DEPARTMENT} managers`)
       }
-      const notMembers = unique.filter(id => memberships.roleOf(member.companyId, id) === null)
-      if (notMembers.length > 0) {
-        return refuse('bad-request', `Not members of this company: ${notMembers.join(', ')}`)
-      }
+      // Before the membership check: a manager who left the company since
+      // changed the list too, and the 409's list lets the dialog start again.
       if (expectedUserIds !== undefined) {
         const today = new Set(scopesOf(member.companyId).departmentManagerIds(departmentId))
         const seen = new Set(expectedUserIds)
         if (today.size !== seen.size || [...seen].some(id => !today.has(id))) {
           return refuse('conflict', MANAGERS_CHANGED_MESSAGE, { code: 'MANAGERS_CHANGED', managers: managers(member, departmentId) })
         }
+      }
+      const notMembers = unique.filter(id => memberships.roleOf(member.companyId, id) === null)
+      if (notMembers.length > 0) {
+        return refuse('bad-request', `Not members of this company: ${notMembers.join(', ')}`)
       }
       scopesOf(member.companyId).replaceDepartmentManagers(departmentId, unique, member.userId)
       return ok(managers(member, departmentId))
