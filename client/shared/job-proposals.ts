@@ -5,6 +5,7 @@ import {
 } from '../../shared/core/job-proposals'
 import { jobCheckText, jobGrantLines, jobMinutesText, jobMissedText, jobRunText, jobTriggerText } from '../../shared/core/job-words'
 import type { JobProposalView } from '../../shared/types/job-proposals'
+import { WORK_SWITCH_NAMES } from './work-switches'
 
 /**
  * A member proposes a time job from the AI chat (「AIへの相談」から定期の仕事, PR C: the app; `.claude/rules/jobs.md` "Member
@@ -139,7 +140,7 @@ export function jobCandidateLines(d: JobDefinition, timeZone: string | null = nu
 export const JOB_CANDIDATE_NOTES: readonly string[] = [
   '出しても、管理者が承認し、あなたが「定期の仕事」で「受け取る」を押すまでは何も動きません。',
   '確かめて新しいものが無い回は、AI は動きません（毎回かならず動くわけではありません）。',
-  '会社やあなたの「AI に任せる」の設定（AI が止められている、「自動で進める」が切れている、このアプリが開いていない など）によって動かないことがあります。',
+  `会社の設定で AI が止められているとき、あなたの「${WORK_SWITCH_NAMES.autoRun}」がオフのとき、このアプリが開いていないときなどは、動かないことがあります。`,
   '名前・時刻・確かめ方は、管理者が直すことがあります。読む場所やできることが変わるときは、もう一度「受け取る」が要ります。',
 ]
 

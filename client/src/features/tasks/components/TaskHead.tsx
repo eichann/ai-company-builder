@@ -22,7 +22,8 @@ export function OriginLine({ origin }: { origin: TaskCardOrigin }) {
   const [open, setOpen] = useState(false)
   const when = day(origin.at)
   const what = origin.kind === 'meeting' ? `会議「${origin.title}」${when ? `（${when}）` : ''}から` : `連絡「${origin.title}」${when ? `（${when}）` : ''}から`
-  const how = origin.byAi ? 'AI が作りました' : `${origin.addedBy ? `${origin.addedBy}さんが` : ''}作りました`
+  // A space before 「AI」 after Japanese (the app's spacing: 「から AI が」), none before a person's name.
+  const how = origin.byAi ? ' AI が作りました' : `${origin.addedBy ? `${origin.addedBy}さんが` : ''}作りました`
   return (
     <div className="text-small text-gray-500 dark:text-zinc-400">
       <span className="mr-1.5 inline-block align-[-2px]"><ThingIcon kind={origin.kind === 'meeting' ? 'meeting' : 'incoming'} size={12} label="" /></span>

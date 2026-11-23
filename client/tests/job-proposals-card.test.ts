@@ -51,7 +51,7 @@ test('after submitting: its state, 取り下げる only while it waits; gone or 
 
 test('before the press it says when (company time), what makes it run, the limits, places, missed runs and what may stop it', () => {
   const text = [...jobCandidateLines(definition), ...JOB_CANDIDATE_NOTES].join('\n')
-  for (const words of ['会社の時刻', '毎週月曜 09:00', '「営業/議事録」に新しいファイルがあるときだけ', '読む場所', '「営業/週報」', '上限：1回 15分・1日 1回', '外に送るもの：下書きまで', '動けなかった回', '期限', '「AI に任せる」', '受け取る']) {
+  for (const words of ['会社の時刻', '毎週月曜 09:00', '「営業/議事録」に新しいファイルがあるときだけ', '読む場所', '「営業/週報」', '上限：1回 15分・1日 1回', '外に送るもの：下書きまで', '動けなかった回', '期限', '「AI が自動で進める」がオフ', '受け取る']) {
     assert.ok(text.includes(words), words)
   }
   assert.doesNotMatch(text, /必ず(毎週|動きます)|毎週かならず/)

@@ -154,7 +154,7 @@ test('a read meeting says each thing once: one 案件 element, the chip without 
   await expect(card.getByText('AI が読み終えた')).toHaveCount(1)
   await expect(card.getByText(/AI が反映しました/)).toHaveCount(0)
   // One list: each task once in the body, the proposal put away too, its review task not at all.
-  await expect(card.getByRole('region', { name: 'AI のタスクの案' })).toHaveCount(0)
+  await expect(card.getByRole('region', { name: 'AI のやることの案' })).toHaveCount(0)
   await expect(card.getByRole('region', { name: '宿題' })).toHaveCount(0)
   await expect(card.getByRole('region', { name: '決めたこと（AI が残した）' })).toHaveCount(0)
   const body = card.getByRole('region', { name: 'この会議の議事録' })

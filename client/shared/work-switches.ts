@@ -11,6 +11,9 @@ import type { MyWorkSwitches, WorkSwitch } from '../../shared/types/work-switche
 
 export type { MyWorkSwitches, WorkSwitch }
 
+/** Each switch's name, as 自分の設定 shows it; other screens that point to a switch say this name. */
+export const WORK_SWITCH_NAMES: Readonly<Record<WorkSwitch, string>> = { readIncoming: '受信を読む', autoRun: 'AI が自動で進める' }
+
 export const WORK_SWITCHES_OFFLINE_TEXT = 'サーバーにつながらないため、いまは自分の設定を読み込めません。つながると自動で読み直します。'
 export const WORK_SWITCH_COMPANY_OFF_TEXT = '会社の設定で止まっています'
 

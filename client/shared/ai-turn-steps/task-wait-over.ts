@@ -51,7 +51,7 @@ export const taskWaitOver = {
     recordToolEndings: [],
     builtinTools: [],
   },
-  consultationTitle: c => `タスク「${c.title.length > TITLE_MAX ? `${c.title.slice(0, TITLE_MAX)}…` : c.title}」の追いかけ`,
+  consultationTitle: c => `やること「${c.title.length > TITLE_MAX ? `${c.title.slice(0, TITLE_MAX)}…` : c.title}」の追いかけ`,
   linksMinutes: false,
   firstMessage: (c, version) => taskWaitOverFirstMessage(c, version),
 } as const satisfies AiTurnStepDefinition<typeof TASK_WAIT_OVER_STEP>

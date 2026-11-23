@@ -55,7 +55,7 @@ export function MinutesReview({ companyId, review, busy, onAct, onMeetingCard = 
   const readerName = result?.success ? result.readerName ?? null : null
   // Until the proposals are read nothing tells which linked task is one.
   const others = result === null ? [] : made.filter(t => !proposals.some(p => p.id === t.id))
-  const listTitle = !onMeetingCard ? 'AI のタスクの案' : proposals.length > 0 ? 'やることの案' : 'やること'
+  const listTitle = !onMeetingCard ? 'AI のやることの案' : proposals.length > 0 ? 'やることの案' : 'やること'
   const decisionsTitle = '決めたこと'
   // One by one, each at its own version (the server makes each a task of its own).
   const act = async (items: Array<{ id: string; version: number }>, action: string, note?: string) => {

@@ -4,7 +4,7 @@
 // (design-system.md 「止まっている」の色). The server decides; this only shows and asks.
 import { SpinnerGap, WarningCircle } from '@phosphor-icons/react'
 import { Button, Callout, Card, SectionHeader, Switch } from '../../../shared/ui/primitives'
-import { companyHasMailOrChat, CONNECT_MAIL_CHAT_TEXT, WORK_SWITCH_COMPANY_OFF_TEXT, type WorkSwitch } from '../../../../shared/work-switches'
+import { companyHasMailOrChat, CONNECT_MAIL_CHAT_TEXT, WORK_SWITCH_COMPANY_OFF_TEXT, WORK_SWITCH_NAMES, type WorkSwitch } from '../../../../shared/work-switches'
 import { CALM } from '../../../../shared/thing-words'
 import { useWorkSwitches } from '../hooks/useWorkSwitches'
 import { STOP_ICON, STOP_TEXT } from '../../../shared/ui/stateStyles'
@@ -12,11 +12,11 @@ import { STOP_LOOK } from '../../../../../shared/design-tokens/stop-meaning'
 
 const SWITCHES: Array<{ key: WorkSwitch; title: string; text: string }> = [
   {
-    key: 'readIncoming', title: '受信を読む',
+    key: 'readIncoming', title: WORK_SWITCH_NAMES.readIncoming,
     text: 'あなたのメール・Slack に来た連絡を AI が読み、返事が要るものを「返事のお願い」としてやることに入れます。',
   },
   {
-    key: 'autoRun', title: 'AI が自動で進める',
+    key: 'autoRun', title: WORK_SWITCH_NAMES.autoRun,
     text: '会議が終わったときなど、あなたの AI の番を AI が自分で始めます。オフなら「AI に進めてもらう」を押すまで待ちます。送る・承認するは、どちらでも必ず人です。',
   },
 ]

@@ -63,6 +63,7 @@ import { STEER_PART_TYPE } from '../shared/steer'
 import { readOnlyMessage } from '../shared/write-access'
 import { JOB_PROPOSAL_PART_TYPE } from '../shared/job-proposals'
 import { MANUAL_JOB_CANDIDATE, MANUAL_JOB_DEFINITION, MANUAL_JOB_FINGERPRINT } from './ui/fixtures/manual-job'
+import { builtinToolDisplay } from '../shared/tool-display'
 
 const params = new URLSearchParams(location.search)
 // A sample for the bottom panel's frame (B2) in place of the inbox (I1), which needs records on (?inbox=1).
@@ -550,6 +551,8 @@ const LIVE_PAST = [
   return { id: p.id, companyId: COMPANY, title: p.title, createdAt: at, updatedAt: at, messageCount: 4, sent: true, preview: p.preview }
 })
 type LiveStep = { chunk: unknown } | { wait: number } | { write: string } | { ask: unknown[] } | { approve: ToolApprovalRequest['toolInput'] } | { end: true }
+// The Skill line the real stream carries (shared/tool-display.ts), so the manual's picture cannot drift from it.
+const SKILL_LINE = builtinToolDisplay('Skill')!
 // What main puts on a tool call (its plain-Japanese line with a company-relative path).
 const line = (label: string, running: string, detail: string) => ({ acb: { display: { label, running, many: `${label}（{n} 回）`, detail } } })
 const READ = (id: string, path: string): LiveStep[] => [
@@ -614,7 +617,7 @@ const LIVE_REPLIES: Array<{ when: RegExp; steps: LiveStep[] }> = [
   ] },
   // A Skill chosen with 「/」 (chapter 14).
   { when: /^\/thank-you-mail/, steps: [
-    { chunk: { type: 'tool-input-available', toolCallId: 's1', toolName: 'Skill', dynamic: true, providerExecuted: true, input: { skill: 'thank-you-mail' }, providerMetadata: line('スキルを使いました', 'スキルを使っています', 'thank-you-mail') } },
+    { chunk: { type: 'tool-input-available', toolCallId: 's1', toolName: 'Skill', dynamic: true, providerExecuted: true, input: { skill: 'thank-you-mail' }, providerMetadata: line(SKILL_LINE.label, SKILL_LINE.running, 'thank-you-mail') } },
     { chunk: { type: 'tool-output-available', toolCallId: 's1', dynamic: true, providerExecuted: true, output: 'ok' } },
     ...READ('r1', MEMO), ...WRITE('w1', THANKS),
     ...SAY('t1', '「thank-you-mail」の手順どおりに、お礼メールの下書きを「営業部/下書き/お礼メール_A社.md」に作りました。件名、お礼、次の約束（見積を来週お送りすること）の順に書いています。'),
