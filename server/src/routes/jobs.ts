@@ -142,7 +142,9 @@ jobsRoute.get('/me/job-turns', companyMember, async (c) => {
   // The occurrence kinds the app runs (`?kinds=time,event`; absent = time, every app before stage 4-0).
   const kinds = parseJobOccurrenceKinds(c.req.query('kinds'))
   if (kinds === null) return c.json({ error: 'kinds is a list of occurrence kinds', code: 'BAD_REQUEST' }, 400)
-  const result = jobRuns.turns(c.var.member, kinds)
+  // The checks the app runs (`?checks=matched_record`, 4b-4 PR2): a set watch's turn only for an app that names its check.
+  const checks = (c.req.query('checks') ?? '').split(',').map(s => s.trim()).filter(s => /^[a-z_]{1,30}$/.test(s)).slice(0, 10)
+  const result = jobRuns.turns(c.var.member, kinds, checks)
   if (!result.ok) return refusal(c, result)
   return c.json({ success: true, data: result.value })
 })

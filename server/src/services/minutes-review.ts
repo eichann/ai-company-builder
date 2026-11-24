@@ -26,13 +26,21 @@ export interface MinutesReviewDeps {
 const READ = 'read'
 const TITLE_MAX = 200
 
+/**
+ * The id of a meeting's 「議事録を確認する」 — the one copy: `ensure` makes it under this id, and a scheduled job's set watch tells
+ * such a やること by it (jobs.md "The set watch (schema 5)").
+ */
+export function minutesReviewIdOf(tokenDigest: TokenDigest, meetingId: string): string {
+  return meetingOutputId(tokenDigest, 'task', meetingId, MINUTES_REVIEW_KEY)
+}
+
 export function createMinutesReview(deps: MinutesReviewDeps) {
   /** Make the meeting's review task unless it exists. Returns its id, or null when none was made. */
   function ensure(companyId: string, meetingId: string): string | null {
     const records = deps.companyData.forCompany(companyId).records
     const meeting = records.byIds([meetingId]).find(r => r.type === 'meeting' && r.removedAt === null)
     if (!meeting) return null
-    const id = meetingOutputId(deps.tokenDigest, 'task', meetingId, MINUTES_REVIEW_KEY)
+    const id = minutesReviewIdOf(deps.tokenDigest, meetingId)
     if (records.find(id)) return null
     let fields: Record<string, unknown> = {}
     try { fields = JSON.parse(records.states([meetingId])[0]?.fields ?? '{}') as Record<string, unknown> } catch { /* no assignee */ }

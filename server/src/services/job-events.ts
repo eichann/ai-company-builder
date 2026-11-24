@@ -27,8 +27,8 @@
  *   `CHAIN_STOP_REMIND_AFTER_MS` after the stop, while they can still act on it.
  */
 import {
-  eventDueSlot, isEventOccurrenceSlot, isRecordTrigger, ledgerRowIsEvent, storedJobDefinition, triggerMatches,
-  type JobDefinition, type JobOutcomeCode, type JobRecordTrigger, type LedgerEventRow,
+  eventDueSlot, isEventOccurrenceSlot, isRecordTrigger, jobSetWatchOpened, ledgerRowIsEvent, newOccurrenceId, storedJobDefinition, triggerMatches,
+  type JobDefinition, type JobOutcomeCode, type JobRecordTrigger, type JobSetMarkOutcome, type LedgerEventRow,
 } from '../../shared/core/jobs'
 import { aiTurnStates } from '../../shared/core/record-types'
 import { replayRecordState } from '../../shared/core/record-ledger'
@@ -40,6 +40,7 @@ import type { Member } from './access'
 import { CHAIN_STOP_REMINDED, companyNow } from './notifications'
 import { recordReader } from './record-access'
 import { currentTypes } from './record-index'
+import { isSetWatchDefinition, minutesReviewEvent, minutesReviewKindKnown, setGuardRefusal, setOccurrenceShown, type MinutesReviewId } from './job-set-watch'
 
 /** Ledger rows of a watched record the scan reads per job and clock tick (the rest next tick, from the cursor). */
 export const EVENT_ROWS_PER_TICK = 500
@@ -64,6 +65,11 @@ export interface JobEventDeps {
   timeZoneOf: (companyId: string) => string
   /** A business plugin step's states that run as 「AI の番」 (absent: the type's own AI-only states alone). */
   aiStepStates?: AiStepStates
+  /**
+   * 4b-4 PR2, the set watch (job-set-watch.ts): the id of a meeting's 「議事録を確認する」. Absent → a set watch reads nothing (fails
+   * closed: its records cannot be told apart from a person's).
+   */
+  minutesReviewId?: MinutesReviewId
   log?: (message: string) => void
 }
 
@@ -88,10 +94,13 @@ function readableRow(handle: CompanyData, member: Member, recordId: string) {
 
 /**
  * Whether the viewer may see this occurrence at all (⑥): a time slot always; an event one only while they read its
- * record — and an `ev:` slot that names no record (never written by 4a) by nobody (fails closed, as 4-0.1 did).
+ * record — and an `ev:` slot that names no record (never written by 4a) by nobody (fails closed, as 4-0.1 did). A set watch's
+ * (4b-4 PR2, its meeting pinned) only while they also read that meeting and are one of its people (§2-5: never an owner / admin
+ * who did not attend).
  */
-export function eventShown(handle: CompanyData, member: Member, occ: { eventRecordId?: string | null; dueSlot?: string }): boolean {
+export function eventShown(handle: CompanyData, member: Member, occ: { eventRecordId?: string | null; dueSlot?: string; eventMeetingId?: string | null }): boolean {
   if (!occ.eventRecordId) return !isEventOccurrenceSlot(occ.dueSlot ?? '')
+  if (occ.eventMeetingId) return setOccurrenceShown(handle, member, occ.eventRecordId, occ.eventMeetingId)
   return readableRow(handle, member, occ.eventRecordId) !== null
 }
 
@@ -297,7 +306,7 @@ export function createJobEvents(deps: JobEventDeps) {
       if (job.approvedVersion === null || (job.state !== 'active' && job.state !== 'paused')) continue
       // Each job on its own (review of #700): one that fails — or one paused for long — never holds another back.
       try {
-        made += scanJob(handle, job, stopped, { nowMs, stamp, zone, day }, told)
+        made += scanJob(handle, job, stopped, { nowMs, stamp, zone, day }, told) + scanSetJob(handle, job, stopped, { nowMs, stamp, zone, day }, told)
         failing.delete(job.id)
       } catch (error) {
         // Another clock moved its cursor first (two servers): nothing of this pass was kept. Anything else: logged once
@@ -309,6 +318,145 @@ export function createJobEvents(deps: JobEventDeps) {
       }
     }
     return made
+  }
+
+  /**
+   * Whether a job's cursor may be read on now (an event job's and a set watch's alike): the job active and the company's jobs not
+   * stopped (the gap opened then keeps what happens meanwhile from running later); not written by an older build since (a
+   * rollback: it pauses and stops without gaps — nothing from before now runs, the safe side, Codex review of #700; a stale gap
+   * ends now); the approved consent accepted (else what happens before its 受け取る never runs: the cursor moves to now).
+   * `setWatch`: an older build's change also moves a set watch's switch boundary to now — it may have accepted a new consent
+   * without moving it (independent review of 4b-4 PR2), so nothing read or made before now counts as after an acceptance.
+   */
+  function cursorReady(handle: CompanyData, job: JobRow, consent: string, at: NonNullable<ReturnType<CompanyData['jobs']['eventCursor']>>, stopped: boolean, stamp: string, told: Set<string>, setWatch = false): boolean {
+    // Paused, or the company's stop: nothing now; the gap opened then keeps what happens meanwhile from running later.
+    if (job.state !== 'active' || stopped) return false
+    // Running, yet a gap of its pause (or of the company's stop) is still open: the pause or the stop was lifted by a
+    // build before 4a (a rollback round trip) — 4a never leaves one open while running (review of #700).
+    const staleGap = handle.jobs.openGapKeys(job.id)
+    if (job.updatedAt !== at.jobStamp || handle.jobs.stopStamp() !== at.stopStamp) {
+      transactions.run(() => {
+        for (const key of staleGap) handle.jobs.closeEventGaps(key === '' ? null : job.id, stamp)
+        dropUntilNow(handle, job.id, 'PAUSED_EVENT', told)
+        if (setWatch) handle.jobs.startSetCursor(job.id, stamp)
+      })
+      log(`[job-events] company ${handle.companyId} job ${job.id}: changed by an older build; events before now are not run`)
+      return false
+    }
+    // A stale gap this job saw lifted already (its stamps match: its cursor began after the older build lifted it — a job
+    // made since): it ends where this job began looking, and what came after runs as usual.
+    if (staleGap.length > 0) transactions.run(() => { for (const key of staleGap) handle.jobs.closeEventGaps(key === '' ? null : job.id, stamp, at.seen) })
+    // Another consent approved and not accepted yet: what happens before its 受け取る never runs.
+    if (job.acceptedConsent === null || job.acceptedConsent !== consent) {
+      transactions.run(() => dropUntilNow(handle, job.id, 'VERSION_EVENT', told))
+      return false
+    }
+    return true
+  }
+
+  /**
+   * A set watch's part of a tick (schema 5, 4b-4 PR2; jobs.md "The set watch (schema 5)"), in one transaction: the company's
+   * ledger rows into `done` of a やること after its cursor, by delivery number (never by time), at most `EVENT_ROWS_PER_TICK`; for
+   * each that is the combination's event of **this** job's responsible person (job-set-watch.ts `minutesReviewEvent`: someone
+   * else's record is left to that person's job, nothing marked here), the record's 「使った」 mark — one per record in the company —
+   * is written whatever comes of it: `made` with its occurrence, or why not (inside a pause's gap, before the boundary or a guard
+   * that does not hold, beyond the day's limit, a business plugin step busy with it). A record marked already (by any job) makes
+   * nothing. The cursor moves in the same transaction (compare-and-set). A combination no longer opened, or a task type that no
+   * longer means it (T9), reads nothing.
+   */
+  function scanSetJob(handle: CompanyData, job: JobRow, stopped: boolean, t: { nowMs: number; stamp: string; zone: string; day: string }, told: Set<string>): number {
+    const version = handle.jobs.version(job.id, job.approvedVersion as number)
+    const definition = version ? storedJobDefinition(version) : null
+    if (!version || !isSetWatchDefinition(definition)) return 0
+    const trigger = definition.trigger
+    const at = handle.jobs.eventCursor(job.id)
+    // A line taken out of `JOB_SET_WATCH_OPENED` stops its jobs: nothing read, nothing made (T22) — and its cursor follows now,
+    // so nothing completed meanwhile runs late if the line comes back (compare-and-set: another clock's move wins).
+    if (!jobSetWatchOpened(trigger)) {
+      if (at !== null) transactions.run(() => { handle.jobs.moveEventCursor(job.id, at.seen, Math.max(at.seen, handle.jobs.ledgerSeqNow()), t.stamp) })
+      return 0
+    }
+    // Never accepted (its acceptance starts the cursor and the boundary), or nothing to tell its records by: nothing.
+    const reviewId = deps.minutesReviewId
+    if (at === null || !reviewId) return 0
+    if (!cursorReady(handle, job, version.consentFingerprint, at, stopped, t.stamp, told, true)) return 0
+    // The task type no longer means what the job names (T9): nothing is read until it does again — never a guess.
+    if (!minutesReviewKindKnown(handle)) {
+      if (!failing.has(`${job.id}:kind`)) log(`[job-events] company ${handle.companyId} job ${job.id}: its record kind is no longer known; nothing is read`)
+      failing.add(`${job.id}:kind`)
+      return 0
+    }
+    failing.delete(`${job.id}:kind`)
+    const responsible = memberOf(handle.companyId, definition.actingUser)
+    return transactions.run((): number => {
+      const newest = handle.jobs.ledgerSeqNow()
+      if (newest <= at.seen) return 0
+      const rows = handle.jobs.ledgerInto('task', 'done', at.seen, newest, EVENT_ROWS_PER_TICK)
+      const gaps = handle.jobs.eventGaps(job.id)
+      const inGap = (seq: number) => gaps.some(g => seq > g.from && (g.until === null || seq <= g.until))
+      let today = handle.jobs.eventOccurrencesOn(job.id, t.day)
+      let n = 0
+      for (const row of rows) {
+        // `causes: human` under `ledger_v1`: a person, or their own consultation's AI — never a migration, the server, a run,
+        // an outside writer or a business plugin's screen.
+        if (!ledgerRowIsEvent(row)) continue
+        const event = minutesReviewEvent(handle, reviewId, definition.actingUser, row)
+        if (!event) continue
+        // `unit: record`: one mark per record in the company — whichever job, version or outcome wrote it.
+        if (handle.jobs.meetingReviewMarked(row.recordId)) continue
+        const mark = (outcome: JobSetMarkOutcome, occurrenceId: string | null = null) => handle.jobs.markMeetingReview({
+          recordId: row.recordId, meetingId: event.meetingId, jobId: job.id, outcome, occurrenceId, at: t.stamp,
+        })
+        // Reached while paused or stopped: never runs (③).
+        if (inGap(row.seq)) { mark('paused'); continue }
+        const refused = responsible
+          ? setGuardRefusal(handle, trigger, definition, { responsible, boundary: at.setBoundary, recordId: row.recordId, version: row.version, meetingId: event.meetingId })
+          : 'not_matched'
+        if (refused) { mark(refused); continue }
+        // The day's limit (company time): beyond it nothing is made — its one notice a day to the responsible person (no
+        // meeting's name, no count); they can still have it made in a consultation.
+        if (today >= definition.grant.limits.runsPerDay) {
+          mark('day_limit')
+          dayLimitNotice(handle, job.id, definition.actingUser, t.day, t.stamp, told)
+          continue
+        }
+        const id = newOccurrenceId(ids.newId().replace(/-/g, '').toLowerCase().slice(0, 32).padEnd(32, '0'))
+        const occurrenceAt = new Date(t.nowMs).toISOString()
+        const inserted = handle.jobs.insertOccurrence({
+          id, jobId: job.id, jobVersion: version.version, dueSlot: eventDueSlot(row.seq), timeZone: t.zone,
+          dueAt: new Date(Date.parse(row.at)).toISOString(),
+          // Its time to run counts from now (the event may have been read late), never from the event.
+          expiresAt: new Date(t.nowMs + definition.missed.expiresAfterMinutes * 60_000).toISOString(),
+          state: 'due', runId: null, outcomeCode: null, createdAt: occurrenceAt, updatedAt: occurrenceAt,
+          eventSeq: row.seq, eventRecordId: row.recordId, eventVersion: row.version, eventDay: t.day,
+          // No watched record (no generation): its end moves, stops or clears no watch.
+          watchGeneration: null, eventMeetingId: event.meetingId,
+        })
+        // One there already is this very event (`UNIQUE (company, job, event_seq)`): marked by the pass that made it.
+        if (!inserted) continue
+        mark('made', id)
+        n++
+        today++
+      }
+      // More rows than one tick reads: on from the last one next tick. Else up to now.
+      const to = rows.length >= EVENT_ROWS_PER_TICK ? rows[rows.length - 1].seq : newest
+      if (!handle.jobs.moveEventCursor(job.id, at.seen, to, t.stamp)) throw new CursorMoved()
+      return n
+    })
+  }
+
+  /**
+   * 「1日の上限を超えたため、作らなかった会議があります」 (4b-4 PR2, §6-2): to the set watch's responsible person only (while a member),
+   * once per job and company day (`job_day_limit:<job>:<day>`), recordless; its words are built when read (no meeting's name, no
+   * count — `jobs.dayLimitNotice`). In the caller's transaction.
+   */
+  function dayLimitNotice(handle: CompanyData, jobId: string, userId: string, day: string, at: string, told: Set<string>): void {
+    if (deps.roleOf(handle.companyId, userId) === null) return
+    const written = handle.notifications.insert([{
+      id: ids.newId(), userId, kind: 'job_day_limit' as const, recordId: '', recordVersion: 0, action: '', actorId: null, actorKind: null,
+      dedupeKey: `job_day_limit:${jobId}:${day}`, createdAt: at, readAt: null,
+    }])
+    if (written.length > 0) told.add(userId)
   }
 
   /**
@@ -325,29 +473,7 @@ export function createJobEvents(deps: JobEventDeps) {
     const at = handle.jobs.eventCursor(job.id)
     // Never accepted as an event job: nothing to look at (its acceptance starts the cursor at "now").
     if (at === null) return 0
-    // Paused, or the company's stop: nothing now; the gap opened then keeps what happens meanwhile from running later.
-    if (job.state !== 'active' || stopped) return 0
-    // Running, yet a gap of its pause (or of the company's stop) is still open: the pause or the stop was lifted by a
-    // build before 4a (a rollback round trip) — 4a never leaves one open while running (review of #700).
-    const staleGap = handle.jobs.openGapKeys(job.id)
-    // The job or the company's stop was written by a build before 4a (a rollback: it pauses and stops without gaps):
-    // nothing from before now runs (the safe side, Codex review of #700); a stale gap ends now.
-    if (job.updatedAt !== at.jobStamp || handle.jobs.stopStamp() !== at.stopStamp) {
-      transactions.run(() => {
-        for (const key of staleGap) handle.jobs.closeEventGaps(key === '' ? null : job.id, t.stamp)
-        dropUntilNow(handle, job.id, 'PAUSED_EVENT', told)
-      })
-      log(`[job-events] company ${handle.companyId} job ${job.id}: changed by an older build; events before now are not run`)
-      return 0
-    }
-    // A stale gap this job saw lifted already (its stamps match: its cursor began after the older build lifted it — a job
-    // made since): it ends where this job began looking, and what came after runs as usual.
-    if (staleGap.length > 0) transactions.run(() => { for (const key of staleGap) handle.jobs.closeEventGaps(key === '' ? null : job.id, t.stamp, at.seen) })
-    // Another consent approved and not accepted yet: what happens before its 受け取る never runs.
-    if (job.acceptedConsent === null || job.acceptedConsent !== version.consentFingerprint) {
-      transactions.run(() => dropUntilNow(handle, job.id, 'VERSION_EVENT', told))
-      return 0
-    }
+    if (!cursorReady(handle, job, version.consentFingerprint, at, stopped, t.stamp, told)) return 0
     return transactions.run((): number => {
       const newest = handle.jobs.ledgerSeqNow()
       if (newest <= at.seen) return 0

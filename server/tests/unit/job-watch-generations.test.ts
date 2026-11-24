@@ -73,12 +73,14 @@ describe('watch generations are additive', () => {
     const changed = once.filter(o => before.some(b => b.name === o.name) && !before.some(b => b.name === o.name && b.sql === withoutLater(o)))
     expect(changed.map(o => o.name).sort()).toEqual(['ai_job_event_cursors', 'ai_job_occurrences'])
     // (Member proposals' own tables, jobs.md "Member proposals", came later than the fixture: theirs, not this migration's.)
-    const proposals = /^(ai_job_candidates|ai_job_proposals)$/
-    expect(once.filter(o => !before.some(b => b.name === o.name) && /ai_job/.test(o.name) && !proposals.test(o.tbl_name))).toEqual([])
+    // (The set watch's mark, 4b-4 PR2, came later too, with its own columns on the two tables: taken out before comparing.)
+    const later = /^(ai_job_candidates|ai_job_proposals|ai_job_meeting_reviews)$/
+    expect(once.filter(o => !before.some(b => b.name === o.name) && /ai_job/.test(o.name) && !later.test(o.tbl_name))).toEqual([])
+    const SET_WATCH_COLUMNS = [', event_meeting_id TEXT', ', set_boundary_seq INTEGER']
     for (const o of changed) {
       const was = before.find(b => b.name === o.name)?.sql as string
       expect(o.sql).toContain(', watch_generation INTEGER')
-      expect(o.sql?.replace(', watch_generation INTEGER', '')).toBe(was)
+      expect(SET_WATCH_COLUMNS.reduce((sql, c) => sql.replace(c, ''), o.sql ?? '').replace(', watch_generation INTEGER', '')).toBe(was)
     }
     const fresh = new Database(':memory:')
     initDatabase(fresh)

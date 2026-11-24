@@ -82,6 +82,8 @@ export interface NotificationServiceDeps {
   jobOccurrenceNoticeOf?: (member: Member, jobId: string, occurrenceId: string) => { name: string; dueSlot: string; outcomeCode: string | null } | null
   /** 「止まっています」 (`job_chain_stopped`, stage 4a ①): the job's name and the cause as the member may read it, while that stop stands; else null — also for anyone but the responsible person who does not read the stop's record now (D7 = A). */
   jobChainStoppedOf?: (member: Member, jobId: string, at: string) => { name: string; why: string } | null
+  /** 「1日の上限を超えた」 (`job_day_limit`, 4b-4 PR2): the set watch's name while the member is its approved version's responsible person; else null. */
+  jobDayLimitOf?: (member: Member, jobId: string) => { name: string } | null
   /**
    * 「受け取りが要ります」 (`job_accept_needed`, jobs.md "The acceptance notice"): the job's name while the
    * version still waits for this member's acceptance, else null (not shown). Absent → never shown.
@@ -982,8 +984,11 @@ export function createNotificationService(deps: NotificationServiceDeps) {
         const at = Date.parse((r.dedupeKey ?? '').split(':').slice(2).join(':'))
         return Number.isNaN(at) ? null : dueText(companyNow(at, zoneOf(member.companyId)).slice(0, 10))
       }
+      // A set watch past its day's limit: `job_day_limit:<job id>:<day>`, shown only to its responsible person.
+      const dayLimit = (r: NotificationRow) => deps.jobDayLimitOf?.(member, (r.dedupeKey ?? '').split(':')[1] ?? '') ?? null
       const visible = rows.filter(r => {
         if (r.kind === 'job_chain_stopped') return r.recordId === '' && chainStopped(r) !== null
+        if (r.kind === 'job_day_limit') return r.recordId === '' && dayLimit(r) !== null
         if (r.kind === 'job_paused') return r.recordId === '' && jobNotice(r) !== null
         if (r.kind === 'job_accept_needed') return r.recordId === '' && acceptNotice(r) !== null
         if (r.kind === 'job_proposal') return r.recordId === '' && proposalNotice(r) !== null
@@ -1033,6 +1038,14 @@ export function createNotificationService(deps: NotificationServiceDeps) {
           const text = since
             ? `定期の仕事「${job.name}」は${since}から止まったままです（${job.why}）。次に見張るやることを選び直してください`
             : `定期の仕事「${job.name}」が止まっています（${job.why}）。次に見張るやることを選び直してください`
+          return { id: r.id, kind: r.kind, recordId: '', recordType: '', recordTitle: '', version: 0, text, createdAt: r.createdAt, read }
+        }
+        if (r.kind === 'job_day_limit') {
+          // No meeting's name and no count (4b-4 §6-2): which meetings went without stays out of the inbox.
+          const job = dayLimit(r) as { name: string }
+          // The day it happened (company time, from its key), never 「今日」: it may be read days later.
+          const day = /^\d{4}-\d{2}-\d{2}$/.test((r.dedupeKey ?? '').split(':')[2] ?? '') ? dueText((r.dedupeKey as string).split(':')[2]) : null
+          const text = `定期の仕事「${job.name}」は${day ? `${day}、` : ''}1日の上限を超えたため、動かなかった会議があります。必要なら、その会議について AI に相談して作ってください`
           return { id: r.id, kind: r.kind, recordId: '', recordType: '', recordTitle: '', version: 0, text, createdAt: r.createdAt, read }
         }
         if (r.kind === 'job_accept_needed') {

@@ -118,5 +118,22 @@ export function sqlitePluginStepRepository(conn: Database.Database, companyId: s
             AND p.skill IN (SELECT value FROM json_each(?)))`)
         .run(at, jobId, companyId, companyId, JSON.stringify(skills)).changes
     },
+    stepBusyWithSkills(recordId, meetingId, skills) {
+      const names = JSON.stringify(skills)
+      // A step runs one of the Skills on this work: pinned so (its first run), or the company's setting names it now.
+      const runsSkill = (alias: string) => `(EXISTS (SELECT 1 FROM plugin_step_pins p WHERE p.company_id = ? AND p.record_id = ${alias}.record_id
+          AND p.plugin_id = ${alias}.plugin_id AND p.step = ${alias}.step AND p.source = 'company_skill' AND p.skill IN (SELECT value FROM json_each(?)))
+        OR EXISTS (SELECT 1 FROM plugin_step_skills k WHERE k.company_id = ? AND k.plugin_id = ${alias}.plugin_id AND k.step = ${alias}.step
+          AND k.skill IN (SELECT value FROM json_each(?))))`
+      const asked = conn.prepare(`SELECT 1 FROM plugin_step_requests q WHERE q.company_id = ? AND q.record_id = ? AND q.done_at IS NULL AND q.meeting_id = ?
+          AND ${runsSkill('q')} LIMIT 1`).get(companyId, recordId, meetingId, companyId, names, companyId, names)
+      if (asked !== undefined) return true
+      // A run of such a step on the work (its step named `<plugin>__<step>`, plugin-steps.md), not closed yet.
+      const running = conn.prepare(`SELECT 1 FROM ai_runs r JOIN (SELECT ? AS record_id, plugin_id, step FROM plugin_step_pins WHERE company_id = ? AND record_id = ?
+            UNION SELECT ? AS record_id, plugin_id, step FROM plugin_step_skills WHERE company_id = ?) s ON r.step = s.plugin_id || '__' || s.step
+          WHERE r.company_id = ? AND r.record_id = ? AND r.closed_at IS NULL AND ${runsSkill('s')} LIMIT 1`)
+        .get(recordId, companyId, recordId, recordId, companyId, companyId, recordId, companyId, names, companyId, names)
+      return running !== undefined
+    },
   }
 }

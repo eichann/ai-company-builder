@@ -50,6 +50,7 @@ import { hasFullAccess, type Member } from './access'
 import { unattendedRunStopped } from './ai-runs'
 import { EVENT_RECORDS_CHECKED, JOBS_FORBIDDEN, OCCURRENCES_LISTED, occurrenceView, type JobService } from './jobs'
 import { eventShown } from './job-events'
+import { isSetWatchOccurrence } from './job-set-watch'
 import { recordReader } from './record-access'
 import { ok, refuse, type Outcome, type Refusal } from './outcome'
 
@@ -85,9 +86,9 @@ export const MINE_PAGES = 5
 interface Rights { retry: boolean; reconcile: boolean }
 const NO_RIGHTS: Rights = { retry: false, reconcile: false }
 
-/** An event occurrence run by the PC (schema 3, stage 4b-1): the only kind whose responsible person presses here. */
+/** An event occurrence run by the PC (schema 3, stage 4b-1; a set watch's since 4b-4 PR2): the only kind whose responsible person presses here. */
 const eventPc = (occ: JobOccurrenceRow, definition: JobDefinition | null): boolean =>
-  !!occ.eventRecordId && definition !== null && definition.placement === 'a' && definition.check.kind === 'source_record'
+  !!occ.eventRecordId && definition !== null && definition.placement === 'a' && (definition.check.kind === 'source_record' || isSetWatchOccurrence(occ, definition))
 const BLOCKED = (why: JobRetryBlock) => refuse('conflict', jobRetryBlockText(why), { code: why })
 
 /** The stored definition, or null for a shape this build does not know (jobs.md "Shapes this build does not know"): never run. */

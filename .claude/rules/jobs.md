@@ -25,6 +25,7 @@ paths:
   - "client/electron/features/ai-turns/claims.ts"
   - "server/src/services/job-retry.ts"
   - "server/src/services/job-events.ts"
+  - "server/src/services/job-set-watch.ts"
   - "server/src/services/ai-runs.ts"
   - "admin/src/lib/api.ts"
   - "server/src/**/job-proposals.ts"
@@ -79,8 +80,11 @@ New tables only (additive; `CREATE … IF NOT EXISTS`, nothing else changes):
   `checked_commit` — the commit a `new_files` check in the shared folder looked up to (the app's, with that claim),
   and (5b, additive: `migrateJobOccurrenceRetries`) `retries` (0 = never), `retried_by`, `retried_at` — 「もう一度」, and
   (4b-0.5, additive: `migrateJobWatchGenerations`) `watch_generation` — the watch an event occurrence was made for
-  ("Event-triggered jobs" "Watch generations").
+  ("Event-triggered jobs" "Watch generations"), and (4b-4 PR2, additive: `migrateJobSetWatch`) `event_meeting_id` — the meeting
+  a set watch's occurrence was made for ("The set watch (schema 5)").
   Written by the clock and the runner (3b, below).
+- `ai_job_meeting_reviews` (4b-4 PR2): the set watch's 「使った」 mark, one per record in the company ("The set watch (schema 5)");
+  `ai_job_event_cursors.set_boundary_seq` (same PR): a set watch's switch boundary.
 - `ai_job_settings`: 「定期の仕事をすべて止める」 (`stopped`; no row = not stopped).
 
 No feature switch in `shared/core/features.ts`: its rule is "every feature on by default", and a
@@ -1453,11 +1457,11 @@ timed renew of the same hold, moves it by milliseconds).
 ## The set watch (schema 5, 4b-4 PR1; owner memo 「4b-4 商談から提案書」 第6版 §2 / §3 / §4 / 付録 B)
 
 「これから来る、条件に合うもの全部」 — a second way to watch, beside the one watched record of schemas 2 / 3 (which stay exactly
-as they are). **PR1 is the definition, the consent and the approval only: nothing runs.** The clock never makes an occurrence
-of a schema-5 job (`makeOccurrences` takes time triggers, the event scan record triggers), no app names its check, and no
-screen announces 5 yet (`ADMIN_JOB_SCHEMAS` / `APP_JOB_SCHEMAS` stay `[1, 2, 3, 4]`: such a version is answered without its
-definition, `needsUpdate`, and a create, approval or acceptance from them is `JOB_NEEDS_NEWER_SCREEN`). PR2 finds the records
-and makes occurrences, PR3 the report and its やること, PR4 the plugin steps' side, PR5 / PR6 the app, PR7 the admin console.
+as they are). **PR1: the definition, the consent and the approval. PR2: the server finds the records and makes occurrences**
+("The scan and its occurrences" below) — no released app names its check (`matched_record`), so nothing is claimed or run until
+PR5, and no screen announces 5 yet (`ADMIN_JOB_SCHEMAS` / `APP_JOB_SCHEMAS` stay `[1, 2, 3, 4]`: such a version is answered
+without its definition, `needsUpdate`, and a create, approval or acceptance from them is `JOB_NEEDS_NEWER_SCREEN`). PR3 the
+report and its やること, PR4 the plugin steps' side, PR5 / PR6 the app, PR7 the admin console.
 
 - **The trigger is words, not a condition language** (owner decision 2026-11-23, §2-1): `{ kind: 'record_set', recordType,
   taskKind, origin, causes, causeRule, assignee, event, unit, guards }`, each key from its own list (`JOB_SET_WATCH_WORDS`,
@@ -1511,6 +1515,67 @@ and makes occurrences, PR3 the report and its やること, PR4 the plugin steps
   it waits for no request or run (§3 ③: a run already going ends within its deadline, and its meeting is before the
   boundary PR2 enforces). Refused for any other reason → nothing closed (one transaction). PR4 adds the steps' side
   (choosing, enabling, asking and taking the Skill refused while such a job is approved).
+- **The scan and its occurrences** (4b-4 PR2; `services/job-events.ts` `scanSetJob` — the cursor, gaps, stamps, day's limit and
+  mark, shared with the event jobs' scan through `cursorReady` —, `services/job-set-watch.ts` — the combination's own rules, one
+  place: what is the event, the guards, the conditions while it runs, who sees it):
+  - **The cursor** is an event job's row (`ai_job_event_cursors`, `watch_record_id` '' — it watches no one record, so no watch,
+    fire, move, generation or chain stop ever applies), made by the acceptance of a new consent (`startSetCursor`: at the
+    company's newest delivery number, never back; `set_boundary_seq` = that number, **the switch boundary**). Paused / the
+    company's stop, a gap still open, a pause an older build made (the stamps), a consent not accepted: as for an event job
+    (`cursorReady`); a change an older build made also moves the switch boundary to now (`startSetCursor` again: such a build
+    may have accepted a new consent without moving it — nothing read or made before now counts as after an acceptance). Each tick, each approved, active, accepted set watch on its own reads the company's ledger rows **into
+    `done` of a やること** after its cursor, by delivery number (`ledgerInto`, index `idx_record_ledger_into (company_id, to_state,
+    delivery_seq)`; "into" = a state change: a field-only change of a done やること writes `done → done` and is not read — it
+    never is a first done anyway, so this keeps the tick's budget for real completions and holds no rule of its own), at most
+    `EVENT_ROWS_PER_TICK`; the occurrences, the marks and the cursor's move (compare-and-set) are one
+    transaction. A combination no longer opened (`jobSetWatchOpened` on the stored version) reads nothing and its cursor follows
+    now (compare-and-set), so what was completed while the line was out never runs late if it comes back; a task type that no
+    longer has `task_kind: minutes_review` and a `meeting` link (T9) reads nothing and logs once, its cursor kept: what was
+    completed meanwhile runs once it is back (decision: no pause reason exists for it — the job looks as if nothing came; an
+    owner notice is a follow-up).
+  - **The event** (`minutesReviewEvent`): `ledgerRowIsEvent` (`causes: human`, `ledger_v1`); a やること whose first version was
+    written by the minutes intake (`MINUTES_ACTOR`) with `task_kind: minutes_review`, exactly one `links.meeting`, and its id
+    `meetingOutputId(meeting, MINUTES_REVIEW_KEY)` (composition's `minutesReviewId`; never a title); the row its **first** `done`
+    (no earlier one in its ledger); its assignee at version 1 the job's responsible person. Anything else is not this job's and
+    is **not marked** (someone else's record is that person's job's to judge, T18).
+  - **The mark** (`ai_job_meeting_reviews`, `PRIMARY KEY (company_id, record_id)`, `JOB_SET_MARK_OUTCOMES`): for the job's own
+    record, written in the scan's transaction whatever comes of it — `made` (with the occurrence), `paused` (a gap), and the
+    guards' (`setGuardRefusal`): `not_matched` (its assignee at the event not the responsible person; `people_only_meeting`: the
+    meeting not members-only — one with a folder, before 2026-11-04; `attendee_responsible`: the responsible person does not read
+    the record or the meeting now or is not one of its people; `outside_attendee`: `external_count` 0), `before_acceptance`
+    (`after_acceptance`: the record's first ledger row **and** the meeting's first row into `read` must both carry a delivery
+    number after the boundary — a NULL one is out, no later reading stands in, T21), `step_busy` (`plugin_step_exclusive`, §3 ②:
+    the meeting's まとまり has an open step request naming that meeting, or an unclosed run of a step, whose pin or company
+    setting names one of the job's Skills — `PluginStepRepository.stepBusyWithSkills`), `day_limit`. A record with a mark (any
+    job's, any outcome) never makes anything: a new version or a new job never runs the same meeting again. The mark is a plain
+    insert, never `OR IGNORE`: the scan asks first in the same transaction, and a mark found there anyway (a second clock) throws,
+    so that job's pass — its occurrence included — is rolled back rather than an occurrence beside another job's mark. Each guard is named
+    in the definition and checked by its name; an unknown name never holds.
+  - **The day's limit**: occurrences made per job and company day up to the consented `grant.limits.runsPerDay` (the memo's 10
+    is what the admin form will offer, PR7); beyond it `day_limit` and the notice `job_day_limit` to the responsible person only,
+    once per job and day (`job_day_limit:<job>:<day>`, built when read by `jobs.dayLimitNotice`: the job's name and the day from
+    its key — never 「今日」, it may be read later —, no meeting's name, no count, shown only while they are the approved version's responsible person). The job is never paused for it.
+  - **The occurrence**: `ev:<seq>` (an event occurrence: the pause, the stop, the floor's freezing, the expiry and its notices
+    all apply as for any), `event_record_id` the record, `event_meeting_id` the meeting, no watch generation, due at the event,
+    expiring `missed.expiresAfterMinutes` from now.
+  - **Who sees it** (§2-5, I8; `eventShown` → `setOccurrenceShown`): someone who reads the record **and** reads the meeting and is
+    one of its people (on its list as a person, its assignee or an attendee: `services/meeting-people.ts`, the minutes service's
+    one copy) — an owner / admin who did not attend never: the occurrence list (`shownOccurrences` leaves them out before the
+    limit, with the job's event records and their meetings in one batch), `lastOccurrence`, the occurrence notices' recipients
+    and words, 「もう一度」 / reconcile (its responsible person may, as for an event PC occurrence, D11) and `GET
+    /me/job-occurrences`. The responsible person's 「止まった」 exception of a watched record does not exist here (no chain).
+  - **The PC** (the run is PR5's): an event PC occurrence for every rule of "Event jobs on the PC" (`isEventPcOccurrence` takes
+    it), with its conditions (`eventCondition` → `setWatchCondition`, after C1 / C7 / C2): its combination still opened
+    (`SET_WATCH_NOT_OPENED`), the record and the meeting still the responsible person's to read and the meeting's people still
+    include them (`EVENT_RECORD_GONE`), the record's meeting still the pinned one (`SET_WATCH_MEETING_CHANGED`), the record still
+    `done` (`EVENT_NOT_NEEDED`), its assignee still them (`EVENT_NOT_ASSIGNEE`); before a run starts also D5. Checked at the list,
+    the claim, every call and renew, the finish and the clock; a failure ends it as an event PC occurrence's (skipped / nothing,
+    not told). **Two locks**: a claim names the kind `event` and the check `matched_record`; `GET /me/job-turns` lists such a turn
+    only with `?checks=matched_record` (an app of 4b-2 lists `event` turns and would drop one it cannot parse). The turn's
+    `source` names the record and `meetingId`. **The minutes it reads**: `JOB_MINUTES_ROUTE` only for `recordId` = the pinned
+    meeting (`routeRefusal`'s `meetingFound`), checked after the conditions; any other meeting → 403 `NOT_IN_STEP`.
+  - **The rollback floor** (4b-0.5) knows no schema 5: the occurrence is frozen there (not listed, told, claimed, run or expired;
+    a stop holds it), the mark untouched — `server/tests/cross-build/` S1.
 - **Telling the record by its kind** (§2-2): `task_kind` is written by the minutes service only — a person's or an AI's
   create naming it is 400 `BAD_VALUE` (`record-engine/create.ts`), and no action takes it as an argument.
 - **Compatibility** (T11): an older server (the floor, 4b-0.5, and every build before this) does not know schema 5 and
@@ -1524,7 +1589,20 @@ and makes occurrences, PR3 the report and its やること, PR4 the plugin steps
   sha256, the places, the words) and `server/tests/integration/job-set-watch.test.ts` (on a real bare repository: the pins and
   reasons replaced, missing Skill / reasons / folder, a combination not opened at save, approval, acceptance and resume, one
   per responsible person, the step setting and the requests closed without a time condition, a changed Skill, older screens,
-  no occurrence made, `task_kind` refused). Mutation check: see the PR.
+  no occurrence made without a matching record, `task_kind` refused). Mutation check: see the PR.
+- Tests (PR2): `server/tests/integration/job-set-watch-scan.test.ts` (the event: one occurrence and its mark, reopened / read again
+  / two ticks nothing more, a mark of any job blocks, a task not made by the intake or not under the meeting's id, the meeting's
+  own review whose first version another writer made or made as another kind, a run's row, first completed by a run then by her,
+  completed before and reopened, made for bob and handed over; the guards: hers when made but handed to bob at the event, no
+  longer one of the meeting's people when completed, no outside attendee, a folder meeting, read before the acceptance — also
+  its review made after —, a NULL delivery number on the meeting's first reading or on the review's making, a step busy,
+  paused, the day's limit and its one notice naming its day and no meeting, no longer shown to an admin who was its responsible person once
+  it is handed over; bob's record unmarked; the owner who did not attend sees no
+  occurrence nor last one, an attendee taken off the list neither (also in 「AI が動いた回」), nor one who still reads the
+  meeting through a group but is not one of its people, expiry told to the responsible person only; 「もう一度」 and `GET /me/job-occurrences`; the two locks and the
+  list's `checks`, the turn's meeting, one meeting's minutes only, the conditions ending it; an older build's change moving
+  the boundary; a line taken out, and nothing from meanwhile run once it is back),
+  `server/tests/cross-build/` (S1: the floor freezes it, back here unchanged). Mutation check: see the PR.
 
 ## Member proposals (「AIへの相談」から定期の仕事, PR A: the server; owner memo 2026-11-22 第1〜5版, decisions Q1–Q4)
 

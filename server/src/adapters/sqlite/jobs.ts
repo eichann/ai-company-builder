@@ -1,7 +1,7 @@
 import type Database from 'better-sqlite3'
-import { EVENT_OCCURRENCE_SLOT_PREFIX, JOB_SCHEMAS, type JobDeliveryPlace, type JobPauseReason, type LedgerEventRow } from '../../../shared/core/jobs'
+import { EVENT_OCCURRENCE_SLOT_PREFIX, JOB_SCHEMAS, type JobDeliveryPlace, type JobPauseReason, type JobSetMarkOutcome, type LedgerEventRow } from '../../../shared/core/jobs'
 import type { JobState } from '../../../shared/types/jobs'
-import type { JobCandidateRow, JobEventCursor, JobEventGap, JobOccurrenceRow, JobProposalRow, JobRepository, JobRow, JobVersionRow } from '../../ports/jobs'
+import type { JobCandidateRow, JobEventCursor, JobEventGap, JobMeetingReviewRow, JobOccurrenceRow, JobProposalRow, JobRepository, JobRow, JobVersionRow } from '../../ports/jobs'
 
 /** A discarded candidate's fingerprint (member proposals' 「やめる」): never a `sha256:` value, so no fingerprint sent matches it. */
 const DISCARDED_MARK = 'discarded'
@@ -30,9 +30,10 @@ interface OccurrenceDbRow {
   retries: number; retried_by: string | null; retried_at: string | null
   event_seq: number | null; event_record_id: string | null; event_version: number | null; event_day: string | null
   watch_generation: number | null
+  event_meeting_id: string | null
 }
 const OCCURRENCE_COLUMNS = 'id, job_id, job_version, due_slot, time_zone, due_at, expires_at, state, run_id, outcome_code, created_at, updated_at'
-const OCCURRENCE_READ = `${OCCURRENCE_COLUMNS}, checked_until, checked_commit, retries, retried_by, retried_at, event_seq, event_record_id, event_version, event_day, watch_generation`
+const OCCURRENCE_READ = `${OCCURRENCE_COLUMNS}, checked_until, checked_commit, retries, retried_by, retried_at, event_seq, event_record_id, event_version, event_day, watch_generation, event_meeting_id`
 /**
  * Newest first, by when each came: a time slot by its time (`due_at`; a job of time slots only reads exactly as it did,
  * newest slot first), an event one by when it was made (`created_at`: a scan only ever moves forward), so a job whose
@@ -66,6 +67,7 @@ const occurrenceOf = (r: OccurrenceDbRow): JobOccurrenceRow => ({
   id: r.id, jobId: r.job_id, jobVersion: r.job_version, dueSlot: r.due_slot, timeZone: r.time_zone, dueAt: r.due_at, expiresAt: r.expires_at,
   state: r.state as JobOccurrenceRow['state'], runId: r.run_id, outcomeCode: r.outcome_code, checkedUntil: r.checked_until, checkedCommit: r.checked_commit, retries: r.retries, retriedBy: r.retried_by, retriedAt: r.retried_at,
   eventSeq: r.event_seq, eventRecordId: r.event_record_id, eventVersion: r.event_version, eventDay: r.event_day, watchGeneration: r.watch_generation,
+  eventMeetingId: r.event_meeting_id,
   createdAt: r.created_at, updatedAt: r.updated_at,
 })
 
@@ -243,10 +245,10 @@ export function sqliteJobRepository(conn: Database.Database, companyId: string):
           .run(companyId, o.id, o.jobId, o.jobVersion, o.dueSlot, o.timeZone, o.dueAt, o.expiresAt, o.state, o.runId, o.outcomeCode, o.createdAt, o.updatedAt)
           .changes === 1
       }
-      return conn.prepare(`INSERT OR IGNORE INTO ai_job_occurrences (company_id, ${OCCURRENCE_COLUMNS}, event_seq, event_record_id, event_version, event_day, watch_generation)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      return conn.prepare(`INSERT OR IGNORE INTO ai_job_occurrences (company_id, ${OCCURRENCE_COLUMNS}, event_seq, event_record_id, event_version, event_day, watch_generation, event_meeting_id)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
         .run(companyId, o.id, o.jobId, o.jobVersion, o.dueSlot, o.timeZone, o.dueAt, o.expiresAt, o.state, o.runId, o.outcomeCode, o.createdAt, o.updatedAt,
-          o.eventSeq, o.eventRecordId ?? null, o.eventVersion ?? null, o.eventDay ?? null, o.watchGeneration ?? null)
+          o.eventSeq, o.eventRecordId ?? null, o.eventVersion ?? null, o.eventDay ?? null, o.watchGeneration ?? null, o.eventMeetingId ?? null)
         .changes === 1
     },
     occurrence(occurrenceId) {
@@ -336,8 +338,10 @@ export function sqliteJobRepository(conn: Database.Database, companyId: string):
       }))
     },
     eventRecordsOf(jobId, limit) {
-      return (conn.prepare(`SELECT event_record_id AS id FROM ai_job_occurrences WHERE company_id = ? AND job_id = ? AND event_record_id IS NOT NULL AND ${KNOWN}
-          GROUP BY event_record_id ORDER BY MAX(event_seq) DESC LIMIT ?`).all(companyId, jobId, limit) as Array<{ id: string }>).map(r => r.id)
+      // A set watch's record has one occurrence per job (its mark is the company's), so its meeting is that one's.
+      return (conn.prepare(`SELECT event_record_id AS id, MAX(event_meeting_id) AS meeting FROM ai_job_occurrences WHERE company_id = ? AND job_id = ? AND event_record_id IS NOT NULL AND ${KNOWN}
+          GROUP BY event_record_id ORDER BY MAX(event_seq) DESC LIMIT ?`).all(companyId, jobId, limit) as Array<{ id: string; meeting: string | null }>)
+        .map(r => ({ recordId: r.id, meetingId: r.meeting }))
     },
     occurrencesOf(jobId, records, limit) {
       return (conn.prepare(`SELECT ${OCCURRENCE_READ} FROM ai_job_occurrences WHERE company_id = ? AND job_id = ? AND ${KNOWN}
@@ -347,15 +351,16 @@ export function sqliteJobRepository(conn: Database.Database, companyId: string):
     },
     eventCursor(jobId) {
       const r = conn.prepare(`SELECT seen_seq, watch_record_id, watch_start, watch_fired, job_stamp, stop_stamp, chain_stop_code, chain_stop_record, chain_stop_at,
-          watch_generation FROM ai_job_event_cursors WHERE company_id = ? AND job_id = ?`)
+          watch_generation, set_boundary_seq FROM ai_job_event_cursors WHERE company_id = ? AND job_id = ?`)
         .get(companyId, jobId) as {
           seen_seq: number; watch_record_id: string; watch_start: string; watch_fired: number; job_stamp: string; stop_stamp: string
           chain_stop_code: string | null; chain_stop_record: string | null; chain_stop_at: string | null; watch_generation: number | null
+          set_boundary_seq: number | null
         } | undefined
       return r ? ({
         seen: r.seen_seq, watch: r.watch_record_id, start: r.watch_start, fired: r.watch_fired === 1, jobStamp: r.job_stamp, stopStamp: r.stop_stamp,
         chainStop: r.chain_stop_code !== null && r.chain_stop_record !== null && r.chain_stop_at !== null ? { code: r.chain_stop_code, record: r.chain_stop_record, at: r.chain_stop_at } : null,
-        generation: r.watch_generation,
+        generation: r.watch_generation, setBoundary: r.set_boundary_seq,
       } satisfies JobEventCursor) : null
     },
     startEventCursor(jobId, startRecord, at) {
@@ -437,6 +442,56 @@ export function sqliteJobRepository(conn: Database.Database, companyId: string):
     eventOccurrencesOn(jobId, day) {
       return (conn.prepare(`SELECT COUNT(*) AS n FROM ai_job_occurrences WHERE company_id = ? AND job_id = ? AND event_day = ?`)
         .get(companyId, jobId, day) as { n: number }).n
+    },
+
+    // 4b-4 PR2, the set watch (jobs.md "The set watch (schema 5)").
+    startSetCursor(jobId, at) {
+      // Its watched record is '' (it watches no one record: never a record id, so no watch, fire, move or chain stop applies);
+      // the boundary moves to now with every new consent accepted, the cursor never back.
+      const now = seqNow()
+      conn.prepare(`INSERT INTO ai_job_event_cursors (company_id, job_id, seen_seq, watch_record_id, watch_start, watch_fired, updated_at, watch_generation, set_boundary_seq)
+          VALUES (?, ?, ?, '', '', 0, ?, 1, ?)
+          ON CONFLICT(company_id, job_id) DO UPDATE SET seen_seq = MAX(seen_seq, excluded.seen_seq), set_boundary_seq = excluded.set_boundary_seq, updated_at = excluded.updated_at`)
+        .run(companyId, jobId, now, at, now)
+      conn.prepare(`UPDATE ai_job_event_cursors SET job_stamp = ?, stop_stamp = ? WHERE company_id = ? AND job_id = ?`)
+        .run(jobUpdatedAt(jobId), stopUpdatedAt(), companyId, jobId)
+    },
+    ledgerInto(type, toState, afterSeq, upToSeq, limit) {
+      const rows = conn.prepare(`SELECT l.delivery_seq AS seq, l.record_id, l.version, r.type, l.action, l.from_state, l.to_state, l.actor_kind, l.actor_id,
+          l.run_id, l.origin, l.via, l.at
+          FROM record_ledger l JOIN records r ON r.company_id = l.company_id AND r.id = l.record_id
+          WHERE l.company_id = ? AND l.to_state = ? AND l.delivery_seq IS NOT NULL AND l.delivery_seq > ? AND l.delivery_seq <= ?
+            AND (l.from_state IS NULL OR l.from_state <> l.to_state) AND r.type = ?
+          ORDER BY l.delivery_seq LIMIT ?`)
+        .all(companyId, toState, afterSeq, upToSeq, type, limit) as Array<{
+          seq: number; record_id: string; version: number; type: string; action: string; from_state: string | null; to_state: string | null
+          actor_kind: string; actor_id: string; run_id: string | null; origin: string | null; via: string | null; at: string
+        }>
+      return rows.map((r): LedgerEventRow => ({
+        seq: r.seq, recordId: r.record_id, version: r.version, type: r.type, action: r.action, fromState: r.from_state, toState: r.to_state,
+        actorKind: r.actor_kind, actorId: r.actor_id, runId: r.run_id, origin: r.origin, via: r.via, at: r.at,
+      }))
+    },
+    firstLedgerSeq(recordId, state) {
+      const r = (state === null
+        ? conn.prepare(`SELECT delivery_seq AS seq FROM record_ledger WHERE company_id = ? AND record_id = ? ORDER BY version LIMIT 1`).get(companyId, recordId)
+        : conn.prepare(`SELECT delivery_seq AS seq FROM record_ledger WHERE company_id = ? AND record_id = ? AND to_state = ?
+            AND (from_state IS NULL OR from_state <> to_state) ORDER BY version LIMIT 1`).get(companyId, recordId, state)) as { seq: number | null } | undefined
+      return r ? { seq: r.seq } : null
+    },
+    meetingReviewMarked(recordId) {
+      return conn.prepare(`SELECT 1 FROM ai_job_meeting_reviews WHERE company_id = ? AND record_id = ?`).get(companyId, recordId) !== undefined
+    },
+    markMeetingReview(row) {
+      // Never OR IGNORE: a second mark throws, so the pass that tried it (its occurrence too) is rolled back — never an
+      // occurrence beside another job's mark.
+      conn.prepare(`INSERT INTO ai_job_meeting_reviews (company_id, record_id, meeting_id, job_id, outcome, occurrence_id, at) VALUES (?, ?, ?, ?, ?, ?, ?)`)
+        .run(companyId, row.recordId, row.meetingId, row.jobId, row.outcome, row.occurrenceId, row.at)
+    },
+    meetingReview(recordId) {
+      const r = conn.prepare(`SELECT record_id, meeting_id, job_id, outcome, occurrence_id, at FROM ai_job_meeting_reviews WHERE company_id = ? AND record_id = ?`)
+        .get(companyId, recordId) as { record_id: string; meeting_id: string; job_id: string; outcome: string; occurrence_id: string | null; at: string } | undefined
+      return r ? ({ recordId: r.record_id, meetingId: r.meeting_id, jobId: r.job_id, outcome: r.outcome as JobSetMarkOutcome, occurrenceId: r.occurrence_id, at: r.at } satisfies JobMeetingReviewRow) : null
     },
 
     // Member proposals (jobs.md "Member proposals").

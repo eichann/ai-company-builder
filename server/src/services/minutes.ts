@@ -59,6 +59,7 @@ import type { TokenDigest } from '../ports/key-broker'
 import { MeetingReadFailed as GoogleReadFailed, type MeetEvent, type MeetingAttendee, type MeetingRecordsReader } from '../ports/meeting-records'
 import type { RecordRow } from '../ports/records'
 import type { Member } from './access'
+import { isMeetingPerson, meetingAttendeeIds } from './meeting-people'
 import { ok, refuse, type Outcome, type Refusal } from './outcome'
 import { onList, recordReader, type RecordReader } from './record-access'
 import type { ServiceActor, ServiceRecordWriter } from './record-engine'
@@ -200,16 +201,6 @@ function fieldsOf(records: CompanyData['records'], id: string): { state: string 
   let fields: Record<string, LedgerValue> = {}
   try { fields = s ? JSON.parse(s.fields) as Record<string, LedgerValue> : {} } catch { fields = {} }
   return { state: s?.state ?? null, fields, version: s?.version ?? 0, updatedAt: s?.updatedAt ?? null }
-}
-
-function attendeeIds(raw: LedgerValue | undefined): string[] {
-  if (typeof raw !== 'string') return []
-  try {
-    const v = JSON.parse(raw) as unknown
-    return Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : []
-  } catch {
-    return []
-  }
 }
 
 /** Comparison form of a title: NFC, A–Z folded, no spaces or brackets. */
@@ -443,11 +434,6 @@ export function createMinutesService(deps: MinutesServiceDeps) {
     return { id: open[0].id, title: open[0].title, typeLabel: bundles.get(open[0].type)?.label ?? open[0].type }
   }
 
-  /** Is the member the minutes' assignee or an attendee? */
-  function isYours(fields: Record<string, LedgerValue>, userId: string): boolean {
-    return fields.assignee === userId || attendeeIds(fields.attendees).includes(userId)
-  }
-
   /**
    * The member's own meetings whose minutes are stuck in 「読んでいる」 for over 30 minutes: back to
    * 「届いた」 as the server clock (the ledger says no person did it). Returns their ids.
@@ -468,14 +454,8 @@ export function createMinutesService(deps: MinutesServiceDeps) {
     return stale
   }
 
-  /**
-   * Is the member one of the meeting's people: on its list as a person, its assignee or an attendee?
-   * (Someone who reads it through a group or department on the list did not attend: the minutes'
-   * own steps stay with the attendees, records.md "Members-only records".)
-   */
-  function isAttendee(row: RecordRow, fields: Record<string, LedgerValue>, userId: string): boolean {
-    return (row.members?.includes(userId) ?? false) || isYours(fields, userId)
-  }
+  /** One of the meeting's people (meeting-people.ts, shared with a scheduled job's set watch). */
+  const isAttendee = (row: RecordRow, fields: Record<string, LedgerValue>, userId: string): boolean => isMeetingPerson(row, fields, userId)
 
   /** A series' key for the member's 「自動で読む」 (a digest: no calendar id is stored there). */
   const seriesKey = (series: string) => deps.tokenDigest.digest(`meeting-series:${series}`).slice(0, 24)
@@ -771,7 +751,7 @@ export function createMinutesService(deps: MinutesServiceDeps) {
     let now = fieldsOf(records, recordId)
     const joining = attending.filter(u => !row.members?.includes(u))
     if (joining.length > 0) {
-      const shown = [...new Set([...attendeeIds(now.fields.attendees), ...joining])]
+      const shown = [...new Set([...meetingAttendeeIds(now.fields.attendees), ...joining])]
       while (JSON.stringify(shown).length > 500) shown.pop()
       writer.transition(companyId, {
         recordId, action: MEETING_ATTENDEES_ACTION, expectedVersion: now.version, to: null, addMembers: joining,
@@ -992,7 +972,7 @@ export function createMinutesService(deps: MinutesServiceDeps) {
         docVersion: versions.join(','),
         meeting: { title: row.title, at: typeof now.fields.meeting_at === 'string' ? now.fields.meeting_at : null },
         folder: row.folder,
-        attendees: attendeeIds(now.fields.attendees).map(id => ({ memberId: id, displayName: names.get(id) ?? '' })),
+        attendees: meetingAttendeeIds(now.fields.attendees).map(id => ({ memberId: id, displayName: names.get(id) ?? '' })),
         externalAttendees: typeof now.fields.external_count === 'number' ? now.fields.external_count : 0,
         bundle,
         candidates,
@@ -1276,7 +1256,7 @@ export function createMinutesService(deps: MinutesServiceDeps) {
         items.push({
           recordId: row.id, title: row.title, version: now.version,
           meetingAt: typeof now.fields.meeting_at === 'string' ? now.fields.meeting_at : null,
-          status: st, attendeeCount: row.members?.length ?? attendeeIds(now.fields.attendees).length,
+          status: st, attendeeCount: row.members?.length ?? meetingAttendeeIds(now.fields.attendees).length,
           by: byId ? { memberId: byId, displayName: names.get(byId) ?? '' } : null, byYou: byId === member.userId,
           series: series !== null, autoSeries: series !== null && auto.has(seriesKey(series)),
         })

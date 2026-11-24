@@ -387,6 +387,7 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     jobNoticeOf: (member, jobId) => jobs.noticeJob(member, jobId),
     jobOccurrenceNoticeOf: (member, jobId, occurrenceId) => jobs.occurrenceNotice(member, jobId, occurrenceId),
     jobChainStoppedOf: (member, jobId, at) => jobs.chainStopNotice(member, jobId, at),
+    jobDayLimitOf: (member, jobId) => jobs.dayLimitNotice(member, jobId),
     jobAcceptNoticeOf: (member, jobId, version) => jobs.acceptNotice(member, jobId, version),
     jobProposalNoticeOf: (member, proposalId) => jobProposals.proposalNotice(member, proposalId),
     jobProposalReturnedOf: (member, proposalId) => jobProposals.proposalReturned(member, proposalId),

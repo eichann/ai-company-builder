@@ -60,4 +60,10 @@ export interface PluginStepRepository {
    * it (4b-4 §3 ③). The number closed.
    */
   closeRequestsForSkills(skills: readonly string[], jobId: string, at: string): number
+  /**
+   * Whether a step that runs one of `skills` (its work's pin, or the company's setting now) is busy with the まとまり `recordId`
+   * for the meeting `meetingId` (4b-4 PR2, §3 ②): an open request naming that meeting, or a run of the step on that record not
+   * closed yet. A set watch's scan then leaves that meeting alone (the step makes the proposal).
+   */
+  stepBusyWithSkills(recordId: string, meetingId: string, skills: readonly string[]): boolean
 }

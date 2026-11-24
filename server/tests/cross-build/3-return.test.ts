@@ -35,7 +35,7 @@ describe.skipIf(!CROSS_DB)('cross-build 3/3: this build again', () => {
     const m = manifest()
     const CO: string = m.CO
     const { j2, j3 } = m.jobs
-    const { o1, o3, o4 } = m.occ
+    const { o1, o3, o4, o5 } = m.occ
     const as = async (user: string, method: string, path: string, body?: unknown) => {
       currentUser.id = user
       const res = await app.request(`/api/companies/${CO}${path}`, { method, headers: { 'Content-Type': 'application/json' }, ...(body !== undefined ? { body: JSON.stringify(body) } : {}) })
@@ -49,7 +49,7 @@ describe.skipIf(!CROSS_DB)('cross-build 3/3: this build again', () => {
     // The clock runs: nothing new is made from events already fired, nothing held runs.
     services.jobOccurrences.makeOccurrences(CO)
     expect(crossBuildSnapshot(db, CO)).toEqual(m.before)
-    expect([o1, o3, o4].map(stateOf)).toEqual(['held', 'held', 'needs_person'])
+    expect([o1, o3, o4, o5].map(stateOf)).toEqual(['held', 'held', 'needs_person', 'held'])
     expect((await as('xb-alice', 'GET', '/me/job-turns?kinds=event')).body.data.turns).toEqual([])
 
     // The reminded stop (J4): read on the floor, and the clock here does not bring it back again (once per stop); its
