@@ -13,7 +13,8 @@ import { chmod, copyFile, lstat, mkdir, readFile, readdir, realpath, rename, rm,
 import { departmentSkillPath, isOccurrenceId, type JobSkillPin } from '../../../../shared/core/jobs'
 import { diskKey } from '../../../../shared/core/paths'
 import { isValidFolderName, isValidSkillName } from '../../../../shared/core/names'
-import { SET_WATCH_DRAFT_FILES, SET_WATCH_RUN_MARK, draftAssetNames, type SetEvidence } from '../../../shared/ai-turn-steps/set-watch'
+import { SET_WATCH_DRAFT_FILES, draftAssetNames, type SetEvidence } from '../../../shared/ai-turn-steps/set-watch'
+import { RUN_FOLDER_MARK } from '../../write-guard'
 
 const TREE_RE = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/
 /** At most this much of a pinned Skill is copied (a Skill is instructions, templates and a few images). */
@@ -199,7 +200,7 @@ export function createSetWatchFs(deps: SetWatchFsDeps) {
         if ((e as NodeJS.ErrnoException).code === 'EEXIST') continue
         return null
       }
-      await writeFile(path.join(abs, SET_WATCH_RUN_MARK), JSON.stringify(mark), { flag: 'wx' }).catch(() => {})
+      await writeFile(path.join(abs, RUN_FOLDER_MARK), JSON.stringify(mark), { flag: 'wx' }).catch(() => {})
       return { name: candidate, rel: `${place}/.personal/${folder}/${candidate}`, abs }
     }
     return null

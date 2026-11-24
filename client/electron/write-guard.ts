@@ -63,7 +63,6 @@ import { recordFileEditProblem } from '../../shared/core/records'
 import { FULL_ACCESS_ROLES } from '../../shared/core/permissions'
 import { insideDeliverableAt } from '../../shared/core/plugin-step-runs'
 import { managedShelfPath } from '../shared/skill-shelf'
-import { SET_WATCH_RUN_MARK } from '../shared/ai-turn-steps/set-watch'
 import { existsSync, readFileSync, readdirSync, realpathSync, type Dirent } from 'node:fs'
 import path from 'node:path'
 import type { GuardReason } from '../shared/agent-events'
@@ -179,6 +178,9 @@ function realRelativePath(root: string, target: string, cwd?: string): string | 
  */
 export type WriteArea = ({ folder: string; place?: string; run?: string | null } | { nowhere: true }) & { reads?: readonly string[]; readOutside?: string }
 
+/** A set watch's run folder's own mark (occurrence, run, generation only): the app writes it, never the AI. */
+export const RUN_FOLDER_MARK = '.acb-job.json'
+
 /**
  * A set watch's run (4b-4 PR5, `jobs.md` "The set watch" "The app runs it"): `run` narrows the write area to one folder the app
  * made for this run, `<place>/.personal/<folder>/<run>/` — null until it is made (nothing is written before). `readOutside`: the
@@ -224,7 +226,7 @@ function isSkillTreePath(rel: string): boolean {
 function isRunMark(rel: string, place: string | null, folder: string, run: string): boolean {
   const head = place === null ? 1 : place.split('/').length
   const segs = rel.split('/')
-  return insideRunFolder(rel, place, folder, run) && segs.length === head + 4 && diskKey(segs[head + 3].normalize('NFC')) === diskKey(SET_WATCH_RUN_MARK)
+  return insideRunFolder(rel, place, folder, run) && segs.length === head + 4 && diskKey(segs[head + 3].normalize('NFC')) === diskKey(RUN_FOLDER_MARK)
 }
 
 /** Inside `<place>/.personal/<folder>/<run>/<something>` (as the disk folds names). */

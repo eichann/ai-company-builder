@@ -20,8 +20,6 @@ import { AUTOMATIC_NO_SHELL_RULE } from './plugin'
 export const SET_WATCH_DRAFT_FILES = ['voices.md', '骨子（仮）.md', 'proposal.html', '確認してほしいこと.md'] as const
 /** The file whose images the app copies (`assets/<name>`). */
 export const SET_WATCH_DRAFT_HTML = 'proposal.html'
-/** The run folder's own mark (occurrence, run, generation only). */
-export const SET_WATCH_RUN_MARK = '.acb-job.json'
 /** At most this many update proposals a run may count (PR3b's `updates`, an integer 0–20). */
 export const SET_WATCH_UPDATES_MAX = 20
 /** At most this many quotes a report keeps on the PC. */
