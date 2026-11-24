@@ -12,7 +12,8 @@
 
 import { outsideTitle } from '../../shared/core/outside-text'
 import { DEFAULT_FEATURES, type CompanyFeatures } from '../../shared/core/features'
-import type { MeetingArrival } from '../../shared/types/minutes'
+import type { MeetingAutoReadMode } from '../../shared/core/minutes'
+import type { MeetingArrival, MeetingAutoReadSetting } from '../../shared/types/minutes'
 import type { MinutesReviewView } from './task-card'
 
 /** One received meeting (its minutes) waiting for the member's AI (「AI の番」, state received). */
@@ -77,6 +78,50 @@ export type MeetingPressResult =
   | { success: true; version: number }
   /** `noAccess`: the member's Google cannot open the minutes (403 MINUTES_NO_ACCESS) — another attendee may. */
   | { success: false; error: string; noAccess?: true }
+
+// 「届いた議事録を AI が自動で読む」 (4b-4 design memo 1.1, minutes.md): the member's own setting,
+// asked of the server with their session. Settings and the 「議事録が届きました」 block show it.
+
+/**
+ * `minutes:autoRead` / `minutes:setAutoRead`: the caller's own setting. `error` '' = nothing to
+ * show (an older server without the route, records off): the setting stays hidden, quietly.
+ */
+export type MeetingAutoReadResult =
+  | { success: true; setting: MeetingAutoReadSetting }
+  | { success: false; error: string }
+
+/**
+ * Said on `window` (detail: the company id) when the member changed the setting in Settings: the
+ * 「議事録が届きました」 block reads it again, so its suggestion never outlives a choice (Codex review).
+ */
+export const MEETING_AUTO_READ_CHANGED_EVENT = 'acb:meeting-auto-read-changed'
+
+/** The three choices, in the order they are offered, in the member's words. */
+export const MEETING_AUTO_READ_CHOICES: ReadonlyArray<{ mode: MeetingAutoReadMode; label: string; note?: string }> = [
+  { mode: 'outside', label: '社外の人がいる会議だけ', note: 'おすすめ' },
+  { mode: 'all', label: '自分が出た会議全部' },
+  { mode: 'off', label: '自動では読まない' },
+]
+export const MEETING_AUTO_READ_TITLE = '届いた議事録を AI が自動で読む'
+export const MEETING_AUTO_READ_NOTE = '読むのはこの PC の AI です。PC が閉じていると、開いたときに読みます。議事録を読めるのは Claude Code を選んでいるときだけです。'
+/**
+ * Said once when the member picks 「全部」 (owner decision D1-4): a series set to 読まない before this
+ * setting existed was not kept, so such a series may start being read.
+ */
+export const MEETING_AUTO_READ_ALL_HINT = '前に定例ごとに「次から自動で読まない」にしたものは、残っていません。そうした定例も、これからは AI が読みます。読みたくない定例は、その会議の画面で「この定例は：読まない」を選んでください。'
+
+/**
+ * Whether to suggest 「社外の人がいる会議だけ」 (owner decision D1-1): only to a member who never chose
+ * and starts at 「自動では読まない」 (the members from before the setting). Someone who chose is never asked again.
+ */
+export function suggestsAutoRead(setting: MeetingAutoReadSetting | null): boolean {
+  return !!setting && !setting.chosen && setting.mode === 'off'
+}
+
+/** Whether picking `next` says `MEETING_AUTO_READ_ALL_HINT`: a move to 「全部」 on a PC that has not said it yet. */
+export function showsAutoReadAllHint(previous: MeetingAutoReadMode, next: MeetingAutoReadMode, saidBefore: boolean): boolean {
+  return next === 'all' && previous !== 'all' && !saidBefore
+}
 
 /** A group (見える人のまとまり) or a department (its 所属) on a members-only list (records.md "Members-only records"). */
 export interface InviteSet {

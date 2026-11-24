@@ -2,7 +2,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import type { MeetingArrivalView } from '../../../shared/minutes-app'
-import { foldMeetings, invitedText, madeWords, meetingBanner, meetingRowWords, meetingWhen, offeredSets, skippableMeetings, type MeetingBanner } from './model'
+import { foldMeetings, invitedText, madeWords, meetingBanner, meetingRowWords, meetingWhen, offeredSets, readingWords, skippableMeetings, type MeetingBanner } from './model'
 
 const NOW = new Date(2026, 10, 4, 13, 0).getTime()
 const item = (over: Partial<MeetingArrivalView> = {}): MeetingArrivalView => ({
@@ -24,17 +24,31 @@ test('an arrived meeting offers ［AI に読ませる］ / ［読まない］ to
 })
 
 test('being read: 今回だけ読まない only while it waits for the member\'s own AI; another attendee\'s AI is named', () => {
-  assert.deepEqual(meetingBanner(item({ status: 'asked', byYou: true }), ctx), { kind: 'reading', auto: false, reader: null, canSkip: true, problem: null })
+  assert.deepEqual(meetingBanner(item({ status: 'asked', byYou: true }), ctx), { kind: 'reading', auto: null, reader: null, waiting: true, canSkip: true, problem: null })
   assert.equal((meetingBanner(item({ status: 'reading', byYou: true }), ctx) as { canSkip: boolean }).canSkip, false)
   const other = meetingBanner(item({ status: 'asked', by: { memberId: 'u2', displayName: '鈴木' } }), ctx)
-  assert.deepEqual(other, { kind: 'reading', auto: false, reader: '鈴木', canSkip: false, problem: null })
+  assert.deepEqual(other, { kind: 'reading', auto: null, reader: '鈴木', waiting: true, canSkip: false, problem: null })
 })
 
 test('the member\'s own automatic series says so; this PC\'s AI unable to start says why (never a silent spinner)', () => {
-  const auto = meetingBanner(item({ status: 'asked', byYou: true, autoSeries: true }), ctx)
-  assert.equal((auto as { auto: boolean }).auto, true)
+  const auto = meetingBanner(item({ status: 'asked', byYou: true, autoSeries: true, askedAutomatically: true }), ctx)
+  assert.equal(readingWords(auto as Extract<MeetingBanner, { kind: 'reading' }>), '自動で読む定例です。AI が読んでいます…')
   const stuck = meetingBanner(item({ status: 'asked', byYou: true }), { ...ctx, ai: { recordId: 'meeting-aaaaaaaa', state: 'not-allowed', reason: 'Claude Code が必要です', canRetry: true, canHand: true } })
   assert.deepEqual((stuck as { problem: unknown }).problem, { reason: 'Claude Code が必要です', canRetry: true })
+})
+
+test('another attendee\'s AI that has not started says it will read (their PC may be closed), not that it reads', () => {
+  const reading = (over: Partial<MeetingArrivalView>) => readingWords(meetingBanner(item(over), ctx) as Extract<MeetingBanner, { kind: 'reading' }>)
+  const suzuki = { memberId: 'u2', displayName: '鈴木' }
+  assert.equal(reading({ status: 'asked', by: suzuki, askedAutomatically: true }), '鈴木さんの AI が読む予定です。しばらく読まれないときは、出ている人の AI が代わりに読みます')
+  assert.equal(reading({ status: 'reading', by: suzuki }), '鈴木さんの AI が読んでいます…')
+})
+
+test('a meeting the member\'s own setting asked says so, and still offers 今回だけ読まない; a press says nothing of a setting', () => {
+  const bySetting = meetingBanner(item({ status: 'asked', byYou: true, askedAutomatically: true }), ctx) as Extract<MeetingBanner, { kind: 'reading' }>
+  assert.equal(readingWords(bySetting), '自動で読む設定のため、AI が読んでいます…')
+  assert.equal(bySetting.canSkip, true)
+  assert.equal(readingWords(meetingBanner(item({ status: 'asked', byYou: true }), ctx) as Extract<MeetingBanner, { kind: 'reading' }>), 'AI が読んでいます…')
 })
 
 test('read: shown until the member closes it; ［読まない］: gone for who chose it, said to the others', () => {
@@ -47,7 +61,7 @@ test('read: shown until the member closes it; ［読まない］: gone for who c
 
 test('two rows at most stay out; ［まとめて読まない］ takes only the folded ones still waiting', () => {
   const rows = ['arrived', 'arrived', 'arrived', 'reading', 'read'].map((kind, n) => ({
-    n, banner: (kind === 'arrived' ? { kind, failedBefore: false } : kind === 'read' ? { kind } : { kind, auto: false, reader: null, canSkip: true, problem: null }) as MeetingBanner,
+    n, banner: (kind === 'arrived' ? { kind, failedBefore: false } : kind === 'read' ? { kind } : { kind, auto: null, reader: null, waiting: false, canSkip: true, problem: null }) as MeetingBanner,
   }))
   const { shown, folded } = foldMeetings(rows)
   assert.deepEqual(shown.map(r => r.n), [0, 1])

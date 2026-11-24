@@ -7,8 +7,9 @@
 import { RECORD_ID_RE } from '../../../../shared/core/records'
 import type { RecordDetail } from '../../../../shared/types/records'
 import type { MeetingArrival, MeetingArrivals } from '../../../../shared/types/minutes'
+import { isMeetingAutoReadMode, type MeetingAutoReadMode } from '../../../../shared/core/minutes'
 import {
-  MEETING_NO_ACCESS_TEXT, MINUTES_ID_RE, MINUTES_OFFLINE_TEXT,
+  MEETING_NO_ACCESS_TEXT, type MeetingAutoReadResult, MINUTES_ID_RE, MINUTES_OFFLINE_TEXT,
   type MeetingArrivalsResult, type MeetingArrivalView, type MeetingCardStateResult, type InviteSet, type MeetingInviteChoicesResult, type MeetingInviteResult, type MeetingPressResult, type MinutesActionResult,
 } from '../../../shared/minutes-app'
 import { reviewOf } from '../../../shared/task-card'
@@ -50,7 +51,18 @@ function arrivalOf(x: unknown): MeetingArrival | null {
     status: a.status as MeetingArrival['status'],
     attendeeCount: typeof a.attendeeCount === 'number' && a.attendeeCount >= 0 ? a.attendeeCount : 0,
     by, byYou: a.byYou === true, series: a.series === true, autoSeries: a.autoSeries === true,
+    // Absent from an older server: left absent, so the card keeps that server's two buttons.
+    ...(a.seriesChoice === 'auto' || a.seriesChoice === 'off' || a.seriesChoice === null ? { seriesChoice: a.seriesChoice } : {}),
+    ...(a.askedAutomatically === true ? { askedAutomatically: true } : {}),
   }
+}
+
+/** The server's 「届いた議事録を AI が自動で読む」, checked (anything else: nothing to show). */
+function autoReadOf(a: Answer): MeetingAutoReadResult {
+  const d = a?.json?.data as { mode?: unknown; chosen?: unknown } | undefined
+  return a?.status === 200 && isMeetingAutoReadMode(d?.mode) && typeof d?.chosen === 'boolean'
+    ? { success: true, setting: { mode: d.mode, chosen: d.chosen } }
+    : { success: false, error: '' }
 }
 
 /** What the reading made, from the meeting's links: decisions not retracted, tasks from it but the review task. */
@@ -202,14 +214,34 @@ export function createMeetingsApi(deps: MeetingsDeps) {
     /** ［読まない］: nobody is asked again; the record stays (取り消す is the generic undo of that entry). */
     skip: (companyId: string, id: string, expectedVersion: number) => press(companyId, id, 'skip', expectedVersion),
 
-    /** 「この定例は次から自動で読む」 / 「次から自動で読まない」: the member's own choice for the series. */
-    async autoSeries(companyId: string, id: string, auto: boolean): Promise<MinutesActionResult> {
-      if (!COMPANY.test(companyId) || !MINUTES_ID_RE.test(id) || typeof auto !== 'boolean') return BAD_INPUT
+    /**
+     * 「この定例は次から自動で読む」 / 「読まない」 / 「設定に従う」 (null): the member's own choice for the
+     * series. An older server answers 400 to null (its words are passed on).
+     */
+    async autoSeries(companyId: string, id: string, auto: boolean | null): Promise<MinutesActionResult> {
+      if (!COMPANY.test(companyId) || !MINUTES_ID_RE.test(id) || (typeof auto !== 'boolean' && auto !== null)) return BAD_INPUT
       const a = await call(companyId, 'PUT', `${meetingPath(id)}/auto-series`, { auto })
       if (!a) return { success: false, error: MINUTES_OFFLINE_TEXT }
       if (a.status === 200) return { success: true }
       log.warn(`[minutes] auto-series: answered ${a.status}`)
       return { success: false, error: memberText(a, `できませんでした（サーバーの応答 ${a.status}）。`) }
+    },
+
+    /** 「届いた議事録を AI が自動で読む」: the member's own setting (an older server: nothing, quietly). */
+    async autoRead(companyId: string): Promise<MeetingAutoReadResult> {
+      if (!COMPANY.test(companyId)) return { success: false, error: '' }
+      return autoReadOf(await call(companyId, 'GET', '/me/minutes/auto-read'))
+    },
+
+    /** Changes the member's own setting; the server's answer is what holds now. */
+    async setAutoRead(companyId: string, mode: MeetingAutoReadMode): Promise<MeetingAutoReadResult> {
+      if (!COMPANY.test(companyId) || !isMeetingAutoReadMode(mode)) return BAD_INPUT
+      const a = await call(companyId, 'PUT', '/me/minutes/auto-read', { mode })
+      if (!a) return { success: false, error: MINUTES_OFFLINE_TEXT }
+      const r = autoReadOf(a)
+      if (r.success) return r
+      log.warn(`[minutes] auto-read: answered ${a.status}`)
+      return { success: false, error: memberText(a, `変えられませんでした（サーバーの応答 ${a.status}）。`) }
     },
 
     /**

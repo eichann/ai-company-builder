@@ -2,7 +2,8 @@
 // small ports, each function taking its port last (default window.electronAPI).
 // Main asks the company server with the member's session; nothing here holds minutes text.
 import type { ElectronPort } from '../../shared/ipc/electron-api'
-import type { MeetingArrivalsResult, MeetingBundleQuestionResult, MeetingCardStateResult, MeetingInviteChoicesResult, MeetingInviteResult, InviteSet, MeetingPressResult, MinutesNoticesResult } from '../../../shared/minutes-app'
+import type { MeetingAutoReadMode } from '../../../../shared/core/minutes'
+import type { MeetingArrivalsResult, MeetingAutoReadResult, MeetingBundleQuestionResult, MeetingCardStateResult, MeetingInviteChoicesResult, MeetingInviteResult, InviteSet, MeetingPressResult, MinutesNoticesResult } from '../../../shared/minutes-app'
 
 /** Watching a company's received minutes: main checks with the server (start, every 10 minutes) while subscribed. */
 export type MinutesReads = ElectronPort<'watchMinutes' | 'getMinutesNotices' | 'onMinutesChanged'>
@@ -102,7 +103,8 @@ export async function undoMeetingSkip(companyId: string, meetingId: string, vers
   return r?.success ? null : (r?.error ?? 'できませんでした。')
 }
 
-export async function setMeetingAutoSeries(companyId: string, meetingId: string, auto: boolean, writes: MeetingWrites = window.electronAPI): Promise<string | null> {
+/** `auto` null: 「設定に従う」 — the member's 「届いた議事録を AI が自動で読む」 decides for the series. */
+export async function setMeetingAutoSeries(companyId: string, meetingId: string, auto: boolean | null, writes: MeetingWrites = window.electronAPI): Promise<string | null> {
   const r = await writes.setMeetingAutoSeries(companyId, meetingId, auto)
   return r?.success ? null : (r?.error ?? 'できませんでした。')
 }
@@ -123,4 +125,15 @@ export type MeetingLinkReads = ElectronPort<'getViewers'>
 export async function bundleViewers(companyId: string, bundleId: string, reads: MeetingLinkReads = window.electronAPI) {
   const r = await reads.getViewers(companyId, { records: [bundleId] }).catch(() => undefined)
   return r?.success ? r.answer.records[bundleId] ?? null : null
+}
+
+/** 「届いた議事録を AI が自動で読む」: the member's own setting, for the suggestion above the meetings (D1-1). */
+export type MeetingAutoReadPort = ElectronPort<'getMeetingAutoRead' | 'setMeetingAutoRead'>
+
+export async function getMeetingAutoRead(companyId: string, port: MeetingAutoReadPort = window.electronAPI): Promise<MeetingAutoReadResult> {
+  return (await port.getMeetingAutoRead(companyId)) ?? { success: false, error: '' }
+}
+
+export async function setMeetingAutoRead(companyId: string, mode: MeetingAutoReadMode, port: MeetingAutoReadPort = window.electronAPI): Promise<MeetingAutoReadResult> {
+  return (await port.setMeetingAutoRead(companyId, mode)) ?? { success: false, error: 'できませんでした。' }
 }

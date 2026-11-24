@@ -9,13 +9,17 @@
  * - MINUTES_NO_ACCESS says, in plain words, that another attendee can press it;
  * - ［AI に読ませる］ accepted makes main read the AI turn runner's queue again at once;
  * - a malformed id or member never reaches the server's URL or body;
+ * - 「届いた議事録を AI が自動で読む」 stays hidden when the server does not answer it (an older server, a
+ *   value it does not know), and a series shows three choices only when the server keeps three;
+ * - 「社外の人がいる会議だけ」 is suggested only to a member who never chose and starts at 自動では読まない
+ *   (D1-1), and picking 「全部」 says once per PC that past per-series 読まない are gone (D1-4);
  * - the members-only meeting's 見られる人 is 「参加者のうち ACB の人 N人・招待した人 N人」, and linking a
  *   meeting to a 案件 says who will then see part of it.
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { createMeetingsApi } from '../electron/features/minutes/meetings'
-import { MEETING_NO_ACCESS_TEXT, meetingLinkSentence } from '../shared/minutes-app'
+import { MEETING_NO_ACCESS_TEXT, meetingLinkSentence, showsAutoReadAllHint, suggestsAutoRead } from '../shared/minutes-app'
 import { meetingSeenWords } from '../shared/record-details'
 
 const SESSION = 'better-auth.session_token=SECRET.sig'
@@ -28,7 +32,7 @@ const arrival = (over: Record<string, unknown> = {}) => ({
   by: { memberId: 'u-me', displayName: '阿部' }, byYou: true, series: true, autoSeries: false, ...over,
 })
 
-function fakeServer(opts: { arrivals?: 'missing'; readRequest?: { status: number; body: unknown }; google?: unknown } = {}) {
+function fakeServer(opts: { arrivals?: 'missing' | unknown[]; readRequest?: { status: number; body: unknown }; google?: unknown; autoRead?: 'missing' | unknown } = {}) {
   const seen: Seen[] = []
   const fetch = (async (url: string, init: RequestInit) => {
     seen.push({ url, method: init.method ?? 'GET', headers: init.headers as Record<string, string>, body: init.body as string | undefined })
@@ -36,7 +40,11 @@ function fakeServer(opts: { arrivals?: 'missing'; readRequest?: { status: number
     if (url.endsWith('/api/me')) return json({ id: 'u-me' })
     if (url.endsWith('/me/google')) return opts.google === undefined ? new Response('Not Found', { status: 404 }) : json(opts.google)
     if (url.endsWith('/me/minutes/arrivals')) {
-      return opts.arrivals === 'missing' ? new Response('Not Found', { status: 404 }) : json({ days: 3, items: [arrival(), arrival({ recordId: 'bad id', status: 'arrived' })] })
+      return opts.arrivals === 'missing' ? new Response('Not Found', { status: 404 }) : json({ days: 3, items: opts.arrivals ?? [arrival(), arrival({ recordId: 'bad id', status: 'arrived' })] })
+    }
+    if (url.endsWith('/me/minutes/auto-read')) {
+      if (opts.autoRead === 'missing') return new Response('Not Found', { status: 404 })
+      return json((init.method ?? 'GET') === 'PUT' ? { ...JSON.parse(init.body as string), chosen: true } : opts.autoRead ?? { mode: 'off', chosen: false })
     }
     if (url.endsWith('/members/choices')) {
       return json({ maySets: true, groups: [{ id: 'grp-1', name: '採用チーム' }, { id: 7 }], departments: [{ id: 'dep-1', name: '営業部' }], listed: [{ type: 'group', id: 'grp-0', name: '面接官' }, { type: 'x', id: 'y', name: 'z' }] })
@@ -173,4 +181,36 @@ test('見られる人 of a members-only meeting: who attended and who was invite
 test('linking a meeting to a 案件 says first who will see part of it', () => {
   assert.equal(meetingLinkSentence('案件', { kind: 'department', text: '営業部のみんな', count: 8 }), '案件につなぐと、この会議の内容の一部（次のアクションなど）が営業部のみんなに見えます。')
   assert.equal(meetingLinkSentence('案件', { kind: 'people', text: '3人が見られます', count: 3 }), '案件につなぐと、この会議の内容の一部（次のアクションなど）がこの案件を見られる3人に見えます。')
+})
+
+test('「届いた議事録を AI が自動で読む」: hidden for an older server and for a value the app does not know; never sends an unknown mode', async () => {
+  assert.deepEqual(await fakeServer({ autoRead: 'missing' }).api.autoRead('co'), { success: false, error: '' })
+  assert.deepEqual(await fakeServer({ autoRead: { mode: 'everything', chosen: true } }).api.autoRead('co'), { success: false, error: '' })
+  const { api, seen } = fakeServer()
+  assert.deepEqual(await api.autoRead('co'), { success: true, setting: { mode: 'off', chosen: false } })
+  assert.equal((await api.setAutoRead('co', 'everything' as 'all')).success, false)
+  assert.equal(seen.filter(s => s.method === 'PUT').length, 0)
+  assert.deepEqual(await api.setAutoRead('co', 'outside'), { success: true, setting: { mode: 'outside', chosen: true } })
+})
+
+test('a series shows three choices only when the server keeps three: an older server\'s answer stays without them', async () => {
+  const items = async (over: Record<string, unknown>) => (await fakeServer({ arrivals: [arrival(over)] }).api.arrivals('co')).items[0]
+  assert.equal('seriesChoice' in await items({}), false)
+  assert.equal((await items({ seriesChoice: null })).seriesChoice, null)
+  assert.equal((await items({ seriesChoice: 'off' })).seriesChoice, 'off')
+  assert.equal('seriesChoice' in await items({ seriesChoice: 'sometimes' }), false)
+})
+
+test('the suggestion goes only to a member who never chose and starts at 自動では読まない (D1-1)', () => {
+  assert.equal(suggestsAutoRead({ mode: 'off', chosen: false }), true)
+  assert.equal(suggestsAutoRead({ mode: 'off', chosen: true }), false)
+  assert.equal(suggestsAutoRead({ mode: 'outside', chosen: false }), false)
+  assert.equal(suggestsAutoRead(null), false)
+})
+
+test('picking 「全部」 says once on this PC that past per-series 読まない are not kept (D1-4)', () => {
+  assert.equal(showsAutoReadAllHint('off', 'all', false), true)
+  assert.equal(showsAutoReadAllHint('outside', 'all', false), true)
+  assert.equal(showsAutoReadAllHint('off', 'all', true), false)
+  assert.equal(showsAutoReadAllHint('off', 'outside', false), false)
 })

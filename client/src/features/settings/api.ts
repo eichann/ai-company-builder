@@ -7,6 +7,7 @@ import type { ElectronAPI, ElectronPort } from '../../shared/ipc/electron-api'
 import type { GoogleFeature, GoogleRelayService } from '../../../shared/google'
 import type { SlackFeature } from '../../../shared/slack'
 import { FULL_ACCESS_ROLES } from '../../../../shared/core/permissions'
+import type { MeetingAutoReadMode } from '../../../../shared/core/minutes'
 import { googlePermission } from '../../shared/lib/googlePermission'
 
 /** Reading on this computer: which git binary the app runs. */
@@ -229,6 +230,17 @@ export function getWorkSwitches(companyId: string, reads: WorkSwitchReads = wind
 
 export function setWorkSwitch(companyId: string, which: 'readIncoming' | 'autoRun', on: boolean, writes: WorkSwitchWrites = window.electronAPI) {
   return writes.setWorkSwitch(companyId, which, on)
+}
+
+/** 自分の設定 →「届いた議事録を AI が自動で読む」: the member's own choice, as the company server holds it. */
+export type MeetingAutoReadSettingPort = ElectronPort<'getMeetingAutoRead' | 'setMeetingAutoRead'>
+
+export function getMeetingAutoReadSetting(companyId: string, port: MeetingAutoReadSettingPort = window.electronAPI) {
+  return port.getMeetingAutoRead(companyId)
+}
+
+export function setMeetingAutoReadSetting(companyId: string, mode: MeetingAutoReadMode, port: MeetingAutoReadSettingPort = window.electronAPI) {
+  return port.setMeetingAutoRead(companyId, mode)
 }
 
 /** 「AI から定期の仕事を提案してもらう」: this PC's own setting for the member in this company. */

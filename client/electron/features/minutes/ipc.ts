@@ -7,6 +7,7 @@
 //   minutes:noBundle    「まとまりはない（社内の会議など）」: the question closed for good
 //   minutes:bundleQuestion  the meeting card's question (may a まとまり be chosen)
 //   minutes:arrivals / meeting / requestReading / skipReading / autoSeries / invite / inviteChoices
+//   minutes:autoRead / setAutoRead  「届いた議事録を AI が自動で読む」 (the member's own setting)
 //                       meetings for their attendees: the task list's 「議事録が届きました」 and the
 //                       meeting card's buttons (meetings.ts)
 // Everything goes with the member's session, which stays in main.
@@ -37,6 +38,8 @@ export function registerMinutesIpc(ipc: IpcRegistrar, minutes: MinutesChecker, m
   ipc.handle('minutes:skipReading', (_event, companyId, meetingId, expectedVersion) =>
     str(companyId) && str(meetingId) ? meetings.skip(companyId, meetingId, expectedVersion) : invalid)
   ipc.handle('minutes:autoSeries', (_event, companyId, meetingId, auto) => str(companyId) && str(meetingId) ? meetings.autoSeries(companyId, meetingId, auto) : invalid)
+  ipc.handle('minutes:autoRead', (_event, companyId) => meetings.autoRead(str(companyId) ? companyId : ''))
+  ipc.handle('minutes:setAutoRead', (_event, companyId, mode) => str(companyId) ? meetings.setAutoRead(companyId, mode) : invalid)
   ipc.handle('minutes:invite', (_event, companyId, recordId, memberIds, expectedVersion, sets) =>
     str(companyId) && str(recordId) ? meetings.invite(companyId, recordId, memberIds, expectedVersion, sets) : invalid)
   ipc.handle('minutes:inviteChoices', (_event, companyId, recordId) =>

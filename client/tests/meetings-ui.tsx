@@ -8,6 +8,8 @@
 // card's question (`?bundle=declined`: 案件はない was chosen). `window.__acbMeetings.finish(id)`: the
 // member's AI finished reading (what the runner does in the app). Presses show in `#log`.
 // 「やることを足す」 answers 「似ている」 for a title close to a proposal (the server decides in the app).
+// `?three=1`: a server that keeps a series' three choices (`seriesChoice`). `?autoread=new`: the member
+// never chose 「届いた議事録を AI が自動で読む」 and starts at 自動では読まない (else the server does not answer it).
 import { useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import '../src/i18n'
@@ -50,6 +52,9 @@ for (let n = 0; n < flood; n++) {
   meetings.push({ id: `meeting-flood${String(n).padStart(3, '0')}`, title: `とても長い名前の部長会議 その${n}（会議室③・オンライン併用）`, at: today(9), state: 'arrived', version: 1, by: null, series: false, members: ['u-abe'] })
 }
 const autoSeries = new Set<string>()
+const THREE = params.get('three') === '1'
+const seriesOff = new Set<string>()
+let autoRead = { mode: 'off' as 'outside' | 'all' | 'off', chosen: false }
 const before = new Map<string, Meeting>()
 const log: string[] = []
 const say = (line: string) => { log.push(line); document.getElementById('log')!.textContent = log.join('\n') }
@@ -84,6 +89,7 @@ const detailOf = (m: Meeting) => ({ record: { ...meetingRecord(m), version: m.ve
 const arrivalOf = (m: Meeting): MeetingArrival => ({
   recordId: m.id, title: m.title, version: m.version, meetingAt: m.at, status: m.state as MeetingArrival['status'], attendeeCount: m.members.length,
   by: m.by ? { memberId: m.by, displayName: people[m.by] } : null, byYou: m.by === ME, series: m.series, autoSeries: m.series && autoSeries.has(m.id),
+  ...(THREE && m.series ? { seriesChoice: autoSeries.has(m.id) ? 'auto' as const : seriesOff.has(m.id) ? 'off' as const : null } : {}),
 })
 // What main counts for 「決めたことN・やることの案N」 (electron/features/minutes/meetings.ts, tested there).
 const madeOf = (d: ReturnType<typeof detailOf>) => ({ decisions: d.links.filter(l => l.record.type === 'decision').length, proposals: d.links.filter(l => l.record.type === 'task').length })
@@ -120,7 +126,17 @@ installElectronAPI({
     return { success: true, recordId: 'task-hand0001', state: 'todo', ...(close ? { similar: { id: close.id, title: close.title } } : {}) }
   },
   actOnTask: async (_c, id, input) => { say(`act ${id} ${input.action}@${input.expectedVersion} ${input.note ?? ''}`.trim()); return { success: true, recordId: id } },
-  setMeetingAutoSeries: async (_c, id, auto) => { say(`auto ${id} ${auto}`); if (auto) autoSeries.add(id); else autoSeries.delete(id); tell(); return { success: true } },
+  setMeetingAutoSeries: async (_c, id, auto) => {
+    say(`auto ${id} ${auto}`)
+    autoSeries.delete(id)
+    seriesOff.delete(id)
+    if (auto === true) autoSeries.add(id)
+    if (auto === false && THREE) seriesOff.add(id)
+    tell()
+    return { success: true }
+  },
+  getMeetingAutoRead: async () => params.get('autoread') === 'new' ? { success: true, setting: autoRead } : { success: false, error: '' },
+  setMeetingAutoRead: async (_c, mode) => { say(`auto-read ${mode}`); autoRead = { mode, chosen: true }; return { success: true, setting: autoRead } },
   inviteToRecord: async (_c, id, add, at, sets = []) => {
     say(`invite ${id} ${[...add, ...sets.map(x => `${x.type}:${x.id}`)].join(',')}@${at}`)
     return { success: true, added: add, addedSets: sets }
@@ -149,7 +165,11 @@ installElectronAPI({
   onMinutesChanged: changed.subscribe,
   onRecordsChanged: changed.subscribe,
 })
-;(window as unknown as { __acbMeetings: unknown }).__acbMeetings = { finish: (id: string) => move(id, { state: 'read' }) }
+;(window as unknown as { __acbMeetings: unknown }).__acbMeetings = {
+  finish: (id: string) => move(id, { state: 'read' }),
+  // The member chose elsewhere (Settings, another PC): the server now holds it.
+  chooseAutoRead: (mode: 'outside' | 'all' | 'off') => { autoRead = { mode, chosen: true } },
+}
 
 function Preview() {
   const { arrivals, reload } = useMeetingArrivals('co')

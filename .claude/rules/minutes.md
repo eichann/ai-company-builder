@@ -424,6 +424,29 @@ or the decision service stops calling it, or another module uses the older per-m
   「〇〇 なし」. On a meeting, every way of choosing or making a 案件 here first asks 「〇〇につなぐと、この会議の内容の一部（次のアクションなど）が<その案件の見られる人>に見えます。」
   (`meetingLinkSentence` over `viewers:get` of the 案件); nothing is linked or made before ［つなぐ］.
   Not yet: the list's and the title bar's 「どの〇〇の会議ですか？」 chooser links without this sentence.
+- **「届いた議事録を AI が自動で読む」 in the app** (4b-4 A2b; owner decisions D1-1…D1-4): main's
+  `minutes:autoRead` / `minutes:setAutoRead` (`GET|PUT /me/minutes/auto-read`, session; an answer that is
+  not 200 with a known mode → `{ success: false, error: '' }`: the setting stays hidden, quietly; an
+  unknown mode is never sent). **Settings** → 自分の設定 (`features/settings/components/MeetingAutoReadSetting.tsx`):
+  the three choices (`MEETING_AUTO_READ_CHOICES`, 「社外の人がいる会議だけ（おすすめ）」 first) with
+  `MEETING_AUTO_READ_NOTE` (this PC's AI; a closed PC reads when it opens; Claude Code only); a member who
+  never chose and starts at 自動では読まない (`suggestsAutoRead`) is told the recommendation; picking
+  「全部」 says `MEETING_AUTO_READ_ALL_HINT` once per PC (`showsAutoReadAllHint`, localStorage
+  `meeting-auto-read-all-hint:<company>`: past per-series 読まない were not kept, D1-4). **The banner**
+  suggests ［社外の人がいる会議だけ自動で読む］ / 今はいい to the same members (`useAutoReadSuggestion`,
+  closed per PC in `meeting-auto-read-suggested:<company>`; toast with 元に戻す = `off`). A meeting the
+  setting asked (`askedAutomatically`, no auto series) says 「自動で読む設定のため、AI が読んでいます…」 with
+  ［読まない］ (今回だけ); another attendee's `asked` says 「〇〇さんの AI が読む予定です。しばらく読まれないときは、出ている
+  人の AI が代わりに読みます」 (「（主催）」 only once the server says the reader is the organiser) (no spinner: their PC may be closed, D1-3; not a promise of one person —
+  the server's follow-up lets another attendee's setting take it after a while), `reading` 「…が読んでいます…」 (`readingWords`, also on the card). **The card**:
+  when the server answers `seriesChoice` (it keeps three), a series shows 「この定例は：」 ［自動で読む］
+  ［読まない］［設定に従う］ (`SERIES_CHOICES`, a radio group, `auto` true / false / null) instead of the
+  one-time offer and the 「次から自動で読まない」 line; an older server's answer (no `seriesChoice`) keeps
+  those two. Tests: `client/tests/meetings-app.test.ts` (hidden for an older server or an unknown mode,
+  never sends one; `seriesChoice` only when the server gives it; the suggestion and the hint rules),
+  `src/features/minutes/model.test.ts` (「読む予定」, the setting's words), `tests/ui/meetings.spec.ts`
+  (the banner's suggestion; the card's three choices), `tests/ui/my-switches.spec.ts` (the setting, the
+  hint once, hidden without the server).
 - Not built from the demo: the consultation's first answer as the AI's summary; ［部署に出す］ on the card.
 - Tests: `client/tests/meetings-app.test.ts` (older server quiet, counts, the card's decisions, the
   press with the session and the runner re-read, NO_ACCESS words, malformed input never sent, the

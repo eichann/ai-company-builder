@@ -25,6 +25,7 @@ import type { DocViewBounds } from '../shared/doc-frame'
 import type { WorkSwitch } from '../shared/work-switches'
 import type { ViewersQuery } from '../shared/viewers'
 import type { InviteSet } from '../shared/minutes-app'
+import type { MeetingAutoReadMode } from '../../shared/core/minutes'
 import type { ArchiveCursor, BundleCreateInput, RecordLinkInput, TaskActInput, TaskCreateInput, TaskDriveLinkOptions, TaskListOptions, TypedFileTarget } from '../shared/tasks'
 import type { DroppedThing } from '../shared/link-drop'
 import type { AutoSyncMode, AutoSyncRendererState } from '../shared/auto-sync'
@@ -234,7 +235,9 @@ const api: ElectronAPI = {
   getMeetingCardState: (companyId: string, meetingId: string) => invoke('minutes:meeting', companyId, meetingId),
   requestMeetingReading: (companyId: string, meetingId: string, expectedVersion: number) => invoke('minutes:requestReading', companyId, meetingId, expectedVersion),
   skipMeetingReading: (companyId: string, meetingId: string, expectedVersion: number) => invoke('minutes:skipReading', companyId, meetingId, expectedVersion),
-  setMeetingAutoSeries: (companyId: string, meetingId: string, auto: boolean) => invoke('minutes:autoSeries', companyId, meetingId, auto),
+  setMeetingAutoSeries: (companyId: string, meetingId: string, auto: boolean | null) => invoke('minutes:autoSeries', companyId, meetingId, auto),
+  getMeetingAutoRead: (companyId: string) => invoke('minutes:autoRead', companyId),
+  setMeetingAutoRead: (companyId: string, mode: MeetingAutoReadMode) => invoke('minutes:setAutoRead', companyId, mode),
   inviteToRecord: (companyId: string, recordId: string, memberIds: string[], expectedVersion: number, sets?: InviteSet[]) => invoke('minutes:invite', companyId, recordId, memberIds, expectedVersion, sets),
   getInviteChoices: (companyId: string, recordId: string) => invoke('minutes:inviteChoices', companyId, recordId),
   onMinutesChanged: callback => subscribe('minutes:changed', callback),

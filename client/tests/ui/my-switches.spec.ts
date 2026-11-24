@@ -2,7 +2,10 @@
 // tests/download-folders-ui.html?tab=mine. Guards: the two switches show the member's own state
 // and a change goes to the server for that switch only; one the company stops is greyed out,
 // says 「会社の設定で止まっています」 and cannot be turned on; the settings open on 自分の設定; a company with
-// neither mail nor chat connected shows no 受信を読む switch, only the line on what connecting does.
+// neither mail nor chat connected shows no 受信を読む switch, only the line on what connecting does;
+// 「届いた議事録を AI が自動で読む」 suggests 「社外の人がいる会議だけ」 to a member who never chose, sends the
+// choice, says once (per PC) that past per-series 読まない are gone when 「全部」 is picked, and stays
+// hidden for a server that does not answer it.
 import { test, expect } from '@playwright/test'
 import { expectNoPageErrors, openPreview } from './helpers'
 
@@ -50,5 +53,30 @@ test('a company with neither mail nor chat connected: no 受信を読む switch,
   // Where one connects stays: the Google and Slack sections are still in the settings.
   await expect(page.getByRole('button', { name: 'Google' })).toBeVisible()
   await expect(page.getByRole('button', { name: 'Slack' })).toBeVisible()
+  expectNoPageErrors(state)
+})
+
+test('「届いた議事録を AI が自動で読む」: suggested to a member who never chose; 「全部」 says once that past per-series 読まない are gone', async ({ page }) => {
+  const state = await openPreview(page, 'download-folders', { tab: 'mine', autoread: 'new' })
+  const box = page.locator('[data-auto-read]')
+  await expect(box.getByRole('radio', { name: '自動では読まない' })).toBeChecked()
+  await expect(box.locator('[data-auto-read-suggestion]')).toContainText('おすすめは「社外の人がいる会議だけ」')
+  await box.getByRole('radio', { name: '自分が出た会議全部' }).check()
+  const hint = page.getByRole('status').filter({ hasText: '次から自動で読まない' })
+  await expect(hint).toContainText('残っていません')
+  await expect(box.locator('[data-auto-read-suggestion]')).toHaveCount(0)
+  await box.getByRole('radio', { name: /社外の人がいる会議だけ/ }).check()
+  await expect(hint).toHaveCount(0)
+  await box.getByRole('radio', { name: '自分が出た会議全部' }).check()
+  await expect(box.getByRole('radio', { name: '自分が出た会議全部' })).toBeChecked()
+  await expect(hint).toHaveCount(0)
+  expect(await page.evaluate(() => (window as unknown as { __autoReadSet: string[] }).__autoReadSet)).toEqual(['all', 'outside', 'all'])
+  expectNoPageErrors(state)
+})
+
+test('a server that does not answer 「届いた議事録を AI が自動で読む」: the setting is not shown', async ({ page }) => {
+  const state = await openPreview(page, 'download-folders', { tab: 'mine' })
+  await expect(page.getByRole('switch', { name: 'AI が自動で進める' })).toBeVisible()
+  await expect(page.locator('[data-auto-read]')).toHaveCount(0)
   expectNoPageErrors(state)
 })
