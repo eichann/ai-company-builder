@@ -1296,7 +1296,7 @@ path holds the same lock key (below).
   `BrowserLineExecutionState`, `BrowserWriteState`, `BrowserWriteResult`) and `browserObjectLockKey`.
 - **The opened list on the server**: `shared/browser-connectors/opened.json` read once at start (`/app/shared` in the
   image; missing or not of the shape → no line). Every map re-hashed (`hashCanonical(canonicalJson(map))` = `mapHash`)
-  and checked (`browserMapProblem`; a version listed twice → both out); every line checked against its map
+  and checked (`browserMapProblem`; a version listed more than once → every copy out); every line checked against its map
   (`browserOpenedLineProblem`, its own name / version / site) and **both hashes recomputed** (`browserLineMeaning` /
   `browserLineMechanics`) — a row that does not match is left out, logged, never trusted; a line listed twice under one
   version is left out. The site's operated host and name come from its one approved declaration in approved.json (two
@@ -1344,7 +1344,8 @@ path holds the same lock key (below).
   permitted → `BROWSER_LINE_NOT_YET`; after `unknown` → `BROWSER_LINE_AFTER_UNKNOWN`; the gate refusing → `claimed` →
   `void`, running with nothing open → `partial`; a change of "what write j created" is bound to the id the server
   recorded, `createdTarget`); a report per write (`POST /api/browser-line-executions/report { index, result: done |
-  not_sent | unknown, reason?, createdId? }`, the secret alone: a create is `done` only with its `createdId`, which is
+  not_sent | unknown, reason?, createdId? }`, the secret alone; a `reason` is kept only when it is a word of
+  `BROWSER_REPORT_REASONS`, else null — never a page's text in slug form: a create is `done` only with its `createdId`, which is
   recorded and its lock taken — a key someone holds ends the run `partial`; not_sent → write 1 `failed`, later
   `partial`; unknown → the rest `skipped`, the execution `unknown`, locks kept; **a late "done" for the unknown write ends
   the execution (`succeeded` when last, else `partial`), never `running` again**; a report for a write never permitted or
@@ -1368,7 +1369,8 @@ path holds the same lock key (below).
   thing, change: unknown_keys | missing_keys | unreadable, count 1..2000 }` (exactly these keys: **no key name can be
   sent**) — a map an approved line uses and a thing it has (`BROWSER_BAD_NOTICE`), from a member whose setting allows the
   site and who holds a grant on one of its approved lines (`BROWSER_TYPE_NOT_GRANTED`), at most 20 a member and 200 a
-  company per site and day (`BROWSER_NOTICE_LIMIT`, 429; `browser_shape_report_counts`). One row per company × site ×
+  company per site and day (`BROWSER_NOTICE_LIMIT`, 429; `browser_shape_report_counts`; only an accepted report is
+  counted, so a member past their own limit never uses up the company's). One row per company × site ×
   version × thing (`browser_shape_notices`: the latest count of each kind, reports, first / last), and only the first one
   tells every owner / admin (`browser_shape_changed`, recordless, key `browser_shape:<site>:<version>:<thing>`;
   notifications.md); its text is built when read from the stored names and counts (the site's declared name, the thing's

@@ -33,7 +33,7 @@ import { BROWSER_MAP_LIMITS, BROWSER_SHAPE_CHANGES, browserMapProblem, type Brow
 import {
   BROWSER_OPENED_STATUSES, browserLineMeaning, browserLineMechanics, browserOpenedLineProblem, type BrowserOpenedLineRow, type BrowserOpenedMapRow,
 } from '../../shared/core/browser-opened'
-import { BROWSER_PLAN_TIMES } from '../../shared/core/browser-plans'
+import { BROWSER_PLAN_TIMES, BROWSER_REPORT_REASONS } from '../../shared/core/browser-plans'
 import { browserLineValuesProblem, type BrowserCheckStatus, type BrowserReadStatus } from '../../shared/core/browser-read-line'
 import { canonicalJson } from '../../shared/core/fixed-content'
 import { parsePluginManifest } from '../../shared/core/plugins'
@@ -178,14 +178,13 @@ export function createBrowserLineService(deps: BrowserLineDeps) {
         && HASH_RE.test(m.readersHash) && !browserMapProblem(m.map) && (m.map as BrowserMap).site === m.site && (m.map as BrowserMap).version === m.version
         && hashCanonical(canonicalJson(m.map)) === m.mapHash
       if (!fine) { log.warn('[browser-lines] a map of the opened list does not match its hash; left out'); continue }
-      const row = m as unknown as BrowserOpenedMapRow
-      if (opened.maps.some(x => x.site === row.site && x.version === row.version)) {
-        log.warn('[browser-lines] a map version is listed twice; both left out')
-        opened.maps = opened.maps.filter(x => !(x.site === row.site && x.version === row.version))
-        continue
-      }
-      opened.maps.push(row)
+      opened.maps.push(m as unknown as BrowserOpenedMapRow)
     }
+    // A map version listed more than once: every copy left out (independent review L2: also a third one).
+    const mapKey = (x: BrowserOpenedMapRow) => `${x.site}\n${x.version}`
+    const twice = new Set(opened.maps.map(mapKey).filter((k, i, all) => all.indexOf(k) !== i))
+    if (twice.size > 0) log.warn('[browser-lines] a map version is listed twice; every copy left out')
+    opened.maps = opened.maps.filter(x => !twice.has(mapKey(x)))
     const rows: LoadedLine[] = []
     for (const l of file.lines as unknown[]) {
       const mapRow = isMap(l) ? opened.maps.find(m => m.site === l.site && m.version === l.mapVersion) : undefined
@@ -568,7 +567,9 @@ export function createBrowserLineService(deps: BrowserLineDeps) {
         || (body.createdId !== undefined && (typeof body.createdId !== 'string' || !CREATED_ID_RE.test(body.createdId)))) {
         return refuse('bad-request', W.badPlan, { code: 'BROWSER_BAD_REPORT' })
       }
-      const input = { index: body.index as number, result: body.result as BrowserWriteResult, reason: (body.reason as string | undefined) ?? null, createdId: (body.createdId as string | undefined) ?? null }
+      // Only a word of the one list is kept (independent review L1): a slug-shaped word could carry text from a page.
+      const reason = typeof body.reason === 'string' && (BROWSER_REPORT_REASONS as readonly string[]).includes(body.reason) ? body.reason : null
+      const input = { index: body.index as number, result: body.result as BrowserWriteResult, reason, createdId: (body.createdId as string | undefined) ?? null }
       return transactions.run(() => {
         const now = clock.nowMs()
         const r = repo(where.companyId)
@@ -669,8 +670,10 @@ export function createBrowserLineService(deps: BrowserLineDeps) {
         const now = clock.now()
         const day = now.slice(0, 10)
         const r = repo(member.companyId)
+        // Only an accepted report is counted (Codex review): a member past their own limit never eats the company's.
+        if (r.shapeReportsOf(member.userId, site, day) >= BROWSER_SHAPE_NOTICE_LIMITS.perMemberSiteDay) return refuse('rate-limited', W.tooManyNotices, { code: 'BROWSER_NOTICE_LIMIT' })
         if (r.shapeReportsOn(site, day) >= BROWSER_SHAPE_NOTICE_LIMITS.perCompanySiteDay) return refuse('rate-limited', W.tooManyNotices, { code: 'BROWSER_NOTICE_LIMIT' })
-        if (r.countShapeReport(member.userId, site, day) > BROWSER_SHAPE_NOTICE_LIMITS.perMemberSiteDay) return refuse('rate-limited', W.tooManyNotices, { code: 'BROWSER_NOTICE_LIMIT' })
+        r.countShapeReport(member.userId, site, day)
         const was = r.shapeNotice(site, mapVersion, thing)
         const counts = {
           unknownKeys: kind === 'unknown_keys' ? count as number : was?.unknownKeys ?? 0,
@@ -720,7 +723,8 @@ export function createBrowserLineService(deps: BrowserLineDeps) {
     memberLeft(companyId: string, userId: string): void {
       const r = repo(companyId)
       const now = clock.nowMs()
-      for (const p of r.plansOf(userId, ['open', 'draft', 'approved'])) r.setPlanState(p.id, p.state, 'closed', { closedAt: iso(now), closeReason: 'left' })
+      // A shape this build does not know is left as it is (frozen: the build that knows it settles it).
+      for (const p of r.plansOf(userId, ['open', 'draft', 'approved'])) if (!frozen(p)) r.setPlanState(p.id, p.state, 'closed', { closedAt: iso(now), closeReason: 'left' })
       for (const e of r.executionsOf(userId, ['claimed', 'running'])) {
         const p = r.plan(e.planId) as BrowserLinePlanRow
         if (frozen(p)) continue

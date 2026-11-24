@@ -161,6 +161,12 @@ describe('the opened list and the gate', () => {
     retired.lines.find(l => l.mapVersion === '1.0.1')!.status = 'retired'
     opened = retired; build()
     expect(code(inspect())).toBe('BROWSER_LINE_RETIRED')
+    // The map listed three times (each copy valid): every copy is out.
+    const thrice = JSON.parse(JSON.stringify(REAL_OPENED)) as BrowserOpenedFile
+    const m101 = thrice.maps.find(m => m.version === '1.0.1')!
+    thrice.maps.push(JSON.parse(JSON.stringify(m101)), JSON.parse(JSON.stringify(m101)))
+    opened = thrice; build()
+    expect(code(inspect())).toBe('BROWSER_LINE_NOT_APPROVED')
     // No file at all: nothing.
     opened = null; build()
     expect(code(inspect())).toBe('BROWSER_LINE_NOT_APPROVED')
@@ -350,6 +356,11 @@ describe('the strict read\'s notice (§16-1)', () => {
     policy = { mode: 'on', sites: [{ host: HOST, level: 'read', assetHosts: [] }] }
     for (let i = 0; i < BROWSER_SHAPE_NOTICE_LIMITS.perMemberSiteDay; i++) expect(svc.shapeNotice(alice, notice()).ok).toBe(true)
     expect(code(svc.shapeNotice(alice, notice()))).toBe('BROWSER_NOTICE_LIMIT')
+    // Refused reports are not counted: one member past their limit never uses up the company's (Codex review).
+    for (let i = 0; i < 300; i++) svc.shapeNotice(alice, notice())
+    grant(bob)
+    expect(svc.shapeNotice(bob, notice()).ok).toBe(true)
+    expect(conn.prepare('SELECT SUM(count) AS n FROM browser_shape_report_counts').get()).toEqual({ n: BROWSER_SHAPE_NOTICE_LIMITS.perMemberSiteDay + 1 })
     now += 86_400_000
     expect(svc.shapeNotice(alice, notice()).ok).toBe(true)
   })
@@ -579,8 +590,11 @@ describe('the rollback floor (deployment.md): rows a writing build leaves, read 
     const unknownSecret = secretOf(unknown.id)
     expect(code(svc.permit(alice, unknown.id, unknownSecret, { index: 2 }))).toBe('BROWSER_LINE_AFTER_UNKNOWN')
     expect(locksOf(unknown.id).length).toBe(2)
-    // Its late report still lands (the secret alone), and ends it.
-    expect(value(svc.report(unknownSecret, { index: 1, result: 'done', createdId: '5' })).state).toBe('partial')
+    // Its late report still lands (the secret alone), and ends it; a reason not of the one list is not kept.
+    expect(value(svc.report(unknownSecret, { index: 1, result: 'done', createdId: '5', reason: 'tanaka-taro-0901234' })).state).toBe('partial')
+    expect(data.forCompany(CO).browserLines.reports(unknown.id).map(r => r.reason)).toEqual([null, null])
+    value(svc.report(unknownSecret, { index: 1, result: 'done', createdId: '5', reason: 'no-answer' }))
+    expect(data.forCompany(CO).browserLines.reports(unknown.id).map(r => r.reason)).toEqual([null, null, 'no-answer'])
     expect(locksOf(unknown.id)).toEqual([])
   })
 
@@ -599,8 +613,14 @@ describe('the rollback floor (deployment.md): rows a writing build leaves, read 
     expect(code(svc.confirm(alice, id, { index: 1, result: 'done' }))).toBe('BROWSER_PLAN_FROZEN')
     expect(code(svc.report(secret, { index: 1, result: 'done', createdId: '1' }))).toBe('BROWSER_PLAN_FROZEN')
     expect(data.forCompany(CO).browserLines.reports(id).map(r => r.outcome)).toEqual(['conflict'])
+    // An open inspection of that unknown shape too: leaving leaves both as they are.
+    const open = value(inspect())
+    conn.prepare('DROP TRIGGER browser_line_plans_fixed').run()
+    conn.prepare('UPDATE browser_line_plans SET shape = 3 WHERE id = ?').run(open.id)
+    initDatabase(conn)
     now += 10 * 60_000
     svc.memberLeft(CO, alice.userId)
+    expect(conn.prepare('SELECT state FROM browser_line_plans WHERE id = ?').get(open.id)).toEqual({ state: 'open' })
     expect(execOf(id).state).toBe('claimed')
     expect(locksOf(id).length).toBe(2)
   })

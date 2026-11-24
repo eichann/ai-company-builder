@@ -138,6 +138,8 @@ export interface BrowserLineRepository {
   saveShapeNotice(row: BrowserShapeNoticeRow): void
   /** Add one to a member's notices for a site on a day; the new count. */
   countShapeReport(userId: string, site: string, day: string): number
+  /** A member's accepted notices for a site on a day. */
+  shapeReportsOf(userId: string, site: string, day: string): number
   /** Everyone's notices for a site on a day in this company. */
   shapeReportsOn(site: string, day: string): number
 }

@@ -197,6 +197,10 @@ export function sqliteBrowserLineRepository(conn: Database.Database, companyId: 
           ON CONFLICT (company_id, user_id, site, day) DO UPDATE SET count = count + 1`).run(companyId, userId, site, day)
       return (conn.prepare('SELECT count FROM browser_shape_report_counts WHERE company_id = ? AND user_id = ? AND site = ? AND day = ?').get(companyId, userId, site, day) as { count: number }).count
     },
+    shapeReportsOf(userId, site, day) {
+      const r = conn.prepare('SELECT count FROM browser_shape_report_counts WHERE company_id = ? AND user_id = ? AND site = ? AND day = ?').get(companyId, userId, site, day) as { count: number } | undefined
+      return r?.count ?? 0
+    },
     shapeReportsOn(site, day) {
       return (conn.prepare('SELECT COALESCE(SUM(count), 0) AS n FROM browser_shape_report_counts WHERE company_id = ? AND site = ? AND day = ?').get(companyId, site, day) as { n: number }).n
     },
