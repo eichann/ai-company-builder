@@ -20,6 +20,7 @@ import { createRecordsApi } from '../electron/records/api'
 import { createRunRegistry } from '../electron/records/runs'
 import { decideToolWrite, type WriteGuard } from '../electron/write-guard'
 import { jobToolAccess, parseJobTurn, parseJobTurns } from '../shared/ai-turn-steps/job'
+import { describePath } from '../shared/agent-events'
 import { draftAssetNames, runFolderName, type DecisionGate } from '../shared/ai-turn-steps/set-watch'
 import { JOB_MINUTES_ROUTE } from '../../shared/core/jobs'
 
@@ -479,18 +480,18 @@ test('a record whose completion\'s answer was lost: another generation finished 
   const recs = path.join(c.data, 'job-set-runs', COMPANY, OCC)
   mkdirSync(recs, { recursive: true })
   const rec: SetRunRecord = { v: 1, occurrenceId: OCC, runId: 'run-s0', generation: 1, state: 'sending', folder: null, at: '2026-11-23T01:00:00.000Z' }
-  writeFileSync(path.join(recs, 'run-s0.1.json'), JSON.stringify(rec))
-  const later = claimsFor(c, fakeServer(c, { runView: { id: 'run-s0', state: 'running', generation: 2 } }))
-  await later.claims.jobTurns(COMPANY)
-  assert.equal(JSON.parse(readFileSync(path.join(recs, 'run-s0.1.json'), 'utf8')).state, 'not_adopted')
-  writeFileSync(path.join(recs, 'run-s0.1.json'), JSON.stringify(rec))
-  const done = claimsFor(c, fakeServer(c, { runView: { id: 'run-s0', state: 'done', generation: 1 } }))
-  await done.claims.jobTurns(COMPANY)
-  assert.equal(JSON.parse(readFileSync(path.join(recs, 'run-s0.1.json'), 'utf8')).state, 'sent')
-  writeFileSync(path.join(recs, 'run-s0.1.json'), JSON.stringify(rec))
-  const still = claimsFor(c, fakeServer(c, { runView: { id: 'run-s0', state: 'running', generation: 1 } }))
-  await still.claims.jobTurns(COMPANY)
-  assert.equal(JSON.parse(readFileSync(path.join(recs, 'run-s0.1.json'), 'utf8')).state, 'sending')
+  const file = path.join(recs, 'run-s0.1.json')
+  const stateAfter = async (runView: Record<string, unknown>) => {
+    writeFileSync(file, JSON.stringify(rec))
+    const t = claimsFor(c, fakeServer(c, { runView }))
+    await t.claims.jobTurns(COMPANY)
+    // Looked at beside the listing (never in its way): give it a moment.
+    for (let i = 0; i < 50 && JSON.parse(readFileSync(file, 'utf8')).state === 'sending'; i++) await new Promise(r => setTimeout(r, 20))
+    return JSON.parse(readFileSync(file, 'utf8')).state
+  }
+  assert.equal(await stateAfter({ id: 'run-s0', state: 'running', generation: 2 }), 'not_adopted')
+  assert.equal(await stateAfter({ id: 'run-s0', state: 'done', generation: 1 }), 'sent')
+  assert.equal(await stateAfter({ id: 'run-s0', state: 'running', generation: 1 }), 'sending')
 })
 
 test('the tool ceiling of a set watch: the minutes route only through its check', () => {
@@ -498,4 +499,44 @@ test('the tool ceiling of a set watch: the minutes route only through its check'
   assert.ok(access.allowsRecordTool('minutes_read'))
   assert.ok(access.allowsRecordTool('proposal_folder'))
   assert.equal(jobToolAccess(setGrant() as never, { kind: 'new_files', path: `${DEPT}/提案書` }).allowsRecordTool('proposal_folder'), false)
+})
+
+test('review: the action log never names what is below the proposals folder (customer names in run folders)', () => {
+  const ctx = { companyRoot: '/co', unnamedBelow: [`${DEPT}/.personal/提案書`] }
+  assert.deepEqual(describePath(`/co/${DEPT}/.personal/提案書/2026-11-23_A社/proposal.html`, ctx), { kind: 'file', path: `${DEPT}/.personal/提案書` })
+  assert.deepEqual(describePath(`/co/${DEPT}/提案書/メモ.md`, ctx), { kind: 'file', path: `${DEPT}/提案書/メモ.md` })
+  // Without the mark (every other consultation): as before.
+  assert.deepEqual(describePath(`/co/${DEPT}/.personal/提案書/2026-11-23_A社/proposal.html`, { companyRoot: '/co' }), { kind: 'file', path: `${DEPT}/.personal/提案書/2026-11-23_A社/proposal.html` })
+})
+
+test('review: a set watch never reads a Skill of the company folder, even inside a read place; never writes the run mark', async () => {
+  const c = company()
+  const { claims } = await claimed(c, fakeServer(c))
+  const area = claims.jobWriteArea('conv-set-00001')!
+  // A grant reading the whole department: the working tree's Skills are still not read (only the pinned copy is).
+  const guard: WriteGuard = { root: c.root, getAccess: () => undefined, writeArea: area, readArea: [DEPT] }
+  assert.equal(decideToolWrite(guard, 'Read', { file_path: path.join(c.root, DEPT, '.claude', 'skills', COPY_SKILL, 'SKILL.md') }, c.root).deny, true)
+  assert.equal(decideToolWrite(guard, 'Grep', { path: path.join(c.root, DEPT, '.claude', 'skills'), pattern: 'x' }, c.root).deny, true)
+  assert.equal(decideToolWrite(guard, 'Read', { file_path: path.join(c.root, DEPT, '提案書', 'メモ.md') }, c.root).deny, false)
+  const made = JSON.parse(await claims.jobSetTools('conv-set-00001')!.execute('proposal_folder', { company: 'A社' }))
+  assert.equal(decideToolWrite(guard, 'Write', { file_path: path.join(c.root, made.folder, '.acb-job.json'), content: '{}' }, c.root).deny, true)
+  assert.equal(decideToolWrite(guard, 'Write', { file_path: path.join(c.root, made.folder, 'voices.md'), content: 'x' }, c.root).deny, false)
+})
+
+test('review: a lost answer whose run went back at this generation is `refused`; the same Skill pinned twice is copied once', async () => {
+  const c = company()
+  const recs = path.join(c.data, 'job-set-runs', COMPANY, OCC)
+  mkdirSync(recs, { recursive: true })
+  const rec: SetRunRecord = { v: 1, occurrenceId: OCC, runId: 'run-s0', generation: 1, state: 'sending', folder: null, at: '2026-11-23T01:00:00.000Z' }
+  writeFileSync(path.join(recs, 'run-s0.1.json'), JSON.stringify(rec))
+  const back = claimsFor(c, fakeServer(c, { runView: { id: 'run-s0', state: 'waiting_person', generation: 1 } }))
+  await back.claims.jobTurns(COMPANY)
+  for (let i = 0; i < 50 && JSON.parse(readFileSync(path.join(recs, 'run-s0.1.json'), 'utf8')).state === 'sending'; i++) await new Promise(r => setTimeout(r, 20))
+  assert.equal(JSON.parse(readFileSync(path.join(recs, 'run-s0.1.json'), 'utf8')).state, 'refused')
+  const fs = back.fs
+  const pin = { place: DEPT, skill: COPY_SKILL, fingerprint: c.autoTree }
+  const copy = await fs.makeCopy(COMPANY, OCC, 7, c.root, [pin, pin])
+  assert.ok(copy)
+  assert.equal(copy!.skills.length, 1)
+  assert.equal(await fs.makeCopy(COMPANY, OCC, 8, c.root, [pin, { ...pin, fingerprint: c.origTree }]), null)
 })

@@ -112,8 +112,13 @@ export function createSetWatchFs(deps: SetWatchFsDeps) {
       let bytes = 0
       const skills: PinnedCopy['skills'] = []
       const assets = new Map<string, string>()
+      const done = new Map<string, string>()
       for (const pin of pins) {
         if (!isValidFolderName(pin.place) || !isValidSkillName(pin.skill) || !TREE_RE.test(pin.fingerprint)) throw new Error('bad pin')
+        // The same Skill named twice (the procedure also read): once; two versions of one Skill: refused.
+        const where = diskKey(departmentSkillPath(pin).normalize('NFC'))
+        if (done.has(where)) { if (done.get(where) !== pin.fingerprint) throw new Error('two versions'); continue }
+        done.set(where, pin.fingerprint)
         const skillDir = path.join(dir, ...departmentSkillPath(pin).split('/'))
         await mkdir(skillDir, { recursive: true })
         skills.push({ place: pin.place, skill: pin.skill, dir: skillDir })

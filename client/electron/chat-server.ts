@@ -660,7 +660,11 @@ export async function startChatServer(config: ChatServerConfig) {
         }
       } : undefined
     // The AI action log: the agents report to config.onToolEvent; this is what only the server knows.
-    const toolEventContext = { companyId, companyRoot: companyRootPath, turnId: crypto.randomUUID(), department: activeDepartment?.folder, onFileCreated }
+    // A set watch's run (its area names a run folder): the run folders below its proposals folder are named after customers, so
+    // the AI action log names that folder only (jobs.md "The set watch" "The app runs it").
+    const unnamedBelow = stepArea && typeof stepArea === 'object' && 'run' in stepArea && 'place' in stepArea && stepArea.place
+      ? [`${stepArea.place}/.personal/${stepArea.folder}`] : undefined
+    const toolEventContext = { companyId, companyRoot: companyRootPath, turnId: crypto.randomUUID(), department: activeDepartment?.folder, onFileCreated, ...(unnamedBelow ? { unnamedBelow } : {}) }
     // 「AI の囲い」: the member's sandbox for this turn (agent-sandbox.md).
     const sandboxInput = connection.ownsConversation && companyId && companyRootPath
       ? await Promise.resolve(config.getAgentSandbox?.(companyId, companyRootPath)).catch(() => undefined) : undefined

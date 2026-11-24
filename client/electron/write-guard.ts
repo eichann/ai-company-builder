@@ -63,6 +63,7 @@ import { recordFileEditProblem } from '../../shared/core/records'
 import { FULL_ACCESS_ROLES } from '../../shared/core/permissions'
 import { insideDeliverableAt } from '../../shared/core/plugin-step-runs'
 import { managedShelfPath } from '../shared/skill-shelf'
+import { SET_WATCH_RUN_MARK } from '../shared/ai-turn-steps/set-watch'
 import { existsSync, readFileSync, realpathSync } from 'node:fs'
 import path from 'node:path'
 import type { GuardReason } from '../shared/agent-events'
@@ -190,6 +191,19 @@ export function runFolderMessage(place: string, folder: string, run: string): st
   return `この定期の仕事で AI がファイルを保存できるのは「${place}/.personal/${folder}/${run}/」の中だけです（この実行のフォルダ。ほかの提案書のフォルダは書き換えられません）。`
 }
 
+/** A Skill folder of the company folder (`…/.claude/skills/…`, `.agents/skills/…`), as the disk folds names. */
+function isSkillTreePath(rel: string): boolean {
+  const segs = rel.split('/').map(s => diskKey(s.normalize('NFC')))
+  return segs.some((s, i) => (s === '.claude' || s === '.agents') && segs[i + 1] === 'skills')
+}
+
+/** `<place>/.personal/<folder>/<run>/.acb-job.json`: the run folder's mark. */
+function isRunMark(rel: string, place: string | null, folder: string, run: string): boolean {
+  const head = place === null ? 1 : place.split('/').length
+  const segs = rel.split('/')
+  return insideRunFolder(rel, place, folder, run) && segs.length === head + 4 && diskKey(segs[head + 3].normalize('NFC')) === diskKey(SET_WATCH_RUN_MARK)
+}
+
 /** Inside `<place>/.personal/<folder>/<run>/<something>` (as the disk folds names). */
 function insideRunFolder(rel: string, place: string | null, folder: string, run: string): boolean {
   if (!insideDeliverableAt(rel, place, folder)) return false
@@ -220,6 +234,8 @@ export function checkDeliverableFolder(guard: WriteGuard, target: string, cwd?: 
   if (area.run !== undefined) {
     if (area.run === null) return refused(RUN_FOLDER_FIRST_MESSAGE)
     const run = area.run
+    // The run folder's own mark (occurrence, run, generation) is the app's: never the AI's to write.
+    if (rel !== null && isRunMark(rel, place, area.folder, run)) return refused(runFolderMessage(area.place ?? '（部署のフォルダ）', area.folder, run))
     if (rel !== null && real !== null && insideRunFolder(rel, place, area.folder, run) && insideRunFolder(real, place, area.folder, run)) return { deny: false }
     return refused(runFolderMessage(area.place ?? '（部署のフォルダ）', area.folder, run))
   }
@@ -538,6 +554,8 @@ export function checkReadArea(guard: WriteGuard, toolName: string, toolInput: Re
   const rel = repoRelativePath(guard.root, target, cwd)
   const real = rel === null ? null : realRelativePath(guard.root, target, cwd)
   if (rel === null || real === null) return refused(target)
+  // A set watch reads its Skills from the pinned copy only (I9): never a Skill folder of the company folder, whatever its places.
+  if (outside !== undefined && (isSkillTreePath(rel) || isSkillTreePath(real))) return refused(rel)
   const inside = (p: string) => places.some(place => isSameOrAncestorPath(pathKey(place), pathKey(p)))
     || (guard.writeArea !== undefined && !('nowhere' in guard.writeArea) && insideDeliverableAt(p, guard.writeArea.place ?? null, guard.writeArea.folder))
   return inside(rel) && inside(real) ? { deny: false } : refused(rel)

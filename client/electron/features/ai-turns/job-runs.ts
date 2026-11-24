@@ -108,6 +108,9 @@ export const NOT_SYNCED_RETRY_MS = 30_000
 /** An earlier occurrence of the job still runs (409 `JOB_EARLIER_RUNNING`, jobs.md "Never side by side"): asked again after this. */
 export const EARLIER_RUNNING_RETRY_MS = 60_000
 
+/** A record whose completion's answer was lost is asked about again only after this. */
+export const RECONCILE_AGAIN_MS = 10 * 60_000
+
 /** A set watch's run that could not keep its record on this PC: nothing was sent, and the AI is told to end (B2 ③). */
 export const SET_RECORD_NOT_KEPT = 'この PC に結果を書き残せなかったため、完了を送っていません。これで終えてください（あとでもう一度動きます）。'
 
@@ -194,6 +197,8 @@ interface HeldSet {
   updatesWarned: boolean
   /** The record could not be kept on this PC: nothing is sent, the run is given back. */
   recordFailed: boolean
+  /** The run's tool calls, one at a time. */
+  queue: Promise<void>
 }
 
 export function createJobRuns(deps: JobRunDeps) {
@@ -253,6 +258,9 @@ export function createJobRuns(deps: JobRunDeps) {
 
   /** Copies an earlier launch left (the app quit mid-run) are nobody's now: removed once, before this launch makes any. */
   let leftCopies: Promise<void> | null = null
+  /** Companies whose lost answers are being looked at now; when each record was last asked about (not again for a while). */
+  const reconciling = new Set<string>()
+  const askedAt = new Map<string, number>()
 
   /**
    * A set watch before its AI (4b-4 PR5, B2): the department folders here (4-T11), the gate (§5-0: failed → `gate_failed`, never
@@ -282,7 +290,7 @@ export function createJobRuns(deps: JobRunDeps) {
     const day = `${due.getFullYear()}-${String(due.getMonth() + 1).padStart(2, '0')}-${String(due.getDate()).padStart(2, '0')}`
     return {
       procedure,
-      set: { companyRoot, meetingId, generation, place: write?.place ?? p.place, folder: write?.folder ?? '', copy, decision, day, run: null, minutes: null, minutesDocVersion: null, updatesWarned: false, recordFailed: false },
+      set: { companyRoot, meetingId, generation, place: write?.place ?? p.place, folder: write?.folder ?? '', copy, decision, day, run: null, minutes: null, minutesDocVersion: null, updatesWarned: false, recordFailed: false, queue: Promise.resolve() },
     }
   }
 
@@ -308,14 +316,23 @@ export function createJobRuns(deps: JobRunDeps) {
   async function reconcileSending(companyId: string): Promise<void> {
     const fs = deps.setWatch
     if (!fs) return
-    for (const rec of await fs.sendingRecords(companyId, 5).catch(() => [] as SetRunRecord[])) {
-      if (byOccurrence.has(keyOf(companyId, rec.occurrenceId))) continue
+    // Not the same records every pass: one asked within `RECONCILE_AGAIN_MS` waits (five stuck ones never hold the rest back).
+    const due = (await fs.sendingRecords(companyId, 200).catch(() => [] as SetRunRecord[]))
+      .filter(rec => !byOccurrence.has(keyOf(companyId, rec.occurrenceId)) && now() - (askedAt.get(`${companyId}\n${rec.runId}.${rec.generation}`) ?? -Infinity) >= RECONCILE_AGAIN_MS)
+      .slice(0, 5)
+    for (const rec of due) {
+      askedAt.set(`${companyId}\n${rec.runId}.${rec.generation}`, now())
       const r = await deps.session(companyId, 'GET', `/ai-runs/${encodeURIComponent(rec.runId)}`).catch(() => null)
       if (!r || r.status !== 200) continue
       const data = r.data as { run?: { state?: unknown; generation?: unknown } } | undefined
       const run = data?.run
       if (!run || typeof run.generation !== 'number') continue
-      const state = run.generation > rec.generation ? 'not_adopted' : run.state === 'done' && run.generation === rec.generation ? 'sent' : null
+      // Another generation finished or holds it → not this record's; done at this generation → sent; given back or waiting for
+      // a person at this generation → this completion never landed (`refused`). Running / waiting to be reconciled: not yet known.
+      const state = run.generation > rec.generation ? 'not_adopted'
+        : run.generation === rec.generation && run.state === 'done' ? 'sent'
+        : run.generation === rec.generation && ['open', 'retry_later', 'waiting_person', 'waiting_setup'].includes(String(run.state)) ? 'refused'
+        : null
       if (state) await fs.writeRecord(companyId, { ...rec, state }).catch(() => false)
     }
   }
@@ -329,7 +346,11 @@ export function createJobRuns(deps: JobRunDeps) {
       // 4b-4 PR5: a set watch's turn is listed only to an app naming its check (`?checks=matched_record`), and only an app that
       // runs it here (its file work given) names it.
       const r = await deps.session(companyId, 'GET', `/me/job-turns?kinds=${JOB_KINDS_RUN.join(',')}${deps.setWatch ? `&checks=${JOB_SET_CHECK_KIND}` : ''}`)
-      await reconcileSending(companyId)
+      // Lost answers are looked at only while the server answers, never in the listing's way (one pass at a time).
+      if (r?.status === 200 && deps.setWatch && !reconciling.has(companyId)) {
+        reconciling.add(companyId)
+        void reconcileSending(companyId).finally(() => reconciling.delete(companyId))
+      }
       const turns = r?.status === 200 ? parseJobTurns(r.data) : null
       if (turns === null) return [...(listed.get(companyId)?.values() ?? [])]
       const ids = new Set(turns.map(t => t.occurrenceId))
@@ -553,10 +574,16 @@ export function createJobRuns(deps: JobRunDeps) {
       if (!h || !set) return null
       const fs = deps.setWatch as SetWatchFs
       const base = (state: SetRunRecord['state']): SetRunRecord => ({ v: 1, occurrenceId: h.occurrenceId, runId: h.runId, generation: set.generation, state, folder: set.run?.rel ?? null, at: new Date(now()).toISOString() })
+      // One call at a time (two at once could make two folders, or finish twice).
+      const serial = <T>(work: () => Promise<T>): Promise<T> => {
+        const next = set.queue.then(work, work)
+        set.queue = next.then(() => undefined, () => undefined)
+        return next
+      }
       return {
-        async folder(company: string, meetingDate?: string) {
+        folder: (company: string, meetingDate?: string) => serial(async () => {
           if (h.reported !== null || !live(h)) return { error: JOB_REPORT_REFUSED }
-          if (!('place' in h.area)) return { error: 'この定期の仕事では、ファイルを保存できません。' }
+          if (!('place' in h.area)) return { error: 'この定期の仕事では、ファイルを保存できません。提案書は作らず、job_report で decline を渡して終えてください。' }
           // One folder per claim: asked again, the same one.
           if (set.run) return { folder: set.run.rel }
           const day = meetingDate !== undefined && /^\d{4}-\d{2}-\d{2}$/.test(meetingDate) ? meetingDate : set.day
@@ -568,10 +595,10 @@ export function createJobRuns(deps: JobRunDeps) {
           // 「途中」 until a report: a run that stops here leaves this record (B2, 6-2).
           await fs.writeRecord(h.companyId, base('working')).catch(() => false)
           return { folder: made.rel }
-        },
-        async report(input: unknown) {
+        }),
+        report: (input: unknown) => serial(async () => {
           if (h.reported !== null) return h.reported === 'done' ? null : JOB_REPORT_REFUSED
-          if (h.lost) { h.reported = 'refused'; return JOB_REPORT_REFUSED }
+          if (!live(h)) { h.reported = 'refused'; return JOB_REPORT_REFUSED }
           if (set.recordFailed) return SET_RECORD_NOT_KEPT
           const parsed = parseSetReportInput(input, set.decision)
           if ('error' in parsed) return parsed.error
@@ -624,7 +651,12 @@ export function createJobRuns(deps: JobRunDeps) {
             set.recordFailed = true
             return SET_RECORD_NOT_KEPT
           }
-          if (h.lost) { h.reported = 'refused'; return JOB_REPORT_REFUSED }
+          // Taken away while the files were checked: nothing is sent, and the record says so (never left `sending`).
+          if (!live(h)) {
+            h.reported = 'refused'
+            await fs.writeRecord(h.companyId, { ...record, state: 'refused' }).catch(() => false)
+            return JOB_REPORT_REFUSED
+          }
           // ④ then the completion: fixed kinds only (no quote, company or folder).
           const r = await deps.finishRun(h.companyId, h.occurrenceId, null, { jobResult: setJobResult(parsed, updates) })
           h.reported = r && r.status < 300 ? 'done' : 'refused'
@@ -633,7 +665,7 @@ export function createJobRuns(deps: JobRunDeps) {
           if (h.timer) clearTimeout(h.timer)
           await fs.removeCopy(set.copy)
           return h.reported === 'done' ? null : JOB_REPORT_REFUSED
-        },
+        }),
       }
     },
 

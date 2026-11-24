@@ -107,6 +107,11 @@ export interface TargetContext {
   home?: string
   /** The app's own data folders (userData): touching them is `app-data`. */
   appDataDirs?: readonly string[]
+  /**
+   * Company folders whose insides are never named (a set watch's `<place>/.personal/<folder>`: its run folders are named after
+   * customers, `jobs.md` "The set watch" "The app runs it"): a path below one is cut to the folder itself.
+   */
+  unnamedBelow?: readonly string[]
 }
 
 const isAbsolute = (p: string) => p.startsWith('/') || p.startsWith('\\') || /^[A-Za-z]:[\\/]/.test(p)
@@ -158,7 +163,15 @@ export function describePath(target: string, ctx: TargetContext): FileTarget {
   const sensitive = sensitiveKind(path, ctx)
   const root = ctx.companyRoot ? segmentsOf(ctx.companyRoot) : null
   if (root && (path.length === root.length ? root.length > 0 && startsWith(path, root) : startsWith(path, root))) {
-    return { kind: 'file', path: path.slice(root.length).join('/'), ...(sensitive ? { sensitive } : {}) }
+    const rel = path.slice(root.length)
+    // Below a folder whose insides are never named: only the folder (compared as the disk folds names, A–Z).
+    for (const below of ctx.unnamedBelow ?? []) {
+      const segs = below.normalize('NFC').split('/').filter(Boolean)
+      if (segs.length > 0 && rel.length > segs.length && segs.every((s, i) => fold(s) === fold(rel[i]))) {
+        return { kind: 'file', path: rel.slice(0, segs.length).join('/'), ...(sensitive ? { sensitive } : {}) }
+      }
+    }
+    return { kind: 'file', path: rel.join('/'), ...(sensitive ? { sensitive } : {}) }
   }
   return { kind: 'outside', ...(sensitive ? { sensitive } : {}) }
 }

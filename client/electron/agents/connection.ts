@@ -157,6 +157,8 @@ export interface ToolEventContextInput {
    * ok; consultation-task.ts `newFilesOfCall`): company path. Must not throw or block.
    */
   onFileCreated?: (companyPath: string) => void
+  /** Company folders whose insides the action log never names (a set watch's proposals folder). */
+  unnamedBelow?: readonly string[]
 }
 
 export interface AgentHostConfig {
