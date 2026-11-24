@@ -213,7 +213,7 @@ describe('the line\'s validator', () => {
     ['a which value read from the site', l => { l.values.round_date.from = ['record_field', 'site_fact'] }],
     ['a target the AI may give', l => { l.values.landing.from = ['ai'] }],
     ['a date compared against a target value', l => { l.values.round_date = { kind: 'date', role: 'target', from: ['site_fact'] } }],
-    ['a value nothing uses', l => { l.values.spare = { kind: 'text', role: 'write', from: ['ai'] } }],
+    ['a value nothing uses', l => { l.values.spare = { kind: 'date', role: 'which', from: ['person'] } }],
     ['no read', l => { l.reads = []; l.checks = [] }],
   ]
   for (const [what, change] of broken) {

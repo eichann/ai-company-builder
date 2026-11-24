@@ -1124,7 +1124,7 @@ Lステップ's facts) is untouched and stays the old path's guard; the new path
   route that carries a notice (§16-1 `POST /browser-shape-notices`, limits, one per company × site × version × thing)
   is PR 4's ("Plans of opened lines on the server").
 - **The read part of a line** (`browser-read-line.ts`, `BrowserReadLine` = `{ site, values, reads, checks }`, §17-2's
-  line check `browserReadLineProblem(line, map)`): values with a kind (`id`, `text`, `date`), a role (`target` — an
+  line check `browserReadLineProblem(line, map)`): values with a kind (`id`, `text`, `date`; `time` `HH:MM` since PR 8), a role (`target` — an
   object's id —, `which` — what decides which / when, what a check compares against —, `write`) and the sources the line
   accepts; reads, in order, each a thing of the map by a `target` value or by an `id` field of an earlier read; checks
   from the closed list `BROWSER_CHECK_WORDS`, arguments names only (a read, a field of its thing, a value, a format of
@@ -1486,9 +1486,10 @@ new take the same lock key for a step.
 
 - **The write part** (`shared/core/browser-write-line.ts`; knows no site): `BrowserOpenedLine.writes?` =
   `[{ read, verb, field, value }]` (absent = an inspection; its meaning hash unchanged). `browserLineWritesProblem` (asked by
-  `browserOpenedLineProblem`, so by the script and the server's loader): the verb in `BROWSER_WRITE_VERBS` (`add_child` only,
-  §17-3; `remove_child` is not a word); the read's thing lists the verb and field in its `writes`; **only the last write may
-  change what existed before** — no verb creates yet, so a line holds one write (§4-1, I4); the written object's id and its
+  `browserOpenedLineProblem`, so by the script and the server's loader): the verb in `BROWSER_WRITE_VERBS` (`add_child`; since PR 8
+  also `create_from`, "Creating on the new path"; §17-3; `remove_child` is not a word); the read's thing lists the verb and
+  field in its `writes`; **only the last write may change what existed before** — `add_child` changes what existed, so it
+  is last (§4-1, I4); the written object's id and its
   parent's are `{ value }` (the server takes the lock from the plan's values, C11); the added value is one the line reads by
   that value as the thing the map says goes in that field, bound to the account (C5: it exists in this account, it is a
   template and not any id, and the card shows it).
@@ -1566,6 +1567,87 @@ to the old path's; the reader fingerprint covering the connector folder), `brows
 write line is never made an inspection), `browser-read-words.test.ts` (§17-2 over `browser-write-line.ts`, with the lines'
 value names), `architecture-boundaries.test.ts` (a map may import its own site's connector, never another's).
 Each guard mutation-checked (33 mutations, after the independent review too; two redundant checks removed, their cases covered by the remaining ones).
+
+## Creating on the new path (generalization PR 8: the verb `create_from` and the landing-route line; nothing writes with them)
+
+Design memo 「ブラウザ操作の汎用化」 §3-3 (`copy`, as stage 0 found it), §3-4, §4-1, §7 (the landing-route line), §15 C1–C4 / C6
+/ C11, §16-4, §18; stage 0 「段0の結果」 R1, R3, R11–R13, 追記 (the test write), 追記2; owner decisions on #826 (which / when
+values only from a person for now; `changed_from` kept; the new route verified as made by this execution). **Nothing
+writes**: the server still refuses every plan of writes (`BROWSER_LINE_WRITES_NOT_YET`), the app has no writing path, and
+the line is **`pending`**. Every shape is **provisional** (§18). The old path is untouched; `landing_inspect`'s meaning hash
+is the same on every map version.
+
+- **The verb** (`browser-write-line.ts`, knows no site): `{ read, verb: 'create_from', set, as }` — a **new** object of the
+  read's thing, a copy of the object `read` read, with each field of `set` set to a line value (`{ value }`) or to the id an
+  earlier write created (`{ created: <as> }`); `as` names it (unique, never a read's name). `add_child` keeps its shape.
+  A copy of a site's object (stage 0: Lステップ's copy is "read the source, create a new one", never `?copy=1`) is a create,
+  not a change: nothing that existed moves.
+- **The map's create facts** (`browser-map.ts`, reviewed, C7): `writes.create_from` = field → the account-bound thing whose
+  id goes in (an `id`, or an `id_set` set to exactly that one id) or `null` (a plain `text` / `date` / `time`); never the
+  copy's own id or its parent field (a copy stays where its original is), never a number, flag or ordered list. A thing that
+  can be created must `delivers: none` (§4-1: what a plan creates reaches nobody until a person hands it out) and hold the
+  account. Every field not set is the original's — the map's promise about the site, tried once on a test object before a
+  line using it is approved (C2).
+- **The line judge** (`browserLineWritesProblem`): only what the map lets; `add_child` only last (a create may stand
+  anywhere: it changes nothing that existed — a stop after it leaves an object nobody uses, §4-1 / StepsLife R9); `{ created }`
+  only of an **earlier** write and only into an `id` field for that thing (C1: what this execution made, never something
+  reached through it); an id from a value only when the line reads that value as the thing the map names, under the
+  account (C5: it exists there, it is that kind of thing, the card shows it); a plain value only a `write` value of the
+  field's kind; every `write` value used by a write (the read part no longer asks it of `write` values; an inspection holds
+  none, `browserOpenedLineProblem`); a copy's original reached from a plan-value read whose parent is value-named too (the
+  lock, C11).
+- **Before anything is sent** (`browserWritesPlanProblem(read, writes, map, before, planAccount)`): the reads make a plan
+  under the plan's account, each value fits its field, and **an id set from a value differs from the original's**
+  (`same-as-original`: a copy re-pointed at what its original already points at is stage 0's most common accident — the
+  previous round's tag); a plain text / date / time may equal the original's (the same end time every week).
+- **The prediction and the judgement** (`predictBrowserWrites(…, created)`, `judgeBrowserWrites(…, planAccount, created)`):
+  `created` is, per `as`, the id the site gave (identified as the state table requires, C3 — the app's) and main's strict
+  read of that object. Predicted: every read unchanged by a create; each created object = its original with `set` applied
+  and its new id. `as_predicted` only when every read after **and** every created object equal the prediction field by
+  field, under the plan's account: the original route or action changed (an action edited in place reaches every route
+  sharing it, R3), the new route still on the source's action, the new action keeping the old tag or dropping a stop, a
+  field not set moving, or a "new" id that is one read before (the original itself) or given twice → `not_as_predicted`
+  (naming the fields; an id collision names the id field); a created object not read whole, of another id, or a missing
+  one → `unreadable`. The plan problem is asked again first (`unreadable`).
+- **Locks** (`browserLineWriteLocks`): a create takes the key of the object its original is reached from (the source
+  route: one copy of a source at a time); the created object's own key is taken by the server when its `done` report
+  records it (PR 4's state table). **For the plan-of-writes PR**: write 2's `{ created: new_action_set }` must be bound by
+  the server to the id it recorded for write 1 (the permit's `createdTarget`), never an id the app names.
+- **Lステップ map 1.0.3** (same version as the read-only confirmation above, one PR): `landing.writes.create_from = { name,
+  to_date, to_time, action_id: action_set }`, `action_set.writes.create_from = { tags: tag }`, both `delivers: none`; a
+  **placeholder** thing `tag` (`id`, `name`, account-bound) — stage 0 R6 (where a tag is read, its key set) was never read,
+  so its read address is `null` (`LSTEP_MAP_READS.tag`) and nothing reads it; `LSTEP_MAP_WRITES` records what stage 0 saw of
+  `POST /api/action/register` (multipart, answers `aid`) and of the route's save (JSON, every field again — `only_welcome`
+  not among them) with the parts **not confirmed** listed (`unconfirmed`). No business word; no read or write names `copy`.
+- **The line** `landing_create` 「流入経路を複製して作る」 1.0.0 (`client/browser-lines/lstep.ts`, **`pending`**): values
+  `source`, `tag` (`target` ← `site_fact`), `name` (text), `to_date` (date), `to_time` (time) (`write` ← `person` only:
+  confirmed one by one on the card, never the AI alone); reads the source route, its action, the tag; writes (1)
+  `create_from(source_action_set, { tags: tag })` as `new_action_set`, (2) `create_from(source, { name, to_date, to_time,
+  action_id: { created: new_action_set } })` as `new_landing`. No check word (business checks — a date in the name or the
+  tag — are a business plugin's line, §16-2).
+- **Before approval** (the owner's, in this order): read only — the tag's address and key set (R6); then one test write on
+  the test route 2597458 (C2): the register's and the create's exact bodies and answers (where the new ids stand), whether
+  a new route takes `only_welcome` / `qr_text` from its original, whether creating sets anything off; then the map's
+  `unconfirmed` lists emptied in a new map version and the line approved. Also open before the app's writing PR: the
+  card's before / after rows, the new route's list row (friend-add address) read after the create, and how the register's
+  inputs are ordered (the state keeps tags / templates / stops apart).
+
+Tests: `server/tests/unit/browser-write-words.test.ts` (an example map of a card, its pack and labels: the map's create
+facts refused shape by shape; a line's creates refused — a field not let, a thing not creatable, nothing set, a later or
+unknown `created`, `created` into another thing's field, `as` twice or a read's name, an id not read / read as another thing
+/ outside the account, a plain value from a target or of another kind, a write value unused, the one-field shape, an
+original not reached from a value-named read —; an inspection with a write value; `add_child` before a create refused,
+after allowed; the meaning moving with the create facts; the prediction and every not-as-predicted / unreadable case; the
+plan problem; the lock), `client/tests/browser-landing-create-line.test.ts` (Lステップ, answers made up from stage 0's key
+sets: `pending` on 1.0.3, no business word, nothing names `copy`, the two writes' addresses and their unconfirmed lists,
+the tag's null address; the values' sources; the tag equal to the source action's → `same-as-original`; a good copy
+`as_predicted`; the new route on the source's action, the old tag kept, a stop dropped, `only_welcome` moving, the source
+route or action changing, the "new" action or route being the source, the account moving, a created object not whole /
+another / missing → never `as_predicted`; a stop after write 1 changes no read and leaves the new action unreferenced; the
+lock the source route's), `browser-lstep-map.test.ts` (the tag's null address is the only read without one),
+`browser-read-words.test.ts` (an unused `which` value still refused by the read part). Each guard mutation-checked (24
+mutations: 21 caught; kept on purpose as second layers — `{ created }` of an unknown name, also refused by the kind check,
+and a created object's account, already held by its original's read; one redundant check in the prediction removed).
 
 ## The operator and the preview (PR 6b-1: built, switched off; nothing in the app calls it)
 

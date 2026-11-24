@@ -98,6 +98,10 @@ export function browserOpenedLineProblem(raw: unknown, map: BrowserMap): string 
   if (own(raw, 'writes')) {
     const writesProblem = browserLineWritesProblem(raw.writes, line, map)
     if (writesProblem) return writesProblem
+  } else {
+    // A `write` value is used only by writes (PR 8): an inspection holds none.
+    const spare = Object.entries(line.values).find(([, v]) => v.role === 'write')
+    if (spare) return `値「${spare[0]}」はこの行で使われていません`
   }
   const readNames = line.reads.map(r => r.name)
   const labels = raw.readLabels
@@ -127,6 +131,7 @@ export function browserLineMeaning(line: BrowserOpenedLine, map: BrowserMap): st
   // A line's writes and a thing's write facts are part of what it means (memo §16-5: what it changes and who that
   // reaches); added only where present, so an inspection's meaning (and its members' grants) stays what it was.
   const writes = line.writes ? { writes: line.writes } : {}
+  // The thing each write writes — for a create, the thing it makes (its original's).
   const written = new Set((line.writes ?? []).map(w => (line.read.reads.find(r => r.name === w.read) as BrowserReadLine['reads'][number]).thing))
   return canonicalJson({
     ...writes,

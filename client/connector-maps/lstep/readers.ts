@@ -208,7 +208,14 @@ export const readTemplate: BrowserThingReader = (a) => {
   return { id: id(field(a, 'id')), folder, name: text(field(a, 'name'), false), body }
 }
 
+/** A tag (PR 8, a placeholder until stage 0 R6 is confirmed): its id and name, nothing else. */
+export const readTag: BrowserThingReader = (a) => {
+  if (!isObject(a)) return fail('tag')
+  return { id: id(field(a, 'id')), name: text(field(a, 'name'), false) }
+}
+
 export const LSTEP_MAP_READERS: Readonly<Record<string, BrowserThingReader>> = {
+  tag: readTag,
   landing: readLanding,
   landing_row: readLandingRow,
   action_set: readActionSet,

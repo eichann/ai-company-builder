@@ -157,6 +157,8 @@ test('no read carries a query but the folder list\'s own (never ?copy=1)', () =>
   for (const [thing, r] of Object.entries(reads)) {
     // The one page read (1.0.2): the reminder's page, where the step's templates are (the old checker's read).
     if ('html' in r) { assert.equal(r.path, '/line/episode/show/{parent}', thing); continue }
+    // PR 8: the tag's address is not confirmed (stage 0 R6): none, so nothing reads it.
+    if (r.path === null) { assert.equal(thing, 'tag'); continue }
     assert.match(r.path, /^\/api\/[a-z-]+(\/\{id\})?$/, thing)
     assert.ok(!r.path.includes('?'))
     if ('query' in r) assert.deepEqual([...r.query], ['group', 'page'])
@@ -273,7 +275,8 @@ test('a stored row edited by hand with its hashes left as they were is refused, 
   const lines = await currentLines(maps)
   const fresh = JSON.parse(mergeOpened(null, maps, lines)) as BrowserOpenedFile
   const lineEdited = JSON.parse(JSON.stringify(fresh)) as BrowserOpenedFile
-  lineEdited.lines[0].line.read.checks = lineEdited.lines[0].line.read.checks.slice(0, 1)
+  const withChecks = lineEdited.lines.find(l => l.line.read.checks.length > 1)!
+  withChecks.line.read.checks = withChecks.line.read.checks.slice(0, 1)
   assert.throws(() => mergeOpened(JSON.stringify(lineEdited), maps, lines), /does not match its hashes/)
   const mapEdited = JSON.parse(JSON.stringify(fresh)) as BrowserOpenedFile
   delete (mapEdited.maps[0].map.things.action_set as { must_hold?: unknown }).must_hold
