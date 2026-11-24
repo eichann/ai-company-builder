@@ -481,6 +481,9 @@ export function createClaudeConnection(config: ClaudeConnectionConfig, createMod
           // Unattended: none of the member's own settings, MCP servers, hooks or plugins (like the hand-off agent).
           settingSources: unattended ? [] : ['user', 'project'],
           ...(unattended ? { strictMcpConfig: true, tools: [...unattended.builtinTools] } : {}),
+          // A set watch's pinned Skill copy lives outside the company folder: its reads are allowed there (the write guard's
+          // `readOutside` still checks each one, links followed).
+          ...(unattended?.readDirs?.length ? { additionalDirectories: [...unattended.readDirs] } : {}),
           // With the app's web research, the CLI's own web tools are off for the
           // whole session, subagents included (a deny beats any allow, in every
           // permission mode; WebFetch / WebSearch also bypass the sandbox's

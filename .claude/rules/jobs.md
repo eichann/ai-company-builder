@@ -20,6 +20,10 @@ paths:
   - "client/shared/ai-turn-steps/job.ts"
   - "client/electron/features/ai-turns/job-runs.ts"
   - "client/electron/features/ai-turns/job-report-tool.ts"
+  - "client/shared/ai-turn-steps/set-watch.ts"
+  - "client/electron/features/ai-turns/set-watch-run.ts"
+  - "client/electron/features/ai-turns/set-watch-tools.ts"
+  - "client/tests/job-set-watch-run.test.ts"
   - "client/tests/job-runs.test.ts"
   - "client/tests/job-runs-fail-closed.test.ts"
   - "client/electron/features/ai-turns/claims.ts"
@@ -1463,8 +1467,8 @@ as they are). **PR1: the definition, the consent and the approval. PR2: the serv
 ("The scan and its occurrences" below) — no released app names its check (`matched_record`), so nothing is claimed or run until
 PR5, and no screen announces 5 yet (`ADMIN_JOB_SCHEMAS` / `APP_JOB_SCHEMAS` stay `[1, 2, 3, 4]`: such a version is answered
 without its definition, `needsUpdate`, and a create, approval or acceptance from them is `JOB_NEEDS_NEWER_SCREEN`). **PR3: how a
-run ends** (the judgement, its やること or notice, corrections: "How a run ends" below). PR4 the plugin steps' side, PR5 / PR6 the
-app, PR7 the admin console.
+run ends** (the judgement, its やること or notice, corrections: "How a run ends" below). PR4 the plugin steps' side, **PR5: the app
+runs it** ("The app runs it" below; no screen announces schema 5 yet — that, and every button, is PR6), PR7 the admin console.
 
 - **The trigger is words, not a condition language** (owner decision 2026-11-23, §2-1): `{ kind: 'record_set', recordType,
   taskKind, origin, causes, causeRule, assignee, event, unit, guards }`, each key from its own list (`JOB_SET_WATCH_WORDS`,
@@ -1640,6 +1644,71 @@ app, PR7 the admin console.
     confidence in hundredths, unconfirmed words; PR3b adds about 4 more, the count) to the responsible person's own view — no free text. A `failed` finish's
     `failure.code` (`[A-Z0-9_]{1,60}`, older than this PR) is stored on the run and hidden from others (`hides`); PR5 should
     send only fixed codes there.
+- **The app runs it** (4b-4 PR5; owner memo §4-4 / §5-0 / 付録 B2 / C2, 「本体を動かさない見直し」 §F / §G and its シナリオ集 S9 / S11;
+  `client/shared/ai-turn-steps/set-watch.ts` (pure), `client/electron/features/ai-turns/job-runs.ts` (the runner's set branch),
+  `set-watch-run.ts` (the files), `set-watch-tools.ts` (the two tools)). The same runner as every PC job ("The app's runner": claim,
+  fail closed, the last check, the deadline, one at a time) with these additions:
+  - **Two locks, named only by an app that runs it**: `GET /me/job-turns?…&checks=matched_record` and the claim's `checks` add
+    `matched_record` only when main was given the set watch's file work (`JobRunDeps.setWatch`); without it a listed set turn is
+    `not-allowed` with no server call. The turn is parsed in a schema-5 frame (`SET_FRAME`: the one opened combination and a
+    stand-in reason — the turn carries neither; the reasons are read from the pinned `decision.json`); an event turn naming a
+    `meetingId` without `matched_record`, or `matched_record` without one, is dropped.
+  - **Before any AI** (`prepareSet`), in this order: every department folder it names (the procedure's, the read Skills', the
+    write place) is a real folder on this PC with no link on the way, else `bad-input` `DEPARTMENT_NOT_HERE` (a person is told;
+    4-T11); **the gate** (`DecisionGate`, §5-0: `CLAUDE_IN_RUN_GATE` today — the run's own AI judges inside the run; a later
+    local model is a new gate, never part of the definition or the consent) answering `failed` → a PC record, then the finish
+    `{ decision: 'gate_failed' }` alone: no draft, no copy, no file check, never Claude instead; **the pinned copy**
+    (`makeCopy`): both pinned trees (`run.procedure` and `grant.reads.skills`) read from git (`ls-tree -r` of the pinned tree,
+    `cat-file blob`; never the working tree, no lazy fetch) into `<userData>/job-skill-copies/<company>/<occurrence>.<generation>/
+    <place>/.claude/skills/<skill>/`, files read-only (0444), links (`120000`) and sub-repositories never copied, ≤ 2,000 files /
+    100 MB; a tree not here → `temporary` `PROCEDURE_NOT_HERE` (I9, 4-T10). `SKILL.md` and `decision.json` come from that copy.
+    Copies an earlier launch left are removed before this launch's first listing.
+  - **Reads** (`setWriteArea`, the write guard's `readArea` + `readOutside`, `chat-write-guard.md`): the grant's read paths,
+    `<place>/.personal/<folder>/` whole (earlier proposals, read only), and the copy — the one folder outside the company folder,
+    as written and as resolved (another run's copy, the app's other data, a link out of the copy: refused, 4-T26). Claude Code
+    gets the copy as `additionalDirectories` (`unattended.readDirs`).
+  - **Writes only in the run folder** (I1, 4-T6 / T12 / T21 / T23): `proposal_folder { company, meetingDate? }` makes
+    `<place>/.personal/<folder>/<YYYY-MM-DD>_<company>` (`runFolderName`: the department folder rule, other characters `_`,
+    ≤ 30; the day the AI gives, else the event's local day) **new for each claim** — `_2`, `_3`… when the name is taken, never
+    reused; asked again in the same claim, the same folder — with `.acb-job.json` (occurrence, run, generation only) and a PC
+    record `working`. Before it is made nothing is writable; afterwards only that folder (`writeArea.run`, read live).
+  - **The report** (`job_report { decision, reason, confidence, unconfirmed?, evidence? }`, only in that consultation; the
+    time job's `job_report` is not offered there), in this order before anything is sent (B2): ① the reason against the pinned
+    list and the server's own parser (`parseJobSetReport`), every `evidence` quote found in the minutes this run read
+    (`quoteAppearsIn`; the record tools tell main each fresh `minutes_read` of the pinned meeting — `onMinutesText` — and a
+    quote without minutes read, or another meeting's, is refused: I7, 4-T9); ② 進める / 人に聞く: the four files there
+    (`SET_WATCH_DRAFT_FILES`, plain non-empty files), the draft's images copied (`assets/<name>` only when the name is a plain
+    one the pinned `tools/assets/` lists; into the run folder's own `assets/` — a real folder, never a link —, never over a
+    file there: 4-T22 / T24); the update proposals counted from `更新案.json` (below); ③ the PC record
+    (`<userData>/job-set-runs/<company>/<occurrence>/<run>.<generation>.json`: decision, reason, confidence, unconfirmed,
+    evidence, images, folder, `updates`, `updatesFile`, `minutesDocVersion`) written through a temporary file and a rename and
+    **read back** — not kept → nothing is sent, the AI is told 「この PC に結果を書き残せなかった…」 and settle gives the run back
+    `temporary` `PC_RECORD_NOT_KEPT`; ④ then the finish with `setJobResult`: the fixed kinds only — no quote, company name,
+    folder or path (I6) — and `updates` only when ≥ 1. Any refusal in ①–② is the tool's answer (the AI fixes it); nothing is
+    finished twice; the copy is removed after ④.
+  - **The update proposals' file** (§G, S9 / S11 #11; the card that applies them is PR6): `更新案.json` in the run folder,
+    `{ "版": 1, "会議": <the pinned meeting>, "更新案": [{ 書き先: hubspot | 係数表, 取引, 項目 (HubSpot: 確度・金額・計上月・次のアクション・
+    商談の記録・取引を作る; 係数表: one line ≤ 40), 値 (text ≤ 2,000, a number, or [{ 月: YYYY-MM, 金額 }]), 根拠? (found in the
+    minutes), 理由? }] }` — ≤ 20 items, each 取引 + 項目 once (with the meeting, the key a later apply tells duplicates by — never
+    "the same day"), ≤ 64 KB (`parseUpdateProposals`). **The app counts, the AI does not** (the tool takes no `updates`). A file not
+    of the shape: the AI is told once what is wrong; reported again unchanged, the run ends with none counted (`updatesFile:
+    invalid`, never a broken file counted). An older server (before PR3b) refuses a finish with `updates` (`JOB_SET_REPORT_BAD`):
+    the AI is told it was not made, the record says `refused`, and the run ends at its deadline for a person (safe side).
+  - **The minutes' version** (S11 #8, T7): the `docVersion` the run's `minutes_read` answered is kept on the PC record
+    (`minutesDocVersion`); null when the run read no minutes or the answer did not say — PR6 then says 「確かめられません」, never
+    「変わっていません」.
+  - **A lost answer** (B2 ④): a record left `sending` is looked at on each listing (≤ 5 a pass): the run (`GET /ai-runs/:runId`)
+    at a later generation → `not_adopted`; `done` at this generation → `sent`; anything else stays `sending`. **Known gap**: a
+    「もう一度」 pressed after the lost answer also closes this generation `done`; the server does not yet say which finish it took
+    (B2's "the finished generation on the run's answer" is a server follow-up).
+  - **What the person can be shown** (for PR6; nothing here is a screen): per run on this PC, its record's state — `working` (the
+    folder made, nothing reported: the app quit or the run stopped mid-way — 「途中」, the folder kept and never written again),
+    `sending`, `sent`, `refused`, `not_adopted` — with its folder. The app closed past the occurrence's wait: the server expires
+    it and tells the person (as any event PC occurrence); a re-claim or 「もう一度」 makes a new generation and a new folder. Two
+    meetings at once: two occurrences, run one after the other (never side by side, the server's `JOB_EARLIER_RUNNING`), each with
+    its own folder and record.
+  - Tests: `client/tests/job-set-watch-run.test.ts` (on a real git repository and folders), `client/tests/ai-turn-unattended.test.ts`
+    (the copy as `additionalDirectories`). Mutation check: see the PR.
 - **Telling the record by its kind** (§2-2): `task_kind` is written by the minutes service only — a person's or an AI's
   create naming it is 400 `BAD_VALUE` (`record-engine/create.ts`), and no action takes it as an argument.
 - **Compatibility** (T11): an older server (the floor, 4b-0.5, and every build before this) does not know schema 5 and

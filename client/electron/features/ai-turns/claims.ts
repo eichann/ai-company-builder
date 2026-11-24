@@ -24,6 +24,7 @@ import { readAutoTurnSettings, readOwnAutoRun, type AiTurnClaimResult, type AiTu
 import type { RecordsApi } from '../../records/api'
 import type { RunRegistry } from '../../records/runs'
 import { isOccurrenceId, type JobRunResult } from '../../../../shared/core/jobs'
+import { createSetWatchTools } from './set-watch-tools'
 import { AI_RUN_RENEW_EVERY_MS, JOB_CONFIRM_MAX_AGE_MS, JOB_RENEW_TIMEOUT_MS, createJobRuns, jobRunGoneOnCall, jobRunGoneOnRenew, type ClockStamp, type HoldHandle, type JobRunDeps } from './job-runs'
 // lane C ▼
 import {
@@ -90,7 +91,7 @@ export interface AiTurnClaimsDeps {
    * pinned version, the new files under a place, and stopping a consultation's AI.
    * Absent: no job runs.
    */
-  jobs?: Pick<JobRunDeps, 'readShelfSkill' | 'fetchMark' | 'checkPoint' | 'newFiles' | 'stopTurn'>
+  jobs?: Pick<JobRunDeps, 'readShelfSkill' | 'fetchMark' | 'checkPoint' | 'newFiles' | 'stopTurn' | 'setWatch' | 'gate'>
 }
 
 const COMPANY = /^[A-Za-z0-9_-]{1,100}$/
@@ -152,7 +153,7 @@ export function createAiTurnClaims(deps: AiTurnClaimsDeps) {
   }
 
   /** Finish the run on the server: done, or failed with its class (the server decides where it goes). A job's done carries its result. */
-  async function finishRun(companyId: string, recordId: string, failure: { class: 'temporary' | 'bad-input' | 'permission' | 'unknown-result'; code: string } | null, extra?: { jobResult: JobRunResult }) {
+  async function finishRun(companyId: string, recordId: string, failure: { class: 'temporary' | 'bad-input' | 'permission' | 'unknown-result'; code: string } | null, extra?: { jobResult: JobRunResult | Record<string, unknown> }) {
     const h = release(companyId, recordId)
     if (!h) return null
     const r = await session(companyId, 'POST', `/ai-runs/${encodeURIComponent(h.runId)}/finish`,
@@ -379,9 +380,18 @@ export function createAiTurnClaims(deps: AiTurnClaimsDeps) {
     jobWriteArea(conversationId: string) {
       return jobs?.writeAreaOf(conversationId) ?? null
     },
-    /** A job run's `job_report` for its consultation; null for any other. */
+    /** A job run's `job_report` for its consultation; null for any other (and for a set watch's run, which has its own tools). */
     jobReporter(conversationId: string) {
       return jobs?.reporter(conversationId) ?? null
+    },
+    /** A set watch run's tools for its consultation (4b-4 PR5: `proposal_folder`, `job_report`); null for any other. */
+    jobSetTools(conversationId: string) {
+      const handlers = jobs?.setHandlers(conversationId) ?? null
+      return handlers ? createSetWatchTools(handlers) : null
+    },
+    /** The minutes a consultation's `minutes_read` answered: a set watch's run keeps its meeting's to check quotes against. */
+    jobMinutesRead(conversationId: string, recordId: string, text: string, docVersion: string | null) {
+      jobs?.minutesRead(conversationId, recordId, text, docVersion)
     },
     /**
      * A call of a run-bound record token was refused (records/api.ts `onRunRefused`, stage 4b-2): when it is a job's run

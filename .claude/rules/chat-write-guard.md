@@ -70,7 +70,13 @@ the safety net. Full text: `docs/architecture/chat-and-agents.md` (internal).
   Read / Glob / Grep to the grant's read paths or that area, as written and as resolved (a link cannot lead out);
   Glob and Grep must name a `path`, a Glob pattern may not start with `/` or climb with `..`. Guard reason
   `deliverable-folder` for both (the wire's list of reasons is unchanged). Test: `client/tests/job-runs.test.ts`
-  (mutation-checked).
+  (mutation-checked). **A set watch's run** (4b-4 PR5, `jobs.md` "The set watch" "The app runs it") narrows it twice:
+  `writeArea.run` — null until `proposal_folder` made the run's folder (every write refused,
+  `RUN_FOLDER_FIRST_MESSAGE`), then only `<place>/.personal/<folder>/<run>/…` as written and as resolved (read live: the
+  area object is main's, so the guard built at the turn's start sees the folder once made) — and `writeArea.readOutside`,
+  the one folder outside the company folder its file tools may read (the pinned Skills' copy in the app's data; as written
+  and as resolved, so a link inside it leads nowhere; Claude Code gets it as `additionalDirectories`). Test:
+  `client/tests/job-set-watch-run.test.ts` (mutation-checked).
 - Checked first, regardless of write access: a folder **not downloaded** on this computer
   (`WriteGuard.getNotDownloaded`) →
   「このフォルダ（コンテンツ/動画）はダウンロードしていないため、ここには保存できません。必要ならユーザーに設定でダウンロードしてもらってください。」

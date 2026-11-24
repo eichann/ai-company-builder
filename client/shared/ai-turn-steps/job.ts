@@ -9,13 +9,14 @@
  * The run's step is `job-procedure` (`JOB_PC_STEP`): the server scopes its token to the grant at every call.
  */
 import {
-  JOB_PC_STEP, OCCURRENCE_ID_RE, jobDeliveryFileId, jobDeliveryHowTo, jobDeliveryTools, jobDeliveryUpdateHowTo, jobRunRouteAllowed, parseJobAcceptedPlace, parseJobDefinition,
+  JOB_PC_STEP, JOB_SET_CHECK_KIND, JOB_SET_WATCH_OPENED, JOB_SET_WATCH_SCHEMA, OCCURRENCE_ID_RE, jobDeliveryFileId, jobDeliveryHowTo, jobDeliveryTools, jobDeliveryUpdateHowTo, jobRunRouteAllowed, parseJobAcceptedPlace, parseJobDefinition,
   type JobCheck, type JobDeliveryPlace, type JobGrant, type JobProcedure,
 } from '../../../shared/core/jobs'
 import { OUTSIDE_TITLE_NOTE, outsideTitle } from '../../../shared/core/outside-text'
 import { jobOperationKindText } from '../../../shared/core/job-words'
 import type { AiTurnCandidate } from './types'
 import { AUTOMATIC_NO_SHELL_RULE } from './plugin'
+import { PROPOSAL_FOLDER_TOOL } from './set-watch'
 
 export { JOB_PC_STEP }
 /** The run step a job's automatic send carries (`aiTurnStep`): the chat server asks main for its ceiling. */
@@ -36,7 +37,13 @@ export interface QueuedJobTurn {
    * time slot.
    */
   kind?: 'event'
-  source?: { recordId: string }
+  /**
+   * The record the event happened to; a set watch's (schema 5, 4b-4 PR5) also names the meeting its occurrence was made for —
+   * the one meeting whose minutes its run may read (the server checks it at every call).
+   */
+  source?: { recordId: string; meetingId?: string }
+  /** 4b-4 PR5: a set watch's occurrence (schema 5: `matched_record`, a department Skill). */
+  set?: true
   check: JobCheck
   checkSince: string
   /** Where the check stops (the occurrence's own time); absent from an older server. */
@@ -71,6 +78,12 @@ const TIME_FRAME = { schema: 1, trigger: { every: 'day', at: '09:00', businessDa
 const EVENT_FRAME = {
   schema: 3, trigger: { kind: 'record', type: 'task', event: 'state', to: 'done', assignee: 'responsible', startRecord: 'task-000000', followMadeTask: false },
 } as const
+/**
+ * A set watch's frame (schema 5, 4b-4 PR5): the one opened combination stands in for the trigger (the turn does not carry it), so
+ * the parser's own pairing holds — `matched_record` only with a department Skill, the one やること, the minutes route alone, no
+ * mail draft or place outside. Its reasons are read from the pinned Skill's `decision.json` on this PC, not from the turn.
+ */
+const SET_FRAME = { schema: JOB_SET_WATCH_SCHEMA, trigger: JOB_SET_WATCH_OPENED[0], decision: { reasons: [{ code: 'stand_in', label: '使わない' }] } } as const
 /** An operation's kind or what it made: ids only (letters, digits, . _ : -), never text. */
 const SHORT_ID = /^[A-Za-z0-9._:-]+$/
 /** At most this many things made before are named to the AI (the rest counted). */
@@ -96,8 +109,12 @@ export function parseJobTurn(v: unknown): QueuedJobTurn | null {
   const source = (typeof t.source === 'object' && t.source !== null ? t.source : null) as Record<string, unknown> | null
   if (event && (!source || !str(source.recordId, 80) || !RECORD_ID.test(source.recordId))) return null
   if (!event && t.source !== undefined && t.source !== null) return null
+  // 4b-4 PR5: a set watch is an event turn checked by `matched_record`, naming the meeting it was made for (else not run here).
+  const set = event && typeof t.check === 'object' && t.check !== null && (t.check as { kind?: unknown }).kind === JOB_SET_CHECK_KIND
+  if (event && source && source.meetingId !== undefined && !set) return null
+  if (set && (!source || !str(source.meetingId, 80) || !RECORD_ID.test(source.meetingId))) return null
   const parsed = parseJobDefinition({
-    ...(event ? EVENT_FRAME : TIME_FRAME), name: '定期の仕事', actingUser: 'u',
+    ...(set ? SET_FRAME : event ? EVENT_FRAME : TIME_FRAME), name: '定期の仕事', actingUser: 'u',
     check: t.check, run: { kind: 'procedure', procedure: t.procedure }, placement: 'a',
     missed: { policy: event ? 'skip' : 'latest_only', expiresAfterMinutes: 60 }, grant: t.grant,
   })
@@ -142,7 +159,8 @@ export function parseJobTurn(v: unknown): QueuedJobTurn | null {
   }
   return {
     occurrenceId: t.occurrenceId, jobId: t.jobId, name: t.name, dueAt: t.dueAt, expiresAt: t.expiresAt, state: t.state,
-    ...(event && source ? { kind: 'event' as const, source: { recordId: source.recordId as string } } : {}),
+    ...(event && source ? { kind: 'event' as const, source: { recordId: source.recordId as string, ...(set ? { meetingId: source.meetingId as string } : {}) } } : {}),
+    ...(set ? { set: true as const } : {}),
     check, checkSince: t.checkSince, ...(typeof t.checkUntil === 'string' ? { checkUntil: t.checkUntil } : {}),
     ...(typeof t.sinceCommit === 'string' ? { sinceCommit: t.sinceCommit } : {}), ...(typeof t.checkedCommit === 'string' ? { checkedCommit: t.checkedCommit } : {}), procedure: parsed.definition.run.procedure, grant, ...(meetings ? { meetings } : {}),
     ...(deliverTo ? { deliverTo } : {}),
@@ -205,11 +223,14 @@ export interface JobToolAccess {
 }
 
 export function jobToolAccess(grant: JobGrant, check: JobCheck, deliverTo?: JobDeliveryPlace): JobToolAccess {
-  const minutes = check.kind === 'new_meetings'
+  // The meeting check's meetings, or a set watch's one meeting (the server checks which at every call).
+  const minutes = check.kind === 'new_meetings' || check.kind === JOB_SET_CHECK_KIND
   const allowed = new Set(JOB_RECORD_TOOLS
     .filter(t => grant.tools.includes(t.group) && jobRunRouteAllowed(grant, t.route, () => minutes))
     .map(t => t.name))
   allowed.add(JOB_REPORT_TOOL)
+  // A set watch's run folder (4b-4 PR5): made by the app, the only place its run writes.
+  if (check.kind === JOB_SET_CHECK_KIND) allowed.add(PROPOSAL_FOLDER_TOOL)
   // The deliverable place's own tools (its connector declares them), only once its responsible person chose it.
   if (deliverTo) for (const name of jobDeliveryTools(grant)) allowed.add(name)
   return {
@@ -222,7 +243,7 @@ export function jobToolAccess(grant: JobGrant, check: JobCheck, deliverTo?: JobD
  * Where the run may write (the write guard's `writeArea`): only `<place>/.personal/<folder>/`, or nowhere; and
  * where its file tools may read (`reads`, the guard's `readArea`): the grant's read paths only.
  */
-export type JobWriteArea = ({ place: string; folder: string } | { nowhere: true }) & { reads: string[] }
+export type JobWriteArea = ({ place: string; folder: string; run?: string | null } | { nowhere: true }) & { reads: string[]; readOutside?: string }
 
 export function jobWriteArea(grant: JobGrant): JobWriteArea {
   const reads = [...grant.reads.paths]

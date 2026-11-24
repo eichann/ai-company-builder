@@ -932,6 +932,11 @@ export interface RecordToolsOptions {
   /** `records_create` made a record (the server answered it): its id and type (a task becomes the consultation's topic). */
   onRecordCreated?: (record: { id: unknown; type: unknown }) => void
   /**
+   * The minutes text a `minutes_read` of this turn answered (a fresh read, not a later part): a scheduled job's set watch keeps
+   * its meeting's to check the quotes of its report against (jobs.md "The set watch", I7). Must not throw.
+   */
+  onMinutesText?: (recordId: string, text: string, docVersion: string | null) => void
+  /**
    * Reads a PDF the AI names for a mail draft (`records/mail-attachments.ts`, bound to the
    * consultation's company folder); absent = no company folder, no files can be attached.
    */
@@ -1040,6 +1045,9 @@ export async function createRecordTools(access: RecordTurnAccess, signal?: Abort
         if (minutesId !== null && kept === undefined) {
           minutesKept.delete(minutesId)
           minutesKept.set(minutesId, answer)
+          const text = (answer as { text?: unknown } | undefined)?.text
+          const docVersion = (answer as { docVersion?: unknown } | undefined)?.docVersion
+          if (typeof text === 'string') try { options.onMinutesText?.(minutesId, text, typeof docVersion === 'string' ? docVersion : null) } catch { /* the job's check asks again */ }
           if (minutesKept.size > MINUTES_KEPT) minutesKept.delete(minutesKept.keys().next().value as string)
         }
         if (!spec.readOnly) changed()

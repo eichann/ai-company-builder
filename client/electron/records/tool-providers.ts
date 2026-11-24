@@ -9,7 +9,7 @@ import { createJobReportTools } from '../features/ai-turns/job-report-tool'
 import type { PathGuard } from '../features/ports'
 import type { PrivateFolderGuards } from '../features/private-folders/guards'
 import { notDownloadedFolders } from '../sync/not-downloaded'
-import type { RecordToolProvider } from './tools'
+import type { ExtraRecordTools, RecordToolProvider } from './tools'
 import type { JobWriteArea } from '../../shared/ai-turn-steps/job'
 import type { DriveOverwriteCard } from '../../shared/drive-overwrite'
 
@@ -22,6 +22,8 @@ export interface RecordToolProviderDeps {
   jobReport?: (conversationId: string) => ((result: unknown) => Promise<string | null>) | null
   /** A scheduled job's run held for this consultation: its write area (drive_put reads only from there); null otherwise. */
   jobWriteArea?: (conversationId: string) => JobWriteArea | null
+  /** A set watch's run held for this consultation (4b-4 PR5): its `proposal_folder` and `job_report`; null otherwise. */
+  jobSetTools?: (conversationId: string) => ExtraRecordTools | null
   /** Whether this consultation's record token is bound to an execution run (then drive_put reads only a job's area, else nothing). */
   runBound?: (companyId: string, conversationId: string) => boolean
 }
@@ -71,5 +73,8 @@ export function recordToolProviders(deps: RecordToolProviderDeps, turn: RecordTo
   // A scheduled job's run (jobs.md): its one report, only in the consultation main holds the run for.
   const report = turn.conversationId ? deps.jobReport?.(turn.conversationId) ?? null : null
   if (report) providers.push(() => Promise.resolve(createJobReportTools(report)))
+  // A set watch's run (4b-4 PR5): its folder and its judgement, only in the consultation main holds that run for.
+  const setTools = turn.conversationId ? deps.jobSetTools?.(turn.conversationId) ?? null : null
+  if (setTools) providers.push(() => Promise.resolve(setTools))
   return providers
 }

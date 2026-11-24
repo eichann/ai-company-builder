@@ -162,6 +162,8 @@ export const ACB_TOOL_DISPLAYS: Readonly<Record<string, ToolDisplay>> = {
   // Counts only: the notes may quote the member's reply.
   // A scheduled job's run hands back its one やること's title (job-report-tool.ts).
   [records('job_report')]: say('定期の仕事の結果を渡しました', '定期の仕事の結果を渡しています', '定期の仕事の結果を {n} 回渡しました'),
+  // A set watch's run folder (set-watch-tools.ts): no detail (the folder's name holds a customer's).
+  [records('proposal_folder')]: say('この実行のフォルダを作りました', 'この実行のフォルダを作っています', 'この実行のフォルダを {n} 回作りました'),
   [records('inbox_reply_check')]: say('返事のあとのやることを確かめました', '返事のあとのやることを確かめています', '返事のあとのやることを {n} 回確かめました'),
   // The fixed app servers.
   mcp__acb_consultations__search_consultations: say('過去の相談を探しました', '過去の相談を探しています', '過去の相談を {n} 回探しました', input => shortText(input.query)),

@@ -82,6 +82,7 @@ import { registerMinutesIpc } from './features/minutes/ipc'
 import { createMeetingsApi } from './features/minutes/meetings'
 import { createAiTurnClaims } from './features/ai-turns/claims'
 import { gitCheckPoint, gitFetchMark, newFilesByGit, newFilesByTime } from './features/ai-turns/job-runs'
+import { createSetWatchFs } from './features/ai-turns/set-watch-run'
 import { createRunRegistry } from './records/runs'
 import { registerAiTurnsIpc } from './features/ai-turns/ipc'
 import { createNotificationsWatcher } from './features/notifications/watcher'
@@ -538,6 +539,13 @@ const aiTurnClaims = createAiTurnClaims({
       return window.upto ? newFilesByGit(jobGit, root, place, { since: window.since, sinceCommit: window.sinceCommit, upto: window.upto }) : null
     },
     stopTurn: conversationId => { chatTurns?.abort(info => info.appSessionId === conversationId, 'job-ended') },
+    // A set watch (4b-4 PR5): the pinned Skills' copy and the PC records in the app's data, never the company folder.
+    setWatch: createSetWatchFs({
+      git: jobGit,
+      gitBlob: (root, sha) => appGit.create(root, { GIT_NO_LAZY_FETCH: '1' }).binaryCatFile(['blob', sha]),
+      copiesRoot: () => path.join(userDataDir(), 'job-skill-copies'),
+      recordsRoot: () => path.join(userDataDir(), 'job-set-runs'),
+    }),
   },
 })
 jobRunRefused = aiTurnClaims.runRefused
@@ -766,6 +774,9 @@ app.whenReady().then(async () => {
       jobReport: conversationId => aiTurnClaims.jobReporter(conversationId),
       // …and the only place its drive_put may read a file from (its deliverable area).
       jobWriteArea: conversationId => aiTurnClaims.jobWriteArea(conversationId),
+      // …a set watch's run folder and judgement (4b-4 PR5), and the minutes its quotes are checked against.
+      jobSetTools: conversationId => aiTurnClaims.jobSetTools(conversationId),
+      jobMinutesRead: (conversationId, recordId, text, docVersion) => aiTurnClaims.jobMinutesRead(conversationId, recordId, text, docVersion),
       runBound: (companyId, conversationId) => aiRunRegistry.runOf(companyId, conversationId) !== null,
       workingFolders,
       skillShelf,

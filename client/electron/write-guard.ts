@@ -58,7 +58,7 @@ import { reservedPathMessage } from '../../shared/types/private-folders'
 import { isInstructionFile, mayChangeInstructionFile } from '../../shared/core/instruction-files'
 import { isSkillFile, mayChangeSkillFile, type SkillEditing } from '../../shared/core/skill-files'
 import { isAgentConfig } from '../../shared/core/agent-config'
-import { isSameOrAncestorPath, lookalikeKey, pathKey } from '../../shared/core/paths'
+import { diskKey, isSameOrAncestorPath, lookalikeKey, pathKey } from '../../shared/core/paths'
 import { recordFileEditProblem } from '../../shared/core/records'
 import { FULL_ACCESS_ROLES } from '../../shared/core/permissions'
 import { insideDeliverableAt } from '../../shared/core/plugin-step-runs'
@@ -176,7 +176,27 @@ function realRelativePath(root: string, target: string, cwd?: string): string | 
  * step), `<place>/.personal/<folder>/` (a scheduled job's grant, `jobs.md`), or nowhere (a job whose grant
  * writes nothing).
  */
-export type WriteArea = ({ folder: string; place?: string } | { nowhere: true }) & { reads?: readonly string[] }
+export type WriteArea = ({ folder: string; place?: string; run?: string | null } | { nowhere: true }) & { reads?: readonly string[]; readOutside?: string }
+
+/**
+ * A set watch's run (4b-4 PR5, `jobs.md` "The set watch" "The app runs it"): `run` narrows the write area to one folder the app
+ * made for this run, `<place>/.personal/<folder>/<run>/` — null until it is made (nothing is written before). `readOutside`: the
+ * one folder outside the company folder its file tools may read — the pinned Skills' copy the app made for this run.
+ */
+export const RUN_FOLDER_FIRST_MESSAGE = 'この定期の仕事では、先に proposal_folder でこの実行だけのフォルダを作ってください。書けるのはそのフォルダの中だけです。'
+
+/** The message the AI sees when a set watch's write lands outside its run folder. */
+export function runFolderMessage(place: string, folder: string, run: string): string {
+  return `この定期の仕事で AI がファイルを保存できるのは「${place}/.personal/${folder}/${run}/」の中だけです（この実行のフォルダ。ほかの提案書のフォルダは書き換えられません）。`
+}
+
+/** Inside `<place>/.personal/<folder>/<run>/<something>` (as the disk folds names). */
+function insideRunFolder(rel: string, place: string | null, folder: string, run: string): boolean {
+  if (!insideDeliverableAt(rel, place, folder)) return false
+  const segments = rel.split('/')
+  const head = place === null ? 1 : place.split('/').length
+  return segments.length >= head + 4 && diskKey(segments[head + 2].normalize('NFC')) === diskKey(run.normalize('NFC'))
+}
 
 /** The message the AI sees when a scheduled job that writes nothing tries to write. */
 export const NOWHERE_TO_WRITE_MESSAGE = 'この定期の仕事では、AI はファイルを保存できません。作ったものは、最後のやることの説明に書いてください。'
@@ -196,6 +216,13 @@ export function checkDeliverableFolder(guard: WriteGuard, target: string, cwd?: 
   if ('nowhere' in area) return refused(NOWHERE_TO_WRITE_MESSAGE)
   const real = rel === null ? null : realRelativePath(guard.root, target, cwd)
   const place = area.place ?? null
+  // A set watch's run: only inside the folder made for this run (as written and where it resolves), nothing before it is made.
+  if (area.run !== undefined) {
+    if (area.run === null) return refused(RUN_FOLDER_FIRST_MESSAGE)
+    const run = area.run
+    if (rel !== null && real !== null && insideRunFolder(rel, place, area.folder, run) && insideRunFolder(real, place, area.folder, run)) return { deny: false }
+    return refused(runFolderMessage(area.place ?? '（部署のフォルダ）', area.folder, run))
+  }
   if (rel !== null && real !== null && insideDeliverableAt(rel, place, area.folder) && insideDeliverableAt(real, place, area.folder)) return { deny: false }
   return refused(deliverableFolderMessage(area.folder, area.place))
 }
@@ -505,12 +532,27 @@ export function checkReadArea(guard: WriteGuard, toolName: string, toolInput: Re
   if (typeof target !== 'string' || target === '') return refused('')
   // A Glob pattern that climbs out or is absolute reads outside whatever its path says.
   if (toolName === 'Glob' && typeof toolInput?.pattern === 'string' && (toolInput.pattern.startsWith('/') || toolInput.pattern.split(/[\\/]/).includes('..'))) return refused(target)
+  // A set watch's pinned copy (4b-4 PR5): the one folder outside the company folder it may read, as written and where it resolves.
+  const outside = guard.writeArea?.readOutside
+  if (outside !== undefined && insideReadOutside(outside, target, cwd)) return { deny: false }
   const rel = repoRelativePath(guard.root, target, cwd)
   const real = rel === null ? null : realRelativePath(guard.root, target, cwd)
   if (rel === null || real === null) return refused(target)
   const inside = (p: string) => places.some(place => isSameOrAncestorPath(pathKey(place), pathKey(p)))
     || (guard.writeArea !== undefined && !('nowhere' in guard.writeArea) && insideDeliverableAt(p, guard.writeArea.place ?? null, guard.writeArea.folder))
   return inside(rel) && inside(real) ? { deny: false } : refused(rel)
+}
+
+/** Whether `target` is inside the folder `outside` (absolute), both as written and where it resolves on disk (links followed). */
+function insideReadOutside(outside: string, target: string, cwd?: string): boolean {
+  if (!path.isAbsolute(outside)) return false
+  const written = path.resolve(cwd && path.isAbsolute(cwd) ? cwd : outside, target)
+  const within = (base: string, p: string) => { const r = path.relative(base, p); return r === '' || (!r.startsWith('..') && !path.isAbsolute(r)) }
+  if (!within(path.resolve(outside), written)) return false
+  let realBase: string
+  try { realBase = realpathSync(outside) } catch { return false }
+  const real = realPathOf(written)
+  return real !== undefined && within(realBase, real)
 }
 
 /** The PreToolUse decision for one Claude Code tool call. */

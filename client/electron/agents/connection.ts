@@ -130,7 +130,14 @@ export interface AgentConnection {
      * loaded; nothing asks the member. The chat server sends it only to Claude Code (registry
      * `recordActions`); an agent that cannot honour it must refuse rather than run unrestricted.
      */
-    unattended?: { builtinTools: readonly string[] }
+    unattended?: {
+      builtinTools: readonly string[]
+      /**
+       * Folders outside the working folder its file tools may read (a set watch's pinned Skill copy, `jobs.md` "The set watch"
+       * "The app runs it"); the write guard's `readOutside` still decides each read.
+       */
+      readDirs?: readonly string[]
+    }
   }): LanguageModel
   createTitleModel(request?: { modelId?: string }): LanguageModel
   readMetadata(metadata: Record<string, unknown> | undefined): {
