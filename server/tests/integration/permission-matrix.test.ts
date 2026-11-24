@@ -132,6 +132,9 @@ interface World {
     /** A 「ブラウザ操作」 plan of the other company's member, approved, and its permitted execution (agent-browser.md). */
     browserPlan: string
     browserExecution: string
+    /** A plan of an opened line of the other company's member, claimed, and its running execution (agent-browser.md "Plans of opened lines on the server"). */
+    browserLinePlan: string
+    browserLineExecution: string
     /** A holding ticket and item of the other company's member (private-folders.md "Holding: the member's upload"). */
     holdingTicket: string
     holdingItem: string
@@ -168,6 +171,10 @@ const OTHER_CANDIDATE = `jc.${'e'.repeat(32)}`
 const OTHER_PROPOSAL = `jp.${'e'.repeat(32)}`
 const OTHER_PLAN = `bp_${'e'.repeat(32)}`
 const OTHER_EXECUTION = `bx_${'e'.repeat(32)}`
+const NO_SUCH_LINE_PLAN = `bl_${'0'.repeat(32)}`
+const NO_SUCH_LINE_EXECUTION = `bw_${'0'.repeat(32)}`
+const OTHER_LINE_PLAN = `bl_${'e'.repeat(32)}`
+const OTHER_LINE_EXECUTION = `bw_${'e'.repeat(32)}`
 const NO_SUCH_HOLDING = '00000000-0000-4000-8000-0000000401d0'
 
 const MATRIX: Row[] = [
@@ -714,6 +721,21 @@ const MATRIX: Row[] = [
   r('GET /api/companies/:companyId/browser-type-grants', w => ({ path: `${C(w)}/browser-type-grants` }), [200, 200, 403, 403, 404, 401]),
   r('PUT /api/companies/:companyId/browser-type-grants/:userId', w => ({ path: `${C(w)}/browser-type-grants/${USER.member}`, body: 'x' }), [400, 400, 403, 403, 404, 401]),
   r('POST /api/browser-executions/report', () => ({ path: '/api/browser-executions/report', body: { result: 'succeeded' } }), [401, 401, 401, 401, 401, 401], 'the execution secret, never a session'),
+  // Plans of opened lines (agent-browser.md "Plans of opened lines on the server"): as the old path's — a plan and its
+  // execution are their member's own, grants and the shape notices' list owner/admin's, the report the secret's.
+  r('POST /api/companies/:companyId/browser-line-plans', w => ({ path: `${C(w)}/browser-line-plans`, body: 'x' }), [400, 400, 400, 400, 404, 401]),
+  r('GET /api/companies/:companyId/browser-line-plans/:planId', w => ({ path: `${C(w)}/browser-line-plans/${NO_SUCH_LINE_PLAN}` }), [404, 404, 404, 404, 404, 401]),
+  r('POST /api/companies/:companyId/browser-line-plans/:planId/result', w => ({ path: `${C(w)}/browser-line-plans/${NO_SUCH_LINE_PLAN}/result`, body: {} }), [404, 404, 404, 404, 404, 401]),
+  r('POST /api/companies/:companyId/browser-line-plans/:planId/approve', w => ({ path: `${C(w)}/browser-line-plans/${NO_SUCH_LINE_PLAN}/approve`, body: {} }), [404, 404, 404, 404, 404, 401]),
+  r('POST /api/companies/:companyId/browser-line-plans/:planId/cancel', w => ({ path: `${C(w)}/browser-line-plans/${NO_SUCH_LINE_PLAN}/cancel` }), [404, 404, 404, 404, 404, 401]),
+  r('POST /api/companies/:companyId/browser-line-plans/:planId/claim', w => ({ path: `${C(w)}/browser-line-plans/${NO_SUCH_LINE_PLAN}/claim` }), [404, 404, 404, 404, 404, 401]),
+  r('POST /api/companies/:companyId/browser-line-executions/:executionId/permit', w => ({ path: `${C(w)}/browser-line-executions/${NO_SUCH_LINE_EXECUTION}/permit`, body: { index: 1 } }), [404, 404, 404, 404, 404, 401]),
+  r('POST /api/companies/:companyId/browser-line-executions/:executionId/confirm', w => ({ path: `${C(w)}/browser-line-executions/${NO_SUCH_LINE_EXECUTION}/confirm`, body: {} }), [404, 404, 404, 404, 404, 401]),
+  r('GET /api/companies/:companyId/browser-line-grants', w => ({ path: `${C(w)}/browser-line-grants` }), [200, 200, 403, 403, 404, 401]),
+  r('PUT /api/companies/:companyId/browser-line-grants/:userId', w => ({ path: `${C(w)}/browser-line-grants/${USER.member}`, body: 'x' }), [400, 400, 403, 403, 404, 401]),
+  r('POST /api/companies/:companyId/browser-shape-notices', w => ({ path: `${C(w)}/browser-shape-notices`, body: 'x' }), [400, 400, 400, 400, 404, 401]),
+  r('GET /api/companies/:companyId/browser-shape-notices', w => ({ path: `${C(w)}/browser-shape-notices` }), [200, 200, 403, 403, 404, 401]),
+  r('POST /api/browser-line-executions/report', () => ({ path: '/api/browser-line-executions/report', body: { index: 1, result: 'done' } }), [401, 401, 401, 401, 401, 401], 'the execution secret, never a session'),
   // lane C ▲
 ]
 
@@ -911,6 +933,14 @@ const CROSS: CrossRow[] = [
   x('GET /api/companies/:companyId/holding/:itemId/files/:idx', (w, id) => ({ path: `${C(w)}/holding/${id}/files/0` }), w => w.other.holdingWaiting, NO_SUCH_HOLDING),
   x('POST /api/companies/:companyId/holding/:itemId/take', (w, id) => ({ path: `${C(w)}/holding/${id}/take`, body: { files: [0] } }), w => w.other.holdingWaiting, NO_SUCH_HOLDING),
   x('POST /api/companies/:companyId/holding/:itemId/discard', (w, id) => ({ path: `${C(w)}/holding/${id}/discard` }), w => w.other.holdingWaiting, NO_SUCH_HOLDING),
+  x('GET /api/companies/:companyId/browser-line-plans/:planId', (w, id) => ({ path: `${C(w)}/browser-line-plans/${id}` }), w => w.other.browserLinePlan, NO_SUCH_LINE_PLAN),
+  x('POST /api/companies/:companyId/browser-line-plans/:planId/result', (w, id) => ({ path: `${C(w)}/browser-line-plans/${id}/result`, body: { reads: {}, checks: [] } }), w => w.other.browserLinePlan, NO_SUCH_LINE_PLAN),
+  x('POST /api/companies/:companyId/browser-line-plans/:planId/approve', (w, id) => ({ path: `${C(w)}/browser-line-plans/${id}/approve`, body: { contentHash: `sha256:${'a'.repeat(64)}` } }), w => w.other.browserLinePlan, NO_SUCH_LINE_PLAN),
+  x('POST /api/companies/:companyId/browser-line-plans/:planId/cancel', (w, id) => ({ path: `${C(w)}/browser-line-plans/${id}/cancel` }), w => w.other.browserLinePlan, NO_SUCH_LINE_PLAN),
+  x('POST /api/companies/:companyId/browser-line-plans/:planId/claim', (w, id) => ({ path: `${C(w)}/browser-line-plans/${id}/claim` }), w => w.other.browserLinePlan, NO_SUCH_LINE_PLAN),
+  x('POST /api/companies/:companyId/browser-line-executions/:executionId/permit', (w, id) => ({ path: `${C(w)}/browser-line-executions/${id}/permit`, body: { index: 1 } }), w => w.other.browserLineExecution, NO_SUCH_LINE_EXECUTION),
+  x('POST /api/companies/:companyId/browser-line-executions/:executionId/confirm', (w, id) => ({ path: `${C(w)}/browser-line-executions/${id}/confirm`, body: { index: 1, result: 'done' } }), w => w.other.browserLineExecution, NO_SUCH_LINE_EXECUTION),
+  x('PUT /api/companies/:companyId/browser-line-grants/:userId', (w, id) => ({ path: `${C(w)}/browser-line-grants/${id}`, body: { site: 'lstep', line: 'landing_inspect', meaningHash: `sha256:${'a'.repeat(64)}`, mechanicsHash: `sha256:${'b'.repeat(64)}`, allowed: true } }), w => w.other.member, 'pm-nobody'),
   x('PUT /api/companies/:companyId/browser-type-grants/:userId', (w, id) => ({ path: `${C(w)}/browser-type-grants/${id}`, body: { connector: 'lstep', operation: 'reminder_step_add_template', declarationHash: `sha256:${'a'.repeat(64)}`, allowed: true } }), w => w.other.member, 'pm-nobody'),
   // lane C ▲
 ]
@@ -1187,6 +1217,16 @@ async function seed(): Promise<World> {
   db.prepare(`INSERT INTO browser_executions (company_id, id, plan_id, user_id, secret_hash, lock_key, state, claimed_at, permitted_at)
     VALUES (?, ?, ?, ?, ?, 'lock-other', 'permitted', ?, ?)`).run(other, OTHER_EXECUTION, OTHER_PLAN, otherMember, 'd'.repeat(64), expires, expires)
   db.prepare("INSERT INTO browser_target_locks (company_id, lock_key, execution_id, created_at) VALUES (?, 'lock-other', ?, ?)").run(other, OTHER_EXECUTION, expires)
+  // A plan of an opened line of the other company's member, claimed, its execution running with write 1 permitted and its
+  // lock (rows as adapters/sqlite/browser-lines.ts writes them).
+  db.prepare(`INSERT INTO browser_line_plans (company_id, id, user_id, shape, site, line_name, line_version, map_version, meaning_hash, mechanics_hash, writes,
+    content, content_hash, state, created_at, expires_at, approved_at) VALUES (?, ?, ?, 2, 'lstep', 'landing_inspect', '1.0.0', '1.0.1', ?, ?, 2, '{}', ?, 'claimed', ?, '2100-01-01T00:00:00.000Z', ?)`)
+    .run(other, OTHER_LINE_PLAN, otherMember, `sha256:${'a'.repeat(64)}`, `sha256:${'b'.repeat(64)}`, `sha256:${'c'.repeat(64)}`, expires, expires)
+  db.prepare(`INSERT INTO browser_line_executions (company_id, id, plan_id, user_id, secret_hash, state, claimed_at, first_permitted_at)
+    VALUES (?, ?, ?, ?, ?, 'running', ?, ?)`).run(other, OTHER_LINE_EXECUTION, OTHER_LINE_PLAN, otherMember, 'f'.repeat(64), expires, expires)
+  db.prepare(`INSERT INTO browser_execution_steps (company_id, execution_id, idx, write_kind, state, permitted_at) VALUES (?, ?, 1, 'create', 'permitted', ?), (?, ?, 2, 'change', 'pending', NULL)`)
+    .run(other, OTHER_LINE_EXECUTION, expires, other, OTHER_LINE_EXECUTION)
+  db.prepare("INSERT INTO browser_line_locks (company_id, lock_key, execution_id, created_at) VALUES (?, 'lock-other-line', ?, ?)").run(other, OTHER_LINE_EXECUTION, expires)
   // A Skill on the other company's shelf, published (rows as adapters/sqlite/skill-shelf.ts writes them).
   db.prepare(`INSERT INTO shelf_items (id, company_id, kind, department_id, name, current_version, created_at, created_by, changed_at, changed_by)
     VALUES ('shelf-other-1', ?, 'skill', NULL, 'other-skill', ?, ?, ?, ?, ?)`).run(other, 'a'.repeat(64), expires, otherMember, expires, otherMember)
@@ -1269,6 +1309,8 @@ async function seed(): Promise<World> {
       holdingTicket: 'holding-ticket-other-1',
       holdingItem: 'holding-item-other-1',
       holdingWaiting: 'holding-item-other-2',
+      browserLinePlan: OTHER_LINE_PLAN,
+      browserLineExecution: OTHER_LINE_EXECUTION,
 
     },
   }

@@ -9,6 +9,7 @@ import { readFileSync } from 'fs'
 import { dirname, join } from 'path'
 import { fileURLToPath } from 'url'
 import type { ApprovedCombinationRow, BrowserConnectorCatalog } from '../ports/browser-plans'
+import type { BrowserOpenedListSource } from '../ports/browser-lines'
 import { logError } from '../lib/error-log'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
@@ -24,4 +25,22 @@ export function fileBrowserConnectorCatalog(file = APPROVED_COMBINATIONS_FILE): 
     logError('browser-plans', 'the approved browser connectors could not be read; no plan is accepted', error)
   }
   return { combinations: () => rows }
+}
+
+/** server/src/adapters → the repository's shared/browser-connectors/opened.json (generalization PR 4). */
+export const OPENED_LIST_FILE = join(HERE, '../../shared/browser-connectors/opened.json')
+
+/**
+ * The opened list (maps and lines, agent-browser.md "Plans of opened lines on the server"), read once at startup like the
+ * approved combinations. A missing or unreadable file gives nothing (every line plan is refused). The service re-hashes
+ * and checks every row before using it.
+ */
+export function fileBrowserOpenedList(file = OPENED_LIST_FILE): BrowserOpenedListSource {
+  let parsed: unknown = null
+  try {
+    parsed = JSON.parse(readFileSync(file, 'utf8')) as unknown
+  } catch (error) {
+    logError('browser-lines', 'the opened list could not be read; no line plan is accepted', error)
+  }
+  return { file: () => parsed }
 }

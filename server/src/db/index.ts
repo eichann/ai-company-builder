@@ -38,6 +38,7 @@ import { migrateRecordLedgerVia } from './schema/plugin-bridge'
 import { migratePluginStepRequestCloser, pluginStepSchema } from './schema/plugin-steps'
 import { pluginRoleSchema } from './schema/plugin-roles'
 import { browserPlanSchema, migrateBrowserExecutionMonotonic, migrateBrowserPlanSummary } from './schema/browser-plans'
+import { browserLineSchema } from './schema/browser-lines'
 // lane C ▲
 // The migrations tests run on their own against older databases.
 export { migrateCompanyFolderKind, migrateInvitationClaims } from './schema/company'
@@ -112,6 +113,8 @@ const SCHEMA = [
   pluginRoleSchema,
   // 「ブラウザ操作」 plans (agent-browser.md "Plans, executions, permits and locks").
   browserPlanSchema,
+  // Plans of opened lines (agent-browser.md "Plans of opened lines on the server"): new tables only.
+  browserLineSchema,
   // lane C ▲
 ]
 

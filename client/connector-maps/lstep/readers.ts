@@ -1,5 +1,5 @@
 /**
- * Lステップ's readers for map 1.0.0 (./map.ts): each turns one strictly read JSON answer into its thing's state — exactly
+ * Lステップ's readers for map 1.0.1 (./map.ts): each turns one strictly read JSON answer into its thing's state — exactly
  * the map's fields, each of its kind — and throws on anything it does not understand (the core then says 「読み取れません
  * でした」; never a guess). The core has already checked every key against the map before a reader runs
  * (`readBrowserThing`); a reader decides the values. Only shapes stage 0 recorded; where it recorded a name but not a
@@ -8,8 +8,10 @@
  * - flags: true / false, or 0 / 1;
  * - texts: plain text (the core's rule); an empty text is read as none (the card says 「なし」 for both);
  * - dates `YYYY-MM-DD`, times `HH:MM` (or `HH:MM:00`); numbers as a number or a decimal in digits;
- * - an action's input: type 13 with its `tag_ids`, 12 with its `egg_id`, 15 with its `episode_id` and `firetype`; the
- *   other kinds' keys absent or null. Any other type → not read (an action doing something unread is never "the same").
+ * - an action's input (1.0.1, the full key sets confirmed): type 13 with exactly `tag_ids`, 12 with exactly `egg_id`, 15
+ *   with exactly `episode_id` and `firetype`, each with `member_query_id` and `send_member_query_id` null — the other
+ *   kinds' keys absent, a condition on who receives it not null → not read. Any other type → not read (an action doing
+ *   something unread is never "the same").
  */
 import type { BrowserThingReader } from '../../../shared/core/browser-map'
 
@@ -97,6 +99,8 @@ const INPUT_KEYS: Readonly<Record<string, readonly string[]>> = {
   15: ['episode_id', 'firetype'],
 }
 const ALL_INPUT_KEYS = ['tag_ids', 'egg_id', 'episode_id', 'firetype']
+/** Keys every input carries (null everywhere seen): a value here would be a condition the state does not hold. */
+const NULL_INPUT_KEYS = ['member_query_id', 'send_member_query_id']
 
 /** `GET /api/actions/<id>`: its inputs grouped by what they do; no id of its own (the core adds the address's). */
 export const readActionSet: BrowserThingReader = (a) => {
@@ -110,8 +114,9 @@ export const readActionSet: BrowserThingReader = (a) => {
     if (!isObject(input)) return fail('input')
     const type = String(id(field(input, 'type')))
     const own = INPUT_KEYS[type] ?? fail('input type')
-    // The other kinds' keys: absent or null only.
-    for (const k of ALL_INPUT_KEYS) if (!own.includes(k) && field(input, k) !== undefined && field(input, k) !== null) fail('input keys')
+    // Exactly this kind's keys (1.0.1): the other kinds' are absent; the conditions null.
+    for (const k of ALL_INPUT_KEYS) if (!own.includes(k) && field(input, k) !== undefined) fail('input keys')
+    for (const k of NULL_INPUT_KEYS) if (field(input, k) !== null) fail('input condition')
     if (type === '13') {
       const ids = field(input, 'tag_ids')
       if (!Array.isArray(ids) || ids.length === 0) return fail('tag_ids')

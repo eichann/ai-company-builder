@@ -57,6 +57,12 @@ export interface BrowserOpenedLineRow {
   status: BrowserOpenedStatus
   meaningHash: string
   mechanicsHash: string
+  /**
+   * The mechanics hashes of earlier rows of this line with the same meaning whose members' grants this row carries
+   * (§16-5, owner decision Q15): written only by a reviewed edit that calls the mechanics change compatible, kept by the
+   * script, never computed. Absent = none (a grant given on another mechanics hash does not count here).
+   */
+  grantsFrom?: string[]
   line: BrowserOpenedLine
 }
 /** `shared/browser-connectors/opened.json` (format 1, provisional until a second site, §18). */

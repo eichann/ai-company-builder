@@ -276,6 +276,32 @@ export function browserLockKey(input: {
   })
 }
 
+/**
+ * The new path's lock key for one object of a site's map (generalization PR 4, design memo §15 C11): the same canonical
+ * JSON as `browserLockKey`, so one object has one key on both paths — kind `<site>.<thing>`, the fields the object's id
+ * and, when the thing has a parent, the parent's id (as the old path's target fields name both). Built by the server
+ * from the map, never from the line's author or the app.
+ */
+export function browserObjectLockKey(input: {
+  company: string; host: string; account: string; site: string; thing: string
+  id: { field: string; value: string }; parent?: { field: string; value: string }
+}): string {
+  const fields: Record<string, BrowserFieldKind> = { [input.id.field]: 'id' }
+  const target: Record<string, string> = { [input.id.field]: input.id.value }
+  if (input.parent) { fields[input.parent.field] = 'id'; target[input.parent.field] = input.parent.value }
+  return browserLockKey({ company: input.company, host: input.host, account: input.account, kind: `${input.site}.${input.thing}`, fields, target })
+}
+
+/**
+ * The new path's states (generalization PR 4; agent-browser.md "Executions with several writes"): a line plan (an
+ * inspection `open` until its result; a plan of writes as the old path's), its execution, one write, a write's report.
+ */
+export type BrowserLinePlanState = 'open' | 'draft' | 'approved' | 'claimed' | 'done' | 'closed'
+export type BrowserLineExecutionState =
+  | 'claimed' | 'running' | 'unknown' | 'succeeded' | 'partial' | 'failed' | 'void' | 'confirmed_done' | 'confirmed_not_done'
+export type BrowserWriteState = 'pending' | 'permitted' | 'done' | 'not_sent' | 'unknown' | 'skipped' | 'confirmed_done' | 'confirmed_not_done'
+export type BrowserWriteResult = 'done' | 'not_sent' | 'unknown'
+
 /** A plan's states (`browser_plans`, design memo §30.3). */
 export type BrowserPlanState = 'draft' | 'approved' | 'claimed' | 'closed' | 'done'
 /** An execution's states (`browser_executions`, design memo §30.4 with §31.1–2). */

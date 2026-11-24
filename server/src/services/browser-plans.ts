@@ -481,6 +481,8 @@ export function createBrowserPlanService(deps: BrowserPlanDeps) {
           if (held) settleExecution(member.companyId, held, now)
           if (repo.lockHolder(lockKey)) return refuse('conflict', W.targetBusy, { code: 'BROWSER_TARGET_BUSY' })
         }
+        // One object, one key on both paths (generalization PR 4, C11): an opened line's execution holding it is busy too.
+        if (companyData.forCompany(member.companyId).browserLines.lockHolder(lockKey)) return refuse('conflict', W.targetBusy, { code: 'BROWSER_TARGET_BUSY' })
         const executionId = `bx_${ids.newToken().slice(0, 32)}`
         const secret = ids.newToken()
         if (!repo.setPlanState(plan.id, 'approved', 'claimed', {})) return refuse('conflict', W.notApprovedYet, { code: 'BROWSER_PLAN_NOT_APPROVED' })

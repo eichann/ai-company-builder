@@ -69,6 +69,7 @@ import { pluginBridgeRoute } from './routes/plugin-bridge'
 // lane C ▼
 import { pluginStepsRoute } from './routes/plugin-steps'
 import { browserPlansRoute, browserReportRoute } from './routes/browser-plans'
+import { browserLineReportRoute, browserLinesRoute } from './routes/browser-lines'
 // lane C ▲
 import { requestLog } from './lib/request-log'
 import { appDownloadUrl } from './lib/config'
@@ -256,4 +257,6 @@ app.route('/api/companies/:companyId', pluginBridgeRoute)
 app.route('/api/companies/:companyId', pluginStepsRoute)
 app.route('/api/companies/:companyId', browserPlansRoute)
 app.route('/api', browserReportRoute)
+app.route('/api/companies/:companyId', browserLinesRoute)
+app.route('/api', browserLineReportRoute)
 // lane C ▲

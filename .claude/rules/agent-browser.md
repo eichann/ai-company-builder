@@ -974,14 +974,15 @@ README in the folder.
   stays the copy of today's one-write code; `StepsLife.tla` is ahead of the code and is what PR 4 / PR 5
   copy. `expected.txt` names both (`model`, `rule <model>`, `states <model>`).
 
-## Executions with several writes (generalization PR 1: the state table and the model; nothing implements it yet)
+## Executions with several writes (generalization PR 1: the state table and the model; PR 4 built the server's half)
 
 Owner-approved design memo 「ブラウザ操作の汎用化」 (2026-11-24) §4, §5, §9, §15 (C11–C15), §15-2 (PR 1 =
 "実行と書き込みの状態の表＋模型＋戻せる下限の決め。設計の PR（コードは模型だけ）"), §16-3, §18. **This
 section is the contract** PR 4 (server: shape-2 plans, a permit and a report per write, the common lock
 key) and PR 5 (app: the writes in order, finding what was created) implement; `model/browser-plan/StepsLife.tla`
-is the same contract as a checked model (each action names its row here). No table, route or type exists
-yet: the memo puts no code but the model in PR 1, and §18 keeps every irreversible shape (stored rows,
+is the same contract as a checked model (each action names its row here). PR 4 built the server's half ("Plans of
+opened lines on the server": the tables, routes and `services/browser-line-steps.ts`, unreachable until a line can
+write); before it, the memo put no code but the model in PR 1, and §18 keeps every irreversible shape (stored rows,
 wire formats) changeable until a second site fits it — the table below is **provisional** until PR 4.
 Today's one-write path (`lstep@0.6.x`, "Plans, executions, permits and locks") is unchanged and keeps
 its own model (`PlanLife.tla`).
@@ -1049,7 +1050,10 @@ its own model (`PlanLife.tla`).
   (company, execution, index, write kind, state, `permitted_at` / `permitted_mono_ms` / `permitted_boot`,
   `settled_at`, the created object's id and lock key — nullable —, `confirmed_by`; unique execution ×
   index; fixed columns by trigger as today) and a nullable write index on `browser_execution_reports`. A
-  shape-1 execution has no step rows and is read as one write; no existing column changes.
+  shape-1 execution has no step rows and is read as one write; no existing column changes. **As built in PR 4**: the
+  new path has tables of its own (`browser_line_plans`, `browser_line_executions`, `browser_execution_steps`,
+  `browser_line_reports` with the write index, `browser_line_locks`) and touches no column of the old path's: an old
+  server never reads a shape-2 row, and the old path's claim checks the new lock table (one key, both paths).
 - **Rolling back the server** (C13, decided here): today's server knows one write and one lock in its
   report, confirm, time-out and leaving paths, so it is **not** a safe place to roll back to once a
   shape-2 row exists. The first build that can write shape 2 is preceded by a **floor build** (a
@@ -1109,7 +1113,7 @@ Lステップ's facts) is untouched and stays the old path's guard; the new path
   `unreadable`, a count) are what may later go to the owner / admin; **no key name, value or page text**. A thing name
   the map does not have gives no notice. The key names stay in `diagnosis` (≤ 50 each), which never leaves the PC. The
   route that carries a notice (§16-1 `POST /browser-shape-notices`, limits, one per company × site × version × thing)
-  is a later PR.
+  is PR 4's ("Plans of opened lines on the server").
 - **The read part of a line** (`browser-read-line.ts`, `BrowserReadLine` = `{ site, values, reads, checks }`, §17-2's
   line check `browserReadLineProblem(line, map)`): values with a kind (`id`, `text`, `date`), a role (`target` — an
   object's id —, `which` — what decides which / when, what a check compares against —, `write`) and the sources the line
@@ -1148,7 +1152,8 @@ Lステップ's facts) is untouched and stays the old path's guard; the new path
   and trimmed, A–Z case-folded — a trailing space, a full-width variant or another ASCII case is the same name.
 - **Not in this PR** (later, memo §15-2): the map's must-hold facts per thing (C5: account and parent binding, mandatory
   notes — PR 3, next section; content kinds and the verbs' facts come with the write verbs), value-shape words (§14-1),
-  the opened list's file and hashes (PR 3), the notice route and the server's re-check of a bound record field (PR 4),
+  the opened list's file and hashes (PR 3), the notice route (PR 4) and the server's re-check of a bound record field (until then PR 4 refuses every
+  record-field value),
   write verbs and predictions (PR 5).
 
 Tests: `server/tests/unit/browser-read-words.test.ts` with an **example map** (`server/tests/fixtures/browser/
@@ -1226,17 +1231,26 @@ to the approved row and `carried.json`).
   (`wrongObject`).
 - **For the reading path (PR 4 / 5)**: an `id_from: 'address'` thing is "the object asked for" only if main builds the
   address from the line's wanted id and passes that same string as `address` — never an id the AI supplies.
-- **Lステップ map 1.0.0** (`client/connector-maps/lstep/map.ts`; stage 0 「段0の結果」 R3, R4, R8, R10, R11, key names
+- **Lステップ map 1.0.0 → 1.0.1** (`client/connector-maps/lstep/map.ts`; stage 0 「段0の結果」 R3, R4, R8, R10, R11, key names
   only): `landing` (`GET /api/landings/{id}`, its id from the address; the R11 keys, `action_texts` and a variable's
   `name` not compared), `landing_row` (one entry of `GET /api/landings?group=&page=`, 50 a page: the friend-add and QR
   addresses), `action_set` (`GET /api/actions/{id}`, id from the address: `inputs` — 13 `tag_ids`, 12 `egg_id`, 15
   `episode_id` + `firetype`, any other type not read —, `a_name`, `a_twice_type`; `aid`, `funnel_descriptions`,
   `group_id` not compared). All three bound to the LINE account; `action_set`'s note says actions can be shared (R3).
   Stage 0 recorded the row's and the action's keys **in part**: an answer with more keys is not read whole and the card
-  says so (availability) until a reviewed map version lists them — part of approving the line. **Never `?copy=1`**:
+  says so (availability) until a reviewed map version lists them — part of approving the line. **Map 1.0.1** (PR 4,
+  owner decision 2 on #818): the full key sets confirmed read only with the owner's login (「段0の結果」 追記2, 0 writes):
+  `landing` exactly 19 keys (`group_id` a number or null, `from_*` empty strings, `to_date` / `to_time` a value or an
+  empty string, the place null, `custom_params` empty); `landing_row` exactly 17 (the unused ones and the folder object
+  `group` {id, name, order} `ignored`; the list's envelope keys in `LSTEP_MAP_READS` for the reading code); `action_set`
+  exactly 6 (`aid` equal to the number asked, still unused; `funnel_descriptions` an empty object); each input exactly
+  its kind's keys plus `member_query_id` / `send_member_query_id`, which must be null (a condition on who receives it is
+  never compared away); `egg_id` / `episode_id` are strings. The fields did not change, so the line's meaning hash is
+  the same on 1.0.0 and 1.0.1 (only the mechanics moved). **Never `?copy=1`**:
   no read carries a query but the folder list's `group` / `page` (tested). No business word (a round's tag, its time, its
   source) is in the map or the lines (tested).
-- **The first line** `landing_inspect` 「流入経路を点検する」 (`client/browser-lines/lstep.ts`, `pending`): values `landing`
+- **The first line** `landing_inspect` 「流入経路を点検する」 (`client/browser-lines/lstep.ts`; on map 1.0.1 **`approved`**,
+  owner decision on #818 after the full-key confirmation — on 1.0.0 it stays `pending`): values `landing`
   and `source` (targets: what the site showed, §16-4); reads the route, its list row, its action, the source and the
   source's action; checks `unchanged_except(landing, source, [name, to_date, to_time, action_id])`,
   `changed_from(landing, source, [action_id])`, `changed_from(action_set, source_action_set, [tags])`,
@@ -1263,6 +1277,124 @@ hand refused; the old path's hash),
 `architecture-boundaries.test.ts` (the map folder and the lines import only what they may; only main.ts imports them).
 Each guard mutation-checked; kept on purpose: the card's real-day check on a supplied value (the values check already
 refuses a date value that is not one).
+
+## Plans of opened lines on the server (generalization PR 4: built; nothing in the app calls it yet)
+
+Design memo 「ブラウザ操作の汎用化」 §3-5, §8, §15 C11–C13, §15-2 (PR 4), §16-1, §16-4, §16-5 with Q14 / Q15 (§18), §17; the
+owner's decisions on #813 (the state table lands here; a rollback floor before the first build that writes; a late
+"done" for a write in doubt ends the execution; a void execution's writes stay `pending`) and #818. Every shape is
+**provisional** until a second site fits it (§18). **The old path is unchanged** (`lstep@0.6.x`, "Plans, executions,
+permits and locks": its tables, routes, gate and tests), except one added check: its claim is also busy when the new
+path holds the same lock key (below).
+
+- **Pieces.** `routes/browser-lines.ts` → `services/browser-lines.ts` (the opened list, the gate, inspections, grants,
+  the strict read's notice) and `services/browser-line-steps.ts` (the write state table) → the handle's `browserLines`
+  (`ports/browser-lines.ts`, `adapters/sqlite/browser-lines.ts`, tables in `db/schema/browser-lines.ts`), the control
+  plane's `BrowserLineExecutionLookup` (a write execution's company by its secret's hash, listed in
+  `company-scoped-sql.test.ts`), `fileBrowserOpenedList` (`adapters/browser-connector-catalog.ts`). API shapes:
+  `shared/types/browser-lines.ts`; the states in `shared/core/browser-plans.ts` (`BrowserLinePlanState`,
+  `BrowserLineExecutionState`, `BrowserWriteState`, `BrowserWriteResult`) and `browserObjectLockKey`.
+- **The opened list on the server**: `shared/browser-connectors/opened.json` read once at start (`/app/shared` in the
+  image; missing or not of the shape → no line). Every map re-hashed (`hashCanonical(canonicalJson(map))` = `mapHash`)
+  and checked (`browserMapProblem`; a version listed more than once → every copy out); every line checked against its map
+  (`browserOpenedLineProblem`, its own name / version / site) and **both hashes recomputed** (`browserLineMeaning` /
+  `browserLineMechanics`) — a row that does not match is left out, logged, never trusted; a line listed twice under one
+  version is left out. The site's operated host and name come from its one approved declaration in approved.json (two
+  hosts → none: nothing allowed).
+- **The gate = an exact line match** (create, approve, claim, every permit; in this order): an `approved` row whose
+  site, name, version, map version, meaning hash and mechanics hash all equal the request's (`BROWSER_LINE_NOT_APPROVED`;
+  `retired` → `BROWSER_LINE_RETIRED`); the member's setting (mode on, the site's host listed, its level allowing the
+  line's effect — 「見るだけ」 for an inspection, 「入力・保存まで」 for writes — `BROWSER_NOT_ALLOWED`); the AI stop
+  (`BROWSER_AI_STOPPED`); the member's **per-line grant** (`BROWSER_TYPE_NOT_GRANTED`). Results, reports, confirms and
+  leaving never ask it (clean-up never stops). The PC registration (「担当者の PC で使う」) adds its check in this one
+  function and an additive device column later; nothing here has to change shape for it.
+- **Per-line grants** (§16-5, owner decision Q15): `browser_line_grants` = member × site × line × **meaning hash** ×
+  the mechanics hash it was given on. `PUT /browser-line-grants/:userId { site, line, meaningHash, mechanicsHash,
+  allowed }` (owner/admin): `true` only for an approved row exactly; **`false` takes away every grant of that person on
+  that line** (any meaning or mechanics: a carried one too — nothing stays in force behind an untick). `GET
+  /browser-line-grants` (owner/admin): the approved lines and **the grants in force**, one per approved row and person,
+  each `from` `direct` (given on that row) or `carried` (which version of the line and map it was given on). A grant
+  counts for a row with the same meaning hash and its own mechanics hash **or one its reviewed `grantsFrom` names**
+  (`BrowserOpenedLineRow.grantsFrom`, written only by a reviewed edit that calls the mechanics change compatible, kept
+  by the script; a `grantsFrom` naming no row of the same line and meaning leaves the row out). Never automatic. Given
+  while a member this time (as the old path); leaving removes them. No admin page yet.
+- **Where a value comes from** (§16-4, Q14): the core's `browserLineValuesProblem` (which / when only from a record
+  field or a person's confirmation, a target only from the site, the AI only for `write`; a person's value not yet
+  confirmed → `BROWSER_VALUE_UNCONFIRMED`, anything else → `BROWSER_VALUE_REFUSED` with the value's name and a fixed
+  word, never the value) and, **until the server can re-read a business plugin's bound record field, no `record_field`
+  value at all** (`BROWSER_VALUE_SOURCE_NOT_YET`, safe side). The values are copied into the fixed content.
+- **An inspection** (a line that writes nothing): `POST /browser-line-plans { line, values, conversationId? }` → a plan
+  `open` (shape 2, `bl_` + 32 hex, an hour from creation); the app reads the site (PR 5) and reports **once** `POST
+  …/:planId/result { reads: { <read>: BrowserReadStatus }, checks: [ok | ng | unreadable] }` — fixed words only, every
+  read of the line named, one word per check, a ✓ only when every read the check names (`read`, `reference`) is `ok`,
+  never `later` (a read-only line has no after) — else `BROWSER_BAD_RESULT`; the server keeps it (`result`, canonical
+  JSON, settable once by trigger) with `state` `all_ok` / `ng` / `not_read` and the plan is `done`. **No value the site
+  showed is ever sent or kept.** A second result → `BROWSER_RESULT_DONE`; past the hour → closed `expired`; `cancel`
+  closes it. `GET /browser-line-plans/:planId`: the member's own (anyone else's, another company's: the same 404).
+- **No plan of writes in this build**: no opened line can hold a write (the core's line has no write part), so
+  `writeGate` refuses every plan of writes at approve / claim / permit (`BROWSER_LINE_WRITES_NOT_YET`) — also one a
+  later build left in the database. The routes and the state table exist so that **this build is the rollback floor**
+  of the first build that writes (below, deployment.md).
+- **The write state table** (`browser-line-steps.ts`, "Executions with several writes" row by row; tables
+  `browser_line_executions`, **`browser_execution_steps`** — one row per write, a trigger allows exactly the table's
+  moves (a write's state never moves backwards; its permit time and created id never change once set) —,
+  `browser_line_reports` append-only with the write's index, `browser_line_locks`): claim once (every lock on **both**
+  paths free, `bw_` id, the secret's sha256 only); a permit per write (`POST /browser-line-executions/:id/permit
+  { index }` with the secret header: write k `pending`, k−1 `done`, nothing open, k = 1 only from `claimed`; k−1 still
+  permitted → `BROWSER_LINE_NOT_YET`; after `unknown` → `BROWSER_LINE_AFTER_UNKNOWN`; the gate refusing → `claimed` →
+  `void`, running with nothing open → `partial`; a change of "what write j created" is bound to the id the server
+  recorded, `createdTarget`); a report per write (`POST /api/browser-line-executions/report { index, result: done |
+  not_sent | unknown, reason?, createdId? }`, the secret alone; a `reason` is kept only when it is a word of
+  `BROWSER_REPORT_REASONS`, else null — never a page's text in slug form: a create is `done` only with its `createdId`, which is
+  recorded and its lock taken — a key someone holds ends the run `partial`; not_sent → write 1 `failed`, later
+  `partial`; unknown → the rest `skipped`, the execution `unknown`, locks kept; **a late "done" for the unknown write ends
+  the execution (`succeeded` when last, else `partial`), never `running` again**; a report for a write never permitted or
+  contradicting → 409, kept; the same again `same`); confirm (`POST …/:id/confirm { index, result }`: only the unknown
+  write, past its own permit + 5 s + 30 s on both clocks, never with the clock behind; who as the old path); time-outs on
+  every touch (2 minutes without a permit → `void`, **the writes stay `pending`**; a write silent past its own window →
+  `unknown`; running with nothing open past `BROWSER_LINE_TIMES.runLimit` (2 minutes from the first permit) →
+  `partial`); the rest given back (cancel, leaving: `claimed` → `void`, running with nothing open → `partial`, a write open
+  → `BROWSER_MAY_HAVE_SENT`). Every final state releases this execution's locks and makes the plan `done`.
+- **One lock key on both paths** (C11): `browserObjectLockKey` = `browserLockKey` with kind `<site>.<thing>` and the
+  object's id (and its parent's) as the fields — byte-equal to the old path's key for the same object (tested with
+  `lstep.reminder_step`). The new path's claim is busy when either table holds a key; **the old path's claim is busy when
+  `browser_line_locks` holds its key** (the one change to the old path; no such row can exist until a write line does).
+- **The rollback floor** (C13, owner decision on #813): this build knows every row the first writing build leaves
+  (executions running, unknown, partial; reports; locks) and serves them without that build's line: no permit (the
+  gate), reports and confirms still settle them, locks held until final. A plan whose `shape` this build does not know
+  (`BROWSER_LINE_PLAN_SHAPES` = [2]) is **frozen**: get, cancel, claim, permit, confirm → 409 `BROWSER_PLAN_FROZEN`; its
+  report kept (`conflict`) and answered 409; its locks kept; leaving leaves it. deployment.md "Rolling back production"
+  says never to roll back below this build once a writing build has run.
+- **The strict read's notice** (§16-1 with Codex round 2 R1 / R2): `POST /browser-shape-notices { site, mapVersion,
+  thing, change: unknown_keys | missing_keys | unreadable, count 1..2000 }` (exactly these keys: **no key name can be
+  sent**) — a map an approved line uses and a thing it has (`BROWSER_BAD_NOTICE`), from a member whose setting allows the
+  site and who holds a grant on one of its approved lines (`BROWSER_TYPE_NOT_GRANTED`), at most 20 a member and 200 a
+  company per site and day (`BROWSER_NOTICE_LIMIT`, 429; `browser_shape_report_counts`; only an accepted report is
+  counted, so a member past their own limit never uses up the company's). One row per company × site ×
+  version × thing (`browser_shape_notices`: the latest count of each kind, reports, first / last), and only the first one
+  tells every owner / admin (`browser_shape_changed`, recordless, key `browser_shape:<site>:<version>:<thing>`;
+  notifications.md); its text is built when read from the stored names and counts (the site's declared name, the thing's
+  label) — 「ブラウザ操作：「Lステップ」の「流入経路」の形が変わりました（知らない項目が2つ増えた）。メンバーには手で作業してもらっています。
+  地図の確かめが要ります」 — and shown only while the reader is an owner / admin. `GET /browser-shape-notices` (owner/admin).
+  A report is an unchecked diagnosis: it never stops, approves or changes anything. The admin page's 「サイトの形が変わりました」 is
+  a later PR.
+- **Shape headings** (memo §8's `X-ACB-Browser-Plan-Shapes`): not needed here — shape-2 plans live in their own tables
+  and routes, which no released app calls; the old routes never list them.
+
+Tests: `server/tests/unit/browser-lines.test.ts` (the real opened list and declaration: the approved line inspected, the
+pending one refused even with a grant; each of the six fields; a row or map edited with its hashes left, retired, no
+file; setting, stop, grant, a grant from before leaving; `grantsFrom` carrying, the grants in force with where they came
+from, one untick taking a carried grant away, a bogus `grantsFrom`; grants owner/admin only, only approved rows, gone on
+leaving; the values' sources — a target from the AI, a person unconfirmed / confirmed, a record field, the AI, the site,
+missing / extra / bad —; the inspection's result once, its words, a ✓ whose read did not count, expiry, another member's
+or company's, cancel, leaving, the triggers; a write plan never approved or claimed; the notice once per key to owners /
+admins, no key name sendable, only a granted member, the daily limit; the state table: claim's locks on both paths, the
+order of permits, `createdTarget`, not_sent, unknown and its late done, reports naming their write and conflicts, the
+trigger, the gate refusing, every time-out with the window per write and both clocks, confirm, giving back; the lock key
+side by side; the rollback floor — running / unknown rows served by a build without the line, a frozen shape —;
+leaving), `browser-plans.test.ts` (the old claim busy on a new-path key; every old test unchanged), permission matrix
+rows + `CROSS`, `company-scoped-sql.test.ts`, `jobs-schema.test.ts`, `client/tests/browser-lstep-map.test.ts` (map
+1.0.1). Each guard mutation-checked (27 mutations, all caught).
 
 ## The operator and the preview (PR 6b-1: built, switched off; nothing in the app calls it)
 
@@ -1778,10 +1910,11 @@ remove, target `{ reminder, step, hole }`, the checker confirming the hole is th
 `old`; a run cut between its two writes is partly done, never resent or rolled back), **checkers run
 isolated and signed** and handed out with their declarations from the shelf (design memo §25: a
 JavaScript engine without network, files or clock, limits on time and memory; only checkers div signed;
-the package's `signature.yaml` verified first), landing routes (the read-only inspection's map and line exist, `pending`:
-"The first map and the inspection line"; reading them and the card on screen are later PRs), a
+the package's `signature.yaml` verified first), landing routes (the read-only inspection's map 1.0.1 and line exist, the line `approved`, and the server takes its
+plans and results: "The first map and the inspection line", "Plans of opened lines on the server"; reading them in the
+app and the card on screen are PR 5 / 6), a
 recording helper, JSON writes, types with more than one write (their state table and model are in
-"Executions with several writes"; the code is PR 4 / PR 5), the shelf handing out browser connectors. WSS to the operated host stays refused (no type declares
+"Executions with several writes"; the server's half is PR 4, unreachable until a line can write; the app's is PR 5), the shelf handing out browser connectors. WSS to the operated host stays refused (no type declares
 one). Until the AI operates, the admin page says next to the mode choice what 「使う」 does today
 (`BROWSER_NOT_YET_NOTE`); the PR that lets the AI operate removes that note (and its assertion in
 `admin/tests/agent-browser.test.tsx`).

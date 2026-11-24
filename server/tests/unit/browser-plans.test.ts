@@ -26,7 +26,7 @@ import { createBrowserPlanService, type BrowserPlanService } from '../../src/ser
 import type { ApprovedCombinationRow, BrowserPlanRepository } from '../../src/ports/browser-plans'
 import type { CompanyDataSource } from '../../src/ports/company-data'
 import type { BrowserOperationSettings } from '../../../shared/core/browser-operation'
-import { BROWSER_REPORT_REASONS } from '../../../shared/core/browser-plans'
+import { BROWSER_REPORT_REASONS, browserObjectLockKey } from '../../../shared/core/browser-plans'
 import type { Member } from '../../src/services/access'
 
 const T0 = Date.parse('2026-11-21T00:00:00.000Z')
@@ -336,6 +336,23 @@ describe('the target lock', () => {
     expect(execState(alice, first.plan.id)).toBe('void')
     // The old execution can never be permitted now.
     expect(code(svc.permit(alice, first.claim.executionId, first.claim.secret, undefined))).toBe('BROWSER_EXECUTION_CLOSED')
+  })
+
+  it('an opened line\'s execution holding the same object\'s key makes it busy too (one key on both paths, generalization C11)', () => {
+    const first = claimed()
+    const key = lockKeyOf(first.claim.executionId)
+    // The same key from the map's side (kind `<site>.<thing>`, the step with its reminder) is byte-equal.
+    expect(browserObjectLockKey({ company: CO, host: SITE.host, account: 'acc1', site: 'lstep', thing: 'reminder_step', id: { field: 'step', value: '22' }, parent: { field: 'reminder', value: '11' } })).toBe(key)
+    value(svc.cancel(alice, first.plan.id))
+    expect(lockHolder(key)).toBeNull()
+    // A new-path execution holds that key now (rows as adapters/sqlite/browser-lines.ts writes them).
+    conn.prepare(`INSERT INTO browser_line_plans (company_id, id, user_id, shape, site, line_name, line_version, map_version, meaning_hash, mechanics_hash, writes, content, content_hash, state, created_at, expires_at)
+      VALUES (?, 'bl_x', ?, 2, 'lstep', 'l', '1.0.0', '1.0.0', 'h', 'h', 1, '{}', 'h', 'claimed', ?, ?)`).run(CO, bob.userId, iso(now), iso(now + 3_600_000))
+    conn.prepare(`INSERT INTO browser_line_executions (company_id, id, plan_id, user_id, secret_hash, state, claimed_at) VALUES (?, 'bw_x', 'bl_x', ?, 'linesecret', 'claimed', ?)`).run(CO, bob.userId, iso(now))
+    conn.prepare('INSERT INTO browser_line_locks (company_id, lock_key, execution_id, created_at) VALUES (?, ?, ?, ?)').run(CO, key, 'bw_x', iso(now))
+    const other = approved()
+    expect(code(svc.claim(alice, other.id, undefined))).toBe('BROWSER_TARGET_BUSY')
+    expect(value(svc.get(alice, other.id)).state).toBe('approved')
   })
 
   it('is released only by the execution that holds it', () => {

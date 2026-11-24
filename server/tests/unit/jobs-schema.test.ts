@@ -49,6 +49,16 @@ const LATER_TABLES = [
   'browser_execution_reports',
   'browser_target_locks',
   'browser_type_grants',
+  // agent-browser.md "Plans of opened lines on the server": line plans, write executions and their writes, reports, locks,
+  // per-line grants, the strict read's notices and their daily counts.
+  'browser_line_plans',
+  'browser_line_executions',
+  'browser_execution_steps',
+  'browser_line_reports',
+  'browser_line_locks',
+  'browser_line_grants',
+  'browser_shape_notices',
+  'browser_shape_report_counts',
   // private-folders.md "Access removed: holding tickets": who stopped reading which private folder.
   'holding_tickets',
   // private-folders.md "Holding: the member's upload": what members handed over with their tickets.
