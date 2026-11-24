@@ -145,6 +145,14 @@ export interface JobRecordTrigger {
  *   from before 2026-11-04 is out), `attendee_responsible` (the responsible person attends the meeting or is its assignee, and
  *   reads it now), `outside_attendee` (at least one attendee from outside the company), `after_acceptance` (the meeting first
  *   read and the record made after the job was accepted), `plugin_step_exclusive` (no business plugin step runs the same Skill).
+ * The second line (4b-4 A3, 「AI が議事録を読み終えたとき」) is the meeting itself: `recordType` / `taskKind` `meeting` (the meeting
+ * record, no kind of its own), `causes: reader_ai` under `reader_v1` (the `finish_reading` → `read` row written by the AI of
+ * **any** of the meeting's people — in their 「AI の番」 reading run of that meeting or their own consultation; never a person, the
+ * AI of someone not on the meeting, the server, a migration or any other run: owner decision 2026-11-25, the reading is shared
+ * with every attendee), `assignee: attendee` (the job runs for its responsible person when they are one of the meeting's people —
+ * whoever had it read; their PC does not read it again), `event: first_read` (the first `read` of the meeting's whole ledger), the
+ * same `unit` (once per meeting for each responsible person) and guards, `after_acceptance` meaning the meeting first read after
+ * the acceptance (it may have arrived before).
  */
 export interface JobSetTrigger {
   kind: 'record_set'
@@ -176,13 +184,13 @@ export function isSetTrigger(t: unknown): t is JobSetTrigger {
  * word here opens nothing: only `JOB_SET_WATCH_OPENED` does.
  */
 export const JOB_SET_WATCH_WORDS = {
-  recordType: ['task'],
-  taskKind: ['minutes_review'],
+  recordType: ['task', 'meeting'],
+  taskKind: ['minutes_review', 'meeting'],
   origin: ['meeting'],
-  causes: ['human'],
-  causeRule: ['ledger_v1'],
-  assignee: ['responsible_from_creation'],
-  event: ['first_done'],
+  causes: ['human', 'reader_ai'],
+  causeRule: ['ledger_v1', 'reader_v1'],
+  assignee: ['responsible_from_creation', 'attendee'],
+  event: ['first_done', 'first_read'],
   unit: ['record'],
   guards: ['after_acceptance', 'attendee_responsible', 'outside_attendee', 'people_only_meeting', 'plugin_step_exclusive'],
 } as const satisfies Record<Exclude<keyof JobSetTrigger, 'kind'>, readonly string[]>
@@ -199,7 +207,23 @@ export const JOB_SET_WATCH_OPENED: readonly JobSetTrigger[] = [
     assignee: 'responsible_from_creation', event: 'first_done', unit: 'record',
     guards: ['after_acceptance', 'attendee_responsible', 'outside_attendee', 'people_only_meeting', 'plugin_step_exclusive'],
   },
+  {
+    kind: 'record_set', recordType: 'meeting', taskKind: 'meeting', origin: 'meeting', causes: ['reader_ai'], causeRule: 'reader_v1',
+    assignee: 'attendee', event: 'first_read', unit: 'record',
+    guards: ['after_acceptance', 'attendee_responsible', 'outside_attendee', 'people_only_meeting', 'plugin_step_exclusive'],
+  },
 ]
+
+/**
+ * Which opened line a set watch is (4b-4 A3, owner decision D2 2026-11-25: the admin chooses per job; the first line stays as it
+ * is): `review_done` — 「自分が担当の『議事録を確認する』を初めて完了したとき」 (the line of 4b-4 PR1); `first_read` — 「自分が出た
+ * 会議の議事録を、出た人のだれかの AI が初めて読み終えたとき」. null for a combination not opened (never guessed from some of its words).
+ */
+export type JobSetWatchLine = 'review_done' | 'first_read'
+export function jobSetWatchLine(trigger: JobSetTrigger): JobSetWatchLine | null {
+  if (!jobSetWatchOpened(trigger)) return null
+  return trigger.event === 'first_read' ? 'first_read' : trigger.event === 'first_done' ? 'review_done' : null
+}
 
 /**
  * What a set watch's scan wrote for one matching record (4b-4 PR2, the 「使った」 mark — one per record in the company, over
@@ -266,6 +290,12 @@ export const JOB_EVENT_CHECK_KINDS = ['source_record'] as const
  * `JOB_EVENT_CHECK_KINDS`, which released apps name on their claims: only an app that runs set watches (PR5) will name it.
  */
 export const JOB_SET_CHECK_KIND = 'matched_record'
+/**
+ * The app's second lock for the set watch's second line (4b-4 A3, independent review M2): an app names it beside
+ * `matched_record` (the turn list's `?checks=` and the claim's `checks`) only when it knows that line — its first message says
+ * what triggered the run. A released app of PR5 names only `matched_record`: it is never listed or handed such a turn.
+ */
+export const JOB_SET_FIRST_READ_LOCK = 'set_first_read'
 /**
  * How long an event occurrence run by the PC waits for the responsible person's app by default (owner memo D6: one day;
  * `missed.expiresAfterMinutes`). The admin form's default (stage 4b-3); the parser keeps the range of every job.

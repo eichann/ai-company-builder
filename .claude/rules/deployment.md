@@ -340,6 +340,12 @@ to its proposer is checked); `snapshot.ts` keeps `ai_job_proposals` and the
 proposals' `ai_jobs` rows as written; back here the withdrawn one stays withdrawn and unapprovable, a resend of the waiting
 one answers its first result and adds no job or notice, and it is still approved once.
 The older fixture test (`job-rollback-floor.test.ts` F11 on `stage4b1-shaped-jobs.sql`) stays as the floor's own.
+Since the set watch's second line (4b-4 A3, `jobs.md` "The set watch (schema 5)" "The second line") the script runs a **second
+chain** on a copy of step 1's database: **2-before-line** — the code of `.github/set-watch-line-before-commit` (a build that
+knows schema 5 but not that line; the one place it is named — move it only to another build without the line) — reads and runs
+nothing of S2 (bob's job of that line), ends its waiting occurrence untold (`SET_WATCH_NOT_OPENED`), refuses its approval and
+leaves every mark as written; **3-return-line** — this build again: the ended occurrence stays ended, the meeting read in
+between never runs late or gets a mark, and a meeting read now runs once. The floor chain carries S2 too (frozen as S1).
 
 ### Browser operation's plans of writes (generalization PR 4)
 

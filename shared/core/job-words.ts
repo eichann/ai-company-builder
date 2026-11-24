@@ -6,7 +6,7 @@
  * Words only: no rule is decided here (the parser is `jobs.ts`, the slots `job-schedule.ts`). Pure
  * (server/tests/unit/core-purity.test.ts).
  */
-import { JOB_MINUTES_ROUTE, isRecordTrigger, isSetTrigger, jobDeliveryLabel, jobSetWatchOpened, type JobCheck, type JobSetTrigger, type JobRecordTrigger, type JobDefinition, type JobGrant, type JobMissed, type JobOccurrenceState, type JobPauseReason, type JobRun, type JobTrigger, type JobWeekday } from './jobs'
+import { JOB_MINUTES_ROUTE, isRecordTrigger, isSetTrigger, jobDeliveryLabel, jobSetWatchLine, type JobCheck, type JobSetTrigger, type JobRecordTrigger, type JobDefinition, type JobGrant, type JobMissed, type JobOccurrenceState, type JobPauseReason, type JobRun, type JobTrigger, type JobWeekday } from './jobs'
 
 const WEEKDAY_WORDS: Record<JobWeekday, string> = { mon: '月曜', tue: '火曜', wed: '水曜', thu: '木曜', fri: '金曜', sat: '土曜', sun: '日曜' }
 
@@ -37,12 +37,18 @@ export function jobRecordTriggerText(trigger: JobRecordTrigger): string {
 }
 
 /**
- * A set watch (schema 5, owner memo 「4b-4」 §2-1): the one combination opened today in its words; any other (a later build's, or
- * one no longer opened) is never described as if it were that one.
+ * A set watch (schema 5, owner memo 「4b-4」 §2-1): each opened combination in its own words; any other (a later build's, or one no
+ * longer opened) is never described as if it were one of them. Each starts 「自分が」 (the admin console says 「責任者が」).
  */
 export function jobSetTriggerText(trigger: JobSetTrigger): string {
-  if (!jobSetWatchOpened(trigger)) return 'この画面では説明できない条件です（画面を新しくしてください）'
-  return '自分が担当の「議事録を確認する」を初めて完了したとき（これから来る、条件に合うもの全部。社外の人が出た会議だけ、1つの会議につき1回）'
+  switch (jobSetWatchLine(trigger)) {
+    case 'review_done':
+      return '自分が担当の「議事録を確認する」を初めて完了したとき（これから来る、条件に合うもの全部。社外の人が出た会議だけ、1つの会議につき1回）'
+    case 'first_read':
+      return '自分が出た会議の議事録を、出た人のだれかの AI が初めて読み終えたとき（これから来る、条件に合うもの全部。社外の人が出た会議だけ、1つの会議につき1回）'
+    default:
+      return 'この画面では説明できない条件です（画面を新しくしてください）'
+  }
 }
 
 /**
@@ -316,9 +322,24 @@ const SET_WATCH_GUARD_WORDS: Record<string, string> = {
   plugin_step_exclusive: '同じ Skill を業務プラグインの手順で自動で動かしていないこと（同じ会議で、手順の頼みが開いているか動いているときは見送ります）',
 }
 
+/** The second line's own words where they differ (4b-4 A3: the record is the meeting itself). */
+const FIRST_READ_GUARD_WORDS: Record<string, string> = {
+  after_acceptance: '責任者が受け取ったあとに、AI が初めて読み終えた会議だけ（受け取る前に届いた会議でも、読み終えたのが受け取ったあとなら動きます）',
+}
+
 /** The lines of 「どれで動くか」 for an opened set watch: the counted causes, the assignee, the event, the unit and each guard. */
 export function setWatchConditionLines(trigger: JobSetTrigger): string[] {
-  if (!jobSetWatchOpened(trigger)) return []
+  const line = jobSetWatchLine(trigger)
+  if (line === null) return []
+  if (line === 'first_read') {
+    return [
+      '会議に出た人（担当を含む）のだれかの AI が議事録を読み終えたとき（その人の「AI の番」での読み取りか、その人の相談の中の AI）。責任者の PC がもう一度読むことはありません。人が変えたとき、会議に出ていない人の AI、定期の仕事、取り込みでは動きません',
+      '責任者がその会議に出た人（または担当）で、今もその会議を読めるときだけ',
+      'その会議の一生で初めての読み終わりだけ（読み直しても動きません）',
+      '1つの会議につき1回だけ（仕事を直しても作り直しても、「議事録を確認する」を完了しても、同じ会議で二度は動きません）',
+      ...trigger.guards.map(g => FIRST_READ_GUARD_WORDS[g] ?? SET_WATCH_GUARD_WORDS[g] ?? 'この画面では説明できない条件があります（画面を新しくしてください）'),
+    ]
+  }
   return [
     '人（と、その人の相談の中の AI）が完了したときだけ。定期の仕事・「AI の番」・業務の画面・取り込みでの完了では動きません',
     '作られたときから責任者が担当の「議事録を確認する」だけ（途中で担当になったものでは動きません）',
@@ -337,12 +358,15 @@ export function setWatchConditionLines(trigger: JobSetTrigger): string[] {
  * member's — reads 「責任者」, so it never says the admin's own PC or meetings.
  */
 export function setWatchSummaryLines(d: JobDefinition, reader: 'responsible' | 'other'): string[] {
-  if (!isSetTrigger(d.trigger) || !jobSetWatchOpened(d.trigger)) return []
+  const line = isSetTrigger(d.trigger) ? jobSetWatchLine(d.trigger) : null
+  if (line === null) return []
   const who = reader === 'responsible' ? 'あなた' : '責任者'
   const p = d.run.kind === 'procedure' ? d.run.procedure : null
   const skill = p && p.source === 'department_skill' ? `「${p.place}」の Skill「${p.skill}」で、` : ''
   return [
-    `いつ：社外の人が出た会議の、${who}が担当の「議事録を確認する」が完了したあと`,
+    line === 'first_read'
+      ? `いつ：社外の人が出た、${who}も出た会議の議事録を、出た人のだれかの AI が読み終えたあと（すぐ）`
+      : `いつ：社外の人が出た会議の、${who}が担当の「議事録を確認する」が完了したあと`,
     `すること：${who}の PC の AI が、${skill}たたき台と、記録の更新案を作ります`,
     `外には何も送りません。更新案は、${who}が［反映する］を押すまで、どこにも書き込まれません`,
   ]
@@ -361,9 +385,10 @@ export function setWatchDayLimitText(runsPerDay: number): string {
   return `1日 ${runsPerDay}回まで。超えた会議では動かさず（その会議は、あとからも動きません）、その日1回だけ責任者に知らせます（会議の名前や件数は書きません）`
 }
 
-/** A missed occurrence of a set watch: the responsible person's app was not open in time. */
-export function setWatchMissedText(expiresAfterMinutes: number): string {
-  return `完了のあと${jobMinutesText(expiresAfterMinutes)}のうちに責任者のアプリで動けなかったときは見送ります`
+/** A missed occurrence of a set watch: the responsible person's app was not open in time (counted from its line's event). */
+export function setWatchMissedText(expiresAfterMinutes: number, trigger?: JobSetTrigger): string {
+  const after = trigger && jobSetWatchLine(trigger) === 'first_read' ? '読み終えたあと' : '完了のあと'
+  return `${after}${jobMinutesText(expiresAfterMinutes)}のうちに責任者のアプリで動けなかったときは見送ります`
 }
 
 /**

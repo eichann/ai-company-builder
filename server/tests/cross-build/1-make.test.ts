@@ -250,6 +250,35 @@ describe.skipIf(!CROSS_DB)('cross-build 1/3: a database as 4b-1 leaves it', () =
     expect(c5.status).toBe(201)
     const r5 = c5.body.data.run
 
+    // S2: bob's set watch of the second line (4b-4 A3: 「自分が担当の会議の議事録を、AI が初めて読み終えたとき」), whose scan made an
+    // occurrence for a meeting his AI read (its mark the meeting's for him). Written as this build stores it, like S1. The floor knows no
+    // schema 5 (frozen, as S1); a build that knows schema 5 but not this line (.github/set-watch-line-before-commit) must run nothing
+    // of it and end its occurrence; back here nothing is made twice or late (cross-build line chain, 2-before-line / 3-return-line).
+    const s2Definition = { ...setDefinition, name: '会議のあとのたたき台', actingUser: 'xb-bob', trigger: JSON.parse(JSON.stringify(JOB_SET_WATCH_OPENED.find(t => t.event === 'first_read'))) }
+    const s2 = `job.${'6'.repeat(32)}`
+    const s2Text = canonicalJson(s2Definition)
+    const s2Consent = hashCanonical(jobConsentCanonical(s2Definition as unknown as JobDefinition))
+    db.prepare(`INSERT INTO ai_jobs (company_id, id, name, state, acting_user_id, latest_version, approved_version, approved_fingerprint, accepted_version, accepted_consent,
+        created_by, created_at, updated_at) VALUES (?, ?, '会議のあとのたたき台', 'active', 'xb-bob', 1, 1, ?, 1, ?, 'xb-owner', ?, ?)`).run(CO, s2, hashCanonical(s2Text), s2Consent, now, now)
+    db.prepare(`INSERT INTO ai_job_versions (company_id, job_id, version, schema, definition, fingerprint, consent_fingerprint, acting_user_id, created_by, created_at,
+        approved_by, approved_at, accepted_by, accepted_at) VALUES (?, ?, 1, 5, ?, ?, ?, 'xb-bob', 'xb-owner', ?, 'xb-owner', ?, 'xb-bob', ?)`)
+      .run(CO, s2, s2Text, hashCanonical(s2Text), s2Consent, now, now, now)
+    sqliteCompanyData(db).forCompany(CO).jobs.startSetCursor(s2, now)
+    const meeting2 = writer.create(CO, {
+      type: 'meeting', title: 'B社 初回の商談', state: 'received', members: ['xb-bob', 'xb-alice'],
+      fields: { assignee: 'xb-bob', attendees: JSON.stringify(['xb-bob', 'xb-alice']), external_count: 2, meeting_at: now },
+      actor: { id: 'google', kind: 'external', source: 'google' }, quiet: true,
+    })
+    if (!meeting2.ok) throw new Error(meeting2.reason)
+    const bobMember = { companyId: CO, userId: 'xb-bob', role: 'member' }
+    ok(await services.recordEngine.act(bobMember, AI, meeting2.record.id, 'start_reading', { expectedVersion: versionOf(meeting2.record.id) }))
+    ok(await services.recordEngine.act(bobMember, AI, meeting2.record.id, 'finish_reading', { expectedVersion: versionOf(meeting2.record.id), args: { summary_text: '見積もりを送る' } }))
+    tick()
+    const o6 = occurrenceOf(s2, 'due')
+    expect(db.prepare('SELECT outcome, meeting_id FROM ai_job_meeting_reviews WHERE company_id = ? AND record_id = ?')
+      .get(CO, `${meetingOutputId(sha256TokenDigest, 'task', meeting2.record.id, MINUTES_REVIEW_KEY)}#xb-bob`)).toEqual({ outcome: 'made', meeting_id: meeting2.record.id })
+    expect(db.prepare('SELECT event_record_id FROM ai_job_occurrences WHERE company_id = ? AND id = ?').get(CO, o6)).toEqual({ event_record_id: meeting2.record.id })
+
     // P5: bob's set watch proposed from the app (schema 5 through the proposals' path, 4b-4 PR6b), waiting for an owner / admin.
     // Written as this build stores it (this company has no shared folder to pin department Skills from): its candidate, the
     // draft job and the proposal. The floor knows no schema 5 and no proposals: it must show its name only and approve nothing;
@@ -273,6 +302,6 @@ describe.skipIf(!CROSS_DB)('cross-build 1/3: a database as 4b-1 leaves it', () =
     })
     expect(ok(services.jobProposals.candidate(bob, p5.candidate)).definition.schema).toBe(5)
 
-    saveDb(db, { CO, j4: { job: j4, stop: j4Stop }, jobs: { j1: j1.job, j2: j2.job, j3: j3.job, s1 }, occ: { o1, o3, o4, o5 }, runs: { r1: r1.id, r4: r4.id, r5: { id: r5.id, generation: r5.generation } }, proposals: { ...proposals, p5 }, before: crossBuildSnapshot(db, CO) })
+    saveDb(db, { CO, j4: { job: j4, stop: j4Stop }, jobs: { j1: j1.job, j2: j2.job, j3: j3.job, s1, s2 }, occ: { o1, o3, o4, o5, o6 }, meetings: { m2: meeting2.record.id }, runs: { r1: r1.id, r4: r4.id, r5: { id: r5.id, generation: r5.generation } }, proposals: { ...proposals, p5 }, before: crossBuildSnapshot(db, CO) })
   })
 })

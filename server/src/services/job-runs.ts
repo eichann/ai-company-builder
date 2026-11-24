@@ -46,7 +46,7 @@ import type { Member } from './access'
 import { endPcRun, isEventPcOccurrence, pcRunDeadlineMs, type JobOccurrences } from './job-occurrences'
 import { eventShown, shownSlot } from './job-events'
 import { madeBefore } from './job-retry'
-import { isSetWatchOccurrence, setWatchMakesTask, setWatchTaskInput } from './job-set-watch'
+import { isSetWatchOccurrence, setWatchAppLock, setWatchMakesTask, setWatchTaskInput } from './job-set-watch'
 import type { JobService } from './jobs'
 import { notInStep } from './not-in-step'
 import { ok, refuse, type Outcome, type Refusal } from './outcome'
@@ -466,6 +466,9 @@ export function createJobRuns(deps: JobRunDeps) {
       if (!(subject.kinds ?? ['time']).includes(jobOccurrenceKind(f.occ.dueSlot))) return KIND_NOT_SUPPORTED()
       // An app that cannot run this check never claims it (B PR 5a-2); nothing is written for it.
       if (!subject.checks?.includes(f.definition.check.kind)) return CHECK_NOT_SUPPORTED()
+      // The set watch's second line (4b-4 A3): only an app that names its lock (one of PR5 would run it with the first line's words).
+      const lock = setWatchAppLock(f.definition)
+      if (lock !== null && !subject.checks.includes(lock)) return CHECK_NOT_SUPPORTED()
       const found = whyNot(f, clock.nowMs())
       if (found?.why === 'GONE') return GONE()
       if (found) {
@@ -685,6 +688,9 @@ export function createJobRuns(deps: JobRunDeps) {
         // A check the app does not say it runs (`?checks=`; 4b-4 PR2: only an app that runs a set watch names `matched_record`) —
         // left out, so an app of 4b-2, which lists `event` turns, is never handed a set watch's turn its parser would drop.
         if (f.definition.check.kind === JOB_SET_CHECK_KIND && !checks.includes(JOB_SET_CHECK_KIND)) continue
+        // The second line's lock (4b-4 A3): never handed to an app that does not know that line.
+        const lock = setWatchAppLock(f.definition)
+        if (lock !== null && !checks.includes(lock)) continue
         // A running one only while its run may be claimed again (lease over, given back, retried later).
         if (f.occ.state === 'running') {
           const r = f.occ.runId ? handle.aiRuns.byId(f.occ.runId) : null

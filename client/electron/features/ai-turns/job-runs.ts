@@ -16,7 +16,7 @@
 //     sends where it belongs.
 import path from 'node:path'
 import { readdir, realpath, stat } from 'node:fs/promises'
-import { JOB_EVENT_CHECK_KINDS, JOB_PC_CHECK_KINDS, JOB_SET_CHECK_KIND, isOccurrenceId, parseJobDecisionFile, parseJobRunResult, type JobDecision, type JobGrant, type JobRunResult } from '../../../../shared/core/jobs'
+import { JOB_EVENT_CHECK_KINDS, JOB_PC_CHECK_KINDS, JOB_SET_CHECK_KIND, JOB_SET_FIRST_READ_LOCK, isOccurrenceId, parseJobDecisionFile, parseJobRunResult, type JobDecision, type JobGrant, type JobRunResult } from '../../../../shared/core/jobs'
 import { jobPathProblem } from '../../../../shared/core/jobs'
 import { diskKey } from '../../../../shared/core/paths'
 import {
@@ -347,7 +347,7 @@ export function createJobRuns(deps: JobRunDeps) {
       // before stage 4-0 ignores it and lists time slots).
       // 4b-4 PR5: a set watch's turn is listed only to an app naming its check (`?checks=matched_record`), and only an app that
       // runs it here (its file work given) names it.
-      const r = await deps.session(companyId, 'GET', `/me/job-turns?kinds=${JOB_KINDS_RUN.join(',')}${deps.setWatch ? `&checks=${JOB_SET_CHECK_KIND}` : ''}`)
+      const r = await deps.session(companyId, 'GET', `/me/job-turns?kinds=${JOB_KINDS_RUN.join(',')}${deps.setWatch ? `&checks=${JOB_SET_CHECK_KIND},${JOB_SET_FIRST_READ_LOCK}` : ''}`)
       // Lost answers are looked at only while the server answers, never in the listing's way (one pass at a time).
       if (r?.status === 200 && deps.setWatch && !reconciling.has(companyId)) {
         reconciling.add(companyId)
@@ -396,7 +396,7 @@ export function createJobRuns(deps: JobRunDeps) {
       // A set watch is claimed only by an app that runs it here (its check named: the server's lock, jobs.md "The set watch").
       if (listedTurn.set && !deps.setWatch) return { claimed: false, reason: 'not-allowed' }
       const answer = await deps.session(companyId, 'POST', '/job-run-claims', {
-        occurrenceId, deviceId: deps.deviceId, conversationId, checks: [...JOB_PC_CHECK_KINDS, ...(event ? JOB_EVENT_CHECK_KINDS : []), ...(listedTurn.set ? [JOB_SET_CHECK_KIND] : [])],
+        occurrenceId, deviceId: deps.deviceId, conversationId, checks: [...JOB_PC_CHECK_KINDS, ...(event ? JOB_EVENT_CHECK_KINDS : []), ...(listedTurn.set ? [JOB_SET_CHECK_KIND, JOB_SET_FIRST_READ_LOCK] : [])],
         ...(event ? { kinds: [...JOB_KINDS_RUN] } : {}), ...(point?.commit ? { checkedCommit: point.commit } : {}),
       })
       if (!answer || answer.status >= 500) return { claimed: false, reason: 'unavailable' }

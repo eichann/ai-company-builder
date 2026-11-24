@@ -44,8 +44,8 @@ describe.skipIf(!CROSS_DB)('cross-build 2/3: the rollback floor on it', () => {
     const m = manifest()
     const CO: string = m.CO
     const { j1, j2, j3 } = m.jobs
-    const { o1, o3, o4, o5 } = m.occ
-    const { s1 } = m.jobs
+    const { o1, o3, o4, o5, o6 } = m.occ
+    const { s1, s2 } = m.jobs
     const as = async (user: string, method: string, path: string, body?: unknown) => {
       currentUser.id = user
       const res = await app.request(`/api/companies/${CO}${path}`, { method, headers: { 'Content-Type': 'application/json' }, ...(body !== undefined ? { body: JSON.stringify(body) } : {}) })
@@ -57,11 +57,13 @@ describe.skipIf(!CROSS_DB)('cross-build 2/3: the rollback floor on it', () => {
     const stateOf = (id: string) => db.prepare('SELECT state, outcome_code FROM ai_job_occurrences WHERE company_id = ? AND id = ?').get(CO, id) as Json
     const noticeCount = () => (db.prepare("SELECT COUNT(*) AS n FROM notifications WHERE company_id = ? AND kind LIKE 'job_%'").get(CO) as Json).n
     const madeCount = () => (db.prepare("SELECT COUNT(*) AS n FROM records WHERE company_id = ? AND type = 'task'").get(CO) as Json).n
-    const states = () => [o1, o3, o4, o5].map(stateOf)
+    // o6: S2's (the set watch's second line, 4b-4 A3) — schema 5, frozen here as S1's.
+    const states = () => [o1, o3, o4, o5, o6].map(stateOf)
 
     // Nothing listed or shown — owners and admins included.
-    for (const user of ['xb-owner', 'xb-admin', 'xb-alice']) {
-      for (const job of [j1, j2, j3, s1]) {
+    // S2 is bob's (alice is not named by it: the job itself is not hers to see).
+    for (const [user, jobs] of [['xb-owner', [j1, j2, j3, s1, s2]], ['xb-admin', [j1, j2, j3, s1, s2]], ['xb-alice', [j1, j2, j3, s1]], ['xb-bob', [s2]]] as const) {
+      for (const job of jobs) {
         const listed = await as(user, 'GET', `/jobs/${job}/occurrences`)
         expect(listed.status).toBe(200)
         expect(listed.body.data.occurrences).toEqual([])
@@ -72,7 +74,7 @@ describe.skipIf(!CROSS_DB)('cross-build 2/3: the rollback floor on it', () => {
     }
     // Nothing told: no notice of an occurrence or of the stopped chain is worded for anyone.
     for (const who of [owner, alice]) {
-      for (const [job, occ] of [[j1, o1], [j2, o3], [j3, o4], [s1, o5]]) expect(services.jobs.occurrenceNotice(who, job, occ)).toBeNull()
+      for (const [job, occ] of [[j1, o1], [j2, o3], [j3, o4], [s1, o5], [s2, o6]]) expect(services.jobs.occurrenceNotice(who, job, occ)).toBeNull()
       const stop = (db.prepare('SELECT chain_stop_at AS at FROM ai_job_event_cursors WHERE company_id = ? AND job_id = ?').get(CO, j3) as Json).at
       expect(services.jobs.chainStopNotice(who, j3, stop)).toBeNull()
     }
@@ -136,7 +138,7 @@ describe.skipIf(!CROSS_DB)('cross-build 2/3: the rollback floor on it', () => {
     expect(services.jobs.setStopped(owner, { stopped: false }).ok).toBe(true)
     // A resume cannot check a shape the floor does not know: it stays paused there (its own build resumes it).
     expect(await services.jobs.resume(owner, j1)).toMatchObject({ ok: false, body: { code: 'JOB_SCHEMA_UNKNOWN' } })
-    expect(states().map(s => s.state)).toEqual(['held', 'held', 'needs_person', 'held'])
+    expect(states().map(s => s.state)).toEqual(['held', 'held', 'needs_person', 'held', 'held'])
     expect(noticeCount()).toBe(before.notices)
     expect(madeCount()).toBe(before.made)
 

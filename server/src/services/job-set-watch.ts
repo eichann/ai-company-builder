@@ -4,7 +4,11 @@
  * 『議事録を確認する』が、その一生で初めて完了したとき」 — and its guards, at the scan and while its run goes on. **Only the rules of
  * the combination live here**: reading the ledger by delivery number, the cursor, the gaps, the day's limit and the mark are the
  * scan's (job-events.ts `scanSetJob`), the run's conditions around it the occurrences' (job-occurrences.ts `eventCondition`).
- * Opening another combination adds its own matcher and guards here, reviewed then.
+ * Opening another combination adds its own matcher and guards here, reviewed then. The second line (4b-4 A3, 「AI が議事録を読み
+ * 終えたとき」; owner decision 2026-11-25: the first reading by **any** of the meeting's people's AI — the reading is shared with
+ * every attendee) has its own: `meetingFirstReadEvent` (the event), `after_acceptance` read on the meeting alone, its conditions in
+ * `setWatchCondition`, and its mark (`setWatchMarked` / `setWatchMarkKey`: once per meeting and responsible person, also across
+ * both lines).
  *
  * - **The record** (§2-2): a やること (`task`) whose `task_kind` was `minutes_review` when it was made, made by the minutes intake
  *   (`MINUTES_ACTOR`: no person's or AI's create may write `task_kind`, records.md), with exactly one `links.meeting` and the id the
@@ -21,8 +25,8 @@
  */
 import { MINUTES_ACTOR, MINUTES_REVIEW_KIND, TASK_KIND_FIELD } from '../../shared/core/core-types'
 import {
-  JOB_ACTOR, JOB_SET_CHECK_KIND, JOB_SET_WATCH_SCHEMA, isSetTrigger, jobPinnedDepartmentSkills, jobSetWatchOpened, occurrenceTaskId, storedJobDefinition,
-  type JobDefinition, type JobOutcomeCode, type JobSetMarkOutcome, type JobSetReport, type JobSetTrigger,
+  JOB_ACTOR, JOB_SET_CHECK_KIND, JOB_SET_FIRST_READ_LOCK, JOB_SET_WATCH_SCHEMA, isSetTrigger, jobPinnedDepartmentSkills, jobSetWatchLine, ledgerRowIsEvent, occurrenceTaskId,
+  storedJobDefinition, type JobDefinition, type JobOutcomeCode, type JobSetMarkOutcome, type JobSetReport, type JobSetTrigger, type JobSetWatchLine, type LedgerEventRow,
 } from '../../shared/core/jobs'
 import { hasOutsideAttendee } from '../../shared/core/minutes'
 import { replayRecordState, type LedgerEntry, type LedgerValue } from '../../shared/core/record-ledger'
@@ -150,31 +154,148 @@ export function minutesReviewEvent(handle: CompanyData, minutesReviewId: Minutes
 }
 
 /**
+ * The ledger rows a line's scan reads (into which state of which type): the first line reads completions of やること, the second
+ * readings of meetings.
+ */
+export function setWatchRowsOf(line: JobSetWatchLine): { type: string; toState: string } {
+  return line === 'first_read' ? { type: 'meeting', toState: 'read' } : { type: 'task', toState: 'done' }
+}
+
+const READ_ACTION = 'finish_reading'
+/** The built-in 「AI の番」 step that reads a meeting's minutes (client/shared/ai-turn-steps/minutes-reading.ts). */
+const READING_STEP = 'minutes-reading'
+
+/**
+ * Whether the company's types still mean what the line names (T9): the first line's 「議事録を確認する」 kind, the second line's meeting
+ * read by an AI (`finish_reading` from `reading` to `read`). When not, the scan reads nothing (never a guess).
+ */
+export function setWatchKindKnown(handle: CompanyData, line: JobSetWatchLine): boolean {
+  if (line === 'review_done') return minutesReviewKindKnown(handle)
+  const def = currentTypes(handle.records).get('meeting')?.definition
+  const finish = def?.actions[READ_ACTION]
+  return !!def && finish?.to === 'read' && finish.from?.includes('reading') === true
+}
+
+/**
+ * Whether a ledger row is `reader_ai` under `reader_v1` (4b-4 A3; owner memo 「4b-4 自動で読む」 第1.1版, Codex #2; owner decision
+ * 2026-11-25): the `finish_reading` from `reading` into `read`, written by an AI (no origin mark, no business plugin screen) of a
+ * member **who is one of the meeting's people** (its list, its assignee or an attendee, at that row) — in their own consultation (no
+ * run), or in **their own 「AI の番」 reading run of this very meeting** (`minutes-reading`, the run's subject the meeting, its member
+ * the AI's). Whose AI it was does not decide whose job runs (the reading is shared with every attendee). Never a person's change,
+ * the AI of someone not on the meeting, a scheduled job's or any other run, the server, a migration. Named here alone:
+ * `ledgerRowIsEvent` (the first line's rule) is not widened.
+ */
+export function readerAiRow(handle: CompanyData, row: LedgerEventRow, ledger: LedgerEntry[]): boolean {
+  if (row.origin !== null || row.via !== null || row.actorKind !== 'ai') return false
+  if (row.action !== READ_ACTION || row.fromState !== 'reading' || row.toState !== 'read') return false
+  const meeting = handle.records.byIds([row.recordId])[0]
+  let fields: Record<string, LedgerValue>
+  try { fields = replayRecordState(ledger, row.version).fields } catch { return false }
+  if (!meeting || !isMeetingPerson(meeting, fields, row.actorId)) return false
+  if (row.runId === null) return true
+  const run = handle.aiRuns.byId(row.runId)
+  return !!run && run.subject.kind === 'record' && run.subject.id === row.recordId && run.step === READING_STEP && run.userId === row.actorId
+}
+
+/**
+ * The second line's event (4b-4 A3): the meeting's **first** `read` in its whole ledger (`first_read`; an undo and a second reading
+ * are not it), counted by `readerAiRow` — whichever of its people's AI read it. The same event for every set watch of this line;
+ * whose it is to run is the guards' (`attendee_responsible`: the responsible person is one of the meeting's people and reads it).
+ */
+export function meetingFirstReadEvent(handle: CompanyData, row: LedgerEventRow): { meetingId: string } | null {
+  if (row.type !== 'meeting') return null
+  const ledger = handle.records.ledger(row.recordId)
+  if (!readerAiRow(handle, row, ledger)) return null
+  if (ledger.some(e => e.version < row.version && e.toState === 'read' && e.fromState !== 'read')) return null
+  return { meetingId: row.recordId }
+}
+
+/**
+ * A line's event for one ledger row of its scan, or null: the first line's 「議事録を確認する」 completed (`ledgerRowIsEvent` +
+ * `minutesReviewEvent`, the record the やること, the responsible person's own), the second line's meeting read (`meetingFirstReadEvent`,
+ * the record the meeting itself).
+ */
+export function setWatchEvent(handle: CompanyData, line: JobSetWatchLine, minutesReviewId: MinutesReviewId, responsible: string, row: LedgerEventRow):
+  { recordId: string; meetingId: string } | null {
+  if (line === 'first_read') {
+    const e = meetingFirstReadEvent(handle, row)
+    return e ? { recordId: row.recordId, meetingId: e.meetingId } : null
+  }
+  if (!ledgerRowIsEvent(row)) return null
+  const e = minutesReviewEvent(handle, minutesReviewId, responsible, row)
+  return e ? { recordId: row.recordId, meetingId: e.meetingId } : null
+}
+
+/**
+ * The 「使った」 mark's key a line writes for a meeting and a responsible person (`unit: record`): the first line's is its 「議事録を確認する」's
+ * id (`minutesReviewId`, as since PR2 — only its assignee from creation ever has a job of it); the second line's is that id and the
+ * responsible person (`<id>#<user>`, 4b-4 A3): every attendee's job of this line may run once for the meeting, never twice for one
+ * person — over versions, jobs and lines (`setWatchMarked`).
+ */
+export function setWatchMarkKey(line: JobSetWatchLine, minutesReviewId: MinutesReviewId, meetingId: string, responsible: string): string {
+  return line === 'first_read' ? `${minutesReviewId(meetingId)}#${responsible}` : minutesReviewId(meetingId)
+}
+
+/**
+ * Whether the meeting was used already for this responsible person (by any job, version or line): the second line's mark of them, or
+ * the first line's mark of the meeting's review when that review was theirs from its making (only their own job writes it).
+ */
+export function setWatchMarked(handle: CompanyData, minutesReviewId: MinutesReviewId, meetingId: string, responsible: string): boolean {
+  const review = minutesReviewId(meetingId)
+  if (handle.jobs.meetingReviewMarked(`${review}#${responsible}`)) return true
+  return handle.jobs.meetingReviewMarked(review) && assigneeAt(handle.records.ledger(review), 1) === responsible
+}
+
+/**
+ * The app lock a set watch's line needs beside its check (4b-4 A3): the second line's turns are listed to and claimed by an app
+ * that names `JOB_SET_FIRST_READ_LOCK` only (a released app of PR5 would run it with the first line's words); none for the first.
+ */
+export function setWatchAppLock(definition: JobDefinition): string | null {
+  return isSetTrigger(definition.trigger) && jobSetWatchLine(definition.trigger) === 'first_read' ? JOB_SET_FIRST_READ_LOCK : null
+}
+
+/**
+ * The first line's key a second-line mark also writes (4b-4 A3, independent review M1): when the meeting's 「議事録を確認する」 was the
+ * responsible person's from its making, the build before this line — which looks marks up by the review's id only — must find the
+ * meeting used too, so a later completion of that review never runs it again there. null otherwise (another attendee's review is
+ * not this person's to block).
+ */
+export function setWatchReviewKeyToo(handle: CompanyData, minutesReviewId: MinutesReviewId, meetingId: string, responsible: string): string | null {
+  const review = minutesReviewId(meetingId)
+  return assigneeAt(handle.records.ledger(review), 1) === responsible && !handle.jobs.meetingReviewMarked(review) ? review : null
+}
+
+/**
  * The guards of the combination for one record (in the scan's transaction): null when they all hold, else the mark's outcome.
- * `boundary`: the delivery number at which the job's current consent was accepted (null: unknown — never compared). The
- * assignee at the event must still be the responsible person (assigned away in between: not this job's to run).
+ * `boundary`: the delivery number at which the job's current consent was accepted (null: unknown — never compared). For the
+ * first line the assignee at the event must still be the responsible person (assigned away in between: not this job's to run).
  */
 export function setGuardRefusal(handle: CompanyData, trigger: JobSetTrigger, definition: JobDefinition, ctx: {
   responsible: Member; boundary: number | null; recordId: string; version: number; meetingId: string; at: string
 }): Exclude<JobSetMarkOutcome, 'made' | 'paused' | 'day_limit'> | null {
-  if (assigneeAt(handle.records.ledger(ctx.recordId), ctx.version) !== ctx.responsible.userId) return 'not_matched'
+  const line = jobSetWatchLine(trigger)
+  // The first line's record is the responsible person's own やること; the second line's is the meeting, whoever had it read (its
+  // people's guard says whether it is theirs).
+  if (line !== 'first_read' && assigneeAt(handle.records.ledger(ctx.recordId), ctx.version) !== ctx.responsible.userId) return 'not_matched'
   for (const guard of trigger.guards) {
-    const refusal = guardRefusal(handle, guard, definition, ctx)
+    const refusal = guardRefusal(handle, guard, definition, { ...ctx, line })
     if (refusal) return refusal
   }
   return null
 }
 
 function guardRefusal(handle: CompanyData, guard: string, definition: JobDefinition, ctx: {
-  responsible: Member; boundary: number | null; recordId: string; meetingId: string; at: string
+  responsible: Member; boundary: number | null; recordId: string; meetingId: string; at: string; line: JobSetWatchLine | null
 }): Exclude<JobSetMarkOutcome, 'made' | 'paused' | 'day_limit'> | null {
   switch (guard) {
     case 'after_acceptance': {
       // Both after the job's current consent was accepted, by delivery number (never the clock); one without a number — a row
-      // written before delivery numbers — is out, and no later reading stands in for the first (§2-3, T21).
-      const made = handle.jobs.firstLedgerSeq(ctx.recordId, null)
+      // written before delivery numbers — is out, and no later reading stands in for the first (§2-3, T21). The second line's
+      // record is the meeting: only its first reading counts (it may have arrived before the acceptance, 4b-4 A3).
       const read = handle.jobs.firstLedgerSeq(ctx.meetingId, 'read')
       const after = (seq: number | null | undefined) => ctx.boundary !== null && seq !== null && seq !== undefined && seq > ctx.boundary
+      if (ctx.line === 'first_read') return after(read?.seq) ? null : 'before_acceptance'
+      const made = handle.jobs.firstLedgerSeq(ctx.recordId, null)
       return after(made?.seq) && after(read?.seq) ? null : 'before_acceptance'
     }
     case 'people_only_meeting': {
@@ -201,18 +322,21 @@ function guardRefusal(handle: CompanyData, guard: string, definition: JobDefinit
  * What a set watch's running occurrence still needs (its conditions beyond the job's — owner memo 付録 B 「C8 の代わり」), in this
  * order: its combination still opened (a line taken out stops it); the responsible person reads the record and the meeting and
  * is one of its people; the record's meeting is still the one it was made for; the record still `done`; its assignee still them.
- * null when all hold.
+ * The second line (4b-4 A3): the record is the meeting itself, still `read` (no assignee condition). null when all hold.
  */
 export function setWatchCondition(handle: CompanyData, definition: JobDefinition, responsible: Member | null,
   occ: { eventRecordId?: string | null; eventMeetingId?: string | null }): JobOutcomeCode | null {
-  if (!isSetTrigger(definition.trigger) || !jobSetWatchOpened(definition.trigger)) return 'SET_WATCH_NOT_OPENED'
+  const line = isSetTrigger(definition.trigger) ? jobSetWatchLine(definition.trigger) : null
+  if (line === null) return 'SET_WATCH_NOT_OPENED'
   const recordId = occ.eventRecordId ?? ''
   const meetingId = occ.eventMeetingId ?? ''
   if (!responsible || !setOccurrenceShown(handle, responsible, recordId, meetingId)) return 'EVENT_RECORD_GONE'
-  if (meetingLinkOf(handle, recordId) !== meetingId) return 'SET_WATCH_MEETING_CHANGED'
+  // The second line's record is the meeting itself (4b-4 A3): still that meeting and still read; whoever had it read (its people's
+  // check above keeps it the responsible person's).
+  if (line === 'first_read' ? recordId !== meetingId : meetingLinkOf(handle, recordId) !== meetingId) return 'SET_WATCH_MEETING_CHANGED'
   const now = fieldsNow(handle, recordId)
-  if (now.state !== 'done') return 'EVENT_NOT_NEEDED'
-  if (now.fields.assignee !== responsible.userId) return 'EVENT_NOT_ASSIGNEE'
+  if (now.state !== (line === 'first_read' ? 'read' : 'done')) return 'EVENT_NOT_NEEDED'
+  if (line !== 'first_read' && now.fields.assignee !== responsible.userId) return 'EVENT_NOT_ASSIGNEE'
   return null
 }
 

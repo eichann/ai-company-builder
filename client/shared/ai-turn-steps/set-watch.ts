@@ -234,7 +234,10 @@ export function setWatchFirstMessage(input: SetWatchMessageInput): string {
     '',
     `定期の仕事「${input.name}」を、次の手順書どおりに進めてください。`,
     '',
-    `きっかけ：あなたが担当の「議事録を確認する」（${input.recordId}）が完了しました。`,
+    // The server's second line (4b-4 A3) names the meeting itself as the record: the trigger was its first reading by the AI.
+    input.recordId === input.meetingId
+      ? `きっかけ：あなたが出た会議（${input.meetingId}）の議事録を、出た人の AI が読み終えました（もう一度読む必要はありません。下の議事録を読んで進めてください）。`
+      : `きっかけ：あなたが担当の「議事録を確認する」（${input.recordId}）が完了しました。`,
     `読める議事録は、その会議（${input.meetingId}）のものだけです。minutes_read で読んでください。ほかの会議の議事録は読めません。`,
     '',
     '手順書（部署の Skill。承認された版の写しです）:',

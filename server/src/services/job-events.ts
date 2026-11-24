@@ -27,7 +27,7 @@
  *   `CHAIN_STOP_REMIND_AFTER_MS` after the stop, while they can still act on it.
  */
 import {
-  eventDueSlot, isEventOccurrenceSlot, isRecordTrigger, jobSetWatchOpened, ledgerRowIsEvent, newOccurrenceId, storedJobDefinition, triggerMatches,
+  eventDueSlot, isEventOccurrenceSlot, isRecordTrigger, jobSetWatchLine, ledgerRowIsEvent, newOccurrenceId, storedJobDefinition, triggerMatches,
   type JobDefinition, type JobOutcomeCode, type JobRecordTrigger, type JobSetMarkOutcome, type LedgerEventRow,
 } from '../../shared/core/jobs'
 import { aiTurnStates } from '../../shared/core/record-types'
@@ -40,7 +40,7 @@ import type { Member } from './access'
 import { CHAIN_STOP_REMINDED, companyNow } from './notifications'
 import { recordReader } from './record-access'
 import { currentTypes } from './record-index'
-import { isSetWatchDefinition, minutesReviewEvent, minutesReviewKindKnown, setGuardRefusal, setOccurrenceShown, type MinutesReviewId } from './job-set-watch'
+import { isSetWatchDefinition, setGuardRefusal, setOccurrenceShown, setWatchEvent, setWatchKindKnown, setWatchMarkKey, setWatchMarked, setWatchReviewKeyToo, setWatchRowsOf, type MinutesReviewId } from './job-set-watch'
 
 /** Ledger rows of a watched record the scan reads per job and clock tick (the rest next tick, from the cursor). */
 export const EVENT_ROWS_PER_TICK = 500
@@ -362,7 +362,10 @@ export function createJobEvents(deps: JobEventDeps) {
    * is written whatever comes of it: `made` with its occurrence, or why not (inside a pause's gap, before the boundary or a guard
    * that does not hold, beyond the day's limit, a business plugin step busy with it). A record marked already (by any job) makes
    * nothing. The cursor moves in the same transaction (compare-and-set). A combination no longer opened, or a task type that no
-   * longer means it (T9), reads nothing and its cursor follows now (what came meanwhile never runs late).
+   * longer means it (T9), reads nothing and its cursor follows now (what came meanwhile never runs late). Each opened line reads
+   * its own rows and tells its own event (job-set-watch.ts `setWatchRowsOf` / `setWatchEvent`: the second line, 4b-4 A3, the
+   * meetings any of their people's AI read first); the mark is the meeting's for this responsible person over both lines
+   * (`setWatchMarked` / `setWatchMarkKey`).
    */
   function scanSetJob(handle: CompanyData, job: JobRow, stopped: boolean, t: { nowMs: number; stamp: string; zone: string; day: string }, told: Set<string>): number {
     const version = handle.jobs.version(job.id, job.approvedVersion as number)
@@ -372,7 +375,8 @@ export function createJobEvents(deps: JobEventDeps) {
     const at = handle.jobs.eventCursor(job.id)
     // A line taken out of `JOB_SET_WATCH_OPENED` stops its jobs: nothing read, nothing made (T22) — and its cursor follows now,
     // so nothing completed meanwhile runs late if the line comes back (compare-and-set: another clock's move wins).
-    if (!jobSetWatchOpened(trigger)) {
+    const line = jobSetWatchLine(trigger)
+    if (line === null) {
       if (at !== null) transactions.run(() => { handle.jobs.moveEventCursor(job.id, at.seen, Math.max(at.seen, handle.jobs.ledgerSeqNow()), t.stamp) })
       return 0
     }
@@ -383,7 +387,7 @@ export function createJobEvents(deps: JobEventDeps) {
     // The task type no longer means what the job names (T9): nothing is read until it does again — never a guess — and, as for a
     // line taken out above, its cursor follows now (compare-and-set), so what was completed meanwhile never runs late once the
     // kind is back (owner decision, the safe side of 4b-4 PR2's open question).
-    if (!minutesReviewKindKnown(handle)) {
+    if (!setWatchKindKnown(handle, line)) {
       if (!failing.has(`${job.id}:kind`)) log(`[job-events] company ${handle.companyId} job ${job.id}: its record kind is no longer known; nothing is read`)
       failing.add(`${job.id}:kind`)
       transactions.run(() => { handle.jobs.moveEventCursor(job.id, at.seen, Math.max(at.seen, handle.jobs.ledgerSeqNow()), t.stamp) })
@@ -394,26 +398,35 @@ export function createJobEvents(deps: JobEventDeps) {
     return transactions.run((): number => {
       const newest = handle.jobs.ledgerSeqNow()
       if (newest <= at.seen) return 0
-      const rows = handle.jobs.ledgerInto('task', 'done', at.seen, newest, EVENT_ROWS_PER_TICK)
+      const read = setWatchRowsOf(line)
+      const rows = handle.jobs.ledgerInto(read.type, read.toState, at.seen, newest, EVENT_ROWS_PER_TICK)
       const gaps = handle.jobs.eventGaps(job.id)
       const inGap = (seq: number) => gaps.some(g => seq > g.from && (g.until === null || seq <= g.until))
       let today = handle.jobs.eventOccurrencesOn(job.id, t.day)
       let n = 0
       for (const row of rows) {
-        // `causes: human` under `ledger_v1`: a person, or their own consultation's AI — never a migration, the server, a run,
-        // an outside writer or a business plugin's screen.
-        if (!ledgerRowIsEvent(row)) continue
-        const event = minutesReviewEvent(handle, reviewId, definition.actingUser, row)
+        // The line's counted causes and event: `human` under `ledger_v1` (a person, or their own consultation's AI — never a
+        // migration, the server, a run, an outside writer or a business plugin's screen) completing their 「議事録を確認する」; or
+        // `reader_ai` under `reader_v1` — the first reading of a meeting by the AI of any of its people (4b-4 A3).
+        const event = setWatchEvent(handle, line, reviewId, definition.actingUser, row)
         if (!event) continue
-        // `unit: record`: one mark per record in the company — whichever job, version or outcome wrote it.
-        if (handle.jobs.meetingReviewMarked(row.recordId)) continue
-        const mark = (outcome: JobSetMarkOutcome, occurrenceId: string | null = null) => handle.jobs.markMeetingReview({
-          recordId: row.recordId, meetingId: event.meetingId, jobId: job.id, outcome, occurrenceId, at: t.stamp,
-        })
+        // `unit: record`: the meeting once for this responsible person — whichever line, job, version or outcome wrote the mark
+        // (the first line's mark is the meeting's review's, the second line's the meeting's and the person's).
+        if (setWatchMarked(handle, reviewId, event.meetingId, definition.actingUser)) continue
+        const markKey = setWatchMarkKey(line, reviewId, event.meetingId, definition.actingUser)
+        // The first line's own mark, by any job (as since PR2: its record is one person's).
+        if (handle.jobs.meetingReviewMarked(markKey)) continue
+        // The second line also writes the review's own key when that review was this person's (an older build looks only there).
+        const reviewKey = line === 'first_read' ? setWatchReviewKeyToo(handle, reviewId, event.meetingId, definition.actingUser) : null
+        const mark = (outcome: JobSetMarkOutcome, occurrenceId: string | null = null) => {
+          for (const recordId of reviewKey ? [markKey, reviewKey] : [markKey]) {
+            handle.jobs.markMeetingReview({ recordId, meetingId: event.meetingId, jobId: job.id, outcome, occurrenceId, at: t.stamp })
+          }
+        }
         // Reached while paused or stopped: never runs (③).
         if (inGap(row.seq)) { mark('paused'); continue }
         const refused = responsible
-          ? setGuardRefusal(handle, trigger, definition, { responsible, boundary: at.setBoundary, recordId: row.recordId, version: row.version, meetingId: event.meetingId, at: t.stamp })
+          ? setGuardRefusal(handle, trigger, definition, { responsible, boundary: at.setBoundary, recordId: event.recordId, version: row.version, meetingId: event.meetingId, at: t.stamp })
           : 'not_matched'
         if (refused) { mark(refused); continue }
         // The day's limit (company time): beyond it nothing is made — its one notice a day to the responsible person (no
@@ -431,7 +444,7 @@ export function createJobEvents(deps: JobEventDeps) {
           // Its time to run counts from now (the event may have been read late), never from the event.
           expiresAt: new Date(t.nowMs + definition.missed.expiresAfterMinutes * 60_000).toISOString(),
           state: 'due', runId: null, outcomeCode: null, createdAt: occurrenceAt, updatedAt: occurrenceAt,
-          eventSeq: row.seq, eventRecordId: row.recordId, eventVersion: row.version, eventDay: t.day,
+          eventSeq: row.seq, eventRecordId: event.recordId, eventVersion: row.version, eventDay: t.day,
           // No watched record (no generation): its end moves, stops or clears no watch.
           watchGeneration: null, eventMeetingId: event.meetingId,
         })

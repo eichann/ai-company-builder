@@ -112,7 +112,7 @@ UNIVERSAL=(client/scripts/universal-git.mjs client/package.json)
 # keep it covered there if those lists ever narrow `shared/`.
 # staging/: the staging kit's helpers, tested by server/tests/unit/staging-kit.test.ts.
 # The rollback floor's pin and its cross-build check (deployment.md "Rolling back production") run in the server job.
-SERVER=(server/ shared/ staging/ manual/ manual-admin/ .github/rollback-floor-commit .github/scripts/rollback-floor-check.sh)
+SERVER=(server/ shared/ staging/ manual/ manual-admin/ .github/rollback-floor-commit .github/set-watch-line-before-commit .github/scripts/rollback-floor-check.sh)
 # manual-admin/ and the app's screens (client/src, client/shared): admin-guide-pages.test.ts checks the
 # administrator guide's pictures and the ［names］ it cites against the admin console and the app.
 ADMIN=(admin/ shared/ manual-admin/ client/src/ client/shared/)

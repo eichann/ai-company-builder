@@ -386,7 +386,7 @@ export function JobVersionWords({ definition, members }: { definition: JobDefini
         {(setWatch ? setWatchGrantLines(definition.grant) : jobGrantLines(definition.grant, definition.trigger)).map((l) => <li key={l}>{l}</li>)}
       </ul></dd>
       {setWatch && (<><dt className="text-muted-foreground">見える人</dt><dd>{SET_WATCH_SEEN_NOTE}</dd></>)}
-      <dt className="text-muted-foreground">動けないとき</dt><dd>{setWatch ? setWatchMissedText(definition.missed.expiresAfterMinutes) : jobMissedText(definition.missed, definition.trigger)}</dd>
+      <dt className="text-muted-foreground">動けないとき</dt><dd>{setWatch ? setWatchMissedText(definition.missed.expiresAfterMinutes, isSetTrigger(definition.trigger) ? definition.trigger : undefined) : jobMissedText(definition.missed, definition.trigger)}</dd>
     </dl>
   )
   if (summary.length === 0) return full
