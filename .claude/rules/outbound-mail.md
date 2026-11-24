@@ -190,9 +190,9 @@ stops in between (a crash, a deploy, a restore of the database) leaves it `sendi
 - A late answer of a send already made `unknown` changes nothing: `finishSend` settles only `sending` and returns
   false, and the send then answers `unknown` (`lateAnswer`) without moving the record, a receipt (やりとり), the retention
   clock or a waiting — both channels; the person decides.
-- Like any `unknown` send (a lost answer), one made `unknown` here no longer counts for "One send per source"
-  (`sendsForSource` reads `sending` / `sent`): another member's draft on the same source is not stopped by it. Kept
-  as is (the 「…が送りました」 sentence would be wrong for a send nobody knows went out); a decision for the owner.
+- Like any `unknown` send (a lost answer), one made `unknown` here still counts for "One send per source" (owner
+  decision 2026-11-24): another member's send on the same source is stopped with 「…送ろうとしました（届いたか分かりません）」
+  and goes with a one-line reason; once settled 送られていなかった it no longer counts.
 - A `sending` row whose record is gone or no longer a draft (nobody can answer for it) is made `unknown` too, so it
   never stays in the way of newer ones (500 per company and pass, oldest first); one whose record cannot move yet
   (changed meanwhile, the feature off) waits for the next pass, logged once per reason and pass.
@@ -221,14 +221,25 @@ Two attendees could each send the client a thank-you mail. Sending reaches outsi
   decision 2026-11-06: on one deal people send many different mails — a proposal, a quote another
   day — and "already sent for this deal" would stop every one).
 - **At the send** (both channels, right before the send row, no `await` between): the sends on the
-  same source key that are `sent` or `sending` (`outbound.sendsForSource`, by anyone, the draft's
-  own left out) and that the **sender may see** — they read the source record **and** that mail's
-  record, through `recordReader` (`slots.heldBy`; owner decision B: one they cannot read is neither
-  mentioned nor a reason to stop them). The first one found → 409 `ALREADY_SENT_FOR_SOURCE` with
-  `alreadySent { messageId, by, byName, at, kind, message }` (contract `MailAlreadySent`;
-  `message` 「この会議のお礼メールは〇〇さんが MM/DD HH:MM に送りました」, Japan time,
-  `shared/core/mail.ts` `alreadySentText`: 連絡への返事・この件の催促 by kind,
-  「あなた」 for the sender's own). Nothing is sent, no send row.
+  same source key that are `sent`, `sending` or `unknown` (`outbound.sendsForSource`, by anyone, the
+  draft's own left out; a send settled 送られていなかった is `not-sent` and never counts) and that the
+  **sender may see** — they read the source record **and** that mail's record, through `recordReader`
+  (`slots.heldBy`; owner decision B: one they cannot read is neither mentioned nor a reason to stop
+  them). The first one found — one that went or is going out before an `unknown` one — → 409
+  `ALREADY_SENT_FOR_SOURCE` with `alreadySent { messageId, by, byName, at, kind, message, unknown? }`
+  (contract `MailAlreadySent`; `message` 「この会議のお礼メールは〇〇さんが MM/DD HH:MM に送りました」,
+  Japan time, `shared/core/mail.ts` `alreadySentText`: 連絡への返事・この件の催促 by kind, 「あなた」 for
+  the sender's own). Nothing is sent, no send row. `at` is when that send started (or finished, for
+  one that went out straight away), never when someone settled it.
+- **An `unknown` send counts** (owner decision 2026-11-24; it did not before): a lost answer, a 5xx,
+  or a send the clock made `unknown` ("A send left half-done") may have reached the client, so it
+  stops another member's send on the same source like a sent one — still **not a hard block**, a
+  one-line reason lets it go. Its sentence never says it went: 「この会議のお礼メールは〇〇さんが MM/DD
+  HH:MM に送ろうとしました（届いたか分かりません）」 (`triedToSendText`, the same kinds and 「あなた」), with
+  `alreadySent.unknown: true` (additive: released apps show `message` / `error` as is, and 「…（届いたか
+  分かりません）。それでも送るときは、アプリを新しくして…」 reads right). Settled 送られていた → the row is
+  `sent` and reads 送りました; settled 送られていなかった → `not-sent`, no longer counted. A discarded
+  record whose send stayed `unknown` still counts (it may have gone). Slack replies use the same gate.
 - **To proceed**: the same send with `resendReason` (1–200 characters, one line, NFC-trimmed:
   `resendReasonOf`; anything else → 400 `RESEND_REASON_INVALID` before anything is read). The
   reason is kept on the send row (`resend_reason`) and as the ledger note of the `send` (or
@@ -258,9 +269,13 @@ sees who and when, passes only with a reason kept in the ledger and the send row
 cannot read the earlier mail is neither told nor stopped; a nudge is its own source, one per round;
 two mails of the same まとまり only both go without a reason — each mutation-checked: the gate, the
 claim reader, the follow-up round, an `await` between the check and the send row, a まとまり taken
-as a source),
+as a source; 「a send whose result is unknown counts too」: stopped with the unknown sentence and
+`unknown: true`, goes with a reason, settled false → not counted, settled true → 送りました at the
+send's time, a sent one named before an unknown one, an unreadable unknown mail neither told nor
+stopping — mutation-checked: `unknown` in `sendsForSource`, the sent-first choice, the sentence,
+the flag, the time),
  `server/tests/unit/source-slots.test.ts` (the order, the key, the sentence and the
-reason), `client/tests/outbound-mail-tools.test.ts` (only a one-line reason leaves main; a malformed
+reason; `triedToSendText`), `client/tests/outbound-mail-tools.test.ts` (only a one-line reason leaves main; a malformed
 `alreadySent` never reaches the card), `client/tests/ui/mail-draft-card.spec.ts` (the earlier send
 shown, sent only with the reason written).
 

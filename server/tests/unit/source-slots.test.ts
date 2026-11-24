@@ -5,7 +5,7 @@
  */
 import { describe, expect, it } from 'vitest'
 import { parseSourceKey, resolveSource, sourceKey, sourceRecordId } from '../../../shared/core/source-slots'
-import { alreadySentText, resendReasonOf } from '../../../shared/core/mail'
+import { alreadySentText, resendReasonOf, triedToSendText } from '../../../shared/core/mail'
 
 describe('the source of a piece of work', () => {
   it('follow-up, then meeting, then thread; nothing (a まとまり is not a source) → no source', () => {
@@ -26,6 +26,10 @@ describe('the source of a piece of work', () => {
   it('the sentence names who and when in Japan time; a reason is one line of 1–200 characters', () => {
     expect(alreadySentText('meeting', '佐藤', '2026-11-06T06:30:00.000Z')).toBe('この会議のお礼メールは佐藤さんが 11/06 15:30 に送りました')
     expect(alreadySentText('thread', null, '2026-11-06T06:30:00.000Z')).toBe('この連絡への返事はあなたが 11/06 15:30 に送りました')
+    // A send whose result is unknown never reads as sent.
+    expect(triedToSendText('meeting', '佐藤', '2026-11-06T06:30:00.000Z')).toBe('この会議のお礼メールは佐藤さんが 11/06 15:30 に送ろうとしました（届いたか分かりません）')
+    expect(triedToSendText('thread', null, '2026-11-06T06:30:00.000Z')).toBe('この連絡への返事はあなたが 11/06 15:30 に送ろうとしました（届いたか分かりません）')
+    expect(triedToSendText('follow-up', '', '2026-11-06T06:30:00.000Z')).toBe('この件の催促はほかの人が 11/06 15:30 に送ろうとしました（届いたか分かりません）')
     expect(resendReasonOf('  別の担当者にも  ')).toBe('別の担当者にも')
     for (const bad of ['', ' ', 'a\nb', 'x'.repeat(201), 3]) expect(resendReasonOf(bad)).toBeNull()
   })

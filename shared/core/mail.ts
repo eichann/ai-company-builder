@@ -302,5 +302,15 @@ export function alreadySentText(kind: SourceKind, who: string | null, at: string
   return `${ALREADY_SENT_WHAT[kind]}は${by}が${when ? ` ${when} に` : ''}送りました`
 }
 
+/**
+ * The same sentence for a send whose result nobody knows (`unknown`, 「届いたか分かりません」): it
+ * must not say it went — 「この会議のお礼メールは佐藤さんが 11/06 15:30 に送ろうとしました（届いたか分かりません）」.
+ */
+export function triedToSendText(kind: SourceKind, who: string | null, at: string): string {
+  const by = who === null ? 'あなた' : who === '' ? 'ほかの人' : `${who}さん`
+  const when = shortJapanTime(at)
+  return `${ALREADY_SENT_WHAT[kind]}は${by}が${when ? ` ${when} に` : ''}送ろうとしました（届いたか分かりません）`
+}
+
 /** What a released app (which knows no 「それでも送る」) shows, as is, after the sentence. */
 export const ALREADY_SENT_OLD_APP_TEXT = 'それでも送るときは、アプリを新しくしてから、理由をひとこと書いて送ってください。何も送っていません。'

@@ -166,7 +166,7 @@ export function sqliteOutboundMailRepository(conn: Database.Database, companyId:
         .run(outcome, at, companyId, id)
     },
     sendsForSource(sourceKey) {
-      return (conn.prepare(`SELECT ${SEND_COLUMNS} FROM outbound_sends WHERE company_id = ? AND source_key = ? AND outcome IN ('sending', 'sent')
+      return (conn.prepare(`SELECT ${SEND_COLUMNS} FROM outbound_sends WHERE company_id = ? AND source_key = ? AND outcome IN ('sending', 'sent', 'unknown')
         ORDER BY started_at, rowid LIMIT 50`).all(companyId, sourceKey) as SendRow[]).map(toSend)
     },
     sentDomains() {
