@@ -1630,7 +1630,9 @@ app, PR7 the admin console.
     (no who column, once per kind: 201, again 200 `recorded: false`). **Not anonymous in storage**: only the pinned responsible
     person can write a row, so a join through the occurrence's version names them; 「人ごとに数えない」 is a promise of the readers —
     no route or screen may group corrections by person (independent review of PR3; the owner decides before PR7 reads it). Cancelling the やること on ［まだ早かった］ is
-    the app's (PR6), with the records API. The judgement and the corrections kept are on the responsible person's own
+    the app's (PR6), with the records API. **For PR5 / PR6** (independent review of PR3b): ［作ってもらう］ after a 見送る **with
+    update proposals** — that occurrence already has its やること (`occurrenceTaskId`), so whatever makes the たたき台 must not make
+    a second やること under that id (update it, or make it elsewhere). The judgement and the corrections kept are on the responsible person's own
     `GET /me/job-occurrences` (`report`, only while shown — `reportOf`'s own check is defence: `mine` already leaves out an
     occurrence not shown, so removing it alone fails no test); never on an owner / admin's occurrence view.
   - **What the AI can still choose** (independent review of PR3): the fixed kinds carry about 18 bits a run (decision, reason,
@@ -1673,7 +1675,8 @@ app, PR7 the admin console.
 - Tests (PR3b): the same file, "updates is a small count only" (a string, a fraction, a negative, 21, null, a list refused; 20
   kept) and "gate_failed carries nothing else" (the parser); "update proposals (PR3b…)" (見送る with a count: the one owner-only
   やること, its date-only 更新案 name and fixed description, no 見送る notice, nothing of the reason — also off the meeting; 見送る
-  with 0: the notice only; 進める with a count: the description and `report.updates`; records off; one やること per occurrence);
+  with 0: the notice only; 進める with a count: the description and `report.updates`; records off — one やること per occurrence
+  is PR3's: the task id from the occurrence, the report's primary key and the run's own end, no new test);
   `server/tests/unit/jobs-schema.test.ts` "a set watch’s report count" (a row from before reads 0; the CHECK); and
   `server/tests/cross-build/` (2-floor: the floor answers a report with a count 404 on a run step 1 claimed, nothing made).
   Mutation check: 17 mutations (the parser's key, integer, bounds and `gate_failed`; `setWatchMakesTask` both ways and in

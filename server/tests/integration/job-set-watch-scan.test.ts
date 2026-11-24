@@ -834,13 +834,6 @@ describe('update proposals (PR3b, owner memo 「4b-4 挟む部分」 §G-1): 見
     expect(notices('job_set_declined')).toEqual([])
   })
 
-  it('one やること per occurrence: a second finish of a 見送る with updates makes nothing more', async () => {
-    const { occ, run } = await claimed()
-    expect((await finish(run, { decision: 'decline', reason: 'introduction', confidence: 0.8, updates: 1 })).status).toBe(200)
-    expect((await finish(run, { decision: 'decline', reason: 'introduction', confidence: 0.8, updates: 5 })).status).not.toBe(200)
-    expect(db.prepare("SELECT COUNT(*) AS n FROM records WHERE company_id = ? AND id = ?").get(CO, taskOf(occ))).toEqual({ n: 1 })
-    expect(reports()).toEqual([expect.objectContaining({ occurrence_id: occ, updates: 1 })])
-  })
 })
 
 describe('見送る: no やること, a notice whose words are built when read (§5-1, T15)', () => {
