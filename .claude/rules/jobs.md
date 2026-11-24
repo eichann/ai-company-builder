@@ -1623,7 +1623,7 @@ runs it** ("The app runs it" below; no screen announces schema 5 yet — that, a
     `setWatchMakesTask` in `finishTask` is defence — removing it alone fails no test). Stored as `ai_job_set_reports.updates` (additive in
     `migrateJobSetWatch`, `INTEGER NOT NULL DEFAULT 0`, CHECK 0–20 and 0 with `gate_failed`): a row from before reads 0. On the
     responsible person's own view `report.updates`. **Compatibility**: the build before (PR3) refuses the key (`JOB_SET_REPORT_BAD`,
-    the run stays running and goes to a person — the app sends it from PR5 on, `job-report-tool.ts`); the rollback floor freezes
+    the run stays running and goes to a person — the app sends it from PR5 on, counted from `更新案.json`: `set-watch-tools.ts`, "The app runs it"); the rollback floor freezes
     the occurrence, so a report with or without a count is a missing run's 404 there, nothing made
     (`server/tests/cross-build/` 2-floor, on a run step 1 claimed).
   - **Corrections** (§5-2): `POST /me/job-occurrences/:occurrenceId/feedback { kind }` — `made_anyway` (［作ってもらう］ after
