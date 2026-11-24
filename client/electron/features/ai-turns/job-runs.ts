@@ -16,7 +16,7 @@
 //     sends where it belongs.
 import path from 'node:path'
 import { readdir, realpath, stat } from 'node:fs/promises'
-import { JOB_EVENT_CHECK_KINDS, JOB_PC_CHECK_KINDS, isOccurrenceId, parseJobRunResult, type JobRunResult } from '../../../../shared/core/jobs'
+import { JOB_EVENT_CHECK_KINDS, JOB_PC_CHECK_KINDS, JOB_SET_CHECK_KIND, isOccurrenceId, parseJobDecisionFile, parseJobRunResult, type JobDecision, type JobGrant, type JobRunResult } from '../../../../shared/core/jobs'
 import { jobPathProblem } from '../../../../shared/core/jobs'
 import { diskKey } from '../../../../shared/core/paths'
 import {
@@ -24,6 +24,11 @@ import {
   type JobFound, type JobToolAccess, type JobWriteArea, type QueuedJobTurn,
 } from '../../../shared/ai-turn-steps/job'
 import type { AiTurnClaimResult, AiTurnSettleResult } from '../../../shared/ai-turns'
+import {
+  CLAUDE_IN_RUN_GATE, SET_WATCH_UPDATES_FILE, SET_WATCH_UPDATES_FILE_MAX, parseSetReportInput, parseUpdateProposals, quotesNotInMinutes,
+  runFolderName, setJobResult, setWatchFirstMessage, type DecisionGate,
+} from '../../../shared/ai-turn-steps/set-watch'
+import type { PinnedCopy, RunFolder, SetRunRecord, SetWatchFs } from './set-watch-run'
 
 /** One instant on both clocks (stage 4b-2): what a job run's age is measured from (claims.ts). */
 export interface ClockStamp { mono: number; wall: number }
@@ -45,7 +50,7 @@ export interface JobRunDeps {
   confirm: (companyId: string, key: string, handle: HoldHandle) => Promise<boolean>
   /** Now, on both clocks the hold's guard is timed on. */
   clockStamp: () => ClockStamp
-  finishRun: (companyId: string, key: string, failure: Failure | null, extra?: { jobResult: JobRunResult }) => Promise<{ status: number } | null>
+  finishRun: (companyId: string, key: string, failure: Failure | null, extra?: { jobResult: JobRunResult | Record<string, unknown> }) => Promise<{ status: number; code?: string } | null>
   /** Whether this app still holds that run through this very hold (registered for the consultation's tokens, not taken away, not claimed again). */
   holds: (companyId: string, key: string, handle: HoldHandle) => boolean
   deviceId: string
@@ -73,6 +78,13 @@ export interface JobRunDeps {
   newFiles: (companyRoot: string | null, place: string, window: { since: string; until: string; sinceCommit: string | null; upto: string | null; offset: ClockOffset | null }) => Promise<string[] | null | 'not-synced'>
   /** Stop the consultation's AI now (main's chat turns), saying why in its reply. */
   stopTurn: (conversationId: string) => void
+  /**
+   * A set watch's file work on this PC (4b-4 PR5, `set-watch-run.ts`): the pinned copy, the run folder, the images, the PC
+   * record. Absent: set watches are not run here (their turns are not asked for, their claims never made).
+   */
+  setWatch?: SetWatchFs
+  /** What judges a set watch (§5-0): Claude inside the run, unless a test hands another. */
+  gate?: DecisionGate
   now?: () => number
   log?: Pick<Console, 'warn'>
 }
@@ -95,6 +107,12 @@ export const JOB_CLOCK_TOLERANCE_MS = 5 * 60_000
 export const NOT_SYNCED_RETRY_MS = 30_000
 /** An earlier occurrence of the job still runs (409 `JOB_EARLIER_RUNNING`, jobs.md "Never side by side"): asked again after this. */
 export const EARLIER_RUNNING_RETRY_MS = 60_000
+
+/** A record whose completion's answer was lost is asked about again only after this. */
+export const RECONCILE_AGAIN_MS = 10 * 60_000
+
+/** A set watch's run that could not keep its record on this PC: nothing was sent, and the AI is told to end (B2 ③). */
+export const SET_RECORD_NOT_KEPT = 'この PC に結果を書き残せなかったため、完了を送っていません。これで終えてください（あとでもう一度動きます）。'
 
 /** What the AI is told when its report could not make the やること (the run was taken away or finished meanwhile). */
 export const JOB_REPORT_REFUSED = '仕事が止められていたか、時間が来ていたため、やることは作られませんでした。作ったとは言わず、そのとおり伝えてください。'
@@ -154,6 +172,33 @@ interface Held {
   timer: ReturnType<typeof setTimeout> | null
   /** This claim's hold (claims.ts); null until held. */
   hold: HoldHandle | null
+  /** A set watch's run (4b-4 PR5); absent for every other job. */
+  set?: HeldSet
+}
+
+/** What main holds for a set watch's run (4b-4 PR5). */
+interface HeldSet {
+  companyRoot: string | null
+  meetingId: string
+  generation: number
+  place: string
+  folder: string
+  copy: PinnedCopy
+  decision: JobDecision
+  /** The day a run folder is named by when the AI gives none (the event's day on this PC). */
+  day: string
+  /** The folder made for this claim (null until `proposal_folder`). */
+  run: RunFolder | null
+  /** The minutes of the pinned meeting this run read (`minutes_read`): what its quotes are checked against (I7). */
+  minutes: string | null
+  /** The minutes' documents' versions that read answered (`docVersion`); null = not read, or not said (シナリオ集 T7). */
+  minutesDocVersion: string | null
+  /** The AI was told once that its update proposals' file is not the shape: a second report ends with none counted. */
+  updatesWarned: boolean
+  /** The record could not be kept on this PC: nothing is sent, the run is given back. */
+  recordFailed: boolean
+  /** The run's tool calls, one at a time. */
+  queue: Promise<void>
 }
 
 export function createJobRuns(deps: JobRunDeps) {
@@ -191,6 +236,8 @@ export function createJobRuns(deps: JobRunDeps) {
     // An event occurrence (stage 4b-2): the server checked its record at the claim (and does at every call); nothing is
     // looked at here. Never `nothing` (an event run may not finish so: the server's conditions decide it is not needed).
     if (turn.check.kind === 'source_record') return turn.kind === 'event' && turn.source ? { kind: 'record', recordId: turn.source.recordId } : null
+    // A set watch (4b-4 PR5): the server checked the record and its meeting at the claim (and does at every call).
+    if (turn.check.kind === JOB_SET_CHECK_KIND) return turn.set && turn.source?.meetingId ? { kind: 'record', recordId: turn.source.recordId } : null
     if (turn.check.kind === 'new_files') {
       if (point === null) return null
       // A working folder (no commit): files by this PC's clock, so it must be known to agree with the server's —
@@ -209,12 +256,101 @@ export function createJobRuns(deps: JobRunDeps) {
   /** The run is still this app's: not taken away (renew 409) and still registered for the consultation's tokens. */
   const live = (h: Held) => !h.lost && h.hold !== null && deps.holds(h.companyId, h.occurrenceId, h.hold)
 
+  /** Copies an earlier launch left (the app quit mid-run) are nobody's now: removed once, before this launch makes any. */
+  let leftCopies: Promise<void> | null = null
+  /** Companies whose lost answers are being looked at now; when each record was last asked about (not again for a while). */
+  const reconciling = new Set<string>()
+  const askedAt = new Map<string, number>()
+
+  /**
+   * A set watch before its AI (4b-4 PR5, B2): the department folders here (4-T11), the gate (§5-0: failed → `gate_failed`, never
+   * Claude instead), the pinned copy of both Skills (I9; not here → tried later), and the run's Skill's reasons from the copy (the
+   * same `decision.json` the server pinned).
+   */
+  async function prepareSet(companyId: string, occurrenceId: string, generation: number, turn: QueuedJobTurn, companyRoot: string | null): Promise<{ set: HeldSet; procedure: string } | 'not-here' | 'procedure' | 'gate-failed'> {
+    const fs = deps.setWatch
+    const p = turn.procedure
+    const meetingId = turn.source?.meetingId
+    if (!fs || p.source !== 'department_skill' || !meetingId) return 'procedure'
+    const write = turn.grant.writes.area === 'deliverable' ? { place: turn.grant.writes.place, folder: turn.grant.writes.folder } : null
+    const places = [...new Set([p.place, ...(turn.grant.reads.skills ?? []).map(s => s.place), ...(write ? [write.place] : [])])]
+    for (const place of places) if (!(await fs.departmentHere(companyRoot, place))) return 'not-here'
+    const judged = await (deps.gate ?? CLAUDE_IN_RUN_GATE).judge().catch(() => 'failed' as const)
+    if (judged !== 'in_run') return 'gate-failed'
+    const copy = await fs.makeCopy(companyId, occurrenceId, generation, companyRoot, [p, ...(turn.grant.reads.skills ?? [])])
+    if (!copy) return 'procedure'
+    const procedure = await fs.readCopyFile(copy, 0, 'SKILL.md')
+    const decisionText = await fs.readCopyFile(copy, 0, 'decision.json')
+    const decision = decisionText === null ? null : parseJobDecisionFile(decisionText)
+    if (procedure === null || decision === null) {
+      await fs.removeCopy(copy)
+      return 'procedure'
+    }
+    const due = new Date(Date.parse(turn.dueAt))
+    const day = `${due.getFullYear()}-${String(due.getMonth() + 1).padStart(2, '0')}-${String(due.getDate()).padStart(2, '0')}`
+    return {
+      procedure,
+      set: { companyRoot, meetingId, generation, place: write?.place ?? p.place, folder: write?.folder ?? '', copy, decision, day, run: null, minutes: null, minutesDocVersion: null, updatesWarned: false, recordFailed: false, queue: Promise.resolve() },
+    }
+  }
+
+  /**
+   * A set watch's area (B2): writes only in the run folder made for this claim (none before it is made: `run` is read live, so the
+   * guard built at the turn's start sees the folder once `proposal_folder` made it); reads the grant's places, the whole
+   * `<place>/.personal/<folder>/` (earlier proposals, read only), and the pinned copy outside the company folder.
+   */
+  function setWriteArea(set: HeldSet, grant: JobGrant): JobWriteArea {
+    const base = `${set.place}/.personal/${set.folder}`
+    if (grant.writes.area !== 'deliverable') return { nowhere: true, reads: [...grant.reads.paths], readOutside: set.copy.dir }
+    return {
+      place: set.place, folder: set.folder, reads: [...grant.reads.paths, base], readOutside: set.copy.dir,
+      get run() { return set.run?.name ?? null },
+    }
+  }
+
+  /**
+   * The PC records whose completion's answer was lost (B2 ④): the server's run says which generation finished it. Another
+   * generation (a re-claim, another PC) → `not_adopted`; this one done → `sent`. Known gap: a 「もう一度」 pressed after the lost
+   * answer closes this generation as done too — the server does not say which finish it took yet.
+   */
+  async function reconcileSending(companyId: string): Promise<void> {
+    const fs = deps.setWatch
+    if (!fs) return
+    // Not the same records every pass: one asked within `RECONCILE_AGAIN_MS` waits (five stuck ones never hold the rest back).
+    const due = (await fs.sendingRecords(companyId, 200).catch(() => [] as SetRunRecord[]))
+      .filter(rec => !byOccurrence.has(keyOf(companyId, rec.occurrenceId)) && now() - (askedAt.get(`${companyId}\n${rec.runId}.${rec.generation}`) ?? -Infinity) >= RECONCILE_AGAIN_MS)
+      .slice(0, 5)
+    for (const rec of due) {
+      askedAt.set(`${companyId}\n${rec.runId}.${rec.generation}`, now())
+      const r = await deps.session(companyId, 'GET', `/ai-runs/${encodeURIComponent(rec.runId)}`).catch(() => null)
+      if (!r || r.status !== 200) continue
+      const data = r.data as { run?: { state?: unknown; generation?: unknown } } | undefined
+      const run = data?.run
+      if (!run || typeof run.generation !== 'number') continue
+      // Another generation finished or holds it → not this record's; done at this generation → sent; given back or waiting for
+      // a person at this generation → this completion never landed (`refused`). Running / waiting to be reconciled: not yet known.
+      const state = run.generation > rec.generation ? 'not_adopted'
+        : run.generation === rec.generation && run.state === 'done' ? 'sent'
+        : run.generation === rec.generation && ['open', 'retry_later', 'waiting_person', 'waiting_setup'].includes(String(run.state)) ? 'refused'
+        : null
+      if (state) await fs.writeRecord(companyId, { ...rec, state }).catch(() => false)
+    }
+  }
+
   return {
     /** The occurrences this app can run now; not readable (offline, an older server) → the last list. */
     async turns(companyId: string): Promise<QueuedJobTurn[]> {
+      if (deps.setWatch) await (leftCopies ??= deps.setWatch.removeLeftCopies())
       // Stage 4b-2: this app runs event occurrences too (`?kinds=` — absent, a server lists time slots only; a server
       // before stage 4-0 ignores it and lists time slots).
-      const r = await deps.session(companyId, 'GET', `/me/job-turns?kinds=${JOB_KINDS_RUN.join(',')}`)
+      // 4b-4 PR5: a set watch's turn is listed only to an app naming its check (`?checks=matched_record`), and only an app that
+      // runs it here (its file work given) names it.
+      const r = await deps.session(companyId, 'GET', `/me/job-turns?kinds=${JOB_KINDS_RUN.join(',')}${deps.setWatch ? `&checks=${JOB_SET_CHECK_KIND}` : ''}`)
+      // Lost answers are looked at only while the server answers, never in the listing's way (one pass at a time).
+      if (r?.status === 200 && deps.setWatch && !reconciling.has(companyId)) {
+        reconciling.add(companyId)
+        void reconcileSending(companyId).finally(() => reconciling.delete(companyId))
+      }
       const turns = r?.status === 200 ? parseJobTurns(r.data) : null
       if (turns === null) return [...(listed.get(companyId)?.values() ?? [])]
       const ids = new Set(turns.map(t => t.occurrenceId))
@@ -255,8 +391,10 @@ export function createJobRuns(deps: JobRunDeps) {
       // An event occurrence's claim names the kind and its check (the two locks of jobs.md "Old apps never run it"); a time
       // slot's claim stays as every earlier app sent it (only a server that listed an event ever gets `kinds`).
       const event = listedTurn.kind === 'event'
+      // A set watch is claimed only by an app that runs it here (its check named: the server's lock, jobs.md "The set watch").
+      if (listedTurn.set && !deps.setWatch) return { claimed: false, reason: 'not-allowed' }
       const answer = await deps.session(companyId, 'POST', '/job-run-claims', {
-        occurrenceId, deviceId: deps.deviceId, conversationId, checks: [...JOB_PC_CHECK_KINDS, ...(event ? JOB_EVENT_CHECK_KINDS : [])],
+        occurrenceId, deviceId: deps.deviceId, conversationId, checks: [...JOB_PC_CHECK_KINDS, ...(event ? JOB_EVENT_CHECK_KINDS : []), ...(listedTurn.set ? [JOB_SET_CHECK_KIND] : [])],
         ...(event ? { kinds: [...JOB_KINDS_RUN] } : {}), ...(point?.commit ? { checkedCommit: point.commit } : {}),
       })
       if (!answer || answer.status >= 500) return { claimed: false, reason: 'unavailable' }
@@ -288,7 +426,7 @@ export function createJobRuns(deps: JobRunDeps) {
         if (live(held)) await deps.finishRun(companyId, occurrenceId, failure)
         return { claimed: false, reason: 'unavailable' }
       }
-      if (!turn || turn.occurrenceId !== occurrenceId || turn.kind !== listedTurn.kind) return giveUp({ class: 'bad-input', code: 'TURN_NOT_READABLE' })
+      if (!turn || turn.occurrenceId !== occurrenceId || turn.kind !== listedTurn.kind || turn.set !== listedTurn.set) return giveUp({ class: 'bad-input', code: 'TURN_NOT_READABLE' })
       // The check, before any AI (D6).
       const found = await findings(turn, companyRoot, point, offset)
       if (found === null) return giveUp({ class: 'bad-input', code: 'CHECK_NOT_POSSIBLE' })
@@ -306,13 +444,35 @@ export function createJobRuns(deps: JobRunDeps) {
         unlist(companyId, occurrenceId)
         return { claimed: false, reason: 'taken' }
       }
-      // A department Skill (a set watch, schema 5) never comes here: the turn's parser refuses it (schema 1 / 3 frames).
-      const p = turn.procedure
-      const procedure = p.source === 'company_skill'
-        ? await deps.readCompanySkill(companyId, p.skill, p.fingerprint, companyRoot).catch(() => null)
-        : p.source === 'shelf_skill' ? await deps.readShelfSkill(companyId, p.item, p.skill, p.fingerprint).catch(() => null) : null
+      // A set watch (4b-4 PR5): the checks before starting, the judging gate, the pinned copy and its reasons.
+      let set: HeldSet | null = null
+      let procedure: string | null
+      if (turn.set) {
+        const prepared = await prepareSet(companyId, occurrenceId, run.generation, turn, companyRoot)
+        if (prepared === 'not-here') return giveUp({ class: 'bad-input', code: 'DEPARTMENT_NOT_HERE' })
+        if (prepared === 'procedure') return giveUp({ class: 'temporary', code: 'PROCEDURE_NOT_HERE' })
+        if (prepared === 'gate-failed') {
+          // The gate could not judge (§5-0): no draft, no file check, never Claude instead — `gate_failed` alone, after the
+          // PC record (B2 ③ before ④).
+          if (!live(held)) return { claimed: false, reason: 'unavailable' }
+          const record: SetRunRecord = { v: 1, occurrenceId, runId: run.id, generation: run.generation, state: 'sending', folder: null, decision: 'gate_failed', at: new Date(now()).toISOString() }
+          if (!(await deps.setWatch!.writeRecord(companyId, record))) return giveUp({ class: 'temporary', code: 'PC_RECORD_NOT_KEPT' })
+          const r = await deps.finishRun(companyId, occurrenceId, null, { jobResult: { decision: 'gate_failed' } })
+          if (r) await deps.setWatch!.writeRecord(companyId, { ...record, state: r.status < 300 ? 'sent' : 'refused' })
+          unlist(companyId, occurrenceId)
+          return { claimed: false, reason: 'taken' }
+        }
+        set = prepared.set
+        procedure = prepared.procedure
+      } else {
+        const p = turn.procedure
+        procedure = p.source === 'company_skill'
+          ? await deps.readCompanySkill(companyId, p.skill, p.fingerprint, companyRoot).catch(() => null)
+          : p.source === 'shelf_skill' ? await deps.readShelfSkill(companyId, p.item, p.skill, p.fingerprint).catch(() => null) : null
+      }
       // Not on this PC yet (not synced, the shelf unreachable): tried again later.
       if (procedure === null) return giveUp({ class: 'temporary', code: 'PROCEDURE_NOT_HERE' })
+      const dropSet = () => { if (set) void deps.setWatch?.removeCopy(set.copy) }
       // The approved minutes count from the run's first claim, on the server's clock; on this PC's clock that is
       // shifted by how far the two differ — taken at the request's departure (`offset.max`), so the answer's travel
       // time never moves the end later.
@@ -320,9 +480,10 @@ export function createJobRuns(deps: JobRunDeps) {
       const skew = offset !== null ? -offset.max : 0
       const deadlineMs = (started ?? claimedAt - skew) + skew + turn.grant.limits.minutes * 60_000
       const left = deadlineMs - JOB_STOP_BEFORE_MS - now()
-      if (left <= 0) return giveUp({ class: 'bad-input', code: 'TIME_LIMIT' })
+      if (left <= 0) { dropSet(); return giveUp({ class: 'bad-input', code: 'TIME_LIMIT' }) }
       held.access = jobToolAccess(turn.grant, turn.check, turn.deliverTo)
-      held.area = jobWriteArea(turn.grant)
+      held.area = set ? setWriteArea(set, turn.grant) : jobWriteArea(turn.grant)
+      if (set) held.set = set
       held.timer = setTimeout(() => {
         held.timedOut = true
         if (byConversation.get(conversationId) === held) deps.stopTurn(conversationId)
@@ -331,6 +492,7 @@ export function createJobRuns(deps: JobRunDeps) {
       // Taken away while the check or the procedure was being read: nothing starts (the run is the server's again).
       if (!live(held)) {
         clearTimeout(held.timer)
+        dropSet()
         return { claimed: false, reason: 'unavailable' }
       }
       // The last check right before the AI starts (stage 4b-2): the server confirms the run once more — a renew, which
@@ -338,6 +500,7 @@ export function createJobRuns(deps: JobRunDeps) {
       // later (never started on an old confirmation).
       if (!(await deps.confirm(companyId, occurrenceId, held.hold as HoldHandle)) || !live(held)) {
         clearTimeout(held.timer)
+        dropSet()
         if (live(held)) return giveUp({ class: 'temporary', code: 'NOT_CONFIRMED' })
         return { claimed: false, reason: 'unavailable' }
       }
@@ -345,11 +508,22 @@ export function createJobRuns(deps: JobRunDeps) {
       // cutoff — finished as the time limit, as when too little was left before the claim.
       if (held.timedOut || deadlineMs - JOB_STOP_BEFORE_MS - now() <= 0) {
         clearTimeout(held.timer)
+        dropSet()
         return giveUp({ class: 'bad-input', code: 'TIME_LIMIT' })
       }
       byConversation.set(conversationId, held)
       byOccurrence.set(key, conversationId)
       const deadline = new Date(deadlineMs - JOB_STOP_BEFORE_MS)
+      const deadlineText = `${deadline.getHours()}:${String(deadline.getMinutes()).padStart(2, '0')}`
+      if (set && turn.source?.meetingId) {
+        return {
+          claimed: true, version: null,
+          message: setWatchFirstMessage({
+            name: turn.name, recordId: turn.source.recordId, meetingId: turn.source.meetingId, procedure, copyDir: set.copy.dir,
+            skills: set.copy.skills, reasons: set.decision.reasons, base: `${set.place}/.personal/${set.folder}`, deadline: deadlineText,
+          }),
+        }
+      }
       return {
         claimed: true, version: null,
         message: jobFirstMessage({ name: turn.name, found, procedure, grant: turn.grant, deadline: `${deadline.getHours()}:${String(deadline.getMinutes()).padStart(2, '0')}`, deliverTo: turn.deliverTo, madeBefore: turn.madeBefore, madeBeforeTotal: turn.madeBeforeTotal }),
@@ -377,7 +551,8 @@ export function createJobRuns(deps: JobRunDeps) {
      */
     reporter(conversationId: string): ((result: unknown) => Promise<string | null>) | null {
       const h = byConversation.get(conversationId)
-      if (!h) return null
+      // A set watch's run reports through its own tools (`setTools`), never this one.
+      if (!h || h.set) return null
       return async (result: unknown) => {
         const parsed = parseJobRunResult(result)
         if (parsed === null || parsed === 'nothing') return 'title は1行・80文字まで、summary は300文字までにしてください。'
@@ -389,6 +564,120 @@ export function createJobRuns(deps: JobRunDeps) {
       }
     },
 
+    /**
+     * A set watch's run (4b-4 PR5): its `proposal_folder` and `job_report`, only for the consultation main holds the run for; null
+     * for any other (`set-watch-tools.ts` makes the tools).
+     */
+    setHandlers(conversationId: string): SetHandlers | null {
+      const h = byConversation.get(conversationId)
+      const set = h?.set
+      if (!h || !set) return null
+      const fs = deps.setWatch as SetWatchFs
+      const base = (state: SetRunRecord['state']): SetRunRecord => ({ v: 1, occurrenceId: h.occurrenceId, runId: h.runId, generation: set.generation, state, folder: set.run?.rel ?? null, at: new Date(now()).toISOString() })
+      // One call at a time (two at once could make two folders, or finish twice).
+      const serial = <T>(work: () => Promise<T>): Promise<T> => {
+        const next = set.queue.then(work, work)
+        set.queue = next.then(() => undefined, () => undefined)
+        return next
+      }
+      return {
+        folder: (company: string, meetingDate?: string) => serial(async () => {
+          if (h.reported !== null || !live(h)) return { error: JOB_REPORT_REFUSED }
+          if (!('place' in h.area)) return { error: 'この定期の仕事では、ファイルを保存できません。提案書は作らず、job_report で decline を渡して終えてください。' }
+          // One folder per claim: asked again, the same one.
+          if (set.run) return { folder: set.run.rel }
+          const day = meetingDate !== undefined && /^\d{4}-\d{2}-\d{2}$/.test(meetingDate) ? meetingDate : set.day
+          const name = runFolderName(day, company)
+          if (!name) return { error: 'meetingDate は YYYY-MM-DD にしてください。' }
+          const made = await fs.makeRunFolder(set.companyRoot, set.place, set.folder, name, { occurrenceId: h.occurrenceId, runId: h.runId, generation: set.generation })
+          if (!made) return { error: 'この実行のフォルダを作れませんでした。ファイルは作らず、job_report も呼ばずに、そのまま終えてください（あとでもう一度動きます）。' }
+          set.run = made
+          // 「途中」 until a report: a run that stops here leaves this record (B2, 6-2).
+          await fs.writeRecord(h.companyId, base('working')).catch(() => false)
+          return { folder: made.rel }
+        }),
+        report: (input: unknown) => serial(async () => {
+          if (h.reported !== null) return h.reported === 'done' ? null : JOB_REPORT_REFUSED
+          if (!live(h)) { h.reported = 'refused'; return JOB_REPORT_REFUSED }
+          if (set.recordFailed) return SET_RECORD_NOT_KEPT
+          const parsed = parseSetReportInput(input, set.decision)
+          if ('error' in parsed) return parsed.error
+          // ① the quotes against the minutes this run read (I7).
+          const missing = quotesNotInMinutes(parsed.evidence, set.minutes)
+          if (missing.length > 0) {
+            return set.minutes === null
+              ? 'evidence を付けるときは、先に minutes_read でこの会議の議事録を読んでください。'
+              : `evidence の quote ${missing.length}件が議事録に見つかりません。議事録の文を、言い換えずにそのまま写してください。`
+          }
+          const decision = parsed.report.decision
+          if (decision !== 'decline' && !set.run) return 'proposal_folder でこの実行のフォルダを作り、そこにファイルを置いてから job_report を呼んでください。'
+          // ② the draft's files there, and its images copied.
+          let images: string[] = []
+          if (decision !== 'decline') {
+            const run = set.run as RunFolder
+            const absent = await fs.missingDraftFiles(run)
+            if (absent.length > 0) return `この実行のフォルダに ${absent.join('・')} がありません。作ってから、もう一度 job_report を呼んでください。`
+            const copied = await fs.copyDraftImages(run, set.copy)
+            if (copied === null) return 'この実行のフォルダの assets に画像を置けませんでした（assets がファイルやリンクになっているか、書き込めません）。assets というファイルやリンクを作らずに、もう一度 job_report を呼んでください。'
+            images = copied
+          }
+          // The update proposals (§G, S9): counted by the app from the one file, only when it is the fixed shape. Told once to fix
+          // a file that is not; asked again, the run ends with none counted (never a broken file counted).
+          let updates = 0
+          let updatesFile: SetRunRecord['updatesFile'] = 'none'
+          if (set.run) {
+            const text = await fs.readRunFile(set.run, SET_WATCH_UPDATES_FILE, SET_WATCH_UPDATES_FILE_MAX)
+            if (text !== null) {
+              const proposals = text === 'invalid' ? { problem: 'ふつうのファイルで、64KB までにしてください。' } : parseUpdateProposals(text, set.meetingId, set.minutes)
+              if ('problem' in proposals) {
+                if (!set.updatesWarned) {
+                  set.updatesWarned = true
+                  return `${SET_WATCH_UPDATES_FILE} の形が正しくありません（${proposals.problem}）。直すか消してから、もう一度 job_report を呼んでください。直せないときは、そのままもう一度呼ぶと、更新案なしとして終えます。`
+                }
+                updatesFile = 'invalid'
+              } else {
+                updates = proposals.items.length
+                updatesFile = 'valid'
+              }
+            }
+          }
+          // ③ the PC record, kept and read back — or nothing is sent.
+          const record: SetRunRecord = {
+            ...base('sending'), decision, reason: parsed.report.reason, confidence: parsed.report.confidence,
+            unconfirmed: [...parsed.report.unconfirmed], updates, updatesFile, evidence: parsed.evidence, images,
+            minutesDocVersion: set.minutesDocVersion,
+          }
+          if (!(await fs.writeRecord(h.companyId, record))) {
+            set.recordFailed = true
+            return SET_RECORD_NOT_KEPT
+          }
+          // Taken away while the files were checked: nothing is sent, and the record says so (never left `sending`).
+          if (!live(h)) {
+            h.reported = 'refused'
+            await fs.writeRecord(h.companyId, { ...record, state: 'refused' }).catch(() => false)
+            return JOB_REPORT_REFUSED
+          }
+          // ④ then the completion: fixed kinds only (no quote, company or folder).
+          const r = await deps.finishRun(h.companyId, h.occurrenceId, null, { jobResult: setJobResult(parsed, updates) })
+          h.reported = r && r.status < 300 ? 'done' : 'refused'
+          // A lost answer (no answer at all) stays `sending`: asked about later (`reconcileSending`).
+          if (r) await fs.writeRecord(h.companyId, { ...record, state: r.status < 300 ? 'sent' : 'refused' }).catch(() => false)
+          if (h.timer) clearTimeout(h.timer)
+          await fs.removeCopy(set.copy)
+          return h.reported === 'done' ? null : JOB_REPORT_REFUSED
+        }),
+      }
+    },
+
+    /** The minutes a job run's consultation read (`minutes_read`): a set watch keeps its pinned meeting's to check quotes (I7). */
+    minutesRead(conversationId: string, recordId: string, text: string, docVersion: string | null = null): void {
+      const set = byConversation.get(conversationId)?.set
+      if (!set || recordId !== set.meetingId || typeof text !== 'string') return
+      set.minutes = text
+      // The version of the documents this run read (T7: 「案を作った後に議事録が直されています」 compares it); not said → null.
+      set.minutesDocVersion = typeof docVersion === 'string' && docVersion.length > 0 && docVersion.length <= 200 ? docVersion : null
+    },
+
     /** After the turn: done with the reported title, or a failure (the server decides where it goes). */
     async settle(companyId: string, occurrenceId: string): Promise<AiTurnSettleResult> {
       const conversationId = byOccurrence.get(keyOf(companyId, occurrenceId))
@@ -396,6 +685,12 @@ export function createJobRuns(deps: JobRunDeps) {
       if (!h || !conversationId) return { outcome: 'unknown' }
       forget(conversationId)
       unlist(companyId, occurrenceId)
+      if (h.set) void deps.setWatch?.removeCopy(h.set.copy)
+      // A set watch whose record could not be kept: nothing was sent — given back, tried again later (B2 ③).
+      if (h.set?.recordFailed && h.reported === null && !h.lost) {
+        await deps.finishRun(companyId, occurrenceId, { class: 'temporary', code: 'PC_RECORD_NOT_KEPT' })
+        return { outcome: 'put-back' }
+      }
       // Finished at its report: done when the server made the やること; refused (paused, stopped, the time) → the
       // person looks and the consultation stays open.
       if (h.reported !== null) return { outcome: h.reported === 'done' ? 'done' : 'failed' }
@@ -411,6 +706,13 @@ export function createJobRuns(deps: JobRunDeps) {
 }
 
 export type JobRuns = ReturnType<typeof createJobRuns>
+
+/** A set watch run's two tools, as main answers them (`set-watch-tools.ts`). */
+export interface SetHandlers {
+  folder(company: string, meetingDate?: string): Promise<{ folder: string } | { error: string }>
+  /** null: the completion was sent and taken; else the sentence the AI acts on. */
+  report(input: unknown): Promise<string | null>
+}
 
 /** At most this many files a check lists (the rest is not needed to know there is something). */
 const NEW_FILES_MAX = 200

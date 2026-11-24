@@ -660,7 +660,11 @@ export async function startChatServer(config: ChatServerConfig) {
         }
       } : undefined
     // The AI action log: the agents report to config.onToolEvent; this is what only the server knows.
-    const toolEventContext = { companyId, companyRoot: companyRootPath, turnId: crypto.randomUUID(), department: activeDepartment?.folder, onFileCreated }
+    // A set watch's run (its area names a run folder): the run folders below its proposals folder are named after customers, so
+    // the AI action log names that folder only (jobs.md "The set watch" "The app runs it").
+    const unnamedBelow = stepArea && typeof stepArea === 'object' && 'run' in stepArea && 'place' in stepArea && stepArea.place
+      ? [`${stepArea.place}/.personal/${stepArea.folder}`] : undefined
+    const toolEventContext = { companyId, companyRoot: companyRootPath, turnId: crypto.randomUUID(), department: activeDepartment?.folder, onFileCreated, ...(unnamedBelow ? { unnamedBelow } : {}) }
     // 「AI の囲い」: the member's sandbox for this turn (agent-sandbox.md).
     const sandboxInput = connection.ownsConversation && companyId && companyRootPath
       ? await Promise.resolve(config.getAgentSandbox?.(companyId, companyRootPath)).catch(() => undefined) : undefined
@@ -683,7 +687,7 @@ export async function startChatServer(config: ChatServerConfig) {
     const turnEnv = !aiTurnStep && companyId && appSessionId
       ? await Promise.resolve(config.getBrokerEnv?.({ agent: authMode, companyId, conversationId: appSessionId, department: activeDepartment?.folder ?? null })).catch(() => undefined)
       : undefined
-    const modelRequest = { workingDirectory, appSessionId, modelId, effort, resumeId: existingCliSessionId, references, companyFiles: companyFiles?.tools, review, appCommands, records, webResearch: webResearch?.tools, browserRequest, secondOpinion, writeGuard, privateReads, askUser, onEvent, steering: turn?.steering, onPromptSuggestion: turn?.onPromptSuggestion, toolEventContext, sandbox, turnEnv, toolStop: turnStop?.toolStopped, ...(shelf?.rootMarker ? { projectRootMarker: shelf.rootMarker } : {}), ...(aiTurnStep ? { unattended: { builtinTools: aiTurnStep.builtinTools } } : {}) }
+    const modelRequest = { workingDirectory, appSessionId, modelId, effort, resumeId: existingCliSessionId, references, companyFiles: companyFiles?.tools, review, appCommands, records, webResearch: webResearch?.tools, browserRequest, secondOpinion, writeGuard, privateReads, askUser, onEvent, steering: turn?.steering, onPromptSuggestion: turn?.onPromptSuggestion, toolEventContext, sandbox, turnEnv, toolStop: turnStop?.toolStopped, ...(shelf?.rootMarker ? { projectRootMarker: shelf.rootMarker } : {}), ...(aiTurnStep ? { unattended: { builtinTools: aiTurnStep.builtinTools, ...(stepArea && typeof stepArea === 'object' && stepArea.readOutside ? { readDirs: [stepArea.readOutside] } : {}) } } : {}) }
     let usedMemo = false
     const recoveryEvent = (status: HandoffRecovery['status']) => {
       if (companyId && appSessionId) config.onRecovery?.(companyId, appSessionId, { status, usedMemo, at: new Date().toISOString() })

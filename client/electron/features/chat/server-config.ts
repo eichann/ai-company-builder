@@ -10,7 +10,7 @@ import type { ChatServerConfig } from '../../chat-server'
 import type { ChatHistoryStore } from '../../chat-history-store'
 import type { CompanyFilesApi } from '../../company-files/api'
 import type { RecordsApi } from '../../records/api'
-import { createRecordTools } from '../../records/tools'
+import { createRecordTools, type ExtraRecordTools } from '../../records/tools'
 import { readMailAttachment } from '../../records/mail-attachments'
 import { recordToolProviders } from '../../records/tool-providers'
 import type { JobWriteArea } from '../../../shared/ai-turn-steps/job'
@@ -87,6 +87,10 @@ export interface ChatServerConfigDeps {
   jobReport?: (conversationId: string) => ((result: unknown) => Promise<string | null>) | null
   /** A scheduled job's run held for a consultation: where it may write (its deliverable area); null otherwise. */
   jobWriteArea?: (conversationId: string) => JobWriteArea | null
+  /** A set watch's run held for a consultation (4b-4 PR5): its `proposal_folder` and `job_report`; null otherwise. */
+  jobSetTools?: (conversationId: string) => ExtraRecordTools | null
+  /** The minutes a consultation's `minutes_read` answered (a set watch's run checks its quotes against its meeting's). */
+  jobMinutesRead?: (conversationId: string, recordId: string, text: string, docVersion: string | null) => void
   /** Whether a consultation's record token is bound to an execution run (records/runs.ts). */
   runBound?: (companyId: string, conversationId: string) => boolean
   /** The allowed-roots check (a Drive put reads a local file). */
@@ -204,7 +208,8 @@ export function createChatServerConfig(deps: ChatServerConfigDeps): ChatServerCo
       }
       // A mail draft's PDFs are read here, in main, inside this consultation's company folder only.
       const readAttachment = companyRoot ? (file: string) => readMailAttachment(file, companyRoot) : undefined
-      return access ? createRecordTools(access, signal, { companyId, conversationId, department, companyScreen, largeContext, onRecordChanged, onRecordCreated, onOperationCard, onApprovalCard, onBundleChoice, onMailDraft, jobProposals, onJobProposalCard, toolProviders, readMailAttachment: readAttachment }) : null
+      return access ? createRecordTools(access, signal, { companyId, conversationId, department, companyScreen, largeContext, onRecordChanged, onRecordCreated, onOperationCard, onApprovalCard, onBundleChoice, onMailDraft, jobProposals, onJobProposalCard, toolProviders, readMailAttachment: readAttachment,
+        ...(deps.jobMinutesRead ? { onMinutesText: (recordId: string, text: string, docVersion: string | null) => deps.jobMinutesRead?.(conversationId, recordId, text, docVersion) } : {}) }) : null
     },
     consultationTopic: (companyId, conversationId) => {
       const session = deps.history.get(companyId, conversationId)

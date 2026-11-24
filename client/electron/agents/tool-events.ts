@@ -36,6 +36,7 @@ export function turnToolEvents(
     cwd: request.workingDirectory,
     home: paths.home,
     appDataDirs: paths.appDataDirs,
+    ...(context?.unnamedBelow?.length ? { unnamedBelow: context.unnamedBelow } : {}),
   }, event => {
     // The log must never reach into the agent's path.
     try { sink(event) } catch (error) {

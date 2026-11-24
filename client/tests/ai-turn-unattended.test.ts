@@ -65,6 +65,19 @@ test('a member\'s own consultation keeps its settings, MCP servers and tools', (
   assert.ok(Object.keys(o.mcpServers).length > 1)
 })
 
+test('a set watch\'s run may read its pinned Skill copy outside the working folder, and an ordinary run gets no such folder', () => {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let options: any
+  const factory = ((_model: string, o: unknown) => { options = o; return {} as ReturnType<typeof claudeCode> }) as typeof claudeCode
+  createClaudeConnection(claudeConfig, factory).createChatModel({
+    workingDirectory: '/Users/m/会社',
+    records: { specs: [spec('minutes_read')], execute: text, close: async () => {}, instructions: '' },
+    unattended: { builtinTools: ['Read', 'Glob', 'Grep'], readDirs: ['/Users/m/Library/ACB/job-skill-copies/acme/occ.1'] },
+  })
+  assert.deepEqual(options.additionalDirectories, ['/Users/m/Library/ACB/job-skill-copies/acme/occ.1'])
+  assert.equal(optionsOf(true).additionalDirectories, undefined)
+})
+
 test('an agent that cannot honour an unattended step refuses it instead of running unrestricted', () => {
   const codex = createCodexConnection({ getShellEnv: () => ({}) } as never)
   assert.throws(() => codex.createChatModel({ unattended: { builtinTools: [] } }), /unattended/)
