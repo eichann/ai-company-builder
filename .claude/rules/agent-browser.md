@@ -1191,7 +1191,8 @@ to the approved row and `carried.json`).
   names the mechanics a line was approved with). A line row: name, version, site, map version, `status`
   (`pending` → `approved` → `retired`, **written `pending`**, changed only by a reviewed edit, kept by the script),
   `meaningHash`, `mechanicsHash`, the line; a changed line under the same name, version and map version is refused.
-  Rows the files no longer give are kept.
+  Rows the files no longer give are kept. Every stored row is checked against its own hashes on each run (Codex review:
+  a map or line edited by hand with its hash strings left would otherwise pass as reviewed).
 - **Two hashes** (`shared/core/browser-opened.ts`, §16-5 / Q15): `browserLineMeaning` — the line's values, reads,
   checks and shown fields with, copied from the map, each read thing's id field and its source, parent, fields' kinds and
   must-hold facts (a note's presence, not its words): the key of a member's grant (PR 4); `browserLineMechanics` — the
@@ -1208,7 +1209,10 @@ to the approved row and `carried.json`).
   whenever the line reads the thing. A map with an account-bound thing needs `account: { label }`.
 - **Core additions** (provisional): `id_from: 'address'` (the answer has no id of its own: `readBrowserThing(…, address)`
   puts the address's id in the state, and a reader that gives one is not read); a read of **another** thing of the map by
-  an earlier read's own id is allowed (a list's row of the same object; the same thing again is still refused); the word
+  an earlier read's own id is allowed (a list's row of the same object; the same thing again is still refused) — and,
+  since two reads may then name one object, each read's **origin** (a value, or an earlier read's field that is not its
+  own id, passing through own ids) is tracked: two reads of one origin are never compared (`unchanged_except`,
+  `changed_from`) and a parent is never taken from a read of the same object (independent review M1 / L3); the word
   `changed_from(read, reference, fields)` — ✓ only when every named field differs from the reference's (what a copy must
   change; ✗ names the fields still the same); the outcome's per-read `reads` status and `account`.
 - **The generic card** (`shared/core/browser-card.ts`, `buildBrowserReadCard`): title, `state` (`all_ok` / `ng` /
@@ -1217,7 +1221,11 @@ to the approved row and `carried.json`).
   「書いたあとに確かめます」 (`BROWSER_CARD_MARK_WORDS`) with the ✗ fields' headings, and the must-hold notes. Built only
   from the map's and the line's words and what main read; **unreadable is never ✓**: a value only from a read that
   counted, a check ✓ only when the outcome says so **and** every read it names counted, `all_ok` only with no problem.
-  No AI word, key or page text beyond the read fields' values.
+  No AI word, key or page text beyond the read fields' values: a supplied value (a check's base date) is shown only once
+  the values passed and as a real day, else 「—」 (independent review L4); another object read says so
+  (`wrongObject`).
+- **For the reading path (PR 4 / 5)**: an `id_from: 'address'` thing is "the object asked for" only if main builds the
+  address from the line's wanted id and passes that same string as `address` — never an id the AI supplies.
 - **Lステップ map 1.0.0** (`client/connector-maps/lstep/map.ts`; stage 0 「段0の結果」 R3, R4, R8, R10, R11, key names
   only): `landing` (`GET /api/landings/{id}`, its id from the address; the R11 keys, `action_texts` and a variable's
   `name` not compared), `landing_row` (one entry of `GET /api/landings?group=&page=`, 50 a page: the friend-add and QR
@@ -1242,15 +1250,19 @@ required by the validator, another parent, a reference in another folder, a pare
 it, every bad parent shape; `changed_from` ✓ / ✗ / unreadable and its refusals; another thing by the same id; the opened
 line's refusals; words and the note's wording move the mechanics only, and each meaning part moves the meaning; the card:
 all ✓, a read not whole, a forged ✓ for a read that did not count, values of an uncounted read, ✗ with headings, the
-account moving, the note always, 「なし」), `browser-read-words.test.ts` (§17-2 over `browser-opened.ts` and
+account moving, the note always, 「なし」, another object's headline, a supplied value only once valid; one object reached
+again through another thing or one value read twice never compared, a parent from the same object refused),
+`browser-read-words.test.ts` (§17-2 over `browser-opened.ts` and
 `browser-card.ts` too, with every opened map's and line's names from `opened.json`), `client/tests/browser-lstep-map.test.ts`
 (the map's keys equal stage 0's lists; each thing read from made-up answers of those shapes; a key more or less, unseen
 spellings, an unknown input type, another kind's key → not read; no query but `group` / `page`; the inspection end to
 end: a good copy all ✓, the copy still on the source's action, the source's tags kept, a template / cancel / folder
 changed, the account moving or unread, a row of another shape, a source action not whole; opened.json as written, a new
-line `pending`, a reviewed status kept, a changed map or line under the same version refused; the old path's hash),
+line `pending`, a reviewed status kept, a changed map or line under the same version refused, a stored row edited by
+hand refused; the old path's hash),
 `architecture-boundaries.test.ts` (the map folder and the lines import only what they may; only main.ts imports them).
-Each guard mutation-checked.
+Each guard mutation-checked; kept on purpose: the card's real-day check on a supplied value (the values check already
+refuses a date value that is not one).
 
 ## The operator and the preview (PR 6b-1: built, switched off; nothing in the app calls it)
 

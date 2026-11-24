@@ -18,7 +18,8 @@
  * - Rows the files no longer give are kept (an app already released may carry them).
  * - `format: 1`, `provisional: true` (memo §18: the shape may change until a second site fits it).
  *
- * `client/tests/browser-opened.test.ts` fails when the file is not what this script writes.
+ * `client/tests/browser-lstep-map.test.ts` fails when the file is not what this script writes, or when a stored row
+ * does not match its own hashes.
  */
 import { createHash } from 'node:crypto'
 import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
@@ -95,6 +96,7 @@ const byKey = <T>(key: (x: T) => string) => (a: T, b: T) => (key(a) < key(b) ? -
 /** The file's text for these current rows, keeping every existing row (and each line's status). */
 export function mergeOpened(existingText: string | null, maps: readonly BrowserOpenedMapRow[], lines: readonly BrowserOpenedLineRow[]): string {
   const existing: BrowserOpenedFile = existingText ? JSON.parse(existingText) as BrowserOpenedFile : { format: 1, provisional: true, maps: [], lines: [] }
+  checkStoredRows(existing)
   const mapRows = new Map(existing.maps.map(m => [mapKey(m), m]))
   for (const m of maps) {
     const old = mapRows.get(mapKey(m))
@@ -113,6 +115,32 @@ export function mergeOpened(existingText: string | null, maps: readonly BrowserO
     lines: [...lineRows.values()].sort(byKey(lineKey)),
   }
   return `${JSON.stringify(file, null, 2)}\n`
+}
+
+/**
+ * Every stored row's payload against its stored hashes (Codex review): a map or a line edited in the file by hand while
+ * its hash strings stay would otherwise be kept as reviewed. Each map must pass the core's check and hash to its
+ * `mapHash`; each line must open against its map row and hash to its `meaningHash` / `mechanicsHash`. A row of an older
+ * build is checked too (only `readersHash`, the old folder's fingerprint, cannot be recomputed: it is part of the
+ * mechanics hash, which is recomputed from it).
+ */
+function checkStoredRows(file: BrowserOpenedFile): void {
+  if (file.format !== 1 || file.provisional !== true || !Array.isArray(file.maps) || !Array.isArray(file.lines)) throw new Error('opened.json: not of the shape this script writes')
+  for (const m of file.maps) {
+    const problem = browserMapProblem(m.map)
+    if (problem || m.map.site !== m.site || m.map.version !== m.version || sha256(canonicalJson(m.map)) !== m.mapHash) {
+      throw new Error(`opened.json: the ${m.site} map ${m.version} does not match its hash (edited by hand?)`)
+    }
+  }
+  for (const l of file.lines) {
+    const m = file.maps.find(x => x.site === l.site && x.version === l.mapVersion)
+    if (!m || !(['pending', 'approved', 'retired'] as const).includes(l.status)) throw new Error(`opened.json: the line ${l.name} has no map or no known status`)
+    if (browserOpenedLineProblem(l.line, m.map) || l.line.name !== l.name || l.line.version !== l.version || l.line.read.site !== l.site
+      || sha256(browserLineMeaning(l.line, m.map)) !== l.meaningHash
+      || sha256(browserLineMechanics(l.line, m.map, { mapHash: m.mapHash, readersHash: m.readersHash })) !== l.mechanicsHash) {
+      throw new Error(`opened.json: the line ${l.name} ${l.version} on map ${l.mapVersion} does not match its hashes (edited by hand?)`)
+    }
+  }
 }
 
 export async function openedFileText(existingText: string | null): Promise<string> {

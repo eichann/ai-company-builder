@@ -229,6 +229,21 @@ test('a new line is written pending; a reviewed status is kept; a changed map un
   assert.throws(() => mergeOpened(JSON.stringify(fresh), maps, [{ ...lines[0], meaningHash: `sha256:${'1'.repeat(64)}` }]), /raise the line's version/)
 })
 
+test('a stored row edited by hand with its hashes left as they were is refused, not kept as reviewed', async () => {
+  const maps = await currentMaps()
+  const lines = await currentLines(maps)
+  const fresh = JSON.parse(mergeOpened(null, maps, lines)) as BrowserOpenedFile
+  const lineEdited = JSON.parse(JSON.stringify(fresh)) as BrowserOpenedFile
+  lineEdited.lines[0].line.read.checks = lineEdited.lines[0].line.read.checks.slice(0, 1)
+  assert.throws(() => mergeOpened(JSON.stringify(lineEdited), maps, lines), /does not match its hashes/)
+  const mapEdited = JSON.parse(JSON.stringify(fresh)) as BrowserOpenedFile
+  delete (mapEdited.maps[0].map.things.action_set as { must_hold?: unknown }).must_hold
+  assert.throws(() => mergeOpened(JSON.stringify(mapEdited), maps, lines), /does not match its hash/)
+  const statusOdd = JSON.parse(JSON.stringify(fresh)) as { lines: { status: string }[] }
+  statusOdd.lines[0].status = 'open'
+  assert.throws(() => mergeOpened(JSON.stringify(statusOdd), maps, lines), /no known status/)
+})
+
 test('the old path is untouched: the connector folder is still lstep@0.6.3\'s approved checker', () => {
   const carried = JSON.parse(readFileSync(CARRIED_FILE, 'utf8')) as { combinations: { version: string; checkerHash: string }[] }
   const approved = JSON.parse(readFileSync(APPROVED_FILE, 'utf8')) as { combinations: { version: string; checkerHash: string; status: string }[] }

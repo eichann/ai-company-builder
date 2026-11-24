@@ -17,7 +17,7 @@
  *
  * The core knows no site, thing or field. The shape is **provisional** until a second site fits it (§18).
  */
-import { BROWSER_SHAPE_WORDS, type BrowserMap, type BrowserMapField, type BrowserMapThing, type BrowserThingResult } from './browser-map'
+import { BROWSER_SHAPE_WORDS, isBrowserDate, type BrowserMap, type BrowserMapField, type BrowserMapThing, type BrowserThingResult } from './browser-map'
 import type { BrowserCheck, BrowserCheckResult, BrowserReadFacts, BrowserReadLineOutcome } from './browser-read-line'
 import type { BrowserOpenedLine } from './browser-opened'
 
@@ -71,6 +71,7 @@ export const BROWSER_CARD_WORDS = {
   yes: 'はい',
   no: 'いいえ',
   accountCheck: 'すべて同じアカウントで読みました',
+  wrongObject: '頼んだものと違うものを読んだので、確かめられませんでした。',
 } as const
 
 /** A field's value as the card writes it (plain; a list joined with 「、」; empty → 「なし」). */
@@ -126,7 +127,7 @@ export function buildBrowserReadCard(line: BrowserOpenedLine, map: BrowserMap, f
         : result.status
     const t = thingOf(c.read)
     const fields = mark === 'ng' ? [...(result?.differs ?? result?.same ?? [])].map(f => fieldLabel(t, f)) : []
-    return { label: checkLabel(c, line, map, facts), mark, fields }
+    return { label: checkLabel(c, line, map, facts, outcome), mark, fields }
   })
 
   const readThings = [...new Set(line.read.reads.map(r => r.thing))]
@@ -150,6 +151,7 @@ export function buildBrowserReadCard(line: BrowserOpenedLine, map: BrowserMap, f
         : outcome.problem === 'account-unknown' ? BROWSER_CARD_WORDS.accountUnknown
           : outcome.problem === 'account-mismatch' ? BROWSER_CARD_WORDS.accountMismatch
             : shapeChanged ? BROWSER_SHAPE_WORDS.member
+              : outcome.problem === 'wrong-object' || outcome.problem === 'wrong-parent' ? BROWSER_CARD_WORDS.wrongObject
               : state === 'ng' ? BROWSER_CARD_WORDS.ng : BROWSER_CARD_WORDS.notRead
 
   return {
@@ -164,13 +166,14 @@ export function buildBrowserReadCard(line: BrowserOpenedLine, map: BrowserMap, f
 }
 
 /** A check's row text, from the map's and the line's words and the supplied value only. */
-function checkLabel(c: BrowserCheck, line: BrowserOpenedLine, map: BrowserMap, facts: BrowserReadFacts): string {
+function checkLabel(c: BrowserCheck, line: BrowserOpenedLine, map: BrowserMap, facts: BrowserReadFacts, outcome: BrowserReadLineOutcome): string {
   const label = (read: string): string => quoted(line.readLabels[read] ?? read)
   const thing = map.things[line.read.reads.find(r => r.name === c.read)?.thing ?? '']
   const field = (f: string): string => thing?.fields[f]?.label ?? f
+  // A supplied value is shown only once the values passed and as a real day (independent review L4): never raw text.
   const value = (name: string): string => {
-    const v = Object.prototype.hasOwnProperty.call(facts.values ?? {}, name) ? facts.values[name]?.value : undefined
-    return typeof v === 'string' ? v : '—'
+    const v = outcome.values === null && Object.prototype.hasOwnProperty.call(facts.values ?? {}, name) ? facts.values[name]?.value : undefined
+    return isBrowserDate(v) ? v : '—'
   }
   switch (c.word) {
     case 'unchanged_except':

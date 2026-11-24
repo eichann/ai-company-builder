@@ -146,6 +146,10 @@ export function browserReadLineProblem(raw: unknown, map: BrowserMap): string | 
   const used = new Set<string>()
   if (!Array.isArray(raw.reads) || raw.reads.length === 0 || raw.reads.length > BROWSER_READ_LINE_LIMITS.reads) return '読むものの数が正しくありません'
   const reads: Record<string, BrowserMapThing> = {}
+  // Where each read's object is named (independent review M1): a value, or an earlier read's field that is not its own
+  // id — passing through another thing's own id (a list's row of the same object) keeps the same place. Two reads from
+  // one place are one object: never compared with each other, never one's parent taken from the other.
+  const origins: Record<string, string> = {}
   for (const r of raw.reads) {
     if (!isMap(r) || !(exactKeys(r, ['name', 'thing', 'id']) || exactKeys(r, ['name', 'thing', 'id', 'parent']))) return '読むものの形が正しくありません'
     if (!isName(r.name) || own(reads, r.name)) return '読むものの名前が正しくありません'
@@ -155,6 +159,7 @@ export function browserReadLineProblem(raw: unknown, map: BrowserMap): string | 
       if (typeof id.value !== 'string' || !own(values, id.value)) return `読むもの「${r.name}」の番号の値がありません`
       if (values[id.value].role !== 'target') return `読むもの「${r.name}」の番号は、対象の値でなければなりません`
       used.add(id.value)
+      origins[r.name as string] = `value:${id.value}`
     } else if (isMap(id) && exactKeys(id, ['read', 'field'])) {
       if (typeof id.read !== 'string' || !own(reads, id.read)) return `読むもの「${r.name}」の番号は、前に読んだものから取ります`
       const from = reads[id.read]
@@ -162,6 +167,7 @@ export function browserReadLineProblem(raw: unknown, map: BrowserMap): string | 
       // Its own id would read the same object again: a check against it would compare a thing with itself (review L2).
       // Another thing of the map by the same id (a list's row of the object, PR 3) is another reading, not the same one.
       if (id.field === from.id && from === map.things[r.thing]) return `読むもの「${r.name}」は、前に読んだものと同じものです`
+      origins[r.name as string] = id.field === from.id ? origins[id.read] : `field:${origins[id.read]}.${id.field}`
     } else return `読むもの「${r.name}」の番号の形が正しくありません`
     const thing = map.things[r.thing]
     if (own(r, 'parent')) {
@@ -174,6 +180,8 @@ export function browserReadLineProblem(raw: unknown, map: BrowserMap): string | 
         if (typeof p.read !== 'string' || !own(reads, p.read)) return `読むもの「${r.name}」の親は、前に読んだものから取ります`
         const from = reads[p.read]
         if (typeof p.field !== 'string' || !own(from.fields, p.field) || from.fields[p.field].kind !== 'id') return `読むもの「${r.name}」の親の欄が正しくありません`
+        // The object's own parent, read from itself, would always agree (independent review L3).
+        if (origins[p.read] === origins[r.name as string]) return `読むもの「${r.name}」の親を、同じものから取ることはできません`
       } else return `読むもの「${r.name}」の親の形が正しくありません`
     } else if (thing.must_hold?.parent) return `読むもの「${r.name}」：このものは親を必ず確かめます（地図の決まり）`
     reads[r.name] = thing
@@ -193,7 +201,7 @@ export function browserReadLineProblem(raw: unknown, map: BrowserMap): string | 
     switch (c.word) {
       case 'unchanged_except': {
         const ref = readThing(c.reference)
-        if (!ref || c.reference === c.read || ref !== t) return `${at}：比べる相手は、同じ種類の別に読んだものです`
+        if (!ref || c.reference === c.read || ref !== t || origins[c.reference as string] === origins[c.read as string]) return `${at}：比べる相手は、同じ種類の別に読んだものです`
         if (!Array.isArray(c.except) || c.except.length > BROWSER_READ_LINE_LIMITS.except || new Set(c.except).size !== c.except.length) return `${at}：除く欄が正しくありません`
         if (!c.except.every(f => typeof f === 'string' && own(t.fields, f) && f !== t.id)) return `${at}：除く欄が地図にありません`
         break
@@ -215,7 +223,7 @@ export function browserReadLineProblem(raw: unknown, map: BrowserMap): string | 
         break
       case 'changed_from': {
         const ref = readThing(c.reference)
-        if (!ref || c.reference === c.read || ref !== t) return `${at}：比べる相手は、同じ種類の別に読んだものです`
+        if (!ref || c.reference === c.read || ref !== t || origins[c.reference as string] === origins[c.read as string]) return `${at}：比べる相手は、同じ種類の別に読んだものです`
         if (!Array.isArray(c.fields) || c.fields.length === 0 || c.fields.length > BROWSER_READ_LINE_LIMITS.except || new Set(c.fields).size !== c.fields.length) return `${at}：欄が正しくありません`
         if (!c.fields.every(f => typeof f === 'string' && own(t.fields, f) && f !== t.id)) return `${at}：欄が地図にありません`
         break
