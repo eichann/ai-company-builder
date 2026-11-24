@@ -46,7 +46,7 @@ import type { Member } from './access'
 import { endPcRun, isEventPcOccurrence, pcRunDeadlineMs, type JobOccurrences } from './job-occurrences'
 import { eventShown, shownSlot } from './job-events'
 import { madeBefore } from './job-retry'
-import { isSetWatchOccurrence, setWatchTaskInput } from './job-set-watch'
+import { isSetWatchOccurrence, setWatchMakesTask, setWatchTaskInput } from './job-set-watch'
 import type { JobService } from './jobs'
 import { notInStep } from './not-in-step'
 import { ok, refuse, type Outcome, type Refusal } from './outcome'
@@ -344,12 +344,13 @@ export function createJobRuns(deps: JobRunDeps) {
 
   /**
    * The one やること a done finish would make (checked by `beforeFinish` before anything is written), or null: `nothing`, a
-   * result that does not parse (the finish answers it), a set watch's 見送る (no やること: a notice instead).
+   * result that does not parse (the finish answers it), a set watch's 見送る without update proposals (no やること: a notice
+   * instead, `setWatchMakesTask`).
    */
   function finishTask(f: Found, runId: string, jobResult: unknown): ServiceCreateInput | null {
     if (f.setWatch) {
       const report = parseJobSetReport(jobResult, f.definition.decision)
-      return report === null || report.decision === 'decline' ? null : setWatchTaskInput(f.handle, f.definition, f.occ, runId)
+      return report === null || !setWatchMakesTask(report) ? null : setWatchTaskInput(f.handle, f.definition, f.occ, runId, report)
     }
     const result = parseJobRunResult(jobResult)
     return result === null || result === 'nothing' ? null : taskInput(f, runId, result)
@@ -360,7 +361,8 @@ export function createJobRuns(deps: JobRunDeps) {
    * against the pinned definition's reasons (`parseJobSetReport`: else 400 `JOB_SET_REPORT_BAD`, the whole finish rolled back,
    * the run still running — a reason the Skill did not declare is never stored); its conditions again (a race: rolled back);
    * the judgement kept on the occurrence (`ai_job_set_reports`); then 進める / 人に聞く / 判断できなかった → the one やること with the
-   * meeting's date only (`setWatchTaskInput`, the run's operation key `create_task`), 見送る → no やること and the notice
+   * meeting's date only (`setWatchTaskInput`, the run's operation key `create_task`) — and so does 見送る with update proposals
+   * (`updates` ≥ 1, PR3b: no notice, the やること's description says it) —, 見送る without any → no やること and the notice
    * `job_set_declined` to the responsible person (its words built when read, only while they read the meeting); the
    * occurrence `done`. Never `nothing`: whether it was needed is the server's to say (`JOB_EVENT_NOTHING_REFUSED`).
    */
@@ -372,7 +374,7 @@ export function createJobRuns(deps: JobRunDeps) {
     if (code) return EVENT_ENDED(code)
     const at = clock.now()
     f.handle.jobs.insertSetReport(f.occ.id, report, at)
-    if (report.decision === 'decline') {
+    if (!setWatchMakesTask(report)) {
       if (!f.handle.jobs.moveOccurrence(f.occ.id, ['running'], 'done', { outcomeCode: null }, at)) return GONE()
       const written = f.handle.notifications.insert([{
         id: deps.ids.newId(), userId: f.definition.actingUser, kind: 'job_set_declined' as const, recordId: '', recordVersion: 0, action: '',
@@ -390,7 +392,7 @@ export function createJobRuns(deps: JobRunDeps) {
         generation: 1, refKind: null, refId: null, status: null, reconciledBy: null, createdAt: at, updatedAt: at,
       })
     }
-    const made = deps.writer.create(f.handle.companyId, setWatchTaskInput(f.handle, f.definition, f.occ, runId))
+    const made = deps.writer.create(f.handle.companyId, setWatchTaskInput(f.handle, f.definition, f.occ, runId, report))
     if (!made.ok) return refuse('conflict', 'やることを作れませんでした。', { code: made.reason === 'records-off' ? 'RECORDS_DISABLED' : 'JOB_TASK_NOT_CREATED' })
     runs.updateOperation(runId, key, ['in_progress'], { state: 'done', refKind: 'record', refId: made.record.id }, at)
     if (!f.handle.jobs.moveOccurrence(f.occ.id, ['running'], 'done', { outcomeCode: null }, at)) return GONE()

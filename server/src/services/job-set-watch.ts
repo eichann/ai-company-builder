@@ -22,7 +22,7 @@
 import { MINUTES_ACTOR, MINUTES_REVIEW_KIND, TASK_KIND_FIELD } from '../../shared/core/core-types'
 import {
   JOB_ACTOR, JOB_SET_CHECK_KIND, JOB_SET_WATCH_SCHEMA, isSetTrigger, jobPinnedDepartmentSkills, jobSetWatchOpened, occurrenceTaskId, storedJobDefinition,
-  type JobDefinition, type JobOutcomeCode, type JobSetMarkOutcome, type JobSetTrigger,
+  type JobDefinition, type JobOutcomeCode, type JobSetMarkOutcome, type JobSetReport, type JobSetTrigger,
 } from '../../shared/core/jobs'
 import { replayRecordState, type LedgerEntry, type LedgerValue } from '../../shared/core/record-ledger'
 import type { CompanyData } from '../ports/company-data'
@@ -191,28 +191,43 @@ export function setWatchCondition(handle: CompanyData, definition: JobDefinition
 }
 
 /**
+ * Whether a set watch's judgement makes the やること (4b-4 PR3 / PR3b, owner memo 「4b-4 挟む部分」 §G-1) — the one place this is
+ * decided: every judgement does except a 見送る that left no update proposal (`updates` 0: only the notice `job_set_declined`).
+ * A 見送る with update proposals makes it too (its description says so) and no notice.
+ */
+export function setWatchMakesTask(report: JobSetReport): boolean {
+  return !(report.decision === 'decline' && report.updates === 0)
+}
+
+/**
  * The やること a set watch's finish makes (4b-4 PR3, owner memo §5-1 / 付録 B 「作るやること」): a service write — never the AI's
  * create, so the meeting's 出どころの枠 (a quote) does not apply —, its id from the occurrence (one by construction), **owner-only**
  * for the responsible person, linked to the meeting it was made for (`links.meeting`: the meeting's name reaches only someone
  * who reads the meeting, through the link). **Its name is the meeting's date only** (「11月23日の会議のたたき台を確かめる」):
  * the やること outlives the person's access to the meeting, so neither the meeting's name nor a customer's may be in it (I6,
- * T15). The judgement (進める / 人に聞く / 判断できなかった), its reason and what is not confirmed are **not** on it (T17): they are the
- * occurrence's (`ai_job_set_reports`, read only through its visibility) and the PC's. Quiet (D9): the やること in 「あなたの番」 is
- * the notice.
+ * T15). The judgement's reason, confidence and what is not confirmed are **not** on it (T17): they are the occurrence's
+ * (`ai_job_set_reports`, read only through its visibility) and the PC's. **PR3b**: with update proposals (`updates` ≥ 1) its
+ * description says how many, in fixed words (「更新案が N 件あります。」), and a 見送る's says no たたき台 was made — its name then
+ * 「…の会議の更新案を確かめる」 (the description stands for the 見送る notice, which is not written). Quiet (D9): the やること in
+ * 「あなたの番」 is the notice.
  */
 export function setWatchTaskInput(handle: CompanyData, definition: JobDefinition,
-  occ: { id: string; dueAt: string; timeZone: string; eventMeetingId?: string | null }, runId: string): ServiceCreateInput {
+  occ: { id: string; dueAt: string; timeZone: string; eventMeetingId?: string | null }, runId: string, report: JobSetReport): ServiceCreateInput {
   const meetingId = occ.eventMeetingId ?? ''
   const at = fieldsNow(handle, meetingId).fields.meeting_at
+  const declined = report.decision === 'decline'
+  const summary = report.updates > 0 ? `${declined ? 'AI はたたき台を作りませんでした。' : ''}更新案が ${report.updates} 件あります。` : null
   return {
-    type: 'task', id: occurrenceTaskId(occ.id), title: setWatchTaskTitle(typeof at === 'string' ? at : null, occ.dueAt, occ.timeZone),
+    type: 'task', id: occurrenceTaskId(occ.id),
+    title: setWatchTaskTitle(typeof at === 'string' ? at : null, occ.dueAt, occ.timeZone, declined ? '更新案' : 'たたき台'),
+    ...(summary ? { summary } : {}),
     personalOwner: definition.actingUser, fields: { assignee: definition.actingUser }, links: { meeting: [meetingId] },
     actor: { ...JOB_ACTOR, runId }, note: '定期の仕事から作りました', quiet: true,
   }
 }
 
-/** 「<月>月<日>日の会議のたたき台を確かめる」 from the meeting's time (else the event's), in company time: a date and fixed words only. */
-export function setWatchTaskTitle(meetingAt: string | null, fallback: string, timeZone: string): string {
+/** 「<月>月<日>日の会議の<what>を確かめる」 from the meeting's time (else the event's), in company time: a date and fixed words only. */
+export function setWatchTaskTitle(meetingAt: string | null, fallback: string, timeZone: string, what: 'たたき台' | '更新案' = 'たたき台'): string {
   const ms = meetingAt !== null && !Number.isNaN(Date.parse(meetingAt)) ? Date.parse(meetingAt) : Date.parse(fallback)
   let month = ''
   let day = ''
@@ -222,7 +237,7 @@ export function setWatchTaskTitle(meetingAt: string | null, fallback: string, ti
       if (p.type === 'day') day = p.value
     }
   } catch { /* an unknown zone: the words without a date */ }
-  return month && day ? `${month}月${day}日の会議のたたき台を確かめる` : '会議のたたき台を確かめる'
+  return month && day ? `${month}月${day}日の会議の${what}を確かめる` : `会議の${what}を確かめる`
 }
 
 /**

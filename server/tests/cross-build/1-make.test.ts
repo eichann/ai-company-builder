@@ -242,7 +242,12 @@ describe.skipIf(!CROSS_DB)('cross-build 1/3: a database as 4b-1 leaves it', () =
     tick()
     const o5 = occurrenceOf(s1, 'due')
     expect(db.prepare('SELECT outcome FROM ai_job_meeting_reviews WHERE company_id = ? AND record_id = ?').get(CO, review)).toEqual({ outcome: 'made' })
+    // Alice's app (PR5) claims it here: its run is held when production goes back to the floor, which must refuse its report —
+    // also one with an update count (4b-4 PR3b) — and make nothing of it.
+    const c5 = await as('xb-alice', 'POST', '/job-run-claims', { occurrenceId: o5, deviceId: 'device-xb-5', conversationId: 'c-xb-5', checks: ['matched_record'], kinds: ['event'] })
+    expect(c5.status).toBe(201)
+    const r5 = c5.body.data.run
 
-    saveDb(db, { CO, j4: { job: j4, stop: j4Stop }, jobs: { j1: j1.job, j2: j2.job, j3: j3.job, s1 }, occ: { o1, o3, o4, o5 }, runs: { r1: r1.id, r4: r4.id }, proposals, before: crossBuildSnapshot(db, CO) })
+    saveDb(db, { CO, j4: { job: j4, stop: j4Stop }, jobs: { j1: j1.job, j2: j2.job, j3: j3.job, s1 }, occ: { o1, o3, o4, o5 }, runs: { r1: r1.id, r4: r4.id, r5: { id: r5.id, generation: r5.generation } }, proposals, before: crossBuildSnapshot(db, CO) })
   })
 })

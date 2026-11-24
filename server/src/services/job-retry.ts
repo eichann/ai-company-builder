@@ -269,7 +269,7 @@ export function createJobRetry(deps: JobRetryDeps) {
     if (!ownSetOccurrence(handle, member, occurrenceId)) return {}
     const report = handle.jobs.setReport(occurrenceId)
     if (!report) return {}
-    return { report: { decision: report.decision, reason: report.reason, confidence: report.confidence, unconfirmed: report.unconfirmed, feedback: handle.jobs.setFeedback(occurrenceId) } }
+    return { report: { decision: report.decision, reason: report.reason, confidence: report.confidence, unconfirmed: report.unconfirmed, updates: report.updates, feedback: handle.jobs.setFeedback(occurrenceId) } }
   }
 
   return {

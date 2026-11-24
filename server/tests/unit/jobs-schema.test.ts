@@ -12,6 +12,7 @@ import { readFileSync } from 'fs'
 import { describe, expect, it } from 'vitest'
 import Database from 'better-sqlite3'
 import { initDatabase } from '../../src/db'
+import { sqliteCompanyData } from '../../src/adapters/sqlite/company-data'
 
 const BEFORE = readFileSync(new URL('../fixtures/app-schema-before-jobs.sql', import.meta.url), 'utf8')
 const TS = '2026-11-11T00:00:00.000Z'
@@ -140,5 +141,45 @@ describe('what the tables hold', () => {
     expect(() => conn.exec(`UPDATE ai_job_versions SET approved_by = 'v', approved_at = '${TS}' ${v}`)).toThrow(/approved once/)
     conn.exec(`UPDATE ai_job_versions SET accepted_by = 'u', accepted_at = '${TS}' ${v}`)
     expect(() => conn.exec(`UPDATE ai_job_versions SET accepted_by = 'v' ${v}`)).toThrow(/accepted once/)
+  })
+})
+
+describe('a set watch’s report count (4b-4 PR3b, jobs.md "The set watch (schema 5)")', () => {
+  // `ai_job_set_reports` as PR3 made it, before `updates`.
+  const PR3_REPORTS = `CREATE TABLE ai_job_set_reports (
+      company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+      occurrence_id TEXT NOT NULL,
+      decision TEXT NOT NULL CHECK (decision IN ('proceed', 'decline', 'ask', 'gate_failed')),
+      reason TEXT NOT NULL CHECK (length(reason) BETWEEN 1 AND 40),
+      confidence REAL CHECK (confidence IS NULL OR (confidence >= 0 AND confidence <= 1)),
+      unconfirmed TEXT NOT NULL DEFAULT '[]',
+      at TEXT NOT NULL,
+      PRIMARY KEY (company_id, occurrence_id)
+    )`
+  const occ = (c: string) => `occ.${c.repeat(32)}`
+  const company = (conn: Database.Database) =>
+    conn.prepare('INSERT INTO companies (id, name, slug, owner_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)').run('co-a', 'A', 'a', 'u', TS, TS)
+  const insert = (conn: Database.Database, id: string, decision: string, updates: number) => conn.prepare(`INSERT INTO ai_job_set_reports
+    (company_id, occurrence_id, decision, reason, confidence, unconfirmed, updates, at) VALUES ('co-a', ?, ?, 'requested', NULL, '[]', ?, ?)`).run(id, decision, updates, TS)
+
+  it('a judgement kept before the count reads as 0 after the upgrade', () => {
+    const conn = frozen()
+    conn.exec(PR3_REPORTS)
+    company(conn)
+    conn.prepare(`INSERT INTO ai_job_set_reports (company_id, occurrence_id, decision, reason, confidence, unconfirmed, at)
+      VALUES ('co-a', ?, 'decline', 'introduction', 0.8, '[]', ?)`).run(occ('a'), TS)
+    initDatabase(conn)
+    expect(sqliteCompanyData(conn).forCompany('co-a').jobs.setReport(occ('a'))).toMatchObject({ decision: 'decline', updates: 0 })
+  })
+
+  it('the database keeps it a count of 0–20, never beside gate_failed', () => {
+    const conn = frozen()
+    initDatabase(conn)
+    company(conn)
+    insert(conn, occ('a'), 'decline', 20)
+    expect(() => insert(conn, occ('b'), 'decline', 21)).toThrow(/CHECK/)
+    expect(() => insert(conn, occ('c'), 'proceed', -1)).toThrow(/CHECK/)
+    expect(() => insert(conn, occ('d'), 'gate_failed', 1)).toThrow(/CHECK/)
+    insert(conn, occ('e'), 'gate_failed', 0)
   })
 })

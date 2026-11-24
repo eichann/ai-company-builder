@@ -1583,9 +1583,10 @@ app, PR7 the admin console.
   I6 / I8, T12 / T15 / T17; `job-runs.ts` `finishSet`, `job-set-watch.ts` `setWatchTaskInput` / `ownSetOccurrence` /
   `setDeclinedNotice`, `job-retry.ts` `feedback`):
   - **The report** (`POST /ai-runs/:runId/finish { outcome: 'done', jobResult }`, `parseJobSetReport`): `{ decision: proceed |
-    decline | ask, reason, confidence, unconfirmed? }` — `reason` one of the **pinned** definition's `decision.reasons` codes, a
+    decline | ask, reason, confidence, unconfirmed?, updates? }` — `reason` one of the **pinned** definition's `decision.reasons` codes, a
     number 0–1 stored in hundredths, `unconfirmed` 0–5 distinct words of `JOB_SET_UNCONFIRMED` (人数・予算・企業規模・助成金・月額;
-    fixed words: a free code could carry a name) and none with `decline` — or exactly `{ decision: 'gate_failed' }` (the app's
+    fixed words: a free code could carry a name) and none with `decline`, `updates` (PR3b) an integer 0–`JOB_SET_UPDATES_MAX` (20;
+    absent = 0) — or exactly `{ decision: 'gate_failed' }` (no count either; the app's
     gate could not judge; the server stores ACB's own `GATE_UNAVAILABLE`, never one of the Skill's). **Any other key** —
     `evidence` (the quotes stay on the PC: the app checks them, PR5), a title, a summary — and an unknown reason → 400
     `JOB_SET_REPORT_BAD`, the whole finish rolled back, the run still running; `nothing` → 400 `JOB_EVENT_NOTHING_REFUSED`. The
@@ -1604,6 +1605,22 @@ app, PR7 the admin console.
     occurrence's pinned responsible person **and** it is theirs to see now (`setOccurrenceShown`: the record and the meeting, one
     of its people); else the notice is not there at all (no row, no unread count). The reason's words are the pinned
     definition's label.
+  - **Update proposals** (4b-4 PR3b, owner memo 「4b-4 挟む部分」 §G-1 / §F): the run may leave update proposals (更新案: HubSpot,
+    a coefficient sheet…) as files in the responsible person's own `.personal`; the report says only **how many** (`updates`,
+    a count — never what they are about). Whether a judgement makes the やること is decided in one place, `setWatchMakesTask`:
+    every one does **except a 見送る with `updates` 0** (the notice above, as before). **見送る with `updates` ≥ 1 makes the same one
+    やること and no 見送る notice**: named 「11月23日の会議の更新案を確かめる」 (the date only, T15), its description in fixed words
+    「AI はたたき台を作りませんでした。更新案が N 件あります。」 (the description stands for the notice); 進める / 人に聞く with a count
+    keep the たたき台 name and say 「更新案が N 件あります。」. **Decision for the owner (safe side of T17)**: such a やること tells, by its
+    name and description, that the judgement was 見送る — the memo asks for it; the reason, the confidence and the unconfirmed
+    words stay off it. Still the responsible person's alone (owner-only, §F #9), one per occurrence (its id), the writer's check
+    before the finish (records off → `needs_person` `RECORDS_OFF`: the conditions' C7 already ends it, so the pre-check's own
+    `setWatchMakesTask` in `finishTask` is defence — removing it alone fails no test). Stored as `ai_job_set_reports.updates` (additive in
+    `migrateJobSetWatch`, `INTEGER NOT NULL DEFAULT 0`, CHECK 0–20 and 0 with `gate_failed`): a row from before reads 0. On the
+    responsible person's own view `report.updates`. **Compatibility**: the build before (PR3) refuses the key (`JOB_SET_REPORT_BAD`,
+    the run stays running and goes to a person — the app sends it from PR5 on, `job-report-tool.ts`); the rollback floor freezes
+    the occurrence, so a report with or without a count is a missing run's 404 there, nothing made
+    (`server/tests/cross-build/` 2-floor, on a run step 1 claimed).
   - **Corrections** (§5-2): `POST /me/job-occurrences/:occurrenceId/feedback { kind }` — `made_anyway` (［作ってもらう］ after
     見送る), `too_early` (［まだ早かった］ after 進める / 人に聞く), `went_ahead` (仕上げた after 人に聞く); `jobSetFeedbackFits`, else 409
     `JOB_FEEDBACK_NOT_FOR_DECISION`; no judgement yet → 409 `JOB_FEEDBACK_NO_REPORT`; another kind → 400 `BAD_FEEDBACK`. **Only
@@ -1617,7 +1634,7 @@ app, PR7 the admin console.
     `GET /me/job-occurrences` (`report`, only while shown — `reportOf`'s own check is defence: `mine` already leaves out an
     occurrence not shown, so removing it alone fails no test); never on an owner / admin's occurrence view.
   - **What the AI can still choose** (independent review of PR3): the fixed kinds carry about 18 bits a run (decision, reason,
-    confidence in hundredths, unconfirmed words) to the responsible person's own view — no free text. A `failed` finish's
+    confidence in hundredths, unconfirmed words; PR3b adds about 4 more, the count) to the responsible person's own view — no free text. A `failed` finish's
     `failure.code` (`[A-Z0-9_]{1,60}`, older than this PR) is stored on the run and hidden from others (`hides`); PR5 should
     send only fixed codes there.
 - **Telling the record by its kind** (§2-2): `task_kind` is written by the minutes service only — a person's or an AI's
@@ -1653,6 +1670,15 @@ app, PR7 the admin console.
   "見送る" (no やること, words built when read, not shown nor counted once she is off the meeting, never to anyone else),
   "corrections of a judgement" (who, once per kind with no who, fits the judgement, her own view's `report` gone once off the
   meeting), and the T9 test (dropped, not run late). Mutation check: see the PR.
+- Tests (PR3b): the same file, "updates is a small count only" (a string, a fraction, a negative, 21, null, a list refused; 20
+  kept) and "gate_failed carries nothing else" (the parser); "update proposals (PR3b…)" (見送る with a count: the one owner-only
+  やること, its date-only 更新案 name and fixed description, no 見送る notice, nothing of the reason — also off the meeting; 見送る
+  with 0: the notice only; 進める with a count: the description and `report.updates`; records off; one やること per occurrence);
+  `server/tests/unit/jobs-schema.test.ts` "a set watch’s report count" (a row from before reads 0; the CHECK); and
+  `server/tests/cross-build/` (2-floor: the floor answers a report with a count 404 on a run step 1 claimed, nothing made).
+  Mutation check: 17 mutations (the parser's key, integer, bounds and `gate_failed`; `setWatchMakesTask` both ways and in
+  `finishSet`; the description, the name, owner-only; the stored and viewed count; the CHECK, its `gate_failed` half, the
+  default) — each fails a test except `finishTask`'s pre-check (defence, above).
 
 ## Member proposals (「AIへの相談」から定期の仕事, PR A: the server; owner memo 2026-11-22 第1〜5版, decisions Q1–Q4)
 
