@@ -365,9 +365,12 @@ below, is its caller). Code: `routes/holding-review.ts` → `services/holding-re
   review API's answer (the folder from `folderPath`, displayed with the department names only) —
   nothing is looked up elsewhere. Default ticks: `takeable` `changed` / `deleted` entries; backups not
   ticked, 本人のメモ and names only never tickable; the body carries only `takeable` ticked indexes and
-  `whenChanged` always (`alongside` unless 「上書きする」 was chosen, offered only when a ticked content
-  meets a later change); a folder gone → no 「フォルダに入れる」, download and 捨てる only. 捨てる opens
-  the destructive `ConfirmDialog` (「元に戻せません」, the count). Downloads go through `fetch` and are
+  `whenChanged` always (`alongside` unless 「上書きする」 was chosen, offered only while a ticked
+  non-backup content meets a later change — a hidden choice is never sent: Codex P2); a folder gone → no
+  「フォルダに入れる」, download and 捨てる only. 捨てる opens the destructive `ConfirmDialog`
+  (「元に戻せません」, the count), and so does a take-in that would throw away held contents left unticked
+  (`discardedByTake`: the take-in decides the whole item; independent review). The tab's count is the
+  list the page shows (one answer, read again after a decision). Downloads go through `fetch` and are
   saved as files, never shown in the page. Refusals in the console's own words
   (`describeHoldingError`): `ALREADY_DECIDED`, `EXPIRED`, 404, 410 → toast, close, list read again;
   `PATH_TAKEN` / `NOT_TAKEABLE` → those entries marked and unticked; `TAKE_REFUSED` → the server's

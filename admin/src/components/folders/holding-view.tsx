@@ -47,7 +47,7 @@ export function HoldingView() {
           </Button>
         }
       />
-      <FolderTabs current="holding" />
+      <FolderTabs current="holding" holdingCount={list.data?.items.length ?? 0} />
       <p className="-mt-2 mb-4 text-body text-text-muted">{HOLDING_HELP}</p>
 
       {list.loading ? (

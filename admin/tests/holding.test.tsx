@@ -95,6 +95,13 @@ async function openItem() {
   return dialog
 }
 
+/** 「フォルダに入れる」, through the confirm the page asks when unticked contents would be thrown away. */
+async function takeIn(dialog: HTMLElement, name: RegExp) {
+  await userEvent.click(within(dialog).getByRole('button', { name }))
+  const confirm = await screen.findByRole('alertdialog')
+  await userEvent.click(within(confirm).getByRole('button', { name: '入れて、残りを捨てる' }))
+}
+
 const box = (dialog: HTMLElement, path: string, group: string) =>
   within(within(dialog).getByRole('region', { name: group })).queryByRole('checkbox', { name: `${path} をフォルダに入れる` })
 
@@ -153,7 +160,7 @@ describe('預かり: taking in', () => {
     await userEvent.click(box(dialog, '古い下書き.md', 'まだ届けていなかった変更')!)
     const group = within(dialog).getByRole('radiogroup', { name: 'その後ほかの人が変えたファイル' })
     expect(within(group).getByRole('radio', { name: /田中 太郎さんの版」として並べて置く/ })).toHaveAttribute('aria-checked', 'true')
-    await userEvent.click(within(dialog).getByRole('button', { name: /フォルダに入れる（2件）/ }))
+    await takeIn(dialog, /フォルダに入れる（2件）/)
     await waitFor(() => expect(posts(calls, '/take')).toHaveLength(1))
     expect(posts(calls, '/take')[0].body).toEqual({ files: [0, 1], whenChanged: 'alongside' })
   })
@@ -162,17 +169,31 @@ describe('預かり: taking in', () => {
     const { calls } = mockApi(routes({ [TAKE]: { body: ok({ state: 'taken', commit: 'abc', placed: [], skipped: [] }) } }))
     const dialog = await openItem()
     await userEvent.click(within(dialog).getByRole('radio', { name: /上書きする/ }))
-    await userEvent.click(within(dialog).getByRole('button', { name: /フォルダに入れる（3件）/ }))
+    await takeIn(dialog, /フォルダに入れる（3件）/)
     await waitFor(() => expect(posts(calls, '/take')).toHaveLength(1))
     expect(posts(calls, '/take')[0].body).toEqual({ files: [0, 1, 2], whenChanged: 'overwrite' })
   })
 
-  it('hides the overwrite choice when no ticked file meets a later change', async () => {
-    mockApi(routes())
+  it('hides the overwrite choice when no ticked file meets a later change, and a hidden choice never overwrites', async () => {
+    const { calls } = mockApi(routes({ [TAKE]: { body: ok({ state: 'taken', commit: 'abc', placed: [], skipped: [] }) } }))
     const dialog = await openItem()
-    expect(within(dialog).getByRole('radiogroup', { name: 'その後ほかの人が変えたファイル' })).toBeInTheDocument()
+    await userEvent.click(within(dialog).getByRole('radio', { name: /上書きする/ }))
     await userEvent.click(box(dialog, '評価表.xlsx', 'まだ届けていなかった変更')!)
     expect(within(dialog).queryByRole('radiogroup', { name: 'その後ほかの人が変えたファイル' })).toBeNull()
+    await takeIn(dialog, /フォルダに入れる（2件）/)
+    await waitFor(() => expect(posts(calls, '/take')).toHaveLength(1))
+    expect(posts(calls, '/take')[0].body).toEqual({ files: [0, 2], whenChanged: 'alongside' })
+  })
+
+  it('keeps the tab\'s count with the list it shows (one answer, refreshed after a decision)', async () => {
+    let items = [item]
+    mockApi(routes({ [LIST]: () => ({ body: ok({ items }) }), [DISCARD]: () => { items = []; return { body: ok({ state: 'discarded' }) } } }))
+    const dialog = await openItem()
+    expect(screen.getByRole('link', { name: /預かり/, hidden: true })).toHaveTextContent('1')
+    await userEvent.click(within(dialog).getByRole('button', { name: /捨てる/ }))
+    await userEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: '捨てる' }))
+    expect(await screen.findByText('預かっているものはありません。')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: /預かり/ })).not.toHaveTextContent('1')
   })
 
   it('offers only download and discard for a folder that is gone', async () => {
@@ -182,6 +203,33 @@ describe('預かり: taking in', () => {
     expect(within(dialog).queryByRole('button', { name: /フォルダに入れる/ })).toBeNull()
     expect(within(dialog).queryAllByRole('checkbox')).toHaveLength(0)
     expect(within(dialog).getByRole('button', { name: /捨てる/ })).toBeEnabled()
+  })
+})
+
+describe('預かり: what is thrown away is asked first', () => {
+  it('a take-in that throws unticked contents away asks first and says how many', async () => {
+    const { calls } = mockApi(routes({ [TAKE]: { body: ok({ state: 'taken', commit: 'abc', placed: [], skipped: [] }) } }))
+    const dialog = await openItem()
+    await userEvent.click(within(dialog).getByRole('button', { name: /フォルダに入れる（3件）/ }))
+    const confirm = await screen.findByRole('alertdialog')
+    // The backup and 本人のメモ hold contents and are not ticked.
+    expect(confirm).toHaveTextContent('選ばなかった2件')
+    expect(confirm).toHaveTextContent('元に戻せません')
+    await userEvent.click(within(confirm).getByRole('button', { name: 'やめる' }))
+    expect(posts(calls, '/take')).toHaveLength(0)
+  })
+
+  it('a take-in that keeps every content goes without asking', async () => {
+    const all = files.filter((f) => f.kind !== 'personal')
+    const { calls } = mockApi(routes({
+      [DETAIL]: { body: ok({ ...detail, files: all }) },
+      [TAKE]: { body: ok({ state: 'taken', commit: 'abc', placed: [], skipped: [] }) },
+    }))
+    const dialog = await openItem()
+    await userEvent.click(box(dialog, '面談メモ.md', '田中 太郎さんの版（バックアップ）')!)
+    await userEvent.click(within(dialog).getByRole('button', { name: /フォルダに入れる（4件）/ }))
+    await waitFor(() => expect(posts(calls, '/take')).toHaveLength(1))
+    expect(screen.queryByRole('alertdialog')).toBeNull()
   })
 })
 
@@ -209,7 +257,7 @@ describe('預かり: refusals', () => {
     const dialog = await openItem()
     const listReads = () => calls.filter((c) => c.method === 'GET' && c.url.endsWith(`${base}/holding`)).length
     const before = listReads()
-    await userEvent.click(within(dialog).getByRole('button', { name: /フォルダに入れる/ }))
+    await takeIn(dialog, /フォルダに入れる/)
     await waitFor(() => expect(error).toHaveBeenCalledWith('ほかの人が先に決めました。一覧を読み込み直しました。'))
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
     await waitFor(() => expect(listReads()).toBeGreaterThan(before))
@@ -218,11 +266,12 @@ describe('預かり: refusals', () => {
   it('a file with no place now: says so in plain words, marks and unticks it, reads the item again', async () => {
     const { calls } = mockApi(routes({ [TAKE]: { status: 409, body: { error: '…', code: 'PATH_TAKEN', files: [1] } } }))
     const dialog = await openItem()
-    await userEvent.click(within(dialog).getByRole('button', { name: /フォルダに入れる（3件）/ }))
-    expect(await within(dialog).findByText(/置けないファイルがありました/)).toBeInTheDocument()
-    expect(within(dialog).getByText('このファイルは入れられません')).toBeInTheDocument()
-    await waitFor(() => expect(box(dialog, '評価表.xlsx', 'まだ届けていなかった変更')).not.toBeChecked())
-    expect(box(dialog, '面談メモ.md', 'まだ届けていなかった変更')).toBeChecked()
+    await takeIn(dialog, /フォルダに入れる（3件）/)
+    const shown = await screen.findByRole('dialog')
+    expect(await within(shown).findByText(/置けないファイルがありました/)).toBeInTheDocument()
+    expect(within(shown).getByText('このファイルは入れられません')).toBeInTheDocument()
+    await waitFor(() => expect(box(shown, '評価表.xlsx', 'まだ届けていなかった変更')).not.toBeChecked())
+    expect(box(shown, '面談メモ.md', 'まだ届けていなかった変更')).toBeChecked()
     await waitFor(() => expect(calls.filter((c) => c.method === 'GET' && c.url.endsWith('/holding/hi_1')).length).toBe(2))
   })
 

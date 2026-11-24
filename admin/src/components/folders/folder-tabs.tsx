@@ -34,11 +34,11 @@ export function folderTabHref(companyId: string, tab: FolderTab): string {
  * item they may not review is never in it), and while it is open. An older server without it, or a
  * refusal, hides it.
  */
-export function FolderTabs({ current }: { current: FolderTab }) {
+export function FolderTabs({ current, holdingCount }: { current: FolderTab; /** 「預かり」 passes the count of the list it shows (one answer, refreshed with it). */ holdingCount?: number }) {
   const { companyId, isAdmin, managedDepartmentIds } = useCompany()
   const mayReview = isAdmin || managedDepartmentIds.length > 0
-  const holding = useQuery(mayReview ? `holding-tab:${companyId}` : null, () => holdingApi.list(companyId))
-  const waiting = holding.data?.items.length ?? 0
+  const holding = useQuery(mayReview && holdingCount === undefined ? `holding-tab:${companyId}` : null, () => holdingApi.list(companyId))
+  const waiting = holdingCount ?? holding.data?.items.length ?? 0
   const tabs = FOLDER_TABS.filter((t) => t.id !== 'holding' || current === 'holding' || waiting > 0)
   return (
     <nav aria-label="フォルダの見方" className="-mt-2 mb-5 flex gap-1 border-b">

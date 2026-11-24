@@ -25,6 +25,7 @@ import {
   defaultSelection,
   describeDownloadError,
   describeHoldingError,
+  discardedByTake,
   expiryText,
   fileStateText,
   formatBytes,
@@ -75,7 +76,8 @@ export function HoldingItemDialog({
   const [overwrite, setOverwrite] = useState(false)
   const [problem, setProblem] = useState<HoldingProblem | null>(null)
   const [busy, setBusy] = useState(false)
-  const [confirmingDiscard, setConfirmingDiscard] = useState(false)
+  /** The destructive confirm on screen: 捨てる, or a take-in that throws unticked contents away. */
+  const [confirming, setConfirming] = useState<'discard' | 'take' | null>(null)
 
   const data = detail.data
   const folderGone = data?.folderGone ?? item?.folderGone ?? false
@@ -106,8 +108,10 @@ export function HoldingItemDialog({
   const person = data ? personLabel(data) : item ? personLabel(item) : ''
   const groups = useMemo(() => (data ? groupFiles(data.files) : []), [data])
   const flagged = useMemo(() => new Set(problem?.files ?? []), [problem])
-  const chosen = data ? takeRequest(data.files, selected, overwrite) : null
   const meetsLaterChange = data ? data.files.some((f) => selected.has(f.idx) && wouldMeetLaterChange(f)) : false
+  // 「上書きする」 counts only while its choice is on screen: once no ticked file meets a later change the
+  // choice is hidden, and a hidden choice never overwrites (Codex P2).
+  const chosen = data ? takeRequest(data.files, selected, overwrite && meetsLaterChange) : null
 
   const close = () => onOpenChange(false)
 
@@ -127,8 +131,11 @@ export function HoldingItemDialog({
     onChanged()
   }
 
+  const leftBehind = data && chosen ? discardedByTake(data.files, chosen) : 0
+
   const take = async () => {
     if (!data || !chosen || chosen.files.length === 0) return
+    setConfirming(null)
     setBusy(true)
     setProblem(null)
     try {
@@ -159,7 +166,7 @@ export function HoldingItemDialog({
       close()
     } catch (err) {
       // The confirm closes on our own terms: a refusal is shown in the item's dialog.
-      setConfirmingDiscard(false)
+      setConfirming(null)
       afterRefusal(err)
     }
   }
@@ -184,7 +191,7 @@ export function HoldingItemDialog({
 
   return (
     <>
-      <Dialog open={item !== null && !confirmingDiscard} onOpenChange={(o) => !busy && onOpenChange(o)}>
+      <Dialog open={item !== null && confirming === null} onOpenChange={(o) => !busy && onOpenChange(o)}>
         <DialogContent size="lg">
           <DialogHeader>
             <DialogTitle>{person}から預かったもの</DialogTitle>
@@ -217,6 +224,11 @@ export function HoldingItemDialog({
               {problem && (
                 <Callout variant="danger" title="できませんでした">
                   <p>{problem.message}</p>
+                </Callout>
+              )}
+              {detail.error !== undefined && !detail.fetching && (
+                <Callout variant="warning" title="最新の状態を読み込めませんでした">
+                  <p>表示は前に読み込んだときのものです。閉じて、開き直してください。</p>
                 </Callout>
               )}
 
@@ -306,7 +318,7 @@ export function HoldingItemDialog({
               )}
               {!folderGone && (
                 <p className="text-small text-text-muted">
-                  選ばなかったものは、フォルダに入れたあと捨てます。本人のメモと名前だけのものは、フォルダに入れられません（必要ならダウンロードしてください）。
+                  選ばなかったものは、フォルダに入れたあと捨てます{leftBehind > 0 ? `（いまは${leftBehind}件）` : ''}。本人のメモと名前だけのものは、フォルダに入れられません（必要ならダウンロードしてください）。
                 </p>
               )}
             </div>
@@ -314,7 +326,7 @@ export function HoldingItemDialog({
 
           <DialogFooter>
             {data && (
-              <Button variant="outline" className="sm:mr-auto" onClick={() => setConfirmingDiscard(true)} disabled={busy || data.state !== 'waiting'}>
+              <Button variant="outline" className="sm:mr-auto" onClick={() => setConfirming('discard')} disabled={busy || data.state !== 'waiting'}>
                 <Trash />
                 捨てる…
               </Button>
@@ -323,7 +335,7 @@ export function HoldingItemDialog({
               閉じる
             </Button>
             {data && !folderGone && (
-              <Button onClick={() => void take()} disabled={busy || data.state !== 'waiting' || !chosen || chosen.files.length === 0}>
+              <Button onClick={() => (leftBehind > 0 ? setConfirming('take') : void take())} disabled={busy || data.state !== 'waiting' || !chosen || chosen.files.length === 0}>
                 <Tray />
                 {busy ? '入れています…' : `フォルダに入れる（${chosen?.files.length ?? 0}件）`}
               </Button>
@@ -333,20 +345,36 @@ export function HoldingItemDialog({
       </Dialog>
 
       <ConfirmDialog
-        open={item !== null && confirmingDiscard}
-        onOpenChange={(o) => !o && setConfirmingDiscard(false)}
+        open={item !== null && confirming === 'discard'}
+        onOpenChange={(o) => !o && setConfirming(null)}
         title="預かったファイルを捨てますか？"
         description={
           <>
             <p>
               {person}から預かったファイル（{data?.files.length ?? 0}件）をすべて捨てます。元に戻せません。
             </p>
-            <p>{person}の PC からは消してあるため、ほかに残っている所はありません。必要なものは、先にダウンロードしてください。</p>
+            <p>捨てたあとは、この画面からも取り出せません。必要なものは、先にダウンロードしてください。</p>
           </>
         }
         confirmLabel="捨てる"
         cancelLabel="やめる"
         onConfirm={discard}
+      />
+      <ConfirmDialog
+        open={item !== null && confirming === 'take'}
+        onOpenChange={(o) => !o && setConfirming(null)}
+        title="フォルダに入れて、残りを捨てますか？"
+        description={
+          <>
+            <p>
+              選んだ{chosen?.files.length ?? 0}件をフォルダに入れます。選ばなかった{leftBehind}件（バックアップや本人のメモを含みます）は捨てます。捨てたものは元に戻せません。
+            </p>
+            <p>残したいものは、先にダウンロードするか、選んでから入れてください。</p>
+          </>
+        }
+        confirmLabel="入れて、残りを捨てる"
+        cancelLabel="やめる"
+        onConfirm={take}
       />
     </>
   )

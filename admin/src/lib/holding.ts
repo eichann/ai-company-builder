@@ -105,7 +105,17 @@ export function changedSince(file: HoldingReviewFile): boolean {
 
 /** A chosen content that would land on a file changed since: what 「上書きする」 is about. */
 export function wouldMeetLaterChange(file: HoldingReviewFile): boolean {
-  return file.kind !== 'deleted' && file.inFolderNow && changedSince(file)
+  // A backup always goes alongside (the server never puts it in place), so 「上書きする」 is not about it.
+  return file.kind !== 'deleted' && file.kind !== 'backup' && file.inFolderNow && changedSince(file)
+}
+
+/**
+ * The entries whose content a take-in throws away (the server decides the whole item: what is not
+ * chosen is discarded with it): every held content not in the request.
+ */
+export function discardedByTake(files: HoldingReviewFile[], request: HoldingTakeRequest): number {
+  const chosen = new Set(request.files)
+  return files.filter((f) => f.held && !chosen.has(f.idx)).length
 }
 
 /**
