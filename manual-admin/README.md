@@ -34,6 +34,11 @@ pnpm manual-admin:shoot -g members-list     # one scene, by id
 pnpm manual:shoot -g admin-app              # the app's screens the guide shows (10・13・15節)
 ```
 
+`MANUAL_NO_ANNOTATIONS=1` in front of either shoot leaves out the red frames, markers and labels and
+writes to `manual-admin/images-plain/` instead (gitignored, never committed; for a video or slides).
+Scenes marked `video: true` (e.g. `video-mapping-gross-profit`) are for a video only: no guide page
+shows them, and they always go to `images-plain/` without annotations.
+
 Not run in CI. Shoot on a Mac (fonts differ between systems) and commit the changed PNGs; a
 second run without changes rewrites the same bytes. Fixed: the clock 2026-11-20 10:30
 Asia/Tokyo, 1280×800 (a scene may set its own size) at 2x, Japanese, light theme, no animations.

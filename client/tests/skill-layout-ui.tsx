@@ -45,6 +45,9 @@
 //               page where main's view would be; window.__acbDocEvent(e) sends a docView:event),
 //               a longer change in 「前の版」, and 「探す」 finding 「納期」 inside the visit notes
 //               (with chat=live also: 「Web で調べて」 and 「HTML の資料に」 get their replies)
+//     video     business-shape = (with chat=live) for a video, not the manual: the trial Skill 「業務の形」
+//               (business-shape, not among the three Skills) asks one plain question at a time about the
+//               member's work and ends with its list of holes (BUSINESS_SHAPE below)
 //
 // 今日のフォルダ: the member belongs to 開発部 (not downloaded) and 営業部, so it is in 営業部;
 // `createDirectory` makes folders on the fake disk (recorded).
@@ -90,6 +93,8 @@ const MANUAL = params.get('manual') === '1'
 const EXTRA = MANUAL && params.get('extra') === '1'
 // ?manual=1&chat=live: 「AIへの相談」 answers what the member sends with a fixed reply (liveChat below).
 const LIVE = MANUAL && params.get('chat') === 'live'
+// ?manual=1&chat=live&video=business-shape: the 「業務の形」 consultation of the FDE video.
+const BUSINESS_SHAPE = LIVE && params.get('video') === 'business-shape'
 const ROOT = MANUAL ? '/Users/yamada/AI Company Builder/検証A社' : '/Users/demo/会社'
 const COMPANY = 'demo'
 // A second company (with no departments of its own on disk) for per-company state.
@@ -619,7 +624,35 @@ const APP_TOOL = (id: string, toolName: string, label: string, running: string, 
   { wait: 80 },
   { chunk: { type: 'tool-output-available', toolCallId: id, dynamic: true, providerExecuted: true, output: 'ok' } },
 ]
+// ?video=business-shape: the trial Skill 「業務の形」 as a new hire — one plain question at a time
+// about the latest case, then the holes it found (fictional; the Skill is not in this repository).
+const BUSINESS_SHAPE_REPLIES: Array<{ when: RegExp; steps: LiveStep[] }> = [
+  { when: /業務の形/, steps: [
+    { chunk: { type: 'tool-input-available', toolCallId: 's1', toolName: 'Skill', dynamic: true, providerExecuted: true, input: { skill: 'business-shape' }, providerMetadata: line(SKILL_LINE.label, SKILL_LINE.running, 'business-shape') } },
+    { chunk: { type: 'tool-output-available', toolCallId: 's1', dynamic: true, providerExecuted: true, output: 'ok' } },
+    ...SAY('t1', '新人のつもりで、1つずつ聞きます。\n\n**最近の1件で、最初に何をしましたか？**'),
+    { end: true },
+  ] },
+  { when: /数量と納期/, steps: [
+    ...SAY('t1', 'ありがとうございます。\n\n**そのあと、何をしましたか？**'),
+    { end: true },
+  ] },
+  { when: /単価を写しました/, steps: [
+    ...SAY('t1', [
+      'ここまでで、形にするときの穴が見えてきました。',
+      '',
+      '**穴の一覧**',
+      '1. 数量と納期のメモが、山田さんのノートにしかない（ほかの人は見られない）',
+      '2. どの「前回の見積」を開くかが決まっていない',
+      '3. 値引きしてよい範囲を、だれが決めるかがわからない',
+      '',
+      '続けて、見積を送ったあとのことを聞いてもいいですか？',
+    ].join('\n')),
+    { end: true },
+  ] },
+]
 const LIVE_REPLIES: Array<{ when: RegExp; steps: LiveStep[] }> = [
+  ...(BUSINESS_SHAPE ? BUSINESS_SHAPE_REPLIES : []),
   // Chapter 37: the AI looks on the web, in a department this PC has not downloaded and in an earlier consultation.
   ...(EXTRA ? [{ when: /Web で調べて/, steps: [
     ...APP_TOOL('web1', 'mcp__acb_web__web_research', 'Webで調べました', 'Webで調べています', '研修業界の最近の動き'),
@@ -754,7 +787,7 @@ function liveChat(path: string, init?: RequestInit): Response {
   const json = (value: unknown) => new Response(JSON.stringify(value), { headers: { 'content-type': 'application/json' } })
   const body = typeof init?.body === 'string' ? JSON.parse(init.body) as Record<string, unknown> : null
   if (path === '/api/rate-limits') return json({ rateLimits: null })
-  if (path === '/api/generate-title') return json({ title: 'A社へのお礼メール' })
+  if (path === '/api/generate-title') return json({ title: BUSINESS_SHAPE ? '見積を出す仕事の形' : 'A社へのお礼メール' })
   if (path === '/api/steer') {
     // Delivered: the chat server puts the instruction into the running reply.
     const id = `s${++liveSteers}`

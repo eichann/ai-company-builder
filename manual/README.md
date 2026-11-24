@@ -28,6 +28,13 @@ deterministic on one machine (fixed clock 2026-11-20 10:30 Asia/Tokyo, 1280×800
 theme, no animations): a second run without changes rewrites the same bytes, so `git status`
 shows only the pictures that really changed.
 
+**Without annotations** (for a video or slides, which draw their own frames):
+`MANUAL_NO_ANNOTATIONS=1 pnpm manual:shoot -g <id>` writes `manual/images-plain/<id>.png` (an
+administrator-guide scene: `manual-admin/images-plain/`) and leaves `images/` alone. The plain
+folders are gitignored: never commit them. A scene marked `video: true` is shot only for a video
+(no page shows it, e.g. `video-business-shape`): it always goes to `images-plain/` and carries no
+annotations.
+
 A shoot fails, rather than saving a wrong picture, when a step or an annotation cannot find its
 target (exactly one visible element) or the page throws.
 

@@ -102,7 +102,9 @@ npx vite -c tests/ui/vite.config.ts    # look at a page: http://localhost:5174/t
   `guide: 'admin'` write into `manual-admin/images/` instead (the administrator guide's pictures of
   the app; `pnpm manual:shoot -g admin-app`). The guide's admin-console pictures have their own
   shoot (`admin/tests/manual/`, `pnpm manual-admin:shoot`: the production admin build with its API
-  answered in the browser from fictional data; `manual-admin/README.md`).
+  answered in the browser from fictional data; `manual-admin/README.md`). `MANUAL_NO_ANNOTATIONS=1` shoots either without
+  the red overlay into the gitignored `images-plain/` folders (for a video); scenes with `video: true`
+  are video-only (no page shows them) and always go there.
 - `playwright test` starts and stops `vite preview` itself (port 4179). `UI_TEST_REUSE=1` reuses
   one you started (rebuild after changes); stop it, and any `vite -c tests/ui/vite.config.ts`,
   when done.
