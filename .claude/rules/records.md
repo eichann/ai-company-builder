@@ -247,7 +247,7 @@ missing or not a boolean is its default —, `TYPE_FEATURE`, `FEATURE_TOOLS`, `F
   show the ids (`planning`) — or the core's shared word where one exists (`cancelled` → 「やめた（しまった）」) —
   while actions keep their Japanese labels. Tests: `tests/unit/record-types.test.ts` "how a state is
   shown", `tests/integration/records.test.ts` "state names … are display only" (the push checker and
-  `GET /types`), `client/tests/type-state-labels.test.ts` (each place above) — mutation-checked.
+  `GET /types`), `client/tests/type-state-labels.test.ts` (each place above but the table), `records-table.test.ts` (状態; removed with the table) — mutation-checked.
 - **Following the parent's 見える範囲** (`place_follows: <link name>`, `TypeDefinition.placeFollows`;
   owner decision 2026-11-23: every record has one parent and its visibility comes from it — copied
   when it is made, never wider than the parent; the one exception is narrowing to a list of people).

@@ -1,7 +1,8 @@
 // A company's own type names its states (`state_labels`, owner decision 2026-11-24): members never
 // see `planning` / `open` / `held`. One rule (`stateWord`), used wherever a record's state is shown:
-// the record card's header and its linked rows, 探す's rows, the records table's 状態, the summary of
-// a record dropped on the chat, and the AI's action tools. A type without names keeps today's words.
+// the record card's header and its linked rows, 探す's rows, the summary of a record dropped on the
+// chat, and the AI's action tools (the records table's 状態: records-table.test.ts, removed with it).
+// A type without names keeps today's words.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { coreTypeDefinitions } from '../../shared/core/core-types'
@@ -10,7 +11,6 @@ import type { RecordSummary } from '../../shared/types/records'
 import { stateWord } from '../shared/thing-words'
 import { findHitView, summaryView } from '../shared/record-views'
 import { droppedRecordSummary } from '../shared/record-drop'
-import { createRecordsTableApi } from '../electron/features/records-table/ipc'
 import { actionToolSpecs } from '../electron/records/tools'
 
 // The shape of the first real company type (クロチャレの回), with its states named.
@@ -59,22 +59,6 @@ test('the record card, its linked rows and 探す show the named state', () => {
   assert.equal(summaryView(rec('open'), def).stateLabel, '受付中')
   assert.equal(findHitView({ record: rec('held'), department: null, mine: false } as never, def).record.stateLabel, '開催済み')
   assert.equal(summaryView(rec('open'), unnamed()).stateLabel, 'open', 'a type without names: unchanged')
-})
-
-test('the records table\'s 状態 column shows the named state', async () => {
-  const def = round()
-  const fetch = (async (url: string) => {
-    const path = new URL(url).pathname
-    const json = (data: unknown) => new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } })
-    if (path.endsWith('/records/types')) return json({ data: { types: [...coreTypeDefinitions(), def].map(d => ({ definition: d, source: 'file', versions: [d.version] })) } })
-    if (path.endsWith('/members')) return json({ data: [] })
-    if (path.endsWith('/records/query')) return json({ data: { total: 2, records: [rec('planning'), rec('held', { id: 'crochallenge_round-0002cd' })] } })
-    return new Response('{}', { status: 404 })
-  }) as typeof globalThis.fetch
-  const api = createRecordsTableApi({ baseUrl: () => 'https://acb.example', cookies: () => ['s=1'], fetch, log: { warn: () => {} } })
-  const page = await api.page('c1', { kind: 'crochallenge_round', openOnly: false, offset: 0 })
-  assert.ok(page.success)
-  assert.deepEqual(page.rows.map(r => r.stateLabel), ['準備中', '開催済み'])
 })
 
 test('a record dropped on the chat is summarised with its named state, and so are the records linked to it', () => {

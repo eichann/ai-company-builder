@@ -3,7 +3,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { coreTypeDefinitions } from '../../shared/core/core-types'
-import type { TypeDefinition } from '../../shared/core/record-types'
+import { parseTypeFile, type TypeDefinition } from '../../shared/core/record-types'
 import type { RecordSummary } from '../../shared/types/records'
 import { createRecordsTableApi } from '../electron/features/records-table/ipc'
 import { columnsOf, kindsOf, openStatesOf } from '../shared/records-table'
@@ -107,4 +107,13 @@ test('columns: the kind\'s one-line server fields, 担当・期限 first, a few 
   assert.equal(kinds[0], 'task')
   assert.ok(kinds.indexOf('project') < kinds.indexOf('meeting') && kinds.indexOf('meeting') < kinds.indexOf('decision'))
   assert.equal(kindsOf(defs)[0].label, 'やること')
+})
+
+test('状態 shows a company type\'s own state names (state_labels), not its ids', async () => {
+  const r = parseTypeFile('round', '---\nlabel: 回\nversion: 1\nstorage: server\nstates: [planning, held]\nstate_labels: { planning: 準備中, held: 開催済み }\nfinal: [held]\n---\n')
+  assert.ok(r.ok)
+  const { api } = server([summary('round-1', {}, { type: 'round', state: 'planning' }), summary('round-2', {}, { type: 'round', state: 'held' })], { defs: [task, r.definition] })
+  const page = await api.page('c1', { kind: 'round', openOnly: false, offset: 0 })
+  assert.ok(page.success)
+  assert.deepEqual(page.rows.map(row => row.stateLabel), ['準備中', '開催済み'])
 })
