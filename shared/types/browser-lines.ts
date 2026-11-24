@@ -76,7 +76,10 @@ export interface BrowserLinePermit {
 export interface BrowserLineReportAnswer { state: BrowserLineExecutionState; step: BrowserWriteState; outcome: 'applied' | 'same' | 'recorded' | 'conflict' }
 
 export interface BrowserLineGrantsView {
-  lines: Array<BrowserLineRef & { label: string }>
+  /** The approved rows; `writes`: the line writes to the site (else it only reads). */
+  lines: Array<BrowserLineRef & { label: string; writes: boolean }>
+  /** Lines with no approved row yet but one waiting for its review (`pending`): names only, nothing can be granted. */
+  waiting: Array<{ site: string; line: string; label: string; writes: boolean }>
   /**
    * The grants in force, one per approved line row and person: `direct` (given on that row) or `carried` from another row
    * of the same line and meaning by the row's reviewed `grantsFrom` (which version of the line and map it was given on).

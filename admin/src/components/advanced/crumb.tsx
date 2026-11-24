@@ -5,8 +5,11 @@ import { CaretLeft } from '@phosphor-icons/react'
 
 import { useCompany } from '@/lib/company-context'
 
-/** The way back from a page inside 「詳しい設定」 (管理画面の見直し 2-3): 「詳しい設定」 or 「詳しい設定 › AI の安全」. */
-export function AdvancedCrumb({ aiSafety = false }: { aiSafety?: boolean }) {
+/**
+ * The way back from a page inside 「詳しい設定」 (管理画面の見直し 2-3): 「詳しい設定」, 「詳しい設定 › AI の安全」 or
+ * 「詳しい設定 › AI の安全 › ブラウザ操作」 (its PCs and people pages).
+ */
+export function AdvancedCrumb({ aiSafety = false, browser = false }: { aiSafety?: boolean; browser?: boolean }) {
   const { companyId } = useCompany()
   const base = `/companies/${companyId}/advanced`
   const link = 'rounded-small underline-offset-4 outline-none hover:text-foreground hover:underline focus-visible:ring-[3px] focus-visible:ring-ring/50'
@@ -21,6 +24,14 @@ export function AdvancedCrumb({ aiSafety = false }: { aiSafety?: boolean }) {
           <span aria-hidden="true">›</span>
           <Link href={`${base}/ai-safety`} className={link}>
             AI の安全
+          </Link>
+        </>
+      )}
+      {browser && (
+        <>
+          <span aria-hidden="true">›</span>
+          <Link href={`${base}/ai-safety/browser`} className={link}>
+            ブラウザ操作
           </Link>
         </>
       )}

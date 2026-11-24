@@ -223,7 +223,13 @@ describe('the opened list and the gate', () => {
     expect(svc.setGrant(alice, bob.userId, { ...refOf(approvedRow()), allowed: true }).ok).toBe(false)
     const pending = pendingRow()
     expect(code(svc.setGrant(admin, bob.userId, { site: 'lstep', line: pending.name, meaningHash: pending.meaningHash, mechanicsHash: pending.mechanicsHash, allowed: true }))).toBe('BROWSER_LINE_NOT_APPROVED')
-    expect(value(svc.grants(admin)).lines.map(l => [l.line, l.mapVersion])).toEqual([['landing_inspect', '1.0.1'], ['landing_inspect', '1.0.2'], ['landing_inspect', '1.0.4']])
+    expect(value(svc.grants(admin)).lines.map(l => [l.line, l.mapVersion, l.writes])).toEqual([['landing_inspect', '1.0.1', false], ['landing_inspect', '1.0.2', false], ['landing_inspect', '1.0.4', false]])
+    // The lines still waiting for their review, once each, names only (the 「使える人」 page greys them); a line with an
+    // approved row is not waiting although it has a pending one too.
+    expect(value(svc.grants(admin)).waiting).toEqual([
+      { site: 'lstep', line: 'landing_create', label: '流入経路を複製して作る', writes: true },
+      { site: 'lstep', line: 'step_template_add', label: 'リマインダの段にテンプレートを足す', writes: true },
+    ])
     svc.memberLeft(CO, alice.userId)
     expect(value(svc.grants(owner)).grants).toEqual([])
   })

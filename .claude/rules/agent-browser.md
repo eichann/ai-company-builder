@@ -643,7 +643,7 @@ typed there broke the login, #768).
 - **Who may use a site** (plan B's 「使える人」): not in this step. The server's per-member type grant
   (`PUT /browser-type-grants/:userId`) has no admin page yet. Since "This PC's registration" (D2) the server
   asks for a registered PC at every gated step, so a grant to a member no longer turns them on wherever they
-  write the opt-in file; the admin page 「使える人」 is PR A (new path only).
+  write the opt-in file; the admin page 「使える人」 (PR A, new path only) is "The admin pages: PCs and people".
 
 Tests: `client/tests/browser-asset-hosts.test.ts` (the window's site: the declaration's hosts, the company's
 list only for a development build, exact / not the operated host / once; only an unpackaged build with
@@ -1345,7 +1345,9 @@ path holds the same lock key (below).
   counts for a row with the same meaning hash and its own mechanics hash **or one its reviewed `grantsFrom` names**
   (`BrowserOpenedLineRow.grantsFrom`, written only by a reviewed edit that calls the mechanics change compatible, kept
   by the script; a `grantsFrom` naming no row of the same line and meaning leaves the row out). Never automatic. Given
-  while a member this time (as the old path); leaving removes them. No admin page yet.
+  while a member this time (as the old path); leaving removes them. The admin page: "The admin pages: PCs and people".
+  The view also lists each approved row's `writes` and `waiting` (lines with a `pending` row and no approved one: names
+  only, for the page to grey out).
 - **Where a value comes from** (§16-4, Q14): the core's `browserLineValuesProblem` (which / when only from a record
   field or a person's confirmation, a target only from the site, the AI only for `write`; a person's value not yet
   confirmed → `BROWSER_VALUE_UNCONFIRMED`, anything else → `BROWSER_VALUE_REFUSED` with the value's name and a fixed
@@ -2403,6 +2405,41 @@ exception, a plan bound to its PC, a revoked PC voiding the claimed execution (`
 (with a stand-in PC check, `tests/helpers/browser-devices.ts`), permission matrix rows + `CROSS`,
 `company-scoped-sql.test.ts`, `jobs-schema.test.ts`. Each guard mutation-checked (32 mutations; one survivor kept on purpose: enable's own
 `pending` check, behind the compare-and-set and the trigger, each of which refuses the same).
+
+## The admin pages: PCs and people (PR A)
+
+Design memo v2 §7-2, §14 (minimum only: no carry-over helper, no extra check). Two pages under 「詳しい設定 › AI の安全 ›
+ブラウザ操作」, linked from that page only (two links at its top); owner/admin only — a member or a department manager gets
+「このページはオーナーと管理者だけが使えます」 and nothing is asked (the server also refuses: 403). Words:
+`admin/src/lib/agent-browser-people.ts` (「PC」, 「使えるようにする」, 「作業」; never 「開ける」, no hash or version on screen).
+Types from `shared/types/browser-devices.ts` / `browser-lines.ts` via `admin/src/lib/api.ts` (`browserPcsApi`,
+`browserPeopleApi`), pinned by `admin-contract.test.ts`.
+
+- **「ブラウザ操作に使う PC」** (`…/browser/pcs`): a table of every registration — person, PC name, 申し込んだ日, state
+  (確認待ち `awaiting` / 使える `success` / 止めた `paused` with the reason), 最後に使った日 — and the history (who, when,
+  which PC, what). ［使えるようにする］ only on 確認待ち (a plain confirm naming the person and the PC, owner/admin's own PC
+  too); ［止める］ on 確認待ち and 使える, always behind a destructive confirm that says what stops (`PC_STOP_EFFECTS`: new
+  requests refused at once, the one being sent may go, a run stops before its next write, registering again to use it).
+  One call per press, to that PC's id.
+- **「ブラウザ操作を使える人」** (`…/browser/people`): rows = members, columns = 作業 (one per site × line, its newest
+  approved row's label and 「見るだけ」/「書き込む」). A box changes the grant at once (no save button). Ticked = a grant in
+  force on **any** approved row of the line (Codex review: what the server still allows is never shown unticked, so one
+  untick can always take it away); 「前の内容でだけ使えます」 when that does not cover every row of the newest meaning. **A tick** grants, one call at a time, the oldest approved row of that 作業 with the
+  newest row's meaning on which the person holds nothing in force, until every such row is covered (usually one call:
+  the reviewed `grantsFrom` carries it forward; an app on an older map's version can then use the 作業 too) — only
+  approved rows of that very 作業 and meaning are ever sent. **An untick** is one `allowed: false`, which the server turns
+  into "every grant of that person on that line" (carried ones too). A `waiting` 作業 is shown greyed with
+  「まだ使えません（確かめ待ち）」 and a disabled box. Notes: 「この作業は内容が変わりました…」 when someone holds only an
+  earlier meaning; 「使えるようにした PC はまだありません」 (link to the PCs page) for a person with no `enabled` PC; the
+  company's setting 「使わない」 above the table (naming the member override as the exception).
+- Not done (memo §7-2, left for later): 「変えています」 on 「詳しい設定」 for PCs / grants, a per-person 「使わない」 note.
+
+Tests: `admin/tests/agent-browser-people.test.tsx` (the links; a member / manager sees neither page and nothing is asked;
+each state and what may be pressed; enable and stop ask first and send one call to that PC; キャンセル sends nothing; a
+tick's exact body and the oldest-first fill; an untick in one call; a waiting 作業 disabled; the changed note; nothing of
+hashes or versions on screen), `server/tests/unit/browser-lines.test.ts` (`waiting`, `writes`),
+`server/tests/integration/admin-contract.test.ts`. Guards mutation-checked (the stop's confirm, the oldest-row fill, the
+waiting box disabled). Administrator guide: 13節 「使う PC と使える人」 (scene `browser-pcs`).
 
 ## Not yet (later PRs)
 

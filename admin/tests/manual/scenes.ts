@@ -538,6 +538,35 @@ export const scenes: Scene[] = [
     ],
   },
 
+  {
+    id: 'browser-pcs',
+    about: '「ブラウザ操作に使う PC」: one PC waiting for the admin, one usable, one stopped, and the history.',
+    path: at('/advanced/ai-safety/browser/pcs'),
+    api: {
+      [`GET ${API}/browser-devices`]: ok({
+        items: [
+          { id: 'bd_1', userId: people.yamada.userId, name: people.yamada.name, label: '山田の MacBook', state: 'pending', revokeReason: null, requestedAt: '2026-11-25T00:30:00.000Z', enabledAt: null, enabledBy: null, revokedAt: null, revokedBy: null, lastUsedAt: null },
+          { id: 'bd_2', userId: people.sato.userId, name: people.sato.name, label: '佐藤の iMac', state: 'enabled', revokeReason: null, requestedAt: '2026-11-20T01:00:00.000Z', enabledAt: '2026-11-20T02:00:00.000Z', enabledBy: people.takahashi.userId, revokedAt: null, revokedBy: null, lastUsedAt: '2026-11-24T00:00:00.000Z' },
+          { id: 'bd_3', userId: people.ito.userId, name: people.ito.name, label: '伊藤の古い PC', state: 'revoked', revokeReason: 'admin', requestedAt: '2026-11-18T01:00:00.000Z', enabledAt: '2026-11-18T02:00:00.000Z', enabledBy: people.takahashi.userId, revokedAt: '2026-11-22T03:00:00.000Z', revokedBy: people.takahashi.userId, lastUsedAt: '2026-11-21T00:00:00.000Z' },
+        ],
+        more: false,
+        history: [
+          { deviceId: 'bd_1', userId: people.yamada.userId, actorId: people.yamada.userId, action: 'request', reason: null, at: '2026-11-25T00:30:00.000Z' },
+          { deviceId: 'bd_3', userId: people.ito.userId, actorId: people.takahashi.userId, action: 'revoke', reason: 'admin', at: '2026-11-22T03:00:00.000Z' },
+          { deviceId: 'bd_2', userId: people.sato.userId, actorId: people.takahashi.userId, action: 'enable', reason: null, at: '2026-11-20T02:00:00.000Z' },
+        ],
+      }),
+    },
+    viewport: { width: 1280, height: 760 },
+    crop: { target: 'role=main', padding: { x: 0, y: 0 } },
+    annotations: [
+      { marker: { target: 'text="確認待ち"', label: '1', at: 'left' } },
+      { box: 'role=button[name="山田 太郎さんの「山田の MacBook」を使えるようにする"]' },
+      { marker: { target: 'role=button[name="佐藤 美咲さんの「佐藤の iMac」を止める"]', label: '2', at: 'left' } },
+      { marker: { target: 'role=list[name="これまでの記録"]', label: '3', at: 'left' } },
+    ],
+  },
+
   // ── 14節 見守る・止める ────────────────────────────────────────────────────
   {
     id: 'home-attention',
