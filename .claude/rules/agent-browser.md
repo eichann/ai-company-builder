@@ -1146,10 +1146,10 @@ Lステップ's facts) is untouched and stays the old path's guard; the new path
   no year (the line chose it). `no_sibling_named` compares names by `siblingNameKey` (owner decision 2026-11-24: refuse
   more): NFC, full-width ASCII and the ideographic space folded to half-width (for this only), whitespace runs collapsed
   and trimmed, A–Z case-folded — a trailing space, a full-width variant or another ASCII case is the same name.
-- **Not in this PR** (later, memo §15-2): the map's must-hold facts per thing and verb (C5: account and parent binding,
-  read whole, content kinds, mandatory notes — today only the parent check inside `no_sibling_named` and the id check
-  of every read), value-shape words (§14-1), the opened list's file and hashes (PR 3), the notice route and the server's
-  re-check of a bound record field (PR 4), write verbs and predictions (PR 5).
+- **Not in this PR** (later, memo §15-2): the map's must-hold facts per thing (C5: account and parent binding, mandatory
+  notes — PR 3, next section; content kinds and the verbs' facts come with the write verbs), value-shape words (§14-1),
+  the opened list's file and hashes (PR 3), the notice route and the server's re-check of a bound record field (PR 4),
+  write verbs and predictions (PR 5).
 
 Tests: `server/tests/unit/browser-read-words.test.ts` with an **example map** (`server/tests/fixtures/browser/
 example-map.ts`, shaped like stage 0's landing-route keys; not a reviewed map) — the map's refusals; strict read
@@ -1168,6 +1168,101 @@ Each guard mutation-checked; kept on purpose: the depth check on lists (stack sa
 reader), `sourceUnchanged`'s status check (the state check after it catches the same), the date words' values check
 (a values problem already makes every value-rooted read `wrong-object`), `dateInText`'s "every one in the format is
 the date" (the whole-text scan catches the same) and the reader state's copy (a reader is reviewed site code).
+
+## The first map and the inspection line (generalization PR 3: data, words and the card's shape; nothing calls them yet)
+
+Design memo 「ブラウザ操作の汎用化」 §3-2, §3-5, §3-7, §7-3 (the inspection first), §15 C5 (must-hold facts, owner: in this
+PR), §15-2 (PR 3), §16-4, §16-5 with Q15 (§18), §17. Read only: no line writes, nothing reads a site, no route, IPC or
+screen uses any of it yet (the reading path, the server's list and the card on screen are later PRs). Every shape is
+**provisional** until a second site fits it (§18). **The old path is untouched**: `client/connectors/lstep/` and
+`lstep@0.6.3`'s approved declaration and checker hashes do not change (`browser-lstep-map.test.ts` holds the folder's hash
+to the approved row and `carried.json`).
+
+- **Where a site's map lives**: `client/connector-maps/<site>/` (`index.ts` exports `MAPS`; `map.ts` the map and
+  `LSTEP_MAP_READS`, how each thing is read; `readers.ts` answer → state). **Not** in `client/connectors/<site>/`: that
+  folder's fingerprint is the approved checker hash, so a map there would move it (memo §8, §15 C10). It imports only
+  itself and `shared/core`; only `electron/main.ts` may import it (`architecture-boundaries.test.ts`, like a connector;
+  nothing does yet). Opened lines are data in `client/browser-lines/<site>.ts` (`LINES`, core types only).
+- **The opened list** `shared/browser-connectors/opened.json` (beside approved.json, never touching it; written by
+  `cd client && npx tsx scripts/browser-opened.ts`, `--check`; `browser-lstep-map.test.ts` fails when it differs):
+  `{ format: 1, provisional: true, maps, lines }`. A map row holds the map itself (the server will read it from here,
+  never from `client/`), `mapHash` (`sha256:` of its canonical JSON) and `readersHash` (the map folder's fingerprint,
+  `folderHash`); a changed map **or reader** under the same version is refused (raise the map's version: the version
+  names the mechanics a line was approved with). A line row: name, version, site, map version, `status`
+  (`pending` → `approved` → `retired`, **written `pending`**, changed only by a reviewed edit, kept by the script),
+  `meaningHash`, `mechanicsHash`, the line; a changed line under the same name, version and map version is refused.
+  Rows the files no longer give are kept. Every stored row is checked against its own hashes on each run (Codex review:
+  a map or line edited by hand with its hash strings left would otherwise pass as reviewed).
+- **Two hashes** (`shared/core/browser-opened.ts`, §16-5 / Q15): `browserLineMeaning` — the line's values, reads,
+  checks and shown fields with, copied from the map, each read thing's id field and its source, parent, fields' kinds and
+  must-hold facts (a note's presence, not its words): the key of a member's grant (PR 4); `browserLineMechanics` — the
+  map's version and hash, the readers' fingerprint, the line's words. Grants carry over a mechanics change only when a
+  review calls it compatible (Q15): never automatic. The core gives canonical JSON; hashing is the caller's.
+  `browserOpenedLineProblem` checks a line against its map (the read part's validator, a heading per read, shown fields
+  the thing has).
+- **Must-hold facts** (§15 C5; `BrowserMapThing.must_hold`, applied by `evaluateBrowserReadLine` to every read of the
+  thing whatever the line says): `account` — the read counts only when the account (the site's marker, read right before
+  and after the line's reads, `facts.account`) is known on both sides, the same, and the plan's (`expectedAccount`) when
+  given — else `account-unknown` / `account-mismatch`; `parent` — every line read of it must name `parent` (a target
+  value or an earlier read's id field; the validator refuses a line that does not) and the state's parent field must be
+  it — else `wrong-parent` (a `parent` named for any thing is checked too); `note` — a sentence (≤ 200) the card shows
+  whenever the line reads the thing. A map with an account-bound thing needs `account: { label }`.
+- **Core additions** (provisional): `id_from: 'address'` (the answer has no id of its own: `readBrowserThing(…, address)`
+  puts the address's id in the state, and a reader that gives one is not read); a read of **another** thing of the map by
+  an earlier read's own id is allowed (a list's row of the same object; the same thing again is still refused) — and,
+  since two reads may then name one object, each read's **origin** (a value, or an earlier read's field that is not its
+  own id, passing through own ids) is tracked: two reads of one origin are never compared (`unchanged_except`,
+  `changed_from`) and a parent is never taken from a read of the same object (independent review M1 / L3); the word
+  `changed_from(read, reference, fields)` — ✓ only when every named field differs from the reference's (what a copy must
+  change; ✗ names the fields still the same); the outcome's per-read `reads` status and `account`.
+- **The generic card** (`shared/core/browser-card.ts`, `buildBrowserReadCard`): title, `state` (`all_ok` / `ng` /
+  `not_read`), a headline (`BROWSER_CARD_WORDS`; a read not whole says `BROWSER_SHAPE_WORDS.member`), the account row,
+  sections of rows — one value (a read) or before / after (a write, later) —, check rows ✓ / ✗ / 「読み取れませんでした」 /
+  「書いたあとに確かめます」 (`BROWSER_CARD_MARK_WORDS`) with the ✗ fields' headings, and the must-hold notes. Built only
+  from the map's and the line's words and what main read; **unreadable is never ✓**: a value only from a read that
+  counted, a check ✓ only when the outcome says so **and** every read it names counted, `all_ok` only with no problem.
+  No AI word, key or page text beyond the read fields' values: a supplied value (a check's base date) is shown only once
+  the values passed and as a real day, else 「—」 (independent review L4); another object read says so
+  (`wrongObject`).
+- **For the reading path (PR 4 / 5)**: an `id_from: 'address'` thing is "the object asked for" only if main builds the
+  address from the line's wanted id and passes that same string as `address` — never an id the AI supplies.
+- **Lステップ map 1.0.0** (`client/connector-maps/lstep/map.ts`; stage 0 「段0の結果」 R3, R4, R8, R10, R11, key names
+  only): `landing` (`GET /api/landings/{id}`, its id from the address; the R11 keys, `action_texts` and a variable's
+  `name` not compared), `landing_row` (one entry of `GET /api/landings?group=&page=`, 50 a page: the friend-add and QR
+  addresses), `action_set` (`GET /api/actions/{id}`, id from the address: `inputs` — 13 `tag_ids`, 12 `egg_id`, 15
+  `episode_id` + `firetype`, any other type not read —, `a_name`, `a_twice_type`; `aid`, `funnel_descriptions`,
+  `group_id` not compared). All three bound to the LINE account; `action_set`'s note says actions can be shared (R3).
+  Stage 0 recorded the row's and the action's keys **in part**: an answer with more keys is not read whole and the card
+  says so (availability) until a reviewed map version lists them — part of approving the line. **Never `?copy=1`**:
+  no read carries a query but the folder list's `group` / `page` (tested). No business word (a round's tag, its time, its
+  source) is in the map or the lines (tested).
+- **The first line** `landing_inspect` 「流入経路を点検する」 (`client/browser-lines/lstep.ts`, `pending`): values `landing`
+  and `source` (targets: what the site showed, §16-4); reads the route, its list row, its action, the source and the
+  source's action; checks `unchanged_except(landing, source, [name, to_date, to_time, action_id])`,
+  `changed_from(landing, source, [action_id])`, `changed_from(action_set, source_action_set, [tags])`,
+  `unchanged_except(action_set, source_action_set, [name, tags])`; shows name and end of reception, URLs, tags /
+  templates / cancels. Business checks (a date in the name or tag) are a business plugin's line once a `which` value's
+  source can be supplied (§16-4, later).
+
+Tests: `server/tests/unit/browser-inspection-core.test.ts` (the map's new refusals; the address's id — none, bad, a
+reader's own refused; the account: unknown, one side, not an id, changed, not the expected, a thing not bound; the parent:
+required by the validator, another parent, a reference in another folder, a parent named for a thing that need not hold
+it, every bad parent shape; `changed_from` ✓ / ✗ / unreadable and its refusals; another thing by the same id; the opened
+line's refusals; words and the note's wording move the mechanics only, and each meaning part moves the meaning; the card:
+all ✓, a read not whole, a forged ✓ for a read that did not count, values of an uncounted read, ✗ with headings, the
+account moving, the note always, 「なし」, another object's headline, a supplied value only once valid; one object reached
+again through another thing or one value read twice never compared, a parent from the same object refused),
+`browser-read-words.test.ts` (§17-2 over `browser-opened.ts` and
+`browser-card.ts` too, with every opened map's and line's names from `opened.json`), `client/tests/browser-lstep-map.test.ts`
+(the map's keys equal stage 0's lists; each thing read from made-up answers of those shapes; a key more or less, unseen
+spellings, an unknown input type, another kind's key → not read; no query but `group` / `page`; the inspection end to
+end: a good copy all ✓, the copy still on the source's action, the source's tags kept, a template / cancel / folder
+changed, the account moving or unread, a row of another shape, a source action not whole; opened.json as written, a new
+line `pending`, a reviewed status kept, a changed map or line under the same version refused, a stored row edited by
+hand refused; the old path's hash),
+`architecture-boundaries.test.ts` (the map folder and the lines import only what they may; only main.ts imports them).
+Each guard mutation-checked; kept on purpose: the card's real-day check on a supplied value (the values check already
+refuses a date value that is not one).
 
 ## The operator and the preview (PR 6b-1: built, switched off; nothing in the app calls it)
 
@@ -1683,7 +1778,8 @@ remove, target `{ reminder, step, hole }`, the checker confirming the hole is th
 `old`; a run cut between its two writes is partly done, never resent or rolled back), **checkers run
 isolated and signed** and handed out with their declarations from the shelf (design memo §25: a
 JavaScript engine without network, files or clock, limits on time and memory; only checkers div signed;
-the package's `signature.yaml` verified first), landing routes, a
+the package's `signature.yaml` verified first), landing routes (the read-only inspection's map and line exist, `pending`:
+"The first map and the inspection line"; reading them and the card on screen are later PRs), a
 recording helper, JSON writes, types with more than one write (their state table and model are in
 "Executions with several writes"; the code is PR 4 / PR 5), the shelf handing out browser connectors. WSS to the operated host stays refused (no type declares
 one). Until the AI operates, the admin page says next to the mode choice what 「使う」 does today
