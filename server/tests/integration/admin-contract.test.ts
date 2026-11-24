@@ -79,6 +79,9 @@ const TYPES: Record<string, string> = {
   AgentEventViewers: 'AgentEventViewers',
   AgentSandbox: 'AgentSandboxView',
   AgentBrowser: 'AgentBrowserView',
+  BrowserPcs: 'BrowserDevicesList',
+  BrowserPc: 'BrowserDeviceView',
+  BrowserPeople: 'BrowserLineGrantsView',
   AgentStops: 'AgentStopView',
   SecondOpinion: 'SecondOpinionView',
   SecurityAlerts: 'SecurityAlertsView',
@@ -297,6 +300,8 @@ beforeAll(async () => {
   app.route('/api/companies/:companyId', agentEventsRoute)
   app.route('/api/companies/:companyId', agentSandboxRoute)
   app.route('/api/companies/:companyId', agentBrowserRoute)
+  app.route('/api/companies/:companyId', (await import('../../src/routes/browser-devices')).browserDevicesRoute)
+  app.route('/api/companies/:companyId', (await import('../../src/routes/browser-lines')).browserLinesRoute)
   app.route('/api/companies/:companyId', secondOpinionRoute)
   app.route('/api/companies/:companyId', taskSettingsRoute)
   app.route('/api/companies/:companyId', (await import('../../src/routes/admin-home')).adminHomeRoute)
@@ -458,6 +463,28 @@ describe('admin API types (admin/src/lib/api.ts) match the server', () => {
       mode: 'on', sites: [{ host: 'crm.example.com', level: 'write', assetHosts: ['cdn.example.net'] }],
     })
     await expectShape('AgentBrowser', USERS.owner, 'PUT', `${base}/agent-browser/overrides/${USERS.member}`, { mode: 'off' })
+  })
+
+  it('「ブラウザ操作に使う PC」 and 「使える人」', async () => {
+    // A member registers a PC the way the app does (the PC's key only in its header), so the list has a row.
+    currentUser.id = USERS.member
+    const registered = await app.request(`${base}/browser-devices`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-ACB-Browser-Device': `v1.${'A'.repeat(43)}` },
+      body: JSON.stringify({ label: '契約の PC' }),
+    })
+    expect(registered.status).toBe(201)
+    const deviceId = ((await registered.json()) as Loose).data.id as string
+    const pcs = await expectShape('BrowserPcs', USERS.owner, 'GET', `${base}/browser-devices`)
+    expect(pcs.items).toHaveLength(1)
+    await expectShape('BrowserPc', USERS.admin, 'POST', `${base}/browser-devices/${deviceId}/enable`)
+    await expectShape('BrowserPc', USERS.owner, 'POST', `${base}/browser-devices/${deviceId}/revoke`)
+    const people = await expectShape('BrowserPeople', USERS.owner, 'GET', `${base}/browser-line-grants`)
+    const row = people.lines[0]
+    const change = { site: row.site, line: row.line, meaningHash: row.meaningHash, mechanicsHash: row.mechanicsHash }
+    const granted = await expectShape('BrowserPeople', USERS.admin, 'PUT', `${base}/browser-line-grants/${USERS.member}`, { ...change, allowed: true })
+    expect(granted.grants.length).toBeGreaterThan(0)
+    await expectShape('BrowserPeople', USERS.owner, 'PUT', `${base}/browser-line-grants/${USERS.member}`, { ...change, allowed: false })
   })
 
   it('「もう一方の AI に聞く」', async () => {

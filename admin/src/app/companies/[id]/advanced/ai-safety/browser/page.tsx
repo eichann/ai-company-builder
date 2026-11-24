@@ -1,8 +1,9 @@
 'use client'
 
+import Link from 'next/link'
 import { useState } from 'react'
 import { toast } from 'sonner'
-import { Browsers, ClockCounterClockwise, Globe, Key, Plus, ShieldSlash, Trash, UserSwitch } from '@phosphor-icons/react'
+import { Browsers, CaretRight, ClockCounterClockwise, Desktop, Globe, Key, Plus, ShieldSlash, Trash, UserSwitch, UsersThree } from '@phosphor-icons/react'
 
 import { RadioCard } from '@/components/app/radio-card'
 import { EmptyState, ErrorState, ListSkeleton, PageHeader } from '@/components/app/states'
@@ -44,6 +45,7 @@ import {
   siteProblems,
   type SiteDraft,
 } from '@/lib/agent-browser'
+import { PCS_TITLE, PEOPLE_TITLE } from '@/lib/agent-browser-people'
 import { linesOf } from '@/lib/agent-sandbox'
 import { useCompany } from '@/lib/company-context'
 import { describeError } from '@/lib/errors'
@@ -80,12 +82,40 @@ export default function AgentBrowserPage() {
         <ErrorState error={view.error} onRetry={view.reload} />
       ) : view.data ? (
         <div className="space-y-6 pb-4">
+          <BrowserSubPages companyId={companyId} />
           <SettingsForm key={JSON.stringify(view.data.settings)} saved={view.data} onSaved={(next) => view.setData(() => next)} />
           <OverridesCard view={view.data} onSaved={(next) => view.setData(() => next)} />
           <HistoryCard history={view.data.history} />
         </div>
       ) : null}
     </>
+  )
+}
+
+/** The two pages of PC registration and per-作業 grants (design memo v2 §7-2: links only on this page). */
+function BrowserSubPages({ companyId }: { companyId: string }) {
+  const pages = [
+    { segment: 'pcs', title: PCS_TITLE, description: 'メンバーが登録した PC を確かめて、使えるようにする・止める', icon: Desktop },
+    { segment: 'people', title: PEOPLE_TITLE, description: 'AI に任せてよい作業を、人ごとに選ぶ', icon: UsersThree },
+  ]
+  return (
+    <ul aria-label="ブラウザ操作の PC と使える人" className="divide-y overflow-hidden rounded-card border bg-card">
+      {pages.map((p) => (
+        <li key={p.segment}>
+          <Link
+            href={`/companies/${companyId}/advanced/ai-safety/browser/${p.segment}`}
+            className="flex items-center gap-3 px-5 py-4 outline-none transition-colors hover:bg-surface-sunken focus-visible:ring-2 focus-visible:ring-focus-ring"
+          >
+            <p.icon size={18} className="shrink-0 text-muted-foreground" />
+            <div className="min-w-0 flex-1">
+              <div className="text-body font-semibold">{p.title}</div>
+              <div className="text-small text-muted-foreground">{p.description}</div>
+            </div>
+            <CaretRight size={14} className="shrink-0 text-muted-foreground" />
+          </Link>
+        </li>
+      ))}
+    </ul>
   )
 }
 

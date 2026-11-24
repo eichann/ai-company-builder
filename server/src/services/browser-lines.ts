@@ -391,7 +391,15 @@ export function createBrowserLineService(deps: BrowserLineDeps) {
   }
 
   function grantsView(member: Member): BrowserLineGrantsView {
-    const lines = load().lines.filter(l => l.row.status === 'approved').map(l => ({ ...refOf(l), label: lineName(l) }))
+    const writesOf = (l: LoadedLine) => l.row.line.writes !== undefined
+    const lines = load().lines.filter(l => l.row.status === 'approved').map(l => ({ ...refOf(l), label: lineName(l), writes: writesOf(l) }))
+    // The 「使える人」 page greys a line still waiting for its review: no approved row yet, a pending one (names only).
+    const waiting: BrowserLineGrantsView['waiting'] = []
+    for (const l of load().lines) {
+      if (l.row.status !== 'pending' || lines.some(a => a.site === l.row.site && a.line === l.row.name)) continue
+      if (waiting.some(w => w.site === l.row.site && w.line === l.row.name)) continue
+      waiting.push({ site: l.row.site, line: l.row.name, label: lineName(l), writes: writesOf(l) })
+    }
     const rows = repo(member.companyId).grants().filter(g => {
       const joined = memberships.joinedAt(member.companyId, g.userId)
       return typeof joined === 'string' && g.grantedAt >= joined
@@ -415,7 +423,7 @@ export function createBrowserLineService(deps: BrowserLineDeps) {
         })
       }
     }
-    return { lines, grants }
+    return { lines, waiting, grants }
   }
 
   const DEDUPE_RE = /^browser_shape:([a-z][a-z0-9_]{0,39}):([0-9.]{5,14}):([a-z][a-z0-9_]{0,39})$/

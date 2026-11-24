@@ -19,6 +19,9 @@ import {
   agentEventViewersSchema,
   agentSandboxSchema,
   agentBrowserSchema,
+  browserDeviceSchema,
+  browserDevicesSchema,
+  browserLineGrantsSchema,
   agentStopSchema,
   recordSettingsSchema,
   secondOpinionSchema,
@@ -934,6 +937,42 @@ export const agentBrowserApi = {
   /** A member's own mode; null = follow the company again. */
   setOverride: (companyId: string, userId: string, mode: BrowserOperationMode | null) =>
     getData(`/api/companies/${enc(companyId)}/agent-browser/overrides/${enc(userId)}`, agentBrowserSchema, { method: 'PUT', body: { mode } }),
+}
+
+// ---------------------------------------------------------------------------
+// 「ブラウザ操作に使う PC」 and 「使える人」 (agent-browser.md "This PC's registration", "Per-line grants"):
+// shapes from shared/types/browser-devices.ts and browser-lines.ts. Owners/admins (others 403).
+// ---------------------------------------------------------------------------
+
+export type { BrowserDeviceState, BrowserDeviceView, BrowserDevicesList } from '../../../shared/types/browser-devices'
+export type { BrowserLineGrantsView, BrowserLineRef } from '../../../shared/types/browser-lines'
+
+export const browserPcsApi = {
+  list: (companyId: string) => getData(`/api/companies/${enc(companyId)}/browser-devices`, browserDevicesSchema),
+  /** 使えるようにする: from 確認待ち only. */
+  enable: (companyId: string, deviceId: string) =>
+    getData(`/api/companies/${enc(companyId)}/browser-devices/${enc(deviceId)}/enable`, browserDeviceSchema, { method: 'POST' }),
+  /** 止める: final (the member registers again to use the PC again). */
+  revoke: (companyId: string, deviceId: string) =>
+    getData(`/api/companies/${enc(companyId)}/browser-devices/${enc(deviceId)}/revoke`, browserDeviceSchema, { method: 'POST' }),
+}
+
+/** One grant change: the exact approved row for `allowed: true`; `false` takes away every grant of the person on the line. */
+export interface BrowserLineGrantChange {
+  site: string
+  line: string
+  meaningHash: string
+  mechanicsHash: string
+  allowed: boolean
+}
+
+export const browserPeopleApi = {
+  get: (companyId: string) => getData(`/api/companies/${enc(companyId)}/browser-line-grants`, browserLineGrantsSchema),
+  set: (companyId: string, userId: string, change: BrowserLineGrantChange) =>
+    getData(`/api/companies/${enc(companyId)}/browser-line-grants/${enc(userId)}`, browserLineGrantsSchema, {
+      method: 'PUT',
+      body: { site: change.site, line: change.line, meaningHash: change.meaningHash, mechanicsHash: change.mechanicsHash, allowed: change.allowed },
+    }),
 }
 
 // ---------------------------------------------------------------------------
