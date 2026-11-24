@@ -68,6 +68,9 @@ const LATER_TABLES = [
   // private-folders.md "Holding: the member's upload": what members handed over with their tickets.
   'holding_items',
   'holding_files',
+  // minutes.md 「届いた議事録を AI が自動で読む」: a series' 読まない, and each member's setting.
+  'meeting_series_off',
+  'meeting_auto_read',
 ]
 /** Indexes later builds add on a table that was there before. */
 const LATER_INDEXES = [

@@ -17,7 +17,7 @@ import { migrateNotificationsForUser, notificationSchema } from './schema/notifi
 import { migrateOutboundAttachments, migrateOutboundSendSources, outboundMailSchema } from './schema/outbound-mail'
 import { migrateDepartmentRuleSubject, migrateGroupRuleSubject, migrateRuleAndManagerCompanies, permissionSchema } from './schema/permissions'
 import { migratePluginInstallKeyReference, migratePluginOperationCreates, migratePluginTables, pluginSchema } from './schema/plugins'
-import { migrateMeetingAutoSeries, migrateRecordLedgerDelivery, migrateRecordLedgerProvenance, migrateRecordLinkCreator, migrateRecordPersonalOwner, migrateRecordTypeSources, migrateRecordViewerSets, migrateRecordViewers, recordSchema } from './schema/records'
+import { migrateMeetingAutoRead, migrateMeetingAutoSeries, migrateRecordLedgerDelivery, migrateRecordLedgerProvenance, migrateRecordLinkCreator, migrateRecordPersonalOwner, migrateRecordTypeSources, migrateRecordViewerSets, migrateRecordViewers, recordSchema } from './schema/records'
 import { migrateMemberAbsenceHistory, migrateMemberWorkSwitches, taskSchema } from './schema/tasks'
 import { migrateSkillUseColumns, skillUseSchema } from './schema/skill-uses'
 import { securityAlertSchema } from './schema/security-alerts'
@@ -45,7 +45,7 @@ import { browserDeviceSchema } from './schema/browser-devices'
 export { migrateCompanyFolderKind, migrateInvitationClaims } from './schema/company'
 export { migrateDepartmentRuleSubject, migrateGroupRuleSubject, migrateRuleAndManagerCompanies } from './schema/permissions'
 export { migratePluginInstallKeyReference, migratePluginOperationCreates, migratePluginTables } from './schema/plugins'
-export { migrateMeetingAutoSeries, migrateRecordLedgerDelivery, migrateRecordLedgerProvenance, migrateRecordPersonalOwner, migrateRecordTypeSources, migrateRecordViewerSets, migrateRecordViewers } from './schema/records'
+export { migrateMeetingAutoRead, migrateMeetingAutoSeries, migrateRecordLedgerDelivery, migrateRecordLedgerProvenance, migrateRecordPersonalOwner, migrateRecordTypeSources, migrateRecordViewerSets, migrateRecordViewers } from './schema/records'
 export { migrateConnectorProviders } from './schema/connectors'
 export { migrateFixedPayloads } from './schema/fixed-payloads'
 export { migrateOutboundAttachments, migrateOutboundSendSources } from './schema/outbound-mail'
@@ -139,6 +139,8 @@ export function initDatabase(conn: Database.Database = sqlite) {
   // Members-only records (records.md "Members-only records").
   migrateRecordViewers(conn)
   migrateMeetingAutoSeries(conn)
+  // 「届いた議事録を AI が自動で読む」: the members of that day start at off, once (minutes.md).
+  migrateMeetingAutoRead(conn)
   migrateAgentEventSandbox(conn)
   // 「もう一方の AI に聞く」: made once, on for the companies that exist then (agents.ts).
   migrateSecondOpinionSetting(conn)

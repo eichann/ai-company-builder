@@ -189,6 +189,27 @@ export interface MeetingArrival {
   series: boolean
   /** The caller set this series to be read automatically. */
   autoSeries: boolean
+  /**
+   * The caller's choice for this series: `auto` (次から自動で読む), `off` (次から自動で読まない) or
+   * null (none: their 「届いた議事録を AI が自動で読む」 setting decides). Absent from an older server.
+   */
+  seriesChoice?: 'auto' | 'off' | null
+  /**
+   * The reading was asked by the server for its reader (their series or their setting), not by a
+   * press. Absent from an older server.
+   */
+  askedAutomatically?: boolean
+}
+
+/**
+ * `GET|PUT /api/companies/:id/me/minutes/auto-read` — 「届いた議事録を AI が自動で読む」, the caller's
+ * own setting. PUT `{ mode }`. `chosen`: the member chose it themself (false: the starting value —
+ * `off` for members from before the setting, `outside` for those who joined after — so the app may
+ * suggest 「社外の人がいる会議だけ」).
+ */
+export interface MeetingAutoReadSetting {
+  mode: 'outside' | 'all' | 'off'
+  chosen: boolean
 }
 
 /**
@@ -215,8 +236,14 @@ export interface MeetingSkipResult {
   version: number
 }
 
-/** `PUT …/me/minutes/item/:recordId/auto-series { auto }` — 「この定例は次から自動で読む」 (the caller's own). */
+/**
+ * `PUT …/me/minutes/item/:recordId/auto-series { auto }` — 「この定例は次から自動で読む」 (the caller's own).
+ * `auto`: true (読む), false (読まない: kept, stronger than the member's setting) or null (none: the
+ * setting decides; an older server answers 400).
+ */
 export interface MeetingAutoSeriesResult {
   recordId: string
   autoSeries: boolean
+  /** Absent from an older server. */
+  seriesChoice?: 'auto' | 'off' | null
 }

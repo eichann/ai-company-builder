@@ -306,6 +306,46 @@ export function migrateMeetingAutoSeries(conn: Database.Database): void {
 }
 
 /**
+ * 「届いた議事録を AI が自動で読む」 (minutes.md "Automatic reading by the member's setting", 4b-4
+ * design memo 1.1). Two additive tables:
+ * - `meeting_series_off`: a member's 「この定例は次から自動で読まない」 kept as a row (a series then has
+ *   three choices: a row in `meeting_auto_series` = 読む, here = 読まない, neither = the setting
+ *   decides). Kept apart from `meeting_auto_series` on purpose: an older build reads every row there
+ *   as 読む, so 読まない written there would be read as its opposite after a rollback.
+ * - `meeting_auto_read`: each member's setting (`outside` / `all` / `off`); `chosen` 0 = the starting
+ *   value. Made once: when the table is created, every member of every company then gets `off`
+ *   (owner decision D1-1: nobody's AI use grows without their choice); a member who joins later has
+ *   no row and starts at `outside` (`NEW_MEMBER_AUTO_READ`). Never run again (the table exists).
+ */
+export function migrateMeetingAutoRead(conn: Database.Database): void {
+  conn.exec(`
+    CREATE TABLE IF NOT EXISTS meeting_series_off (
+      company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+      user_id TEXT NOT NULL,
+      series_key TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      PRIMARY KEY (company_id, user_id, series_key)
+    );
+  `)
+  const exists = conn.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'meeting_auto_read'").get()
+  if (exists) return
+  conn.transaction(() => {
+    conn.exec(`
+      CREATE TABLE IF NOT EXISTS meeting_auto_read (
+        company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+        user_id TEXT NOT NULL,
+        mode TEXT NOT NULL CHECK (mode IN ('outside', 'all', 'off')),
+        chosen INTEGER NOT NULL DEFAULT 0 CHECK (chosen IN (0, 1)),
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (company_id, user_id)
+      );
+    `)
+    conn.prepare("INSERT OR IGNORE INTO meeting_auto_read (company_id, user_id, mode, chosen, updated_at) SELECT company_id, user_id, 'off', 0, ? FROM memberships")
+      .run(new Date().toISOString())
+  })()
+}
+
+/**
  * Who made a file link (records.md "Links into .personal/", owner decision 2026-11-03): a link into
  * a `.personal/` folder is shown to that member alone. Additive and nullable: older rows stay unknown.
  */

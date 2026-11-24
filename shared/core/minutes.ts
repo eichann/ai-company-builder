@@ -46,6 +46,50 @@ export const MEETING_ATTENDEES_ACTION = 'attendees_joined'
 export const MEETING_ARRIVED_DAYS = 3
 
 /**
+ * Whether a meeting had someone from outside the company: the count the intake stored
+ * (`external_count`, from the event's list at discovery). One reading for every rule that asks —
+ * a member's 「社外の人がいる会議だけ」 automatic reading and a set watch's `outside_attendee` guard —
+ * so the two never disagree. Anything but a positive number (none stored, an older row) is no.
+ */
+export function hasOutsideAttendee(externalCount: unknown): boolean {
+  return typeof externalCount === 'number' && Number.isFinite(externalCount) && externalCount > 0
+}
+
+/**
+ * 「届いた議事録を AI が自動で読む」 (4b-4 design memo §1, version 1.1): each member's own choice of
+ * which arriving meetings their AI reads without a press. `outside`: meetings with someone from
+ * outside (recommended); `all`: every meeting they attended; `off`: none (a press only).
+ */
+export const MEETING_AUTO_READ_MODES = ['outside', 'all', 'off'] as const
+export type MeetingAutoReadMode = typeof MEETING_AUTO_READ_MODES[number]
+export const isMeetingAutoReadMode = (v: unknown): v is MeetingAutoReadMode => (MEETING_AUTO_READ_MODES as readonly unknown[]).includes(v)
+/**
+ * A member who never chose (owner decision D1-1): someone who joins from now on starts with
+ * 「社外の人がいる会議だけ」. Members of a company when the setting was made were stored `off` once,
+ * so nobody's AI use grows without their choice.
+ */
+export const NEW_MEMBER_AUTO_READ: MeetingAutoReadMode = 'outside'
+
+/**
+ * A member's choice for one recurring series (「この定例は次から自動で読む／読まない」): `auto`,
+ * `off`, or null — none: the member's own setting decides. The series' choice is stronger than the
+ * setting both ways.
+ */
+export type MeetingSeriesChoice = 'auto' | 'off' | null
+
+/**
+ * Whether a member's AI reads an arriving meeting they attended without a press: the series'
+ * choice first, then their setting (`outside` asks `hasOutsideAttendee` of the stored count).
+ */
+export function meetingAutoReads(m: { series: MeetingSeriesChoice; mode: MeetingAutoReadMode; externalCount: unknown }): boolean {
+  if (m.series === 'auto') return true
+  if (m.series === 'off') return false
+  if (m.mode === 'all') return true
+  if (m.mode === 'outside') return hasOutsideAttendee(m.externalCount)
+  return false
+}
+
+/**
  * Whether a calendar event is one its people marked private (Google's `visibility` private /
  * confidential): such a meeting is not recorded at all (owner decision 2026-11-04).
  */

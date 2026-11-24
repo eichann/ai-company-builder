@@ -239,9 +239,16 @@ export interface RecordRepository {
   removeMembers(id: string, userIds: readonly string[], sets: readonly RecordSetSubject[]): { users: string[]; sets: RecordSetSubject[] }
   /** A member left the company: they are on no members-only record's list any more (re-joining starts from nothing). */
   forgetMember(userId: string): void
-  /** The recurring series (digests) a member set to 「自動で読む」 (minutes.md "Meetings for their attendees"). */
-  meetingAutoSeries(userId: string): string[]
-  setMeetingAutoSeries(userId: string, seriesKey: string, auto: boolean, at: string): void
+  /**
+   * A member's choices per recurring series (digest → `auto` 読む / `off` 読まない; a series not in it
+   * has none: their setting decides). minutes.md "Meetings for their attendees".
+   */
+  meetingSeriesChoices(userId: string): Map<string, 'auto' | 'off'>
+  /** Set one series' choice (null = none); 読む and 読まない are never both kept. */
+  setMeetingSeriesChoice(userId: string, seriesKey: string, choice: 'auto' | 'off' | null, at: string): void
+  /** A member's 「届いた議事録を AI が自動で読む」 row, or null (never chose and joined after the setting was made). */
+  meetingAutoRead(userId: string): { mode: string; chosen: boolean; updatedAt: string } | null
+  setMeetingAutoRead(userId: string, mode: 'outside' | 'all' | 'off', at: string): void
   /** What discovery knows of one calendar event (minutes.md): its record, a private mark, the back-off. */
   meetingEvent(eventKey: string): MeetingEventRow | null
   setMeetingEvent(eventKey: string, change: Partial<Omit<MeetingEventRow, 'eventKey'>>, at: string): void

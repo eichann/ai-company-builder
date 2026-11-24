@@ -193,6 +193,9 @@ beforeAll(async () => {
 
   // HubSpot: deals and customers (with their domain) imported into the company map.
   expect((await call('mn-owner', 'PUT', `${C()}/records/settings`, { enabled: true })).status).toBe(200)
+  // These members read by a press (「自動では読まない」, as members from before the setting): this file is about
+  // the press and the reading; automatic reading by the setting is meeting-attendees.test.ts's.
+  for (const u of ['mn-sato', 'mn-tanaka', 'mn-yamada']) expect((await call(u, 'PUT', `${C()}/me/minutes/auto-read`, { mode: 'off' })).status).toBe(200)
   const audience = { allDepartments: true, departmentIds: [], everyone: true, addUserIds: [], removeUserIds: [] }
   const key = (await services.keyBroker.create(owner, { service: 'hubspot', displayName: 'HubSpot', secret: HUBSPOT_KEY, audience })).value.keys[0].id
   await enableSampleSales(services.plugins, owner)

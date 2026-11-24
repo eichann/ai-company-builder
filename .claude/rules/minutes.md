@@ -309,7 +309,43 @@ or the decision service stops calling it, or another module uses the older per-m
   `arrived`) it is asked to be read for them as above (actor `CLOCK_ACTOR`, note
   「この定例は自動で読む設定のため、AI に読ませました」); not shared → it stays `arrived`. Only this call sets
   it (the card's button, or 元に戻す after 「次から自動で読まない」): never a press of ［AI に読ませる］, discovery or
-  a default. It is per series, so one press shows on every meeting of that series.
+  a default. It is per series, so one press shows on every meeting of that series. **Three choices**
+  (2026-11-25, 4b-4 design memo 1.1): `auto: true` = 読む (`meeting_auto_series`), `false` = 読まない, kept
+  in its own table `meeting_series_off` — never in `meeting_auto_series`, which an older build reads as 読む
+  —, `null` = none: the member's setting below decides (an older server answers 400). Before this,
+  読まない deleted the row, so a series turned off earlier now reads as none (owner decision D1-4: not
+  recoverable; the app says so once when the member picks 「全部」). The answer and the arrivals carry
+  `seriesChoice` (`auto` / `off` / null).
+- **「届いた議事録を AI が自動で読む」** (the member's setting, 4b-4 design memo 1.1, owner decisions
+  D1-1…D1-4): `GET|PUT /me/minutes/auto-read { mode }` → `MeetingAutoReadSetting { mode, chosen }`
+  (session; the caller's own only — no member id is taken; a bad body 400; PUT 409 `FEATURE_OFF` while
+  会議と議事録 is off) — `outside` 社外の人がいる会議だけ / `all` 自分が出た会議全部 / `off` 自動では読まない.
+  Stored in `meeting_auto_read` (`chosen` 0 = the starting value). **Starting value** (D1-1): the members
+  of every company when the table was made got `off` once (`migrateMeetingAutoRead`, only when it creates
+  the table); a member who joins later has no row and starts at `outside` (`NEW_MEMBER_AUTO_READ`); a
+  member who leaves loses the row (`forgetMember`), so coming back starts as someone new. **Applied by
+  discovery** like the series: when **that member's** discovery finds a meeting **whose list names them**
+  (new, or still `arrived`) and the series' choice is none, `meetingAutoReads` (`shared/core/minutes.ts`)
+  decides — `outside` asks `hasOutsideAttendee` of the stored `external_count`, the same reading a set
+  watch's `outside_attendee` guard makes (one rule, `jobs.md`) — and it is asked to be read for them
+  exactly as ［AI に読ませる］ (the presser's Google tried first; not shared → it stays `arrived`), actor
+  `CLOCK_ACTOR`, note 「自動で読む設定のため、AI に読ませました」. A mode the member **chose** applies to
+  meetings recorded at or after the choice (`updated_at`): choosing never reads the last days' backlog at
+  once; a member who never chose (no row) has no such bound, so their first discovery may read the last
+  3 days' outside meetings still `arrived` (open owner decision). **After the try of the text** (an await)
+  the series' choice and the setting are read again in the synchronous stretch of the write: turned off
+  meanwhile → nothing is asked (Codex review). **Google budget**: the try counts two calls per document
+  against the run's `MEETING_CALLS_PER_RUN` (a spent run leaves it to the next); a try Google refused (not
+  shared, nothing readable) is not made again for that member and meeting for an hour (in the process
+  only: a restart tries once more); Google asking to wait (`GOOGLE_UNAVAILABLE`) stops that member's run
+  and is tried on the next. **One reader**: the first discovery that asks wins (the meeting leaves `arrived`); another
+  attendee's run finds it not arrived and does nothing; a second run writes nothing. **D1-2**: it reads
+  whatever the company's 「自動で進める」 says (the app runs an asked meeting as a press; a scheduled job
+  made from the reading still follows the company's switch); stopping is the AI's emergency stop.
+  **D1-3**: a closed PC keeps the meeting `received` for its reader until it opens; others see 「〇〇さんの
+  AI が読む予定」 (arrivals' `status: asked`, `by`); nothing hands it on. Arrivals add `askedAutomatically`
+  (the latest `request_reading` was the clock's). Tests: `server/tests/integration/meeting-auto-read.test.ts`,
+  `server/tests/unit/meeting-auto-read.test.ts` (each mutation-checked).
 - **「議事録が届きました」**: `GET /me/minutes/arrivals` → `MeetingArrivals { days, items }` — the
   meetings whose list names the caller (`listedRecordIds`, no company-wide scan) that took place in the last `MEETING_ARRIVED_DAYS` (3) days, newest
   first: `status` (arrived / asked / reading / read / skipped / failed), `attendeeCount`, `by` (the
