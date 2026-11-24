@@ -5,6 +5,14 @@ paths:
   - "shared/core/browser-plans.ts"
   - "shared/core/browser-map.ts"
   - "shared/core/browser-read-line.ts"
+  - "shared/core/browser-opened.ts"
+  - "shared/core/browser-write-line.ts"
+  - "server/tests/unit/browser-write-words.test.ts"
+  - "client/connector-maps/**"
+  - "client/browser-lines/**"
+  - "client/scripts/browser-opened.ts"
+  - "client/tests/browser-lstep-map.test.ts"
+  - "client/tests/browser-step-template-line.test.ts"
   - "server/tests/unit/browser-read-words.test.ts"
   - "server/tests/fixtures/browser/**"
   - "shared/types/browser-plans.ts"
@@ -1091,8 +1099,8 @@ here is **provisional** until a second site fits it (§18): nothing is stored or
 Lステップ's facts) is untouched and stays the old path's guard; the new path uses the map's names instead.
 
 - **The map's read side** (`browser-map.ts`): `BrowserMap` = `{ site, version, things }`; a thing has a Japanese
-  `label`, `answer: 'json'` (only JSON is read strictly here; an HTML thing stays on the checker path until one is
-  needed), its `id` field, an optional `parent` (`{ thing, field }`), its `fields` (`BROWSER_FIELD_KINDS`, closed: `id`,
+  `label`, `answer: 'json'` (read strictly; since PR 6 also `html`, "The write words and the first write line"), its
+  `id` field, an optional `parent` (`{ thing, field }`), its `fields` (`BROWSER_FIELD_KINDS`, closed: `id`,
   `id_list`, `id_set` — any order, each as often —, `text`, `date` `YYYY-MM-DD` in the site's own day, `time`
   `HH:MM`, `number`, `flag`; `nullable`; a Japanese heading) and `keys`: every key path the answer may carry
   (`a`, `list[].b`) as `required` (the reader uses it; it stands in every object that should hold it), `optional` (the
@@ -1155,7 +1163,7 @@ Lステップ's facts) is untouched and stays the old path's guard; the new path
   notes — PR 3, next section; content kinds and the verbs' facts come with the write verbs), value-shape words (§14-1),
   the opened list's file and hashes (PR 3), the notice route (PR 4) and the server's re-check of a bound record field (until then PR 4 refuses every
   record-field value),
-  write verbs and predictions (PR 5).
+  write verbs and predictions (built in generalization PR 6: "The write words and the first write line").
 
 Tests: `server/tests/unit/browser-read-words.test.ts` with an **example map** (`server/tests/fixtures/browser/
 example-map.ts`, shaped like stage 0's landing-route keys; not a reviewed map) — the map's refusals; strict read
@@ -1187,13 +1195,14 @@ to the approved row and `carried.json`).
 - **Where a site's map lives**: `client/connector-maps/<site>/` (`index.ts` exports `MAPS`; `map.ts` the map and
   `LSTEP_MAP_READS`, how each thing is read; `readers.ts` answer → state). **Not** in `client/connectors/<site>/`: that
   folder's fingerprint is the approved checker hash, so a map there would move it (memo §8, §15 C10). It imports only
-  itself and `shared/core`; only `electron/main.ts` may import it (`architecture-boundaries.test.ts`, like a connector;
+  itself, `shared/core` and (since PR 6) its own site's connector folder, whose checker it reads a step with; only
+  `electron/main.ts` may import it (`architecture-boundaries.test.ts`, like a connector;
   nothing does yet). Opened lines are data in `client/browser-lines/<site>.ts` (`LINES`, core types only).
 - **The opened list** `shared/browser-connectors/opened.json` (beside approved.json, never touching it; written by
   `cd client && npx tsx scripts/browser-opened.ts`, `--check`; `browser-lstep-map.test.ts` fails when it differs):
   `{ format: 1, provisional: true, maps, lines }`. A map row holds the map itself (the server will read it from here,
   never from `client/`), `mapHash` (`sha256:` of its canonical JSON) and `readersHash` (the map folder's fingerprint,
-  `folderHash`); a changed map **or reader** under the same version is refused (raise the map's version: the version
+  `folderHash`; since PR 6 together with the site's connector folder, `mapReadersHash` — rows already written keep theirs); a changed map **or reader** under the same version is refused (raise the map's version: the version
   names the mechanics a line was approved with). A line row: name, version, site, map version, `status`
   (`pending` → `approved` → `retired`, **written `pending`**, changed only by a reviewed edit, kept by the script),
   `meaningHash`, `mechanicsHash`, the line; a changed line under the same name, version and map version is refused.
@@ -1332,9 +1341,10 @@ path holds the same lock key (below).
   JSON, settable once by trigger) with `state` `all_ok` / `ng` / `not_read` and the plan is `done`. **No value the site
   showed is ever sent or kept.** A second result → `BROWSER_RESULT_DONE`; past the hour → closed `expired`; `cancel`
   closes it. `GET /browser-line-plans/:planId`: the member's own (anyone else's, another company's: the same 404).
-- **No plan of writes in this build**: no opened line can hold a write (the core's line has no write part), so
+- **No plan of writes in this build**: since PR 6 an opened line may hold writes (`step_template_add`, `pending`), but
   `writeGate` refuses every plan of writes at approve / claim / permit (`BROWSER_LINE_WRITES_NOT_YET`) — also one a
-  later build left in the database. The routes and the state table exist so that **this build is the rollback floor**
+  later build left in the database — and `create` refuses an inspection of a line that writes (it would pass the
+  「見るだけ」 gate) with the same code. The routes and the state table exist so that **this build is the rollback floor**
   of the first build that writes (below, deployment.md).
 - **The write state table** (`browser-line-steps.ts`, "Executions with several writes" row by row; tables
   `browser_line_executions`, **`browser_execution_steps`** — one row per write, a trigger allows exactly the table's
@@ -1463,6 +1473,90 @@ nothing logged).
 Each guard mutation-checked; kept on purpose: the address check
 after building (the description check already refuses what it would), the notices' rebuild beyond the merge (the core's
 notices hold only those fields) and `later` → unreadable in the result (a read-only line has no after word).
+
+## The write words and the first write line (generalization PR 6: data and words; nothing writes with them yet)
+
+Design memo 「ブラウザ操作の汎用化」 §3-3 (the verbs), §3-4 (one generic check), §4-1 (the harmless prefix, I4), §6 (today's
+step-template operation as map + one line: "proof the model fits"), §15 C4 / C5 / C7 / C11, §16-2 (付け替え stays manual: a
+step's templates go one hole at a time, stage 0 R15), §16-4, §17, §18. **Nothing writes**: the server still refuses every
+plan of writes and every inspection of a line that writes (`BROWSER_LINE_WRITES_NOT_YET`); the app has no writing path for
+lines; the new line is **`pending`** until the owner's test write (PR 7). Every shape is **provisional** (§18). **The old
+path is unchanged** (`client/connectors/lstep/`, `lstep@0.6.3` and its approved declaration and checker hashes); old and
+new take the same lock key for a step.
+
+- **The write part** (`shared/core/browser-write-line.ts`; knows no site): `BrowserOpenedLine.writes?` =
+  `[{ read, verb, field, value }]` (absent = an inspection; its meaning hash unchanged). `browserLineWritesProblem` (asked by
+  `browserOpenedLineProblem`, so by the script and the server's loader): the verb in `BROWSER_WRITE_VERBS` (`add_child` only,
+  §17-3; `remove_child` is not a word); the read's thing lists the verb and field in its `writes`; **only the last write may
+  change what existed before** — no verb creates yet, so a line holds one write (§4-1, I4); the written object's id and its
+  parent's are `{ value }` (the server takes the lock from the plan's values, C11); the added value is one the line reads by
+  that value as the thing the map says goes in that field, bound to the account (C5: it exists in this account, it is a
+  template and not any id, and the card shows it).
+- **The map's write facts** (`browser-map.ts`, reviewed with the map, C7): a thing's `writes` (per verb, the fields a line may
+  change and the account-bound thing whose id goes in each — `{ add_child: { templates: 'template' } }`; only an `id_set`,
+  not nullable — where an id lands in an ordered list is not predictable), `delivers` (`none` /
+  `scheduled`, `BROWSER_MAP_DELIVERS`; required with `writes`), and a written thing must hold `account` (and `parent` when it
+  has one). A line can only narrow: it uses what the map lists or nothing.
+- **html things** (`answer: 'html'`): a thing a site shows only in a page's markup (a step's templates). No `keys` (nothing to
+  read strictly); its id always from the address; `readBrowserThing(map, thing, page, reader, id, parentId)` hands the page
+  (≤ `htmlChars`, 5,000,000) and the ids main built the address from to the reviewed reader, which must fail closed; the state
+  must hold exactly the map's fields, the id is the address's (a reader's own refused) and the parent field exactly the parent
+  asked. Anything else is `unreadable` (no key name to tell). Lステップ's reader is the old checker's `view`, imported unchanged
+  (memo §6, §16-7 R3: the same reading the old path approved); the map's `readersHash` covers that folder.
+- **The prediction** (`predictBrowserWrites`, §3-4 step 2): every read's state before, with each write applied —
+  `add_child` adds the value once more (each as often: adding is always visible) — and nothing else. **The judgement**
+  (`judgeBrowserWrites`, I3): the reads before must have made a plan; the reads after are judged by
+  `evaluateBrowserReadLine` (strict read, the objects asked for, every must-hold fact), both under **the plan's account**
+  (a required argument); then every read after must equal the prediction field by field: `as_predicted`, else
+  `not_as_predicted` (naming each read's differing fields) or `unreadable`. Never "done" from the site's answer.
+  **Scope** (independent review): "nothing else changed" is about what the line reads — Lステップ's step reader returns
+  the asked step's templates only, so a template also landing on another step is not seen (the old path's checker reads
+  the same one step; reading every step of the page is an owner decision for PR 7).
+- **The lock** (`browserLineWriteLocks`, C11): `browserObjectLockKey` with the written thing's id and parent fields from the
+  plan's values — for `reminder_step` byte-equal to the old path's `browserLockKey` (`lstep.reminder_step`, target
+  `{ reminder, step }`).
+- **The meaning** (§16-5): a line's `writes`, and for each thing it writes that thing's `writes` and `delivers`, are part of
+  its meaning (a member's grant); added only when present, so an inspection's meaning hash never moves (`landing_inspect`'s
+  is the same on 1.0.1 and 1.0.2).
+- **Lステップ map 1.0.2** (`client/connector-maps/lstep/`): adds `reminder` (`GET /api/episodes/{id}`: not hidden, every step
+  naming it, none twice), `reminder_step` (html, `GET /line/episode/show/{reminder}`: `templates` as the old checker reads
+  them; `writes: { add_child: { templates: template } }`, `delivers: scheduled`, account + parent held, the old declaration's `shared`
+  sentence as its note), `step_timing` (`GET /api/episode-steps/{id}`: the site's text), `template_folder` (an entry of
+  `GET /api/template-groups`, 「未分類」 `0`) and `template` (an entry of `GET /api/templates?group=&page=`: text only —
+  `form_type` 8 —, 「未分類」's `group: null` read as folder `0`). Key names only from the old path's records (design memo
+  §34–§36, §39–§41); **the full key sets are not confirmed** (the old readers are lenient), so strict read stops on a real
+  answer with a key more until a read-only confirmation lists them (PR 7). `LSTEP_MAP_WRITES` is the old declaration's
+  write word for word (mechanics). The template list's envelope is `null` (unconfirmed). `landing_inspect` gets a row on
+  1.0.2, `pending` (the readers moved, its meaning did not: carrying its grants is the owner's "compatible" call, Q15); its
+  approved row on 1.0.1 is unchanged. Until that call the read runner (PR 5a), handed the bundled map 1.0.2, refuses the
+  inspection (`not-approved`): nothing calls it yet, but approving the 1.0.2 row (with `grantsFrom` the 1.0.1 row's
+  mechanics hash) must come before PR 5b wires it. `browser-read-line-runner.test.ts` hands the runner the 1.0.2 row as
+  approved and checks it has the 1.0.1 row's meaning.
+- **The line** `step_template_add` 「リマインダの段にテンプレートを足す」 (`client/browser-lines/lstep.ts`, **`pending`**):
+  values `reminder`, `step`, `template_folder`, `template` (all `target` ← `site_fact`, §16-4); reads the reminder, the step
+  (parent: the reminder), its timing (parent: the reminder) and the template (parent: its folder); one write
+  `add_child(step.templates, template)`; no check word (the old type had none, memo §6); shows the reminder's name, the
+  step's templates, the timing, the template's name and body.
+- **Not yet** (PR 7 and later): the html reader's own account (the page's `lm-account-id`, which the old checker read
+  from the same page; the new path reads the marker before and after the reads instead); the reading code for html things and value-named folders (PR 5a reads JSON objects and list
+  entries whose folder comes from an earlier read); the plan of writes on the server (matching the plan's writes to the
+  line's, the locks from the values); the app's write (matching `LSTEP_MAP_WRITES`, the CSRF value); the card's before /
+  after rows; reading the bodies of the templates already on the step (the old facts read them; a line's reads are fixed,
+  so this needs a core word); the owner's test write on a test reminder.
+
+Tests: `server/tests/unit/browser-write-words.test.ts` (an example map: the map's write facts and html things refused
+shape by shape; an html read — the address's id, the parent asked, a reader's own id / another parent / an extra field /
+a throw / not a page / too long refused —; a line's writes refused — a field or thing the map does not let, an unknown
+verb, two writes, an object or parent not named by the plan, a value not read or read outside the account —; an
+inspection's meaning unmoved by the map's writes, a line's writes and a written thing's reach moving it; the prediction and
+the judgement), `client/tests/browser-step-template-line.test.ts` (map 1.0.2's new key lists and readers on made-up answers
+of the recorded shapes, each refusal; the step's templates equal to the old checker's reading; the line `pending` with no
+business word; the write the old declaration's; exactly one template added → `as_predicted`, anything else not; the account,
+a read not whole, another reminder or folder → `unreadable` / `wrong-parent`; the shared note on the card; the lock key equal
+to the old path's; the reader fingerprint covering the connector folder), `browser-lines.test.ts` (an approved, granted
+write line is never made an inspection), `browser-read-words.test.ts` (§17-2 over `browser-write-line.ts`, with the lines'
+value names), `architecture-boundaries.test.ts` (a map may import its own site's connector, never another's).
+Each guard mutation-checked (33 mutations, after the independent review too; two redundant checks removed, their cases covered by the remaining ones).
 
 ## The operator and the preview (PR 6b-1: built, switched off; nothing in the app calls it)
 

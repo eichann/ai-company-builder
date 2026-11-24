@@ -34,9 +34,18 @@ import type { BrowserPreviewSurface } from '../shared/browser-runner'
 
 const { map, reads, readers } = lstepMap()
 const line = LINES.find(l => l.name === 'landing_inspect')!
-/** The line's row in the opened list on this map version (reviewed: approved on 1.0.1). */
-const lineRow = (JSON.parse(readFileSync(OPENED_FILE, 'utf8')) as BrowserOpenedFile).lines
+const openedLines = (JSON.parse(readFileSync(OPENED_FILE, 'utf8')) as BrowserOpenedFile).lines
+/** The line's row in the opened list on this map version. */
+const currentRow = openedLines
   .find(l => l.site === map.site && l.name === line.name && l.version === line.version && l.mapVersion === map.version)!
+/** Its approved row (map 1.0.1, owner decision on #818). */
+const approvedRow = openedLines.find(l => l.site === map.site && l.name === line.name && l.version === line.version && l.status === 'approved')!
+/**
+ * The row the runner is handed: this map version's, as approved. Map 1.0.2 (generalization PR 6) added things this line
+ * does not read, so its row on 1.0.2 is `pending` until the owner calls the readers' change compatible (Q15); the
+ * runner's own rules are what these tests hold, and `not-approved` for a pending row is tested below.
+ */
+const lineRow = { ...currentRow, status: 'approved' as const }
 
 /** How each thing is addressed: the map's reads (1.0.1: the list's envelope as stage 0 recorded it, 追記2). */
 const ADDRESSES: Record<string, BrowserThingAddress> = {
@@ -214,8 +223,10 @@ test('a good copy: only the line\'s reads, in order, the marker before and after
   assert.deepEqual(reported, [])
 })
 
-test('the line is the approved row of the opened list on this map version', () => {
-  assert.equal(lineRow.status, 'approved')
+test('the line has a row on this map version with the meaning of its approved row (a grant can carry, Q15)', () => {
+  assert.equal(approvedRow.mapVersion, '1.0.1')
+  assert.ok(currentRow, 'the bundled map version has a row for the line')
+  assert.equal(currentRow.meaningHash, approvedRow.meaningHash)
 })
 
 test('the inspection\'s result goes to the server in its own words only — each read\'s status, each check\'s mark, never a value', async () => {

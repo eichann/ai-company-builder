@@ -1,5 +1,5 @@
 /**
- * Lステップ's map 1.0.1 (「サイトの地図」, generalization PR 3, completed in PR 4; agent-browser.md "The first map and the
+ * Lステップ's map 1.0.2 (「サイトの地図」, generalization PR 3, completed in PR 4, extended in PR 6; agent-browser.md "The first map and the
  * inspection line"). Reviewed data. Its things and every key of their JSON answers are exactly what stage 0 recorded
  * (2026-11-24, read only, the owner's login: 「ブラウザ操作の汎用化_段0の結果」 R4, R8, R10, R11) and, for 1.0.1, the full
  * key sets confirmed afterwards (same day, 「追記2：項目の全部の確かめ」: four routes — the 11/12, 11/19 and 11/26 rounds' and
@@ -30,6 +30,33 @@
  * read before and after the reads); an action carries the site's warning that actions can be shared (R3: three actions
  * were used by several routes, one by eight).
  *
+ * **1.0.2** (PR 6, design memo §6: today's 「リマインダの段にテンプレートを足す」 as map + one line) adds what that operation
+ * reads and writes — only key names the old path's readers recorded from the owner's read-only windows (design memo
+ * §34–§36, §39–§41; `client/connectors/lstep/`), no value. Their **full key sets are not confirmed yet** (the old readers
+ * are lenient: they read the keys they need and pass others): strict read then stops on a real answer with a key more
+ * (availability, never a wrong write) until a read-only confirmation lists them — part of approving the line (PR 7).
+ * - `reminder` (リマインダ) — `GET /api/episodes/<id>` (§39): `id`, `name`, `hid_at` (must be null: a hidden reminder is
+ *   not read), `steps[]` with `id` and `episode_id` (each must name this reminder); `order`, `type` and every other key of
+ *   a step (`order`, `step_days`, `step_time`, `step_type`, `step_minutes`, `skip`, `initial`, `egg_id`,
+ *   `member_query_id`, `action_id`) not compared — their meaning is not confirmed; the step's timing is read as the
+ *   site's own text (`step_timing`).
+ * - `reminder_step` (リマインダの段) — an **html** thing: the step's attached templates are only in the reminder's page
+ *   `GET /line/episode/show/<reminder>` (§41: the rows of `#template_confirm_<step>`, each with its `openModal(…)` and
+ *   delete form; plus slots in the step's box, the 11/20 capture). Its reader is the old path's checker `view`, unchanged
+ *   (`readers.ts`: the same reading the old path approves, memo §16-7 R3). `templates` is the step's template ids in any
+ *   order, each as often (the same template may stand in two holes). Bound to the account and to its reminder; it carries
+ *   the old declaration's `shared` note word for word; its one write is `add_child(templates)` and it `delivers`
+ *   `scheduled` (memo §37: the owner who runs Lステップ — people who have the step's time still ahead, at that time).
+ * - `step_timing` (段の時刻) — `GET /api/episode-steps/<step>` (§40): `episode_step_id` (its id), `episode_id` (its
+ *   reminder), `step_timing_text` (the site's own words, never parsed); `episode_group_id`, `episode_name` not compared.
+ * - `template_folder` (テンプレートのフォルダ) — one entry of `GET /api/template-groups` (§36): `id` (「未分類」 is `0`, §40),
+ *   `name`; `order`, `item_count` not compared. Named as a template's parent only.
+ * - `template` (テンプレート) — one entry of `GET /api/templates?group=<folder>&page=<n>` (§34, §36, §40): `id`, `name`,
+ *   `content_text` (its body), `form_type` (only 8, text: any other kind is not read — the old path's rule, kept in the
+ *   reader), `group` (`{ id, name }`, or null in 「未分類」, read as folder `0`: listed `optional` so the core lets it be null — the
+ *   reader still requires it); `created_at`, `editor_version`, the
+ *   folder's `name` not compared.
+ *
  * Never read: `GET /api/landings/<id>?copy=1` (it may create something on the site's side; stage 0 never called it) —
  * no read here carries a query but the folder list's own `group` and `page` (`LSTEP_MAP_READS`, tested).
  */
@@ -37,7 +64,7 @@ import type { BrowserMap } from '../../../shared/core/browser-map'
 
 export const LSTEP_MAP: BrowserMap = {
   site: 'lstep',
-  version: '1.0.1',
+  version: '1.0.2',
   account: { label: 'LINE アカウント' },
   things: {
     landing: {
@@ -112,6 +139,75 @@ export const LSTEP_MAP: BrowserMap = {
         note: 'アクションは、ほかの流入経路と共有されていることがあります。同じアクションを指す流入経路は、どれも同じ動きをします。',
       },
     },
+    reminder: {
+      label: 'リマインダ', answer: 'json', id: 'id',
+      fields: {
+        id: { kind: 'id', label: '番号' },
+        name: { kind: 'text', label: 'リマインダの名前' },
+        steps: { kind: 'id_set', label: '段' },
+      },
+      keys: {
+        id: 'required', name: 'required', hid_at: 'required', order: 'ignored', type: 'ignored', steps: 'required',
+        'steps[].id': 'required', 'steps[].episode_id': 'required', 'steps[].order': 'ignored', 'steps[].step_days': 'ignored',
+        'steps[].step_time': 'ignored', 'steps[].step_type': 'ignored', 'steps[].step_minutes': 'ignored', 'steps[].skip': 'ignored',
+        'steps[].initial': 'ignored', 'steps[].egg_id': 'ignored', 'steps[].member_query_id': 'ignored', 'steps[].action_id': 'ignored',
+      },
+      must_hold: { account: true },
+    },
+    reminder_step: {
+      label: 'リマインダの段', answer: 'html', id: 'step', id_from: 'address',
+      parent: { thing: 'reminder', field: 'reminder' },
+      fields: {
+        step: { kind: 'id', label: '段の番号' },
+        reminder: { kind: 'id', label: 'リマインダ' },
+        templates: { kind: 'id_set', label: '段のテンプレート' },
+      },
+      writes: { add_child: { templates: 'template' } },
+      delivers: 'scheduled',
+      must_hold: {
+        account: true,
+        parent: true,
+        note: '全部の回で共有のリマインダです。ほかの回でも、この段をまだ迎えていない人に届きます（もう過ぎた人には届きません）。',
+      },
+    },
+    step_timing: {
+      label: '段の時刻', answer: 'json', id: 'step',
+      parent: { thing: 'reminder', field: 'reminder' },
+      fields: {
+        step: { kind: 'id', label: '段の番号' },
+        reminder: { kind: 'id', label: 'リマインダ' },
+        timing: { kind: 'text', label: '段の時刻（サイトの表示）' },
+      },
+      keys: {
+        episode_step_id: 'required', episode_id: 'required', step_timing_text: 'required',
+        episode_group_id: 'ignored', episode_name: 'ignored',
+      },
+      must_hold: { account: true, parent: true },
+    },
+    template_folder: {
+      label: 'テンプレートのフォルダ', answer: 'json', id: 'id',
+      fields: {
+        id: { kind: 'id', label: '番号' },
+        name: { kind: 'text', label: 'フォルダの名前' },
+      },
+      keys: { id: 'required', name: 'required', order: 'ignored', item_count: 'ignored' },
+      must_hold: { account: true },
+    },
+    template: {
+      label: 'テンプレート', answer: 'json', id: 'id',
+      parent: { thing: 'template_folder', field: 'folder' },
+      fields: {
+        id: { kind: 'id', label: '番号' },
+        folder: { kind: 'id', label: 'フォルダ' },
+        name: { kind: 'text', label: 'テンプレートの名前' },
+        body: { kind: 'text', label: '本文' },
+      },
+      keys: {
+        id: 'required', name: 'required', content_text: 'required', form_type: 'required', group: 'optional',
+        'group.id': 'required', 'group.name': 'ignored', created_at: 'ignored', editor_version: 'ignored',
+      },
+      must_hold: { account: true, parent: true },
+    },
   },
 }
 
@@ -132,4 +228,29 @@ export const LSTEP_MAP_READS = {
     envelopeLinkKeys: ['url', 'label', 'page', 'active'],
   },
   action_set: { path: '/api/actions/{id}' },
+  // 1.0.2 (PR 6). The template list's envelope is not confirmed whole (the old reader names `current_page`, `data`,
+  // `last_page`, `per_page`, `total` among others): `envelope: null` until a read-only confirmation lists it (PR 7) —
+  // the reading code reads no list whose envelope the map does not name.
+  reminder: { path: '/api/episodes/{id}' },
+  reminder_step: { path: '/line/episode/show/{parent}', html: true },
+  step_timing: { path: '/api/episode-steps/{id}' },
+  template_folder: { path: '/api/template-groups', list: 'data' },
+  template: { path: '/api/templates', query: ['group', 'page'], pages: { param: 'page', max: 10, perPage: 50 }, folderFrom: 'parent', envelope: null },
+} as const
+
+/**
+ * How each write of the map is sent (mechanics, 1.0.2; hashed with this folder): the old declaration's one write, word for
+ * word (`lstep@0.6.3`: captured on test objects 2026-11-20, its form seen again in §40). `{id}` is the written object's
+ * id, `{value}` the id the line adds; `_token` / `_lm_user_id` are the page's own values the reading code takes, never
+ * compared. Nothing sends with it yet: the app's writing path is a later PR, behind the server's gate.
+ */
+export const LSTEP_MAP_WRITES = {
+  reminder_step: {
+    add_child: {
+      templates: {
+        method: 'POST', path: '/line/episode/step/pack/template', form: { content_id: '{id}', template_id: '{value}' },
+        ignore_body: ['_token', '_lm_user_id'],
+      },
+    },
+  },
 } as const

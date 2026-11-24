@@ -1,5 +1,5 @@
 /**
- * Lステップ's map 1.0.1 and the inspection line (generalization PR 3; agent-browser.md "The first map and the inspection
+ * Lステップ's map (1.0.1, now 1.0.2: its new things are browser-step-template-line.test.ts's) and the inspection line (generalization PR 3; agent-browser.md "The first map and the inspection
  * line"): `client/connector-maps/lstep/`, `client/browser-lines/lstep.ts`, `shared/browser-connectors/opened.json`.
  *
  * Guards (each test fails when its guard is removed):
@@ -49,7 +49,7 @@ test('the map lists exactly the keys stage 0 recorded', () => {
   assert.deepEqual(Object.keys(map.things.action_set.keys).filter(k => k.startsWith('inputs[].')).map(k => k.slice(9)).sort(), [...INPUT_KEYS].sort())
   assert.deepEqual(Object.keys(map.things.landing.keys).filter(k => k.startsWith('custom_params[].')).sort(), ['custom_params[].name', 'custom_params[].var_id'])
   assert.deepEqual(Object.keys(map.things.landing_row.keys).filter(k => k.startsWith('group.')).sort(), ['group.id', 'group.name', 'group.order'])
-  assert.equal(map.version, '1.0.1')
+  assert.equal(map.version, '1.0.2')
 })
 
 // --- made-up answers of those shapes ---
@@ -155,6 +155,8 @@ test('no read carries a query but the folder list\'s own (never ?copy=1)', () =>
   const all = JSON.stringify(reads)
   assert.doesNotMatch(all, /copy/)
   for (const [thing, r] of Object.entries(reads)) {
+    // The one page read (1.0.2): the reminder's page, where the step's templates are (the old checker's read).
+    if ('html' in r) { assert.equal(r.path, '/line/episode/show/{parent}', thing); continue }
     assert.match(r.path, /^\/api\/[a-z-]+(\/\{id\})?$/, thing)
     assert.ok(!r.path.includes('?'))
     if ('query' in r) assert.deepEqual([...r.query], ['group', 'page'])
@@ -257,11 +259,11 @@ test('a new line is written pending; a reviewed status is kept; a changed map un
   const maps = await currentMaps()
   const lines = await currentLines(maps)
   const fresh = JSON.parse(mergeOpened(null, maps, lines)) as BrowserOpenedFile
-  assert.deepEqual(fresh.lines.map(l => l.status), ['pending'])
+  assert.ok(fresh.lines.length >= 2 && fresh.lines.every(l => l.status === 'pending'))
   assert.equal(fresh.provisional, true)
   const approved = { ...fresh, lines: fresh.lines.map(l => ({ ...l, status: 'approved' as const })) }
   const again = JSON.parse(mergeOpened(JSON.stringify(approved), maps, lines)) as BrowserOpenedFile
-  assert.deepEqual(again.lines.map(l => l.status), ['approved'])
+  assert.ok(again.lines.every(l => l.status === 'approved'))
   assert.throws(() => mergeOpened(JSON.stringify(fresh), [{ ...maps[0], readersHash: `sha256:${'0'.repeat(64)}` }], lines), /raise the map's version/)
   assert.throws(() => mergeOpened(JSON.stringify(fresh), maps, [{ ...lines[0], meaningHash: `sha256:${'1'.repeat(64)}` }]), /raise the line's version/)
 })

@@ -8,7 +8,7 @@
  * - **maps**: one row per site map version from `client/connector-maps/<site>/index.ts` (`MAPS`), checked with the core's
  *   `browserMapProblem`: the map itself (so the server reads it from this file, never from client/), `mapHash` = `sha256:`
  *   of its canonical JSON, `readersHash` = the site's map folder (every file, as approved.json's checker hash:
- *   `folderHash`). A version whose map or reader code changed is refused (raise the map's version): the version names
+ *   `folderHash`) together with the site's connector folder, whose checker a map may read with (`mapReadersHash`). A version whose map or reader code changed is refused (raise the map's version): the version names
  *   the mechanics a line was approved with.
  * - **lines**: one row per line from `client/browser-lines/<site>.ts` (`LINES`) × the map version it opens against, checked
  *   with `browserOpenedLineProblem`; `meaningHash` / `mechanicsHash` (`sha256:` of `browserLineMeaning` /
@@ -31,12 +31,23 @@ import {
   type BrowserOpenedFile, type BrowserOpenedLine, type BrowserOpenedLineRow, type BrowserOpenedMapRow,
 } from '../../shared/core/browser-opened'
 import { canonicalJson } from '../../shared/core/fixed-content'
-import { folderHash } from './browser-connectors'
+import { CONNECTORS_DIR, folderHash } from './browser-connectors'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 export const MAPS_DIR = resolve(HERE, '../connector-maps')
 export const LINES_DIR = resolve(HERE, '../browser-lines')
 export const OPENED_FILE = resolve(HERE, '../../shared/browser-connectors/opened.json')
+
+/**
+ * The fingerprint of a site's reading code (generalization PR 6): its map folder, and — since map 1.0.2 reads the step's
+ * templates with the old path's checker unchanged — its connector folder `client/connectors/<site>/` when there is one.
+ * Rows already written keep the hash they were written with (it is stored, never recomputed: checkStoredRows).
+ */
+export function mapReadersHash(mapDir: string, site: string, connectorsDir = CONNECTORS_DIR): string {
+  const connector = join(connectorsDir, site)
+  if (!existsSync(connector)) return folderHash(mapDir)
+  return sha256(`map ${folderHash(mapDir)}\nconnector ${folderHash(connector)}\n`)
+}
 
 const sha256 = (text: string): string => `sha256:${createHash('sha256').update(Buffer.from(text, 'utf8')).digest('hex')}`
 
@@ -48,7 +59,7 @@ export async function currentMaps(mapsDir = MAPS_DIR): Promise<BrowserOpenedMapR
     if (!statSync(dir).isDirectory()) continue
     const mod = await import(pathToFileURL(join(dir, 'index.ts')).href) as { MAPS?: readonly BrowserMap[] }
     if (!Array.isArray(mod.MAPS) || mod.MAPS.length === 0) throw new Error(`${site}/index.ts must export MAPS`)
-    const readersHash = folderHash(dir)
+    const readersHash = mapReadersHash(dir, site)
     for (const map of mod.MAPS) {
       const problem = browserMapProblem(map)
       if (problem) throw new Error(`${site}: the map does not pass: ${problem}`)
