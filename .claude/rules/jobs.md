@@ -2266,7 +2266,8 @@ Code: `shared/core/job-proposals.ts` (ids `jc.` / `jp.` + 32 hex, limits, states
     other: `trigger.NOT_OPENED`), the department Skill it runs and 0–4 department Skills it reads — an unknown key (a name, a
     responsible person, a place, limits) → 400 `BAD_JOB_CANDIDATE` `UNKNOWN_KEY`. The responsible person is the signed-in member;
     the name 「<Skill>（会議のあと）」; it reads no folder (`reads.paths` empty), writes only in `<the run Skill's department>/.personal/
-    たたき台/` (`JOB_SET_WATCH_PROPOSAL_FOLDER`); 30 minutes, 10 a day (O6), a missed one let go after one day; the trees and the
+    提案書/` (`JOB_SET_WATCH_PROPOSAL_FOLDER` = `grant.writes.folder`, owner decision 2026-11-24: the runner makes each run's
+    folder under it, so the runs land at `<department>/.personal/提案書/<YYYY-MM-DD>_<会社>` — "The app runs it"); 30 minutes, 10 a day (O6), a missed one let go after one day; the trees and the
     reasons pinned as a save pins them (`jobs.pinnedDefinition` → `definitionFrom`: a run Skill without a valid `decision.json` →
     `JOB_SKILL_DECISION_MISSING`). An owner / admin may still edit it before approving (a folder to read, other limits): a new
     consent the member accepts.

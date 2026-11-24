@@ -7,7 +7,7 @@
  *   (a name, a responsible person, a place, limits) is taken, the combination must be an opened one, the trees and the reasons
  *   are the server's, the run Skill needs its `decision.json`;
  * - a Skill the member does not read is answered as one that is not there, and is never listed;
- * - the department it writes in (`.personal/たたき台/`) must be the member's to write;
+ * - the department it writes in (`.personal/提案書/`) must be the member's to write;
  * - one per person: not while the member has an approved, active set watch;
  * - only an app that shows schema 5 makes one;
  * - its proposal's job keeps schema 5 through an admin's edit (never made a schema 4), is approved by an owner / admin as any
@@ -161,7 +161,7 @@ describe('the candidate is the server’s, from the member’s choices only', ()
       run: { kind: 'procedure', procedure: { source: 'department_skill', place: DEPT, skill: 'sales-proposal-auto', fingerprint: treeOf(DEPT, 'sales-proposal-auto') } },
       grant: {
         creates: ['task'], outbound: 'none', reads: { paths: [], calls: [], skills: [{ place: DEPT, skill: 'sales-proposal-v1', fingerprint: treeOf(DEPT, 'sales-proposal-v1') }] },
-        writes: { area: 'deliverable', place: DEPT, folder: 'たたき台' }, limits: { minutes: 30, runsPerDay: 10 },
+        writes: { area: 'deliverable', place: DEPT, folder: '提案書' }, limits: { minutes: 30, runsPerDay: 10 },
       },
       missed: { policy: 'skip', expiresAfterMinutes: 1440 },
       decision: DECISION,

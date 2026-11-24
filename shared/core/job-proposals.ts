@@ -196,7 +196,7 @@ export function proposalDefinition(input: JobCandidateInput, pinned: { actingUse
  * A member proposes a set watch from the app (schema 5, 4b-4 PR6b, owner 2026-11-24; jobs.md "Member proposals" "A set watch
  * from the app"): in Settings → 「定期の仕事」 the member chooses one of the opened combinations (`JOB_SET_WATCH_OPENED`), the
  * department Skill it runs and the department Skills it reads — nothing else. The rest is the server's: the responsible person
- * (the signed-in member), the name, where it writes (`.personal/たたき台/` of the member in the run Skill's department), the
+ * (the signed-in member), the name, where it writes (`.personal/提案書/` of the member in the run Skill's department), the
  * limits (owner memo O6: 30 minutes, 10 a day), the wait (one day), the pinned trees and the reasons. Then the same submit →
  * approval → 受け取る as a time job's proposal (an owner / admin still approves: N2 is only a proposal).
  */
@@ -212,7 +212,7 @@ export interface JobSetWatchCandidateInput {
 }
 
 /** The folder in the member's own `.personal` of the Skill's department where each run makes its own folder (server-made). */
-export const JOB_SET_WATCH_PROPOSAL_FOLDER = 'たたき台'
+export const JOB_SET_WATCH_PROPOSAL_FOLDER = '提案書'
 /** A proposed set watch's limits (owner memo 「4b-4」 O6: 1回30分・1日10回) and its wait for the app (one day). */
 export const JOB_SET_WATCH_PROPOSAL_LIMITS = { minutes: 30, runsPerDay: 10 } as const
 export const JOB_SET_WATCH_PROPOSAL_MISSED: JobMissed = { policy: 'skip', expiresAfterMinutes: 24 * 60 }
@@ -258,7 +258,7 @@ const UNPINNED_DECISION = { reasons: [{ code: 'from_skill', label: 'Skill の一
 /**
  * The definition a chosen set watch becomes (schema 5, not yet pinned or parsed — the server pins the trees and the reasons, then
  * runs `parseJobDefinition`): the signed-in member as the responsible person; the minutes route alone; reads the Skills chosen
- * only (no folder); writes only in `<the run Skill's department>/.personal/たたき台/`; the one やること; no mail, no place outside.
+ * only (no folder); writes only in `<the run Skill's department>/.personal/提案書/`; the one やること; no mail, no place outside.
  */
 export function setWatchProposalDefinition(input: JobSetWatchCandidateInput, actingUser: string): Record<string, unknown> {
   return {
