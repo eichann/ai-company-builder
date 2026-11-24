@@ -261,7 +261,8 @@ export function wireBrowserWriteLines<E extends IpcInvokeEvent>(ipc: IpcRegistra
     const got = await http.get(e.companyId, e.planId)
     if (got.kind !== 'ok' || !isMap(got.value) || !isMap(got.value.execution) || !Array.isArray(got.value.execution.steps)) return
     const steps = got.value.execution.steps as Array<Record<string, unknown>>
-    const open = steps.find(s => s.state === 'unknown')
+    // A write still `permitted` there (its report lost, its window not yet past) is as unresolved as an unknown one.
+    const open = steps.find(s => s.state === 'unknown' || s.state === 'permitted')
     e.confirmFrom = open && typeof open.confirmableAt === 'string' ? open.confirmableAt : null
     // A confirm (here or by an admin), or a late sure "done", settled it: take the server's states.
     const states = steps.map(s => String(s.state))

@@ -4,9 +4,13 @@ import { Button, Callout } from '../../../shared/ui/primitives'
 import { STATE_BOX, type StateBoxTone } from '../../../shared/ui/stateStyles'
 import { BROWSER_WRITE_CARD_WORDS as W, type BrowserWriteGetResult, type BrowserWriteView } from '../../../../shared/browser-line-writes'
 import type { BrowserInspectionView } from '../../../../shared/browser-inspection'
-import { confirmBrowserWrite, confirmBrowserWriteValue, runBrowserWrite, type BrowserWriteAnswers, type BrowserWriteOutbound, type BrowserWriteReads } from '../api'
+import { useInterval } from '../../../shared/hooks/useInterval'
+import { confirmBrowserWrite, confirmBrowserWriteValue, getBrowserWriteCard, runBrowserWrite, type BrowserWriteAnswers, type BrowserWriteOutbound, type BrowserWriteReads } from '../api'
 import { WRITE_CARD_UNREADABLE, useBrowserWrite } from '../hooks/useBrowserWrite'
 import { putWrite } from '../writeStore'
+
+/** A write in doubt is read again this often (the server opens the confirm at `confirmableAt`). */
+const UNSETTLED_REFRESH_MS = 15_000
 
 // Confirming and awaiting ［任せる］ are amber (the member's turn), a run in doubt is amber too (they check the site),
 // all done green, a stop grey (design-system.md 「止まっている」の色).
@@ -47,6 +51,12 @@ export const BrowserWriteCard = memo(function BrowserWriteCard({ companyId, card
 }) {
   const { view, message, key } = useBrowserWrite(companyId, cardId, ports.reads)
   const [busy, setBusy] = useState(false)
+  // A write in doubt: main asks the server again so the confirm opens at its time (and a settled one shows).
+  const waiting = view?.result?.confirm !== null && view?.result?.confirm !== undefined && !view.result.confirm.canNow
+  useInterval(() => {
+    void (ports.reads ? getBrowserWriteCard(companyId, cardId, ports.reads) : getBrowserWriteCard(companyId, cardId))
+      .then(r => putWrite(key, r, WRITE_CARD_UNREADABLE)).catch(() => {})
+  }, waiting && !busy ? UNSETTLED_REFRESH_MS : null)
   const press = (call: () => Promise<BrowserWriteGetResult>) => {
     setBusy(true)
     void call()

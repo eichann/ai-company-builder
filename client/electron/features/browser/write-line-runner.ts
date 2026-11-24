@@ -413,7 +413,11 @@ export function createBrowserWriteRunner(deps: BrowserWriteRunnerDeps) {
           try { record('succeeded') } catch { log.warn('[browser] a write\'s result could not be kept') }
           // The next write only once the server kept this one done (StepsLife.tla ServerPermits needs write k−1 done).
           const kept = await report(execution.secret, { index: k, result: 'done', ...(madeId ? { createdId: madeId } : {}) })
-          if (!kept) return result('unknown', 'report-lost', { executionId: execution.executionId })
+          if (!kept) {
+            // The server never kept "done": it settles write k as unknown by its time-out and the person confirms it.
+            states[k - 1] = 'unknown'
+            return result('unknown', 'report-lost', { executionId: execution.executionId })
+          }
         }
         return result('succeeded', null, { executionId: execution.executionId })
       } catch (error) {

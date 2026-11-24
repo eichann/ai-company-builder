@@ -80,7 +80,7 @@ const WRITERS: BrowserLineWriters = {
   },
 }
 
-function harness(o: { openedFile?: unknown; writers?: BrowserLineWriters } = {}) {
+function harness(o: { openedFile?: unknown; writers?: BrowserLineWriters; loseAnswer?: boolean; steps?: unknown[] } = {}) {
   const landings = new Map<string, Record<string, unknown>>([['2597458', landing()]])
   const actions = new Map<string, Record<string, unknown>>([['7001', action([21])]])
   const reads: string[] = []
@@ -109,6 +109,7 @@ function harness(o: { openedFile?: unknown; writers?: BrowserLineWriters } = {})
       if (!steps.beforeSend()) return { sent: false, stage: 'before-send' }
       if (!hooks?.sessionRequest({ method: r.method, url: `https://${HOST}${r.path}`, body: r.body }).allow) return { sent: true, answer: null }
       writes.push(r.path)
+      if (o.loseAnswer) return { sent: true, answer: null }
       const b = JSON.parse(r.body) as Record<string, unknown>
       const id = String(nextId++)
       if (r.path === '/test/actions') { actions.set(id, action([Number(b.tag)])); return { sent: true, answer: { status: 200, body: JSON.stringify({ aid: Number(id) }) } } }
@@ -140,6 +141,7 @@ function harness(o: { openedFile?: unknown; writers?: BrowserLineWriters } = {})
       return ok({ index, permittedAt: new Date().toISOString(), validMs: 5000, createdTarget: index === 2 ? recorded.get(1) ?? null : null })
     }
     if (path.endsWith('/report')) { if (body?.createdId) recorded.set(body.index as number, body.createdId as string); return ok({ outcome: 'applied' }) }
+    if (path.includes('/browser-line-plans/') && init.method === 'GET') return ok({ execution: o.steps ? { steps: o.steps } : null })
     return ok({ execution: null })
   }) as unknown as typeof fetch
   const handlers = new Map<string, (event: IpcInvokeEvent, ...args: unknown[]) => Promise<unknown>>()
@@ -227,4 +229,22 @@ test('as written today (pending), or without the site\'s writers, nothing is pro
   const none = harness({ writers: {} })
   assert.equal(await none.tool().execute({ site: 'lstep', line: 'landing_create', values: PROPOSED }), BROWSER_WRITE_WORDS.notSupported)
   assert.deepEqual([...today.cards, ...none.cards], [])
+})
+
+test('a write in doubt stays in doubt on the card while the server still holds it permitted (its report lost): the confirm stays offered', async () => {
+  const later = new Date(Date.now() + 30_000).toISOString()
+  const h = harness({ loseAnswer: true, steps: [{ index: 1, state: 'permitted', confirmableAt: later }, { index: 2, state: 'pending', confirmableAt: null }] })
+  await h.tool().execute({ site: 'lstep', line: 'landing_create', values: PROPOSED })
+  const id = h.cards[0]
+  for (const n of ['name', 'to_date', 'to_time']) await h.call('browserLines:confirmValue', 1, id, n)
+  const card = await h.call('browserLines:writeCard', 1, id)
+  if (!card.ok) throw new Error('no card')
+  const r = await h.call('browserLines:runWrite', 1, id, card.view.contentHash!)
+  if (!r.ok) throw new Error('no result')
+  assert.equal(r.view.result?.outcome, 'unknown')
+  assert.equal(r.view.result?.unknown.length, 1, 'the write that may have been sent is under 「分からないこと」')
+  assert.equal(r.view.result?.notDone.length, 1, 'only the write surely not sent is under 「していないこと」')
+  assert.equal(r.view.result?.confirm?.from, later)
+  assert.equal(r.view.result?.confirm?.canNow, false)
+  assert.deepEqual(h.writes, ['/test/actions'])
 })
