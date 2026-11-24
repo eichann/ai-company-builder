@@ -414,6 +414,18 @@ export function closesWhenRunEnds(outcome: AiTurnOutcome, status: ConsultationSt
 }
 
 /**
+ * A consultation the member started with 「この作業をする」 (owner memo 「4b-4 挟む部分」 E5 / F-7, PR6): it closes by itself under
+ * the same rules as an automatic run's (`closesWhenRunEnds`) once its AI has worked and the turn ended — `close`; it stays
+ * for good (`keep`) when the turn ended while it was the tab in front (the member saw it end), failed, or the member
+ * wrote in it; else `wait` (still working, waiting for an approval or an answer, not started yet).
+ */
+export function workConsultationStep(status: ConsultationStatus | undefined, hold: ConsultationHold | undefined, automatic: AutomaticConsultation, sawWorking: boolean): 'close' | 'keep' | 'wait' {
+  if (!sawWorking || !status || status.state === 'working' || status.state === 'needs-you') return 'wait'
+  if (closesWhenRunEnds('done', status, hold, automatic)) return 'close'
+  return 'keep'
+}
+
+/**
  * When the member ends the record (完了 / 済んだ / 終わりにする, on the card or with the list's ☑), its
  * automatic consultations close too — also one that stayed open for a review or after a failure,
  * and also the one shown in front (the member ended the thing it was about). Never one the member

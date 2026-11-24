@@ -124,6 +124,8 @@ const ASK_WORDS: Partial<Record<NotificationKind, string>> = {
   job_accept_needed: '受け取ってください',
   job_proposal_returned: '差し戻されました',
   job_proposal: '案が届きました',
+  // A set watch's 見送る (4b-4 PR6): opens 「定期の仕事」, where its ［作ってもらう］ is.
+  job_set_declined: 'AI は作りませんでした',
 }
 
 /** Notices that are no row at all: the morning summary says what あなた待ち already counts. */

@@ -180,6 +180,7 @@ const api: ElectronAPI = {
   getMyJobOccurrences: (companyId: string) => invoke('jobs:occurrences', companyId),
   retryJobOccurrence: (companyId: string, jobId: string, occurrenceId: string) => invoke('jobs:retryOccurrence', companyId, jobId, occurrenceId),
   reconcileJobOccurrence: (companyId: string, jobId: string, occurrenceId: string, key: string, done: boolean) => invoke('jobs:reconcileOccurrence', companyId, jobId, occurrenceId, key, done),
+  sendJobFeedback: (companyId: string, occurrenceId: string, kind: string) => invoke('jobs:feedback', companyId, occurrenceId, kind),
   getJobCandidate: (companyId: string, candidateId: string) => invoke('jobProposals:candidate', companyId, candidateId),
   submitJobProposal: (companyId: string, candidateId: string, fingerprint: string) => invoke('jobProposals:submit', companyId, candidateId, fingerprint),
   getMyJobProposals: (companyId: string) => invoke('jobProposals:mine', companyId),

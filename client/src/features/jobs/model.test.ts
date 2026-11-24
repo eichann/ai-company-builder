@@ -3,7 +3,9 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import type { MyJob, MyJobOccurrence } from '../../../shared/jobs'
-import { acceptedText, occurrenceRows, placeLine } from './model'
+import { acceptanceLines, acceptedText, declinedRows, makeAnywayMessage, occurrenceRows, placeLine } from './model'
+import { JOB_SET_WATCH_OPENED, type JobDefinition } from '../../../../shared/core/jobs'
+import { SET_WATCH_NOT_RUN_NOTE, SET_WATCH_SEEN_NOTE } from '../../../../shared/core/job-words'
 
 const job = (over: Partial<MyJob>): MyJob => ({
   id: 'job.' + '1'.repeat(32), name: '日報', state: 'active', waiting: null, pausedReason: null, trigger: null, placement: 'e',
@@ -64,4 +66,48 @@ test('出した案: the state in the proposer\'s words, 取り下げる only whi
   assert.equal(rows[2].name, '定期の仕事')
   assert.match(rows[2].line, /差し戻されました（理由：先に話をしたい）/)
   assert.match(rows[1].line, /「受け取る」/)
+})
+
+// 4b-4 PR6: the set watch's 受け取る says what the admin approved (memo §2 / §5 / §6) — which records it takes and never takes,
+// when it does not run, who sees its occurrences — and never describes a combination that is not opened as the opened one.
+const setWatchDef = {
+  schema: 5, name: '商談のあと', actingUser: 'u1', trigger: JOB_SET_WATCH_OPENED[0], check: { kind: 'matched_record' },
+  run: { kind: 'procedure', procedure: { source: 'department_skill', place: '法人ソリューション', skill: 'sales-proposal-auto', fingerprint: '0'.repeat(40) } },
+  placement: 'a', missed: { policy: 'skip', expiresAfterMinutes: 1440 },
+  grant: {
+    tools: ['records'], creates: ['task'], routes: ['GET /minutes/:recordId/text'], outbound: 'none', writes: { area: 'none' }, limits: { minutes: 30, runsPerDay: 10 },
+    reads: { paths: [], calls: [], skills: [{ place: '法人ソリューション', skill: 'sales-proposal-v1', fingerprint: '0'.repeat(40) }] },
+  },
+  decision: { reasons: [{ code: 'asked_for_proposal', label: '提案を求められた' }] },
+} as unknown as JobDefinition
+
+test('a set watch\'s 受け取る: its conditions, when it does not run, the Skills read, the reasons, its grant and who sees it', () => {
+  const lines = acceptanceLines(setWatchDef)
+  assert.match(lines[0], /これから来る、条件に合うもの全部/)
+  assert.ok(lines.some(l => /動く条件：.*初めての完了だけ/.test(l)))
+  assert.ok(lines.some(l => /動く条件：社外の人が1人以上出た会議だけ/.test(l)))
+  assert.ok(lines.includes(SET_WATCH_NOT_RUN_NOTE))
+  assert.ok(lines.includes('読む Skill：「法人ソリューション」の Skill「sales-proposal-v1」'))
+  assert.ok(lines.some(l => /判断の理由.*提案を求められた/.test(l)))
+  assert.ok(lines.includes('議事録：動くきっかけになった会議の議事録だけ読む'))
+  assert.ok(lines.some(l => /1日 10回まで。超えた会議では動かさず/.test(l)))
+  assert.equal(lines[lines.length - 1], SET_WATCH_SEEN_NOTE)
+  // A combination that is not opened (a later build's) is never described as this one: no condition lines.
+  const other = { ...setWatchDef, trigger: { ...JOB_SET_WATCH_OPENED[0], guards: ['after_acceptance'] } } as unknown as JobDefinition
+  assert.ok(!acceptanceLines(other).some(l => l.startsWith('動く条件：')))
+  assert.match(acceptanceLines(other)[0], /説明できない条件/)
+})
+
+test('a set watch\'s 見送る is a row with ［作ってもらう］ until it is said; never the meeting\'s name', () => {
+  const declined = occ({ id: 'occ.' + 'd'.repeat(32), name: '商談のあと', state: 'done', outcomeCode: null, report: { decision: 'decline', reason: 'just_met', confidence: 0.3, unconfirmed: [], feedback: [] } })
+  const proceeded = occ({ state: 'done', outcomeCode: null, report: { decision: 'proceed', reason: 'asked', confidence: 0.9, unconfirmed: [], feedback: [] } })
+  const rows = declinedRows([declined, proceeded, occ({})])
+  assert.equal(rows.length, 1)
+  assert.equal(rows[0].heading, '商談のあと（11月22日 10:00）')
+  assert.match(rows[0].line, /作りませんでした（AI は迷いました/)
+  assert.equal(rows[0].makeAnyway, true)
+  assert.equal(declinedRows([{ ...declined, report: { ...declined.report!, feedback: ['made_anyway'] } }])[0].makeAnyway, false)
+  // A 見送る with update proposals has its やること (PR3b): not listed here (its ［作ってもらう］ is on the card).
+  assert.deepEqual(declinedRows([{ ...declined, report: { ...declined.report!, updates: 2 } }]), [])
+  assert.match(makeAnywayMessage('2026-11-22T10:00'), /11月22日 10:00ごろに私が完了した「議事録を確認する」/)
 })

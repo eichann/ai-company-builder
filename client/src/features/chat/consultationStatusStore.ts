@@ -43,6 +43,11 @@ export function someConsultationStatus(test: (status: ConsultationStatus) => boo
   return false
 }
 
+/** Told after any tab's status changed (outside React: a consultation that closes itself once its work is done). */
+export function subscribeConsultationStatuses(listener: () => void): () => void {
+  return subscribe(listener)
+}
+
 export function useConsultationStatuses(): ReadonlyMap<string, ConsultationStatus> {
   return useSyncExternalStore(subscribe, () => statuses)
 }

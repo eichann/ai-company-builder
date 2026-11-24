@@ -97,7 +97,9 @@ export interface ChatPanelChatProps {
 /** What chat.newConsultation / chat.insertText asked the pane to do (ChatPanel holds it until a tab can). */
 export type ChatInputRequest =
   /** `instruction`: `message` is the app's instruction to the AI, sent but shown only as a chip (app-instruction.ts). */
-  | { kind: 'newConsultation'; message?: string; title?: string; minutesId?: string; topicRecordId?: string; pluginStep?: PluginPersonStep; instruction?: AppInstruction }
+  | { kind: 'newConsultation'; message?: string; title?: string; minutesId?: string; topicRecordId?: string; pluginStep?: PluginPersonStep; instruction?: AppInstruction
+    /** The app's first message went out (its id) in this tab's new conversation (「この作業をする」 closes it by itself once done). */
+    onSent?: (sent: { tabId: string; conversationId: string; messageId: string }) => void }
   | { kind: 'insertText'; text: string }
   /**
    * 「AI の番」 run automatically (ai-turns.md), for a fresh tab behind the shown one: claim the
@@ -429,7 +431,7 @@ export const ChatPanelChat = memo(function ChatPanelChat({ tabId, isShown, depar
       return
     }
     if (!isShown || !historyReadyRef.current || inputRequest?.kind !== 'newConsultation') return
-    const { message, title, minutesId, topicRecordId, pluginStep, instruction } = inputRequest
+    const { message, title, minutesId, topicRecordId, pluginStep, instruction, onSent } = inputRequest
     onInputRequestConsumed?.()
     // Reading minutes needs the minutes' actions (registry recordActions): Codex only reads.
     if (minutesId && !agentCan(authMode, 'recordActions')) { setHistoryError(MINUTES_NEEDS_CLAUDE_TEXT); return }
@@ -445,7 +447,8 @@ export const ChatPanelChat = memo(function ChatPanelChat({ tabId, isShown, depar
       setPendingRecords([])
       setTopicSwitch(null)
       if (pluginStep) pluginStepRef.current = pluginStep
-      if (message) void sendTurn(message, undefined, undefined, undefined, instruction)
+      const conversationId = appSessionIdRef.current
+      if (message) void sendTurn(message, undefined, undefined, undefined, instruction, onSent && conversationId ? messageId => onSent({ tabId, conversationId, messageId }) : undefined)
     })
   }, [inputRequest, isRestoringSession, isShown, chatInputApiRef])
 

@@ -167,6 +167,7 @@ contract.invoke jobProposals:withdraw
 contract.invoke jobRepeatAsks:get
 contract.invoke jobRepeatAsks:set
 contract.invoke jobs:accept
+contract.invoke jobs:feedback
 contract.invoke jobs:mine
 contract.invoke jobs:occurrences
 contract.invoke jobs:pause
@@ -610,6 +611,7 @@ contract.type ElectronAPI.searchChatSessions = searchChatSessions: Invoke<'chatH
 contract.type ElectronAPI.searchRecords = searchRecords: Invoke<'recordViews:search'>
 contract.type ElectronAPI.selectDirectory = selectDirectory: Invoke<'dialog:selectDirectory'>
 contract.type ElectronAPI.sendBackApproval = sendBackApproval: Invoke<'approvals:sendBack'>
+contract.type ElectronAPI.sendJobFeedback = sendJobFeedback: Invoke<'jobs:feedback'>
 contract.type ElectronAPI.sendOutboundMail = sendOutboundMail: Invoke<'outboundMail:send'>
 contract.type ElectronAPI.setAgentEnvPassthrough = setAgentEnvPassthrough: Invoke<'config:setAgentEnvPassthrough'>
 contract.type ElectronAPI.setApiKey = setApiKey: Invoke<'config:setApiKey'>
@@ -937,6 +939,7 @@ contract.type IpcInvokeChannels.'jobProposals:withdraw' = 'jobProposals:withdraw
 contract.type IpcInvokeChannels.'jobRepeatAsks:get' = 'jobRepeatAsks:get': { args: [companyId: string]; result: JobRepeatAskSetting }
 contract.type IpcInvokeChannels.'jobRepeatAsks:set' = 'jobRepeatAsks:set': { args: [companyId: string, on: boolean]; result: JobRepeatAskSetting }
 contract.type IpcInvokeChannels.'jobs:accept' = 'jobs:accept': { args: [companyId: string, jobId: string, version: number, fingerprint: string]; result: JobActionResult }
+contract.type IpcInvokeChannels.'jobs:feedback' = 'jobs:feedback': { args: [companyId: string, occurrenceId: string, kind: string]; result: JobFeedbackResult }
 contract.type IpcInvokeChannels.'jobs:mine' = 'jobs:mine': { args: [companyId: string]; result: MyJobsResult }
 contract.type IpcInvokeChannels.'jobs:occurrences' = 'jobs:occurrences': { args: [companyId: string]; result: MyJobOccurrencesResult }
 contract.type IpcInvokeChannels.'jobs:pause' = 'jobs:pause': { args: [companyId: string, jobId: string]; result: JobActionResult }
@@ -1278,6 +1281,7 @@ main.handle jobProposals:withdraw @ features/jobs/proposals.ts (companyId, propo
 main.handle jobRepeatAsks:get @ features/jobs/repeat-asks.ts (companyId)
 main.handle jobRepeatAsks:set @ features/jobs/repeat-asks.ts (companyId, on)
 main.handle jobs:accept @ features/jobs/ipc.ts (companyId, jobId, version, fingerprint)
+main.handle jobs:feedback @ features/jobs/ipc.ts (companyId, occurrenceId, kind)
 main.handle jobs:mine @ features/jobs/ipc.ts (companyId)
 main.handle jobs:occurrences @ features/jobs/ipc.ts (companyId)
 main.handle jobs:pause @ features/jobs/ipc.ts (companyId, jobId)
@@ -1876,6 +1880,8 @@ preload selectDirectory -> invoke dialog:selectDirectory()
 preload selectDirectory : () => Promise<string | null>
 preload sendBackApproval -> invoke approvals:sendBack($0, $1, $2)
 preload sendBackApproval : (companyId: string, approvalId: string, reason: string) => Promise<ApprovalResult>
+preload sendJobFeedback -> invoke jobs:feedback($0, $1, $2)
+preload sendJobFeedback : (companyId: string, occurrenceId: string, kind: string) => Promise<JobFeedbackResult>
 preload sendOutboundMail -> invoke outboundMail:send($0, $1, $2, $3, $4, $5)
 preload sendOutboundMail : (companyId: string, messageId: string, hash: string, awaitReply?: MailAwaitReply | null | undefined, attachmentsShown?: string[] | null | undefined, resendReason?: string | null | undefined) => Promise<OutboundMailResult>
 preload setAgentEnvPassthrough -> invoke config:setAgentEnvPassthrough($0)

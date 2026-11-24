@@ -373,6 +373,15 @@ export function reviewOf(meeting: RecordDetail, me: string, people: Record<strin
 }
 
 /** 「〇〇さんはこの会議を見られません」: a 責任者 the meeting's decisions cannot reach (never widened). */
+/**
+ * The name of the meeting a やること links, as this card's read answered it (owner memo 「4b-4 挟む部分」 N1, S11 #1): the server
+ * lists a linked record only while the reader reads it, so a meeting they no longer read gives null — said beside the
+ * date-only title on screen only, never stored, copied into the title or sent anywhere.
+ */
+export function linkedMeetingTitle(links: TaskCardData['links']): string | null {
+  return links.find(l => l.record?.type === 'meeting')?.record?.title ?? null
+}
+
 export function cannotReadLine(names: readonly string[]): string | null {
   const unique = [...new Set(names)]
   if (unique.length === 0) return null

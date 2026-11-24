@@ -2,7 +2,7 @@
 // and their 「もう一度」 / 「後始末」 — the server decides who may and when; this only shows its answers and refusals.
 import { useCallback, useRef, useState } from 'react'
 import type { JobActionResult, MyJobOccurrence } from '../../../../shared/jobs'
-import { getMyJobOccurrences, reconcileJobOccurrence, retryJobOccurrence } from '../api'
+import { getMyJobOccurrences, reconcileJobOccurrence, retryJobOccurrence, sendJobFeedback } from '../api'
 
 export function useMyJobOccurrences(companyId: string) {
   const [occurrences, setOccurrences] = useState<MyJobOccurrence[]>([])
@@ -41,5 +41,19 @@ export function useMyJobOccurrences(companyId: string) {
   const reconcile = useCallback((o: MyJobOccurrence, key: string, done: boolean) => run(() => reconcileJobOccurrence(companyId, o.jobId, o.id, key, done),
     '記録しました。この回はこれだけでは動き出しません。'), [companyId, run])
 
-  return { loadRef, occurrences, error, message, busy, retry, reconcile }
+  // A correction of a set watch's judgement (4b-4 PR6): true when kept (or kept before); a refusal in the server's words.
+  const feedback = useCallback(async (o: MyJobOccurrence, kind: 'made_anyway' | 'too_early') => {
+    setBusy(true)
+    setMessage(null)
+    try {
+      const r = await sendJobFeedback(companyId, o.id, kind)
+      await reload()
+      if (!r.success) setMessage(r.error)
+      return r.success
+    } finally {
+      setBusy(false)
+    }
+  }, [companyId, reload])
+
+  return { loadRef, occurrences, error, message, busy, retry, reconcile, feedback }
 }

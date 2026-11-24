@@ -89,7 +89,7 @@ a plugin can never draw a notice (§2-2).
   recordless: a version approved that its responsible person must accept, to them only — never the
   approver —; 「…の内容が変わりました…」 when they had accepted an earlier version; key
   `job_accept_needed:<job>:<version>`; shown only while it still waits for them; opening it shows the app's
-  「定期の仕事」, while opening any other job notice opens nothing — `jobs.md` "The acceptance notice"),
+  「定期の仕事」 (so do a stopped chain, a returned proposal and a set watch's 見送る `job_set_declined`, whose ［作ってもらう］ is there: `jobs.md` "The set watch (schema 5)" "The app (PR6)"), while opening an occurrence's notice opens nothing — `jobs.md` "The acceptance notice"),
   `job_proposal` (「〇〇さんから定期の仕事の案「…」が届いています…」, on by default, recordless: a member submitted a proposal of a
   time job, to every owner / admin — one row per recipient, key `job_proposal:<proposal>`, a resend adds none; built when read,
   shown only while the proposal still waits and the reader is an owner / admin — `jobs.md` "Member proposals"),
