@@ -2255,7 +2255,7 @@ the guards they were.
   **`key_hash` = sha256 of the header value — the key itself is never stored, logged or answered**, the PC's name,
   state, revoke reason, requested / enabled (by) / revoked (by) / last used; one registration not stopped per company ×
   member × key — partial unique index —; trigger: the fixed columns never change, only pending → enabled → revoked,
-  revoked final; no DELETE while its company exists), `browser_device_history` (append-only: which registration, whose,
+  revoked final; CHECKs tie who / when to the state; no DELETE while its company exists), `browser_device_history` (append-only: which registration, whose,
   who acted, `request` / `enable` / `revoke`, the reason, when), `browser_plan_devices` (company × path `type` | `line` ×
   plan → the registration that made it; written once with the plan, in its transaction; never changed or removed while
   its company exists; no row = made under the owner's exception or before D2).
@@ -2278,7 +2278,7 @@ the guards they were.
   none → `BROWSER_DEVICE_NOT_REGISTERED`, `pending` → `BROWSER_DEVICE_PENDING`, `revoked` → `BROWSER_DEVICE_REVOKED`
   (each 403), `enabled` → passes; then for a step of an existing plan **its registration must be this one** (none for
   none) → else 409 `BROWSER_DEVICE_ELSEWHERE` (another PC of the member, or this PC registered again: a new
-  registration, so an old plan never moves again). A passing step notes `last_used_at` at most once a day. A
+  registration, so an old plan never moves again). A step that passes the PC check notes `last_used_at` at most once a day (before the rest of the gate: it says the PC asked, not that the step went through). The check at a plan's creation runs before the plan's insert transaction; a PC stopped in between leaves a plan bound to a stopped registration, which every later step refuses. A
   refusal at a permit ends the execution as any gate refusal (old path `void` reason `device`; new path `void` /
   `partial` with the code). **Not asked** (clean-up never stops): cancel (so another PC can only 「やめる」), reports,
   confirms, an inspection's result (binding it to the PC is §14-3), the lists, the shape notice.
@@ -2305,7 +2305,8 @@ execution, cancel from another PC —; leaving; `browser-lines-mine`), `server/t
 exception, a plan bound to its PC, a revoked PC voiding the claimed execution (`device`), the second PC cancelling,
 `browser-devices-me` uncached and own only, the real member removal stopping the PC), the old and new paths' own tests
 (with a stand-in PC check, `tests/helpers/browser-devices.ts`), permission matrix rows + `CROSS`,
-`company-scoped-sql.test.ts`, `jobs-schema.test.ts`. Each guard mutation-checked.
+`company-scoped-sql.test.ts`, `jobs-schema.test.ts`. Each guard mutation-checked (32 mutations; one survivor kept on purpose: enable's own
+`pending` check, behind the compare-and-set and the trigger, each of which refuses the same).
 
 ## Not yet (later PRs)
 

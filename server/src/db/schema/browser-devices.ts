@@ -28,7 +28,9 @@ export const browserDeviceSchema = `
       revoked_by TEXT,
       last_used_at TEXT,
       PRIMARY KEY (company_id, id),
-      CHECK ((state = 'revoked') = (revoke_reason IS NOT NULL))
+      CHECK ((state = 'revoked') = (revoke_reason IS NOT NULL)),
+      CHECK ((state = 'revoked') = (revoked_at IS NOT NULL) AND (revoked_at IS NULL) = (revoked_by IS NULL)),
+      CHECK ((enabled_at IS NULL) = (enabled_by IS NULL) AND (state <> 'enabled' OR enabled_at IS NOT NULL))
     );
     CREATE UNIQUE INDEX IF NOT EXISTS idx_browser_devices_live ON browser_devices(company_id, user_id, key_hash) WHERE state <> 'revoked';
     CREATE INDEX IF NOT EXISTS idx_browser_devices_key ON browser_devices(company_id, user_id, key_hash, requested_at);

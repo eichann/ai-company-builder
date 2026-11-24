@@ -148,6 +148,7 @@ describe('registering this PC', () => {
     // Withdrawing again changes nothing; a PC never registered is not found.
     expect(value(dev.withdraw(alice, key))).toMatchObject({ id: device.id, state: 'revoked' })
     expect(code(dev.withdraw(alice, newKey()))).toBe('BROWSER_DEVICE_NOT_FOUND')
+    now += 60_000
     const again = deviceOf(dev.register(alice, key, { label: 'x' }))
     expect(again.id).not.toBe(device.id)
     expect(again.state).toBe('pending')
@@ -182,6 +183,10 @@ describe('who enables and stops', () => {
     expect(() => conn.prepare('DELETE FROM browser_devices WHERE id = ?').run(d.id)).toThrow(/kept/)
     const p = deviceOf(dev.register(bob, newKey(), { label: 'x' }))
     expect(() => conn.prepare("UPDATE browser_devices SET label = 'y' WHERE id = ?").run(p.id)).toThrow(/only moves/)
+    // Who and when go with the state: enabled without its time / person, stopped without its, are refused.
+    expect(() => conn.prepare("UPDATE browser_devices SET state = 'enabled' WHERE id = ?").run(p.id)).toThrow(/CHECK/)
+    expect(() => conn.prepare("UPDATE browser_devices SET enabled_by = 'u-x' WHERE id = ?").run(p.id)).toThrow(/CHECK/)
+    expect(() => conn.prepare("UPDATE browser_devices SET state = 'revoked', revoke_reason = 'admin' WHERE id = ?").run(p.id)).toThrow(/CHECK/)
   })
 
   it('another company\'s registration is one that does not exist (the same 404), and is left as it was', () => {
@@ -363,7 +368,8 @@ describe('leaving the company', () => {
     expect(data.forCompany(OTHER_CO).browserDevices.byId(theirsElsewhere.device.id)?.state).toBe('enabled')
     expect(value(dev.list(owner)).history.filter(h => h.action === 'revoke').map(h => [h.deviceId, h.reason]).sort()).toEqual([[a.device.id, 'left'], [pending.id, 'left']].sort())
     expect(code(inspect(alice, a.key))).toBe('BROWSER_DEVICE_REVOKED')
-    // Back again: the old registration stays stopped; a new one starts pending.
+    // Back again: the old registration stays stopped; a new one starts pending (and is the one this PC now has).
+    now += 60_000
     expect(value(dev.register(alice, a.key, { label: 'x' })).device).toMatchObject({ state: 'pending' })
     expect(code(inspect(alice, a.key))).toBe('BROWSER_DEVICE_PENDING')
   })
