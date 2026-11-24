@@ -221,7 +221,7 @@ describe('the opened list and the gate', () => {
     expect(svc.setGrant(alice, bob.userId, { ...refOf(approvedRow()), allowed: true }).ok).toBe(false)
     const pending = pendingRow()
     expect(code(svc.setGrant(admin, bob.userId, { site: 'lstep', line: pending.name, meaningHash: pending.meaningHash, mechanicsHash: pending.mechanicsHash, allowed: true }))).toBe('BROWSER_LINE_NOT_APPROVED')
-    expect(value(svc.grants(admin)).lines.map(l => [l.line, l.mapVersion])).toEqual([['landing_inspect', '1.0.1'], ['landing_inspect', '1.0.2']])
+    expect(value(svc.grants(admin)).lines.map(l => [l.line, l.mapVersion])).toEqual([['landing_inspect', '1.0.1'], ['landing_inspect', '1.0.2'], ['landing_inspect', '1.0.4']])
     svc.memberLeft(CO, alice.userId)
     expect(value(svc.grants(owner)).grants).toEqual([])
   })

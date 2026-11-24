@@ -79,7 +79,7 @@ const read = (thing: string, answer: unknown, address?: string, parent?: string)
 const keysOf = (thing: string) => Object.keys(map.things[thing].keys ?? {}).sort()
 
 test('the new things list exactly the key names the old path recorded, confirmed whole in 1.0.3 (追記3)', () => {
-  assert.equal(map.version, '1.0.3')
+  assert.equal(map.version, '1.0.4')
   assert.deepEqual(keysOf('reminder'), ['hid_at', 'id', 'name', 'order', 'steps', 'steps[].action_id', 'steps[].egg_id', 'steps[].episode_id',
     'steps[].id', 'steps[].initial', 'steps[].member_query_id', 'steps[].order', 'steps[].skip', 'steps[].step_days', 'steps[].step_minutes',
     'steps[].step_time', 'steps[].step_type', 'type'])
@@ -162,10 +162,10 @@ test('the step\'s templates are read exactly as the old path\'s checker reads th
   }
 })
 
-test('the line opens on maps 1.0.2 and 1.0.3, is written pending on both, and holds no business word', () => {
+test('the line opens on maps 1.0.2 to 1.0.4, is written pending on each, and holds no business word', () => {
   const opened = JSON.parse(readFileSync(OPENED_FILE, 'utf8')) as BrowserOpenedFile
   const rows = opened.lines.filter(l => l.name === 'step_template_add')
-  assert.deepEqual(rows.map(r => [r.mapVersion, r.status]), [['1.0.2', 'pending'], ['1.0.3', 'pending']])
+  assert.deepEqual(rows.map(r => [r.mapVersion, r.status]), [['1.0.2', 'pending'], ['1.0.3', 'pending'], ['1.0.4', 'pending']])
   const text = JSON.stringify({ map, line, LSTEP_MAP_WRITES })
   for (const word of ['参加者', '18:20', '新方式', 'クロチャレ', 'crochalle']) assert.ok(!text.includes(word), word)
 })
