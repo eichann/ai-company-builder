@@ -28,13 +28,15 @@
 //             (sending is not answered). The other parameters still apply. With manual=1 also:
 //     result    what 「サーバーと同期」 answers: conflict (a file both changed: the server's version kept,
 //               this PC's in the backups) | offline (the send failed) | denied (a file in 総務部, which
-//               this member only reads: sync stopped) | restored (that file put back, the rest sent);
+//               this member only reads: sync stopped) | restored (that file put back, the rest sent) |
+//               lost (the private folder 営業部/提案前メモ was taken off this PC: the member may no longer read it);
 //               absent = 同期が完了しました. 「変更を確認」 lists two changes, 「バックアップ履歴」 two backups.
 //     chat      live = a new consultation whose sent messages get a fixed reply chosen by their words
 //               (the manual's chapters 6–9: reading and writing files, an extra instruction while
 //               the AI works, a choice question, a command to confirm, a refused write, a review
 //               request, a Skill; chapters 18 and 26: a やること the AI makes, the time-job question and its
 //               proposal card), and three earlier consultations in the list
+//     kind      none (with manual=1): thank-you-mail came from the company's Skills (「会社の Skill」, chapter 43)
 //     tasks     manual = (instead of tasks=1) 山田さん's やること (chapter 17): the tab, today's meeting and the
 //               title bar's ［受け箱］ with what waits for him
 //     folders   marks = 総務部 downloaded (閲覧のみ), 営業部/過去資料 not downloaded and the private
@@ -194,7 +196,9 @@ const skill = (folder: string, name: string, description: string) => ({
 })
 const SHELF_VERSION = 'abcd1234'.repeat(8)
 /** ?kind=none: weekly-report came from the company; release-note is the member's own beside a company one. */
-const SHELF_MARKS: Record<string, { state: 'company' | 'clash' | 'editing'; version: string; newer?: { version: string; at: string } }> = {
+const SHELF_MARKS: Record<string, { state: 'company' | 'clash' | 'editing'; version: string; newer?: { version: string; at: string } }> = MANUAL ? {
+  'thank-you-mail': { state: 'company', version: SHELF_VERSION },
+} : {
   'weekly-report': { state: 'company', version: SHELF_VERSION },
   'release-note': {
     state: params.get('shelf') === 'editing' ? 'editing' : 'clash', version: SHELF_VERSION,
@@ -336,7 +340,7 @@ const api: Partial<ElectronAPI> = {
   onFileChange: () => () => {},
   listSkills: async (_root: string, folder: string, _id: string, _name?: string, options?: { force?: boolean }) => {
     record('listSkills', [folder, !!options?.force])
-    return { success: true, ...(params.get('kind') === 'none' ? { ruleClashes: ['tone'] } : {}), skills: (SKILLS[folder] ?? []).map(s => (params.get('kind') !== 'none' ? s : {
+    return { success: true, ...(params.get('kind') === 'none' && !MANUAL ? { ruleClashes: ['tone'] } : {}), skills: (SKILLS[folder] ?? []).map(s => (params.get('kind') !== 'none' ? s : {
       ...s,
       ...(SHELF_MARKS[s.name] ? { shelf: SHELF_MARKS[s.name] } : {}),
       // ?publish=no: the server says this member may not publish a Skill here (so 頼む is offered on their own).
@@ -857,6 +861,13 @@ if (MANUAL) {
         return {
           success: true, restoredWriteDeniedFiles: [deniedFile], writeDeniedBackupPath: `${BACKUPS}/2026-11-20T01-29-00-000Z_write_denied`, backupPath: `${BACKUPS}/2026-11-20T01-29-00-000Z_write_denied`,
           message: '同期完了。編集する権限がないフォルダのファイル（1件）は元に戻しました。あなたが編集した版は、タイトルバーの［バックアップ履歴］に保存してあります。その他の変更は正常に反映されました。',
+        }
+      }
+      if (result === 'lost') {
+        // The note git-sync.ts adds (electron/sync/private-folders.ts accessLostMessage) after the company sync's message.
+        return {
+          success: true, lostPrivateFolders: ['営業部/提案前メモ'],
+          message: '同期が完了しました。このフォルダを見る権限がなくなったため、手元から削除しました（『営業部/提案前メモ』）。同期していなかった変更も削除されています。',
         }
       }
       return { success: true, message: '同期が完了しました' }

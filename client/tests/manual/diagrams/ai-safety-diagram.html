@@ -1,0 +1,38 @@
+<!-- The manual's chapter 41: the three things a company's administrator can do about the AI (stop it,
+     keep a log of what it did, run its commands inside 「AI の囲い」), what the member sees and does.
+     Shot by shoot.spec.ts (scenes.ts). -->
+<style>
+  body { margin: 0; background: var(--color-surface); font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Hiragino Kaku Gothic ProN", sans-serif; color: var(--color-text); }
+  #diagram { width: 960px; padding: 28px 30px 30px; box-sizing: border-box; background: var(--color-surface); }
+  .row { display: flex; gap: 14px; }
+  .box { flex: 1; border-radius: 14px; border: 2px solid var(--color-border-strong); background: var(--color-bg); overflow: hidden; }
+  .head { padding: 12px 14px; font-size: 17px; font-weight: 700; text-align: center; background: var(--color-selected-bg); }
+  .part { padding: 10px 14px; font-size: 13px; line-height: 1.7; border-top: 1px solid var(--color-border); }
+  .part .label { display: block; font-size: 12px; font-weight: 700; color: var(--color-text-muted); }
+  .do { background: var(--color-success-bg); color: var(--color-success-text); }
+  .do .label { color: var(--color-success-text); }
+  .foot { margin-top: 14px; padding: 10px 14px; border-radius: 10px; text-align: center; font-size: 14px; font-weight: 700; background: var(--color-info-bg); border: 1px solid var(--color-info-border); color: var(--color-info-text); }
+</style>
+<div id="diagram">
+  <div class="row">
+    <div class="box">
+      <div class="head">止める</div>
+      <div class="part"><span class="label">管理者がすること</span>会社全体・人ごと・道具の種類ごとに、AI を一時停止する</div>
+      <div class="part"><span class="label">あなたに見えること</span>「管理者が AI の利用を一時停止しています。再開されるまでお待ちください。」</div>
+      <div class="part do"><span class="label">あなたがすること</span>再開を待つ。別のやり方で同じことをさせない</div>
+    </div>
+    <div class="box">
+      <div class="head">記録する</div>
+      <div class="part"><span class="label">管理者がすること</span>AI がいつ・どの道具を・どこに使ったかを見る</div>
+      <div class="part"><span class="label">あなたに見えること</span>相談と設定のお知らせ。会話やファイルの中身は送られない</div>
+      <div class="part do"><span class="label">あなたがすること</span>ふだんどおり使う</div>
+    </div>
+    <div class="box">
+      <div class="head">囲う</div>
+      <div class="part"><span class="label">管理者がすること</span>AI が動かすコマンドを「AI の囲い」に入れ、つないでよい宛先を決める</div>
+      <div class="part"><span class="label">あなたに見えること</span>「会社の設定で、この宛先（…）には接続できません。」</div>
+      <div class="part do"><span class="label">あなたがすること</span>必要なら、何をしたかったかを管理者に伝える</div>
+    </div>
+  </div>
+  <div class="foot">どれも故障ではありません。会社が AI を安全に使うためのしくみです</div>
+</div>

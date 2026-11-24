@@ -8,6 +8,9 @@
 //   role    manager (default: manager of 人事部) | member | admin
 //   state   normal (default) | offline | taken (the name is unavailable) | outdated
 //   select  a company-relative path to select (e.g. 人事部/評価/面談メモ.md)
+//   manual  1 = the user manual's company (client/tests/manual/scenes.ts, chapters 39–40): 検証A社, 山田 太郎 in
+//           営業部 with the private folder 営業部/提案前メモ (3 people), 見積_下書き.md in 下書き and 研修の説明動画.mp4,
+//           over 100 MB, which sync keeps on this computer. Fictional data only.
 import { createRoot } from 'react-dom/client'
 import '../src/i18n'
 import '../src/index.css'
@@ -21,12 +24,25 @@ const theme = params.get('theme') ?? 'light'
 const role = params.get('role') ?? 'manager'
 const state = params.get('state') ?? 'normal'
 const select = params.get('select')
+const MANUAL = params.get('manual') === '1'
 if (theme === 'dark') document.documentElement.classList.add('dark')
 
 const ROOT = '/Users/demo/会社'
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms))
 
-const DISK: Record<string, Array<{ name: string; isDirectory: boolean }>> = {
+const DEPT = MANUAL ? '営業部' : '人事部'
+const DISK: Record<string, Array<{ name: string; isDirectory: boolean }>> = MANUAL ? {
+  [`${ROOT}/営業部`]: [
+    { name: '下書き', isDirectory: true },
+    { name: '提案前メモ', isDirectory: true },
+    { name: '提案書', isDirectory: true },
+    { name: '研修の説明動画.mp4', isDirectory: false },
+    { name: '訪問メモ_1123.md', isDirectory: false },
+  ],
+  [`${ROOT}/営業部/下書き`]: [{ name: 'お礼メール_A社.md', isDirectory: false }, { name: '見積_下書き.md', isDirectory: false }],
+  [`${ROOT}/営業部/提案前メモ`]: [{ name: 'C社_検討メモ.md', isDirectory: false }],
+  [`${ROOT}/営業部/提案書`]: [{ name: '提案書_A社向け.md', isDirectory: false }],
+} : {
   [`${ROOT}/人事部`]: [
     { name: '評価', isDirectory: true },
     { name: '採用', isDirectory: true },
@@ -47,7 +63,11 @@ type TreeNode = { name: string; isDirectory: boolean; path: string; children?: T
 const tree = (dir: string, depth: number, max: number): TreeNode[] =>
   listDir(dir).map(e => (e.isDirectory && depth < max ? { ...e, children: tree(e.path, depth + 1, max) } : e))
 
-const MEMBERS = [
+const MEMBERS = MANUAL ? [
+  { userId: 'u_owner', name: '佐藤 花子', email: 'sato@kensho-a.example', role: 'owner' },
+  { userId: 'u_me', name: '山田 太郎', email: 'yamada@kensho-a.example', role: 'member' },
+  { userId: 'u_takahashi', name: '高橋 健一', email: 'takahashi@kensho-a.example', role: 'member' },
+] : [
   { userId: 'u_owner', name: '佐藤 健', email: 'sato@example.com', role: 'owner' },
   { userId: 'u_admin', name: '鈴木 一郎', email: 'suzuki@example.com', role: 'admin' },
   { userId: 'u_me', name: '山田 花子', email: 'yamada@example.com', role: role === 'admin' ? 'admin' : 'member' },
@@ -56,7 +76,17 @@ const MEMBERS = [
   { userId: 'u_dev', name: '伊藤 翔', email: 'ito@example.com', role: 'member' },
 ]
 
-const FOLDERS: MyPrivateFolder[] = [
+const FOLDERS: MyPrivateFolder[] = MANUAL ? [{
+  scopeId: 's_memo',
+  path: '営業部/提案前メモ',
+  canWrite: true,
+  viewerCount: 3,
+  viewers: [
+    { userId: 'u_me', name: '山田 太郎', role: 'member' },
+    { userId: 'u_takahashi', name: '高橋 健一', role: 'member' },
+    { userId: 'u_owner', name: '佐藤 花子', role: 'owner' },
+  ],
+}] : [
   {
     scopeId: 's_eval',
     path: '人事部/評価',
@@ -93,6 +123,8 @@ Object.assign(window, {
     },
     moveItem: async () => ({ success: true }),
     getMyPrivateFolders: async () => ({ success: true, folders: FOLDERS }),
+    // ?manual=1: over 100 MB and kept on this computer by sync (company-relative).
+    gitUnsharedLargeFiles: async () => ({ success: true, files: MANUAL ? ['営業部/研修の説明動画.mp4'] : [] }),
     getPrivateFolderCreateContext: async () => {
       await sleep(250)
       if (state === 'offline') return { success: false, offline: true, error: 'offline' }
@@ -101,8 +133,8 @@ Object.assign(window, {
         context: {
           role: role === 'admin' ? 'admin' : 'member',
           managedDepartmentIds: role === 'manager' ? ['d_hr'] : [],
-          department: { id: 'd_hr', name: '人事部', folder: '人事部' },
-          managerIds: ['u_me', 'u_hr2'],
+          department: { id: 'd_hr', name: DEPT, folder: DEPT },
+          managerIds: MANUAL ? ['u_takahashi'] : ['u_me', 'u_hr2'],
           members: MEMBERS,
         },
       }
@@ -116,8 +148,8 @@ Object.assign(window, {
   },
 })
 
-useAppStore.setState({ currentCompany: { id: 'demo', name: '株式会社デモ', rootPath: ROOT, departments: [], createdAt: new Date() } })
-useAuthStore.setState({ user: { id: 'u_me', email: 'yamada@example.com', name: '山田 花子', image: null, emailVerified: true } })
+useAppStore.setState({ currentCompany: { id: 'demo', name: MANUAL ? '検証A社' : '株式会社デモ', rootPath: ROOT, departments: [], createdAt: new Date() } })
+useAuthStore.setState({ user: { id: 'u_me', email: 'yamada@example.com', name: MANUAL ? '山田 太郎' : '山田 花子', image: null, emailVerified: true } })
 
 function Preview() {
   return (
@@ -125,13 +157,13 @@ function Preview() {
       <div className="w-72">
         <FileTreePanel
           rootPath={ROOT}
-          departmentFolder="人事部"
+          departmentFolder={DEPT}
           selectedFilePath={select ? `${ROOT}/${select}` : null}
           onSelectFile={() => {}}
           onPrivateFolderCreated={() => {}}
         />
       </div>
-      <div className="flex-1 p-8 text-sm text-gray-500 dark:text-zinc-400">表示確認用の人工データです（人事部、「評価」は非公開フォルダ）。</div>
+      <div className="flex-1 p-8 text-sm text-gray-500 dark:text-zinc-400">{MANUAL ? '表示確認用の人工データです（営業部、「提案前メモ」は非公開フォルダ）。' : '表示確認用の人工データです（人事部、「評価」は非公開フォルダ）。'}</div>
     </main>
   )
 }
