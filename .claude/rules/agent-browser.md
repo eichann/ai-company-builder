@@ -1528,7 +1528,10 @@ new take the same lock key for a step.
   answer with a key more until a read-only confirmation lists them (PR 7). `LSTEP_MAP_WRITES` is the old declaration's
   write word for word (mechanics). The template list's envelope is `null` (unconfirmed). `landing_inspect` gets a row on
   1.0.2, `pending` (the readers moved, its meaning did not: carrying its grants is the owner's "compatible" call, Q15); its
-  approved row on 1.0.1 is unchanged.
+  approved row on 1.0.1 is unchanged. Until that call the read runner (PR 5a), handed the bundled map 1.0.2, refuses the
+  inspection (`not-approved`): nothing calls it yet, but approving the 1.0.2 row (with `grantsFrom` the 1.0.1 row's
+  mechanics hash) must come before PR 5b wires it. `browser-read-line-runner.test.ts` hands the runner the 1.0.2 row as
+  approved and checks it has the 1.0.1 row's meaning.
 - **The line** `step_template_add` 「リマインダの段にテンプレートを足す」 (`client/browser-lines/lstep.ts`, **`pending`**):
   values `reminder`, `step`, `template_folder`, `template` (all `target` ← `site_fact`, §16-4); reads the reminder, the step
   (parent: the reminder), its timing (parent: the reminder) and the template (parent: its folder); one write
