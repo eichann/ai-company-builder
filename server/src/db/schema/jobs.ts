@@ -198,6 +198,11 @@ export function migrateJobWatchGenerations(conn: Database.Database): void {
  *   deleted, so a new version or a new job never runs the same meeting again.
  * - `idx_record_ledger_into` — the ledger's rows by the state they went into, in delivery order: the scan reads 「やることが
  *   完了になった行」 of the whole company without reading every other row.
+ * - `ai_job_set_reports` (4b-4 PR3) — a set watch's judgement, one per occurrence, written in its finish's transaction: fixed
+ *   kinds only (the decision, the reason's code, the confidence in hundredths, the unconfirmed words as a JSON list) — never a
+ *   title, a quote or a company's name (I6). Read only through the occurrence's own visibility (I8).
+ * - `ai_job_set_feedback` (4b-4 PR3) — a person's correction of a judgement (§5-2): the occurrence, the kind and the time only
+ *   (never who: nobody is counted, 「人ごとに数えない」), once per kind (`PRIMARY KEY`).
  */
 export function migrateJobSetWatch(conn: Database.Database): void {
   const occ = new Set((conn.prepare('PRAGMA table_info(ai_job_occurrences)').all() as Array<{ name: string }>).map(c => c.name))
@@ -216,6 +221,23 @@ export function migrateJobSetWatch(conn: Database.Database): void {
       PRIMARY KEY (company_id, record_id)
     );
     CREATE INDEX IF NOT EXISTS idx_record_ledger_into ON record_ledger(company_id, to_state, delivery_seq) WHERE delivery_seq IS NOT NULL;
+    CREATE TABLE IF NOT EXISTS ai_job_set_reports (
+      company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+      occurrence_id TEXT NOT NULL,
+      decision TEXT NOT NULL CHECK (decision IN ('proceed', 'decline', 'ask', 'gate_failed')),
+      reason TEXT NOT NULL CHECK (length(reason) BETWEEN 1 AND 40),
+      confidence REAL CHECK (confidence IS NULL OR (confidence >= 0 AND confidence <= 1)),
+      unconfirmed TEXT NOT NULL DEFAULT '[]',
+      at TEXT NOT NULL,
+      PRIMARY KEY (company_id, occurrence_id)
+    );
+    CREATE TABLE IF NOT EXISTS ai_job_set_feedback (
+      company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+      occurrence_id TEXT NOT NULL,
+      kind TEXT NOT NULL CHECK (kind IN ('made_anyway', 'too_early', 'went_ahead')),
+      at TEXT NOT NULL,
+      PRIMARY KEY (company_id, occurrence_id, kind)
+    );
   `)
 }
 

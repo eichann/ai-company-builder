@@ -81,6 +81,10 @@ a plugin can never draw a notice (§2-2).
   made — to the responsible person and the job's creator while an owner / admin; key
   `<kind>:<job>:<occurrence>`; text built when read, shown only while the reader may see the job, its
   name 「定期の仕事」 when not theirs to read — `jobs.md` "Notices"; no notice when it ran, D9),
+  `job_set_declined` (「「<会議名>」では、AI はたたき台を作りませんでした（<理由>）。…」, on by default, recordless: a set watch's AI
+  judged 見送る — to the occurrence's responsible person only, key `job_set_declined:<job>:<occurrence>`; built when read and
+  shown only while they are that occurrence's responsible person and read the meeting as one of its people — else not shown
+  nor counted; `jobs.md` "The set watch (schema 5)" "How a run ends"; an app before PR6 shows it as a notice that waits),
   `job_accept_needed` (「定期の仕事「…」の責任者になりました…「受け取る」を押してください」, on by default,
   recordless: a version approved that its responsible person must accept, to them only — never the
   approver —; 「…の内容が変わりました…」 when they had accepted an earlier version; key

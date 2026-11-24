@@ -362,7 +362,7 @@ export function createJobEvents(deps: JobEventDeps) {
    * is written whatever comes of it: `made` with its occurrence, or why not (inside a pause's gap, before the boundary or a guard
    * that does not hold, beyond the day's limit, a business plugin step busy with it). A record marked already (by any job) makes
    * nothing. The cursor moves in the same transaction (compare-and-set). A combination no longer opened, or a task type that no
-   * longer means it (T9), reads nothing.
+   * longer means it (T9), reads nothing and its cursor follows now (what came meanwhile never runs late).
    */
   function scanSetJob(handle: CompanyData, job: JobRow, stopped: boolean, t: { nowMs: number; stamp: string; zone: string; day: string }, told: Set<string>): number {
     const version = handle.jobs.version(job.id, job.approvedVersion as number)
@@ -380,10 +380,13 @@ export function createJobEvents(deps: JobEventDeps) {
     const reviewId = deps.minutesReviewId
     if (at === null || !reviewId) return 0
     if (!cursorReady(handle, job, version.consentFingerprint, at, stopped, t.stamp, told, true)) return 0
-    // The task type no longer means what the job names (T9): nothing is read until it does again — never a guess.
+    // The task type no longer means what the job names (T9): nothing is read until it does again — never a guess — and, as for a
+    // line taken out above, its cursor follows now (compare-and-set), so what was completed meanwhile never runs late once the
+    // kind is back (owner decision, the safe side of 4b-4 PR2's open question).
     if (!minutesReviewKindKnown(handle)) {
       if (!failing.has(`${job.id}:kind`)) log(`[job-events] company ${handle.companyId} job ${job.id}: its record kind is no longer known; nothing is read`)
       failing.add(`${job.id}:kind`)
+      transactions.run(() => { handle.jobs.moveEventCursor(job.id, at.seen, Math.max(at.seen, handle.jobs.ledgerSeqNow()), t.stamp) })
       return 0
     }
     failing.delete(`${job.id}:kind`)

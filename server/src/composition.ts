@@ -91,6 +91,7 @@ import { companyNow, createNotificationService } from './services/notifications'
 import { createAiRunService } from './services/ai-runs'
 import { createRecordRunSubjects, runSubjectsByKind } from './services/run-subjects'
 import { createJobRuns } from './services/job-runs'
+import { setDeclinedNotice } from './services/job-set-watch'
 import { createSkillUseService } from './services/skill-uses'
 import { createGroupService } from './services/groups'
 import { createServerClock } from './services/server-clock'
@@ -388,6 +389,7 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     jobOccurrenceNoticeOf: (member, jobId, occurrenceId) => jobs.occurrenceNotice(member, jobId, occurrenceId),
     jobChainStoppedOf: (member, jobId, at) => jobs.chainStopNotice(member, jobId, at),
     jobDayLimitOf: (member, jobId) => jobs.dayLimitNotice(member, jobId),
+    jobSetDeclinedOf: (member, jobId, occurrenceId) => setDeclinedNotice(shared.companyData.forCompany(member.companyId), member, jobId, occurrenceId),
     jobAcceptNoticeOf: (member, jobId, version) => jobs.acceptNotice(member, jobId, version),
     jobProposalNoticeOf: (member, proposalId) => jobProposals.proposalNotice(member, proposalId),
     jobProposalReturnedOf: (member, proposalId) => jobProposals.proposalReturned(member, proposalId),

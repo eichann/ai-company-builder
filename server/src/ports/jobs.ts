@@ -5,7 +5,7 @@
  * version's definition (and a trigger refuses it), only one that adds a version and ones that mark a
  * version approved / accepted once.
  */
-import type { JobDeliveryPlace, JobOccurrenceState, JobPauseReason, JobSetMarkOutcome, JobState, LedgerEventRow } from '../../shared/core/jobs'
+import type { JobDeliveryPlace, JobOccurrenceState, JobPauseReason, JobSetFeedbackKind, JobSetMarkOutcome, JobSetReport, JobState, LedgerEventRow } from '../../shared/core/jobs'
 
 export interface JobRow {
   id: string
@@ -349,6 +349,15 @@ export interface JobRepository {
   markMeetingReview(row: JobMeetingReviewRow): void
   /** The record's mark, or null. */
   meetingReview(recordId: string): JobMeetingReviewRow | null
+  // 4b-4 PR3: a set watch's judgement and its corrections (jobs.md "The set watch's report").
+  /** Keep an occurrence's judgement (one per occurrence: a second one throws, rolling its finish back). */
+  insertSetReport(occurrenceId: string, report: JobSetReport, at: string): void
+  /** The occurrence's judgement, or null. */
+  setReport(occurrenceId: string): (JobSetReport & { at: string }) | null
+  /** Keep a correction once per occurrence and kind; false when that kind was kept already (nothing written). */
+  insertSetFeedback(occurrenceId: string, kind: JobSetFeedbackKind, at: string): boolean
+  /** The kinds of correction kept for the occurrence. */
+  setFeedback(occurrenceId: string): JobSetFeedbackKind[]
   /**
    * Stage 4-0.1: a pause or the company's stop (restore's included) holds the job's (null: every job's) event
    * occurrences still `due` — `held` with `code` — so that returning to 4a never runs one that waited before the pause.

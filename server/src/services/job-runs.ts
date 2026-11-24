@@ -32,11 +32,12 @@
  *   ends its run (`holdDue` → `endPcRun`), so nothing comes back after a resume.
  */
 import {
-  JOB_ACTOR, JOB_MADE_BEFORE_LISTED, JOB_PC_STEP, JOB_SET_CHECK_KIND, isOccurrenceId, jobOccurrenceKind, jobRunRouteAllowed, occurrenceTaskId, parseJobRunResult, storedJobDefinition,
+  JOB_ACTOR, JOB_MADE_BEFORE_LISTED, JOB_PC_STEP, JOB_SET_CHECK_KIND, isOccurrenceId, jobOccurrenceKind, jobRunRouteAllowed, occurrenceTaskId, parseJobRunResult,
+  parseJobSetReport, storedJobDefinition,
   type JobDefinition, type JobDeliveryPlace, type JobOccurrenceState, type JobOutcomeCode,
 } from '../../shared/core/jobs'
 import type { JobMadeBefore, JobMeetingView, JobTurnView } from '../../shared/types/jobs'
-import type { Clock } from '../ports/clock'
+import type { Clock, IdGenerator } from '../ports/clock'
 import type { CompanyData, CompanyDataSource } from '../ports/company-data'
 import type { JobOccurrenceRow, JobRow, JobVersionRow } from '../ports/jobs'
 import type { RunSubjectLiveRun, RunSubjectMember, RunSubjects } from '../ports/run-subjects'
@@ -45,6 +46,7 @@ import type { Member } from './access'
 import { endPcRun, isEventPcOccurrence, pcRunDeadlineMs, type JobOccurrences } from './job-occurrences'
 import { eventShown, shownSlot } from './job-events'
 import { madeBefore } from './job-retry'
+import { isSetWatchOccurrence, setWatchTaskInput } from './job-set-watch'
 import type { JobService } from './jobs'
 import { notInStep } from './not-in-step'
 import { ok, refuse, type Outcome, type Refusal } from './outcome'
@@ -54,6 +56,7 @@ export interface JobRunDeps {
   companyData: CompanyDataSource
   transactions: Transactions
   clock: Clock
+  ids: Pick<IdGenerator, 'newId'>
   jobs: Pick<JobService, 'runnerRefusal' | 'pauseBySystem' | 'pinnedSkillKept' | 'nameOf'>
   notices: Pick<JobOccurrences, 'writeNotice' | 'tell'>
   /**
@@ -119,8 +122,11 @@ const definitionOf = (v: JobVersionRow): JobDefinition | null => storedJobDefini
 /** Why an occurrence is not the caller's to run now (a short reason; `null`: it is). `EVENT`: an event condition failed (`code`). */
 type Why = keyof typeof REFUSALS | 'GONE' | 'EVENT'
 
-/** `event`: an event occurrence run by the PC (schema 3, stage 4b-1) — its conditions are the source record's too. */
-interface Found { handle: CompanyData; occ: JobOccurrenceRow; job: JobRow; version: JobVersionRow; definition: JobDefinition; event: boolean }
+/**
+ * `event`: an event occurrence run by the PC (schema 3, stage 4b-1) — its conditions are the source record's too. `setWatch`: one
+ * of a set watch (schema 5, 4b-4) — its finish is a judgement (`parseJobSetReport`), never a title.
+ */
+interface Found { handle: CompanyData; occ: JobOccurrenceRow; job: JobRow; version: JobVersionRow; definition: JobDefinition; event: boolean; setWatch: boolean }
 
 /** An event condition that failed, as a claim, a call, a renew or a finish answers it (409; the app stops its AI on it). */
 const EVENT_ENDED = (code: JobOutcomeCode) => conflict('JOB_EVENT_ENDED', 'この回は続けられなくなったため、終わりました。', { reason: code })
@@ -150,7 +156,7 @@ export function createJobRuns(deps: JobRunDeps) {
     const event = occ.eventRecordId !== null && occ.eventRecordId !== undefined
     if (event && (!isEventPcOccurrence(occ, definition) || !deps.eventRuns)) return null
     if (!event && occ.dueSlot.startsWith('ev:')) return null
-    return { handle, occ, job, version, definition, event }
+    return { handle, occ, job, version, definition, event, setWatch: event && isSetWatchOccurrence(occ, definition) }
   }
 
   /** Whether the member may see the occurrence at all (⑥): an event one only while they read its record now. */
@@ -336,6 +342,61 @@ export function createJobRuns(deps: JobRunDeps) {
     }
   }
 
+  /**
+   * The one やること a done finish would make (checked by `beforeFinish` before anything is written), or null: `nothing`, a
+   * result that does not parse (the finish answers it), a set watch's 見送る (no やること: a notice instead).
+   */
+  function finishTask(f: Found, runId: string, jobResult: unknown): ServiceCreateInput | null {
+    if (f.setWatch) {
+      const report = parseJobSetReport(jobResult, f.definition.decision)
+      return report === null || report.decision === 'decline' ? null : setWatchTaskInput(f.handle, f.definition, f.occ, runId)
+    }
+    const result = parseJobRunResult(jobResult)
+    return result === null || result === 'nothing' ? null : taskInput(f, runId, result)
+  }
+
+  /**
+   * A set watch's done finish (4b-4 PR3, owner memo §5-1 / 付録 B), in the finish's transaction: the judgement parsed strictly
+   * against the pinned definition's reasons (`parseJobSetReport`: else 400 `JOB_SET_REPORT_BAD`, the whole finish rolled back,
+   * the run still running — a reason the Skill did not declare is never stored); its conditions again (a race: rolled back);
+   * the judgement kept on the occurrence (`ai_job_set_reports`); then 進める / 人に聞く / 判断できなかった → the one やること with the
+   * meeting's date only (`setWatchTaskInput`, the run's operation key `create_task`), 見送る → no やること and the notice
+   * `job_set_declined` to the responsible person (its words built when read, only while they read the meeting); the
+   * occurrence `done`. Never `nothing`: whether it was needed is the server's to say (`JOB_EVENT_NOTHING_REFUSED`).
+   */
+  function finishSet(f: Found, runId: string, jobResult: unknown): Refusal | null {
+    if (jobResult === 'nothing') return refuse('bad-request', 'この定期の仕事の回は「することがない」で終われません（要るかどうかはサーバーが確かめます）。', { code: 'JOB_EVENT_NOTHING_REFUSED' })
+    const report = parseJobSetReport(jobResult, f.definition.decision)
+    if (report === null) return refuse('bad-request', '判断の報告の形が正しくありません（理由は決められた種類から選び、文章は送らないでください）。', { code: 'JOB_SET_REPORT_BAD' })
+    const code = eventWhy(f, false)
+    if (code) return EVENT_ENDED(code)
+    const at = clock.now()
+    f.handle.jobs.insertSetReport(f.occ.id, report, at)
+    if (report.decision === 'decline') {
+      if (!f.handle.jobs.moveOccurrence(f.occ.id, ['running'], 'done', { outcomeCode: null }, at)) return GONE()
+      const written = f.handle.notifications.insert([{
+        id: deps.ids.newId(), userId: f.definition.actingUser, kind: 'job_set_declined' as const, recordId: '', recordVersion: 0, action: '',
+        actorId: null, actorKind: null, dedupeKey: `job_set_declined:${f.job.id}:${f.occ.id}`, createdAt: at, readAt: null,
+      }])
+      if (written.length > 0) toTell.set(runId, { companyId: f.handle.companyId, userIds: [f.definition.actingUser] })
+      return null
+    }
+    if (!f.definition.grant.creates.includes('task')) return refuse('bad-request', 'この定期の仕事はやることを作れません。', { code: 'JOB_TASK_NOT_GRANTED' })
+    const runs = f.handle.aiRuns
+    const key = 'create_task'
+    if (!runs.operation(runId, key)) {
+      runs.insertOperation({
+        runId, key, fingerprint: `${f.job.id}:${f.version.version}:${f.version.fingerprint}`, kind: 'record-create', state: 'in_progress',
+        generation: 1, refKind: null, refId: null, status: null, reconciledBy: null, createdAt: at, updatedAt: at,
+      })
+    }
+    const made = deps.writer.create(f.handle.companyId, setWatchTaskInput(f.handle, f.definition, f.occ, runId))
+    if (!made.ok) return refuse('conflict', 'やることを作れませんでした。', { code: made.reason === 'records-off' ? 'RECORDS_DISABLED' : 'JOB_TASK_NOT_CREATED' })
+    runs.updateOperation(runId, key, ['in_progress'], { state: 'done', refKind: 'record', refId: made.record.id }, at)
+    if (!f.handle.jobs.moveOccurrence(f.occ.id, ['running'], 'done', { outcomeCode: null }, at)) return GONE()
+    return null
+  }
+
   /** The run holding this occurrence now, or null (ended meanwhile, another run). */
   function held(member: RunSubjectMember, run: RunSubjectLiveRun): Found | null {
     const f = own(member, run.subject.id)
@@ -444,9 +505,9 @@ export function createJobRuns(deps: JobRunDeps) {
       }
       // The one やること checked before anything is written (as the server's runner does): refused → the run
       // ended, `needs_person` with that code, told — never left running.
-      const result = body.outcome === 'done' ? parseJobRunResult(body.jobResult) : null
-      if (result === null || result === 'nothing' || !f.definition.grant.creates.includes('task') || stillRuns(f)) return null
-      const refused = deps.writer.check(f.handle.companyId, taskInput(f, run.id, result))
+      const input = body.outcome === 'done' ? finishTask(f, run.id, body.jobResult) : null
+      if (input === null || !f.definition.grant.creates.includes('task') || stillRuns(f)) return null
+      const refused = deps.writer.check(f.handle.companyId, input)
       if (!refused) return null
       const code: JobOutcomeCode = refused.reason === 'records-off' ? 'RECORDS_OFF' : 'TASK_NOT_CREATED'
       let told: string[] = []
@@ -472,6 +533,8 @@ export function createJobRuns(deps: JobRunDeps) {
         return null
       }
       if (run.state !== 'done') return null
+      // A set watch's run (4b-4 PR3) reports a judgement of fixed kinds, never a title or a text (I6).
+      if (f.setWatch) return finishSet(f, run.id, body.jobResult)
       const result = parseJobRunResult(body.jobResult)
       if (result === null) return refuse('bad-request', 'jobResult is "nothing" or { title, summary? }', { code: 'JOB_RESULT_REQUIRED' })
       // An event occurrence (stage 4b-1): whether it is still needed is the server's conditions' to say, never the AI's —

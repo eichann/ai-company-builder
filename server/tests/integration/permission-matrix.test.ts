@@ -257,6 +257,8 @@ const MATRIX: Row[] = [
   r('GET /api/companies/:companyId/me/job-turns', w => ({ path: `${C(w)}/me/job-turns` }), MEMBERS),
   // Stage 4b-1 (D11): the event PC occurrences the caller ran as responsible person — every member, their own only.
   r('GET /api/companies/:companyId/me/job-occurrences', w => ({ path: `${C(w)}/me/job-occurrences` }), MEMBERS),
+  // 4b-4 PR3: a correction of a set watch's judgement — the occurrence's responsible person only (anyone else: the one 404).
+  r('POST /api/companies/:companyId/me/job-occurrences/:occurrenceId/feedback', w => ({ path: `${C(w)}/me/job-occurrences/${NO_SUCH_OCC}/feedback`, body: { kind: 'too_early' } }), [404, 404, 404, 404, 404, 401]),
   r('POST /api/companies/:companyId/job-run-claims', w => ({ path: `${C(w)}/job-run-claims`, body: {} }), [400, 400, 400, 400, 404, 401], 'no occurrence'),
   // Member proposals (jobs.md "Member proposals"): every member proposes (owner decision Q2) — their own candidates and
   // proposals only (anyone else's: the one 404); owners / admins list and return them; the AI's routes take a record token.
@@ -841,6 +843,7 @@ const CROSS: CrossRow[] = [
   x('DELETE /api/companies/:companyId/groups/:groupId', (w, id) => ({ path: `${C(w)}/groups/${id}` }), w => w.other.group),
   x('GET /api/companies/:companyId/jobs/:jobId', (w, id) => ({ path: `${C(w)}/jobs/${id}` }), w => w.other.job, NO_SUCH_JOB),
   x('GET /api/companies/:companyId/jobs/:jobId/occurrences', (w, id) => ({ path: `${C(w)}/jobs/${id}/occurrences` }), w => w.other.job, NO_SUCH_JOB),
+  x('POST /api/companies/:companyId/me/job-occurrences/:occurrenceId/feedback', (w, id) => ({ path: `${C(w)}/me/job-occurrences/${id}/feedback`, body: { kind: 'too_early' } }), () => OTHER_OCC, NO_SUCH_OCC),
   x('POST /api/companies/:companyId/jobs/:jobId/occurrences/:occurrenceId/retry', (w, id) => ({ path: `${C(w)}/jobs/${id}/occurrences/${OTHER_OCC}/retry` }), w => w.other.job, NO_SUCH_JOB),
   x('POST /api/companies/:companyId/jobs/:jobId/occurrences/:occurrenceId/operations/:key/reconcile', (w, id) => ({ path: `${C(w)}/jobs/${id}/occurrences/${OTHER_OCC}/operations/k1/reconcile`, body: { done: true } }), w => w.other.job, NO_SUCH_JOB),
   x('PUT /api/companies/:companyId/jobs/:jobId', (w, id) => ({ path: `${C(w)}/jobs/${id}`, body: { definition: { schema: 1 } } }), w => w.other.job, NO_SUCH_JOB),

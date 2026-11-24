@@ -416,6 +416,63 @@ export function parseJobDecisionFile(text: string): JobDecision | null {
   try { return parseJobDecision(JSON.parse(text)) } catch { return null }
 }
 
+/**
+ * A set watch's judgement (4b-4 PR3, owner memo 第6版 §5 / §5-0 / 付録 B): 進める (`proceed`), 見送る (`decline`), 人に聞く
+ * (`ask`) — or `gate_failed`, the app's gate could not judge (ACB's own outcome, never one of the Skill's reasons).
+ */
+export const JOB_SET_DECISIONS = ['proceed', 'decline', 'ask'] as const
+export type JobSetDecision = typeof JOB_SET_DECISIONS[number]
+/** The reason the server stores for `gate_failed` (upper case: never a Skill's code, `DECISION_CODE_RE`). */
+export const JOB_GATE_UNAVAILABLE = 'GATE_UNAVAILABLE'
+/**
+ * What a judgement to go ahead (or ask) may say is not confirmed yet (§5): fixed words only — a free code could carry a
+ * customer's name to the server (I6). 人数・予算・企業規模・助成金・月額.
+ */
+export const JOB_SET_UNCONFIRMED = ['headcount', 'budget', 'company_size', 'subsidy', 'monthly_fee'] as const
+/**
+ * The judgement as the server keeps it: fixed kinds only (I6) — no free text, no quote (`evidence` stays on the PC: the app
+ * checks it, §5 O1), the confidence on a coarse scale (hundredths: a float's bits carry no words).
+ */
+export type JobSetReport =
+  | { decision: JobSetDecision; reason: string; confidence: number; unconfirmed: string[] }
+  | { decision: 'gate_failed'; reason: typeof JOB_GATE_UNAVAILABLE; confidence: null; unconfirmed: [] }
+
+/**
+ * The finish's `jobResult` of a set watch's run, strictly (`POST /ai-runs/:runId/finish`): `{ decision, reason, confidence,
+ * unconfirmed? }` with `reason` one of the pinned definition's codes (an unknown one is refused, never stored as given),
+ * `confidence` a number 0–1, `unconfirmed` 0–5 distinct words of `JOB_SET_UNCONFIRMED` and only with `proceed` / `ask`; or
+ * exactly `{ decision: 'gate_failed' }`. Any other key — `evidence`, a title, a summary — is refused. Null when not one.
+ */
+export function parseJobSetReport(v: unknown, decision: JobDecision | undefined): JobSetReport | null {
+  if (!isObj(v)) return null
+  if (v.decision === 'gate_failed') {
+    return Object.keys(v).length === 1 ? { decision: 'gate_failed', reason: JOB_GATE_UNAVAILABLE, confidence: null, unconfirmed: [] } : null
+  }
+  if (!Object.keys(v).every(k => k === 'decision' || k === 'reason' || k === 'confidence' || k === 'unconfirmed')) return null
+  if (!(JOB_SET_DECISIONS as readonly unknown[]).includes(v.decision)) return null
+  const d = v.decision as JobSetDecision
+  if (typeof v.reason !== 'string' || !decision?.reasons.some(r => r.code === v.reason)) return null
+  if (typeof v.confidence !== 'number' || !Number.isFinite(v.confidence) || v.confidence < 0 || v.confidence > 1) return null
+  const unconfirmed = v.unconfirmed === undefined ? [] : v.unconfirmed
+  if (!Array.isArray(unconfirmed) || unconfirmed.length > JOB_SET_UNCONFIRMED.length) return null
+  if (!unconfirmed.every(u => (JOB_SET_UNCONFIRMED as readonly unknown[]).includes(u)) || new Set(unconfirmed).size !== unconfirmed.length) return null
+  if (d === 'decline' && unconfirmed.length > 0) return null
+  return { decision: d, reason: v.reason, confidence: Math.round(v.confidence * 100) / 100, unconfirmed: [...unconfirmed] as string[] }
+}
+
+/**
+ * A person's correction of a set watch's judgement (§5-2): ［作ってもらう］ after 見送る (`made_anyway`), ［まだ早かった］ after 進める
+ * or 人に聞く (`too_early`), 仕上げた after 人に聞く (`went_ahead`). Kept with the occurrence and the time only (never who).
+ */
+export const JOB_SET_FEEDBACK_KINDS = ['made_anyway', 'too_early', 'went_ahead'] as const
+export type JobSetFeedbackKind = typeof JOB_SET_FEEDBACK_KINDS[number]
+/** Whether a correction answers the judgement it is about (a 見送る is never "too early"; nothing corrects a gate that failed). */
+export function jobSetFeedbackFits(kind: JobSetFeedbackKind, decision: JobSetReport['decision']): boolean {
+  if (kind === 'made_anyway') return decision === 'decline'
+  if (kind === 'too_early') return decision === 'proceed' || decision === 'ask'
+  return decision === 'ask'
+}
+
 /** A refusal's codes only — never the values (a path could name a private folder). */
 export type JobDefinitionResult = { ok: true; definition: JobDefinition } | { ok: false; problems: string[] }
 
