@@ -15,10 +15,12 @@ import {
   PEOPLE_COMPANY_OFF,
   PEOPLE_INTRO,
   PEOPLE_NO_PC,
+  PEOPLE_PARTIAL,
   PEOPLE_TITLE,
   PEOPLE_UNTICK_NOTE,
   PEOPLE_WAITING,
   changedFor,
+  isPartial,
   isTicked,
   lineKindLabel,
   nextGrantRow,
@@ -73,7 +75,7 @@ export default function BrowserPeoplePage() {
         current = await browserPeopleApi.set(companyId, userId, { site: t.site, line: t.line, meaningHash: t.meaningHash, mechanicsHash: t.mechanicsHash, allowed: false })
         view.setData(() => current)
       }
-      toast.success(allow ? `${name}さんが「${column.label}」を使えるようにしました` : `${name}さんの「${column.label}」を外しました`)
+      toast.success(allow ? `${name}さんが「${column.label}」を使えるようになりました` : `${name}さんの「${column.label}」を外しました`)
     } catch (err) {
       toast.error('変更できませんでした', { description: describeError(err) })
       view.reload()
@@ -82,7 +84,7 @@ export default function BrowserPeoplePage() {
     }
   }
 
-  const companyOff = setting.data ? setting.data.settings.mode === 'off' && !setting.data.overrides.some((o) => o.mode === 'on') : false
+  const companyOff = setting.data?.settings.mode === 'off'
   const usablePc = new Set((pcs.data?.items ?? []).filter((pc) => pc.state === 'enabled').map((pc) => pc.userId))
 
   return (
@@ -169,6 +171,7 @@ function PeopleTable({
                       disabled={c.kind === 'waiting' || busy !== null}
                       onChange={(e) => onChange(p.userId, p.name, c, e.target.checked)}
                     />
+                    {isPartial(view, c, p.userId) && <span className="block text-small text-warning-text">{PEOPLE_PARTIAL}</span>}
                   </TableCell>
                 )
               })}

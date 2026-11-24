@@ -73,7 +73,8 @@ export const PEOPLE_TITLE = 'ブラウザ操作を使える人'
 
 export const PEOPLE_INTRO = 'AI に任せてよい作業を、人ごとに選びます。選んだ人も、使えるようにした PC からしか使えません。'
 
-export const PEOPLE_COMPANY_OFF = '会社全体のブラウザ操作が「使わない」なので、選んでも今は使えません。'
+export const PEOPLE_COMPANY_OFF =
+  '会社全体のブラウザ操作が「使わない」なので、「メンバーごとの動作」で「使う」にした人のほかは、選んでも今は使えません。'
 
 export const PEOPLE_NO_PC = '使えるようにした PC はまだありません'
 
@@ -142,10 +143,22 @@ export function peopleColumns(view: BrowserLineGrantsView): PeopleColumn[] {
 const inForce = (view: BrowserLineGrantsView, userId: string, row: BrowserLineRef) =>
   view.grants.some((g) => g.userId === userId && sameRow(g, row))
 
-/** Ticked: the person holds a grant in force on the 作業's newest approved row. */
+/**
+ * Ticked: the person holds a grant in force on **any** approved row of the 作業 (any meaning) — so whatever the server
+ * still lets them use is never shown unticked, and the untick (which takes every grant on the line away) is always one
+ * press away (Codex review). `partial` when that does not include the newest row: the box is ticked, the cell says so,
+ * and choosing again is untick + tick.
+ */
 export function isTicked(view: BrowserLineGrantsView, column: PeopleColumn, userId: string): boolean {
-  return column.kind === 'usable' && inForce(view, userId, column.target)
+  return column.kind === 'usable' && view.grants.some((g) => g.userId === userId && g.site === column.site && g.line === column.line)
 }
+
+/** Ticked, but not on the newest approved row (an earlier content, or a fill that stopped halfway). */
+export function isPartial(view: BrowserLineGrantsView, column: PeopleColumn, userId: string): boolean {
+  return column.kind === 'usable' && isTicked(view, column, userId) && !column.rows.every((r) => inForce(view, userId, r))
+}
+
+export const PEOPLE_PARTIAL = '前の内容でだけ使えます'
 
 /**
  * The next row to grant when the box is ticked: the oldest of the 作業's rows (same meaning) on which the person holds
@@ -165,5 +178,5 @@ export function nextGrantRow(view: BrowserLineGrantsView, column: PeopleColumn, 
 export function changedFor(view: BrowserLineGrantsView, column: PeopleColumn): boolean {
   if (column.kind !== 'usable') return false
   return view.grants.some((g) => g.site === column.site && g.line === column.line && g.meaningHash !== column.target.meaningHash
-    && !isTicked(view, column, g.userId))
+    && !inForce(view, g.userId, column.target))
 }

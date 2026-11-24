@@ -14,6 +14,7 @@ import {
   PEOPLE_CHANGED,
   PEOPLE_COMPANY_OFF,
   PEOPLE_NO_PC,
+  PEOPLE_PARTIAL,
   PEOPLE_WAITING,
   pcEnableSentence,
 } from '@/lib/agent-browser-people'
@@ -254,7 +255,7 @@ describe('ブラウザ操作を使える人', () => {
     expect(writes(calls)[0].body).toEqual({ site: 'lstep', line: 'landing_inspect', meaningHash: MEANING, mechanicsHash: H('4'), allowed: false })
   })
 
-  it('a 作業 whose content changed asks to choose again; a refused change is said and the table read again', async () => {
+  it('a 作業 whose content changed asks to choose again; access to the earlier content shows ticked and one untick takes it away (Codex review)', async () => {
     const old = { ...ROWS[1], meaningHash: H('o'), mechanicsHash: H('9'), mapVersion: '0.9.0' }
     const calls = stubApi(ownerCapabilities, {
       ...peopleRoutes(grants({ lines: [...ROWS, old], grants: [grant('u_member', old)] })),
@@ -262,10 +263,21 @@ describe('ブラウザ操作を使える人', () => {
     })
     renderInCompany(<BrowserPeoplePage />)
     expect(await screen.findByText(PEOPLE_CHANGED)).toBeInTheDocument()
-    expect(box(/^田中 太郎：流入経路を点検する$/)).not.toBeChecked()
-    await userEvent.click(box(/^田中 太郎：流入経路を点検する$/))
+    const tanaka = box(/^田中 太郎：流入経路を点検する$/)
+    expect(tanaka).toBeChecked()
+    expect(within(tanaka.closest('td') as HTMLElement).getByText(PEOPLE_PARTIAL)).toBeInTheDocument()
+    await userEvent.click(tanaka)
+    // A refused change is said and the table read again.
     await waitFor(() => expect(calls.filter((c) => c.method === 'GET' && c.url.endsWith('/browser-line-grants'))).toHaveLength(2))
-    // Only the new meaning's rows are ever sent (the oldest of them first).
-    expect(writes(calls).map((c) => (c.body as { meaningHash: string }).meaningHash)).toEqual([MEANING])
+    expect(writes(calls).map((c) => c.body)).toEqual([{ site: 'lstep', line: 'landing_inspect', meaningHash: MEANING, mechanicsHash: H('4'), allowed: false }])
+  })
+
+  it('a fill that stopped halfway still shows ticked (with the note), so it can be taken away', async () => {
+    stubApi(ownerCapabilities, peopleRoutes(grants({ grants: [grant('u_member', ROWS[1]), grant('u_member', ROWS[2], carried)] })))
+    renderInCompany(<BrowserPeoplePage />)
+    const tanaka = await screen.findByRole('checkbox', { name: '田中 太郎：流入経路を点検する' })
+    expect(tanaka).toBeChecked()
+    expect(within(tanaka.closest('td') as HTMLElement).getByText(PEOPLE_PARTIAL)).toBeInTheDocument()
+    expect(screen.queryByText(PEOPLE_CHANGED)).toBeNull()
   })
 })

@@ -2423,14 +2423,15 @@ Types from `shared/types/browser-devices.ts` / `browser-lines.ts` via `admin/src
   One call per press, to that PC's id.
 - **「ブラウザ操作を使える人」** (`…/browser/people`): rows = members, columns = 作業 (one per site × line, its newest
   approved row's label and 「見るだけ」/「書き込む」). A box changes the grant at once (no save button). Ticked = a grant in
-  force on the newest approved row. **A tick** grants, one call at a time, the oldest approved row of that 作業 with the
+  force on **any** approved row of the line (Codex review: what the server still allows is never shown unticked, so one
+  untick can always take it away); 「前の内容でだけ使えます」 when that does not cover every row of the newest meaning. **A tick** grants, one call at a time, the oldest approved row of that 作業 with the
   newest row's meaning on which the person holds nothing in force, until every such row is covered (usually one call:
   the reviewed `grantsFrom` carries it forward; an app on an older map's version can then use the 作業 too) — only
   approved rows of that very 作業 and meaning are ever sent. **An untick** is one `allowed: false`, which the server turns
   into "every grant of that person on that line" (carried ones too). A `waiting` 作業 is shown greyed with
   「まだ使えません（確かめ待ち）」 and a disabled box. Notes: 「この作業は内容が変わりました…」 when someone holds only an
   earlier meaning; 「使えるようにした PC はまだありません」 (link to the PCs page) for a person with no `enabled` PC; the
-  company's setting 「使わない」 (and no member override 「使う」) above the table.
+  company's setting 「使わない」 above the table (naming the member override as the exception).
 - Not done (memo §7-2, left for later): 「変えています」 on 「詳しい設定」 for PCs / grants, a per-person 「使わない」 note.
 
 Tests: `admin/tests/agent-browser-people.test.tsx` (the links; a member / manager sees neither page and nothing is asked;
