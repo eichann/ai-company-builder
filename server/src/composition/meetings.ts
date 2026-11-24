@@ -31,6 +31,7 @@ export interface MeetingsWiringDeps {
   resolveAddress: NonNullable<MinutesServiceDeps['resolveAddress']>
   afterAction: NonNullable<MinutesServiceDeps['afterAction']>
   readingAskedAgain: NonNullable<MinutesServiceDeps['readingAskedAgain']>
+  readingClaimed: NonNullable<MinutesServiceDeps['readingClaimed']>
 }
 
 export function wireMeetings(deps: MeetingsWiringDeps) {
@@ -52,12 +53,13 @@ export function wireMeetings(deps: MeetingsWiringDeps) {
     afterAction: deps.afterAction,
     // Built later; called only after construction.
     readingAskedAgain: deps.readingAskedAgain,
+    readingClaimed: deps.readingClaimed,
     members: companyId => {
       const rows = repos.memberships.listByCompany(companyId)
       const accounts = shared.accounts.byIds(rows.map(m => m.user_id))
       return rows.flatMap(m => {
         const a = accounts.get(m.user_id)
-        return a ? [{ userId: m.user_id, email: a.email, name: a.name ?? '', role: m.role }] : []
+        return a ? [{ userId: m.user_id, email: a.email, name: a.name ?? '', role: m.role, joinedAt: m.created_at }] : []
       })
     },
   })

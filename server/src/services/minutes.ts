@@ -74,6 +74,8 @@ export interface MinutesMember {
   email: string
   name: string
   role: string
+  /** When their membership began (the company's own row): a newcomer's automatic reading starts there. */
+  joinedAt?: string | null
 }
 
 export interface MinutesServiceDeps {
@@ -99,6 +101,12 @@ export interface MinutesServiceDeps {
    * claimed anew (`AiRunService.askedAgain`; ai-turns.md "Asked again").
    */
   readingAskedAgain?: (companyId: string, recordId: string) => void
+  /**
+   * The reading's execution run is claimed by an app now (its lease live, or waiting for a person to
+   * reconcile what it did): another attendee's automatic reading never takes the meeting over from
+   * its reader then (minutes.md "The organiser first"). Absent → treated as claimed (never taken over).
+   */
+  readingClaimed?: (companyId: string, recordId: string) => boolean
   /** The company's members with their ACB email and display name (compared only; never logged). */
   members: (companyId: string) => MinutesMember[]
   clock: Clock
@@ -135,6 +143,16 @@ const MAX_ARRIVALS = 100
 const AUTO_SERIES_NOTE = 'この定例は自動で読む設定のため、AI に読ませました'
 /** The ledger note when the member's own 「届いた議事録を AI が自動で読む」 asked for the reading. */
 const AUTO_READ_NOTE = '自動で読む設定のため、AI に読ませました'
+/** A meeting the clock asked for its organiser, taken by another attendee's automatic reading (once). */
+/** The meeting type's first AI action (core-types.ts): the reading has started. */
+const START_READING_ACTION = 'start_reading'
+const TAKEOVER_NOTE = '主催者の AI が読み始めなかったため、自動で読む設定のほかの参加者の AI に読ませました'
+/**
+ * The organiser first (owner decision 2026-11-25): for this long after a meeting arrives another attendee's
+ * automatic reading waits when the organiser's would read it, and a reading the clock asked for the organiser
+ * may be taken over by another attendee's only once it is this old and has not started.
+ */
+export const ORGANISER_FIRST_MS = 15 * 60_000
 /** A refused try for a member's automatic reading is made again after this long (sharing may change). */
 const AUTO_TRY_AGAIN_MS = 60 * 60 * 1000
 const READ_REQUEST_NOTE = 'AI に読ませる'
@@ -188,6 +206,11 @@ interface SourceRef {
   docs: Array<{ kind: 'notes' | 'transcript'; id: string }>
   /** The recurring series the event belongs to (calendar `recurringEventId`), when it does. */
   series?: string
+  /**
+   * The organiser's member id, when the organiser is on the list by an address Google verified for them
+   * (kept from 2026-11-25; never an address): arrivals say whether the planned reader is the organiser.
+   */
+  organiser?: string
 }
 
 function parseRef(raw: LedgerValue | undefined): SourceRef | null {
@@ -636,6 +659,7 @@ export function createMinutesService(deps: MinutesServiceDeps) {
     const finder = deps.members(companyId).find(m => m.userId === userId)
     if (!finder) return ok(result)
     const byEmail = verifiedMembers(companyId)
+    const joinedAt = new Map(deps.members(companyId).map(m => [m.userId, m.joinedAt ?? null]))
     const nowMs = deps.clock.nowMs()
 
     for (const event of events.slice(0, MAX_MEETINGS_PER_CHECK)) {
@@ -657,13 +681,29 @@ export function createMinutesService(deps: MinutesServiceDeps) {
         const m = byEmail.get(normalizeEmail(a.email) ?? '')
         return m ? [m.userId] : []
       }))]
-      // Read for the finder without a press (their series, else their setting): only a meeting they attend.
-      // Read fresh at each use (never kept across a Google call): a choice changed meanwhile applies.
-      const autoNote = (recordId: string) => attending.includes(userId) ? autoReadNote(records, userId, recordId, event.series) : null
+      // The organiser, counted only when on the list by an address Google verified for them (no email is kept).
+      const organiserAt = event.attendees.find(a => a.organizer && a.listed && !a.declined)
+      const organiser = organiserAt ? byEmail.get(normalizeEmail(organiserAt.email) ?? '')?.userId ?? null : null
+      const wants = (who: string, recordId: string) => autoReadNote(records, companyId, who, recordId, event.series, joinedAt.get(who))
+      // Read for the finder without a press (their series, else their setting): only a meeting they attend,
+      // and not while the organiser goes first. Read fresh at each use (never kept across a Google call): a
+      // choice changed meanwhile applies.
+      const autoNote = (recordId: string) => {
+        if (!attending.includes(userId)) return null
+        const note = wants(userId, recordId)
+        if (note === null || (organiser !== null && organiser !== userId && organiserFirst(companyId, recordId, organiser, wants))) return null
+        return note
+      }
+      // A meeting the clock asked for the organiser that has not started: once, after ORGANISER_FIRST_MS.
+      const takeoverNote = (recordId: string) => {
+        if (organiser === null || organiser === userId || autoNote(recordId) === null) return null
+        const asked = clockAskedOnly(companyId, recordId)
+        return asked !== null && asked.reader === organiser && deps.clock.nowMs() - asked.askedMs >= ORGANISER_FIRST_MS ? TAKEOVER_NOTE : null
+      }
       // Recorded from this event already: no Google call for it.
       if (known?.recordId) {
         result.existing++
-        if (await joinAndAuto(companyId, userId, known.recordId, attending, autoNote, budget) === 'stop') { result.waiting++; return ok(result) }
+        if (await joinAndAuto(companyId, userId, known.recordId, attending, autoNote, takeoverNote, budget) === 'stop') { result.waiting++; return ok(result) }
         continue
       }
       if (Date.parse(event.end) > nowMs) { result.waiting++; continue }
@@ -685,7 +725,7 @@ export function createMinutesService(deps: MinutesServiceDeps) {
           // (a reused link, a copied event) never widens its list.
           if (parseRef(fieldsOf(records, existing).fields.source_ref)?.event === event.eventId) {
             records.setMeetingEvent(key, { recordId: existing }, deps.clock.now())
-            if (await joinAndAuto(companyId, userId, existing, attending, autoNote, budget) === 'stop') { result.waiting++; return ok(result) }
+            if (await joinAndAuto(companyId, userId, existing, attending, autoNote, takeoverNote, budget) === 'stop') { result.waiting++; return ok(result) }
           } else {
             lookLater(companyId, key)
           }
@@ -704,7 +744,10 @@ export function createMinutesService(deps: MinutesServiceDeps) {
         const shown = [...attending]
         while (JSON.stringify(shown).length > 500) shown.pop()
         const external = event.attendees.filter(a => a.listed && isExternalAddress(a.email, [domain]))
-        const ref: SourceRef = { conference, event: event.eventId, docs: docs.map(d => ({ kind: d.kind, id: d.docId })), ...(event.series ? { series: event.series } : {}) }
+        const ref: SourceRef = {
+          conference, event: event.eventId, docs: docs.map(d => ({ kind: d.kind, id: d.docId })),
+          ...(event.series ? { series: event.series } : {}), ...(organiser !== null ? { organiser } : {}),
+        }
         // No まとまり at intake (choosing one shows part of the meeting to its department: an
         // attendee's choice). The outside participants' company (名寄せ) is still its 相手.
         const counterpart = participantsCompany({ companyId, userId, role: finder.role }, external.map(a => a.email))
@@ -755,10 +798,14 @@ export function createMinutesService(deps: MinutesServiceDeps) {
    * A meeting found again from the event it was recorded from (the caller checked: `meeting_events`
    * maps only that event to it): the attendees the calendar added
    * since join its list (removed ones stay; told 「議事録が届きました」 while it is still arrived), and
-   * the finder's 「自動で読む」 series asks the AI to read it. Best effort: someone else's change in
+   * the finder's 「自動で読む」 series asks the AI to read it — or, already asked by the clock for the
+   * organiser and not started, takes it over (`mayTakeOver`). Best effort: someone else's change in
    * between leaves it to the next run.
    */
-  async function joinAndAuto(companyId: string, userId: string, recordId: string, attending: string[], autoNote: (recordId: string) => string | null, budget: { calls: number }): Promise<'stop' | void> {
+  async function joinAndAuto(
+    companyId: string, userId: string, recordId: string, attending: string[],
+    autoNote: (recordId: string) => string | null, takeoverNote: (recordId: string) => string | null, budget: { calls: number },
+  ): Promise<'stop' | void> {
     const records = companyData.forCompany(companyId).records
     const row = records.byIds([recordId])[0]
     if (!row || row.removedAt !== null || row.members === null) return
@@ -774,8 +821,49 @@ export function createMinutesService(deps: MinutesServiceDeps) {
       })
       now = fieldsOf(records, recordId)
     }
-    if (now.state !== MEETING_ARRIVED_STATE || !(records.byIds([recordId])[0]?.members ?? []).includes(userId)) return
-    return autoAsk(companyId, userId, recordId, now.version, autoNote, budget)
+    if (!(records.byIds([recordId])[0]?.members ?? []).includes(userId)) return
+    if (now.state === MEETING_ARRIVED_STATE) return autoAsk(companyId, userId, recordId, now.version, autoNote, budget)
+    if (now.state === 'received') return autoAsk(companyId, userId, recordId, now.version, takeoverNote, budget)
+  }
+
+  /**
+   * Within ORGANISER_FIRST_MS of the meeting arriving, another attendee's automatic reading waits when the
+   * organiser (an attendee: the caller found them on the list) would read it automatically.
+   */
+  function organiserFirst(companyId: string, recordId: string, organiser: string, wants: (who: string, recordId: string) => string | null): boolean {
+    const row = companyData.forCompany(companyId).records.byIds([recordId])[0]
+    if (!row) return false
+    const arrivedMs = Date.parse(row.createdAt)
+    if (Number.isNaN(arrivedMs) || deps.clock.nowMs() - arrivedMs >= ORGANISER_FIRST_MS) return false
+    return wants(organiser, recordId) !== null
+  }
+
+  /**
+   * A meeting only the clock asked to be read, not started (owner decisions 2026-11-25), of one waiting for its
+   * AI (`received`): the latest request was **the clock's** (never a person's own press), no reading started
+   * since, and no app holds the reading's run. Its reader and when the clock asked; else null. Two may move
+   * it to another reader, each asked again right before the write, in its synchronous stretch, which is a
+   * compare-and-set at the version — so the first reader's later start fails and does nothing:
+   * - another attendee's automatic reading, when the reader is the organiser and the ask is ORGANISER_FIRST_MS
+   *   old (the organiser's PC may be closed). The taker is on its list and not the organiser, so a meeting
+   *   taken over has another reader and is never taken over automatically again (once);
+   * - an attendee's own press ［AI に読ませる］, whoever the reader and however old the ask: a person can always
+   *   read a meeting themselves.
+   */
+  function clockAskedOnly(companyId: string, recordId: string): { reader: string; askedMs: number } | null {
+    const records = companyData.forCompany(companyId).records
+    const now = fieldsOf(records, recordId)
+    // The callers ask only of a `received` meeting, and the write is a compare-and-set at the version read then.
+    if (typeof now.fields.assignee !== 'string') return null
+    const ledger = records.ledger(recordId)
+    const asks = ledger.filter(e => e.action === MEETING_READ_REQUEST_ACTION)
+    const ask = asks[asks.length - 1]
+    if (!ask || ask.actorId !== CLOCK_ACTOR.id) return null
+    if (ledger.some(e => e.version > ask.version && e.action === START_READING_ACTION)) return null
+    const askedMs = Date.parse(ask.at)
+    if (Number.isNaN(askedMs)) return null
+    if (deps.readingClaimed?.(companyId, recordId) ?? true) return null
+    return { reader: now.fields.assignee, askedMs }
   }
 
   /**
@@ -804,11 +892,26 @@ export function createMinutesService(deps: MinutesServiceDeps) {
    * joined after the setting was made. `since`: a mode the member chose applies to meetings recorded
    * from then on (choosing never reads a backlog of the last days at once); null = no bound.
    */
-  function autoReadOf(records: CompanyData['records'], userId: string): { mode: MeetingAutoReadMode; chosen: boolean; since: string | null } {
+  function autoReadOf(records: CompanyData['records'], userId: string): { mode: MeetingAutoReadMode; chosen: boolean; since: string | null; newcomer: boolean } {
     const row = records.meetingAutoRead(userId)
-    if (!row) return { mode: NEW_MEMBER_AUTO_READ, chosen: false, since: null }
+    if (!row) return { mode: NEW_MEMBER_AUTO_READ, chosen: false, since: null, newcomer: true }
     // A value this build does not know reads as off (never reads more than the member chose).
-    return { mode: isMeetingAutoReadMode(row.mode) ? row.mode : 'off', chosen: row.chosen, since: row.chosen ? row.updatedAt : null }
+    return { mode: isMeetingAutoReadMode(row.mode) ? row.mode : 'off', chosen: row.chosen, since: row.chosen ? row.updatedAt : null, newcomer: false }
+  }
+
+  /** The first time the clock looked at a newcomer's setting whose joining time is not known (this process only). */
+  const firstSeen = new Map<string, string>()
+
+  /**
+   * Where a newcomer's starting value begins (owner decision 2026-11-25): the time they joined the company,
+   * else the first time the clock saw them — so their first run never reads meetings held before then.
+   */
+  function newcomerStart(companyId: string, userId: string, joinedAt: string | null | undefined): string {
+    if (joinedAt && !Number.isNaN(Date.parse(joinedAt))) return joinedAt
+    const key = `${companyId}\u0000${userId}`
+    const seen = firstSeen.get(key) ?? deps.clock.now()
+    firstSeen.set(key, seen)
+    return seen
   }
 
   /**
@@ -816,12 +919,20 @@ export function createMinutesService(deps: MinutesServiceDeps) {
    * series' choice first (both ways), then their setting — 「社外の人がいる会議だけ」 by the stored count
    * (`external_count`, the same reading a set watch's `outside_attendee` guard makes).
    */
-  function autoReadNote(records: CompanyData['records'], userId: string, recordId: string, seriesId: string | null | undefined): string | null {
+  function autoReadNote(
+    records: CompanyData['records'], companyId: string, userId: string, recordId: string, seriesId: string | null | undefined, joinedAt: string | null | undefined,
+  ): string | null {
     const series: MeetingSeriesChoice = seriesId ? records.meetingSeriesChoices(userId).get(seriesKey(seriesId)) ?? null : null
     if (series === 'auto') return AUTO_SERIES_NOTE
     const setting = autoReadOf(records, userId)
     const row = records.byIds([recordId])[0]
     if (!row || (setting.since !== null && row.createdAt < setting.since)) return null
+    // A newcomer who never chose: only meetings held after they joined (never the last days' backlog).
+    if (setting.newcomer) {
+      const held = fieldsOf(records, recordId).fields.meeting_at
+      const heldMs = Date.parse(typeof held === 'string' ? held : row.createdAt)
+      if (Number.isNaN(heldMs) || heldMs < Date.parse(newcomerStart(companyId, userId, joinedAt))) return null
+    }
     return meetingAutoReads({ series, mode: setting.mode, externalCount: fieldsOf(records, recordId).fields.external_count }) ? AUTO_READ_NOTE : null
   }
 
@@ -1218,12 +1329,17 @@ export function createMinutesService(deps: MinutesServiceDeps) {
         deps.readingAskedAgain?.(member.companyId, row.id)
         return ok({ recordId: row.id, version: now.version, state: 'received' })
       }
-      if (!['arrived', 'skipped', 'failed'].includes(now.state ?? '')) {
+      // Waiting only because the clock asked it for someone else, not started: the press takes it (a person can
+      // always read a meeting themselves; owner decision 2026-11-25). Never a reading started or another's press.
+      const takesOver = now.state === 'received' && clockAskedOnly(member.companyId, row.id) !== null
+      if (!takesOver && !['arrived', 'skipped', 'failed'].includes(now.state ?? '')) {
         return refuse('conflict', 'この会議は、もう AI が読んでいるか、読み終わっています。', { code: 'MEETING_NOT_WAITING', version: now.version })
       }
       if (expected !== now.version) return refuse('conflict', 'ほかの人が先に変えました。最新の状態を見てからもう一度お試しください', { code: 'VERSION_CONFLICT', version: now.version })
-      // A press always has its note: askToRead answers null only for the clock's choice read again.
-      return (await askToRead(member.companyId, member.userId, row.id, expected, { id: member.userId, kind: 'human', source: null }, READ_REQUEST_NOTE))
+      // askToRead answers null only when the note says no: the clock's choice, or a takeover no longer allowed
+      // after the try of the text (the reading started or its run was claimed meanwhile).
+      const note = () => !takesOver || clockAskedOnly(member.companyId, row.id) !== null ? READ_REQUEST_NOTE : null
+      return (await askToRead(member.companyId, member.userId, row.id, expected, { id: member.userId, kind: 'human', source: null }, note))
         ?? refuse('conflict', 'この会議は、いまは AI に読ませられません。', { code: 'MEETING_NOT_WAITING', version: now.version })
     },
 
@@ -1347,6 +1463,8 @@ export function createMinutesService(deps: MinutesServiceDeps) {
         const series = parseRef(now.fields.source_ref)?.series ?? null
         const seriesChoice = series !== null ? choices.get(seriesKey(series)) ?? null : null
         // Asked by the server for its reader (their series or setting): the latest request was the clock's.
+        // The planned reader is the meeting's organiser (kept on meetings recorded from 2026-11-25): 「（主催）」.
+        const byOrganiser = st !== 'skipped' && byId !== null && parseRef(now.fields.source_ref)?.organiser === byId
         const askedAutomatically = (st === 'asked' || st === 'reading')
           && [...records.ledger(row.id)].reverse().find(e => e.action === MEETING_READ_REQUEST_ACTION)?.actorId === CLOCK_ACTOR.id
         items.push({
@@ -1354,7 +1472,7 @@ export function createMinutesService(deps: MinutesServiceDeps) {
           meetingAt: typeof now.fields.meeting_at === 'string' ? now.fields.meeting_at : null,
           status: st, attendeeCount: row.members?.length ?? meetingAttendeeIds(now.fields.attendees).length,
           by: byId ? { memberId: byId, displayName: names.get(byId) ?? '' } : null, byYou: byId === member.userId,
-          series: series !== null, autoSeries: seriesChoice === 'auto', seriesChoice, askedAutomatically,
+          series: series !== null, autoSeries: seriesChoice === 'auto', seriesChoice, askedAutomatically, byOrganiser,
         })
       }
       items.sort((a, b) => ((b.meetingAt ?? '') < (a.meetingAt ?? '') ? -1 : (b.meetingAt ?? '') > (a.meetingAt ?? '') ? 1 : 0))
