@@ -32,7 +32,7 @@ shows only the pictures that really changed.
 `MANUAL_NO_ANNOTATIONS=1 pnpm manual:shoot -g <id>` writes `manual/images-plain/<id>.png` (an
 administrator-guide scene: `manual-admin/images-plain/`) and leaves `images/` alone. The plain
 folders are gitignored: never commit them. A scene marked `video: true` is shot only for a video
-(no page shows it, e.g. `video-business-shape`): it always goes to `images-plain/` and carries no
+(no page shows it, e.g. `video-business-shape`, `video-approval-card-manager`): it always goes to `images-plain/` and carries no
 annotations.
 
 A shoot fails, rather than saving a wrong picture, when a step or an annotation cannot find its

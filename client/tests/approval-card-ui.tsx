@@ -3,6 +3,8 @@
 // holding a `data-approval` reference; the card reads the request through the fake preload API.
 // `?viewer=approver` (default) may approve; `?viewer=requester` asked for it and may not.
 // `?kind=create`: a new deal with similar existing ones (plugins.md "Similar records").
+// `?video=manager`: the FDE video's card — HubSpot as by default, 山田さん asked and 佐藤さん (the
+// section manager in the narration) decides, so the line reads 「佐藤さんの承認待ち」 above ［承認］.
 // What 「承認」 / 「同じ」 sent is shown in `#sent` for the spec.
 import { useState } from 'react'
 import { createRoot } from 'react-dom/client'
@@ -45,10 +47,11 @@ const createView: ApprovalView = {
 }
 // `?manual=1`: the user manual's picture (manual/README.md): a fictional system name, nothing real.
 const manualView: ApprovalView = { ...updateView, pluginId: 'customer-ledger', operationLabel: '案件の金額を顧客台帳に書き戻す', systemLabel: '顧客台帳' }
-const view = params.get('kind') === 'create' ? createView : params.get('manual') === '1' ? manualView : updateView
+const VIDEO_MANAGER = params.get('video') === 'manager'
+const view = params.get('kind') === 'create' ? createView : params.get('manual') === '1' && !VIDEO_MANAGER ? manualView : updateView
 // `?manual=1&viewer=requester` (or `&approver=sato`, the approver's side): the manual's chapter 23 — 山田さん asked, 佐藤さん
 // decides (the same ids, other names). `?manual=1` alone keeps chapter 8's names.
-const swapped = params.get('manual') === '1' && (!approver || params.get('approver') === 'sato')
+const swapped = VIDEO_MANAGER || (params.get('manual') === '1' && (!approver || params.get('approver') === 'sato'))
 const names = swapped ? { 'u-sato': '山田', 'u-abe': '佐藤' } : { 'u-sato': '佐藤', 'u-abe': '山田' }
 
 function Preview() {

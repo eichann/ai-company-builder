@@ -2537,6 +2537,14 @@ scenes.push(
 
 // ── Video only (`video: true`: manual/images-plain/, no manual page shows them) ──
 scenes.push({
+  id: 'video-approval-card-manager',
+  about: 'Video: the approval card as the section manager 佐藤さん sees it — 山田さん asked, 1,200,000 → 1,500,000, 「佐藤さんの承認待ち」 above ［承認］.',
+  video: true,
+  page: 'approval-card',
+  query: { video: 'manager' },
+  crop: { target: 'section', padding: { x: 32, y: 16 } },
+})
+scenes.push({
   id: 'video-business-shape',
   about: 'Video: the trial Skill 「業務の形」 asks one plain question at a time about 山田さん\'s latest quote, then lists the holes it found.',
   video: true,

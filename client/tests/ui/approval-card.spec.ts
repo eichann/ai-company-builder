@@ -37,6 +37,17 @@ test('the requester (not the approver) has no approve or send-back button, only 
   expectNoPageErrors(state)
 })
 
+test('the video\'s card (?video=manager) waits for the manager 佐藤さん, not 山田さん who asked, and keeps ［承認］ with HubSpot', async ({ page }) => {
+  const state = await openPreview(page, 'approval-card', { video: 'manager' })
+  const card = page.getByRole('group', { name: '承認のお願い' })
+  await expect(card).toContainText('案件の欄を HubSpot に書き戻す')
+  await expect(card).toContainText('1,200,000')
+  await expect(card).toContainText('1,500,000')
+  await expect(card.getByRole('status')).toHaveText('佐藤さんの承認待ち')
+  await expect(card.getByRole('button', { name: '承認', exact: true })).toBeVisible()
+  expectNoPageErrors(state)
+})
+
 test('a new deal with similar ones: the approver first says whether it is the same; 「同じ」 makes nothing and links the meeting', async ({ page }) => {
   const state = await openPreview(page, 'approval-card', { kind: 'create' })
   const card = page.getByRole('group', { name: '承認のお願い' })
