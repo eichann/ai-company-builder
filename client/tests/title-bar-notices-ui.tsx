@@ -45,7 +45,7 @@ const readIds: string[] = []
 // `?theme=dark` for dark mode (the status-colours spec reads the new-item dot in both themes).
 if (new URLSearchParams(location.search).get('theme') === 'dark') document.documentElement.classList.add('dark')
 const features = new URLSearchParams(location.search).get('features') === 'off'
-  ? { taskList: true, meetings: false, inbox: false, decisions: true, projects: true }
+  ? { taskList: true, meetings: false, inbox: false, decisions: true, projects: true, afterMeeting: false }
   : undefined
 const withMeetings = new URLSearchParams(location.search).get('meetings') === '1'
 if (new URLSearchParams(location.search).get('undo') === '1') {

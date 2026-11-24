@@ -120,9 +120,10 @@ engine the day it is turned on.
 ## Features on and off (「使う機能」, owner decisions 2026-11-07)
 
 The record types stay in the core and are always installed; what a company switches is a
-**feature**, one switch each, all **on** by default (a company that never chose sees no change).
+**feature**, one switch each, all **on** by default (a company that never chose sees no change) — except
+`afterMeeting`, a trial screen of the app that is **off** until an owner / admin turns it on (`DEFAULT_FEATURES`).
 One copy of the rules: `shared/core/features.ts` (`FEATURE_IDS`, `featuresFrom` — lenient: anything
-missing or not `false` is on —, `TYPE_FEATURE`, `FEATURE_TOOLS`, `FEATURE_NOTICE_KINDS`,
+missing or not a boolean is its default —, `TYPE_FEATURE`, `FEATURE_TOOLS`, `FEATURE_NOTICE_KINDS`,
 `noticeTurnedOff`, `noticeKindsShown`, the words `FEATURE_WORDS` / `FEATURE_OFF_NOTE` /
 `FEATURE_OFF_CONFIRM` / `FEATURE_OFF_SETTINGS_LINE`).
 
@@ -133,6 +134,7 @@ missing or not `false` is on —, `TYPE_FEATURE`, `FEATURE_TOOLS`, `FEATURE_NOTI
 | 受信の振り分け・返事のお願い | `inbox` | `interaction`, `reply_request` | the mail poll, Slack's signals, our replies into threads, 「返事を待つ」 (`offersAwait`), the AI's judgement / reply check, 引き受ける, 受信を読む (off for everyone, as the company's own switch), the inbox's notices and tools (`inbox.md`) |
 | 決めたこと | `decisions` | `decision` | `POST /records/decisions` (person and AI: 409 `FEATURE_OFF`), the approval's 「〇〇を承認」 decision (skipped, the approval stands), `decisions_record` and its instructions |
 | プロジェクト | `projects` | `project` | creating a `project` (person and AI), 「どの〇〇の会議ですか？」 where no business kind exists, `GET /records/bundle-kinds` says `coreOff: true` |
+| 会議のあとの更新案（試し） | `afterMeeting` | — (owns no type, tool or notice; **off by default**) | the app's 4b-4 card and weekly buttons under a job's やること (`jobs.md` "The 4b-4 screens (PR6-A)"); the files on members' PCs stay |
 
 - **Storage and API**: table `company_features` (one JSON object per company, behind the handle's
   `tasks`; no row = all on), apart from the task settings so an older admin console's whole-document

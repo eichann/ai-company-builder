@@ -49,6 +49,7 @@ export const COMMANDS = defineCommands([
       fresh: z.boolean().optional().describe('「＋新しい相談」: start a new one even when one about it exists'),
       purpose: z.enum(['nudge', 'work']).optional().describe('Why it is started: `nudge` = ［催促の下書きを作る］ (always a new one; the AI drafts, never sends); `work` = 「この作業をする」 (always a new one that starts the work, fixed to when the やること was made, and closes by itself once done while not in front)'),
       madeAt: z.string().max(40).optional().describe('`work`: when the やること was made (ISO time): the week it fixes'),
+      detail: z.string().min(1).max(40_000).optional().describe('`work` only: what the member chose on a screen of the やること (「会議のあと」\'s card, 4b-4 PR6-A), added to the first message under its own heading'),
       pane: z.string().optional().describe('The chat pane; the one used last when left out'),
     }),
     target: { arg: 'pane', area: 'chat' },

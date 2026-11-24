@@ -24,6 +24,8 @@ contract.events writeAccess:changed
 contract.invoke absences:add
 contract.invoke absences:get
 contract.invoke absences:remove
+contract.invoke afterMeeting:note
+contract.invoke afterMeeting:read
 contract.invoke agent-interaction:list
 contract.invoke agent-interaction:respond
 contract.invoke aiTurns:claim
@@ -538,6 +540,7 @@ contract.type ElectronAPI.markSlackSeen = markSlackSeen: Invoke<'slack:markSeen'
 contract.type ElectronAPI.moveEnvKeyToServer = moveEnvKeyToServer: Invoke<'brokerKeys:moveFromEnv'>
 contract.type ElectronAPI.moveFromExternal = moveFromExternal: Invoke<'fs:moveFromExternal'>
 contract.type ElectronAPI.moveItem = moveItem: Invoke<'fs:move'>
+contract.type ElectronAPI.noteAfterMeeting = noteAfterMeeting: Invoke<'afterMeeting:note'>
 contract.type ElectronAPI.onAgentInteraction = onAgentInteraction: Subscribe<'agent-interaction:request'>
 contract.type ElectronAPI.onAgentInteractionClosed = onAgentInteractionClosed: Subscribe<'agent-interaction:closed'>
 contract.type ElectronAPI.onAppCommandRequest = onAppCommandRequest: Subscribe<'appCommand:request'>
@@ -575,6 +578,7 @@ contract.type ElectronAPI.patchChatSession = patchChatSession: Invoke<'chatHisto
 contract.type ElectronAPI.pauseJob = pauseJob: Invoke<'jobs:pause'>
 contract.type ElectronAPI.publishSkill = publishSkill: Invoke<'skills:publish'>
 contract.type ElectronAPI.publishSkillToCompany = publishSkillToCompany: Invoke<'skillShelf:publish'>
+contract.type ElectronAPI.readAfterMeeting = readAfterMeeting: Invoke<'afterMeeting:read'>
 contract.type ElectronAPI.readDirectory = readDirectory: Invoke<'fs:readDirectory'>
 contract.type ElectronAPI.readDirectoryTree = readDirectoryTree: (path: string, maxDepth?: number) => Promise<InvokeResult<'fs:readDirectoryTree'>>
 contract.type ElectronAPI.readFile = readFile: Invoke<'fs:readFile'>
@@ -796,6 +800,8 @@ contract.type IpcInvokeChannels = export interface IpcInvokeChannels { }
 contract.type IpcInvokeChannels.'absences:add' = 'absences:add': { args: [companyId: string, input: AbsenceAddInput]; result: AbsenceAddResult }
 contract.type IpcInvokeChannels.'absences:get' = 'absences:get': { args: [companyId: string]; result: AbsencesResult }
 contract.type IpcInvokeChannels.'absences:remove' = 'absences:remove': { args: [companyId: string, absenceId: string]; result: AbsenceRemoveResult }
+contract.type IpcInvokeChannels.'afterMeeting:note' = 'afterMeeting:note': { args: [companyId: string, rootPath: string, occurrenceId: string, change: AfterMeetingChange]; result: AfterMeetingNoteResult }
+contract.type IpcInvokeChannels.'afterMeeting:read' = 'afterMeeting:read': { args: [companyId: string, rootPath: string, occurrenceId: string]; result: AfterMeetingRead }
 contract.type IpcInvokeChannels.'agent-interaction:list' = 'agent-interaction:list': { args: []; result: AgentInteractionRequest[] }
 contract.type IpcInvokeChannels.'agent-interaction:respond' = 'agent-interaction:respond': { args: [id: string, response: AgentInteractionResponse]; result: boolean }
 contract.type IpcInvokeChannels.'aiTurns:claim' = 'aiTurns:claim': { args: [companyId: string, recordId: string, expectedVersion: number, conversationId: string, companyRoot?: string]; result: AiTurnClaimResult }
@@ -1138,6 +1144,8 @@ contract.type ToolInfo.startCommand = startCommand?: string
 main.handle absences:add @ features/absences/ipc.ts (companyId, input)
 main.handle absences:get @ features/absences/ipc.ts (companyId)
 main.handle absences:remove @ features/absences/ipc.ts (companyId, absenceId)
+main.handle afterMeeting:note @ features/after-meeting/ipc.ts (companyId, rootPath, occurrenceId, change)
+main.handle afterMeeting:read @ features/after-meeting/ipc.ts (companyId, rootPath, occurrenceId)
 main.handle agent-interaction:list @ features/agent-interactions/ipc.ts ()
 main.handle agent-interaction:respond @ features/agent-interactions/ipc.ts (id: string, response: AgentInteractionResponse)
 main.handle aiTurns:claim @ features/ai-turns/ipc.ts (companyId, recordId, expectedVersion, conversationId, companyRoot)
@@ -1734,6 +1742,8 @@ preload moveFromExternal -> invoke fs:moveFromExternal($0, $1)
 preload moveFromExternal : (sourcePath: string, destPath: string) => Promise<FileOpResult>
 preload moveItem -> invoke fs:move($0, $1)
 preload moveItem : (sourcePath: string, destPath: string) => Promise<FileOpResult>
+preload noteAfterMeeting -> invoke afterMeeting:note($0, $1, $2, $3)
+preload noteAfterMeeting : (companyId: string, rootPath: string, occurrenceId: string, change: AfterMeetingChange) => Promise<AfterMeetingNoteResult>
 preload onAgentInteraction -> on agent-interaction:request(<fn>) ; removeListener agent-interaction:request(<fn>)
 preload onAgentInteraction : (callback: (request: AgentInteractionRequest) => void) => () => void
 preload onAgentInteractionClosed -> on agent-interaction:closed(<fn>) ; removeListener agent-interaction:closed(<fn>)
@@ -1808,6 +1818,8 @@ preload publishSkill -> invoke skills:publish($0, $1)
 preload publishSkill : (rootPath: string, skillRelativePath: string) => Promise<FileOpResult>
 preload publishSkillToCompany -> invoke skillShelf:publish($0, $1, $2, $3)
 preload publishSkillToCompany : (rootPath: string, skillPath: string, expectedVersion: string | null, leaveOutOutputs: boolean) => Promise<SkillShelfSendResult>
+preload readAfterMeeting -> invoke afterMeeting:read($0, $1, $2)
+preload readAfterMeeting : (companyId: string, rootPath: string, occurrenceId: string) => Promise<AfterMeetingRead>
 preload readDirectory -> invoke fs:readDirectory($0)
 preload readDirectory : (path: string) => Promise<DirectoryEntry[]>
 preload readDirectoryTree -> invoke fs:readDirectoryTree($0, $1)

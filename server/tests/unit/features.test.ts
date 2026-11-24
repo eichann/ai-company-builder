@@ -137,7 +137,7 @@ const decisionBody = () => ({ folder: '営業部', title: '値引きは10%まで
 
 describe('the switches', () => {
   it('every feature is on until an owner or admin turns one off; a member cannot, a bad body changes nothing', () => {
-    expect(features.of('a')).toEqual({ taskList: true, meetings: true, inbox: true, decisions: true, projects: true })
+    expect(features.of('a')).toEqual({ taskList: true, meetings: true, inbox: true, decisions: true, projects: true, afterMeeting: false })
     const byMember = features.set(m('u-alice'), { feature: 'meetings', on: false })
     expect(byMember.ok).toBe(false)
     expect(byMember.ok ? null : byMember.kind).toBe('forbidden')
@@ -150,9 +150,18 @@ describe('the switches', () => {
     expect(view.updatedBy).toBe('u-admin')
     expect(changedCompanies).toEqual(['a'])
     // The other switches and another company are untouched.
-    expect(features.of('a')).toEqual({ taskList: true, meetings: false, inbox: true, decisions: true, projects: true })
+    expect(features.of('a')).toEqual({ taskList: true, meetings: false, inbox: true, decisions: true, projects: true, afterMeeting: false })
     expect(features.of('b').meetings).toBe(true)
     expect(features.get(m('u-alice')).canEdit).toBe(false)
+  })
+
+  it('「会議のあと」 (a trial screen of the app, 4b-4 PR6-A) is off until an owner or admin turns it on; a stored document without it reads off', () => {
+    expect(features.of('a').afterMeeting).toBe(false)
+    expect(features.set(m('u-alice'), { feature: 'afterMeeting', on: true }).ok).toBe(false)
+    expect(ok(features.set(m('u-owner'), { feature: 'afterMeeting', on: true })).features.afterMeeting).toBe(true)
+    expect(features.of('a').afterMeeting).toBe(true)
+    expect(features.of('b').afterMeeting).toBe(false)
+    expect(ok(records.types(m('u-alice'))).features.afterMeeting).toBe(true)
   })
 
   it('GET /records/types carries the features (the app and the AI follow them)', () => {

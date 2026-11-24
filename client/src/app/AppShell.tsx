@@ -74,6 +74,7 @@ import { useSeenTasks } from '../features/tasks/hooks/useSeenTasks'
 import { usePluginStepTurns } from '../features/plugin-steps/hooks/usePluginStepTurns'
 import { useJobTurns } from '../features/jobs/hooks/useJobTurns'
 import { JobTaskPanel } from '../features/jobs/components/JobTaskPanel'
+import { AfterMeetingPart } from '../features/after-meeting/entry'
 import { OCCURRENCE_TASK_ID_RE } from '../../shared/jobs'
 import { ContinueStepButton } from '../features/plugin-steps/components/ContinueStepButton'
 import { PersonStepButtons } from '../features/plugin-steps/components/PersonStepButtons'
@@ -474,7 +475,11 @@ export function AppShell({ bottomPanel }: AppShellProps = {}) {
         // A やること a scheduled job made (its id is the occurrence's, jobs.md "The set watch (schema 5)" "The app (PR6)").
         {...(OCCURRENCE_TASK_ID_RE.test(recordId) ? {
           meetingBesideTitle: true,
-          renderJobPart: ctx => <JobTaskPanel companyId={currentCompany.id} task={ctx.task} busy={ctx.busy} onComplete={ctx.complete} onDismiss={ctx.dismiss} />,
+          renderJobPart: ctx => <>
+            <JobTaskPanel companyId={currentCompany.id} task={ctx.task} busy={ctx.busy} onComplete={ctx.complete} onDismiss={ctx.dismiss} />
+            {/* 「会議のあと」 (4b-4 PR6-A): drawn only while the company turned it on in 「使う機能」 (off by default). */}
+            <AfterMeetingPart enabled={features.afterMeeting} companyId={currentCompany.id} rootPath={rootPath ?? ''} task={ctx.task} busy={ctx.busy} onComplete={ctx.complete} />
+          </>,
         } : {})}
         onDetachConsultation={sessionId => { void patchChatSession(currentCompany.id, sessionId, { topicRecordId: null }).catch(() => {}) }} /></div>
     }

@@ -51,13 +51,13 @@ function stubApi(caps: Capabilities, view: FeaturesView) {
 const puts = (calls: Call[]) => calls.filter((c) => c.method === 'PUT' && c.url.endsWith('/features')).map((c) => c.body)
 
 describe('使う機能', () => {
-  it('shows the five switches, each with what it is and what turning it off does', async () => {
+  it('shows every switch, each with what it is and what turning it off does (「会議のあと」 off by default)', async () => {
     stubApi(ownerCapabilities, viewOf({ inbox: false }))
     renderInCompany(<FeaturesSettingsPage />)
     const list = await screen.findByRole('list', { name: '使う機能' })
     for (const id of FEATURE_IDS) {
       const toggle = within(list).getByRole('switch', { name: FEATURE_WORDS[id].name })
-      expect(toggle).toHaveAttribute('aria-checked', id === 'inbox' ? 'false' : 'true')
+      expect(toggle).toHaveAttribute('aria-checked', id === 'inbox' || id === 'afterMeeting' ? 'false' : 'true')
       expect(toggle).toBeEnabled()
       expect(within(list).getByText(FEATURE_WORDS[id].what)).toBeInTheDocument()
       expect(within(list).getByText(`オフにすると：${FEATURE_WORDS[id].whenOff}`)).toBeInTheDocument()

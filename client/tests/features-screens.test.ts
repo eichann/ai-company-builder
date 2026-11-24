@@ -43,13 +43,13 @@ function tasksHarness(features: unknown) {
 
 const decisionAsked = (asked: Array<{ path: string; body: unknown }>) => asked.some(a => a.path.endsWith('/records/query') && (a.body as { type?: string }).type === 'decision')
 
-test('the list carries the features; an older server without them reads as everything on', async () => {
+test('the list carries the features; an older server without them reads as everything on (but the trial 「会議のあと」, off by default)', async () => {
   const off = await tasksHarness({ taskList: false, meetings: true, inbox: true, decisions: true, projects: false }).api.list('co1')
   assert.ok(off.success)
-  assert.deepEqual(off.data.features, { taskList: false, meetings: true, inbox: true, decisions: true, projects: false })
+  assert.deepEqual(off.data.features, { taskList: false, meetings: true, inbox: true, decisions: true, projects: false, afterMeeting: false })
   const old = await tasksHarness(undefined).api.list('co1')
   assert.ok(old.success)
-  assert.deepEqual(old.data.features, { taskList: true, meetings: true, inbox: true, decisions: true, projects: true })
+  assert.deepEqual(old.data.features, { taskList: true, meetings: true, inbox: true, decisions: true, projects: true, afterMeeting: false })
 })
 
 test('決めたこと to confirm are read only while 決めたこと is on', async () => {

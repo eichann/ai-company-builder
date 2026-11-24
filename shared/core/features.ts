@@ -6,7 +6,8 @@
  * - Business record types (`task`, `meeting`, `decision`, `interaction`, `reply_request`,
  *   `project`) stay in the core and are always installed. A switch turns a FEATURE on or off,
  *   never a type, and turning one off deletes nothing.
- * - Every feature is on by default, so a company that never chose sees no change.
+ * - Every feature is on by default, so a company that never chose sees no change — except `afterMeeting` (4b-4 PR6-A, owner
+ *   memo 「4b-4 挟む部分」 H-9 A): a trial screen of one business, off until an owner / admin turns it on (`DEFAULT_FEATURES`).
  * - Records made before a switch-off are 「見るだけ」: still shown, with
  *   `FEATURE_OFF_NOTE` on their card; nothing new of that feature is made, no action is
  *   offered or accepted, and its AI turns, clock jobs and notices stop. Turning it on again
@@ -15,15 +16,17 @@
  * Pure: imports nothing (server/tests/unit/core-purity.test.ts).
  */
 
-export type FeatureId = 'taskList' | 'meetings' | 'inbox' | 'decisions' | 'projects'
+export type FeatureId = 'taskList' | 'meetings' | 'inbox' | 'decisions' | 'projects' | 'afterMeeting'
 
 /** In the order the admin console lists them. */
-export const FEATURE_IDS: readonly FeatureId[] = Object.freeze(['taskList', 'meetings', 'inbox', 'decisions', 'projects'])
+export const FEATURE_IDS: readonly FeatureId[] = Object.freeze(['taskList', 'meetings', 'inbox', 'decisions', 'projects', 'afterMeeting'])
 
 export type CompanyFeatures = Record<FeatureId, boolean>
 
 export const DEFAULT_FEATURES: Readonly<CompanyFeatures> = Object.freeze({
   taskList: true, meetings: true, inbox: true, decisions: true, projects: true,
+  // A trial screen (「会議のあと」, the app's `features/after-meeting/`): owns no type, tool or notice; off until chosen.
+  afterMeeting: false,
 })
 
 /** A fresh, mutable copy of the defaults (everything on). */
@@ -37,15 +40,15 @@ export function isFeatureId(value: unknown): value is FeatureId {
 
 /**
  * The features from a stored document or a server's answer. Lenient on purpose: anything
- * missing or not a boolean is ON (the default) — an older server that sends no `features`,
- * a stored document from before a feature existed, a damaged row. A switch is off only when
- * it says `false`.
+ * missing or not a boolean is its default — an older server that sends no `features`,
+ * a stored document from before a feature existed, a damaged row. A switch on by default is off
+ * only when it says `false`; one off by default (`afterMeeting`) is on only when it says `true`.
  */
 export function featuresFrom(input: unknown): CompanyFeatures {
   const out = defaultFeatures()
   if (typeof input !== 'object' || input === null || Array.isArray(input)) return out
   const o = input as Record<string, unknown>
-  for (const id of FEATURE_IDS) if (o[id] === false) out[id] = false
+  for (const id of FEATURE_IDS) if (typeof o[id] === 'boolean') out[id] = o[id] as boolean
   return out
 }
 
@@ -93,6 +96,7 @@ export const FEATURE_TOOLS: Readonly<Record<FeatureId, readonly string[]>> = Obj
   inbox: Object.freeze(['inbox_read', 'inbox_judge', 'inbox_reply_check']),
   decisions: Object.freeze(['decisions_record']),
   projects: Object.freeze([]),
+  afterMeeting: Object.freeze([]),
 })
 
 /** True when a tool belongs to no feature, or to one that is on. */
@@ -111,6 +115,7 @@ export const FEATURE_NOTICE_KINDS: Readonly<Record<FeatureId, readonly string[]>
   inbox: Object.freeze(['reply_arrived', 'intake_unsure', 'from_message', 'replied_done', 'mail_left_inbox', 'mail_archived']),
   decisions: Object.freeze([]),
   projects: Object.freeze([]),
+  afterMeeting: Object.freeze([]),
 })
 
 /** The feature a notice kind belongs to, or null (the core's). */
@@ -176,6 +181,11 @@ export const FEATURE_WORDS: Readonly<Record<FeatureId, { name: string; what: str
     name: 'プロジェクト',
     what: 'やることや会議をプロジェクトごとにまとめます。',
     whenOff: '新しいプロジェクトを作れなくなり、「どのプロジェクトの会議ですか？」と聞かなくなります。業務プラグインの案件はそのまま使えます。',
+  }),
+  afterMeeting: Object.freeze({
+    name: '会議のあとの更新案（試し）',
+    what: '商談のあとに AI が作った HubSpot・係数表の更新案を、やることの画面で確かめて直し、1回押して反映します。週次の定例レポートのボタンもここです。はじめはオフです。',
+    whenOff: 'やることの画面に、更新案のカードと週次のボタンが出なくなります。AI が作ったファイルは、その人のパソコンにそのまま残ります。',
   }),
 })
 

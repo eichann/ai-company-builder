@@ -451,7 +451,7 @@ const api: Partial<ElectronAPI> = {
   signOut: async () => { record('signOut', []); return { success: true } },
   // ?features=listoff: the task list turned off (「使う機能」): the small list 「確かめること」.
   getTaskList: async () => featuresParam.includes('listoff')
-    ? { success: true, data: { available: true, listDepartmentIds: null, features: { taskList: false, meetings: !featuresParam.includes('meetingsoff'), inbox: true, decisions: true, projects: true },
+    ? { success: true, data: { available: true, listDepartmentIds: null, features: { taskList: false, meetings: !featuresParam.includes('meetingsoff'), inbox: true, decisions: true, projects: true, afterMeeting: false },
       decisionsToConfirm: [{ id: 'decision-0000aa', title: '値引きは10%まで' }],
       items: [
         { id: 'approval-0000aa', type: 'approval', typeLabel: '承認のお願い', title: '金額の変更', turn: 'mine' as const, state: 'pending', version: 1, due: null, tags: [], waitingFor: null, personal: false, own: false, actingFor: null, bundle: null, finishedAt: null, stateLabel: null },
