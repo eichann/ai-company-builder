@@ -12,7 +12,7 @@
 // companies or private-folder names.
 import {
   alerts, browserOn, busyHome, effectiveAt, events, firstMonthFeatures, firstMonthTasks, google, hubspotItem, jobList, morningDetail,
-  morningJob, oneStop, proposal, proposalJob, salesDetail, salesItem, sharedInbox, shelfItems, shelfRequest, withoutFolder,
+  grossProfitDetail, mappingCheckPassed, morningJob, oneStop, proposal, proposalJob, salesDetail, salesItem, sharedInbox, shelfItems, shelfRequest, withoutFolder,
 } from './answers'
 import { API, at, home, ok, people, setupWith, signedIn, type Routes } from './world'
 
@@ -64,6 +64,11 @@ export interface Scene {
   annotations?: SceneAnnotation[]
   /** Keep the focus where the steps left it. */
   keepFocus?: true
+  /**
+   * Only for a video (no guide page shows it): saved in manual-admin/images-plain/ (gitignored),
+   * never in manual-admin/images, and without annotations (the video draws its own frames).
+   */
+  video?: true
 }
 
 const MENU = 'role=navigation[name="メインメニュー"]'
@@ -581,6 +586,28 @@ export const scenes: Scene[] = [
     about: '「気になる動き」: two alerts and whether to tell owners and admins on Slack too.',
     path: at('/alerts'),
     api: { [`GET ${API}/security-alerts`]: ok(alerts) },
+  },
+
+  // ── Video only (`video: true`: manual-admin/images-plain/, no guide page shows them) ──
+  {
+    id: 'video-mapping-gross-profit',
+    about: 'Video: 法人営業\'s 読み替え表 with 案件・金額 read from HubSpot\'s 粗利 (gross_profit) — a mistake HubSpot\'s check does not catch.',
+    video: true,
+    path: at('/integrations'),
+    api: {
+      [`GET ${API}/plugins`]: ok({ plugins: [{ ...salesItem, install: { ...salesItem.install!, problem: null } }] }),
+      [`GET ${API}/plugins/corporate-sales`]: ok(grossProfitDetail),
+      [`GET ${API}/plugins/corporate-sales/roles`]: ok({ pluginId: 'corporate-sales', label: '法人営業', roles: [{ name: 'sales_lead', label: '営業の責任者', description: null, userIds: [people.kobayashi.userId] }], overrides: [], history: [] }),
+      [`GET ${API}/plugins/corporate-sales/step-skills`]: ok({ steps: [] }),
+      [`POST ${API}/plugins/corporate-sales/mapping/check`]: ok(mappingCheckPassed),
+    },
+    viewport: { width: 1280, height: 3000 },
+    steps: [
+      { waitFor: 'role=button[name="表で直す"]' }, { click: 'role=button[name="表で直す"]' },
+      { click: 'role=button[name="HubSpot に聞いて確かめる"]' },
+      { waitFor: 'text="HubSpot の項目と合っています。"' },
+    ],
+    crop: { target: 'role=heading[name=/^読み替え表/]', to: 'text="HubSpot の項目と合っています。"', padding: 24 },
   },
 
   // ── Diagrams ──────────────────────────────────────────────────────────────

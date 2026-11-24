@@ -21,6 +21,7 @@ import type {
   JobList,
   JobView,
   PluginDetail,
+  PluginMappingCheck,
   MemberGroupsView,
   Overview,
   PermissionScope,
@@ -353,6 +354,22 @@ export const salesDetail: PluginDetail = {
   mappingErrors: [], autoAcknowledgements: [],
   history: [{ action: 'install', at: AT, by: by.userId, change: {} }],
   readScope: { departmentIds: ['d_sales'], userIds: [] },
+}
+
+// ── Video only (scenes with `video: true`; no guide page shows them) ─────────────
+/**
+ * The 読み替え表 with a mistake that still checks out: ACB's 金額 (amount) read from and written to
+ * HubSpot's 粗利 (a custom deal property, `gross_profit`) instead of the deal's amount. HubSpot
+ * has that property, so 「HubSpot に聞いて確かめる」 finds nothing wrong.
+ */
+export const grossProfitDetail: PluginDetail = (() => {
+  const text = MAPPING.replace('{ from: amount, write: true }', '{ from: gross_profit, write: true }')
+  if (text === MAPPING) throw new Error('grossProfitDetail: the 金額 line of the mapping moved')
+  return { ...salesDetail, mapping: { ...salesDetail.mapping!, text } }
+})()
+/** HubSpot answered and every mapped property is there. */
+export const mappingCheckPassed: PluginMappingCheck = {
+  reachable: true, reason: null, objects: { deal: { errors: [], warnings: [] } }, checkedAt: '2026-11-20T01:30:00.000Z',
 }
 
 // ── 12節 定期の仕事 ──────────────────────────────────────────────────────────

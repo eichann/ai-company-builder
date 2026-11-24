@@ -7,6 +7,10 @@
 // the annotations are an overlay added to the page just before the shot (the console's code knows
 // nothing about them). Every /api/* request is answered in the browser from the scene's route
 // table (world.ts + the scene's own answers); a request the table does not answer fails the shot.
+//
+// MANUAL_NO_ANNOTATIONS=1 shoots without the overlay into manual-admin/images-plain/ (gitignored):
+// pictures for a video or slides, which draw their own frames. Scenes marked `video: true` always
+// go there and carry no annotations.
 import { test, expect, type Locator, type Page } from '@playwright/test'
 import fs from 'node:fs'
 import path from 'node:path'
@@ -17,6 +21,10 @@ import { signedOut, world, type Routes } from './world'
 // The admin package is CommonJS: Playwright loads this file with __dirname.
 const HERE = __dirname
 const IMAGES = path.resolve(HERE, '../../../manual-admin/images')
+/** Shots without annotations and video-only scenes: never the committed folder. */
+const PLAIN_IMAGES = path.resolve(HERE, '../../../manual-admin/images-plain')
+/** MANUAL_NO_ANNOTATIONS=1: no red frames, markers or labels, and the plain folder instead. */
+const NO_ANNOTATIONS = process.env.MANUAL_NO_ANNOTATIONS === '1'
 const TOKENS = path.resolve(HERE, '../../../shared/design-tokens')
 /** The clock every scene sees (the member manual's, so dates in both read alike). */
 const NOW = new Date('2026-11-20T10:30:00+09:00')
@@ -162,11 +170,14 @@ for (const scene of scenes) {
     await page.mouse.move(0, 0)
     if (!scene.keepFocus) await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur())
     const clip = await clipFor(page, scene)
-    await annotate(page, scene)
+    if (scene.video && scene.annotations?.length) throw new Error(`scene ${scene.id}: a video scene carries no annotations (the video draws its own)`)
+    if (!NO_ANNOTATIONS) await annotate(page, scene)
     expect(unanswered, `scene ${scene.id}: API calls the manual's world does not answer`).toEqual([])
     expect(errors, `scene ${scene.id}: errors on the page`).toEqual([])
     // A part the console could not read (an answer of the wrong shape) shows this instead of itself.
     await expect(page.getByText('読み込めませんでした'), `scene ${scene.id}: a part of the page could not read its answer`).toHaveCount(0)
-    await page.screenshot({ path: path.join(IMAGES, `${scene.id}.png`), clip, animations: 'disabled', caret: 'hide' })
+    const images = NO_ANNOTATIONS || scene.video ? PLAIN_IMAGES : IMAGES
+    fs.mkdirSync(images, { recursive: true })
+    await page.screenshot({ path: path.join(images, `${scene.id}.png`), clip, animations: 'disabled', caret: 'hide' })
   })
 }

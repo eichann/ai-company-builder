@@ -13,6 +13,9 @@ client/test-results/
 client/playwright-report/
 # The administrator guide's shoot (admin/tests/manual)
 admin/test-results/
+# Shots without annotations and video-only scenes (MANUAL_NO_ANNOTATIONS=1): local only
+manual/images-plain/
+manual-admin/images-plain/
 dist-electron/
 out/
 *.tsbuildinfo

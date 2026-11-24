@@ -6,6 +6,10 @@
 // viewport and light theme (playwright.config.ts), fonts loaded, animations and
 // the caret off. The annotations are an overlay added to the preview page just
 // before the shot; the app's code knows nothing about them.
+//
+// MANUAL_NO_ANNOTATIONS=1 shoots without the overlay into manual/images-plain/ (and
+// manual-admin/images-plain/), both gitignored: pictures for a video or slides, which draw their own
+// frames. Scenes marked `video: true` always go there and carry no annotations.
 import { test, expect, type Locator, type Page } from '@playwright/test'
 import fs from 'node:fs'
 import path from 'node:path'
@@ -14,9 +18,19 @@ import { expectNoPageErrors, openPreview } from '../ui/helpers'
 import { scenes, type Scene, type SceneStep } from './scenes'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
-const IMAGES = path.resolve(HERE, '../../../manual/images')
-/** The administrator guide's pictures of the app (scenes with `guide: 'admin'`). */
-const ADMIN_GUIDE_IMAGES = path.resolve(HERE, '../../../manual-admin/images')
+const REPO = path.resolve(HERE, '../../..')
+/** MANUAL_NO_ANNOTATIONS=1: no red frames, markers or notes, and the plain folder instead. */
+const NO_ANNOTATIONS = process.env.MANUAL_NO_ANNOTATIONS === '1'
+
+/**
+ * Where a scene's picture goes: manual/images (the administrator guide's pictures of the app,
+ * `guide: 'admin'`, in manual-admin/images), or `images-plain` beside it for a shot without
+ * annotations or a video-only scene — never the committed folder.
+ */
+function imagesFor(scene: Scene): string {
+  const guide = scene.guide === 'admin' ? 'manual-admin' : 'manual'
+  return path.join(REPO, guide, NO_ANNOTATIONS || scene.video ? 'images-plain' : 'images')
+}
 const TOKENS = path.resolve(HERE, '../../../shared/design-tokens')
 /** The clock every scene sees (relative dates such as 「3日前」 stay put). */
 const NOW = new Date('2026-11-20T10:30:00+09:00')
@@ -139,8 +153,11 @@ for (const scene of scenes) {
     await page.mouse.move(0, 0)
     if (!scene.keepFocus) await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur())
     const clip = await clipFor(page, scene)
-    await annotate(page, scene)
+    if (scene.video && scene.annotations?.length) throw new Error(`scene ${scene.id}: a video scene carries no annotations (the video draws its own)`)
+    if (!NO_ANNOTATIONS) await annotate(page, scene)
     expectNoPageErrors(state)
-    await page.screenshot({ path: path.join(scene.guide === 'admin' ? ADMIN_GUIDE_IMAGES : IMAGES, `${scene.id}.png`), clip, animations: 'disabled', caret: 'hide' })
+    const images = imagesFor(scene)
+    fs.mkdirSync(images, { recursive: true })
+    await page.screenshot({ path: path.join(images, `${scene.id}.png`), clip, animations: 'disabled', caret: 'hide' })
   })
 }

@@ -72,6 +72,11 @@ export interface Scene {
   keepFocus?: true
   /** A picture of the app for the administrator guide (manual-admin/): saved in manual-admin/images instead. */
   guide?: 'admin'
+  /**
+   * Only for a video (no manual page shows it): saved in manual/images-plain/ (gitignored), never
+   * in manual/images, and without annotations (the video draws its own frames).
+   */
+  video?: true
 }
 
 // The main screen with the manual's company (skill-layout-ui.html ?manual=1: 検証A社, 山田 太郎 in
@@ -2529,3 +2534,36 @@ scenes.push(
     guide: 'admin',
   },
 )
+
+// ── Video only (`video: true`: manual/images-plain/, no manual page shows them) ──
+scenes.push({
+  id: 'video-business-shape',
+  about: 'Video: the trial Skill 「業務の形」 asks one plain question at a time about 山田さん\'s latest quote, then lists the holes it found.',
+  video: true,
+  page: LIVE.page,
+  query: {
+    ...LIVE.query,
+    video: 'business-shape',
+    // The consultation wide (a width the member could have dragged it to, saved as the app saves it),
+    // so the questions, the answers and the list of holes show together.
+    seed: JSON.stringify({
+      'layout:demo': JSON.stringify({
+        version: 2,
+        trees: {
+          screen: { type: 'split', id: 'screen', direction: 'row', children: [{ type: 'pane', id: 'side' }, { type: 'pane', id: 'chat' }], sizes: [null, 1040] },
+          files: { type: 'split', id: 'files', direction: 'row', children: [{ type: 'pane', id: 'fileTree' }, { type: 'pane', id: 'editor' }], sizes: [260, null] },
+        },
+      }),
+    }),
+  },
+  // Tall enough for the whole consultation from the request down, starting just above it (no half bubble).
+  viewport: { width: 1440, height: 1385 },
+  steps: [
+    CLOSE_LIST, { click: 'role=button[name="左の欄 (⌘B)"]' },
+    ...ASK('業務の形の Skill で、見積を出す仕事を形にしたいです。'), { waitFor: 'text=最近の1件で、最初に何をしましたか？' },
+    ...ASK('お客さんのメールを読んで、数量と納期をノートにメモしました。'), { waitFor: 'text=そのあと、何をしましたか？' },
+    ...ASK('前回の見積を開いて、単価を写しました。'), { waitFor: 'text=穴の一覧' },
+    SETTLE,
+  ],
+  crop: { target: CHAT_PANE, padding: 0 },
+})
