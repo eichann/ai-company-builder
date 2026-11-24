@@ -45,6 +45,11 @@ export interface PluginStepRepository {
   setStepSetting(pluginId: string, step: string, setting: PluginStepSettingRow, at: string, by: string): void
   /** Ask for a step's automatic run on a record (again: a done request is opened anew). */
   request(row: { recordId: string; pluginId: string; step: string; at: string; meetingId: string | null }): void
+  /**
+   * A meeting asked for a step whose Skill a set watch takes over (4b-4 §3 ④, PR4): the request is written already closed by
+   * that job (`done_by_job`, 「定期の仕事が受け持つため」) — kept as the record that the meeting asked, never anyone's turn.
+   */
+  requestTakenByJob(row: { recordId: string; pluginId: string; step: string; at: string; meetingId: string | null; jobId: string }): void
   /** The record's open request for a step (not answered by a finished run), or null. */
   openRequest(recordId: string, pluginId: string, step: string): { requestedAt: string; meetingId: string | null } | null
   /** Records with an open request for a step. */
@@ -62,8 +67,10 @@ export interface PluginStepRepository {
   closeRequestsForSkills(skills: readonly string[], jobId: string, at: string): number
   /**
    * Whether a step that runs one of `skills` (its work's pin, or the company's setting now) is busy with the まとまり `recordId`
-   * for the meeting `meetingId` (4b-4 PR2, §3 ②): an open request naming that meeting, or a run of the step on that record not
-   * closed yet. A set watch's scan then leaves that meeting alone (the step makes the proposal).
+   * for the meeting `meetingId` (4b-4 PR2, §3 ②): an open request naming that meeting, or a run of the step on that record
+   * going on at `at` (`running` with its lease live — 4b-4 PR4: any other run of such a step is never claimed again while the
+   * job takes the Skill over, so counting it would leave the まとまり's meetings to nobody). A set watch's scan then leaves that
+   * meeting alone (the step makes the proposal).
    */
-  stepBusyWithSkills(recordId: string, meetingId: string, skills: readonly string[]): boolean
+  stepBusyWithSkills(recordId: string, meetingId: string, skills: readonly string[], at: string): boolean
 }

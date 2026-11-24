@@ -151,6 +151,14 @@ export function sqliteJobRepository(conn: Database.Database, companyId: string):
         ORDER BY j.id
       `).all(companyId, companyId, schema, userId) as Array<{ id: string }>).map(r => r.id)
     },
+    approvedVersionsOf(schema) {
+      return (conn.prepare(`
+        SELECT ${VERSION_COLUMNS} FROM ai_job_versions WHERE company_id = ? AND schema = ? AND EXISTS (
+          SELECT 1 FROM ai_jobs j WHERE j.company_id = ? AND j.id = ai_job_versions.job_id AND j.approved_version = ai_job_versions.version
+            AND j.state <> 'retired')
+        ORDER BY job_id
+      `).all(companyId, schema, companyId) as VersionDbRow[]).map(versionOf)
+    },
     find(jobId) {
       const r = conn.prepare(`SELECT ${JOB_COLUMNS} FROM ai_jobs WHERE company_id = ? AND id = ?`).get(companyId, jobId) as JobDbRow | undefined
       return r ? jobOf(r) : null

@@ -25,6 +25,11 @@ export interface PluginStepRuns {
   isPluginStep(step: string): boolean
   turnOf(member: Member, recordId: string, step: string): AiTurnCheck
   pinForRun(member: Member, recordId: string, step: string): Promise<Outcome<PluginStepProcedurePin>>
+  /**
+   * Asked inside the claim's transaction (4b-4 §3 ④): a refusal when the work's Skill is one a scheduled job takes over now;
+   * the claim is rolled back.
+   */
+  claimRefusal?(member: Member, recordId: string, step: string): Refusal | null
   /** A plugin step's run finished as done (a person's step started by itself answers what asked for it). */
   afterDoneRun?(member: Member, run: { recordId: string; step: string; createdAt: string }): void
 }
@@ -60,6 +65,11 @@ export function createRecordRunSubjects(deps: RecordRunSubjectDeps) {
       // The procedure the work runs: pinned at its first run (the operator's stop refuses here).
       if (!steps) return ok({ pin: null })
       return steps.pinForRun(member, recordId, step).then(pinned => (pinned.ok ? ok({ pin: pinned.value }) : pinned))
+    },
+
+    claimed(member, run) {
+      if (run.subject.kind !== 'record' || !pluginSteps?.isPluginStep(run.step)) return null
+      return pluginSteps.claimRefusal?.(member, run.subject.id, run.step) ?? null
     },
 
     afterDone(member, run: RunSubjectRun) {

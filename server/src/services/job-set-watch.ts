@@ -41,6 +41,30 @@ export function isSetWatchDefinition(d: JobDefinition | null): d is JobDefinitio
   return d !== null && d.schema === JOB_SET_WATCH_SCHEMA && isSetTrigger(d.trigger) && d.placement === 'a' && d.check.kind === JOB_SET_CHECK_KIND
 }
 
+/**
+ * The Skill names a set watch runs and reads (4b-4 §3): a business plugin step whose company Skill has one of these names is the
+ * same work run another way — told by the name, wherever the Skill folder is (a step pins `.claude/skills/<name>`, the job a
+ * department's), on the safe side.
+ */
+export const setWatchSkillNames = (definition: JobDefinition): string[] => [...new Set(jobPinnedDepartmentSkills(definition).map(p => p.skill))]
+
+/**
+ * The Skills the company's set watches take over from business plugin steps now (4b-4 §3 ④, PR4): each Skill name of the approved
+ * version of every set watch not retired — active or paused, accepted or not (a paused one may be resumed, and its approval
+ * already closed the steps' requests) — with the job that takes it (the first by id). A business plugin step whose Skill is one
+ * of these is never chosen, switched to start by itself, asked or claimed (services/plugin-steps.ts). One copy: the approval's
+ * own refusal (`JOB_SET_WATCH_STEP_SKILL`) and the scan's `plugin_step_exclusive` name the same Skills (`setWatchSkillNames`).
+ */
+export function skillsTakenBySetWatches(handle: CompanyData): ReadonlyMap<string, string> {
+  const taken = new Map<string, string>()
+  for (const v of handle.jobs.approvedVersionsOf(JOB_SET_WATCH_SCHEMA)) {
+    const definition = storedJobDefinition(v)
+    if (!definition) continue
+    for (const skill of setWatchSkillNames(definition)) if (!taken.has(skill)) taken.set(skill, v.jobId)
+  }
+  return taken
+}
+
 /** An occurrence of a set watch (its record and the meeting it was made for, pinned when made). */
 export function isSetWatchOccurrence(occ: { eventRecordId?: string | null; eventMeetingId?: string | null }, definition: JobDefinition | null): boolean {
   return !!occ.eventRecordId && !!occ.eventMeetingId && isSetWatchDefinition(definition)
@@ -129,7 +153,7 @@ export function minutesReviewEvent(handle: CompanyData, minutesReviewId: Minutes
  * assignee at the event must still be the responsible person (assigned away in between: not this job's to run).
  */
 export function setGuardRefusal(handle: CompanyData, trigger: JobSetTrigger, definition: JobDefinition, ctx: {
-  responsible: Member; boundary: number | null; recordId: string; version: number; meetingId: string
+  responsible: Member; boundary: number | null; recordId: string; version: number; meetingId: string; at: string
 }): Exclude<JobSetMarkOutcome, 'made' | 'paused' | 'day_limit'> | null {
   if (assigneeAt(handle.records.ledger(ctx.recordId), ctx.version) !== ctx.responsible.userId) return 'not_matched'
   for (const guard of trigger.guards) {
@@ -140,7 +164,7 @@ export function setGuardRefusal(handle: CompanyData, trigger: JobSetTrigger, def
 }
 
 function guardRefusal(handle: CompanyData, guard: string, definition: JobDefinition, ctx: {
-  responsible: Member; boundary: number | null; recordId: string; meetingId: string
+  responsible: Member; boundary: number | null; recordId: string; meetingId: string; at: string
 }): Exclude<JobSetMarkOutcome, 'made' | 'paused' | 'day_limit'> | null {
   switch (guard) {
     case 'after_acceptance': {
@@ -163,8 +187,8 @@ function guardRefusal(handle: CompanyData, guard: string, definition: JobDefinit
     }
     case 'plugin_step_exclusive': {
       const bundle = handle.records.linksFrom([ctx.meetingId]).find(l => l.name === 'bundle' && l.targetId)?.targetId ?? null
-      const skills = [...new Set(jobPinnedDepartmentSkills(definition).map(p => p.skill))]
-      return bundle !== null && handle.pluginSteps.stepBusyWithSkills(bundle, ctx.meetingId, skills) ? 'step_busy' : null
+      const skills = setWatchSkillNames(definition)
+      return bundle !== null && handle.pluginSteps.stepBusyWithSkills(bundle, ctx.meetingId, skills, ctx.at) ? 'step_busy' : null
     }
     // A guard this build does not know is never assumed to hold (an opened line names only known ones).
     default: return 'not_matched'

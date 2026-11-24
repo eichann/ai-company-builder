@@ -743,4 +743,189 @@ describe('a person\'s step the company starts by itself (「自動で始める�
     expect(services.pluginSteps.setStepSettings(outsider, 'sample-sales', 'propose', { autoStart: true })).toMatchObject({ ok: false, kind: 'not-found' })
     expect(services.pluginSteps.turns(outsider).value?.turns ?? []).toEqual([])
   })
+
+  /**
+   * 4b-4 §3 ④ (PR4, T10 / T19): while a set watch (schema 5) whose Skills include a company Skill is approved and not retired, no
+   * business plugin step runs that Skill by itself — never chosen for a step, a step set to it never switched to start by itself,
+   * a meeting's request for it closed by the job at once, never listed as a turn nor claimed (a first claim, a re-claim and one
+   * after 「もう一度」), whatever was pinned before the job. The job's own approval-side rules: job-set-watch.test.ts.
+   */
+  describe('a Skill a set watch takes over is never run by a step by itself (4b-4 §3 ④)', () => {
+    const JOB = `job.${'4b4'.padEnd(32, '0')}`
+    /** A set watch reading `skill`; `draft`: its only version made but never approved. */
+    function setWatch(state: 'active' | 'paused' | 'retired' | 'draft', skill = SKILL) {
+      const approved = state !== 'draft'
+      const definition = JSON.stringify({
+        schema: 5,
+        run: { kind: 'procedure', procedure: { source: 'department_skill', place: '営業部', skill: 'sales-proposal-auto', fingerprint: 'tree-a' } },
+        grant: { reads: { skills: [{ place: '営業部', skill, fingerprint: 'tree-b' }] } },
+      })
+      db.prepare('DELETE FROM ai_jobs WHERE company_id = ? AND id = ?').run(CO, JOB)
+      db.prepare(`INSERT INTO ai_jobs (company_id, id, name, state, acting_user_id, latest_version, approved_version, approved_fingerprint, created_by, created_at, updated_at)
+        VALUES (?, ?, '提案書', ?, ?, 1, ?, ?, ?, ?, ?)`).run(CO, JOB, state, member.userId, approved ? 1 : null, approved ? 'sha256:x' : null, owner.userId, ts(), ts())
+      db.prepare(`INSERT INTO ai_job_versions (company_id, job_id, version, schema, definition, fingerprint, consent_fingerprint, acting_user_id, created_by, created_at, approved_by, approved_at)
+        VALUES (?, ?, 1, 5, ?, 'sha256:x', 'sha256:y', ?, ?, ?, ?, ?)`).run(CO, JOB, definition, member.userId, owner.userId, ts(), approved ? owner.userId : null, approved ? ts() : null)
+    }
+    const noJob = () => db.prepare('DELETE FROM ai_jobs WHERE company_id = ? AND id = ?').run(CO, JOB)
+    const pinSkill = (recordId: string, step: string, skill = SKILL) => db.prepare(`INSERT OR REPLACE INTO plugin_step_pins
+      (company_id, record_id, plugin_id, step, source, version, skill, fingerprint, pinned_at, updated_at) VALUES (?, ?, 'sample-sales', ?, 'company_skill', NULL, ?, 'tree-old', ?, ?)`)
+      .run(CO, recordId, step, skill, ts(), ts())
+    const unpin = (recordId: string, step: string) => db.prepare('DELETE FROM plugin_step_pins WHERE company_id = ? AND record_id = ? AND plugin_id = ? AND step = ?').run(CO, recordId, 'sample-sales', step)
+    const settingOf = (step: string) => (db.prepare('SELECT skill FROM plugin_step_skills WHERE company_id = ? AND plugin_id = ? AND step = ?').get(CO, 'sample-sales', step) as Json)?.skill ?? null
+    const requestOf = (recordId: string) => db.prepare("SELECT done_at, done_by_job FROM plugin_step_requests WHERE company_id = ? AND record_id = ? AND step = 'propose'").get(CO, recordId) as Json
+    const runsOf = (recordId: string) => (db.prepare('SELECT COUNT(*) AS n, MAX(generation) AS g FROM ai_runs WHERE company_id = ? AND record_id = ?').get(CO, recordId) as Json)
+    const openRequest = (recordId: string) => db.prepare(`INSERT OR REPLACE INTO plugin_step_requests (company_id, record_id, plugin_id, step, requested_at, meeting_id, done_at)
+      VALUES (?, ?, 'sample-sales', 'propose', ?, NULL, NULL)`).run(CO, recordId, ts())
+    const forgetRequests = (recordId: string) => db.prepare('DELETE FROM plugin_step_requests WHERE company_id = ? AND record_id = ?').run(CO, recordId)
+    let k = 0
+    const claimAgain = (recordId: string) => claimPropose(member, recordId, `taken-${++k}`)
+
+    it('choosing the Skill for a step is refused while such a job is approved (paused too); the plugin’s own procedure and other Skills stay choosable', async () => {
+      const before = settingOf('propose')
+      for (const state of ['active', 'paused'] as const) {
+        setWatch(state)
+        expect(await services.pluginSteps.setStepSkill(owner, 'sample-sales', 'propose', { skill: SKILL }), state).toMatchObject({ ok: false, kind: 'conflict', body: { code: 'STEP_SKILL_TAKEN_BY_JOB' } })
+        expect(settingOf('propose')).toBe(before)
+        expect(await services.pluginSteps.setStepSkill(owner, 'sample-sales', 'propose', { skill: null })).toMatchObject({ ok: true })
+      }
+      // Another job's Skill is not this one's.
+      setWatch('active', 'other-skill')
+      expect(await services.pluginSteps.setStepSkill(owner, 'sample-sales', 'propose', { skill: SKILL })).toMatchObject({ ok: true })
+      expect(await services.pluginSteps.setStepSkill(owner, 'sample-sales', 'propose', { skill: null })).toMatchObject({ ok: true })
+      // Not approved yet (its approval is refused while a step is set to the Skill, job-set-watch.test.ts): nothing taken over.
+      setWatch('draft')
+      expect(await services.pluginSteps.setStepSkill(owner, 'sample-sales', 'propose', { skill: SKILL })).toMatchObject({ ok: true })
+      expect(await services.pluginSteps.setStepSkill(owner, 'sample-sales', 'propose', { skill: null })).toMatchObject({ ok: true })
+      // Retired: the Skill is free again.
+      setWatch('retired')
+      expect(await services.pluginSteps.setStepSkill(owner, 'sample-sales', 'propose', { skill: SKILL })).toMatchObject({ ok: true })
+      expect(await services.pluginSteps.setStepSkill(owner, 'sample-sales', 'propose', { skill: null })).toMatchObject({ ok: true })
+      noJob()
+    })
+
+    it('a step whose setting names the Skill (left from before the job) is not switched to start by itself; switching it off works', () => {
+      db.prepare(`INSERT OR REPLACE INTO plugin_step_skills (company_id, plugin_id, step, skill, updated_at, updated_by) VALUES (?, 'sample-sales', 'propose', ?, ?, 'x')`).run(CO, SKILL, ts())
+      setWatch('active')
+      expect(services.pluginSteps.setStepSettings(owner, 'sample-sales', 'propose', { autoStart: true })).toMatchObject({ ok: false, kind: 'conflict', body: { code: 'STEP_SKILL_TAKEN_BY_JOB' } })
+      expect(services.pluginSteps.stepSkills(owner, 'sample-sales').value.steps.find((x: Json) => x.step === 'propose').autoStart).toBe(false)
+      expect(services.pluginSteps.setStepSettings(owner, 'sample-sales', 'propose', { autoStart: false, deliverableFolder: '提案書' })).toMatchObject({ ok: true })
+      noJob()
+      expect(services.pluginSteps.setStepSettings(owner, 'sample-sales', 'propose', { autoStart: true })).toMatchObject({ ok: true })
+      services.pluginSteps.setStepSettings(owner, 'sample-sales', 'propose', { autoStart: false })
+      db.prepare("DELETE FROM plugin_step_skills WHERE company_id = ? AND plugin_id = 'sample-sales' AND step = 'propose'").run(CO)
+    })
+
+    it('a meeting’s request for a work pinned to the Skill is closed by the job at once and is nobody’s turn; without the job it is asked as before', async () => {
+      const deal = recordOf('1000000001')
+      giveBack(deal)
+      services.pluginSteps.setStepSettings(owner, 'sample-sales', 'propose', { autoStart: true })
+      pinSkill(deal, 'propose')
+      setWatch('active')
+      setState(deal, 'talking')
+      expect(await readMeeting(deal)).toMatchObject({ ok: true })
+      setState(deal, 'open')
+      expect(requestOf(deal)).toMatchObject({ done_by_job: JOB })
+      expect(requestOf(deal).done_at).not.toBeNull()
+      expect(proposeTurns()).toEqual([])
+      // Without the job, the same meeting read asks as before (the closed request opened anew, its closer forgotten).
+      noJob()
+      setState(deal, 'talking')
+      expect(await readMeeting(deal)).toMatchObject({ ok: true })
+      setState(deal, 'open')
+      expect(requestOf(deal)).toEqual({ done_at: null, done_by_job: null })
+      expect(proposeTurns().map(t => t.recordId)).toEqual([deal])
+      forgetRequests(deal)
+      unpin(deal, 'propose')
+      services.pluginSteps.setStepSettings(owner, 'sample-sales', 'propose', { autoStart: false })
+    })
+
+    it('an open request of a work pinned to the Skill (an older version, a step switched on again) is not listed and not claimed; nothing is written', async () => {
+      const deal = recordOf('1000000001')
+      giveBack(deal)
+      services.pluginSteps.setStepSettings(owner, 'sample-sales', 'propose', { autoStart: true })
+      pinSkill(deal, 'propose')
+      openRequest(deal)
+      setWatch('paused')
+      expect(proposeTurns()).toEqual([])
+      const runs = runsOf(deal)
+      expect(await claimAgain(deal)).toMatchObject({ ok: false, body: { code: 'NOT_AI_TURN' } })
+      expect(runsOf(deal)).toEqual(runs)
+      // Pinned to the plugin's own procedure: the job takes nothing over (the pin decides, even when the setting names the Skill now).
+      unpin(deal, 'propose')
+      db.prepare(`INSERT INTO plugin_step_pins (company_id, record_id, plugin_id, step, source, version, skill, fingerprint, pinned_at, updated_at)
+        VALUES (?, ?, 'sample-sales', 'propose', 'plugin', '0.3.0', NULL, ?, ?, ?)`).run(CO, deal, fingerprintOf('0.3.0'), ts(), ts())
+      db.prepare(`INSERT OR REPLACE INTO plugin_step_skills (company_id, plugin_id, step, skill, updated_at, updated_by) VALUES (?, 'sample-sales', 'propose', ?, ?, 'x')`).run(CO, SKILL, ts())
+      expect(proposeTurns().map(t => t.recordId)).toEqual([deal])
+      const ok = await claimAgain(deal)
+      expect(ok, JSON.stringify(ok)).toMatchObject({ ok: true })
+      db.prepare("DELETE FROM plugin_step_skills WHERE company_id = ? AND plugin_id = 'sample-sales' AND step = 'propose'").run(CO)
+      giveBack(deal)
+      noJob()
+      unpin(deal, 'propose')
+      forgetRequests(deal)
+      services.pluginSteps.setStepSettings(owner, 'sample-sales', 'propose', { autoStart: false })
+    })
+
+    it('a run claimed before the job: once the job is approved, its re-claim after 「もう一度」 is refused (resuming it)', async () => {
+      const deal = recordOf('1000000001')
+      giveBack(deal)
+      services.pluginSteps.setStepSettings(owner, 'sample-sales', 'propose', { autoStart: true })
+      pinSkill(deal, 'propose')
+      openRequest(deal)
+      const first = await claimAgain(deal)
+      expect(first, JSON.stringify(first)).toMatchObject({ ok: true })
+      const run = first.value.run
+      setWatch('active')
+      expect(services.aiRuns.finish(member, run.id, { generation: run.generation, outcome: 'failed', failure: { class: 'temporary' } })).toMatchObject({ ok: true })
+      expect(services.aiRuns.retry(member, run.id)).toMatchObject({ ok: true })
+      const runs = runsOf(deal)
+      expect(await claimAgain(deal)).toMatchObject({ ok: false, body: { code: 'NOT_AI_TURN' } })
+      expect(runsOf(deal)).toEqual(runs)
+      noJob()
+      giveBack(deal)
+      unpin(deal, 'propose')
+      forgetRequests(deal)
+      services.pluginSteps.setStepSettings(owner, 'sample-sales', 'propose', { autoStart: false })
+    })
+
+    it('a job approved while the claim awaits its pin: the claim is refused in its transaction, nothing written', async () => {
+      const deal = recordOf('1000000001')
+      giveBack(deal)
+      services.pluginSteps.setStepSettings(owner, 'sample-sales', 'propose', { autoStart: true })
+      pinSkill(deal, 'propose')
+      openRequest(deal)
+      const runs = runsOf(deal)
+      const original = services.pluginShelf.isStopped.bind(services.pluginShelf)
+      const spy = vi.spyOn(services.pluginShelf, 'isStopped').mockImplementationOnce(async (...args: Json[]) => {
+        setWatch('active')
+        return original(...args)
+      })
+      try {
+        expect(await claimAgain(deal)).toMatchObject({ ok: false, body: { code: 'NOT_AI_TURN' } })
+      } finally {
+        spy.mockRestore()
+      }
+      expect(runsOf(deal)).toEqual(runs)
+      noJob()
+      unpin(deal, 'propose')
+      forgetRequests(deal)
+      services.pluginSteps.setStepSettings(owner, 'sample-sales', 'propose', { autoStart: false })
+    })
+
+    it('an ai_turn step whose work is pinned to the Skill is not the AI’s turn either', async () => {
+      const other = recordOf('1000000002')
+      const was = stateOf(other).state
+      setState(other, 'open')
+      giveBack(other)
+      pinSkill(other, 'work')
+      setWatch('active')
+      const workTurns = () => (services.pluginSteps.turns(member).value.turns as Json[]).filter(t => t.step === 'work' && t.recordId === other)
+      expect(workTurns()).toEqual([])
+      expect(await claim(other)).toMatchObject({ ok: false, body: { code: 'NOT_AI_TURN' } })
+      noJob()
+      expect(workTurns()).toHaveLength(1)
+      unpin(other, 'work')
+      setState(other, was)
+    })
+  })
 })

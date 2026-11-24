@@ -184,6 +184,11 @@ export interface JobRepository {
    * set watch per responsible person, checked inside the approval's, acceptance's and resume's transaction).
    */
   activeApprovedOf(schema: number, userId: string): string[]
+  /**
+   * The approved versions of `schema` of every job not retired (active or paused, accepted or not): 4b-4 PR4, the Skills a
+   * set watch takes over from business plugin steps while it may run again (`job-set-watch.ts` `skillsTakenBySetWatches`).
+   */
+  approvedVersionsOf(schema: number): JobVersionRow[]
   find(jobId: string): JobRow | null
   /** A job with its first version, in one transaction (the caller's). */
   create(job: JobRow, first: JobVersionRow): void

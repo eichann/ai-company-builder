@@ -413,7 +413,7 @@ export function createJobEvents(deps: JobEventDeps) {
         // Reached while paused or stopped: never runs (③).
         if (inGap(row.seq)) { mark('paused'); continue }
         const refused = responsible
-          ? setGuardRefusal(handle, trigger, definition, { responsible, boundary: at.setBoundary, recordId: row.recordId, version: row.version, meetingId: event.meetingId })
+          ? setGuardRefusal(handle, trigger, definition, { responsible, boundary: at.setBoundary, recordId: row.recordId, version: row.version, meetingId: event.meetingId, at: t.stamp })
           : 'not_matched'
         if (refused) { mark(refused); continue }
         // The day's limit (company time): beyond it nothing is made — its one notice a day to the responsible person (no

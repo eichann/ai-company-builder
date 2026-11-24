@@ -23,6 +23,7 @@ import { nodePluginTrustCrypto } from '../adapters/plugin-trust-crypto'
 import { createPluginRoleService } from '../services/plugin-roles'
 import { parsePluginRunStep, type OperationRoleHolds, type RunStepOf } from '../services/plugin-operation-checks'
 import { createPluginStepService } from '../services/plugin-steps'
+import { skillsTakenBySetWatches } from '../services/job-set-watch'
 import type { PluginShelf } from '../services/plugin-shelf'
 import type { Member } from '../services/access'
 import type { Outcome } from '../services/outcome'
@@ -62,6 +63,8 @@ export function wirePluginsLane(deps: PluginsLaneDeps) {
   const pluginSteps = createPluginStepService({
     companyData: deps.companyData, clock: deps.clock, shelf: deps.pluginShelf, skillTree: (companyId, name) => (deps.hasCompanyFolder(companyId) ? companySkillTree(companyId, name) : Promise.resolve(null)), actsFor: deps.actsFor,
     act: (member, actor, recordId, action, body) => deps.recordEngine.act(member, actor, recordId, action, body),
+    // 4b-4 §3 ④: the Skills a set watch takes over (job-set-watch.ts, the one copy of which they are).
+    skillsTakenOver: companyId => skillsTakenBySetWatches(deps.companyData.forCompany(companyId)),
   })
   // A meeting read moves its まとまり to the business plugin's step for it (plan C5, plugin-steps.md).
   deps.recordEngine.useAfterAction((member, actor, done) => pluginSteps.afterAct(member, actor, done))
@@ -69,6 +72,7 @@ export function wirePluginsLane(deps: PluginsLaneDeps) {
     isPluginStep: step => parsePluginRunStep(step) !== null,
     turnOf: (member, recordId, step) => pluginSteps.turnOf(member, recordId, step),
     pinForRun: (member, recordId, step) => pluginSteps.pinForRun(member, recordId, step),
+    claimRefusal: (member, recordId, step) => pluginSteps.claimRefusal(member, recordId, step),
     afterDoneRun: (member, run) => pluginSteps.afterDoneRun(member, run),
   })
   const runStepOf: RunStepOf = (companyId, run) => pluginSteps.stepOfRun(companyId, run)
