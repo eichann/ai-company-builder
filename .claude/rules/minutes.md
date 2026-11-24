@@ -293,7 +293,8 @@ or the decision service stops calling it, or another module uses the older per-m
   Google refuses the text" below, nothing changes; then → `received` with **assignee = the presser**
   (`request_reading` = `MEETING_READ_REQUEST_ACTION`, quiet): the AI's turn on their PC (`ai-turn`,
   the existing reading, `text` with their grant). Same member while it waits for their AI → the same
-  answer, nothing written on the record; `reading` / `read` / someone else's `received` → 409
+  answer, nothing written on the record (except once when only the clock had asked it for them: the press is
+  then written, so it is theirs and never taken over); `reading` / `read` / someone else's `received` → 409
   `MEETING_NOT_WAITING` — unless that `received` is only the clock's ask, not started (taken by the press:
   "The organiser first" below). **The press is a fresh attempt** (production 2026-11-05: a press after a
   failed reading answered 200 and nothing ran): both answers also give back an earlier run of the
@@ -368,8 +369,9 @@ or the decision service stops calling it, or another module uses the older per-m
     checked again after the try of the text, in the write's synchronous stretch.
   - **A person's own ［AI に読ませる］ always reads**: a meeting only the clock asked for someone else (any
     reader, at once) is taken by the press the same way (note 「AI に読ませる」, the person as actor); never a
-    reading started or claimed, never another person's press (those stay 409 `MEETING_NOT_WAITING`).
-  Tests: `meeting-auto-read.test.ts` 「the organiser first」 (each guard mutation-checked). Tests: `server/tests/integration/meeting-auto-read.test.ts`,
+    reading started or claimed, never another person's press (those stay 409 `MEETING_NOT_WAITING`) — also
+    the reader's own press on a meeting the clock asked for them (it is written then, above).
+  Tests: `server/tests/integration/meeting-auto-read.test.ts` (with 「the organiser first」),
   `server/tests/unit/meeting-auto-read.test.ts` (each mutation-checked).
 - **「議事録が届きました」**: `GET /me/minutes/arrivals` → `MeetingArrivals { days, items }` — the
   meetings whose list names the caller (`listedRecordIds`, no company-wide scan) that took place in the last `MEETING_ARRIVED_DAYS` (3) days, newest

@@ -102,9 +102,9 @@ export interface MinutesServiceDeps {
    */
   readingAskedAgain?: (companyId: string, recordId: string) => void
   /**
-   * The reading's execution run is claimed by an app now (its lease live, or waiting for a person to
-   * reconcile what it did): another attendee's automatic reading never takes the meeting over from
-   * its reader then (minutes.md "The organiser first"). Absent → treated as claimed (never taken over).
+   * The reading's execution run is claimed by an app now (`running`, its lease live): nobody takes the
+   * meeting over from its reader then (minutes.md "The organiser first"). Absent → treated as claimed
+   * (never taken over).
    */
   readingClaimed?: (companyId: string, recordId: string) => boolean
   /** The company's members with their ACB email and display name (compared only; never logged). */
@@ -143,9 +143,9 @@ const MAX_ARRIVALS = 100
 const AUTO_SERIES_NOTE = 'この定例は自動で読む設定のため、AI に読ませました'
 /** The ledger note when the member's own 「届いた議事録を AI が自動で読む」 asked for the reading. */
 const AUTO_READ_NOTE = '自動で読む設定のため、AI に読ませました'
-/** A meeting the clock asked for its organiser, taken by another attendee's automatic reading (once). */
 /** The meeting type's first AI action (core-types.ts): the reading has started. */
 const START_READING_ACTION = 'start_reading'
+/** A meeting the clock asked for its organiser, taken by another attendee's automatic reading (once). */
 const TAKEOVER_NOTE = '主催者の AI が読み始めなかったため、自動で読む設定のほかの参加者の AI に読ませました'
 /**
  * The organiser first (owner decision 2026-11-25): for this long after a meeting arrives another attendee's
@@ -1325,6 +1325,12 @@ export function createMinutesService(deps: MinutesServiceDeps) {
       const expected = versionBody(body, now.version)
       if (typeof expected !== 'number') return expected
       if (now.state === 'received' && now.fields.assignee === member.userId) {
+        // Asked for them by the clock only: their press makes it their own (written once, at the version now),
+        // so nobody's press or automatic reading takes it from them afterwards (Codex review).
+        if (clockAskedOnly(member.companyId, row.id) !== null) {
+          const own = await askToRead(member.companyId, member.userId, row.id, now.version, { id: member.userId, kind: 'human', source: null }, READ_REQUEST_NOTE)
+          if (own) return own
+        }
         // Nothing new on the record; a run that stopped before this press still must not hold the reading back.
         deps.readingAskedAgain?.(member.companyId, row.id)
         return ok({ recordId: row.id, version: now.version, state: 'received' })
@@ -1340,7 +1346,7 @@ export function createMinutesService(deps: MinutesServiceDeps) {
       // after the try of the text (the reading started or its run was claimed meanwhile).
       const note = () => !takesOver || clockAskedOnly(member.companyId, row.id) !== null ? READ_REQUEST_NOTE : null
       return (await askToRead(member.companyId, member.userId, row.id, expected, { id: member.userId, kind: 'human', source: null }, note))
-        ?? refuse('conflict', 'この会議は、いまは AI に読ませられません。', { code: 'MEETING_NOT_WAITING', version: now.version })
+        ?? refuse('conflict', 'この会議は、いまは AI に読ませられません。', { code: 'MEETING_NOT_WAITING', version: fieldsOf(records, row.id).version })
     },
 
     /**

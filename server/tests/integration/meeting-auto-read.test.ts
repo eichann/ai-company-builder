@@ -108,6 +108,8 @@ function seed(): GoogleSeed {
     { ev: ev('fakear-org11', '主催11', '2026-12-10', 'uuu-uuuu-uuu', [S.member, S.colleague, GUEST]), day: '2026-12-10' },
     { ev: ev('fakear-org12', '主催12', '2026-12-11', 'vvv-vvvv-vvv', [S.member, S.colleague, GUEST]), day: '2026-12-11' },
     { ev: ev('fakear-org13', '主催13', '2026-12-12', 'www-wwww-www', [S.member, S.colleague, GUEST]), day: '2026-12-12' },
+    { ev: ev('fakear-org14', '主催14', '2026-12-13', 'xxx-xxxx-xxx', [S.member, S.colleague, GUEST]), day: '2026-12-13' },
+    { ev: ev('fakear-org15', '主催15', '2026-12-14', 'yyy-yyyy-yyy', [S.member, S.colleague, GUEST]), day: '2026-12-14' },
   ]
   return {
     ...base,
@@ -472,6 +474,11 @@ describe('the organiser first (owner decisions 2026-11-25)', () => {
     const token = await tokenFor('ar-sato')
     const late = await call(null, 'POST', `/api/records-ai/item/${m}/actions/start_reading`, { expectedVersion: asked }, token)
     expect([403, 409]).toContain(late.status)
+    // Nor at the version now, nor by claiming the reading's run: it is no longer the organiser's AI's turn.
+    const now = await call(null, 'POST', `/api/records-ai/item/${m}/actions/start_reading`, { expectedVersion: await versionOf(m) }, token)
+    expect(now.status, now.text).toBe(403)
+    const claim = await call('ar-sato', 'POST', `${C()}/ai-run-claims`, { recordId: m, step: 'minutes-reading', deviceId: 'app-device-sato', conversationId: 'conv-org3' })
+    expect([claim.status, claim.body.code]).toEqual([409, 'NOT_AI_TURN'])
     expect([stateOf(m), fieldsOf(m).assignee]).toEqual(['received', 'ar-tanaka'])
     // Once: nobody's later run moves it again.
     at('2026-12-02T18:45:00+09:00')
@@ -636,5 +643,47 @@ describe('the organiser first (owner decisions 2026-11-25)', () => {
     const m = idOf('主催13')
     expect((await call('ar-sato', 'POST', `${C()}/me/minutes/item/${m}/skip`, {})).status).toBe(200)
     expect((await arrivals('ar-tanaka')).find(i => i.recordId === m)).toMatchObject({ status: 'skipped', by: { memberId: 'ar-sato' }, byOrganiser: false })
+  })
+
+  it('the reader\'s own press on a meeting the clock asked for them makes it theirs: never taken over afterwards', async () => {
+    at('2026-12-13T09:00:00+09:00')
+    await setMode('ar-sato', 'outside')
+    await setMode('ar-tanaka', 'outside')
+    at('2026-12-13T18:00:00+09:00')
+    await check('ar-sato')
+    const m = idOf('主催14')
+    expect(fieldsOf(m).assignee).toBe('ar-sato')
+    expect((await press('ar-sato', m)).status).toBe(200)
+    expect((await requests(m)).map(r => r.actor_id)).toEqual(['acb:clock', 'ar-sato'])
+    // A second press writes nothing more.
+    const once = ledgerCount()
+    expect((await press('ar-sato', m)).status).toBe(200)
+    expect(ledgerCount()).toBe(once)
+    const pressed = await press('ar-tanaka', m)
+    expect([pressed.status, pressed.body.code]).toEqual([409, 'MEETING_NOT_WAITING'])
+    at('2026-12-13T18:30:00+09:00')
+    await check('ar-tanaka')
+    expect(fieldsOf(m).assignee).toBe('ar-sato')
+  })
+
+  it('an automatic takeover whose reading the organiser\'s app claims while its try of the text is on its way writes nothing', async () => {
+    at('2026-12-14T18:00:00+09:00')
+    await check('ar-sato')
+    const m = idOf('主催15')
+    expect(fieldsOf(m).assignee).toBe('ar-sato')
+    at('2026-12-14T18:20:00+09:00')
+    const doc = 'fake-doc-ar-24'
+    const calls = () => google.requests.filter(q => q.path.includes(doc)).length
+    const seen = calls()
+    google.faults.delayMs = 300
+    const taking = check('ar-tanaka')
+    for (let i = 0; i < 400 && calls() === seen; i++) await new Promise(r => setTimeout(r, 10))
+    expect(calls()).toBeGreaterThan(seen)
+    const claimed = await call('ar-sato', 'POST', `${C()}/ai-run-claims`, { recordId: m, step: 'minutes-reading', deviceId: 'app-device-sato', conversationId: 'conv-org15' })
+    expect(claimed.status, claimed.text).toBeLessThan(300)
+    await taking
+    google.faults.reset()
+    expect(fieldsOf(m).assignee).toBe('ar-sato')
+    expect((await requests(m)).map(r => r.actor_id)).toEqual(['acb:clock'])
   })
 })
