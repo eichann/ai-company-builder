@@ -257,8 +257,10 @@ function thingProblem(t: unknown, things: Record<string, unknown>): string | nul
           if (!boundThing(child)) return `書ける欄（${verb}）に入るものが正しくありません`
           continue
         }
-        // create_from: the copy's own id is the site's (never set), and it stays in its original's parent (never moved).
-        if (!own(fields, f) || f === t.id || (isMap(t.parent) && f === t.parent.field)) return `書ける欄（${verb}）が地図にありません`
+        // create_from: only a thing with no parent (independent review M1: a new child changes its parent, which existed
+        // before the plan — not a harmless prefix, and not predicted); the copy's own id is the site's (never set).
+        if (own(t, 'parent')) return `書ける欄（${verb}）：親のあるものは作れません（親が変わるため）`
+        if (!own(fields, f) || f === t.id) return `書ける欄（${verb}）が地図にありません`
         const kind = fields[f].kind
         if (kind === 'id' || kind === 'id_set') { if (!boundThing(child)) return `書ける欄（${verb}）に入るものが正しくありません` }
         else if (!(BROWSER_CREATE_PLAIN_KINDS as readonly string[]).includes(kind) || child !== null) return `書ける欄（${verb}）は、番号か、文字・日付・時刻です`

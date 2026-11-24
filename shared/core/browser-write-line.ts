@@ -31,7 +31,7 @@
  *   read by the id the site gave must equal the prediction **exactly**, under the plan's account (`judgeBrowserWrites`);
  *   anything else is "not as predicted" or "could not be read", never done.
  * - **A copy is never its original** (stage 0 R3, the most common accident): a created object's id is none read before
- *   of its thing, and an id a create sets from a value must differ from its original's (else no plan:
+ *   of its thing, and an id a create sets from a value must not be one its original already holds there (else no plan:
  *   `browserWritesPlanProblem`).
  *
  * The core knows no site, thing or field. Every shape is **provisional** until a second site fits it (§18).
@@ -214,7 +214,7 @@ export type BrowserWritesPlanProblem = 'reads' | 'values' | 'same-as-original'
 /**
  * Before anything is sent (§3-4 step 1, with the plan's account): the reads make a plan (`evaluateBrowserReadLine`: read
  * whole, the objects asked for, every must-hold fact, every check ✓), every value a write uses fits its field, and an id
- * a create sets from a value differs from its original's — a copy re-pointed at what its original already points at is
+ * a create sets from a value is not one its original already holds in that field — a copy re-pointed at what its original already points at is
  * the copy-still-on-the-original accident (stage 0 R3); a text, date or time set to the original's own is allowed (the
  * same end time every week).
  */
@@ -236,7 +236,9 @@ export function browserWritesPlanProblem(
       const value = values[src.value]
       const next = field.kind === 'id_set' ? [value] : value
       if (typeof value !== 'string' || !browserFieldValueFits(field, next)) return 'values'
-      if ((field.kind === 'id' || field.kind === 'id_set') && browserFieldValuesEqual(field, next, got.state[f])) return 'same-as-original'
+      // The id must not be one the original already holds (independent review L4: an id set `[old, x]` with `old` set).
+      const held = got.state[f]
+      if ((field.kind === 'id' && held === value) || (field.kind === 'id_set' && Array.isArray(held) && held.includes(value))) return 'same-as-original'
     }
   }
   return null
@@ -264,7 +266,10 @@ export type BrowserWritesJudgement =
  * state after must equal the prediction field by field. A read after that differs anywhere, an extra or a missing id,
  * a created object that is not exactly its original with the set fields, an original that changed, the account moving:
  * never `as_predicted`. **Scope** (independent review): "nothing else changed" holds for what the line reads and what it
- * created — a change the site made elsewhere is not seen, as on the old path.
+ * created, field by field of the map — a change the site made elsewhere, or in a key the map lists as `ignored`, is not
+ * seen, as on the old path. That a created id is really new (not an existing object with the same content, e.g. one left
+ * by an earlier stopped run) and that the created reads sit between the account markers are the caller's to make sure
+ * (the app's identification, C3: the answer's id, the parent's list, nothing else referencing it).
  */
 export function judgeBrowserWrites(
   read: BrowserReadLine, writes: readonly BrowserLineWrite[], map: BrowserMap, before: BrowserReadFacts, after: BrowserReadFacts,

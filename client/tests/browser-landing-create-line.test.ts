@@ -6,7 +6,7 @@
  * Guards (each test fails when its guard is removed):
  * - the line is written `pending` on 1.0.3, holds no business word, and the map's reads and writes never name `copy`;
  *   the two writes go only where stage 0 saw them (`POST /api/action/register`, `POST /api/landings`);
- * - the plan: the person confirms name / day / time (never the AI alone); the tag must differ from the source action's;
+ * - the plan: the person confirms name / day / time (never the AI alone); the tag must not be one of the source action's;
  * - the judgement, end to end on answers made up from stage 0's key sets: a good copy is "as predicted"; the new route
  *   still on the source's action, the new action keeping the source's tag too, a stop or template dropped, a field the
  *   line does not set moving, the source route or the source action changing (an action edited in place reaches every
@@ -129,9 +129,11 @@ test('name, day and time come only from the person, one by one; the source and t
   assert.deepEqual(browserLineValuesProblem(line.read, { ...VALUES, to_date: { value: '2026-12-03', from: { kind: 'record_field', aiWroteLast: false } } }), { problem: 'source', value: 'to_date' })
 })
 
-test('the plan: the new tag must differ from the source action\'s (the previous round\'s tag kept is never planned)', () => {
+test('the plan: the new tag is none of the source action\'s tags (the previous round\'s tag kept is never planned)', () => {
   assert.equal(browserWritesPlanProblem(line.read, writes, map, facts(), ACCOUNT), null)
   assert.equal(browserWritesPlanProblem(line.read, writes, map, facts({ action: actionAnswer([Number(TAG)]) }), ACCOUNT), 'same-as-original')
+  // Also when the source carries it beside another tag (independent review L4).
+  assert.equal(browserWritesPlanProblem(line.read, writes, map, facts({ action: actionAnswer([OLD_TAG, Number(TAG)]) }), ACCOUNT), 'same-as-original')
   // The same end time as the source is fine (a plain value).
   assert.equal(browserWritesPlanProblem(line.read, writes, map, facts({ source: landingAnswer({ to_time: '17:00' }) }), ACCOUNT), null)
   assert.equal(browserWritesPlanProblem(line.read, writes, map, facts({ account: '1' }), ACCOUNT), 'reads')

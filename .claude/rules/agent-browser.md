@@ -1584,7 +1584,8 @@ is the same on every map version.
   not a change: nothing that existed moves.
 - **The map's create facts** (`browser-map.ts`, reviewed, C7): `writes.create_from` = field → the account-bound thing whose
   id goes in (an `id`, or an `id_set` set to exactly that one id) or `null` (a plain `text` / `date` / `time`); never the
-  copy's own id or its parent field (a copy stays where its original is), never a number, flag or ordered list. A thing that
+  copy's own id, never a number, flag or ordered list; **only a thing with no parent** (independent review M1: a new child
+  changes its parent, which existed before the plan — not a harmless prefix, and not predicted). A thing that
   can be created must `delivers: none` (§4-1: what a plan creates reaches nobody until a person hands it out) and hold the
   account. Every field not set is the original's — the map's promise about the site, tried once on a test object before a
   line using it is approved (C2).
@@ -1597,7 +1598,8 @@ is the same on every map version.
   none, `browserOpenedLineProblem`); a copy's original reached from a plan-value read whose parent is value-named too (the
   lock, C11).
 - **Before anything is sent** (`browserWritesPlanProblem(read, writes, map, before, planAccount)`): the reads make a plan
-  under the plan's account, each value fits its field, and **an id set from a value differs from the original's**
+  under the plan's account, each value fits its field, and **an id set from a value is not one the original already holds
+  in that field** (for an `id_set`: not among its ids, independent review L4)
   (`same-as-original`: a copy re-pointed at what its original already points at is stage 0's most common accident — the
   previous round's tag); a plain text / date / time may equal the original's (the same end time every week).
 - **The prediction and the judgement** (`predictBrowserWrites(…, created)`, `judgeBrowserWrites(…, planAccount, created)`):
@@ -1608,7 +1610,11 @@ is the same on every map version.
   sharing it, R3), the new route still on the source's action, the new action keeping the old tag or dropping a stop, a
   field not set moving, or a "new" id that is one read before (the original itself) or given twice → `not_as_predicted`
   (naming the fields; an id collision names the id field); a created object not read whole, of another id, or a missing
-  one → `unreadable`. The plan problem is asked again first (`unreadable`).
+  one → `unreadable`. The plan problem is asked again first (`unreadable`). **Scope**: the map's fields only (a key the map
+  marks `ignored` — the action's `group_id`, the route's `action_texts` — is not compared on a copy either); **the caller's
+  part** (independent review L1 / L2, for the app's writing PR): that a created id is really new (not an existing object of
+  the same content, e.g. one left by an earlier stopped run — the identification C3: the answer's id, the parent's list,
+  nothing else referencing it) and that the created reads sit between the account markers.
 - **Locks** (`browserLineWriteLocks`): a create takes the key of the object its original is reached from (the source
   route: one copy of a source at a time); the created object's own key is taken by the server when its `done` report
   records it (PR 4's state table). **For the plan-of-writes PR**: write 2's `{ created: new_action_set }` must be bound by
@@ -1645,8 +1651,8 @@ the tag's null address; the values' sources; the tag equal to the source action'
 route or action changing, the "new" action or route being the source, the account moving, a created object not whole /
 another / missing → never `as_predicted`; a stop after write 1 changes no read and leaves the new action unreferenced; the
 lock the source route's), `browser-lstep-map.test.ts` (the tag's null address is the only read without one),
-`browser-read-words.test.ts` (an unused `which` value still refused by the read part). Each guard mutation-checked (24
-mutations: 21 caught; kept on purpose as second layers — `{ created }` of an unknown name, also refused by the kind check,
+`browser-read-words.test.ts` (an unused `which` value still refused by the read part). Each guard mutation-checked (26
+mutations, after the independent review too: 23 caught; kept on purpose as second layers — `{ created }` of an unknown name, also refused by the kind check,
 and a created object's account, already held by its original's read; one redundant check in the prediction removed).
 
 ## The operator and the preview (PR 6b-1: built, switched off; nothing in the app calls it)

@@ -294,9 +294,15 @@ const CMAP: BrowserMap = {
       label: '箱', answer: 'json', id: 'id', parent: { thing: 'card', field: 'card' },
       fields: { id: { kind: 'id', label: '番号' }, card: { kind: 'id', label: 'カード' }, inner: { kind: 'id', label: '内側' } },
       keys: { id: 'required', card: 'required', inner: 'required' },
+      must_hold: { account: true, parent: true },
+    },
+    crate: {
+      label: '木箱', answer: 'json', id: 'id',
+      fields: { id: { kind: 'id', label: '番号' }, inner: { kind: 'id', label: '内側' } },
+      keys: { id: 'required', inner: 'required' },
       writes: { create_from: { inner: 'pack' } },
       delivers: 'none',
-      must_hold: { account: true, parent: true },
+      must_hold: { account: true },
     },
   },
 }
@@ -333,7 +339,7 @@ describe('creating: the map\'s facts', () => {
   it('the example map is a map', () => expect(browserMapProblem(CMAP)).toBeNull())
   const broken: [string, (m: Loose) => void][] = [
     ['setting the copy\'s own id', m => { m.things.card.writes.create_from.id = null }],
-    ['setting the copy\'s parent (moving it)', m => { m.things.box.writes.create_from.card = 'card' }],
+    ['creating a thing that has a parent (a new child changes its parent: not a harmless prefix)', m => { m.things.box.writes = { create_from: { inner: 'pack' } }; m.things.box.delivers = 'none' }],
     ['a field it does not have', m => { m.things.card.writes.create_from.nowhere = null }],
     ['a number (not a kind a copy may set)', m => { m.things.card.writes.create_from.size = null }],
     ['an ordered list (not a kind a copy may set)', m => { m.things.pack.writes.create_from.steps = 'label' }],
@@ -379,8 +385,9 @@ describe('creating: a line\'s creates', () => {
     ['a create whose original is not reached from a plan value (no lock)', l => {
       l.read.values.box = { kind: 'id', role: 'target', from: ['site_fact'] }
       l.read.reads.push({ name: 'box', thing: 'box', id: { value: 'box' }, parent: { read: 'source', field: 'id' } })
-      l.readLabels.box = '箱'
-      l.writes.push({ read: 'box', verb: 'create_from', set: { inner: { created: 'new_pack' } }, as: 'new_box' })
+      l.read.reads.push({ name: 'crate', thing: 'crate', id: { read: 'box', field: 'inner' } })
+      l.readLabels.box = '箱'; l.readLabels.crate = '木箱'
+      l.writes.push({ read: 'crate', verb: 'create_from', set: { inner: { created: 'new_pack' } }, as: 'new_crate' })
     }],
   ]
   for (const [what, change] of broken) {
@@ -475,6 +482,7 @@ describe('creating: the prediction and the judgement', () => {
   it('before anything is sent: an id set from a value must differ from the original\'s; a plain value may be the same', () => {
     expect(browserWritesPlanProblem(CLINE.read, CLINE.writes!, CMAP, facts(), '1')).toBeNull()
     expect(browserWritesPlanProblem(CLINE.read, CLINE.writes!, CMAP, facts({ pack: pack(['22']) }), '1')).toBe('same-as-original')
+    expect(browserWritesPlanProblem(CLINE.read, CLINE.writes!, CMAP, facts({ pack: pack(['21', '22']) }), '1')).toBe('same-as-original')
     expect(browserWritesPlanProblem(CLINE.read, CLINE.writes!, CMAP, facts({ card: card({ at: '17:00' }) }), '1')).toBeNull()
     expect(browserWritesPlanProblem(CLINE.read, CLINE.writes!, CMAP, facts({ account: '2' }), '1')).toBe('reads')
     // The judgement refuses the same plan: never "done" for a copy that kept its original's id.

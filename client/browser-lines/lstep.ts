@@ -43,7 +43,7 @@
  *   (§4-1: stage 0 R1). Neither touches what existed: the source route and its action must read the same after;
  * - the judgement (`judgeBrowserWrites`): each created object read by the id the site gave must be exactly its original
  *   with the set fields; the new route's action is the new action, never the source's (a copy still on its original's
- *   action is stage 0's most common accident), and the tag must differ from the source action's tags before anything is
+ *   action is stage 0's most common accident), and the tag must not be one of the source action's tags before anything is
  *   sent (`browserWritesPlanProblem`).
  * No business word: which round, which date in the name or the tag, which end time are a business plugin's line (§16-2).
  */
