@@ -129,7 +129,7 @@ describe('registering this PC', () => {
       expect(code(dev.mine(alice, bad))).toBe('BROWSER_DEVICE_BAD_KEY')
       expect(code(dev.withdraw(alice, bad))).toBe('BROWSER_DEVICE_BAD_KEY')
     }
-    for (const body of [{}, { label: '' }, { label: 'x'.repeat(61) }, { label: 'a‮b' }, { label: 'x', key: 'y' }, null, 'x']) {
+    for (const body of [{}, { label: '' }, { label: 'x'.repeat(61) }, { label: 'a\u202eb' }, { label: 'x', key: 'y' }, null, 'x']) {
       expect(code(dev.register(alice, newKey(), body))).toBe('BROWSER_DEVICE_BAD_LABEL')
     }
     expect(conn.prepare('SELECT COUNT(*) AS n FROM browser_devices').get()).toEqual({ n: 0 })
@@ -377,7 +377,11 @@ describe('leaving the company', () => {
 
 describe('the lines the member may use (GET /browser-lines-mine)', () => {
   it('only approved rows with a grant in force, names only', () => {
-    expect(value(svc.mine(alice)).lines).toEqual([{ ...refOf(approvedRow()), label: '流入経路を点検する', writes: false }])
+    // The 1.0.1 row she was granted on, and any approved row that carries it (a reviewed grantsFrom); never a pending one.
+    const lines = value(svc.mine(alice)).lines
+    expect(lines).toContainEqual({ ...refOf(approvedRow()), label: '流入経路を点検する', writes: false })
+    const approved = REAL_OPENED.lines.filter(l => l.status === 'approved' && l.name === 'landing_inspect')
+    expect(lines.map(l => l.mechanicsHash).sort()).toEqual(approved.filter(l => l.mechanicsHash === approvedRow().mechanicsHash || (l.grantsFrom ?? []).includes(approvedRow().mechanicsHash)).map(l => l.mechanicsHash).sort())
     value(svc.setGrant(owner, alice.userId, { site: 'lstep', line: 'landing_inspect', meaningHash: approvedRow().meaningHash, mechanicsHash: approvedRow().mechanicsHash, allowed: false }))
     expect(value(svc.mine(alice)).lines).toEqual([])
   })
