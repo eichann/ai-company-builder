@@ -1,4 +1,4 @@
-import { JOB_SET_WATCH_SCHEMA, isSetTrigger, jobSetFeedbackFits, knownJobDefinition, occurrenceTaskId, type JobDefinition, type JobOccurrenceState, type JobSetFeedbackKind, type JobPauseReason, type JobPlacement, type JobRetryBlock, type JobState, type JobTrigger } from '../../shared/core/jobs'
+import { JOB_SET_WATCH_SCHEMA, isSetTrigger, parseJobDefinition, jobSetFeedbackFits, knownJobDefinition, occurrenceTaskId, type JobDefinition, type JobOccurrenceState, type JobSetFeedbackKind, type JobPauseReason, type JobPlacement, type JobRetryBlock, type JobState, type JobTrigger } from '../../shared/core/jobs'
 import type { JobSetReportView, JobWaiting } from '../../shared/types/jobs'
 
 /**
@@ -26,7 +26,7 @@ export const APP_JOB_SCHEMAS: readonly number[] = [1, 2, 3, 4]
  * runs it (PR5's runner; until then the server answers such a version without its definition, `needsUpdate`).
  */
 export function appReadsJobDefinition(d: unknown, schemas: readonly number[] = APP_JOB_SCHEMAS): JobDefinition | null {
-  const known = knownJobDefinition(d) ?? (isSetWatchDefinition(d) ? d : null)
+  const known = knownJobDefinition(d) ?? (isSetWatchDefinition(d) && parseJobDefinition(d).ok ? d : null)
   return known !== null && schemas.includes(known.schema) ? known : null
 }
 
@@ -133,8 +133,9 @@ export interface MyJobOccurrence {
 
 /**
  * What the app offers on a set watch's judgement (owner memo 「4b-4 挟む部分」 H-10, S2 / S11): ［確かめて完了］ on its やること
- * (進める / 人に聞く / 判断できなかった, and 見送る with update proposals — never done for the member, S11 #2), ［まだ早かった］ only where the server takes
- * `too_early` and not twice, ［作ってもらう］ where it takes `made_anyway` (見送る) and — with no correction to record — after a
+ * (進める / 人に聞く / 判断できなかった, and 見送る with update proposals — never done for the member, S11 #2), ［まだ早かった］ where the
+ * server takes `too_early` and the member did not say 仕上げた — also once recorded, while its やること is still open (a press whose
+ * correction was kept but whose やること was not taken away can be pressed again: the server answers `recorded: false`), ［作ってもらう］ where it takes `made_anyway` (見送る) and — with no correction to record — after a
  * judgement that failed (S2 J5). Decided from the answered kinds only; the server checks each press again.
  */
 export interface SetWatchOffer {
@@ -152,7 +153,7 @@ export function setWatchOffer(report: JobSetReportView): SetWatchOffer {
   const madeTask = report.decision !== 'decline' || (report.updates ?? 0) > 0
   return {
     confirmDone: madeTask,
-    tooEarly: fits('too_early') && !sent('too_early') && !sent('went_ahead'),
+    tooEarly: fits('too_early') && !sent('went_ahead'),
     makeAnyway: (fits('made_anyway') && !sent('made_anyway')) || report.decision === 'gate_failed',
     makeAnywayRecords: fits('made_anyway'),
   }

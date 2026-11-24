@@ -229,6 +229,8 @@ installElectronAPI({
   },
   actOnTask: async (_c, recordId, input) => {
     if (conflict) return { success: false, offline: false, code: 'VERSION_CONFLICT', error: 'ほかの人が先に変えました。' }
+    // `&refuse=complete`: the server refuses 完了 (offline, a rule): the card says why.
+    if (params.get('refuse') === 'complete' && input.action === 'complete') return { success: false, offline: true, code: null, error: 'サーバーに接続できませんでした。' }
     // A tag the server refuses: the card shows its words.
     if ((input.args?.tags as string[] | undefined)?.includes('禁止')) return { success: false, offline: false, code: 'BAD_VALUE', error: 'このタグは付けられません。' }
     show('acted', `${input.action}@${input.expectedVersion}${input.note ? `:${input.note}` : ''}${input.ok ? `:ok=${input.ok.by ?? ''}/${input.ok.note ?? ''}` : ''}${input.args?.due ? `:due=${String(input.args.due)}` : ''}${input.args && 'waiting_on' in input.args ? `:on=${String(input.args.waiting_on)}` : ''}${input.args && 'wait_until' in input.args ? `:until=${String(input.args.wait_until)}` : ''}${input.args?.tags ? `:tags=${(input.args.tags as string[]).join('|')}` : ''}${['assignee', 'reviewer', 'when_done'].filter(k => input.args?.[k]).map(k => `:${k}=${String(input.args![k])}`).join('')}`)

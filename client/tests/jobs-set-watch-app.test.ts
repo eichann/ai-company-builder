@@ -8,16 +8,18 @@ import assert from 'node:assert/strict'
 import { JOB_SET_WATCH_OPENED, occurrenceTaskId } from '../../shared/core/jobs'
 import type { JobSetReportView } from '../../shared/types/jobs'
 import { appReadsJobDefinition, jobNoticeTarget, minutesEditedMark, setWatchOccurrenceOf, setWatchOffer, type MyJobOccurrence } from '../shared/jobs'
-import { linkedMeetingTitle, type TaskCardData } from '../shared/task-card'
+import { linkedMeetingTitle, taskStillOpen, type TaskCardData } from '../shared/task-card'
 import { createJobsApi, parseSetReport } from '../electron/features/jobs/ipc'
 
 const report = (over: Partial<JobSetReportView>): JobSetReportView => ({ decision: 'proceed', reason: 'asked_for_proposal', confidence: 0.8, unconfirmed: [], feedback: [], ...over })
 
-test('a judgement offers ［確かめて完了］ only where a やること was made, ［まだ早かった］ once after 進める / 人に聞く, ［作ってもらう］ after 見送る or a failed gate', () => {
+test('a judgement offers ［確かめて完了］ only where a やること was made, ［まだ早かった］ after 進める / 人に聞く, ［作ってもらう］ after 見送る or a failed gate', () => {
   assert.deepEqual(setWatchOffer(report({})), { confirmDone: true, tooEarly: true, makeAnyway: false, makeAnywayRecords: false })
   assert.deepEqual(setWatchOffer(report({ decision: 'ask' })), { confirmDone: true, tooEarly: true, makeAnyway: false, makeAnywayRecords: false })
-  // Already said: not offered again (the server would answer recorded: false).
-  assert.equal(setWatchOffer(report({ feedback: ['too_early'] })).tooEarly, false)
+  // Recorded but its やること still open (taking it away failed): pressed again (the server answers recorded: false).
+  assert.equal(setWatchOffer(report({ decision: 'ask', feedback: ['too_early'] })).tooEarly, true)
+  // The member said 仕上げた: not "too early" any more.
+  assert.equal(setWatchOffer(report({ decision: 'ask', feedback: ['went_ahead'] })).tooEarly, false)
   // 見送る: no やること to complete, ［作ってもらう］ records `made_anyway` once.
   assert.deepEqual(setWatchOffer(report({ decision: 'decline' })), { confirmDone: false, tooEarly: false, makeAnyway: true, makeAnywayRecords: true })
   assert.equal(setWatchOffer(report({ decision: 'decline', feedback: ['made_anyway'] })).makeAnyway, false)
@@ -60,6 +62,14 @@ const setWatch = {
 test('受け取る shows a set watch\'s definition only once the app announces 5 (the runner\'s build)', () => {
   assert.equal(appReadsJobDefinition(setWatch), null)
   assert.equal(appReadsJobDefinition(setWatch, [1, 2, 3, 4, 5])?.schema, 5)
+  // A malformed answer is shown as one the app cannot show, never drawn from (independent review of PR6).
+  assert.equal(appReadsJobDefinition({ ...setWatch, grant: { ...setWatch.grant, limits: undefined } }, [1, 2, 3, 4, 5]), null)
+})
+
+test('a やること that is over — 完了, アーカイブ or 要らない — offers nothing more', () => {
+  assert.equal(taskStillOpen({ state: 'todo' }), true)
+  for (const state of ['done', 'cancelled', 'dismissed']) assert.equal(taskStillOpen({ state }), false, state)
+  assert.equal(taskStillOpen({ state: 'closed_by_type', finished: true }), false)
 })
 
 test('the meeting\'s name beside a date-only title comes only from a linked meeting the card\'s read answered', () => {

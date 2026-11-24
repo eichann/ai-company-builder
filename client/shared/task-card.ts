@@ -378,6 +378,11 @@ export function reviewOf(meeting: RecordDetail, me: string, people: Record<strin
  * lists a linked record only while the reader reads it, so a meeting they no longer read gives null — said beside the
  * date-only title on screen only, never stored, copied into the title or sent anywhere.
  */
+/** Whether a やること is still open: not in any final state of its type (完了, アーカイブ, 要らない). */
+export function taskStillOpen(record: { state: string | null; finished?: true }): boolean {
+  return !record.finished && record.state !== 'done' && record.state !== 'cancelled' && record.state !== 'dismissed'
+}
+
 export function linkedMeetingTitle(links: TaskCardData['links']): string | null {
   return links.find(l => l.record?.type === 'meeting')?.record?.title ?? null
 }

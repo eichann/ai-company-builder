@@ -5,7 +5,7 @@ import { CheckCircle, CircleNotch, Plus, Robot, Sparkle, WarningOctagon } from '
 import { fileNameFromTitle } from '../../../../shared/today-folder'
 import { InputDialog } from '../../../shared/ui/InputDialog'
 import { runCommand } from '../../../shared/commands/commands'
-import { COMPANY_AND_DRIVE_FILES_NOTE, LOCAL_FILE_MISSING, TYPED_FILES_NOTE, linkedMeetingTitle, type TaskCardData } from '../../../../shared/task-card'
+import { COMPANY_AND_DRIVE_FILES_NOTE, LOCAL_FILE_MISSING, TYPED_FILES_NOTE, linkedMeetingTitle, taskStillOpen, type TaskCardData } from '../../../../shared/task-card'
 import { droppedText, mayCarryLink } from '../../../../shared/drive-links'
 import type { RecordViewSummary, RemovableLink } from '../../../../shared/record-views'
 import { mergeActionFor, type BundleChoice, type RecordLinkInput, type SimilarItem, type TaskActInput, type TaskDriveChoice, type TaskDriveLinkOptions, type TypedFileTarget } from '../../../../shared/tasks'
@@ -114,8 +114,8 @@ interface Props {
 export interface JobPartContext {
   task: { id: string; title: string; madeAt: string | null; open: boolean }
   busy: boolean
-  /** 完了にする as the card's main button does it; null when the member cannot complete it here without saying whose OK. */
-  complete: (() => void) | null
+  /** 完了にする as the card's main button does it (its refusal's words, or null); null when the member cannot complete it here without saying whose OK. */
+  complete: (() => Promise<string | null>) | null
   /**
    * 要らない (`dismiss`) with a note: a job's やること has no requester, so its responsible person takes it away as one of its
    * meeting's people (`link:meeting`); null when the type does not let the member now (not reading the meeting).
@@ -263,10 +263,10 @@ export function TaskCard({ companyId, rootPath, recordId, knownVersion, renderPr
   const dismissAction = card.actions.find(a => a.action === 'dismiss')
   const made = card.history.reduce<string | null>((first, h) => (first === null || h.at < first ? h.at : first), null)
   const jobPart = renderJobPart?.({
-    task: { id: recordId, title: card.record.title, madeAt: made, open: card.record.state !== 'done' && card.record.state !== 'cancelled' },
+    task: { id: recordId, title: card.record.title, madeAt: made, open: taskStillOpen(card.record) },
     busy,
     complete: completeAction && !completeAction.needsOk
-      ? () => void runSteps([...(completeAction.startFirst ? [{ action: 'start' }] : []), { action: 'complete' }], '完了にしました')
+      ? () => runSteps([...(completeAction.startFirst ? [{ action: 'start' }] : []), { action: 'complete' }], '完了にしました')
       : null,
     dismiss: dismissAction ? note => runSteps([{ action: 'dismiss', note }], '外しました') : null,
   })

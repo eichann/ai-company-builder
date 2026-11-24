@@ -1686,7 +1686,7 @@ app, PR7 the admin console.
 - **The app (PR6, the common part; owner memo 「4b-4 挟む部分」 H-10 / S11 — the 4b-4 screens of their own are PR6-A,
   `features/after-meeting/` behind a company switch)**. Everything only shows and asks; the server decides.
   - **Not announced yet**: `APP_JOB_SCHEMAS` stays `[1, 2, 3, 4]`. The 受け取る words for schema 5 are here
-    (`appReadsJobDefinition(d, schemas)` reads a set watch by its trigger only once 5 is announced; `acceptanceLines`,
+    (`appReadsJobDefinition(d, schemas)` reads a set watch by its trigger only once 5 is announced, and only when the shared parser takes it; `acceptanceLines`,
     `features/jobs/model.ts`), and `5` is announced **in the build that runs it** (PR5's runner, which names `matched_record`):
     an app announcing it without the runner would let a member accept a job whose occurrences only expire.
   - **The words are one copy** in `shared/core/job-words.ts` (moved from PR7's `admin/src/lib/jobs.ts`):
@@ -1706,7 +1706,7 @@ app, PR7 the admin console.
     has no requester, and `dismiss` allows the meeting's people, `link:meeting`); a refusal takes nothing away; ［作ってもらう］ after
     判断できなかった — 「この作業をする」, no correction; after a 見送る with update proposals (PR3b: its やること exists) ［確かめて完了］ and
     ［作ってもらう］ (`made_anyway`, then 「この作業をする」 on that same やること — never a second one); any other job's やること (no judgement on the member's view) —
-    「この作業をする」. `setWatchOffer` decides which (`too_early` once, after 進める / 人に聞く; `made_anyway` after 見送る).
+    「この作業をする」. `setWatchOffer` decides which (`too_early` after 進める / 人に聞く unless 仕上げた was said — again while its やること is still open, so a correction kept but a 要らない refused can be pressed once more, the server answering `recorded: false`; `made_anyway` after 見送る). A refusal of 完了 or 要らない is said in the part.
   - **The meeting's name beside the date-only title** (N1, S11 #1): `TaskCard` `meetingBesideTitle` → `linkedMeetingTitle` of
     the card's own read (the server lists a linked record only while the member reads it) → `RecordPage` `titleNote`. Display
     only: never stored, never in the title, the list, a notice or a message. Rows of the list show the date only (follow-up).
@@ -1719,7 +1719,9 @@ app, PR7 the admin console.
     sharing without the member. It is remembered like an automatic run's consultation (ending the やること closes it) and
     **closes by itself** once its AI worked and the turn ended while it was not in front (`workConsultationStep` over
     `closesWhenRunEnds`; `ChatPanel` watches the tab's status outside React): a review, an approval or a question waiting, a
-    failure, the member's words or draft, or the tab in front keep it open.
+    reply that ends by asking the member something in plain text (`replyAsksTheMember`, the hold's `lastReplyAsks`; independent
+    review), a failure, the member's words or draft, or the tab in front keep it open. A やること in any final state (完了,
+    アーカイブ, 要らない: `taskStillOpen`) offers none of the part's buttons.
   - **見送る** (`job_set_declined`): the notice opens 「定期の仕事」 (`jobNoticeTarget`; inbox badge 「AI は作りませんでした」), whose
     「会議のあとの AI の判断」 (`declinedRows`) lists each 見送る without update proposals with ［作ってもらう］: `made_anyway` first, then a new consultation
     (`makeAnywayMessage`: the AI finds the member's 「議事録を確認する」 completed at that time — the occurrence names no meeting in

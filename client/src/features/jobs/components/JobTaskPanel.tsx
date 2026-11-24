@@ -16,8 +16,8 @@ export interface JobTaskPanelProps {
   companyId: string
   task: { id: string; title: string; madeAt: string | null; open: boolean }
   busy: boolean
-  /** ［確かめて完了］: the card's own 完了にする (null: not offered to this member now). */
-  onComplete: (() => void) | null
+  /** ［確かめて完了］: the card's own 完了にする — its refusal's words, or null (null: not offered to this member now). */
+  onComplete: (() => Promise<string | null>) | null
   /** Takes the やること away with a note (the card's own 要らない); its refusal's words, or null. Null: not offered. */
   onDismiss: ((note: string) => Promise<string | null>) | null
   /**
@@ -70,6 +70,7 @@ export function JobTaskPanel({ companyId, task, busy, onComplete, onDismiss, min
       try {
         const r = await sendJobFeedback(companyId, occurrence.id, 'made_anyway')
         if (!r.success) { setMessage(r.error); return }
+        await reload()
       } finally {
         setWorking(false)
       }
@@ -84,7 +85,7 @@ export function JobTaskPanel({ companyId, task, busy, onComplete, onDismiss, min
       {mark === 'unknown' && <p className="text-text-muted">AI が読んだあとに議事録が直されたかは、確かめられません。</p>}
       <div className="flex flex-wrap items-center gap-2">
         {occurrence && offer ? <>
-          {offer.confirmDone && onComplete && task.open && <Button size="sm" variant="primary" disabled={disabled} onClick={onComplete}>確かめて完了</Button>}
+          {offer.confirmDone && onComplete && task.open && <Button size="sm" variant="primary" disabled={disabled} onClick={() => { setMessage(null); void onComplete().then(failure => { if (failure) setMessage(failure) }) }}>確かめて完了</Button>}
           {offer.tooEarly && onDismiss && task.open && <Button size="sm" disabled={disabled} onClick={() => void tooEarly()}>まだ早かった</Button>}
           {offer.makeAnyway && task.open && <Button size="sm" disabled={disabled} onClick={() => void makeAnyway()}>作ってもらう</Button>}
         </> : occurrences !== null && task.open && (

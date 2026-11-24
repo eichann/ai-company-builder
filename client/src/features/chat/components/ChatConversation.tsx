@@ -47,6 +47,7 @@ import { TopicChip } from './TopicChip'
 import { patchChatSession } from '../api'
 import { appInstructionOf, type AppInstruction } from '../../../../shared/app-instruction'
 import { chatErrorText } from '../chatErrorText'
+import { replyAsksTheMember } from '../aiTurns'
 
 // One chat tab: a conversation with the agent. A composition of hooks
 // (hooks/, one concern each, in the order useChat needs them) and
@@ -378,6 +379,7 @@ export const ChatPanelChat = memo(function ChatPanelChat({ tabId, isShown, depar
     busy: tabBusy(),
     userMessageIds: messagesRef.current.filter(message => message.role === 'user').map(message => message.id),
     shown: isShown,
+    lastReplyAsks: replyAsksTheMember(messagesRef.current),
   })
   useConsultationStatus({ tabId, isShown, status, approval: pendingApproval, interaction: currentInteraction, messages, rootPath: currentCompany?.rootPath, readHold })
 

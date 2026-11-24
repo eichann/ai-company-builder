@@ -7,7 +7,7 @@ import {
   AI_TURN_PASS_CAP, AI_TURN_PASS_INTERVAL_MS, MAX_ATTEMPTS_PER_RECORD, freshLog, logForToday, nextAiTurn, orderAiTurns,
   FAILED_REASON, URGENT_WITHIN_MS, aiTurnItems, askedAgain, handUrgent, handedOver, movedOn, recordOutcome, recordStarted, resumed, retried, usagePauseUntil, type AiTurnDecisionInput,
   canResumeAiTurns, retitledConsultation, closesWhenRunEnds, closesWhenRecordEnds, rememberedAutomatic, forgottenAutomatic,
-  automaticConsultationsOf, readAutomaticConsultations, AUTOMATIC_CONSULTATIONS_KEPT, type ConsultationHold, usagePause, usagePauseLifted, aiTurnNoticeText, STOP_UNCONFIRMED_TEXT, mayStartAiTurns, jobOutcome, notDeferred, workConsultationStep,
+  automaticConsultationsOf, readAutomaticConsultations, AUTOMATIC_CONSULTATIONS_KEPT, type ConsultationHold, usagePause, usagePauseLifted, aiTurnNoticeText, STOP_UNCONFIRMED_TEXT, mayStartAiTurns, jobOutcome, notDeferred, workConsultationStep, replyAsksTheMember,
 } from './aiTurns'
 import type { AiTurnCandidate } from '../../../shared/ai-turn-steps/types'
 import { jobTurnCandidate, type QueuedJobTurn } from '../../../shared/ai-turn-steps/job'
@@ -411,4 +411,16 @@ test('「この作業をする」: closes once its AI worked and ended while not
   assert.equal(workConsultationStep({ state: 'failed', line: 'エラーで止まりました' }, QUIET, AUTO, true), 'keep')
   assert.equal(workConsultationStep(UNSEEN, { ...QUIET, userMessageIds: ['m-app', 'm-member'] }, AUTO, true), 'keep')
   assert.equal(workConsultationStep(UNSEEN, { ...QUIET, draft: 'まだ' }, AUTO, true), 'keep')
+  // The AI asked the member in plain text (independent review of PR6): the turn ended, but it waits for them.
+  assert.equal(workConsultationStep(UNSEEN, { ...QUIET, lastReplyAsks: true }, AUTO, true), 'keep')
+})
+
+test('a reply that ends with a question to the member is told apart from one that only reports', () => {
+  const reply = (text: string) => [{ role: 'user', parts: [{ type: 'text', text: 'やって' }] }, { role: 'assistant', parts: [{ type: 'text', text }] }]
+  assert.equal(replyAsksTheMember(reply('どの会議のたたき台を作りますか？')), true)
+  assert.equal(replyAsksTheMember(reply('これでよいですか?\n')), true)
+  assert.equal(replyAsksTheMember(reply('「この内容で送りますか？」')), true)
+  assert.equal(replyAsksTheMember(reply('たたき台を作りました。')), false)
+  // Only the AI's last reply counts (the member's own question does not).
+  assert.equal(replyAsksTheMember([{ role: 'assistant', parts: [{ type: 'text', text: 'できました。' }] }, { role: 'user', parts: [{ type: 'text', text: 'ありがとう？' }] }]), false)
 })

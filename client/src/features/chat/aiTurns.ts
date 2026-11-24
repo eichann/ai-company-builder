@@ -378,6 +378,11 @@ export interface ConsultationHold {
   unsent: number
   /** A turn runs, a send is being prepared, messages wait to go out, or the AI waits for an approval or an answer. */
   busy: boolean
+  /**
+   * The AI's last reply ends with a question to the member (「…ですか？」): a consultation the member started to get work done
+   * stays open for it (`workConsultationStep`); absent = no. An automatic run's close does not look at it.
+   */
+  lastReplyAsks?: boolean
   /** Every user message of the conversation (the app's first one of an automatic run included). */
   userMessageIds: readonly string[]
   /** It is the tab shown in front. */
@@ -416,13 +421,24 @@ export function closesWhenRunEnds(outcome: AiTurnOutcome, status: ConsultationSt
 /**
  * A consultation the member started with 「この作業をする」 (owner memo 「4b-4 挟む部分」 E5 / F-7, PR6): it closes by itself under
  * the same rules as an automatic run's (`closesWhenRunEnds`) once its AI has worked and the turn ended — `close`; it stays
- * for good (`keep`) when the turn ended while it was the tab in front (the member saw it end), failed, or the member
- * wrote in it; else `wait` (still working, waiting for an approval or an answer, not started yet).
+ * for good (`keep`) when the turn ended while it was the tab in front (the member saw it end), failed, the AI's last reply asks
+ * the member something (`lastReplyAsks`), or the member wrote in it; else `wait` (still working, waiting for an approval or an
+ * answer, not started yet).
  */
 export function workConsultationStep(status: ConsultationStatus | undefined, hold: ConsultationHold | undefined, automatic: AutomaticConsultation, sawWorking: boolean): 'close' | 'keep' | 'wait' {
   if (!sawWorking || !status || status.state === 'working' || status.state === 'needs-you') return 'wait'
-  if (closesWhenRunEnds('done', status, hold, automatic)) return 'close'
+  if (!hold?.lastReplyAsks && closesWhenRunEnds('done', status, hold, automatic)) return 'close'
   return 'keep'
+}
+
+/**
+ * Whether the AI's last reply asks the member something in plain text (its last words end with 「？」 or 「?」): such a turn ends
+ * as an ordinary reply, not as a question the app knows, so a self-closing consultation must not close over it.
+ */
+export function replyAsksTheMember(messages: ReadonlyArray<{ role: string; parts?: ReadonlyArray<{ type: string; text?: string }> }>): boolean {
+  const last = [...messages].reverse().find(m => m.role === 'assistant')
+  const text = (last?.parts ?? []).filter(p => p.type === 'text' && typeof p.text === 'string').map(p => p.text).join('').trim()
+  return /[?？][」』）)]*\s*$/.test(text)
 }
 
 /**

@@ -33,6 +33,14 @@ test('［まだ早かった］ refused by the server takes nothing away and says
   expectNoPageErrors(state)
 })
 
+test('［確かめて完了］ refused by the server says why where it was pressed', async ({ page }) => {
+  const state = await openPreview(page, 'task-card', { setwatch: 'proceed', refuse: 'complete' })
+  const part = page.getByTestId('task-card').getByRole('region', { name: '定期の仕事から' })
+  await part.getByRole('button', { name: '確かめて完了' }).click()
+  await expect(part.getByRole('status')).toHaveText('サーバーに接続できませんでした。')
+  expectNoPageErrors(state)
+})
+
 test('判断できなかった: ［作ってもらう］ starts the work fixed to when it was made, with no correction', async ({ page }) => {
   const state = await openPreview(page, 'task-card', { setwatch: 'gate' })
   const part = page.getByTestId('task-card').getByRole('region', { name: '定期の仕事から' })
