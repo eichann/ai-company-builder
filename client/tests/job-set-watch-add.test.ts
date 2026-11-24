@@ -90,8 +90,11 @@ test('the Skills listed: well-formed ones only, each once; a server without the 
     { place: '.claude', skill: 'x', runs: true }, { place: DEPT, skill: 'Bad Name', runs: true }, { place: DEPT, skill: 'sales-proposal-v1', runs: 'yes' },
   ] })).api.setWatchSkills('co')
   assert.deepEqual(listed, { success: true, supported: true, skills: [{ place: DEPT, skill: 'sales-proposal-auto', runs: true }, { place: DEPT, skill: 'sales-proposal-v1', runs: false }] })
-  const old = await api(() => ({ status: 404, body: { error: 'Not found' } })).api.setWatchSkills('co')
-  assert.deepEqual(old, { success: true, supported: false, skills: [] })
+  // A server before it: its unknown path answers 404 with NOT_FOUND (since 2026-11-02) or with no code (earlier).
+  for (const body of [{ error: 'Not found', code: 'NOT_FOUND' }, { error: 'Not found' }]) {
+    const old = await api(() => ({ status: 404, body })).api.setWatchSkills('co')
+    assert.deepEqual(old, { success: true, supported: false, skills: [] })
+  }
 })
 
 test('the pick: it runs a Skill with its reasons, reads at most four and never itself, only Skills listed', () => {

@@ -2274,8 +2274,9 @@ Code: `shared/core/job-proposals.ts` (ids `jc.` / `jp.` + 32 hex, limits, states
     write — the approval refuses a second anyway); a Skill at a place the member does not read — the same answer and words as one
     that is not there (`JOB_SKILL_MISSING`). Then the department it writes in must be the member's to write (`JOB_CANDIDATE_PLACE`),
     and the approval's `rightsFit` inside the write (the Skills' places read, the department written).
-  - **The list** names only departments and Skills the member reads (checked again after the git reads), at most 50 departments and
-    100 Skills each; a company without the shared folder has none.
+  - **The list** names only departments and Skills the member reads (only readable departments are looked into — at most 50, one git
+    read each — and all of it checked again after the git reads), at most 100 Skills each; a company without the shared folder has
+    none. Not cached: each opening of 「見張りを足す」 reads again.
   - **Kept as any candidate**: 24 hours, 20 a member, its creator's alone; `GET /me/job-candidates/:id`, the submit and 「やめる」 read
     a candidate of either shape (`candidateSchemaOf`: the stored text's own schema, 4 or 5). The submit, the limits (5 waiting, 10 a
     day), the notices, withdraw / return are unchanged. **Its job keeps schema 5**: `PUT` keeps every version of a proposal's job in
@@ -2288,7 +2289,8 @@ Code: `shared/core/job-proposals.ts` (ids `jc.` / `jp.` + 32 hex, limits, states
     (`readSetWatchChoice`, nothing else is sent) — and shows the candidate in the 受け取る words (`acceptanceLines`; `readShownCandidate`
     takes schema 5 only of an opened combination run by a department Skill) with 「これで管理者に出す」 (the candidate's id and fingerprint
     shown, `jobProposals:submit`) and 「やめる」. 「出した案」 then lists it as any proposal.
-  - **Compatibility**: a server before PR6b answers the list 404 (no code) → nothing offered (「サーバーの更新が必要です」); its candidate
+  - **Compatibility**: a server before PR6b answers the list 404 (`NOT_FOUND`, or no code before 2026-11-02) → nothing offered
+    (「サーバーの更新が必要です」); its candidate
     view never reads a schema-5 candidate (it reads the text as schema 4: the one 404). The rollback floor has no proposals and
     freezes schema 5 (`server/tests/cross-build/` P5: name only, never approved; back here the candidate reads back and a resend adds
     nothing).

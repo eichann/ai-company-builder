@@ -112,11 +112,14 @@ export function createJobProposalsApi(deps: JobProposalsDeps) {
       if (ok(r)) return { success: true, supported: true }
       return failure('discard', r)
     },
-    /** 「見張りを足す」's Skills. A server before it (404 naming no code) has none: `supported: false`, never an error. */
+    /**
+     * 「見張りを足す」's Skills. A server before it has none: `supported: false`, never an error — its unknown path answers 404
+     * with `NOT_FOUND` (since 2026-11-02) or no code (earlier). The route itself never answers 404.
+     */
     async setWatchSkills(companyId: unknown): Promise<SetWatchSkillsResult> {
       if (typeof companyId !== 'string' || !COMPANY_ID.test(companyId)) return BAD_INPUT
       const r = await call(companyId, '/me/job-set-watch-skills', 'GET')
-      if (r && r.status === 404 && typeof r.json?.code !== 'string') return { success: true, supported: false, skills: [] }
+      if (r && r.status === 404 && (typeof r.json?.code !== 'string' || r.json.code === 'NOT_FOUND')) return { success: true, supported: false, skills: [] }
       if (!ok(r)) return failure('setWatchSkills', r)
       return { success: true, supported: true, skills: readSetWatchSkills(r.json!.data) }
     },

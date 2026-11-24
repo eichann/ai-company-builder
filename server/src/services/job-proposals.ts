@@ -266,8 +266,11 @@ export function createJobProposals(deps: JobProposalDeps) {
     async setWatchSkills(member: Member): Promise<Outcome<{ skills: Array<{ place: string; skill: string; runs: boolean }> }>> {
       if (!deps.hasCompanyFolder(member.companyId) || !deps.departmentSkills) return ok({ skills: [] })
       const top = (await deps.placeFolders(member.companyId, '').catch(() => null)) ?? []
+      // Only departments the member reads are looked into (at most 50 git reads a request); checked again after the reads.
+      const before = currentReader(member)
+      if (before === null) return ok({ skills: [] })
       const found: Array<{ place: string; skill: string; runs: boolean }> = []
-      for (const place of top.filter(p => !p.startsWith('.')).slice(0, SET_WATCH_DEPARTMENTS_MAX)) {
+      for (const place of top.filter(p => !p.startsWith('.') && before.reader.file(p)).slice(0, SET_WATCH_DEPARTMENTS_MAX)) {
         const skills = await deps.departmentSkills(member.companyId, place).catch(() => null)
         for (const s of skills ?? []) found.push({ place, skill: s.skill, runs: s.runs })
       }
