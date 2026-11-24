@@ -24,6 +24,7 @@ import {
   JOB_ACTOR, JOB_SET_CHECK_KIND, JOB_SET_WATCH_SCHEMA, isSetTrigger, jobPinnedDepartmentSkills, jobSetWatchOpened, occurrenceTaskId, storedJobDefinition,
   type JobDefinition, type JobOutcomeCode, type JobSetMarkOutcome, type JobSetReport, type JobSetTrigger,
 } from '../../shared/core/jobs'
+import { hasOutsideAttendee } from '../../shared/core/minutes'
 import { replayRecordState, type LedgerEntry, type LedgerValue } from '../../shared/core/record-ledger'
 import type { CompanyData } from '../ports/company-data'
 import type { RecordRow } from '../ports/records'
@@ -183,8 +184,8 @@ function guardRefusal(handle: CompanyData, guard: string, definition: JobDefinit
     case 'attendee_responsible':
       return readable(handle, ctx.responsible, ctx.recordId) !== null && meetingOfPerson(handle, ctx.responsible, ctx.meetingId) !== null ? null : 'not_matched'
     case 'outside_attendee': {
-      const n = fieldsNow(handle, ctx.meetingId).fields.external_count
-      return typeof n === 'number' && n > 0 ? null : 'not_matched'
+      // The one reading of the stored count, shared with a member's 「社外の人がいる会議だけ」 automatic reading.
+      return hasOutsideAttendee(fieldsNow(handle, ctx.meetingId).fields.external_count) ? null : 'not_matched'
     }
     case 'plugin_step_exclusive': {
       const bundle = handle.records.linksFrom([ctx.meetingId]).find(l => l.name === 'bundle' && l.targetId)?.targetId ?? null

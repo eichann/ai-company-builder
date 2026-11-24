@@ -428,6 +428,8 @@ export function sqliteRecordRepository(conn: Database.Database, companyId: strin
     forgetMember(userId) {
       conn.prepare('DELETE FROM record_viewers WHERE company_id = ? AND user_id = ?').run(companyId, userId)
       conn.prepare('DELETE FROM meeting_auto_series WHERE company_id = ? AND user_id = ?').run(companyId, userId)
+      conn.prepare('DELETE FROM meeting_series_off WHERE company_id = ? AND user_id = ?').run(companyId, userId)
+      conn.prepare('DELETE FROM meeting_auto_read WHERE company_id = ? AND user_id = ?').run(companyId, userId)
     },
     meetingEvent(eventKey) {
       return meetingEventRow(eventKey)
@@ -445,13 +447,28 @@ export function sqliteRecordRepository(conn: Database.Database, companyId: strin
       return (conn.prepare(`SELECT v.record_id FROM record_viewers v JOIN records r ON r.company_id = v.company_id AND r.id = v.record_id
         WHERE v.company_id = ? AND v.user_id = ? AND r.type = ? AND r.removed_at IS NULL`).all(companyId, userId, type) as Array<{ record_id: string }>).map(r => r.record_id)
     },
-    meetingAutoSeries(userId) {
-      return (conn.prepare('SELECT series_key FROM meeting_auto_series WHERE company_id = ? AND user_id = ? ORDER BY series_key').all(companyId, userId) as Array<{ series_key: string }>)
-        .map(r => r.series_key)
+    meetingSeriesChoices(userId) {
+      const out = new Map<string, 'auto' | 'off'>()
+      for (const r of conn.prepare('SELECT series_key FROM meeting_series_off WHERE company_id = ? AND user_id = ?').all(companyId, userId) as Array<{ series_key: string }>) out.set(r.series_key, 'off')
+      // 読む wins over a stray 読まない (an older build adding 読む never clears this table).
+      for (const r of conn.prepare('SELECT series_key FROM meeting_auto_series WHERE company_id = ? AND user_id = ?').all(companyId, userId) as Array<{ series_key: string }>) out.set(r.series_key, 'auto')
+      return out
     },
-    setMeetingAutoSeries(userId, seriesKey, auto, at) {
-      if (auto) conn.prepare('INSERT OR IGNORE INTO meeting_auto_series (company_id, user_id, series_key, created_at) VALUES (?, ?, ?, ?)').run(companyId, userId, seriesKey, at)
-      else conn.prepare('DELETE FROM meeting_auto_series WHERE company_id = ? AND user_id = ? AND series_key = ?').run(companyId, userId, seriesKey)
+    setMeetingSeriesChoice(userId, seriesKey, choice, at) {
+      conn.transaction(() => {
+        if (choice === 'auto') conn.prepare('INSERT OR IGNORE INTO meeting_auto_series (company_id, user_id, series_key, created_at) VALUES (?, ?, ?, ?)').run(companyId, userId, seriesKey, at)
+        else conn.prepare('DELETE FROM meeting_auto_series WHERE company_id = ? AND user_id = ? AND series_key = ?').run(companyId, userId, seriesKey)
+        if (choice === 'off') conn.prepare('INSERT OR IGNORE INTO meeting_series_off (company_id, user_id, series_key, created_at) VALUES (?, ?, ?, ?)').run(companyId, userId, seriesKey, at)
+        else conn.prepare('DELETE FROM meeting_series_off WHERE company_id = ? AND user_id = ? AND series_key = ?').run(companyId, userId, seriesKey)
+      })()
+    },
+    meetingAutoRead(userId) {
+      const r = conn.prepare('SELECT mode, chosen, updated_at FROM meeting_auto_read WHERE company_id = ? AND user_id = ?').get(companyId, userId) as { mode: string; chosen: number; updated_at: string } | undefined
+      return r ? { mode: r.mode, chosen: r.chosen === 1, updatedAt: r.updated_at } : null
+    },
+    setMeetingAutoRead(userId, mode, at) {
+      conn.prepare(`INSERT INTO meeting_auto_read (company_id, user_id, mode, chosen, updated_at) VALUES (?, ?, ?, 1, ?)
+        ON CONFLICT(company_id, user_id) DO UPDATE SET mode = excluded.mode, chosen = 1, updated_at = excluded.updated_at`).run(companyId, userId, mode, at)
     },
     markRemoved(id, at) {
       conn.prepare('UPDATE records SET removed_at = ?, updated_at = ? WHERE company_id = ? AND id = ? AND removed_at IS NULL').run(at, at, companyId, id)

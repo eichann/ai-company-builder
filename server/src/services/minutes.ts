@@ -15,11 +15,12 @@
  *   each attendee is told once. Stored: the meeting's title, time, attending
  *   member ids, the count of outside attendees, opaque Google ids and the
  *   minutes documents' versions. **No text of the minutes is ever stored or logged.**
- * - **Reading** is never automatic: an attendee's ［AI に読ませる］ (`requestReading`)
+ * - **Reading** starts from an attendee: their ［AI に読ませる］ (`requestReading`)
  *   makes it the AI's turn on their PC with their own Google permission (they become
  *   the assignee); ［読まない］ (`skipReading`) ends it for everyone. A member's
- *   「この定例は次から自動で読む」 (`setAutoSeries`) does the first for each new
- *   meeting of that series their own discovery finds.
+ *   「この定例は次から自動で読む」 (`setAutoSeries`) and their own 「届いた議事録を AI が
+ *   自動で読む」 (`setAutoRead`: outside / all / off) do the first for each new meeting
+ *   of theirs that their own discovery finds (the series' choice first).
  * - **まとまり** (`bundle`): candidates are found mechanically, whatever their
  *   type — outside attendees' email domains ↔ the `domain` of 相手 records
  *   (types implementing `counterpart`) that a まとまり links to; the meeting
@@ -37,6 +38,7 @@ import { FEATURE_OFF } from '../../shared/core/features'
 import {
   MEETING_ARRIVED_DAYS, MEETING_ARRIVED_STATE, MEETING_ATTENDEES_ACTION, MEETING_BUNDLE_DAYS_MAX, MEETING_BUNDLE_DAYS_MIN, MEETING_INTAKE_CHOICES,
   MEETING_BUNDLE_LINKED_ACTION, MEETING_NO_BUNDLE_ACTION, MEETING_READ_REQUEST_ACTION, MEETING_SKIP_ACTION, MEETING_TYPE, meetingAsksBundle,
+  isMeetingAutoReadMode, meetingAutoReads, NEW_MEMBER_AUTO_READ, type MeetingAutoReadMode, type MeetingSeriesChoice,
   meetingBundleDaysOf, meetingIntakeOf, MINUTES_TEXT_FOOTER, MINUTES_TEXT_HEADER, MINUTES_TEXT_MAX, MINUTES_TEXT_PAGED_MAX, keepHeadAndTail,
 } from '../../shared/core/minutes'
 import { INSTRUCTION_LIKE_WORDS } from '../../shared/core/instruction-like'
@@ -48,7 +50,7 @@ import type { LedgerValue } from '../../shared/core/record-ledger'
 import type { TypeDefinition } from '../../shared/core/record-types'
 import { newRecordId, RECORD_ID_RE } from '../../shared/core/records'
 import type {
-  MeetingArrival, MeetingArrivals, MeetingAutoSeriesResult, MeetingBundleQuestion, MeetingBundleQuestions, MeetingBundleQuestionState,
+  MeetingArrival, MeetingArrivals, MeetingAutoReadSetting, MeetingAutoSeriesResult, MeetingBundleQuestion, MeetingBundleQuestions, MeetingBundleQuestionState,
   MeetingReadRequestResult, MeetingSkipResult, MinutesBundleSummary, MinutesCheckResult, MinutesFolderSetting,
   MinutesLinkBundleResult, MinutesNoBundleResult, MinutesText,
 } from '../../shared/types/minutes'
@@ -131,6 +133,8 @@ const FOUND_NOTE = 'カレンダーの予定から見つけました'
 /** At most this many meetings in the member's 「議事録が届きました」 answer. */
 const MAX_ARRIVALS = 100
 const AUTO_SERIES_NOTE = 'この定例は自動で読む設定のため、AI に読ませました'
+/** The ledger note when the member's own 「届いた議事録を AI が自動で読む」 asked for the reading. */
+const AUTO_READ_NOTE = '自動で読む設定のため、AI に読ませました'
 const READ_REQUEST_NOTE = 'AI に読ませる'
 const SKIP_NOTE = '読まない'
 const ATTENDEES_NOTE = 'カレンダーで会議に加わった人'
@@ -623,7 +627,8 @@ export function createMinutesService(deps: MinutesServiceDeps) {
     const finder = deps.members(companyId).find(m => m.userId === userId)
     if (!finder) return ok(result)
     const byEmail = verifiedMembers(companyId)
-    const auto = new Set(records.meetingAutoSeries(userId))
+    const choices = records.meetingSeriesChoices(userId)
+    const setting = autoReadOf(records, userId)
     const nowMs = deps.clock.nowMs()
 
     for (const event of events.slice(0, MAX_MEETINGS_PER_CHECK)) {
@@ -645,11 +650,13 @@ export function createMinutesService(deps: MinutesServiceDeps) {
         const m = byEmail.get(normalizeEmail(a.email) ?? '')
         return m ? [m.userId] : []
       }))]
-      const wantsAuto = !!event.series && auto.has(seriesKey(event.series)) && attending.includes(userId)
+      // Read for the finder without a press (their series, else their setting): only a meeting they attend.
+      const series: MeetingSeriesChoice = event.series ? choices.get(seriesKey(event.series)) ?? null : null
+      const autoNote = (recordId: string) => attending.includes(userId) ? autoReadNote(records, recordId, series, setting) : null
       // Recorded from this event already: no Google call for it.
       if (known?.recordId) {
         result.existing++
-        await joinAndAuto(companyId, userId, known.recordId, attending, wantsAuto)
+        await joinAndAuto(companyId, userId, known.recordId, attending, autoNote)
         continue
       }
       if (Date.parse(event.end) > nowMs) { result.waiting++; continue }
@@ -671,7 +678,7 @@ export function createMinutesService(deps: MinutesServiceDeps) {
           // (a reused link, a copied event) never widens its list.
           if (parseRef(fieldsOf(records, existing).fields.source_ref)?.event === event.eventId) {
             records.setMeetingEvent(key, { recordId: existing }, deps.clock.now())
-            await joinAndAuto(companyId, userId, existing, attending, wantsAuto)
+            await joinAndAuto(companyId, userId, existing, attending, autoNote)
           } else {
             lookLater(companyId, key)
           }
@@ -709,7 +716,8 @@ export function createMinutesService(deps: MinutesServiceDeps) {
         if (made.ok) {
           records.setMeetingEvent(key, { recordId: made.record.id }, deps.clock.now())
           result.created.push(made.record.id)
-          if (wantsAuto) await askToRead(companyId, userId, made.record.id, made.entry.version, { ...CLOCK_ACTOR }, AUTO_SERIES_NOTE)
+          const note = autoNote(made.record.id)
+          if (note) await askToRead(companyId, userId, made.record.id, made.entry.version, { ...CLOCK_ACTOR }, note)
         } else if (made.reason === 'exists') result.existing++
       } catch (err) {
         if (err instanceof GoogleReadFailed) {
@@ -744,7 +752,7 @@ export function createMinutesService(deps: MinutesServiceDeps) {
    * the finder's 「自動で読む」 series asks the AI to read it. Best effort: someone else's change in
    * between leaves it to the next run.
    */
-  async function joinAndAuto(companyId: string, userId: string, recordId: string, attending: string[], wantsAuto: boolean): Promise<void> {
+  async function joinAndAuto(companyId: string, userId: string, recordId: string, attending: string[], autoNote: (recordId: string) => string | null): Promise<void> {
     const records = companyData.forCompany(companyId).records
     const row = records.byIds([recordId])[0]
     if (!row || row.removedAt !== null || row.members === null) return
@@ -760,9 +768,33 @@ export function createMinutesService(deps: MinutesServiceDeps) {
       })
       now = fieldsOf(records, recordId)
     }
-    if (wantsAuto && now.state === MEETING_ARRIVED_STATE && (records.byIds([recordId])[0]?.members ?? []).includes(userId)) {
-      await askToRead(companyId, userId, recordId, now.version, { ...CLOCK_ACTOR }, AUTO_SERIES_NOTE)
-    }
+    if (now.state !== MEETING_ARRIVED_STATE || !(records.byIds([recordId])[0]?.members ?? []).includes(userId)) return
+    const note = autoNote(recordId)
+    if (note) await askToRead(companyId, userId, recordId, now.version, { ...CLOCK_ACTOR }, note)
+  }
+
+  /**
+   * A member's 「届いた議事録を AI が自動で読む」: their row, else the starting value of someone who
+   * joined after the setting was made. `since`: a mode the member chose applies to meetings recorded
+   * from then on (choosing never reads a backlog of the last days at once); null = no bound.
+   */
+  function autoReadOf(records: CompanyData['records'], userId: string): { mode: MeetingAutoReadMode; chosen: boolean; since: string | null } {
+    const row = records.meetingAutoRead(userId)
+    if (!row) return { mode: NEW_MEMBER_AUTO_READ, chosen: false, since: null }
+    // A value this build does not know reads as off (never reads more than the member chose).
+    return { mode: isMeetingAutoReadMode(row.mode) ? row.mode : 'off', chosen: row.chosen, since: row.chosen ? row.updatedAt : null }
+  }
+
+  /**
+   * Whether the finder's AI reads this meeting without a press, and the ledger note saying why: the
+   * series' choice first (both ways), then their setting — 「社外の人がいる会議だけ」 by the stored count
+   * (`external_count`, the same reading a set watch's `outside_attendee` guard makes).
+   */
+  function autoReadNote(records: CompanyData['records'], recordId: string, series: MeetingSeriesChoice, setting: ReturnType<typeof autoReadOf>): string | null {
+    if (series === 'auto') return AUTO_SERIES_NOTE
+    const row = records.byIds([recordId])[0]
+    if (!row || (setting.since !== null && row.createdAt < setting.since)) return null
+    return meetingAutoReads({ series, mode: setting.mode, externalCount: fieldsOf(records, recordId).fields.external_count }) ? AUTO_READ_NOTE : null
   }
 
   /** The body `{ expectedVersion? }` of an attendee's button, or why not. */
@@ -1212,13 +1244,43 @@ export function createMinutesService(deps: MinutesServiceDeps) {
       const now = fieldsOf(records, row.id)
       if (!isAttendee(row, now.fields, member.userId)) return refuse('forbidden', MINUTES_NOT_YOURS.error, { code: MINUTES_NOT_YOURS.code })
       const b = body as Record<string, unknown> | null
-      if (typeof b !== 'object' || b === null || Array.isArray(b) || typeof b.auto !== 'boolean' || Object.keys(b).some(k => k !== 'auto')) {
-        return refuse('bad-request', 'auto: true or false', { code: 'BAD_REQUEST' })
+      if (typeof b !== 'object' || b === null || Array.isArray(b) || (typeof b.auto !== 'boolean' && b.auto !== null) || Object.keys(b).some(k => k !== 'auto')) {
+        return refuse('bad-request', 'auto: true, false or null', { code: 'BAD_REQUEST' })
       }
       const series = parseRef(now.fields.source_ref)?.series
       if (!series) return refuse('conflict', 'この会議はくり返しの予定（定例）ではありません。', { code: 'MEETING_NOT_SERIES' })
-      records.setMeetingAutoSeries(member.userId, seriesKey(series), b.auto, deps.clock.now())
-      return ok({ recordId: row.id, autoSeries: b.auto })
+      // false is kept as 読まない (stronger than the member's setting); null leaves it to the setting.
+      const choice: MeetingSeriesChoice = b.auto === true ? 'auto' : b.auto === false ? 'off' : null
+      records.setMeetingSeriesChoice(member.userId, seriesKey(series), choice, deps.clock.now())
+      return ok({ recordId: row.id, autoSeries: choice === 'auto', seriesChoice: choice })
+    },
+
+    /**
+     * GET /me/minutes/auto-read — the caller's own 「届いた議事録を AI が自動で読む」 (`chosen` false: the
+     * starting value, so the app may suggest 「社外の人がいる会議だけ」). Answered also while 会議と議事録
+     * is off (it is only the member's own setting).
+     */
+    autoRead(member: Member): Outcome<MeetingAutoReadSetting> {
+      const records = companyData.forCompany(member.companyId).records
+      if (!records.settings().enabled) return disabled()
+      const s = autoReadOf(records, member.userId)
+      return ok({ mode: s.mode, chosen: s.chosen })
+    },
+
+    /**
+     * PUT /me/minutes/auto-read { mode } — the caller's own setting, and only theirs (no member id is
+     * taken). Applies to meetings recorded from now on; a series' own choice stays stronger.
+     */
+    setAutoRead(member: Member, body: unknown): Outcome<MeetingAutoReadSetting> {
+      const records = companyData.forCompany(member.companyId).records
+      if (!records.settings().enabled) return disabled()
+      if (!featureOn(member.companyId)) return featureOff()
+      const b = body as Record<string, unknown> | null
+      if (typeof b !== 'object' || b === null || Array.isArray(b) || !isMeetingAutoReadMode(b.mode) || Object.keys(b).some(k => k !== 'mode')) {
+        return refuse('bad-request', 'mode: outside, all or off', { code: 'BAD_REQUEST' })
+      }
+      records.setMeetingAutoRead(member.userId, b.mode, deps.clock.now())
+      return ok({ mode: b.mode, chosen: true })
     },
 
     /**
@@ -1242,7 +1304,7 @@ export function createMinutesService(deps: MinutesServiceDeps) {
       }).map(st => st.recordId))
       const rows = records.byIds(listed.filter(id => recent.has(id))).filter(r => r.removedAt === null && reader.record(r)).slice(0, MAX_ARRIVALS)
       const names = new Map(deps.members(member.companyId).map(m => [m.userId, m.name]))
-      const auto = new Set(records.meetingAutoSeries(member.userId))
+      const choices = records.meetingSeriesChoices(member.userId)
       const status: Record<string, MeetingArrival['status']> = { arrived: 'arrived', received: 'asked', reading: 'reading', read: 'read', skipped: 'skipped', failed: 'failed' }
       const items: MeetingArrival[] = []
       for (const row of records.byIds(rows.map(r => r.id))) {
@@ -1253,12 +1315,16 @@ export function createMinutesService(deps: MinutesServiceDeps) {
         if (st === 'skipped') byId = [...records.ledger(row.id)].reverse().find(e => e.toState === 'skipped' && e.fromState !== 'skipped' && e.actorKind === 'human')?.actorId ?? null
         else if (st !== 'arrived' && typeof now.fields.assignee === 'string') byId = now.fields.assignee
         const series = parseRef(now.fields.source_ref)?.series ?? null
+        const seriesChoice = series !== null ? choices.get(seriesKey(series)) ?? null : null
+        // Asked by the server for its reader (their series or setting): the latest request was the clock's.
+        const askedAutomatically = (st === 'asked' || st === 'reading')
+          && [...records.ledger(row.id)].reverse().find(e => e.action === MEETING_READ_REQUEST_ACTION)?.actorId === CLOCK_ACTOR.id
         items.push({
           recordId: row.id, title: row.title, version: now.version,
           meetingAt: typeof now.fields.meeting_at === 'string' ? now.fields.meeting_at : null,
           status: st, attendeeCount: row.members?.length ?? meetingAttendeeIds(now.fields.attendees).length,
           by: byId ? { memberId: byId, displayName: names.get(byId) ?? '' } : null, byYou: byId === member.userId,
-          series: series !== null, autoSeries: series !== null && auto.has(seriesKey(series)),
+          series: series !== null, autoSeries: seriesChoice === 'auto', seriesChoice, askedAutomatically,
         })
       }
       items.sort((a, b) => ((b.meetingAt ?? '') < (a.meetingAt ?? '') ? -1 : (b.meetingAt ?? '') > (a.meetingAt ?? '') ? 1 : 0))

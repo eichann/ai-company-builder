@@ -9,9 +9,10 @@
  *   POST    /me/minutes/check               any member: look at my calendar now (older apps call it;
  *                                            the server clock finds meetings by itself)
  *   GET     /me/minutes/arrivals            any member: my meetings of the last 3 days (「議事録が届きました」)
+ *   GET|PUT /me/minutes/auto-read           any member: my own 「届いた議事録を AI が自動で読む」 { mode }
  *   POST    /me/minutes/item/:recordId/read-request  one of the meeting's people: ［AI に読ませる］ { expectedVersion? }
  *   POST    /me/minutes/item/:recordId/skip          one of the meeting's people: ［読まない］ { expectedVersion? }
- *   PUT     /me/minutes/item/:recordId/auto-series   one of the meeting's people: { auto } (「この定例は次から自動で読む」, their own)
+ *   PUT     /me/minutes/item/:recordId/auto-series   one of the meeting's people: { auto: true | false | null } (「この定例は次から自動で読む／読まない」, their own)
  *   GET     /me/minutes/item/:recordId/text      the assignee or an attendee: the minutes as outside
  *                                            text, read now from Google with my own permission
  *   POST    /me/minutes/item/:recordId/bundle    the assignee or an admin: { bundleId, expectedVersion? }
@@ -58,6 +59,16 @@ minutesRoute.post('/me/minutes/check', companyMember, async (c) => {
 minutesRoute.get('/me/minutes/arrivals', companyMember, async (c) => {
   const member = c.var.member
   return answer(c, minutes.arrivals(member))
+})
+
+minutesRoute.get('/me/minutes/auto-read', companyMember, async (c) => {
+  const member = c.var.member
+  return answer(c, minutes.autoRead(member))
+})
+
+minutesRoute.put('/me/minutes/auto-read', companyMember, serviceBody, async (c) => {
+  const member = c.var.member
+  return answer(c, minutes.setAutoRead(member, c.var.body))
 })
 
 minutesRoute.post('/me/minutes/item/:recordId/read-request', companyMember, serviceBody, async (c) => {

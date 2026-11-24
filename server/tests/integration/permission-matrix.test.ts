@@ -588,6 +588,9 @@ const MATRIX: Row[] = [
   r('POST /api/companies/:companyId/me/minutes/item/:recordId/read-request', w => ({ path: `${C(w)}/me/minutes/item/meeting-nosuch01/read-request`, body: {} }), [404, 404, 404, 404, 404, 401]),
   r('POST /api/companies/:companyId/me/minutes/item/:recordId/skip', w => ({ path: `${C(w)}/me/minutes/item/meeting-nosuch01/skip`, body: {} }), [404, 404, 404, 404, 404, 401]),
   r('PUT /api/companies/:companyId/me/minutes/item/:recordId/auto-series', w => ({ path: `${C(w)}/me/minutes/item/meeting-nosuch01/auto-series`, body: { auto: true } }), [404, 404, 404, 404, 404, 401]),
+  // 「届いた議事録を AI が自動で読む」: the member's own setting only (no member id in the path or body).
+  r('GET /api/companies/:companyId/me/minutes/auto-read', w => ({ path: `${C(w)}/me/minutes/auto-read` }), MEMBERS, 'the caller\'s own setting'),
+  r('PUT /api/companies/:companyId/me/minutes/auto-read', w => ({ path: `${C(w)}/me/minutes/auto-read`, body: { mode: 'sometimes' } }), [400, 400, 400, 400, 404, 401], 'the caller\'s own setting; a bad mode is refused before anything is written'),
   r('GET /api/companies/:companyId/me/minutes/bundle-questions', w => ({ path: `${C(w)}/me/minutes/bundle-questions` }), MEMBERS, 'only the member\'s own meetings are answered'),
   r('GET /api/records-ai/minutes/:recordId/text', () => ({ path: '/api/records-ai/minutes/minutes-nosuch01/text' }), [401, 401, 401, 401, 401, 401], 'a session is not a record token'),
   r('POST /api/records-ai/minutes/:recordId/bundle', () => ({ path: '/api/records-ai/minutes/meeting-nosuch01/bundle', body: {} }), [401, 401, 401, 401, 401, 401], 'a session is not a record token'),

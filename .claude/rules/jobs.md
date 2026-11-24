@@ -1565,7 +1565,7 @@ not make jobs members' apps cannot run).
     record, written in the scan's transaction whatever comes of it — `made` (with the occurrence), `paused` (a gap), and the
     guards' (`setGuardRefusal`): `not_matched` (its assignee at the event not the responsible person; `people_only_meeting`: the
     meeting not members-only — one with a folder, before 2026-11-04; `attendee_responsible`: the responsible person does not read
-    the record or the meeting now or is not one of its people; `outside_attendee`: `external_count` 0), `before_acceptance`
+    the record or the meeting now or is not one of its people; `outside_attendee`: `external_count` 0 — `hasOutsideAttendee`, the reading a member's 「社外の人がいる会議だけ」 automatic reading shares, minutes.md), `before_acceptance`
     (`after_acceptance`: the record's first ledger row **and** the meeting's first row into `read` must both carry a delivery
     number after the boundary — a NULL one is out, no later reading stands in, T21), `step_busy` (`plugin_step_exclusive`, §3 ②:
     the meeting's まとまり has an open step request naming that meeting, or a run of a step going on (`running`, its lease

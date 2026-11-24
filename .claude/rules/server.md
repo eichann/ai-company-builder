@@ -394,6 +394,7 @@ GET  /api/config                                  setup state (no auth)
 /api/oauth                    GET /google/callback — public: Google sends the browser back;
                               the state finds the company (google-connector.md)  oauth.ts
                               GET|PUT /google/minutes-folder, POST /me/minutes/check,
+                              GET|PUT /me/minutes/auto-read (the member's own),
                               GET /me/minutes/item/:recordId/text,
                               POST /me/minutes/item/:recordId/bundle             minutes.ts
                                                                 (議事録の取り込み: minutes.md)
