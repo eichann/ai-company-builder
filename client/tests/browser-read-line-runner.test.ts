@@ -15,13 +15,16 @@
  * - refusals before anything is read (switch, line status, values, stop, window, busy) and stops during the run.
  */
 import { test } from 'node:test'
+import { readFileSync } from 'node:fs'
 import assert from 'node:assert/strict'
 import type { BrowserShapeNotice } from '../../shared/core/browser-map'
 import type { BrowserSuppliedValue } from '../../shared/core/browser-read-line'
+import type { BrowserOpenedFile } from '../../shared/core/browser-opened'
 import { BROWSER_SHAPE_WORDS } from '../../shared/core/browser-map'
 import { BROWSER_CARD_WORDS } from '../../shared/core/browser-card'
 import { lstepMap } from '../connector-maps/lstep'
 import { LINES } from '../browser-lines/lstep'
+import { OPENED_FILE } from '../scripts/browser-opened'
 import { accountFromMeta } from '../connectors/lstep/reminder-step'
 import {
   createBrowserReadRunner, browserThingAddressProblem,
@@ -31,22 +34,18 @@ import type { BrowserPreviewSurface } from '../shared/browser-runner'
 
 const { map, reads, readers } = lstepMap()
 const line = LINES.find(l => l.name === 'landing_inspect')!
+/** The line's row in the opened list on this map version (reviewed: approved on 1.0.1). */
+const lineRow = (JSON.parse(readFileSync(OPENED_FILE, 'utf8')) as BrowserOpenedFile).lines
+  .find(l => l.site === map.site && l.name === line.name && l.version === line.version && l.mapVersion === map.version)!
 
-// --- stage 0's key sets (追記2), key names only ---
-
-/** The folder list's envelope around `data`, and the keys of each of its `links`. */
-const ENVELOPE_KEYS = ['current_page', 'data', 'first_page_url', 'from', 'last_page', 'last_page_url', 'links', 'next_page_url', 'path',
-  'per_page', 'prev_page_url', 'to', 'total']
-const LINK_KEYS = ['url', 'label', 'page', 'active']
-
-/** How each thing is addressed: the map's reads, with the list's envelope as stage 0 recorded it. */
+/** How each thing is addressed: the map's reads (1.0.1: the list's envelope as stage 0 recorded it, 追記2). */
 const ADDRESSES: Record<string, BrowserThingAddress> = {
   landing: { kind: 'object', path: reads.landing.path },
   landing_row: {
     kind: 'list_entry', path: reads.landing_row.path,
     folder: { param: 'group', field: 'group_id' },
     pages: { param: reads.landing_row.pages.param, max: reads.landing_row.pages.max, perPage: reads.landing_row.pages.perPage },
-    list: { items: 'data', current: 'current_page', last: 'last_page', total: 'total', keys: ENVELOPE_KEYS, lists: { links: LINK_KEYS } },
+    list: { items: 'data', current: 'current_page', last: 'last_page', total: 'total', keys: reads.landing_row.envelope, lists: { links: reads.landing_row.envelopeLinkKeys } },
   },
   action_set: { kind: 'object', path: reads.action_set.path },
 }
@@ -150,27 +149,32 @@ function surfaceOf(site: FakeSite): BrowserPreviewSurface {
   return surface
 }
 
+const PLAN_ID = `bl_${'a'.repeat(32)}`
 const siteFact = (value: string): BrowserSuppliedValue => ({ value, from: { kind: 'site_fact' } })
 
 function setup(over: Partial<BrowserReadRunnerDeps> = {}, site = fakeSite()) {
   const surface = surfaceOf(site)
-  const reported: BrowserShapeNotice[][] = []
+  const reported: BrowserShapeNotice[] = []
+  const results: Array<{ companyId: string; planId: string; report: unknown }> = []
   const deps: BrowserReadRunnerDeps = {
     aiSwitch: () => true,
     stopped: () => false,
     window: () => surface,
     context: () => () => true,
-    notices: { report: async n => { reported.push([...n]) } },
+    reporter: {
+      notice: async (_companyId, n) => { reported.push(n) },
+      result: async (companyId, planId, report) => { results.push({ companyId, planId, report }) },
+    },
     ...over,
   }
   const runner = createBrowserReadRunner(deps)
   const input = (more: Partial<BrowserReadRunInput> = {}): BrowserReadRunInput => ({
-    companyId: 'c1', host: 'manager.example.invalid', line, lineStatus: 'approved', map, readers, addresses: ADDRESSES,
+    companyId: 'c1', host: 'manager.example.invalid', line, lineStatus: lineRow.status, map, readers, addresses: ADDRESSES,
     account: { path: MARKER, read: accountFromMeta },
     values: { landing: siteFact('501'), source: siteFact('400') },
     ...more,
   })
-  return { site, surface, runner, input, reported }
+  return { site, surface, runner, input, reported, results }
 }
 
 const flush = () => new Promise(resolve => setImmediate(resolve))
@@ -208,6 +212,47 @@ test('a good copy: only the line\'s reads, in order, the marker before and after
   assertOnlyDeclaredQueries(site.addresses)
   await flush()
   assert.deepEqual(reported, [])
+})
+
+test('the line is the approved row of the opened list on this map version', () => {
+  assert.equal(lineRow.status, 'approved')
+})
+
+test('the inspection\'s result goes to the server in its own words only — each read\'s status, each check\'s mark, never a value', async () => {
+  {
+    const { runner, input, results } = setup()
+    const result = await runner.run(input({ planId: PLAN_ID }))
+    assert.equal(result.status, 'judged')
+    await flush()
+    const names = line.read.reads.map(r => r.name)
+    assert.deepEqual(results, [{ companyId: 'c1', planId: PLAN_ID, report: { reads: Object.fromEntries(names.map(n => [n, 'ok'])), checks: line.read.checks.map(() => 'ok') } }])
+    assert.deepEqual(result.status === 'judged' && result.report, results[0].report)
+    // Not a value the site showed: no name, address, tag or account.
+    assert.doesNotMatch(JSON.stringify(results), /流入経路|example\.invalid|90171|7002|501/)
+  }
+  {
+    // The account moving: no read ok, no check ✓ in what is sent (the server refuses a ✓ whose reads did not count).
+    const { site, runner, input, results } = setup()
+    let n = 0
+    site.account = () => (n++ === 0 ? '90171' : '90172')
+    await runner.run(input({ planId: PLAN_ID }))
+    await flush()
+    const report = results[0].report as { reads: Record<string, string>; checks: string[] }
+    assert.ok(Object.values(report.reads).every(s => s !== 'ok'), 'no read counted')
+    assert.ok(report.checks.every(c => c === 'unreadable'), 'every check unreadable')
+  }
+  {
+    // A refused run, or a run without a plan, sends no result; a plan id not of the server's shape is refused first.
+    const refused = setup({ stopped: () => true })
+    assert.equal((await refused.runner.run(refused.input({ planId: PLAN_ID }))).status, 'refused')
+    const cardOnly = setup()
+    await cardOnly.runner.run(cardOnly.input())
+    await flush()
+    assert.deepEqual([...refused.results, ...cardOnly.results], [])
+    const bad = setup()
+    assert.deepEqual(await bad.runner.run(bad.input({ planId: '../x' })), { status: 'refused', reason: 'input' })
+    assert.deepEqual(bad.site.addresses, [])
+  }
 })
 
 test('the account changes between the marker reads → no read counts, nothing ✓', async () => {
@@ -263,7 +308,7 @@ test('a key the map does not list → not read, the member\'s sentence, a notice
   assert.equal(result.card.state, 'not_read')
   assertNothingChecked(result)
   await flush()
-  assert.deepEqual(reported, [result.notices])
+  assert.deepEqual(reported, result.notices)
   const told = JSON.stringify({ notices: result.notices, reported, card: result.card, member: result.member })
   assert.doesNotMatch(told, /customer_12345|山田/)
   // The reads after it still name only declared addresses (the landing's action is not read: its id is unknown).
@@ -484,9 +529,9 @@ test('a reporter that fails or throws changes nothing; the runner logs nothing',
   console.log = console.warn = console.error = console.info = (...a: unknown[]) => { logged.push(a) }
   try {
     for (const report of [async () => { throw new Error('no server') }, () => { throw new Error('sync') }]) {
-      const { site, runner, input } = setup({ notices: { report: report as () => Promise<unknown> } })
+      const { site, runner, input } = setup({ reporter: { notice: report as () => Promise<unknown>, result: report as () => Promise<unknown> } })
       setJson(site, '/api/landings/501', { ...(mapShaped('landing', landing()) as object), extra: 1 })
-      const result = await runner.run(input())
+      const result = await runner.run(input({ planId: PLAN_ID }))
       assert.equal(result.status === 'judged' && result.member, BROWSER_SHAPE_WORDS.member)
       await flush()
     }

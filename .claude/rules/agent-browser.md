@@ -1401,8 +1401,8 @@ rows + `CROSS`, `company-scoped-sql.test.ts`, `jobs-schema.test.ts`, `client/tes
 
 Design memo 「ブラウザ操作の汎用化」 §3, §9, §16-1 (strict read, the member's sentence, the notice), §17 (layers). The app's
 side of a **read-only** opened line: `client/electron/features/browser/read-line-runner.ts` (`createBrowserReadRunner`, no
-Electron, no site). Not wired: the server's opened list and `POST /browser-shape-notices` are PR 4, the chat / card wiring
-is PR 5b; no module imports it but its test (it names no runner, run window or `enterAi`, so the closed-entry test of "The
+Electron, no site). Not wired: the server side is "Plans of opened lines on the server" above (PR 4); the HTTP client,
+the chat and the card are PR 5b; no module imports it but its test (it names no runner, run window or `enterAi`, so the closed-entry test of "The
 runner" is unchanged). The old path (`client/connectors/lstep/`, `runner.ts`) is untouched.
 
 - **Input**: an opened line whose row is `approved` (anything else → `not-approved`), its map (`browserMapProblem`; the
@@ -1410,7 +1410,9 @@ runner" is unchanged). The old path (`client/connectors/lstep/`, `runner.ts`) is
   (`BrowserThingAddress`, site data), the account marker (`{ path, read(html) }`, reviewed site code) and the values
   (`browserLineValuesProblem`, before anything is read). Ports: the switch (first line: off = nothing asked), the stop, the
   member's open window as main reads through it (`BrowserPreviewSurface`, controller `previewWindow`), the context, the
-  notice reporter. Refusals are fixed words (`BROWSER_READ_RUN_REFUSALS`); what was read before a refusal is dropped.
+  reporter (`BrowserLineReporter`: `notice` = one `POST …/browser-shape-notices { site, mapVersion, thing, change, count }`
+  per notice, `result` = `POST …/browser-line-plans/:planId/result { reads, checks }` once when the run was for a plan —
+  `planId`, the server's `bl_` + 32 hex, else `input` —; both the member's session, given by 5b). Refusals are fixed words (`BROWSER_READ_RUN_REFUSALS`); what was read before a refusal is dropped.
 - **Only GETs of the map's declared addresses**: every request goes through the surface's `read` — the window's page-less
   read session, the shell's `exactRead` (GET of exactly that address) — never the page, a write or `ai` mode. An `object`
   address is a fixed path with exactly one `{id}` segment filled with a plain id (`BROWSER_ID_VALUE_RE`); a `list_entry`
@@ -1430,11 +1432,14 @@ runner" is unchanged). The old path (`client/connectors/lstep/`, `runner.ts`) is
 - **What is told**: a request that fails (not 200, no answer) or an entry not found is **not** a shape change: not read,
   no notice. A strict-read failure gives `member` = `BROWSER_SHAPE_WORDS.member` and `notices` (one per thing × kind of
   change, rebuilt from exactly site / map version / thing / change / count — no key name, value or page text; the
-  `diagnosis` key names are dropped), handed to the reporter fire-and-forget (a failure or a throw changes nothing). The
-  result carries the outcome and `buildBrowserReadCard`'s card: unreadable is never ✓. Nothing is logged; no answer is
+  `diagnosis` key names are dropped). The result carries the outcome, `buildBrowserReadCard`'s card (unreadable is never
+  ✓) and `report`, the server's result body: each read's `BrowserReadStatus` by name, each check `ok` / `ng` /
+  `unreadable` in the line's order (`later` sent as unreadable) — fixed words, never a value. Notices and the result go to
+  the reporter fire-and-forget (a failure or a throw changes nothing); a refused run sends no result (the plan closes at
+  its hour). Nothing is logged; no answer is
   kept.
-- **For 5b / later**: the list entry's folder source (`group` ← the route's `group_id`) and the envelope keys are handed in
-  as data; they belong with the map (`LSTEP_MAP_READS`) once the wiring reads them from there. `no_sibling_named` gets no
+- **For 5b / later**: the list entry's folder source (`group` ← the route's `group_id`) is handed in as data (the envelope
+  keys come from `LSTEP_MAP_READS` since map 1.0.1); it belongs with the map once the wiring reads it from there. `no_sibling_named` gets no
   siblings yet (its check stays 「読み取れませんでした」). **The host** is the caller's: the map has none, so 5b must take
   it from the reviewed declaration of `map.site` (as `approved.json`), never from the request — else a map's GETs could go
   to another site with its cookies (independent review). The card's values are site data: 5b decides where they may go.
@@ -1443,7 +1448,7 @@ runner" is unchanged). The old path (`client/connectors/lstep/`, `runner.ts`) is
   account field of the object where the site has one.
 
 Tests: `client/tests/browser-read-line-runner.test.ts` (a fake Lステップ from stage 0's key sets, answers made up and cut to
-the keys the map lists: a good copy ✓ with exactly the line's reads in order and the marker before and after; the account
+the keys the map lists, the list's envelope from `LSTEP_MAP_READS` (map 1.0.1): a good copy ✓ with exactly the line's reads in order and the marker before and after; the account
 moving, unreadable, an error status or not the expected → nothing ✓; an unknown key — also one shaped like a customer's
 data —, a missing key, a repeated JSON key, an unknown envelope or link key → the member's sentence and one notice per thing
 × change with no key name, reported; a failed request → no notice, unreadable never ✓; only `read` used, no query but
@@ -1451,10 +1456,13 @@ data —, a missing key, a repeated JSON key, an unknown envelope or link key �
 AI or not plain refused first; the list entry on page 2, twice, missing, short of `total`, a moving `last`, too many pages
 (only page 1 asked), no folder; refusals before anything (the switch asks nothing, not approved, another site, the stop,
 no / closed window); a stop, a changed context, the switch off, a closed or replaced window mid-run → nothing more read;
-one run per window; the read cap and the time limit, never loosened by the caller; a failing reporter; nothing logged).
+one run per window; the read cap and the time limit, never loosened by the caller; the line is the opened list's
+approved row on the map's version; the result sent in the server's words only — no value, every check unreadable when
+the account moved —, none for a refused or card-only run, a plan id of another shape refused; a failing reporter;
+nothing logged).
 Each guard mutation-checked; kept on purpose: the address check
-after building (the description check already refuses what it would) and the notices' rebuild beyond the merge (the core's
-notices hold only those fields).
+after building (the description check already refuses what it would), the notices' rebuild beyond the merge (the core's
+notices hold only those fields) and `later` → unreadable in the result (a read-only line has no after word).
 
 ## The operator and the preview (PR 6b-1: built, switched off; nothing in the app calls it)
 

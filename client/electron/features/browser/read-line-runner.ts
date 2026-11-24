@@ -1,6 +1,7 @@
 // The read runner of an opened read-only line (「開けた1行」, generalization PR 5a; agent-browser.md
 // "The read runner of an opened line"). Built and tested; NOTHING calls it yet: the server's opened
-// list and the notice route are PR 4, the wiring to the chat and the card PR 5b.
+// list, the inspection's result and the notice route are the server's (PR 4, routes/browser-lines.ts); the wiring
+// to them, to the chat and to the card is PR 5b.
 //
 // Given an approved line, its map, the map's readers, how each thing is addressed and the line's values,
 // it reads ONLY the things the line names, in its order, through the member's open window's page-less
@@ -14,8 +15,9 @@
 //
 // Never kept or logged: a page's HTML or JSON (each answer is dropped once read), a value, a key name.
 // What may leave the PC is the notice (`BrowserShapeNotice`: site, map version, thing, kind of change,
-// count — the map's own strings), through the reporter port (PR 4's `POST /browser-shape-notices`,
-// wired in 5b). The member sees `BROWSER_SHAPE_WORDS.member` when the site's shape changed.
+// count — the map's own strings) and the inspection's result (each read's status and each check's mark: fixed words,
+// never a value), through the reporter port (the server's routes; wired in 5b). The member sees
+// `BROWSER_SHAPE_WORDS.member` when the site's shape changed.
 import {
   BROWSER_SHAPE_CHANGES, BROWSER_SHAPE_WORDS, browserMapProblem, readBrowserThing,
   type BrowserMap, type BrowserShapeChange, type BrowserShapeNotice, type BrowserThingNotRead, type BrowserThingReader, type BrowserThingResult,
@@ -26,6 +28,7 @@ import {
 } from '../../../../shared/core/browser-read-line'
 import { browserOpenedLineProblem, type BrowserOpenedLine, type BrowserOpenedStatus } from '../../../../shared/core/browser-opened'
 import { buildBrowserReadCard, type BrowserCard } from '../../../../shared/core/browser-card'
+import type { BrowserInspectionResult } from '../../../../shared/types/browser-lines'
 import { BROWSER_ID_VALUE_RE, BROWSER_QUERY_NAME_RE, exploreAddressProblem } from '../../../../shared/core/plugin-browser-declaration'
 import { parseStrictJson } from '../../../shared/browser-json'
 import type { BrowserPreviewSurface } from '../../../shared/browser-runner'
@@ -56,9 +59,23 @@ export interface BrowserAccountMarker {
   read(html: string): string | null
 }
 
-/** Where the notices go (PR 4's route; 5b wires it). Fire and forget: a failure never changes the result. */
-export interface BrowserShapeNoticeReporter {
-  report(notices: readonly BrowserShapeNotice[]): Promise<unknown>
+/**
+ * The inspection's result as the server takes it (`POST …/browser-line-plans/:planId/result`, shared/types/browser-lines.ts
+ * `BrowserInspectionResult` without the state the server derives): fixed words only.
+ */
+export type BrowserInspectionReport = Pick<BrowserInspectionResult, 'reads' | 'checks'>
+
+/**
+ * What the runner tells the server (the member's session; 5b gives the HTTP client). Fire and forget: a failure or a throw
+ * never changes the result, and nothing is retried here.
+ * - `notice`: one `POST /api/companies/:companyId/browser-shape-notices` with exactly `{ site, mapVersion, thing, change,
+ *   count }` per notice (the server's one-per-call body; it merges per company × site × version × thing).
+ * - `result`: `POST /api/companies/:companyId/browser-line-plans/:planId/result { reads, checks }`, once, when the run was
+ *   started for a plan (`planId`) and judged. A refused run reports nothing (the plan closes at its hour).
+ */
+export interface BrowserLineReporter {
+  notice(companyId: string, notice: BrowserShapeNotice): Promise<unknown>
+  result(companyId: string, planId: string, report: BrowserInspectionReport): Promise<unknown>
 }
 
 export interface BrowserReadRunnerDeps {
@@ -70,7 +87,7 @@ export interface BrowserReadRunnerDeps {
   window(companyId: string, host: string): BrowserPreviewSurface | null
   /** Captures the context now (sign-in, company, setting generation); the answer says whether it still holds. */
   context(): () => boolean
-  notices?: BrowserShapeNoticeReporter
+  reporter?: BrowserLineReporter
   /** The wall clock (epoch ms), for the run's time limit. */
   now?(): number
   /** Tighter limits than `BROWSER_READ_RUN_LIMITS` (tests); never looser. */
@@ -89,6 +106,8 @@ export interface BrowserReadRunInput {
   addresses: Readonly<Record<string, BrowserThingAddress>>
   account: BrowserAccountMarker
   values: Readonly<Record<string, BrowserSuppliedValue>>
+  /** The server's inspection plan this run is for (`bl_` + 32 hex, `POST /browser-line-plans`); absent: only the card. */
+  planId?: string
   /** The account a plan is bound to (later PRs); absent for a read made only to show the card. */
   expectedAccount?: string
 }
@@ -111,11 +130,15 @@ export type BrowserReadRunResult =
     member: string | null
     /** What may go to the owner / admin: no key name, value or page text. */
     notices: readonly BrowserShapeNotice[]
+    /** The inspection's result in the server's words (each read's status, each check ✓ / ✗ / unreadable). */
+    report: BrowserInspectionReport
   }
 
 export const BROWSER_READ_RUN_LIMITS = { reads: 30, ms: 60_000 } as const
 
 const OK = 200
+/** The server's inspection plan id (routes/browser-lines.ts): put in an address only in this shape. */
+const LINE_PLAN_ID_RE = /^bl_[0-9a-f]{32}$/
 const ID_SEGMENT = '{id}'
 
 class Refusal extends Error {
@@ -174,6 +197,20 @@ function cleanNotices(map: BrowserMap, raw: readonly BrowserShapeNotice[]): Brow
   return [...kept.values()]
 }
 
+/**
+ * The result in the server's words: every read of the line by name with its status, every check's status in the line's
+ * order — `later` never (a read-only line has no after; it is sent as unreadable, never ✓).
+ */
+function inspectionReport(line: BrowserOpenedLine, outcome: BrowserReadLineOutcome): BrowserInspectionReport {
+  const reads: Record<string, string> = {}
+  for (const r of line.read.reads) reads[r.name] = own(outcome.reads, r.name) ? outcome.reads[r.name] : 'not-read'
+  const checks = line.read.checks.map((_, i) => {
+    const status = outcome.checks[i]?.status
+    return status === 'ok' || status === 'ng' ? status : 'unreadable'
+  })
+  return { reads, checks }
+}
+
 export function createBrowserReadRunner(deps: BrowserReadRunnerDeps) {
   const now = deps.now ?? Date.now
   const limits = {
@@ -206,6 +243,7 @@ export function createBrowserReadRunner(deps: BrowserReadRunnerDeps) {
       }
     }
     if (browserLineValuesProblem(line.read, values)) return refused('values')
+    if (input.planId !== undefined && (typeof input.planId !== 'string' || !LINE_PLAN_ID_RE.test(input.planId))) return refused('input')
     if (input.expectedAccount !== undefined && (typeof input.expectedAccount !== 'string' || !BROWSER_ID_VALUE_RE.test(input.expectedAccount))) return refused('input')
     if (deps.stopped(companyId)) return refused('stopped')
     const surface = deps.window(companyId, host)
@@ -334,11 +372,15 @@ export function createBrowserReadRunner(deps: BrowserReadRunnerDeps) {
       const outcome = evaluateBrowserReadLine(line.read, map, facts)
       const card = buildBrowserReadCard(line, map, facts, outcome)
       const notices = cleanNotices(map, Object.values(reads).flatMap(r => (r.status === 'not_read' ? r.notices : [])))
-      if (notices.length > 0 && deps.notices) {
-        // Fire and forget: the card never waits on it, and a failure changes nothing.
-        try { void Promise.resolve(deps.notices.report(notices)).catch(() => {}) } catch { /* the reporter threw: nothing to do */ }
+      const report = inspectionReport(line, outcome)
+      // Fire and forget: the card never waits on it, and a failure or a throw changes nothing.
+      const tell = (send: () => Promise<unknown>): void => { try { void Promise.resolve(send()).catch(() => {}) } catch { /* nothing to do */ } }
+      const reporter = deps.reporter
+      if (reporter) {
+        for (const n of notices) tell(() => reporter.notice(companyId, n))
+        if (input.planId !== undefined) tell(() => reporter.result(companyId, input.planId as string, report))
       }
-      return { status: 'judged', ok: outcome.problem === null, outcome, card, member: notices.length > 0 ? BROWSER_SHAPE_WORDS.member : null, notices }
+      return { status: 'judged', ok: outcome.problem === null, outcome, card, member: notices.length > 0 ? BROWSER_SHAPE_WORDS.member : null, notices, report }
     } catch (error) {
       return refused(error instanceof Refusal ? error.reason : 'context')
     } finally {
