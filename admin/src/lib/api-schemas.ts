@@ -42,6 +42,14 @@ import type {
   PluginRolesView,
   PluginStepSkillsView,
 } from '../../../shared/types/plugins'
+import type {
+  HoldingDiscardResult,
+  HoldingReviewDetail,
+  HoldingReviewFile,
+  HoldingReviewItem,
+  HoldingReviewList,
+  HoldingTakeResult,
+} from '../../../shared/types/private-holding'
 import type { RecordSettings } from '../../../shared/types/records'
 import type { SecondOpinionView } from '../../../shared/types/second-opinion'
 import type { SecurityAlertSettings, SecurityAlertView, SecurityAlertsView } from '../../../shared/types/security-alerts'
@@ -214,6 +222,8 @@ export const adminHomeSchema: z.ZodMiniType<AdminHome> = z.looseObject({
     stoppedPlugins: z.array(z.looseObject({ id: str, label: str, problem: str })),
     // Absent from a server before 「気になる動き」.
     securityAlerts: z.optional(z.array(securityAlertSchema)),
+    // Absent from a server before the holding place's review (private-folders.md "Holding: review").
+    holding: z.optional(z.looseObject({ waiting: z.number(), expiringSoon: z.number() })),
   }),
   counts: z.looseObject({ members: z.number(), departments: z.number() }),
 })
@@ -440,3 +450,39 @@ export const coreConnectorsSchema = topLevel<CoreConnectorsView>({ connectors: l
 export const minutesFolderSchema = topLevel<MinutesFolderSetting>({ folder: nullableStr, choices: list, meetings: str, bundleQuestionDays: num })
 export const meetingDuplicatesSchema = topLevel<MeetingDuplicates>({ groups: list })
 export const meetingDuplicatesMergedSchema = topLevel<MeetingDuplicatesMerged>({ keptId: str, merged: list, failed: list })
+
+// 「預かり」: the holding place's review (shared/types/private-holding.ts, private-folders.md "Holding: review").
+// Checked field by field: the page decides what may be taken in from these, so a shape it does not
+// know is refused rather than guessed at.
+const holdingKind = z.enum(['changed', 'deleted', 'backup', 'personal', 'names-only'])
+const holdingItemShape = {
+  itemId: str,
+  scopeId: str,
+  folderPath: str,
+  folderGone: z.boolean(),
+  userId: str,
+  userName: nullableStr,
+  cause: z.enum(['readers', 'left-company', 'folder-deleted', 'role', 'rules']),
+  state: z.enum(['waiting', 'taking']),
+  receivedAt: str,
+  expiresAt: str,
+  counts: z.looseObject({ changed: z.number(), deleted: z.number(), backup: z.number(), personal: z.number(), namesOnly: z.number() }),
+  bytes: z.number(),
+}
+const holdingItemSchema: z.ZodMiniType<HoldingReviewItem> = z.looseObject(holdingItemShape)
+const holdingFileSchema: z.ZodMiniType<HoldingReviewFile> = z.looseObject({
+  idx: z.number(),
+  path: str,
+  kind: holdingKind,
+  size: z.number(),
+  label: nullableStr,
+  held: z.boolean(),
+  dropped: z.nullable(z.enum(['too-large', 'secret'])),
+  takeable: z.boolean(),
+  standing: z.enum(['unchanged', 'changed', 'unknown']),
+  inFolderNow: z.boolean(),
+})
+export const holdingListSchema: z.ZodMiniType<HoldingReviewList> = z.looseObject({ items: z.array(holdingItemSchema) })
+export const holdingDetailSchema: z.ZodMiniType<HoldingReviewDetail> = z.looseObject({ ...holdingItemShape, files: z.array(holdingFileSchema) })
+export const holdingTakeSchema = topLevel<HoldingTakeResult>({ state: z.literal('taken'), commit: nullableStr, placed: list, skipped: list })
+export const holdingDiscardSchema = topLevel<HoldingDiscardResult>({ state: z.literal('discarded') })

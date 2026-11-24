@@ -66,6 +66,10 @@ import {
   privateFolderSchema,
   privateFoldersSchema,
   pushRejectionPageSchema,
+  holdingDetailSchema,
+  holdingDiscardSchema,
+  holdingListSchema,
+  holdingTakeSchema,
   repoFoldersSchema,
   sandboxImpactSchema,
   scopeMoveSchema,
@@ -396,6 +400,8 @@ export interface AdminHome {
     stoppedPlugins: Array<{ id: string; label: string; problem: string }>
     /** 「気になる動き」 of the last 7 days (owner / admin); absent from an older server. */
     securityAlerts?: SecurityAlertView[]
+    /** 「預かり」 the caller may review, and those discarded by the clock within 7 days; absent from an older server. */
+    holding?: { waiting: number; expiringSoon: number }
   }
   counts: { members: number; departments: number }
 }
@@ -691,6 +697,98 @@ export const privateFoldersApi = {
 export interface DeletePrivateFolderResult {
   path: string
   archived: true
+}
+
+// ---------------------------------------------------------------------------
+// 「預かり」: the holding place's review (shared/types/private-holding.ts; private-folders.md "Holding: review")
+// ---------------------------------------------------------------------------
+
+export type {
+  HoldingCause,
+  HoldingDiscardResult,
+  HoldingEntryKind,
+  HoldingFileStanding,
+  HoldingReviewDetail,
+  HoldingReviewFile,
+  HoldingReviewItem,
+  HoldingReviewList,
+  HoldingTakeRequest,
+  HoldingTakeResult,
+} from '../../../shared/types/private-holding'
+import type { HoldingTakeRequest } from '../../../shared/types/private-holding'
+
+/** Which version of a held entry to download: as handed over, as the folder had it then, or as it is now. */
+export type HoldingFileVersion = 'held' | 'base' | 'current'
+
+/** A downloaded file: its bytes and the name the server gave it (the entry's own name). */
+export interface DownloadedFile {
+  blob: Blob
+  name: string
+}
+
+/** How long a download may take (a held file can be 50 MB). */
+const DOWNLOAD_TIMEOUT_MS = 120_000
+
+const holdBase = (companyId: string) => `/api/companies/${enc(companyId)}/holding`
+
+/** The name in `Content-Disposition: attachment; filename*=UTF-8''…` (the server's format), else `fallback`. */
+export function attachmentName(header: string | null, fallback: string): string {
+  const m = header ? /filename\*=UTF-8''([^;]+)/i.exec(header) : null
+  if (!m) return fallback
+  try {
+    const name = decodeURIComponent(m[1]).split(/[\\/]/).pop() ?? ''
+    return name.trim() === '' ? fallback : name
+  } catch {
+    return fallback
+  }
+}
+
+export const holdingApi = {
+  /** The items the caller may review (others are never listed). */
+  list: (companyId: string) => getData(holdBase(companyId), holdingListSchema),
+
+  /** Its entries and how each stands against the folder now. 404 for anyone who may not review it. */
+  get: (companyId: string, itemId: string) => getData(`${holdBase(companyId)}/${enc(itemId)}`, holdingDetailSchema),
+
+  /** 「フォルダに入れる」: the chosen entries as one change, as the caller; the rest is discarded with it. */
+  take: (companyId: string, itemId: string, request: HoldingTakeRequest) =>
+    getData(`${holdBase(companyId)}/${enc(itemId)}/take`, holdingTakeSchema, { method: 'POST', body: request }),
+
+  /** 「捨てる」: the item and its contents go (the page asks first). */
+  discard: (companyId: string, itemId: string) =>
+    getData(`${holdBase(companyId)}/${enc(itemId)}/discard`, holdingDiscardSchema, { method: 'POST', body: {} }),
+
+  /**
+   * One entry's bytes (always a download, never shown in the page: the member's bytes are not trusted).
+   * A refusal is an ApiError like any other call's.
+   */
+  download: async (companyId: string, itemId: string, idx: number, version: HoldingFileVersion, fallbackName: string): Promise<DownloadedFile> => {
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), DOWNLOAD_TIMEOUT_MS)
+    try {
+      const res = await fetch(`${API_BASE}${holdBase(companyId)}/${enc(itemId)}/files/${idx}?version=${version}`, {
+        credentials: 'include',
+        signal: controller.signal,
+      })
+      if (!res.ok) {
+        let body: Record<string, unknown> | null = null
+        try {
+          const raw: unknown = JSON.parse(await res.text())
+          body = raw && typeof raw === 'object' && !Array.isArray(raw) ? (raw as Record<string, unknown>) : null
+        } catch {
+          body = null
+        }
+        throw new ApiError(res.status, typeof body?.error === 'string' ? body.error : `Request failed (${res.status})`, body)
+      }
+      const blob = await res.blob()
+      return { blob, name: attachmentName(res.headers.get('Content-Disposition'), fallbackName) }
+    } catch (err) {
+      if (controller.signal.aborted) throw new ApiTimeoutError()
+      throw err
+    } finally {
+      clearTimeout(timer)
+    }
+  },
 }
 
 // ---------------------------------------------------------------------------

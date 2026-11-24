@@ -61,6 +61,7 @@ const TYPES: Record<string, string> = {
   Capabilities: 'Capabilities',
   Overview: 'Overview',
   AdminHome: 'AdminHome',
+  HoldingList: 'HoldingReviewList',
   ClientActivity: 'ClientActivity[]',
   Permissions: '{ scopes: PermissionScope[]; orphanedScopes?: OrphanedScope[] }',
   ScopeRulesResult: 'ScopeRulesResult',
@@ -292,6 +293,7 @@ beforeAll(async () => {
   app.route('/api/companies/:companyId', groupsRoute)
   app.route('/api/companies/:companyId', (await import('../../src/routes/skill-shelf')).skillShelfRoute)
   app.route('/api/companies/:companyId', privateFoldersRoute)
+  app.route('/api/companies/:companyId', (await import('../../src/routes/holding-review')).holdingReviewRoute)
   app.route('/api/companies/:companyId', agentEventsRoute)
   app.route('/api/companies/:companyId', agentSandboxRoute)
   app.route('/api/companies/:companyId', agentBrowserRoute)
@@ -338,6 +340,8 @@ describe('admin API types (admin/src/lib/api.ts) match the server', () => {
     await expectShape('Overview', USERS.owner, 'GET', `${base}/overview`)
     await expectShape('AdminHome', USERS.owner, 'GET', `${base}/home`)
     await expectShape('AdminHome', USERS.owner, 'PUT', `${base}/home/holidays-checked`, { checked: true })
+    // 「預かり」 (A1): the list (its items' shape is the shared contract the admin re-exports).
+    await expectShape('HoldingList', USERS.owner, 'GET', `${base}/holding`)
     await expectShape('PushRejections', USERS.owner, 'GET', `${base}/push-rejections?limit=10`)
   })
 

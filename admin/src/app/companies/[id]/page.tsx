@@ -3,6 +3,7 @@
 import type { ReactNode } from 'react'
 import Link from 'next/link'
 import {
+  Archive,
   ArrowRight,
   CheckCircle,
   Circle,
@@ -42,6 +43,7 @@ import {
 import { useCompany } from '@/lib/company-context'
 import { formatBuild, formatDateTime, formatRelative, latest, parseBuild, roleLabel } from '@/lib/format'
 import { SUMMARY_LABELS } from '@/lib/permission-labels'
+import { HOLDING_HELP } from '@/lib/holding'
 import { explainRejection } from '@/lib/rejections'
 import { useQuery } from '@/lib/use-query'
 import { cn } from '@/lib/utils'
@@ -95,7 +97,12 @@ function HomeView() {
             permissionsHref={`${base}/folders`}
             rejectionsHref={`${base}/advanced/info/rules`}
             extra={<ExtraAttention attention={data.attention} base={base} />}
-            extraCount={(data.attention.meetingDuplicates > 0 ? 1 : 0) + data.attention.stoppedPlugins.length + (data.attention.securityAlerts?.length ?? 0)}
+            extraCount={
+              (data.attention.meetingDuplicates > 0 ? 1 : 0) +
+              data.attention.stoppedPlugins.length +
+              (data.attention.securityAlerts?.length ?? 0) +
+              ((data.attention.holding?.waiting ?? 0) > 0 ? 1 : 0)
+            }
           />
           {!isAdmin && canViewAgentEvents && (
             // The log is inside 「詳しい設定」 (owners and admins); a manager the setting lets read it opens it from here.
@@ -176,8 +183,24 @@ function SetupCard({ setup, base, hasCompanyFolder }: { setup: NonNullable<Admin
 /** What the home gathers besides the overview's lists (管理画面の見直し 2-3). */
 function ExtraAttention({ attention, base }: { attention: AdminHome['attention']; base: string }) {
   const alerts = attention.securityAlerts ?? []
+  // Counts only, of the items the server lets this caller review (private-folders.md "Holding: review").
+  const holding = attention.holding ?? { waiting: 0, expiringSoon: 0 }
   return (
     <>
+      {holding.waiting > 0 && (
+        <AttentionCard
+          icon={Archive}
+          tone={holding.expiringSoon > 0 ? 'warning' : 'muted'}
+          title="預かったファイルを確かめてください"
+          description={HOLDING_HELP}
+          footer={<FooterLink href={`${base}/folders?tab=holding`}>預かりを開く</FooterLink>}
+        >
+          <li className="px-5 py-2.5 text-body">{holding.waiting}件</li>
+          {holding.expiringSoon > 0 && (
+            <li className="px-5 py-2.5 text-body text-warning-text">うち{holding.expiringSoon}件は、あと7日以内に自動的に捨てます</li>
+          )}
+        </AttentionCard>
+      )}
       {alerts.length > 0 && (
         <AttentionCard
           icon={ShieldWarning}

@@ -6,6 +6,7 @@ import { FolderSimple } from '@phosphor-icons/react'
 import { EmptyState, ListSkeleton, PageHeader } from '@/components/app/states'
 import { FOLDERS_TITLE } from '@/components/folders/folder-tabs'
 
+import { HoldingView } from '@/components/folders/holding-view'
 import { PermissionsView } from '@/components/folders/permissions-view'
 import { PrivateFoldersView } from '@/components/folders/private-folders-view'
 import { useCompany } from '@/lib/company-context'
@@ -13,7 +14,8 @@ import { NO_COMPANY_FOLDER_NOTE } from '@/lib/company-folder'
 
 /**
  * 「フォルダ」: who may change each place (the former 「権限」) and the folders whose viewers are
- * chosen (the former 「非公開フォルダ」), one menu item with two tabs (?tab=private).
+ * chosen (the former 「非公開フォルダ」), one menu item with two tabs (?tab=private), and 「預かり」
+ * (?tab=holding) when the caller has held items to review (private-folders.md "Holding: review").
  * /permissions and /private-folders lead here.
  */
 export default function FoldersPage() {
@@ -30,5 +32,6 @@ export default function FoldersPage() {
       </>
     )
   }
+  if (tab === 'holding') return <HoldingView />
   return tab === 'private' ? <PrivateFoldersView /> : <PermissionsView />
 }
