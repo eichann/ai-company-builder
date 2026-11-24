@@ -8,10 +8,10 @@
 // - the draft's images are copied only from the pinned `tools/assets/`, never over a file, never through a link;
 // - the report: quotes checked against the minutes this run read, the files there, the images copied, the record kept on this
 //   PC and read back — and only then the completion, fixed kinds only (no quote, company or folder).
-import { test } from 'node:test'
+import { after, test } from 'node:test'
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { createAiTurnClaims } from '../electron/features/ai-turns/claims'
@@ -35,9 +35,14 @@ const MINUTES = '佐藤：来月までに提案書を送ってください。\n�
 
 const git = (cwd: string, ...args: string[]) => execFileSync('git', args, { cwd, encoding: 'utf8' }).trim()
 
+/** Every temporary folder a test made: removed once the file's tests are done (a shared PC). */
+const made: string[] = []
+after(() => { for (const dir of made) rmSync(dir, { recursive: true, force: true }) })
+
 /** A company folder whose shared branch holds both Skills (the copy with its reasons, the original with its images). */
 function company() {
   const tmp = realpathSync(mkdtempSync(path.join(os.tmpdir(), 'acb-setwatch-')))
+  made.push(tmp)
   const root = path.join(tmp, 'company')
   const data = path.join(tmp, 'userData')
   const auto = path.join(root, DEPT, '.claude', 'skills', COPY_SKILL)
