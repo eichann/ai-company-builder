@@ -20,7 +20,8 @@
     "build": "pnpm -r build",
     "lint": "pnpm -r lint",
     "typecheck": "pnpm -r typecheck",
-    "manual:shoot": "pnpm --filter client manual:shoot"
+    "manual:shoot": "pnpm --filter client manual:shoot",
+    "manual-admin:shoot": "pnpm --filter @ai-company-builder/admin manual:shoot"
   },
   "keywords": ["ai", "agent", "electron", "workflow"],
   "author": "",

@@ -1,0 +1,3 @@
+{
+  "HubSpot に聞いて確かめる": "drawn from a template with the connector's label (`${system} に聞いて確かめる`, admin/src/app/companies/[id]/integrations/page.tsx), so the whole name is not one piece of text in the source"
+}

@@ -204,6 +204,9 @@ Object.assign(window, {
       },
       removeAbsence: async (_companyId: string, id: string) => { manualAbsences = manualAbsences.filter(a => a.id !== id); return { success: true } },
     } : {}),
+    // 設定 →「AIに渡す環境変数」 (tab=aienv; the administrator guide's 15節): one name passed on already.
+    getAgentEnvPassthrough: async () => ['CRM_BASE_URL'],
+    setAgentEnvPassthrough: async (names: string[]) => ({ names, invalid: [], denied: [] }),
     // ?manual=1: settings →「定期の仕事」 (chapter 26).
     ...(MANUAL ? {
       getMyJobs: async () => ({ success: true, jobs: manualJobs() }),

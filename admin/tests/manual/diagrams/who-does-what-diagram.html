@@ -1,0 +1,49 @@
+<!-- The guide's 15節: three places for three kinds of work — the operator (server side), the admin
+     console, and a member's PC (the FDE's settings in the app). Shot by shoot.spec.ts (scenes.ts). -->
+<style>
+  body { margin: 0; background: var(--color-surface); font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Hiragino Kaku Gothic ProN", sans-serif; color: var(--color-text); }
+  #diagram { width: 960px; padding: 28px 30px 30px; box-sizing: border-box; background: var(--color-surface); }
+  .row { display: flex; gap: 16px; align-items: stretch; }
+  .col { flex: 1; padding: 14px 16px 16px; border-radius: 14px; border: 2px solid var(--color-border-strong); background: var(--color-bg); }
+  .col h3 { margin: 0 0 2px; font-size: 17px; }
+  .col .who { margin: 0 0 8px; font-size: 13px; color: var(--color-text-muted); }
+  .col ul { margin: 0; padding-left: 18px; font-size: 14px; line-height: 1.75; }
+  .col .chapter { color: var(--color-text-muted); font-size: 12px; }
+  .col.admin { border-color: var(--color-primary); background: var(--color-selected-bg); }
+  .note { margin-top: 14px; padding: 12px 16px; border-radius: 10px; background: var(--color-surface-sunken); color: var(--color-text); font-size: 14px; text-align: center; }
+</style>
+<div id="diagram">
+  <div class="row">
+    <div class="col">
+      <h3>運用担当者に頼む</h3>
+      <p class="who">サーバーの側の人</p>
+      <ul>
+        <li>会社を作る <span class="chapter">1節</span></li>
+        <li>Google の会社の登録 <span class="chapter">9節</span></li>
+        <li>業務プラグインを用意する・止める <span class="chapter">11節</span></li>
+        <li>データの書き出し・バックアップから戻す</li>
+        <li>消した非公開フォルダを戻す <span class="chapter">5節</span></li>
+      </ul>
+    </div>
+    <div class="col admin">
+      <h3>管理画面でできる</h3>
+      <p class="who">オーナー・管理者（FDE も）</p>
+      <ul>
+        <li>人・部署・フォルダの権限 <span class="chapter">2〜5節</span></li>
+        <li>仕事の進め方・つなぎ先 <span class="chapter">8〜9節</span></li>
+        <li>鍵・業務プラグイン・定期の仕事 <span class="chapter">10〜12節</span></li>
+        <li>見守る・［AI を止める］ <span class="chapter">14節</span></li>
+      </ul>
+    </div>
+    <div class="col">
+      <h3>社員の PC で触る</h3>
+      <p class="who">FDE が、アプリの「設定」で</p>
+      <ul>
+        <li>APIキー（このPC）・環境変数（.env）</li>
+        <li>［この鍵をサーバーに移す］ <span class="chapter">10節</span></li>
+        <li>AIに渡す環境変数</li>
+      </ul>
+    </div>
+  </div>
+  <div class="note">困ったら、まずホームの「対応が必要なこと」。AI がおかしいときは、調べる前に［AI を止める］。</div>
+</div>

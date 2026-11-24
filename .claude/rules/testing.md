@@ -98,7 +98,11 @@ npx vite -c tests/ui/vite.config.ts    # look at a page: http://localhost:5174/t
   change. `tests/manual-pages.test.ts` checks every picture a manual page shows exists. `tests/manual-ui-names.test.ts`
   checks every ［名前］ the manual cites is still a name in the app's screens (allowlist:
   `manual/ui-names-allowlist.json`, each with a reason). Data in
-  a preview page a scene uses stays fictional (no real people or companies).
+  a preview page a scene uses stays fictional (no real people or companies). Scenes with
+  `guide: 'admin'` write into `manual-admin/images/` instead (the administrator guide's pictures of
+  the app; `pnpm manual:shoot -g admin-app`). The guide's admin-console pictures have their own
+  shoot (`admin/tests/manual/`, `pnpm manual-admin:shoot`: the production admin build with its API
+  answered in the browser from fictional data; `manual-admin/README.md`).
 - `playwright test` starts and stops `vite preview` itself (port 4179). `UI_TEST_REUSE=1` reuses
   one you started (rebuild after changes); stop it, and any `vite -c tests/ui/vite.config.ts`,
   when done.

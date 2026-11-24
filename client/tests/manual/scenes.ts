@@ -70,6 +70,8 @@ export interface Scene {
   annotations?: SceneAnnotation[]
   /** Keep the focus where the steps left it (a list that closes when its input loses focus). */
   keepFocus?: true
+  /** A picture of the app for the administrator guide (manual-admin/): saved in manual-admin/images instead. */
+  guide?: 'admin'
 }
 
 // The main screen with the manual's company (skill-layout-ui.html ?manual=1: 検証A社, 山田 太郎 in
@@ -2494,3 +2496,36 @@ export const scenes: Scene[] = [
     annotations: [{ box: 'role=button[name="書き出す"]' }, { marker: { target: 'role=button[name="書き出す"]', label: '1', at: 'left' } }],
   },
 ]
+
+// ── The administrator guide's pictures of the app (manual-admin/, `guide: 'admin'`) ─────────────
+// 10・13・15節 of the guide show settings an FDE touches on a member's PC and the plan card. They are
+// shot here, with the member manual's preview pages, into manual-admin/images (the guide's site
+// serves only its own folder): `pnpm manual:shoot -g admin-app`.
+const forAdminGuide = (from: string, id: string): Scene => ({ ...scenes.find(s => s.id === from)!, id, guide: 'admin' })
+scenes.push(
+  forAdminGuide('settings-own-keys', 'admin-app-own-keys'),
+  forAdminGuide('settings-browser', 'admin-app-browser'),
+  forAdminGuide('browser-plan-card', 'admin-app-plan-card'),
+  {
+    id: 'admin-app-env-move',
+    about: '設定 →「APIキー（このPC）」: the note that it is for older apps, and ［この鍵をサーバーに移す］ for a key in the .env.',
+    page: 'download-folders',
+    query: { tab: 'apikeys', manual: '1', role: 'member' },
+    viewport: { width: 1100, height: 760 },
+    steps: [{ waitFor: 'role=button[name="この鍵をサーバーに移す"]' }, SETTLE],
+    crop: { target: 'role=dialog', padding: 0 },
+    annotations: [{ box: 'role=button[name="この鍵をサーバーに移す"]' }],
+    guide: 'admin',
+  },
+  {
+    id: 'admin-app-agent-env',
+    about: '設定 →「AIに渡す環境変数」: the warning that the AI and its commands see them.',
+    page: 'download-folders',
+    query: { tab: 'aienv', manual: '1', role: 'member' },
+    viewport: { width: 1100, height: 760 },
+    steps: [{ waitFor: 'text=ここに書いた環境変数は、AIと、AIが実行するコマンドから見えるようになります' }, SETTLE],
+    crop: { target: 'role=dialog', padding: 0 },
+    annotations: [{ box: 'text=ここに書いた環境変数は、AIと、AIが実行するコマンドから見えるようになります' }],
+    guide: 'admin',
+  },
+)

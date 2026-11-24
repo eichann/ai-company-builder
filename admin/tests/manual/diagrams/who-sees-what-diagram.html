@@ -1,0 +1,47 @@
+<!-- The guide's 6節: a private folder and records differ in who sees them — owners and admins
+     always see a private folder, but not an owner-only or members-only record, nor a meeting they
+     were not in. Shot by shoot.spec.ts (scenes.ts). -->
+<style>
+  body { margin: 0; background: var(--color-surface); font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Hiragino Kaku Gothic ProN", sans-serif; color: var(--color-text); }
+  #diagram { width: 960px; padding: 28px 30px 30px; box-sizing: border-box; background: var(--color-surface); }
+  table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 15px; }
+  th, td { padding: 12px 14px; text-align: left; border-bottom: 1px solid var(--color-border); vertical-align: top; }
+  thead th { font-size: 14px; color: var(--color-text-muted); font-weight: 600; border-bottom: 2px solid var(--color-border-strong); }
+  tbody th { font-weight: 700; width: 30%; }
+  .yes { color: var(--color-success-text); font-weight: 700; }
+  .no { color: var(--color-danger-text); font-weight: 700; }
+  .if { color: var(--color-text); }
+  .sub { display: block; font-size: 12px; color: var(--color-text-muted); font-weight: 400; margin-top: 2px; }
+  .folder { background: var(--color-bg); }
+  .note { margin-top: 16px; padding: 12px 16px; border-radius: 10px; background: var(--color-selected-bg); border: 1px solid var(--color-selected-border); font-size: 14px; font-weight: 700; text-align: center; }
+</style>
+<div id="diagram">
+  <table>
+    <thead>
+      <tr><th></th><th>オーナー・管理者</th><th>部署の管理役</th></tr>
+    </thead>
+    <tbody>
+      <tr class="folder">
+        <th>非公開フォルダ<span class="sub">「総務部/人事評価」など</span></th>
+        <td><span class="yes">いつも見られる</span></td>
+        <td><span class="if">見られる人に入っていれば見られる</span><span class="sub">自分の部署のものは、見られる人を変えられる</span></td>
+      </tr>
+      <tr>
+        <th>「あなただけ」の記録<span class="sub">持ち主だけ</span></th>
+        <td><span class="no">見られない</span></td>
+        <td><span class="no">見られない</span></td>
+      </tr>
+      <tr>
+        <th>「この人たちだけ」の記録</th>
+        <td><span class="if">入っていれば見られる</span></td>
+        <td><span class="if">入っていれば見られる</span></td>
+      </tr>
+      <tr>
+        <th>会議の記録</th>
+        <td><span class="if">出た人・招待された人なら見られる</span></td>
+        <td><span class="if">出た人・招待された人なら見られる</span></td>
+      </tr>
+    </tbody>
+  </table>
+  <div class="note">記録は、役割ではなく「入っているかどうか」で決まります。社長にも見えない記録があります。</div>
+</div>
