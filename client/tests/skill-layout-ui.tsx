@@ -39,6 +39,10 @@
 //               title bar's ［受け箱］ with what waits for him
 //     folders   marks = 総務部 downloaded (閲覧のみ), 営業部/過去資料 not downloaded and the private
 //               folder 営業部/提案前メモ this member reads; other = the same for someone who does not read it
+//     extra     1 = chapters 33–38: 営業部/提案書/提案書_A社向け.html shown by a faked document view (a drawn
+//               page where main's view would be; window.__acbDocEvent(e) sends a docView:event),
+//               a longer change in 「前の版」, and 「探す」 finding 「納期」 inside the visit notes
+//               (with chat=live also: 「Web で調べて」 and 「HTML の資料に」 get their replies)
 //
 // 今日のフォルダ: the member belongs to 開発部 (not downloaded) and 営業部, so it is in 営業部;
 // `createDirectory` makes folders on the fake disk (recorded).
@@ -81,6 +85,7 @@ try {
 if (params.get('notice') !== '1') markAgentLogNoticeSeen('u_me')
 
 const MANUAL = params.get('manual') === '1'
+const EXTRA = MANUAL && params.get('extra') === '1'
 // ?manual=1&chat=live: 「AIへの相談」 answers what the member sends with a fixed reply (liveChat below).
 const LIVE = MANUAL && params.get('chat') === 'live'
 const ROOT = MANUAL ? '/Users/yamada/AI Company Builder/検証A社' : '/Users/demo/会社'
@@ -215,6 +220,8 @@ const SKILLS: Record<string, ReturnType<typeof skill>[]> = MANUAL ? {
   開発部: [skill('開発部', 'release-note', 'リリースノートを書く')],
   総務: [],
 }
+// ?extra=1 (chapter 38): a Skill 山田さん made for himself, kept on this PC.
+if (EXTRA) SKILLS['営業部'].push({ ...skill('営業部', 'estimate-outline', '訪問メモから見積の骨子を作る'), isPrivate: true } as ReturnType<typeof skill>)
 
 const COMMITS = MANUAL ? [
   { hash: 'c2'.padEnd(40, '0'), hashShort: 'c2000000', message: '提案書の進め方を直しました', author: '山田 太郎', date: '2026-11-19T17:40:00+09:00' },
@@ -345,6 +352,12 @@ const api: Partial<ElectronAPI> = {
   gitGrep: async (_root: string, query: string, folder: string) => {
     record('gitGrep', [query, folder])
     await sleep(100)
+    if (EXTRA && query === '納期') {
+      return { success: true, results: [
+        { file: '営業部/訪問メモ_1123.md', line: 7, text: '- 納期は3月末を希望', column: 2 },
+        { file: '営業部/下書き/お礼メール_A社.md', line: 5, text: '3月末の納期に間に合うよう、進め方もご相談させてください。', column: 3 },
+      ] }
+    }
     if (query === '提案') {
       return { success: true, results: [
         { file: '営業部/提案書/A社_提案.md', line: 3, text: 'A社への提案の骨子', column: 4 },
@@ -359,7 +372,9 @@ const api: Partial<ElectronAPI> = {
     return { success: true, results: [] }
   },
   gitLog: async (_root: string, folder: string) => { record('gitLog', [folder]); return { success: true, commits: [...COMMITS] } },
-  gitCommitFileDiff: async () => ({ success: true, diff: '@@ -1 +1 @@\n-# 提案\n+# A社 提案\n' }),
+  gitCommitFileDiff: async () => ({ success: true, diff: EXTRA
+    ? '@@ -6,6 +6,6 @@\n \n ## 進め方\n \n-1. 今の手順を書き出す（1月）\n-2. 全社で使い始める（4月）\n+1. 今の手順を一緒に書き出す（12月）\n+2. 試しに一部の部署で使う（1月）\n+3. 全社で使い始める（3月）\n'
+    : '@@ -1 +1 @@\n-# 提案\n+# A社 提案\n' }),
   // Records (search, the record card, a file's 「つながっているもの」): what the server would answer.
   searchRecords: async (companyId: string, text: string) => {
     record('searchRecords', [companyId, text])
@@ -572,6 +587,7 @@ const SAY = (id: string, text: string): LiveStep[] => [
 const THANKS = '営業部/下書き/お礼メール_A社.md'
 /** What the AI's files hold once written. */
 const LIVE_WRITTEN: Record<string, string> = {
+  '営業部/提案書/提案書_A社向け.html': '<!doctype html>\n<html lang="ja"><head><meta charset="utf-8"><title>A社向け ご提案</title></head>\n<body><h1>受発注の手作業を減らし、商談の時間を増やす</h1></body></html>\n',
   [THANKS]: [
     '件名：本日のお打ち合わせのお礼',
     '',
@@ -592,7 +608,40 @@ const LIVE_WRITTEN: Record<string, string> = {
   '営業部/提案書/提案書_A社向け_骨子.md': '# A社向け 提案書（骨子）\n\n## ねらい\n\n## 進め方\n\n## 費用\n',
 }
 const MEMO = '営業部/訪問メモ_1123.md'
+const PROPOSAL_HTML = '営業部/提案書/提案書_A社向け.html'
+/** An app tool's line (what main puts on it), its call and its answer. */
+const APP_TOOL = (id: string, toolName: string, label: string, running: string, detail: string): LiveStep[] => [
+  { chunk: { type: 'tool-input-available', toolCallId: id, toolName, dynamic: true, providerExecuted: true, input: {}, providerMetadata: line(label, running, detail) } },
+  { wait: 80 },
+  { chunk: { type: 'tool-output-available', toolCallId: id, dynamic: true, providerExecuted: true, output: 'ok' } },
+]
 const LIVE_REPLIES: Array<{ when: RegExp; steps: LiveStep[] }> = [
+  // Chapter 37: the AI looks on the web, in a department this PC has not downloaded and in an earlier consultation.
+  ...(EXTRA ? [{ when: /Web で調べて/, steps: [
+    ...APP_TOOL('web1', 'mcp__acb_web__web_research', 'Webで調べました', 'Webで調べています', '研修業界の最近の動き'),
+    ...APP_TOOL('cf1', 'mcp__acb_company_files__company_read_file', '会社のファイルを読みました', '会社のファイルを読んでいます', '総務部/取引先一覧.md'),
+    ...APP_TOOL('cs1', 'mcp__acb_consultations__search_consultations', '過去の相談を探しました', '過去の相談を探しています', 'B社 研修'),
+    ...SAY('t1', [
+      '調べた内容をまとめます。',
+      '',
+      '**研修業界の最近の動き（Web）**',
+      '- 社内研修を、オンラインと集合を組み合わせて行う会社が増えています。',
+      '- 研修の効果を、半年後の行動の変化で確かめる動きがあります。',
+      '',
+      '出どころ：[研修市場の調査（example.org）](https://example.org/research) ／ [人材育成の白書（example.net）](https://example.net/whitepaper)',
+      '',
+      '**会社の資料**：総務部の「取引先一覧」では、A社とのお付き合いは3年目です。',
+      '',
+      '**前の相談**：「B社 研修の提案の骨子」の進め方（ねらい → 進め方 → 費用）が、A社にも使えそうです。',
+    ].join('\n')),
+    { end: true as const },
+  ] }] : []),
+  // Chapter 36: an HTML document the AI writes (its line offers ［見る］).
+  ...(EXTRA ? [{ when: /HTML の資料に/, steps: [
+    ...READ('r1', '営業部/提案書/提案書_A社向け.md'), ...WRITE('w1', PROPOSAL_HTML),
+    ...SAY('t1', '提案書を、お客さまに見せる HTML の資料にしました。「営業部/提案書/提案書_A社向け.html」です。上の［見る］で開けます。'),
+    { end: true as const },
+  ] }] : []),
   // A やること the AI makes (chapter 18): the record tool's line and what the tool told it to say.
   { when: /やることに入れて/, steps: [
     { chunk: { type: 'tool-input-available', toolCallId: 'c1', toolName: 'mcp__acb_records__records_create', dynamic: true, providerExecuted: true, input: { type: 'task', title: '見積を直す' }, providerMetadata: line('記録を作りました', '記録を作っています', 'タスク「見積を直す」') } },
@@ -838,6 +887,49 @@ if (MANUAL) {
         }] }),
       } satisfies Partial<ElectronAPI>)
     }
+  }
+  if (EXTRA) {
+    // Chapter 36: the proposal as an HTML document. Main shows a document in a view of its own over the
+    // window; here a drawn page stands where that view would be (setDocViewBounds), so the picture shows it.
+    if (!LIVE) {
+      DISK[`${ROOT}/営業部/提案書`].push(file('提案書_A社向け.html'))
+      FILES[`${ROOT}/${PROPOSAL_HTML}`] = LIVE_WRITTEN[PROPOSAL_HTML]
+    }
+    const pages = new Map<number, HTMLDivElement>()
+    let nextView = 1
+    const docEvents = emitter<unknown>()
+    const page = () => {
+      const el = document.createElement('div')
+      el.setAttribute('data-testid', 'doc-view-page')
+      el.style.cssText = 'position:fixed;z-index:5;pointer-events:none;overflow:hidden;background:#f6f7fb;font-family:system-ui,sans-serif;color:#1d2433'
+      el.innerHTML = [
+        '<div style="background:#1f3a68;color:#fff;padding:28px 32px">',
+        '<div style="font-size:12px;opacity:.8">検証A社 営業部　ご提案</div>',
+        '<div style="font-size:24px;font-weight:700;margin-top:6px">受発注の手作業を減らし、商談の時間を増やす</div>',
+        '<div style="font-size:13px;opacity:.85;margin-top:6px">A社 購買部 御中</div></div>',
+        '<div style="display:flex;gap:12px;padding:20px 32px">',
+        ...[['12月', '今の手順を一緒に書き出す'], ['1月', '試しに一部の部署で使う'], ['3月', '全社で使い始める']].map(([when, what], i) =>
+          `<div style="flex:1;background:#fff;border-radius:10px;padding:14px;box-shadow:0 1px 3px rgba(0,0,0,.08)"><div style="font-size:11px;color:#1f3a68;font-weight:700">STEP ${i + 1}・${when}</div><div style="font-size:14px;margin-top:6px">${what}</div></div>`),
+        '</div>',
+        '<div style="padding:0 32px;font-size:13px;line-height:1.8">ねらい：受発注の手作業を減らし、営業の方が商談に使える時間を増やします。</div>',
+      ].join('')
+      return el
+    }
+    Object.assign(api, {
+      openDocView: async () => { const viewId = nextView++; pages.set(viewId, page()); return { ok: true, viewId } },
+      closeDocView: async (viewId: number) => { pages.get(viewId)?.remove(); pages.delete(viewId) },
+      setDocViewBounds: async (viewId: number, bounds: { x: number; y: number; width: number; height: number } | null) => {
+        const el = pages.get(viewId)
+        if (!el) return
+        if (!bounds) { el.remove(); return }
+        Object.assign(el.style, { left: `${bounds.x}px`, top: `${bounds.y}px`, width: `${bounds.width}px`, height: `${bounds.height}px` })
+        if (!el.isConnected) document.body.appendChild(el)
+      },
+      setDocViewZoom: async () => {},
+      reloadDocView: async () => {},
+      onDocViewEvent: docEvents.subscribe as never,
+    } satisfies Partial<ElectronAPI>)
+    Object.assign(window, { __acbDocEvent: (e: unknown) => docEvents.emit(e) })
   }
   if (LIVE) {
     // The draft the AI will write starts missing, so the list shows it appear.
