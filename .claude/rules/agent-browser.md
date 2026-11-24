@@ -1521,7 +1521,8 @@ constant stays off). **The old path is unchanged** (`browser_request`, the plan 
   stays `pending` — no build bundles it with the inspection); `landing_create` and `step_template_add` stay `pending`.
 - **The card** (`src/features/browser-plans/components/BrowserInspectionCard.tsx`, `inspectionStore.ts`,
   `hooks/useBrowserInspection.ts`; IPC `browserLines:card { companyId, planId }`, main window's main frame only, ids of the
-  server's shape, the signed-in member's card only; the renderer copies only the card's shape, `readBrowserCard`): the
+  server's shape, the signed-in member's card only; the renderer copies only the card's shape, `readBrowserCard`, and keeps
+  it only while a card shows it — shown again, main is asked again, so nothing outlives main's sign-out clear): the
   generic card (`buildBrowserReadCard`) — headline, each check ✓ / ✗ (with the fields' headings) / 「読み取れませんでした」,
   「サイトから読み取った情報（AI には見せていません）」 with the account and the read values (a value not read 「読み取れませんでした」
   in amber, never a stand-in), the read time, the map's notes as warnings. Nothing to press. Frame green when all ✓, amber
@@ -1532,12 +1533,13 @@ Tests: `client/tests/browser-inspect-app.test.ts` (the real map, lines, declarat
 fake of the server's routes: a good run reads exactly the marker, the line's GETs and the marker on the declaration's
 host, the AI's words hold no value the site showed, the server gets the line's ref, the values as targets and the
 result in fixed words once and no value, the card only for the main window and the member; switched off no tool and
-nothing asked; a pending row, each refusal of the server's gate and bad values read nothing; the turn aborted mid-run
-→ no card, no result; a route in no folder → its row and a check 「読み取れませんでした」, never all ✓; a ✗ told as a mark
+nothing asked; a pending row, each refusal of the server's gate and bad values read nothing; a turn already stopped
+makes no plan; the turn aborted mid-run → no card, no result; a route in no folder → its row and a check 「読み取れませんでした」, never all ✓; a ✗ told as a mark
 only; the renderer's card check), `client/tests/ui/browser-inspection-card.spec.ts` (preview
 `browser-inspection-card-ui.html`, `?state=all_ok|ng|not_read|gone|other-window`, `?manual=1` a fictional site for the
 manual later: the marks, 「読み取れませんでした」 never ✓, the notes, no button, the plain sentences),
-`browser-read-line-runner.test.ts` (the 1.0.x row as approved and carrying the first row's grants),
+`src/features/browser-plans/inspectionStore.test.ts` (the renderer's copy gone with the last card, main asked again, a late
+answer dropped), `browser-read-line-runner.test.ts` (the 1.0.x row as approved and carrying the first row's grants),
 `browser-lines.test.ts` (the approved rows), `architecture-boundaries.test.ts`, `browser-runner.test.ts` (the old runner's
 importers unchanged). Each guard mutation-checked (the switch, the row's status, the main-window check, the member's
 card, the turn signal, no value in the AI's words); kept on purpose: the runner's own `turn.aborted` check (the context

@@ -172,8 +172,9 @@ export function wireBrowserInspections<E extends IpcInvokeEvent>(ipc: IpcRegistr
     const win = deps.window(input.companyId, site.host)
     if (!win || win.closed()) return refused(W.noWindow)
 
-    // The server's gate first: nothing is read unless it makes the plan.
+    // The server's gate first: nothing is read unless it makes the plan (and no plan for a turn already stopped).
     const stillCurrent = deps.context.capture({ companyId: input.companyId, signal: input.signal })
+    if (!stillCurrent()) return refused(W.interrupted)
     const ref: BrowserLineRef = { site: row.site, line: row.name, version: row.version, mapVersion: row.mapVersion, meaningHash: row.meaningHash, mechanicsHash: row.mechanicsHash }
     const made = await http.createInspection(input.companyId, { line: ref, values: supplied, ...(input.conversationId ? { conversationId: input.conversationId } : {}) })
     if (made.kind === 'no-answer') return refused(W.offline)

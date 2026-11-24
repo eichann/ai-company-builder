@@ -254,6 +254,15 @@ test('the consultation closed or stopped mid-run: the reads end, no card, no res
   assert.equal((await h.card(1)).ok, false)
 })
 
+test('a turn already stopped makes no plan and reads nothing', async () => {
+  const h = harness()
+  const turn = new AbortController()
+  turn.abort()
+  assert.equal(await h.tool(turn.signal)!.execute(ASK), BROWSER_INSPECT_WORDS.interrupted)
+  assert.deepEqual(h.f.server, [])
+  assert.deepEqual(h.f.reads, [])
+})
+
 test('unreadable is never ✓: a route in no folder — its row 「読み取れませんでした」, and the AI is told so without a value', async () => {
   const h = harness()
   h.f.answers.set('/api/landings/501', mapShaped('landing', landing({ group_id: null })))
