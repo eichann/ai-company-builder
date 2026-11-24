@@ -555,7 +555,8 @@ who uses it).
   `chat-server.ts` — a scheduled job's run, an automatic 「AI の番」, a business plugin's unattended step) never asks
   `getBrokerEnv` and gets no `turnEnv`, so its AI process has no broker token, placeholder or relay URL (the member's
   shell copies are removed as for any turn, `withoutBrokerEnv`). No one is there to see what a script would send or
-  write through the relay; such a turn has no shell or network tools either, this is the second wall. Consultations,
+  write through the relay; such a turn has no shell (Bash) tool either — at most its declared web or file tools, which cannot
+  read the process environment — so this is the second wall. Consultations,
   including a person-started step's, keep their pass. Test: `client/tests/job-runs.test.ts` 「a job turn gets no
   broker variables」 (mutation-checked).
 - `agents/agent-env.ts` rule 0: a broker variable passes to an AI process only with a value the
