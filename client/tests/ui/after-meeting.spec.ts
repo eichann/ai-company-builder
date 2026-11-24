@@ -1,7 +1,8 @@
 // 「会議のあと」 (4b-4 PR6-A, tests/after-meeting-ui.tsx; jobs.md "The 4b-4 screens (PR6-A)"). Guards: with the company's switch off
 // nothing of it is drawn or read; ［反映する］ hands one consultation only the ticked items with the member's values, never the
 // minutes' quote unless chosen, after a last check, once (a double press records one press); an approval waits by its id with
-// ［開く］; the weekly report's ［作り直す］ first says to delete this week's section by hand.
+// ［開く］; the weekly report's ［作り直す］ first says to delete this week's section by hand; the 案件 a HubSpot 取引 goes to is
+// chosen on the card (owner FB #43) and a coefficient sheet item offers no 「理由を HubSpot・承認に渡す」 (#41).
 import { test, expect, type Page } from '@playwright/test'
 import { expectNoPageErrors, openPreview } from './helpers'
 
@@ -35,6 +36,28 @@ test('［反映する］ hands only the ticked items with the member\'s values a
   expect(consult.detail).not.toContain('"項目": "金額"')
   expect(consult.detail).not.toContain('来月から始めたい')
   expect(consult.detail).toContain('導入時期が決まった')
+  expectNoPageErrors(state)
+})
+
+test('the 案件 for a 新規 取引 is chosen on the card; the press writes there and makes no second 案件', async ({ page }) => {
+  const state = await openPreview(page, 'after-meeting', { deals: '1' })
+  const card = page.getByRole('region', { name: '会議のあとの更新案' })
+  const choose = card.getByRole('group', { name: '取引「新規:株式会社サンプル」を書く案件' })
+  await expect(choose.getByRole('radio', { name: /サンプル\/追加研修/ })).toBeChecked()
+  await expect(choose).toContainText('担当：高橋・確度：B（中）・金額：300,000円')
+  await choose.getByRole('radio', { name: /サンプル\/研修導入/ }).check()
+  await expect(card.getByRole('listitem', { name: '1001 の 計上月' }).getByRole('checkbox', { name: /理由/ })).toHaveCount(0)
+  await card.getByRole('button', { name: '反映する' }).click()
+  const dialog = page.getByRole('dialog', { name: 'この内容で反映しますか？' })
+  await expect(dialog).toContainText('書く案件：サンプル/研修導入')
+  await expect(dialog).not.toContainText('取引を作る')
+  await dialog.getByRole('button', { name: 'この内容で反映する' }).click()
+  const seen = await asked(page)
+  const note = seen.find(a => 'note' in a)!.note as { deals: unknown }
+  expect(note.deals).toEqual([{ 取引: '新規:株式会社サンプル', 案件: 'deal-sample01' }])
+  const consult = seen.find(a => 'consult' in a)!.consult as { detail: string }
+  expect(consult.detail).toContain('案件 deal-sample01 に書いてください')
+  expect(consult.detail).not.toContain('"項目": "取引を作る"')
   expectNoPageErrors(state)
 })
 

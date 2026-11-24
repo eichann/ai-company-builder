@@ -3,7 +3,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { EMPTY_MARK, itemKey, itemStatus, type AfterMeetingMark, type ResultItem, type SetUpdateItem } from '../../../shared/after-meeting'
 import {
-  addedItem, applyAsk, cardNotes, cardOffers, draftsFrom, editorOf, isWeeklyReportTask, itemsToApply, newPressId, occurrenceOfTask, statusText, type DraftItem,
+  addedItem, applyAsk, createSkipped, defaultPick, handedOf, cardNotes, cardOffers, draftsFrom, editorOf, isWeeklyReportTask, itemsToApply, newPressId, occurrenceOfTask, statusText, type DraftItem,
 } from './model'
 
 const QUOTE = '来月から月額で始めたいと先方の部長が言った'
@@ -136,4 +136,45 @@ test('受注予定日 is a day: the apply hands the member\'s date and says to w
   for (const bad of ['', '2027/01/20', '2027-02-30']) {
     assert.ok(!itemsToApply(picked.map(d => (d === picked[3] ? { ...d, 値: bad } : d)), statusOf(EMPTY_MARK)).some(d => d.項目 === '受注予定日'), bad)
   }
+})
+
+test('a coefficient sheet item hands on no reason or quote (no HubSpot, no approval there: owner FB #41)', () => {
+  const sheet = { ...draftsFrom([{ ...items[2], 理由: '月はカードで選び直してください', 根拠: QUOTE }])[0], shareQuote: true }
+  assert.deepEqual(Object.keys(handedOf(sheet)).sort(), ['書き先', '取引', '値', '項目'].sort())
+})
+
+const SAMPLE = { id: 'deal-sample01', title: 'サンプル/研修', assignee: '高杉', confidence: 'B（中）', amount: 300000, why: 'name' as const }
+const LINKED = { ...SAMPLE, id: 'deal-linked01', title: 'サンプル/既存', why: 'linked' as const }
+
+test('the 案件 chosen at first: an earlier press\'s, the one named, the meeting\'s, the best match; 「新しく作る」 only with none found', () => {
+  assert.equal(defaultPick('新規:株式会社サンプル', [SAMPLE, LINKED], undefined), 'deal-linked01', 'the meeting\'s own comes first')
+  assert.equal(defaultPick('新規:株式会社サンプル', [SAMPLE, LINKED], 'deal-sample01'), 'deal-sample01', 'what an earlier press chose stays')
+  assert.equal(defaultPick('deal-sample01', [LINKED, SAMPLE], undefined), 'deal-sample01', 'the one the file names')
+  assert.equal(defaultPick('新規:株式会社サンプル', [SAMPLE], undefined), 'deal-sample01', 'an existing 案件 rather than a second one')
+  assert.equal(defaultPick('新規:株式会社サンプル', [], undefined), null)
+  assert.equal(defaultPick('123', [], undefined), undefined, 'nothing to choose: the ask stays as it was')
+  assert.equal(defaultPick('123', [{ ...SAMPLE, why: 'customer' }], undefined), undefined, 'a 取引 the AI named otherwise is never moved to a guess')
+  const other = { ...SAMPLE, id: 'deal-other001', title: 'ほか社/研修', for: '新規:株式会社ほか' }
+  assert.equal(defaultPick('新規:株式会社サンプル', [other], undefined), null, 'another company\'s 案件 found by its name is never chosen')
+})
+
+test('an existing 案件 chosen: the ask names its id and links the meeting first, and 「取引を作る」 is not handed on', () => {
+  const deal = '新規:株式会社サンプル'
+  const drafts = draftsFrom([
+    { 書き先: 'hubspot', 取引: deal, 項目: '確度', 値: 'B（中）' },
+    { 書き先: 'hubspot', 取引: deal, 項目: '取引を作る', 値: '株式会社サンプル/山田様' },
+  ])
+  const chosen = itemsToApply(drafts, statusOf(EMPTY_MARK)).filter(d => !createSkipped(d, { [deal]: SAMPLE.id }))
+  assert.deepEqual(chosen.map(d => d.項目), ['確度'])
+  const ask = applyAsk({ pressId: 'a-0123456789abcdef', folder: 'a/.personal/b/c', meetingId: 'meeting-abc123', minutesDocVersion: null, items: chosen, deals: [{ 取引: deal, deal: SAMPLE }], meetingBundle: null })
+  assert.match(ask, /案件 deal-sample01 に書いてください/)
+  assert.match(ask, /minutes_link_bundle で会議（meeting-abc123）をこの案件 deal-sample01 につないで/)
+  assert.match(ask, /"案件"\?: 書いた案件の番号/)
+  const linkedElsewhere = applyAsk({ pressId: 'a-0123456789abcdef', folder: 'a/.personal/b/c', meetingId: 'meeting-abc123', minutesDocVersion: null, items: chosen, deals: [{ 取引: deal, deal: SAMPLE }], meetingBundle: 'deal-linked01' })
+  assert.doesNotMatch(linkedElsewhere, /minutes_link_bundle/, 'a meeting already linked to another 案件 is never linked again without asking')
+  const two = applyAsk({ pressId: 'a-0123456789abcdef', folder: 'a/.personal/b/c', meetingId: 'meeting-abc123', minutesDocVersion: null, items: [...chosen, { ...chosen[0], key: 'x', 取引: 'x' }], deals: [{ 取引: deal, deal: SAMPLE }, { 取引: 'x', deal: LINKED }], meetingBundle: null })
+  assert.doesNotMatch(two, /minutes_link_bundle/, 'a meeting is linked only when one 案件 is written to (a second link would replace the first)')
+  // 「新しく作る」: today's path, 取引を作る handed on.
+  assert.equal(itemsToApply(drafts, statusOf(EMPTY_MARK)).filter(d => !createSkipped(d, { [deal]: null })).length, 2)
+  assert.match(applyAsk({ pressId: 'a-0123456789abcdef', folder: 'a/.personal/b/c', meetingId: 'meeting-abc123', minutesDocVersion: null, items: drafts, deals: [{ 取引: deal, deal: null }] }), /「新しく作る」を選びました/)
 })

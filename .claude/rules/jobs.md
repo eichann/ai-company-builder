@@ -1893,11 +1893,31 @@ not make jobs members' apps cannot run).
     company folder's, never through a link — `更新案.json` (`readProposalFile`: version 1 — another version is said as such —,
     ≤ 20 items, each key once) and `result.json` (`readResultFile`, written by the apply consultation's AI: each entry taken alone,
     ids only in their plain shapes); and 確度's choices from `GET /records/types` (a choice field labelled 確度, its `optionLabels`;
-    none → typed; kept 5 minutes per company). A run folder is compared as the disk folds names (`diskKey`).
+    none → typed; kept 5 minutes per company). A run folder is compared as the disk folds names (`diskKey`). **The 案件 to choose**
+    (owner FB #43, `readDeals`; only when the file has a HubSpot item; read with the member's session, so only what they read;
+    kept a minute; not reached, or any search not answered → `deals: null` and the card applies as before — never "none found"): the type of 案件 is a type implementing `bundle`
+    with a field labelled 確度; offered are its open records (not in a final state, at most 10): the meeting's own `bundle` link
+    (`meetingBundle`), a 案件 the file names by id, the 案件 linked to the meeting's 相手 (`linkedTo`), and those whose title or
+    summary holds a `新規:<会社名>` 取引's name (`text`, also without 株式会社 etc.; offered for that 取引 only, `for` /
+    `dealsFor`: never another company's), each with 担当 (a member's name), 確度 (its label)
+    and 金額.
   - **The card** (`components/UpdateProposalCard.tsx`): each item editable (確度 from those choices, 金額 a number, 計上月 months
     with amounts, 受注予定日 a date picker (a day `YYYY-MM-DD`; none or another shape is not handed on), 商談の記録 a text; 「直しました」 and the AI's value beside), ticked (all at first), ［項目を足す］ (HubSpot's fixed
     items or a coefficient sheet line; never the same deal's item twice), and **what is shared**: the AI's reason on at first,
-    **the minutes' quote off at first** (F #1). ［反映する］ opens **the last check** (exactly what goes out), then one press:
+    **the minutes' quote off at first** (F #1) — HubSpot items only: a coefficient sheet item offers neither and hands neither on
+    (`sharesWords`, owner FB #41). **Which 案件** (owner FB #43): each HubSpot 取引 gets 「HubSpot に書く案件」 — the 案件 offered
+    (title, 担当・確度・金額, 「この会議の案件」) and, for a `新規:` 取引, 「新しく作る」; chosen at first (`defaultPick`): an earlier
+    press's choice, the 案件 the file names, the meeting's own; for a `新規:` 取引 only, then the 相手's, the name's, and 「新しく作る」
+    only with none found (another 取引 is never moved to a guess: nothing chosen, the ask as before); the defaults are fixed when
+    the last check opens (the card reads again every 15 s). With an
+    existing 案件 chosen, 「取引を作る」 is not handed on (`createSkipped`); the ask names the 案件's id and tells the AI to link the
+    meeting to it first with `minutes_link_bundle` — only when the press writes to exactly one existing 案件 (a link replaces) and
+    never over another 案件 the meeting is linked to (the AI asks; also when `minutes_read` shows one the card could not read), to keep
+    `取引` as in the file and to write the 案件 written to as `案件` in `result.json`; 「新しく作る」 tells it to create without
+    searching again. The press keeps the choice (`ApplyEntry.deals`); **a 取引 never moves to another 案件** once an earlier press's
+    item of it is written, waiting for an approval, on its way or stopped — the 案件 a result says it wrote to first (also after a
+    press that chose none), after 「新しく作る」 whose 「取引を作る」 is 済み the 案件 made (`dealLocked`, shown fixed and handed on also when the 案件
+    cannot be read now; main refuses a press that names another 案件, 「新しく作る」 or none for it, `movedDeals` → `ALREADY`). ［反映する］ opens **the last check** (exactly what goes out), then one press:
     main records the press (`afterMeeting:note { kind: 'apply', id, keys }`) and only then `chat.consultAbout { purpose: 'work',
     detail }` starts **one** consultation whose first message (`applyAsk`) carries only the ticked items with the member's values,
     the reason / quote only where chosen, the minutes' `docVersion` to compare first (T7: 「議事録が直されています」 is said by the
@@ -1946,7 +1966,8 @@ not make jobs members' apps cannot run).
   - Tests: `src/features/after-meeting/model.test.ts` (only the ticked items and the member's values; reason / quote only when
     chosen; never twice; an earlier press's result answers no later one; stopped after the wait; words; notes), `client/tests/
     after-meeting.test.ts` (main: the run's own folder only — `..`, a link out, a root outside —, one press of two at once, an item
-    twice in a press, undo only with the value before, files read as data), `tests/after-meeting-removable.test.ts`,
+    twice in a press, undo only with the value before, files read as data; the 案件 offered — open ones, by the meeting and the
+    name —, none when offline, a 取引 never moved to another 案件, a choice only of the card's shape), `tests/after-meeting-removable.test.ts`,
     `tests/task-consult-work.test.ts` (`detail` with 「この作業をする」 only), `server/tests/unit/features.test.ts` (off by default),
     `tests/ui/after-meeting.spec.ts` (`after-meeting-ui.html`: off draws and reads nothing; the last check and one press; the quote
     only when ticked; a consultation that does not start takes the press back; an approval's ［開く］; the weekly ［作り直す］ asks
