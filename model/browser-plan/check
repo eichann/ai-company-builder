@@ -1,10 +1,13 @@
 #!/usr/bin/env bash
-# model/browser-plan/check: run the browser plan lifecycle model (PlanLife.tla) through the checker tla-ts.
+# model/browser-plan/check: run the browser plan lifecycle models (PlanLife.tla: today's one-write code;
+# StepsLife.tla: the several-writes design) through the checker tla-ts.
 # The one entry point, locally and in CI (job "Model (browser plan)"). Needs bash, Node and npm only.
-#   1. The real model keeps every INVARIANT and has no dead end; the rules it checks are exactly
-#      expected.txt's `rule` lines (dropping one fails); a CHECK_DEADLOCK line is refused.
-#   2. Its distinct state count equals expected.txt's `states` (a guard against a checker that explores less).
-#   3. R7 (every state can reach a settled one) holds on its state graph (reach.mjs), over every state.
+#   1. Each real model keeps every INVARIANT and has no dead end; the rules it checks are exactly
+#      expected.txt's `rule <model>` lines (dropping one fails); a CHECK_DEADLOCK line is refused; the
+#      models run are exactly expected.txt's `model` lines.
+#   2. Its distinct state count equals expected.txt's `states <model>` (a guard against a checker that
+#      explores less).
+#   3. R7 (every state can reach a settled one) holds on each state graph (reach.mjs), over every state.
 #   4. Each broken variant (broken/) fails on exactly the rule expected.txt names (an R7 variant keeps every
 #      INVARIANT and fails R7). A variant that passes fails this script: the checker must not wave through
 #      something known to be broken.
@@ -68,21 +71,32 @@ while read -r kind module _; do
   [ -e "$here/$d/$module.tla" ] || fail "expected.txt names $kind $module but $d/$module.tla is missing"
 done <"$here/expected.txt"
 
-# 1, 2, 3: the real model
-rules=$(sed -n 's/^INVARIANT //p' "$here/PlanLife.cfg")
-reach_rule=$(sed -n 's/^\\\* REACH \([A-Za-z0-9_]*\) .*/\1/p' "$here/PlanLife.cfg")
-[ -n "$reach_rule" ] || fail "PlanLife.cfg has no \"\\* REACH\" line"
-! grep -qE '^[[:space:]]*CHECK_DEADLOCK' "$here/PlanLife.cfg" || fail "PlanLife.cfg has a CHECK_DEADLOCK line (dead ends must stay checked)"
-have=$( (tr ' ' '\n' <<<"$rules"; echo "$reach_rule") | sed '/^$/d' | sort)
-need=$(awk '$1 == "rule" { print $2 }' "$here/expected.txt" | sort)
-[ "$have" = "$need" ] || fail "the rules PlanLife.cfg checks differ from expected.txt's rule lines"
-run PlanLife -dump dot,actionlabels "$tmp/graph.dot"
-passed || { show; fail "the real model breaks a rule or has a dead end (exit code ${code})"; }
-got=$(states_found)
-want=$(awk '$1 == "states" { print $2 }' "$here/expected.txt")
-[ "$got" = "$want" ] || fail "the real model has $got distinct states, expected.txt says $want (changed the model? update expected.txt and say why in the PR)"
-echo "ok   real model: keeps all $(wc -w <<<"$rules" | tr -d ' ') INVARIANTs, no dead end, ${got} distinct states (as expected)"
-reach "$tmp/graph.dot" "$reach_rule" "$got" "the real model"
+# 1, 2, 3: the real models (PlanLife = today's one-write code; StepsLife = the several-writes design)
+models=(PlanLife StepsLife)
+listed=$(awk '$1 == "model" { print $2 }' "$here/expected.txt" | sort)
+[ "$listed" = "$(printf '%s\n' "${models[@]}" | sort)" ] || fail "expected.txt's model lines differ from the models check runs (${models[*]})"
+stray=$(awk -v ms=" ${models[*]} " '($1 == "rule" || $1 == "states") && index(ms, " " $2 " ") == 0' "$here/expected.txt")
+[ -z "$stray" ] || fail "expected.txt has rule / states lines for no model check runs: $stray"
+reach_rule=""
+for model in "${models[@]}"; do
+  [ -e "$here/$model.tla" ] && [ -e "$here/$model.cfg" ] || fail "$model.tla or $model.cfg is missing"
+  rules=$(sed -n 's/^INVARIANT //p' "$here/$model.cfg")
+  r=$(sed -n 's/^\\\* REACH \([A-Za-z0-9_]*\) .*/\1/p' "$here/$model.cfg")
+  [ -n "$r" ] || fail "$model.cfg has no \"\\* REACH\" line"
+  [ -z "$reach_rule" ] || [ "$r" = "$reach_rule" ] || fail "$model.cfg names another REACH rule ($r, not $reach_rule)"
+  reach_rule=$r
+  ! grep -qE '^[[:space:]]*CHECK_DEADLOCK' "$here/$model.cfg" || fail "$model.cfg has a CHECK_DEADLOCK line (dead ends must stay checked)"
+  have=$( (tr ' ' '\n' <<<"$rules"; echo "$reach_rule") | sed '/^$/d' | sort)
+  need=$(awk -v m="$model" '$1 == "rule" && $2 == m { print $3 }' "$here/expected.txt" | sort)
+  [ "$have" = "$need" ] || fail "the rules $model.cfg checks differ from expected.txt's rule lines for $model"
+  run "$model" -dump dot,actionlabels "$tmp/graph.dot"
+  passed || { show; fail "the real model $model breaks a rule or has a dead end (exit code ${code})"; }
+  got=$(states_found)
+  want=$(awk -v m="$model" '$1 == "states" && $2 == m { print $3 }' "$here/expected.txt")
+  [ "$got" = "$want" ] || fail "the real model $model has $got distinct states, expected.txt says $want (changed the model? update expected.txt and say why in the PR)"
+  echo "ok   real model $model: keeps all $(wc -w <<<"$rules" | tr -d ' ') INVARIANTs, no dead end, ${got} distinct states (as expected)"
+  reach "$tmp/graph.dot" "$reach_rule" "$got" "the real model $model"
+done
 
 # 4, 5: broken variants, accepted limits and open holes must fail on their named rule
 n=0

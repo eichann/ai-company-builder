@@ -1,7 +1,9 @@
 # model/browser-plan — the browser plan lifecycle as a TLA+ model
 
 The life of one 「ブラウザ操作」 plan — register → approve → claim → send permit → send → report →
-confirm — written in TLA+ (`PlanLife.tla`), with the rules it must keep. The checker
+confirm — written in TLA+ (`PlanLife.tla`), with the rules it must keep. A second model,
+`StepsLife.tla`, is the **several-writes design** (generalization PR 1, below: "StepsLife"), ahead of
+the code. The checker
 [tla-ts](https://www.npmjs.com/package/tla-ts) explores **every** reachable state and checks the
 rules in each. It catches what example-based tests miss: interleavings of two PCs, late network
 answers, crashes at any step, and clocks.
@@ -55,11 +57,13 @@ reachability rule, not a state formula: `reach.mjs` checks it on the checker's s
 
 ## What `check` verifies (numbers in `expected.txt`)
 
-1. The real model keeps every INVARIANT (TypeOK, R1–R6) and has no dead end; the rules checked are
-   exactly `expected.txt`'s `rule` lines (dropping one fails); a `CHECK_DEADLOCK` line is refused.
-2. Its distinct state count equals `states` (today **57,618**): a guard against a checker that
-   explores less than it should.
-3. R7 holds over all of those states (`reach.mjs` must walk the same number).
+1. Each real model (`model` lines: PlanLife, StepsLife) keeps every INVARIANT and has no dead end;
+   the rules checked are exactly `expected.txt`'s `rule <model>` lines (dropping one fails); a
+   `CHECK_DEADLOCK` line is refused.
+2. Its distinct state count equals `states <model>` (today PlanLife **57,618**, StepsLife **28,320**): a
+   guard against a checker that explores less than it should.
+3. R7 holds over all of those states (`reach.mjs` must walk the same number; one settled predicate for
+   both models).
 4. Each `broken/` variant fails on its named rule. **A variant that passes fails the job**: the
    checker must not wave through something known to be broken.
 5. Each `limits/` and `holes/` variant fails on its named rule, so neither disappears nor changes
@@ -121,6 +125,70 @@ in today's code, or a proposed fix).
   are folded into one "pass / refuse" (`ServerRefusesPermit` may refuse at any time).
 - **No liveness under fairness** ("eventually settles"): R7 says a path to settled exists.
 
+## StepsLife: several ordered writes (design ahead of code)
+
+Design memo 「ブラウザ操作の汎用化」 §4, §5, §9, §15 (C11–C15), §15-2 (PR 1), §16-3. The contract is
+agent-browser.md "Executions with several writes" (the execution and write-state table); each action of
+`StepsLife.tla` names its row there. Nothing implements it yet: PR 4 (server) and PR 5 (app) copy it,
+and then cite their files in the actions (and in `changed-areas.sh`'s MODEL), as PlanLife does.
+
+Site-neutral: an existing object E, a folder, what this execution created ("ours"), a person's new
+object in the same folder ("theirs"). p1 = a three-write plan (create → change it → change E; or a
+second shape that changes E before its last write, which the line judge must keep out); p2 = an
+old-path one-write plan on the same E (its own life is PlanLife's, folded into claim → write → end).
+
+| Rule | What it says | 日本語（意味） |
+|---|---|---|
+| `R1_AtMostOneSendPerWrite` | Each write reaches the site at most once | どの書き込みも、届くのは多くても1回 |
+| `R2_NoSendWithoutLivePermit` | Only under a live permit for that write | その書き込みの生きている許可なしに送らない |
+| `R3_OneOpenExecutionPerObject` | One open execution per object, across the old and the new path | 古い道と新しい道をまたいで、同じものに開いた実行は1つ |
+| `R4_NotSentMeansNotSent` | `not_sent` / `skipped` / `pending` never reached the site | 「送っていない」「試していない」は本当に届いていない |
+| `R5_NotDoneStaysTrue` | A "not done" confirmation stays true | 「されていなかった」があとから嘘にならない |
+| `R6_NoDoubleApply` | No change lands twice | 同じ変更が2回入らない |
+| `R7_EverythingSettles` | Every state can reach a settled one | どこからでも片付けられる |
+| `R8_InOrder` | Write k is permitted only after k−1 was recorded done | k 番目は k−1 番目が「済んだ」と記録されてから |
+| `R9_StoppedLeavesExistingAlone` | A stopped execution left the existing object alone | 途中で止まった実行は、今あるものを変えていない |
+| `R10_NoContinueAfterUnknown` | Nothing is permitted after an execution was unknown, not even after a late "done" | 「分からない」のあとは、遅れた「済んだ」が来ても続けない |
+| `R11_CreatedIsItsOwn` | What is recorded as created is this execution's own, unshared object | 「作ったもの」は本当に自分が作り、だれからも指されていないもの |
+| `R12_PartialIsSure` | A partial execution has no unknown write | 「途中まで」には「分からない」書き込みが残っていない |
+| `R13_DoneMeansLanded` | A write recorded done landed (a report counts for the write it names) | 「済んだ」は本当に入った（報告は名指しした書き込みにだけ効く） |
+
+Broken variants (`broken/BrokenSteps*`), one guard removed each:
+
+| Variant | Guard removed | Fails |
+|---|---|---|
+| `BrokenStepsLockFreedAfterWrite` | locks held until the execution is final (C12) | R3 |
+| `BrokenStepsOldPathOwnKey` | one lock key for both paths (C11) | R3 |
+| `BrokenStepsPermitPerPlan` | a permit per write, only after k−1 done | R8 |
+| `BrokenStepsWindowFromFirstPermit` | the window counted from that write's permit (checks R5 only; R2 breaks in the same step) | R5 |
+| `BrokenStepsContinueAfterLateDone` | `unknown` never runs again | R10 |
+| `BrokenStepsNoReferenceCheck` | a create is ours only if nothing else references it (C1) | R11 |
+| `BrokenStepsPickNewest` | identifying the created object by answer id and content, not "the one new" (C3) | R11 |
+| `BrokenStepsReportToCurrentWrite` | a report counts for the write it names | R13 |
+| `BrokenStepsNoLineJudge` | the line judge at the claim (I4) | R9 |
+| `BrokenStepsNoGapTimeout` | the plan's limit ends a gap between two writes (has its own `TimePasses` stutter so the stuck state is no dead end) | R7 |
+| `BrokenStepsGapEndsOpenWrite` | the gap ends only with nothing open | R12 |
+| `BrokenStepsResendAfterNoAnswer` | a write with no answer is never sent again | R1' |
+| `BrokenStepsSendWithoutPermitCheck` | the last check before sending looks at the permit's age | R2' |
+| `BrokenStepsNotSentAfterSend` | "not sent" only before the request left (never after a send) | R4' |
+| `BrokenStepsNoRereadBeforeWrite` | the target read again before each write (I2) | R6 |
+
+Not tested by a variant, on purpose: the plan's limit on later permits (`ageFirst < LIMIT` in
+`ServerPermits`) only bounds how long a run may take (availability; no rule depends on it), and
+`NoneOpen` there is a second layer of `Prev = "done"`.
+
+### What StepsLife leaves out
+
+- **Site properties are assumptions** (memo C2, C15): whether a site's create shares a child, what
+  creating sets off, what is not visible — checked per site by the map's reviewed promise and a test
+  object, not here. The model lets any create share (`oursShared`) and demands the app see it.
+- Three writes, one folder, one existing object; no two new-path plans at once (the claim once and the
+  one lock are PlanLife's and R3 here); no `remove_child` or irreversible write (not opened, I10).
+- One clock per write (`age`, since that write's permit) and the plan's (`ageFirst`); both-clock
+  readings and a jumping clock are PlanLife's (`ServerClockJumps`) and required per write all the same.
+- The approval, the facts, the gate's checks (folded into `ServerRefusesPermit`), a person confirming
+  wrongly, a modified app.
+
 ## Drift: the model is copied by hand
 
 Nothing compares the model with the code mechanically: change the code and the model stays as it
@@ -146,7 +214,8 @@ was. What keeps them together:
 
 | File | What |
 |---|---|
-| `PlanLife.tla` / `PlanLife.cfg` | The model, its rules, the checker's settings and the `\* REACH` line |
+| `PlanLife.tla` / `PlanLife.cfg` | The model of today's one-write code, its rules, the checker's settings and the `\* REACH` line |
+| `StepsLife.tla` / `StepsLife.cfg` | The several-writes design (generalization PR 1), the same way |
 | `reach.mjs` | R7 on the state graph |
 | `expected.txt` | Rules, state count, each variant's expected result |
 | `broken/`, `limits/`, `holes/`, `proposals/` | The variants |

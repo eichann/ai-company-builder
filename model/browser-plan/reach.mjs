@@ -4,9 +4,9 @@
 //
 //   node reach.mjs <the checker's `-dump dot,actionlabels` output> <rule name>
 //
-// Settled (the same predicate as PlanLife.tla's `Settled`): every app idle, no execution claimed /
-// permitted / unknown, the lock free. Exit 0 when the rule holds. Exit 1 when it does not, printing the
-// unsettleable state nearest to the start and the actions that lead there. Exit 2 when the graph cannot
+// Settled (the same predicate as PlanLife.tla's and StepsLife.tla's `Settled`): every app idle (or
+// gone), no execution claimed / running / permitted / unknown, every lock free. Exit 0 when the rule
+// holds. Exit 1 when it does not, printing the unsettleable state nearest to the start and the actions that lead there. Exit 2 when the graph cannot
 // be read (a checker or dump format change must not pass silently).
 import { readFileSync } from 'node:fs'
 
@@ -49,11 +49,20 @@ const value = (text, name) => {
   }
   return m[1]
 }
+// One predicate for both models, written as "only these words": PlanLife's `lock` is one value,
+// StepsLife's a function from lock keys (unquoted) to a plan or "none" — every quoted value in it must
+// be "none"; every app's phase must be "idle" (or StepsLife's "gone"); every execution not started or
+// final (PlanLife's and StepsLife's final words together; a new open state is never settled by mistake).
+const FINAL = ['none', 'succeeded', 'failed', 'cdone', 'cnotdone', 'void', 'partial', 'confirmed']
+const only = (text, words) => {
+  const quoted = text.match(/"[^"]*"/g) ?? []
+  return quoted.length > 0 && quoted.every(q => words.includes(q.slice(1, -1)))
+}
 const settled = id => {
   const t = label.get(id)
-  return !/"(claimed|checked|asking|permitted|sent)"/.test(value(t, 'ph'))
-    && !/"(claimed|permitted|unknown)"/.test(value(t, 'exSt'))
-    && value(t, 'lock') === '"none"'
+  return only(value(t, 'ph'), ['idle', 'gone'])
+    && only(value(t, 'exSt'), FINAL)
+    && only(value(t, 'lock'), ['none'])
 }
 
 // Walk backwards from the settled states.

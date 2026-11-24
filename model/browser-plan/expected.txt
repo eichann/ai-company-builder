@@ -2,17 +2,36 @@
 # careless edit) passing something that is broken: a rule dropped, a state count that moved, a variant
 # that no longer fails. Change a line only together with the model, and say why in the PR.
 #
-# rule <a rule the real model must check> (must equal the INVARIANT line plus the "\* REACH" line of PlanLife.cfg)
-rule TypeOK
-rule R1_AtMostOneSendPerPlan
-rule R2_NoSendWithoutApprovalAndLivePermit
-rule R3_OneOpenExecutionPerTarget
-rule R4_FailedOnlyIfNotSent
-rule R5_NotDoneStaysTrue
-rule R6_NoDoubleApply
-rule R7_EverythingSettles
-# states <distinct states of the real model (PlanLife.cfg)>
-states 57618
+# model <a real model check runs> (PlanLife = today's one-write code; StepsLife = the several-writes design)
+model PlanLife
+model StepsLife
+# rule <model> <a rule the real model must check> (must equal the INVARIANT line plus the "\* REACH" line
+# of <model>.cfg)
+rule PlanLife TypeOK
+rule PlanLife R1_AtMostOneSendPerPlan
+rule PlanLife R2_NoSendWithoutApprovalAndLivePermit
+rule PlanLife R3_OneOpenExecutionPerTarget
+rule PlanLife R4_FailedOnlyIfNotSent
+rule PlanLife R5_NotDoneStaysTrue
+rule PlanLife R6_NoDoubleApply
+rule PlanLife R7_EverythingSettles
+rule StepsLife TypeOK
+rule StepsLife R1_AtMostOneSendPerWrite
+rule StepsLife R2_NoSendWithoutLivePermit
+rule StepsLife R3_OneOpenExecutionPerObject
+rule StepsLife R4_NotSentMeansNotSent
+rule StepsLife R5_NotDoneStaysTrue
+rule StepsLife R6_NoDoubleApply
+rule StepsLife R7_EverythingSettles
+rule StepsLife R8_InOrder
+rule StepsLife R9_StoppedLeavesExistingAlone
+rule StepsLife R10_NoContinueAfterUnknown
+rule StepsLife R11_CreatedIsItsOwn
+rule StepsLife R12_PartialIsSure
+rule StepsLife R13_DoneMeansLanded
+# states <model> <distinct states of the real model (<model>.cfg)>
+states PlanLife 57618
+states StepsLife 28320
 # broken <variant in broken/> <the rule it must break> (one guard removed; a guard added = a variant added)
 broken BrokenRetryAfterUnknown R1_AtMostOneSendPerPlan
 broken BrokenNoCheckBeforeSend R2_NoSendWithoutApprovalAndLivePermit
@@ -22,6 +41,22 @@ broken BrokenLockFreedOnUnknown R3_OneOpenExecutionPerTarget
 broken BrokenNoReread R6_NoDoubleApply
 broken BrokenNoServerTimeout R7_EverythingSettles
 broken BrokenNoMonotonicWindow R5_NotDoneStaysTrue
+# StepsLife's variants (the several-writes design: PR 4's server and PR 5's app must keep each guard)
+broken BrokenStepsLockFreedAfterWrite R3_OneOpenExecutionPerObject
+broken BrokenStepsOldPathOwnKey R3_OneOpenExecutionPerObject
+broken BrokenStepsPermitPerPlan R8_InOrder
+broken BrokenStepsWindowFromFirstPermit R5_NotDoneStaysTrue
+broken BrokenStepsContinueAfterLateDone R10_NoContinueAfterUnknown
+broken BrokenStepsNoReferenceCheck R11_CreatedIsItsOwn
+broken BrokenStepsPickNewest R11_CreatedIsItsOwn
+broken BrokenStepsReportToCurrentWrite R13_DoneMeansLanded
+broken BrokenStepsNoLineJudge R9_StoppedLeavesExistingAlone
+broken BrokenStepsNoGapTimeout R7_EverythingSettles
+broken BrokenStepsGapEndsOpenWrite R12_PartialIsSure
+broken BrokenStepsResendAfterNoAnswer R1_AtMostOneSendPerWrite
+broken BrokenStepsSendWithoutPermitCheck R2_NoSendWithoutLivePermit
+broken BrokenStepsNotSentAfterSend R4_NotSentMeansNotSent
+broken BrokenStepsNoRereadBeforeWrite R6_NoDoubleApply
 # limit <variant in limits/> <the rule it breaks> (an accepted limit the rule file states; kept failing so
 # it neither disappears nor grows unnoticed)
 limit LimitFrozenAfterCheck R2_NoSendWithoutApprovalAndLivePermit
