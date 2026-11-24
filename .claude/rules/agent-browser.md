@@ -996,7 +996,9 @@ its own model (`PlanLife.tla`).
 - **Write states** (one row per execution × index): `pending` → `permitted` → `done` / `not_sent` /
   `unknown`; `unknown` → `done` (a late sure report) / `confirmed_done` / `confirmed_not_done`; `pending`
   → `skipped` (never tried: an earlier write stopped, the gate refused, the plan's limit). A write's
-  state never moves backwards; `done`, `not_sent`, `skipped`, `confirmed_*` are final.
+  state never moves backwards; `done`, `not_sent`, `skipped`, `confirmed_*` are final. A `void`
+  execution's writes stay `pending` (none was ever permitted); `pending` in a final execution reads as
+  "never tried", like `skipped`.
 - **The rows** (every change a compare-and-set in one transaction; time-outs judged on every touch, as
   today):
 
@@ -1006,6 +1008,7 @@ its own model (`PlanLife.tla`).
   | claimed → void (`VoidClaimed`) | cancel, 2 minutes, leaving | `void`, locks go |
   | permit write k (`ServerPermits`) | the holder's secret; `claimed` (k = 1) or `running`; write k `pending`; **write k−1 `done` (recorded)**; no write `permitted` / `unknown`; for k > 1 the plan's limit (from the first permit) not past; the gate | write k `permitted` with both clocks' readings; execution `running`; a permit is given once per write |
   | permit while k−1 still `permitted` (`ServerSaysNotYet`) | its report not in yet | "not yet", nothing changes; the app may ask again |
+  | the app gives the rest back (`AppStopsBetween`) | a stop before asking write k's permit (the re-read differs, the window, the setting, the stop): cancel | `claimed` → `void`; `running` with nothing open and write k `pending` → `partial` (k on `skipped`), locks go; lost → the claim limit / the gap settle it |
   | the gate refuses (`ServerRefusesPermit`) | stop, setting, grant, retired line, app version | `claimed` → `void`; `running` with nothing open → `partial` (rest `skipped`); a write open → left to its report / time-out |
   | permitted and silent (`ServerSettlesUnknown`) | **that write's** permit + 5 s + 30 s on both clocks | write `unknown`, rest `skipped`, execution `unknown` |
   | the gap (`ServerEndsGap`) | `running`, nothing open, the next write `pending`, the plan's limit past (the app stopped between two writes, C12) | `partial`, rest `skipped`, locks go |
@@ -1027,11 +1030,14 @@ its own model (`PlanLife.tla`).
   same object (PR 4 tests the two side by side). Taken at the claim for every existing object the line
   names and as a "create in this parent" reservation; a created object's key in the transaction that
   records it; **all held until the execution is final** (`unknown` keeps them). Model: R3,
-  `BrokenStepsLockFreedAfterWrite`, `BrokenStepsOldPathOwnKey`.
+  `BrokenStepsLockFreedAfterWrite`, `BrokenStepsOldPathOwnKey` — for the existing object's key only;
+  the parent's reservation and the created object's key are not modelled (one folder, no second
+  new-path plan): PR 4's server tests carry them.
 - **Time**: each write has its own 5 s permit and its own 35 s window counted from **its** permit (the
   last time something could have been sent; a restart counts from the start as today) —
   `BrokenStepsWindowFromFirstPermit` → R5. The plan's limit (memo §4-2: about 2 minutes from the first
-  permit) only stops later permits and ends a gap; it never shortens a write's window.
+  permit) only stops later permits and ends a gap; it never shortens a write's window. It bounds how long
+  a run may take (availability): no rule depends on it, so the model has no variant for it.
 - **Partial is sure** (§16-3, R4 of the second Codex round): a `partial` execution holds no `unknown`
   write, so the card's 「していないこと」 lists only writes surely not sent (R12,
   `BrokenStepsGapEndsOpenWrite`).
@@ -1058,7 +1064,7 @@ its own model (`PlanLife.tla`).
   site; R5' a "not done" confirmation stays true; R6 no change twice; R7 everything can settle; R8
   write k only after k−1 recorded done; R9 a stopped execution left E alone; R10 nothing permitted after
   `unknown`; R11 what is recorded as created is the execution's own, unshared object; R12 `partial` has
-  no unknown write; R13 `done` means it landed. Each of the 11 `BrokenSteps*` variants removes one guard
+  no unknown write; R13 `done` means it landed. Each of the 15 `BrokenSteps*` variants removes one guard
   and fails its rule. **Left out** (assumptions checked elsewhere): whether a site's create shares a
   child and what creating sets off (the map's reviewed promise and a test object, C2); more than three
   writes, more objects, two new-path plans at once (the claim-once and one-lock rules are PlanLife's); the

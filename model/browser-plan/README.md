@@ -168,6 +168,14 @@ Broken variants (`broken/BrokenSteps*`), one guard removed each:
 | `BrokenStepsNoLineJudge` | the line judge at the claim (I4) | R9 |
 | `BrokenStepsNoGapTimeout` | the plan's limit ends a gap between two writes (has its own `TimePasses` stutter so the stuck state is no dead end) | R7 |
 | `BrokenStepsGapEndsOpenWrite` | the gap ends only with nothing open | R12 |
+| `BrokenStepsResendAfterNoAnswer` | a write with no answer is never sent again | R1' |
+| `BrokenStepsSendWithoutPermitCheck` | the last check before sending looks at the permit's age | R2' |
+| `BrokenStepsNotSentAfterSend` | "not sent" only before the request left (never after a send) | R4' |
+| `BrokenStepsNoRereadBeforeWrite` | the target read again before each write (I2) | R6 |
+
+Not tested by a variant, on purpose: the plan's limit on later permits (`ageFirst < LIMIT` in
+`ServerPermits`) only bounds how long a run may take (availability; no rule depends on it), and
+`NoneOpen` there is a second layer of `Prev = "done"`.
 
 ### What StepsLife leaves out
 

@@ -75,6 +75,8 @@ done <"$here/expected.txt"
 models=(PlanLife StepsLife)
 listed=$(awk '$1 == "model" { print $2 }' "$here/expected.txt" | sort)
 [ "$listed" = "$(printf '%s\n' "${models[@]}" | sort)" ] || fail "expected.txt's model lines differ from the models check runs (${models[*]})"
+stray=$(awk -v ms=" ${models[*]} " '($1 == "rule" || $1 == "states") && index(ms, " " $2 " ") == 0' "$here/expected.txt")
+[ -z "$stray" ] || fail "expected.txt has rule / states lines for no model check runs: $stray"
 reach_rule=""
 for model in "${models[@]}"; do
   [ -e "$here/$model.tla" ] && [ -e "$here/$model.cfg" ] || fail "$model.tla or $model.cfg is missing"

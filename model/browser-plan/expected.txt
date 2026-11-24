@@ -53,6 +53,10 @@ broken BrokenStepsReportToCurrentWrite R13_DoneMeansLanded
 broken BrokenStepsNoLineJudge R9_StoppedLeavesExistingAlone
 broken BrokenStepsNoGapTimeout R7_EverythingSettles
 broken BrokenStepsGapEndsOpenWrite R12_PartialIsSure
+broken BrokenStepsResendAfterNoAnswer R1_AtMostOneSendPerWrite
+broken BrokenStepsSendWithoutPermitCheck R2_NoSendWithoutLivePermit
+broken BrokenStepsNotSentAfterSend R4_NotSentMeansNotSent
+broken BrokenStepsNoRereadBeforeWrite R6_NoDoubleApply
 # limit <variant in limits/> <the rule it breaks> (an accepted limit the rule file states; kept failing so
 # it neither disappears nor grows unnoticed)
 limit LimitFrozenAfterCheck R2_NoSendWithoutApprovalAndLivePermit
