@@ -23,6 +23,7 @@ import { CODEX_CHOICE_SERVER, CODEX_CHOICE_TOOL, CLAUDE_CHOICE_TOOL } from './ch
 import { REVIEW_SERVER } from './review-request'
 import { WEB_RESEARCH_SERVER, WEB_RESEARCH_TOOL } from './web-research'
 import { BROWSER_REQUEST_SERVER, BROWSER_REQUEST_TOOL } from './browser-plans'
+import { BROWSER_INSPECT_TOOL } from './browser-inspection'
 import { commandHosts, type SandboxConcern, type SandboxViolation } from './agents/sandbox-policy'
 import {
   AGENT_EVENT_VERSION,
@@ -89,6 +90,8 @@ export function categorizeTool(toolName: string): ToolCategory {
     if (mcp.server === WEB_RESEARCH_SERVER && mcp.tool === WEB_RESEARCH_TOOL) return 'web'
     // 「ブラウザ操作」's request reads an outside site (the stop's `web` kind stops it, as `browserAiStopped`).
     if (mcp.server === BROWSER_REQUEST_SERVER && mcp.tool === BROWSER_REQUEST_TOOL) return 'web'
+    // …and so does its inspection (it reads the site through the member's window).
+    if (mcp.server === BROWSER_REQUEST_SERVER && mcp.tool === BROWSER_INSPECT_TOOL) return 'web'
     return APP_MCP_SERVERS.includes(mcp.server) ? 'app-tool' : 'mcp-external'
   }
   return Object.prototype.hasOwnProperty.call(TOOL_CATEGORIES, toolName) ? TOOL_CATEGORIES[toolName] : 'other'

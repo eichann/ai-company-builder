@@ -76,6 +76,7 @@ import type { PluginScreensResult } from './plugin-screens'
 // lane C ▼
 import type { BrowserActionResult, BrowserSitesResult } from './browser-operation'
 import type { BrowserConfirmResult, BrowserPlanActAnswer, BrowserPlanGetResult, BrowserPlanListResult, BrowserPlanRunAnswer } from './browser-plans'
+import type { BrowserInspectionGetResult } from './browser-inspection'
 import type { SkillShelfMark, SkillShelfRequestInfo, SkillShelfRestoreResult, SkillShelfSendResult } from './skill-shelf'
 import type { PluginStepButton, PluginStepContinuation, PluginStepContinueResult, PluginStepStartResult, QueuedPluginStep } from './ai-turn-steps/plugin'
 import type { StepDeliverablesView } from './step-deliverables'
@@ -913,6 +914,8 @@ export interface IpcInvokeChannels {
   'browserPlans:cancel': { args: [companyId: string, planId: string]; result: BrowserPlanActAnswer }
   /** ［済んでいた］［されていなかった］ on a result nobody knows (main window only). */
   'browserPlans:confirm': { args: [companyId: string, executionId: string, result: BrowserConfirmResult]; result: BrowserPlanActAnswer }
+  /** One read-only inspection's card, as main holds it in memory for the signed-in member (main window only; agent-browser.md "The inspection in the chat"). */
+  'browserLines:card': { args: [companyId: string, planId: string]; result: BrowserInspectionGetResult }
   /** The member's records at a business plugin's ai_turn step (C5, plugin-steps.md); main remembers them for the claim. */
   'aiTurns:pluginTurns': { args: [companyId: string]; result: QueuedPluginStep[] }
   /** The `start: person` steps at a record's state (its card's buttons). */
@@ -1365,6 +1368,7 @@ export interface ElectronAPI {
   runBrowserPlan: Invoke<'browserPlans:run'>
   cancelBrowserPlan: Invoke<'browserPlans:cancel'>
   confirmBrowserExecution: Invoke<'browserPlans:confirm'>
+  getBrowserInspection: Invoke<'browserLines:card'>
   listPluginStepTurns: Invoke<'aiTurns:pluginTurns'>
   listPersonSteps: Invoke<'pluginSteps:onRecord'>
   startPersonStep: Invoke<'pluginSteps:start'>

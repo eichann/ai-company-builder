@@ -463,6 +463,7 @@ const api: ElectronAPI = {
   runBrowserPlan: (companyId: string, planId: string, contentHash: string) => invoke('browserPlans:run', companyId, planId, contentHash),
   cancelBrowserPlan: (companyId: string, planId: string) => invoke('browserPlans:cancel', companyId, planId),
   confirmBrowserExecution: (companyId: string, executionId: string, result: BrowserConfirmResult) => invoke('browserPlans:confirm', companyId, executionId, result),
+  getBrowserInspection: (companyId: string, planId: string) => invoke('browserLines:card', companyId, planId),
   listPluginStepTurns: (companyId: string) => invoke('aiTurns:pluginTurns', companyId),
   listPersonSteps: (companyId: string, recordId: string) => invoke('pluginSteps:onRecord', companyId, recordId),
   startPersonStep: (companyId: string, recordId: string, pluginId: string, step: string, companyRoot?: string) => invoke('pluginSteps:start', companyId, recordId, pluginId, step, companyRoot),
