@@ -1,5 +1,5 @@
 /**
- * Lステップ's map (1.0.1, now 1.0.2: its new things are browser-step-template-line.test.ts's) and the inspection line (generalization PR 3; agent-browser.md "The first map and the inspection
+ * Lステップ's map (1.0.1, now 1.0.3: its new things are browser-step-template-line.test.ts's) and the inspection line (generalization PR 3; agent-browser.md "The first map and the inspection
  * line"): `client/connector-maps/lstep/`, `client/browser-lines/lstep.ts`, `shared/browser-connectors/opened.json`.
  *
  * Guards (each test fails when its guard is removed):
@@ -49,7 +49,7 @@ test('the map lists exactly the keys stage 0 recorded', () => {
   assert.deepEqual(Object.keys(map.things.action_set.keys).filter(k => k.startsWith('inputs[].')).map(k => k.slice(9)).sort(), [...INPUT_KEYS].sort())
   assert.deepEqual(Object.keys(map.things.landing.keys).filter(k => k.startsWith('custom_params[].')).sort(), ['custom_params[].name', 'custom_params[].var_id'])
   assert.deepEqual(Object.keys(map.things.landing_row.keys).filter(k => k.startsWith('group.')).sort(), ['group.id', 'group.name', 'group.order'])
-  assert.equal(map.version, '1.0.2')
+  assert.equal(map.version, '1.0.3')
 })
 
 // --- made-up answers of those shapes ---

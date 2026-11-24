@@ -1,5 +1,5 @@
 /**
- * Lステップ's map 1.0.2 (「サイトの地図」, generalization PR 3, completed in PR 4, extended in PR 6; agent-browser.md "The first map and the
+ * Lステップ's map 1.0.3 (「サイトの地図」, generalization PR 3, completed in PR 4, extended in PR 6 and PR 8; agent-browser.md "The first map and the
  * inspection line"). Reviewed data. Its things and every key of their JSON answers are exactly what stage 0 recorded
  * (2026-11-24, read only, the owner's login: 「ブラウザ操作の汎用化_段0の結果」 R4, R8, R10, R11) and, for 1.0.1, the full
  * key sets confirmed afterwards (same day, 「追記2：項目の全部の確かめ」: four routes — the 11/12, 11/19 and 11/26 rounds' and
@@ -32,9 +32,13 @@
  *
  * **1.0.2** (PR 6, design memo §6: today's 「リマインダの段にテンプレートを足す」 as map + one line) adds what that operation
  * reads and writes — only key names the old path's readers recorded from the owner's read-only windows (design memo
- * §34–§36, §39–§41; `client/connectors/lstep/`), no value. Their **full key sets are not confirmed yet** (the old readers
- * are lenient: they read the keys they need and pass others): strict read then stops on a real answer with a key more
- * (availability, never a wrong write) until a read-only confirmation lists them — part of approving the line (PR 7).
+ * §34–§36, §39–§41; `client/connectors/lstep/`), no value. **1.0.3** (PR 8): their full key sets and the two lists'
+ * envelopes confirmed read only with the owner's login (「段0の結果」 追記3, 2026-11-25, 0 writes — the test reminder, one
+ * step, the template folders, a folder's templates and 「未分類」's): the reminder exactly 6 keys, each step exactly 12, a
+ * step's timing exactly 5, a template folder exactly 4 (its list's envelope `data` alone), a template exactly 7 (its list's
+ * envelope the landing list's 13 keys, 50 a page; `group` an object {id, name}, or null in 「未分類」). The key lists below
+ * were already those sets, so the things' maps did not move: 1.0.3 names the envelopes (`LSTEP_MAP_READS`) and says the
+ * sets are confirmed.
  * - `reminder` (リマインダ) — `GET /api/episodes/<id>` (§39): `id`, `name`, `hid_at` (must be null: a hidden reminder is
  *   not read), `steps[]` with `id` and `episode_id` (each must name this reminder); `order`, `type` and every other key of
  *   a step (`order`, `step_days`, `step_time`, `step_type`, `step_minutes`, `skip`, `initial`, `egg_id`,
@@ -64,7 +68,7 @@ import type { BrowserMap } from '../../../shared/core/browser-map'
 
 export const LSTEP_MAP: BrowserMap = {
   site: 'lstep',
-  version: '1.0.2',
+  version: '1.0.3',
   account: { label: 'LINE アカウント' },
   things: {
     landing: {
@@ -228,18 +232,22 @@ export const LSTEP_MAP_READS = {
     envelopeLinkKeys: ['url', 'label', 'page', 'active'],
   },
   action_set: { path: '/api/actions/{id}' },
-  // 1.0.2 (PR 6). The template list's envelope is not confirmed whole (the old reader names `current_page`, `data`,
-  // `last_page`, `per_page`, `total` among others): `envelope: null` until a read-only confirmation lists it (PR 7) —
-  // the reading code reads no list whose envelope the map does not name.
+  // 1.0.2 (PR 6); the envelopes confirmed in 1.0.3 (追記3): the template folders' list is `{ data }` alone, a folder's
+  // template list has the landing list's 13 keys (and its links' 4). The reading code reads no other key around the rows.
   reminder: { path: '/api/episodes/{id}' },
   reminder_step: { path: '/line/episode/show/{parent}', html: true },
   step_timing: { path: '/api/episode-steps/{id}' },
-  template_folder: { path: '/api/template-groups', list: 'data' },
-  template: { path: '/api/templates', query: ['group', 'page'], pages: { param: 'page', max: 10, perPage: 50 }, folderFrom: 'parent', envelope: null },
+  template_folder: { path: '/api/template-groups', list: 'data', envelope: ['data'] },
+  template: {
+    path: '/api/templates', query: ['group', 'page'], pages: { param: 'page', max: 10, perPage: 50 }, folderFrom: 'parent',
+    envelope: ['current_page', 'data', 'first_page_url', 'from', 'last_page', 'last_page_url', 'links', 'next_page_url', 'path',
+      'per_page', 'prev_page_url', 'to', 'total'],
+    envelopeLinkKeys: ['url', 'label', 'page', 'active'],
+  },
 } as const
 
 /**
- * How each write of the map is sent (mechanics, 1.0.2; hashed with this folder): the old declaration's one write, word for
+ * How each write of the map is sent (mechanics, since 1.0.2; hashed with this folder): the old declaration's one write, word for
  * word (`lstep@0.6.3`: captured on test objects 2026-11-20, its form seen again in §40). `{id}` is the written object's
  * id, `{value}` the id the line adds; `_token` / `_lm_user_id` are the page's own values the reading code takes, never
  * compared. Nothing sends with it yet: the app's writing path is a later PR, behind the server's gate.

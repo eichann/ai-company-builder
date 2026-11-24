@@ -1,5 +1,5 @@
 /**
- * Lステップ's readers for map 1.0.2 (./map.ts): each turns one strictly read JSON answer into its thing's state — exactly
+ * Lステップ's readers for map 1.0.3 (./map.ts): each turns one strictly read JSON answer into its thing's state — exactly
  * the map's fields, each of its kind — and throws on anything it does not understand (the core then says 「読み取れません
  * でした」; never a guess). The core has already checked every key against the map before a reader runs
  * (`readBrowserThing`); a reader decides the values. Only shapes stage 0 recorded; where it recorded a name but not a

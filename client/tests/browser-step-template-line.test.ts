@@ -1,5 +1,5 @@
 /**
- * Lステップ's map 1.0.2 and the first write line `step_template_add` (generalization PR 6; agent-browser.md "The write words
+ * Lステップ's map 1.0.2 (key sets confirmed in 1.0.3) and the first write line `step_template_add` (generalization PR 6; agent-browser.md "The write words
  * and the first write line"): today's 「リマインダの段にテンプレートを足す」 (`lstep@0.6.x`) as map + one line.
  *
  * Guards (each test fails when its guard is removed):
@@ -52,7 +52,7 @@ function reminderAnswer(over: Record<string, unknown> = {}, steps: unknown[] = [
 function stepEntry(id: string, over: Record<string, unknown> = {}): Record<string, unknown> {
   return {
     id: Number(id), order: 0, step_days: 0, step_time: '09:00:00', step_type: 1, step_minutes: null, skip: 1, initial: 0,
-    egg_id: null, member_query_id: null, action_id: null, episode_id: Number(REMINDER), ...over,
+    egg_id: 7400009, member_query_id: null, action_id: null, episode_id: Number(REMINDER), ...over,
   }
 }
 const timingAnswer = (over: Record<string, unknown> = {}) => ({
@@ -78,8 +78,8 @@ const read = (thing: string, answer: unknown, address?: string, parent?: string)
   readBrowserThing(map, thing, answer, readers[thing], address, parent)
 const keysOf = (thing: string) => Object.keys(map.things[thing].keys ?? {}).sort()
 
-test('the new things list exactly the key names the old path recorded', () => {
-  assert.equal(map.version, '1.0.2')
+test('the new things list exactly the key names the old path recorded, confirmed whole in 1.0.3 (追記3)', () => {
+  assert.equal(map.version, '1.0.3')
   assert.deepEqual(keysOf('reminder'), ['hid_at', 'id', 'name', 'order', 'steps', 'steps[].action_id', 'steps[].egg_id', 'steps[].episode_id',
     'steps[].id', 'steps[].initial', 'steps[].member_query_id', 'steps[].order', 'steps[].skip', 'steps[].step_days', 'steps[].step_minutes',
     'steps[].step_time', 'steps[].step_type', 'type'])
@@ -88,6 +88,24 @@ test('the new things list exactly the key names the old path recorded', () => {
   assert.deepEqual(keysOf('template_folder'), ['id', 'item_count', 'name', 'order'])
   assert.equal(map.things.reminder_step.answer, 'html')
   assert.equal(map.things.reminder_step.keys, undefined)
+})
+
+test('1.0.3: the key sets and the lists\' envelopes are exactly what the read-only confirmation listed (追記3)', () => {
+  const { reads } = lstepMap()
+  const top = (thing: string) => keysOf(thing).filter(k => !k.includes('.'))
+  const items = (thing: string, list: string) => keysOf(thing).filter(k => k.startsWith(`${list}[].`))
+  assert.equal(top('reminder').length, 6)
+  assert.equal(items('reminder', 'steps').length, 12)
+  assert.equal(keysOf('step_timing').length, 5)
+  assert.equal(keysOf('template_folder').length, 4)
+  assert.deepEqual(top('template'), ['content_text', 'created_at', 'editor_version', 'form_type', 'group', 'id', 'name'])
+  assert.deepEqual(keysOf('template').filter(k => k.startsWith('group.')), ['group.id', 'group.name'])
+  // The template folders' list is `{ data }` alone; a folder's template list has the landing list's envelope (13 keys, 50 a page).
+  assert.deepEqual(reads.template_folder.envelope, ['data'])
+  assert.deepEqual(reads.template.envelope, reads.landing_row.envelope)
+  assert.equal(reads.template.envelope.length, 13)
+  assert.deepEqual(reads.template.envelopeLinkKeys, reads.landing_row.envelopeLinkKeys)
+  assert.equal(reads.template.pages.perPage, 50)
 })
 
 test('each new thing reads whole from an answer of the recorded shape', () => {
@@ -104,6 +122,12 @@ test('each new thing reads whole from an answer of the recorded shape', () => {
   // 「未分類」: no folder object, read as folder 0 (§40).
   const un = read('template', templateAnswer({ group: null }))
   assert.equal(un.status === 'read' && un.state.folder, '0')
+  // 追記3: a step's template id is a number with a value, its time a string — read past, never compared.
+  assert.equal(read('reminder', reminderAnswer({}, [stepEntry(STEP, { egg_id: 7400010, step_time: '18:20:00' })])).status, 'read')
+  // A key of the confirmed set missing → not read (strict: the set is exact, not a floor).
+  const without = (o: Record<string, unknown>, k: string) => Object.fromEntries(Object.entries(o).filter(([key]) => key !== k))
+  assert.equal(read('template_folder', without(folderAnswer(), 'order')).status, 'read', 'an ignored key may be absent')
+  assert.equal(read('template', without(templateAnswer(), 'content_text')).status, 'not_read', 'a required key missing')
   assert.equal(read('template_folder', folderAnswer({ id: 0, name: '未分類' })).status, 'read')
 })
 
@@ -138,10 +162,10 @@ test('the step\'s templates are read exactly as the old path\'s checker reads th
   }
 })
 
-test('the line opens on map 1.0.2, is written pending, and holds no business word', () => {
+test('the line opens on maps 1.0.2 and 1.0.3, is written pending on both, and holds no business word', () => {
   const opened = JSON.parse(readFileSync(OPENED_FILE, 'utf8')) as BrowserOpenedFile
   const rows = opened.lines.filter(l => l.name === 'step_template_add')
-  assert.deepEqual(rows.map(r => [r.mapVersion, r.status]), [['1.0.2', 'pending']])
+  assert.deepEqual(rows.map(r => [r.mapVersion, r.status]), [['1.0.2', 'pending'], ['1.0.3', 'pending']])
   const text = JSON.stringify({ map, line, LSTEP_MAP_WRITES })
   for (const word of ['参加者', '18:20', '新方式', 'クロチャレ', 'crochalle']) assert.ok(!text.includes(word), word)
 })

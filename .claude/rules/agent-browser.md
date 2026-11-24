@@ -1532,6 +1532,15 @@ new take the same lock key for a step.
   inspection (`not-approved`): nothing calls it yet, but approving the 1.0.2 row (with `grantsFrom` the 1.0.1 row's
   mechanics hash) must come before PR 5b wires it. `browser-read-line-runner.test.ts` hands the runner the 1.0.2 row as
   approved and checks it has the 1.0.1 row's meaning.
+- **Lステップ map 1.0.3** (generalization PR 8, first commit): the read-only confirmation of PR 6's things with the owner's
+  login (「段0の結果」 追記3, 2026-11-25, 0 writes): the reminder exactly 6 keys, each step 12 (its `egg_id` a number with a
+  value, `step_time` a string: read past), a step's timing 5, a template folder 4 (its list's envelope `data` alone), a
+  template 7 (`group` {id, name}, or null in 「未分類」 — listed `optional`, the only way the core lets a key be null; the
+  reader requires it), its list's envelope the landing list's 13 keys and links' 4, 50 a page. The key lists already were
+  those sets; 1.0.3 names the two envelopes in `LSTEP_MAP_READS` (the template list's was `null`). Every line gets a
+  `pending` row on 1.0.3 (`landing_inspect`'s meaning unchanged, so carrying its grants is again the owner's "compatible"
+  call; `step_template_add` stays `pending` until the owner's test write). Tests: `browser-step-template-line.test.ts`
+  (the counts and envelopes, a step of the confirmed shape read past, a required key missing not read).
 - **The line** `step_template_add` 「リマインダの段にテンプレートを足す」 (`client/browser-lines/lstep.ts`, **`pending`**):
   values `reminder`, `step`, `template_folder`, `template` (all `target` ← `site_fact`, §16-4); reads the reminder, the step
   (parent: the reminder), its timing (parent: the reminder) and the template (parent: its folder); one write
