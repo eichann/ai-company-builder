@@ -46,6 +46,7 @@ import { AppInstructionChip } from './AppInstructionChip'
 import { TopicChip } from './TopicChip'
 import { patchChatSession } from '../api'
 import { appInstructionOf, type AppInstruction } from '../../../../shared/app-instruction'
+import { chatErrorText } from '../chatErrorText'
 
 // One chat tab: a conversation with the agent. A composition of hooks
 // (hooks/, one concern each, in the order useChat needs them) and
@@ -513,7 +514,7 @@ export const ChatPanelChat = memo(function ChatPanelChat({ tabId, isShown, depar
       {status === 'error' && error && (
         <div className="flex-shrink-0 px-4 py-2 bg-danger-bg border-b border-danger-border">
           <div className="text-sm text-danger-text">
-            {t('chat.errorOccurred', { error: error.message })}
+            {chatErrorText(error.message, e => t('chat.errorOccurred', { error: e }))}
           </div>
         </div>
       )}
