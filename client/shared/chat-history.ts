@@ -7,6 +7,7 @@ import type { PluginOperationCard } from './plugin-operations'
 import type { ApprovalCardRef } from './approvals'
 import type { JobProposalCardRef } from './job-proposals'
 import type { BrowserPlanCardRef } from './browser-plans'
+import type { BrowserInspectionRef } from './browser-inspection'
 import type { MinutesBundleChoiceCard } from './minutes-app'
 import type { DriveOverwriteCard } from './drive-overwrite'
 import type { MailDraftCard } from './outbound-mail'
@@ -41,6 +42,8 @@ export interface ChatSession {
     jobProposals?: JobProposalCardRef[]
     /** 「ブラウザ操作」 plans made in this reply (browser-plans.ts): a reference; the card reads the plan from the server. */
     browserPlans?: BrowserPlanCardRef[]
+    /** 「ブラウザ操作」 inspections made in this reply (browser-inspection.ts): a reference; main holds the card in memory only. */
+    browserInspections?: BrowserInspectionRef[]
     /** 「どの案件の議事録ですか？」 cards in this reply (minutes-app.ts). */
     minutesDealChoices?: MinutesBundleChoiceCard[]
     /** The app's cards in the order the tools produced them (part ids), when a reply has two or more. */

@@ -1,7 +1,7 @@
 // The read runner of an opened read-only line (「開けた1行」, generalization PR 5a; agent-browser.md
-// "The read runner of an opened line"). Built and tested; NOTHING calls it yet: the server's opened
-// list, the inspection's result and the notice route are the server's (PR 4, routes/browser-lines.ts); the wiring
-// to them, to the chat and to the card is PR 5b.
+// "The read runner of an opened line"). Called only by the inspection's wiring (inspect.ts, PR 5b: the chat's
+// `browser_inspect`); the server's opened list, the inspection's result and the notice route are the server's (PR 4,
+// routes/browser-lines.ts).
 //
 // Given an approved line, its map, the map's readers, how each thing is addressed and the line's values,
 // it reads ONLY the things the line names, in its order, through the member's open window's page-less
@@ -85,8 +85,11 @@ export interface BrowserReadRunnerDeps {
   stopped(companyId: string): boolean
   /** The member's open window of the site, as main reads through it (controller `previewWindow`); null: not open. */
   window(companyId: string, host: string): BrowserPreviewSurface | null
-  /** Captures the context now (sign-in, company, setting generation); the answer says whether it still holds. */
-  context(): () => boolean
+  /**
+   * Captures the context now (sign-in, company, setting generation, and — given — the turn's signal); the answer says
+   * whether it still holds.
+   */
+  context(scope: { companyId: string; signal?: AbortSignal }): () => boolean
   reporter?: BrowserLineReporter
   /** The wall clock (epoch ms), for the run's time limit. */
   now?(): number
@@ -110,6 +113,11 @@ export interface BrowserReadRunInput {
   planId?: string
   /** The account a plan is bound to (later PRs); absent for a read made only to show the card. */
   expectedAccount?: string
+  /**
+   * The signal of the consultation's turn that asked (PR 5b): aborted — the member closed or stopped the consultation —,
+   * nothing more is read and nothing is judged (owner decision: an inspection runs only while its consultation is open).
+   */
+  signal?: AbortSignal
 }
 
 /** Why nothing was judged (a fixed word): what was read so far is dropped. */
@@ -249,17 +257,22 @@ export function createBrowserReadRunner(deps: BrowserReadRunnerDeps) {
     const surface = deps.window(companyId, host)
     if (!surface || surface.closed()) return refused('window')
     if (busy.has(surface)) return refused('busy')
-    const stillCurrent = deps.context()
+    if (input.signal !== undefined && !(input.signal instanceof AbortSignal)) return refused('input')
+    const turn = input.signal
+    const stillCurrent = deps.context({ companyId, ...(turn ? { signal: turn } : {}) })
     busy.add(surface)
     const abort = new AbortController()
     const deadline = now() + limits.ms
     const timer = setTimeout(() => abort.abort(), limits.ms)
+    // The turn stopped (the consultation closed or stopped): the read on its way is abandoned at once.
+    const onTurn = (): void => abort.abort()
+    turn?.addEventListener('abort', onTurn, { once: true })
     let made = 0
     // Every check that may stop the run: the switch, the stop, the context, the same window still open, the time.
     const check = (): void => {
       if (!(deps.aiSwitch ?? buildAiSwitch)()) throw new Refusal('off')
       if (deps.stopped(companyId)) throw new Refusal('stopped')
-      if (!stillCurrent()) throw new Refusal('context')
+      if (!stillCurrent() || turn?.aborted) throw new Refusal('context')
       if (surface.closed() || deps.window(companyId, host) !== surface) throw new Refusal('window')
       if (now() >= deadline || abort.signal.aborted) throw new Refusal('timeout')
     }
@@ -385,6 +398,7 @@ export function createBrowserReadRunner(deps: BrowserReadRunnerDeps) {
       return refused(error instanceof Refusal ? error.reason : 'context')
     } finally {
       clearTimeout(timer)
+      turn?.removeEventListener('abort', onTurn)
       abort.abort()
       busy.delete(surface)
     }

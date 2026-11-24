@@ -36,3 +36,10 @@ export function confirmBrowserExecution(companyId: string, executionId: string, 
 export function openBrowserSite(companyId: string, host: string, site: BrowserSiteWindow = window.electronAPI) {
   return site.openBrowserSite(companyId, host)
 }
+
+/** Reading an inspection's card main holds in memory for the signed-in member (`browserLines:card`). */
+export type BrowserInspectionReads = ElectronPort<'getBrowserInspection'>
+
+export function getBrowserInspection(companyId: string, planId: string, reads: BrowserInspectionReads = window.electronAPI) {
+  return reads.getBrowserInspection(companyId, planId)
+}

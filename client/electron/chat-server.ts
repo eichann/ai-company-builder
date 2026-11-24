@@ -14,6 +14,8 @@ import { APPROVAL_PART_TYPE, type ApprovalCardRef } from '../shared/approvals'
 import { JOB_PROPOSAL_PART_TYPE, type JobProposalCardRef } from '../shared/job-proposals'
 import { BROWSER_PLAN_PART_TYPE, type BrowserPlanCardRef } from '../shared/browser-plans'
 import type { BrowserRequestTools } from './browser-request/tools'
+import type { BrowserInspectTools } from './browser-request/inspect-tool'
+import { BROWSER_INSPECTION_PART_TYPE, type BrowserInspectionRef } from '../shared/browser-inspection'
 import { MINUTES_BUNDLE_CHOICE_PART_TYPE, type MinutesBundleChoiceCard } from '../shared/minutes-app'
 import { MAIL_DRAFT_PART_TYPE, type MailDraftCard } from '../shared/outbound-mail'
 import { DRIVE_OVERWRITE_PART_TYPE, type DriveOverwriteCard } from '../shared/drive-overwrite'
@@ -133,6 +135,11 @@ export interface ChatServerConfig extends AgentHost {
    * plan's card into the reply (a reference; the card reads the server).
    */
   createBrowserRequest?: (input: { companyId: string; conversationId: string | null; signal: AbortSignal; onPlan: (planId: string) => void }) => BrowserRequestTools | undefined
+  /**
+   * 「ブラウザ操作」's read-only inspection (browser-request/inspect-tool.ts; agent-browser.md "The inspection in the chat"):
+   * undefined while the switch is off. `onCard` puts the inspection's card into the reply (a reference; main holds the card).
+   */
+  createBrowserInspect?: (input: { companyId: string; conversationId: string | null; signal: AbortSignal; onCard: (planId: string) => void }) => BrowserInspectTools | undefined
   prepareRecovery?: (company: string, id: string, messages: UIMessage[]) => { context: string; usedMemo: boolean }
   onRecovery?: (company: string, id: string, recovery: HandoffRecovery) => void
   persistAgentSession?: (company: string, id: string, session: AgentSession) => void
@@ -499,6 +506,16 @@ export async function startChatServer(config: ChatServerConfig) {
         },
       })
       : undefined
+    // Its inspection (inspect-tool.ts): the same gates and the same signal — it reads only while this turn runs.
+    const browserInspect = !aiTurnStep && connection.ownsConversation && can.browserOperator && companyId
+      ? config.createBrowserInspect?.({
+        companyId, conversationId: appSessionId || null, signal: browserRequestAbort.signal,
+        onCard: planId => {
+          const ref: BrowserInspectionRef = { id: planId, companyId, conversationId: appSessionId || null, planId, at: new Date().toISOString() }
+          injector.push({ type: BROWSER_INSPECTION_PART_TYPE, id: `browser-inspection-${planId}`, data: ref })
+        },
+      })
+      : undefined
     // 「確認をお願いする」 (review/tools.ts): the AI hands its work to the member and
     // stops; the accepted request becomes a part of the reply (the card, stored with it).
     const review = !aiTurnStep && connection.ownsConversation && workingDirectory
@@ -687,7 +704,7 @@ export async function startChatServer(config: ChatServerConfig) {
     const turnEnv = !aiTurnStep && companyId && appSessionId
       ? await Promise.resolve(config.getBrokerEnv?.({ agent: authMode, companyId, conversationId: appSessionId, department: activeDepartment?.folder ?? null })).catch(() => undefined)
       : undefined
-    const modelRequest = { workingDirectory, appSessionId, modelId, effort, resumeId: existingCliSessionId, references, companyFiles: companyFiles?.tools, review, appCommands, records, webResearch: webResearch?.tools, browserRequest, secondOpinion, writeGuard, privateReads, askUser, onEvent, steering: turn?.steering, onPromptSuggestion: turn?.onPromptSuggestion, toolEventContext, sandbox, turnEnv, toolStop: turnStop?.toolStopped, ...(shelf?.rootMarker ? { projectRootMarker: shelf.rootMarker } : {}), ...(aiTurnStep ? { unattended: { builtinTools: aiTurnStep.builtinTools, ...(stepArea && typeof stepArea === 'object' && stepArea.readOutside ? { readDirs: [stepArea.readOutside] } : {}) } } : {}) }
+    const modelRequest = { workingDirectory, appSessionId, modelId, effort, resumeId: existingCliSessionId, references, companyFiles: companyFiles?.tools, review, appCommands, records, webResearch: webResearch?.tools, browserRequest, browserInspect, secondOpinion, writeGuard, privateReads, askUser, onEvent, steering: turn?.steering, onPromptSuggestion: turn?.onPromptSuggestion, toolEventContext, sandbox, turnEnv, toolStop: turnStop?.toolStopped, ...(shelf?.rootMarker ? { projectRootMarker: shelf.rootMarker } : {}), ...(aiTurnStep ? { unattended: { builtinTools: aiTurnStep.builtinTools, ...(stepArea && typeof stepArea === 'object' && stepArea.readOutside ? { readDirs: [stepArea.readOutside] } : {}) } } : {}) }
     let usedMemo = false
     const recoveryEvent = (status: HandoffRecovery['status']) => {
       if (companyId && appSessionId) config.onRecovery?.(companyId, appSessionId, { status, usedMemo, at: new Date().toISOString() })

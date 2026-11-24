@@ -116,6 +116,9 @@ import { developerAssetHostsOn } from '../shared/browser-operation'
 import { createThisPcSwitch } from './features/browser/ai-switch'
 import { BROWSER_AI_OPT_IN_FILE } from '../shared/browser-ai'
 import { lstepConnector } from '../connectors/lstep'
+import { lstepReadLines } from '../connector-maps/lstep'
+import { LINES as LSTEP_LINES } from '../browser-lines/lstep'
+import { wireBrowserInspections } from './features/browser/inspect'
 import { browserOperatorOf } from './agents/registry'
 import { browserAiStopped } from '../../shared/core/browser-operation'
 import { createProcedureReader } from './features/ai-turns/procedures'
@@ -614,9 +617,10 @@ registerBrowserIpc(ipc, {
 })
 // Its plans (agent-browser.md "The card, the IPC and the request tool"): the card's IPC, the runner behind
 // ［任せる］ and the request tool's factory. Reading a site, the operator and sending ask the switch (off unless this PC's opt-in).
+// Off for everyone unless this PC's opt-in names this server and the signed-in member (6c, owner's PC only).
+const browserAiSwitch = createThisPcSwitch({ file: () => path.join(userDataDir(), BROWSER_AI_OPT_IN_FILE), server: getServerApiUrl, userId: session.userId })
 const browserPlans = wireBrowserPlans(ipc, {
-  // Off for everyone unless this PC's opt-in names this server and the signed-in member (6c, owner's PC only).
-  aiSwitch: createThisPcSwitch({ file: () => path.join(userDataDir(), BROWSER_AI_OPT_IN_FILE), server: getServerApiUrl, userId: session.userId }),
+  aiSwitch: browserAiSwitch,
   fromMainWindow: event => isMainFrameSender(event, id => mainWindowHost.isWindow(id)),
   baseUrl: getServerApiUrl,
   cookies: session.cookies,
@@ -632,6 +636,23 @@ const browserPlans = wireBrowserPlans(ipc, {
 agentControl.policy.onPolicy((companyId, policy) => browserPlans.context.policyAnswered(companyId, policy.browser))
 agentControl.policy.onRefreshFailed(() => browserPlans.context.advance())
 lifecycle.beforeQuit(() => browserPlans.context.quitting())
+// Its read-only inspection (agent-browser.md "The inspection in the chat"): the chat's `browser_inspect`, the read runner
+// over the member's own window and the card's IPC — the same switch and context as the plans; the site's map and lines are
+// handed in here only (architecture-boundaries.test.ts).
+const lstepLines = lstepReadLines()
+const browserInspections = wireBrowserInspections(ipc, {
+  aiSwitch: browserAiSwitch,
+  fromMainWindow: event => isMainFrameSender(event, id => mainWindowHost.isWindow(id)),
+  baseUrl: getServerApiUrl,
+  cookies: session.cookies,
+  userId: session.userId,
+  context: browserPlans.context,
+  stopped: companyId => browserAiStopped(agentControl.policy.stop(companyId)),
+  window: (companyId, host) => browser.previewWindow(companyId, host),
+  sites: [{ map: lstepLines.map, readers: lstepLines.readers, addresses: lstepLines.addresses, account: lstepLines.account }],
+  lines: LSTEP_LINES,
+  declarations: [lstep.declaration],
+})
 // lane C ▲
 
 registerAuthIpc(ipc, {
@@ -651,6 +672,7 @@ registerAuthIpc(ipc, {
     // …nor this one's site logins (「ブラウザ操作」).
     browser.signedOut()
     browserPlans.context.advance()
+    browserInspections.clear()
   },
   onSignedIn: userId => {
     agentControl.eventSender.sessionStarted()
@@ -768,6 +790,7 @@ app.whenReady().then(async () => {
       agentEvents: agentControl.events,
       agentPolicy: agentControl.policy,
       browserPlans,
+      browserInspections,
       agentStop: agentControl.stop,
       serverUrl: getServerApiUrl,
       brokerTokens,

@@ -340,7 +340,8 @@ const FEATURE_IMPORT_EXCEPTIONS: Record<string, string> = {
   'chat -> voice/microphoneSelection.ts': 'the composer\'s microphone button lists and picks the microphone',
   'chat -> voice/voiceAvailability.ts': 'the composer\'s microphone button says whether voice input can be used',
   'chat -> voice/voiceShortcut.ts': 'the composer shows and catches the member\'s voice key (VoiceInputControl, useVoiceShortcut)',
-  'chat -> browser-plans/components/BrowserPlanCard.tsx': 'a reply that made a 「ブラウザ操作」 plan shows its approval card, owned by browser-plans because the inbox opens the same card by plan id (agent-browser.md)',
+  'chat -> browser-plans/components/BrowserInspectionCard.tsx': 'a reply that ran a 「ブラウザ操作」 inspection shows its card (what main read, held in memory), owned by browser-plans beside the plan card: both are the browser operation\'s cards (agent-browser.md "The inspection in the chat")',
+  'chat -> browser-plans/components/BrowserPlanCard.tsx':'a reply that made a 「ブラウザ操作」 plan shows its approval card, owned by browser-plans because the inbox opens the same card by plan id (agent-browser.md)',
   'inbox -> notifications/api.ts': 'since I2 the inbox is the only screen of the notices: it marks them seen, undoes them (the two undos with their refusal words) and switches their kinds through the notices port, which stays in notifications beside useNotices (AppShell reads it); folding notifications into inbox is a move-only PR of its own (renderer-structure.md "How to move code")',
 }
 

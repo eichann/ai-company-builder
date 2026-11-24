@@ -23,6 +23,8 @@ import { ApprovalCard } from './ApprovalCard'
 import { JobProposalCard } from './JobProposalCard'
 import { BROWSER_PLAN_PART_TYPE, readBrowserPlanCardRef } from '../../../../shared/browser-plans'
 import { BrowserPlanCard } from '../../browser-plans/components/BrowserPlanCard'
+import { BROWSER_INSPECTION_PART_TYPE, readBrowserInspectionRef } from '../../../../shared/browser-inspection'
+import { BrowserInspectionCard } from '../../browser-plans/components/BrowserInspectionCard'
 import { MINUTES_BUNDLE_CHOICE_PART_TYPE, readMinutesBundleChoiceCard } from '../../../../shared/minutes-app'
 import { MinutesBundleChoiceCard } from './MinutesBundleChoiceCard'
 import { SteerInstructionView } from './SteerInstruction'
@@ -148,6 +150,10 @@ export function AssistantMessageParts({ parts, isStreaming, markdown }: { parts:
         if (part.type === BROWSER_PLAN_PART_TYPE) {
           const ref = readBrowserPlanCardRef((part as { data?: unknown }).data)
           return ref ? <BrowserPlanCard key={item.key} companyId={ref.companyId} planId={ref.planId} /> : null
+        }
+        if (part.type === BROWSER_INSPECTION_PART_TYPE) {
+          const ref = readBrowserInspectionRef((part as { data?: unknown }).data)
+          return ref ? <BrowserInspectionCard key={item.key} companyId={ref.companyId} planId={ref.planId} /> : null
         }
         if (part.type === MINUTES_BUNDLE_CHOICE_PART_TYPE) {
           const card = readMinutesBundleChoiceCard((part as { data?: unknown }).data)
