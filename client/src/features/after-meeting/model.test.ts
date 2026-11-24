@@ -123,3 +123,17 @@ test('editors, ids and which やること is which', () => {
   assert.equal(isWeeklyReportTask('今週の定例レポートを作る'), true)
   assert.equal(isWeeklyReportTask('11月23日の会議のたたき台を確かめる'), false)
 })
+
+test('受注予定日 is a day: the apply hands the member\'s date and says to write the deal\'s close_date; no day, not handed on', () => {
+  const drafts = draftsFrom([...items, { 書き先: 'hubspot', 取引: '123', 項目: '受注予定日', 値: '2026-12-15' }])
+  const close = drafts.find(d => d.項目 === '受注予定日')!
+  assert.equal(editorOf(close), 'date')
+  const picked = drafts.map(d => (d === close ? { ...d, 値: '2027-01-20' } : d))
+  const ask = applyAsk({ pressId: 'a-0123456789abcdef', folder: 'a/.personal/b/c', meetingId: null, minutesDocVersion: null, items: itemsToApply(picked, statusOf(EMPTY_MARK)) })
+  assert.ok(ask.includes('"項目": "受注予定日"') && ask.includes('"値": "2027-01-20"'))
+  assert.match(ask, /close_date/)
+  assert.doesNotMatch(applyAsk({ pressId: 'a-0123456789abcdef', folder: 'a/.personal/b/c', meetingId: null, minutesDocVersion: null, items: draftsFrom(items) }), /close_date/)
+  for (const bad of ['', '2027/01/20', '2027-02-30']) {
+    assert.ok(!itemsToApply(picked.map(d => (d === picked[3] ? { ...d, 値: bad } : d)), statusOf(EMPTY_MARK)).some(d => d.項目 === '受注予定日'), bad)
+  }
+})

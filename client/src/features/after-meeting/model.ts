@@ -6,7 +6,7 @@ import {
   itemKey, mayApply, mayUndoSheet, UNAPPLIED_NOTE_AFTER_MS, AFTER_MEETING_RESULT_FILE, AFTER_MEETING_RESULT_VERSION,
   type ApplyEntry, type HandedItem, type ItemStatus, type SetUpdateItem, type SetUpdateValue, type UpdateTarget,
 } from '../../../shared/after-meeting'
-import { SET_WATCH_HUBSPOT_ITEMS } from '../../../shared/ai-turn-steps/set-watch'
+import { SET_WATCH_CLOSE_DATE, SET_WATCH_HUBSPOT_ITEMS, isDayValue } from '../../../shared/ai-turn-steps/set-watch'
 import { SET_WATCH_UNSURE_BELOW } from '../../../../shared/core/job-words'
 
 /** A set watch's やること id is its occurrence's (`task-<hex>` ⇔ `occ.<hex>`, `occurrenceTaskId`). */
@@ -77,16 +77,22 @@ export function valueText(v: SetUpdateValue): string {
 }
 
 /** What kind of editor an item's value takes. */
-export function editorOf(d: Pick<DraftItem, '書き先' | '項目' | '値'>): 'stage' | 'number' | 'months' | 'long' | 'text' {
+export function editorOf(d: Pick<DraftItem, '書き先' | '項目' | '値'>): 'stage' | 'date' | 'number' | 'months' | 'long' | 'text' {
   if (d.書き先 === 'hubspot' && d.項目 === '確度') return 'stage'
+  if (isCloseDate(d)) return 'date'
   if (Array.isArray(d.値) || d.項目 === '計上月') return 'months'
   if (typeof d.値 === 'number' || d.項目 === '金額') return 'number'
   if (d.項目 === '商談の記録' || (typeof d.値 === 'string' && d.値.length > 60)) return 'long'
   return 'text'
 }
 
-/** A value the member typed, checked as the file's own rule (the AI reads it back as data). */
-export function valueProblem(v: SetUpdateValue): string | null {
+function isCloseDate(d: Pick<DraftItem, '書き先' | '項目'>): boolean {
+  return d.書き先 === 'hubspot' && d.項目 === SET_WATCH_CLOSE_DATE
+}
+
+/** A value the member typed, checked as the file's own rule (the AI reads it back as data); 受注予定日 is a day. */
+export function valueProblem(v: SetUpdateValue, of?: Pick<DraftItem, '書き先' | '項目'>): string | null {
+  if (of && isCloseDate(of)) return isDayValue(v) ? null : '日付を選んでください。'
   if (typeof v === 'number') return Number.isFinite(v) ? null : '数字を入れてください。'
   if (typeof v === 'string') return v.trim().length === 0 ? '値を入れてください。' : v.length > 2000 ? '2000字までにしてください。' : null
   if (v.length === 0) return '計上月を1つ以上入れてください。'
@@ -133,7 +139,7 @@ export function handedOf(d: DraftItem): Record<string, unknown> {
 
 /** The items an apply takes: ticked, valid, and allowed by their state now (never one written or on its way). */
 export function itemsToApply(items: readonly DraftItem[], statusOf: (key: string) => ItemStatus): DraftItem[] {
-  return items.filter(d => d.on && valueProblem(d.値) === null && mayApply(statusOf(d.key)))
+  return items.filter(d => d.on && valueProblem(d.値, d) === null && mayApply(statusOf(d.key)))
 }
 
 /** The longest ask one press hands on (`chat.consultAbout`'s `detail`): a longer one is refused before anything is recorded. */
@@ -163,6 +169,7 @@ export function applyAsk(input: { pressId: string; folder: string; meetingId: st
       : input.meetingId ? [`- 書く前に、minutes_read で会議（${input.meetingId}）を読めるか確かめてください（案を作ったあとに直されたかは、確かめられません）。`] : []),
     '- HubSpot の項目は、法人営業の操作で書いてください。先に refresh_deal で今の値と担当を確かめ、担当が私でなければ書かずに「担当が違う」とし、担当の名前を残してください。今の値が案と違えば「今：…、案：…」を見せて、私に選んでもらってください。同じ会議の同じ取引・項目がもう書かれていれば、書かないでください。',
     '- 係数表の項目は、部署の Skill「anken-sync-auto」の手順（スクリプト）で書いてください。先に目印の列で、同じ会議の同じ取引・項目がもう書かれていないか確かめ、書かれていれば書かないでください。書く前の値を「前の値」に残してください。結果が分からない挿入はやり直さず、私に見せてください。',
+    ...(input.items.some(isCloseDate) ? [`- ${SET_WATCH_CLOSE_DATE}は、update_deal で案件の欄 close_date（受注予定日）に、値の日付（YYYY-MM-DD）のまま渡してください。`] : []),
     '- 承認が要る操作は、承認のお願いになります。その id と承認する人を結果に残してください。',
     '- 「理由」「引用」は、下にあるときだけ、HubSpot や承認のお願いに渡してよいものです。下にない議事録の発言は、どこにも渡さないでください。メールは送らないでください。',
     ...resultRule(input.folder, input.pressId),

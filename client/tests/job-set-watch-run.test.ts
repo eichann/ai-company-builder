@@ -21,7 +21,7 @@ import { createRunRegistry } from '../electron/records/runs'
 import { decideToolWrite, type WriteGuard } from '../electron/write-guard'
 import { jobToolAccess, parseJobTurn, parseJobTurns } from '../shared/ai-turn-steps/job'
 import { describePath } from '../shared/agent-events'
-import { draftAssetNames, runFolderName, type DecisionGate } from '../shared/ai-turn-steps/set-watch'
+import { draftAssetNames, parseUpdateProposals, runFolderName, type DecisionGate } from '../shared/ai-turn-steps/set-watch'
 import { JOB_MINUTES_ROUTE } from '../../shared/core/jobs'
 
 const COMPANY = 'acme'
@@ -577,4 +577,14 @@ test('codex review: no search reaches a working-tree Skill; nothing is made thro
   } finally {
     chmodSync(path.join(x.run, 'assets'), 0o755)
   }
+})
+
+test('受注予定日 in the update proposals: a real day "YYYY-MM-DD" only', () => {
+  const file = (値: unknown, 書き先 = 'hubspot') => JSON.stringify({ 版: 1, 会議: 'meeting-abc123', 更新案: [{ 書き先, 取引: '1', 項目: '受注予定日', 値 }] })
+  assert.deepEqual(parseUpdateProposals(file('2026-12-15'), 'meeting-abc123', null), { items: [{ 書き先: 'hubspot', 取引: '1', 項目: '受注予定日', 値: '2026-12-15' }] })
+  for (const bad of ['12月15日', '2026-12', '2026-02-30', '2026-12-15T00:00', 20261215]) {
+    const r = parseUpdateProposals(file(bad), 'meeting-abc123', null)
+    assert.ok('problem' in r && r.problem.includes('YYYY-MM-DD'), String(bad))
+  }
+  assert.ok('items' in parseUpdateProposals(file('来年の春', '係数表'), 'meeting-abc123', null), 'a coefficient sheet line of that name keeps its own rule')
 })

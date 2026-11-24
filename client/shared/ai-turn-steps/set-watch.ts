@@ -103,7 +103,15 @@ export function setJobResult(input: SetReportInput, updates: number): Record<str
 export const SET_WATCH_UPDATES_FILE = '更新案.json'
 export const SET_WATCH_UPDATES_VERSION = 1
 /** What a HubSpot item may change (the plugin's operations, applied later in the person's consultation). */
-export const SET_WATCH_HUBSPOT_ITEMS = ['確度', '金額', '計上月', '次のアクション', '商談の記録', '取引を作る'] as const
+export const SET_WATCH_HUBSPOT_ITEMS = ['確度', '金額', '計上月', '次のアクション', '受注予定日', '商談の記録', '取引を作る'] as const
+/** The HubSpot item whose value is a day (`YYYY-MM-DD`, the business plugin's date shape): the deal's close date. */
+export const SET_WATCH_CLOSE_DATE = '受注予定日'
+
+/** A calendar day `YYYY-MM-DD` that exists (never 2026-02-30). */
+export function isDayValue(v: unknown): v is string {
+  return typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v) && !Number.isNaN(Date.parse(`${v}T00:00:00Z`))
+    && new Date(`${v}T00:00:00Z`).toISOString().slice(0, 10) === v
+}
 export const SET_WATCH_UPDATE_TARGETS = ['hubspot', '係数表'] as const
 /** The largest update proposals' file read (a few dozen short items). */
 export const SET_WATCH_UPDATES_FILE_MAX = 64 * 1024
@@ -149,6 +157,7 @@ export function parseUpdateProposals(text: string, meetingId: string, minutes: s
     const item = x.書き先 === 'hubspot' ? (SET_WATCH_HUBSPOT_ITEMS as readonly unknown[]).includes(x.項目) : ONE_LINE(x.項目, 40)
     if (!item) return { problem: `${at}：「項目」は ${x.書き先 === 'hubspot' ? SET_WATCH_HUBSPOT_ITEMS.join('・') + ' のどれか' : '1行・40字まで'}にしてください。` }
     if (!updateValue(x.値)) return { problem: `${at}：「値」は文（2000字まで）・数・または [{ "月": "YYYY-MM", "金額": 数 }] にしてください。` }
+    if (x.書き先 === 'hubspot' && x.項目 === SET_WATCH_CLOSE_DATE && !isDayValue(x.値)) return { problem: `${at}：「${SET_WATCH_CLOSE_DATE}」の「値」は日付 "YYYY-MM-DD"（例："2026-12-15"）にしてください。` }
     if (x.根拠 !== undefined && (typeof x.根拠 !== 'string' || minutes === null || !quoteAppearsIn(minutes, x.根拠))) return { problem: `${at}：「根拠」が議事録に見つかりません。議事録の文をそのまま写してください。` }
     if (x.理由 !== undefined && (typeof x.理由 !== 'string' || x.理由.length > 300)) return { problem: `${at}：「理由」は300字までにしてください。` }
     const key = `${x.書き先}\n${(x.取引 as string).normalize('NFC')}\n${(x.項目 as string).normalize('NFC')}`
