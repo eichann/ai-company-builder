@@ -165,7 +165,11 @@ installElectronAPI({
   onMinutesChanged: changed.subscribe,
   onRecordsChanged: changed.subscribe,
 })
-;(window as unknown as { __acbMeetings: unknown }).__acbMeetings = { finish: (id: string) => move(id, { state: 'read' }) }
+;(window as unknown as { __acbMeetings: unknown }).__acbMeetings = {
+  finish: (id: string) => move(id, { state: 'read' }),
+  // The member chose elsewhere (Settings, another PC): the server now holds it.
+  chooseAutoRead: (mode: 'outside' | 'all' | 'off') => { autoRead = { mode, chosen: true } },
+}
 
 function Preview() {
   const { arrivals, reload } = useMeetingArrivals('co')

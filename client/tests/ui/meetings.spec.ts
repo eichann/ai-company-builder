@@ -11,7 +11,7 @@
 // is only a quiet line — ［まとめる］ puts the new one away with its note and opens the earlier one,
 // ［元に戻す］ undoes that entry, ［このまま］ keeps both. 「届いた議事録を AI が自動で読む」 (4b-4 A2b): a
 // member who never chose is offered 「社外の人がいる会議だけ」 above the meetings, and choosing it sends that
-// and hides the offer; a server keeping a series' three choices shows them on the card, the current one
+// and hides the offer, a choice made meanwhile (Settings) is never replaced and the offer goes; a server keeping a series' three choices shows them on the card, the current one
 // marked, and 「設定に従う」 sends none (null).
 import { test, expect } from '@playwright/test'
 import { expectNoPageErrors, openPreview } from './helpers'
@@ -315,5 +315,28 @@ test('a server that keeps three choices: the card shows them for a series, marks
   await choice.getByRole('radio', { name: '設定に従う' }).click()
   await expect(page.locator('#log')).toContainText('auto meeting-teirei01 false\nauto meeting-teirei01 null')
   await expect(choice.getByRole('radio', { name: '設定に従う' })).toHaveAttribute('aria-checked', 'true')
+  expectNoPageErrors(state)
+})
+
+test('a choice made meanwhile is never replaced by the offer: pressing it sends nothing, and Settings\' change takes the offer away', async ({ page }) => {
+  const state = await openPreview(page, 'meetings', { autoread: 'new' })
+  const offer = page.locator('[data-auto-read-suggestion]')
+  await expect(offer).toBeVisible()
+  await page.evaluate(() => (window as unknown as { __acbMeetings: { chooseAutoRead: (m: string) => void } }).__acbMeetings.chooseAutoRead('all'))
+  await offer.getByRole('button', { name: '社外の人がいる会議だけ自動で読む' }).click()
+  await expect(offer).toHaveCount(0)
+  await expect(page.locator('#log')).toHaveText('')
+  expectNoPageErrors(state)
+})
+
+test('Settings changing the setting takes the offer away at once', async ({ page }) => {
+  const state = await openPreview(page, 'meetings', { autoread: 'new' })
+  const offer = page.locator('[data-auto-read-suggestion]')
+  await expect(offer).toBeVisible()
+  await page.evaluate(() => {
+    (window as unknown as { __acbMeetings: { chooseAutoRead: (m: string) => void } }).__acbMeetings.chooseAutoRead('off')
+    window.dispatchEvent(new CustomEvent('acb:meeting-auto-read-changed', { detail: 'co' }))
+  })
+  await expect(offer).toHaveCount(0)
   expectNoPageErrors(state)
 })

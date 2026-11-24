@@ -1,6 +1,6 @@
 import { useCallback, useRef, useState } from 'react'
 import type { MeetingAutoReadMode } from '../../../../../shared/core/minutes'
-import type { MeetingAutoReadResult } from '../../../../shared/minutes-app'
+import { MEETING_AUTO_READ_CHANGED_EVENT, type MeetingAutoReadResult } from '../../../../shared/minutes-app'
 import { getMeetingAutoReadSetting, setMeetingAutoReadSetting } from '../api'
 
 /**
@@ -22,7 +22,11 @@ export function useMeetingAutoRead(companyId: string) {
     setError(null)
     try {
       const r = await setMeetingAutoReadSetting(companyId, mode)
-      if (r.success) { setResult(r); return true }
+      if (r.success) {
+        setResult(r)
+        window.dispatchEvent(new CustomEvent(MEETING_AUTO_READ_CHANGED_EVENT, { detail: companyId }))
+        return true
+      }
       setError(r.error || 'できませんでした。')
       return false
     } catch {

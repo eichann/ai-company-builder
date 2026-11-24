@@ -436,8 +436,9 @@ or the decision service stops calling it, or another module uses the older per-m
   suggests ［社外の人がいる会議だけ自動で読む］ / 今はいい to the same members (`useAutoReadSuggestion`,
   closed per PC in `meeting-auto-read-suggested:<company>`; toast with 元に戻す = `off`). A meeting the
   setting asked (`askedAutomatically`, no auto series) says 「自動で読む設定のため、AI が読んでいます…」 with
-  ［読まない］ (今回だけ); another attendee's `asked` says 「〇〇さんの AI が読む予定です」 (no spinner: their
-  PC may be closed, D1-3), `reading` 「…が読んでいます…」 (`readingWords`, also on the card). **The card**:
+  ［読まない］ (今回だけ); another attendee's `asked` says 「〇〇さんの AI が読む予定です（しばらく読まれないときは、ほかの
+  参加者の AI が代わりに読みます）」 (no spinner: their PC may be closed, D1-3; not a promise of one person —
+  the server's follow-up lets another attendee's setting take it after a while), `reading` 「…が読んでいます…」 (`readingWords`, also on the card). **The card**:
   when the server answers `seriesChoice` (it keeps three), a series shows 「この定例は：」 ［自動で読む］
   ［読まない］［設定に従う］ (`SERIES_CHOICES`, a radio group, `auto` true / false / null) instead of the
   one-time offer and the 「次から自動で読まない」 line; an older server's answer (no `seriesChoice`) keeps

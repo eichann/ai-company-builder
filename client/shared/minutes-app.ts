@@ -90,6 +90,12 @@ export type MeetingAutoReadResult =
   | { success: true; setting: MeetingAutoReadSetting }
   | { success: false; error: string }
 
+/**
+ * Said on `window` (detail: the company id) when the member changed the setting in Settings: the
+ * 「議事録が届きました」 block reads it again, so its suggestion never outlives a choice (Codex review).
+ */
+export const MEETING_AUTO_READ_CHANGED_EVENT = 'acb:meeting-auto-read-changed'
+
 /** The three choices, in the order they are offered, in the member's words. */
 export const MEETING_AUTO_READ_CHOICES: ReadonlyArray<{ mode: MeetingAutoReadMode; label: string; note?: string }> = [
   { mode: 'outside', label: '社外の人がいる会議だけ', note: 'おすすめ' },

@@ -112,6 +112,8 @@ export function MeetingBanners({ companyId, items, aiTurns, onView, onChanged, n
   }
 
   const autoReadOutside = async () => {
+    // A choice made meanwhile (Settings, another PC) is never replaced by the suggestion.
+    if (!(await suggestion.stillNeverChose())) return
     const r = await setMeetingAutoRead(companyId, 'outside')
     if (!r.success) { say({ text: r.error || 'できませんでした。' }); return }
     suggestion.answered(r)
@@ -178,7 +180,7 @@ export function MeetingBanners({ companyId, items, aiTurns, onView, onChanged, n
             <button type="button" disabled={locked(m.recordId)} onClick={() => void skip(m)} className={QUIET}>読まない</button>
           </>}
           {banner.kind === 'reading' && <>
-            {!banner.problem && <span className="min-w-0 shrink truncate text-caption font-normal text-ai-text">{readingWords(banner)}</span>}
+            {!banner.problem && <span title={readingWords(banner)} className="min-w-0 shrink truncate text-caption font-normal text-ai-text">{readingWords(banner)}</span>}
             {banner.problem?.canRetry && <button type="button" onClick={() => aiTurns?.retry(m.recordId)} className={QUIET}>もう一度</button>}
             {banner.canSkip && <button type="button" disabled={locked(m.recordId)} onClick={() => void skip(m)} className={QUIET}>読まない</button>}
           </>}
