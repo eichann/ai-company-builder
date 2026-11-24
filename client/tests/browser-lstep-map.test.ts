@@ -1,10 +1,12 @@
 /**
- * Lステップ's map 1.0.0 and the inspection line (generalization PR 3; agent-browser.md "The first map and the inspection
+ * Lステップ's map 1.0.1 and the inspection line (generalization PR 3; agent-browser.md "The first map and the inspection
  * line"): `client/connector-maps/lstep/`, `client/browser-lines/lstep.ts`, `shared/browser-connectors/opened.json`.
  *
  * Guards (each test fails when its guard is removed):
- * - the map holds exactly the keys stage 0 recorded (key names only; the answers below are made up from those lists, no
- *   real value): a key more or less, an unknown kind of input, a value of a shape not seen → not read whole;
+ * - the map holds exactly the keys stage 0 recorded and 追記2 confirmed in full (key names and kinds only; the answers
+ *   below are made up from those lists, no real value): each of the four confirmed shapes reads whole — the test route's
+ *   null folder and empty end of reception included —; a key more or less, an unknown kind of input, another kind's key,
+ *   a condition on who receives it, a value of a shape not seen → not read whole;
  * - no read of the map carries a query but the folder list's `group` / `page` (never `?copy=1`);
  * - the inspection, end to end on made-up answers: a good copy is ✓; the copy still pointing at its source's action, the
  *   tags left as the source's, a template changed, the account moving → ✗ or 「読み取れませんでした」, never ✓;
@@ -28,14 +30,15 @@ import { CARRIED_FILE, CONNECTORS_DIR, APPROVED_FILE, folderHash } from '../scri
 const { map, reads, readers } = lstepMap()
 const line = LINES[0]
 
-// --- the keys stage 0 recorded (「ブラウザ操作の汎用化_段0の結果」 R4, R10, R11; key names only) ---
+// --- the keys stage 0 recorded and 追記2 confirmed whole (「ブラウザ操作の汎用化_段0の結果」 R4, R10, R11, 追記2; names only) ---
 
 const LANDING_KEYS = ['name', 'qr_text', 'action_id', 'action_texts', 'prevent_default', 'only_welcome', 'cv_head', 'cv_body',
   'group_id', 'from_date', 'from_time', 'to_date', 'to_time', 'out_of_period_message', 'latitude', 'longitude', 'radius',
   'custom_params', 'only_once_param_sync']
-const ROW_KEYS = ['id', 'name', 'follow_url', 'qr_url', 'validity_period_from', 'validity_period_to']
+const ROW_KEYS = ['id', 'created_at', 'updated_at', 'name', 'counter', 'counter_member', 'order', 'only_welcome', 'prevent_default',
+  'validity_period_from', 'validity_period_to', 'follow_url', 'qr_url', 'action_texts', 'action_twice_type', 'custom_params_script_tag', 'group']
 const ACTION_KEYS = ['inputs', 'aid', 'a_twice_type', 'a_name', 'funnel_descriptions', 'group_id']
-const INPUT_KEYS = ['type', 'tag_ids', 'egg_id', 'episode_id', 'firetype']
+const INPUT_KEYS = ['type', 'tag_ids', 'egg_id', 'episode_id', 'firetype', 'member_query_id', 'send_member_query_id']
 
 const topKeys = (thing: string) => Object.keys(map.things[thing].keys).filter(k => !k.includes('.')).sort()
 
@@ -45,6 +48,8 @@ test('the map lists exactly the keys stage 0 recorded', () => {
   assert.deepEqual(topKeys('action_set'), [...ACTION_KEYS].sort())
   assert.deepEqual(Object.keys(map.things.action_set.keys).filter(k => k.startsWith('inputs[].')).map(k => k.slice(9)).sort(), [...INPUT_KEYS].sort())
   assert.deepEqual(Object.keys(map.things.landing.keys).filter(k => k.startsWith('custom_params[].')).sort(), ['custom_params[].name', 'custom_params[].var_id'])
+  assert.deepEqual(Object.keys(map.things.landing_row.keys).filter(k => k.startsWith('group.')).sort(), ['group.id', 'group.name', 'group.order'])
+  assert.equal(map.version, '1.0.1')
 })
 
 // --- made-up answers of those shapes ---
@@ -59,16 +64,19 @@ function landingAnswer(over: Record<string, unknown> = {}): Record<string, unkno
 }
 const sourceAnswer = (over: Record<string, unknown> = {}) => landingAnswer({ name: '見本の流入経路 A', action_id: 7001, to_date: '2026-11-26', ...over })
 const rowAnswer = (over: Record<string, unknown> = {}) => ({
-  id: 501, name: '見本の流入経路 B', follow_url: 'https://example.test/follow/x', qr_url: 'https://example.test/qr/x',
-  validity_period_from: null, validity_period_to: '2026-12-03 17:00', ...over,
+  id: 501, created_at: '2026-11-20 10:00:00', updated_at: '2026-11-21 10:00:00', name: '見本の流入経路 B', counter: 3,
+  counter_member: 2, order: 1, only_welcome: 0, prevent_default: 0, validity_period_from: null, validity_period_to: '2026-12-03 17:00',
+  follow_url: 'https://example.test/follow/x', qr_url: 'https://example.test/qr/x', action_texts: ['見本'], action_twice_type: 1,
+  custom_params_script_tag: '', group: { id: 9, name: '見本のフォルダ', order: 1 }, ...over,
 })
+const NO_CONDITION = { member_query_id: null, send_member_query_id: null }
 function actionAnswer(tags: number[], over: Record<string, unknown> = {}): Record<string, unknown> {
   return {
-    aid: 'x', a_name: '見本のアクション', a_twice_type: 1, funnel_descriptions: [], group_id: null,
+    aid: 7002, a_name: '見本のアクション', a_twice_type: 1, funnel_descriptions: {}, group_id: null,
     inputs: [
-      { type: 13, tag_ids: tags },
-      ...[101, 102].map(e => ({ type: 15, episode_id: e, firetype: 1 })),
-      { type: 12, egg_id: 300 },
+      { type: 13, tag_ids: tags, ...NO_CONDITION },
+      ...['101', '102'].map(e => ({ type: 15, episode_id: e, firetype: 1, ...NO_CONDITION })),
+      { type: 12, egg_id: '300', ...NO_CONDITION },
     ],
     ...over,
   }
@@ -102,16 +110,45 @@ test('a key more, a key less, or a value of an unseen shape → not read whole',
   notRead(read('landing', landingAnswer({ prevent_default: 'yes' }), '501'))
   notRead(read('landing', landingAnswer({ action_id: 0 }), '501'))
   notRead(read('landing', landingAnswer({ custom_params: [{ name: 'a', var_id: 11, secret: 1 }] }), '501'))
-  notRead(read('landing_row', rowAnswer({ created_at: 'x' })))
+  notRead(read('landing_row', rowAnswer({ copied_from: 'x' })))
   notRead(read('landing_row', rowAnswer({ follow_url: '' })))
   notRead(read('action_set', actionAnswer([21], { extra: 1 }), '7002'))
-  notRead(read('action_set', actionAnswer([21], { inputs: [{ type: 14, tag_ids: [1] }] }), '7002'))
-  notRead(read('action_set', actionAnswer([21], { inputs: [{ type: 13, tag_ids: [1], egg_id: 3 }] }), '7002'))
-  notRead(read('action_set', actionAnswer([21], { inputs: [{ type: 13, tag_ids: [] }] }), '7002'))
-  notRead(read('action_set', actionAnswer([21], { inputs: [{ type: 13, tag_ids: [1], member_query_id: 2 }] }), '7002'))
-  notRead(read('action_set', actionAnswer([21], { funnel_descriptions: [{ unknown: 1 }] }), '7002'))
-  // The other kinds' keys may stand as null.
-  assert.equal(read('action_set', actionAnswer([21], { inputs: [{ type: 13, tag_ids: [1], egg_id: null, episode_id: null, firetype: null }] }), '7002').status, 'read')
+  notRead(read('action_set', actionAnswer([21], { inputs: [{ type: 14, tag_ids: [1], ...NO_CONDITION }] }), '7002'))
+  notRead(read('action_set', actionAnswer([21], { inputs: [{ type: 13, tag_ids: [1], egg_id: '3', ...NO_CONDITION }] }), '7002'))
+  notRead(read('action_set', actionAnswer([21], { inputs: [{ type: 13, tag_ids: [], ...NO_CONDITION }] }), '7002'))
+  notRead(read('action_set', actionAnswer([21], { inputs: [{ type: 13, tag_ids: [1], member_query_id: 2, send_member_query_id: null }] }), '7002'))
+  notRead(read('action_set', actionAnswer([21], { inputs: [{ type: 12, egg_id: '3', member_query_id: null, send_member_query_id: 5 }] }), '7002'))
+  notRead(read('action_set', actionAnswer([21], { inputs: [{ type: 13, tag_ids: [1] }] }), '7002'))
+  notRead(read('action_set', actionAnswer([21], { funnel_descriptions: { unknown: 1 } }), '7002'))
+  notRead(read('landing_row', rowAnswer({ group: { id: 9, name: 'x', order: 1, extra: 1 } })))
+  // 1.0.1: exactly each kind's keys — another kind's key, even null, is not read.
+  notRead(read('action_set', actionAnswer([21], { inputs: [{ type: 13, tag_ids: [1], egg_id: null, ...NO_CONDITION }] }), '7002'))
+})
+
+// --- 追記2's four confirmed shapes (key names and kinds as recorded; every value made up) ---
+
+test('the confirmed shapes read whole: a round\'s route, the test route (no folder, no end), the row and each kind of input', () => {
+  // A round's route: a folder, an end of reception, empty starts, null place, no variables.
+  const round = landingAnswer({ group_id: 12, from_date: '', from_time: '', to_date: '2026-11-26', to_time: '18:20',
+    latitude: null, longitude: null, radius: null, custom_params: [], cv_head: '', cv_body: '', qr_text: '見本', out_of_period_message: '' })
+  const r = read('landing', round, '601')
+  assert.equal(r.status, 'read')
+  if (r.status === 'read') assert.deepEqual([r.state.from_date, r.state.to_date, r.state.to_time, r.state.group_id], [null, '2026-11-26', '18:20', '12'])
+  // The test route: no folder (null) and no end (empty strings) — read whole, the card shows 「なし」.
+  const testRoute = read('landing', landingAnswer({ group_id: null, from_date: '', from_time: '', to_date: '', to_time: '', custom_params: [] }), '602')
+  assert.equal(testRoute.status, 'read')
+  if (testRoute.status === 'read') assert.deepEqual([testRoute.state.group_id, testRoute.state.to_date, testRoute.state.to_time], [null, null, null])
+  assert.equal(Object.keys(round).length, 19)
+  // The row with its folder object; also one whose folder is null (未分類, not seen but harmless: never compared).
+  assert.equal(read('landing_row', rowAnswer()).status, 'read')
+  assert.equal(Object.keys(rowAnswer()).length, 17)
+  assert.equal(read('landing_row', rowAnswer({ group: null })).status, 'read')
+  // An action: 6 keys, aid a number, funnel_descriptions an empty object, a_name / group_id null; ids as strings / numbers.
+  const action = actionAnswer([21, 22], { a_name: null })
+  assert.equal(Object.keys(action).length, 6)
+  const a = read('action_set', action, '7002')
+  assert.equal(a.status, 'read')
+  if (a.status === 'read') assert.deepEqual(a.state, { id: '7002', name: null, twice: '1', tags: ['21', '22'], templates: ['300'], stops: ['101_1', '102_1'] })
 })
 
 test('no read carries a query but the folder list\'s own (never ?copy=1)', () => {
@@ -180,7 +217,7 @@ test('a new action with the source\'s tags → ✗ on the tags only', () => {
 })
 
 test('a template or a cancel changed, or the route\'s folder → ✗ naming it', () => {
-  const changed = actionAnswer([22], { inputs: [{ type: 13, tag_ids: [22] }, { type: 15, episode_id: 101, firetype: 1 }, { type: 12, egg_id: 301 }] })
+  const changed = actionAnswer([22], { inputs: [{ type: 13, tag_ids: [22], ...NO_CONDITION }, { type: 15, episode_id: '101', firetype: 1, ...NO_CONDITION }, { type: 12, egg_id: '301', ...NO_CONDITION }] })
   const { card } = inspect(facts({ action: changed }))
   assert.equal(card.checks[4].mark, 'ng')
   assert.deepEqual(card.checks[4].fields, ['送るテンプレート', '止めるリマインダ（番号_止め方）'])
@@ -197,7 +234,7 @@ test('the account moving during the reads, or not read → nothing ✓', () => {
 })
 
 test('a row of a shape not recorded: the URL 「読み取れませんでした」, the rest still judged, never all ✓', () => {
-  const { card } = inspect(facts({ row: rowAnswer({ created_at: 'x' }) }))
+  const { card } = inspect(facts({ row: rowAnswer({ copied_from: 'x' }) }))
   assert.deepEqual(card.sections[1].rows.map(r => 'value' in r && r.value), [{ status: 'unreadable' }, { status: 'unreadable' }])
   assert.notEqual(card.state, 'all_ok')
   assert.deepEqual(card.checks.map(c => c.mark), ['ok', 'ok', 'ok', 'ok', 'ok'])

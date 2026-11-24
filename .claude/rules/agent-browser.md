@@ -1226,17 +1226,26 @@ to the approved row and `carried.json`).
   (`wrongObject`).
 - **For the reading path (PR 4 / 5)**: an `id_from: 'address'` thing is "the object asked for" only if main builds the
   address from the line's wanted id and passes that same string as `address` — never an id the AI supplies.
-- **Lステップ map 1.0.0** (`client/connector-maps/lstep/map.ts`; stage 0 「段0の結果」 R3, R4, R8, R10, R11, key names
+- **Lステップ map 1.0.0 → 1.0.1** (`client/connector-maps/lstep/map.ts`; stage 0 「段0の結果」 R3, R4, R8, R10, R11, key names
   only): `landing` (`GET /api/landings/{id}`, its id from the address; the R11 keys, `action_texts` and a variable's
   `name` not compared), `landing_row` (one entry of `GET /api/landings?group=&page=`, 50 a page: the friend-add and QR
   addresses), `action_set` (`GET /api/actions/{id}`, id from the address: `inputs` — 13 `tag_ids`, 12 `egg_id`, 15
   `episode_id` + `firetype`, any other type not read —, `a_name`, `a_twice_type`; `aid`, `funnel_descriptions`,
   `group_id` not compared). All three bound to the LINE account; `action_set`'s note says actions can be shared (R3).
   Stage 0 recorded the row's and the action's keys **in part**: an answer with more keys is not read whole and the card
-  says so (availability) until a reviewed map version lists them — part of approving the line. **Never `?copy=1`**:
+  says so (availability) until a reviewed map version lists them — part of approving the line. **Map 1.0.1** (PR 4,
+  owner decision 2 on #818): the full key sets confirmed read only with the owner's login (「段0の結果」 追記2, 0 writes):
+  `landing` exactly 19 keys (`group_id` a number or null, `from_*` empty strings, `to_date` / `to_time` a value or an
+  empty string, the place null, `custom_params` empty); `landing_row` exactly 17 (the unused ones and the folder object
+  `group` {id, name, order} `ignored`; the list's envelope keys in `LSTEP_MAP_READS` for the reading code); `action_set`
+  exactly 6 (`aid` equal to the number asked, still unused; `funnel_descriptions` an empty object); each input exactly
+  its kind's keys plus `member_query_id` / `send_member_query_id`, which must be null (a condition on who receives it is
+  never compared away); `egg_id` / `episode_id` are strings. The fields did not change, so the line's meaning hash is
+  the same on 1.0.0 and 1.0.1 (only the mechanics moved). **Never `?copy=1`**:
   no read carries a query but the folder list's `group` / `page` (tested). No business word (a round's tag, its time, its
   source) is in the map or the lines (tested).
-- **The first line** `landing_inspect` 「流入経路を点検する」 (`client/browser-lines/lstep.ts`, `pending`): values `landing`
+- **The first line** `landing_inspect` 「流入経路を点検する」 (`client/browser-lines/lstep.ts`; on map 1.0.1 **`approved`**,
+  owner decision on #818 after the full-key confirmation — on 1.0.0 it stays `pending`): values `landing`
   and `source` (targets: what the site showed, §16-4); reads the route, its list row, its action, the source and the
   source's action; checks `unchanged_except(landing, source, [name, to_date, to_time, action_id])`,
   `changed_from(landing, source, [action_id])`, `changed_from(action_set, source_action_set, [tags])`,
