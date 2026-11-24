@@ -6,7 +6,8 @@
  *   (`browserMapProblem`), every line checked against its map (`browserOpenedLineProblem`) and both of its hashes
  *   recomputed (`browserLineMeaning` / `browserLineMechanics`) — a row whose stored hash differs is left out, never
  *   trusted. A line's `status` is the reviewed one (`pending` / `approved` / `retired`).
- * - **The gate** (create, approve, claim, every permit): the line is an `approved` row whose site, name, version, map
+ * - **The gate** (create, approve, claim, every permit): first this PC (an enabled registration of the member, and the
+ *   plan's own registration: services/browser-devices.ts); then the line is an `approved` row whose site, name, version, map
  *   version, meaning hash and mechanics hash are **all exactly** the request's (`BROWSER_LINE_NOT_APPROVED` /
  *   `BROWSER_LINE_RETIRED`); the member's browser setting lets them use the site at the level the line needs; the AI is
  *   not stopped; the member holds a grant for the line's meaning on this mechanics hash or one the row's reviewed
@@ -43,6 +44,7 @@ import type {
   BrowserInspectionResult, BrowserLineClaim, BrowserLineExecutionView, BrowserLineGrantsView, BrowserLinePermit, BrowserLinePlanView,
   BrowserLineRef, BrowserLineReportAnswer, BrowserShapeNoticeView, BrowserWriteResult,
 } from '../../shared/types/browser-lines'
+import type { BrowserLinesMine } from '../../shared/types/browser-devices'
 import type { AccountDirectory } from '../ports/accounts'
 import type { BrowserConnectorCatalog } from '../ports/browser-plans'
 import type { BrowserLineExecutionLookup, BrowserLineExecutionRow, BrowserLinePlanRow, BrowserLineRepository, BrowserOpenedListSource } from '../ports/browser-lines'
@@ -53,6 +55,7 @@ import type { MembershipRepository } from '../ports/memberships'
 import type { Transactions } from '../ports/transactions'
 import { hashCanonical } from '../lib/content-hash'
 import { hasFullAccess, type Member } from './access'
+import type { BrowserDeviceGate } from './browser-devices'
 import { BROWSER_LINE_TIMES, createBrowserLineSteps, type BrowserLineWritesContent } from './browser-line-steps'
 import { ok, refuse, type Outcome, type Refusal } from './outcome'
 
@@ -71,6 +74,8 @@ export interface BrowserLineDeps {
   accounts: Pick<AccountDirectory, 'byIds'>
   browserPolicy: (member: Member) => BrowserOperationSettings
   aiStops: (member: Member) => { all: boolean; tools: readonly string[] }
+  /** This PC's registration (agent-browser.md "This PC's registration"): the first check of the gate. */
+  devices: BrowserDeviceGate
   /** Tell these members their notices changed (push channel). */
   noticesChanged?: (companyId: string, userIds: string[]) => void
   log?: Pick<Console, 'warn'>
@@ -260,15 +265,21 @@ export function createBrowserLineService(deps: BrowserLineDeps) {
     return settings.mode === 'on' && !!setting && levelAllows(setting.level, effect)
   }
 
-  /** Every rule a line plan's step must pass now, in this order (create, approve, claim, every permit). */
-  function gate(member: Member, ref: BrowserLineRef, effect: BrowserOperationEffect): Outcome<LoadedLine> {
+  /**
+   * Every rule a line plan's step must pass now, in this order (create, approve, claim, every permit): this PC (an enabled
+   * registration of the member, the plan's own registration — `devices.check`), the line, the setting, the stop, the grant.
+   */
+  function gate(member: Member, ref: BrowserLineRef, effect: BrowserOperationEffect, device: { key: string | undefined; planId: string | null }):
+    Outcome<LoadedLine & { deviceId: string | null }> {
+    const pc = deps.devices.check(member, device.key, device.planId === null ? null : { path: 'line', planId: device.planId })
+    if (!pc.ok) return pc
     const line = findLine(ref)
     if (!line || line.row.status === 'pending') return refuse('conflict', W.notApproved, { code: 'BROWSER_LINE_NOT_APPROVED' })
     if (line.row.status !== 'approved') return refuse('conflict', W.retired, { code: 'BROWSER_LINE_RETIRED' })
     if (!siteAllowed(member, ref.site, effect)) return refuse('conflict', W.notAllowed, { code: 'BROWSER_NOT_ALLOWED' })
     if (browserAiStopped(deps.aiStops(member))) return refuse('conflict', W.aiStopped, { code: 'BROWSER_AI_STOPPED' })
     if (!granted(member, line.row)) return refuse('forbidden', W.notGranted, { code: 'BROWSER_TYPE_NOT_GRANTED' })
-    return ok(line)
+    return ok({ ...line, deviceId: pc.value.deviceId })
   }
 
   /**
@@ -276,8 +287,8 @@ export function createBrowserLineService(deps: BrowserLineDeps) {
    * line has a write part since generalization PR 6 (`browser-write-line.ts`, its line judge §4-1 / I4), but the plan's
    * writes are not matched to the line's yet; until a later build does, every plan of writes stops here, whatever a row says.
    */
-  function writeGate(member: Member, p: BrowserLinePlanRow): Outcome<LoadedLine> {
-    const passed = gate(member, planRef(p), 'write')
+  function writeGate(member: Member, p: BrowserLinePlanRow, deviceKey: string | undefined): Outcome<LoadedLine> {
+    const passed = gate(member, planRef(p), 'write', { key: deviceKey, planId: p.id })
     if (!passed.ok) return passed
     return refuse('conflict', W.writesNotYet, { code: 'BROWSER_LINE_WRITES_NOT_YET', writes: p.writes })
   }
@@ -400,13 +411,13 @@ export function createBrowserLineService(deps: BrowserLineDeps) {
      * POST /browser-line-plans: an inspection of an approved line (the gate at level 「見るだけ」), its values checked for
      * where they come from (§16-4). A line that writes is refused (`BROWSER_LINE_WRITES_NOT_YET`).
      */
-    create(member: Member, body: unknown): Outcome<BrowserLinePlanView> {
+    create(member: Member, body: unknown, deviceKey?: string): Outcome<BrowserLinePlanView> {
       if (!isMap(body) || Object.keys(body).some(k => !['line', 'values', 'conversationId'].includes(k))) return refuse('bad-request', W.badPlan, { code: 'BROWSER_BAD_PLAN' })
       const ref = parseRef(body.line)
       if (!ref || (body.conversationId !== undefined && (typeof body.conversationId !== 'string' || !CONVERSATION_RE.test(body.conversationId)))) {
         return refuse('bad-request', W.badPlan, { code: 'BROWSER_BAD_PLAN' })
       }
-      const passed = gate(member, ref, 'read')
+      const passed = gate(member, ref, 'read', { key: deviceKey, planId: null })
       if (!passed.ok) return passed
       const line = passed.value
       // A line that writes is never made an inspection (it would pass the 「見るだけ」 gate); its plans are a later build's.
@@ -434,7 +445,11 @@ export function createBrowserLineService(deps: BrowserLineDeps) {
         contentHash: hashCanonical(canonical), state: 'open', closeReason: null, createdAt: content.createdAt, expiresAt: content.expiresAt,
         approvedAt: null, closedAt: null, conversationId: content.conversation, result: null, reportedAt: null,
       }
-      repo(member.companyId).insertPlan(row)
+      // The plan and the PC that made it, together: it goes on only on that registration.
+      transactions.run(() => {
+        repo(member.companyId).insertPlan(row)
+        deps.devices.bind(member, 'line', row.id, passed.value.deviceId)
+      })
       return ok(planView(member.companyId, row))
     },
 
@@ -480,7 +495,7 @@ export function createBrowserLineService(deps: BrowserLineDeps) {
     },
 
     /** POST /browser-line-plans/:planId/approve { contentHash }: a plan of writes (none can be made in this build). */
-    approve(member: Member, planId: string, body: unknown): Outcome<BrowserLinePlanView> {
+    approve(member: Member, planId: string, body: unknown, deviceKey?: string): Outcome<BrowserLinePlanView> {
       const found = ownPlan(member, planId)
       if (!found) return planMissing()
       if (frozen(found)) return frozenRefusal()
@@ -492,7 +507,7 @@ export function createBrowserLineService(deps: BrowserLineDeps) {
         if (p.state === 'closed' && p.closeReason === 'expired') return refuse('conflict', W.expired, { code: 'BROWSER_PLAN_EXPIRED' })
         if (p.state !== 'draft') return refuse('conflict', W.notDraft, { code: 'BROWSER_PLAN_NOT_DRAFT' })
         if (shown !== p.contentHash) return refuse('conflict', W.contentChanged, { code: 'CONTENT_CHANGED' })
-        const passed = writeGate(member, p)
+        const passed = writeGate(member, p, deviceKey)
         if (!passed.ok) return passed
         if (!repo(member.companyId).setPlanState(p.id, 'draft', 'approved', { approvedAt: iso(now) })) return refuse('conflict', W.notDraft, { code: 'BROWSER_PLAN_NOT_DRAFT' })
         return ok(planView(member.companyId, repo(member.companyId).plan(p.id) as BrowserLinePlanRow))
@@ -522,7 +537,7 @@ export function createBrowserLineService(deps: BrowserLineDeps) {
     },
 
     /** POST /browser-line-plans/:planId/claim: once per plan of writes; every lock in one transaction; the secret once. */
-    claim(member: Member, planId: string): Outcome<BrowserLineClaim> {
+    claim(member: Member, planId: string, deviceKey?: string): Outcome<BrowserLineClaim> {
       const found = ownPlan(member, planId)
       if (!found) return planMissing()
       if (frozen(found)) return frozenRefusal()
@@ -531,7 +546,7 @@ export function createBrowserLineService(deps: BrowserLineDeps) {
         const p = settlePlan(member.companyId, found, now)
         if (p.state === 'closed' && p.closeReason === 'expired') return refuse('conflict', W.expired, { code: 'BROWSER_PLAN_EXPIRED' })
         if (p.state !== 'approved' || p.writes === 0) return refuse('conflict', W.notApprovedYet, { code: 'BROWSER_PLAN_NOT_APPROVED' })
-        const passed = writeGate(member, p)
+        const passed = writeGate(member, p, deviceKey)
         if (!passed.ok) return passed
         const secret = ids.newToken()
         const claimed = steps.claim(member.companyId, p, writesContent(contentOf(p)), tokenDigest.digest(secret), now)
@@ -541,7 +556,7 @@ export function createBrowserLineService(deps: BrowserLineDeps) {
     },
 
     /** POST /browser-line-executions/:executionId/permit { index } (the secret in a header): one write's permit, the gate again. */
-    permit(member: Member, executionId: string, secret: string | undefined, body: unknown): Outcome<BrowserLinePermit> {
+    permit(member: Member, executionId: string, secret: string | undefined, body: unknown, deviceKey?: string): Outcome<BrowserLinePermit> {
       if (!EXEC_ID_RE.test(executionId) || typeof secret !== 'string' || secret.length < 32 || secret.length > 200) return execMissing()
       const found = repo(member.companyId).execution(executionId)
       if (!found || found.userId !== member.userId || found.secretHash !== tokenDigest.digest(secret)) return execMissing()
@@ -551,7 +566,7 @@ export function createBrowserLineService(deps: BrowserLineDeps) {
         const now = clock.nowMs()
         const p = repo(member.companyId).plan(found.planId) as BrowserLinePlanRow
         if (frozen(p)) return frozenRefusal()
-        const gateNow = (): Refusal | null => { const g = writeGate(member, p); return g.ok ? null : g }
+        const gateNow = (): Refusal | null => { const g = writeGate(member, p, deviceKey); return g.ok ? null : g }
         return steps.permit(member.companyId, found, p, writesContent(contentOf(p)), index, gateNow, now)
       })
     },
@@ -620,6 +635,17 @@ export function createBrowserLineService(deps: BrowserLineDeps) {
     grants(member: Member): Outcome<BrowserLineGrantsView> {
       if (!hasFullAccess(member.role)) return refuse('forbidden', W.manageForbidden)
       return ok(grantsView(member))
+    },
+
+    /**
+     * GET /browser-lines-mine: the approved lines the member holds a grant in force for — names, labels and whether the line
+     * writes, nothing else (the app's settings screen and request tool: whether to offer anything at all). Any member.
+     */
+    mine(member: Member): Outcome<BrowserLinesMine> {
+      return ok({
+        lines: load().lines.filter(l => l.row.status === 'approved' && granted(member, l.row))
+          .map(l => ({ ...refOf(l), label: lineName(l), writes: l.row.line.writes !== undefined })),
+      })
     },
 
     /**

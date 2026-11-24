@@ -201,6 +201,10 @@ const HANDLE_TABLES: Record<string, string[]> = {
   browser_line_grants: ['adapters/sqlite/browser-lines.ts'],
   browser_shape_notices: ['adapters/sqlite/browser-lines.ts'],
   browser_shape_report_counts: ['adapters/sqlite/browser-lines.ts'],
+  // The PCs used for 「ブラウザ操作」 (agent-browser.md "This PC's registration").
+  browser_devices: ['adapters/sqlite/browser-devices.ts'],
+  browser_device_history: ['adapters/sqlite/browser-devices.ts'],
+  browser_plan_devices: ['adapters/sqlite/browser-devices.ts'],
   // lane C ▲
 }
 /** Handle repository factories (each bound to one company): only the handle source builds them. */
@@ -224,6 +228,7 @@ const HANDLE_FACTORIES = [
   'sqlitePluginRoleRepository',
   'sqliteBrowserPlanRepository',
   'sqliteBrowserLineRepository',
+  'sqliteBrowserDeviceRepository',
   // lane C ▲
 ]
 const HANDLE_SOURCE = 'adapters/sqlite/company-data.ts'

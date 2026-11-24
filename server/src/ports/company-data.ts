@@ -58,6 +58,7 @@ import type { PluginStepRepository } from './plugin-steps'
 import type { PluginRoleRepository } from './plugin-roles'
 import type { BrowserPlanRepository } from './browser-plans'
 import type { BrowserLineRepository } from './browser-lines'
+import type { BrowserDeviceRepository } from './browser-devices'
 // lane C ▲
 export interface CompanyData {
   /** The company this handle is limited to. */
@@ -123,6 +124,8 @@ export interface CompanyData {
   readonly browserPlans: BrowserPlanRepository
   /** Plans of opened lines, write executions and one row per write, reports, locks, per-line grants, shape notices (ports/browser-lines.ts, agent-browser.md). */
   readonly browserLines: BrowserLineRepository
+  /** The PCs used for 「ブラウザ操作」: registrations, their history, each plan's PC (ports/browser-devices.ts, agent-browser.md "This PC's registration"). */
+  readonly browserDevices: BrowserDeviceRepository
   // lane C ▲
   /** Every row of the company, table by table (the per-company export, src/cli/company-archive.ts). */
   readonly archive: CompanyRowsExport

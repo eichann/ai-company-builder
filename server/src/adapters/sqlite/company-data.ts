@@ -38,6 +38,7 @@ import { sqlitePluginStepRepository } from './plugin-steps'
 import { sqlitePluginRoleRepository } from './plugin-roles'
 import { sqliteBrowserPlanRepository } from './browser-plans'
 import { sqliteBrowserLineRepository } from './browser-lines'
+import { sqliteBrowserDeviceRepository } from './browser-devices'
 // lane C ▲
 /** The scope methods that can take a private folder away from someone: tracked changes only. */
 function gatedScopes(scopes: ScopeRepository, gate: ReaderChangeGate, companyId: string): ScopeRepository {
@@ -104,6 +105,7 @@ export function sqliteCompanyData(conn: Database.Database, options: { readerChan
         pluginRoles: sqlitePluginRoleRepository(conn, companyId),
         browserPlans: sqliteBrowserPlanRepository(conn, companyId),
         browserLines: sqliteBrowserLineRepository(conn, companyId),
+        browserDevices: sqliteBrowserDeviceRepository(conn, companyId),
         // lane C ▲
         archive: sqliteCompanyRowsExport(conn, companyId),
       }

@@ -39,6 +39,7 @@ import { migratePluginStepRequestCloser, pluginStepSchema } from './schema/plugi
 import { pluginRoleSchema } from './schema/plugin-roles'
 import { browserPlanSchema, migrateBrowserExecutionMonotonic, migrateBrowserPlanSummary } from './schema/browser-plans'
 import { browserLineSchema } from './schema/browser-lines'
+import { browserDeviceSchema } from './schema/browser-devices'
 // lane C ▲
 // The migrations tests run on their own against older databases.
 export { migrateCompanyFolderKind, migrateInvitationClaims } from './schema/company'
@@ -115,6 +116,8 @@ const SCHEMA = [
   browserPlanSchema,
   // Plans of opened lines (agent-browser.md "Plans of opened lines on the server"): new tables only.
   browserLineSchema,
+  // The PCs used for 「ブラウザ操作」 (agent-browser.md "This PC's registration"): new tables only.
+  browserDeviceSchema,
   // lane C ▲
 ]
 

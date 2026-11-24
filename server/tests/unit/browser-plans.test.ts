@@ -28,6 +28,7 @@ import type { CompanyDataSource } from '../../src/ports/company-data'
 import type { BrowserOperationSettings } from '../../../shared/core/browser-operation'
 import { BROWSER_REPORT_REASONS, browserObjectLockKey } from '../../../shared/core/browser-plans'
 import type { Member } from '../../src/services/access'
+import { anyPc } from '../helpers/browser-devices'
 
 const T0 = Date.parse('2026-11-21T00:00:00.000Z')
 const CO = 'co-1'
@@ -67,7 +68,7 @@ function build() {
     ids: { newId: () => randomBytes(8).toString('hex'), newToken: () => randomBytes(32).toString('hex') },
     tokenDigest: sha256TokenDigest, catalog: { combinations: () => rows }, executionLookup: sqliteBrowserExecutionLookup(conn),
     memberships: sqliteMembershipRepository(conn), accounts: { byIds: () => new Map() } as never,
-    browserPolicy: () => policy, aiStops: () => stops, log: { warn: () => {} },
+    browserPolicy: () => policy, aiStops: () => stops, devices: anyPc, log: { warn: () => {} },
   })
 }
 
@@ -670,7 +671,7 @@ describe('compare-and-set', () => {
       ids: { newId: () => randomBytes(8).toString('hex'), newToken: () => randomBytes(32).toString('hex') },
       tokenDigest: sha256TokenDigest, catalog: { combinations: () => rows }, executionLookup: sqliteBrowserExecutionLookup(conn),
       memberships: sqliteMembershipRepository(conn), accounts: { byIds: () => new Map() } as never,
-      browserPolicy: () => policy, aiStops: () => stops, log: { warn: () => {} },
+      browserPolicy: () => policy, aiStops: () => stops, devices: anyPc, log: { warn: () => {} },
     })
   }
 
