@@ -326,6 +326,7 @@ describe('a set watch a member proposed from the app (schema 5, 4b-4 PR6b)', () 
     expect(await within(dialog).findByLabelText('版の出どころ')).toHaveTextContent('第1版：社員が出した版')
     const trigger = setProposalDef().trigger
     if (!isSetTrigger(trigger)) throw new Error('not a set watch')
+    await userEvent.click(within(dialog).getByRole('button', { name: 'くわしく' }))
     const conditions = within(dialog).getByLabelText('動く条件')
     for (const line of setWatchConditionLines(trigger)) expect(conditions).toHaveTextContent(line)
     expect(dialog).toHaveTextContent('「営業部」の Skill「proposal」・「経営企画」の Skill「pricing」')

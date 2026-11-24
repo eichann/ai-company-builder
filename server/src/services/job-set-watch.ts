@@ -29,6 +29,7 @@ import type { CompanyData } from '../ports/company-data'
 import type { RecordRow } from '../ports/records'
 import type { Member } from './access'
 import { isMeetingPerson } from './meeting-people'
+import { companyNow } from './notifications'
 import { recordReader } from './record-access'
 import type { ServiceCreateInput } from './record-engine'
 import { currentTypes } from './record-index'
@@ -233,10 +234,11 @@ export function setWatchMakesTask(report: JobSetReport): boolean {
  * (`ai_job_set_reports`, read only through its visibility) and the PC's. **PR3b**: with update proposals (`updates` ≥ 1) its
  * description says how many, in fixed words (「更新案が N 件あります。」), and a 見送る's says no たたき台 was made — its name then
  * 「…の会議の更新案を確かめる」 (the description stands for the 見送る notice, which is not written). Quiet (D9): the やること in
- * 「あなたの番」 is the notice.
+ * 「あなたの番」 is the notice — so **its due is the company day it is made** (`madeAt`, owner FB 2026-11-25, 使い心地のメモ #39:
+ * with no due, a 未着手 やること rests in the list's 「いつか」, `restingTask`, where nobody found it). A date only, like the name.
  */
 export function setWatchTaskInput(handle: CompanyData, definition: JobDefinition,
-  occ: { id: string; dueAt: string; timeZone: string; eventMeetingId?: string | null }, runId: string, report: JobSetReport): ServiceCreateInput {
+  occ: { id: string; dueAt: string; timeZone: string; eventMeetingId?: string | null }, runId: string, report: JobSetReport, madeAt: string): ServiceCreateInput {
   const meetingId = occ.eventMeetingId ?? ''
   const at = fieldsNow(handle, meetingId).fields.meeting_at
   const declined = report.decision === 'decline'
@@ -245,7 +247,8 @@ export function setWatchTaskInput(handle: CompanyData, definition: JobDefinition
     type: 'task', id: occurrenceTaskId(occ.id),
     title: setWatchTaskTitle(typeof at === 'string' ? at : null, occ.dueAt, occ.timeZone, declined ? '更新案' : 'たたき台'),
     ...(summary ? { summary } : {}),
-    personalOwner: definition.actingUser, fields: { assignee: definition.actingUser }, links: { meeting: [meetingId] },
+    personalOwner: definition.actingUser, fields: { assignee: definition.actingUser, due: companyNow(Date.parse(madeAt), occ.timeZone).slice(0, 10) },
+    links: { meeting: [meetingId] },
     actor: { ...JOB_ACTOR, runId }, note: '定期の仕事から作りました', quiet: true,
   }
 }

@@ -7,9 +7,10 @@ import { Button, Callout, Card, SubHeading } from '../../../shared/ui/primitives
 import { JOB_CANDIDATE_NOTES, type SetWatchSkill, type ShownJobCandidate } from '../../../../shared/job-proposals'
 import { JOB_SET_WATCH_OPENED } from '../../../../../shared/core/jobs'
 import { jobSetTriggerText, setWatchConditionLines } from '../../../../../shared/core/job-words'
+import { JobWordsList } from './JobWordsList'
 import { createSetWatchCandidate, discardSetWatchCandidate, getSetWatchSkills, submitSetWatchCandidate } from '../api'
 import {
-  acceptanceLines, setWatchChoiceOf, setWatchReadChoices, setWatchRunChoices, setWatchSkillKey, setWatchSkillLabel, toggleSetWatchRead, type SetWatchPick,
+  setWatchChoiceOf, setWatchReadChoices, setWatchRunChoices, setWatchSkillKey, setWatchSkillLabel, toggleSetWatchRead, type SetWatchPick,
 } from '../model'
 
 type Stage = { kind: 'closed' } | { kind: 'choosing'; skills: SetWatchSkill[] | null } | { kind: 'candidate'; candidate: ShownJobCandidate }
@@ -97,9 +98,7 @@ export function SetWatchAdd({ companyId, onSubmitted }: { companyId: string; onS
       )}
       {stage.kind === 'candidate' && (
         <div className="space-y-3">
-          <ul aria-label="見張りの案" className="space-y-1 text-body text-text">
-            {acceptanceLines(stage.candidate.definition).map(l => <li key={l}>{l}</li>)}
-          </ul>
+          <JobWordsList definition={stage.candidate.definition} label="見張りの案" />
           <ul className="space-y-1 text-small text-text-muted">{NOTES.map(n => <li key={n}>{n}</li>)}</ul>
           <div className="flex flex-wrap items-center gap-2">
             <Button size="sm" variant="primary" disabled={busy} onClick={() => void submit(stage.candidate)}>これで管理者に出す</Button>

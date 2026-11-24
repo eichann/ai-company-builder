@@ -86,6 +86,17 @@ export function dueText(due: string, now: CompanyNow): string {
   return `${m[1] === now.date.slice(0, 4) ? md : `${m[1]}/${md}`}${time}`
 }
 
+/**
+ * A 「議事録を確認する」 row's meeting, in company time: 「会議 11/24（月） 10:00」, 「会議 今日 10:00」 — so several of one
+ * meeting title are told apart (使い心地のメモ #40). Null for a time that does not parse.
+ */
+export function meetingRowText(meetingAt: string, now: CompanyNow): string | null {
+  const ms = Date.parse(meetingAt)
+  if (Number.isNaN(ms)) return null
+  const at = companyNow(ms)
+  return `会議 ${dueText(`${at.date}T${at.time}`, now)}`
+}
+
 /** Earliest due first (a day before its own times), no due last; then by title. */
 export function byDue(a: TaskListItem, b: TaskListItem): number {
   if (a.due !== b.due) {

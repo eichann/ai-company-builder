@@ -504,3 +504,36 @@ test('a meeting\'s proposals: the buttons follow the type\'s who — every reade
   assert.deepEqual(before.proposals[0].may, { adopt: false, dismiss: false, proposeAgain: false, keepApart: false })
   assert.deepEqual(before.proposals[1].may, { adopt: true, dismiss: true, proposeAgain: true, keepApart: false })
 })
+
+// 使い心地のメモ #40: several 「議事録を確認する：<会議名>」 of one title side by side. Each row carries its meeting's time —
+// only from the meeting the server answered with the task (it lists a linked record only while the member reads it).
+test('a 「議事録を確認する」 row carries its meeting\'s time from the linked meeting the server answered; none when the server left the meeting out', async () => {
+  const empty = { status: 200, body: { data: { total: 0, records: [] } } }
+  const review = (id: string) => rec(id, 'todo', { task_kind: 'minutes_review' }, { title: '議事録を確認する：A社 定例' })
+  const meeting = { id: 'meeting-aaaaaa01', type: 'meeting', typeVersion: 5, title: 'A社 定例', summary: '', path: null, state: 'read', fields: { meeting_at: '2026-11-24T01:00:00.000Z' }, version: 4, updatedAt: '2026-11-24T02:00:00.000Z' }
+  const detail = (r: RecordSummary, links: unknown[]) => ({ status: 200, body: { data: { record: r, links } } })
+  const homework = rec('task-hw0001', 'todo')
+  const routes: Record<string, { status: number; body: unknown }> = {
+    '/api/me': { status: 200, body: { data: { id: ME } } },
+    'GET /api/companies/co1/records/my-turn': { status: 200, body: { data: { total: 3, records: [review('task-rv0001'), review('task-rv0002'), homework] } } },
+    'GET /api/companies/co1/records/ai-turn': empty,
+    'GET /api/companies/co1/records/item/task-rv0001': detail(review('task-rv0001'), [{ name: 'meeting', direction: 'out', record: meeting }]),
+    // The member no longer reads this one's meeting: the server answers the link without its record.
+    'GET /api/companies/co1/records/item/task-rv0002': detail(review('task-rv0002'), [{ name: 'meeting', direction: 'out' }]),
+    // Not a 「議事録を確認する」: a meeting's homework says nothing of the meeting's time.
+    'GET /api/companies/co1/records/item/task-hw0001': detail(homework, [{ name: 'meeting', direction: 'out', record: meeting }]),
+  }
+  const api = createTasksApi({
+    baseUrl: () => 'https://acb.test', cookies: () => ['s=1'], log: { warn: () => {} }, now: () => Date.parse('2026-11-25T06:00:00.000Z'),
+    fetch: (async (url: string, init: RequestInit) => {
+      const path = url.replace('https://acb.test', '')
+      if (path.endsWith('/records/query')) return new Response(JSON.stringify(empty.body), { status: 200 })
+      const a = routes[`${init.method} ${path}`] ?? routes[path] ?? { status: 404, body: {} }
+      return new Response(JSON.stringify(a.body), { status: a.status })
+    }) as unknown as typeof fetch,
+  })
+  const r = await api.list('co1')
+  assert.ok(r.success)
+  const at = Object.fromEntries(r.data.items.map(i => [i.id, i.meetingAt ?? null]))
+  assert.deepEqual(at, { 'task-rv0001': '2026-11-24T01:00:00.000Z', 'task-rv0002': null, 'task-hw0001': null })
+})

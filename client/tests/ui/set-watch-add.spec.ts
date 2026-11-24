@@ -14,8 +14,16 @@ test('choose, see the 案 in the 受け取る words, then send exactly what was 
   await expect(make).toBeEnabled()
   await page.getByRole('checkbox', { name: 'sales-proposal-v1（法人ソリューション）' }).check()
   await make.click()
-  const lines = page.getByRole('list', { name: '見張りの案' })
+  // Three lines first (使い心地のメモ #37); every line of the consent stays behind ［くわしく］.
+  const summary = page.getByRole('list', { name: '見張りの案（要点）' })
+  await expect(summary.getByRole('listitem')).toHaveCount(3)
+  await expect(summary).toContainText('「議事録を確認する」を、あなたが完了にしたあと')
+  await expect(summary).toContainText('［反映する］を押すまで')
+  const lines = page.getByRole('list', { name: '見張りの案', exact: true })
+  await expect(lines).toHaveCount(0)
+  await page.getByRole('button', { name: 'くわしく' }).click()
   await expect(lines).toContainText('これから来る')
+  await expect(lines).toContainText('動く条件：')
   await expect(lines).toContainText('提案を求められた')
   // Nothing sent to an owner / admin yet: only the choice was asked of the server.
   const sent = () => page.evaluate(() => (window as unknown as { __acbSetWatch: unknown[] }).__acbSetWatch)

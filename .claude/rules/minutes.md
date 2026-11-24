@@ -680,7 +680,10 @@ Records off → 404 `RECORDS_DISABLED`. The AI's emergency stop ends record toke
 - **Checking** (`client/electron/features/minutes/checker.ts`, main; the session stays there):
   the renderer names the company it works in (`minutes:watch`, from `useMinutesNotices` in
   `useMinutesSlots`, which `AppShell` mounts; the subscription's end sends `null`); main then checks at once, every 10 minutes
-  (`MINUTES_CHECK_INTERVAL_MS`) and on 「議事録を確かめる」 (`minutes:check`). Each check first asks
+  (`MINUTES_CHECK_INTERVAL_MS`), on 「議事録を確かめる」 (`minutes:check`) and **once when the member's Google permission changes in
+  this app** (`useMinutesNotices` over `googlePermission`, the signal 設定 →「Google」 and 「仕事の道具をつなぐ」 give; 使い心地のメモ #38:
+  the title bar's button only showed after reopening the company). Nothing is polled more often. Test:
+  `tests/ui/connect-tools.spec.ts` 「「議事録を確かめる」 shows as soon as Google is allowed…」. Each check first asks
   `GET /me/google`: **without an active grant that includes `minutes`, nothing about minutes is
   asked or shown** (no error either). With it: `POST /me/minutes/check` (the server puts stale
   readings back itself; for an older server each `stale` id still in `reading` is put back with the

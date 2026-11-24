@@ -5,7 +5,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import type { TaskListItem } from '../../../shared/tasks'
-import { bundleListWord, bundlePlacesOf, companyNow, mayMakePrivateBundle, privateBundleFolderNames, companyPathOf, dueText, dueWhen, listEvents, listRows, listSections, listShownFor, filterByTag, linkCandidates, nextCard, postponeChoices } from './model'
+import { bundleListWord, bundlePlacesOf, companyNow, mayMakePrivateBundle, privateBundleFolderNames, companyPathOf, dueText, dueWhen, listEvents, listRows, listSections, listShownFor, filterByTag, linkCandidates, meetingRowText, nextCard, postponeChoices } from './model'
 import type { TaskCardData, TaskCardResult } from '../../../shared/task-card'
 
 // The card is no longer remounted per version (tasks-ui.md), so two reads can race: an older answer
@@ -48,6 +48,12 @@ test('a due reads from today: a passed time today is overdue, the week ends on S
   assert.equal(dueText('2026-11-06T09:00', NOW), '明日 09:00')
   assert.equal(dueText('2026-11-10', NOW), '11/10（火）')
   assert.equal(dueText('2027-01-15', NOW), '2027/1/15（金）')
+})
+
+test('a 「議事録を確認する」 row names its meeting\'s day and time in company time (使い心地のメモ #40), never the stored UTC', () => {
+  assert.equal(meetingRowText('2026-11-04T01:00:00.000Z', NOW), '会議 昨日 10:00')
+  assert.equal(meetingRowText('2026-11-02T23:30:00.000Z', NOW), '会議 11/3（火） 08:30')
+  assert.equal(meetingRowText('not a time', NOW), null)
 })
 
 test('by turn: only the member\'s own far future folds; meetings to come join their turn, meetings over join today\'s done', () => {

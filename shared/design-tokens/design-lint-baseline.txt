@@ -172,7 +172,7 @@ client/src/features/files/components/PrivateFolderHelp.tsx arbitrary-value=1 pal
 client/src/features/files/components/TooLargeFileHelp.tsx arbitrary-value=1 palette-color=11 white-black=1
 client/src/features/files/components/TreeRow.tsx arbitrary-value=2 opacity-scale=1 palette-color=28 radius-scale=2 type-scale=2 white-black=2
 client/src/features/history/components/FileVersions.tsx palette-color=11 radius-scale=1
-client/src/features/jobs/components/JobsSection.tsx palette-color=21 white-black=1
+client/src/features/jobs/components/JobsSection.tsx palette-color=19 white-black=1
 client/src/features/jobs/components/RewatchPicker.tsx palette-color=3
 client/src/features/minutes/components/InviteDialog.tsx arbitrary-value=2 palette-color=12 radius-scale=2
 client/src/features/minutes/components/MeetingBanners.tsx arbitrary-value=2 palette-color=29 shadow-scale=1 white-black=1

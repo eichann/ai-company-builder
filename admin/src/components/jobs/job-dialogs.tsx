@@ -27,7 +27,7 @@ import { useQuery } from '@/lib/use-query'
 import { JOB_NEEDS_NEWER_SCREEN, isRecordTrigger, isSetTrigger, type JobDefinition, type JobWeekday } from '../../../../shared/core/jobs'
 import {
   JOB_EVENT_NOTE, SET_WATCH_NOT_RUN_NOTE, SET_WATCH_SEEN_NOTE, jobCheckText, jobEventStateText, jobGrantLines, jobMissedText, jobPlacementText, jobRecordTriggerText,
-  jobRunText, jobRunsText, jobTriggerText, setWatchConditionLines, setWatchGrantLines, setWatchMissedText, setWatchReadSkillsText, setWatchReasonLabels,
+  jobRunText, jobRunsText, jobTriggerText, setWatchConditionLines, setWatchGrantLines, setWatchSummaryLines, setWatchMissedText, setWatchReadSkillsText, setWatchReasonLabels,
 } from '../../../../shared/core/job-words'
 
 const personName = (m: { name: string | null; email: string | null } | undefined) => (m ? m.name || m.email || '名前未設定' : 'もういない人')
@@ -349,7 +349,10 @@ export function JobVersionWords({ definition, members }: { definition: JobDefini
   const setWatch = isSetTrigger(definition.trigger) ? definition.trigger : null
   const readSkills = setWatch ? setWatchReadSkillsText(definition) : null
   const reasons = setWatch ? setWatchReasonLabels(definition) : []
-  return (
+  // A set watch says three lines first and keeps every line below behind ［くわしく］ (使い心地のメモ #37: too long to read).
+  const summary = setWatchSummaryLines(definition)
+  const [open, setOpen] = useState(false)
+  const full = (
     <dl className="grid grid-cols-[6rem_1fr] gap-x-3 gap-y-1.5 text-sm">
       <dt className="text-muted-foreground">名前</dt><dd>{definition.name}</dd>
       <dt className="text-muted-foreground">責任者</dt><dd>{personName(who)}（この人の権限で動きます）</dd>
@@ -385,6 +388,16 @@ export function JobVersionWords({ definition, members }: { definition: JobDefini
       {setWatch && (<><dt className="text-muted-foreground">見える人</dt><dd>{SET_WATCH_SEEN_NOTE}</dd></>)}
       <dt className="text-muted-foreground">動けないとき</dt><dd>{setWatch ? setWatchMissedText(definition.missed.expiresAfterMinutes) : jobMissedText(definition.missed, definition.trigger)}</dd>
     </dl>
+  )
+  if (summary.length === 0) return full
+  return (
+    <div className="space-y-2">
+      <ul aria-label="要点" className="list-disc space-y-1 pl-4 text-body">{summary.map((l) => <li key={l}>{l}</li>)}</ul>
+      <Button type="button" variant="link" size="sm" className="h-auto px-0" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
+        {open ? 'くわしくを閉じる' : 'くわしく'}
+      </Button>
+      {open && full}
+    </div>
   )
 }
 

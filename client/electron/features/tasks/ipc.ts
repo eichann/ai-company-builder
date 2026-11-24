@@ -143,8 +143,8 @@ export function createTasksApi(deps: TasksDeps) {
   const doFetch = deps.fetch ?? fetch
   const log = deps.log ?? console
   const now = deps.now ?? Date.now
-  /** `<company>:<record>@<version>` → its まとまり: a record's links change only with its version. */
-  const bundleCache = new Map<string, { id: string; title: string } | null>()
+  /** `<company>:<record>@<version>` → its まとまり and its meeting's time: a record's links change only with its version. */
+  const linkCache = new Map<string, { bundle: { id: string; title: string } | null; meetingAt: string | null }>()
   /** The signed-in member's id per session (cookies), from /api/me. */
   let me: { cookies: string; id: string } | null = null
   /** Google's chooser open for 「Google Drive のファイルをつなぐ」, per company: what the card's ［やめる］ stops. */
@@ -204,27 +204,40 @@ export function createTasksApi(deps: TasksDeps) {
     return out
   }
 
-  /** Each record's まとまり (its outgoing `bundle` link), looked up once per record version. */
-  async function bundles(companyId: string, list: RecordSummary[]): Promise<Record<string, { id: string; title: string }>> {
+  /**
+   * Each record's まとまり (its outgoing `bundle` link) and, for a 「議事録を確認する」, its meeting's time (使い心地のメモ #40:
+   * several of one meeting title side by side) — looked up once per record version. The meeting's time comes only from the
+   * linked meeting the server answered, which it lists only while the member reads that meeting.
+   */
+  async function linkedOf(companyId: string, list: RecordSummary[]): Promise<{ bundles: Record<string, { id: string; title: string }>; meetingTimes: Record<string, string> }> {
     const out: Record<string, { id: string; title: string }> = {}
+    const meetingTimes: Record<string, string> = {}
     const todo = list.filter(r => r.type === 'task' || r.type === 'meeting').slice(0, BUNDLE_LOOKUPS)
     let next = 0
     async function worker() {
       while (next < todo.length) {
         const r = todo[next++]
         const key = `${companyId}:${r.id}@${r.version}`
-        if (!bundleCache.has(key)) {
+        if (!linkCache.has(key)) {
           const a = await call(companyId, 'GET', `/records/item/${encodeURIComponent(r.id)}`)
           if (a?.status !== 200) continue // not cached: asked again next time
-          const link = (a.json?.data as RecordDetail).links.find(l => l.name === 'bundle' && l.direction === 'out' && l.record)
-          bundleCache.set(key, link?.record ? { id: link.record.id, title: link.record.title || '（名前なし）' } : null)
+          const links = (a.json?.data as RecordDetail).links
+          const link = links.find(l => l.name === 'bundle' && l.direction === 'out' && l.record)
+          const meeting = r.fields.task_kind === 'minutes_review'
+            ? links.find(l => l.name === 'meeting' && l.direction === 'out' && l.record?.type === 'meeting')?.record : undefined
+          const at = meeting?.fields.meeting_at
+          linkCache.set(key, {
+            bundle: link?.record ? { id: link.record.id, title: link.record.title || '（名前なし）' } : null,
+            meetingAt: typeof at === 'string' && !Number.isNaN(Date.parse(at)) ? at : null,
+          })
         }
-        const b = bundleCache.get(key)
-        if (b) out[r.id] = b
+        const c = linkCache.get(key)
+        if (c?.bundle) out[r.id] = c.bundle
+        if (c?.meetingAt) meetingTimes[r.id] = c.meetingAt
       }
     }
     await Promise.all(Array.from({ length: 6 }, worker))
-    return out
+    return { bundles: out, meetingTimes }
   }
 
   function failure(what: string, a: Answer): { success: false; offline: boolean; code: string | null; error: string } {
@@ -618,7 +631,7 @@ export function createTasksApi(deps: TasksDeps) {
       const doneToday = [...done1, ...done2, ...(records(settled) ?? [])]
       // An older server without the route, or no answer: nothing asks (the list itself still shows).
       const bundleQuestions = questions?.status === 200 ? (questions.json?.data as MeetingBundleQuestions | undefined)?.questions ?? [] : []
-      const linked = await bundles(companyId, [...mine, ...ai, ...askedList, ...doneToday])
+      const linked = await linkedOf(companyId, [...mine, ...ai, ...askedList, ...doneToday])
       // An older server without the route: the types' own labels name them (as before).
       const bundleKinds = kinds?.status === 200 ? (kinds.json?.data as BundleKindsResult | undefined) ?? null : null
       return {
@@ -633,7 +646,7 @@ export function createTasksApi(deps: TasksDeps) {
           members: Object.entries(names).map(([memberId, name]) => ({ id: memberId, name })),
           items: classifyTasks({
             me: id,
-          ...(bundleKinds ? { bundleKinds } : {}), myTurn: mine, aiTurn: ai, asked: askedList, doneToday, typeLabels, typeImplements, people: names, bundles: linked,
+          ...(bundleKinds ? { bundleKinds } : {}), myTurn: mine, aiTurn: ai, asked: askedList, doneToday, typeLabels, typeImplements, people: names, bundles: linked.bundles, meetingTimes: linked.meetingTimes,
             ...(bundleKinds ? { bundleKindNames: Object.fromEntries(bundleKinds.kinds.map(k => [k.type, k.name])) } : {}),
             bundleQuestions,
             today: dayWindow(now(), DEFAULT_COMPANY_TIME_ZONE).date, holidays,
