@@ -70,9 +70,13 @@ export interface BrowserMapThing {
    * What the thing lets a line write (generalization PR 6, memo §3-3, §15 C7): per verb, the fields it may change and,
    * for each, the thing of the map whose id goes in (`{ add_child: { <list field>: '<thing>' } }`) — reviewed with the map
    * (the site's effect is predictable: `add_child` adds exactly one id of that thing to that list). A line can only use
-   * what is listed here; listing opens nothing by itself.
+   * what is listed here; listing opens nothing by itself. `create_from` (PR 8): a new object of this thing made as a copy
+   * of one read, with the listed fields set — an `id` / `id_set` field names the thing whose id goes in (an `id_set` is
+   * set to exactly that one id), a `text` / `date` / `time` field is `null` (a plain value of its kind); every other field
+   * of the copy is the original's (the reviewed promise of the site: nothing else changes on a copy, checked on a test
+   * object before a line is approved, memo §15 C2).
    */
-  writes?: Readonly<Partial<Record<BrowserWriteVerb, Readonly<Record<string, string>>>>>
+  writes?: BrowserMapWrites
   /**
    * Who a write on the thing reaches (memo §3-2 「届き方」; required for a thing with `writes`): `none` — nobody until a
    * person hands it out; `scheduled` — people who have the thing's time still ahead of them, at that time.
@@ -94,9 +98,24 @@ export interface BrowserMustHold {
   note?: string
 }
 
-/** The write verbs (memo §3-3; closed, §17-3: only what a known case needs). Adding one is a change of the core. */
-export const BROWSER_WRITE_VERBS = ['add_child'] as const
+/**
+ * The write verbs (memo §3-3; closed, §17-3: only what a known case needs). Adding one is a change of the core.
+ * `add_child` — one id more in a list of an existing object (PR 6); `create_from` — a new object, a copy of one read with
+ * listed fields set (PR 8: a site whose copy is "read the original, create a new one").
+ */
+export const BROWSER_WRITE_VERBS = ['add_child', 'create_from'] as const
 export type BrowserWriteVerb = typeof BROWSER_WRITE_VERBS[number]
+
+/** A thing's write facts: per verb, the fields a line may write (see `BrowserMapThing.writes`). */
+export interface BrowserMapWrites {
+  /** list field → the thing whose id is added. */
+  add_child?: Readonly<Record<string, string>>
+  /** field → the thing whose id goes in (`id` / `id_set`), or null (a plain `text` / `date` / `time` value). */
+  create_from?: Readonly<Record<string, string | null>>
+}
+
+/** The field kinds `create_from` may set with a plain value (the rest are ids of a thing, or not settable). */
+export const BROWSER_CREATE_PLAIN_KINDS = ['text', 'date', 'time'] as const
 
 /** Who a write reaches (memo §3-2; the old declaration's words, only the two a write on this path may have: `immediate` and `unknown` are never opened here). */
 export const BROWSER_MAP_DELIVERS = ['none', 'scheduled'] as const
@@ -226,17 +245,30 @@ function thingProblem(t: unknown, things: Record<string, unknown>): string | nul
   if (own(t, 'writes') || own(t, 'delivers')) {
     const w = t.writes
     if (!isMap(w) || Object.keys(w).length === 0 || !onlyKeys(w, BROWSER_WRITE_VERBS)) return '書ける欄の形が正しくありません'
+    // The thing whose id goes in: one of the map, bound to the account (it is read from this account).
+    const boundThing = (child: unknown): boolean => typeof child === 'string' && own(things, child) && isMap(things[child])
+      && isMap((things[child] as Record<string, unknown>).must_hold) && (things[child] as Record<string, Record<string, unknown>>).must_hold.account === true
     for (const [verb, list] of Object.entries(w)) {
       if (!isMap(list) || Object.keys(list).length === 0) return `書ける欄（${verb}）が正しくありません`
       for (const [f, child] of Object.entries(list)) {
-        // add_child adds one id to a list kept in any order (where it lands in an ordered list is not predictable).
-        if (!own(fields, f) || fields[f].kind !== 'id_set' || fields[f].nullable) return `書ける欄（${verb}）は、順不同の番号の一覧です`
-        // The thing whose id goes in: one of the map, bound to the account (it is read from this account).
-        if (typeof child !== 'string' || !own(things, child) || !isMap(things[child]) || !isMap((things[child] as Record<string, unknown>).must_hold)
-          || ((things[child] as Record<string, Record<string, unknown>>).must_hold.account !== true)) return `書ける欄（${verb}）に入るものが正しくありません`
+        if (verb === 'add_child') {
+          // add_child adds one id to a list kept in any order (where it lands in an ordered list is not predictable).
+          if (!own(fields, f) || fields[f].kind !== 'id_set' || fields[f].nullable) return `書ける欄（${verb}）は、順不同の番号の一覧です`
+          if (!boundThing(child)) return `書ける欄（${verb}）に入るものが正しくありません`
+          continue
+        }
+        // create_from: only a thing with no parent (independent review M1: a new child changes its parent, which existed
+        // before the plan — not a harmless prefix, and not predicted); the copy's own id is the site's (never set).
+        if (own(t, 'parent')) return `書ける欄（${verb}）：親のあるものは作れません（親が変わるため）`
+        if (!own(fields, f) || f === t.id) return `書ける欄（${verb}）が地図にありません`
+        const kind = fields[f].kind
+        if (kind === 'id' || kind === 'id_set') { if (!boundThing(child)) return `書ける欄（${verb}）に入るものが正しくありません` }
+        else if (!(BROWSER_CREATE_PLAIN_KINDS as readonly string[]).includes(kind) || child !== null) return `書ける欄（${verb}）は、番号か、文字・日付・時刻です`
       }
     }
     if (!(BROWSER_MAP_DELIVERS as readonly unknown[]).includes(t.delivers)) return '書けるものには、届き方が要ります'
+    // §4-1: what a plan creates reaches nobody until a person hands it out (a stop after it leaves something unused).
+    if (own(w, 'create_from') && t.delivers !== 'none') return '作れるものは、人が配るまでだれにも届かないものだけです'
     // A thing written from outside is bound to the account (and to its parent when it has one): never loosened by a line.
     if (!isMap(t.must_hold) || t.must_hold.account !== true || (own(t, 'parent') && t.must_hold.parent !== true)) return '書けるものは、アカウント（と親）を必ず守ります'
   }

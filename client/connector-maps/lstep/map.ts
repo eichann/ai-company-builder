@@ -1,5 +1,5 @@
 /**
- * Lステップ's map 1.0.2 (「サイトの地図」, generalization PR 3, completed in PR 4, extended in PR 6; agent-browser.md "The first map and the
+ * Lステップ's map 1.0.3 (「サイトの地図」, generalization PR 3, completed in PR 4, extended in PR 6 and PR 8; agent-browser.md "The first map and the
  * inspection line"). Reviewed data. Its things and every key of their JSON answers are exactly what stage 0 recorded
  * (2026-11-24, read only, the owner's login: 「ブラウザ操作の汎用化_段0の結果」 R4, R8, R10, R11) and, for 1.0.1, the full
  * key sets confirmed afterwards (same day, 「追記2：項目の全部の確かめ」: four routes — the 11/12, 11/19 and 11/26 rounds' and
@@ -32,9 +32,13 @@
  *
  * **1.0.2** (PR 6, design memo §6: today's 「リマインダの段にテンプレートを足す」 as map + one line) adds what that operation
  * reads and writes — only key names the old path's readers recorded from the owner's read-only windows (design memo
- * §34–§36, §39–§41; `client/connectors/lstep/`), no value. Their **full key sets are not confirmed yet** (the old readers
- * are lenient: they read the keys they need and pass others): strict read then stops on a real answer with a key more
- * (availability, never a wrong write) until a read-only confirmation lists them — part of approving the line (PR 7).
+ * §34–§36, §39–§41; `client/connectors/lstep/`), no value. **1.0.3** (PR 8): their full key sets and the two lists'
+ * envelopes confirmed read only with the owner's login (「段0の結果」 追記3, 2026-11-25, 0 writes — the test reminder, one
+ * step, the template folders, a folder's templates and 「未分類」's): the reminder exactly 6 keys, each step exactly 12, a
+ * step's timing exactly 5, a template folder exactly 4 (its list's envelope `data` alone), a template exactly 7 (its list's
+ * envelope the landing list's 13 keys, 50 a page; `group` an object {id, name}, or null in 「未分類」). The key lists below
+ * were already those sets, so the things' maps did not move: 1.0.3 names the envelopes (`LSTEP_MAP_READS`) and says the
+ * sets are confirmed.
  * - `reminder` (リマインダ) — `GET /api/episodes/<id>` (§39): `id`, `name`, `hid_at` (must be null: a hidden reminder is
  *   not read), `steps[]` with `id` and `episode_id` (each must name this reminder); `order`, `type` and every other key of
  *   a step (`order`, `step_days`, `step_time`, `step_type`, `step_minutes`, `skip`, `initial`, `egg_id`,
@@ -57,6 +61,22 @@
  *   reader still requires it); `created_at`, `editor_version`, the
  *   folder's `name` not compared.
  *
+ *
+ * **Creating a landing route** (PR 8, 1.0.3; stage 0 R1, R3, 追記: a copy is "read the source, create a new one", two
+ * writes; registering an action always gives a new action, the old one unchanged — seen three times on the test route):
+ * - `action_set` may be created as a copy with its tags set (`create_from: { tags: tag }`): the new action has the
+ *   original's name, second-time behaviour, templates (in order) and stops, and exactly the one tag. `delivers: none` —
+ *   a registered action nobody points at does nothing.
+ * - `landing` may be created as a copy with its name, the end of its reception (day and time) and its action set
+ *   (`create_from: { name, to_date, to_time, action_id: action_set }`): every other field is the original's (its folder,
+ *   QR text, measuring tags, the variables it carries, …). `delivers: none` — nobody comes in until a person hands its
+ *   friend-add address out.
+ * - `tag` (タグ) — **a placeholder, not confirmed** (stage 0 R6 was never read): `id` and `name`, bound to the account.
+ *   Its address and key set must be confirmed read only before the line can be approved; until then its read address is
+ *   `null` (`LSTEP_MAP_READS`) and nothing reads it. The line reads the tag it sets so the card shows its name and the
+ *   tag is one of this account (C5).
+ * Not in the map (the line's business, §16-2): which round, which name, which tag. Never `copy=1`.
+ *
  * Never read: `GET /api/landings/<id>?copy=1` (it may create something on the site's side; stage 0 never called it) —
  * no read here carries a query but the folder list's own `group` and `page` (`LSTEP_MAP_READS`, tested).
  */
@@ -64,7 +84,7 @@ import type { BrowserMap } from '../../../shared/core/browser-map'
 
 export const LSTEP_MAP: BrowserMap = {
   site: 'lstep',
-  version: '1.0.2',
+  version: '1.0.3',
   account: { label: 'LINE アカウント' },
   things: {
     landing: {
@@ -90,6 +110,9 @@ export const LSTEP_MAP: BrowserMap = {
         params: { kind: 'id_set', label: '引き継ぐ値' },
         only_once_param_sync: { kind: 'flag', label: '値の引き継ぎは1回だけ' },
       },
+      // PR 8: a copy with its name, the end of its reception and its action set; nobody comes in until it is handed out.
+      writes: { create_from: { name: null, to_date: null, to_time: null, action_id: 'action_set' } },
+      delivers: 'none',
       keys: {
         name: 'required', qr_text: 'required', action_id: 'required', action_texts: 'ignored', prevent_default: 'required',
         only_welcome: 'required', cv_head: 'required', cv_body: 'required', group_id: 'required', from_date: 'required',
@@ -134,10 +157,23 @@ export const LSTEP_MAP: BrowserMap = {
         'inputs[].member_query_id': 'required', 'inputs[].send_member_query_id': 'required',
         aid: 'ignored', a_twice_type: 'required', a_name: 'required', funnel_descriptions: 'ignored', group_id: 'ignored',
       },
+      // PR 8: registering makes a new action (stage 0 追記), a copy with exactly one tag; nobody uses it until a route points at it.
+      writes: { create_from: { tags: 'tag' } },
+      delivers: 'none',
       must_hold: {
         account: true,
         note: 'アクションは、ほかの流入経路と共有されていることがあります。同じアクションを指す流入経路は、どれも同じ動きをします。',
       },
+    },
+    // PR 8: a placeholder (stage 0 R6 not read): its key set and address are confirmed read only before the line is approved.
+    tag: {
+      label: 'タグ', answer: 'json', id: 'id',
+      fields: {
+        id: { kind: 'id', label: '番号' },
+        name: { kind: 'text', label: 'タグの名前' },
+      },
+      keys: { id: 'required', name: 'required' },
+      must_hold: { account: true },
     },
     reminder: {
       label: 'リマインダ', answer: 'json', id: 'id',
@@ -228,23 +264,61 @@ export const LSTEP_MAP_READS = {
     envelopeLinkKeys: ['url', 'label', 'page', 'active'],
   },
   action_set: { path: '/api/actions/{id}' },
-  // 1.0.2 (PR 6). The template list's envelope is not confirmed whole (the old reader names `current_page`, `data`,
-  // `last_page`, `per_page`, `total` among others): `envelope: null` until a read-only confirmation lists it (PR 7) —
-  // the reading code reads no list whose envelope the map does not name.
+  // PR 8: stage 0 R6 (where a tag is read, and its key set) is not confirmed: no address, nothing reads it.
+  tag: { path: null },
+  // 1.0.2 (PR 6); the envelopes confirmed in 1.0.3 (追記3): the template folders' list is `{ data }` alone, a folder's
+  // template list has the landing list's 13 keys (and its links' 4). The reading code reads no other key around the rows.
   reminder: { path: '/api/episodes/{id}' },
   reminder_step: { path: '/line/episode/show/{parent}', html: true },
   step_timing: { path: '/api/episode-steps/{id}' },
-  template_folder: { path: '/api/template-groups', list: 'data' },
-  template: { path: '/api/templates', query: ['group', 'page'], pages: { param: 'page', max: 10, perPage: 50 }, folderFrom: 'parent', envelope: null },
+  template_folder: { path: '/api/template-groups', list: 'data', envelope: ['data'] },
+  template: {
+    path: '/api/templates', query: ['group', 'page'], pages: { param: 'page', max: 10, perPage: 50 }, folderFrom: 'parent',
+    envelope: ['current_page', 'data', 'first_page_url', 'from', 'last_page', 'last_page_url', 'links', 'next_page_url', 'path',
+      'per_page', 'prev_page_url', 'to', 'total'],
+    envelopeLinkKeys: ['url', 'label', 'page', 'active'],
+  },
 } as const
 
 /**
- * How each write of the map is sent (mechanics, 1.0.2; hashed with this folder): the old declaration's one write, word for
+ * How each write of the map is sent (mechanics, since 1.0.2; hashed with this folder): the old declaration's one write, word for
  * word (`lstep@0.6.3`: captured on test objects 2026-11-20, its form seen again in §40). `{id}` is the written object's
  * id, `{value}` the id the line adds; `_token` / `_lm_user_id` are the page's own values the reading code takes, never
  * compared. Nothing sends with it yet: the app's writing path is a later PR, behind the server's gate.
  */
 export const LSTEP_MAP_WRITES = {
+  /**
+   * PR 8 (1.0.3): registering an action (stage 0 追記: multipart, from the route's edit screen; answers the new `aid`).
+   * Seen on the test route: `aid`, `a_name`, `a_twice_type`, `is_template`, `inputs[n][type]`, `inputs[n][member_query_id]`,
+   * `inputs[n][send_member_query_id]`, `inputs[n][egg_id]`, `inputs[n][open]`, `withDescription` — names only. **Not
+   * confirmed** (`unconfirmed`, before the line can be approved): how a tag input's `tag_ids` and a stop's `episode_id` /
+   * `firetype` are sent, what `aid`, `is_template`, `open` and `withDescription` carry for a new copy, and where the new
+   * `aid` stands in the answer. Nothing sends with it.
+   */
+  action_set: {
+    create_from: {
+      method: 'POST', path: '/api/action/register', encoding: 'multipart', answerId: 'aid',
+      seen: ['aid', 'a_name', 'a_twice_type', 'is_template', 'inputs[n][type]', 'inputs[n][member_query_id]', 'inputs[n][send_member_query_id]',
+        'inputs[n][egg_id]', 'inputs[n][open]', 'withDescription'],
+      unconfirmed: ['inputs[n][tag_ids]', 'inputs[n][episode_id]', 'inputs[n][firetype]', 'aid', 'is_template', 'inputs[n][open]', 'withDescription', 'answerId'],
+    },
+  },
+  /**
+   * PR 8 (1.0.3): creating a route (stage 0 R12: `POST /api/landings`, JSON; never `copy=1`). Stage 0 saw the **update**
+   * (`POST /api/landings/<id>` with `_method` and `id`) send every field again: `name`, `qr_text`, `action_id`,
+   * `prevent_default`, `cv_head`, `cv_body`, `group_id`, `from_date`, `from_time`, `to_date`, `to_time`,
+   * `out_of_period_message`, `latitude`, `longitude`, `radius`, `only_once_param_sync`, `custom_params[]` (`name`,
+   * `var_id`) — `only_welcome` is not among them. **Not confirmed**: the create's exact body (assumed the update's without
+   * `_method` / `id`), whether a new route takes `only_welcome` from anywhere, and where the new id stands in the answer.
+   */
+  landing: {
+    create_from: {
+      method: 'POST', path: '/api/landings', encoding: 'json',
+      seenOnUpdate: ['name', 'qr_text', 'action_id', 'prevent_default', 'cv_head', 'cv_body', 'group_id', 'from_date', 'from_time', 'to_date',
+        'to_time', 'out_of_period_message', 'latitude', 'longitude', 'radius', 'only_once_param_sync', 'custom_params[].name', 'custom_params[].var_id'],
+      unconfirmed: ['body', 'only_welcome', 'answerId'],
+    },
+  },
   reminder_step: {
     add_child: {
       templates: {

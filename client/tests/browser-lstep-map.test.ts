@@ -1,5 +1,5 @@
 /**
- * Lステップ's map (1.0.1, now 1.0.2: its new things are browser-step-template-line.test.ts's) and the inspection line (generalization PR 3; agent-browser.md "The first map and the inspection
+ * Lステップ's map (1.0.1, now 1.0.3: its new things are browser-step-template-line.test.ts's) and the inspection line (generalization PR 3; agent-browser.md "The first map and the inspection
  * line"): `client/connector-maps/lstep/`, `client/browser-lines/lstep.ts`, `shared/browser-connectors/opened.json`.
  *
  * Guards (each test fails when its guard is removed):
@@ -49,7 +49,7 @@ test('the map lists exactly the keys stage 0 recorded', () => {
   assert.deepEqual(Object.keys(map.things.action_set.keys).filter(k => k.startsWith('inputs[].')).map(k => k.slice(9)).sort(), [...INPUT_KEYS].sort())
   assert.deepEqual(Object.keys(map.things.landing.keys).filter(k => k.startsWith('custom_params[].')).sort(), ['custom_params[].name', 'custom_params[].var_id'])
   assert.deepEqual(Object.keys(map.things.landing_row.keys).filter(k => k.startsWith('group.')).sort(), ['group.id', 'group.name', 'group.order'])
-  assert.equal(map.version, '1.0.2')
+  assert.equal(map.version, '1.0.3')
 })
 
 // --- made-up answers of those shapes ---
@@ -157,6 +157,8 @@ test('no read carries a query but the folder list\'s own (never ?copy=1)', () =>
   for (const [thing, r] of Object.entries(reads)) {
     // The one page read (1.0.2): the reminder's page, where the step's templates are (the old checker's read).
     if ('html' in r) { assert.equal(r.path, '/line/episode/show/{parent}', thing); continue }
+    // PR 8: the tag's address is not confirmed (stage 0 R6): none, so nothing reads it.
+    if (r.path === null) { assert.equal(thing, 'tag'); continue }
     assert.match(r.path, /^\/api\/[a-z-]+(\/\{id\})?$/, thing)
     assert.ok(!r.path.includes('?'))
     if ('query' in r) assert.deepEqual([...r.query], ['group', 'page'])
@@ -273,7 +275,8 @@ test('a stored row edited by hand with its hashes left as they were is refused, 
   const lines = await currentLines(maps)
   const fresh = JSON.parse(mergeOpened(null, maps, lines)) as BrowserOpenedFile
   const lineEdited = JSON.parse(JSON.stringify(fresh)) as BrowserOpenedFile
-  lineEdited.lines[0].line.read.checks = lineEdited.lines[0].line.read.checks.slice(0, 1)
+  const withChecks = lineEdited.lines.find(l => l.line.read.checks.length > 1)!
+  withChecks.line.read.checks = withChecks.line.read.checks.slice(0, 1)
   assert.throws(() => mergeOpened(JSON.stringify(lineEdited), maps, lines), /does not match its hashes/)
   const mapEdited = JSON.parse(JSON.stringify(fresh)) as BrowserOpenedFile
   delete (mapEdited.maps[0].map.things.action_set as { must_hold?: unknown }).must_hold

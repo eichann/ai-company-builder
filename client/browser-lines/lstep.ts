@@ -28,6 +28,24 @@
  *   reminder, and the shared-reminder note on the card (`reminder_step`'s note, the old declaration's `shared` words).
  * No check word: the old type had none either (memo §6); a business rule (which template for which round) is a business
  * plugin's line later.
+ *
+ * `landing_create` — 「流入経路を複製して作る」 (generalization PR 8, design memo §7 as stage 0 found it). **Written
+ * `pending`; it stays so until the owner's read-only confirmations and one test write on the test route** (memo §15 C2:
+ * what creating sets off is the map's reviewed promise, tried once on a test object). Generic: copy a route, with its
+ * name, the end of its reception and its action replaced by a copy whose tag is replaced:
+ * - values: the source route and the tag — ids the site showed (`target` ← `site_fact`, §16-4; the card shows the tag's
+ *   name) — and the new name, the end's day and time — each confirmed by the person on the card (`write` ← `person`;
+ *   owner decision on #826: which round, and so these values, only from a person for now; never the AI alone);
+ * - reads: the source route, its action (by the route's `action_id`) and the tag, all under the LINE account;
+ * - writes: (1) register a new action, the source's with exactly the tag (`create_from(source_action_set, { tags })`);
+ *   (2) create the route, the source's with the name, the end and **the action write 1 created** (`create_from(source,
+ *   { name, to_date, to_time, action_id: created })`). A stop after (1) leaves a registered action nothing points at
+ *   (§4-1: stage 0 R1). Neither touches what existed: the source route and its action must read the same after;
+ * - the judgement (`judgeBrowserWrites`): each created object read by the id the site gave must be exactly its original
+ *   with the set fields; the new route's action is the new action, never the source's (a copy still on its original's
+ *   action is stage 0's most common accident), and the tag must not be one of the source action's tags before anything is
+ *   sent (`browserWritesPlanProblem`).
+ * No business word: which round, which date in the name or the tag, which end time are a business plugin's line (§16-2).
  */
 import type { BrowserOpenedLine } from '../../shared/core/browser-opened'
 
@@ -103,6 +121,44 @@ export const LINES: readonly BrowserOpenedLine[] = [
       { read: 'step', fields: ['templates'] },
       { read: 'timing', fields: ['timing'] },
       { read: 'template', fields: ['name', 'body'] },
+    ],
+  },
+  {
+    name: 'landing_create',
+    version: '1.0.0',
+    label: '流入経路を複製して作る',
+    read: {
+      site: 'lstep',
+      values: {
+        source: { kind: 'id', role: 'target', from: ['site_fact'] },
+        tag: { kind: 'id', role: 'target', from: ['site_fact'] },
+        name: { kind: 'text', role: 'write', from: ['person'] },
+        to_date: { kind: 'date', role: 'write', from: ['person'] },
+        to_time: { kind: 'time', role: 'write', from: ['person'] },
+      },
+      reads: [
+        { name: 'source', thing: 'landing', id: { value: 'source' } },
+        { name: 'source_action_set', thing: 'action_set', id: { read: 'source', field: 'action_id' } },
+        { name: 'tag', thing: 'tag', id: { value: 'tag' } },
+      ],
+      checks: [],
+    },
+    writes: [
+      { read: 'source_action_set', verb: 'create_from', set: { tags: { value: 'tag' } }, as: 'new_action_set' },
+      {
+        read: 'source', verb: 'create_from', as: 'new_landing',
+        set: { name: { value: 'name' }, to_date: { value: 'to_date' }, to_time: { value: 'to_time' }, action_id: { created: 'new_action_set' } },
+      },
+    ],
+    readLabels: {
+      source: '複製元の流入経路',
+      source_action_set: '複製元のアクション',
+      tag: '新しいアクションでつけるタグ',
+    },
+    show: [
+      { read: 'source', fields: ['name', 'to_date', 'to_time'] },
+      { read: 'source_action_set', fields: ['tags', 'templates', 'stops'] },
+      { read: 'tag', fields: ['name'] },
     ],
   },
 ]

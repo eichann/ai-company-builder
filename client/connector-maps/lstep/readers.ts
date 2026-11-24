@@ -1,5 +1,5 @@
 /**
- * Lステップ's readers for map 1.0.2 (./map.ts): each turns one strictly read JSON answer into its thing's state — exactly
+ * Lステップ's readers for map 1.0.3 (./map.ts): each turns one strictly read JSON answer into its thing's state — exactly
  * the map's fields, each of its kind — and throws on anything it does not understand (the core then says 「読み取れません
  * でした」; never a guess). The core has already checked every key against the map before a reader runs
  * (`readBrowserThing`); a reader decides the values. Only shapes stage 0 recorded; where it recorded a name but not a
@@ -208,7 +208,14 @@ export const readTemplate: BrowserThingReader = (a) => {
   return { id: id(field(a, 'id')), folder, name: text(field(a, 'name'), false), body }
 }
 
+/** A tag (PR 8, a placeholder until stage 0 R6 is confirmed): its id and name, nothing else. */
+export const readTag: BrowserThingReader = (a) => {
+  if (!isObject(a)) return fail('tag')
+  return { id: id(field(a, 'id')), name: text(field(a, 'name'), false) }
+}
+
 export const LSTEP_MAP_READERS: Readonly<Record<string, BrowserThingReader>> = {
+  tag: readTag,
   landing: readLanding,
   landing_row: readLandingRow,
   action_set: readActionSet,

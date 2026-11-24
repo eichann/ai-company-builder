@@ -45,7 +45,8 @@ export const BROWSER_ROLE_SOURCES: Readonly<Record<BrowserValueRole, readonly Br
   write: ['record_field', 'person', 'site_fact', 'ai'],
 }
 
-export const BROWSER_VALUE_KINDS = ['id', 'text', 'date'] as const
+/** `time` (PR 8): `HH:MM`, a value a copy sets in a time field (the end of a reception). */
+export const BROWSER_VALUE_KINDS = ['id', 'text', 'date', 'time'] as const
 export type BrowserValueKind = typeof BROWSER_VALUE_KINDS[number]
 
 export interface BrowserLineValue {
@@ -230,7 +231,9 @@ export function browserReadLineProblem(raw: unknown, map: BrowserMap): string | 
       }
     }
   }
-  for (const name of Object.keys(values)) if (!used.has(name)) return `値「${name}」はこの行で使われていません`
+  // A `write` value is used by the line's writes (PR 8): the opened line checks that (`browserLineWritesProblem`; an
+  // inspection holds none, `browserOpenedLineProblem`). Every other value must be used here.
+  for (const name of Object.keys(values)) if (values[name].role !== 'write' && !used.has(name)) return `値「${name}」はこの行で使われていません`
   return null
 }
 
@@ -279,6 +282,7 @@ export function browserLineValuesProblem(line: BrowserReadLine, supplied: unknow
 function valueFits(kind: BrowserValueKind, v: unknown): v is string {
   if (kind === 'id') return typeof v === 'string' && BROWSER_ID_VALUE_RE.test(v)
   if (kind === 'date') return isBrowserDate(v)
+  if (kind === 'time') return typeof v === 'string' && /^([01]\d|2[0-3]):[0-5]\d$/.test(v)
   return isPlainBrowserText(v, 200)
 }
 
