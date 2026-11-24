@@ -50,6 +50,26 @@ const DAY_MS = 24 * 60 * 60 * 1000
 const EXPIRY_WARNING_DAYS = 7
 const TRAILER = 'ACB-Holding-Item:'
 
+/** What a take-in decided on the tip it was built on. */
+interface Decided {
+  placed: HoldingTakeResult['placed']
+  skipped: HoldingTakeResult['skipped']
+  changes: number
+  /** Chosen contents with no place now: the take-in is refused, nothing committed. */
+  blocked: number[]
+}
+
+/** A chosen content gone from the server's disk while the take-in ran. */
+class HeldContentMissing extends Error {
+  constructor(readonly idx: number) {
+    super('held content missing')
+  }
+}
+
+const PATH_TAKEN = (files: number[]) => refuse('conflict',
+  'フォルダの中の形が変わっていて、置けないファイルがありました（同じ名前のファイルがフォルダの場所にあります）。そのファイルを外すか、ダウンロードしてからもう一度お試しください。預かったものはそのまま残しています。',
+  { code: HOLDING_REVIEW_CODES.pathTaken, files })
+
 export interface HoldingReviewDeps {
   companyData: CompanyDataSource
   accounts: AccountDirectory
@@ -61,6 +81,8 @@ export interface HoldingReviewDeps {
   canManagePath: (actor: Member, path: string) => boolean
   /** The reviewer as the push checker sees them (the snapshot git-http builds for their own push). */
   pushSnapshot: (actor: Member) => PusherSnapshot
+  /** The caller's membership read now (services/access.ts): under the lock, a role changed meanwhile counts. */
+  memberOf: (companyId: string, userId: string) => Member | null
 }
 
 const NOT_FOUND = () => refuse('not-found', 'Not found')
@@ -100,17 +122,38 @@ function monthDay(at: string | null, nowMs: number): string {
   return new Date((Number.isFinite(ms) ? ms : nowMs) + 9 * 60 * 60 * 1000).toISOString().slice(5, 10)
 }
 
-/** The folder's files by pathKey, and the folders they are in. */
-function indexTree(tree: FolderTree | null): { files: Map<string, FolderFile>; dirs: Set<string> } {
+/** The folder's files by pathKey, and the folders they are in (by pathKey → as the folder spells them). */
+function indexTree(tree: FolderTree | null): { files: Map<string, FolderFile>; dirs: Map<string, string> } {
   const files = new Map<string, FolderFile>()
-  const dirs = new Set<string>()
+  const dirs = new Map<string, string>()
   for (const f of tree?.files ?? []) {
-    const key = pathKey(f.path)
-    files.set(key, f)
-    const segments = key.split('/')
-    for (let i = 1; i < segments.length; i++) dirs.add(segments.slice(0, i).join('/'))
+    files.set(pathKey(f.path), f)
+    noteDirs(dirs, f.path)
   }
   return { files, dirs }
+}
+
+/** The folders above `path` (as spelled there), unless one of that key is known already. */
+function noteDirs(dirs: Map<string, string>, path: string): void {
+  const segments = path.split('/')
+  for (let i = 1; i < segments.length; i++) {
+    const prefix = segments.slice(0, i).join('/')
+    const key = pathKey(prefix)
+    if (!dirs.has(key)) dirs.set(key, prefix)
+  }
+}
+
+/**
+ * `path` under the folders as the repository already spells them (`Reports/` for a held `reports/a.md`):
+ * a second spelling of one folder is never made (the push checker would refuse it as a collision).
+ */
+function respell(path: string, dirs: Map<string, string>): string {
+  const segments = path.split('/')
+  for (let i = segments.length - 1; i >= 1; i--) {
+    const stored = dirs.get(pathKey(segments.slice(0, i).join('/')))
+    if (stored) return [stored, ...segments.slice(i)].join('/')
+  }
+  return path
 }
 
 function standingOf(key: string, tip: Map<string, FolderFile>, base: Map<string, FolderFile> | null): HoldingFileStanding {
@@ -119,7 +162,7 @@ function standingOf(key: string, tip: Map<string, FolderFile>, base: Map<string,
 }
 
 export function createHoldingReviewService(deps: HoldingReviewDeps) {
-  const { companyData, accounts, blobs, transactions, clock, companyLock, canManagePath, pushSnapshot } = deps
+  const { companyData, accounts, blobs, transactions, clock, companyLock, canManagePath, pushSnapshot, memberOf } = deps
 
   const expiresAt = (item: HoldingItem) => new Date(Date.parse(item.finishedAt ?? item.createdAt) + HOLDING_ITEM_DAYS * DAY_MS).toISOString()
 
@@ -192,14 +235,30 @@ export function createHoldingReviewService(deps: HoldingReviewDeps) {
   }
 
   /**
+   * The folder's commit carrying the item's line: the commit, null (none), or 'unknown' when the
+   * history could not be read — then the item stays `taking` (a later settle asks again), never
+   * given back as if nothing had landed (Codex P2, 2026-11-24).
+   */
+  async function landedCommit(handle: CompanyData, folder: PrivateFolderRecord, itemId: string): Promise<string | null | 'unknown'> {
+    try {
+      return await handle.privateFolders.findCommitWithLine(folder, `${TRAILER} ${itemId}`)
+    } catch (error) {
+      logError('holding', 'could not read a folder\'s history to settle a take-in', error, { company: handle.companyId, item: itemId })
+      return 'unknown'
+    }
+  }
+
+  /**
    * Under the company lock: an item left `taking` (no take-in runs now — they hold the lock) is
-   * settled by the folder's history: the commit with its line there → taken; else waiting again.
+   * settled by the folder's history: the commit with its line there → taken; none → waiting again;
+   * the history unreadable → still `taking`. A folder gone meanwhile → waiting (nothing can land).
    */
   async function settle(handle: CompanyData, itemId: string): Promise<void> {
     const item = handle.holdingItems.get(itemId)
     if (!item || item.state !== 'taking') return
     const folder = handle.privateFolders.get(item.scopeId)
-    const landed = folder ? await handle.privateFolders.findCommitWithLine(folder, `${TRAILER} ${item.id}`).catch(() => null) : null
+    const landed = folder ? await landedCommit(handle, folder, item.id) : null
+    if (landed === 'unknown') return
     if (landed) await finishTaken(handle, item, landed, null, item.decidedBy ?? CLOCK_ACTOR.id)
     else handle.holdingItems.backToWaiting(item.id, clock.now())
   }
@@ -217,6 +276,8 @@ export function createHoldingReviewService(deps: HoldingReviewDeps) {
   /** What a decided or expired item answers to take / discard. */
   function decidedRefusal(item: HoldingItem): Outcome<never> | null {
     if (item.state === 'expired') return EXPIRED()
+    // `taking` here (after settling) means the folder's history could not be read: try again later.
+    if (item.state === 'taking') return BUSY()
     if (item.state !== 'waiting') return ALREADY_DECIDED()
     return null
   }
@@ -298,8 +359,12 @@ export function createHoldingReviewService(deps: HoldingReviewDeps) {
       if (!parsed) return INVALID()
       return companyLock.run(actor.companyId, async (): Promise<Outcome<HoldingTakeResult>> => {
         await settle(first.value.handle, itemId)
-        // Read again under the lock: who reads the folder, the item's state, the folder itself.
-        const found = reviewable(actor, itemId)
+        // Read again under the lock (the request may have waited behind another change): the caller's
+        // role and membership — the push snapshot is built from these —, who reads the folder, the
+        // item's state, the folder itself (independent review, 2026-11-24).
+        const caller = memberOf(actor.companyId, actor.userId)
+        if (!caller) return NOT_FOUND()
+        const found = reviewable(caller, itemId)
         if (!found.ok) return found
         const { handle, item, folder } = found.value
         const decided = decidedRefusal(item)
@@ -353,10 +418,17 @@ export function createHoldingReviewService(deps: HoldingReviewDeps) {
           const edits: FolderFileEdit[] = []
           const placed: HoldingTakeResult['placed'] = []
           const skipped: HoldingTakeResult['skipped'] = []
+          // A chosen content with no place now (a file where its folder was): the take-in is refused
+          // as a whole — never `taken` with that content dropped (independent review, 2026-11-24).
+          const blocked: number[] = []
           for (const f of entries) {
             const key = pathKey(f.path)
             const there = tip.files.get(key)
-            if (fileInTheWay(key)) { skipped.push({ idx: f.idx, reason: 'path-taken' }); continue }
+            if (fileInTheWay(key)) {
+              if (f.kind === 'deleted') skipped.push({ idx: f.idx, reason: 'absent' })
+              else blocked.push(f.idx)
+              continue
+            }
             if (f.kind === 'deleted') {
               if (!there) skipped.push({ idx: f.idx, reason: 'absent' })
               else if (planned.has(key) || there.type !== 'blob' || standingOf(key, tip.files, baseIndex) !== 'unchanged') skipped.push({ idx: f.idx, reason: 'changed' })
@@ -367,7 +439,7 @@ export function createHoldingReviewService(deps: HoldingReviewDeps) {
             let oid = blobOf.get(sha)
             if (!oid) {
               const bytes = await blobs.read(handle.companyId, item.id, sha)
-              if (!bytes) throw new Error('held content missing')
+              if (!bytes) throw new HeldContentMissing(f.idx)
               oid = await writeBlob(bytes)
               blobOf.set(sha, oid)
             }
@@ -378,21 +450,24 @@ export function createHoldingReviewService(deps: HoldingReviewDeps) {
             else if (!regular || planned.has(key) || f.kind === 'backup') how = 'alongside'
             else if (standingOf(key, tip.files, baseIndex) === 'unchanged') how = 'placed'
             else how = parsed.overwrite ? 'overwritten' : 'alongside'
-            const path = how === 'alongside' ? alongside(f.path) : (there?.path ?? f.path)
+            const path = there && how !== 'alongside' ? there.path : (how === 'alongside' ? alongside(respell(f.path, tip.dirs)) : respell(f.path, tip.dirs))
+            noteDirs(tip.dirs, path)
             edits.push({ path, blob: oid, mode: how === 'alongside' ? '100644' : (there?.mode ?? '100644') })
             planned.add(pathKey(path))
             placed.push({ idx: f.idx, path, how })
           }
-          return { edits, result: { placed, skipped, changes: edits.length } }
+          if (blocked.length > 0) return { edits: [], result: { placed: [], skipped: [], changes: 0, blocked } }
+          return { edits, result: { placed, skipped, changes: edits.length, blocked } }
         }
 
         let outcome: Awaited<ReturnType<CompanyData['privateFolders']['commitFiles']>> | null = null
-        let lastResult: { placed: HoldingTakeResult['placed']; skipped: HoldingTakeResult['skipped']; changes: number } | null = null
+        let lastResult: Decided | null = null
+        let missing: number | null = null
         try {
           const r = await handle.privateFolders.commitFiles(folder, {
             // The member's name, a count and the item id: nothing of the content, no folder name.
             message: (_result, changes) => `${who}さんの預かりから取り込み（${changes}件）\n\n${TRAILER} ${item.id}`,
-            as: pushSnapshot(actor),
+            as: pushSnapshot(caller),
             decide: async (tip, writeBlob) => {
               const d = await decide(tip, writeBlob)
               lastResult = d.result
@@ -401,21 +476,31 @@ export function createHoldingReviewService(deps: HoldingReviewDeps) {
           })
           outcome = r
         } catch (error) {
-          logError('holding', 'a take-in stopped', error, { company: handle.companyId, item: item.id })
+          if (error instanceof HeldContentMissing) missing = error.idx
+          else logError('holding', 'a take-in stopped', error, { company: handle.companyId, item: item.id })
+        }
+        if (outcome?.ok && (outcome.result as Decided).blocked.length > 0) {
+          // Nothing was committed (no edits): the item waits again, nothing dropped.
+          handle.holdingItems.backToWaiting(item.id, clock.now())
+          return PATH_TAKEN((outcome.result as Decided).blocked)
         }
         if (outcome?.ok) {
-          const result = outcome.result as { placed: HoldingTakeResult['placed']; skipped: HoldingTakeResult['skipped']; changes: number }
+          const result = outcome.result as Decided
           await finishTaken(handle, item, outcome.commit, result.changes, actor.userId)
           return ok({ state: 'taken', commit: outcome.commit, placed: result.placed, skipped: result.skipped })
         }
         // Not known to have landed: the folder's history decides (an error after the push landed).
-        const landed = await handle.privateFolders.findCommitWithLine(folder, `${TRAILER} ${item.id}`).catch(() => null)
+        const landed = await landedCommit(handle, folder, item.id)
+        // Not known either way: the item stays `taking` until a later settle can read the history.
+        if (landed === 'unknown') return BUSY()
         if (landed) {
-          const result = lastResult as { placed: HoldingTakeResult['placed']; skipped: HoldingTakeResult['skipped']; changes: number } | null
+          const result = lastResult as Decided | null
           await finishTaken(handle, item, landed, result?.changes ?? null, actor.userId)
           return ok({ state: 'taken', commit: landed, placed: result?.placed ?? [], skipped: result?.skipped ?? [] })
         }
         handle.holdingItems.backToWaiting(item.id, clock.now())
+        if (missing !== null) return refuse('conflict', '預かったファイルの中身が見つかりませんでした。', { code: HOLDING_REVIEW_CODES.notTakeable, files: [missing] })
+        if (outcome && !outcome.ok && outcome.reason === 'CONFLICT') return PATH_TAKEN([])
         if (outcome && !outcome.ok && outcome.reason === 'REFUSED') {
           const reasons = [...new Set(outcome.rejections.map(r => REFUSAL_WORDS[r.marker] ?? 'サーバーの決まりに合いません'))]
           return refuse('conflict', `フォルダに入れられないファイルがありました（理由: ${reasons.join('、')}）。預かったものはそのまま残しています。`, {
@@ -432,7 +517,9 @@ export function createHoldingReviewService(deps: HoldingReviewDeps) {
       if (!first.ok) return first
       return companyLock.run(actor.companyId, async (): Promise<Outcome<HoldingDiscardResult>> => {
         await settle(first.value.handle, itemId)
-        const found = reviewable(actor, itemId)
+        const caller = memberOf(actor.companyId, actor.userId)
+        if (!caller) return NOT_FOUND()
+        const found = reviewable(caller, itemId)
         if (!found.ok) return found
         const { handle, item } = found.value
         const decided = decidedRefusal(item)

@@ -423,9 +423,9 @@ export function sqlitePrivateFolderRepository(conn: Database.Database, companyId
 
     async findCommitWithLine(folder, line) {
       const repo = privateRepoPath(companyId, folder.repoId)
-      // Whole messages of the recent history, NUL-separated; the line must match exactly.
+      // Whole messages of the recent history, NUL-separated; the line must match exactly. A failure to
+      // read throws (never "not found": the caller would take the item in a second time).
       const out = await gitAsync(['-C', repo, 'log', '-n', '1000', '--format=%H%x00%B%x00', 'refs/heads/main'], { timeoutMs: FOLDER_GIT_TIMEOUT_MS.local })
-        .catch(() => '')
       const parts = out.split('\0')
       for (let i = 0; i + 1 < parts.length; i += 2) {
         const id = parts[i].trim()

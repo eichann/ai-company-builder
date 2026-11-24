@@ -224,6 +224,7 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
   const holdingReview = createHoldingReviewService({
     ...shared, blobs: holdingBlobs, companyLock: processCompanyLock,
     canManagePath: privateFolders.canManagePath,
+    memberOf: (companyId, userId) => access.memberOf(companyId, userId),
     // The reviewer exactly as git-http's push snapshot names them for their own push (called after construction).
     pushSnapshot: m => {
       const scopes = shared.companyData.forCompany(m.companyId).scopes

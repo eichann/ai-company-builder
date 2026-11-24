@@ -325,13 +325,19 @@ is its first caller). Code: `routes/holding-review.ts` → `services/holding-rev
   the folder (`beginScopePush`), under the company lock (serialised with create / delete /
   make-public); a member's push in between → redone on the new tip.
 - **Never over a later change** (owner decision 6), decided on the tip the commit is built on (again
-  on a new tip): files matched by `pathKey`, written at the tip's spelling. A content entry: already
+  on a new tip): files matched by `pathKey`, written at the tip's spelling — an existing file's, and
+  for a new file or an alongside copy the folders above it as the repository spells them (never a second
+  spelling of one folder; Codex P2). A content entry: already
   so → `same`; absent → `placed`; unchanged since the member's base → `placed` (replaced); changed
   since or no base → `alongside` as 「<stem>（<member's name>さんの版 MM-DD）<ext>」 (MM-DD of arrival,
   Japan time; ` 2`, ` 3` when taken), or `overwritten` when the reviewer chose `overwrite`. A `backup`,
   a symlink / gitlink there, or a folder at the path: always alongside. A `deleted` entry: removed only
-  when unchanged since the base, else `skipped` (`changed`, `absent`); a file in the way of a path →
-  `skipped` (`path-taken`). The take-in decides the whole item: unchosen entries are discarded with it.
+  when unchanged since the base, else `skipped` (`changed`, `absent`). A chosen content with no place
+  now (a file where its folder was) refuses the whole take-in, 409 `PATH_TAKEN` with `files`, nothing
+  committed, the item waiting — never `taken` with that content dropped (independent review). The
+  take-in decides the whole item: unchosen entries are discarded with it.
+- **Under the lock, read again**: the caller's membership and role (`memberOf`: an admin demoted while
+  the request waited is not pushed as an admin — independent review), who reads the folder, the item.
 - **Once** (I6, checklist 7): `waiting → taking` (compare-and-set, by the reviewer) under the company
   lock is the "done" guard; discard (`waiting → discarded`) and the clock's expiry (`waiting →
   expired`) are compare-and-sets from `waiting` too, so a second take-in or a discard → 409
@@ -342,8 +348,10 @@ is its first caller). Code: `routes/holding-review.ts` → `services/holding-rev
   A take-in that did not finish is **settled by the folder's history** (`findCommitWithLine`, the last
   1,000 commits): an error after the push (before the item was marked) → looked for at once; an item
   found `taking` under the company lock (a stopped process: no take-in runs while the lock is held) →
-  by take / discard, and by the server clock before its holding sweep. The line there → `taken`, else
-  `taking → waiting`. A folder gone meanwhile → waiting.
+  by take / discard, and by the server clock before its holding sweep. The line there → `taken`, none →
+  `taking → waiting`; **the history unreadable → still `taking`** (a later settle asks again; take /
+  discard answer 503 `BUSY`) — never given back to be taken in twice (Codex P2). A folder gone
+  meanwhile → waiting.
 - **Discard**: `waiting → discarded` + `holding-discarded`, then the contents are deleted (the sweep
   catches up when that fails).
 - **Admin home** (owner decision 12): `attention.holding { waiting, expiringSoon }` — the items the
@@ -353,8 +361,9 @@ is its first caller). Code: `routes/holding-review.ts` → `services/holding-rev
   C1 build), the zip download, taking a deleted folder's item into another folder (question 7).
 - Tests: `server/tests/integration/holding-review.test.ts` (who reviews and the one 404 for everyone
   else, a deleted folder, alongside / overwrite / deletions / one commit and its message, refusals by
-  the push checker as the reviewer, two take-ins at once, take-in racing discard, the clock and an
-  item being taken in, settling by the folder's history both ways, downloads, the admin home; no
+  the push checker as the reviewer, the folders' spelling, `PATH_TAKEN`, a role changed while waiting,
+  two take-ins at once, take-in racing discard, the clock and an item being taken in, settling by the
+  folder's history both ways and an unreadable history, downloads, the admin home; no
   answer to a non-reviewer and no log line names the folder or an entry path; each guard
   mutation-checked), `permission-matrix.test.ts` (rows + `CROSS`: another company's waiting item =
   unknown).

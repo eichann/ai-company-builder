@@ -201,6 +201,11 @@ export const HOLDING_REVIEW_CODES = Object.freeze({
   notTakeable: 'NOT_TAKEABLE',
   /** 409: the push checker refused the take-in as the reviewer's own push; `refused` says why. Nothing changed. */
   takeRefused: 'TAKE_REFUSED',
+  /**
+   * 409: a chosen file has no place in the folder now (a file sits where its folder was); `files`
+   * names the entries. Nothing changed; the reviewer leaves them out (after downloading) or retries.
+   */
+  pathTaken: 'PATH_TAKEN',
   /** 503: the folder is busy (being deleted / made public, members pushing); try again. Nothing changed. */
   busy: 'BUSY',
   /** 400: the request is not valid. */
@@ -284,8 +289,11 @@ export interface HoldingTakeResult {
   commit: string | null
   /** Where each chosen entry went: `placed` at its path, `alongside` under another name, `overwritten`, `deleted`, `same` (already so). */
   placed: Array<{ idx: number; path: string; how: 'placed' | 'alongside' | 'overwritten' | 'deleted' | 'same' }>
-  /** Chosen entries left out: a deletion of a file changed since (`changed`) or already gone (`absent`), or a path a folder / file is in the way of (`path-taken`). */
-  skipped: Array<{ idx: number; reason: 'changed' | 'absent' | 'path-taken' }>
+  /**
+   * Chosen deletions left out: of a file changed since (`changed`) or already gone (`absent`). (A chosen
+   * content with no place is never left out: the take-in is refused with `PATH_TAKEN`.)
+   */
+  skipped: Array<{ idx: number; reason: 'changed' | 'absent' }>
 }
 
 /** POST /holding/:itemId/discard → `{ state: 'discarded' }`. */

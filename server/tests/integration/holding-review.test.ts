@@ -15,7 +15,7 @@
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest'
 import { createHash } from 'crypto'
 import { execFileSync } from 'child_process'
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'fs'
+import { existsSync, mkdirSync, mkdtempSync, renameSync, rmSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
 
@@ -123,7 +123,7 @@ function commitTo(repo: string, files: Record<string, string | null>, message: s
   const parent = run(['rev-parse', 'refs/heads/main'])
   run(['read-tree', parent])
   for (const [p, content] of Object.entries(files)) {
-    if (content === null) { run(['update-index', '--force-remove', '--', p]); continue }
+    if (content === null) { run(['update-index', '--index-info'], `0 ${'0'.repeat(40)}\t${p}\n`); continue }
     const blob = run(['hash-object', '-w', '--stdin'], content)
     run(['update-index', '--add', '--cacheinfo', `100644,${blob},${p}`])
   }
@@ -346,6 +346,35 @@ describe('taking in', () => {
     }
   })
 
+  it('files go under the folders as the folder already spells them, never a second spelling (Codex P2)', async () => {
+    const folder = await folderWith({ 'Reports/a.md': 'base\n' }, READERS)
+    const itemId = await handOver(folder, AFTER, [
+      { path: 'reports/new.md', kind: 'changed', content: 'new\n' },
+      { path: 'reports/a.md', kind: 'changed', content: 'member\n' },
+    ])
+    commitTo(folder.repo, { 'Reports/a.md': 'keeper\n' }, 'later')
+    const take = await as('owner', 'POST', `${H}/${itemId}/take`, { files: [0, 1] })
+    expect(take.status).toBe(200)
+    const day = new Date(Date.parse(itemRow(itemId).finished_at) + 9 * 3600_000).toISOString().slice(5, 10)
+    expect(take.body.data.placed).toEqual([
+      { idx: 0, path: 'Reports/new.md', how: 'placed' },
+      { idx: 1, path: `Reports/a（佐藤さんの版 ${day}）.md`, how: 'alongside' },
+    ])
+    expect(filesAt(folder.repo).filter(p => p.toLowerCase().startsWith('reports/')).every(p => p.startsWith('Reports/'))).toBe(true)
+  })
+
+  it('a chosen file with no place now (a file where its folder was) refuses the take-in; nothing is dropped', async () => {
+    const folder = await folderWith({ 'dir/x.md': 'base\n' }, READERS)
+    const itemId = await handOver(folder, AFTER, [{ path: 'dir/x.md', kind: 'changed', content: 'member\n' }, { path: 'ok.md', kind: 'changed', content: 'ok\n' }])
+    commitTo(folder.repo, { 'dir/x.md': null, dir: 'now a file\n' }, 'later')
+    const before = tipOf(folder.repo)
+    const take = await as('owner', 'POST', `${H}/${itemId}/take`, { files: [0, 1] })
+    expect([take.status, take.body.code, take.body.files]).toEqual([409, 'PATH_TAKEN', [0]])
+    expect(itemRow(itemId)).toMatchObject({ state: 'waiting', blobs_deleted_at: null })
+    expect(tipOf(folder.repo)).toBe(before)
+    expect((await as('owner', 'GET', `${H}/${itemId}/files/0`)).text).toBe('member\n')
+  })
+
   it('overwrite replaces a file someone changed since, when chosen', async () => {
     const folder = await folderWith({ 'f.md': 'base\n' }, READERS)
     const itemId = await handOver(folder, AFTER, [{ path: 'f.md', kind: 'changed', content: 'member\n' }])
@@ -414,6 +443,26 @@ describe('the push checker judges the take-in as the reviewer (I6)', () => {
 })
 
 describe('once only, and stopping halfway (I6, checklist 7)', () => {
+  it('who the reviewer is now is read again under the lock: an admin demoted while the take-in waited gets the 404', async () => {
+    const folder = await folderWith({ 'f.md': 'base\n' }, READERS)
+    const itemId = await handOver(folder, AFTER, [{ path: 'm.md', kind: 'changed', content: 'member\n' }])
+    const { processCompanyLock } = await import('../../src/adapters/system')
+    let take: Promise<Loose> | null = null
+    await processCompanyLock.run(CO, async () => {
+      take = outsider('admin', 'POST', `${H}/${itemId}/take`, { files: [0] })
+      await new Promise(resolve => setTimeout(resolve, 200))
+      db.prepare(`UPDATE memberships SET role = 'member' WHERE company_id = ? AND user_id = 'u-admin'`).run(CO)
+    })
+    try {
+      const r = await take!
+      expect([r.status, r.body]).toEqual([404, { error: 'Not found' }])
+      expect(itemRow(itemId).state).toBe('waiting')
+      expect(tipOf(folder.repo)).toBe(folder.base)
+    } finally {
+      db.prepare(`UPDATE memberships SET role = 'admin' WHERE company_id = ? AND user_id = 'u-admin'`).run(CO)
+    }
+  })
+
   it('two take-ins at once: one commit, the other is told someone decided first', async () => {
     const folder = await folderWith({ 'f.md': 'base\n' }, READERS)
     const itemId = await handOver(folder, AFTER, [{ path: 'g.md', kind: 'changed', content: 'member\n' }])
@@ -469,6 +518,28 @@ describe('once only, and stopping halfway (I6, checklist 7)', () => {
     db.prepare(`UPDATE holding_items SET state = 'taking', decision_commit = NULL WHERE id = ?`).run(itemId)
     const again = await as('owner', 'POST', `${H}/${itemId}/take`, { files: [0] })
     expect([again.status, again.body.code]).toEqual([409, 'ALREADY_DECIDED'])
+    expect(itemRow(itemId)).toMatchObject({ state: 'taken', decision_commit: take.body.data.commit })
+    expect(commitsWithLine(folder.repo, itemId)).toHaveLength(1)
+  })
+
+  it('a take-in whose folder history cannot be read stays being taken in — never given back to be taken twice (Codex P2)', async () => {
+    const folder = await folderWith({ 'f.md': 'base\n' }, READERS)
+    const itemId = await handOver(folder, AFTER, [{ path: 'l.md', kind: 'backup', content: 'member\n' }])
+    const take = await as('owner', 'POST', `${H}/${itemId}/take`, { files: [0] })
+    expect(take.status).toBe(200)
+    db.prepare(`UPDATE holding_items SET state = 'taking', decision_commit = NULL WHERE id = ?`).run(itemId)
+    // The repository cannot be read for a moment.
+    renameSync(folder.repo, `${folder.repo}.away`)
+    try {
+      const again = await as('owner', 'POST', `${H}/${itemId}/take`, { files: [0] })
+      expect([again.status, again.body.code]).toEqual([503, 'BUSY'])
+      await services.serverClock.runOnce()
+      expect(itemRow(itemId).state).toBe('taking')
+    } finally {
+      renameSync(`${folder.repo}.away`, folder.repo)
+    }
+    const discard = await as('owner', 'POST', `${H}/${itemId}/discard`)
+    expect([discard.status, discard.body.code]).toEqual([409, 'ALREADY_DECIDED'])
     expect(itemRow(itemId)).toMatchObject({ state: 'taken', decision_commit: take.body.data.commit })
     expect(commitsWithLine(folder.repo, itemId)).toHaveLength(1)
   })

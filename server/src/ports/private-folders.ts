@@ -108,7 +108,10 @@ export interface PrivateFolderRepository {
   filesAt(folder: PrivateFolderRecord, commit: string | 'tip'): Promise<FolderTree | null>
   /** One blob of the folder's repository, or null. */
   readBlob(folder: PrivateFolderRecord, oid: string): Promise<Buffer | null>
-  /** The most recent commit of the folder's main (of its last 1,000) whose message has exactly this line, or null. */
+  /**
+   * The most recent commit of the folder's main (of its last 1,000) whose message has exactly this
+   * line, or null when there is none. Throws when the history cannot be read (never answered as none).
+   */
   findCommitWithLine(folder: PrivateFolderRecord, line: string): Promise<string | null>
   /**
    * One commit on the folder's main, pushed into its repository **through the push checker as
