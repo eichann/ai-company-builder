@@ -3,6 +3,10 @@ paths:
   - "shared/core/browser-operation.ts"
   - "shared/core/plugin-browser-declaration.ts"
   - "shared/core/browser-plans.ts"
+  - "shared/core/browser-map.ts"
+  - "shared/core/browser-read-line.ts"
+  - "server/tests/unit/browser-read-words.test.ts"
+  - "server/tests/fixtures/browser/**"
   - "shared/types/browser-plans.ts"
   - "shared/browser-connectors/**"
   - "client/scripts/browser-connectors.ts"
@@ -985,7 +989,7 @@ its own model (`PlanLife.tla`).
 - **The line judge (I4, §4-1)**: before its last write a plan writes only to what this execution
   created (and confirmed its own, below); a change of what it created comes after the create; the
   object that existed before the plan is written by the last write only. Judged at approval of the line
-  and when the server loads the list (PR 2's `browserLineProblem`); a line that fails it is never loaded,
+  and when the server loads the list (`browserLineProblem`, read part and write part; PR 2 built the read part's check, `browserReadLineProblem`: "The read-side words"); a line that fails it is never loaded,
   approved or not. Model: `HarmlessPrefix` at `Claim`, `broken/BrokenStepsNoLineJudge` → R9.
 - **Execution states** (shape 2): `claimed` (nothing permitted) → `running` (a write permitted at least
   once) → final `succeeded` (every write done) / `partial` (the first k done for sure, the rest surely
@@ -1071,6 +1075,99 @@ its own model (`PlanLife.tla`).
   app's two clocks and a server clock jump (PlanLife's `ServerClockJumps`; both clocks per write are
   required here as there); the approval and the facts (PlanLife); the old path's inner life (folded into
   claim → write → end).
+
+## The read-side words (generalization PR 2: the core's words; nothing calls them yet)
+
+Design memo 「ブラウザ操作の汎用化」 §3-2, §3-5–§3-7, §15 C6 / C14, §15-2 (PR 2 = 「本体の言葉のうち読む側」), §16-1, §16-2,
+§16-4, §17, §18. Two pure modules in `shared/core` that **know no site, thing or field**; nothing in the app or the
+server imports them yet (PR 3 adds the first map and the check line beside the connector, PR 4 the server). Every shape
+here is **provisional** until a second site fits it (§18): nothing is stored or sent in it yet. Today's one-write path
+(`lstep@0.6.x`: `browserFirstVersionProblem`, `BROWSER_FACT_SCHEMAS`, `BROWSER_RAW_MARKUP_FACTS`, which name
+Lステップ's facts) is untouched and stays the old path's guard; the new path uses the map's names instead.
+
+- **The map's read side** (`browser-map.ts`): `BrowserMap` = `{ site, version, things }`; a thing has a Japanese
+  `label`, `answer: 'json'` (only JSON is read strictly here; an HTML thing stays on the checker path until one is
+  needed), its `id` field, an optional `parent` (`{ thing, field }`), its `fields` (`BROWSER_FIELD_KINDS`, closed: `id`,
+  `id_list`, `id_set` — any order, each as often —, `text`, `date` `YYYY-MM-DD` in the site's own day, `time`
+  `HH:MM`, `number`, `flag`; `nullable`; a Japanese heading) and `keys`: every key path the answer may carry
+  (`a`, `list[].b`) as `required` (the reader uses it; it stands in every object that should hold it), `optional` (the
+  reader uses it; may be absent: list items that differ by kind) or `ignored` (読まない欄: never compared, reviewed one
+  by one). `browserMapProblem` checks a map where it is loaded (each key's container listed, the id an `id` field, the
+  parent in the map, limits `BROWSER_MAP_LIMITS`).
+- **Strict read** (§3-2, owner decision §16-1; `readBrowserThing(map, thing, answer, reader)`): the core walks every
+  key of the parsed answer at every depth; a key the map does not list, a `required` key missing from an object that
+  should hold it, or a container of the wrong shape (an object where the map lists keys, a list of the listed depth
+  where it lists items; null only for a key not `required`) ⇒ `not_read` (no plan; after approval nothing is sent).
+  A key path never ends in `[]` (a list is named by its key). A key not of `BROWSER_ANSWER_KEY_RE` is always
+  unknown (a key `"a.b"` or `"a[]"` would otherwise spell a nested path and pass for it) and is never named. Then the
+  site's reader (code in its connector folder) turns the answer into the state, which must hold **exactly** the map's
+  fields, each of its kind (`browserThingStateProblem`, on a copy taken once); a reader that throws or gives anything else ⇒ `not_read`
+  (`unreadable`). Never a partial state. Too deep (8) or too many keys (2000) ⇒ `not_read`.
+- **What is told** (§16-1 with Codex round 2 R1/R2): `BROWSER_SHAPE_WORDS.member` 「サイトの形が変わったので確認中です。
+  今回は手でお願いします。」 (+ 「送っていません。」 after an approval) is all the member sees. The result's `notices`
+  (`BrowserShapeNotice`: site, map version, thing — the map's own strings —, `unknown_keys` / `missing_keys` /
+  `unreadable`, a count) are what may later go to the owner / admin; **no key name, value or page text**. A thing name
+  the map does not have gives no notice. The key names stay in `diagnosis` (≤ 50 each), which never leaves the PC. The
+  route that carries a notice (§16-1 `POST /browser-shape-notices`, limits, one per company × site × version × thing)
+  is a later PR.
+- **The read part of a line** (`browser-read-line.ts`, `BrowserReadLine` = `{ site, values, reads, checks }`, §17-2's
+  line check `browserReadLineProblem(line, map)`): values with a kind (`id`, `text`, `date`), a role (`target` — an
+  object's id —, `which` — what decides which / when, what a check compares against —, `write`) and the sources the line
+  accepts; reads, in order, each a thing of the map by a `target` value or by an `id` field of an earlier read; checks
+  from the closed list `BROWSER_CHECK_WORDS`, arguments names only (a read, a field of its thing, a value, a format of
+  `BROWSER_DATE_FORMATS`): `unchanged_except(read, reference, except)` (same kind of thing, every field but the id and
+  `except` equal), `source_unchanged(read)` (**after only**: refused in a line that writes nothing — a write line is a
+  later PR; `sourceUnchanged` judges it), `no_sibling_named(read, field)` (a thing with a parent; a text field),
+  `date_in_text(read, field, date, format)` (a text field; `date` a `which` date value), `datetime_on_date(read, field,
+  date)` (a date field). Refused too: an unknown thing / field / word / argument, an id from a later read, from an
+  earlier read's own id field (the same object again: a check would compare it with itself) or from a value that is not
+  a `target`, a value nothing uses, sources the role does not allow. No expression, condition or calculation
+  can be written (plugins.md §8-1); a new word is a change of the core.
+- **Where a value comes from** (§16-4, owner decision Q14 §18; `BROWSER_ROLE_SOURCES`, the one copy):
+  `which` ← `record_field` (a: a record field a business plugin bound — which record type and field is the plugin's,
+  checked by the server later) or `person` (b: confirmed on the card, one value at a time); `target` ← `site_fact` (c);
+  `write` ← any, the AI included. `browserLineValuesProblem(line, supplied)` asks the role's rule **and** the line's list
+  (a line that wrongly lists the AI is still refused), the value's kind, nothing missing or extra; a `which` value from a
+  record field the AI wrote last (Codex round 2 R5) or from a person not yet confirmed is `unconfirmed` (the card asks
+  the person). Answers carry a fixed word and the line's value name, never the value.
+- **Judging** (`evaluateBrowserReadLine(line, map, facts, phase)`): facts are what main read (each read's
+  `readBrowserThing` result, the parents' lists for `no_sibling_named`, the values) — never the AI's word. A read counts
+  only when read whole, a valid state of its thing **and the object asked for** (its id equal to the value or the earlier
+  read's field); otherwise `not-read` / `wrong-object` makes no plan, **even when no check uses that read**. Each check is
+  `ok` / `ng` / `unreadable` / `later`; **only `ok` is ✓**, and nothing turns `unreadable` into `ok`: a check whose read is
+  not counted, a parent's list not read whole, not this parent's (an item of another parent), not holding the thing
+  exactly once or holding an item that is not a valid state, are `unreadable`. `later` (an after word before the write)
+  is never ✓ (C14). `problem` is null only when the values pass, every read counts and every check is `ok`.
+  The values are copied once (plain data) and the copy is checked and used. `dateInText`: the date must stand in the
+  chosen format (ASCII digits, a real day, no digit or separator right next to it: `12/3` not in `12/31`, `2026/12/3`,
+  `112/3`), every real day in that format must be it, and **the whole text, NFKC-folded (full-width digits count), may
+  name no other day in any date-like spelling** — `YYYYMMDD`, `YYYY-M-D` / `/` / `.`, `YYYY年M月D日`, `M/D`, `M月D日`
+  (§15 C6 「部分一致しない」: `参加者_20261203_20261126`, `20261203（変更: 2026/12/04）`, `12/3 または １２/４` ✗); `M/D` has
+  no year (the line chose it). `no_sibling_named` compares names by `siblingNameKey` (owner decision 2026-11-24: refuse
+  more): NFC, full-width ASCII and the ideographic space folded to half-width (for this only), whitespace runs collapsed
+  and trimmed, A–Z case-folded — a trailing space, a full-width variant or another ASCII case is the same name.
+- **Not in this PR** (later, memo §15-2): the map's must-hold facts per thing and verb (C5: account and parent binding,
+  read whole, content kinds, mandatory notes — today only the parent check inside `no_sibling_named` and the id check
+  of every read), value-shape words (§14-1), the opened list's file and hashes (PR 3), the notice route and the server's
+  re-check of a bound record field (PR 4), write verbs and predictions (PR 5).
+
+Tests: `server/tests/unit/browser-read-words.test.ts` with an **example map** (`server/tests/fixtures/browser/
+example-map.ts`, shaped like stage 0's landing-route keys; not a reviewed map) — the map's refusals; strict read
+(whole, optional / ignored keys, unknown keys at the top and in list items, a key spelled like a nested path counted and
+never named, missing required keys at the top and in items, containers of the wrong shape and a null required one, readers that throw / add / drop / mistype a field, not an
+object, too deep, a thing not in the map telling nothing, the notice holding no key name, the member's sentence); the
+line's refusals; the sources (which from the AI or the site refused even when the line lists them, a record field the
+AI wrote last and an unconfirmed person `unconfirmed`, a target from the AI, missing / extra / bad values); judging (all
+✓, a read not whole — also one no check uses —, another object, a forged state, every word unreadable without its read,
+values refused, a value read once, `unchanged_except` naming the differing fields with an id set in another order equal, the previous
+round's tag, another day, a twin sibling (also by a trailing space, full width or case), every bad list, `source_unchanged`), `dateInText` as a table, and **§17-2:
+the new core modules name no site, thing or field** — every approved connector's id, hosts, operations, checkers,
+readers and reads with their labels (from `approved.json`, so a new site is covered by itself) and the example map's
+things, thing labels, `_` field names and each part of its key paths must not appear in `browser-map.ts` / `browser-read-line.ts` (the old path's files are the named exception, §16-7 R8).
+Each guard mutation-checked; kept on purpose: the depth check on lists (stack safety; every deep list also fails the
+reader), `sourceUnchanged`'s status check (the state check after it catches the same), the date words' values check
+(a values problem already makes every value-rooted read `wrong-object`), `dateInText`'s "every one in the format is
+the date" (the whole-text scan catches the same) and the reader state's copy (a reader is reviewed site code).
 
 ## The operator and the preview (PR 6b-1: built, switched off; nothing in the app calls it)
 
