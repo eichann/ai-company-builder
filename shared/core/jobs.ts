@@ -434,21 +434,28 @@ export const JOB_SET_UNCONFIRMED = ['headcount', 'budget', 'company_size', 'subs
  * checks it, §5 O1), the confidence on a coarse scale (hundredths: a float's bits carry no words).
  */
 export type JobSetReport =
-  | { decision: JobSetDecision; reason: string; confidence: number; unconfirmed: string[] }
-  | { decision: 'gate_failed'; reason: typeof JOB_GATE_UNAVAILABLE; confidence: null; unconfirmed: [] }
+  | { decision: JobSetDecision; reason: string; confidence: number; unconfirmed: string[]; updates: number }
+  | { decision: 'gate_failed'; reason: typeof JOB_GATE_UNAVAILABLE; confidence: null; unconfirmed: []; updates: 0 }
+/**
+ * How many update proposals (更新案) a set watch's run left for its responsible person, at most (4b-4 PR3b, owner memo
+ * 「4b-4 挟む部分」 §G-1): a count only — never what they are about (those stay in the person's own files on the PC).
+ */
+export const JOB_SET_UPDATES_MAX = 20
 
 /**
  * The finish's `jobResult` of a set watch's run, strictly (`POST /ai-runs/:runId/finish`): `{ decision, reason, confidence,
  * unconfirmed? }` with `reason` one of the pinned definition's codes (an unknown one is refused, never stored as given),
- * `confidence` a number 0–1, `unconfirmed` 0–5 distinct words of `JOB_SET_UNCONFIRMED` and only with `proceed` / `ask`; or
- * exactly `{ decision: 'gate_failed' }`. Any other key — `evidence`, a title, a summary — is refused. Null when not one.
+ * `confidence` a number 0–1, `unconfirmed` 0–5 distinct words of `JOB_SET_UNCONFIRMED` and only with `proceed` / `ask`,
+ * `updates` an integer 0–`JOB_SET_UPDATES_MAX` (absent = 0: an app before PR3b); or exactly `{ decision: 'gate_failed' }` (no
+ * count: a gate that could not judge made nothing). Any other key — `evidence`, a title, a summary — is refused. Null when
+ * not one.
  */
 export function parseJobSetReport(v: unknown, decision: JobDecision | undefined): JobSetReport | null {
   if (!isObj(v)) return null
   if (v.decision === 'gate_failed') {
-    return Object.keys(v).length === 1 ? { decision: 'gate_failed', reason: JOB_GATE_UNAVAILABLE, confidence: null, unconfirmed: [] } : null
+    return Object.keys(v).length === 1 ? { decision: 'gate_failed', reason: JOB_GATE_UNAVAILABLE, confidence: null, unconfirmed: [], updates: 0 } : null
   }
-  if (!Object.keys(v).every(k => k === 'decision' || k === 'reason' || k === 'confidence' || k === 'unconfirmed')) return null
+  if (!Object.keys(v).every(k => k === 'decision' || k === 'reason' || k === 'confidence' || k === 'unconfirmed' || k === 'updates')) return null
   if (!(JOB_SET_DECISIONS as readonly unknown[]).includes(v.decision)) return null
   const d = v.decision as JobSetDecision
   if (typeof v.reason !== 'string' || !decision?.reasons.some(r => r.code === v.reason)) return null
@@ -457,7 +464,9 @@ export function parseJobSetReport(v: unknown, decision: JobDecision | undefined)
   if (!Array.isArray(unconfirmed) || unconfirmed.length > JOB_SET_UNCONFIRMED.length) return null
   if (!unconfirmed.every(u => (JOB_SET_UNCONFIRMED as readonly unknown[]).includes(u)) || new Set(unconfirmed).size !== unconfirmed.length) return null
   if (d === 'decline' && unconfirmed.length > 0) return null
-  return { decision: d, reason: v.reason, confidence: Math.round(v.confidence * 100) / 100, unconfirmed: [...unconfirmed] as string[] }
+  const updates = v.updates === undefined ? 0 : v.updates
+  if (typeof updates !== 'number' || !Number.isInteger(updates) || updates < 0 || updates > JOB_SET_UPDATES_MAX) return null
+  return { decision: d, reason: v.reason, confidence: Math.round(v.confidence * 100) / 100, unconfirmed: [...unconfirmed] as string[], updates }
 }
 
 /**

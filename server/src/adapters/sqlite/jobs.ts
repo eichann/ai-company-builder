@@ -504,16 +504,16 @@ export function sqliteJobRepository(conn: Database.Database, companyId: string):
 
     insertSetReport(occurrenceId, report, at) {
       // Never OR IGNORE: a second judgement of one occurrence throws (its finish is rolled back).
-      conn.prepare(`INSERT INTO ai_job_set_reports (company_id, occurrence_id, decision, reason, confidence, unconfirmed, at) VALUES (?, ?, ?, ?, ?, ?, ?)`)
-        .run(companyId, occurrenceId, report.decision, report.reason, report.confidence, JSON.stringify(report.unconfirmed), at)
+      conn.prepare(`INSERT INTO ai_job_set_reports (company_id, occurrence_id, decision, reason, confidence, unconfirmed, updates, at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
+        .run(companyId, occurrenceId, report.decision, report.reason, report.confidence, JSON.stringify(report.unconfirmed), report.updates, at)
     },
     setReport(occurrenceId) {
-      const r = conn.prepare(`SELECT decision, reason, confidence, unconfirmed, at FROM ai_job_set_reports WHERE company_id = ? AND occurrence_id = ?`)
-        .get(companyId, occurrenceId) as { decision: string; reason: string; confidence: number | null; unconfirmed: string; at: string } | undefined
+      const r = conn.prepare(`SELECT decision, reason, confidence, unconfirmed, updates, at FROM ai_job_set_reports WHERE company_id = ? AND occurrence_id = ?`)
+        .get(companyId, occurrenceId) as { decision: string; reason: string; confidence: number | null; unconfirmed: string; updates: number; at: string } | undefined
       if (!r) return null
       let unconfirmed: string[] = []
       try { unconfirmed = JSON.parse(r.unconfirmed) as string[] } catch { unconfirmed = [] }
-      return { decision: r.decision, reason: r.reason, confidence: r.confidence, unconfirmed, at: r.at } as JobSetReport & { at: string }
+      return { decision: r.decision, reason: r.reason, confidence: r.confidence, unconfirmed, updates: r.updates, at: r.at } as JobSetReport & { at: string }
     },
     insertSetFeedback(occurrenceId, kind, at) {
       return conn.prepare(`INSERT OR IGNORE INTO ai_job_set_feedback (company_id, occurrence_id, kind, at) VALUES (?, ?, ?, ?)`)

@@ -208,6 +208,8 @@ export interface JobSetReportView {
   /** 0–1 in hundredths; null for `gate_failed`. */
   confidence: number | null
   unconfirmed: string[]
+  /** How many update proposals the run left (0–20; 4b-4 PR3b). Absent: an older server (read as 0). */
+  updates?: number
   feedback: Array<'made_anyway' | 'too_early' | 'went_ahead'>
 }
 

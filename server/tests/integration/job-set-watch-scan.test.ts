@@ -749,6 +749,23 @@ describe('the judgement reaches the server as fixed kinds only (I6, T12)', () =>
     expect(reports()).toEqual([])
   })
 
+  it('updates is a small count only (PR3b): an integer 0–20 — a string, a fraction, a negative or 21 is refused', async () => {
+    const { occ, run } = await claimed()
+    for (const updates of ['2', 1.5, -1, 21, null, [1]]) {
+      expect(await finish(run, { decision: 'proceed', reason: 'requested', confidence: 0.9, updates }), String(updates)).toMatchObject({ status: 400, body: { code: 'JOB_SET_REPORT_BAD' } })
+    }
+    expect(reports()).toEqual([])
+    expect(stateOf(occ)).toBe('running')
+    expect((await finish(run, { decision: 'proceed', reason: 'requested', confidence: 0.9, updates: 20 })).status).toBe(200)
+    expect(reports()).toEqual([expect.objectContaining({ occurrence_id: occ, updates: 20 })])
+  })
+
+  it('gate_failed carries nothing else: a count beside it is refused (PR3b)', async () => {
+    const { run } = await claimed()
+    for (const updates of [0, 1]) expect((await finish(run, { decision: 'gate_failed', updates })).status).toBe(400)
+    expect(reports()).toEqual([])
+  })
+
   it('`nothing` is refused: whether it was needed is the server’s to say', async () => {
     const { run } = await claimed()
     expect(await finish(run, 'nothing')).toMatchObject({ status: 400, body: { code: 'JOB_EVENT_NOTHING_REFUSED' } })
@@ -788,6 +805,59 @@ describe('進める / 人に聞く / 判断できなかった: one やること 
     expect(reports()).toEqual([expect.objectContaining({ decision: 'gate_failed', reason: 'GATE_UNAVAILABLE', confidence: null })])
     expect((await as(ALICE, 'GET', `/records/item/${taskOf(occ)}`)).body.data.record.title).toMatch(DATE_ONLY)
   })
+})
+
+describe('update proposals (PR3b, owner memo 「4b-4 挟む部分」 §G-1): 見送る with a count still makes the one やること', () => {
+  it('見送る with updates: one owner-only やること named by the date, saying how many and that no たたき台 was made; no 見送る notice', async () => {
+    const { occ, run, meeting: m } = await claimed({ title: 'A社 初回の商談' })
+    expect((await finish(run, { decision: 'decline', reason: 'introduction', confidence: 0.8, updates: 2 })).status).toBe(200)
+    const task = (await as(ALICE, 'GET', `/records/item/${taskOf(occ)}`)).body.data
+    expect(task.record.title).toMatch(/^\d{1,2}月\d{1,2}日の会議の更新案を確かめる$/)
+    expect(task.record.summary).toBe('AI はたたき台を作りませんでした。更新案が 2 件あります。')
+    expect(task.record.fields).toMatchObject({ assignee: ALICE })
+    expect(JSON.stringify(task)).toContain(m)
+    expect(JSON.stringify(task)).not.toMatch(/introduction|顔合わせ|0\.8/)
+    expect(db.prepare("SELECT COUNT(*) AS n FROM notifications WHERE company_id = ? AND kind = 'job_set_declined'").get(CO)).toEqual({ n: 0 })
+    expect(reports()).toEqual([expect.objectContaining({ occurrence_id: occ, decision: 'decline', updates: 2 })])
+    expect(stateOf(occ)).toBe('done')
+    // The responsible person's alone (§F #9): bob (at the meeting) and the owner get a missing record's answer.
+    expect((await as(BOB, 'GET', `/records/item/${taskOf(occ)}`)).status).toBe(404)
+    expect((await as('ss-owner', 'GET', `/records/item/${taskOf(occ)}`)).status).toBe(404)
+    // Off the meeting: still hers, still without the meeting's name or the reason.
+    takeOff(m)
+    const after = (await as(ALICE, 'GET', `/records/item/${taskOf(occ)}`)).body.data
+    expect(JSON.stringify(after)).not.toMatch(/A社|introduction|顔合わせ/)
+    // Her own view of the occurrence carries the count while it is hers to see (here: no longer — nothing at all).
+    expect((await as(ALICE, 'GET', '/me/job-occurrences')).body.data.occurrences).toEqual([])
+  })
+
+  it('見送る with updates 0: the notice only, no やること (as before PR3b)', async () => {
+    const { occ, run } = await claimed()
+    expect((await finish(run, { decision: 'decline', reason: 'introduction', confidence: 0.8, updates: 0 })).status).toBe(200)
+    expect((await as(ALICE, 'GET', `/records/item/${taskOf(occ)}`)).status).toBe(404)
+    expect(notices('job_set_declined')).toEqual([expect.objectContaining({ user_id: ALICE })])
+  })
+
+  it('進める with updates: the date-only たたき台 やること says how many; her own view carries the count', async () => {
+    const { occ, run } = await claimed()
+    expect((await finish(run, { decision: 'proceed', reason: 'requested', confidence: 0.9, updates: 3 })).status).toBe(200)
+    const task = (await as(ALICE, 'GET', `/records/item/${taskOf(occ)}`)).body.data.record
+    expect(task.title).toMatch(DATE_ONLY)
+    expect(task.summary).toBe('更新案が 3 件あります。')
+    const mine = (await as(ALICE, 'GET', '/me/job-occurrences')).body.data.occurrences
+    expect(mine).toEqual([expect.objectContaining({ id: occ, report: expect.objectContaining({ decision: 'proceed', updates: 3 }) })])
+  })
+
+  it('records off: a 見送る with updates is stopped like any やること — the occurrence needs a person, nothing kept', async () => {
+    const { occ, run } = await claimed()
+    db.prepare('UPDATE record_settings SET enabled = 0 WHERE company_id = ?').run(CO)
+    expect((await finish(run, { decision: 'decline', reason: 'introduction', confidence: 0.8, updates: 1 })).status).toBe(409)
+    expect(occurrences((db.prepare('SELECT job_id FROM ai_job_occurrences WHERE company_id = ? AND id = ?').get(CO, occ) as Json).job_id)[0])
+      .toMatchObject({ state: 'needs_person', outcome_code: 'RECORDS_OFF' })
+    expect(reports()).toEqual([])
+    expect(notices('job_set_declined')).toEqual([])
+  })
+
 })
 
 describe('見送る: no やること, a notice whose words are built when read (§5-1, T15)', () => {
@@ -853,7 +923,7 @@ describe('corrections of a judgement (§5-2, POST /me/job-occurrences/:id/feedba
     expect(rows).toHaveLength(1)
     expect(Object.keys(rows[0]).sort()).toEqual(['at', 'company_id', 'kind', 'occurrence_id'])
     const mine = (await as(ALICE, 'GET', '/me/job-occurrences')).body.data.occurrences
-    expect(mine).toEqual([expect.objectContaining({ id: occ, report: { decision: 'ask', reason: 'requested', confidence: 0.5, unconfirmed: [], feedback: ['went_ahead'] } })])
+    expect(mine).toEqual([expect.objectContaining({ id: occ, report: { decision: 'ask', reason: 'requested', confidence: 0.5, unconfirmed: [], updates: 0, feedback: ['went_ahead'] } })])
   })
 
   it('a correction must answer the judgement; none before a judgement; a kind not in the list is 400', async () => {

@@ -96,6 +96,13 @@ describe.skipIf(!CROSS_DB)('cross-build 2/3: the rollback floor on it', () => {
     // The set watch's (schema 5) neither, whatever the app names.
     expect((await as('xb-alice', 'GET', '/me/job-turns?kinds=time,event&checks=matched_record')).body.data.turns).toEqual([])
     expect((await as('xb-alice', 'POST', '/job-run-claims', { occurrenceId: o5, deviceId: 'device-xb-9', conversationId: 'c-9', checks: ['new_files', 'new_meetings', 'source_record', 'matched_record'], kinds: ['time', 'event'] })).status).toBe(404)
+    // Its run claimed by step 1 (alice's app went on while production went back): its report — with an update count (4b-4
+    // PR3b) or without — is a missing run's answer here, and nothing is made or kept of it.
+    const before5 = { state: stateOf(o5), made: madeCount(), notices: noticeCount() }
+    for (const jobResult of [{ decision: 'decline', reason: 'requested', confidence: 0.5, updates: 2 }, { decision: 'proceed', reason: 'requested', confidence: 0.5 }]) {
+      expect((await as('xb-alice', 'POST', `/ai-runs/${m.runs.r5.id}/finish`, { generation: m.runs.r5.generation, outcome: 'done', jobResult })).status).toBe(404)
+    }
+    expect({ state: stateOf(o5), made: madeCount(), notices: noticeCount() }).toEqual(before5)
     expect((await as('xb-alice', 'GET', `/ai-runs/${m.runs.r1}`)).status).toBe(404)
     expect((await as('xb-owner', 'POST', `/jobs/${j3}/occurrences/${o4}/operations/put-1/reconcile`, { done: true })).status).toBe(404)
 
