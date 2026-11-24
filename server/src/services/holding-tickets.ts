@@ -69,8 +69,10 @@ export function createHoldingTicketService(deps: HoldingTicketServiceDeps) {
 
   function settle(companyId: string, before: Map<string, FolderReaders>, after: Map<string, FolderReaders>, change: ReaderChange): void {
     const handle = companyData.forCompany(companyId)
-    const at = clock.now()
-    const expiresAt = new Date(clock.nowMs() + HOLDING_TICKET_DAYS * DAY_MS).toISOString()
+    // One clock read: a ticket expires exactly HOLDING_TICKET_DAYS after it was written.
+    const atMs = clock.nowMs()
+    const at = new Date(atMs).toISOString()
+    const expiresAt = new Date(atMs + HOLDING_TICKET_DAYS * DAY_MS).toISOString()
     for (const [scopeId, was] of before) {
       const now = after.get(scopeId)
       let lost: string[]
