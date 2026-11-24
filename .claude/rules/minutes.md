@@ -331,7 +331,14 @@ or the decision service stops calling it, or another module uses the older per-m
   exactly as ［AI に読ませる］ (the presser's Google tried first; not shared → it stays `arrived`), actor
   `CLOCK_ACTOR`, note 「自動で読む設定のため、AI に読ませました」. A mode the member **chose** applies to
   meetings recorded at or after the choice (`updated_at`): choosing never reads the last days' backlog at
-  once. **One reader**: the first discovery that asks wins (the meeting leaves `arrived`); another
+  once; a member who never chose (no row) has no such bound, so their first discovery may read the last
+  3 days' outside meetings still `arrived` (open owner decision). **After the try of the text** (an await)
+  the series' choice and the setting are read again in the synchronous stretch of the write: turned off
+  meanwhile → nothing is asked (Codex review). **Google budget**: the try counts two calls per document
+  against the run's `MEETING_CALLS_PER_RUN` (a spent run leaves it to the next); a try Google refused (not
+  shared, nothing readable) is not made again for that member and meeting for an hour (in the process
+  only: a restart tries once more); Google asking to wait (`GOOGLE_UNAVAILABLE`) stops that member's run
+  and is tried on the next. **One reader**: the first discovery that asks wins (the meeting leaves `arrived`); another
   attendee's run finds it not arrived and does nothing; a second run writes nothing. **D1-2**: it reads
   whatever the company's 「自動で進める」 says (the app runs an asked meeting as a press; a scheduled job
   made from the reading still follows the company's switch); stopping is the AI's emergency stop.

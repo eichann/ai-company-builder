@@ -76,6 +76,11 @@ function seed(): GoogleSeed {
     { ev: ev('fakear-weekly2', '週次', '2026-11-25', 'fff-ffff-fff', [S.member, S.colleague], { recurringEventId: SERIES }), day: '2026-11-25' },
     // 11/26: another customer meeting both members want read.
     { ev: ev('fakear-sales2', '商談2', '2026-11-26', 'ggg-gggg-ggg', [S.member, S.colleague, GUEST]), day: '2026-11-26' },
+    // 11/27: one whose text Google refuses at first; 11/28: one whose reader turns the setting off mid-way.
+    { ev: ev('fakear-sales3', '商談3', '2026-11-27', 'hhh-hhhh-hhh', [S.member, S.colleague, GUEST]), day: '2026-11-27' },
+    { ev: ev('fakear-sales4', '商談4', '2026-11-28', 'iii-iiii-iii', [S.member, S.colleague, GUEST]), day: '2026-11-28' },
+    // 11/29: Sato's alone, recorded by a run whose budget is spent before the try of its text.
+    { ev: ev('fakear-sales5', '商談5', '2026-11-29', 'jjj-jjjj-jjj', [S.member, GUEST]), day: '2026-11-29' },
   ]
   return {
     ...base,
@@ -273,5 +278,72 @@ describe('the member\'s setting', () => {
     await poll()
     expect(await requests(sales2)).toHaveLength(1)
     expect(fieldsOf(sales2).assignee).toBe(reader)
+  })
+
+  it('a try of the text Google refused is not made again for an hour; Google asking to wait is tried on the next run', async () => {
+    at('2026-11-27T09:00:00+09:00')
+    await setMode('ar-tanaka', 'off')
+    const doc = 'fake-doc-ar-7'
+    const textReads = () => google.requests.filter(q => q.path.includes(doc) && (q.path.includes('/export') || q.path.startsWith('/v1/documents'))).length
+    google.faults.refuseDocs(doc)
+    google.faults.refuseExport(doc, 'cannotExportFile')
+    at('2026-11-27T18:00:00+09:00')
+    await poll()
+    const sales3 = idOf('商談3')
+    expect(stateOf(sales3)).toBe('arrived')
+    const tried = textReads()
+    expect(tried).toBeGreaterThan(0)
+    at('2026-11-27T18:30:00+09:00')
+    await poll()
+    expect(textReads()).toBe(tried)
+    // Google asking to wait: not remembered as a refusal.
+    google.faults.reset()
+    google.faults.refuseDocs(doc)
+    google.faults.refuseExport(doc, 'userRateLimitExceeded')
+    at('2026-11-27T19:05:00+09:00')
+    await poll()
+    const busy = textReads()
+    expect(busy).toBeGreaterThan(tried)
+    await poll()
+    expect(textReads()).toBeGreaterThan(busy)
+    expect(stateOf(sales3)).toBe('arrived')
+    google.faults.reset()
+    at('2026-11-27T19:10:00+09:00')
+    await poll()
+    expect(stateOf(sales3)).toBe('received')
+    expect(fieldsOf(sales3).assignee).toBe('ar-sato')
+  })
+
+  it('the member\'s choice is read again after the try of the text: turned off meanwhile, nothing is asked', async () => {
+    at('2026-11-28T18:00:00+09:00')
+    const doc = 'fake-doc-ar-8'
+    const docCalls = () => google.requests.filter(q => q.path.includes(doc)).map(q => q.path)
+    google.faults.delayMs = 300
+    const run = poll()
+    // Wait until discovery has recorded it and the try of the text has begun (a text read is on its way).
+    for (let i = 0; i < 400 && !docCalls().some(p => p.includes('/export') || p.startsWith('/v1/documents')) && docCalls().length < 2; i++) await new Promise(r => setTimeout(r, 10))
+    expect(docCalls().length).toBeGreaterThanOrEqual(2)
+    await setMode('ar-sato', 'off')
+    await run
+    google.faults.reset()
+    const sales4 = idOf('商談4')
+    expect(stateOf(sales4)).toBe('arrived')
+    expect(await requests(sales4)).toEqual([])
+  })
+
+  it('the try of the text counts against the run\'s Google budget: a spent run leaves it to the next', async () => {
+    at('2026-11-29T09:00:00+09:00')
+    await setMode('ar-sato', 'outside')
+    at('2026-11-29T18:00:00+09:00')
+    const doc = 'fake-doc-ar-9'
+    const textReads = () => google.requests.filter(q => q.path.includes(doc) && (q.path.includes('/export') || q.path.startsWith('/v1/documents'))).length
+    // Two calendars (2) and the meeting's discovery (4): one call left, a try needs two.
+    await services.minutes.pollCompany(CO, async () => {}, 7)
+    const sales5 = idOf('商談5')
+    expect(stateOf(sales5)).toBe('arrived')
+    expect(textReads()).toBe(0)
+    await poll()
+    expect(stateOf(sales5)).toBe('received')
+    expect(fieldsOf(sales5).assignee).toBe('ar-sato')
   })
 })
