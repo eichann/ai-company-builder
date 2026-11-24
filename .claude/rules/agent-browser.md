@@ -69,6 +69,10 @@ paths:
   - "client/tests/browser-plans-app.test.ts"
   - "client/tests/browser-plan-card-ui.tsx"
   - "client/tests/ui/browser-plan-card.spec.ts"
+  - "client/shared/browser-inspection.ts"
+  - "client/tests/browser-inspect-app.test.ts"
+  - "client/tests/browser-inspection-card-ui.tsx"
+  - "client/tests/ui/browser-inspection-card.spec.ts"
 ---
 
 # Browser operation (「ブラウザ操作」): sites the chat AI may operate
@@ -1407,13 +1411,14 @@ leaving), `browser-plans.test.ts` (the old claim busy on a new-path key; every o
 rows + `CROSS`, `company-scoped-sql.test.ts`, `jobs-schema.test.ts`, `client/tests/browser-lstep-map.test.ts` (map
 1.0.1). Each guard mutation-checked (27 mutations, all caught).
 
-## The read runner of an opened line (generalization PR 5a: built and tested; nothing calls it yet)
+## The read runner of an opened line (generalization PR 5a; wired by 5b: "The inspection in the chat")
 
 Design memo 「ブラウザ操作の汎用化」 §3, §9, §16-1 (strict read, the member's sentence, the notice), §17 (layers). The app's
 side of a **read-only** opened line: `client/electron/features/browser/read-line-runner.ts` (`createBrowserReadRunner`, no
-Electron, no site). Not wired: the server side is "Plans of opened lines on the server" above (PR 4); the HTTP client,
-the chat and the card are PR 5b; no module imports it but its test (it names no runner, run window or `enterAi`, so the closed-entry test of "The
-runner" is unchanged). The old path (`client/connectors/lstep/`, `runner.ts`) is untouched.
+Electron, no site). The server side is "Plans of opened lines on the server" above (PR 4); the HTTP client, the chat and
+the card are PR 5b ("The inspection in the chat"), whose `inspect.ts` is its only importer besides its test (it names no
+runner, run window or `enterAi`, so the closed-entry test of "The runner" is unchanged). Since 5b a run may carry the
+turn's `signal`: aborted, the read on its way is abandoned and nothing more is read or judged (`context`). The old path (`client/connectors/lstep/`, `runner.ts`) is untouched.
 
 - **Input**: an opened line whose row is `approved` (anything else → `not-approved`), its map (`browserMapProblem`; the
   line `browserOpenedLineProblem` on it, same site), the map's readers, how each read thing is addressed
@@ -1448,8 +1453,8 @@ runner" is unchanged). The old path (`client/connectors/lstep/`, `runner.ts`) is
   the reporter fire-and-forget (a failure or a throw changes nothing); a refused run sends no result (the plan closes at
   its hour). Nothing is logged; no answer is
   kept.
-- **For 5b / later**: the list entry's folder source (`group` ← the route's `group_id`) is handed in as data (the envelope
-  keys come from `LSTEP_MAP_READS` since map 1.0.1); it belongs with the map once the wiring reads it from there. `no_sibling_named` gets no
+- **For 5b / later**: the list entry's folder source (`group` ← the route's `group_id`) is handed in as data — since map
+  1.0.4 from the map (`LSTEP_MAP_READS.landing_row.folder`, `lstepReadLines()`). `no_sibling_named` gets no
   siblings yet (its check stays 「読み取れませんでした」). **The host** is the caller's: the map has none, so 5b must take
   it from the reviewed declaration of `map.site` (as `approved.json`), never from the request — else a map's GETs could go
   to another site with its cookies (independent review). The card's values are site data: 5b decides where they may go.
@@ -1473,6 +1478,72 @@ nothing logged).
 Each guard mutation-checked; kept on purpose: the address check
 after building (the description check already refuses what it would), the notices' rebuild beyond the merge (the core's
 notices hold only those fields) and `later` → unreadable in the result (a read-only line has no after word).
+
+## The inspection in the chat (generalization PR 5b: wired, behind this PC's opt-in)
+
+Owner decisions on #823 (the marker page, the folder in the map, a route in no folder 「読み取れませんでした」, 404 / 500 no
+shape notice, every list page read, only judged runs reported) and the PC-registration memo v2 (an inspection needs no
+［任せる］; it runs only while the member has that consultation open; the AI gets only ✓ / ✗ words, never a site value — the
+values are on the member's card alone; PC registration itself is a later PR: this PC's opt-in stays the switch, the build
+constant stays off). **The old path is unchanged** (`browser_request`, the plan card, `runner.ts`, `lstep@0.6.x`).
+
+- **The tool** `browser_inspect` (`electron/browser-request/inspect-tool.ts`, `mcp__acb_browser__browser_inspect`, on the
+  same in-process server as `browser_request`, `alwaysLoad`, auto-allowed, category `web` — the emergency stop's `web`
+  kind): the same gates as `browser_request` — the wiring present and the switch on (`browserInspectForTurn`: off = no
+  tool), an agent with `capabilities.browserOperator`, never an unattended step — and the same turn signal (the member's
+  stop, the turn tracker's: an administrator's stop, a closed window). Input `{ site, line, values }`: the line's own value
+  names, each a plain id (`BROWSER_ID_VALUE_RE`), as the user gave them. **Its answer** (`inspectionWordsForAi`,
+  `BROWSER_INSPECT_WORDS`, `client/shared/browser-inspection.ts`): fixed words, the card's title, overall state and each
+  check's label (the line's and map's words) with its mark — never a read field's value, the account, or a ✗'s field
+  headings. A judged run puts the card's reference into the reply (`data-browser-inspection`, `BrowserInspectionRef`,
+  stored as `browserInspections`).
+- **The wiring** (`features/browser/inspect.ts`, `wireBrowserInspections`; no Electron; main hands in the switch and the
+  context the plans use, the stop, the controller's `previewWindow`, the bundled map folder's `lstepReadLines()` — map,
+  readers, addresses, the account marker — and `LINES`, and the bundled declarations): the switch → the bundled line on
+  the bundled map version, an inspection (no writes), whose opened-list row and map row hold **exactly** that line and map
+  (canonical JSON equal) and is `approved` → the values (`browserLineValuesProblem`; a value that decides which / when can
+  never come from this tool) → the site's host and name **only from its approved, carried declaration** (never the
+  request) → the stop, the window open → `POST /browser-line-plans` (the server's gate: approved row, setting, stop,
+  grant; nothing is read unless it makes the plan) → the read runner with the plan id and the turn's signal → the card
+  kept **in memory** for that member (≤ 100, cleared on sign-out) → the result `{ reads, checks }` once, notices as the
+  runner sends them (`lines-api.ts`, the member's session; never a value). A refused run reports nothing (the plan
+  closes at its hour).
+- **Where a target value comes from** (decision for the owner): the map has no list of routes to choose from (no landing
+  folder list was confirmed read only), so the numbers are the member's, through the AI, sent as `site_fact`: the read
+  itself makes each one — main reads exactly that object in the member's logged-in account (strict read, the account
+  marker before and after), an id the site does not answer for is not read and never ✓, and the card shows the names as
+  read. Choosing from a list the site showed waits for a confirmed list read.
+- **The account marker page** (map 1.0.4 `LSTEP_MAP_ACCOUNT`): `/` — the start page the window itself opens on every
+  「開いてログイン」, read with the old path's `accountFromMeta`; anything but a 200 page with one marker = account unknown,
+  no read counts. **Map 1.0.4** (on top of PR 8's 1.0.3): no thing, field or key changed; the folder of the list row and
+  the marker page moved into the map; `landing_inspect` on 1.0.2 and 1.0.4 is `approved` with `grantsFrom` the approved
+  earlier rows' mechanics hashes (1.0.1, 1.0.2: the owner's compatible calls, #826 decision 1 and this PR; its 1.0.3 row
+  stays `pending` — no build bundles it with the inspection); `landing_create` and `step_template_add` stay `pending`.
+- **The card** (`src/features/browser-plans/components/BrowserInspectionCard.tsx`, `inspectionStore.ts`,
+  `hooks/useBrowserInspection.ts`; IPC `browserLines:card { companyId, planId }`, main window's main frame only, ids of the
+  server's shape, the signed-in member's card only; the renderer copies only the card's shape, `readBrowserCard`, and keeps
+  it only while a card shows it — shown again, main is asked again, so nothing outlives main's sign-out clear): the
+  generic card (`buildBrowserReadCard`) — headline, each check ✓ / ✗ (with the fields' headings) / 「読み取れませんでした」,
+  「サイトから読み取った情報（AI には見せていません）」 with the account and the read values (a value not read 「読み取れませんでした」
+  in amber, never a stand-in), the read time, the map's notes as warnings. Nothing to press. Frame green when all ✓, amber
+  otherwise. After a restart: 「この点検の結果は、このアプリを開き直したので消えました…」; another window: open it in the main
+  window's consultation.
+
+Tests: `client/tests/browser-inspect-app.test.ts` (the real map, lines, declaration and opened list with a fake Lステップ and a
+fake of the server's routes: a good run reads exactly the marker, the line's GETs and the marker on the declaration's
+host, the AI's words hold no value the site showed, the server gets the line's ref, the values as targets and the
+result in fixed words once and no value, the card only for the main window and the member; switched off no tool and
+nothing asked; a pending row, each refusal of the server's gate and bad values read nothing; a turn already stopped
+makes no plan; the turn aborted mid-run → no card, no result; a route in no folder → its row and a check 「読み取れませんでした」, never all ✓; a ✗ told as a mark
+only; the renderer's card check), `client/tests/ui/browser-inspection-card.spec.ts` (preview
+`browser-inspection-card-ui.html`, `?state=all_ok|ng|not_read|gone|other-window`, `?manual=1` a fictional site for the
+manual later: the marks, 「読み取れませんでした」 never ✓, the notes, no button, the plain sentences),
+`src/features/browser-plans/inspectionStore.test.ts` (the renderer's copy gone with the last card, main asked again, a late
+answer dropped), `browser-read-line-runner.test.ts` (the 1.0.x row as approved and carrying the first row's grants),
+`browser-lines.test.ts` (the approved rows), `architecture-boundaries.test.ts`, `browser-runner.test.ts` (the old runner's
+importers unchanged). Each guard mutation-checked (the switch, the row's status, the main-window check, the member's
+card, the turn signal, no value in the AI's words); kept on purpose: the runner's own `turn.aborted` check (the context
+capture with the signal already sees it).
 
 ## The write words and the first write line (generalization PR 6: data and words; nothing writes with them yet)
 
@@ -1529,10 +1600,8 @@ new take the same lock key for a step.
   answer with a key more until a read-only confirmation lists them (PR 7). `LSTEP_MAP_WRITES` is the old declaration's
   write word for word (mechanics). The template list's envelope is `null` (unconfirmed). `landing_inspect` gets a row on
   1.0.2, `pending` (the readers moved, its meaning did not: carrying its grants is the owner's "compatible" call, Q15); its
-  approved row on 1.0.1 is unchanged. Until that call the read runner (PR 5a), handed the bundled map 1.0.2, refuses the
-  inspection (`not-approved`): nothing calls it yet, but approving the 1.0.2 row (with `grantsFrom` the 1.0.1 row's
-  mechanics hash) must come before PR 5b wires it. `browser-read-line-runner.test.ts` hands the runner the 1.0.2 row as
-  approved and checks it has the 1.0.1 row's meaning.
+  approved row on 1.0.1 is unchanged. The owner called it compatible (#826 decision 1): the 1.0.2 row is `approved` with
+  `grantsFrom` the 1.0.1 row's mechanics hash (PR 5b's first commit; map 1.0.4 likewise, "The inspection in the chat").
 - **Lステップ map 1.0.3** (generalization PR 8, first commit): the read-only confirmation of PR 6's things with the owner's
   login (「段0の結果」 追記3, 2026-11-25, 0 writes): the reminder exactly 6 keys, each step 12 (its `egg_id` a number with a
   value, `step_time` a string: read past), a step's timing 5, a template folder 4 (its list's envelope `data` alone), a
@@ -2170,8 +2239,8 @@ remove, target `{ reminder, step, hole }`, the checker confirming the hole is th
 isolated and signed** and handed out with their declarations from the shelf (design memo §25: a
 JavaScript engine without network, files or clock, limits on time and memory; only checkers div signed;
 the package's `signature.yaml` verified first), landing routes (the read-only inspection's map 1.0.1 and line exist, the line `approved`, and the server takes its
-plans and results: "The first map and the inspection line", "Plans of opened lines on the server"; reading them in the
-app and the card on screen are PR 5 / 6), a
+plans and results: "The first map and the inspection line", "Plans of opened lines on the server"; the inspection is read in the
+app and shown on its card since PR 5b, "The inspection in the chat"; creating routes is a later line), a
 recording helper, JSON writes, types with more than one write (their state table and model are in
 "Executions with several writes"; the server's half is PR 4, unreachable until a line can write; the app's is PR 5), the shelf handing out browser connectors. WSS to the operated host stays refused (no type declares
 one). Until the AI operates, the admin page says next to the mode choice what 「使う」 does today

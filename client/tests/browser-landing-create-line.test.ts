@@ -98,10 +98,10 @@ function created(o: { route?: Record<string, unknown>; action?: Record<string, u
 }
 const judge = (after = facts(), made = created(), before = facts()) => judgeBrowserWrites(line.read, writes, map, before, after, ACCOUNT, made)
 
-test('the line is written pending on map 1.0.3, holds no business word, and nothing in the map names a copy read', () => {
+test('the line is written pending on maps 1.0.3 and 1.0.4, holds no business word, and nothing in the map names a copy read', () => {
   const opened = JSON.parse(readFileSync(OPENED_FILE, 'utf8')) as BrowserOpenedFile
   const rows = opened.lines.filter(l => l.name === 'landing_create')
-  assert.deepEqual(rows.map(r => [r.mapVersion, r.status]), [['1.0.3', 'pending']])
+  assert.deepEqual(rows.map(r => [r.mapVersion, r.status]), [['1.0.3', 'pending'], ['1.0.4', 'pending']])
   const text = JSON.stringify({ map, line, LSTEP_MAP_WRITES, reads })
   for (const word of ['参加者', '18:20', '新方式', 'クロチャレ', 'crochalle']) assert.ok(!text.includes(word), word)
   // Never `GET /api/landings/<id>?copy=1` (it may create on the site's side): no read or write names `copy`.

@@ -62,6 +62,7 @@ contract.invoke brokerKeys:save
 contract.invoke browser:clearLogin
 contract.invoke browser:open
 contract.invoke browser:sites
+contract.invoke browserLines:card
 contract.invoke browserPlans:cancel
 contract.invoke browserPlans:confirm
 contract.invoke browserPlans:get
@@ -450,6 +451,7 @@ contract.type ElectronAPI.getApproval = getApproval: Invoke<'approvals:get'>
 contract.type ElectronAPI.getArchivedTasks = getArchivedTasks: Invoke<'tasks:archived'>
 contract.type ElectronAPI.getAuthMode = getAuthMode: Invoke<'config:getAuthMode'>
 contract.type ElectronAPI.getAutoTurnSettings = getAutoTurnSettings: Invoke<'aiTurns:settings'>
+contract.type ElectronAPI.getBrowserInspection = getBrowserInspection: Invoke<'browserLines:card'>
 contract.type ElectronAPI.getBrowserPlan = getBrowserPlan: Invoke<'browserPlans:get'>
 contract.type ElectronAPI.getBrowserSites = getBrowserSites: Invoke<'browser:sites'>
 contract.type ElectronAPI.getBundleChoices = getBundleChoices: Invoke<'tasks:bundles'>
@@ -842,6 +844,7 @@ contract.type IpcInvokeChannels.'brokerKeys:save' = 'brokerKeys:save': { args: [
 contract.type IpcInvokeChannels.'browser:clearLogin' = 'browser:clearLogin': { args: [companyId: string, host: string]; result: BrowserActionResult }
 contract.type IpcInvokeChannels.'browser:open' = 'browser:open': { args: [companyId: string, host: string]; result: BrowserActionResult }
 contract.type IpcInvokeChannels.'browser:sites' = 'browser:sites': { args: [companyId: string]; result: BrowserSitesResult }
+contract.type IpcInvokeChannels.'browserLines:card' = 'browserLines:card': { args: [companyId: string, planId: string]; result: BrowserInspectionGetResult }
 contract.type IpcInvokeChannels.'browserPlans:cancel' = 'browserPlans:cancel': { args: [companyId: string, planId: string]; result: BrowserPlanActAnswer }
 contract.type IpcInvokeChannels.'browserPlans:confirm' = 'browserPlans:confirm': { args: [companyId: string, executionId: string, result: BrowserConfirmResult]; result: BrowserPlanActAnswer }
 contract.type IpcInvokeChannels.'browserPlans:get' = 'browserPlans:get': { args: [companyId: string, planId: string]; result: BrowserPlanGetResult }
@@ -1188,6 +1191,7 @@ main.handle brokerKeys:save @ features/broker/ipc.ts (companyId: string, service
 main.handle browser:clearLogin @ features/browser/ipc.ts (companyId, host)
 main.handle browser:open @ features/browser/ipc.ts (companyId, host)
 main.handle browser:sites @ features/browser/ipc.ts (companyId)
+main.handle browserLines:card @ features/browser/inspect.ts (companyId, planId)
 main.handle browserPlans:cancel @ features/browser/plans-ipc.ts (companyId, planId)
 main.handle browserPlans:confirm @ features/browser/plans-ipc.ts (companyId, executionId, result)
 main.handle browserPlans:get @ features/browser/plans-ipc.ts (companyId, planId)
@@ -1566,6 +1570,8 @@ preload getAuthMode -> invoke config:getAuthMode()
 preload getAuthMode : () => Promise<AuthMode>
 preload getAutoTurnSettings -> invoke aiTurns:settings($0)
 preload getAutoTurnSettings : (companyId: string) => Promise<AutoTurnSettings>
+preload getBrowserInspection -> invoke browserLines:card($0, $1)
+preload getBrowserInspection : (companyId: string, planId: string) => Promise<BrowserInspectionGetResult>
 preload getBrowserPlan -> invoke browserPlans:get($0, $1)
 preload getBrowserPlan : (companyId: string, planId: string) => Promise<BrowserPlanGetResult>
 preload getBrowserSites -> invoke browser:sites($0)

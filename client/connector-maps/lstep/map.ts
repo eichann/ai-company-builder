@@ -1,5 +1,5 @@
 /**
- * Lステップ's map 1.0.3 (「サイトの地図」, generalization PR 3, completed in PR 4, extended in PR 6 and PR 8; agent-browser.md "The first map and the
+ * Lステップ's map 1.0.4 (「サイトの地図」, generalization PR 3, completed in PR 4, extended in PR 6 and PR 8; agent-browser.md "The first map and the
  * inspection line"). Reviewed data. Its things and every key of their JSON answers are exactly what stage 0 recorded
  * (2026-11-24, read only, the owner's login: 「ブラウザ操作の汎用化_段0の結果」 R4, R8, R10, R11) and, for 1.0.1, the full
  * key sets confirmed afterwards (same day, 「追記2：項目の全部の確かめ」: four routes — the 11/12, 11/19 and 11/26 rounds' and
@@ -79,12 +79,17 @@
  *
  * Never read: `GET /api/landings/<id>?copy=1` (it may create something on the site's side; stage 0 never called it) —
  * no read here carries a query but the folder list's own `group` and `page` (`LSTEP_MAP_READS`, tested).
+ *
+ * **1.0.4** (generalization PR 5b, the owner's decisions on #823): no thing, field or key changed — only reading data moved
+ * into the map: the list row's folder (`landing_row.folder`: `group` ← the route's `group_id`, before handed in by the
+ * caller) and the page whose `lm-account-id` marker is read before and after a line's reads (`LSTEP_MAP_ACCOUNT`). A line's
+ * meaning is the same as on 1.0.1 – 1.0.3; carrying its grants is the owner's "compatible" call (Q15).
  */
 import type { BrowserMap } from '../../../shared/core/browser-map'
 
 export const LSTEP_MAP: BrowserMap = {
   site: 'lstep',
-  version: '1.0.3',
+  version: '1.0.4',
   account: { label: 'LINE アカウント' },
   things: {
     landing: {
@@ -251,13 +256,16 @@ export const LSTEP_MAP: BrowserMap = {
  * How each thing is read (mechanics: the reading code of a later PR follows exactly these; hashed with this folder).
  * GET only, fixed paths, `{id}` filled with a plain id; the list's query is `group` (the landing's folder) and `page`
  * (1..10, the app's, never the AI's). Nothing else — never `?copy=1`. The account is the `lm-account-id` marker every
- * page of the site carries (confirmed 6b-1, agent-browser.md "The account"); which page the reading code reads it from
- * is chosen with that code.
+ * page of the site carries (confirmed 6b-1, agent-browser.md "The account"), read from `LSTEP_MAP_ACCOUNT` (1.0.4).
  */
 export const LSTEP_MAP_READS = {
   landing: { path: '/api/landings/{id}' },
   landing_row: {
     path: '/api/landings', query: ['group', 'page'], pages: { param: 'page', max: 10, perPage: 50 },
+    // 1.0.4: the folder the row is listed in is the route's own `group_id` (read just before, the same object). A route in
+    // no folder (`group_id` null) has no list to read: its row is 「読み取れませんでした」 (how 「未分類」 is listed was not
+    // confirmed by stage 0; nothing is guessed).
+    folder: { param: 'group', field: 'group_id' },
     // The list's envelope around `data` (追記2), for the reading code: anything else around the rows is not read.
     envelope: ['current_page', 'data', 'first_page_url', 'from', 'last_page', 'last_page_url', 'links', 'next_page_url', 'path',
       'per_page', 'prev_page_url', 'to', 'total'],
@@ -279,6 +287,15 @@ export const LSTEP_MAP_READS = {
     envelopeLinkKeys: ['url', 'label', 'page', 'active'],
   },
 } as const
+
+/**
+ * The page whose `lm-account-id` marker is read right before and right after a line's reads (1.0.4; the must-hold
+ * `account`, §15 C5), with the old path's reader (`accountFromMeta`, unchanged). The site's start page: the very address
+ * the app's window opens on every 「開いてログイン」 (browser-window.ts), so reading it changes nothing the member's own
+ * opening does not; every page of the site carries the marker (design memo §34). A fixed path, no query. If the site
+ * answers it with anything but a page (a redirect, an error), the account is unknown and no read counts — never a guess.
+ */
+export const LSTEP_MAP_ACCOUNT = { path: '/' } as const
 
 /**
  * How each write of the map is sent (mechanics, since 1.0.2; hashed with this folder): the old declaration's one write, word for
