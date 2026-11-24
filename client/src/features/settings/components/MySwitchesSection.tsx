@@ -1,4 +1,5 @@
-// 設定 → 自分の設定: the member's own 「受信を読む」 and 「AI が自動で進める」 (言葉の決まり 5c).
+// 設定 → 自分の設定: the member's own 「受信を読む」 and 「AI が自動で進める」 (言葉の決まり 5c), and
+// 「届いた議事録を AI が自動で読む」 (MeetingAutoReadSetting).
 // The company decides whether each may be used (管理画面の「詳しい設定」); one it stops is greyed
 // with 「会社の設定で止まっています」 — in the warning colour, since an admin can turn it back on
 // (design-system.md 「止まっている」の色). The server decides; this only shows and asks.
@@ -7,6 +8,7 @@ import { Button, Callout, Card, SectionHeader, Switch } from '../../../shared/ui
 import { companyHasMailOrChat, CONNECT_MAIL_CHAT_TEXT, WORK_SWITCH_COMPANY_OFF_TEXT, WORK_SWITCH_NAMES, type WorkSwitch } from '../../../../shared/work-switches'
 import { CALM } from '../../../../shared/thing-words'
 import { useWorkSwitches } from '../hooks/useWorkSwitches'
+import { MeetingAutoReadSetting } from './MeetingAutoReadSetting'
 import { STOP_ICON, STOP_TEXT } from '../../../shared/ui/stateStyles'
 import { STOP_LOOK } from '../../../../../shared/design-tokens/stop-meaning'
 
@@ -75,6 +77,7 @@ export function MySwitchesSection({ companyId, onOpenGoogle }: { companyId: stri
           <p className="text-small text-zinc-500 dark:text-zinc-400">会社が使ってよいか・初めの値は、管理者が管理画面の「詳しい設定」で決めています。</p>
         </>
       )}
+      <MeetingAutoReadSetting companyId={companyId} />
     </div>
   )
 }

@@ -47,6 +47,8 @@ const tab = params.get('tab') ?? 'sync'
 // 自分の設定: the member's two switches as the server would answer them.
 const policy = { readIncoming: params.get('company') !== 'off' && params.get('company') !== 'later', autoRun: true }
 let stoppedLater = params.get('company') === 'later'
+let autoRead = { mode: 'off' as 'outside' | 'all' | 'off', chosen: false }
+const autoReadSet: string[] = []
 const chosen: Record<string, boolean | null> = { readIncoming: null, autoRun: null }
 const switchState = (k: 'readIncoming' | 'autoRun', def: boolean) => ({ on: policy[k] && (chosen[k] ?? def), allowed: policy[k] || (k === 'readIncoming' && stoppedLater), companyDefault: def, chosen: chosen[k] })
 const mySwitches = () => ({ readIncoming: { ...switchState('readIncoming', false), connected: { mail: params.get('mail') !== 'no', chat: false } }, autoRun: switchState('autoRun', true),
@@ -191,6 +193,14 @@ Object.assign(window, {
       getSlackStatus: async () => ({ success: true, data: { available: true, reason: null, connected: true, status: 'active', features: ['read', 'notices'], featuresOff: [], practice: false, seen: ['read', 'notices'] } }),
     } : {}),
     getWorkSwitches: async () => ({ success: true, switches: mySwitches() }),
+    // 「届いた議事録を AI が自動で読む」 (?autoread=new: never chose, starts off; absent: an older server, hidden).
+    getMeetingAutoRead: async () => (params.get('autoread') === 'new' ? { success: true, setting: autoRead } : { success: false, error: '' }),
+    setMeetingAutoRead: async (_companyId: string, mode: 'outside' | 'all' | 'off') => {
+      autoReadSet.push(mode)
+      ;(window as unknown as { __autoReadSet: string[] }).__autoReadSet = autoReadSet
+      autoRead = { mode, chosen: true }
+      return { success: true, setting: autoRead }
+    },
     // 「AI から定期の仕事を提案してもらう」: this PC's own setting (on).
     getJobRepeatAsk: async () => ({ success: true, on: repeatAskOn }),
     setJobRepeatAsk: async (_companyId: string, on: boolean) => { repeatAskOn = on; return { success: true, on } },

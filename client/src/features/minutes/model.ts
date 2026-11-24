@@ -80,11 +80,13 @@ export type MeetingBanner =
   /** 「議事録が届きました」 with ［AI に読ませる］［読まない］ (`failedBefore`: the AI could not read it last time). */
   | { kind: 'arrived'; failedBefore: boolean }
   /**
-   * 「AI が読んでいます…」. `auto`: the member's own 「次から自動で読む」 series asked it; `reader`: another
-   * attendee's AI reads it (their name); `canSkip`: still waiting for this member's AI (［読まない］ =
-   * 今回だけ); `problem`: this PC's AI cannot start it, in words (with 「もう一度」 when it may).
+   * 「AI が読んでいます…」. `auto`: why the member's own AI was asked without a press — their
+   * 「次から自動で読む」 series, or their 「届いた議事録を AI が自動で読む」 setting; `reader`: another
+   * attendee's AI reads it (their name), `waiting` while it has not started (their PC may be closed:
+   * 「〇〇さんの AI が読む予定」, owner decision D1-3); `canSkip`: still waiting for this member's AI
+   * (［読まない］ = 今回だけ); `problem`: this PC's AI cannot start it, in words (with 「もう一度」 when it may).
    */
-  | { kind: 'reading'; auto: boolean; reader: string | null; canSkip: boolean; problem: { reason: string; canRetry: boolean } | null }
+  | { kind: 'reading'; auto: 'series' | 'setting' | null; reader: string | null; waiting: boolean; canSkip: boolean; problem: { reason: string; canRetry: boolean } | null }
   /** 「読み終わりました」 with ［見る］ and ×. */
   | { kind: 'read' }
   /** 「〇〇さんが読まないにしました」 (another attendee chose it). */
@@ -106,8 +108,9 @@ export function meetingBanner(item: MeetingArrivalView, ctx: { closed: boolean; 
       const stuck = item.byYou && ctx.ai && (ctx.ai.state === 'not-allowed' || ctx.ai.state === 'failed' || (ctx.ai.state === 'handed' && ctx.ai.reason !== ''))
       return {
         kind: 'reading',
-        auto: item.byYou && item.autoSeries,
+        auto: !item.byYou ? null : item.autoSeries ? 'series' : item.askedAutomatically ? 'setting' : null,
         reader: item.byYou ? null : (item.by?.displayName || null),
+        waiting: item.status === 'asked',
         canSkip: item.byYou && item.status === 'asked',
         problem: stuck && ctx.ai ? { reason: ctx.ai.reason, canRetry: ctx.ai.canRetry } : null,
       }
@@ -118,3 +121,21 @@ export function meetingBanner(item: MeetingArrivalView, ctx: { closed: boolean; 
       return item.byYou ? null : { kind: 'skipped', by: item.by?.displayName || '参加者' }
   }
 }
+
+/** The line of a meeting the AI reads (or will), in the member's words. */
+export function readingWords(banner: Extract<MeetingBanner, { kind: 'reading' }>): string {
+  if (banner.auto === 'series') return '自動で読む定例です。AI が読んでいます…'
+  if (banner.auto === 'setting') return '自動で読む設定のため、AI が読んでいます…'
+  if (banner.reader) return banner.waiting ? `${banner.reader}さんの AI が読む予定です` : `${banner.reader}さんの AI が読んでいます…`
+  return 'AI が読んでいます…'
+}
+
+/**
+ * The card's 「この定例は：」 choice, in the member's words (`auto` / `off` / null = 設定に従う). Shown
+ * only when the server says it (`seriesChoice`); an older server keeps its two buttons.
+ */
+export const SERIES_CHOICES: ReadonlyArray<{ choice: 'auto' | 'off' | null; label: string }> = [
+  { choice: 'auto', label: '自動で読む' },
+  { choice: 'off', label: '読まない' },
+  { choice: null, label: '設定に従う' },
+]

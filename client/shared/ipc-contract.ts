@@ -44,7 +44,8 @@ import type { JobRepeatAskSetting } from './job-repeat-asks'
 import type { QueuedJobTurn } from './ai-turn-steps/job'
 import type { WorkSwitch, WorkSwitchesResult } from './work-switches'
 import type { ViewersQuery, ViewersResult } from './viewers'
-import type { InviteSet, MeetingArrivalsResult, MeetingBundleQuestionResult, MeetingCardStateResult, MeetingInviteChoicesResult, MeetingInviteResult, MeetingPressResult, MinutesActionResult, MinutesNoticesResult } from './minutes-app'
+import type { InviteSet, MeetingArrivalsResult, MeetingAutoReadResult, MeetingBundleQuestionResult, MeetingCardStateResult, MeetingInviteChoicesResult, MeetingInviteResult, MeetingPressResult, MinutesActionResult, MinutesNoticesResult } from './minutes-app'
+import type { MeetingAutoReadMode } from '../../shared/core/minutes'
 import type { NoticesActionResult, NoticesState } from './notifications-app'
 import type { FindHomeResult, FindResult, MakePrivatePlanResult, RecordCardResult, RecordListResult } from './record-views'
 import type { RecordsTablePage, RecordsTableQuery } from './records-table'
@@ -710,7 +711,9 @@ export interface IpcInvokeChannels {
   /** ［読まない］ (取り消す: tasks:undo of that entry). */
   'minutes:skipReading': { args: [companyId: string, meetingId: string, expectedVersion: number]; result: MeetingPressResult }
   /** 「この定例は次から自動で読む」 (true) / 「次から自動で読まない」 (false): the member's own choice. */
-  'minutes:autoSeries': { args: [companyId: string, meetingId: string, auto: boolean]; result: MinutesActionResult }
+  'minutes:autoSeries': { args: [companyId: string, meetingId: string, auto: boolean | null]; result: MinutesActionResult }
+  'minutes:autoRead': { args: [companyId: string]; result: MeetingAutoReadResult }
+  'minutes:setAutoRead': { args: [companyId: string, mode: MeetingAutoReadMode]; result: MeetingAutoReadResult }
   /** ［招待する］: members — and groups / departments (`sets`) — added to a members-only record's list (never undone). */
   'minutes:invite': { args: [companyId: string, recordId: string, memberIds: string[], expectedVersion: number, sets?: InviteSet[]]; result: MeetingInviteResult }
   /** What ［招待する］ may offer besides people, and the groups / departments on the list now. */
@@ -1249,6 +1252,8 @@ export interface ElectronAPI {
   requestMeetingReading: Invoke<'minutes:requestReading'>
   skipMeetingReading: Invoke<'minutes:skipReading'>
   setMeetingAutoSeries: Invoke<'minutes:autoSeries'>
+  getMeetingAutoRead: Invoke<'minutes:autoRead'>
+  setMeetingAutoRead: Invoke<'minutes:setAutoRead'>
   inviteToRecord: Invoke<'minutes:invite'>
   getInviteChoices: Invoke<'minutes:inviteChoices'>
   onMinutesChanged: Subscribe<'minutes:changed'>

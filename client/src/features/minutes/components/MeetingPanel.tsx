@@ -10,6 +10,7 @@ import { MAIN_BUTTON, SMALL_BUTTON } from '../../../shared/ui/RecordPage'
 import { GOOGLE_OPENED_TEXT, GOOGLE_RENEW_MINUTES_TEXT } from '../../../../shared/google'
 import { renewMinutesPermission, requestMeetingReading, setMeetingAutoSeries } from '../api'
 import { useMeetingCardState } from '../hooks/useMeetingCardState'
+import { meetingBanner, readingWords, SERIES_CHOICES } from '../model'
 import { InviteDialog } from './InviteDialog'
 
 interface Props {
@@ -28,6 +29,9 @@ interface Props {
   /** Something changed on the server (the list and the banner read again). */
   onChanged: () => void
 }
+
+/** The series' current choice: the same size as the others, marked by the primary colour. */
+const CHOSEN = 'inline-flex shrink-0 items-center gap-1 rounded-control border border-primary px-2 py-0.5 text-small font-strong text-link'
 
 const offeredKey = (companyId: string) => `meeting-auto-offered:${companyId}`
 function readOffered(companyId: string): Set<string> {
@@ -61,12 +65,12 @@ export function MeetingPanel({ companyId, meetingId, members, onConsult, summary
     if (!r.success) setError(r.error)
     changed()
   }
-  const auto = async (on: boolean) => {
+  const auto = async (on: boolean | null) => {
     setError(null)
     const failure = await setMeetingAutoSeries(companyId, meetingId, on)
     if (failure) { setError(failure); return }
     if (on) markOffered()
-    setNote(on ? 'この定例は、次から AI が自動で読みます。' : 'この定例は、次から自動では読みません。')
+    setNote(on ? 'この定例は、次から AI が自動で読みます。' : on === false ? 'この定例は、次から自動では読みません。' : 'この定例は、「届いた議事録を AI が自動で読む」の設定に従います。')
     changed()
   }
   const renew = async () => {
@@ -77,12 +81,15 @@ export function MeetingPanel({ companyId, meetingId, members, onConsult, summary
   }
   const canRead = m?.status === 'arrived' || m?.status === 'skipped' || m?.status === 'failed'
   const reading = m?.status === 'asked' || m?.status === 'reading'
+  const readingBanner = m && reading ? meetingBanner(m, { closed: false, hidden: false }) : null
+  // A server that keeps a series' three choices says which (`seriesChoice`); an older one keeps its two buttons.
+  const threeChoices = !!m?.series && m.seriesChoice !== undefined
   return (
     <section aria-label="この会議の議事録" className="space-y-5">
       {summary}
       {reading && (
         <p className="flex items-center gap-1.5 text-small text-link">
-          <CircleNotch size={12} className="animate-spin" />{m.byYou || !m.by ? 'AI が読んでいます…' : `${m.by.displayName}さんの AI が読んでいます…`}
+          <CircleNotch size={12} className="animate-spin" />{readingBanner?.kind === 'reading' ? readingWords(readingBanner) : 'AI が読んでいます…'}
         </p>
       )}
       {m?.status === 'skipped' && m.by && <p className="text-small text-gray-500">{m.byYou ? 'あなた' : `${m.by.displayName}さん`}が読まないにしました。あとから［AI に読ませる］で読めます。</p>}
@@ -92,7 +99,7 @@ export function MeetingPanel({ companyId, meetingId, members, onConsult, summary
         </p>
       )}
       {review ? renderReview(review) : result !== null && outputs}
-      {m?.status === 'read' && m.series && !m.autoSeries && !offered.has(meetingId) && (
+      {!threeChoices && m?.status === 'read' && m.series && !m.autoSeries && !offered.has(meetingId) && (
         <div data-auto-offer className="flex flex-wrap items-start gap-2 rounded-control bg-sky-50 px-3 py-2 text-small dark:bg-sky-950/30">
           <span className="min-w-0 flex-1">
             <span className="font-medium">この定例は次から自動で読みますか？</span>
@@ -102,10 +109,22 @@ export function MeetingPanel({ companyId, meetingId, members, onConsult, summary
           <button type="button" onClick={markOffered} className="text-small text-gray-500 hover:text-link">今はいい</button>
         </div>
       )}
-      {m?.autoSeries && (
+      {!threeChoices && m?.autoSeries && (
         <p className="text-small text-gray-500">この定例は、議事録が届くと AI が自動で読みます。
           <button type="button" onClick={() => void auto(false)} className="ml-1 text-link hover:underline">次から自動で読まない</button>
         </p>
+      )}
+      {threeChoices && (
+        <div data-series-choice role="radiogroup" aria-label="この定例の議事録を自動で読むか" className="flex flex-wrap items-center gap-1.5 text-small text-text-muted">
+          <span>この定例は：</span>
+          {SERIES_CHOICES.map(c => {
+            const chosen = (m.seriesChoice ?? null) === c.choice
+            return (
+              <button key={c.label} type="button" role="radio" aria-checked={chosen} onClick={() => { if (!chosen) void auto(c.choice === null ? null : c.choice === 'auto') }}
+                className={chosen ? CHOSEN : SMALL_BUTTON}>{c.label}</button>
+            )
+          })}
+        </div>
       )}
       <div className="space-y-2">
         {m && (

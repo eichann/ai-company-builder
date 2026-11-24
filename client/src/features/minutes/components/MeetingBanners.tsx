@@ -8,8 +8,9 @@ import { CaretDown, CaretRight, CheckCircle, CircleNotch, NotePencil, X } from '
 import type { AiTurnItemsView } from '../../../../shared/ai-turns'
 import type { MeetingArrivalView } from '../../../../shared/minutes-app'
 import { MAIN_BUTTON, SMALL_BUTTON } from '../../../shared/ui/RecordPage'
-import { requestMeetingReading, setMeetingAutoSeries, skipMeetingReading, undoMeetingSkip } from '../api'
-import { foldMeetings, madeWords, meetingBanner, meetingRowWords, skippableMeetings } from '../model'
+import { requestMeetingReading, setMeetingAutoRead, setMeetingAutoSeries, skipMeetingReading, undoMeetingSkip } from '../api'
+import { foldMeetings, madeWords, meetingBanner, meetingRowWords, readingWords, skippableMeetings } from '../model'
+import { useAutoReadSuggestion } from '../hooks/useAutoReadSuggestion'
 
 const LINK = 'text-caption font-normal text-gray-500 underline-offset-2 hover:text-link hover:underline dark:text-zinc-400'
 const SHORT = `${MAIN_BUTTON} shrink-0 !px-1.5 !py-0.5 !text-caption`
@@ -54,6 +55,8 @@ export function MeetingBanners({ companyId, items, aiTurns, onView, onChanged, n
   // 「ほか N 件」 opened.
   const [open, setOpen] = useState(false)
   const timer = useRef<ReturnType<typeof setTimeout>>()
+  // 「社外の人がいる会議だけ自動で読む」 suggested to a member who never chose (owner decision D1-1).
+  const suggestion = useAutoReadSuggestion(companyId)
 
   const say = (t: Toast) => {
     clearTimeout(timer.current)
@@ -108,6 +111,16 @@ export function MeetingBanners({ companyId, items, aiTurns, onView, onChanged, n
     })
   }
 
+  const autoReadOutside = async () => {
+    const r = await setMeetingAutoRead(companyId, 'outside')
+    if (!r.success) { say({ text: r.error || 'できませんでした。' }); return }
+    suggestion.answered(r)
+    say({
+      text: '社外の人がいる会議は、次から AI が自動で読みます（設定 →「自分の設定」で変えられます）',
+      undo: () => void setMeetingAutoRead(companyId, 'off').then(back => { if (back.success) suggestion.answered(back); else say({ text: back.error }) }),
+    })
+  }
+
   const rows = items.flatMap(item => {
     const m = asked.get(item.recordId) === item.version && (item.status === 'arrived' || item.status === 'failed' || item.status === 'skipped')
       ? { ...item, status: 'asked' as const, byYou: true } : item
@@ -155,7 +168,7 @@ export function MeetingBanners({ companyId, items, aiTurns, onView, onChanged, n
         <div className="flex items-center gap-1.5 text-small leading-5">
           {banner.kind === 'read'
             ? <CheckCircle size={13} weight="fill" className="shrink-0 text-emerald-600 dark:text-emerald-400" />
-            : banner.kind === 'reading' && !banner.problem
+            : banner.kind === 'reading' && !banner.problem && !(banner.reader && banner.waiting)
               ? <CircleNotch size={13} className="shrink-0 animate-spin text-ai-icon" />
               : <NotePencil size={13} weight="duotone" className="shrink-0 text-sky-600 dark:text-sky-400" />}
           <span title={line} className="min-w-0 flex-1 truncate text-gray-800 dark:text-zinc-100">{line}</span>
@@ -165,7 +178,7 @@ export function MeetingBanners({ companyId, items, aiTurns, onView, onChanged, n
             <button type="button" disabled={locked(m.recordId)} onClick={() => void skip(m)} className={QUIET}>読まない</button>
           </>}
           {banner.kind === 'reading' && <>
-            {!banner.problem && <span className="min-w-0 shrink truncate text-caption font-normal text-ai-text">{banner.auto ? '自動で読む定例です。AI が読んでいます…' : banner.reader ? `${banner.reader}さんの AI が読んでいます…` : 'AI が読んでいます…'}</span>}
+            {!banner.problem && <span className="min-w-0 shrink truncate text-caption font-normal text-ai-text">{readingWords(banner)}</span>}
             {banner.problem?.canRetry && <button type="button" onClick={() => aiTurns?.retry(m.recordId)} className={QUIET}>もう一度</button>}
             {banner.canSkip && <button type="button" disabled={locked(m.recordId)} onClick={() => void skip(m)} className={QUIET}>読まない</button>}
           </>}
@@ -176,7 +189,7 @@ export function MeetingBanners({ companyId, items, aiTurns, onView, onChanged, n
           {banner.kind === 'skipped' && <span className="min-w-0 shrink truncate text-caption font-normal text-gray-500 dark:text-zinc-400">{banner.by}さんが読まないにしました</span>}
         </div>
         {banner.kind === 'reading' && banner.problem && <p className="pl-5 text-caption font-normal text-gray-600 dark:text-zinc-300">{banner.problem.reason}</p>}
-        {banner.kind === 'reading' && banner.auto && <p className="pl-5"><button type="button" onClick={() => void stopAuto(m)} className={LINK}>次から自動で読まない</button></p>}
+        {banner.kind === 'reading' && banner.auto === 'series' && <p className="pl-5"><button type="button" onClick={() => void stopAuto(m)} className={LINK}>次から自動で読まない</button></p>}
         {errors[m.recordId] && <p role="alert" className="pl-5 text-caption font-normal leading-snug text-gray-600 dark:text-zinc-300">{errors[m.recordId]}</p>}
       </div>
     )
@@ -185,8 +198,15 @@ export function MeetingBanners({ companyId, items, aiTurns, onView, onChanged, n
   return <>
     {rows.length > 0 && (
       // A block of its own height at most: the list below keeps the rest of the pane, however many arrive.
-      <div className="max-h-[45%] shrink-0 overflow-y-auto border-b border-gray-200 bg-sky-50/50 px-2 py-1 dark:border-zinc-800 dark:bg-sky-950/20" role="region" aria-label="議事録が届きました">
+      <div ref={suggestion.loadRef} className="max-h-[45%] shrink-0 overflow-y-auto border-b border-gray-200 bg-sky-50/50 px-2 py-1 dark:border-zinc-800 dark:bg-sky-950/20" role="region" aria-label="議事録が届きました">
         <p className="px-1 text-caption font-semibold text-gray-600 dark:text-zinc-300">議事録が届きました</p>
+        {suggestion.suggest && (
+          <p data-auto-read-suggestion className="flex flex-wrap items-center gap-1.5 px-1 pb-0.5 text-caption font-normal text-text-muted">
+            <span className="min-w-0">押さなくても、届いた議事録を AI が読めます。</span>
+            <button type="button" onClick={() => void autoReadOutside()} className={SHORT}>社外の人がいる会議だけ自動で読む</button>
+            <button type="button" onClick={suggestion.dismiss} className={LINK}>今はいい</button>
+          </p>
+        )}
         {shown.map(row)}
         {folded.length > 0 && (
           <div className="flex items-center gap-2 px-1 pt-0.5">

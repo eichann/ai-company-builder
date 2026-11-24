@@ -188,6 +188,7 @@ contract.invoke jobs:watchChoices
 contract.invoke manual:export
 contract.invoke manual:open
 contract.invoke minutes:arrivals
+contract.invoke minutes:autoRead
 contract.invoke minutes:autoSeries
 contract.invoke minutes:bundleQuestion
 contract.invoke minutes:check
@@ -198,6 +199,7 @@ contract.invoke minutes:meeting
 contract.invoke minutes:noBundle
 contract.invoke minutes:notices
 contract.invoke minutes:requestReading
+contract.invoke minutes:setAutoRead
 contract.invoke minutes:skip
 contract.invoke minutes:skipReading
 contract.invoke minutes:watch
@@ -483,6 +485,7 @@ contract.type ElectronAPI.getInviteChoices = getInviteChoices: Invoke<'minutes:i
 contract.type ElectronAPI.getJobCandidate = getJobCandidate: Invoke<'jobProposals:candidate'>
 contract.type ElectronAPI.getJobRepeatAsk = getJobRepeatAsk: Invoke<'jobRepeatAsks:get'>
 contract.type ElectronAPI.getMeetingArrivals = getMeetingArrivals: Invoke<'minutes:arrivals'>
+contract.type ElectronAPI.getMeetingAutoRead = getMeetingAutoRead: Invoke<'minutes:autoRead'>
 contract.type ElectronAPI.getMeetingBundleQuestion = getMeetingBundleQuestion: Invoke<'minutes:bundleQuestion'>
 contract.type ElectronAPI.getMeetingCardState = getMeetingCardState: Invoke<'minutes:meeting'>
 contract.type ElectronAPI.getMinutesNotices = getMinutesNotices: Invoke<'minutes:notices'>
@@ -640,6 +643,7 @@ contract.type ElectronAPI.setGoogleArchive = setGoogleArchive: Invoke<'google:se
 contract.type ElectronAPI.setGoogleDrive = setGoogleDrive: Invoke<'google:setDrive'>
 contract.type ElectronAPI.setGoogleRelay = setGoogleRelay: Invoke<'google:setRelay'>
 contract.type ElectronAPI.setJobRepeatAsk = setJobRepeatAsk: Invoke<'jobRepeatAsks:set'>
+contract.type ElectronAPI.setMeetingAutoRead = setMeetingAutoRead: Invoke<'minutes:setAutoRead'>
 contract.type ElectronAPI.setMeetingAutoSeries = setMeetingAutoSeries: Invoke<'minutes:autoSeries'>
 contract.type ElectronAPI.setNotificationSetting = setNotificationSetting: Invoke<'notifications:setSetting'>
 contract.type ElectronAPI.setPermissionMode = setPermissionMode: Invoke<'config:setPermissionMode'>
@@ -978,7 +982,8 @@ contract.type IpcInvokeChannels.'jobs:watchChoices' = 'jobs:watchChoices': { arg
 contract.type IpcInvokeChannels.'manual:export' = 'manual:export': { args: []; result: ManualExportResult }
 contract.type IpcInvokeChannels.'manual:open' = 'manual:open': { args: [pageId: string, anchor: string | null]; result: ManualOpenResult }
 contract.type IpcInvokeChannels.'minutes:arrivals' = 'minutes:arrivals': { args: [companyId: string]; result: MeetingArrivalsResult }
-contract.type IpcInvokeChannels.'minutes:autoSeries' = 'minutes:autoSeries': { args: [companyId: string, meetingId: string, auto: boolean]; result: MinutesActionResult }
+contract.type IpcInvokeChannels.'minutes:autoRead' = 'minutes:autoRead': { args: [companyId: string]; result: MeetingAutoReadResult }
+contract.type IpcInvokeChannels.'minutes:autoSeries' = 'minutes:autoSeries': { args: [companyId: string, meetingId: string, auto: boolean | null]; result: MinutesActionResult }
 contract.type IpcInvokeChannels.'minutes:bundleQuestion' = 'minutes:bundleQuestion': { args: [companyId: string, minutesId: string]; result: MeetingBundleQuestionResult }
 contract.type IpcInvokeChannels.'minutes:check' = 'minutes:check': { args: [companyId: string]; result: MinutesActionResult }
 contract.type IpcInvokeChannels.'minutes:invite' = 'minutes:invite': { args: [companyId: string, recordId: string, memberIds: string[], expectedVersion: number, sets?: InviteSet[]]; result: MeetingInviteResult }
@@ -988,6 +993,7 @@ contract.type IpcInvokeChannels.'minutes:meeting' = 'minutes:meeting': { args: [
 contract.type IpcInvokeChannels.'minutes:noBundle' = 'minutes:noBundle': { args: [companyId: string, minutesId: string]; result: MinutesActionResult }
 contract.type IpcInvokeChannels.'minutes:notices' = 'minutes:notices': { args: [companyId: string]; result: MinutesNoticesResult }
 contract.type IpcInvokeChannels.'minutes:requestReading' = 'minutes:requestReading': { args: [companyId: string, meetingId: string, expectedVersion: number]; result: MeetingPressResult }
+contract.type IpcInvokeChannels.'minutes:setAutoRead' = 'minutes:setAutoRead': { args: [companyId: string, mode: MeetingAutoReadMode]; result: MeetingAutoReadResult }
 contract.type IpcInvokeChannels.'minutes:skip' = 'minutes:skip': { args: [companyId: string, minutesId: string]; result: MinutesActionResult }
 contract.type IpcInvokeChannels.'minutes:skipReading' = 'minutes:skipReading': { args: [companyId: string, meetingId: string, expectedVersion: number]; result: MeetingPressResult }
 contract.type IpcInvokeChannels.'minutes:watch' = 'minutes:watch': { args: [companyId: string | null]; result: void }
@@ -1329,6 +1335,7 @@ main.handle jobs:watchChoices @ features/jobs/ipc.ts (companyId, text)
 main.handle manual:export @ features/manual/ipc.ts ()
 main.handle manual:open @ features/manual/ipc.ts (pageId, anchor)
 main.handle minutes:arrivals @ features/minutes/ipc.ts (companyId)
+main.handle minutes:autoRead @ features/minutes/ipc.ts (companyId)
 main.handle minutes:autoSeries @ features/minutes/ipc.ts (companyId, meetingId, auto)
 main.handle minutes:bundleQuestion @ features/minutes/ipc.ts (companyId, minutesId)
 main.handle minutes:check @ features/minutes/ipc.ts (companyId)
@@ -1339,6 +1346,7 @@ main.handle minutes:meeting @ features/minutes/ipc.ts (companyId, meetingId)
 main.handle minutes:noBundle @ features/minutes/ipc.ts (companyId, minutesId)
 main.handle minutes:notices @ features/minutes/ipc.ts (companyId)
 main.handle minutes:requestReading @ features/minutes/ipc.ts (companyId, meetingId, expectedVersion)
+main.handle minutes:setAutoRead @ features/minutes/ipc.ts (companyId, mode)
 main.handle minutes:skip @ features/minutes/ipc.ts (companyId, minutesId)
 main.handle minutes:skipReading @ features/minutes/ipc.ts (companyId, meetingId, expectedVersion)
 main.handle minutes:watch @ features/minutes/ipc.ts (companyId)
@@ -1642,6 +1650,8 @@ preload getJobRepeatAsk -> invoke jobRepeatAsks:get($0)
 preload getJobRepeatAsk : (companyId: string) => Promise<JobRepeatAskSetting>
 preload getMeetingArrivals -> invoke minutes:arrivals($0)
 preload getMeetingArrivals : (companyId: string) => Promise<MeetingArrivalsResult>
+preload getMeetingAutoRead -> invoke minutes:autoRead($0)
+preload getMeetingAutoRead : (companyId: string) => Promise<MeetingAutoReadResult>
 preload getMeetingBundleQuestion -> invoke minutes:bundleQuestion($0, $1)
 preload getMeetingBundleQuestion : (companyId: string, minutesId: string) => Promise<MeetingBundleQuestionResult>
 preload getMeetingCardState -> invoke minutes:meeting($0, $1)
@@ -1956,8 +1966,10 @@ preload setGoogleRelay -> invoke google:setRelay($0, $1, $2)
 preload setGoogleRelay : (companyId: string, on: boolean, service?: "sheets" | "docs" | undefined) => Promise<GoogleRelayResult>
 preload setJobRepeatAsk -> invoke jobRepeatAsks:set($0, $1)
 preload setJobRepeatAsk : (companyId: string, on: boolean) => Promise<JobRepeatAskSetting>
+preload setMeetingAutoRead -> invoke minutes:setAutoRead($0, $1)
+preload setMeetingAutoRead : (companyId: string, mode: "outside" | "all" | "off") => Promise<MeetingAutoReadResult>
 preload setMeetingAutoSeries -> invoke minutes:autoSeries($0, $1, $2)
-preload setMeetingAutoSeries : (companyId: string, meetingId: string, auto: boolean) => Promise<MinutesActionResult>
+preload setMeetingAutoSeries : (companyId: string, meetingId: string, auto: boolean | null) => Promise<MinutesActionResult>
 preload setNotificationSetting -> invoke notifications:setSetting($0, $1, $2)
 preload setNotificationSetting : (companyId: string, kind: string, on: boolean) => Promise<NoticesActionResult>
 preload setPermissionMode -> invoke config:setPermissionMode($0)
