@@ -18,13 +18,15 @@
  */
 import { normalizeEmail } from './mail'
 
-export const GOOGLE_FEATURES = ['minutes', 'mail', 'drive', 'inbox', 'sheets', 'inbox_archive'] as const
+export const GOOGLE_FEATURES = ['minutes', 'mail', 'drive', 'inbox', 'sheets', 'inbox_archive', 'documents'] as const
 /**
  * minutes = 予定と議事録を読む, mail = メールを送る, drive = Drive で選んだものを読む・置く
  * (`drive.file` only), inbox = 受信を読む (`gmail.readonly`), sheets = スプレッドシートを中継で使う
  * (`spreadsheets`: a script's Sheets calls relayed with the member's own permission,
  * `google-relay.ts`; owner decision 2026-11-04), inbox_archive = 済んだメールを Gmail でもアーカイブする
- * (`gmail.modify`, used for nothing but the inbox label: `gmailCallAllowed`; owner decision 2026-11-05).
+ * (`gmail.modify`, used for nothing but the inbox label: `gmailCallAllowed`; owner decision 2026-11-05),
+ * documents = ドキュメントを中継で使う (`documents`: a script's Docs calls relayed with the member's own
+ * permission, never a deletion or a replacement, `google-relay.ts`; owner decision 2026-11-24, U2').
  */
 export type GoogleFeature = typeof GOOGLE_FEATURES[number]
 
@@ -57,8 +59,18 @@ export const GOOGLE_SCOPE = {
    */
   spreadsheets: 'https://www.googleapis.com/auth/spreadsheets',
   /**
-   * With スプレッドシートを中継で使う only (owner decision 2026-11-04, 「会社の Workspace の中の表だけに
-   * 書ける」): to read who owns a sheet before the relay writes into it. Google lets it read the
+   * ドキュメントを中継で使う (the `documents` feature only, owner decision 2026-11-24, U2'): every Doc
+   * the member can edit — no per-file designation; Google refuses the rest. The relay passes only
+   * reading and adding (text, tables, rows, styles, bullets), never a deletion or a replacement, and
+   * writes only into Docs owned inside the company's Workspace (`fileOwnership`); the Google client
+   * sends nothing but the relay's two Docs calls with it (`docsCallAllowed`).
+   */
+  documents: 'https://www.googleapis.com/auth/documents',
+  /**
+   * With スプレッドシートを中継で使う and ドキュメントを中継で使う only (owner decisions 2026-11-04 /
+   * 2026-11-24, 「会社の Workspace の中のファイルだけに書ける」): to read who owns a file before the relay
+   * writes into it. Shared by two features, so each call names the one it is made for
+   * (`googleCallFeature`): either can be turned off without stopping the other's check. Google lets it read the
    * names and details of every file the member can see (never their contents); ACB sends exactly
    * one kind of call with it — one file's `owners` and `driveId` (`driveMetadataCallAllowed`).
    */
@@ -78,7 +90,7 @@ export const GOOGLE_NEVER_SCOPES: readonly string[] = [
   'https://www.googleapis.com/auth/drive.readonly',
   // `drive.metadata.readonly` left this list on 2026-11-05 (B-H1: the relay writes only into sheets
   // owned inside the company's Workspace, and only Drive tells the owner). Held only with the
-  // `sheets` feature; the Google client sends nothing with it but one file's owner lookup.
+  // `sheets` and `documents` features; the Google client sends nothing with it but one file's owner lookup.
   'https://www.googleapis.com/auth/gmail.compose',
   'https://www.googleapis.com/auth/gmail.metadata',
   // `gmail.modify` left this list on 2026-11-05 (owner decision: 「済んだメールを Gmail でもアーカイブする」,
@@ -98,6 +110,7 @@ export const GOOGLE_FEATURE_SCOPES: Record<GoogleFeature, readonly string[]> = {
   inbox: [GOOGLE_SCOPE.gmailReadonly],
   sheets: [GOOGLE_SCOPE.spreadsheets, GOOGLE_SCOPE.driveMetadataReadonly],
   inbox_archive: [GOOGLE_SCOPE.gmailModify],
+  documents: [GOOGLE_SCOPE.documents, GOOGLE_SCOPE.driveMetadataReadonly],
 }
 
 /**
@@ -109,10 +122,13 @@ export const GOOGLE_FEATURE_OPTIONAL_SCOPES: Partial<Record<GoogleFeature, reado
   // A grant from before 2026-11-05 still reads sheets; the relay refuses its writes until the member
   // allows again (it cannot tell who owns the sheet).
   sheets: [GOOGLE_SCOPE.driveMetadataReadonly],
+  // Asked with it from the start; a member who unticks it on Google's page still reads Docs, and the
+  // relay refuses their writes until they allow again (as for sheets).
+  documents: [GOOGLE_SCOPE.driveMetadataReadonly],
 }
 
 /** Every scope ACB may hold. Anything else Google reports as granted is not stored. */
-export const GOOGLE_ALLOWED_SCOPES: readonly string[] = [
+export const GOOGLE_ALLOWED_SCOPES: readonly string[] = [...new Set([
   ...IDENTITY_SCOPES,
   ...GOOGLE_FEATURE_SCOPES.minutes,
   ...GOOGLE_FEATURE_SCOPES.mail,
@@ -120,7 +136,8 @@ export const GOOGLE_ALLOWED_SCOPES: readonly string[] = [
   ...GOOGLE_FEATURE_SCOPES.inbox,
   ...GOOGLE_FEATURE_SCOPES.sheets,
   ...GOOGLE_FEATURE_SCOPES.inbox_archive,
-]
+  ...GOOGLE_FEATURE_SCOPES.documents,
+])]
 
 /** Google's short names → the long form it reports. */
 const SCOPE_ALIASES: Record<string, string> = { email: GOOGLE_SCOPE.email }
@@ -157,13 +174,33 @@ export function googleFeaturesToRenew(scopes: readonly string[]): GoogleFeature[
   return googleFeaturesOf(scopes).filter(f => GOOGLE_FEATURE_OPTIONAL_SCOPES[f]?.some(s => !scopes.includes(s)))
 }
 
+/** The features that hold a scope (one, except `drive.metadata.readonly`: sheets and documents). */
+export function googleFeaturesOfScope(scope: string): GoogleFeature[] {
+  return GOOGLE_FEATURES.filter(f => GOOGLE_FEATURE_SCOPES[f].includes(scope))
+}
+
 /**
- * The feature a scope belongs to (each feature scope belongs to exactly one),
- * null for the identity scopes. The Google client refuses a call whose
- * feature the member turned off (`connector_grants.features_off`).
+ * The feature a scope belongs to when exactly one feature holds it, null for the identity scopes
+ * (and for a shared scope: its calls name their feature, `googleCallFeature`).
  */
 export function googleFeatureOfScope(scope: string): GoogleFeature | null {
-  return GOOGLE_FEATURES.find(f => GOOGLE_FEATURE_SCOPES[f].includes(scope)) ?? null
+  const of = googleFeaturesOfScope(scope)
+  return of.length === 1 ? of[0] : null
+}
+
+/**
+ * The feature whose switches decide one call (the Google client refuses a call whose feature the
+ * company or the member turned off). A scope held by one feature decides alone; a shared scope
+ * (`drive.metadata.readonly`) needs the call to name a feature that holds it — so the owner lookup
+ * of a Doc keeps working when the member stopped the spreadsheet relay, and stops when they stopped
+ * the Docs one. `unclear` (a shared scope with no feature, or a feature that does not hold the
+ * scope): the call is refused, never guessed. null: an identity scope (no feature).
+ */
+export function googleCallFeature(scope: string, named?: GoogleFeature): GoogleFeature | null | 'unclear' {
+  const of = googleFeaturesOfScope(scope)
+  if (named !== undefined) return of.includes(named) ? named : 'unclear'
+  if (of.length === 0) return null
+  return of.length === 1 ? of[0] : 'unclear'
 }
 
 /** A member's list of turned-off features as stored → the known features only (unknown entries are ignored). */
@@ -179,10 +216,11 @@ export function googleFeaturesOff(raw: readonly string[]): GoogleFeature[] {
  * off. 受信を読む (`inbox`) is no longer Google's own company switch since 2026-11-02 — it is
  * the company's 受信を読む (`work-switches.ts`, the task settings' `readIncoming.allowed`, allowed
  * by default, each member starting off), which covers Slack's reading too. `sheets` (the relay,
- * 2026-11-04) is off until the admin ticks スプレッドシート under 「API キー」→「本人の許可で中継する」;
+ * 2026-11-04) and `documents` (2026-11-24) are off until the admin ticks スプレッドシート / ドキュメント under
+ * 「API キー」→「本人の許可で中継する」;
  * `inbox_archive` (2026-11-05) until the admin turns it on in 「会社で使うもの」.
  */
-export const GOOGLE_COMPANY_DEFAULT_OFF: readonly GoogleFeature[] = ['sheets', 'inbox_archive']
+export const GOOGLE_COMPANY_DEFAULT_OFF: readonly GoogleFeature[] = ['sheets', 'inbox_archive', 'documents']
 
 /**
  * The admin's switches as stored (default-on features turned off, default-off features turned on)
@@ -222,14 +260,14 @@ export function googleCompanyFeatures(company: GoogleCompanySwitches & { pickerC
  * Features never asked in the one consent: only when the member names them (the relay, 2026-11-04;
  * 済んだメールを Gmail でもアーカイブする, 2026-11-05: only members who choose it allow it).
  */
-export const GOOGLE_ASKED_BY_NAME_ONLY: readonly GoogleFeature[] = ['sheets', 'inbox_archive']
+export const GOOGLE_ASKED_BY_NAME_ONLY: readonly GoogleFeature[] = ['sheets', 'inbox_archive', 'documents']
 
 /**
  * What one member is offered (「仕事の道具をつなぐ」's one consent, the screen's 「まだ許可していないもの」):
  * the company's features, but 受信を読む only while the member's own 受信を読む is on — the
  * most sensitive scope is never asked of someone who did not turn it on (owner decisions
- * 2026-11-02) — and never `sheets`: the relay is asked only when the member chooses it
- * (設定 → Google 「スプレッドシートを中継で使う」, by name), like a feature asked when first used.
+ * 2026-11-02) — and never `sheets` / `documents`: the relay is asked only when the member chooses it
+ * (設定 → Google 「スプレッドシート（ドキュメント）を中継で使う」, by name), like a feature asked when first used.
  */
 export function googleMemberFeatures(companyFeatures: readonly GoogleFeature[], readIncomingOn: boolean): GoogleFeature[] {
   return companyFeatures.filter(f => (f !== 'inbox' || readIncomingOn) && !GOOGLE_ASKED_BY_NAME_ONLY.includes(f))
@@ -327,6 +365,24 @@ export function driveMetadataCallAllowed(req: { api: string; method: string; pat
 /** The fields the relay's owner lookup asks Drive for (and nothing else). */
 export const DRIVE_OWNER_FIELDS = 'owners(emailAddress),driveId'
 
+const DOCS_DOCUMENT_PATH_RE = /^\/v1\/documents\/[A-Za-z0-9_-]{1,200}(:batchUpdate)?$/
+
+/**
+ * Whether ACB makes this call with the Docs write permission (`documents`, the relay only; enforced
+ * by the one Google client before anything leaves): only on the Docs API, `GET /v1/documents/<id>`
+ * or `POST /v1/documents/<id>:batchUpdate` — never a new document. And no Docs call writes under
+ * another scope (the access token carries every granted scope, so a write declared with the
+ * minutes' `documents.readonly` would still reach Google): a Docs call other than a GET must
+ * declare `documents`. Other calls are not this function's business (true).
+ */
+export function docsCallAllowed(req: { api: string; method: string; path: string; scope: string }): boolean {
+  if (req.scope === GOOGLE_SCOPE.documents) {
+    const m = DOCS_DOCUMENT_PATH_RE.exec(req.path)
+    return req.api === 'docs' && !!m && (m[1] ? req.method === 'POST' : req.method === 'GET')
+  }
+  return req.api !== 'docs' || req.method === 'GET'
+}
+
 // ---------------------------------------------------------------------------
 // Where Google's APIs live (the server's one Google client maps an API to its host).
 
@@ -337,7 +393,7 @@ export const GOOGLE_API_HOSTS: Record<GoogleApi, string> = {
   calendar: 'www.googleapis.com',
   drive: 'www.googleapis.com',
   meet: 'meet.googleapis.com',
-  /** The minutes' documents: `/v1/documents/…`. */
+  /** The minutes' documents and the relay's Docs calls: `/v1/documents/…`. */
   docs: 'docs.googleapis.com',
   gmail: 'gmail.googleapis.com',
   /** The relay's Sheets calls (google-relay.ts): `/v4/spreadsheets/…`. */

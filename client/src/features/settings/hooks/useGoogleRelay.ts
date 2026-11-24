@@ -1,8 +1,8 @@
-// 「スプレッドシートを中継で使う」 (google-connector.md "The relay"): the member's relay view and own
-// records from the server, and 「やめる」 / back on. Allowing it the first time is a Google consent
+// 「スプレッドシート（ドキュメント）を中継で使う」 (google-connector.md "The relay"): the member's relay view
+// and own records from the server, and 「やめる」 / back on of one service. Allowing it the first time is a Google consent
 // (useGoogle's connect); the card is remounted when the permission changes, so it reads again.
 import { useCallback, useRef, useState } from 'react'
-import type { MyGoogleRelay } from '../../../../shared/google'
+import type { GoogleRelayService, MyGoogleRelay } from '../../../../shared/google'
 import { getGoogleRelay, setGoogleRelay } from '../api'
 
 export function useGoogleRelay(companyId: string) {
@@ -23,10 +23,10 @@ export function useGoogleRelay(companyId: string) {
     void reload()
   }, [companyId, reload])
 
-  const setOn = useCallback(async (on: boolean) => {
+  const setOn = useCallback(async (on: boolean, service: GoogleRelayService) => {
     setBusy(true)
     try {
-      const r = await setGoogleRelay(companyId, on)
+      const r = await setGoogleRelay(companyId, on, service)
       if (r.success) { setData(r.data); setError(null) } else setError(r.error)
     } finally {
       setBusy(false)

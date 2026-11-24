@@ -146,6 +146,31 @@ test('「スプレッドシートを中継で使う」: 「やめる」 sends on
   assert.equal((await odd.api.relay('co1')).success, false)
 })
 
+test('「ドキュメントを中継で使う」: 「やめる」 sends only the member\'s own switch of documents; the handler takes no other service', async () => {
+  const view = { success: true, data: { available: true, reason: null, services: [], stopped: null, capPerDay: 500, usedToday: 0, records: [] } }
+  const ok = harness({ status: 200, body: view })
+  assert.equal((await ok.api.setRelay('co1', false, 'docs')).success, true)
+  assert.deepEqual(ok.requests.map(q => [q.method, q.url, q.body]), [
+    ['PUT', 'https://acb.test/api/companies/co1/me/google/features', { feature: 'documents', on: false }],
+    ['GET', 'https://acb.test/api/companies/co1/me/google/relay', undefined],
+  ])
+  // Through the handler: a service the relay does not have is refused before anything is sent.
+  const { registerGoogleIpc } = await import('../electron/features/google/ipc')
+  const handlers = new Map<string, (...args: unknown[]) => unknown>()
+  const sent: unknown[] = []
+  registerGoogleIpc({ handle: (channel: string, fn: (...args: unknown[]) => unknown) => { handlers.set(channel, fn) } } as never, {
+    baseUrl: () => 'https://acb.test', cookies: () => [], shell: { openExternal: async () => {} }, log: { warn: () => {} },
+    fetch: (async (url: string, init: RequestInit) => { sent.push([url, init.body]); return new Response(JSON.stringify(view)) }) as unknown as typeof fetch,
+  })
+  const setRelay = handlers.get('google:setRelay')!
+  for (const service of ['inbox_archive', 'documents', 'gmail', 7]) {
+    assert.equal(((await setRelay({}, 'co1', true, service)) as { success: boolean }).success, false)
+  }
+  assert.deepEqual(sent, [])
+  assert.equal(((await setRelay({}, 'co1', true)) as { success: boolean }).success, true)
+  assert.deepEqual(JSON.parse(String((sent[0] as [string, string])[1])), { feature: 'sheets', on: true })
+})
+
 test('「済んだメールを Gmail でもアーカイブする」: shown only while the company offers it to a connected member; 「やめる」 sends only that switch', async () => {
   const { googleSectionView } = await import('../shared/google')
   const base = { available: true, reason: null, connected: true, status: 'active' as const, googleEmail: 'sato@div.example', domain: 'div.example', practice: false, featuresOff: [] as const }

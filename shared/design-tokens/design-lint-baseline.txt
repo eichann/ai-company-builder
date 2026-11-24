@@ -201,7 +201,7 @@ client/src/features/settings/components/BrowserSection.tsx palette-color=9 white
 client/src/features/settings/components/ConnectToolsScreen.tsx arbitrary-value=2 palette-color=18
 client/src/features/settings/components/DownloadFoldersSection.tsx palette-color=91 radius-scale=2 type-scale=6 white-black=16
 client/src/features/settings/components/DriveTrustedFolders.tsx palette-color=2
-client/src/features/settings/components/GoogleRelayCard.tsx arbitrary-value=1 opacity-scale=1 palette-color=24 radius-scale=1 type-scale=4 white-black=4
+client/src/features/settings/components/GoogleRelayCard.tsx arbitrary-value=1 opacity-scale=1 palette-color=23 radius-scale=1 type-scale=4 white-black=4
 client/src/features/settings/components/GoogleSection.tsx palette-color=13 white-black=1
 client/src/features/settings/components/MoveEnvKeysCard.tsx palette-color=14 white-black=1
 client/src/features/settings/components/MySwitchesSection.tsx palette-color=8 white-black=1

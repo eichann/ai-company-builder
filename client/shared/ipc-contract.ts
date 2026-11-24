@@ -62,7 +62,7 @@ import type { DocViewBounds, DocViewEvent, DocViewOpenResult } from './doc-frame
 import type { ManualExportResult, ManualOpenResult } from './manual'
 // Lanes (ipc-and-main-process.md "Lane markers"): add only right under your lane's ▼.
 // lane A ▼
-import type { GoogleRelayResult } from './google'
+import type { GoogleRelayResult, GoogleRelayService } from './google'
 import type { DriveOverwriteDecisionResult, DriveTrustedFoldersResult, DriveUntrustResult } from './drive-overwrite'
 import type { SlackConnectResult, SlackFeature, SlackStatusResult } from './slack'
 import type { RecordThreadResult } from './threads'
@@ -863,9 +863,10 @@ export interface IpcInvokeChannels {
   // company offers (the sign-in URL stays in main), and 「あとで」 per service.
   'google:connectAll': { args: [companyId: string]; result: GoogleConnectResult }
   'google:markSeen': { args: [companyId: string]; result: GoogleStatusResult }
-  // 「スプレッドシートを中継で使う」 (google-connector.md "The relay"): the member's view and own records; 「やめる」 / back on.
+  // 「スプレッドシート（ドキュメント）を中継で使う」 (google-connector.md "The relay"): the member's view and own records;
+  // 「やめる」 / back on of one relay service (`sheets` when absent: apps before U2').
   'google:relay': { args: [companyId: string]; result: GoogleRelayResult }
-  'google:setRelay': { args: [companyId: string, on: boolean]; result: GoogleRelayResult }
+  'google:setRelay': { args: [companyId: string, on: boolean, service?: GoogleRelayService]; result: GoogleRelayResult }
   // 「済んだメールを Gmail でもアーカイブする」 (google-connector.md "Archiving in Gmail"): the member's own switch, back on without a consent.
   'google:setArchive': { args: [companyId: string, on: boolean]; result: GoogleStatusResult }
   // The card's 「上書きする」 / 「やめる」 for a Google document someone else edited (google-drive.md "Continuing a document people edited").

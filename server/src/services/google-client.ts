@@ -33,7 +33,7 @@
  * practice value is never sent (`practice-real-secret`).
  */
 import { checkUpstreamPath } from '../../shared/core/upstream-path'
-import { GOOGLE_API_HOSTS, GOOGLE_AUTHORIZE_PATH, GOOGLE_SCOPE, driveMetadataCallAllowed, gmailCallAllowed, googleCompanyFeatureOn, googleFeatureOfScope, isPracticeGoogleSecret, type GoogleApi } from '../../shared/core/google'
+import { GOOGLE_API_HOSTS, GOOGLE_AUTHORIZE_PATH, GOOGLE_SCOPE, docsCallAllowed, driveMetadataCallAllowed, gmailCallAllowed, googleCallFeature, googleCompanyFeatureOn, isPracticeGoogleSecret, type GoogleApi, type GoogleFeature } from '../../shared/core/google'
 import { isDrivePickerTokenScope } from '../../shared/core/google-drive'
 import type { CompanyDataSource } from '../ports/company-data'
 import type { ConnectorGrantRow, ConnectorRepository } from '../ports/connectors'
@@ -66,7 +66,9 @@ export type GoogleStopReason =
   /**
    * A Gmail call ACB never makes (shared/core/google.ts `gmailCallAllowed`): anything with
    * `gmail.modify` but the INBOX label on a thread or message, and any Gmail write but a send;
-   * with `drive.metadata.readonly`, anything but one file's owner lookup (`driveMetadataCallAllowed`).
+   * with `drive.metadata.readonly`, anything but one file's owner lookup (`driveMetadataCallAllowed`);
+   * with `documents`, anything but the relay's two Docs calls, and any Docs write under another scope
+   * (`docsCallAllowed`); a shared scope whose call names no feature that holds it (`googleCallFeature`).
    */
   | 'call-not-allowed'
 
@@ -84,6 +86,12 @@ export interface GoogleRequest {
   binary?: boolean
   /** The scope this call needs; the call is refused unless the member granted it. */
   scope: string
+  /**
+   * The feature this call is made for, when its scope is shared by two (`drive.metadata.readonly`:
+   * the relay's owner lookup of a sheet or of a Doc). Its switches decide the call; a shared scope
+   * without it, or a feature that does not hold the scope, is refused (`call-not-allowed`).
+   */
+  feature?: GoogleFeature
   /** A short name for the record (`calendar.events.list`, `gmail.send`); never content. */
   operation: string
   /**
@@ -262,9 +270,10 @@ export function createGoogleClient(deps: GoogleClientDeps) {
    * by the admin (answered like the company switch, `off`), nor by the member
    * (member-oauth.md "Feature toggles": refused like a scope not granted).
    */
-  function scopeStop(companyId: string, connectors: ConnectorRepository, grant: ConnectorGrantRow, scope: string): GoogleStopReason | null {
+  function scopeStop(companyId: string, connectors: ConnectorRepository, grant: ConnectorGrantRow, scope: string, named?: GoogleFeature): GoogleStopReason | null {
     if (!grant.scopes.includes(scope)) return 'scope-not-granted'
-    const feature = googleFeatureOfScope(scope)
+    const feature = googleCallFeature(scope, named)
+    if (feature === 'unclear') return 'call-not-allowed'
     if (feature === 'inbox') {
       // 受信を読む: the company's and the member's own switch (work-switches.ts), not Google's.
       if (!deps.readIncoming.allowed(companyId)) return 'off'
@@ -449,6 +458,8 @@ export function createGoogleClient(deps: GoogleClientDeps) {
       }
       // `drive.metadata.readonly` (the relay's owner lookup, B-H1) reads one file's owners, nothing else.
       if (!driveMetadataCallAllowed({ api: req.api, method: req.method, path: req.path, scope: req.scope, query: req.query })) return notSent('call-not-allowed')
+      // `documents` (the relay's Docs calls, U2') reads one Doc or sends one batchUpdate; no Docs write under another scope.
+      if (!docsCallAllowed({ api: req.api, method: req.method, path: req.path, scope: req.scope })) return notSent('call-not-allowed')
       const isRead = req.method === 'GET'
       const body = req.rawBody ? req.rawBody.bytes : req.body === undefined ? null : new TextEncoder().encode(JSON.stringify(req.body))
       const contentType = req.rawBody ? req.rawBody.contentType : 'application/json'
@@ -461,7 +472,7 @@ export function createGoogleClient(deps: GoogleClientDeps) {
         const grant = connectors.grant('google', userId)
         const stop = grantStop(grant)
         if (stop) return notSent(stop)
-        const scoped = scopeStop(companyId, connectors, grant!, req.scope)
+        const scoped = scopeStop(companyId, connectors, grant!, req.scope, req.feature)
         if (scoped) return notSent(scoped)
         const token = await accessTokenFor(companyId, userId, grant!)
         if ('stop' in token) return notSent(token.stop)

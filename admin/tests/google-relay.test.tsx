@@ -77,6 +77,23 @@ describe('本人の許可で中継する', () => {
     expect(writes(calls)[1].body).toEqual({ capPerMemberPerDay: 300 })
   })
 
+  it('ticking ドキュメント sends only that service; a Docs record names the Doc and says a deletion was not relayed', async () => {
+    const docsRecord = { id: 'e3', at: '2026-11-24T01:00:00.000Z', userId: 'u_sato', memberName: '佐藤 花子', service: 'docs', operation: 'documents.batchUpdate' as const, spreadsheetId: null, range: null, documentId: 'doc-weekly-1', status: 403, result: 'refused' as const, reason: 'deletion' as const }
+    const view = { ...relay, services: [{ service: 'sheets' as const, on: true }, { service: 'docs' as const, on: false }], records: [docsRecord] }
+    const calls = stubApi({
+      [`GET ${base}/google/relay`]: { body: ok(view) },
+      [`PUT ${base}/google/relay`]: { body: ok({ ...view, services: [{ service: 'sheets', on: true }, { service: 'docs', on: true }] }) },
+    })
+    renderInCompany(<ApiKeysPage />)
+    const card = await screen.findByTestId('google-relay')
+    expect(within(card).getByText(/ドキュメント doc-weekly-1/)).toBeInTheDocument()
+    expect(within(card).getByText('ドキュメントに書き足す、整える')).toBeInTheDocument()
+    expect(within(card).getByText('消す操作は中継しません')).toBeInTheDocument()
+    await userEvent.click(within(card).getByRole('checkbox', { name: /ドキュメント/ }))
+    await waitFor(() => expect(writes(calls)).toHaveLength(1))
+    expect(writes(calls)[0]).toMatchObject({ method: 'PUT', url: `${base}/google/relay`, body: { services: { docs: true } } })
+  })
+
   it('a member\'s stop asks first and sends only that member', async () => {
     const calls = stubApi({
       [`PUT ${base}/google/relay/members/u_takasugi`]: { body: ok({ ...relay, members: [{ ...relay.members[0], stopped: true }, relay.members[1]] }) },

@@ -1,7 +1,7 @@
 // The Google connection (「Google で許可」, milestone 4; .claude/rules/google-connector.md):
 //   google:status, google:connect, google:disconnect,
 //   google:connectAll and google:markSeen (「仕事の道具をつなぐ」: one consent for what the company offers),
-//   google:relay and google:setRelay (「スプレッドシートを中継で使う」: the member's view and own records,
+//   google:relay and google:setRelay (「スプレッドシート（ドキュメント）を中継で使う」: the member's view and own records,
 //   and 「やめる」 / turning it back on without a new consent; google-connector.md "The relay"),
 //   google:setArchive (「済んだメールを Gmail でもアーカイブする」: the member's own switch, sends only
 //   `{ feature: 'inbox_archive', on }`; google-connector.md "Archiving in Gmail"),
@@ -21,6 +21,7 @@
 
 import { GOOGLE_OFFLINE_TEXT, googleErrorText, isGoogleSignInUrl, type GoogleConnectResult, type GoogleFeature, type GoogleRelayResult, type GoogleStatusResult, type MyGoogle, type MyGoogleRelay } from '../../../shared/google'
 import { GOOGLE_FEATURES } from '../../../../shared/core/google'
+import { GOOGLE_RELAY_SERVICE_FEATURE, isGoogleRelayService, type GoogleRelayService } from '../../../../shared/core/google-relay'
 import { DRIVE_OVERWRITE_REFUSALS, type DriveOverwriteDecisionResult, type DriveTrustedFoldersResult, type DriveUntrustResult } from '../../../shared/drive-overwrite'
 import type { DriveTrustedFolder } from '../../../../shared/types/google-drive'
 import type { IpcRegistrar } from '../../ipc/registrar'
@@ -83,9 +84,12 @@ export function createGoogleApi(deps: GoogleDeps) {
     return { success: false, offline: false, error: googleErrorText(r.res.status, r.json) }
   }
 
-  /** 「やめる」 / back on: the member's own switch of the allowed feature (no consent), then the relay's view. */
-  async function setRelay(companyId: string, on: boolean): Promise<GoogleRelayResult> {
-    const r = await send(companyId, 'PUT', '/features', { feature: 'sheets', on })
+  /**
+   * 「やめる」 / back on: the member's own switch of one relay service's feature (no consent), then the
+   * relay's view. Only a relay service's feature is ever sent (`sheets` → sheets, `docs` → documents).
+   */
+  async function setRelay(companyId: string, on: boolean, service: GoogleRelayService = 'sheets'): Promise<GoogleRelayResult> {
+    const r = await send(companyId, 'PUT', '/features', { feature: GOOGLE_RELAY_SERVICE_FEATURE[service], on })
     if (!r) return offline
     if (!r.res.ok) {
       log.warn(`[google] PUT features: answered ${r.res.status}`)
@@ -215,9 +219,10 @@ export function registerGoogleIpc(ipc: IpcRegistrar, deps: GoogleDeps): ReturnTy
     if (typeof companyId !== 'string' || !companyId) return invalid
     return api.relay(companyId)
   })
-  ipc.handle('google:setRelay', async (_, companyId: string, on: boolean) => {
+  ipc.handle('google:setRelay', async (_, companyId: string, on: boolean, service?: GoogleRelayService) => {
     if (typeof companyId !== 'string' || !companyId || typeof on !== 'boolean') return invalid
-    return api.setRelay(companyId, on)
+    if (service !== undefined && !isGoogleRelayService(service)) return invalid
+    return api.setRelay(companyId, on, service)
   })
   ipc.handle('google:setArchive', async (_, companyId: string, on: boolean) => {
     if (typeof companyId !== 'string' || !companyId || typeof on !== 'boolean') return invalid

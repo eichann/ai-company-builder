@@ -179,7 +179,7 @@ afterAll(async () => {
 describe('Google relay: who turns it on and who allows it', () => {
   it('is off until an owner/admin turns スプレッドシート on; members cannot; the name google holds no key', async () => {
     const view = await call('r-owner', 'GET', `${C()}/google/relay`)
-    expect(view.body.data).toMatchObject({ available: true, services: [{ service: 'sheets', on: false }], capPerMemberPerDay: 500, stopped: false, members: [] })
+    expect(view.body.data).toMatchObject({ available: true, services: [{ service: 'sheets', on: false }, { service: 'docs', on: false }], capPerMemberPerDay: 500, stopped: false, members: [] })
     expect((await call('r-sato', 'GET', `${C()}/google/relay`)).status).toBe(403)
     expect((await call('r-sato', 'PUT', `${C()}/google/relay`, { services: { sheets: true } })).status).toBe(403)
     expect((await call('r-owner', 'PUT', `${C()}/google/relay`, { services: { drive: true } })).status).toBe(400)
@@ -193,7 +193,7 @@ describe('Google relay: who turns it on and who allows it', () => {
     expect(key.body.code).toBe('SERVICE_RESERVED')
 
     const on = await call('r-owner', 'PUT', `${C()}/google/relay`, { services: { sheets: true } })
-    expect(on.body.data.services).toEqual([{ service: 'sheets', on: true }])
+    expect(on.body.data.services).toEqual([{ service: 'sheets', on: true }, { service: 'docs', on: false }])
   })
 
   it('is asked only when the member chooses it: never in the one consent, by name only', async () => {
@@ -203,7 +203,7 @@ describe('Google relay: who turns it on and who allows it', () => {
     const url = await allow('r-sato', ['sheets'], GOOGLE_SEED.member)
     expect(url.searchParams.get('scope')).toContain(SHEETS_SCOPE)
     const mine = (await call('r-sato', 'GET', `${C()}/me/google/relay`)).body.data
-    expect(mine).toMatchObject({ available: true, services: [{ service: 'sheets', offered: true, allowed: true, turnedOff: false }], stopped: null, capPerDay: 500 })
+    expect(mine).toMatchObject({ available: true, services: [{ service: 'sheets', offered: true, allowed: true, turnedOff: false }, { service: 'docs', offered: false, allowed: false, turnedOff: false }], stopped: null, capPerDay: 500 })
   })
 })
 
@@ -700,7 +700,14 @@ describe('Google relay: writes only into sheets owned inside the company (B-H1)'
       expect(res, JSON.stringify(r)).toMatchObject({ ok: false, kind: 'not-sent', reason: 'call-not-allowed' })
     }
     expect(sent()).toBe(before)
-    const ok = await services.googleClient.request(CO, 'r-sato', { api: 'drive', method: 'GET', path: `/drive/v3/files/${OUTSIDE}`, query: { fields: 'owners(emailAddress),driveId', supportsAllDrives: 'true' }, scope: METADATA_SCOPE, operation: 'test' })
+    const lookup = { api: 'drive', method: 'GET', path: `/drive/v3/files/${OUTSIDE}`, query: { fields: 'owners(emailAddress),driveId', supportsAllDrives: 'true' }, scope: METADATA_SCOPE, operation: 'test' } as const
+    // Shared by スプレッドシート and ドキュメント (U2'): a lookup that names no feature, or one that does
+    // not hold the permission, is refused — whose switches decide it is never guessed.
+    for (const feature of [undefined, 'minutes'] as const) {
+      expect(await services.googleClient.request(CO, 'r-sato', { ...lookup, ...(feature ? { feature } : {}) })).toMatchObject({ ok: false, kind: 'not-sent', reason: 'call-not-allowed' })
+    }
+    expect(sent()).toBe(before)
+    const ok = await services.googleClient.request(CO, 'r-sato', { ...lookup, feature: 'sheets' })
     expect(ok.ok).toBe(true)
   })
 })

@@ -178,8 +178,8 @@ export type RelayErrorCode =
   | 'ACB_MANAGED_BY_PLUGIN' | 'ACB_READ_NOT_ALLOWED' | 'ACB_CLOSED_TO_RELAY' | 'ACB_KEY_NOT_CHOSEN'
   // The person relay (google-relay.ts): a deletion, a call it does not pass, no permission of the member, Google off.
   | 'ACB_DELETE_REFUSED' | 'ACB_NOT_RELAYED' | 'ACB_GOOGLE_NOT_ALLOWED' | 'ACB_GOOGLE_OFF'
-  // …a write into a sheet not owned inside the company's Workspace (B-H1).
-  | 'ACB_OUTSIDE_SHEET'
+  // …a write into a sheet / a Doc not owned inside the company's Workspace (B-H1; Docs: U2').
+  | 'ACB_OUTSIDE_SHEET' | 'ACB_OUTSIDE_DOCUMENT'
 
 /** How a refusal of the relay is filed in the AI action log. */
 const REFUSAL_RECORD: Partial<Record<RelayErrorCode, { decision: ToolDecision; guardReason?: GuardReason }>> = {
@@ -201,6 +201,7 @@ const REFUSAL_RECORD: Partial<Record<RelayErrorCode, { decision: ToolDecision; g
   ACB_GOOGLE_NOT_ALLOWED: { decision: 'guard-denied', guardReason: 'key-not-available' },
   ACB_GOOGLE_OFF: { decision: 'stopped' },
   ACB_OUTSIDE_SHEET: { decision: 'guard-denied', guardReason: 'outside-owner' },
+  ACB_OUTSIDE_DOCUMENT: { decision: 'guard-denied', guardReason: 'outside-owner' },
 }
 
 const CREDENTIAL_HEADERS = ['authorization', 'x-api-key', 'x-goog-api-key'] as const
