@@ -316,9 +316,13 @@ GET  /api/config                                  setup state (no auth)
                               POST /browser-line-plans/:planId/result | approve | cancel | claim,
                               POST /browser-line-executions/:executionId/permit | confirm,
                               GET|PUT /browser-line-grants(/:userId) (owner/admin),
-                              POST /browser-shape-notices, GET /browser-shape-notices (owner/admin)
-                                                                             browser-lines.ts
+                              POST /browser-shape-notices, GET /browser-shape-notices (owner/admin),
+                              GET /browser-lines-mine                         browser-lines.ts
                                                                 (opened lines: agent-browser.md "Plans of opened lines on the server")
+                              POST /browser-devices, GET|DELETE /browser-devices-me (+ the PC's key header),
+                              GET /browser-devices, POST /browser-devices/:deviceId/enable | revoke (owner/admin)
+                                                                             browser-devices.ts
+                                                                (this PC: agent-browser.md "This PC's registration")
                               GET|PUT /second-opinion                         second-opinion.ts
                                                                 (もう一方の AI に聞く: chat-and-agents.md)
                               GET /security-alerts, PUT /security-alerts/settings (owner/admin)

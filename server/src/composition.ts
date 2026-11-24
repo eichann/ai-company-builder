@@ -62,6 +62,7 @@ import { createAgentSandboxService } from './services/agent-sandbox'
 import { createAgentBrowserService } from './services/agent-browser'
 import { createBrowserPlanService } from './services/browser-plans'
 import { createBrowserLineService } from './services/browser-lines'
+import { createBrowserDeviceService } from './services/browser-devices'
 import type { BrowserConnectorCatalog } from './ports/browser-plans'
 import type { BrowserOpenedListSource } from './ports/browser-lines'
 import { createTaskSettingsService } from './services/task-settings'
@@ -290,10 +291,13 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
   const agentPolicy = createAgentPolicyService({ agentSandbox, agentBrowser, agentStops, secondOpinion, digest: sha256TokenDigest, push })
   // 「ブラウザ操作」 plans (agent-browser.md "Plans, executions, permits and locks"): the approved
   // combinations from shared/browser-connectors/approved.json; the member's setting and stops now.
+  // The PCs used for 「ブラウザ操作」 (agent-browser.md "This PC's registration"): the first check of both paths' gates.
+  const browserDevices = createBrowserDeviceService({ ...shared, tokenDigest: sha256TokenDigest })
   const browserPlans = createBrowserPlanService({
     ...shared, memberships: repos.memberships, tokenDigest: sha256TokenDigest, monotonic: systemMonotonicClock,
     catalog: options.browserConnectors ?? fileBrowserConnectorCatalog(), executionLookup: sqliteBrowserExecutionLookup(conn),
     browserPolicy: member => agentBrowser.policyFor(member), aiStops: member => agentStops.policyFor(member),
+    devices: browserDevices.gate,
   })
   // Plans of opened lines (agent-browser.md "Plans of opened lines on the server"): the opened list from
   // shared/browser-connectors/opened.json, the site's host from its approved declaration.
@@ -302,6 +306,7 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     opened: options.browserOpened ?? fileBrowserOpenedList(), catalog: options.browserConnectors ?? fileBrowserConnectorCatalog(),
     executionLookup: sqliteBrowserLineExecutionLookup(conn),
     browserPolicy: member => agentBrowser.policyFor(member), aiStops: member => agentStops.policyFor(member),
+    devices: browserDevices.gate,
     noticesChanged: (companyId, userIds) => push.notify(companyId, userIds, { kind: 'notifications', version: shared.ids.newToken().slice(0, 32) }),
   })
   const brokerTokens = createBrokerTokenService({
@@ -823,6 +828,8 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
         // …and their browser plans close, a claimed execution is void, their type grants go (agent-browser.md).
         browserPlans.memberLeft(companyId, userId)
         browserLines.memberLeft(companyId, userId)
+        // …and every PC registration of theirs is stopped; invited back, nothing returns.
+        browserDevices.memberLeft(companyId, userId, actorId)
       },
       onRoleChanged: (companyId, userId, actorId) => jobs.roleChanged(companyId, userId, actorId),
     }),
@@ -898,6 +905,7 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     agentBrowser,
     browserPlans,
     browserLines,
+    browserDevices,
     agentStops,
     agentPolicy,
     secondOpinion,

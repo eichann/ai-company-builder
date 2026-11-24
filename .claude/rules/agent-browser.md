@@ -73,6 +73,16 @@ paths:
   - "client/tests/browser-inspect-app.test.ts"
   - "client/tests/browser-inspection-card-ui.tsx"
   - "client/tests/ui/browser-inspection-card.spec.ts"
+  - "shared/core/browser-device.ts"
+  - "shared/types/browser-devices.ts"
+  - "server/src/routes/browser-devices.ts"
+  - "server/src/services/browser-devices.ts"
+  - "server/src/ports/browser-devices.ts"
+  - "server/src/adapters/sqlite/browser-devices.ts"
+  - "server/src/db/schema/browser-devices.ts"
+  - "server/tests/unit/browser-devices.test.ts"
+  - "server/tests/unit/browser-device-core.test.ts"
+  - "server/tests/helpers/browser-devices.ts"
 ---
 
 # Browser operation (「ブラウザ操作」): sites the chat AI may operate
@@ -631,9 +641,9 @@ typed there broke the login, #768).
   with the admin's list; a site whose pages need a host its declaration does not list looks incomplete
   until a new declaration version is reviewed (the learning mode stays diagnosis only, §6-4).
 - **Who may use a site** (plan B's 「使える人」): not in this step. The server's per-member type grant
-  (`PUT /browser-type-grants/:userId`) has no admin page yet; a button for it waits for the PC
-  registration (§33.3; "This PC's opt-in" weakness: a grant to a second member before it turns them on
-  wherever they write the opt-in file).
+  (`PUT /browser-type-grants/:userId`) has no admin page yet. Since "This PC's registration" (D2) the server
+  asks for a registered PC at every gated step, so a grant to a member no longer turns them on wherever they
+  write the opt-in file; the admin page 「使える人」 is PR A (new path only).
 
 Tests: `client/tests/browser-asset-hosts.test.ts` (the window's site: the declaration's hosts, the company's
 list only for a development build, exact / not the operated host / once; only an unpackaged build with
@@ -734,7 +744,9 @@ send → report; 6c turns it on for the owner's PC).
   without it): the member may have left. A plan and an execution are their member's own: anyone
   else's — and another company's — is the same 404 as one that does not exist (owners/admins too,
   except confirm below).
-- **The checks** at register, approve, claim and permit (`gate`, in this order): the combination
+- **The checks** at register, approve, claim and permit (`gate`, in this order): since D2 first **this PC**
+  ("This PC's registration": an enabled registration of the member, the plan's own registration — a refusal at
+  the permit voids the execution with reason `device`), then the combination
   (connector, version, declaration hash, checker hash, facts version) is in the catalog
   (`BROWSER_TYPE_NOT_APPROVED`) and not retired (`BROWSER_TYPE_RETIRED`), the app at least
   `minAppVersion` (`BROWSER_APP_TOO_OLD`), the operation exists, **the first version's rule**
@@ -1320,8 +1332,10 @@ path holds the same lock key (below).
   `retired` → `BROWSER_LINE_RETIRED`); the member's setting (mode on, the site's host listed, its level allowing the
   line's effect — 「見るだけ」 for an inspection, 「入力・保存まで」 for writes — `BROWSER_NOT_ALLOWED`); the AI stop
   (`BROWSER_AI_STOPPED`); the member's **per-line grant** (`BROWSER_TYPE_NOT_GRANTED`). Results, reports, confirms and
-  leaving never ask it (clean-up never stops). The PC registration (「担当者の PC で使う」) adds its check in this one
-  function and an additive device column later; nothing here has to change shape for it.
+  leaving never ask it (clean-up never stops). **First of all** (D2, "This PC's registration"): this PC — an enabled
+  registration of the member, and for a plan the registration that made it (`devices.check`, injected); the plan's
+  PC is a row of `browser_plan_devices` (path `line`), so no column here changed. A refusal at a permit ends the
+  execution like any gate refusal (`void` / `partial`, the refusal's code kept as the reason).
 - **Per-line grants** (§16-5, owner decision Q15): `browser_line_grants` = member × site × line × **meaning hash** ×
   the mechanics hash it was given on. `PUT /browser-line-grants/:userId { site, line, meaningHash, mechanicsHash,
   allowed }` (owner/admin): `true` only for an approved row exactly; **`false` takes away every grant of that person on
@@ -2157,13 +2171,21 @@ confirm opening by itself on a fake clock; the plain results; no jargon), `src/f
 layer kept on purpose: the registration's context check before each read (the check after each answer
 catches the same change).
 
-## This PC's opt-in (6c: on for the owner's PC only)
+## This PC's opt-in (6c: on for the owner's PC only; since D2 the transition's exception)
 
 Owner decision 2026-11-22: the AI's browser operation is turned on **only on the owner's PC** for the
 real-machine check (design memo §33 1-6) and the first real run; everyone else stays off, also members
 running the very same build. Design memo §33.3 prescribes the server's PC registration for 6c; for one
 PC whose person is the company's owner, this PR uses the smallest mechanism that keeps the build off for
 everyone else, and leaves that registration as the condition before anyone else is turned on ("Not yet").
+
+**Since D2 ("This PC's registration") this file is the transition's exception** (design memo
+「ブラウザ操作を担当者の PC で使う」 v2 §10): the server now asks every gated step for a registered PC, and lets a
+request **without** the PC's key header through for an owner only (`BROWSER_DEVICE_OWNER_TRANSITION`) — exactly
+what this file does today, so the owner's PC keeps working on it until the app that sends the header (D4) is
+everywhere. A member or an admin with the file is refused by the server (`BROWSER_DEVICE_NOT_REGISTERED`), so the
+weakness below no longer reaches them. D5 removes the file and the exception together, after D4 has reached every PC
+and the owner's PC is registered.
 
 - **The build constant stays `false`** (`BROWSER_AI_BUILD_SWITCH`): no build is on for everyone. main
   composes `createThisPcSwitch({ file: <userData>/browser-ai-this-pc.json, server, userId })`
@@ -2191,8 +2213,9 @@ everyone else, and leaves that registration as the condition before anyone else 
 - **Weakness (said)**: **the per-PC file is not access control — the server's type grant is.** The file
   is the person's own; an AI turn outside the sandbox (`record-only`, the API key's agent) could write it
   as it could read §33.3's device file. It only narrows where it is on; the grant and the person's
-  approval on the card are the guards. So **granting a second member before §33.3's registration exists
-  turns them on wherever they write the file** — do not grant anyone else until then.
+  approval on the card are the guards. Before D2, **granting a second member turned them on wherever
+  they wrote the file**; since D2 the server refuses a member's or an admin's step without a registered PC,
+  so the file only ever reaches the owner (the transition's exception above).
 - **The operator's init check, accepted as built in** (owner decision 2026-11-22, "Checked on every
   start"): built-in plugins are matched by **pattern** (`path: 'builtin'`, `source: '<name>@builtin'`), not
   pinned by name — a later CLI's new built-in plugin passes (consistent with "what Anthropic ships is
@@ -2209,6 +2232,80 @@ stops the run before the claim), `browser-plans-app.test.ts` (a capture reads fa
 off), `browser-execute.test.ts` (the opt-in removed between the permit and the send, with the switch and
 context composed as main does: the last check refuses, failed, nothing reaches the site). Each guard mutation-checked; second layer kept on purpose: the regular-file check after
 `O_NOFOLLOW` / `O_NONBLOCK` (a folder or a pipe already fails to read).
+
+## This PC's registration (D2: the server's half; the app sends no key yet)
+
+Owner-approved design memo 「ブラウザ操作を担当者の PC で使う」 v2 (2026-11-24) §3–§8, §10, §14-1 (「必要最低限に絞る」: everything
+in §14-3 「あとから足せる」 stays out — a confirmation number, expiries, extra checks on one's own PC, per-company keys, the
+personal MCP's visibility, a lost-PC guide, binding an inspection's result to the PC). Owner answers to §12: the
+transition's exception is for an owner only; an inspection runs only while the member has that consultation open (the
+app's, L1). The server decides **from which PC** a plan's steps come; the person's session, the grant and the card stay
+the guards they were.
+
+- **Pieces.** `shared/core/browser-device.ts` (pure: `BROWSER_DEVICE_HEADER` `X-ACB-Browser-Device`,
+  `parseBrowserDeviceKey` — exactly `v1.` + 32 bytes in unpadded base64url, the last character's unused bits zero so a key
+  has one spelling —, the states `pending` / `enabled` / `revoked` and their moves, the revoke reasons `admin` / `self` /
+  `left`, `normalizeBrowserDeviceLabel` (NFC, trimmed, 1–60, no control or direction character), the refusal words
+  `BROWSER_DEVICE_WORDS` (plain Japanese, 「PC」 never 「デバイス」), `BROWSER_DEVICE_OWNER_TRANSITION` and the gate's one rule
+  `browserDeviceDecision`); `shared/types/browser-devices.ts`; server `routes/browser-devices.ts` →
+  `services/browser-devices.ts` → the handle's `browserDevices` (`ports/browser-devices.ts`,
+  `adapters/sqlite/browser-devices.ts`, tables in `db/schema/browser-devices.ts`). The plan services get the gate
+  injected (`BrowserDeviceGate`: `check`, `bind`; composed in `composition.ts`), never a row or a hash.
+- **Tables** (new only; no column of a plan table changes): `browser_devices` (company, `bd_` + 32 hex id, member,
+  **`key_hash` = sha256 of the header value — the key itself is never stored, logged or answered**, the PC's name,
+  state, revoke reason, requested / enabled (by) / revoked (by) / last used; one registration not stopped per company ×
+  member × key — partial unique index —; trigger: the fixed columns never change, only pending → enabled → revoked,
+  revoked final; no DELETE while its company exists), `browser_device_history` (append-only: which registration, whose,
+  who acted, `request` / `enable` / `revoke`, the reason, when), `browser_plan_devices` (company × path `type` | `line` ×
+  plan → the registration that made it; written once with the plan, in its transaction; never changed or removed while
+  its company exists; no row = made under the owner's exception or before D2).
+- **Routes** (`/api/companies/:companyId`, a person's session): `POST /browser-devices { label }` + the header (this
+  member registers this PC: `pending`, 201; asked again for a registration not stopped → that one, 200; at most
+  `BROWSER_DEVICE_LIMITS.livePerMember` (10) not stopped → `BROWSER_DEVICE_LIMIT`), `GET /browser-devices-me` + the
+  header (this member's registration of this PC — the one not stopped, else the newest stopped one — or `{ state: 'none' }`;
+  `no-store`), `DELETE /browser-devices-me` + the header (取り下げる / この PC での利用をやめる: `revoked`, `self`), `GET
+  /browser-devices` (owner/admin: every registration, newest first, 500 with `more`, the person's name, the history's
+  newest 200; never a key or its hash), `POST /browser-devices/:deviceId/enable` (owner/admin, from `pending` only, else
+  409 `BROWSER_DEVICE_STATE_CHANGED`; **their own PC too, one press, no further check** — owner decision 11/24),
+  `POST /browser-devices/:deviceId/revoke` (owner/admin; a stopped one answered as it is). A missing or malformed header is
+  400 `BROWSER_DEVICE_BAD_KEY`; another company's registration is the same 404 `BROWSER_DEVICE_NOT_FOUND` as none (the
+  handle). `GET /browser-lines-mine` (any member, `routes/browser-lines.ts`): the approved lines they hold a grant in
+  force for — ref, label, `writes` — for the app's 「この PC」 and the request tool (D4, L1).
+- **The gate** (`devices.check`, the **first** check of the old path's `gate` and the new path's `gate` — so register /
+  approve / claim / permit and create / approve / claim / every permit; the route passes the header): no header → only
+  an **owner** passes, with no registration (the transition's exception: "This PC's opt-in"); a header that is not one
+  key → `BROWSER_DEVICE_NOT_REGISTERED` (never the exception); this member's registration of that key in this company:
+  none → `BROWSER_DEVICE_NOT_REGISTERED`, `pending` → `BROWSER_DEVICE_PENDING`, `revoked` → `BROWSER_DEVICE_REVOKED`
+  (each 403), `enabled` → passes; then for a step of an existing plan **its registration must be this one** (none for
+  none) → else 409 `BROWSER_DEVICE_ELSEWHERE` (another PC of the member, or this PC registered again: a new
+  registration, so an old plan never moves again). A passing step notes `last_used_at` at most once a day. A
+  refusal at a permit ends the execution as any gate refusal (old path `void` reason `device`; new path `void` /
+  `partial` with the code). **Not asked** (clean-up never stops): cancel (so another PC can only 「やめる」), reports,
+  confirms, an inspection's result (binding it to the PC is §14-3), the lists, the shape notice.
+- **Stopping**: an owner / admin's 止める (`admin`), the member's own (`self`), and **leaving the company** — every
+  registration of the person stopped (`left`) in `companies.removeMember`'s transaction (`onMemberLeft` →
+  `browserDevices.memberLeft`); invited back, nothing returns (a new registration starts `pending`). A stop applies to the
+  next gated step at once (the server is the authority); a permit already given (5 s) may still be used, and a write
+  already sent is settled by its report or a person.
+- **Weaknesses (said, §3-4)**: the key is not bound to hardware — an AI outside the sandbox that the person lets read
+  the keychain item could read it; the guards remain the grant and the person's approval on the card. A stolen owner /
+  admin session can register and enable its own PC (no confirmation number: §14-3). The member's own browser MCPs are
+  outside this (their visibility is §14-3). The request log prints `deviceId` (an opaque id), never the header.
+
+Tests: `server/tests/unit/browser-device-core.test.ts` (the key's one spelling, the name, the moves, the gate's rule as
+a table: every state × role × plan binding, the exception for an owner only and none once it ends),
+`server/tests/unit/browser-devices.test.ts` (the real device and opened-lines services: registering twice, after a stop,
+the name and the limit; enable / revoke owner / admin only, an admin's own PC, from pending only, revoked final and the
+trigger, another company's id the same 404; the list without any key or hash; no key material in any table; the new
+path's gate — none, pending, enabled, stopped, another member's or company's registration of the same PC, a malformed
+key, the owner's exception and nobody else's, a demoted owner, the PC first —; last used once a day; the plan bound to
+its PC — another PC, the same PC registered again, the owner's plan without a PC, a permit from another PC voiding the
+execution, cancel from another PC —; leaving; `browser-lines-mine`), `server/tests/integration/browser-plans.test.ts`
+(over HTTP with the real composition: members register and are enabled, an admin without a PC refused and the owner's
+exception, a plan bound to its PC, a revoked PC voiding the claimed execution (`device`), the second PC cancelling,
+`browser-devices-me` uncached and own only, the real member removal stopping the PC), the old and new paths' own tests
+(with a stand-in PC check, `tests/helpers/browser-devices.ts`), permission matrix rows + `CROSS`,
+`company-scoped-sql.test.ts`, `jobs-schema.test.ts`. Each guard mutation-checked.
 
 ## Not yet (later PRs)
 
@@ -2227,8 +2324,8 @@ the execution (6b-2c, "Executing a plan": claim → re-read → permit → send 
 the card, its IPC and the request tool (6b-2d, "The card, the IPC and the request tool"), all switched
 off, and the inbox's rows (switched off too); **6c** — on for the owner's PC only through "This PC's
 opt-in" (built, `lstep@0.6.3` approved: "Login helpers" lets the person log in, "Asset hosts" draws the page), and **the server's PC
-registration** (design memo §33.3: server × company × member × PC, `X-ACB-Browser-Device`, enabled by an
-owner / admin, checked at register / approve / claim / permit) before it is on for anyone else;
+registration** (the server's half is built: "This PC's registration"; still to come: the admin pages, PR A; the app's
+key, header and 「この PC」, D4; the end of the transition, D5) before it is on for anyone else;
 `irreversible` types and more than one write (refused by the first version's rule today); **the method override and the swap** (design memo §24: a write may
 declare `method: DELETE` / `PATCH` with `override: form_field`, sent as POST with `_method=<method>` in the
 body; `matchDeclaredWrite` would then match the effective method and the declared `_method` pair, still

@@ -11,7 +11,9 @@
  *   at the same moment only one wins.
  * - Time-outs are judged whenever a plan or an execution is touched (read, claim, permit, report,
  *   confirm, the lists), by the server's clock — never only by a timer.
- * - At register, approve, claim and permit: the combination is approved (not retired) and the app
+ * - At register, approve, claim and permit: first this PC (an enabled registration of the member, and the
+ *   plan's own registration: services/browser-devices.ts, agent-browser.md "This PC's registration"), then
+ *   the combination is approved (not retired) and the app
  *   new enough, the operation passes the first version's rule, the company's setting lets the
  *   member use it on that site at that level, the AI is not stopped, the member is granted the type.
  *   Report, confirm and the lists go on for a retired combination (clean-up never stops).
@@ -44,6 +46,7 @@ import type { MembershipRepository } from '../ports/memberships'
 import type { Transactions } from '../ports/transactions'
 import { hashCanonical } from '../lib/content-hash'
 import { hasFullAccess, type Member } from './access'
+import type { BrowserDeviceGate } from './browser-devices'
 import { ok, refuse, type Outcome, type Refusal } from './outcome'
 
 export interface BrowserPlanDeps {
@@ -62,6 +65,8 @@ export interface BrowserPlanDeps {
   browserPolicy: (member: Member) => BrowserOperationSettings
   /** The member's AI stops now (agent-stop.md). */
   aiStops: (member: Member) => { all: boolean; tools: readonly string[] }
+  /** This PC's registration (agent-browser.md "This PC's registration"): the first check of the gate. */
+  devices: BrowserDeviceGate
   log?: Pick<Console, 'warn'>
 }
 
@@ -113,6 +118,10 @@ const GATE_VOID_REASONS: Record<string, string> = {
   BROWSER_APP_TOO_OLD: 'app-too-old',
   BROWSER_OPERATION_NOT_YET: 'not-yet',
   BROWSER_UNKNOWN_OPERATION: 'unknown-operation',
+  BROWSER_DEVICE_NOT_REGISTERED: 'device',
+  BROWSER_DEVICE_PENDING: 'device',
+  BROWSER_DEVICE_REVOKED: 'device',
+  BROWSER_DEVICE_ELSEWHERE: 'device',
 }
 const PLAN_ID_RE = /^bp_[0-9a-f]{32}$/
 const EXEC_ID_RE = /^bx_[0-9a-f]{32}$/
@@ -216,11 +225,14 @@ export function createBrowserPlanService(deps: BrowserPlanDeps) {
 
   /**
    * Every rule a step of a plan must pass now (register, approve, claim, permit), in this order:
-   * the combination approved and not retired, the app new enough, the operation known and allowed by
-   * the first version's rule, the company's setting, the AI stop, the member's grant.
+   * this PC (an enabled registration of the member, the plan's own registration — `devices.check`), the
+   * combination approved and not retired, the app new enough, the operation known and allowed by the first
+   * version's rule, the company's setting, the AI stop, the member's grant.
    */
-  function gate(member: Member, key: Parsed['connector'] & { declarationHash: string; checkerHash: string; factsVersion: number }, operationName: string, appVersion: string | undefined):
-    Outcome<{ combination: Combination; operation: BrowserOperation }> {
+  function gate(member: Member, key: Parsed['connector'] & { declarationHash: string; checkerHash: string; factsVersion: number }, operationName: string, appVersion: string | undefined,
+    device: { key: string | undefined; planId: string | null }): Outcome<{ combination: Combination; operation: BrowserOperation; deviceId: string | null }> {
+    const pc = deps.devices.check(member, device.key, device.planId === null ? null : { path: 'type', planId: device.planId })
+    if (!pc.ok) return pc
     const combination = findCombination(key)
     // A `pending` row (listed, not yet made `approved`: design memo §33.5) is not approved.
     if (!combination || combination.row.status === 'pending') return refuse('conflict', W.notApproved, { code: 'BROWSER_TYPE_NOT_APPROVED' })
@@ -238,7 +250,7 @@ export function createBrowserPlanService(deps: BrowserPlanDeps) {
     if (!use.usable.includes(operationName)) return refuse('conflict', W.notAllowed, { code: 'BROWSER_NOT_ALLOWED' })
     if (browserAiStopped(deps.aiStops(member))) return refuse('conflict', W.aiStopped, { code: 'BROWSER_AI_STOPPED' })
     if (!granted(member, key.id, operationName, key.declarationHash)) return refuse('forbidden', W.notGranted, { code: 'BROWSER_TYPE_NOT_GRANTED' })
-    return ok({ combination, operation })
+    return ok({ combination, operation, deviceId: pc.value.deviceId })
   }
 
   const contentOf = (plan: BrowserPlanRow): PlanContent => JSON.parse(plan.content) as PlanContent
@@ -356,10 +368,11 @@ export function createBrowserPlanService(deps: BrowserPlanDeps) {
 
   return {
     /** POST /browser-plans: a candidate and its facts → a draft plan (its fixed content and hash). */
-    register(member: Member, body: unknown, appVersion: string | undefined): Outcome<BrowserPlanView> {
+    register(member: Member, body: unknown, appVersion: string | undefined, deviceKey?: string): Outcome<BrowserPlanView> {
       const input = parseInput(body)
       if (!input) return refuse('bad-request', W.badPlan, { code: 'BROWSER_BAD_PLAN' })
-      const passed = gate(member, { ...input.connector, declarationHash: input.declarationHash, checkerHash: input.checkerHash, factsVersion: input.factsVersion }, input.operation, appVersion)
+      const passed = gate(member, { ...input.connector, declarationHash: input.declarationHash, checkerHash: input.checkerHash, factsVersion: input.factsVersion }, input.operation, appVersion,
+        { key: deviceKey, planId: null })
       if (!passed.ok) return passed
       const { combination, operation } = passed.value
       const values = { target: input.target, change: input.change }
@@ -393,7 +406,11 @@ export function createBrowserPlanService(deps: BrowserPlanDeps) {
         // The open-plans list's copies, from the same canonical form as the content.
         targetJson: canonicalJson(content.target), conversationId: content.conversation,
       }
-      plans(member.companyId).insertPlan(row)
+      // The plan and the PC that made it, together: it goes on only on that registration.
+      transactions.run(() => {
+        plans(member.companyId).insertPlan(row)
+        deps.devices.bind(member, 'type', row.id, passed.value.deviceId)
+      })
       return ok(planView(member.companyId, row))
     },
 
@@ -411,7 +428,7 @@ export function createBrowserPlanService(deps: BrowserPlanDeps) {
     },
 
     /** POST /browser-plans/:planId/approve { contentHash }: the member approves the content they saw. */
-    approve(member: Member, planId: string, body: unknown, appVersion: string | undefined): Outcome<BrowserPlanView> {
+    approve(member: Member, planId: string, body: unknown, appVersion: string | undefined, deviceKey?: string): Outcome<BrowserPlanView> {
       const found = ownPlan(member, planId)
       if (!found) return planMissing()
       const shown = isMap(body) ? body.contentHash : undefined
@@ -422,7 +439,7 @@ export function createBrowserPlanService(deps: BrowserPlanDeps) {
         if (plan.state === 'closed' && plan.closeReason === 'expired') return refuse('conflict', W.expired, { code: 'BROWSER_PLAN_EXPIRED' })
         if (plan.state !== 'draft') return refuse('conflict', W.notDraft, { code: 'BROWSER_PLAN_NOT_DRAFT' })
         if (shown !== plan.contentHash) return refuse('conflict', W.contentChanged, { code: 'CONTENT_CHANGED' })
-        const passed = gate(member, keyOf(plan), plan.operation, appVersion)
+        const passed = gate(member, keyOf(plan), plan.operation, appVersion, { key: deviceKey, planId: plan.id })
         if (!passed.ok) return passed
         if (!plans(member.companyId).setPlanState(plan.id, 'draft', 'approved', { approvedAt: iso(now) })) return refuse('conflict', W.notDraft, { code: 'BROWSER_PLAN_NOT_DRAFT' })
         return ok(planView(member.companyId, plans(member.companyId).plan(plan.id) as BrowserPlanRow))
@@ -457,7 +474,7 @@ export function createBrowserPlanService(deps: BrowserPlanDeps) {
      * transaction and answers the execution's secret — the only time it is ever sent; the server keeps
      * its hash. A lost answer is not given again: the plan is consumed (a new plan is a new approval).
      */
-    claim(member: Member, planId: string, appVersion: string | undefined): Outcome<BrowserClaim> {
+    claim(member: Member, planId: string, appVersion: string | undefined, deviceKey?: string): Outcome<BrowserClaim> {
       const found = ownPlan(member, planId)
       if (!found) return planMissing()
       return transactions.run(() => {
@@ -466,7 +483,7 @@ export function createBrowserPlanService(deps: BrowserPlanDeps) {
         const plan = settlePlan(member.companyId, found, now)
         if (plan.state === 'closed' && plan.closeReason === 'expired') return refuse('conflict', W.expired, { code: 'BROWSER_PLAN_EXPIRED' })
         if (plan.state !== 'approved') return refuse('conflict', W.notApprovedYet, { code: 'BROWSER_PLAN_NOT_APPROVED' })
-        const passed = gate(member, keyOf(plan), plan.operation, appVersion)
+        const passed = gate(member, keyOf(plan), plan.operation, appVersion, { key: deviceKey, planId: plan.id })
         if (!passed.ok) return passed
         const { combination, operation } = passed.value
         const content = contentOf(plan)
@@ -510,7 +527,7 @@ export function createBrowserPlanService(deps: BrowserPlanDeps) {
      * POST /browser-executions/:executionId/send-permit (the execution's secret in a header): once,
      * claimed → permitted, with every check in the same transaction; the permit time is the server's.
      */
-    permit(member: Member, executionId: string, secret: string | undefined, appVersion: string | undefined): Outcome<BrowserPermit> {
+    permit(member: Member, executionId: string, secret: string | undefined, appVersion: string | undefined, deviceKey?: string): Outcome<BrowserPermit> {
       const found = ownExecution(member, executionId, secret)
       if (!found) return execMissing()
       return transactions.run(() => {
@@ -522,7 +539,7 @@ export function createBrowserPlanService(deps: BrowserPlanDeps) {
         }
         if (exec.state !== 'claimed') return refuse('conflict', W.executionClosed, { code: 'BROWSER_EXECUTION_CLOSED' })
         const plan = repo.plan(exec.planId) as BrowserPlanRow
-        const passed = gate(member, keyOf(plan), plan.operation, appVersion)
+        const passed = gate(member, keyOf(plan), plan.operation, appVersion, { key: deviceKey, planId: plan.id })
         if (!passed.ok) {
           // A stop, a changed setting, a revoked grant, a retired combination or a too-old app ends this
           // execution (design memo §30.4: claimed → void): lifting it later never revives the same secret.

@@ -35,13 +35,16 @@ import { db, initDatabase } from '../../src/db'
 import { browserPlansRoute, browserReportRoute } from '../../src/routes/browser-plans'
 import { companiesRoute } from '../../src/routes/companies'
 import { agentBrowserRoute } from '../../src/routes/agent-browser'
+import { browserDevicesRoute } from '../../src/routes/browser-devices'
 import { fileBrowserConnectorCatalog } from '../../src/adapters/browser-connector-catalog'
+import { randomBytes } from 'crypto'
 
 const app = new Hono()
 app.route('/api/companies', companiesRoute)
 app.route('/api/companies/:companyId', agentBrowserRoute)
 app.route('/api/companies/:companyId', browserPlansRoute)
 app.route('/api', browserReportRoute)
+app.route('/api/companies/:companyId', browserDevicesRoute)
 
 const CO = 'bp-co'
 const BASE = `/api/companies/${CO}`
@@ -49,7 +52,11 @@ const ROLE: Record<string, string> = { 'bp-owner': 'owner', 'bp-admin': 'admin',
 const APPROVED = fileBrowserConnectorCatalog().combinations().find(r => r.status === 'approved')!
 const OP = 'reminder_step_add_template'
 const SECRET_HEADER = 'X-ACB-Browser-Execution'
+const DEVICE_HEADER = 'X-ACB-Browser-Device'
 const ts = (ms = Date.now()) => new Date(ms).toISOString()
+const newKey = () => `v1.${randomBytes(32).toString('base64url')}`
+/** Each member's PC (registered and enabled in beforeAll; agent-browser.md "This PC's registration"). The owner has none: the transition exception. */
+const PC: Record<string, string> = { 'bp-alice': newKey(), 'bp-bob': newKey() }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Json = any
@@ -57,8 +64,12 @@ async function call(user: string | null, method: string, path: string, body?: un
   currentUser.id = user
   const res = await app.request(path, {
     method,
-    // The app's build as every app request carries it: the approved row's own minimum (a build at least it).
-    headers: { ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}), ...(APPROVED.minAppVersion ? { 'X-ACB-Client-Version': APPROVED.minAppVersion } : {}), ...headers },
+    // The app's build as every app request carries it: the approved row's own minimum (a build at least it), and the
+    // member's PC key as an app with a registered PC sends it.
+    headers: {
+      ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}), ...(APPROVED.minAppVersion ? { 'X-ACB-Client-Version': APPROVED.minAppVersion } : {}),
+      ...(user && PC[user] ? { [DEVICE_HEADER]: PC[user] } : {}), ...headers,
+    },
     ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
   })
   const json: Json = await res.json().catch(() => null)
@@ -83,6 +94,11 @@ beforeAll(async () => {
   }
   const on = { mode: 'on', sites: [{ host: 'manager.linestep.net', level: 'write', assetHosts: ['d1nhtjid4lgi9y.cloudfront.net', 'profile.line-scdn.net'] }] }
   expect((await call('bp-owner', 'PUT', `${BASE}/agent-browser`, on)).status).toBe(200)
+  for (const user of Object.keys(PC)) {
+    const asked = await call(user, 'POST', `${BASE}/browser-devices`, { label: `${user} の Mac` })
+    expect(asked.status, JSON.stringify(asked.json)).toBe(201)
+    expect((await call('bp-owner', 'POST', `${BASE}/browser-devices/${asked.json.data.id}/enable`)).status).toBe(200)
+  }
 })
 
 async function plan(user: string, step: string) {
@@ -160,5 +176,57 @@ describe('「ブラウザ操作」 plans over HTTP', () => {
     // The app's report after they left: unknown is taken (records only), the state moves only as the table says.
     const late = await call(null, 'POST', '/api/browser-executions/report', { result: 'unknown' }, { [SECRET_HEADER]: claim.secret })
     expect(late.json.data).toEqual({ state: 'unknown', outcome: 'applied' })
+    // Their PC was stopped by the same removal (agent-browser.md "This PC's registration").
+    expect(db.prepare("SELECT state, revoke_reason FROM browser_devices WHERE company_id = ? AND user_id = 'bp-bob'").all(CO)).toEqual([{ state: 'revoked', revoke_reason: 'left' }])
+  })
+})
+
+describe('this PC on the old path (agent-browser.md "This PC\'s registration")', () => {
+  const grant = { connector: 'lstep', operation: OP, declarationHash: APPROVED.declarationHash, allowed: true }
+
+  it('an admin without a registered PC is refused at every gated step; the owner without the header passes (the transition exception)', async () => {
+    for (const u of ['bp-admin', 'bp-owner']) expect((await call('bp-owner', 'PUT', `${BASE}/browser-type-grants/${u}`, grant)).status).toBe(200)
+    const refused = await call('bp-admin', 'POST', `${BASE}/browser-plans`, candidate('20'))
+    expect([refused.status, refused.json.code]).toEqual([403, 'BROWSER_DEVICE_NOT_REGISTERED'])
+    expect(refused.json.error).toContain('PC')
+    const { claim } = await plan('bp-owner', '21')
+    const permit = await call('bp-owner', 'POST', `${BASE}/browser-executions/${claim.executionId}/send-permit`, undefined, { [SECRET_HEADER]: claim.secret })
+    expect(permit.status).toBe(200)
+  })
+
+  it('the plan is bound to the PC that made it; another PC of the same member only cancels; a stopped PC voids the claimed execution', async () => {
+    // A second PC of Alice's, enabled too.
+    const second = newKey()
+    const asked = await call('bp-alice', 'POST', `${BASE}/browser-devices`, { label: '2台目' }, { [DEVICE_HEADER]: second })
+    expect((await call('bp-admin', 'POST', `${BASE}/browser-devices/${asked.json.data.id}/enable`)).status).toBe(200)
+    const made = await call('bp-alice', 'POST', `${BASE}/browser-plans`, candidate('30'))
+    expect(made.status).toBe(201)
+    const id = made.json.data.id
+    const elsewhere = await call('bp-alice', 'POST', `${BASE}/browser-plans/${id}/approve`, { contentHash: made.json.data.contentHash }, { [DEVICE_HEADER]: second })
+    expect([elsewhere.status, elsewhere.json.code]).toEqual([409, 'BROWSER_DEVICE_ELSEWHERE'])
+    expect((await call('bp-alice', 'POST', `${BASE}/browser-plans/${id}/approve`, { contentHash: made.json.data.contentHash })).status).toBe(200)
+    expect((await call('bp-alice', 'POST', `${BASE}/browser-plans/${id}/claim`, undefined, { [DEVICE_HEADER]: second })).json.code).toBe('BROWSER_DEVICE_ELSEWHERE')
+    const claim = (await call('bp-alice', 'POST', `${BASE}/browser-plans/${id}/claim`)).json.data
+    // The admin stops Alice's first PC: the next permit is refused and the execution is void for good.
+    const list = await call('bp-admin', 'GET', `${BASE}/browser-devices`)
+    expect(list.headers.get('cache-control')).toBe('no-store')
+    const first = list.json.data.items.find((d: Json) => d.userId === 'bp-alice' && d.label === 'bp-alice の Mac')
+    expect((await call('bp-admin', 'POST', `${BASE}/browser-devices/${first.id}/revoke`)).json.data).toMatchObject({ state: 'revoked', revokeReason: 'admin' })
+    const permit = await call('bp-alice', 'POST', `${BASE}/browser-executions/${claim.executionId}/send-permit`, undefined, { [SECRET_HEADER]: claim.secret })
+    expect([permit.status, permit.json.code]).toEqual([403, 'BROWSER_DEVICE_REVOKED'])
+    expect(db.prepare('SELECT state, void_reason FROM browser_executions WHERE id = ?').get(claim.executionId)).toEqual({ state: 'void', void_reason: 'device' })
+    // Another plan of the stopped PC: the second PC cancels it (cancel is never gated).
+    const other = (await call('bp-alice', 'POST', `${BASE}/browser-plans`, candidate('31'), { [DEVICE_HEADER]: second })).json.data
+    expect((await call('bp-alice', 'POST', `${BASE}/browser-plans/${other.id}/cancel`, undefined, { [DEVICE_HEADER]: PC['bp-alice'] })).status).toBe(200)
+  })
+
+  it('this PC\'s state for the app: uncached, only the member\'s own, never the key', async () => {
+    const me = await call('bp-alice', 'GET', `${BASE}/browser-devices-me`)
+    expect(me.headers.get('cache-control')).toBe('no-store')
+    expect(me.json.data).toMatchObject({ state: 'revoked', revokeReason: 'admin', userId: 'bp-alice' })
+    expect(JSON.stringify(me.json)).not.toContain(PC['bp-alice'].slice(3))
+    expect((await call('bp-admin', 'GET', `${BASE}/browser-devices-me`, undefined, { [DEVICE_HEADER]: PC['bp-alice'] })).json.data).toEqual({ state: 'none' })
+    expect((await call('bp-alice', 'GET', `${BASE}/browser-devices-me`, undefined, { [DEVICE_HEADER]: 'v1.x' })).status).toBe(400)
+    expect((await call('bp-alice', 'GET', `${BASE}/browser-devices`)).status).toBe(403)
   })
 })

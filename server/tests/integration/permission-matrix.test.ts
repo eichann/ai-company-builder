@@ -135,6 +135,8 @@ interface World {
     /** A plan of an opened line of the other company's member, claimed, and its running execution (agent-browser.md "Plans of opened lines on the server"). */
     browserLinePlan: string
     browserLineExecution: string
+    /** A PC registration of the other company's member, pending (agent-browser.md "This PC's registration"). */
+    browserDevice: string
     /** A holding ticket and item of the other company's member (private-folders.md "Holding: the member's upload"). */
     holdingTicket: string
     holdingItem: string
@@ -175,6 +177,8 @@ const NO_SUCH_LINE_PLAN = `bl_${'0'.repeat(32)}`
 const NO_SUCH_LINE_EXECUTION = `bw_${'0'.repeat(32)}`
 const OTHER_LINE_PLAN = `bl_${'e'.repeat(32)}`
 const OTHER_LINE_EXECUTION = `bw_${'e'.repeat(32)}`
+const NO_SUCH_DEVICE = `bd_${'0'.repeat(32)}`
+const OTHER_DEVICE = `bd_${'e'.repeat(32)}`
 const NO_SUCH_HOLDING = '00000000-0000-4000-8000-0000000401d0'
 
 const MATRIX: Row[] = [
@@ -736,6 +740,15 @@ const MATRIX: Row[] = [
   r('POST /api/companies/:companyId/browser-shape-notices', w => ({ path: `${C(w)}/browser-shape-notices`, body: 'x' }), [400, 400, 400, 400, 404, 401]),
   r('GET /api/companies/:companyId/browser-shape-notices', w => ({ path: `${C(w)}/browser-shape-notices` }), [200, 200, 403, 403, 404, 401]),
   r('POST /api/browser-line-executions/report', () => ({ path: '/api/browser-line-executions/report', body: { index: 1, result: 'done' } }), [401, 401, 401, 401, 401, 401], 'the execution secret, never a session'),
+  r('GET /api/companies/:companyId/browser-lines-mine', w => ({ path: `${C(w)}/browser-lines-mine` }), MEMBERS),
+  // The PCs used for 「ブラウザ操作」 (agent-browser.md "This PC's registration"): any member registers, reads and withdraws
+  // their own PC (no key header → 400 for each); owners / admins list, enable and stop.
+  r('POST /api/companies/:companyId/browser-devices', w => ({ path: `${C(w)}/browser-devices`, body: { label: 'x' } }), [400, 400, 400, 400, 404, 401]),
+  r('GET /api/companies/:companyId/browser-devices-me', w => ({ path: `${C(w)}/browser-devices-me` }), [400, 400, 400, 400, 404, 401]),
+  r('DELETE /api/companies/:companyId/browser-devices-me', w => ({ path: `${C(w)}/browser-devices-me` }), [400, 400, 400, 400, 404, 401]),
+  r('GET /api/companies/:companyId/browser-devices', w => ({ path: `${C(w)}/browser-devices` }), [200, 200, 403, 403, 404, 401]),
+  r('POST /api/companies/:companyId/browser-devices/:deviceId/enable', w => ({ path: `${C(w)}/browser-devices/${NO_SUCH_DEVICE}/enable` }), [404, 404, 403, 403, 404, 401]),
+  r('POST /api/companies/:companyId/browser-devices/:deviceId/revoke', w => ({ path: `${C(w)}/browser-devices/${NO_SUCH_DEVICE}/revoke` }), [404, 404, 403, 403, 404, 401]),
   // lane C ▲
 ]
 
@@ -941,6 +954,8 @@ const CROSS: CrossRow[] = [
   x('POST /api/companies/:companyId/browser-line-executions/:executionId/permit', (w, id) => ({ path: `${C(w)}/browser-line-executions/${id}/permit`, body: { index: 1 } }), w => w.other.browserLineExecution, NO_SUCH_LINE_EXECUTION),
   x('POST /api/companies/:companyId/browser-line-executions/:executionId/confirm', (w, id) => ({ path: `${C(w)}/browser-line-executions/${id}/confirm`, body: { index: 1, result: 'done' } }), w => w.other.browserLineExecution, NO_SUCH_LINE_EXECUTION),
   x('PUT /api/companies/:companyId/browser-line-grants/:userId', (w, id) => ({ path: `${C(w)}/browser-line-grants/${id}`, body: { site: 'lstep', line: 'landing_inspect', meaningHash: `sha256:${'a'.repeat(64)}`, mechanicsHash: `sha256:${'b'.repeat(64)}`, allowed: true } }), w => w.other.member, 'pm-nobody'),
+  x('POST /api/companies/:companyId/browser-devices/:deviceId/enable', (w, id) => ({ path: `${C(w)}/browser-devices/${id}/enable` }), w => w.other.browserDevice, NO_SUCH_DEVICE),
+  x('POST /api/companies/:companyId/browser-devices/:deviceId/revoke', (w, id) => ({ path: `${C(w)}/browser-devices/${id}/revoke` }), w => w.other.browserDevice, NO_SUCH_DEVICE),
   x('PUT /api/companies/:companyId/browser-type-grants/:userId', (w, id) => ({ path: `${C(w)}/browser-type-grants/${id}`, body: { connector: 'lstep', operation: 'reminder_step_add_template', declarationHash: `sha256:${'a'.repeat(64)}`, allowed: true } }), w => w.other.member, 'pm-nobody'),
   // lane C ▲
 ]
@@ -1227,6 +1242,9 @@ async function seed(): Promise<World> {
   db.prepare(`INSERT INTO browser_execution_steps (company_id, execution_id, idx, write_kind, state, permitted_at) VALUES (?, ?, 1, 'create', 'permitted', ?), (?, ?, 2, 'change', 'pending', NULL)`)
     .run(other, OTHER_LINE_EXECUTION, expires, other, OTHER_LINE_EXECUTION)
   db.prepare("INSERT INTO browser_line_locks (company_id, lock_key, execution_id, created_at) VALUES (?, 'lock-other-line', ?, ?)").run(other, OTHER_LINE_EXECUTION, expires)
+  // A PC registration of the other company's member, pending (rows as adapters/sqlite/browser-devices.ts writes them).
+  db.prepare(`INSERT INTO browser_devices (company_id, id, user_id, key_hash, label, state, requested_at) VALUES (?, ?, ?, ?, 'other PC', 'pending', ?)`)
+    .run(other, OTHER_DEVICE, otherMember, '9'.repeat(64), expires)
   // A Skill on the other company's shelf, published (rows as adapters/sqlite/skill-shelf.ts writes them).
   db.prepare(`INSERT INTO shelf_items (id, company_id, kind, department_id, name, current_version, created_at, created_by, changed_at, changed_by)
     VALUES ('shelf-other-1', ?, 'skill', NULL, 'other-skill', ?, ?, ?, ?, ?)`).run(other, 'a'.repeat(64), expires, otherMember, expires, otherMember)
@@ -1311,6 +1329,7 @@ async function seed(): Promise<World> {
       holdingWaiting: 'holding-item-other-2',
       browserLinePlan: OTHER_LINE_PLAN,
       browserLineExecution: OTHER_LINE_EXECUTION,
+      browserDevice: OTHER_DEVICE,
 
     },
   }

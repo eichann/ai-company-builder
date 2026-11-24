@@ -59,6 +59,10 @@ const LATER_TABLES = [
   'browser_line_grants',
   'browser_shape_notices',
   'browser_shape_report_counts',
+  // agent-browser.md "This PC's registration": PC registrations, their history, each plan's PC.
+  'browser_devices',
+  'browser_device_history',
+  'browser_plan_devices',
   // private-folders.md "Access removed: holding tickets": who stopped reading which private folder.
   'holding_tickets',
   // private-folders.md "Holding: the member's upload": what members handed over with their tickets.

@@ -4,6 +4,9 @@
  * yet (6b). A person's session only — no record-token route exists — except the report, which the
  * execution's secret alone proves.
  *
+ * The steps the server gates (register, approve, claim, send-permit) also take this PC's key header
+ * (`X-ACB-Browser-Device`, agent-browser.md "This PC's registration").
+ *
  * Mounted at /api/companies/:companyId:
  *   POST /browser-plans                                   register a candidate + facts (draft)
  *   GET  /browser-plans-open                              the member's own draft / approved plans, newest first
@@ -20,6 +23,7 @@
  *   POST /browser-executions/report                       X-ACB-Browser-Execution: <secret>; { result, reason? }
  */
 import { Hono } from 'hono'
+import { BROWSER_DEVICE_HEADER } from '../../shared/core/browser-device'
 import { services } from '../composition'
 import { CLIENT_VERSION_HEADER } from '../lib/client-activity'
 import { refusal } from './respond'
@@ -32,7 +36,7 @@ export const browserPlansRoute = new Hono()
 const { browserPlans } = services
 
 browserPlansRoute.post('/browser-plans', companyMember, serviceBody, (c) => {
-  const r = browserPlans.register(c.var.member, c.var.body, c.req.header(CLIENT_VERSION_HEADER))
+  const r = browserPlans.register(c.var.member, c.var.body, c.req.header(CLIENT_VERSION_HEADER), c.req.header(BROWSER_DEVICE_HEADER))
   return r.ok ? c.json({ success: true, data: r.value }, 201) : refusal(c, r)
 })
 
@@ -50,7 +54,7 @@ browserPlansRoute.get('/browser-plans/:planId', companyMember, (c) => {
 })
 
 browserPlansRoute.post('/browser-plans/:planId/approve', companyMember, serviceBody, (c) => {
-  const r = browserPlans.approve(c.var.member, c.req.param('planId'), c.var.body, c.req.header(CLIENT_VERSION_HEADER))
+  const r = browserPlans.approve(c.var.member, c.req.param('planId'), c.var.body, c.req.header(CLIENT_VERSION_HEADER), c.req.header(BROWSER_DEVICE_HEADER))
   return r.ok ? c.json({ success: true, data: r.value }) : refusal(c, r)
 })
 
@@ -60,7 +64,7 @@ browserPlansRoute.post('/browser-plans/:planId/cancel', companyMember, (c) => {
 })
 
 browserPlansRoute.post('/browser-plans/:planId/claim', companyMember, (c) => {
-  const r = browserPlans.claim(c.var.member, c.req.param('planId'), c.req.header(CLIENT_VERSION_HEADER))
+  const r = browserPlans.claim(c.var.member, c.req.param('planId'), c.req.header(CLIENT_VERSION_HEADER), c.req.header(BROWSER_DEVICE_HEADER))
   if (!r.ok) return refusal(c, r)
   // The secret is answered this once: never stored, never cached on the way.
   c.header('Cache-Control', 'no-store')
@@ -68,7 +72,7 @@ browserPlansRoute.post('/browser-plans/:planId/claim', companyMember, (c) => {
 })
 
 browserPlansRoute.post('/browser-executions/:executionId/send-permit', companyMember, (c) => {
-  const r = browserPlans.permit(c.var.member, c.req.param('executionId'), c.req.header(BROWSER_EXECUTION_HEADER), c.req.header(CLIENT_VERSION_HEADER))
+  const r = browserPlans.permit(c.var.member, c.req.param('executionId'), c.req.header(BROWSER_EXECUTION_HEADER), c.req.header(CLIENT_VERSION_HEADER), c.req.header(BROWSER_DEVICE_HEADER))
   return r.ok ? c.json({ success: true, data: r.value }) : refusal(c, r)
 })
 

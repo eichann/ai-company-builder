@@ -34,6 +34,7 @@ import { browserLockKey, browserObjectLockKey } from '../../../shared/core/brows
 import { canonicalJson } from '../../../shared/core/fixed-content'
 import type { Member } from '../../src/services/access'
 import type { Refusal } from '../../src/services/outcome'
+import { anyPc } from '../helpers/browser-devices'
 
 const T0 = Date.parse('2026-11-25T00:00:00.000Z')
 const CO = 'co-1'
@@ -71,7 +72,7 @@ function build() {
     companyData: data, transactions: sqliteTransactions(conn), clock, monotonic, ids, tokenDigest: sha256TokenDigest,
     opened: { file: () => opened }, catalog: CATALOG, executionLookup: sqliteBrowserLineExecutionLookup(conn),
     memberships: sqliteMembershipRepository(conn), accounts: { byIds: () => new Map() },
-    browserPolicy: () => policy, aiStops: () => stops, log: { warn: () => {} },
+    browserPolicy: () => policy, aiStops: () => stops, devices: anyPc, log: { warn: () => {} },
   })
 }
 function join(companyId: string, userId: string, role: string, at = iso(T0 - 3_600_000)) {
