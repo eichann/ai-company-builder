@@ -783,11 +783,14 @@ describe('the judgement reaches the server as fixed kinds only (I6, T12)', () =>
 describe('進める / 人に聞く / 判断できなかった: one やること named by the date only (§5-1, I6, T15 / T17)', () => {
   it('due the company day it was made (使い心地のメモ #39): in 「あなたの番」, never resting in 「いつか」 with no due', async () => {
     const { occ, run } = await claimed()
+    const companyDay = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Tokyo', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date())
+    const before = companyDay()
     expect((await finish(run, { decision: 'proceed', reason: 'requested', confidence: 0.9 })).status).toBe(200)
+    const after = companyDay()
     const task = (await as(ALICE, 'GET', `/records/item/${taskOf(occ)}`)).body.data
-    const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Tokyo', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date())
-    expect(task.record.fields.due).toBe(today)
-    expect(turnTiming(task.record, today)).toBe('now')
+    // The finish's own day (either side of a midnight that passes while it runs).
+    expect([before, after]).toContain(task.record.fields.due)
+    expect(turnTiming(task.record, after)).toBe('now')
   })
 
   it('owner-only for alice, linked to the meeting, its name the date only; nothing of the judgement on it — also once she no longer reads the meeting', async () => {

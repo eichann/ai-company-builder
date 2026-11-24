@@ -17,7 +17,7 @@ test('choose, see the 案 in the 受け取る words, then send exactly what was 
   // Three lines first (使い心地のメモ #37); every line of the consent stays behind ［くわしく］.
   const summary = page.getByRole('list', { name: '見張りの案（要点）' })
   await expect(summary.getByRole('listitem')).toHaveCount(3)
-  await expect(summary).toContainText('「議事録を確認する」を、あなたが完了にしたあと')
+  await expect(summary).toContainText('あなたが担当の「議事録を確認する」が完了したあと')
   await expect(summary).toContainText('［反映する］を押すまで')
   const lines = page.getByRole('list', { name: '見張りの案', exact: true })
   await expect(lines).toHaveCount(0)

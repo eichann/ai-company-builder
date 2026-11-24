@@ -1005,6 +1005,9 @@ describe('a set watch — 「これから来る、条件に合うもの全部」
     const summary = within(dialog).getByRole('list', { name: '要点' })
     expect(within(summary).getAllByRole('listitem')).toHaveLength(3)
     expect(summary).toHaveTextContent('［反映する］を押すまで')
+    // The admin reads whose PC and meetings: the responsible person's, never 「あなた」.
+    expect(summary).toHaveTextContent('責任者の PC の AI が')
+    expect(summary).not.toHaveTextContent('あなた')
     expect(within(dialog).queryByLabelText('動く条件')).toBeNull()
     await userEvent.click(within(dialog).getByRole('button', { name: 'くわしく' }))
     const conditions = await within(dialog).findByLabelText('動く条件')

@@ -10,7 +10,7 @@ import { acceptanceLines } from '../model'
  */
 export function JobWordsList({ definition, label }: { definition: JobDefinition; label: string }) {
   const [open, setOpen] = useState(false)
-  const summary = setWatchSummaryLines(definition)
+  const summary = setWatchSummaryLines(definition, 'responsible')
   const full = <ul aria-label={label} className="space-y-1 text-body text-text">{acceptanceLines(definition).map(l => <li key={l}>{l}</li>)}</ul>
   if (summary.length === 0) return full
   return (

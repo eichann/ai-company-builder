@@ -350,7 +350,7 @@ export function JobVersionWords({ definition, members }: { definition: JobDefini
   const readSkills = setWatch ? setWatchReadSkillsText(definition) : null
   const reasons = setWatch ? setWatchReasonLabels(definition) : []
   // A set watch says three lines first and keeps every line below behind ［くわしく］ (使い心地のメモ #37: too long to read).
-  const summary = setWatchSummaryLines(definition)
+  const summary = setWatchSummaryLines(definition, 'other')
   const [open, setOpen] = useState(false)
   const full = (
     <dl className="grid grid-cols-[6rem_1fr] gap-x-3 gap-y-1.5 text-sm">

@@ -536,4 +536,9 @@ test('a 「議事録を確認する」 row carries its meeting\'s time from the 
   assert.ok(r.success)
   const at = Object.fromEntries(r.data.items.map(i => [i.id, i.meetingAt ?? null]))
   assert.deepEqual(at, { 'task-rv0001': '2026-11-24T01:00:00.000Z', 'task-rv0002': null, 'task-hw0001': null })
+  // Access to the meeting goes while the task's version stays: the next list no longer shows its time (never from a cache).
+  routes['GET /api/companies/co1/records/item/task-rv0001'] = detail(review('task-rv0001'), [{ name: 'meeting', direction: 'out' }])
+  const again = await api.list('co1')
+  assert.ok(again.success)
+  assert.equal(again.data.items.find(i => i.id === 'task-rv0001')?.meetingAt, undefined)
 })

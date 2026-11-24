@@ -1618,7 +1618,8 @@ not make jobs members' apps cannot run).
     through the link. **The judgement, its reason and the unconfirmed words are never on it** (T17): only the occurrence's (I8)
     and the PC's. **Its due is the company day it is made** (the finish's time in the occurrence's zone, a date only; 使い心地のメモ
     #39, 2026-11-25): without one a 未着手 やること rests in the list's 「いつか」 (`restingTask`), where nobody found it; with it, it is
-    「あなたの番」 that day. Test: `job-set-watch-scan.test.ts` 「due the company day it was made」.
+    「あなたの番」 that day; left 未着手, it reads 期限切れ from the next day and gets the morning's overdue notice, as any やること
+    with a due. Test: `job-set-watch-scan.test.ts` 「due the company day it was made」.
   - **見送る → no やること, the notice `job_set_declined`** to the responsible person (recordless, key
     `job_set_declined:<job>:<occurrence>`, nothing else stored). Its words — 「「<会議名>」では、AI はたたき台を作りませんでした
     （<理由の言葉>）。…」 — are built **when read** (`setDeclinedNotice` → `jobSetDeclinedOf`), only while the reader is that
@@ -1877,8 +1878,8 @@ not make jobs members' apps cannot run).
   - **Three lines first, the rest behind ［くわしく］** (使い心地のメモ #37, 2026-11-24): wherever its words are shown for consent —
     the app's 受け取る and 「見張りの案」 (`JobWordsList`), the admin's approval / 受け取る / a member's proposal (`JobVersionWords`) —
     a set watch first says `setWatchSummaryLines` (`job-words.ts`: when it runs, what it makes on the responsible person's PC,
-    that nothing leaves until ［反映する］ — true of every opened combination's grant), then ［くわしく］ opens every line as before,
-    unchanged. Other jobs show every line. Tests: `tests/ui/set-watch-add.spec.ts`, `admin/tests/jobs.test.tsx` (the approval).
+    that nothing leaves until ［反映する］ — true of every opened combination's grant; 「あなた」 to the responsible person in the
+    app, 「責任者」 to an owner / admin in the admin console), then ［くわしく］ opens every line as before, unchanged. Other jobs show every line. Tests: `tests/ui/set-watch-add.spec.ts`, `admin/tests/jobs.test.tsx` (the approval).
   - **Where set watches appear in 設定 →「定期の仕事」**: a waiting one in 「受け取りを待っています」 with its words; an accepted
     one in 「あなたの定期の仕事」 with `jobSetTriggerText` and 「次は、条件に合う会議が来たとき」 (no slot); its 見送る in
     「会議のあとの AI の判断」 — all only once the app announces 5 (before, the server answers such a job without its trigger).

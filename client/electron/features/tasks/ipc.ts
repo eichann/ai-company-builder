@@ -205,9 +205,11 @@ export function createTasksApi(deps: TasksDeps) {
   }
 
   /**
-   * Each record's まとまり (its outgoing `bundle` link) and, for a 「議事録を確認する」, its meeting's time (使い心地のメモ #40:
-   * several of one meeting title side by side) — looked up once per record version. The meeting's time comes only from the
-   * linked meeting the server answered, which it lists only while the member reads that meeting.
+   * Each record's まとまり (its outgoing `bundle` link), looked up once per record version, and, for a 「議事録を確認する」, its
+   * meeting's time (使い心地のメモ #40: several of one meeting title side by side). The meeting's time comes only from the
+   * linked meeting the server answered, which it lists only while the member reads that meeting — and access to a meeting can
+   * change without the task's version (its list was copied when it was made), so such a task is read again on every list,
+   * never answered from the cache (a few rows: one per meeting read).
    */
   async function linkedOf(companyId: string, list: RecordSummary[]): Promise<{ bundles: Record<string, { id: string; title: string }>; meetingTimes: Record<string, string> }> {
     const out: Record<string, { id: string; title: string }> = {}
@@ -218,12 +220,13 @@ export function createTasksApi(deps: TasksDeps) {
       while (next < todo.length) {
         const r = todo[next++]
         const key = `${companyId}:${r.id}@${r.version}`
-        if (!linkCache.has(key)) {
+        const review = r.fields.task_kind === 'minutes_review'
+        if (review || !linkCache.has(key)) {
           const a = await call(companyId, 'GET', `/records/item/${encodeURIComponent(r.id)}`)
-          if (a?.status !== 200) continue // not cached: asked again next time
+          if (a?.status !== 200) { linkCache.delete(key); continue } // not cached: asked again next time
           const links = (a.json?.data as RecordDetail).links
           const link = links.find(l => l.name === 'bundle' && l.direction === 'out' && l.record)
-          const meeting = r.fields.task_kind === 'minutes_review'
+          const meeting = review
             ? links.find(l => l.name === 'meeting' && l.direction === 'out' && l.record?.type === 'meeting')?.record : undefined
           const at = meeting?.fields.meeting_at
           linkCache.set(key, {
