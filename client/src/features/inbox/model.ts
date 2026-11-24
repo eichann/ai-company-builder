@@ -81,6 +81,8 @@ const STOP_NOTICES: Partial<Record<NotificationKind, StopMeaning>> = {
   job_chain_stopped: 'needsAction',
   delegate_stopped: 'needsAction',
   company_restored: 'needsAction',
+  // 「ブラウザ操作」 (agent-browser.md "The strict read's notice"): a site's shape changed; members do it by hand meanwhile.
+  browser_shape_changed: 'needsAction',
 }
 
 /**
@@ -419,10 +421,11 @@ export const countText = (n: number) => (n > 99 ? '99+' : String(n))
 /**
  * Notice kinds only owners / admins are ever written (member proposals' PR C, owner decision 2026-11-22): `job_proposal` (a
  * member's proposal arrived), `job_paused` (a job paused because its responsible person left or lost rights) and
- * `company_restored` (the company's data put back from a backup; owner decision 2026-11-22). A member's
+ * `company_restored` (the company's data put back from a backup; owner decision 2026-11-22), `browser_shape_changed` (a browser
+ * operation's site changed shape: agent-browser.md "The strict read's notice"). A member's
  * 「知らせの設定」 does not offer them; an owner / admin's does. Unknown role (offline) → not offered (the safe side).
  */
-export const ADMIN_ONLY_NOTICE_KINDS: readonly NotificationKind[] = ['job_proposal', 'job_paused', 'company_restored']
+export const ADMIN_ONLY_NOTICE_KINDS: readonly NotificationKind[] = ['job_proposal', 'job_paused', 'company_restored', 'browser_shape_changed']
 
 export function noticeKindsForRole<K extends string>(kinds: readonly K[], fullAccess: boolean | null): K[] {
   return fullAccess === true ? [...kinds] : kinds.filter(k => !(ADMIN_ONLY_NOTICE_KINDS as readonly string[]).includes(k))

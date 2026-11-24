@@ -72,7 +72,11 @@ a plugin can never draw a notice (§2-2).
   `company_restored` (「会社のデータをバックアップから戻したため、定期の仕事と AI を止めました。…」, on by default,
   recordless: written by `restorePause` after a restore to every owner / admin, key `company_restored:<at>`; shown only
   while the reader is owner / admin; opening it opens nothing; a Mac notification while unread — `deployment.md`
-  "After a restore"). **Also with records off**: `GET /me/notifications` then answers `available: false` with only
+  "After a restore"), `browser_shape_changed` (「ブラウザ操作：「…」の「…」の形が変わりました（…）。…地図の確かめが要ります」, on by
+  default, recordless: a member's app could not read a site's thing whole by its map — to every owner / admin, once per
+  company × site × map version × thing, key `browser_shape:<site>:<version>:<thing>`; built when read from the stored names
+  and counts, never a key name; shown only while the reader is an owner / admin; the inbox's amber stop row —
+  `agent-browser.md` "Plans of opened lines on the server"). **Also with records off**: `GET /me/notifications` then answers `available: false` with only
   these company notices (never a record's), and the app's watcher, seeing `/records/my-turn` 404, shows the inbox with
   those notices alone (`NoticesState.bellOnly`, no 「あなたの番」) when there is one, else nothing as before (`restore-pause.test.ts`,
   `client/tests/notifications.test.ts`),
@@ -96,7 +100,7 @@ a plugin can never draw a notice (§2-2).
   `job_proposal_returned` (「出した定期の仕事の案「…」は差し戻されました（理由：…）…」, on by default, recordless: to the proposer
   only, once per proposal, key `job_proposal_returned:<proposal>`; the reason a fixed code's words, never text; shown only to
   the proposer while it is returned — `jobs.md` "Member proposals"). The app's notice settings offer the owner /
-  admin-only kinds (`job_proposal`, `job_paused`, `company_restored`; `ADMIN_ONLY_NOTICE_KINDS`) to owners / admins only (member
+  admin-only kinds (`job_proposal`, `job_paused`, `company_restored`, `browser_shape_changed`; `ADMIN_ONLY_NOTICE_KINDS`) to owners / admins only (member
   proposals' PR C, owner decisions 2026-11-22),
   `asked`, `morning_summary`, `due_tomorrow` (below), `others` (everything else: the AI's
   「用意ができた」 / 「先に渡す」 when it is not a first hand-over, 「自分で進める」 of task v5, sent back,

@@ -100,6 +100,11 @@ export const NOTIFICATION_KINDS = [
   // were stopped; check the outside results before resuming. To owners / admins only, about no record. An app
   // released before it drops a notice with no record and only counts it as unread.
   'company_restored',
+  // 「ブラウザ操作」: a site's thing could not be read whole by its map (agent-browser.md "The strict read's notice", design
+  // memo §16-1): to every owner / admin, once per company × site × map version × thing (key
+  // `browser_shape:<site>:<version>:<thing>`), about no record; built when read from the map's names and counts — never a
+  // key name. An app released before it keeps an unknown kind as waiting for the member.
+  'browser_shape_changed',
   'others',
 ] as const
 export type NotificationKind = typeof NOTIFICATION_KINDS[number]
@@ -148,6 +153,7 @@ export const NOTIFICATION_KIND_LABELS: Record<NotificationKind, string> = {
   job_proposal: '社員から定期の仕事の案が届いた（管理者だけ）',
   job_proposal_returned: '出した定期の仕事の案が差し戻された',
   company_restored: '会社のデータをバックアップから戻したため、自動の仕事を止めた（管理者だけ）',
+  browser_shape_changed: 'ブラウザ操作のサイトの形が変わり、地図の確かめが要る（管理者だけ）',
   others: 'そのほかの動き（担当になった・差し戻された・中止されたなど）',
 }
 
@@ -192,6 +198,7 @@ export const NOTIFICATION_DEFAULTS: Record<NotificationKind, boolean> = {
   job_proposal: true,
   job_proposal_returned: true,
   company_restored: true,
+  browser_shape_changed: true,
   others: false,
 }
 
@@ -207,7 +214,7 @@ export const NOTIFICATION_DEFAULTS: Record<NotificationKind, boolean> = {
  */
 export const UNDOABLE_NOTIFICATION_KINDS: readonly NotificationKind[] = ['replied_done', 'mail_left_inbox', 'mail_archived']
 
-export const RECORDLESS_NOTIFICATION_KINDS: readonly NotificationKind[] = ['morning_summary', 'job_paused', 'job_expired', 'job_skipped', 'job_failed', 'job_chain_stopped', 'job_day_limit', 'job_set_declined', 'job_accept_needed', 'job_proposal', 'job_proposal_returned', 'company_restored']
+export const RECORDLESS_NOTIFICATION_KINDS: readonly NotificationKind[] = ['morning_summary', 'job_paused', 'job_expired', 'job_skipped', 'job_failed', 'job_chain_stopped', 'job_day_limit', 'job_set_declined', 'job_accept_needed', 'job_proposal', 'job_proposal_returned', 'company_restored', 'browser_shape_changed']
 
 /** A scheduled job's occurrence notices (jobs.md "Notices"): key `<kind>:<job id>:<occurrence id>`. */
 export const JOB_OCCURRENCE_NOTIFICATION_KINDS: readonly NotificationKind[] = ['job_expired', 'job_skipped', 'job_failed']

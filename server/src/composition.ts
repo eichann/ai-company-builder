@@ -21,7 +21,8 @@ import { sqliteAgentEventRepository, sqliteAgentEventSettingsRepository } from '
 import { sqliteAgentSandboxRepository } from './adapters/sqlite/agent-sandbox'
 import { sqliteAgentBrowserRepository } from './adapters/sqlite/agent-browser'
 import { sqliteBrowserExecutionLookup } from './adapters/sqlite/browser-plans'
-import { fileBrowserConnectorCatalog } from './adapters/browser-connector-catalog'
+import { sqliteBrowserLineExecutionLookup } from './adapters/sqlite/browser-lines'
+import { fileBrowserConnectorCatalog, fileBrowserOpenedList } from './adapters/browser-connector-catalog'
 import { sqliteAgentStopRepository } from './adapters/sqlite/agent-stops'
 import { sqliteBrokerTokenRepository, sqliteKeyBrokerRepository } from './adapters/sqlite/key-broker'
 import { sqliteTransactions } from './adapters/sqlite/transactions'
@@ -60,7 +61,9 @@ import { createAgentEventService } from './services/agent-events'
 import { createAgentSandboxService } from './services/agent-sandbox'
 import { createAgentBrowserService } from './services/agent-browser'
 import { createBrowserPlanService } from './services/browser-plans'
+import { createBrowserLineService } from './services/browser-lines'
 import type { BrowserConnectorCatalog } from './ports/browser-plans'
+import type { BrowserOpenedListSource } from './ports/browser-lines'
 import { createTaskSettingsService } from './services/task-settings'
 import { createFeatureService } from './services/features'
 import { noticeTurnedOff } from '../shared/core/features'
@@ -183,6 +186,8 @@ export interface ServiceOptions {
   pluginTrustNow?: () => number
   /** The approved browser connector combinations (default: shared/browser-connectors/approved.json). */
   browserConnectors?: BrowserConnectorCatalog
+  /** The opened list of maps and lines (default: shared/browser-connectors/opened.json). */
+  browserOpened?: BrowserOpenedListSource
 }
 
 export function createServices(conn: Database.Database, brokerCipher: BrokerCipherState = brokerCipherFromEnv(), options: ServiceOptions = {}) {
@@ -290,6 +295,15 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     catalog: options.browserConnectors ?? fileBrowserConnectorCatalog(), executionLookup: sqliteBrowserExecutionLookup(conn),
     browserPolicy: member => agentBrowser.policyFor(member), aiStops: member => agentStops.policyFor(member),
   })
+  // Plans of opened lines (agent-browser.md "Plans of opened lines on the server"): the opened list from
+  // shared/browser-connectors/opened.json, the site's host from its approved declaration.
+  const browserLines = createBrowserLineService({
+    ...shared, memberships: repos.memberships, tokenDigest: sha256TokenDigest, monotonic: systemMonotonicClock,
+    opened: options.browserOpened ?? fileBrowserOpenedList(), catalog: options.browserConnectors ?? fileBrowserConnectorCatalog(),
+    executionLookup: sqliteBrowserLineExecutionLookup(conn),
+    browserPolicy: member => agentBrowser.policyFor(member), aiStops: member => agentStops.policyFor(member),
+    noticesChanged: (companyId, userIds) => push.notify(companyId, userIds, { kind: 'notifications', version: shared.ids.newToken().slice(0, 32) }),
+  })
   const brokerTokens = createBrokerTokenService({
     ...repos, ...shared, brokerVault, keyBroker, tokenDigest: sha256TokenDigest, ttlMinutes: BROKER_TOKEN_TTL_MINUTES,
     // With several company keys, the one a plugin's connection uses (bound below).
@@ -386,6 +400,7 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
   const notifications = createNotificationService({
     ...shared,
     jobNoticeOf: (member, jobId) => jobs.noticeJob(member, jobId),
+    browserShapeNoticeOf: (member, dedupeKey) => browserLines.noticeText(member, dedupeKey),
     jobOccurrenceNoticeOf: (member, jobId, occurrenceId) => jobs.occurrenceNotice(member, jobId, occurrenceId),
     jobChainStoppedOf: (member, jobId, at) => jobs.chainStopNotice(member, jobId, at),
     jobDayLimitOf: (member, jobId) => jobs.dayLimitNotice(member, jobId),
@@ -807,6 +822,7 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
         jobs.memberLeft(companyId, userId, actorId)
         // …and their browser plans close, a claimed execution is void, their type grants go (agent-browser.md).
         browserPlans.memberLeft(companyId, userId)
+        browserLines.memberLeft(companyId, userId)
       },
       onRoleChanged: (companyId, userId, actorId) => jobs.roleChanged(companyId, userId, actorId),
     }),
@@ -881,6 +897,7 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     agentSandbox,
     agentBrowser,
     browserPlans,
+    browserLines,
     agentStops,
     agentPolicy,
     secondOpinion,

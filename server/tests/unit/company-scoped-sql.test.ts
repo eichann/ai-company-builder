@@ -192,6 +192,15 @@ const HANDLE_TABLES: Record<string, string[]> = {
   browser_execution_reports: ['adapters/sqlite/browser-plans.ts'],
   browser_target_locks: ['adapters/sqlite/browser-plans.ts'],
   browser_type_grants: ['adapters/sqlite/browser-plans.ts'],
+  // Plans of opened lines (agent-browser.md "Plans of opened lines on the server").
+  browser_line_plans: ['adapters/sqlite/browser-lines.ts'],
+  browser_line_executions: ['adapters/sqlite/browser-lines.ts'],
+  browser_execution_steps: ['adapters/sqlite/browser-lines.ts'],
+  browser_line_reports: ['adapters/sqlite/browser-lines.ts'],
+  browser_line_locks: ['adapters/sqlite/browser-lines.ts'],
+  browser_line_grants: ['adapters/sqlite/browser-lines.ts'],
+  browser_shape_notices: ['adapters/sqlite/browser-lines.ts'],
+  browser_shape_report_counts: ['adapters/sqlite/browser-lines.ts'],
   // lane C ▲
 }
 /** Handle repository factories (each bound to one company): only the handle source builds them. */
@@ -214,6 +223,7 @@ const HANDLE_FACTORIES = [
   'sqlitePluginStepRepository',
   'sqlitePluginRoleRepository',
   'sqliteBrowserPlanRepository',
+  'sqliteBrowserLineRepository',
   // lane C ▲
 ]
 const HANDLE_SOURCE = 'adapters/sqlite/company-data.ts'
@@ -231,6 +241,9 @@ const UNSCOPED: Record<string, Array<[sql: string, reason: string]>> = {
   ],
   'adapters/sqlite/browser-plans.ts': [
     ['SELECT company_id, id FROM browser_executions WHERE secret_hash = ?', 'a browser execution\'s report brings only its secret: this lookup by the secret\'s hash is what finds the company (control plane)'],
+  ],
+  'adapters/sqlite/browser-lines.ts': [
+    ['SELECT company_id, id FROM browser_line_executions WHERE secret_hash = ?', 'a write of an opened line reports with its secret only: this lookup by the secret\'s hash is what finds the company (control plane)'],
   ],
   'adapters/sqlite/google-drive.ts': [
     ['SELECT company_id FROM google_drive_pick_tickets WHERE ticket_hash = ?', BY_TOKEN],

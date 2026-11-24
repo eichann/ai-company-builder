@@ -291,7 +291,7 @@ test('only what the chosen chip shows counts as seen: あなた待ち hidden by 
 // Member proposals' PR C (owner decision 2026-11-22): a member's 「知らせの設定」 never offers the owner / admin-only kinds.
 test('知らせの設定: the owner / admin-only kinds are offered to owners / admins only, never when the role is not known', async () => {
   const { noticeKindsForRole } = await import('./model')
-  const kinds = ['asked', 'job_paused', 'job_proposal', 'job_proposal_returned', 'company_restored'] as const
+  const kinds = ['asked', 'job_paused', 'job_proposal', 'job_proposal_returned', 'company_restored', 'browser_shape_changed'] as const
   assert.deepEqual(noticeKindsForRole(kinds, false), ['asked', 'job_proposal_returned'])
   assert.deepEqual(noticeKindsForRole(kinds, null), ['asked', 'job_proposal_returned'])
   assert.deepEqual(noticeKindsForRole(kinds, true), [...kinds])

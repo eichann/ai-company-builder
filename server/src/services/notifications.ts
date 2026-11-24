@@ -104,6 +104,11 @@ export interface NotificationServiceDeps {
    * words, while the reader is the proposer and it is returned, else null. Absent → never shown.
    */
   jobProposalReturnedOf?: (member: Member, proposalId: string) => { name: string; reason: string } | null
+  /**
+   * 「ブラウザ操作」's site changed shape (`browser_shape_changed`, agent-browser.md "The strict read's notice"): the text
+   * built from the stored names and counts while the member is an owner / admin, else null (not shown). Absent → never shown.
+   */
+  browserShapeNoticeOf?: (member: Member, dedupeKey: string | null) => string | null
   /** The member's role in the company, or null (a notice goes only to someone who reads the record). */
   roleOf: (companyId: string, userId: string) => string | null
   /** The company's time zone for a due without one (records.md "Due with a time"); Japan by default. */
@@ -978,6 +983,7 @@ export function createNotificationService(deps: NotificationServiceDeps) {
       const proposalNotice = (r: NotificationRow) => deps.jobProposalNoticeOf?.(member, (r.dedupeKey ?? '').split(':')[1] ?? '') ?? null
       // Its return, to the proposer: `job_proposal_returned:<proposal id>`.
       const returnedNotice = (r: NotificationRow) => deps.jobProposalReturnedOf?.(member, (r.dedupeKey ?? '').split(':')[1] ?? '') ?? null
+      const shapeNotice = (r: NotificationRow) => deps.browserShapeNoticeOf?.(member, r.dedupeKey) ?? null
       const jobOccurrenceKinds = new Set<string>(JOB_OCCURRENCE_NOTIFICATION_KINDS)
       // An event job's stopped chain: `job_chain_stopped:<job id>:<at>` (the time has `:` in it: the rest of the key).
       const chainStopped = (r: NotificationRow) => {
@@ -1009,6 +1015,7 @@ export function createNotificationService(deps: NotificationServiceDeps) {
         if (r.kind === 'job_accept_needed') return r.recordId === '' && acceptNotice(r) !== null
         if (r.kind === 'job_proposal') return r.recordId === '' && proposalNotice(r) !== null
         if (r.kind === 'job_proposal_returned') return r.recordId === '' && returnedNotice(r) !== null
+        if (r.kind === 'browser_shape_changed') return r.recordId === '' && shapeNotice(r) !== null
         // After a restore (deployment.md): only while the member is an owner / admin (they alone can resume).
         if (r.kind === 'company_restored') return r.recordId === '' && hasFullAccess(member.role)
         if (jobOccurrenceKinds.has(r.kind)) return r.recordId === '' && occurrenceNotice(r) !== null
@@ -1084,6 +1091,9 @@ export function createNotificationService(deps: NotificationServiceDeps) {
           const job = proposalNotice(r) as { name: string }
           const text = `${personText(r.actorId, names)}から定期の仕事の案「${job.name}」が届いています。管理画面の「定期の仕事」で確かめてください`
           return { id: r.id, kind: r.kind, recordId: '', recordType: '', recordTitle: '', version: 0, text, createdAt: r.createdAt, read }
+        }
+        if (r.kind === 'browser_shape_changed') {
+          return { id: r.id, kind: r.kind, recordId: '', recordType: '', recordTitle: '', version: 0, text: shapeNotice(r) as string, createdAt: r.createdAt, read }
         }
         if (r.kind === 'job_proposal_returned') {
           const p = returnedNotice(r) as { name: string; reason: string }

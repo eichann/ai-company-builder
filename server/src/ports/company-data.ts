@@ -57,6 +57,7 @@ import type { InboxRepository } from './inbox'
 import type { PluginStepRepository } from './plugin-steps'
 import type { PluginRoleRepository } from './plugin-roles'
 import type { BrowserPlanRepository } from './browser-plans'
+import type { BrowserLineRepository } from './browser-lines'
 // lane C ▲
 export interface CompanyData {
   /** The company this handle is limited to. */
@@ -120,6 +121,8 @@ export interface CompanyData {
   readonly pluginRoles: PluginRoleRepository
   /** 「ブラウザ操作」 plans, executions, reports, target locks, type grants (ports/browser-plans.ts, agent-browser.md). */
   readonly browserPlans: BrowserPlanRepository
+  /** Plans of opened lines, write executions and one row per write, reports, locks, per-line grants, shape notices (ports/browser-lines.ts, agent-browser.md). */
+  readonly browserLines: BrowserLineRepository
   // lane C ▲
   /** Every row of the company, table by table (the per-company export, src/cli/company-archive.ts). */
   readonly archive: CompanyRowsExport

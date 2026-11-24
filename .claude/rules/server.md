@@ -228,7 +228,7 @@ construction, not by remembering a check (owner plan 0.13–0.14).
   Handle repositories are built only by `company-data.ts`.
 - The control plane outside handles: the companies registry, memberships, accounts, and lookups
   that find the company — a browser execution by its secret's hash (`BrowserExecutionLookup`, the
-  report: `agent-browser.md`), an invitation by token (`InvitationTokenLookup`:
+  report: `agent-browser.md`; an opened line's write execution likewise, `BrowserLineExecutionLookup`), an invitation by token (`InvitationTokenLookup`:
   `findByToken`, `claimForSignup`, which returns the company; everything after uses that
   company's handle) and a key-broker token by hash. A member's holding tickets are found by their own user id across companies
   (`HoldingTicketLookup`: a person who left the company has no membership to find it by; `private-folders.md` "Holding:
@@ -312,6 +312,13 @@ GET  /api/config                                  setup state (no auth)
                               GET /browser-executions-waiting, GET /browser-type-grants,
                               PUT /browser-type-grants/:userId (owner/admin)  browser-plans.ts
                                                                 (plans: agent-browser.md "Plans, executions, permits and locks")
+                              POST /browser-line-plans, GET /browser-line-plans/:planId,
+                              POST /browser-line-plans/:planId/result | approve | cancel | claim,
+                              POST /browser-line-executions/:executionId/permit | confirm,
+                              GET|PUT /browser-line-grants(/:userId) (owner/admin),
+                              POST /browser-shape-notices, GET /browser-shape-notices (owner/admin)
+                                                                             browser-lines.ts
+                                                                (opened lines: agent-browser.md "Plans of opened lines on the server")
                               GET|PUT /second-opinion                         second-opinion.ts
                                                                 (もう一方の AI に聞く: chat-and-agents.md)
                               GET /security-alerts, PUT /security-alerts/settings (owner/admin)
@@ -403,6 +410,8 @@ GET  /api/config                                  setup state (no auth)
                                                                 (company map: records.md)
 /api                          POST /browser-executions/report — a browser execution's report; its
                               secret (header) instead of a session            browser-plans.ts
+                              POST /browser-line-executions/report — a write of an opened line, the same
+                              way                                             browser-lines.ts
 /api/broker                   GET|POST|PUT|PATCH|DELETE /:service/* — the key broker's relay
                               (token instead of a session; key-broker.md)      broker-relay.ts
 /api/git                      GET /repos/:companyId → { companyId, httpsUrl }  git.ts

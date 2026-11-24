@@ -341,6 +341,21 @@ proposals' `ai_jobs` rows as written; back here the withdrawn one stays withdraw
 one answers its first result and adds no job or notice, and it is still approved once.
 The older fixture test (`job-rollback-floor.test.ts` F11 on `stage4b1-shaped-jobs.sql`) stays as the floor's own.
 
+### Browser operation's plans of writes (generalization PR 4)
+
+**Before the first build that makes plans of opened lines with writes (PR 5 or later, once a write line is approved),
+the build of `feat/browser-gen-4-server` must be in production; after such a build has run, never roll production back
+below it** (owner decision on #813, design memo §15 C13). Why: that build leaves write executions (`running`, `unknown`,
+`partial`), one row per write, their reports and the new path's locks (`agent-browser.md` "Plans of opened lines on the
+server"). A build before PR 4 knows none of these tables: its old-path claim would not see the new path's locks (two
+writes on one object), and nobody could report, confirm or settle those executions. PR 4 serves every such row (no
+permit without its line, reports and confirms settle them, locks held until final) and freezes a plan shape it does not
+know (`BROWSER_LINE_PLAN_SHAPES`). Guard: `server/tests/unit/browser-lines.test.ts` 「the rollback floor」 (rows a writing
+build leaves, served by a build without its line; a frozen shape). The jobs' cross-build check above pins its own floor
+commit; the writing PR adds its rows to `server/tests/cross-build/` against this build when it moves that pin (owner's
+call). Rolling back to a build between PR 4 and the writing one is fine; before PR 4 is fine only while no plan of
+writes was ever made (the new tables are additive and unread there).
+
 ### The previous floor (stage 4-0.1)
 
 **Once event-triggered jobs (stage 4a) are in production, never roll production back to a version older than
