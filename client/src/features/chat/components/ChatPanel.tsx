@@ -140,13 +140,13 @@ function CompanyChatPanel({ userId, departmentPath, activeDepartment, slashComma
     })
   }
   // 「相談する」 on a record: the member's most recent consultation about it, else a new one with it as the main topic.
-  useCommandHandler('chat.consultAbout', async ({ recordId, title, fresh, purpose, madeAt }) => {
+  useCommandHandler('chat.consultAbout', async ({ recordId, title, fresh, purpose, madeAt, detail }) => {
     // A purpose (［催促の下書きを作る］, 「この作業をする」) always starts its own consultation.
     const existing = fresh || purpose ? null : consultationAbout(companyId ? await getChatSessionSummaries(companyId).catch(() => []) : [], recordId)
     if (existing) { openOrFocus(existing); return }
     setInputRequest({
       kind: 'newConsultation', title: purpose ? taskConsultPurposeTitle(title, purpose) : taskConsultTitle(title), topicRecordId: recordId,
-      message: taskConsultFirstMessage({ id: recordId, title, ...(madeAt ? { madeAt } : {}) }, agentCan(authMode, 'recordsMcp'), purpose),
+      message: taskConsultFirstMessage({ id: recordId, title, ...(madeAt ? { madeAt } : {}), ...(detail && purpose === 'work' ? { detail } : {}) }, agentCan(authMode, 'recordsMcp'), purpose),
       instruction: { kind: 'task', recordId, title },
       ...(purpose === 'work' ? { onSent: ({ tabId, conversationId, messageId }: { tabId: string; conversationId: string; messageId: string }) => closeWhenWorkDone(recordId, tabId, conversationId, messageId) } : {}),
     })

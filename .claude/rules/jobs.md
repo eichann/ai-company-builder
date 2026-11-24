@@ -14,6 +14,10 @@ paths:
   - "admin/tests/jobs.test.tsx"
   - "client/electron/features/jobs/**"
   - "client/src/features/jobs/**"
+  - "client/src/features/after-meeting/**"
+  - "client/electron/features/after-meeting/**"
+  - "client/shared/after-meeting.ts"
+  - "client/tests/after-meeting*"
   - "client/shared/jobs.ts"
   - "client/tests/jobs-ipc.test.ts"
   - "server/src/services/job-runs.ts"
@@ -1812,6 +1816,65 @@ runs it** ("The app runs it" below; no screen announces schema 5 yet — that, a
   - Tests: `client/tests/jobs-set-watch-app.test.ts`, `client/tests/task-consult-work.test.ts`,
     `src/features/jobs/model.test.ts`, `src/features/chat/aiTurns.test.ts` (「この作業をする」), `tests/ui/job-task-panel.spec.ts`
     (`task-card-ui.html?setwatch=proceed|gate|none`, `&refuse=1`). Mutation check: see the PR.
+- **The 4b-4 screens (PR6-A, 「会議のあと」; owner memo 「4b-4 挟む部分」 H-9 A / H-10 / S3–S5 / S11, OD1–OD7, N1, E9)**. **Built to be
+  thrown away**: no server change but one 「使う機能」 switch, no bridge operation, no stored contract outside this PC.
+  - **The switch**: `afterMeeting` in `shared/core/features.ts`, **off by default** (`DEFAULT_FEATURES`; `featuresFrom` reads a
+    stored `true`); owners / admins turn it on in the admin console's 「使う機能」. Off → `AfterMeetingPart` draws nothing and
+    reads nothing (`enabled`). A server before this build refuses `PUT /features { feature: 'afterMeeting' }` (unknown id):
+    deploy the server first.
+  - **Where**: AppShell's `renderJobPart` (a job's やること, `task-<32 hex>`) draws `src/features/after-meeting/entry.tsx` under
+    PR6's `JobTaskPanel`. A やること whose title names 定例レポート (`isWeeklyReportTask`) gets the weekly buttons; any other gets the
+    update proposal card when this PC holds its run (`afterMeeting:read` finds none → nothing).
+  - **What it reads** (main, `electron/features/after-meeting/ipc.ts`, the company folder through `AllowedRoots`): the newest PC
+    record of the occurrence (`<userData>/job-set-runs/<company>/<occurrence>/`, PR5) naming a run folder
+    `<place>/.personal/<folder>/<run>` (exactly four plain segments), then in that folder — by its real location inside the
+    company folder's, never through a link — `更新案.json` (`readProposalFile`: version 1 — another version is said as such —,
+    ≤ 20 items, each key once) and `result.json` (`readResultFile`, written by the apply consultation's AI: each entry taken alone,
+    ids only in their plain shapes); and 確度's choices from `GET /records/types` (a choice field labelled 確度; none → typed).
+  - **The card** (`components/UpdateProposalCard.tsx`): each item editable (確度 from those choices, 金額 a number, 計上月 months
+    with amounts, 商談の記録 a text; 「直しました」 and the AI's value beside), ticked (all at first), ［項目を足す］ (HubSpot's fixed
+    items or a coefficient sheet line; never the same deal's item twice), and **what is shared**: the AI's reason on at first,
+    **the minutes' quote off at first** (F #1). ［反映する］ opens **the last check** (exactly what goes out), then one press:
+    main records the press (`afterMeeting:note { kind: 'apply', id, keys }`) and only then `chat.consultAbout { purpose: 'work',
+    detail }` starts **one** consultation whose first message (`applyAsk`) carries only the ticked items with the member's values,
+    the reason / quote only where chosen, the minutes' `docVersion` to compare first (T7: 「議事録が直されています」 is said by the
+    consultation), HubSpot through the business plugin's operations (担当 checked with `refresh_deal`: 担当が違う), the coefficient
+    sheet through the pinned Skill `anken-sync-auto`, and the results to write to `result.json` with the press id. **What the AI
+    may write is not narrowed by the server** (E3, accepted): the plugin's gate, approvals and the relay decide as for any
+    consultation of the member. The consultation closes by itself as PR6's 「この作業をする」.
+  - **Never twice** (`shared/after-meeting.ts` `itemStatus` / `refusedKeys`, asked by main inside a per-occurrence queue): an item
+    handed to a press and not answered by a result carrying **that press's id** is 「反映中」 for `APPLY_PENDING_MS` (30 min), then
+    「途中で止まりました」 (offered again: ［残りを反映する］); written (済み), waiting for an approval or for another assignee is never
+    handed on again; one item twice in a press, a press id used before, or two presses at once → one recorded, the other
+    `ALREADY`. The mark lives in `<userData>/after-meeting/<company>/<occurrence>.json` (the app's data, never the company folder).
+  - **Results** per item (✔ / ✖ / 「〇〇さんの承認待ち」 with ［開く］ = `record.open` of the approval id — the approval card is the
+    server's —, 「この取引の担当は〇〇さんです」); read again every 15 s while a press waits. **［この項目を元に戻す］** (HubSpot) is the
+    member's own `pluginOperations:undo` of the operation id the result names: the server takes it back only while the written
+    value is still there (`CHANGED_OUTSIDE` otherwise). **［係数表を元に戻す］** (only items written with the value before kept) is a
+    press of kind `undo`: its consultation writes the value before back only where the written value is still there and tells the
+    rows added (never deleted: OD3).
+  - **Notes**: 「AI はこの案に迷いました」 below `SET_WATCH_UNSURE_BELOW`; 「N日前に作られ、まだ反映していません」 after 3 days with
+    nothing pressed (S11 #7: on this PC, when the card is opened — not a notice); 「反映していない更新案が N 件あります」 (C12);
+    offline → no press (F5).
+  - **The draft's buttons** (proceed / ask): ［作り直す］ with a hint (a new folder beside the old, `redoDraftAsk`), ［共有に出す］ (the
+    consultation asks who sees it first), ［いらない］ (folds them on this PC; no correction recorded).
+  - **The weekly report** (`components/WeeklyReportPart.tsx`, the Friday やること; its work starts with PR6's 「この作業をする」, week
+    fixed): ［今週は作らない］ (asks, then the card's own 完了: OD5), ［MIN の判断を直す］ (W7), ［作り直す］ (asks first that this week's
+    section be deleted by hand: E9).
+  - **How to remove it** (`client/tests/after-meeting-removable.test.ts` fails on any other import or mention): delete
+    `client/src/features/after-meeting/`, `client/electron/features/after-meeting/`, `client/shared/after-meeting.ts`,
+    `client/tests/after-meeting*.{ts,tsx,html}`, `client/tests/ui/after-meeting.spec.ts`; then the lines naming it in
+    `src/app/AppShell.tsx` (the import and `<AfterMeetingPart …/>`), `shared/ipc-contract.ts` (import, two channels, two methods),
+    `electron/preload.ts` (import, two methods), `electron/main.ts` (import, register), `tests/ipc-path-guard.test.ts` (two rows);
+    regenerate `ipc-inventory.txt`; optionally `afterMeeting` in `shared/core/features.ts` (a stored value of an unknown id is
+    ignored) and `chat.consultAbout`'s `detail`; drop this section and the `paths:` above. The files on members' PCs stay.
+  - Tests: `src/features/after-meeting/model.test.ts` (only the ticked items and the member's values; reason / quote only when
+    chosen; never twice; an earlier press's result answers no later one; stopped after the wait; words; notes), `client/tests/
+    after-meeting.test.ts` (main: the run's own folder only — `..`, a link out, a root outside —, one press of two at once, an item
+    twice in a press, undo only with the value before, files read as data), `tests/after-meeting-removable.test.ts`,
+    `tests/task-consult-work.test.ts` (`detail` with 「この作業をする」 only), `server/tests/unit/features.test.ts` (off by default),
+    `tests/ui/after-meeting.spec.ts` (`after-meeting-ui.html`: off draws and reads nothing; the last check and one press; the quote
+    only when ticked; an approval's ［開く］; the weekly ［作り直す］ asks first). Mutation check: see the PR.
 
 ## Member proposals (「AIへの相談」から定期の仕事, PR A: the server; owner memo 2026-11-22 第1〜5版, decisions Q1–Q4)
 

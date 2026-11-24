@@ -87,6 +87,8 @@ const GUARDED: Record<string, { args: unknown[]; paths: number[]; fromChatWindow
   'skills:toggleNurturing': { args: [IN_FILE, true], paths: [0] },
   'tools:start': { args: [IN, 'dev'], paths: [0] },
   'chatWindow:openFile': { args: [IN_FILE], paths: [0], fromChatWindow: true },
+  'afterMeeting:read': { args: ['c1', IN, `occ.${'a'.repeat(32)}`], paths: [1] },
+  'afterMeeting:note': { args: ['c1', IN, `occ.${'a'.repeat(32)}`, { kind: 'draft-dismissed' }], paths: [1] },
   // Lanes (ipc-and-main-process.md "Lane markers"): add only right under your lane's ▼.
   // lane A ▼
   // lane A ▲

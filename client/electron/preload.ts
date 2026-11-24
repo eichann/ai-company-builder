@@ -19,6 +19,7 @@ import type { GoogleFeature, GoogleRelayService } from '../shared/google'
 import type { MailAwaitReply, MailDraftEdit } from '../shared/outbound-mail'
 import type { AbsenceAddInput } from '../shared/absences'
 import type { RecordsTableQuery } from '../shared/records-table'
+import type { AfterMeetingChange } from '../shared/after-meeting'
 import type { DocViewBounds } from '../shared/doc-frame'
 import type { WorkSwitch } from '../shared/work-switches'
 import type { ViewersQuery } from '../shared/viewers'
@@ -253,6 +254,8 @@ const api: ElectronAPI = {
   getRecordCard: (companyId: string, recordId: string) => invoke('recordViews:card', companyId, recordId),
   getConsultationTopics: (companyId: string, recordIds: string[]) => invoke('recordViews:topics', companyId, recordIds),
   getRecordsTablePage: (companyId: string, query: RecordsTableQuery) => invoke('recordsTable:page', companyId, query),
+  readAfterMeeting: (companyId: string, rootPath: string, occurrenceId: string) => invoke('afterMeeting:read', companyId, rootPath, occurrenceId),
+  noteAfterMeeting: (companyId: string, rootPath: string, occurrenceId: string, change: AfterMeetingChange) => invoke('afterMeeting:note', companyId, rootPath, occurrenceId, change),
   getRecordsForFile: (companyId: string, companyPath: string) => invoke('recordViews:forFile', companyId, companyPath),
   getOutboundMail: (companyId: string, messageId: string) => invoke('outboundMail:get', companyId, messageId),
   getOutboundMailRecipients: (companyId: string, messageId: string) => invoke('outboundMail:recipients', companyId, messageId),

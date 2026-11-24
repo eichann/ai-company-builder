@@ -195,7 +195,7 @@ describe('the company\'s features (使う機能)', () => {
   it('every member reads them (all on); only owners and admins change one; 受信を読む is off for everyone while the inbox is, and back after', async () => {
     const read = await call('ts-member', 'GET', `${BASE}/features`)
     expect(read.status).toBe(200)
-    expect(read.json.data.features).toEqual({ taskList: true, meetings: true, inbox: true, decisions: true, projects: true })
+    expect(read.json.data.features).toEqual({ taskList: true, meetings: true, inbox: true, decisions: true, projects: true, afterMeeting: false })
     expect(read.json.data.canEdit).toBe(false)
     expect((await call('ts-member', 'PUT', `${BASE}/features`, { feature: 'inbox', on: false })).status).toBe(403)
     expect((await call('ts-manager', 'PUT', `${BASE}/features`, { feature: 'inbox', on: false })).status).toBe(403)

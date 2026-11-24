@@ -28,3 +28,12 @@ test('it starts the work, names the task by id only, keeps to the linked meeting
   // Without a known time it still says the week is fixed, never "this week".
   assert.match(taskConsultFirstMessage({ id: TASK.id, title: TASK.title }, false, 'work'), /作られた日で決まっています/)
 })
+
+test('what the member chose on the やること\'s screen (「会議のあと」, PR6-A) goes with 「この作業をする」 only, after its rules', () => {
+  const detail = '反映する項目（JSON）：[{"項目":"確度"}]'
+  const work = taskConsultFirstMessage({ ...TASK, detail }, true, 'work')
+  assert.ok(work.indexOf(detail) > work.indexOf('今日の週ではありません'), 'the week and meeting rules still come first')
+  assert.match(work, /ここにないことはしないでください/)
+  assert.ok(!taskConsultFirstMessage({ ...TASK, detail }, true).includes(detail), 'an ordinary consultation never carries it')
+  assert.ok(!taskConsultFirstMessage({ ...TASK, detail }, true, 'nudge').includes(detail))
+})

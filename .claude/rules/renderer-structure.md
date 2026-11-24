@@ -42,7 +42,7 @@ the task list tab, `tasks-ui.md`),
 panel's one list and the title bar's ［受け箱］ since I2, `notifications.md` "The inbox"), `absences` (the settings'
 「不在と代わりの人」, shown by `settings`; `records.md` "Absence and the delegate"), `jobs` (the settings'
 「定期の仕事」: the member's scheduled jobs and 「受け取る」, `jobs.md` "The screens"), `records-table` (「記録の一覧」, the
-middle's table of records; reached only through its `entry.tsx`, `tasks-ui.md` "The records table (B4)"), `browser-plans` (「ブラウザ操作」's approval card,
+middle's table of records; reached only through its `entry.tsx`, `tasks-ui.md` "The records table (B4)"), `after-meeting` (4b-4's update proposal card and weekly buttons under a job's やること, behind the company switch `afterMeeting`; reached only through its `entry.tsx`, `jobs.md` "The 4b-4 screens (PR6-A)"), `browser-plans` (「ブラウザ操作」's approval card,
 opened by plan id from the chat and the inbox, `agent-browser.md`). Only create what you need; add a feature
 folder when the code has no home among these.
 

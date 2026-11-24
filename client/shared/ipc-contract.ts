@@ -48,6 +48,7 @@ import type { InviteSet, MeetingArrivalsResult, MeetingBundleQuestionResult, Mee
 import type { NoticesActionResult, NoticesState } from './notifications-app'
 import type { FindHomeResult, FindResult, MakePrivatePlanResult, RecordCardResult, RecordListResult } from './record-views'
 import type { RecordsTablePage, RecordsTableQuery } from './records-table'
+import type { AfterMeetingChange, AfterMeetingNoteResult, AfterMeetingRead } from './after-meeting'
 import type { ConsultationTopicsResult } from './consultation-topics'
 import type { CalendarTodayOptions, CalendarTodayResult } from './calendar'
 import type { ArchiveCursor, ArchivedTasksResult, BundleChoicesResult, BundleCreateInput, BundleKindsAnswer, RecordLinkInput, TaskActInput, TaskCreateInput, TaskDriveChoice, TaskDriveLinkOptions, TaskDriveLinkResult, TaskListOptions, TaskListResult, TaskProposalsResult, TaskWriteResult, TypedFileTarget } from './tasks'
@@ -736,6 +737,9 @@ export interface IpcInvokeChannels {
   'recordViews:topics': { args: [companyId: string, recordIds: string[]]; result: ConsultationTopicsResult }
   /** 「記録の一覧」: one page of one kind (records-table.ts; the server answers only what the member reads). */
   'recordsTable:page': { args: [companyId: string, query: RecordsTableQuery]; result: RecordsTablePage }
+  /** 「会議のあと」 (4b-4 PR6-A, after-meeting.ts): the run's files on this PC and the card's own mark. */
+  'afterMeeting:read': { args: [companyId: string, rootPath: string, occurrenceId: string]; result: AfterMeetingRead }
+  'afterMeeting:note': { args: [companyId: string, rootPath: string, occurrenceId: string, change: AfterMeetingChange]; result: AfterMeetingNoteResult }
   // The chat's mail card (outbound-mail.md): the person's own actions, with the session in main.
   'outboundMail:get': { args: [companyId: string, messageId: string]; result: OutboundMailResult }
   'outboundMail:recipients': { args: [companyId: string, messageId: string]; result: OutboundMailResult }
@@ -1255,6 +1259,8 @@ export interface ElectronAPI {
   getRecordsForFile: Invoke<'recordViews:forFile'>
   getConsultationTopics: Invoke<'recordViews:topics'>
   getRecordsTablePage: Invoke<'recordsTable:page'>
+  readAfterMeeting: Invoke<'afterMeeting:read'>
+  noteAfterMeeting: Invoke<'afterMeeting:note'>
   getOutboundMail: Invoke<'outboundMail:get'>
   getOutboundMailRecipients: Invoke<'outboundMail:recipients'>
   updateOutboundMail: Invoke<'outboundMail:update'>

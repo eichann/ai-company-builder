@@ -95,7 +95,7 @@ export const groups: MemberGroupsView = { groups: [] }
 
 export const recordSettings: RecordSettings = { enabled: true, updatedAt: SET_UP }
 
-export const features: FeaturesView = { features: { taskList: true, meetings: true, inbox: true, decisions: true, projects: true }, canEdit: true, updatedAt: null, updatedBy: null, updatedByName: null }
+export const features: FeaturesView = { features: { taskList: true, meetings: true, inbox: true, decisions: true, projects: true, afterMeeting: false }, canEdit: true, updatedAt: null, updatedBy: null, updatedByName: null }
 
 export const taskSettings: TaskSettingsView = { settings: defaultTaskSettings(), canEdit: true, updatedAt: null, updatedBy: null, updatedByName: null }
 
@@ -285,7 +285,7 @@ export const shelfRequest: ShelfRequestView = {
 // ── 8節 仕事の進め方: 検証A社's first month ────────────────────────────────────
 /** Only 「会議と議事録」 and 「プロジェクト」 on. */
 export const firstMonthFeatures: FeaturesView = {
-  ...features, features: { taskList: false, meetings: true, inbox: false, decisions: false, projects: true },
+  ...features, features: { taskList: false, meetings: true, inbox: false, decisions: false, projects: true, afterMeeting: false },
   updatedAt: '2026-11-06T01:00:00.000Z', updatedBy: by.userId, updatedByName: by.name,
 }
 /** 案件 as the name of what bundles tasks, and 10 automatic runs a person a day. */
