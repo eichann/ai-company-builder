@@ -1,11 +1,13 @@
+// Kept whole (~360 lines): every rule of what one press hands on — items, words shared, the 案件 chosen — changes together.
 // 「会議のあと」 (4b-4 PR6-A): the card's pure rules — the items the member edits, what an apply hands to the consultation
 // (only the items ticked, only what the member chose to share), the words of each item's state, and the weekly report's asks.
 // Why a consultation does the writing: the plugin's operations, the approvals and the coefficient sheet's scripts are the
 // member's own consultation's (owner memo 「4b-4 挟む部分」 §A / H-9 A); this screen only chooses and asks.
 import {
   itemKey, mayApply, mayUndoSheet, UNAPPLIED_NOTE_AFTER_MS, AFTER_MEETING_RESULT_FILE, AFTER_MEETING_RESULT_VERSION,
-  type ApplyEntry, type HandedItem, type ItemStatus, type SetUpdateItem, type SetUpdateValue, type UpdateTarget,
+  type ApplyEntry, type DealChoice, type HandedItem, type ItemStatus, type SetUpdateItem, type SetUpdateValue, type UpdateTarget,
 } from '../../../shared/after-meeting'
+import { outsideTitle, OUTSIDE_TITLE_NOTE } from '../../../../shared/core/outside-text'
 import { SET_WATCH_CLOSE_DATE, SET_WATCH_HUBSPOT_ITEMS, isDayValue } from '../../../shared/ai-turn-steps/set-watch'
 import { SET_WATCH_UNSURE_BELOW } from '../../../../shared/core/job-words'
 
@@ -33,7 +35,10 @@ export interface DraftItem {
   proposed: SetUpdateValue | null
   /** Ticked: handed to the apply (all are at first, C2). */
   on: boolean
-  /** Share the AI's reason with HubSpot / the approval (on at first) and the minutes' quote (off at first: F #1). */
+  /**
+   * Share the AI's reason with HubSpot / the approval (on at first) and the minutes' quote (off at first: F #1). A coefficient
+   * sheet item has neither to share (no HubSpot, no approval: owner FB #41), so it never hands them on.
+   */
   shareReason: boolean
   shareQuote: boolean
 }
@@ -125,16 +130,82 @@ export function newPressId(kind: 'apply' | 'undo', random: (bytes: Uint8Array) =
   return `${kind === 'apply' ? 'a' : 'u'}-${[...random(new Uint8Array(8))].map(b => b.toString(16).padStart(2, '0')).join('')}`
 }
 
+/** Whether an item offers 「理由を渡す」 / 「引用も渡す」: only HubSpot's go anywhere (its note, an approval request). */
+export function sharesWords(d: Pick<DraftItem, '書き先'>): boolean {
+  return d.書き先 === 'hubspot'
+}
+
 /**
  * What one item hands on: target, deal, item and value always; the AI's reason only when the member shares it; the minutes'
- * quote only when the member chose it (off at first). Nothing else of the file goes into the consultation.
+ * quote only when the member chose it (off at first) — both for HubSpot only. Nothing else of the file goes into the consultation.
  */
 export function handedOf(d: DraftItem): Record<string, unknown> {
   return {
     書き先: d.書き先, 取引: d.取引, 項目: d.項目, 値: d.値,
-    ...(d.shareReason && d.理由 ? { 理由: d.理由 } : {}),
-    ...(d.shareQuote && d.根拠 ? { 引用: d.根拠 } : {}),
+    ...(sharesWords(d) && d.shareReason && d.理由 ? { 理由: d.理由 } : {}),
+    ...(sharesWords(d) && d.shareQuote && d.根拠 ? { 引用: d.根拠 } : {}),
   }
+}
+
+/** The HubSpot item that makes a new 案件 (used only when 「新しく作る」 is chosen). */
+export const CREATE_DEAL_ITEM = '取引を作る'
+
+/** A 取引 the job's AI named as a new one (`新規:<会社名>`: it cannot read HubSpot, so it never knows one exists). */
+export function isNewDeal(deal: string): boolean {
+  return /^新規[:：]/.test(deal)
+}
+
+/** The HubSpot 取引 of the card, in order (each gets its 案件 chosen before applying, owner FB #43). */
+export function dealsToChoose(items: readonly Pick<DraftItem, '書き先' | '取引'>[]): string[] {
+  return [...new Set(items.filter(d => d.書き先 === 'hubspot').map(d => d.取引))]
+}
+
+const WHY_ORDER: Record<DealChoice['why'], number> = { linked: 0, named: 1, customer: 2, name: 3 }
+
+/**
+ * The 案件 chosen for a 取引 before the member touches it: what an earlier press chose, the 案件 the file names, the meeting's
+ * own (`linked`), else the best match (the meeting's 相手, then the name); 「新しく作る」 (null) only for a 新規 取引 with nothing found.
+ * undefined: nothing to choose (no 案件 read, a 取引 that names none of them) — the ask stays as it was.
+ */
+export function defaultPick(deal: string, deals: readonly DealChoice[], before: string | null | undefined): string | null | undefined {
+  const has = (id: string | null) => id !== null && deals.some(x => x.id === id)
+  if (before === null || (before !== undefined && has(before))) return before
+  if (has(deal)) return deal
+  const best = [...deals].sort((a, b) => WHY_ORDER[a.why] - WHY_ORDER[b.why])[0]
+  if (best) return best.id
+  return isNewDeal(deal) ? null : undefined
+}
+
+/** 「取引を作る」 is never handed on while an existing 案件 is chosen for its 取引 (the consultation would make a second one). */
+export function createSkipped(d: Pick<DraftItem, '書き先' | '取引' | '項目'>, picks: Readonly<Record<string, string | null | undefined>>): boolean {
+  return d.書き先 === 'hubspot' && d.項目 === CREATE_DEAL_ITEM && typeof picks[d.取引] === 'string'
+}
+
+/** One line of a 案件 as the card and the last check show it (title, 担当, 確度, 金額). */
+export function dealLine(x: DealChoice): string {
+  const parts = [x.assignee ? `担当：${x.assignee}` : null, x.confidence ? `確度：${x.confidence}` : null, x.amount !== null ? `金額：${x.amount.toLocaleString('ja-JP')}円` : null]
+  return parts.filter(Boolean).join('・')
+}
+
+/** What the ask says of one chosen 案件 (the record id literally: the consultation uses it, `anken-sync-auto` (b) 2.1). */
+function dealAskLines(meetingId: string | null, meetingBundle: string | null, picked: readonly { 取引: string; deal: DealChoice | null }[]): string[] {
+  const out: string[] = []
+  for (const p of picked) {
+    if (p.deal === null) {
+      out.push(`- 取引「${p.取引}」は、私がカードで今ある案件を見たうえで「新しく作る」を選びました。案件を探して選び直さず、「${CREATE_DEAL_ITEM}」の項目で作ってください（「${CREATE_DEAL_ITEM}」が下に無ければ、書かずに「反映しない」としてください）。`)
+      continue
+    }
+    const d = p.deal
+    out.push(`- 取引「${p.取引}」は、私がカードで選んだ今ある案件 ${d.id}（${outsideTitle(d.title)}）です。HubSpot の項目はこの案件 ${d.id} に書いてください。探し直したり、取引を作ったりしないでください。`)
+    if (meetingId && meetingBundle === d.id) out.push(`  会議（${meetingId}）は、もうこの案件 ${d.id} につながっています。`)
+    else if (meetingId && meetingBundle) out.push(`  会議（${meetingId}）は、もう別の案件につながっています。つなぎ直さずに、どうするか私に聞いてください。`)
+    else if (meetingId) out.push(`  書く前に、minutes_link_bundle で会議（${meetingId}）をこの案件 ${d.id} につないでください（つなげなかったときは、理由を私に伝えてから書いてください）。`)
+  }
+  if (picked.length > 0) {
+    out.push('- 結果の「取引」は下の一覧のとおりのまま（書き換えない）にし、書いた案件の番号を「案件」に入れてください。')
+    if (picked.some(p => p.deal !== null)) out.push(`- ${OUTSIDE_TITLE_NOTE}`)
+  }
+  return out
 }
 
 /** The items an apply takes: ticked, valid, and allowed by their state now (never one written or on its way). */
@@ -145,7 +216,7 @@ export function itemsToApply(items: readonly DraftItem[], statusOf: (key: string
 /** The longest ask one press hands on (`chat.consultAbout`'s `detail`): a longer one is refused before anything is recorded. */
 export const ASK_MAX = 40_000
 
-const RESULT_SHAPE = `{ "版": ${AFTER_MEETING_RESULT_VERSION}, "結果": [{ "回": "<この相談の回>", "書き先": "hubspot" または "係数表", "取引", "項目", "状態": "済み" | "失敗" | "承認待ち" | "担当が違う" | "反映しない" | "戻した", "理由"?: 短い説明, "承認"?: "approval-…", "承認する人"?: 名前, "担当"?: 担当の名前, "操作"?: 法人営業の操作の id, "プラグイン"?: 操作のプラグイン（corporate-sales など）, "前の値"?, "書いた値"? }] }`
+const RESULT_SHAPE = `{ "版": ${AFTER_MEETING_RESULT_VERSION}, "結果": [{ "回": "<この相談の回>", "書き先": "hubspot" または "係数表", "取引", "項目", "状態": "済み" | "失敗" | "承認待ち" | "担当が違う" | "反映しない" | "戻した", "理由"?: 短い説明, "承認"?: "approval-…", "承認する人"?: 名前, "担当"?: 担当の名前, "操作"?: 法人営業の操作の id, "プラグイン"?: 操作のプラグイン（corporate-sales など）, "前の値"?, "書いた値"?, "案件"?: 書いた案件の番号（deal-… など） }] }`
 
 function resultRule(folder: string, pressId: string): string[] {
   return [
@@ -159,14 +230,20 @@ function resultRule(folder: string, pressId: string): string[] {
  * given; the minutes' version checked first; HubSpot through the business plugin's operations, the coefficient sheet through the
  * pinned Skill's scripts; what was not shared stays here; the results written back for the card.
  */
-export function applyAsk(input: { pressId: string; folder: string; meetingId: string | null; minutesDocVersion: string | null; items: readonly DraftItem[] }): string {
+export function applyAsk(input: {
+  pressId: string; folder: string; meetingId: string | null; minutesDocVersion: string | null; items: readonly DraftItem[]
+  /** The 案件 chosen on the card for each HubSpot 取引 handed on (null: 「新しく作る」), and the meeting's own 案件. */
+  deals?: readonly { 取引: string; deal: DealChoice | null }[]; meetingBundle?: string | null
+}): string {
   const handed = input.items.map(handedOf)
+  const hubspot = new Set(input.items.filter(d => d.書き先 === 'hubspot').map(d => d.取引))
   return [
     `会議のあとの更新案のうち、私がカードで確かめて選んだ項目だけを反映してください（この相談の回：${input.pressId}）。`,
     '- 下の項目のほかは、どこにも書かないでください。値は下のとおりにしてください（私が直した値もあります）。',
     ...(input.meetingId && input.minutesDocVersion
       ? [`- 書く前に、minutes_read で会議（${input.meetingId}）を読んでください。答えの docVersion が「${input.minutesDocVersion}」と違えば、「AI が案を作ったあとに議事録が直されています」と私に伝え、続けるか聞いてください。`]
       : input.meetingId ? [`- 書く前に、minutes_read で会議（${input.meetingId}）を読めるか確かめてください（案を作ったあとに直されたかは、確かめられません）。`] : []),
+    ...dealAskLines(input.meetingId, input.meetingBundle ?? null, (input.deals ?? []).filter(p => hubspot.has(p.取引))),
     '- HubSpot の項目は、法人営業の操作で書いてください。先に refresh_deal で今の値と担当を確かめ、担当が私でなければ書かずに「担当が違う」とし、担当の名前を残してください。今の値が案と違えば「今：…、案：…」を見せて、私に選んでもらってください。同じ会議の同じ取引・項目がもう書かれていれば、書かないでください。',
     '- 係数表の項目は、部署の Skill「anken-sync-auto」の手順（スクリプト）で書いてください。先に目印の列で、同じ会議の同じ取引・項目がもう書かれていないか確かめ、書かれていれば書かないでください。書く前の値を「前の値」に残してください。結果が分からない挿入はやり直さず、私に見せてください。',
     ...(input.items.some(isCloseDate) ? [`- ${SET_WATCH_CLOSE_DATE}は、update_deal で案件の欄 close_date（受注予定日）に、値の日付（YYYY-MM-DD）のまま渡してください。`] : []),

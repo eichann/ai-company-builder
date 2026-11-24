@@ -24,13 +24,13 @@ const HANDED: Record<string, HandedItem> = {
 /** An apply press as the card sends it: the keys and what it hands on of each. */
 const press = (id: string, ...keys: string[]): AfterMeetingChange => ({ kind: 'apply', id, keys, items: keys.map(k => HANDED[k]) })
 
-function world(t: { after: (fn: () => void) => void }, opts: { types?: unknown; folder?: string } = {}) {
+function world(t: { after: (fn: () => void) => void }, opts: { types?: unknown; folder?: string; file?: unknown; fetch?: typeof fetch } = {}) {
   const base = realpathSync(mkdtempSync(path.join(tmpdir(), 'acb-after-meeting-')))
   t.after(() => rmSync(base, { recursive: true, force: true }))
   const root = path.join(base, 'company')
   const runDir = path.join(root, ...FOLDER.split('/'))
   mkdirSync(runDir, { recursive: true })
-  writeFileSync(path.join(runDir, '更新案.json'), JSON.stringify(proposals))
+  writeFileSync(path.join(runDir, '更新案.json'), JSON.stringify(opts.file ?? proposals))
   const records = path.join(base, 'records', 'c1', OCC)
   mkdirSync(records, { recursive: true })
   writeFileSync(path.join(records, 'run-1.1.json'), JSON.stringify({ v: 1, occurrenceId: OCC, runId: 'run-1', generation: 1, state: 'sent', folder: opts.folder ?? FOLDER, decision: 'proceed', confidence: 0.4, minutesDocVersion: 'notes:7', at: new Date(NOW).toISOString() }))
@@ -39,7 +39,7 @@ function world(t: { after: (fn: () => void) => void }, opts: { types?: unknown; 
     paths: { validate: p => { if (!path.resolve(p).startsWith(root)) throw new Error('outside'); return path.resolve(p) } },
     recordsRoot: () => path.join(base, 'records'), marksRoot: () => path.join(base, 'marks'),
     baseUrl: () => 'https://acb.example', cookies: () => ['s=1'], now: () => now, log: { warn: () => {} },
-    fetch: (async () => new Response(JSON.stringify({ data: { types: opts.types ?? [] } }), { status: 200 })) as typeof fetch,
+    fetch: opts.fetch ?? (async () => new Response(JSON.stringify({ data: { types: opts.types ?? [] } }), { status: 200 })) as typeof fetch,
   })
   return { base, root, runDir, api, setNow: (n: number) => { now = n } }
 }
@@ -161,4 +161,64 @@ test('［いらない］ and a person\'s undo are kept on this PC in the app\'s 
   assert.equal(kept.draftDismissed, true)
   assert.equal((await w.api.note('c1', w.root, OCC, { kind: 'undone', key: K_STAGE })).success, true)
   assert.equal((await w.api.note('c1', w.root, OCC, { kind: 'bogus' } as never)).success, false)
+})
+
+// Owner FB #43: the 案件 a HubSpot 取引 goes to is chosen on the card before applying.
+const DEAL_TYPE = { definition: {
+  name: 'deal', implements: ['bundle'], final: ['won', 'lost'],
+  fields: { confidence: { label: '確度', kind: 'choice', options: ['b'], optionLabels: { b: 'B（中）' } }, amount: { label: '金額', kind: 'number' }, assignee: { label: '担当', kind: 'person' } },
+} }
+const deal = (id: string, title: string, state = 'open') => ({ id, type: 'deal', title, summary: '', path: null, state, fields: { confidence: 'b', amount: 300000, assignee: 'u-taka' }, version: 1, updatedAt: '' })
+const NEW_FILE = { 版: 1, 会議: 'meeting-abc123', 更新案: [{ 書き先: 'hubspot', 取引: '新規:株式会社サンプル', 項目: '確度', 値: 'B（中）' }] }
+
+test('the 案件 offered for a 新規 取引: the meeting\'s own and those of the company by name, open ones only, with 担当・確度・金額', async t => {
+  const asked: Array<{ url: string; body: unknown }> = []
+  const w = world(t, { file: NEW_FILE, fetch: (async (url: string, init?: RequestInit) => {
+    const body = init?.body ? JSON.parse(String(init.body)) : null
+    asked.push({ url, body })
+    const ok = (data: unknown) => new Response(JSON.stringify({ data }), { status: 200 })
+    if (url.endsWith('/records/types')) return ok({ types: [DEAL_TYPE] })
+    if (url.endsWith('/members')) return ok([{ userId: 'u-taka', name: '高杉' }])
+    if (url.endsWith('/records/item/meeting-abc123')) return ok({ record: {}, links: [{ name: 'bundle', direction: 'out', record: deal('deal-linked01', 'サンプル/既存') }] })
+    if (url.endsWith('/records/query')) return ok({ total: 2, records: [deal('deal-sample01', 'サンプル/研修'), deal('deal-lost0001', 'サンプル/昔の', 'lost')] })
+    return new Response('{}', { status: 404 })
+  }) as typeof fetch })
+  const r = await w.api.read('c1', w.root, OCC)
+  assert.ok(r.success && r.run)
+  assert.equal(r.meetingBundle, 'deal-linked01')
+  assert.deepEqual(r.deals?.map(d => [d.id, d.why]), [['deal-linked01', 'linked'], ['deal-sample01', 'name']], 'a lost 案件 is not offered')
+  assert.deepEqual(r.deals?.[1], { id: 'deal-sample01', title: 'サンプル/研修', why: 'name', confidence: 'B（中）', amount: 300000, assignee: '高杉' })
+  // Searched by the company's name, also without 株式会社 (a 案件's name often leaves it out).
+  assert.deepEqual(asked.filter(a => a.url.endsWith('/records/query')).map(a => (a.body as { text: string }).text), ['株式会社サンプル', 'サンプル'])
+})
+
+test('the server not reached: no 案件 to choose, the card applies as before', async t => {
+  const w = world(t, { file: NEW_FILE, fetch: (async () => { throw new Error('offline') }) as typeof fetch })
+  const r = await w.api.read('c1', w.root, OCC)
+  assert.ok(r.success && r.run && r.deals === null)
+})
+
+test('a 取引 never moves to another 案件 once an earlier press began writing to one; after a failure it may', async t => {
+  const w = world(t)
+  const pick = (id: string, deal: string | null): AfterMeetingChange => ({ ...press(id, K_STAGE), deals: [{ 取引: '123', 案件: deal }] } as AfterMeetingChange)
+  assert.ok((await w.api.note('c1', w.root, OCC, pick('a-0000000000000001', 'deal-sample01'))).success)
+  writeFileSync(path.join(w.runDir, 'result.json'), JSON.stringify({ 版: 1, 結果: [{ 回: 'a-0000000000000001', 書き先: 'hubspot', 取引: '123', 項目: '確度', 状態: '失敗', 案件: 'deal-sample01' }] }))
+  const added: HandedItem = { 書き先: 'hubspot', 取引: '123', 項目: '金額', 値: 5 }
+  const other = { kind: 'apply', id: 'a-0000000000000002', keys: [itemKey(added)], items: [added], deals: [{ 取引: '123', 案件: 'deal-sample02' }] } as AfterMeetingChange
+  assert.ok((await w.api.note('c1', w.root, OCC, other)).success, 'nothing written yet: another 案件 may be chosen')
+  const third = { kind: 'apply', id: 'a-0000000000000003', keys: [K_STAGE], items: [HANDED[K_STAGE]], deals: [{ 取引: '123', 案件: null }] } as AfterMeetingChange
+  const refused = await w.api.note('c1', w.root, OCC, third)
+  assert.ok(!refused.success && refused.code === 'ALREADY', 'the 金額 is on its way to deal-sample02: 「新しく作る」 is refused')
+  const read = await w.api.read('c1', w.root, OCC)
+  assert.ok(read.success && read.run)
+  assert.deepEqual(read.mark.applies.map(a => a.deals?.[0]?.案件), ['deal-sample01', 'deal-sample02'])
+  assert.equal(readResultFile(readFileSync(path.join(w.runDir, 'result.json'), 'utf8'))[0].案件, 'deal-sample01')
+})
+
+test('a press\'s 案件 choice is only of the card\'s shape: a 取引 it does not hand on, or an id not of a record, is refused', async t => {
+  const w = world(t)
+  const bad = (deals: unknown) => ({ ...press('a-0000000000000001', K_STAGE), deals } as AfterMeetingChange)
+  assert.equal((await w.api.note('c1', w.root, OCC, bad([{ 取引: '999', 案件: 'deal-sample01' }]))).success, false)
+  assert.equal((await w.api.note('c1', w.root, OCC, bad([{ 取引: '123', 案件: '../x' }]))).success, false)
+  assert.equal((await w.api.note('c1', w.root, OCC, bad([{ 取引: '123', 案件: 'deal-sample01' }]))).success, true)
 })

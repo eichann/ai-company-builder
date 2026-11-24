@@ -2,7 +2,8 @@
 // `readAfterMeeting` answers the run's files from the data below, `noteAfterMeeting` keeps the mark here (refusing an item
 // already handed on, as main does), and every press is listed in window.__acbAfterMeeting.
 // /tests/after-meeting-ui.html (&off=1: the company's switch off; &weekly=1: the Friday report's やること; &result=approval:
-// a result waiting for 田中さん's approval; &closedate=1: a 受注予定日 item too; &theme=dark)
+// a result waiting for 田中さん's approval; &closedate=1: a 受注予定日 item too; &deals=1: the AI named 「新規:株式会社サンプル」
+// and two 案件 of that company exist; &theme=dark)
 import { createRoot } from 'react-dom/client'
 import '../src/i18n'
 import '../src/index.css'
@@ -23,13 +24,23 @@ const results: ResultItem[] = params.get('result') === 'approval'
   : []
 if (results.length > 0) mark = { ...mark, applies: [{ id: 'a-0000000000000001', at: new Date().toISOString(), kind: 'apply', keys: [itemKey(results[0])] }] }
 
+const deals = params.get('deals') === '1'
+const DEAL = deals ? '新規:株式会社サンプル' : '1001'
 const read = (): AfterMeetingRead => ({
   success: true, mark, results, meetingId: 'meeting-abc123', problem: null, stages: ['A（高）', 'B（中）', 'C（低）'],
+  deals: deals
+    ? [
+      { id: 'deal-sample01', title: 'サンプル/研修導入', assignee: '高橋', confidence: 'B（中）', amount: 300000, why: 'name' },
+      { id: 'deal-sample02', title: 'サンプル/追加研修', assignee: '高橋', confidence: 'C（低）', amount: null, why: 'customer' },
+    ]
+    : null,
+  meetingBundle: null,
   run: { folder: '営業/.personal/提案書/2026-11-24_サンプル社', decision: 'proceed', confidence: 0.9, minutesDocVersion: 'notes:7', at: new Date().toISOString() },
   proposals: [
-    { 書き先: 'hubspot', 取引: '1001', 項目: '確度', 値: 'B（中）', 根拠: '来月から始めたいと先方が話した', 理由: '導入時期が決まった' },
-    { 書き先: 'hubspot', 取引: '1001', 項目: '金額', 値: 300000 },
-    { 書き先: '係数表', 取引: '1001', 項目: '計上月', 値: [{ 月: '2026-12', 金額: 300000 }] },
+    { 書き先: 'hubspot', 取引: DEAL, 項目: '確度', 値: 'B（中）', 根拠: '来月から始めたいと先方が話した', 理由: '導入時期が決まった' },
+    { 書き先: 'hubspot', 取引: DEAL, 項目: '金額', 値: 300000 },
+    { 書き先: '係数表', 取引: '1001', 項目: '計上月', 値: [{ 月: '2026-12', 金額: 300000 }], 理由: '月はカードで選び直してください' },
+    ...(deals ? [{ 書き先: 'hubspot' as const, 取引: DEAL, 項目: '取引を作る', 値: '株式会社サンプル/山田様' }] : []),
     ...(params.get('closedate') === '1' ? [{ 書き先: 'hubspot' as const, 取引: '1001', 項目: '受注予定日', 値: '2026-12-15' }] : []),
   ],
 })
@@ -40,7 +51,7 @@ installElectronAPI({
     asked.push({ note: change })
     if (change.kind === 'apply' || change.kind === 'undo') {
       if (refusedKeys(change, mark, results, Date.now()).length > 0) return { success: false, code: 'ALREADY', error: 'この項目は、もう反映しているか、反映の途中です。画面を読み直しました。' }
-      mark = { ...mark, applies: [...mark.applies, { id: change.id, at: new Date().toISOString(), kind: change.kind, keys: change.keys, ...(change.kind === 'apply' ? { items: change.items } : {}) }] }
+      mark = { ...mark, applies: [...mark.applies, { id: change.id, at: new Date().toISOString(), kind: change.kind, keys: change.keys, ...(change.kind === 'apply' ? { items: change.items, ...(change.deals ? { deals: change.deals } : {}) } : {}) }] }
     } else if (change.kind === 'draft-dismissed') mark = { ...mark, draftDismissed: true }
     else if (change.kind === 'cancel') mark = { ...mark, applies: mark.applies.filter(a => a.id !== change.id) }
     return { success: true, mark }

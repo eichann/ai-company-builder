@@ -8,11 +8,11 @@ import { Button, Callout } from '../../../shared/ui/primitives'
 import { Dialog, DialogFooter, DialogTitle } from '../../../shared/ui/Dialog'
 import { ConfirmDialog } from '../../../shared/ui/ConfirmDialog'
 import { useInterval } from '../../../shared/hooks/useInterval'
-import { itemStatus, mayUndoHubspot, sheetWritten, type AfterMeetingRead, type UpdateTarget } from '../../../../shared/after-meeting'
+import { dealLocked, itemStatus, mayUndoHubspot, pickedBefore, sheetWritten, type AfterMeetingRead, type DealChoice, type DealPick, type UpdateTarget } from '../../../../shared/after-meeting'
 import { noteAfterMeeting, readAfterMeeting, undoHubspotWrite } from '../api'
 import {
-  ADDABLE_HUBSPOT_ITEMS, ASK_MAX, addedItem, applyAsk, cardNotes, cardOffers, draftsFrom, edited, handedItemOf, handedOf, itemsToApply, newPressId, redoDraftAsk, shareDraftAsk, sheetUndoAsk,
-  statusText, statusTone, valueProblem, valueText, type DraftItem,
+  ADDABLE_HUBSPOT_ITEMS, ASK_MAX, addedItem, applyAsk, cardNotes, cardOffers, createSkipped, dealLine, dealsToChoose, defaultPick, draftsFrom, edited, handedItemOf, handedOf,
+  isNewDeal, itemsToApply, newPressId, redoDraftAsk, shareDraftAsk, sharesWords, sheetUndoAsk, statusText, statusTone, valueProblem, valueText, type DraftItem,
 } from '../model'
 import { ValueEditor } from './ValueEditor'
 import { DraftButtons } from './DraftButtons'
@@ -29,6 +29,8 @@ export function UpdateProposalCard({ companyId, rootPath, occurrenceId, task }: 
   const [checking, setChecking] = useState<'apply' | 'undo' | null>(null)
   const [undoing, setUndoing] = useState<DraftItem | null>(null)
   const [adding, setAdding] = useState<{ target: UpdateTarget; deal: string; item: string; problem: string | null } | null>(null)
+  // The 案件 the member chose for a HubSpot 取引 (null: 「新しく作る」); a 取引 not in it takes `defaultPick`.
+  const [picks, setPicks] = useState<Record<string, string | null>>({})
   // One press at a time, also between a click and the state change (a double click); main checks again.
   const pressing = useRef(false)
   const loadedFor = useRef<string | null>(null)
@@ -59,7 +61,18 @@ export function UpdateProposalCard({ companyId, rootPath, occurrenceId, task }: 
   const offline = typeof navigator !== 'undefined' && navigator.onLine === false
   const disabled = working || !task.open
   const change = (key: string, patch: Partial<DraftItem>) => setItems(xs => (xs ?? []).map(x => (x.key === key ? { ...x, ...patch } : x)))
-  const chosen = itemsToApply(list, statusOf)
+  // The 案件 each HubSpot 取引 goes to (owner FB #43): locked once an earlier press began writing to one, else the member's or the default.
+  const pickOf = (deal: string): string | null | undefined => {
+    if (!data.deals) return undefined
+    const locked = dealLocked(deal, data.mark, data.results, now)
+    if (locked !== undefined) return locked
+    return deal in picks ? picks[deal] : defaultPick(deal, data.deals, pickedBefore(deal, data.mark))
+  }
+  const dealGroups = data.deals ? dealsToChoose(list).filter(g => data.deals!.length > 0 || isNewDeal(g)) : []
+  const picked: Record<string, string | null | undefined> = Object.fromEntries(dealGroups.map(g => [g, pickOf(g)]))
+  const dealOf = (id: string): DealChoice => data.deals?.find(x => x.id === id) ?? { id, title: id, assignee: null, confidence: null, amount: null, why: 'named' }
+  const chosen = itemsToApply(list, statusOf).filter(d => !createSkipped(d, picked))
+  const chosenPicks: DealPick[] = dealsToChoose(chosen).flatMap(g => (picked[g] === undefined ? [] : [{ 取引: g, 案件: picked[g] as string | null }]))
   const notes = cardNotes({ confidence: run.confidence, runAt: run.at, statuses: list.map(d => statusOf(d.key)), now })
   const unapplied = list.filter(d => statusOf(d.key).kind === 'new').length
   const work = (detail: string) => runCommand('chat.consultAbout', { recordId: task.id, title: task.title, purpose: 'work', ...(task.madeAt ? { madeAt: task.madeAt } : {}), detail })
@@ -77,11 +90,14 @@ export function UpdateProposalCard({ companyId, rootPath, occurrenceId, task }: 
       const keys = kind === 'apply' ? chosen.map(d => d.key) : sheet.map(x => x.d.key)
       if (keys.length === 0) return
       const detail = kind === 'apply'
-        ? applyAsk({ pressId: id, folder: run.folder, meetingId: data.meetingId, minutesDocVersion: run.minutesDocVersion, items: chosen })
+        ? applyAsk({
+          pressId: id, folder: run.folder, meetingId: data.meetingId, minutesDocVersion: run.minutesDocVersion, items: chosen,
+          deals: chosenPicks.map(p => ({ 取引: p.取引, deal: p.案件 === null ? null : dealOf(p.案件) })), meetingBundle: data.meetingBundle,
+        })
         : sheetUndoAsk({ pressId: id, folder: run.folder, items: sheet.map(({ d, w }) => ({ 取引: d.取引, 項目: d.項目, 前の値: w.前の値!, 書いた値: w.書いた値! })) })
       // Too long for one consultation's first message: said before anything is recorded.
       if (detail.length > ASK_MAX) { setMessage('一度に渡す文が長すぎます。項目を分けて（チェックを外して）2回に分けて反映してください。'); return }
-      const r = await noteAfterMeeting(companyId, rootPath, occurrenceId, kind === 'apply' ? { kind, id, keys, items: chosen.map(handedItemOf) } : { kind, id, keys })
+      const r = await noteAfterMeeting(companyId, rootPath, occurrenceId, kind === 'apply' ? { kind, id, keys, items: chosen.map(handedItemOf), ...(chosenPicks.length > 0 ? { deals: chosenPicks } : {}) } : { kind, id, keys })
       if (!r.success) { setMessage(r.error); await reload(); return }
       setData(prev => (prev ? { ...prev, mark: r.mark } : prev))
       // The press is recorded first (never twice); a consultation that did not start takes it back.
@@ -140,6 +156,35 @@ export function UpdateProposalCard({ companyId, rootPath, occurrenceId, task }: 
       {data.problem === 'version' && <Callout tone="warning">このアプリでは表示できない形の更新案です。アプリを新しくしてください。</Callout>}
       {data.problem === 'shape' && <Callout tone="warning">更新案のファイルを読めませんでした（形が違います）。［作り直す］で作り直せます。</Callout>}
       {data.problem === null && list.length === 0 && <p className="text-text-muted">この回には更新案がありません。</p>}
+      {dealGroups.map((g, gi) => {
+        const locked = dealLocked(g, data.mark, data.results, now) !== undefined
+        const current = picked[g]
+        const options = [...(data.deals ?? [])]
+        if (typeof current === 'string' && !options.some(x => x.id === current)) options.push(dealOf(current))
+        return (
+          <fieldset key={g} aria-label={`取引「${g}」を書く案件`} className="space-y-1.5 rounded-control border border-border bg-surface p-2">
+            <legend className="px-1 font-strong">HubSpot に書く案件（AI の案：{g}）</legend>
+            {locked && <p className="text-text-muted">前の反映で選んだ案件に、もう書き始めています（変えられません）。</p>}
+            {options.map(x => (
+              <label key={x.id} className="flex items-start gap-1.5">
+                <input type="radio" name={`deal-${occurrenceId}-${gi}`} className="mt-0.5" checked={current === x.id} disabled={disabled || locked} onChange={() => setPicks(ps => ({ ...ps, [g]: x.id }))} />
+                <span>
+                  <span>{x.title}</span>
+                  {x.id === data.meetingBundle && <span className="ml-1 rounded-small bg-selected-bg px-1 text-selected-text">この会議の案件</span>}
+                  {dealLine(x) && <span className="block text-text-muted">{dealLine(x)}</span>}
+                </span>
+              </label>
+            ))}
+            {isNewDeal(g) && (
+              <label className="flex items-center gap-1.5">
+                <input type="radio" name={`deal-${occurrenceId}-${gi}`} checked={current === null} disabled={disabled || locked} onChange={() => setPicks(ps => ({ ...ps, [g]: null }))} />
+                <span>新しく作る</span>
+              </label>
+            )}
+            {options.length === 0 && <p className="text-text-muted">この会社の案件は見つかりませんでした。</p>}
+          </fieldset>
+        )
+      })}
       <ul className="space-y-2">
         {list.map(d => {
           const s = statusOf(d.key)
@@ -164,7 +209,8 @@ export function UpdateProposalCard({ companyId, rootPath, occurrenceId, task }: 
               {edited(d) && d.proposed !== null && <p className="text-text-muted">AI の案：{valueText(d.proposed)}</p>}
               {d.理由 && <p className="text-text-muted">理由：{d.理由}</p>}
               {d.根拠 && <p className="text-text-muted">議事録の引用：「{d.根拠}」</p>}
-              {editable && d.on && (d.理由 || d.根拠) && (
+              {createSkipped(d, picked) && s.kind !== 'result' && <p className="text-text-muted">今ある案件を選んだので、取引は作りません。</p>}
+              {editable && d.on && sharesWords(d) && (d.理由 || d.根拠) && (
                 <div className="flex flex-wrap gap-3 text-text-muted">
                   {d.理由 && <label className="inline-flex items-center gap-1"><input type="checkbox" checked={d.shareReason} onChange={e => change(d.key, { shareReason: e.target.checked })} />理由を HubSpot・承認に渡す</label>}
                   {d.根拠 && <label className="inline-flex items-center gap-1"><input type="checkbox" checked={d.shareQuote} onChange={e => change(d.key, { shareQuote: e.target.checked })} />議事録の引用も渡す</label>}
@@ -236,6 +282,9 @@ export function UpdateProposalCard({ companyId, rootPath, occurrenceId, task }: 
               return (
                 <li key={d.key} className="rounded-control border border-border p-2">
                   <p className="font-strong">{d.書き先 === 'hubspot' ? 'HubSpot' : '係数表'}・{d.項目}（{d.取引}）</p>
+                  {d.書き先 === 'hubspot' && picked[d.取引] !== undefined && (
+                    <p className="text-text-muted">書く案件：{picked[d.取引] === null ? '新しく作る' : dealOf(picked[d.取引] as string).title}</p>
+                  )}
                   <p>{valueText(d.値)}</p>
                   {typeof h.理由 === 'string' && <p className="text-text-muted">理由：{h.理由}</p>}
                   {typeof h.引用 === 'string' && <p className="text-text-muted">議事録の引用：「{h.引用}」</p>}

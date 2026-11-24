@@ -8,6 +8,7 @@
  * (the apply consultation's AI writes it, in the shape its first message gives), and the app's own mark in its data
  * (`<userData>/after-meeting/<company>/<occurrence>.json`: what was handed to a consultation, when, so nothing is applied twice).
  */
+import { RECORD_ID_RE } from '../../shared/core/records'
 import { SET_WATCH_HUBSPOT_ITEMS, SET_WATCH_UPDATES_MAX, SET_WATCH_UPDATE_TARGETS, SET_WATCH_UPDATES_VERSION, type SetUpdateItem, type SetUpdateValue } from './ai-turn-steps/set-watch'
 
 export const AFTER_MEETING_RESULT_FILE = 'result.json'
@@ -47,13 +48,33 @@ export interface ResultItem {
   プラグイン?: string
   前の値?: SetUpdateValue
   書いた値?: SetUpdateValue
+  /** The 案件 the consultation wrote to (its record id), when the card chose one for the item's 取引. */
+  案件?: string
 }
+
+/**
+ * An existing 案件 the card offers for a HubSpot 取引 (owner FB #43): read with the member's session from the records they
+ * read — the meeting's own 案件, one the file names, one of the meeting's 相手, one whose name holds the company's.
+ */
+export interface DealChoice {
+  id: string
+  title: string
+  /** 担当's name (null: none, or not known). */
+  assignee: string | null
+  /** 確度 as shown (its label). */
+  confidence: string | null
+  amount: number | null
+  why: 'linked' | 'named' | 'customer' | 'name'
+}
+
+/** The member's choice for one HubSpot 取引 of the file: an existing 案件 (its id), or null = make a new one. */
+export interface DealPick { 取引: string; 案件: string | null }
 
 /** What a press handed on of one item, kept so a card opened again shows what was applied (an added item, an edited value). */
 export interface HandedItem { 書き先: UpdateTarget; 取引: string; 項目: string; 値: SetUpdateValue }
 
 /** One press of the card, handed to one consultation (`items`: an apply's values, in the order of `keys`). */
-export interface ApplyEntry { id: string; at: string; kind: 'apply' | 'undo'; keys: string[]; items?: HandedItem[] }
+export interface ApplyEntry { id: string; at: string; kind: 'apply' | 'undo'; keys: string[]; items?: HandedItem[]; deals?: DealPick[] }
 
 /** The app's mark of one occurrence on this PC. */
 export interface AfterMeetingMark {
@@ -91,11 +112,15 @@ export type AfterMeetingRead =
     mark: AfterMeetingMark
     /** 確度's choices, from the business plugin's type the server answers (null: not found → typed). */
     stages: string[] | null
+    /** The 案件 the card offers for the HubSpot items (null: not read — offline, no 案件 type, no HubSpot item → no choice). */
+    deals: DealChoice[] | null
+    /** The 案件 the meeting is linked to now (null: none, or not one the member reads). */
+    meetingBundle: string | null
   }
   | { success: false; error: string }
 
 export type AfterMeetingChange =
-  | { kind: 'apply'; id: string; keys: string[]; items: HandedItem[] }
+  | { kind: 'apply'; id: string; keys: string[]; items: HandedItem[]; deals?: DealPick[] }
   | { kind: 'undo'; id: string; keys: string[] }
   | { kind: 'undone'; key: string }
   /** The consultation of a press did not start: its press is taken back (only while nothing answered it). */
@@ -193,6 +218,7 @@ export function readResultFile(text: string): ResultItem[] {
       ...(typeof x.操作 === 'string' && OPERATION_ID_RE.test(x.操作) && typeof x.プラグイン === 'string' && PLUGIN_ID_RE.test(x.プラグイン) ? { 操作: x.操作, プラグイン: x.プラグイン } : {}),
       ...(isUpdateValue(x.前の値) ? { 前の値: x.前の値 } : {}),
       ...(isUpdateValue(x.書いた値) ? { 書いた値: x.書いた値 } : {}),
+      ...(typeof x.案件 === 'string' && RECORD_ID_RE.test(x.案件) ? { 案件: x.案件 } : {}),
     })
   }
   return out
@@ -224,7 +250,8 @@ export function readMark(text: string | null): AfterMeetingMark {
     if ((x.kind !== 'apply' && x.kind !== 'undo') || !Array.isArray(x.keys)) return []
     const keys = x.keys.filter((k): k is string => typeof k === 'string' && k.length <= KEY_MAX)
     const items = handedItems(x.items, keys)
-    return [{ id: x.id, at: x.at, kind: x.kind, keys, ...(x.kind === 'apply' && items ? { items } : {}) }]
+    const deals = items ? dealPicks(x.deals, items) : null
+    return [{ id: x.id, at: x.at, kind: x.kind, keys, ...(x.kind === 'apply' && items ? { items } : {}), ...(x.kind === 'apply' && deals && deals.length > 0 ? { deals } : {}) }]
   })
   const undone = Array.isArray(o.undone) ? o.undone.filter((k): k is string => typeof k === 'string' && k.length <= KEY_MAX) : []
   return { v: 1, applies, undone, draftDismissed: o.draftDismissed === true }
@@ -308,4 +335,57 @@ export function refusedKeys(change: { kind: 'apply' | 'undo'; keys: readonly str
     seen.add(key)
   }
   return out
+}
+
+/**
+ * A press's 案件 choices, only of the shape the card sends: each a HubSpot 取引 the press hands on, once, with a record id or
+ * null (make a new one). Absent → none (an older card); anything else → null (refused).
+ */
+export function dealPicks(v: unknown, items: readonly HandedItem[]): DealPick[] | null {
+  if (v === undefined) return []
+  if (!Array.isArray(v) || v.length > SET_WATCH_UPDATES_MAX) return null
+  const deals = new Set(items.filter(i => i.書き先 === 'hubspot').map(i => i.取引.normalize('NFC')))
+  const seen = new Set<string>()
+  const out: DealPick[] = []
+  for (const raw of v) {
+    if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return null
+    const x = raw as Record<string, unknown>
+    if (Object.keys(x).length !== 2 || typeof x.取引 !== 'string' || !deals.has(x.取引.normalize('NFC')) || seen.has(x.取引.normalize('NFC'))) return null
+    if (x.案件 !== null && !(typeof x.案件 === 'string' && RECORD_ID_RE.test(x.案件))) return null
+    seen.add(x.取引.normalize('NFC'))
+    out.push({ 取引: x.取引, 案件: x.案件 as string | null })
+  }
+  return out
+}
+
+/** The 案件 the newest press chose for a 取引 (undefined: none chose; null: 「新しく作る」). */
+export function pickedBefore(deal: string, mark: AfterMeetingMark): string | null | undefined {
+  for (const a of [...mark.applies].reverse()) {
+    const p = a.deals?.find(x => x.取引.normalize('NFC') === deal.normalize('NFC'))
+    if (p) return p.案件
+  }
+  return undefined
+}
+
+/**
+ * The 取引's 案件 can no longer be changed: an earlier press chose one and an item of that 取引 is written, waiting for an
+ * approval, on its way or stopped half-way (the earlier consultation may still be writing) — a later press then writes to the
+ * same 案件, never to another one.
+ */
+export function dealLocked(deal: string, mark: AfterMeetingMark, results: readonly ResultItem[], now: number): string | null | undefined {
+  const before = pickedBefore(deal, mark)
+  if (before === undefined) return undefined
+  const prefix = `hubspot\n${deal.normalize('NFC')}\n`
+  const keys = new Set(mark.applies.flatMap(a => a.keys).filter(k => k.startsWith(prefix)))
+  for (const key of keys) {
+    const s = itemStatus(key, mark, results, now)
+    const open = s.kind === 'new' || (s.kind === 'result' && !s.written && (s.result.状態 === '失敗' || s.result.状態 === '反映しない'))
+    if (!open) return before
+  }
+  return undefined
+}
+
+/** main's check beside `refusedKeys`: the 取引 whose 案件 a press would change after an earlier press began writing to another. */
+export function movedDeals(picks: readonly DealPick[], mark: AfterMeetingMark, results: readonly ResultItem[], now: number): string[] {
+  return picks.filter(p => { const locked = dealLocked(p.取引, mark, results, now); return locked !== undefined && locked !== p.案件 }).map(p => p.取引)
 }
