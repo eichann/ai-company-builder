@@ -290,7 +290,7 @@ console's 「預かり」 tab is A1), and no app calls it yet (C1).
 The folder's managers look at what was handed over and take it into the folder or discard it
 (design memo §4; owner decisions 5, 6, 7, 12). Contract: the review section of
 `shared/types/private-holding.ts` (not read by released apps: the admin console's 「預かり」 tab, A1,
-is its first caller). Code: `routes/holding-review.ts` → `services/holding-review.ts` → the handle's
+below, is its caller). Code: `routes/holding-review.ts` → `services/holding-review.ts` → the handle's
 `holdingItems` (review compare-and-sets), `privateFolders` (`filesAt`, `readBlob`,
 `findCommitWithLine`, `commitFiles`: `adapters/private-folders.ts`) and the blob store.
 
@@ -357,8 +357,29 @@ is its first caller). Code: `routes/holding-review.ts` → `services/holding-rev
 - **Admin home** (owner decision 12): `attention.holding { waiting, expiringSoon }` — the items the
   caller may review and those the clock discards within 7 days (`services/admin-home.ts`, from
   `holdingReview.attention`); a 知らせ kind comes later.
+- **Admin console 「預かり」** (A1; `admin/src/components/folders/holding-view.tsx`,
+  `holding-item-dialog.tsx`, words and the request body in `admin/src/lib/holding.ts`): a third tab of
+  「フォルダ」 (`?tab=holding`), shown only while `GET /holding` lists something for the caller (or the
+  tab is open), with the count; the home's 「預かったファイルを確かめてください（N件）」 card from
+  `attention.holding` (amber when some expire within 7 days) leads there. Everything shown is the
+  review API's answer (the folder from `folderPath`, displayed with the department names only) —
+  nothing is looked up elsewhere. Default ticks: `takeable` `changed` / `deleted` entries; backups not
+  ticked, 本人のメモ and names only never tickable; the body carries only `takeable` ticked indexes and
+  `whenChanged` always (`alongside` unless 「上書きする」 was chosen, offered only while a ticked
+  non-backup content meets a later change — a hidden choice is never sent: Codex P2); a folder gone → no
+  「フォルダに入れる」, download and 捨てる only. 捨てる opens the destructive `ConfirmDialog`
+  (「元に戻せません」, the count), and so does a take-in that would throw away held contents left unticked
+  (`discardedByTake`: the take-in decides the whole item; independent review). The tab's count is the
+  list the page shows (one answer, read again after a decision). Downloads go through `fetch` and are
+  saved as files, never shown in the page. Refusals in the console's own words
+  (`describeHoldingError`): `ALREADY_DECIDED`, `EXPIRED`, 404, 410 → toast, close, list read again;
+  `PATH_TAKEN` / `NOT_TAKEABLE` → those entries marked and unticked; `TAKE_REFUSED` → the server's
+  sentence only when it is its fixed Japanese one; `BUSY` / 503, `FOLDER_GONE`, `INVALID` → a sentence;
+  each refusal reads the item again. Test: `admin/tests/holding.test.tsx` (mutation-checked); the list's
+  shape in `admin-contract.test.ts`.
 - Not here (later stages): `HOLDING_CLIENT_COMMIT_DATE` for the console's old-app warning (needs the
-  C1 build), the zip download, taking a deleted folder's item into another folder (question 7).
+  C1 build), the zip download, a side-by-side diff in the console, taking a deleted folder's item into
+  another folder (question 7).
 - Tests: `server/tests/integration/holding-review.test.ts` (who reviews and the one 404 for everyone
   else, a deleted folder, alongside / overwrite / deletions / one commit and its message, refusals by
   the push checker as the reviewer, the folders' spelling, `PATH_TAKEN`, a role changed while waiting,
