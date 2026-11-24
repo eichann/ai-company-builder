@@ -752,3 +752,36 @@ test('a job\'s run lost while its turn was being prepared never runs: the turn, 
     server.server.close()
   }
 })
+
+test('a job turn gets no broker variables: no one is there, so no pass to the relay (owner decision D3); a consultation keeps its pass', async () => {
+  // key-broker.md "Unattended turns get no pass": the chat server never asks the key broker for a turn with a step ceiling.
+  const { startChatServer } = await import('../electron/chat-server')
+  const brokerAsked: string[] = []
+  let ceilings = 0
+  const server = await startChatServer({
+    getAuthMode: () => 'claude-code', getApiKey: () => undefined, buildSystemPrompt: () => '', getShellEnv: () => ({}),
+    getPermissionMode: () => 'default', isClaudeCodeAuthenticated: () => true, getClaudeCodeCliPath: () => '/test/claude', listenPort: 0,
+    // Held when the turn starts, gone once it is tracked: the turn stops before any AI runs, after its environment is made.
+    pluginStepTools: () => (ceilings++ === 0 ? { allowsRecordTool: () => true, builtinTools: [] } : null),
+    getWriteGuard: async () => ({ root: os.tmpdir(), getAccess: () => undefined }),
+    stepWriteArea: async () => ({ nowhere: true, reads: [] }),
+    createRecordTools: async () => ({ specs: [], execute: async () => '', close: async () => {}, instructions: '', readTask: async () => null, linkNewFile: async () => false }) as never,
+    getBrokerEnv: async ({ conversationId }) => { brokerAsked.push(conversationId); return { ACB_BROKER_URL: 'https://acb.example/api/broker' } },
+  })
+  const post = (body: Record<string, unknown>) => fetch(`http://127.0.0.1:${server.port}/api/chat`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${server.authToken}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ messages: [{ id: 'm', role: 'user', parts: [{ type: 'text', text: 'hi' }] }], companyId: 'co', companyRootPath: os.tmpdir(), ...body }),
+  })
+  try {
+    const job = await (await post({ appSessionId: 'conv-job-00030', aiTurnStep: 'job-procedure' })).text()
+    // The turn got past the point where its environment is made (it was tracked, then stopped as job-ended).
+    assert.match(job, /定期の仕事/, job.slice(0, 400))
+    assert.deepEqual(brokerAsked, [], 'a job turn never asks the key broker')
+    // The control: an ordinary consultation through the same server still asks (so the check above is not vacuous).
+    await (await post({ appSessionId: 'conv-chat-00031' })).text()
+    assert.deepEqual(brokerAsked, ['conv-chat-00031'])
+  } finally {
+    server.server.close()
+  }
+})

@@ -548,9 +548,16 @@ who uses it).
   key (and `OPENAI_*` Codex). Scripts in those chats use the `ACB_ANTHROPIC_*` / `ACB_OPENAI_*`
   names (K7 list).
 - Where it goes: the chat's AI process (`turnEnv` on the turn request: Claude Code `env`, Codex's
-  app-server, the API-key mode's commands) and tools started from the app (`tools:start` takes
+  app-server, the API-key mode's commands) of a consultation a person is in, and tools started from the app (`tools:start` takes
   the company id; `tool:<rel path>` token, the skill's department; the shell variables of the same
   names are replaced). A tool running longer than the token (≤ 60 min) must be restarted.
+- **Unattended turns get no pass** (owner decision D3, 4b-4 memo §G-3): a turn with a step ceiling (`aiTurnStep` in
+  `chat-server.ts` — a scheduled job's run, an automatic 「AI の番」, a business plugin's unattended step) never asks
+  `getBrokerEnv` and gets no `turnEnv`, so its AI process has no broker token, placeholder or relay URL (the member's
+  shell copies are removed as for any turn, `withoutBrokerEnv`). No one is there to see what a script would send or
+  write through the relay; such a turn has no shell or network tools either, this is the second wall. Consultations,
+  including a person-started step's, keep their pass. Test: `client/tests/job-runs.test.ts` 「a job turn gets no
+  broker variables」 (mutation-checked).
 - `agents/agent-env.ts` rule 0: a broker variable passes to an AI process only with a value the
   app sets — an `acb_tok_` token, the placeholder, or a relay URL on the company server's origin
   (`configureAgentEnv({ serverUrl })`) — so a real key, or a base URL that would send the token
