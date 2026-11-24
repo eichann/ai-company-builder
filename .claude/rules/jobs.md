@@ -636,7 +636,9 @@ consultation, claim / hold / renew / finish (`claims.ts`), the same unattended C
 - **Only the grant's tools** (`jobToolAccess`, asked by the chat server as `pluginStepTools(conversation,
   'job-procedure')`): record tools whose route the grant names within the server's ceiling (`jobRunRouteAllowed`;
   `records_create` never), `minutes_read` only with the meeting check, mail drafts only with `outbound_draft`,
-  `job_report` always; Claude Code's file tools only for `files_read` / `files_write`.
+  `job_report` always; Claude Code's file tools only for `files_read` / `files_write`. **No key broker pass** (owner
+  decision D3): the chat server asks no broker token for a turn with a step ceiling, so a job's AI has no relay
+  variables (`key-broker.md` "Unattended turns get no pass").
 - **Writes and reads** (`jobWriteArea` → the write guard, `chat-write-guard.md`): writes only under
   `<place>/.personal/<folder>/` of the grant (`insideDeliverableAt`), or nowhere (`NOWHERE_TO_WRITE_MESSAGE`); Claude
   Code's reads (Read, Glob, Grep) only inside the grant's read paths or that area, as written and as resolved

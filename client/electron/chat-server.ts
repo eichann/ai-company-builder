@@ -678,7 +678,9 @@ export async function startChatServer(config: ChatServerConfig) {
     const sandbox: TurnSandbox | undefined = sandboxInput && sandboxDecision && sandboxDecision.mode !== 'off'
       ? { mode: sandboxDecision.mode, resolved: sandboxDecision.resolved, home: sandboxInput.host.home, onUnavailable: sandboxDecision.onUnavailable } : undefined
     // The key broker (key-broker.md K6): a token per consultation, refreshed before it runs out.
-    const turnEnv = companyId && appSessionId
+    // Never for an unattended turn (a scheduled job's, an 「AI の番」 step's: owner decision D3): no one is there, so it
+    // gets no pass to the relay at all (key-broker.md "Unattended turns get no pass").
+    const turnEnv = !aiTurnStep && companyId && appSessionId
       ? await Promise.resolve(config.getBrokerEnv?.({ agent: authMode, companyId, conversationId: appSessionId, department: activeDepartment?.folder ?? null })).catch(() => undefined)
       : undefined
     const modelRequest = { workingDirectory, appSessionId, modelId, effort, resumeId: existingCliSessionId, references, companyFiles: companyFiles?.tools, review, appCommands, records, webResearch: webResearch?.tools, browserRequest, secondOpinion, writeGuard, privateReads, askUser, onEvent, steering: turn?.steering, onPromptSuggestion: turn?.onPromptSuggestion, toolEventContext, sandbox, turnEnv, toolStop: turnStop?.toolStopped, ...(shelf?.rootMarker ? { projectRootMarker: shelf.rootMarker } : {}), ...(aiTurnStep ? { unattended: { builtinTools: aiTurnStep.builtinTools } } : {}) }

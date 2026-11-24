@@ -1377,7 +1377,9 @@ plugin's switch:
   "Read-only by default"). **Inventory (2026-10-31)**:
   div's `法人ソリューション/.claude/skills/anken-sync` reads (owners, pipelines, deal search /
   get, v3 paths) **and writes** (creates deals, PATCHes deals, creates meetings) through the
-  relay when the app gives it `ACB_HUBSPOT_*`; `weekly-report` prepares the same variables.
+  relay when the app gives it `ACB_HUBSPOT_*`; `weekly-report` prepares the same variables. The app gives
+  them only in a consultation a person is in — never in a scheduled job's or another unattended turn
+  (`key-broker.md` "Unattended turns get no pass").
   Turning the HubSpot plugin on for div stops anken-sync's writes (and its v3 searches) there
   until it moves to the typed operations — an owner decision.
 
