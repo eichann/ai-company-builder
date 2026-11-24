@@ -46,6 +46,12 @@ export interface BrowserMapThing {
   answer: 'json'
   /** The field holding the thing's own id (kind `id`). */
   id: string
+  /**
+   * Where the id comes from (PR 3): `answer` (default) — the reader takes it out of the answer; `address` — the answer
+   * does not carry it (a site's `GET /x/{id}` answers the object without its own number), so the core puts the id the
+   * address was built with into the state, and the reader must not give one. Which address is the connector's code.
+   */
+  id_from?: 'answer' | 'address'
   /** What the thing lives in: the parent thing and the field holding the parent's id (kind `id`). */
   parent?: { thing: string; field: string }
   fields: Readonly<Record<string, BrowserMapField>>
@@ -55,6 +61,20 @@ export interface BrowserMapThing {
    * `ignored` (読まない欄, e.g. an update time): never in the state, never compared — reviewed one by one.
    */
   keys: Readonly<Record<string, BrowserMapKeyUse>>
+  /**
+   * The thing's must-hold facts (memo §15 C5, PR 3): what every line reading it gets whether the line asks or not — a
+   * line can neither drop nor loosen them. `account`: read under the outside account the card names (the account read
+   * before and after the line's reads, the same, and the expected one when there is one); `parent`: every read of it names
+   * its parent and the state's parent field must be that parent; `note`: a sentence the card always shows when it is read.
+   */
+  must_hold?: BrowserMustHold
+}
+
+export interface BrowserMustHold {
+  account?: boolean
+  parent?: boolean
+  /** ≤ 200 characters, plain text: the site's knowledge the person must see (e.g. "this may be shared"). */
+  note?: string
 }
 
 export const BROWSER_MAP_KEY_USES = ['required', 'optional', 'ignored'] as const
@@ -66,9 +86,11 @@ export interface BrowserMap {
   /** The map's version (semver). */
   version: string
   things: Readonly<Record<string, BrowserMapThing>>
+  /** The outside account's heading on the card (required when a thing must hold `account`). */
+  account?: { label: string }
 }
 
-export const BROWSER_MAP_LIMITS = { things: 20, fields: 40, keys: 200, depth: 8, label: 40, answerPaths: 2000, diagnosisKeys: 50 } as const
+export const BROWSER_MAP_LIMITS = { things: 20, fields: 40, keys: 200, depth: 8, label: 40, note: 200, answerPaths: 2000, diagnosisKeys: 50 } as const
 
 /** A thing's, field's or value's name in a map or a line. */
 export const BROWSER_MAP_NAME_RE = /^[a-z][a-z0-9_]{0,39}$/
@@ -133,7 +155,7 @@ export function browserFieldValuesEqual(field: BrowserMapField, a: unknown, b: u
 
 /** Why this map cannot be used (Japanese, for the reviewer), or null. Checked where a map is loaded. */
 export function browserMapProblem(raw: unknown): string | null {
-  if (!isMap(raw) || !onlyKeys(raw, ['site', 'version', 'things'])) return '地図の形が正しくありません'
+  if (!isMap(raw) || !onlyKeys(raw, ['site', 'version', 'things', 'account'])) return '地図の形が正しくありません'
   if (typeof raw.site !== 'string' || !BROWSER_MAP_NAME_RE.test(raw.site)) return '地図のサイトの名前が正しくありません'
   if (typeof raw.version !== 'string' || !SEMVER_RE.test(raw.version)) return '地図の版が正しくありません'
   if (!isMap(raw.things)) return '地図のものの形が正しくありません'
@@ -144,11 +166,17 @@ export function browserMapProblem(raw: unknown): string | null {
     const problem = thingProblem(raw.things[name], raw.things)
     if (problem) return `もの「${name}」：${problem}`
   }
+  if (own(raw, 'account')) {
+    const a = raw.account
+    if (!isMap(a) || !onlyKeys(a, ['label']) || !isPlainBrowserText(a.label, BROWSER_MAP_LIMITS.label)) return 'アカウントの見出しが正しくありません'
+  }
+  const bound = Object.values(raw.things).some(t => isMap(t) && isMap(t.must_hold) && t.must_hold.account === true)
+  if (bound && !own(raw, 'account')) return 'アカウントを守るものがあるのに、アカウントの見出しがありません'
   return null
 }
 
 function thingProblem(t: unknown, things: Record<string, unknown>): string | null {
-  if (!isMap(t) || !onlyKeys(t, ['label', 'answer', 'id', 'parent', 'fields', 'keys'])) return '形が正しくありません'
+  if (!isMap(t) || !onlyKeys(t, ['label', 'answer', 'id', 'id_from', 'parent', 'fields', 'keys', 'must_hold'])) return '形が正しくありません'
   if (!isPlainBrowserText(t.label, BROWSER_MAP_LIMITS.label)) return '見出しが正しくありません'
   if (t.answer !== 'json') return '読み方は json だけです'
   if (!isMap(t.fields)) return '欄の形が正しくありません'
@@ -164,6 +192,15 @@ function thingProblem(t: unknown, things: Record<string, unknown>): string | nul
   }
   const fields = t.fields as Record<string, BrowserMapField>
   if (typeof t.id !== 'string' || !own(fields, t.id) || fields[t.id].kind !== 'id' || fields[t.id].nullable) return '番号の欄が正しくありません'
+  if (own(t, 'id_from') && t.id_from !== 'answer' && t.id_from !== 'address') return '番号の出どころが正しくありません'
+  if (own(t, 'must_hold')) {
+    const m = t.must_hold
+    if (!isMap(m) || !onlyKeys(m, ['account', 'parent', 'note'])) return '必ず守る事実の形が正しくありません'
+    if (own(m, 'account') && typeof m.account !== 'boolean') return '必ず守る事実（アカウント）が正しくありません'
+    if (own(m, 'parent') && typeof m.parent !== 'boolean') return '必ず守る事実（親）が正しくありません'
+    if (m.parent === true && !own(t, 'parent')) return '親を守るのに、親がありません'
+    if (own(m, 'note') && !isPlainBrowserText(m.note, BROWSER_MAP_LIMITS.note)) return '必ず出す注意書きが正しくありません'
+  }
   if (own(t, 'parent')) {
     const p = t.parent
     if (!isMap(p) || !onlyKeys(p, ['thing', 'field']) || typeof p.thing !== 'string' || typeof p.field !== 'string') return '親の形が正しくありません'
@@ -244,7 +281,7 @@ export type BrowserThingReader = (answer: unknown) => unknown
  * fields. Anything short of whole is `not_read` — never a partial state. The state's id is not checked against a planned
  * id here: the line's evaluation does that (`browser-read-line.ts`).
  */
-export function readBrowserThing(map: BrowserMap, thingName: string, answer: unknown, reader: BrowserThingReader): BrowserThingResult {
+export function readBrowserThing(map: BrowserMap, thingName: string, answer: unknown, reader: BrowserThingReader, address?: string): BrowserThingResult {
   const thing = own(map.things, thingName) ? map.things[thingName] : undefined
   const notRead = (change: BrowserShapeChange, count: number, unknownKeys: string[] = [], missingKeys: string[] = []): BrowserThingNotRead => ({
     status: 'not_read',
@@ -268,6 +305,12 @@ export function readBrowserThing(map: BrowserMap, thingName: string, answer: unk
   try { state = reader(answer) } catch { return notRead('unreadable', 1) }
   // Copied once, then checked and handed on: what was checked is what is used (review L3).
   const copy = isMap(state) ? Object.fromEntries(Object.entries(state).map(([k, v]) => [k, Array.isArray(v) ? [...v] : v])) : state
+  if (thing.id_from === 'address') {
+    // The answer does not carry its id: the address's id stands in, and a reader that made one up is not trusted.
+    if (typeof address !== 'string' || !BROWSER_ID_VALUE_RE.test(address) || !isMap(copy) || own(copy, thing.id)) return notRead('unreadable', 1)
+    const withId = copy as Record<string, unknown>
+    withId[thing.id] = address
+  }
   if (browserThingStateProblem(thing, copy)) return notRead('unreadable', 1)
   return { status: 'read', state: copy as Record<string, unknown> }
 }

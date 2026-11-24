@@ -26,6 +26,7 @@ client/   Electron desktop app (renderer on Vite, port 5173).
                        services/, sync/ (git:sync), agents/ (Claude Code, Codex), guards
   shared/              types + pure helpers used by main, preload and renderer
   connectors/          a site's browser checkers + declaration, handed in by main.ts only (agent-browser rule)
+  connector-maps/      a site's map (generalization) + its readers; browser-lines/ its opened lines (data)
   src/                 React renderer: app/, features/<name>/, shared/ (ui, hooks, lib, ipc),
                        stores/ (renderer-structure rule)
   tests/               node tests (*.test.ts), sync-harness/ + sync/, ui/ (Playwright), perf/

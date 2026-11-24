@@ -25,6 +25,7 @@ import {
 } from '../../../shared/core/browser-read-line'
 import { canonicalJson } from '../../../shared/core/fixed-content'
 import { parsePluginManifest } from '../../../shared/core/plugins'
+import type { BrowserOpenedFile } from '../../../shared/core/browser-opened'
 import { EXAMPLE_CHECK_LINE, EXAMPLE_MAP, landingAnswer, readLanding, readNamed } from '../fixtures/browser/example-map'
 
 const clone = <T>(v: T): T => JSON.parse(JSON.stringify(v)) as T
@@ -432,10 +433,11 @@ describe('dates in a text', () => {
 })
 
 describe('the new core modules name no site, thing or field (§17-2)', () => {
-  const NEW_PATH = ['shared/core/browser-map.ts', 'shared/core/browser-read-line.ts']
+  const NEW_PATH = ['shared/core/browser-map.ts', 'shared/core/browser-read-line.ts', 'shared/core/browser-opened.ts', 'shared/core/browser-card.ts']
   const root = resolve(__dirname, '../../..')
   // Names a site's data gives: every approved connector's id, hosts, operation, checker, reader and read names, and the
-  // example map's things and fields. The old path (`plugin-browser-declaration.ts`, `browser-plans.ts`) is a named
+  // example map's and every opened map's things and fields (`opened.json`, so a new map is covered by itself), and the
+  // opened lines' names, titles and headings. The old path (`plugin-browser-declaration.ts`, `browser-plans.ts`) is a named
   // exception (memo §16-7 R8): it predates the map and is left as it is.
   function siteNames(): string[] {
     const approved = JSON.parse(readFileSync(resolve(root, 'shared/browser-connectors/approved.json'), 'utf8')) as { combinations: { connector: string; declaration: string }[] }
@@ -452,14 +454,25 @@ describe('the new core modules name no site, thing or field (§17-2)', () => {
       }
       for (const [read, r] of Object.entries(b.explore)) { names.add(read); names.add(r.reader); names.add(r.label) }
     }
-    const map: BrowserMap = EXAMPLE_MAP
-    names.add(map.site)
-    for (const [thing, t] of Object.entries(map.things)) {
-      names.add(thing)
-      names.add(t.label)
-      for (const f of Object.keys(t.fields)) if (f.includes('_')) names.add(f)
-      // Each part of a key path too (`custom_params[].var_id` → `custom_params`, `var_id`).
-      for (const k of Object.keys(t.keys)) for (const part of k.replace(/\[\]/g, '').split('.')) if (part.includes('_')) names.add(part)
+    const opened = JSON.parse(readFileSync(resolve(root, 'shared/browser-connectors/opened.json'), 'utf8')) as BrowserOpenedFile
+    const maps: BrowserMap[] = [EXAMPLE_MAP, ...opened.maps.map(m => m.map)]
+    for (const map of maps) {
+      names.add(map.site)
+      if (map.account) names.add(map.account.label)
+      for (const [thing, t] of Object.entries(map.things)) {
+        names.add(thing)
+        names.add(t.label)
+        if (t.must_hold?.note) names.add(t.must_hold.note)
+        for (const f of Object.keys(t.fields)) if (f.includes('_')) names.add(f)
+        // Each part of a key path too (`custom_params[].var_id` → `custom_params`, `var_id`).
+        for (const k of Object.keys(t.keys)) for (const part of k.replace(/\[\]/g, '').split('.')) if (part.includes('_')) names.add(part)
+      }
+    }
+    for (const row of opened.lines) {
+      names.add(row.name)
+      names.add(row.line.label)
+      for (const r of row.line.read.reads) if (r.name.includes('_')) names.add(r.name)
+      for (const label of Object.values(row.line.readLabels)) names.add(label)
     }
     return [...names]
   }
@@ -470,6 +483,9 @@ describe('the new core modules name no site, thing or field (§17-2)', () => {
     expect(names).toContain('landing')
     expect(names).toContain('流入経路')
     expect(names).toContain('var_id')
+    expect(names).toContain('action_set')
+    expect(names).toContain('landing_inspect')
+    expect(names).toContain('tag_ids')
     expect(names.length).toBeGreaterThan(15)
   })
 

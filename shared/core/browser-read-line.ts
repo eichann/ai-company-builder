@@ -55,11 +55,18 @@ export interface BrowserLineValue {
   from: readonly BrowserValueSource[]
 }
 
-/** One thing the line reads: by a value's id, or by an id field of an earlier read. */
+/** Where a read's id (or its parent's id) comes from: a `target` value, or an id field of an earlier read. */
+export type BrowserLineIdSource = { value: string } | { read: string; field: string }
+
+/**
+ * One thing the line reads: by a value's id, or by an id field of an earlier read. `parent` (PR 3): the parent it must
+ * be in (the state's parent field equal to it) — required for a thing that must hold `parent` (§15 C5).
+ */
 export interface BrowserLineRead {
   name: string
   thing: string
-  id: { value: string } | { read: string; field: string }
+  id: BrowserLineIdSource
+  parent?: BrowserLineIdSource
 }
 
 /** How a date may be written in a text (closed; a line picks one, §16-2: the business plugin's choice, never the core's). */
@@ -75,6 +82,9 @@ export type BrowserDateFormat = typeof BROWSER_DATE_FORMATS[number]
  *   (the parent's list read whole).
  * - `date_in_text` — the text `field` holds the `date` value written in `format`, and no other date in that format.
  * - `datetime_on_date` — the date `field` (the date part of the site's date and time) is the `date` value.
+ * - `changed_from` (PR 3) — every one of `fields` of `read` differs from `reference`'s (the same kind of thing): what a
+ *   copy must change (stage 0: a copy left pointing at its original's action is the most common accident). ✗ names the
+ *   fields still the same.
  */
 export type BrowserCheck =
   | { word: 'unchanged_except'; read: string; reference: string; except: readonly string[] }
@@ -82,6 +92,7 @@ export type BrowserCheck =
   | { word: 'no_sibling_named'; read: string; field: string }
   | { word: 'date_in_text'; read: string; field: string; date: string; format: BrowserDateFormat }
   | { word: 'datetime_on_date'; read: string; field: string; date: string }
+  | { word: 'changed_from'; read: string; reference: string; fields: readonly string[] }
 export type BrowserCheckWord = BrowserCheck['word']
 
 export const BROWSER_CHECK_WORDS: Readonly<Record<BrowserCheckWord, { when: 'now' | 'after'; args: readonly string[] }>> = {
@@ -90,9 +101,10 @@ export const BROWSER_CHECK_WORDS: Readonly<Record<BrowserCheckWord, { when: 'now
   no_sibling_named: { when: 'now', args: ['read', 'field'] },
   date_in_text: { when: 'now', args: ['read', 'field', 'date', 'format'] },
   datetime_on_date: { when: 'now', args: ['read', 'field', 'date'] },
+  changed_from: { when: 'now', args: ['read', 'reference', 'fields'] },
 }
 
-/** The read part of an opened line. Provisional (§18): PR 3 puts it in the opened list's format. */
+/** The read part of an opened line. Provisional (§18): the opened list (`browser-opened.ts`, PR 3) wraps it. */
 export interface BrowserReadLine {
   site: string
   values: Readonly<Record<string, BrowserLineValue>>
@@ -135,7 +147,7 @@ export function browserReadLineProblem(raw: unknown, map: BrowserMap): string | 
   if (!Array.isArray(raw.reads) || raw.reads.length === 0 || raw.reads.length > BROWSER_READ_LINE_LIMITS.reads) return '読むものの数が正しくありません'
   const reads: Record<string, BrowserMapThing> = {}
   for (const r of raw.reads) {
-    if (!isMap(r) || !exactKeys(r, ['name', 'thing', 'id'])) return '読むものの形が正しくありません'
+    if (!isMap(r) || !(exactKeys(r, ['name', 'thing', 'id']) || exactKeys(r, ['name', 'thing', 'id', 'parent']))) return '読むものの形が正しくありません'
     if (!isName(r.name) || own(reads, r.name)) return '読むものの名前が正しくありません'
     if (typeof r.thing !== 'string' || !own(map.things, r.thing)) return `読むもの「${r.name}」のものが地図にありません`
     const id = r.id
@@ -148,9 +160,23 @@ export function browserReadLineProblem(raw: unknown, map: BrowserMap): string | 
       const from = reads[id.read]
       if (typeof id.field !== 'string' || !own(from.fields, id.field) || from.fields[id.field].kind !== 'id') return `読むもの「${r.name}」の番号の欄が正しくありません`
       // Its own id would read the same object again: a check against it would compare a thing with itself (review L2).
-      if (id.field === from.id) return `読むもの「${r.name}」は、前に読んだものと同じものです`
+      // Another thing of the map by the same id (a list's row of the object, PR 3) is another reading, not the same one.
+      if (id.field === from.id && from === map.things[r.thing]) return `読むもの「${r.name}」は、前に読んだものと同じものです`
     } else return `読むもの「${r.name}」の番号の形が正しくありません`
-    reads[r.name] = map.things[r.thing]
+    const thing = map.things[r.thing]
+    if (own(r, 'parent')) {
+      if (!thing.parent) return `読むもの「${r.name}」は親のないものです`
+      const p = r.parent
+      if (isMap(p) && exactKeys(p, ['value'])) {
+        if (typeof p.value !== 'string' || !own(values, p.value) || values[p.value].role !== 'target' || values[p.value].kind !== 'id') return `読むもの「${r.name}」の親の値が正しくありません`
+        used.add(p.value)
+      } else if (isMap(p) && exactKeys(p, ['read', 'field'])) {
+        if (typeof p.read !== 'string' || !own(reads, p.read)) return `読むもの「${r.name}」の親は、前に読んだものから取ります`
+        const from = reads[p.read]
+        if (typeof p.field !== 'string' || !own(from.fields, p.field) || from.fields[p.field].kind !== 'id') return `読むもの「${r.name}」の親の欄が正しくありません`
+      } else return `読むもの「${r.name}」の親の形が正しくありません`
+    } else if (thing.must_hold?.parent) return `読むもの「${r.name}」：このものは親を必ず確かめます（地図の決まり）`
+    reads[r.name] = thing
   }
   if (!Array.isArray(raw.checks) || raw.checks.length > BROWSER_READ_LINE_LIMITS.checks) return '確かめの数が正しくありません'
   const readThing = (n: unknown): BrowserMapThing | null => (typeof n === 'string' && own(reads, n) ? reads[n] : null)
@@ -187,6 +213,13 @@ export function browserReadLineProblem(raw: unknown, map: BrowserMap): string | 
         if (!whichDate(c.date)) return `${at}：基準の日付は、どれ・いつを決める日付の値です`
         used.add(c.date as string)
         break
+      case 'changed_from': {
+        const ref = readThing(c.reference)
+        if (!ref || c.reference === c.read || ref !== t) return `${at}：比べる相手は、同じ種類の別に読んだものです`
+        if (!Array.isArray(c.fields) || c.fields.length === 0 || c.fields.length > BROWSER_READ_LINE_LIMITS.except || new Set(c.fields).size !== c.fields.length) return `${at}：欄が正しくありません`
+        if (!c.fields.every(f => typeof f === 'string' && own(t.fields, f) && f !== t.id)) return `${at}：欄が地図にありません`
+        break
+      }
     }
   }
   for (const name of Object.keys(values)) if (!used.has(name)) return `値「${name}」はこの行で使われていません`
@@ -252,6 +285,13 @@ export interface BrowserReadFacts {
   /** For `after` words: the same reads made before the write. */
   earlier?: Readonly<Record<string, BrowserThingResult>>
   values: Readonly<Record<string, BrowserSuppliedValue>>
+  /**
+   * The outside account as the site's own marker gave it, read right before and right after the line's reads (null: not
+   * read). A thing that must hold `account` counts only when both are read, the same, and — when given — `expected`.
+   */
+  account?: { before: string | null; after: string | null }
+  /** The account the plan is bound to (a later PR's plans); absent for a read made only to show the card. */
+  expectedAccount?: string
 }
 
 /** ✓ / ✗ / could not be read / judged only after the write. Only `ok` is ✓; nothing turns `unreadable` into `ok`. */
@@ -262,16 +302,26 @@ export interface BrowserCheckResult {
   status: BrowserCheckStatus
   /** `unchanged_except` / `source_unchanged` ✗: the map's names of the fields that differ (for the card's headings). */
   differs?: readonly string[]
+  /** `changed_from` ✗: the map's names of the fields still the same. */
+  same?: readonly string[]
 }
 
 /** Why a line's reads make no plan: a fixed word (never page text). */
-export type BrowserReadPlanProblem = 'line' | 'values' | 'not-read' | 'wrong-object' | 'check-ng' | 'check-unreadable'
+export type BrowserReadPlanProblem = 'line' | 'values' | 'not-read' | 'wrong-object' | 'account-unknown' | 'account-mismatch' | 'wrong-parent'
+  | 'check-ng' | 'check-unreadable'
+
+/** How one read of the line came out: `ok` only when read whole, the object asked for and every must-hold fact held. */
+export type BrowserReadStatus = 'ok' | 'not-read' | 'wrong-object' | 'account-unknown' | 'account-mismatch' | 'wrong-parent'
 
 export interface BrowserReadLineOutcome {
   /** null only when every read was read whole, is the object asked for, the values pass and every `now` check is ✓. */
   problem: BrowserReadPlanProblem | null
   values: BrowserValueProblem | null
   checks: readonly BrowserCheckResult[]
+  /** Each read's status by its name (empty when the line itself is refused). */
+  reads: Readonly<Record<string, BrowserReadStatus>>
+  /** The account every account-bound read was read under, when it held; else null. */
+  account: string | null
 }
 
 /**
@@ -279,32 +329,53 @@ export interface BrowserReadLineOutcome {
  * rule: a read not read whole, or whose id is not the one asked for, makes no plan even when no check uses it.
  */
 export function evaluateBrowserReadLine(line: BrowserReadLine, map: BrowserMap, facts: BrowserReadFacts, phase: 'now' | 'after' = 'now'): BrowserReadLineOutcome {
-  if (browserReadLineProblem(line, map)) return { problem: 'line', values: null, checks: [] }
+  if (browserReadLineProblem(line, map)) return { problem: 'line', values: null, checks: [], reads: {}, account: null }
   // The values copied once (plain data), then checked and used: what was checked is what is used (review L3).
   let values: Record<string, BrowserSuppliedValue>
-  try { values = JSON.parse(JSON.stringify(facts.values ?? null)) as Record<string, BrowserSuppliedValue> } catch { return { problem: 'values', values: { problem: 'missing', value: '' }, checks: [] } }
+  try { values = JSON.parse(JSON.stringify(facts.values ?? null)) as Record<string, BrowserSuppliedValue> } catch { return { problem: 'values', values: { problem: 'missing', value: '' }, checks: [], reads: {}, account: null } }
   facts = { ...facts, values }
   const valueProblem = browserLineValuesProblem(line, facts.values)
-  // Each read's state, only when read whole and the object asked for; otherwise null (and why).
+  // The account must-hold fact (§15 C5): read before and after the reads, the same, a plain id, the expected one if any.
+  const account = accountHeld(facts)
+  // Each read's state, only when read whole, the object asked for and its must-hold facts held; otherwise null (and why).
   const states: Record<string, Readonly<Record<string, unknown>> | null> = {}
+  const readStatus: Record<string, BrowserReadStatus> = {}
   let readProblem: BrowserReadPlanProblem | null = null
+  const fail = (name: string, why: Exclude<BrowserReadStatus, 'ok'>): void => { states[name] = null; readStatus[name] = why; readProblem ??= why }
+  const idFrom = (src: BrowserLineIdSource): unknown => ('value' in src
+    ? (!valueProblem && own(facts.values, src.value) ? facts.values[src.value].value : null)
+    : (states[src.read]?.[src.field] ?? null))
   for (const r of line.reads) {
     const thing = map.things[r.thing]
     const got = own(facts.reads, r.name) ? facts.reads[r.name] : undefined
     const state = got && got.status === 'read' && !browserThingStateProblem(thing, got.state) ? got.state : null
-    const wanted = 'value' in r.id
-      ? (!valueProblem && own(facts.values, r.id.value) ? facts.values[r.id.value].value : null)
-      : (states[r.id.read]?.[r.id.field] ?? null)
-    if (!state) { states[r.name] = null; readProblem ??= 'not-read'; continue }
-    if (typeof wanted !== 'string' || state[thing.id] !== wanted) { states[r.name] = null; readProblem ??= 'wrong-object'; continue }
+    const wanted = idFrom(r.id)
+    if (!state) { fail(r.name, 'not-read'); continue }
+    if (typeof wanted !== 'string' || state[thing.id] !== wanted) { fail(r.name, 'wrong-object'); continue }
+    if (thing.must_hold?.account && account.status !== 'ok') { fail(r.name, account.status); continue }
+    if (r.parent || thing.must_hold?.parent) {
+      const parent = r.parent ? idFrom(r.parent) : null
+      if (!thing.parent || typeof parent !== 'string' || state[thing.parent.field] !== parent) { fail(r.name, 'wrong-parent'); continue }
+    }
     states[r.name] = state
+    readStatus[r.name] = 'ok'
   }
   const checks = line.checks.map(c => judge(c, line, map, facts, states, phase, valueProblem === null))
   const problem: BrowserReadPlanProblem | null = valueProblem ? 'values'
     : readProblem
       ?? (checks.some(c => c.status === 'ng') ? 'check-ng'
         : checks.some(c => c.status === 'unreadable' || (phase === 'after' && c.status === 'later')) ? 'check-unreadable' : null)
-  return { problem, values: valueProblem, checks }
+  return { problem, values: valueProblem, checks, reads: readStatus, account: account.status === 'ok' ? account.value : null }
+}
+
+/** The account must-hold fact over the facts: ok with the account, or why not (a fixed word). */
+function accountHeld(facts: BrowserReadFacts): { status: 'ok'; value: string } | { status: 'account-unknown' | 'account-mismatch' } {
+  const a = facts.account
+  const isId = (v: unknown): v is string => typeof v === 'string' && BROWSER_ID_VALUE_RE.test(v)
+  if (!isMap(a) || !isId(a.before) || !isId(a.after)) return { status: 'account-unknown' }
+  if (a.before !== a.after) return { status: 'account-mismatch' }
+  if (facts.expectedAccount !== undefined && facts.expectedAccount !== a.before) return { status: 'account-mismatch' }
+  return { status: 'ok', value: a.before }
 }
 
 function judge(
@@ -354,6 +425,12 @@ function judge(
       const day = state[c.field]
       if (day === null) return { word, status: 'ng' }
       return { word, status: day === facts.values[c.date].value ? 'ok' : 'ng' }
+    }
+    case 'changed_from': {
+      const ref = states[c.reference]
+      if (!state || !ref) return unreadable
+      const same = c.fields.filter(f => browserFieldValuesEqual(thing.fields[f], ref[f], state[f]))
+      return same.length ? { word, status: 'ng', same } : { word, status: 'ok' }
     }
   }
 }

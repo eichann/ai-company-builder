@@ -150,6 +150,38 @@ test('the browser core knows no site: a connector imports only its own folder, t
   assert.equal(connectorMayImport('shared/browser-runner', join(CLIENT, 'connectors/lstep/a.ts'), false), false)
 })
 
+/**
+ * A site's map (`connector-maps/<site>/`, generalization PR 3) imports only its own folder and the repository's
+ * shared/core; the opened lines (`browser-lines/`) only shared/core's types (they are data). Neither imports a connector,
+ * another site's map or anything of the app; nothing in the app but the composition root imports them
+ * (agent-browser.md "The first map and the inspection line").
+ */
+function mapMayImport(t: string, file: string, typeOnly: boolean): boolean {
+  const r = rel(file)
+  if (r.startsWith('browser-lines/')) return typeOnly && t.startsWith('../shared/core/')
+  const site = r.split('/').slice(0, 2).join('/')
+  return t.startsWith(`${site}/`) || t.startsWith('../shared/core/')
+}
+
+test('a site\'s map imports only its own folder and shared/core, the opened lines only core types, and only main.ts imports either', () => {
+  const files = [...sourceFiles(join(CLIENT, 'connector-maps')), ...sourceFiles(join(CLIENT, 'browser-lines'))]
+  assert.ok(files.length > 0)
+  const out: string[] = []
+  for (const file of files) {
+    for (const { spec, typeOnly } of importStatementsIn(readFileSync(file, 'utf8'))) {
+      if (!mapMayImport(target(file, spec), file, typeOnly)) out.push(`${rel(file)}: ${spec}`)
+    }
+  }
+  assert.deepEqual(out, [], 'a map and its lines are a site\'s data and reviewed readers; everything else is the core\'s')
+  const app = ['electron', 'src', 'shared', 'connectors'].flatMap(d => sourceFiles(join(CLIENT, d)))
+  const importers = app.filter(f => importsOf(f).some(spec => /^(connector-maps|browser-lines)\//.test(target(f, spec)))).map(rel)
+  assert.deepEqual(importers.filter(f => f !== 'electron/main.ts'), [], 'hand a site\'s map in from the composition root')
+  // Self-tests: another site's map, a connector and the app's runner are not allowed.
+  assert.equal(mapMayImport('connector-maps/other/x', join(CLIENT, 'connector-maps/lstep/a.ts'), false), false)
+  assert.equal(mapMayImport('connectors/lstep/x', join(CLIENT, 'connector-maps/lstep/a.ts'), false), false)
+  assert.equal(mapMayImport('../shared/core/browser-opened', join(CLIENT, 'browser-lines/lstep.ts'), false), false)
+})
+
 test('client/shared imports only itself and the repository shared/', () => {
   const files = sourceFiles(join(CLIENT, 'shared'))
   assert.ok(files.length > 0)

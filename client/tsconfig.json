@@ -20,6 +20,6 @@
       "@/*": ["src/*"]
     }
   },
-  "include": ["src", "electron", "connectors"],
+  "include": ["src", "electron", "connectors", "connector-maps", "browser-lines"],
   "references": [{ "path": "./tsconfig.node.json" }]
 }
