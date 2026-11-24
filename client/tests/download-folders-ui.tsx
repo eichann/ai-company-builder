@@ -23,6 +23,8 @@
 //          済んだメールを Gmail でもアーカイブする and the spreadsheet relay; one 「もう聞かない」 folder (chapters 28–29)
 //   (manual=1) slack=connected: 山田さん allowed Slack (DMs and mentions, 「あなたの番」 by DM), not yet 返事を送る (chapter 28)
 //   (manual=1) tab=ownkeys: Gemini, which members may bring their own key for, with none yet (chapter 28)
+//   (manual=1) tab=absences: 山田さん has no absence yet; adding one keeps it and answers that 高橋さん cannot read
+//          one waiting item (chapter 42)
 //   closed 1 = start with the settings closed: a 「設定を開く」 button (always there) opens them (Esc closes, focus returns)
 import { useState } from 'react'
 import { createRoot } from 'react-dom/client'
@@ -89,7 +91,9 @@ const manualJobs = () => [{
   toAccept: jobAccepted ? null : { version: 1, fingerprint: MANUAL_JOB_FINGERPRINT, definition: MANUAL_JOB_DEFINITION, why: 'accept' as const },
   deliverTo: null, controls: true, chainStopped: null, approvedVersion: 1,
 }]
-const sizeUnder = (p: string) => Object.entries(TREE).filter(([k]) => k === p || k.startsWith(`${p}/`)).reduce((n, [, v]) => n + v, 0)
+// ?manual=1&tab=absences: 山田さん's absences (none until he adds one).
+let manualAbsences: Array<{ id: string; userId: string; from: string; until: string; delegateId: string; delegateName: string; active: boolean; setBy: string; setAt: string }> = []
+const sizeUnder =(p: string) => Object.entries(TREE).filter(([k]) => k === p || k.startsWith(`${p}/`)).reduce((n, [, v]) => n + v, 0)
 const childrenOf = (p: string) => {
   const set = new Set<string>()
   for (const k of Object.keys(TREE)) {
@@ -188,6 +192,18 @@ Object.assign(window, {
       return { success: true, switches: mySwitches() }
     },
     getEnvStatus: async () => ({ success: true, vars: { ...envVars } }),
+    // ?manual=1: settings →「不在と代わりの人」 (chapter 42), kept like the server would.
+    ...(MANUAL ? {
+      getAbsences: async () => ({ success: true, view: { userId: 'u-yamada', absences: [...manualAbsences], canEdit: true, covering: [], today: '2026-11-20' },
+        members: [{ userId: 'u-yamada', name: '山田 太郎' }, { userId: 'u-takahashi', name: '高橋 健一' }, { userId: 'u-sato', name: '佐藤 花子' }] }),
+      addAbsence: async (_companyId: string, input: { from: string; until: string; delegateId: string }) => {
+        const absence = { id: `ab-${manualAbsences.length + 1}`, userId: 'u-yamada', from: input.from, until: input.until, delegateId: input.delegateId,
+          delegateName: input.delegateId === 'u-sato' ? '佐藤 花子' : '高橋 健一', active: false, setBy: 'u-yamada', setAt: '2026-11-20T01:00:00.000Z' }
+        manualAbsences.push(absence)
+        return { success: true, created: { absence, delegateCannotRead: 1 } }
+      },
+      removeAbsence: async (_companyId: string, id: string) => { manualAbsences = manualAbsences.filter(a => a.id !== id); return { success: true } },
+    } : {}),
     // ?manual=1: settings →「定期の仕事」 (chapter 26).
     ...(MANUAL ? {
       getMyJobs: async () => ({ success: true, jobs: manualJobs() }),

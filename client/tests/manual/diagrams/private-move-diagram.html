@@ -1,0 +1,37 @@
+<!-- The manual's chapter 40: what happens to files at a private folder's edge — moved in, moved out,
+     and when the member may no longer read it. Shot by shoot.spec.ts (scenes.ts). -->
+<style>
+  body { margin: 0; background: var(--color-surface); font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Hiragino Kaku Gothic ProN", sans-serif; color: var(--color-text); }
+  #diagram { width: 960px; padding: 28px 30px 30px; box-sizing: border-box; background: var(--color-surface); display: flex; flex-direction: column; gap: 14px; }
+  .row { display: flex; align-items: stretch; gap: 0; }
+  .place { width: 210px; padding: 14px 12px; border-radius: 14px; border: 2px solid var(--color-border-strong); background: var(--color-bg); text-align: center; font-size: 15px; font-weight: 700; display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 4px; }
+  .place small { font-size: 12px; font-weight: 400; color: var(--color-text-muted); }
+  .place.private { border-color: var(--color-primary); background: var(--color-selected-bg); }
+  .place.pc { border-style: dashed; }
+  .arrow { width: 90px; display: flex; align-items: center; justify-content: center; }
+  .what { flex: 1; margin-left: 14px; padding: 12px 16px; border-radius: 12px; font-size: 14px; line-height: 1.7; }
+  .what b { display: block; font-size: 15px; }
+  .warn { background: var(--color-warning-bg); border: 1px solid var(--color-warning-border); color: var(--color-warning-text); }
+  .info { background: var(--color-info-bg); border: 1px solid var(--color-info-border); color: var(--color-info-text); }
+  .danger { background: var(--color-danger-bg); border: 1px solid var(--color-danger-border); color: var(--color-danger-text); }
+</style>
+<div id="diagram">
+  <div class="row">
+    <div class="place">公開の場所<small>営業部/下書き など</small></div>
+    <div class="arrow"><svg width="70" height="20" viewBox="0 0 70 20" aria-hidden="true"><path d="M2 10 H58" stroke="var(--color-primary)" stroke-width="3" /><path d="M56 3 L68 10 L56 17 z" fill="var(--color-primary)" /></svg></div>
+    <div class="place private">非公開フォルダ<small>営業部/提案前メモ</small></div>
+    <div class="what warn"><b>1 公開の場所 → 非公開フォルダへ移す</b>これまでに配られた分は、みんなの手元に残ります。過去の版も会社の履歴に残ります。<br>見られたくないものは、はじめから非公開フォルダで作ります。</div>
+  </div>
+  <div class="row">
+    <div class="place private">非公開フォルダ<small>営業部/提案前メモ</small></div>
+    <div class="arrow"><svg width="70" height="20" viewBox="0 0 70 20" aria-hidden="true"><path d="M2 10 H58" stroke="var(--color-primary)" stroke-width="3" /><path d="M56 3 L68 10 L56 17 z" fill="var(--color-primary)" /></svg></div>
+    <div class="place">公開の場所<small>営業部/下書き など</small></div>
+    <div class="what info"><b>2 非公開フォルダ → 公開の場所へ移す</b>次に同期したときに、会社の全員の手元に届きます。</div>
+  </div>
+  <div class="row">
+    <div class="place private">非公開フォルダ<small>あなたの PC の中</small></div>
+    <div class="arrow"><svg width="70" height="20" viewBox="0 0 70 20" aria-hidden="true"><path d="M2 10 H58" stroke="var(--color-danger-icon)" stroke-width="3" /><path d="M56 3 L68 10 L56 17 z" fill="var(--color-danger-icon)" /></svg></div>
+    <div class="place pc">なくなる<small>この PC から消える</small></div>
+    <div class="what danger"><b>3 見られる人から外れたとき</b>次の同期で、フォルダがこの PC から消えます。同期していなかった書きかけも、一緒に消えます（控えは残りません）。</div>
+  </div>
+</div>

@@ -37,7 +37,7 @@ A scene is data in `client/tests/manual/scenes.ts`:
 
 - `page` (+ `query`): which preview page to open (`client/tests/<page>-ui.html`, the real React
   components with the app's background parts faked; the same pages the UI tests use).
-- `steps`: clicks, right clicks, double clicks, hovers, typing (`fill`, `typeAtEnd`), keys, a preview page's own hook
+- `steps`: clicks, right clicks, double clicks, hovers, drags, typing (`fill`, `typeAtEnd`), choosing in a list (`select`), keys, a preview page's own hook
   (`run`) and waits to reach the state to show.
 - `crop`: an element (with padding) or a region to cut out; the whole window when absent.
 - `annotations`: red frames (`box`), numbered red markers (`marker`, placed top-left, left,

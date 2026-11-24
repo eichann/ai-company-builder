@@ -109,6 +109,7 @@ async function runStep(page: Page, step: SceneStep): Promise<void> {
   else if ('hover' in step) await (await one(page, step.hover)).hover()
   else if ('drag' in step) await (await one(page, step.drag)).dragTo(await one(page, step.to))
   else if ('fill' in step) await (await one(page, step.fill)).fill(step.text)
+  else if ('select' in step) await (await one(page, step.select)).selectOption({ label: step.option })
   else if ('typeAtEnd' in step) {
     await (await one(page, step.typeAtEnd)).click()
     await page.keyboard.press('ControlOrMeta+End')

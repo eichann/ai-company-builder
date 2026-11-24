@@ -35,6 +35,8 @@ export type SceneStep =
   | { hover: string }
   /** Types `text` into the target field, replacing what it held. */
   | { fill: string; text: string }
+  /** Chooses the option with this label in the target `<select>`. */
+  | { select: string; option: string }
   /** Clicks the target, moves to its end (⌘↓) and types `text` (an editor). */
   | { typeAtEnd: string; text: string }
   /** Presses a key (Playwright key name, e.g. `Escape`). */
@@ -150,7 +152,11 @@ const SKILL_CARD = (name: string) => `xpath=//*[normalize-space()="${name}"]/anc
 // 33〜38章 もっと便利に: the main screen with what those chapters show (skill-layout-ui.html ?extra=1: an HTML
 // proposal and its drawn document view, a longer 前の版, 「納期」 found in the visit notes, a Skill of 山田さん's own).
 const EXTRA = { page: 'skill-layout', query: { companies: '2', manual: '1', extra: '1' } } as const
-const EXTRA_LIVE = { page: 'skill-layout', query: { companies: '2', manual: '1', extra: '1', chat: 'live' } } as const
+// 39〜40章: 営業部's file list as 山田さん sees it (private-folders-ui.html ?manual=1): 提案前メモ is private,
+// 研修の説明動画.mp4 is over 100 MB.
+const PRIVATE_TREE = { page: 'private-folders', query: { manual: '1' }, viewport: { width: 900, height: 700 } } as const
+const TOO_LARGE_BADGE = 'role=button[name="研修の説明動画.mp4は大きすぎて共有されていません"]'
+const EXTRA_LIVE ={ page: 'skill-layout', query: { companies: '2', manual: '1', extra: '1', chat: 'live' } } as const
 const VISIT_MEMO_1120 = 'role=button[name=/^訪問メモ_1120\\.md/]'
 const HTML_REQUEST = '提案書_A社向け.md を、お客さまに見せる HTML の資料にしてください。'
 const DOC_PAGE = '[data-testid="doc-view-page"]'
@@ -2232,5 +2238,259 @@ export const scenes: Scene[] = [
     id: 'skill-grow-diagram',
     about: 'Diagram: make a Skill, try it on this PC, hand it to someone who may change the company\'s Skills, then it reaches everyone.',
     diagram: true,
+  },
+
+  // ── 39章 ファイルがほかの人に届かない・知らないうちに変わった ─────────────
+  {
+    id: 'too-large-mark',
+    about: '研修の説明動画.mp4 (over 100 MB) in the file list with 「共有されていません」.',
+    ...PRIVATE_TREE,
+    steps: [{ waitFor: TOO_LARGE_BADGE }],
+    crop: { region: { x: 0, y: 0, width: 300, height: 330 } },
+    annotations: [{ box: TOO_LARGE_BADGE }, { marker: { target: TOO_LARGE_BADGE, label: '1', at: 'right' } }],
+  },
+  {
+    id: 'too-large-help',
+    about: 'The mark pressed: 「大きすぎて共有されていません」 and the three ways to hand it over.',
+    ...PRIVATE_TREE,
+    steps: [{ click: TOO_LARGE_BADGE }, { waitFor: 'role=dialog' }, SETTLE],
+    crop: { target: 'role=dialog', padding: 24 },
+    annotations: [
+      { marker: { target: 'text=/^100MB をこえるファイルは/', label: '1', at: 'left' } },
+      { box: 'role=list[name="ほかの人にも見てもらうには"]' }, { marker: { target: 'role=list[name="ほかの人にも見てもらうには"]', label: '2', at: 'left' } },
+    ],
+  },
+  {
+    id: 'settings-gitignore',
+    about: '設定 →「同期しないファイル」 as a member reads it: only admins may change it; what is always left out.',
+    page: 'download-folders',
+    query: { tab: 'gitignore', role: 'member', manual: '1' },
+    viewport: { width: 1100, height: 800 },
+    steps: [{ waitFor: 'text=会社全体に効くので、変えられるのは管理者だけです。' }],
+    annotations: [
+      { marker: { target: 'text=会社全体に効くので、変えられるのは管理者だけです。', label: '1', at: 'left' } },
+      { box: 'text=自動で追加される項目 >> xpath=..' }, { marker: { target: 'text=自動で追加される項目 >> xpath=..', label: '2', at: 'left' } },
+    ],
+  },
+  {
+    id: 'editor-changed-outside',
+    about: 'An open file with unsaved edits changed on disk: the band, 差分を見る and 自分の編集を残す.',
+    page: 'editor-tabs',
+    query: { view: 'external' },
+    steps: [
+      { click: 'role=tab[name="提案書.md"]' }, { typeAtEnd: '.cm-content', text: '\n見積は来週お送りします。' },
+      { run: 'window.__acbExternalEdit("/Users/demo/会社/営業部/提案書.md")' }, { waitFor: 'role=alert' },
+    ],
+    crop: { region: { x: 0, y: 112, width: 1280, height: 150 } },
+    annotations: [
+      { marker: { target: 'text=このファイルは外部で変更されました。あなたの編集はまだ保存していません', label: '1', at: 'below' } },
+      { box: 'role=button[name="ディスクの内容を読み込む"]' }, { marker: { target: 'role=button[name="ディスクの内容を読み込む"]', label: '2', at: 'below' } },
+      { box: 'role=button[name="差分を見る"]' }, { marker: { target: 'role=button[name="差分を見る"]', label: '3', at: 'below' } },
+      { box: 'role=button[name="自分の編集を残す"]' }, { marker: { target: 'role=button[name="自分の編集を残す"]', label: '4', at: 'below' } },
+    ],
+  },
+
+  // ── 40章 非公開フォルダで知っておくこと ─────────────────────────────────
+  {
+    id: 'new-folder-scope',
+    about: '「新しいフォルダ…」 as a member: 公開範囲 with 非公開 greyed and why.',
+    ...PRIVATE_TREE,
+    query: { ...PRIVATE_TREE.query, role: 'member' },
+    steps: [{ click: 'role=button[name="新しいフォルダ…"]' }, { waitFor: 'text=非公開のフォルダは、管理者か部署の管理役が作れます' }, SETTLE],
+    crop: { target: 'role=dialog', padding: 24 },
+    annotations: [
+      { box: 'role=radiogroup[name="公開範囲"]' }, { marker: { target: 'role=radiogroup[name="公開範囲"]', label: '1', at: 'left' } },
+      { marker: { target: 'text=非公開のフォルダは、管理者か部署の管理役が作れます', label: '2', at: 'left' } },
+    ],
+  },
+  {
+    id: 'private-move-diagram',
+    about: 'Diagram: moving into a private folder, out of one, and losing the right to read one.',
+    diagram: true,
+  },
+  {
+    id: 'move-to-private',
+    about: '見積_下書き.md dragged onto 提案前メモ: 「非公開フォルダへ移動します」 and what stays with everyone.',
+    ...PRIVATE_TREE,
+    steps: [{ drag: 'role=button[name=/^見積_下書き\\.md/]', to: 'role=button[name=/^提案前メモ/]' }, { waitFor: 'role=dialog' }, SETTLE],
+    crop: { target: 'role=dialog', padding: 24 },
+    annotations: [
+      { box: 'text=/このファイルの過去の内容は、全員の手元に残っています/' }, { marker: { target: 'text=/このファイルの過去の内容は、全員の手元に残っています/', label: '1', at: 'left' } },
+    ],
+  },
+  {
+    id: 'move-to-public',
+    about: 'C社_検討メモ.md dragged out of 提案前メモ into 下書き: 「全員に公開されます」 and ［公開の場所へ移動する］.',
+    ...PRIVATE_TREE,
+    steps: [{ drag: 'role=button[name=/^C社_検討メモ\\.md/]', to: 'role=button[name=/^下書き/]' }, { waitFor: 'role=dialog' }, SETTLE],
+    crop: { target: 'role=dialog', padding: 24 },
+    annotations: [
+      { marker: { target: 'text=/全員に公開されます。次に同期したときに/', label: '1', at: 'left' } },
+      { box: 'role=button[name="公開の場所へ移動する"]' }, { marker: { target: 'role=button[name="公開の場所へ移動する"]', label: '2', at: 'below' } },
+    ],
+  },
+  {
+    id: 'access-lost-notice',
+    about: 'After a sync: 提案前メモ taken off this PC because 山田さん may no longer read it.',
+    ...MAIN,
+    query: { ...MAIN.query, result: 'lost' },
+    steps: [CLOSE_LIST, { click: SYNC }, { waitFor: 'text=/手元から削除しました/' }],
+    crop: { region: { x: 760, y: 520, width: 520, height: 280 } },
+    annotations: [{ marker: { target: 'text=/手元から削除しました/', label: '1', at: 'left' } }],
+  },
+
+  // ── 41章 AI が止まっている・記録されている・囲われているとき ─────────────
+  {
+    id: 'ai-safety-diagram',
+    about: 'Diagram: what an administrator can do about the AI (stop, keep a log, run it inside 「AI の囲い」), what you see and do.',
+    diagram: true,
+  },
+  {
+    id: 'chat-log-notice',
+    about: 'The one-time notice in 「AIへの相談」: the AI action log goes to the administrators, without the conversation or files.',
+    ...MAIN,
+    query: { ...MAIN.query, notice: '1' },
+    steps: [{ waitFor: 'role=dialog[name="AI の操作の記録について"]' }, SETTLE],
+    crop: { target: 'role=dialog[name="AI の操作の記録について"]', padding: 32 },
+    annotations: [{ marker: { target: 'text=/^AI の操作の記録（/', label: '1', at: 'left' } }],
+  },
+  {
+    id: 'settings-ai-notice',
+    about: 'Settings always show the two notes: the AI action log and 「AI の囲い」.',
+    page: 'download-folders',
+    query: { tab: 'mine', manual: '1', role: 'member' },
+    viewport: { width: 1100, height: 800 },
+    steps: [{ waitFor: 'text=/AI の操作の記録/' }],
+    crop: { target: 'role=navigation[name="設定の項目"]', padding: { x: 40, y: 8 } },
+    annotations: [
+      { marker: { target: 'text=/^AI の操作の記録/', label: '1', at: 'right' } },
+      { marker: { target: 'text=/^会社の設定によっては、AI が実行するコマンドは/', label: '2', at: 'right' } },
+    ],
+  },
+  {
+    id: 'settings-mine-company-off',
+    about: '設定 →「自分の設定」 when the company turned 受信を読む off: greyed, 「会社の設定で止まっています」.',
+    page: 'download-folders',
+    query: { tab: 'mine', manual: '1', role: 'member', company: 'off' },
+    viewport: { width: 1100, height: 800 },
+    steps: [{ waitFor: '[data-company-off]' }],
+    crop: { region: { x: 290, y: 60, width: 760, height: 330 } },
+    annotations: [{ box: '[data-company-off]' }, { marker: { target: '[data-company-off]', label: '1', at: 'below' } }],
+  },
+  {
+    id: 'record-feature-off',
+    about: 'A プロジェクト while the company has プロジェクト turned off: 「この機能は今オフです」, nothing to press.',
+    page: 'record-card',
+    query: { record: 'project', manual: '1', off: '1' },
+    viewport: { width: 1100, height: 900 },
+    steps: [{ waitFor: 'text=この機能は今オフです' }],
+    crop: { region: { x: 0, y: 0, width: 830, height: 300 } },
+    annotations: [{ box: 'text=この機能は今オフです >> xpath=..' }, { marker: { target: 'text=この機能は今オフです >> xpath=..', label: '1', at: 'left' } }],
+  },
+
+  // ── 42章 休むとき：不在と代わりの人 ───────────────────────────────────────
+  {
+    id: 'settings-absence',
+    about: '設定 →「不在と代わりの人」: 山田さん adds 11/25–11/27 with 高橋さん; one item 高橋さん cannot read.',
+    page: 'download-folders',
+    query: { tab: 'absences', manual: '1', role: 'member' },
+    viewport: { width: 1100, height: 800 },
+    steps: [
+      { waitFor: 'text=予定している不在はありません。' },
+      { fill: 'xpath=//label[span[normalize-space()="始まりの日"]]/input', text: '2026-11-25' },
+      { fill: 'xpath=//label[span[normalize-space()="終わりの日"]]/input', text: '2026-11-27' },
+      { select: 'xpath=//label[span[normalize-space()="代わりの人"]]/select', option: '高橋 健一' },
+      { click: 'role=button[name="追加"]' },
+      { waitFor: 'text=/代わりの人が見られないものが 1 件あります/' },
+    ],
+    annotations: [
+      { box: 'text=11月25日〜11月27日 >> xpath=..' }, { marker: { target: 'text=11月25日〜11月27日 >> xpath=..', label: '1', at: 'left' } },
+      { marker: { target: 'text=不在を追加', label: '2', at: 'left' } },
+      { marker: { target: 'text=/代わりの人が見られないものが 1 件あります/', label: '3', at: 'left' } },
+    ],
+  },
+
+  // ── 43章 共有フォルダのない会社では ─────────────────────────────────────
+  {
+    id: 'title-bar-local-only',
+    about: 'A company without the shared folder: 「この PC だけで作業」 in the title bar, pressed.',
+    ...MAIN,
+    query: { ...MAIN.query, kind: 'none' },
+    steps: [CLOSE_LIST, { click: 'role=button[name="この PC だけで作業"]' }, { waitFor: 'role=note' }],
+    crop: { region: { x: 380, y: 0, width: 900, height: 220 } },
+    annotations: [
+      { box: 'role=button[name="この PC だけで作業"]' }, { marker: { target: 'role=button[name="この PC だけで作業"]', label: '1', at: 'left' } },
+      { marker: { target: 'role=note', label: '2', at: 'left' } },
+    ],
+  },
+  {
+    id: 'skill-company-shelf',
+    about: 'A company without the shared folder: thank-you-mail is 「会社の Skill」, with ［自分用に直す］.',
+    ...MAIN,
+    query: { ...MAIN.query, kind: 'none' },
+    steps: [CLOSE_LIST, { click: 'role=button[name="全社" s]' }, { click: SKILLS_TAB }, { click: `${SKILL_CARD('thank-you-mail')} >> role=button[name="設定"]` }, { waitFor: 'text=/^会社の Skill（版/' }, SETTLE],
+    crop: { region: { x: 0, y: 120, width: 1050, height: 560 } },
+    annotations: [
+      { box: 'text=/^会社の Skill（版/ >> xpath=..' }, { marker: { target: 'text=/^会社の Skill（版/ >> xpath=..', label: '1', at: 'left' } },
+      { marker: { target: 'role=button[name="自分用に直す"]', label: '2', at: 'left' } },
+    ],
+  },
+
+  // ── 44章 設定の見取り図と、アカウント ──────────────────────────────────
+  {
+    id: 'settings-nav',
+    about: 'The top of the settings\' list of sections: あなた, 同期, AI と連携.',
+    page: 'download-folders',
+    query: { tab: 'mine', manual: '1', role: 'member', browser: '1' },
+    viewport: { width: 1100, height: 800 },
+    steps: [{ waitFor: 'role=button[name="自分の設定"]' }],
+    crop: { target: 'role=navigation[name="設定の項目"]', padding: { x: 40, y: 8 } },
+    annotations: [
+      { marker: { target: 'text="あなた"', label: '1', at: 'right' } },
+      { marker: { target: 'text="同期"', label: '2', at: 'right' } },
+      { marker: { target: 'text="AI と連携"', label: '3', at: 'right' } },
+    ],
+  },
+  {
+    id: 'settings-nav-more',
+    about: 'The settings\' list scrolled to its end: the three settings for the company\'s technical staff, 仕事 and 入力.',
+    page: 'download-folders',
+    query: { tab: 'mine', manual: '1', role: 'member', browser: '1' },
+    viewport: { width: 1100, height: 800 },
+    steps: [
+      { waitFor: 'role=button[name="自分の設定"]' },
+      // The list scrolls inside the window (its height stays the same).
+      { run: 'for (const el of document.querySelectorAll(\'nav[aria-label="設定の項目"] *\')) if (el.scrollHeight > el.clientHeight + 4 && getComputedStyle(el).overflowY !== "visible") el.scrollTop = el.scrollHeight' },
+      SETTLE,
+    ],
+    crop: { target: 'role=navigation[name="設定の項目"]', padding: { x: 40, y: 8 } },
+    annotations: [
+      { box: 'role=button[name="APIキー（このPC）"]' }, { box: 'role=button[name="環境変数（.env）"]' }, { box: 'role=button[name="AIに渡す環境変数"]' },
+      { marker: { target: 'role=button[name="環境変数（.env）"]', label: '4', at: 'right' } },
+      { marker: { target: 'text="仕事"', label: '5', at: 'right' } },
+      { marker: { target: 'text="入力"', label: '6', at: 'right' } },
+    ],
+  },
+  {
+    id: 'title-bar-account',
+    about: 'The right end of the title bar: language, light / dark, 使い方, settings and ログアウト.',
+    ...MAIN,
+    steps: [CLOSE_LIST],
+    crop: { region: { x: 840, y: 0, width: 440, height: 90 } },
+    annotations: [
+      { marker: { target: 'role=button[name="EN"]', label: '1', at: 'below' } },
+      { marker: { target: 'role=button[name="ダークモード"]', label: '2', at: 'below' } },
+      { marker: { target: 'role=button[name="使い方"]', label: '3', at: 'below' } },
+      { marker: { target: 'role=banner >> role=button[name="設定"]', label: '4', at: 'below' } },
+      { marker: { target: 'role=banner >> role=button[name="ログアウト"]', label: '5', at: 'below' } },
+    ],
+  },
+  {
+    id: 'manual-export',
+    about: '［使い方］ opened in the middle: its tool bar with ［書き出す］.',
+    ...MAIN,
+    steps: [CLOSE_LIST, { click: 'role=button[name="使い方"]' }, { waitFor: 'role=toolbar[name="使い方の表示"]' }],
+    crop: { target: 'role=toolbar[name="使い方の表示"]', padding: 12 },
+    annotations: [{ box: 'role=button[name="書き出す"]' }, { marker: { target: 'role=button[name="書き出す"]', label: '1', at: 'left' } }],
   },
 ]
