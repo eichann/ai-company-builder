@@ -23,7 +23,8 @@ Status:
   (admin tests, in CI) fails when a page shows a picture that is not there, and when a ［name］ the
   guide cites is no longer one whole piece of text in the admin console (`admin/src`) or the app
   (`client/src`, `client/shared`) — or is listed in `ui-names-allowlist.json` with its reason.
-  Do not edit the PNGs by hand: the next shoot overwrites them.
+  Do not edit the PNGs by hand: the next shoot overwrites them. A picture still to come is a
+  placeholder line `［写真：<admin page path> — 何を写すか］` until its scene exists.
 
 ## Taking the screenshots again
 

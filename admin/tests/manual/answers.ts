@@ -247,6 +247,8 @@ export function pageAnswers(): Routes {
     [`GET ${API}/permissions/effective?path=`]: ok(effectiveAt('')),
     [`GET ${API}/skill-editors`]: ok(skillEditors),
     [`GET ${API}/permissions/folders?path=`]: ok({ path: '', folders: departments.map((d) => ({ name: d.folder, path: d.folder, scopeId: `s_${d.id}`, hasRules: false })) }),
+    // 「預かり」 (the folder page's third tab counts what waits): nothing handed over. The guide's 5節 does not show it yet.
+    [`GET ${API}/holding`]: ok({ items: [] }),
     [`GET ${API}/private-folders`]: ok([hrSummary]),
     [`GET ${API}/private-folders/s_hr`]: ok(hrFolder),
   }

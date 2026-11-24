@@ -30,8 +30,12 @@ function pictureRefs(markdown: string): string[] {
   return refs.filter((ref) => !/^[a-z][a-z0-9+.-]*:/i.test(ref))
 }
 
-/** The ［…］ names a page cites (full-width brackets are the guide's convention for controls). */
-const citedNames = (markdown: string) => [...markdown.matchAll(/［([^］\n]+)］/g)].map((m) => m[1].trim())
+/**
+ * The ［…］ names a page cites (full-width brackets are the guide's convention for controls), leaving out
+ * a placeholder of a picture still to come (［写真：…］, manual-admin/README.md).
+ */
+const citedNames = (markdown: string) =>
+  [...markdown.matchAll(/［([^］\n]+)］/g)].map((m) => m[1].trim()).filter((name) => !name.startsWith('写真：'))
 
 /**
  * Whether `source` holds `name` as one whole piece of text (a string literal, JSX text or a JSON

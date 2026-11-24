@@ -1,3 +1,4 @@
 {
-  "HubSpot に聞いて確かめる": "drawn from a template with the connector's label (`${system} に聞いて確かめる`, admin/src/app/companies/[id]/integrations/page.tsx), so the whole name is not one piece of text in the source"
+  "HubSpot に聞いて確かめる": "drawn from a template with the connector's label (`${system} に聞いて確かめる`, admin/src/app/companies/[id]/integrations/page.tsx), so the whole name is not one piece of text in the source",
+  "フォルダに入れる": "the button shows how many files it takes in (`フォルダに入れる（${n}件）`, admin/src/components/folders/holding-item-dialog.tsx); the guide names it without the count"
 }
