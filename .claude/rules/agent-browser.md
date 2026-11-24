@@ -1625,8 +1625,13 @@ its runner takes the shared set of busy windows.
   not-done writes as steps; none while one is in doubt), ［済んでいた］［されていなかった］ from the server's
   `confirmableAt` (`browserLines:confirmWrite`), and 「もう一度は送りません」. Built only from the map's and the line's words
   and the values the person confirmed. A line's own stop note (§16-3 item 5) has no field yet.
-- **The seam for PC registration** (another PR): the server's `gate` (one function: create, approve, claim, every permit)
-  takes its device check; the app's switch (`browserAiSwitch`) is the one place this PC is asked.
+- **This PC's registration** (#833, "This PC's registration"): a plan of writes goes through the same device check as
+  every line plan — `gate` asks `devices.check` first at create (the plan is bound to that registration), approve, claim
+  and **every write's permit**; a PC stopped or another PC → the permit is refused and the state table ends the run
+  (`claimed` → void, `running` with nothing open → partial: what was done stays, the rest skipped); reports and confirms
+  are clean-up and never asked, so a write already on its way still settles. Tested in `browser-devices.test.ts` (a write
+  plan bound to its PC; a PC stopped between two writes). The app's switch (`browserAiSwitch`) stays the one place this
+  PC is asked on the app's side.
 - **Remaining limits** (said): a created object's identification is the answer's id + its strict read + the prediction +
   the account on both sides — the parent's list difference (C3) waits for a map read of such a list, and "nothing else
   references it" is the map's reviewed promise, checked by the test write (C2); a json / multipart body is the reviewed
