@@ -1024,7 +1024,7 @@ Event-triggered jobs (4a) store `schema: 2`. Production may run 4-0 again after 
   fails closed) and `[1, 2, 3, 4]` since member proposals' PR C (schema 4 is schema 1's content: the same words, its 受け取る
   as any: "Member proposals" "The app (PR C)"). The core reads `schema: 3` since 4b-1 (`JOB_SCHEMAS` `[1, 2, 3]`) and `schema: 4` since member proposals (`[1, 2, 3, 4]`; the
   screens announce 4 since their PRs B / C) and `schema: 5` since 4b-4 PR1 (`[1, 2, 3, 4, 5]`, "The set watch (schema 5)";
-  the admin console announces it since 4b-4 PR7, the app not yet). The server's tests of "a shape this build does not know" stand in `schema: 6`
+  the admin console announces it since 4b-4 PR7, the app since PR6b — merged together). The server's tests of "a shape this build does not know" stand in `schema: 6`
   since then (`schema: 5` before 4b-4 PR1, `schema: 4` before that) (`job-schemas.test.ts`, `job-rollback-floor.test.ts` reads the frozen 4b-1 fixture's version one shape later;
   the floor build runs it as written). Tests
   `admin/tests/job-screen-schemas.test.ts` (the core stood in by one reading `schema: 6` since 4b-4 PR1 — `schema: 5` since PR B, `schema: 4` since 4b-3,
@@ -1741,7 +1741,7 @@ not make jobs members' apps cannot run).
     (`JOB_SET_WATCH_OPENED`, by index, each in `jobSetTriggerText`'s words) — never words of the admin's own; under it what the
     combination takes and never takes (`setWatchConditionLines`: the counted causes, the assignee from creation, the first
     done, one per meeting, each guard) and when it does not run (`SET_WATCH_NOT_RUN_NOTE`, memo §2-2). Then the department (its
-    own folder, from the departments list) and the Skill it runs, the Skills it reads (1–4, one per line: a name of the same
+    own folder, from the departments list) and the Skill it runs, the Skills it reads (0–4, one per line: a name of the same
     department or 「部署のフォルダ/Skill」), read places, the deliverable folder, minutes per run and the day's limit. 「すること」,
     a time job's check, record reads, mail drafts and a place outside are not offered: `setWatchFromForm` builds schema 5 with
     the check `matched_record`, the minutes route alone, `creates: ['task']` with `records`, `outbound: none` and no
@@ -1763,7 +1763,7 @@ not make jobs members' apps cannot run).
   - **A set watch a member proposed** (PR6b, "Member proposals" "A set watch from the app"): the same words, the 「届いた案」 card and
     the approval's 版の出どころ; its edit form (`JobFormFields` `fromProposal`: a job with `proposal`, of any schema) offers neither
     責任者 nor 「いつ動くか」 (the server refuses both) and sends schema 5 with `baseVersion`; the app's shape (no read places,
-    `.personal/たたき台/`, 30 minutes, 10 a day) round-trips exactly. Its proposer accepts in the app, as every proposal's (an
+    `.personal/提案書/`, 30 minutes, 10 a day) round-trips exactly. Its proposer accepts in the app, as every proposal's (an
     owner / admin's own set watch they made here is accepted here, as other shapes).
   - **Overlap warnings** (`setWatchOverlaps`, the approval): another job of this shape that is active and approved with the same
     responsible person (from the list the page read; a paused one does not count, as on the server), and a business plugin

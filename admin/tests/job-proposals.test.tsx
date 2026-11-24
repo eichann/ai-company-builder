@@ -288,7 +288,7 @@ describe('a set watch a member proposed from the app (schema 5, 4b-4 PR6b)', () 
   /**
    * The shape PR6b's server makes (`setWatchProposalDefinition` in `shared/core/job-proposals.ts`, then pinned): the opened
    * combination, the member's department Skill, the Skills it reads, the minutes route alone, its one やること, writing only in
-   * `.personal/たたき台/` of that department, 30 minutes, 10 a day, one day's wait — and no origin mark (schema 5 takes none).
+   * `.personal/提案書/` of that department, 30 minutes, 10 a day, one day's wait — and no origin mark (schema 5 takes none).
    */
   const setProposalDef = (over: Record<string, unknown> = {}): JobDefinition => {
     const parsed = parseJobDefinition({
@@ -299,7 +299,7 @@ describe('a set watch a member proposed from the app (schema 5, 4b-4 PR6b)', () 
       grant: {
         tools: ['records', 'files_write'], creates: ['task'], routes: ['GET /minutes/:recordId/text'],
         reads: { paths: [], calls: [], skills: [{ place: '営業部', skill: 'proposal', fingerprint: 'b'.repeat(40) }, { place: '経営企画', skill: 'pricing', fingerprint: 'c'.repeat(40) }] },
-        writes: { area: 'deliverable', place: '営業部', folder: 'たたき台' }, outbound: 'none', limits: { minutes: 30, runsPerDay: 10 },
+        writes: { area: 'deliverable', place: '営業部', folder: '提案書' }, outbound: 'none', limits: { minutes: 30, runsPerDay: 10 },
       },
       decision: { reasons: [{ code: 'internal', label: '社内の会議' }] },
       ...over,
@@ -377,7 +377,7 @@ describe('a set watch a member proposed from the app (schema 5, 4b-4 PR6b)', () 
     expect(form!.proposal).toBe(false)
     const back = definitionFromForm(form!)
     expect(back.ok).toBe(true)
-    if (back.ok) expect(back.definition).toMatchObject({ schema: 5, grant: { tools: ['records', 'files_write'], reads: { paths: [] }, writes: { place: '営業部', folder: 'たたき台' } } })
+    if (back.ok) expect(back.definition).toMatchObject({ schema: 5, grant: { tools: ['records', 'files_write'], reads: { paths: [] }, writes: { place: '営業部', folder: '提案書' } } })
   })
 })
 

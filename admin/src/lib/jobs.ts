@@ -9,7 +9,7 @@
  */
 import {
   JOB_EVENT_PC_EXPIRES_DEFAULT_MINUTES, JOB_MINUTES_ROUTE, JOB_NAME_MAX, JOB_PROPOSAL_ORIGIN, JOB_PROPOSAL_SCHEMA, JOB_READ_SKILLS_MAX, JOB_SET_CHECK_KIND,
-  JOB_SCHEMAS, JOB_SET_WATCH_OPENED, JOB_SET_WATCH_SCHEMA, isRecordTrigger, isSetTrigger, knownJobDefinition, JOB_OUTBOUND_ROUTES, JOB_TASK_TITLE_MAX, JOB_TITLE_WORDS_MAX, parseJobDefinition,
+  JOB_SCHEMAS, JOB_SET_WATCH_OPENED, JOB_SET_WATCH_SCHEMA, isRecordTrigger, jobPinnedDepartmentSkills, isSetTrigger, knownJobDefinition, JOB_OUTBOUND_ROUTES, JOB_TASK_TITLE_MAX, JOB_TITLE_WORDS_MAX, parseJobDefinition,
   type JobDefinition, type JobDefinitionResult, type JobDoneMark, type JobGrant, type JobSetTrigger, type JobSkillPin, type JobWeekday,
 } from '../../../shared/core/jobs'
 import { BUILTIN_CONNECTORS, type DeliveryPlaceKind } from '../../../shared/core/builtin-connectors'
@@ -539,8 +539,7 @@ export function setWatchTriggerText(trigger: JobSetTrigger): string {
 
 /** The Skill names a set watch runs or reads: what the server matches a business plugin's step setting against. */
 export function setWatchSkillNames(d: JobDefinition): string[] {
-  const run = d.run.kind === 'procedure' && d.run.procedure.source === 'department_skill' ? [d.run.procedure.skill] : []
-  return [...new Set([...run, ...(d.grant.reads.skills ?? []).map(p => p.skill)])]
+  return [...new Set(jobPinnedDepartmentSkills(d).map(p => p.skill))]
 }
 
 /**
