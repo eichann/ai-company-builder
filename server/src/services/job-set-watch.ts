@@ -21,7 +21,7 @@
  */
 import { MINUTES_ACTOR, MINUTES_REVIEW_KIND, TASK_KIND_FIELD } from '../../shared/core/core-types'
 import {
-  JOB_SET_CHECK_KIND, JOB_SET_WATCH_SCHEMA, isSetTrigger, jobPinnedDepartmentSkills, jobSetWatchOpened,
+  JOB_ACTOR, JOB_SET_CHECK_KIND, JOB_SET_WATCH_SCHEMA, isSetTrigger, jobPinnedDepartmentSkills, jobSetWatchOpened, occurrenceTaskId, storedJobDefinition,
   type JobDefinition, type JobOutcomeCode, type JobSetMarkOutcome, type JobSetTrigger,
 } from '../../shared/core/jobs'
 import { replayRecordState, type LedgerEntry, type LedgerValue } from '../../shared/core/record-ledger'
@@ -30,6 +30,7 @@ import type { RecordRow } from '../ports/records'
 import type { Member } from './access'
 import { isMeetingPerson } from './meeting-people'
 import { recordReader } from './record-access'
+import type { ServiceCreateInput } from './record-engine'
 import { currentTypes } from './record-index'
 
 /** The meeting's output id of its 「議事録を確認する」 (minutes-review.ts: `meetingOutputId(…, 'task', meeting, MINUTES_REVIEW_KEY)`). */
@@ -187,4 +188,70 @@ export function setWatchCondition(handle: CompanyData, definition: JobDefinition
   if (now.state !== 'done') return 'EVENT_NOT_NEEDED'
   if (now.fields.assignee !== responsible.userId) return 'EVENT_NOT_ASSIGNEE'
   return null
+}
+
+/**
+ * The やること a set watch's finish makes (4b-4 PR3, owner memo §5-1 / 付録 B 「作るやること」): a service write — never the AI's
+ * create, so the meeting's 出どころの枠 (a quote) does not apply —, its id from the occurrence (one by construction), **owner-only**
+ * for the responsible person, linked to the meeting it was made for (`links.meeting`: the meeting's name reaches only someone
+ * who reads the meeting, through the link). **Its name is the meeting's date only** (「11月23日の会議のたたき台を確かめる」):
+ * the やること outlives the person's access to the meeting, so neither the meeting's name nor a customer's may be in it (I6,
+ * T15). The judgement (進める / 人に聞く / 判断できなかった), its reason and what is not confirmed are **not** on it (T17): they are the
+ * occurrence's (`ai_job_set_reports`, read only through its visibility) and the PC's. Quiet (D9): the やること in 「あなたの番」 is
+ * the notice.
+ */
+export function setWatchTaskInput(handle: CompanyData, definition: JobDefinition,
+  occ: { id: string; dueAt: string; timeZone: string; eventMeetingId?: string | null }, runId: string): ServiceCreateInput {
+  const meetingId = occ.eventMeetingId ?? ''
+  const at = fieldsNow(handle, meetingId).fields.meeting_at
+  return {
+    type: 'task', id: occurrenceTaskId(occ.id), title: setWatchTaskTitle(typeof at === 'string' ? at : null, occ.dueAt, occ.timeZone),
+    personalOwner: definition.actingUser, fields: { assignee: definition.actingUser }, links: { meeting: [meetingId] },
+    actor: { ...JOB_ACTOR, runId }, note: '定期の仕事から作りました', quiet: true,
+  }
+}
+
+/** 「<月>月<日>日の会議のたたき台を確かめる」 from the meeting's time (else the event's), in company time: a date and fixed words only. */
+export function setWatchTaskTitle(meetingAt: string | null, fallback: string, timeZone: string): string {
+  const ms = meetingAt !== null && !Number.isNaN(Date.parse(meetingAt)) ? Date.parse(meetingAt) : Date.parse(fallback)
+  let month = ''
+  let day = ''
+  try {
+    for (const p of new Intl.DateTimeFormat('en-US', { timeZone, month: 'numeric', day: 'numeric' }).formatToParts(new Date(ms))) {
+      if (p.type === 'month') month = p.value
+      if (p.type === 'day') day = p.value
+    }
+  } catch { /* an unknown zone: the words without a date */ }
+  return month && day ? `${month}月${day}日の会議のたたき台を確かめる` : '会議のたたき台を確かめる'
+}
+
+/**
+ * A set watch's occurrence the member may see as its responsible person (4b-4 PR3): the occurrence (a shape this build knows),
+ * of `jobId` when given, pinned to a version naming them, of a set watch, and shown to them now (I8: they read the record and
+ * the meeting and are one of its people — `setOccurrenceShown`). Else null: the notice, the judgement and the correction
+ * route are not there for them, whoever they are (an owner / admin who did not attend included).
+ */
+export function ownSetOccurrence(handle: CompanyData, member: Member, occurrenceId: string, jobId: string | null = null):
+  { occ: NonNullable<ReturnType<CompanyData['jobs']['occurrence']>>; definition: JobDefinition } | null {
+  const occ = handle.jobs.occurrence(occurrenceId)
+  if (!occ || (jobId !== null && occ.jobId !== jobId)) return null
+  const version = handle.jobs.version(occ.jobId, occ.jobVersion)
+  if (!version || version.actingUserId !== member.userId) return null
+  const definition = storedJobDefinition(version)
+  if (!isSetWatchOccurrence(occ, definition) || !setOccurrenceShown(handle, member, occ.eventRecordId as string, occ.eventMeetingId as string)) return null
+  return { occ, definition: definition as JobDefinition }
+}
+
+/**
+ * 「〈会議名〉では、たたき台を作りませんでした（理由）」 (`job_set_declined`)'s words for the member **now** (§5-1, T15): the meeting's
+ * title and the reason's label (the pinned definition's), only while the occurrence is theirs to see (`ownSetOccurrence`) and
+ * its judgement is 見送る. Else null — the notice is not shown at all (no row in the list, no unread count).
+ */
+export function setDeclinedNotice(handle: CompanyData, member: Member, jobId: string, occurrenceId: string): { meeting: string; reason: string } | null {
+  const own = ownSetOccurrence(handle, member, occurrenceId, jobId)
+  const report = own ? handle.jobs.setReport(occurrenceId) : null
+  if (!own || report?.decision !== 'decline') return null
+  const meeting = handle.records.byIds([own.occ.eventMeetingId as string])[0]
+  const label = own.definition.decision?.reasons.find(r => r.code === report.reason)?.label ?? 'その他'
+  return meeting ? { meeting: meeting.title, reason: label } : null
 }

@@ -1,5 +1,5 @@
 import type Database from 'better-sqlite3'
-import { EVENT_OCCURRENCE_SLOT_PREFIX, JOB_SCHEMAS, type JobDeliveryPlace, type JobPauseReason, type JobSetMarkOutcome, type LedgerEventRow } from '../../../shared/core/jobs'
+import { EVENT_OCCURRENCE_SLOT_PREFIX, JOB_SCHEMAS, type JobDeliveryPlace, type JobPauseReason, type JobSetFeedbackKind, type JobSetMarkOutcome, type JobSetReport, type LedgerEventRow } from '../../../shared/core/jobs'
 import type { JobState } from '../../../shared/types/jobs'
 import type { JobCandidateRow, JobEventCursor, JobEventGap, JobMeetingReviewRow, JobOccurrenceRow, JobProposalRow, JobRepository, JobRow, JobVersionRow } from '../../ports/jobs'
 
@@ -492,6 +492,27 @@ export function sqliteJobRepository(conn: Database.Database, companyId: string):
       const r = conn.prepare(`SELECT record_id, meeting_id, job_id, outcome, occurrence_id, at FROM ai_job_meeting_reviews WHERE company_id = ? AND record_id = ?`)
         .get(companyId, recordId) as { record_id: string; meeting_id: string; job_id: string; outcome: string; occurrence_id: string | null; at: string } | undefined
       return r ? ({ recordId: r.record_id, meetingId: r.meeting_id, jobId: r.job_id, outcome: r.outcome as JobSetMarkOutcome, occurrenceId: r.occurrence_id, at: r.at } satisfies JobMeetingReviewRow) : null
+    },
+
+    insertSetReport(occurrenceId, report, at) {
+      // Never OR IGNORE: a second judgement of one occurrence throws (its finish is rolled back).
+      conn.prepare(`INSERT INTO ai_job_set_reports (company_id, occurrence_id, decision, reason, confidence, unconfirmed, at) VALUES (?, ?, ?, ?, ?, ?, ?)`)
+        .run(companyId, occurrenceId, report.decision, report.reason, report.confidence, JSON.stringify(report.unconfirmed), at)
+    },
+    setReport(occurrenceId) {
+      const r = conn.prepare(`SELECT decision, reason, confidence, unconfirmed, at FROM ai_job_set_reports WHERE company_id = ? AND occurrence_id = ?`)
+        .get(companyId, occurrenceId) as { decision: string; reason: string; confidence: number | null; unconfirmed: string; at: string } | undefined
+      if (!r) return null
+      let unconfirmed: string[] = []
+      try { unconfirmed = JSON.parse(r.unconfirmed) as string[] } catch { unconfirmed = [] }
+      return { decision: r.decision, reason: r.reason, confidence: r.confidence, unconfirmed, at: r.at } as JobSetReport & { at: string }
+    },
+    insertSetFeedback(occurrenceId, kind, at) {
+      return conn.prepare(`INSERT OR IGNORE INTO ai_job_set_feedback (company_id, occurrence_id, kind, at) VALUES (?, ?, ?, ?)`)
+        .run(companyId, occurrenceId, kind, at).changes > 0
+    },
+    setFeedback(occurrenceId) {
+      return (conn.prepare(`SELECT kind FROM ai_job_set_feedback WHERE company_id = ? AND occurrence_id = ? ORDER BY kind`).all(companyId, occurrenceId) as Array<{ kind: JobSetFeedbackKind }>).map(r => r.kind)
     },
 
     // Member proposals (jobs.md "Member proposals").

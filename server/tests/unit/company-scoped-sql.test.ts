@@ -101,6 +101,8 @@ const HANDLE_TABLES: Record<string, string[]> = {
   ai_job_proposals: ['adapters/sqlite/jobs.ts'],
   // The set watch's 「使った」 mark (jobs.md "The set watch (schema 5)"), through the handle only.
   ai_job_meeting_reviews: ['adapters/sqlite/jobs.ts'],
+  ai_job_set_reports: ['adapters/sqlite/jobs.ts'],
+  ai_job_set_feedback: ['adapters/sqlite/jobs.ts'],
   // Which Skill a consultation used (records.md "Which Skill"); copied by the records / Drive adapters through skillUsesJson.
   consultation_skill_uses: ['adapters/sqlite/skill-uses.ts'],
   // The Skill shelf of a company without the shared folder (plugins.md "The Skill shelf").

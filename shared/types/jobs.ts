@@ -192,6 +192,23 @@ export interface JobOccurrenceView {
 export interface MyJobOccurrenceView extends JobOccurrenceView {
   jobId: string
   name: string
+  /**
+   * A set watch's judgement (4b-4 PR3), only on the responsible person's own view while the occurrence is theirs to see (I8):
+   * fixed kinds only — never a quote, a title or a company's name (those stay on the PC). Absent: not a set watch, no judgement
+   * yet, an older server.
+   */
+  report?: JobSetReportView
+}
+
+/** A set watch's judgement as its responsible person sees it (`GET /me/job-occurrences`), with the corrections they kept. */
+export interface JobSetReportView {
+  decision: 'proceed' | 'decline' | 'ask' | 'gate_failed'
+  /** One of the pinned Skill's reason codes, or `GATE_UNAVAILABLE` (ACB's own). */
+  reason: string
+  /** 0–1 in hundredths; null for `gate_failed`. */
+  confidence: number | null
+  unconfirmed: string[]
+  feedback: Array<'made_anyway' | 'too_early' | 'went_ahead'>
 }
 
 /** An outside operation an earlier run of the occurrence is known to have done: its kind and what it made (no body). */

@@ -118,7 +118,7 @@ function putSkills() {
   mkdirSync(join(base, COPY), { recursive: true })
   mkdirSync(join(base, ORIGINAL), { recursive: true })
   writeFileSync(join(base, COPY, 'SKILL.md'), '# 提案書のたたき台（自動）\n')
-  writeFileSync(join(base, COPY, 'decision.json'), JSON.stringify({ reasons: [{ code: 'requested', label: '提案を求められた' }] }))
+  writeFileSync(join(base, COPY, 'decision.json'), JSON.stringify({ reasons: [{ code: 'requested', label: '提案を求められた' }, { code: 'introduction', label: '顔合わせ・情報交換' }] }))
   writeFileSync(join(base, ORIGINAL, 'SKILL.md'), '# 提案書\n')
   git(workDir, 'add', '-A')
   git(workDir, 'commit', '-q', '--allow-empty', '-m', 'skills')
@@ -216,6 +216,7 @@ afterAll(() => { if (workDir) rmSync(workDir, { recursive: true, force: true }) 
 
 beforeEach(() => {
   for (const t of ['ai_job_occurrences', 'ai_job_event_cursors', 'ai_job_event_gaps', 'ai_job_versions', 'ai_jobs', 'notifications', 'ai_job_meeting_reviews',
+    'ai_job_set_reports', 'ai_job_set_feedback',
     'plugin_step_requests', 'plugin_step_pins', 'ai_job_settings', 'member_absences']) db.prepare(`DELETE FROM ${t} WHERE company_id = ?`).run(CO)
   db.prepare("DELETE FROM ai_runs WHERE company_id = ? AND subject_kind = 'occurrence'").run(CO)
   db.prepare('UPDATE record_settings SET enabled = 1 WHERE company_id = ?').run(CO)
@@ -605,7 +606,7 @@ describe('the run on the PC (the claim, the read path, the conditions)', () => {
 })
 
 describe('the record kind no longer means what the job names (T9)', () => {
-  it('a task type without `task_kind: minutes_review`: nothing read (no mark, the cursor kept); once it is back, the record runs', async () => {
+  it('a task type without `task_kind: minutes_review`: nothing read (no mark); once it is back, what was completed meanwhile never runs (the cursor followed now)', async () => {
     const job = await running()
     const m = meeting()
     const review = await read(m)
@@ -623,6 +624,11 @@ describe('the record kind no longer means what the job names (T9)', () => {
       db.prepare("DELETE FROM record_types WHERE company_id = ? AND name = 'task' AND version = ?").run(CO, current.version + 1)
     }
     tick()
+    tick()
+    expect(occurrences(job)).toEqual([])
+    expect(markOf(review)).toBeUndefined()
+    // A review completed after the kind is back runs as usual.
+    await completedReview({ title: 'B社 初回' })
     expect(occurrences(job)).toHaveLength(1)
   })
 })
@@ -663,5 +669,184 @@ describe('a line taken out of the opened list (T22)', () => {
     // The line back (a later build): what was completed while it was out never runs late.
     tick()
     expect(occurrences(job)).toHaveLength(1)
+  })
+})
+
+// ── 4b-4 PR3: how a run ends — the judgement, its やること or notice, and its corrections (owner memo §5 / §5-1 / §5-2, I6 / I8,
+// T12 / T15 / T17). The app's finish is sent as the app would; the server's checks are what is tested.
+const finish = (run: Json, jobResult: unknown) => as(ALICE, 'POST', `/ai-runs/${run.id}/finish`, { generation: run.generation, outcome: 'done', jobResult })
+const reports = () => db.prepare('SELECT * FROM ai_job_set_reports WHERE company_id = ?').all(CO) as Json[]
+const feedbackRows = () => db.prepare('SELECT * FROM ai_job_set_feedback WHERE company_id = ?').all(CO) as Json[]
+const stateOf = (occ: string) => (db.prepare('SELECT state FROM ai_job_occurrences WHERE company_id = ? AND id = ?').get(CO, occ) as Json).state
+const taskOf = (occ: string) => `task-${occ.slice(4)}`
+const DATE_ONLY = /^\d{1,2}月\d{1,2}日の会議のたたき台を確かめる$/
+/** A completed review, its occurrence claimed by alice's app: the run, ready to finish. */
+async function claimed(opts: Parameters<typeof meeting>[0] = {}): Promise<{ job: string; occ: string; run: Json; meeting: string; review: string }> {
+  const job = await running()
+  const done = await completedReview(opts)
+  const occ = occurrences(job)[0].id
+  const run = (await claim(occ)).body.data.run
+  return { job, occ, run, ...done }
+}
+/** Alice taken off the meeting's list and people (she still reads her own review). */
+const takeOff = (m: string) => {
+  db.prepare('DELETE FROM record_viewers WHERE company_id = ? AND record_id = ? AND user_id = ?').run(CO, m, ALICE)
+  db.prepare("UPDATE record_state SET fields = json_set(fields, '$.assignee', ?, '$.attendees', ?) WHERE company_id = ? AND record_id = ?").run(BOB, JSON.stringify([BOB]), CO, m)
+}
+
+describe('the judgement reaches the server as fixed kinds only (I6, T12)', () => {
+  it('a reason the Skill did not declare is refused (400), nothing kept, the run still running', async () => {
+    const { occ, run } = await claimed()
+    expect(await finish(run, { decision: 'proceed', reason: 'A社が乗り気', confidence: 0.9 })).toMatchObject({ status: 400, body: { code: 'JOB_SET_REPORT_BAD' } })
+    expect(reports()).toEqual([])
+    expect(stateOf(occ)).toBe('running')
+  })
+
+  it('no free text: `evidence`, a title or a summary beside the judgement is refused; a title-only result is no judgement', async () => {
+    const { run } = await claimed()
+    for (const extra of [{ evidence: [{ at: '00:10', said: 'A社の田中' }] }, { title: 'A社 提案書' }, { summary: '…' }]) {
+      expect(await finish(run, { decision: 'proceed', reason: 'requested', confidence: 0.9, ...extra })).toMatchObject({ status: 400, body: { code: 'JOB_SET_REPORT_BAD' } })
+    }
+    expect(await finish(run, { title: 'A社 提案書' })).toMatchObject({ status: 400, body: { code: 'JOB_SET_REPORT_BAD' } })
+    expect(reports()).toEqual([])
+  })
+
+  it('unconfirmed: only the fixed words, never with 見送る', async () => {
+    const { run } = await claimed()
+    expect((await finish(run, { decision: 'proceed', reason: 'requested', confidence: 0.9, unconfirmed: ['A社の予算'] })).status).toBe(400)
+    expect((await finish(run, { decision: 'decline', reason: 'introduction', confidence: 0.9, unconfirmed: ['budget'] })).status).toBe(400)
+    expect(reports()).toEqual([])
+  })
+
+  it('confidence: a number from 0 to 1 only', async () => {
+    const { run } = await claimed()
+    expect((await finish(run, { decision: 'proceed', reason: 'requested', confidence: 1.5 })).status).toBe(400)
+    expect((await finish(run, { decision: 'proceed', reason: 'requested', confidence: '0.9' })).status).toBe(400)
+    expect(reports()).toEqual([])
+  })
+
+  it('`nothing` is refused: whether it was needed is the server’s to say', async () => {
+    const { run } = await claimed()
+    expect(await finish(run, 'nothing')).toMatchObject({ status: 400, body: { code: 'JOB_EVENT_NOTHING_REFUSED' } })
+  })
+
+  it('kept on the occurrence: the decision, the reason’s code, the confidence in hundredths, the unconfirmed words', async () => {
+    const { occ, run } = await claimed()
+    expect((await finish(run, { decision: 'ask', reason: 'requested', confidence: 0.123456789, unconfirmed: ['budget', 'headcount'] })).status).toBe(200)
+    expect(reports()).toEqual([expect.objectContaining({ occurrence_id: occ, decision: 'ask', reason: 'requested', confidence: 0.12, unconfirmed: '["budget","headcount"]' })])
+    expect(stateOf(occ)).toBe('done')
+  })
+})
+
+describe('進める / 人に聞く / 判断できなかった: one やること named by the date only (§5-1, I6, T15 / T17)', () => {
+  it('owner-only for alice, linked to the meeting, its name the date only; nothing of the judgement on it — also once she no longer reads the meeting', async () => {
+    const { occ, run, meeting: m } = await claimed({ title: 'A社 初回の商談' })
+    expect((await finish(run, { decision: 'proceed', reason: 'requested', confidence: 0.9, unconfirmed: ['budget'] })).status).toBe(200)
+    const task = (await as(ALICE, 'GET', `/records/item/${taskOf(occ)}`)).body.data
+    expect(task.record.title).toMatch(DATE_ONLY)
+    expect(task.record.fields).toMatchObject({ assignee: ALICE })
+    expect(JSON.stringify(task)).toContain(m)
+    expect(JSON.stringify(task)).not.toMatch(/requested|proceed|budget|0\.9/)
+    // Owner-only: bob (at the meeting) and the owner get a missing record's answer.
+    expect((await as(BOB, 'GET', `/records/item/${taskOf(occ)}`)).status).toBe(404)
+    expect((await as('ss-owner', 'GET', `/records/item/${taskOf(occ)}`)).status).toBe(404)
+    // She no longer reads the meeting: the やること stays hers, without the meeting's name (T15) or the judgement (T17).
+    takeOff(m)
+    const after = (await as(ALICE, 'GET', `/records/item/${taskOf(occ)}`)).body.data
+    expect(after.record.title).toMatch(DATE_ONLY)
+    expect(JSON.stringify(after)).not.toMatch(/A社|requested|proceed|budget/)
+  })
+
+  it('判断できなかった (`gate_failed`): only that, its reason ACB’s own, the same date-only やること', async () => {
+    const { occ, run } = await claimed()
+    expect((await finish(run, { decision: 'gate_failed', reason: 'requested' })).status).toBe(400)
+    expect((await finish(run, { decision: 'gate_failed' })).status).toBe(200)
+    expect(reports()).toEqual([expect.objectContaining({ decision: 'gate_failed', reason: 'GATE_UNAVAILABLE', confidence: null })])
+    expect((await as(ALICE, 'GET', `/records/item/${taskOf(occ)}`)).body.data.record.title).toMatch(DATE_ONLY)
+  })
+})
+
+describe('見送る: no やること, a notice whose words are built when read (§5-1, T15)', () => {
+  it('to alice with the meeting’s name and the reason’s words; nothing stored but the kind and the key', async () => {
+    const { occ, run } = await claimed({ title: 'A社 初回の商談' })
+    expect((await finish(run, { decision: 'decline', reason: 'introduction', confidence: 0.8 })).status).toBe(200)
+    expect((await as(ALICE, 'GET', `/records/item/${taskOf(occ)}`)).status).toBe(404)
+    const rows = db.prepare("SELECT * FROM notifications WHERE company_id = ? AND kind = 'job_set_declined'").all(CO) as Json[]
+    expect(rows).toEqual([expect.objectContaining({ user_id: ALICE, record_id: '' })])
+    expect(JSON.stringify(rows[0])).not.toMatch(/A社|introduction|顔合わせ/)
+    const list = (await as(ALICE, 'GET', '/me/notifications')).body.data
+    expect(list.items.find((i: Json) => i.kind === 'job_set_declined').text).toMatch(/「A社 初回の商談」.*顔合わせ・情報交換/)
+  })
+
+  it('once she is no longer one of the meeting’s people: the notice is not shown at all, nor counted', async () => {
+    const { run, meeting: m } = await claimed({ title: 'A社 初回の商談' })
+    await finish(run, { decision: 'decline', reason: 'introduction', confidence: 0.8 })
+    const before = (await as(ALICE, 'GET', '/me/notifications')).body.data.unread
+    takeOff(m)
+    const list = (await as(ALICE, 'GET', '/me/notifications')).body.data
+    expect(list.items.some((i: Json) => i.kind === 'job_set_declined')).toBe(false)
+    expect(list.unread).toBe(before - 1)
+  })
+
+  it('a 見送る notice is shown only for a 見送る: a row naming an occurrence judged 進める shows nothing (no meeting name)', async () => {
+    const { job, occ, run } = await claimed({ title: 'A社 初回の商談' })
+    await finish(run, { decision: 'proceed', reason: 'requested', confidence: 0.9 })
+    db.prepare('INSERT INTO notifications (company_id, id, user_id, kind, record_id, record_version, action, actor_id, actor_kind, dedupe_key, created_at, read_at) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?, NULL)')
+      .run(CO, 'n-not-declined', ALICE, 'job_set_declined', '', 0, '', `job_set_declined:${job}:${occ}`, new Date().toISOString())
+    expect((await as(ALICE, 'GET', '/me/notifications')).body.data.items.some((i: Json) => i.kind === 'job_set_declined')).toBe(false)
+  })
+
+  it('never shown to anyone but the occurrence’s responsible person (the same row under the owner’s or bob’s name shows nothing)', async () => {
+    const { run } = await claimed({ title: 'A社 初回の商談' })
+    await finish(run, { decision: 'decline', reason: 'introduction', confidence: 0.8 })
+    const row = db.prepare("SELECT * FROM notifications WHERE company_id = ? AND kind = 'job_set_declined'").get(CO) as Json
+    for (const who of ['ss-owner', BOB]) {
+      db.prepare('INSERT INTO notifications (company_id, id, user_id, kind, record_id, record_version, action, actor_id, actor_kind, dedupe_key, created_at, read_at) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?, NULL)')
+        .run(CO, `n-copy-${who}`, who, row.kind, '', 0, '', row.dedupe_key, row.created_at)
+      expect((await as(who, 'GET', '/me/notifications')).body.data.items.some((i: Json) => i.kind === 'job_set_declined')).toBe(false)
+    }
+  })
+})
+
+describe('corrections of a judgement (§5-2, POST /me/job-occurrences/:id/feedback)', () => {
+  const press = (who: string, occ: string, kind: unknown) => as(who, 'POST', `/me/job-occurrences/${occ}/feedback`, { kind })
+
+  it('only alice while the occurrence is hers to see: bob, the owner, an admin, and alice off the meeting get the one 404', async () => {
+    const { occ, run, meeting: m } = await claimed()
+    await finish(run, { decision: 'decline', reason: 'introduction', confidence: 0.8 })
+    for (const who of [BOB, 'ss-owner', 'ss-admin']) expect(await press(who, occ, 'made_anyway')).toMatchObject({ status: 404, body: { code: 'JOB_NOT_FOUND' } })
+    takeOff(m)
+    expect(await press(ALICE, occ, 'made_anyway')).toMatchObject({ status: 404, body: { code: 'JOB_NOT_FOUND' } })
+    expect(feedbackRows()).toEqual([])
+  })
+
+  it('once per kind: the occurrence, the kind and the time only (never who); her view carries the judgement and it', async () => {
+    const { occ, run } = await claimed()
+    await finish(run, { decision: 'ask', reason: 'requested', confidence: 0.5 })
+    expect(await press(ALICE, occ, 'went_ahead')).toMatchObject({ status: 201, body: { data: { recorded: true } } })
+    expect(await press(ALICE, occ, 'went_ahead')).toMatchObject({ status: 200, body: { data: { recorded: false } } })
+    const rows = feedbackRows()
+    expect(rows).toHaveLength(1)
+    expect(Object.keys(rows[0]).sort()).toEqual(['at', 'company_id', 'kind', 'occurrence_id'])
+    const mine = (await as(ALICE, 'GET', '/me/job-occurrences')).body.data.occurrences
+    expect(mine).toEqual([expect.objectContaining({ id: occ, report: { decision: 'ask', reason: 'requested', confidence: 0.5, unconfirmed: [], feedback: ['went_ahead'] } })])
+  })
+
+  it('a correction must answer the judgement; none before a judgement; a kind not in the list is 400', async () => {
+    const { occ, run } = await claimed()
+    expect(await press(ALICE, occ, 'too_early')).toMatchObject({ status: 409, body: { code: 'JOB_FEEDBACK_NO_REPORT' } })
+    await finish(run, { decision: 'proceed', reason: 'requested', confidence: 0.9 })
+    expect(await press(ALICE, occ, 'made_anyway')).toMatchObject({ status: 409, body: { code: 'JOB_FEEDBACK_NOT_FOR_DECISION' } })
+    expect(await press(ALICE, occ, 'went_ahead')).toMatchObject({ status: 409, body: { code: 'JOB_FEEDBACK_NOT_FOR_DECISION' } })
+    expect(await press(ALICE, occ, 'A社は来月')).toMatchObject({ status: 400, body: { code: 'BAD_FEEDBACK' } })
+    expect((await press(ALICE, occ, 'too_early')).status).toBe(201)
+  })
+
+  it('her own view shows no judgement once the occurrence is no longer hers to see', async () => {
+    const { run, meeting: m } = await claimed()
+    await finish(run, { decision: 'proceed', reason: 'requested', confidence: 0.9 })
+    expect((await as(ALICE, 'GET', '/me/job-occurrences')).body.data.occurrences[0].report).toMatchObject({ decision: 'proceed' })
+    takeOff(m)
+    expect(JSON.stringify((await as(ALICE, 'GET', '/me/job-occurrences')).body.data)).not.toMatch(/requested|proceed/)
   })
 })

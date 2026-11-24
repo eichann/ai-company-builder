@@ -34,13 +34,13 @@
  * of another job or company, or none, or one they may not see: the one 404 `JOB_NOT_FOUND`.
  */
 import {
-  JOB_PC_STEP, JOB_RECONCILE_STATES, JOB_RETRY_MAX, JOB_RETRY_STATES, isJobId, isOccurrenceId, jobRetryExpiresAt, storedJobDefinition,
-  type JobDefinition, type JobDeliveryPlace, type JobRetryBlock,
+  JOB_PC_STEP, JOB_RECONCILE_STATES, JOB_RETRY_MAX, JOB_RETRY_STATES, JOB_SET_FEEDBACK_KINDS, isJobId, isOccurrenceId, jobRetryExpiresAt,
+  jobSetFeedbackFits, storedJobDefinition, type JobDefinition, type JobDeliveryPlace, type JobRetryBlock, type JobSetFeedbackKind,
 } from '../../shared/core/jobs'
 import { jobRetryBlockText } from '../../shared/core/job-words'
 import type { AgentStopPolicy } from '../../shared/types/agent-stop'
 import type { AiRunView } from '../../shared/types/ai-runs'
-import type { JobMadeBefore, JobOccurrenceView, MyJobOccurrenceView } from '../../shared/types/jobs'
+import type { JobMadeBefore, JobOccurrenceView, JobSetReportView, MyJobOccurrenceView } from '../../shared/types/jobs'
 import type { AiRunRow } from '../ports/ai-runs'
 import type { Clock } from '../ports/clock'
 import type { CompanyData, CompanyDataSource } from '../ports/company-data'
@@ -50,7 +50,7 @@ import { hasFullAccess, type Member } from './access'
 import { unattendedRunStopped } from './ai-runs'
 import { EVENT_RECORDS_CHECKED, JOBS_FORBIDDEN, OCCURRENCES_LISTED, occurrenceView, type JobService } from './jobs'
 import { eventShown } from './job-events'
-import { isSetWatchOccurrence } from './job-set-watch'
+import { isSetWatchOccurrence, ownSetOccurrence } from './job-set-watch'
 import { recordReader } from './record-access'
 import { ok, refuse, type Outcome, type Refusal } from './outcome'
 
@@ -261,6 +261,17 @@ export function createJobRetry(deps: JobRetryDeps) {
     return true
   }
 
+  /**
+   * A set watch's judgement on the responsible person's own view (4b-4 PR3): fixed kinds and the corrections kept — only where
+   * the occurrence is theirs to see now (`ownSetOccurrence`, I8); nothing for anything else.
+   */
+  function reportOf(handle: CompanyData, member: Member, occurrenceId: string): { report?: JobSetReportView } {
+    if (!ownSetOccurrence(handle, member, occurrenceId)) return {}
+    const report = handle.jobs.setReport(occurrenceId)
+    if (!report) return {}
+    return { report: { decision: report.decision, reason: report.reason, confidence: report.confidence, unconfirmed: report.unconfirmed, feedback: handle.jobs.setFeedback(occurrenceId) } }
+  }
+
   return {
     viewOf,
     viewFor,
@@ -289,9 +300,32 @@ export function createJobRetry(deps: JobRetryDeps) {
       for (const occ of pinned) {
         const version = handle.jobs.version(occ.jobId, occ.jobVersion)
         if (!version || !eventPc(occ, definitionOf(version)) || !eventShown(handle, member, occ)) continue
-        out.push({ ...occurrenceView(occ), jobId: occ.jobId, name: deps.jobs.pinnedNameOf(member, version), ...viewFor(member, occ) })
+        out.push({ ...occurrenceView(occ), jobId: occ.jobId, name: deps.jobs.pinnedNameOf(member, version), ...viewFor(member, occ), ...reportOf(handle, member, occ.id) })
       }
       return ok({ occurrences: out })
+    },
+
+    /**
+     * `POST /me/job-occurrences/:occurrenceId/feedback { kind }` (4b-4 PR3, owner memo §5-2 / 付録 B2): a person's correction of a set
+     * watch's judgement — ［作ってもらう］ after 見送る, ［まだ早かった］ after 進める / 人に聞く, 仕上げた after 人に聞く. Only the pinned
+     * version's responsible person while the occurrence is theirs to see (I8: they read the record and the meeting and are one of
+     * its people) — anyone else, an owner / admin who did not attend included, another company's or no occurrence: the one 404.
+     * Kept with the occurrence, the kind and the time only (never who: nobody is counted), once per kind (a second press: 200,
+     * nothing written). A kind that does not answer the judgement → 409 `JOB_FEEDBACK_NOT_FOR_DECISION`; none yet → 409
+     * `JOB_FEEDBACK_NO_REPORT`.
+     */
+    feedback(member: Member, occurrenceId: string, body: unknown): Outcome<{ recorded: boolean }> {
+      const handle = companyData.forCompany(member.companyId)
+      if (!isOccurrenceId(occurrenceId) || !ownSetOccurrence(handle, member, occurrenceId)) return NOT_FOUND()
+      const b = typeof body === 'object' && body !== null && !Array.isArray(body) && Object.keys(body).length === 1 ? body as { kind?: unknown } : null
+      if (!b || !(JOB_SET_FEEDBACK_KINDS as readonly unknown[]).includes(b.kind)) return refuse('bad-request', 'kind is made_anyway, too_early or went_ahead', { code: 'BAD_FEEDBACK' })
+      const kind = b.kind as JobSetFeedbackKind
+      return transactions.run((): Outcome<{ recorded: boolean }> => {
+        const report = handle.jobs.setReport(occurrenceId)
+        if (!report) return refuse('conflict', 'まだ AI の判断がありません。', { code: 'JOB_FEEDBACK_NO_REPORT' })
+        if (!jobSetFeedbackFits(kind, report.decision)) return refuse('conflict', 'この判断には、その直しは使えません。', { code: 'JOB_FEEDBACK_NOT_FOR_DECISION' })
+        return ok({ recorded: handle.jobs.insertSetFeedback(occurrenceId, kind, clock.now()) })
+      })
     },
 
     /** POST /jobs/:jobId/occurrences/:occurrenceId/retry — 「もう一度」. */

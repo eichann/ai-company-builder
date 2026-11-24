@@ -85,6 +85,11 @@ export interface NotificationServiceDeps {
   /** 「1日の上限を超えた」 (`job_day_limit`, 4b-4 PR2): the set watch's name while the member is its approved version's responsible person; else null. */
   jobDayLimitOf?: (member: Member, jobId: string) => { name: string } | null
   /**
+   * 「…では、たたき台を作りませんでした」 (`job_set_declined`, 4b-4 PR3): the meeting's title and the reason's words while the member is
+   * that occurrence's responsible person and reads the meeting now (I8); else null — not shown at all. Absent → never shown.
+   */
+  jobSetDeclinedOf?: (member: Member, jobId: string, occurrenceId: string) => { meeting: string; reason: string } | null
+  /**
    * 「受け取りが要ります」 (`job_accept_needed`, jobs.md "The acceptance notice"): the job's name while the
    * version still waits for this member's acceptance, else null (not shown). Absent → never shown.
    */
@@ -986,7 +991,18 @@ export function createNotificationService(deps: NotificationServiceDeps) {
       }
       // A set watch past its day's limit: `job_day_limit:<job id>:<day>`, shown only to its responsible person.
       const dayLimit = (r: NotificationRow) => deps.jobDayLimitOf?.(member, (r.dedupeKey ?? '').split(':')[1] ?? '') ?? null
+      // A set watch's 見送る: `job_set_declined:<job id>:<occurrence id>`, shown only while its meeting is the reader's to read.
+      // Asked once per row (the filter and the words read the same answer).
+      const declined = new Map<string, { meeting: string; reason: string } | null>()
+      const setDeclined = (r: NotificationRow) => {
+        if (!declined.has(r.id)) {
+          const [, jobId = '', occurrenceId = ''] = (r.dedupeKey ?? '').split(':')
+          declined.set(r.id, deps.jobSetDeclinedOf?.(member, jobId, occurrenceId) ?? null)
+        }
+        return declined.get(r.id) ?? null
+      }
       const visible = rows.filter(r => {
+        if (r.kind === 'job_set_declined') return r.recordId === '' && setDeclined(r) !== null
         if (r.kind === 'job_chain_stopped') return r.recordId === '' && chainStopped(r) !== null
         if (r.kind === 'job_day_limit') return r.recordId === '' && dayLimit(r) !== null
         if (r.kind === 'job_paused') return r.recordId === '' && jobNotice(r) !== null
@@ -1046,6 +1062,12 @@ export function createNotificationService(deps: NotificationServiceDeps) {
           // The day it happened (company time, from its key), never 「今日」: it may be read days later.
           const day = /^\d{4}-\d{2}-\d{2}$/.test((r.dedupeKey ?? '').split(':')[2] ?? '') ? dueText((r.dedupeKey as string).split(':')[2]) : null
           const text = `定期の仕事「${job.name}」は${day ? `${day}、` : ''}1日の上限を超えたため、動かなかった会議があります。必要なら、その会議について AI に相談して作ってください`
+          return { id: r.id, kind: r.kind, recordId: '', recordType: '', recordTitle: '', version: 0, text, createdAt: r.createdAt, read }
+        }
+        if (r.kind === 'job_set_declined') {
+          // Built now, never stored: the meeting's title (outside words, quoted) and the Skill's label for the reason.
+          const d = setDeclined(r) as { meeting: string; reason: string }
+          const text = `「${d.meeting}」では、AI はたたき台を作りませんでした（${d.reason}）。必要なら、その会議について AI に相談して作ってください`
           return { id: r.id, kind: r.kind, recordId: '', recordType: '', recordTitle: '', version: 0, text, createdAt: r.createdAt, read }
         }
         if (r.kind === 'job_accept_needed') {

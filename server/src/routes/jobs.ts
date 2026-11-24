@@ -20,6 +20,7 @@
  *   POST /jobs/:jobId/occurrences/:occurrenceId/operations/:key/reconcile  owner/admin { done }: its run's unknown outside result;
  *                                                                           since 4b-1 also the pinned responsible person of an event PC occurrence
  *   GET  /me/job-occurrences           the event PC occurrences the caller ran as responsible person (4b-1, D11)
+ *   POST /me/job-occurrences/:occurrenceId/feedback { kind }   a correction of a set watch's judgement (4b-4 PR3)
  */
 import { Hono, type Context } from 'hono'
 import { JOB_ACCEPT_HEADER, JOB_ACCEPT_SEPARATE, JOB_NEEDS_NEWER_APP, JOB_SCHEMAS_HEADER, parseJobOccurrenceKinds, parseJobSchemasHeader } from '../../shared/core/jobs'
@@ -75,6 +76,13 @@ jobsRoute.get('/me/job-occurrences', companyMember, async (c) => {
   const result = jobRetry.mine(c.var.member)
   if (!result.ok) return refusal(c, result)
   return c.json({ success: true, data: result.value })
+})
+
+// 4b-4 PR3: a correction of a set watch's judgement (its responsible person, while the occurrence is theirs to see).
+jobsRoute.post('/me/job-occurrences/:occurrenceId/feedback', companyMember, serviceBody, async (c) => {
+  const result = jobRetry.feedback(c.var.member, c.req.param('occurrenceId'), c.var.body)
+  if (!result.ok) return refusal(c, result)
+  return c.json({ success: true, data: result.value }, result.value.recorded ? 201 : 200)
 })
 
 jobsRoute.post('/jobs/:jobId/occurrences/:occurrenceId/retry', companyMember, async (c) => {

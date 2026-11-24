@@ -1462,8 +1462,9 @@ timed renew of the same hold, moves it by milliseconds).
 as they are). **PR1: the definition, the consent and the approval. PR2: the server finds the records and makes occurrences**
 ("The scan and its occurrences" below) — no released app names its check (`matched_record`), so nothing is claimed or run until
 PR5, and no screen announces 5 yet (`ADMIN_JOB_SCHEMAS` / `APP_JOB_SCHEMAS` stay `[1, 2, 3, 4]`: such a version is answered
-without its definition, `needsUpdate`, and a create, approval or acceptance from them is `JOB_NEEDS_NEWER_SCREEN`). PR3 the
-report and its やること, PR4 the plugin steps' side, PR5 / PR6 the app, PR7 the admin console.
+without its definition, `needsUpdate`, and a create, approval or acceptance from them is `JOB_NEEDS_NEWER_SCREEN`). **PR3: how a
+run ends** (the judgement, its やること or notice, corrections: "How a run ends" below). PR4 the plugin steps' side, PR5 / PR6 the
+app, PR7 the admin console.
 
 - **The trigger is words, not a condition language** (owner decision 2026-11-23, §2-1): `{ kind: 'record_set', recordType,
   taskKind, origin, causes, causeRule, assignee, event, unit, guards }`, each key from its own list (`JOB_SET_WATCH_WORDS`,
@@ -1532,9 +1533,9 @@ report and its やること, PR4 the plugin steps' side, PR5 / PR6 the app, PR7 
     `EVENT_ROWS_PER_TICK`; the occurrences, the marks and the cursor's move (compare-and-set) are one
     transaction. A combination no longer opened (`jobSetWatchOpened` on the stored version) reads nothing and its cursor follows
     now (compare-and-set), so what was completed while the line was out never runs late if it comes back; a task type that no
-    longer has `task_kind: minutes_review` and a `meeting` link (T9) reads nothing and logs once, its cursor kept: what was
-    completed meanwhile runs once it is back (decision: no pause reason exists for it — the job looks as if nothing came; an
-    owner notice is a follow-up).
+    longer has `task_kind: minutes_review` and a `meeting` link (T9) reads nothing, logs once and **its cursor follows now the
+    same way** (4b-4 PR3, owner-approved safe side: what was completed meanwhile is dropped, never run late; no pause reason
+    exists for it — the job looks as if nothing came; an owner notice is a follow-up).
   - **The event** (`minutesReviewEvent`): `ledgerRowIsEvent` (`causes: human`, `ledger_v1`); a やること whose first version was
     written by the minutes intake (`MINUTES_ACTOR`) with `task_kind: minutes_review`, exactly one `links.meeting`, and its id
     `meetingOutputId(meeting, MINUTES_REVIEW_KEY)` (composition's `minutesReviewId`; never a title); the row its **first** `done`
@@ -1578,6 +1579,47 @@ report and its やること, PR4 the plugin steps' side, PR5 / PR6 the app, PR7 
     meeting (`routeRefusal`'s `meetingFound`), checked after the conditions; any other meeting → 403 `NOT_IN_STEP`.
   - **The rollback floor** (4b-0.5) knows no schema 5: the occurrence is frozen there (not listed, told, claimed, run or expired;
     a stop holds it), the mark untouched — `server/tests/cross-build/` S1.
+- **How a run ends: the judgement, its やること or notice, and corrections** (4b-4 PR3; owner memo §5 / §5-0 / §5-1 / §5-2,
+  I6 / I8, T12 / T15 / T17; `job-runs.ts` `finishSet`, `job-set-watch.ts` `setWatchTaskInput` / `ownSetOccurrence` /
+  `setDeclinedNotice`, `job-retry.ts` `feedback`):
+  - **The report** (`POST /ai-runs/:runId/finish { outcome: 'done', jobResult }`, `parseJobSetReport`): `{ decision: proceed |
+    decline | ask, reason, confidence, unconfirmed? }` — `reason` one of the **pinned** definition's `decision.reasons` codes, a
+    number 0–1 stored in hundredths, `unconfirmed` 0–5 distinct words of `JOB_SET_UNCONFIRMED` (人数・予算・企業規模・助成金・月額;
+    fixed words: a free code could carry a name) and none with `decline` — or exactly `{ decision: 'gate_failed' }` (the app's
+    gate could not judge; the server stores ACB's own `GATE_UNAVAILABLE`, never one of the Skill's). **Any other key** —
+    `evidence` (the quotes stay on the PC: the app checks them, PR5), a title, a summary — and an unknown reason → 400
+    `JOB_SET_REPORT_BAD`, the whole finish rolled back, the run still running; `nothing` → 400 `JOB_EVENT_NOTHING_REFUSED`. The
+    conditions again first (a race: rolled back). Kept in `ai_job_set_reports` (one per occurrence, CHECKed kinds; additive in
+    `migrateJobSetWatch`) in the finish's transaction; the occurrence `done`.
+  - **進める / 人に聞く / 判断できなかった → one やること** (`setWatchTaskInput`): the service writer (not the AI's create, so no
+    出どころの枠), id `occurrenceTaskId`, **owner-only** for the responsible person, assignee them, `links.meeting` the pinned
+    meeting, quiet (D9), the run's operation key `create_task`. **Its name is the meeting's date only**
+    (「11月23日の会議のたたき台を確かめる」, the meeting's `meeting_at` in the occurrence's zone): the やること outlives access to the
+    meeting, so no meeting name or customer word is in it (T15); the meeting's name reaches only someone who reads the meeting,
+    through the link. **The judgement, its reason and the unconfirmed words are never on it** (T17): only the occurrence's (I8)
+    and the PC's.
+  - **見送る → no やること, the notice `job_set_declined`** to the responsible person (recordless, key
+    `job_set_declined:<job>:<occurrence>`, nothing else stored). Its words — 「「<会議名>」では、AI はたたき台を作りませんでした
+    （<理由の言葉>）。…」 — are built **when read** (`setDeclinedNotice` → `jobSetDeclinedOf`), only while the reader is that
+    occurrence's pinned responsible person **and** it is theirs to see now (`setOccurrenceShown`: the record and the meeting, one
+    of its people); else the notice is not there at all (no row, no unread count). The reason's words are the pinned
+    definition's label.
+  - **Corrections** (§5-2): `POST /me/job-occurrences/:occurrenceId/feedback { kind }` — `made_anyway` (［作ってもらう］ after
+    見送る), `too_early` (［まだ早かった］ after 進める / 人に聞く), `went_ahead` (仕上げた after 人に聞く); `jobSetFeedbackFits`, else 409
+    `JOB_FEEDBACK_NOT_FOR_DECISION`; no judgement yet → 409 `JOB_FEEDBACK_NO_REPORT`; another kind → 400 `BAD_FEEDBACK`. **Only
+    the pinned version's responsible person while the occurrence is theirs to see** (`ownSetOccurrence`, I8) — anyone else, an
+    owner / admin who did not attend, alice once off the meeting, another company's or no occurrence: the one 404
+    `JOB_NOT_FOUND` (permission matrix row + `CROSS`). `ai_job_set_feedback` keeps the occurrence, the kind and the time only
+    (no who column, once per kind: 201, again 200 `recorded: false`). **Not anonymous in storage**: only the pinned responsible
+    person can write a row, so a join through the occurrence's version names them; 「人ごとに数えない」 is a promise of the readers —
+    no route or screen may group corrections by person (independent review of PR3; the owner decides before PR7 reads it). Cancelling the やること on ［まだ早かった］ is
+    the app's (PR6), with the records API. The judgement and the corrections kept are on the responsible person's own
+    `GET /me/job-occurrences` (`report`, only while shown — `reportOf`'s own check is defence: `mine` already leaves out an
+    occurrence not shown, so removing it alone fails no test); never on an owner / admin's occurrence view.
+  - **What the AI can still choose** (independent review of PR3): the fixed kinds carry about 18 bits a run (decision, reason,
+    confidence in hundredths, unconfirmed words) to the responsible person's own view — no free text. A `failed` finish's
+    `failure.code` (`[A-Z0-9_]{1,60}`, older than this PR) is stored on the run and hidden from others (`hides`); PR5 should
+    send only fixed codes there.
 - **Telling the record by its kind** (§2-2): `task_kind` is written by the minutes service only — a person's or an AI's
   create naming it is 400 `BAD_VALUE` (`record-engine/create.ts`), and no action takes it as an argument.
 - **Compatibility** (T11): an older server (the floor, 4b-0.5, and every build before this) does not know schema 5 and
@@ -1605,6 +1647,12 @@ report and its やること, PR4 the plugin steps' side, PR5 / PR6 the app, PR7 
   list's `checks`, the turn's meeting, one meeting's minutes only, the conditions ending it; an older build's change moving
   the boundary; a line taken out, and nothing from meanwhile run once it is back),
   `server/tests/cross-build/` (S1: the floor freezes it, back here unchanged). Mutation check: see the PR.
+- Tests (PR3): the same file, "the judgement reaches the server as fixed kinds only" (an undeclared reason, `evidence` / a title /
+  a summary, the unconfirmed words and 見送る, confidence 0–1, `nothing`, the hundredths), "進める / 人に聞く / 判断できなかった" (owner-only,
+  the meeting linked, the date-only name, nothing of the judgement — also after she leaves the meeting; `gate_failed`'s one shape),
+  "見送る" (no やること, words built when read, not shown nor counted once she is off the meeting, never to anyone else),
+  "corrections of a judgement" (who, once per kind with no who, fits the judgement, her own view's `report` gone once off the
+  meeting), and the T9 test (dropped, not run late). Mutation check: see the PR.
 
 ## Member proposals (「AIへの相談」から定期の仕事, PR A: the server; owner memo 2026-11-22 第1〜5版, decisions Q1–Q4)
 
