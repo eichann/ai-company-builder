@@ -63,6 +63,10 @@ contract.invoke browser:clearLogin
 contract.invoke browser:open
 contract.invoke browser:sites
 contract.invoke browserLines:card
+contract.invoke browserLines:confirmValue
+contract.invoke browserLines:confirmWrite
+contract.invoke browserLines:runWrite
+contract.invoke browserLines:writeCard
 contract.invoke browserPlans:cancel
 contract.invoke browserPlans:confirm
 contract.invoke browserPlans:get
@@ -410,6 +414,8 @@ contract.type ElectronAPI.closeChatWindows = closeChatWindows: Invoke<'chatWindo
 contract.type ElectronAPI.closeDocView = closeDocView: Invoke<'docView:close'>
 contract.type ElectronAPI.completeHandoffTurn = completeHandoffTurn: Invoke<'handoff:complete'>
 contract.type ElectronAPI.confirmBrowserExecution = confirmBrowserExecution: Invoke<'browserPlans:confirm'>
+contract.type ElectronAPI.confirmBrowserWrite = confirmBrowserWrite: Invoke<'browserLines:confirmWrite'>
+contract.type ElectronAPI.confirmBrowserWriteValue = confirmBrowserWriteValue: Invoke<'browserLines:confirmValue'>
 contract.type ElectronAPI.connectGoogle = connectGoogle: Invoke<'google:connect'>
 contract.type ElectronAPI.connectGoogleAll = connectGoogleAll: Invoke<'google:connectAll'>
 contract.type ElectronAPI.connectSlack = connectSlack: Invoke<'slack:connect'>
@@ -454,6 +460,7 @@ contract.type ElectronAPI.getAutoTurnSettings = getAutoTurnSettings: Invoke<'aiT
 contract.type ElectronAPI.getBrowserInspection = getBrowserInspection: Invoke<'browserLines:card'>
 contract.type ElectronAPI.getBrowserPlan = getBrowserPlan: Invoke<'browserPlans:get'>
 contract.type ElectronAPI.getBrowserSites = getBrowserSites: Invoke<'browser:sites'>
+contract.type ElectronAPI.getBrowserWriteCard = getBrowserWriteCard: Invoke<'browserLines:writeCard'>
 contract.type ElectronAPI.getBundleChoices = getBundleChoices: Invoke<'tasks:bundles'>
 contract.type ElectronAPI.getBundleKinds = getBundleKinds: Invoke<'tasks:bundleKinds'>
 contract.type ElectronAPI.getCalendarToday = getCalendarToday: Invoke<'calendar:today'>
@@ -614,6 +621,7 @@ contract.type ElectronAPI.retryJobOccurrence = retryJobOccurrence: Invoke<'jobs:
 contract.type ElectronAPI.retryTaskRun = retryTaskRun: Invoke<'tasks:retryRun'>
 contract.type ElectronAPI.rewatchJob = rewatchJob: Invoke<'jobs:rewatch'>
 contract.type ElectronAPI.runBrowserPlan = runBrowserPlan: Invoke<'browserPlans:run'>
+contract.type ElectronAPI.runBrowserWrite = runBrowserWrite: Invoke<'browserLines:runWrite'>
 contract.type ElectronAPI.sameAsApproval = sameAsApproval: Invoke<'approvals:sameAs'>
 contract.type ElectronAPI.saveChatSession = saveChatSession: Invoke<'chatHistory:saveSession'>
 contract.type ElectronAPI.saveOwnBrokerKey = saveOwnBrokerKey: Invoke<'brokerKeys:save'>
@@ -845,6 +853,10 @@ contract.type IpcInvokeChannels.'browser:clearLogin' = 'browser:clearLogin': { a
 contract.type IpcInvokeChannels.'browser:open' = 'browser:open': { args: [companyId: string, host: string]; result: BrowserActionResult }
 contract.type IpcInvokeChannels.'browser:sites' = 'browser:sites': { args: [companyId: string]; result: BrowserSitesResult }
 contract.type IpcInvokeChannels.'browserLines:card' = 'browserLines:card': { args: [companyId: string, planId: string]; result: BrowserInspectionGetResult }
+contract.type IpcInvokeChannels.'browserLines:confirmValue' = 'browserLines:confirmValue': { args: [companyId: string, cardId: string, name: string]; result: BrowserWriteGetResult }
+contract.type IpcInvokeChannels.'browserLines:confirmWrite' = 'browserLines:confirmWrite': { args: [companyId: string, cardId: string, result: 'done' | 'not_done']; result: BrowserWriteGetResult }
+contract.type IpcInvokeChannels.'browserLines:runWrite' = 'browserLines:runWrite': { args: [companyId: string, cardId: string, contentHash: string]; result: BrowserWriteGetResult }
+contract.type IpcInvokeChannels.'browserLines:writeCard' = 'browserLines:writeCard': { args: [companyId: string, cardId: string]; result: BrowserWriteGetResult }
 contract.type IpcInvokeChannels.'browserPlans:cancel' = 'browserPlans:cancel': { args: [companyId: string, planId: string]; result: BrowserPlanActAnswer }
 contract.type IpcInvokeChannels.'browserPlans:confirm' = 'browserPlans:confirm': { args: [companyId: string, executionId: string, result: BrowserConfirmResult]; result: BrowserPlanActAnswer }
 contract.type IpcInvokeChannels.'browserPlans:get' = 'browserPlans:get': { args: [companyId: string, planId: string]; result: BrowserPlanGetResult }
@@ -1192,6 +1204,10 @@ main.handle browser:clearLogin @ features/browser/ipc.ts (companyId, host)
 main.handle browser:open @ features/browser/ipc.ts (companyId, host)
 main.handle browser:sites @ features/browser/ipc.ts (companyId)
 main.handle browserLines:card @ features/browser/inspect.ts (companyId, planId)
+main.handle browserLines:confirmValue @ features/browser/write-lines.ts (companyId, cardId, name)
+main.handle browserLines:confirmWrite @ features/browser/write-lines.ts (companyId, cardId, result)
+main.handle browserLines:runWrite @ features/browser/write-lines.ts (companyId, cardId, contentHash)
+main.handle browserLines:writeCard @ features/browser/write-lines.ts (companyId, cardId)
 main.handle browserPlans:cancel @ features/browser/plans-ipc.ts (companyId, planId)
 main.handle browserPlans:confirm @ features/browser/plans-ipc.ts (companyId, executionId, result)
 main.handle browserPlans:get @ features/browser/plans-ipc.ts (companyId, planId)
@@ -1488,6 +1504,10 @@ preload completeHandoffTurn -> invoke handoff:complete($0, $1, $2)
 preload completeHandoffTurn : (company: string, id: string, receipt: HandoffCompletion) => Promise<void>
 preload confirmBrowserExecution -> invoke browserPlans:confirm($0, $1, $2)
 preload confirmBrowserExecution : (companyId: string, executionId: string, result: BrowserConfirmResult) => Promise<BrowserPlanActAnswer>
+preload confirmBrowserWrite -> invoke browserLines:confirmWrite($0, $1, $2)
+preload confirmBrowserWrite : (companyId: string, cardId: string, result: "done" | "not_done") => Promise<BrowserWriteGetResult>
+preload confirmBrowserWriteValue -> invoke browserLines:confirmValue($0, $1, $2)
+preload confirmBrowserWriteValue : (companyId: string, cardId: string, name: string) => Promise<BrowserWriteGetResult>
 preload connectGoogle -> invoke google:connect($0, $1)
 preload connectGoogle : (companyId: string, features: ("minutes" | "mail" | "drive" | "inbox" | "sheets" | "inbox_archive" | "documents")[]) => Promise<GoogleConnectResult>
 preload connectGoogleAll -> invoke google:connectAll($0)
@@ -1576,6 +1596,8 @@ preload getBrowserPlan -> invoke browserPlans:get($0, $1)
 preload getBrowserPlan : (companyId: string, planId: string) => Promise<BrowserPlanGetResult>
 preload getBrowserSites -> invoke browser:sites($0)
 preload getBrowserSites : (companyId: string) => Promise<BrowserSitesResult>
+preload getBrowserWriteCard -> invoke browserLines:writeCard($0, $1)
+preload getBrowserWriteCard : (companyId: string, cardId: string) => Promise<BrowserWriteGetResult>
 preload getBundleChoices -> invoke tasks:bundles($0)
 preload getBundleChoices : (companyId: string) => Promise<BundleChoicesResult>
 preload getBundleKinds -> invoke tasks:bundleKinds($0)
@@ -1896,6 +1918,8 @@ preload rewatchJob -> invoke jobs:rewatch($0, $1, $2, $3)
 preload rewatchJob : (companyId: string, jobId: string, version: number, recordId: string) => Promise<JobActionResult>
 preload runBrowserPlan -> invoke browserPlans:run($0, $1, $2)
 preload runBrowserPlan : (companyId: string, planId: string, contentHash: string) => Promise<BrowserPlanRunAnswer>
+preload runBrowserWrite -> invoke browserLines:runWrite($0, $1, $2)
+preload runBrowserWrite : (companyId: string, cardId: string, contentHash: string) => Promise<BrowserWriteGetResult>
 preload sameAsApproval -> invoke approvals:sameAs($0, $1, $2, $3)
 preload sameAsApproval : (companyId: string, approvalId: string, recordId: string, linkMeeting: boolean) => Promise<ApprovalResult>
 preload saveChatSession -> invoke chatHistory:saveSession($0, $1)

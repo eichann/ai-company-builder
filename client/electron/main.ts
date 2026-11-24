@@ -119,6 +119,8 @@ import { lstepConnector } from '../connectors/lstep'
 import { lstepReadLines } from '../connector-maps/lstep'
 import { LINES as LSTEP_LINES } from '../browser-lines/lstep'
 import { wireBrowserInspections } from './features/browser/inspect'
+import { wireBrowserWriteLines } from './features/browser/write-lines'
+import { createBrowserRunRecords } from './features/browser/run-records'
 import { browserOperatorOf } from './agents/registry'
 import { browserAiStopped } from '../../shared/core/browser-operation'
 import { createProcedureReader } from './features/ai-turns/procedures'
@@ -653,6 +655,25 @@ const browserInspections = wireBrowserInspections(ipc, {
   lines: LSTEP_LINES,
   declarations: [lstep.declaration],
 })
+// Its writes on the new path (agent-browser.md "Writing on the new path"): the chat's `browser_write` proposes, the member
+// confirms each value and presses ［任せる］ on the card, the write runner writes in order. No site has writers yet (they
+// come with the owner's test write, PR 7), so every line that writes is refused before anything is read.
+const browserWrites = wireBrowserWriteLines(ipc, {
+  aiSwitch: browserAiSwitch,
+  fromMainWindow: event => isMainFrameSender(event, id => mainWindowHost.isWindow(id)),
+  baseUrl: getServerApiUrl,
+  cookies: session.cookies,
+  userId: session.userId,
+  context: browserPlans.context,
+  stopped: companyId => browserAiStopped(agentControl.policy.stop(companyId)),
+  siteLevel: (companyId, host) => browser.siteNow(companyId, host)?.level ?? null,
+  windows: browser,
+  records: createBrowserRunRecords(path.join(userDataDir(), 'browser-runs', 'line-records.json')),
+  busyWindows: browserPlans.busyWindows,
+  sites: [{ map: lstepLines.map, readers: lstepLines.readers, addresses: lstepLines.addresses, account: lstepLines.account, writers: {} }],
+  lines: LSTEP_LINES,
+  declarations: [lstep.declaration],
+})
 // lane C ▲
 
 registerAuthIpc(ipc, {
@@ -673,6 +694,7 @@ registerAuthIpc(ipc, {
     browser.signedOut()
     browserPlans.context.advance()
     browserInspections.clear()
+    browserWrites.clear()
   },
   onSignedIn: userId => {
     agentControl.eventSender.sessionStarted()
@@ -791,6 +813,7 @@ app.whenReady().then(async () => {
       agentPolicy: agentControl.policy,
       browserPlans,
       browserInspections,
+      browserWrites,
       agentStop: agentControl.stop,
       serverUrl: getServerApiUrl,
       brokerTokens,

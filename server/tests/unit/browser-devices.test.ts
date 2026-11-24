@@ -57,6 +57,8 @@ let policy: BrowserOperationSettings
 let data: CompanyDataSource
 let dev: BrowserDeviceService
 let svc: BrowserLineService
+/** The opened list the lines service reads (a test may approve a writing line). */
+let opened: unknown
 const iso = (ms: number) => new Date(ms).toISOString()
 const ids = { newId: () => randomBytes(8).toString('hex'), newToken: () => randomBytes(32).toString('hex') }
 const clock = { now: () => iso(now), nowMs: () => now }
@@ -68,7 +70,7 @@ function build() {
   dev = createBrowserDeviceService({ companyData: data, transactions: sqliteTransactions(conn), clock, ids, tokenDigest: sha256TokenDigest, accounts: { byIds: ids => new Map(ids.map(id => [id, { name: `Name ${id}`, email: `${id}@example.com` }])) } })
   svc = createBrowserLineService({
     companyData: data, transactions: sqliteTransactions(conn), clock, monotonic, ids, tokenDigest: sha256TokenDigest,
-    opened: { file: () => REAL_OPENED }, catalog: fileBrowserConnectorCatalog(), executionLookup: sqliteBrowserLineExecutionLookup(conn),
+    opened: { file: () => opened }, catalog: fileBrowserConnectorCatalog(), executionLookup: sqliteBrowserLineExecutionLookup(conn),
     memberships: sqliteMembershipRepository(conn), accounts: { byIds: () => new Map() },
     browserPolicy: () => policy, aiStops: () => ({ all: false, tools: [] }), devices: dev.gate, log: { warn: () => {} },
   })
@@ -102,6 +104,7 @@ beforeEach(() => {
   join(CO, owner.userId, 'owner'); join(CO, admin.userId, 'admin'); join(CO, alice.userId, 'member'); join(CO, bob.userId, 'member')
   join(OTHER_CO, otherOwner.userId, 'owner'); join(OTHER_CO, alice.userId, 'member')
   now = T0
+  opened = REAL_OPENED
   policy = { mode: 'on', sites: [{ host: HOST, level: 'write', assetHosts: [] }] }
   build()
   for (const m of [owner, admin, alice, bob]) grant(m)
@@ -324,8 +327,8 @@ describe('a plan goes on only on the PC that made it', () => {
     const draft = insertWritePlan('draft', one.device.id)
     expect(code(svc.approve(alice, draft.id, { contentHash: draft.contentHash }, two.key))).toBe('BROWSER_DEVICE_ELSEWHERE')
     expect(code(svc.approve(alice, draft.id, { contentHash: draft.contentHash }, undefined))).toBe('BROWSER_DEVICE_NOT_REGISTERED')
-    // Its own PC passes the PC check (and this build then refuses every plan of writes).
-    expect(code(svc.approve(alice, draft.id, { contentHash: draft.contentHash }, one.key))).toBe('BROWSER_LINE_WRITES_NOT_YET')
+    // Its own PC passes the PC check (and the next rule refuses this plan: its line, an inspection's row, writes nothing).
+    expect(code(svc.approve(alice, draft.id, { contentHash: draft.contentHash }, one.key))).toBe('BROWSER_LINE_NOT_APPROVED')
     const approved = insertWritePlan('approved', one.device.id)
     expect(code(svc.claim(alice, approved.id, two.key))).toBe('BROWSER_DEVICE_ELSEWHERE')
     // The same PC stopped and registered again: a new registration, so the old plan does not move again.
@@ -340,7 +343,7 @@ describe('a plan goes on only on the PC that made it', () => {
     const pc = enabledPc(owner)
     const draft = insertWritePlan('draft', null, owner)
     expect(code(svc.approve(owner, draft.id, { contentHash: draft.contentHash }, pc.key))).toBe('BROWSER_DEVICE_ELSEWHERE')
-    expect(code(svc.approve(owner, draft.id, { contentHash: draft.contentHash }, undefined))).toBe('BROWSER_LINE_WRITES_NOT_YET')
+    expect(code(svc.approve(owner, draft.id, { contentHash: draft.contentHash }, undefined))).toBe('BROWSER_LINE_NOT_APPROVED')
     const bound = insertWritePlan('draft', pc.device.id, owner)
     expect(code(svc.approve(owner, bound.id, { contentHash: bound.contentHash }, undefined))).toBe('BROWSER_DEVICE_ELSEWHERE')
   })
@@ -354,6 +357,34 @@ describe('a plan goes on only on the PC that made it', () => {
     const c = value(steps.claim(CO, p, { writes: [{ kind: 'change', thing: 'action_set', idField: 'id' }], locks: [`lock-${p.id}`], host: HOST, account: '90171', site: 'lstep', company: CO }, sha256TokenDigest.digest(secret), now))
     expect(code(svc.permit(alice, c.executionId, secret, { index: 1 }, two.key))).toBe('BROWSER_DEVICE_ELSEWHERE')
     expect(data.forCompany(CO).browserLines.execution(c.executionId)).toMatchObject({ state: 'void', voidReason: 'BROWSER_DEVICE_ELSEWHERE' })
+  })
+
+  it('a write plan (PR 5c) is bound to the PC that made it; a PC stopped between two writes ends the execution (partial: what was done stays, the rest skipped), and the done write\'s report still lands', () => {
+    const writing = JSON.parse(JSON.stringify(opened)) as BrowserOpenedFile
+    const row = writing.lines.filter(l => l.name === 'landing_create').at(-1)!
+    row.status = 'approved'
+    opened = writing; build()
+    value(svc.setGrant(owner, alice.userId, { site: row.site, line: row.name, meaningHash: row.meaningHash, mechanicsHash: row.mechanicsHash, allowed: true }))
+    policy = { mode: 'on', sites: [{ host: HOST, level: 'write', assetHosts: [] }] }
+    const one = enabledPc(alice)
+    const two = enabledPc(alice)
+    const person = (v: string) => ({ value: v, from: { kind: 'person', confirmed: true } })
+    const site = (v: string) => ({ value: v, from: { kind: 'site_fact' } })
+    const values = { source: site('2597458'), tag: site('61'), name: person('試験'), to_date: person('2026-12-03'), to_time: person('18:20') }
+    const ref = { site: row.site, line: row.name, version: row.version, mapVersion: row.mapVersion, meaningHash: row.meaningHash, mechanicsHash: row.mechanicsHash }
+    const p = value(svc.create(alice, { line: ref, values, account: '90171' }, one.key))
+    expect(code(svc.approve(alice, p.id, { contentHash: p.contentHash }, two.key))).toBe('BROWSER_DEVICE_ELSEWHERE')
+    value(svc.approve(alice, p.id, { contentHash: p.contentHash }, one.key))
+    const claim = value(svc.claim(alice, p.id, one.key))
+    value(svc.permit(alice, claim.executionId, claim.secret, { index: 1 }, one.key))
+    // The PC is stopped while write 1 is on its way: its report still lands (clean-up is never gated)…
+    value(dev.withdraw(alice, one.key))
+    expect(value(svc.report(claim.secret, { index: 1, result: 'done', createdId: '8801' })).step).toBe('done')
+    // …and write 2's permit is refused: the execution ends partial, nothing more is permitted.
+    expect(code(svc.permit(alice, claim.executionId, claim.secret, { index: 2 }, one.key))).toMatch(/^BROWSER_DEVICE_/)
+    const e = data.forCompany(CO).browserLines.execution(claim.executionId)!
+    expect(e.state).toBe('partial')
+    expect(data.forCompany(CO).browserLines.steps(claim.executionId).map(s => s.state)).toEqual(['done', 'skipped'])
   })
 })
 

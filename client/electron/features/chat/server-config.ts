@@ -44,7 +44,7 @@ import type { WorkingFolders } from '../../services/working-folders'
 import type { SkillShelfStore } from '../skill-shelf/store'
 import { taskTopicOf, topicAfterTaskMade } from '../../../shared/consultation-task'
 import { browserRequestForTurn, type BrowserRequestPlans } from '../../browser-request/tools'
-import { browserInspectForTurn, type BrowserInspectPlans } from '../../browser-request/inspect-tool'
+import { browserInspectForTurn, type BrowserInspectPlans, type BrowserWritePlans } from '../../browser-request/inspect-tool'
 
 export interface ChatServerConfigDeps {
   config: ConfigStore
@@ -72,6 +72,8 @@ export interface ChatServerConfigDeps {
   browserPlans?: BrowserRequestPlans
   /** Its read-only inspection (features/browser/inspect.ts): the tool exists only while the same switch is on. */
   browserInspections?: BrowserInspectPlans
+  /** Its writes on the new path (features/browser/write-lines.ts): `browser_write` exists only while the same switch is on. */
+  browserWrites?: BrowserWritePlans
   /** Cancel a conversation's pending choice cards (agent-interactions.ts). */
   cancelChoicePrompts: (appSessionId: string) => void
   /** The AI action log (services/agent-events.ts). */
@@ -246,7 +248,7 @@ export function createChatServerConfig(deps: ChatServerConfigDeps): ChatServerCo
     requestInteraction: deps.requestInteraction,
     runAppCommand: deps.runAppCommand,
     createBrowserRequest: turn => browserRequestForTurn(deps.browserPlans, turn),
-    createBrowserInspect: turn => browserInspectForTurn(deps.browserInspections, turn),
+    createBrowserInspect: turn => browserInspectForTurn(deps.browserInspections, turn, deps.browserWrites),
     requestToolApproval: (toolName, toolInput, toolUseId, appSessionId, reason) => deps.toolApprovals.request(toolName, toolInput, toolUseId, appSessionId, reason),
     cancelInteractions: appSessionId => {
       deps.toolApprovals.cancel(appSessionId)

@@ -18,11 +18,15 @@
  * - **An inspection** (a line that writes nothing): made `open` by the member's session after the gate; the app reads the
  *   site (PR 5) and reports, once, the fixed words of each read and check (never a value the site showed); the server
  *   keeps them and says whether every read counted and every check is ✓.
- * - **A plan of writes**: refused in this build (`BROWSER_LINE_WRITES_NOT_YET`): an opened line may hold writes since
- *   generalization PR 6 (`step_template_add`, written `pending`), but this build makes no plan of them — neither a write
- *   plan nor an inspection of such a line.
- *   Its routes and the state table (`browser-line-steps.ts`) exist so this build is the rollback floor of the first
- *   build that writes (deployment.md "Rolling back production").
+ * - **A plan of writes** (generalization PR 5c): made `draft` from an **approved** line that writes, by the member's session,
+ *   with the account the app read (the site's marker) and values whose sources the core accepts — which / when and every
+ *   person's value **confirmed one by one** on the card; the server derives the writes and every lock from the line, its map
+ *   and the values (never from the app). Approve (the hash the person saw), claim, a permit per write and a report per write
+ *   follow the state table (`browser-line-steps.ts`). Both lines that write (`step_template_add`, `landing_create`) stay
+ *   `pending` until the owner's test write (PR 7), so the gate refuses them (`BROWSER_LINE_NOT_APPROVED`); a plan whose
+ *   line holds no write (or another number of writes) is never approved, claimed or permitted. An inspection of a line
+ *   that writes stays refused (`BROWSER_LINE_WRITES_NOT_YET`: it would pass the 「見るだけ」 gate). The rollback floor is
+ *   PR 4's build (deployment.md "Rolling back production"): never roll back below it once this build ran.
  * - **The strict read's notice** (§16-1 with Codex round 2 R1 / R2): the app reports a thing it could not read whole as
  *   the map's site, version and thing, a fixed kind and a count — never a key name; only for a map an approved line uses,
  *   only from a member who may use the site and holds a grant on one of its lines, within limits; one notice per company ×
@@ -39,6 +43,8 @@ import {
 import { BROWSER_PLAN_TIMES, BROWSER_REPORT_REASONS } from '../../shared/core/browser-plans'
 import { browserLineValuesProblem, type BrowserCheckStatus, type BrowserReadStatus } from '../../shared/core/browser-read-line'
 import { canonicalJson } from '../../shared/core/fixed-content'
+import { browserLineWriteLocks, type BrowserLineWrite as CoreLineWrite } from '../../shared/core/browser-write-line'
+import { BROWSER_ID_VALUE_RE } from '../../shared/core/plugin-browser-declaration'
 import { parsePluginManifest } from '../../shared/core/plugins'
 import type {
   BrowserInspectionResult, BrowserLineClaim, BrowserLineExecutionView, BrowserLineGrantsView, BrowserLinePermit, BrowserLinePlanView,
@@ -163,6 +169,28 @@ function parseRef(v: unknown): BrowserLineRef | null {
   return { site, line, version, mapVersion, meaningHash, mechanicsHash }
 }
 
+/**
+ * The writes of a plan as the state table reads them, derived from the line and its map alone (never from the app): an
+ * `add_child` changes the object its read names; a `create_from` creates a new object of its read's thing, and when it sets
+ * a field to what an earlier write created (`{ created }`), the permit binds that id (`on`: the server's recorded id,
+ * `createdTarget`). Null when a write cannot be told this way (a create naming two created objects: the permit binds one).
+ */
+export function browserLineServerWrites(writes: readonly CoreLineWrite[], read: { reads: ReadonlyArray<{ name: string; thing: string }> }, map: BrowserMap): BrowserLineWritesContent['writes'] | null {
+  const out: BrowserLineWritesContent['writes'] = []
+  const madeBy: Record<string, number> = {}
+  for (const [i, w] of writes.entries()) {
+    const r = read.reads.find(x => x.name === w.read)
+    const thing = r ? map.things[r.thing] : undefined
+    if (!r || !thing) return null
+    if (w.verb === 'add_child') { out.push({ kind: 'change', thing: r.thing, idField: thing.id }); continue }
+    const refs = Object.values(w.set).flatMap(src => ('created' in src ? [src.created] : []))
+    if (refs.length > 1 || refs.some(n => !own(madeBy, n))) return null
+    out.push({ kind: 'create', thing: r.thing, idField: thing.id, ...(refs.length === 1 ? { on: { created: madeBy[refs[0]] } } : {}) })
+    madeBy[w.as] = i + 1
+  }
+  return out
+}
+
 export function createBrowserLineService(deps: BrowserLineDeps) {
   const { companyData, transactions, clock, monotonic, ids, tokenDigest, executionLookup, memberships } = deps
   const log = deps.log ?? console
@@ -283,14 +311,17 @@ export function createBrowserLineService(deps: BrowserLineDeps) {
   }
 
   /**
-   * The gate for a plan of writes: the line's gate at level 「入力・保存まで」, then — in this build — a refusal: the core's
-   * line has a write part since generalization PR 6 (`browser-write-line.ts`, its line judge §4-1 / I4), but the plan's
-   * writes are not matched to the line's yet; until a later build does, every plan of writes stops here, whatever a row says.
+   * The gate for a plan of writes (approve, claim, every permit): the line's gate at level 「入力・保存まで」 — an approved
+   * row exactly (the PC registration adds its check in `gate`, the one seam) —, and the row's line must write exactly as
+   * many times as the plan holds: a plan whose line writes nothing (an inspection's row) or writes otherwise is never
+   * approved, claimed or permitted, whatever a row in the database says.
    */
   function writeGate(member: Member, p: BrowserLinePlanRow, deviceKey: string | undefined): Outcome<LoadedLine> {
     const passed = gate(member, planRef(p), 'write', { key: deviceKey, planId: p.id })
     if (!passed.ok) return passed
-    return refuse('conflict', W.writesNotYet, { code: 'BROWSER_LINE_WRITES_NOT_YET', writes: p.writes })
+    const writes = passed.value.row.line.writes
+    if (!writes || writes.length !== p.writes || p.writes < 1) return refuse('conflict', W.notApproved, { code: 'BROWSER_LINE_NOT_APPROVED' })
+    return passed
   }
 
   const contentOf = (p: BrowserLinePlanRow) => JSON.parse(p.content) as LinePlanContent
@@ -408,20 +439,27 @@ export function createBrowserLineService(deps: BrowserLineDeps) {
     },
 
     /**
-     * POST /browser-line-plans: an inspection of an approved line (the gate at level 「見るだけ」), its values checked for
-     * where they come from (§16-4). A line that writes is refused (`BROWSER_LINE_WRITES_NOT_YET`).
+     * POST /browser-line-plans { line, values, conversationId?, account? }: without `account`, an inspection of an approved
+     * line that writes nothing (the gate at level 「見るだけ」; a line that writes is refused, `BROWSER_LINE_WRITES_NOT_YET`);
+     * with `account` (the site's marker as the app read it, a plain id), a **plan of writes** of an approved line that writes
+     * (the gate at level 「入力・保存まで」), made `draft`: the writes and every lock derived here from the line, its map and the
+     * values (C11). Values: where they come from (§16-4; which / when and every person's value confirmed one by one).
      */
     create(member: Member, body: unknown, deviceKey?: string): Outcome<BrowserLinePlanView> {
-      if (!isMap(body) || Object.keys(body).some(k => !['line', 'values', 'conversationId'].includes(k))) return refuse('bad-request', W.badPlan, { code: 'BROWSER_BAD_PLAN' })
+      if (!isMap(body) || Object.keys(body).some(k => !['line', 'values', 'conversationId', 'account'].includes(k))) return refuse('bad-request', W.badPlan, { code: 'BROWSER_BAD_PLAN' })
       const ref = parseRef(body.line)
       if (!ref || (body.conversationId !== undefined && (typeof body.conversationId !== 'string' || !CONVERSATION_RE.test(body.conversationId)))) {
         return refuse('bad-request', W.badPlan, { code: 'BROWSER_BAD_PLAN' })
       }
-      const passed = gate(member, ref, 'read', { key: deviceKey, planId: null })
+      const writing = own(body, 'account')
+      if (writing && (typeof body.account !== 'string' || !BROWSER_ID_VALUE_RE.test(body.account))) return refuse('bad-request', W.badPlan, { code: 'BROWSER_BAD_PLAN' })
+      const passed = gate(member, ref, writing ? 'write' : 'read', { key: deviceKey, planId: null })
       if (!passed.ok) return passed
       const line = passed.value
-      // A line that writes is never made an inspection (it would pass the 「見るだけ」 gate); its plans are a later build's.
-      if (line.row.line.writes !== undefined) return refuse('conflict', W.writesNotYet, { code: 'BROWSER_LINE_WRITES_NOT_YET' })
+      const lineWrites = line.row.line.writes
+      // A line that writes is never made an inspection (it would pass the 「見るだけ」 gate); a plan of writes needs a line that writes.
+      if (!writing && lineWrites !== undefined) return refuse('conflict', W.writesNotYet, { code: 'BROWSER_LINE_WRITES_NOT_YET' })
+      if (writing && (lineWrites === undefined || lineWrites.length === 0)) return refuse('bad-request', W.badPlan, { code: 'BROWSER_BAD_PLAN' })
       const site = siteOf(ref.site) as Site
       // Values: the core's one rule, then — until the server can re-read a business plugin's bound field — no record field.
       const problem = browserLineValuesProblem(line.row.line.read, body.values)
@@ -433,16 +471,28 @@ export function createBrowserLineService(deps: BrowserLineDeps) {
       for (const [name, v] of Object.entries(values)) {
         if (v.from.kind === 'record_field') return refuse('bad-request', W.valueSourceNotYet, { code: 'BROWSER_VALUE_SOURCE_NOT_YET', value: name })
       }
+      let writes: LinePlanContent['writes'] = []
+      let locks: string[] = []
+      const account = writing ? body.account as string : null
+      if (writing) {
+        // The writes and the locks from the line alone (C11): the app never names a write, a target or a key.
+        const derived = browserLineServerWrites(lineWrites as CoreLineWrite[], line.row.line.read, line.map)
+        const plain = Object.fromEntries(Object.entries(values).map(([k, v]) => [k, v.value]))
+        const keys = browserLineWriteLocks(line.row.line.read, lineWrites as CoreLineWrite[], line.map, plain, { company: member.companyId, host: site.host, account: account as string })
+        if (!derived || !keys || keys.length === 0) return refuse('bad-request', W.badPlan, { code: 'BROWSER_BAD_PLAN' })
+        writes = derived
+        locks = keys
+      }
       const now = clock.nowMs()
       const content: LinePlanContent = {
         shape: 2, company: member.companyId, user: member.userId, conversation: (body.conversationId as string | undefined) ?? null, line: ref,
-        values, writes: [], locks: [], site: ref.site, host: site.host, account: null, createdAt: iso(now), expiresAt: iso(now + BROWSER_PLAN_TIMES.planLifetime),
+        values, writes, locks, site: ref.site, host: site.host, account, createdAt: iso(now), expiresAt: iso(now + BROWSER_PLAN_TIMES.planLifetime),
       }
       const canonical = canonicalJson(content)
       const row: BrowserLinePlanRow = {
         id: `bl_${ids.newToken().slice(0, 32)}`, userId: member.userId, shape: 2, site: ref.site, lineName: ref.line, lineVersion: ref.version,
-        mapVersion: ref.mapVersion, meaningHash: ref.meaningHash, mechanicsHash: ref.mechanicsHash, writes: 0, content: canonical,
-        contentHash: hashCanonical(canonical), state: 'open', closeReason: null, createdAt: content.createdAt, expiresAt: content.expiresAt,
+        mapVersion: ref.mapVersion, meaningHash: ref.meaningHash, mechanicsHash: ref.mechanicsHash, writes: writes.length, content: canonical,
+        contentHash: hashCanonical(canonical), state: writing ? 'draft' : 'open', closeReason: null, createdAt: content.createdAt, expiresAt: content.expiresAt,
         approvedAt: null, closedAt: null, conversationId: content.conversation, result: null, reportedAt: null,
       }
       // The plan and the PC that made it, together: it goes on only on that registration.

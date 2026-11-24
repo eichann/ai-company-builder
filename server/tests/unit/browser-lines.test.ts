@@ -8,7 +8,8 @@
  * Guards: the opened list re-checked (a row whose hashes do not match is never used), the gate an exact match of six
  * fields on an approved row, the site setting, the stop and the per-line grant (meaning + mechanics, carried only by a
  * reviewed `grantsFrom`); where a value comes from (which / when never from the AI or the site, no record field yet, a
- * person's value confirmed); an inspection's result once, fixed words, consistent; no plan of writes in this build; the
+ * person's value confirmed); an inspection's result once, fixed words, consistent; plans of writes only of an approved
+ * line that writes (the writes and locks derived by the server); the
  * strict read's notice (names of the map only, a member who may use the site, limits, one per key, owners / admins told
  * once); the write state table row by row (the steps module), one lock key on both paths, and the rollback floor (rows a
  * writing build leaves, read by a build that does not know its line; a shape this build does not know frozen).
@@ -309,14 +310,107 @@ describe('an inspection', () => {
   })
 })
 
-describe('no plan of writes in this build', () => {
-  it('a write plan in the database (as a later build would leave one) is never approved, claimed or permitted: the line holds no write', () => {
+describe('plans of writes (generalization PR 5c)', () => {
+  const person = (value: string) => ({ value, from: { kind: 'person', confirmed: true } })
+  /** The real opened list with these writing lines' newest rows marked approved (as the owner's review after the test write would). */
+  function approve(...names: string[]): BrowserOpenedLineRow[] {
+    const writing = JSON.parse(JSON.stringify(REAL_OPENED)) as BrowserOpenedFile
+    const rows = names.map(n => writing.lines.filter(l => l.name === n).at(-1)!)
+    for (const r of rows) { expect(r.status).toBe('pending'); r.status = 'approved' }
+    opened = writing; build()
+    for (const r of rows) grant(alice, r)
+    policy = { mode: 'on', sites: [{ host: HOST, level: 'write', assetHosts: [] }] }
+    return rows
+  }
+  const STEP_VALUES = { reminder: site('7100002'), step: site('7200003'), template_folder: site('7300004'), template: site('7400005') }
+  const LANDING_VALUES = { source: site('2597458'), tag: site('61'), name: person('試験_20261203'), to_date: person('2026-12-03'), to_time: person('18:20') }
+  const writePlan = (row: BrowserOpenedLineRow, values: unknown, account: unknown = '90171', m = alice) => svc.create(m, { line: refOf(row), values, account })
+  const contentOf = (p: { id: string }) => JSON.parse((conn.prepare('SELECT content FROM browser_line_plans WHERE id = ?').get(p.id) as { content: string }).content) as Record<string, unknown>
+
+  it('as written today both writing lines are pending: no plan of writes is made', () => {
+    policy = { mode: 'on', sites: [{ host: HOST, level: 'write', assetHosts: [] }] }
+    for (const name of ['step_template_add', 'landing_create']) {
+      const row = REAL_OPENED.lines.filter(l => l.name === name).at(-1)!
+      expect(code(writePlan(row, name === 'landing_create' ? LANDING_VALUES : STEP_VALUES))).toBe('BROWSER_LINE_NOT_APPROVED')
+    }
+    expect(conn.prepare('SELECT COUNT(*) AS n FROM browser_line_plans').get()).toEqual({ n: 0 })
+  })
+
+  it('an approved line that writes makes a draft: the writes and the lock derived by the server (the old path\'s key for the same step)', () => {
+    const [row] = approve('step_template_add')
+    const p = value(writePlan(row, STEP_VALUES))
+    expect(p.state).toBe('draft')
+    expect(p.writes).toBe(1)
+    const c = contentOf(p)
+    expect(c.writes).toEqual([{ kind: 'change', thing: 'reminder_step', idField: 'step' }])
+    expect(c.account).toBe('90171')
+    expect(c.locks).toEqual([browserLockKey({ company: CO, host: HOST, account: '90171', kind: 'lstep.reminder_step', fields: { reminder: 'id', step: 'id' }, target: { reminder: '7100002', step: '7200003' } })])
+    // approve (the hash the person saw) → claim (the secret once) → permit write 1 → report → succeeded, locks gone.
+    expect(code(svc.approve(alice, p.id, { contentHash: 'sha256:' + '0'.repeat(64) }))).toBe('CONTENT_CHANGED')
+    expect(value(svc.approve(alice, p.id, { contentHash: p.contentHash })).state).toBe('approved')
+    const claim = value(svc.claim(alice, p.id))
+    expect(claim.fixed.contentHash).toBe(p.contentHash)
+    const permit = value(svc.permit(alice, claim.executionId, claim.secret, { index: 1 }))
+    expect(permit.createdTarget).toBeNull()
+    expect(value(svc.report(claim.secret, { index: 1, result: 'done' })).state).toBe('succeeded')
+    expect(locksOf(claim.executionId)).toEqual([])
+  })
+
+  it('landing_create: which / when values only when a person confirmed them one by one; write 2 is bound to the id the server recorded for write 1', () => {
+    const [row] = approve('landing_create')
+    expect(code(writePlan(row, { ...LANDING_VALUES, name: { value: '試験_20261203', from: { kind: 'person', confirmed: false } } }))).toBe('BROWSER_VALUE_UNCONFIRMED')
+    expect(code(writePlan(row, { ...LANDING_VALUES, name: { value: '試験_20261203', from: { kind: 'ai' } } }))).toBe('BROWSER_VALUE_REFUSED')
+    expect(code(writePlan(row, { ...LANDING_VALUES, tag: person('61') }))).toBe('BROWSER_VALUE_REFUSED')
+    const p = value(writePlan(row, LANDING_VALUES))
+    expect(contentOf(p).writes).toEqual([
+      { kind: 'create', thing: 'action_set', idField: 'id' },
+      { kind: 'create', thing: 'landing', idField: 'id', on: { created: 1 } },
+    ])
+    value(svc.approve(alice, p.id, { contentHash: p.contentHash }))
+    const claim = value(svc.claim(alice, p.id))
+    value(svc.permit(alice, claim.executionId, claim.secret, { index: 1 }))
+    // A create is done only with what it created.
+    expect(code(svc.report(claim.secret, { index: 1, result: 'done' }))).toBe('BROWSER_BAD_REPORT')
+    value(svc.report(claim.secret, { index: 1, result: 'done', createdId: '8801' }))
+    expect(value(svc.permit(alice, claim.executionId, claim.secret, { index: 2 })).createdTarget).toBe('8801')
+  })
+
+  it('the account and the shape: a bad account refused; no account on a writing line is an inspection (refused); a write plan of an inspection line refused', () => {
+    const [row] = approve('step_template_add')
+    expect(code(writePlan(row, STEP_VALUES, '90171/../1'))).toBe('BROWSER_BAD_PLAN')
+    expect(code(writePlan(row, STEP_VALUES, 90171))).toBe('BROWSER_BAD_PLAN')
+    expect(code(svc.create(alice, { line: refOf(row), values: STEP_VALUES }))).toBe('BROWSER_LINE_WRITES_NOT_YET')
+    expect(code(svc.create(alice, { line: refOf(approvedRow()), values: VALUES, account: '90171' }))).toBe('BROWSER_BAD_PLAN')
+    expect(conn.prepare('SELECT COUNT(*) AS n FROM browser_line_plans').get()).toEqual({ n: 0 })
+  })
+
+  it('a write plan needs 「入力・保存まで」, the stop off and the line\'s grant', () => {
+    const [row] = approve('step_template_add')
+    policy = { mode: 'on', sites: [{ host: HOST, level: 'read', assetHosts: [] }] }
+    expect(code(writePlan(row, STEP_VALUES))).toBe('BROWSER_NOT_ALLOWED')
+    policy = { mode: 'on', sites: [{ host: HOST, level: 'write', assetHosts: [] }] }
+    stops = { all: true, tools: [] }
+    expect(code(writePlan(row, STEP_VALUES))).toBe('BROWSER_AI_STOPPED')
+    stops = { all: false, tools: [] }
+    expect(code(writePlan(row, STEP_VALUES, '90171', bob))).toBe('BROWSER_TYPE_NOT_GRANTED')
+  })
+
+  it('a write plan in the database whose line writes nothing (an inspection\'s row) is never approved, claimed or permitted', () => {
     policy = { mode: 'on', sites: [{ host: HOST, level: 'write', assetHosts: [] }] }
     const p = insertWritePlan('draft')
-    expect(code(svc.approve(alice, p.id, { contentHash: p.contentHash }))).toBe('BROWSER_LINE_WRITES_NOT_YET')
+    expect(code(svc.approve(alice, p.id, { contentHash: p.contentHash }))).toBe('BROWSER_LINE_NOT_APPROVED')
     const a = insertWritePlan('approved')
-    expect(code(svc.claim(alice, a.id))).toBe('BROWSER_LINE_WRITES_NOT_YET')
+    expect(code(svc.claim(alice, a.id))).toBe('BROWSER_LINE_NOT_APPROVED')
     expect(conn.prepare('SELECT COUNT(*) AS n FROM browser_line_executions').get()).toEqual({ n: 0 })
+  })
+
+  it('a plan whose line writes another number of times than the plan holds is refused at approve', () => {
+    const [row] = approve('step_template_add')
+    const p = value(writePlan(row, STEP_VALUES))
+    conn.prepare('DROP TRIGGER browser_line_plans_fixed').run()
+    conn.prepare('UPDATE browser_line_plans SET writes = 2 WHERE id = ?').run(p.id)
+    initDatabase(conn)
+    expect(code(svc.approve(alice, p.id, { contentHash: p.contentHash }))).toBe('BROWSER_LINE_NOT_APPROVED')
   })
 })
 
@@ -602,7 +696,7 @@ describe('the rollback floor (deployment.md): rows a writing build leaves, read 
     // This build (no line that writes) serves them now through its routes' service.
     const secretOf = (id: string) => { const s = randomBytes(32).toString('hex'); conn.prepare('DROP TRIGGER browser_line_executions_fixed').run(); conn.prepare('UPDATE browser_line_executions SET secret_hash = ? WHERE id = ?').run(sha256TokenDigest.digest(s), id); initDatabase(conn); return s }
     const runSecret = secretOf(running.id)
-    expect(code(svc.permit(alice, running.id, runSecret, { index: 2 }))).toBe('BROWSER_LINE_WRITES_NOT_YET')
+    expect(code(svc.permit(alice, running.id, runSecret, { index: 2 }))).toBe('BROWSER_LINE_NOT_APPROVED')
     expect(execOf(running.id).state).toBe('partial')
     expect(stepStates(running.id)).toEqual(['done', 'skipped', 'skipped'])
     const unknownSecret = secretOf(unknown.id)

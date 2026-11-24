@@ -182,6 +182,7 @@ export const ACB_TOOL_DISPLAYS: Readonly<Record<string, ToolDisplay>> = {
   mcp__acb_browser__browser_request: say('サイトの操作を頼みました', 'サイトの中を探して計画を作っています', 'サイトの操作を {n} 回頼みました'),
   // Its inspection: reads only; the card shows what was read.
   mcp__acb_browser__browser_inspect: say('サイトを点検しました', 'サイトを読んで点検しています', 'サイトを {n} 回点検しました'),
+  mcp__acb_browser__browser_write: say('書き込みのカードを出しました', '書き込みのカードを作っています', '書き込みのカードを {n} 回出しました'),
   mcp__acb_ask__ask_user: say('質問しました', '質問しています', '{n} 回質問しました'),
   ...SECOND_OPINION_DISPLAYS,
 }

@@ -6,6 +6,7 @@ import { BROWSER_CARD_MARK_WORDS, type BrowserCard, type BrowserCardMark, type B
 import { BROWSER_INSPECTION_CARD_WORDS as W, type BrowserInspectionView } from '../../../../shared/browser-inspection'
 import type { BrowserInspectionReads } from '../api'
 import { useBrowserInspection } from '../hooks/useBrowserInspection'
+import { BrowserWriteCard } from './BrowserWriteCard'
 
 // Everything ✓ is green; a ✗ or something unread asks the member to look at the site, so amber (design-system.md
 // 「止まっている」の色: something to do).
@@ -48,6 +49,12 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
  * only); main keeps them in memory, so after a restart the card says the result is gone. Nothing here can act on the site.
  */
 export const BrowserInspectionCard = memo(function BrowserInspectionCard({ companyId, planId, reads }: { companyId: string; planId: string; reads?: BrowserInspectionReads }) {
+  // A write card (`wp_…`, generalization PR 5c) shares the chat's reference; it draws what was read with this body.
+  if (planId.startsWith('wp_')) return <BrowserWriteCard companyId={companyId} cardId={planId} readCard={v => <InspectionBody view={v} />} />
+  return <InspectionCardOf companyId={companyId} planId={planId} reads={reads} />
+})
+
+function InspectionCardOf({ companyId, planId, reads }: { companyId: string; planId: string; reads?: BrowserInspectionReads }) {
   const { view, message } = useBrowserInspection(companyId, planId, reads)
   if (!view) {
     return (
@@ -57,7 +64,7 @@ export const BrowserInspectionCard = memo(function BrowserInspectionCard({ compa
     )
   }
   return <InspectionBody view={view} />
-})
+}
 
 export function InspectionBody({ view }: { view: BrowserInspectionView }) {
   const { card } = view

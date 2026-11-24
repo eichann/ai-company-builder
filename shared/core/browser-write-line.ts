@@ -3,8 +3,8 @@
  * `agent-browser.md` "The write words and the first write line", "Creating on the new path"). Internal design memo
  * 「ブラウザ操作の汎用化」 §3-3 (the verbs), §3-4 (one generic check: read → predict → write → read → compare), §4-1 (the
  * harmless prefix, I4), §5 (I2, I3), §6 (the step-template line), §7 (the landing-route line), §15 C1–C7 / C11, §16-4,
- * §17, §18. Pure; nothing in the app or the server writes with it yet (the server still refuses every plan of writes,
- * `BROWSER_LINE_WRITES_NOT_YET`).
+ * §17, §18. Pure; the server derives a plan's locks with it and the app's write runner (PR 5c) judges its writes with
+ * it — only for an approved line, and none is approved yet.
  *
  * A line's writes are a list of
  * - `{ read, verb: 'add_child', field, value }`: add the id `value` to the list `field` of the object the read `read`

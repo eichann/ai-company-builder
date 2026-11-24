@@ -1,10 +1,13 @@
 ---- MODULE StepsLife ----
 \* The life of one execution with SEVERAL ORDERED WRITES (browser operation generalization, PR 1): the
 \* execution and write-state table of agent-browser.md "Executions with several writes" in TLA+.
-\* DESIGN AHEAD OF CODE: nothing implements it yet. The server half lands in PR 4 (shape-2 plans, a permit
-\* and a report per write, the common lock key), the app half in PR 5 (the writes in order, finding what
-\* was created). Until then this model IS the contract those PRs copy; each action names the state-table
-\* row it is. PlanLife.tla stays the copy of today's one-write code (lstep@0.6.x), unchanged.
+\* The contract the code copies; each action names the state-table row it is. The code (PR 4, PR 5c):
+\*   Server: server/src/services/browser-line-steps.ts (the state table, row by row) and
+\*           server/src/services/browser-lines.ts (the gate, the plan of writes, the writes and locks derived).
+\*   App:    client/electron/features/browser/write-line-runner.ts (the writes in order, each under its own
+\*           permit, the reads after each judged against the prediction; its steps name the App* actions)
+\*           with client/shared/browser-line-writes.ts (the write gate, the request held to its mechanics).
+\* PlanLife.tla stays the copy of today's one-write code (lstep@0.6.x), unchanged.
 \*
 \* No site is named: "an existing object" (E), "a folder" (where a create lands), "what this execution
 \* created" (ours) and "what a person created meanwhile in the same folder" (theirs) are the map's words.
