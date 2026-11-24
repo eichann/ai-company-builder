@@ -63,13 +63,13 @@ export function UpdateProposalCard({ companyId, rootPath, occurrenceId, task }: 
   const change = (key: string, patch: Partial<DraftItem>) => setItems(xs => (xs ?? []).map(x => (x.key === key ? { ...x, ...patch } : x)))
   // The 案件 each HubSpot 取引 goes to (owner FB #43): locked once an earlier press began writing to one, else the member's or the default.
   const pickOf = (deal: string): string | null | undefined => {
-    if (!data.deals) return undefined
+    // Locked first, also when the 案件 could not be read now (offline): a later press keeps writing where the earlier one did.
     const locked = dealLocked(deal, data.mark, data.results, now)
-    if (locked !== undefined) return locked
+    if (locked !== undefined || !data.deals) return locked
     return deal in picks ? picks[deal] : defaultPick(deal, data.deals, pickedBefore(deal, data.mark))
   }
   const dealGroups = data.deals ? dealsToChoose(list).filter(g => data.deals!.length > 0 || isNewDeal(g)) : []
-  const picked: Record<string, string | null | undefined> = Object.fromEntries(dealGroups.map(g => [g, pickOf(g)]))
+  const picked: Record<string, string | null | undefined> = Object.fromEntries(dealsToChoose(list).map(g => [g, pickOf(g)]))
   const dealOf = (id: string): DealChoice => data.deals?.find(x => x.id === id) ?? { id, title: id, assignee: null, confidence: null, amount: null, why: 'named' }
   const chosen = itemsToApply(list, statusOf).filter(d => !createSkipped(d, picked))
   const chosenPicks: DealPick[] = dealsToChoose(chosen).flatMap(g => (picked[g] === undefined ? [] : [{ 取引: g, 案件: picked[g] as string | null }]))

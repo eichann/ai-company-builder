@@ -303,7 +303,7 @@ export function createAfterMeetingApi(deps: AfterMeetingDeps) {
           return { success: false, code: 'ALREADY', error: 'この項目は、もう反映しているか、反映の途中です。画面を読み直しました。' }
         }
         // An earlier press is writing (or wrote) the 取引 to one 案件: a later press never sends its other items to another one.
-        if (movedDeals(deals, mark, results, now()).length > 0) {
+        if (movedDeals(deals, handed ?? [], mark, results, now()).length > 0) {
           return { success: false, code: 'ALREADY', error: '前の反映で選んだ案件に、もう書き始めています。案件は変えられません。画面を読み直しました。' }
         }
         mark.applies = [...mark.applies, { id: c.id, at: new Date(now()).toISOString(), kind: c.kind, keys: [...c.keys], ...(handed ? { items: handed } : {}), ...(deals.length > 0 ? { deals } : {}) }].slice(-50)

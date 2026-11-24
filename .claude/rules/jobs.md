@@ -1911,8 +1911,8 @@ not make jobs members' apps cannot run).
     meeting to it first with `minutes_link_bundle` (a meeting already linked to another 案件: never relinked, the AI asks), to keep
     `取引` as in the file and to write the 案件 written to as `案件` in `result.json`; 「新しく作る」 tells it to create without
     searching again. The press keeps the choice (`ApplyEntry.deals`); **a 取引 never moves to another 案件** once an earlier press's
-    item of it is written, waiting for an approval, on its way or stopped (`dealLocked`, shown fixed; main refuses a press that
-    would, `movedDeals` → `ALREADY`). ［反映する］ opens **the last check** (exactly what goes out), then one press:
+    item of it is written, waiting for an approval, on its way or stopped (`dealLocked`, shown fixed and handed on also when the 案件
+    cannot be read now; main refuses a press that names another 案件, 「新しく作る」 or none for it, `movedDeals` → `ALREADY`). ［反映する］ opens **the last check** (exactly what goes out), then one press:
     main records the press (`afterMeeting:note { kind: 'apply', id, keys }`) and only then `chat.consultAbout { purpose: 'work',
     detail }` starts **one** consultation whose first message (`applyAsk`) carries only the ticked items with the member's values,
     the reason / quote only where chosen, the minutes' `docVersion` to compare first (T7: 「議事録が直されています」 is said by the

@@ -385,7 +385,15 @@ export function dealLocked(deal: string, mark: AfterMeetingMark, results: readon
   return undefined
 }
 
-/** main's check beside `refusedKeys`: the 取引 whose 案件 a press would change after an earlier press began writing to another. */
-export function movedDeals(picks: readonly DealPick[], mark: AfterMeetingMark, results: readonly ResultItem[], now: number): string[] {
-  return picks.filter(p => { const locked = dealLocked(p.取引, mark, results, now); return locked !== undefined && locked !== p.案件 }).map(p => p.取引)
+/**
+ * main's check beside `refusedKeys`: the HubSpot 取引 of a press whose 案件 an earlier press began writing to, and which this
+ * press would send elsewhere — another 案件, 「新しく作る」, or no choice at all (the consultation would search again).
+ */
+export function movedDeals(picks: readonly DealPick[], handed: readonly HandedItem[], mark: AfterMeetingMark, results: readonly ResultItem[], now: number): string[] {
+  const deals = [...new Set(handed.filter(i => i.書き先 === 'hubspot').map(i => i.取引))]
+  return deals.filter(deal => {
+    const locked = dealLocked(deal, mark, results, now)
+    const pick = picks.find(p => p.取引.normalize('NFC') === deal.normalize('NFC'))
+    return locked !== undefined && (!pick || pick.案件 !== locked)
+  })
 }

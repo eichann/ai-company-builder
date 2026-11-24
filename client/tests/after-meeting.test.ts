@@ -209,6 +209,8 @@ test('a 取引 never moves to another 案件 once an earlier press began writing
   const third = { kind: 'apply', id: 'a-0000000000000003', keys: [K_STAGE], items: [HANDED[K_STAGE]], deals: [{ 取引: '123', 案件: null }] } as AfterMeetingChange
   const refused = await w.api.note('c1', w.root, OCC, third)
   assert.ok(!refused.success && refused.code === 'ALREADY', 'the 金額 is on its way to deal-sample02: 「新しく作る」 is refused')
+  const unnamed = await w.api.note('c1', w.root, OCC, press('a-0000000000000004', K_STAGE))
+  assert.ok(!unnamed.success && unnamed.code === 'ALREADY', 'nor a press that names no 案件 (the consultation would search again)')
   const read = await w.api.read('c1', w.root, OCC)
   assert.ok(read.success && read.run)
   assert.deepEqual(read.mark.applies.map(a => a.deals?.[0]?.案件), ['deal-sample01', 'deal-sample02'])
