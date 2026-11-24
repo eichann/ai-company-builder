@@ -67,11 +67,12 @@ export interface BrowserMapThing {
    */
   keys?: Readonly<Record<string, BrowserMapKeyUse>>
   /**
-   * What the thing lets a line write (generalization PR 6, memo §3-3, §15 C7): per verb, the fields it may change —
-   * reviewed with the map (the site's effect is predictable: `add_child` adds exactly one id to that list). A line can
-   * only use what is listed here; listing opens nothing by itself.
+   * What the thing lets a line write (generalization PR 6, memo §3-3, §15 C7): per verb, the fields it may change and,
+   * for each, the thing of the map whose id goes in (`{ add_child: { <list field>: '<thing>' } }`) — reviewed with the map
+   * (the site's effect is predictable: `add_child` adds exactly one id of that thing to that list). A line can only use
+   * what is listed here; listing opens nothing by itself.
    */
-  writes?: Readonly<Partial<Record<BrowserWriteVerb, readonly string[]>>>
+  writes?: Readonly<Partial<Record<BrowserWriteVerb, Readonly<Record<string, string>>>>>
   /**
    * Who a write on the thing reaches (memo §3-2 「届き方」; required for a thing with `writes`): `none` — nobody until a
    * person hands it out; `scheduled` — people who have the thing's time still ahead of them, at that time.
@@ -226,10 +227,13 @@ function thingProblem(t: unknown, things: Record<string, unknown>): string | nul
     const w = t.writes
     if (!isMap(w) || Object.keys(w).length === 0 || !onlyKeys(w, BROWSER_WRITE_VERBS)) return '書ける欄の形が正しくありません'
     for (const [verb, list] of Object.entries(w)) {
-      if (!Array.isArray(list) || list.length === 0 || new Set(list).size !== list.length) return `書ける欄（${verb}）が正しくありません`
-      for (const f of list) {
+      if (!isMap(list) || Object.keys(list).length === 0) return `書ける欄（${verb}）が正しくありません`
+      for (const [f, child] of Object.entries(list)) {
         // add_child adds one id to a list kept in any order (where it lands in an ordered list is not predictable).
-        if (typeof f !== 'string' || !own(fields, f) || fields[f].kind !== 'id_set' || fields[f].nullable) return `書ける欄（${verb}）は、順不同の番号の一覧です`
+        if (!own(fields, f) || fields[f].kind !== 'id_set' || fields[f].nullable) return `書ける欄（${verb}）は、順不同の番号の一覧です`
+        // The thing whose id goes in: one of the map, bound to the account (it is read from this account).
+        if (typeof child !== 'string' || !own(things, child) || !isMap(things[child]) || !isMap((things[child] as Record<string, unknown>).must_hold)
+          || ((things[child] as Record<string, Record<string, unknown>>).must_hold.account !== true)) return `書ける欄（${verb}）に入るものが正しくありません`
       }
     }
     if (!(BROWSER_MAP_DELIVERS as readonly unknown[]).includes(t.delivers)) return '書けるものには、届き方が要ります'

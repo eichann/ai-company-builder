@@ -16,7 +16,8 @@
  *   (`browserLineWriteLocks`).
  * - **What is added was read** (C5): an `add_child` value is a value the line reads as an object of the same account.
  * - **The prediction** (§3-4 step 2, I3): from the states read before, the core computes every read's state after the
- *   writes — the written field with exactly the added id, every other field and every other read unchanged. After the
+ *   writes — the written field with exactly the added id, every other field and every other read unchanged (what the
+ *   line reads: a change elsewhere on the site is not seen, as on the old path). After the
  *   write, the line's reads made again must equal that prediction **exactly**, under the same account and with every
  *   must-hold fact held (`judgeBrowserWrites`); anything else is "not as predicted" or "could not be read", never done.
  *
@@ -63,7 +64,7 @@ export function browserLineWritesProblem(raw: unknown, read: BrowserReadLine, ma
     if (!r) return `${at}：書くものは、この行が読むものです`
     const thing = map.things[r.thing]
     const allowed = thing.writes?.[w.verb as BrowserWriteVerb]
-    if (!allowed || typeof w.field !== 'string' || !allowed.includes(w.field)) return `${at}：地図が、このもののこの欄への書き込みを許していません`
+    if (!allowed || typeof w.field !== 'string' || !own(allowed, w.field)) return `${at}：地図が、このもののこの欄への書き込みを許していません`
     // §4-1 (I4): every object a line names existed before it (no verb creates one yet), so only the last write may change it.
     if (i !== raw.length - 1) return `${at}：前からあるものに書けるのは、最後の1回だけです`
     // C11: the server takes the lock from the plan's values alone (the object's id and its parent's).
@@ -71,8 +72,9 @@ export function browserLineWritesProblem(raw: unknown, read: BrowserReadLine, ma
     if (w.verb === 'add_child') {
       // C5: what is added is read by the line, by that value, as an object of the same account (it exists there, and the
       // card shows it) — so it is a `target` id the site showed.
+      // And it is the thing the map says goes in that field (not just any id of the account).
       const added = read.reads.find(x => isValueSource(x.id) && x.id.value === w.value)
-      if (!added || map.things[added.thing].must_hold?.account !== true) return `${at}：足すものは、この行が同じアカウントで読むものです`
+      if (!added || added.thing !== allowed[w.field] || map.things[added.thing].must_hold?.account !== true) return `${at}：足すものは、この行が同じアカウントで読むものです`
     }
   }
   return null
@@ -120,16 +122,20 @@ export type BrowserWritesJudgement =
 
 /**
  * Judge the writes (§3-4 steps 4–5, I3): the reads before must have made a plan (`evaluateBrowserReadLine` with no
- * problem); the reads after are judged by the same function — strict read, the objects asked for, every must-hold fact
- * (account, parent) — under the account read before; then every read's state after must equal the prediction field by
- * field. A read after that differs anywhere, an extra or a missing id, the account moving: never `as_predicted`.
+ * problem) and the reads after are judged by the same function — strict read, the objects asked for, every must-hold
+ * fact (account, parent) — both under the plan's account; then every read's state after must equal the prediction field
+ * by field. A read after that differs anywhere, an extra or a missing id, the account moving: never `as_predicted`.
+ * **Scope** (independent review): "nothing else changed" holds for what the line reads — a change the site made
+ * elsewhere (another step, another object) is not seen, as on the old path.
  */
 export function judgeBrowserWrites(
   read: BrowserReadLine, writes: readonly BrowserLineWrite[], map: BrowserMap, before: BrowserReadFacts, after: BrowserReadFacts,
+  planAccount: string,
 ): BrowserWritesJudgement {
-  const was = evaluateBrowserReadLine(read, map, before, 'now')
+  // Both sides under the plan's account (the one the person approved), never only "the same before and after".
+  const was = evaluateBrowserReadLine(read, map, { ...before, expectedAccount: planAccount }, 'now')
   if (was.problem !== null) return { status: 'unreadable', reads: was.reads }
-  const now = evaluateBrowserReadLine(read, map, { ...after, values: before.values, earlier: before.reads, expectedAccount: was.account ?? undefined }, 'after')
+  const now = evaluateBrowserReadLine(read, map, { ...after, values: before.values, earlier: before.reads, expectedAccount: planAccount }, 'after')
   if (Object.values(now.reads).some(s => s !== 'ok') || Object.keys(now.reads).length !== read.reads.length) return { status: 'unreadable', reads: now.reads }
   const states = (facts: BrowserReadFacts): Record<string, BrowserState> =>
     Object.fromEntries(read.reads.map(r => { const g = facts.reads[r.name]; return [r.name, g.status === 'read' ? g.state : {}] }))

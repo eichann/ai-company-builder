@@ -39,7 +39,7 @@ const MAP: BrowserMap = {
       label: '箱', answer: 'html', id: 'id', id_from: 'address',
       parent: { thing: 'shelf', field: 'shelf' },
       fields: { id: { kind: 'id', label: '番号' }, shelf: { kind: 'id', label: '棚' }, items: { kind: 'id_set', label: '中身' }, order: { kind: 'id_list', label: '並び' } },
-      writes: { add_child: ['items'] },
+      writes: { add_child: { items: 'item' } },
       delivers: 'scheduled',
       must_hold: { account: true, parent: true, note: '見本の注意書き' },
     },
@@ -93,10 +93,14 @@ const readNamed = (a: unknown): unknown => ({ id: (a as { id: unknown }).id, nam
 describe('the map\'s write facts and html things', () => {
   it('the example map is a map', () => expect(browserMapProblem(MAP)).toBeNull())
   const broken: [string, (m: Loose) => void][] = [
-    ['writes on an ordered list (where it lands is not predictable)', m => { m.things.box.writes.add_child = ['order'] }],
-    ['writes on a field it does not have', m => { m.things.box.writes.add_child = ['nowhere'] }],
+    ['writes on an ordered list (where it lands is not predictable)', m => { m.things.box.writes.add_child = { order: 'item' } }],
+    ['writes on a field it does not have', m => { m.things.box.writes.add_child = { nowhere: 'item' } }],
+    ['a child thing not in the map', m => { m.things.box.writes.add_child = { items: 'nowhere' } }],
+    ['a child thing not bound to the account', m => { m.things.box.writes.add_child = { items: 'loose_item' } }],
+    ['a child thing with must-hold facts but not the account', m => { m.things.loose_item.must_hold = { note: '見本' }; m.things.box.writes.add_child = { items: 'loose_item' } }],
+    ['the old list form', m => { m.things.box.writes.add_child = ['items'] }],
     ['writes on a list that may be null', m => { m.things.box.fields.items.nullable = true }],
-    ['an unknown verb', m => { m.things.box.writes = { remove_child: ['items'] } }],
+    ['an unknown verb', m => { m.things.box.writes = { remove_child: { items: 'item' } } }],
     ['no verb at all', m => { m.things.box.writes = {} }],
     ['writes without who it reaches', m => { delete m.things.box.delivers }],
     ['a reach the path never opens', m => { m.things.box.delivers = 'immediate' }],
@@ -171,6 +175,7 @@ describe('a line\'s writes', () => {
       l.writes[0].value = 'nowhere'
     }],
     ['adding what is read outside the account', l => { l.read.reads[2].thing = 'loose_item' }],
+    ['adding another kind of thing than the map says goes in', l => { l.writes[0].value = 'shelf' }],
     ['an extra key on the line', l => { l.extra = 1 }],
   ]
   for (const [what, change] of broken) {
@@ -214,6 +219,7 @@ describe('the prediction and the judgement', () => {
     account,
   })
   const writes = LINE.writes!
+  const judge = (b: BrowserReadFacts, a: BrowserReadFacts) => judgeBrowserWrites(LINE.read, writes, MAP, b, a, '1')
   it('adds the value exactly once more and changes nothing else (the states read are not touched)', () => {
     const before = { shelf: { id: '9', name: '棚' }, box: { id: '50', shelf: '9', items: ['3'], order: [] }, item: { id: '3', name: 'pen' } }
     const after = predictBrowserWrites(LINE.read, writes, MAP, before, { item: '3' })
@@ -224,14 +230,19 @@ describe('the prediction and the judgement', () => {
     expect(predictBrowserWrites(LINE.read, writes, MAP, { ...before, box: { id: '50' } }, { item: '3' })).toBeNull()
   })
   it('only exactly the prediction is "as predicted"', () => {
-    expect(judgeBrowserWrites(LINE.read, writes, MAP, facts('items=1;order='), facts('items=3,1;order='))).toEqual({ status: 'as_predicted' })
-    expect(judgeBrowserWrites(LINE.read, writes, MAP, facts('items=1;order='), facts('items=1;order='))).toMatchObject({ status: 'not_as_predicted', differs: { box: ['items'] } })
+    expect(judge(facts('items=1;order='), facts('items=3,1;order='))).toEqual({ status: 'as_predicted' })
+    expect(judge(facts('items=1;order='), facts('items=1;order='))).toMatchObject({ status: 'not_as_predicted', differs: { box: ['items'] } })
     // A field the write does not name moved (the order list): not as predicted, naming it.
-    expect(judgeBrowserWrites(LINE.read, writes, MAP, facts('items=1;order='), facts('items=1,3;order=1'))).toMatchObject({ status: 'not_as_predicted', differs: { box: ['order'] } })
+    expect(judge(facts('items=1;order='), facts('items=1,3;order=1'))).toMatchObject({ status: 'not_as_predicted', differs: { box: ['order'] } })
     // Another read moved.
-    expect(judgeBrowserWrites(LINE.read, writes, MAP, facts('items=1;order='), facts('items=1,3;order=', 'pencil'))).toMatchObject({ status: 'not_as_predicted', differs: { item: ['name'] } })
+    expect(judge(facts('items=1;order='), facts('items=1,3;order=', 'pencil'))).toMatchObject({ status: 'not_as_predicted', differs: { item: ['name'] } })
     // The account moved, or the page after is not read.
-    expect(judgeBrowserWrites(LINE.read, writes, MAP, facts('items=1;order='), facts('items=1,3;order=', 'pen', { before: '2', after: '2' })).status).toBe('unreadable')
-    expect(judgeBrowserWrites(LINE.read, writes, MAP, facts('items=1;order='), facts('nonsense')).status).toBe('unreadable')
+    expect(judge(facts('items=1;order='), facts('items=1,3;order=', 'pen', { before: '2', after: '2' })).status).toBe('unreadable')
+    // Before and after agree, but not with the plan's account.
+    const other = { before: '2', after: '2' }
+    expect(judge(facts('items=1;order=', 'pen', other), facts('items=1,3;order=', 'pen', other)).status).toBe('unreadable')
+    // Read before under another account, after under the plan's: the before is not the plan's state.
+    expect(judge(facts('items=1;order=', 'pen', other), facts('items=1,3;order=')).status).toBe('unreadable')
+    expect(judge(facts('items=1;order='), facts('nonsense')).status).toBe('unreadable')
   })
 })

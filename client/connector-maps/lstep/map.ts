@@ -162,7 +162,7 @@ export const LSTEP_MAP: BrowserMap = {
         reminder: { kind: 'id', label: 'リマインダ' },
         templates: { kind: 'id_set', label: '段のテンプレート' },
       },
-      writes: { add_child: ['templates'] },
+      writes: { add_child: { templates: 'template' } },
       delivers: 'scheduled',
       must_hold: {
         account: true,

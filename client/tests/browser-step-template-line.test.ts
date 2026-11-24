@@ -12,7 +12,8 @@
  *   one, a template removed, the reminder / timing / template changed, the account moving, the step moving to another
  *   reminder → never "as predicted";
  * - the must-hold facts: the account on every read, the shared-reminder note always on the card;
- * - the new path's lock key for the step equals the old path's for the same step; the old path's files are untouched.
+ * - the new path's lock key for the step equals the old path's for the same step (the old path's files themselves are
+ *   held to their approved hash by browser-lstep-map.test.ts).
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
@@ -173,7 +174,7 @@ function facts(a: Answers = {}): BrowserReadFacts {
     account: a.account ?? { before: '90171', after: '90171' },
   }
 }
-const judge = (after: Answers, before: Answers = {}) => judgeBrowserWrites(line.read, writes, map, facts(before), facts(after))
+const judge = (after: Answers, before: Answers = {}, account = '90171') => judgeBrowserWrites(line.read, writes, map, facts(before), facts(after), account)
 
 test('exactly the one template added to that step, nothing else changed → as predicted', () => {
   assert.deepEqual(judge({ page: reminderPage(['300', TEMPLATE]) }), { status: 'as_predicted' })
@@ -203,6 +204,8 @@ test('after the write: the account moving, a read not whole or another reminder 
   const unreadable = (after: Answers, before: Answers = {}) => assert.equal(judge(after, before).status, 'unreadable', JSON.stringify(after).slice(0, 80))
   const good = reminderPage(['300', TEMPLATE])
   unreadable({ page: good, account: { before: '90172', after: '90172' } })
+  // Before and after agree with each other but not with the plan's account.
+  assert.equal(judge({ page: good, account: { before: '90172', after: '90172' } }, { account: { before: '90172', after: '90172' } }).status, 'unreadable')
   unreadable({ page: good, account: { before: '90171', after: '90172' } })
   unreadable({ page: good, account: { before: null, after: null } })
   unreadable({ page: good, reminder: reminderAnswer({ extra: 1 }) })

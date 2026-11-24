@@ -1490,9 +1490,11 @@ new take the same lock key for a step.
   §17-3; `remove_child` is not a word); the read's thing lists the verb and field in its `writes`; **only the last write may
   change what existed before** — no verb creates yet, so a line holds one write (§4-1, I4); the written object's id and its
   parent's are `{ value }` (the server takes the lock from the plan's values, C11); the added value is one the line reads by
-  that value as an account-bound thing (C5: it exists in this account, and the card shows it).
+  that value as the thing the map says goes in that field, bound to the account (C5: it exists in this account, it is a
+  template and not any id, and the card shows it).
 - **The map's write facts** (`browser-map.ts`, reviewed with the map, C7): a thing's `writes` (per verb, the fields a line may
-  change: only an `id_set`, not nullable — where an id lands in an ordered list is not predictable), `delivers` (`none` /
+  change and the account-bound thing whose id goes in each — `{ add_child: { templates: 'template' } }`; only an `id_set`,
+  not nullable — where an id lands in an ordered list is not predictable), `delivers` (`none` /
   `scheduled`, `BROWSER_MAP_DELIVERS`; required with `writes`), and a written thing must hold `account` (and `parent` when it
   has one). A line can only narrow: it uses what the map lists or nothing.
 - **html things** (`answer: 'html'`): a thing a site shows only in a page's markup (a step's templates). No `keys` (nothing to
@@ -1504,9 +1506,12 @@ new take the same lock key for a step.
 - **The prediction** (`predictBrowserWrites`, §3-4 step 2): every read's state before, with each write applied —
   `add_child` adds the value once more (each as often: adding is always visible) — and nothing else. **The judgement**
   (`judgeBrowserWrites`, I3): the reads before must have made a plan; the reads after are judged by
-  `evaluateBrowserReadLine` (strict read, the objects asked for, every must-hold fact) under the account read before; then
-  every read after must equal the prediction field by field: `as_predicted`, else `not_as_predicted` (naming each read's
-  differing fields) or `unreadable`. Never "done" from the site's answer.
+  `evaluateBrowserReadLine` (strict read, the objects asked for, every must-hold fact), both under **the plan's account**
+  (a required argument); then every read after must equal the prediction field by field: `as_predicted`, else
+  `not_as_predicted` (naming each read's differing fields) or `unreadable`. Never "done" from the site's answer.
+  **Scope** (independent review): "nothing else changed" is about what the line reads — Lステップ's step reader returns
+  the asked step's templates only, so a template also landing on another step is not seen (the old path's checker reads
+  the same one step; reading every step of the page is an owner decision for PR 7).
 - **The lock** (`browserLineWriteLocks`, C11): `browserObjectLockKey` with the written thing's id and parent fields from the
   plan's values — for `reminder_step` byte-equal to the old path's `browserLockKey` (`lstep.reminder_step`, target
   `{ reminder, step }`).
@@ -1515,7 +1520,7 @@ new take the same lock key for a step.
   is the same on 1.0.1 and 1.0.2).
 - **Lステップ map 1.0.2** (`client/connector-maps/lstep/`): adds `reminder` (`GET /api/episodes/{id}`: not hidden, every step
   naming it, none twice), `reminder_step` (html, `GET /line/episode/show/{reminder}`: `templates` as the old checker reads
-  them; `writes: { add_child: [templates] }`, `delivers: scheduled`, account + parent held, the old declaration's `shared`
+  them; `writes: { add_child: { templates: template } }`, `delivers: scheduled`, account + parent held, the old declaration's `shared`
   sentence as its note), `step_timing` (`GET /api/episode-steps/{id}`: the site's text), `template_folder` (an entry of
   `GET /api/template-groups`, 「未分類」 `0`) and `template` (an entry of `GET /api/templates?group=&page=`: text only —
   `form_type` 8 —, 「未分類」's `group: null` read as folder `0`). Key names only from the old path's records (design memo
@@ -1529,7 +1534,8 @@ new take the same lock key for a step.
   (parent: the reminder), its timing (parent: the reminder) and the template (parent: its folder); one write
   `add_child(step.templates, template)`; no check word (the old type had none, memo §6); shows the reminder's name, the
   step's templates, the timing, the template's name and body.
-- **Not yet** (PR 7 and later): the reading code for html things and value-named folders (PR 5a reads JSON objects and list
+- **Not yet** (PR 7 and later): the html reader's own account (the page's `lm-account-id`, which the old checker read
+  from the same page; the new path reads the marker before and after the reads instead); the reading code for html things and value-named folders (PR 5a reads JSON objects and list
   entries whose folder comes from an earlier read); the plan of writes on the server (matching the plan's writes to the
   line's, the locks from the values); the app's write (matching `LSTEP_MAP_WRITES`, the CSRF value); the card's before /
   after rows; reading the bodies of the templates already on the step (the old facts read them; a line's reads are fixed,
@@ -1547,7 +1553,7 @@ a read not whole, another reminder or folder → `unreadable` / `wrong-parent`; 
 to the old path's; the reader fingerprint covering the connector folder), `browser-lines.test.ts` (an approved, granted
 write line is never made an inspection), `browser-read-words.test.ts` (§17-2 over `browser-write-line.ts`, with the lines'
 value names), `architecture-boundaries.test.ts` (a map may import its own site's connector, never another's).
-Each guard mutation-checked (29 mutations; two redundant checks removed, their cases covered by the remaining ones).
+Each guard mutation-checked (33 mutations, after the independent review too; two redundant checks removed, their cases covered by the remaining ones).
 
 ## The operator and the preview (PR 6b-1: built, switched off; nothing in the app calls it)
 
