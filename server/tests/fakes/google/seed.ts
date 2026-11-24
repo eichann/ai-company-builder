@@ -135,6 +135,20 @@ export interface SeedSpreadsheet {
   driveId?: string
 }
 
+/** A Google Doc the relay reads and writes (U2', google-connector.md "The relay"): who may read and edit it, its text. */
+export interface SeedRelayDoc {
+  id: string
+  title: string
+  owner: string
+  /** May edit (the owner always may). */
+  editors: string[]
+  /** May only read. */
+  readers: string[]
+  text: string
+  /** In a shared drive (Drive then names no owner, only `driveId`). */
+  driveId?: string
+}
+
 export interface GoogleSeed {
   users: SeedUser[]
   events: SeedEvent[]
@@ -143,6 +157,7 @@ export interface GoogleSeed {
   driveFiles?: SeedDriveFile[]
   mails?: SeedMail[]
   spreadsheets?: SeedSpreadsheet[]
+  relayDocs?: SeedRelayDoc[]
 }
 
 export const GOOGLE_SEED = {
@@ -189,6 +204,12 @@ export const GOOGLE_SEED = {
   colleagueSheet: 'fakesheet-colleague-owned-000000000000000005',
   /** A sheet in a shared drive 佐藤 may edit (Drive names no owner there). */
   sharedDriveSheet: 'fakesheet-shared-drive-00000000000000000004',
+  // Docs (the relay, U2'): 佐藤's weekly report, a customer's Doc shared with him, one in a shared
+  // drive, and 田中's Doc he may only read.
+  practiceDoc: 'fakedoc-weekly-report-practice-000000000001',
+  outsideDoc: 'fakedoc-customer-owned-00000000000000000002',
+  sharedDriveDoc: 'fakedoc-shared-drive-0000000000000000000003',
+  readOnlyDoc: 'fakedoc-colleague-readonly-0000000000000004',
 } as const
 
 const S = GOOGLE_SEED
@@ -416,5 +437,11 @@ export function defaultGoogleSeed(): GoogleSeed {
       sheets: [{ sheetId: 0, title: '一覧', rows: [['案件', '状態']] }],
     },
   ]
-  return { users, events, conferences, docs, driveFiles, mails, spreadsheets }
+  const relayDocs: SeedRelayDoc[] = [
+    { id: S.practiceDoc, title: '練習用 週次レポート', owner: S.member, editors: [S.member], readers: [], text: '週次レポート\n今週の数字\n' },
+    { id: S.outsideDoc, title: '株式会社サンプル 共有のメモ', owner: S.customerSuzuki, editors: [S.customerSuzuki, S.member], readers: [], text: 'ご依頼\n' },
+    { id: S.sharedDriveDoc, title: '営業部 共有ドライブのメモ', owner: S.member, editors: [S.member, S.colleague], readers: [], text: '一覧\n', driveId: 'fake-shared-drive-0001' },
+    { id: S.readOnlyDoc, title: '経理部 メモ（見るだけ）', owner: S.colleague, editors: [S.colleague], readers: [S.member], text: '予算\n' },
+  ]
+  return { users, events, conferences, docs, driveFiles, mails, spreadsheets, relayDocs }
 }

@@ -27,6 +27,7 @@ paths:
   - "shared/core/google-relay.ts"
   - "server/src/services/google-relay.ts"
   - "server/tests/integration/google-relay.test.ts"
+  - "server/tests/integration/google-relay-docs.test.ts"
   - "server/tests/unit/google-relay-owner.test.ts"
   - "server/tests/integration/google-inbox-archive.test.ts"
   - "admin/src/components/key-broker/google-relay.tsx"
@@ -49,8 +50,9 @@ used; never `drive`, `drive.readonly`,
 `gmail.compose`, `gmail.metadata`, `https://mail.google.com/` or domain-wide
 delegation (`GOOGLE_NEVER_SCOPES`). `gmail.modify` left that list on 2026-11-05 (owner decision) for
 the `inbox_archive` feature only, and nothing but the INBOX label is ever sent with it ("Archiving in
-Gmail"). `drive.metadata.readonly` left it the same day (B-H1) for the `sheets` feature only, and
-nothing but one file's owner lookup is ever sent with it ("The relay", 「会社の表だけに書く」). `gmail.readonly` is allowed only as the `inbox` feature,
+Gmail"). `drive.metadata.readonly` left it the same day (B-H1) for the `sheets` feature (and since
+2026-11-24 `documents`) only, and nothing but one file's owner lookup is ever sent with it ("The relay",
+「会社の表だけに書く」). `gmail.readonly` is allowed only as the `inbox` feature,
 off for a company until its admin turns it on (owner decisions 2026-11-01 / 11-02, spec §7-1; each company registers its own internal app, so no
 Google review). Drive (`drive.file` + Google Picker): `google-drive.md`. Google is a built-in
 core connector serving the roles 予定を読む / メールを読む・送る / 会議の記録を読む
@@ -89,10 +91,18 @@ core connector serving the roles 予定を読む / メールを読む・送る /
 `drive.meet.readonly`, and optionally `documents.readonly` (below); `mail` (メールを送る) = `gmail.send`; `drive` (Drive で選んだものを読む・置く)
 = `drive.file` (`google-drive.md`); `inbox` (受信を読む) = `gmail.readonly`; `sheets`
 (スプレッドシートを中継で使う) = `spreadsheets` (the relay, below); `inbox_archive` (済んだメールを Gmail
-でもアーカイブする) = `gmail.modify` ("Archiving in Gmail"); each with `openid email`.
+でもアーカイブする) = `gmail.modify` ("Archiving in Gmail"); `documents` (ドキュメントを中継で使う, U2'
+2026-11-24) = `documents` (the relay's Docs, below); each with `openid email`.
 `googleScopesFor`, `googleFeaturesOf` (a feature counts only when all its scopes are granted),
-`normalizeGrantedScopes` (Google's report → allowed long forms only), `googleFeatureOfScope`
-(each feature scope belongs to one feature), `googleFeaturesOff`.
+`normalizeGrantedScopes` (Google's report → allowed long forms only), `googleFeaturesOff`.
+**Which feature's switches decide a call** (`googleCallFeature`, used by `google-client.ts` `scopeStop`):
+a scope held by one feature decides alone; `drive.metadata.readonly` is held by two (`sheets` and
+`documents`, both optional there), so its call must name the feature it is made for (`GoogleRequest.feature`:
+the relay's owner lookup names its service's feature) — no feature, or one that does not hold the scope,
+→ `call-not-allowed`, nothing sent. So stopping the spreadsheet relay (company or member) never stops a
+Doc's owner lookup, and the other way round. Test: `google-relay.test.ts` 「the Drive metadata
+permission sends nothing but…」, `google-relay-docs.test.ts` 「スプレッドシート turned off … does not stop a
+Doc's owner lookup」 (mutation-checked).
 
 **Optional scopes** (`GOOGLE_FEATURE_OPTIONAL_SCOPES`): asked with their feature, but a grant without
 them still has it, so adding one never turns the feature off for members who allowed it earlier.
@@ -151,8 +161,8 @@ export. `drive.readonly` stays in `GOOGLE_NEVER_SCOPES`.
 
 ## The relay with the member's own permission (「本人の許可で中継する」, owner decision 2026-11-04)
 
-A script on the member's PC (anken-sync's coefficient table, …) calls
-`$ACB_GOOGLE_BASE_URL/sheets/v4/spreadsheets/…` with `Authorization: Bearer $ACB_GOOGLE_API_KEY` —
+A script on the member's PC (anken-sync's coefficient table, the weekly report's Doc, …) calls
+`$ACB_GOOGLE_BASE_URL/sheets/v4/spreadsheets/…` (or `…/docs/v1/documents/…`, "Docs" below) with `Authorization: Bearer $ACB_GOOGLE_API_KEY` —
 the key broker's short-lived token (K6, `key-broker.md`: `google` is a granted service once the
 company offers the relay, so released apps already set both variables). The key broker's relay
 (`services/broker-relay.ts`, `personRelays`) takes the token's member (`brokerTokens.holder`: live,
@@ -185,7 +195,54 @@ grant** — never a key, never a service account — so every switch above appli
   only from `SHEETS_QUERY_ALLOWED` (`key` dropped; `access_token` & co. refused). Method-override
   headers refused. Nothing of the client's headers is forwarded (the Google client builds its
   own). The path sent on is the raw path without its first segment.
-  Overwriting cells with values (also empty ones) is an edit and passes.
+  Overwriting cells with values (also empty ones) is an edit and passes. `alt=json` (Google's Python
+  client adds it to every call) passes as that exact value only; any other `alt` refuses the call.
+- **Docs** (U2', owner decision 2026-11-24; relay service `docs` = Google feature `documents`,
+  `GOOGLE_RELAY_SERVICE_FEATURE`): scope `documents` + `drive.metadata.readonly` (optional, for the owner
+  check); off for a company until an owner/admin ticks ドキュメント (`PUT /google/relay { services: { docs } }`
+  writes the feature switch `documents`, history `features`), never in the one consent
+  (`GOOGLE_ASKED_BY_NAME_ONLY`; asked by name `{ features: ['documents'] }`), 「やめる」 =
+  `PUT /me/google/features { feature: 'documents', on: false }`; each service's switches are its own.
+  **What passes** (`parseDocsCall`, `checkDocsBatchUpdate`, `docsQuery`): `GET /v1/documents/<id>` (query
+  `includeTabsContent`, `suggestionsViewMode`, `fields`, `prettyPrint`, `alt=json`) and
+  `POST /v1/documents/<id>:batchUpdate` (query `fields`, `prettyPrint`, `alt=json`; body only `requests`
+  and `writeControl`, passed as is — a script sends `requiredRevisionId` so Google refuses a write over
+  a newer version); never a new document or any other path / verb. Request kinds only from
+  `DOCS_BATCH_UPDATE_ALLOWED`: `insertText`, `insertTable`, `insertTableRow`, `updateTextStyle`,
+  `updateParagraphStyle`, `updateTableColumnProperties`, `updateTableCellStyle`,
+  `createParagraphBullets`, **`deleteParagraphBullets`** (owner: it only takes bullets off — Google keeps
+  the indent — and removes no text, so the weekly report keeps its bullets); one camelCase kind per
+  request, ≤ 500 (`DOCS_BATCH_LIMIT`). Any other kind that removes, replaces or merges (`delete…` but
+  the bullets, `replace…`, `merge…`, `unmerge…`, `clear…`, `remove…`, any case: `deleteContentRange`,
+  `deleteTableRow` / `Column`, `deleteNamedRange`, `deletePositionedObject`, `deleteHeader` / `Footer` /
+  `Tab`, `replaceAllText`, `replaceImage`, `replaceNamedRangeContent`, `mergeTableCells`, …) → 403
+  `ACB_DELETE_REFUSED`; anything else unlisted (`insertInlineImage`, `createNamedRange`,
+  `updateDocumentStyle`, …) → `ACB_NOT_RELAYED`. The relay does **not** promise that an insert leaves
+  its surroundings as they were: it passes only adding and formatting kinds. A script that sends many
+  batchUpdates for one write (the weekly report's gdoc.py sends about a dozen) and is stopped half-way
+  (a stop, the cap, a refusal) leaves what it already wrote; nothing is rolled back by deleting (that
+  would need a delete kind) — accepted, the member removes the partial text by hand.
+  **Writes only into Docs owned inside the company** (`fileOwnership` = `sheetOwnership`, the same rule,
+  owner lookup with the `documents` feature named): an outsider's Doc or one in an unregistered shared
+  drive → 403 `ACB_OUTSIDE_DOCUMENT` (record reason `outside`, 「会社の外の人が持っているドキュメントでした」);
+  reads are not checked. The registered shared drives count for Docs too. Stops, the AI emergency stop
+  (also while the body arrives), the daily cap (**one count for Sheets and Docs together**,
+  `person-relay:google`), the refusals' record limit and every Google switch are the same as for
+  Sheets. Records: host `docs.googleapis.com`, path `/v1/documents/<id>[:batchUpdate]`, `documentId` in
+  `GoogleRelayRecord` — never the Doc's text. The Google client sends nothing with `documents` but those
+  two calls on the Docs API, and no Docs call but a GET under another scope (`docsCallAllowed`: the
+  access token carries every granted scope, so a write declared with the minutes' `documents.readonly`
+  would otherwise reach Google). Screens: the admin's checkbox 「ドキュメント（読む・書き足す。消す・置き換える
+  は通さない）」 (records show 「ドキュメント <id>」, members which services they allowed,
+  `allowedServices`); the app's card 「ドキュメントを中継で使う」 beside the spreadsheet one (each shown
+  only when offered, `googleRelayCardView(r, service)`; ［許可する］ = 「Google で許可」 for `documents`;
+  ［やめる］ = IPC `google:setRelay(companyId, on, 'docs')`, main sends only `{ feature: 'documents', on }`
+  and refuses any service the relay does not have). Test: `tests/integration/google-relay-docs.test.ts`
+  (each deletion kind, unlisted kinds, two kinds, 501, an unknown body field, a new document, other
+  paths, the query list and `alt`, the outsider / shared-drive Doc, its own switches and their
+  independence from Sheets, every stop, the shared cap, the client's guard, records without text —
+  each refusal with nothing sent and the Doc unchanged; mutation-checked), `client/tests/google-connect.test.ts`,
+  `client/tests/google-relay-card.test.ts`, `admin/tests/google-relay.test.tsx`.
 - **Writes only into sheets owned inside the company's Workspace** (B-H1, owner decision
   2026-11-04 「会社の Workspace の中の表だけに書ける」: an AI led by a mail must not copy company
   content into a sheet an outsider shared with the member). Before a write (every operation but
@@ -223,7 +280,7 @@ grant** — never a key, never a service account — so every switch above appli
   with Google's status in Google's error shape `{ error: { code, status, message } }` (Japanese
   message, never Google's text); ACB's own refusals in the broker's error shape
   (`ACB_DELETE_REFUSED`, `ACB_NOT_RELAYED`, `ACB_GOOGLE_NOT_ALLOWED` — 「設定 → Google で…［許可する］」,
-  `ACB_OUTSIDE_SHEET`, `ACB_GOOGLE_OFF`, `ACB_STOPPED`, `ACB_OVER_CAP`). A write is never retried; a lost answer → 504.
+  `ACB_OUTSIDE_SHEET`, `ACB_OUTSIDE_DOCUMENT`, `ACB_GOOGLE_OFF`, `ACB_STOPPED`, `ACB_OVER_CAP`). A write is never retried; a lost answer → 504.
 - **Records**: one AI-action-log line per call, filed by the broker relay (tool `broker:google`,
   target `{ kind: 'broker', service: 'google', host: 'sheets.googleapis.com', path: <decoded path,
   spreadsheet id and range>, operation, status, bytesIn, bytesOut }`, the conversation and
@@ -254,7 +311,7 @@ grant** — never a key, never a service account — so every switch above appli
   `stopped: company | member | null`, cap and today's count, their own latest 50 records only).
 - **Screens**: admin 「API キー」→ card 「本人の許可で中継する」
   (`admin/src/components/key-broker/google-relay.tsx`, owners / admins): the services as
-  checkboxes (スプレッドシート; 「あとから足せるもの」 lists `GOOGLE_RELAY_LATER`), 書き込める共有ドライブ
+  checkboxes (スプレッドシート, ドキュメント; 「あとから足せるもの」 lists `GOOGLE_RELAY_LATER`), 書き込める共有ドライブ
   (address + name → 登録する; 登録をやめる asks first), 1人あたりの上限,
   全員の中継を止める / 再開 (asks first), 許可しているメンバー with today's count and
   この人の中継を止める / 再開 (asks first), the records (filter by person). App 設定 → Google →
@@ -262,7 +319,7 @@ grant** — never a key, never a service account — so every switch above appli
   while the company offers it, `googleRelayCardView`): ［許可する］ = 「Google で許可」 for `sheets`
   (consent), or, when the member only turned it off, back on without a consent; ［やめる］ (asks
   first) = the member's own switch; the admin's stop; the member's own records. IPC (lane A):
-  `google:relay`, `google:setRelay(companyId, on)` (main sends only `{ feature: 'sheets', on }`;
+  `google:relay`, `google:setRelay(companyId, on, service?)` (main sends only `{ feature: 'sheets' | 'documents', on }`;
   answers the server's `MyGoogleRelay` or a status sentence). Record words:
   `googleRelayRecordWords` (shared/core). Tests: `client/tests/google-relay-card.test.ts`,
   `client/tests/google-connect.test.ts` (setRelay), `admin/tests/google-relay.test.tsx`.

@@ -19,14 +19,29 @@
  * - Only the Sheets API's calls listed in `parseSheetsCall` (spreadsheets.get, values get /
  *   batchGet / update / batchUpdate / append, spreadsheets.batchUpdate), and only the query
  *   parameters in `SHEETS_QUERY_ALLOWED`.
+ * - **Docs** (owner decision 2026-11-24, U2'): `GET /v1/documents/<id>` and
+ *   `POST /v1/documents/<id>:batchUpdate` only (`parseDocsCall`), request kinds only from
+ *   `DOCS_BATCH_UPDATE_ALLOWED` (adding text / tables / rows, styles, bullets) — every kind that
+ *   removes, replaces or merges content is refused as a deletion (`checkDocsBatchUpdate`) — and the
+ *   same owner rule as sheets (`fileOwnership`). The relay does not promise that a script's insert
+ *   leaves its surroundings as they were: it passes only adding and formatting kinds, and a script
+ *   may send `writeControl.requiredRevisionId` so Google refuses a write over a newer version.
  */
+import type { GoogleFeature } from './google'
 
-/** The Google services the relay may pass (this PR: Sheets only). The path's first segment names one. */
-export const GOOGLE_RELAY_SERVICES = ['sheets'] as const
+/** The Google services the relay may pass. The path's first segment names one. */
+export const GOOGLE_RELAY_SERVICES = ['sheets', 'docs'] as const
 export type GoogleRelayService = typeof GOOGLE_RELAY_SERVICES[number]
 
+/**
+ * The member's Google feature each relay service uses (its scope, the company's switch, the
+ * member's 「やめる」): Sheets → `sheets` (スプレッドシートを中継で使う), Docs → `documents`
+ * (ドキュメントを中継で使う).
+ */
+export const GOOGLE_RELAY_SERVICE_FEATURE = { sheets: 'sheets', docs: 'documents' } as const satisfies Record<GoogleRelayService, GoogleFeature>
+
 /** Shown to the admin as 「あとから足せるもの」: not relayed until their own rules exist. */
-export const GOOGLE_RELAY_LATER = ['drive', 'calendar', 'docs', 'slides'] as const
+export const GOOGLE_RELAY_LATER = ['drive', 'calendar', 'slides'] as const
 export type GoogleRelayLaterService = typeof GOOGLE_RELAY_LATER[number]
 
 export function isGoogleRelayService(v: unknown): v is GoogleRelayService {
@@ -46,6 +61,14 @@ export const SHEETS_OPERATIONS = [
 ] as const
 export type SheetsOperation = typeof SHEETS_OPERATIONS[number]
 
+/** The Docs calls the relay passes. */
+export const DOCS_OPERATIONS = ['documents.get', 'documents.batchUpdate'] as const
+export type DocsOperation = typeof DOCS_OPERATIONS[number]
+
+/** Any relayed call (the records name one). */
+export type GoogleRelayOperation = SheetsOperation | DocsOperation
+export const GOOGLE_RELAY_OPERATIONS: readonly GoogleRelayOperation[] = [...SHEETS_OPERATIONS, ...DOCS_OPERATIONS]
+
 /** What each call does, in the member's words (the records). */
 export const SHEETS_OPERATION_TEXT: Record<SheetsOperation, string> = {
   'spreadsheets.get': '表の情報を読む',
@@ -56,6 +79,42 @@ export const SHEETS_OPERATION_TEXT: Record<SheetsOperation, string> = {
   'values.append': '行を足す',
   'spreadsheets.batchUpdate': '行・列を足す、整える',
 }
+
+/** What each Docs call does, in the member's words (the records). */
+export const DOCS_OPERATION_TEXT: Record<DocsOperation, string> = {
+  'documents.get': 'ドキュメントを読む',
+  'documents.batchUpdate': 'ドキュメントに書き足す、整える',
+}
+
+/**
+ * `documents:batchUpdate` request kinds that pass (owner decision 2026-11-24, U2'): adding text,
+ * tables and table rows, text / paragraph / column / cell styles, and bullets on and off.
+ * `deleteParagraphBullets` passes although its name starts with `delete`: it takes the bullets off
+ * paragraphs (Google keeps their indent) and removes no text — the weekly report keeps its bullets
+ * (owner, 「UX が損なわれるのが一番だめ」). Every other kind is refused: one that removes, replaces
+ * or merges content (`deleteContentRange`, `deleteTableRow` / `Column`, `deleteNamedRange`,
+ * `deletePositionedObject`, `deleteHeader` / `Footer` / `Tab`, `replaceAllText`, `replaceImage`,
+ * `replaceNamedRangeContent`, `mergeTableCells`, `unmergeTableCells`, …) as a deletion, any other as
+ * "not relayed". Kinds are matched as Google names them (camelCase).
+ */
+export const DOCS_BATCH_UPDATE_ALLOWED: readonly string[] = [
+  'insertText', 'insertTable', 'insertTableRow',
+  'updateTextStyle', 'updateParagraphStyle', 'updateTableColumnProperties', 'updateTableCellStyle',
+  'createParagraphBullets', 'deleteParagraphBullets',
+]
+
+/** A Docs request kind that removes, replaces or merges what is there (unless listed above). */
+const DOCS_DESTRUCTIVE = /^(delete|replace|merge|unmerge|clear|remove)/i
+
+/** The top-level fields of a `documents:batchUpdate` body (Google's two; anything else is refused). */
+const DOCS_BODY_FIELDS = new Set(['requests', 'writeControl'])
+
+/** Query parameters the relay passes on for Docs, per call (Google's documented ones); any other is refused. */
+export const DOCS_QUERY_ALLOWED: Record<DocsOperation, readonly string[]> = {
+  'documents.get': ['includeTabsContent', 'suggestionsViewMode', 'fields', 'prettyPrint'],
+  'documents.batchUpdate': ['fields', 'prettyPrint'],
+}
+
 
 /**
  * `spreadsheets:batchUpdate` request kinds that pass: adding rows / columns / cells / sheets,
@@ -100,8 +159,11 @@ export const GOOGLE_RELAY_REFUSALS_PER_DAY = 200
 
 /** At most this many requests in one batchUpdate (Google allows more; a script's batch is small). */
 export const SHEETS_BATCH_LIMIT = 500
+/** The same for Docs. */
+export const DOCS_BATCH_LIMIT = 500
 
 const SPREADSHEET_ID = /^[A-Za-z0-9_-]{1,200}$/
+const DOCUMENT_ID = SPREADSHEET_ID
 
 export interface SheetsCall {
   operation: SheetsOperation
@@ -152,9 +214,12 @@ export function parseSharedDriveInput(raw: unknown): string | null {
   return DRIVE_ID.test(id) ? id : null
 }
 
-export type SheetOwnership = 'inside' | 'outside' | 'shared-drive'
+export type FileOwnership = 'inside' | 'outside' | 'shared-drive'
+/** The same as `FileOwnership` (sheets were the first files). */
+export type SheetOwnership = FileOwnership
 
-export function sheetOwnership(meta: unknown, domain: string, sharedDrives: readonly string[] = []): SheetOwnership {
+/** Who holds a spreadsheet or a Doc (the relay's write rule for both, above). */
+export function fileOwnership(meta: unknown, domain: string, sharedDrives: readonly string[] = []): FileOwnership {
   const want = domain.trim().toLowerCase()
   if (!want || !meta || typeof meta !== 'object' || Array.isArray(meta)) return 'outside'
   const m = meta as { owners?: unknown; driveId?: unknown }
@@ -168,6 +233,9 @@ export function sheetOwnership(meta: unknown, domain: string, sharedDrives: read
   }
   return 'inside'
 }
+
+/** The same rule under its first name (sheets): one copy, two names. */
+export const sheetOwnership = fileOwnership
 
 /**
  * One Sheets call from its method and decoded path on sheets.googleapis.com
@@ -243,14 +311,21 @@ export function checkSheetsBatchUpdate(body: unknown): { ok: true; kinds: string
 }
 
 /**
+ * `alt=json`: Google's Python client adds it to every call. Only that exact value passes (`alt=media`
+ * / `proto` / `sse` would change what the answer is); any other `alt` refuses the call.
+ */
+const altAllowed = (name: string, value: string) => name === 'alt' && value === 'json'
+
+/**
  * The query of a Sheets call, as passed on: `key` (where a script may have put the token) is
- * dropped; any parameter not in `SHEETS_QUERY_ALLOWED` (e.g. `access_token`) refuses the call.
+ * dropped; `alt=json` passes; any other parameter not in `SHEETS_QUERY_ALLOWED` (e.g.
+ * `access_token`, `alt=media`) refuses the call.
  */
 export function sheetsQuery(query: URLSearchParams): { ok: true; query: Record<string, string[]> } | { ok: false; name: string } {
   const out: Record<string, string[]> = {}
   for (const [name, value] of query) {
     if (name === 'key') continue
-    if (!SHEETS_QUERY_ALLOWED.includes(name)) return { ok: false, name: name.slice(0, 40) }
+    if (!SHEETS_QUERY_ALLOWED.includes(name) && !altAllowed(name, value)) return { ok: false, name: name.slice(0, 40) }
     ;(out[name] ??= []).push(value)
   }
   return { ok: true, query: out }
@@ -269,22 +344,100 @@ export function sheetsPathParts(path: string): { spreadsheetId: string | null; r
   return { spreadsheetId, range }
 }
 
+export interface DocsCall {
+  operation: DocsOperation
+  documentId: string
+  write: boolean
+}
+
+/**
+ * One Docs call from its method and decoded path on docs.googleapis.com: `GET /v1/documents/<id>`
+ * or `POST /v1/documents/<id>:batchUpdate`, else refused (a new document, any other verb or path).
+ * The body of a batchUpdate is checked separately (`checkDocsBatchUpdate`).
+ */
+export function parseDocsCall(method: string, path: string): { ok: true; call: DocsCall } | { ok: false; refusal: SheetsRefusal; documentId: string | null } {
+  const seg = path.split('/')
+  if (seg[0] !== '' || seg[1] !== 'v1' || seg[2] !== 'documents' || seg.length !== 4) return { ok: false, refusal: 'not-relayed', documentId: null }
+  const head = seg[3]
+  const colon = head.indexOf(':')
+  const id = colon < 0 ? head : head.slice(0, colon)
+  const verb = colon < 0 ? null : head.slice(colon + 1)
+  if (!DOCUMENT_ID.test(id)) return { ok: false, refusal: 'not-relayed', documentId: null }
+  if (verb === null && method === 'GET') return { ok: true, call: { operation: 'documents.get', documentId: id, write: false } }
+  if (verb === 'batchUpdate' && method === 'POST') return { ok: true, call: { operation: 'documents.batchUpdate', documentId: id, write: true } }
+  return { ok: false, refusal: 'not-relayed', documentId: id }
+}
+
+/**
+ * The body of a `documents:batchUpdate`: only `requests` (1–500, one kind each) and `writeControl`;
+ * refused when any request removes, replaces or merges content, or is a kind not in
+ * `DOCS_BATCH_UPDATE_ALLOWED`. `kinds` names them (for the answer, never their content).
+ */
+export function checkDocsBatchUpdate(body: unknown): { ok: true; kinds: string[] } | { ok: false; refusal: SheetsRefusal | 'bad-body'; kinds: string[] } {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return { ok: false, refusal: 'bad-body', kinds: [] }
+  if (Object.keys(body).some(k => !DOCS_BODY_FIELDS.has(k))) return { ok: false, refusal: 'bad-body', kinds: [] }
+  const requests = (body as { requests?: unknown }).requests
+  if (!Array.isArray(requests) || requests.length === 0 || requests.length > DOCS_BATCH_LIMIT) return { ok: false, refusal: 'bad-body', kinds: [] }
+  const kinds: string[] = []
+  for (const r of requests) {
+    if (!r || typeof r !== 'object' || Array.isArray(r)) return { ok: false, refusal: 'bad-body', kinds }
+    const keys = Object.keys(r)
+    // Google reads one kind per request; more than one would hide a kind behind another.
+    if (keys.length !== 1) return { ok: false, refusal: 'bad-body', kinds }
+    kinds.push(keys[0])
+  }
+  const named = [...new Set(kinds)].map(k => k.slice(0, 40))
+  const unlisted = kinds.filter(k => !DOCS_BATCH_UPDATE_ALLOWED.includes(k))
+  if (unlisted.some(k => DOCS_DESTRUCTIVE.test(k))) return { ok: false, refusal: 'deletion', kinds: named }
+  if (unlisted.length > 0) return { ok: false, refusal: 'not-relayed', kinds: named }
+  return { ok: true, kinds: named }
+}
+
+/** Whether a refused Docs kind is named as a deletion (the answer lists those). */
+export function isDocsDeletionKind(kind: string): boolean {
+  return !DOCS_BATCH_UPDATE_ALLOWED.includes(kind) && DOCS_DESTRUCTIVE.test(kind)
+}
+
+/** The query of a Docs call, as passed on: `key` dropped, `alt=json` passes; a parameter not listed for the call refuses it. */
+export function docsQuery(operation: DocsOperation, query: URLSearchParams): { ok: true; query: Record<string, string[]> } | { ok: false; name: string } {
+  const out: Record<string, string[]> = {}
+  for (const [name, value] of query) {
+    if (name === 'key') continue
+    if (!DOCS_QUERY_ALLOWED[operation].includes(name) && !altAllowed(name, value)) return { ok: false, name: name.slice(0, 40) }
+    ;(out[name] ??= []).push(value)
+  }
+  return { ok: true, query: out }
+}
+
+/** The document id named by a recorded Docs path (`/v1/documents/<id>:batchUpdate`), null when none. */
+export function docsPathParts(path: string): { documentId: string | null } {
+  const seg = path.split('/')
+  if (seg[1] !== 'v1' || seg[2] !== 'documents' || !seg[3]) return { documentId: null }
+  const id = seg[3].split(':')[0]
+  return { documentId: DOCUMENT_ID.test(id) ? id : null }
+}
+
 /** One relayed call in the member's words (the records of the app and the admin console). */
 export function googleRelayRecordWords(r: {
-  operation: SheetsOperation | null
+  /** `sheets` when absent (records of an older server). */
+  service?: string
+  operation: GoogleRelayOperation | null
   range: string | null
   result: 'ok' | 'google-refused' | 'refused' | 'error'
   reason: 'deletion' | 'not-relayed' | 'stopped' | 'over-cap' | 'not-allowed' | 'outside' | 'other' | null
 }): { action: string; result: string; note: string | null } {
-  const action = r.operation ? SHEETS_OPERATION_TEXT[r.operation] : r.reason === 'deletion' ? '消す操作' : '中継しない操作'
+  const thing = r.service === 'docs' ? 'ドキュメント' : '表'
+  const action = r.operation
+    ? (r.operation in DOCS_OPERATION_TEXT ? DOCS_OPERATION_TEXT[r.operation as DocsOperation] : SHEETS_OPERATION_TEXT[r.operation as SheetsOperation])
+    : r.reason === 'deletion' ? '消す操作' : '中継しない操作'
   if (r.result === 'ok') return { action, result: '届けました', note: null }
-  if (r.result === 'google-refused') return { action, result: 'Google が断りました', note: '編集する権限がないか、表が見つかりません' }
+  if (r.result === 'google-refused') return { action, result: 'Google が断りました', note: `編集する権限がないか、${thing}が見つかりません` }
   if (r.result === 'error') return { action, result: 'うまくいきませんでした', note: 'Google につながらないか、混み合っていました' }
   const note = r.reason === 'deletion' ? '消す操作は中継しません'
     : r.reason === 'not-relayed' ? 'この操作は中継しません'
       : r.reason === 'stopped' ? '管理者が止めていました'
         : r.reason === 'over-cap' ? '今日の上限に達していました'
           : r.reason === 'not-allowed' ? '本人の許可がありませんでした'
-            : r.reason === 'outside' ? '会社の外の人が持っている表でした' : null
+            : r.reason === 'outside' ? `会社の外の人が持っている${thing}でした` : null
   return { action, result: '中継しませんでした', note }
 }

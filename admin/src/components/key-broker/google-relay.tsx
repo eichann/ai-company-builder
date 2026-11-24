@@ -2,7 +2,7 @@
 
 // 「本人の許可で中継する」 on the 「API キー」 page (google-connector.md "The relay"): Google is relayed
 // with each member's own Google permission, never a key. The admin chooses which Google services may
-// be relayed (only スプレッドシート today), the per-person daily cap and the stop (everyone or one
+// be relayed (スプレッドシート, ドキュメント), the per-person daily cap and the stop (everyone or one
 // member), and sees who allowed it and what was relayed (never a cell's content).
 import Link from 'next/link'
 import { useState } from 'react'
@@ -26,12 +26,18 @@ export const GOOGLE_RELAY_SERVICE_TEXT: Record<GoogleRelayService, { label: stri
     label: 'スプレッドシート（読む・書く。消すは通さない）',
     detail: '本人が編集できる会社の表に、行の追加・書き換えができます（会社の外の人が持っている表には書き込みません）。表やシート、行や列を消す操作は中継しません。',
   },
+  docs: {
+    label: 'ドキュメント（読む・書き足す。消す・置き換えるは通さない）',
+    detail: '本人が編集できる会社のドキュメントに、文字・表・行の追加と、文字や段落の見た目（太字・見出し・箇条書きなど）の変更ができます（会社の外の人が持っているドキュメントには書き込みません）。文字や表を消す・置き換える・セルをまとめる操作は中継しません。',
+  },
 }
+
+/** A relay service's short name for the toast and the members' list. */
+const SERVICE_NAME: Record<GoogleRelayService, string> = { sheets: 'スプレッドシート', docs: 'ドキュメント' }
 
 export const GOOGLE_RELAY_LATER_TEXT: Record<GoogleRelayLaterService, string> = {
   drive: 'ドライブ（閲覧のみ）',
   calendar: 'カレンダー（閲覧のみ）',
-  docs: 'ドキュメント（閲覧のみ）',
   slides: 'スライド（閲覧のみ）',
 }
 
@@ -102,7 +108,7 @@ export function GoogleRelayCard({ companyId }: { companyId: string }) {
           <ShieldCheck size={16} className="mt-0.5 shrink-0" />
           <span>
             鍵は預かりません。メンバーが自分で許可したときだけ、本人の権限で届けます。
-            <span className="block text-xs text-muted-foreground">表ごとの指定はいりません。本人が編集できる表なら届き、本人に権限のない表は Google が断ります。書き込めるのは会社の人が持っている表と、下で登録した共有ドライブの表だけです（AI がメールにだまされて、外の人の表に会社の情報を書き込まないように）。PC にもスクリプトにも Google の鍵は置きません。</span>
+            <span className="block text-xs text-muted-foreground">表やドキュメントごとの指定はいりません。本人が編集できるものなら届き、本人に権限のないものは Google が断ります。書き込めるのは会社の人が持っている表・ドキュメントと、下で登録した共有ドライブにあるものだけです（AI がメールにだまされて、外の人のファイルに会社の情報を書き込まないように）。PC にもスクリプトにも Google の鍵は置きません。</span>
           </span>
         </p>
 
@@ -113,7 +119,7 @@ export function GoogleRelayCard({ companyId }: { companyId: string }) {
               <li key={s.service}>
                 <label className="flex cursor-pointer items-start gap-3 px-3 py-2.5">
                   <input type="checkbox" className="mt-1 h-4 w-4" checked={s.on} disabled={busy || !data.available}
-                    onChange={() => void saveRelay(s.on ? 'スプレッドシートの中継をオフにしました' : 'スプレッドシートの中継をオンにしました', { services: { [s.service]: !s.on } })} />
+                    onChange={() => void saveRelay(`${SERVICE_NAME[s.service]}の中継を${s.on ? 'オフ' : 'オン'}にしました`, { services: { [s.service]: !s.on } })} />
                   <span className="min-w-0">
                     <span className="text-sm">{GOOGLE_RELAY_SERVICE_TEXT[s.service].label}</span>
                     <span className="block text-xs text-muted-foreground">{GOOGLE_RELAY_SERVICE_TEXT[s.service].detail}</span>
@@ -168,7 +174,7 @@ export function GoogleRelayCard({ companyId }: { companyId: string }) {
         <section className="space-y-2" data-testid="google-relay-shared-drives">
           <h3 className="flex items-center gap-2 text-sm font-medium"><HardDrives size={14} />書き込める共有ドライブ</h3>
           <p className="text-xs text-muted-foreground">
-            共有ドライブの表は、ここに登録した会社の共有ドライブにあるときだけ書き込めます（ほかの共有ドライブの表は、読めますが書き込めません）。共有ドライブを開いたときのアドレスを貼ってください。
+            共有ドライブの表・ドキュメントは、ここに登録した会社の共有ドライブにあるときだけ書き込めます（ほかの共有ドライブのものは、読めますが書き込めません）。共有ドライブを開いたときのアドレスを貼ってください。
           </p>
           {(data.sharedDrives ?? []).length > 0 && (
             <ul className="divide-y rounded-control border">
@@ -180,7 +186,7 @@ export function GoogleRelayCard({ companyId }: { companyId: string }) {
                   <div className="ml-auto flex items-center gap-2">
                     {confirm === `drive:${d.driveId}` ? (
                       <>
-                        <span className="text-xs">登録をやめますか？ この共有ドライブの表には書き込めなくなります。</span>
+                        <span className="text-xs">登録をやめますか？ この共有ドライブの表・ドキュメントには書き込めなくなります。</span>
                         <Button size="sm" variant="destructive" disabled={busy}
                           onClick={async () => { await save('共有ドライブの登録をやめました', () => googleApi.removeRelaySharedDrive(companyId, d.driveId)); setConfirm(null) }}>やめる</Button>
                         <Button size="sm" variant="ghost" onClick={() => setConfirm(null)}>そのまま</Button>
@@ -220,7 +226,7 @@ export function GoogleRelayCard({ companyId }: { companyId: string }) {
                       {m.memberName || m.memberEmail || '（メンバー）'}
                       {m.stopped ? <Badge variant="paused">止めています</Badge> : m.allowed ? <Badge variant="success">許可済み</Badge> : <Badge variant="neutral">本人がやめています</Badge>}
                     </p>
-                    {m.allowedAt && <p className="text-xs text-muted-foreground">{formatDateTime(m.allowedAt)} に許可</p>}
+                    {m.allowedAt && <p className="text-xs text-muted-foreground">{formatDateTime(m.allowedAt)} に許可{m.allowed ? `（${(m.allowedServices ?? ['sheets']).map((x) => SERVICE_NAME[x]).join('・')}）` : ''}</p>}
                   </div>
                   <p>今日 <span className="font-semibold">{m.usedToday}</span><span className="text-muted-foreground"> ／ {data.capPerMemberPerDay}回</span></p>
                   <div className="ml-auto flex items-center gap-2">
@@ -247,7 +253,7 @@ export function GoogleRelayCard({ companyId }: { companyId: string }) {
 
         <section className="space-y-2">
           <h3 className="flex items-center gap-2 text-sm font-medium"><ClockCounterClockwise size={14} />中継の記録（新しい順、最大100件）</h3>
-          <p className="text-xs text-muted-foreground">だれが・いつ・どの表に・何をしたかだけを残します（表の中身・鍵・通行証は残しません）。すべての記録は「AI の操作の記録」にもあります。</p>
+          <p className="text-xs text-muted-foreground">だれが・いつ・どの表やドキュメントに・何をしたかだけを残します（中身・鍵・通行証は残しません）。すべての記録は「AI の操作の記録」にもあります。</p>
           <div className="flex flex-wrap items-center gap-2 text-sm">
             <span className="text-muted-foreground">だれ:</span>
             {['all', ...new Set(data.records.map((r) => r.userId))].map((w) => (
@@ -270,7 +276,7 @@ export function GoogleRelayCard({ companyId }: { companyId: string }) {
                         <td className="whitespace-nowrap px-3 py-2 font-mono text-xs text-muted-foreground">{formatDateTime(r.at)}</td>
                         <td className="whitespace-nowrap px-3 py-2">{r.memberName ?? nameOf(r.userId)}</td>
                         <td className="px-3 py-2"><span className="font-medium">{w.action}</span>
-                          {(r.range || r.spreadsheetId) && <span className="block break-all text-xs text-muted-foreground">{[r.range, r.spreadsheetId ? `表 ${r.spreadsheetId}` : null].filter(Boolean).join(' ・ ')}</span>}
+                          {(r.range || r.spreadsheetId || r.documentId) && <span className="block break-all text-xs text-muted-foreground">{[r.range, r.spreadsheetId ? `表 ${r.spreadsheetId}` : null, r.documentId ? `ドキュメント ${r.documentId}` : null].filter(Boolean).join(' ・ ')}</span>}
                         </td>
                         <td className="px-3 py-2 text-xs">{w.result}{w.note && <span className="block text-muted-foreground">{w.note}</span>}</td>
                       </tr>

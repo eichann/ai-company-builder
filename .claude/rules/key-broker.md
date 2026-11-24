@@ -346,7 +346,7 @@ the sign-in.
 `/api/broker/google/…` is not a keyed service: `BrokerRelayDeps.personRelays('google')` hands the
 call (after the token, as `brokerTokens.holder` — live, a member, `google` in the token — and the
 company's AI stop) to `services/google-relay.ts`, which calls Google with that member's own OAuth
-grant (`google-connector.md` "The relay"). No key is resolved, revealed or sent; nothing of this
+grant (`google-connector.md` "The relay": Sheets, and Docs since 2026-11-24). No key is resolved, revealed or sent; nothing of this
 file's key swap, destinations, caps or redirects applies. Token issue grants `google` (source
 `user`) while the company offers it (`personRelaysOffered`), so the app's K6 sets
 `ACB_GOOGLE_API_KEY` / `ACB_GOOGLE_BASE_URL` (`<origin>/api/broker/google`); not offered →

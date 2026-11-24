@@ -923,7 +923,7 @@ contract.type IpcInvokeChannels.'google:markSeen' = 'google:markSeen': { args: [
 contract.type IpcInvokeChannels.'google:relay' = 'google:relay': { args: [companyId: string]; result: GoogleRelayResult }
 contract.type IpcInvokeChannels.'google:setArchive' = 'google:setArchive': { args: [companyId: string, on: boolean]; result: GoogleStatusResult }
 contract.type IpcInvokeChannels.'google:setDrive' = 'google:setDrive': { args: [companyId: string, on: boolean]; result: GoogleStatusResult }
-contract.type IpcInvokeChannels.'google:setRelay' = 'google:setRelay': { args: [companyId: string, on: boolean]; result: GoogleRelayResult }
+contract.type IpcInvokeChannels.'google:setRelay' = 'google:setRelay': { args: [companyId: string, on: boolean, service?: GoogleRelayService]; result: GoogleRelayResult }
 contract.type IpcInvokeChannels.'google:status' = 'google:status': { args: [companyId: string]; result: GoogleStatusResult }
 contract.type IpcInvokeChannels.'google:untrustDriveFolder' = 'google:untrustDriveFolder': { args: [companyId: string, folderId: string]; result: DriveUntrustResult }
 contract.type IpcInvokeChannels.'handoff:complete' = 'handoff:complete': { args: [company: string, id: string, receipt: HandoffCompletion]; result: void }
@@ -1264,7 +1264,7 @@ main.handle google:markSeen @ features/google/ipc.ts (companyId: string)
 main.handle google:relay @ features/google/ipc.ts (companyId: string)
 main.handle google:setArchive @ features/google/ipc.ts (companyId: string, on: boolean)
 main.handle google:setDrive @ features/google/ipc.ts (companyId: string, on: boolean)
-main.handle google:setRelay @ features/google/ipc.ts (companyId: string, on: boolean)
+main.handle google:setRelay @ features/google/ipc.ts (companyId: string, on: boolean, service?: GoogleRelayService)
 main.handle google:status @ features/google/ipc.ts (companyId: string)
 main.handle google:untrustDriveFolder @ features/google/ipc.ts (companyId: string, folderId: string)
 main.handle handoff:complete @ features/chat-history/ipc.ts (company: string, id: string, receipt: HandoffCompletion)
@@ -1465,7 +1465,7 @@ preload completeHandoffTurn : (company: string, id: string, receipt: HandoffComp
 preload confirmBrowserExecution -> invoke browserPlans:confirm($0, $1, $2)
 preload confirmBrowserExecution : (companyId: string, executionId: string, result: BrowserConfirmResult) => Promise<BrowserPlanActAnswer>
 preload connectGoogle -> invoke google:connect($0, $1)
-preload connectGoogle : (companyId: string, features: ("minutes" | "mail" | "drive" | "inbox" | "sheets" | "inbox_archive")[]) => Promise<GoogleConnectResult>
+preload connectGoogle : (companyId: string, features: ("minutes" | "mail" | "drive" | "inbox" | "sheets" | "inbox_archive" | "documents")[]) => Promise<GoogleConnectResult>
 preload connectGoogleAll -> invoke google:connectAll($0)
 preload connectGoogleAll : (companyId: string) => Promise<GoogleConnectResult>
 preload connectSlack -> invoke slack:connect($0, $1)
@@ -1892,8 +1892,8 @@ preload setGoogleArchive -> invoke google:setArchive($0, $1)
 preload setGoogleArchive : (companyId: string, on: boolean) => Promise<GoogleStatusResult>
 preload setGoogleDrive -> invoke google:setDrive($0, $1)
 preload setGoogleDrive : (companyId: string, on: boolean) => Promise<GoogleStatusResult>
-preload setGoogleRelay -> invoke google:setRelay($0, $1)
-preload setGoogleRelay : (companyId: string, on: boolean) => Promise<GoogleRelayResult>
+preload setGoogleRelay -> invoke google:setRelay($0, $1, $2)
+preload setGoogleRelay : (companyId: string, on: boolean, service?: "sheets" | "docs" | undefined) => Promise<GoogleRelayResult>
 preload setJobRepeatAsk -> invoke jobRepeatAsks:set($0, $1)
 preload setJobRepeatAsk : (companyId: string, on: boolean) => Promise<JobRepeatAskSetting>
 preload setMeetingAutoSeries -> invoke minutes:autoSeries($0, $1, $2)

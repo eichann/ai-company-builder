@@ -15,7 +15,7 @@ import type { HandoffCompletion } from '../shared/handoff'
 import type { AgentInteractionResponse } from '../shared/agent-interaction'
 import type { PermissionMode } from '../shared/permission-mode'
 import type { CreatePrivateFolderRequest, SetPrivateFolderMembersRequest } from '../shared/private-folder-ui'
-import type { GoogleFeature } from '../shared/google'
+import type { GoogleFeature, GoogleRelayService } from '../shared/google'
 import type { MailAwaitReply, MailDraftEdit } from '../shared/outbound-mail'
 import type { AbsenceAddInput } from '../shared/absences'
 import type { RecordsTableQuery } from '../shared/records-table'
@@ -425,7 +425,7 @@ const api: ElectronAPI = {
   connectGoogleAll: (companyId: string) => invoke('google:connectAll', companyId),
   markGoogleSeen: (companyId: string) => invoke('google:markSeen', companyId),
   getGoogleRelay: (companyId: string) => invoke('google:relay', companyId),
-  setGoogleRelay: (companyId: string, on: boolean) => invoke('google:setRelay', companyId, on),
+  setGoogleRelay: (companyId: string, on: boolean, service?: GoogleRelayService) => invoke('google:setRelay', companyId, on, service),
   setGoogleArchive: (companyId: string, on: boolean) => invoke('google:setArchive', companyId, on),
   decideDriveOverwrite: (companyId: string, confirmationId: string, action: 'confirm' | 'decline', trust?: boolean) => invoke('google:decideDriveOverwrite', companyId, confirmationId, action, trust),
   markSlackSeen: (companyId: string) => invoke('slack:markSeen', companyId),

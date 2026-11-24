@@ -4,10 +4,12 @@
 // client) and the renderer. Nothing here ever holds a token: the app has none.
 import { GOOGLE_AUTHORIZE_HOST, GOOGLE_AUTHORIZE_PATH, type GoogleFeature } from '../../shared/core/google'
 import type { GoogleGrantStatus, GoogleUnavailableReason, MyGoogle, MyGoogleRelay } from '../../shared/types/google'
+import type { GoogleRelayService } from '../../shared/core/google-relay'
 
 export type { GoogleFeature } from '../../shared/core/google'
 export type { GoogleGrantStatus, GoogleRelayRecord, GoogleUnavailableReason, MyGoogle, MyGoogleRelay } from '../../shared/types/google'
 export { googleRelayRecordWords } from '../../shared/core/google-relay'
+export type { GoogleRelayService } from '../../shared/core/google-relay'
 
 /** What main answers the renderer: the member's view, or why not (built from status codes only). */
 export type GoogleStatusResult =
@@ -29,6 +31,7 @@ export const GOOGLE_FEATURE_LABEL: Record<GoogleFeature, string> = {
   inbox: '受信を読む',
   sheets: 'スプレッドシートを中継で使う',
   inbox_archive: '済んだメールを Gmail でもアーカイブする',
+  documents: 'ドキュメントを中継で使う',
 }
 
 export const GOOGLE_UNAVAILABLE_TEXT: Record<GoogleUnavailableReason, string> = {
@@ -171,7 +174,7 @@ export function googleSectionView(my: MyGoogle): GoogleSectionView {
 }
 
 // ---------------------------------------------------------------------------
-// 「スプレッドシートを中継で使う」 (google-connector.md "The relay").
+// 「スプレッドシート（ドキュメント）を中継で使う」 (google-connector.md "The relay").
 
 /** The relay as main answers the renderer: the member's view, or why not (built from status codes only). */
 export type GoogleRelayResult =
@@ -184,16 +187,18 @@ export interface GoogleRelayCardView {
   state: 'allow' | 'resume' | 'allowed'
   /** 「今日 37回 ／ 上限 500回」 */
   usage: string
-  /** Why scripts cannot reach a sheet now although the member allowed it (an admin's stop), or null. */
+  /** Why scripts cannot reach a sheet / Doc now although the member allowed it (an admin's stop), or null. */
   notice: string | null
 }
 
-export function googleRelayCardView(r: MyGoogleRelay): GoogleRelayCardView | null {
-  const sheets = r.services.find(s => s.service === 'sheets')
-  if (!r.available || !sheets?.offered) return null
-  const state = sheets.allowed ? 'allowed' : sheets.turnedOff ? 'resume' : 'allow'
-  const notice = !sheets.allowed ? null
-    : r.stopped === 'company' ? '管理者が、いま全員の Google の中継を止めています。スクリプトは表に届きません（許可はそのまま残っています）。'
-      : r.stopped === 'member' ? '管理者が、いまあなたの Google の中継を止めています。スクリプトは表に届きません（許可はそのまま残っています）。' : null
+/** One relay service's card (`sheets` 「スプレッドシートを中継で使う」, `docs` 「ドキュメントを中継で使う」), or null when the company does not offer it. */
+export function googleRelayCardView(r: MyGoogleRelay, service: GoogleRelayService = 'sheets'): GoogleRelayCardView | null {
+  const one = r.services.find(s => s.service === service)
+  if (!r.available || !one?.offered) return null
+  const state = one.allowed ? 'allowed' : one.turnedOff ? 'resume' : 'allow'
+  const thing = service === 'docs' ? 'ドキュメント' : '表'
+  const notice = !one.allowed ? null
+    : r.stopped === 'company' ? `管理者が、いま全員の Google の中継を止めています。スクリプトは${thing}に届きません（許可はそのまま残っています）。`
+      : r.stopped === 'member' ? `管理者が、いまあなたの Google の中継を止めています。スクリプトは${thing}に届きません（許可はそのまま残っています）。` : null
   return { state, usage: `今日 ${r.usedToday}回 ／ 上限 ${r.capPerDay}回`, notice }
 }

@@ -4,7 +4,7 @@
  * secret, a refresh or access token, an authorization code or a PKCE value.
  */
 import type { GoogleFeature } from '../core/google'
-import type { GoogleRelayService, SheetsOperation } from '../core/google-relay'
+import type { GoogleRelayOperation, GoogleRelayService } from '../core/google-relay'
 
 export type { GoogleFeature } from '../core/google'
 
@@ -165,20 +165,22 @@ export interface GoogleConnectStart {
 // ---------------------------------------------------------------------------
 // The relay with the member's own permission (「本人の許可で中継する」, google-connector.md "The relay").
 
-/** One relayed call as the records show it: who, when, which spreadsheet and range, the result — never cell contents. */
+/** One relayed call as the records show it: who, when, which spreadsheet and range (or document), the result — never contents. */
 export interface GoogleRelayRecord {
   id: string
   at: string
   userId: string
   /** The member's name (the admin's view; the member's own view: their own). */
   memberName: string | null
-  /** `sheets`. */
+  /** `sheets` or `docs`. */
   service: string
   /** The call (null when it was refused before one was recognised). */
-  operation: SheetsOperation | null
+  operation: GoogleRelayOperation | null
   /** The spreadsheet (from the path) and the A1 range of a values call. */
   spreadsheetId: string | null
   range: string | null
+  /** The Doc (from the path) of a Docs call; an older server leaves it out. */
+  documentId?: string | null
   /** Google's status, or the relay's own when it refused. */
   status: number | null
   /**
@@ -195,8 +197,10 @@ export interface GoogleRelayMember {
   userId: string
   memberName: string | null
   memberEmail: string | null
-  /** The member allowed the relay (an active grant holding the service's permission, not turned off by them). */
+  /** The member allowed the relay (an active grant holding the service's permission, not turned off by them) for at least one service. */
   allowed: boolean
+  /** The services they allowed (an older server leaves it out: then スプレッドシート). */
+  allowedServices?: GoogleRelayService[]
   /** When their Google permission was last given (the grant's creation or update). */
   allowedAt: string | null
   /** The admin stopped this member's relay. */

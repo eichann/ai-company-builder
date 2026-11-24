@@ -4,7 +4,7 @@
 // The company .env holds secret values, so it has ports of its own, and even
 // those never read a value back: only per name whether it is set.
 import type { ElectronAPI, ElectronPort } from '../../shared/ipc/electron-api'
-import type { GoogleFeature } from '../../../shared/google'
+import type { GoogleFeature, GoogleRelayService } from '../../../shared/google'
 import type { SlackFeature } from '../../../shared/slack'
 import { FULL_ACCESS_ROLES } from '../../../../shared/core/permissions'
 import { googlePermission } from '../../shared/lib/googlePermission'
@@ -164,8 +164,8 @@ export function getGoogleRelay(companyId: string, port: GoogleRelayPort = window
   return port.getGoogleRelay(companyId)
 }
 
-export function setGoogleRelay(companyId: string, on: boolean, port: GoogleRelayPort = window.electronAPI) {
-  return port.setGoogleRelay(companyId, on)
+export function setGoogleRelay(companyId: string, on: boolean, service: GoogleRelayService, port: GoogleRelayPort = window.electronAPI) {
+  return port.setGoogleRelay(companyId, on, service)
 }
 
 export async function disconnectGoogle(companyId: string, outbound: GoogleOutbound = window.electronAPI) {

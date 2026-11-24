@@ -2,19 +2,20 @@
  * The Google relay with the member's own permission (「本人の許可で中継する」, owner decision
  * 2026-11-04, `.claude/rules/google-connector.md` "The relay").
  *
- * A script on the member's PC calls `$ACB_GOOGLE_BASE_URL/sheets/v4/spreadsheets/…` with the
- * broker token the app hands out (`ACB_GOOGLE_API_KEY`). The key broker's relay
+ * A script on the member's PC calls `$ACB_GOOGLE_BASE_URL/sheets/v4/spreadsheets/…` (or, since
+ * 2026-11-24 (U2'), `$ACB_GOOGLE_BASE_URL/docs/v1/documents/…`) with the broker token the app hands
+ * out (`ACB_GOOGLE_API_KEY`). The key broker's relay
  * (services/broker-relay.ts) checks the token and hands the call here with the token's member;
  * this module sends it through the one Google client (google-client.ts) **with that member's own
  * Google permission** — never a stored company key, never a service account — so every Google
  * switch applies (operator stop, company Google off, the company's スプレッドシート off, the
  * member's grant gone or stopped, the member's own 「やめる」).
  *
- * Before anything leaves ACB, in order: the path (only `/sheets/…`, `checkUpstreamPath`), the
+ * Before anything leaves ACB, in order: the path (only `/sheets/…` or `/docs/…`, `checkUpstreamPath`), the
  * company-wide and the per-member stop, method-override headers, the call (only
- * `parseSheetsCall`'s list — never a clear or delete), the query parameters, the body (a
- * `spreadsheets:batchUpdate` with any delete / clear or an unlisted request kind is refused), for a
- * write who owns the sheet (only a sheet owned inside the company's Workspace domain — B-H1, owner
+ * `parseSheetsCall`'s / `parseDocsCall`'s list — never a clear or delete), the query parameters, the
+ * body (a batchUpdate with any delete / clear / replace / merge or an unlisted request kind is
+ * refused), for a write who owns the sheet or Doc (only a sheet owned inside the company's Workspace domain — B-H1, owner
  * decision 2026-11-04: an AI led by a mail must not copy company content into an outsider's sheet),
  * and the member's daily cap. No person is asked (the ledger records every call: who, when, which
  * spreadsheet and range, the result — never cell contents).
@@ -24,8 +25,9 @@
 import { checkUpstreamPath } from '../../shared/core/upstream-path'
 import { DRIVE_OWNER_FIELDS, GOOGLE_API_HOSTS, GOOGLE_SCOPE, googleCompanyFeatureOn, googleCompanySwitched } from '../../shared/core/google'
 import {
-  GOOGLE_RELAY_CAP, GOOGLE_RELAY_REFUSALS_PER_DAY, GOOGLE_RELAY_SERVICES, RELAY_SHARED_DRIVES_MAX, RELAY_SHARED_DRIVE_NAME_MAX, SHEETS_OPERATIONS,
-  checkSheetsBatchUpdate, isGoogleRelayCap, isGoogleRelayService, parseSharedDriveInput, parseSheetsCall, sheetOwnership, sheetsPathParts, sheetsQuery, type GoogleRelayService, type SheetsOperation,
+  GOOGLE_RELAY_CAP, GOOGLE_RELAY_OPERATIONS, GOOGLE_RELAY_REFUSALS_PER_DAY, GOOGLE_RELAY_SERVICES, GOOGLE_RELAY_SERVICE_FEATURE, RELAY_SHARED_DRIVES_MAX, RELAY_SHARED_DRIVE_NAME_MAX,
+  checkDocsBatchUpdate, checkSheetsBatchUpdate, docsPathParts, docsQuery, fileOwnership, isDocsDeletionKind, isGoogleRelayCap, isGoogleRelayService, parseDocsCall, parseSharedDriveInput, parseSheetsCall,
+  sheetsPathParts, sheetsQuery, type GoogleRelayOperation, type GoogleRelayService,
 } from '../../shared/core/google-relay'
 import type { GoogleChangeAction, GoogleRelayAdminView, GoogleRelayMember, GoogleRelayRecord, GoogleRelaySharedDrive, GoogleUnavailableReason, MyGoogleRelay } from '../../shared/types/google'
 import type { AccountDirectory } from '../ports/accounts'
@@ -53,7 +55,15 @@ const INSIDE_CACHE_MS = 10 * 60 * 1000
 const INSIDE_CACHE_MAX = 2000
 /** The refusal of a write into a sheet not owned inside the company (B-H1). */
 export const OUTSIDE_SHEET_MESSAGE = '会社の外の人が持っている表には書き込めません。会社の Google アカウントの人が持っている表を使ってください（読むことはできます）。'
-const SHARED_DRIVE_MESSAGE = 'この表は、会社に登録されていない共有ドライブにあるため、中継では書き込めません。管理者に「API キー → 本人の許可で中継する」でこの共有ドライブを登録してもらってください（読むことはできます）。'
+/** The same for a Doc (U2'). */
+export const OUTSIDE_DOCUMENT_MESSAGE = '会社の外の人が持っているドキュメントには書き込めません。会社の Google アカウントの人が持っているドキュメントを使ってください（読むことはできます）。'
+
+/** Each relay service in the member's words: what it calls a file, and the switch's name in 設定 → Google. */
+const SERVICE_WORDS: Record<GoogleRelayService, { thing: string; name: string; feature: string; scope: string; api: 'sheets' | 'docs'; outside: RelayErrorCode }> = {
+  sheets: { thing: '表', name: 'スプレッドシート', feature: 'スプレッドシートを中継で使う', scope: GOOGLE_SCOPE.spreadsheets, api: 'sheets', outside: 'ACB_OUTSIDE_SHEET' },
+  docs: { thing: 'ドキュメント', name: 'ドキュメント', feature: 'ドキュメントを中継で使う', scope: GOOGLE_SCOPE.documents, api: 'docs', outside: 'ACB_OUTSIDE_DOCUMENT' },
+}
+const sharedDriveMessage = (service: GoogleRelayService) => `この${SERVICE_WORDS[service].thing}は、会社に登録されていない共有ドライブにあるため、中継では書き込めません。管理者に「API キー → 本人の許可で中継する」でこの共有ドライブを登録してもらってください（読むことはできます）。`
 
 export interface GoogleRelayDeps {
   companyData: CompanyDataSource
@@ -83,7 +93,7 @@ const isObject = (v: unknown): v is Record<string, unknown> => !!v && typeof v =
 function servicesOn(connectors: ConnectorRepository): GoogleRelayService[] {
   const client = connectors.client()
   if (!client) return []
-  return GOOGLE_RELAY_SERVICES.filter(s => googleCompanyFeatureOn(s, { ...client, readIncomingAllowed: false }))
+  return GOOGLE_RELAY_SERVICES.filter(s => googleCompanyFeatureOn(GOOGLE_RELAY_SERVICE_FEATURE[s], { ...client, readIncomingAllowed: false }))
 }
 
 /**
@@ -111,18 +121,19 @@ async function readBody(body: AsyncIterable<Uint8Array>, limit: number): Promise
 }
 
 /** A not-sent reason of the Google client → the relay's refusal (nothing left ACB). */
-function notSentRefusal(reason: string): { status: number; code: RelayErrorCode; message: string } {
+function notSentRefusal(reason: string, service: GoogleRelayService): { status: number; code: RelayErrorCode; message: string } {
+  const w = SERVICE_WORDS[service]
   switch (reason) {
     case 'operator-stopped': return { status: 403, code: 'ACB_STOPPED', message: 'いまは Google を使えません（運用担当者が止めています）。' }
     case 'not-configured':
-    case 'off': return { status: 403, code: 'ACB_GOOGLE_OFF', message: '管理者が Google（またはスプレッドシートの中継）を止めています。' }
+    case 'off': return { status: 403, code: 'ACB_GOOGLE_OFF', message: `管理者が Google（または${w.name}の中継）を止めています。` }
     case 'vault-off': return { status: 503, code: 'ACB_BROKER_OFF', message: 'サーバーの準備ができていないため、Google の中継を使えません。管理者に確かめてください。' }
     case 'not-member': return { status: 403, code: 'ACB_NOT_MEMBER', message: 'この会社のメンバーではないため、中継できません。' }
-    case 'feature-off': return { status: 403, code: 'ACB_GOOGLE_NOT_ALLOWED', message: 'あなたが「スプレッドシートを中継で使う」をやめています。使うときは、アプリの「設定 → Google」で［許可する］を押してください。' }
+    case 'feature-off': return { status: 403, code: 'ACB_GOOGLE_NOT_ALLOWED', message: `あなたが「${w.feature}」をやめています。使うときは、アプリの「設定 → Google」で［許可する］を押してください。` }
     case 'no-grant':
     case 'grant-revoked':
     case 'grant-stopped':
-    case 'scope-not-granted': return { status: 403, code: 'ACB_GOOGLE_NOT_ALLOWED', message: 'この作業には、あなたの Google の許可が必要です。アプリの「設定 → Google」で「スプレッドシートを中継で使う」の［許可する］を押してください。' }
+    case 'scope-not-granted': return { status: 403, code: 'ACB_GOOGLE_NOT_ALLOWED', message: `この作業には、あなたの Google の許可が必要です。アプリの「設定 → Google」で「${w.feature}」の［許可する］を押してください。` }
     case 'timeout': return { status: 504, code: 'ACB_UPSTREAM_TIMEOUT', message: 'Google からの返事が時間内に来ませんでした。' }
     default: return { status: 502, code: 'ACB_UPSTREAM_UNREACHABLE', message: 'Google につながりませんでした。時間をおいてもう一度お試しください。' }
   }
@@ -138,13 +149,15 @@ function resultBody(result: Extract<GoogleResult, { ok: true }>): Uint8Array {
   return enc(result.text === null || result.text === '' ? {} : { text: result.text })
 }
 
-/** One AI-action-log line → the records' line (who, when, which sheet and range, the result). */
+/** One AI-action-log line → the records' line (who, when, which sheet and range or Doc, the result). */
 function recordOf(row: AgentEventRow, names: Map<string, { name: string | null } | undefined>): GoogleRelayRecord {
-  const t = (isObject(row.target) ? row.target : {}) as { path?: unknown; operation?: unknown; status?: unknown }
+  const t = (isObject(row.target) ? row.target : {}) as { path?: unknown; operation?: unknown; status?: unknown; host?: unknown }
   const path = typeof t.path === 'string' ? t.path : ''
-  const operation = typeof t.operation === 'string' && (SHEETS_OPERATIONS as readonly string[]).includes(t.operation) ? t.operation as SheetsOperation : null
+  const service: GoogleRelayService = t.host === GOOGLE_API_HOSTS.docs ? 'docs' : 'sheets'
+  const operation = typeof t.operation === 'string' && (GOOGLE_RELAY_OPERATIONS as readonly string[]).includes(t.operation) ? t.operation as GoogleRelayOperation : null
   const status = typeof t.status === 'number' ? t.status : null
-  const parts = sheetsPathParts(path)
+  const parts = service === 'docs' ? { spreadsheetId: null, range: null } : sheetsPathParts(path)
+  const documentId = service === 'docs' ? docsPathParts(path).documentId : null
   let result: GoogleRelayRecord['result']
   let reason: GoogleRelayRecord['reason'] = null
   if (row.decision === 'stopped') { result = 'refused'; reason = 'stopped' } else if (row.decision === 'guard-denied') {
@@ -159,7 +172,7 @@ function recordOf(row: AgentEventRow, names: Map<string, { name: string | null }
   else result = 'error'
   return {
     id: row.id, at: row.at, userId: row.userId, memberName: names.get(row.userId)?.name ?? null,
-    service: 'sheets', operation, spreadsheetId: parts.spreadsheetId, range: parts.range ? parts.range.slice(0, 120) : null,
+    service, operation, spreadsheetId: parts.spreadsheetId, range: parts.range ? parts.range.slice(0, 120) : null, documentId,
     status, result, reason,
   }
 }
@@ -184,10 +197,10 @@ export function createGoogleRelay(deps: GoogleRelayDeps) {
    * grant from before the owner lookup (B-H1: no `drive.metadata.readonly`) still reads, but shows
    * as not allowed, so the app offers ［許可する］ again (a released app too) and writes can pass.
    */
-  function allowedBy(connectors: ConnectorRepository, userId: string): { allowed: boolean; turnedOff: boolean; at: string | null } {
+  function allowedBy(connectors: ConnectorRepository, userId: string, service: GoogleRelayService): { allowed: boolean; turnedOff: boolean; at: string | null } {
     const grant = connectors.grant('google', userId)
-    const has = grant?.status === 'active' && grant.scopes.includes(GOOGLE_SCOPE.spreadsheets)
-    const turnedOff = !!has && grant!.featuresOff.includes('sheets')
+    const has = grant?.status === 'active' && grant.scopes.includes(SERVICE_WORDS[service].scope)
+    const turnedOff = !!has && grant!.featuresOff.includes(GOOGLE_RELAY_SERVICE_FEATURE[service])
     const canWrite = !!has && grant!.scopes.includes(GOOGLE_SCOPE.driveMetadataReadonly)
     return { allowed: canWrite && !turnedOff, turnedOff, at: has ? grant!.updatedAt : null }
   }
@@ -199,7 +212,7 @@ export function createGoogleRelay(deps: GoogleRelayDeps) {
     const day = deps.dayOf(clock.nowMs())
     const stoppedIds = settings.stoppedUserIds ?? []
     const userIds = [...new Set([
-      ...connectors.grants('google').filter(g => g.scopes.includes(GOOGLE_SCOPE.spreadsheets)).map(g => g.userId),
+      ...connectors.grants('google').filter(g => GOOGLE_RELAY_SERVICES.some(s => g.scopes.includes(SERVICE_WORDS[s].scope))).map(g => g.userId),
       ...stoppedIds,
     ])].filter(u => deps.isMember(companyId, u))
     const people = accounts.byIds(userIds)
@@ -211,10 +224,12 @@ export function createGoogleRelay(deps: GoogleRelayDeps) {
       capPerMemberPerDay: capOf(settings),
       stopped: settings.stopped === true,
       members: userIds.map((userId): GoogleRelayMember => {
-        const a = allowedBy(connectors, userId)
+        const each = GOOGLE_RELAY_SERVICES.map(s => ({ s, a: allowedBy(connectors, userId, s) }))
+        const allowedServices = each.filter(x => x.a.allowed).map(x => x.s)
         return {
           userId, memberName: people.get(userId)?.name ?? null, memberEmail: people.get(userId)?.email ?? null,
-          allowed: a.allowed, allowedAt: a.at, stopped: stoppedIds.includes(userId), usedToday: deps.usage.count(companyId, userId, day),
+          allowed: allowedServices.length > 0, allowedServices, allowedAt: each.find(x => x.a.at)?.a.at ?? null,
+          stopped: stoppedIds.includes(userId), usedToday: deps.usage.count(companyId, userId, day),
         }
       }),
       records: records(companyId, null, ADMIN_RECORDS),
@@ -233,19 +248,21 @@ export function createGoogleRelay(deps: GoogleRelayDeps) {
     for (const k of [...insideUntil.keys()]) if (k.startsWith(`${companyId}\n`)) insideUntil.delete(k)
   }
 
-  /** Sheets found owned inside the company: `company\nmember\nsheet` → until (ms). Only `inside` is kept. */
+  /** Files (sheets, Docs) found owned inside the company: `company\nmember\ndomain\nfile` → until (ms). Only `inside` is kept. */
   const insideUntil = new Map<string, number>()
 
   /**
-   * B-H1: may this member's write go into this sheet? Drive (with the member's own
-   * `drive.metadata.readonly`) names its owner; only an owner of the company's Workspace domain
-   * passes (`sheetOwnership`). Anything unsure refuses: the server must not allow when unsure.
+   * B-H1: may this member's write go into this sheet or Doc? Drive (with the member's own
+   * `drive.metadata.readonly`, named for the service's feature: each relay's own switches decide
+   * its lookup) names its owner; only an owner of the company's Workspace domain passes
+   * (`fileOwnership`). Anything unsure refuses: the server must not allow when unsure.
    */
-  async function ownerRefusal(who: PersonRelayCall['who'], spreadsheetId: string, meta: Partial<PersonRelayResult>): Promise<PersonRelayResult | null> {
+  async function ownerRefusal(who: PersonRelayCall['who'], service: GoogleRelayService, fileId: string, meta: Partial<PersonRelayResult>): Promise<PersonRelayResult | null> {
+    const w = SERVICE_WORDS[service]
     const connectors = connectorsOf(who.companyId)
     const domain = connectors.client()?.domain ?? ''
     const sharedDrives = (connectors.relaySettings()?.sharedDrives ?? []).map(d => d.driveId)
-    const key = `${who.companyId}\n${who.userId}\n${domain}\n${spreadsheetId}`
+    const key = `${who.companyId}\n${who.userId}\n${domain}\n${fileId}`
     const now = clock.nowMs()
     const until = insideUntil.get(key)
     if (until !== undefined && until > now) return null
@@ -253,31 +270,32 @@ export function createGoogleRelay(deps: GoogleRelayDeps) {
     const looked = await google.request(who.companyId, who.userId, {
       api: 'drive',
       method: 'GET',
-      path: `/drive/v3/files/${spreadsheetId}`,
+      path: `/drive/v3/files/${fileId}`,
       query: { fields: DRIVE_OWNER_FIELDS, supportsAllDrives: 'true' },
       scope: GOOGLE_SCOPE.driveMetadataReadonly,
-      operation: 'sheets.owner',
+      feature: GOOGLE_RELAY_SERVICE_FEATURE[service],
+      operation: `${service}.owner`,
       recordedByCaller: true,
     })
     if (!looked.ok) {
       if (looked.kind === 'not-sent') {
         if (looked.reason === 'scope-not-granted') {
-          return out(403, 'ACB_GOOGLE_NOT_ALLOWED', '表に書き込む前に、その表が会社のものか確かめる許可が必要になりました。アプリの「設定 → Google」で「スプレッドシートを中継で使う」の［許可する］を押してください（読むことはいまのままできます）。', meta)
+          return out(403, 'ACB_GOOGLE_NOT_ALLOWED', `${w.thing}に書き込む前に、その${w.thing}が会社のものか確かめる許可が必要になりました。アプリの「設定 → Google」で「${w.feature}」の［許可する］を押してください（読むことはいまのままできます）。`, meta)
         }
-        const r = notSentRefusal(looked.reason)
+        const r = notSentRefusal(looked.reason, service)
         return out(r.status, r.code, r.message, meta)
       }
       if (looked.kind === 'refused') {
         // Drive answers 404 for a file the member cannot open: refused like Sheets refuses a write
         // the member may not make (403), nothing written.
-        return { status: 403, body: googleError(403, 'PERMISSION_DENIED', 'Google が断りました（あなたにはこの表を編集・閲覧する権限がないか、表が見つかりません）。'), bytesIn: meta.bytesIn ?? 0, ...meta }
+        return { status: 403, body: googleError(403, 'PERMISSION_DENIED', `Google が断りました（あなたにはこの${w.thing}を編集・閲覧する権限がないか、${w.thing}が見つかりません）。`), bytesIn: meta.bytesIn ?? 0, ...meta }
       }
       const status = looked.kind === 'rate-limited' ? 429 : 502
       return { status, body: googleError(status, status === 429 ? 'RESOURCE_EXHAUSTED' : 'UNAVAILABLE', 'Google が混み合っているか、使えませんでした。時間をおいてもう一度お試しください。'), bytesIn: meta.bytesIn ?? 0, ...meta }
     }
-    const owner = sheetOwnership(looked.json, domain, sharedDrives)
-    if (owner === 'shared-drive') return out(403, 'ACB_OUTSIDE_SHEET', SHARED_DRIVE_MESSAGE, meta)
-    if (owner !== 'inside') return out(403, 'ACB_OUTSIDE_SHEET', OUTSIDE_SHEET_MESSAGE, meta)
+    const owner = fileOwnership(looked.json, domain, sharedDrives)
+    if (owner === 'shared-drive') return out(403, w.outside, sharedDriveMessage(service), meta)
+    if (owner !== 'inside') return out(403, w.outside, service === 'docs' ? OUTSIDE_DOCUMENT_MESSAGE : OUTSIDE_SHEET_MESSAGE, meta)
     if (insideUntil.size >= INSIDE_CACHE_MAX) insideUntil.delete(insideUntil.keys().next().value!)
     insideUntil.set(key, now + INSIDE_CACHE_MS)
     return null
@@ -300,28 +318,42 @@ export function createGoogleRelay(deps: GoogleRelayDeps) {
       return { refused: out(403, 'ACB_STOPPED', '管理者が、あなたの Google の中継を止めています。再開されるまで使えません。', meta) }
     }
     if (!servicesOn(connectors).includes(service)) {
-      return { refused: out(403, 'ACB_GOOGLE_OFF', 'この会社では、スプレッドシートの中継を使っていません。管理者に確かめてください。', meta) }
+      return { refused: out(403, 'ACB_GOOGLE_OFF', `この会社では、${SERVICE_WORDS[service].name}の中継を使っていません。管理者に確かめてください。`, meta) }
     }
     return { settings }
+  }
+
+  /** One recognised call of either service, in the shape the checks below share. */
+  type RelayCall = { operation: GoogleRelayOperation; fileId: string; write: boolean; batch: boolean }
+
+  /** The service's call from its method and path, or why it is refused (`parseSheetsCall` / `parseDocsCall`). */
+  function parseCall(service: GoogleRelayService, method: string, path: string): { ok: true; call: RelayCall } | { ok: false; refusal: 'deletion' | 'not-relayed' } {
+    if (service === 'docs') {
+      const p = parseDocsCall(method, path)
+      return p.ok ? { ok: true, call: { operation: p.call.operation, fileId: p.call.documentId, write: p.call.write, batch: p.call.operation === 'documents.batchUpdate' } } : p
+    }
+    const p = parseSheetsCall(method, path)
+    return p.ok ? { ok: true, call: { operation: p.call.operation, fileId: p.call.spreadsheetId, write: p.call.write, batch: p.call.operation === 'spreadsheets.batchUpdate' } } : p
   }
 
   async function relayOnce(call: PersonRelayCall): Promise<PersonRelayResult> {
     {
       const { who } = call
 
-      // 1. Where: only a relay service's API (Sheets), a plain path. The path sent on is the raw
-      // path without its first segment (whatever its spelling, `%73heets` included).
+      // 1. Where: only a relay service's API (Sheets, Docs), a plain path. The path sent on is the
+      // raw path without its first segment (whatever its spelling, `%73heets` included).
       const checked = checkUpstreamPath(call.rawPath)
       if (!checked) return out(400, 'ACB_BAD_PATH', '宛先のパスの書き方が正しくありません。')
       const decodedSegs = checked.decoded.split('/')
       const service = decodedSegs[1]
       if (!isGoogleRelayService(service)) {
-        return out(403, 'ACB_NOT_RELAYED', 'Google の中継は、いまスプレッドシート（/sheets/v4/spreadsheets/…）だけです。')
+        return out(403, 'ACB_NOT_RELAYED', 'Google の中継は、いまスプレッドシート（/sheets/v4/spreadsheets/…）とドキュメント（/docs/v1/documents/…）だけです。')
       }
+      const w = SERVICE_WORDS[service]
       const apiPath = `/${call.rawPath.split('/').slice(2).join('/')}`
       const apiDecoded = `/${decodedSegs.slice(2).join('/')}`
-      const parsed = parseSheetsCall(call.method, apiDecoded)
-      const meta = { host: GOOGLE_API_HOSTS.sheets, path: apiDecoded.slice(0, 200), ...(parsed.ok ? { operation: parsed.call.operation } : {}) }
+      const parsed = parseCall(service, call.method, apiDecoded)
+      const meta = { host: GOOGLE_API_HOSTS[w.api], path: apiDecoded.slice(0, 200), ...(parsed.ok ? { operation: parsed.call.operation } : {}) }
 
       // 2. The admin's stops, the AI emergency stop and the company's service switch.
       const first = stopNow(who, service, meta)
@@ -332,9 +364,13 @@ export function createGoogleRelay(deps: GoogleRelayDeps) {
       if (!parsed.ok) {
         return parsed.refusal === 'deletion'
           ? out(403, 'ACB_DELETE_REFUSED', '表・シート・セルの中身を消す操作は、ACB の中継では通しません。', meta)
-          : out(403, 'ACB_NOT_RELAYED', 'この操作は、ACB の中継では通しません（読む・書き換える・行を足す、などだけです）。', meta)
+          : out(403, 'ACB_NOT_RELAYED', service === 'docs'
+            ? 'この操作は、ACB の中継では通しません（ドキュメントを読む・書き足す、整える、だけです）。'
+            : 'この操作は、ACB の中継では通しません（読む・書き換える・行を足す、などだけです）。', meta)
       }
-      const query = sheetsQuery(call.query)
+      const query = parsed.call.operation === 'documents.get' || parsed.call.operation === 'documents.batchUpdate'
+        ? docsQuery(parsed.call.operation, call.query)
+        : sheetsQuery(call.query)
       if (!query.ok) return out(400, 'ACB_NOT_RELAYED', `「${query.name}」の指定は、ACB の中継では使えません。`, meta)
 
       // 4. The body of a write: JSON, bounded; a batchUpdate only with allowed request kinds.
@@ -349,25 +385,33 @@ export function createGoogleRelay(deps: GoogleRelayDeps) {
         bytesIn = bytes.byteLength
         try { json = JSON.parse(new TextDecoder().decode(bytes)) as unknown } catch { json = undefined }
         if (!isObject(json)) return out(400, 'ACB_NOT_RELAYED', '書き込む内容を JSON として読めませんでした。', { ...meta, bytesIn })
-        if (parsed.call.operation === 'spreadsheets.batchUpdate') {
-          const kinds = checkSheetsBatchUpdate(json)
+        if (parsed.call.batch) {
+          const kinds = service === 'docs' ? checkDocsBatchUpdate(json) : checkSheetsBatchUpdate(json)
           if (!kinds.ok) {
-            if (kinds.refusal === 'deletion') return out(403, 'ACB_DELETE_REFUSED', `表・シート・行や列を消す操作（${kinds.kinds.filter(k => /^(delete|clear)/i.test(k)).join('、')}）は、ACB の中継では通しません。`, { ...meta, bytesIn })
+            if (kinds.refusal === 'deletion') {
+              const named = service === 'docs' ? kinds.kinds.filter(isDocsDeletionKind) : kinds.kinds.filter(k => /^(delete|clear)/i.test(k))
+              return out(403, 'ACB_DELETE_REFUSED', service === 'docs'
+                ? `ドキュメントの中身を消す・置き換える・まとめる操作（${named.join('、')}）は、ACB の中継では通しません。`
+                : `表・シート・行や列を消す操作（${named.join('、')}）は、ACB の中継では通しません。`, { ...meta, bytesIn })
+            }
             if (kinds.refusal === 'not-relayed') return out(403, 'ACB_NOT_RELAYED', `この操作（${kinds.kinds.join('、')}）は、ACB の中継では通しません。`, { ...meta, bytesIn })
-            return out(400, 'ACB_NOT_RELAYED', '書き込む内容の形が正しくありません（requests に1つずつ操作を並べてください）。', { ...meta, bytesIn })
+            return out(400, 'ACB_NOT_RELAYED', service === 'docs'
+              ? '書き込む内容の形が正しくありません（requests に1つずつ操作を並べてください。ほかに使えるのは writeControl だけです）。'
+              : '書き込む内容の形が正しくありません（requests に1つずつ操作を並べてください）。', { ...meta, bytesIn })
           }
         }
       }
 
-      // 5. A write only into a sheet owned inside the company's Workspace (B-H1). Reads are not
-      // checked: reading an outside sheet sends nothing of the company's out.
+      // 5. A write only into a file owned inside the company's Workspace (B-H1). Reads are not
+      // checked: reading an outside file sends nothing of the company's out.
       if (parsed.call.write) {
-        const refused = await ownerRefusal(who, parsed.call.spreadsheetId, { ...meta, bytesIn })
+        const refused = await ownerRefusal(who, service, parsed.call.fileId, { ...meta, bytesIn })
         if (refused) return refused
       }
 
-      // 6. The stops again (the body may have taken a while), then the member's daily cap
-      // (counted before the call leaves, like the key broker's caps).
+      // 6. The stops again (the body may have taken a while), then the member's daily cap — one
+      // count for every relay service together (counted before the call leaves, like the key
+      // broker's caps).
       const again = stopNow(who, service, { ...meta, bytesIn })
       if ('refused' in again) return again.refused
       const day = deps.dayOf(clock.nowMs())
@@ -379,29 +423,30 @@ export function createGoogleRelay(deps: GoogleRelayDeps) {
 
       // 7. Google, with this member's own permission (every Google switch is checked there first).
       const result = await google.request(who.companyId, who.userId, {
-        api: 'sheets',
+        api: w.api,
         method: call.method as 'GET' | 'POST' | 'PUT',
         path: apiPath,
         query: query.query,
         ...(json !== undefined ? { body: json } : {}),
-        scope: GOOGLE_SCOPE.spreadsheets,
-        operation: `sheets.${parsed.call.operation}`,
+        scope: w.scope,
+        feature: GOOGLE_RELAY_SERVICE_FEATURE[service],
+        operation: `${service}.${parsed.call.operation}`,
         recordedByCaller: true,
       })
       if (result.ok) return { status: result.status, body: resultBody(result), bytesIn, ...meta }
       if (result.kind === 'not-sent') {
-        const r = notSentRefusal(result.reason)
+        const r = notSentRefusal(result.reason, service)
         return out(r.status, r.code, r.message, { ...meta, bytesIn })
       }
       if (result.kind === 'refused') {
         const status = result.status ?? 400
         const message = status === 403
-          ? 'Google が断りました（あなたにはこの表を編集・閲覧する権限がないか、許可が足りません）。'
-          : status === 404 ? 'Google が断りました（表が見つかりません）。' : 'Google が断りました。'
+          ? `Google が断りました（あなたにはこの${w.thing}を編集・閲覧する権限がないか、許可が足りません）。`
+          : status === 404 ? `Google が断りました（${w.thing}が見つかりません）。` : 'Google が断りました。'
         return { status, body: googleError(status, result.googleReason ?? 'FAILED_PRECONDITION', message), bytesIn, ...meta }
       }
       if (result.kind === 'unknown') {
-        return { status: 504, body: googleError(504, 'DEADLINE_EXCEEDED', 'Google に届いたか分かりません。表を確かめてから、必要ならもう一度お試しください。'), bytesIn, ...meta }
+        return { status: 504, body: googleError(504, 'DEADLINE_EXCEEDED', `Google に届いたか分かりません。${w.thing}を確かめてから、必要ならもう一度お試しください。`), bytesIn, ...meta }
       }
       const status = result.kind === 'rate-limited' ? 429 : 502
       return { status, body: googleError(status, status === 429 ? 'RESOURCE_EXHAUSTED' : 'UNAVAILABLE', 'Google が混み合っているか、使えませんでした。時間をおいてもう一度お試しください。'), bytesIn, ...meta }
@@ -450,8 +495,9 @@ export function createGoogleRelay(deps: GoogleRelayDeps) {
       let client = connectors.client()
       if (!client) return refuse('not-found', 'Google の登録がまだありません。先に「つなぎ先 → Google」で登録してください。', { code: 'NOT_CONFIGURED' })
       for (const [service, on] of Object.entries((services ?? {}) as Record<GoogleRelayService, boolean>) as Array<[GoogleRelayService, boolean]>) {
-        if (googleCompanyFeatureOn(service, { ...client, readIncomingAllowed: false }) === on) continue
-        connectors.setClientFeatures(googleCompanySwitched(client, service, on), clock.now(), member.userId, change('features', member.userId, null, { feature: service, on }))
+        const feature = GOOGLE_RELAY_SERVICE_FEATURE[service]
+        if (googleCompanyFeatureOn(feature, { ...client, readIncomingAllowed: false }) === on) continue
+        connectors.setClientFeatures(googleCompanySwitched(client, feature, on), clock.now(), member.userId, change('features', member.userId, null, { feature, on }))
         client = connectors.client()!
       }
       if (capPerMemberPerDay !== undefined || stopped !== undefined) {
@@ -536,11 +582,13 @@ export function createGoogleRelay(deps: GoogleRelayDeps) {
       const settings = connectors.relaySettings() ?? {}
       const reason = await deps.unavailable(member.companyId)
       const on = servicesOn(connectors)
-      const a = allowedBy(connectors, member.userId)
       return ok({
         available: reason === null,
         reason,
-        services: GOOGLE_RELAY_SERVICES.map(service => ({ service, offered: reason === null && on.includes(service), allowed: a.allowed, turnedOff: a.turnedOff })),
+        services: GOOGLE_RELAY_SERVICES.map(service => {
+          const a = allowedBy(connectors, member.userId, service)
+          return { service, offered: reason === null && on.includes(service), allowed: a.allowed, turnedOff: a.turnedOff }
+        }),
         stopped: settings.stopped ? 'company' : (settings.stoppedUserIds ?? []).includes(member.userId) ? 'member' : null,
         capPerDay: capOf(settings),
         usedToday: deps.usage.count(member.companyId, member.userId, deps.dayOf(clock.nowMs())),

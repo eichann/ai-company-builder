@@ -34,6 +34,23 @@ describe('the relay card', () => {
     assert.equal(googleRelayCardView(withSheets({ allowed: true }))!.usage, '今日 37回 ／ 上限 500回')
   })
 
+  it('the Docs card is its own: shown only when the company offers ドキュメント, with its own state', () => {
+    const both: MyGoogleRelay = { ...base, services: [base.services[0], { service: 'docs', offered: false, allowed: false, turnedOff: false }] }
+    assert.equal(googleRelayCardView(both, 'docs'), null)
+    assert.equal(googleRelayCardView(both, 'sheets')!.state, 'allow')
+    const docsOn: MyGoogleRelay = { ...base, stopped: 'member', services: [{ ...base.services[0], allowed: true }, { service: 'docs', offered: true, allowed: false, turnedOff: true }] }
+    assert.equal(googleRelayCardView(docsOn, 'docs')!.state, 'resume')
+    assert.equal(googleRelayCardView(docsOn, 'docs')!.notice, null)
+    assert.equal(googleRelayCardView(docsOn, 'sheets')!.state, 'allowed')
+    assert.match(googleRelayCardView({ ...docsOn, services: [docsOn.services[0], { ...docsOn.services[1], allowed: true, turnedOff: false }] }, 'docs')!.notice!, /ドキュメントに届きません/)
+  })
+
+  it('a Docs record names the Doc in Docs words', () => {
+    assert.deepEqual(googleRelayRecordWords({ service: 'docs', operation: 'documents.batchUpdate', range: null, result: 'refused', reason: 'outside' }),
+      { action: 'ドキュメントに書き足す、整える', result: '中継しませんでした', note: '会社の外の人が持っているドキュメントでした' })
+    assert.equal(googleRelayRecordWords({ service: 'docs', operation: 'documents.get', range: null, result: 'google-refused', reason: null }).note, '編集する権限がないか、ドキュメントが見つかりません')
+  })
+
   it('a record says why ACB refused (a deletion is named as such), and Google\'s refusal apart from ACB\'s', () => {
     assert.deepEqual(googleRelayRecordWords({ operation: 'spreadsheets.batchUpdate', range: null, result: 'refused', reason: 'deletion' }),
       { action: '行・列を足す、整える', result: '中継しませんでした', note: '消す操作は中継しません' })

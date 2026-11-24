@@ -65,7 +65,7 @@
  */
 import { createHash, randomBytes } from 'crypto'
 import { Hono, type Context } from 'hono'
-import { defaultGoogleSeed, type ArtifactState, type GoogleSeed, type SeedArtifact, type SeedEvent, type SeedDriveFile, type SeedMail, type SeedSpreadsheet } from './seed'
+import { defaultGoogleSeed, type ArtifactState, type GoogleSeed, type SeedArtifact, type SeedEvent, type SeedDriveFile, type SeedMail, type SeedRelayDoc, type SeedSpreadsheet } from './seed'
 
 export const FAKE_GOOGLE_SECRET_PREFIX = 'fake-google-secret-'
 export const FAKE_ACCESS_TOKEN_PREFIX = 'ya29.fake-'
@@ -335,6 +335,8 @@ export interface FakeGoogle {
   uploads(): Array<{ id: string; name: string; parents: string[]; mimeType: string }>
   /** A spreadsheet as it is now (null when unknown); for assertions. */
   spreadsheet(id: string): { title: string; sheets: Array<{ sheetId: number; title: string; rows: unknown[][] }> } | null
+  /** A relay Doc as it is now (null when unknown): its text, revision and every request kind applied; for assertions. */
+  relayDocument(id: string): { text: string; revisionId: string; applied: string[] } | null
 }
 
 interface CodeGrant {
@@ -418,6 +420,11 @@ export function createFakeGoogle(options: FakeGoogleOptions = {}): FakeGoogle {
   let failPrefix: string | null = null
   const exportRefused = new Map<string, string>()
   const docsRefused = new Map<string, string>()
+  /** The relay's Docs (U2'): text, revision and the request kinds applied. */
+  type LiveRelayDoc = SeedRelayDoc & { revision: number; applied: string[] }
+  const relayDocs = new Map<string, LiveRelayDoc>((seed.relayDocs ?? []).map(d => [d.id, { ...d, editors: [...d.editors], readers: [...d.readers], revision: 1, applied: [] }]))
+  const relayDocEditor = (d: LiveRelayDoc, email: string) => [d.owner, ...d.editors].some(e => e.toLowerCase() === email)
+  const relayDocReader = (d: LiveRelayDoc, email: string) => relayDocEditor(d, email) || d.readers.some(e => e.toLowerCase() === email)
   const copyBlocked = new Set<string>()
   let dropCount = 0
   let editBeforeExport: Array<{ content: string; by: string; omitted: boolean }> = []
@@ -1266,6 +1273,18 @@ export function createFakeGoogle(options: FakeGoogleOptions = {}): FakeGoogle {
   })
 
   app.get('/drive/v3/files/:fileId', c => {
+    const relayDoc = relayDocs.get(c.req.param('fileId') ?? '')
+    if (relayDoc) {
+      // A relay Doc's metadata (the owner lookup): as for a spreadsheet, below.
+      const a = bearer(c, [GOOGLE_SCOPES.driveMetadataReadonly, `${AUTH}drive.readonly`, `${AUTH}drive`], 'drive.googleapis.com')
+      const email = a.email.toLowerCase()
+      if (!relayDocReader(relayDoc, email)) throw fileNotFound(relayDoc.id)
+      if (c.req.query('supportsAllDrives') !== 'true' && relayDoc.driveId) throw fileNotFound(relayDoc.id)
+      return c.json(selectFields({
+        kind: 'drive#file', id: relayDoc.id, name: relayDoc.title, mimeType: 'application/vnd.google-apps.document',
+        ...(relayDoc.driveId ? { driveId: relayDoc.driveId } : { owners: [{ kind: 'drive#user', emailAddress: relayDoc.owner, me: relayDoc.owner.toLowerCase() === email }] }),
+      }, c.req.query('fields')))
+    }
     const sheet = spreadsheets.get(c.req.param('fileId') ?? '')
     if (sheet) {
       // A spreadsheet's metadata (the relay's owner lookup, B-H1): any Drive metadata scope, and the
@@ -1325,6 +1344,12 @@ export function createFakeGoogle(options: FakeGoogleOptions = {}): FakeGoogle {
   app.get('/v1/documents/:documentId', c => {
     const a = bearer(c, NEEDS.docs, 'docs.googleapis.com')
     const id = c.req.param('documentId') ?? ''
+    const relayDoc = relayDocs.get(id)
+    if (relayDoc) {
+      if (!relayDocReader(relayDoc, a.email.toLowerCase())) throw apiError(404, 'Requested entity was not found.', 'notFound')
+      const content = relayDoc.text.split(/(?<=\n)/).map(line => ({ paragraph: { elements: [{ textRun: { content: line } }] } }))
+      return c.json({ documentId: id, title: relayDoc.title, revisionId: `rev-${relayDoc.revision}`, body: { content } })
+    }
     const d = docs.get(id)
     if (!d || !d.readers.some(r => r.toLowerCase() === a.email.toLowerCase())) throw apiError(404, 'Requested entity was not found.', 'notFound')
     const refusal = docsRefused.get(id)
@@ -1334,6 +1359,37 @@ export function createFakeGoogle(options: FakeGoogleOptions = {}): FakeGoogle {
     return c.json(c.req.query('includeTabsContent') === 'true'
       ? { documentId: id, title: d.name, tabs: [{ tabProperties: { title: 'タブ 1' }, documentTab: { body } }] }
       : { documentId: id, title: d.name, body })
+  })
+
+  // documents.batchUpdate (the relay's Docs writes, U2'): editors only, with `documents` (or `drive`).
+  // insertText adds text, deleteContentRange removes it (so a test can see a deletion never arrived);
+  // every kind is listed in `applied`. A stale `writeControl.requiredRevisionId` is refused as Google does.
+  app.post('/v1/documents/:spec', async c => {
+    const [id, verb] = (c.req.param('spec') ?? '').split(':')
+    if (verb !== 'batchUpdate') throw apiError(404, 'Not found', 'notFound')
+    const a = bearer(c, [`${AUTH}documents`, `${AUTH}drive`], 'docs.googleapis.com')
+    const d = relayDocs.get(id)
+    if (!d || !relayDocReader(d, a.email.toLowerCase())) throw apiError(404, 'Requested entity was not found.', 'notFound')
+    if (!relayDocEditor(d, a.email.toLowerCase())) throw apiError(403, 'The caller does not have permission', 'forbidden')
+    const body = await c.req.json().catch(() => ({})) as { requests?: Array<Record<string, Record<string, unknown>>>; writeControl?: { requiredRevisionId?: string } }
+    const wanted = body.writeControl?.requiredRevisionId
+    if (wanted !== undefined && wanted !== `rev-${d.revision}`) throw apiError(400, 'The required revision ID does not match the latest revision.', 'failedPrecondition')
+    for (const r of body.requests ?? []) {
+      const [kind] = Object.keys(r)
+      const v = r[kind] ?? {}
+      d.applied.push(kind)
+      if (kind === 'insertText') {
+        const at = (v.location as { index?: number } | undefined)?.index
+        const text = String(v.text ?? '')
+        const i = typeof at === 'number' ? Math.max(0, Math.min(d.text.length, at - 1)) : d.text.length
+        d.text = d.text.slice(0, i) + text + d.text.slice(i)
+      } else if (kind === 'deleteContentRange') {
+        const range = (v.range ?? {}) as { startIndex?: number; endIndex?: number }
+        d.text = d.text.slice(0, (range.startIndex ?? 1) - 1) + d.text.slice((range.endIndex ?? 1) - 1)
+      }
+    }
+    d.revision++
+    return c.json({ documentId: id, replies: (body.requests ?? []).map(() => ({})), writeControl: { requiredRevisionId: `rev-${d.revision}` } })
   })
 
   // ---- Gmail ----
@@ -1937,6 +1993,10 @@ export function createFakeGoogle(options: FakeGoogleOptions = {}): FakeGoogle {
     spreadsheet(id) {
       const sp = spreadsheets.get(id)
       return sp ? { title: sp.title, sheets: sp.sheets.map(sh => ({ sheetId: sh.sheetId, title: sh.title, rows: sh.rows.map(r => [...r]) })) } : null
+    },
+    relayDocument(id) {
+      const d = relayDocs.get(id)
+      return d ? { text: d.text, revisionId: `rev-${d.revision}`, applied: [...d.applied] } : null
     },
     uploads() {
       return uploadOrder.map(id => driveFiles.get(id)!).map(f => ({ id: f.id, name: f.name, parents: [...f.parents], mimeType: f.mimeType }))
