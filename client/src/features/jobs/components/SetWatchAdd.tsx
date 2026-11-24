@@ -159,7 +159,7 @@ function Choosing({ skills, pick, busy, onPick, onMake, onCancel }: {
         </fieldset>
       )}
       <p className="text-small text-text-muted">
-        できたものは、あなたの PC の「{pick.run ? pick.run.split('/')[0] : '動かす Skill の部署'}」の中の、あなただけのフォルダ（.personal/提案書/<日付>_<会社名>）にだけ置かれます（同期されません）。1回30分・1日10回までです。
+        できたものは、あなたの PC の「{pick.run ? pick.run.split('/')[0] : '動かす Skill の部署'}」の中の、あなただけのフォルダ（.personal/提案書 の中に、会議ごとに「日付_会社名」のフォルダ）にだけ置かれます（同期されません）。1回30分・1日10回までです。
       </p>
       <div className="flex flex-wrap items-center gap-2">
         <Button size="sm" variant="primary" disabled={busy || !ready} onClick={onMake}>案を作る</Button>
