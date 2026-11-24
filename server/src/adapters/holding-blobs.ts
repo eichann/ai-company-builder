@@ -5,11 +5,12 @@
  * temporary file of its own (`.tmp-<random>`, one per request), hashed as it arrives (never held in
  * memory), and is renamed to its sha256 only when the service says so: a request that loses never
  * removes anything but its own temporary file. Same model as the private-folder archives
- * (lib/private-folders.ts): never served by any route.
+ * (lib/private-folders.ts): never served by path — the review hands one content to the folder's
+ * reviewer by the item's entry (private-folders.md "Holding: review").
  */
 import { createHash, randomBytes } from 'crypto'
 import { existsSync } from 'fs'
-import { chmod, mkdir, open, readdir, rename, rm, stat } from 'fs/promises'
+import { chmod, mkdir, open, readdir, readFile, rename, rm, stat } from 'fs/promises'
 import { join } from 'path'
 import type { HoldingBlobStore } from '../ports/holding'
 
@@ -71,6 +72,15 @@ export function diskHoldingBlobStore(root: string): HoldingBlobStore {
 
     async has(companyId, itemId, sha256) {
       return existsSync(join(itemDir(companyId, itemId), part(sha256, SHA)))
+    },
+
+    async read(companyId, itemId, sha256) {
+      try {
+        return await readFile(join(itemDir(companyId, itemId), part(sha256, SHA)))
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null
+        throw error
+      }
     },
 
     async remove(companyId, itemId, sha256) {

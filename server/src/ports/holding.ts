@@ -82,7 +82,14 @@ export interface HoldingItem {
   totalBytes: number
   createdAt: string
   finishedAt: string | null
+  /** When a reviewer started taking it in / decided it (or the clock expired it). */
+  decidedAt: string | null
+  decidedBy: string | null
+  /** The folder's commit that took it in (null: taken with nothing to change, or not taken). */
+  decisionCommit: string | null
   blobsDeletedAt: string | null
+  /** The operator erased it: the member's app is told `ERASED` (never `ALREADY_RECEIVED`). */
+  erasedAt: string | null
 }
 
 /**
@@ -147,8 +154,25 @@ export interface HoldingItemRepository {
   /** Items done with their contents (taken, discarded, expired) whose blobs are not marked deleted yet. */
   blobsToDelete(): string[]
   markBlobsDeleted(itemId: string, at: string): void
-  /** The operator's erasure: the file rows go, the item is discarded. False when unknown. */
-  erase(itemId: string, at: string): boolean
+  /**
+   * The operator's erasure: the file rows go, the item is discarded and marked erased. Refused while
+   * it is still `receiving` (the member's app is uploading; owner decision L4) or `taking` (a reviewer's
+   * take-in reads its contents now), judged in the same transaction as the erase.
+   */
+  erase(itemId: string, at: string): 'erased' | 'unknown' | 'receiving' | 'taking'
+
+  // The review (private-folders.md "Holding: review"); each step a compare-and-set on the state.
+
+  /** Items received and not decided yet (waiting, taking), oldest first. */
+  forReview(): HoldingItem[]
+  /** waiting → taking, by the reviewer (the one "done" guard against taking it in twice). */
+  beginTaking(itemId: string, by: string, at: string): boolean
+  /** taking → taken, with the folder's commit (null: nothing needed changing). */
+  markTaken(itemId: string, commit: string | null, at: string): boolean
+  /** taking → waiting (the take-in stopped before its commit landed). */
+  backToWaiting(itemId: string, at: string): boolean
+  /** waiting → discarded, by the reviewer. */
+  discard(itemId: string, by: string, at: string): boolean
 }
 
 /** A content received into a temporary file of its item's directory, not yet under its name. */
@@ -171,6 +195,8 @@ export interface HoldingBlobStore {
   /** Remove a temporary file this request made. */
   discard(companyId: string, itemId: string, temp: string): Promise<void>
   has(companyId: string, itemId: string, sha256: string): Promise<boolean>
+  /** A stored content's bytes (≤ the file cap), or null when it is not on the disk. */
+  read(companyId: string, itemId: string, sha256: string): Promise<Buffer | null>
   remove(companyId: string, itemId: string, sha256: string): Promise<void>
   /** The files of an item's directory: contents by sha256 and temporary files, with their age. */
   entries(companyId: string, itemId: string): Promise<Array<{ name: string; temp: boolean; mtimeMs: number }>>

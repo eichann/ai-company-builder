@@ -76,6 +76,8 @@ interface World {
   sales: string // 営業部, managed by the manager; holds the private folder
   accounting: string // 経理部, no manager
   privateScope: string // 営業部/評価 (owner, admin, manager can read; the member cannot)
+  /** A received (waiting) holding item of that private folder: its reviewers are owner, admin and the manager. */
+  holdingItem: string
   salesScope: string
   salesRule: string
   salesEveryoneRule: string
@@ -133,6 +135,8 @@ interface World {
     /** A holding ticket and item of the other company's member (private-folders.md "Holding: the member's upload"). */
     holdingTicket: string
     holdingItem: string
+    /** A received (waiting) item of the other company's private folder (private-folders.md "Holding: review"). */
+    holdingWaiting: string
   }
 }
 
@@ -190,6 +194,16 @@ const MATRIX: Row[] = [
     'nobody holds a ticket: the same 404 for everyone'),
   r('PUT /api/me/holding/items/:itemId/blobs/:sha256', () => ({ path: `/api/me/holding/items/${NO_SUCH_HOLDING}/blobs/${'a'.repeat(64)}`, body: 'x' }), [404, 404, 404, 404, 404, 401]),
   r('POST /api/me/holding/items/:itemId/finish', () => ({ path: `/api/me/holding/items/${NO_SUCH_HOLDING}/finish` }), [404, 404, 404, 404, 404, 401]),
+  // The review (private-folders.md "Holding: review"): readers of the folder who are owner / admin or its department's
+  // manager; the member (no reader) gets the 404 of an item that does not exist.
+  r('GET /api/companies/:companyId/holding', w => ({ path: `${C(w)}/holding` }), MEMBERS, 'everyone gets the list of what they may review (the member: none)'),
+  r('GET /api/companies/:companyId/holding/:itemId', w => ({ path: `${C(w)}/holding/${w.holdingItem}` }), [200, 200, 404, 200, 404, 401]),
+  r('GET /api/companies/:companyId/holding/:itemId/files/:idx', w => ({ path: `${C(w)}/holding/${w.holdingItem}/files/0`, query: 'version=nonsense' }), [400, 400, 404, 400, 404, 401],
+    'an unknown version: 400 for a reviewer, the 404 for anyone else'),
+  r('POST /api/companies/:companyId/holding/:itemId/take', w => ({ path: `${C(w)}/holding/${w.holdingItem}/take`, body: {} }), [400, 400, 404, 400, 404, 401],
+    'invalid body: 400 for a reviewer, nothing taken in'),
+  r('POST /api/companies/:companyId/holding/:itemId/discard', w => ({ path: `${C(w)}/holding/${NO_SUCH_HOLDING}/discard` }), [404, 404, 404, 404, 404, 401],
+    'no such item: nothing discarded'),
 
   // Companies
   r('GET /api/companies/:companyId', w => ({ path: C(w) }), MEMBERS),
@@ -887,6 +901,11 @@ const CROSS: CrossRow[] = [
   x('POST /api/me/holding/tickets/:ticketId/items', (_w, id) => ({ path: `/api/me/holding/tickets/${id}/items`, body: { deviceKey: 'device-owner-1', baseCommit: null, manifest: [{ path: 'a.md', kind: 'deleted', size: 0, sha256: null }] } }), w => w.other.holdingTicket),
   x('PUT /api/me/holding/items/:itemId/blobs/:sha256', (_w, id) => ({ path: `/api/me/holding/items/${id}/blobs/${'a'.repeat(64)}`, body: 'x' }), w => w.other.holdingItem),
   x('POST /api/me/holding/items/:itemId/finish', (_w, id) => ({ path: `/api/me/holding/items/${id}/finish` }), w => w.other.holdingItem),
+  // The review: the other company's received item, named in this company's URL by its owner.
+  x('GET /api/companies/:companyId/holding/:itemId', (w, id) => ({ path: `${C(w)}/holding/${id}` }), w => w.other.holdingWaiting, NO_SUCH_HOLDING),
+  x('GET /api/companies/:companyId/holding/:itemId/files/:idx', (w, id) => ({ path: `${C(w)}/holding/${id}/files/0` }), w => w.other.holdingWaiting, NO_SUCH_HOLDING),
+  x('POST /api/companies/:companyId/holding/:itemId/take', (w, id) => ({ path: `${C(w)}/holding/${id}/take`, body: { files: [0] } }), w => w.other.holdingWaiting, NO_SUCH_HOLDING),
+  x('POST /api/companies/:companyId/holding/:itemId/discard', (w, id) => ({ path: `${C(w)}/holding/${id}/discard` }), w => w.other.holdingWaiting, NO_SUCH_HOLDING),
   x('PUT /api/companies/:companyId/browser-type-grants/:userId', (w, id) => ({ path: `${C(w)}/browser-type-grants/${id}`, body: { connector: 'lstep', operation: 'reminder_step_add_template', declarationHash: `sha256:${'a'.repeat(64)}`, allowed: true } }), w => w.other.member, 'pm-nobody'),
   // lane C ▲
 ]
@@ -1189,13 +1208,22 @@ async function seed(): Promise<World> {
     VALUES ('holding-item-other-1', ?, 'holding-ticket-other-1', ?, 'device-other-1', ?, '機密', 'receiving', 1, ?, ?)`).run(other, otherMember, otherPf.scopeId, expires, expires)
   db.prepare(`INSERT INTO holding_files (company_id, item_id, idx, path, kind, size, sha256) VALUES (?, 'holding-item-other-1', 0, 'a.md', 'changed', 1, ?)`)
     .run(other, 'a'.repeat(64))
+  // A received (waiting) item of each company's private folder, for the review's rows.
+  for (const [company, scopeId, suffix, owner] of [[other, otherPf.scopeId, 'other-2', otherMember], [co, pf.scopeId, 'here-1', USER.member]] as const) {
+    db.prepare(`INSERT INTO holding_tickets (id, company_id, user_id, scope_id, repo_id, folder_path, cause, state, created_at, updated_at, expires_at, by_user)
+      VALUES (?, ?, ?, ?, NULL, '機密', 'readers', 'expired', ?, ?, '2999-01-01T00:00:00.000Z', ?)`).run(`holding-ticket-${suffix}`, company, owner, scopeId, expires, expires, owner)
+    db.prepare(`INSERT INTO holding_items (id, company_id, ticket_id, user_id, device_key, scope_id, folder_path, state, total_bytes, created_at, updated_at, finished_at)
+      VALUES (?, ?, ?, ?, 'device-1', ?, '機密', 'waiting', 1, ?, ?, ?)`).run(`holding-item-${suffix}`, company, `holding-ticket-${suffix}`, owner, scopeId, expires, expires, expires)
+    db.prepare(`INSERT INTO holding_files (company_id, item_id, idx, path, kind, size, sha256, stored) VALUES (?, ?, 0, 'a.md', 'changed', 1, ?, 1)`)
+      .run(company, `holding-item-${suffix}`, 'b'.repeat(64))
+  }
   // A pending request to publish a Skill on the other company's shelf (rows as adapters/sqlite/skill-shelf.ts writes them).
   db.prepare(`INSERT INTO shelf_requests (id, company_id, department_id, name, requested_by, requested_at, version, files, file_count, total_bytes, autorun, state)
     VALUES ('shelf-request-other-1', ?, NULL, 'other-request', ?, ?, ?, '[]', 0, 0, 0, 'pending')`).run(other, otherMember, expires, 'a'.repeat(64))
 
   return {
     co, sales, accounting,
-    privateScope: pf.scopeId, companyScope,
+    privateScope: pf.scopeId, companyScope, holdingItem: 'holding-item-here-1',
     salesScope: salesRules.scope, salesRule: salesRules.rule, salesEveryoneRule: salesRules.everyone,
     accountingScope: accountingRules.scope, accountingRule: accountingRules.rule, accountingEveryoneRule: accountingRules.everyone,
     key: (db.prepare('SELECT id FROM broker_keys WHERE company_id = ?').get(co) as { id: string }).id,
@@ -1235,6 +1263,7 @@ async function seed(): Promise<World> {
       browserExecution: OTHER_EXECUTION,
       holdingTicket: 'holding-ticket-other-1',
       holdingItem: 'holding-item-other-1',
+      holdingWaiting: 'holding-item-other-2',
 
     },
   }

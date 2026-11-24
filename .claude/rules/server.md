@@ -293,6 +293,9 @@ GET  /api/config                                  setup state (no auth)
                                                                 (会社の Skill, no shared folder only: plugins.md "The Skill shelf")
                               /private-folders…, /me/private-folders, /me/scopes,
                               POST /paths/check                               private-folders.ts
+                              GET /holding, GET /holding/:itemId, GET /holding/:itemId/files/:idx,
+                              POST /holding/:itemId/take | discard (the folder's managers decide what a
+                              member handed over: private-folders.md "Holding: review")   holding-review.ts
                               POST|GET /agent-events, /agent-events/summary,
                               GET|PUT /agent-events/settings (+ /retention-preview),
                               GET /agent-events/viewers                       agent-events.ts
@@ -711,7 +714,7 @@ restriction there stays private folders; groups cannot be named in their rules).
   admins are implicit, as in `private-folder-members`), and holding tickets opened or cancelled
   when someone stops / starts reading a private folder again (`holding-ticket`,
   `holding-ticket-cancel`: `private-folders.md` "Access removed"). The holding place adds `holding-received`, `holding-expired`, `holding-erased` (`private-folders.md` "Holding: the
-  member's upload"). No endpoint reads it yet.
+  member's upload") and `holding-taken`, `holding-discarded`, `holding-downloaded` ("Holding: review"). No endpoint reads it yet.
 - Tests: `tests/unit/permissions-groups.test.ts`, `tests/integration/restricted-places.test.ts`
   (each guard mutation-checked; 所属 history, a department deleted), `private-folders.test.ts` (a
   folder's creation), `company-without-folder.test.ts`, `plugin-steps.test.ts` (the note),
@@ -731,8 +734,10 @@ admin console's home (管理画面の見直し 2-1): 「最初にやること」
   behind the handle's `tasks`; the first time is kept). Attention: the overview's lists
   (`permission-views.ts`) plus the count of one meeting's outputs made twice, the plugins that
   are on but cannot run, and 「気になる動き」 of the last 7 days (`securityAlerts`, `security-alerts.md`).
+  Both views: `holding { waiting, expiringSoon }`, the held items the caller may review and those the
+  clock discards within 7 days (`private-folders.md` "Holding: review").
 - A department manager who is not an owner / admin: no steps; only the sync and app state of the
-  members who belong to the departments they manage. Blocked syncs and orphaned rules are left
+  members who belong to the departments they manage (and the held items they review). Blocked syncs and orphaned rules are left
   out (their paths may name a private folder the manager does not read). Anyone else 403.
   Test: `tests/integration/admin-home.test.ts`.
 

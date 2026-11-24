@@ -1,3 +1,5 @@
+import type Database from 'better-sqlite3'
+
 /**
  * The holding place for a member's unsent work in a private folder they can no longer read
  * (private-folders.md "Access removed: holding tickets"). Part of the one schema run by
@@ -51,7 +53,9 @@ export const holdingSchema = `
       decided_at TEXT,
       decided_by TEXT,
       decision_commit TEXT,
-      blobs_deleted_at TEXT
+      blobs_deleted_at TEXT,
+      -- The operator erased it (src/cli/erase-content.ts): the member's app is told ERASED, never ALREADY_RECEIVED.
+      erased_at TEXT
     );
     CREATE UNIQUE INDEX IF NOT EXISTS idx_holding_items_device ON holding_items(company_id, ticket_id, device_key);
     CREATE INDEX IF NOT EXISTS idx_holding_items_state ON holding_items(company_id, state);
@@ -76,3 +80,9 @@ export const holdingSchema = `
     );
     CREATE INDEX IF NOT EXISTS idx_holding_files_company ON holding_files(company_id, item_id);
 `
+
+/** `holding_items.erased_at` (2026-11-24, owner decision L4): databases made before it get the column. Idempotent. */
+export function migrateHoldingErased(conn: Database.Database): void {
+  const cols = new Set((conn.prepare(`PRAGMA table_info(holding_items)`).all() as Array<{ name: string }>).map(c => c.name))
+  if (!cols.has('erased_at')) conn.exec(`ALTER TABLE holding_items ADD COLUMN erased_at TEXT`)
+}

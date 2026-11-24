@@ -69,6 +69,12 @@ export const HOLDING_CODES = Object.freeze({
   cancelled: 'CANCELLED',
   /** 409: this item was received already (finished) — the app may remove its copy. */
   alreadyReceived: 'ALREADY_RECEIVED',
+  /**
+   * 410: the server's operator erased this item (contents and names) — it is **not** received: the app
+   * must not take this as `ALREADY_RECEIVED` (keep the local copy; owner decision L4, 2026-11-24). Told
+   * only to the item's own member. An item still receiving is never erased.
+   */
+  erased: 'ERASED',
   /** 409: `finish` before every content arrived; `missing` lists the sha256 still wanted. */
   missingFiles: 'MISSING_FILES',
   /**
@@ -166,4 +172,123 @@ export interface HoldingItemResponse {
  */
 export interface HoldingFinishResponse {
   state: 'waiting'
+}
+
+// ============================================================================
+// The review (stage S3, private-folders.md "Holding: review"): the folder's managers
+// look at what was handed over and take it into the folder or discard it.
+// Under /api/companies/:companyId (a member of the company). Not called by released
+// apps: the admin console's 「預かり」 tab (A1) is its first caller.
+//
+// Who sees an item (I5): someone who reads the folder now and is an owner / admin or a
+// 部署の管理役 of the department it is in; an item of a folder that is no longer private
+// (deleted, made public): owners / admins only. Anyone else: the same 404 `{ error: 'Not found' }`
+// as an item that does not exist (never a hint that the folder or the item exists).
+// ============================================================================
+
+/** Why the member stopped reading the folder (the ticket's cause). */
+export type HoldingCause = 'readers' | 'left-company' | 'folder-deleted' | 'role' | 'rules'
+
+/** The review's refusal codes (fixed strings). */
+export const HOLDING_REVIEW_CODES = Object.freeze({
+  /** 409: someone decided it first (taken, being taken, or discarded) — 「ほかの人が先に決めました」. */
+  alreadyDecided: 'ALREADY_DECIDED',
+  /** 410: 30 days passed since it arrived; it is (being) discarded by the clock. */
+  expired: 'EXPIRED',
+  /** 409: the folder is no longer a private folder (deleted or made public): download or discard only. */
+  folderGone: 'FOLDER_GONE',
+  /** 400: a chosen entry cannot go into the folder (本人のメモ, a name only, a content not held). */
+  notTakeable: 'NOT_TAKEABLE',
+  /** 409: the push checker refused the take-in as the reviewer's own push; `refused` says why. Nothing changed. */
+  takeRefused: 'TAKE_REFUSED',
+  /** 503: the folder is busy (being deleted / made public, members pushing); try again. Nothing changed. */
+  busy: 'BUSY',
+  /** 400: the request is not valid. */
+  invalid: 'INVALID',
+})
+
+/** GET /holding: one item. */
+export interface HoldingReviewItem {
+  itemId: string
+  scopeId: string
+  /** The folder's path (the caller reads it; for a folder no longer private, owners / admins only). */
+  folderPath: string
+  /** The folder was deleted or made public: download or discard only (owner decision, question 7). */
+  folderGone: boolean
+  userId: string
+  userName: string | null
+  cause: HoldingCause
+  state: 'waiting' | 'taking'
+  /** When it arrived. */
+  receivedAt: string
+  /** When the clock discards it (30 days after it arrived). */
+  expiresAt: string
+  /** Entries by kind (`namesOnly`: names only — secrets, too large, unreadable). */
+  counts: { changed: number; deleted: number; backup: number; personal: number; namesOnly: number }
+  bytes: number
+}
+
+export interface HoldingReviewList {
+  items: HoldingReviewItem[]
+}
+
+/**
+ * How a file of the item stands against the folder today, judged on its newest version:
+ * - `unchanged`: the folder still has the version the member started from (or still lacks the file)
+ * - `changed`: someone changed it (or added / removed it) since — taken in alongside unless overwritten
+ * - `unknown`: the version the member started from is not known (no base) — treated as `changed`
+ */
+export type HoldingFileStanding = 'unchanged' | 'changed' | 'unknown'
+
+export interface HoldingReviewFile {
+  /** The entry's index (what `take` and the content endpoint name). */
+  idx: number
+  /** Relative to the folder. */
+  path: string
+  kind: HoldingEntryKind
+  size: number
+  label: string | null
+  /** Its content is held (downloadable). */
+  held: boolean
+  /** Why a name only: `too-large`, `secret`. */
+  dropped: 'too-large' | 'secret' | null
+  /** May be chosen for `take` (changed / deleted / backup with content held; never personal or names only). */
+  takeable: boolean
+  standing: HoldingFileStanding
+  /** The folder has a file at this path now. */
+  inFolderNow: boolean
+}
+
+/** GET /holding/:itemId */
+export interface HoldingReviewDetail extends HoldingReviewItem {
+  files: HoldingReviewFile[]
+}
+
+/**
+ * POST /holding/:itemId/take `{ files: idx[], whenChanged }`: the chosen entries go into the folder
+ * as ONE commit, pushed through the push checker as the reviewer. The rest of the item is discarded
+ * with it (the item is decided once).
+ * - `alongside` (default): a file someone changed since is not overwritten; the member's version is
+ *   put next to it as 「<name>（〇〇さんの版 MM-DD）.<ext>」. A deletion is applied only to a file
+ *   unchanged since.
+ * - `overwrite`: the member's version replaces it.
+ */
+export interface HoldingTakeRequest {
+  files: number[]
+  whenChanged?: 'alongside' | 'overwrite'
+}
+
+export interface HoldingTakeResult {
+  state: 'taken'
+  /** The folder's commit (null: nothing needed changing). */
+  commit: string | null
+  /** Where each chosen entry went: `placed` at its path, `alongside` under another name, `overwritten`, `deleted`, `same` (already so). */
+  placed: Array<{ idx: number; path: string; how: 'placed' | 'alongside' | 'overwritten' | 'deleted' | 'same' }>
+  /** Chosen entries left out: a deletion of a file changed since (`changed`) or already gone (`absent`), or a path a folder / file is in the way of (`path-taken`). */
+  skipped: Array<{ idx: number; reason: 'changed' | 'absent' | 'path-taken' }>
+}
+
+/** POST /holding/:itemId/discard → `{ state: 'discarded' }`. */
+export interface HoldingDiscardResult {
+  state: 'discarded'
 }

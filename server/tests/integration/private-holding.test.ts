@@ -776,17 +776,41 @@ describe('retention and erasure (I8)', () => {
     expect((await item(tickets.v1, { deviceKey: 'device-v1-r1', baseCommit: null, manifest: manifest() })).status).toBe(200)
   })
 
-  it('the operator\'s erasure removes an item\'s contents and names; the app is told it was received', async () => {
+  it('the operator\'s erasure refuses an item still being received, leaving everything (owner decision L4)', async () => {
     const { tickets } = await ticketsFor(['v1'])
+    const id = (await item(tickets.v1, { deviceKey: 'device-v1-erase-r', baseCommit: null, manifest: manifest() })).body.data.itemId
+    await put('v1', id, TEXT_A)
+    const rowsBefore = filesOf(id)
+    expect(await services.privateHolding.erase(CO, id, 'request')).toBe('receiving')
+    expect(itemRow(id)).toMatchObject({ state: 'receiving', erased_at: null })
+    expect(filesOf(id)).toEqual(rowsBefore)
+    expect(existsSync(join(itemDir(id), sha(TEXT_A)))).toBe(true)
+    expect(db.prepare(`SELECT COUNT(*) AS n FROM permission_history WHERE company_id = ? AND action = 'holding-erased' AND detail LIKE ?`).get(CO, `%${id}%`)).toEqual({ n: 0 })
+    // The member's app carries on and finishes; then it can be erased.
+    for (const bytes of [TEXT_B, NOTE]) await put('v1', id, bytes)
+    expect((await as('v1', 'POST', `/api/me/holding/items/${id}/finish`)).status).toBe(200)
+    expect(await services.privateHolding.erase(CO, id, 'request')).toBe('erased')
+  })
+
+  it('the operator\'s erasure removes an item\'s contents and names; its own member is told ERASED, never that it was received', async () => {
+    const { tickets } = await ticketsFor(['v1', 'v2'])
     const id = (await item(tickets.v1, { deviceKey: 'device-v1-erase', baseCommit: null, manifest: manifest() })).body.data.itemId
     for (const bytes of [TEXT_A, TEXT_B, NOTE]) await put('v1', id, bytes)
     await as('v1', 'POST', `/api/me/holding/items/${id}/finish`)
-    expect(await services.privateHolding.erase(CO, id, 'request')).toBe(true)
+    expect(await services.privateHolding.erase(CO, id, 'request')).toBe('erased')
     expect(existsSync(itemDir(id))).toBe(false)
     expect(filesOf(id)).toEqual([])
-    expect(itemRow(id)).toMatchObject({ state: 'discarded', total_bytes: 0, blobs_deleted_at: expect.any(String) })
-    expect((await item(tickets.v1, { deviceKey: 'device-v1-erase', baseCommit: null, manifest: manifest() })).body.code).toBe('ALREADY_RECEIVED')
+    expect(itemRow(id)).toMatchObject({ state: 'discarded', total_bytes: 0, blobs_deleted_at: expect.any(String), erased_at: expect.any(String) })
+    // Its own member: 410 ERASED on the manifest, a blob and finish (never ALREADY_RECEIVED: the app keeps its copy).
+    for (const r of [
+      await item(tickets.v1, { deviceKey: 'device-v1-erase', baseCommit: null, manifest: manifest() }),
+      await put('v1', id, TEXT_A),
+      await as('v1', 'POST', `/api/me/holding/items/${id}/finish`),
+    ]) expect([r.status, r.body.code]).toEqual([410, 'ERASED'])
+    // Anyone else: the same 404 as an item that does not exist.
+    expect((await put('v2', id, TEXT_A)).body).toEqual({ error: 'Not found' })
+    expect((await as('v2', 'POST', `/api/me/holding/items/${id}/finish`)).body).toEqual({ error: 'Not found' })
     // Another company's id erases nothing.
-    expect(await services.privateHolding.erase(OTHER_CO, id, 'request')).toBe(false)
+    expect(await services.privateHolding.erase(OTHER_CO, id, 'request')).toBe('unknown')
   })
 })

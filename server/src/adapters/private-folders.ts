@@ -9,14 +9,20 @@ import { mkdtempSync, rmSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import type Database from 'better-sqlite3'
-import type { PrivateFolderRecord, PrivateFolderRepository, PrivateRuleSet, FolderAccess } from '../ports/private-folders'
+import type {
+  FolderAccess, FolderCommitResult, FolderFileEdit, FolderTree, PrivateFolderRecord, PrivateFolderRepository, PrivateRuleSet, PusherSnapshot,
+} from '../ports/private-folders'
 import type { ReaderChangeGate } from '../ports/holding'
-import { createScopeRepo, removeScopeRepo, SERVER_GIT_IDENTITY } from '../lib/git-server'
-import { gitAsync } from '../lib/git-exec'
+import { createScopeRepo, preparePushCheck, removeScopeRepo, SERVER_GIT_IDENTITY } from '../lib/git-server'
+import { gitAsync, gitBufferAsync, GitTimeoutError } from '../lib/git-exec'
+import { applyPathEdits, commitRootEditWithCommit, listFiles, PathEditConflictError, writeBlobBytes, type PathEdit } from '../lib/bare-commit'
+import { parseHookRejections } from '../lib/push-rejections'
 import { companyRepoPath } from '../lib/config'
 import { listScopesWithRules } from './sqlite/permission-store'
 import {
+  beginScopePush,
   closeScope,
+  endScopePush,
   companyPushesRunning,
   existsInCompanyRepo,
   privateRepoPath,
@@ -398,5 +404,107 @@ export function sqlitePrivateFolderRepository(conn: Database.Database, companyId
         throw err
       }
     },
+
+    async filesAt(folder, commit) {
+      const repo = privateRepoPath(companyId, folder.repoId)
+      if (commit !== 'tip' && !/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(commit)) return null
+      return listFiles(repo, commit === 'tip' ? 'refs/heads/main' : commit, FOLDER_GIT_TIMEOUT_MS.local)
+    },
+
+    async readBlob(folder, oid) {
+      if (!/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(oid)) return null
+      const repo = privateRepoPath(companyId, folder.repoId)
+      try {
+        return await gitBufferAsync(['-C', repo, 'cat-file', 'blob', oid])
+      } catch {
+        return null
+      }
+    },
+
+    async findCommitWithLine(folder, line) {
+      const repo = privateRepoPath(companyId, folder.repoId)
+      // Whole messages of the recent history, NUL-separated; the line must match exactly.
+      const out = await gitAsync(['-C', repo, 'log', '-n', '1000', '--format=%H%x00%B%x00', 'refs/heads/main'], { timeoutMs: FOLDER_GIT_TIMEOUT_MS.local })
+        .catch(() => '')
+      const parts = out.split('\0')
+      for (let i = 0; i + 1 < parts.length; i += 2) {
+        const id = parts[i].trim()
+        if (parts[i + 1].split('\n').some(l => l.trim() === line)) return id
+      }
+      return null
+    },
+
+    async commitFiles(folder, input) {
+      return commitFilesAs(companyId, folder, input)
+    },
+  }
+}
+
+/** Local plumbing and the push (which runs the checker) of a commit into a private folder. Tests may shorten them. */
+const FOLDER_GIT_TIMEOUT_MS = { local: 60_000, push: 300_000 }
+
+export function setFolderGitTimeoutsForTests(timeouts: { local: number; push: number }): () => void {
+  const before = { ...FOLDER_GIT_TIMEOUT_MS }
+  Object.assign(FOLDER_GIT_TIMEOUT_MS, timeouts)
+  return () => { Object.assign(FOLDER_GIT_TIMEOUT_MS, before) }
+}
+
+const SERVER_IDENTITY = { name: SERVER_GIT_IDENTITY.GIT_AUTHOR_NAME, email: SERVER_GIT_IDENTITY.GIT_AUTHOR_EMAIL }
+
+/**
+ * One commit into a private folder's repository, pushed to itself with `as`'s permission snapshot
+ * (preparePushCheck, as git-http does for that member's own push) — never internalGitEnv(), so the
+ * write check and every content rule apply. Registered as a push to the folder (make-public and
+ * delete wait for it; refused while one of them runs).
+ */
+async function commitFilesAs<T>(
+  companyId: string,
+  folder: PrivateFolderRecord,
+  input: {
+    message: (result: T, edits: number) => string
+    as: PusherSnapshot
+    decide: (tip: FolderTree | null, writeBlob: (content: Buffer) => Promise<string>) => Promise<{ edits: FolderFileEdit[]; result: T }>
+  },
+): Promise<FolderCommitResult<T>> {
+  const scopeId = folder.scope.id
+  const repo = privateRepoPath(companyId, folder.repoId)
+  if (!beginScopePush(scopeId)) return { ok: false, reason: 'BUSY' }
+  const check = preparePushCheck({
+    companyId,
+    pusher: input.as.pusher,
+    scopes: input.as.scopes,
+    scopePath: folder.scope.path,
+    managedFolders: input.as.managedFolders,
+    skillEditing: input.as.skillEditing,
+  })
+  try {
+    const writeBlob = (content: Buffer) => writeBlobBytes(repo, content, FOLDER_GIT_TIMEOUT_MS.local)
+    const done = await commitRootEditWithCommit(repo, {
+      message: '',
+      identity: SERVER_IDENTITY,
+      timeouts: FOLDER_GIT_TIMEOUT_MS,
+      pushAs: { ...check.env, ACB_PUSHER_ROLE: input.as.pusher.role, ACB_PUSHER_ID: input.as.pusher.id, ACB_NODE: process.execPath },
+    }, async (entries, parent) => {
+      const tip = parent ? await listFiles(repo, parent, FOLDER_GIT_TIMEOUT_MS.local) : null
+      const decided = await input.decide(tip, writeBlob)
+      if (decided.edits.length === 0) return { result: decided.result }
+      const edits: PathEdit[] = decided.edits
+      return {
+        entries: await applyPathEdits(repo, entries, edits, FOLDER_GIT_TIMEOUT_MS.local),
+        result: decided.result,
+        message: input.message(decided.result, edits.length),
+      }
+    })
+    return { ok: true, commit: done.commit, result: done.result }
+  } catch (err) {
+    if (err instanceof PathEditConflictError) return { ok: false, reason: 'CONFLICT' }
+    if (err instanceof GitTimeoutError) return { ok: false, reason: 'BUSY' }
+    const stderr = typeof (err as { stderr?: unknown }).stderr === 'string' ? (err as { stderr: string }).stderr : ''
+    const rejections = parseHookRejections(stderr)
+    if (rejections.length > 0) return { ok: false, reason: 'REFUSED', rejections }
+    throw err
+  } finally {
+    check.cleanup()
+    endScopePush(scopeId)
   }
 }

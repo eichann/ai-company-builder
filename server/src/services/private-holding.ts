@@ -89,6 +89,13 @@ export interface PrivateHoldingDeps {
 const NOT_FOUND = () => refuse('not-found', 'Not found')
 const INVALID = (error = 'Invalid request') => refuse('bad-request', error, { code: HOLDING_CODES.invalid })
 const ALREADY_RECEIVED = () => refuse('conflict', 'Already received', { code: HOLDING_CODES.alreadyReceived })
+const ERASED = () => refuse('gone', 'The operator erased what was handed over', { code: HOLDING_CODES.erased })
+/**
+ * An item that is not receiving any more, to its own member: received (`ALREADY_RECEIVED`: the app may
+ * remove its copy) — unless the operator erased it (`ERASED`: never told it was received, owner
+ * decision L4, 2026-11-24; the app keeps its copy).
+ */
+const notReceiving = (item: HoldingItem | null | undefined) => (item?.erasedAt ? ERASED() : ALREADY_RECEIVED())
 const COMPANY_FULL = () => refuse('conflict', 'The holding place is full for now; keep the files and try again later', { code: HOLDING_CODES.companyFull })
 const HASH_MISMATCH = () => refuse('bad-request', 'The content is not the one named', { code: HOLDING_CODES.hashMismatch })
 
@@ -291,7 +298,7 @@ export function createPrivateHoldingService(deps: PrivateHoldingDeps) {
     // Received, removed or erased meanwhile (another PUT of the same content finished first): only
     // this request's temporary file goes — never a content an item names.
     if (!item) { await blobs.discard(companyId, itemId, temp); return NOT_FOUND() }
-    if (item.state !== 'receiving') { await blobs.discard(companyId, itemId, temp); return ALREADY_RECEIVED() }
+    if (item.state !== 'receiving') { await blobs.discard(companyId, itemId, temp); return notReceiving(item) }
     const rows = handle.holdingItems.files(itemId).filter(f => f.sha256 === sha256 && !f.dropped)
     if (rows.length === 0) { await blobs.discard(companyId, itemId, temp); return NOT_FOUND() }
     // The manifest was replaced during the upload with another size for this content: not this one.
@@ -316,7 +323,8 @@ export function createPrivateHoldingService(deps: PrivateHoldingDeps) {
     if (!handle.holdingItems.markStored(itemId, sha256, clock.now())) {
       // The manifest changed during the rename: keep the file only if a stored entry names it.
       if (!handle.holdingItems.files(itemId).some(f => f.sha256 === sha256 && f.stored)) await blobs.remove(companyId, itemId, sha256)
-      return handle.holdingItems.get(itemId)?.state === 'receiving' ? NOT_FOUND() : ALREADY_RECEIVED()
+      const now = handle.holdingItems.get(itemId)
+      return now?.state === 'receiving' ? NOT_FOUND() : notReceiving(now)
     }
     return ok(null)
   }
@@ -354,7 +362,7 @@ export function createPrivateHoldingService(deps: PrivateHoldingDeps) {
       const parsed = parseItem(body)
       const existing = parsed ? handle.holdingItems.forDevice(ticket.id, parsed.deviceKey) : null
       // Received already: the app may remove its copy, whatever happened to the ticket since.
-      if (existing && existing.state !== 'receiving') return ALREADY_RECEIVED()
+      if (existing && existing.state !== 'receiving') return notReceiving(existing)
       const shut = closed(ticket)
       if (shut) return shut
       if (!parsed) return INVALID()
@@ -362,7 +370,7 @@ export function createPrivateHoldingService(deps: PrivateHoldingDeps) {
       const result = transactions.run(() => {
         // Read again inside the transaction: the caps and the device count are decided here.
         const current = handle.holdingItems.forDevice(ticket.id, parsed.deviceKey)
-        if (current && current.state !== 'receiving') return ALREADY_RECEIVED()
+        if (current && current.state !== 'receiving') return notReceiving(current)
         if (!current && handle.holdingItems.countForTicket(ticket.id) >= HOLDING_LIMITS.devices) {
           return refuse('conflict', 'This ticket has its items from enough PCs', { code: HOLDING_CODES.tooManyDevices })
         }
@@ -375,7 +383,7 @@ export function createPrivateHoldingService(deps: PrivateHoldingDeps) {
         }, stored)
         const itemId = current?.id ?? ids.newId()
         if (current) {
-          if (!handle.holdingItems.replaceFiles(itemId, files, at)) return ALREADY_RECEIVED()
+          if (!handle.holdingItems.replaceFiles(itemId, files, at)) return notReceiving(handle.holdingItems.get(itemId))
         } else {
           handle.holdingItems.create({
             id: itemId, ticketId: ticket.id, userId, deviceKey: parsed.deviceKey, scopeId: ticket.scopeId,
@@ -408,7 +416,7 @@ export function createPrivateHoldingService(deps: PrivateHoldingDeps) {
       const found = itemFor(userId, itemId)
       if (!found.ok) return found
       const { handle, item, ticket } = found.value
-      if (item.state !== 'receiving') return ALREADY_RECEIVED()
+      if (item.state !== 'receiving') return notReceiving(item)
       const shut = closed(ticket)
       if (shut) return shut
       if (!SHA.test(sha256)) return INVALID()
@@ -479,7 +487,7 @@ export function createPrivateHoldingService(deps: PrivateHoldingDeps) {
       if (!found.ok) return found
       const { handle, item, ticket } = found.value
       if (item.state === 'waiting') return ok({ state: 'waiting' })
-      if (item.state !== 'receiving') return ALREADY_RECEIVED()
+      if (item.state !== 'receiving') return notReceiving(item)
       const shut = closed(ticket)
       if (shut) return shut
       // Under the lock, every content marked stored is looked for on the disk first: one that is gone
@@ -508,7 +516,7 @@ export function createPrivateHoldingService(deps: PrivateHoldingDeps) {
         })
         if (!done) {
           const now = handle.holdingItems.get(item.id)
-          return now?.state === 'waiting' ? ok({ state: 'waiting' }) : now ? ALREADY_RECEIVED() : NOT_FOUND()
+          return now?.state === 'waiting' ? ok({ state: 'waiting' }) : now ? notReceiving(now) : NOT_FOUND()
         }
         return ok({ state: 'waiting' })
       })
@@ -558,22 +566,24 @@ export function createPrivateHoldingService(deps: PrivateHoldingDeps) {
 
     /**
      * The operator's erasure (src/cli/erase-content.ts `holding`): the item's file rows and
-     * contents go, the item stays as discarded (so the app's retry is told it was received — also
-     * for an item still receiving: an owner decision left open, private-folders.md).
+     * contents go, the item stays as discarded and marked erased (the member's app is then told
+     * `ERASED`, never `ALREADY_RECEIVED`). Refused while the item is still `receiving` (the member's
+     * app is uploading — owner decision L4, 2026-11-24) or `taking` (a take-in reads it now): judged
+     * in the erase's own transaction, nothing changed.
      */
-    async erase(companyId: string, itemId: string, reason: string): Promise<boolean> {
+    async erase(companyId: string, itemId: string, reason: string): Promise<'erased' | 'unknown' | 'receiving' | 'taking'> {
       return withLock(companyId, async () => {
         const handle = companyData.forCompany(companyId)
         const at = clock.now()
-        const erased = transactions.run(() => {
-          if (!handle.holdingItems.erase(itemId, at)) return false
-          handle.permissionHistory.append({ action: 'holding-erased', detail: { itemId, reason }, at, byUser: 'operator' })
-          return true
+        const answer = transactions.run(() => {
+          const r = handle.holdingItems.erase(itemId, at)
+          if (r === 'erased') handle.permissionHistory.append({ action: 'holding-erased', detail: { itemId, reason }, at, byUser: 'operator' })
+          return r
         })
-        if (!erased) return false
+        if (answer !== 'erased') return answer
         await blobs.removeItem(companyId, itemId)
         handle.holdingItems.markBlobsDeleted(itemId, clock.now())
-        return true
+        return answer
       })
     },
   }

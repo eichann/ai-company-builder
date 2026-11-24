@@ -62,6 +62,11 @@ export interface AdminHome {
     stoppedPlugins: Array<{ id: string; label: string; problem: string }>
     /** 「気になる動き」 of the last 7 days (owner / admin; a manager []; security-alerts.md). */
     securityAlerts: SecurityAlertView[]
+    /**
+     * The holding place (private-folders.md "Holding: review"): items the caller may review —
+     * 「預かったファイルを確かめてください（N件）」 — and those the clock discards within 7 days.
+     */
+    holding: { waiting: number; expiringSoon: number }
   }
   counts: { members: number; departments: number }
 }
@@ -82,6 +87,8 @@ export interface AdminHomeDeps {
   securityAlerts?: (member: Member) => SecurityAlertView[]
   /** Installed plugins that are on and have a problem. */
   stoppedPlugins: (member: Member) => Promise<Array<{ id: string; label: string; problem: string }>>
+  /** The holding place's items the member may review (services/holding-review.ts `attention`). */
+  holding?: (member: Member) => { waiting: number; expiringSoon: number }
   /** The company has the shared company folder (services/company-folder.ts `has`). */
   hasCompanyFolder: (companyId: string) => boolean
 }
@@ -130,6 +137,8 @@ export function createAdminHomeService(deps: AdminHomeDeps) {
     return deps.hasCompanyFolder(companyId) ? attention : { ...attention, notSyncedRecently: [] }
   }
 
+  const holdingOf = (member: Member) => deps.holding?.(member) ?? { waiting: 0, expiringSoon: 0 }
+
   async function view(member: Member): Promise<Outcome<AdminHome>> {
     const handle = companyData.forCompany(member.companyId)
     const counts = { members: memberships.listByCompany(member.companyId).length, departments: handle.departments.count() }
@@ -139,7 +148,7 @@ export function createAdminHomeService(deps: AdminHomeDeps) {
         view: 'admin',
         setup: { steps, done: steps.filter(s => s.done).length, total: steps.length },
         departments: [],
-        attention: { ...syncAttention(member.companyId, overview.attention), meetingDuplicates: deps.meetingDuplicates(member) ?? 0, stoppedPlugins, securityAlerts: deps.securityAlerts?.(member) ?? [] },
+        attention: { ...syncAttention(member.companyId, overview.attention), meetingDuplicates: deps.meetingDuplicates(member) ?? 0, stoppedPlugins, securityAlerts: deps.securityAlerts?.(member) ?? [], holding: holdingOf(member) },
         counts,
       })
     }
@@ -150,7 +159,7 @@ export function createAdminHomeService(deps: AdminHomeDeps) {
       view: 'manager',
       setup: null,
       departments,
-      attention: { ...syncAttention(member.companyId, managerAttention(member, departments.map(d => d.id))), meetingDuplicates: 0, stoppedPlugins: [], securityAlerts: [] },
+      attention: { ...syncAttention(member.companyId, managerAttention(member, departments.map(d => d.id))), meetingDuplicates: 0, stoppedPlugins: [], securityAlerts: [], holding: holdingOf(member) },
       counts,
     })
   }

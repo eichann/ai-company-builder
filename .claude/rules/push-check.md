@@ -95,6 +95,11 @@ forever — the "permanently unable to sync" shape).
   on them like on any push: every other content rule applies. git-http strips both variables from what it
   inherits, so a client cannot select either. Local-transport pushes (tests, an operator) carry
   neither and are not write-checked.
+- One server-made commit is **not** the server's own push: taking a held item into a private folder
+  (`private-folders.md` "Holding: review") is pushed from the scope repository to itself with the
+  reviewer's snapshot (`preparePushCheck`, `ACB_PUSHER_ROLE` / `_ID`, `ACB_NODE`; `bare-commit.ts`
+  `pushAs` drops any inherited marker or snapshot), so every rule — the write check included —
+  applies as if the reviewer pushed.
 
 ## Range
 
