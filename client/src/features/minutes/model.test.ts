@@ -40,7 +40,7 @@ test('the member\'s own automatic series says so; this PC\'s AI unable to start 
 test('another attendee\'s AI that has not started says it will read (their PC may be closed), not that it reads', () => {
   const reading = (over: Partial<MeetingArrivalView>) => readingWords(meetingBanner(item(over), ctx) as Extract<MeetingBanner, { kind: 'reading' }>)
   const suzuki = { memberId: 'u2', displayName: '鈴木' }
-  assert.equal(reading({ status: 'asked', by: suzuki, askedAutomatically: true }), '鈴木さんの AI が読む予定です（しばらく読まれないときは、ほかの参加者の AI が代わりに読みます）')
+  assert.equal(reading({ status: 'asked', by: suzuki, askedAutomatically: true }), '鈴木さんの AI が読む予定です。しばらく読まれないときは、出ている人の AI が代わりに読みます')
   assert.equal(reading({ status: 'reading', by: suzuki }), '鈴木さんの AI が読んでいます…')
 })
 

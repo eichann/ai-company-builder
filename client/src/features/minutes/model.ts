@@ -127,7 +127,7 @@ export function readingWords(banner: Extract<MeetingBanner, { kind: 'reading' }>
   if (banner.auto === 'series') return '自動で読む定例です。AI が読んでいます…'
   if (banner.auto === 'setting') return '自動で読む設定のため、AI が読んでいます…'
   // Not a promise of one person: after a while another attendee's AI with the setting on may take it.
-  if (banner.reader) return banner.waiting ? `${banner.reader}さんの AI が読む予定です（しばらく読まれないときは、ほかの参加者の AI が代わりに読みます）` : `${banner.reader}さんの AI が読んでいます…`
+  if (banner.reader) return banner.waiting ? `${banner.reader}さんの AI が読む予定です。しばらく読まれないときは、出ている人の AI が代わりに読みます` : `${banner.reader}さんの AI が読んでいます…`
   return 'AI が読んでいます…'
 }
 
