@@ -131,10 +131,15 @@ const COMMON_STATE_WORDS: Readonly<Record<string, string>> = {
   cancelled: 'やめた（しまった）', handled: '対応済み', active: '進めている', bundle_waiting: 'まとまりの分を待っている', bundle_working: 'まとまりの分を進めている',
 }
 
-/** A state in members' words; a state no table knows is shown as it is (a company's own word). */
-export function stateWord(state: string | null | undefined, type?: string): string | null {
+/**
+ * A state in members' words: the type's own `state_labels` first (a company's or a plugin's type
+ * names its states, records.md "Type definitions"), then the core's words above, else as it is.
+ */
+export function stateWord(state: string | null | undefined, type?: string, labels?: Readonly<Record<string, string>>): string | null {
   if (!state) return null
-  return (type ? STATE_WORDS[type]?.[state] : undefined) ?? COMMON_STATE_WORDS[state] ?? state
+  // Own keys only: a state named like an object's built-in (`constructor`) is no word of any table.
+  const own = (table: Readonly<Record<string, string>> | undefined) => (table && Object.prototype.hasOwnProperty.call(table, state) ? table[state] : undefined)
+  return own(labels) ?? own(type && Object.prototype.hasOwnProperty.call(STATE_WORDS, type) ? STATE_WORDS[type] : undefined) ?? own(COMMON_STATE_WORDS) ?? state
 }
 
 // --- Next steps and turns ---------------------------------------------------------------

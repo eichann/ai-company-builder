@@ -74,7 +74,7 @@ export function droppedRecordSummary(detail: RecordDetail & { people?: Record<st
   const def = types.get(r.type)
   const people = detail.people ?? {}
   const lines = [`■ ${thingOf(r, types)}『${r.title || '（名前なし）'}』（${r.id}）`]
-  const state = stateWord(r.state, r.type)
+  const state = stateWord(r.state, r.type, def?.stateLabels)
   if (state) lines.push(`- 状態：${state}${r.personal ? '（本人だけのもの）' : ''}`)
   const turn = turnLine(r, def, people)
   if (turn) lines.push(`- 番：${turn}`)
@@ -95,7 +95,8 @@ export function droppedRecordSummary(detail: RecordDetail & { people?: Record<st
   if (others.length) {
     const shown = others.slice(0, MAX_RECORDS).map(l => {
       const linkLabel = l.direction === 'out' ? def?.links[l.name]?.label : null
-      return `${linkLabel ? `${linkLabel}：` : ''}${thingOf(l.record!, types)}『${l.record!.title}』（${l.record!.id}${stateWord(l.record!.state, l.record!.type) ? `・${stateWord(l.record!.state, l.record!.type)}` : ''}）`
+      const linkedState = stateWord(l.record!.state, l.record!.type, types.get(l.record!.type)?.stateLabels)
+      return `${linkLabel ? `${linkLabel}：` : ''}${thingOf(l.record!, types)}『${l.record!.title}』（${l.record!.id}${linkedState ? `・${linkedState}` : ''}）`
     })
     lines.push(`- つながっている記録：${shown.join('、')}${others.length > MAX_RECORDS ? ` ほか${others.length - MAX_RECORDS}件` : ''}`)
   }

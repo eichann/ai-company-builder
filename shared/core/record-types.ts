@@ -255,6 +255,15 @@ export interface TypeDefinition {
   fields: Record<string, FieldDef>
   links: Record<string, LinkDef>
   states: string[]
+  /**
+   * YAML `state_labels: { <state>: <shown as> }` (owner decision 2026-11-24): how a state is shown
+   * to people (「準備中」 for `planning`), like a choice's `option_labels`. Display only: states are
+   * stored, queried, compared and written by their names. A state without one is shown by the
+   * app's own words for it, else as it is (`stateWord`, client/shared/thing-words.ts). Absent =
+   * none (left out of the definition then, so stored definitions compare equal). Adding,
+   * changing or dropping one is not breaking (a higher `version`, like any change).
+   */
+  stateLabels?: Record<string, string>
   initial: string | null
   /** States in which nothing is waiting for anyone (done, cancelled…): not anyone's turn. */
   final: string[]
@@ -453,6 +462,9 @@ export function aiTurnStates(def: TypeDefinition): Set<string> {
   return states
 }
 
+/** The longest name `state_labels` may give a state (as a choice's `option_labels`). */
+export const STATE_LABEL_MAX_LENGTH = 40
+
 /** Names a field may not take: the record's own keys and the index columns. */
 const RESERVED_FIELD_NAMES = new Set(['id', 'type', 'links', 'state', 'version', 'title', 'summary', 'path'])
 
@@ -476,7 +488,7 @@ export function validateTypeDefinition(name: string, raw: YamlValue): TypeParseR
   const err = (m: string) => { if (errors.length < 50) errors.push(m) }
   if (!ONTOLOGY_NAME_RE.test(name)) err(`型の名前「${name}」は英小文字・数字・_ で書いてください`)
   if (!isYamlMap(raw)) return { ok: false, errors: ['定義は「項目名: 値」の形で書いてください'] }
-  const known = new Set(['label', 'version', 'implements', 'storage', 'fields', 'links', 'states', 'initial', 'final', 'create_states', 'proposal_states', 'place_follows', 'actions', 'description'])
+  const known = new Set(['label', 'version', 'implements', 'storage', 'fields', 'links', 'states', 'initial', 'final', 'create_states', 'proposal_states', 'place_follows', 'state_labels', 'actions', 'description'])
   for (const k of Object.keys(raw)) if (!known.has(k)) err(`知らない項目「${k}」があります`)
 
   if (!isStr(raw.label)) err('label（画面に出す名前）を書いてください')
@@ -580,6 +592,26 @@ export function validateTypeDefinition(name: string, raw: YamlValue): TypeParseR
       if (typeof s !== 'string' || !ONTOLOGY_NAME_RE.test(s)) err(`状態「${String(s)}」は英小文字・数字・_ で書いてください`)
       else if (states.includes(s)) err(`状態「${s}」が2回書かれています`)
       else states.push(s)
+    }
+  }
+  let stateLabels: Record<string, string> | undefined
+  if (raw.state_labels !== undefined && raw.state_labels !== null) {
+    const labels = raw.state_labels
+    if (!isYamlMap(labels)) err('state_labels は「状態: 画面に出す名前」の形で書いてください')
+    else {
+      const seen = new Map<string, string>()
+      for (const [s, l] of Object.entries(labels)) {
+        if (!states.includes(s)) { err(`state_labels の「${s}」は states にありません`); continue }
+        if (!isStr(l) || l.length > STATE_LABEL_MAX_LENGTH || TAG_FORBIDDEN_RE.test(l)) {
+          err(`state_labels の「${s}」は ${STATE_LABEL_MAX_LENGTH} 文字までの名前で書いてください（改行は使えません）`)
+          continue
+        }
+        const shown = l.trim()
+        const other = seen.get(shown)
+        if (other !== undefined) { err(`state_labels で「${other}」と「${s}」が同じ名前「${shown}」です（見分けがつかなくなります）`); continue }
+        seen.set(shown, s)
+      }
+      if (seen.size > 0) stateLabels = Object.fromEntries([...seen].map(([shown, s]) => [s, shown]))
     }
   }
   let initial: string | null = states[0] ?? null
@@ -774,6 +806,7 @@ export function validateTypeDefinition(name: string, raw: YamlValue): TypeParseR
       fields,
       links,
       states,
+      ...(stateLabels ? { stateLabels } : {}),
       initial,
       final,
       ...(createStates ? { createStates } : {}),

@@ -584,7 +584,9 @@ export function actionToolSpecs(types: TypeDefinition[], place: { department?: s
         shape.links = z.object(Object.fromEntries(links.map(l => [l, (t.links[l]?.cardinality === 'one' ? z.union([id, z.null()]) : z.array(id).max(50)).optional()
           .describe(t.links[l]?.label ?? l)]))).strict().optional().describe('この操作で決めるつながり（記録の id）。省いたものはそのまま / links this action sets (record ids); left out = unchanged')
       }
-      const from = a.from ? a.from.join(' / ') : 'どの状態からでも'
+      // A state the type names (`state_labels`) reads 「準備中（planning）」: the AI says the name to the member.
+      const shownState = (st: string) => (t.stateLabels && Object.prototype.hasOwnProperty.call(t.stateLabels, st) ? `${t.stateLabels[st]}（${st}）` : st)
+      const from = a.from ? a.from.map(shownState).join(' / ') : 'どの状態からでも'
       const aiNote = a.who.includes('ai') ? '' : ' この操作は AI からはできない（本人が画面で行う）。This action is not open to the AI: ask the member to do it.' +
         // ok_from (task complete): the person may do it on someone's OK; the AI only suggests it.
         (a.okFrom && !a.who.includes('ai')
@@ -599,7 +601,7 @@ export function actionToolSpecs(types: TypeDefinition[], place: { department?: s
         name: tool, readOnly: false, schema: z.object(shape).strict(),
         ...(ALWAYS_LOADED_ACTION_TYPES.includes(t.name) ? {} : { onDemand: true }),
         display: actionToolDisplay(a.label),
-        description: `「${t.label}」の「${a.label}」（${from} → ${a.to ?? '状態はそのまま'}）。${a.note === 'required' ? 'note（ひとことの理由）が必須。' : ''}${defaultNote}${aiNote}\n` +
+        description: `「${t.label}」の「${a.label}」（${from} → ${a.to ? shownState(a.to) : '状態はそのまま'}${t.stateLabels ? '。メンバーには状態を表示名で言う / say a state by its label to the member' : ''}）。${a.note === 'required' ? 'note（ひとことの理由）が必須。' : ''}${defaultNote}${aiNote}\n` +
           `${t.name}.${name}: from ${a.from ? a.from.join('/') : 'any state'} to ${a.to ?? 'the same state'}.${a.note === 'required' ? ' `note` is required.' : ''}${defaulted.length > 0 ? ` Give ${defaulted.join(', ')} too (when it passes, the task returns to its assignee for a follow-up).` : ''}`,
         request: input => {
           const args = Object.fromEntries(Object.keys(a.args).filter(k => input[k] !== undefined).map(k => [k, input[k]]))
