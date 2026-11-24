@@ -9,22 +9,25 @@ import { toast } from 'sonner'
 
 import { ListSkeleton } from '@/components/app/states'
 import { Button } from '@/components/ui/button'
+import { Callout } from '@/components/ui/callout'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { JOB_START_PAGE, jobsApi, skillShelfApi, type JobVersionView, type JobView, type Member } from '@/lib/api'
+import { JOB_START_PAGE, jobsApi, pluginsApi, skillShelfApi, type JobVersionView, type JobView, type Member } from '@/lib/api'
 import { useCompany } from '@/lib/company-context'
 import { PcJobFields } from './pc-job-fields'
+import { SetWatchFields } from './set-watch-fields'
 import { describeJobError } from '@/lib/errors'
 import { PROPOSAL_CLOSED_TEXT, proposalClosed, proposalVersionText } from '@/lib/job-proposals'
 import {
   JOB_EXPIRY_CHOICES, JOB_HOURS, JOB_MINUTES, JOB_VERSION_HIDDEN, definitionFromForm, editableDefinition, emptyJobForm, hiddenVersion, jobProblemText,
-  JOB_FORM_CANNOT_EDIT, jobEditForm, needsNewerScreen, switchJobForm, type JobForm,
+  JOB_FORM_CANNOT_EDIT, jobEditForm, needsNewerScreen, setWatchTriggerText, setWatchOverlaps, setWatchSkillNames, switchJobForm, type JobForm,
 } from '@/lib/jobs'
 import { useQuery } from '@/lib/use-query'
-import { JOB_NEEDS_NEWER_SCREEN, isRecordTrigger, type JobDefinition, type JobWeekday } from '../../../../shared/core/jobs'
+import { JOB_NEEDS_NEWER_SCREEN, isRecordTrigger, isSetTrigger, type JobDefinition, type JobWeekday } from '../../../../shared/core/jobs'
 import {
-  JOB_EVENT_NOTE, jobCheckText, jobEventStateText, jobGrantLines, jobMissedText, jobPlacementText, jobRecordTriggerText, jobRunText, jobRunsText, jobTriggerText,
+  JOB_EVENT_NOTE, SET_WATCH_NOT_RUN_NOTE, SET_WATCH_SEEN_NOTE, jobCheckText, jobEventStateText, jobGrantLines, jobMissedText, jobPlacementText, jobRecordTriggerText,
+  jobRunText, jobRunsText, jobTriggerText, setWatchConditionLines, setWatchGrantLines, setWatchMissedText, setWatchReadSkillsText, setWatchReasonLabels,
 } from '../../../../shared/core/job-words'
 
 const personName = (m: { name: string | null; email: string | null } | undefined) => (m ? m.name || m.email || '名前未設定' : 'もういない人')
@@ -80,6 +83,7 @@ export function JobFormDialog({ job, members, defaultActingUser, onClose, onSave
             key={job ? `${job.id}:${newestVersion?.version ?? 0}` : 'new'}
             initial={editForm ?? emptyJobForm(defaultActingUser)}
             baseVersion={proposal ? newestVersion?.version : undefined}
+            fromProposal={proposal !== null}
             newJob={job === null}
             members={members}
             onCancel={onClose}
@@ -110,13 +114,19 @@ function Row({ label, children }: { label: string; children: ReactNode }) {
   )
 }
 
-export function JobFormFields({ initial, baseVersion, newJob, members, onCancel, onSubmit }: {
+export function JobFormFields({ initial, baseVersion, fromProposal = false, newJob, members, onCancel, onSubmit }: {
   initial: JobForm
   /**
    * A proposal's job: the version this form was built from, kept as it was when the form was made and sent back with the
    * edit (`baseVersion`), so the server's stale check compares with what the person edited — never a version read later.
    */
   baseVersion?: number
+  /**
+   * A job from a member's proposal of any shape (schema 4 from the chat, schema 5 — a set watch — from the app, 4b-4 PR6b): it
+   * runs as its proposer and keeps the shape it was proposed in, so neither 責任者 nor 「いつ動くか」 is offered (the server
+   * refuses both: `JOB_RESPONSIBLE_FIXED`, `JOB_PROPOSAL_SCHEMA`). A schema-4 version says so itself (`form.proposal`).
+   */
+  fromProposal?: boolean
   /** A new job (not a version being edited): only then does becoming an event run by the PC take the one-day default. */
   newJob: boolean
   members: Member[]
@@ -132,6 +142,7 @@ export function JobFormFields({ initial, baseVersion, newJob, members, onCancel,
   const [problem, setProblem] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const set = <K extends keyof JobForm>(k: K, v: JobForm[K]) => setF((prev) => ({ ...prev, [k]: v }))
+  const proposed = f.proposal || fromProposal
   // An event job's first watched やること: the responsible person's open ones that this console's user reads (the server
   // checks again that both of them read it).
   // Searched by name and paged (a member may have many open やること).
@@ -171,7 +182,7 @@ export function JobFormFields({ initial, baseVersion, newJob, members, onCancel,
       <Row label="名前">
         <Input aria-label="名前" value={f.name} onChange={(e) => set('name', e.target.value)} placeholder="例：週の報告" />
       </Row>
-      {f.proposal ? (
+      {proposed ? (
         // A member's proposal runs as its proposer, always (owner decision 2026-11-22): not offered, said as such.
         <Row label="責任者（案を出した人）">
           <span aria-label="責任者">{personName(members.find((m) => m.userId === f.actingUser))}（案を出した人のままです。変えられません）</span>
@@ -184,16 +195,21 @@ export function JobFormFields({ initial, baseVersion, newJob, members, onCancel,
         </select>
       </Row>
       )}
-      {!f.proposal && (
+      {!proposed && (
       <Row label="いつ動くか">
         <select aria-label="いつ動くか" className={SELECT} value={f.when}
           onChange={(e) => setF((prev) => switchJobForm(prev, { when: e.target.value as JobForm['when'] }, newJob))}>
           <option value="time">決まった時間に</option>
           <option value="event">見張っているやることが終わったときなどに（出来事で）</option>
+          {/* A set watch runs a department Skill: only a company with the shared folder has one (the server refuses it elsewhere). */}
+          {(hasCompanyFolder || f.when === 'set') && <option value="set">これから来る、条件に合うもの全部（決まった条件から選ぶ）</option>}
         </select>
       </Row>
       )}
-      {f.when === 'event' ? (
+      {f.when === 'set' ? (
+        // A set watch (schema 5, 4b-4 PR7): its own fields — the combination, the department Skill, reads, writes, limits.
+        <SetWatchFields f={f} set={set} />
+      ) : f.when === 'event' ? (
         <>
           <Row label="見張るやること（責任者が担当のもの）">
             <Input aria-label="見張るやることを名前で探す" value={startText} placeholder="名前で探す"
@@ -281,8 +297,8 @@ export function JobFormFields({ initial, baseVersion, newJob, members, onCancel,
         </select>
       </Row>
       )}
-      {/* A member's proposal stays a Skill run by the responsible person's PC AI (schema 4): not offered. */}
-      {!f.proposal && (
+      {/* A member's proposal stays a Skill run by the responsible person's PC AI (schema 4): not offered; a set watch always is one. */}
+      {!f.proposal && f.when !== 'set' && (
       <Row label="すること">
         <select aria-label="すること" className={SELECT} value={f.kind}
           onChange={(e) => setF((prev) => switchJobForm(prev, { kind: e.target.value as JobForm['kind'] }, newJob))}>
@@ -291,7 +307,7 @@ export function JobFormFields({ initial, baseVersion, newJob, members, onCancel,
         </select>
       </Row>
       )}
-      {f.kind === 'task' ? (
+      {f.when === 'set' ? null : f.kind === 'task' ? (
         <Row label="作るやること">
           <Input aria-label="作るやること" value={f.taskTitle} onChange={(e) => set('taskTitle', e.target.value)} placeholder="例：週の報告を書く" />
           <select aria-label="期限" className={SELECT} value={f.dueBusinessDays === null ? 'none' : String(f.dueBusinessDays)}
@@ -304,7 +320,7 @@ export function JobFormFields({ initial, baseVersion, newJob, members, onCancel,
       ) : (
         <PcJobFields f={f} set={set} hasCompanyFolder={hasCompanyFolder} shelfSkills={shelfSkills} event={f.when === 'event'} />
       )}
-      <Row label={f.when === 'event' ? (f.kind === 'pc' ? '出来事のあと、動けなかったとき（責任者のアプリが閉じていたなど）' : '出来事のあと、動けなかったとき（サーバーが止まっていたなど）') : '時間に動けなかったとき（サーバーが止まっていたなど）'}>
+      <Row label={f.when === 'set' ? '完了のあと、動けなかったとき（責任者のアプリが閉じていたなど）' : f.when === 'event' ? (f.kind === 'pc' ? '出来事のあと、動けなかったとき（責任者のアプリが閉じていたなど）' : '出来事のあと、動けなかったとき（サーバーが止まっていたなど）') : '時間に動けなかったとき（サーバーが止まっていたなど）'}>
         {f.when === 'time' && (
         <select aria-label="動けなかったとき" className={SELECT} value={f.missedPolicy} onChange={(e) => set('missedPolicy', e.target.value as JobForm['missedPolicy'])}>
           <option value="latest_only">あとから一番新しい回だけ動かす</option>
@@ -328,17 +344,46 @@ export function JobFormFields({ initial, baseVersion, newJob, members, onCancel,
 export function JobVersionWords({ definition, members }: { definition: JobDefinition; members: Member[] }) {
   const who = members.find((m) => m.userId === definition.actingUser)
   const check = jobCheckText(definition.check)
+  // A set watch (schema 5, 4b-4 PR7): everything its responsible person consents to besides the shared words — which records
+  // it takes (and when it does not run), the Skills read, the reasons its Skill judges by, its day's limit, who sees it.
+  const setWatch = isSetTrigger(definition.trigger) ? definition.trigger : null
+  const readSkills = setWatch ? setWatchReadSkillsText(definition) : null
+  const reasons = setWatch ? setWatchReasonLabels(definition) : []
   return (
     <dl className="grid grid-cols-[6rem_1fr] gap-x-3 gap-y-1.5 text-sm">
       <dt className="text-muted-foreground">名前</dt><dd>{definition.name}</dd>
       <dt className="text-muted-foreground">責任者</dt><dd>{personName(who)}（この人の権限で動きます）</dd>
-      <dt className="text-muted-foreground">いつ</dt><dd>{jobTriggerText(definition.trigger)}{isRecordTrigger(definition.trigger) && <span className="block text-xs text-muted-foreground">{JOB_EVENT_NOTE}</span>}</dd>
+      <dt className="text-muted-foreground">いつ</dt><dd>{isSetTrigger(definition.trigger) ? setWatchTriggerText(definition.trigger) : jobTriggerText(definition.trigger)}{isRecordTrigger(definition.trigger) && <span className="block text-xs text-muted-foreground">{JOB_EVENT_NOTE}</span>}</dd>
+      {setWatch && (
+        <>
+          <dt className="text-muted-foreground">動く条件</dt>
+          <dd aria-label="動く条件">
+            <ul className="list-disc pl-4">{setWatchConditionLines(setWatch).map((l) => <li key={l}>{l}</li>)}</ul>
+            <span className="block text-small text-muted-foreground">{SET_WATCH_NOT_RUN_NOTE}</span>
+          </dd>
+        </>
+      )}
       <dt className="text-muted-foreground">すること</dt><dd>{jobRunText(definition.run)}</dd>
+      {readSkills && (<><dt className="text-muted-foreground">読む Skill</dt><dd>{readSkills}</dd></>)}
+      {setWatch && (
+        <>
+          <dt className="text-muted-foreground">判断の理由</dt>
+          <dd aria-label="判断の理由">
+            AI は議事録を読んで判断し、終わりの報告で、その理由を次の一覧（Skill が決めたもの）から1つ選びます。
+            {reasons.length > 0
+              ? <ul className="list-disc pl-4">{reasons.map((l, i) => <li key={`${i}:${l}`}>{l}</li>)}</ul>
+              : <span className="block">理由の一覧は、保存のときに Skill から読みます。</span>}
+          </dd>
+        </>
+      )}
       {check && (<><dt className="text-muted-foreground">確かめること</dt><dd>{check}</dd></>)}
       <dt className="text-muted-foreground">動く場所</dt><dd>{jobPlacementText(definition.placement)}</dd>
       <dt className="text-muted-foreground">できること</dt>
-      <dd><ul className="list-disc pl-4">{jobGrantLines(definition.grant, definition.trigger).map((l) => <li key={l}>{l}</li>)}</ul></dd>
-      <dt className="text-muted-foreground">動けないとき</dt><dd>{jobMissedText(definition.missed, definition.trigger)}</dd>
+      <dd><ul className="list-disc pl-4">
+        {(setWatch ? setWatchGrantLines(definition.grant) : jobGrantLines(definition.grant, definition.trigger)).map((l) => <li key={l}>{l}</li>)}
+      </ul></dd>
+      {setWatch && (<><dt className="text-muted-foreground">見える人</dt><dd>{SET_WATCH_SEEN_NOTE}</dd></>)}
+      <dt className="text-muted-foreground">動けないとき</dt><dd>{setWatch ? setWatchMissedText(definition.missed.expiresAfterMinutes) : jobMissedText(definition.missed, definition.trigger)}</dd>
     </dl>
   )
 }
@@ -348,10 +393,12 @@ export function JobVersionWords({ definition, members }: { definition: JobDefini
  * Approving is never accepting (owner decision 2026-11-18): also when the approver is the responsible person, their
  * consent to run it with their rights is its own press afterwards (`JobAcceptDialog`).
  */
-export function JobApproveDialog({ job, members, myUserId, onClose, onApproved, onRefused }: {
+export function JobApproveDialog({ job, members, myUserId, jobs = [], onClose, onApproved, onRefused }: {
   job: JobView
   members: Member[]
   myUserId: string | null
+  /** The company's jobs as the list read them: a set watch's warning names another of the same responsible person. */
+  jobs?: JobView[]
   onClose: () => void
   onApproved: (next: JobView) => void
   /** The approval was refused (the page reads the proposals again when one was decided elsewhere meanwhile). */
@@ -380,6 +427,11 @@ export function JobApproveDialog({ job, members, myUserId, onClose, onApproved, 
   const proposerName = proposal ? personName(members.find((m) => m.userId === proposal.proposerId)) : ''
   // No line at all when the words say nothing (a version before the submitted one): never a bare 「第N版：」 (review L3).
   const versionLine = proposal && newest ? proposalVersionText(newest.version, proposal, proposerName) : null
+  // A set watch (4b-4 PR7): what it would overlap with — another of the same shape for this person, a business plugin step set
+  // to one of its Skills. Only said; the server refuses both (`JOB_SET_WATCH_ONE_PER_PERSON`, `JOB_SET_WATCH_STEP_SKILL`).
+  const setWatch = definition !== null && isSetTrigger(definition.trigger)
+  const steps = useQuery(setWatch ? `job-step-skills:${companyId}` : null, () => stepSkillSettings(companyId))
+  const overlaps = setWatch && definition ? setWatchOverlaps(definition, job.id, jobs, steps.data ?? []) : null
 
   const approve = async () => {
     if (!newest?.fingerprint || tooNew || hidden || closed) return
@@ -417,6 +469,26 @@ export function JobApproveDialog({ job, members, myUserId, onClose, onApproved, 
           <div className="space-y-3">
             {versionLine && newest && <p className="text-body" aria-label="版の出どころ">第{newest.version}版：{versionLine}</p>}
             <JobVersionWords definition={definition} members={members} />
+            {overlaps && (
+              <div className="space-y-2" aria-label="重なりの確かめ">
+                {overlaps.samePerson.length > 0 && (
+                  <Callout variant="warning" role="alert">
+                    {own ? 'あなた' : `${who}さん`}には、同じ形（これから来る、条件に合うもの全部）の仕事「{overlaps.samePerson.join('」「')}」がもう動いています。1人に1つだけなので、このままでは承認できません。先にそちらを止めてください。
+                  </Callout>
+                )}
+                {overlaps.steps.length > 0 && (
+                  <Callout variant="warning" role="alert">
+                    業務プラグインの手順（{overlaps.steps.map((x) => `「${x.plugin}」の「${x.step}」`).join('・')}）が、この仕事と同じ Skill（{setWatchSkillNames(definition).join('・')}）を使う設定です。同じ提案書が二重にできないよう、このままでは承認できません。「つなぎ先」でその手順の Skill の設定を外してください。
+                  </Callout>
+                )}
+                {steps.error !== null && steps.error !== undefined && (
+                  <Callout variant="info">業務プラグインの手順の設定を確かめられませんでした。同じ Skill を使う手順があれば、承認のときにサーバーが断ります。</Callout>
+                )}
+                <Callout variant="info">
+                  承認すると、この仕事の Skill を使う業務プラグインの手順で、まだ開いている頼みは閉じます（提案書は、この仕事が受け持ちます）。承認したあとは、手順でこの Skill を選ぶことはできません。
+                </Callout>
+              </div>
+            )}
             <p className="rounded-control border border-info-border bg-info-bg px-3 py-2 text-sm text-info-text" role="note">
               {own && !mustAccept
                 ? 'あなたは責任者として、この内容（だれの権限で・何を・どこで）をすでに受け取っています。承認すると、受け取り直しなしでこの版に切り替わります。'
@@ -440,6 +512,25 @@ export function JobApproveDialog({ job, members, myUserId, onClose, onApproved, 
       </DialogContent>
     </Dialog>
   )
+}
+
+/**
+ * The company's business plugin steps set to run one of its Skills (`…/plugins/:id/step-skills` of each installed plugin), for a
+ * set watch's warning. A plugin whose steps cannot be read (a connector, an older server) is left out: the server checks anyway.
+ */
+async function stepSkillSettings(companyId: string): Promise<Array<{ plugin: string; step: string; skill: string | null }>> {
+  const { plugins } = await pluginsApi.list(companyId)
+  const installed = plugins.filter((p) => p.install !== null)
+  const views = await Promise.all(installed.map(async (p) => {
+    const label = p.versions.find((v) => v.version === p.install?.version)?.label ?? p.id
+    try {
+      const view = await pluginsApi.stepSkills(companyId, p.id)
+      return view.steps.map((x) => ({ plugin: label, step: x.label, skill: x.skill }))
+    } catch {
+      return []
+    }
+  }))
+  return views.flat()
 }
 
 /** What the approval note says when the approver is the responsible person: approving does not consent for them. */

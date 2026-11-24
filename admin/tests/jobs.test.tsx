@@ -16,11 +16,12 @@ import { ApiError } from '@/lib/api'
 import { JOB_REFUSED_GENERAL, describeJobError } from '@/lib/errors'
 import {
   DELIVERY_PLACE_CHOICES, JOB_FORM_CANNOT_EDIT, JOB_VERSION_HIDDEN, jobEditForm, definitionFromForm, editableDefinition, emptyJobForm, formFromDefinition, hiddenVersion, jobProblemText, needsNewerScreen,
-  switchJobForm,
+  setComboOf, setWatchTriggerText, setWatchOverlaps, switchJobForm,
 } from '@/lib/jobs'
-import { JOB_EVENT_PC_EXPIRES_DEFAULT_MINUTES, jobConsentCanonical, type JobDefinition } from '../../shared/core/jobs'
+import { JOB_EVENT_PC_EXPIRES_DEFAULT_MINUTES, JOB_SET_WATCH_OPENED, jobConsentCanonical, type JobDefinition, type JobSetTrigger } from '../../shared/core/jobs'
+import { SET_WATCH_SEEN_NOTE, jobSetTriggerText, setWatchConditionLines } from '../../shared/core/job-words'
 import { base, companyRoutes, renderInCompany } from './company-harness'
-import { managerCapabilities, ok } from './fixtures'
+import { company, managerCapabilities, ok } from './fixtures'
 import { mockApi } from './mock-api'
 
 vi.mock('next/navigation', () => ({
@@ -443,7 +444,7 @@ describe('a definition of a shape this console does not read', () => {
     renderInCompany(<JobsRoute />)
     await screen.findByRole('listitem', { name: '週の報告' })
     const job = calls.find((c) => c.url.endsWith('/jobs'))!
-    expect(job.headers['X-ACB-Job-Schemas']).toBe('1,2,3,4')
+    expect(job.headers['X-ACB-Job-Schemas']).toBe('1,2,3,4,5')
   })
 
   it('the list says 「画面を新しくしてください」 instead of a time, offers no edit, and a trigger of an unknown shape never crashes it', async () => {
@@ -553,7 +554,7 @@ describe('an event job', () => {
     const query = calls.find((c) => c.url.endsWith('/records/query'))!
     expect(query.body).toMatchObject({ type: 'task', fields: { assignee: 'u_member' }, offset: 0 })
     const post = calls.find((c) => c.method === 'POST' && c.url.endsWith('/jobs'))!
-    expect(post.headers['X-ACB-Job-Schemas']).toBe('1,2,3,4')
+    expect(post.headers['X-ACB-Job-Schemas']).toBe('1,2,3,4,5')
     expect((post.body as { definition: JobDefinition }).definition).toMatchObject({ schema: 2, trigger: { startRecord: START, to: 'done', followMadeTask: true } })
   })
 
@@ -708,7 +709,7 @@ describe('an event run by the responsible person’s PC AI (schema 3)', () => {
     expect(within(dialog).queryByRole('button', { name: '保存' })).toBeNull()
   })
 
-  it('creating one on the page: the watched やること by name, the Skill, the done mark — schema 3 is sent, announced 1,2,3,4', async () => {
+  it('creating one on the page: the watched やること by name, the Skill, the done mark — schema 3 is sent, announced 1,2,3,4,5', async () => {
     const { calls } = mockApi({
       ...companyRoutes(),
       [`GET ${base}/jobs`]: { body: ok({ stopped: false, canManage: true, jobs: [] }) },
@@ -734,7 +735,7 @@ describe('an event run by the responsible person’s PC AI (schema 3)', () => {
     await userEvent.click(within(dialog).getByRole('button', { name: '保存' }))
     await waitFor(() => expect(calls.filter((c) => c.method === 'POST' && c.url.endsWith('/jobs'))).toHaveLength(1))
     const post = calls.find((c) => c.method === 'POST' && c.url.endsWith('/jobs'))!
-    expect(post.headers['X-ACB-Job-Schemas']).toBe('1,2,3,4')
+    expect(post.headers['X-ACB-Job-Schemas']).toBe('1,2,3,4,5')
     expect((post.body as { definition: JobDefinition }).definition).toMatchObject({
       schema: 3, placement: 'a', trigger: { startRecord: START, to: 'done' }, check: { kind: 'source_record', doneMark: 'file_linked' },
       missed: { expiresAfterMinutes: 1440 }, grant: { creates: ['task'] },
@@ -879,5 +880,219 @@ describe('an event run by the responsible person’s PC AI (schema 3)', () => {
     expect(neutral).not.toMatch(/数分のうちに|PC/)
     expect(neutral).toMatch(/もう一度動かします/)
     expect(retryConfirmText('e')).toMatch(/数分のうちに/)
+  })
+})
+
+describe('a set watch — 「これから来る、条件に合うもの全部」 (schema 5, 4b-4 PR7)', () => {
+  const OPENED = (): JobSetTrigger => JSON.parse(JSON.stringify(JOB_SET_WATCH_OPENED[0]))
+  const REASONS = { reasons: [{ code: 'internal', label: '社内の会議' }, { code: 'asked', label: '提案を求められた' }] }
+  const setDef = (over: Record<string, unknown> = {}): JobDefinition => ({
+    ...def(), schema: 5, name: '提案書のたたき台', actingUser: 'u_member', trigger: OPENED(), check: { kind: 'matched_record' },
+    run: { kind: 'procedure', procedure: { source: 'department_skill', place: '営業部', skill: 'proposal-auto', fingerprint: 'a'.repeat(40) } }, placement: 'a',
+    missed: { policy: 'skip', expiresAfterMinutes: 1440 },
+    grant: {
+      tools: ['records', 'files_read', 'files_write'], creates: ['task'], routes: ['GET /minutes/:recordId/text'],
+      reads: { paths: ['営業部/提案書'], calls: [], skills: [{ place: '営業部', skill: 'proposal', fingerprint: 'b'.repeat(40) }] },
+      writes: { area: 'deliverable', place: '営業部', folder: '提案書' }, outbound: 'none', limits: { minutes: 30, runsPerDay: 10 },
+    },
+    decision: REASONS,
+    ...over,
+  }) as JobDefinition
+  const setForm = () => ({
+    ...switchJobForm({ ...emptyJobForm('u_member'), name: '提案書のたたき台' }, { when: 'set' }, true),
+    skillPlace: '営業部', skillName: 'proposal-auto', readSkills: 'proposal\n経営企画/pricing', readPaths: '営業部/提案書', writePlace: '営業部', writeFolder: '提案書',
+  })
+  const pending = jobView({ name: '提案書のたたき台', approvedVersion: null, state: 'draft', waiting: 'NOT_APPROVED', trigger: OPENED(), placement: 'a', nextSlot: null, lastOccurrence: null })
+
+  it('the form makes schema 5 from an opened combination only: the department Skill, the Skills read, the minutes route and its one やること', () => {
+    const parsed = definitionFromForm({ ...setForm(), readRecords: true, mailDrafts: true, deliverTo: 'google:drive_folder', checkKind: 'new_meetings' })
+    expect(parsed.ok, JSON.stringify(parsed)).toBe(true)
+    if (!parsed.ok) return
+    const d = parsed.definition
+    expect(d).toMatchObject({ schema: 5, placement: 'a', check: { kind: 'matched_record' }, run: { procedure: { source: 'department_skill', place: '営業部', skill: 'proposal-auto' } } })
+    expect(JSON.stringify(d.trigger)).toBe(JSON.stringify(JOB_SET_WATCH_OPENED[0]))
+    // Left-overs of another kind of job grant nothing: no record routes, no drafts, no place outside — the minutes route alone.
+    expect(d.grant).toMatchObject({ routes: ['GET /minutes/:recordId/text'], outbound: 'none', creates: ['task'], tools: ['records', 'files_read', 'files_write'] })
+    expect(d.grant.deliverTo).toBeUndefined()
+    expect(d.grant.reads.skills?.map((p) => [p.place, p.skill])).toEqual([['営業部', 'proposal'], ['経営企画', 'pricing']])
+    // Read back, the same choices.
+    expect(formFromDefinition(d)).toMatchObject({ when: 'set', kind: 'pc', setCombo: 0, skillPlace: '営業部', skillName: 'proposal-auto', readSkills: 'proposal\n経営企画/pricing' })
+    // A combination that is not opened is never sent: the form offers no words of its own.
+    const notOpened = definitionFromForm({ ...setForm(), setCombo: JOB_SET_WATCH_OPENED.length })
+    expect(notOpened.ok).toBe(false)
+    if (!notOpened.ok) expect(jobProblemText(notOpened.problems)).toMatch(/使えるようになっている条件の中から/)
+    // No department chosen: said plainly.
+    const noPlace = definitionFromForm({ ...setForm(), skillPlace: '', readSkills: '' })
+    expect(noPlace.ok).toBe(false)
+    if (!noPlace.ok) expect(jobProblemText(noPlace.problems)).toMatch(/Skill の部署を選んでください/)
+  })
+
+  it('a new one starts at the owner’s numbers (30 minutes, 10 a day, one day’s wait, a missed one let go); editing keeps a version’s own', () => {
+    const fresh = switchJobForm(emptyJobForm('u_member'), { when: 'set' }, true)
+    expect(fresh).toMatchObject({ kind: 'pc', limits: { minutes: 30, runsPerDay: 10 }, expiresAfterMinutes: 1440, missedPolicy: 'skip' })
+    const editing = formFromDefinition(setDef({ grant: { ...setDef().grant, limits: { minutes: 60, runsPerDay: 3 } }, missed: { policy: 'skip', expiresAfterMinutes: 4320 } }))
+    const back = switchJobForm(switchJobForm(editing, { when: 'time' }, false), { when: 'set' }, false)
+    expect(back).toMatchObject({ limits: { minutes: 60, runsPerDay: 3 }, expiresAfterMinutes: 4320 })
+  })
+
+  it('edited only when the form says it back exactly (the server’s trees and reasons left out); a combination not opened never', () => {
+    expect(jobEditForm(setDef())).not.toBeNull()
+    // A grant the form would say otherwise (its tools in another order) would come back changed: no form.
+    expect(jobEditForm(setDef({ grant: { ...setDef().grant, tools: ['records', 'files_write', 'files_read'] } }))).toBeNull()
+    const other = { ...OPENED(), guards: ['after_acceptance'] }
+    expect(setComboOf(other)).toBe(-1)
+    expect(jobEditForm(setDef({ trigger: other }))).toBeNull()
+    // Its words never describe it as the opened one, and its conditions are not listed.
+    expect(jobSetTriggerText(other)).toMatch(/説明できない/)
+    expect(setWatchConditionLines(other)).toEqual([])
+  })
+
+  it('creating one on the page: the combination, the department and its Skill — schema 5 is sent, announced 1,2,3,4,5', async () => {
+    const { calls } = mockApi({
+      ...companyRoutes(),
+      [`GET ${base}/jobs`]: { body: ok({ stopped: false, canManage: true, jobs: [] }) },
+      [`POST ${base}/jobs`]: { status: 201, body: ok(pending) },
+    })
+    renderInCompany(<JobsRoute />)
+    await userEvent.click(await screen.findByRole('button', { name: '定期の仕事を作る' }))
+    const dialog = await screen.findByRole('dialog')
+    await userEvent.type(within(dialog).getByRole('textbox', { name: '名前' }), '提案書のたたき台')
+    await userEvent.selectOptions(within(dialog).getByRole('combobox', { name: '責任者' }), 'u_member')
+    await userEvent.selectOptions(within(dialog).getByRole('combobox', { name: 'いつ動くか' }), 'set')
+    // Only the opened combinations are offered, in their words; what each takes and never takes is said.
+    const combos = within(within(dialog).getByRole('combobox', { name: '条件' })).getAllByRole('option')
+    expect(combos.map((o) => o.textContent)).toEqual(JOB_SET_WATCH_OPENED.map((t) => jobSetTriggerText(t)))
+    expect(within(dialog).getByRole('note', { name: '条件の中身' })).toHaveTextContent('社外の人が1人以上出た会議だけ')
+    expect(dialog).toHaveTextContent('上司やアシスタントが押した会議')
+    expect(dialog).toHaveTextContent(SET_WATCH_SEEN_NOTE)
+    // A set watch is always a Skill on the PC: 「すること」, a time job's check and a place outside are not offered.
+    expect(within(dialog).queryByRole('combobox', { name: 'すること' })).toBeNull()
+    expect(within(dialog).queryByRole('combobox', { name: '確かめること' })).toBeNull()
+    expect(within(dialog).queryByRole('combobox', { name: 'できたものを置く先' })).toBeNull()
+    expect((within(dialog).getByRole('combobox', { name: '1日の上限' }) as HTMLSelectElement).value).toBe('10')
+    // The departments' own folders are offered.
+    await userEvent.selectOptions(within(dialog).getByRole('combobox', { name: 'Skill の部署' }), await within(dialog).findByRole('option', { name: '営業部' }))
+    await userEvent.type(within(dialog).getByRole('textbox', { name: 'Skill' }), 'proposal-auto')
+    await userEvent.type(within(dialog).getByRole('textbox', { name: '読む Skill' }), 'proposal')
+    await userEvent.click(within(dialog).getByRole('button', { name: '保存' }))
+    await waitFor(() => expect(calls.filter((c) => c.method === 'POST' && c.url.endsWith('/jobs'))).toHaveLength(1))
+    const post = calls.find((c) => c.method === 'POST' && c.url.endsWith('/jobs'))!
+    expect(post.headers['X-ACB-Job-Schemas']).toBe('1,2,3,4,5')
+    expect((post.body as { definition: JobDefinition }).definition).toMatchObject({
+      schema: 5, trigger: { kind: 'record_set' }, check: { kind: 'matched_record' },
+      run: { procedure: { source: 'department_skill', place: '営業部', skill: 'proposal-auto' } },
+      grant: { routes: ['GET /minutes/:recordId/text'], reads: { skills: [{ place: '営業部', skill: 'proposal' }] }, limits: { minutes: 30, runsPerDay: 10 } },
+      missed: { policy: 'skip', expiresAfterMinutes: 1440 },
+    })
+  })
+
+  it('the approval shows the whole consent — conditions, Skills read, the reasons, the day’s limit, who sees it — and sends the fingerprint', async () => {
+    const { calls } = mockApi({
+      ...companyRoutes(),
+      [`GET ${base}/jobs`]: { body: ok({ stopped: false, canManage: true, jobs: [pending] }) },
+      [`GET ${base}/jobs/${JOB_ID}`]: { body: ok({ ...pending, versions: [version(1, setDef(), 'c1')] }) },
+      [`GET ${base}/plugins`]: { body: ok({ plugins: [] }) },
+      [`POST ${base}/jobs/${JOB_ID}/approve`]: { body: ok({ ...pending, approvedVersion: 1, state: 'active', waiting: 'NOT_ACCEPTED' }) },
+    })
+    renderInCompany(<JobsRoute />)
+    const row = await screen.findByRole('listitem', { name: '提案書のたたき台' })
+    // The responsible person's trigger, never 「自分が…」 read by the admin as themselves.
+    expect(row).toHaveTextContent(`いつ：${setWatchTriggerText(OPENED())}`)
+    expect(setWatchTriggerText(OPENED())).toMatch(/^責任者が担当の「議事録を確認する」/)
+    await userEvent.click(within(row).getByRole('button', { name: '承認する' }))
+    const dialog = await screen.findByRole('dialog')
+    const conditions = await within(dialog).findByLabelText('動く条件')
+    for (const line of setWatchConditionLines(OPENED())) expect(conditions).toHaveTextContent(line)
+    expect(within(dialog).getByLabelText('判断の理由')).toHaveTextContent('社内の会議')
+    expect(within(dialog).getByLabelText('判断の理由')).toHaveTextContent('提案を求められた')
+    expect(dialog).toHaveTextContent('「営業部」の Skill「proposal-auto」を、責任者の PC の AI が動かします')
+    expect(dialog).toHaveTextContent('「営業部」の Skill「proposal」')
+    expect(dialog).toHaveTextContent('上限：1回 30分・1日 10回まで。超えた会議では動かさず（その会議は、あとからも動きません）、その日1回だけ責任者に知らせます')
+    // The grant as a set watch has it: the triggering meeting's minutes only, records not read, the limit said once.
+    expect(dialog).toHaveTextContent('議事録：動くきっかけになった会議の議事録だけ読む')
+    expect(dialog).not.toHaveTextContent('確かめで見つかった')
+    expect(dialog).not.toHaveTextContent('やること・記録を読む')
+    expect(dialog.textContent?.match(/1日 10回/g)).toHaveLength(1)
+    expect(dialog).not.toHaveTextContent('自分が担当')
+    expect(dialog).toHaveTextContent(SET_WATCH_SEEN_NOTE)
+    expect(dialog).toHaveTextContent('完了のあと1日のうちに責任者のアプリで動けなかったときは見送ります')
+    expect(dialog).toHaveTextContent('まだ開いている頼みは閉じます')
+    // Nothing overlaps: no warning.
+    expect(within(dialog).queryByRole('alert')).toBeNull()
+    await userEvent.click(within(dialog).getByRole('button', { name: '承認する' }))
+    await waitFor(() => expect(calls.filter((c) => c.method === 'POST').map((c) => c.body)).toEqual([{ version: 1, fingerprint: 'sha256:v1' }]))
+  })
+
+  it('the approval warns of what overlaps: another running set watch of the same person, a business plugin step set to one of its Skills', async () => {
+    const running = jobView({ id: 'job.11111111111111111111111111111111', name: '前からの提案書', trigger: OPENED(), placement: 'a', approved: { responsibleUserId: 'u_member', name: '前からの提案書' } })
+    const salesPkg = {
+      id: 'corporate-sales', label: '法人営業', version: '0.2.0', kind: 'official', role: 'business', description: null, service: '', host: '',
+      scopes: [], operationScopes: {}, types: [], operations: [], fingerprint: 'f', stopped: false, connector: null,
+    }
+    const install = { version: '0.2.0', enabled: true, keyId: null, mappingVersion: 1, connectionId: 'c2', accountId: null, managedSince: null, updatedAt: '2026-11-01T00:00:00.000Z', updatedBy: 'u_owner', problem: null }
+    mockApi({
+      ...companyRoutes(),
+      [`GET ${base}/jobs`]: { body: ok({ stopped: false, canManage: true, jobs: [pending, running] }) },
+      [`GET ${base}/jobs/${JOB_ID}`]: { body: ok({ ...pending, versions: [version(1, setDef(), 'c1')] }) },
+      [`GET ${base}/plugins`]: { body: ok({ plugins: [{ id: 'corporate-sales', versions: [salesPkg], install }, { id: 'gone', versions: [], install: { ...install, version: '9' } }] }) },
+      [`GET ${base}/plugins/corporate-sales/step-skills`]: { body: ok({ steps: [{ step: 'proposal', label: '提案の準備', overridable: true, skill: 'proposal' }, { step: 'report', label: '報告', overridable: true, skill: 'weekly' }] }) },
+    })
+    renderInCompany(<JobsRoute />)
+    const row = await screen.findByRole('listitem', { name: '提案書のたたき台' })
+    await userEvent.click(within(row).getByRole('button', { name: '承認する' }))
+    const dialog = await screen.findByRole('dialog')
+    await waitFor(() => expect(within(dialog).getAllByRole('alert')).toHaveLength(2))
+    const [person, step] = within(dialog).getAllByRole('alert')
+    expect(person).toHaveTextContent('田中 太郎さんには、同じ形（これから来る、条件に合うもの全部）の仕事「前からの提案書」がもう動いています')
+    expect(step).toHaveTextContent('「法人営業」の「提案の準備」')
+    expect(step).not.toHaveTextContent('報告')
+    // The server decides: the press is still offered.
+    expect(within(dialog).getByRole('button', { name: '承認する' })).toBeEnabled()
+  })
+
+  it('what overlaps is the server’s rule: active and approved, the same person, another job — a paused one or another person’s does not count', () => {
+    const d = setDef()
+    const j = (over: Record<string, unknown>) => ({ id: 'job.x', name: 'x', state: 'active', approvedVersion: 1, trigger: OPENED(), approved: { responsibleUserId: 'u_member' }, ...over })
+    const steps = [{ plugin: 'p', step: 's', skill: 'proposal-auto' }, { plugin: 'p', step: 't', skill: null }, { plugin: 'p', step: 'u', skill: 'other' }]
+    expect(setWatchOverlaps(d, JOB_ID, [
+      j({ name: 'a' }), j({ name: 'paused', state: 'paused' }), j({ name: 'draft', approvedVersion: null }), j({ name: 'bob', approved: { responsibleUserId: 'u_admin' } }),
+      j({ name: 'time job', trigger: def().trigger }), j({ id: JOB_ID, name: 'itself' }),
+    ], steps)).toEqual({ samePerson: ['a'], steps: [{ plugin: 'p', step: 's' }] })
+  })
+
+  it('its occurrences are said to be shown to attendees only (an admin who did not attend sees none)', async () => {
+    mockApi({
+      ...companyRoutes(),
+      [`GET ${base}/jobs`]: { body: ok({ stopped: false, canManage: true, jobs: [jobView({ name: '提案書のたたき台', trigger: OPENED(), placement: 'a', nextSlot: null, lastOccurrence: null })] }) },
+      [`GET ${base}/jobs/${JOB_ID}/occurrences`]: { body: ok({ occurrences: [] }) },
+    })
+    renderInCompany(<JobsRoute />)
+    const row = await screen.findByRole('listitem', { name: '提案書のたたき台' })
+    expect(row).toHaveTextContent('次の回：条件に合うものが来たとき（回は、その会議に出た人にだけ見えます）')
+    expect(row).toHaveTextContent('前の回：あなたに見える回はまだありません')
+    await userEvent.click(within(row).getByRole('button', { name: '回の記録' }))
+    expect(await within(row).findByText('あなたに見える回はありません。')).toBeInTheDocument()
+    expect(row).toHaveTextContent(SET_WATCH_SEEN_NOTE)
+  })
+
+  it('a company without the shared folder is not offered one (it has no department Skills)', async () => {
+    mockApi({
+      ...companyRoutes(),
+      [`GET ${base}`]: { body: ok({ ...company, role: 'owner', folderKind: 'none' }) },
+      [`GET ${base}/jobs`]: { body: ok({ stopped: false, canManage: true, jobs: [] }) },
+      [`GET ${base}/skill-shelf`]: { body: ok({ items: [] }) },
+    })
+    renderInCompany(<JobsRoute />)
+    await userEvent.click(await screen.findByRole('button', { name: '定期の仕事を作る' }))
+    const dialog = await screen.findByRole('dialog')
+    const when = within(dialog).getByRole('combobox', { name: 'いつ動くか' })
+    await waitFor(() => expect(within(when).queryByRole('option', { name: /これから来る/ })).toBeNull())
+    expect(within(when).getByRole('option', { name: /見張っているやること/ })).toBeInTheDocument()
+  })
+
+  it('the server’s set-watch refusals are its fixed sentences', () => {
+    for (const code of ['JOB_SET_WATCH_ONE_PER_PERSON', 'JOB_SET_WATCH_STEP_SKILL', 'JOB_SET_WATCH_NOT_OPENED', 'JOB_SKILL_DECISION_MISSING']) {
+      expect(describeJobError(new ApiError(409, 'このとおりの文', { error: 'このとおりの文', code }))).toBe('このとおりの文')
+    }
   })
 })

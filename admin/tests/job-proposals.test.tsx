@@ -15,7 +15,8 @@ import { describeJobError } from '@/lib/errors'
 import { PROPOSAL_CLOSED_TEXT, RETURN_REASON_CHOICES, proposalStateText, proposalVersionText } from '@/lib/job-proposals'
 import { JOB_FORM_CANNOT_EDIT, definitionFromForm, formFromDefinition, jobEditForm } from '@/lib/jobs'
 import { JOB_PROPOSAL_RETURN_REASONS } from '../../shared/core/job-proposals'
-import { jobConsentCanonical, parseJobDefinition, type JobDefinition } from '../../shared/core/jobs'
+import { JOB_SET_WATCH_OPENED, isSetTrigger, jobConsentCanonical, parseJobDefinition, type JobDefinition } from '../../shared/core/jobs'
+import { setWatchConditionLines } from '../../shared/core/job-words'
 import { base, companyRoutes, renderInCompany } from './company-harness'
 import { members as memberFixtures, ok } from './fixtures'
 import { mockApi } from './mock-api'
@@ -279,6 +280,104 @@ describe('editing a proposal’s job (schema 4)', () => {
     const one = definitionFromForm(formFromDefinition(asSchema1(proposalDef())))
     expect(one.ok && one.definition.schema).toBe(1)
     expect(one.ok && 'origin' in one.definition).toBe(false)
+  })
+})
+
+describe('a set watch a member proposed from the app (schema 5, 4b-4 PR6b)', () => {
+  const SET_NAME = 'proposal-auto（会議のあと）'
+  /**
+   * The shape PR6b's server makes (`setWatchProposalDefinition` in `shared/core/job-proposals.ts`, then pinned): the opened
+   * combination, the member's department Skill, the Skills it reads, the minutes route alone, its one やること, writing only in
+   * `.personal/提案書/` of that department, 30 minutes, 10 a day, one day's wait — and no origin mark (schema 5 takes none).
+   */
+  const setProposalDef = (over: Record<string, unknown> = {}): JobDefinition => {
+    const parsed = parseJobDefinition({
+      schema: 5, name: SET_NAME, actingUser: 'u_member', trigger: JSON.parse(JSON.stringify(JOB_SET_WATCH_OPENED[0])),
+      check: { kind: 'matched_record' },
+      run: { kind: 'procedure', procedure: { source: 'department_skill', place: '営業部', skill: 'proposal-auto', fingerprint: 'a'.repeat(40) } },
+      placement: 'a', missed: { policy: 'skip', expiresAfterMinutes: 1440 },
+      grant: {
+        tools: ['records', 'files_write'], creates: ['task'], routes: ['GET /minutes/:recordId/text'],
+        reads: { paths: [], calls: [], skills: [{ place: '営業部', skill: 'proposal', fingerprint: 'b'.repeat(40) }, { place: '経営企画', skill: 'pricing', fingerprint: 'c'.repeat(40) }] },
+        writes: { area: 'deliverable', place: '営業部', folder: '提案書' }, outbound: 'none', limits: { minutes: 30, runsPerDay: 10 },
+      },
+      decision: { reasons: [{ code: 'internal', label: '社内の会議' }] },
+      ...over,
+    })
+    if (!parsed.ok) throw new Error(JSON.stringify(parsed.problems))
+    return parsed.definition
+  }
+  const setJob = (over: Record<string, unknown> = {}) => jobView({ name: SET_NAME, trigger: setProposalDef().trigger, ...over })
+
+  it('the card and the approval show the whole consent and the version the member sent; approving sends the fingerprint, never an acceptance', async () => {
+    const job = setJob()
+    const { calls } = mockApi(routes(job, [version(1, setProposalDef())], [proposalView()], {
+      [`GET ${base}/plugins`]: { body: ok({ plugins: [] }) },
+      [`POST ${base}/jobs/${JOB_ID}/approve`]: { body: ok({ ...job, approvedVersion: 1, state: 'active', waiting: 'NOT_ACCEPTED', proposal: summary({ state: 'approved' }) }) },
+    }))
+    renderInCompany(<JobsRoute />)
+    const row = await screen.findByRole('listitem', { name: '田中 太郎さんからの案' })
+    await userEvent.click(within(row).getByRole('button', { name: '中身を見る' }))
+    const content = await within(row).findByLabelText('出した内容')
+    expect(content).toHaveTextContent('第1版：社員が出した版')
+    expect(content).toHaveTextContent('「営業部」の Skill「proposal-auto」')
+    await userEvent.click(within(row).getByRole('button', { name: '承認する' }))
+    const dialog = await screen.findByRole('dialog')
+    expect(await within(dialog).findByLabelText('版の出どころ')).toHaveTextContent('第1版：社員が出した版')
+    const trigger = setProposalDef().trigger
+    if (!isSetTrigger(trigger)) throw new Error('not a set watch')
+    const conditions = within(dialog).getByLabelText('動く条件')
+    for (const line of setWatchConditionLines(trigger)) expect(conditions).toHaveTextContent(line)
+    expect(dialog).toHaveTextContent('「営業部」の Skill「proposal」・「経営企画」の Skill「pricing」')
+    expect(within(dialog).getByLabelText('判断の理由')).toHaveTextContent('社内の会議')
+    expect(dialog).toHaveTextContent('田中 太郎さんが内容を確かめて「受け取る」を押すまで動きません')
+    await userEvent.click(within(dialog).getByRole('button', { name: '承認する' }))
+    await waitFor(() => expect(calls.filter((c) => c.method === 'POST').map((c) => [c.url.replace(base, ''), c.body])).toEqual([
+      [`/jobs/${JOB_ID}/approve`, { version: 1, fingerprint: 'sha256:v1' }],
+    ]))
+    expect(calls.some((c) => c.url.includes('/accept'))).toBe(false)
+  })
+
+  it('editing keeps it a set watch run as its proposer: no 責任者 or 「いつ動くか」 offered, schema 5 and the version it was made from sent', async () => {
+    const job = setJob({ approvedVersion: 1, state: 'active', waiting: 'NOT_ACCEPTED', proposal: summary({ state: 'approved' }) })
+    const { calls } = mockApi(routes(job, [version(1, setProposalDef())], [], {
+      [`PUT ${base}/jobs/${JOB_ID}`]: { body: ok({ ...job, latestVersion: 2, changed: true }) },
+    }))
+    renderInCompany(<JobsRoute />)
+    await userEvent.click(within(await screen.findByRole('listitem', { name: SET_NAME })).getByRole('button', { name: '直す' }))
+    const dialog = await screen.findByRole('dialog')
+    const name = await within(dialog).findByRole('textbox', { name: '名前' })
+    expect(within(dialog).queryByRole('combobox', { name: '責任者' })).not.toBeInTheDocument()
+    expect(within(dialog).getByLabelText('責任者')).toHaveTextContent('田中 太郎（案を出した人のままです。変えられません）')
+    expect(within(dialog).queryByRole('combobox', { name: 'いつ動くか' })).not.toBeInTheDocument()
+    expect(within(dialog).queryByRole('combobox', { name: 'すること' })).not.toBeInTheDocument()
+    await userEvent.clear(name)
+    await userEvent.type(name, '提案書（会議のあと）')
+    await userEvent.click(within(dialog).getByRole('button', { name: '保存' }))
+    await waitFor(() => expect(calls.filter((c) => c.method === 'PUT')).toHaveLength(1))
+    const body = calls.find((c) => c.method === 'PUT')!.body as { definition: JobDefinition; baseVersion: number }
+    expect(body.baseVersion).toBe(1)
+    expect(body.definition).toMatchObject({ schema: 5, actingUser: 'u_member', name: '提案書（会議のあと）' })
+    expect('origin' in body.definition).toBe(false)
+    // What the member sent and accepts is unchanged (the trees and reasons are the server's, filled again when the version is made).
+    const unpinned = (d: JobDefinition) => {
+      const copy = JSON.parse(JSON.stringify(d)) as JobDefinition & { decision?: unknown }
+      if (copy.run.kind === 'procedure') copy.run.procedure.fingerprint = ''
+      for (const p of copy.grant.reads.skills ?? []) p.fingerprint = ''
+      delete copy.decision
+      return jobConsentCanonical(copy)
+    }
+    expect(unpinned(body.definition)).toBe(unpinned(setProposalDef()))
+  })
+
+  it('the shape the app proposes round-trips through the form exactly (never a schema-4 proposal form)', () => {
+    const d = setProposalDef()
+    const form = jobEditForm(d)
+    expect(form).not.toBeNull()
+    expect(form!.proposal).toBe(false)
+    const back = definitionFromForm(form!)
+    expect(back.ok).toBe(true)
+    if (back.ok) expect(back.definition).toMatchObject({ schema: 5, grant: { tools: ['records', 'files_write'], reads: { paths: [] }, writes: { place: '営業部', folder: '提案書' } } })
   })
 })
 
