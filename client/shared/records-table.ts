@@ -127,7 +127,7 @@ export function rowOf(r: RecordSummary, def: TypeDefinition, columns: readonly R
     cells[c.field] = { text, sort: sortValue(f, value, text) }
   }
   return {
-    id: r.id, title: r.title || '（名前なし）', stateLabel: stateLabel(r.state, r.type),
+    id: r.id, title: r.title || '（名前なし）', stateLabel: stateLabel(r.state, r.type, def),
     finished: r.state !== null && def.final.includes(r.state), updatedAt: r.updatedAt,
     ...(r.personal ? { personal: true as const } : {}),
     ...(r.membersOnly ? { membersOnly: true as const } : {}),

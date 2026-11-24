@@ -261,6 +261,40 @@ ${placeFollows ? 'place_follows: program\n' : ''}---
     resetToRemote()
   })
 
+  it('state names (state_labels) are display only: a new type with them, renamed and dropped, is accepted from an owner and answered with the types', async () => {
+    resetToRemote()
+    const ROUND = (version: number, labels: string | null) => `---
+label: クロチャレの回
+version: ${version}
+storage: server
+states: [planning, open, held, cancelled]
+${labels ? `state_labels: ${labels}\n` : ''}final: [held, cancelled]
+---
+`
+    write('.acb/types/round.md', ROUND(1, '{ planning: 準備中, open: 受付中, held: 開催済み }'))
+    commit('a new type with state names')
+    expect(pushAs('owner').ok).toBe(true)
+    await services.records.refreshIndex(owner)
+    const roundOf = async () => ((await api('u-member', 'GET', '/types')).body.data?.types as Array<{ definition: { name: string; states: string[]; stateLabels?: Record<string, string> } }>)
+      .find(t => t.definition.name === 'round')?.definition
+    expect(await roundOf()).toMatchObject({ states: ['planning', 'open', 'held', 'cancelled'], stateLabels: { planning: '準備中', open: '受付中', held: '開催済み' } })
+
+    write('.acb/types/round.md', ROUND(2, '{ planning: 支度中, cancelled: やめた回 }'))
+    commit('rename and add state names')
+    expect(pushAs('owner').ok).toBe(true)
+    write('.acb/types/round.md', ROUND(3, null))
+    commit('drop the state names')
+    const dropped = pushAs('admin')
+    expect(dropped.output).not.toContain('消す・名前を変える変更はまだできません')
+    expect(dropped.ok).toBe(true)
+    await services.records.refreshIndex(owner)
+    const now = await roundOf()
+    expect(now?.states).toEqual(['planning', 'open', 'held', 'cancelled'])
+    expect(now && 'stateLabels' in now).toBe(false)
+    expect(((await api('u-owner', 'GET', '/problems')).body.data?.problems as Array<{ path: string }>).filter(p => p.path === '.acb/types/round.md')).toEqual([])
+    resetToRemote()
+  })
+
   it('a task through the engine: attached version checked against the repository; a file type’s milestone line committed through the push checker', async () => {
     const created = await api('u-owner', 'POST', '/item', { type: 'task', title: '提案書の見直し', fields: { assignee: 'u-member' }, links: { files: ['営業部/商談/提案書.md'] } })
     expect(created.status).toBe(201)

@@ -199,7 +199,7 @@ missing or not a boolean is its default —, `TYPE_FEATURE`, `FEATURE_TOOLS`, `F
   "Money", tests `tests/unit/record-types.test.ts`, `record-money-field.test.ts`), `links` (target type
   or `file` — or `interface: <name>` instead of `target`, "Links to an interface" below —,
   cardinality, inverse label, `origin: true` — "Linking records later"),
-  `states`, `initial`, `create_states` (states a create may start in instead — "Task version
+  `states`, `state_labels` (how each state is shown — "State names" below), `initial`, `create_states` (states a create may start in instead — "Task version
   5"), `proposal_states` (proposals: nobody's turn — "Task version 11"), `actions` (from / to / who / notify / attach / note / history_line /
   decision / approval / args / ok_from — "Completing on someone's OK" — / who_unless — "Task
   version 9" — / links — record links the action sets, "Task version 5"), `implements` (interfaces, `INTERFACES`, "Core interfaces"
@@ -219,6 +219,35 @@ missing or not a boolean is its default —, `TYPE_FEATURE`, `FEATURE_TOOLS`, `F
   dropping `place_follows` or pointing it at another link, is
   **breaking** and refused until a migration tool exists. Every accepted version is kept
   (`record_types`); a record remembers the version it was indexed under.
+- **State names** (`state_labels: { <state>: <shown as> }`, `TypeDefinition.stateLabels`; owner decision
+  2026-11-24, before the first real company type, クロチャレの回): members never see a raw state id
+  (`planning`, `open`, `held`). Like a choice's `option_labels`: **display only** — states are stored,
+  queried, compared, written by actions and named in the ledger by their ids; nothing reads the names
+  but the screens and the AI's words. Parser (`STATE_LABEL_MAX_LENGTH` 40): a map whose keys are states
+  of the type (another → error), each a one-line name (no control or line-separator characters,
+  trimmed, not empty), no two states with the same name; absent or `{}` = none (left out of the
+  definition, so stored definitions compare equal). **Not breaking**: adding, changing or dropping a
+  name is an ordinary change (a higher `version`, like any change — the push checker never refuses
+  it, `companyExtensionConflicts` never counts it). The app shows them through `stateWord(state, type,
+  labels)` (`client/shared/thing-words.ts`: the type's own name first, then the core's words, else the
+  id), carried by `stateLabel(state, type, def)`: the record card's header and its linked rows
+  (`summaryView`), 探す's rows (`findHitView`), the records table's 状態 (`rowOf`), the summary of a
+  record dropped on the chat (`record-drop.ts`, its linked records too), and the AI's action tools
+  (「準備中（planning） → 受付中（open）」 + 「メンバーには状態を表示名で言う」, `actionToolSpecs`; `records_types`
+  returns the names with the definition). Actions were already shown by their `label` (経緯, buttons).
+  Not yet: a plugin operation's similar-records `status` (`plugin-operation-similar.ts`, a business
+  plugin's state without a `status` field) still shows the id. **Rollout** (older builds): an older
+  server's parser does not know the key, so it reports the file `invalid_type` and keeps the last valid
+  version — **a new type has none, so it is not in force at all** — while its push checker lets the file
+  in (an added file is not compared; a changed one only when both sides parse). The index reads a
+  type file only when a push changes it, so a file synced before the server knows the key stays
+  missing after the update until it changes again or an owner / admin runs `POST /records/reindex
+  { full: true }`: **deploy the server first, then sync the file**. Released apps read definitions as
+  JSON from `GET /records/types` and ignore the key: until the app with this change is distributed they
+  show the ids (`planning`) — or the core's shared word where one exists (`cancelled` → 「やめた（しまった）」) —
+  while actions keep their Japanese labels. Tests: `tests/unit/record-types.test.ts` "how a state is
+  shown", `tests/integration/records.test.ts` "state names … are display only" (the push checker and
+  `GET /types`), `client/tests/type-state-labels.test.ts` (each place above but the table), `records-table.test.ts` (状態; removed with the table) — mutation-checked.
 - **Following the parent's 見える範囲** (`place_follows: <link name>`, `TypeDefinition.placeFollows`;
   owner decision 2026-11-23: every record has one parent and its visibility comes from it — copied
   when it is made, never wider than the parent; the one exception is narrowing to a list of people).
@@ -2284,7 +2313,8 @@ Main only reshapes the server's answers — nothing is filtered or added on the 
 - **Words and icons** (言葉の決まり, owner 2026-11-02): one plain name and one icon per kind of
   thing, the same on every screen — `client/shared/thing-words.ts` (`thingName`: やること, 議事録を確認する,
   会議の記録, 来た連絡, 送るメールの下書き / 送る Slack の返事 / 送ったもの, 承認のお願い, 返事のお願い; a bundle or
-  a company's type by its own label, never its id; `stateWord` per type — every state of every core
+  a company's type by its own label, never its id; `stateWord` per type — a type's own `state_labels`
+first ("State names"), and every state of every core
 type has a word (来た連絡: 届いた・対応済み・確認待ち・部署の番・やることにしなかった; a task's AI の案;
 test: no raw state of a core type); `CALM` for waiting, empty and
   failing; `NEXT_STEP`, `turnWords`, `TURN_ASKS`) and `src/shared/ui/ThingIcon.tsx` (`ThingIcon`,

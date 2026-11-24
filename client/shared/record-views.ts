@@ -232,8 +232,8 @@ export function recordKindOf(type: string, def?: Pick<TypeDefinition, 'implement
   return 'other'
 }
 
-/** States in members' words, per type (`thing-words.ts`); a state no table knows as it is. */
-export const stateLabel = (state: string | null, type?: string): string | null => stateWord(state, type)
+/** States in members' words, per type: its own `state_labels`, else `thing-words.ts`; a state no one names as it is. */
+export const stateLabel = (state: string | null, type?: string, def?: Pick<TypeDefinition, 'stateLabels'>): string | null => stateWord(state, type, def?.stateLabels)
 
 /** Fields kept for the machinery (hashes, outside ids, pointers): never on the card. */
 const HIDDEN_FIELDS = new Set(['source_ref', 'source_key', 'payload_hash', 'payload_version', 'result_operation_id', 'provider_message_id', 'doc_version', 'next_actor', 'attendees', 'approver_rule', 'approver_role', 'operation'])
@@ -241,7 +241,7 @@ const HIDDEN_FIELDS = new Set(['source_ref', 'source_key', 'payload_hash', 'payl
 export function summaryView(r: RecordSummary, def: TypeDefinition | undefined): RecordViewSummary {
   return {
     id: r.id, type: r.type, typeLabel: thingName({ type: r.type, typeLabel: def?.label, implements: def?.implements, state: r.state }), kind: recordKindOf(r.type, def),
-    title: r.title || '（名前なし）', summary: r.summary, stateLabel: stateLabel(r.state, r.type), updatedAt: r.updatedAt,
+    title: r.title || '（名前なし）', summary: r.summary, stateLabel: stateLabel(r.state, r.type, def), updatedAt: r.updatedAt,
     ...(r.personal ? { personal: true as const } : {}),
     ...(r.membersOnly ? { membersOnly: true as const } : {}),
     ...(r.exceptionNotice ? { exception: true as const } : {}),

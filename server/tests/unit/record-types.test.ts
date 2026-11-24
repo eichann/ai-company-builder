@@ -25,7 +25,11 @@
  * - `place_follows` names a record link of the type with cardinality one (not
  *   a file, many or origin link) on a server type; it is absent from the
  *   definition when not written; removing it or naming another link is
- *   breaking, also for a company's extension of a plugin type.
+ *   breaking, also for a company's extension of a plugin type;
+ * - `state_labels` names only states of the type, once each, with a short
+ *   one-line name no two states share; it is display only, so adding, changing
+ *   or dropping one is not breaking (a higher version, like any change) and it
+ *   is absent from the definition when not written.
  */
 import { describe, expect, it } from 'vitest'
 import { parseYamlLite } from '../../../shared/core/yaml-lite'
@@ -410,5 +414,53 @@ ${placeFollows === null ? '' : `place_follows: ${placeFollows}\n`}---
     const company = parsed(recording(null, { version: 5 }))
     expect(companyExtensionConflicts(company, pluginNew).join('\n')).toMatch(/place_follows: program）をやめる/)
     expect(companyExtensionConflicts(parsed(recording('program', { version: 5 })), pluginNew)).toEqual([])
+  })
+})
+
+describe('how a state is shown (state_labels, owner decision 2026-11-24)', () => {
+  const withLabels = (labels: string, version = 1) => parseTypeFile('task', withYaml(y => y.replace('states: [todo, in_progress, review, done]', `states: [todo, in_progress, review, done]\nstate_labels: ${labels}`).replace('version: 1', `version: ${version}`)))
+  const ok = (labels: string, version = 1): TypeDefinition => {
+    const r = withLabels(labels, version)
+    if (!r.ok) throw new Error(r.errors.join('\n'))
+    return r.definition
+  }
+
+  it('gives states their names; the states themselves stay as written', () => {
+    const def = ok('{ todo: 準備中, in_progress: " 受付中 " }')
+    expect(def.stateLabels).toEqual({ todo: '準備中', in_progress: '受付中' })
+    expect(def.states).toEqual(['todo', 'in_progress', 'review', 'done'])
+    expect(def.initial).toBe('todo')
+    // Not written → not in the definition, so stored definitions of every other type compare equal.
+    expect('stateLabels' in task()).toBe(false)
+    expect('stateLabels' in ok('{}')).toBe(false)
+  })
+
+  it('refuses a state the type does not have, an empty, long or multi-line name, and two states with one name', () => {
+    const refused = (labels: string) => {
+      const r = withLabels(labels)
+      expect(r.ok, labels).toBe(false)
+      return r.ok ? [] : r.errors
+    }
+    expect(refused('{ planning: 準備中 }').join()).toContain('「planning」は states にありません')
+    refused('{ todo: "" }')
+    refused('{ todo: "  " }')
+    refused(`{ todo: ${'あ'.repeat(41)} }`)
+    expect(ok(`{ todo: ${'あ'.repeat(40)} }`).stateLabels?.todo).toHaveLength(40)
+    refused('{ todo: "準備\\n中" }')
+    refused('{ todo: 1 }')
+    refused('[todo]')
+    expect(refused('{ todo: 準備中, review: " 準備中" }').join()).toContain('同じ名前')
+  })
+
+  it('is display only: adding, changing or dropping a name is not breaking, and needs a higher version like any change', () => {
+    const plain = task()
+    const named = ok('{ todo: 準備中 }', 2)
+    expect(compareTypeDefinitions(plain, named)).toMatchObject({ changed: true, breaking: [], versionProblem: null })
+    expect(compareTypeDefinitions(named, ok('{ todo: 支度中 }', 3)).breaking).toEqual([])
+    expect(compareTypeDefinitions(named, { ...plain, version: 3 }).breaking).toEqual([])
+    expect(compareTypeDefinitions(named, ok('{ todo: 支度中 }', 2)).versionProblem).not.toBeNull()
+    // A company's extension of a plugin type may name states the plugin's does not, and drop them again.
+    expect(companyExtensionConflicts({ ...named, version: 5 }, plain)).toEqual([])
+    expect(companyExtensionConflicts({ ...plain, version: 5 }, named)).toEqual([])
   })
 })
