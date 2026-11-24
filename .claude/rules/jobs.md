@@ -1608,9 +1608,16 @@ app, PR7 the admin console.
     the pinned version's responsible person while the occurrence is theirs to see** (`ownSetOccurrence`, I8) — anyone else, an
     owner / admin who did not attend, alice once off the meeting, another company's or no occurrence: the one 404
     `JOB_NOT_FOUND` (permission matrix row + `CROSS`). `ai_job_set_feedback` keeps the occurrence, the kind and the time only
-    (never who: 「人ごとに数えない」), once per kind (201, again 200 `recorded: false`). Cancelling the やること on ［まだ早かった］ is
+    (no who column, once per kind: 201, again 200 `recorded: false`). **Not anonymous in storage**: only the pinned responsible
+    person can write a row, so a join through the occurrence's version names them; 「人ごとに数えない」 is a promise of the readers —
+    no route or screen may group corrections by person (independent review of PR3; the owner decides before PR7 reads it). Cancelling the やること on ［まだ早かった］ is
     the app's (PR6), with the records API. The judgement and the corrections kept are on the responsible person's own
-    `GET /me/job-occurrences` (`report`, only while shown); never on an owner / admin's occurrence view.
+    `GET /me/job-occurrences` (`report`, only while shown — `reportOf`'s own check is defence: `mine` already leaves out an
+    occurrence not shown, so removing it alone fails no test); never on an owner / admin's occurrence view.
+  - **What the AI can still choose** (independent review of PR3): the fixed kinds carry about 18 bits a run (decision, reason,
+    confidence in hundredths, unconfirmed words) to the responsible person's own view — no free text. A `failed` finish's
+    `failure.code` (`[A-Z0-9_]{1,60}`, older than this PR) is stored on the run and hidden from others (`hides`); PR5 should
+    send only fixed codes there.
 - **Telling the record by its kind** (§2-2): `task_kind` is written by the minutes service only — a person's or an AI's
   create naming it is 400 `BAD_VALUE` (`record-engine/create.ts`), and no action takes it as an argument.
 - **Compatibility** (T11): an older server (the floor, 4b-0.5, and every build before this) does not know schema 5 and

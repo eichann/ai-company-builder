@@ -992,9 +992,14 @@ export function createNotificationService(deps: NotificationServiceDeps) {
       // A set watch past its day's limit: `job_day_limit:<job id>:<day>`, shown only to its responsible person.
       const dayLimit = (r: NotificationRow) => deps.jobDayLimitOf?.(member, (r.dedupeKey ?? '').split(':')[1] ?? '') ?? null
       // A set watch's 見送る: `job_set_declined:<job id>:<occurrence id>`, shown only while its meeting is the reader's to read.
+      // Asked once per row (the filter and the words read the same answer).
+      const declined = new Map<string, { meeting: string; reason: string } | null>()
       const setDeclined = (r: NotificationRow) => {
-        const [, jobId = '', occurrenceId = ''] = (r.dedupeKey ?? '').split(':')
-        return deps.jobSetDeclinedOf?.(member, jobId, occurrenceId) ?? null
+        if (!declined.has(r.id)) {
+          const [, jobId = '', occurrenceId = ''] = (r.dedupeKey ?? '').split(':')
+          declined.set(r.id, deps.jobSetDeclinedOf?.(member, jobId, occurrenceId) ?? null)
+        }
+        return declined.get(r.id) ?? null
       }
       const visible = rows.filter(r => {
         if (r.kind === 'job_set_declined') return r.recordId === '' && setDeclined(r) !== null
