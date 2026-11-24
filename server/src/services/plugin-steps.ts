@@ -49,7 +49,7 @@ import type { RecordRow } from '../ports/records'
 import type { ActorInput } from './record-engine/types'
 import { requireFullAccess, type Member } from './access'
 import type { AiTurnCheck } from './run-subjects'
-import { ok, refuse, type Outcome } from './outcome'
+import { ok, refuse, type Outcome, type Refusal } from './outcome'
 import { parsePluginRunStep, stepOf } from './plugin-operation-checks'
 import { PLUGIN_NOT_FOUND, PLUGINS_FORBIDDEN } from './plugin-service-common'
 import type { PluginShelf } from './plugin-shelf'
@@ -65,6 +65,11 @@ export const PROCEDURE_UNAVAILABLE = {
 export const STEP_SKILL_MISSING = {
   error: '会社のスキルが見つかりません。.claude/skills/ に置いて同期してから、もう一度ためしてください', code: 'STEP_SKILL_MISSING',
 } as const
+/** 4b-4 §3 ④: a set watch runs this Skill, so no business plugin step is set to run it (only one of them makes the proposal). */
+export const STEP_SKILL_TAKEN_BY_JOB = {
+  error: 'この Skill は定期の仕事が受け持っています。手順にこの Skill を使うには、その定期の仕事をやめてからにしてください', code: 'STEP_SKILL_TAKEN_BY_JOB',
+} as const
+const NOT_AI_TURN = { error: 'この記録はいま AI の番ではありません', code: 'NOT_AI_TURN' } as const
 const RECORDS_DISABLED = { error: 'この会社では記録の機能が有効になっていません', code: 'RECORDS_DISABLED' } as const
 const RECORD_NOT_FOUND = { error: '記録が見つかりません', code: 'RECORD_NOT_FOUND' } as const
 /** Work listed per call (a member's 「AI の番」 of plugin steps). */
@@ -80,6 +85,12 @@ export interface PluginStepDeps {
   skillTree: (companyId: string, name: string) => Promise<string | null>
   /** Absentees a member stands in for today (services/absences.ts). */
   actsFor: (companyId: string, userId: string) => string[]
+  /**
+   * The company Skills a scheduled job takes over now (4b-4 §3 ④: Skill name → the job; composition binds the set watches',
+   * `job-set-watch.ts` `skillsTakenBySetWatches`). A step whose Skill is one of them is never chosen, switched to start by
+   * itself, asked or claimed. Absent: none.
+   */
+  skillsTakenOver?: (companyId: string) => ReadonlyMap<string, string>
   /** The record engine's action (its `who`, `mayAct`, compare-and-set): how a meeting read moves its まとまり. */
   act?: (member: Member, actor: ActorInput, recordId: string, action: string, body: unknown) => Promise<Outcome<unknown>>
 }
@@ -179,6 +190,20 @@ export function createPluginStepService(deps: PluginStepDeps) {
     }
     found.sort((a, b) => b.at.localeCompare(a.at))
     return found[0]?.view ?? null
+  }
+
+  /**
+   * The job that takes over the Skill a step runs on a work (4b-4 §3 ④), or null: the work's pin when it has one (a Skill pin,
+   * whenever it was made — an older version pinned before the job, a step switched on again later), else what its first run
+   * would pin, the company's setting now (any name it holds: the safe side). A plugin's own procedure is never taken over.
+   */
+  function takenBy(companyId: string, recordId: string | null, pluginId: string, name: string,
+    taken: ReadonlyMap<string, string> | undefined = deps.skillsTakenOver?.(companyId)): string | null {
+    if (!taken || taken.size === 0) return null
+    const r = repo(companyId)
+    const pin = recordId ? r.pin(recordId, pluginId, name)?.pin ?? null : null
+    const skill = pin ? (pin.source === 'company_skill' ? pin.skill : null) : (r.stepSkills(pluginId)[name] ?? null)
+    return skill === null ? null : taken.get(skill) ?? null
   }
 
   const atStep = (rec: { row: RecordRow; state: string }, step: PluginStep) => rec.row.type === step.for.type && rec.state === step.for.state
@@ -327,7 +352,11 @@ export function createPluginStepService(deps: PluginStepDeps) {
         if (!m || m.role !== 'business' || m.contract < PLUGIN_CONTRACT_V2) continue
         for (const [name, step] of Object.entries(m.steps)) {
           if (step.for.type !== bundle.row.type || !startsByItself(member.companyId, i.pluginId, name, step)) continue
-          repo(member.companyId).request({ recordId: bundleId, pluginId: i.pluginId, step: name, at: clock.now(), meetingId: done.recordId })
+          const row = { recordId: bundleId, pluginId: i.pluginId, step: name, at: clock.now(), meetingId: done.recordId }
+          // Its Skill taken over by a set watch: asked, but closed by that job at once — nobody's turn (§3 ④).
+          const job = takenBy(member.companyId, bundleId, i.pluginId, name)
+          if (job) repo(member.companyId).requestTakenByJob({ ...row, jobId: job })
+          else repo(member.companyId).request(row)
         }
       }
       const states = new Set<string>()
@@ -372,6 +401,18 @@ export function createPluginStepService(deps: PluginStepDeps) {
       // A person's step: only when the company starts it by itself and a meeting asked for it.
       return bound && startsByItself(member.companyId, bound.pluginId, bound.step, inst.step)
         && repo(member.companyId).openRequest(recordId, bound.pluginId, bound.step) ? 'yes' : 'not-ai-turn'
+    },
+
+    /**
+     * Asked inside the claim's transaction, right before a run of `<pluginId>__<step>` is written (4b-4 §3 ④; `RunSubjects.claimed`):
+     * the work's Skill — its pin, else the setting its first run would pin — is one a set watch takes over → refused as not the
+     * AI's turn, nothing written. A first claim, a re-claim and a claim after 「もう一度」 alike, whatever app sends it; in the same
+     * synchronous stretch as the write, so an approval that came while the claim awaited its pin is seen here.
+     */
+    claimRefusal(member: Member, recordId: string, runStep: string): Refusal | null {
+      const bound = parsePluginRunStep(runStep)
+      if (!bound || !takenBy(member.companyId, recordId, bound.pluginId, bound.step)) return null
+      return refuse('conflict', NOT_AI_TURN.error, { code: NOT_AI_TURN.code })
     },
 
     /** A run of a plugin step finished as done: it answers the request that started it (a later meeting's stays open). */
@@ -426,12 +467,14 @@ export function createPluginStepService(deps: PluginStepDeps) {
           else if (startsByItself(member.companyId, i.pluginId, name, step)) byItself.push({ pluginId: i.pluginId, name, step })
         }
       }
+      // Read once for the whole list (the turns are polled): the Skills a set watch takes over (§3 ④).
+      const taken = deps.skillsTakenOver?.(member.companyId)
       // A person's step the company starts by itself: the records a meeting asked it for, at its state, the member's.
       const asked: PluginStepTurn[] = []
       for (const st of byItself) {
         for (const recordId of handle.pluginSteps.openRequests(st.pluginId, st.name)) {
           const rec = readable(member, recordId)
-          if (!rec || !atStep(rec, st.step) || !isMine(member, rec.fields)) continue
+          if (!rec || !atStep(rec, st.step) || !isMine(member, rec.fields) || takenBy(member.companyId, recordId, st.pluginId, st.name, taken)) continue
           asked.push({ recordId, version: rec.version, ...stepView(member.companyId, st.pluginId, st.name, automaticStepCeiling(st.step)), auto: true })
         }
       }
@@ -449,7 +492,7 @@ export function createPluginStepService(deps: PluginStepDeps) {
       for (const row of rows) {
         const s = states.get(row.id)
         for (const st of steps) {
-          if (row.type !== st.step.for.type || (s?.state ?? '') !== st.step.for.state) continue
+          if (row.type !== st.step.for.type || (s?.state ?? '') !== st.step.for.state || takenBy(member.companyId, row.id, st.pluginId, st.name, taken)) continue
           turns.push({ recordId: row.id, version: s?.version ?? 0, ...stepView(member.companyId, st.pluginId, st.name, st.step) })
         }
       }
@@ -585,6 +628,8 @@ export function createPluginStepService(deps: PluginStepDeps) {
         const problem = companySkillOverrideProblem(m, stepName, skill)
         if (problem) return refuse('bad-request', problem, { code: 'STEP_NOT_OVERRIDABLE' })
         if (!await deps.skillTree(member.companyId, skill)) return refuse('conflict', STEP_SKILL_MISSING.error, { code: STEP_SKILL_MISSING.code })
+        // After the await, in one synchronous stretch with the write: a set watch approved meanwhile is seen (§3 ④).
+        if (deps.skillsTakenOver?.(member.companyId).has(skill)) return refuse('conflict', STEP_SKILL_TAKEN_BY_JOB.error, { code: STEP_SKILL_TAKEN_BY_JOB.code })
       }
       repo(member.companyId).setStepSkill(pluginId, stepName, skill, clock.now(), member.userId)
       return stepSkills(member, pluginId)
@@ -614,6 +659,10 @@ export function createPluginStepService(deps: PluginStepDeps) {
       if (b.deliverableFolder !== undefined && b.deliverableFolder !== null) {
         const problem = deliverableFolderProblem(b.deliverableFolder)
         if (problem) return refuse('bad-request', problem, { code: 'DELIVERABLE_FOLDER_INVALID' })
+      }
+      // Starting by itself a step whose Skill a set watch takes over: refused (§3 ④; a setting left from before the job).
+      if (b.autoStart === true && takenBy(member.companyId, null, pluginId, stepName)) {
+        return refuse('conflict', STEP_SKILL_TAKEN_BY_JOB.error, { code: STEP_SKILL_TAKEN_BY_JOB.code })
       }
       const was = settingOf(member.companyId, pluginId, stepName)
       repo(member.companyId).setStepSetting(pluginId, stepName, {

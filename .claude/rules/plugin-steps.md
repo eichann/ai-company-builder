@@ -163,9 +163,11 @@ the company Skill `sales-proposal-v1`.
   (`NOT_AI_TURN`), even with a request open. **A set watch takes the Skill over** (4b-4 PR1, `jobs.md` "The set watch
   (schema 5)"): approving such a job closes every open request whose work's pin is a company Skill of one of the job's
   Skill names (`closeRequestsForSkills`, no time condition, `done_by_job` = the job), and is refused while a step's company
-  Skill setting names one (`JOB_SET_WATCH_STEP_SKILL`); the steps' own refusals while such a job exists come with PR4. Its scan
-  (PR2) leaves a meeting alone while the meeting's まとまり has an open request naming it, or an unclosed run, of a step whose pin
-  or setting names one of those Skills (`stepBusyWithSkills`, §3 ②: the mark `step_busy`).
+  Skill setting names one (`JOB_SET_WATCH_STEP_SKILL`); the steps' own refusals while such a job exists: "While a set watch
+  takes the Skill over" (PR4). Its scan
+  (PR2) leaves a meeting alone while the meeting's まとまり has an open request naming it, or a run going on (`running`, its
+  lease live — PR4: any other run of such a step is never claimed again, so it would block the まとまり for good), of a step whose
+  pin or setting names one of those Skills (`stepBusyWithSkills`, §3 ②: the mark `step_busy`).
 - **The automatic ceiling** (`automaticStepCeiling`, one copy): it reads outside text (minutes)
   with nobody watching, so it never gets a tool that reaches outside — `web_research` is dropped and
   only connector roles that only read stay (`mail.read`, not `mail.send` / bare `mail`). Applied in
@@ -176,6 +178,51 @@ the company Skill `sales-proposal-v1`.
   ordinary execution run (one claim per record, the operator's stop, the pin), the member's
   「自動で進める」 and the company's daily limit count it like every 「AI の番」 (`ai-turns.md` "The
   rules"), the emergency stop refuses its claim.
+
+## While a set watch takes the Skill over (4b-4 PR4, owner memo 「4b-4 商談から提案書」 §3 ④, T10 / T19)
+
+A company runs a proposal Skill automatically one way only: a set watch (schema 5, `jobs.md` "The set watch") or a step.
+**Which Skills are taken** is one copy, `job-set-watch.ts` `skillsTakenBySetWatches` (bound in `composition/plugins.ts` as
+`PluginStepDeps.skillsTakenOver`; plugin steps know no job): every Skill name (`setWatchSkillNames`, the run's and the ones it
+reads — the same names the approval's `JOB_SET_WATCH_STEP_SKILL` and the scan's `plugin_step_exclusive` use) of the **approved
+version of every set watch not retired** — active or paused (a paused one may be resumed; there is no way to retire a job yet,
+so giving the Skill back to a step needs a new design, memo §3), accepted or not; a draft never approved takes nothing
+(`JobRepository.approvedVersionsOf`). **Which Skill a step runs on a work** (`takenBy` in `services/plugin-steps.ts`): its pin
+when it has one — a company Skill pin, whenever it was made (an older version, a step switched on again later); a plugin pin is
+never taken —, else the company's setting now (any name, the safe side). Then:
+
+- **Choosing** (`PUT …/step-skills/:step`): a taken Skill → 409 `STEP_SKILL_TAKEN_BY_JOB`, nothing written; checked after the
+  Skill's tree is read, in one synchronous stretch with the write (a job approved during that await is seen). Clearing it and
+  other Skills are unchanged. Test: `plugin-steps.test.ts` 「choosing the Skill for a step is refused…」.
+- **Enabling** (`PUT …/step-settings/:step { autoStart: true }`): a step whose setting names a taken Skill (left from before
+  the job — the approval refuses while a setting names one, so only older data reaches it) → the same 409; `autoStart: false`
+  and the folder are unchanged. Test: 「a step whose setting names the Skill … is not switched to start by itself」.
+- **Asking** (`afterAct`, a meeting read): the request of a step whose work's Skill is taken is written **already closed by
+  that job** (`requestTakenByJob`: `done_at` now, `done_by_job` = the job — 「定期の仕事が受け持つため」), so it is nobody's turn and
+  the scan's `step_busy` does not see it; `request` (any other) opens it anew and now also clears `done_by_job`. Test: 「a
+  meeting's request for a work pinned to the Skill is closed by the job at once…」.
+- **Listing** (`GET /me/plugin-step-turns`): a work whose Skill is taken is left out — a person's step started by itself with a
+  request open (older data, a request opened before the job), and an `ai_turn` step's; the taken Skills are read once per list.
+  Known: the candidates are cut at `TURNS_SHOWN` before this filter (as before for the reader check), so many taken works could
+  push real turns off one answer. Tests: 「an open request of a work pinned to the Skill … is not listed and not claimed」 (a plugin
+  pin is never taken, even with the setting naming the Skill), 「an ai_turn step whose work is pinned to the Skill…」.
+- **Claiming** (`POST /ai-run-claims`, the first claim, a re-claim and one after 「もう一度」 — 「再開」 in the memo):
+  `claimRefusal`, asked **inside the claim's transaction** by the record subjects' `claimed` (`services/run-subjects.ts`,
+  `PluginStepRuns.claimRefusal`) → 409 `NOT_AI_TURN`, the claim rolled back (no run, no generation). Whatever app claims. A run
+  already holding its lease when the job is approved is not ended: a record run has no deadline, so it goes on while its app
+  renews it (the scan's `step_busy` leaves its meeting to it only while it does); once it lets go it is never claimed again, and
+  it no longer counts as busy (above). A first claim refused here may still have written the work's pin in `pinForRun` before the
+  transaction (only with a setting left from before the job; harmless: the pin names the taken Skill, which is refused).
+  Tests: the two above, 「a run claimed before the job: … its re-claim after 「もう一度」 is refused」 and 「a job approved while the
+  claim awaits its pin…」 (the check is in the transaction, not in the claim's earlier turn check).
+- **Not refused**: a person's own start (［ボタン］, 「続きをする」): the owner's O4, a person may always make one in a
+  consultation.
+- Mutation check: every guard above removed alone, the composition's two bindings, the pin before the setting, a plugin pin
+  never taken, the repository's "approved" and "not retired", `request` clearing `done_by_job`, the claim check moved out of the
+  transaction, and the busy run's state and lease (`job-set-watch-scan.test.ts` 「a run of such a step going on…」) — each fails a
+  test. Not caught alone: the busy run's `state = 'running'` (every way out of `running` clears the lease, so the lease check
+  alone refuses the same runs; kept as defence), and the choosing check placed after the Skill's tree is read (a test cannot hold that git read; kept there so a
+  job approved meanwhile is seen).
 
 ## The deliverable folder (owner decision 2026-11-06 ③)
 

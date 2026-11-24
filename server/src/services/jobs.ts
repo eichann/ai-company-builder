@@ -38,7 +38,7 @@ import { jobChainStopText } from '../../shared/core/job-words'
 import { RECORD_ID_RE } from '../../shared/core/records'
 import { companyNow } from './notifications'
 import { createJobEvents, eventShown, recordTriggerProblems, shownSlot, type AiStepStates } from './job-events'
-import { fieldsNow } from './job-set-watch'
+import { fieldsNow, setWatchSkillNames } from './job-set-watch'
 import { isMeetingPerson } from './meeting-people'
 import { DEFAULT_COMPANY_TIME_ZONE } from '../../shared/core/calendar'
 
@@ -194,12 +194,6 @@ export function versionRow(jobId: string, version: number, definition: JobDefini
   }
 }
 const isObject = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v)
-/**
- * The Skill names a set watch runs and reads (4b-4 §3): a business plugin step whose company Skill has one of these names is the
- * same work run another way — told by the name, wherever the Skill folder is (a step pins `.claude/skills/<name>`, the job a
- * department's), on the safe side.
- */
-const setWatchSkillNames = (definition: JobDefinition): string[] => [...new Set(jobPinnedDepartmentSkills(definition).map(p => p.skill))]
 
 export function createJobService(deps: JobServiceDeps) {
   const { companyData, memberships, transactions, clock, ids } = deps

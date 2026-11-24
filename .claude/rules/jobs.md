@@ -1516,8 +1516,9 @@ app, PR7 the admin console.
   own transaction, whenever they were asked — not `answerRequest`'s time condition, so a request a later meeting opened again
   is closed too — marking `done_by_job` (additive, `migratePluginStepRequestCloser`; 「定期の仕事が受け持つため閉じました」);
   it waits for no request or run (§3 ③: a run already going ends within its deadline, and its meeting is before the
-  boundary PR2 enforces). Refused for any other reason → nothing closed (one transaction). PR4 adds the steps' side
-  (choosing, enabling, asking and taking the Skill refused while such a job is approved).
+  boundary PR2 enforces). Refused for any other reason → nothing closed (one transaction). The steps' side (PR4:
+  choosing, enabling, asking and claiming the Skill refused while such a job is approved and not retired) is `plugin-steps.md`
+  "While a set watch takes the Skill over".
 - **The scan and its occurrences** (4b-4 PR2; `services/job-events.ts` `scanSetJob` — the cursor, gaps, stamps, day's limit and
   mark, shared with the event jobs' scan through `cursorReady` —, `services/job-set-watch.ts` — the combination's own rules, one
   place: what is the event, the guards, the conditions while it runs, who sees it):
@@ -1548,8 +1549,8 @@ app, PR7 the admin console.
     the record or the meeting now or is not one of its people; `outside_attendee`: `external_count` 0), `before_acceptance`
     (`after_acceptance`: the record's first ledger row **and** the meeting's first row into `read` must both carry a delivery
     number after the boundary — a NULL one is out, no later reading stands in, T21), `step_busy` (`plugin_step_exclusive`, §3 ②:
-    the meeting's まとまり has an open step request naming that meeting, or an unclosed run of a step, whose pin or company
-    setting names one of the job's Skills — `PluginStepRepository.stepBusyWithSkills`), `day_limit`. A record with a mark (any
+    the meeting's まとまり has an open step request naming that meeting, or a run of a step going on (`running`, its lease
+    live — PR4), whose pin or company setting names one of the job's Skills — `PluginStepRepository.stepBusyWithSkills`), `day_limit`. A record with a mark (any
     job's, any outcome) never makes anything: a new version or a new job never runs the same meeting again. The mark is a plain
     insert, never `OR IGNORE`: the scan asks first in the same transaction, and a mark found there anyway (a second clock) throws,
     so that job's pass — its occurrence included — is rolled back rather than an occurrence beside another job's mark. Each guard is named

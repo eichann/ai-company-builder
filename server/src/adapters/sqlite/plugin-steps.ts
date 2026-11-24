@@ -84,8 +84,15 @@ export function sqlitePluginStepRepository(conn: Database.Database, companyId: s
     },
     request(row) {
       conn.prepare(`INSERT INTO plugin_step_requests (company_id, record_id, plugin_id, step, requested_at, meeting_id, done_at) VALUES (?, ?, ?, ?, ?, ?, NULL)
-        ON CONFLICT (company_id, record_id, plugin_id, step) DO UPDATE SET requested_at = excluded.requested_at, meeting_id = excluded.meeting_id, done_at = NULL`)
+        ON CONFLICT (company_id, record_id, plugin_id, step) DO UPDATE SET requested_at = excluded.requested_at, meeting_id = excluded.meeting_id, done_at = NULL,
+          done_by_job = NULL`)
         .run(companyId, row.recordId, row.pluginId, row.step, row.at, row.meetingId)
+    },
+    requestTakenByJob(row) {
+      conn.prepare(`INSERT INTO plugin_step_requests (company_id, record_id, plugin_id, step, requested_at, meeting_id, done_at, done_by_job) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT (company_id, record_id, plugin_id, step) DO UPDATE SET requested_at = excluded.requested_at, meeting_id = excluded.meeting_id,
+          done_at = excluded.done_at, done_by_job = excluded.done_by_job`)
+        .run(companyId, row.recordId, row.pluginId, row.step, row.at, row.meetingId, row.at, row.jobId)
     },
     openRequest(recordId, pluginId, step) {
       const r = conn.prepare(`SELECT requested_at, meeting_id FROM plugin_step_requests
@@ -118,7 +125,7 @@ export function sqlitePluginStepRepository(conn: Database.Database, companyId: s
             AND p.skill IN (SELECT value FROM json_each(?)))`)
         .run(at, jobId, companyId, companyId, JSON.stringify(skills)).changes
     },
-    stepBusyWithSkills(recordId, meetingId, skills) {
+    stepBusyWithSkills(recordId, meetingId, skills, at) {
       const names = JSON.stringify(skills)
       // A step runs one of the Skills on this work: pinned so (its first run), or the company's setting names it now.
       const runsSkill = (alias: string) => `(EXISTS (SELECT 1 FROM plugin_step_pins p WHERE p.company_id = ? AND p.record_id = ${alias}.record_id
@@ -128,11 +135,12 @@ export function sqlitePluginStepRepository(conn: Database.Database, companyId: s
       const asked = conn.prepare(`SELECT 1 FROM plugin_step_requests q WHERE q.company_id = ? AND q.record_id = ? AND q.done_at IS NULL AND q.meeting_id = ?
           AND ${runsSkill('q')} LIMIT 1`).get(companyId, recordId, meetingId, companyId, names, companyId, names)
       if (asked !== undefined) return true
-      // A run of such a step on the work (its step named `<plugin>__<step>`, plugin-steps.md), not closed yet.
+      // A run of such a step on the work (its step named `<plugin>__<step>`, plugin-steps.md) going on now: running, its lease live.
       const running = conn.prepare(`SELECT 1 FROM ai_runs r JOIN (SELECT ? AS record_id, plugin_id, step FROM plugin_step_pins WHERE company_id = ? AND record_id = ?
             UNION SELECT ? AS record_id, plugin_id, step FROM plugin_step_skills WHERE company_id = ?) s ON r.step = s.plugin_id || '__' || s.step
-          WHERE r.company_id = ? AND r.record_id = ? AND r.closed_at IS NULL AND ${runsSkill('s')} LIMIT 1`)
-        .get(recordId, companyId, recordId, recordId, companyId, companyId, recordId, companyId, names, companyId, names)
+          WHERE r.company_id = ? AND r.record_id = ? AND r.closed_at IS NULL AND r.state = 'running' AND r.claim_expires_at > ?
+            AND ${runsSkill('s')} LIMIT 1`)
+        .get(recordId, companyId, recordId, recordId, companyId, companyId, recordId, at, companyId, names, companyId, names)
       return running !== undefined
     },
   }

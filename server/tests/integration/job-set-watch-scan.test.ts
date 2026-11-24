@@ -426,6 +426,30 @@ describe('the guards (T4 / T6 / T21 / §3 ②)', () => {
     expect(markOf(review).outcome).toBe('step_busy')
   })
 
+  it('a run of such a step going on (running, its lease live) is busy; one that is never claimed again (4b-4 PR4) is not', async () => {
+    const job = await running()
+    const at = new Date().toISOString()
+    const later = new Date(Date.now() + 5 * 60_000).toISOString()
+    const earlier = new Date(Date.now() - 5 * 60_000).toISOString()
+    const withRun = (state: string, expires: string | null) => {
+      const m = meeting()
+      const deal = ok(services.recordEngine.create(alice(), HUMAN, { type: 'task', title: 'まとまりの代わり', fields: { assignee: ALICE } })).record.id
+      companyData.forCompany(CO).records.replaceLinks(m, [{ sourceId: m, name: 'bundle', position: 0, targetId: deal, targetPath: null }])
+      db.prepare("INSERT INTO plugin_step_pins (company_id, record_id, plugin_id, step, source, version, skill, fingerprint, pinned_at, updated_at) VALUES (?, ?, 'corporate-sales', 'prepare_proposal', 'company_skill', NULL, ?, ?, ?, ?)").run(CO, deal, ORIGINAL, 'd'.repeat(40), at, at)
+      db.prepare(`INSERT INTO ai_runs (company_id, id, subject_kind, record_id, step, user_id, state, generation, device_id, conversation_id, claim_expires_at, attempts, created_at, updated_at)
+        VALUES (?, ?, 'record', ?, 'corporate-sales__prepare_proposal', ?, ?, 1, NULL, NULL, ?, 0, ?, ?)`).run(CO, `run-busy-${deal}`, deal, ALICE, state, expires, at, at)
+      return m
+    }
+    const live = withRun('running', later)
+    const lapsed = withRun('running', earlier)
+    const waiting = withRun('waiting_person', null)
+    const reviews = [await read(live), await read(lapsed), await read(waiting)]
+    for (const review of reviews) await complete(review)
+    tick()
+    expect(reviews.map(r => markOf(r).outcome)).toEqual(['step_busy', 'made', 'made'])
+    expect(occurrences(job)).toHaveLength(2)
+  })
+
   it('completed while the job was paused: marked paused, never made after the resume', async () => {
     const job = await running()
     const m = meeting()
