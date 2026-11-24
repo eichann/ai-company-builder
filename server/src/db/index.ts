@@ -22,7 +22,7 @@ import { migrateMemberAbsenceHistory, migrateMemberWorkSwitches, taskSchema } fr
 import { migrateSkillUseColumns, skillUseSchema } from './schema/skill-uses'
 import { securityAlertSchema } from './schema/security-alerts'
 import { migrateShelfHistoryRequester, skillShelfSchema } from './schema/skill-shelf'
-import { holdingSchema } from './schema/holding'
+import { holdingSchema, migrateHoldingErased } from './schema/holding'
 
 // Lanes (server.md "Lane markers"): add only right under your lane's ▼.
 // lane A ▼
@@ -165,6 +165,8 @@ export function initDatabase(conn: Database.Database = sqlite) {
   migrateNotificationsForUser(conn)
   // Scheduled jobs: where an occurrence's check stopped (jobs.md "The app's runner").
   migrateJobOccurrenceCheckedUntil(conn)
+  // The holding place: an item the operator erased is told apart from one received (private-folders.md).
+  migrateHoldingErased(conn)
   migrateJobOccurrenceRetries(conn)
   // Scheduled jobs: the deliverable place the responsible person chose when accepting (jobs.md).
   migrateJobAcceptedPlace(conn)

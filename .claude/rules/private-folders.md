@@ -22,6 +22,9 @@ paths:
   - "server/src/adapters/holding-blobs.ts"
   - "shared/types/private-holding.ts"
   - "server/tests/**/private-holding.test.ts"
+  - "server/src/services/holding-review.ts"
+  - "server/src/routes/holding-review.ts"
+  - "server/tests/**/holding-review.test.ts"
   - "admin/src/lib/private-folders.ts"
   - "admin/src/lib/private-folder-help.ts"
   - "admin/src/app/**/private*/**"
@@ -166,8 +169,8 @@ the first endpoints that take company data from someone who may no longer be a m
 (released apps will call it; `protocol: 1`, fixed kinds and codes): `shared/types/private-holding.ts`.
 Code: `routes/private-holding.ts` → `services/private-holding.ts` → the handle's `holding` /
 `holdingItems` (`adapters/sqlite/holding.ts`) and the blob store (`adapters/holding-blobs.ts`).
-Nothing reviews or takes in an item yet (S3: admin endpoints; A1: the 「預かり」 tab), and no app
-calls it yet (C1).
+The folder's managers review it through the admin endpoints of S3 ("Holding: review" below; the
+console's 「預かり」 tab is A1), and no app calls it yet (C1).
 
 - **Routes** (`/api/me/holding`, `signedIn`, **no membership**: a person removed from the company
   still hands over): `GET /tickets` (open ones and those closed in the last 90 days: `ticketId`,
@@ -263,12 +266,16 @@ calls it yet (C1).
 - **Archive and erasure**: `company-archive.ts export` lists the company's held item directories
   (`heldContents`, like kept private-folder archives: listed, not copied; the rows travel as every
   `company_id` table). `erase-content.ts holding <companyId> <itemId> <reason>`: the item's contents
-  and file rows go, the item stays `discarded` (so the app's retry hears `ALREADY_RECEIVED`),
-  `holding-erased` in `permission_history`. **Open owner decision** (review L4, 2026-11-24): erasing
-  an item that is still `receiving` also answers `ALREADY_RECEIVED`, so that member's app removes
-  its local copy too — left as is for the owner to decide (the alternative: answer so the app keeps it).
-- **For S3** (not here): before taking an item in, re-validate every manifest path with the push
-  checker's rules (as the reviewer's push does); S2 only normalises them.
+  and file rows go, the item stays `discarded` and is marked `erased_at` (`migrateHoldingErased`),
+  `holding-erased` in `permission_history`. **Owner decision L4 (2026-11-24, 「B」 + block)**: an item
+  still `receiving` (the member's app is uploading) is **never erased** — refused in the erase's own
+  transaction, nothing changed, the command says so in plain words (retry after it finishes, or cancel
+  the ticket first); an item `taking` (a reviewer's take-in) likewise. And an erased item is never
+  answered as received: its own member gets 410 `ERASED` from the manifest, a blob PUT and `finish`
+  (the app keeps its copy; never `ALREADY_RECEIVED`), anyone else the same 404. Tests:
+  `private-holding.test.ts` "refuses an item still being received", "told ERASED".
+- S2 only normalises manifest paths; taking an item in judges them again as the reviewer's push
+  ("Holding: review").
 - Tests: `server/tests/integration/private-holding.test.ts` (every rule above through the real app,
   with bodies held open mid-upload for the races — a second PUT losing to a finished item, a manifest
   changed during an upload — and the admission checks asserted to never read the body; no holding
@@ -277,6 +284,89 @@ calls it yet (C1).
   `CROSS`: another company's member's ticket / item = unknown), `company-scoped-sql.test.ts`,
   `request-log.test.ts` (a manifest with paths; only `ticketId` printed), `company-archive.test.ts`
   (`heldContents`).
+
+## Holding: review (stage S3)
+
+The folder's managers look at what was handed over and take it into the folder or discard it
+(design memo §4; owner decisions 5, 6, 7, 12). Contract: the review section of
+`shared/types/private-holding.ts` (not read by released apps: the admin console's 「預かり」 tab, A1,
+is its first caller). Code: `routes/holding-review.ts` → `services/holding-review.ts` → the handle's
+`holdingItems` (review compare-and-sets), `privateFolders` (`filesAt`, `readBlob`,
+`findCommitWithLine`, `commitFiles`: `adapters/private-folders.ts`) and the blob store.
+
+- **Routes** (`/api/companies/:companyId`, `companyMember`): `GET /holding` (the items the caller may
+  review: waiting or being taken in, with who, cause, when it arrived, `expiresAt` = 30 days after,
+  counts by kind), `GET /holding/:itemId` (+ each entry's `standing` against the folder's tip —
+  `unchanged` / `changed` since the member's base / `unknown` without a base — `inFolderNow`,
+  `takeable`), `GET /holding/:itemId/files/:idx?version=held|base|current` (one entry's bytes, always
+  `application/octet-stream` + `attachment` + `nosniff` + a sandboxing CSP, `no-store`; a held one is
+  recorded `holding-downloaded`), `POST /holding/:itemId/take { files: idx[], whenChanged?:
+  'alongside' | 'overwrite' }`, `POST /holding/:itemId/discard`. Zip download of a whole item: not
+  yet (A1 may download entry by entry).
+- **Who** (I5, one check `reviewable`): someone who reads the folder now (`canReadPrivateScope`) and
+  is owner / admin or manages its path (`services/private-folders.ts` `canManagePath`, injected: a
+  manager of its department); an item whose folder is no longer a private folder (deleted, or made
+  public — owner decision on the safe side) → owners / admins only, and only download / discard (409
+  `FOLDER_GONE` on take; owner decision 7). A receiving item, another company's item, or anyone else
+  → the same 404 `{ error: 'Not found' }`, before the body is read. The list leaves such items out.
+- **Taking in is the reviewer's own push** (I6): `PrivateFolderRepository.commitFiles` builds ONE
+  commit on the folder's main (`lib/bare-commit.ts` `commitRootEditWithCommit` + `applyPathEdits`, no
+  working tree, async git only) and pushes it from the repository to itself with the reviewer's
+  permission snapshot (`preparePushCheck` with the pusher, scopes, managed folders and 「Skill を直せる人」 that
+  git-http would use — composed in `composition.ts` `pushSnapshot` — plus `ACB_PUSHER_ROLE` / `_ID` /
+  `ACB_NODE`; never `internalGitEnv`, the server marker and any inherited snapshot are removed). So
+  write permission (`[WRITE_DENIED]` for a manager who only views), protected config, secrets
+  (also a content changed on the server's disk since it was scanned), `.personal`, Windows names and
+  look-alikes are judged on what is written now; paths stored at upload are never trusted. Before
+  that the service refuses (400 `NOT_TAKEABLE`, with the indexes) `personal` and names-only entries,
+  a content not held or gone from the disk, and a path with an empty / `.` / `..` / `.git` segment. A
+  refusal → 409 `TAKE_REFUSED` with `refused` (the checker's markers and paths, relative to the
+  folder) and a Japanese sentence; nothing lands, the item stays `waiting`. Registered as a push to
+  the folder (`beginScopePush`), under the company lock (serialised with create / delete /
+  make-public); a member's push in between → redone on the new tip.
+- **Never over a later change** (owner decision 6), decided on the tip the commit is built on (again
+  on a new tip): files matched by `pathKey`, written at the tip's spelling — an existing file's, and
+  for a new file or an alongside copy the folders above it as the repository spells them (never a second
+  spelling of one folder; Codex P2). A content entry: already
+  so → `same`; absent → `placed`; unchanged since the member's base → `placed` (replaced); changed
+  since or no base → `alongside` as 「<stem>（<member's name>さんの版 MM-DD）<ext>」 (MM-DD of arrival,
+  Japan time; ` 2`, ` 3` when taken), or `overwritten` when the reviewer chose `overwrite`. A `backup`,
+  a symlink / gitlink there, or a folder at the path: always alongside. A `deleted` entry: removed only
+  when unchanged since the base, else `skipped` (`changed`, `absent`). A chosen content with no place
+  now (a file where its folder was) refuses the whole take-in, 409 `PATH_TAKEN` with `files`, nothing
+  committed, the item waiting — never `taken` with that content dropped (independent review). The
+  take-in decides the whole item: unchosen entries are discarded with it.
+- **Under the lock, read again**: the caller's membership and role (`memberOf`: an admin demoted while
+  the request waited is not pushed as an admin — independent review), who reads the folder, the item.
+- **Once** (I6, checklist 7): `waiting → taking` (compare-and-set, by the reviewer) under the company
+  lock is the "done" guard; discard (`waiting → discarded`) and the clock's expiry (`waiting →
+  expired`) are compare-and-sets from `waiting` too, so a second take-in or a discard → 409
+  `ALREADY_DECIDED` (「ほかの人が先に決めました。」), an item past its 30 days → 410 `EXPIRED`. The
+  commit message is 「<name>さんの預かりから取り込み（N件）」 + the line `ACB-Holding-Item: <itemId>`
+  (the member's name, a count and an id; no content, no folder name). After the push: `taking →
+  taken` with `decision_commit` and `holding-taken` in one transaction, then the contents are deleted.
+  A take-in that did not finish is **settled by the folder's history** (`findCommitWithLine`, the last
+  1,000 commits): an error after the push (before the item was marked) → looked for at once; an item
+  found `taking` under the company lock (a stopped process: no take-in runs while the lock is held) →
+  by take / discard, and by the server clock before its holding sweep. The line there → `taken`, none →
+  `taking → waiting`; **the history unreadable → still `taking`** (a later settle asks again; take /
+  discard answer 503 `BUSY`) — never given back to be taken in twice (Codex P2). A folder gone
+  meanwhile → waiting.
+- **Discard**: `waiting → discarded` + `holding-discarded`, then the contents are deleted (the sweep
+  catches up when that fails).
+- **Admin home** (owner decision 12): `attention.holding { waiting, expiringSoon }` — the items the
+  caller may review and those the clock discards within 7 days (`services/admin-home.ts`, from
+  `holdingReview.attention`); a 知らせ kind comes later.
+- Not here (later stages): `HOLDING_CLIENT_COMMIT_DATE` for the console's old-app warning (needs the
+  C1 build), the zip download, taking a deleted folder's item into another folder (question 7).
+- Tests: `server/tests/integration/holding-review.test.ts` (who reviews and the one 404 for everyone
+  else, a deleted folder, alongside / overwrite / deletions / one commit and its message, refusals by
+  the push checker as the reviewer, the folders' spelling, `PATH_TAKEN`, a role changed while waiting,
+  two take-ins at once, take-in racing discard, the clock and an item being taken in, settling by the
+  folder's history both ways and an unreadable history, downloads, the admin home; no
+  answer to a non-reviewer and no log line names the folder or an entry path; each guard
+  mutation-checked), `permission-matrix.test.ts` (rows + `CROSS`: another company's waiting item =
+  unknown).
 
 ## Repositories and git-http
 

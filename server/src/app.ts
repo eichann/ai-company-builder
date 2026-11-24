@@ -24,6 +24,7 @@ import { groupsRoute } from './routes/groups'
 import { jobsRoute } from './routes/jobs'
 import { jobProposalsAiRoute, jobProposalsRoute } from './routes/job-proposals'
 import { privateFoldersRoute } from './routes/private-folders'
+import { holdingReviewRoute } from './routes/holding-review'
 import { clientActivityMiddleware } from './routes/client-activity-middleware'
 import { agentEventsRoute } from './routes/agent-events'
 import { agentSandboxRoute } from './routes/agent-sandbox'
@@ -186,6 +187,8 @@ app.route('/api/companies/:companyId', jobsRoute)
 // A member's proposal of a time job (jobs.md "Member proposals"): the session's routes.
 app.route('/api/companies/:companyId', jobProposalsRoute)
 app.route('/api/companies/:companyId', privateFoldersRoute)
+// The holding place, the review (private-folders.md "Holding: review"): the folder's managers take in or discard.
+app.route('/api/companies/:companyId', holdingReviewRoute)
 app.route('/api/companies/:companyId', agentEventsRoute)
 app.route('/api/companies/:companyId', agentSandboxRoute)
 app.route('/api/companies/:companyId', agentBrowserRoute)

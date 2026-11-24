@@ -87,7 +87,8 @@ export function sqliteHoldingTicketLookup(conn: Database.Database): HoldingTicke
 type ItemRow = {
   id: string; ticket_id: string; user_id: string; device_key: string; scope_id: string; folder_path: string
   base_commit: string | null; state: HoldingItemState; total_bytes: number; created_at: string
-  finished_at: string | null; blobs_deleted_at: string | null
+  finished_at: string | null; decided_at: string | null; decided_by: string | null; decision_commit: string | null
+  blobs_deleted_at: string | null; erased_at: string | null
 }
 type FileRow = {
   idx: number; path: string; kind: HoldingFileKind; size: number; sha256: string | null; label: string | null
@@ -97,7 +98,8 @@ type FileRow = {
 const toItem = (r: ItemRow): HoldingItem => ({
   id: r.id, ticketId: r.ticket_id, userId: r.user_id, deviceKey: r.device_key, scopeId: r.scope_id,
   folderPath: r.folder_path, baseCommit: r.base_commit, state: r.state, totalBytes: r.total_bytes,
-  createdAt: r.created_at, finishedAt: r.finished_at, blobsDeletedAt: r.blobs_deleted_at,
+  createdAt: r.created_at, finishedAt: r.finished_at, decidedAt: r.decided_at, decidedBy: r.decided_by,
+  decisionCommit: r.decision_commit, blobsDeletedAt: r.blobs_deleted_at, erasedAt: r.erased_at ?? null,
 })
 const toFile = (r: FileRow): HoldingFile => ({
   idx: r.idx, path: r.path, kind: r.kind, size: r.size, sha256: r.sha256, label: r.label, stored: r.stored === 1, dropped: r.dropped,
@@ -253,15 +255,53 @@ export function sqliteHoldingItemRepository(conn: Database.Database, companyId: 
 
     erase(itemId, at) {
       return conn.transaction(() => {
-        const changed = conn.prepare(`
-          UPDATE holding_items SET state = CASE WHEN state IN ('receiving', 'waiting', 'taking') THEN 'discarded' ELSE state END,
-            decided_at = COALESCE(decided_at, ?), decided_by = COALESCE(decided_by, 'operator'), total_bytes = 0, updated_at = ?
-          WHERE company_id = ? AND id = ?
-        `).run(at, at, companyId, itemId).changes
-        if (changed === 0) return false
+        const row = conn.prepare(`SELECT state FROM holding_items WHERE company_id = ? AND id = ?`).get(companyId, itemId) as { state: HoldingItemState } | undefined
+        if (!row) return 'unknown' as const
+        // The member's app is still uploading: never erased under it (owner decision L4). A take-in
+        // running now holds the contents too: erased after it (the operator's command has no company lock).
+        if (row.state === 'receiving' || row.state === 'taking') return row.state
+        conn.prepare(`
+          UPDATE holding_items SET state = CASE WHEN state = 'waiting' THEN 'discarded' ELSE state END,
+            decided_at = COALESCE(decided_at, ?), decided_by = COALESCE(decided_by, 'operator'), total_bytes = 0,
+            erased_at = COALESCE(erased_at, ?), updated_at = ?
+          WHERE company_id = ? AND id = ? AND state NOT IN ('receiving', 'taking')
+        `).run(at, at, at, companyId, itemId)
         conn.prepare(`DELETE FROM holding_files WHERE company_id = ? AND item_id = ?`).run(companyId, itemId)
-        return true
+        return 'erased' as const
       })()
+    },
+
+    forReview() {
+      return (conn.prepare(`SELECT * FROM holding_items WHERE company_id = ? AND state IN ('waiting', 'taking') ORDER BY finished_at, id`)
+        .all(companyId) as ItemRow[]).map(toItem)
+    },
+
+    beginTaking(itemId, by, at) {
+      return conn.prepare(`
+        UPDATE holding_items SET state = 'taking', decided_by = ?, decided_at = ?, updated_at = ?
+        WHERE company_id = ? AND id = ? AND state = 'waiting'
+      `).run(by, at, at, companyId, itemId).changes > 0
+    },
+
+    markTaken(itemId, commit, at) {
+      return conn.prepare(`
+        UPDATE holding_items SET state = 'taken', decision_commit = ?, decided_at = ?, updated_at = ?
+        WHERE company_id = ? AND id = ? AND state = 'taking'
+      `).run(commit, at, at, companyId, itemId).changes > 0
+    },
+
+    backToWaiting(itemId, at) {
+      return conn.prepare(`
+        UPDATE holding_items SET state = 'waiting', decided_by = NULL, decided_at = NULL, updated_at = ?
+        WHERE company_id = ? AND id = ? AND state = 'taking'
+      `).run(at, companyId, itemId).changes > 0
+    },
+
+    discard(itemId, by, at) {
+      return conn.prepare(`
+        UPDATE holding_items SET state = 'discarded', decided_by = ?, decided_at = ?, updated_at = ?
+        WHERE company_id = ? AND id = ? AND state = 'waiting'
+      `).run(by, at, at, companyId, itemId).changes > 0
     },
   }
 }

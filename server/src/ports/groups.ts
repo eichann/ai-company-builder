@@ -62,6 +62,15 @@ export interface PermissionHistoryEntry {
     | 'holding-expired'
     /** The operator erased an item's contents and names (`itemId`, `reason`; src/cli/erase-content.ts). */
     | 'holding-erased'
+    /**
+     * A reviewer took an item into its folder (`itemId`, `ticketId`, `scopeId`, `userId`, `files` = the
+     * changes made (null when settled from the folder's history), `commit`; private-folders.md "Holding: review").
+     */
+    | 'holding-taken'
+    /** A reviewer discarded an item (`itemId`, `ticketId`, `scopeId`, `userId`). */
+    | 'holding-discarded'
+    /** A reviewer downloaded one held content (`itemId`, `idx`). */
+    | 'holding-downloaded'
   /**
    * What changed, as JSON-able data (ids, names, a place's path, rules before / after; for a
    * group's or a department's members `before` / `after` ids and, when not an edit of the list

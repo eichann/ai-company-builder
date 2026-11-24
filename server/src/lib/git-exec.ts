@@ -17,7 +17,8 @@ import { requestOperations } from './request-log'
 const execFileAsync = promisify(execFile)
 
 export interface GitAsyncOptions {
-  input?: string
+  /** Written to git's stdin (bytes as given). */
+  input?: string | Buffer
   /** Added to (and overriding) this process's environment. */
   env?: NodeJS.ProcessEnv
   /**
@@ -89,7 +90,7 @@ export async function gitBufferAsync(args: string[], input?: string, maxBuffer =
 function gitWithWatchdog(
   args: string[],
   env: NodeJS.ProcessEnv,
-  input: string | undefined,
+  input: string | Buffer | undefined,
   timeoutMs: number,
   maxBuffer: number,
 ): Promise<string> {

@@ -47,12 +47,31 @@ export interface BareCommitTimeouts {
 export interface RootEdit<T> {
   entries?: TreeEntry[]
   result: T
+  /** This attempt's commit message, when it depends on what the edit decided (else the options'). */
+  message?: string
 }
 
 export interface CommitRootEditOptions {
   message: string
   identity: CommitIdentity
   timeouts: BareCommitTimeouts
+  /**
+   * The push's hook environment instead of internalGitEnv(): a member's permission snapshot
+   * (`preparePushCheck`), so the checker applies every rule — write permission included — as if
+   * that member pushed (private-folders.md "Holding: review"). Never combined with the marker.
+   */
+  pushAs?: Record<string, string>
+}
+
+/** The process environment without the server's own push marker (never inherited by a member's push). */
+function withoutServerMarker(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const copy = { ...env }
+  delete copy.ACB_INTERNAL_PUSH
+  delete copy.ACB_PUSH_POLICY
+  delete copy.ACB_PUSHER_ROLE
+  delete copy.ACB_PUSHER_ID
+  delete copy.ACB_PUSHER_EMAIL
+  return copy
 }
 
 /** Attempts before a run of concurrent member pushes makes us give up. */
@@ -155,8 +174,17 @@ export async function commitFileEdit(
 export async function commitRootEdit<T>(
   bareRepo: string,
   options: CommitRootEditOptions,
-  edit: (entries: TreeEntry[]) => Promise<RootEdit<T>>,
+  edit: (entries: TreeEntry[], parent: string | null) => Promise<RootEdit<T>>,
 ): Promise<T> {
+  return (await commitRootEditWithCommit(bareRepo, options, edit)).result
+}
+
+/** commitRootEdit, also answering the commit it published (null: nothing to commit). */
+export async function commitRootEditWithCommit<T>(
+  bareRepo: string,
+  options: CommitRootEditOptions,
+  edit: (entries: TreeEntry[], parent: string | null) => Promise<RootEdit<T>>,
+): Promise<{ result: T; commit: string | null }> {
   const { message, identity, timeouts } = options
   const local = timeouts.local
   // Explicit identity: the server's commits must not depend on the host's
@@ -173,23 +201,28 @@ export async function commitRootEdit<T>(
     const parent = await revParse(bareRepo, ref, local)
     const entries = parent ? await readTree(bareRepo, parent, local) : []
 
-    const decided = await edit(entries)
-    if (!decided.entries) return decided.result
+    const decided = await edit(entries, parent)
+    if (!decided.entries) return { result: decided.result, commit: null }
 
     const tree = await writeTree(bareRepo, decided.entries, local)
     const commit = (await gitAsync(
-      ['-C', bareRepo, 'commit-tree', tree, ...(parent ? ['-p', parent] : []), '-m', message],
+      ['-C', bareRepo, 'commit-tree', tree, ...(parent ? ['-p', parent] : []), '-m', decided.message ?? message],
       { env: commitEnv, timeoutMs: local },
     )).trim()
 
     try {
       // To itself: receive-pack runs the pre-receive checker on the update,
-      // which is marked as the server's own (internalGitEnv)
+      // which is marked as the server's own (internalGitEnv) — or, with
+      // `pushAs`, checked as that member's push (no marker: the checker's
+      // serverPush needs the marker and no snapshot, and gets neither).
+      const env = options.pushAs
+        ? { ...withoutServerMarker(process.env), ...options.pushAs, GIT_TERMINAL_PROMPT: '0' }
+        : { ...internalGitEnv(), GIT_TERMINAL_PROMPT: '0' }
       await gitAsync(['-C', bareRepo, 'push', '--quiet', bareRepo, `${commit}:${ref}`], {
-        env: { ...internalGitEnv(), GIT_TERMINAL_PROMPT: '0' },
+        env,
         timeoutMs: timeouts.push,
       })
-      return decided.result
+      return { result: decided.result, commit }
     } catch (error) {
       // The branch moved (a member's push): redo the edit on the new tip.
       // Anything else — the checker refused, a timeout — is the caller's error.
@@ -197,4 +230,61 @@ export async function commitRootEdit<T>(
       if (now === parent || attempt >= MAX_ATTEMPTS) throw error
     }
   }
+}
+
+/** One change of a file at `path` (as stored, '/'-separated): a blob put there, or the file removed. */
+export type PathEdit = { path: string; blob: string; mode: string } | { path: string; remove: true }
+
+/** An edit that would replace a folder by a file, or put a file inside a file: never done silently. */
+export class PathEditConflictError extends Error {
+  constructor() {
+    super('path edit conflicts with the tree')
+    this.name = 'PathEditConflictError'
+  }
+}
+
+/**
+ * The root entries after `edits`: the trees along each path are rewritten once, every other
+ * subtree is reused; a tree left empty by removals disappears (git keeps no empty folders). A file
+ * where a folder is, or a folder where a file is, throws PathEditConflictError (the caller decides
+ * such paths before).
+ */
+export async function applyPathEdits(bareRepo: string, entries: TreeEntry[], edits: PathEdit[], timeoutMs: number): Promise<TreeEntry[]> {
+  const here = new Map<string, PathEdit>()
+  const below = new Map<string, PathEdit[]>()
+  for (const e of edits) {
+    const segments = e.path.split('/')
+    if (segments.some(s => s === '' || s === '.' || s === '..')) throw new Error('applyPathEdits: bad path')
+    const [name, ...rest] = segments
+    if (rest.length === 0) here.set(name, e)
+    else below.set(name, [...(below.get(name) ?? []), { ...e, path: rest.join('/') }])
+  }
+  let out = entries.slice()
+  for (const [name, e] of here) {
+    const existing = out.find(x => x.name === name)
+    if ((existing && existing.type !== 'blob') || below.has(name)) throw new PathEditConflictError()
+    out = out.filter(x => x.name !== name)
+    if (!('remove' in e)) out.push({ mode: e.mode, type: 'blob', oid: e.blob, name })
+  }
+  for (const [name, inner] of below) {
+    const existing = out.find(x => x.name === name)
+    if (existing && existing.type !== 'tree') throw new PathEditConflictError()
+    const next = await applyPathEdits(bareRepo, existing ? await readTree(bareRepo, existing.oid, timeoutMs) : [], inner, timeoutMs)
+    out = out.filter(x => x.name !== name)
+    if (next.length > 0) out.push({ mode: '040000', type: 'tree', oid: await writeTree(bareRepo, next, timeoutMs), name })
+  }
+  return out
+}
+
+/** Write a blob from bytes (no attributes or filters apply). Returns its id. */
+export async function writeBlobBytes(bareRepo: string, content: Buffer, timeoutMs: number): Promise<string> {
+  return (await gitAsync(['-C', bareRepo, 'hash-object', '-w', '--no-filters', '--stdin'], { input: content, timeoutMs })).trim()
+}
+
+/** Every file of a commit's tree (recursively, paths as stored), or null when the commit is not in the repository. */
+export async function listFiles(bareRepo: string, commit: string, timeoutMs: number): Promise<{ commit: string; files: Array<{ path: string; mode: string; type: string; oid: string }> } | null> {
+  const resolved = await revParse(bareRepo, commit, timeoutMs)
+  if (!resolved) return null
+  const out = await gitAsync(['-C', bareRepo, 'ls-tree', '-r', '-z', '--full-tree', resolved], { timeoutMs })
+  return { commit: resolved, files: parseTree(out).map(e => ({ path: e.name, mode: e.mode, type: e.type, oid: e.oid })) }
 }

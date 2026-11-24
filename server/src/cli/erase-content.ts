@@ -71,7 +71,17 @@ async function main(argv: string[]): Promise<number> {
       companyData: sqliteCompanyData(db), ticketLookup: sqliteHoldingTicketLookup(db), blobs: diskHoldingBlobStore(HOLDING_DIR),
       transactions: sqliteTransactions(db), clock: systemClock, ids: randomIds,
     })
-    if (!(await holding.erase(args[0], args[1], args[2]))) { console.error('No such held item in this company.'); return 1 }
+    const answer = await holding.erase(args[0], args[1], args[2])
+    if (answer === 'unknown') { console.error('No such held item in this company.'); return 1 }
+    if (answer === 'receiving') {
+      // Owner decision L4 (2026-11-24): never under the member's app while it still uploads.
+      console.error('Not erased: this item is still being received (the member\'s app is uploading). Try again after it has finished, or cancel the member\'s holding ticket first.')
+      return 1
+    }
+    if (answer === 'taking') {
+      console.error('Not erased: a reviewer is taking this item into its folder right now. Try again in a moment.')
+      return 1
+    }
     console.log(`erased ${args[0]} holding ${args[1]}`)
     return 0
   }

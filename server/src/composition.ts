@@ -96,6 +96,7 @@ import { createGroupService } from './services/groups'
 import { createServerClock } from './services/server-clock'
 import { createHoldingTicketService } from './services/holding-tickets'
 import { createPrivateHoldingService } from './services/private-holding'
+import { createHoldingReviewService } from './services/holding-review'
 import { createReaderChangeGate } from './lib/reader-change-gate'
 import { createRestorePause } from './services/restore-pause'
 import { createSecurityAlertService } from './services/security-alerts'
@@ -214,8 +215,27 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
   const holdingTickets = createHoldingTicketService({ ...repos, ...shared, readerChanges })
   const trackReaderChange = holdingTickets.track
   // With a ticket, what their PC never sent is handed over here (private-folders.md "Holding: the member's upload").
+  const holdingBlobs = diskHoldingBlobStore(HOLDING_DIR)
   const privateHolding = createPrivateHoldingService({
-    ...shared, ticketLookup: sqliteHoldingTicketLookup(conn), blobs: diskHoldingBlobStore(HOLDING_DIR),
+    ...shared, ticketLookup: sqliteHoldingTicketLookup(conn), blobs: holdingBlobs,
+  })
+  const privateFolders = createPrivateFolderService({ ...repos, ...shared, repoStore, companyLock: processCompanyLock, trackReaderChange })
+  // The folder's managers take what was handed over into the folder, or discard it (private-folders.md "Holding: review").
+  const holdingReview = createHoldingReviewService({
+    ...shared, blobs: holdingBlobs, companyLock: processCompanyLock,
+    canManagePath: privateFolders.canManagePath,
+    memberOf: (companyId, userId) => access.memberOf(companyId, userId),
+    // The reviewer exactly as git-http's push snapshot names them for their own push (called after construction).
+    pushSnapshot: m => {
+      const scopes = shared.companyData.forCompany(m.companyId).scopes
+      scopes.ensureCompanyScope(null)
+      return {
+        pusher: { id: m.userId, role: m.role },
+        scopes: scopes.listWithRules(),
+        managedFolders: permissionViews.managedFolders(m.companyId, m.userId),
+        skillEditing: permissionViews.skillEditing(m.companyId, m.userId),
+      }
+    },
   })
   // With or without the shared company folder (owner decision 2026-11-07): what needs the repository asks.
   const companyFolders = createCompanyFolders({ companies: repos.companies, companyData: shared.companyData })
@@ -826,7 +846,8 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
       // Holding tickets past their 30 days (private-folders.md "Access removed"): every company.
       expireHoldingTickets: companyId => holdingTickets.expire(companyId),
       // The holding place's retention (private-folders.md "Holding: the member's upload"): every company.
-      sweepHolding: companyId => privateHolding.sweep(companyId),
+      // First a take-in a stopped process left halfway is settled (private-folders.md "Holding: review").
+      sweepHolding: async companyId => { await holdingReview.settleStale(companyId); return privateHolding.sweep(companyId) },
       yieldNow: () => new Promise<void>(resolve => setImmediate(resolve)),
     }),
     permissionViews,
@@ -839,6 +860,7 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
       googleUsable: companyId => googleConnector.usable(companyId),
       meetingDuplicates: m => { const r = meetingOutputs.duplicates(m); return r.ok ? r.value.groups.length : null },
       securityAlerts: m => securityAlerts.forHome(m),
+      holding: m => holdingReview.attention(m),
       stoppedPlugins: async m => {
         const r = await plugins.list(m)
         if (!r.ok) return []
@@ -849,7 +871,8 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     permissionEditor,
     // The holding place, the member's upload (private-folders.md "Holding: the member's upload").
     privateHolding,
-    privateFolders: createPrivateFolderService({ ...repos, ...shared, repoStore, companyLock: processCompanyLock, trackReaderChange }),
+    privateFolders,
+    holdingReview,
     companyFolders,
     agentEvents,
     agentSandbox,
