@@ -1,5 +1,5 @@
 // One item's value as the member edits it (C1): 確度 from the business's stages, 金額 a number, 計上月 months with amounts,
-// 商談の記録 a text. The value stays the file's shape (`SetUpdateValue`), so what is applied is what the AI's file allows.
+// 受注予定日 a day, 商談の記録 a text. The value stays the file's shape (`SetUpdateValue`), so what is applied is what the AI's file allows.
 import { Plus, X } from '@phosphor-icons/react'
 import type { SetUpdateValue } from '../../../../shared/after-meeting'
 import { editorOf, type DraftItem } from '../model'
@@ -17,6 +17,9 @@ export function ValueEditor({ item, stages, disabled, onChange }: { item: DraftI
         {stages.map(s => <option key={s} value={s}>{s}</option>)}
       </select>
     )
+  }
+  if (kind === 'date') {
+    return <input aria-label={label} type="date" className={FIELD} disabled={disabled} value={typeof item.値 === 'string' ? item.値 : ''} onChange={e => onChange(e.target.value)} />
   }
   if (kind === 'number') {
     return (

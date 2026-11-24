@@ -38,6 +38,21 @@ test('［反映する］ hands only the ticked items with the member\'s values a
   expectNoPageErrors(state)
 })
 
+test('受注予定日 is picked as a day on the card and handed on as the member picked it', async ({ page }) => {
+  const state = await openPreview(page, 'after-meeting', { closedate: '1' })
+  const card = page.getByRole('region', { name: '会議のあとの更新案' })
+  const day = card.getByRole('textbox', { name: '1001 の 受注予定日' })
+  await expect(day).toHaveAttribute('type', 'date')
+  await day.fill('2027-01-20')
+  await expect(card.getByRole('listitem', { name: '1001 の 受注予定日' }).getByText('直しました')).toBeVisible()
+  await card.getByRole('button', { name: '反映する' }).click()
+  await page.getByRole('button', { name: 'この内容で反映する' }).click()
+  const consult = (await asked(page)).find(a => 'consult' in a)!.consult as { detail: string }
+  expect(consult.detail).toContain('"項目": "受注予定日"')
+  expect(consult.detail).toContain('"値": "2027-01-20"')
+  expectNoPageErrors(state)
+})
+
 test('a consultation that does not start takes the press back and says so', async ({ page }) => {
   const state = await openPreview(page, 'after-meeting', { nostart: '1' })
   const card = page.getByRole('region', { name: '会議のあとの更新案' })

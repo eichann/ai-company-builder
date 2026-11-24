@@ -2,7 +2,7 @@
 // `readAfterMeeting` answers the run's files from the data below, `noteAfterMeeting` keeps the mark here (refusing an item
 // already handed on, as main does), and every press is listed in window.__acbAfterMeeting.
 // /tests/after-meeting-ui.html (&off=1: the company's switch off; &weekly=1: the Friday report's やること; &result=approval:
-// a result waiting for 田中さん's approval; &theme=dark)
+// a result waiting for 田中さん's approval; &closedate=1: a 受注予定日 item too; &theme=dark)
 import { createRoot } from 'react-dom/client'
 import '../src/i18n'
 import '../src/index.css'
@@ -30,6 +30,7 @@ const read = (): AfterMeetingRead => ({
     { 書き先: 'hubspot', 取引: '1001', 項目: '確度', 値: 'B（中）', 根拠: '来月から始めたいと先方が話した', 理由: '導入時期が決まった' },
     { 書き先: 'hubspot', 取引: '1001', 項目: '金額', 値: 300000 },
     { 書き先: '係数表', 取引: '1001', 項目: '計上月', 値: [{ 月: '2026-12', 金額: 300000 }] },
+    ...(params.get('closedate') === '1' ? [{ 書き先: 'hubspot' as const, 取引: '1001', 項目: '受注予定日', 値: '2026-12-15' }] : []),
   ],
 })
 

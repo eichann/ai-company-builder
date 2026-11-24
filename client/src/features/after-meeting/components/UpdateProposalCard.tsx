@@ -146,7 +146,7 @@ export function UpdateProposalCard({ companyId, rootPath, occurrenceId, task }: 
           const tone = statusTone(s)
           const line = statusText(s)
           const editable = !disabled && (s.kind === 'new' || s.kind === 'stopped' || (s.kind === 'result' && (s.result.状態 === '失敗' || s.result.状態 === '反映しない')))
-          const problem = valueProblem(d.値)
+          const problem = valueProblem(d.値, d)
           return (
             <li key={d.key} aria-label={`${d.取引} の ${d.項目}`} className="space-y-1.5 rounded-control border border-border bg-surface p-2">
               <div className="flex flex-wrap items-center gap-2">

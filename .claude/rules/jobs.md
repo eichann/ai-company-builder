@@ -1702,7 +1702,8 @@ not make jobs members' apps cannot run).
     finished twice; the copy is removed after ④.
   - **The update proposals' file** (§G, S9 / S11 #11; the card that applies them is PR6): `更新案.json` in the run folder,
     `{ "版": 1, "会議": <the pinned meeting>, "更新案": [{ 書き先: hubspot | 係数表, 取引, 項目 (HubSpot: 確度・金額・計上月・次のアクション・
-    商談の記録・取引を作る; 係数表: one line ≤ 40), 値 (text ≤ 2,000, a number, or [{ 月: YYYY-MM, 金額 }]), 根拠? (found in the
+    受注予定日・商談の記録・取引を作る; 係数表: one line ≤ 40), 値 (text ≤ 2,000, a number, or [{ 月: YYYY-MM, 金額 }]; HubSpot's
+    受注予定日 only a real day `YYYY-MM-DD`, the business plugin's date shape — `SET_WATCH_CLOSE_DATE`, `isDayValue`), 根拠? (found in the
     minutes), 理由? }] }` — ≤ 20 items, each 取引 + 項目 once (with the meeting, the key a later apply tells duplicates by — never
     "the same day"), ≤ 64 KB (`parseUpdateProposals`). **The app counts, the AI does not** (the tool takes no `updates`). A file not
     of the shape: the AI is told once what is wrong; reported again unchanged, the run ends with none counted (`updatesFile:
@@ -1888,13 +1889,14 @@ not make jobs members' apps cannot run).
     ids only in their plain shapes); and 確度's choices from `GET /records/types` (a choice field labelled 確度, its `optionLabels`;
     none → typed; kept 5 minutes per company). A run folder is compared as the disk folds names (`diskKey`).
   - **The card** (`components/UpdateProposalCard.tsx`): each item editable (確度 from those choices, 金額 a number, 計上月 months
-    with amounts, 商談の記録 a text; 「直しました」 and the AI's value beside), ticked (all at first), ［項目を足す］ (HubSpot's fixed
+    with amounts, 受注予定日 a date picker (a day `YYYY-MM-DD`; none or another shape is not handed on), 商談の記録 a text; 「直しました」 and the AI's value beside), ticked (all at first), ［項目を足す］ (HubSpot's fixed
     items or a coefficient sheet line; never the same deal's item twice), and **what is shared**: the AI's reason on at first,
     **the minutes' quote off at first** (F #1). ［反映する］ opens **the last check** (exactly what goes out), then one press:
     main records the press (`afterMeeting:note { kind: 'apply', id, keys }`) and only then `chat.consultAbout { purpose: 'work',
     detail }` starts **one** consultation whose first message (`applyAsk`) carries only the ticked items with the member's values,
     the reason / quote only where chosen, the minutes' `docVersion` to compare first (T7: 「議事録が直されています」 is said by the
-    consultation), HubSpot through the business plugin's operations (担当 checked with `refresh_deal`: 担当が違う), the coefficient
+    consultation), HubSpot through the business plugin's operations (担当 checked with `refresh_deal`: 担当が違う; a 受注予定日 item adds
+    that it goes to `update_deal`'s deal field `close_date` as the day given), the coefficient
     sheet through the pinned Skill `anken-sync-auto`, and the results to write to `result.json` with the press id. **What the AI
     may write is not narrowed by the server** (E3, accepted): the plugin's gate, approvals and the relay decide as for any
     consultation of the member. **What is shared is an instruction to that AI, not a technical guard**: the consultation reads
