@@ -10,12 +10,13 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { departmentsApi } from '@/lib/api'
 import { useCompany } from '@/lib/company-context'
+import { RadioCard } from '@/components/app/radio-card'
 import {
-  PC_JOB_MINUTES, SET_WATCH_DAY_LIMITS, type JobForm,
+  PC_JOB_MINUTES, SET_WATCH_DAY_LIMITS, setWatchTriggerText, type JobForm,
 } from '@/lib/jobs'
 import { useQuery } from '@/lib/use-query'
-import { JOB_READ_SKILLS_MAX, JOB_SET_WATCH_OPENED } from '../../../../shared/core/jobs'
-import { SET_WATCH_NOT_RUN_NOTE, SET_WATCH_SEEN_NOTE, jobCheckText, jobSetTriggerText, setWatchConditionLines } from '../../../../shared/core/job-words'
+import { JOB_READ_SKILLS_MAX, JOB_SET_WATCH_OPENED, jobSetWatchLine } from '../../../../shared/core/jobs'
+import { SET_WATCH_LINE_CHOICES, SET_WATCH_NOT_RUN_NOTE, SET_WATCH_SEEN_NOTE, jobCheckText, setWatchConditionLines, setWatchWhenText } from '../../../../shared/core/job-words'
 import { isValidFolderName } from '../../../../shared/core/names'
 
 const SELECT = 'rounded-control border bg-background px-2 py-1 text-body'
@@ -38,15 +39,28 @@ export function SetWatchFields({ f, set }: {
   // A department's own folder (a root folder): where its Skills live (`<folder>/.claude/skills/<name>`).
   const folders = [...new Set((departments.data ?? []).map((d) => d.folder).filter((x) => isValidFolderName(x)))]
   const combo = JOB_SET_WATCH_OPENED[f.setCombo]
+  // 「いつ作るか」 (A3b, owner decision D2): only the opened lines, in `SET_WATCH_LINE_CHOICES`' order (the recommended first); a
+  // line opened without a choice's words is still offered, in its full sentence — never words of the admin's own.
+  const lines = JOB_SET_WATCH_OPENED.map((t, index) => ({ index, line: jobSetWatchLine(t), trigger: t }))
+  const choices = [
+    ...SET_WATCH_LINE_CHOICES.flatMap((c) => lines.filter((l) => l.line === c.line).map((l) => ({
+      index: l.index, label: c.label, help: [setWatchWhenText(c.line, '責任者'), c.note].filter(Boolean).join('。'),
+    }))),
+    ...lines.filter((l) => !SET_WATCH_LINE_CHOICES.some((c) => c.line === l.line)).map((l) => ({ index: l.index, label: setWatchTriggerText(l.trigger), help: '' })),
+  ]
   return (
     <>
-      <Row label="どれで動くか（使えるようになっている条件から選びます）">
-        <select aria-label="条件" className={SELECT} value={f.setCombo} onChange={(e) => set('setCombo', Number(e.target.value))}>
-          {JOB_SET_WATCH_OPENED.map((t, i) => <option key={i} value={i}>{jobSetTriggerText(t)}</option>)}
-        </select>
-      </Row>
+      <div className="grid gap-1.5">
+        <Label id="set-watch-when">いつ作るか</Label>
+        <div role="radiogroup" aria-labelledby="set-watch-when" className="grid gap-2 md:grid-cols-2">
+          {choices.map(({ index, label, help }) => (
+            <RadioCard key={index} checked={f.setCombo === index} onSelect={() => set('setCombo', index)} label={label} help={help} />
+          ))}
+        </div>
+      </div>
       {combo && (
         <div className="space-y-1" role="note" aria-label="条件の中身">
+          <p className="text-small">{setWatchTriggerText(combo)}</p>
           <ul className="list-disc space-y-0.5 pl-4 text-small">
             {setWatchConditionLines(combo).map((l) => <li key={l}>{l}</li>)}
           </ul>

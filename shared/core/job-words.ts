@@ -6,7 +6,7 @@
  * Words only: no rule is decided here (the parser is `jobs.ts`, the slots `job-schedule.ts`). Pure
  * (server/tests/unit/core-purity.test.ts).
  */
-import { JOB_MINUTES_ROUTE, isRecordTrigger, isSetTrigger, jobDeliveryLabel, jobSetWatchLine, type JobCheck, type JobSetTrigger, type JobRecordTrigger, type JobDefinition, type JobGrant, type JobMissed, type JobOccurrenceState, type JobPauseReason, type JobRun, type JobTrigger, type JobWeekday } from './jobs'
+import { JOB_MINUTES_ROUTE, isRecordTrigger, isSetTrigger, jobDeliveryLabel, jobSetWatchLine, type JobCheck, type JobSetTrigger, type JobSetWatchLine, type JobRecordTrigger, type JobDefinition, type JobGrant, type JobMissed, type JobOccurrenceState, type JobPauseReason, type JobRun, type JobTrigger, type JobWeekday } from './jobs'
 
 const WEEKDAY_WORDS: Record<JobWeekday, string> = { mon: '月曜', tue: '火曜', wed: '水曜', thu: '木曜', fri: '金曜', sat: '土曜', sun: '日曜' }
 
@@ -349,6 +349,28 @@ export function setWatchConditionLines(trigger: JobSetTrigger): string[] {
   ]
 }
 
+/** 「いつ」 of an opened line in one sentence: the first of `setWatchSummaryLines`, and the help of the admin's 「いつ作るか」. */
+export function setWatchWhenText(line: JobSetWatchLine, who: 'あなた' | '責任者'): string {
+  return line === 'first_read'
+    ? `社外の人が出た、${who}も出た会議の議事録を、出た人のだれかの AI が読み終えたあと（すぐ）`
+    : `社外の人が出た会議の、${who}が担当の「議事録を確認する」が完了したあと`
+}
+
+/**
+ * The admin's 「いつ作るか」 (4b-4 A3b, owner decision D2 2026-11-25): each opened line as a short choice, the recommended one
+ * first — 「AI が読み終えたとき」, recommended for sales staff (it makes drafts before a person has checked the minutes; nothing is
+ * written anywhere until the person presses ［反映する］). What the person consents to stays `jobSetTriggerText` and the
+ * condition lines.
+ */
+export const SET_WATCH_LINE_CHOICES: ReadonlyArray<{ line: JobSetWatchLine; label: string; note: string | null }> = [
+  {
+    line: 'first_read',
+    label: 'AI が議事録を読み終えたとき（すぐ）',
+    note: 'おすすめ（法人営業の担当には、こちら）。人が議事録を確かめる前に作りますが、作るのは下書きと更新案だけです',
+  },
+  { line: 'review_done', label: '責任者が「議事録を確認する」を済ませたとき', note: null },
+]
+
 /**
  * The three lines read first, before ［くわしく］ opens every line above (owner FB 2026-11-24, 使い心地のメモ #37: some fifteen
  * lines of 「動く条件」 were too long to read): when it runs, what it makes, and that nothing leaves ACB until the person
@@ -364,9 +386,7 @@ export function setWatchSummaryLines(d: JobDefinition, reader: 'responsible' | '
   const p = d.run.kind === 'procedure' ? d.run.procedure : null
   const skill = p && p.source === 'department_skill' ? `「${p.place}」の Skill「${p.skill}」で、` : ''
   return [
-    line === 'first_read'
-      ? `いつ：社外の人が出た、${who}も出た会議の議事録を、出た人のだれかの AI が読み終えたあと（すぐ）`
-      : `いつ：社外の人が出た会議の、${who}が担当の「議事録を確認する」が完了したあと`,
+    `いつ：${setWatchWhenText(line, who)}`,
     `すること：${who}の PC の AI が、${skill}たたき台と、記録の更新案を作ります`,
     `外には何も送りません。更新案は、${who}が［反映する］を押すまで、どこにも書き込まれません`,
   ]

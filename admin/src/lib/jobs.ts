@@ -9,7 +9,7 @@
  */
 import {
   JOB_EVENT_PC_EXPIRES_DEFAULT_MINUTES, JOB_MINUTES_ROUTE, JOB_NAME_MAX, JOB_PROPOSAL_ORIGIN, JOB_PROPOSAL_SCHEMA, JOB_READ_SKILLS_MAX, JOB_SET_CHECK_KIND,
-  JOB_SCHEMAS, JOB_SET_WATCH_OPENED, JOB_SET_WATCH_SCHEMA, isRecordTrigger, jobPinnedDepartmentSkills, isSetTrigger, knownJobDefinition, JOB_OUTBOUND_ROUTES, JOB_TASK_TITLE_MAX, JOB_TITLE_WORDS_MAX, parseJobDefinition,
+  JOB_SCHEMAS, JOB_SET_WATCH_OPENED, JOB_SET_WATCH_SCHEMA, isRecordTrigger, jobPinnedDepartmentSkills, jobSetWatchLine, isSetTrigger, knownJobDefinition, JOB_OUTBOUND_ROUTES, JOB_TASK_TITLE_MAX, JOB_TITLE_WORDS_MAX, parseJobDefinition,
   type JobDefinition, type JobDefinitionResult, type JobDoneMark, type JobGrant, type JobSetTrigger, type JobSkillPin, type JobWeekday,
 } from '../../../shared/core/jobs'
 import { BUILTIN_CONNECTORS, type DeliveryPlaceKind } from '../../../shared/core/builtin-connectors'
@@ -221,7 +221,9 @@ export function switchJobForm(prev: JobForm, change: Partial<Pick<JobForm, 'when
   if (newJob && eventPc(next) && !eventPc(prev)) next.expiresAfterMinutes = JOB_EVENT_PC_EXPIRES_DEFAULT_MINUTES
   // A new set watch (4b-4 PR7) starts at the owner's numbers (memo O6): 30 minutes a run, 10 a day, one day's wait for the
   // app; a missed one is let go (there is no later slot to take its place). Still choices; an edit keeps the version's own.
+  // 「いつ作るか」 starts at the recommended line (A3b, owner decision D2: 「AI が議事録を読み終えたとき」), still a choice.
   if (newJob && next.when === 'set' && prev.when !== 'set') {
+    next.setCombo = SET_WATCH_RECOMMENDED_COMBO
     next.limits = { ...SET_WATCH_LIMITS }
     next.expiresAfterMinutes = JOB_EVENT_PC_EXPIRES_DEFAULT_MINUTES
     next.missedPolicy = 'skip'
@@ -233,6 +235,12 @@ export function switchJobForm(prev: JobForm, change: Partial<Pick<JobForm, 'when
 export const SET_WATCH_LIMITS: JobGrant['limits'] = { ...JOB_SET_WATCH_PROPOSAL_LIMITS }
 /** The day's limits the form offers a set watch. */
 export const SET_WATCH_DAY_LIMITS = [1, 3, 5, 10, 15, 20, 24]
+
+/**
+ * The opened line a new set watch starts at (A3b, owner decision D2 2026-11-25): 「AI が議事録を読み終えたとき」 (`first_read`),
+ * recommended for sales staff; the first opened line if that one is ever taken out.
+ */
+export const SET_WATCH_RECOMMENDED_COMBO = Math.max(0, JOB_SET_WATCH_OPENED.findIndex(t => jobSetWatchLine(t) === 'first_read'))
 
 /** The index of an opened combination equal to this trigger (every key, every list in its order), or -1. */
 export function setComboOf(trigger: JobSetTrigger): number {

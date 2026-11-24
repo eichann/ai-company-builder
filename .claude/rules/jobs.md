@@ -1740,8 +1740,9 @@ not make jobs members' apps cannot run).
   - Tests: `client/tests/job-set-watch-run.test.ts` (on a real git repository and folders), `client/tests/ai-turn-unattended.test.ts`
     (the copy as `additionalDirectories`). Mutation check: see the PR.
 - **The second line: 「AI が議事録を読み終えたとき」** (4b-4 A3; owner memo 「4b-4 自動で読む・知らせ・受け箱の数」 第1.1版 §2 and Codex
-  #2 / #3 / #12, owner decision D2 2026-11-25: opened beside the first, which is unchanged; the admin chooses per job — the form and the
-  app's 「見張りの案」 already offer every opened line, each in its own words; **owner decision 2026-11-25 (later)**: it fires on the
+  #2 / #3 / #12, owner decision D2 2026-11-25: opened beside the first, which is unchanged; the admin chooses per job — the admin
+  form's 「いつ作るか」 (A3b, "The admin console (PR7)" below: this line first, recommended for sales staff, the default of a new one)
+  and the app's 「見張りの案」 offer every opened line, each in its own words; **owner decision 2026-11-25 (later)**: it fires on the
   meeting's first reading **whoever's AI read it** — the reading is shared with every attendee, e.g. a manager's AI may read first —
   and runs the job of each responsible person who is one of the meeting's people; their PC does not read it again).
   `{ recordType: 'meeting', taskKind: 'meeting', origin: 'meeting', causes: ['reader_ai'], causeRule: 'reader_v1', assignee:
@@ -1810,7 +1811,12 @@ not make jobs members' apps cannot run).
 - **The admin console (PR7)** (`admin/src/lib/jobs.ts`, `components/jobs/set-watch-fields.tsx`, `job-dialogs.tsx`; owner memo
   §2 / §3 / §6). Everything only shows and asks; the server decides.
   - **The form**: 「いつ動くか」 → 「これから来る、条件に合うもの全部」 (`when: 'set'`) offers **only the opened combinations**
-    (`JOB_SET_WATCH_OPENED`, by index, each in `jobSetTriggerText`'s words) — never words of the admin's own; under it what the
+    (`JOB_SET_WATCH_OPENED`, by index) — never words of the admin's own — as 「いつ作るか」 (4b-4 A3b, owner decision D2
+    2026-11-25: a radio group in `SET_WATCH_LINE_CHOICES`' order and short words, `job-words.ts`: 「AI が議事録を読み終えたとき（すぐ）」
+    first, marked おすすめ for sales staff, then 「責任者が「議事録を確認する」を済ませたとき」; each choice's help is
+    `setWatchWhenText`, the same 「いつ」 the three-line summary says; a line opened without choice words would be offered in its
+    full sentence). **A new set watch starts at the recommended line** (`SET_WATCH_RECOMMENDED_COMBO`, `switchJobForm`); an edit
+    keeps the version's line. Under it the chosen line's full sentence (`setWatchTriggerText`: 「責任者が…」) and what the
     combination takes and never takes (`setWatchConditionLines`: the counted causes, the assignee from creation, the first
     done, one per meeting, each guard) and when it does not run (`SET_WATCH_NOT_RUN_NOTE`, memo §2-2). Then the department (its
     own folder, from the departments list) and the Skill it runs, the Skills it reads (0–4, one per line: a name of the same
@@ -1857,7 +1863,9 @@ not make jobs members' apps cannot run).
     sentence codes, the occurrence note, the 前の回 words, the day's limit and wait lines, the minutes / records / limit grant
     lines, the trigger's subject on the list and in the dialog, 「すること」 and the PC fields hidden, the option only with the
     shared folder); each fails a test. Not alone: `adminReadsDefinition`'s `JOB_SCHEMAS` check (the core reads 5 today; it
-    keeps "a screen never reads more than its core" explicit).
+    keeps "a screen never reads more than its core" explicit). A3b's 「いつ作るか」 (`jobs.test.tsx` "a new one starts at the
+    owner's numbers…", "creating one on the page…"): the recommended line as a new one's default and an edit keeping its own,
+    the choices' order, a press choosing its line, and the chosen line's sentence with 「責任者」 — 4 mutations, each fails a test.
 - Tests: `server/tests/unit/job-set-watch-definition.test.ts` (words key by key, a combination not opened, a line taken
   out, each piece schema 5's alone and schema 5 only those, the Skill pins, `decision.json`, the consent and schemas 1–4's
   sha256, the places, the words) and `server/tests/integration/job-set-watch.test.ts` (on a real bare repository: the pins and
