@@ -39,7 +39,7 @@ import type { PluginOperationResult } from './plugin-operations'
 import type { ApprovalResult } from './approvals'
 import type { AbsenceAddInput, AbsenceAddResult, AbsenceRemoveResult, AbsencesResult } from './absences'
 import type { JobActionResult, JobFeedbackResult, MyJobOccurrencesResult, MyJobsResult, WatchChoicesResult } from './jobs'
-import type { JobCandidateDiscardResult, JobCandidateResult, JobProposalResult, MyJobProposalsResult } from './job-proposals'
+import type { JobCandidateDiscardResult, JobCandidateResult, JobProposalResult, MyJobProposalsResult, SetWatchCandidateResult, SetWatchChoice, SetWatchSkillsResult } from './job-proposals'
 import type { JobRepeatAskSetting } from './job-repeat-asks'
 import type { QueuedJobTurn } from './ai-turn-steps/job'
 import type { WorkSwitch, WorkSwitchesResult } from './work-switches'
@@ -614,6 +614,10 @@ export interface IpcInvokeChannels {
   'jobProposals:withdraw': { args: [companyId: string, proposalId: string]; result: JobProposalResult }
   /** 「やめる」: the candidate not submitted yet is discarded on the server (the member's own press). */
   'jobProposals:discard': { args: [companyId: string, candidateId: string]; result: JobCandidateDiscardResult }
+  /** 「見張りを足す」 (4b-4 PR6b): the department Skills the member reads, with whether each can run a set watch. */
+  'jobProposals:setWatchSkills': { args: [companyId: string]; result: SetWatchSkillsResult }
+  /** 「見張りを足す」: a set watch's candidate from the member's choices (the server builds the rest), shown before 「管理者に出す」. */
+  'jobProposals:createSetWatch': { args: [companyId: string, choice: SetWatchChoice]; result: SetWatchCandidateResult }
   // 「AI から定期の仕事を提案してもらう」 (jobs.md "Asking after repeats (PR D)"): this PC's own setting per member and company.
   /** Whether the AI may ask once, after the same Skill was used on 3 days, to make it a time job. */
   'jobRepeatAsks:get': { args: [companyId: string]; result: JobRepeatAskSetting }
@@ -1186,6 +1190,8 @@ export interface ElectronAPI {
   getMyJobProposals: Invoke<'jobProposals:mine'>
   withdrawJobProposal: Invoke<'jobProposals:withdraw'>
   discardJobCandidate: Invoke<'jobProposals:discard'>
+  getSetWatchSkills: Invoke<'jobProposals:setWatchSkills'>
+  createSetWatchCandidate: Invoke<'jobProposals:createSetWatch'>
   getJobRepeatAsk: Invoke<'jobRepeatAsks:get'>
   setJobRepeatAsk: Invoke<'jobRepeatAsks:set'>
   // 自分の設定 → 「受信を読む」「AI が自動で進める」.

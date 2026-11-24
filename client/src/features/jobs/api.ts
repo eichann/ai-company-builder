@@ -2,6 +2,7 @@
 // each function taking its port last (default window.electronAPI). Main asks the company server with
 // the member's session.
 import type { ElectronPort } from '../../shared/ipc/electron-api'
+import type { SetWatchChoice } from '../../../shared/job-proposals'
 
 /** The jobs the member is responsible for. */
 export type JobsReads = ElectronPort<'getMyJobs'>
@@ -73,4 +74,26 @@ export function getMyJobProposals(companyId: string, reads: JobProposalReads = w
 
 export function withdrawMyJobProposal(companyId: string, proposalId: string, writes: JobProposalWrites = window.electronAPI) {
   return writes.withdrawJobProposal(companyId, proposalId)
+}
+
+/**
+ * 「見張りを足す」 (4b-4 PR6b): the department Skills the member reads, a set watch's candidate from their choices, and the same
+ * 「これで管理者に出す」 / 「やめる」 as a chat card's (the server builds and decides everything).
+ */
+export type SetWatchAddPort = ElectronPort<'getSetWatchSkills' | 'createSetWatchCandidate' | 'submitJobProposal' | 'discardJobCandidate'>
+
+export function getSetWatchSkills(companyId: string, port: SetWatchAddPort = window.electronAPI) {
+  return port.getSetWatchSkills(companyId)
+}
+
+export function createSetWatchCandidate(companyId: string, choice: SetWatchChoice, port: SetWatchAddPort = window.electronAPI) {
+  return port.createSetWatchCandidate(companyId, choice)
+}
+
+export function submitSetWatchCandidate(companyId: string, candidateId: string, fingerprint: string, port: SetWatchAddPort = window.electronAPI) {
+  return port.submitJobProposal(companyId, candidateId, fingerprint)
+}
+
+export function discardSetWatchCandidate(companyId: string, candidateId: string, port: SetWatchAddPort = window.electronAPI) {
+  return port.discardJobCandidate(companyId, candidateId)
 }

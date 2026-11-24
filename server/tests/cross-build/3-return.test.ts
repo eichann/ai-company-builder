@@ -88,6 +88,14 @@ describe.skipIf(!CROSS_DB)('cross-build 3/3: this build again', () => {
     expect(counts()).toEqual(before)
     expect((await services.jobs.approve(owner, p1.jobId, { version: 1, fingerprint: fp(p1.jobId) }, [1, 2, 3, 4])).ok).toBe(true)
     expect(db.prepare('SELECT state FROM ai_job_proposals WHERE company_id = ? AND id = ?').get(CO, p1.id)).toEqual({ state: 'approved' })
+    // P5 (schema 5 from the app, 4b-4 PR6b): still waiting, its candidate reads back as it was, and a resend adds nothing.
+    const { p5 } = m.proposals
+    const bob = { companyId: CO, userId: 'xb-bob', role: 'member' }
+    expect(db.prepare('SELECT state FROM ai_job_proposals WHERE company_id = ? AND id = ?').get(CO, p5.id)).toEqual({ state: 'submitted' })
+    expect(services.jobProposals.candidate(bob, p5.candidate)).toMatchObject({ ok: true, value: { fingerprint: p5.fingerprint, definition: { schema: 5 } } })
+    const before5 = counts()
+    expect(await services.jobProposals.submit(bob, p5.candidate, { fingerprint: p5.fingerprint })).toMatchObject({ ok: true, value: { created: false, proposal: { id: p5.id, state: 'submitted' } } })
+    expect(counts()).toEqual(before5)
     // The return the floor did not show is bob's again, in its fixed words.
     const bobItems = (services.notifications.list({ companyId: CO, userId: 'xb-bob', role: 'member' }) as Json).value.items.filter((i: Json) => i.kind === 'job_proposal_returned')
     expect(bobItems).toEqual([expect.objectContaining({ text: expect.stringContaining('差し戻されました（理由：読む場所や置く場所、できることが広すぎる）') })])

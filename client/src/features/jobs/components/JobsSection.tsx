@@ -1,20 +1,24 @@
 // Settings → 「定期の仕事」 (jobs.md "The screens"): the jobs the member is the responsible person of — what
 // one waiting for their 「受け取る」 will do, on whose rights, where — and their own pause / resume. The
 // sentences are the ones the admin approved (shared/core/job-words.ts); the server decides everything.
+import { useState } from 'react'
 import { SpinnerGap } from '@phosphor-icons/react'
 import { Button, Callout, Card, SectionHeader, SubHeading } from '../../../shared/ui/primitives'
 import { JobOccurrences } from './JobOccurrences'
 import { JobProposals } from './JobProposals'
 import { RewatchPicker } from './RewatchPicker'
+import { SetWatchAdd } from './SetWatchAdd'
 import { JOB_CHAIN_STOPPED_ASK, JOB_GOOGLE_ADDRESS_NOTE, jobRunsText, jobSlotText, jobTriggerText } from '../../../../../shared/core/job-words'
 import { isSetTrigger } from '../../../../../shared/core/jobs'
 import { useMyJobs } from '../hooks/useMyJobs'
-import { acceptanceLines, placeLine } from '../model'
+import { acceptanceLines, hasSetWatch, placeLine } from '../model'
 
 export function JobsSection({ companyId }: { companyId: string }) {
   const { loadRef, jobs, error, message, busy, accept, pause, resume, rewatch, reload } = useMyJobs(companyId)
   const waiting = jobs?.filter(j => j.toAccept) ?? []
   const others = jobs?.filter(j => !j.toAccept) ?? []
+  // 「出した案」 reads its list again after a set watch is sent from here (a new key mounts it afresh).
+  const [proposalsRead, setProposalsRead] = useState(0)
 
   return (
     <div ref={loadRef} className="space-y-5 px-8 pb-8 pt-7">
@@ -88,8 +92,10 @@ export function JobsSection({ companyId }: { companyId: string }) {
           <p data-google-address-note className="text-small text-text-muted">{JOB_GOOGLE_ADDRESS_NOTE}</p>
         </>
       )}
-      {/* Member proposals: what became of the proposals sent from the AI chat (also once their job is retired). */}
-      <JobProposals companyId={companyId} jobs={jobs} onChanged={() => { void reload() }} />
+      {/* 4b-4 PR6b: a set watch proposed from here (one per person: not offered once they have one). */}
+      {jobs && !hasSetWatch(jobs) && <SetWatchAdd companyId={companyId} onSubmitted={() => setProposalsRead(n => n + 1)} />}
+      {/* Member proposals: what became of the proposals sent from the AI chat or from here (also once their job is retired). */}
+      <JobProposals key={proposalsRead} companyId={companyId} jobs={jobs} onChanged={() => { void reload() }} />
       {/* Stage 4b-2: also after a hand-over (the job is no longer listed above, its occurrences they ran still are). */}
       <JobOccurrences companyId={companyId} />
     </div>

@@ -162,8 +162,10 @@ contract.invoke handoff:complete
 contract.invoke handoff:get
 contract.invoke handoff:update
 contract.invoke jobProposals:candidate
+contract.invoke jobProposals:createSetWatch
 contract.invoke jobProposals:discard
 contract.invoke jobProposals:mine
+contract.invoke jobProposals:setWatchSkills
 contract.invoke jobProposals:submit
 contract.invoke jobProposals:withdraw
 contract.invoke jobRepeatAsks:get
@@ -417,6 +419,7 @@ contract.type ElectronAPI.createCompany = createCompany: Invoke<'api:createCompa
 contract.type ElectronAPI.createDirectory = createDirectory: Invoke<'fs:createDirectory'>
 contract.type ElectronAPI.createFile = createFile: Invoke<'fs:createFile'>
 contract.type ElectronAPI.createPrivateFolder = createPrivateFolder: Invoke<'privateFolders:create'>
+contract.type ElectronAPI.createSetWatchCandidate = createSetWatchCandidate: Invoke<'jobProposals:createSetWatch'>
 contract.type ElectronAPI.createTask = createTask: Invoke<'tasks:create'>
 contract.type ElectronAPI.decideDriveOverwrite = decideDriveOverwrite: Invoke<'google:decideDriveOverwrite'>
 contract.type ElectronAPI.declineMinutesBundle = declineMinutesBundle: Invoke<'minutes:noBundle'>
@@ -494,6 +497,7 @@ contract.type ElectronAPI.getRecordsForFile = getRecordsForFile: Invoke<'recordV
 contract.type ElectronAPI.getRecordsTablePage = getRecordsTablePage: Invoke<'recordsTable:page'>
 contract.type ElectronAPI.getServerUrl = getServerUrl: Invoke<'config:getServerUrl'>
 contract.type ElectronAPI.getSession = getSession: Invoke<'auth:getSession'>
+contract.type ElectronAPI.getSetWatchSkills = getSetWatchSkills: Invoke<'jobProposals:setWatchSkills'>
 contract.type ElectronAPI.getSlackStatus = getSlackStatus: Invoke<'slack:status'>
 contract.type ElectronAPI.getStats = getStats: Invoke<'fs:stat'>
 contract.type ElectronAPI.getTaskCard = getTaskCard: Invoke<'tasks:card'>
@@ -938,8 +942,10 @@ contract.type IpcInvokeChannels.'handoff:complete' = 'handoff:complete': { args:
 contract.type IpcInvokeChannels.'handoff:get' = 'handoff:get': { args: [company: string, id: string]; result: HandoffView }
 contract.type IpcInvokeChannels.'handoff:update' = 'handoff:update': { args: [company: string, id: string]; result: void }
 contract.type IpcInvokeChannels.'jobProposals:candidate' = 'jobProposals:candidate': { args: [companyId: string, candidateId: string]; result: JobCandidateResult }
+contract.type IpcInvokeChannels.'jobProposals:createSetWatch' = 'jobProposals:createSetWatch': { args: [companyId: string, choice: SetWatchChoice]; result: SetWatchCandidateResult }
 contract.type IpcInvokeChannels.'jobProposals:discard' = 'jobProposals:discard': { args: [companyId: string, candidateId: string]; result: JobCandidateDiscardResult }
 contract.type IpcInvokeChannels.'jobProposals:mine' = 'jobProposals:mine': { args: [companyId: string]; result: MyJobProposalsResult }
+contract.type IpcInvokeChannels.'jobProposals:setWatchSkills' = 'jobProposals:setWatchSkills': { args: [companyId: string]; result: SetWatchSkillsResult }
 contract.type IpcInvokeChannels.'jobProposals:submit' = 'jobProposals:submit': { args: [companyId: string, candidateId: string, fingerprint: string]; result: JobProposalResult }
 contract.type IpcInvokeChannels.'jobProposals:withdraw' = 'jobProposals:withdraw': { args: [companyId: string, proposalId: string]; result: JobProposalResult }
 contract.type IpcInvokeChannels.'jobRepeatAsks:get' = 'jobRepeatAsks:get': { args: [companyId: string]; result: JobRepeatAskSetting }
@@ -1282,8 +1288,10 @@ main.handle handoff:complete @ features/chat-history/ipc.ts (company: string, id
 main.handle handoff:get @ features/chat-history/ipc.ts (company: string, id: string)
 main.handle handoff:update @ features/chat-history/ipc.ts (company: string, id: string)
 main.handle jobProposals:candidate @ features/jobs/proposals.ts (companyId, candidateId)
+main.handle jobProposals:createSetWatch @ features/jobs/proposals.ts (companyId, choice)
 main.handle jobProposals:discard @ features/jobs/proposals.ts (companyId, candidateId)
 main.handle jobProposals:mine @ features/jobs/proposals.ts (companyId)
+main.handle jobProposals:setWatchSkills @ features/jobs/proposals.ts (companyId)
 main.handle jobProposals:submit @ features/jobs/proposals.ts (companyId, candidateId, fingerprint)
 main.handle jobProposals:withdraw @ features/jobs/proposals.ts (companyId, proposalId)
 main.handle jobRepeatAsks:get @ features/jobs/repeat-asks.ts (companyId)
@@ -1496,6 +1504,8 @@ preload createFile -> invoke fs:createFile($0, $1)
 preload createFile : (path: string, content: string) => Promise<FileOpResult>
 preload createPrivateFolder -> invoke privateFolders:create($0, $1)
 preload createPrivateFolder : (companyId: string, input: CreatePrivateFolderRequest) => Promise<CreatePrivateFolderResult>
+preload createSetWatchCandidate -> invoke jobProposals:createSetWatch($0, $1)
+preload createSetWatchCandidate : (companyId: string, choice: SetWatchChoice) => Promise<SetWatchCandidateResult>
 preload createTask -> invoke tasks:create($0, $1)
 preload createTask : (companyId: string, input: TaskCreateInput) => Promise<TaskWriteResult>
 preload decideDriveOverwrite -> invoke google:decideDriveOverwrite($0, $1, $2, $3)
@@ -1650,6 +1660,8 @@ preload getServerUrl -> invoke config:getServerUrl()
 preload getServerUrl : () => Promise<string | null>
 preload getSession -> invoke auth:getSession()
 preload getSession : () => Promise<SessionResult>
+preload getSetWatchSkills -> invoke jobProposals:setWatchSkills($0)
+preload getSetWatchSkills : (companyId: string) => Promise<SetWatchSkillsResult>
 preload getSlackStatus -> invoke slack:status($0)
 preload getSlackStatus : (companyId: string) => Promise<SlackStatusResult>
 preload getStats -> invoke fs:stat($0)

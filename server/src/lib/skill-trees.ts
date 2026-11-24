@@ -60,3 +60,35 @@ export async function departmentSkill(companyId: string, place: string, name: st
     return { tree, decision: null }
   }
 }
+
+/** The most Skills one department lists (a member's 「見張りを足す」 chooses among them). */
+const DEPARTMENT_SKILLS_MAX = 100
+
+/**
+ * The Skills of one department (`<place>/.claude/skills/<name>`, 4b-4 PR6b) on the shared branch, by name, and whether each
+ * has a `decision.json` (only such a Skill can be what a set watch runs; the server checks the file when it pins). Valid
+ * Skill names only, sorted, at most `DEPARTMENT_SKILLS_MAX`; null when there is no repository or the place is not a
+ * department folder name.
+ */
+export async function departmentSkills(companyId: string, place: string): Promise<Array<{ skill: string; runs: boolean }> | null> {
+  if (!isValidFolderName(place)) return null
+  const bareRepo = companyRepoPath(companyId)
+  if (!existsSync(bareRepo)) return null
+  const ref = await resolveSharedBranch(bareRepo)
+  if (!ref) return null
+  const prefix = `${place}/.claude/skills/`
+  let out: string
+  try {
+    out = await gitAsync(['-C', bareRepo, 'ls-tree', '-r', '-z', '--name-only', ref, '--', prefix], { timeoutMs: 30_000 })
+  } catch {
+    return []
+  }
+  const skills = new Map<string, boolean>()
+  for (const path of out.split('\0')) {
+    if (!path.startsWith(prefix)) continue
+    const [name, ...rest] = path.slice(prefix.length).split('/')
+    if (!name || !isValidSkillName(name) || rest.length === 0) continue
+    skills.set(name, (skills.get(name) ?? false) || (rest.length === 1 && rest[0] === 'decision.json'))
+  }
+  return [...skills].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)).slice(0, DEPARTMENT_SKILLS_MAX).map(([skill, runs]) => ({ skill, runs }))
+}

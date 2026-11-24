@@ -1823,10 +1823,11 @@ not make jobs members' apps cannot run).
   default) — each fails a test except `finishTask`'s pre-check (defence, above).
 - **The app (PR6, the common part; owner memo 「4b-4 挟む部分」 H-10 / S11 — the 4b-4 screens of their own are PR6-A,
   `features/after-meeting/` behind a company switch)**. Everything only shows and asks; the server decides.
-  - **Not announced yet**: `APP_JOB_SCHEMAS` stays `[1, 2, 3, 4]`. The 受け取る words for schema 5 are here
-    (`appReadsJobDefinition(d, schemas)` reads a set watch by its trigger only once 5 is announced, and only when the shared parser takes it; `acceptanceLines`,
-    `features/jobs/model.ts`), and `5` is announced **in the build that runs it** (PR5's runner, which names `matched_record`):
-    an app announcing it without the runner would let a member accept a job whose occurrences only expire.
+  - **Announced since PR6b**: `APP_JOB_SCHEMAS` is `[1, 2, 3, 4, 5]` (it was `[1, 2, 3, 4]` until PR6b). The 受け取る words for
+    schema 5 are here (`appReadsJobDefinition(d, schemas)` reads a set watch by its trigger only once 5 is announced, and only when
+    the shared parser takes it; `acceptanceLines`, `features/jobs/model.ts`), and `5` is announced **only in a build that runs it**
+    (PR5's runner, which names `matched_record`): an app announcing it without the runner would let a member accept a job whose
+    occurrences only expire.
   - **The words are one copy** in `shared/core/job-words.ts` (moved from PR7's `admin/src/lib/jobs.ts`):
     `setWatchConditionLines` (only for an opened combination), `SET_WATCH_NOT_RUN_NOTE`, `SET_WATCH_SEEN_NOTE`,
     `setWatchGrantLines`, `setWatchDayLimitText`, `setWatchMissedText`, `setWatchReadSkillsText`, `setWatchReasonLabels`, and the
@@ -2157,7 +2158,8 @@ Code: `shared/core/job-proposals.ts` (ids `jc.` / `jp.` + 32 hex, limits, states
     含まれています）」 — never which.
   - **The submit is the member's press only**: the handler (`client/electron/features/jobs/proposals.ts`, session cookies) is
     registered by that module alone; no chat-server route, AI tool or record token reaches it; in the renderer only the chat
-    card's data layer (`src/features/chat/api.ts` `JobProposalCardPort`) and the card call it. Renderer values never shape
+    card's data layer (`src/features/chat/api.ts` `JobProposalCardPort`) and the card call it — and, since 4b-4 PR6b, 「定期の仕事」's
+    (`src/features/jobs/api.ts` `SetWatchAddPort`) for the member's press on a set watch they chose there. Renderer values never shape
     the path (`isJobCandidateId`, `isJobProposalId`, the fingerprint's shape, the company id).
   - **The chat server's flag fails closed** (review L3): the step lookup (`stepWriteArea`) is asked whenever it exists — also
     without a write guard — and a lookup that threw or rejected (a timeout) counts as a step: no tools.
@@ -2249,6 +2251,54 @@ Code: `shared/core/job-proposals.ts` (ids `jc.` / `jp.` + 32 hex, limits, states
     unreadable store kept while unchanged (without it the same unreadable file is read again at each look and still
     refused: cost only); not node-tested: the handler passing the sink to `withSkillSightings` (one line of wiring — each
     half, the sink's call and `repeatAskForTurn` connecting it, fails a test).
+- **A set watch from the app (4b-4 PR6b, owner 2026-11-24)**: the same path for schema 5 — candidate → 「管理者に出す」 → an owner /
+  admin approves (kept: the owner's N2, 「開けた組み合わせで自分の会議だけを見張るなら承認なしで足せる」, is only a proposal) → the member's
+  own 受け取る. Code: `shared/core/job-proposals.ts` (`parseJobSetWatchCandidateInput`, `setWatchProposalDefinition`,
+  `candidateSchemaOf`), `services/job-proposals.ts` (`setWatchSkills`, `createSetWatchCandidate`), `lib/skill-trees.ts`
+  `departmentSkills`; the app's `features/jobs/components/SetWatchAdd.tsx` (設定 →「定期の仕事」「会議のあとの見張りを足す」).
+
+  ```
+  GET  /me/job-set-watch-skills    the session: the department Skills the caller reads, each with `runs` (it has a decision.json)
+  POST /me/job-candidates { trigger, skill: { place, skill }, readSkills: [{ place, skill }] }   the session → 201 JobCandidateView
+  ```
+
+  - **The member chooses three things, the server the rest**: one of `JOB_SET_WATCH_OPENED` (the definition's parser refuses any
+    other: `trigger.NOT_OPENED`), the department Skill it runs and 0–4 department Skills it reads — an unknown key (a name, a
+    responsible person, a place, limits) → 400 `BAD_JOB_CANDIDATE` `UNKNOWN_KEY`. The responsible person is the signed-in member;
+    the name 「<Skill>（会議のあと）」; it reads no folder (`reads.paths` empty), writes only in `<the run Skill's department>/.personal/
+    提案書/` (`JOB_SET_WATCH_PROPOSAL_FOLDER` = `grant.writes.folder`, owner decision 2026-11-24: the runner makes each run's
+    folder under it, so the runs land at `<department>/.personal/提案書/<YYYY-MM-DD>_<会社>` — "The app runs it"); 30 minutes, 10 a day (O6), a missed one let go after one day; the trees and the
+    reasons pinned as a save pins them (`jobs.pinnedDefinition` → `definitionFrom`: a run Skill without a valid `decision.json` →
+    `JOB_SKILL_DECISION_MISSING`). An owner / admin may still edit it before approving (a folder to read, other limits): a new
+    consent the member accepts.
+  - **Refused before any git read**: an app that does not announce 5 (`JOB_NEEDS_NEWER_SCREEN`); a company without the shared folder
+    (`JOB_SKILL_NOT_HERE`); while the member has an approved, active set watch (`JOB_SET_WATCH_ONE_PER_PERSON`, also inside the
+    write — the approval refuses a second anyway); a Skill at a place the member does not read — the same answer and words as one
+    that is not there (`JOB_SKILL_MISSING`). Then the department it writes in must be the member's to write (`JOB_CANDIDATE_PLACE`),
+    and the approval's `rightsFit` inside the write (the Skills' places read, the department written).
+  - **The list** names only departments and Skills the member reads (only readable departments are looked into — at most 50, one git
+    read each — and all of it checked again after the git reads), at most 100 Skills each; a company without the shared folder has
+    none. Not cached: each opening of 「見張りを足す」 reads again.
+  - **Kept as any candidate**: 24 hours, 20 a member, its creator's alone; `GET /me/job-candidates/:id`, the submit and 「やめる」 read
+    a candidate of either shape (`candidateSchemaOf`: the stored text's own schema, 4 or 5). The submit, the limits (5 waiting, 10 a
+    day), the notices, withdraw / return are unchanged. **Its job keeps schema 5**: `PUT` keeps every version of a proposal's job in
+    the schema of its submitted version (4 or 5; `JOB_PROPOSAL_SCHEMA` otherwise), and still makes no other job schema 4.
+  - **The admin's approval** needs a console that announces 5 (PR7 #808); before it the proposal waits (「画面を新しくしてください」),
+    and an owner / admin can still return it.
+  - **The app**: 「見張りを足す」 (not offered once the member has a set watch, `hasSetWatch`) reads the list (`jobProposals:setWatchSkills`),
+    offers the opened combinations in their words, the Skills with `runs` to run (one is chosen by itself when it is the only one) and
+    the others to read (≤ 4, `toggleSetWatchRead`), sends only what `setWatchChoiceOf` builds — main checks it again
+    (`readSetWatchChoice`, nothing else is sent) — and shows the candidate in the 受け取る words (`acceptanceLines`; `readShownCandidate`
+    takes schema 5 only of an opened combination run by a department Skill) with 「これで管理者に出す」 (the candidate's id and fingerprint
+    shown, `jobProposals:submit`) and 「やめる」. 「出した案」 then lists it as any proposal.
+  - **Compatibility**: a server before PR6b answers the list 404 (`NOT_FOUND`, or no code before 2026-11-02) → nothing offered
+    (「サーバーの更新が必要です」); its candidate
+    view never reads a schema-5 candidate (it reads the text as schema 4: the one 404). The rollback floor has no proposals and
+    freezes schema 5 (`server/tests/cross-build/` P5: name only, never approved; back here the candidate reads back and a resend adds
+    nothing).
+  - Tests: `server/tests/integration/job-set-watch-proposals.test.ts`, permission matrix rows, the cross-build P5,
+    `client/tests/job-set-watch-add.test.ts`, `client/tests/job-screen-schemas.test.ts` (schema 5's words, header `1,2,3,4,5`),
+    `client/tests/ui/set-watch-add.spec.ts`. Mutation check: see the PR.
 - **The rollback floor** (6760eef3, knows `[1, 2]`): a schema-4 job is listed by name only, its versions without definition or
   fingerprints, approve / edit / accept refused (`JOB_SCHEMA_UNKNOWN`), no occurrence made, no `job_proposal` /
   `job_proposal_returned` shown (unknown kinds); it never reads the new tables. Coming back: nothing revived (a withdrawn proposal stays so, its job retired), nothing

@@ -12,10 +12,11 @@
  * Pure (server/tests/unit/core-purity.test.ts).
  */
 import {
-  JOB_MINUTES_ROUTE, JOB_NAME_MAX, JOB_OUTBOUND_ROUTES, JOB_PROPOSAL_ORIGIN, JOB_PROPOSAL_SCHEMA, jobPathProblem,
-  type JobMissed, type JobProcedure, type JobTimeTrigger,
+  JOB_MINUTES_ROUTE, JOB_NAME_MAX, JOB_OUTBOUND_ROUTES, JOB_PROPOSAL_ORIGIN, JOB_PROPOSAL_SCHEMA, JOB_READ_SKILLS_MAX, JOB_SET_CHECK_KIND,
+  JOB_SET_WATCH_SCHEMA, jobPathProblem, type JobMissed, type JobProcedure, type JobSetTrigger, type JobTimeTrigger,
 } from './jobs'
 import { jobTriggerText } from './job-words'
+import { isValidFolderName, isValidSkillName } from './names'
 
 /** A candidate (案の候補, before 「管理者に出す」): `jc.` + 32 hex. A proposal (a candidate submitted): `jp.` + 32 hex. */
 export const JOB_CANDIDATE_ID_RE = /^jc\.[0-9a-f]{32}$/
@@ -188,5 +189,103 @@ export function proposalDefinition(input: JobCandidateInput, pinned: { actingUse
       limits: { minutes: input.minutes, runsPerDay: 1 },
     },
     origin: JOB_PROPOSAL_ORIGIN,
+  }
+}
+
+/*
+ * A member proposes a set watch from the app (schema 5, 4b-4 PR6b, owner 2026-11-24; jobs.md "Member proposals" "A set watch
+ * from the app"): in Settings → 「定期の仕事」 the member chooses one of the opened combinations (`JOB_SET_WATCH_OPENED`), the
+ * department Skill it runs and the department Skills it reads — nothing else. The rest is the server's: the responsible person
+ * (the signed-in member), the name, where it writes (`.personal/提案書/` of the member in the run Skill's department), the
+ * limits (owner memo O6: 30 minutes, 10 a day), the wait (one day), the pinned trees and the reasons. Then the same submit →
+ * approval → 受け取る as a time job's proposal (an owner / admin still approves: N2 is only a proposal).
+ */
+
+/** What the member chooses (`POST /me/job-candidates`): a combination, and Skills the server pins. No free text. */
+export interface JobSetWatchCandidateInput {
+  /** One of `JOB_SET_WATCH_OPENED`, exactly (the definition's parser refuses anything else: `trigger.NOT_OPENED`). */
+  trigger: JobSetTrigger
+  /** The department Skill it runs (its `decision.json` gives the reasons). */
+  skill: { place: string; skill: string }
+  /** The department Skills it reads: 0–`JOB_READ_SKILLS_MAX`, each once. */
+  readSkills: Array<{ place: string; skill: string }>
+}
+
+/** The folder in the member's own `.personal` of the Skill's department where each run makes its own folder (server-made). */
+export const JOB_SET_WATCH_PROPOSAL_FOLDER = '提案書'
+/** A proposed set watch's limits (owner memo 「4b-4」 O6: 1回30分・1日10回) and its wait for the app (one day). */
+export const JOB_SET_WATCH_PROPOSAL_LIMITS = { minutes: 30, runsPerDay: 10 } as const
+export const JOB_SET_WATCH_PROPOSAL_MISSED: JobMissed = { policy: 'skip', expiresAfterMinutes: 24 * 60 }
+
+type SkillRef = { place: string; skill: string }
+/** A department Skill as the member names it: one department folder (NFC, no leading dot) and an ASCII Skill name. */
+function isSkillRef(v: unknown): v is SkillRef {
+  if (!isObj(v) || Object.keys(v).length !== 2) return false
+  const { place, skill } = v
+  return typeof place === 'string' && place.length <= 100 && place === place.normalize('NFC') && isValidFolderName(place) && !place.startsWith('.')
+    && typeof skill === 'string' && skill.length <= 64 && isValidSkillName(skill)
+}
+
+/** The set watch the member chose, strictly (codes only, never the values sent). The combination is the definition parser's. */
+export function parseJobSetWatchCandidateInput(v: unknown): { ok: true; input: JobSetWatchCandidateInput } | { ok: false; problems: string[] } {
+  if (!isObj(v)) return { ok: false, problems: ['BAD'] }
+  const problems: string[] = []
+  const keys = ['trigger', 'skill', 'readSkills']
+  if (Object.keys(v).some(k => !keys.includes(k))) problems.push('UNKNOWN_KEY')
+  for (const k of keys) if (!Object.prototype.hasOwnProperty.call(v, k)) problems.push(`${k}.MISSING`)
+  if (problems.length > 0) return { ok: false, problems }
+  if (!isObj(v.trigger) || v.trigger.kind !== 'record_set') problems.push('trigger.BAD')
+  if (!isSkillRef(v.skill)) problems.push('skill.BAD')
+  const reads = v.readSkills
+  if (!Array.isArray(reads) || reads.length > JOB_READ_SKILLS_MAX || !reads.every(isSkillRef)
+    || new Set(reads.map(r => `${r.place}/${r.skill}`)).size !== reads.length) problems.push('readSkills.BAD')
+  if (problems.length > 0) return { ok: false, problems }
+  const ref = (r: SkillRef): SkillRef => ({ place: r.place, skill: r.skill })
+  return { ok: true, input: { trigger: v.trigger as unknown as JobSetTrigger, skill: ref(v.skill as SkillRef), readSkills: (reads as SkillRef[]).map(ref) } }
+}
+
+/** A proposed set watch's name, made by the server: 「<Skill>（会議のあと）」, the Skill's part shortened to fit. */
+export function setWatchProposalJobName(skill: string): string {
+  const when = '（会議のあと）'
+  const room = JOB_NAME_MAX - when.length
+  return `${skill.length <= room ? skill : `${skill.slice(0, Math.max(1, room - 1))}…`}${when}`
+}
+
+/** Stand-ins the server replaces with what it reads when it pins (`pinDepartmentSkills`): the trees and the run Skill's reasons. */
+const UNPINNED_TREE = '0'.repeat(40)
+const UNPINNED_DECISION = { reasons: [{ code: 'from_skill', label: 'Skill の一覧から' }] }
+
+/**
+ * The definition a chosen set watch becomes (schema 5, not yet pinned or parsed — the server pins the trees and the reasons, then
+ * runs `parseJobDefinition`): the signed-in member as the responsible person; the minutes route alone; reads the Skills chosen
+ * only (no folder); writes only in `<the run Skill's department>/.personal/提案書/`; the one やること; no mail, no place outside.
+ */
+export function setWatchProposalDefinition(input: JobSetWatchCandidateInput, actingUser: string): Record<string, unknown> {
+  return {
+    schema: JOB_SET_WATCH_SCHEMA,
+    name: setWatchProposalJobName(input.skill.skill),
+    actingUser,
+    trigger: input.trigger,
+    check: { kind: JOB_SET_CHECK_KIND },
+    run: { kind: 'procedure', procedure: { source: 'department_skill', place: input.skill.place, skill: input.skill.skill, fingerprint: UNPINNED_TREE } },
+    placement: 'a',
+    missed: { ...JOB_SET_WATCH_PROPOSAL_MISSED },
+    grant: {
+      tools: ['records', 'files_write'], creates: ['task'], routes: [JOB_MINUTES_ROUTE],
+      reads: { paths: [], calls: [], ...(input.readSkills.length > 0 ? { skills: input.readSkills.map(r => ({ ...r, fingerprint: UNPINNED_TREE })) } : {}) },
+      writes: { area: 'deliverable', place: input.skill.place, folder: JOB_SET_WATCH_PROPOSAL_FOLDER },
+      outbound: 'none', limits: { ...JOB_SET_WATCH_PROPOSAL_LIMITS },
+    },
+    decision: UNPINNED_DECISION,
+  }
+}
+
+/** A candidate's stored definition, of either shape a candidate can be (schema 4 from the chat, schema 5 from the app), or null. */
+export function candidateSchemaOf(definition: string): typeof JOB_PROPOSAL_SCHEMA | typeof JOB_SET_WATCH_SCHEMA | null {
+  try {
+    const s = (JSON.parse(definition) as { schema?: unknown } | null)?.schema
+    return s === JOB_PROPOSAL_SCHEMA || s === JOB_SET_WATCH_SCHEMA ? s : null
+  } catch {
+    return null
   }
 }

@@ -60,8 +60,10 @@ const setWatch = {
 }
 
 test('受け取る shows a set watch\'s definition only once the app announces 5 (the runner\'s build)', () => {
-  assert.equal(appReadsJobDefinition(setWatch), null)
+  assert.equal(appReadsJobDefinition(setWatch, [1, 2, 3, 4]), null)
   assert.equal(appReadsJobDefinition(setWatch, [1, 2, 3, 4, 5])?.schema, 5)
+  // This build runs it (PR5) and lets the member add one (PR6b): it announces 5.
+  assert.equal(appReadsJobDefinition(setWatch)?.schema, 5)
   // A malformed answer is shown as one the app cannot show, never drawn from (independent review of PR6).
   assert.equal(appReadsJobDefinition({ ...setWatch, grant: { ...setWatch.grant, limits: undefined } }, [1, 2, 3, 4, 5]), null)
 })

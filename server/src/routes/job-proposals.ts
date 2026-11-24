@@ -8,6 +8,8 @@
  *   POST /candidates                 (act) a candidate for the member alone → 201
  *
  * The member's own session — mounted at /api/companies/:companyId (no record token reaches these):
+ *   GET  /me/job-set-watch-skills                     the department Skills the caller reads (「見張りを足す」, 4b-4 PR6b)
+ *   POST /me/job-candidates                           { trigger, skill, readSkills } a set watch's candidate → 201 (an app showing schema 5)
  *   GET  /me/job-candidates/:candidateId             the caller's candidate
  *   POST /me/job-candidates/:candidateId/submit       { fingerprint } → 201 (200 when submitted already)
  *   POST /me/job-candidates/:candidateId/discard      「やめる」: the creator's own, not submitted yet
@@ -22,6 +24,7 @@ import type { Outcome } from '../services/outcome'
 import { refusal } from './respond'
 import { aiActs, aiReads, companyMember, serviceBody } from './guards'
 import type { Context } from 'hono'
+import { JOB_SCHEMAS_HEADER, parseJobSchemasHeader } from '../../shared/core/jobs'
 
 const { jobProposals } = services
 
@@ -43,6 +46,11 @@ jobProposalsAiRoute.post('/candidates', aiActs, serviceBody, async (c) => {
 })
 
 export const jobProposalsRoute = new Hono()
+
+jobProposalsRoute.get('/me/job-set-watch-skills', companyMember, async (c) => answer(c, await jobProposals.setWatchSkills(c.var.member)))
+
+jobProposalsRoute.post('/me/job-candidates', companyMember, serviceBody, async (c) =>
+  answer(c, await jobProposals.createSetWatchCandidate(c.var.member, c.var.body, parseJobSchemasHeader(c.req.header(JOB_SCHEMAS_HEADER))), 201))
 
 jobProposalsRoute.get('/me/job-candidates/:candidateId', companyMember, (c) => answer(c, jobProposals.candidate(c.var.member, c.req.param('candidateId'))))
 

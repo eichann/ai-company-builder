@@ -17,7 +17,7 @@ import { latestJobSlot, nextJobSlot } from '../../shared/core/job-schedule'
 import { isTimeTrigger } from '../../shared/core/jobs'
 import { sha256Bytes, sha256TokenDigest } from '../adapters/system'
 import { minutesReviewIdOf } from '../services/minutes-review'
-import { companySkillTree, departmentSkill } from '../lib/skill-trees'
+import { companySkillTree, departmentSkill, departmentSkills } from '../lib/skill-trees'
 import type { CompanyRepository } from '../ports/companies'
 import type { MembershipRepository } from '../ports/memberships'
 import type { AgentStopService } from '../services/agent-stops'
@@ -97,6 +97,8 @@ export function wireJobs<R extends { memberships: MembershipRepository }>(deps: 
     shelfSkill: (who, itemId) => skillShelf.jobSkill(who, itemId),
     placeExists: deps.placeExists,
     placeFolders: deps.placeFolders,
+    // A member's 「見張りを足す」 (4b-4 PR6b): the department Skills on the shared branch (only with the shared folder).
+    departmentSkills: (companyId, place) => (companyFolders.has(companyId) ? departmentSkills(companyId, place) : Promise.resolve(null)),
     timeZoneOf: () => DEFAULT_COMPANY_TIME_ZONE,
     noticesChanged: (companyId, userIds) => push.notify(companyId, userIds, { kind: 'notifications', version: shared.ids.newToken().slice(0, 32) }),
   })

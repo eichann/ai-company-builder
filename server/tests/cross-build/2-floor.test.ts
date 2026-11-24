@@ -153,6 +153,16 @@ describe.skipIf(!CROSS_DB)('cross-build 2/3: the rollback floor on it', () => {
       expect((db.prepare('SELECT COUNT(*) AS n FROM ai_job_occurrences WHERE company_id = ? AND job_id = ?').get(CO, p.jobId) as Json).n).toBe(0)
     }
     expect(await services.jobs.accept(member('xb-bob', 'member'), p3.jobId, { version: 1 }, [1, 2, 3, 4], true)).toMatchObject({ ok: false, body: { code: 'JOB_SCHEMA_UNKNOWN' } })
+    // P5: bob's set watch proposed from the app (schema 5, 4b-4 PR6b): its name only, no definition or fingerprint, never approved.
+    const { p5 } = m.proposals
+    if (p5) {
+      const seen5 = await as('xb-owner', 'GET', `/jobs/${p5.jobId}`)
+      expect(seen5.status).toBe(200)
+      expect(seen5.body.data.name).toBe('sales-proposal-auto（会議のあと）')
+      for (const v of seen5.body.data.versions) expect(v).toMatchObject({ definition: null, fingerprint: null, consentFingerprint: null })
+      expect(await services.jobs.approve(owner, p5.jobId, { version: 1 }, [1, 2, 3, 4])).toMatchObject({ ok: false, body: { code: 'JOB_SCHEMA_UNKNOWN' } })
+      expect((db.prepare('SELECT COUNT(*) AS n FROM ai_job_occurrences WHERE company_id = ? AND job_id = ?').get(CO, p5.jobId) as Json).n).toBe(0)
+    }
     for (const who of [owner, member('xb-admin', 'admin'), member('xb-bob', 'member')]) {
       const listed = services.notifications.list(who) as Json
       expect(listed.ok).toBe(true)

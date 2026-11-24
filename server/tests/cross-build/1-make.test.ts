@@ -33,7 +33,9 @@ import { randomIds, sha256TokenDigest } from '../../src/adapters/system'
 import { hashCanonical } from '../../src/lib/content-hash'
 import { canonicalJson } from '../../../shared/core/fixed-content'
 import { MINUTES_REVIEW_KEY } from '../../../shared/core/core-types'
-import { JOB_MINUTES_ROUTE, JOB_SET_WATCH_OPENED, jobConsentCanonical, type JobDefinition } from '../../../shared/core/jobs'
+import { JOB_MINUTES_ROUTE, JOB_SET_WATCH_OPENED, jobConsentCanonical, parseJobDefinition, type JobDefinition } from '../../../shared/core/jobs'
+import { setWatchProposalDefinition } from '../../../shared/core/job-proposals'
+import { versionRow } from '../../src/services/jobs'
 
 const app = new Hono()
 app.route('/api/companies', companiesRoute)
@@ -248,6 +250,29 @@ describe.skipIf(!CROSS_DB)('cross-build 1/3: a database as 4b-1 leaves it', () =
     expect(c5.status).toBe(201)
     const r5 = c5.body.data.run
 
-    saveDb(db, { CO, j4: { job: j4, stop: j4Stop }, jobs: { j1: j1.job, j2: j2.job, j3: j3.job, s1 }, occ: { o1, o3, o4, o5 }, runs: { r1: r1.id, r4: r4.id, r5: { id: r5.id, generation: r5.generation } }, proposals, before: crossBuildSnapshot(db, CO) })
+    // P5: bob's set watch proposed from the app (schema 5 through the proposals' path, 4b-4 PR6b), waiting for an owner / admin.
+    // Written as this build stores it (this company has no shared folder to pin department Skills from): its candidate, the
+    // draft job and the proposal. The floor knows no schema 5 and no proposals: it must show its name only and approve nothing;
+    // back here the candidate reads back as schema 5 and a resend adds nothing.
+    const p5Def = setWatchProposalDefinition({ trigger: JSON.parse(JSON.stringify(JOB_SET_WATCH_OPENED[0])), skill: { place: '法人ソリューション', skill: 'sales-proposal-auto' }, readSkills: [] }, 'xb-bob')
+    ;(p5Def.run as Json).procedure.fingerprint = tree('c')
+    p5Def.decision = { reasons: [{ code: 'requested', label: '提案を求められた' }] }
+    const p5Parsed = parseJobDefinition(p5Def)
+    if (!p5Parsed.ok) throw new Error(p5Parsed.problems.join(','))
+    const p5Text = canonicalJson(p5Parsed.definition)
+    const p5 = { candidate: `jc.${'c5'.repeat(16)}`, id: `jp.${'d5'.repeat(16)}`, jobId: `job.${'e5'.repeat(16)}`, fingerprint: hashCanonical(p5Text) }
+    const handle = sqliteCompanyData(db).forCompany(CO)
+    handle.jobs.insertCandidate({ id: p5.candidate, createdBy: 'xb-bob', definition: p5Text, fingerprint: p5.fingerprint, createdAt: now, expiresAt: new Date(Date.now() + 86_400_000).toISOString() })
+    handle.jobs.create({
+      id: p5.jobId, name: p5Parsed.definition.name, state: 'draft', actingUserId: 'xb-bob', latestVersion: 1, approvedVersion: null, approvedFingerprint: null,
+      acceptedVersion: null, acceptedConsent: null, acceptedPlace: null, pausedReason: null, pausedBy: null, pausedAt: null, createdBy: 'xb-bob', createdAt: now, updatedAt: now,
+    }, versionRow(p5.jobId, 1, p5Parsed.definition, p5Text, 'xb-bob', now))
+    handle.jobs.insertProposal({
+      id: p5.id, jobId: p5.jobId, proposerId: 'xb-bob', candidateId: p5.candidate, submittedVersion: 1, submittedFingerprint: p5.fingerprint,
+      state: 'submitted', returnReason: null, decidedBy: null, decidedAt: null, createdAt: now, updatedAt: now,
+    })
+    expect(ok(services.jobProposals.candidate(bob, p5.candidate)).definition.schema).toBe(5)
+
+    saveDb(db, { CO, j4: { job: j4, stop: j4Stop }, jobs: { j1: j1.job, j2: j2.job, j3: j3.job, s1 }, occ: { o1, o3, o4, o5 }, runs: { r1: r1.id, r4: r4.id, r5: { id: r5.id, generation: r5.generation } }, proposals: { ...proposals, p5 }, before: crossBuildSnapshot(db, CO) })
   })
 })

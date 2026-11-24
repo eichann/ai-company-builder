@@ -1,4 +1,5 @@
-import { JOB_PROPOSAL_SCHEMA, parseJobDefinition, type JobDefinition } from '../../shared/core/jobs'
+import { JOB_PROPOSAL_SCHEMA, JOB_SET_WATCH_SCHEMA, isSetTrigger, jobSetWatchOpened, parseJobDefinition, type JobDefinition, type JobSetTrigger } from '../../shared/core/jobs'
+import { isValidFolderName, isValidSkillName } from '../../shared/core/names'
 import {
   JOB_PROPOSALS_PER_DAY, JOB_PROPOSALS_WAITING_MAX, JOB_PROPOSAL_STATES, isJobCandidateId, isJobProposalId, isJobProposalReturnReason,
   jobProposalReturnReasonText, type JobProposalReturnReason, type JobProposalState,
@@ -56,16 +57,24 @@ export interface ShownJobCandidate {
 
 const ZONE_RE = /^[A-Za-z][A-Za-z0-9_+-]{0,30}(?:\/[A-Za-z0-9_+-]{1,30}){0,2}$/
 
+/** A member's proposal of either shape: a time job from the chat (schema 4) or a set watch from the app (schema 5, 4b-4 PR6b). */
+function proposalShape(d: JobDefinition): boolean {
+  if (d.run.kind !== 'procedure') return false
+  if (d.schema === JOB_PROPOSAL_SCHEMA) return true
+  return d.schema === JOB_SET_WATCH_SCHEMA && d.run.procedure.source === 'department_skill' && isSetTrigger(d.trigger) && jobSetWatchOpened(d.trigger)
+}
+
 /**
- * `GET /me/job-candidates/:id`'s answer, checked: a definition the one parser reads as a member's proposal (schema 4, a
- * procedure) with a fingerprint of the server's shape — anything else is not shown (and so cannot be submitted).
+ * `GET /me/job-candidates/:id`'s answer, checked: a definition the one parser reads as a member's proposal (schema 4 — or a
+ * set watch of an opened combination, schema 5 — run as a procedure) with a fingerprint of the server's shape — anything else
+ * is not shown (and so cannot be submitted).
  */
 export function readShownCandidate(v: unknown, candidateId: string): ShownJobCandidate | null {
   if (!v || typeof v !== 'object') return null
   const c = v as Record<string, unknown>
   if (c.id !== candidateId || !isJobFingerprint(c.fingerprint) || !str(c.expiresAt, 40)) return null
   const parsed = parseJobDefinition(c.definition)
-  if (!parsed.ok || parsed.definition.schema !== JOB_PROPOSAL_SCHEMA || parsed.definition.run.kind !== 'procedure') return null
+  if (!parsed.ok || !proposalShape(parsed.definition)) return null
   const timeZone = typeof c.timeZone === 'string' && ZONE_RE.test(c.timeZone) ? c.timeZone : null
   return { id: candidateId, definition: parsed.definition, fingerprint: c.fingerprint, expiresAt: c.expiresAt, timeZone }
 }
@@ -213,6 +222,12 @@ const REFUSAL_TEXT: Record<string, string> = {
   JOB_PROPOSAL_DECIDED: 'この案はもう決まっています（承認・差し戻しなど）。いまの状態を出しました。',
   JOB_NEEDS_NEWER_SCREEN: 'このアプリでは扱えない案です。アプリを新しくしてください。',
   JOB_NEEDS_NEWER_APP: 'このアプリでは扱えない案です。アプリを新しくしてください。',
+  // A set watch from the app (4b-4 PR6b): what 「見張りを足す」 may be told.
+  JOB_SET_WATCH_ONE_PER_PERSON: 'あなたには、会議のあとの見張りがもうあります。1人に1つだけです。',
+  JOB_SKILL_DECISION_MISSING: 'この Skill には、AI が判断の理由を選ぶ一覧（decision.json）が無いか、書き方が正しくありません。Skill を直せる人に頼んでください。',
+  JOB_SKILL_NOT_HERE: 'この会社は全社フォルダを使っていないため、会議のあとの見張りは作れません。',
+  BAD_JOB_DEFINITION: 'この組み合わせでは見張りを作れません。アプリを新しくしてください。',
+  BAD_JOB_CANDIDATE: '選んだ内容が正しくありません。選び直してください。',
   BAD_REQUEST: '入力が正しくありません。',
 }
 export const JOB_PROPOSAL_REFUSED_TEXT = 'うまくいきませんでした。少し待ってから、もう一度ためしてください。'
@@ -223,3 +238,62 @@ export function jobProposalRefusalText(code: string | null): string {
 
 /** A refusal that means the proposal or candidate moved on meanwhile: the card reads it again. */
 export const JOB_PROPOSAL_READ_AGAIN_CODES: readonly string[] = ['JOB_VERSION_FINGERPRINT', 'JOB_PROPOSAL_DECIDED', 'JOB_CANDIDATE_NOT_FOUND', 'JOB_CANDIDATE_PLACE', 'JOB_CANDIDATE_DISCARDED', 'JOB_CANDIDATE_SUBMITTED']
+
+
+/*
+ * 「見張りを足す」 (4b-4 PR6b, jobs.md "Member proposals" "A set watch from the app"): in Settings → 「定期の仕事」 the member
+ * chooses one of the opened combinations, the department Skill it runs (one with its `decision.json`) and the Skills it
+ * reads; main asks the server with the session for the candidate (`POST /me/job-candidates`) — the server builds everything
+ * else. Then the same 「これで管理者に出す」 / 「やめる」 as a chat card (`jobProposals:submit` / `jobProposals:discard`).
+ */
+
+/** A department Skill the member reads, as the server lists it; `runs`: it has a `decision.json` (it can be what runs). */
+export interface SetWatchSkill { place: string; skill: string; runs: boolean }
+export type SetWatchSkillsResult = { success: true; supported: boolean; skills: SetWatchSkill[] } | JobProposalsFailure
+/** What the member chose (the server takes exactly these three keys). */
+export interface SetWatchChoice { trigger: JobSetTrigger; skill: { place: string; skill: string }; readSkills: Array<{ place: string; skill: string }> }
+export type SetWatchCandidateResult = { success: true; candidate: ShownJobCandidate } | JobProposalsFailure
+
+/** At most this many Skills are shown (the server lists at most 100 a department). */
+export const SET_WATCH_SKILLS_SHOWN = 200
+/** The Skills a set watch may read (the core's `JOB_READ_SKILLS_MAX`). */
+export const SET_WATCH_READ_SKILLS_MAX = 4
+
+/** The server's list, checked: department folder and Skill names of the right shape only, each once; anything else left out. */
+export function readSetWatchSkills(v: unknown): SetWatchSkill[] {
+  const list = v && typeof v === 'object' ? (v as { skills?: unknown }).skills : null
+  if (!Array.isArray(list)) return []
+  const seen = new Set<string>()
+  const out: SetWatchSkill[] = []
+  for (const s of list.slice(0, SET_WATCH_SKILLS_SHOWN)) {
+    if (!s || typeof s !== 'object') continue
+    const { place, skill, runs } = s as Record<string, unknown>
+    if (typeof place !== 'string' || place.length > 100 || !isValidFolderName(place) || typeof skill !== 'string' || skill.length > 64 || !isValidSkillName(skill)) continue
+    const key = `${place}/${skill}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    out.push({ place, skill, runs: runs === true })
+  }
+  return out
+}
+
+/**
+ * The choice as sent (main checks it again before any server call): an opened combination, a run Skill and up to four other
+ * Skills read, each a department folder and a Skill name of the right shape, each once — else null (nothing is sent).
+ */
+export function readSetWatchChoice(v: unknown): SetWatchChoice | null {
+  if (!v || typeof v !== 'object') return null
+  const c = v as Record<string, unknown>
+  if (Object.keys(c).length !== 3 || !isSetTrigger(c.trigger) || !jobSetWatchOpened(c.trigger)) return null
+  const ref = (r: unknown): { place: string; skill: string } | null => {
+    if (!r || typeof r !== 'object') return null
+    const { place, skill } = r as Record<string, unknown>
+    return typeof place === 'string' && isValidFolderName(place) && place.length <= 100 && typeof skill === 'string' && isValidSkillName(skill) && skill.length <= 64 ? { place, skill } : null
+  }
+  const run = ref(c.skill)
+  const reads = Array.isArray(c.readSkills) ? c.readSkills.map(ref) : null
+  if (!run || !reads || reads.length > SET_WATCH_READ_SKILLS_MAX || reads.some(r => r === null)) return null
+  const all = reads as Array<{ place: string; skill: string }>
+  if (new Set(all.map(r => `${r.place}/${r.skill}`)).size !== all.length) return null
+  return { trigger: c.trigger, skill: run, readSkills: all }
+}
