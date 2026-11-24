@@ -47,6 +47,7 @@ describe('the map', () => {
     ['a parent thing not in the map', m => { m.things.landing.parent.thing = 'nowhere' }],
     ['a parent field not an id', m => { m.things.landing.parent.field = 'name' }],
     ['a key path not of the shape', m => { m.things.tag.keys['a..b'] = 'required' }],
+    ['a key path ending in a list marker (the walker names a list by its key)', m => { m.things.tag.keys['name[]'] = 'ignored' }],
     ['a key whose container is not listed', m => { m.things.tag.keys['meta.size'] = 'ignored' }],
     ['an unknown key use', m => { m.things.tag.keys.name = 'maybe' }],
     ['only ignored keys', m => { m.things.tag.keys = { id: 'ignored', name: 'ignored' } }],
@@ -106,6 +107,19 @@ describe('strict read', () => {
     expect(r.status === 'not_read' && r.notices).toEqual([{ site: 'example_site', mapVersion: '1.0.0', thing: 'landing', change: 'missing_keys', count: 1 }])
     const b = readLandingAnswer(landingAnswer({ custom_params: [{ name: 'no var id' }] }))
     expect(b.status === 'not_read' && b.notices[0].change).toBe('missing_keys')
+  })
+
+  it('a container of the wrong shape → not read (its required keys would never be asked)', () => {
+    for (const custom_params of ['x', [[{ var_id: '1' }]], [null], { var_id: '1' }]) {
+      const r = readLandingAnswer(landingAnswer({ custom_params }))
+      expect(r.status === 'not_read' && r.notices.map(n => n.change)).toContain('missing_keys')
+    }
+    // An optional container may be null; a required one may not.
+    expect(readBrowserThing(EXAMPLE_MAP, 'landing', landingAnswer({ custom_params: null }), a => readLanding({ ...(a as object), custom_params: [] })).status).toBe('read')
+    const m = clone(EXAMPLE_MAP) as Loose
+    m.things.landing.keys.custom_params = 'required'
+    const r = readBrowserThing(m, 'landing', landingAnswer({ custom_params: null }), a => readLanding({ ...(a as object), custom_params: [] }))
+    expect(r.status === 'not_read' && r.notices[0].change).toBe('missing_keys')
   })
 
   it('a reader that throws or hands back anything but exactly the fields → not read', () => {
@@ -173,6 +187,10 @@ describe('the line\'s validator', () => {
     ['a thing the map does not have', l => { l.reads[3].thing = 'coupon' }],
     ['an id from a later read', l => { l.reads[2].id = { read: 'add_tag', field: 'id' } }],
     ['an id from a field that is not an id', l => { l.reads[2].id = { read: 'landing', field: 'name' } }],
+    ['a read of the same object again (an id from a read\'s own id field)', l => {
+      l.reads[1].id = { read: 'landing', field: 'id' }
+      delete l.values.reference
+    }],
     ['an id from a value that is not a target', l => {
       l.values.picked = { kind: 'id', role: 'which', from: ['person'] }
       l.reads[3].id = { value: 'picked' }
@@ -297,6 +315,15 @@ describe('judging a line', () => {
     expect(out.checks.filter(c => c.word === 'date_in_text' || c.word === 'datetime_on_date').every(c => c.status === 'unreadable')).toBe(true)
   })
 
+  it('a value is read once: what was checked is what the checks use (review L3)', () => {
+    const f = goodFacts()
+    let reads = 0
+    const shifty = { from: { kind: 'person', confirmed: true }, get value() { return reads++ === 0 ? '2026-12-03' : '2026-11-26' } }
+    const out = evaluateBrowserReadLine(EXAMPLE_CHECK_LINE, EXAMPLE_MAP, { ...f, values: { ...f.values, round_date: shifty as Loose } })
+    expect(out.problem).toBeNull()
+    expect(reads).toBe(1)
+  })
+
   it('unchanged_except: ✗ with the fields that differ; an id set in another order is the same', () => {
     const f = goodFacts()
     const changed = readLandingAnswer(landingAnswer({ id: '400', name: 'x', prevent_default: true, custom_params: [{ var_id: '12', name: 'b' }, { var_id: '11', name: 'a' }] }))
@@ -371,6 +398,14 @@ describe('dates in a text', () => {
     ['開催 2026-12-03', '2026-12-03', 'YYYY-MM-DD', true],
     ['開催 2026-12-03-2', '2026-12-03', 'YYYY-MM-DD', false],
     ['名前だけ', '2026-12-03', 'YYYYMMDD', false],
+    // Another day in another spelling, also full-width (review M2).
+    ['20261203（変更: 2026/12/04）', '2026-12-03', 'YYYYMMDD', false],
+    ['2026/12/4 開催 12/3', '2026-12-03', 'M/D', false],
+    ['12/3 または １２/４', '2026-12-03', 'M/D', false],
+    ['2026-12-03 と 12月4日', '2026-12-03', 'YYYY-MM-DD', false],
+    ['2026-12-03 と 2025年12月3日', '2026-12-03', 'YYYY-MM-DD', false],
+    ['参加者_20261203（12月3日 18:20）', '2026-12-03', 'YYYYMMDD', true],
+    ['12/3回 2026.12.03 開催', '2026-12-03', 'M/D', true],
   ]
   for (const [text, date, format, want] of cases) {
     it(`${text} / ${format} → ${want ? '✓' : '✗'}`, () => expect(dateInText(text, date, format)).toBe(want))
@@ -390,17 +425,22 @@ describe('the new core modules name no site, thing or field (§17-2)', () => {
       names.add(c.connector)
       const parsed = parsePluginManifest(c.declaration)
       if (!parsed.ok || !parsed.value.browser) continue
+      names.add(parsed.value.label)
       const b = parsed.value.browser
       for (const h of [b.host, ...b.assetHosts, ...b.loginHelpers.map(l => l.host)]) names.add(h)
-      for (const [op, o] of Object.entries(b.operations)) { names.add(op); names.add(o.checker); if (o.lock) names.add(o.lock.kind) }
-      for (const [read, r] of Object.entries(b.explore)) { names.add(read); names.add(r.reader) }
+      for (const [op, o] of Object.entries(b.operations)) {
+        names.add(op); names.add(o.label); names.add(o.checker); if (o.lock) names.add(o.lock.kind)
+      }
+      for (const [read, r] of Object.entries(b.explore)) { names.add(read); names.add(r.reader); names.add(r.label) }
     }
     const map: BrowserMap = EXAMPLE_MAP
     names.add(map.site)
     for (const [thing, t] of Object.entries(map.things)) {
       names.add(thing)
+      names.add(t.label)
       for (const f of Object.keys(t.fields)) if (f.includes('_')) names.add(f)
-      for (const k of Object.keys(t.keys)) if (k.includes('_')) names.add(k)
+      // Each part of a key path too (`custom_params[].var_id` → `custom_params`, `var_id`).
+      for (const k of Object.keys(t.keys)) for (const part of k.replace(/\[\]/g, '').split('.')) if (part.includes('_')) names.add(part)
     }
     return [...names]
   }
@@ -409,13 +449,19 @@ describe('the new core modules name no site, thing or field (§17-2)', () => {
     const names = siteNames()
     expect(names).toContain('lstep')
     expect(names).toContain('landing')
+    expect(names).toContain('流入経路')
+    expect(names).toContain('var_id')
     expect(names.length).toBeGreaterThan(15)
   })
 
   for (const file of NEW_PATH) {
     it(`${file} holds none of them`, () => {
       const source = readFileSync(resolve(root, file), 'utf8')
-      const found = siteNames().filter(n => new RegExp(`(?<![A-Za-z0-9_.-])${n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![A-Za-z0-9_-])`).test(source))
+      const escape = (n: string) => n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+      // An ASCII name as a whole word; a Japanese label anywhere.
+      const found = siteNames().filter(n => (/^[\x20-\x7e]+$/.test(n)
+        ? new RegExp(`(?<![A-Za-z0-9_.-])${escape(n)}(?![A-Za-z0-9_-])`)
+        : new RegExp(escape(n))).test(source))
       expect(found).toEqual([])
     })
   }

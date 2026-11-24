@@ -146,6 +146,8 @@ export function browserReadLineProblem(raw: unknown, map: BrowserMap): string | 
       if (typeof id.read !== 'string' || !own(reads, id.read)) return `読むもの「${r.name}」の番号は、前に読んだものから取ります`
       const from = reads[id.read]
       if (typeof id.field !== 'string' || !own(from.fields, id.field) || from.fields[id.field].kind !== 'id') return `読むもの「${r.name}」の番号の欄が正しくありません`
+      // Its own id would read the same object again: a check against it would compare a thing with itself (review L2).
+      if (id.field === from.id) return `読むもの「${r.name}」は、前に読んだものと同じものです`
     } else return `読むもの「${r.name}」の番号の形が正しくありません`
     reads[r.name] = map.things[r.thing]
   }
@@ -277,6 +279,10 @@ export interface BrowserReadLineOutcome {
  */
 export function evaluateBrowserReadLine(line: BrowserReadLine, map: BrowserMap, facts: BrowserReadFacts, phase: 'now' | 'after' = 'now'): BrowserReadLineOutcome {
   if (browserReadLineProblem(line, map)) return { problem: 'line', values: null, checks: [] }
+  // The values copied once (plain data), then checked and used: what was checked is what is used (review L3).
+  let values: Record<string, BrowserSuppliedValue>
+  try { values = JSON.parse(JSON.stringify(facts.values ?? null)) as Record<string, BrowserSuppliedValue> } catch { return { problem: 'values', values: { problem: 'missing', value: '' }, checks: [] } }
+  facts = { ...facts, values }
   const valueProblem = browserLineValuesProblem(line, facts.values)
   // Each read's state, only when read whole and the object asked for; otherwise null (and why).
   const states: Record<string, Readonly<Record<string, unknown>> | null> = {}
@@ -365,29 +371,46 @@ export function sourceUnchanged(thing: BrowserMapThing, before: BrowserThingResu
 }
 
 /**
- * Does the text hold this date in the format, and no other date in that format? A date counts only with no digit (and,
- * for the slash formats, no `/`) right before or after it, so `20261203` is not found in `202612031` and `12/3` not in
- * `12/31` or `2026/12/3`; another real date of the same format anywhere is ✗ (§15 C6 「部分一致しない」). ASCII digits only:
- * full-width digits are not read as a date (✗, the safe side). `M/D` has no year: the line chose it, the year is not checked.
+ * Does the text hold this date in the format, and no other day in any date-like spelling? The date must stand in the
+ * chosen format (a real day: an 8-digit number that is no date is not one) (ASCII digits, nothing but a separator-free edge next to it: `20261203` is not in `202612031`, `12/3` not
+ * in `12/31`, `2026/12/3` or `112/3`), and every one found so is the date. Then the whole text, NFKC-folded (full-width
+ * digits count), is scanned for every date-like spelling — `YYYYMMDD`, `YYYY-M-D` / `YYYY/M/D` / `YYYY.M.D`,
+ * `YYYY年M月D日`, `M/D`, `M月D日` — and one naming another day (a year-less one: another month or day) is ✗ (§15 C6
+ * 「部分一致しない」, review M2: `20261203（変更: 2026/12/04）` ✗). A number that only looks like a date is ✗ too: the safe
+ * side. `M/D` has no year: the line chose it, the year is not checked.
  */
 export function dateInText(text: string, date: string, format: BrowserDateFormat): boolean {
   if (!isBrowserDate(date)) return false
   const [y, m, d] = date.split('-')
-  const found: string[] = []
-  if (format === 'YYYYMMDD') {
-    for (const x of text.matchAll(/(?<!\d)(\d{8})(?!\d)/g)) {
-      const s = x[1]
-      if (isBrowserDate(`${s.slice(0, 4)}-${s.slice(4, 6)}-${s.slice(6)}`)) found.push(s)
-    }
-    return found.length > 0 && found.every(s => s === `${y}${m}${d}`)
+  const wanted = format === 'YYYYMMDD' ? `${y}${m}${d}` : format === 'YYYY-MM-DD' ? date : `${Number(m)}/${Number(d)}`
+  const pattern = format === 'YYYYMMDD' ? /(?<![\d])(\d{8})(?![\d])/g
+    : format === 'YYYY-MM-DD' ? /(?<![\d\-/.])(\d{4}-\d{2}-\d{2})(?![\d\-/.])/g
+      : /(?<![\d\-/.])(\d{1,2}\/\d{1,2})(?![\d\-/.])/g
+  // Only spellings that are real days count (a phone number's 8 digits are no date); another real day is ✗ below.
+  const real = (t: string): boolean => format === 'YYYYMMDD' ? isBrowserDate(`${t.slice(0, 4)}-${t.slice(4, 6)}-${t.slice(6)}`)
+    : format === 'YYYY-MM-DD' ? isBrowserDate(t)
+      : t.split('/').every((n, i) => Number(n) >= 1 && Number(n) <= (i === 0 ? 12 : 31))
+  const inFormat = [...text.matchAll(pattern)].map(x => x[1]).filter(real)
+  if (!inFormat.includes(wanted) || inFormat.some(s => s !== wanted)) return false
+  const { full, monthDay } = datesIn(text.normalize('NFKC'))
+  return full.every(f => f === date) && monthDay.every(md => md === `${Number(m)}/${Number(d)}`)
+}
+
+/** Every date-like spelling in a (NFKC-folded) text: whole dates as `YYYY-MM-DD`, year-less ones as `M/D`. Not a real day = kept as is (never equal). */
+function datesIn(text: string): { full: string[]; monthDay: string[] } {
+  const full: string[] = []
+  const monthDay: string[] = []
+  const day = (yy: string, mm: string, dd: string): string => {
+    const iso = `${yy}-${mm.padStart(2, '0')}-${dd.padStart(2, '0')}`
+    return isBrowserDate(iso) ? iso : `?${yy}${mm}${dd}`
   }
-  if (format === 'YYYY-MM-DD') {
-    for (const x of text.matchAll(/(?<![\d-])(\d{4}-\d{2}-\d{2})(?![\d-])/g)) if (isBrowserDate(x[1])) found.push(x[1])
-    return found.length > 0 && found.every(s => s === date)
+  for (const x of text.matchAll(/(?<!\d)(\d{4})(\d{2})(\d{2})(?!\d)/g)) {
+    const iso = day(x[1], x[2], x[3])
+    if (!iso.startsWith('?')) full.push(iso)
   }
-  for (const x of text.matchAll(/(?<![\d/])(\d{1,2})\/(\d{1,2})(?![\d/])/g)) {
-    const mm = Number(x[1]), dd = Number(x[2])
-    if (mm >= 1 && mm <= 12 && dd >= 1 && dd <= 31) found.push(`${x[1]}/${x[2]}`)
-  }
-  return found.length > 0 && found.every(s => s === `${Number(m)}/${Number(d)}`)
+  for (const x of text.matchAll(/(?<!\d)(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})(?!\d)/g)) full.push(day(x[1], x[2], x[3]))
+  for (const x of text.matchAll(/(?<!\d)(\d{4})年(\d{1,2})月(\d{1,2})日/g)) full.push(day(x[1], x[2], x[3]))
+  for (const x of text.matchAll(/(?<![\d\-/.])(\d{1,2})\/(\d{1,2})(?![\d\-/.])/g)) monthDay.push(`${Number(x[1])}/${Number(x[2])}`)
+  for (const x of text.matchAll(/(?<!\d)(\d{1,2})月(\d{1,2})日/g)) monthDay.push(`${Number(x[1])}/${Number(x[2])}`)
+  return { full, monthDay }
 }

@@ -40,7 +40,7 @@ export interface BrowserMapField {
 }
 
 export interface BrowserMapThing {
-  /** The Japanese name of the thing (「流入経路」), shown on the card and in the admin notice. */
+  /** The Japanese name of the thing, shown on the card and in the admin notice. */
   label: string
   /** Only JSON answers are read strictly by this path (an HTML thing stays on today's checker path until one is needed). */
   answer: 'json'
@@ -77,8 +77,11 @@ export const BROWSER_MAP_NAME_RE = /^[a-z][a-z0-9_]{0,39}$/
  * key `"a.b"` or `"a[]"` would otherwise spell the path of a nested key and pass for it.
  */
 export const BROWSER_ANSWER_KEY_RE = /^[A-Za-z_][A-Za-z0-9_]{0,63}$/
-/** A key path: keys joined by `.`, a key followed by `[]` once per list level it holds (`inputs[].tag_ids`). */
-const KEY_PATH_RE = /^[A-Za-z_][A-Za-z0-9_]{0,63}(?:\[\])*(?:\.[A-Za-z_][A-Za-z0-9_]{0,63}(?:\[\])*)*$/
+/**
+ * A key path: keys joined by `.`, a key followed by `[]` once per list level it holds before a key of its items
+ * (`inputs[].tag_ids`). Never `[]` at the end: a list is named by its key (`tags`), as the walker sees it.
+ */
+const KEY_PATH_RE = /^(?:[A-Za-z_][A-Za-z0-9_]{0,63}(?:\[\])*\.)*[A-Za-z_][A-Za-z0-9_]{0,63}$/
 const SEMVER_RE = /^(0|[1-9]\d{0,3})\.(0|[1-9]\d{0,3})\.(0|[1-9]\d{0,3})$/
 
 const isMap = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v)
@@ -263,8 +266,10 @@ export function readBrowserThing(map: BrowserMap, thingName: string, answer: unk
   }
   let state: unknown
   try { state = reader(answer) } catch { return notRead('unreadable', 1) }
-  if (browserThingStateProblem(thing, state)) return notRead('unreadable', 1)
-  return { status: 'read', state: { ...(state as Record<string, unknown>) } }
+  // Copied once, then checked and handed on: what was checked is what is used (review L3).
+  const copy = isMap(state) ? Object.fromEntries(Object.entries(state).map(([k, v]) => [k, Array.isArray(v) ? [...v] : v])) : state
+  if (browserThingStateProblem(thing, copy)) return notRead('unreadable', 1)
+  return { status: 'read', state: copy as Record<string, unknown> }
 }
 
 /** Why a state is not one of this thing (a field missing, an extra one, a value not of its kind), or null. */
@@ -280,14 +285,17 @@ export function browserThingStateProblem(thing: BrowserMapThing, state: unknown)
 
 /**
  * The answer's keys against the map's (§3-2): every key at every depth must be listed, every `required` key present in
- * each object at its place. `unknownCount` counts distinct unknown key paths (a key not of `BROWSER_ANSWER_KEY_RE` counts
- * and is never named); `missing` the required keys absent somewhere. 'unreadable' when the
+ * each object at its place, every container the map describes of its shape (an object where it lists keys, a list of the
+ * listed depth where it lists items; null only when not required). `unknownCount` counts distinct unknown key paths (a
+ * key not of `BROWSER_ANSWER_KEY_RE` counts and is never named); `missing` the required keys absent somewhere and the
+ * places of the wrong shape (map paths). 'unreadable' when the
  * answer is not an object, too deep or too large to walk.
  */
 export function browserAnswerKeysProblem(thing: BrowserMapThing, answer: unknown):
   { unknownCount: number; unknownNamed: string[]; missing: string[] } | 'unreadable' {
   if (!isMap(answer)) return 'unreadable'
-  const known = new Set(Object.keys(thing.keys))
+  const allKeys = Object.keys(thing.keys)
+  const known = new Set(allKeys)
   const required = Object.keys(thing.keys).filter(k => thing.keys[k] === 'required')
   const unknown = new Set<string>()
   const unknownNamed = new Set<string>()
@@ -304,15 +312,24 @@ export function browserAnswerKeysProblem(thing: BrowserMapThing, answer: unknown
       if (!BROWSER_ANSWER_KEY_RE.test(key)) { unknown.add(`\u0000${at}\u0000${key}`); continue }
       const path = at === '' ? key : `${at}.${key}`
       if (!known.has(path)) { unknown.add(path); unknownNamed.add(path); continue }
-      walkValue(obj[key], path, depth + 1)
+      walkValue(obj[key], path, depth + 1, thing.keys[path] !== 'required')
     }
   }
-  const walkValue = (v: unknown, path: string, depth: number): void => {
+  // What the map holds below a place: keys of an object (`P.x`), items of a list (`P[]…`), or nothing (a leaf).
+  const holds = (at: string): 'object' | 'list' | null =>
+    allKeys.some(k => k.startsWith(`${at}.`)) ? 'object' : allKeys.some(k => k.startsWith(`${at}[]`)) ? 'list' : null
+  // A container the map describes must have that shape (review M1: else its required keys would never be asked):
+  // an object where it lists keys, a list (of the listed depth) where it lists items; null only for a key not required.
+  const walkValue = (v: unknown, path: string, depth: number, nullable: boolean): void => {
     if (tooBig) return
     if (depth > BROWSER_MAP_LIMITS.depth) { tooBig = true; return }
+    const shape = holds(path)
+    if (shape !== null && v === null) { if (!nullable) missing.add(path); return }
+    if (shape === 'object' && !isMap(v)) { missing.add(path); return }
+    if (shape === 'list' && !Array.isArray(v)) { missing.add(path); return }
     if (Array.isArray(v)) {
       if (v.length > BROWSER_MAP_LIMITS.answerPaths) { tooBig = true; return }
-      for (const item of v) walkValue(item, `${path}[]`, depth + 1)
+      for (const item of v) walkValue(item, `${path}[]`, depth + 1, false)
       return
     }
     if (isMap(v)) walkObject(v, path, depth)
