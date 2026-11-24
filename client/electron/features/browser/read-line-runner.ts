@@ -73,6 +73,8 @@ export interface BrowserReadRunnerDeps {
   notices?: BrowserShapeNoticeReporter
   /** The wall clock (epoch ms), for the run's time limit. */
   now?(): number
+  /** Tighter limits than `BROWSER_READ_RUN_LIMITS` (tests); never looser. */
+  limits?: Partial<typeof BROWSER_READ_RUN_LIMITS>
 }
 
 /** What the caller hands the runner: an approved line of the opened list with its map and the site's code. */
@@ -174,6 +176,10 @@ function cleanNotices(map: BrowserMap, raw: readonly BrowserShapeNotice[]): Brow
 
 export function createBrowserReadRunner(deps: BrowserReadRunnerDeps) {
   const now = deps.now ?? Date.now
+  const limits = {
+    reads: Math.min(deps.limits?.reads ?? BROWSER_READ_RUN_LIMITS.reads, BROWSER_READ_RUN_LIMITS.reads),
+    ms: Math.min(deps.limits?.ms ?? BROWSER_READ_RUN_LIMITS.ms, BROWSER_READ_RUN_LIMITS.ms),
+  }
   const busy = new WeakSet<BrowserPreviewSurface>()
 
   async function run(input: BrowserReadRunInput): Promise<BrowserReadRunResult> {
@@ -208,8 +214,8 @@ export function createBrowserReadRunner(deps: BrowserReadRunnerDeps) {
     const stillCurrent = deps.context()
     busy.add(surface)
     const abort = new AbortController()
-    const deadline = now() + BROWSER_READ_RUN_LIMITS.ms
-    const timer = setTimeout(() => abort.abort(), BROWSER_READ_RUN_LIMITS.ms)
+    const deadline = now() + limits.ms
+    const timer = setTimeout(() => abort.abort(), limits.ms)
     let made = 0
     // Every check that may stop the run: the switch, the stop, the context, the same window still open, the time.
     const check = (): void => {
@@ -223,7 +229,7 @@ export function createBrowserReadRunner(deps: BrowserReadRunnerDeps) {
     const get = async (address: string): Promise<{ status: number; body: string } | null> => {
       check()
       if (exploreAddressProblem(address) !== null) return null
-      if (++made > BROWSER_READ_RUN_LIMITS.reads) throw new Refusal('too-many-reads')
+      if (++made > limits.reads) throw new Refusal('too-many-reads')
       let answer: { status: number; body: string } | null
       try { answer = await surface.read(address, abort.signal) } catch { answer = null }
       return answer && typeof answer.status === 'number' && typeof answer.body === 'string' ? answer : null

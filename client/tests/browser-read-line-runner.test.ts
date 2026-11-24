@@ -498,11 +498,33 @@ test('a reporter that fails or throws changes nothing; the runner logs nothing',
   assert.deepEqual(logged, [])
 })
 
-test('too many reads stop the run', async () => {
-  const { site, runner, input } = setup()
-  // Ten pages of a list whose entry is on the last: 2 + 1 + 10 + … stays under the cap; a line read through many lists cannot run away.
-  for (let p = 1; p <= 10; p++) setJson(site, `/api/landings?group=10&page=${p}`, listPage(p === 10 ? [mapShaped('landing_row', row(501))] : [mapShaped('landing_row', row(1000 + p))], p, 10, 10))
-  const result = await runner.run(input())
-  assert.equal(result.status === 'judged' && result.ok, true)
-  assert.ok(site.addresses.length <= 30, 'under the cap')
+test('the read cap and the time limit stop the run: refused, nothing read after', async () => {
+  {
+    const { site, runner, input } = setup({ limits: { reads: 4 } })
+    assert.deepEqual(await runner.run(input()), { status: 'refused', reason: 'too-many-reads' })
+    assert.equal(site.addresses.length, 4)
+  }
+  {
+    let clock = 1_000
+    const site = fakeSite()
+    site.onRead = a => { if (a === '/api/landings/501') clock += 60_000 }
+    const { runner, input } = setup({ now: () => clock }, site)
+    assert.deepEqual(await runner.run(input()), { status: 'refused', reason: 'timeout' })
+    assert.deepEqual(site.addresses, [MARKER, '/api/landings/501'])
+  }
+  {
+    // A looser limit than the runner's own is not taken.
+    let clock = 1_000
+    const site = fakeSite()
+    site.onRead = a => { if (a === '/api/landings/501') clock += 60_000 }
+    const { runner, input } = setup({ now: () => clock, limits: { ms: 10 * 60_000, reads: 1000 } }, site)
+    assert.deepEqual(await runner.run(input()), { status: 'refused', reason: 'timeout' })
+  }
+  {
+    // Ten pages of a list whose entry is on the last stay under the cap.
+    const { site, runner, input } = setup()
+    for (let p = 1; p <= 10; p++) setJson(site, `/api/landings?group=10&page=${p}`, listPage(p === 10 ? [mapShaped('landing_row', row(501))] : [mapShaped('landing_row', row(1000 + p))], p, 10, 10))
+    const result = await runner.run(input())
+    assert.equal(result.status === 'judged' && result.ok, true)
+  }
 })

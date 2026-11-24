@@ -1417,7 +1417,8 @@ runner" is unchanged). The old path (`client/connectors/lstep/`, `runner.ts`) is
   address is a fixed path plus exactly `?<folder>=<id>&<page>=<n>` (the folder from the same object's earlier read, the
   page the app's). A description with a query, a fragment, `%` or another `{…}` is refused before anything is read
   (`browserThingAddressProblem`); so **never `?copy=1`** (tested), and every address also passes `exploreAddressProblem`.
-  At most `BROWSER_READ_RUN_LIMITS` (30 reads, 60 s). One run per window.
+  At most `BROWSER_READ_RUN_LIMITS` (30 reads, 60 s; a caller may only tighten them). One run per window (per runner:
+  the composition root makes one).
 - **The account** (must-hold, §15 C5): the marker page is read right before the line's reads and right after (status 200,
   the reader's plain id, else unknown); `evaluateBrowserReadLine` counts an account-bound read only when both agree (and
   equal `expectedAccount` when given). Which page carries the marker for the map path is the wiring's (5b) choice.
@@ -1434,7 +1435,12 @@ runner" is unchanged). The old path (`client/connectors/lstep/`, `runner.ts`) is
   kept.
 - **For 5b / later**: the list entry's folder source (`group` ← the route's `group_id`) and the envelope keys are handed in
   as data; they belong with the map (`LSTEP_MAP_READS`) once the wiring reads them from there. `no_sibling_named` gets no
-  siblings yet (its check stays 「読み取れませんでした」).
+  siblings yet (its check stays 「読み取れませんでした」). **The host** is the caller's: the map has none, so 5b must take
+  it from the reviewed declaration of `map.site` (as `approved.json`), never from the request — else a map's GETs could go
+  to another site with its cookies (independent review). The card's values are site data: 5b decides where they may go.
+- **Remaining limit**: the account marker is read before and after only, so a switch A → B → A in the middle is not seen
+  (the rule's design for a read-only card); before a plan binds `expectedAccount`, re-read it between reads or check an
+  account field of the object where the site has one.
 
 Tests: `client/tests/browser-read-line-runner.test.ts` (a fake Lステップ from stage 0's key sets, answers made up and cut to
 the keys the map lists: a good copy ✓ with exactly the line's reads in order and the marker before and after; the account
@@ -1445,7 +1451,8 @@ data —, a missing key, a repeated JSON key, an unknown envelope or link key �
 AI or not plain refused first; the list entry on page 2, twice, missing, short of `total`, a moving `last`, too many pages
 (only page 1 asked), no folder; refusals before anything (the switch asks nothing, not approved, another site, the stop,
 no / closed window); a stop, a changed context, the switch off, a closed or replaced window mid-run → nothing more read;
-one run per window; a failing reporter; nothing logged). Each guard mutation-checked; kept on purpose: the address check
+one run per window; the read cap and the time limit, never loosened by the caller; a failing reporter; nothing logged).
+Each guard mutation-checked; kept on purpose: the address check
 after building (the description check already refuses what it would) and the notices' rebuild beyond the merge (the core's
 notices hold only those fields).
 
