@@ -181,6 +181,12 @@ meetings), `notifications.md` (「あなたの番」 in the inbox and the title 
   as 「もう済んだ」. The task kind's icon (`ThingIcon` `task`) is `ListChecks` (the やること tab's
   icon), not a ticked box, everywhere (card chip, ⌘K, search, links). Tests: `tasks-list.test.ts`,
   `tasks-list.spec.ts` (「人に頼んだもの」, not a box).
+- **A 「議事録を確認する」 row says its meeting's time** on the second line (「会議 11/24（月） 10:00」, `meetingRowText`, company
+  time; 使い心地のメモ #40: several of one meeting title side by side). Display only: main takes `meeting_at` from the linked meeting
+  in the task's own detail read (`linkedOf`), which the server answers only while the member reads that meeting — none otherwise.
+  Such a task is read again on every list, never answered from the per-version cache the まとまり uses (access to a meeting can
+  change without the task's version: its list was copied when it was made). Test: `tasks-list.test.ts` 「a 「議事録を確認する」 row carries its meeting's time…」,
+  `model.test.ts`.
 - Rows (言葉の決まり 3b: what to do next, never a state word): ☑ or the kind's icon (`ThingIcon`), title,
   「あなただけ」, the small chip of the 案件 / プロジェクト it belongs to (opens it), due (期限切れ in red),
   whose turn / what it waits for, 「〇〇さんの代わり」 for a delegate, up to 3 tags; a finished one is

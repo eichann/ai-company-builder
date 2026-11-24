@@ -350,7 +350,7 @@ export function createJobRuns(deps: JobRunDeps) {
   function finishTask(f: Found, runId: string, jobResult: unknown): ServiceCreateInput | null {
     if (f.setWatch) {
       const report = parseJobSetReport(jobResult, f.definition.decision)
-      return report === null || !setWatchMakesTask(report) ? null : setWatchTaskInput(f.handle, f.definition, f.occ, runId, report)
+      return report === null || !setWatchMakesTask(report) ? null : setWatchTaskInput(f.handle, f.definition, f.occ, runId, report, clock.now())
     }
     const result = parseJobRunResult(jobResult)
     return result === null || result === 'nothing' ? null : taskInput(f, runId, result)
@@ -392,7 +392,7 @@ export function createJobRuns(deps: JobRunDeps) {
         generation: 1, refKind: null, refId: null, status: null, reconciledBy: null, createdAt: at, updatedAt: at,
       })
     }
-    const made = deps.writer.create(f.handle.companyId, setWatchTaskInput(f.handle, f.definition, f.occ, runId, report))
+    const made = deps.writer.create(f.handle.companyId, setWatchTaskInput(f.handle, f.definition, f.occ, runId, report, at))
     if (!made.ok) return refuse('conflict', 'やることを作れませんでした。', { code: made.reason === 'records-off' ? 'RECORDS_DISABLED' : 'JOB_TASK_NOT_CREATED' })
     runs.updateOperation(runId, key, ['in_progress'], { state: 'done', refKind: 'record', refId: made.record.id }, at)
     if (!f.handle.jobs.moveOccurrence(f.occ.id, ['running'], 'done', { outcomeCode: null }, at)) return GONE()

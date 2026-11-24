@@ -4,7 +4,7 @@ import { NEXT_STEP, ONLY_YOU, thingKindOf, type ThingKind } from '../../../../sh
 import { SeenBy, ThingIcon } from '../../../shared/ui/ThingIcon'
 import type { AiTurnItemState, AiTurnItemView } from '../../../../shared/ai-turns'
 import type { TaskListItem } from '../../../../shared/tasks'
-import { dueText, dueWhen, type CompanyNow, type ListEvent } from '../model'
+import { dueText, dueWhen, meetingRowText, type CompanyNow, type ListEvent } from '../model'
 import { isFileTreeDrag, isLinkableDrag, startRecordDrag } from '../../../shared/lib/dragTypes'
 import { PRIMARY_ACTION } from '../../../shared/ui/buttonStyles'
 import { STOP_ICON } from '../../../shared/ui/stateStyles'
@@ -67,6 +67,9 @@ export function TaskRow({ item, now, active, ai, busy, onOpen, onFinish, onAccep
   // Finished (a done task's やり直す, a 来た連絡's 元に戻す): the green ✓.
   const ticked = item.check?.action === 'reopen' || item.check?.action === 'undo'
   const sub: string[] = []
+  // A 「議事録を確認する」 says its meeting's time, so the current one stands out among others of the same title.
+  const meeting = item.meetingAt ? meetingRowText(item.meetingAt, now) : null
+  if (meeting) sub.push(meeting)
   if (item.waitingFor) sub.push(item.waitingFor)
   else if (item.turn === 'ai' && ai) sub.push(ai.reason ? `${AI_STATE_WORDS[ai.state]}：${ai.reason}` : AI_STATE_WORDS[ai.state])
   else if (item.turn === 'ai') sub.push('AI の番')

@@ -328,6 +328,26 @@ export function setWatchConditionLines(trigger: JobSetTrigger): string[] {
   ]
 }
 
+/**
+ * The three lines read first, before ［くわしく］ opens every line above (owner FB 2026-11-24, 使い心地のメモ #37: some fifteen
+ * lines of 「動く条件」 were too long to read): when it runs, what it makes, and that nothing leaves ACB until the person
+ * presses — true of every opened set watch, whose grant has no mail, no place outside and no operation (`jobs.ts`
+ * `SET_WATCH_NONE`). A summary only: the full words stay what the person consents to. [] for a combination not opened.
+ * `reader`: the responsible person reads 「あなた」 (the app's 受け取る); anyone else — an owner / admin approving another
+ * member's — reads 「責任者」, so it never says the admin's own PC or meetings.
+ */
+export function setWatchSummaryLines(d: JobDefinition, reader: 'responsible' | 'other'): string[] {
+  if (!isSetTrigger(d.trigger) || !jobSetWatchOpened(d.trigger)) return []
+  const who = reader === 'responsible' ? 'あなた' : '責任者'
+  const p = d.run.kind === 'procedure' ? d.run.procedure : null
+  const skill = p && p.source === 'department_skill' ? `「${p.place}」の Skill「${p.skill}」で、` : ''
+  return [
+    `いつ：社外の人が出た会議の、${who}が担当の「議事録を確認する」が完了したあと`,
+    `すること：${who}の PC の AI が、${skill}たたき台と、記録の更新案を作ります`,
+    `外には何も送りません。更新案は、${who}が［反映する］を押すまで、どこにも書き込まれません`,
+  ]
+}
+
 /** When it does not run although the person expected it (memo §2-2 「うまくいかない場面」), said on every screen of it. */
 export const SET_WATCH_NOT_RUN_NOTE =
   '動くのは、［AI に読ませる］を押した人（「議事録を確認する」の担当）の仕事だけです。上司やアシスタントが押した会議、Google をつないでいない・別のアドレスで招待された会議、途中で担当を変えた会議では動きません。動かなかった会議の提案書などは、責任者が普通の AI相談で作れます。'

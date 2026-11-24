@@ -54,6 +54,11 @@ export interface TaskListItem {
   bundle: { id: string; title: string; typeLabel?: string } | null
   /** `done` only: when it finished (ISO), as far as the list knows (its last change). */
   finishedAt: string | null
+  /**
+   * A 「議事録を確認する」: its meeting's start (ISO), from the linked meeting the server answered — so only while the member
+   * reads that meeting. Display only: several of one meeting title are told apart by it (使い心地のメモ #40).
+   */
+  meetingAt?: string
   /** A meeting read with no まとまり: the member says which one (「どのまとまりの会議ですか？」). */
   needsBundle?: true
   /**
@@ -434,6 +439,8 @@ export interface TaskSources {
   bundleKindNames?: Record<string, string>
   /** Record id → its まとまり, when it has one. */
   bundles: Record<string, { id: string; title: string }>
+  /** A 「議事録を確認する」's id → its meeting's start, when the server answered the meeting with the task. */
+  meetingTimes?: Record<string, string>
   /** The company's today (`YYYY-MM-DD`) and own holidays: a wait given back counts business days. */
   today?: string
   holidays?: string[]
@@ -531,6 +538,7 @@ export function classifyTasks(src: TaskSources): TaskListItem[] {
       own: r.type === 'task' && r.fields.assignee === src.me && (r.fields.requested_by ?? src.me) === src.me,
       actingFor: r.actingFor ? nameOf(src.people, r.actingFor) : null,
       bundle: bundleOf(src, r.id),
+      ...(r.type === 'task' && r.fields.task_kind === 'minutes_review' && src.meetingTimes?.[r.id] ? { meetingAt: src.meetingTimes[r.id] } : {}),
       finishedAt,
       ...(bundleGroup ? { needsBundle: true as const, bundleGroup } : {}),
       ...(bundleGroup && suggested ? { suggestedBundle: suggested } : {}),

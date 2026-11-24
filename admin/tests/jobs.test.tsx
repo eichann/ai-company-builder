@@ -1001,6 +1001,15 @@ describe('a set watch — 「これから来る、条件に合うもの全部」
     expect(setWatchTriggerText(OPENED())).toMatch(/^責任者が担当の「議事録を確認する」/)
     await userEvent.click(within(row).getByRole('button', { name: '承認する' }))
     const dialog = await screen.findByRole('dialog')
+    // Three lines first (使い心地のメモ #37); the whole consent behind ［くわしく］, unchanged.
+    const summary = within(dialog).getByRole('list', { name: '要点' })
+    expect(within(summary).getAllByRole('listitem')).toHaveLength(3)
+    expect(summary).toHaveTextContent('［反映する］を押すまで')
+    // The admin reads whose PC and meetings: the responsible person's, never 「あなた」.
+    expect(summary).toHaveTextContent('責任者の PC の AI が')
+    expect(summary).not.toHaveTextContent('あなた')
+    expect(within(dialog).queryByLabelText('動く条件')).toBeNull()
+    await userEvent.click(within(dialog).getByRole('button', { name: 'くわしく' }))
     const conditions = await within(dialog).findByLabelText('動く条件')
     for (const line of setWatchConditionLines(OPENED())) expect(conditions).toHaveTextContent(line)
     expect(within(dialog).getByLabelText('判断の理由')).toHaveTextContent('社内の会議')

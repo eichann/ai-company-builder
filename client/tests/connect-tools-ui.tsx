@@ -4,7 +4,8 @@
 // turned 受信 on since), `seen` (nothing new: the screen stays closed), `noslack` (the company
 // has no Slack), `settings` (opened from 設定). 「Google でつなぐ」 here grants everything but
 // メール (the member unticked it on Google's page). `&theme=dark` for the dark look. `&calendar=1`
-// also mounts the task list's today's-calendar hook (one meeting once Google is allowed). `&manual=1`: the user
+// also mounts the task list's today's-calendar hook (one meeting once Google is allowed). `&minutes=1` mounts the
+// title bar's 「議事録を確かめる」 as the minutes slot shows it (only while main says minutes are available). `&manual=1`: the user
 // manual's company (検証A社's domain and 山田さん's address, client/tests/manual/scenes.ts chapter 28).
 import { useState } from 'react'
 import { createRoot } from 'react-dom/client'
@@ -12,6 +13,8 @@ import '../src/i18n'
 import '../src/index.css'
 import { ConnectToolsScreen } from '../src/features/settings/components/ConnectToolsScreen'
 import { useCalendarToday } from '../src/features/tasks/hooks/useCalendarToday'
+import { MinutesCheckButton } from '../src/features/minutes/components/MinutesCheckButton'
+import { useMinutesNotices } from '../src/features/minutes/hooks/useMinutesNotices'
 import type { MyGoogle } from '../shared/google'
 import type { MySlack } from '../shared/slack'
 import { installElectronAPI } from './ui/fixtures/electron-api'
@@ -34,6 +37,7 @@ if (state === 'new' || state === 'seen') {
 }
 
 const calls: string[] = []
+const minutesListeners = new Set<(change: { companyId: string }) => void>()
 ;(window as unknown as { __connectToolsCalls: string[] }).__connectToolsCalls = calls
 
 installElectronAPI({
@@ -52,12 +56,22 @@ installElectronAPI({
     calls.push('getCalendarToday')
     return { success: true, data: { date: '2026-11-04', timeZone: 'Asia/Tokyo', reason: google.connected ? null : 'not-connected', events: google.connected ? [{ id: 'ev-1', title: 'B社 打ち合わせ', start: '2026-11-04T05:00:00.000Z', end: '2026-11-04T06:00:00.000Z', allDay: false, online: true, attendeeCount: 3, hasExternalAttendees: true }] : [] } }
   },
+  // Main's received-minutes checker, as it answers: available once the grant includes minutes, told after each check.
+  watchMinutes: async () => { calls.push('watchMinutes') },
+  checkMinutes: async () => { calls.push('checkMinutes'); for (const l of minutesListeners) l({ companyId: 'co-preview' }); return { success: true } },
+  getMinutesNotices: async () => ({ available: google.connected && google.features.includes('minutes'), notices: [] }),
+  onMinutesChanged: (callback) => { minutesListeners.add(callback); return () => { minutesListeners.delete(callback) } },
   markSlackSeen: async () => { calls.push('markSlackSeen'); slack = { ...slack, seen: ['read', 'notices'] }; return { success: true, data: slack } },
 })
 
 function CalendarProbe() {
   const today = useCalendarToday('co-preview')
   return <output data-testid="calendar">{today ? (today.reason ?? today.events.map(e => e.title).join(',')) : 'loading'}</output>
+}
+
+function MinutesProbe() {
+  const minutes = useMinutesNotices('co-preview')
+  return minutes.available ? <MinutesCheckButton companyId="co-preview" /> : null
 }
 
 function Preview() {
@@ -68,6 +82,7 @@ function Preview() {
       <ConnectToolsScreen companyId="co-preview" firstRun={state !== 'settings'} />
       <output data-testid="calls" hidden>{log.length}</output>
       {params.get('calendar') && <CalendarProbe />}
+      {params.get('minutes') && <MinutesProbe />}
     </main>
   )
 }

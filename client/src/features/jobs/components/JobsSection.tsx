@@ -11,7 +11,8 @@ import { SetWatchAdd } from './SetWatchAdd'
 import { JOB_CHAIN_STOPPED_ASK, JOB_GOOGLE_ADDRESS_NOTE, jobRunsText, jobSlotText, jobTriggerText } from '../../../../../shared/core/job-words'
 import { isSetTrigger } from '../../../../../shared/core/jobs'
 import { useMyJobs } from '../hooks/useMyJobs'
-import { acceptanceLines, hasSetWatch, placeLine } from '../model'
+import { hasSetWatch, placeLine } from '../model'
+import { JobWordsList } from './JobWordsList'
 
 export function JobsSection({ companyId }: { companyId: string }) {
   const { loadRef, jobs, error, message, busy, accept, pause, resume, rewatch, reload } = useMyJobs(companyId)
@@ -40,9 +41,7 @@ export function JobsSection({ companyId }: { companyId: string }) {
               {placeLine(job) && <p className="text-body text-zinc-700 dark:text-zinc-200">{placeLine(job)}</p>}
               {job.toAccept?.definition ? (
                 <>
-                  <ul aria-label={`「${job.name}」の内容`} className="space-y-1 text-body text-zinc-700 dark:text-zinc-200">
-                    {acceptanceLines(job.toAccept.definition).map(l => <li key={l}>{l}</li>)}
-                  </ul>
+                  <JobWordsList definition={job.toAccept.definition} label={`「${job.name}」の内容`} />
                   <div className="flex items-center gap-2">
                     <Button size="sm" variant="primary" disabled={busy || !job.toAccept.fingerprint} onClick={() => void accept(job)}>
                       {job.toAccept.why === 'place' ? '置き先を選び直す' : job.deliverTo ? '置き先を選んで受け取る' : '受け取る'}
