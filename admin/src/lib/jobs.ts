@@ -15,6 +15,7 @@ import {
 import { BUILTIN_CONNECTORS, type DeliveryPlaceKind } from '../../../shared/core/builtin-connectors'
 import { canonicalJson } from '../../../shared/core/fixed-content'
 import { jobSetTriggerText } from '../../../shared/core/job-words'
+import { JOB_SET_WATCH_PROPOSAL_LIMITS } from '../../../shared/core/job-proposals'
 import { DELIVERABLE_FOLDER_MAX } from '../../../shared/core/plugin-step-runs'
 
 /**
@@ -228,8 +229,8 @@ export function switchJobForm(prev: JobForm, change: Partial<Pick<JobForm, 'when
   return next
 }
 
-/** A new set watch's limits (owner memo 「4b-4」 O6: 1回30分・1日10回). */
-export const SET_WATCH_LIMITS: JobGrant['limits'] = { minutes: 30, runsPerDay: 10 }
+/** A new set watch's limits (owner memo 「4b-4」 O6: 1回30分・1日10回): the same numbers a member's proposal of one gets (shared core). */
+export const SET_WATCH_LIMITS: JobGrant['limits'] = { ...JOB_SET_WATCH_PROPOSAL_LIMITS }
 /** The day's limits the form offers a set watch. */
 export const SET_WATCH_DAY_LIMITS = [1, 3, 5, 10, 15, 20, 24]
 
