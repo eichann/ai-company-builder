@@ -24,6 +24,16 @@ import { aiRunsRoute } from '../../src/routes/ai-runs'
 import { jobsRoute } from '../../src/routes/jobs'
 import { services } from '../../src/composition'
 import { crossBuildSnapshot } from './snapshot'
+import { createServiceRecordWriter } from '../../src/services/record-engine'
+import { meetingOutputId } from '../../src/services/meeting-outputs'
+import { sqliteCompanyData } from '../../src/adapters/sqlite/company-data'
+import { sqliteMembershipRepository } from '../../src/adapters/sqlite/memberships'
+import { sqliteTransactions } from '../../src/adapters/sqlite/transactions'
+import { randomIds, sha256TokenDigest } from '../../src/adapters/system'
+import { hashCanonical } from '../../src/lib/content-hash'
+import { canonicalJson } from '../../../shared/core/fixed-content'
+import { MINUTES_REVIEW_KEY } from '../../../shared/core/core-types'
+import { JOB_MINUTES_ROUTE, JOB_SET_WATCH_OPENED, jobConsentCanonical, type JobDefinition } from '../../../shared/core/jobs'
 
 const app = new Hono()
 app.route('/api/companies', companiesRoute)
@@ -185,6 +195,54 @@ describe.skipIf(!CROSS_DB)('cross-build 1/3: a database as 4b-1 leaves it', () =
     expect(db.prepare("SELECT COUNT(*) AS n FROM notifications WHERE company_id = ? AND kind = 'job_proposal'").get(CO)).toEqual({ n: 8 })
     expect(db.prepare("SELECT user_id FROM notifications WHERE company_id = ? AND kind = 'job_proposal_returned'").all(CO)).toEqual([{ user_id: 'xb-bob' }])
     const proposals = { p1, p2, p3, p4 }
-    saveDb(db, { CO, j4: { job: j4, stop: j4Stop }, jobs: { j1: j1.job, j2: j2.job, j3: j3.job }, occ: { o1, o3, o4 }, runs: { r1: r1.id, r4: r4.id }, proposals, before: crossBuildSnapshot(db, CO) })
+
+    // S1: alice's set watch (schema 5, 4b-4 PR2: 「自分が担当の『議事録を確認する』を初めて完了したとき」) whose scan made an occurrence
+    // for a meeting she read and reviewed, its 「使った」 mark written. Written as this build stores it (a company without the
+    // shared folder cannot pin a department Skill through the API: the version is inserted as the API would have made it). The
+    // floor knows no schema 5: it must show, tell, claim, run and expire nothing of it; a stop holds it; back here the mark and
+    // the occurrence are as they were, and nothing is made twice.
+    const now = new Date().toISOString()
+    const tree = (c: string) => c.repeat(40)
+    const setDefinition = {
+      schema: 5, name: '提案書のたたき台', actingUser: 'xb-alice', trigger: JSON.parse(JSON.stringify(JOB_SET_WATCH_OPENED[0])), check: { kind: 'matched_record' },
+      run: { kind: 'procedure', procedure: { source: 'department_skill', place: '法人ソリューション', skill: 'sales-proposal-auto', fingerprint: tree('a') } },
+      placement: 'a', missed: { policy: 'skip', expiresAfterMinutes: 1440 },
+      grant: {
+        tools: ['records'], creates: ['task'], routes: [JOB_MINUTES_ROUTE],
+        reads: { paths: [], calls: [], skills: [{ place: '法人ソリューション', skill: 'sales-proposal-v1', fingerprint: tree('b') }] },
+        writes: { area: 'none' }, outbound: 'none', limits: { minutes: 30, runsPerDay: 10 },
+      },
+      decision: { reasons: [{ code: 'requested', label: '提案を求められた' }] },
+    }
+    const s1 = `job.${'5'.repeat(32)}`
+    const text = canonicalJson(setDefinition)
+    const consent = hashCanonical(jobConsentCanonical(setDefinition as unknown as JobDefinition))
+    db.prepare(`INSERT INTO ai_jobs (company_id, id, name, state, acting_user_id, latest_version, approved_version, approved_fingerprint, accepted_version, accepted_consent,
+        created_by, created_at, updated_at) VALUES (?, ?, '提案書のたたき台', 'active', 'xb-alice', 1, 1, ?, 1, ?, 'xb-owner', ?, ?)`).run(CO, s1, hashCanonical(text), consent, now, now)
+    db.prepare(`INSERT INTO ai_job_versions (company_id, job_id, version, schema, definition, fingerprint, consent_fingerprint, acting_user_id, created_by, created_at,
+        approved_by, approved_at, accepted_by, accepted_at) VALUES (?, ?, 1, 5, ?, ?, ?, 'xb-alice', 'xb-owner', ?, 'xb-owner', ?, 'xb-alice', ?)`)
+      .run(CO, s1, text, hashCanonical(text), consent, now, now, now)
+    sqliteCompanyData(db).forCompany(CO).jobs.startSetCursor(s1, now)
+    const roleOf = (co: string, user: string) => sqliteMembershipRepository(db).roleOf(co, user)
+    const writer = createServiceRecordWriter({
+      companyData: sqliteCompanyData(db), transactions: sqliteTransactions(db), clock: { now: () => new Date().toISOString(), nowMs: () => Date.now() }, ids: randomIds,
+      isMember: (co, user) => roleOf(co, user) !== null, roleOf, notify: () => {}, recordChanged: () => {},
+    })
+    const meeting = writer.create(CO, {
+      type: 'meeting', title: 'A社 初回の商談', state: 'received', members: ['xb-alice', 'xb-bob'],
+      fields: { assignee: 'xb-alice', attendees: JSON.stringify(['xb-alice', 'xb-bob']), external_count: 1, meeting_at: now },
+      actor: { id: 'google', kind: 'external', source: 'google' }, quiet: true,
+    })
+    if (!meeting.ok) throw new Error(meeting.reason)
+    const AI = { kind: 'ai' as const, source: 'claude' }
+    ok(await services.recordEngine.act(alice, AI, meeting.record.id, 'start_reading', { expectedVersion: versionOf(meeting.record.id) }))
+    ok(await services.recordEngine.act(alice, AI, meeting.record.id, 'finish_reading', { expectedVersion: versionOf(meeting.record.id), args: { summary_text: '提案書を送る' } }))
+    const review = meetingOutputId(sha256TokenDigest, 'task', meeting.record.id, MINUTES_REVIEW_KEY)
+    await complete(review)
+    tick()
+    const o5 = occurrenceOf(s1, 'due')
+    expect(db.prepare('SELECT outcome FROM ai_job_meeting_reviews WHERE company_id = ? AND record_id = ?').get(CO, review)).toEqual({ outcome: 'made' })
+
+    saveDb(db, { CO, j4: { job: j4, stop: j4Stop }, jobs: { j1: j1.job, j2: j2.job, j3: j3.job, s1 }, occ: { o1, o3, o4, o5 }, runs: { r1: r1.id, r4: r4.id }, proposals, before: crossBuildSnapshot(db, CO) })
   })
 })

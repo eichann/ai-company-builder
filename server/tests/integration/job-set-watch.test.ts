@@ -1,7 +1,7 @@
 /**
  * Integration Test: the set watch's definition, consent and approval (schema 5, 4b-4 PR1; owner memo 「4b-4 商談から提案書」
- * 第6版 §2 / §3 / §4-4, T8 / T11 / T14 / T19 / T22; jobs.md "The set watch (schema 5)"). Nothing runs yet: no occurrence is
- * ever made of such a job in this build (PR2 finds the records).
+ * 第6版 §2 / §3 / §4-4, T8 / T11 / T14 / T19 / T22; jobs.md "The set watch (schema 5)"). The scan that finds the
+ * records and makes occurrences (PR2) is job-set-watch-scan.test.ts.
  *
  * Guards (each mutation-checked; the results in the PR):
  * - the server pins both department Skills at their trees and copies the reasons from the run's Skill's `decision.json` — never
@@ -12,7 +12,7 @@
  *   closes the open step requests pinned to one of them whenever they were asked, waiting for none (§3 ③, T19);
  * - a changed Skill is a new version (`JOB_SKILL_CHANGED`) and a new consent;
  * - a screen or app that does not announce 5 gets no definition and makes, approves or accepts none (T11);
- * - the clock makes no occurrence of an approved, accepted set watch (this PR runs nothing);
+ * - the clock makes no occurrence of an approved, accepted set watch while no record matches (PR2's scan: job-set-watch-scan.test.ts);
  * - nobody but the minutes service writes a やること's `task_kind` (§2-2: a person's or an AI's create is refused).
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -227,7 +227,7 @@ describe('older screens and apps never see, make, approve or accept it (T11)', (
     expect(codeOf(await jobs.accept(alice(), job, { version: 1 }, [1, 2, 3, 4], true))).toBe('JOB_NEEDS_NEWER_SCREEN')
   })
 
-  it('approved and accepted, it makes no occurrence (this build runs nothing of it)', async () => {
+  it('approved and accepted, it makes no occurrence while no record matches (the scan: job-set-watch-scan.test.ts)', async () => {
     const job = await running()
     expect(jobRow(job)).toMatchObject({ state: 'active', approved_version: 1 })
     services.jobOccurrences.makeOccurrences(CO)

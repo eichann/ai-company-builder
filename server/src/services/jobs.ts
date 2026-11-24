@@ -38,6 +38,8 @@ import { jobChainStopText } from '../../shared/core/job-words'
 import { RECORD_ID_RE } from '../../shared/core/records'
 import { companyNow } from './notifications'
 import { createJobEvents, eventShown, recordTriggerProblems, shownSlot, type AiStepStates } from './job-events'
+import { fieldsNow } from './job-set-watch'
+import { isMeetingPerson } from './meeting-people'
 import { DEFAULT_COMPANY_TIME_ZONE } from '../../shared/core/calendar'
 
 export const JOBS_FORBIDDEN = 'Only owners and admins can manage scheduled jobs'
@@ -287,8 +289,15 @@ export function createJobService(deps: JobServiceDeps) {
    */
   function shownOccurrences(member: Member, handle: CompanyData, jobId: string, limit: number, reader: RecordReader = readerOf(member, handle)): JobOccurrenceRow[] {
     const records = handle.jobs.eventRecordsOf(jobId, EVENT_RECORDS_CHECKED)
-    const readable = records.length === 0 ? [] : handle.records.byIds(records).filter(r => r.removedAt === null && reader.record(r)).map(r => r.id)
-    return handle.jobs.occurrencesOf(jobId, readable, limit)
+    const ids = records.map(r => r.recordId)
+    const readable = new Set(ids.length === 0 ? [] : handle.records.byIds(ids).filter(r => r.removedAt === null && reader.record(r)).map(r => r.id))
+    // A set watch's (4b-4 PR2): only while the viewer is also one of its meeting's people and reads that meeting (§2-5) — left
+    // out here, before the limit, as the rest.
+    const meetings = [...new Set(records.flatMap(r => (r.meetingId && readable.has(r.recordId) ? [r.meetingId] : [])))]
+    const attended = new Set(meetings.length === 0 ? [] : handle.records.byIds(meetings)
+      .filter(m => m.removedAt === null && m.type === 'meeting' && reader.record(m) && isMeetingPerson(m, fieldsNow(handle, m.id).fields, member.userId)).map(m => m.id))
+    const shown = records.filter(r => readable.has(r.recordId) && (r.meetingId === null || attended.has(r.meetingId))).map(r => r.recordId)
+    return handle.jobs.occurrencesOf(jobId, shown, limit)
   }
 
   /**
@@ -884,6 +893,9 @@ export function createJobService(deps: JobServiceDeps) {
         handle.jobs.accept(jobId, v.version, v.consentFingerprint, member.userId, at, place)
         // An event job (stage 4a) looks at what happens from its acceptance on — never back in time.
         if (isRecordTrigger(definition.trigger) && !again) handle.jobs.startEventCursor(jobId, definition.trigger.startRecord, at)
+        // A set watch (4b-4 PR2): its cursor at now and its boundary there — only a meeting first read and a record made after
+        // this acceptance of a new consent is ever its (the switch boundary, §2-3 / §3 ①).
+        if (isSetTrigger(definition.trigger) && !again) handle.jobs.startSetCursor(jobId, at)
         return ok(undefined)
       })
       if (!result.ok) return result
@@ -1103,6 +1115,19 @@ export function createJobService(deps: JobServiceDeps) {
       if (!found || found.handle.jobs.eventCursor(jobId)?.chainStop?.at !== at) return null
       const chain = chainOf(member, found.handle, found.job, readerOf(member, found.handle)).chainStopped
       return chain ? { name: nameFor(member, found.handle, found.job), why: chain.why } : null
+    },
+
+    /**
+     * 「1日の上限を超えた」 (`job_day_limit`, 4b-4 PR2)'s words for the member now: the set watch's name, only while they are its
+     * approved version's responsible person (the notice was theirs alone; a hand-over ends it) — else null. Never a meeting's
+     * name or a count.
+     */
+    dayLimitNotice(member: Member, jobId: string): { name: string } | null {
+      const found = visibleJob(member, jobId)
+      if (!found || found.job.approvedVersion === null) return null
+      const approved = found.handle.jobs.version(jobId, found.job.approvedVersion)
+      if (!approved || approved.actingUserId !== member.userId || !isSetTrigger(definitionOf(approved)?.trigger)) return null
+      return { name: nameFor(member, found.handle, found.job) }
     },
 
     /**

@@ -184,6 +184,41 @@ export function migrateJobWatchGenerations(conn: Database.Database): void {
   }
 }
 
+/**
+ * 4b-4 PR2, the set watch's scan (jobs.md "The set watch (schema 5)"; owner memo 「4b-4 商談から提案書」 第6版 §2 / 付録 B). Additive: a
+ * build before it (the rollback floor, 4b-0.5, freezes schema 5 anyway) neither reads nor writes any of it.
+ *
+ * - `ai_job_occurrences.event_meeting_id` — the meeting a set watch's occurrence was made for, pinned when made: its run reads
+ *   that meeting's minutes only, and who sees the occurrence is who reads the record **and** is one of that meeting's people.
+ * - `ai_job_event_cursors.set_boundary_seq` — a set watch's cursor (the same row and gaps as an event job's; its watched record
+ *   is '') keeps the delivery number at which its current consent was accepted: only a meeting first read **and** a record made
+ *   after it is ever a set watch's (the switch boundary, §2-3 / §3 ①). NULL for an event job's cursor.
+ * - `ai_job_meeting_reviews` — the 「使った」 mark: **one per record in the company** (`PRIMARY KEY (company_id, record_id)`, never
+ *   per job), written in the scan's transaction whether an occurrence was made or why not (`JOB_SET_MARK_OUTCOMES`); never
+ *   deleted, so a new version or a new job never runs the same meeting again.
+ * - `idx_record_ledger_into` — the ledger's rows by the state they went into, in delivery order: the scan reads 「やることが
+ *   完了になった行」 of the whole company without reading every other row.
+ */
+export function migrateJobSetWatch(conn: Database.Database): void {
+  const occ = new Set((conn.prepare('PRAGMA table_info(ai_job_occurrences)').all() as Array<{ name: string }>).map(c => c.name))
+  if (!occ.has('event_meeting_id')) conn.exec('ALTER TABLE ai_job_occurrences ADD COLUMN event_meeting_id TEXT')
+  const cursors = new Set((conn.prepare('PRAGMA table_info(ai_job_event_cursors)').all() as Array<{ name: string }>).map(c => c.name))
+  if (!cursors.has('set_boundary_seq')) conn.exec('ALTER TABLE ai_job_event_cursors ADD COLUMN set_boundary_seq INTEGER')
+  conn.exec(`
+    CREATE TABLE IF NOT EXISTS ai_job_meeting_reviews (
+      company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+      record_id TEXT NOT NULL,
+      meeting_id TEXT NOT NULL,
+      job_id TEXT NOT NULL,
+      outcome TEXT NOT NULL CHECK (outcome IN ('made', 'paused', 'before_acceptance', 'day_limit', 'not_matched', 'step_busy')),
+      occurrence_id TEXT,
+      at TEXT NOT NULL,
+      PRIMARY KEY (company_id, record_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_record_ledger_into ON record_ledger(company_id, to_state, delivery_seq) WHERE delivery_seq IS NOT NULL;
+  `)
+}
+
 export const jobSchema = `
     -- A job (behind the company handle, ports/jobs.ts). acting_user_id: the responsible person of the
     -- newest version (whom it runs as: owner decision D3). approved_version / approved_fingerprint: the

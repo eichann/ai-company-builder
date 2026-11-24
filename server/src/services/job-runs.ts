@@ -32,7 +32,7 @@
  *   ends its run (`holdDue` → `endPcRun`), so nothing comes back after a resume.
  */
 import {
-  JOB_ACTOR, JOB_MADE_BEFORE_LISTED, JOB_PC_STEP, isOccurrenceId, jobOccurrenceKind, jobRunRouteAllowed, occurrenceTaskId, parseJobRunResult, storedJobDefinition,
+  JOB_ACTOR, JOB_MADE_BEFORE_LISTED, JOB_PC_STEP, JOB_SET_CHECK_KIND, isOccurrenceId, jobOccurrenceKind, jobRunRouteAllowed, occurrenceTaskId, parseJobRunResult, storedJobDefinition,
   type JobDefinition, type JobDeliveryPlace, type JobOccurrenceState, type JobOutcomeCode,
 } from '../../shared/core/jobs'
 import type { JobMadeBefore, JobMeetingView, JobTurnView } from '../../shared/types/jobs'
@@ -372,8 +372,9 @@ export function createJobRuns(deps: JobRunDeps) {
       occurrenceId: f.occ.id, jobId: f.job.id, jobVersion: f.occ.jobVersion, fingerprint: f.version.fingerprint,
       // An event occurrence's slot is its event's time in company time, never its delivery number (§11).
       name: deps.jobs.nameOf(member, f.job.id) ?? '定期の仕事', dueSlot: shownSlot(f.occ), dueAt: f.occ.dueAt, expiresAt: f.occ.expiresAt,
-      // Stage 4b-1: the record the event happened to (the responsible person reads it: else it is not their turn).
-      ...(f.event ? { kind: 'event' as const, source: { recordId: f.occ.eventRecordId as string } } : {}),
+      // Stage 4b-1: the record the event happened to (the responsible person reads it: else it is not their turn); a set watch's
+      // (4b-4 PR2) also names the meeting it was made for — the one meeting whose minutes its run may read.
+      ...(f.event ? { kind: 'event' as const, source: { recordId: f.occ.eventRecordId as string, ...(f.occ.eventMeetingId ? { meetingId: f.occ.eventMeetingId } : {}) } } : {}),
       state: f.occ.state as 'due' | 'running', check: d.check, checkSince: checkSince(f), checkUntil: checkUntil(f, member),
       ...(d.check.kind === 'new_files' ? { sinceCommit: sinceCommit(f), checkedCommit: f.occ.checkedCommit ?? null } : {}),
       procedure: d.run.procedure, grant: d.grant,
@@ -531,8 +532,12 @@ export function createJobRuns(deps: JobRunDeps) {
         if (found.why === 'EVENT' || found.why === 'OWNER_RIGHTS_CHANGED') record(f, found.why, found.code)
         return notInStep()
       }
-      // The minutes route only for a meeting this occurrence's check finds now (the grant names the route too).
-      const meetingFound = () => typeof params.recordId === 'string' && meetingsFor(f, member).some(m => m.id === params.recordId)
+      // The minutes route only for a meeting this occurrence's check finds now (the grant names the route too); a set watch's
+      // (4b-4 PR2) only for the one meeting it was made for, pinned on the occurrence (its conditions, just checked, say it is
+      // still the record's and the responsible person's).
+      const meetingFound = () => typeof params.recordId === 'string' && (f.occ.eventMeetingId
+        ? params.recordId === f.occ.eventMeetingId
+        : meetingsFor(f, member).some(m => m.id === params.recordId))
       return jobRunRouteAllowed(f.definition.grant, route, meetingFound) ? null : notInStep()
     },
 
@@ -602,7 +607,7 @@ export function createJobRuns(deps: JobRunDeps) {
      * what the app needs to run it — the check, since when new files count, the pinned procedure and the
      * grant. Nothing is changed here; an occurrence that is not theirs to run now is left out.
      */
-    turns(member: Member, kinds: readonly string[] = ['time']): Outcome<{ turns: JobTurnView[] }> {
+    turns(member: Member, kinds: readonly string[] = ['time'], checks: readonly string[] = []): Outcome<{ turns: JobTurnView[] }> {
       const handle = companyData.forCompany(member.companyId)
       const nowMs = clock.nowMs()
       const turns: JobTurnView[] = []
@@ -612,6 +617,9 @@ export function createJobRuns(deps: JobRunDeps) {
         const f = own(member, occ.id)
         // An event occurrence only while they read its record (⑥) and its conditions hold (nothing is written here).
         if (!f || !seen(member, f) || whyNot(f, nowMs) !== null) continue
+        // A check the app does not say it runs (`?checks=`; 4b-4 PR2: only an app that runs a set watch names `matched_record`) —
+        // left out, so an app of 4b-2, which lists `event` turns, is never handed a set watch's turn its parser would drop.
+        if (f.definition.check.kind === JOB_SET_CHECK_KIND && !checks.includes(JOB_SET_CHECK_KIND)) continue
         // A running one only while its run may be claimed again (lease over, given back, retried later).
         if (f.occ.state === 'running') {
           const r = f.occ.runId ? handle.aiRuns.byId(f.occ.runId) : null

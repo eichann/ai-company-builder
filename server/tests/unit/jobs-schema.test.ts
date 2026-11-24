@@ -33,6 +33,8 @@ const LATER_TABLES = [
   // jobs.md "Member proposals": a member's candidates (24 h) and the permanent records of the submitted ones.
   'ai_job_candidates',
   'ai_job_proposals',
+  // jobs.md "The set watch (schema 5)" (4b-4 PR2): the 「使った」 mark, one per record.
+  'ai_job_meeting_reviews',
   // agent-browser.md 「ブラウザ操作」: the company setting, members' own modes and the history.
   'agent_browser_settings',
   'agent_browser_overrides',
@@ -53,6 +55,8 @@ const LATER_TABLES = [
 const LATER_INDEXES = [
   // records.md "Delivery order": a delivery number once per company.
   'idx_record_ledger_delivery',
+  // jobs.md "The set watch (schema 5)" (4b-4 PR2): the ledger's rows by the state they went into, in delivery order.
+  'idx_record_ledger_into',
 ]
 /**
  * Columns later builds add to a table that was there before (each an idempotent `ALTER TABLE … ADD COLUMN`, so

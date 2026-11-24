@@ -15,7 +15,8 @@
 import { DEFAULT_COMPANY_TIME_ZONE } from '../../shared/core/calendar'
 import { latestJobSlot, nextJobSlot } from '../../shared/core/job-schedule'
 import { isTimeTrigger } from '../../shared/core/jobs'
-import { sha256Bytes } from '../adapters/system'
+import { sha256Bytes, sha256TokenDigest } from '../adapters/system'
+import { minutesReviewIdOf } from '../services/minutes-review'
 import { companySkillTree, departmentSkill } from '../lib/skill-trees'
 import type { CompanyRepository } from '../ports/companies'
 import type { MembershipRepository } from '../ports/memberships'
@@ -172,6 +173,8 @@ export function wireJobOccurrences(deps: JobOccurrencesWiringDeps) {
     // A deliverable place no longer usable (a folder pick past its 90 days) sends the occurrence to a person at its slot.
     placeUsable: deps.placeUsable,
     aiStepStates: deps.aiStepStates,
+    // The set watch (4b-4 PR2): a meeting's 「議事録を確認する」 is told by its id, the one minutes-review.ts gives it.
+    minutesReviewId: meetingId => minutesReviewIdOf(sha256TokenDigest, meetingId),
     noticesChanged: (companyId, userIds) => push.notify(companyId, userIds, { kind: 'notifications', version: shared.ids.newToken().slice(0, 32) }),
   })
   const jobRunner = createJobRunner({

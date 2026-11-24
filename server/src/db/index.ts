@@ -7,7 +7,7 @@ import { DECISION_VERSION, TASK_VERSION } from '../../shared/core/core-types'
 import { APP_DB_PATH, DATA_DIR } from '../lib/config'
 import { agentSchema, migrateAgentEventSandbox, migrateSecondOpinionSetting } from './schema/agents'
 import { aiRunSchema, migrateAiRunColumns, migrateAiRunSubjects } from './schema/ai-runs'
-import { jobSchema, migrateJobAcceptedPlace, migrateJobEvents, migrateJobOccurrenceCheckedUntil, migrateJobOccurrenceRetries, migrateJobWatchGenerations } from './schema/jobs'
+import { jobSchema, migrateJobAcceptedPlace, migrateJobEvents, migrateJobOccurrenceCheckedUntil, migrateJobOccurrenceRetries, migrateJobSetWatch, migrateJobWatchGenerations } from './schema/jobs'
 import { brokerSchema, migrateBrokerSettings } from './schema/broker'
 import { companySchema, migrateCompanyFolderKind, migrateInvitationClaims } from './schema/company'
 import { connectorSchema, migrateConnectorProviders, migrateGooglePicker } from './schema/connectors'
@@ -48,7 +48,7 @@ export { migrateConnectorProviders } from './schema/connectors'
 export { migrateFixedPayloads } from './schema/fixed-payloads'
 export { migrateOutboundAttachments, migrateOutboundSendSources } from './schema/outbound-mail'
 export { migrateAiRunColumns, migrateAiRunSubjects } from './schema/ai-runs'
-export { migrateJobAcceptedPlace, migrateJobEvents, migrateJobOccurrenceCheckedUntil, migrateJobOccurrenceRetries, migrateJobWatchGenerations } from './schema/jobs'
+export { migrateJobAcceptedPlace, migrateJobEvents, migrateJobOccurrenceCheckedUntil, migrateJobOccurrenceRetries, migrateJobSetWatch, migrateJobWatchGenerations } from './schema/jobs'
 export { migrateMemberAbsenceHistory, migrateMemberWorkSwitches } from './schema/tasks'
 export { migrateSkillUseColumns } from './schema/skill-uses'
 export { migrateSecondOpinionSetting } from './schema/agents'
@@ -174,6 +174,8 @@ export function initDatabase(conn: Database.Database = sqlite) {
   migrateJobEvents(conn)
   // Watch generations (stage 4b-0.5, jobs.md "Event-triggered jobs"): after the cursors exist; it reads memberships.
   migrateJobWatchGenerations(conn)
+  // The set watch's scan (4b-4 PR2, jobs.md "The set watch (schema 5)"): the meeting on an occurrence, the boundary, the mark.
+  migrateJobSetWatch(conn)
   // Absences are history: removed periods are marked, never deleted (records.md "Whose turn it was").
   migrateMemberAbsenceHistory(conn)
   // 「ブラウザ操作」 permits counted on the monotonic clock too (agent-browser.md, the clock fix).

@@ -5,7 +5,7 @@
  * version's definition (and a trigger refuses it), only one that adds a version and ones that mark a
  * version approved / accepted once.
  */
-import type { JobDeliveryPlace, JobOccurrenceState, JobPauseReason, JobState, LedgerEventRow } from '../../shared/core/jobs'
+import type { JobDeliveryPlace, JobOccurrenceState, JobPauseReason, JobSetMarkOutcome, JobState, LedgerEventRow } from '../../shared/core/jobs'
 
 export interface JobRow {
   id: string
@@ -96,6 +96,11 @@ export interface JobOccurrenceRow {
    * watch now moves, stops or clears it; null / absent (a time slot, or a watch not known) never does.
    */
   watchGeneration?: number | null
+  /**
+   * 4b-4 PR2, a set watch's occurrence: the meeting it was made for (its record's one `links.meeting`), pinned when made — the
+   * only minutes its run may read; who sees it reads the record and is one of that meeting's people. Absent / null: any other.
+   */
+  eventMeetingId?: string | null
   createdAt: string
   updatedAt: string
 }
@@ -152,6 +157,21 @@ export interface JobEventCursor {
   chainStop: { code: string; record: string; at: string } | null
   /** Stage 4b-0.5: which watch this is (+ 1 each time it starts over or moves); null only before the startup migration. */
   generation: number | null
+  /**
+   * 4b-4 PR2, a set watch's cursor (`watch` is ''): the delivery number at which its current consent was accepted — only a
+   * meeting first read and a record made after it is ever its (the switch boundary). null for an event job's cursor.
+   */
+  setBoundary: number | null
+}
+
+/** The 「使った」 mark of one record (4b-4 PR2): one per record in the company, whichever job wrote it. */
+export interface JobMeetingReviewRow {
+  recordId: string
+  meetingId: string
+  jobId: string
+  outcome: JobSetMarkOutcome
+  occurrenceId: string | null
+  at: string
 }
 
 export interface JobRepository {
@@ -248,8 +268,11 @@ export interface JobRepository {
    * (with the record's type): what a job watching that record looks at (indexed by the record).
    */
   watchedEvents(recordId: string, afterSeq: number, upToSeq: number, limit: number): LedgerEventRow[]
-  /** The job's distinct event records, newest event first, at most `limit` (who may see its occurrences is who reads them). */
-  eventRecordsOf(jobId: string, limit: number): string[]
+  /**
+   * The job's distinct event records, newest event first, at most `limit` (who may see its occurrences is who reads them),
+   * each with the meeting a set watch's occurrence of it was made for (null for any other: 4b-4 PR2).
+   */
+  eventRecordsOf(jobId: string, limit: number): Array<{ recordId: string; meetingId: string | null }>
   /**
    * The job's newest occurrences (the order of `occurrences`), at most `limit`: every time slot, and the event ones of
    * `records` only — leaving the others out in SQL, before the limit.
@@ -300,6 +323,32 @@ export interface JobRepository {
   stopStamp(): string
   /** How many event occurrences of the job were made on the company's `day`. */
   eventOccurrencesOn(jobId: string, day: string): number
+
+  // 4b-4 PR2, the set watch (jobs.md "The set watch (schema 5)").
+  /**
+   * A set watch's cursor (`watch` ''): at the company's newest delivery number (never moved back), the boundary there — its
+   * consent was accepted now —, the stamps taken now. A first acceptance makes it.
+   */
+  startSetCursor(jobId: string, at: string): void
+  /**
+   * The company's ledger rows into `toState` (a real change: the state before differs) of records of `type`, with a delivery
+   * number in (`afterSeq`, `upToSeq`], in delivery order, at most `limit` (indexed by the state they went into).
+   */
+  ledgerInto(type: string, toState: string, afterSeq: number, upToSeq: number, limit: number): LedgerEventRow[]
+  /**
+   * The delivery number of the record's first ledger row into `state` (a real change), or of its first row when `state` is
+   * null (its making): `{ seq }` — `seq` null when that row has none (written before delivery numbers) —, or null: no such row.
+   */
+  firstLedgerSeq(recordId: string, state: string | null): { seq: number | null } | null
+  /** Whether the record has its 「使った」 mark (whichever job wrote it). */
+  meetingReviewMarked(recordId: string): boolean
+  /**
+   * Write the record's 「使った」 mark (`PRIMARY KEY (company, record)`). The caller asked `meetingReviewMarked` in the same
+   * transaction; one there already throws (fails closed: the caller's transaction, occurrence included, is rolled back).
+   */
+  markMeetingReview(row: JobMeetingReviewRow): void
+  /** The record's mark, or null. */
+  meetingReview(recordId: string): JobMeetingReviewRow | null
   /**
    * Stage 4-0.1: a pause or the company's stop (restore's included) holds the job's (null: every job's) event
    * occurrences still `due` — `held` with `code` — so that returning to 4a never runs one that waited before the pause.

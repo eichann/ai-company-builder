@@ -25,6 +25,8 @@ export function crossBuildSnapshot(db: Db, co: string) {
     proposals: all('SELECT * FROM ai_job_proposals WHERE company_id = ? ORDER BY id'),
     proposalJobs: all(`SELECT id, name, state, acting_user_id, latest_version, approved_version, approved_fingerprint, accepted_version, accepted_consent, created_by
       FROM ai_jobs WHERE company_id = ? AND id IN (SELECT job_id FROM ai_job_proposals WHERE company_id = ai_jobs.company_id) ORDER BY id`),
+    // The set watch's 「使った」 mark (4b-4 PR2): no build writes a second or changes one.
+    marks: all('SELECT * FROM ai_job_meeting_reviews WHERE company_id = ? ORDER BY record_id'),
     made: all(`SELECT id FROM records WHERE company_id = ? AND type = 'task' AND id IN (SELECT 'task-' || substr(id, 5) FROM ai_job_occurrences WHERE company_id = records.company_id) ORDER BY id`),
   }
 }

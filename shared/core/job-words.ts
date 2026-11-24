@@ -203,6 +203,8 @@ const OUTCOME_WORDS: Record<string, string> = {
   EVENT_NOT_NEEDED: 'きっかけのやることがその状態ではなくなったため、AI を動かしませんでした',
   EVENT_DONE_MARK: 'きっかけのやることにファイルがもうつながっていたため、AI を動かしませんでした',
   MADE_THEN_STOPPED: '途中で続けられなくなりましたが、外にすでに作ったものがあります。人が確かめる必要があります',
+  SET_WATCH_NOT_OPENED: 'この定期の仕事の条件が、いまのサーバーで使える組み合わせではなくなったため、動かしませんでした',
+  SET_WATCH_MEETING_CHANGED: 'きっかけのやることにつながる会議が変わったため、この回は見送りました',
 }
 
 /**

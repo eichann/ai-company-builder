@@ -583,6 +583,12 @@ usable folders. No folder (or one that stopped being usable) → `check` answers
 `reason: 'no-folder' | 'folder-unusable'` and reads nothing. Admin console: 「つなぎ先」→「Google」→
 「議事録の置き場所」 (`minutes-folder.tsx`).
 
+## Who a meeting's people are (one copy)
+
+`services/meeting-people.ts` (`isMeetingPerson`, `meetingAttendeeIds`): on its list as a person, its assignee or in `attendees`.
+The minutes service's buttons and text use it, and so does a scheduled job's set watch (`jobs.md` "The set watch (schema 5)":
+who sees its occurrences, whose meeting it is). Change the rule there.
+
 ## For a scheduled job's meeting check (B PR 5a-2)
 
 `services.minutes.attendedSince(member, since, until, limit)`: the meetings whose people-only list names the member

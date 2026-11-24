@@ -201,6 +201,17 @@ export const JOB_SET_WATCH_OPENED: readonly JobSetTrigger[] = [
   },
 ]
 
+/**
+ * What a set watch's scan wrote for one matching record (4b-4 PR2, the 「使った」 mark — one per record in the company, over
+ * every version and job: `ai_job_meeting_reviews`): `made` (its occurrence), or why none was made — `paused` (it came while
+ * the job or the company was stopped), `before_acceptance` (the meeting was first read, or the record made, before the job
+ * was accepted — or that cannot be told), `day_limit` (beyond the day's limit), `not_matched` (a guard of the combination did
+ * not hold: the meeting, its people, its outside attendees, the record's assignee), `step_busy` (a business plugin step runs
+ * the same Skill for that meeting). Short codes, stored; never text.
+ */
+export const JOB_SET_MARK_OUTCOMES = ['made', 'paused', 'before_acceptance', 'day_limit', 'not_matched', 'step_busy'] as const
+export type JobSetMarkOutcome = typeof JOB_SET_MARK_OUTCOMES[number]
+
 /** Is this set watch exactly one of the opened combinations (every key, every list in its order)? */
 export function jobSetWatchOpened(trigger: JobSetTrigger): boolean {
   const text = canonicalJson(trigger)
@@ -1115,6 +1126,9 @@ export const JOB_OUTCOME_CODES = [
   // state (`nothing`: no longer needed), its done mark found (`nothing`), or stopped after its run made something outside
   // that is known (`needs_person`: a person looks at what was made).
   'EVENT_NOT_NEEDED', 'EVENT_DONE_MARK', 'MADE_THEN_STOPPED',
+  // 4b-4 PR2, a set watch's occurrence (schema 5): its combination is no longer one of `JOB_SET_WATCH_OPENED` (a line taken
+  // out: its jobs stop), or the meeting it was made for is no longer the record's (the meeting link changed).
+  'SET_WATCH_NOT_OPENED', 'SET_WATCH_MEETING_CHANGED',
 ] as const
 export type JobOutcomeCode = typeof JOB_OUTCOME_CODES[number]
 

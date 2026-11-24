@@ -47,6 +47,7 @@ import type { JobService } from './jobs'
 import { companyNow } from './notifications'
 import type { ServiceCreateInput, ServiceRecordWriter } from './record-engine'
 import { aiTurnState, createJobEvents, eventShown, type AiStepStates } from './job-events'
+import { isSetWatchOccurrence, setWatchCondition, type MinutesReviewId } from './job-set-watch'
 import { madeBefore } from './job-retry'
 
 /** Per company and run: occurrences the runner takes at most. */
@@ -78,6 +79,8 @@ export interface JobOccurrenceDeps {
   placeUsable?: (companyId: string, userId: string, place: JobDeliveryPlace) => boolean
   /** Event-triggered jobs (stage 4a): a business plugin step's states that run as 「AI の番」 (never an event's state, ⑧). */
   aiStepStates?: AiStepStates
+  /** 4b-4 PR2, the set watch: the id of a meeting's 「議事録を確認する」 (absent → a set watch reads nothing). */
+  minutesReviewId?: MinutesReviewId
 }
 
 /** Company time `YYYY-MM-DDTHH:MM` in `timeZone` → the UTC instant (ISO). Two passes settle a zone's offset. */
@@ -130,10 +133,13 @@ export function endPcRun(handle: CompanyData, runId: string | null, code: string
 /**
  * An event occurrence run by the responsible person's PC (schema 3, stage 4b-1, jobs.md "Event jobs on the PC"): an event
  * occurrence pinned to a PC procedure with the source-record check. Its conditions (C1–C9, owner memo 「段4b 設計メモ」 §5-2)
- * are checked at the list, the claim, every call, every renew, the finish and by the clock (`eventCondition`).
+ * are checked at the list, the claim, every call, every renew, the finish and by the clock (`eventCondition`). Since 4b-4 PR2
+ * also a set watch's occurrence (schema 5, `matched_record`: its record and meeting pinned — job-set-watch.ts), whose conditions
+ * are the same machinery with the combination's own in place of C3–C9.
  */
-export function isEventPcOccurrence(occ: Pick<JobOccurrenceRow, 'eventRecordId'>, definition: JobDefinition | null): definition is JobDefinition {
-  return !!occ.eventRecordId && definition !== null && definition.placement === 'a' && definition.check.kind === 'source_record'
+export function isEventPcOccurrence(occ: Pick<JobOccurrenceRow, 'eventRecordId' | 'eventMeetingId'>, definition: JobDefinition | null): definition is JobDefinition {
+  if (!occ.eventRecordId || definition === null || definition.placement !== 'a') return false
+  return definition.check.kind === 'source_record' || isSetWatchOccurrence(occ, definition)
 }
 
 /** Where an event PC occurrence goes when a condition fails and its run made nothing outside (owner memo §4-4). */
@@ -156,7 +162,7 @@ export function createJobOccurrences(deps: JobOccurrenceDeps) {
   const { companyData, transactions, clock, ids } = deps
   const log = deps.log ?? ((message: string) => console.log(message))
   // Event-triggered jobs (stage 4a, services/job-events.ts): the scan the clock runs, the checks before acting.
-  const events = createJobEvents({ transactions, clock, ids, roleOf: deps.roleOf, timeZoneOf: deps.timeZoneOf, aiStepStates: deps.aiStepStates, log })
+  const events = createJobEvents({ transactions, clock, ids, roleOf: deps.roleOf, timeZoneOf: deps.timeZoneOf, aiStepStates: deps.aiStepStates, minutesReviewId: deps.minutesReviewId, log })
 
   /** Write an occurrence notice for the responsible person and the job's creator (if owner / admin now), in the caller's transaction. */
   function notice(companyId: string, handle: CompanyData, kind: NotificationKind, occ: JobOccurrenceRow, job: JobRow | null, actingUserId: string | null, told: Set<string>) {
@@ -604,7 +610,8 @@ export function createJobOccurrences(deps: JobOccurrenceDeps) {
     const job = handle.jobs.find(occ.jobId)
     const version = job ? handle.jobs.version(occ.jobId, occ.jobVersion) : null
     const definition = version ? definitionOf(version) : null
-    if (!job || !version || !isEventPcOccurrence(occ, definition) || !isRecordTrigger(definition.trigger)) return 'JOB_VERSION_CHANGED'
+    const setWatch = isSetWatchOccurrence(occ, definition)
+    if (!job || !version || !isEventPcOccurrence(occ, definition) || (!setWatch && !isRecordTrigger(definition.trigger))) return 'JOB_VERSION_CHANGED'
     if (handle.jobs.stopped()) return 'COMPANY_STOPPED'
     if (job.state !== 'active') return 'JOB_PAUSED'
     if (job.approvedVersion !== occ.jobVersion) return 'JOB_VERSION_CHANGED'
@@ -613,6 +620,19 @@ export function createJobOccurrences(deps: JobOccurrenceDeps) {
     const refusal = deps.jobs.runnerRefusal(handle.companyId, version)
     if (refusal) return refusal
     const responsible = memberOf(handle.companyId, definition.actingUser)
+    // A set watch's occurrence (4b-4 PR2): its combination still opened, the record and its pinned meeting still the responsible
+    // person's (read, one of the meeting's people), the meeting still the record's, the record still done and theirs — in place of
+    // C3–C9 (it watches no one record, so no watch generation or done mark applies).
+    if (setWatch) {
+      const why = setWatchCondition(handle, definition, responsible, occ)
+      if (why) return why
+      if (absentToo) {
+        const day = dayOf(occ)
+        if (handle.tasks.absencesFrom(day).some(a => a.userId === definition.actingUser && a.from <= day && day <= a.until)) return 'OWNER_ABSENT'
+      }
+      return null
+    }
+    if (!isRecordTrigger(definition.trigger)) return 'JOB_VERSION_CHANGED'
     const recordId = occ.eventRecordId as string
     if (!responsible || !eventShown(handle, responsible, occ)) return 'EVENT_RECORD_GONE'
     if (!ownsWatch(handle, occ)) return 'EVENT_NOT_WATCHED'
@@ -680,7 +700,8 @@ export function createJobOccurrences(deps: JobOccurrenceDeps) {
   function eventEnded(companyId: string, occ: JobOccurrenceRow, made: string | null, code: string): string[] {
     const handle = companyData.forCompany(companyId)
     const told = new Set<string>()
-    if (!occ.eventRecordId) return []
+    // A set watch's occurrence (4b-4 PR2) watches no one record: its end moves, stops or clears no watch.
+    if (!occ.eventRecordId || occ.eventMeetingId) return []
     if (made === null) {
       if (ownsWatch(handle, occ)) events.chainStopped(handle, occ.jobId, code, occ.eventRecordId, told)
       return [...told]

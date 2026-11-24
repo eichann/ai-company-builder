@@ -237,7 +237,8 @@ export interface JobTurnView {
    * record the event happened to (`source`, a record the responsible person reads now). Absent: a time slot.
    */
   kind?: 'event'
-  source?: { recordId: string }
+  /** The record the event happened to; a set watch's (4b-4 PR2) also the meeting it was made for — the minutes its run may read. */
+  source?: { recordId: string; meetingId?: string }
   check: JobCheck
   /** ISO instant: a file changed after it is new for `new_files`. */
   checkSince: string

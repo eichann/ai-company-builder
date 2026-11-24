@@ -278,7 +278,12 @@ compare-and-set and ledger), and writes notices.
   responsible person's own row back once — unread, dated now, its
   `action` set to `reminded` (`CHAIN_STOP_REMINDED`, the repository's `remindOnce` compare-and-set) and worded
   「…は11月18日から止まったままです（…）」; no new row, kind or key (`jobs.md` "A stopped chain"). An
-  occurrence notice of an event occurrence reaches only those who read its record (and is shown only while they do).
+  occurrence notice of an event occurrence reaches only those who read its record (and is shown only while they do); of a
+  set watch's (4b-4 PR2) only those who also read its meeting and are one of its people.
+- `job_day_limit` (4b-4 PR2, `jobs.md` "The set watch (schema 5)"): a set watch went past its day's limit — to its responsible
+  person only (while a member), once per job and company day (key `job_day_limit:<job>:<day>`), recordless; built when read
+  (`jobs.dayLimitNotice`) and shown only while the reader is the approved version's responsible person; it names the day from its
+  key (never 「今日」), never a meeting's name or a count. An app that does not know the kind keeps it as any recordless one.
 
 ## The push signal
 
