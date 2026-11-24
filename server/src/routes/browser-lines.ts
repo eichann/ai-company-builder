@@ -1,16 +1,16 @@
 /**
  * 「ブラウザ操作」's opened lines on the server (generalization PR 4; agent-browser.md "Plans of opened lines on the
  * server"). Rules: services/browser-lines.ts, services/browser-line-steps.ts; shapes: shared/types/browser-lines.ts.
- * Nothing in the app calls these yet (PR 5). A person's session only, except a write execution's report (its secret).
+ * The app calls them since PR 5b / 5c (inspect.ts, write-lines.ts). A person's session only, except a write execution's report (its secret).
  *
  * The steps the server gates (create, approve, claim, permit) also take this PC's key header (`X-ACB-Browser-Device`,
  * agent-browser.md "This PC's registration").
  *
  * Mounted at /api/companies/:companyId:
- *   POST /browser-line-plans                                  an inspection of an approved line (a write line: refused)
+ *   POST /browser-line-plans                                  an inspection of an approved line; with `account`: a plan of writes (draft)
  *   GET  /browser-line-plans/:planId                          the member's own
  *   POST /browser-line-plans/:planId/result                   the inspection's result, once (fixed words)
- *   POST /browser-line-plans/:planId/approve | cancel | claim a plan of writes (none can be made in this build)
+ *   POST /browser-line-plans/:planId/approve | cancel | claim a plan of writes (only of an approved line that writes)
  *   POST /browser-line-executions/:executionId/permit         X-ACB-Browser-Execution: <secret>; { index }: one write
  *   POST /browser-line-executions/:executionId/confirm        { index, result: done | not_done }
  *   GET  /browser-line-grants                                 owner/admin: approved lines and who may use them

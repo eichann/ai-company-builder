@@ -118,6 +118,12 @@ export interface BrowserReadRunInput {
    * nothing more is read and nothing is judged (owner decision: an inspection runs only while its consultation is open).
    */
   signal?: AbortSignal
+  /**
+   * Objects to read too, each by its thing's `object` address and an id main holds (generalization PR 5c: what a write
+   * created, by the id the site gave), read after the line's reads and before the account marker is read again — so they
+   * sit between the markers (the judgement's caller part). Not judged here; handed back as read.
+   */
+  objects?: Readonly<Record<string, { thing: string; id: string }>>
 }
 
 /** Why nothing was judged (a fixed word): what was read so far is dropped. */
@@ -140,6 +146,10 @@ export type BrowserReadRunResult =
     notices: readonly BrowserShapeNotice[]
     /** The inspection's result in the server's words (each read's status, each check ✓ / ✗ / unreadable). */
     report: BrowserInspectionReport
+    /** What main read (memory only, never sent): the write runner judges its writes from it (PR 5c). */
+    facts: BrowserReadFacts
+    /** The extra objects as read (`objects`), by name. */
+    objects: Readonly<Record<string, BrowserThingResult>>
   }
 
 export const BROWSER_READ_RUN_LIMITS = { reads: 30, ms: 60_000 } as const
@@ -253,6 +263,12 @@ export function createBrowserReadRunner(deps: BrowserReadRunnerDeps) {
     if (browserLineValuesProblem(line.read, values)) return refused('values')
     if (input.planId !== undefined && (typeof input.planId !== 'string' || !LINE_PLAN_ID_RE.test(input.planId))) return refused('input')
     if (input.expectedAccount !== undefined && (typeof input.expectedAccount !== 'string' || !BROWSER_ID_VALUE_RE.test(input.expectedAccount))) return refused('input')
+    const extra = input.objects ?? {}
+    if (!isObject(extra)) return refused('input')
+    for (const o of Object.values(extra)) {
+      const a = isObject(o) && typeof o.thing === 'string' && own(addresses, o.thing) ? addresses[o.thing] : undefined
+      if (!a || a.kind !== 'object' || browserThingAddressProblem(a) || !own(readers, o.thing) || typeof o.id !== 'string' || !BROWSER_ID_VALUE_RE.test(o.id)) return refused('addresses')
+    }
     if (deps.stopped(companyId)) return refused('stopped')
     const surface = deps.window(companyId, host)
     if (!surface || surface.closed()) return refused('window')
@@ -376,6 +392,8 @@ export function createBrowserReadRunner(deps: BrowserReadRunnerDeps) {
         reads[r.name] = got
         if (got.status === 'read') states[r.name] = got.state
       }
+      const objects: Record<string, BrowserThingResult> = {}
+      for (const [name, o] of Object.entries(extra)) objects[name] = await readObject(o.thing, addresses[o.thing] as Extract<BrowserThingAddress, { kind: 'object' }>, o.id)
       const after = await readAccount()
       check()
       const facts: BrowserReadFacts = {
@@ -393,7 +411,7 @@ export function createBrowserReadRunner(deps: BrowserReadRunnerDeps) {
         for (const n of notices) tell(() => reporter.notice(companyId, n))
         if (input.planId !== undefined) tell(() => reporter.result(companyId, input.planId as string, report))
       }
-      return { status: 'judged', ok: outcome.problem === null, outcome, card, member: notices.length > 0 ? BROWSER_SHAPE_WORDS.member : null, notices, report }
+      return { status: 'judged', ok: outcome.problem === null, outcome, card, member: notices.length > 0 ? BROWSER_SHAPE_WORDS.member : null, notices, report, facts, objects }
     } catch (error) {
       return refused(error instanceof Refusal ? error.reason : 'context')
     } finally {

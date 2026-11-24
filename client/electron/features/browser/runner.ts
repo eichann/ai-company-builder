@@ -103,6 +103,11 @@ export interface BrowserRunnerDeps {
   /** A monotonic clock in ms (default `performance.now()`): a sleep stops it, a clock set back does not move it. */
   monoMs?(): number
   log?: Pick<Console, 'warn'>
+  /**
+   * The windows a run holds now (`<company>\0<host>`), shared with the new path's write runner (generalization PR 5c) so
+   * one window never serves two runs at once; default: this runner's own.
+   */
+  busyWindows?: Set<string>
 }
 
 /** What the card's press hands the runner: nothing else (never a fact, a hash of its own, the AI's word). */
@@ -125,7 +130,7 @@ const sha256 = (text: string) => `sha256:${createHash('sha256').update(text, 'ut
 export function createBrowserRunner(deps: BrowserRunnerDeps) {
   const log = deps.log ?? console
   const mono = deps.monoMs ?? (() => performance.now())
-  const busyWindows = new Set<string>()
+  const busyWindows = deps.busyWindows ?? new Set<string>()
   const runningPlans = new Set<string>()
 
   async function run(input: BrowserRunInput): Promise<BrowserRunResult> {

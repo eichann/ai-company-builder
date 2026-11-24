@@ -43,3 +43,26 @@ export type BrowserInspectionReads = ElectronPort<'getBrowserInspection'>
 export function getBrowserInspection(companyId: string, planId: string, reads: BrowserInspectionReads = window.electronAPI) {
   return reads.getBrowserInspection(companyId, planId)
 }
+
+/** Reading a write card main holds in memory for the signed-in member (`browserLines:writeCard`). */
+export type BrowserWriteReads = ElectronPort<'getBrowserWriteCard'>
+/** ［確かめた］ (a person's value) and ［済んでいた］［されていなかった］: the member's own answers. */
+export type BrowserWriteAnswers = ElectronPort<'confirmBrowserWriteValue' | 'confirmBrowserWrite'>
+/** ［任せる］: the app writes the plan to the site. */
+export type BrowserWriteOutbound = ElectronPort<'runBrowserWrite'>
+
+export function getBrowserWriteCard(companyId: string, cardId: string, reads: BrowserWriteReads = window.electronAPI) {
+  return reads.getBrowserWriteCard(companyId, cardId)
+}
+
+export function confirmBrowserWriteValue(companyId: string, cardId: string, name: string, answers: BrowserWriteAnswers = window.electronAPI) {
+  return answers.confirmBrowserWriteValue(companyId, cardId, name)
+}
+
+export function confirmBrowserWrite(companyId: string, cardId: string, result: 'done' | 'not_done', answers: BrowserWriteAnswers = window.electronAPI) {
+  return answers.confirmBrowserWrite(companyId, cardId, result)
+}
+
+export function runBrowserWrite(companyId: string, cardId: string, contentHash: string, outbound: BrowserWriteOutbound = window.electronAPI) {
+  return outbound.runBrowserWrite(companyId, cardId, contentHash)
+}

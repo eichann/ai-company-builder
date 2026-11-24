@@ -38,7 +38,7 @@ export interface BrowserOpenedLine {
   read: BrowserReadLine
   /**
    * The writes (generalization PR 6, `browser-write-line.ts`): absent for an inspection (読むだけの点検). A line with writes
-   * is never made a plan by a build that cannot write it (the server refuses it, `BROWSER_LINE_WRITES_NOT_YET`).
+   * is never made an inspection (`BROWSER_LINE_WRITES_NOT_YET`); since PR 5c an approved one makes plans of writes.
    */
   writes?: readonly BrowserLineWrite[]
   /** The card's heading of each read (Japanese, plain): every read has one. */

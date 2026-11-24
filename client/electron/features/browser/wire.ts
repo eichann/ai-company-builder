@@ -76,6 +76,8 @@ export function wireBrowserPlans<E extends IpcInvokeEvent>(ipc: IpcRegistrar<E, 
   const readers = new Map(deps.connectors.readers.map(r => [r.id, r]))
   const records = createBrowserRunRecords(path.join(deps.userDataDir(), 'browser-runs', 'records.json'), deps.log)
   const now = () => Date.now()
+  // One window serves one run at a time, on both paths (the write runner of opened lines gets the same set).
+  const busyWindows = new Set<string>()
 
   const runner = createBrowserRunner({
     aiSwitch, plans: http, connector, combination,
@@ -89,7 +91,7 @@ export function wireBrowserPlans<E extends IpcInvokeEvent>(ipc: IpcRegistrar<E, 
     parse: parseBrowserHtml,
     // The card's press has no conversation: the sign-in, the company's setting, quitting and the switch decide.
     context: () => context.capture({ companyId: '' }),
-    records, now, log: deps.log,
+    records, now, log: deps.log, busyWindows,
   })
 
   registerBrowserPlansIpc(ipc, {
@@ -136,6 +138,7 @@ export function wireBrowserPlans<E extends IpcInvokeEvent>(ipc: IpcRegistrar<E, 
 
   return {
     context,
+    busyWindows,
     /** Whether the request tool may exist at all (the switch, asked per turn). */
     requestAvailable: () => aiSwitch(),
     request,

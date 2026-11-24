@@ -1304,7 +1304,7 @@ hand refused; the old path's hash),
 Each guard mutation-checked; kept on purpose: the card's real-day check on a supplied value (the values check already
 refuses a date value that is not one).
 
-## Plans of opened lines on the server (generalization PR 4: built; nothing in the app calls it yet)
+## Plans of opened lines on the server (generalization PR 4: built; the app calls it since PR 5b / 5c)
 
 Design memo 「ブラウザ操作の汎用化」 §3-5, §8, §15 C11–C13, §15-2 (PR 4), §16-1, §16-4, §16-5 with Q14 / Q15 (§18), §17; the
 owner's decisions on #813 (the state table lands here; a rollback floor before the first build that writes; a late
@@ -1359,11 +1359,16 @@ path holds the same lock key (below).
   JSON, settable once by trigger) with `state` `all_ok` / `ng` / `not_read` and the plan is `done`. **No value the site
   showed is ever sent or kept.** A second result → `BROWSER_RESULT_DONE`; past the hour → closed `expired`; `cancel`
   closes it. `GET /browser-line-plans/:planId`: the member's own (anyone else's, another company's: the same 404).
-- **No plan of writes in this build**: since PR 6 an opened line may hold writes (`step_template_add`, `pending`), but
-  `writeGate` refuses every plan of writes at approve / claim / permit (`BROWSER_LINE_WRITES_NOT_YET`) — also one a
-  later build left in the database — and `create` refuses an inspection of a line that writes (it would pass the
-  「見るだけ」 gate) with the same code. The routes and the state table exist so that **this build is the rollback floor**
-  of the first build that writes (below, deployment.md).
+- **Plans of writes** (since PR 5c, "Writing on the new path" below): `POST /browser-line-plans` with `account` (a plain
+  id: the site's marker as the app read it) makes a `draft` of an **approved** line that writes, at level 「入力・保存まで」;
+  the server derives the writes (`browserLineServerWrites`: `add_child` → a change of the read's object, `create_from` → a
+  create, one setting `{ created }` bound by the permit to the id recorded for that earlier write) and every lock
+  (`browserLineWriteLocks`) from the line, its map and the values — the app names no write, target or key. `writeGate`
+  (approve, claim, every permit) = the line's gate plus: the row's line writes exactly as many times as the plan holds
+  (an inspection's row, or a write plan a database holds for another line, is `BROWSER_LINE_NOT_APPROVED`). Without
+  `account` it stays an inspection, and an inspection of a line that writes is still refused
+  (`BROWSER_LINE_WRITES_NOT_YET`); a write plan of a line that writes nothing is `BROWSER_BAD_PLAN`. Both writing lines
+  are `pending`, so today the gate refuses them before anything. PR 4's build is the rollback floor (below, deployment.md).
 - **The write state table** (`browser-line-steps.ts`, "Executions with several writes" row by row; tables
   `browser_line_executions`, **`browser_execution_steps`** — one row per write, a trigger allows exactly the table's
   moves (a write's state never moves backwards; its permit time and created id never change once set) —,
@@ -1558,6 +1563,91 @@ answer dropped), `browser-read-line-runner.test.ts` (the 1.0.x row as approved a
 importers unchanged). Each guard mutation-checked (the switch, the row's status, the main-window check, the member's
 card, the turn signal, no value in the AI's words); kept on purpose: the runner's own `turn.aborted` check (the context
 capture with the signal already sees it).
+
+## Writing on the new path (generalization PR 5c: the write executor, behind this PC's opt-in; no line can write yet)
+
+Design memo 「ブラウザ操作の汎用化」 §4, §9, §15 C1–C4 / C11 / C15, §16-3, §16-4; the state table ("Executions with several
+writes") and `model/browser-plan/StepsLife.tla` (the runner's steps name its App* actions; the model cites the runner, the
+server's state table and the gate). **Nothing can write yet**: `step_template_add` and `landing_create` stay `pending` (the
+owner's test write, PR 7, approves them) and no site has writers (main.ts hands Lステップ `writers: {}`), so `browser_write`
+answers with fixed words before anything is read. **The old path is unchanged** (`runner.ts`, `lstep@0.6.x`), except that
+its runner takes the shared set of busy windows.
+
+- **Pieces.** `client/shared/browser-line-writes.ts` (pure: the writer port `BrowserLineWriter` with its
+  `BrowserLineWriteMechanics`, `lineWriteRequestProblem`, the gate `createLineWriteGate`, the card's sentences and four
+  lists, the AI's words, the card's view and its check `readBrowserWriteView`);
+  `client/electron/features/browser/write-line-runner.ts` (`createBrowserWriteRunner`, no Electron, no site);
+  `write-lines.ts` (`wireBrowserWriteLines`: the proposal, the card in memory, its IPC, the run); `lines-api.ts` (the
+  plan's routes; the report with the secret alone); the tool `browser_write` (`browser-request/inspect-tool.ts`, on
+  `acb_browser`, the same gates as `browser_inspect`); the card (`src/features/browser-plans/components/BrowserWriteCard.tsx`,
+  `writeStore.ts`, `hooks/useBrowserWrite.ts`), reached through the inspection's chat reference (`data-browser-inspection`,
+  with a `wp_` + 32 hex card id: main's own, never a server id). The read runner returns its `facts` (memory only) and reads
+  extra `objects` by id between the account markers.
+- **A writer is a site's reviewed code** (in its map folder, handed in by main.ts; none yet): it builds the ONE request of
+  one write of a map thing (`<thing>.<verb>`) from the ids main gives (the object, its parent, the added value — or the
+  original's state and each set field's value, a created id the server's) and pages it reads (GET only, the window's
+  page-less read session), and for a create names the new id in the answer (a candidate). Its mechanics say what may be
+  sent: POST, the exact path (no query, no braces), the encoding; for a form also each key and its source (`{id}`,
+  `{parent}`, `{value}`) and the page's ignored fields. The built request is held to them (`lineWriteRequestProblem`: a
+  form carries exactly those keys once each with exactly the plan's values, the ignored ones a plain token; a json or
+  multipart write: method and path — its body is the reviewed writer's). Anything else → `plan`, given back, no permit.
+- **The card and the person** (§16-4, Q14): `browser_write { site, line, values }` keeps a card in main's memory (≤ 100,
+  this member's, cleared on sign-out) and answers fixed words (`BROWSER_WRITE_WORDS`: never a value it proposed, a value
+  the site showed, a hash or a result). The card lists each value; a value the line takes from a person shows
+  「AI が提案した値」 with ［確かめた］ (`browserLines:confirmValue`, main window only; a target can never be confirmed).
+  Nothing is read or asked until **every** such value is confirmed; then main reads the site (the read runner, strict,
+  between the account markers), the reads must make a plan (`browserWritesPlanProblem`), and `POST /browser-line-plans`
+  gets the values with their sources (`site_fact` for targets, `person` confirmed for the confirmed ones) and the account
+  read. The card then shows what was read (the generic card), what will be done (`browserWriteSentences`: the map's
+  headings and the line's labels) and ［任せる］ with the draft's hash.
+- **［任せる］** (`browserLines:runWrite { companyId, cardId, contentHash }`, main window only, the hash the card shows,
+  once: a card runs only from `ready`) → the runner: the switch → approve (the hash) → claim (once) → the fixed content
+  must hash to that hash and hold exactly the line's row, the values sent, the account read, the declared host and the
+  number of writes (else `fixed-mismatch`, given back) → this PC's record (`<userData>/browser-runs/line-records.json`;
+  any record of the plan: `already-ran`) → the setting at 「入力・保存まで」, the stop, the hour, the window, one run per
+  window **on both paths** (`busyWindows`, shared with the old runner) → the reads again under the plan's account, each
+  read's state equal to what the card showed (else `before-changed`) → `ai` mode with the write gate → for each write k:
+  the writer's request → the gate armed with exactly it → record `permit-asked` → the write session prepared → write k's
+  permit (≤ 5 s, once; a write that sets what an earlier one created needs the permit's `createdTarget` to be the id this
+  run used, else not sent) → the last check (both clocks under the permit, the context, the stop, the setting, the window
+  clean) → the request (never resent) → a create's id from the answer (a positive integer, never one read before) → the
+  line's reads and every object created so far read again **between the markers** and `judgeBrowserWrites` over writes
+  1..k: exactly as predicted = `done` (reported with the created id; the next write only once the server kept it);
+  anything else once the request left = `unknown`, nothing later asked or sent.
+- **Stops** (StepsLife): before write k's permit (a stop, the window, the setting, a changed read, a writer's problem) →
+  `cancel` (claimed → void; running with nothing open → partial: what was done stays — the harmless prefix leaves only
+  what this run created); a refused permit → nothing reported (the server settled it); permit asked, not sent →
+  `not_sent` (write 1 → failed, later → partial); sent → `done` or `unknown` only. The gate refuses every write of the
+  page, every read of the page but its parts without a query, and from main's write session anything but the armed bytes.
+- **The stopped card** (§16-3): the headline (すべて済みました / 送る前に止めました / 途中で止めました。nつのうちkつ目まで /
+  kつ目が届いたか分かりません), 済んだこと, していないこと (only writes surely not sent), 分からないこと, 手でやること (the
+  not-done writes as steps; none while one is in doubt), ［済んでいた］［されていなかった］ from the server's
+  `confirmableAt` (`browserLines:confirmWrite`), and 「もう一度は送りません」. Built only from the map's and the line's words
+  and the values the person confirmed. A line's own stop note (§16-3 item 5) has no field yet.
+- **The seam for PC registration** (another PR): the server's `gate` (one function: create, approve, claim, every permit)
+  takes its device check; the app's switch (`browserAiSwitch`) is the one place this PC is asked.
+- **Remaining limits** (said): a created object's identification is the answer's id + its strict read + the prediction +
+  the account on both sides — the parent's list difference (C3) waits for a map read of such a list, and "nothing else
+  references it" is the map's reviewed promise, checked by the test write (C2); a json / multipart body is the reviewed
+  writer's (only method and path are held); a stop while a write is on its way makes the read after it refused →
+  `unknown` (safe side); the read runner still reads no html thing or value-named folder, so `step_template_add` cannot
+  be read on this path until PR 7.
+
+Tests: `client/tests/browser-write-line-runner.test.ts` (the real read runner, map 1.0.4 and `landing_create` with test
+writers over a fake Lステップ and a fake of the routes: both writes in order each under its own permit; no write without its
+permit (refused, unanswered, late); a lost answer → unknown, write 2 never asked or sent, the plan never runs again; a stop
+after write 1 leaves only the created action; a read after that is not the prediction or a created id that is none / the
+source → never done; write 2 bound to another id → not sent; the gate lets only the armed bytes through; the fixed content
+must be what the card showed and the reads what the person saw; switched off / not approved / no writer → nothing asked;
+an add_child form write with exactly its keys, one key more or another key refused; the stopped card's lists),
+`client/tests/browser-write-lines-app.test.ts` (the AI's words fixed; nothing read or asked until every person's value is
+confirmed, sent as the person's; main window only; ［任せる］ only with the card's hash, once; the report's secret in its
+header without the session; pending / no writers → nothing proposed), `server/tests/unit/browser-lines.test.ts` ("plans of
+writes"), `browser-runner.test.ts` (the write runner made only by its wiring and run only by `browserLines:runWrite` after
+the main-window check; no agent, chat server, preload or page names it). Each guard mutation-checked (31 mutations); kept on
+purpose as second layers: the created id's own check (the judgement refuses the same ids), the stop check before a writer
+builds (the check after it catches the same), a target never confirmable (its source list already refuses), and the
+confirmed-only values at prepare (prepare runs only once all are confirmed).
 
 ## The write words and the first write line (generalization PR 6: data and words; nothing writes with them yet)
 

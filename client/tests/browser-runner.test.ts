@@ -354,7 +354,9 @@ test('only the card\'s ［任せる］ reaches the runner: one composition makes
   // Inside it, the wiring alone takes a value from it; the others only its types.
   const inside = app.filter(f => rel(f).startsWith('electron/features/browser/') && rel(f) !== 'electron/features/browser/runner.ts'
     && /from ['"]\.\/runner(\.js|\.ts)?['"]/.test(fs.readFileSync(f, 'utf8'))).map(rel).sort()
-  assert.deepEqual(inside, ['electron/features/browser/plans-api.ts', 'electron/features/browser/plans-ipc.ts', 'electron/features/browser/register.ts', 'electron/features/browser/run-records.ts', 'electron/features/browser/wire.ts'])
+  assert.deepEqual(inside, ['electron/features/browser/plans-api.ts', 'electron/features/browser/plans-ipc.ts', 'electron/features/browser/register.ts', 'electron/features/browser/run-records.ts', 'electron/features/browser/wire.ts',
+    // The new path's write runner and its wiring (PR 5c) take the step record's type only.
+    'electron/features/browser/write-line-runner.ts', 'electron/features/browser/write-lines.ts'])
   for (const f of inside.filter(f => f !== 'electron/features/browser/wire.ts')) {
     assert.doesNotMatch(fs.readFileSync(path.join(clientDir, f), 'utf8'), /^import \{[^}]*\} from '\.\/runner'/m, `${f} takes only types from the runner`)
   }
@@ -366,8 +368,20 @@ test('only the card\'s ［任せる］ reaches the runner: one composition makes
   assert.match(runHandler, /runner\.run\(/)
   assert.ok(runHandler.indexOf('deps.fromMainWindow(event)') < runHandler.indexOf('runner.run('))
   // Only the controller hands out a window to run in (the wiring passes it on); only the runner (and the window that defines it) enters ai mode.
-  assert.deepEqual(mentioning(/\brunWindow\b/), ['electron/features/browser/controller.ts', 'electron/features/browser/wire.ts'])
-  assert.deepEqual(mentioning(/\benterAi\b/), ['electron/browser-window.ts', 'electron/features/browser/runner.ts', 'shared/browser-runner.ts'])
+  assert.deepEqual(mentioning(/\brunWindow\b/), ['electron/features/browser/controller.ts', 'electron/features/browser/wire.ts', 'electron/features/browser/write-lines.ts'])
+  assert.deepEqual(mentioning(/\benterAi\b/), ['electron/browser-window.ts', 'electron/features/browser/runner.ts', 'electron/features/browser/write-line-runner.ts', 'shared/browser-runner.ts'])
+  // The new path's write runner (PR 5c): made only by its wiring, run only by the card's ［任せる］ (`browserLines:runWrite`,
+  // after the main-window check), never named by an agent, the chat server, the preload or a page.
+  assert.deepEqual(mentioning(/\bcreateBrowserWriteRunner\b/), ['electron/features/browser/write-line-runner.ts', 'electron/features/browser/write-lines.ts'])
+  const writeSource = fs.readFileSync(path.join(clientDir, 'electron/features/browser/write-lines.ts'), 'utf8')
+  assert.equal(writeSource.match(/runner\.run\(/g)?.length, 1)
+  const runWrite = writeSource.slice(writeSource.indexOf("ipc.handle('browserLines:runWrite'"), writeSource.indexOf("ipc.handle('browserLines:confirmWrite'"))
+  assert.match(runWrite, /runner\.run\(/)
+  assert.ok(runWrite.indexOf('mine(event') >= 0 && runWrite.indexOf('mine(event') < runWrite.indexOf('runner.run('))
+  assert.match(writeSource.slice(writeSource.indexOf('function mine('), writeSource.indexOf('function mine(') + 300), /deps\.fromMainWindow\(event\)/)
+  for (const f of app.filter(f => /electron\/agents\/|chat-server|electron\/preload|\/src\/|browser-request\//.test(f))) {
+    assert.doesNotMatch(fs.readFileSync(f, 'utf8'), /createBrowserWriteRunner|createLineWriteGate/, path.relative(clientDir, f))
+  }
   // The browser's IPC is the member's three buttons, the change event and the plan card's five channels.
   const inventory = fs.readFileSync(path.join(clientDir, 'tests/ipc-harness/ipc-inventory.txt'), 'utf8').split('\n')
   assert.deepEqual(inventory.filter(l => /^(main\.handle|main\.on|contract\.invoke|contract\.send|contract\.sync|contract\.events) browser(Plans)?:/.test(l)).map(l => l.split(' ')[1]).sort(),

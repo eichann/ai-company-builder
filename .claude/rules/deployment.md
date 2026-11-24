@@ -354,7 +354,10 @@ know (`BROWSER_LINE_PLAN_SHAPES`). Guard: `server/tests/unit/browser-lines.test.
 build leaves, served by a build without its line; a frozen shape). The jobs' cross-build check above pins its own floor
 commit; the writing PR adds its rows to `server/tests/cross-build/` against this build when it moves that pin (owner's
 call). Rolling back to a build between PR 4 and the writing one is fine; before PR 4 is fine only while no plan of
-writes was ever made (the new tables are additive and unread there).
+writes was ever made (the new tables are additive and unread there). **PR 5c** (`feat/browser-gen-5c-write-executor`)
+is the first build whose server makes plans of writes — but only of an approved line, and none is approved until the
+owner's test write (PR 7): deploy it only on top of PR 4 in production, and from the first plan of writes on, never below
+PR 4.
 
 ### The previous floor (stage 4-0.1)
 

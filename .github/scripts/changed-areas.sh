@@ -122,6 +122,8 @@ ADMIN=(admin/ shared/ manual-admin/ client/src/ client/shared/)
 MODEL=(
   model/browser-plan/ shared/core/browser-plans.ts server/src/services/browser-plans.ts
   client/shared/browser-runner.ts client/electron/features/browser/runner.ts client/electron/features/browser/read-session.ts
+  server/src/services/browser-line-steps.ts server/src/services/browser-lines.ts
+  client/electron/features/browser/write-line-runner.ts client/shared/browser-line-writes.ts
 )
 
 pathspecs() {

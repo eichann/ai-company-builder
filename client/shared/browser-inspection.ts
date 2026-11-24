@@ -14,18 +14,24 @@ import { BROWSER_REQUEST_SERVER, BROWSER_COMPANY_ID_RE } from './browser-plans'
 /** The consultation AI's inspection tool (`mcp__acb_browser__browser_inspect`; electron/browser-request/inspect-tool.ts). */
 export const BROWSER_INSPECT_TOOL = 'browser_inspect'
 export const BROWSER_INSPECT_TOOL_ID = `mcp__${BROWSER_REQUEST_SERVER}__${BROWSER_INSPECT_TOOL}`
+/** The consultation AI's write proposal (`mcp__acb_browser__browser_write`; generalization PR 5c, electron/browser-request/inspect-tool.ts). */
+export const BROWSER_WRITE_TOOL = 'browser_write'
+export const BROWSER_WRITE_TOOL_ID = `mcp__${BROWSER_REQUEST_SERVER}__${BROWSER_WRITE_TOOL}`
 
 /** The chat's reference to an inspection's card (one per tool call; stored with the reply as `browserInspections`). */
 export const BROWSER_INSPECTION_PART_TYPE = 'data-browser-inspection'
 
 /** The server's inspection plan id (routes/browser-lines.ts): put in an address only in this shape. */
 export const BROWSER_LINE_PLAN_ID_RE = /^bl_[0-9a-f]{32}$/
+/** A write card's id (main's own, generalization PR 5c): the reference names it instead of a server plan. */
+export const BROWSER_WRITE_CARD_REF_RE = /^wp_[0-9a-f]{32}$/
 
 export interface BrowserInspectionRef {
   /** The card's own id (one per tool call). */
   id: string
   companyId: string
   conversationId: string | null
+  /** An inspection's server plan (`bl_…`), or a write card's id (`wp_…`, main's: PR 5c). */
   planId: string
   at: string
 }
@@ -37,7 +43,7 @@ const isMap = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 
 export function readBrowserInspectionRef(data: unknown): BrowserInspectionRef | undefined {
   if (!isMap(data)) return undefined
   const d = data
-  if (!str(d.id, 200) || !str(d.companyId, 100) || !BROWSER_COMPANY_ID_RE.test(d.companyId) || !str(d.planId, 40) || !BROWSER_LINE_PLAN_ID_RE.test(d.planId) || !str(d.at, 40)) return undefined
+  if (!str(d.id, 200) || !str(d.companyId, 100) || !BROWSER_COMPANY_ID_RE.test(d.companyId) || !str(d.planId, 40) || !(BROWSER_LINE_PLAN_ID_RE.test(d.planId) || BROWSER_WRITE_CARD_REF_RE.test(d.planId)) || !str(d.at, 40)) return undefined
   return {
     id: d.id, companyId: d.companyId, planId: d.planId, at: d.at,
     conversationId: typeof d.conversationId === 'string' && d.conversationId.length <= 200 ? d.conversationId : null,
