@@ -250,8 +250,8 @@ export interface NotificationItem {
    */
   aiChange?: { pluginId: string; operationId: string; undone: boolean }
   /**
-   * An unread notice whose matter is settled now (`shared/core/notification-settle.ts`: the meeting is no longer
-   * `arrived`, the occurrence ran afterwards, the job runs again): judged when read, never stored, not marked read. The
+   * An unread notice whose matter is settled now (`shared/core/notification-settle.ts`: the meeting was taken up
+   * (read, being read or set aside), the occurrence ran afterwards, the job runs again): judged when read, never stored, not marked read. The
    * inbox counts it out of あなた待ち; an app released before it ignores it (counted as before).
    */
   settled?: true

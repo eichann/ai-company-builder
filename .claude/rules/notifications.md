@@ -221,8 +221,9 @@ a plugin can never draw a notice (§2-2).
   `GET /me/notifications` adds `settled: true` to an **unread** notice whose matter is over, by one table
   (`shared/core/notification-settle.ts`, `NOTICE_SETTLE_RULES`, pure) judged from the **current state** of what it tells
   of — never the ledger, nothing stored, the notice **not** marked read (`unread` unchanged), no row ever written or
-  changed: `minutes_arrived` — the meeting is no longer `arrived` (someone pressed ［AI に読ませる］ / ［読まない］, it is
-  read or being read; the records' states, one batch); `job_failed` / `job_expired` — that occurrence ran afterwards
+  changed: `minutes_arrived` — the meeting was taken up: `received` / `reading` / `read` / `skipped` (someone pressed ［AI に読ませる］
+  / ［読まない］; never `arrived` or `failed`, which waits for a person again; a meeting put back to `arrived` counts again;
+  the records' states, one batch); `job_failed` / `job_expired` — that occurrence ran afterwards
   (`done` / `nothing`, only reached through 「もう一度」; `jobs.occurrenceNotice`'s `state`); `job_paused` — the job is
   `active` again (`jobs.noticeJob`'s `state`; retired or paused again stays). Every other kind (what a requester is told:
   `overdue`, `acceptance_waiting`, `ai_turn_stuck`, `request_returned`…, and any kind not known) and a state that could not

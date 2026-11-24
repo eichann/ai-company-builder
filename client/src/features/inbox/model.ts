@@ -131,8 +131,8 @@ const ASK_WORDS: Partial<Record<NotificationKind, string>> = {
 }
 
 /**
- * An unread notice the server marks settled (`settled`, shared/core/notification-settle.ts: the meeting is no longer
- * `arrived`, the occurrence ran afterwards, the job runs again): できた・未確認 with this badge, out of あなた待ち and its
+ * An unread notice the server marks settled (`settled`, shared/core/notification-settle.ts: the meeting was taken up
+ * (read, being read or set aside), the occurrence ran afterwards, the job runs again): できた・未確認 with this badge, out of あなた待ち and its
  * count, never a stop. Still unread: opening it marks it read as any notice.
  */
 const SETTLED_WORDS = { tone: 'success' as const, word: '片付きました' }

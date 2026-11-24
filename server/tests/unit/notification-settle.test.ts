@@ -99,8 +99,9 @@ describe('the table (shared/core/notification-settle.ts)', () => {
 
   it('each kind by its own condition, and an unknown state never settles', () => {
     expect(noticeSettled('minutes_arrived', { meetingState: 'arrived' })).toBe(false)
-    expect(noticeSettled('minutes_arrived', { meetingState: 'received' })).toBe(true)
-    expect(noticeSettled('minutes_arrived', { meetingState: null })).toBe(false)
+    for (const s of ['received', 'reading', 'read', 'skipped']) expect(noticeSettled('minutes_arrived', { meetingState: s })).toBe(true)
+    // A failed reading waits for a person again; a state of a later build is not known.
+    for (const s of ['failed', 'a_later_state', null]) expect(noticeSettled('minutes_arrived', { meetingState: s })).toBe(false)
     expect(noticeSettled('minutes_arrived', { occurrenceState: 'done', jobState: 'active' })).toBe(false)
     for (const kind of ['job_failed', 'job_expired']) {
       for (const s of ['done', 'nothing']) expect(noticeSettled(kind, { occurrenceState: s })).toBe(true)
