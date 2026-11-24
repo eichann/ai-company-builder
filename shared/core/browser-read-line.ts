@@ -71,7 +71,8 @@ export type BrowserDateFormat = typeof BROWSER_DATE_FORMATS[number]
  * state); `after` words compare a read before a write with the read after it and are never ✓ before (`later`, C14).
  * - `unchanged_except` — `read` is the same as `reference` (the same kind of thing) in every field but its id and `except`.
  * - `source_unchanged` — `read` after the writes is exactly what it was before them (after only).
- * - `no_sibling_named` — no other thing in the same parent has the same `field` text (the parent's list read whole).
+ * - `no_sibling_named` — no other thing in the same parent has the same `field` text, compared by `siblingNameKey`
+ *   (the parent's list read whole).
  * - `date_in_text` — the text `field` holds the `date` value written in `format`, and no other date in that format.
  * - `datetime_on_date` — the date `field` (the date part of the site's date and time) is the `date` value.
  */
@@ -337,8 +338,8 @@ function judge(
       // The list must be this thing's parent's, holding the thing itself exactly once: else it is not the list asked for.
       if (items.some(item => item[parentField] !== state[parentField])) return unreadable
       if (items.filter(item => item[thing.id] === state[thing.id]).length !== 1) return unreadable
-      const name = (state[c.field] as string).normalize('NFC')
-      const same = items.some(item => item[thing.id] !== state[thing.id] && typeof item[c.field] === 'string' && (item[c.field] as string).normalize('NFC') === name)
+      const name = siblingNameKey(state[c.field] as string)
+      const same = items.some(item => item[thing.id] !== state[thing.id] && typeof item[c.field] === 'string' && siblingNameKey(item[c.field] as string) === name)
       return { word, status: same ? 'ng' : 'ok' }
     }
     case 'date_in_text': {
@@ -355,6 +356,20 @@ function judge(
       return { word, status: day === facts.values[c.date].value ? 'ok' : 'ng' }
     }
   }
+}
+
+/**
+ * The key `no_sibling_named` compares names by (owner decision 2026-11-24: refuse more, the safe side): NFC, full-width
+ * ASCII and the ideographic space folded to half-width (for this purpose only, not a general NFKC), whitespace runs
+ * collapsed to one space and trimmed, A–Z case-folded. So 「参加者_20261203 」, 「参加者＿２０２６１２０３」 and a name differing
+ * only in ASCII case count as the same name. Knows no site.
+ */
+export function siblingNameKey(text: string): string {
+  return text.normalize('NFC')
+    .replace(/[\uFF01-\uFF5E]/g, ch => String.fromCharCode(ch.charCodeAt(0) - 0xFEE0))
+    .replace(/\s+/g, ' ') // every whitespace run, the ideographic space U+3000 included
+    .trim()
+    .replace(/[A-Z]/g, ch => ch.toLowerCase())
 }
 
 /**

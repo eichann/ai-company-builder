@@ -20,7 +20,7 @@ import {
   BROWSER_SHAPE_WORDS, browserMapProblem, readBrowserThing, type BrowserMap, type BrowserThingResult,
 } from '../../../shared/core/browser-map'
 import {
-  browserLineValuesProblem, browserReadLineProblem, dateInText, evaluateBrowserReadLine, sourceUnchanged,
+  browserLineValuesProblem, browserReadLineProblem, dateInText, evaluateBrowserReadLine, siblingNameKey, sourceUnchanged,
   type BrowserReadFacts, type BrowserReadLine, type BrowserSuppliedValue,
 } from '../../../shared/core/browser-read-line'
 import { canonicalJson } from '../../../shared/core/fixed-content'
@@ -354,6 +354,17 @@ describe('judging a line', () => {
     const items = (f.siblings!.landing as { items: Record<string, unknown>[] }).items
     const judge = (siblings: BrowserReadFacts['siblings']) => evaluateBrowserReadLine(EXAMPLE_CHECK_LINE, EXAMPLE_MAP, { ...f, siblings }).checks[4].status
     expect(judge({ landing: { status: 'read', items: [...items, { ...items[1], id: '402', name: '参加者_20261203 の入口' }] } })).toBe('ng')
+    // Names that differ only by spaces, width or ASCII case are the same name (owner decision 2026-11-24).
+    for (const twin of ['参加者_20261203 の入口 ', ' 参加者_20261203  の入口', '参加者＿２０２６１２０３\u3000の入口']) {
+      expect(judge({ landing: { status: 'read', items: [...items, { ...items[1], id: '402', name: twin }] } }), twin).toBe('ng')
+    }
+    const upper = (x: string) => x.replace('参加者', 'Entry')
+    const g = goodFacts()
+    const named = readLandingAnswer(landingAnswer({ name: 'Entry_20261203 の入口' }))
+    const siblings = { landing: { status: 'read' as const, items: [{ ...items[0], name: upper('参加者_20261203 の入口') }, { ...items[1], id: '402', name: 'ENTRY_20261203 の入口' }] } }
+    expect(evaluateBrowserReadLine(EXAMPLE_CHECK_LINE, EXAMPLE_MAP, { ...g, reads: { ...g.reads, landing: named }, siblings }).checks[4].status).toBe('ng')
+    // Another name stays another name.
+    expect(judge({ landing: { status: 'read', items: [...items, { ...items[1], id: '402', name: '参加者_20261210 の入口' }] } })).toBe('ok')
     expect(judge({ landing: { status: 'not_read' } })).toBe('unreadable')
     expect(judge(undefined)).toBe('unreadable')
     expect(judge({ landing: { status: 'read', items: [items[1]] } })).toBe('unreadable')
@@ -377,6 +388,14 @@ describe('judging a line', () => {
     expect(sourceUnchanged(thing, notRead, f.reads.reference).status).toBe('unreadable')
     expect(sourceUnchanged(thing, f.reads.reference, notRead).status).toBe('unreadable')
     expect(sourceUnchanged(thing, f.reads.reference, undefined).status).toBe('unreadable')
+  })
+})
+
+describe('the sibling name key', () => {
+  it('folds spaces, width and ASCII case, nothing else', () => {
+    expect(siblingNameKey('  Abc\u3000 ＤＥＦ１２  ')).toBe('abc def12')
+    expect(siblingNameKey('参加者_1')).not.toBe(siblingNameKey('参加者_2'))
+    expect(siblingNameKey('ｶﾅ')).toBe('ｶﾅ') // half-width kana is not folded (full-width ASCII and the space only)
   })
 })
 

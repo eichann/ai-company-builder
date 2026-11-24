@@ -1143,8 +1143,9 @@ Lステップ's facts) is untouched and stays the old path's guard; the new path
   `112/3`), every real day in that format must be it, and **the whole text, NFKC-folded (full-width digits count), may
   name no other day in any date-like spelling** — `YYYYMMDD`, `YYYY-M-D` / `/` / `.`, `YYYY年M月D日`, `M/D`, `M月D日`
   (§15 C6 「部分一致しない」: `参加者_20261203_20261126`, `20261203（変更: 2026/12/04）`, `12/3 または １２/４` ✗); `M/D` has
-  no year (the line chose it). `no_sibling_named` compares NFC text exactly: a name differing only by case, width or
-  spaces counts as another name (a limit, owner decision in the PR).
+  no year (the line chose it). `no_sibling_named` compares names by `siblingNameKey` (owner decision 2026-11-24: refuse
+  more): NFC, full-width ASCII and the ideographic space folded to half-width (for this only), whitespace runs collapsed
+  and trimmed, A–Z case-folded — a trailing space, a full-width variant or another ASCII case is the same name.
 - **Not in this PR** (later, memo §15-2): the map's must-hold facts per thing and verb (C5: account and parent binding,
   read whole, content kinds, mandatory notes — today only the parent check inside `no_sibling_named` and the id check
   of every read), value-shape words (§14-1), the opened list's file and hashes (PR 3), the notice route and the server's
@@ -1159,7 +1160,7 @@ line's refusals; the sources (which from the AI or the site refused even when th
 AI wrote last and an unconfirmed person `unconfirmed`, a target from the AI, missing / extra / bad values); judging (all
 ✓, a read not whole — also one no check uses —, another object, a forged state, every word unreadable without its read,
 values refused, a value read once, `unchanged_except` naming the differing fields with an id set in another order equal, the previous
-round's tag, another day, a twin sibling, every bad list, `source_unchanged`), `dateInText` as a table, and **§17-2:
+round's tag, another day, a twin sibling (also by a trailing space, full width or case), every bad list, `source_unchanged`), `dateInText` as a table, and **§17-2:
 the new core modules name no site, thing or field** — every approved connector's id, hosts, operations, checkers,
 readers and reads with their labels (from `approved.json`, so a new site is covered by itself) and the example map's
 things, thing labels, `_` field names and each part of its key paths must not appear in `browser-map.ts` / `browser-read-line.ts` (the old path's files are the named exception, §16-7 R8).
