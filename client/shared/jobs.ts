@@ -15,9 +15,10 @@ import type { JobSetReportView, JobWaiting } from '../../shared/types/jobs'
  * `client/tests/job-screen-schemas.test.ts`. `3` since stage 4b-2 (an event run by this PC's AI), in the same build
  * that runs it (fail closed, the event claim's locks: `electron/features/ai-turns/job-runs.ts`).
  * `4` since member proposals' PR C (a member's proposal: schema 1's words, its card and 「受け取る」 in this app; `jobs.md`
- * "Member proposals" "The app (PR C)").
+ * "Member proposals" "The app (PR C)"). `5` since 4b-4 PR6b (a set watch: this build runs it — PR5's runner, which names
+ * `matched_record` —, shows its 受け取る words — PR6 — and lets the member propose one, jobs.md "A set watch from the app").
  */
-export const APP_JOB_SCHEMAS: readonly number[] = [1, 2, 3, 4]
+export const APP_JOB_SCHEMAS: readonly number[] = [1, 2, 3, 4, 5]
 
 /**
  * A definition this app shows: a shape the core knows and this app announces; anything else is shown as hidden. A set watch

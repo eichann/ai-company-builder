@@ -740,8 +740,10 @@ export function createJobService(deps: JobServiceDeps) {
       const { definition, canonical } = parsed.value
       const { handle } = found
       if (!reads.includes(definition.schema)) return NEEDS_NEWER_SCREEN()
-      // Every version of a proposal's job stays schema 4, and no other job becomes one (the rollback floor freezes 4).
-      if ((definition.schema === JOB_PROPOSAL_SCHEMA) !== (proposal !== null)) return PROPOSAL_SCHEMA()
+      // Every version of a proposal's job keeps the shape it was proposed in (schema 4 from the chat, schema 5 from the app:
+      // 4b-4 PR6b), and no other job becomes schema 4 (the rollback floor freezes both).
+      const proposedSchema = proposal ? handle.jobs.version(jobId, proposal.submittedVersion)?.schema ?? JOB_PROPOSAL_SCHEMA : null
+      if (proposal ? definition.schema !== proposedSchema : definition.schema === JOB_PROPOSAL_SCHEMA) return PROPOSAL_SCHEMA()
       const problems = triggerProblems(handle, definition, member)
       if (problems.length > 0) return BAD_DEFINITION(problems)
       const written = transactions.run((): Outcome<boolean> => {
@@ -1215,6 +1217,12 @@ export function createJobService(deps: JobServiceDeps) {
       return role !== null && fitsRights(companyData.forCompany(companyId), userId, role, definition)
     },
     skillStillPinned: (companyId: string, definition: JobDefinition) => skillPinned(companyId, definition),
+    /**
+     * Member proposals of a set watch (4b-4 PR6b): a definition built by the server, pinned and parsed as a save pins and
+     * parses it (`definitionFrom`: the department Skills' trees and the run Skill's reasons read now, the responsible person a
+     * member) — never saved here.
+     */
+    pinnedDefinition: (companyId: string, definition: Record<string, unknown>) => definitionFrom(companyId, { definition }),
     /** Does `userId` read every place a definition names now (a shelf Skill's place too)? The view's own hiding rule. */
     readsAllFor(companyId: string, userId: string, definition: JobDefinition): boolean {
       const role = memberships.roleOf(companyId, userId)

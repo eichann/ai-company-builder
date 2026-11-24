@@ -10,8 +10,8 @@ import assert from 'node:assert/strict'
 import { createJobsApi } from '../electron/features/jobs/ipc'
 import { APP_JOB_SCHEMAS, appReadsJobDefinition } from '../shared/jobs'
 import { jobCheckText, jobGrantLines, jobMissedText, jobPlacementText, jobRunText, jobTriggerText } from '../../shared/core/job-words'
-import { parseJobDefinition, type JobDefinition } from '../../shared/core/jobs'
-import { proposalDefinition } from '../../shared/core/job-proposals'
+import { JOB_SET_WATCH_OPENED, parseJobDefinition, type JobDefinition } from '../../shared/core/jobs'
+import { proposalDefinition, setWatchProposalDefinition } from '../../shared/core/job-proposals'
 
 const J1 = 'job.' + '1'.repeat(32)
 const FP = 'sha256:' + 'a'.repeat(64)
@@ -41,6 +41,11 @@ const SAMPLES: Record<number, unknown[]> = {
       { actingUser: 'me', procedure: { source: 'shelf_skill', item: 'item1', skill: 'weekly-report', fingerprint: 'd'.repeat(64) }, skillName: 'weekly-report', candidateId: 'jc.' + 'e'.repeat(32) },
     ),
   ],
+  // The set watch (4b-4 PR5 runs it, PR6b adds it from the app): as the server builds a member's, without and with Skills read.
+  5: [[], [{ place: '法人ソリューション', skill: 'sales-proposal-v1' }]].map(readSkills => {
+    const d = setWatchProposalDefinition({ trigger: JSON.parse(JSON.stringify(JOB_SET_WATCH_OPENED[0])), skill: { place: '法人ソリューション', skill: 'sales-proposal-auto' }, readSkills }, 'me')
+    return { ...d, decision: { reasons: [{ code: 'requested', label: '提案を求められた' }] } }
+  }),
 }
 
 test('every schema this app announces has definitions it shows in words', () => {
@@ -104,14 +109,14 @@ test('a definition of a shape this app does not announce is shown as one it cann
 test('every job call announces exactly this app’s shapes (whatever the shared parser reads)', async () => {
   const headers: Array<Record<string, string>> = []
   await api(null, headers).mine('c1')
-  assert.ok(headers.length > 0 && headers.every(h => h['X-ACB-Job-Schemas'] === '1,2,3,4'))
+  assert.ok(headers.length > 0 && headers.every(h => h['X-ACB-Job-Schemas'] === '1,2,3,4,5'))
   // Taken from this app's own list, not the core's: a schema added to the list (as a later app will) is what is sent.
   const list = APP_JOB_SCHEMAS as number[]
   list.push(9)
   try {
     const later: Array<Record<string, string>> = []
     await api(null, later).mine('c1')
-    assert.ok(later.every(h => h['X-ACB-Job-Schemas'] === '1,2,3,4,9'))
+    assert.ok(later.every(h => h['X-ACB-Job-Schemas'] === '1,2,3,4,5,9'))
   } finally {
     list.pop()
   }

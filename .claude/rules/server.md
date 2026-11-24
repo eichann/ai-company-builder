@@ -358,6 +358,7 @@ GET  /api/config                                  setup state (no auth)
                               GET /jobs/:jobId/occurrences, GET /me/job-turns, POST /job-run-claims,
                               POST /jobs/:jobId/occurrences/:occurrenceId/retry | …/operations/:key/reconcile   jobs.ts
                                                                 (定期の仕事: jobs.md)
+                              GET /me/job-set-watch-skills, POST /me/job-candidates (a set watch from the app),
                               GET /me/job-candidates/:candidateId, POST …/submit | discard, GET /me/job-proposals,
                               POST /me/job-proposals/:proposalId/withdraw, GET /job-proposals,
                               POST /job-proposals/:proposalId/return                  job-proposals.ts

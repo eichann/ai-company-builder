@@ -35,6 +35,8 @@ import { SettingsPanel } from '../src/features/settings/components/SettingsPanel
 import { FileTreePanel } from '../src/features/files/components/FileTreePanel'
 import { dispatchFileChanges } from '../src/shared/lib/fileEvents'
 import { MANUAL_JOB_CANDIDATE, MANUAL_JOB_DEFINITION, MANUAL_JOB_FINGERPRINT } from './ui/fixtures/manual-job'
+import { setWatchProposalDefinition } from '../../shared/core/job-proposals'
+import { JOB_SET_WATCH_OPENED } from '../../shared/core/jobs'
 
 const params = new URLSearchParams(location.search)
 const view = params.get('view') ?? 'settings'
@@ -82,6 +84,14 @@ const TREE: Record<string, number> = MANUAL ? {
   'shared': 12 * MB,
   '.claude/skills': 2 * MB,
 }
+// ?manual=1&tab=jobs: the set watch 山田さん adds (4b-4 PR6b), as the server would build it from his choice.
+const SET_WATCH_CANDIDATE = `jc.${'5'.repeat(32)}`
+function setWatchCandidateDefinition() {
+  const d = setWatchProposalDefinition({ trigger: JSON.parse(JSON.stringify(JOB_SET_WATCH_OPENED[0])), skill: { place: '法人ソリューション', skill: 'sales-proposal-auto' }, readSkills: [{ place: '法人ソリューション', skill: 'sales-proposal-v1' }] }, 'u-yamada')
+  const pinned = JSON.parse(JSON.stringify(d).replace(/"0{40}"/g, `"${'a'.repeat(40)}"`))
+  return { ...pinned, decision: { reasons: [{ code: 'requested', label: '提案を求められた' }, { code: 'internal_meeting', label: '社内の会議' }] } }
+}
+
 // ?manual=1: the job the manual's 山田さん proposed (chapter 26), waiting for 「受け取る」 or running.
 const JOB_ID = `job.${'1'.repeat(32)}`
 const jobAccepted = params.get('jobs') === 'accepted'
@@ -217,6 +227,19 @@ Object.assign(window, {
       getMyJobOccurrences: async () => ({ success: true, supported: true, occurrences: [] }),
       acceptJob: async () => ({ success: true }),
       pauseJob: async () => ({ success: true }),
+      // 「会議のあとの見張りを足す」 (4b-4 PR6b): the department Skills she reads; the candidate the server would build from the
+      // choice (recorded in window.__acbSetWatch), and the submit.
+      getSetWatchSkills: async () => ({ success: true, supported: true, skills: [
+        { place: '法人ソリューション', skill: 'sales-proposal-auto', runs: true }, { place: '法人ソリューション', skill: 'sales-proposal-v1', runs: false },
+      ] }),
+      createSetWatchCandidate: async (_companyId: string, choice: unknown) => {
+        ;((window as unknown as { __acbSetWatch: unknown[] }).__acbSetWatch ??= []).push(choice)
+        return { success: true, candidate: { id: SET_WATCH_CANDIDATE, definition: setWatchCandidateDefinition(), fingerprint: MANUAL_JOB_FINGERPRINT, expiresAt: '2026-11-25T00:00:00.000Z', timeZone: null } }
+      },
+      submitJobProposal: async (_companyId: string, candidateId: string, fingerprint: string) => {
+        ;((window as unknown as { __acbSetWatch: unknown[] }).__acbSetWatch ??= []).push({ candidateId, fingerprint })
+        return { success: true, proposal: { id: `jp.${'c'.repeat(32)}`, jobId: `job.${'2'.repeat(32)}`, proposerId: 'u-yamada', candidateId, submittedVersion: 1, submittedFingerprint: fingerprint, state: 'submitted', returnReason: null, decidedBy: null, decidedAt: null, createdAt: '2026-11-24T06:00:00.000Z' } }
+      },
     } : {}),
     listOwnBrokerKeys: async () => ({ success: true, data: ownKeys }),
     // Main reads the value, sends it and removes it from the .env once the server kept it.

@@ -262,6 +262,8 @@ const MATRIX: Row[] = [
   r('POST /api/companies/:companyId/job-run-claims', w => ({ path: `${C(w)}/job-run-claims`, body: {} }), [400, 400, 400, 400, 404, 401], 'no occurrence'),
   // Member proposals (jobs.md "Member proposals"): every member proposes (owner decision Q2) — their own candidates and
   // proposals only (anyone else's: the one 404); owners / admins list and return them; the AI's routes take a record token.
+  r('GET /api/companies/:companyId/me/job-set-watch-skills', w => ({ path: `${C(w)}/me/job-set-watch-skills` }), MEMBERS),
+  r('POST /api/companies/:companyId/me/job-candidates', w => ({ path: `${C(w)}/me/job-candidates`, body: {} }), [409, 409, 409, 409, 404, 401], 'no X-ACB-Job-Schemas naming 5'),
   r('GET /api/companies/:companyId/me/job-candidates/:candidateId', w => ({ path: `${C(w)}/me/job-candidates/${NO_SUCH_CANDIDATE}` }), [404, 404, 404, 404, 404, 401]),
   r('POST /api/companies/:companyId/me/job-candidates/:candidateId/discard', w => ({ path: `${C(w)}/me/job-candidates/${NO_SUCH_CANDIDATE}/discard` }), [404, 404, 404, 404, 404, 401]),
   r('POST /api/companies/:companyId/me/job-candidates/:candidateId/submit', w => ({ path: `${C(w)}/me/job-candidates/${NO_SUCH_CANDIDATE}/submit`, body: {} }), [400, 400, 400, 400, 404, 401], 'no fingerprint'),

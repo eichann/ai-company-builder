@@ -20,10 +20,10 @@ import { DEFAULT_COMPANY_TIME_ZONE } from '../../shared/core/calendar'
 import {
   JOB_CANDIDATES_PER_MEMBER, JOB_CANDIDATE_TTL_MS, JOB_PROPOSALS_PER_DAY, JOB_PROPOSALS_WAITING_MAX, JOB_PROPOSAL_STATES,
   isJobCandidateId, isJobProposalId, isJobProposalReturnReason, jobCandidatePlaces, jobProposalReturnReasonText, newJobCandidateId, newJobProposalId,
-  parseJobCandidateInput, proposalDefinition, type JobProposalReturnReason,
+  candidateSchemaOf, parseJobCandidateInput, parseJobSetWatchCandidateInput, proposalDefinition, setWatchProposalDefinition, type JobProposalReturnReason,
 } from '../../shared/core/job-proposals'
 import {
-  JOB_PROPOSAL_SCHEMA, jobDefinitionCanonical, jobPathProblem, newJobId, parseJobDefinition, storedJobDefinition,
+  JOB_NEEDS_NEWER_SCREEN, JOB_SET_WATCH_SCHEMA, jobDefinitionCanonical, jobPathProblem, newJobId, parseJobDefinition, storedJobDefinition,
   type JobDefinition, type JobProcedure,
 } from '../../shared/core/jobs'
 import { resolveAccess, type PermissionRepository } from '../../shared/core/permissions'
@@ -58,6 +58,12 @@ const TODAY_FULL = () => refuse('conflict', `今日はもう${JOB_PROPOSALS_PER_
 const DISCARDED = () => refuse('gone', 'この案はやめました。出したいときは、もう一度 AI に頼んでください。', { code: 'JOB_CANDIDATE_DISCARDED' })
 const ALREADY_SUBMITTED = () => refuse('conflict', 'この案はもう管理者に出しました。やめるときは「取り下げる」を押してください。', { code: 'JOB_CANDIDATE_SUBMITTED' })
 const PROPOSAL_NOT_FOUND = () => refuse('not-found', '定期の仕事の案が見つかりません。', { code: 'JOB_PROPOSAL_NOT_FOUND' })
+const NEEDS_NEWER_SCREEN = () => refuse('conflict', `${JOB_NEEDS_NEWER_SCREEN}。`, { code: 'JOB_NEEDS_NEWER_SCREEN' })
+const NO_COMPANY_FOLDER = () => refuse('conflict', 'この会社は全社フォルダを使っていないため、会議のあとの見張りは作れません。', { code: 'JOB_SKILL_NOT_HERE' })
+/** The words of services/jobs.ts's own `DEPARTMENT_SKILL_MISSING`: one answer for a Skill not there and one the member does not read. */
+const DEPARTMENT_SKILL_MISSING = () => refuse('conflict', '部署の Skill が見つかりません。部署のフォルダの .claude/skills/ に置いて同期してから、もう一度ためしてください。', { code: 'JOB_SKILL_MISSING' })
+/** One set watch per responsible person (jobs.md "The set watch (schema 5)"): the approval refuses a second; said before it. */
+const SET_WATCH_TAKEN = () => refuse('conflict', 'あなたには、同じ形（これから来る、条件に合うもの全部）の定期の仕事がもう動いています。1人に1つだけです。', { code: 'JOB_SET_WATCH_ONE_PER_PERSON' })
 const DECIDED = (state: string) => refuse('conflict', state === 'approved' ? 'この案はもう承認されました。' : 'この案はもう決まっています。', { code: 'JOB_PROPOSAL_DECIDED', state })
 
 /** How many proposals a list answers. */
@@ -70,7 +76,9 @@ export interface JobProposalDeps {
   clock: Clock
   ids: IdGenerator
   /** The approval's own checks (services/jobs.ts): rights now, the pinned Skill still as pinned. */
-  jobs: Pick<JobService, 'rightsFit' | 'readsAllFor' | 'skillStillPinned' | 'nameOf'>
+  jobs: Pick<JobService, 'rightsFit' | 'readsAllFor' | 'skillStillPinned' | 'nameOf' | 'pinnedDefinition'>
+  /** The Skills of one department on the shared branch, and whether each has a `decision.json` (4b-4 PR6b). Absent → none. */
+  departmentSkills?: (companyId: string, place: string) => Promise<Array<{ skill: string; runs: boolean }> | null>
   /** The git tree id of a company Skill now, or null. */
   skillTree: (companyId: string, name: string) => Promise<string | null>
   hasCompanyFolder: (companyId: string) => boolean
@@ -88,6 +96,13 @@ export interface JobProposalDeps {
 
 const isObject = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v)
 const hex32 = (ids: IdGenerator) => ids.newId().replace(/-/g, '').toLowerCase()
+/** A candidate's definition as stored, in whichever shape a candidate can be (4 from the chat, 5 from the app), or null. */
+const candidateDefinition = (row: JobCandidateRow): JobDefinition | null => {
+  const schema = candidateSchemaOf(row.definition)
+  return schema === null ? null : storedJobDefinition({ schema, definition: row.definition })
+}
+/** The most departments 「見張りを足す」 looks into (each one git read). */
+const SET_WATCH_DEPARTMENTS_MAX = 50
 
 export function createJobProposals(deps: JobProposalDeps) {
   const { companyData, memberships, transactions, clock, ids } = deps
@@ -162,7 +177,7 @@ export function createJobProposals(deps: JobProposalDeps) {
 
   function candidateView(row: JobCandidateRow, proposal: JobProposalRow | null, viewer: Member): JobCandidateView {
     return {
-      id: row.id, definition: storedJobDefinition({ schema: JOB_PROPOSAL_SCHEMA, definition: row.definition }) as JobDefinition,
+      id: row.id, definition: candidateDefinition(row) as JobDefinition,
       fingerprint: row.fingerprint, createdAt: row.createdAt, expiresAt: row.expiresAt, proposal: proposal ? proposalView(proposal, viewer) : null,
       // The zone its times are in (the clock's), so the card can name it (additive: an older app ignores it).
       timeZone: deps.timeZoneOf?.(viewer.companyId) ?? DEFAULT_COMPANY_TIME_ZONE,
@@ -243,6 +258,68 @@ export function createJobProposals(deps: JobProposalDeps) {
       return ok(candidateView(row, null, member))
     },
 
+    /**
+     * `GET /me/job-set-watch-skills` (the member's session, 4b-4 PR6b): the department Skills the member reads — what 「見張りを足す」
+     * offers — each with whether it can be what a set watch runs (it has a `decision.json`). Departments and Skills the member does
+     * not read are never named. A company without the shared folder has none.
+     */
+    async setWatchSkills(member: Member): Promise<Outcome<{ skills: Array<{ place: string; skill: string; runs: boolean }> }>> {
+      if (!deps.hasCompanyFolder(member.companyId) || !deps.departmentSkills) return ok({ skills: [] })
+      const top = (await deps.placeFolders(member.companyId, '').catch(() => null)) ?? []
+      const found: Array<{ place: string; skill: string; runs: boolean }> = []
+      for (const place of top.filter(p => !p.startsWith('.')).slice(0, SET_WATCH_DEPARTMENTS_MAX)) {
+        const skills = await deps.departmentSkills(member.companyId, place).catch(() => null)
+        for (const s of skills ?? []) found.push({ place, skill: s.skill, runs: s.runs })
+      }
+      // The membership and the scopes as they are now, after the git reads (a private folder or a reader changed meanwhile).
+      const now = currentReader(member)
+      if (now === null) return ok({ skills: [] })
+      return ok({ skills: found.filter(s => now.reader.file(s.place) && now.reader.file(`${s.place}/.claude/skills/${s.skill}`)) })
+    },
+
+    /**
+     * `POST /me/job-candidates { trigger, skill, readSkills }` (the member's session, 4b-4 PR6b): a set watch's candidate for the
+     * member alone, built by the server from those choices (`setWatchProposalDefinition`), pinned as a save pins it, kept as any
+     * candidate (24 hours, at most 20, its creator only); then the same submit → approval → 受け取る. Only an app that shows
+     * schema 5 (`reads`, the old-screen rule); never while the member has an approved, active set watch (one per person).
+     */
+    async createSetWatchCandidate(member: Member, body: unknown, reads: readonly number[]): Promise<Outcome<JobCandidateView>> {
+      if (!reads.includes(JOB_SET_WATCH_SCHEMA)) return NEEDS_NEWER_SCREEN()
+      const parsed = parseJobSetWatchCandidateInput(body)
+      if (!parsed.ok) return BAD_INPUT(parsed.problems)
+      if (!deps.hasCompanyFolder(member.companyId)) return NO_COMPANY_FOLDER()
+      const handle = companyData.forCompany(member.companyId)
+      if (handle.jobs.activeApprovedOf(JOB_SET_WATCH_SCHEMA, member.userId).length > 0) return SET_WATCH_TAKEN()
+      handle.jobs.dropExpiredCandidates(clock.now())
+      if (handle.jobs.liveCandidates(member.userId, clock.now()) >= JOB_CANDIDATES_PER_MEMBER) return CANDIDATES_FULL()
+      // A Skill the member does not read is not there for them — the same answer as one that is not there, given before any
+      // git read (services/jobs.ts `skillPinned`'s rule), so the answer never tells them about it.
+      const reader = recordReader(member, handle.scopes.listWithRules())
+      if (![parsed.input.skill, ...parsed.input.readSkills].every(s => reader.file(s.place) && reader.file(`${s.place}/.claude/skills/${s.skill}`))) return DEPARTMENT_SKILL_MISSING()
+      // The responsible person is the signed-in member, fixed before any Skill is read; the server pins the trees and reasons.
+      const pinned = await deps.jobs.pinnedDefinition(member.companyId, setWatchProposalDefinition(parsed.input, member.userId))
+      if (!pinned.ok) return pinned
+      const { definition, canonical } = pinned.value
+      const place = definition.grant.writes.area === 'deliverable' ? definition.grant.writes.place : null
+      if (place === null || !(await placesUsable(member, [place], place))) return PLACE_REFUSED()
+      const id = newJobCandidateId(hex32(ids))
+      const at = clock.now()
+      const row: JobCandidateRow = {
+        id, createdBy: member.userId, definition: canonical, fingerprint: hashCanonical(canonical), createdAt: at,
+        expiresAt: new Date(clock.nowMs() + JOB_CANDIDATE_TTL_MS).toISOString(),
+      }
+      const saved = transactions.run((): Outcome<void> => {
+        // The approval's own rights check (the Skills' places read, the department written) on the membership and scopes now.
+        if (!deps.jobs.rightsFit(member.companyId, member.userId, definition)) return PLACE_REFUSED()
+        if (handle.jobs.activeApprovedOf(JOB_SET_WATCH_SCHEMA, member.userId).length > 0) return SET_WATCH_TAKEN()
+        if (handle.jobs.liveCandidates(member.userId, at) >= JOB_CANDIDATES_PER_MEMBER) return CANDIDATES_FULL()
+        handle.jobs.insertCandidate(row)
+        return ok(undefined)
+      })
+      if (!saved.ok) return saved
+      return ok(candidateView(row, null, member))
+    },
+
     /** `GET /me/job-candidates/:candidateId`: the caller's own candidate (anyone else's, expired, another company's: the one 404). */
     candidate(member: Member, candidateId: string): Outcome<JobCandidateView> {
       if (!isJobCandidateId(candidateId)) return CANDIDATE_NOT_FOUND()
@@ -253,7 +330,7 @@ export function createJobProposals(deps: JobProposalDeps) {
       if (row.discarded) return DISCARDED()
       // What it names must still be theirs to read (jobs.md "Names never leak"): a place — or a shelf Skill's place — they no
       // longer read withholds the content and its fingerprint, answered as a candidate that is not there (naming nothing).
-      const definition = storedJobDefinition({ schema: JOB_PROPOSAL_SCHEMA, definition: row.definition })
+      const definition = candidateDefinition(row)
       if (definition === null || !deps.jobs.readsAllFor(member.companyId, member.userId, definition)) return CANDIDATE_NOT_FOUND()
       return ok(candidateView(row, handle.jobs.proposalOfCandidate(member.userId, candidateId), member))
     },
@@ -280,7 +357,7 @@ export function createJobProposals(deps: JobProposalDeps) {
       if (!row) return CANDIDATE_NOT_FOUND()
       if (row.discarded) return DISCARDED()
       // As stored: never resolved again (the card showed this).
-      const definition = storedJobDefinition({ schema: JOB_PROPOSAL_SCHEMA, definition: row.definition })
+      const definition = candidateDefinition(row)
       if (definition === null || definition.actingUser !== member.userId) return CANDIDATE_NOT_FOUND()
       // Its fingerprint is compared only where it is theirs to see (they read every place it names, a shelf Skill's place too —
       // the candidate's own view withholds it otherwise): else the same refusal whatever was sent (Codex, 3rd pass).

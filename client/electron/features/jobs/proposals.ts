@@ -6,10 +6,13 @@
 //   jobProposals:mine       the member's proposals (`GET /me/job-proposals`)
 //   jobProposals:withdraw   「取り下げる」 while it waits
 //   jobProposals:discard    「やめる」: the candidate not submitted yet is discarded on the server (owner decision 2026-11-22)
+//   jobProposals:setWatchSkills  「見張りを足す」 (4b-4 PR6b): the department Skills the member reads (`GET /me/job-set-watch-skills`)
+//   jobProposals:createSetWatch  its candidate from the member's choices (`POST /me/job-candidates`); the server builds the rest
 
 import {
-  JOB_PROPOSALS_OFFLINE_TEXT, isJobFingerprint, jobProposalRefusalText, readProposalView, readShownCandidate,
+  JOB_PROPOSALS_OFFLINE_TEXT, isJobFingerprint, jobProposalRefusalText, readProposalView, readSetWatchChoice, readSetWatchSkills, readShownCandidate,
   type JobCandidateDiscardResult, type JobCandidateResult, type JobProposalResult, type JobProposalsFailure, type MyJobProposalsResult,
+  type SetWatchCandidateResult, type SetWatchSkillsResult,
 } from '../../../shared/job-proposals'
 import { APP_JOB_SCHEMAS } from '../../../shared/jobs'
 import { JOB_SCHEMAS_HEADER } from '../../../../shared/core/jobs'
@@ -109,6 +112,23 @@ export function createJobProposalsApi(deps: JobProposalsDeps) {
       if (ok(r)) return { success: true, supported: true }
       return failure('discard', r)
     },
+    /** 「見張りを足す」's Skills. A server before it (404 naming no code) has none: `supported: false`, never an error. */
+    async setWatchSkills(companyId: unknown): Promise<SetWatchSkillsResult> {
+      if (typeof companyId !== 'string' || !COMPANY_ID.test(companyId)) return BAD_INPUT
+      const r = await call(companyId, '/me/job-set-watch-skills', 'GET')
+      if (r && r.status === 404 && typeof r.json?.code !== 'string') return { success: true, supported: false, skills: [] }
+      if (!ok(r)) return failure('setWatchSkills', r)
+      return { success: true, supported: true, skills: readSetWatchSkills(r.json!.data) }
+    },
+    /** The member's choices, checked here first (nothing else is sent); the candidate only as the server built it and as shown. */
+    async createSetWatch(companyId: unknown, choice: unknown): Promise<SetWatchCandidateResult> {
+      const body = readSetWatchChoice(choice)
+      if (typeof companyId !== 'string' || !COMPANY_ID.test(companyId) || !body) return BAD_INPUT
+      const r = await call(companyId, '/me/job-candidates', 'POST', body)
+      const data = ok(r) ? r.json!.data as { id?: unknown } : null
+      const candidate = data && typeof data.id === 'string' ? readShownCandidate(data, data.id) : null
+      return candidate ? { success: true, candidate } : failure('createSetWatch', r)
+    },
     async withdraw(companyId: unknown, proposalId: unknown): Promise<JobProposalResult> {
       if (typeof companyId !== 'string' || !COMPANY_ID.test(companyId) || !isJobProposalId(proposalId)) return BAD_INPUT
       const r = await call(companyId, `/me/job-proposals/${proposalId}/withdraw`, 'POST')
@@ -125,4 +145,6 @@ export function registerJobProposalsIpc(ipc: IpcRegistrar, deps: JobProposalsDep
   ipc.handle('jobProposals:mine', (_event, companyId) => api.mine(companyId))
   ipc.handle('jobProposals:withdraw', (_event, companyId, proposalId) => api.withdraw(companyId, proposalId))
   ipc.handle('jobProposals:discard', (_event, companyId, candidateId) => api.discard(companyId, candidateId))
+  ipc.handle('jobProposals:setWatchSkills', (_event, companyId) => api.setWatchSkills(companyId))
+  ipc.handle('jobProposals:createSetWatch', (_event, companyId, choice) => api.createSetWatch(companyId, choice))
 }
