@@ -39,7 +39,7 @@ import {
   awaitReplyDefault, awaitReplyUntilProblem, awaitReplyWaitUntil,
   chatReplyCanonical, chatReplyProblems, countLinks, emailDomain, isExternalAddress, mailContentCanonical, mailContentProblems, MAIL_LIMITS,
   MESSAGE_ID_RE, normalizeEmail, REPLY_REFERENCES_MAX, type MailReplyHeaders, type RecipientSource,
-  ALREADY_SENT_OLD_APP_TEXT, alreadySentText, RESEND_REASON_MAX, resendReasonOf,
+  ALREADY_SENT_OLD_APP_TEXT, alreadySentText, RESEND_REASON_MAX, resendReasonOf, triedToSendText,
 } from '../../shared/core/mail'
 import { sourceKey, type Source } from '../../shared/core/source-slots'
 import { MEETING_TYPE } from '../../shared/core/minutes'
@@ -527,19 +527,27 @@ export function createOutboundMailService(deps: OutboundMailDeps) {
 
 
   /**
-   * The first send on `source` (sent, or going out now) by anyone that the member may see: they
-   * read the source and that mail's record (the one reader, never what they cannot see). Null
+   * The first send on `source` by anyone that the member may see: they read the source and that
+   * mail's record (the one reader, never what they cannot see). One that went (or is going) out
+   * comes before one whose result is unknown (owner decision 2026-11-24: an unknown send counts,
+   * in its own words 「送ろうとしました（届いたか分かりません）」, at the time it was started). Null
    * when there is none they may be told of.
    */
   function earlierSend(member: Member, source: Source, ownId: string): MailAlreadySent | null {
     const rows = companyData.forCompany(member.companyId).outbound.sendsForSource(sourceKey(source)).filter(r => r.messageId !== ownId)
-    const first = slots.heldBy(member, source,
- rows.map(r => ({ recordId: r.messageId, by: r.by, at: r.finishedAt ?? r.startedAt })))[0]
+    const seen = slots.heldBy(member, source, rows.map(r => {
+      const unknown = r.outcome === 'unknown'
+      // When it was sent, not when someone answered 「送られていた」 for it.
+      const at = unknown || r.reason === 'resolved-by-person' ? r.startedAt : (r.finishedAt ?? r.startedAt)
+      return { recordId: r.messageId, by: r.by, at, unknown }
+    }))
+    const first = seen.find(c => !c.unknown) ?? seen[0]
     if (!first) return null
     const name = first.by === member.userId ? null : (deps.members(member.companyId).find(m => m.userId === first.by)?.name ?? '')
     return {
       messageId: first.recordId, by: first.by, byName: name || null, at: first.at, kind: source.kind,
-      message: alreadySentText(source.kind, name, first.at),
+      message: first.unknown ? triedToSendText(source.kind, name, first.at) : alreadySentText(source.kind, name, first.at),
+      ...(first.unknown ? { unknown: true as const } : {}),
     }
   }
 

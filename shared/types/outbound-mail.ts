@@ -167,7 +167,8 @@ export interface MailSendInput {
 /**
  * An earlier send on the same source that the person may see (409 `ALREADY_SENT_FOR_SOURCE`, and
  * a new draft's answer): the other mail's record id (［開く］ opens its record card), who and when,
- * the source's kind and the sentence 「この会議のお礼メールは〇〇さんが MM/DD HH:MM に送りました」.
+ * the source's kind and the sentence 「この会議のお礼メールは〇〇さんが MM/DD HH:MM に送りました」
+ * (for a send whose result is unknown: 「…送ろうとしました（届いたか分かりません）」).
  */
 export interface MailAlreadySent {
   messageId: string
@@ -176,6 +177,12 @@ export interface MailAlreadySent {
   at: string
   kind: SourceKind
   message: string
+  /**
+   * True when nobody knows whether that send went out (`unknown`, 「届いたか分かりません」): `message`
+   * then says 「…送ろうとしました（届いたか分かりません）」. Absent when it went (or is going) out.
+   * Additive: released apps show `message` / `error` as is.
+   */
+  unknown?: true
 }
 
 /** Attaching a PDF: POST /outbound/:messageId/attachments (JSON; the bytes as base64). */

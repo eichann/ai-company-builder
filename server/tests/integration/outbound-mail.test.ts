@@ -1131,6 +1131,93 @@ describe('one send per source: what was already sent is shown, a reason lets it 
     expect(twice.body.alreadySent).toMatchObject({ messageId: nudge.id, kind: 'follow-up', byName: null })
     expect(twice.body.alreadySent.message).toMatch(/^この件の催促はあなたが/)
   })
+
+  describe('a send whose result is unknown counts too, in its own words (owner decision 2026-11-24)', () => {
+    /** 佐藤 sends on the meeting and Gmail's answer is lost: his mail is `unknown`. */
+    async function unknownSend(m: string) {
+      const d = (await drafted(satoToken, { meetingId: m })).draft
+      google.faults.dropAnswerAfterSend(1)
+      const r = await send('m-sato', d)
+      expect(r.body.data?.outcome, r.text).toBe('unknown')
+      expect(sendRow(d.id)).toMatchObject({ source_key: `meeting:${m}`, outcome: 'unknown' })
+      return d
+    }
+    const UNKNOWN_SENTENCE = /^この会議のお礼メールは佐藤 健さんが \d\d\/\d\d \d\d:\d\d に送ろうとしました（届いたか分かりません）$/
+
+    it('another member is stopped with 「送ろうとしました（届いたか分かりません）」, and goes with a reason', async () => {
+      const m = meeting('届いたか分からない商談')
+      const first = await unknownSend(m)
+      const made = await drafted(tanakaToken, { meetingId: m })
+      expect(made.alreadySent).toMatchObject({ messageId: first.id, by: 'm-sato', kind: 'meeting', unknown: true })
+      expect(made.alreadySent.message).toMatch(UNKNOWN_SENTENCE)
+      const sent = sentCount()
+      const r = await send('m-tanaka', made.draft)
+      expect([r.status, r.body.code]).toEqual([409, 'ALREADY_SENT_FOR_SOURCE'])
+      expect(r.body.alreadySent).toMatchObject({ messageId: first.id, by: 'm-sato', byName: '佐藤 健', kind: 'meeting', unknown: true })
+      expect(r.body.alreadySent.message).toMatch(UNKNOWN_SENTENCE)
+      // A released app shows `error` as is: the truthful sentence, then 「アプリを新しくして…何も送っていません」.
+      expect(r.body.error).toMatch(/送ろうとしました（届いたか分かりません）。それでも送るときは、アプリを新しくして/)
+      expect(r.body.error).not.toMatch(/に送りました/)
+      expect(sentCount()).toBe(sent)
+      expect(stateOf(made.draft.id).state).toBe('draft')
+
+      const reason = '佐藤さんの分が届いていないと先方から聞いたため'
+      const passed = await send('m-tanaka', made.draft, { resendReason: reason })
+      expect(passed.body.data?.outcome, passed.text).toBe('sent')
+      expect(sentCount()).toBe(sent + 1)
+      expect(sendRow(made.draft.id)).toMatchObject({ resend_reason: reason, outcome: 'sent' })
+    })
+
+    it('settled 「送られていなかった」 → it no longer counts; settled 「送られていた」 → 送りました', async () => {
+      const notSent = meeting('送られていなかった商談')
+      const a = await unknownSend(notSent)
+      expect((await person('m-sato', 'POST', `/outbound/${a.id}/resolve`, { sent: false })).body.data.draft.state).toBe('draft')
+      const free = await drafted(tanakaToken, { meetingId: notSent })
+      expect(free.alreadySent).toBeUndefined()
+      expect((await send('m-tanaka', free.draft)).body.data?.outcome).toBe('sent')
+
+      const wasSent = meeting('送られていた商談')
+      const b = await unknownSend(wasSent)
+      // The time told is when it was sent, not when the answer was lost or someone settled it.
+      db.prepare("UPDATE outbound_sends SET started_at = '2026-01-05T01:00:00.000Z' WHERE company_id = ? AND message_id = ?").run(CO, b.id)
+      const before = await drafted(tanakaToken, { meetingId: wasSent })
+      expect(before.alreadySent.message).toBe('この会議のお礼メールは佐藤 健さんが 01/05 10:00 に送ろうとしました（届いたか分かりません）')
+      expect((await person('m-sato', 'POST', `/outbound/${b.id}/resolve`, { sent: true })).body.data.draft.state).toBe('sent')
+      const r = await send('m-tanaka', before.draft)
+      expect([r.status, r.body.code]).toEqual([409, 'ALREADY_SENT_FOR_SOURCE'])
+      expect(r.body.alreadySent.unknown).toBeUndefined()
+      expect(r.body.alreadySent.message).toBe('この会議のお礼メールは佐藤 健さんが 01/05 10:00 に送りました')
+    })
+
+    it('a send that went out is named before an unknown one on the same source', async () => {
+      const m = meeting('両方ある商談')
+      await unknownSend(m)
+      // 田中 sends with a reason; then 阿部's AI would draft a third: the sent one is what he is told.
+      const tanaka = (await drafted(tanakaToken, { meetingId: m })).draft
+      expect((await send('m-tanaka', tanaka, { resendReason: '念のため' })).body.data?.outcome).toBe('sent')
+      const third = (await drafted(satoToken, { meetingId: m })).draft
+      const r = await send('m-sato', third)
+      expect([r.status, r.body.code]).toEqual([409, 'ALREADY_SENT_FOR_SOURCE'])
+      expect(r.body.alreadySent).toMatchObject({ messageId: tanaka.id, by: 'm-tanaka' })
+      expect(r.body.alreadySent.unknown).toBeUndefined()
+      expect(r.body.alreadySent.message).toMatch(/に送りました$/)
+    })
+
+    it('a sender who cannot read the unknown mail is neither told nor stopped (owner decision B)', async () => {
+      const m = meeting('自分だけのやることから送ろうとした商談')
+      const task = await person('m-sato', 'POST', '/records/item', { type: 'task', title: '自分だけの段取り', personal: true, fields: { assignee: 'm-sato' } })
+      expect(task.status, task.text).toBe(201)
+      const hidden = (await drafted(satoToken, { meetingId: m, taskId: task.body.data.record.id })).draft
+      google.faults.dropAnswerAfterSend(1)
+      expect((await send('m-sato', hidden)).body.data?.outcome).toBe('unknown')
+
+      const made = await drafted(tanakaToken, { meetingId: m })
+      expect(made.alreadySent).toBeUndefined()
+      const r = await send('m-tanaka', made.draft)
+      expect(r.body.data?.outcome, r.text).toBe('sent')
+      expect(JSON.stringify(r.body)).not.toContain(hidden.id)
+    })
+  })
 })
 
 describe('SEND-1: the draft as confirmed, or nothing — changes while the send awaits its checks', () => {

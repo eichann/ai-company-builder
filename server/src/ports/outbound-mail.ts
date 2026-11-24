@@ -122,8 +122,9 @@ export interface OutboundMailRepository {
   /** Settles an `unknown` send (the person said whether it was sent). */
   resolveSend(id: string, outcome: 'sent' | 'not-sent', at: string): void
   /**
-   * Sends on a source that went out or are going out now (`sent`, `sending`), oldest first: what
-   * 「もう送りました」 is judged from (the caller applies the reader).
+   * Sends on a source that went out, are going out now or may have gone out (`sent`, `sending`,
+   * `unknown`), oldest first: what 「もう送りました」 / 「送ろうとしました」 is judged from (the caller
+   * applies the reader). A send settled 「送られていなかった」 (`not-sent`) is not among them.
    */
   sendsForSource(sourceKey: string): OutboundSendRow[]
   /** Lower-case domains of every recipient of a send that went out (sent). */
