@@ -1751,8 +1751,11 @@ not make jobs members' apps cannot run).
   - **Never widened by an edit** (`jobEditForm`): a schema-5 version is given the form only when it comes back exactly, the
     pinned trees and the reasons (the server's) left out (`pinless`); a combination not opened (`setComboOf` -1) never is.
   - **Words** (approval and an owner/admin's own 受け取る, `JobVersionWords`): besides the shared words, 動く条件
-    (`setWatchConditionLines` + `SET_WATCH_NOT_RUN_NOTE`), 読む Skill, 判断の理由 (the pinned `decision.reasons` labels), the day's
-    limit (`setWatchDayLimitText`: beyond it nothing runs and the responsible person alone is told once, no meeting, no count),
+    (`setWatchConditionLines` + `SET_WATCH_NOT_RUN_NOTE`), 読む Skill, 判断の理由 (the pinned `decision.reasons` labels: the AI
+    names one of them when it reports), the grant as a set watch has it (`setWatchGrantLines`: `records` only makes the one
+    やること, the triggering meeting's minutes only, the day's limit said once — `setWatchDayLimitText`: beyond it nothing runs,
+    never later either, and the responsible person alone is told once, no meeting, no count), the trigger as 「責任者が担当の…」
+    (`setWatchTriggerText`: the shared sentence's 「自分」 is the responsible person's view, never the admin reading it),
     見える人 (`SET_WATCH_SEEN_NOTE`: attendees only, never an admin who did not attend) and the wait
     (`setWatchMissedText`). These sentences live in `admin/src/lib/jobs.ts` until the app's 受け取る (PR6) needs them; then they
     move to `job-words.ts` (one copy). A combination not opened is described only as 「説明できない条件」.
@@ -1763,11 +1766,19 @@ not make jobs members' apps cannot run).
     closed and the Skill can no longer be chosen there. The press stays: the server refuses with its sentence
     (`JOB_SET_WATCH_ONE_PER_PERSON`, `JOB_SET_WATCH_STEP_SKILL`, `JOB_SET_WATCH_NOT_OPENED`, `JOB_SKILL_DECISION_MISSING` are
     in `JOB_SENTENCE_CODES`).
-  - **The list**: いつ in `jobSetTriggerText`'s words, 次の回 「条件に合うものが来たとき（回は、その会議に出た人にだけ見えます）」, and
-    回の記録 says `SET_WATCH_SEEN_NOTE` (an empty list for an admin who did not attend is 「あなたに見える回はありません」, never read
-    as 「動いていない」).
+  - **The list**: いつ in `setWatchTriggerText`'s words, 次の回 「条件に合うものが来たとき（回は、その会議に出た人にだけ見えます）」, 前の回
+    「あなたに見える回はまだありません」 when none is shown, and 回の記録 says `SET_WATCH_SEEN_NOTE` (an empty list for an admin who did
+    not attend is 「あなたに見える回はありません」, never read as 「動いていない」). A company without the shared folder is not offered
+    a set watch (it has no department Skills; the server refuses `JOB_SKILL_NOT_HERE`).
   - Test: `admin/tests/jobs.test.tsx` "a set watch" and `admin/tests/job-screen-schemas.test.ts` (schema 5: the smallest and
-    one with every choice round-trip). Mutation check: see the PR.
+    one with every choice round-trip). Mutation check: 27 guards removed or inverted one at a time (the announced `5`, reading
+    a schema-5 definition, a set watch always `pc`, the new job's limits and missed policy, a combination not opened refused,
+    the round-trip for schema 5 and leaving out the trees and the reasons, the condition lines only for an opened combination,
+    same person / step name in the overlaps, the step reads' failure kept per plugin, the jobs handed to the approval, the
+    sentence codes, the occurrence note, the 前の回 words, the day's limit and wait lines, the minutes / records / limit grant
+    lines, the trigger's subject on the list and in the dialog, 「すること」 and the PC fields hidden, the option only with the
+    shared folder); each fails a test. Not alone: `adminReadsDefinition`'s `JOB_SCHEMAS` check (the core reads 5 today; it
+    keeps "a screen never reads more than its core" explicit).
 - Tests: `server/tests/unit/job-set-watch-definition.test.ts` (words key by key, a combination not opened, a line taken
   out, each piece schema 5's alone and schema 5 only those, the Skill pins, `decision.json`, the consent and schemas 1–4's
   sha256, the places, the words) and `server/tests/integration/job-set-watch.test.ts` (on a real bare repository: the pins and

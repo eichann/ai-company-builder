@@ -132,7 +132,8 @@ const SAMPLES: Record<number, unknown[]> = {
 function formed(d: JobDefinition): string {
   const run = d.run.kind === 'procedure' && d.run.procedure.source === 'department_skill' ? { ...d.run, procedure: { ...d.run.procedure, fingerprint: '' } } : d.run
   const skills = d.grant.reads.skills?.map((p) => ({ ...p, fingerprint: '' }))
-  const { decision: _decision, ...rest } = d
+  const rest: Partial<JobDefinition> = { ...d }
+  delete rest.decision
   return canonicalJson({ ...rest, run, grant: skills ? { ...d.grant, reads: { ...d.grant.reads, skills } } : d.grant })
 }
 

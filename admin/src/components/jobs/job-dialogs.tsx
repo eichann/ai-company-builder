@@ -21,7 +21,7 @@ import { describeJobError } from '@/lib/errors'
 import { PROPOSAL_CLOSED_TEXT, proposalClosed, proposalVersionText } from '@/lib/job-proposals'
 import {
   JOB_EXPIRY_CHOICES, JOB_HOURS, JOB_MINUTES, JOB_VERSION_HIDDEN, definitionFromForm, editableDefinition, emptyJobForm, hiddenVersion, jobProblemText,
-  JOB_FORM_CANNOT_EDIT, SET_WATCH_NOT_RUN_NOTE, SET_WATCH_SEEN_NOTE, jobEditForm, needsNewerScreen, setWatchConditionLines, setWatchDayLimitText, setWatchMissedText,
+  JOB_FORM_CANNOT_EDIT, SET_WATCH_NOT_RUN_NOTE, SET_WATCH_SEEN_NOTE, jobEditForm, needsNewerScreen, setWatchConditionLines, setWatchGrantLines, setWatchMissedText, setWatchTriggerText,
   setWatchOverlaps, setWatchReadSkillsText, setWatchReasonLabels, setWatchSkillNames, switchJobForm, type JobForm,
 } from '@/lib/jobs'
 import { useQuery } from '@/lib/use-query'
@@ -193,7 +193,8 @@ export function JobFormFields({ initial, baseVersion, newJob, members, onCancel,
           onChange={(e) => setF((prev) => switchJobForm(prev, { when: e.target.value as JobForm['when'] }, newJob))}>
           <option value="time">決まった時間に</option>
           <option value="event">見張っているやることが終わったときなどに（出来事で）</option>
-          <option value="set">これから来る、条件に合うもの全部（決まった条件から選ぶ）</option>
+          {/* A set watch runs a department Skill: only a company with the shared folder has one (the server refuses it elsewhere). */}
+          {(hasCompanyFolder || f.when === 'set') && <option value="set">これから来る、条件に合うもの全部（決まった条件から選ぶ）</option>}
         </select>
       </Row>
       )}
@@ -344,7 +345,7 @@ export function JobVersionWords({ definition, members }: { definition: JobDefini
     <dl className="grid grid-cols-[6rem_1fr] gap-x-3 gap-y-1.5 text-sm">
       <dt className="text-muted-foreground">名前</dt><dd>{definition.name}</dd>
       <dt className="text-muted-foreground">責任者</dt><dd>{personName(who)}（この人の権限で動きます）</dd>
-      <dt className="text-muted-foreground">いつ</dt><dd>{jobTriggerText(definition.trigger)}{isRecordTrigger(definition.trigger) && <span className="block text-xs text-muted-foreground">{JOB_EVENT_NOTE}</span>}</dd>
+      <dt className="text-muted-foreground">いつ</dt><dd>{isSetTrigger(definition.trigger) ? setWatchTriggerText(definition.trigger) : jobTriggerText(definition.trigger)}{isRecordTrigger(definition.trigger) && <span className="block text-xs text-muted-foreground">{JOB_EVENT_NOTE}</span>}</dd>
       {setWatch && (
         <>
           <dt className="text-muted-foreground">動く条件</dt>
@@ -360,7 +361,7 @@ export function JobVersionWords({ definition, members }: { definition: JobDefini
         <>
           <dt className="text-muted-foreground">判断の理由</dt>
           <dd aria-label="判断の理由">
-            AI は議事録を読み、提案書などを「作る・作らない・人に聞く」を、次の理由の中から1つ選んで決めます（Skill が決めた一覧）。
+            AI は議事録を読んで判断し、終わりの報告で、その理由を次の一覧（Skill が決めたもの）から1つ選びます。
             {reasons.length > 0
               ? <ul className="list-disc pl-4">{reasons.map((l, i) => <li key={`${i}:${l}`}>{l}</li>)}</ul>
               : <span className="block">理由の一覧は、保存のときに Skill から読みます。</span>}
@@ -371,8 +372,7 @@ export function JobVersionWords({ definition, members }: { definition: JobDefini
       <dt className="text-muted-foreground">動く場所</dt><dd>{jobPlacementText(definition.placement)}</dd>
       <dt className="text-muted-foreground">できること</dt>
       <dd><ul className="list-disc pl-4">
-        {jobGrantLines(definition.grant, definition.trigger).map((l) => <li key={l}>{l}</li>)}
-        {setWatch && <li>{setWatchDayLimitText(definition.grant.limits.runsPerDay)}</li>}
+        {(setWatch ? setWatchGrantLines(definition.grant) : jobGrantLines(definition.grant, definition.trigger)).map((l) => <li key={l}>{l}</li>)}
       </ul></dd>
       {setWatch && (<><dt className="text-muted-foreground">見える人</dt><dd>{SET_WATCH_SEEN_NOTE}</dd></>)}
       <dt className="text-muted-foreground">動けないとき</dt><dd>{setWatch ? setWatchMissedText(definition.missed.expiresAfterMinutes) : jobMissedText(definition.missed, definition.trigger)}</dd>
@@ -473,7 +473,7 @@ export function JobApproveDialog({ job, members, myUserId, jobs = [], onClose, o
                     業務プラグインの手順（{overlaps.steps.map((x) => `「${x.plugin}」の「${x.step}」`).join('・')}）が、この仕事と同じ Skill（{setWatchSkillNames(definition).join('・')}）を使う設定です。同じ提案書が二重にできないよう、このままでは承認できません。「つなぎ先」でその手順の Skill の設定を外してください。
                   </Callout>
                 )}
-                {steps.error && (
+                {steps.error !== null && steps.error !== undefined && (
                   <Callout variant="info">業務プラグインの手順の設定を確かめられませんでした。同じ Skill を使う手順があれば、承認のときにサーバーが断ります。</Callout>
                 )}
                 <Callout variant="info">

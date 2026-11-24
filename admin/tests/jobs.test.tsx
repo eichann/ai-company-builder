@@ -16,12 +16,12 @@ import { ApiError } from '@/lib/api'
 import { JOB_REFUSED_GENERAL, describeJobError } from '@/lib/errors'
 import {
   DELIVERY_PLACE_CHOICES, JOB_FORM_CANNOT_EDIT, JOB_VERSION_HIDDEN, jobEditForm, definitionFromForm, editableDefinition, emptyJobForm, formFromDefinition, hiddenVersion, jobProblemText, needsNewerScreen,
-  SET_WATCH_SEEN_NOTE, setComboOf, setWatchConditionLines, setWatchOverlaps, switchJobForm,
+  SET_WATCH_SEEN_NOTE, setComboOf, setWatchTriggerText, setWatchConditionLines, setWatchOverlaps, switchJobForm,
 } from '@/lib/jobs'
 import { JOB_EVENT_PC_EXPIRES_DEFAULT_MINUTES, JOB_SET_WATCH_OPENED, jobConsentCanonical, type JobDefinition, type JobSetTrigger } from '../../shared/core/jobs'
 import { jobSetTriggerText } from '../../shared/core/job-words'
 import { base, companyRoutes, renderInCompany } from './company-harness'
-import { managerCapabilities, ok } from './fixtures'
+import { company, managerCapabilities, ok } from './fixtures'
 import { mockApi } from './mock-api'
 
 vi.mock('next/navigation', () => ({
@@ -996,7 +996,9 @@ describe('a set watch — 「これから来る、条件に合うもの全部」
     })
     renderInCompany(<JobsRoute />)
     const row = await screen.findByRole('listitem', { name: '提案書のたたき台' })
-    expect(row).toHaveTextContent(jobSetTriggerText(OPENED()))
+    // The responsible person's trigger, never 「自分が…」 read by the admin as themselves.
+    expect(row).toHaveTextContent(`いつ：${setWatchTriggerText(OPENED())}`)
+    expect(setWatchTriggerText(OPENED())).toMatch(/^責任者が担当の「議事録を確認する」/)
     await userEvent.click(within(row).getByRole('button', { name: '承認する' }))
     const dialog = await screen.findByRole('dialog')
     const conditions = await within(dialog).findByLabelText('動く条件')
@@ -1005,7 +1007,13 @@ describe('a set watch — 「これから来る、条件に合うもの全部」
     expect(within(dialog).getByLabelText('判断の理由')).toHaveTextContent('提案を求められた')
     expect(dialog).toHaveTextContent('「営業部」の Skill「proposal-auto」を、責任者の PC の AI が動かします')
     expect(dialog).toHaveTextContent('「営業部」の Skill「proposal」')
-    expect(dialog).toHaveTextContent('1日 10回まで。超えた会議では動かさず、その日1回だけ責任者に知らせます')
+    expect(dialog).toHaveTextContent('上限：1回 30分・1日 10回まで。超えた会議では動かさず（その会議は、あとからも動きません）、その日1回だけ責任者に知らせます')
+    // The grant as a set watch has it: the triggering meeting's minutes only, records not read, the limit said once.
+    expect(dialog).toHaveTextContent('議事録：動くきっかけになった会議の議事録だけ読む')
+    expect(dialog).not.toHaveTextContent('確かめで見つかった')
+    expect(dialog).not.toHaveTextContent('やること・記録を読む')
+    expect(dialog.textContent?.match(/1日 10回/g)).toHaveLength(1)
+    expect(dialog).not.toHaveTextContent('自分が担当')
     expect(dialog).toHaveTextContent(SET_WATCH_SEEN_NOTE)
     expect(dialog).toHaveTextContent('完了のあと1日のうちに責任者のアプリで動けなかったときは見送ります')
     expect(dialog).toHaveTextContent('まだ開いている頼みは閉じます')
@@ -1061,9 +1069,25 @@ describe('a set watch — 「これから来る、条件に合うもの全部」
     renderInCompany(<JobsRoute />)
     const row = await screen.findByRole('listitem', { name: '提案書のたたき台' })
     expect(row).toHaveTextContent('次の回：条件に合うものが来たとき（回は、その会議に出た人にだけ見えます）')
+    expect(row).toHaveTextContent('前の回：あなたに見える回はまだありません')
     await userEvent.click(within(row).getByRole('button', { name: '回の記録' }))
     expect(await within(row).findByText('あなたに見える回はありません。')).toBeInTheDocument()
     expect(row).toHaveTextContent(SET_WATCH_SEEN_NOTE)
+  })
+
+  it('a company without the shared folder is not offered one (it has no department Skills)', async () => {
+    mockApi({
+      ...companyRoutes(),
+      [`GET ${base}`]: { body: ok({ ...company, role: 'owner', folderKind: 'none' }) },
+      [`GET ${base}/jobs`]: { body: ok({ stopped: false, canManage: true, jobs: [] }) },
+      [`GET ${base}/skill-shelf`]: { body: ok({ items: [] }) },
+    })
+    renderInCompany(<JobsRoute />)
+    await userEvent.click(await screen.findByRole('button', { name: '定期の仕事を作る' }))
+    const dialog = await screen.findByRole('dialog')
+    const when = within(dialog).getByRole('combobox', { name: 'いつ動くか' })
+    await waitFor(() => expect(within(when).queryByRole('option', { name: /これから来る/ })).toBeNull())
+    expect(within(when).getByRole('option', { name: /見張っているやること/ })).toBeInTheDocument()
   })
 
   it('the server’s set-watch refusals are its fixed sentences', () => {

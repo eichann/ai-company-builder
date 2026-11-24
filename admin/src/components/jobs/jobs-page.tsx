@@ -17,7 +17,7 @@ import { companiesApi, jobsApi, type JobView, type Member } from '@/lib/api'
 import { useAuth } from '@/lib/auth-context'
 import { useCompany } from '@/lib/company-context'
 import { describeJobError } from '@/lib/errors'
-import { JOB_VERSION_HIDDEN } from '@/lib/jobs'
+import { JOB_VERSION_HIDDEN, setWatchTriggerText } from '@/lib/jobs'
 import { useQuery } from '@/lib/use-query'
 import { JOB_CHAIN_STOPPED_ASK, jobOccurrenceText, jobRunsText, jobSlotText, jobTriggerText } from '../../../../shared/core/job-words'
 import { JOB_NEEDS_NEWER_SCREEN, JOB_SYSTEM_PAUSE_REASONS, isKnownJobTrigger, isRecordTrigger, isSetTrigger } from '../../../../shared/core/jobs'
@@ -155,7 +155,7 @@ export function JobsPage() {
                       </p>
                       <p className="text-sm text-muted-foreground">
                         責任者：{personName(byId.get(runsAs))}
-                        {job.needsUpdate ? <>　{JOB_NEEDS_NEWER_SCREEN}</> : isKnownJobTrigger(job.trigger) || isSetTrigger(job.trigger) ? <>　いつ：{jobTriggerText(job.trigger)}</>
+                        {job.needsUpdate ? <>　{JOB_NEEDS_NEWER_SCREEN}</> : isSetTrigger(job.trigger) ? <>　いつ：{setWatchTriggerText(job.trigger)}</> : isKnownJobTrigger(job.trigger) ? <>　いつ：{jobTriggerText(job.trigger)}</>
                           // No trigger and not a shape it cannot show: the version is hidden from this viewer (it names a
                           // やること or a place they cannot read) — said as such, never what it names.
                           : job.trigger === undefined && <>　{JOB_VERSION_HIDDEN}</>}
@@ -195,7 +195,9 @@ export function JobsPage() {
                           : isSetTrigger(job.trigger) ? '条件に合うものが来たとき（回は、その会議に出た人にだけ見えます）'
                           // A version hidden from this viewer (no trigger, not a shape it cannot show): nothing it names is said.
                           : job.trigger === undefined && !job.needsUpdate ? '表示できません' : 'ありません'}
-                        {'　'}前の回：{job.lastOccurrence && last ? `${jobSlotText(job.lastOccurrence.dueSlot)}　${last.label}` : 'まだありません'}
+                        {'　'}前の回：{job.lastOccurrence && last ? `${jobSlotText(job.lastOccurrence.dueSlot)}　${last.label}`
+                          // A set watch's occurrences are shown to the meeting's attendees only: none seen is not none made.
+                          : isSetTrigger(job.trigger) ? 'あなたに見える回はまだありません' : 'まだありません'}
                       </p>
                     </div>
                     <div className="flex shrink-0 flex-wrap gap-2">

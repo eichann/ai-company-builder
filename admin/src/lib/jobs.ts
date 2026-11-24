@@ -9,12 +9,12 @@
  */
 import {
   JOB_EVENT_PC_EXPIRES_DEFAULT_MINUTES, JOB_MINUTES_ROUTE, JOB_NAME_MAX, JOB_PROPOSAL_ORIGIN, JOB_PROPOSAL_SCHEMA, JOB_READ_SKILLS_MAX, JOB_SET_CHECK_KIND,
-  JOB_SET_WATCH_OPENED, JOB_SET_WATCH_SCHEMA, isRecordTrigger, isSetTrigger, knownJobDefinition, JOB_OUTBOUND_ROUTES, JOB_TASK_TITLE_MAX, JOB_TITLE_WORDS_MAX, parseJobDefinition,
+  JOB_SCHEMAS, JOB_SET_WATCH_OPENED, JOB_SET_WATCH_SCHEMA, isRecordTrigger, isSetTrigger, knownJobDefinition, JOB_OUTBOUND_ROUTES, JOB_TASK_TITLE_MAX, JOB_TITLE_WORDS_MAX, parseJobDefinition,
   type JobDefinition, type JobDefinitionResult, type JobDoneMark, type JobGrant, type JobSetTrigger, type JobSkillPin, type JobWeekday,
 } from '../../../shared/core/jobs'
 import { BUILTIN_CONNECTORS, type DeliveryPlaceKind } from '../../../shared/core/builtin-connectors'
 import { canonicalJson } from '../../../shared/core/fixed-content'
-import { jobMinutesText } from '../../../shared/core/job-words'
+import { jobGrantLines, jobMinutesText, jobSetTriggerText } from '../../../shared/core/job-words'
 import { DELIVERABLE_FOLDER_MAX } from '../../../shared/core/plugin-step-runs'
 
 /**
@@ -37,7 +37,7 @@ export const ADMIN_JOB_SCHEMAS: readonly number[] = [1, 2, 3, 4, 5]
  */
 function adminReadsDefinition(d: unknown): JobDefinition | null {
   const known = knownJobDefinition(d)
-    ?? (d && typeof d === 'object' && (d as { schema?: unknown }).schema === JOB_SET_WATCH_SCHEMA && isSetTrigger((d as { trigger?: unknown }).trigger) ? d as JobDefinition : null)
+    ?? ((JOB_SCHEMAS as readonly number[]).includes(JOB_SET_WATCH_SCHEMA) && d && typeof d === 'object' && (d as { schema?: unknown }).schema === JOB_SET_WATCH_SCHEMA && isSetTrigger((d as { trigger?: unknown }).trigger) ? d as JobDefinition : null)
   return known !== null && ADMIN_JOB_SCHEMAS.includes(known.schema) ? known : null
 }
 
@@ -483,7 +483,8 @@ function pinless(x: JobDefinition): string {
   const run = x.run.kind === 'procedure' ? { ...x.run, procedure: { ...x.run.procedure, fingerprint: '' } } : x.run
   const skills = x.grant.reads.skills?.map(p => ({ ...p, fingerprint: '' }))
   const grant = skills ? { ...x.grant, reads: { ...x.grant.reads, skills } } : x.grant
-  const { decision: _decision, ...rest } = x
+  const rest: Partial<JobDefinition> = { ...x }
+  delete rest.decision
   return canonicalJson({ ...rest, run, grant })
 }
 
@@ -533,7 +534,7 @@ const SET_WATCH_GUARD_WORDS: Record<string, string> = {
   people_only_meeting: '出た人だけが見られる会議だけ（2026年11月4日より前の、フォルダつきの会議は対象外）',
   attendee_responsible: '責任者がその会議に出ていて（または担当で）、今もその会議を読めるときだけ',
   outside_attendee: '社外の人が1人以上出た会議だけ（社内だけの会議では AI を動かしません）',
-  after_acceptance: '責任者が受け取ったあとに初めて読み終えた会議で、そのあと作られた「議事録を確認する」だけ（受け取る前の会議では動きません）',
+  after_acceptance: '責任者が受け取ったあとに、AI が初めて読み終えた会議と、そのあと作られた「議事録を確認する」だけ（受け取る前に読み終えた会議では動きません）',
   plugin_step_exclusive: '同じ Skill を業務プラグインの手順で自動で動かしていないこと（同じ会議で、手順の頼みが開いているか動いているときは見送ります）',
 }
 
@@ -559,12 +560,35 @@ export const SET_WATCH_SEEN_NOTE =
 
 /** The day's limit of a set watch (memo §2-4 / O6, Q2). */
 export function setWatchDayLimitText(runsPerDay: number): string {
-  return `1日 ${runsPerDay}回まで。超えた会議では動かさず、その日1回だけ責任者に知らせます（会議の名前や件数は書きません）`
+  return `1日 ${runsPerDay}回まで。超えた会議では動かさず（その会議は、あとからも動きません）、その日1回だけ責任者に知らせます（会議の名前や件数は書きません）`
 }
 
 /** A missed occurrence of a set watch: the responsible person's app was not open in time. */
 export function setWatchMissedText(expiresAfterMinutes: number): string {
   return `完了のあと${jobMinutesText(expiresAfterMinutes)}のうちに責任者のアプリで動けなかったときは見送ります`
+}
+
+/**
+ * The trigger as an owner / admin reads it: the shared sentence says 「自分が担当の…」 (the responsible person's view, as the app
+ * will show it); here it is the responsible person, never the admin reading it (independent review of PR7).
+ */
+export function setWatchTriggerText(trigger: JobSetTrigger): string {
+  return jobSetTriggerText(trigger).replace(/^自分が担当の/, '責任者が担当の')
+}
+
+/**
+ * The grant's lines for a set watch (independent review of PR7): the shared `jobGrantLines` speak of a time / event job, so
+ * three of its lines are said as the set watch's grant is: `records` only makes the one やること (its only route is the minutes
+ * one), the minutes are the triggering meeting's only, and the day's limit says what happens beyond it.
+ */
+export function setWatchGrantLines(grant: JobGrant): string[] {
+  return jobGrantLines(grant).flatMap((line) => {
+    if (line.startsWith('道具：やること・記録を読む')) return ['道具：終わったときに、責任者だけに見えるやることを1つ作る（やることや記録は読みません）']
+    if (line.startsWith('議事録：')) return ['議事録：動くきっかけになった会議の議事録だけ読む']
+    if (line.startsWith('使える操作：')) return []
+    if (line.startsWith('上限：')) return [`上限：1回 ${jobMinutesText(grant.limits.minutes)}・${setWatchDayLimitText(grant.limits.runsPerDay)}`]
+    return [line]
+  })
 }
 
 /** The Skills its AI reads besides the one it runs, as 「「部署」の Skill「名前」」. */
