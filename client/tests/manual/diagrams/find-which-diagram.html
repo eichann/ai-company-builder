@@ -1,0 +1,35 @@
+<!-- The manual's chapter 33: which way to find something — the name (⌘K), the words inside (探す),
+     or the place you just were (← →). Shot by shoot.spec.ts (scenes.ts). -->
+<style>
+  body { margin: 0; background: var(--color-surface); font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Hiragino Kaku Gothic ProN", sans-serif; color: var(--color-text); }
+  #diagram { width: 960px; padding: 28px 30px 30px; box-sizing: border-box; background: var(--color-surface); }
+  .row { display: flex; gap: 16px; align-items: stretch; }
+  .col { flex: 1; padding: 14px 16px 16px; border-radius: 14px; border: 2px solid var(--color-border-strong); background: var(--color-bg); }
+  .col .ask { font-size: 13px; color: var(--color-text-muted); }
+  .col h3 { margin: 6px 0 8px; font-size: 18px; }
+  .col .key { display: inline-block; padding: 2px 10px; border-radius: 8px; border: 1px solid var(--color-border-strong); background: var(--color-surface); font-size: 14px; font-weight: 700; }
+  .col ul { margin: 10px 0 0; padding-left: 18px; font-size: 14px; line-height: 1.75; }
+  .col.main { border-color: var(--color-primary); background: var(--color-selected-bg); }
+</style>
+<div id="diagram">
+  <div class="row">
+    <div class="col main">
+      <div class="ask">名前を少し覚えている</div>
+      <h3>名前で探して開く</h3>
+      <span class="key">⌘K</span>
+      <ul><li>ファイル・やること・Skill・相談</li><li>名前の一部を打って Enter</li><li>どの画面からでも</li></ul>
+    </div>
+    <div class="col">
+      <div class="ask">中に書いた言葉なら覚えている</div>
+      <h3>［探す］</h3>
+      <span class="key">⌘⇧F</span>
+      <ul><li>ファイルの中身まで探す</li><li>部署の中 → 全社に広げる</li><li>期間や種類で絞る</li></ul>
+    </div>
+    <div class="col">
+      <div class="ask">さっき見ていた所に戻りたい</div>
+      <h3>戻る・進む</h3>
+      <span class="key">← →</span>
+      <ul><li>真ん中の上の矢印</li><li>ブラウザの「戻る」と同じ</li><li>開いていた所を順にたどる</li></ul>
+    </div>
+  </div>
+</div>

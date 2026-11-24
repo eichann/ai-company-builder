@@ -1,0 +1,29 @@
+<!-- The manual's chapter 38: a Skill of your own — made on this PC only, tried, then handed to someone
+     who may change the company's Skills. Shot by shoot.spec.ts (scenes.ts). -->
+<style>
+  body { margin: 0; background: var(--color-surface); font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Hiragino Kaku Gothic ProN", sans-serif; color: var(--color-text); }
+  #diagram { width: 960px; padding: 28px 30px 30px; box-sizing: border-box; background: var(--color-surface); }
+  .row { display: flex; align-items: stretch; }
+  .box { flex: 1; padding: 14px 12px 16px; border-radius: 14px; border: 2px solid var(--color-border-strong); background: var(--color-bg); text-align: center; }
+  .box .step { display: inline-flex; width: 24px; height: 24px; border-radius: 9999px; background: var(--color-primary); color: var(--color-on-primary); font-weight: 700; font-size: 14px; align-items: center; justify-content: center; }
+  .box .title { margin-top: 6px; font-size: 16px; font-weight: 700; }
+  .box .what { margin-top: 6px; font-size: 13px; line-height: 1.6; color: var(--color-text-muted); }
+  .box.you { border-color: var(--color-primary); background: var(--color-selected-bg); }
+  .arrow { width: 32px; display: flex; align-items: center; justify-content: center; }
+  .wall { margin-top: 12px; display: flex; gap: 12px; }
+  .wall div { flex: 1; padding: 10px 14px; border-radius: 10px; font-size: 13px; text-align: center; }
+  .mine { background: var(--color-selected-bg); color: var(--color-text); }
+  .company { background: var(--color-success-bg); border: 1px solid var(--color-success-border); color: var(--color-success-text); font-weight: 700; }
+</style>
+<div id="diagram">
+  <div class="row">
+    <div class="box you"><span class="step">1</span><div class="title">作る</div><div class="what">［新しい Skill を追加］<br>名前・説明・AI への指示</div></div>
+    <div class="arrow"><svg width="26" height="20" viewBox="0 0 26 20" aria-hidden="true"><path d="M2 10 H16" stroke="var(--color-primary)" stroke-width="3" /><path d="M14 3 L24 10 L14 17 z" fill="var(--color-primary)" /></svg></div>
+    <div class="box you"><span class="step">2</span><div class="title">自分で試す</div><div class="what">「/」で呼んで使う。<br>うまくいかなければ<br>SKILL.md を直す</div></div>
+    <div class="arrow"><svg width="26" height="20" viewBox="0 0 26 20" aria-hidden="true"><path d="M2 10 H16" stroke="var(--color-primary)" stroke-width="3" /><path d="M14 3 L24 10 L14 17 z" fill="var(--color-primary)" /></svg></div>
+    <div class="box"><span class="step">3</span><div class="title">決めた人に頼む</div><div class="what">「Skill を直せる人」や<br>部署の管理役に<br>見てもらう</div></div>
+    <div class="arrow"><svg width="26" height="20" viewBox="0 0 26 20" aria-hidden="true"><path d="M2 10 H16" stroke="var(--color-primary)" stroke-width="3" /><path d="M14 3 L24 10 L14 17 z" fill="var(--color-primary)" /></svg></div>
+    <div class="box"><span class="step">4</span><div class="title">会社の Skill に</div><div class="what">［公開する］と<br>次の同期で<br>部署のみんなに届く</div></div>
+  </div>
+  <div class="wall"><div class="mine">1〜2 は「非公開 — あなただけ」。この PC の中だけです</div><div class="company">3〜4 は、決められた人だけができます</div></div>
+</div>

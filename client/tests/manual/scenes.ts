@@ -29,6 +29,10 @@ export type SceneStep =
   | { click: string }
   /** A right click (a context menu). */
   | { rightClick: string }
+  /** A double click (a file kept open in its own tab). */
+  | { doubleClick: string }
+  /** The pointer rests on the target (buttons that show on hover). */
+  | { hover: string }
   /** Types `text` into the target field, replacing what it held. */
   | { fill: string; text: string }
   /** Clicks the target, moves to its end (⌘↓) and types `text` (an editor). */
@@ -143,6 +147,36 @@ const DEAL_SCREENS = { page: 'plugin-slots', query: { manual: '1' }, viewport: {
 const DRIVE_TEXT = 'text=/^あなたが Google Drive で選んだ/'
 const PLAN_CARD = 'role=group[name="承認のお願い（ブラウザ操作）"]'
 const SKILL_CARD = (name: string) => `xpath=//*[normalize-space()="${name}"]/ancestor::div[.//button[normalize-space()="実行"]][1]`
+// 33〜38章 もっと便利に: the main screen with what those chapters show (skill-layout-ui.html ?extra=1: an HTML
+// proposal and its drawn document view, a longer 前の版, 「納期」 found in the visit notes, a Skill of 山田さん's own).
+const EXTRA = { page: 'skill-layout', query: { companies: '2', manual: '1', extra: '1' } } as const
+const EXTRA_LIVE = { page: 'skill-layout', query: { companies: '2', manual: '1', extra: '1', chat: 'live' } } as const
+const VISIT_MEMO_1120 = 'role=button[name=/^訪問メモ_1120\\.md/]'
+const HTML_REQUEST = '提案書_A社向け.md を、お客さまに見せる HTML の資料にしてください。'
+const DOC_PAGE = '[data-testid="doc-view-page"]'
+const DOC_TOOLBAR = 'role=toolbar[name="資料の表示"]'
+/** The chat's ［見る］ on the AI's line that wrote the HTML document. */
+const CHAT_SEE = `${CHAT_PANE} >> role=button[name="見る"]`
+const HTML_OPEN: SceneStep[] = [
+  CLOSE_LIST, ...ASK(HTML_REQUEST), { waitFor: CHAT_SEE }, { click: CHAT_SEE }, { waitFor: DOC_TOOLBAR },
+  { click: FOLD_SIDE }, { click: 'role=button[name="左の欄 (⌘B)"]' }, { waitFor: DOC_PAGE }, SETTLE,
+]
+const CHAT_HEADER = { page: 'chat-header', query: { limits: 'ok' } } as const
+/** Selects `text` in the document as a mouse would (the review's comment box opens on mouse-up). */
+const SELECT_TEXT = (text: string): SceneStep => ({ run: `(() => {
+  const wanted = ${JSON.stringify(text)}
+  const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT)
+  for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+    const at = node.textContent.indexOf(wanted)
+    if (at === -1) continue
+    const range = document.createRange()
+    range.setStart(node, at); range.setEnd(node, at + wanted.length)
+    const selection = window.getSelection(); selection.removeAllRanges(); selection.addRange(range)
+    node.parentElement.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }))
+    return
+  }
+  throw new Error('text not found')
+})()` })
 
 export const scenes: Scene[] = [
   // ── The sample page (manual/pages/sample.md) ──────────────────────────────
@@ -1876,6 +1910,327 @@ export const scenes: Scene[] = [
   {
     id: 'browser-flow-diagram',
     about: 'Diagram: you log in yourself, the AI makes a plan, you read and press ［任せる］, it runs once as planned.',
+    diagram: true,
+  },
+  // ── 33章〜 もっと便利に ─────────────────────────────────────────────────────
+  // 33章: finding and opening, the screen's shape.
+  {
+    id: 'find-palette',
+    about: '⌘K 「名前で探す」 with 「訪問」 typed: the visit notes and an earlier consultation, each with its kind.',
+    ...EXTRA_LIVE,
+    steps: [CLOSE_LIST, { press: 'ControlOrMeta+k' }, { fill: 'role=textbox[name="名前で探す"]', text: '訪問' }, { waitFor: 'role=option[name=/訪問メモの整理/]' }],
+    crop: { target: 'role=dialog[name="探す"]', padding: { x: 40, y: 16 } },
+    annotations: [
+      { box: 'role=textbox[name="名前で探す"]' }, { marker: { target: 'role=textbox[name="名前で探す"]', label: '1', at: 'left' } },
+      { marker: { target: 'role=option[name=/訪問メモの整理/]', label: '2', at: 'left' } },
+      { marker: { target: 'role=option[name=/^訪問メモ_1123/]', label: '3', at: 'left' } },
+    ],
+  },
+  {
+    id: 'search-panel',
+    about: 'The left 「探す」 tab with 「納期」: 営業部 only, ［全社で探す］, the period, and the lines found inside the files.',
+    ...EXTRA,
+    steps: [CLOSE_LIST, { click: SALES_TAB }, { click: 'role=button[name="探す" s]' }, { fill: 'role=textbox[name="探す"]', text: '納期' }, { waitFor: 'role=region[name="中身で見つかったもの"]' }, SETTLE],
+    crop: { region: { x: 0, y: 120, width: 300, height: 440 } },
+    annotations: [
+      { marker: { target: 'role=textbox[name="探す"]', label: '1', at: 'right' } },
+      { box: 'role=button[name="全社で探す"]' }, { marker: { target: 'role=button[name="全社で探す"]', label: '2', at: 'right' } },
+      { marker: { target: 'role=button[name="1週間"]', label: '3', at: 'below' } },
+      { marker: { target: 'role=region[name="中身で見つかったもの"] >> h3', label: '4', at: 'right' } },
+    ],
+  },
+  {
+    id: 'place-navigation',
+    about: 'The middle\'s ← → (戻る・進む) after opening two files.',
+    ...EXTRA,
+    steps: [...SALES_FILES, { click: VISIT_MEMO }, { click: PROPOSAL }, { waitFor: 'text=受発注の手作業を減らし' }],
+    crop: { region: { x: 260, y: 110, width: 600, height: 110 } },
+    annotations: [
+      { box: 'role=button[name="戻る"]' }, { note: { target: 'role=button[name="戻る"]', text: '① 戻る' } },
+      { note: { target: 'role=button[name="進む"]', text: '② 進む', row: 2 } },
+    ],
+  },
+  {
+    id: 'layout-controls',
+    about: 'The title bar\'s 「画面の形」: 左の欄 (⌘B), AIチャット (⌘⇧C) and いつもの形に戻す.',
+    ...EXTRA,
+    steps: [CLOSE_LIST],
+    crop: { region: { x: 680, y: 0, width: 400, height: 110 } },
+    annotations: [
+      { box: 'role=button[name="左の欄 (⌘B)"]' }, { note: { target: 'role=button[name="左の欄 (⌘B)"]', text: '① 左の欄（⌘B）' } },
+      { box: 'role=button[name="AIチャット (⌘⇧C)"]' }, { note: { target: 'role=button[name="AIチャット (⌘⇧C)"]', text: '② AIチャット（⌘⇧C）', row: 2 } },
+      { marker: { target: 'role=button[name="いつもの形に戻す"]', label: '3', at: 'below' } },
+    ],
+  },
+  {
+    id: 'find-which-diagram',
+    about: 'Diagram: the name you remember → ⌘K, words inside → 探す (⌘⇧F), the place you just were → ← →.',
+    diagram: true,
+  },
+  // 34章: tabs, 今日のフォルダ, files.
+  {
+    id: 'tab-tidy-menu',
+    about: 'Four files open in tabs and the tabs\' 「…」: タブを片づける, 片づけたタブ, 固定, 種類ごとにまとめる, まとまり.',
+    ...EXTRA,
+    steps: [
+      ...SALES_FILES, { doubleClick: VISIT_MEMO }, { doubleClick: VISIT_MEMO_1120 }, { doubleClick: 'role=button[name=/^営業の進め方\\.md/]' }, { doubleClick: PROPOSAL },
+      { click: 'role=button[name="タブの操作"]' }, { waitFor: 'role=menuitem[name=/^タブを片づける/]' },
+    ],
+    crop: { region: { x: 260, y: 110, width: 600, height: 320 } },
+    annotations: [
+      { box: 'role=menuitem[name=/^タブを片づける/]' }, { marker: { target: 'role=menuitem[name=/^タブを片づける/]', label: '1', at: 'left' } },
+      { marker: { target: 'role=menuitem[name=/^片づけたタブ/]', label: '2', at: 'left' } },
+      { marker: { target: 'role=menuitem[name=/^このタブを固定する/]', label: '3', at: 'left' } },
+      { marker: { target: 'role=menuitemcheckbox[name=/^種類ごとにまとめる/]', label: '4', at: 'left' } },
+      { marker: { target: 'role=menuitem[name=/^このタブを新しいまとまりに入れる/]', label: '5', at: 'left' } },
+    ],
+  },
+  {
+    id: 'today-folder',
+    about: '「今日のフォルダを開く」 pressed: 営業部/.personal/inbox/日付別/2026/20261120 made and shown.',
+    ...EXTRA,
+    steps: [...SALES_FILES, { click: 'role=button[name="今日のフォルダを開く"]' }, { waitFor: 'role=button[name="20261120"]' }],
+    crop: { region: { x: 0, y: 120, width: 330, height: 360 } },
+    annotations: [
+      { box: 'role=button[name="今日のフォルダを開く"]' }, { marker: { target: 'role=button[name="今日のフォルダを開く"]', label: '1', at: 'right' } },
+      { marker: { target: 'role=button[name="20261120"]', label: '2', at: 'right' } },
+    ],
+  },
+  {
+    id: 'settings-today-tabs',
+    about: '設定 →「自分の設定」: 今日のフォルダ (おまかせ（営業部）) and 前の日のタブを自動で片づける.',
+    ...EXTRA,
+    steps: [{ click: 'role=banner >> role=button[name="設定"]' }, { click: 'role=dialog >> role=button[name=/自分の設定/]' }, { waitFor: 'role=combobox[name="今日のフォルダを置く部署"]' }, SETTLE],
+    crop: { region: { x: 380, y: 185, width: 760, height: 280 } },
+    annotations: [
+      { box: 'role=combobox[name="今日のフォルダを置く部署"]' }, { marker: { target: 'role=combobox[name="今日のフォルダを置く部署"]', label: '1', at: 'left' } },
+      { box: 'role=switch[name="前の日のタブを自動で片づける"]' }, { marker: { target: 'role=switch[name="前の日のタブを自動で片づける"]', label: '2', at: 'left' } },
+    ],
+  },
+  {
+    id: 'file-menu-more',
+    about: 'Right-clicking 訪問メモ_1120.md: 名前を変更, 削除, パスをコピー.',
+    ...EXTRA,
+    steps: [...SALES_FILES, { rightClick: VISIT_MEMO_1120 }, { waitFor: 'role=button[name="パスをコピー"]' }],
+    crop: { region: { x: 0, y: 120, width: 430, height: 440 } },
+    annotations: [
+      { box: 'role=button[name=/^削除/]' }, { marker: { target: 'role=button[name=/^削除/]', label: '1', at: 'right' } },
+      { marker: { target: 'role=button[name="パスをコピー"]', label: '2', at: 'right' } },
+    ],
+  },
+  {
+    id: 'close-unsaved',
+    about: 'Closing the window with an edit that could not be saved: 「保存できていない編集があります」, ［キャンセル］［保存せずに進む］.',
+    page: 'editor-tabs',
+    query: { view: 'tabs' },
+    steps: [
+      { click: 'role=button[name="エディタ"]' }, { typeAtEnd: '.cm-content', text: '\n追記' },
+      { run: 'Object.keys(window.__acbFiles).forEach(p => window.__acbFailWrites.add(p))' },
+      { run: 'window.__acbRequestClose()' }, { waitFor: 'role=alertdialog' },
+    ],
+    crop: { target: 'role=alertdialog', padding: 16 },
+    annotations: [
+      { box: 'role=button[name="キャンセル"]' }, { marker: { target: 'role=button[name="キャンセル"]', label: '1', at: 'below' } },
+      { marker: { target: 'role=button[name="保存せずに進む"]', label: '2', at: 'below' } },
+    ],
+  },
+  // 35章: the consultation list, voice input.
+  {
+    id: 'chat-list-actions',
+    about: '「AIへの相談」\'s list: search, and a row\'s ピン留め, 名前を編集, 別ウィンドウで開く, 相談を削除.',
+    ...EXTRA_LIVE,
+    steps: [{ hover: 'role=button[name=/^A社へのお礼メール/]' }, SETTLE],
+    crop: { target: 'role=complementary[name="AIへの相談"]', padding: { x: 40, y: 0 } },
+    annotations: [
+      { marker: { target: 'role=textbox[name="相談を検索"]', label: '1', at: 'left' } },
+      { box: 'role=button[name="ピン留め"] >> nth=0 >> xpath=..' }, { marker: { target: 'role=button[name="ピン留め"] >> nth=0 >> xpath=..', label: '2', at: 'left' } },
+    ],
+  },
+  {
+    id: 'voice-input',
+    about: 'Voice input above the chat\'s input: ［音声入力］, its key (⇧⌘M) and the microphone list.',
+    page: 'voice-input',
+    query: { scenario: 'healthy' },
+    viewport: { width: 900, height: 600 },
+    steps: [{ waitFor: 'role=button[name="マイクを選択"]' }, { click: 'role=button[name="マイクを選択"]' }, { waitFor: 'role=combobox[name="使用するマイク"]' }],
+    crop: { target: 'section', padding: { x: 40, y: 12 } },
+    annotations: [
+      { box: 'role=button[name="音声入力を開始"]' }, { marker: { target: 'role=button[name="音声入力を開始"]', label: '1', at: 'left' } },
+      { marker: { target: 'role=button[name="マイクを選択"]', label: '2', at: 'right' } },
+      { marker: { target: 'role=combobox[name="使用するマイク"]', label: '3', at: 'left' } },
+    ],
+  },
+  {
+    id: 'settings-voice',
+    about: '設定 →「音声入力」: the shortcut and 「整え方の指示」.',
+    page: 'voice-prompt',
+    viewport: { width: 900, height: 760 },
+    crop: { region: { x: 0, y: 30, width: 900, height: 730 } },
+    annotations: [
+      { box: 'role=button[name="音声入力ショートカットを変更"]' }, { marker: { target: 'role=button[name="音声入力ショートカットを変更"]', label: '1', at: 'left' } },
+      { marker: { target: 'role=textbox[name="整え方の指示"]', label: '2', at: 'left' } },
+    ],
+  },
+  // 36章: documents the AI made.
+  {
+    id: 'html-view',
+    about: 'The AI wrote an HTML proposal; ［見る］ on its line opened it: the document, ［見る］［中身］, zoom and 全画面.',
+    ...EXTRA_LIVE,
+    viewport: { width: 1440, height: 800 },
+    steps: HTML_OPEN,
+    annotations: [
+      { box: CHAT_SEE }, { marker: { target: CHAT_SEE, label: '1', at: 'left' } },
+      { marker: { target: `${DOC_TOOLBAR} >> role=button[name="見る"]`, label: '2', at: 'below' } },
+      { marker: { target: `${DOC_TOOLBAR} >> role=button[name="中身"]`, label: '3', at: 'below' } },
+      { marker: { target: 'role=button[name="全画面"]', label: '4', at: 'below' } },
+    ],
+  },
+  {
+    id: 'html-blocked-band',
+    about: 'The band 「この資料はインターネットから部品を 3 件読み込もうとしています。」 with ［止めたもの］ and ［AI に直してもらう］.',
+    ...EXTRA_LIVE,
+    steps: [
+      ...HTML_OPEN,
+      { run: "window.__acbDocEvent({ viewId: 1, kind: 'blocked', count: 3, hosts: ['cdn.example.com', 'fonts.example.net'], hostCount: 2 })" },
+      { waitFor: 'role=region[name="インターネットの部品"]' }, SETTLE,
+    ],
+    crop: { target: 'role=region[name="インターネットの部品"]', padding: { x: 40, y: 12 } },
+    annotations: [
+      { marker: { target: 'text=/^この資料はインターネットから部品を/', label: '1', at: 'left' } },
+      { marker: { target: 'role=button[name="止めたもの"]', label: '2', at: 'below' } },
+      { box: 'role=button[name="AI に直してもらう"]' }, { marker: { target: 'role=button[name="AI に直してもらう"]', label: '3', at: 'below' } },
+    ],
+  },
+  {
+    id: 'file-versions',
+    about: 'A file\'s side panel: 「前の版」 with who changed it when.',
+    ...EXTRA,
+    steps: [...SALES_FILES, { click: PROPOSAL }, { waitFor: 'role=button[name=/^提案書の進め方を直しました/]' }],
+    crop: { region: { x: 320, y: 120, width: 540, height: 280 } },
+    annotations: [
+      { box: 'role=region[name="前の版"]' }, { marker: { target: 'role=region[name="前の版"]', label: '1', at: 'left' } },
+    ],
+  },
+  {
+    id: 'file-version-diff',
+    about: 'One version opened from 「前の版」: 変更前 and 変更後 side by side, nothing to restore.',
+    ...EXTRA,
+    viewport: { width: 1100, height: 440 },
+    steps: [...SALES_FILES, { click: PROPOSAL }, { click: 'role=button[name=/^提案書の進め方を直しました/]' }, { waitFor: 'text=変更後' }, SETTLE],
+    crop: { target: 'role=dialog', padding: 0 },
+  },
+  {
+    id: 'doc-review-comment',
+    about: 'Reviewing a Markdown document: the banner, a selected sentence, the kinds of comment and ［コメント］.',
+    page: 'doc-review',
+    viewport: { width: 1100, height: 640 },
+    steps: [
+      { click: 'role=button[name="レビューする"]' }, { waitFor: 'text=/^レビュー中/' },
+      SELECT_TEXT('担当は営業部です'), { waitFor: 'role=button[name="できれば"]' },
+      { fill: 'textarea[placeholder^="コメントを入力"]', text: '部署名を正式な名前にしてください' },
+    ],
+    crop: { region: { x: 0, y: 30, width: 1100, height: 580 } },
+    annotations: [
+      { marker: { target: 'text=/^レビュー中/', label: '1', at: 'left' } },
+      { box: 'role=button[name="対応必須"]' }, { marker: { target: 'role=button[name="対応必須"]', label: '2', at: 'left' } },
+      { box: 'role=button[name="コメント" s]' }, { marker: { target: 'role=button[name="コメント" s]', label: '3', at: 'below' } },
+      { box: 'role=button[name="レビュー完了"]' }, { marker: { target: 'role=button[name="レビュー完了"]', label: '4', at: 'below' } },
+    ],
+  },
+  {
+    id: 'doc-review-past',
+    about: '佐藤さん\'s finished review opened from ［レビュー履歴 (1)］: the marked sentence, the comment with ［返信］［解決］, ［変更を確認］.',
+    page: 'doc-review',
+    viewport: { width: 1100, height: 640 },
+    steps: [{ click: 'role=button[name="レビュー履歴 (1)"]' }, { click: 'role=button[name=/佐藤/]' }, { waitFor: 'text=1件のコメント（0件解決済み）' }, SETTLE],
+    crop: { region: { x: 0, y: 30, width: 1100, height: 300 } },
+    annotations: [
+      { box: 'mark[data-review-highlight]' }, { marker: { target: 'mark[data-review-highlight]', label: '1', at: 'below' } },
+      { marker: { target: 'text=根拠となる数字を添えてください', label: '2', at: 'left' } },
+      { marker: { target: 'role=button[name="解決"]', label: '3', at: 'below' } },
+      { box: 'role=button[name="変更を確認"]' }, { marker: { target: 'role=button[name="変更を確認"]', label: '4', at: 'below' } },
+    ],
+  },
+  {
+    id: 'review-loop-diagram',
+    about: 'Diagram: look, comment, the AI fixes it, check what changed — again until it is right.',
+    diagram: true,
+  },
+  // 37章: what else the AI can look at; its settings.
+  {
+    id: 'chat-research-rows',
+    about: 'One request: the AI searched the web, read a file of a department not downloaded and found an earlier consultation; the answer cites its sources.',
+    ...EXTRA_LIVE,
+    viewport: { width: 1280, height: 1000 },
+    steps: [CLOSE_LIST, ...ASK('A社の提案の前に、研修業界の最近の動きを Web で調べて、出どころもつけてください。取引先一覧と、前の B社の相談も見てまとめて。'), { waitFor: 'text=出どころ：' }, SETTLE],
+    crop: CHAT_CROP,
+    annotations: [
+      { marker: { target: 'text=Webで調べました', label: '1', at: 'left' } },
+      { marker: { target: 'text=会社のファイルを読みました', label: '2', at: 'left' } },
+      { marker: { target: 'text=過去の相談を探しました', label: '3', at: 'left' } },
+      { box: 'text=出どころ：' }, { marker: { target: 'text=出どころ：', label: '4', at: 'left' } },
+    ],
+  },
+  {
+    id: 'ai-reach-diagram',
+    about: 'Diagram: besides this PC\'s files, the AI reads departments not downloaded, earlier consultations, the company\'s records and (through a separate reader) the web.',
+    diagram: true,
+  },
+  {
+    id: 'chat-header-model',
+    about: 'The consultation\'s header: the usage meter, the model, how hard it thinks, and 別ウィンドウで開く.',
+    ...CHAT_HEADER,
+    steps: [{ waitFor: 'role=button[name=/^利用上限/]' }],
+    crop: { target: 'role=banner', padding: { x: 16, y: 40 } },
+    annotations: [
+      { marker: { target: 'role=button[name=/^利用上限/]', label: '1', at: 'below' } },
+      { marker: { target: 'role=banner >> role=combobox >> nth=0', label: '2', at: 'below' } },
+      { marker: { target: 'role=banner >> role=combobox >> nth=1', label: '3', at: 'below' } },
+      { box: 'role=banner >> role=button[name="別ウィンドウで開く"]' }, { marker: { target: 'role=banner >> role=button[name="別ウィンドウで開く"]', label: '4', at: 'below' } },
+    ],
+  },
+  {
+    id: 'chat-auth-settings',
+    about: 'The consultation\'s settings: 認証方法を選択 — Claude Max / Pro, Codex（ChatGPTプラン）, API キー.',
+    ...CHAT_HEADER,
+    steps: [{ waitFor: 'role=button[name=/^利用上限/]' }, { click: 'role=banner >> role=button >> nth=-1' }, { waitFor: 'text=Codex（ChatGPTプラン）' }, SETTLE],
+    crop: { region: { x: 521, y: 355, width: 759, height: 345 } },
+    annotations: [
+      { marker: { target: 'text=Claude Max / Pro', label: '1', at: 'right' } },
+      { marker: { target: 'text=Codex（ChatGPTプラン）', label: '2', at: 'right' } },
+      { marker: { target: 'text="API キー"', label: '3', at: 'right' } },
+    ],
+  },
+  // 38章: a Skill of your own.
+  {
+    id: 'skill-new',
+    about: '［新しい Skill を追加］: 「新しい Skill を作成」, step 1 with the name and the folder name filled in.',
+    ...EXTRA,
+    steps: [
+      CLOSE_LIST, { click: SALES_TAB }, { click: SKILLS_TAB }, { click: 'role=button[name=/新しい Skill を追加/]' },
+      { fill: 'role=textbox[name="例: 提案書作成"]', text: '見積の骨子' }, { fill: 'role=textbox[name="my-skill-name"]', text: 'estimate-outline' },
+    ],
+    crop: { target: 'role=dialog[name="新しい Skill を作成"]', padding: 16 },
+    annotations: [
+      { marker: { target: 'role=textbox[name="例: 提案書作成"]', label: '1', at: 'left' } },
+      { marker: { target: 'role=textbox[name="my-skill-name"]', label: '2', at: 'left' } },
+      { box: 'role=button[name="次へ"]' }, { marker: { target: 'role=button[name="次へ"]', label: '3', at: 'left' } },
+    ],
+  },
+  {
+    id: 'skill-private',
+    about: 'The Skill 山田さん made: 「非公開 — あなただけ」 and ［公開する］ in its 設定.',
+    ...EXTRA,
+    steps: [CLOSE_LIST, { click: SALES_TAB }, { click: SKILLS_TAB }, { click: 'role=button[name="非公開 (1)"]' }, { click: `${SKILL_CARD('estimate-outline')} >> role=button[name="設定"]` }, { waitFor: 'text=Skill の設定' }, SETTLE],
+    crop: { region: { x: 0, y: 120, width: 1050, height: 560 } },
+    annotations: [
+      { box: 'xpath=//span[normalize-space()="— あなただけ"]/..' }, { marker: { target: 'xpath=//span[normalize-space()="— あなただけ"]/..', label: '1', at: 'left' } },
+      { marker: { target: 'role=button[name="公開する"]', label: '2', at: 'left' } },
+    ],
+  },
+  {
+    id: 'skill-grow-diagram',
+    about: 'Diagram: make a Skill, try it on this PC, hand it to someone who may change the company\'s Skills, then it reaches everyone.',
     diagram: true,
   },
 ]

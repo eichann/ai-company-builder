@@ -105,6 +105,8 @@ function diagramPage(id: string): string {
 async function runStep(page: Page, step: SceneStep): Promise<void> {
   if ('click' in step) await (await one(page, step.click)).click()
   else if ('rightClick' in step) await (await one(page, step.rightClick)).click({ button: 'right' })
+  else if ('doubleClick' in step) await (await one(page, step.doubleClick)).dblclick()
+  else if ('hover' in step) await (await one(page, step.hover)).hover()
   else if ('drag' in step) await (await one(page, step.drag)).dragTo(await one(page, step.to))
   else if ('fill' in step) await (await one(page, step.fill)).fill(step.text)
   else if ('typeAtEnd' in step) {

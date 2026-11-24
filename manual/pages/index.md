@@ -53,6 +53,17 @@ AI Company Builder（ACB）の使い方をまとめたページです。アプ�
 31. [会社が入れた仕事の画面（営業部の案件など）](31-gyoumu-no-gamen.md)
 32. [AI にサイトを操作してもらう（ブラウザ操作）](32-browser-sousa.md)
 
+### もっと便利に
+
+毎日の近道と、AI ともう一歩進んだ使い方です。
+
+33. [探して開く・画面を自分の形に](33-sagashite-hiraku.md)
+34. [タブ・今日のフォルダ・ファイルの小技](34-tab-to-kyou-no-folder.md)
+35. [相談の近道：一覧・別ウィンドウ・音声入力・入力候補](35-soudan-no-chikamichi.md)
+36. [AI が作った資料を見る・確かめる](36-shiryou-wo-miru.md)
+37. [AI にもっと頼む](37-ai-ni-motto.md)
+38. [Skill をもっと：自分で作る・会社に渡す・道具のある Skill](38-skill-wo-motto.md)
+
 ## 困ったときは
 
 同期が止まったり、見慣れない知らせが出たりしたときは、[14章の早見表](14-doki-tomatta.md#止まる場面とすることの早見表)を開いてください。

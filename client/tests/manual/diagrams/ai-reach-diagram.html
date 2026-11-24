@@ -1,0 +1,27 @@
+<!-- The manual's chapter 37: what the AI of a consultation can look at besides the files on this PC —
+     the company's files it may read, earlier consultations, the company's records and the web (through a
+     separate reader) — and what it does not. Shot by shoot.spec.ts (scenes.ts). -->
+<style>
+  body { margin: 0; background: var(--color-surface); font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Hiragino Kaku Gothic ProN", sans-serif; color: var(--color-text); }
+  #diagram { width: 960px; padding: 28px 30px 30px; box-sizing: border-box; background: var(--color-surface); }
+  .center { margin: 0 auto 16px; width: 300px; padding: 14px 16px; border-radius: 14px; border: 2px solid var(--color-ai-border); background: var(--color-ai-bg); text-align: center; }
+  .center .title { font-size: 17px; font-weight: 700; }
+  .center .what { margin-top: 4px; font-size: 13px; color: var(--color-text-muted); }
+  .row { display: flex; gap: 12px; align-items: stretch; }
+  .col { flex: 1; padding: 12px 12px 14px; border-radius: 12px; border: 2px solid var(--color-border-strong); background: var(--color-bg); }
+  .col h3 { margin: 0 0 6px; font-size: 15px; }
+  .col p { margin: 0; font-size: 13px; line-height: 1.65; color: var(--color-text-muted); }
+  .col .ask { margin-top: 8px; font-size: 12px; color: var(--color-text); background: var(--color-surface-sunken); border-radius: 8px; padding: 6px 8px; }
+  .col.web { border-style: dashed; }
+  .not { margin-top: 14px; padding: 10px 16px; border-radius: 10px; background: var(--color-surface-sunken); color: var(--color-text-muted); font-size: 13px; text-align: center; }
+</style>
+<div id="diagram">
+  <div class="center"><div class="title">相談の AI</div><div class="what">あなたの PC の会社フォルダで作業します</div></div>
+  <div class="row">
+    <div class="col"><h3>入れていない部署</h3><p>PC にダウンロードしていない部署のファイルも、あなたが読める所なら読めます</p><div class="ask">「総務部の取引先一覧も見て」</div></div>
+    <div class="col"><h3>前の相談</h3><p>この PC の、ほかの相談を探して読みます</p><div class="ask">「先週の B社の相談の続きで」</div></div>
+    <div class="col"><h3>会社の記録</h3><p>やること・決めたことなどを探し、数え、だれがいつ変えたかを見ます</p><div class="ask">「A社の決めたことは何件？」</div></div>
+    <div class="col web"><h3>Web</h3><p>別の読み手が Web を読み、要点と出どころだけを返します</p><div class="ask">「Web で調べて、出どころも」</div></div>
+  </div>
+  <div class="not">読めない場所は読めません。非公開フォルダの中身は、外に出す前にあなたに確かめます。</div>
+</div>
