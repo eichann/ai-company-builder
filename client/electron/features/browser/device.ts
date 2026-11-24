@@ -3,7 +3,7 @@
 //
 // - **The key**: 32 random bytes made the first time the member registers this PC, kept **only encrypted** by the OS
 //   keychain (`SecretBox`: Electron's safeStorage, handed in by main.ts — features never import Electron) in
-//   `<userData>/browser-device-key`. It is sent only as `X-ACB-Browser-Device: v1.<base64url>` (the server keeps its
+//   `<userData>/browser-device-key-<origin hash>`, one per server. It is sent only as `X-ACB-Browser-Device: v1.<base64url>` (the server keeps its
 //   sha256): by this module's own calls to the PC routes, and by the plan clients (plans-api.ts, lines-api.ts) on the
 //   steps the server's gate asks (create, approve, claim, permit). Never in an IPC answer, a log, a URL, a body or a
 //   company folder. No keychain → the PC cannot be registered (plain sentence on the screen); a key that cannot be read
@@ -39,51 +39,88 @@ export function newBrowserDeviceKey(random: (n: number) => Buffer = crypto.rando
   return `v1.${random(32).toString('base64url')}`
 }
 
-export function createBrowserDeviceKey(deps: { box: SecretBox; file: () => string; random?: (n: number) => Buffer; log?: (message: string) => void }): BrowserDeviceKey {
-  let held: string | null = null
+/** The file of one server's key: `<dir>/browser-device-key-<sha256(origin)[0..16]>`. */
+export function browserDeviceKeyFile(dir: string, origin: string): string {
+  return path.join(dir, `${BROWSER_DEVICE_KEY_FILE}-${crypto.createHash('sha256').update(origin).digest('hex').slice(0, 16)}`)
+}
+
+const originOf = (base: string): string | null => {
+  try {
+    const u = new URL(base)
+    return u.protocol === 'https:' || u.protocol === 'http:' ? u.origin : null
+  } catch { return null }
+}
+
+/**
+ * One key **per server origin** (independent review M2): the key one server trusts as "this PC" is never sent to another
+ * server the app is pointed at. The sealed text names its origin, so a file sealed for another origin (copied or renamed)
+ * is not one. A file that exists but cannot be opened (a denied or reset keychain) is never overwritten: registering again
+ * moves it aside (`.unreadable-<time>`) before making a new key (review M1).
+ */
+export function createBrowserDeviceKey(deps: { box: SecretBox; dir: () => string; server: () => string; random?: (n: number) => Buffer; log?: (message: string) => void }): BrowserDeviceKey {
+  const held = new Map<string, string>()
   const log = deps.log ?? (() => {})
 
-  function read(): string | null {
-    if (held) return held
-    if (!deps.box.available()) return null
+  function read(origin: string): { key: string | null; present: boolean } {
+    const kept = held.get(origin)
+    if (kept) return { key: kept, present: true }
+    if (!deps.box.available()) return { key: null, present: false }
+    let sealed: Buffer
     try {
       // A link is never followed; only a small regular file counts.
-      const fd = fs.openSync(deps.file(), fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW | fs.constants.O_NONBLOCK)
-      let sealed: Buffer
+      const fd = fs.openSync(browserDeviceKeyFile(deps.dir(), origin), fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW | fs.constants.O_NONBLOCK)
       try {
         const st = fs.fstatSync(fd)
-        if (!st.isFile() || st.size > SEALED_MAX_BYTES) return null
+        if (!st.isFile() || st.size > SEALED_MAX_BYTES) return { key: null, present: true }
         sealed = fs.readFileSync(fd)
       } finally { fs.closeSync(fd) }
-      const key = parseBrowserDeviceKey(deps.box.decrypt(sealed))
-      if (key) held = key
-      return key
+    } catch (e) {
+      return { key: null, present: (e as NodeJS.ErrnoException).code !== 'ENOENT' }
+    }
+    try {
+      const opened = JSON.parse(deps.box.decrypt(sealed)) as { origin?: unknown; key?: unknown }
+      const key = opened.origin === origin ? parseBrowserDeviceKey(opened.key) : null
+      if (key) held.set(origin, key)
+      return { key, present: true }
     } catch {
-      // None yet, or unreadable (another computer, a reset keychain): this PC is not registered.
-      return null
+      // Another computer's, a reset or denied keychain: not a key this PC can send.
+      return { key: null, present: true }
     }
   }
 
   return {
-    header: read,
+    header() {
+      const origin = originOf(deps.server())
+      return origin ? read(origin).key : null
+    },
     available: () => deps.box.available(),
     ensure() {
-      const existing = read()
-      if (existing) return existing
-      if (!deps.box.available()) return null
+      const origin = originOf(deps.server())
+      if (!origin || !deps.box.available()) return null
+      const existing = read(origin)
+      if (existing.key) return existing.key
       const key = newBrowserDeviceKey(deps.random)
       if (!parseBrowserDeviceKey(key)) return null
       try {
-        const file = deps.file()
+        const file = browserDeviceKeyFile(deps.dir(), origin)
         fs.mkdirSync(path.dirname(file), { recursive: true })
-        const tmp = `${file}.${process.pid}.tmp`
-        fs.writeFileSync(tmp, deps.box.encrypt(key), { mode: 0o600 })
+        if (existing.present) {
+          fs.renameSync(file, `${file}.unreadable-${Date.now()}`)
+          log('[browser-device] a PC key that could not be read was kept aside; a new one is made')
+        }
+        // A fresh temporary name, never an existing file or a link (O_EXCL), synced before it replaces the key.
+        const tmp = `${file}.${crypto.randomBytes(8).toString('hex')}.tmp`
+        const fd = fs.openSync(tmp, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_NOFOLLOW, 0o600)
+        try {
+          fs.writeFileSync(fd, deps.box.encrypt(JSON.stringify({ origin, key })))
+          fs.fsyncSync(fd)
+        } finally { fs.closeSync(fd) }
         fs.renameSync(tmp, file)
       } catch {
         log('[browser-device] the PC key could not be saved')
         return null
       }
-      held = key
+      held.set(origin, key)
       return key
     },
   }
@@ -170,9 +207,12 @@ export function createBrowserDevice(deps: BrowserDeviceDeps): BrowserDevice {
     return { state: v.state as BrowserDeviceState, label: typeof v.label === 'string' ? v.label : null }
   }
 
-  function remember(companyId: string, state: BrowserDeviceState | 'none'): void {
-    const k = scope(companyId)
-    if (k) remembered.set(k, state)
+  /** Bumped by `clear()` (sign-out): an answer asked before it is never remembered after it. */
+  let generation = 0
+
+  /** Keep the answer only for the server × member × company it was asked for, and only if nothing changed since. */
+  function remember(asked: { scope: string | null; generation: number }, companyId: string, state: BrowserDeviceState | 'none'): void {
+    if (asked.scope && asked.generation === generation && scope(companyId) === asked.scope) remembered.set(asked.scope, state)
   }
 
   async function lines(companyId: string): Promise<BrowserPcView['lines']> {
@@ -189,12 +229,17 @@ export function createBrowserDevice(deps: BrowserDeviceDeps): BrowserDevice {
   /** This PC's state for the member in that company (none without a key: there can be no registration of it). */
   async function mine(companyId: string): Promise<{ state: BrowserPcView['state']; label: string | null }> {
     if (!deps.key.available()) return { state: 'unavailable', label: null }
+    const asked = { scope: scope(companyId), generation }
     const key = deps.key.header()
-    if (!key) { remember(companyId, 'none'); return { state: 'none', label: null } }
+    if (!key) { remember(asked, companyId, 'none'); return { state: 'none', label: null } }
     const r = await call('GET', companyId, '/browser-devices-me', { key })
     const m = r.kind === 'ok' ? mineOf(r.value) : null
-    if (!m) return { state: 'unknown', label: null }
-    remember(companyId, m.state)
+    if (!m) {
+      // A refusal (left the company, no access) forgets what was remembered; no answer keeps it (the server still decides).
+      if (r.kind === 'refused') remember(asked, companyId, 'none')
+      return { state: 'unknown', label: null }
+    }
+    remember(asked, companyId, m.state)
     return m
   }
 
@@ -249,6 +294,7 @@ export function createBrowserDevice(deps: BrowserDeviceDeps): BrowserDevice {
       return false
     },
     clear() {
+      generation++
       remembered.clear()
       askedAt.clear()
     },

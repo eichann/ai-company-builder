@@ -10,9 +10,10 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { BROWSER_DEVICE_HEADER, BROWSER_DEVICE_WORDS, parseBrowserDeviceKey } from '../../shared/core/browser-device'
 import { BROWSER_PC_WORDS } from '../shared/browser-device'
-import { createBrowserDevice, createBrowserDeviceKey, newBrowserDeviceKey } from '../electron/features/browser/device'
+import { browserDeviceKeyFile, createBrowserDevice, createBrowserDeviceKey, newBrowserDeviceKey } from '../electron/features/browser/device'
 import { createRegisteredPcSwitch } from '../electron/features/browser/ai-switch'
 import { createBrowserPlansHttp } from '../electron/features/browser/plans-api'
 import { createBrowserLinesHttp } from '../electron/features/browser/lines-api'
@@ -39,7 +40,7 @@ function box(over: Partial<SecretBox> = {}): SecretBox & { sealed: number } {
 
 function tempFile() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'acb-pc-key-'))
-  return { dir, file: path.join(dir, 'browser-device-key') }
+  return { dir, file: browserDeviceKeyFile(dir, SERVER) }
 }
 
 type Seen = { method: string; path: string; headers: Headers; body: string | null }
@@ -67,7 +68,7 @@ test('the key is made once and kept only encrypted: no plain key on disk, read b
   const { dir, file } = tempFile()
   try {
     const b = box()
-    const k = createBrowserDeviceKey({ box: b, file: () => file })
+    const k = createBrowserDeviceKey({ box: b, dir: () => dir, server: () => SERVER })
     assert.equal(k.header(), null, 'no key until the member registers')
     assert.equal(fs.existsSync(file), false)
     const key = k.ensure()!
@@ -78,14 +79,49 @@ test('the key is made once and kept only encrypted: no plain key on disk, read b
     assert.equal(fs.statSync(file).mode & 0o077, 0, 'only the member can read the sealed file')
     assert.equal(b.sealed, 1)
     // A restart: the same key back from the keychain.
-    assert.equal(createBrowserDeviceKey({ box: box(), file: () => file }).header(), key)
-    // Sealed by another keychain (another computer, a reset keychain): none, and registering makes a new one.
-    const other = createBrowserDeviceKey({ box: box({ decrypt: () => { throw new Error('no') } }), file: () => file })
-    assert.equal(other.header(), null)
-    // A link to a sealed key elsewhere is not followed.
-    const linked = path.join(dir, 'link')
-    fs.symlinkSync(file, linked)
-    assert.equal(createBrowserDeviceKey({ box: box(), file: () => linked }).header(), null)
+    assert.equal(createBrowserDeviceKey({ box: box(), dir: () => dir, server: () => SERVER }).header(), key)
+    // A link in the key's place (pointing at a sealed key elsewhere) is not followed.
+    const elsewhere = fs.mkdtempSync(path.join(os.tmpdir(), 'acb-pc-key-link-'))
+    try {
+      fs.renameSync(file, path.join(elsewhere, 'sealed'))
+      fs.symlinkSync(path.join(elsewhere, 'sealed'), file)
+      assert.equal(createBrowserDeviceKey({ box: box(), dir: () => dir, server: () => SERVER }).header(), null)
+    } finally { fs.rmSync(elsewhere, { recursive: true, force: true }) }
+  } finally { fs.rmSync(dir, { recursive: true, force: true }) }
+})
+
+test('one key per server: another server the app is pointed at never gets this one, and a file sealed for another server is not a key', () => {
+  const { dir, file } = tempFile()
+  try {
+    let server = SERVER
+    const k = createBrowserDeviceKey({ box: box(), dir: () => dir, server: () => server })
+    const a = k.ensure()!
+    server = 'https://other.example'
+    assert.equal(k.header(), null, 'nothing to send to another server')
+    const b = k.ensure()!
+    assert.notEqual(a, b)
+    server = `${SERVER}/api/`
+    assert.equal(k.header(), a, 'the same origin written with a path is the same server')
+    // The first server's sealed file copied into the second's place reads as no key there.
+    fs.copyFileSync(file, browserDeviceKeyFile(dir, 'https://third.example'))
+    server = 'https://third.example'
+    assert.equal(createBrowserDeviceKey({ box: box(), dir: () => dir, server: () => server }).header(), null)
+  } finally { fs.rmSync(dir, { recursive: true, force: true }) }
+})
+
+test('a key the keychain will not open (denied, reset) is never overwritten: registering again keeps it aside and makes a new one', () => {
+  const { dir, file } = tempFile()
+  try {
+    const first = createBrowserDeviceKey({ box: box(), dir: () => dir, server: () => SERVER }).ensure()!
+    const sealed = fs.readFileSync(file)
+    const denied = createBrowserDeviceKey({ box: box({ decrypt: () => { throw new Error('denied') } }), dir: () => dir, server: () => SERVER })
+    assert.equal(denied.header(), null)
+    const fresh = denied.ensure()!
+    assert.notEqual(fresh, first)
+    const aside = fs.readdirSync(dir).filter(n => n.includes('.unreadable-'))
+    assert.equal(aside.length, 1)
+    assert.deepEqual(fs.readFileSync(path.join(dir, aside[0])), sealed, 'the old sealed key is kept, byte for byte')
+    assert.equal(fs.readdirSync(dir).filter(n => n.endsWith('.tmp')).length, 0)
   } finally { fs.rmSync(dir, { recursive: true, force: true }) }
 })
 
@@ -93,7 +129,7 @@ test('without a keychain nothing is made or sent: the screen says this PC cannot
   const { dir, file } = tempFile()
   try {
     const server = fakeServer()
-    const key = createBrowserDeviceKey({ box: box({ available: () => false }), file: () => file })
+    const key = createBrowserDeviceKey({ box: box({ available: () => false }), dir: () => dir, server: () => SERVER })
     const device = createBrowserDevice({ key, baseUrl: () => SERVER, cookies: () => ['s=1'], userId: () => 'u1', computerName: () => 'pc', fetch: server.fetch })
     assert.equal((await device.view(CO)).state, 'unavailable')
     assert.deepEqual(await device.register(CO, 'my PC'), { ok: false, message: BROWSER_PC_WORDS.unavailable })
@@ -104,7 +140,7 @@ test('without a keychain nothing is made or sent: the screen says this PC cannot
 })
 
 test('registering sends the key in its header only, the name in the body; the screen\'s answers never hold the key', async () => {
-  const { dir, file } = tempFile()
+  const { dir } = tempFile()
   try {
     let state: 'none' | 'pending' | 'enabled' | 'revoked' = 'none'
     const server = fakeServer(req => {
@@ -113,7 +149,7 @@ test('registering sends the key in its header only, the name in the body; the sc
       if (req.method === 'DELETE') { state = 'revoked'; return { json: { success: true, data: { id: 'bd_1', label: 'my PC', state } } } }
       return { json: { success: true, data: state === 'none' ? { state } : { id: 'bd_1', label: 'my PC', state, userId: 'u1' } } }
     })
-    const key = createBrowserDeviceKey({ box: box(), file: () => file })
+    const key = createBrowserDeviceKey({ box: box(), dir: () => dir, server: () => SERVER })
     let user: string | null = 'u1'
     const device = createBrowserDevice({ key, baseUrl: () => SERVER, cookies: () => ['s=1'], userId: () => user, computerName: () => 'Taros-MacBook.local', fetch: server.fetch })
     const first = await device.view(CO)
@@ -156,23 +192,23 @@ test('registering sends the key in its header only, the name in the body; the sc
 })
 
 test('a refused registration says the server\'s plain sentence; no answer says so without guessing a state', async () => {
-  const { dir, file } = tempFile()
+  const { dir } = tempFile()
   try {
     const server = fakeServer(req => req.method === 'POST' && req.path.endsWith('/browser-devices')
       ? { status: 409, json: { success: false, code: 'BROWSER_DEVICE_LIMIT', error: BROWSER_DEVICE_WORDS.tooMany } }
       : { status: 500, json: {} })
-    const device = createBrowserDevice({ key: createBrowserDeviceKey({ box: box(), file: () => file }), baseUrl: () => SERVER, cookies: () => ['s=1'], userId: () => 'u1', computerName: () => 'pc', fetch: server.fetch })
+    const device = createBrowserDevice({ key: createBrowserDeviceKey({ box: box(), dir: () => dir, server: () => SERVER }), baseUrl: () => SERVER, cookies: () => ['s=1'], userId: () => 'u1', computerName: () => 'pc', fetch: server.fetch })
     assert.deepEqual(await device.register(CO, 'pc'), { ok: false, message: BROWSER_DEVICE_WORDS.tooMany })
     assert.equal((await device.view(CO)).state, 'unknown')
   } finally { fs.rmSync(dir, { recursive: true, force: true }) }
 })
 
 test('the refresh asks at most once a minute per company, and only once this PC has a key', async () => {
-  const { dir, file } = tempFile()
+  const { dir } = tempFile()
   try {
     const server = fakeServer(() => ({ json: { success: true, data: { id: 'bd_1', label: 'pc', state: 'enabled' } } }))
     let now = 0
-    const key = createBrowserDeviceKey({ box: box(), file: () => file })
+    const key = createBrowserDeviceKey({ box: box(), dir: () => dir, server: () => SERVER })
     const device = createBrowserDevice({ key, baseUrl: () => SERVER, cookies: () => ['s=1'], userId: () => 'u1', computerName: () => 'pc', fetch: server.fetch, now: () => now })
     device.refresh(CO)
     assert.equal(server.seen.length, 0, 'no key: never asked')
@@ -186,6 +222,76 @@ test('the refresh asks at most once a minute per company, and only once this PC 
     await new Promise(r => setTimeout(r, 10))
     assert.equal(server.seen.length, 2)
   } finally { fs.rmSync(dir, { recursive: true, force: true }) }
+})
+
+test('an answer that arrives after a sign-out or another member\'s sign-in never turns the switch on for them', async () => {
+  const { dir } = tempFile()
+  try {
+    let release: () => void = () => {}
+    const server = fakeServer(() => ({ json: { success: true, data: { id: 'bd_1', label: 'pc', state: 'enabled' } } }))
+    const slow = (async (input: string | URL | Request, init?: RequestInit) => {
+      if (String(input).endsWith('/browser-devices-me')) await new Promise<void>(r => { release = r })
+      return server.fetch(input, init)
+    }) as typeof fetch
+    const key = createBrowserDeviceKey({ box: box(), dir: () => dir, server: () => SERVER })
+    key.ensure()
+    let user = 'u1'
+    const device = createBrowserDevice({ key, baseUrl: () => SERVER, cookies: () => ['s=1'], userId: () => user, computerName: () => 'pc', fetch: slow })
+    const pending = device.view(CO)
+    await new Promise(r => setTimeout(r, 5))
+    user = 'u2'
+    release()
+    await pending
+    assert.equal(device.enabledHere(), false, 'u1\'s answer is not u2\'s')
+    user = 'u1'
+    assert.equal(device.enabledHere(), false, 'nor kept for u1 under another sign-in')
+    const again = device.view(CO)
+    await new Promise(r => setTimeout(r, 5))
+    device.clear()
+    release()
+    await again
+    assert.equal(device.enabledHere(), false, 'signed out meanwhile: forgotten')
+  } finally { fs.rmSync(dir, { recursive: true, force: true }) }
+})
+
+test('a refusal (left the company, no access) forgets a remembered 使える; no answer keeps it', async () => {
+  const { dir } = tempFile()
+  try {
+    let answer: { status?: number; json: unknown } = { json: { success: true, data: { id: 'bd_1', label: 'pc', state: 'enabled' } } }
+    const server = fakeServer(req => req.path.endsWith('/browser-devices-me') ? answer : { json: { success: true, data: { lines: [] } } })
+    const key = createBrowserDeviceKey({ box: box(), dir: () => dir, server: () => SERVER })
+    key.ensure()
+    const device = createBrowserDevice({ key, baseUrl: () => SERVER, cookies: () => ['s=1'], userId: () => 'u1', computerName: () => 'pc', fetch: server.fetch })
+    await device.view(CO)
+    assert.equal(device.enabledHere(), true)
+    answer = { status: 502, json: {} }
+    await device.view(CO)
+    assert.equal(device.enabledHere(), true, 'no answer: kept (the server still refuses a stopped PC)')
+    answer = { status: 403, json: { success: false, code: 'FORBIDDEN' } }
+    await device.view(CO)
+    assert.equal(device.enabledHere(), false)
+  } finally { fs.rmSync(dir, { recursive: true, force: true }) }
+})
+
+test('only the PC module and the plan clients name the header, and only main.ts and the plan wirings hand the key on', () => {
+  const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
+  const files: string[] = []
+  const walk = (dir: string) => {
+    for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+      const p = path.join(dir, e.name)
+      if (e.isDirectory()) { if (e.name !== 'node_modules') walk(p) } else if (/\.(ts|tsx)$/.test(e.name) && !/\.test\.tsx?$/.test(e.name)) files.push(p)
+    }
+  }
+  for (const d of ['electron', 'src', 'shared', 'connectors', 'connector-maps']) if (fs.existsSync(path.join(root, d))) walk(path.join(root, d))
+  const rel = (p: string) => path.relative(root, p).split(path.sep).join('/')
+  const naming = (re: RegExp) => files.filter(f => re.test(fs.readFileSync(f, 'utf8'))).map(rel).sort()
+  assert.deepEqual(naming(/BROWSER_DEVICE_HEADER|X-ACB-Browser-Device/i), [
+    'electron/features/browser/device.ts', 'electron/features/browser/lines-api.ts', 'electron/features/browser/plans-api.ts',
+  ])
+  assert.deepEqual(naming(/\bdeviceKey\b|\bbrowserDeviceKey\b/), [
+    'electron/features/browser/inspect.ts', 'electron/features/browser/lines-api.ts', 'electron/features/browser/plans-api.ts',
+    'electron/features/browser/wire.ts', 'electron/features/browser/write-lines.ts', 'electron/main.ts',
+  ])
 })
 
 const KEY = newBrowserDeviceKey()

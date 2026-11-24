@@ -2394,13 +2394,18 @@ the guards they were.
 - **The app's half (D4)** (design memo v2 §3-2, §7-1, §8-2): `client/electron/features/browser/device.ts`
   (`createBrowserDeviceKey`: 32 random bytes as `v1.` + base64url, made the first time the member registers, **kept only
   sealed by the OS keychain** — `SecretBox`, safeStorage handed in by main.ts as for the API key — in
-  `<userData>/browser-device-key` (0600, written atomically, a link never followed), read once and then held in main's
-  memory; no keychain (`available()` false, Linux without one) → nothing made, the screen 「この PC では使えません（安全な
-  保存ができません）。」 and registering refused in that sentence; a sealed key that cannot be opened (another computer, a reset
-  keychain) = none, registering makes a new key = a new registration. `createBrowserDevice`: `GET /browser-devices-me`,
-  `POST /browser-devices { label }`, `DELETE /browser-devices-me` with the header, `GET /browser-lines-mine` without it;
-  the remembered state per server × member × company, asked again when the settings open, after each press and when the
-  company's policy is answered (at most once a minute per company, only once this PC has a key); cleared on sign-out).
+  `<userData>/browser-device-key-<sha256(origin)[0..16]>` — **one key per server origin**, the sealed text naming its
+  origin (independent review: the key one server trusts is never sent to another server the app is pointed at; a file
+  sealed for another origin is no key) — (0600, a fresh `O_EXCL` temporary file synced and renamed, a link never
+  followed), read once and then held in main's memory; no keychain (`available()` false, Linux without one) → nothing
+  made, the screen 「この PC では使えません（安全な保存ができません）。」 and registering refused in that sentence; a sealed key that
+  cannot be opened (another computer, a reset or denied keychain) = none, and registering again keeps that file aside
+  (`.unreadable-<time>`, never overwritten) and makes a new key = a new registration. `createBrowserDevice`: `GET
+  /browser-devices-me`, `POST /browser-devices { label }`, `DELETE /browser-devices-me` with the header, `GET
+  /browser-lines-mine` without it; the remembered state per server × member × company — kept only for the scope it was
+  asked for and not across a sign-out (an answer arriving later is dropped), forgotten on a refusal (left the company), kept
+  on no answer —, asked again when the settings open, after each press and when the company's policy is answered (at
+  most once a minute per company, only once this PC has a key); cleared on sign-out).
   **The header goes only** on those PC routes and, through `deviceKey` handed to the plan clients, on the steps the
   gate asks: old path register / approve / claim / permit (`plans-api.ts`), new path a plan's creation (inspection or
   writes) / approve / claim / every permit (`lines-api.ts`) — never on get, the lists, cancel, confirm, a result, a
@@ -2437,7 +2442,10 @@ exception, a plan bound to its PC, a revoked PC voiding the claimed execution (`
 `company-scoped-sql.test.ts`, `jobs-schema.test.ts`. Each guard mutation-checked (32 mutations; one survivor kept on purpose: enable's own
 `pending` check, behind the compare-and-set and the trigger, each of which refuses the same). The app's half: `client/tests/browser-device.test.ts` (the key's
 one spelling every time; made once, sealed — no plain key on disk, 0600 —, read back after a restart, another keychain's
-or a linked file = none; no keychain: nothing made or sent, the plain sentence; registering sends the key in the header
+or a linked file = none; one key per server (another server gets none, a file sealed for another origin is none); a key
+the keychain will not open kept aside, never overwritten; an answer arriving after a sign-out or another sign-in never
+remembered; a refusal forgets 使える, no answer keeps it; only `device.ts` and the two plan clients name the header and
+only main.ts and the plan wirings hand the key on (a source scan); no keychain: nothing made or sent, the plain sentence; registering sends the key in the header
 and the name alone in the body, the answers never hold the key or the id, the usable list asked without it; a refusal's
 sentence, no answer `unknown`; the refresh once a minute and only with a key; the old and new plan clients carry it on
 exactly the gated steps; no key → no header and the opt-in alone turns the switch on), `client/tests/ipc-browser-device.test.ts`

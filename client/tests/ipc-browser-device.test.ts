@@ -6,12 +6,11 @@
 import { test, after, before } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
-import path from 'node:path'
-import { loadMain, type MainHarness } from './ipc-harness/main-harness.ts'
+import { SERVER_URL, loadMain, type MainHarness } from './ipc-harness/main-harness.ts'
 import { BrowserWindow } from './ipc-harness/fake-electron.ts'
 import { BROWSER_DEVICE_HEADER, parseBrowserDeviceKey } from '../../shared/core/browser-device.ts'
 import { BROWSER_PC_WORDS, type BrowserPcResult } from '../shared/browser-device.ts'
-import { BROWSER_DEVICE_KEY_FILE } from '../electron/features/browser/device.ts'
+import { browserDeviceKeyFile } from '../electron/features/browser/device.ts'
 
 const CO = 'co-pc'
 let h: MainHarness
@@ -54,7 +53,7 @@ test('registering through the app: the key only in the PC routes\' header, never
   const secret = key.slice(3)
   for (const a of answers) assert.ok(!JSON.stringify(a).includes(secret) && !JSON.stringify(a).includes('bd_x'), 'the renderer never gets the key or the id')
   assert.ok(!h.logs.join('\n').includes(secret), 'never logged')
-  const sealed = fs.readFileSync(path.join(h.userData, BROWSER_DEVICE_KEY_FILE))
+  const sealed = fs.readFileSync(browserDeviceKeyFile(h.userData, SERVER_URL))
   assert.ok(!sealed.toString().includes(secret), 'kept only through the keychain')
 
   // Other requests main makes meanwhile (the session, a company's policy and sites) — none carries the key.
