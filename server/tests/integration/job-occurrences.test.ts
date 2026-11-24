@@ -212,6 +212,11 @@ describe('the clock makes occurrences', () => {
     // Bob is neither responsible nor an admin: nothing.
     const bobs = services.notifications.list({ companyId: CO, userId: 'u-bob', role: 'member' })
     expect(bobs.ok && bobs.value.items).toEqual([])
+    // Settled (notifications.md "Settled notices") from the occurrence as it is now: once it ran afterwards — still unread.
+    expect(bell.ok && bell.value.items[0].settled).toBeUndefined()
+    db.prepare("UPDATE ai_job_occurrences SET state = 'done' WHERE company_id = ? AND job_id = ?").run(CO, job)
+    const ran = services.notifications.list(alice())
+    expect(ran.ok && ran.value.items.map(i => [i.kind, i.settled, i.read])).toEqual([['job_expired', true, false]])
     // Shown only while the member may see the job: once a new approved version names bob, alice's goes.
     const edited = await jobService.update(owner(), job, { definition: weekly({ actingUser: 'u-bob' }) })
     if (!edited.ok) throw new Error(JSON.stringify(edited.body))

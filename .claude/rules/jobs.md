@@ -395,7 +395,9 @@ bare `notifications` push (both recipient checks are tested: a creator demoted t
 responsible person who left are not written to). Key `<kind>:<job>:<occurrence>` (once per occurrence and member; `…:<retries>` after a 「もう一度」, 5b). Text built
 when read (`notifications.ts` `jobOccurrenceText`, through `jobs.occurrenceNotice`): shown only while
 the reader may see the job (owner / admin, or its responsible person), its name 「定期の仕事」 when a
-place the newest version names is not theirs to read. **No `subject_kind` column on `notifications`**:
+place the newest version names is not theirs to read. `occurrenceNotice` and `noticeJob` also answer the occurrence's /
+job's state now: an unread `job_failed` / `job_expired` whose occurrence ran afterwards, or `job_paused` whose job is active
+again, is marked settled (`notifications.md` "Settled notices"). **No `subject_kind` column on `notifications`**:
 a recordless notice with the job and occurrence in its key is enough while no notice is about a record
 and a job at once (add it, additive, when one is). While the company's records are off the inbox does
 not show them (the occurrence's state says it: `GET /jobs/:jobId/occurrences`).
