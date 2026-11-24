@@ -5,9 +5,9 @@
  * names its write; `unknown` ends the run for good (the writes after it `skipped` at once) and only the person's confirm
  * or a late sure "done" settles it; `partial` holds no unknown write.
  *
- * **Unreachable in this build**: a plan of writes is made only from an approved line that writes, and no opened line can
- * hold a write yet (the core's line has no write part: `browserOpenedLineProblem`). `browser-lines.ts` refuses to make
- * one (`BROWSER_LINE_WRITES_NOT_YET`). The table is built now (owner decision on #813) so that this build is the
+ * **Unreachable in this build**: a plan of writes is made only from an approved line that writes; the one such line
+ * (`step_template_add`, generalization PR 6) is `pending`, and `browser-lines.ts` refuses every plan of writes and every
+ * inspection of a line that writes (`BROWSER_LINE_WRITES_NOT_YET`). The table is built now (owner decision on #813) so that this build is the
  * **rollback floor** of the first build that writes: it knows every row such a build leaves (deployment.md).
  *
  * Every function runs in the caller's transaction (synchronous), on the company's handle; time-outs are judged on every

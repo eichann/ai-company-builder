@@ -17,7 +17,9 @@
  * - **An inspection** (a line that writes nothing): made `open` by the member's session after the gate; the app reads the
  *   site (PR 5) and reports, once, the fixed words of each read and check (never a value the site showed); the server
  *   keeps them and says whether every read counted and every check is ✓.
- * - **A plan of writes**: refused in this build (`BROWSER_LINE_WRITES_NOT_YET`: no opened line can hold a write yet).
+ * - **A plan of writes**: refused in this build (`BROWSER_LINE_WRITES_NOT_YET`): an opened line may hold writes since
+ *   generalization PR 6 (`step_template_add`, written `pending`), but this build makes no plan of them — neither a write
+ *   plan nor an inspection of such a line.
  *   Its routes and the state table (`browser-line-steps.ts`) exist so this build is the rollback floor of the first
  *   build that writes (deployment.md "Rolling back production").
  * - **The strict read's notice** (§16-1 with Codex round 2 R1 / R2): the app reports a thing it could not read whole as
@@ -270,10 +272,9 @@ export function createBrowserLineService(deps: BrowserLineDeps) {
   }
 
   /**
-   * The gate for a plan of writes: the line's gate at level 「入力・保存まで」, then the plan's writes must be the line's —
-   * and no approved line holds a write in this build (the core's line has no write part: `browserOpenedLineProblem` takes
-   * exactly name, version, label, read, readLabels, show). PR 5 adds the write part and its line judge (§4-1, I4); until
-   * then every plan of writes stops here, whatever a row says.
+   * The gate for a plan of writes: the line's gate at level 「入力・保存まで」, then — in this build — a refusal: the core's
+   * line has a write part since generalization PR 6 (`browser-write-line.ts`, its line judge §4-1 / I4), but the plan's
+   * writes are not matched to the line's yet; until a later build does, every plan of writes stops here, whatever a row says.
    */
   function writeGate(member: Member, p: BrowserLinePlanRow): Outcome<LoadedLine> {
     const passed = gate(member, planRef(p), 'write')
@@ -397,7 +398,7 @@ export function createBrowserLineService(deps: BrowserLineDeps) {
 
     /**
      * POST /browser-line-plans: an inspection of an approved line (the gate at level 「見るだけ」), its values checked for
-     * where they come from (§16-4). A line that writes is refused in this build.
+     * where they come from (§16-4). A line that writes is refused (`BROWSER_LINE_WRITES_NOT_YET`).
      */
     create(member: Member, body: unknown): Outcome<BrowserLinePlanView> {
       if (!isMap(body) || Object.keys(body).some(k => !['line', 'values', 'conversationId'].includes(k))) return refuse('bad-request', W.badPlan, { code: 'BROWSER_BAD_PLAN' })
@@ -408,6 +409,8 @@ export function createBrowserLineService(deps: BrowserLineDeps) {
       const passed = gate(member, ref, 'read')
       if (!passed.ok) return passed
       const line = passed.value
+      // A line that writes is never made an inspection (it would pass the 「見るだけ」 gate); its plans are a later build's.
+      if (line.row.line.writes !== undefined) return refuse('conflict', W.writesNotYet, { code: 'BROWSER_LINE_WRITES_NOT_YET' })
       const site = siteOf(ref.site) as Site
       // Values: the core's one rule, then — until the server can re-read a business plugin's bound field — no record field.
       const problem = browserLineValuesProblem(line.row.line.read, body.values)

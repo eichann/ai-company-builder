@@ -319,6 +319,23 @@ describe('no plan of writes in this build', () => {
   })
 })
 
+describe('a line that writes (generalization PR 6)', () => {
+  it('is never made an inspection, even approved and granted (it would pass the 「見るだけ」 gate)', () => {
+    const writing = JSON.parse(JSON.stringify(REAL_OPENED)) as BrowserOpenedFile
+    const row = writing.lines.find(l => l.name === 'step_template_add')!
+    expect(row.status).toBe('pending')
+    row.status = 'approved'
+    opened = writing; build(); grant(alice, row)
+    const values = { reminder: site('7100002'), step: site('7200003'), template_folder: site('7300004'), template: site('7400005') }
+    expect(code(inspect(alice, values, row))).toBe('BROWSER_LINE_WRITES_NOT_YET')
+    expect(conn.prepare('SELECT COUNT(*) AS n FROM browser_line_plans').get()).toEqual({ n: 0 })
+  })
+  it('as written today it is pending: refused before anything else', () => {
+    const row = REAL_OPENED.lines.find(l => l.name === 'step_template_add')!
+    expect(code(inspect(alice, {}, row))).toBe('BROWSER_LINE_NOT_APPROVED')
+  })
+})
+
 describe('the strict read\'s notice (§16-1)', () => {
   const notice = (over: Record<string, unknown> = {}) => ({ site: 'lstep', mapVersion: '1.0.1', thing: 'landing', change: 'unknown_keys', count: 2, ...over })
   const told = () => conn.prepare("SELECT user_id, dedupe_key FROM notifications WHERE kind = 'browser_shape_changed' ORDER BY user_id").all()

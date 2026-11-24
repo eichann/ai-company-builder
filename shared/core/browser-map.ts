@@ -42,8 +42,13 @@ export interface BrowserMapField {
 export interface BrowserMapThing {
   /** The Japanese name of the thing, shown on the card and in the admin notice. */
   label: string
-  /** Only JSON answers are read strictly by this path (an HTML thing stays on today's checker path until one is needed). */
-  answer: 'json'
+  /**
+   * `json`: read strictly, every key against `keys` (the rule of this path). `html` (generalization PR 6): a page that
+   * holds no JSON for the thing (what a site shows only in a page's markup) — it has no `keys`; its reviewed
+   * reader gets the page's text and the ids main asked for, and must fail closed on anything it does not recognise (the
+   * same reading as the old path's checker: design memo §6, §16-7 R3). Its id always comes from the address.
+   */
+  answer: 'json' | 'html'
   /** The field holding the thing's own id (kind `id`). */
   id: string
   /**
@@ -60,7 +65,18 @@ export interface BrowserMapThing {
    * reader uses it and it stands in every object that should hold it; `optional`: the reader uses it, it may be absent;
    * `ignored` (読まない欄, e.g. an update time): never in the state, never compared — reviewed one by one.
    */
-  keys: Readonly<Record<string, BrowserMapKeyUse>>
+  keys?: Readonly<Record<string, BrowserMapKeyUse>>
+  /**
+   * What the thing lets a line write (generalization PR 6, memo §3-3, §15 C7): per verb, the fields it may change —
+   * reviewed with the map (the site's effect is predictable: `add_child` adds exactly one id to that list). A line can
+   * only use what is listed here; listing opens nothing by itself.
+   */
+  writes?: Readonly<Partial<Record<BrowserWriteVerb, readonly string[]>>>
+  /**
+   * Who a write on the thing reaches (memo §3-2 「届き方」; required for a thing with `writes`): `none` — nobody until a
+   * person hands it out; `scheduled` — people who have the thing's time still ahead of them, at that time.
+   */
+  delivers?: BrowserMapDelivers
   /**
    * The thing's must-hold facts (memo §15 C5, PR 3): what every line reading it gets whether the line asks or not — a
    * line can neither drop nor loosen them. `account`: read under the outside account the card names (the account read
@@ -77,6 +93,14 @@ export interface BrowserMustHold {
   note?: string
 }
 
+/** The write verbs (memo §3-3; closed, §17-3: only what a known case needs). Adding one is a change of the core. */
+export const BROWSER_WRITE_VERBS = ['add_child'] as const
+export type BrowserWriteVerb = typeof BROWSER_WRITE_VERBS[number]
+
+/** Who a write reaches (memo §3-2; the old declaration's words, only the two a write on this path may have: `immediate` and `unknown` are never opened here). */
+export const BROWSER_MAP_DELIVERS = ['none', 'scheduled'] as const
+export type BrowserMapDelivers = typeof BROWSER_MAP_DELIVERS[number]
+
 export const BROWSER_MAP_KEY_USES = ['required', 'optional', 'ignored'] as const
 export type BrowserMapKeyUse = typeof BROWSER_MAP_KEY_USES[number]
 
@@ -90,7 +114,7 @@ export interface BrowserMap {
   account?: { label: string }
 }
 
-export const BROWSER_MAP_LIMITS = { things: 20, fields: 40, keys: 200, depth: 8, label: 40, note: 200, answerPaths: 2000, diagnosisKeys: 50 } as const
+export const BROWSER_MAP_LIMITS = { things: 20, fields: 40, keys: 200, depth: 8, label: 40, note: 200, answerPaths: 2000, diagnosisKeys: 50, htmlChars: 5_000_000 } as const
 
 /** A thing's, field's or value's name in a map or a line. */
 export const BROWSER_MAP_NAME_RE = /^[a-z][a-z0-9_]{0,39}$/
@@ -176,9 +200,9 @@ export function browserMapProblem(raw: unknown): string | null {
 }
 
 function thingProblem(t: unknown, things: Record<string, unknown>): string | null {
-  if (!isMap(t) || !onlyKeys(t, ['label', 'answer', 'id', 'id_from', 'parent', 'fields', 'keys', 'must_hold'])) return '形が正しくありません'
+  if (!isMap(t) || !onlyKeys(t, ['label', 'answer', 'id', 'id_from', 'parent', 'fields', 'keys', 'writes', 'delivers', 'must_hold'])) return '形が正しくありません'
   if (!isPlainBrowserText(t.label, BROWSER_MAP_LIMITS.label)) return '見出しが正しくありません'
-  if (t.answer !== 'json') return '読み方は json だけです'
+  if (t.answer !== 'json' && t.answer !== 'html') return '読み方は json か html です'
   if (!isMap(t.fields)) return '欄の形が正しくありません'
   const fieldNames = Object.keys(t.fields)
   if (fieldNames.length === 0 || fieldNames.length > BROWSER_MAP_LIMITS.fields) return '欄の数が正しくありません'
@@ -193,6 +217,25 @@ function thingProblem(t: unknown, things: Record<string, unknown>): string | nul
   const fields = t.fields as Record<string, BrowserMapField>
   if (typeof t.id !== 'string' || !own(fields, t.id) || fields[t.id].kind !== 'id' || fields[t.id].nullable) return '番号の欄が正しくありません'
   if (own(t, 'id_from') && t.id_from !== 'answer' && t.id_from !== 'address') return '番号の出どころが正しくありません'
+  if (t.answer === 'html') {
+    // A page has no keys to read strictly: its reader is the guard, and the ids it is for come from main's address.
+    if (own(t, 'keys')) return 'html のものに鍵の一覧はありません'
+    if (t.id_from !== 'address') return 'html のものの番号は、住所から取ります'
+  }
+  if (own(t, 'writes') || own(t, 'delivers')) {
+    const w = t.writes
+    if (!isMap(w) || Object.keys(w).length === 0 || !onlyKeys(w, BROWSER_WRITE_VERBS)) return '書ける欄の形が正しくありません'
+    for (const [verb, list] of Object.entries(w)) {
+      if (!Array.isArray(list) || list.length === 0 || new Set(list).size !== list.length) return `書ける欄（${verb}）が正しくありません`
+      for (const f of list) {
+        // add_child adds one id to a list kept in any order (where it lands in an ordered list is not predictable).
+        if (typeof f !== 'string' || !own(fields, f) || fields[f].kind !== 'id_set' || fields[f].nullable) return `書ける欄（${verb}）は、順不同の番号の一覧です`
+      }
+    }
+    if (!(BROWSER_MAP_DELIVERS as readonly unknown[]).includes(t.delivers)) return '書けるものには、届き方が要ります'
+    // A thing written from outside is bound to the account (and to its parent when it has one): never loosened by a line.
+    if (!isMap(t.must_hold) || t.must_hold.account !== true || (own(t, 'parent') && t.must_hold.parent !== true)) return '書けるものは、アカウント（と親）を必ず守ります'
+  }
   if (own(t, 'must_hold')) {
     const m = t.must_hold
     if (!isMap(m) || !onlyKeys(m, ['account', 'parent', 'note'])) return '必ず守る事実の形が正しくありません'
@@ -207,6 +250,7 @@ function thingProblem(t: unknown, things: Record<string, unknown>): string | nul
     if (!own(things, p.thing)) return '親のものが地図にありません'
     if (!own(fields, p.field) || fields[p.field].kind !== 'id' || p.field === t.id) return '親の番号の欄が正しくありません'
   }
+  if (t.answer === 'html') return null
   if (!isMap(t.keys)) return '鍵の一覧が正しくありません'
   const all = Object.keys(t.keys)
   if (all.length === 0 || all.length > BROWSER_MAP_LIMITS.keys) return '鍵の数が正しくありません'
@@ -272,16 +316,19 @@ export type BrowserThingResult = BrowserThingRead | BrowserThingNotRead
 
 /**
  * The connector's reader for one thing: the parsed answer (strict JSON) → the thing's state. Site code, in the connector's
- * folder. It may throw or hand back anything: the core checks what it gives.
+ * folder. It may throw or hand back anything: the core checks what it gives. An `html` thing's reader gets the page's
+ * text and `ids` — the id main asked for and, for a thing with a parent, the parent's (both plain ids main built the
+ * address from, never the AI's word); a JSON reader gets no `ids`.
  */
-export type BrowserThingReader = (answer: unknown) => unknown
+export type BrowserThingReader = (answer: unknown, ids?: BrowserThingIds) => unknown
+export interface BrowserThingIds { id: string; parent: string | null }
 
 /**
  * Read one thing strictly (§3-2, §16-1): the answer's keys against the map's, then the reader's state against the map's
  * fields. Anything short of whole is `not_read` — never a partial state. The state's id is not checked against a planned
  * id here: the line's evaluation does that (`browser-read-line.ts`).
  */
-export function readBrowserThing(map: BrowserMap, thingName: string, answer: unknown, reader: BrowserThingReader, address?: string): BrowserThingResult {
+export function readBrowserThing(map: BrowserMap, thingName: string, answer: unknown, reader: BrowserThingReader, address?: string, parentAddress?: string): BrowserThingResult {
   const thing = own(map.things, thingName) ? map.things[thingName] : undefined
   const notRead = (change: BrowserShapeChange, count: number, unknownKeys: string[] = [], missingKeys: string[] = []): BrowserThingNotRead => ({
     status: 'not_read',
@@ -290,6 +337,7 @@ export function readBrowserThing(map: BrowserMap, thingName: string, answer: unk
   })
   // A name the map does not have is never put in a notice (every string of a notice is the map's own).
   if (!thing) return { status: 'not_read', notices: [], diagnosis: { unknownKeys: [], missingKeys: [] } }
+  if (thing.answer === 'html') return readHtmlThing(thing, answer, reader, address, parentAddress, notRead)
   const keys = browserAnswerKeysProblem(thing, answer)
   if (keys === 'unreadable') return notRead('unreadable', 1)
   if (keys.unknownCount > 0 || keys.missing.length > 0) {
@@ -315,6 +363,30 @@ export function readBrowserThing(map: BrowserMap, thingName: string, answer: unk
   return { status: 'read', state: copy as Record<string, unknown> }
 }
 
+/**
+ * An `html` thing (PR 6): the page's text (≤ `htmlChars`) and the ids main built its address from go to the reviewed
+ * reader; its state must hold exactly the map's fields, its id is the address's (a reader that gives one is not trusted)
+ * and, when the thing has a parent, the parent field the reader gives must be the parent main asked for. Anything else is
+ * `unreadable` — never a partial state, and no key name to tell (a page has none).
+ */
+function readHtmlThing(
+  thing: BrowserMapThing, answer: unknown, reader: BrowserThingReader, address: string | undefined, parentAddress: string | undefined,
+  notRead: (change: BrowserShapeChange, count: number) => BrowserThingNotRead,
+): BrowserThingResult {
+  if (typeof answer !== 'string' || answer.length > BROWSER_MAP_LIMITS.htmlChars) return notRead('unreadable', 1)
+  if (typeof address !== 'string' || !BROWSER_ID_VALUE_RE.test(address)) return notRead('unreadable', 1)
+  // The parent main asked the page for (a thing with a parent): the reader's parent field must be exactly it (below).
+  const parent = thing.parent && typeof parentAddress === 'string' && BROWSER_ID_VALUE_RE.test(parentAddress) ? parentAddress : undefined
+  let state: unknown
+  try { state = reader(answer, { id: address, parent: parent ?? null }) } catch { return notRead('unreadable', 1) }
+  if (!isMap(state) || own(state, thing.id)) return notRead('unreadable', 1)
+  const copy: Record<string, unknown> = Object.fromEntries(Object.entries(state).map(([k, v]) => [k, Array.isArray(v) ? [...v] : v]))
+  copy[thing.id] = address
+  if (thing.parent && copy[thing.parent.field] !== parent) return notRead('unreadable', 1)
+  if (browserThingStateProblem(thing, copy)) return notRead('unreadable', 1)
+  return { status: 'read', state: copy }
+}
+
 /** Why a state is not one of this thing (a field missing, an extra one, a value not of its kind), or null. */
 export function browserThingStateProblem(thing: BrowserMapThing, state: unknown): string | null {
   if (!isMap(state)) return 'not-an-object'
@@ -336,10 +408,11 @@ export function browserThingStateProblem(thing: BrowserMapThing, state: unknown)
  */
 export function browserAnswerKeysProblem(thing: BrowserMapThing, answer: unknown):
   { unknownCount: number; unknownNamed: string[]; missing: string[] } | 'unreadable' {
-  if (!isMap(answer)) return 'unreadable'
-  const allKeys = Object.keys(thing.keys)
+  if (!isMap(answer) || !thing.keys) return 'unreadable'
+  const keyUses = thing.keys
+  const allKeys = Object.keys(keyUses)
   const known = new Set(allKeys)
-  const required = Object.keys(thing.keys).filter(k => thing.keys[k] === 'required')
+  const required = allKeys.filter(k => keyUses[k] === 'required')
   const unknown = new Set<string>()
   const unknownNamed = new Set<string>()
   const missing = new Set<string>()
@@ -355,7 +428,7 @@ export function browserAnswerKeysProblem(thing: BrowserMapThing, answer: unknown
       if (!BROWSER_ANSWER_KEY_RE.test(key)) { unknown.add(`\u0000${at}\u0000${key}`); continue }
       const path = at === '' ? key : `${at}.${key}`
       if (!known.has(path)) { unknown.add(path); unknownNamed.add(path); continue }
-      walkValue(obj[key], path, depth + 1, thing.keys[path] !== 'required')
+      walkValue(obj[key], path, depth + 1, keyUses[path] !== 'required')
     }
   }
   // What the map holds below a place: keys of an object (`P.x`), items of a list (`P[]…`), or nothing (a leaf).

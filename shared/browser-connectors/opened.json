@@ -481,6 +481,431 @@
         },
         "version": "1.0.1"
       }
+    },
+    {
+      "site": "lstep",
+      "version": "1.0.2",
+      "mapHash": "sha256:9e98281c477b0215b829819de5f95ed0d192e37f66fd146d4b4ce40a9ba3416f",
+      "readersHash": "sha256:e9199ea5222274de5f9326e165a96f4295cbd8b156cc0655f8af51653e0d46d8",
+      "map": {
+        "account": {
+          "label": "LINE アカウント"
+        },
+        "site": "lstep",
+        "things": {
+          "action_set": {
+            "answer": "json",
+            "fields": {
+              "id": {
+                "kind": "id",
+                "label": "番号"
+              },
+              "name": {
+                "kind": "text",
+                "label": "アクションの名前",
+                "nullable": true
+              },
+              "stops": {
+                "kind": "id_set",
+                "label": "止めるリマインダ（番号_止め方）"
+              },
+              "tags": {
+                "kind": "id_set",
+                "label": "つけるタグ"
+              },
+              "templates": {
+                "kind": "id_list",
+                "label": "送るテンプレート"
+              },
+              "twice": {
+                "kind": "text",
+                "label": "2回目以降の動き",
+                "nullable": true
+              }
+            },
+            "id": "id",
+            "id_from": "address",
+            "keys": {
+              "a_name": "required",
+              "a_twice_type": "required",
+              "aid": "ignored",
+              "funnel_descriptions": "ignored",
+              "group_id": "ignored",
+              "inputs": "required",
+              "inputs[].egg_id": "optional",
+              "inputs[].episode_id": "optional",
+              "inputs[].firetype": "optional",
+              "inputs[].member_query_id": "required",
+              "inputs[].send_member_query_id": "required",
+              "inputs[].tag_ids": "optional",
+              "inputs[].type": "required"
+            },
+            "label": "アクション",
+            "must_hold": {
+              "account": true,
+              "note": "アクションは、ほかの流入経路と共有されていることがあります。同じアクションを指す流入経路は、どれも同じ動きをします。"
+            }
+          },
+          "landing": {
+            "answer": "json",
+            "fields": {
+              "action_id": {
+                "kind": "id",
+                "label": "アクション"
+              },
+              "cv_body": {
+                "kind": "text",
+                "label": "計測のタグ（body）",
+                "nullable": true
+              },
+              "cv_head": {
+                "kind": "text",
+                "label": "計測のタグ（head）",
+                "nullable": true
+              },
+              "from_date": {
+                "kind": "date",
+                "label": "受付の始まりの日",
+                "nullable": true
+              },
+              "from_time": {
+                "kind": "time",
+                "label": "受付の始まりの時刻",
+                "nullable": true
+              },
+              "group_id": {
+                "kind": "id",
+                "label": "フォルダ",
+                "nullable": true
+              },
+              "id": {
+                "kind": "id",
+                "label": "番号"
+              },
+              "latitude": {
+                "kind": "number",
+                "label": "緯度",
+                "nullable": true
+              },
+              "longitude": {
+                "kind": "number",
+                "label": "経度",
+                "nullable": true
+              },
+              "name": {
+                "kind": "text",
+                "label": "名前"
+              },
+              "only_once_param_sync": {
+                "kind": "flag",
+                "label": "値の引き継ぎは1回だけ"
+              },
+              "only_welcome": {
+                "kind": "flag",
+                "label": "初めての友だちだけ"
+              },
+              "out_of_period_message": {
+                "kind": "text",
+                "label": "受付の期間外の文",
+                "nullable": true
+              },
+              "params": {
+                "kind": "id_set",
+                "label": "引き継ぐ値"
+              },
+              "prevent_default": {
+                "kind": "flag",
+                "label": "既定の動きを止める"
+              },
+              "qr_text": {
+                "kind": "text",
+                "label": "QR コードの文字",
+                "nullable": true
+              },
+              "radius": {
+                "kind": "number",
+                "label": "半径",
+                "nullable": true
+              },
+              "to_date": {
+                "kind": "date",
+                "label": "受付の終わりの日",
+                "nullable": true
+              },
+              "to_time": {
+                "kind": "time",
+                "label": "受付の終わりの時刻",
+                "nullable": true
+              }
+            },
+            "id": "id",
+            "id_from": "address",
+            "keys": {
+              "action_id": "required",
+              "action_texts": "ignored",
+              "custom_params": "required",
+              "custom_params[].name": "ignored",
+              "custom_params[].var_id": "required",
+              "cv_body": "required",
+              "cv_head": "required",
+              "from_date": "required",
+              "from_time": "required",
+              "group_id": "required",
+              "latitude": "required",
+              "longitude": "required",
+              "name": "required",
+              "only_once_param_sync": "required",
+              "only_welcome": "required",
+              "out_of_period_message": "required",
+              "prevent_default": "required",
+              "qr_text": "required",
+              "radius": "required",
+              "to_date": "required",
+              "to_time": "required"
+            },
+            "label": "流入経路",
+            "must_hold": {
+              "account": true
+            }
+          },
+          "landing_row": {
+            "answer": "json",
+            "fields": {
+              "follow_url": {
+                "kind": "text",
+                "label": "友だち追加の URL"
+              },
+              "id": {
+                "kind": "id",
+                "label": "番号"
+              },
+              "name": {
+                "kind": "text",
+                "label": "名前"
+              },
+              "qr_url": {
+                "kind": "text",
+                "label": "QR コードの URL"
+              },
+              "validity_period_from": {
+                "kind": "text",
+                "label": "受付の始まり（一覧）",
+                "nullable": true
+              },
+              "validity_period_to": {
+                "kind": "text",
+                "label": "受付の終わり（一覧）",
+                "nullable": true
+              }
+            },
+            "id": "id",
+            "keys": {
+              "action_texts": "ignored",
+              "action_twice_type": "ignored",
+              "counter": "ignored",
+              "counter_member": "ignored",
+              "created_at": "ignored",
+              "custom_params_script_tag": "ignored",
+              "follow_url": "required",
+              "group": "ignored",
+              "group.id": "ignored",
+              "group.name": "ignored",
+              "group.order": "ignored",
+              "id": "required",
+              "name": "required",
+              "only_welcome": "ignored",
+              "order": "ignored",
+              "prevent_default": "ignored",
+              "qr_url": "required",
+              "updated_at": "ignored",
+              "validity_period_from": "required",
+              "validity_period_to": "required"
+            },
+            "label": "流入経路の一覧の行",
+            "must_hold": {
+              "account": true
+            }
+          },
+          "reminder": {
+            "answer": "json",
+            "fields": {
+              "id": {
+                "kind": "id",
+                "label": "番号"
+              },
+              "name": {
+                "kind": "text",
+                "label": "リマインダの名前"
+              },
+              "steps": {
+                "kind": "id_set",
+                "label": "段"
+              }
+            },
+            "id": "id",
+            "keys": {
+              "hid_at": "required",
+              "id": "required",
+              "name": "required",
+              "order": "ignored",
+              "steps": "required",
+              "steps[].action_id": "ignored",
+              "steps[].egg_id": "ignored",
+              "steps[].episode_id": "required",
+              "steps[].id": "required",
+              "steps[].initial": "ignored",
+              "steps[].member_query_id": "ignored",
+              "steps[].order": "ignored",
+              "steps[].skip": "ignored",
+              "steps[].step_days": "ignored",
+              "steps[].step_minutes": "ignored",
+              "steps[].step_time": "ignored",
+              "steps[].step_type": "ignored",
+              "type": "ignored"
+            },
+            "label": "リマインダ",
+            "must_hold": {
+              "account": true
+            }
+          },
+          "reminder_step": {
+            "answer": "html",
+            "delivers": "scheduled",
+            "fields": {
+              "reminder": {
+                "kind": "id",
+                "label": "リマインダ"
+              },
+              "step": {
+                "kind": "id",
+                "label": "段の番号"
+              },
+              "templates": {
+                "kind": "id_set",
+                "label": "段のテンプレート"
+              }
+            },
+            "id": "step",
+            "id_from": "address",
+            "label": "リマインダの段",
+            "must_hold": {
+              "account": true,
+              "note": "全部の回で共有のリマインダです。ほかの回でも、この段をまだ迎えていない人に届きます（もう過ぎた人には届きません）。",
+              "parent": true
+            },
+            "parent": {
+              "field": "reminder",
+              "thing": "reminder"
+            },
+            "writes": {
+              "add_child": [
+                "templates"
+              ]
+            }
+          },
+          "step_timing": {
+            "answer": "json",
+            "fields": {
+              "reminder": {
+                "kind": "id",
+                "label": "リマインダ"
+              },
+              "step": {
+                "kind": "id",
+                "label": "段の番号"
+              },
+              "timing": {
+                "kind": "text",
+                "label": "段の時刻（サイトの表示）"
+              }
+            },
+            "id": "step",
+            "keys": {
+              "episode_group_id": "ignored",
+              "episode_id": "required",
+              "episode_name": "ignored",
+              "episode_step_id": "required",
+              "step_timing_text": "required"
+            },
+            "label": "段の時刻",
+            "must_hold": {
+              "account": true,
+              "parent": true
+            },
+            "parent": {
+              "field": "reminder",
+              "thing": "reminder"
+            }
+          },
+          "template": {
+            "answer": "json",
+            "fields": {
+              "body": {
+                "kind": "text",
+                "label": "本文"
+              },
+              "folder": {
+                "kind": "id",
+                "label": "フォルダ"
+              },
+              "id": {
+                "kind": "id",
+                "label": "番号"
+              },
+              "name": {
+                "kind": "text",
+                "label": "テンプレートの名前"
+              }
+            },
+            "id": "id",
+            "keys": {
+              "content_text": "required",
+              "created_at": "ignored",
+              "editor_version": "ignored",
+              "form_type": "required",
+              "group": "optional",
+              "group.id": "required",
+              "group.name": "ignored",
+              "id": "required",
+              "name": "required"
+            },
+            "label": "テンプレート",
+            "must_hold": {
+              "account": true,
+              "parent": true
+            },
+            "parent": {
+              "field": "folder",
+              "thing": "template_folder"
+            }
+          },
+          "template_folder": {
+            "answer": "json",
+            "fields": {
+              "id": {
+                "kind": "id",
+                "label": "番号"
+              },
+              "name": {
+                "kind": "text",
+                "label": "フォルダの名前"
+              }
+            },
+            "id": "id",
+            "keys": {
+              "id": "required",
+              "item_count": "ignored",
+              "name": "required",
+              "order": "ignored"
+            },
+            "label": "テンプレートのフォルダ",
+            "must_hold": {
+              "account": true
+            }
+          }
+        },
+        "version": "1.0.2"
+      }
     }
   ],
   "lines": [
@@ -796,6 +1221,292 @@
           }
         ],
         "version": "1.0.0"
+      }
+    },
+    {
+      "name": "landing_inspect",
+      "version": "1.0.0",
+      "site": "lstep",
+      "mapVersion": "1.0.2",
+      "status": "pending",
+      "meaningHash": "sha256:ff6c8aaa0e51d744f8215cc012bd5609250b445ec8021970be1f4b849ee103d0",
+      "mechanicsHash": "sha256:3c5b0e0839ee59a3ea60a31660afff0fb075a0a9a23b15204891e09184da2b7c",
+      "line": {
+        "label": "流入経路を点検する",
+        "name": "landing_inspect",
+        "read": {
+          "checks": [
+            {
+              "except": [
+                "name",
+                "to_date",
+                "to_time",
+                "action_id"
+              ],
+              "read": "landing",
+              "reference": "source",
+              "word": "unchanged_except"
+            },
+            {
+              "fields": [
+                "action_id"
+              ],
+              "read": "landing",
+              "reference": "source",
+              "word": "changed_from"
+            },
+            {
+              "fields": [
+                "tags"
+              ],
+              "read": "action_set",
+              "reference": "source_action_set",
+              "word": "changed_from"
+            },
+            {
+              "except": [
+                "name",
+                "tags"
+              ],
+              "read": "action_set",
+              "reference": "source_action_set",
+              "word": "unchanged_except"
+            }
+          ],
+          "reads": [
+            {
+              "id": {
+                "value": "landing"
+              },
+              "name": "landing",
+              "thing": "landing"
+            },
+            {
+              "id": {
+                "field": "id",
+                "read": "landing"
+              },
+              "name": "landing_row",
+              "thing": "landing_row"
+            },
+            {
+              "id": {
+                "field": "action_id",
+                "read": "landing"
+              },
+              "name": "action_set",
+              "thing": "action_set"
+            },
+            {
+              "id": {
+                "value": "source"
+              },
+              "name": "source",
+              "thing": "landing"
+            },
+            {
+              "id": {
+                "field": "action_id",
+                "read": "source"
+              },
+              "name": "source_action_set",
+              "thing": "action_set"
+            }
+          ],
+          "site": "lstep",
+          "values": {
+            "landing": {
+              "from": [
+                "site_fact"
+              ],
+              "kind": "id",
+              "role": "target"
+            },
+            "source": {
+              "from": [
+                "site_fact"
+              ],
+              "kind": "id",
+              "role": "target"
+            }
+          }
+        },
+        "readLabels": {
+          "action_set": "点検する流入経路のアクション",
+          "landing": "点検する流入経路",
+          "landing_row": "点検する流入経路（一覧の行）",
+          "source": "複製元の流入経路",
+          "source_action_set": "複製元のアクション"
+        },
+        "show": [
+          {
+            "fields": [
+              "name",
+              "to_date",
+              "to_time"
+            ],
+            "read": "landing"
+          },
+          {
+            "fields": [
+              "follow_url",
+              "qr_url"
+            ],
+            "read": "landing_row"
+          },
+          {
+            "fields": [
+              "tags",
+              "templates",
+              "stops"
+            ],
+            "read": "action_set"
+          },
+          {
+            "fields": [
+              "name",
+              "to_date",
+              "to_time"
+            ],
+            "read": "source"
+          },
+          {
+            "fields": [
+              "tags"
+            ],
+            "read": "source_action_set"
+          }
+        ],
+        "version": "1.0.0"
+      }
+    },
+    {
+      "name": "step_template_add",
+      "version": "1.0.0",
+      "site": "lstep",
+      "mapVersion": "1.0.2",
+      "status": "pending",
+      "meaningHash": "sha256:df7dc9f6bee4544b21286d78f4c2b76536b376f61da40886091a9059f42a666d",
+      "mechanicsHash": "sha256:bdc7029517cdab6453ccf4f481babf9a33c5027dcdcd784637e56910c583d1a8",
+      "line": {
+        "label": "リマインダの段にテンプレートを足す",
+        "name": "step_template_add",
+        "read": {
+          "checks": [],
+          "reads": [
+            {
+              "id": {
+                "value": "reminder"
+              },
+              "name": "reminder",
+              "thing": "reminder"
+            },
+            {
+              "id": {
+                "value": "step"
+              },
+              "name": "step",
+              "parent": {
+                "value": "reminder"
+              },
+              "thing": "reminder_step"
+            },
+            {
+              "id": {
+                "field": "step",
+                "read": "step"
+              },
+              "name": "timing",
+              "parent": {
+                "value": "reminder"
+              },
+              "thing": "step_timing"
+            },
+            {
+              "id": {
+                "value": "template"
+              },
+              "name": "template",
+              "parent": {
+                "value": "template_folder"
+              },
+              "thing": "template"
+            }
+          ],
+          "site": "lstep",
+          "values": {
+            "reminder": {
+              "from": [
+                "site_fact"
+              ],
+              "kind": "id",
+              "role": "target"
+            },
+            "step": {
+              "from": [
+                "site_fact"
+              ],
+              "kind": "id",
+              "role": "target"
+            },
+            "template": {
+              "from": [
+                "site_fact"
+              ],
+              "kind": "id",
+              "role": "target"
+            },
+            "template_folder": {
+              "from": [
+                "site_fact"
+              ],
+              "kind": "id",
+              "role": "target"
+            }
+          }
+        },
+        "readLabels": {
+          "reminder": "リマインダ",
+          "step": "テンプレートを足す段",
+          "template": "足すテンプレート",
+          "timing": "段の時刻"
+        },
+        "show": [
+          {
+            "fields": [
+              "name"
+            ],
+            "read": "reminder"
+          },
+          {
+            "fields": [
+              "templates"
+            ],
+            "read": "step"
+          },
+          {
+            "fields": [
+              "timing"
+            ],
+            "read": "timing"
+          },
+          {
+            "fields": [
+              "name",
+              "body"
+            ],
+            "read": "template"
+          }
+        ],
+        "version": "1.0.0",
+        "writes": [
+          {
+            "field": "templates",
+            "read": "step",
+            "value": "template",
+            "verb": "add_child"
+          }
+        ]
       }
     }
   ]

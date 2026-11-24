@@ -151,16 +151,19 @@ test('the browser core knows no site: a connector imports only its own folder, t
 })
 
 /**
- * A site's map (`connector-maps/<site>/`, generalization PR 3) imports only its own folder and the repository's
- * shared/core; the opened lines (`browser-lines/`) only shared/core's types (they are data). Neither imports a connector,
- * another site's map or anything of the app; nothing in the app but the composition root imports them
- * (agent-browser.md "The first map and the inspection line").
+ * A site's map (`connector-maps/<site>/`, generalization PR 3) imports only its own folder, the repository's shared/core
+ * and — since PR 6 — **its own site's** connector folder (`connectors/<site>/`: map 1.0.2 reads a step's templates with
+ * the old path's checker unchanged, design memo §6 / §16-7 R3; that folder's fingerprint is part of the map's
+ * `readersHash`). The opened lines (`browser-lines/`) only shared/core's types (they are data). Neither imports another
+ * site's map or connector, or anything of the app; nothing in the app but the composition root imports them
+ * (agent-browser.md "The first map and the inspection line", "The write words and the first write line").
  */
 function mapMayImport(t: string, file: string, typeOnly: boolean): boolean {
   const r = rel(file)
   if (r.startsWith('browser-lines/')) return typeOnly && t.startsWith('../shared/core/')
   const site = r.split('/').slice(0, 2).join('/')
-  return t.startsWith(`${site}/`) || t.startsWith('../shared/core/')
+  const ownConnector = `connectors/${r.split('/')[1]}/`
+  return t.startsWith(`${site}/`) || t.startsWith(ownConnector) || t.startsWith('../shared/core/')
 }
 
 test('a site\'s map imports only its own folder and shared/core, the opened lines only core types, and only main.ts imports either', () => {
@@ -178,7 +181,10 @@ test('a site\'s map imports only its own folder and shared/core, the opened line
   assert.deepEqual(importers.filter(f => f !== 'electron/main.ts'), [], 'hand a site\'s map in from the composition root')
   // Self-tests: another site's map, a connector and the app's runner are not allowed.
   assert.equal(mapMayImport('connector-maps/other/x', join(CLIENT, 'connector-maps/lstep/a.ts'), false), false)
-  assert.equal(mapMayImport('connectors/lstep/x', join(CLIENT, 'connector-maps/lstep/a.ts'), false), false)
+  assert.equal(mapMayImport('connectors/other/x', join(CLIENT, 'connector-maps/lstep/a.ts'), false), false)
+  assert.equal(mapMayImport('connectors/lstep/x', join(CLIENT, 'connector-maps/lstep/a.ts'), false), true)
+  assert.equal(mapMayImport('connectors/lstep/x', join(CLIENT, 'browser-lines/lstep.ts'), true), false)
+  assert.equal(mapMayImport('shared/browser-runner', join(CLIENT, 'connector-maps/lstep/a.ts'), true), false)
   assert.equal(mapMayImport('../shared/core/browser-opened', join(CLIENT, 'browser-lines/lstep.ts'), false), false)
 })
 

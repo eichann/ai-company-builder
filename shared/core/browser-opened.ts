@@ -22,6 +22,7 @@
 import { isPlainBrowserText } from './plugin-browser-declaration'
 import { BROWSER_MAP_LIMITS, BROWSER_MAP_NAME_RE, type BrowserMap } from './browser-map'
 import { browserReadLineProblem, type BrowserReadLine } from './browser-read-line'
+import { browserLineWritesProblem, type BrowserLineWrite } from './browser-write-line'
 import { canonicalJson } from './fixed-content'
 
 /** Fields of one read the card shows (in this order). */
@@ -35,6 +36,11 @@ export interface BrowserOpenedLine {
   /** The card's title (Japanese, plain). */
   label: string
   read: BrowserReadLine
+  /**
+   * The writes (generalization PR 6, `browser-write-line.ts`): absent for an inspection (読むだけの点検). A line with writes
+   * is never made a plan by a build that cannot write it (the server refuses it, `BROWSER_LINE_WRITES_NOT_YET`).
+   */
+  writes?: readonly BrowserLineWrite[]
   /** The card's heading of each read (Japanese, plain): every read has one. */
   readLabels: Readonly<Record<string, string>>
   show: readonly BrowserLineShow[]
@@ -81,13 +87,18 @@ const exactKeys = (v: Record<string, unknown>, keys: readonly string[]): boolean
  * role allows, the must-hold parent named), a heading for every read and no other, shown fields the read's thing has.
  */
 export function browserOpenedLineProblem(raw: unknown, map: BrowserMap): string | null {
-  if (!isMap(raw) || !exactKeys(raw, ['name', 'version', 'label', 'read', 'readLabels', 'show'])) return '行の形が正しくありません'
+  const shape = ['name', 'version', 'label', 'read', 'readLabels', 'show']
+  if (!isMap(raw) || !(exactKeys(raw, shape) || exactKeys(raw, [...shape, 'writes']))) return '行の形が正しくありません'
   if (typeof raw.name !== 'string' || !BROWSER_MAP_NAME_RE.test(raw.name)) return '行の名前が正しくありません'
   if (typeof raw.version !== 'string' || !SEMVER_RE.test(raw.version)) return '行の版が正しくありません'
   if (!isPlainBrowserText(raw.label, BROWSER_OPENED_LIMITS.label)) return '行の見出しが正しくありません'
   const readProblem = browserReadLineProblem(raw.read, map)
   if (readProblem) return readProblem
   const line = raw.read as BrowserReadLine
+  if (own(raw, 'writes')) {
+    const writesProblem = browserLineWritesProblem(raw.writes, line, map)
+    if (writesProblem) return writesProblem
+  }
   const readNames = line.reads.map(r => r.name)
   const labels = raw.readLabels
   if (!isMap(labels) || !exactKeys(labels, readNames)) return '読むものの見出しは、読むものごとに1つです'
@@ -113,7 +124,12 @@ export function browserOpenedLineProblem(raw: unknown, map: BrowserMap): string 
 export function browserLineMeaning(line: BrowserOpenedLine, map: BrowserMap): string {
   if (browserOpenedLineProblem(line, map)) throw new Error('browserLineMeaning: the line does not open against the map')
   const things = [...new Set(line.read.reads.map(r => r.thing))].sort()
+  // A line's writes and a thing's write facts are part of what it means (memo §16-5: what it changes and who that
+  // reaches); added only where present, so an inspection's meaning (and its members' grants) stays what it was.
+  const writes = line.writes ? { writes: line.writes } : {}
+  const written = new Set((line.writes ?? []).map(w => (line.read.reads.find(r => r.name === w.read) as BrowserReadLine['reads'][number]).thing))
   return canonicalJson({
+    ...writes,
     site: line.read.site,
     name: line.name,
     values: line.read.values,
@@ -129,6 +145,7 @@ export function browserLineMeaning(line: BrowserOpenedLine, map: BrowserMap): st
         parent: t.parent ?? null,
         fields: Object.fromEntries(Object.entries(t.fields).map(([f, field]) => [f, { kind: field.kind, nullable: field.nullable === true }])),
         mustHold: { account: t.must_hold?.account === true, parent: t.must_hold?.parent === true, note: t.must_hold?.note !== undefined },
+        ...(written.has(name) ? { writes: t.writes ?? null, delivers: t.delivers ?? null } : {}),
       }]
     })),
   })
