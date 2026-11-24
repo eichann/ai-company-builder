@@ -11,11 +11,11 @@ import { Label } from '@/components/ui/label'
 import { departmentsApi } from '@/lib/api'
 import { useCompany } from '@/lib/company-context'
 import {
-  PC_JOB_MINUTES, SET_WATCH_DAY_LIMITS, SET_WATCH_NOT_RUN_NOTE, SET_WATCH_SEEN_NOTE, setWatchConditionLines, type JobForm,
+  PC_JOB_MINUTES, SET_WATCH_DAY_LIMITS, type JobForm,
 } from '@/lib/jobs'
 import { useQuery } from '@/lib/use-query'
 import { JOB_READ_SKILLS_MAX, JOB_SET_WATCH_OPENED } from '../../../../shared/core/jobs'
-import { jobCheckText, jobSetTriggerText } from '../../../../shared/core/job-words'
+import { SET_WATCH_NOT_RUN_NOTE, SET_WATCH_SEEN_NOTE, jobCheckText, jobSetTriggerText, setWatchConditionLines } from '../../../../shared/core/job-words'
 import { isValidFolderName } from '../../../../shared/core/names'
 
 const SELECT = 'rounded-control border bg-background px-2 py-1 text-body'

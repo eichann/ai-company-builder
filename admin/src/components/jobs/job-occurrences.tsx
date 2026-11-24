@@ -14,9 +14,8 @@ import { Button } from '@/components/ui/button'
 import { jobsApi, type JobOccurrenceView } from '@/lib/api'
 import { useCompany } from '@/lib/company-context'
 import { describeJobError } from '@/lib/errors'
-import { SET_WATCH_SEEN_NOTE } from '@/lib/jobs'
 import { useQuery } from '@/lib/use-query'
-import { jobMadeBeforeText, jobOccurrenceText, jobOperationKindText, jobRetryBlockText, jobSlotText } from '../../../../shared/core/job-words'
+import { SET_WATCH_SEEN_NOTE, jobMadeBeforeText, jobOccurrenceText, jobOperationKindText, jobRetryBlockText, jobSlotText } from '../../../../shared/core/job-words'
 
 type Asking =
   | { kind: 'retry'; occ: JobOccurrenceView }

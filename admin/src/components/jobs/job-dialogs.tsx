@@ -21,13 +21,13 @@ import { describeJobError } from '@/lib/errors'
 import { PROPOSAL_CLOSED_TEXT, proposalClosed, proposalVersionText } from '@/lib/job-proposals'
 import {
   JOB_EXPIRY_CHOICES, JOB_HOURS, JOB_MINUTES, JOB_VERSION_HIDDEN, definitionFromForm, editableDefinition, emptyJobForm, hiddenVersion, jobProblemText,
-  JOB_FORM_CANNOT_EDIT, SET_WATCH_NOT_RUN_NOTE, SET_WATCH_SEEN_NOTE, jobEditForm, needsNewerScreen, setWatchConditionLines, setWatchGrantLines, setWatchMissedText, setWatchTriggerText,
-  setWatchOverlaps, setWatchReadSkillsText, setWatchReasonLabels, setWatchSkillNames, switchJobForm, type JobForm,
+  JOB_FORM_CANNOT_EDIT, jobEditForm, needsNewerScreen, setWatchTriggerText, setWatchOverlaps, setWatchSkillNames, switchJobForm, type JobForm,
 } from '@/lib/jobs'
 import { useQuery } from '@/lib/use-query'
 import { JOB_NEEDS_NEWER_SCREEN, isRecordTrigger, isSetTrigger, type JobDefinition, type JobWeekday } from '../../../../shared/core/jobs'
 import {
-  JOB_EVENT_NOTE, jobCheckText, jobEventStateText, jobGrantLines, jobMissedText, jobPlacementText, jobRecordTriggerText, jobRunText, jobRunsText, jobTriggerText,
+  JOB_EVENT_NOTE, SET_WATCH_NOT_RUN_NOTE, SET_WATCH_SEEN_NOTE, jobCheckText, jobEventStateText, jobGrantLines, jobMissedText, jobPlacementText, jobRecordTriggerText,
+  jobRunText, jobRunsText, jobTriggerText, setWatchConditionLines, setWatchGrantLines, setWatchMissedText, setWatchReadSkillsText, setWatchReasonLabels,
 } from '../../../../shared/core/job-words'
 
 const personName = (m: { name: string | null; email: string | null } | undefined) => (m ? m.name || m.email || '名前未設定' : 'もういない人')
@@ -83,6 +83,7 @@ export function JobFormDialog({ job, members, defaultActingUser, onClose, onSave
             key={job ? `${job.id}:${newestVersion?.version ?? 0}` : 'new'}
             initial={editForm ?? emptyJobForm(defaultActingUser)}
             baseVersion={proposal ? newestVersion?.version : undefined}
+            fromProposal={proposal !== null}
             newJob={job === null}
             members={members}
             onCancel={onClose}
@@ -113,13 +114,19 @@ function Row({ label, children }: { label: string; children: ReactNode }) {
   )
 }
 
-export function JobFormFields({ initial, baseVersion, newJob, members, onCancel, onSubmit }: {
+export function JobFormFields({ initial, baseVersion, fromProposal = false, newJob, members, onCancel, onSubmit }: {
   initial: JobForm
   /**
    * A proposal's job: the version this form was built from, kept as it was when the form was made and sent back with the
    * edit (`baseVersion`), so the server's stale check compares with what the person edited — never a version read later.
    */
   baseVersion?: number
+  /**
+   * A job from a member's proposal of any shape (schema 4 from the chat, schema 5 — a set watch — from the app, 4b-4 PR6b): it
+   * runs as its proposer and keeps the shape it was proposed in, so neither 責任者 nor 「いつ動くか」 is offered (the server
+   * refuses both: `JOB_RESPONSIBLE_FIXED`, `JOB_PROPOSAL_SCHEMA`). A schema-4 version says so itself (`form.proposal`).
+   */
+  fromProposal?: boolean
   /** A new job (not a version being edited): only then does becoming an event run by the PC take the one-day default. */
   newJob: boolean
   members: Member[]
@@ -135,6 +142,7 @@ export function JobFormFields({ initial, baseVersion, newJob, members, onCancel,
   const [problem, setProblem] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const set = <K extends keyof JobForm>(k: K, v: JobForm[K]) => setF((prev) => ({ ...prev, [k]: v }))
+  const proposed = f.proposal || fromProposal
   // An event job's first watched やること: the responsible person's open ones that this console's user reads (the server
   // checks again that both of them read it).
   // Searched by name and paged (a member may have many open やること).
@@ -174,7 +182,7 @@ export function JobFormFields({ initial, baseVersion, newJob, members, onCancel,
       <Row label="名前">
         <Input aria-label="名前" value={f.name} onChange={(e) => set('name', e.target.value)} placeholder="例：週の報告" />
       </Row>
-      {f.proposal ? (
+      {proposed ? (
         // A member's proposal runs as its proposer, always (owner decision 2026-11-22): not offered, said as such.
         <Row label="責任者（案を出した人）">
           <span aria-label="責任者">{personName(members.find((m) => m.userId === f.actingUser))}（案を出した人のままです。変えられません）</span>
@@ -187,7 +195,7 @@ export function JobFormFields({ initial, baseVersion, newJob, members, onCancel,
         </select>
       </Row>
       )}
-      {!f.proposal && (
+      {!proposed && (
       <Row label="いつ動くか">
         <select aria-label="いつ動くか" className={SELECT} value={f.when}
           onChange={(e) => setF((prev) => switchJobForm(prev, { when: e.target.value as JobForm['when'] }, newJob))}>

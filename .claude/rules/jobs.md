@@ -1757,8 +1757,14 @@ not make jobs members' apps cannot run).
     never later either, and the responsible person alone is told once, no meeting, no count), the trigger as 「責任者が担当の…」
     (`setWatchTriggerText`: the shared sentence's 「自分」 is the responsible person's view, never the admin reading it),
     見える人 (`SET_WATCH_SEEN_NOTE`: attendees only, never an admin who did not attend) and the wait
-    (`setWatchMissedText`). These sentences live in `admin/src/lib/jobs.ts` until the app's 受け取る (PR6) needs them; then they
-    move to `job-words.ts` (one copy). A combination not opened is described only as 「説明できない条件」.
+    (`setWatchMissedText`). These sentences are the one copy in `shared/core/job-words.ts` (PR6 moved them; the console imports
+    them — the app's 受け取る says the same); only `setWatchTriggerText` is the console's own. A combination not opened is
+    described only as 「説明できない条件」.
+  - **A set watch a member proposed** (PR6b, "Member proposals" "A set watch from the app"): the same words, the 「届いた案」 card and
+    the approval's 版の出どころ; its edit form (`JobFormFields` `fromProposal`: a job with `proposal`, of any schema) offers neither
+    責任者 nor 「いつ動くか」 (the server refuses both) and sends schema 5 with `baseVersion`; the app's shape (no read places,
+    `.personal/たたき台/`, 30 minutes, 10 a day) round-trips exactly. Its proposer accepts in the app, as every proposal's (an
+    owner / admin's own set watch they made here is accepted here, as other shapes).
   - **Overlap warnings** (`setWatchOverlaps`, the approval): another job of this shape that is active and approved with the same
     responsible person (from the list the page read; a paused one does not count, as on the server), and a business plugin
     step set to one of its Skills by name (each installed plugin's `…/step-skills`; a plugin whose steps cannot be read is
@@ -1770,8 +1776,9 @@ not make jobs members' apps cannot run).
     「あなたに見える回はまだありません」 when none is shown, and 回の記録 says `SET_WATCH_SEEN_NOTE` (an empty list for an admin who did
     not attend is 「あなたに見える回はありません」, never read as 「動いていない」). A company without the shared folder is not offered
     a set watch (it has no department Skills; the server refuses `JOB_SKILL_NOT_HERE`).
-  - Test: `admin/tests/jobs.test.tsx` "a set watch" and `admin/tests/job-screen-schemas.test.ts` (schema 5: the smallest and
-    one with every choice round-trip). Mutation check: 27 guards removed or inverted one at a time (the announced `5`, reading
+  - Test: `admin/tests/jobs.test.tsx` "a set watch", `admin/tests/job-proposals.test.tsx` "a set watch a member proposed from the
+    app" and `admin/tests/job-screen-schemas.test.ts` (schema 5: the smallest and one with every choice round-trip). The
+    proposal's fixed 責任者 / 「いつ動くか」 (`fromProposal`) fails a test when removed. Mutation check: 27 guards removed or inverted one at a time (the announced `5`, reading
     a schema-5 definition, a set watch always `pc`, the new job's limits and missed policy, a combination not opened refused,
     the round-trip for schema 5 and leaving out the trees and the reasons, the condition lines only for an opened combination,
     same person / step name in the overlaps, the step reads' failure kept per plugin, the jobs handed to the approval, the

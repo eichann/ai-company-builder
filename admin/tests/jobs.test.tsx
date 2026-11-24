@@ -16,10 +16,10 @@ import { ApiError } from '@/lib/api'
 import { JOB_REFUSED_GENERAL, describeJobError } from '@/lib/errors'
 import {
   DELIVERY_PLACE_CHOICES, JOB_FORM_CANNOT_EDIT, JOB_VERSION_HIDDEN, jobEditForm, definitionFromForm, editableDefinition, emptyJobForm, formFromDefinition, hiddenVersion, jobProblemText, needsNewerScreen,
-  SET_WATCH_SEEN_NOTE, setComboOf, setWatchTriggerText, setWatchConditionLines, setWatchOverlaps, switchJobForm,
+  setComboOf, setWatchTriggerText, setWatchOverlaps, switchJobForm,
 } from '@/lib/jobs'
 import { JOB_EVENT_PC_EXPIRES_DEFAULT_MINUTES, JOB_SET_WATCH_OPENED, jobConsentCanonical, type JobDefinition, type JobSetTrigger } from '../../shared/core/jobs'
-import { jobSetTriggerText } from '../../shared/core/job-words'
+import { SET_WATCH_SEEN_NOTE, jobSetTriggerText, setWatchConditionLines } from '../../shared/core/job-words'
 import { base, companyRoutes, renderInCompany } from './company-harness'
 import { company, managerCapabilities, ok } from './fixtures'
 import { mockApi } from './mock-api'

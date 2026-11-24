@@ -14,7 +14,7 @@ import {
 } from '../../../shared/core/jobs'
 import { BUILTIN_CONNECTORS, type DeliveryPlaceKind } from '../../../shared/core/builtin-connectors'
 import { canonicalJson } from '../../../shared/core/fixed-content'
-import { jobGrantLines, jobMinutesText, jobSetTriggerText } from '../../../shared/core/job-words'
+import { jobSetTriggerText } from '../../../shared/core/job-words'
 import { DELIVERABLE_FOLDER_MAX } from '../../../shared/core/plugin-step-runs'
 
 /**
@@ -523,50 +523,11 @@ export function jobProblemText(problems: string[]): string {
   return '内容に正しくないところがあります。選び直してください。'
 }
 
-/**
- * A set watch's words for the approval and an owner/admin's own 受け取る (4b-4 PR7, owner memo 「4b-4」 §2 / §3 / §5 / §6):
- * what of the consent the shared words (`jobTriggerText`, `jobRunText`, `jobCheckText`, `jobGrantLines`) do not say yet —
- * which records it takes and which it never does, the Skills read, the reasons the Skill judges by, who sees its
- * occurrences. Kept here until the app's 受け取る (PR6) needs the same sentences; then they move to `job-words.ts` (one copy).
- * Said only for an opened combination: one that is not is described by `jobSetTriggerText` as such, never as this one.
+/*
+ * A set watch's consent words (conditions, notes, grant lines, read Skills, reasons) are one copy in
+ * `shared/core/job-words.ts` (moved there by 4b-4 PR6), read by the approval, an owner/admin's own 受け取る and the app's 受け取る
+ * alike. Only what an owner / admin reads differently is here.
  */
-const SET_WATCH_GUARD_WORDS: Record<string, string> = {
-  people_only_meeting: '出た人だけが見られる会議だけ（2026年11月4日より前の、フォルダつきの会議は対象外）',
-  attendee_responsible: '責任者がその会議に出ていて（または担当で）、今もその会議を読めるときだけ',
-  outside_attendee: '社外の人が1人以上出た会議だけ（社内だけの会議では AI を動かしません）',
-  after_acceptance: '責任者が受け取ったあとに、AI が初めて読み終えた会議と、そのあと作られた「議事録を確認する」だけ（受け取る前に読み終えた会議では動きません）',
-  plugin_step_exclusive: '同じ Skill を業務プラグインの手順で自動で動かしていないこと（同じ会議で、手順の頼みが開いているか動いているときは見送ります）',
-}
-
-/** The lines of 「どれで動くか」 for an opened set watch: the counted causes, the assignee, the event, the unit and each guard. */
-export function setWatchConditionLines(trigger: JobSetTrigger): string[] {
-  if (setComboOf(trigger) < 0) return []
-  return [
-    '人（と、その人の相談の中の AI）が完了したときだけ。定期の仕事・「AI の番」・業務の画面・取り込みでの完了では動きません',
-    '作られたときから責任者が担当の「議事録を確認する」だけ（途中で担当になったものでは動きません）',
-    'その「議事録を確認する」の一生で初めての完了だけ（開き直してまた完了しても動きません）',
-    '1つの会議につき1回だけ（仕事を直しても作り直しても、同じ会議で二度は動きません）',
-    ...trigger.guards.map(g => SET_WATCH_GUARD_WORDS[g] ?? 'この画面では説明できない条件があります（画面を新しくしてください）'),
-  ]
-}
-
-/** When it does not run although the person expected it (memo §2-2 「うまくいかない場面」), said on every screen of it. */
-export const SET_WATCH_NOT_RUN_NOTE =
-  '動くのは、［AI に読ませる］を押した人（「議事録を確認する」の担当）の仕事だけです。上司やアシスタントが押した会議、Google をつないでいない・別のアドレスで招待された会議、途中で担当を変えた会議では動きません。動かなかった会議の提案書などは、責任者が普通の AI相談で作れます。'
-
-/** Who sees its occurrences (memo §2-5, I8): never an owner / admin who did not attend. */
-export const SET_WATCH_SEEN_NOTE =
-  'この仕事の回・知らせ・件数・理由は、その会議を今読めて、会議に出た人（または担当）にだけ見えます。会議に出ていない管理者には、回の記録にも出てきません。'
-
-/** The day's limit of a set watch (memo §2-4 / O6, Q2). */
-export function setWatchDayLimitText(runsPerDay: number): string {
-  return `1日 ${runsPerDay}回まで。超えた会議では動かさず（その会議は、あとからも動きません）、その日1回だけ責任者に知らせます（会議の名前や件数は書きません）`
-}
-
-/** A missed occurrence of a set watch: the responsible person's app was not open in time. */
-export function setWatchMissedText(expiresAfterMinutes: number): string {
-  return `完了のあと${jobMinutesText(expiresAfterMinutes)}のうちに責任者のアプリで動けなかったときは見送ります`
-}
 
 /**
  * The trigger as an owner / admin reads it: the shared sentence says 「自分が担当の…」 (the responsible person's view, as the app
@@ -574,32 +535,6 @@ export function setWatchMissedText(expiresAfterMinutes: number): string {
  */
 export function setWatchTriggerText(trigger: JobSetTrigger): string {
   return jobSetTriggerText(trigger).replace(/^自分が担当の/, '責任者が担当の')
-}
-
-/**
- * The grant's lines for a set watch (independent review of PR7): the shared `jobGrantLines` speak of a time / event job, so
- * three of its lines are said as the set watch's grant is: `records` only makes the one やること (its only route is the minutes
- * one), the minutes are the triggering meeting's only, and the day's limit says what happens beyond it.
- */
-export function setWatchGrantLines(grant: JobGrant): string[] {
-  return jobGrantLines(grant).flatMap((line) => {
-    if (line.startsWith('道具：やること・記録を読む')) return ['道具：終わったときに、責任者だけに見えるやることを1つ作る（やることや記録は読みません）']
-    if (line.startsWith('議事録：')) return ['議事録：動くきっかけになった会議の議事録だけ読む']
-    if (line.startsWith('使える操作：')) return []
-    if (line.startsWith('上限：')) return [`上限：1回 ${jobMinutesText(grant.limits.minutes)}・${setWatchDayLimitText(grant.limits.runsPerDay)}`]
-    return [line]
-  })
-}
-
-/** The Skills its AI reads besides the one it runs, as 「「部署」の Skill「名前」」. */
-export function setWatchReadSkillsText(d: JobDefinition): string | null {
-  const pins = d.grant.reads.skills ?? []
-  return pins.length === 0 ? null : pins.map(p => `「${p.place}」の Skill「${p.skill}」`).join('・')
-}
-
-/** The reasons the Skill judges by (its `decision.json`, pinned by the server), by their labels. */
-export function setWatchReasonLabels(d: JobDefinition): string[] {
-  return (d.decision?.reasons ?? []).map(r => r.label)
 }
 
 /** The Skill names a set watch runs or reads: what the server matches a business plugin's step setting against. */
