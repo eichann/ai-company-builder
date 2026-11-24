@@ -1666,12 +1666,19 @@ runs it** ("The app runs it" below; no screen announces schema 5 yet — that, a
   - **Reads** (`setWriteArea`, the write guard's `readArea` + `readOutside`, `chat-write-guard.md`): the grant's read paths,
     `<place>/.personal/<folder>/` whole (earlier proposals, read only), and the copy — the one folder outside the company folder,
     as written and as resolved (another run's copy, the app's other data, a link out of the copy: refused, 4-T26). Claude Code
-    gets the copy as `additionalDirectories` (`unattended.readDirs`).
+    gets the copy as `additionalDirectories` (`unattended.readDirs`). **Nothing in an agent folder of the company folder is read**
+    (`…/.claude/…`, `.agents/…`), whatever the read places name, and a Glob / Grep may neither name one in its pattern nor
+    search a root that holds one (looked for on disk, bounded, unsure → refused): the pinned copy is the only Skill source (I9;
+    independent review M1, Codex). **The AI action log** (`agent-events.md`) names `<place>/.personal/<folder>` only, never what is
+    below it (`unnamedBelow` on the turn's tool-event context: the run folders are named after customers; review H1).
   - **Writes only in the run folder** (I1, 4-T6 / T12 / T21 / T23): `proposal_folder { company, meetingDate? }` makes
     `<place>/.personal/<folder>/<YYYY-MM-DD>_<company>` (`runFolderName`: the department folder rule, other characters `_`,
     ≤ 30; the day the AI gives, else the event's local day) **new for each claim** — `_2`, `_3`… when the name is taken, never
     reused; asked again in the same claim, the same folder — with `.acb-job.json` (occurrence, run, generation only) and a PC
-    record `working`. Before it is made nothing is writable; afterwards only that folder (`writeArea.run`, read live).
+    record `working` (`.personal` and the proposals folder are made one level at a time, only where nothing is and never through
+    a link — Codex). Before it is made nothing is writable; afterwards only that folder (`writeArea.run`, read live), never
+    its mark `.acb-job.json` (the app's). The run's two tools answer one call at a time (two at once never make two folders or
+    finish twice). The same Skill pinned twice (the procedure also read) is copied once; two versions of one Skill: not here.
   - **The report** (`job_report { decision, reason, confidence, unconfirmed?, evidence? }`, only in that consultation; the
     time job's `job_report` is not offered there), in this order before anything is sent (B2): ① the reason against the pinned
     list and the server's own parser (`parseJobSetReport`), every `evidence` quote found in the minutes this run read
@@ -1679,7 +1686,7 @@ runs it** ("The app runs it" below; no screen announces schema 5 yet — that, a
     quote without minutes read, or another meeting's, is refused: I7, 4-T9); ② 進める / 人に聞く: the four files there
     (`SET_WATCH_DRAFT_FILES`, plain non-empty files), the draft's images copied (`assets/<name>` only when the name is a plain
     one the pinned `tools/assets/` lists; into the run folder's own `assets/` — a real folder, never a link —, never over a
-    file there: 4-T22 / T24); the update proposals counted from `更新案.json` (below); ③ the PC record
+    file there: 4-T22 / T24; an image that cannot be copied for any other reason stops the report, nothing sent); the update proposals counted from `更新案.json` (below); ③ the PC record
     (`<userData>/job-set-runs/<company>/<occurrence>/<run>.<generation>.json`: decision, reason, confidence, unconfirmed,
     evidence, images, folder, `updates`, `updatesFile`, `minutesDocVersion`) written through a temporary file and a rename and
     **read back** — not kept → nothing is sent, the AI is told 「この PC に結果を書き残せなかった…」 and settle gives the run back
@@ -1698,7 +1705,11 @@ runs it** ("The app runs it" below; no screen announces schema 5 yet — that, a
     (`minutesDocVersion`); null when the run read no minutes or the answer did not say — PR6 then says 「確かめられません」, never
     「変わっていません」.
   - **A lost answer** (B2 ④): a record left `sending` is looked at on each listing (≤ 5 a pass): the run (`GET /ai-runs/:runId`)
-    at a later generation → `not_adopted`; `done` at this generation → `sent`; anything else stays `sending`. **Known gap**: a
+    at a later generation → `not_adopted`; `done` at this generation → `sent`; given back or waiting for a person at this
+    generation (`open`, `retry_later`, `waiting_person`, `waiting_setup`) → `refused` (the completion never landed); running or
+    waiting to be reconciled → still `sending`. Looked at beside the listing (only after a 200, never in its way, one pass a
+    company at a time), each record at most every `RECONCILE_AGAIN_MS` (10 min), so stuck ones never hold the rest back. A run
+    taken away while its files were checked writes `refused`, never `sending`. **Known gap**: a
     「もう一度」 pressed after the lost answer also closes this generation `done`; the server does not yet say which finish it took
     (B2's "the finished generation on the run's answer" is a server follow-up).
   - **What the person can be shown** (for PR6; nothing here is a screen): per run on this PC, its record's state — `working` (the

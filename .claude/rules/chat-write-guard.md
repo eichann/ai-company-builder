@@ -75,7 +75,9 @@ the safety net. Full text: `docs/architecture/chat-and-agents.md` (internal).
   `RUN_FOLDER_FIRST_MESSAGE`), then only `<place>/.personal/<folder>/<run>/…` as written and as resolved (read live: the
   area object is main's, so the guard built at the turn's start sees the folder once made) — and `writeArea.readOutside`,
   the one folder outside the company folder its file tools may read (the pinned Skills' copy in the app's data; as written
-  and as resolved, so a link inside it leads nowhere; Claude Code gets it as `additionalDirectories`). Test:
+  and as resolved, so a link inside it leads nowhere; Claude Code gets it as `additionalDirectories`). With it, nothing in an
+  agent folder of the company folder (`.claude/`, `.agents/`) is read, by a path, a Glob / Grep pattern or a search root that
+  holds one; the run folder's mark `.acb-job.json` is never written. Test:
   `client/tests/job-set-watch-run.test.ts` (mutation-checked).
 - Checked first, regardless of write access: a folder **not downloaded** on this computer
   (`WriteGuard.getNotDownloaded`) →

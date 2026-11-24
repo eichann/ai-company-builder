@@ -540,3 +540,36 @@ test('review: a lost answer whose run went back at this generation is `refused`;
   assert.equal(copy!.skills.length, 1)
   assert.equal(await fs.makeCopy(COMPANY, OCC, 8, c.root, [pin, { ...pin, fingerprint: c.origTree }]), null)
 })
+
+test('codex review: no search reaches a working-tree Skill; nothing is made through a `.personal` link; an image that cannot be copied stops the report', async () => {
+  const c = company()
+  const { claims } = await claimed(c, fakeServer(c))
+  const area = claims.jobWriteArea('conv-set-00001')!
+  const guard: WriteGuard = { root: c.root, getAccess: () => undefined, writeArea: area, readArea: [DEPT] }
+  const dept = path.join(c.root, DEPT)
+  assert.equal(decideToolWrite(guard, 'Grep', { path: path.join(dept, '.claude'), pattern: '.', output_mode: 'content' }, c.root).deny, true)
+  assert.equal(decideToolWrite(guard, 'Glob', { path: dept, pattern: '.claude/skills/**/*.md' }, c.root).deny, true)
+  assert.equal(decideToolWrite(guard, 'Grep', { path: dept, pattern: '提案' }, c.root).deny, true)
+  assert.equal(decideToolWrite(guard, 'Grep', { path: path.join(dept, '提案書'), pattern: '提案', glob: '*.md' }, c.root).deny, false)
+  assert.equal(decideToolWrite(guard, 'Grep', { path: path.join(dept, '提案書'), pattern: '提案', glob: '../.claude/**' }, c.root).deny, true)
+  // `.personal` is a link out: nothing is made there.
+  const d = company()
+  const outside = path.join(d.tmp, 'outside')
+  mkdirSync(outside)
+  symlinkSync(outside, path.join(d.root, DEPT, '.personal'))
+  const t = await claimed(d, fakeServer(d))
+  assert.ok(JSON.parse(await t.claims.jobSetTools('conv-set-00001')!.execute('proposal_folder', { company: 'A社' })).error)
+  assert.deepEqual(readdirSync(outside), [])
+  // assets that cannot be written: the report stops, nothing is sent.
+  const e = company()
+  const server = fakeServer(e)
+  const x = await drafted(e, server)
+  mkdirSync(path.join(x.run, 'assets'))
+  chmodSync(path.join(x.run, 'assets'), 0o555)
+  try {
+    assert.match(JSON.parse(await x.tools.execute('job_report', REPORT)).error, /assets/)
+    assert.deepEqual(finishes(server), [])
+  } finally {
+    chmodSync(path.join(x.run, 'assets'), 0o755)
+  }
+})

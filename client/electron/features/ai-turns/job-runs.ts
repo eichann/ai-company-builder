@@ -618,7 +618,7 @@ export function createJobRuns(deps: JobRunDeps) {
             const absent = await fs.missingDraftFiles(run)
             if (absent.length > 0) return `この実行のフォルダに ${absent.join('・')} がありません。作ってから、もう一度 job_report を呼んでください。`
             const copied = await fs.copyDraftImages(run, set.copy)
-            if (copied === null) return 'この実行のフォルダの assets に画像を置けませんでした。assets というファイルやリンクを作らずに、もう一度 job_report を呼んでください。'
+            if (copied === null) return 'この実行のフォルダの assets に画像を置けませんでした（assets がファイルやリンクになっているか、書き込めません）。assets というファイルやリンクを作らずに、もう一度 job_report を呼んでください。'
             images = copied
           }
           // The update proposals (§G, S9): counted by the app from the one file, only when it is the fixed shape. Told once to fix

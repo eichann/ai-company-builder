@@ -481,7 +481,9 @@ the server: `agent-events.md` ("Sending from the app").
   as `unfinished`.
 - **Metadata only.** `describeTarget` is the only reader of a tool input: company-relative NFC
   paths (outside the company only `{ kind: 'outside' }`, plus `sensitive`: ssh / env-file /
-  keychain / credentials / app-data — never the path), program name + subcommand for a short
+  keychain / credentials / app-data — never the path; below a folder the turn's context names in
+  `unnamedBelow` — a set watch's proposals folder, whose run folders carry customers' names,
+  `jobs.md` "The set watch" — only that folder), program name + subcommand for a short
   allowlist (git, npm, pnpm, yarn, bun, pip, uv, brew, docker, gh, cargo, go; `python -m <module>`;
   `npx <package>`; `sh -c '…'` is read inside), `redirect: true` for `>` / `>>` / `&>` / `tee`,
   the hosts of URLs a command names (`hosts`, never the path or query),

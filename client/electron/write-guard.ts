@@ -64,7 +64,7 @@ import { FULL_ACCESS_ROLES } from '../../shared/core/permissions'
 import { insideDeliverableAt } from '../../shared/core/plugin-step-runs'
 import { managedShelfPath } from '../shared/skill-shelf'
 import { SET_WATCH_RUN_MARK } from '../shared/ai-turn-steps/set-watch'
-import { existsSync, readFileSync, realpathSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync, realpathSync, type Dirent } from 'node:fs'
 import path from 'node:path'
 import type { GuardReason } from '../shared/agent-events'
 
@@ -191,10 +191,33 @@ export function runFolderMessage(place: string, folder: string, run: string): st
   return `この定期の仕事で AI がファイルを保存できるのは「${place}/.personal/${folder}/${run}/」の中だけです（この実行のフォルダ。ほかの提案書のフォルダは書き換えられません）。`
 }
 
-/** A Skill folder of the company folder (`…/.claude/skills/…`, `.agents/skills/…`), as the disk folds names. */
+/** A search pattern that names an agent folder (`.claude`, `.agents`) anywhere. */
+function mentionsAgentFolder(pattern: string): boolean {
+  const k = diskKey(pattern.normalize('NFC'))
+  return k.includes('.claude') || k.includes('.agents')
+}
+
+/** Whether a folder holds an agent folder (`.claude`, `.agents`) at any depth, bounded; unsure → true (fail closed). */
+function holdsAgentFolder(abs: string): boolean {
+  let seen = 0
+  const stack = [abs]
+  while (stack.length > 0) {
+    const dir = stack.pop() as string
+    let entries: Dirent[]
+    try { entries = readdirSync(dir, { withFileTypes: true }) } catch { if (dir === abs) return false; continue }
+    for (const e of entries) {
+      if (++seen > 20_000) return true
+      const k = diskKey(e.name.normalize('NFC'))
+      if (k === '.claude' || k === '.agents') return true
+      if (e.isDirectory() && k !== '.git' && k !== 'node_modules') stack.push(path.join(dir, e.name))
+    }
+  }
+  return false
+}
+
+/** In an agent folder of the company folder (`…/.claude/…`, `.agents/…`: Skills and agent config), as the disk folds names. */
 function isSkillTreePath(rel: string): boolean {
-  const segs = rel.split('/').map(s => diskKey(s.normalize('NFC')))
-  return segs.some((s, i) => (s === '.claude' || s === '.agents') && segs[i + 1] === 'skills')
+  return rel.split('/').some(s => { const k = diskKey(s.normalize('NFC')); return k === '.claude' || k === '.agents' })
 }
 
 /** `<place>/.personal/<folder>/<run>/.acb-job.json`: the run folder's mark. */
@@ -556,6 +579,13 @@ export function checkReadArea(guard: WriteGuard, toolName: string, toolInput: Re
   if (rel === null || real === null) return refused(target)
   // A set watch reads its Skills from the pinned copy only (I9): never a Skill folder of the company folder, whatever its places.
   if (outside !== undefined && (isSkillTreePath(rel) || isSkillTreePath(real))) return refused(rel)
+  // …nor through a search below a read place (Codex review): Glob / Grep may not name a Skill folder in their pattern, and their
+  // root may hold none (looked for on disk, bounded; unsure → refused).
+  if (outside !== undefined && (toolName === 'Glob' || toolName === 'Grep')) {
+    const patterns = [toolInput?.pattern, toolInput?.glob].filter((v): v is string => typeof v === 'string')
+    if ((toolName === 'Glob' && patterns.some(mentionsAgentFolder)) || (toolName === 'Grep' && typeof toolInput?.glob === 'string' && mentionsAgentFolder(toolInput.glob))) return refused(rel)
+    if (holdsAgentFolder(path.join(realpathSync(guard.root), ...real.split('/')))) return refused(rel)
+  }
   const inside = (p: string) => places.some(place => isSameOrAncestorPath(pathKey(place), pathKey(p)))
     || (guard.writeArea !== undefined && !('nowhere' in guard.writeArea) && insideDeliverableAt(p, guard.writeArea.place ?? null, guard.writeArea.folder))
   return inside(rel) && inside(real) ? { deny: false } : refused(rel)

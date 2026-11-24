@@ -180,8 +180,14 @@ export function createSetWatchFs(deps: SetWatchFsDeps) {
     const root = await realpath(companyRoot).catch(() => null)
     if (!root) return null
     if (!(await departmentHere(root, place))) return null
+    // `.personal` and the proposals folder: each made only where nothing is, never through a link (Codex review: a recursive
+    // mkdir would have made a folder where a link pointed before the check refused it).
     const base = path.join(root, place, '.personal', folder)
-    await mkdir(base, { recursive: true }).catch(() => {})
+    for (const dir of [path.join(root, place, '.personal'), base]) {
+      const s = await lstat(dir).catch(() => null)
+      if (s && (!s.isDirectory() || s.isSymbolicLink())) return null
+      if (!s && !(await mkdir(dir).then(() => true, (e: NodeJS.ErrnoException) => e.code === 'EEXIST'))) return null
+    }
     const realBase = await realpath(base).catch(() => null)
     if (!realBase || diskKey(realBase) !== diskKey(base)) return null
     for (let i = 1; i <= 99; i++) {
@@ -246,7 +252,11 @@ export function createSetWatchFs(deps: SetWatchFsDeps) {
         await copyFile(from, to, fsConstants.COPYFILE_EXCL)
         await chmod(to, 0o644).catch(() => {})
         copied.push(name)
-      } catch { /* there already (never overwritten), or not copied */ }
+      } catch (e) {
+        // There already: never overwritten, fine. Any other failure (disk full, permissions): the draft is not whole — nothing
+        // is sent (Codex review).
+        if ((e as NodeJS.ErrnoException).code !== 'EEXIST') return null
+      }
     }
     return copied
   }
