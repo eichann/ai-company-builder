@@ -647,6 +647,12 @@ consultation, claim / hold / renew / finish (`claims.ts`), the same unattended C
   `job_report` always; Claude Code's file tools only for `files_read` / `files_write`. **No key broker pass** (owner
   decision D3): the chat server asks no broker token for a turn with a step ceiling, so a job's AI has no relay
   variables (`key-broker.md` "Unattended turns get no pass").
+  **The turn's start asks no route outside the grant**: a connector's tools are made for a job run only when its grant puts
+  into that connector's place (`recordToolProviders`' `jobDelivery`, from the held run's `deliverTo`) — Google Drive's
+  provider asks `GET /google/drive/status` first, which the server refuses `NOT_IN_STEP` for a run with no Drive place, and
+  that refusal ends the run (`jobRunGoneOnCall`, "Fail closed"). Staging 2026-11-25: every set watch's turn (no place
+  outside) was stopped `job-ended` as it started, again and again. Test: `job-set-watch-run.test.ts` 「staging 2026-11-25…」
+  (main's wiring of the records API's `onRunRefused`, the providers and the record tools; fails without the check).
 - **Writes and reads** (`jobWriteArea` → the write guard, `chat-write-guard.md`): writes only under
   `<place>/.personal/<folder>/` of the grant (`insideDeliverableAt`), or nowhere (`NOWHERE_TO_WRITE_MESSAGE`); Claude
   Code's reads (Read, Glob, Grep) only inside the grant's read paths or that area, as written and as resolved

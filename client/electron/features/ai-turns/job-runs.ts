@@ -174,6 +174,8 @@ interface Held {
   hold: HoldHandle | null
   /** A set watch's run (4b-4 PR5); absent for every other job. */
   set?: HeldSet
+  /** The connector of the deliverable place outside its responsible person chose; null: none (its token reaches no connector). */
+  deliversWith: string | null
 }
 
 /** What main holds for a set watch's run (4b-4 PR5). */
@@ -414,7 +416,7 @@ export function createJobRuns(deps: JobRunDeps) {
       const serverMs = (v: unknown) => (typeof v === 'string' && !Number.isNaN(Date.parse(v)) ? Date.parse(v) : null)
       const serverNow = serverMs(run.updatedAt)
       const offset: ClockOffset | null = serverNow !== null ? { min: serverNow - claimedAt, max: serverNow - sentAt } : null
-      const held: Held = { companyId, occurrenceId, runId: run.id, access: { allowsRecordTool: () => false, builtinTools: [] }, area: { nowhere: true, reads: [] }, reported: null, timedOut: false, lost: false, timer: null, hold: null }
+      const held: Held = { companyId, occurrenceId, runId: run.id, access: { allowsRecordTool: () => false, builtinTools: [] }, area: { nowhere: true, reads: [] }, reported: null, timedOut: false, lost: false, timer: null, hold: null, deliversWith: null }
       // Taken away by the server (a pause, the company's stop, the time limit, another PC, a condition of an event that
       // failed), or not confirmed by it for too long (fail closed): the AI stops here too.
       held.hold = deps.hold(companyId, occurrenceId, conversationId, { id: run.id, generation: run.generation }, () => {
@@ -482,6 +484,7 @@ export function createJobRuns(deps: JobRunDeps) {
       const left = deadlineMs - JOB_STOP_BEFORE_MS - now()
       if (left <= 0) { dropSet(); return giveUp({ class: 'bad-input', code: 'TIME_LIMIT' }) }
       held.access = jobToolAccess(turn.grant, turn.check, turn.deliverTo)
+      held.deliversWith = turn.deliverTo?.connector ?? null
       held.area = set ? setWriteArea(set, turn.grant) : jobWriteArea(turn.grant)
       if (set) held.set = set
       held.timer = setTimeout(() => {
@@ -537,6 +540,16 @@ export function createJobRuns(deps: JobRunDeps) {
       // Past its stop time (also when the stop came before the turn was tracked, so it stopped nothing): no ceiling, and
       // the chat server's re-check after tracking stops the turn (review of 4b-2).
       return h && step === JOB_PC_STEP && live(h) && !h.timedOut ? h.access : null
+    },
+
+    /**
+     * Whether a job run's consultation is held here (`run`) and which connector its deliverable place outside is of (null:
+     * none); null when the consultation is not a job run's. The turn's tools ask a connector only when its grant names it:
+     * any other route of the run's token is refused `NOT_IN_STEP`, which ends the run (jobs.md "Fail closed").
+     */
+    deliveryOf(conversationId: string): { connector: string | null } | null {
+      const h = byConversation.get(conversationId)
+      return h ? { connector: h.deliversWith } : null
     },
 
     /** Where a job run's consultation may write; null when it is not one. */

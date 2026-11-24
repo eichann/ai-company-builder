@@ -488,6 +488,8 @@ test('the tool providers give a job run\'s consultation its area (main\'s held r
     toolProviders: recordToolProviders({
       drivePicking: pick.p, paths: roots, privateFolders: { readable: () => [] },
       jobWriteArea: c => (c === 'conv-job' ? { place: '営業部', folder: 'reports', reads: [] } : null),
+      // A job whose grant puts into a Drive folder (jobs.md "A deliverable place outside").
+      jobDelivery: c => (c === 'conv-job' ? { connector: 'google' } : null),
     }, { companyId: 'co', companyRoot: root, conversationId }),
   })
   const job = (await make('conv-job'))!

@@ -782,6 +782,8 @@ app.whenReady().then(async () => {
       jobWriteArea: conversationId => aiTurnClaims.jobWriteArea(conversationId),
       // …a set watch's run folder and judgement (4b-4 PR5), and the minutes its quotes are checked against.
       jobSetTools: conversationId => aiTurnClaims.jobSetTools(conversationId),
+      // …and whether its grant puts into a place outside (only then does its turn ask that connector anything).
+      jobDelivery: conversationId => aiTurnClaims.jobDelivery(conversationId),
       jobMinutesRead: (conversationId, recordId, text, docVersion) => aiTurnClaims.jobMinutesRead(conversationId, recordId, text, docVersion),
       runBound: (companyId, conversationId) => aiRunRegistry.runOf(companyId, conversationId) !== null,
       workingFolders,

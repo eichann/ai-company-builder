@@ -24,6 +24,11 @@ export interface RecordToolProviderDeps {
   jobWriteArea?: (conversationId: string) => JobWriteArea | null
   /** A set watch's run held for this consultation (4b-4 PR5): its `proposal_folder` and `job_report`; null otherwise. */
   jobSetTools?: (conversationId: string) => ExtraRecordTools | null
+  /**
+   * A scheduled job's run held for this consultation: the connector of its deliverable place outside (null: none); null when
+   * the consultation is not a job run's.
+   */
+  jobDelivery?: (conversationId: string) => { connector: string | null } | null
   /** Whether this consultation's record token is bound to an execution run (then drive_put reads only a job's area, else nothing). */
   runBound?: (companyId: string, conversationId: string) => boolean
 }
@@ -45,8 +50,14 @@ export interface RecordToolTurn {
 export function recordToolProviders(deps: RecordToolProviderDeps, turn: RecordToolTurn): RecordToolProvider[] {
   const providers: RecordToolProvider[] = []
   const { drivePicking, paths } = deps
+  // A scheduled job's run reaches Google Drive only when its grant puts into a Drive folder (jobs.md "A deliverable place
+  // outside"): every other route of the run's token — the Drive status this provider asks first included — is refused
+  // `NOT_IN_STEP`, and that refusal ends the run (jobs.md "Fail closed"; staging 2026-11-25: every set watch's turn was
+  // stopped `job-ended` right as it started).
+  const job = turn.conversationId ? deps.jobDelivery?.(turn.conversationId) ?? null : null
+  const jobAsksDrive = job === null || job.connector === 'google'
   // Google Drive's tools (google-drive.md); each turn asks the server whether Drive is set up for the company.
-  if (drivePicking && paths) {
+  if (drivePicking && paths && jobAsksDrive) {
     // A scheduled job's run: drive_put reads only from its own deliverable area (`<place>/.personal/<folder>/`), never
     // another company file (a prompt could otherwise send any file the member reads into the job's folder); no area → none.
     const area = turn.conversationId ? deps.jobWriteArea?.(turn.conversationId) ?? null : null

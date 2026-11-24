@@ -89,6 +89,8 @@ export interface ChatServerConfigDeps {
   jobWriteArea?: (conversationId: string) => JobWriteArea | null
   /** A set watch's run held for a consultation (4b-4 PR5): its `proposal_folder` and `job_report`; null otherwise. */
   jobSetTools?: (conversationId: string) => ExtraRecordTools | null
+  /** A scheduled job's run held for a consultation: the connector of its deliverable place outside (null: none); null otherwise. */
+  jobDelivery?: (conversationId: string) => { connector: string | null } | null
   /** The minutes a consultation's `minutes_read` answered (a set watch's run checks its quotes against its meeting's). */
   jobMinutesRead?: (conversationId: string, recordId: string, text: string, docVersion: string | null) => void
   /** Whether a consultation's record token is bound to an execution run (records/runs.ts). */

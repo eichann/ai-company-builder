@@ -376,6 +376,10 @@ export function createAiTurnClaims(deps: AiTurnClaimsDeps) {
     jobTools(conversationId: string, step: string) {
       return jobs?.toolsOf(conversationId, step) ?? null
     },
+    /** A job run's consultation: the connector of its deliverable place outside (null: none); null for any other consultation. */
+    jobDelivery(conversationId: string) {
+      return jobs?.deliveryOf(conversationId) ?? null
+    },
     /** Where a job run's consultation may write; null for any other consultation. */
     jobWriteArea(conversationId: string) {
       return jobs?.writeAreaOf(conversationId) ?? null

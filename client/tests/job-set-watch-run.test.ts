@@ -17,6 +17,8 @@ import path from 'node:path'
 import { createAiTurnClaims } from '../electron/features/ai-turns/claims'
 import { createSetWatchFs, type SetRunRecord } from '../electron/features/ai-turns/set-watch-run'
 import { createRecordsApi } from '../electron/records/api'
+import { createRecordTools } from '../electron/records/tools'
+import { recordToolProviders } from '../electron/records/tool-providers'
 import { createRunRegistry } from '../electron/records/runs'
 import { decideToolWrite, type WriteGuard } from '../electron/write-guard'
 import { jobToolAccess, parseJobTurn, parseJobTurns } from '../shared/ai-turn-steps/job'
@@ -108,6 +110,12 @@ function fakeServer(c: ReturnType<typeof company>, opts: { finish?: number; fini
       return json(opts.finish ?? 200, opts.finish ? { code: opts.finishCode ?? 'JOB_SET_REPORT_BAD' } : { data: {} })
     }
     if (p === '/ai-runs/run-s0') return json(200, { data: { run: opts.runView } })
+    // The turn's record token and what the turn start reads with it (records/api.ts, records/tools.ts).
+    if (p === '/me/record-tokens') return json(201, { data: { token: 'acb_rec_x', tokenId: 'tok-s1', scope: 'act' } })
+    if (p === '/api/records-ai/types') return json(200, { data: { types: [] } })
+    if (p === '/api/records-ai/plugins') return json(200, { data: { plugins: [] } })
+    // The server's answer to a run-bound token on a route outside the pinned grant (a set watch names no place outside).
+    if (p.startsWith('/api/records-ai/google/drive/')) return json(403, { code: 'NOT_IN_STEP' })
     return json(404, { code: 'NOT_FOUND' })
   }) as typeof fetch
   return { calls, fetch }
@@ -123,8 +131,13 @@ function claimsFor(c: ReturnType<typeof company>, server: ReturnType<typeof fake
     recordsRoot: over.recordsRoot ?? (() => path.join(c.data, 'job-set-runs')),
   })
   const stopped: string[] = []
+  // As main wires it: a run-bound call the server refused is reported to the claims (a run-ending refusal stops the AI).
+  const records = createRecordsApi({
+    ...base, fetch: server.fetch, runOf: runs.runOf,
+    onRunRefused: (companyId, conversationId, run, status, code) => claims.runRefused(companyId, conversationId, run.id, status, code),
+  })
   const claims = createAiTurnClaims({
-    ...base, records: createRecordsApi({ ...base, fetch: server.fetch, runOf: runs.runOf }), runs, deviceId: 'device-set-1',
+    ...base, records, runs, deviceId: 'device-set-1',
     renewEveryMs: 3_600_000, fetch: server.fetch, agent: () => 'claude-code', windowOpen: () => true, aiAllowed: () => true, stopPolicyConfirmed: async () => true,
     log: { warn: () => {} },
     jobs: {
@@ -133,7 +146,7 @@ function claimsFor(c: ReturnType<typeof company>, server: ReturnType<typeof fake
       ...(over.setWatch === null ? {} : { setWatch: fs }), ...(over.gate ? { gate: over.gate } : {}),
     },
   })
-  return { claims, fs, stopped }
+  return { claims, fs, stopped, records }
 }
 const finishes = (server: ReturnType<typeof fakeServer>) => server.calls.filter(x => x.path === '/ai-runs/run-s1/finish').map(x => x.body)
 const records = (c: ReturnType<typeof company>): SetRunRecord[] => {
@@ -497,6 +510,32 @@ test('a record whose completion\'s answer was lost: another generation finished 
   assert.equal(await stateAfter({ id: 'run-s0', state: 'running', generation: 2 }), 'not_adopted')
   assert.equal(await stateAfter({ id: 'run-s0', state: 'done', generation: 1 }), 'sent')
   assert.equal(await stateAfter({ id: 'run-s0', state: 'running', generation: 1 }), 'sending')
+})
+
+test('staging 2026-11-25: the turn\'s start never asks a route outside the grant, so the run is not ended `job-ended` as it starts', async () => {
+  const c = company()
+  const server = fakeServer(c)
+  const { claims, records, stopped, r, conv } = await claimed(c, server)
+  assert.equal(r.claimed, true)
+  // The turn's record tools as main makes them (features/chat/server-config.ts), Google Drive set up on this PC.
+  const access = await records.openTurn(COMPANY, { conversationId: conv, agent: 'claude-code', scope: 'act', requireRun: true })
+  assert.ok(access)
+  const tools = await createRecordTools(access, undefined, {
+    companyId: COMPANY, conversationId: conv,
+    toolProviders: recordToolProviders({
+      drivePicking: { pick: async () => { throw new Error('not picked') } }, paths: {} as never, privateFolders: { readable: () => [] },
+      jobReport: x => claims.jobReporter(x), jobWriteArea: x => claims.jobWriteArea(x), jobSetTools: x => claims.jobSetTools(x),
+      jobDelivery: x => claims.jobDelivery(x), runBound: () => true,
+    }, { companyId: COMPANY, companyRoot: c.root, conversationId: conv }),
+  })
+  assert.ok(tools)
+  // Nothing outside the grant was asked (the Drive status is refused NOT_IN_STEP for a run with no place outside)…
+  assert.deepEqual(server.calls.filter(x => x.path.includes('/google/')), [])
+  // …so the run is still this app's: the chat server finds its ceiling after tracking the turn, and nothing stopped it.
+  assert.ok(claims.jobTools(conv, 'job-procedure'))
+  assert.deepEqual(stopped, [])
+  assert.ok(tools.specs.some(s => s.name === 'proposal_folder'))
+  assert.ok(!tools.specs.some(s => s.name.startsWith('drive_')))
 })
 
 test('the tool ceiling of a set watch: the minutes route only through its check', () => {
