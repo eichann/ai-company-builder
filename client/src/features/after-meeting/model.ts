@@ -160,20 +160,28 @@ export function dealsToChoose(items: readonly Pick<DraftItem, '書き先' | '取
   return [...new Set(items.filter(d => d.書き先 === 'hubspot').map(d => d.取引))]
 }
 
+/** The 案件 offered for one 取引: those found for it, and those found through the meeting (never another 取引's by name). */
+export function dealsFor(deal: string, all: readonly DealChoice[]): DealChoice[] {
+  return all.filter(x => x.for === undefined || x.for === deal)
+}
+
 const WHY_ORDER: Record<DealChoice['why'], number> = { linked: 0, named: 1, customer: 2, name: 3 }
 
 /**
  * The 案件 chosen for a 取引 before the member touches it: what an earlier press chose, the 案件 the file names, the meeting's
- * own (`linked`), else the best match (the meeting's 相手, then the name); 「新しく作る」 (null) only for a 新規 取引 with nothing found.
- * undefined: nothing to choose (no 案件 read, a 取引 that names none of them) — the ask stays as it was.
+ * own (`linked`); for a 新規 取引 only, else the best match (the meeting's 相手, then the name) and 「新しく作る」 (null) with nothing
+ * found. undefined: nothing chosen (a 取引 the AI named otherwise is never moved to a guess) — the ask stays as it was.
  */
-export function defaultPick(deal: string, deals: readonly DealChoice[], before: string | null | undefined): string | null | undefined {
+export function defaultPick(deal: string, all: readonly DealChoice[], before: string | null | undefined): string | null | undefined {
+  const deals = dealsFor(deal, all)
   const has = (id: string | null) => id !== null && deals.some(x => x.id === id)
   if (before === null || (before !== undefined && has(before))) return before
   if (has(deal)) return deal
+  const linked = deals.find(x => x.why === 'linked')
+  if (linked) return linked.id
+  if (!isNewDeal(deal)) return undefined
   const best = [...deals].sort((a, b) => WHY_ORDER[a.why] - WHY_ORDER[b.why])[0]
-  if (best) return best.id
-  return isNewDeal(deal) ? null : undefined
+  return best ? best.id : null
 }
 
 /** 「取引を作る」 is never handed on while an existing 案件 is chosen for its 取引 (the consultation would make a second one). */
@@ -190,6 +198,8 @@ export function dealLine(x: DealChoice): string {
 /** What the ask says of one chosen 案件 (the record id literally: the consultation uses it, `anken-sync-auto` (b) 2.1). */
 function dealAskLines(meetingId: string | null, meetingBundle: string | null, picked: readonly { 取引: string; deal: DealChoice | null }[]): string[] {
   const out: string[] = []
+  // A meeting has one 案件: linked only when this press writes to exactly one (the link replaces, it never adds).
+  const existing = new Set(picked.flatMap(p => (p.deal ? [p.deal.id] : [])))
   for (const p of picked) {
     if (p.deal === null) {
       out.push(`- 取引「${p.取引}」は、私がカードで今ある案件を見たうえで「新しく作る」を選びました。案件を探して選び直さず、「${CREATE_DEAL_ITEM}」の項目で作ってください（「${CREATE_DEAL_ITEM}」が下に無ければ、書かずに「反映しない」としてください）。`)
@@ -199,7 +209,8 @@ function dealAskLines(meetingId: string | null, meetingBundle: string | null, pi
     out.push(`- 取引「${p.取引}」は、私がカードで選んだ今ある案件 ${d.id}（${outsideTitle(d.title)}）です。HubSpot の項目はこの案件 ${d.id} に書いてください。探し直したり、取引を作ったりしないでください。`)
     if (meetingId && meetingBundle === d.id) out.push(`  会議（${meetingId}）は、もうこの案件 ${d.id} につながっています。`)
     else if (meetingId && meetingBundle) out.push(`  会議（${meetingId}）は、もう別の案件につながっています。つなぎ直さずに、どうするか私に聞いてください。`)
-    else if (meetingId) out.push(`  書く前に、minutes_link_bundle で会議（${meetingId}）をこの案件 ${d.id} につないでください（つなげなかったときは、理由を私に伝えてから書いてください）。`)
+    else if (meetingId && existing.size === 1) out.push(`  書く前に、minutes_link_bundle で会議（${meetingId}）をこの案件 ${d.id} につないでください。minutes_read の答えで会議がもう別の案件につながっていれば、つなぎ直さずに私に聞いてください（つなげなかったときは、理由を私に伝えてから書いてください）。`)
+    else if (meetingId) out.push(`  この相談では会議（${meetingId}）を案件につながないでください（案件が2つ以上あります。どれにつなぐかは私に聞いてください）。`)
   }
   if (picked.length > 0) {
     out.push('- 結果の「取引」は下の一覧のとおりのまま（書き換えない）にし、書いた案件の番号を「案件」に入れてください。')

@@ -205,15 +205,20 @@ export function createAfterMeetingApi(deps: AfterMeetingDeps) {
       const id = typeof m.userId === 'string' ? m.userId : typeof m.id === 'string' ? m.id : null
       if (id && typeof m.name === 'string' && m.name) names.set(id, m.name)
     }
-    const found = new Map<string, { record: RecordSummary; why: DealChoice['why'] }>()
-    const take = (r: RecordSummary | undefined | null, why: DealChoice['why']) => {
-      if (r && typeof r.id === 'string' && r.type === def.name && !(def.final ?? []).includes(r.state ?? '') && !found.has(r.id)) found.set(r.id, { record: r, why })
+    const found = new Map<string, { record: RecordSummary; why: DealChoice['why']; for?: string }>()
+    const take = (r: RecordSummary | undefined | null, why: DealChoice['why'], deal?: string) => {
+      if (r && typeof r.id === 'string' && r.type === def.name && !(def.final ?? []).includes(r.state ?? '') && !found.has(r.id)) found.set(r.id, { record: r, why, ...(deal ? { for: deal } : {}) })
+    }
+    // A search that did not answer is not "none found": the card would offer only 「新しく作る」 (a second 案件).
+    const answered = (a: Answer, also404 = false): a is NonNullable<Answer> => {
+      if (a && (a.status === 200 || (also404 && a.status === 404))) return true
+      throw new Error('not answered')
     }
     let meetingBundle: string | null = null
     let counterpart: string | null = null
     if (meetingId && RECORD_ID_RE.test(meetingId)) {
       const meeting = await call(companyId, 'GET', `/records/item/${encodeURIComponent(meetingId)}`)
-      for (const l of meeting?.status === 200 ? (meeting.data as RecordDetail | null)?.links ?? [] : []) {
+      for (const l of answered(meeting, true) && meeting.status === 200 ? (meeting.data as RecordDetail | null)?.links ?? [] : []) {
         if (l.direction !== 'out' || !l.record) continue
         if (l.name === 'bundle') { meetingBundle = l.record.id; take(l.record, 'linked') }
         if (l.name === 'counterpart') counterpart = l.record.id
@@ -221,29 +226,29 @@ export function createAfterMeetingApi(deps: AfterMeetingDeps) {
     }
     for (const id of named.filter(n => RECORD_ID_RE.test(n)).slice(0, 5)) {
       const r = await call(companyId, 'GET', `/records/item/${encodeURIComponent(id)}`)
-      if (r?.status === 200) take((r.data as RecordDetail | null)?.record, 'named')
+      if (answered(r, true) && r.status === 200) take((r.data as RecordDetail | null)?.record, 'named', id)
     }
-    const query = async (body: Record<string, unknown>, why: DealChoice['why']) => {
+    const query = async (body: Record<string, unknown>, why: DealChoice['why'], deal?: string) => {
       const r = await call(companyId, 'POST', '/records/query', { type: def.name, limit: 20, ...body })
-      for (const rec of r?.status === 200 ? (r.data as RecordQueryResult | null)?.records ?? [] : []) take(rec, why)
+      for (const rec of answered(r) ? (r.data as RecordQueryResult | null)?.records ?? [] : []) take(rec, why, deal)
     }
     if (counterpart) await query({ linkedTo: { id: counterpart } }, 'customer')
     for (const n of named) {
       const company = NEW_DEAL_RE.exec(n)?.[1]?.normalize('NFKC').trim()
       if (!company) continue
       const bare = company.replace(CORPORATE_FORMS, '').trim()
-      for (const text of new Set([company, bare].filter(t => t.length >= 2).map(t => t.slice(0, 100)))) await query({ text }, 'name')
+      for (const text of new Set([company, bare].filter(t => t.length >= 2).map(t => t.slice(0, 100)))) await query({ text }, 'name', n)
     }
     const [confidenceId, confidence] = field(def, '確度') ?? []
     const amountId = field(def, '金額')?.[0]
     const assigneeId = field(def, '担当')?.[0]
     const labels = ((confidence as Partial<FieldDef> | undefined)?.optionLabels ?? {}) as Record<string, unknown>
-    const deals = [...found.values()].slice(0, DEALS_MAX).map(({ record: r, why }): DealChoice => {
+    const deals = [...found.values()].slice(0, DEALS_MAX).map(({ record: r, why, for: deal }): DealChoice => {
       const c = confidenceId ? r.fields?.[confidenceId] : null
       const a = amountId ? r.fields?.[amountId] : null
       const who = assigneeId ? r.fields?.[assigneeId] : null
       return {
-        id: r.id, title: String(r.title ?? '').slice(0, 200), why,
+        id: r.id, title: String(r.title ?? '').slice(0, 200), why, ...(deal ? { for: deal } : {}),
         confidence: typeof c === 'string' && c ? (typeof labels[c] === 'string' ? labels[c] as string : c) : null,
         amount: typeof a === 'number' && Number.isFinite(a) ? a : null,
         assignee: typeof who === 'string' && who ? names.get(who) ?? null : null,

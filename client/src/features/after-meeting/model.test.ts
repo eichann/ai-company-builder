@@ -153,6 +153,9 @@ test('the 案件 chosen at first: an earlier press\'s, the one named, the meetin
   assert.equal(defaultPick('新規:株式会社サンプル', [SAMPLE], undefined), 'deal-sample01', 'an existing 案件 rather than a second one')
   assert.equal(defaultPick('新規:株式会社サンプル', [], undefined), null)
   assert.equal(defaultPick('123', [], undefined), undefined, 'nothing to choose: the ask stays as it was')
+  assert.equal(defaultPick('123', [{ ...SAMPLE, why: 'customer' }], undefined), undefined, 'a 取引 the AI named otherwise is never moved to a guess')
+  const other = { ...SAMPLE, id: 'deal-other001', title: 'ほか社/研修', for: '新規:株式会社ほか' }
+  assert.equal(defaultPick('新規:株式会社サンプル', [other], undefined), null, 'another company\'s 案件 found by its name is never chosen')
 })
 
 test('an existing 案件 chosen: the ask names its id and links the meeting first, and 「取引を作る」 is not handed on', () => {
@@ -169,6 +172,8 @@ test('an existing 案件 chosen: the ask names its id and links the meeting firs
   assert.match(ask, /"案件"\?: 書いた案件の番号/)
   const linkedElsewhere = applyAsk({ pressId: 'a-0123456789abcdef', folder: 'a/.personal/b/c', meetingId: 'meeting-abc123', minutesDocVersion: null, items: chosen, deals: [{ 取引: deal, deal: SAMPLE }], meetingBundle: 'deal-linked01' })
   assert.doesNotMatch(linkedElsewhere, /minutes_link_bundle/, 'a meeting already linked to another 案件 is never linked again without asking')
+  const two = applyAsk({ pressId: 'a-0123456789abcdef', folder: 'a/.personal/b/c', meetingId: 'meeting-abc123', minutesDocVersion: null, items: [...chosen, { ...chosen[0], key: 'x', 取引: 'x' }], deals: [{ 取引: deal, deal: SAMPLE }, { 取引: 'x', deal: LINKED }], meetingBundle: null })
+  assert.doesNotMatch(two, /minutes_link_bundle/, 'a meeting is linked only when one 案件 is written to (a second link would replace the first)')
   // 「新しく作る」: today's path, 取引を作る handed on.
   assert.equal(itemsToApply(drafts, statusOf(EMPTY_MARK)).filter(d => !createSkipped(d, { [deal]: null })).length, 2)
   assert.match(applyAsk({ pressId: 'a-0123456789abcdef', folder: 'a/.personal/b/c', meetingId: 'meeting-abc123', minutesDocVersion: null, items: drafts, deals: [{ 取引: deal, deal: null }] }), /「新しく作る」を選びました/)

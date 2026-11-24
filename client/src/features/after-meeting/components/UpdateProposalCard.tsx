@@ -11,7 +11,7 @@ import { useInterval } from '../../../shared/hooks/useInterval'
 import { dealLocked, itemStatus, mayUndoHubspot, pickedBefore, sheetWritten, type AfterMeetingRead, type DealChoice, type DealPick, type UpdateTarget } from '../../../../shared/after-meeting'
 import { noteAfterMeeting, readAfterMeeting, undoHubspotWrite } from '../api'
 import {
-  ADDABLE_HUBSPOT_ITEMS, ASK_MAX, addedItem, applyAsk, cardNotes, cardOffers, createSkipped, dealLine, dealsToChoose, defaultPick, draftsFrom, edited, handedItemOf, handedOf,
+  ADDABLE_HUBSPOT_ITEMS, ASK_MAX, addedItem, applyAsk, cardNotes, cardOffers, createSkipped, dealLine, dealsFor, dealsToChoose, defaultPick, draftsFrom, edited, handedItemOf, handedOf,
   isNewDeal, itemsToApply, newPressId, redoDraftAsk, shareDraftAsk, sharesWords, sheetUndoAsk, statusText, statusTone, valueProblem, valueText, type DraftItem,
 } from '../model'
 import { ValueEditor } from './ValueEditor'
@@ -68,7 +68,7 @@ export function UpdateProposalCard({ companyId, rootPath, occurrenceId, task }: 
     if (locked !== undefined || !data.deals) return locked
     return deal in picks ? picks[deal] : defaultPick(deal, data.deals, pickedBefore(deal, data.mark))
   }
-  const dealGroups = data.deals ? dealsToChoose(list).filter(g => data.deals!.length > 0 || isNewDeal(g)) : []
+  const dealGroups = data.deals ? dealsToChoose(list).filter(g => dealsFor(g, data.deals!).length > 0 || isNewDeal(g)) : []
   const picked: Record<string, string | null | undefined> = Object.fromEntries(dealsToChoose(list).map(g => [g, pickOf(g)]))
   const dealOf = (id: string): DealChoice => data.deals?.find(x => x.id === id) ?? { id, title: id, assignee: null, confidence: null, amount: null, why: 'named' }
   const chosen = itemsToApply(list, statusOf).filter(d => !createSkipped(d, picked))
@@ -159,7 +159,7 @@ export function UpdateProposalCard({ companyId, rootPath, occurrenceId, task }: 
       {dealGroups.map((g, gi) => {
         const locked = dealLocked(g, data.mark, data.results, now) !== undefined
         const current = picked[g]
-        const options = [...(data.deals ?? [])]
+        const options = dealsFor(g, data.deals ?? [])
         if (typeof current === 'string' && !options.some(x => x.id === current)) options.push(dealOf(current))
         return (
           <fieldset key={g} aria-label={`取引「${g}」を書く案件`} className="space-y-1.5 rounded-control border border-border bg-surface p-2">
@@ -252,7 +252,11 @@ export function UpdateProposalCard({ companyId, rootPath, occurrenceId, task }: 
       ) : task.open && <Button size="sm" variant="ghost" disabled={disabled} onClick={() => setAdding({ target: 'hubspot', deal: list[0]?.取引 ?? '', item: '', problem: null })}><Plus size={12} />項目を足す</Button>}
       <div className="flex flex-wrap items-center gap-2">
         {offers?.apply && task.open && (
-          <Button size="sm" variant="primary" disabled={disabled || offline || chosen.length === 0} onClick={() => setChecking('apply')}>
+          <Button size="sm" variant="primary" disabled={disabled || offline || chosen.length === 0} onClick={() => {
+            // The 案件 shown in the last check stay as they are while it is open (the card reads again every 15 s).
+            setPicks(ps => ({ ...Object.fromEntries(Object.entries(picked).filter((e): e is [string, string | null] => e[1] !== undefined)), ...ps }))
+            setChecking('apply')
+          }}>
             {offers.apply === 'rest' ? '残りを反映する' : '反映する'}
           </Button>
         )}

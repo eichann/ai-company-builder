@@ -187,15 +187,22 @@ test('the 案件 offered for a 新規 取引: the meeting\'s own and those of th
   assert.ok(r.success && r.run)
   assert.equal(r.meetingBundle, 'deal-linked01')
   assert.deepEqual(r.deals?.map(d => [d.id, d.why]), [['deal-linked01', 'linked'], ['deal-sample01', 'name']], 'a lost 案件 is not offered')
-  assert.deepEqual(r.deals?.[1], { id: 'deal-sample01', title: 'サンプル/研修', why: 'name', confidence: 'B（中）', amount: 300000, assignee: '高杉' })
+  assert.deepEqual(r.deals?.[1], { id: 'deal-sample01', title: 'サンプル/研修', why: 'name', for: '新規:株式会社サンプル', confidence: 'B（中）', amount: 300000, assignee: '高杉' })
   // Searched by the company's name, also without 株式会社 (a 案件's name often leaves it out).
   assert.deepEqual(asked.filter(a => a.url.endsWith('/records/query')).map(a => (a.body as { text: string }).text), ['株式会社サンプル', 'サンプル'])
 })
 
-test('the server not reached: no 案件 to choose, the card applies as before', async t => {
+test('the server not reached, or a search not answered: no 案件 to choose (never 「新しく作る」 alone), the card applies as before', async t => {
   const w = world(t, { file: NEW_FILE, fetch: (async () => { throw new Error('offline') }) as typeof fetch })
   const r = await w.api.read('c1', w.root, OCC)
   assert.ok(r.success && r.run && r.deals === null)
+  const half = world(t, { file: NEW_FILE, fetch: (async (url: string) => {
+    if (url.endsWith('/records/types')) return new Response(JSON.stringify({ data: { types: [DEAL_TYPE] } }), { status: 200 })
+    if (url.endsWith('/records/query')) return new Response('{}', { status: 503 })
+    return new Response(JSON.stringify({ data: [] }), { status: url.endsWith('/members') ? 200 : 404 })
+  }) as typeof fetch })
+  const h = await half.api.read('c1', half.root, OCC)
+  assert.ok(h.success && h.run && h.deals === null)
 })
 
 test('a 取引 never moves to another 案件 once an earlier press began writing to one; after a failure it may', async t => {
@@ -223,4 +230,24 @@ test('a press\'s 案件 choice is only of the card\'s shape: a 取引 it does no
   assert.equal((await w.api.note('c1', w.root, OCC, bad([{ 取引: '999', 案件: 'deal-sample01' }]))).success, false)
   assert.equal((await w.api.note('c1', w.root, OCC, bad([{ 取引: '123', 案件: '../x' }]))).success, false)
   assert.equal((await w.api.note('c1', w.root, OCC, bad([{ 取引: '123', 案件: 'deal-sample01' }]))).success, true)
+})
+
+test('「新しく作る」 done: the rest of that 取引 goes to the 案件 made, never 「新しく作る」 again', async t => {
+  const w = world(t)
+  const create: HandedItem = { 書き先: 'hubspot', 取引: '123', 項目: '取引を作る', 値: 'サンプル/山田様' }
+  assert.ok((await w.api.note('c1', w.root, OCC, { kind: 'apply', id: 'a-0000000000000001', keys: [itemKey(create)], items: [create], deals: [{ 取引: '123', 案件: null }] })).success)
+  writeFileSync(path.join(w.runDir, 'result.json'), JSON.stringify({ 版: 1, 結果: [{ 回: 'a-0000000000000001', 書き先: 'hubspot', 取引: '123', 項目: '取引を作る', 状態: '済み', 案件: 'deal-made0001' }] }))
+  const again = await w.api.note('c1', w.root, OCC, { ...press('a-0000000000000002', K_STAGE), deals: [{ 取引: '123', 案件: null }] } as AfterMeetingChange)
+  assert.ok(!again.success, 'a second 「新しく作る」 is refused')
+  assert.ok((await w.api.note('c1', w.root, OCC, { ...press('a-0000000000000003', K_STAGE), deals: [{ 取引: '123', 案件: 'deal-made0001' }] } as AfterMeetingChange)).success)
+})
+
+test('a 取引 already written to a 案件 by a press that chose none (offline, an older card) stays with that 案件', async t => {
+  const w = world(t)
+  assert.ok((await w.api.note('c1', w.root, OCC, press('a-0000000000000001', K_STAGE))).success)
+  writeFileSync(path.join(w.runDir, 'result.json'), JSON.stringify({ 版: 1, 結果: [{ 回: 'a-0000000000000001', 書き先: 'hubspot', 取引: '123', 項目: '確度', 状態: '済み', 案件: 'deal-wrote001' }] }))
+  const added: HandedItem = { 書き先: 'hubspot', 取引: '123', 項目: '金額', 値: 5 }
+  const to = (id: string, deal: string) => ({ kind: 'apply', id, keys: [itemKey(added)], items: [added], deals: [{ 取引: '123', 案件: deal }] } as AfterMeetingChange)
+  assert.equal((await w.api.note('c1', w.root, OCC, to('a-0000000000000002', 'deal-other001'))).success, false)
+  assert.ok((await w.api.note('c1', w.root, OCC, to('a-0000000000000003', 'deal-wrote001'))).success)
 })

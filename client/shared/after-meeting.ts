@@ -65,6 +65,8 @@ export interface DealChoice {
   confidence: string | null
   amount: number | null
   why: 'linked' | 'named' | 'customer' | 'name'
+  /** The one 取引 it was found for (by its id or its company's name); absent: found through the meeting, offered for each. */
+  for?: string
 }
 
 /** The member's choice for one HubSpot 取引 of the file: an existing 案件 (its id), or null = make a new one. */
@@ -373,8 +375,15 @@ export function pickedBefore(deal: string, mark: AfterMeetingMark): string | nul
  * same 案件, never to another one.
  */
 export function dealLocked(deal: string, mark: AfterMeetingMark, results: readonly ResultItem[], now: number): string | null | undefined {
-  const before = pickedBefore(deal, mark)
-  if (before === undefined) return undefined
+  const same = (r: ResultItem) => r.書き先 === 'hubspot' && r.取引.normalize('NFC') === deal.normalize('NFC')
+  // What a consultation wrote (or asked to write) to decides first, also after a press that chose nothing (offline, an older card).
+  const wrote = results.filter(r => same(r) && (r.状態 === '済み' || r.状態 === '承認待ち') && r.案件 && r.項目 !== '取引を作る')
+  if (wrote.length > 0) return wrote[wrote.length - 1].案件
+  const picked = pickedBefore(deal, mark)
+  if (picked === undefined) return undefined
+  // 「新しく作る」 done: the 案件 made is where the rest goes (never a second one).
+  const made = picked === null ? results.find(r => same(r) && r.項目 === '取引を作る' && r.状態 === '済み' && r.案件) : undefined
+  const before = made?.案件 ?? picked
   const prefix = `hubspot\n${deal.normalize('NFC')}\n`
   const keys = new Set(mark.applies.flatMap(a => a.keys).filter(k => k.startsWith(prefix)))
   for (const key of keys) {
