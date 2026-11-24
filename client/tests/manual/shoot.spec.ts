@@ -15,6 +15,8 @@ import { scenes, type Scene, type SceneStep } from './scenes'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 const IMAGES = path.resolve(HERE, '../../../manual/images')
+/** The administrator guide's pictures of the app (scenes with `guide: 'admin'`). */
+const ADMIN_GUIDE_IMAGES = path.resolve(HERE, '../../../manual-admin/images')
 const TOKENS = path.resolve(HERE, '../../../shared/design-tokens')
 /** The clock every scene sees (relative dates such as 「3日前」 stay put). */
 const NOW = new Date('2026-11-20T10:30:00+09:00')
@@ -139,6 +141,6 @@ for (const scene of scenes) {
     const clip = await clipFor(page, scene)
     await annotate(page, scene)
     expectNoPageErrors(state)
-    await page.screenshot({ path: path.join(IMAGES, `${scene.id}.png`), clip, animations: 'disabled', caret: 'hide' })
+    await page.screenshot({ path: path.join(scene.guide === 'admin' ? ADMIN_GUIDE_IMAGES : IMAGES, `${scene.id}.png`), clip, animations: 'disabled', caret: 'hide' })
   })
 }

@@ -807,8 +807,9 @@ by that server at `/manual/` — so a self-hosted server shows the manual of its
 
 ## The administrator guide (管理者・FDE の手引き, 2026-11-24)
 
-`manual-admin/pages/<page>.md` (and `manual-admin/images/`, none yet: the build needs the folder only
-when a page shows a picture) is the counterpart of the user manual for owners, admins and FDEs.
+`manual-admin/pages/<page>.md` (and `manual-admin/images/`, shot from the real admin console with a fictional
+company by `pnpm manual-admin:shoot`: `manual-admin/README.md`; the build needs the folder only when a page shows a
+picture) is the counterpart of the user manual for owners, admins and FDEs.
 Everything of "The user manual" above holds for it — the build (`build-manual.ts manual-admin
 manual-admin <out>`, `MANUAL_SITES` in `lib/manual-build.ts`: only the `<title>`'s site name
 differs; `pnpm … manual-admin:build` → `server/manual-admin-site/`, gitignored; the Dockerfile's

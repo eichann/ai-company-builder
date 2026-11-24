@@ -113,7 +113,9 @@ UNIVERSAL=(client/scripts/universal-git.mjs client/package.json)
 # staging/: the staging kit's helpers, tested by server/tests/unit/staging-kit.test.ts.
 # The rollback floor's pin and its cross-build check (deployment.md "Rolling back production") run in the server job.
 SERVER=(server/ shared/ staging/ manual/ manual-admin/ .github/rollback-floor-commit .github/scripts/rollback-floor-check.sh)
-ADMIN=(admin/ shared/)
+# manual-admin/ and the app's screens (client/src, client/shared): admin-guide-pages.test.ts checks the
+# administrator guide's pictures and the ［names］ it cites against the admin console and the app.
+ADMIN=(admin/ shared/ manual-admin/ client/src/ client/shared/)
 # The browser plan lifecycle model (model/browser-plan/, agent-browser.md "The plan model"): the model
 # itself and the code it copies by hand. check-areas.mjs fails when the model cites a file not listed
 # here (each action names the code it copies), so a lifecycle change always runs the model.

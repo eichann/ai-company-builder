@@ -11,6 +11,8 @@ server/manual-admin-site/
 # Playwright UI tests (client/tests/ui)
 client/test-results/
 client/playwright-report/
+# The administrator guide's shoot (admin/tests/manual)
+admin/test-results/
 dist-electron/
 out/
 *.tsbuildinfo
