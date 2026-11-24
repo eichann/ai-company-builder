@@ -1829,9 +1829,12 @@
       "version": "1.0.0",
       "site": "lstep",
       "mapVersion": "1.0.2",
-      "status": "pending",
+      "status": "approved",
       "meaningHash": "sha256:ff6c8aaa0e51d744f8215cc012bd5609250b445ec8021970be1f4b849ee103d0",
       "mechanicsHash": "sha256:78e30a747a28087e91648f6151e64080936f088c815279764c1058d83df43605",
+      "grantsFrom": [
+        "sha256:8aa36db07ec68591e01361687d57e48b2d3e15b08ee41a2d2faf0acb4a2aa722"
+      ],
       "line": {
         "label": "流入経路を点検する",
         "name": "landing_inspect",
