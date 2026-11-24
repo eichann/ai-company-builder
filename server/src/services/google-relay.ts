@@ -135,6 +135,7 @@ function notSentRefusal(reason: string, service: GoogleRelayService): { status: 
     case 'grant-stopped':
     case 'scope-not-granted': return { status: 403, code: 'ACB_GOOGLE_NOT_ALLOWED', message: `この作業には、あなたの Google の許可が必要です。アプリの「設定 → Google」で「${w.feature}」の［許可する］を押してください。` }
     case 'timeout': return { status: 504, code: 'ACB_UPSTREAM_TIMEOUT', message: 'Google からの返事が時間内に来ませんでした。' }
+    case 'call-not-allowed': return { status: 403, code: 'ACB_NOT_RELAYED', message: 'この操作は、ACB の中継では通しません。' }
     default: return { status: 502, code: 'ACB_UPSTREAM_UNREACHABLE', message: 'Google につながりませんでした。時間をおいてもう一度お試しください。' }
   }
 }
@@ -352,6 +353,9 @@ export function createGoogleRelay(deps: GoogleRelayDeps) {
       const w = SERVICE_WORDS[service]
       const apiPath = `/${call.rawPath.split('/').slice(2).join('/')}`
       const apiDecoded = `/${decodedSegs.slice(2).join('/')}`
+      // A Docs path has nothing to escape (ids are plain): one spelled with escapes (`%3AbatchUpdate`)
+      // would be judged decoded here and sent raw, so it is refused before anything is counted.
+      if (service === 'docs' && apiPath !== apiDecoded) return out(400, 'ACB_BAD_PATH', '宛先のパスの書き方が正しくありません。')
       const parsed = parseCall(service, call.method, apiDecoded)
       const meta = { host: GOOGLE_API_HOSTS[w.api], path: apiDecoded.slice(0, 200), ...(parsed.ok ? { operation: parsed.call.operation } : {}) }
 

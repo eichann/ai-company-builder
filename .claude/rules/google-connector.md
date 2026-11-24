@@ -212,7 +212,14 @@ grant** — never a key, never a service account — so every switch above appli
   `updateParagraphStyle`, `updateTableColumnProperties`, `updateTableCellStyle`,
   `createParagraphBullets`, **`deleteParagraphBullets`** (owner: it only takes bullets off — Google keeps
   the indent — and removes no text, so the weekly report keeps its bullets); one camelCase kind per
-  request, ≤ 500 (`DOCS_BATCH_LIMIT`). Any other kind that removes, replaces or merges (`delete…` but
+  request, ≤ 500 (`DOCS_BATCH_LIMIT`). `updateTextStyle` only with a plain `fields` mask without `*`
+  or `link` (independent review: a link change points the Doc's existing links elsewhere — a
+  replacement); else `ACB_NOT_RELAYED`. Accepted residual risks (owner): `createParagraphBullets`
+  removes the paragraphs' leading tab characters (Google reads them as the nesting level), and a
+  style can make existing text hard to see (colour, size) — formatting, not removal. A Docs path
+  spelled with escapes (`%3AbatchUpdate`) → 400 `ACB_BAD_PATH` before anything is counted (ids are
+  plain, so the raw and decoded paths must be equal); the client's `call-not-allowed` answers 403
+  `ACB_NOT_RELAYED`. Any other kind that removes, replaces or merges (`delete…` but
   the bullets, `replace…`, `merge…`, `unmerge…`, `clear…`, `remove…`, any case: `deleteContentRange`,
   `deleteTableRow` / `Column`, `deleteNamedRange`, `deletePositionedObject`, `deleteHeader` / `Footer` /
   `Tab`, `replaceAllText`, `replaceImage`, `replaceNamedRangeContent`, `mergeTableCells`, …) → 403

@@ -103,6 +103,18 @@ export const DOCS_BATCH_UPDATE_ALLOWED: readonly string[] = [
   'createParagraphBullets', 'deleteParagraphBullets',
 ]
 
+/**
+ * `updateTextStyle` passes only when its `fields` mask is a plain list without `*` and without
+ * `link` (review of U2'): a link change would point the Doc's existing links elsewhere — a
+ * replacement of content, not formatting.
+ */
+function textStyleAllowed(v: unknown): boolean {
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return false
+  const fields = (v as { fields?: unknown }).fields
+  if (typeof fields !== 'string' || fields.trim() === '') return false
+  return fields.split(',').map(f => f.trim()).every(f => f !== '' && f !== '*' && !/^link(\.|$)/i.test(f))
+}
+
 /** A Docs request kind that removes, replaces or merges what is there (unless listed above). */
 const DOCS_DESTRUCTIVE = /^(delete|replace|merge|unmerge|clear|remove)/i
 
@@ -390,6 +402,9 @@ export function checkDocsBatchUpdate(body: unknown): { ok: true; kinds: string[]
   const unlisted = kinds.filter(k => !DOCS_BATCH_UPDATE_ALLOWED.includes(k))
   if (unlisted.some(k => DOCS_DESTRUCTIVE.test(k))) return { ok: false, refusal: 'deletion', kinds: named }
   if (unlisted.length > 0) return { ok: false, refusal: 'not-relayed', kinds: named }
+  if (requests.some(r => 'updateTextStyle' in (r as object) && !textStyleAllowed((r as { updateTextStyle: unknown }).updateTextStyle))) {
+    return { ok: false, refusal: 'not-relayed', kinds: named }
+  }
   return { ok: true, kinds: named }
 }
 

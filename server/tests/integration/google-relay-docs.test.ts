@@ -100,6 +100,7 @@ async function script(token: string, method: string, path: string, body?: unknow
 const batch = (id: string) => `/v1/documents/${id}:batchUpdate`
 const insert = (text = TEXT) => ({ insertText: { endOfSegmentLocation: {}, text } })
 
+/** A fresh token (a member may hold 50 live ones; the many refusal cases reuse theirs with `tokenOf`). */
 async function tokenFor(user: string): Promise<{ token: string | null; services: string[] }> {
   const r = await call(user, 'POST', `${C}/me/broker-tokens`, { conversationId: `conv-${user}` })
   expect(r.status, JSON.stringify(r.body)).toBe(200)
@@ -117,6 +118,13 @@ async function allow(user: string, features: string[], email: string) {
   const back = new URL(res.headers.get('location')!)
   expect((await call(null, 'GET', `/api/oauth/google/callback${back.search}`)).status).toBe(200)
   return url
+}
+
+const kept = new Map<string, string>()
+/** One token per member for the refusal cases (they do not change who may do what). */
+async function tokenOf(user: string): Promise<{ token: string | null }> {
+  if (!kept.has(user)) kept.set(user, (await tokenFor(user)).token!)
+  return { token: kept.get(user)! }
 }
 
 const sent = () => fake.requests.length
@@ -261,7 +269,7 @@ describe('docs: never a deletion, never an unlisted call — refused before anyt
   ]
   for (const [kind, value] of deletionKinds) {
     it(`refuses ${kind} as a deletion, also behind an allowed request`, async () => {
-      const { token } = await tokenFor('d-sato')
+      const { token } = await tokenOf('d-sato')
       const before = sent()
       const was = doc()
       const r = await script(token!, 'POST', batch(DOC), { requests: [insert(), { [kind]: value }] })
@@ -276,6 +284,11 @@ describe('docs: never a deletion, never an unlisted call — refused before anyt
     ['an unlisted kind (insertInlineImage: fetches an outside URL)', 'POST', batch(DOC), { requests: [{ insertInlineImage: { uri: 'https://example.com/x.png', endOfSegmentLocation: {} } }] }],
     ['an unlisted kind (createNamedRange)', 'POST', batch(DOC), { requests: [{ createNamedRange: { name: 'x', range: { startIndex: 1, endIndex: 2 } } }] }],
     ['an unlisted kind (updateDocumentStyle)', 'POST', batch(DOC), { requests: [{ updateDocumentStyle: { documentStyle: {}, fields: '*' } }] }],
+    // A link change points the Doc's existing links elsewhere (a replacement, not formatting).
+    ['updateTextStyle changing links', 'POST', batch(DOC), { requests: [{ updateTextStyle: { range: { startIndex: 1, endIndex: 9 }, textStyle: { link: { url: 'https://example.com/x' } }, fields: 'link' } }] }],
+    ['updateTextStyle with a link among its fields', 'POST', batch(DOC), { requests: [{ updateTextStyle: { range: { startIndex: 1, endIndex: 9 }, textStyle: { bold: true, link: { url: 'https://example.com/x' } }, fields: 'bold, link.url' } }] }],
+    ['updateTextStyle with fields *', 'POST', batch(DOC), { requests: [{ updateTextStyle: { range: { startIndex: 1, endIndex: 9 }, textStyle: { link: { url: 'https://example.com/x' } }, fields: '*' } }] }],
+    ['updateTextStyle without fields', 'POST', batch(DOC), { requests: [{ updateTextStyle: { range: { startIndex: 1, endIndex: 9 }, textStyle: { bold: true } } }] }],
     ['two kinds in one request', 'POST', batch(DOC), { requests: [{ insertText: { text: 'x', endOfSegmentLocation: {} }, deleteContentRange: { range: { startIndex: 1, endIndex: 5 } } }] }],
     ['501 requests', 'POST', batch(DOC), { requests: Array.from({ length: 501 }, () => insert('x')) }],
     ['no requests', 'POST', batch(DOC), { requests: [] }],
@@ -290,7 +303,7 @@ describe('docs: never a deletion, never an unlisted call — refused before anyt
   ]
   for (const [name, method, path, body] of others) {
     it(`refuses ${name}`, async () => {
-      const { token } = await tokenFor('d-sato')
+      const { token } = await tokenOf('d-sato')
       const before = sent()
       const was = doc()
       const r = await script(token!, method, path, body)
@@ -300,8 +313,21 @@ describe('docs: never a deletion, never an unlisted call — refused before anyt
     })
   }
 
+  it('a Docs path spelled with escapes is refused before anything is counted', async () => {
+    const { token } = await tokenOf('d-sato')
+    const used = (await call('d-sato', 'GET', `${C}/me/google/relay`)).body.data.usedToday
+    const before = sent()
+    for (const path of [`/v1/documents/${DOC}%3AbatchUpdate`, `/v1/%64ocuments/${DOC}`]) {
+      const r = await script(token!, path.endsWith('Update') ? 'POST' : 'GET', path, path.endsWith('Update') ? { requests: [insert()] } : undefined)
+      expect(r.status).toBe(400)
+      expect(r.body.error.code).toBe('ACB_BAD_PATH')
+    }
+    expect(sent()).toBe(before)
+    expect((await call('d-sato', 'GET', `${C}/me/google/relay`)).body.data.usedToday).toBe(used)
+  })
+
   it('files a deletion as one, with the Doc named by id', async () => {
-    const { token } = await tokenFor('d-sato')
+    const { token } = await tokenOf('d-sato')
     await script(token!, 'POST', batch(DOC), { requests: [{ replaceAllText: { containsText: { text: '週次' }, replaceText: '' } }] })
     const latest = (await call('d-owner', 'GET', `${C}/google/relay`)).body.data.records[0]
     expect(latest).toMatchObject({ userId: 'd-sato', service: 'docs', operation: 'documents.batchUpdate', documentId: DOC, spreadsheetId: null, result: 'refused', reason: 'deletion' })
@@ -319,7 +345,7 @@ describe('docs: query parameters', () => {
   ]
   for (const [name, method, path] of cases) {
     it(`refuses ${name}`, async () => {
-      const { token } = await tokenFor('d-sato')
+      const { token } = await tokenOf('d-sato')
       const before = sent()
       const r = await script(token!, method, path, method === 'POST' ? { requests: [insert()] } : undefined)
       expect(r.status).toBe(400)
@@ -330,7 +356,7 @@ describe('docs: query parameters', () => {
   it('Sheets passes alt=json (Google\'s Python client adds it) and refuses any other alt', async () => {
     expect((await call('d-owner', 'PUT', `${C}/google/relay`, { services: { sheets: true } })).status).toBe(200)
     await allow('d-sato', ['sheets'], GOOGLE_SEED.member)
-    const { token } = await tokenFor('d-sato')
+    const { token } = await tokenOf('d-sato')
     const path = `/v4/spreadsheets/${SHEET}/values/${encodeURIComponent('案件!A1')}`
     expect((await script(token!, 'GET', `${path}?alt=json`, undefined, 'sheets')).status).toBe(200)
     const before = sent()
