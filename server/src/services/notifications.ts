@@ -38,6 +38,7 @@ import { addDays, isBusinessDay, nextBusinessDay } from '../../shared/core/busin
 import { acceptanceOf, CLOCK_ACTOR, INBOX_ACTIONS, INBOX_ACTOR, INTAKE_UNSURE_STATE, MESSAGE_TYPE, messageOriginLinks, WAIT_OVER_ACTION, waitCameBack } from '../../shared/core/core-types'
 import { restingTask, turnTiming } from '../../shared/core/turn-timing'
 import { MEETING_ARRIVED_STATE, MEETING_ATTENDEES_ACTION, MEETING_TYPE } from '../../shared/core/minutes'
+import { noticeSettled, type NoticeSubjectNow } from '../../shared/core/notification-settle'
 import type { AccountDirectory } from '../ports/accounts'
 import type { Clock, IdGenerator } from '../ports/clock'
 import type { CompanyData, CompanyDataSource } from '../ports/company-data'
@@ -71,15 +72,18 @@ export interface NotificationServiceDeps {
   accounts: Pick<AccountDirectory, 'byIds'>
   /** Tell these members their notices changed (push channel: kind + a fresh version only). */
   push: (companyId: string, userIds: string[]) => void
-  /** `job_paused`: the job's name when the member may read it now (owner / admin), else null (jobs.md). Absent → never shown. */
-  jobNoticeOf?: (member: Member, jobId: string) => { name: string } | null
+  /**
+   * `job_paused`: the job's name when the member may read it now (owner / admin), else null (jobs.md); its state now
+   * (settled once it runs again: `shared/core/notification-settle.ts`; absent → never settled). Absent → never shown.
+   */
+  jobNoticeOf?: (member: Member, jobId: string) => { name: string; state?: string } | null
   /**
    * An occurrence's notice (`job_expired` / `job_skipped` / `job_failed`, jobs.md "Notices"): the job's
    * name as the member may see it (owner / admin, or its responsible person: 「定期の仕事」 when a place it
    * names is not theirs to read), the occurrence's slot and code — null when the member may not see the
-   * job now. Absent → never shown.
+   * job now. Absent → never shown. `state`: the occurrence's now (settled once it ran afterwards; absent → never settled).
    */
-  jobOccurrenceNoticeOf?: (member: Member, jobId: string, occurrenceId: string) => { name: string; dueSlot: string; outcomeCode: string | null } | null
+  jobOccurrenceNoticeOf?: (member: Member, jobId: string, occurrenceId: string) => { name: string; dueSlot: string; outcomeCode: string | null; state?: string } | null
   /** 「止まっています」 (`job_chain_stopped`, stage 4a ①): the job's name and the cause as the member may read it, while that stop stands; else null — also for anyone but the responsible person who does not read the stop's record now (D7 = A). */
   jobChainStoppedOf?: (member: Member, jobId: string, at: string) => { name: string; why: string } | null
   /** 「1日の上限を超えた」 (`job_day_limit`, 4b-4 PR2): the set watch's name while the member is its approved version's responsible person; else null. */
@@ -967,7 +971,7 @@ export function createNotificationService(deps: NotificationServiceDeps) {
       const jobNotice = (r: NotificationRow) => {
         const [, jobId = '', reason = ''] = (r.dedupeKey ?? '').split(':')
         const job = deps.jobNoticeOf?.(member, jobId) ?? null
-        return job ? { name: job.name, reason } : null
+        return job ? { name: job.name, reason, state: job.state ?? null } : null
       }
       // An occurrence's notice: `<kind>:<job id>:<occurrence id>`, shown only while the member may see the job.
       const occurrenceNotice = (r: NotificationRow) => {
@@ -1038,6 +1042,12 @@ export function createNotificationService(deps: NotificationServiceDeps) {
       let aiToCheck: ReturnType<typeof aiChangesToCheck> | null = null
       const aiNow = () => (aiToCheck ??= aiChangesToCheck(member.companyId, handle, member.userId, (_, rec) => reader.record(rec), today))
       const dueStates = new Map(handle.records.states(shown.filter(r => r.kind === 'due_tomorrow').map(r => r.recordId)).map(st => [st.recordId, st]))
+      // Settled (片付いた, shared/core/notification-settle.ts): only an unread notice of a settling kind, from the current
+      // state of what it tells of (one read of the meetings' states; the jobs' answers above) — no ledger read, nothing
+      // stored, the notice not marked read. Only items already visible get here: settling never shows or hides one.
+      const meetingStates = new Map(handle.records.states(shown.filter(r => r.kind === 'minutes_arrived').map(r => r.recordId)).map(st => [st.recordId, st.state]))
+      const settledMark = (r: NotificationRow, now: NoticeSubjectNow) =>
+        (r.readAt === null && noticeSettled(r.kind, now) ? { settled: true as const } : {})
       const items: NotificationItem[] = shown.map(r => {
         const read = r.readAt !== null
         if (r.kind === 'morning_summary') {
@@ -1049,9 +1059,9 @@ export function createNotificationService(deps: NotificationServiceDeps) {
           return { id: r.id, kind: r.kind, recordId: '', recordType: '', recordTitle: '', version: 0, text, createdAt: r.createdAt, read, ...(desktop ? { desktop } : {}) }
         }
         if (r.kind === 'job_paused') {
-          const job = jobNotice(r) as { name: string; reason: string }
+          const job = jobNotice(r) as { name: string; reason: string; state: string | null }
           const why = job.reason === 'OWNER_LEFT' ? '責任者が会社を離れました。新しい責任者を決めてください' : '責任者の権限が変わり、仕事の範囲に足りなくなりました'
-          return { id: r.id, kind: r.kind, recordId: '', recordType: '', recordTitle: '', version: 0, text: `定期の仕事「${job.name}」を止めました：${why}`, createdAt: r.createdAt, read }
+          return { id: r.id, kind: r.kind, recordId: '', recordType: '', recordTitle: '', version: 0, text: `定期の仕事「${job.name}」を止めました：${why}`, createdAt: r.createdAt, read, ...settledMark(r, { jobState: job.state }) }
         }
         if (r.kind === 'company_restored') return restoredItem(r)
         if (r.kind === 'job_chain_stopped') {
@@ -1101,12 +1111,12 @@ export function createNotificationService(deps: NotificationServiceDeps) {
           return { id: r.id, kind: r.kind, recordId: '', recordType: '', recordTitle: '', version: 0, text, createdAt: r.createdAt, read }
         }
         if (jobOccurrenceKinds.has(r.kind)) {
-          const occ = occurrenceNotice(r) as { name: string; dueSlot: string; outcomeCode: string | null }
+          const occ = occurrenceNotice(r) as { name: string; dueSlot: string; outcomeCode: string | null; state?: string }
           // The reason it was written with (key `<kind>:<job>:<occurrence>:<retries>:<code>`, B PR 5b): a later
           // 「もう一度」 clears the occurrence's own code. A key without one (written before) reads the occurrence's.
           const written = (r.dedupeKey ?? '').split(':')[4]
           const outcomeCode = written && /^[A-Z_]{1,40}$/.test(written) ? written : occ.outcomeCode
-          return { id: r.id, kind: r.kind as NotificationKind, recordId: '', recordType: '', recordTitle: '', version: 0, text: jobOccurrenceText(r.kind, { ...occ, outcomeCode }), createdAt: r.createdAt, read }
+          return { id: r.id, kind: r.kind as NotificationKind, recordId: '', recordType: '', recordTitle: '', version: 0, text: jobOccurrenceText(r.kind, { ...occ, outcomeCode }), createdAt: r.createdAt, read, ...settledMark(r, { occurrenceState: occ.state ?? null }) }
         }
         const rec = recs.get(r.recordId) as RecordRow
         const def = types.get(rec.type)?.definition
@@ -1141,7 +1151,7 @@ export function createNotificationService(deps: NotificationServiceDeps) {
         return {
           id: r.id, kind: r.kind as NotificationKind, recordId: rec.id, recordType: rec.type, recordTitle: rec.title,
           version: r.recordVersion, text, createdAt: r.createdAt, read, ...(r.forUserId ? { forUserId: r.forUserId } : {}), ...(desktop ? { desktop } : {}),
-          ...(aiChange ? { aiChange } : {}),
+          ...(aiChange ? { aiChange } : {}), ...settledMark(r, { meetingState: meetingStates.get(rec.id) ?? null }),
         }
       })
       return ok({ available: true, unread: visible.filter(r => r.readAt === null).length, items })

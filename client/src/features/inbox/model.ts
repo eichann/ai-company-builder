@@ -130,11 +130,19 @@ const ASK_WORDS: Partial<Record<NotificationKind, string>> = {
   job_set_declined: 'AI は作りませんでした',
 }
 
+/**
+ * An unread notice the server marks settled (`settled`, shared/core/notification-settle.ts: the meeting is no longer
+ * `arrived`, the occurrence ran afterwards, the job runs again): できた・未確認 with this badge, out of あなた待ち and its
+ * count, never a stop. Still unread: opening it marks it read as any notice.
+ */
+const SETTLED_WORDS = { tone: 'success' as const, word: '片付きました' }
+
 /** Notices that are no row at all: the morning summary says what あなた待ち already counts. */
 const NO_ROW_NOTICES: ReadonlySet<NotificationKind> = new Set(['morning_summary'])
 
 /** Where a notice that is not part of a listed row goes. */
-export function noticePlace(kind: NotificationKind, turnComplete: boolean): 'stop' | 'done' | 'waiting' {
+export function noticePlace(kind: NotificationKind, turnComplete: boolean, settled = false): 'stop' | 'done' | 'waiting' {
+  if (settled) return 'done'
   if (STOP_NOTICES[kind]) return 'stop'
   if (DONE_WORDS[kind]) return 'done'
   if (CHANGE_WORDS[kind] && turnComplete) return 'done'
@@ -307,10 +315,10 @@ export function inboxView(source: NoticesState, now: Date, meetings: readonly Me
   const turnComplete = turn.total <= turn.items.length
   const stopBadge = (m: StopMeaning) => ({ tone: m, word: STOP_LOOK[m].word })
   const badgeOf = (n: NotificationItem, place: 'stop' | 'done' | 'waiting') => place === 'stop' ? stopBadge(STOP_NOTICES[n.kind]!)
-    : place === 'done' ? (DONE_WORDS[n.kind] ?? CHANGE_WORDS[n.kind]!) : { tone: 'neutral' as const, word: ASK_WORDS[n.kind] ?? 'あなたの番' }
+    : place === 'done' ? (n.settled === true ? SETTLED_WORDS : DONE_WORDS[n.kind] ?? CHANGE_WORDS[n.kind]!) : { tone: 'neutral' as const, word: ASK_WORDS[n.kind] ?? 'あなたの番' }
   for (const n of notices) {
     if (NO_ROW_NOTICES.has(n.kind)) continue
-    const place = noticePlace(n.kind, turnComplete)
+    const place = noticePlace(n.kind, turnComplete, n.settled === true)
     // Every read notice the server listed stays findable (the bell showed them, ［元に戻す］ included): folded at the bottom.
     if (n.read) {
       const seen = noticeRow(n, 'done', 0, badgeOf(n, place))

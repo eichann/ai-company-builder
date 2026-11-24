@@ -363,3 +363,32 @@ test('a plan listed both as open and as a run is one row, its run\'s', () => {
   assert.equal([...both.waiting, ...both.working].filter(i => i.key === `browser:${bp(3)}`).length, 1)
   assert.equal(both.waiting.find(i => i.key === `browser:${bp(3)}`)?.actionLabel, '確かめる…')
 })
+
+// Settled notices (notifications.md "Settled notices", 4b-4 第1.1版 D4): the server's `settled` mark, judged when read.
+test('a settled notice leaves あなた待ち and its count for できた・未確認 (片付きました), still unread, and the bulk may clear it', () => {
+  const kinds = ['minutes_arrived', 'job_failed', 'job_expired', 'job_paused'] as const
+  const open = kinds.map((k, i) => notice(k, k === 'minutes_arrived' ? 'meeting-a' : '', `2026-11-22T0${i}:00:00Z`))
+  const before = inboxView(state([], open), NOW)
+  assert.equal(before.counts.waiting, 4)
+  assert.equal(before.done.length, 0)
+  const settled = open.map(x => ({ ...x, settled: true as const }))
+  const v = inboxView(state([], settled), NOW)
+  assert.deepEqual(v.waiting, [])
+  assert.equal(v.counts.waiting, 0, 'the title bar\'s number is あなた待ち')
+  assert.deepEqual(v.done.map(i => i.key).sort(), settled.map(x => `notice:${x.id}`).sort())
+  for (const i of v.done) {
+    assert.deepEqual(i.badge, { tone: 'success', word: '片付きました' })
+    assert.equal(i.unreadNoticeIds.length, 1, 'not read: opening it marks it read as any notice')
+  }
+  assert.deepEqual(bulkSeenIds(v, 'done').sort(), settled.map(x => x.id).sort())
+  // Still news for the dot (an unread できた notice is).
+  assert.equal(hasInboxNews(inboxNewsKeys(v), new Set(inboxNewsBaseline(v))), true)
+})
+
+test('a settled notice about a row that waits is that row\'s news and never changes the row: it still waits, counted once', () => {
+  const arrived = { ...notice('minutes_arrived', 'meeting-w', '2026-11-22T00:00:00Z'), settled: true as const }
+  const v = inboxView(state([turn('meeting-w', 'meeting', 'read')], [arrived]), NOW)
+  assert.deepEqual(v.waiting.map(i => [i.key, i.unreadNoticeIds]), [['record:meeting-w', [arrived.id]]])
+  assert.deepEqual(v.done, [])
+  assert.equal(v.counts.waiting, 1)
+})

@@ -19,6 +19,8 @@ paths:
   - "client/tests/inbox-ui.*"
   - "client/tests/ui/inbox.spec.ts"
   - "shared/core/turn-timing.ts"
+  - "shared/core/notification-settle.ts"
+  - "server/tests/unit/notification-settle.test.ts"
 ---
 
 # Notices (知らせ), 「あなたの番」 and the inbox (受け箱) (stage 2 S5; the inbox I1 / I2)
@@ -215,6 +217,20 @@ a plugin can never draw a notice (§2-2).
   can no longer read (rules changed, private folder) or that was removed drops out of the list
   and of `unread`; nothing of it is shown. Records off → `{ available: false }` (no inbox, unless the company's own notices).
 - Notices older than 90 days are forgotten when the member next reads (`NOTIFICATION_KEEP_DAYS`).
+- **Settled notices** (片付いた, 4b-4 「自動で読む・知らせ・受け箱の数」 第1.1版, owner decision D4: only the clear kinds):
+  `GET /me/notifications` adds `settled: true` to an **unread** notice whose matter is over, by one table
+  (`shared/core/notification-settle.ts`, `NOTICE_SETTLE_RULES`, pure) judged from the **current state** of what it tells
+  of — never the ledger, nothing stored, the notice **not** marked read (`unread` unchanged), no row ever written or
+  changed: `minutes_arrived` — the meeting is no longer `arrived` (someone pressed ［AI に読ませる］ / ［読まない］, it is
+  read or being read; the records' states, one batch); `job_failed` / `job_expired` — that occurrence ran afterwards
+  (`done` / `nothing`, only reached through 「もう一度」; `jobs.occurrenceNotice`'s `state`); `job_paused` — the job is
+  `active` again (`jobs.noticeJob`'s `state`; retired or paused again stays). Every other kind (what a requester is told:
+  `overdue`, `acceptance_waiting`, `ai_turn_stuck`, `request_returned`…, and any kind not known) and a state that could not
+  be read never settle (the safe side). Judged only on notices already visible to the member: settling never shows nor hides
+  one. An app released before it ignores the field (counted as before). Tests: `tests/unit/notification-settle.test.ts`
+  (the table, each kind's condition, unread and the rows unchanged, a read notice never marked),
+  `job-occurrences.test.ts` 「past its expiry…」 and `jobs.test.ts` 「removing the member pauses…」 (the jobs' real states) —
+  mutation-checked.
 
 ```
 GET  /me/notifications            any member: their own → { available, unread, items ≤ 50 }
@@ -401,7 +417,11 @@ already says concerns the member, by what it needs from them — no tabs by sour
   **asks for something** whose record is not a listed row (`asked` for a later task, `overdue`,
   `acceptance_waiting`, `request_returned`, `intake_unsure`, `wait_over`, `reply_arrived`, `due_tomorrow`,
   `minutes_arrived`, `job_accept_needed`) **and any kind this app does not know** (the safe side:
-  `noticePlace`). These rows **leave when opened** (today's read state, decision ③: no new 「済んだ」). Order:
+  `noticePlace`). These rows **leave when opened** (today's read state, decision ③: no new 「済んだ」) — or when the
+  server marks them `settled` ("Settled notices" above): such an unread notice is a できた・未確認 row 「片付きました」
+  (`SETTLED_WORDS`), out of あなた待ち and the title bar's number, never a stop, still unread (opening it marks it read,
+  「まとめて確認済みにする」 includes it, the dot treats it as any unread できた notice); about a row that waits it stays that
+  row's news and changes nothing of the row. Order:
   stopped → (AI questions, I3) → approval → mail draft → check (minutes check, review) → the rest; then
   nearest due, newest.
 - **One job is one row**: an unread notice about a record in あなた待ち is that row's line and new mark
@@ -480,7 +500,7 @@ already says concerns the member, by what it needs from them — no tabs by sour
   state, the read lists, unread past the list),
   `skill-layout-state.spec.ts` (the button and ⌘J one panel, ⌘K, the Mac notification opens it),
   `status-colours.spec.ts` (the dot `unread`, the count `primary`) — mutation-checked.
-- Tests: `src/features/inbox/model.test.ts` (order, one row per record, stops leave once read, the 14-day
+- Tests: `src/features/inbox/model.test.ts` (settled notices out of あなた待ち and in できた, a settled row's news, order, one row per record, stops leave once read, the 14-day
   fold, the bulk only for できた, あなた待ち never capped, no approving action), `tests/ui/inbox.spec.ts`
   (`tests/inbox-ui.html`: order and chips, ［承認する…］ opens the real card and calls nothing, opening
   marks exactly its notices, a request approved elsewhere leaves, the fold and the bulk; `?plans=1|off`: a plan's rows open the real plan card and nothing runs, a plan approved elsewhere leaves on the next read, ［任せる］ on a card elsewhere moves the row at once, a read every minute while a plan is listed and a few minutes on through a run claimed elsewhere, then none, switched off no row and no read),

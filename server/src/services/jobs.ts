@@ -1087,13 +1087,16 @@ export function createJobService(deps: JobServiceDeps) {
       if (job) pauseFor(companyId, [job], reason, JOB_ACTOR.id)
     },
 
-    /** An occurrence notice's words for the member now, or null when they may not see the job (owner/admin, or its responsible person). */
-    occurrenceNotice(member: Member, jobId: string, occurrenceId: string): { name: string; dueSlot: string; outcomeCode: string | null } | null {
+    /**
+     * An occurrence notice's words for the member now, or null when they may not see the job (owner/admin, or its responsible
+     * person); with the occurrence's state now (whether the notice is settled: notifications.md "Settled notices").
+     */
+    occurrenceNotice(member: Member, jobId: string, occurrenceId: string): { name: string; dueSlot: string; outcomeCode: string | null; state: JobOccurrenceRow['state'] } | null {
       const found = visibleJob(member, jobId)
       if (!found) return null
       const occ = found.handle.jobs.occurrence(occurrenceId)
       if (!occ || occ.jobId !== jobId || !eventShown(found.handle, member, occ)) return null
-      return { name: nameFor(member, found.handle, found.job), dueSlot: shownSlot(occ), outcomeCode: occ.outcomeCode }
+      return { name: nameFor(member, found.handle, found.job), dueSlot: shownSlot(occ), outcomeCode: occ.outcomeCode, state: occ.state }
     },
 
     /** Whether the member may see this occurrence of a job they see (⑥: an event one only while they read its record). */
@@ -1229,11 +1232,11 @@ export function createJobService(deps: JobServiceDeps) {
       return role !== null && readsAll(companyData.forCompany(companyId), userId, role, definition)
     },
 
-    /** The job's name for a notice the member may read now (owner/admin only), or null. */
-    noticeJob(member: Member, jobId: string): { name: string } | null {
+    /** The job's name and state now for a notice the member may read now (owner/admin only), or null. */
+    noticeJob(member: Member, jobId: string): { name: string; state: JobRow['state'] } | null {
       if (!hasFullAccess(member.role) || !isJobId(jobId)) return null
       const job = jobsOf(member.companyId).find(jobId)
-      return job ? { name: job.name } : null
+      return job ? { name: job.name, state: job.state } : null
     },
   }
 }

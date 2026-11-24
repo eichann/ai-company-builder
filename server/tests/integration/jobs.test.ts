@@ -351,6 +351,12 @@ describe('the responsible person leaves or loses rights', () => {
     expect(bell.body.data.items.map((i: Json) => i.text)).toContain('定期の仕事「辞める人の仕事」を止めました：責任者が会社を離れました。新しい責任者を決めてください')
     // The responsible person is gone: resuming is refused until another is chosen.
     expect((await as('u-owner', 'POST', `/jobs/${job.id}/resume`)).body.code).toBe('JOB_OWNER_NOT_MEMBER')
+    // Settled (notifications.md "Settled notices") only once the job runs again — judged from its state now, still unread.
+    const paused = (items: Json[]) => items.filter(i => i.kind === 'job_paused' && i.text.includes('辞める人の仕事'))
+    expect(paused(bell.body.data.items).map(i => i.settled ?? null)).toEqual([null])
+    db.prepare("UPDATE ai_jobs SET state = 'active', paused_reason = NULL WHERE company_id = ? AND id = ?").run(CO, job.id)
+    const after = await as('u-owner', 'GET', '/me/notifications')
+    expect(paused(after.body.data.items).map(i => [i.settled, i.read])).toEqual([[true, false]])
   })
 
   it('a demotion that loses a place the approved version names pauses the job; one that keeps it does not', async () => {
