@@ -213,6 +213,11 @@ export function wireBrowserWriteLines<E extends IpcInvokeEvent>(ipc: IpcRegistra
     if (!Object.entries(line.read.values).every(([n, d]) => d.role !== 'target' || BROWSER_ID_VALUE_RE.test(e.proposed[n]))) return refused(W.values)
     const cardId = `wp_${randomBytes(16).toString('hex')}`
     keep(cardId, e)
+    // Nothing for a person to confirm (every value a target the read itself checks): read and make the draft now, as an
+    // inspection reads on the AI's request; ［任せる］ is still the member's.
+    if (!Object.values(line.read.values).some(d => d.role !== 'target' && d.from.includes('person'))) {
+      await prepare(e).catch(() => { e.phase = 'failed'; e.message = MESSAGES.readFailed })
+    }
     return { kind: 'card', cardId, words: W.proposed }
   }
 

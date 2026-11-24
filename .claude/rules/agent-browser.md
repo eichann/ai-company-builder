@@ -1595,7 +1595,8 @@ its runner takes the shared set of busy windows.
   this member's, cleared on sign-out) and answers fixed words (`BROWSER_WRITE_WORDS`: never a value it proposed, a value
   the site showed, a hash or a result). The card lists each value; a value the line takes from a person shows
   「AI が提案した値」 with ［確かめた］ (`browserLines:confirmValue`, main window only; a target can never be confirmed).
-  Nothing is read or asked until **every** such value is confirmed; then main reads the site (the read runner, strict,
+  Nothing is read or asked until **every** such value is confirmed (a line with none — every value a target the read
+  itself checks — is read on the proposal, as an inspection is); then main reads the site (the read runner, strict,
   between the account markers), the reads must make a plan (`browserWritesPlanProblem`), and `POST /browser-line-plans`
   gets the values with their sources (`site_fact` for targets, `person` confirmed for the confirmed ones) and the account
   read. The card then shows what was read (the generic card), what will be done (`browserWriteSentences`: the map's

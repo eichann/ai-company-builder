@@ -80,7 +80,7 @@ const WRITERS: BrowserLineWriters = {
   },
 }
 
-function harness(o: { openedFile?: unknown; writers?: BrowserLineWriters; loseAnswer?: boolean; steps?: unknown[] } = {}) {
+function harness(o: { openedFile?: unknown; writers?: BrowserLineWriters; loseAnswer?: boolean; steps?: unknown[]; sites?: Parameters<typeof wireBrowserWriteLines>[1]['sites']; lines?: typeof LINES; extraGet?: (a: string) => { status: number; body: string } | null } = {}) {
   const landings = new Map<string, Record<string, unknown>>([['2597458', landing()]])
   const actions = new Map<string, Record<string, unknown>>([['7001', action([21])]])
   const reads: string[] = []
@@ -95,6 +95,8 @@ function harness(o: { openedFile?: unknown; writers?: BrowserLineWriters; loseAn
     m = /^\/api\/actions\/(\d+)$/.exec(a)
     if (m && actions.has(m[1])) return { status: 200, body: JSON.stringify(mapShaped('action_set', actions.get(m[1]))) }
     if (a === '/test-tags/61') return { status: 200, body: JSON.stringify({ id: 61, name: TAG_NAME }) }
+    const extra = o.extraGet?.(a)
+    if (extra) return extra
     return { status: 404, body: '' }
   }
   const preview = { async read(a: string) { return get(a) }, closed: () => false }
@@ -154,8 +156,8 @@ function harness(o: { openedFile?: unknown; writers?: BrowserLineWriters; loseAn
     baseUrl: () => 'https://acb.example', cookies: () => ['s=1'], userId: user, context: createBrowserContext({ userId: user, aiSwitch: on }),
     stopped: () => false, siteLevel: () => 'write', windows: { runWindow: () => run, previewWindow: () => preview },
     records: { has: id => records.some(r => r.planId === id), put: r => { records.push(r) } }, busyWindows: new Set(),
-    sites: [{ map: site.map, readers: site.readers, addresses: { ...site.addresses, tag: { kind: 'object', path: '/test-tags/{id}' } }, account: site.account, writers: o.writers ?? WRITERS }],
-    lines: LINES, declarations: [lstep.declaration], fetch: fetchFake, openedFile: o.openedFile ?? approvedOpened(),
+    sites: o.sites ?? [{ map: site.map, readers: site.readers, addresses: { ...site.addresses, tag: { kind: 'object', path: '/test-tags/{id}' } }, account: site.account, writers: o.writers ?? WRITERS }],
+    lines: o.lines ?? LINES, declarations: [lstep.declaration], fetch: fetchFake, openedFile: o.openedFile ?? approvedOpened(),
   })
   const ev = (sender: number) => ({ sender: { id: sender, isDestroyed: () => false, send() {} } }) as unknown as IpcInvokeEvent
   const call = (channel: string, sender: number, ...args: unknown[]) => handlers.get(channel)!(ev(sender), COMPANY, ...args) as Promise<BrowserWriteGetResult>
@@ -247,4 +249,33 @@ test('a write in doubt stays in doubt on the card while the server still holds i
   assert.equal(r.view.result?.confirm?.from, later)
   assert.equal(r.view.result?.confirm?.canNow, false)
   assert.deepEqual(h.writes, ['/test/actions'])
+})
+
+test('a line with nothing for a person to confirm (every value a target the read checks) is read and made ready on the proposal; ［任せる］ stays the member\'s', async () => {
+  const map = {
+    site: 'lstep', version: '9.9.9', account: { label: 'アカウント' },
+    things: {
+      card: { label: 'カード', answer: 'json', id: 'id', fields: { id: { kind: 'id', label: '番号' }, items: { kind: 'id_set', label: '入っているもの' } }, keys: { id: 'required', items: 'required' }, must_hold: { account: true }, writes: { add_child: { items: 'item' } }, delivers: 'none' },
+      item: { label: 'もの', answer: 'json', id: 'id', fields: { id: { kind: 'id', label: '番号' }, name: { kind: 'text', label: '名前' } }, keys: { id: 'required', name: 'required' }, must_hold: { account: true } },
+    },
+  } as unknown as typeof site.map
+  const line = {
+    name: 'card_add', version: '1.0.0', label: 'カードに足す',
+    read: { site: 'lstep', values: { card: { kind: 'id', role: 'target', from: ['site_fact'] }, item: { kind: 'id', role: 'target', from: ['site_fact'] } },
+      reads: [{ name: 'card', thing: 'card', id: { value: 'card' } }, { name: 'item', thing: 'item', id: { value: 'item' } }], checks: [] },
+    writes: [{ read: 'card', verb: 'add_child', field: 'items', value: 'item' }], readLabels: { card: 'カード', item: '足すもの' }, show: [],
+  } as unknown as (typeof LINES)[number]
+  const writer = { 'card.add_child': { mechanics: { method: 'POST' as const, path: '/test/cards/add', encoding: 'form' as const, form: { card_id: '{id}' as const, item_id: '{value}' as const }, ignoreBody: [] }, async build() { return { problem: 'plan' as const } } } }
+  const h = harness({
+    openedFile: { format: 1, provisional: true, maps: [{ site: 'lstep', version: '9.9.9', map }], lines: [{ site: 'lstep', name: 'card_add', version: '1.0.0', mapVersion: '9.9.9', status: 'approved', line }] },
+    lines: [line],
+    sites: [{ map, readers: { card: (a: unknown) => { const x = a as { id: number; items: number[] }; return { id: String(x.id), items: x.items.map(String) } }, item: (a: unknown) => { const x = a as { id: number; name: string }; return { id: String(x.id), name: x.name } } }, addresses: { card: { kind: 'object', path: '/test-cards/{id}' }, item: { kind: 'object', path: '/test-items/{id}' } }, account: site.account, writers: writer }],
+    extraGet: a => a === '/test-cards/11' ? { status: 200, body: JSON.stringify({ id: 11, items: [1] }) } : a === '/test-items/22' ? { status: 200, body: JSON.stringify({ id: 22, name: 'もの' }) } : null,
+  })
+  assert.equal(await h.tool().execute({ site: 'lstep', line: 'card_add', values: { card: '11', item: '22' } }), BROWSER_WRITE_WORDS.proposed)
+  const card = await h.call('browserLines:writeCard', 1, h.cards[0])
+  if (!card.ok) throw new Error('no card')
+  assert.equal(card.view.phase, 'ready')
+  assert.ok(card.view.contentHash)
+  assert.deepEqual(h.writes, [], 'nothing is written until ［任せる］')
 })
