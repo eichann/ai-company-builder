@@ -113,7 +113,9 @@ import { removeLeftoverBrowserPartitions } from './features/browser/leftovers'
 import { isMainFrameSender, registerBrowserIpc } from './features/browser/ipc'
 import { bundledAssetHosts, bundledLoginHelpers, wireBrowserPlans } from './features/browser/wire'
 import { developerAssetHostsOn } from '../shared/browser-operation'
-import { createThisPcSwitch } from './features/browser/ai-switch'
+import { createRegisteredPcSwitch, createThisPcSwitch } from './features/browser/ai-switch'
+import { BROWSER_DEVICE_KEY_FILE, createBrowserDevice, createBrowserDeviceKey } from './features/browser/device'
+import { registerBrowserDeviceIpc } from './features/browser/device-ipc'
 import { BROWSER_AI_OPT_IN_FILE } from '../shared/browser-ai'
 import { lstepConnector } from '../connectors/lstep'
 import { lstepReadLines } from '../connector-maps/lstep'
@@ -618,14 +620,24 @@ registerBrowserIpc(ipc, {
   watch: companyId => agentControl.watchSignals(companyId),
 })
 // Its plans (agent-browser.md "The card, the IPC and the request tool"): the card's IPC, the runner behind
-// ［任せる］ and the request tool's factory. Reading a site, the operator and sending ask the switch (off unless this PC's opt-in).
-// Off for everyone unless this PC's opt-in names this server and the signed-in member (6c, owner's PC only).
-const browserAiSwitch = createThisPcSwitch({ file: () => path.join(userDataDir(), BROWSER_AI_OPT_IN_FILE), server: getServerApiUrl, userId: session.userId })
+// ［任せる］ and the request tool's factory. Reading a site, the operator and sending ask the switch (below).
+// This PC's registration (agent-browser.md "This PC's registration", D4): the PC's key only in the OS keychain
+// (safeStorage through `secretBox`), sent only in the header of the PC routes and the plans' gated steps.
+const browserDeviceKey = createBrowserDeviceKey({ box: secretBox, file: () => path.join(userDataDir(), BROWSER_DEVICE_KEY_FILE), log: message => console.log(message) })
+const browserDevice = createBrowserDevice({ key: browserDeviceKey, baseUrl: getServerApiUrl, cookies: session.cookies, userId: session.userId, computerName: () => os.hostname() })
+registerBrowserDeviceIpc(ipc, { device: browserDevice, fromMainWindow: event => isMainFrameSender(event, id => mainWindowHost.isWindow(id)) })
+agentControl.policy.onPolicy(companyId => browserDevice.refresh(companyId))
+// On when this PC is registered and enabled — or, during the transition (D5 removes it), this PC's hand-placed opt-in.
+const browserAiSwitch = createRegisteredPcSwitch({
+  optIn: createThisPcSwitch({ file: () => path.join(userDataDir(), BROWSER_AI_OPT_IN_FILE), server: getServerApiUrl, userId: session.userId }),
+  registered: () => browserDevice.enabledHere(),
+})
 const browserPlans = wireBrowserPlans(ipc, {
   aiSwitch: browserAiSwitch,
   fromMainWindow: event => isMainFrameSender(event, id => mainWindowHost.isWindow(id)),
   baseUrl: getServerApiUrl,
   cookies: session.cookies,
+  deviceKey: browserDeviceKey.header,
   userId: session.userId,
   userDataDir,
   windows: browser,
@@ -647,6 +659,7 @@ const browserInspections = wireBrowserInspections(ipc, {
   fromMainWindow: event => isMainFrameSender(event, id => mainWindowHost.isWindow(id)),
   baseUrl: getServerApiUrl,
   cookies: session.cookies,
+  deviceKey: browserDeviceKey.header,
   userId: session.userId,
   context: browserPlans.context,
   stopped: companyId => browserAiStopped(agentControl.policy.stop(companyId)),
@@ -663,6 +676,7 @@ const browserWrites = wireBrowserWriteLines(ipc, {
   fromMainWindow: event => isMainFrameSender(event, id => mainWindowHost.isWindow(id)),
   baseUrl: getServerApiUrl,
   cookies: session.cookies,
+  deviceKey: browserDeviceKey.header,
   userId: session.userId,
   context: browserPlans.context,
   stopped: companyId => browserAiStopped(agentControl.policy.stop(companyId)),
@@ -695,6 +709,7 @@ registerAuthIpc(ipc, {
     browserPlans.context.advance()
     browserInspections.clear()
     browserWrites.clear()
+    browserDevice.clear()
   },
   onSignedIn: userId => {
     agentControl.eventSender.sessionStarted()

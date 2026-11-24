@@ -25,6 +25,8 @@
 //   (manual=1) tab=ownkeys: Gemini, which members may bring their own key for, with none yet (chapter 28)
 //   (manual=1) tab=absences: 山田さん has no absence yet; adding one keeps it and answers that 高橋さん cannot read
 //          one waiting item (chapter 42)
+//   pc     (with browser=…) 「この PC」: none (default) | pending | enabled | revoked | unavailable | unknown; pcFail=1 refuses
+//          a press with the server's sentence; lines=0 gives the member no usable combination
 //   closed 1 = start with the settings closed: a 「設定を開く」 button (always there) opens them (Esc closes, focus returns)
 import { useState } from 'react'
 import { createRoot } from 'react-dom/client'
@@ -171,6 +173,16 @@ type TreeNode = { name: string; isDirectory: boolean; path: string; children?: T
 const tree = (dir: string, depth: number, max: number): TreeNode[] =>
   listDir(dir).map(e => (e.isDirectory && depth < max ? { ...e, children: tree(e.path, depth + 1, max) } : e))
 
+type PcState = 'none' | 'pending' | 'enabled' | 'revoked' | 'unavailable' | 'unknown'
+let pc: { state: PcState; label: string | null } = (() => {
+  const state = (params.get('pc') ?? 'none') as PcState
+  return { state, label: state === 'pending' || state === 'enabled' || state === 'revoked' ? '見本の MacBook' : null }
+})()
+const pcView = () => ({
+  ...pc, suggestedLabel: '見本の Mac',
+  lines: params.get('lines') === '0' ? [] : [{ label: '流入経路を点検する', writes: false }, { label: '流入経路を作る', writes: true }],
+})
+
 Object.assign(window, {
   electronAPI: {
     gitBinaryStatus: async () => ({ bundled: true, binary: 'bundled' }),
@@ -179,6 +191,15 @@ Object.assign(window, {
     onBrowserChanged: () => () => {},
     openBrowserSite: async (_companyId: string, host: string) => { (window as unknown as { browserOpened: string[] }).browserOpened = [...((window as unknown as { browserOpened?: string[] }).browserOpened ?? []), host]; return { ok: true } },
     clearBrowserLogin: async () => (params.get('browser') === 'clearFails' ? { ok: false, message: 'ログインを消せませんでした。もう一度お試しください。' } : { ok: true }),
+    // 「この PC」: main's view (a state, a name, the combinations — never a key). A press moves the state as the server would.
+    getBrowserPc: async () => ({ ok: true, view: pcView() }),
+    registerBrowserPc: async (_companyId: string, label: string) => {
+      if (params.get('pcFail')) return { ok: false, message: '登録できる PC の数を超えています。使わない PC の登録をやめてから、もう一度登録してください' }
+      ;(window as unknown as { pcRegistered?: string }).pcRegistered = label
+      pc = { state: 'pending', label }
+      return { ok: true, view: pcView() }
+    },
+    withdrawBrowserPc: async () => { pc = { state: 'revoked', label: pc.label }; return { ok: true, view: pcView() } },
     // 自分の設定 → 「Google で許可する」 opens the Google section: offline here, it says so (?google=ready: not allowed yet).
     getGoogleStatus: async () => (params.get('google') === 'ready'
       ? { success: true, data: { available: true, reason: null, connected: false, status: null, googleEmail: null, features: [], featuresOff: [], domain: 'kensho-a.example', practice: false, companyFeatures: ['minutes', 'mail'], seen: [] } }

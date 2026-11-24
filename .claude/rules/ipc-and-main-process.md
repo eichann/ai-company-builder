@@ -66,7 +66,9 @@ Full text: `docs/architecture/main-process-and-ipc.md` (internal).
   `agent-browser.md` "The card, the IPC and the request tool"; and browserLines:card: a read-only inspection's card held
   in main's memory, main window only, `features/browser/inspect.ts`, `agent-browser.md` "The inspection in the chat"; and
   browserLines:writeCard / confirmValue / runWrite / confirmWrite: a write card held in main's memory, main window only, the
-  member's own, `features/browser/write-lines.ts`, `agent-browser.md` "Writing on the new path"), `jobs` (jobs:mine / accept / pause / resume: the
+  member's own, `features/browser/write-lines.ts`, `agent-browser.md` "Writing on the new path"; and browserDevice:get / register /
+  withdraw: Settings' 「この PC」, main window only, a state and names — never the PC's key, `features/browser/device-ipc.ts`,
+  `agent-browser.md` "This PC's registration"), `jobs` (jobs:mine / accept / pause / resume: the
   scheduled jobs the member is responsible for, with the session; `jobs.md` "The screens"; and `proposals.ts`
   jobProposals:candidate / submit / mine / withdraw: a member's proposals, the chat card's 「これで管理者に出す」 a press of the
   member's own, session only — `jobs.md` "Member proposals" "The app (PR C)"; and `repeat-asks.ts` jobRepeatAsks:get / set:

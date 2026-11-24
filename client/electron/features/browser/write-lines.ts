@@ -50,6 +50,8 @@ export interface BrowserWriteLinesDeps<E> {
   fromMainWindow: (event: E) => boolean
   baseUrl: () => string
   cookies: () => string[]
+  /** This PC's key header value (device.ts): only the plan client's gated steps send it. */
+  deviceKey?: () => string | null
   userId: () => string | null
   context: BrowserContext
   stopped(companyId: string): boolean
@@ -120,7 +122,7 @@ const MESSAGES = {
 
 export function wireBrowserWriteLines<E extends IpcInvokeEvent>(ipc: IpcRegistrar<E, IpcMessageEvent>, deps: BrowserWriteLinesDeps<E>) {
   const now = deps.now ?? Date.now
-  const http = createBrowserLinesHttp({ baseUrl: deps.baseUrl, cookies: deps.cookies, fetch: deps.fetch })
+  const http = createBrowserLinesHttp({ baseUrl: deps.baseUrl, cookies: deps.cookies, deviceKey: deps.deviceKey, fetch: deps.fetch })
   const file = (deps.openedFile ?? opened) as BrowserOpenedFile
   // The site's operated host and name only from its reviewed declaration this build carries and the approved list approves.
   const declared = approvedBundledDeclarations(deps.approvedFile ?? approved, deps.carriedFile ?? carried, deps.declarations)

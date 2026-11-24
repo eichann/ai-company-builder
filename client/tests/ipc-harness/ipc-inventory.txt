@@ -62,6 +62,9 @@ contract.invoke brokerKeys:save
 contract.invoke browser:clearLogin
 contract.invoke browser:open
 contract.invoke browser:sites
+contract.invoke browserDevice:get
+contract.invoke browserDevice:register
+contract.invoke browserDevice:withdraw
 contract.invoke browserLines:card
 contract.invoke browserLines:confirmValue
 contract.invoke browserLines:confirmWrite
@@ -458,6 +461,7 @@ contract.type ElectronAPI.getArchivedTasks = getArchivedTasks: Invoke<'tasks:arc
 contract.type ElectronAPI.getAuthMode = getAuthMode: Invoke<'config:getAuthMode'>
 contract.type ElectronAPI.getAutoTurnSettings = getAutoTurnSettings: Invoke<'aiTurns:settings'>
 contract.type ElectronAPI.getBrowserInspection = getBrowserInspection: Invoke<'browserLines:card'>
+contract.type ElectronAPI.getBrowserPc = getBrowserPc: Invoke<'browserDevice:get'>
 contract.type ElectronAPI.getBrowserPlan = getBrowserPlan: Invoke<'browserPlans:get'>
 contract.type ElectronAPI.getBrowserSites = getBrowserSites: Invoke<'browser:sites'>
 contract.type ElectronAPI.getBrowserWriteCard = getBrowserWriteCard: Invoke<'browserLines:writeCard'>
@@ -603,6 +607,7 @@ contract.type ElectronAPI.reconcilePluginOperation = reconcilePluginOperation: I
 contract.type ElectronAPI.reconcileTaskRun = reconcileTaskRun: Invoke<'tasks:reconcile'>
 contract.type ElectronAPI.recreatePluginOperation = recreatePluginOperation: Invoke<'pluginOperations:recreate'>
 contract.type ElectronAPI.registerAllowedRoot = registerAllowedRoot: Invoke<'fs:registerAllowedRoot'>
+contract.type ElectronAPI.registerBrowserPc = registerBrowserPc: Invoke<'browserDevice:register'>
 contract.type ElectronAPI.reloadDocView = reloadDocView: Invoke<'docView:reload'>
 contract.type ElectronAPI.removeAbsence = removeAbsence: Invoke<'absences:remove'>
 contract.type ElectronAPI.removeOutboundMailAttachment = removeOutboundMailAttachment: Invoke<'outboundMail:removeAttachment'>
@@ -683,6 +688,7 @@ contract.type ElectronAPI.watchCompany = watchCompany: Invoke<'fs:watch'>
 contract.type ElectronAPI.watchMinutes = watchMinutes: Invoke<'minutes:watch'>
 contract.type ElectronAPI.watchNotifications = watchNotifications: Invoke<'notifications:watch'>
 contract.type ElectronAPI.withdrawApproval = withdrawApproval: Invoke<'approvals:withdraw'>
+contract.type ElectronAPI.withdrawBrowserPc = withdrawBrowserPc: Invoke<'browserDevice:withdraw'>
 contract.type ElectronAPI.withdrawJobProposal = withdrawJobProposal: Invoke<'jobProposals:withdraw'>
 contract.type ElectronAPI.writeFile = writeFile: Invoke<'fs:writeFile'>
 contract.type EnvStatusResult = export interface EnvStatusResult { }
@@ -852,6 +858,9 @@ contract.type IpcInvokeChannels.'brokerKeys:save' = 'brokerKeys:save': { args: [
 contract.type IpcInvokeChannels.'browser:clearLogin' = 'browser:clearLogin': { args: [companyId: string, host: string]; result: BrowserActionResult }
 contract.type IpcInvokeChannels.'browser:open' = 'browser:open': { args: [companyId: string, host: string]; result: BrowserActionResult }
 contract.type IpcInvokeChannels.'browser:sites' = 'browser:sites': { args: [companyId: string]; result: BrowserSitesResult }
+contract.type IpcInvokeChannels.'browserDevice:get' = 'browserDevice:get': { args: [companyId: string]; result: BrowserPcResult }
+contract.type IpcInvokeChannels.'browserDevice:register' = 'browserDevice:register': { args: [companyId: string, label: string]; result: BrowserPcResult }
+contract.type IpcInvokeChannels.'browserDevice:withdraw' = 'browserDevice:withdraw': { args: [companyId: string]; result: BrowserPcResult }
 contract.type IpcInvokeChannels.'browserLines:card' = 'browserLines:card': { args: [companyId: string, planId: string]; result: BrowserInspectionGetResult }
 contract.type IpcInvokeChannels.'browserLines:confirmValue' = 'browserLines:confirmValue': { args: [companyId: string, cardId: string, name: string]; result: BrowserWriteGetResult }
 contract.type IpcInvokeChannels.'browserLines:confirmWrite' = 'browserLines:confirmWrite': { args: [companyId: string, cardId: string, result: 'done' | 'not_done']; result: BrowserWriteGetResult }
@@ -1203,6 +1212,9 @@ main.handle brokerKeys:save @ features/broker/ipc.ts (companyId: string, service
 main.handle browser:clearLogin @ features/browser/ipc.ts (companyId, host)
 main.handle browser:open @ features/browser/ipc.ts (companyId, host)
 main.handle browser:sites @ features/browser/ipc.ts (companyId)
+main.handle browserDevice:get @ features/browser/device-ipc.ts (companyId)
+main.handle browserDevice:register @ features/browser/device-ipc.ts (companyId, label)
+main.handle browserDevice:withdraw @ features/browser/device-ipc.ts (companyId)
 main.handle browserLines:card @ features/browser/inspect.ts (companyId, planId)
 main.handle browserLines:confirmValue @ features/browser/write-lines.ts (companyId, cardId, name)
 main.handle browserLines:confirmWrite @ features/browser/write-lines.ts (companyId, cardId, result)
@@ -1592,6 +1604,8 @@ preload getAutoTurnSettings -> invoke aiTurns:settings($0)
 preload getAutoTurnSettings : (companyId: string) => Promise<AutoTurnSettings>
 preload getBrowserInspection -> invoke browserLines:card($0, $1)
 preload getBrowserInspection : (companyId: string, planId: string) => Promise<BrowserInspectionGetResult>
+preload getBrowserPc -> invoke browserDevice:get($0)
+preload getBrowserPc : (companyId: string) => Promise<BrowserPcResult>
 preload getBrowserPlan -> invoke browserPlans:get($0, $1)
 preload getBrowserPlan : (companyId: string, planId: string) => Promise<BrowserPlanGetResult>
 preload getBrowserSites -> invoke browser:sites($0)
@@ -1882,6 +1896,8 @@ preload recreatePluginOperation -> invoke pluginOperations:recreate($0, $1, $2, 
 preload recreatePluginOperation : (companyId: string, pluginId: string, operationId: string, confirm: boolean, conversationId?: string | undefined) => Promise<PluginOperationResult>
 preload registerAllowedRoot -> invoke fs:registerAllowedRoot($0)
 preload registerAllowedRoot : (path: string) => Promise<{ success: boolean; }>
+preload registerBrowserPc -> invoke browserDevice:register($0, $1)
+preload registerBrowserPc : (companyId: string, label: string) => Promise<BrowserPcResult>
 preload reloadDocView -> invoke docView:reload($0)
 preload reloadDocView : (viewId: number) => Promise<void>
 preload removeAbsence -> invoke absences:remove($0, $1)
@@ -2058,6 +2074,8 @@ preload watchNotifications -> invoke notifications:watch($0)
 preload watchNotifications : (companyId: string | null) => Promise<void>
 preload withdrawApproval -> invoke approvals:withdraw($0, $1)
 preload withdrawApproval : (companyId: string, approvalId: string) => Promise<ApprovalResult>
+preload withdrawBrowserPc -> invoke browserDevice:withdraw($0)
+preload withdrawBrowserPc : (companyId: string) => Promise<BrowserPcResult>
 preload withdrawJobProposal -> invoke jobProposals:withdraw($0, $1)
 preload withdrawJobProposal : (companyId: string, proposalId: string) => Promise<JobProposalResult>
 preload writeFile -> invoke fs:writeFile($0, $1)
