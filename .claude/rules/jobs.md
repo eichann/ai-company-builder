@@ -2158,7 +2158,8 @@ Code: `shared/core/job-proposals.ts` (ids `jc.` / `jp.` + 32 hex, limits, states
     含まれています）」 — never which.
   - **The submit is the member's press only**: the handler (`client/electron/features/jobs/proposals.ts`, session cookies) is
     registered by that module alone; no chat-server route, AI tool or record token reaches it; in the renderer only the chat
-    card's data layer (`src/features/chat/api.ts` `JobProposalCardPort`) and the card call it. Renderer values never shape
+    card's data layer (`src/features/chat/api.ts` `JobProposalCardPort`) and the card call it — and, since 4b-4 PR6b, 「定期の仕事」's
+    (`src/features/jobs/api.ts` `SetWatchAddPort`) for the member's press on a set watch they chose there. Renderer values never shape
     the path (`isJobCandidateId`, `isJobProposalId`, the fingerprint's shape, the company id).
   - **The chat server's flag fails closed** (review L3): the step lookup (`stepWriteArea`) is asked whenever it exists — also
     without a write guard — and a lookup that threw or rejected (a timeout) counts as a step: no tools.
