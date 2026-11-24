@@ -14,6 +14,7 @@ import { Button } from '@/components/ui/button'
 import { jobsApi, type JobOccurrenceView } from '@/lib/api'
 import { useCompany } from '@/lib/company-context'
 import { describeJobError } from '@/lib/errors'
+import { SET_WATCH_SEEN_NOTE } from '@/lib/jobs'
 import { useQuery } from '@/lib/use-query'
 import { jobMadeBeforeText, jobOccurrenceText, jobOperationKindText, jobRetryBlockText, jobSlotText } from '../../../../shared/core/job-words'
 
@@ -46,9 +47,14 @@ export function retryConfirmText(placement: 'e' | 'a' | null | undefined, made: 
 }
 
 /** A job's occurrences (newest first): when, what became of it and why, in plain words — and 「もう一度」 where it works. */
-export function JobOccurrences({ jobId, placement, nameOf }: {
+export function JobOccurrences({ jobId, placement, setWatch = false, nameOf }: {
   jobId: string
   placement?: 'e' | 'a' | null
+  /**
+   * A set watch (schema 5, 4b-4 PR7): the server lists its occurrences only to someone who attended the meeting (memo §2-5),
+   * so an owner / admin who did not sees none — said, so an empty list is not read as 「動いていない」.
+   */
+  setWatch?: boolean
   nameOf: (userId: string) => string
 }) {
   const { companyId } = useCompany()
@@ -75,9 +81,11 @@ export function JobOccurrences({ jobId, placement, nameOf }: {
 
   if (list.error && !list.data) return <p role="alert" className="text-sm text-destructive">{describeJobError(list.error)}</p>
   if (!list.data) return <ListSkeleton rows={2} />
-  if (list.data.occurrences.length === 0) return <p className="text-sm text-muted-foreground">まだ回がありません。</p>
+  const seen = setWatch && <p className="text-small text-muted-foreground" role="note">{SET_WATCH_SEEN_NOTE}</p>
+  if (list.data.occurrences.length === 0) return <>{seen}<p className="text-sm text-muted-foreground">{setWatch ? 'あなたに見える回はありません。' : 'まだ回がありません。'}</p></>
   return (
     <>
+      {seen}
       <ul aria-label="回の記録" className="space-y-1 rounded-md border bg-muted/30 px-3 py-2 text-sm">
         {list.data.occurrences.map((o) => {
           const words = jobOccurrenceText(o.state, o.outcomeCode)

@@ -24,7 +24,7 @@ vi.mock('../../shared/core/jobs', async (importOriginal) => {
 import { jobsApi } from '@/lib/api'
 import { ADMIN_JOB_SCHEMAS, definitionFromForm, editableDefinition, formFromDefinition, jobEditForm, needsNewerScreen } from '@/lib/jobs'
 import { canonicalJson } from '../../shared/core/fixed-content'
-import { parseJobDefinition, type JobDefinition } from '../../shared/core/jobs'
+import { JOB_SET_WATCH_OPENED, parseJobDefinition, type JobDefinition } from '../../shared/core/jobs'
 import { ok } from './fixtures'
 import { mockApi } from './mock-api'
 
@@ -103,6 +103,37 @@ const SAMPLES: Record<number, unknown[]> = {
       },
     },
   ],
+  // 4b-4 PR7: a set watch (schema 5) — the smallest (the opened combination, a department Skill, the minutes route and its
+  // one やること only) and one with every choice (reads, Skills of its own and another department, a Japanese deliverable
+  // folder, other limits and wait). The reasons and the trees are the server's (read when the version is made): stood in here.
+  5: [
+    {
+      ...base, schema: 5, name: '提案書のたたき台', trigger: JOB_SET_WATCH_OPENED[0], missed: { policy: 'skip', expiresAfterMinutes: 1440 },
+      check: { kind: 'matched_record' },
+      run: { kind: 'procedure', procedure: { source: 'department_skill', place: '営業部', skill: 'proposal-auto', fingerprint: 'a'.repeat(40) } }, placement: 'a',
+      grant: { tools: ['records'], creates: ['task'], routes: ['GET /minutes/:recordId/text'], reads: { paths: [], calls: [] }, writes: { area: 'none' }, outbound: 'none', limits: { minutes: 30, runsPerDay: 10 } },
+      decision: { reasons: [{ code: 'internal', label: '社内の会議' }] },
+    },
+    {
+      ...base, schema: 5, name: '提案書のたたき台', trigger: JOB_SET_WATCH_OPENED[0], missed: { policy: 'latest_only', expiresAfterMinutes: 4320 },
+      check: { kind: 'matched_record' },
+      run: { kind: 'procedure', procedure: { source: 'department_skill', place: '営業部', skill: 'proposal-auto', fingerprint: 'a'.repeat(40) } }, placement: 'a',
+      grant: {
+        tools: ['records', 'files_read', 'files_write'], creates: ['task'], routes: ['GET /minutes/:recordId/text'],
+        reads: { paths: ['営業部/提案書', '営業部/資料'], calls: [], skills: [{ place: '営業部', skill: 'proposal', fingerprint: 'b'.repeat(40) }, { place: '経営企画', skill: 'pricing', fingerprint: 'c'.repeat(40) }] },
+        writes: { area: 'deliverable', place: '営業部', folder: '提案書' }, outbound: 'none', limits: { minutes: 60, runsPerDay: 5 },
+      },
+      decision: { reasons: [{ code: 'internal', label: '社内の会議' }, { code: 'asked', label: '提案を求められた' }] },
+    },
+  ],
+}
+
+/** What the server fills when a version is made (the pinned trees, a set watch's reasons) is left out of the comparison. */
+function formed(d: JobDefinition): string {
+  const run = d.run.kind === 'procedure' && d.run.procedure.source === 'department_skill' ? { ...d.run, procedure: { ...d.run.procedure, fingerprint: '' } } : d.run
+  const skills = d.grant.reads.skills?.map((p) => ({ ...p, fingerprint: '' }))
+  const { decision: _decision, ...rest } = d
+  return canonicalJson({ ...rest, run, grant: skills ? { ...d.grant, reads: { ...d.grant.reads, skills } } : d.grant })
 }
 
 describe('this console announces only the shapes its form round-trips', () => {
@@ -119,7 +150,7 @@ describe('this console announces only the shapes its form round-trips', () => {
         const shelfName = d.run.kind === 'procedure' && d.run.procedure.source === 'shelf_skill' ? d.run.procedure.skill : undefined
         const back = definitionFromForm(formFromDefinition(d), shelfName)
         expect(back.ok, JSON.stringify(back)).toBe(true)
-        expect(canonicalJson((back as { definition: JobDefinition }).definition)).toBe(canonicalJson(d))
+        expect(formed((back as { definition: JobDefinition }).definition)).toBe(formed(d))
         // And so it is given the edit form (`jobEditForm` refuses only what would not come back).
         expect(jobEditForm(d)).not.toBeNull()
       }
@@ -129,8 +160,8 @@ describe('this console announces only the shapes its form round-trips', () => {
   it('with a core that reads a later shape, the requests still announce this console’s shapes only', async () => {
     const { calls } = mockApi({ 'GET /api/companies/c1/jobs': { body: ok({ stopped: false, canManage: true, jobs: [] }) } })
     await jobsApi.list('c1')
-    expect(calls.map((c) => c.headers['X-ACB-Job-Schemas'])).toEqual(['1,2,3,4'])
-    expect(ADMIN_JOB_SCHEMAS.join(',')).toBe('1,2,3,4')
+    expect(calls.map((c) => c.headers['X-ACB-Job-Schemas'])).toEqual(['1,2,3,4,5'])
+    expect(ADMIN_JOB_SCHEMAS.join(',')).toBe('1,2,3,4,5')
   })
 
   it('a definition of that later shape is never made into a form, whatever the core reads', () => {

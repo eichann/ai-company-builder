@@ -1018,12 +1018,13 @@ Event-triggered jobs (4a) store `schema: 2`. Production may run 4-0 again after 
   form is never built from a shape the core reads but the form cannot) and `APP_JOB_SCHEMAS` (`client/shared/jobs.ts`;
   the 受け取る shows a definition only of such a shape, `appReadsJobDefinition`) — the admin `[1, 2, 3]` since 4b-3 (with the
   form that makes and reads schema 3 back) and `[1, 2, 3, 4]` since member proposals' PR B (the form reads a proposal's job back
-  exactly and keeps it schema 4: "Member proposals" "The admin console (PR B)"), the app `[1, 2, 3]`
+  exactly and keeps it schema 4: "Member proposals" "The admin console (PR B)") and `[1, 2, 3, 4, 5]` since 4b-4 PR7 (the form
+  makes and reads a set watch back: "The set watch (schema 5)" "The admin console (PR7)"), the app `[1, 2, 3]`
   since 4b-2 (its words for schema 3: `jobCheckText`'s `source_record`; shipped in the same build that runs such jobs and
   fails closed) and `[1, 2, 3, 4]` since member proposals' PR C (schema 4 is schema 1's content: the same words, its 受け取る
   as any: "Member proposals" "The app (PR C)"). The core reads `schema: 3` since 4b-1 (`JOB_SCHEMAS` `[1, 2, 3]`) and `schema: 4` since member proposals (`[1, 2, 3, 4]`; the
   screens announce 4 since their PRs B / C) and `schema: 5` since 4b-4 PR1 (`[1, 2, 3, 4, 5]`, "The set watch (schema 5)";
-  no screen announces it yet). The server's tests of "a shape this build does not know" stand in `schema: 6`
+  the admin console announces it since 4b-4 PR7, the app not yet). The server's tests of "a shape this build does not know" stand in `schema: 6`
   since then (`schema: 5` before 4b-4 PR1, `schema: 4` before that) (`job-schemas.test.ts`, `job-rollback-floor.test.ts` reads the frozen 4b-1 fixture's version one shape later;
   the floor build runs it as written). Tests
   `admin/tests/job-screen-schemas.test.ts` (the core stood in by one reading `schema: 6` since 4b-4 PR1 — `schema: 5` since PR B, `schema: 4` since 4b-3,
@@ -1469,10 +1470,12 @@ timed renew of the same hold, moves it by milliseconds).
 「これから来る、条件に合うもの全部」 — a second way to watch, beside the one watched record of schemas 2 / 3 (which stay exactly
 as they are). **PR1: the definition, the consent and the approval. PR2: the server finds the records and makes occurrences**
 ("The scan and its occurrences" below) — no released app names its check (`matched_record`), so nothing is claimed or run until
-PR5, and no screen announces 5 yet (`ADMIN_JOB_SCHEMAS` / `APP_JOB_SCHEMAS` stay `[1, 2, 3, 4]`: such a version is answered
-without its definition, `needsUpdate`, and a create, approval or acceptance from them is `JOB_NEEDS_NEWER_SCREEN`). **PR3: how a
-run ends** (the judgement, its やること or notice, corrections: "How a run ends" below). PR4 the plugin steps' side, **PR5: the app
-runs it** ("The app runs it" below; no screen announces schema 5 yet — that, and every button, is PR6), PR7 the admin console.
+PR5, and the app does not announce 5 before PR6b (`APP_JOB_SCHEMAS` `[1, 2, 3, 4]` until then: such a version is answered to it
+without its definition, `needsUpdate`, and an acceptance from it is `JOB_NEEDS_NEWER_SCREEN`). **PR3: how a run ends** (the
+judgement, its やること or notice, corrections: "How a run ends" below). PR4 the plugin steps' side, **PR5: the app runs it** ("The
+app runs it" below), PR6 / PR6-A the app's words and screens, PR6b the app announces 5 (and a member proposes one), **PR7 the
+admin console** ("The admin console (PR7)" below; `ADMIN_JOB_SCHEMAS` `[1, 2, 3, 4, 5]`, merged together with PR6b: admins must
+not make jobs members' apps cannot run).
 
 - **The trigger is words, not a condition language** (owner decision 2026-11-23, §2-1): `{ kind: 'record_set', recordType,
   taskKind, origin, causes, causeRule, assignee, event, unit, guards }`, each key from its own list (`JOB_SET_WATCH_WORDS`,
@@ -1564,7 +1567,7 @@ runs it** ("The app runs it" below; no screen announces schema 5 yet — that, a
     so that job's pass — its occurrence included — is rolled back rather than an occurrence beside another job's mark. Each guard is named
     in the definition and checked by its name; an unknown name never holds.
   - **The day's limit**: occurrences made per job and company day up to the consented `grant.limits.runsPerDay` (the memo's 10
-    is what the admin form will offer, PR7); beyond it `day_limit` and the notice `job_day_limit` to the responsible person only,
+    is what the admin form offers a new one, PR7); beyond it `day_limit` and the notice `job_day_limit` to the responsible person only,
     once per job and day (`job_day_limit:<job>:<day>`, built when read by `jobs.dayLimitNotice`: the job's name and the day from
     its key — never 「今日」, it may be read later —, no meeting's name, no count, shown only while they are the approved version's responsible person). The job is never paused for it.
   - **The occurrence**: `ev:<seq>` (an event occurrence: the pause, the stop, the floor's freezing, the expiry and its notices
@@ -1730,8 +1733,41 @@ runs it** ("The app runs it" below; no screen announces schema 5 yet — that, a
   freezes such a version ("Shapes this build does not know"); the server's tests of an unknown shape stand in `schema: 6` since
   this PR (`job-schemas.test.ts`, `job-rollback-floor.test.ts`, `admin/tests/job-screen-schemas.test.ts`,
   `client/tests/job-screen-schemas.test.ts`). An older app parses a turn in schema 1 / 3 frames, which refuse a department
-  Skill (none is listed anyway). The admin form has none (`formFromDefinition` throws on one; `editableDefinition` never
-  hands it one).
+  Skill (none is listed anyway). An admin tab left open from before PR7 (announcing `1,2,3,4`) gets such a version without its
+  definition and says 「画面を新しくしてください」 (the server refuses its edit, approval and acceptance, as above).
+- **The admin console (PR7)** (`admin/src/lib/jobs.ts`, `components/jobs/set-watch-fields.tsx`, `job-dialogs.tsx`; owner memo
+  §2 / §3 / §6). Everything only shows and asks; the server decides.
+  - **The form**: 「いつ動くか」 → 「これから来る、条件に合うもの全部」 (`when: 'set'`) offers **only the opened combinations**
+    (`JOB_SET_WATCH_OPENED`, by index, each in `jobSetTriggerText`'s words) — never words of the admin's own; under it what the
+    combination takes and never takes (`setWatchConditionLines`: the counted causes, the assignee from creation, the first
+    done, one per meeting, each guard) and when it does not run (`SET_WATCH_NOT_RUN_NOTE`, memo §2-2). Then the department (its
+    own folder, from the departments list) and the Skill it runs, the Skills it reads (1–4, one per line: a name of the same
+    department or 「部署のフォルダ/Skill」), read places, the deliverable folder, minutes per run and the day's limit. 「すること」,
+    a time job's check, record reads, mail drafts and a place outside are not offered: `setWatchFromForm` builds schema 5 with
+    the check `matched_record`, the minutes route alone, `creates: ['task']` with `records`, `outbound: none` and no
+    `deliverTo` whatever the form held before (a left-over of another kind grants nothing). The trees and the reasons are
+    stand-ins the server replaces (`pinDepartmentSkills`). A **new** one starts at the owner's numbers (memo O6: 30 minutes, 10
+    a day, one day's wait, a missed one let go — `SET_WATCH_LIMITS`, `switchJobForm`); an edit keeps a version's own.
+  - **Never widened by an edit** (`jobEditForm`): a schema-5 version is given the form only when it comes back exactly, the
+    pinned trees and the reasons (the server's) left out (`pinless`); a combination not opened (`setComboOf` -1) never is.
+  - **Words** (approval and an owner/admin's own 受け取る, `JobVersionWords`): besides the shared words, 動く条件
+    (`setWatchConditionLines` + `SET_WATCH_NOT_RUN_NOTE`), 読む Skill, 判断の理由 (the pinned `decision.reasons` labels), the day's
+    limit (`setWatchDayLimitText`: beyond it nothing runs and the responsible person alone is told once, no meeting, no count),
+    見える人 (`SET_WATCH_SEEN_NOTE`: attendees only, never an admin who did not attend) and the wait
+    (`setWatchMissedText`). These sentences live in `admin/src/lib/jobs.ts` until the app's 受け取る (PR6) needs them; then they
+    move to `job-words.ts` (one copy). A combination not opened is described only as 「説明できない条件」.
+  - **Overlap warnings** (`setWatchOverlaps`, the approval): another job of this shape that is active and approved with the same
+    responsible person (from the list the page read; a paused one does not count, as on the server), and a business plugin
+    step set to one of its Skills by name (each installed plugin's `…/step-skills`; a plugin whose steps cannot be read is
+    left out, a failed plugin list is said) — each a warning callout, and the approval note that the steps' open requests are
+    closed and the Skill can no longer be chosen there. The press stays: the server refuses with its sentence
+    (`JOB_SET_WATCH_ONE_PER_PERSON`, `JOB_SET_WATCH_STEP_SKILL`, `JOB_SET_WATCH_NOT_OPENED`, `JOB_SKILL_DECISION_MISSING` are
+    in `JOB_SENTENCE_CODES`).
+  - **The list**: いつ in `jobSetTriggerText`'s words, 次の回 「条件に合うものが来たとき（回は、その会議に出た人にだけ見えます）」, and
+    回の記録 says `SET_WATCH_SEEN_NOTE` (an empty list for an admin who did not attend is 「あなたに見える回はありません」, never read
+    as 「動いていない」).
+  - Test: `admin/tests/jobs.test.tsx` "a set watch" and `admin/tests/job-screen-schemas.test.ts` (schema 5: the smallest and
+    one with every choice round-trip). Mutation check: see the PR.
 - Tests: `server/tests/unit/job-set-watch-definition.test.ts` (words key by key, a combination not opened, a line taken
   out, each piece schema 5's alone and schema 5 only those, the Skill pins, `decision.json`, the consent and schemas 1–4's
   sha256, the places, the words) and `server/tests/integration/job-set-watch.test.ts` (on a real bare repository: the pins and

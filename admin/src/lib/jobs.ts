@@ -8,11 +8,13 @@
  * parser check the rest.
  */
 import {
-  JOB_EVENT_PC_EXPIRES_DEFAULT_MINUTES, JOB_MINUTES_ROUTE, JOB_NAME_MAX, JOB_PROPOSAL_ORIGIN, JOB_PROPOSAL_SCHEMA, isRecordTrigger, isSetTrigger, knownJobDefinition, JOB_OUTBOUND_ROUTES, JOB_TASK_TITLE_MAX, JOB_TITLE_WORDS_MAX, parseJobDefinition,
-  type JobDefinition, type JobDefinitionResult, type JobDoneMark, type JobGrant, type JobWeekday,
+  JOB_EVENT_PC_EXPIRES_DEFAULT_MINUTES, JOB_MINUTES_ROUTE, JOB_NAME_MAX, JOB_PROPOSAL_ORIGIN, JOB_PROPOSAL_SCHEMA, JOB_READ_SKILLS_MAX, JOB_SET_CHECK_KIND,
+  JOB_SET_WATCH_OPENED, JOB_SET_WATCH_SCHEMA, isRecordTrigger, isSetTrigger, knownJobDefinition, JOB_OUTBOUND_ROUTES, JOB_TASK_TITLE_MAX, JOB_TITLE_WORDS_MAX, parseJobDefinition,
+  type JobDefinition, type JobDefinitionResult, type JobDoneMark, type JobGrant, type JobSetTrigger, type JobSkillPin, type JobWeekday,
 } from '../../../shared/core/jobs'
 import { BUILTIN_CONNECTORS, type DeliveryPlaceKind } from '../../../shared/core/builtin-connectors'
 import { canonicalJson } from '../../../shared/core/fixed-content'
+import { jobMinutesText } from '../../../shared/core/job-words'
 import { DELIVERABLE_FOLDER_MAX } from '../../../shared/core/plugin-step-runs'
 
 /**
@@ -23,13 +25,19 @@ import { DELIVERABLE_FOLDER_MAX } from '../../../shared/core/plugin-step-runs'
  * definition nor take an approval, acceptance or edit of it from here. Schema 3 (an event run by the responsible person's PC
  * AI) since stage 4b-3, with the form that makes and reads it back. Schema 4 (a job a member proposed from the AI chat, jobs.md
  * "Member proposals") since PR B: the form reads it back exactly (`jobEditForm`) and keeps it schema 4 with its responsible
- * person fixed; this console never makes a new one (only a member's proposal does).
+ * person fixed; this console never makes a new one (only a member's proposal does). Schema 5 (a set watch, 4b-4 PR7): the form
+ * makes it from an opened combination only and reads it back exactly (`setWatchFromForm`, `jobEditForm`).
  */
-export const ADMIN_JOB_SCHEMAS: readonly number[] = [1, 2, 3, 4]
+export const ADMIN_JOB_SCHEMAS: readonly number[] = [1, 2, 3, 4, 5]
 
-/** A definition this console's form reads: a shape the core knows and this console announces. */
+/**
+ * A definition this console's form reads: a shape the core knows and this console announces. A set watch (schema 5, 4b-4
+ * PR7) is read here by its trigger's kind: the core's `knownJobDefinition` answers time and record triggers only, and the
+ * set watch's words are said by `jobSetTriggerText`, which never describes a combination that is not opened as the opened one.
+ */
 function adminReadsDefinition(d: unknown): JobDefinition | null {
   const known = knownJobDefinition(d)
+    ?? (d && typeof d === 'object' && (d as { schema?: unknown }).schema === JOB_SET_WATCH_SCHEMA && isSetTrigger((d as { trigger?: unknown }).trigger) ? d as JobDefinition : null)
   return known !== null && ADMIN_JOB_SCHEMAS.includes(known.schema) ? known : null
 }
 
@@ -49,7 +57,20 @@ export interface JobForm {
    * (`event`): with `task` the server's operation (stage 4a, schema 2), with `pc` the responsible person's PC AI (stage 4b-3,
    * schema 3).
    */
-  when: 'time' | 'event'
+  when: 'time' | 'event' | 'set'
+  /**
+   * `set` (schema 5, 4b-4 PR7): which of the opened combinations (`JOB_SET_WATCH_OPENED`) — its index there, the only
+   * choices offered; -1 = the version's combination is not (any more) one of them: never saved from here (the parser
+   * refuses it too).
+   */
+  setCombo: number
+  /** `set`: the department whose Skill runs (`<place>/.claude/skills/<skillName>`). */
+  skillPlace: string
+  /**
+   * `set`: the Skills its AI may read besides the one it runs, one per line — a Skill name of the same department, or
+   * 「部署のフォルダ/Skill」 for another department's.
+   */
+  readSkills: string
   /** `event`: the state watched for (a state of a やること). */
   eventTo: string
   /**
@@ -144,7 +165,7 @@ const RECORD_READ_ROUTES = ['GET /my-turn', 'POST /query', 'GET /item/:recordId'
 
 export function emptyJobForm(actingUser: string): JobForm {
   return {
-    name: '', actingUser, proposal: false, kind: 'task', when: 'time', eventTo: 'done', eventFrom: '', startRecord: '', followMadeTask: true, every: 'week', hour: '09', minute: '00', businessDaysOnly: true, weekday: 'mon', businessDaysBefore: 0,
+    name: '', actingUser, proposal: false, kind: 'task', when: 'time', setCombo: 0, skillPlace: '', readSkills: '', eventTo: 'done', eventFrom: '', startRecord: '', followMadeTask: true, every: 'week', hour: '09', minute: '00', businessDaysOnly: true, weekday: 'mon', businessDaysBefore: 0,
     monthDay: 1, ifHoliday: 'before', taskTitle: '', dueBusinessDays: 1, missedPolicy: 'latest_only', expiresAfterMinutes: 720,
     limits: NEW_JOB_LIMITS,
     skillName: '', shelfItem: '', checkKind: 'new_files', checkPath: '', titleWords: '', doneMark: 'none', readPaths: '', readsOrder: [], readRecords: true, mailDrafts: false, writePlace: '', writeFolder: '',
@@ -192,11 +213,55 @@ export const JOB_VERSION_HIDDEN = 'この版には、あなたが見られない
  */
 export function switchJobForm(prev: JobForm, change: Partial<Pick<JobForm, 'when' | 'kind'>>, newJob: boolean): JobForm {
   const next = { ...prev, ...change }
-  if (change.kind === 'pc' && prev.kind !== 'pc') next.limits = { ...prev.limits, minutes: Math.max(prev.limits.minutes, 15) }
+  // A set watch is always a department Skill on the responsible person's PC (schema 5): 「すること」 is not offered.
+  if (next.when === 'set') next.kind = 'pc'
+  if (next.kind === 'pc' && prev.kind !== 'pc') next.limits = { ...prev.limits, minutes: Math.max(prev.limits.minutes, 15) }
   const eventPc = (f: JobForm) => f.when === 'event' && f.kind === 'pc'
   if (newJob && eventPc(next) && !eventPc(prev)) next.expiresAfterMinutes = JOB_EVENT_PC_EXPIRES_DEFAULT_MINUTES
+  // A new set watch (4b-4 PR7) starts at the owner's numbers (memo O6): 30 minutes a run, 10 a day, one day's wait for the
+  // app; a missed one is let go (there is no later slot to take its place). Still choices; an edit keeps the version's own.
+  if (newJob && next.when === 'set' && prev.when !== 'set') {
+    next.limits = { ...SET_WATCH_LIMITS }
+    next.expiresAfterMinutes = JOB_EVENT_PC_EXPIRES_DEFAULT_MINUTES
+    next.missedPolicy = 'skip'
+  }
   return next
 }
+
+/** A new set watch's limits (owner memo 「4b-4」 O6: 1回30分・1日10回). */
+export const SET_WATCH_LIMITS: JobGrant['limits'] = { minutes: 30, runsPerDay: 10 }
+/** The day's limits the form offers a set watch. */
+export const SET_WATCH_DAY_LIMITS = [1, 3, 5, 10, 15, 20, 24]
+
+/** The index of an opened combination equal to this trigger (every key, every list in its order), or -1. */
+export function setComboOf(trigger: JobSetTrigger): number {
+  const text = canonicalJson(trigger)
+  return JOB_SET_WATCH_OPENED.findIndex(o => canonicalJson(o) === text)
+}
+
+/** The Skills read, as the form writes them: a name of the run's department, else 「部署/Skill」. */
+function readSkillsText(pins: readonly JobSkillPin[], place: string): string {
+  return pins.map(p => (p.place === place ? p.skill : `${p.place}/${p.skill}`)).join('\n')
+}
+
+/** The form's Skills read, as pins with a placeholder fingerprint (the server pins each at its tree). */
+function readSkillPins(f: JobForm): Array<{ place: string; skill: string; fingerprint: string }> {
+  const place = f.skillPlace.normalize('NFC').trim()
+  return lines(f.readSkills).map((line) => {
+    const slash = line.lastIndexOf('/')
+    return slash < 0
+      ? { place, skill: line, fingerprint: PLACEHOLDER_TREE }
+      : { place: line.slice(0, slash).trim(), skill: line.slice(slash + 1).trim(), fingerprint: PLACEHOLDER_TREE }
+  })
+}
+
+/** A git tree id's shape: what the parser checks before the server replaces it with the tree it reads. */
+const PLACEHOLDER_TREE = '0'.repeat(40)
+/**
+ * The reasons a set watch's Skill declares are the server's (its `decision.json`, read when the version is made): the form
+ * sends this stand-in so the shared parser can check the rest, and the server replaces it.
+ */
+const PLACEHOLDER_DECISION = { reasons: [{ code: 'from_skill', label: 'Skill の一覧から' }] }
 
 /** A procedure's choices as the form shows them (a PC job of either trigger). */
 function pcFieldsOf(d: JobDefinition, checkPath: string): Partial<JobForm> {
@@ -227,8 +292,17 @@ export function formFromDefinition(d: JobDefinition): JobForm {
       ...(d.check.kind === 'source_record' ? { doneMark: d.check.doneMark } : {}),
     }
   }
-  // A set watch (schema 5) has no form in this console yet (not in `ADMIN_JOB_SCHEMAS`: `editableDefinition` never hands one here).
-  if (isSetTrigger(d.trigger)) throw new Error('formFromDefinition: no form for a set watch in this console')
+  if (isSetTrigger(d.trigger)) {
+    // A set watch (schema 5, 4b-4 PR7): the combination, the department Skill it runs and the Skills it reads; the rest is a
+    // PC job's choices. The minutes route and `creates: ['task']` are the schema's own (not choices).
+    const p = d.run.kind === 'procedure' && d.run.procedure.source === 'department_skill' ? d.run.procedure : null
+    return {
+      ...base, ...pcFieldsOf(d, ''), name: d.name, when: 'set', kind: 'pc', setCombo: setComboOf(d.trigger),
+      skillName: p?.skill ?? '', skillPlace: p?.place ?? '', readSkills: readSkillsText(d.grant.reads.skills ?? [], p?.place ?? ''),
+      readRecords: false, mailDrafts: false,
+      missedPolicy: d.missed.policy, expiresAfterMinutes: d.missed.expiresAfterMinutes, limits: d.grant.limits,
+    }
+  }
   const [hour, minute] = d.trigger.at.split(':')
   const t = d.trigger
   const common: JobForm = {
@@ -285,12 +359,43 @@ function procedureOf(f: JobForm, shelfSkillName?: string) {
 }
 
 /**
+ * A set watch (schema 5, 4b-4 PR7, owner memo 「4b-4」 §2 / §4): one of the opened combinations — never another, the form
+ * offers no words of its own —, a department Skill run on the responsible person's PC, checked by the server on the matched
+ * record (`matched_record`), with the one やること; its AI may read the places and Skills chosen and that meeting's minutes
+ * only — no mail draft, no place outside, no other route. The fingerprints and the reasons are stand-ins the server
+ * replaces with what it reads.
+ */
+function setWatchFromForm(f: JobForm): JobDefinitionResult {
+  const trigger = JOB_SET_WATCH_OPENED[f.setCombo]
+  if (!trigger) return { ok: false, problems: ['trigger.NOT_OPENED'] }
+  const reads = [...f.readsOrder.filter(p => lines(f.readPaths).includes(p)), ...lines(f.readPaths).filter(p => !f.readsOrder.includes(p))]
+  const skills = readSkillPins(f)
+  const writes: JobGrant['writes'] = f.writeFolder.trim() ? { area: 'deliverable', place: f.writePlace.normalize('NFC').trim(), folder: f.writeFolder.normalize('NFC').trim() } : { area: 'none' }
+  const tools = ['records', ...(reads.length > 0 ? ['files_read'] : []), ...(writes.area === 'deliverable' ? ['files_write'] : [])]
+  return parseJobDefinition({
+    schema: JOB_SET_WATCH_SCHEMA, name: f.name.normalize('NFC').trim(), actingUser: f.actingUser,
+    trigger: JSON.parse(JSON.stringify(trigger)),
+    check: { kind: JOB_SET_CHECK_KIND },
+    run: { kind: 'procedure', procedure: { source: 'department_skill', place: f.skillPlace.normalize('NFC').trim(), skill: f.skillName.trim(), fingerprint: PLACEHOLDER_TREE } },
+    placement: 'a',
+    missed: { policy: f.missedPolicy, expiresAfterMinutes: f.expiresAfterMinutes },
+    grant: {
+      tools, creates: ['task'], routes: [JOB_MINUTES_ROUTE],
+      reads: { paths: reads, calls: [], ...(skills.length > 0 ? { skills } : {}) },
+      writes, outbound: 'none', limits: f.limits,
+    },
+    decision: PLACEHOLDER_DECISION,
+  })
+}
+
+/**
  * The definition the form says, checked by the shared parser (the server checks it again). A PC job's Skill
  * goes with a placeholder fingerprint: the server reads the pinned one (and a shelf Skill's name) itself.
  */
 export function definitionFromForm(form: JobForm, shelfSkillName?: string): JobDefinitionResult {
   // A member's proposal stays what it is: a time job run by the responsible person's PC AI (schema 4, below).
   const f: JobForm = form.proposal ? { ...form, when: 'time', kind: 'pc' } : form
+  if (f.when === 'set') return setWatchFromForm(f)
   if (f.when === 'event') {
     if (!f.startRecord) return { ok: false, problems: ['trigger.startRecord.REQUIRED'] }
     const event = {
@@ -364,11 +469,22 @@ export const JOB_FORM_CANNOT_EDIT = 'この版は、管理画面の入力欄で�
  */
 export function jobEditForm(d: JobDefinition): JobForm | null {
   const form = formFromDefinition(d)
-  if (d.schema !== 3 && d.schema !== JOB_PROPOSAL_SCHEMA) return form
+  if (d.schema !== 3 && d.schema !== JOB_PROPOSAL_SCHEMA && d.schema !== JOB_SET_WATCH_SCHEMA) return form
   const shelfName = d.run.kind === 'procedure' && d.run.procedure.source === 'shelf_skill' ? d.run.procedure.skill : undefined
   const back = definitionFromForm(form, shelfName)
-  const pinless = (x: JobDefinition) => canonicalJson(x.run.kind === 'procedure' ? { ...x, run: { ...x.run, procedure: { ...x.run.procedure, fingerprint: '' } } } : x)
   return back.ok && pinless(back.definition) === pinless(d) ? form : null
+}
+
+/**
+ * A definition without what the server fills when a version is made: the pinned Skills' fingerprints and a set watch's
+ * reasons (its Skill's `decision.json`). What is left is what the form chose.
+ */
+function pinless(x: JobDefinition): string {
+  const run = x.run.kind === 'procedure' ? { ...x.run, procedure: { ...x.run.procedure, fingerprint: '' } } : x.run
+  const skills = x.grant.reads.skills?.map(p => ({ ...p, fingerprint: '' }))
+  const grant = skills ? { ...x.grant, reads: { ...x.grant.reads, skills } } : x.grant
+  const { decision: _decision, ...rest } = x
+  return canonicalJson({ ...rest, run, grant })
 }
 
 /** What to tell the person about the parser's problem codes (never the value). */
@@ -386,6 +502,14 @@ export function jobProblemText(problems: string[]): string {
   }
   if (problems.includes('check.doneMark.BAD')) return '「済みの印」を選び直してください。'
   if (problems.includes('grant.creates.EVENT_NEEDS_TASK')) return '出来事で AI が動く仕事は、終わったときに責任者のやることを1つ作ります。作れるものに「やること」が要ります。'
+  if (problems.includes('trigger.NOT_OPENED')) return '「これから来る、条件に合うもの全部」は、使えるようになっている条件の中から選んでください。'
+  if (problems.includes('grant.reads.skills.BAD') || problems.some(p => p.startsWith('grant.reads.skills.'))) {
+    return `読む Skill は、1行に1つ、${JOB_READ_SKILLS_MAX}つまで入れてください（同じ部署なら Skill のフォルダ名、ほかの部署なら「部署のフォルダ/Skill のフォルダ名」。同じものは1回だけ）。`
+  }
+  if (problems.includes('run.procedure.place.BAD')) return '手順にする Skill の部署を選んでください。'
+  if (problems.includes('grant.routes.SET_WATCH_MINUTES_ONLY') || problems.includes('grant.outbound.SET_WATCH_NONE') || problems.includes('grant.deliverTo.SET_WATCH_NONE')) {
+    return '「これから来る、条件に合うもの全部」の仕事は、その会議の議事録を読むほかの操作・メールの下書き・外に置くことはできません。'
+  }
   if (problems.some(p => p.startsWith('trigger.'))) return 'きっかけを選び直してください。'
   if (problems.some(p => p.startsWith('run.procedure'))) return '手順にする Skill を選んでください（Skill のフォルダ名は半角の英小文字・数字・- _）。'
   if (problems.includes('check.path.BAD') || problems.includes('check.path.NOT_IN_READS')) return '新しいファイルを確かめる場所を、会社のフォルダの中の場所で入れてください（例：営業部/面談）。'
@@ -396,4 +520,84 @@ export function jobProblemText(problems: string[]): string {
   if (problems.includes('grant.deliverTo.NEEDS_DELIVERABLE')) return 'できたものを外に置くには、先に「作ったファイルの置き場所」を入れてください（AI はそこで作ってから置きます）。'
   if (problems.some(p => p.startsWith('grant.deliverTo'))) return 'できたものを置く先を選び直してください。'
   return '内容に正しくないところがあります。選び直してください。'
+}
+
+/**
+ * A set watch's words for the approval and an owner/admin's own 受け取る (4b-4 PR7, owner memo 「4b-4」 §2 / §3 / §5 / §6):
+ * what of the consent the shared words (`jobTriggerText`, `jobRunText`, `jobCheckText`, `jobGrantLines`) do not say yet —
+ * which records it takes and which it never does, the Skills read, the reasons the Skill judges by, who sees its
+ * occurrences. Kept here until the app's 受け取る (PR6) needs the same sentences; then they move to `job-words.ts` (one copy).
+ * Said only for an opened combination: one that is not is described by `jobSetTriggerText` as such, never as this one.
+ */
+const SET_WATCH_GUARD_WORDS: Record<string, string> = {
+  people_only_meeting: '出た人だけが見られる会議だけ（2026年11月4日より前の、フォルダつきの会議は対象外）',
+  attendee_responsible: '責任者がその会議に出ていて（または担当で）、今もその会議を読めるときだけ',
+  outside_attendee: '社外の人が1人以上出た会議だけ（社内だけの会議では AI を動かしません）',
+  after_acceptance: '責任者が受け取ったあとに初めて読み終えた会議で、そのあと作られた「議事録を確認する」だけ（受け取る前の会議では動きません）',
+  plugin_step_exclusive: '同じ Skill を業務プラグインの手順で自動で動かしていないこと（同じ会議で、手順の頼みが開いているか動いているときは見送ります）',
+}
+
+/** The lines of 「どれで動くか」 for an opened set watch: the counted causes, the assignee, the event, the unit and each guard. */
+export function setWatchConditionLines(trigger: JobSetTrigger): string[] {
+  if (setComboOf(trigger) < 0) return []
+  return [
+    '人（と、その人の相談の中の AI）が完了したときだけ。定期の仕事・「AI の番」・業務の画面・取り込みでの完了では動きません',
+    '作られたときから責任者が担当の「議事録を確認する」だけ（途中で担当になったものでは動きません）',
+    'その「議事録を確認する」の一生で初めての完了だけ（開き直してまた完了しても動きません）',
+    '1つの会議につき1回だけ（仕事を直しても作り直しても、同じ会議で二度は動きません）',
+    ...trigger.guards.map(g => SET_WATCH_GUARD_WORDS[g] ?? 'この画面では説明できない条件があります（画面を新しくしてください）'),
+  ]
+}
+
+/** When it does not run although the person expected it (memo §2-2 「うまくいかない場面」), said on every screen of it. */
+export const SET_WATCH_NOT_RUN_NOTE =
+  '動くのは、［AI に読ませる］を押した人（「議事録を確認する」の担当）の仕事だけです。上司やアシスタントが押した会議、Google をつないでいない・別のアドレスで招待された会議、途中で担当を変えた会議では動きません。動かなかった会議の提案書などは、責任者が普通の AI相談で作れます。'
+
+/** Who sees its occurrences (memo §2-5, I8): never an owner / admin who did not attend. */
+export const SET_WATCH_SEEN_NOTE =
+  'この仕事の回・知らせ・件数・理由は、その会議を今読めて、会議に出た人（または担当）にだけ見えます。会議に出ていない管理者には、回の記録にも出てきません。'
+
+/** The day's limit of a set watch (memo §2-4 / O6, Q2). */
+export function setWatchDayLimitText(runsPerDay: number): string {
+  return `1日 ${runsPerDay}回まで。超えた会議では動かさず、その日1回だけ責任者に知らせます（会議の名前や件数は書きません）`
+}
+
+/** A missed occurrence of a set watch: the responsible person's app was not open in time. */
+export function setWatchMissedText(expiresAfterMinutes: number): string {
+  return `完了のあと${jobMinutesText(expiresAfterMinutes)}のうちに責任者のアプリで動けなかったときは見送ります`
+}
+
+/** The Skills its AI reads besides the one it runs, as 「「部署」の Skill「名前」」. */
+export function setWatchReadSkillsText(d: JobDefinition): string | null {
+  const pins = d.grant.reads.skills ?? []
+  return pins.length === 0 ? null : pins.map(p => `「${p.place}」の Skill「${p.skill}」`).join('・')
+}
+
+/** The reasons the Skill judges by (its `decision.json`, pinned by the server), by their labels. */
+export function setWatchReasonLabels(d: JobDefinition): string[] {
+  return (d.decision?.reasons ?? []).map(r => r.label)
+}
+
+/** The Skill names a set watch runs or reads: what the server matches a business plugin's step setting against. */
+export function setWatchSkillNames(d: JobDefinition): string[] {
+  const run = d.run.kind === 'procedure' && d.run.procedure.source === 'department_skill' ? [d.run.procedure.skill] : []
+  return [...new Set([...run, ...(d.grant.reads.skills ?? []).map(p => p.skill)])]
+}
+
+/**
+ * What a set watch would overlap with, for the approval's warning (memo §2-4, §3 ④; the server refuses both:
+ * `JOB_SET_WATCH_ONE_PER_PERSON`, `JOB_SET_WATCH_STEP_SKILL`): other jobs of the same shape that run as the same responsible
+ * person (approved and active — a paused one does not count, as on the server), and business plugin steps set to one of its
+ * Skills (by name, wherever its folder is, as on the server). Only shown; the server decides.
+ */
+export function setWatchOverlaps(d: JobDefinition, jobId: string | null, jobs: ReadonlyArray<{
+  id: string; name: string; state: string; approvedVersion: number | null; trigger?: unknown; approved?: { responsibleUserId: string } | null
+}>, steps: ReadonlyArray<{ plugin: string; step: string; skill: string | null }>): { samePerson: string[]; steps: Array<{ plugin: string; step: string }> } {
+  const names = setWatchSkillNames(d)
+  return {
+    samePerson: jobs
+      .filter(j => j.id !== jobId && j.state === 'active' && j.approvedVersion !== null && isSetTrigger(j.trigger) && j.approved?.responsibleUserId === d.actingUser)
+      .map(j => j.name),
+    steps: steps.filter(s => s.skill !== null && names.includes(s.skill)).map(s => ({ plugin: s.plugin, step: s.step })),
+  }
 }

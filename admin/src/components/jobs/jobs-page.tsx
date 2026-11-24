@@ -20,7 +20,7 @@ import { describeJobError } from '@/lib/errors'
 import { JOB_VERSION_HIDDEN } from '@/lib/jobs'
 import { useQuery } from '@/lib/use-query'
 import { JOB_CHAIN_STOPPED_ASK, jobOccurrenceText, jobRunsText, jobSlotText, jobTriggerText } from '../../../../shared/core/job-words'
-import { JOB_NEEDS_NEWER_SCREEN, JOB_SYSTEM_PAUSE_REASONS, isKnownJobTrigger, isRecordTrigger } from '../../../../shared/core/jobs'
+import { JOB_NEEDS_NEWER_SCREEN, JOB_SYSTEM_PAUSE_REASONS, isKnownJobTrigger, isRecordTrigger, isSetTrigger } from '../../../../shared/core/jobs'
 import { STOP_LOOK } from '../../../../shared/design-tokens/stop-meaning'
 import { JobAcceptDialog, JobApproveDialog, JobFormDialog } from './job-dialogs'
 import { JobOccurrences } from './job-occurrences'
@@ -155,7 +155,7 @@ export function JobsPage() {
                       </p>
                       <p className="text-sm text-muted-foreground">
                         責任者：{personName(byId.get(runsAs))}
-                        {job.needsUpdate ? <>　{JOB_NEEDS_NEWER_SCREEN}</> : isKnownJobTrigger(job.trigger) ? <>　いつ：{jobTriggerText(job.trigger)}</>
+                        {job.needsUpdate ? <>　{JOB_NEEDS_NEWER_SCREEN}</> : isKnownJobTrigger(job.trigger) || isSetTrigger(job.trigger) ? <>　いつ：{jobTriggerText(job.trigger)}</>
                           // No trigger and not a shape it cannot show: the version is hidden from this viewer (it names a
                           // やること or a place they cannot read) — said as such, never what it names.
                           : job.trigger === undefined && <>　{JOB_VERSION_HIDDEN}</>}
@@ -191,6 +191,8 @@ export function JobsPage() {
                       <p className="text-xs text-muted-foreground">
                         次の回：{job.nextSlot ? jobSlotText(job.nextSlot) : job.approvedVersion === null ? '承認すると決まります'
                           : isRecordTrigger(job.trigger) ? '見張っているやることが、きっかけの状態になったとき'
+                          // A set watch (4b-4 PR7): every matching record from now on; its occurrences are shown to attendees only.
+                          : isSetTrigger(job.trigger) ? '条件に合うものが来たとき（回は、その会議に出た人にだけ見えます）'
                           // A version hidden from this viewer (no trigger, not a shape it cannot show): nothing it names is said.
                           : job.trigger === undefined && !job.needsUpdate ? '表示できません' : 'ありません'}
                         {'　'}前の回：{job.lastOccurrence && last ? `${jobSlotText(job.lastOccurrence.dueSlot)}　${last.label}` : 'まだありません'}
@@ -216,7 +218,7 @@ export function JobsPage() {
                       </Button>
                     </div>
                   </div>
-                  {historyOf === job.id && <JobOccurrences jobId={job.id} placement={job.placement} nameOf={(userId) => personName(byId.get(userId))} />}
+                  {historyOf === job.id && <JobOccurrences jobId={job.id} placement={job.placement} setWatch={isSetTrigger(job.trigger)} nameOf={(userId) => personName(byId.get(userId))} />}
                 </li>
               )
             })}
@@ -238,6 +240,7 @@ export function JobsPage() {
           job={approving}
           members={memberList}
           myUserId={user?.id ?? null}
+          jobs={list}
           onClose={() => setApproving(null)}
           onApproved={(next) => { replace(next); proposalsMoved() }}
           onRefused={(err) => { if (proposalDecidedElsewhere(err)) { proposalsMoved(); jobs.reload() } }}
