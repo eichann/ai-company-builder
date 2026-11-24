@@ -35,6 +35,9 @@ const LATER_TABLES = [
   'ai_job_proposals',
   // jobs.md "The set watch (schema 5)" (4b-4 PR2): the 「使った」 mark, one per record.
   'ai_job_meeting_reviews',
+  // 4b-4 PR3: a set watch's judgement (fixed kinds) and the corrections of it.
+  'ai_job_set_reports',
+  'ai_job_set_feedback',
   // agent-browser.md 「ブラウザ操作」: the company setting, members' own modes and the history.
   'agent_browser_settings',
   'agent_browser_overrides',
