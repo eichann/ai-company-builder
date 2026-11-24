@@ -965,6 +965,106 @@ README in the folder.
   wall clock alone, as 6a did) must fail R5. No hole is open (`holes/`, `proposals/` empty).
   `limits/LimitFrozenAfterCheck` is the accepted "Remaining limits" stretch between the app's last
   clock check and the request leaving (fails R2, kept so it does not change unnoticed).
+- **A second real model, `StepsLife.tla`** (the generalization's PR 1, below): the several-writes design,
+  checked by the same `check` with its own rules R1'–R13 and `broken/BrokenSteps*` variants. `PlanLife.tla`
+  stays the copy of today's one-write code; `StepsLife.tla` is ahead of the code and is what PR 4 / PR 5
+  copy. `expected.txt` names both (`model`, `rule <model>`, `states <model>`).
+
+## Executions with several writes (generalization PR 1: the state table and the model; nothing implements it yet)
+
+Owner-approved design memo 「ブラウザ操作の汎用化」 (2026-11-24) §4, §5, §9, §15 (C11–C15), §15-2 (PR 1 =
+"実行と書き込みの状態の表＋模型＋戻せる下限の決め。設計の PR（コードは模型だけ）"), §16-3, §18. **This
+section is the contract** PR 4 (server: shape-2 plans, a permit and a report per write, the common lock
+key) and PR 5 (app: the writes in order, finding what was created) implement; `model/browser-plan/StepsLife.tla`
+is the same contract as a checked model (each action names its row here). No table, route or type exists
+yet: the memo puts no code but the model in PR 1, and §18 keeps every irreversible shape (stored rows,
+wire formats) changeable until a second site fits it — the table below is **provisional** until PR 4.
+Today's one-write path (`lstep@0.6.x`, "Plans, executions, permits and locks") is unchanged and keeps
+its own model (`PlanLife.tla`).
+
+- **The line judge (I4, §4-1)**: before its last write a plan writes only to what this execution
+  created (and confirmed its own, below); a change of what it created comes after the create; the
+  object that existed before the plan is written by the last write only. Judged at approval of the line
+  and when the server loads the list (PR 2's `browserLineProblem`); a line that fails it is never loaded,
+  approved or not. Model: `HarmlessPrefix` at `Claim`, `broken/BrokenStepsNoLineJudge` → R9.
+- **Execution states** (shape 2): `claimed` (nothing permitted) → `running` (a write permitted at least
+  once) → final `succeeded` (every write done) / `partial` (the first k done for sure, the rest surely
+  not sent: `not_sent` or `skipped`) / `failed` (write 1 not sent: nothing changed) / `void` (claimed,
+  never permitted) / `confirmed_done` · `confirmed_not_done` (the person's answer for the unknown write);
+  and `unknown` — **not final, but never runs again**: the writes after the unknown one are `skipped` at
+  once; it waits for the person's confirm or a late sure "done", and either ends it (R10).
+- **Write states** (one row per execution × index): `pending` → `permitted` → `done` / `not_sent` /
+  `unknown`; `unknown` → `done` (a late sure report) / `confirmed_done` / `confirmed_not_done`; `pending`
+  → `skipped` (never tried: an earlier write stopped, the gate refused, the plan's limit). A write's
+  state never moves backwards; `done`, `not_sent`, `skipped`, `confirmed_*` are final.
+- **The rows** (every change a compare-and-set in one transaction; time-outs judged on every touch, as
+  today):
+
+  | Row (model action) | When | Then |
+  |---|---|---|
+  | claim (`Claim`) | plan approved, line judged, every lock key the line names free | execution `claimed`, all its locks taken, the secret once |
+  | claimed → void (`VoidClaimed`) | cancel, 2 minutes, leaving | `void`, locks go |
+  | permit write k (`ServerPermits`) | the holder's secret; `claimed` (k = 1) or `running`; write k `pending`; **write k−1 `done` (recorded)**; no write `permitted` / `unknown`; for k > 1 the plan's limit (from the first permit) not past; the gate | write k `permitted` with both clocks' readings; execution `running`; a permit is given once per write |
+  | permit while k−1 still `permitted` (`ServerSaysNotYet`) | its report not in yet | "not yet", nothing changes; the app may ask again |
+  | the gate refuses (`ServerRefusesPermit`) | stop, setting, grant, retired line, app version | `claimed` → `void`; `running` with nothing open → `partial` (rest `skipped`); a write open → left to its report / time-out |
+  | permitted and silent (`ServerSettlesUnknown`) | **that write's** permit + 5 s + 30 s on both clocks | write `unknown`, rest `skipped`, execution `unknown` |
+  | the gap (`ServerEndsGap`) | `running`, nothing open, the next write `pending`, the plan's limit past (the app stopped between two writes, C12) | `partial`, rest `skipped`, locks go |
+  | report for write k (`ServerGetsReport`) | the secret; the report **names its write index** (never "the current one") | `permitted` + done → `done` (a create also records what it created and takes its lock); last → `succeeded`. `permitted` + not sent → `not_sent`, rest `skipped`; k = 1 → `failed`, else `partial`. `permitted` + unknown → `unknown`, rest `skipped`, execution `unknown`. `unknown` + done → `done`, execution ends `succeeded` (last) or `partial` — **never `running` again**. Anything else: recorded only (`same` / `recorded` / `conflict`, append-only as today) |
+  | confirm (`PersonConfirms`) | only the unknown write, only past **its own** window on both clocks; who may: as today | the write `confirmed_*`, execution `confirmed_*`, locks go; nothing more is sent |
+
+- **Idempotent reports, late and duplicate** (C12): every report is kept with its write index; the same
+  report again is `same`; a report for a write that was never permitted is `conflict` (409, kept); a
+  report never moves another write (`broken/BrokenStepsReportToCurrentWrite` → R13).
+- **What was created** (C1, C3): recorded only from a create write's `done` report, and the app reports
+  `done` only when the new object is identified for sure — the site's answer id, the parent's list
+  differing by exactly that id, its content as planned, its parent and account — **and** nothing else
+  references it (a copy may share a child with its original). Anything less is `unknown` (the next
+  write is never permitted). A later write on "what write k created" goes to the id the server
+  recorded (the permit binds it; the app cannot name another). Model: `Identified`, R11;
+  `BrokenStepsNoReferenceCheck`, `BrokenStepsPickNewest`.
+- **Locks** (C11, C12): one key for one object on both paths — company, host, account, the object's
+  kind and id, from the map (never the line's author), byte-equal to today's `browserLockKey` for the
+  same object (PR 4 tests the two side by side). Taken at the claim for every existing object the line
+  names and as a "create in this parent" reservation; a created object's key in the transaction that
+  records it; **all held until the execution is final** (`unknown` keeps them). Model: R3,
+  `BrokenStepsLockFreedAfterWrite`, `BrokenStepsOldPathOwnKey`.
+- **Time**: each write has its own 5 s permit and its own 35 s window counted from **its** permit (the
+  last time something could have been sent; a restart counts from the start as today) —
+  `BrokenStepsWindowFromFirstPermit` → R5. The plan's limit (memo §4-2: about 2 minutes from the first
+  permit) only stops later permits and ends a gap; it never shortens a write's window.
+- **Partial is sure** (§16-3, R4 of the second Codex round): a `partial` execution holds no `unknown`
+  write, so the card's 「していないこと」 lists only writes surely not sent (R12,
+  `BrokenStepsGapEndsOpenWrite`).
+- **Provisional storage for PR 4** (additive only, memo §8): a new table `browser_execution_steps`
+  (company, execution, index, write kind, state, `permitted_at` / `permitted_mono_ms` / `permitted_boot`,
+  `settled_at`, the created object's id and lock key — nullable —, `confirmed_by`; unique execution ×
+  index; fixed columns by trigger as today) and a nullable write index on `browser_execution_reports`. A
+  shape-1 execution has no step rows and is read as one write; no existing column changes.
+- **Rolling back the server** (C13, decided here): today's server knows one write and one lock in its
+  report, confirm, time-out and leaving paths, so it is **not** a safe place to roll back to once a
+  shape-2 row exists. The first build that can write shape 2 is preceded by a **floor build** (a
+  separate, earlier deploy: PR 4's first part) whose every plan entry — get, the lists, claim, permit,
+  report, confirm, the time-outs, leaving — treats a shape it does not know as frozen (not listed, not
+  claimed or permitted, a report kept and answered 409, locks it holds kept), with a cross-version test
+  that leaves `partial` and `unknown` executions and rolls back (as jobs' 4b-0.5). Production is never
+  rolled back below that floor (deployment rule, added with PR 4).
+- **What the model proves** (`StepsLife.tla`, 28,320 states; site-neutral: an existing object E, a
+  folder, what this execution created, a person's object in the same folder): over every interleaving of
+  one three-write plan (create → change it → change E, and a second shape that breaks the line judge),
+  an old-path one-write plan on the same E, lost / late / duplicate reports, lost answers, app crashes at
+  any step, a person editing E or creating in the folder, and a create that re-uses a shared child —
+  R1' each write reaches the site at most once; R2' only under a live permit for that write; R3 one open
+  execution per object across both paths; R4' `not_sent` / `skipped` / `pending` never reached the
+  site; R5' a "not done" confirmation stays true; R6 no change twice; R7 everything can settle; R8
+  write k only after k−1 recorded done; R9 a stopped execution left E alone; R10 nothing permitted after
+  `unknown`; R11 what is recorded as created is the execution's own, unshared object; R12 `partial` has
+  no unknown write; R13 `done` means it landed. Each of the 11 `BrokenSteps*` variants removes one guard
+  and fails its rule. **Left out** (assumptions checked elsewhere): whether a site's create shares a
+  child and what creating sets off (the map's reviewed promise and a test object, C2); more than three
+  writes, more objects, two new-path plans at once (the claim-once and one-lock rules are PlanLife's); the
+  app's two clocks and a server clock jump (PlanLife's `ServerClockJumps`; both clocks per write are
+  required here as there); the approval and the facts (PlanLife); the old path's inner life (folded into
+  claim → write → end).
 
 ## The operator and the preview (PR 6b-1: built, switched off; nothing in the app calls it)
 
@@ -1481,7 +1581,8 @@ remove, target `{ reminder, step, hole }`, the checker confirming the hole is th
 isolated and signed** and handed out with their declarations from the shelf (design memo §25: a
 JavaScript engine without network, files or clock, limits on time and memory; only checkers div signed;
 the package's `signature.yaml` verified first), landing routes, a
-recording helper, JSON writes, types with more than one write, the shelf handing out browser connectors. WSS to the operated host stays refused (no type declares
+recording helper, JSON writes, types with more than one write (their state table and model are in
+"Executions with several writes"; the code is PR 4 / PR 5), the shelf handing out browser connectors. WSS to the operated host stays refused (no type declares
 one). Until the AI operates, the admin page says next to the mode choice what 「使う」 does today
 (`BROWSER_NOT_YET_NOTE`); the PR that lets the AI operate removes that note (and its assertion in
 `admin/tests/agent-browser.test.tsx`).

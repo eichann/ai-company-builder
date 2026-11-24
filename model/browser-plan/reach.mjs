@@ -4,8 +4,8 @@
 //
 //   node reach.mjs <the checker's `-dump dot,actionlabels` output> <rule name>
 //
-// Settled (the same predicate as PlanLife.tla's `Settled`): every app idle, no execution claimed /
-// permitted / unknown, the lock free. Exit 0 when the rule holds. Exit 1 when it does not, printing the
+// Settled (the same predicate as PlanLife.tla's and StepsLife.tla's `Settled`): every app idle (or
+// gone), no execution claimed / running / permitted / unknown, every lock free. Exit 0 when the rule holds. Exit 1 when it does not, printing the
 // unsettleable state nearest to the start and the actions that lead there. Exit 2 when the graph cannot
 // be read (a checker or dump format change must not pass silently).
 import { readFileSync } from 'node:fs'
@@ -49,11 +49,14 @@ const value = (text, name) => {
   }
   return m[1]
 }
+// One predicate for both models: PlanLife's `lock` is one value ("none" or a plan), StepsLife's a
+// function from lock keys to a plan or "none"; a plan's name ("p1", "p2") anywhere in it = held.
+// The app's busy phases and the execution's open states are the union of both models' words.
 const settled = id => {
   const t = label.get(id)
-  return !/"(claimed|checked|asking|permitted|sent)"/.test(value(t, 'ph'))
-    && !/"(claimed|permitted|unknown)"/.test(value(t, 'exSt'))
-    && value(t, 'lock') === '"none"'
+  return !/"(claimed|checked|ready|asking|permitted|sent)"/.test(value(t, 'ph'))
+    && !/"(claimed|running|permitted|unknown)"/.test(value(t, 'exSt'))
+    && !/"p\d+"/.test(value(t, 'lock'))
 }
 
 // Walk backwards from the settled states.

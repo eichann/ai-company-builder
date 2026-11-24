@@ -421,9 +421,9 @@ jobs:
   model-browser-plan:
     name: Model (browser plan)
     # The browser plan lifecycle model (model/browser-plan/, agent-browser.md "The plan model"): the
-    # checker tla-ts explores every reachable state of PlanLife.tla and checks rules R1-R7, the state
-    # count against expected.txt, and that each broken / limit / hole variant fails on its named rule
-    # and each proposal passes (~25 s). Runs when the model or the code it copies changes (area model;
+    # checker tla-ts explores every reachable state of PlanLife.tla (today's one write, R1-R7) and
+    # StepsLife.tla (the several-writes design, R1'-R13), checks the state counts against expected.txt,
+    # and that each broken / limit / hole variant fails on its named rule and each proposal passes (~40 s). Runs when the model or the code it copies changes (area model;
     # check-areas.mjs keeps that list in step with the files the model cites), on push to main and
     # nightly. The checker is npm code from outside the pnpm workspace: installed by model/check from
     # model/browser-plan/package-lock.json with install scripts off, in this job only, which gets no
