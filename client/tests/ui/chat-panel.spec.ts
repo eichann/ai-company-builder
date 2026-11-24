@@ -737,6 +737,21 @@ test('「相談する」: a new consultation about the task names it by id and k
   expect(await chatBodies()).toBe(1)
 })
 
+// 「会議のあと」 (4b-4 PR6-A): the card records its press before asking, so the pane must say it took the ask (else the press is
+// taken back), and what the card chose reaches the AI with 「この作業をする」.
+test('「この作業をする」 with what a card chose: the pane says it took it, and the detail reaches the AI', async ({ page }) => {
+  await openPreview(page, 'chat-header', { history: 'edit', turn: 'manual' })
+  await expect(page.getByText('単価を10月版にしました。').and(page.locator('p:not(.truncate)'))).toBeVisible({ timeout: 15_000 })
+  const taken = await page.evaluate(() => (window as unknown as { __acbCommands: { run: (id: string, args: unknown) => Promise<unknown> } }).__acbCommands.run('chat.consultAbout', {
+    recordId: 'task-0000aa', title: '11月24日の会議のたたき台を確かめる', purpose: 'work', detail: '反映する項目（JSON）：[{"項目":"確度","値":"A"}]',
+  }))
+  expect(taken).toBe(true)
+  await expect.poll(() => chat(page, c => c.requests.filter(r => r.path === '/api/chat').length)).toBe(1)
+  const sent = await chat(page, c => c.requests.find(r => r.path === '/api/chat')?.body)
+  expect(JSON.stringify(sent?.messages)).toContain('ここにないことはしないでください')
+  expect(JSON.stringify(sent?.messages)).toContain('\\"値\\":\\"A\\"')
+})
+
 // A business plugin's person step (plugin-steps.md): its procedure goes to the AI, not into the member's bubble.
 test('a person step\'s consultation sends the procedure to the AI and shows only a chip naming the step', async ({ page }) => {
   await openPreview(page, 'chat-header', { history: 'edit', turn: 'manual' })

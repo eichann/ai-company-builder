@@ -39,12 +39,14 @@ installElectronAPI({
     asked.push({ note: change })
     if (change.kind === 'apply' || change.kind === 'undo') {
       if (refusedKeys(change, mark, results, Date.now()).length > 0) return { success: false, code: 'ALREADY', error: 'この項目は、もう反映しているか、反映の途中です。画面を読み直しました。' }
-      mark = { ...mark, applies: [...mark.applies, { id: change.id, at: new Date().toISOString(), kind: change.kind, keys: change.keys }] }
+      mark = { ...mark, applies: [...mark.applies, { id: change.id, at: new Date().toISOString(), kind: change.kind, keys: change.keys, ...(change.kind === 'apply' ? { items: change.items } : {}) }] }
     } else if (change.kind === 'draft-dismissed') mark = { ...mark, draftDismissed: true }
+    else if (change.kind === 'cancel') mark = { ...mark, applies: mark.applies.filter(a => a.id !== change.id) }
     return { success: true, mark }
   },
 })
-commands.register('chat.consultAbout', args => { asked.push({ consult: args }) }, { target: 'chat' })
+// `&nostart=1`: the chat pane does not take it (no consultation starts): the card takes its press back.
+commands.register('chat.consultAbout', args => { asked.push({ consult: args }); return params.get('nostart') === '1' ? undefined : true }, { target: 'chat' })
 commands.register('record.open', args => { asked.push({ open: args }) })
 
 const weekly = params.get('weekly') === '1'

@@ -11,8 +11,8 @@ import { FEATURE_OFF_SETTINGS_LINE, featuresFrom, type CompanyFeatures } from '.
 
 /**
  * The company's 「使う機能」 for the settings pages (records.md "Features on and off"). While unknown
- * (loading, an older server without the route, an error) every feature reads as on, so a setting is
- * never hidden by mistake.
+ * (loading, an older server without the route, an error) every feature reads as its default (on, but the app's trial
+ * 「会議のあと」, which has no settings card here), so a setting is never hidden by mistake.
  */
 export function useCompanyFeatures(): CompanyFeatures {
   const { companyId } = useCompany()

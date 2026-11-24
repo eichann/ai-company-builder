@@ -55,16 +55,45 @@ test('never twice: an item handed on and not answered, or written, is not offere
   const again: AfterMeetingMark = { ...pending, applies: [...pending.applies, { id: 'a-0000000000000002', at: new Date(NOW - 1000).toISOString(), kind: 'apply', keys: [k1] }] }
   assert.equal(itemStatus(k1, again, answered, NOW).kind, 'pending')
   // Older than the wait, with no answer: stopped half-way, offered again.
-  const old: AfterMeetingMark = { ...EMPTY_MARK, applies: [{ id: 'a-0000000000000003', at: new Date(NOW - 31 * 60_000).toISOString(), kind: 'apply', keys: [k2] }] }
+  const old: AfterMeetingMark = { ...EMPTY_MARK, applies: [{ id: 'a-0000000000000003', at: new Date(NOW - 121 * 60_000).toISOString(), kind: 'apply', keys: [k2] }] }
   assert.equal(itemStatus(k2, old, [], NOW).kind, 'stopped')
   assert.deepEqual(itemsToApply(drafts, statusOf(old)).map(d => d.key), [k0, k1, k2])
 })
 
+test('a card opened again shows what was applied: the value handed on, and an item added there', () => {
+  const added = { 書き先: 'hubspot' as const, 取引: '123', 項目: '次のアクション', 値: '見積を送る' }
+  const applies = [{ id: 'a-0000000000000001', at: new Date(NOW).toISOString(), kind: 'apply' as const, keys: [itemKey(items[1]), itemKey(added)], items: [{ ...items[1], 値: 280000 }, added] }]
+  const drafts = draftsFrom(items, applies)
+  assert.equal(drafts.find(d => d.項目 === '金額')?.値, 280000)
+  assert.equal(drafts.find(d => d.項目 === '金額')?.proposed, 300000)
+  assert.deepEqual(drafts.find(d => d.項目 === '次のアクション'), { key: itemKey(added), ...added, proposed: null, on: true, shareReason: false, shareQuote: false })
+})
+
+test('an undo that failed or stopped never makes a written item appliable again', () => {
+  const k = itemKey(items[2])
+  const mark: AfterMeetingMark = { ...EMPTY_MARK, applies: [
+    { id: 'a-0000000000000001', at: new Date(NOW - 5 * 60 * 60_000).toISOString(), kind: 'apply', keys: [k] },
+    { id: 'u-0000000000000001', at: new Date(NOW - 4 * 60 * 60_000).toISOString(), kind: 'undo', keys: [k] },
+  ] }
+  const written: ResultItem = { 回: 'a-0000000000000001', 書き先: '係数表', 取引: '123', 項目: '計上月', 状態: '済み', 前の値: 1, 書いた値: 2 }
+  const drafts = draftsFrom(items)
+  // The undo's consultation said it did not write back: still written.
+  const failedUndo = statusOf(mark, [written, { ...written, 回: 'u-0000000000000001', 状態: '失敗' }])
+  assert.deepEqual(itemsToApply(drafts, failedUndo).map(d => d.key).includes(k), false)
+  assert.equal(cardOffers(drafts, failedUndo).sheetUndo, true, 'the undo may be asked again')
+  // The undo stopped half-way: still written, not appliable.
+  assert.deepEqual(itemsToApply(drafts, statusOf(mark, [written])).map(d => d.key).includes(k), false)
+  // Taken back (戻した): neither applied again nor undone again.
+  const back = statusOf(mark, [written, { ...written, 回: 'u-0000000000000001', 状態: '戻した' }])
+  assert.equal(itemsToApply(drafts, back).some(d => d.key === k), false)
+  assert.equal(cardOffers(drafts, back).sheetUndo, false)
+})
+
 test('item words: an approval waits for its person, another assignee\'s deal is not written', () => {
-  const st = (r: Partial<ResultItem>) => statusText({ kind: 'result', undone: false, result: { 回: 'a-0000000000000001', 書き先: 'hubspot', 取引: '1', 項目: '金額', 状態: '済み', ...r } })
+  const st = (r: Partial<ResultItem>) => statusText({ kind: 'result', undone: false, via: 'apply', written: null, result: { 回: 'a-0000000000000001', 書き先: 'hubspot', 取引: '1', 項目: '金額', 状態: '済み', ...r } })
   assert.equal(st({ 状態: '承認待ち', 承認する人: '田中' }), '田中さんの承認待ち')
   assert.equal(st({ 状態: '担当が違う', 担当: '佐藤' }), 'この取引の担当は佐藤さんです。反映しませんでした')
-  assert.equal(statusText({ kind: 'pending', entry: { id: 'a-0000000000000001', at: '', kind: 'apply', keys: [] } }), '反映中…（相談の中で進めています）')
+  assert.equal(statusText({ kind: 'pending', written: null, entry: { id: 'a-0000000000000001', at: '', kind: 'apply', keys: [] } }), '反映中…（相談の中で進めています）')
 })
 
 test('the card notes: the AI unsure, and an unapplied proposal after three days', () => {

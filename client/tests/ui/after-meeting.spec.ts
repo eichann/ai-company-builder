@@ -38,6 +38,17 @@ test('［反映する］ hands only the ticked items with the member\'s values a
   expectNoPageErrors(state)
 })
 
+test('a consultation that does not start takes the press back and says so', async ({ page }) => {
+  const state = await openPreview(page, 'after-meeting', { nostart: '1' })
+  const card = page.getByRole('region', { name: '会議のあとの更新案' })
+  await card.getByRole('button', { name: '反映する' }).click()
+  await page.getByRole('button', { name: 'この内容で反映する' }).click()
+  await expect(card.getByText('相談を始められませんでした')).toBeVisible()
+  await expect(card.getByRole('button', { name: '反映する' })).toBeEnabled()
+  expect((await asked(page)).filter(a => 'note' in a).map(a => (a.note as { kind: string }).kind)).toEqual(['apply', 'cancel'])
+  expectNoPageErrors(state)
+})
+
 test('the minutes\' quote goes only when the member ticks it', async ({ page }) => {
   const state = await openPreview(page, 'after-meeting')
   const card = page.getByRole('region', { name: '会議のあとの更新案' })

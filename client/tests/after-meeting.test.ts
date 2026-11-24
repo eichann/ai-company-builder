@@ -6,7 +6,7 @@ import { mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync, readFileSyn
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { createAfterMeetingApi } from '../electron/features/after-meeting/ipc'
-import { itemKey, readProposalFile, readResultFile } from '../shared/after-meeting'
+import { itemKey, readProposalFile, readResultFile, type AfterMeetingChange, type HandedItem } from '../shared/after-meeting'
 
 const OCC = `occ.${'a'.repeat(32)}`
 const FOLDER = '営業/.personal/提案書/2026-11-24_A社'
@@ -17,6 +17,12 @@ const proposals = { 版: 1, 会議: 'meeting-abc123', 更新案: [
 ] }
 const K_STAGE = itemKey({ 書き先: 'hubspot', 取引: '123', 項目: '確度' })
 const K_SHEET = itemKey({ 書き先: '係数表', 取引: '123', 項目: '粗利' })
+const HANDED: Record<string, HandedItem> = {
+  [K_STAGE]: { 書き先: 'hubspot', 取引: '123', 項目: '確度', 値: 'A' },
+  [K_SHEET]: { 書き先: '係数表', 取引: '123', 項目: '粗利', 値: 1200 },
+}
+/** An apply press as the card sends it: the keys and what it hands on of each. */
+const press = (id: string, ...keys: string[]): AfterMeetingChange => ({ kind: 'apply', id, keys, items: keys.map(k => HANDED[k]) })
 
 function world(t: { after: (fn: () => void) => void }, opts: { types?: unknown; folder?: string } = {}) {
   const base = realpathSync(mkdtempSync(path.join(tmpdir(), 'acb-after-meeting-')))
@@ -39,7 +45,7 @@ function world(t: { after: (fn: () => void) => void }, opts: { types?: unknown; 
 }
 
 test('the card reads the run\'s own files: its proposals, results and the business\'s stages for 確度', async t => {
-  const w = world(t, { types: [{ definition: { fields: { confidence: { label: '確度', kind: 'choice', options: ['a', 'b'], option_labels: { a: 'A（高）' } } } } }] })
+  const w = world(t, { types: [{ definition: { fields: { confidence: { label: '確度', kind: 'choice', options: ['a', 'b'], optionLabels: { a: 'A（高）' } } } } }] })
   const r = await w.api.read('c1', w.root, OCC)
   assert.ok(r.success && r.run)
   assert.equal(r.run.folder, FOLDER)
@@ -51,12 +57,12 @@ test('the card reads the run\'s own files: its proposals, results and the busine
 
 test('a press is recorded once: the same item is never handed on twice while it waits or once written', async t => {
   const w = world(t)
-  const first = await w.api.note('c1', w.root, OCC, { kind: 'apply', id: 'a-0000000000000001', keys: [K_STAGE, K_SHEET] })
+  const first = await w.api.note('c1', w.root, OCC, press('a-0000000000000001', K_STAGE, K_SHEET))
   assert.ok(first.success)
   // A double press (two at once, and a second one later) is refused.
   const [a, b] = await Promise.all([
-    w.api.note('c1', w.root, OCC, { kind: 'apply', id: 'a-0000000000000002', keys: [K_STAGE] }),
-    w.api.note('c1', w.root, OCC, { kind: 'apply', id: 'a-0000000000000003', keys: [K_SHEET] }),
+    w.api.note('c1', w.root, OCC, press('a-0000000000000002', K_STAGE)),
+    w.api.note('c1', w.root, OCC, press('a-0000000000000003', K_SHEET)),
   ])
   assert.equal(a.success || b.success, false)
   assert.ok(!a.success && a.code === 'ALREADY')
@@ -66,25 +72,49 @@ test('a press is recorded once: the same item is never handed on twice while it 
     { 回: 'a-0000000000000001', 書き先: '係数表', 取引: '123', 項目: '粗利', 状態: '失敗' },
   ] }))
   w.setNow(NOW + 60 * 60_000)
-  assert.equal((await w.api.note('c1', w.root, OCC, { kind: 'apply', id: 'a-0000000000000004', keys: [K_STAGE] })).success, false)
-  assert.equal((await w.api.note('c1', w.root, OCC, { kind: 'apply', id: 'a-0000000000000005', keys: [K_SHEET] })).success, true)
+  assert.equal((await w.api.note('c1', w.root, OCC, press('a-0000000000000004', K_STAGE))).success, false)
+  assert.equal((await w.api.note('c1', w.root, OCC, press('a-0000000000000005', K_SHEET))).success, true)
   // The same item twice in one press, or a press id used before: refused.
-  assert.equal((await w.api.note('c1', w.root, OCC, { kind: 'apply', id: 'a-0000000000000001', keys: [K_SHEET] })).success, false)
+  assert.equal((await w.api.note('c1', w.root, OCC, press('a-0000000000000001', K_SHEET))).success, false)
 })
 
 test('two presses at the same moment: one is recorded, the other refused; one item twice in a press is refused', async t => {
   const w = world(t)
   const both = await Promise.all([
-    w.api.note('c1', w.root, OCC, { kind: 'apply', id: 'a-0000000000000001', keys: [K_STAGE] }),
-    w.api.note('c1', w.root, OCC, { kind: 'apply', id: 'a-0000000000000002', keys: [K_STAGE] }),
+    w.api.note('c1', w.root, OCC, press('a-0000000000000001', K_STAGE)),
+    w.api.note('c1', w.root, OCC, press('a-0000000000000002', K_STAGE)),
   ])
   assert.deepEqual(both.map(r => r.success), [true, false])
-  assert.equal((await w.api.note('c1', w.root, OCC, { kind: 'apply', id: 'a-0000000000000003', keys: [K_SHEET, K_SHEET] })).success, false)
+  assert.equal((await w.api.note('c1', w.root, OCC, press('a-0000000000000003', K_SHEET, K_SHEET))).success, false)
+})
+
+test('an apply keeps what it handed on (the value applied, an added item), and only items that are exactly its keys', async t => {
+  const w = world(t)
+  assert.equal((await w.api.note('c1', w.root, OCC, { kind: 'apply', id: 'a-0000000000000001', keys: [K_STAGE], items: [HANDED[K_SHEET]] })).success, false)
+  assert.equal((await w.api.note('c1', w.root, OCC, { kind: 'apply', id: 'a-0000000000000001', keys: [K_STAGE] } as never)).success, false)
+  const added: HandedItem = { 書き先: 'hubspot', 取引: '123', 項目: '次のアクション', 値: '見積を送る' }
+  const r = await w.api.note('c1', w.root, OCC, { kind: 'apply', id: 'a-0000000000000002', keys: [K_STAGE, itemKey(added)], items: [HANDED[K_STAGE], added] })
+  assert.ok(r.success)
+  const read = await w.api.read('c1', w.root, OCC)
+  assert.ok(read.success && read.run)
+  assert.deepEqual(read.mark.applies[0].items, [HANDED[K_STAGE], added])
+})
+
+test('a press whose consultation did not start is taken back only at once and only while nothing answered it', async t => {
+  const w = world(t)
+  assert.ok((await w.api.note('c1', w.root, OCC, press('a-0000000000000001', K_STAGE))).success)
+  assert.ok((await w.api.note('c1', w.root, OCC, { kind: 'cancel', id: 'a-0000000000000001' })).success)
+  assert.ok((await w.api.note('c1', w.root, OCC, press('a-0000000000000002', K_STAGE))).success, 'offered again')
+  w.setNow(NOW + 2 * 60_000)
+  assert.equal((await w.api.note('c1', w.root, OCC, { kind: 'cancel', id: 'a-0000000000000002' })).success, false, 'too late: it may have started')
+  assert.ok((await w.api.note('c1', w.root, OCC, press('a-0000000000000003', K_SHEET))).success)
+  writeFileSync(path.join(w.runDir, 'result.json'), JSON.stringify({ 版: 1, 結果: [{ 回: 'a-0000000000000003', 書き先: '係数表', 取引: '123', 項目: '粗利', 状態: '済み' }] }))
+  assert.equal((await w.api.note('c1', w.root, OCC, { kind: 'cancel', id: 'a-0000000000000003' })).success, false, 'answered: it started')
 })
 
 test('an undo of the coefficient sheet only for what the consultation wrote, with the value before kept', async t => {
   const w = world(t)
-  assert.ok((await w.api.note('c1', w.root, OCC, { kind: 'apply', id: 'a-0000000000000001', keys: [K_SHEET] })).success)
+  assert.ok((await w.api.note('c1', w.root, OCC, press('a-0000000000000001', K_SHEET))).success)
   writeFileSync(path.join(w.runDir, 'result.json'), JSON.stringify({ 版: 1, 結果: [{ 回: 'a-0000000000000001', 書き先: '係数表', 取引: '123', 項目: '粗利', 状態: '済み' }] }))
   assert.equal((await w.api.note('c1', w.root, OCC, { kind: 'undo', id: 'u-0000000000000001', keys: [K_SHEET] })).success, false, 'nothing kept to write back')
   writeFileSync(path.join(w.runDir, 'result.json'), JSON.stringify({ 版: 1, 結果: [{ 回: 'a-0000000000000001', 書き先: '係数表', 取引: '123', 項目: '粗利', 状態: '済み', 前の値: 900, 書いた値: 1000 }] }))

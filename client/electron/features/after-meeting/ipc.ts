@@ -7,8 +7,11 @@
 import path from 'node:path'
 import { lstat, mkdir, readFile, readdir, realpath, rename, writeFile } from 'node:fs/promises'
 import { isOccurrenceId } from '../../../../shared/core/jobs'
+import { diskKey } from '../../../../shared/core/paths'
+import type { FieldDef } from '../../../../shared/core/record-types'
+import type { RecordTypeView } from '../../../../shared/types/records'
 import {
-  AFTER_MEETING_FILE_MAX, AFTER_MEETING_RESULT_FILE, APPLY_ID_RE, readMark, readProposalFile, readResultFile, refusedKeys,
+  AFTER_MEETING_FILE_MAX, AFTER_MEETING_RESULT_FILE, APPLY_ID_RE, handedItems, readMark, readProposalFile, readResultFile, refusedKeys,
   type AfterMeetingChange, type AfterMeetingMark, type AfterMeetingNoteResult, type AfterMeetingRead, type AfterMeetingRun, type ResultItem,
 } from '../../../shared/after-meeting'
 import { SET_WATCH_UPDATES_FILE } from '../../../shared/ai-turn-steps/set-watch'
@@ -31,6 +34,9 @@ export interface AfterMeetingDeps {
 const COMPANY_RE = /^[A-Za-z0-9_-]{1,100}$/
 const BAD: AfterMeetingNoteResult = { success: false, code: 'BAD_REQUEST', error: '入力が正しくありません。' }
 const KEY_MAX = 200
+const STAGES_KEPT_MS = 5 * 60_000
+/** A press whose consultation did not start may be taken back only this soon after it (and only while nothing answered it). */
+const CANCEL_WITHIN_MS = 60_000
 
 /** A run folder as PR5 writes it: `<place>/.personal/<folder>/<run>`, plain segments only. */
 function runFolderOk(rel: unknown): rel is string {
@@ -75,7 +81,8 @@ export function createAfterMeetingApi(deps: AfterMeetingDeps) {
     const folder = path.join(root, ...run.folder.split('/'))
     const real = await realpath(folder).catch(() => null)
     const realRoot = await realpath(root).catch(() => null)
-    if (!real || !realRoot || real !== path.join(realRoot, ...run.folder.split('/'))) return null
+    // Compared as the disk folds names (a Mac's NFD spelling of a Japanese place or company is the same folder).
+    if (!real || !realRoot || diskKey(real) !== diskKey(path.join(realRoot, ...run.folder.split('/')))) return null
     const file = path.join(real, name)
     const st = await lstat(file).catch(() => null)
     if (!st || !st.isFile() || st.size > AFTER_MEETING_FILE_MAX) return null
@@ -98,8 +105,18 @@ export function createAfterMeetingApi(deps: AfterMeetingDeps) {
     }
   }
 
-  /** 確度's choices: a business type's choice field named 確度 in the types the server answers (its labels, in order). */
+  // The stages change with a plugin version: read at most every few minutes (the card reads again while a press waits).
+  const stagesKept = new Map<string, { at: number; stages: string[] | null }>()
   async function stagesOf(companyId: string): Promise<string[] | null> {
+    const kept = stagesKept.get(companyId)
+    if (kept && now() - kept.at < STAGES_KEPT_MS) return kept.stages
+    const stages = await readStages(companyId)
+    stagesKept.set(companyId, { at: now(), stages })
+    return stages
+  }
+
+  /** 確度's choices: a business type's choice field named 確度 in the types the server answers (its labels, in order). */
+  async function readStages(companyId: string): Promise<string[] | null> {
     const base = deps.baseUrl().replace(/\/+$/, '')
     const cookies = deps.cookies()
     if (!base || cookies.length === 0) return null
@@ -108,12 +125,12 @@ export function createAfterMeetingApi(deps: AfterMeetingDeps) {
         method: 'GET', redirect: 'error', signal: AbortSignal.timeout(10_000), headers: { Cookie: cookies.join('; ') },
       })
       if (res.status !== 200) return null
-      const types = ((await res.json().catch(() => null)) as { data?: { types?: Array<{ definition?: { fields?: Record<string, unknown> } }> } } | null)?.data?.types ?? []
-      for (const t of types) {
+      const types = ((await res.json().catch(() => null)) as { data?: { types?: Array<Partial<RecordTypeView>> } } | null)?.data?.types ?? []
+      for (const t of Array.isArray(types) ? types : []) {
         for (const f of Object.values(t.definition?.fields ?? {})) {
-          const field = f as { label?: unknown; kind?: unknown; options?: unknown; option_labels?: unknown }
+          const field = f as Partial<FieldDef>
           if (field.label !== '確度' || field.kind !== 'choice' || !Array.isArray(field.options)) continue
-          const labels = (typeof field.option_labels === 'object' && field.option_labels !== null ? field.option_labels : {}) as Record<string, unknown>
+          const labels = (typeof field.optionLabels === 'object' && field.optionLabels !== null ? field.optionLabels : {}) as Record<string, unknown>
           const out = field.options.filter((o): o is string => typeof o === 'string').map(o => (typeof labels[o] === 'string' ? labels[o] as string : o))
           return out.length > 0 && out.length <= 20 ? out : null
         }
@@ -155,8 +172,12 @@ export function createAfterMeetingApi(deps: AfterMeetingDeps) {
     const okKey = (k: unknown): k is string => typeof k === 'string' && k.length > 0 && k.length <= KEY_MAX
     if ((c.kind === 'apply' || c.kind === 'undo') && !(typeof c.id === 'string' && APPLY_ID_RE.test(c.id) && c.id.startsWith(c.kind === 'apply' ? 'a-' : 'u-')
       && Array.isArray(c.keys) && c.keys.length > 0 && c.keys.length <= 40 && c.keys.every(okKey))) return BAD
+    // An apply keeps what it handed on (an added item, an edited value): exactly its keys, each of the file's shape.
+    const handed = c.kind === 'apply' ? handedItems(c.items, c.keys) : null
+    if (c.kind === 'apply' && !handed) return BAD
     if (c.kind === 'undone' && !okKey(c.key)) return BAD
-    if (c.kind !== 'apply' && c.kind !== 'undo' && c.kind !== 'undone' && c.kind !== 'draft-dismissed') return BAD
+    if (c.kind === 'cancel' && !(typeof c.id === 'string' && APPLY_ID_RE.test(c.id))) return BAD
+    if (c.kind !== 'apply' && c.kind !== 'undo' && c.kind !== 'undone' && c.kind !== 'draft-dismissed' && c.kind !== 'cancel') return BAD
     return serial(`${w.companyId}/${w.occurrenceId}`, async (): Promise<AfterMeetingNoteResult> => {
       const mark = await markOf(w.companyId, w.occurrenceId)
       if (c.kind === 'apply' || c.kind === 'undo') {
@@ -168,7 +189,14 @@ export function createAfterMeetingApi(deps: AfterMeetingDeps) {
         if (mark.applies.some(a => a.id === c.id) || refusedKeys(c, mark, results, now()).length > 0) {
           return { success: false, code: 'ALREADY', error: 'この項目は、もう反映しているか、反映の途中です。画面を読み直しました。' }
         }
-        mark.applies = [...mark.applies, { id: c.id, at: new Date(now()).toISOString(), kind: c.kind, keys: [...c.keys] }].slice(-50)
+        mark.applies = [...mark.applies, { id: c.id, at: new Date(now()).toISOString(), kind: c.kind, keys: [...c.keys], ...(handed ? { items: handed } : {}) }].slice(-50)
+      } else if (c.kind === 'cancel') {
+        const run = await runOf(w.companyId, w.occurrenceId)
+        const resultText = run ? await runFile(w.root, run, AFTER_MEETING_RESULT_FILE) : null
+        const answered = (resultText === null ? [] : readResultFile(resultText)).some(r => r.回 === c.id)
+        const entry = mark.applies.find(a => a.id === c.id)
+        if (!entry || answered || now() - Date.parse(entry.at) > CANCEL_WITHIN_MS) return { success: false, code: 'ALREADY', error: 'この押した記録は、もう取り消せません。' }
+        mark.applies = mark.applies.filter(a => a.id !== c.id)
       } else if (c.kind === 'undone') {
         if (!mark.undone.includes(c.key)) mark.undone = [...mark.undone, c.key].slice(-100)
       } else {

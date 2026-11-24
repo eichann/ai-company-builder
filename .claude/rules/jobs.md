@@ -1830,7 +1830,8 @@ runs it** ("The app runs it" below; no screen announces schema 5 yet — that, a
     `<place>/.personal/<folder>/<run>` (exactly four plain segments), then in that folder — by its real location inside the
     company folder's, never through a link — `更新案.json` (`readProposalFile`: version 1 — another version is said as such —,
     ≤ 20 items, each key once) and `result.json` (`readResultFile`, written by the apply consultation's AI: each entry taken alone,
-    ids only in their plain shapes); and 確度's choices from `GET /records/types` (a choice field labelled 確度; none → typed).
+    ids only in their plain shapes); and 確度's choices from `GET /records/types` (a choice field labelled 確度, its `optionLabels`;
+    none → typed; kept 5 minutes per company). A run folder is compared as the disk folds names (`diskKey`).
   - **The card** (`components/UpdateProposalCard.tsx`): each item editable (確度 from those choices, 金額 a number, 計上月 months
     with amounts, 商談の記録 a text; 「直しました」 and the AI's value beside), ticked (all at first), ［項目を足す］ (HubSpot's fixed
     items or a coefficient sheet line; never the same deal's item twice), and **what is shared**: the AI's reason on at first,
@@ -1841,16 +1842,27 @@ runs it** ("The app runs it" below; no screen announces schema 5 yet — that, a
     consultation), HubSpot through the business plugin's operations (担当 checked with `refresh_deal`: 担当が違う), the coefficient
     sheet through the pinned Skill `anken-sync-auto`, and the results to write to `result.json` with the press id. **What the AI
     may write is not narrowed by the server** (E3, accepted): the plugin's gate, approvals and the relay decide as for any
-    consultation of the member. The consultation closes by itself as PR6's 「この作業をする」.
+    consultation of the member. **What is shared is an instruction to that AI, not a technical guard**: the consultation reads
+    the minutes (`minutes_read`) and may read the run folder, so a quote not chosen is in its context; it is told to pass on
+    only what is listed (owner decision). The consultation closes by itself as PR6's 「この作業をする」. An ask longer than
+    `ASK_MAX` (40,000, the command's `detail` cap) is refused before anything is recorded; **a consultation that did not start**
+    (`chat.consultAbout` answers `true` only when the pane took it) takes the press back (`afterMeeting:note { kind: 'cancel' }`,
+    only within a minute and only while no result answers it). A press keeps what it handed on (`ApplyEntry.items`: the
+    values, no reason or quote), so a card opened again shows the value applied and an item added there.
   - **Never twice** (`shared/after-meeting.ts` `itemStatus` / `refusedKeys`, asked by main inside a per-occurrence queue): an item
-    handed to a press and not answered by a result carrying **that press's id** is 「反映中」 for `APPLY_PENDING_MS` (30 min), then
-    「途中で止まりました」 (offered again: ［残りを反映する］); written (済み), waiting for an approval or for another assignee is never
-    handed on again; one item twice in a press, a press id used before, or two presses at once → one recorded, the other
-    `ALREADY`. The mark lives in `<userData>/after-meeting/<company>/<occurrence>.json` (the app's data, never the company folder).
+    handed to a press and not answered by a result carrying **that press's id** is 「反映中」 for `APPLY_PENDING_MS` (2 hours), then
+    「途中で止まりました」 (offered again with ［残りを反映する］, whose last check warns that the earlier consultation may still be
+    writing — look in 「AIへの相談」 first; the ask tells the AI to check the marker column before writing a sheet line); an item an
+    apply wrote (済み) — also when an undo of it then failed or stopped (`ItemStatus.written`) —, waiting for an approval or for
+    another assignee is never handed on again; one item twice in a press, a press id used before, or two presses at once → one recorded, the other
+    `ALREADY`. The mark lives in `<userData>/after-meeting/<company>/<occurrence>.json` (the app's data, never the company folder;
+    the last 50 presses: a lost or trimmed mark reads an item only from `result.json`, known).
   - **Results** per item (✔ / ✖ / 「〇〇さんの承認待ち」 with ［開く］ = `record.open` of the approval id — the approval card is the
-    server's —, 「この取引の担当は〇〇さんです」); read again every 15 s while a press waits. **［この項目を元に戻す］** (HubSpot) is the
-    member's own `pluginOperations:undo` of the operation id the result names: the server takes it back only while the written
-    value is still there (`CHANGED_OUTSIDE` otherwise). **［係数表を元に戻す］** (only items written with the value before kept) is a
+    server's —, 「この取引の担当は〇〇さんです」); read again every 15 s while a press waits. **［この項目を元に戻す］** (HubSpot), after a
+    confirmation, is the member's own `pluginOperations:undo` of the operation id the result names (the AI wrote it: the server
+    decides only whether the member may undo it and takes it back only while the written value is still there; the card then
+    says which record the server answered, so a wrong id shows). **［係数表を元に戻す］** (only items an apply wrote with the value
+    before kept; again after an undo that failed or stopped), after a last check listing each value written and before, is a
     press of kind `undo`: its consultation writes the value before back only where the written value is still there and tells the
     rows added (never deleted: OD3).
   - **Notes**: 「AI はこの案に迷いました」 below `SET_WATCH_UNSURE_BELOW`; 「N日前に作られ、まだ反映していません」 after 3 days with
@@ -1874,7 +1886,9 @@ runs it** ("The app runs it" below; no screen announces schema 5 yet — that, a
     twice in a press, undo only with the value before, files read as data), `tests/after-meeting-removable.test.ts`,
     `tests/task-consult-work.test.ts` (`detail` with 「この作業をする」 only), `server/tests/unit/features.test.ts` (off by default),
     `tests/ui/after-meeting.spec.ts` (`after-meeting-ui.html`: off draws and reads nothing; the last check and one press; the quote
-    only when ticked; an approval's ［開く］; the weekly ［作り直す］ asks first). Mutation check: see the PR.
+    only when ticked; a consultation that does not start takes the press back; an approval's ［開く］; the weekly ［作り直す］ asks
+    first), `tests/ui/chat-panel.spec.ts` (「この作業をする」 with a card's `detail`: the pane answers `true`, the detail reaches the AI).
+    Mutation check: see the PR.
 
 ## Member proposals (「AIへの相談」から定期の仕事, PR A: the server; owner memo 2026-11-22 第1〜5版, decisions Q1–Q4)
 

@@ -150,6 +150,8 @@ function CompanyChatPanel({ userId, departmentPath, activeDepartment, slashComma
       instruction: { kind: 'task', recordId, title },
       ...(purpose === 'work' ? { onSent: ({ tabId, conversationId, messageId }: { tabId: string; conversationId: string; messageId: string }) => closeWhenWorkDone(recordId, tabId, conversationId, messageId) } : {}),
     })
+    // Handed to the pane (a caller that recorded a press before asking, 「会議のあと」, takes it back when this is not true).
+    return true
   }, { target: paneId })
   useCommandHandler('chat.openConsultation', ({ sessionId }) => openOrFocus(sessionId), { target: paneId })
   const consumeInputRequest = useCallback(() => setInputRequest(null), [])

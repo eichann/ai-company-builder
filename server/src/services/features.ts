@@ -32,7 +32,7 @@ export interface FeatureServiceDeps {
 export function createFeatureService(deps: FeatureServiceDeps) {
   const { companyData, accounts, clock } = deps
 
-  /** The features in force for a company (anything unreadable or missing = on). */
+  /** The features in force for a company (anything unreadable or missing = its default: on, but `afterMeeting`). */
   function of(companyId: string): CompanyFeatures {
     const stored = companyData.forCompany(companyId).tasks.features()
     if (!stored) return featuresFrom(null)

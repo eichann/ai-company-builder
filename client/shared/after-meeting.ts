@@ -14,8 +14,11 @@ export const AFTER_MEETING_RESULT_FILE = 'result.json'
 export const AFTER_MEETING_RESULT_VERSION = 1
 /** The largest result / proposal file read (a few dozen short items). */
 export const AFTER_MEETING_FILE_MAX = 64 * 1024
-/** A press handed to a consultation is 「反映中」 this long while its result is not written; after it, 「途中で止まりました」. */
-export const APPLY_PENDING_MS = 30 * 60_000
+/**
+ * A press handed to a consultation is 「反映中」 this long while its result is not written; after it, 「途中で止まりました」 — offered
+ * again only with the last check saying the earlier consultation may still be writing (the member looks first).
+ */
+export const APPLY_PENDING_MS = 2 * 60 * 60_000
 /** An unapplied proposal older than this says so on its card (S11 #7: on this PC, when it is opened). */
 export const UNAPPLIED_NOTE_AFTER_MS = 3 * 24 * 60 * 60_000
 
@@ -46,8 +49,11 @@ export interface ResultItem {
   書いた値?: SetUpdateValue
 }
 
-/** One press of the card, handed to one consultation. */
-export interface ApplyEntry { id: string; at: string; kind: 'apply' | 'undo'; keys: string[] }
+/** What a press handed on of one item, kept so a card opened again shows what was applied (an added item, an edited value). */
+export interface HandedItem { 書き先: UpdateTarget; 取引: string; 項目: string; 値: SetUpdateValue }
+
+/** One press of the card, handed to one consultation (`items`: an apply's values, in the order of `keys`). */
+export interface ApplyEntry { id: string; at: string; kind: 'apply' | 'undo'; keys: string[]; items?: HandedItem[] }
 
 /** The app's mark of one occurrence on this PC. */
 export interface AfterMeetingMark {
@@ -89,8 +95,11 @@ export type AfterMeetingRead =
   | { success: false; error: string }
 
 export type AfterMeetingChange =
-  | { kind: 'apply' | 'undo'; id: string; keys: string[] }
+  | { kind: 'apply'; id: string; keys: string[]; items: HandedItem[] }
+  | { kind: 'undo'; id: string; keys: string[] }
   | { kind: 'undone'; key: string }
+  /** The consultation of a press did not start: its press is taken back (only while nothing answered it). */
+  | { kind: 'cancel'; id: string }
   | { kind: 'draft-dismissed' }
 
 export type AfterMeetingNoteResult = { success: true; mark: AfterMeetingMark } | { success: false; code: 'ALREADY' | 'BAD_REQUEST' | 'NOT_HERE'; error: string }
@@ -189,6 +198,21 @@ export function readResultFile(text: string): ResultItem[] {
   return out
 }
 
+/** An apply's handed items, only when each is of the file's shape and they are exactly `keys`, in order; else null. */
+export function handedItems(v: unknown, keys: readonly string[]): HandedItem[] | null {
+  if (!Array.isArray(v) || v.length !== keys.length) return null
+  const out: HandedItem[] = []
+  for (const [i, raw] of v.entries()) {
+    if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return null
+    const x = raw as Record<string, unknown>
+    if (!(SET_WATCH_UPDATE_TARGETS as readonly unknown[]).includes(x.書き先) || !ONE_LINE(x.取引, 100) || !itemFits(x.書き先, x.項目) || !isUpdateValue(x.値)) return null
+    const item: HandedItem = { 書き先: x.書き先 as UpdateTarget, 取引: x.取引 as string, 項目: x.項目 as string, 値: x.値 as SetUpdateValue }
+    if (itemKey(item) !== keys[i]) return null
+    out.push(item)
+  }
+  return out
+}
+
 /** The app's mark read back (another shape → the empty mark: nothing was handed on from this PC as far as it can tell). */
 export function readMark(text: string | null): AfterMeetingMark {
   const o = text === null ? null : parseJson(text)
@@ -199,52 +223,76 @@ export function readMark(text: string | null): AfterMeetingMark {
     if (typeof x.id !== 'string' || !APPLY_ID_RE.test(x.id) || typeof x.at !== 'string' || Number.isNaN(Date.parse(x.at))) return []
     if ((x.kind !== 'apply' && x.kind !== 'undo') || !Array.isArray(x.keys)) return []
     const keys = x.keys.filter((k): k is string => typeof k === 'string' && k.length <= KEY_MAX)
-    return [{ id: x.id, at: x.at, kind: x.kind, keys }]
+    const items = handedItems(x.items, keys)
+    return [{ id: x.id, at: x.at, kind: x.kind, keys, ...(x.kind === 'apply' && items ? { items } : {}) }]
   })
   const undone = Array.isArray(o.undone) ? o.undone.filter((k): k is string => typeof k === 'string' && k.length <= KEY_MAX) : []
   return { v: 1, applies, undone, draftDismissed: o.draftDismissed === true }
 }
 
-/** Where one item stands: never pressed, handed on and waiting, stopped half-way, or what the consultation said. */
+/**
+ * Where one item stands: never pressed, handed on and waiting, stopped half-way, or what the consultation said. `entry` is the
+ * newest press holding it (an apply or an undo); `written` the result of the newest apply press when it wrote the item (済み), so
+ * an undo that failed or stopped never makes a written item look unwritten.
+ */
 export type ItemStatus =
   | { kind: 'new' }
-  | { kind: 'pending'; entry: ApplyEntry }
-  | { kind: 'stopped'; entry: ApplyEntry }
-  | { kind: 'result'; result: ResultItem; undone: boolean }
+  | { kind: 'pending'; entry: ApplyEntry; written: ResultItem | null }
+  | { kind: 'stopped'; entry: ApplyEntry; written: ResultItem | null }
+  | { kind: 'result'; result: ResultItem; undone: boolean; via: 'apply' | 'undo' | null; written: ResultItem | null }
 
-/** The newest result per key (a later press's result written after an earlier one in the file wins by its press). */
-function resultFor(key: string, entry: ApplyEntry | null, results: readonly ResultItem[]): ResultItem | null {
-  const mine = results.filter(r => itemKey(r) === key)
-  if (entry) {
-    const answered = mine.filter(r => r.回 === entry.id)
-    if (answered.length > 0) return answered[answered.length - 1]
-    return null
-  }
-  return mine.length > 0 ? mine[mine.length - 1] : null
+/** The result answering one press for a key (the last one the file holds for it). */
+function answerOf(key: string, entry: ApplyEntry, results: readonly ResultItem[]): ResultItem | null {
+  const answered = results.filter(r => itemKey(r) === key && r.回 === entry.id)
+  return answered.length > 0 ? answered[answered.length - 1] : null
 }
 
 export function itemStatus(key: string, mark: AfterMeetingMark, results: readonly ResultItem[], now: number): ItemStatus {
-  const entry = [...mark.applies].reverse().find(a => a.keys.includes(key)) ?? null
-  const result = resultFor(key, entry, results)
-  if (entry && !result) return now - Date.parse(entry.at) < APPLY_PENDING_MS ? { kind: 'pending', entry } : { kind: 'stopped', entry }
-  if (result) return { kind: 'result', result, undone: mark.undone.includes(key) }
+  const holding = mark.applies.filter(a => a.keys.includes(key))
+  const entry = holding.length > 0 ? holding[holding.length - 1] : null
+  const lastApply = [...holding].reverse().find(a => a.kind === 'apply') ?? null
+  const applied = lastApply ? answerOf(key, lastApply, results) : null
+  const written = applied && applied.状態 === '済み' ? applied : null
+  if (entry) {
+    const result = answerOf(key, entry, results)
+    if (!result) return now - Date.parse(entry.at) < APPLY_PENDING_MS ? { kind: 'pending', entry, written } : { kind: 'stopped', entry, written }
+    return { kind: 'result', result, undone: mark.undone.includes(key), via: entry.kind, written }
+  }
+  // No press of this PC (a lost or trimmed mark): the file's last result for the item, if any.
+  const mine = results.filter(r => itemKey(r) === key)
+  if (mine.length > 0) return { kind: 'result', result: mine[mine.length - 1], undone: mark.undone.includes(key), via: null, written: null }
   return { kind: 'new' }
 }
 
-/** May this item be handed to an apply consultation now: never pressed, failed, stopped half-way, or left out by the consultation. */
+/**
+ * May this item be handed to an apply consultation now: never pressed, an apply that failed, stopped half-way or was left out by
+ * the consultation — never one an apply wrote (also when an undo of it failed or stopped).
+ */
 export function mayApply(s: ItemStatus): boolean {
-  if (s.kind === 'new' || s.kind === 'stopped') return true
-  return s.kind === 'result' && !s.undone && (s.result.状態 === '失敗' || s.result.状態 === '反映しない')
+  if (s.kind === 'new') return true
+  if (s.written) return false
+  if (s.kind === 'stopped') return s.entry.kind === 'apply'
+  return s.kind === 'result' && s.via !== 'undo' && !s.undone && (s.result.状態 === '失敗' || s.result.状態 === '反映しない')
 }
 
-/** May a coefficient sheet item be written back: written by the consultation, with the value before kept, not taken back yet. */
+/**
+ * The apply result a coefficient sheet undo writes back from: the item an apply wrote with the value before kept, not taken back
+ * (a 戻した result) and its undo not waiting. Null when it may not be undone now.
+ */
+export function sheetWritten(s: ItemStatus): ResultItem | null {
+  if (s.kind === 'new' || s.kind === 'pending' || !s.written) return null
+  if (s.kind === 'result' && (s.undone || s.result.状態 === '戻した')) return null
+  const w = s.written
+  return w.書き先 === '係数表' && w.前の値 !== undefined && w.書いた値 !== undefined ? w : null
+}
+
 export function mayUndoSheet(s: ItemStatus): boolean {
-  return s.kind === 'result' && !s.undone && s.result.書き先 === '係数表' && s.result.状態 === '済み' && s.result.前の値 !== undefined && s.result.書いた値 !== undefined
+  return sheetWritten(s) !== null
 }
 
 /** A HubSpot item a person may take back through the server's undo (the server decides whether the written value is still there). */
-export function mayUndoHubspot(s: ItemStatus): s is { kind: 'result'; result: ResultItem & { 操作: string; プラグイン: string }; undone: boolean } {
-  return s.kind === 'result' && !s.undone && s.result.書き先 === 'hubspot' && s.result.状態 === '済み' && !!s.result.操作 && !!s.result.プラグイン
+export function mayUndoHubspot(s: ItemStatus): s is { kind: 'result'; result: ResultItem & { 操作: string; プラグイン: string }; undone: boolean; via: 'apply'; written: ResultItem } {
+  return s.kind === 'result' && s.via === 'apply' && !s.undone && s.result.書き先 === 'hubspot' && s.result.状態 === '済み' && !!s.result.操作 && !!s.result.プラグイン
 }
 
 /**

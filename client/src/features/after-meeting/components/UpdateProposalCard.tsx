@@ -1,16 +1,17 @@
 // The update proposal card (4b-4 PR6-A, owner memo 「4b-4 挟む部分」 S3 / S4 / S11): the run's 更新案.json on this PC, edited and
 // ticked by the member, handed to ONE consultation by ［反映する］ after a last check (the consultation does the writing: plugin
-// operations, approvals, the Skill's scripts). Kept whole (~300 lines): the items, the press and its results change together.
+// operations, approvals, the Skill's scripts). Kept whole (~330 lines): the items, the press, its dialogs and its results change together.
 import { useCallback, useRef, useState } from 'react'
 import { CheckCircle, Hourglass, Plus, WarningOctagon } from '@phosphor-icons/react'
 import { runCommand } from '../../../shared/commands/commands'
 import { Button, Callout } from '../../../shared/ui/primitives'
 import { Dialog, DialogFooter, DialogTitle } from '../../../shared/ui/Dialog'
+import { ConfirmDialog } from '../../../shared/ui/ConfirmDialog'
 import { useInterval } from '../../../shared/hooks/useInterval'
-import { itemStatus, mayUndoHubspot, mayUndoSheet, type AfterMeetingRead, type UpdateTarget } from '../../../../shared/after-meeting'
+import { itemStatus, mayUndoHubspot, sheetWritten, type AfterMeetingRead, type UpdateTarget } from '../../../../shared/after-meeting'
 import { noteAfterMeeting, readAfterMeeting, undoHubspotWrite } from '../api'
 import {
-  ADDABLE_HUBSPOT_ITEMS, addedItem, applyAsk, cardNotes, cardOffers, draftsFrom, edited, handedOf, itemsToApply, newPressId, redoDraftAsk, shareDraftAsk, sheetUndoAsk,
+  ADDABLE_HUBSPOT_ITEMS, ASK_MAX, addedItem, applyAsk, cardNotes, cardOffers, draftsFrom, edited, handedItemOf, handedOf, itemsToApply, newPressId, redoDraftAsk, shareDraftAsk, sheetUndoAsk,
   statusText, statusTone, valueProblem, valueText, type DraftItem,
 } from '../model'
 import { ValueEditor } from './ValueEditor'
@@ -25,7 +26,8 @@ export function UpdateProposalCard({ companyId, rootPath, occurrenceId, task }: 
   const [items, setItems] = useState<DraftItem[] | null>(null)
   const [message, setMessage] = useState<string | null>(null)
   const [working, setWorking] = useState(false)
-  const [checking, setChecking] = useState(false)
+  const [checking, setChecking] = useState<'apply' | 'undo' | null>(null)
+  const [undoing, setUndoing] = useState<DraftItem | null>(null)
   const [adding, setAdding] = useState<{ target: UpdateTarget; deal: string; item: string; problem: string | null } | null>(null)
   // One press at a time, also between a click and the state change (a double click); main checks again.
   const pressing = useRef(false)
@@ -37,7 +39,7 @@ export function UpdateProposalCard({ companyId, rootPath, occurrenceId, task }: 
     if (!r.run) return
     setData(r)
     // The member's edits stay while the card is open; the file is read once for them.
-    setItems(prev => prev ?? draftsFrom(r.proposals))
+    setItems(prev => prev ?? draftsFrom(r.proposals, r.mark.applies))
   }, [companyId, rootPath, occurrenceId])
   const loadRef = useCallback((el: HTMLElement | null) => {
     if (!el || loadedFor.current === occurrenceId) return
@@ -62,6 +64,9 @@ export function UpdateProposalCard({ companyId, rootPath, occurrenceId, task }: 
   const unapplied = list.filter(d => statusOf(d.key).kind === 'new').length
   const work = (detail: string) => runCommand('chat.consultAbout', { recordId: task.id, title: task.title, purpose: 'work', ...(task.madeAt ? { madeAt: task.madeAt } : {}), detail })
 
+  const sheet = list.flatMap(d => { const w = sheetWritten(statusOf(d.key)); return w ? [{ d, w }] : [] })
+  const stopped = chosen.filter(d => statusOf(d.key).kind === 'stopped')
+
   const press = async (kind: 'apply' | 'undo') => {
     if (pressing.current) return
     pressing.current = true
@@ -69,23 +74,30 @@ export function UpdateProposalCard({ companyId, rootPath, occurrenceId, task }: 
     setMessage(null)
     try {
       const id = newPressId(kind)
-      const sheet = list.map(d => ({ d, s: statusOf(d.key) })).filter(x => mayUndoSheet(x.s))
       const keys = kind === 'apply' ? chosen.map(d => d.key) : sheet.map(x => x.d.key)
       if (keys.length === 0) return
-      const r = await noteAfterMeeting(companyId, rootPath, occurrenceId, { kind, id, keys })
-      if (!r.success) { setMessage(r.error); await reload(); return }
-      setData({ ...data, mark: r.mark })
       const detail = kind === 'apply'
         ? applyAsk({ pressId: id, folder: run.folder, meetingId: data.meetingId, minutesDocVersion: run.minutesDocVersion, items: chosen })
-        : sheetUndoAsk({ pressId: id, folder: run.folder, items: sheet.flatMap(({ d, s }) => (s.kind === 'result' && s.result.前の値 !== undefined && s.result.書いた値 !== undefined ? [{ 取引: d.取引, 項目: d.項目, 前の値: s.result.前の値, 書いた値: s.result.書いた値 }] : [])) })
-      void work(detail)
+        : sheetUndoAsk({ pressId: id, folder: run.folder, items: sheet.map(({ d, w }) => ({ 取引: d.取引, 項目: d.項目, 前の値: w.前の値!, 書いた値: w.書いた値! })) })
+      // Too long for one consultation's first message: said before anything is recorded.
+      if (detail.length > ASK_MAX) { setMessage('一度に渡す文が長すぎます。項目を分けて（チェックを外して）2回に分けて反映してください。'); return }
+      const r = await noteAfterMeeting(companyId, rootPath, occurrenceId, kind === 'apply' ? { kind, id, keys, items: chosen.map(handedItemOf) } : { kind, id, keys })
+      if (!r.success) { setMessage(r.error); await reload(); return }
+      setData(prev => (prev ? { ...prev, mark: r.mark } : prev))
+      // The press is recorded first (never twice); a consultation that did not start takes it back.
+      if (await work(detail) !== true) {
+        const back = await noteAfterMeeting(companyId, rootPath, occurrenceId, { kind: 'cancel', id })
+        if (back.success) setData(prev => (prev ? { ...prev, mark: back.mark } : prev))
+        setMessage('相談を始められませんでした。AIへの相談の画面が開いているか確かめて、もう一度押してください。')
+        return
+      }
       setMessage(kind === 'apply'
         ? '反映の相談を始めました。HubSpot と係数表に書くのは、その相談の AI です（承認が要るものは承認のお願いになります）。結果はここに出ます。'
         : '係数表を元に戻す相談を始めました。結果はここに出ます。')
     } finally {
       pressing.current = false
       setWorking(false)
-      setChecking(false)
+      setChecking(null)
     }
   }
 
@@ -98,11 +110,14 @@ export function UpdateProposalCard({ companyId, rootPath, occurrenceId, task }: 
       const r = await undoHubspotWrite(companyId, s.result.プラグイン, s.result.操作)
       if (!r.success) { setMessage(r.error); return }
       const n = await noteAfterMeeting(companyId, rootPath, occurrenceId, { kind: 'undone', key: d.key })
-      if (n.success) setData({ ...data, mark: n.mark })
-      setMessage('HubSpot の値を元に戻しました（HubSpot のワークフローや通知は戻りません）。')
+      if (n.success) setData(prev => (prev ? { ...prev, mark: n.mark } : prev))
+      // What the server says it took back (the operation id came from the consultation's file): said, so a mismatch is seen.
+      const what = r.operation.recordTitle ? `「${r.operation.recordTitle}」の値` : 'HubSpot の値'
+      setMessage(`${what}を元に戻しました（HubSpot のワークフローや通知は戻りません）。`)
     } finally {
       pressing.current = false
       setWorking(false)
+      setUndoing(null)
     }
   }
 
@@ -165,7 +180,7 @@ export function UpdateProposalCard({ companyId, rootPath, occurrenceId, task }: 
                 {s.kind === 'result' && s.result.状態 === '承認待ち' && s.result.承認 && (
                   <Button size="sm" onClick={() => void runCommand('record.open', { recordId: s.result.承認! })}>開く</Button>
                 )}
-                {mayUndoHubspot(s) && <Button size="sm" disabled={working} onClick={() => void undoHubspot(d)}>この項目を元に戻す</Button>}
+                {mayUndoHubspot(s) && <Button size="sm" disabled={working} onClick={() => setUndoing(d)}>この項目を元に戻す</Button>}
               </div>
             </li>
           )
@@ -191,12 +206,12 @@ export function UpdateProposalCard({ companyId, rootPath, occurrenceId, task }: 
       ) : task.open && <Button size="sm" variant="ghost" disabled={disabled} onClick={() => setAdding({ target: 'hubspot', deal: list[0]?.取引 ?? '', item: '', problem: null })}><Plus size={12} />項目を足す</Button>}
       <div className="flex flex-wrap items-center gap-2">
         {offers?.apply && task.open && (
-          <Button size="sm" variant="primary" disabled={disabled || offline || chosen.length === 0} onClick={() => setChecking(true)}>
+          <Button size="sm" variant="primary" disabled={disabled || offline || chosen.length === 0} onClick={() => setChecking('apply')}>
             {offers.apply === 'rest' ? '残りを反映する' : '反映する'}
           </Button>
         )}
         {offers?.pending && <Button size="sm" variant="primary" disabled>反映中…</Button>}
-        {offers?.sheetUndo && task.open && <Button size="sm" disabled={disabled || offline} onClick={() => void press('undo')}>係数表を元に戻す</Button>}
+        {offers?.sheetUndo && task.open && <Button size="sm" disabled={disabled || offline} onClick={() => setChecking('undo')}>係数表を元に戻す</Button>}
         {offline && <span className="text-text-muted">オフラインです。つながったら押してください。</span>}
       </div>
       {message && <p role="status" className="text-text-muted">{message}</p>}
@@ -204,14 +219,17 @@ export function UpdateProposalCard({ companyId, rootPath, occurrenceId, task }: 
         <DraftButtons disabled={disabled} onRedo={hint => void work(redoDraftAsk(run.folder, hint))} onShare={() => void work(shareDraftAsk(run.folder))}
           onDismiss={async () => {
             const r = await noteAfterMeeting(companyId, rootPath, occurrenceId, { kind: 'draft-dismissed' })
-            if (r.success) setData({ ...data, mark: r.mark }); else setMessage(r.error)
+            if (r.success) setData(prev => (prev ? { ...prev, mark: r.mark } : prev)); else setMessage(r.error)
           }} />
       )}
-      {checking && (
+      {checking === 'apply' && (
         // The last check (S11 #1): exactly what goes to HubSpot, the approvals and the coefficient sheet, right before the press.
-        <Dialog onClose={() => setChecking(false)} labelledBy="after-meeting-check" size="lg" dismissible={!working}>
+        <Dialog onClose={() => setChecking(null)} labelledBy="after-meeting-check" size="lg" dismissible={!working}>
           <DialogTitle id="after-meeting-check">この内容で反映しますか？</DialogTitle>
-          <p className="mt-2 text-body text-text-muted">次の {chosen.length} 件だけを、相談の AI に渡します。HubSpot・承認のお願い・係数表に出るのは、ここにあるものだけです。</p>
+          <p className="mt-2 text-body text-text-muted">次の {chosen.length} 件だけを、相談の AI に渡します。HubSpot・承認のお願い・係数表に出るのは、ここにあるものだけです（相談の AI には、そう頼みます）。</p>
+          {stopped.length > 0 && (
+            <Callout tone="warning" className="mt-2">前に頼んだ相談が、まだ書いている途中かもしれません（{stopped.length} 件）。「AIへの相談」で前の相談が終わっているか確かめてから押してください。</Callout>
+          )}
           <ul className="mt-3 max-h-80 space-y-2 overflow-y-auto text-body">
             {chosen.map(d => {
               const h = handedOf(d)
@@ -226,10 +244,33 @@ export function UpdateProposalCard({ companyId, rootPath, occurrenceId, task }: 
             })}
           </ul>
           <DialogFooter>
-            <Button onClick={() => setChecking(false)} disabled={working}>やめる</Button>
+            <Button onClick={() => setChecking(null)} disabled={working}>やめる</Button>
             <Button variant="primary" disabled={working} onClick={() => void press('apply')}>この内容で反映する</Button>
           </DialogFooter>
         </Dialog>
+      )}
+      {checking === 'undo' && (
+        <Dialog onClose={() => setChecking(null)} labelledBy="after-meeting-undo" size="md" dismissible={!working}>
+          <DialogTitle id="after-meeting-undo">係数表を元に戻しますか？</DialogTitle>
+          <p className="mt-2 text-body text-text-muted">今の値が「書いた値」のままの項目だけ、「前の値」に書き戻すよう相談の AI に頼みます。足した行は消しません（行番号を伝えます）。</p>
+          <ul className="mt-3 space-y-2 text-body">
+            {sheet.map(({ d, w }) => (
+              <li key={d.key} className="rounded-control border border-border p-2">
+                <p className="font-strong">係数表・{d.項目}（{d.取引}）</p>
+                <p>書いた値：{valueText(w.書いた値!)} → 前の値：{valueText(w.前の値!)}</p>
+              </li>
+            ))}
+          </ul>
+          <DialogFooter>
+            <Button onClick={() => setChecking(null)} disabled={working}>やめる</Button>
+            <Button variant="primary" disabled={working} onClick={() => void press('undo')}>元に戻す</Button>
+          </DialogFooter>
+        </Dialog>
+      )}
+      {undoing && (
+        <ConfirmDialog isOpen title="HubSpot の値を元に戻しますか？" confirmOnEnter={false} confirmText="元に戻す"
+          message={`「${undoing.項目}」（取引 ${undoing.取引}）を、相談の AI が書く前の値に戻します。HubSpot の値が書いたときのままのときだけ戻ります。HubSpot のワークフローや通知は戻りません。`}
+          onCancel={() => setUndoing(null)} onConfirm={() => void undoHubspot(undoing)} />
       )}
     </section>
   )
