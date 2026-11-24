@@ -2508,7 +2508,7 @@ the execution (6b-2c, "Executing a plan": claim → re-read → permit → send 
 the card, its IPC and the request tool (6b-2d, "The card, the IPC and the request tool"), all switched
 off, and the inbox's rows (switched off too); **6c** — on for the owner's PC only through "This PC's
 opt-in" (built, `lstep@0.6.3` approved: "Login helpers" lets the person log in, "Asset hosts" draws the page), and **the server's PC
-registration** (the server's half and the app's half are built: "This PC's registration"; still to come: the admin pages, PR A;
+registration** (the server's half, the app's half and the admin pages are built: "This PC's registration", "The admin pages: PCs and people"; still to come:
 the end of the transition, D5) before it is on for anyone else;
 `irreversible` types and more than one write (refused by the first version's rule today); **the method override and the swap** (design memo §24: a write may
 declare `method: DELETE` / `PATCH` with `override: form_field`, sent as POST with `_method=<method>` in the
