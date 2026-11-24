@@ -13,6 +13,8 @@ export type JobsWrites = ElectronPort<'acceptJob' | 'pauseJob' | 'resumeJob' | '
 export type JobOccurrenceReads = ElectronPort<'getMyJobOccurrences'>
 /** 「もう一度」 and 「後始末」 on them (the server decides who may and when). */
 export type JobOccurrenceWrites = ElectronPort<'retryJobOccurrence' | 'reconcileJobOccurrence'>
+/** A correction of a set watch's judgement (［まだ早かった］ / ［作ってもらう］; kept on the server with the occurrence). */
+export type JobFeedbackWrites = ElectronPort<'sendJobFeedback'>
 /** An event job's next watched やること: the member's own open ones (stage 4a ①). */
 export type WatchReads = ElectronPort<'getWatchChoices'>
 
@@ -55,6 +57,10 @@ export function retryJobOccurrence(companyId: string, jobId: string, occurrenceI
 
 export function reconcileJobOccurrence(companyId: string, jobId: string, occurrenceId: string, key: string, done: boolean, writes: JobOccurrenceWrites = window.electronAPI) {
   return writes.reconcileJobOccurrence(companyId, jobId, occurrenceId, key, done)
+}
+
+export function sendJobFeedback(companyId: string, occurrenceId: string, kind: 'too_early' | 'made_anyway', writes: JobFeedbackWrites = window.electronAPI) {
+  return writes.sendJobFeedback(companyId, occurrenceId, kind)
 }
 
 /** The member's own proposals (「AIへの相談」から定期の仕事, jobs.md "Member proposals") and their 「取り下げる」. */

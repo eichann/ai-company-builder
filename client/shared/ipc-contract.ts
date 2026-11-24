@@ -38,7 +38,7 @@ import type { GoogleConnectResult, GoogleFeature, GoogleStatusResult } from './g
 import type { PluginOperationResult } from './plugin-operations'
 import type { ApprovalResult } from './approvals'
 import type { AbsenceAddInput, AbsenceAddResult, AbsenceRemoveResult, AbsencesResult } from './absences'
-import type { JobActionResult, MyJobOccurrencesResult, MyJobsResult, WatchChoicesResult } from './jobs'
+import type { JobActionResult, JobFeedbackResult, MyJobOccurrencesResult, MyJobsResult, WatchChoicesResult } from './jobs'
 import type { JobCandidateDiscardResult, JobCandidateResult, JobProposalResult, MyJobProposalsResult } from './job-proposals'
 import type { JobRepeatAskSetting } from './job-repeat-asks'
 import type { QueuedJobTurn } from './ai-turn-steps/job'
@@ -601,6 +601,7 @@ export interface IpcInvokeChannels {
   'jobs:retryOccurrence': { args: [companyId: string, jobId: string, occurrenceId: string]; result: JobActionResult }
   /** 「後始末」: whether its run's outside operation was made (never starts it again). */
   'jobs:reconcileOccurrence': { args: [companyId: string, jobId: string, occurrenceId: string, key: string, done: boolean]; result: JobActionResult }
+  'jobs:feedback': { args: [companyId: string, occurrenceId: string, kind: string]; result: JobFeedbackResult }
   // Member proposals (jobs.md "Member proposals" "The app (PR C)"): the chat card and 「定期の仕事」, with the member's session only.
   /** The candidate the card shows (and its proposal once submitted); null: gone or withheld. */
   'jobProposals:candidate': { args: [companyId: string, candidateId: string]; result: JobCandidateResult }
@@ -1175,6 +1176,7 @@ export interface ElectronAPI {
   getMyJobOccurrences: Invoke<'jobs:occurrences'>
   retryJobOccurrence: Invoke<'jobs:retryOccurrence'>
   reconcileJobOccurrence: Invoke<'jobs:reconcileOccurrence'>
+  sendJobFeedback: Invoke<'jobs:feedback'>
   getJobCandidate: Invoke<'jobProposals:candidate'>
   submitJobProposal: Invoke<'jobProposals:submit'>
   getMyJobProposals: Invoke<'jobProposals:mine'>

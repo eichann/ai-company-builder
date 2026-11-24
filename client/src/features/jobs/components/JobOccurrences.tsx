@@ -7,18 +7,42 @@ import { Button, Card, SubHeading } from '../../../shared/ui/primitives'
 import { ConfirmDialog } from '../../../shared/ui/ConfirmDialog'
 import { JOB_RECONCILE_ASK, type MyJobOccurrence } from '../../../../shared/jobs'
 import { useMyJobOccurrences } from '../hooks/useMyJobOccurrences'
-import { occurrenceRows } from '../model'
+import { declinedRows, makeAnywayMessage, occurrenceRows } from '../model'
+import { runCommand } from '../../../shared/commands/commands'
+import { jobSlotText } from '../../../../../shared/core/job-words'
 
 type Ask = { kind: 'retry'; occurrence: MyJobOccurrence; madeBefore: string | null } | { kind: 'reconcile'; occurrence: MyJobOccurrence; key: string; what: string; done: boolean }
 
 export function JobOccurrences({ companyId }: { companyId: string }) {
-  const { loadRef, occurrences, error, message, busy, retry, reconcile } = useMyJobOccurrences(companyId)
+  const { loadRef, occurrences, error, message, busy, retry, reconcile, feedback } = useMyJobOccurrences(companyId)
   const [ask, setAsk] = useState<Ask | null>(null)
   const rows = occurrenceRows(occurrences)
+  const declined = declinedRows(occurrences)
+  // ［作ってもらう］ after 見送る (4b-4 PR6): the correction is kept first (the server checks it fits), then a consultation.
+  const makeAnyway = async (o: MyJobOccurrence) => {
+    if (!await feedback(o, 'made_anyway')) return
+    void runCommand('chat.newConsultation', { title: `会議のたたき台を作る（${jobSlotText(o.dueSlot)}）`, message: makeAnywayMessage(o.dueSlot) })
+  }
 
   return (
     <div ref={loadRef}>
       {error && <p role="alert" className="text-small text-danger-text">{error}</p>}
+      {declined.length > 0 && (
+        // Where the notice 「…AI はたたき台を作りませんでした」 (job_set_declined) leads: its ［作ってもらう］.
+        <Card className="space-y-2 p-5">
+          <SubHeading>会議のあとの AI の判断</SubHeading>
+          <ul className="divide-y divide-border">
+            {declined.map(row => (
+              <li key={row.occurrence.id} aria-label={row.heading} className="flex flex-wrap items-center gap-2 py-2 text-small text-text">
+                <span className="font-strong">{row.heading}</span>
+                <span className="text-text-muted">{row.line}</span>
+                {row.makeAnyway && <Button size="sm" className="ml-auto" disabled={busy} onClick={() => void makeAnyway(row.occurrence)}>作ってもらう</Button>}
+              </li>
+            ))}
+          </ul>
+          {message && rows.length === 0 && <p role="status" className="text-small text-text-muted">{message}</p>}
+        </Card>
+      )}
       {rows.length > 0 && (
         <Card className="space-y-2 p-5">
           <SubHeading>AI が動いた回で、確かめが要るもの</SubHeading>

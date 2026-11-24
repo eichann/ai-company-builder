@@ -9,17 +9,18 @@
 //   jobs:occurrences          the event occurrences this PC's AI ran for them (stage 4b-2, D11: `GET /me/job-occurrences`)
 //   jobs:retryOccurrence      「もう一度」 on one of them (the server decides who may and when)
 //   jobs:reconcileOccurrence  「後始末」: say whether an outside operation of its run was made (作られていた／作られていなかった)
+//   jobs:feedback             a correction of a set watch's judgement (［まだ早かった］ / ［作ってもらう］, 4b-4 PR6)
 
 import {
   APP_JOB_SCHEMAS, JOBS_OFFLINE_TEXT, JOBS_SERVER_TOO_OLD_TEXT, appReadsJobDefinition,
-  type JobActionResult, type JobsFailure, type MyJob, type MyJobOccurrence, type MyJobOccurrencesResult, type MyJobsResult, type WatchChoicesResult,
+  type JobActionResult, type JobFeedbackResult, type JobsFailure, type MyJob, type MyJobOccurrence, type MyJobOccurrencesResult, type MyJobsResult, type WatchChoicesResult,
 } from '../../../shared/jobs'
 import {
-  JOB_ACCEPT_HEADER, JOB_ACCEPT_SEPARATE, JOB_OCCURRENCE_STATES, JOB_RETRY_BLOCKS, JOB_SCHEMAS_HEADER, isJobId, isOccurrenceId,
+  JOB_ACCEPT_HEADER, JOB_ACCEPT_SEPARATE, JOB_OCCURRENCE_STATES, JOB_RETRY_BLOCKS, JOB_SET_FEEDBACK_KINDS, JOB_SET_UNCONFIRMED, JOB_SET_UPDATES_MAX, JOB_SCHEMAS_HEADER, isJobId, isOccurrenceId,
   type JobDeliveryPlace, type JobOccurrenceState, type JobRetryBlock,
 } from '../../../../shared/core/jobs'
 import { RECORD_ID_RE } from '../../../../shared/core/records'
-import type { JobView } from '../../../../shared/types/jobs'
+import type { JobSetReportView, JobView } from '../../../../shared/types/jobs'
 import type { IpcRegistrar } from '../../ipc/registrar'
 
 export interface JobsDeps {
@@ -89,12 +90,38 @@ export function parseMyJobOccurrence(v: unknown): MyJobOccurrence | null {
     const x = (typeof m === 'object' && m !== null ? m : {}) as Record<string, unknown>
     if (typeof x.kind === 'string' && SHORT_KIND.test(x.kind) && typeof x.count === 'number' && Number.isInteger(x.count) && x.count >= 0) madeBefore.push({ kind: x.kind, count: x.count })
   }
+  const report = parseSetReport(o.report)
   return {
+    ...(report ? { report } : {}),
     id: o.id, jobId: o.jobId,
     name: typeof o.name === 'string' && o.name.length > 0 && o.name.length <= 200 ? o.name : '定期の仕事',
     dueSlot: typeof o.dueSlot === 'string' && o.dueSlot.length <= 40 ? o.dueSlot : '',
     state: (JOB_OCCURRENCE_STATES as readonly unknown[]).includes(o.state) ? o.state as JobOccurrenceState : null,
     outcomeCode: code(o.outcomeCode), retry, unknownOperations, madeBefore,
+  }
+}
+
+/**
+ * A set watch's judgement on the member's own occurrence (4b-4 PR3 `report`), kept only in its fixed kinds: a decision this app
+ * knows, a short code for the reason (shown nowhere: the server's label is the pinned definition's), a confidence 0–1 or null,
+ * the fixed unconfirmed words and corrections. Anything else → no report (the entry stays: its 「もう一度」 / 「後始末」 do not
+ * depend on it), so a later server's other kind never offers a press this app cannot judge.
+ */
+export function parseSetReport(v: unknown): JobSetReportView | null {
+  if (typeof v !== 'object' || v === null) return null
+  const r = v as Record<string, unknown>
+  const decisions = ['proceed', 'decline', 'ask', 'gate_failed'] as const
+  if (!(decisions as readonly unknown[]).includes(r.decision)) return null
+  const decision = r.decision as JobSetReportView['decision']
+  const reason = typeof r.reason === 'string' && /^[A-Za-z][A-Za-z0-9_]{0,39}$/.test(r.reason) ? r.reason : ''
+  const confidence = typeof r.confidence === 'number' && Number.isFinite(r.confidence) && r.confidence >= 0 && r.confidence <= 1 ? r.confidence : null
+  // PR3b's count of update proposals (0–20); anything else is read as none.
+  const updates = typeof r.updates === 'number' && Number.isInteger(r.updates) && r.updates >= 0 && r.updates <= JOB_SET_UPDATES_MAX ? r.updates : 0
+  const words = (x: unknown, allowed: readonly string[]) => (Array.isArray(x) ? [...new Set(x.filter((w): w is string => typeof w === 'string' && allowed.includes(w)))] : [])
+  return {
+    decision, reason, confidence, updates,
+    unconfirmed: words(r.unconfirmed, JOB_SET_UNCONFIRMED),
+    feedback: words(r.feedback, JOB_SET_FEEDBACK_KINDS) as JobSetReportView['feedback'],
   }
 }
 
@@ -253,6 +280,18 @@ export function createJobsApi(deps: JobsDeps) {
       const occurrences = (Array.isArray(list) ? list : []).slice(0, MAX_OCCURRENCES).map(parseMyJobOccurrence).filter((o): o is MyJobOccurrence => o !== null)
       return { success: true, supported: true, occurrences }
     },
+    /**
+     * A correction of a set watch's judgement (4b-4 PR6: ［まだ早かった］ `too_early`, ［作ってもらう］ `made_anyway`): the server
+     * decides who (its pinned responsible person while the occurrence is theirs to see) and whether it fits the judgement.
+     * Only a known kind and an occurrence id reach the path / body.
+     */
+    async feedback(companyId: unknown, occurrenceId: unknown, kind: unknown): Promise<JobFeedbackResult> {
+      if (typeof companyId !== 'string' || !COMPANY_ID.test(companyId) || !isOccurrenceId(occurrenceId)) return BAD_INPUT
+      if (!(JOB_SET_FEEDBACK_KINDS as readonly unknown[]).includes(kind)) return BAD_INPUT
+      const r = await call(`${company(companyId)}/me/job-occurrences/${occurrenceId}/feedback`, 'POST', { kind })
+      if (!ok(r)) return failure('feedback', r)
+      return { success: true, recorded: (r.json!.data as { recorded?: unknown }).recorded === true }
+    },
     /** 「もう一度」 on an occurrence (the server checks who and when; its refusal's words are shown as they are). */
     async retryOccurrence(companyId: unknown, jobId: unknown, occurrenceId: unknown): Promise<JobActionResult> {
       if (!isOccurrenceId(occurrenceId)) return BAD_INPUT
@@ -278,5 +317,6 @@ export function registerJobsIpc(ipc: IpcRegistrar, deps: JobsDeps) {
   ipc.handle('jobs:rewatch', (_event, companyId, jobId, version, recordId) => api.rewatch(companyId, jobId, version, recordId))
   ipc.handle('jobs:occurrences', (_event, companyId) => api.occurrences(companyId))
   ipc.handle('jobs:retryOccurrence', (_event, companyId, jobId, occurrenceId) => api.retryOccurrence(companyId, jobId, occurrenceId))
+  ipc.handle('jobs:feedback', (_event, companyId, occurrenceId, kind) => api.feedback(companyId, occurrenceId, kind))
   ipc.handle('jobs:reconcileOccurrence', (_event, companyId, jobId, occurrenceId, key, done) => api.reconcileOccurrence(companyId, jobId, occurrenceId, key, done))
 }

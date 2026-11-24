@@ -5,7 +5,7 @@ import { CheckCircle, CircleNotch, Plus, Robot, Sparkle, WarningOctagon } from '
 import { fileNameFromTitle } from '../../../../shared/today-folder'
 import { InputDialog } from '../../../shared/ui/InputDialog'
 import { runCommand } from '../../../shared/commands/commands'
-import { COMPANY_AND_DRIVE_FILES_NOTE, LOCAL_FILE_MISSING, TYPED_FILES_NOTE, type TaskCardData } from '../../../../shared/task-card'
+import { COMPANY_AND_DRIVE_FILES_NOTE, LOCAL_FILE_MISSING, TYPED_FILES_NOTE, linkedMeetingTitle, taskStillOpen, type TaskCardData } from '../../../../shared/task-card'
 import { droppedText, mayCarryLink } from '../../../../shared/drive-links'
 import type { RecordViewSummary, RemovableLink } from '../../../../shared/record-views'
 import { mergeActionFor, type BundleChoice, type RecordLinkInput, type SimilarItem, type TaskActInput, type TaskDriveChoice, type TaskDriveLinkOptions, type TypedFileTarget } from '../../../../shared/tasks'
@@ -98,6 +98,29 @@ interface Props {
    * instead; Google Drive files are offered in every company (owner decision 2026-11-13).
    */
   sharedFolder?: boolean
+  /**
+   * A やること a scheduled job made (jobs.md "The set watch (schema 5)" "The app (PR6)"): the screen's part for it, given what
+   * it may press through this card — 完了にする and 要らない at the card's version, with the card's notice and ［取り消す］.
+   */
+  renderJobPart?: (ctx: JobPartContext) => ReactNode
+  /**
+   * The name of the meeting it links is shown beside its date-only title (owner memo 「4b-4 挟む部分」 S1 T4 / N1, S11 #1):
+   * from this card's own read, which carries a linked record only while the member reads it — never stored or copied.
+   */
+  meetingBesideTitle?: boolean
+}
+
+/** What a job's part on the card may do and know (`renderJobPart`). */
+export interface JobPartContext {
+  task: { id: string; title: string; madeAt: string | null; open: boolean }
+  busy: boolean
+  /** 完了にする as the card's main button does it (its refusal's words, or null); null when the member cannot complete it here without saying whose OK. */
+  complete: (() => Promise<string | null>) | null
+  /**
+   * 要らない (`dismiss`) with a note: a job's やること has no requester, so its responsible person takes it away as one of its
+   * meeting's people (`link:meeting`); null when the type does not let the member now (not reading the meeting).
+   */
+  dismiss: ((note: string) => Promise<string | null>) | null
 }
 
 /** What the member's last press left on the card. */
@@ -113,7 +136,7 @@ type Notice =
  * behind 「…」; what the AI prepared, the source, 経緯 and 「つながっているもの」. What is offered
  * comes from the type; the server decides every action.
  */
-export function TaskCard({ companyId, rootPath, recordId, knownVersion, renderPrepared, renderSource, renderSections, shareFolders = [], onConsult, onNudge, consultations = [], tagsInUse = [], team, onChanged, onEnded, bundleKind = null, bundleFolder = null, bundlePlaces, onLoaded, createTodayFile, onDetachConsultation, notDownloadedFolderOf, sharedFolder = true }: Props) {
+export function TaskCard({ companyId, rootPath, recordId, knownVersion, renderPrepared, renderSource, renderSections, shareFolders = [], onConsult, onNudge, consultations = [], tagsInUse = [], team, onChanged, onEnded, bundleKind = null, bundleFolder = null, bundlePlaces, onLoaded, createTodayFile, onDetachConsultation, notDownloadedFolderOf, sharedFolder = true, renderJobPart, meetingBesideTitle = false }: Props) {
   const { result, reload, personalHere, localHere } = useTaskCard(companyId, recordId, onLoaded, rootPath, knownVersion)
   const [busy, setBusy] = useState(false)
   const [notice, setNotice] = useState<Notice | null>(null)
@@ -235,6 +258,19 @@ export function TaskCard({ companyId, rootPath, recordId, knownVersion, renderPr
     onSet={tags => runSteps([{ action: 'set_tags', args: { tags } }])}
     bundleType={bundleFolder ? bundleKind?.type : undefined} linkedBundleId={card.bundle?.id ?? null}
     {...(card.canSetBundle ? { onLinkBundle: (b: BundleChoice) => linkBundle(b) } : {})} />
+  // A job's part: 完了にする and 要らない are the card's own presses (its version, its notice and ［取り消す］).
+  const completeAction = card.actions.find(a => a.action === 'complete')
+  const dismissAction = card.actions.find(a => a.action === 'dismiss')
+  const made = card.history.reduce<string | null>((first, h) => (first === null || h.at < first ? h.at : first), null)
+  const jobPart = renderJobPart?.({
+    task: { id: recordId, title: card.record.title, madeAt: made, open: taskStillOpen(card.record) },
+    busy,
+    complete: completeAction && !completeAction.needsOk
+      ? () => runSteps([...(completeAction.startFirst ? [{ action: 'start' }] : []), { action: 'complete' }], '完了にしました')
+      : null,
+    dismiss: dismissAction ? note => runSteps([{ action: 'dismiss', note }], '外しました') : null,
+  })
+  const meetingTitle = meetingBesideTitle ? linkedMeetingTitle(card.links) : null
   const top = notice?.kind === 'conflict'
     ? <ConflictNotice lines={card.history.filter(h => h.version !== undefined && h.version > notice.since).reverse()} />
     : notice?.kind === 'similar'
@@ -242,7 +278,7 @@ export function TaskCard({ companyId, rootPath, recordId, knownVersion, renderPr
     : notice?.kind === 'done'
       ? <DoneNotice text={notice.text} busy={busy} onUndo={notice.undo ? () => void undo(notice.undo!) : null} />
       : null
-  return <><CardBody card={card} top={top} team={team ?? card.teamMode} review={review} tagField={tagField} rootPath={rootPath} busy={busy} shareFolders={card.record.personal ? shareFolders : []} onShare={share} onConsult={onConsult} onNudge={onNudge} consultations={consultations} onDetachConsultation={onDetachConsultation} renderPrepared={renderPrepared} renderSource={renderSource} renderSections={renderSections} onRun={runSteps}
+  return <><CardBody card={card} top={top} jobPart={jobPart} meetingTitle={meetingTitle} team={team ?? card.teamMode} review={review} tagField={tagField} rootPath={rootPath} busy={busy} shareFolders={card.record.personal ? shareFolders : []} onShare={share} onConsult={onConsult} onNudge={onNudge} consultations={consultations} onDetachConsultation={onDetachConsultation} renderPrepared={renderPrepared} renderSource={renderSource} renderSections={renderSections} onRun={runSteps}
     linkDrop={linkDrop} notDownloadedFolderOf={notDownloadedFolderOf}
     onLinkFile={sharedFolder ? p => fileLink(p, false) : null} onUnlinkFile={p => fileLink(p, true)} personalHere={personalHere}
     typedFiles={{ localFiles: !sharedFolder, localHere, onLinkDrive: (chosen?: TaskDriveChoice[]) => linkDrive(chosen ? { chosen } : undefined), onLinkDriveText: linkDriveText, drive: { usable: drive.usable, note: drive.note, hint: drive.hint, picking: drive.picking, onStop: drive.stop }, onUnlink: unlinkTarget,
@@ -289,6 +325,10 @@ export function TaskCard({ companyId, rootPath, recordId, knownVersion, renderPr
 interface BodyProps {
   card: TaskCardData
   top: ReactNode
+  /** A scheduled job's part (`renderJobPart`), drawn above what the AI prepared. */
+  jobPart?: ReactNode
+  /** The linked meeting's name beside the date-only title (display only). */
+  meetingTitle?: string | null
   team: boolean
   rootPath: string
   busy: boolean
@@ -347,7 +387,7 @@ interface BodyProps {
   review: ReactNode
 }
 
-function CardBody({ card, top, team, rootPath, busy, renderPrepared, renderSource, renderSections, onRun, onRetry, onReconcile, linkDrop, notDownloadedFolderOf, onLinkFile, onUnlinkFile, personalHere, typedFiles, onNewFile, companyId, bundleWord, onCreateBundle, bundlePlaces, onShowToBundle, onUnlinkRecord, onSetBundle, onRemoveBundle, shareFolders, onShare, onConsult, onNudge, consultations, onDetachConsultation, tagField, review }: BodyProps) {
+function CardBody({ card, top, jobPart, meetingTitle, team, rootPath, busy, renderPrepared, renderSource, renderSections, onRun, onRetry, onReconcile, linkDrop, notDownloadedFolderOf, onLinkFile, onUnlinkFile, personalHere, typedFiles, onNewFile, companyId, bundleWord, onCreateBundle, bundlePlaces, onShowToBundle, onUnlinkRecord, onSetBundle, onRemoveBundle, shareFolders, onShare, onConsult, onNudge, consultations, onDetachConsultation, tagField, review }: BodyProps) {
   const { record } = card
   const now = useMemo(() => companyNow(Date.now()), [])
   const [runError, setRunError] = useState<string | null>(null)
@@ -392,7 +432,7 @@ function CardBody({ card, top, team, rootPath, busy, renderPrepared, renderSourc
   const doneLine = whenDoneLine(card)
   const turn = record.state === 'preparing' ? 'AI の番' : null
   return (
-    <RecordPage testId="task-card" kind="task" name="やること" title={record.title} top={top}
+    <RecordPage testId="task-card" kind="task" name="やること" title={record.title} titleNote={meetingTitle ? `（${meetingTitle}）` : null} top={top}
       chips={<>
         {record.stateLabel && <Chip tone={record.state === 'done' ? 'green' : 'gray'}>{record.stateLabel}</Chip>}
         {turn && <Chip>{turn}</Chip>}
@@ -430,6 +470,7 @@ function CardBody({ card, top, team, rootPath, busy, renderPrepared, renderSourc
         </>} />}>
       {doneLine && <p className="text-small text-gray-500 dark:text-zinc-400">{doneLine}</p>}
       <WaitBand key={`${record.state}@${record.version}`} card={card} today={now.date} busy={busy} onRun={onRun} {...(onNudge ? { onNudge: () => onNudge({ id: record.id, title: record.title }) } : {})} />
+      {jobPart}
       {card.okLine && <p className="flex items-center gap-1.5 rounded-md bg-success-bg px-2 py-1 text-small text-success-text"><CheckCircle size={14} weight="fill" className="text-success-icon" />{card.okLine}</p>}
 
       {(card.prepSummary || card.prepared.length > 0) && (

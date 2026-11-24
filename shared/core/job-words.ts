@@ -300,3 +300,101 @@ export function jobOperationKindText(kind: string): string {
   if (kind === 'drive-put') return 'Google Drive に置くファイル'
   return '外への操作'
 }
+
+/*
+ * The set watch's consent and judgement words (schema 5, owner memo 「4b-4」 §2 / §3 / §5 / §6), said where the responsible
+ * person accepts it (the app's 受け取る, 4b-4 PR6) and where the admin approves it (PR7 kept the same sentences in
+ * `admin/src/lib/jobs.ts` until the app needed them; one copy from here on). Only for an opened combination
+ * (`jobSetWatchOpened`): one that is not is described by `jobSetTriggerText` as such, never as this one.
+ */
+
+const SET_WATCH_GUARD_WORDS: Record<string, string> = {
+  people_only_meeting: '出た人だけが見られる会議だけ（2026年11月4日より前の、フォルダつきの会議は対象外）',
+  attendee_responsible: '責任者がその会議に出ていて（または担当で）、今もその会議を読めるときだけ',
+  outside_attendee: '社外の人が1人以上出た会議だけ（社内だけの会議では AI を動かしません）',
+  after_acceptance: '責任者が受け取ったあとに、AI が初めて読み終えた会議と、そのあと作られた「議事録を確認する」だけ（受け取る前に読み終えた会議では動きません）',
+  plugin_step_exclusive: '同じ Skill を業務プラグインの手順で自動で動かしていないこと（同じ会議で、手順の頼みが開いているか動いているときは見送ります）',
+}
+
+/** The lines of 「どれで動くか」 for an opened set watch: the counted causes, the assignee, the event, the unit and each guard. */
+export function setWatchConditionLines(trigger: JobSetTrigger): string[] {
+  if (!jobSetWatchOpened(trigger)) return []
+  return [
+    '人（と、その人の相談の中の AI）が完了したときだけ。定期の仕事・「AI の番」・業務の画面・取り込みでの完了では動きません',
+    '作られたときから責任者が担当の「議事録を確認する」だけ（途中で担当になったものでは動きません）',
+    'その「議事録を確認する」の一生で初めての完了だけ（開き直してまた完了しても動きません）',
+    '1つの会議につき1回だけ（仕事を直しても作り直しても、同じ会議で二度は動きません）',
+    ...trigger.guards.map(g => SET_WATCH_GUARD_WORDS[g] ?? 'この画面では説明できない条件があります（画面を新しくしてください）'),
+  ]
+}
+
+/** When it does not run although the person expected it (memo §2-2 「うまくいかない場面」), said on every screen of it. */
+export const SET_WATCH_NOT_RUN_NOTE =
+  '動くのは、［AI に読ませる］を押した人（「議事録を確認する」の担当）の仕事だけです。上司やアシスタントが押した会議、Google をつないでいない・別のアドレスで招待された会議、途中で担当を変えた会議では動きません。動かなかった会議の提案書などは、責任者が普通の AI相談で作れます。'
+
+/** Who sees its occurrences (memo §2-5, I8): never an owner / admin who did not attend. */
+export const SET_WATCH_SEEN_NOTE =
+  'この仕事の回・知らせ・件数・理由は、その会議を今読めて、会議に出た人（または担当）にだけ見えます。会議に出ていない管理者には、回の記録にも出てきません。'
+
+/** The day's limit of a set watch (memo §2-4 / O6, Q2). */
+export function setWatchDayLimitText(runsPerDay: number): string {
+  return `1日 ${runsPerDay}回まで。超えた会議では動かさず（その会議は、あとからも動きません）、その日1回だけ責任者に知らせます（会議の名前や件数は書きません）`
+}
+
+/** A missed occurrence of a set watch: the responsible person's app was not open in time. */
+export function setWatchMissedText(expiresAfterMinutes: number): string {
+  return `完了のあと${jobMinutesText(expiresAfterMinutes)}のうちに責任者のアプリで動けなかったときは見送ります`
+}
+
+/**
+ * The grant's lines for a set watch: the shared `jobGrantLines` speak of a time / event job, so three of its lines are said
+ * as the set watch's grant is — `records` only makes the one やること, the minutes are the triggering meeting's only, and the
+ * day's limit says what happens beyond it.
+ */
+export function setWatchGrantLines(grant: JobGrant): string[] {
+  return jobGrantLines(grant).flatMap((line) => {
+    if (line.startsWith('道具：やること・記録を読む')) return ['道具：終わったときに、責任者だけに見えるやることを1つ作る（やることや記録は読みません）']
+    if (line.startsWith('議事録：')) return ['議事録：動くきっかけになった会議の議事録だけ読む']
+    if (line.startsWith('使える操作：')) return []
+    if (line.startsWith('上限：')) return [`上限：1回 ${jobMinutesText(grant.limits.minutes)}・${setWatchDayLimitText(grant.limits.runsPerDay)}`]
+    return [line]
+  })
+}
+
+/** The Skills its AI reads besides the one it runs, as 「「部署」の Skill「名前」」; null when none. */
+export function setWatchReadSkillsText(d: JobDefinition): string | null {
+  const pins = d.grant.reads.skills ?? []
+  return pins.length === 0 ? null : pins.map(p => `「${p.place}」の Skill「${p.skill}」`).join('・')
+}
+
+/** The reasons the Skill judges by (its `decision.json`, pinned by the server), by their labels. */
+export function setWatchReasonLabels(d: JobDefinition): string[] {
+  return (d.decision?.reasons ?? []).map(r => r.label)
+}
+
+/**
+ * The permanent hint in 設定 → 「定期の仕事」 (owner memo 「4b-4 挟む部分」 S11 #4, OD2 withdrawn): a meeting finds its attendee by the
+ * Google address the invitation went to, so another address means the job never runs — and, on purpose, no per-meeting notice
+ * says so (it could tell of a meeting the person is not on). Always the same words, never about one meeting.
+ */
+export const JOB_GOOGLE_ADDRESS_NOTE =
+  '会議をきっかけに動く定期の仕事は、カレンダーの招待が届く Google のアドレスと、ACB でつないでいる Google のアドレスが同じときだけ動きます。違うと会議の参加者として見つからず、何も作られません（設定 →「Google」で、つないでいるアドレスを確かめられます）。'
+
+/** Below this confidence a judgement is marked as one the AI was unsure of (memo S2 J4). */
+export const SET_WATCH_UNSURE_BELOW = 0.5
+
+/**
+ * A set watch's judgement as its responsible person reads it (memo §5-1 / S2), from the fixed kinds the server answers on
+ * their own view (`report`): never a reason's free words, a quote or a customer's name — those are not on the server.
+ */
+export function setWatchJudgementText(report: { decision: string; confidence: number | null; updates?: number }): string {
+  const unsure = report.confidence !== null && report.confidence < SET_WATCH_UNSURE_BELOW ? '（AI は迷いました：確からしさ 低）' : ''
+  const updates = report.updates && report.updates > 0 ? `。更新案が ${report.updates} 件あります` : ''
+  switch (report.decision) {
+    case 'proceed': return `AI がたたき台を作りました${unsure}${updates}`
+    case 'ask': return `AI は作るか迷ったため、たたき台を作ってから聞いています。作ってよいか確かめてください${unsure}${updates}`
+    case 'decline': return `AI はたたき台を作りませんでした${unsure}${updates}`
+    case 'gate_failed': return 'AI が判断できなかったため、たたき台は作っていません'
+    default: return 'このアプリでは表示できない判断です'
+  }
+}

@@ -33,6 +33,8 @@ import type { OutboundMailView } from '../../shared/types/outbound-mail'
 import { installElectronAPI } from './ui/fixtures/electron-api'
 import { commands } from '../src/shared/commands/commands'
 import { fakeDropLink } from './ui/fixtures/link-drop'
+import { JobTaskPanel } from '../src/features/jobs/components/JobTaskPanel'
+import type { JobSetReportView } from '../../shared/types/jobs'
 
 const defs = new Map(coreTypeDefinitions().map(d => [d.name, d]))
 const ME = 'u-sato'
@@ -52,6 +54,11 @@ const BUNDLE_TITLE = MANUAL ? 'A社 研修導入' : 'A社 問い合わせ対応�
 // `?theme=dark` for dark mode (the primary-action spec reads the main action in both themes).
 if (params.get('theme') === 'dark') document.documentElement.classList.add('dark')
 const done = params.get('task') === 'done'
+// `?setwatch=proceed|ask|gate|none`: a やること a set watch made (its id is the occurrence's), with the job's part as AppShell
+// composes it (jobs.md "The set watch (schema 5)" "The app (PR6)"); `none`: a job's やること with no judgement on the member's view.
+const SETWATCH = params.get('setwatch')
+const SET_OCC = 'occ.' + 'b'.repeat(32)
+const TASK_ID = SETWATCH ? 'task-' + 'b'.repeat(32) : 'task-0000aa'
 const withSource = params.get('source') === '1'
 const shared = params.get('shared') === '1'
 const driveList = params.get('drive') === 'list'
@@ -87,10 +94,11 @@ const typedLinks = [
 ]
 const rec = (id: string, type: string, title: string, state: string | null, fields: RecordSummary['fields'] = {}, extra: Partial<RecordSummary> = {}): RecordSummary =>
   ({ id, type, typeVersion: 1, title, summary: '', path: null, state, fields, version: 3, updatedAt: '2026-11-05T06:00:00.000Z', ...extra })
-const task = OWN ? rec('task-0000aa', 'task', '見積を直す', 'todo', { assignee: ME, requested_by: ME, when_done: 'notify', due: '2026-11-23T15:00', tags: '["営業"]' }, { personal: true })
-  : rec('task-0000aa', 'task', 'A社 見積書を 150万円 で作り直す', done ? 'done' : 'todo', {
+const task = OWN ? rec(TASK_ID, 'task', '見積を直す', 'todo', { assignee: ME, requested_by: ME, when_done: 'notify', due: '2026-11-23T15:00', tags: '["営業"]' }, { personal: true })
+  : rec(TASK_ID, 'task', SETWATCH ? '11月24日の会議のたたき台を確かめる' : 'A社 見積書を 150万円 で作り直す', done ? 'done' : 'todo', {
     // 終わったら：確かめてから (task version 9): the assignee completes only by naming whose OK.
-    assignee: ME, requested_by: 'u-abe', when_done: 'check', due: MANUAL ? '2026-11-24T17:00' : '2026-11-07T17:00', tags: '["営業","見積"]',
+    // A set watch's やること is the member's own (no requester), so they complete it themselves.
+    assignee: ME, ...(SETWATCH ? {} : { requested_by: 'u-abe', when_done: 'check' }), due: MANUAL ? '2026-11-24T17:00' : '2026-11-07T17:00', tags: '["営業","見積"]',
     prep_summary: '前回の見積と議事録を確かめ、窓口を3つにした下書きを作りました。',
     ...(done ? { ok_by: 'u-abe', ok_note: '電話で' } : {}),
   }, shared || MANUAL ? {} : { personal: true })
@@ -98,6 +106,8 @@ const entries = (conflict ? [{ version: 4, action: 'set_due', actorId: 'u-abe', 
 // `?manual=1`: the AI made it from the meeting, with the line it read there (「会議『…』から AI が作りました」 and ［根拠を見る］).
 const shownEntries = MANUAL && !OWN
   ? [{ version: 1, action: 'create', actorId: 'ai', actorKind: 'ai', at: '2026-11-19T06:00:00.000Z', note: '「見積は150万円で作り直して、来週の火曜までにお送りします」（山田さんの発言）', fromState: null, toState: 'todo', changes: [] } as unknown as LedgerEntry, ...entries]
+  // A set watch's やること: made by the job (the time 「この作業をする」 fixes).
+  : SETWATCH ? [{ version: 1, action: 'create', actorId: 'acb:job', actorKind: 'external', at: '2026-11-24T06:10:00.000Z', note: '定期の仕事から作りました', fromState: null, toState: 'todo', changes: [] } as unknown as LedgerEntry, ...entries]
   : entries
 const runs = [{ id: 'run-1', recordId: 'task-0000aa', needsPerson: true, label: '外への操作の結果が分かりません。相手先で確かめてから続きを進めます', operations: [{ key: 'mail-send-1', kind: 'outbound', state: 'unknown', ref: null, updatedAt: '' }] }] as unknown as AiRunView[]
 const meeting = rec('meeting-0000mm', 'meeting', 'A社 研修導入のお打ち合わせ', 'read', { summary_text: '窓口を3つに増やす方向で合意。' })
@@ -175,6 +185,15 @@ const show = (id: string, line: string) => { acted.push(line); document.getEleme
 
 installElectronAPI({
   getTaskCard: async () => ({ success: true, card }),
+  getMyJobOccurrences: async () => ({ success: true, supported: true, occurrences: SETWATCH && SETWATCH !== 'none' ? [{
+    id: SET_OCC, jobId: 'job.' + '1'.repeat(32), name: '商談のあと', dueSlot: '2026-11-24T15:00', state: 'done' as const, outcomeCode: null, retry: null, unknownOperations: [], madeBefore: [],
+    report: { decision: SETWATCH === 'gate' ? 'gate_failed' : SETWATCH, reason: 'asked_for_proposal', confidence: SETWATCH === 'gate' ? null : 0.4, unconfirmed: [], feedback: [] } as JobSetReportView,
+  }] : [] }),
+  // `&refuse=1`: the server refuses the correction (the occurrence is no longer the member's to see).
+  sendJobFeedback: async (_c, occurrenceId, kind) => {
+    show('acted', `feedback ${occurrenceId} ${kind}`)
+    return params.get('refuse') === '1' ? { success: false, offline: false, code: 'JOB_NOT_FOUND', error: '定期の仕事が見つかりません。' } : { success: true, recorded: true }
+  },
   dropLinkOnRecord: fakeDropLink(line => show('acted', line)),
   patchChatSession: async (_c, sessionId, patch) => { show('acted', `topic ${sessionId}=${String(patch.topicRecordId)}`); return {} as never },
   // The titles 「…に切り替えますか？」 names (a consultation about another やること dropped on the card).
@@ -210,6 +229,8 @@ installElectronAPI({
   },
   actOnTask: async (_c, recordId, input) => {
     if (conflict) return { success: false, offline: false, code: 'VERSION_CONFLICT', error: 'ほかの人が先に変えました。' }
+    // `&refuse=complete`: the server refuses 完了 (offline, a rule): the card says why.
+    if (params.get('refuse') === 'complete' && input.action === 'complete') return { success: false, offline: true, code: null, error: 'サーバーに接続できませんでした。' }
     // A tag the server refuses: the card shows its words.
     if ((input.args?.tags as string[] | undefined)?.includes('禁止')) return { success: false, offline: false, code: 'BAD_VALUE', error: 'このタグは付けられません。' }
     show('acted', `${input.action}@${input.expectedVersion}${input.note ? `:${input.note}` : ''}${input.ok ? `:ok=${input.ok.by ?? ''}/${input.ok.note ?? ''}` : ''}${input.args?.due ? `:due=${String(input.args.due)}` : ''}${input.args && 'waiting_on' in input.args ? `:on=${String(input.args.waiting_on)}` : ''}${input.args && 'wait_until' in input.args ? `:until=${String(input.args.wait_until)}` : ''}${input.args?.tags ? `:tags=${(input.args.tags as string[]).join('|')}` : ''}${['assignee', 'reviewer', 'when_done'].filter(k => input.args?.[k]).map(k => `:${k}=${String(input.args![k])}`).join('')}`)
@@ -269,6 +290,7 @@ installElectronAPI({
 commands.register('file.open', ({ path }) => { show('acted', `open ${path}`) })
 commands.register('folder.reveal', ({ path }) => { show('acted', `reveal ${path}`) })
 commands.register('record.open', ({ recordId }) => { show('acted', `open ${recordId}`) })
+commands.register('chat.consultAbout', ({ recordId, purpose, madeAt }) => { show('acted', `consult ${recordId} ${purpose ?? ''} ${madeAt ?? ''}`) }, { target: 'chat' })
 const TODAY = '営業/.personal/inbox/日付別/2026/20261103'
 const createTodayFile = async (name: string) => {
   show('acted', `today ${name}`)
@@ -290,6 +312,10 @@ function Preview() {
           { folder: '開発部', name: '開発部', kind: { type: 'project', name: 'プロジェクト', source: 'core' as const }, departmentId: 'd-dev' },
         ] } } : {})}
         consultations={params.get('consult') === 'none' ? [] : [{ sessionId: 's-1', title: '見積の相談', updatedAt: '2026-11-05T07:00:00.000Z' }]}
+        {...(SETWATCH ? {
+          meetingBesideTitle: true,
+          renderJobPart: ctx => <JobTaskPanel companyId="co-preview" task={ctx.task} busy={ctx.busy} onComplete={ctx.complete} onDismiss={ctx.dismiss} />,
+        } : {})}
         sharedFolder={!noFolder} tagsInUse={['営業', '見積', '経理']} createTodayFile={createTodayFile} notDownloadedFolderOf={p => (p === '総務' || p.startsWith('総務/') ? '総務' : null)} onDetachConsultation={id => show('acted', `detach ${id}`)} />
     </main>
   )

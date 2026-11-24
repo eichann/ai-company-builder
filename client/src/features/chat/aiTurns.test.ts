@@ -7,7 +7,7 @@ import {
   AI_TURN_PASS_CAP, AI_TURN_PASS_INTERVAL_MS, MAX_ATTEMPTS_PER_RECORD, freshLog, logForToday, nextAiTurn, orderAiTurns,
   FAILED_REASON, URGENT_WITHIN_MS, aiTurnItems, askedAgain, handUrgent, handedOver, movedOn, recordOutcome, recordStarted, resumed, retried, usagePauseUntil, type AiTurnDecisionInput,
   canResumeAiTurns, retitledConsultation, closesWhenRunEnds, closesWhenRecordEnds, rememberedAutomatic, forgottenAutomatic,
-  automaticConsultationsOf, readAutomaticConsultations, AUTOMATIC_CONSULTATIONS_KEPT, type ConsultationHold, usagePause, usagePauseLifted, aiTurnNoticeText, STOP_UNCONFIRMED_TEXT, mayStartAiTurns, jobOutcome, notDeferred,
+  automaticConsultationsOf, readAutomaticConsultations, AUTOMATIC_CONSULTATIONS_KEPT, type ConsultationHold, usagePause, usagePauseLifted, aiTurnNoticeText, STOP_UNCONFIRMED_TEXT, mayStartAiTurns, jobOutcome, notDeferred, workConsultationStep, replyAsksTheMember,
 } from './aiTurns'
 import type { AiTurnCandidate } from '../../../shared/ai-turn-steps/types'
 import { jobTurnCandidate, type QueuedJobTurn } from '../../../shared/ai-turn-steps/job'
@@ -394,4 +394,33 @@ test('a claim not won waits before it is asked again, the others go on', () => {
   const deferred = new Map([[A.id, NOW + 30_000]])
   assert.deepEqual(notDeferred([A, B], deferred, NOW).map(c => c.id), [B.id])
   assert.deepEqual(notDeferred([A, B], deferred, NOW + 30_000).map(c => c.id), [A.id, B.id])
+})
+
+// 「この作業をする」 (4b-4 PR6, owner memo 「4b-4 挟む部分」 E5 / F-7): the member's consultation closes by itself once its work
+// is done while it is not in front — under the automatic run's rules, never before its AI worked, never over the member.
+test('「この作業をする」: closes once its AI worked and ended while not in front; waits while it works or asks; stays otherwise', () => {
+  // Not started yet (the first status may be idle): nothing is decided.
+  assert.equal(workConsultationStep({ state: 'idle', line: '' }, QUIET, AUTO, false), 'wait')
+  // Working, or waiting for an approval / a review / an answer: still waiting.
+  assert.equal(workConsultationStep({ state: 'working', line: '考えています' }, QUIET, AUTO, true), 'wait')
+  assert.equal(workConsultationStep({ state: 'needs-you', kind: 'approve', line: '許可を待っています' }, QUIET, AUTO, true), 'wait')
+  // Ended unread, nothing of the member's: closes.
+  assert.equal(workConsultationStep(UNSEEN, QUIET, AUTO, true), 'close')
+  // Ended in front (the member watched it), failed, or the member wrote in it: stays for good.
+  assert.equal(workConsultationStep({ state: 'idle', line: '' }, { ...QUIET, shown: true }, AUTO, true), 'keep')
+  assert.equal(workConsultationStep({ state: 'failed', line: 'エラーで止まりました' }, QUIET, AUTO, true), 'keep')
+  assert.equal(workConsultationStep(UNSEEN, { ...QUIET, userMessageIds: ['m-app', 'm-member'] }, AUTO, true), 'keep')
+  assert.equal(workConsultationStep(UNSEEN, { ...QUIET, draft: 'まだ' }, AUTO, true), 'keep')
+  // The AI asked the member in plain text (independent review of PR6): the turn ended, but it waits for them.
+  assert.equal(workConsultationStep(UNSEEN, { ...QUIET, lastReplyAsks: true }, AUTO, true), 'keep')
+})
+
+test('a reply that ends with a question to the member is told apart from one that only reports', () => {
+  const reply = (text: string) => [{ role: 'user', parts: [{ type: 'text', text: 'やって' }] }, { role: 'assistant', parts: [{ type: 'text', text }] }]
+  assert.equal(replyAsksTheMember(reply('どの会議のたたき台を作りますか？')), true)
+  assert.equal(replyAsksTheMember(reply('これでよいですか?\n')), true)
+  assert.equal(replyAsksTheMember(reply('「この内容で送りますか？」')), true)
+  assert.equal(replyAsksTheMember(reply('たたき台を作りました。')), false)
+  // Only the AI's last reply counts (the member's own question does not).
+  assert.equal(replyAsksTheMember([{ role: 'assistant', parts: [{ type: 'text', text: 'できました。' }] }, { role: 'user', parts: [{ type: 'text', text: 'ありがとう？' }] }]), false)
 })

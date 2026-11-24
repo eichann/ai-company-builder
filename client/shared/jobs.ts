@@ -1,5 +1,5 @@
-import { knownJobDefinition, type JobDefinition, type JobOccurrenceState, type JobPauseReason, type JobPlacement, type JobRetryBlock, type JobState, type JobTrigger } from '../../shared/core/jobs'
-import type { JobWaiting } from '../../shared/types/jobs'
+import { JOB_SET_WATCH_SCHEMA, isSetTrigger, parseJobDefinition, jobSetFeedbackFits, knownJobDefinition, occurrenceTaskId, type JobDefinition, type JobOccurrenceState, type JobSetFeedbackKind, type JobPauseReason, type JobPlacement, type JobRetryBlock, type JobState, type JobTrigger } from '../../shared/core/jobs'
+import type { JobSetReportView, JobWaiting } from '../../shared/types/jobs'
 
 /**
  * Settings → 「定期の仕事」 (jobs.md "The screens", PR 4): the scheduled jobs the member is the responsible
@@ -19,10 +19,20 @@ import type { JobWaiting } from '../../shared/types/jobs'
  */
 export const APP_JOB_SCHEMAS: readonly number[] = [1, 2, 3, 4]
 
-/** A definition this app shows: a shape the core knows and this app announces; anything else is shown as hidden. */
-export function appReadsJobDefinition(d: unknown): JobDefinition | null {
-  const known = knownJobDefinition(d)
-  return known !== null && APP_JOB_SCHEMAS.includes(known.schema) ? known : null
+/**
+ * A definition this app shows: a shape the core knows and this app announces; anything else is shown as hidden. A set watch
+ * (schema 5, 4b-4 PR6) is read by its trigger's kind — the core's `knownJobDefinition` answers time and record triggers only
+ * — and only once this app announces 5: its 受け取る words are here since PR6, the announcement is made in the build that
+ * runs it (PR5's runner; until then the server answers such a version without its definition, `needsUpdate`).
+ */
+export function appReadsJobDefinition(d: unknown, schemas: readonly number[] = APP_JOB_SCHEMAS): JobDefinition | null {
+  const known = knownJobDefinition(d) ?? (isSetWatchDefinition(d) && parseJobDefinition(d).ok ? d : null)
+  return known !== null && schemas.includes(known.schema) ? known : null
+}
+
+/** A schema-5 definition (a set watch): the shape the set watch's words take. */
+export function isSetWatchDefinition(d: unknown): d is JobDefinition {
+  return !!d && typeof d === 'object' && (d as { schema?: unknown }).schema === JOB_SET_WATCH_SCHEMA && isSetTrigger((d as { trigger?: unknown }).trigger)
 }
 
 /** The server answers jobs without who the member is to them (a build before PR 4): nothing can be shown honestly. */
@@ -84,6 +94,8 @@ export type JobActionResult = { success: true } | JobsFailure
 export function jobNoticeTarget(kind: string): 'jobs' | 'none' | null {
   // A stopped chain (stage 4a): the responsible person chooses the next watched やること there.
   if (kind === 'job_accept_needed' || kind === 'job_chain_stopped') return 'jobs'
+  // A set watch's 見送る (4b-4 PR6): its ［作ってもらう］ is in 「定期の仕事」's 「会議のあとの AI の判断」 (no やること was made).
+  if (kind === 'job_set_declined') return 'jobs'
   // A member's proposal returned (member proposals): the proposer sees its state in their list of proposals there.
   if (kind === 'job_proposal_returned') return 'jobs'
   // A proposal waiting for an owner / admin: decided in the admin console, nothing to press here.
@@ -111,7 +123,78 @@ export interface MyJobOccurrence {
   retry: { allowed: true } | { allowed: false; why: JobRetryBlock | 'UNKNOWN' } | null
   unknownOperations: Array<{ key: string; kind: string }>
   madeBefore: Array<{ kind: string; count: number }>
+  /**
+   * A set watch's judgement (4b-4 PR3's `report`), on the member's own view only while the occurrence is theirs to see: the
+   * fixed kinds as answered (one with a decision this app does not know is left out), never a quote or a title.
+   * Absent: not a set watch, no judgement yet, an older server.
+   */
+  report?: JobSetReportView
 }
+
+/**
+ * What the app offers on a set watch's judgement (owner memo 「4b-4 挟む部分」 H-10, S2 / S11): ［確かめて完了］ on its やること
+ * (進める / 人に聞く / 判断できなかった, and 見送る with update proposals — never done for the member, S11 #2), ［まだ早かった］ where the
+ * server takes `too_early` and the member did not say 仕上げた — also once recorded, while its やること is still open (a press whose
+ * correction was kept but whose やること was not taken away can be pressed again: the server answers `recorded: false`), ［作ってもらう］ where it takes `made_anyway` (見送る) and — with no correction to record — after a
+ * judgement that failed (S2 J5). Decided from the answered kinds only; the server checks each press again.
+ */
+export interface SetWatchOffer {
+  confirmDone: boolean
+  tooEarly: boolean
+  makeAnyway: boolean
+  /** ［作ってもらう］ also records `made_anyway` (only after 見送る: nothing corrects a gate that failed). */
+  makeAnywayRecords: boolean
+}
+
+export function setWatchOffer(report: JobSetReportView): SetWatchOffer {
+  const fits = (k: JobSetFeedbackKind) => jobSetFeedbackFits(k, report.decision)
+  const sent = (k: JobSetFeedbackKind) => report.feedback.includes(k)
+  // Every judgement makes the やること but a 見送る with no update proposals (PR3b's `setWatchMakesTask`).
+  const madeTask = report.decision !== 'decline' || (report.updates ?? 0) > 0
+  return {
+    confirmDone: madeTask,
+    tooEarly: fits('too_early') && !sent('went_ahead'),
+    makeAnyway: (fits('made_anyway') && !sent('made_anyway')) || report.decision === 'gate_failed',
+    makeAnywayRecords: fits('made_anyway'),
+  }
+}
+
+/** The set watch's occurrence whose やること this is (its id is the occurrence's, `occurrenceTaskId`), with a judgement; else null. */
+export function setWatchOccurrenceOf(occurrences: readonly MyJobOccurrence[], taskId: string): (MyJobOccurrence & { report: JobSetReportView }) | null {
+  for (const o of occurrences) {
+    if (!o.report) continue
+    let id: string
+    try { id = occurrenceTaskId(o.id) } catch { continue }
+    if (id === taskId) return o as MyJobOccurrence & { report: JobSetReportView }
+  }
+  return null
+}
+
+/** Ids of a やること an occurrence made (`task-` + the occurrence's 32 hex): only these can be a set watch's. */
+export const OCCURRENCE_TASK_ID_RE = /^task-[0-9a-f]{32}$/
+
+/**
+ * 「議事録が直された」 (memo S1 T7, S11 #8): the minutes' `docVersion` the run read against the one now. `edited` only when both
+ * are known and differ; `unknown` when the run's is known but today's cannot be read — never said as unchanged; `none` when the
+ * run kept none (a build before PR5's run record: nothing is said).
+ */
+export function minutesEditedMark(versions: JobRunMinutesVersions | null | undefined): 'edited' | 'same' | 'unknown' | 'none' {
+  if (!versions || versions.read === null) return 'none'
+  if (versions.now === null) return 'unknown'
+  return versions.read === versions.now ? 'same' : 'edited'
+}
+
+/**
+ * What PR5's runner keeps of a set watch's run on this PC (the smallest interface PR6 needs, filled by PR5): the minutes'
+ * `docVersion` the run read, and the one now (null: not known).
+ */
+export interface JobRunMinutesVersions {
+  read: string | null
+  now: string | null
+}
+
+/** `jobs:feedback`: a correction of a set watch's judgement (`recorded: false` = it was there already). */
+export type JobFeedbackResult = { success: true; recorded: boolean } | JobsFailure
 
 /** `jobs:occurrences`. `supported: false`: a server before stage 4b-1 (nothing to show, said as nothing). */
 export type MyJobOccurrencesResult = { success: true; supported: boolean; occurrences: MyJobOccurrence[] } | JobsFailure

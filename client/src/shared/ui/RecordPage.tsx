@@ -14,7 +14,7 @@ import { StatusBadge, type StatusBadgeVariant } from './primitives'
  * chips, the big title with the one main action and 「…」 beside it, where it came from, the body,
  * fields and 経緯 folded at the bottom, and 「つながっているもの」 on the right (below when narrow).
  */
-export function RecordPage({ testId, kind, name, chips, seenBy, top, title, actions, from, children, bottom, bottomLast, links }: {
+export function RecordPage({ testId, kind, name, chips, seenBy, top, title, titleNote, actions, from, children, bottom, bottomLast, links }: {
   testId?: string
   kind: ThingKind
   /** The kind's plain name (`typeLabel`: 会議の記録, 案件…). */
@@ -26,6 +26,8 @@ export function RecordPage({ testId, kind, name, chips, seenBy, top, title, acti
   /** Above the header: a conflict notice, the AI working, the 案件 it belongs to. */
   top?: ReactNode
   title: string
+  /** Said beside the title, quieter (a やること's meeting name, read now: never part of the title). */
+  titleNote?: string | null
   actions?: ReactNode
   from?: ReactNode
   children?: ReactNode
@@ -49,7 +51,7 @@ export function RecordPage({ testId, kind, name, chips, seenBy, top, title, acti
             {seenBy && <span className="ml-auto">{seenBy}</span>}
           </div>
           <div className="flex items-start gap-3">
-            <h1 className="min-w-0 flex-1 text-[22px] font-bold leading-snug">{title}</h1>
+            <h1 className="min-w-0 flex-1 text-[22px] font-bold leading-snug">{title}{titleNote && <span data-title-note className="ml-1 text-title font-normal text-text-muted">{titleNote}</span>}</h1>
             {actions && <div className="flex shrink-0 items-center gap-1.5 pt-1">{actions}</div>}
           </div>
           {from}

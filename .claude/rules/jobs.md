@@ -1763,6 +1763,55 @@ runs it** ("The app runs it" below; no screen announces schema 5 yet — that, a
   Mutation check: 17 mutations (the parser's key, integer, bounds and `gate_failed`; `setWatchMakesTask` both ways and in
   `finishSet`; the description, the name, owner-only; the stored and viewed count; the CHECK, its `gate_failed` half, the
   default) — each fails a test except `finishTask`'s pre-check (defence, above).
+- **The app (PR6, the common part; owner memo 「4b-4 挟む部分」 H-10 / S11 — the 4b-4 screens of their own are PR6-A,
+  `features/after-meeting/` behind a company switch)**. Everything only shows and asks; the server decides.
+  - **Not announced yet**: `APP_JOB_SCHEMAS` stays `[1, 2, 3, 4]`. The 受け取る words for schema 5 are here
+    (`appReadsJobDefinition(d, schemas)` reads a set watch by its trigger only once 5 is announced, and only when the shared parser takes it; `acceptanceLines`,
+    `features/jobs/model.ts`), and `5` is announced **in the build that runs it** (PR5's runner, which names `matched_record`):
+    an app announcing it without the runner would let a member accept a job whose occurrences only expire.
+  - **The words are one copy** in `shared/core/job-words.ts` (moved from PR7's `admin/src/lib/jobs.ts`):
+    `setWatchConditionLines` (only for an opened combination), `SET_WATCH_NOT_RUN_NOTE`, `SET_WATCH_SEEN_NOTE`,
+    `setWatchGrantLines`, `setWatchDayLimitText`, `setWatchMissedText`, `setWatchReadSkillsText`, `setWatchReasonLabels`, and the
+    app's `setWatchJudgementText` (fixed kinds only; 「AI は迷いました」 below `SET_WATCH_UNSURE_BELOW` 0.5) and
+    `JOB_GOOGLE_ADDRESS_NOTE` — the permanent hint in 設定 →「定期の仕事」 that the calendar invitation's Google address must be
+    the one connected (S11 #4: no per-meeting notice of a meeting not found).
+  - **The judgement** reaches the app only from the member's own `GET /me/job-occurrences` (`report`, parsed by main's
+    `parseSetReport`: a known decision, a code-shaped reason, a 0–1 confidence, the fixed unconfirmed words and corrections; anything
+    else → no report). A やること is a set watch's when its id is `occurrenceTaskId` of such an occurrence
+    (`setWatchOccurrenceOf`; only `task-<32 hex>` ids are asked, `OCCURRENCE_TASK_ID_RE`).
+  - **On the やること's card** (`features/jobs/components/JobTaskPanel.tsx`, composed by AppShell into `TaskCard`'s
+    `renderJobPart` for those ids): the judgement line; ［確かめて完了］ — the card's own 完了にする, pressed by the member (S11 #2:
+    never done for them); ［まだ早かった］ — `POST /me/job-occurrences/:id/feedback { kind: 'too_early' }` (IPC `jobs:feedback`) first,
+    then the card's 要らない (`dismiss`, note 「AI のたたき台が早すぎたため」, at the card's version with ［取り消す］: the job's やること
+    has no requester, and `dismiss` allows the meeting's people, `link:meeting`); a refusal takes nothing away; ［作ってもらう］ after
+    判断できなかった — 「この作業をする」, no correction; after a 見送る with update proposals (PR3b: its やること exists) ［確かめて完了］ and
+    ［作ってもらう］ (`made_anyway`, then 「この作業をする」 on that same やること — never a second one); any other job's やること (no judgement on the member's view) —
+    「この作業をする」. `setWatchOffer` decides which (`too_early` after 進める / 人に聞く unless 仕上げた was said — again while its やること is still open, so a correction kept but a 要らない refused can be pressed once more, the server answering `recorded: false`; `made_anyway` after 見送る). A refusal of 完了 or 要らない is said in the part.
+  - **The meeting's name beside the date-only title** (N1, S11 #1): `TaskCard` `meetingBesideTitle` → `linkedMeetingTitle` of
+    the card's own read (the server lists a linked record only while the member reads it) → `RecordPage` `titleNote`. Display
+    only: never stored, never in the title, the list, a notice or a message. Rows of the list show the date only (follow-up).
+  - **「議事録が直された」** (T7, S11 #8): `minutesEditedMark(versions)` — `edited` only when the run's `docVersion` and today's are both
+    known and differ, `unknown` (said as 確かめられません, never as unchanged) when today's is not; nothing until PR5 keeps the run's
+    (`JobRunMinutesVersions`, `JobTaskPanel`'s `minutesVersions`, TODO(4b-4 PR5)).
+  - **「この作業をする」** (U9 / F-6, E5): `chat.consultAbout { purpose: 'work', madeAt }` — always a new consultation 「<title> の作業」
+    whose first message (`taskConsultFirstMessage`, `workFirstMessage`) starts the work for **the week the やること was made in**
+    (company time, `weekOfMaking`; never the week it is pressed in) and the meeting it links only, never sending, deleting or
+    sharing without the member. It is remembered like an automatic run's consultation (ending the やること closes it) and
+    **closes by itself** once its AI worked and the turn ended while it was not in front (`workConsultationStep` over
+    `closesWhenRunEnds`; `ChatPanel` watches the tab's status outside React): a review, an approval or a question waiting, a
+    reply that ends by asking the member something in plain text (`replyAsksTheMember`, the hold's `lastReplyAsks`; independent
+    review), a failure, the member's words or draft, or the tab in front keep it open. A やること in any final state (完了,
+    アーカイブ, 要らない: `taskStillOpen`) offers none of the part's buttons.
+  - **見送る** (`job_set_declined`): the notice opens 「定期の仕事」 (`jobNoticeTarget`; inbox badge 「AI は作りませんでした」), whose
+    「会議のあとの AI の判断」 (`declinedRows`) lists each 見送る without update proposals with ［作ってもらう］: `made_anyway` first, then a new consultation
+    (`makeAnywayMessage`: the AI finds the member's 「議事録を確認する」 completed at that time — the occurrence names no meeting in
+    the app — and asks when it cannot tell).
+  - **Where set watches appear in 設定 →「定期の仕事」**: a waiting one in 「受け取りを待っています」 with its words; an accepted
+    one in 「あなたの定期の仕事」 with `jobSetTriggerText` and 「次は、条件に合う会議が来たとき」 (no slot); its 見送る in
+    「会議のあとの AI の判断」 — all only once the app announces 5 (before, the server answers such a job without its trigger).
+  - Tests: `client/tests/jobs-set-watch-app.test.ts`, `client/tests/task-consult-work.test.ts`,
+    `src/features/jobs/model.test.ts`, `src/features/chat/aiTurns.test.ts` (「この作業をする」), `tests/ui/job-task-panel.spec.ts`
+    (`task-card-ui.html?setwatch=proceed|gate|none`, `&refuse=1`). Mutation check: see the PR.
 
 ## Member proposals (「AIへの相談」から定期の仕事, PR A: the server; owner memo 2026-11-22 第1〜5版, decisions Q1–Q4)
 

@@ -16,7 +16,7 @@ import { useAgentAuth } from '../hooks/useAgentAuth'
 import { getChatSession, getChatSessionSummaries } from '../api'
 import { useChatWindows } from '../hooks/useChatWindows'
 import { useMoveToWindow } from '../hooks/useMoveToWindow'
-import { consultationStatusOf } from '../consultationStatusStore'
+import { consultationStatusOf, subscribeConsultationStatuses } from '../consultationStatusStore'
 import { publishChatPane, showInOtherChatPane } from '../chatPanes'
 import { useLatestRef } from '../../../shared/hooks/useLatestRef'
 import { commandArea, useCommandHandler } from '../../../shared/commands/commands'
@@ -26,8 +26,8 @@ import type { AiTurnItemsView } from '../../../../shared/ai-turns'
 import { consultationAbout, taskConsultFirstMessage, taskConsultPurposeTitle, taskConsultTitle } from '../../../../shared/task-consult'
 import { agentCan } from '../../../../shared/agents/registry'
 import { useAiTurnRunner } from '../hooks/useAiTurnRunner'
-import { automaticConsultationsFor, consultationHoldOf, forgetAutomaticConsultations } from '../automaticConsultationsStore'
-import { closesWhenRecordEnds } from '../aiTurns'
+import { automaticConsultationsFor, consultationHoldOf, forgetAutomaticConsultations, rememberAutomaticConsultation } from '../automaticConsultationsStore'
+import { closesWhenRecordEnds, workConsultationStep } from '../aiTurns'
 import { AiTurnNotice } from './AiTurnNotice'
 
 // The chat panel: one company's conversations as tabs (all mounted, only the
@@ -118,15 +118,37 @@ function CompanyChatPanel({ userId, departmentPath, activeDepartment, slashComma
     ...(pluginStep && message ? { instruction: { kind: 'step', recordId: pluginStep.recordId, title: title ?? '' } } : {}),
   }), { target: paneId })
   useCommandHandler('chat.insertText', ({ text }) => setInputRequest({ kind: 'insertText', text }), { target: paneId })
+  // 「この作業をする」 (jobs.md, owner memo 「4b-4 挟む部分」 E5): remembered like an automatic run's consultation (ending the
+  // やること closes it too), and closed by itself once its work is done while not in front — the rules of `closesWhenRunEnds`
+  // (a review, an approval, a failure, the member's words, another conversation in the tab or the tab in front keep it open).
+  // Watched outside React (no effect); stops with the tab.
+  const closeWhenWorkDone = (recordId: string, tabId: string, conversationId: string, messageId: string) => {
+    if (!companyId) return
+    rememberAutomaticConsultation(companyId, userId, conversationId, recordId, messageId)
+    let sawWorking = false
+    const stop = subscribeConsultationStatuses(() => {
+      const status = consultationStatusOf(tabId)
+      if (!tabsRef.current.some(tab => tab.id === tabId)) { stop(); return }
+      if (status?.state === 'working') sawWorking = true
+      const step = workConsultationStep(status, consultationHoldOf(tabId), { sessionId: conversationId, messageId }, sawWorking)
+      if (step === 'wait') return
+      stop()
+      if (step === 'close') {
+        closeTab(tabId)
+        forgetAutomaticConsultations(companyId, userId, [conversationId])
+      }
+    })
+  }
   // 「相談する」 on a record: the member's most recent consultation about it, else a new one with it as the main topic.
-  useCommandHandler('chat.consultAbout', async ({ recordId, title, fresh, purpose }) => {
-    // A purpose (［催促の下書きを作る］) always starts its own consultation.
+  useCommandHandler('chat.consultAbout', async ({ recordId, title, fresh, purpose, madeAt }) => {
+    // A purpose (［催促の下書きを作る］, 「この作業をする」) always starts its own consultation.
     const existing = fresh || purpose ? null : consultationAbout(companyId ? await getChatSessionSummaries(companyId).catch(() => []) : [], recordId)
     if (existing) { openOrFocus(existing); return }
     setInputRequest({
       kind: 'newConsultation', title: purpose ? taskConsultPurposeTitle(title, purpose) : taskConsultTitle(title), topicRecordId: recordId,
-      message: taskConsultFirstMessage({ id: recordId, title }, agentCan(authMode, 'recordsMcp'), purpose),
+      message: taskConsultFirstMessage({ id: recordId, title, ...(madeAt ? { madeAt } : {}) }, agentCan(authMode, 'recordsMcp'), purpose),
       instruction: { kind: 'task', recordId, title },
+      ...(purpose === 'work' ? { onSent: ({ tabId, conversationId, messageId }: { tabId: string; conversationId: string; messageId: string }) => closeWhenWorkDone(recordId, tabId, conversationId, messageId) } : {}),
     })
   }, { target: paneId })
   useCommandHandler('chat.openConsultation', ({ sessionId }) => openOrFocus(sessionId), { target: paneId })

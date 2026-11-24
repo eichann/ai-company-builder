@@ -73,6 +73,8 @@ import { useTaskList } from '../features/tasks/hooks/useTaskList'
 import { useSeenTasks } from '../features/tasks/hooks/useSeenTasks'
 import { usePluginStepTurns } from '../features/plugin-steps/hooks/usePluginStepTurns'
 import { useJobTurns } from '../features/jobs/hooks/useJobTurns'
+import { JobTaskPanel } from '../features/jobs/components/JobTaskPanel'
+import { OCCURRENCE_TASK_ID_RE } from '../../shared/jobs'
 import { ContinueStepButton } from '../features/plugin-steps/components/ContinueStepButton'
 import { PersonStepButtons } from '../features/plugin-steps/components/PersonStepButtons'
 import { StepDeliverables } from '../features/plugin-steps/components/StepDeliverables'
@@ -469,6 +471,11 @@ export function AppShell({ bottomPanel }: AppShellProps = {}) {
       // Keyed by id only: a new version (the AI linked a file, a press in the list) updates it in place.
       // 「続きをする」 sits above a やること an automatic step run handed over (plugin-steps.md).
       return <div key={recordId}><ContinueStepButton companyId={currentCompany.id} rootPath={rootPath} recordId={recordId} /><TaskCard knownVersion={taskList.data?.items.find(i => i.id === recordId)?.version} onLoaded={look => noteRecordLook(recordId, look)} companyId={currentCompany.id} rootPath={rootPath} recordId={recordId} renderPrepared={renderPrepared} renderSource={record => renderRecordSource(currentCompany.id, record)} renderSections={plugins.renderSections} shareFolders={shareFolders} onConsult={consultAbout} onNudge={draftNudge} onEnded={recordEnded} consultations={recordConsultations.get(recordId)} tagsInUse={tagCounts(taskList.data?.items ?? []).map(t => t.tag)} onChanged={taskList.reload} bundleKind={deptBundleKind} bundleFolder={effectiveDeptFolder || null} bundlePlaces={bundlePlaces} createTodayFile={createTodayFile} notDownloadedFolderOf={notDownloadedFolderOf} sharedFolder={sharedFolder}
+        // A やること a scheduled job made (its id is the occurrence's, jobs.md "The set watch (schema 5)" "The app (PR6)").
+        {...(OCCURRENCE_TASK_ID_RE.test(recordId) ? {
+          meetingBesideTitle: true,
+          renderJobPart: ctx => <JobTaskPanel companyId={currentCompany.id} task={ctx.task} busy={ctx.busy} onComplete={ctx.complete} onDismiss={ctx.dismiss} />,
+        } : {})}
         onDetachConsultation={sessionId => { void patchChatSession(currentCompany.id, sessionId, { topicRecordId: null }).catch(() => {}) }} /></div>
     }
     // A business plugin's `start: person` steps at the record's state (plugin-steps.md) sit above its card.
