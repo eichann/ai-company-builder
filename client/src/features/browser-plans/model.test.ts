@@ -3,7 +3,8 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import type { BrowserFact } from '../../../../shared/core/browser-plans'
 import type { BrowserExecutionView, BrowserPlanView } from '../../../../shared/types/browser-plans'
-import { notReadyText, planContent, planStatus, runResultText } from './model'
+import { WRITE_CARD_LIVE_REFRESH_MS, WRITE_CARD_UNSETTLED_REFRESH_MS, notReadyText, planContent, planStatus, runResultText, writeCardRefreshMs } from './model'
+import type { BrowserWriteView } from '../../../shared/browser-line-writes'
 
 const at = '2026-11-22T03:00:00.000Z'
 const fact = (value: unknown): BrowserFact => ({ status: 'known', value, readAt: at, source: '/x' })
@@ -67,4 +68,18 @@ test('plain words for why ［任せる］ is off and for what a press led to (a 
   for (const r of [runResultText({ outcome: 'failed', reason: 'permit-late' }), notReadyText('off', 'Lステップ') ?? '']) {
     for (const word of ['安全です', 'sha256', 'ハッシュ', 'トークン']) assert.equal(r.includes(word), false)
   }
+})
+
+test('a write card reads itself again while its run goes on, and while answer buttons are up even once pressable (the other window\'s answer shows)', () => {
+  const card = (over: Partial<BrowserWriteView>): BrowserWriteView => ({
+    title: 't', siteLabel: 's', phase: 'finished', values: [], sentences: [], card: null, readAt: null, contentHash: null, message: null, result: null, ...over,
+  })
+  const result = (confirm: { from: string | null; canNow: boolean } | null) => ({ outcome: 'unknown' as const, headline: '', done: [], notDone: [], unknown: ['x'], byHand: [], confirm })
+  const bf = `bf_${'1'.repeat(32)}`
+  assert.equal(writeCardRefreshMs(bf, card({ phase: 'running' }), false), WRITE_CARD_LIVE_REFRESH_MS)
+  assert.equal(writeCardRefreshMs(bf, card({ result: result({ from: null, canNow: true }) }), false), WRITE_CARD_UNSETTLED_REFRESH_MS)
+  assert.equal(writeCardRefreshMs(bf, card({ result: result({ from: at, canNow: false }) }), false), WRITE_CARD_UNSETTLED_REFRESH_MS)
+  assert.equal(writeCardRefreshMs(bf, card({ result: result({ from: null, canNow: true }) }), true), null)
+  assert.equal(writeCardRefreshMs(bf, card({ result: result(null) }), false), null)
+  assert.equal(writeCardRefreshMs(`bl_${'1'.repeat(32)}`, card({ phase: 'running' }), false), null)
 })

@@ -751,7 +751,7 @@ test('the card follows the server: its time for the answer, an answer it already
   assert.equal((stuck.wiring.card(COMPANY, FRAME_RUN) as { ok: true; view: BrowserWriteView }).view.result?.confirm, null)
 })
 
-test('the card in two windows at once: one ［任せる］ wins (asked once), the other window gets the card as it stands; the same for the answer', async () => {
+test('the card in two windows at once: one ［任せる］ wins (asked once), the other window waits for it and gets the card as it then stands; the same for the answer', async () => {
   let release: () => void = () => {}
   const { w, wiring, tool, cards } = workWorld({
     answers: [PLAN, CLICK_SAVE, DONE_PLAIN],
@@ -761,10 +761,13 @@ test('the card in two windows at once: one ［任せる］ wins (asked once), th
   for (let i = 0; i < 50 && cards.length === 0; i++) await new Promise(resolve => setTimeout(resolve, 5))
   assert.deepEqual(wiring.placeOf(COMPANY, FRAME_RUN), { conversationId: 'conv-1' })
   const first = wiring.approve(COMPANY, FRAME_RUN, PLAN_HASH)
-  const second = await wiring.approve(COMPANY, FRAME_RUN, PLAN_HASH)
-  assert.equal(second?.ok, true, 'the other window gets the card, not an error')
+  const second = wiring.approve(COMPANY, FRAME_RUN, PLAN_HASH)
+  await new Promise(resolve => setTimeout(resolve, 10))
   release()
   assert.equal((await first)?.ok, true)
+  const other = await second
+  assert.equal(other?.ok, true, 'the other window gets the card, not an error')
+  assert.notEqual(other?.ok && other.view.phase, 'ready', 'and the card as it stands after the first press')
   await words
   assert.equal(w.calls.filter(c => c.startsWith('frameApprove')).length, 1)
   assert.equal(w.site.requests.length, 1)
@@ -779,10 +782,15 @@ test('the card in two windows at once: one ［任せる］ wins (asked once), th
   })
   await doubt.tool.execute({ site: HOST, task: 'いつものクーポン', skill: 'coupons' })
   const one = doubt.wiring.confirm(COMPANY, FRAME_RUN, 'not_done')
-  const other = await doubt.wiring.confirm(COMPANY, FRAME_RUN, 'done')
-  assert.equal(other?.ok, true)
+  const otherPress = doubt.wiring.confirm(COMPANY, FRAME_RUN, 'done')
+  await new Promise(resolve => setTimeout(resolve, 10))
   answer()
   assert.equal(((await one) as { ok: true; view: BrowserWriteView }).view.result?.headline, CW.confirmedNotDone)
+  // The other window waited for the first answer and shows it: no buttons left there (Codex review).
+  const seen = await otherPress as { ok: true; view: BrowserWriteView }
+  assert.equal(seen.ok, true)
+  assert.equal(seen.view.result?.confirm, null)
+  assert.equal(seen.view.result?.headline, CW.confirmedNotDone)
   assert.deepEqual(doubt.w.calls.filter(c => c.startsWith('frameConfirm')), ['frameConfirm 1 not_done'])
 })
 

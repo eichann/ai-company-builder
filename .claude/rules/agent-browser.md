@@ -3623,8 +3623,10 @@ so their buttons work there too — and only there and in the main window.
   anywhere else. A card the member does not have answers `gone` from any window.
 - **One press wins** when the card shows in two windows (the main window's inbox and the consultation's window): a press
   while another is on its way (`Entry.pressing`, ［任せる］ and the answer) asks the server nothing and returns the card as it
-  stands; the card moves on by itself in both (read again every 2 s while it runs). A later press finds the card no longer
-  `ready` (as before).
+  stands **once that press is through** (Codex review: it waits for it, so it never shows buttons already answered); the
+  card moves on by itself in both — read again every 2 s while its run goes on and every 15 s while answer buttons are up,
+  also once they can be pressed (`writeCardRefreshMs`, `src/features/browser-plans/model.ts`), so an answer given in the
+  other window shows. A later press finds the card no longer `ready` (as before).
 - **Unchanged**: the one-time approval value stays in the work wiring (main's memory); the AI's tools reach none of this;
   the read-only inspection's card (`browserLines:card`) stays main-window only.
 
@@ -3632,8 +3634,9 @@ Tests: `client/tests/chat-windows.test.ts` (the rule: the main window, that cons
 another company's, not with no consultation, not an unknown sender, not a frame inside, not once closed),
 `browser-write-lines-app.test.ts` (a `bl_` card from its consultation's window, never another's; a `bf_` card's read,
 ［任せる］, ［やめる］ and answer only from a window showing its consultation, `gone` without a card),
-`browser-frame-writes.test.ts` (the card in two windows: one ［任せる］ and one answer asked of the server). Each guard
-mutation-checked.
+`browser-frame-writes.test.ts` (the card in two windows: one ［任せる］ and one answer asked of the server, the other
+window shown the outcome; a lost reply frees the next press), `src/features/browser-plans/model.test.ts` (when a card
+reads itself again). Each guard mutation-checked.
 
 ## Not yet (later PRs)
 

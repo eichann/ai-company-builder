@@ -8,11 +8,8 @@ import { useInterval } from '../../../shared/hooks/useInterval'
 import { cancelBrowserWrite, confirmBrowserWrite, confirmBrowserWriteValue, getBrowserWriteCard, runBrowserWrite, type BrowserWriteAnswers, type BrowserWriteOutbound, type BrowserWriteReads } from '../api'
 import { WRITE_CARD_UNREADABLE, useBrowserWrite } from '../hooks/useBrowserWrite'
 import { putWrite } from '../writeStore'
+import { writeCardRefreshMs } from '../model'
 
-/** A write in doubt is read again this often (the server opens the confirm at `confirmableAt`). */
-const UNSETTLED_REFRESH_MS = 15_000
-/** A write run's card is read again this often while its run goes on. */
-const LIVE_REFRESH_MS = 2_000
 
 // Confirming and awaiting ［任せる］ are amber (the member's turn), a run in doubt is amber too (they check the site),
 // all done green, a stop grey (design-system.md 「止まっている」の色).
@@ -53,14 +50,11 @@ export const BrowserWriteCard = memo(function BrowserWriteCard({ companyId, card
 }) {
   const { view, message, key } = useBrowserWrite(companyId, cardId, ports.reads)
   const [busy, setBusy] = useState(false)
-  // A write in doubt: main asks the server again so the confirm opens at its time (and a settled one shows).
-  const waiting = view?.result?.confirm !== null && view?.result?.confirm !== undefined && !view.result.confirm.canNow
-  // A write run's card (`bf_…`) moves on in main by itself (the run, its end, the card's time): read again until it settles.
-  const live = cardId.startsWith('bf_') && !!view && view.phase !== 'finished' && view.phase !== 'failed'
+  // Read again while a run goes on or answer buttons are up (an answer given in the card's other window shows here too).
   useInterval(() => {
     void (ports.reads ? getBrowserWriteCard(companyId, cardId, ports.reads) : getBrowserWriteCard(companyId, cardId))
       .then(r => putWrite(key, r, WRITE_CARD_UNREADABLE)).catch(() => {})
-  }, live ? LIVE_REFRESH_MS : waiting && !busy ? UNSETTLED_REFRESH_MS : null)
+  }, writeCardRefreshMs(cardId, view ?? null, busy))
   const press = (call: () => Promise<BrowserWriteGetResult>) => {
     setBusy(true)
     void call()

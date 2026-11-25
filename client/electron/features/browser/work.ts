@@ -97,7 +97,7 @@ interface Entry {
   /** The consultation the card was made in: the windows that may press it are the ones that show it. */
   conversationId: string | null
   /** A press on its way (［任せる］ or the answer): a second one from another window waits for it, never asks again. */
-  pressing: boolean
+  pressing: Promise<unknown> | null
 }
 
 /** A server refusal → the consultation AI's fixed words. */
@@ -290,7 +290,7 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
         userId, companyId, runId: run.runId, host, phase: run.needsApproval ? 'ready' : 'running', values: plan?.values ?? [],
         sentences: workPlanSentences({ summary: plan?.summary ?? input.task, affects: plan?.affects ?? '', frames: workFrames(run.frames) }),
         planHash: run.planHash, approvalToken: run.approvalToken, card: null, readAt: null, message: null, result: null, decide: null,
-        inDoubt: null, conversationId: input.conversationId, pressing: false,
+        inDoubt: null, conversationId: input.conversationId, pressing: null,
       }
       const e = entry
       keep(e)
@@ -582,18 +582,22 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
       if (e.phase !== 'ready' || !e.decide || !e.approvalToken || !e.planHash) return { ok: false, message: 'まだ任せられる状態ではありません。' }
       if (planHash !== e.planHash) return { ok: false, message: 'カードの中身が変わりました。もう一度確かめてください。' }
       // One press wins: the same card shown in a second window answers with the card as it stands (it moves on by itself).
-      if (e.pressing) return { ok: true, view: viewOf(e) }
-      e.pressing = true
-      const a = await deps.api.frameApprove(companyId, runId, { planHash: e.planHash, approvalToken: e.approvalToken })
-        .finally(() => { e.pressing = false })
-      if (a.kind !== 'ok') {
-        if (a.kind === 'refused') { e.phase = 'failed'; e.message = refusedWords(a); e.decide?.('cancelled') }
-        return { ok: true, view: viewOf(e) }
-      }
-      // The task may have ended meanwhile (the turn stopped, the card's time): the card stays as the task left it.
-      if (!e.decide) return { ok: true, view: viewOf(e) }
-      e.phase = 'running'
-      e.decide('approved')
+      if (e.pressing) { await e.pressing.catch(() => {}); return { ok: true, view: viewOf(e) } }
+      const { planHash: hash, approvalToken: token } = e
+      // The whole press (the server's answer and the card's move) is what a second window waits for.
+      const done = (async () => {
+        const a = await deps.api.frameApprove(companyId, runId, { planHash: hash, approvalToken: token })
+        if (a.kind !== 'ok') {
+          if (a.kind === 'refused') { e.phase = 'failed'; e.message = refusedWords(a); e.decide?.('cancelled') }
+          return
+        }
+        // The task may have ended meanwhile (the turn stopped, the card's time): the card stays as the task left it.
+        if (!e.decide) return
+        e.phase = 'running'
+        e.decide('approved')
+      })()
+      e.pressing = done
+      await done.finally(() => { e.pressing = null })
       return { ok: true, view: viewOf(e) }
     },
     /**
@@ -605,18 +609,19 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
       const e = mine(deps.userId(), companyId, runId)
       if (!e) return null
       if ((answer !== 'done' && answer !== 'not_done') || !e.inDoubt || !e.result) return { ok: false, message: CW.confirmNotNow }
-      // One press wins (the card in two windows): the second waits for nothing and shows the card as it stands.
-      if (e.pressing) return { ok: true, view: viewOf(e) }
-      e.pressing = true
-      const sent = await deps.api.frameConfirm(companyId, runId, { write: e.inDoubt.write, answer }).finally(() => { e.pressing = false })
-      if (sent.kind === 'ok') {
-        settleDoubt(e, answer, answer === 'done' ? CW.confirmedDone : CW.confirmedNotDone)
-        return { ok: true, view: viewOf(e) }
-      }
-      // Not taken: the server's word decides what the card shows next (already answered, no longer in doubt, its time) —
-      // never a loop of 「もう一度押してください」 (independent review of #859).
-      await syncDoubt(e)
-      if (!e.inDoubt) return { ok: true, view: viewOf(e) }
+      // One press wins (the card in two windows): the second waits for it and shows the card as it then stands.
+      if (e.pressing) { await e.pressing.catch(() => {}); return { ok: true, view: viewOf(e) } }
+      const done = (async () => {
+        const sent = await deps.api.frameConfirm(companyId, runId, { write: (e.inDoubt as { write: number }).write, answer })
+        if (sent.kind === 'ok') settleDoubt(e, answer, answer === 'done' ? CW.confirmedDone : CW.confirmedNotDone)
+        else await syncDoubt(e)
+        return sent
+      })()
+      e.pressing = done
+      const sent = await done.finally(() => { e.pressing = null })
+      // Not taken: the server's word (read again above) decides what the card shows next — already answered, no longer in
+      // doubt, its time —, never a loop of 「もう一度押してください」 (independent review of #859).
+      if (sent.kind === 'ok' || !e.inDoubt) return { ok: true, view: viewOf(e) }
       if (sent.kind === 'refused' && sent.code === 'BROWSER_TOO_EARLY') return { ok: false, message: CW.confirmTooEarly }
       if (sent.kind === 'refused' && (sent.code === 'BROWSER_FRAME_CONFIRMED' || sent.code === 'BROWSER_FRAME_NOT_UNKNOWN')) {
         // The server holds another answer or state the read could not bring: the card stops asking.

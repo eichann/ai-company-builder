@@ -6,6 +6,22 @@ import type { BrowserFact } from '../../../../shared/core/browser-plans'
 import type { BrowserPlanView } from '../../../../shared/types/browser-plans'
 import type { BrowserPlanCardData, BrowserPlanNotReady } from '../../../shared/browser-plans'
 import { BROWSER_RUN_WORDS, type BrowserRunReason, type BrowserRunResult } from '../../../shared/browser-runner'
+import type { BrowserWriteView } from '../../../shared/browser-line-writes'
+
+/** A write card is read again this often while its run goes on (a `bf_` card moves on in main by itself). */
+export const WRITE_CARD_LIVE_REFRESH_MS = 2_000
+/** …and this often while its answer buttons for a write in doubt are up. */
+export const WRITE_CARD_UNSETTLED_REFRESH_MS = 15_000
+
+/**
+ * How often a write card reads itself again, or null: while a `bf_` card's run goes on, and **while the answer buttons
+ * of a write in doubt are up — also once they can be pressed** — so an answer given in the card's other window (the main
+ * window and the consultation's own window) shows here too (agent-browser.md "A card in its consultation's own window").
+ */
+export function writeCardRefreshMs(cardId: string, view: BrowserWriteView | null, pressing: boolean): number | null {
+  if (cardId.startsWith('bf_') && !!view && view.phase !== 'finished' && view.phase !== 'failed') return WRITE_CARD_LIVE_REFRESH_MS
+  return view?.result?.confirm && !pressing ? WRITE_CARD_UNSETTLED_REFRESH_MS : null
+}
 
 export const PLAN_WORDS = {
   title: '承認のお願い（ブラウザ操作）',
