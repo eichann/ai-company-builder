@@ -162,6 +162,7 @@ async function run() {
   result.helpers = await helperScenarios(win, js)
   result.runner = await runnerScenarios(win, site, sites, js, partition)
   result.recording = await recordingScenarios(win, shell, site, js)
+  result.browse = await browseScenarios(win, sites)
 
   // The login: a cookie and storage of the site, then cleared.
   await js(`document.cookie = 'sid=1; Secure; Max-Age=3600'; localStorage.setItem('k', 'v'); 1`)
@@ -265,6 +266,54 @@ async function recordingScenarios(win: BrowserShellWindow, shell: ReturnType<typ
   out.endedOnClose = endedOther
   await page.loadURL('https://op.test/')
   await wait(800)
+  return out
+}
+
+/**
+ * The operator's window tools (agent-browser.md "The operator's window tools"): in the window's `ai` mode with a gate that
+ * refuses every write, the operator's real presses and typing — a form's submit, a button that writes by fetch, one behind a
+ * confirm dialog — send nothing; a link to another site goes nowhere; a page of the site opens; the snapshot never reads a
+ * password field's value.
+ */
+async function browseScenarios(win: BrowserShellWindow, sites: Sites) {
+  const out: Record<string, unknown> = {}
+  const page = win.webContents
+  await page.loadURL('https://op.test/browse')
+  await wait(800)
+  const writesBefore = sites.hits.filter(h => h.method !== 'GET' && h.method !== 'HEAD').length
+  out.entered = await win.browse.enter(() => false)
+  const snap = await win.browse.snapshot()
+  out.snapshot = snap
+  const ref = (name: string) => snap?.elements.find(e => e.name === name)?.ref ?? -1
+  const signal = new AbortController().signal
+  out.typed = await win.browse.act({ do: 'type', ref: ref('検索'), text: '山田花子' }, signal)
+  out.typedValue = await page.executeJavaScript(`document.getElementById('q').value`, true)
+  out.selected = await win.browse.act({ do: 'select', ref: ref('並び順'), option: '古い順' }, signal)
+  out.selectedValue = await page.executeJavaScript(`document.getElementById('order').value`, true)
+  out.submit = await win.browse.act({ do: 'click', ref: ref('保存して送信') }, signal)
+  await page.loadURL('https://op.test/browse')
+  await wait(500)
+  let again = await win.browse.snapshot()
+  const refAgain = (name: string) => again?.elements.find(e => e.name === name)?.ref ?? -1
+  out.fetchClick = await win.browse.act({ do: 'click', ref: refAgain('すぐ保存') }, signal)
+  out.confirmClick = await win.browse.act({ do: 'click', ref: refAgain('消す') }, signal)
+  out.evilClick = await win.browse.act({ do: 'click', ref: refAgain('外のサイト') }, signal)
+  out.urlAfterEvil = page.getURL()
+  again = await win.browse.snapshot()
+  out.next = await win.browse.act({ do: 'click', ref: refAgain('次のページ') }, signal)
+  out.urlAfterNext = page.getURL()
+  out.back = await win.browse.act({ do: 'back' }, signal)
+  out.urlAfterBack = page.getURL()
+  // An address that would name another host (the parser refuses it first; the window checks again).
+  out.goOther = await win.browse.act({ do: 'go', path: '@evil.test/x' }, signal)
+  out.go = await win.browse.act({ do: 'go', path: '/browse-next' }, signal)
+  out.urlAfterGo = page.getURL()
+  await win.browse.leave()
+  await wait(300)
+  out.writes = sites.hits.filter(h => h.method !== 'GET' && h.method !== 'HEAD').slice(writesBefore).map(h => `${h.method} ${h.host}${h.path}`)
+  out.evilHits = sites.hits.filter(h => h.host === 'evil.test' && h.path.startsWith('/browse')).length
+  await page.loadURL('https://op.test/')
+  await wait(500)
   return out
 }
 

@@ -12,6 +12,7 @@ import {
   type BrowserExploreRead, type BrowserOperation,
 } from '../../shared/core/plugin-browser-declaration'
 import type { BrowserExploreItem } from './browser-runner'
+import { BROWSER_OPERATOR_BROWSE_PROMPT } from './browser-browse'
 
 export const BROWSER_OPERATOR_LIMITS = {
   /** Steps (one CLI start each) per request. */
@@ -52,8 +53,14 @@ export const BROWSER_OPERATOR_SYSTEM_PROMPT = [
   '似た名前の対象があって決めきれないときは stop（ambiguous）にして、人に聞くことを question に書いてください。',
 ].join('\n')
 
-/** The CLI's arguments, exactly (design memo §33 1-2; a test holds them). */
-export function browserOperatorArgs(model: string): string[] {
+/**
+ * Which of the operator's two fixed system prompts a step starts with: the preview's (choose from the readers' items) or
+ * the window tools' (agent-browser.md "The operator's window tools"). A closed choice: nothing else can be passed.
+ */
+export type BrowserOperatorPrompt = 'preview' | 'browse'
+
+/** The CLI's arguments, exactly (design memo §33 1-2; a test holds them). Only the system prompt differs per kind. */
+export function browserOperatorArgs(model: string, prompt: BrowserOperatorPrompt = 'preview'): string[] {
   return [
     '-p', '--model', model,
     '--safe-mode',
@@ -65,7 +72,7 @@ export function browserOperatorArgs(model: string): string[] {
     '--no-session-persistence',
     '--max-turns', '1',
     '--output-format', 'stream-json', '--verbose',
-    '--system-prompt', BROWSER_OPERATOR_SYSTEM_PROMPT,
+    '--system-prompt', prompt === 'browse' ? BROWSER_OPERATOR_BROWSE_PROMPT : BROWSER_OPERATOR_SYSTEM_PROMPT,
   ]
 }
 

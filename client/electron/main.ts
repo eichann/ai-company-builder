@@ -124,6 +124,8 @@ import { lstepReadLines } from '../connector-maps/lstep'
 import { LINES as LSTEP_LINES } from '../browser-lines/lstep'
 import { wireBrowserInspections } from './features/browser/inspect'
 import { wireBrowserWriteLines } from './features/browser/write-lines'
+import { wireBrowserBrowse } from './features/browser/browse'
+import { createBrowserLinesHttp } from './features/browser/lines-api'
 import { createBrowserRunRecords } from './features/browser/run-records'
 import { browserOperatorOf } from './agents/registry'
 import { browserAiStopped } from '../../shared/core/browser-operation'
@@ -664,6 +666,22 @@ const browserPlans = wireBrowserPlans(ipc, {
 agentControl.policy.onPolicy((companyId, policy) => browserPlans.context.policyAnswered(companyId, policy.browser))
 agentControl.policy.onRefreshFailed(() => browserPlans.context.advance())
 lifecycle.beforeQuit(() => browserPlans.context.quitting())
+// Its read task on a registered domain (agent-browser.md "The operator's window tools"): the chat's `browser_browse`, the
+// operator acting in the member's own window (reading only), the server's gate, lock and run log; the card through the
+// inspection card's IPC. The same switch, context and busy windows as the plans.
+const browserBrowses = wireBrowserBrowse({
+  aiSwitch: browserAiSwitch,
+  userId: session.userId,
+  context: browserPlans.context,
+  stopped: companyId => browserAiStopped(agentControl.policy.stop(companyId)),
+  window: (companyId, host) => browser.browseWindow(companyId, host),
+  registered: (companyId, host) => browser.siteNow(companyId, host) !== null,
+  api: createBrowserLinesHttp({ baseUrl: getServerApiUrl, cookies: session.cookies, deviceKey: browserDeviceKey.header }),
+  operator: () => browserOperatorOf(config.authMode()),
+  cliPath: () => claudeCli.path(),
+  parentEnv: () => shellEnv.env(),
+  busyWindows: browserPlans.busyWindows,
+})
 // Its read-only inspection (agent-browser.md "The inspection in the chat"): the chat's `browser_inspect`, the read runner
 // over the member's own window and the card's IPC — the same switch and context as the plans; the site's map and lines are
 // handed in here only (architecture-boundaries.test.ts).
@@ -682,6 +700,8 @@ const browserInspections = wireBrowserInspections(ipc, {
   sites: [{ map: lstepLines.map, readers: lstepLines.readers, addresses: lstepLines.addresses, account: lstepLines.account }],
   lines: LSTEP_LINES,
   declarations: [lstep.declaration],
+  // An operator run's card (`bo_…`) is the browse wiring's (above).
+  runCard: (userId, companyId, runId) => browserBrowses.card(userId, companyId, runId),
 })
 // Its writes on the new path (agent-browser.md "Writing on the new path"): the chat's `browser_write` proposes, the member
 // confirms each value and presses ［任せる］ on the card, the write runner writes in order. No site has writers yet (they
@@ -723,6 +743,7 @@ registerAuthIpc(ipc, {
     browser.signedOut()
     browserPlans.context.advance()
     browserInspections.clear()
+    browserBrowses.clear()
     browserWrites.clear()
     browserDevice.clear()
     browserRecordings.clear()
@@ -844,6 +865,11 @@ app.whenReady().then(async () => {
       agentPolicy: agentControl.policy,
       browserPlans,
       browserInspections,
+      browserBrowses: {
+        available: browserBrowses.available,
+        domains: companyId => browser.sites(companyId).sites.map(s => s.host),
+        browse: input => browserBrowses.browse(input),
+      },
       browserWrites,
       agentStop: agentControl.stop,
       serverUrl: getServerApiUrl,

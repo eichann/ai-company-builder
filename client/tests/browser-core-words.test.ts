@@ -24,7 +24,8 @@ import { parsePluginManifest } from '../../shared/core/plugins'
 import type { BrowserOpenedFile, BrowserOpenedLine } from '../../shared/core/browser-opened'
 import type { BrowserMap } from '../../shared/core/browser-map'
 import { BROWSER_CATALOG_NONE, browserLineCatalog, browserOperationCatalog } from '../shared/browser-tool-catalog'
-import { browserInspectDescription, browserInspectSchema, browserWriteDescription, browserWriteSchema, createBrowserInspectTools } from '../electron/browser-request/inspect-tool'
+import { browserBrowseDescription, browserBrowseSchema, browserInspectDescription, browserInspectSchema, browserWriteDescription, browserWriteSchema, createBrowserInspectTools } from '../electron/browser-request/inspect-tool'
+import { BROWSER_OPERATOR_BROWSE_PROMPT } from '../shared/browser-browse'
 import { browserRequestDescription, browserRequestSchema, createBrowserRequestTools } from '../electron/browser-request/tools'
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
@@ -195,7 +196,8 @@ describe('the core\'s texts name no site (design memo §3 I10)', () => {
   it('the tools\' descriptions and schemas name no site; a site\'s words reach them only through the catalog, from its data', () => {
     const shared = [
       browserInspectDescription(BROWSER_CATALOG_NONE), browserWriteDescription(BROWSER_CATALOG_NONE), browserRequestDescription(BROWSER_CATALOG_NONE),
-      JSON.stringify([browserInspectSchema, browserWriteSchema, browserRequestSchema].map(s => Object.values(s.shape).map(f => f.description))),
+      browserBrowseDescription([]), BROWSER_OPERATOR_BROWSE_PROMPT,
+      JSON.stringify([browserInspectSchema, browserWriteSchema, browserRequestSchema, browserBrowseSchema].map(s => Object.values(s.shape).map(f => f.description))),
     ].join('\n')
     assert.deepEqual(found(names, shared), [])
     const lineCatalog = browserLineCatalog([SAMPLE.line], id => (id === SAMPLE.site.id ? SAMPLE.site : null), 'read')

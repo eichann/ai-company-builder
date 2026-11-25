@@ -23,7 +23,7 @@ import { createInterface } from 'node:readline'
 import { compareCliVersions, parseCliVersion } from '../../shared/agents/cli-version'
 import {
   BROWSER_OPERATOR_LIMITS, browserOperatorArgs, browserOperatorEnv, operatorInitProblem,
-  type BrowserOperatorFailure,
+  type BrowserOperatorFailure, type BrowserOperatorPrompt,
 } from '../../shared/browser-operator'
 import { spawnVoiceProcess } from '../voice-process'
 
@@ -44,6 +44,8 @@ export interface BrowserOperatorStepJob {
   timeoutMs: number
   /** Where HOME / USER / LOGNAME and the proxy variables come from (the app's own environment). */
   parentEnv: Readonly<Record<string, string | undefined>>
+  /** Which fixed system prompt (the preview's when absent; the window tools': `browse`). Everything else is the same closed start. */
+  prompt?: BrowserOperatorPrompt
 }
 
 export type BrowserOperatorStepResult = { ok: true; text: string } | { ok: false; code: BrowserOperatorFailure | 'cancelled' }
@@ -188,7 +190,7 @@ export async function runClaudeBrowserOperatorStep(job: BrowserOperatorStepJob, 
       const env = browserOperatorEnv(job.parentEnv, { pathDirs: job.cli.pathDirs, tmpdir: tmp })
       let child: ReturnType<Spawn>
       try {
-        child = spawn(job.cli.path, browserOperatorArgs(job.model), { cwd, env, detached: true }, { inheritEnv: false })
+        child = spawn(job.cli.path, browserOperatorArgs(job.model, job.prompt),{ cwd, env, detached: true }, { inheritEnv: false })
       } catch {
         resolve({ ok: false, code: 'start-failed' })
         return

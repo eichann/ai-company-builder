@@ -55,6 +55,7 @@ interface Result {
   runner: Record<string, unknown>
   helpers: Record<string, unknown>
   recording: Record<string, unknown>
+  browse: Record<string, unknown>
 }
 
 function freePort(): Promise<number> {
@@ -401,4 +402,28 @@ test('recording and the AI never hold the window together; the preview reads not
   assert.deepEqual(r.ended, [], 'stopping is not an end the recording is discarded for')
   assert.equal(r.otherStarted, true)
   assert.deepEqual(r.endedOnClose, ['closed'])
+})
+
+test('the operator\'s window tools read only: a submit, a fetch button and a confirmed button send nothing; another site is never reached', { skip }, () => {
+  const r = result.browse
+  assert.equal(r.entered, true)
+  const snap = r.snapshot as { address: string; elements: Array<{ role: string; name: string; value?: string }> }
+  assert.equal(snap.address, '/browse')
+  assert.equal(JSON.stringify(snap).includes('pw-in-page-5555'), false, 'a password field\'s value is never read')
+  assert.deepEqual(snap.elements.find(e => e.role === 'password')?.value, undefined)
+  // Real typing and choosing work…
+  assert.equal(r.typed, 'ok')
+  assert.equal(r.typedValue, '山田花子')
+  assert.equal(r.selected, 'ok')
+  assert.equal(r.selectedValue, '古い順')
+  // …but no press made a write leave the window: the form's submit, a fetch, a confirm (dismissed, never accepted).
+  assert.deepEqual(r.writes, [])
+  assert.equal(r.evilHits, 0)
+  assert.match(String(r.urlAfterEvil), /^https:\/\/op\.test\//)
+  // Pages of the site open (a link, back, an address of the site); another site's address does not.
+  assert.equal(r.urlAfterNext, 'https://op.test/browse-next')
+  assert.equal(r.back, 'ok')
+  assert.equal(r.urlAfterBack, 'https://op.test/browse')
+  assert.equal(r.goOther, 'failed')
+  assert.equal(r.urlAfterGo, 'https://op.test/browse-next')
 })

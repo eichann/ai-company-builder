@@ -211,7 +211,7 @@ callers ask capabilities instead of branching on agent ids. Related: `chat-write
   claude.ai connectors and `.mcp.json` load too) Claude Code defers them behind ToolSearch, whose
   keyword search returns only a few matches — the AI once said `records_create` did not exist.
   Every in-process app server (`acb_consultations`, company files, `acb_review`, `acb_app`,
-  `acb_web`, `acb_second_opinion`, `acb_browser` — 「ブラウザ操作」's request and its inspection (`browser_inspect`),
+  `acb_web`, `acb_second_opinion`, `acb_browser` — 「ブラウザ操作」's request, its inspection (`browser_inspect`) and read task (`browser_browse`),
   only while its switch is on, `agent-browser.md`) is created with `alwaysLoad: true`; `acb_records` per tool (all but
   other types' actions, which its instructions name for `select:`; `records.md` "Tool search").
   Third-party MCP servers stay as the CLI decides. Test: `tests/claude-tool-search.test.ts`.

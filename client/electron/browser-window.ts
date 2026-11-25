@@ -36,6 +36,8 @@ import {
   BROWSER_RECORDING_BINDING, BROWSER_RECORDING_SCRIPT, BROWSER_RECORDING_WINDOW_TITLE, BROWSER_RECORDING_WORLD, createPageDebuggerOwner,
   type BrowserRecordingObservation, type BrowserRecordingObserver, type BrowserRecordSurface,
 } from '../shared/browser-recorder'
+import { readBrowserPageSnapshot, sameDomainPath, BROWSER_BROWSE_LIMITS, type BrowserBrowseSurface } from '../shared/browser-browse'
+import { BROWSER_BROWSE_WORLD, BROWSER_SNAPSHOT_SCRIPT, browseFocusScript, browsePointScript, browseSelectScript } from '../shared/browser-browse-script'
 import { BrowserNotSentError, createSessionLanes, exactRead, throughSession, writeThroughSession, type PagelessSession } from './features/browser/read-session'
 
 /** What `ai` mode needs: the approved step's decider (none = no write) and the emergency stop. */
@@ -44,6 +46,12 @@ export interface BrowserAiGate {
   /** A run's read rule for the page's reads of the operated host (none: reads pass). */
   decideRead?: BrowserReadDecider
   stopped: () => boolean
+  /**
+   * The operator's window tools (agent-browser.md "The operator's window tools"): every JavaScript dialog the page opens
+   * (alert / confirm / prompt / beforeunload) is dismissed — never accepted — so a page cannot hold the window and a
+   * confirm never says yes.
+   */
+  dismissDialogs?: boolean
 }
 
 export interface BrowserShellWindow extends BrowserWindowHandle {
@@ -53,6 +61,7 @@ export interface BrowserShellWindow extends BrowserWindowHandle {
   run: BrowserRunSurface
   preview: BrowserPreviewSurface
   record: BrowserRecordSurface
+  browse: BrowserBrowseSurface
 }
 
 const RUN_REQUEST_MS = 30_000
@@ -412,6 +421,13 @@ export function createBrowserWindowShell(options: {
       }
     }
     const onMessage = async (_event: unknown, method: string, params: Record<string, unknown>) => {
+      // The operator's window tools: a page's dialog is dismissed at once (never accepted), so nothing waits on it.
+      if (method === 'Page.javascriptDialogOpening') {
+        if (owner.holder() === 'ai' && gate?.dismissDialogs) {
+          try { await contents.debugger.sendCommand('Page.handleJavaScriptDialog', { accept: false }) } catch { /* gone */ }
+          return
+        }
+      }
       if (method !== 'Fetch.requestPaused') { onRecording(method, params); return }
       const requestId = params.requestId as string
       const request = params.request as { url: string; method: string; headers?: Record<string, string>; postData?: string; postDataEntries?: Array<{ bytes?: string }> }
@@ -467,6 +483,7 @@ export function createBrowserWindowShell(options: {
       if (contents.isDestroyed() || state.mode !== 'ai' || owner.holder() !== 'ai') return
       const dbg = connect()
       await dbg.sendCommand('Fetch.enable', { patterns: [{ urlPattern: '*', requestStage: 'Request' }] })
+      if (gate?.dismissDialogs) await dbg.sendCommand('Page.enable')
       state.aiGateReady = state.mode === 'ai'
     }
     const setMode = async (mode: BrowserWindowMode, next?: BrowserAiGate) => {
@@ -537,7 +554,12 @@ export function createBrowserWindowShell(options: {
       },
       active: () => recorder !== null,
     }
-    return { setMode, record, windowClosed: () => endRecording('closed') }
+    /** One DevTools command for the operator's window tools: only while the `ai` gate holds the connection and is ready. */
+    const command = async (method: string, params: Record<string, unknown>): Promise<boolean> => {
+      if (contents.isDestroyed() || owner.holder() !== 'ai' || state.mode !== 'ai' || !state.aiGateReady || !contents.debugger.isAttached()) return false
+      try { await contents.debugger.sendCommand(method, params); return true } catch { return false }
+    }
+    return { setMode, record, command, windowClosed: () => endRecording('closed') }
   }
 
   return {
@@ -694,6 +716,94 @@ export function createBrowserWindowShell(options: {
           if (!win.isDestroyed()) win.destroy()
         },
       ).catch(() => { /* refused or offline: the window says so */ })
+      // The operator's window tools (agent-browser.md "The operator's window tools"): reading only — the `ai` gate with a
+      // decider that refuses every write, dialogs dismissed; the page read and acted on from an isolated world (its script
+      // cannot see or replace what is used), presses and typing as real input through the gate's DevTools connection.
+      let browsing = false
+      const browseReady = () => browsing && !closed() && !contents.isDestroyed() && state.mode === 'ai' && state.aiGateReady
+      const inWorld = async (code: string): Promise<unknown> => {
+        if (!browseReady()) return null
+        let timer: ReturnType<typeof setTimeout> | undefined
+        try {
+          return await Promise.race([
+            contents.executeJavaScriptInIsolatedWorld(BROWSER_BROWSE_WORLD, [{ code }]),
+            new Promise(resolve => { timer = setTimeout(() => resolve(null), 5_000) }),
+          ])
+        } catch {
+          return null
+        } finally {
+          clearTimeout(timer)
+        }
+      }
+      const pause = (ms: number, signal: AbortSignal) => new Promise<void>(resolve => {
+        if (signal.aborted) { resolve(); return }
+        const timer = setTimeout(done, ms)
+        function done() { clearTimeout(timer); signal.removeEventListener('abort', done); resolve() }
+        signal.addEventListener('abort', done, { once: true })
+      })
+      /** After an action: a moment, then until the page stops loading (at most `settleMs`). */
+      const settle = async (signal: AbortSignal) => {
+        await pause(300, signal)
+        const until = Date.now() + BROWSER_BROWSE_LIMITS.settleMs
+        while (!signal.aborted && !contents.isDestroyed() && contents.isLoading() && Date.now() < until) await pause(100, signal)
+      }
+      const browse: BrowserBrowseSurface = {
+        async enter(stopped) {
+          if (closed() || pageDebugger.record.active()) return false
+          await setMode('ai', { decide: () => false, stopped, dismissDialogs: true })
+          browsing = !closed() && state.mode === 'ai' && state.aiGateReady
+          return browsing
+        },
+        async leave() {
+          browsing = false
+          if (state.contentsId === contentsId) await setMode('human')
+        },
+        async snapshot() {
+          const text = await inWorld(BROWSER_SNAPSHOT_SCRIPT)
+          return state.site ? readBrowserPageSnapshot(text, state.site.host) : null
+        },
+        async act(action, signal) {
+          if (!browseReady() || signal.aborted) return 'failed'
+          switch (action.do) {
+            case 'click': {
+              const at = await inWorld(browsePointScript(action.ref))
+              let point: { x: number; y: number } | null = null
+              try { point = typeof at === 'string' ? JSON.parse(at) as { x: number; y: number } : null } catch { point = null }
+              if (!point || !Number.isFinite(point.x) || !Number.isFinite(point.y)) return 'failed'
+              const { x, y } = point
+              const mouse = (type: string) => pageDebugger.command('Input.dispatchMouseEvent', { type, x, y, button: 'left', clickCount: 1 })
+              if (!(await pageDebugger.command('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y })) || !(await mouse('mousePressed')) || !(await mouse('mouseReleased'))) return 'failed'
+              break
+            }
+            case 'type':
+              if ((await inWorld(browseFocusScript(action.ref))) !== true) return 'failed'
+              if (!(await pageDebugger.command('Input.insertText', { text: action.text }))) return 'failed'
+              break
+            case 'select':
+              if ((await inWorld(browseSelectScript(action.ref, action.option))) !== true) return 'failed'
+              break
+            case 'go': {
+              // Only an address of the operated domain (the window's navigation rule refuses any other as well).
+              const host = state.site?.host
+              const url = host ? `https://${host}${action.path}` : ''
+              if (!host || sameDomainPath(url, host) === null) return 'failed'
+              try { await contents.loadURL(url) } catch { return 'failed' }
+              break
+            }
+            case 'back':
+              if (!contents.navigationHistory.canGoBack()) return 'failed'
+              contents.navigationHistory.goBack()
+              break
+            case 'wait':
+              await pause(Math.min(action.seconds, BROWSER_BROWSE_LIMITS.waitSeconds) * 1000, signal)
+              return browseReady() ? 'ok' : 'failed'
+          }
+          await settle(signal)
+          return browseReady() ? 'ok' : 'failed'
+        },
+        pageClean,
+        closed,
+      }
       const title = `${BROWSER_WORDS.section} — ${spec.site.host}`
       // The title says while the window records (the page cannot change it: page-title-updated is refused).
       const record: BrowserRecordSurface = {
@@ -737,6 +847,7 @@ export function createBrowserWindowShell(options: {
         run,
         preview,
         record,
+        browse,
       }
     },
 

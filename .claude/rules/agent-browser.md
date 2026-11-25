@@ -114,12 +114,25 @@ paths:
   - "server/tests/integration/browser-skill-push.test.ts"
   - "admin/src/lib/agent-browser-skills.ts"
   - "admin/tests/agent-browser-skills.test.tsx"
+  - "shared/core/browser-run-log.ts"
+  - "shared/types/browser-runs.ts"
+  - "client/shared/browser-browse.ts"
+  - "client/shared/browser-browse-script.ts"
+  - "client/tests/browser-browse.test.ts"
+  - "server/src/routes/browser-runs.ts"
+  - "server/src/services/browser-runs.ts"
+  - "server/src/ports/browser-runs.ts"
+  - "server/src/adapters/sqlite/browser-runs.ts"
+  - "server/src/db/schema/browser-runs.ts"
+  - "server/tests/unit/browser-runs.test.ts"
 ---
 
 # Browser operation (「ブラウザ操作」): sites the chat AI may operate
 
 The chat AI may operate web sites the company approved, in a browser window of the desktop app,
-only through per-site operation types (later PRs), never by free clicking. Owner decisions
+only through per-site operation types (later PRs), never by free clicking. **Since redesign step ④** (owner 2026-11-25) the
+operator AI may move through a registered domain's pages freely **reading only** — every write still refused by the window's
+gate ("The operator's window tools"); free writes are step ⑤. Owner decisions
 (2026-11-20, internal design memo §2, §13, §17, §18):
 
 - **Admin-approved sites only.** Each site has one host the AI operates (writes go only there)
@@ -2923,7 +2936,112 @@ after an editor's declaration approving nothing, a push read at its own commit; 
 `company-scoped-sql.test.ts`, `jobs-schema.test.ts`, `client/tests/browser-core-words.test.ts` (the new files scanned).
 Each guard mutation-checked.
 
+## The operator's window tools (step ④ of the redesign: the operator reads a registered domain freely; writes stay refused)
+
+Owner-approved design memo 「ブラウザ操作：記録から自動化へ／サイトの言葉を本体から外す」 (2026-11-25) §3 I1 / I2 / I5 / I6 / I8 /
+I10, §6-1 steps 1–2, §7-1 (the operator, the lock), §9 bug 3, §12 row ④, D6, D10. Inside a domain the company registered,
+the operator AI may move through pages freely **reading only**, without per-site code: the consultation AI hands it an
+instruction in words (「この一覧の受付の終わりを並べて」); writes stay refused by the window's gate (step ⑤ adds them). Behind the
+same switch as everything else (`BROWSER_AI_BUILD_SWITCH` / this PC's registration or opt-in).
+
+- **Pieces.** `client/shared/browser-browse.ts` (pure: the limits `BROWSER_BROWSE_LIMITS` — 20 steps, 90 s each, 5 minutes
+  in all, a page's text ≤ 30 000 characters, ≤ 300 elements —, the snapshot `BrowserPageSnapshot` and its check
+  `readBrowserPageSnapshot`, the actions, `parseBrowseAnswer`, the operator's fixed prompt `BROWSER_OPERATOR_BROWSE_PROMPT`,
+  `browseMaterial`, `browseLogStep`, the consultation AI's words `BROWSER_BROWSE_WORDS` / `browseWordsForAi`, the member's card
+  `browseCard`, the window port `BrowserBrowseSurface`); `client/shared/browser-browse-script.ts` (the page scripts, plain
+  strings); the shell's `browse` surface (`electron/browser-window.ts`); `electron/features/browser/browse.ts`
+  (`wireBrowserBrowse`: the loop, the cards in memory; no Electron); the tool `browser_browse` (`electron/browser-request/
+  inspect-tool.ts`); server `shared/core/browser-run-log.ts`, `routes/browser-runs.ts` → `services/browser-runs.ts` → the
+  handle's `browserRuns` (`ports/browser-runs.ts`, `adapters/sqlite/browser-runs.ts`, `db/schema/browser-runs.ts`), API shapes
+  `shared/types/browser-runs.ts`.
+- **The operator** is the closed start of "The operator and the preview", unchanged — `--tools ""`, no MCP, no settings,
+  `--max-turns 1`, every init check — with only its system prompt chosen from two fixed ones (`browserOperatorArgs(model,
+  'browse')`, a closed choice: nothing else can be passed). It has **no tool**: its "window tools" are its answer, exactly
+  one JSON object per step — `click` / `type` / `select` (an element `ref` of the page it was just shown, of a fitting role:
+  typing only into a text field, never a password field; an option the select showed), `go` (a path of the domain: starts
+  with `/`, no `//`, `\`, `#`, space or control), `back`, `wait` (1–5 s), `done { result, unread }` or `stop { why:
+  not-found | need-person | blocked, unread }`. Anything else ends the run (`bad-answer`), nothing done.
+- **Main acts** in the member's own window (controller `browseWindow`): `enter` puts it in `ai` mode with a decider that
+  **refuses every write** (`decide: () => false`; reads pass, the request rule and frames as in any `ai` run) and dialogs
+  dismissed, never accepted (`dismissDialogs`: `Page.handleJavaScriptDialog { accept: false }`, so a confirm never says yes
+  and a page cannot hold the window). The page is read and acted on from an **isolated world** (`BROWSER_BROWSE_WORLD`,
+  `executeJavaScriptInIsolatedWorld`: the page's script cannot see the element list or replace the functions used): the
+  snapshot is the address, title, visible text (`innerText`) and the visible usable elements — a text field named by its
+  label / placeholder only, **a password field's value never read**, a link's path only when it stays on the domain. Presses
+  and typing are real input through the `ai` gate's DevTools connection (`Input.dispatchMouseEvent`, `Input.insertText`; the
+  window's one debugger owner, `command` only while the gate holds it); `go` loads only `https://<domain><path>` whose host
+  is the domain (`sameDomainPath`); the window's navigation rule refuses any other host as before. After each action the page
+  settles (≤ 10 s). Never while the person records (the debugger owner refuses `ai`), never while a plan's run uses the
+  window (the shared `busyWindows`).
+- **The server decides** (`POST /browser-runs { host, conversationId? }` + this PC's key, before anything is read or
+  started; then `POST /browser-runs/:runId/continue` + the key **before every step**): this PC (`devices.check`; on a
+  continue the run's own registration, else `BROWSER_DEVICE_ELSEWHERE`), the company's mode with the member's override on and
+  the domain registered exactly (`BROWSER_NOT_ALLOWED`), the AI not stopped (`BROWSER_AI_STOPPED`), the person at least
+  見るだけ on the domain (`siteGrants.allows(…, 'read')`, `BROWSER_TYPE_NOT_GRANTED`: 使わない refused). A refusal at a continue
+  ends the run (`refused`, a fixed reason) and the app stops before its next action. `finish` and the list are clean-up and
+  never gated.
+- **The lock** (D10): at most one running run per company × domain — a partial unique index on `browser_runs` (the database
+  refuses a second running row), `BROWSER_RUN_BUSY` otherwise. Held until finish, a refusal, leaving the company, its lease
+  (`BROWSER_RUN_LIMITS.leaseMs` 2 minutes, renewed by each continue) or the run's limit (6 minutes whatever the renewals) —
+  judged on every touch (a start on that domain, continue, finish, the list), never by a timer, so a crashed app frees the
+  domain at the latest one lease later. A run is never taken over; a new request starts a new run.
+- **Isolation** (I6): the page's text reaches the operator only, as outside text (`{ outside }`). The consultation AI gets
+  fixed words (`BROWSER_BROWSE_WORDS`: 済みました／止まりました with a fixed reason) and, for bug 3 of §9, 「読めなかったもの：
+  「…」」 — **its own headings** (`items`, ≤ 10 × 40 characters, given in the tool call) echoed back **by number**; never the page,
+  the operator's summary or anything else it wrote. (A hijacked operator can choose which numbers and which fixed reason:
+  a channel of a few bits, no text — said.) The operator's summary (`done.result`, ≤ 4000) goes to the **member's card**
+  only, held in main's memory per signed-in member (≤ 100, cleared on sign-out), shown by the generic card through the
+  inspection card's IPC (`browserLines:card` with the run's `bo_` id; the reference `data-browser-inspection` accepts it):
+  「AI のまとめ（サイトから読んだ内容。AI には見せていません）」, each asked heading 「読めました（AI の判断です）」 or
+  「読み取れませんでした」, and the note that it is the AI's reading, not a machine check. Bug 4 (the ✗ wording) is not on this
+  path (no comparison): it stays with step ⑤'s cards.
+- **The run log** (I8, `browser_run_log`, append-only by trigger, once per run): per action the page as a pattern, the
+  action, and the label of a button or field — **the recording's rules** (`browserAddressPattern`, `browserLabel`,
+  `isBrowserAddressPattern` in `shared/core/browser-recording.ts`: digits, mail, addresses masked; query values never; a
+  link's or an option's text never; what was typed or chosen never). The server checks every step with
+  `browserRunLogProblem` and refuses the whole list otherwise. A run that already ended (timed out, refused) still gets its
+  log once. `GET /browser-runs`: the member's own runs, an owner / admin everyone's, newest first (200), with their logs;
+  another company's run is the same 404 as none. (No admin page yet: "Not yet".)
+- **Stop**: the turn's signal (the member's stop, closing the consultation, an administrator's stop through `chatTurns`) and
+  the deadline abort the operator's step (its CLI killed) and every wait; the AI stop (`browserAiStopped`), a changed context
+  (sign-in, the company's setting, the switch) or a closed / replaced window are checked after every answer; the window
+  always leaves `ai` mode and `finish` is always sent (lost = the lease ends it). The emergency stop's `web` kind covers
+  the tool (`agent-events.ts`), and the server refuses the next continue.
+- **The tool** `browser_browse` (`mcp__acb_browser__browser_browse`, beside `browser_inspect`: the same gates — the switch,
+  `capabilities.browserOperator`, never an unattended step, the turn's signal; `alwaysLoad`, auto-allowed, category `web`).
+  Input `{ site, task, items? }`: `site` a domain in its very spelling, `task` ≤ 1000, `items` ≤ 10 headings ≤ 40. Its
+  description holds shared words and the company's registered domains only (no site word: "The tools' words"). A run
+  ending with `done` or `stop` puts the card's reference into the reply.
+- **Remaining limits** (said): reading is free inside the domain, so a site that changes something on a GET (I2) is not
+  stopped; the operator reads the page's text (D6: names of customers reach the model); a hijacked operator can still press
+  anything — every write is refused, and a GET-only side effect is the I2 limit; dialogs are dismissed, so a page that
+  needs a confirm to show something stays as it is.
+
+Tests: `client/tests/browser-browse.test.ts` (switched off / a domain not registered / no window: nothing asked; each
+server refusal → plain words, the window never entered; a good run: a continue before every step, the operator's actions
+done, the AI's words fixed — no page text, injection text or summary —, the card only for the member, the log patterns and
+labels only; a stop: fixed reason and unread headings only; a refusal at a step stops before the next action; the turn's
+signal and the AI stop end the run, no card, finish told; answers naming another site, an element not shown, a password
+field, an option not offered, extra keys or text around the JSON act on nothing; one run per window; the tool's input and
+its words; the snapshot drops a password's value and another site's path), `client/tests/browser-window-electron.test.ts`
+(a real window: the operator's real presses on a form's submit, a fetch button and a confirm button send no write; a link to
+another site reaches nothing; a page of the site, back and an address of the site open; an address naming another host is
+refused; the snapshot holds no password value), `browser-operator.test.ts` (the browse start is the same closed start with
+its own prompt), `browser-device.test.ts` (the key rides on start and continue, never on finish),
+`browser-core-words.test.ts` (the tool's description, schema and the operator's prompt name no site),
+`server/tests/unit/browser-runs.test.ts` (the real PC registrations and site grants: unregistered / pending / no key,
+the setting, a domain not registered or spelled otherwise, the stop, 使わない, another company; the lock — busy, the index
+itself, the lease and the run's limit, leaving, final states —; every continue asks again and ends the run on a refusal —
+the stop, 使わない, the setting, another PC, a stopped PC —; only the run's member; the log — kept once, who sees what,
+append-only, values refused whole, a timed-out run's log, unknown reasons not kept), permission matrix rows + `CROSS`,
+`company-scoped-sql.test.ts`, `jobs-schema.test.ts`. Mutation-checked: the window's write refusal (both Electron tests
+fail), the continue's refusal, the AI's words, the registered-domain check, the AI stop, the server's grant, PC, stop,
+lease and same-PC checks.
+
 ## Not yet (later PRs)
+
+**The operator's window tools, later** (step ④'s follow-ups): an admin page for the run log (the API is there:
+`GET /browser-runs`), the operator reading a company Skill's steps (step ⑥), writes (step ⑤).
 
 **Keeping a login on disk** (`browserLoginStorage`, kept in `shared/core` for that PR): deferred until
 it can be bound to "every AI turn on this PC is enclosed". Reviews of PR 4 found that a member's

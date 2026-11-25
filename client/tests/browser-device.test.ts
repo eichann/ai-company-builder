@@ -300,6 +300,7 @@ const PLAN = `bp_${'a'.repeat(32)}`
 const EXEC = `bx_${'b'.repeat(32)}`
 const LPLAN = `bl_${'c'.repeat(32)}`
 const LEXEC = `bw_${'d'.repeat(32)}`
+const RUN = `bo_${'f'.repeat(32)}`
 const SECRET = 's'.repeat(40)
 const HASH = `sha256:${'e'.repeat(64)}`
 
@@ -342,6 +343,10 @@ test('the new path: the key rides only on a plan\'s creation, approve, claim and
   await http.report(SECRET, { index: 1, result: 'done' })
   await http.result(CO, LPLAN, { reads: {}, checks: [] } as never)
   await http.notice(CO, { site: 'lstep', mapVersion: '1', thing: 't', change: 'unreadable', count: 1 })
+  // The operator's runs: the start and each continue are gated; the finish (the log, the lock) is clean-up.
+  await http.runStart(CO, { host: 'shop.example.test' })
+  await http.runContinue(CO, RUN)
+  await http.runFinish(CO, RUN, { outcome: 'done', steps: [] })
   const carried = server.seen.filter(r => r.headers.get(BROWSER_DEVICE_HEADER) === KEY).map(r => `${r.method} ${r.path}`)
   assert.deepEqual(carried, [
     `POST /api/companies/${CO}/browser-line-plans`,
@@ -349,8 +354,10 @@ test('the new path: the key rides only on a plan\'s creation, approve, claim and
     `POST /api/companies/${CO}/browser-line-plans/${LPLAN}/approve`,
     `POST /api/companies/${CO}/browser-line-plans/${LPLAN}/claim`,
     `POST /api/companies/${CO}/browser-line-executions/${LEXEC}/permit`,
+    `POST /api/companies/${CO}/browser-runs`,
+    `POST /api/companies/${CO}/browser-runs/${RUN}/continue`,
   ])
-  assert.equal(server.seen.length, 11)
+  assert.equal(server.seen.length, 14)
 })
 
 test('the transition: a PC without a key sends no header (the owner\'s opt-in still works through the server\'s exception), and the opt-in alone turns the switch on', async () => {

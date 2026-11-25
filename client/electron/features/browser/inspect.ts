@@ -17,6 +17,7 @@ import { browserLineValuesProblem, type BrowserSuppliedValue } from '../../../..
 import type { BrowserOpenedFile, BrowserOpenedLine, BrowserOpenedLineRow } from '../../../../shared/core/browser-opened'
 import { canonicalJson } from '../../../../shared/core/fixed-content'
 import { BROWSER_ID_VALUE_RE } from '../../../../shared/core/plugin-browser-declaration'
+import { BROWSER_RUN_ID_RE } from '../../../../shared/core/browser-run-log'
 import { parsePluginManifest } from '../../../../shared/core/plugin-manifest'
 import type { BrowserLineRef } from '../../../../shared/types/browser-lines'
 import { BROWSER_COMPANY_ID_RE } from '../../../shared/browser-plans'
@@ -68,6 +69,8 @@ export interface BrowserInspectionsDeps<E> {
   carriedFile?: unknown
   fetch?: typeof fetch
   now?: () => number
+  /** An operator run's card for this member (features/browser/browse.ts, in its memory), asked by the same card IPC. */
+  runCard?: (userId: string, companyId: string, runId: string) => BrowserInspectionView | undefined
 }
 
 export type BrowserInspectOutcome =
@@ -212,9 +215,11 @@ export function wireBrowserInspections<E extends IpcInvokeEvent>(ipc: IpcRegistr
   // The card's IPC: the main window's own page only (as the plan card), ids of the server's exact shape, this member's card.
   ipc.handle('browserLines:card', async (event, companyId, planId): Promise<BrowserInspectionGetResult> => {
     if (!deps.fromMainWindow(event)) return { ok: false, message: CW.notMainWindow }
-    if (typeof companyId !== 'string' || !BROWSER_COMPANY_ID_RE.test(companyId) || typeof planId !== 'string' || !BROWSER_LINE_PLAN_ID_RE.test(planId)) return { ok: false, message: CW.badInput }
+    if (typeof companyId !== 'string' || !BROWSER_COMPANY_ID_RE.test(companyId) || typeof planId !== 'string'
+      || !(BROWSER_LINE_PLAN_ID_RE.test(planId) || BROWSER_RUN_ID_RE.test(planId))) return { ok: false, message: CW.badInput }
     const userId = deps.userId()
-    const view = userId ? cards.get(key(userId, companyId, planId)) : undefined
+    // An operator run's card (`bo_…`, agent-browser.md "The operator's window tools") is held by its own wiring.
+    const view = !userId ? undefined : BROWSER_RUN_ID_RE.test(planId) ? deps.runCard?.(userId, companyId, planId) : cards.get(key(userId, companyId, planId))
     return view ? { ok: true, view } : { ok: false, message: CW.gone }
   })
 
