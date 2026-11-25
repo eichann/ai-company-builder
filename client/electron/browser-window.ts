@@ -352,6 +352,8 @@ export function createBrowserWindowShell(options: {
     }
     const onDetach = () => {
       state.aiGateReady = false
+      // Gone: the next attach adds the listeners again (never twice).
+      try { contents.debugger.removeListener('message', onMessage); contents.debugger.removeListener('detach', onDetach) } catch { /* the window is gone */ }
       // The connection went away under a recording (the window is going, or another client took it): it is discarded.
       if (recorder) endRecording(contents.isDestroyed() ? 'closed' : 'lost')
     }
@@ -515,6 +517,9 @@ export function createBrowserWindowShell(options: {
           await dbg.sendCommand('Runtime.enable')
           await dbg.sendCommand('Runtime.addBinding', { name: BROWSER_RECORDING_BINDING, executionContextName: BROWSER_RECORDING_WORLD })
           await dbg.sendCommand('Page.enable')
+          // The main frame's id now: a page already loaded navigates within itself (History API) before any new load.
+          const tree = await dbg.sendCommand('Page.getFrameTree') as { frameTree?: { frame?: { id?: string } } }
+          mainFrameId = tree.frameTree?.frame?.id ?? null
           await dbg.sendCommand('Page.addScriptToEvaluateOnNewDocument', { source: BROWSER_RECORDING_SCRIPT, worldName: BROWSER_RECORDING_WORLD, runImmediately: true })
           await dbg.sendCommand('Network.enable', { maxPostDataSize: RECORDING_BODY_MAX })
           if (recorder !== observer) return false

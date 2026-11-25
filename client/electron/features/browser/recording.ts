@@ -17,13 +17,28 @@ import { createHmac, randomBytes } from 'node:crypto'
 import { BROWSER_DEVICE_HEADER } from '../../../../shared/core/browser-device'
 import { browserRecordingLine, browserRecordingWithout, type BrowserRecordingContent } from '../../../../shared/core/browser-recording'
 import {
-  BROWSER_RECORDING_APP_WORDS, createBrowserRecorder,
+  createBrowserRecorder,
   type BrowserRecorder, type BrowserRecordingResult, type BrowserRecordingView, type BrowserRecordSurface,
 } from '../../../shared/browser-recorder'
 import { BROWSER_COMPANY_ID_RE } from '../../../shared/browser-plans'
 import type { BrowserActionResult } from '../../../shared/browser-operation'
 
-const W = BROWSER_RECORDING_APP_WORDS
+/** Main's sentences for the member (the screen's own words are `BROWSER_RECORDING_APP_WORDS`). */
+export const BROWSER_RECORDING_MAIN_WORDS = {
+  sent: '記録を送りました。管理者に「記録を送りました」と伝えてください。',
+  discarded: '記録を捨てました。',
+  closed: 'サイトの窓を閉じたので、記録を捨てました。',
+  lost: 'サイトの窓とのつながりが切れたので、記録を捨てました。',
+  cannotStart: '記録を始められませんでした。AI がこの窓を使っているときは記録できません。もう一度お試しください。',
+  empty: '記録する行がなかったので、記録を捨てました。',
+  noPc: '記録するには、この PC を使えるようにしてもらう必要があります（下の「この PC」）。',
+  notAllowed: 'このサイトは、いまは記録できません。会社の設定が変わった可能性があります。',
+  busy: 'ほかのサイトを記録中です。先にそちらを止めてください。',
+  sendFailed: '送れませんでした。時間をおいて、もう一度［送る］を押してください。',
+  refused: (reason: string) => `送れませんでした（${reason}）。`,
+  notMainWindow: 'この画面からは操作できません。',
+}
+const W = BROWSER_RECORDING_MAIN_WORDS
 
 /** The server's answer to a send. */
 export type BrowserRecordingSendAnswer = { kind: 'ok' } | { kind: 'refused'; message: string | null } | { kind: 'no-answer' }
@@ -164,7 +179,11 @@ export function createBrowserRecordings(deps: BrowserRecordingsDeps) {
           },
         })
       } catch { ok = false }
-      if (sessions.get(keyOf(user, companyId)) !== s) return { ok: false, message: notes.get(keyOf(user, companyId)) ?? W.cannotStart }
+      if (sessions.get(keyOf(user, companyId)) !== s) {
+        // Discarded (or signed out) while it was starting: let the window go, or it stays held with nobody listening.
+        await surface.stop().catch(() => {})
+        return { ok: false, message: notes.get(keyOf(user, companyId)) ?? W.cannotStart }
+      }
       if (!ok || deps.userId() !== user) {
         discard(s, null)
         return { ok: false, message: W.cannotStart }
@@ -176,6 +195,8 @@ export function createBrowserRecordings(deps: BrowserRecordingsDeps) {
     /** 「記録を止める」: nothing more is observed; the lines wait for the person to check them. */
     async stop(companyId: string): Promise<BrowserRecordingResult> {
       const s = current(companyId)
+      // Stopped before it began observing: nothing was recorded — discarded (the start lets the window go).
+      if (s?.phase === 'starting') { discard(s, W.empty); return answer(companyId) }
       if (!s || s.phase !== 'recording') return answer(companyId)
       s.phase = 'review'
       await s.surface?.stop().catch(() => {})

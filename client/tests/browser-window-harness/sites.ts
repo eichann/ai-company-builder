@@ -20,6 +20,7 @@ const RECORDING_PAGE = `<!doctype html><meta charset="utf-8"><title>orders</titl
 <label for="pw">パスワード</label><input id="pw" name="login_pw" type="password">
 <button id="save" type="button">保存</button>
 <a id="customer" href="/customers/90211">山田花子さんの注文</a>
+<div role="listbox"><div role="option" id="pick">鈴木一郎</div></div>
 <script>
   fetch('/rec-api/48213').then(r => r.json())
   document.getElementById('save').addEventListener('click', () => {

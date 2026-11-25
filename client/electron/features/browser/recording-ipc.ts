@@ -8,8 +8,8 @@
 // Only the main window's main frame may ask; the host is only a name (main records only a site its current policy lists).
 // Every answer is a view of lines in the recording's kept form — never a value.
 import type { IpcInvokeEvent, IpcMessageEvent, IpcRegistrar } from '../../ipc/registrar'
-import { BROWSER_RECORDING_APP_WORDS, type BrowserRecordingResult } from '../../../shared/browser-recorder'
-import type { BrowserRecordings } from './recording'
+import type { BrowserRecordingResult } from '../../../shared/browser-recorder'
+import { BROWSER_RECORDING_MAIN_WORDS, type BrowserRecordings } from './recording'
 
 export interface BrowserRecordingIpcDeps<E> {
   recordings: Pick<BrowserRecordings, 'view' | 'start' | 'stop' | 'removeLine' | 'send' | 'discard'>
@@ -17,7 +17,7 @@ export interface BrowserRecordingIpcDeps<E> {
 }
 
 const id = (v: unknown): v is string => typeof v === 'string' && v.length > 0 && v.length <= 200
-const notMain: BrowserRecordingResult = { ok: false, message: BROWSER_RECORDING_APP_WORDS.notMainWindow }
+const notMain: BrowserRecordingResult = { ok: false, message: BROWSER_RECORDING_MAIN_WORDS.notMainWindow }
 
 export function registerBrowserRecordingIpc<E extends IpcInvokeEvent>(ipc: IpcRegistrar<E, IpcMessageEvent>, deps: BrowserRecordingIpcDeps<E>): void {
   const { recordings, fromMainWindow } = deps

@@ -230,7 +230,8 @@ export type BrowserRecordingView =
 
 export type BrowserRecordingResult = { ok: true; view: BrowserRecordingView } | { ok: false; message: string }
 
-export const BROWSER_RECORDING_APP_WORDS = Object.freeze({
+/** The screen's words (the renderer's bundle holds only these; main's own sentences are in features/browser/recording.ts). */
+export const BROWSER_RECORDING_APP_WORDS = {
   record: '記録する',
   windowRecording: '（記録中）',
   recordNote: 'いつもの作業を、サイトの窓で1回通してやってください。押したボタンと入力した欄の見出し、開いたページの形だけを記録します。入力した値・パスワード・ログインの情報は記録しません。',
@@ -242,19 +243,7 @@ export const BROWSER_RECORDING_APP_WORDS = Object.freeze({
   reviewTitle: '送る前に確かめてください',
   reviewNote: '要らない行は［消す］で消せます。送った記録は、あなたと会社のオーナー・管理者だけが見られ、30日で消えます。',
   full: '長いので、ここで記録を止めました（500行まで）。',
-  sent: '記録を送りました。管理者に「記録を送りました」と伝えてください。',
-  discarded: '記録を捨てました。',
-  closed: 'サイトの窓を閉じたので、記録を捨てました。',
-  lost: 'サイトの窓とのつながりが切れたので、記録を捨てました。',
-  cannotStart: '記録を始められませんでした。AI がこの窓を使っているときは記録できません。もう一度お試しください。',
-  empty: '記録する行がなかったので、記録を捨てました。',
-  noPc: '記録するには、この PC を使えるようにしてもらう必要があります（下の「この PC」）。',
-  notAllowed: 'このサイトは、いまは記録できません。会社の設定が変わった可能性があります。',
-  busy: 'ほかのサイトを記録中です。先にそちらを止めてください。',
-  sendFailed: '送れませんでした。時間をおいて、もう一度［送る］を押してください。',
-  refused: (reason: string) => `送れませんでした（${reason}）。`,
-  notMainWindow: 'この画面からは操作できません。',
-})
+}
 
 /** Who hears a recording's observations; `ended`: the window closed or the connection was lost (the recording is discarded). */
 export interface BrowserRecordingObserver {
@@ -282,11 +271,14 @@ export const BROWSER_RECORDING_WORLD = 'acb-recording'
  */
 export const BROWSER_RECORDING_SCRIPT = `(() => {
   if (globalThis.__acbRecording || typeof document === 'undefined') return; globalThis.__acbRecording = true;
-  const send = (o) => { try { globalThis[${JSON.stringify(BROWSER_RECORDING_BINDING)}](JSON.stringify(o)); } catch (e) {} };
+  // The binding's name is BROWSER_RECORDING_BINDING (spelled out: no call runs when the renderer loads this module).
+  const send = (o) => { try { globalThis.__acbRecord(JSON.stringify(o)); } catch (e) {} };
   const clip = (s) => (typeof s === 'string' ? s : '').slice(0, 200);
   const byIds = (ids) => (ids || '').split(/\\s+/).map(id => document.getElementById(id)).filter(Boolean).map(el => el.innerText || '').join(' ');
+  // A <label> wrapping its field: its own words only, never the field's options or value.
+  const ownText = (label) => { const c = label.cloneNode(true); c.querySelectorAll('input, select, textarea, option, datalist').forEach(n => n.remove()); return c.textContent || ''; };
   const fieldLabel = (el) => clip(el.getAttribute('aria-label') || byIds(el.getAttribute('aria-labelledby'))
-    || (el.labels && el.labels[0] && el.labels[0].innerText) || el.getAttribute('placeholder') || el.getAttribute('title') || '');
+    || (el.labels && el.labels[0] && ownText(el.labels[0])) || el.getAttribute('placeholder') || el.getAttribute('title') || '');
   const buttonLabel = (el) => clip(el.getAttribute('aria-label') || byIds(el.getAttribute('aria-labelledby'))
     || (el instanceof HTMLInputElement ? el.value : el.innerText) || el.getAttribute('title') || '');
   document.addEventListener('click', (e) => {
@@ -296,7 +288,8 @@ export const BROWSER_RECORDING_SCRIPT = `(() => {
     const choice = t.closest('input[type=checkbox], input[type=radio], [role=checkbox], [role=radio], [role=tab], [role=menuitem], [role=option], [role=switch]');
     const link = t.closest('a[href]');
     if (button) send({ type: 'click', role: 'button', label: buttonLabel(button) });
-    else if (choice) send({ type: 'click', role: 'choice', label: choice instanceof HTMLInputElement ? fieldLabel(choice) : buttonLabel(choice) });
+    // An option or a menu item is often the data itself (a customer in a list): no label.
+    else if (choice) send({ type: 'click', role: 'choice', label: choice instanceof HTMLInputElement ? fieldLabel(choice) : choice.matches('[role=option], [role=menuitem]') ? '' : buttonLabel(choice) });
     else if (link) send({ type: 'click', role: 'link', href: link.href });
   }, true);
   document.addEventListener('change', (e) => {

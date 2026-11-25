@@ -22,7 +22,7 @@ import { createBrowserRecordingService, type BrowserRecordingService } from '../
 import { createBrowserSiteGrants, type BrowserSiteGrants } from '../../src/services/browser-site-grants'
 import type { BrowserOperationSettings } from '../../../shared/core/browser-operation'
 import {
-  BROWSER_RECORDING_LIMITS, browserAddressPattern, browserKeyPattern, browserLabel, browserRecordingProblem, type BrowserRecordingContent,
+  BROWSER_RECORDING_LIMITS, browserAddressPattern, browserJsonShape, browserKeyPattern, browserLabel, browserRecordingProblem, type BrowserRecordingContent,
 } from '../../../shared/core/browser-recording'
 import type { BrowserDeviceView } from '../../../shared/types/browser-devices'
 import type { Member } from '../../src/services/access'
@@ -110,6 +110,14 @@ beforeEach(() => {
 describe('what may be stored (the server\'s own check)', () => {
   it('a recording in its kept form passes', () => {
     expect(browserRecordingProblem(recording(), DOMAIN)).toBeNull()
+    // An answer or a body that is a JSON array at its root (Codex review): `[]`, `[].id`.
+    const rooted = recording()
+    ;(rooted.steps[1] as { answerKeys: string[] }).answerKeys = browserJsonShape([{ id: 42, tags: ['a'] }]).keys
+    ;(rooted.steps[4] as { fields: unknown[] }).fields = [{ name: '[]', value: '値1', from: null }]
+    expect((rooted.steps[1] as { answerKeys: string[] }).answerKeys).toEqual(['[].id', '[].tags'])
+    expect(browserRecordingProblem(rooted, DOMAIN)).toBeNull()
+    ;(rooted.steps[1] as { answerKeys: string[] }).answerKeys = ['id.[]']
+    expect(browserRecordingProblem(rooted, DOMAIN)).not.toBeNull()
   })
 
   it('a value, a token field, an unmasked address, label or key, or a dangling reference is refused', () => {

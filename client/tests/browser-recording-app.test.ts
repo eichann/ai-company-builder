@@ -7,9 +7,8 @@
  */
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { createBrowserRecordings, createBrowserRecordingsHttp } from '../electron/features/browser/recording'
+import { BROWSER_RECORDING_MAIN_WORDS as W, createBrowserRecordings, createBrowserRecordingsHttp } from '../electron/features/browser/recording'
 import type { BrowserRecordingObserver, BrowserRecordSurface } from '../shared/browser-recorder'
-import { BROWSER_RECORDING_APP_WORDS as W } from '../shared/browser-recorder'
 import { BROWSER_DEVICE_HEADER } from '../../shared/core/browser-device'
 import { browserRecordingProblem } from '../../shared/core/browser-recording'
 
@@ -134,4 +133,26 @@ test('this PC\'s key rides only on the send, with the session; nothing goes with
   assert.equal(new URL(seen[0].url).pathname, `/api/companies/${CO}/browser-recordings`)
   const none = createBrowserRecordingsHttp({ baseUrl: () => 'https://acb.example.test', cookies: () => [], deviceKey: () => 'v1.key', fetch: (async () => { throw new Error('asked') }) as typeof fetch })
   assert.deepEqual(await none.send(CO, { domain: HOST, content }), { kind: 'no-answer' })
+})
+
+test('discarded or stopped while it is still starting: the window is let go once the start finishes (never left held)', async () => {
+  for (const press of ['discard', 'stop'] as const) {
+    let release: (ok: boolean) => void = () => {}
+    let held = false
+    const surface: BrowserRecordSurface = {
+      start: () => new Promise<boolean>(resolve => { release = ok => { held = ok; resolve(ok) } }),
+      async stop() { held = false },
+      active: () => held,
+    }
+    const recordings = createBrowserRecordings({
+      windows: { open: () => ({ ok: true }), recordWindow: () => surface },
+      userId: () => 'u-1', mayRecord: () => true, api: { send: async () => ({ kind: 'ok' }) }, changed: () => {},
+    })
+    const starting = recordings.start(CO, HOST)
+    await (press === 'discard' ? recordings.discard(CO) : recordings.stop(CO))
+    release(true)
+    assert.equal((await starting).ok, false)
+    assert.equal(held, false, `${press}: the window is no longer held by a recording`)
+    assert.equal(recordings.view(CO).state, 'none')
+  }
 })

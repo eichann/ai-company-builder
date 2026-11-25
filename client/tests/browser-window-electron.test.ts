@@ -366,11 +366,12 @@ test('recording: the person\'s own clicks and typing are kept in their kept form
   assert.equal(r.problem, null, 'the recording passes the server\'s check as it is')
   const content = r.content as { steps: Array<Record<string, unknown>>; hosts: unknown[] }
   const json = JSON.stringify(content)
-  for (const secret of ['2026-12-03', 'pw-secret-value', '7777', 'csrf-in-header', 'csrf-in-body', 'auth-header-6543', '山田', '48213', '90211', 'forged by the page', 'login_pw', '_token']) {
+  for (const secret of ['2026-12-03', 'pw-secret-value', '7777', 'csrf-in-header', 'csrf-in-body', 'auth-header-6543', '山田', '48213', '90211', 'forged by the page', 'login_pw', '_token', '鈴木']) {
     assert.equal(json.includes(secret), false, secret)
   }
   const kinds = content.steps.map(s => `${s.kind}:${s.kind === 'page' || s.kind === 'send' ? s.address : s.label ?? s.address}`)
   assert.ok(kinds.includes('page:/rec-form'), kinds.join(' | '))
+  assert.ok(kinds.includes('page:/rec-form/{n}'), `a same-document navigation before any new load: ${kinds.join(' | ')}`)
   assert.ok(kinds.includes('input:受付終了日'), kinds.join(' | '))
   assert.ok(kinds.includes('input:パスワード'), kinds.join(' | '))
   assert.ok(kinds.includes('click:保存'), kinds.join(' | '))
@@ -385,7 +386,8 @@ test('recording: the person\'s own clicks and typing are kept in their kept form
   const click = content.steps.find(s => s.kind === 'click' && s.label === '保存')
   assert.equal(save.after, click?.id, 'the save follows the press (推定)')
   // The page's own synthetic click and its call of the binding name are not the person's.
-  assert.equal(content.steps.filter(s => s.kind === 'click').length, 1)
+  assert.deepEqual(content.steps.filter(s => s.kind === 'click').map(s => `${s.target}:${s.label}`), ['button:保存', 'choice:null'],
+    'an option picked from a list is a choice without its text (it is often the data itself)')
 })
 
 test('recording and the AI never hold the window together; the preview reads nothing while recording; closing the window ends it', { skip }, () => {

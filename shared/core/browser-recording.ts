@@ -291,9 +291,10 @@ function isKeyPattern(k: string, json: boolean): boolean {
 function isKeyPath(p: unknown, allowFormName: boolean): p is string {
   if (typeof p !== 'string' || p === '' || p.length > 300) return false
   if (allowFormName && isKeyPattern(p, false)) return true
-  return p.split('.').every(seg => {
+  // A root array's items are `[]` / `[].id` (browserJsonShape): only the first segment may be bare brackets.
+  return p.split('.').every((seg, i) => {
     const base = seg.replace(/(\[\])+$/, '')
-    return base !== '' && isKeyPattern(base, true)
+    return base === '' ? i === 0 && seg !== '' : isKeyPattern(base, true)
   })
 }
 

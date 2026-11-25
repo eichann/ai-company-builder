@@ -213,8 +213,11 @@ async function recordingScenarios(win: BrowserShellWindow, shell: ReturnType<typ
   const recorder = createBrowserRecorder({ domain: 'op.test', digest: newRecordingDigest(), now: () => Date.now() })
   const ended: string[] = []
   out.started = await win.record.start({ observe: o => recorder.observe(o), ended: r => ended.push(r) })
+  // A page already loaded navigating within itself (History API) before any new load is a page line too.
+  await js(`history.pushState({}, '', '/rec-form/77'); 1`)
+  await wait(300)
   // Reload so the page's load (its own script's read, its forged calls) is observed too.
-  await page.reload()
+  await page.loadURL('https://op.test/rec-form')
   await wait(1200)
   const hooks = { stopped: () => false, pageRead: () => true, sessionRequest: () => ({ allow: false as const, reason: 'test' }) }
   out.aiWhileRecording = await win.run.enterAi(hooks as never)
@@ -232,6 +235,7 @@ async function recordingScenarios(win: BrowserShellWindow, shell: ReturnType<typ
   page.insertText('pw-secret-value-7777')
   await press('Tab')
   await clickOn('save')
+  await clickOn('pick')
   await wait(1000)
   await win.record.stop()
   const content = recorder.content()
