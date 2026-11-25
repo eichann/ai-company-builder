@@ -171,7 +171,7 @@ company's `rootPath`), so the sandbox applies there exactly as for a git company
   on this PC; rejected → the turn ends with its sentence (`agent-browser.md` "Keeping a login on disk"). Every chat turn
   asks the same before its agent starts (`chat-server.ts` `beforeAiTurn`); `sandboxKeepsPlaceUnread` says whether an
   enforce turn keeps a place unreadable for both CLIs. Chat titles run with no tool (Claude `tools: []`, no MCP; Codex
-  `CODEX_TEXT_OVERRIDES`), since they run without the sandbox.
+  `CODEX_TEXT_OVERRIDES` and its configured MCP servers disabled), since they run without the sandbox.
 - A refused host / read: the PostToolUseFailure hook returns `additionalContext` with
   `blockedHostMessage(host)` = 「会社の設定で、この宛先（host）には接続できません。必要なら管理者に許可を依頼してください。」
   (or the read sentence) for the AI to relay; the event is `blocked` (S2).

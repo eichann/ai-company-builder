@@ -232,8 +232,24 @@ test('「ログインを消す」 removes the kept login too', async () => {
   const w = world()
   w.browser.policyAnswered('c1', policy('enforce'))
   w.browser.open('c1', SITE.host)
+  w.changed.length = 0
   assert.deepEqual(await w.browser.clearLogin('c1', SITE.host), { ok: true })
   assert.deepEqual(w.onDisk(), [])
+  // Its partition is not used again in this run, and Settings never promises a kept login it will not keep.
+  assert.ok(w.changed.includes('c1'))
+  assert.deepEqual(w.browser.sites('c1'), { sites: [{ host: SITE.host }] })
+  w.browser.open('c1', SITE.host)
+  assert.doesNotMatch(w.opened[1].partition, /^persist:/)
+})
+
+test('a window already open in memory when the site becomes kept: Settings does not say kept until it closes', () => {
+  const w = world()
+  w.browser.policyAnswered('c1', policy('observe'))
+  w.browser.open('c1', SITE.host)
+  w.browser.policyAnswered('c1', policy('enforce'))
+  assert.deepEqual(w.browser.sites('c1'), { sites: [{ host: SITE.host }] })
+  w.opened[0].onClosed()
+  assert.deepEqual(w.browser.sites('c1'), { sites: [{ host: SITE.host, kept: true }] })
 })
 
 // ---------------------------------------------------------------------------

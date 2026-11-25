@@ -133,6 +133,11 @@ export function createKeptLogins(deps: KeptLoginsDeps) {
     /** May a login be kept now (this run never ran an AI turn without the sandbox)? */
     keeping(): boolean { return !stopped },
 
+    /** May this site's login be kept now: keeping, and its partition not removed earlier in this run? */
+    mayKeep(userId: string, companyId: string, host: string): boolean {
+      return !stopped && !spent.has(keptLoginFolder(userId, companyId, host))
+    },
+
     /** The `persist:` partition of a site's kept login, or null when it may not be kept now (memory then). */
     partition(userId: string, companyId: string, host: string): string | null {
       const name = keptLoginFolder(userId, companyId, host)

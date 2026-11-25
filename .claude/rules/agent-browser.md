@@ -338,7 +338,8 @@ What "every AI turn is enclosed" means in today's code, and what makes it hold:
   in force): `TurnSandbox.beforeUnenclosed()` is awaited first; rejected → the turn ends with its sentence, never runs.
 - **Turns that are not conversations**: titles were the only ones with tools — Claude's title model now runs with
   `tools: []`, no MCP server, `strictMcpConfig`; Codex's title process gets `CODEX_TEXT_OVERRIDES` (the shell and every
-  other tool off; `agents/codex-overrides.ts`, a leaf both read). The one-shots (commit messages, voice, hand-off, the
+  other tool off; `agents/codex-overrides.ts`, a leaf both read) and every MCP server the member configured disabled by
+  name (`config/read`, as the one-shots do). The one-shots (commit messages, voice, hand-off, the
   second opinion, the Web reader, the browser operator, tag suggestions) already ran without file tools.
 - **Not enclosed → before it runs**: `controller.beforeAiTurn` stops keeping **for the rest of this app run** (set before
   anything is awaited, so a window opened meanwhile lives in memory), closes every kept window and removes **every** kept
@@ -370,7 +371,8 @@ The pieces:
 - **Crash halfway**: the turn waits for the removal; a crash during it leaves the turn unstarted and some folders, which
   the next start keeps only until a valid answer, a sign-in or the first unenclosed turn judges them; "stopped for this
   run" is memory only (a restart starts keeping again: the remaining-limits stretch above).
-- Words: Settings shows `BROWSER_WORDS.loginKept` for a kept site (`BrowserSiteView.kept`), else `loginNotKept`; the
+- Words: Settings shows `BROWSER_WORDS.loginKept` for a kept site (`BrowserSiteView.kept`: kept now, its partition not
+  removed earlier in this run — `kept.mayKeep` —, and no window of it already open in memory), else `loginNotKept`; the
   admin's `BROWSER_LOGIN_NOTE` says who keeps it.
 
 Tests: `client/tests/browser-kept-logins.test.ts` (the rule; the place for both agents and the company folder; names and
@@ -384,7 +386,7 @@ for the removal and never runs when it fails; the Claude title has no tool), `co
 shell off), `browser-window-electron.test.ts` (a real `persist:` window keeps its cookies in `Partitions/<name>`, its
 page-less sessions never reach the disk, removing leaves no folder and no cookie, a removed partition is not reused),
 `server/tests/integration/browser-login-levels.test.ts` (each person's own level, 使わない, absent while off, announced),
-`client/tests/ui/browser-settings.spec.ts` (the kept sentence). Each guard mutation-checked (33 mutations).
+`client/tests/ui/browser-settings.spec.ts` (the kept sentence). Each guard mutation-checked (37 mutations).
 
 ## The runner (PR 5a: built and tested; the AI cannot reach it)
 

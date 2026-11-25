@@ -140,9 +140,13 @@ export function createBrowserController(deps: BrowserControllerDeps) {
   }
   /** `${user}\0${company}` → the hosts whose login the last valid answer lets this PC keep (`browserLoginStorage`). */
   const keptHosts = new Map<string, Set<string>>()
-  /** May this site's login be kept on this PC now? */
+  /** May this site's login be kept on this PC now (the answer, this run, a partition not removed earlier in it)? */
   const keepsNow = (userId: string, companyId: string, host: string): boolean =>
-    !!deps.kept?.keeping() && !!keptHosts.get(keyOf(userId, companyId))?.has(host)
+    !!deps.kept?.mayKeep(userId, companyId, host) && !!keptHosts.get(keyOf(userId, companyId))?.has(host)
+  /** What Settings says: kept now, and no window of the site already open in memory (a new login there is not kept). */
+  const keptShown = (userId: string, companyId: string, host: string): boolean =>
+    keepsNow(userId, companyId, host) &&
+    ![...windows.values()].some(w => w.userId === userId && w.companyId === companyId && w.host === host && !deps.kept!.isKept(w.partition))
   /** Removes kept logins (closing their windows first); logs and answers false when one is left on disk. */
   const removeKept = async (scope: Parameters<KeptLogins['remove']>[0], closeWhere: (win: OpenWindow) => boolean): Promise<boolean> => {
     if (!deps.kept) return true
@@ -218,7 +222,7 @@ export function createBrowserController(deps: BrowserControllerDeps) {
     sites(companyId: string): BrowserSitesResult {
       const user = deps.userId()
       return {
-        sites: (sitesOf(companyId) ?? []).map(s => ({ host: s.host, ...(user && keepsNow(user, companyId, s.host) ? { kept: true } : {}) })),
+        sites: (sitesOf(companyId) ?? []).map(s => ({ host: s.host, ...(user && keptShown(user, companyId, s.host) ? { kept: true } : {}) })),
       }
     },
 
@@ -276,6 +280,8 @@ export function createBrowserController(deps: BrowserControllerDeps) {
         clear(browserPartition(user, companyId, host)),
         removeKept({ userId: user, companyId, host }, () => false),
       ])
+      // A removed kept login is not kept again in this run: Settings says so.
+      if (deps.kept) deps.onChanged?.(companyId)
       return memory && kept ? { ok: true } : { ok: false, message: BROWSER_WORDS.clearFailed }
     },
 

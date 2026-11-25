@@ -90,7 +90,8 @@ callers ask capabilities instead of branching on agent ids. Related: `chat-write
   callers stay agent-agnostic. The Web reader is not a profile: it is a one-shot job with its
   restrictions built in (`runWebReader`, `agents/web-reader.ts`).
 - Chat titles (`createTitleModel`) run without the company sandbox, so with no tool: Claude Code `tools: []`, no MCP
-  server, `strictMcpConfig`; Codex's title process `CODEX_TEXT_OVERRIDES` (`agents/codex-overrides.ts`). A turn without
+  server, `strictMcpConfig`; Codex's title process `CODEX_TEXT_OVERRIDES` (`agents/codex-overrides.ts`) and the member's MCP servers disabled by
+  name. A turn without
   the sandbox must never read this PC's files while a browser login is kept (`agent-browser.md` "Keeping a login on disk").
 - Commit messages: the member's agent, then `commitMessageFallback` agents in registry order
   (Claude Code, API key — Codex is never picked on the member's behalf); a private folder's clone
