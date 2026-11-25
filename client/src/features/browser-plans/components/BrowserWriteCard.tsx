@@ -5,7 +5,7 @@ import { STATE_BOX, type StateBoxTone } from '../../../shared/ui/stateStyles'
 import { BROWSER_WRITE_CARD_WORDS as W, type BrowserWriteGetResult, type BrowserWriteView } from '../../../../shared/browser-line-writes'
 import type { BrowserInspectionView } from '../../../../shared/browser-inspection'
 import { useInterval } from '../../../shared/hooks/useInterval'
-import { confirmBrowserWrite, confirmBrowserWriteValue, getBrowserWriteCard, runBrowserWrite, type BrowserWriteAnswers, type BrowserWriteOutbound, type BrowserWriteReads } from '../api'
+import { cancelBrowserWrite, confirmBrowserWrite, confirmBrowserWriteValue, getBrowserWriteCard, runBrowserWrite, type BrowserWriteAnswers, type BrowserWriteOutbound, type BrowserWriteReads } from '../api'
 import { WRITE_CARD_UNREADABLE, useBrowserWrite } from '../hooks/useBrowserWrite'
 import { putWrite } from '../writeStore'
 
@@ -117,6 +117,11 @@ export const BrowserWriteCard = memo(function BrowserWriteCard({ companyId, card
           <Button variant="primary" disabled={busy} onClick={() => press(() => (ports.outbound ? runBrowserWrite(companyId, cardId, view.contentHash as string, ports.outbound) : runBrowserWrite(companyId, cardId, view.contentHash as string)))}>
             {busy ? W.entrusting : W.entrust}
           </Button>
+          {view.cancellable && (
+            <Button disabled={busy} onClick={() => press(() => (ports.outbound ? cancelBrowserWrite(companyId, cardId, ports.outbound) : cancelBrowserWrite(companyId, cardId)))}>
+              {W.cancel}
+            </Button>
+          )}
         </div>
       )}
       {view.phase === 'running' && <p role="status" className="mt-2 text-body text-text-muted">{W.entrusting}</p>}

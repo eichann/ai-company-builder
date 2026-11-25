@@ -5,6 +5,7 @@
  */
 import type Database from 'better-sqlite3'
 import type { BrowserRunLogRow, BrowserRunRepository, BrowserRunRow } from '../../ports/browser-runs'
+import type { BrowserRunWriteStep } from '../../../shared/core/browser-run-log'
 
 const COLUMNS = 'id, user_id, host, device_id, conversation_id, state, reason, started_at, lease_until, ended_at'
 type DbRow = {
@@ -61,6 +62,17 @@ export function sqliteBrowserRunRepository(conn: Database.Database, companyId: s
       return (conn.prepare(`SELECT run_id, idx, page, action, label FROM browser_run_log WHERE company_id = ? AND run_id IN (${marks}) ORDER BY run_id, idx`)
         .all(companyId, ...runIds) as Array<{ run_id: string; idx: number; page: string; action: BrowserRunLogRow['action']; label: string | null }>)
         .map(r => ({ runId: r.run_id, idx: r.idx, page: r.page, action: r.action, label: r.label }))
+    },
+    appendWrites(runId, rows) {
+      const insert = conn.prepare('INSERT INTO browser_run_writes (company_id, run_id, idx, after_step, frame, method, page, outcome) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+      rows.forEach((w, i) => insert.run(companyId, runId, i + 1, w.after, w.frame, w.method, w.page, w.outcome))
+    },
+    writesOf(runIds) {
+      if (runIds.length === 0) return []
+      const marks = runIds.map(() => '?').join(', ')
+      return (conn.prepare(`SELECT run_id, after_step, frame, method, page, outcome FROM browser_run_writes WHERE company_id = ? AND run_id IN (${marks}) ORDER BY run_id, idx`)
+        .all(companyId, ...runIds) as Array<{ run_id: string; after_step: number; frame: number | null; method: BrowserRunWriteStep['method']; page: string; outcome: BrowserRunWriteStep['outcome'] }>)
+        .map(r => ({ runId: r.run_id, after: r.after_step, frame: r.frame, method: r.method, page: r.page, outcome: r.outcome }))
     },
     list(limit, userId) {
       const rows = userId === undefined

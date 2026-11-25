@@ -68,6 +68,11 @@ export interface BrowserFrameDeps {
   siteGrants: Pick<BrowserSiteGrants, 'allows'>
   /** 「Skill の承認」 (services/browser-skills.ts): the frames of an approved declaration, read by the server. */
   skills: Pick<BrowserSkillService, 'approvedFrames' | 'stillApproved' | 'runCardShown'>
+  /**
+   * Whether an operator run (services/browser-runs.ts, step ④) holds the domain now: step ⑤b joins the two locks, so a
+   * frames run never starts while another run operates the domain. Absent: no operator runs (tests of ⑤a).
+   */
+  operatorRunOn?: (companyId: string, host: string) => boolean
 }
 
 export const BROWSER_FRAME_TIMES = {
@@ -138,6 +143,9 @@ interface StartFrames {
   declarationHash: string | null
   files: string | null
   writes: readonly BrowserSkillWrite[]
+  /** The approved declaration's addresses (a Skill run; an ad-hoc plan has none), answered by the start only. */
+  afterRead: readonly string[]
+  neverRead: readonly string[]
   /** The run may open at once (a pre-approved Skill version whose text nobody changed since). */
   preApproved: boolean
   /** A Skill's approval row the frames rest on (checked again inside the start's transaction). */
@@ -251,6 +259,7 @@ export function createBrowserFrameService(deps: BrowserFrameDeps) {
       const a = approved.value
       return ok({
         host: a.frames.domain, source: 'skill', skill: a.skill, declarationHash: a.declarationHash, files: a.files, writes: a.frames.writes,
+        afterRead: a.frames.afterRead, neverRead: a.frames.neverRead,
         preApproved: a.mode === 'pre_approved' && !a.needsRunCard, approval: a.approval,
       })
     }
@@ -263,11 +272,29 @@ export function createBrowserFrameService(deps: BrowserFrameDeps) {
     if (browserAdhocWritesProblem(parsed.declaration.writes)) return refuse('bad-request', W.widePlan, { code: 'BROWSER_FRAME_BAD_PLAN' })
     // Its domain must be a registered one with writes allowed: the gate below (the same check as every permit's).
     // An ad-hoc plan is never pre-approvable: the person approves it on the card.
-    return ok({ host: parsed.declaration.domain, source: 'adhoc', skill: null, declarationHash: null, files: null, writes: parsed.declaration.writes, preApproved: false, approval: null })
+    return ok({
+      host: parsed.declaration.domain, source: 'adhoc', skill: null, declarationHash: null, files: null, writes: parsed.declaration.writes,
+      afterRead: [], neverRead: [], preApproved: false, approval: null,
+    })
   }
 
   return {
     pastWindow,
+
+    /**
+     * Who holds a domain for the operator runs' start (step ⑤b, services/browser-runs.ts): the run not ended there (its id
+     * and member), `busy` while an ended run's write to it may still be on its way, else null. Time-outs judged first.
+     */
+    holderOn(companyId: string, host: string): { runId: string; userId: string } | 'busy' | null {
+      const now = clock.nowMs()
+      const r = repo(companyId)
+      const live = r.liveRunOn(host)
+      if (live) settle(companyId, live, now)
+      const still = r.liveRunOn(host)
+      if (still) return { runId: still.id, userId: still.userId }
+      for (const ended of r.runsInFlightOn(host)) settle(companyId, ended, now)
+      return r.runsInFlightOn(host).length > 0 ? 'busy' : null
+    },
 
     /**
      * POST /browser-frame-runs { skill } | { plan: { domain, writes } } (+ conversationId?) with the PC's key header: a
@@ -303,6 +330,8 @@ export function createBrowserFrameService(deps: BrowserFrameDeps) {
         // write is recorded or times out, so two writes never travel to one site at once (independent review of ⑤a).
         for (const ended of r.runsInFlightOn(f.host)) settle(member.companyId, ended, now)
         if (r.runsInFlightOn(f.host).length > 0) return refuse('conflict', W.busy, { code: 'BROWSER_RUN_BUSY' })
+        // An operator run (step ④) on this domain holds it too (step ⑤b: one lock across both kinds of run).
+        if (deps.operatorRunOn?.(member.companyId, f.host)) return refuse('conflict', W.busy, { code: 'BROWSER_RUN_BUSY' })
         const approvalToken = f.preApproved ? null : ids.newToken()
         const run: FrameRunRow = {
           id: `bf_${ids.newToken().slice(0, 32)}`, userId: member.userId, host: f.host, deviceId: passed.value.deviceId,
@@ -313,7 +342,7 @@ export function createBrowserFrameService(deps: BrowserFrameDeps) {
           endReason: null, createdAt: iso(now), expiresAt: iso(now + BROWSER_FRAME_TIMES.run), endedAt: null,
         }
         r.insertRun(run, f.writes.map((w, i) => ({ idx: i + 1, method: w.method, path: w.path, fields: canonicalJson({ ...w.fields }), max: w.max })))
-        return ok({ ...view(member.companyId, run), approvalToken })
+        return ok({ ...view(member.companyId, run), approvalToken, afterRead: [...f.afterRead], neverRead: [...f.neverRead] })
       })
     },
 

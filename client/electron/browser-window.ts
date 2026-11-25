@@ -38,7 +38,9 @@ import {
 } from '../shared/browser-recorder'
 import { readBrowserPageSnapshot, sameDomainPath, BROWSER_BROWSE_LIMITS, type BrowserBrowseSurface } from '../shared/browser-browse'
 import { BROWSER_BROWSE_WORLD, BROWSER_SNAPSHOT_SCRIPT, browseFocusScript, browsePointScript, browseSelectScript } from '../shared/browser-browse-script'
-import { BrowserNotSentError, createSessionLanes, exactRead, throughSession, writeThroughSession, type PagelessSession } from './features/browser/read-session'
+import { BrowserNotSentError, createSessionLanes, exactRead, throughSession, writeThroughSession, type PagelessSession, type SessionAnswer, type SessionRequest } from './features/browser/read-session'
+import type { BrowserWorkHooks, HeldBody, HeldPageWriteAnswer } from '../shared/browser-frame-writes'
+import type { BrowserWriteOutcome, BrowserWriteSteps } from '../shared/browser-runner'
 
 /** What `ai` mode needs: the approved step's decider (none = no write) and the emergency stop. */
 export interface BrowserAiGate {
@@ -52,7 +54,22 @@ export interface BrowserAiGate {
    * confirm never says yes.
    */
   dismissDialogs?: boolean
+  /**
+   * A write run (step ⑤b; agent-browser.md "Writes within frames, in the app"): every write the page makes is held — never
+   * continued — and handed to `hooks.holdWrite` with `send`, the window's one way to send exactly that request once through
+   * its write session. The page then gets the site's answer (without `Set-Cookie`) or a failure.
+   */
+  hold?: { hooks: BrowserWorkHooks; send(request: SessionRequest, steps: BrowserWriteSteps): Promise<BrowserWriteOutcome> }
 }
+
+/** Request headers a held write's copy never carries (the session sets them, or they belong to the connection). */
+const HELD_DROPPED_HEADERS = new Set(['host', 'content-length', 'content-type', 'cookie', 'cookie2', 'connection', 'keep-alive', 'transfer-encoding', 'upgrade', 'te', 'trailer', 'expect', 'accept-encoding'])
+const heldHeaders = (headers: Record<string, string>): Array<[string, string]> =>
+  Object.entries(headers).filter(([k]) => { const n = k.toLowerCase(); return !HELD_DROPPED_HEADERS.has(n) && !n.startsWith('proxy-') && !n.startsWith('sec-') })
+/** A held write's body read at most (larger: not readable, refused). */
+const HELD_BODY_MAX = 1024 * 1024
+/** Answer headers a fulfilled page request never gets: cookies (the site's are never handed back), and what no longer fits the decoded body. */
+const FULFILL_DROPPED_HEADERS = new Set(['set-cookie', 'set-cookie2', 'content-encoding', 'content-length', 'transfer-encoding'])
 
 export interface BrowserShellWindow extends BrowserWindowHandle {
   readonly webContents: WebContents
@@ -80,7 +97,17 @@ const RECORDING_START_MS = 20_000
  * failing before the request is ended rejects with `BrowserNotSentError` (the request never left);
  * every failure after `request.end` is an ordinary rejection (it may have left).
  */
-function sendOnce(ses: Session, r: { method: string; url: string; contentType?: string; body?: string }, signal?: AbortSignal, beforeSend?: () => boolean): Promise<{ status: number; body: string }> {
+/** The answer's headers as pairs, `Set-Cookie` left out (what the site sets is never handed back to a page or a window). */
+function answerHeaders(headers: Record<string, string | string[]>): Array<[string, string]> {
+  const out: Array<[string, string]> = []
+  for (const [name, value] of Object.entries(headers)) {
+    if (name.toLowerCase() === 'set-cookie' || name.toLowerCase() === 'set-cookie2') continue
+    for (const v of Array.isArray(value) ? value : [value]) out.push([name, v])
+  }
+  return out
+}
+
+function sendOnce(ses: Session, r: SessionRequest, signal?: AbortSignal, beforeSend?: () => boolean): Promise<SessionAnswer> {
   return new Promise((resolve, reject) => {
     let done = false
     let timer: ReturnType<typeof setTimeout> | undefined
@@ -93,7 +120,7 @@ function sendOnce(ses: Session, r: { method: string; url: string; contentType?: 
       request = made
       signal?.addEventListener('abort', onAbort, { once: true })
       timer = setTimeout(() => finish(() => { made.abort(); reject(new Error('no answer in time')) }), RUN_REQUEST_MS)
-      made.on('redirect', status => finish(() => { made.abort(); resolve({ status, body: '' }) }))
+      made.on('redirect', (status, _method, _url, headers) => finish(() => { made.abort(); resolve({ status, body: '', headers: answerHeaders(headers ?? {}), bytes: new Uint8Array() }) }))
       made.on('response', response => {
         const chunks: Buffer[] = []
         let size = 0
@@ -103,12 +130,17 @@ function sendOnce(ses: Session, r: { method: string; url: string; contentType?: 
           if (size > RUN_ANSWER_MAX) finish(() => { made.abort(); reject(new Error('answer too large')) })
           else chunks.push(chunk)
         })
-        response.on('end', () => finish(() => resolve({ status: response.statusCode, body: Buffer.concat(chunks).toString('utf8') })))
+        response.on('end', () => finish(() => {
+          const bytes = Buffer.concat(chunks)
+          resolve({ status: response.statusCode, body: bytes.toString('utf8'), headers: answerHeaders(response.headers), bytes: new Uint8Array(bytes) })
+        }))
         response.on('error', () => finish(() => reject(new Error('answer cut off'))))
       })
       made.on('error', () => finish(() => reject(new Error('no answer'))))
       made.on('abort', () => finish(() => reject(new Error('aborted'))))
       if (r.contentType) made.setHeader('content-type', r.contentType)
+      // A page's held write (step ⑤b): the headers its script set, as it set them (a refused one: never sent).
+      for (const [name, value] of r.headers ?? []) made.setHeader(name, value)
     } catch {
       finish(() => { request?.abort(); reject(new BrowserNotSentError('the request could not be made')) })
       return
@@ -120,7 +152,7 @@ function sendOnce(ses: Session, r: { method: string; url: string; contentType?: 
       finish(() => { made.abort(); reject(new BrowserNotSentError('stopped right before sending')) })
       return
     }
-    made.end(r.body)
+    made.end(typeof r.body === 'string' || r.body === undefined ? r.body : Buffer.from(r.body))
   })
 }
 
@@ -437,7 +469,13 @@ export function createBrowserWindowShell(options: {
       }
       if (method !== 'Fetch.requestPaused') { onRecording(method, params); return }
       const requestId = params.requestId as string
-      const request = params.request as { url: string; method: string; headers?: Record<string, string>; postData?: string; postDataEntries?: Array<{ bytes?: string }> }
+      const request = params.request as { url: string; method: string; headers?: Record<string, string>; postData?: string; postDataEntries?: Array<{ bytes?: string }>; hasPostData?: boolean }
+      // A write run (step ⑤b): the page's write is held, never continued; the run decides, main sends it once or not at all.
+      const hold = state.site && state.mode === 'ai' && gate?.hold
+      if (hold && !isReadMethod(request.method)) {
+        await holdPageWrite(requestId, request, hold)
+        return
+      }
       let allow = true
       if (isReadMethod(request.method)) {
         // A run's read rule: the page's parts, else only a declared read path.
@@ -462,7 +500,62 @@ export function createBrowserWindowShell(options: {
         else await contents.debugger.sendCommand('Fetch.failRequest', { requestId, errorReason: 'BlockedByClient' })
       } catch { /* the request or the window is gone */ }
     }
+    /** The page's writes held now (failed before the gate lets go: Chromium would send a paused request on its own). */
+    const heldIds = new Set<string>()
+    async function holdPageWrite(
+      requestId: string,
+      request: { url: string; method: string; headers?: Record<string, string>; postData?: string; postDataEntries?: Array<{ bytes?: string }>; hasPostData?: boolean },
+      hold: NonNullable<BrowserAiGate['hold']>,
+    ) {
+      heldIds.add(requestId)
+      const fail = async () => { try { await contents.debugger.sendCommand('Fetch.failRequest', { requestId, errorReason: 'BlockedByClient' }) } catch { /* gone */ } }
+      try {
+        const headers = request.headers ?? {}
+        // The basic rule first: https on the operated host, the AI not stopped, no method-override header.
+        const pre = state.site ? await decideAiWrite(state.site, { method: request.method, url: request.url, headers }, () => true, gate?.stopped() ?? true) : { allow: false as const, reason: 'host' as const }
+        if (!pre.allow) { refuse(state, hostForLog(request.url), `ai-write:${pre.reason}`); await fail(); return }
+        // The exact bytes the page made (a form's, a JSON's, a multipart's text parts); a file, a stream or a large body: not readable.
+        let bytes: Buffer | null = null
+        let readable = true
+        if (request.postDataEntries && request.postDataEntries.length > 0) {
+          if (request.postDataEntries.some(e => typeof e.bytes !== 'string')) readable = false
+          else bytes = Buffer.concat(request.postDataEntries.map(e => Buffer.from(e.bytes as string, 'base64')))
+        } else if (typeof request.postData === 'string') bytes = Buffer.from(request.postData, 'utf8')
+        else if (request.hasPostData === true) readable = false
+        if (bytes && bytes.length > HELD_BODY_MAX) readable = false
+        const body: HeldBody = !readable ? { kind: 'unreadable' } : bytes === null || bytes.length === 0 ? { kind: 'none' } : { kind: 'text', text: bytes.toString('utf8') }
+        const contentType = Object.entries(headers).find(([k]) => k.toLowerCase() === 'content-type')?.[1] ?? ''
+        const copy: SessionRequest = {
+          method: request.method, url: request.url, ...(contentType ? { contentType } : {}), headers: heldHeaders(headers),
+          ...(bytes && bytes.length > 0 ? { body: new Uint8Array(bytes) } : {}),
+        }
+        let answer: HeldPageWriteAnswer
+        try {
+          answer = await hold.hooks.holdWrite({ method: request.method, url: request.url, contentType, body, send: steps => hold.send(copy, steps) })
+        } catch {
+          answer = { kind: 'fail' }
+        }
+        if (answer.kind === 'fail' || !heldIds.has(requestId)) { await fail(); return }
+        try {
+          await contents.debugger.sendCommand('Fetch.fulfillRequest', {
+            requestId, responseCode: answer.status,
+            responseHeaders: answer.headers.filter(([k]) => !FULFILL_DROPPED_HEADERS.has(k.toLowerCase())).map(([name, value]) => ({ name, value })),
+            body: Buffer.from(answer.body).toString('base64'),
+          })
+        } catch { /* the page went away meanwhile */ }
+      } finally {
+        heldIds.delete(requestId)
+      }
+    }
+    /** Every write still held fails at once (the gate is about to let go, or the window goes). */
+    const failHeld = async () => {
+      for (const requestId of [...heldIds]) {
+        heldIds.delete(requestId)
+        try { await contents.debugger.sendCommand('Fetch.failRequest', { requestId, errorReason: 'BlockedByClient' }) } catch { /* gone */ }
+      }
+    }
     const onDetach = () => {
+      heldIds.clear()
       state.aiGateReady = false
       // Gone: the next attach adds the listeners again (never twice).
       try { contents.debugger.removeListener('message', onMessage); contents.debugger.removeListener('detach', onDetach) } catch { /* the window is gone */ }
@@ -516,6 +609,8 @@ export function createBrowserWindowShell(options: {
       if (owner.holder() !== 'ai') return
       owner.release('ai')
       if (!contents.isDestroyed() && contents.debugger.isAttached()) {
+        // A held write is failed before Fetch lets go of the page's requests (step ⑤b: never sent on its own).
+        await failHeld()
         try { await contents.debugger.sendCommand('Fetch.disable') } catch { /* detaching anyway */ }
       }
       disconnect()
@@ -788,14 +883,27 @@ export function createBrowserWindowShell(options: {
         const until = Date.now() + BROWSER_BROWSE_LIMITS.settleMs
         while (!signal.aborted && !contents.isDestroyed() && contents.isLoading() && Date.now() < until) await pause(100, signal)
       }
+      /** A write run's held write, sent once through the window's write session (exactly the page's request: step ⑤b). */
+      const sendHeld = (request: SessionRequest, steps: BrowserWriteSteps): Promise<BrowserWriteOutcome> => {
+        if (closed()) return Promise.resolve({ sent: false, stage: 'prepare' })
+        const asks = (r: BrowserSessionRequest) => state.contentsId === contentsId && state.mode === 'ai' && r.url === request.url && r.method === request.method
+        return writeThroughSession(lanes, writeKey, writes, request, asks, steps, () => !closed())
+      }
       const browse: BrowserBrowseSurface = {
-        async enter(stopped) {
+        async enter(stopped, work) {
           if (closed() || pageDebugger.record.active()) return false
           // The operator works in a window the member may have behind others or minimized: a hidden page takes no
           // presses, so it is kept as a shown one while the operator has it (restored when it is given back).
           contents.setBackgroundThrottling(false)
           if (!win.isDestroyed() && !win.isVisible()) win.showInactive()
-          await setMode('ai', { decide: () => false, stopped, dismissDialogs: true })
+          await setMode('ai', {
+            decide: () => false, stopped, dismissDialogs: true,
+            // A write run: the page's writes are held for the run, and a Skill's never-read addresses are refused.
+            ...(work ? {
+              hold: { hooks: work, send: sendHeld },
+              decideRead: read => { try { const u = new URL(read.url); return !work.neverRead(`${u.pathname}${u.search}`) } catch { return false } },
+            } : {}),
+          })
           browsing = !closed() && state.mode === 'ai' && state.aiGateReady
           if (!browsing || !state.site) return false
           // The page is loaded afresh under the gate before the operator sees it (independent review): what the page held

@@ -125,6 +125,8 @@ import { LINES as LSTEP_LINES } from '../browser-lines/lstep'
 import { wireBrowserInspections } from './features/browser/inspect'
 import { wireBrowserWriteLines } from './features/browser/write-lines'
 import { wireBrowserBrowse } from './features/browser/browse'
+import { wireBrowserWork } from './features/browser/work'
+import { readBrowserSkillSteps } from './features/browser/skill-steps'
 import { createBrowserLinesHttp } from './features/browser/lines-api'
 import { createBrowserRunRecords } from './features/browser/run-records'
 import { browserOperatorOf } from './agents/registry'
@@ -682,6 +684,25 @@ const browserBrowses = wireBrowserBrowse({
   parentEnv: () => shellEnv.env(),
   busyWindows: browserPlans.busyWindows,
 })
+// Its write task on a registered domain (agent-browser.md "Writes within frames, in the app", step ⑤b): the chat's
+// `browser_work`, the server's frames run (a company Skill's approved declaration, or the plan the member approves on the
+// card), the operator in the member's window with every page write held and sent once. The card through the write card's IPC.
+const browserWorks = wireBrowserWork({
+  aiSwitch: browserAiSwitch,
+  userId: session.userId,
+  context: browserPlans.context,
+  stopped: companyId => browserAiStopped(agentControl.policy.stop(companyId)),
+  window: (companyId, host) => browser.browseWindow(companyId, host),
+  reader: (companyId, host) => browser.previewWindow(companyId, host),
+  registered: (companyId, host) => browser.siteNow(companyId, host) !== null,
+  api: createBrowserLinesHttp({ baseUrl: getServerApiUrl, cookies: session.cookies, deviceKey: browserDeviceKey.header }),
+  operator: () => browserOperatorOf(config.authMode()),
+  cliPath: () => claudeCli.path(),
+  parentEnv: () => shellEnv.env(),
+  // A Skill's steps from the member's own company folder (the name is a valid Skill name; every path through the allowed roots).
+  skillSteps: (companyRoot, skill) => readBrowserSkillSteps(companyRoot, skill, p => allowedRoots.validate(p)),
+  busyWindows: browserPlans.busyWindows,
+})
 // Its read-only inspection (agent-browser.md "The inspection in the chat"): the chat's `browser_inspect`, the read runner
 // over the member's own window and the card's IPC — the same switch and context as the plans; the site's map and lines are
 // handed in here only (architecture-boundaries.test.ts).
@@ -722,6 +743,12 @@ const browserWrites = wireBrowserWriteLines(ipc, {
   sites: [{ map: lstepLines.map, readers: lstepLines.readers, addresses: lstepLines.addresses, account: lstepLines.account, writers: {} }],
   lines: LSTEP_LINES,
   declarations: [lstep.declaration],
+  // A write run's card (`bf_…`) is the work wiring's (above).
+  frameCards: {
+    card: (companyId, runId) => browserWorks.card(companyId, runId),
+    approve: (companyId, runId, planHash) => browserWorks.approve(companyId, runId, planHash),
+    cancel: (companyId, runId) => browserWorks.cancel(companyId, runId),
+  },
 })
 // lane C ▲
 
@@ -744,6 +771,7 @@ registerAuthIpc(ipc, {
     browserPlans.context.advance()
     browserInspections.clear()
     browserBrowses.clear()
+    browserWorks.clear()
     browserWrites.clear()
     browserDevice.clear()
     browserRecordings.clear()
@@ -870,6 +898,7 @@ app.whenReady().then(async () => {
         domains: companyId => browser.sites(companyId).sites.map(s => s.host),
         browse: input => browserBrowses.browse(input),
       },
+      browserWorks: { available: browserWorks.available, work: input => browserWorks.work(input) },
       browserWrites,
       agentStop: agentControl.stop,
       serverUrl: getServerApiUrl,

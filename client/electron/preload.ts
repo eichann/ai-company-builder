@@ -472,6 +472,7 @@ const api: ElectronAPI = {
   confirmBrowserWriteValue: (companyId: string, cardId: string, name: string) => invoke('browserLines:confirmValue', companyId, cardId, name),
   runBrowserWrite: (companyId: string, cardId: string, contentHash: string) => invoke('browserLines:runWrite', companyId, cardId, contentHash),
   confirmBrowserWrite: (companyId: string, cardId: string, result: 'done' | 'not_done') => invoke('browserLines:confirmWrite', companyId, cardId, result),
+  cancelBrowserWrite: (companyId: string, cardId: string) => invoke('browserLines:cancelWrite', companyId, cardId),
   getBrowserPc: (companyId: string) => invoke('browserDevice:get', companyId),
   registerBrowserPc: (companyId: string, label: string) => invoke('browserDevice:register', companyId, label),
   withdrawBrowserPc: (companyId: string) => invoke('browserDevice:withdraw', companyId),

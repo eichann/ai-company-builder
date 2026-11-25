@@ -71,6 +71,14 @@ export interface BrowserFrameRunView {
  */
 export interface BrowserFrameRunStart extends BrowserFrameRunView {
   approvalToken: string | null
+  /**
+   * A Skill run's declared addresses (step ⑤b), from the approved declaration the server read — never an app's: what the
+   * app reads again after writing (`after_read`, `{created}` allowed) and what neither the page nor the operator may read
+   * during the run (`never_read`). Empty for an ad-hoc plan; absent from an older server (the app then reads nothing after
+   * and refuses no read beyond its own rules).
+   */
+  afterRead?: string[]
+  neverRead?: string[]
 }
 
 /** What the app read of the held write, sent with a permit: its shape only, never the body's other values. */

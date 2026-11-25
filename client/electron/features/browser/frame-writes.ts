@@ -1,0 +1,196 @@
+// A write run's page writes, one at a time (redesign step ⑤b; agent-browser.md "Writes within frames, in the app"; design
+// memo §3 I3 / I4 / I7 and its 「止まったら・2回動いたら・同時に動いたら」, §6-2; the model's app actions in
+// model/browser-plan/FramesLife.tla). The window holds each write its page makes (`HeldPageWrite`); this decides it:
+//
+//   read it (a file or an unreadable body → refused) → match a frame with the core's rule (none → refused, never asked)
+//   → the window's write session is prepared → the server's permit (once, with the request's shape only) → the last check,
+//   synchronously right before the request leaves (the permit's 5 s on both clocks, the run still going) → sent once →
+//   the report (done / not_sent / unknown) → the page gets the site's answer (without Set-Cookie) or a failure.
+//
+// **One at a time**: a second write the page makes waits until the first's result is recorded (a promise chain), so two
+// writes never travel to a site together and the server never sees a permit while one is in flight. **Never again**: a
+// write that left without an answer is `unknown`, the run sends nothing more (`locked`), and nothing here resends — the
+// page's own retry is a new hold that needs a new unit. A write held when the run stops or the window goes is failed,
+// never sent. No Electron; the HTTP client and the clocks are injected.
+import {
+  pickFrame, readHeldWrite, sentFields, workWriteLogStep, workWriteLine,
+  type HeldPageWrite, type HeldPageWriteAnswer, type WorkFrame,
+} from '../../../shared/browser-frame-writes'
+import type { BrowserRunWriteOutcome, BrowserRunWriteStep } from '../../../../shared/core/browser-run-log'
+import type { BrowserFramePermit, BrowserFramePermitRequest } from '../../../../shared/types/browser-frames'
+import type { BrowserLinesAnswer } from './lines-api'
+
+/** The server's frames routes as one write uses them (the member's session; the permit and a sure report carry this PC's key). */
+export interface FrameWritesApi {
+  framePermit(companyId: string, runId: string, body: { frame: number; request: BrowserFramePermitRequest }): Promise<BrowserLinesAnswer>
+  frameReport(companyId: string, runId: string, body: { write: number; result: 'done' | 'not_sent' | 'unknown'; reason?: string }): Promise<BrowserLinesAnswer>
+}
+
+/** One held write as the card and the operator learn of it (main's memory only). */
+export interface FrameWriteRecord {
+  /** The frame's method and pattern (never the path the page sent: it may name an object). */
+  line: string
+  outcome: BrowserRunWriteOutcome
+  /** The site's status when it answered (a non-success status makes the write `unknown`). */
+  status: number | null
+  /** What it sent (for the after-read card's machine check; never a login, CSRF or session field) and its path. */
+  sent: Record<string, string> | null
+  path: string | null
+  /** The site's answer as text, when it answered with success (what `{created}` is read from). */
+  answerText: string | null
+}
+
+export interface FrameWriterDeps {
+  companyId: string
+  runId: string
+  host: string
+  /** The run's frames (the server's view at the start / approval); `left` is counted down here as permits are given. */
+  frames: WorkFrame[]
+  api: FrameWritesApi
+  /** The run still going: not stopped, not cut, the window open, the same context. Asked at every step and in the last check. */
+  going(): boolean
+  /** How many operator steps were logged so far (where a write step sits in the run log). */
+  stepsSoFar(): number
+  /** An after-read address to read before the first write that fits it (its "before"), awaited before the permit. */
+  readBefore?(heldPath: string): Promise<void>
+  now?: () => number
+  monoMs?: () => number
+}
+
+const PERMIT_MAX_MS = 5000
+const REPORT_TRIES = 3
+const isPermit = (v: unknown): v is BrowserFramePermit => {
+  const p = v as Record<string, unknown> | null
+  return !!p && Number.isSafeInteger(p.write) && (p.write as number) > 0 && Number.isSafeInteger(p.frame) && typeof p.validMs === 'number' && Number.isFinite(p.validMs)
+}
+/** The permit refusals that mean the run is over (nothing more can be permitted in it). */
+const RUN_OVER = new Set(['BROWSER_RUN_ENDED', 'BROWSER_RUN_AFTER_UNKNOWN', 'BROWSER_RUN_NOT_APPROVED', 'BROWSER_FRAME_RUN_NOT_FOUND', 'BROWSER_NOT_ALLOWED', 'BROWSER_AI_STOPPED', 'BROWSER_TYPE_NOT_GRANTED', 'BROWSER_SKILL_CHANGED', 'BROWSER_DEVICE_ELSEWHERE'])
+
+export function createFrameWriter(deps: FrameWriterDeps) {
+  const now = deps.now ?? Date.now
+  const monoMs = deps.monoMs ?? (() => performance.now())
+  const records: FrameWriteRecord[] = []
+  const log: BrowserRunWriteStep[] = []
+  let chain: Promise<unknown> = Promise.resolve()
+  let closed = false
+  /** A write may have been sent without an answer (or its result could not be recorded): nothing more in this run. */
+  let locked = false
+  /** The server said the run is over (ended, refused by the gate). */
+  let over = false
+
+  const keep = (r: FrameWriteRecord, frame: number | null, method: string, path: string, outcome: BrowserRunWriteOutcome) => {
+    records.push(r)
+    if (log.length < 60) log.push(workWriteLogStep({ after: deps.stepsSoFar(), frame, method, path, host: deps.host, outcome }))
+  }
+
+  /** The report, sent at most 3 times with the same body; true once the server recorded it. */
+  async function report(write: number, result: 'done' | 'not_sent' | 'unknown', reason?: string): Promise<boolean> {
+    for (let i = 0; i < REPORT_TRIES; i++) {
+      const a = await deps.api.frameReport(deps.companyId, deps.runId, { write, result, ...(reason ? { reason } : {}) }).catch((): BrowserLinesAnswer => ({ kind: 'no-answer' }))
+      if (a.kind === 'ok') return true
+      if (a.kind === 'refused') return false
+    }
+    return false
+  }
+
+  async function decide(held: HeldPageWrite): Promise<HeldPageWriteAnswer> {
+    const fail: HeldPageWriteAnswer = { kind: 'fail' }
+    const shapeOf = readHeldWrite({ method: held.method, url: held.url, host: deps.host, contentType: held.contentType, body: held.body })
+    let path = '/'
+    try { path = new URL(held.url).pathname } catch { /* kept as / */ }
+    // Stopped, locked, over: nothing is sent (the page sees a failure).
+    if (closed || locked || over || !deps.going()) {
+      keep({ line: workWriteLine(held.method.toUpperCase(), null), outcome: 'not-sent', status: null, sent: null, path: null, answerText: null }, null, held.method, path, 'not-sent')
+      return fail
+    }
+    // A file, an unreadable body, another host, `_method` twice: refused, never asked for.
+    if (!shapeOf.ok) {
+      keep({ line: workWriteLine(held.method.toUpperCase(), null), outcome: 'refused', status: null, sent: null, path: null, answerText: null }, null, held.method, path, 'refused')
+      return fail
+    }
+    const shape = shapeOf.shape
+    // Outside every frame (an autosave, another target, a frame used up): refused, never asked for.
+    const picked = pickFrame(deps.frames, shape)
+    if ('mismatch' in picked) {
+      keep({ line: workWriteLine(shape.method, null), outcome: 'refused', status: null, sent: null, path: null, answerText: null }, null, shape.method, shape.path, 'refused')
+      return fail
+    }
+    const { frame, request } = picked
+    const line = workWriteLine(frame.method, frame.path)
+    if (deps.readBefore) await deps.readBefore(shape.path).catch(() => {})
+    let permit: BrowserFramePermit | null = null
+    let askedMono = 0
+    let askedWall = 0
+    const outcome = await held.send({
+      // The permit, after the write session is prepared (its seconds never eat into the permit's 5).
+      ready: async () => {
+        if (closed || locked || over || !deps.going()) return false
+        askedMono = monoMs()
+        askedWall = now()
+        const a = await deps.api.framePermit(deps.companyId, deps.runId, { frame: frame.frame, request }).catch((): BrowserLinesAnswer => ({ kind: 'no-answer' }))
+        if (a.kind === 'refused' && a.code && RUN_OVER.has(a.code)) over = true
+        if (a.kind !== 'ok' || !isPermit(a.value) || a.value.frame !== frame.frame) return false
+        permit = a.value
+        // The unit is the server's now (never given back, also when this write is not sent).
+        frame.left = Math.max(0, frame.left - 1)
+        return true
+      },
+      // The last check, synchronously right before the request leaves: the permit still fresh on both clocks, the run going.
+      beforeSend: () => {
+        if (!permit || closed || locked || over || !deps.going()) return false
+        const valid = Math.min(permit.validMs, PERMIT_MAX_MS)
+        const mono = monoMs() - askedMono
+        const wall = now() - askedWall
+        return mono >= 0 && mono < valid && wall >= 0 && wall < valid
+      },
+    })
+    const permitted = permit as BrowserFramePermit | null
+    if (!outcome.sent) {
+      // Never left: told `not_sent` when a unit was taken (no permit: nothing to tell).
+      if (permitted && !(await report(permitted.write, 'not_sent', 'permit-late'))) locked = true
+      keep({ line, outcome: 'not-sent', status: null, sent: null, path: null, answerText: null }, frame.frame, shape.method, shape.path, 'not-sent')
+      return fail
+    }
+    const write = (permitted as BrowserFramePermit | null)?.write ?? 0
+    const answer = outcome.answer
+    if (!answer) {
+      // It may have reached the site: unknown, the run sends nothing more, and it is never sent again.
+      locked = true
+      await report(write, 'unknown', 'no-answer')
+      keep({ line, outcome: 'unknown', status: null, sent: sentFields(shape), path: shape.path, answerText: null }, frame.frame, shape.method, shape.path, 'unknown')
+      return fail
+    }
+    const success = answer.status >= 200 && answer.status < 400
+    // A non-success answer: the site saw the request, what it changed is not known (the safe side: unknown, locked).
+    if (!success) locked = true
+    const recorded = await report(write, success ? 'done' : 'unknown', success ? undefined : 'other-state')
+    // A result the server did not record: nothing more is sent in this run (the server's time-out makes it unknown).
+    if (!recorded) locked = true
+    keep({
+      line, outcome: success ? 'done' : 'unknown', status: success ? null : answer.status, sent: sentFields(shape), path: shape.path,
+      answerText: success ? answer.body : null,
+    }, frame.frame, shape.method, shape.path, success ? 'done' : 'unknown')
+    // The page gets the site's answer (its Set-Cookie never: the window drops it too), so its flow goes on.
+    return { kind: 'fulfill', status: answer.status, headers: (answer.headers ?? []).filter(([k]) => !/^set-cookie2?$/i.test(k)), body: answer.bytes ?? new TextEncoder().encode(answer.body) }
+  }
+
+  return {
+    /** The window's hold: queued behind the write before it (its result recorded first). */
+    hold(held: HeldPageWrite): Promise<HeldPageWriteAnswer> {
+      const next = chain.then(() => decide(held), () => decide(held))
+      chain = next.catch(() => undefined)
+      return next.catch((): HeldPageWriteAnswer => ({ kind: 'fail' }))
+    },
+    /** The run is over: every write held from now on (and every one still queued) fails; one on its way finishes. */
+    close() { closed = true },
+    /** Until the write on its way (if any) is recorded. */
+    idle: () => chain.then(() => undefined),
+    locked: () => locked,
+    records: () => records.slice(),
+    log: () => log.slice(),
+    /** A frame's remaining units (for the operator's material). */
+    frames: () => deps.frames.map(f => ({ ...f })),
+  }
+}
+
+export type FrameWriter = ReturnType<typeof createFrameWriter>

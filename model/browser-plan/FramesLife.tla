@@ -4,7 +4,9 @@
 \* once under a permit of the server, and reported. Unlike StepsLife, the writes are not known in advance: a run holds
 \* only an upper bound per frame. agent-browser.md "Writes within frames" is the contract; each server action names its
 \* function in server/src/services/browser-frames.ts (the server's state table, one owner). The app's half (holding the
-\* page's write, sending it once through the core's own write connection) is step ⑤b and copies the App* actions.
+\* page's write, sending it once through the core's own write connection) is step ⑤b and copies the App* actions:
+\* client/electron/features/browser/frame-writes.ts (`createFrameWriter`: `decide`'s `ready` = AppAsks, `beforeSend` =
+\* the last check of AppSends / AppStopsBeforeSend, the report after the send = AppAfterSend).
 \* StepsLife.tla stays the model of the safe pattern (ordered writes known in advance); PlanLife.tla today's one write.
 \*
 \* No site is named. Two frames: "a" (at most 2 uses) and "b" (at most 1); at most N writes in all (a bound for the
@@ -171,7 +173,7 @@ Tick ==
 \* =========================== app (step ⑤b) ===========================
 
 \* The page made a write; the window's gate holds it; it matches a frame (a write matching none is refused at once and
-\* never asked for: not modelled). The worker asks the server for a permit for that frame.
+\* never asked for: not modelled). The worker asks the server for a permit for that frame (frame-writes.ts `ready`).
 AppAsks(w) ==
     /\ ph[w] = "idle"
     /\ \E p \in Asking : ph' = [ph EXCEPT ![w] = p]

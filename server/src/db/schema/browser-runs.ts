@@ -9,6 +9,8 @@
  *   move only from `running` (every other state is final); `log_written` goes 0 → 1 once (the log is written once).
  * - `browser_run_log`: per step the page as a pattern, what was done, the label of what was pressed — never a value
  *   (shared/core/browser-run-log.ts). Append-only while its company exists.
+ * - `browser_run_writes` (step ⑤b, additive): a write run's page writes — after which step, the frame, the method, the
+ *   path as a pattern, the outcome. Never a value. Append-only like the log.
  */
 export const browserRunSchema = `
     CREATE TABLE IF NOT EXISTS browser_runs (
@@ -52,6 +54,27 @@ export const browserRunSchema = `
       SELECT RAISE(ABORT, 'a browser run log is append-only');
     END;
     CREATE TRIGGER IF NOT EXISTS browser_run_log_no_delete BEFORE DELETE ON browser_run_log
+      WHEN EXISTS (SELECT 1 FROM companies WHERE id = OLD.company_id)
+    BEGIN
+      SELECT RAISE(ABORT, 'a browser run log is append-only');
+    END;
+
+    CREATE TABLE IF NOT EXISTS browser_run_writes (
+      company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+      run_id TEXT NOT NULL,
+      idx INTEGER NOT NULL,
+      after_step INTEGER NOT NULL CHECK (after_step >= 0),
+      frame INTEGER,
+      method TEXT NOT NULL CHECK (method IN ('POST', 'PUT', 'PATCH', 'DELETE', 'OTHER')),
+      page TEXT NOT NULL,
+      outcome TEXT NOT NULL CHECK (outcome IN ('done', 'not-sent', 'unknown', 'refused')),
+      PRIMARY KEY (company_id, run_id, idx)
+    );
+    CREATE TRIGGER IF NOT EXISTS browser_run_writes_no_update BEFORE UPDATE ON browser_run_writes
+    BEGIN
+      SELECT RAISE(ABORT, 'a browser run log is append-only');
+    END;
+    CREATE TRIGGER IF NOT EXISTS browser_run_writes_no_delete BEFORE DELETE ON browser_run_writes
       WHEN EXISTS (SELECT 1 FROM companies WHERE id = OLD.company_id)
     BEGIN
       SELECT RAISE(ABORT, 'a browser run log is append-only');

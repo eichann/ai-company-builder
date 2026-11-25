@@ -211,6 +211,7 @@ const HANDLE_TABLES: Record<string, string[]> = {
   // The operator's runs (agent-browser.md "The operator's window tools").
   browser_runs: ['adapters/sqlite/browser-runs.ts'],
   browser_run_log: ['adapters/sqlite/browser-runs.ts'],
+  browser_run_writes: ['adapters/sqlite/browser-runs.ts'],
   // Writes within frames (agent-browser.md "Writes within frames").
   browser_frame_runs: ['adapters/sqlite/browser-frames.ts'],
   browser_frames: ['adapters/sqlite/browser-frames.ts'],

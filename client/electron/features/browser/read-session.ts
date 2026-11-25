@@ -21,12 +21,18 @@ export interface SessionRequest {
   method: string
   url: string
   contentType?: string
-  body?: string
+  /** The body: text, or (a page's held write, step ⑤b) its exact bytes. */
+  body?: string | Uint8Array
+  /** More request headers (a page's held write: the ones its script set, e.g. a CSRF header), each set as given. */
+  headers?: ReadonlyArray<readonly [string, string]>
 }
 
 export interface SessionAnswer {
   status: number
   body: string
+  /** The answer's headers and exact bytes (for handing a held write's answer back to its page, step ⑤b). */
+  headers?: ReadonlyArray<readonly [string, string]>
+  bytes?: Uint8Array
 }
 
 /** A page-less session as the shell provides it. */

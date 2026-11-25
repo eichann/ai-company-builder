@@ -16,10 +16,14 @@ import { outsideValue, type OutsideValue } from '../../shared/core/outside-text'
 import { browserRunAddressPattern, browserRunLabel, type BrowserRunLogStep } from '../../shared/core/browser-run-log'
 import type { BrowserCard } from '../../shared/core/browser-card'
 import { BROWSER_REQUEST_SERVER } from './browser-plans'
+import type { BrowserWorkHooks } from './browser-frame-writes'
 
 /** The chat AI's one generic tool (`mcp__acb_browser__browser_browse`). */
 export const BROWSER_BROWSE_TOOL = 'browser_browse'
 export const BROWSER_BROWSE_TOOL_ID = `mcp__${BROWSER_REQUEST_SERVER}__${BROWSER_BROWSE_TOOL}`
+/** The chat AI's generic write tool (step ⑤b; browser-frame-writes.ts holds the rest): here so the stop's categories need nothing more. */
+export const BROWSER_WORK_TOOL = 'browser_work'
+export const BROWSER_WORK_TOOL_ID = `mcp__${BROWSER_REQUEST_SERVER}__${BROWSER_WORK_TOOL}`
 
 export const BROWSER_BROWSE_LIMITS = Object.freeze({
   /** Steps (one closed CLI start each) per request. */
@@ -102,8 +106,12 @@ export type BrowserBrowseAnswer =
 
 /** What the window does with the operator's actions (the shell's `browse`, electron/browser-window.ts). */
 export interface BrowserBrowseSurface {
-  /** `ai` mode with a gate that refuses every write; false when it could not (closed, a recording, not loaded). */
-  enter(stopped: () => boolean): Promise<boolean>
+  /**
+   * `ai` mode with a gate that refuses every write; false when it could not (closed, a recording, not loaded). With `work`
+   * (a write run, step ⑤b) every write the page makes is held and handed to `work.holdWrite` instead, and a read
+   * `work.neverRead` names is refused.
+   */
+  enter(stopped: () => boolean, work?: BrowserWorkHooks): Promise<boolean>
   leave(): Promise<void>
   /** The page now (the main frame), or null when it cannot be read. */
   snapshot(): Promise<BrowserPageSnapshot | null>

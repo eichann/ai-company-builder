@@ -9,9 +9,10 @@ import { SECOND_OPINION_SERVER, secondOpinionSchema } from './second-opinion'
 import { WEB_RESEARCH_TOOL_ID } from '../../shared/web-research'
 import { BROWSER_REQUEST_SERVER, BROWSER_REQUEST_TOOL, browserRequestSchema } from '../browser-request/tools'
 import { BROWSER_REQUEST_TOOL_ID } from '../../shared/browser-plans'
-import { BROWSER_BROWSE_TOOL, BROWSER_INSPECT_TOOL, BROWSER_WRITE_TOOL, browserBrowseSchema, browserInspectSchema, browserWriteSchema } from '../browser-request/inspect-tool'
+import { BROWSER_BROWSE_TOOL, BROWSER_INSPECT_TOOL, BROWSER_WORK_TOOL, BROWSER_WRITE_TOOL, browserBrowseSchema, browserInspectSchema, browserWorkSchema, browserWriteSchema } from '../browser-request/inspect-tool'
 import { BROWSER_INSPECT_TOOL_ID, BROWSER_WRITE_TOOL_ID } from '../../shared/browser-inspection'
 import { BROWSER_BROWSE_TOOL_ID } from '../../shared/browser-browse'
+import { BROWSER_WORK_TOOL_ID } from '../../shared/browser-frame-writes'
 import { wrapLanguageModel } from 'ai'
 import { MissingAgentSession } from './recovery'
 import { claudeCode } from 'ai-sdk-provider-claude-code'
@@ -367,7 +368,7 @@ export function createClaudeConnection(config: ClaudeConnectionConfig, createMod
         // Web research changes nothing in the company; after private reads the
         // PreToolUse hook has already asked the member (private-read-guard.ts).
         const readOnlyTools = ['Read', 'ListDirectory', 'Glob', 'Grep', 'View']
-        if (readOnlyTools.includes(toolName) || (references && Object.keys(referenceSchemas).some(name => toolName === `mcp__acb_consultations__${name}`)) || (companyFiles && COMPANY_FILE_TOOL_NAMES.some(name => toolName === companyFileToolId(name))) || (review && toolName === REVIEW_TOOL_ID) || (appCommands && appCommands.tools.some(t => t.id === toolName)) || (webResearch && toolName === WEB_RESEARCH_TOOL_ID) || (browserRequest && toolName === BROWSER_REQUEST_TOOL_ID) || (browserInspect && toolName === BROWSER_INSPECT_TOOL_ID) || (browserInspect?.write && toolName === BROWSER_WRITE_TOOL_ID) || (browserInspect?.browse && toolName === BROWSER_BROWSE_TOOL_ID) || (secondOpinion && secondOpinion.tools.some(t => t.id === toolName))) {
+        if (readOnlyTools.includes(toolName) || (references && Object.keys(referenceSchemas).some(name => toolName === `mcp__acb_consultations__${name}`)) || (companyFiles && COMPANY_FILE_TOOL_NAMES.some(name => toolName === companyFileToolId(name))) || (review && toolName === REVIEW_TOOL_ID) || (appCommands && appCommands.tools.some(t => t.id === toolName)) || (webResearch && toolName === WEB_RESEARCH_TOOL_ID) || (browserRequest && toolName === BROWSER_REQUEST_TOOL_ID) || (browserInspect && toolName === BROWSER_INSPECT_TOOL_ID) || (browserInspect?.write && toolName === BROWSER_WRITE_TOOL_ID) || (browserInspect?.browse && toolName === BROWSER_BROWSE_TOOL_ID) || (browserInspect?.work && toolName === BROWSER_WORK_TOOL_ID) || (secondOpinion && secondOpinion.tools.some(t => t.id === toolName))) {
           return verdict({ behavior: 'allow' as const, updatedInput: toolInput }, 'auto-allowed')
         }
         // Request approval from UI
@@ -434,6 +435,8 @@ export function createClaudeConnection(config: ClaudeConnectionConfig, createMod
           ...(browserInspect?.write ? [tool(BROWSER_WRITE_TOOL, browserInspect.write.description, browserWriteSchema.shape, async args => ({ content: [{ type: 'text' as const, text: await browserInspect.write!.execute(args) }] }), { annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true } })] : []),
           // Its read task on a registered domain (redesign step ④): the operator reads in the member's window; fixed words back.
           ...(browserInspect?.browse ? [tool(BROWSER_BROWSE_TOOL, browserInspect.browse.description, browserBrowseSchema.shape, async args => ({ content: [{ type: 'text' as const, text: await browserInspect.browse!.execute(args) }] }), { annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true } })] : []),
+          // A write task (step ⑤b): writes only within a Skill's approved frames or a plan the member approves on the card.
+          ...(browserInspect?.work ? [tool(BROWSER_WORK_TOOL, browserInspect.work.description, browserWorkSchema.shape, async args => ({ content: [{ type: 'text' as const, text: await browserInspect.work!.execute(args) }] }), { annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true } })] : []),
         ]
         const browserRequestServer = browserTools.length > 0 ? createSdkMcpServer({ name: BROWSER_REQUEST_SERVER, alwaysLoad: true, tools: browserTools }) : undefined
         // 「もう一方の AI に聞く」 (second-opinion.ts): only the agents the member named this turn.
@@ -460,6 +463,7 @@ export function createClaudeConnection(config: ClaudeConnectionConfig, createMod
           ...(browserInspect ? [BROWSER_INSPECT_TOOL_ID] : []),
           ...(browserInspect?.write ? [BROWSER_WRITE_TOOL_ID] : []),
           ...(browserInspect?.browse ? [BROWSER_BROWSE_TOOL_ID] : []),
+          ...(browserInspect?.work ? [BROWSER_WORK_TOOL_ID] : []),
           ...(secondOpinionServer && secondOpinion ? secondOpinion.tools.map(t => t.id) : []),
         ]
         const state = { missingSession: false, autoRejected: false, sandboxUnavailable: false }

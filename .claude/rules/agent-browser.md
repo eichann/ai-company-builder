@@ -132,7 +132,8 @@ paths:
 The chat AI may operate web sites the company approved, in a browser window of the desktop app,
 only through per-site operation types (later PRs), never by free clicking. **Since redesign step ④** (owner 2026-11-25) the
 operator AI may move through a registered domain's pages freely **reading only** — every write still refused by the window's
-gate ("The operator's window tools"); free writes are step ⑤. Owner decisions
+gate ("The operator's window tools"); **since step ⑤b** it may also write, each page write held and sent once within the
+run's frames ("Writes within frames, in the app"). Owner decisions
 (2026-11-20, internal design memo §2, §13, §17, §18):
 
 - **Admin-approved sites only.** Each site has one host the AI operates (writes go only there)
@@ -3084,8 +3085,8 @@ sent **once** under a permit of the server. The state table of "Executions with 
 known in advance; here a run holds only an upper bound per frame. **The contract as a checked model**:
 `model/browser-plan/FramesLife.tla` (README "FramesLife"; R1, R2, R4, R7, R10, R14 never past a frame, R15 one write in
 flight, R16 nothing after the AI stop; six `BrokenFrames*` variants); `StepsLife.tla` stays the safe pattern's model.
-**Nothing in the app calls these routes yet** (⑤b: intercepting the page's write, sending it through the core's write
-connection, the plan card and the after-read card).
+**Since ⑤b the app calls them** ("Writes within frames, in the app": holding the page's write, sending it through the
+core's write connection, the plan card and the after-read card).
 
 - **Pieces.** `routes/browser-frames.ts` → `services/browser-frames.ts` (**the one owner of every state move**; each
   function names its model action) → the handle's `browserFrames` (`ports/browser-frames.ts`,
@@ -3172,7 +3173,7 @@ connection, the plan card and the after-read card).
   With the sandbox off for a company, the key file stays keychain-sealed; the approval value itself never leaves main.
 - **Decisions (safe side)**: a unit is used by the permit, not given back on `not_sent` (a run may ask again with a new
   plan); a refused permit ends the run, also when the refusal is another PC's request of the same member; the domain lock
-  is this table's own until ⑤b joins it with step ④'s run lock; `GET /browser-frame-runs/:runId` answers `no-store`.
+  is joined with step ④'s run lock since ⑤b ("Writes within frames, in the app"); `GET /browser-frame-runs/:runId` answers `no-store`.
 
 Tests: `server/tests/unit/browser-frames.test.ts` (a fictional site; the ad-hoc plan waits and needs exactly the card's
 hash, the declaration's rules on a plan, a frame never past its max (also the CHECK), one write in flight (also the
@@ -3190,10 +3191,158 @@ mutation-checked (about 40 mutations); kept on purpose as second layers: the ser
 compare-and-set `used < max` refuses the same, and the CHECK behind both) and the declaration / domain comparison of a
 Skill run (another declaration is another approval row, which `stillApproved` refuses).
 
+## Writes within frames, in the app (step ⑤b of the redesign: the operator writes; each page write held and sent once)
+
+Design memo 「ブラウザ操作：記録から自動化へ」 §3 I3 / I4 / I6 / I7 / I8, §6 (6-1 the flow, 6-2 sending once, 6-3 the one
+approval), §8, §9 bugs 1 / 3 / 4, §12 row ⑤, D1, and its two additions (追記2: on a real site, holding the page's write,
+sending it once on a separate connection with the page's own login and fulfilling the page's request with the answer
+minus Set-Cookie worked end to end — multipart 200, JSON 201, JSON 204, the page's flow went on). The consultation AI can
+ask for a **write task** on a registered domain; the operator AI presses 「保存」 itself; every write the page makes is
+held by the window, matched to one of the run's frames ("Writes within frames"), sent **once** through the core's own
+write connection under the server's permit, and its answer handed back to the page. Behind the same switch as everything
+else. **No site word** anywhere (a fictional site in the tests).
+
+- **Pieces.** `client/shared/browser-frame-writes.ts` (pure: reading a held write `readHeldWrite`, `frameRequestFor`,
+  `pickFrame`, `sentFields`, `createdIdOf`, `afterReadTarget` / `afterReadAddress` / `beforeReadAddress`, `topFields`,
+  the operator's two prompts `BROWSER_OPERATOR_WORK_PREVIEW_PROMPT` / `BROWSER_OPERATOR_WORK_PROMPT`, `parseWorkAnswer`,
+  `workMaterial`, the run log's `workWriteLogStep`, the AI's words `BROWSER_WORK_WORDS` / `workWordsForAi`, the cards
+  `workPlanSentences` / `workResultCard`; the window port `HeldPageWrite` / `HeldPageWriteAnswer` / `BrowserWorkHooks`);
+  `electron/features/browser/frame-writes.ts` (`createFrameWriter`: one held write at a time; no Electron);
+  `electron/features/browser/work.ts` (`wireBrowserWork`: the task's flow, the cards in memory); `skill-steps.ts` (a
+  Skill's `SKILL.md` / `site-notes.md` from the member's company folder, through the allowed roots); the shell's hold
+  (`browser-window.ts`: `BrowserAiGate.hold`, `holdPageWrite`, `sendHeld`); the tool `browser_work`
+  (`electron/browser-request/inspect-tool.ts`, registered in `agents/claude.ts`, category `web`); the core's
+  `browserNeverReadFits` (`shared/core/browser-frame-match.ts`), the card row's `compared` / `by` / `mark`
+  (`shared/core/browser-card.ts`), the run log's write steps (`shared/core/browser-run-log.ts` `BrowserRunWriteStep`,
+  `browserRunWritesProblem`).
+- **The flow** (`work`; each refusal is a fixed word, nothing sent): the switch, a registered domain, not stopped, the
+  member's window and its read session, the operator, one run per window → **a Skill**: `POST /browser-frame-runs
+  { skill }` (the server's approved frames, its `afterRead` / `neverRead` — answered by the start only) → **the preview**
+  (read only) unless the Skill version is pre-approved and its text unchanged: an operator run (`POST /browser-runs
+  { host, write: true, frameRunId? }`), every write the page makes held and failed, a never-read address refused; the
+  operator answers `plan` (what will be done, who else is affected, the key values read; ad hoc also the frames in the
+  declaration's grammar, `browserAdhocWritesProblem` — a Skill plan names none) → **ad hoc**: `POST /browser-frame-runs
+  { plan }` → **the plan card** (a waiting run) → ［任せる］ → **the work**: a new operator run naming the frames run, the
+  page's writes handed to the writer → **the after-read** → the result card → the frames run ends (`end`) whatever
+  happened. The AI's tool call waits for the card and the work (up to the server's 10 minutes for the card), then
+  answers; the conversation goes on with its next step.
+- **Who may start one** (server): `POST /browser-runs { write: true }` asks the person's own level 変えてよい
+  (`siteGrants.allows(…, 'write')`, `BROWSER_TYPE_NOT_GRANTED`) and the site's level allowing writes (`BROWSER_NOT_ALLOWED`)
+  before anything is read; the frames start and every permit ask it again ("Writes within frames"). A person at 見るだけ
+  never gets a write task's preview.
+- **One lock per company × domain across both kinds of run** (D10; ⑤a left it to ⑤b): a frames run never starts while
+  an operator run holds the domain (`BrowserFrameDeps.operatorRunOn` → `browserRuns.runningOn`, `BROWSER_RUN_BUSY`); an
+  operator run starts while a frames run is not ended there only when it names that run (`frameRunId`) and is its
+  member's (`BrowserRunDeps.frameRunOn` → `browserFrames.holderOn`), and never while an ended run's write may still be
+  on its way (`busy`); naming a frames run that holds nothing → `BROWSER_RUN_ENDED`. Wired in `composition.ts` by
+  closures called only after construction.
+- **The plan card (D1)** is the write card (`BrowserWriteView`, `BrowserWriteCard.tsx`, reference `bf_…` — the frames
+  run's id — accepted by `readBrowserInspectionRef` and drawn by `BrowserInspectionCard`): the operator's summary, who
+  else is affected, each frame in plain words with its count (`browserSkillWriteLine`), the key values read (card only,
+  never the AI), ［任せる］ (`browserLines:runWrite` with the plan's hash the card shows) and ［やめる］
+  (`browserLines:cancelWrite`, new; main window only; the run ends). **The one-time approval value** stays in the work
+  wiring's memory: never in a view, a tool's answer or a log; ［任せる］ is the only path to `approve` (the AI's tools
+  cannot call it). A pre-approved Skill version whose text nobody changed runs without the card (its card shows the run
+  and the result); a Skill whose text changed shows the card once (the server's `needsRunCard`).
+- **Holding a page write** (the shell, `ai` mode of a write run: `BrowserAiGate.hold`): every non-GET of the page is
+  held — never continued — after the basic rule (`decideAiWrite` with a yes-decider: https on the operated host, the AI not
+  stopped, no method-override header). The body is read from DevTools Fetch's `postDataEntries` (exact bytes) or
+  `postData`; a body Fetch does not give (`hasPostData` without data: a file, a stream) or over 1 MiB is **unreadable**.
+  The held copy keeps the page's own headers but the connection's and the cookies (`HELD_DROPPED_HEADERS`, `proxy-*`,
+  `sec-*`): its CSRF header goes as the page set it, its login is the window's cookies for exactly that address (the
+  write session's `copyCookies`). **A held write is failed before the gate lets go** (`failHeld` in `setMode('human')`
+  before `Fetch.disable`: Chromium would otherwise send a paused request on its own).
+- **Deciding one** (`createFrameWriter`, in this order; each `refused` / `not-sent` fails the page's request): the run
+  over, locked or stopped → not sent; `readHeldWrite` — another host, a body that is not a form, JSON or multipart text
+  parts, **a part with a file**, `_method` twice → refused; `pickFrame` — the core's one rule `browserFrameMismatch` with
+  only the frame's fixed fields and `_method` (the path **with its query**, so a write with a query never fits —
+  decision), a frame with no unit left → refused, **never asked for**; an after-read "before" read; then
+  `held.send(steps)`: the write session prepared, **`ready`** asks the permit once (a unit taken is counted down here,
+  never given back), **`beforeSend`** synchronously right before the request leaves — the permit under `min(validMs,
+  5000)` on both clocks, the run still going (the turn's signal, the AI stop, the window, the context) — then sent once.
+  Not sent after a permit → `not_sent` reported. No answer → **unknown**: reported, the run **locked** (nothing more is
+  held through, the operator is stopped), never sent again; the page's own retry is a new hold, refused. An answer:
+  2xx / 3xx → `done`, the page gets it (`Fetch.fulfillRequest`, **without `Set-Cookie`** — dropped by the writer and again
+  by the shell — nor `content-encoding` / `-length`); **any other status → unknown, locked** (decision: the site saw the
+  request; what it changed is not known), the page still gets the answer. A report the server did not record (3 tries)
+  locks the run too. **One at a time**: the next held write starts only once this one's report was recorded (a promise
+  chain); a write held meanwhile waits paused.
+- **Kept for the card** (main's memory): each write's frame line (the frame's method and pattern — never the path the
+  page sent), its outcome, the site's status when not a success, what it sent (`sentFields`: one value per field, never
+  a login, CSRF or session field, `isSensitiveFieldName`) and, for a success, its answer text (what `{created}` is read
+  from). Never the headers or cookies.
+- **The after-read** (a Skill run's `after_read`, read through the window's page-less read session, GET of exactly the
+  address): a literal address is read before anything is written; a pattern address is read right before the first
+  held write whose path fits it (its "before"); after the work each address is filled — `{created}` from the done
+  write whose path shares the longest beginning with the pattern's part before `{created}` (exactly one; its answer's
+  `id` or `data.id`, plain characters), `{n}` / `{x}` from exactly one done write's path that fits — and read again. An
+  address that cannot be filled or read is **not read**, and the consultation AI hears its **pattern** (company-reviewed
+  text) as 「読めなかったもの」 (bug 3), never page text.
+- **The result card** (`workResultCard`): the writes and what became of each (「サイトが成功を返しました（機械で確かめた）」 /
+  「届いたか分かりません（確かめていない）」 / 「送っていません」 / 「計画の枠に合わないので止めました」); each after-read address's
+  top-level values **before → after** with what the write sent beside it (`compared`) and who checked it — `machine`
+  (the field the write sent: ✓ equal / ✗ differs), `none` (nobody compared) — (bug 1: both sides and the ids always
+  shown); the operator's checks of the Skill's 「確かめること」 before → after → 比べ元, `by: 'ai'`, ✓ / ✗; bug 4's soft words
+  「「{比べ元}」と違う項目があります。意図した変更か確かめてください。」 with the operator's name for what it compares to (default
+  「比べ元」); for an unknown write, 「手でやること」: what to check on the site by hand, and that nothing is sent again. The
+  renderer checks each row's shape (`readBrowserCard`); the labels' words are `BROWSER_CARD_CHECKED_BY_WORDS`.
+- **The consultation AI's words** (`workWordsForAi`): 済みました / 止まりました（a fixed reason: not found, needs a person,
+  blocked, refused outside the plan, interrupted, not approved）/ 分からない書き込みがあります / 読めなかったもの：its own
+  headings by number and the unread after-read patterns. Never the page, the plan's words, a value, the hash or the
+  approval value. **One write task per consultation turn** (`BROWSER_WORK_LIMITS.callsPerTurn`).
+- **Stop**: the turn's signal (the member's stop, closing the consultation, an administrator's stop), the AI stop asked
+  every 0.5 s, a closed window or a changed context end the run at once: the card's wait ends (the run ends, nothing
+  written), a held write is not sent (`beforeSend`, `failHeld`), one already on its way becomes unknown if no answer
+  comes. The window leaves `ai` mode only after the writer is idle (≤ 45 s) and every held request was failed.
+- **The run log** (I8): each operator run's `finish` carries `writes` (`BrowserRunWriteStep`: after which logged step,
+  the frame or null, the method — `OTHER` for any other —, the path as the recording's pattern, `done` / `not-sent` /
+  `unknown` / `refused`); the server checks them (`browserRunWritesProblem`), keeps them in the additive table
+  `browser_run_writes` (append-only by trigger) and lists them with the run (`BrowserRunView.writes`, optional for an
+  older server). No value.
+- **Never read** (a Skill's `never_read`): the window's read rule refuses the page's and the operator's reads of the
+  operated host that `browserNeverReadFits` names (its path pattern, and each query word it lists) during the preview and
+  the work.
+- **Remaining limits** (said): the operator reads the page and may be misled by it — what it can do is bounded by the
+  domain and the frames, and its words reach only the member's card; what a write *contains* (which number, which date)
+  is not checked by the machine beyond the frame's fixed fields — the plan card and the after-read card are where a
+  person sees it (§8); a site that sets a new cookie on each save gets none back (decision of the runner's write
+  session; 追記2 showed the real site goes on); a site's GET with a side effect is stopped only when `never_read` names
+  it; `{created}` pairing by the longest common beginning is a heuristic (an ambiguous one is not read, never guessed);
+  a non-success answer locks the run (a validation error ends the task: ask again); the Skill's steps come from the
+  member's own checkout (they may be older or newer than the version the server approved — the frames are always the
+  server's); an upload with a file is refused (design memo 追記: the file chooser filled by the core is a later step).
+
+Tests: `client/tests/browser-frame-writes.test.ts` (a file / an unreadable or unknown body / `_method` twice / another
+host refused; the frame fit, an undeclared `_method`, a query, used up; no CSRF field kept; `{created}` and the
+after-read addresses; never-read patterns; the operator's answers read strictly; the writer — outside the frames and past
+the max never asked or sent, the second write waits for the first's report, no answer → unknown and nothing more, a stop
+between the permit and the last check → not sent and `not_sent`, a non-success answer → unknown, Set-Cookie never
+handed back, no value in the log or the server's calls; the wiring — an ad-hoc plan only after the card's ［任せる］ (the
+view and the AI's words never hold the value or the hash), ［やめる］, a pre-approved Skill without the card, a text change
+with it, 見るだけ refused before the operator, a write outside the plan refused during the work, the after-read card's
+labels and bugs 1 / 4, the AI's words without page text or injection), `client/tests/browser-window-electron.test.ts` (a
+real window and a fictional site: a save sent once with the page's cookie and CSRF header, its 201 JSON reaching the
+page without the site's cookie in the page or the window, two saves at once one after the other, an autosave outside
+the plan, an upload with a file, a never-read address, a save past the frame's max and a save whose permit came after
+the stop never reach the site, a lost answer reaches it once and nothing more is sent; no cookie, CSRF or value in a
+permit, a report or the log), `client/tests/browser-core-words.test.ts` (the tool, its schema and both prompts name no
+site), `server/tests/unit/browser-runs.test.ts` (`write: true` at 見るだけ / on a 見るだけ site refused; the joined lock —
+only the member's run naming the frames run, `busy`, a run naming nothing → ended; write steps kept, listed, a value
+refused, append-only), `server/tests/unit/browser-frames.test.ts` (the start's `afterRead` / `neverRead`, not in `get`;
+no frames run while an operator run holds the domain; `holderOn`), `jobs-schema.test.ts`, `company-scoped-sql.test.ts`,
+the IPC inventory, `model/browser-plan/check` (FramesLife unchanged: the app is stricter, README). Each guard
+mutation-checked (the serial chain, the last check, Set-Cookie, the frame's units, the file refusal, sensitive fields,
+unknown body kinds, the card's wait, the write task's start, bug 4's words, the machine label); kept on purpose as second
+layers: the writer's early "locked" check (`ready` refuses the same), the shell's Set-Cookie drop behind the writer's.
+
+
 ## Not yet (later PRs)
 
 **The operator's window tools, later** (step ④'s follow-ups): an admin page for the run log (the API is there:
-`GET /browser-runs`), the operator reading a company Skill's steps (step ⑥), writes (step ⑤).
+`GET /browser-runs`, its write steps included). **Writes, later** (step ⑤b's follow-ups): the Skill's steps from the
+company's Skill shelf (a company without the shared folder: today the operator gets the task only), a file chooser the
+person fills for an upload (design memo 追記: a file body is refused today), the person's confirm of an unknown write on
+the card (「済んでいた／されていなかった」: no route yet; the card says what to check by hand), safe patterns (step ⑧).
 
 **Keeping a login on disk** (`browserLoginStorage`, kept in `shared/core` for that PR): deferred until
 it can be bound to "every AI turn on this PC is enclosed". Reviews of PR 4 found that a member's

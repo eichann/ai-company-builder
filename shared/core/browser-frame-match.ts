@@ -77,3 +77,40 @@ export function browserAdhocWritesProblem(writes: readonly BrowserSkillWrite[]):
     return first !== '' && !first.startsWith('{')
   }) ? null : 'wide-path'
 }
+
+/**
+ * Does a read (a GET the page or the operator makes) fall under one of a Skill's `never_read` patterns (a read that changes
+ * something on the site, design memo I2)? The path matches the pattern's path part as a write's would (`{n}`, `{x}`,
+ * literals); each query word the pattern names (`key`, or `key=value`) must be in the request's query, which may hold
+ * more. A path that cannot be read is treated as falling under it (refused: the safe side).
+ */
+export function browserNeverReadFits(pattern: string, pathAndQuery: string): boolean {
+  if (typeof pathAndQuery !== 'string' || !pathAndQuery.startsWith('/') || pathAndQuery.length > BROWSER_FRAME_REQUEST_LIMITS.path) return true
+  const hash = pathAndQuery.indexOf('#')
+  const bare = hash === -1 ? pathAndQuery : pathAndQuery.slice(0, hash)
+  const [wantPath, wantQuery] = splitOnce(pattern)
+  const [gotPath, gotQuery] = splitOnce(bare)
+  if (!browserFramePathFits(wantPath, gotPath)) return false
+  if (wantQuery === null) return true
+  let params: Array<[string, string]>
+  try {
+    params = (gotQuery ?? '').split('&').filter(p => p !== '').map((p): [string, string] => {
+      const at = p.indexOf('=')
+      const k = decodeURIComponent((at === -1 ? p : p.slice(0, at)).replace(/\+/g, ' '))
+      const v = at === -1 ? '' : decodeURIComponent(p.slice(at + 1).replace(/\+/g, ' '))
+      return [k, v]
+    })
+  } catch {
+    return true
+  }
+  return wantQuery.split('&').every((word) => {
+    const at = word.indexOf('=')
+    if (at === -1) return params.some(([k]) => k === word)
+    return params.some(([k, v]) => k === word.slice(0, at) && v === word.slice(at + 1))
+  })
+}
+
+function splitOnce(s: string): [string, string | null] {
+  const q = s.indexOf('?')
+  return q === -1 ? [s, null] : [s.slice(0, q), s.slice(q + 1)]
+}

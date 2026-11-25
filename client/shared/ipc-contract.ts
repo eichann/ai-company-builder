@@ -926,6 +926,7 @@ export interface IpcInvokeChannels {
   'browserLines:confirmValue': { args: [companyId: string, cardId: string, name: string]; result: BrowserWriteGetResult }
   'browserLines:runWrite': { args: [companyId: string, cardId: string, contentHash: string]; result: BrowserWriteGetResult }
   'browserLines:confirmWrite': { args: [companyId: string, cardId: string, result: 'done' | 'not_done']; result: BrowserWriteGetResult }
+  'browserLines:cancelWrite': { args: [companyId: string, cardId: string]; result: BrowserWriteGetResult }
   /** Settings › 「この PC」: this PC's registration state and the member's usable combinations — never the PC's key (main window only; agent-browser.md "This PC's registration"). */
   'browserDevice:get': { args: [companyId: string]; result: BrowserPcResult }
   /** 「この PC を登録する」: main makes the key (OS keychain) and registers it; answers the new state only. */
@@ -1403,6 +1404,7 @@ export interface ElectronAPI {
   confirmBrowserWriteValue: Invoke<'browserLines:confirmValue'>
   runBrowserWrite: Invoke<'browserLines:runWrite'>
   confirmBrowserWrite: Invoke<'browserLines:confirmWrite'>
+  cancelBrowserWrite: Invoke<'browserLines:cancelWrite'>
   getBrowserPc: Invoke<'browserDevice:get'>
   registerBrowserPc: Invoke<'browserDevice:register'>
   withdrawBrowserPc: Invoke<'browserDevice:withdraw'>

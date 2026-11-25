@@ -48,8 +48,8 @@ export function getBrowserInspection(companyId: string, planId: string, reads: B
 export type BrowserWriteReads = ElectronPort<'getBrowserWriteCard'>
 /** ［確かめた］ (a person's value) and ［済んでいた］［されていなかった］: the member's own answers. */
 export type BrowserWriteAnswers = ElectronPort<'confirmBrowserWriteValue' | 'confirmBrowserWrite'>
-/** ［任せる］: the app writes the plan to the site. */
-export type BrowserWriteOutbound = ElectronPort<'runBrowserWrite'>
+/** ［任せる］: the app writes the plan to the site; ［やめる］ (a write run's card): it does not. */
+export type BrowserWriteOutbound = ElectronPort<'runBrowserWrite' | 'cancelBrowserWrite'>
 
 export function getBrowserWriteCard(companyId: string, cardId: string, reads: BrowserWriteReads = window.electronAPI) {
   return reads.getBrowserWriteCard(companyId, cardId)
@@ -65,4 +65,8 @@ export function confirmBrowserWrite(companyId: string, cardId: string, result: '
 
 export function runBrowserWrite(companyId: string, cardId: string, contentHash: string, outbound: BrowserWriteOutbound = window.electronAPI) {
   return outbound.runBrowserWrite(companyId, cardId, contentHash)
+}
+
+export function cancelBrowserWrite(companyId: string, cardId: string, outbound: BrowserWriteOutbound = window.electronAPI) {
+  return outbound.cancelBrowserWrite(companyId, cardId)
 }

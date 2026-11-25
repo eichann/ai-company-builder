@@ -64,8 +64,8 @@ export interface BrowserLineWritesApi {
 
 /** The operator's runs (agent-browser.md "The operator's window tools"; server routes/browser-runs.ts). */
 export interface BrowserRunsApi {
-  /** `POST /browser-runs { host, conversationId? }` + this PC's key: the server's gate and the company × domain lock. */
-  runStart(companyId: string, body: { host: string; conversationId?: string }): Promise<BrowserLinesAnswer>
+  /** `POST /browser-runs { host, conversationId?, frameRunId? }` + this PC's key: the server's gate and the company × domain lock. */
+  runStart(companyId: string, body: { host: string; conversationId?: string; frameRunId?: string; write?: true }): Promise<BrowserLinesAnswer>
   /** `POST /browser-runs/:runId/continue` + this PC's key: the gate again before a step; the lease renewed. */
   runContinue(companyId: string, runId: string): Promise<BrowserLinesAnswer>
   /** `POST /browser-runs/:runId/finish { outcome, reason?, steps }`: the log (no value) and the lock released. */
@@ -74,7 +74,23 @@ export interface BrowserRunsApi {
 
 const refusedLocally: BrowserLinesAnswer = { kind: 'refused', code: null }
 
-export function createBrowserLinesHttp(deps: BrowserLinesHttpDeps): BrowserLinesHttp & BrowserLineWritesApi & BrowserRunsApi {
+/**
+ * A write run's frames (agent-browser.md "Writes within frames"; server routes/browser-frames.ts): start, approve, permit
+ * and a sure report carry this PC's key; get and end are the member's session alone. The one-time approval value goes only
+ * in the approve body, from main's memory (never an AI tool's answer).
+ */
+export interface BrowserFramesApi {
+  frameStart(companyId: string, body: { skill: string; conversationId?: string } | { plan: { domain: string; writes: unknown[] }; conversationId?: string }): Promise<BrowserLinesAnswer>
+  frameApprove(companyId: string, runId: string, body: { planHash: string; approvalToken: string }): Promise<BrowserLinesAnswer>
+  framePermit(companyId: string, runId: string, body: { frame: number; request: { method: string; path: string; fields: Record<string, string> } }): Promise<BrowserLinesAnswer>
+  frameReport(companyId: string, runId: string, body: { write: number; result: 'done' | 'not_sent' | 'unknown'; reason?: string }): Promise<BrowserLinesAnswer>
+  frameEnd(companyId: string, runId: string): Promise<BrowserLinesAnswer>
+}
+
+const FRAME_RUN_ID_RE = /^bf_[0-9a-f]{32}$/
+const APPROVAL_TOKEN_RE = /^[0-9a-f]{64}$/
+
+export function createBrowserLinesHttp(deps: BrowserLinesHttpDeps): BrowserLinesHttp & BrowserLineWritesApi & BrowserRunsApi & BrowserFramesApi {
   const doFetch = deps.fetch ?? fetch
 
   /** 2xx with `data` → ok; 4xx → refused (the server's code); anything else → no answer. */
@@ -113,7 +129,18 @@ export function createBrowserLinesHttp(deps: BrowserLinesHttpDeps): BrowserLines
   const planOk = (companyId: string, planId: string) => companyOk(companyId) && BROWSER_LINE_PLAN_ID_RE.test(planId)
   const execOk = (companyId: string, executionId: string) => companyOk(companyId) && EXEC_ID_RE.test(executionId)
 
+  const frameOk = (companyId: string, runId: string) => companyOk(companyId) && FRAME_RUN_ID_RE.test(runId)
+
   return {
+    frameStart: async (companyId, body) => companyOk(companyId) ? post(`${company(companyId)}/browser-frame-runs`, body, { device: true }) : refusedLocally,
+    frameApprove: async (companyId, runId, body) => frameOk(companyId, runId) && HASH_RE.test(body.planHash) && APPROVAL_TOKEN_RE.test(body.approvalToken)
+      ? post(`${company(companyId)}/browser-frame-runs/${runId}/approve`, { planHash: body.planHash, approvalToken: body.approvalToken }, { device: true }) : refusedLocally,
+    framePermit: async (companyId, runId, body) => frameOk(companyId, runId) && Number.isSafeInteger(body.frame) && body.frame >= 1
+      ? post(`${company(companyId)}/browser-frame-runs/${runId}/permit`, { frame: body.frame, request: body.request }, { device: true }) : refusedLocally,
+    // A sure answer (done / not_sent) counts only from the run's own PC: the key goes with every report.
+    frameReport: async (companyId, runId, body) => frameOk(companyId, runId) && Number.isSafeInteger(body.write) && body.write >= 1
+      ? post(`${company(companyId)}/browser-frame-runs/${runId}/report`, body, { device: true }) : refusedLocally,
+    frameEnd: async (companyId, runId) => frameOk(companyId, runId) ? post(`${company(companyId)}/browser-frame-runs/${runId}/end`, {}) : refusedLocally,
     createWrites: async (companyId, body) => companyOk(companyId) && typeof body.account === 'string'
       ? post(`${company(companyId)}/browser-line-plans`, body, { device: true }) : refusedLocally,
     get: async (companyId, planId) => planOk(companyId, planId) ? post(`${company(companyId)}/browser-line-plans/${planId}`, null, { method: 'GET' }) : refusedLocally,

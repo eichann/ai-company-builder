@@ -550,3 +550,44 @@ describe('frames: a run of free operation', () => {
     expect(() => conn.prepare('UPDATE browser_frames SET max = 9 WHERE company_id = ? AND run_id = ? AND idx = 1').run(CO, locked.runId)).toThrow()
   })
 })
+
+describe('step ⑤b: what the app is answered, one lock with the operator runs', () => {
+  it('a Skill run\'s start answers the approved declaration\'s after-read and never-read addresses (an ad-hoc plan none)', async () => {
+    put(`${yaml}never_read: [ "/api/orders/{n}?copy=1" ]\nafter_read: [ "/api/orders/{created}" ]\n`)
+    await approveSkill('pre_approved')
+    const run = value(await frames.start(alice, { skill: SKILL }, PC))
+    expect(run.afterRead).toEqual(['/api/orders/{created}'])
+    expect(run.neverRead).toEqual(['/api/orders/{n}?copy=1'])
+    value(frames.end(alice, run.runId))
+    const plan = value(await frames.start(alice, { plan: adhoc }, PC))
+    expect([plan.afterRead, plan.neverRead]).toEqual([[], []])
+    // `get` never answers them (nor the approval value): the start is the app's one source.
+    expect(Object.keys(value(frames.get(alice, plan.runId)))).not.toContain('afterRead')
+  })
+
+  it('a frames run never starts while an operator run holds the domain; `holderOn` names the run holding it for the operator runs', async () => {
+    let operatorRunning = true
+    const withRuns = createBrowserFrameService({
+      companyData: sqliteCompanyData(conn), transactions: sqliteTransactions(conn), clock: { now: () => iso(now), nowMs: () => now },
+      ids: { newId: () => randomBytes(8).toString('hex'), newToken: () => randomBytes(32).toString('hex') }, tokenDigest: sha256TokenDigest,
+      monotonic: { bootId: 'boot-1', monoMs: () => now - monoBase }, browserPolicy: () => policy, aiStops: () => ({ all: false, tools: [] }),
+      devices: { check: (_m, key) => ({ ok: true, value: { deviceId: key === undefined ? null : `bd_${key}` } }) },
+      siteGrants: { allows: () => true },
+      skills: { approvedFrames: async () => { throw new Error('no skill here') }, stillApproved: () => false, runCardShown: () => {} },
+      operatorRunOn: () => operatorRunning,
+    })
+    expect(code(await withRuns.start(alice, { plan: adhoc }, PC))).toBe('BROWSER_RUN_BUSY')
+    expect(withRuns.holderOn(CO, DOMAIN)).toBeNull()
+    operatorRunning = false
+    const run = value(await withRuns.start(alice, { plan: adhoc }, PC))
+    expect(withRuns.holderOn(CO, DOMAIN)).toEqual({ runId: run.runId, userId: alice.userId })
+    expect(withRuns.holderOn(CO, 'other.example.test')).toBeNull()
+    // Ended with a write permitted: busy until it is recorded or times out.
+    value(await withRuns.approve(alice, run.runId, { planHash: run.planHash, approvalToken: run.approvalToken }, PC))
+    value(await withRuns.permit(alice, run.runId, { frame: 1, request: FITS[1] }, PC))
+    value(withRuns.end(alice, run.runId))
+    expect(withRuns.holderOn(CO, DOMAIN)).toBe('busy')
+    value(withRuns.report(alice, run.runId, { write: 1, result: 'done' }, PC))
+    expect(withRuns.holderOn(CO, DOMAIN)).toBeNull()
+  })
+})

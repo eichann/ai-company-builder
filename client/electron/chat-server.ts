@@ -139,7 +139,7 @@ export interface ChatServerConfig extends AgentHost {
    * 「ブラウザ操作」's read-only inspection (browser-request/inspect-tool.ts; agent-browser.md "The inspection in the chat"):
    * undefined while the switch is off. `onCard` puts the inspection's card into the reply (a reference; main holds the card).
    */
-  createBrowserInspect?: (input: { companyId: string; conversationId: string | null; signal: AbortSignal; onCard: (planId: string) => void }) => BrowserInspectTools | undefined
+  createBrowserInspect?: (input: { companyId: string; conversationId: string | null; signal: AbortSignal; onCard: (planId: string) => void; companyRoot?: string | null }) => BrowserInspectTools | undefined
   prepareRecovery?: (company: string, id: string, messages: UIMessage[]) => { context: string; usedMemo: boolean }
   onRecovery?: (company: string, id: string, recovery: HandoffRecovery) => void
   persistAgentSession?: (company: string, id: string, session: AgentSession) => void
@@ -509,7 +509,7 @@ export async function startChatServer(config: ChatServerConfig) {
     // Its inspection (inspect-tool.ts): the same gates and the same signal — it reads only while this turn runs.
     const browserInspect = !aiTurnStep && connection.ownsConversation && can.browserOperator && companyId
       ? config.createBrowserInspect?.({
-        companyId, conversationId: appSessionId || null, signal: browserRequestAbort.signal,
+        companyId, conversationId: appSessionId || null, signal: browserRequestAbort.signal, companyRoot: companyRootPath || null,
         onCard: planId => {
           const ref: BrowserInspectionRef = { id: planId, companyId, conversationId: appSessionId || null, planId, at: new Date().toISOString() }
           injector.push({ type: BROWSER_INSPECTION_PART_TYPE, id: `browser-inspection-${planId}`, data: ref })

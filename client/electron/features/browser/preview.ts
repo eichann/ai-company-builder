@@ -43,7 +43,7 @@ export interface PreviewOperator {
     cli: PreviewOperatorCli; model: string; material: unknown; signal: AbortSignal; timeoutMs: number
     parentEnv: Readonly<Record<string, string | undefined>>
     /** The window tools' fixed prompt (agent-browser.md "The operator's window tools"); absent: the preview's. */
-    prompt?: 'browse'
+    prompt?: 'browse' | 'work-preview' | 'work'
   }): Promise<{ ok: true; text: string } | { ok: false; code: BrowserOperatorFailure | 'cancelled' }>
 }
 

@@ -2,7 +2,7 @@ import { memo } from 'react'
 import { CheckCircle, Globe, Hourglass, WarningCircle, XCircle } from '@phosphor-icons/react'
 import { Callout } from '../../../shared/ui/primitives'
 import { STATE_BOX, type StateBoxTone } from '../../../shared/ui/stateStyles'
-import { BROWSER_CARD_MARK_WORDS, type BrowserCard, type BrowserCardMark, type BrowserCardValue } from '../../../../../shared/core/browser-card'
+import { BROWSER_CARD_CHECKED_BY_WORDS, BROWSER_CARD_MARK_WORDS, type BrowserCard, type BrowserCardMark, type BrowserCardRow, type BrowserCardValue } from '../../../../../shared/core/browser-card'
 import { BROWSER_INSPECTION_CARD_WORDS as W, type BrowserInspectionView } from '../../../../shared/browser-inspection'
 import type { BrowserInspectionReads } from '../api'
 import { useBrowserInspection } from '../hooks/useBrowserInspection'
@@ -50,7 +50,8 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
  */
 export const BrowserInspectionCard = memo(function BrowserInspectionCard({ companyId, planId, reads }: { companyId: string; planId: string; reads?: BrowserInspectionReads }) {
   // A write card (`wp_…`, generalization PR 5c) shares the chat's reference; it draws what was read with this body.
-  if (planId.startsWith('wp_')) return <BrowserWriteCard companyId={companyId} cardId={planId} readCard={v => <InspectionBody view={v} />} />
+  // A write run's card (`bf_…`, step ⑤b) is a write card too.
+  if (planId.startsWith('wp_') || planId.startsWith('bf_')) return <BrowserWriteCard companyId={companyId} cardId={planId} readCard={v => <InspectionBody view={v} />} />
   return <InspectionCardOf companyId={companyId} planId={planId} reads={reads} />
 })
 
@@ -64,6 +65,21 @@ function InspectionCardOf({ companyId, planId, reads }: { companyId: string; pla
     )
   }
   return <InspectionBody view={view} />
+}
+
+/**
+ * A write's row: before → after, and — on the after-read card (step ⑤b) — what it is compared to and who checked it
+ * (機械で確かめた / AI が確かめた / 確かめていない), with ✓ / ✗ when someone did. Both sides always shown (bug 1).
+ */
+function BeforeAfter({ row }: { row: Extract<BrowserCardRow, { before: BrowserCardValue }> }) {
+  return (
+    <span className="inline-flex flex-wrap items-center gap-x-1.5" data-checked-by={row.by}>
+      <span><Value value={row.before} /> → <Value value={row.after} /></span>
+      {row.compared && <span className="text-small text-text-muted">（比べ元：<Value value={row.compared} />）</span>}
+      {row.mark && <span className={`font-strong ${MARK[row.mark].className}`}>{BROWSER_CARD_MARK_WORDS[row.mark]}</span>}
+      {row.by && <span className="text-small text-text-muted">{BROWSER_CARD_CHECKED_BY_WORDS[row.by]}</span>}
+    </span>
+  )
 }
 
 export function InspectionBody({ view }: { view: BrowserInspectionView }) {
@@ -108,7 +124,7 @@ export function InspectionBody({ view }: { view: BrowserInspectionView }) {
             <dl>
               {s.rows.map((r, j) => (
                 <Row key={j} label={r.label}>
-                  {'value' in r ? <Value value={r.value} /> : <span><Value value={r.before} /> → <Value value={r.after} /></span>}
+                  {'value' in r ? <Value value={r.value} /> : <BeforeAfter row={r} />}
                 </Row>
               ))}
             </dl>

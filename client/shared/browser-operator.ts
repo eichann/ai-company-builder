@@ -13,6 +13,7 @@ import {
 } from '../../shared/core/plugin-browser-declaration'
 import type { BrowserExploreItem } from './browser-runner'
 import { BROWSER_OPERATOR_BROWSE_PROMPT } from './browser-browse'
+import { BROWSER_OPERATOR_WORK_PREVIEW_PROMPT, BROWSER_OPERATOR_WORK_PROMPT } from './browser-frame-writes'
 
 export const BROWSER_OPERATOR_LIMITS = {
   /** Steps (one CLI start each) per request. */
@@ -54,10 +55,18 @@ export const BROWSER_OPERATOR_SYSTEM_PROMPT = [
 ].join('\n')
 
 /**
- * Which of the operator's two fixed system prompts a step starts with: the preview's (choose from the readers' items) or
- * the window tools' (agent-browser.md "The operator's window tools"). A closed choice: nothing else can be passed.
+ * Which of the operator's fixed system prompts a step starts with: the preview's (choose from the readers' items), the
+ * window tools' (agent-browser.md "The operator's window tools"), or a write run's preview and work (step ⑤b, "Writes
+ * within frames, in the app"). A closed choice: nothing else can be passed.
  */
-export type BrowserOperatorPrompt = 'preview' | 'browse'
+export type BrowserOperatorPrompt = 'preview' | 'browse' | 'work-preview' | 'work'
+
+const OPERATOR_PROMPTS: Readonly<Record<BrowserOperatorPrompt, string>> = {
+  preview: BROWSER_OPERATOR_SYSTEM_PROMPT,
+  browse: BROWSER_OPERATOR_BROWSE_PROMPT,
+  'work-preview': BROWSER_OPERATOR_WORK_PREVIEW_PROMPT,
+  work: BROWSER_OPERATOR_WORK_PROMPT,
+}
 
 /** The CLI's arguments, exactly (design memo §33 1-2; a test holds them). Only the system prompt differs per kind. */
 export function browserOperatorArgs(model: string, prompt: BrowserOperatorPrompt = 'preview'): string[] {
@@ -72,7 +81,7 @@ export function browserOperatorArgs(model: string, prompt: BrowserOperatorPrompt
     '--no-session-persistence',
     '--max-turns', '1',
     '--output-format', 'stream-json', '--verbose',
-    '--system-prompt', prompt === 'browse' ? BROWSER_OPERATOR_BROWSE_PROMPT : BROWSER_OPERATOR_SYSTEM_PROMPT,
+    '--system-prompt', OPERATOR_PROMPTS[prompt],
   ]
 }
 

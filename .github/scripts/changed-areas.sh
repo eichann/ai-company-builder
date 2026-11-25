@@ -124,7 +124,7 @@ MODEL=(
   client/shared/browser-runner.ts client/electron/features/browser/runner.ts client/electron/features/browser/read-session.ts
   server/src/services/browser-line-steps.ts server/src/services/browser-lines.ts
   client/electron/features/browser/write-line-runner.ts client/shared/browser-line-writes.ts
-  server/src/services/browser-frames.ts
+  server/src/services/browser-frames.ts client/electron/features/browser/frame-writes.ts
 )
 
 pathspecs() {
