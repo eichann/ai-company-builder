@@ -15,10 +15,10 @@
 import { createHash } from 'crypto'
 import { describe, expect, it } from 'vitest'
 import {
-  JOB_MINUTES_ROUTE, JOB_SET_WATCH_OPENED, jobConsentCanonical, jobDefinitionPaths, jobPinnedDepartmentSkills, parseJobDecisionFile,
+  JOB_MINUTES_ROUTE, JOB_SET_WATCH_OPENED, jobConsentCanonical, jobDefinitionPaths, jobPinnedDepartmentSkills, jobSetWatchLine, parseJobDecisionFile,
   parseJobDefinition, type JobDefinition, type JobSetTrigger,
 } from '../../shared/core/jobs'
-import { jobTriggerText } from '../../shared/core/job-words'
+import { jobTriggerText, setWatchConditionLines, setWatchMissedText, setWatchSummaryLines } from '../../shared/core/job-words'
 
 const TREE = 'b'.repeat(40)
 const TREE2 = 'c'.repeat(40)
@@ -241,5 +241,73 @@ describe('the words', () => {
   it('the opened combination in plain words; any other is never described as if it were it', () => {
     expect(jobTriggerText(OPENED)).toContain('「議事録を確認する」を初めて完了したとき')
     expect(jobTriggerText({ ...OPENED, guards: [] })).not.toContain('議事録')
+  })
+
+  it('every guard of each opened line has its words (never 「説明できない」 for an opened line; Codex review of 4b-4 A3)', () => {
+    for (const t of JOB_SET_WATCH_OPENED) {
+      const lines = setWatchConditionLines(t)
+      expect(lines.length, t.event).toBe(4 + t.guards.length)
+      for (const l of lines) expect(l, t.event).not.toContain('説明できない')
+    }
+  })
+})
+
+// ── 4b-4 A3: the second line, 「自分が担当の会議の議事録を、AI が初めて読み終えたとき」 (owner decision D2, 2026-11-25) ──
+const FIRST_READ: JobSetTrigger = {
+  kind: 'record_set', recordType: 'meeting', taskKind: 'meeting', origin: 'meeting', causes: ['reader_ai'], causeRule: 'reader_v1',
+  assignee: 'attendee', event: 'first_read', unit: 'record',
+  guards: ['after_acceptance', 'attendee_responsible', 'outside_attendee', 'people_only_meeting', 'plugin_step_exclusive'],
+}
+
+describe('the second line (4b-4 A3): the AI of the meeting’s assignee reading it for the first time', () => {
+  it('is opened beside the first, which stays exactly as it was; each is told apart by its words', () => {
+    expect(parsed(setWatch({ trigger: FIRST_READ })).trigger).toEqual(FIRST_READ)
+    expect(parsed(setWatch()).trigger).toEqual(OPENED)
+    expect(jobSetWatchLine(FIRST_READ)).toBe('first_read')
+    expect(jobSetWatchLine(OPENED)).toBe('review_done')
+  })
+
+  it('words of one line mixed into the other are no opened combination (never a line of their own)', () => {
+    for (const [key, value] of [['recordType', 'meeting'], ['taskKind', 'meeting'], ['causes', ['reader_ai']], ['causeRule', 'reader_v1'], ['assignee', 'attendee'], ['event', 'first_read']] as const) {
+      expect(problems(setWatch({ trigger: { ...OPENED, [key]: value } })), key).toEqual(['trigger.NOT_OPENED'])
+    }
+    for (const [key, value] of [['recordType', 'task'], ['causes', ['human']], ['causes', ['human', 'reader_ai']], ['causeRule', 'ledger_v1'], ['assignee', 'responsible_from_creation'], ['event', 'first_done']] as const) {
+      const t = { ...FIRST_READ, [key]: value } as JobSetTrigger
+      expect(problems(setWatch({ trigger: t })), key).toEqual(['trigger.NOT_OPENED'])
+      expect(jobSetWatchLine(t), key).toBeNull()
+    }
+    expect(problems(setWatch({ trigger: { ...FIRST_READ, guards: FIRST_READ.guards.slice(1) } }))).toEqual(['trigger.NOT_OPENED'])
+  })
+
+  it('taken out, only it closes; the first line stays open (a build that knows schema 5 but not this line)', () => {
+    const i = JOB_SET_WATCH_OPENED.findIndex(t => t.event === 'first_read')
+    const removed = (JOB_SET_WATCH_OPENED as JobSetTrigger[]).splice(i, 1)
+    try {
+      expect(problems(setWatch({ trigger: FIRST_READ }))).toEqual(['trigger.NOT_OPENED'])
+      expect(jobSetWatchLine(FIRST_READ)).toBeNull()
+      expect(jobTriggerText(FIRST_READ)).not.toContain('議事録')
+      expect(problems(setWatch())).toEqual([])
+    } finally {
+      (JOB_SET_WATCH_OPENED as JobSetTrigger[]).splice(i, 0, ...removed)
+    }
+  })
+
+  it('its consent is another than the first line’s (another 受け取る)', () => {
+    const a = jobConsentCanonical(parsed(setWatch()))
+    const b = jobConsentCanonical(parsed(setWatch({ trigger: FIRST_READ })))
+    expect(a).not.toEqual(b)
+    expect(b).toContain('first_read')
+  })
+
+  it('its own words: when, the conditions and the wait — never the first line’s 「議事録を確認する」 completion', () => {
+    expect(jobTriggerText(FIRST_READ)).toMatch(/^自分が出た会議の議事録を、出た人のだれかの AI が初めて読み終えたとき/)
+    const lines = setWatchConditionLines(FIRST_READ)
+    expect(lines.join('\n')).toContain('会議に出た人（担当を含む）のだれかの AI が議事録を読み終えたとき')
+    expect(lines.join('\n')).not.toContain('完了したときだけ')
+    expect(lines).toContain('責任者が受け取ったあとに、AI が初めて読み終えた会議だけ（受け取る前に届いた会議でも、読み終えたのが受け取ったあとなら動きます）')
+    expect(setWatchSummaryLines(parsed(setWatch({ trigger: FIRST_READ })), 'responsible')[0]).toContain('出た人のだれかの AI が読み終えたあと')
+    expect(setWatchSummaryLines(parsed(setWatch()), 'responsible')[0]).toContain('「議事録を確認する」が完了したあと')
+    expect(setWatchMissedText(1440, FIRST_READ)).toMatch(/^読み終えたあと/)
+    expect(setWatchMissedText(1440, OPENED)).toMatch(/^完了のあと/)
   })
 })

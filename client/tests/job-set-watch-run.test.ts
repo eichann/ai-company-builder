@@ -23,7 +23,7 @@ import { createRunRegistry } from '../electron/records/runs'
 import { decideToolWrite, type WriteGuard } from '../electron/write-guard'
 import { jobToolAccess, parseJobTurn, parseJobTurns } from '../shared/ai-turn-steps/job'
 import { describePath } from '../shared/agent-events'
-import { draftAssetNames, parseUpdateProposals, runFolderName, type DecisionGate } from '../shared/ai-turn-steps/set-watch'
+import { draftAssetNames, parseUpdateProposals, runFolderName, setWatchFirstMessage, type DecisionGate } from '../shared/ai-turn-steps/set-watch'
 import { JOB_MINUTES_ROUTE } from '../../shared/core/jobs'
 
 const COMPANY = 'acme'
@@ -174,6 +174,9 @@ test('a set watch turn is read in its own frame, and only an app that runs it he
   assert.equal(r.claimed, true)
   assert.match(server.calls.find(x => x.path === '/me/job-turns')!.query, /checks=matched_record/)
   assert.ok((server.calls.find(x => x.path === '/job-run-claims')!.body.checks as string[]).includes('matched_record'))
+  // 4b-4 A3: this app knows the second line (its first message says what triggered it), so it names that line's lock too.
+  assert.match(server.calls.find(x => x.path === '/me/job-turns')!.query, /checks=matched_record,set_first_read/)
+  assert.ok((server.calls.find(x => x.path === '/job-run-claims')!.body.checks as string[]).includes('set_first_read'))
   // The ceiling: the minutes and the run's own tools; no time-job report for this consultation.
   const access = claims.jobTools('conv-set-00001', 'job-procedure')!
   for (const name of ['minutes_read', 'job_report', 'proposal_folder']) assert.ok(access.allowsRecordTool(name), name)
@@ -626,4 +629,13 @@ test('受注予定日 in the update proposals: a real day "YYYY-MM-DD" only', ()
     assert.ok('problem' in r && r.problem.includes('YYYY-MM-DD'), String(bad))
   }
   assert.ok('items' in parseUpdateProposals(file('来年の春', '係数表'), 'meeting-abc123', null), 'a coefficient sheet line of that name keeps its own rule')
+})
+
+test('the first message names the trigger of its line: a completed 「議事録を確認する」, or (4b-4 A3) the meeting its AI finished reading', () => {
+  const base = { name: '提案書', procedure: '# 手順', copyDir: '/copy', skills: [], reasons: [{ code: 'requested', label: '提案を求められた' }], base: '部署/.personal/提案書', deadline: '10:00' }
+  const review = setWatchFirstMessage({ ...base, recordId: 'task-0123456789abcdef', meetingId: 'meeting-0123456789abcdef01234567' })
+  assert.match(review, /きっかけ：あなたが担当の「議事録を確認する」（task-0123456789abcdef）が完了しました。/)
+  const read = setWatchFirstMessage({ ...base, recordId: 'meeting-0123456789abcdef01234567', meetingId: 'meeting-0123456789abcdef01234567' })
+  assert.match(read, /きっかけ：あなたが出た会議（meeting-0123456789abcdef01234567）の議事録を、出た人の AI が読み終えました/)
+  assert.doesNotMatch(read, /議事録を確認する/)
 })

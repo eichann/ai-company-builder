@@ -535,7 +535,7 @@ export function jobProblemText(problems: string[]): string {
  * will show it); here it is the responsible person, never the admin reading it (independent review of PR7).
  */
 export function setWatchTriggerText(trigger: JobSetTrigger): string {
-  return jobSetTriggerText(trigger).replace(/^自分が担当の/, '責任者が担当の')
+  return jobSetTriggerText(trigger).replace(/^自分が/, '責任者が')
 }
 
 /** The Skill names a set watch runs or reads: what the server matches a business plugin's step setting against. */

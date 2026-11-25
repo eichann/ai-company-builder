@@ -105,7 +105,9 @@ test('the pick: it runs a Skill with its reasons, reads at most four and never i
   const pick: SetWatchPick = { combo: 0, run: `${DEPT}/auto`, reads: [] }
   assert.deepEqual(setWatchChoiceOf(pick, skills), { trigger: opened(), skill: { place: DEPT, skill: 'auto' }, readSkills: [] })
   assert.equal(setWatchChoiceOf({ ...pick, run: `${DEPT}/plain` }, skills), null)
-  assert.equal(setWatchChoiceOf({ ...pick, combo: 1 }, skills), null)
+  // Every opened line can be picked (4b-4 A3: the second, 「AI が議事録を読み終えたとき」), one past them never.
+  assert.equal(setWatchChoiceOf({ ...pick, combo: 1 }, skills)?.trigger.event, 'first_read')
+  assert.equal(setWatchChoiceOf({ ...pick, combo: JOB_SET_WATCH_OPENED.length }, skills), null)
   assert.equal(setWatchChoiceOf({ ...pick, reads: ['営業部/none'] }, skills), null)
   let p = pick
   for (const k of ['a', 'b', 'c', 'd', 'e']) p = toggleSetWatchRead(p, `営業部/${k}`)

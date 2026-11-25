@@ -35,7 +35,7 @@ describe.skipIf(!CROSS_DB)('cross-build 3/3: this build again', () => {
     const m = manifest()
     const CO: string = m.CO
     const { j2, j3 } = m.jobs
-    const { o1, o3, o4, o5 } = m.occ
+    const { o1, o3, o4, o5, o6 } = m.occ
     const as = async (user: string, method: string, path: string, body?: unknown) => {
       currentUser.id = user
       const res = await app.request(`/api/companies/${CO}${path}`, { method, headers: { 'Content-Type': 'application/json' }, ...(body !== undefined ? { body: JSON.stringify(body) } : {}) })
@@ -49,7 +49,7 @@ describe.skipIf(!CROSS_DB)('cross-build 3/3: this build again', () => {
     // The clock runs: nothing new is made from events already fired, nothing held runs.
     services.jobOccurrences.makeOccurrences(CO)
     expect(crossBuildSnapshot(db, CO)).toEqual(m.before)
-    expect([o1, o3, o4, o5].map(stateOf)).toEqual(['held', 'held', 'needs_person', 'held'])
+    expect([o1, o3, o4, o5, o6].map(stateOf)).toEqual(['held', 'held', 'needs_person', 'held', 'held'])
     expect((await as('xb-alice', 'GET', '/me/job-turns?kinds=event')).body.data.turns).toEqual([])
 
     // The reminded stop (J4): read on the floor, and the clock here does not bring it back again (once per stop); its
@@ -63,8 +63,8 @@ describe.skipIf(!CROSS_DB)('cross-build 3/3: this build again', () => {
     const stop = (db.prepare('SELECT chain_stop_at AS at FROM ai_job_event_cursors WHERE company_id = ? AND job_id = ?').get(CO, j3) as Json).at
     expect(services.jobs.chainStopNotice(alice, j3, stop)).not.toBeNull()
     const mine = (await as('xb-alice', 'GET', '/me/job-occurrences')).body.data.occurrences
-    // Every occurrence 4b-1 made for her (J2's done one too), none lost.
-    expect(mine.map((o: Json) => o.id).sort()).toEqual(m.before.occurrences.map((o: Json) => o.id).sort())
+    // Every occurrence 4b-1 made for her (J2's done one too), none lost — and S2's (bob's, 4b-4 A3) not hers.
+    expect(mine.map((o: Json) => o.id).sort()).toEqual(m.before.occurrences.map((o: Json) => o.id).filter((id: string) => id !== o6).sort())
     expect(mine.map((o: Json) => o.id)).toEqual(expect.arrayContaining([o1, o3, o4]))
     expect(mine.find((o: Json) => o.id === o1).unknownOperations).toEqual([{ key: 'put-1', kind: 'drive-put' }])
 

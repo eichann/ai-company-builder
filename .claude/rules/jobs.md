@@ -1489,7 +1489,7 @@ not make jobs members' apps cannot run).
   taskKind, origin, causes, causeRule, assignee, event, unit, guards }`, each key from its own list (`JOB_SET_WATCH_WORDS`,
   else `trigger.<key>.BAD`; `causes` never empty), and **the whole combination exactly one of `JOB_SET_WATCH_OPENED`**
   (`shared/core/jobs.ts`, `jobSetWatchOpened`: every key, every list in the order written there), else
-  `trigger.NOT_OPENED`. The one line today is 4b-4's: a やること (`task`) of kind 「議事録を確認する」 (`minutes_review`) that came
+  `trigger.NOT_OPENED`. The first line is 4b-4's (the second, 「AI が議事録を読み終えたとき」, is "The second line" below): a やること (`task`) of kind 「議事録を確認する」 (`minutes_review`) that came
   from a meeting (`meeting`: its one `links.meeting` and the id `meetingOutputId` gives — never a title), counted causes
   `human` under `ledger_v1` (exactly `ledgerRowIsEvent`: a person or their own consultation AI; never a migration, `acb:`
   actor, run, outside writer or business plugin screen), `responsible_from_creation` (its assignee was the responsible
@@ -1739,6 +1739,66 @@ not make jobs members' apps cannot run).
     its own folder and record.
   - Tests: `client/tests/job-set-watch-run.test.ts` (on a real git repository and folders), `client/tests/ai-turn-unattended.test.ts`
     (the copy as `additionalDirectories`). Mutation check: see the PR.
+- **The second line: 「AI が議事録を読み終えたとき」** (4b-4 A3; owner memo 「4b-4 自動で読む・知らせ・受け箱の数」 第1.1版 §2 and Codex
+  #2 / #3 / #12, owner decision D2 2026-11-25: opened beside the first, which is unchanged; the admin chooses per job — the form and the
+  app's 「見張りの案」 already offer every opened line, each in its own words; **owner decision 2026-11-25 (later)**: it fires on the
+  meeting's first reading **whoever's AI read it** — the reading is shared with every attendee, e.g. a manager's AI may read first —
+  and runs the job of each responsible person who is one of the meeting's people; their PC does not read it again).
+  `{ recordType: 'meeting', taskKind: 'meeting', origin: 'meeting', causes: ['reader_ai'], causeRule: 'reader_v1', assignee:
+  'attendee', event: 'first_read', unit: 'record', guards: <the same five> }`; told apart by `jobSetWatchLine` (`review_done` /
+  `first_read`, null for a combination not opened — never guessed from some of its words). Its own rules, all in
+  `services/job-set-watch.ts`, the first line's untouched:
+  - **The event** (`meetingFirstReadEvent`, `readerAiRow`): the scan reads meetings into `read` (`setWatchRowsOf`); a row counts only
+    when it is `finish_reading` from `reading` to `read`, with no origin mark and no business plugin screen (`via`), by an AI (`ai`)
+    whose member is **one of the meeting's people** at that row (`isMeetingPerson`: its list, its assignee or an attendee — never
+    the AI of someone not on the meeting) — in that member's own consultation (no run) or in **their own `minutes-reading` run of
+    that very meeting** (`aiRuns.byId`: subject the meeting, step `minutes-reading`, its member the AI's; any other run — a
+    scheduled job's, another step's, another member's, a missing one — never). `ledgerRowIsEvent` is not widened (Codex #2). It is
+    the meeting's **first** `read` (`first_read`: a row put back and read again is not it). The same event for every job of this
+    line; **whose it is to run is `attendee_responsible`**: a responsible person who is not one of the meeting's people (or no
+    longer reads it) never runs it (`not_matched`).
+  - **The occurrence** names the meeting as both its record and its meeting (`event_record_id` = `event_meeting_id`); who sees it,
+    the PC's two locks, the minutes route of that one meeting, the finish (its やること linked to the meeting, date-only name,
+    owner-only), 「もう一度」 and the corrections are the set watch's as above. **Its conditions** (`setWatchCondition`): the line still
+    opened, the meeting still the responsible person's to read and one of its people (else `EVENT_RECORD_GONE`), the occurrence's
+    record still its meeting (`SET_WATCH_MEETING_CHANGED`), the meeting still `read` (`EVENT_NOT_NEEDED`) — no assignee condition
+    (the meeting handed to someone else goes on).
+  - **The acceptance** (`after_acceptance` for this line): the meeting's first `read` after the switch boundary, by delivery number —
+    a meeting that arrived before the acceptance and is read after it runs; no boundary known: `before_acceptance`. The other
+    guards are the first line's (outside attendee by the stored `external_count` through `hasOutsideAttendee`, the same reading as
+    a member's automatic reading, 4b-4 A2; members-only meeting; its people; the plugin step).
+  - **Once per meeting for each person, across both lines** (`setWatchMarked`, `setWatchMarkKey`): this line marks
+    `<the meeting's 「議事録を確認する」 id>#<responsible person>` (every attendee's job once for the meeting; a new version or job of the
+    same person never again); the first line keeps its PR2 key, the review's id (only its assignee from creation ever has a job of
+    it). A person is blocked by either: their own key of this line, or the first line's key of a review that was theirs from its
+    making. So a meeting this line ran for her never runs again when she completes its review under the first line, and the other
+    way round; another attendee is not blocked by her review's mark. One set watch per responsible person still holds across
+    lines. **Older builds look marks up by the review's id only**, so when the review was the responsible person's from its
+    making this line writes that key too, with the same outcome (`setWatchReviewKeyToo`, independent review M1): rolled back to
+    the build before this line, her completing that review never runs the meeting again for her first-line job. The marks name
+    meetings a job did not run for (also members-only ones its responsible person cannot read): nothing reads the table through
+    an answer today, and **no view may count or list a job's marks** for anyone but the meeting's people (independent review L3).
+  - **The app's second lock** (`JOB_SET_FIRST_READ_LOCK`, `setWatchAppLock`; independent review M2): besides `matched_record`, a
+    turn of this line is listed (`?checks=`) and claimed (`checks`) only by an app that names `set_first_read` — this build's
+    app does (`client/electron/features/ai-turns/job-runs.ts`); a released app of PR5 would run it with the first line's
+    words, so it is never handed one (`JOB_CHECK_NOT_SUPPORTED` on a claim, nothing written).
+  - **Known** (independent review L1): the reader's being one of the meeting's people is read with the meeting's list as it is
+    when the scan reaches the row (its fields — assignee, attendees — as at that row); someone added to the list in between
+    counts, someone taken off no longer does (the safe side). The window is one clock pass.
+  - **The words** (`job-words.ts`): `jobSetTriggerText` (「自分が出た会議の議事録を、出た人のだれかの AI が初めて読み終えたとき…」; the
+    admin console says 「責任者が」), `setWatchConditionLines` (`FIRST_READ_GUARD_WORDS` where they differ), `setWatchSummaryLines`
+    and `setWatchMissedText(…, trigger)` per line; the app's first message of such a run says an attendee's AI finished reading
+    the meeting and it need not be read again (`setWatchFirstMessage`: the record is the meeting).
+  - **A build that knows schema 5 but not this line** (the build before A3, and the rollback floor): such a version is a line taken
+    out there — never approved, accepted or resumed (`JOB_SET_WATCH_NOT_OPENED`), its scan reads nothing and its cursor follows
+    now, a waiting or running occurrence ends at its next look (`SET_WATCH_NOT_OPENED`, untold), and nothing read meanwhile runs
+    late when this build is back; the floor freezes it as any schema 5. Checked across builds: `server/tests/cross-build/` (S2 in
+    1-make; 2-floor / 3-return; 2-before-line on `.github/set-watch-line-before-commit` and 3-return-line).
+  - **Not alone in a test** (defence): `setWatchKindKnown`'s meeting check (the meeting type is a core type no company replaces),
+    `meetingFirstReadEvent`'s type check (`ledgerInto` reads meetings only).
+  - Tests: `server/tests/integration/job-set-watch-first-read.test.ts`, `server/tests/unit/job-set-watch-definition.test.ts` "the
+    second line", `client/tests/job-set-watch-run.test.ts` (the first message). Mutation check: 35 guards removed or inverted one
+    at a time, each fails a test (see the PR).
 - **Telling the record by its kind** (§2-2): `task_kind` is written by the minutes service only — a person's or an AI's
   create naming it is 400 `BAD_VALUE` (`record-engine/create.ts`), and no action takes it as an argument.
 - **Compatibility** (T11): an older server (the floor, 4b-0.5, and every build before this) does not know schema 5 and

@@ -114,7 +114,7 @@ export function acceptanceLines(d: JobDefinition): string[] {
       ...(check ? [check] : []),
       rights,
       ...setWatchGrantLines(d.grant),
-      setWatchMissedText(d.missed.expiresAfterMinutes),
+      setWatchMissedText(d.missed.expiresAfterMinutes, d.trigger),
       SET_WATCH_SEEN_NOTE,
     ]
   }
