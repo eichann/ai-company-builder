@@ -1,7 +1,8 @@
 // Meetings for their attendees (minutes.md "Meetings for their attendees", design §4-5): what the
-// task list's banner says for one meeting, in the member's words. Pure.
+// inbox's row says for one meeting (the banner on やること before 2026-11-26), in the member's words. Pure.
 import type { AiTurnItemView } from '../../../shared/ai-turns'
 import type { InviteSet, MeetingArrivalView, MeetingInviteChoicesResult } from '../../../shared/minutes-app'
+import type { MeetingNews } from '../../../shared/notifications-app'
 
 type InviteChoices = Extract<MeetingInviteChoicesResult, { success: true }>
 
@@ -33,41 +34,6 @@ export function invitedText(
   }).filter(Boolean)
   const all = [...people, ...sets]
   return all.length > 0 ? `${all.join('、')}を招待しました。` : '選んだ人は、もうこの会議を見られます。'
-}
-
-const pad = (n: number) => String(n).padStart(2, '0')
-const dayKey = (d: Date) => `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`
-
-/** 「今日 12:00」「昨日 15:00」「11/2 15:00」 in the member's clock ('' when unknown). */
-export function meetingWhen(iso: string | null, now: number): string {
-  const d = iso ? new Date(iso) : null
-  if (!d || Number.isNaN(d.getTime())) return ''
-  const time = `${d.getHours()}:${pad(d.getMinutes())}`
-  const today = new Date(now)
-  const yesterday = new Date(today.getFullYear(), today.getMonth(), today.getDate() - 1)
-  if (dayKey(d) === dayKey(today)) return `今日 ${time}`
-  if (dayKey(d) === dayKey(yesterday)) return `昨日 ${time}`
-  return `${d.getMonth() + 1}/${d.getDate()} ${time}`
-}
-
-/**
- * A row's 「定例ミーティング・今日 12:00」. No count here: the number of people ACB knows on a meeting
- * is not how many attended (the card says what it counts, `meetingSeenWords`).
- */
-export function meetingRowWords(item: Pick<MeetingArrivalView, 'title' | 'meetingAt'>, now: number): string {
-  return [item.title, meetingWhen(item.meetingAt, now)].filter(Boolean).join('・')
-}
-
-/** Rows shown above the list; the rest fold behind 「ほか N 件」, so a first discovery never takes over the pane. */
-export const MEETING_ROWS_SHOWN = 2
-
-export function foldMeetings<T>(rows: readonly T[]): { shown: readonly T[]; folded: readonly T[] } {
-  return { shown: rows.slice(0, MEETING_ROWS_SHOWN), folded: rows.slice(MEETING_ROWS_SHOWN) }
-}
-
-/** The folded rows ［まとめて読まない］ acts on: the ones still offering ［読まない］ as arrived. */
-export function skippableMeetings<T extends { banner: MeetingBanner }>(folded: readonly T[]): T[] {
-  return folded.filter(r => r.banner.kind === 'arrived')
 }
 
 /** 「決めたこと2・やることの案3」; 「やることの案3」 while 決めたこと is turned off (「使う機能」). */
@@ -125,6 +91,52 @@ export function meetingBanner(item: MeetingArrivalView, ctx: { closed: boolean; 
     case 'skipped':
       return item.byYou ? null : { kind: 'skipped', by: item.by?.displayName || '参加者' }
   }
+}
+
+/** The server looks 3 days back for meetings (minutes.md): one still waiting says so from its second day on. */
+export const MEETING_EXPIRES_SOON_MS = 2 * 24 * 60 * 60 * 1000
+export const MEETING_EXPIRES_SOON_WORDS = 'あと1日で読めなくなります'
+
+/**
+ * One meeting of the last days as the inbox's row (owner decision 2026-11-26: the banner on やること is gone, its rows
+ * live in the inbox), or null when it has none (hidden after the member's own ［読まない］). `closed`: its
+ * 「読み終わりました」 was looked at on this PC — a `read` row then stays findable as seen, never new again.
+ */
+export function meetingNewsOf(item: MeetingArrivalView, banner: MeetingBanner | null, ctx: { now: number; closed: boolean; decisionsOn?: boolean }): MeetingNews | null {
+  if (!banner) return null
+  const at = item.meetingAt ? Date.parse(item.meetingAt) : NaN
+  const base = { id: item.recordId, title: item.title, meetingAt: item.meetingAt, seen: false }
+  // Only what still waits to be read can run out; a finished reading stays in the meeting's card.
+  const soon = (waits: boolean) => waits && !Number.isNaN(at) && ctx.now - at >= MEETING_EXPIRES_SOON_MS
+  switch (banner.kind) {
+    case 'arrived':
+      // The badge says it arrived; the line says what the press does (or why it is offered again).
+      return { ...base, stage: 'arrived', line: banner.failedBefore ? '前回は AI が読めませんでした。もう一度読ませられます' : `AI に読ませると、${ctx.decisionsOn === false ? '' : '決めたことと'}やることの案を作ります`, expiresSoon: soon(true) }
+    case 'reading':
+      return { ...base, stage: 'reading', line: banner.problem ? banner.problem.reason : readingWords(banner), expiresSoon: soon(banner.waiting) }
+    case 'read':
+      return { ...base, stage: 'read', line: `読み終わりました：${madeWords(item.made, ctx.decisionsOn)}`, expiresSoon: false, seen: ctx.closed }
+    case 'skipped':
+      return { ...base, stage: 'skipped', line: `${banner.by}さんが読まないにしました`, expiresSoon: false }
+  }
+}
+
+/**
+ * One row per meeting: the arrivals' rows first; a meeting also in the task list's turns (a department without the list)
+ * keeps the arrival's look unless the list says this PC's AI stopped on it, and gains the list's buttons it lacks.
+ */
+export function mergeMeetingRows<R extends MeetingNews & { actions: Array<{ label: string }> }>(arrivals: readonly R[], turns: readonly R[]): R[] {
+  const out = new Map<string, R>(arrivals.map(r => [r.id, r]))
+  for (const t of turns) {
+    const a = out.get(t.id)
+    if (!a) { out.set(t.id, t); continue }
+    const base = t.stage === 'stopped' ? { ...t, meetingAt: a.meetingAt } : a
+    // One way to set it aside: the arrival's ［読まない］ (with its 元に戻す) wins over the list's ［今は読まない］.
+    const skips = a.actions.some(x => x.label === '読まない')
+    const extra = t.actions.filter(x => !a.actions.some(y => y.label === x.label) && !(skips && x.label === '今は読まない'))
+    out.set(t.id, { ...base, actions: [...a.actions, ...extra] })
+  }
+  return [...out.values()]
 }
 
 /** The line of a meeting the AI reads (or will), in the member's words. */

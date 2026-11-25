@@ -526,6 +526,15 @@ const api: Partial<ElectronAPI> = {
   getMeetingArrivals: async () => featuresParam.includes('listoff')
     ? { available: true, items: [{ recordId: 'meeting-0000cc', title: 'A社 定例', version: 2, meetingAt: '2026-11-02T01:00:00Z', status: 'arrived' as const, attendeeCount: 2, by: null, byYou: false, series: false, autoSeries: false, made: null }] }
     : { available: false, items: [] },
+  // With the task list off the arrived meeting is the inbox's row (its 「議事録が届きました」 notice unread).
+  ...(featuresParam.includes('listoff') ? {
+    watchNotifications: async () => {},
+    onNotificationsChanged: () => () => {},
+    getNotificationsState: async () => ({
+      available: true, myTurn: { total: 0, items: [] },
+      notices: { available: true, unread: 1, items: [{ id: 'n-m', kind: 'minutes_arrived' as const, recordId: 'meeting-0000cc', recordType: 'meeting', recordTitle: 'A社 定例', version: 2, text: '議事録が届きました：「A社 定例」', createdAt: new Date().toISOString(), read: false }] },
+    }),
+  } : {}),
 }
 // ?manual=1&tasks=manual: the title bar's ［受け箱］ counts what waits for 山田さん (chapter 17).
 if (MANUAL && params.get('tasks') === 'manual') {
@@ -1095,9 +1104,11 @@ Object.assign((window as unknown as { __acbLayout: object }).__acbLayout, {
 useAuthStore.setState({ user: { id: 'u_me', email: 'yamada@example.com', name: MANUAL ? '山田 太郎' : '山田 花子', image: null, emailVerified: true } })
 openCompany(COMPANY)
 
+const PREVIEW_NEWS_SINCE = '2026-01-01T00:00:00.000Z'
 // App.tsx shows the screen only while a company is open.
 function Screen() {
   const company = useAppStore(s => s.currentCompany)
-  return company ? <AppShell key={company.id} bottomPanel={BOTTOM_PANEL} /> : null
+  // The manual's fixed clock (2026-11-20) is before the inbox's first day: its notices count as 新着 here.
+  return company ? <AppShell key={company.id} bottomPanel={BOTTOM_PANEL} inboxNewsSince={PREVIEW_NEWS_SINCE} /> : null
 }
 createRoot(document.getElementById('root')!).render(<div className="h-screen"><Screen /></div>)

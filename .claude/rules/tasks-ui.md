@@ -141,8 +141,8 @@ meetings), `notifications.md` (「あなたの番」 in the inbox and the title 
 - **A task only the member sees shows whatever department is on screen**: the list is read per
   company (no folder in any of its requests) and owner-only tasks come in 「あなたの番」 like any
   other; a department tab never narrows it (`tests/tasks-list.test.ts`). Where the company hides
-  the tab for that department (`taskListDepartmentIds`), the title bar's ［受け箱］ (あなた待ち) still
-  counts it. `useCalendarToday`:
+  the tab for that department (`taskListDepartmentIds`), the inbox still shows its approvals and mail (あなた待ち) and
+  its notices (新着). `useCalendarToday`:
   at mount, every 10 minutes, and **at once when the app sees the member's Google permission
   change** (owner FB 2026-11-04: 「Google の設定を全部終えたのに、今日の予定が出ない」 — the list said
   「許可をすると…」 for up to 10 minutes). Settings' Google reads (`features/settings/api.ts`
@@ -151,7 +151,13 @@ meetings), `notifications.md` (「あなたの番」 in the inbox and the title 
   featuresOff differ from the last read for that company (the first read is silent). Test:
   `tests/ui/connect-tools.spec.ts` 「today's calendar is read again as soon as Google is allowed…」.
 - `model.ts` (pure, `model.test.ts`): "today" is the company's day (`companyNow`, Japan time until a
-  setting exists). **By turn**: 引き受け待ち, あなたの番 (today's meetings still to come mixed in),
+  setting exists). **By turn**: 引き受け待ち, then the member's turn by when (owner decision 2026-11-26, 「受け箱の作り直し」: a
+  due today is the list's, never the inbox's) — **期限切れ** as one line with 「まとめて直す…」 (`OverdueFix.tsx`: ［全部 来週の月曜へ］
+  (`nextMondayDue`, that Monday 09:00) ［全部 期限なしに］ and per row ［来週へ］ ［やめる］ — `set_due` where the type lets the member
+  (`overdueFixes`: task, 返事のお願い), `cancel` = アーカイブ only on their own task; each at the version the list knows, one
+  ［元に戻す］ that undoes every entry it made; when some of them were asked by someone else, 「うち N 件は頼まれたものです。頼んだ人に
+  知らせが届きます。」 is said before the press (`askedByOthers`, owner 2026-11-26), else nothing), **今日** (today's meetings still
+  to come mixed in), **このあと**,
   AI の番, ほかの人の番・返事待ち, 先のこと (a task resting in the member's turn due after this week —
   folded until opened), **いつか** (a resting task with no due — folded), 今日終わったこと (today's meetings that are over too; 「あしたの朝に空になります」).
   **By date**: 期限切れ, 今日 (meetings to come), 明日, 今週, あとで (folded), 期限なし, 今日終わったこと.
@@ -935,16 +941,15 @@ asked only while 決めたこと is on). AppShell reads them with `featuresFrom`
 
 - **やることの一覧 off**: no やること tab anywhere (`tasksShown` also needs `features.taskList`;
   `taskListDepartmentIds` still narrows when on). Instead the tab **「確かめること」** (`CorePressPanel.tsx`):
-  「今日の予定」 (while 会議 is on), the arrived minutes (`MeetingBanners`, ［AI に読ませる］), then
+  「今日の予定」 (while 会議 is on), then
   「確かめること」 — approvals waiting for the member and what the AI prepared for them
   (`corePressItems`, `client/shared/tasks.ts`; `aiPrepared`: a handed-over `prep_summary` or
   「議事録を確認する」), and 決めたこと to confirm. Rows open the card where the press happens. The
-  morning summary's Mac notification opens the inbox (I2). The inbox counts the arrived minutes too
-  (`arrivedMeetingTurns`, `notifications.md`), whoever may see the meeting, until someone presses
-  ［AI に読ませる］.
+  morning summary's Mac notification opens the inbox. The arrived minutes are the inbox's rows
+  (`notifications.md` "The inbox"), for whoever may see the meeting.
 - **会議と議事録 off**: no 「今日の予定」 (the list's `showCalendar`; `useCalendarToday` reads nothing),
   no 「議事録が届きました」, no 「議事録を確かめる」, no ［自分で読み取る］.
-- **決めたこと off**: the meeting lines say only やることの案 (`madeWords`, `MeetingBanners`'s title), the
+- **決めたこと off**: the meeting lines say only やることの案 (`madeWords`, the inbox row's line and the ［AI に読ませる］ title), the
   manual reading's first message asks for no decision (`startMinutesReading(…, features)`).
 - **プロジェクト off**: `departmentBundleKind` gives null for the core's kind (`coreOff`), so nothing
   offers 「新しいプロジェクトにする」; a business plugin's kind is unchanged.
@@ -954,11 +959,9 @@ asked only while 決めたこと is on). AppShell reads them with `featuresFrom`
 
 ## Minutes and AI turns (S11, owner decision 2026-11-01: 議事録の帯をやめる)
 
-Since 2026-11-04 (meetings for their attendees, design §4-5) one compact block sits above the list
-— 「議事録が届きました」 / 「AI が読んでいます…」 / 「読み終わりました」, two one-line rows, the rest behind
-「ほか N 件」, at most 45% of the pane so the list always keeps its place and scroll — from the
-server's arrivals, with ［AI に読ませる］［読まない］: `minutes.md` "In the app". The rows below are
-unchanged.
+Since 2026-11-26 the meetings of the server's arrivals are rows of the inbox (the block above the list is gone):
+「議事録が届きました」 / 「AI が読んでいます…」 / 「読み終わりました」 with ［AI に読ませる］［読まない］: `minutes.md` "In the app",
+`notifications.md` "The inbox". The rows below are unchanged.
 
 - No banner: a received meeting is a row of 「AI の番」 (the server's `ai-turn`), showing the automatic
   runner's state in words and its reason (「AI が進めています」「AI では始められません：…」…), with
@@ -985,7 +988,7 @@ unchanged.
   the chooser). Two or more of one group are one row 「〇〇を選ぶ会議 n件」 that opens (`listRows`,
   `model.ts`). Tests: `tasks-list.spec.ts` (案件 in 営業部, no 「まとまり」), `notifications.test.ts`,
   `minutes.spec.ts`.
-- **A department without the list** (`tasksShown` false): the same meetings reach the title bar
+- **A department without the list** (`tasksShown` false): the same meetings are rows of the inbox
   instead (`notifications.md` "The app"): `meetingTurns` (`client/shared/notifications-app.ts`)
   picks the `needsBundle` items and the received meetings in 「AI の番」 from the list AppShell already
   reads, with the runner's state (`meetingTurns(…, word)`); the minutes feature's `useMinutesSlots` gives each its buttons (〇〇を選ぶ → `BundleChooser`,

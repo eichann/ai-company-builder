@@ -132,12 +132,14 @@ const DEFAULT_LEFT_PANEL = 'skills'
 interface AppShellProps {
   /** What the bottom panel shows (the inbox, I1, hands it in); without it there is no panel, button or ⌘J. */
   bottomPanel?: BottomPanelContent
+  /** The inbox's first day: only a preview on a fixed clock before it (the manual's) hands another. */
+  inboxNewsSince?: string
 }
 
 // A plan's state moving on any card (the chat's ［任せる］) makes the inbox read its plans again.
 const PLAN_STATES = { subscribe: subscribePlanStates, version: planStatesVersion }
 
-export function AppShell({ bottomPanel }: AppShellProps = {}) {
+export function AppShell({ bottomPanel, inboxNewsSince }: AppShellProps = {}) {
   const { t } = useTranslation()
   const currentCompany = useAppStore((s) => s.currentCompany)
   const rootPath = currentCompany?.rootPath
@@ -530,14 +532,14 @@ export function AppShell({ bottomPanel }: AppShellProps = {}) {
     showLeftTab(id)
   }
   const openTasks = () => { if (tasksShown) selectLeftTab('tasks'); else if (pressShown) selectLeftTab('press') }
-  // The inbox (features/inbox, I1) is the bottom panel's content: rows from 「あなたの番」, the notices main
-  // already read and the meetings the title bar carried; its approval and mail rows open the same cards as a
-  // task (a preview may hand in a sample instead). Its ［受け箱］ is the title bar's (I2).
+  // The inbox (features/inbox) is the bottom panel's content: あなた待ち and 新着 from what main already read and the
+  // meetings; its approval and mail rows open the same cards as a task (a preview may hand in a sample instead).
+  // Its ［受け箱］ is the title bar's.
   const inbox = useInboxSlot({
     // From a department not downloaded here (its prompt hides the middle and the list), 全社 shows what was opened.
-    companyId: currentCompany?.id, notices, meetings: meetings.titleBarMeetings, features,
-    // Every source of its rows answered once (the task list behind the meetings, the arrivals): the dot's baseline.
-    ready: (taskList.data !== null || taskList.error !== null) && meetings.titleBarMeetingsRead,
+    companyId: currentCompany?.id, notices, features,
+    // The meetings (the banner on やること before 2026-11-26) are its rows, each with the minutes feature's buttons.
+    meetings: meetings.inboxMeetings, onMeetingSeen: meetings.inboxMeetingSeen, meetingNote: meetings.meetingSuggestion, newsSince: inboxNewsSince,
     open: bottomOpen && !bottomPanel, onToggle: () => setBottomOpen(o => !o),
     onOpenRecord: id => { if (isSelectedDeptUnsynced) handleSelectDept(COMPANY_TAB_ID); openTab(recordTabKey(id)) },
     onOpenTasks: () => { if (isSelectedDeptUnsynced) handleSelectDept(COMPANY_TAB_ID); openTasks() },
@@ -616,7 +618,6 @@ export function AppShell({ bottomPanel }: AppShellProps = {}) {
       dot: leftTab !== 'tasks' && myTurnIds.some(id => !seenTasks.seen.has(id)),
       render: () => currentCompany && rootPath ? (
         <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col">
-        {meetings.banners()}
         <div className="flex min-h-0 flex-1">
         <TaskListPanel
           companyId={currentCompany.id}
@@ -638,13 +639,12 @@ export function AppShell({ bottomPanel }: AppShellProps = {}) {
       ) : null,
     },
     {
-      // The task list turned off (「使う機能」): what only ACB can act on, with 今日の予定 and arrived minutes above it.
+      // The task list turned off (「使う機能」): what only ACB can act on, with 今日の予定 (arrived minutes: the inbox).
       id: 'press', title: '確かめること', icon: HandPointing, mount: 'once-opened', className: 'flex',
       visible: pressShown,
       render: () => currentCompany ? (
         <CorePressPanel companyId={currentCompany.id} data={taskList.data} showCalendar={features.meetings}
-          onOpen={id => { const item = taskList.data?.items.find(i => i.id === id); if (item) openListItem(item); else openTab(recordTabKey(id)) }}
-          meetings={meetings.banners()} />
+          onOpen={id => { const item = taskList.data?.items.find(i => i.id === id); if (item) openListItem(item); else openTab(recordTabKey(id)) }} />
       ) : null,
     },
     {
@@ -717,6 +717,7 @@ export function AppShell({ bottomPanel }: AppShellProps = {}) {
       />
       <LeaveConfirmDialog question={leaving.question} onAnswer={leaving.answer} />
       {inbox?.dialog}
+      {meetings.meetingToast}
       <DepartmentBar
         departments={departments}
         isLoading={isLoadingDepartments}

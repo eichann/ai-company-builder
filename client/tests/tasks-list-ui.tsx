@@ -70,6 +70,12 @@ const manualData: TaskListData = {
   ],
 }
 let data: TaskListData = MANUAL ? manualData : defaultData
+// `?overdue=1`: two of the member's tasks past their due — their own (moved or dropped here) and one 田中さん asked (moved only);
+// `?overdue=own`: the own one alone.
+if (params.get('overdue')) data = { ...data, items: [...data.items,
+  it({ id: 'task-late01', title: '経費の精算をする', turn: 'mine', due: day(-3), own: true, personal: true, check: { action: 'complete' } }),
+  ...(params.get('overdue') === 'own' ? [] : [it({ id: 'task-late02', title: '研修の感想を送る', turn: 'mine', due: day(-10), check: { action: 'complete' } })]),
+] }
 // `?manual=1`: what the automatic 「AI の番」 says about its two rows (one working, one stopped after its tries).
 const manualAiTurns = {
   items: [
@@ -88,6 +94,7 @@ const archived = MANUAL ? MANUAL_ARCHIVED.map((title, n) => ({
 }))
 const changed = emitter<{ companyId: string }>()
 const acted: string[] = []
+const overdueBefore = new Map<string, TaskListItem>()
 
 installElectronAPI({
   getTaskList: async () => ({ success: true, data }),
@@ -143,7 +150,9 @@ installElectronAPI({
   undoTaskAction: async (_companyId, recordId, version, expected) => {
     acted.push(`${recordId}:undo ${version}@${expected}`)
     document.getElementById('acted')!.textContent = acted.join(',')
-    data = { ...data, items: data.items.map(i => (i.id === recordId ? { ...i, turn: 'mine' as const, state: 'unsure', version: i.version + 1, finishedAt: null, check: { action: 'settle' as const } } : i)) }
+    const was = overdueBefore.get(recordId)
+    if (was) { data = { ...data, items: [...data.items.filter(i => i.id !== recordId), { ...was, version: version + 1 }] }; return { success: true, recordId } }
+    data ={ ...data, items: data.items.map(i => (i.id === recordId ? { ...i, turn: 'mine' as const, state: 'unsure', version: i.version + 1, finishedAt: null, check: { action: 'settle' as const } } : i)) }
     return { success: true, recordId }
   },
   actOnTask: async (_companyId, recordId, input) => {
@@ -153,6 +162,14 @@ installElectronAPI({
     if (input.action === 'request_review') data = { ...data, items: data.items.map(i => (i.id === recordId ? { ...i, turn: 'others' as const, state: 'review', waitingFor: '阿部さんの番', check: undefined } : i)) }
     if (input.action === 'settle') data = { ...data, items: data.items.map(i => (i.id === recordId ? { ...i, turn: 'done' as const, state: 'handled', version: i.version + 1, finishedAt: new Date().toISOString(), check: { action: 'undo' as const, version: i.version + 1 } } : i)) }
     if (input.action === 'complete') data = { ...data, items: data.items.map(i => (i.id === recordId ? { ...i, turn: 'done' as const, state: 'done', finishedAt: new Date().toISOString(), check: { action: 'reopen' as const } } : i)) }
+    // 期限切れ's まとめて直す (`?overdue=1`): the due moved or the task archived, its entry answered for 元に戻す.
+    const item = data.items.find(i => i.id === recordId)
+    if (item && (input.action === 'set_due' || input.action === 'cancel')) {
+      overdueBefore.set(recordId, item)
+      const next = { ...item, version: item.version + 1, due: input.action === 'set_due' ? (input.args?.due as string | null) : item.due }
+      data = { ...data, items: input.action === 'cancel' ? data.items.filter(i => i.id !== recordId) : data.items.map(i => (i.id === recordId ? next : i)) }
+      return { success: true, recordId, entryVersion: item.version + 1 }
+    }
     return { success: true, recordId }
   },
 })

@@ -64,7 +64,7 @@ test('返事待ち (task version 12): the row says its 見込み; once the clock
   assert.equal(cameBackLine('先方からの返事', '2026-11-03T01:00:00.000Z', '2026-11-09', ['2026-11-05']), '先方からの返事が来ていません（3日）')
 })
 
-test('「あなたの番」 in the list is exactly what the title bar counts (and the morning summary): a resting task goes to 先のこと / いつか in both', () => {
+test('the list\'s 期限切れ + 今日 + このあと are exactly this week\'s turn (the morning summary\'s count): a resting task goes to 先のこと / いつか in both', () => {
   // Tuesday 2026-11-03 10:00 in Japan.
   const now = companyNow(Date.parse('2026-11-03T01:00:00.000Z'))
   const myTurn = [
@@ -86,7 +86,7 @@ test('「あなたの番」 in the list is exactly what the title bar counts (an
     return { id: r.id, type: r.type, title: r.title, state: r.state, due: null, ...(t !== 'now' ? { timing: t } : {}) }
   })
   const bar = thisWeeksTurn(turnItems, turnItems.length)
-  assert.deepEqual(sections.mine, bar.items.map(i => i.id).sort())
+  assert.deepEqual([...(sections.overdue ?? []), ...(sections.today ?? []), ...(sections.next ?? [])].sort(), bar.items.map(i => i.id).sort())
   assert.equal(bar.total, 7)
   assert.deepEqual(sections.later, ['task-next01'])
   assert.deepEqual(sections.someday, ['task-asked1', 'task-none01'])

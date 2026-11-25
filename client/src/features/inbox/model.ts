@@ -1,18 +1,20 @@
-// The inbox (受け箱, I1; design 2026-11-22 「下のパネルを「受け箱」1 つにする」): one list of what the server
-// already says concerns the member — 「あなたの番」 (`/records/my-turn`, this week's) and the notices
-// (`/me/notifications`) — ordered by what it needs from them. Pure: no React, no IPC. The inbox stores
-// nothing of its own (what the server answered is rebuilt into rows every time), and it never decides
-// who may see what: every row comes from an answer the server already filtered for this member.
+// The inbox (受け箱; redesign 2026-11-26, notifications.md "The inbox"): only two things — あなた待ち (what is stopped until
+// the member acts: a stopped job, an approval, a mail to check before it goes; it leaves only when done) and 新着 (notices
+// the member has not looked at yet; opening one or ［確認した］ moves it to 「確認したもの」). Tasks are the left list's, never
+// rows or counts here. Pure: no React, no IPC. Nothing is stored: every answer main hands over is rebuilt into rows, and the
+// inbox never decides who may see what — every row comes from an answer the server already filtered for this member.
+// Over ~300 lines on purpose: the placement rules (which row, which section, which count) are one table read together.
 import { UNDOABLE_NOTIFICATION_KINDS, type NotificationItem, type NotificationKind } from '../../../../shared/types/notifications'
 import { STOP_LOOK, type StopMeaning } from '../../../../shared/design-tokens/stop-meaning'
-import type { MeetingTurn, NoticesState, TurnItem } from '../../../shared/notifications-app'
+import type { MeetingNews, NoticesState, TurnItem } from '../../../shared/notifications-app'
 import { jobNoticeTarget } from '../../../shared/jobs'
 import { thingKindOf, thingName, type ThingKind } from '../../../shared/thing-words'
 import type { BrowserInboxPlans } from '../../../shared/browser-plans'
 
-/** あなた待ち (only the member's press moves it), 作業中, できた・未確認. */
-export type InboxState = 'waiting' | 'working' | 'done'
-export type InboxFilter = 'all' | InboxState
+/** あなた待ち, 新着 (counted), 「動いているもの」 under 新着 (not counted), 確認したもの. */
+export type InboxSection = 'waiting' | 'new' | 'moving' | 'seen'
+/** The chips: 「新着」 shows あなた待ち and 新着 (the first look), the others one part each. */
+export type InboxFilter = 'new' | 'waiting' | 'seen'
 
 /**
  * What a row's main button does. There is deliberately no approve or send here: ［承認する…］ and
@@ -26,17 +28,17 @@ export type InboxAction =
   | { kind: 'openBrowserPlan'; planId: string }
   | { kind: 'openTasks' }
   | { kind: 'openJobs' }
-  /** A notice about nothing that can be opened: opening only marks it seen (its text says it all). */
+  /** A notice about nothing that can be opened: its text says it all. */
   | { kind: 'none' }
 
 /** The badge's look: a stop by its meaning (`STOP_LOOK`), else a plain set. */
-export type InboxTone = StopMeaning | 'success' | 'neutral' | 'ai'
+export type InboxTone = StopMeaning | 'success' | 'neutral' | 'ai' | 'info'
 
 export interface InboxItem {
-  /** One job = one row: `record:<id>` for a record, `notice:<id>` for a notice about no row, `browser:<planId>` for a plan. */
+  /** One job = one row: `record:<id>` for a record (a meeting too), `notice:<id>` for a notice about no record, `browser:<planId>`. */
   key: string
-  state: InboxState
-  /** Order inside あなた待ち (smaller first): stopped, a run nobody knows the result of, approval, mail, check, the rest. */
+  section: InboxSection
+  /** Order inside あなた待ち (smaller first): stopped, a run nobody knows the result of, approval, mail. */
   rank: number
   /** What it is, for the icon ('notice' for a notice about no record). */
   thing: ThingKind | 'notice'
@@ -44,34 +46,42 @@ export interface InboxItem {
   /** One line: the newest unread notice about it, or what it needs. */
   line: string
   badge: { tone: InboxTone; word: string }
-  /** Where it comes from, in members' words (承認のお願い, やること, 知らせ…). */
+  /** Where it comes from, in members' words (承認のお願い, 知らせ, 議事録…). */
   source: string
   due: string | null
-  /** When the notice was made (a turn item has none). */
+  /** When the notice came (or the meeting was): the row's time and the order of 新着. */
   at: string | null
-  /** Unread notices this row stands for: opening the row marks exactly these read. */
+  /** Unread notices this row stands for: opening it (or ［確認した］) marks exactly these read. */
   unreadNoticeIds: string[]
   action: InboxAction
   /** The main button's words (「承認する…」, 「確かめて送る…」, 「開く」). */
   actionLabel: string
   /**
-   * A meeting the title bar used to carry (a department without the task list, `useMinutesSlots`): its
-   * own buttons (choose a まとまり, read it yourself, もう一度…) are the minutes feature's, found by this id.
+   * A stop notice (あなた待ち): opening it never marks it read — only ［済んだ］ does, or the server settling it — so looking
+   * at it is not mistaken for having dealt with it (owner decision 2026-11-26 「見ただけでは消えない」).
    */
+  stop?: true
+  /** A meeting row: its own buttons are the minutes feature's (found by this id). */
   meetingId?: string
-  /** ［元に戻す］ of a done notice that offers it (UNDOABLE_NOTIFICATION_KINDS, `ai_changed`). */
+  /** A finished meeting's 「読み終わりました」: opening it or ［確認した］ marks it looked at on this PC (no notice holds it). */
+  meetingNews?: true
+  /** 「あと1日で読めなくなります」: a meeting still waiting to be read that the server drops tomorrow. */
+  expiresSoon?: true
+  /** ［元に戻す］ of a notice that offers it (UNDOABLE_NOTIFICATION_KINDS, `ai_changed`). */
   undo?: { noticeId: string; recordId: string; version: number; aiChange?: { pluginId: string; operationId: string } }
 }
 
-/** できた・未確認 older than this is not a row but one folded line (owner decision ⑥). */
-export const DONE_KEEP_DAYS = 14
-/** The whole list's rows at most; the oldest できた go first, あなた待ち never. */
-export const INBOX_MAX_ROWS = 100
+/**
+ * The first day (owner decision 2026-11-26, Q4): notices from before this moment start in 「確認したもの」 — one fixed
+ * instant for every member and PC, so it never moves: run again, on another PC or later, it never takes a notice that came
+ * after it (a moving 「first day on this PC」 would, on a member's second PC). It is the day the redesign was decided, so a
+ * release later than it only shows a few more days as 新着 (the safe side), never fewer. Stops are not news: no cutoff.
+ */
+export const INBOX_NEWS_SINCE = '2026-11-25T15:00:00.000Z' // 2026-11-26 00:00 in Japan
 
 /**
- * Notices that say something stopped (owner decision ③): あなた待ち while unread, gone once opened (today's
- * read state — no new 「済んだ」 on the server). Their look by what the stop means for the member
- * (`STOP_LOOK`, design-system.md 「止まっている」の色): a failure red, something they must pick up amber.
+ * Notices that say something stopped: あなた待ち while unread and not settled. Their look by what the stop means for the
+ * member (`STOP_LOOK`, design-system.md 「止まっている」の色): a failure red, something they must pick up amber.
  */
 const STOP_NOTICES: Partial<Record<NotificationKind, StopMeaning>> = {
   job_failed: 'failed',
@@ -85,12 +95,8 @@ const STOP_NOTICES: Partial<Record<NotificationKind, StopMeaning>> = {
   browser_shape_changed: 'needsAction',
 }
 
-/**
- * Notices that only tell of something finished or changed: できた・未確認 (owner decision ④), the only ones
- * 「まとめて確認済みにする」 may clear. Every other kind — one that asks for something, and any kind this app
- * does not know yet — waits for the member (the safe side).
- */
-const DONE_WORDS: Partial<Record<NotificationKind, { tone: InboxTone; word: string }>> = {
+/** A news row's badge by its notice's kind (a kind this app does not know: 「お知らせ」 — still news, never dropped). */
+const NEWS_WORDS: Partial<Record<NotificationKind, { tone: InboxTone; word: string }>> = {
   request_done: { tone: 'success', word: '終わりました' },
   ok_completed: { tone: 'success', word: '完了しました' },
   request_accepted: { tone: 'success', word: '引き受けられました' },
@@ -100,63 +106,42 @@ const DONE_WORDS: Partial<Record<NotificationKind, { tone: InboxTone; word: stri
   mail_archived: { tone: 'neutral', word: 'アーカイブしました' },
   // Skipped on purpose (the responsible person was absent): nothing to do.
   job_skipped: { tone: 'stoppedOnPurpose', word: STOP_LOOK.stoppedOnPurpose.word },
-}
-/**
- * 「変わりました」 news about a record (owner decision ④): できた・未確認 — unless the turn the server listed is
- * incomplete (past its first 200), when the record may be one waiting for the member: then あなた待ち.
- */
-const CHANGE_WORDS: Partial<Record<NotificationKind, { tone: InboxTone; word: string }>> = {
   due_changed: { tone: 'neutral', word: '変わりました' },
   others: { tone: 'neutral', word: '変わりました' },
   ai_changed: { tone: 'ai', word: 'AI が変えました' },
-}
-
-/** What a notice that asks for something says on its badge (a kind not listed: 「あなたの番」). */
-const ASK_WORDS: Partial<Record<NotificationKind, string>> = {
-  asked: '頼まれました',
-  from_message: 'やることができました',
-  overdue: '期限を過ぎました',
-  acceptance_waiting: '引き受け待ち',
-  request_returned: '戻ってきました',
-  intake_unsure: '確かめてください',
-  wait_over: '見込みを過ぎました',
-  reply_arrived: '返事が来ました',
-  due_tomorrow: '明日が期限',
-  minutes_arrived: '議事録が届きました',
-  job_accept_needed: '受け取ってください',
-  job_proposal_returned: '差し戻されました',
-  job_proposal: '案が届きました',
+  asked: { tone: 'info', word: '頼まれました' },
+  from_message: { tone: 'info', word: 'やることができました' },
+  overdue: { tone: 'neutral', word: '期限を過ぎました' },
+  acceptance_waiting: { tone: 'neutral', word: '引き受け待ち' },
+  request_returned: { tone: 'neutral', word: '戻ってきました' },
+  intake_unsure: { tone: 'neutral', word: '確かめてください' },
+  wait_over: { tone: 'neutral', word: '見込みを過ぎました' },
+  reply_arrived: { tone: 'info', word: '返事が来ました' },
+  due_tomorrow: { tone: 'neutral', word: '明日が期限' },
+  minutes_arrived: { tone: 'info', word: '議事録が届きました' },
+  job_accept_needed: { tone: 'neutral', word: '受け取ってください' },
+  job_proposal_returned: { tone: 'neutral', word: '差し戻されました' },
+  job_proposal: { tone: 'info', word: '案が届きました' },
   // A set watch's 見送る (4b-4 PR6): opens 「定期の仕事」, where its ［作ってもらう］ is.
-  job_set_declined: 'AI は作りませんでした',
+  job_set_declined: { tone: 'neutral', word: 'AI は作りませんでした' },
 }
+const NEWS_DEFAULT = { tone: 'neutral' as const, word: 'お知らせ' }
 
-/**
- * An unread notice the server marks settled (`settled`, shared/core/notification-settle.ts: the meeting was taken up
- * (read, being read or set aside), the occurrence ran afterwards, the job runs again): できた・未確認 with this badge, out of あなた待ち and its
- * count, never a stop. Still unread: opening it marks it read as any notice.
- */
+/** An unread notice the server marks settled (`shared/core/notification-settle.ts`): news that its matter is over. */
 const SETTLED_WORDS = { tone: 'success' as const, word: '片付きました' }
 
-/** Notices that are no row at all: the morning summary says what あなた待ち already counts. */
+/** Notices that are no row at all: the morning summary only counts the left list. */
 const NO_ROW_NOTICES: ReadonlySet<NotificationKind> = new Set(['morning_summary'])
 
-/** Where a notice that is not part of a listed row goes. */
-export function noticePlace(kind: NotificationKind, turnComplete: boolean, settled = false): 'stop' | 'done' | 'waiting' {
-  if (settled) return 'done'
-  if (STOP_NOTICES[kind]) return 'stop'
-  if (DONE_WORDS[kind]) return 'done'
-  if (CHANGE_WORDS[kind] && turnComplete) return 'done'
-  return 'waiting'
-}
+/** Is this notice a stop that still waits for the member (あなた待ち)? A settled one is news that it is over. */
+export const isWaitingStop = (n: Pick<NotificationItem, 'kind' | 'settled' | 'read'>) => !n.read && n.settled !== true && STOP_NOTICES[n.kind] !== undefined
 
-
-const RANK = { stopped: 0, unsure: 1, approval: 2, mail: 3, check: 4, other: 5 } as const
+const RANK = { stopped: 0, unsure: 1, approval: 2, mail: 3, other: 5 } as const
 
 /**
- * 「ブラウザ操作」 rows (the member's own, `browserPlans:list`; none while the switch is off on this PC): a draft
- * waits for their approval, a run nobody knows the result of waits for their 「済んでいた」/「されていなかった」 once
- * it can be pressed (until then, and while one may be sending, 作業中), an approved plan not started is 作業中.
- * Every row only opens the card; a settled plan is in neither server list, so it is gone (nothing is stored).
+ * 「ブラウザ操作」 rows (the member's own, `browserPlans:list`; none while the switch is off on this PC): a draft waits for
+ * their approval, a run nobody knows the result of waits for their 「済んでいた」/「されていなかった」 once it can be pressed;
+ * the rest moves on without them (under 新着, not counted). Every row only opens the card; a settled plan is gone.
  */
 function browserRows(b: BrowserInboxPlans): InboxItem[] {
   const rows = new Map<string, InboxItem>()
@@ -167,24 +152,25 @@ function browserRows(b: BrowserInboxPlans): InboxItem[] {
   for (const p of b.plans) {
     const title = `${p.label}（${p.site}）`
     rows.set(p.planId, p.state === 'draft'
-      ? { ...base(p.planId, title, p.createdAt), state: 'waiting', rank: RANK.approval, line: 'サイトから読み取った中身と届く時を確かめてから、カードで任せてください', badge: { tone: 'awaitingApproval', word: STOP_LOOK.awaitingApproval.word }, actionLabel: '承認する…' }
-      : { ...base(p.planId, title, p.createdAt), state: 'working', rank: RANK.other, line: '承認しました。様子はカードで見られます', badge: { tone: 'neutral', word: '承認しました' }, actionLabel: '開く…' })
+      ? { ...base(p.planId, title, p.createdAt), section: 'waiting', rank: RANK.approval, line: 'サイトから読み取った中身と届く時を確かめてから、カードで任せてください', badge: { tone: 'awaitingApproval', word: STOP_LOOK.awaitingApproval.word }, actionLabel: '承認する…' }
+      : { ...base(p.planId, title, p.createdAt), section: 'moving', rank: RANK.other, line: '承認しました。様子はカードで見られます', badge: { tone: 'neutral', word: '承認しました' }, actionLabel: '開く…' })
   }
   // A plan claimed for a run has left the open list; its run is the one row (the later list wins anyway).
   for (const e of b.unsure) {
     // The server's word (its clocks), not this PC's clock: the inbox reads again once `confirmableAt` has passed.
     const due = e.state === 'unknown' && e.canConfirm
     rows.set(e.planId, due
-      ? { ...base(e.planId, e.label, e.permittedAt), state: 'waiting', rank: RANK.unsure, line: 'サイトで確かめて、済んでいたかどうかをカードで押してください', badge: { tone: 'needsAction', word: '届いたか分かりません' }, actionLabel: '確かめる…' }
-      : { ...base(e.planId, e.label, e.permittedAt), state: 'working', rank: RANK.other, line: 'しばらくすると、届いたかどうかをカードで確かめられます', badge: { tone: 'neutral', word: '結果を待っています' }, actionLabel: '開く…' })
+      ? { ...base(e.planId, e.label, e.permittedAt), section: 'waiting', rank: RANK.unsure, line: 'サイトで確かめて、済んでいたかどうかをカードで押してください', badge: { tone: 'needsAction', word: '届いたか分かりません' }, actionLabel: '確かめる…' }
+      : { ...base(e.planId, e.label, e.permittedAt), section: 'moving', rank: RANK.other, line: 'しばらくすると、届いたかどうかをカードで確かめられます', badge: { tone: 'neutral', word: '結果を待っています' }, actionLabel: '開く…' })
   }
   return [...rows.values()]
 }
 
-function turnRow(item: TurnItem): InboxItem {
+/** A turn item that is あなた待ち (an approval, a mail to check before it goes), or null: tasks are the left list's. */
+function waitingTurnRow(item: TurnItem): InboxItem | null {
   const r = { type: item.type, state: item.state }
   const thing = thingKindOf(r)
-  const base = { key: `record:${item.id}`, state: 'waiting' as const, thing, title: item.title, source: thingName(r), due: item.due, at: null, unreadNoticeIds: [] }
+  const base = { key: `record:${item.id}`, section: 'waiting' as const, thing, title: item.title, source: thingName(r), due: item.due, at: null, unreadNoticeIds: [] }
   if (thing === 'approval') {
     // The approver's request waits for their approval; a request sent back waits for its requester to fix it.
     return item.state === 'sent_back'
@@ -194,26 +180,26 @@ function turnRow(item: TurnItem): InboxItem {
   if (thing === 'outbound') {
     return { ...base, rank: RANK.mail, line: '送る前に、宛先と中身を確かめてください', badge: { tone: 'awaitingApproval', word: '確かめて送る' }, action: { kind: 'openMailDraft', messageId: item.id }, actionLabel: '確かめて送る…' }
   }
-  const check = thing === 'minutes_check' || item.state === 'review'
-  const line = item.waitCameBack ? '返事の見込みを過ぎました。追いかけてください' : check ? '中身を確かめてください' : 'あなたの番です'
-  return { ...base, rank: check ? RANK.check : RANK.other, line, badge: { tone: 'neutral', word: check ? '確かめる' : 'あなたの番' }, action: { kind: 'openRecord', recordId: item.id, title: item.title }, actionLabel: '開く' }
+  return null
 }
 
-/**
- * A meeting of a department without the task list (what the title bar's 「あなたの番」 and bell carried
- * before I2): one waiting for the member is あなた待ち (a stopped reading first, by its meaning), one the
- * AI is reading or will read is 作業中.
- */
-function meetingRow(m: MeetingTurn): InboxItem {
-  const base = {
-    key: `record:${m.id}`, thing: 'meeting' as const, title: m.title, line: m.text, source: m.kind === 'bundle' ? '会議' : '議事録',
-    due: null, at: null, unreadNoticeIds: [], meetingId: m.id,
-    action: { kind: 'openRecord' as const, recordId: m.id, title: m.title }, actionLabel: '開く',
+const MEETING_BADGE: Record<Exclude<MeetingNews['stage'], 'stopped'>, { tone: InboxTone; word: string }> = {
+  arrived: { tone: 'info', word: '議事録が届きました' },
+  reading: { tone: 'ai', word: 'AI が読んでいます' },
+  read: { tone: 'success', word: '読み終わりました' },
+  ask: { tone: 'neutral', word: '選んでください' },
+  skipped: { tone: 'neutral', word: '読まないことになりました' },
+}
+
+function meetingRow(m: MeetingNews): InboxItem {
+  const stop = m.stage === 'stopped' ? (m.stop ?? 'failed') : null
+  return {
+    key: `record:${m.id}`, section: stop ? 'waiting' : 'seen', rank: RANK.stopped, thing: 'meeting', title: m.title, line: m.line,
+    badge: stop ? { tone: stop, word: STOP_LOOK[stop].word } : MEETING_BADGE[m.stage as Exclude<MeetingNews['stage'], 'stopped'>],
+    source: '議事録', due: null, at: m.meetingAt, unreadNoticeIds: [], meetingId: m.id,
+    action: { kind: 'openRecord', recordId: m.id, title: m.title }, actionLabel: '開く',
+    ...(m.expiresSoon ? { expiresSoon: true as const } : {}),
   }
-  if (!m.needsPerson) return { ...base, state: 'working', rank: RANK.other, badge: { tone: 'ai', word: m.ai?.state === 'waiting' ? 'AI が読む予定' : 'AI が読んでいます' } }
-  const stop: StopMeaning | null = m.ai?.state === 'failed' ? 'failed' : m.ai?.state === 'not-allowed' ? 'needsAction' : null
-  if (stop) return { ...base, state: 'waiting', rank: RANK.stopped, badge: { tone: stop, word: STOP_LOOK[stop].word } }
-  return { ...base, state: 'waiting', rank: RANK.check, badge: { tone: 'neutral', word: m.kind === 'bundle' ? '選んでください' : m.ai ? 'あなたの番' : '議事録が届きました' } }
 }
 
 function noticeAction(n: NotificationItem): InboxAction {
@@ -233,18 +219,15 @@ function undoOf(n: NotificationItem): InboxItem['undo'] {
   return { noticeId: n.id, recordId: n.recordId, version: n.version, ...(n.aiChange ? { aiChange: { pluginId: n.aiChange.pluginId, operationId: n.aiChange.operationId } } : {}) }
 }
 
-function noticeRow(n: NotificationItem, state: InboxState, rank: number, badge: InboxItem['badge']): InboxItem {
+function noticeRow(n: NotificationItem, section: InboxSection, badge: InboxItem['badge']): InboxItem {
   const action = noticeAction(n)
-  const recordKind = n.recordId ? thingKindOf({ type: n.recordType }) : null
   const undo = undoOf(n)
   return {
-    key: `notice:${n.id}`, state, rank, thing: recordKind ?? 'notice',
+    key: n.recordId ? `record:${n.recordId}` : `notice:${n.id}`, section, rank: section === 'waiting' ? RANK.stopped : RANK.other,
+    thing: n.recordId ? thingKindOf({ type: n.recordType }) : 'notice',
     title: n.recordTitle || (n.kind.startsWith('job_') ? '定期の仕事' : '知らせ'),
-    line: n.text, badge,
-    source: '知らせ',
-    due: null, at: n.createdAt, unreadNoticeIds: n.read ? [] : [n.id],
+    line: n.text, badge, source: '知らせ', due: null, at: n.createdAt, unreadNoticeIds: n.read ? [] : [n.id],
     action, actionLabel: action.kind === 'none' ? '確認した' : '開く',
-    // In every state: a change that can be undone keeps its button wherever its notice lands (as the bell had it).
     ...(undo ? { undo } : {}),
   }
 }
@@ -259,169 +242,94 @@ const newestFirst = (a: InboxItem, b: InboxItem) => (b.at ?? '').localeCompare(a
 
 export interface InboxView {
   waiting: InboxItem[]
-  working: InboxItem[]
-  /** できた・未確認 of the last DONE_KEEP_DAYS days, newest first. */
-  done: InboxItem[]
-  /** できた・未確認 older than that: one line, 「まとめて確認済みにする」. */
-  olderDone: { count: number; noticeIds: string[] }
-  /** Notices already read whose notice came today (on this PC's clock): 「きょう確認したもの」. */
-  seenToday: InboxItem[]
-  /** The other read notices of the server's list (its newest 50), newest first: 「前に確認したもの」, folded. */
-  seenBefore: InboxItem[]
-  /** Unread notices the server counts but did not list (past its newest 50): told, never dropped. */
+  /** 新着: one row per thing, newest first — the blue count. */
+  news: InboxItem[]
+  /** Moving on without the member (a meeting the AI reads, a まとまり to choose, an approved plan): shown under 新着, never counted. */
+  moving: InboxItem[]
+  /** 確認したもの: what was looked at, and what came before the first day; newest first. */
+  seen: InboxItem[]
+  /** Unread notices the server counts but did not list (past its newest 50, so older ones): told under 確認したもの. */
   unreadNotListed: number
-  /** あなた待ち the server counted but did not list (past its first 200): never hidden, only told. */
-  waitingNotListed: number
-  /** This week's turn does not hold them (`thisWeeksTurn`): 「先のこと」「いつか」 in the task list. */
-  resting: number
-  /** できた rows left out to keep the list at INBOX_MAX_ROWS. */
-  doneLeftOut: number
-  /** Every できた・未確認 notice, shown or left out (what 「まとめて確認済みにする」 marks). */
-  doneNoticeIds: string[]
-  counts: Record<InboxFilter, number>
-}
-
-const sameLocalDay = (iso: string, now: Date) => {
-  const d = new Date(iso)
-  return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate()
+  /** The server's turn was past its first 200: an approval or a mail beyond it is in the left list. */
+  turnNotListed: boolean
+  counts: { waiting: number; news: number; seen: number }
+  /** What 「すべて確認した」 marks: every news row's unread notices, and the finished meetings among them (this PC). */
+  newsNoticeIds: string[]
+  newsMeetingIds: string[]
 }
 
 /**
- * The inbox from what main read for the company on screen (`NoticesState`) and the meetings of a department
- * without the task list. One record is one row: an unread notice about a record in あなた待ち becomes that
- * row's line and new mark, not a row of its own.
+ * The inbox from what main read for the company on screen (`NoticesState`), the meetings the minutes feature hands
+ * (`MeetingNews`) and the member's browser plans. One thing is one row: an unread notice about a record that has a row is
+ * that row's news, never a second row. `newsSince`: the first day (`INBOX_NEWS_SINCE`).
  */
-export function inboxView(source: NoticesState, now: Date, meetings: readonly MeetingTurn[] = [], browser?: BrowserInboxPlans): InboxView {
+export function inboxView(source: NoticesState, meetings: readonly MeetingNews[] = [], browser?: BrowserInboxPlans, newsSince: string = INBOX_NEWS_SINCE): InboxView {
   const turn = source.available ? source.myTurn : { total: 0, items: [] as TurnItem[] }
   const rows = new Map<string, InboxItem>()
-  for (const item of turn.items) rows.set(item.id, turnRow(item))
-  // A meeting the AI reads is one row too (作業中): its unread notices are its news, not rows of their own.
-  // One already in the server's turn stays that row and keeps the meeting's own buttons.
-  for (const m of meetings) {
-    const listed = rows.get(m.id)
-    if (listed) listed.meetingId = m.id
-    else rows.set(m.id, meetingRow(m))
+  for (const item of turn.items) {
+    const row = waitingTurnRow(item)
+    if (row) rows.set(row.key, row)
   }
+  for (const m of meetings) if (!rows.has(`record:${m.id}`)) rows.set(`record:${m.id}`, meetingRow(m))
+  const since = Date.parse(newsSince)
+  const fresh = (iso: string) => Date.parse(iso) >= since
 
-  const waiting: InboxItem[] = []
-  const done: InboxItem[] = []
-  const seenToday: InboxItem[] = []
-  const seenBefore: InboxItem[] = []
-  const oldIds: string[] = []
-  const keepFrom = now.getTime() - DONE_KEEP_DAYS * 24 * 60 * 60 * 1000
-  // Newest first, so a row's line is its newest unread notice. With records off, main still hands the company's
-  // own notices (`bellOnly`, the list's `available` false): those are rows too.
-  const notices = source.available ? [...source.notices.items].sort((a, b) => b.createdAt.localeCompare(a.createdAt)) : []
-  const turnComplete = turn.total <= turn.items.length
-  const stopBadge = (m: StopMeaning) => ({ tone: m, word: STOP_LOOK[m].word })
-  const badgeOf = (n: NotificationItem, place: 'stop' | 'done' | 'waiting') => place === 'stop' ? stopBadge(STOP_NOTICES[n.kind]!)
-    : place === 'done' ? (n.settled === true ? SETTLED_WORDS : DONE_WORDS[n.kind] ?? CHANGE_WORDS[n.kind]!) : { tone: 'neutral' as const, word: ASK_WORDS[n.kind] ?? 'あなたの番' }
-  for (const n of notices) {
-    if (NO_ROW_NOTICES.has(n.kind)) continue
-    const place = noticePlace(n.kind, turnComplete, n.settled === true)
-    // Every read notice the server listed stays findable (the bell showed them, ［元に戻す］ included): folded at the bottom.
-    if (n.read) {
-      const seen = noticeRow(n, 'done', 0, badgeOf(n, place))
-      if (sameLocalDay(n.createdAt, now)) seenToday.push(seen)
-      else seenBefore.push(seen)
-      continue
-    }
-    const row = n.recordId ? rows.get(n.recordId) : undefined
-    const stop = STOP_NOTICES[n.kind]
+  // With records off, main still hands the company's own notices (`bellOnly`): those are rows too.
+  const notices = (source.available ? [...source.notices.items] : []).filter(n => !NO_ROW_NOTICES.has(n.kind))
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+  // Unread first (newest first), so a row's line is its newest unread notice; read ones only find a row of their own.
+  for (const n of [...notices.filter(x => !x.read), ...notices.filter(x => x.read)]) {
+    const key = n.recordId ? `record:${n.recordId}` : `notice:${n.id}`
+    const row = rows.get(key)
+    const stop = isWaitingStop(n) ? STOP_NOTICES[n.kind]! : null
     if (row) {
-      if (row.unreadNoticeIds.length === 0) { row.line = n.text; row.at = n.createdAt }
+      // A read notice is no news, but a change it offers to undo stays on the one row (its newest such notice).
+      if (n.read) { if (!row.undo) { const undo = undoOf(n); if (undo) row.undo = undo } continue }
+      // A meeting keeps its own line (where its reading stands is newer than 「議事録が届きました」).
+      if (row.unreadNoticeIds.length === 0) { row.at = n.createdAt; if (!row.meetingId) row.line = n.text }
       row.unreadNoticeIds.push(n.id)
-      // Its newest change that can be undone keeps ［元に戻す］ on the one row.
       if (!row.undo) { const undo = undoOf(n); if (undo) row.undo = undo }
-      // A stop about a waiting record makes that row a stop (its look and its place first).
-      if (stop && row.rank !== RANK.stopped) { row.badge = stopBadge(stop); row.rank = RANK.stopped; row.line = n.text; row.state = 'waiting' }
+      // A stop about a row makes it a stop of あなた待ち (first, its look); a news row of 確認したもの becomes 新着.
+      if (stop && !row.stop) Object.assign(row, { section: 'waiting', rank: RANK.stopped, stop: true, badge: { tone: stop, word: STOP_LOOK[stop].word }, line: n.text })
+      else if (row.section === 'seen' && !row.meetingId && fresh(n.createdAt)) { row.section = 'new'; row.line = n.text; row.at = n.createdAt }
       continue
     }
-    // Gone once opened: the server keeps no 「済んだ」 for these (decision ③).
-    if (place !== 'done') waiting.push(noticeRow(n, 'waiting', place === 'stop' ? RANK.stopped : RANK.other, badgeOf(n, place)))
-    else if (new Date(n.createdAt).getTime() < keepFrom) oldIds.push(n.id)
-    else done.push(noticeRow(n, 'done', 0, badgeOf(n, place)))
+    if (stop) { rows.set(key, { ...noticeRow(n, 'waiting', { tone: stop, word: STOP_LOOK[stop].word }), stop: true }); continue }
+    const badge = n.settled === true && !n.read ? SETTLED_WORDS : NEWS_WORDS[n.kind] ?? NEWS_DEFAULT
+    rows.set(key, noticeRow(n, !n.read && fresh(n.createdAt) ? 'new' : 'seen', badge))
   }
+
+  // A meeting's place: its unread notice since the first day, or a finished reading not yet looked at here, is 新着; the AI
+  // reading it (or a まとまり to choose, or still waiting to be read) stays in sight uncounted; anything else was looked at.
+  for (const m of meetings) {
+    const row = rows.get(`record:${m.id}`)
+    if (!row?.meetingId || row.section === 'waiting') continue
+    const unreadFresh = notices.some(n => !n.read && n.recordId === m.id && fresh(n.createdAt))
+    const finished = m.stage === 'read' && !m.seen && (m.meetingAt === null || fresh(m.meetingAt))
+    // An arrived one whose notice was read (or switched off, or from before the first day) stays in sight, uncounted:
+    // it still waits for ［AI に読ませる］ (a failed reading says so on its line) and may run out.
+    row.section = unreadFresh || finished ? 'new' : m.stage === 'reading' || m.stage === 'ask' || m.stage === 'arrived' ? 'moving' : 'seen'
+    if (finished) row.meetingNews = true
+  }
+
+  const all = [...rows.values(), ...(browser ? browserRows(browser) : [])]
+  const pick = (s: InboxSection) => all.filter(r => r.section === s)
+  const waiting = pick('waiting').sort(byNeed)
+  const news = pick('new').sort(newestFirst)
+  const seen = pick('seen').sort(newestFirst)
   const listedUnread = source.available ? source.notices.items.filter(n => !n.read).length : 0
-  const unreadNotListed = source.available ? Math.max(0, source.notices.unread - listedUnread) : 0
-  const own = [...rows.values(), ...(browser ? browserRows(browser) : [])]
-  const working = own.filter(r => r.state === 'working')
-  waiting.push(...own.filter(r => r.state === 'waiting'))
-  waiting.sort(byNeed)
-  done.sort(newestFirst)
-  const room = Math.max(0, INBOX_MAX_ROWS - waiting.length)
-  const shownDone = done.slice(0, room)
-  const waitingNotListed = Math.max(0, turn.total - turn.items.length)
-  const waitingCount = waiting.length + waitingNotListed
-  const doneCount = done.length + oldIds.length
   return {
-    waiting, working, done: shownDone, seenToday, seenBefore, unreadNotListed,
-    olderDone: { count: oldIds.length, noticeIds: oldIds },
-    waitingNotListed, resting: turn.resting ?? 0, doneLeftOut: done.length - shownDone.length,
-    doneNoticeIds: [...done.flatMap(i => i.unreadNoticeIds), ...oldIds],
-    counts: { all: waitingCount + working.length + doneCount + unreadNotListed, waiting: waitingCount, working: working.length, done: doneCount },
+    waiting, news, moving: pick('moving'), seen,
+    unreadNotListed: source.available ? Math.max(0, source.notices.unread - listedUnread) : 0,
+    turnNotListed: turn.total > turn.items.length,
+    counts: { waiting: waiting.length, news: news.length, seen: seen.length },
+    newsNoticeIds: news.flatMap(i => i.unreadNoticeIds),
+    newsMeetingIds: news.filter(i => i.meetingNews && i.meetingId).map(i => i.meetingId!),
   }
 }
 
-/**
- * 「まとめて確認済みにする」: only できた・未確認 (owner decision ⑦) — the notices of the done rows and the
- * folded older ones. Never a notice of あなた待ち (a stop, a row's own news), and never 「すべて」 on the
- * server: those must be opened one by one.
- */
-export function bulkSeenIds(view: InboxView, scope: 'older' | 'done'): string[] {
-  if (scope === 'older') return [...view.olderDone.noticeIds]
-  return [...view.doneNoticeIds]
-}
-
-/** At most this many keys stand for the unread notices the server did not list (one key each, so only growth is news). */
-const UNLISTED_NEWS_KEYS = 1000
-
-/**
- * What the title bar's ［受け箱］ dot compares (owner decision ①: the dot = something new since the inbox was
- * last on screen): every waiting / working row by key and state, every unread notice, and one key per unread
- * notice the server counted but did not list. With `filter`, only what that chip shows (what the member saw).
- */
-export function inboxNewsKeys(view: InboxView, filter: InboxFilter = 'all'): string[] {
-  const keys = new Set<string>()
-  const shows = (state: InboxState) => filter === 'all' || filter === state
-  for (const i of [...view.waiting, ...view.working]) {
-    if (!shows(i.state)) continue
-    // By state too: a meeting the AI was reading that now waits for the member is new.
-    keys.add(`${i.key}#${i.state}`)
-    for (const id of i.unreadNoticeIds) keys.add(`notice:${id}`)
-  }
-  if (shows('done')) {
-    // Every できた・未確認 notice, also one the row limit left out or the 14-day line folded.
-    for (const id of view.doneNoticeIds) keys.add(`notice:${id}`)
-    for (let k = 1; k <= Math.min(view.unreadNotListed, UNLISTED_NEWS_KEYS); k++) keys.add(`unlisted:${k}`)
-  }
-  return [...keys]
-}
-
-/**
- * What counts as already seen before the inbox was ever on screen in this window: the waiting and working
- * rows (the count says those), never an unread notice — so at the start the dot is the old bell's (something
- * unread on the server, shared by the member's PCs).
- */
-export function inboxNewsBaseline(view: InboxView): string[] {
-  return [...view.waiting, ...view.working].map(i => `${i.key}#${i.state}`)
-}
-
-/** The dot: a key that was not there when the inbox was last on screen. */
-export const hasInboxNews = (keys: readonly string[], seen: ReadonlySet<string>) => keys.some(k => !seen.has(k))
-
-/**
- * What counts as seen while the panel shows: exactly what the chosen chip shows now (a row that left and comes
- * back later is new again), plus what was seen before of the rest that is still there (hidden by the chip, so
- * neither newly seen nor forgotten).
- */
-export function seenWhileShown(seen: ReadonlySet<string>, all: readonly string[], shown: readonly string[]): Set<string> {
-  const next = new Set(shown)
-  for (const k of all) if (seen.has(k)) next.add(k)
-  return next
-}
-
-export const sameKeys = (a: ReadonlySet<string>, b: ReadonlySet<string>) => a.size === b.size && [...a].every(k => b.has(k))
+/** The title bar button's name (aria-label and tooltip alike): both counts in words, and the shortcut. */
+export const inboxButtonName = (news: number, waiting: number) => `受け箱：新着 ${news} 件・あなた待ち ${waiting} 件 (⌘J)`
 
 /** 99 at most, then 「99+」. */
 export const countText = (n: number) => (n > 99 ? '99+' : String(n))

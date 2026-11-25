@@ -1,10 +1,10 @@
 /* eslint-disable react-refresh/only-export-components -- standalone preview page entry, never hot-reloaded as a module */
 // Preview page for meetings seen by their attendees (minutes.md "Meetings for their attendees"):
-// the real banner 「議事録が届きました」 on top of やること (MeetingBanners) and the real meeting card
-// (RecordCard with the app's MeetingPanel and 案件 field) over a fake main kept in memory. Synthetic
-// data only. `?viewer=suzuki`: another attendee's screen (阿部 already chose ［読まない］ for 採用面接).
-// `?noaccess=1`: the member's Google cannot open the minutes. `?renew=1`: their permission is from before the Docs API. `?flood=N`: a first discovery, N more
-// meetings at once, and a long list below. `?bundle=suggest`: the server suggests one 案件 for the
+// the meetings' rows of the inbox (the real `useMeetingInboxRows`, `inboxView` and `InboxList`, the banner on やること
+// before 2026-11-26) and the real meeting card (RecordCard with the app's MeetingPanel and 案件 field) over a fake main
+// kept in memory. Synthetic data only. `?viewer=suzuki`: another attendee's screen (阿部 already chose ［読まない］ for
+// 採用面接). `?noaccess=1`: the member's Google cannot open the minutes. `?renew=1`: their permission is from before the
+// Docs API. `?flood=N`: a first discovery, N more meetings at once. `?bundle=suggest`: the server suggests one 案件 for the
 // card's question (`?bundle=declined`: 案件はない was chosen). `window.__acbMeetings.finish(id)`: the
 // member's AI finished reading (what the runner does in the app). Presses show in `#log`.
 // 「やることを足す」 answers 「似ている」 for a title close to a proposal (the server decides in the app).
@@ -20,8 +20,11 @@ import '../src/index.css'
 import { coreTypeDefinitions } from '../../shared/core/core-types'
 import type { MeetingArrival } from '../../shared/types/minutes'
 import type { RecordSummary } from '../../shared/types/records'
-import { MeetingBanners } from '../src/features/minutes/components/MeetingBanners'
+import type { NotificationItem } from '../../shared/types/notifications'
 import { useMeetingArrivals } from '../src/features/minutes/hooks/useMeetingArrivals'
+import { useMeetingInboxRows } from '../src/features/minutes/hooks/useMeetingInboxRows'
+import { InboxList } from '../src/features/inbox/components/InboxList'
+import { inboxView } from '../src/features/inbox/model'
 import { RecordCard } from '../src/features/records/components/RecordCard'
 import { useCommandHandler } from '../src/shared/commands/commands'
 import { renderMeetingPanel } from '../src/app/meetingCard'
@@ -178,22 +181,36 @@ installElectronAPI({
   chooseAutoRead: (mode: 'outside' | 'all' | 'off') => { autoRead = { mode, chosen: true } },
 }
 
+// The manual's fixed clock (2026-11-20) is before the inbox's first day: its notices count as 新着 here.
+const PREVIEW_NEWS_SINCE = '2026-01-01T00:00:00.000Z'
+// Each meeting's 「議事録が届きました」 notice (the server writes one per attendee), unread until the row is looked at.
+const arrivedNotices = (read: ReadonlySet<string>): NotificationItem[] => meetings.map(m => ({
+  id: `n-${m.id}`, kind: 'minutes_arrived', recordId: m.id, recordType: 'meeting', recordTitle: m.title, version: 1,
+  text: `議事録が届きました：「${m.title}」`, createdAt: new Date().toISOString(), read: read.has(`n-${m.id}`),
+}))
+
 function Preview() {
   const { arrivals, reload } = useMeetingArrivals('co')
   useCommandHandler('record.open', ({ recordId }) => say(`open ${recordId}`))
   const [open, setOpen] = useState<string | null>(null)
+  const [read, setRead] = useState<ReadonlySet<string>>(new Set())
+  const rows = useMeetingInboxRows({ companyId: 'co', items: arrivals.available ? arrivals.items : [], aiTurns: null, decisionsOn: true, onView: m => setOpen(m.id), onChanged: reload })
+  const notices = arrivedNotices(read)
+  const view = inboxView({ available: true, myTurn: { total: 0, items: [] }, notices: { available: true, unread: notices.filter(x => !x.read).length, items: notices } }, rows.rows, undefined, PREVIEW_NEWS_SINCE)
+  const see = (ids: readonly string[]) => setRead(r => new Set([...r, ...ids]))
   return (
     <main className="flex min-h-screen bg-white text-gray-900">
-      {/* The pane as AppShell lays it out: the block, then the list taking what is left. */}
-      <aside style={{ width: 300 }} className="flex h-screen min-w-0 shrink-0 flex-col border-r" aria-label="やること">
-        {arrivals.available && <MeetingBanners companyId="co" items={arrivals.items} aiTurns={null} onView={m => setOpen(m.id)} onChanged={reload} />}
-        <div className="flex min-h-0 flex-1">
-          <div data-testid="task-list" className="min-h-0 flex-1 overflow-y-auto">
-            <p className="p-3 text-small text-gray-400">（やることの一覧）</p>
-            <pre id="log" className="p-2 text-[10px]" />
-            {flood > 0 && Array.from({ length: 60 }, (_, n) => <p key={n} className="px-3 py-1.5 text-small">やること {n}</p>)}
-          </div>
-        </div>
+      {/* The inbox's list as the bottom panel shows it (the meetings' rows since 2026-11-26), and the log. */}
+      <aside style={{ width: 520 }} className="flex h-screen min-w-0 shrink-0 flex-col overflow-y-auto border-r" aria-label="受け箱">
+        {(['new', 'seen'] as const).map(filter => (
+          <InboxList key={filter} view={view} filter={filter} meetingButtons={id => rows.rows.find(r => r.id === id)?.actions ?? []}
+            onOpen={i => { see(i.unreadNoticeIds); if (i.meetingNews && i.meetingId) rows.markSeen(i.meetingId); if (i.meetingId) setOpen(i.meetingId) }}
+            onSeen={i => { see(i.unreadNoticeIds); if (i.meetingNews && i.meetingId) rows.markSeen(i.meetingId) }}
+            onButton={(i, b) => { see(i.unreadNoticeIds); b.run() }} onUndo={() => {}} undone={new Set()} onAllSeen={() => { see(view.newsNoticeIds); view.newsMeetingIds.forEach(rows.markSeen) }}
+            meetingNote={rows.suggestion} error={null} />
+        ))}
+        <pre id="log" className="p-2 text-caption" />
+        {rows.toast}
       </aside>
       <section className="min-w-0 flex-1">
         {open && <RecordCard key={open} companyId="co" rootPath="/Users/me/company" recordId={open}

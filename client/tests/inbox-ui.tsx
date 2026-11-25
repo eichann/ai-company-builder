@@ -1,5 +1,5 @@
 /* eslint-disable react-refresh/only-export-components -- standalone preview page entry, never hot-reloaded as a module */
-// Preview page for the inbox (受け箱, features/inbox, I1): the real slot hook, list and card dialog in the
+// Preview page for the inbox (受け箱, features/inbox; あなた待ち and 新着 since 2026-11-26): the real slot hook, list and card dialog in the
 // real bottom panel frame, over a fake main process that keeps the read state like the server does (the
 // read answer comes back through `notifications:changed`). The approval card is the real one (it reads
 // the request through `getApproval`). What was opened shows in `#opened`, the ids marked read in
@@ -158,6 +158,8 @@ function Preview() {
   const notices = useNotices('co-preview')
   const inbox = useInboxSlot({
     companyId: 'co-preview', notices, open: true, onToggle: () => setOpened('toggled'),
+    // The manual's fixed clock (2026-11-20) is before the inbox's first day: its notices count as 新着 here.
+    newsSince: '2026-01-01T00:00:00.000Z',
     onOpenRecord: id => setOpened(`record ${id}`), onOpenTasks: () => setOpened('task list'), onOpenJobs: () => setOpened('jobs'),
     renderApprovalCard: id => <ApprovalCard card={{ id: `card-${id}`, companyId: 'co-preview', conversationId: null, approvalId: id, origin: 'shown', at: '' }} />,
     renderMailDraft: id => <PreparedMailCard companyId="co-preview" messageId={id} />,

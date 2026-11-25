@@ -1,8 +1,8 @@
-// The banner 「議事録が届きました」 for one meeting (minutes.md "Meetings for their attendees", design §4-5).
+// 「議事録が届きました」 for one meeting (the inbox's row since 2026-11-26) (minutes.md "Meetings for their attendees", design §4-5).
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import type { MeetingArrivalView } from '../../../shared/minutes-app'
-import { foldMeetings, invitedText, madeWords, meetingBanner, meetingRowWords, meetingWhen, offeredSets, readingWords, skippableMeetings, type MeetingBanner } from './model'
+import { invitedText, meetingBanner, meetingNewsOf, mergeMeetingRows, MEETING_EXPIRES_SOON_MS, offeredSets, readingWords, type MeetingBanner } from './model'
 
 const NOW = new Date(2026, 10, 4, 13, 0).getTime()
 const item = (over: Partial<MeetingArrivalView> = {}): MeetingArrivalView => ({
@@ -11,11 +11,41 @@ const item = (over: Partial<MeetingArrivalView> = {}): MeetingArrivalView => ({
 })
 const ctx = { closed: false, hidden: false }
 
-test('a row says what and when, and no count: ACB\'s members on a meeting are not how many attended', () => {
-  assert.equal(meetingRowWords(item(), NOW), '定例ミーティング・今日 12:00')
-  assert.equal(meetingWhen(new Date(2026, 10, 3, 15, 0).toISOString(), NOW), '昨日 15:00')
-  assert.equal(meetingWhen(new Date(2026, 10, 2, 9, 5).toISOString(), NOW), '11/2 9:05')
-  assert.equal(madeWords({ decisions: 2, proposals: 3 }), '決めたこと2・やることの案3')
+test('the inbox\'s meeting row: one stage per meeting, 「読み終わりました」 with what was made, seen only once looked at here', () => {
+  const row = (over: Partial<MeetingArrivalView>, closed = false) => {
+    const m = item(over)
+    return meetingNewsOf(m, meetingBanner(m, ctx), { now: NOW, closed })
+  }
+  assert.equal(row({})?.stage, 'arrived')
+  assert.equal(row({ status: 'asked', byYou: true })?.stage, 'reading')
+  assert.deepEqual([row({ status: 'read', made: { decisions: 2, proposals: 3 } })?.line, row({ status: 'read' })?.seen], ['読み終わりました：決めたこと2・やることの案3', false])
+  // Looked at on this PC: still a row (findable as seen), never news again.
+  assert.equal(row({ status: 'read' }, true)?.seen, true)
+  // Another attendee set it aside: said, no buttons; the member's own ［読まない］: gone.
+  assert.equal(row({ status: 'skipped', by: { memberId: 'u1', displayName: '阿部' } })?.line, '阿部さんが読まないにしました')
+  assert.equal(row({ status: 'skipped', byYou: true, by: { memberId: 'u1', displayName: '阿部' } }), null)
+})
+
+test('one meeting is one inbox row: an arrival also in the list\'s turns is merged, a stop of this PC\'s AI wins the look', () => {
+  const r = (id: string, stage: 'arrived' | 'reading' | 'stopped' | 'ask', labels: string[]) =>
+    ({ id, title: id, stage, line: stage, meetingAt: null, expiresSoon: false, seen: false, actions: labels.map(label => ({ label, run: () => {} })) })
+  const rows = mergeMeetingRows([r('m1', 'reading', ['読まない']), r('m2', 'arrived', ['AI に読ませる'])], [r('m1', 'stopped', ['自分で読み取る', '今は読まない', 'もう一度', '読まない']), r('m3', 'ask', ['はい'])])
+  // One way to set it aside: the arrival's ［読まない］, never also the list's ［今は読まない］ (independent review).
+  assert.deepEqual(rows.map(x => [x.id, x.stage, x.actions.map(a => a.label)]), [
+    ['m1', 'stopped', ['読まない', '自分で読み取る', 'もう一度']], ['m2', 'arrived', ['AI に読ませる']], ['m3', 'ask', ['はい']],
+  ])
+})
+
+test('「あと1日で読めなくなります」 only on a meeting still waiting to be read, from its second day (the server drops it after 3)', () => {
+  const at = (ms: number, status: MeetingArrivalView['status'] = 'arrived', byYou = false) => {
+    const m = item({ meetingAt: new Date(NOW - ms).toISOString(), status, byYou })
+    return meetingNewsOf(m, meetingBanner(m, ctx), { now: NOW, closed: false })?.expiresSoon
+  }
+  assert.equal(at(MEETING_EXPIRES_SOON_MS - 60_000), false)
+  assert.equal(at(MEETING_EXPIRES_SOON_MS), true)
+  assert.equal(at(MEETING_EXPIRES_SOON_MS, 'asked', true), true)
+  assert.equal(at(MEETING_EXPIRES_SOON_MS, 'reading', true), false)
+  assert.equal(at(MEETING_EXPIRES_SOON_MS, 'read'), false)
 })
 
 test('an arrived meeting offers ［AI に読ませる］ / ［読まない］ to every attendee, also after a failed reading', () => {
@@ -73,17 +103,6 @@ test('read: shown until the member closes it; ［読まない］: gone for who c
   assert.equal(meetingBanner(item({ status: 'skipped', byYou: true, by: { memberId: 'u1', displayName: '阿部' } }), ctx), null)
   assert.deepEqual(meetingBanner(item({ status: 'skipped', by: { memberId: 'u1', displayName: '阿部' } }), ctx), { kind: 'skipped', by: '阿部' })
   assert.equal(meetingBanner(item(), { ...ctx, hidden: true }), null)
-})
-
-test('two rows at most stay out; ［まとめて読まない］ takes only the folded ones still waiting', () => {
-  const rows = ['arrived', 'arrived', 'arrived', 'reading', 'read'].map((kind, n) => ({
-    n, banner: (kind === 'arrived' ? { kind, failedBefore: false } : kind === 'read' ? { kind } : { kind, auto: null, reader: null, organiser: false, waiting: false, canSkip: true, canRead: false, problem: null }) as MeetingBanner,
-  }))
-  const { shown, folded } = foldMeetings(rows)
-  assert.deepEqual(shown.map(r => r.n), [0, 1])
-  assert.deepEqual(folded.map(r => r.n), [2, 3, 4])
-  assert.deepEqual(skippableMeetings(folded).map(r => r.n), [2])
-  assert.deepEqual(foldMeetings(rows.slice(0, 2)).folded, [])
 })
 
 test('［招待する］: groups and departments only when the server says the member may add them, never one already on the list', () => {

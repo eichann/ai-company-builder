@@ -204,15 +204,53 @@ export function meetingTurns(items: readonly TaskListItem[], ai: readonly AiTurn
 }
 
 /**
- * 「議事録が届きました」 for the title bar (owner decision 2026-11-07, records.md "Features on and off"):
- * where the department shows no task list, the meetings that arrived and nobody asked the AI to read
- * yet (`arrived`, nobody's turn) are counted in 「あなたの番」 too, with ［AI に読ませる］. Whoever may
- * see the meeting gets it; once someone presses it, it is no longer `arrived` and drops out. A
- * meeting already among `taken` (in 「AI の番」) is not listed twice.
+ * A meeting as one inbox row (owner decision 2026-11-26 「議事録の帯をなくし、受け箱に統一」, notifications.md "The inbox"):
+ * the minutes feature builds it (from the arrivals and, where the department shows no task list, `meetingTurns`); the
+ * inbox places it. `arrived`: waits for ［AI に読ませる］／［読まない］ (also after the AI could not read it); `reading`: the
+ * AI reads it or will; `read`: finished (「読み終わりました」); `stopped`: this PC's AI cannot go on (`stop` says how);
+ * `ask`: something only the member answers that is no news (a まとまり to choose); `skipped`: another attendee chose
+ * ［読まない］ (no buttons). Nothing here is stored.
  */
-export function arrivedMeetingTurns(arrivals: ReadonlyArray<{ recordId: string; title: string; status: string }>, taken: ReadonlySet<string> = new Set()): MeetingTurn[] {
-  return arrivals.filter(a => a.status === 'arrived' && !taken.has(a.recordId))
-    .map(a => ({ id: a.recordId, title: a.title, kind: 'minutes' as const, text: '議事録が届きました', needsPerson: true, ai: null }))
+export type MeetingStage = 'arrived' | 'reading' | 'read' | 'stopped' | 'ask' | 'skipped'
+
+export interface MeetingNews {
+  id: string
+  title: string
+  stage: MeetingStage
+  /** In plain Japanese: where it stands. */
+  line: string
+  /** The meeting's start (ISO), when known: the inbox's first day uses it for a finished one. */
+  meetingAt: string | null
+  /** The server drops a meeting 3 days after it (minutes.md): one that still waits says so a day before. */
+  expiresSoon: boolean
+  /** `read` only: its 「読み終わりました」 was looked at on this PC (the server keeps no such notice). */
+  seen: boolean
+  /** `stopped` only: a failure (red) or something the member must pick up (amber), as `STOP_LOOK`. */
+  stop?: 'failed' | 'needsAction'
+}
+
+/** A row's own button from the feature it belongs to (a meeting's ［AI に読ませる］…): the inbox only places it. */
+export interface RowButton {
+  label: string
+  run: () => void
+  primary?: boolean
+  disabled?: boolean
+  /** Shown as its tooltip. */
+  title?: string
+}
+
+/** A meeting row with its buttons, as the minutes feature hands it to the inbox. */
+export type MeetingNewsRow = MeetingNews & { actions: RowButton[] }
+
+/**
+ * A meeting of a department without the task list (`meetingTurns`) as an inbox row: a reading this PC's AI failed or may
+ * not do is a stop; the AI reading (or about to) is `reading`; anything else waiting for the member is `ask`.
+ */
+export function meetingNewsOfTurn(t: MeetingTurn): MeetingNews {
+  const base = { id: t.id, title: t.title, line: t.text, meetingAt: null, expiresSoon: false, seen: false }
+  if (t.ai?.state === 'failed') return { ...base, stage: 'stopped', stop: 'failed' }
+  if (t.ai?.state === 'not-allowed') return { ...base, stage: 'stopped', stop: 'needsAction' }
+  return { ...base, stage: t.needsPerson ? 'ask' : 'reading' }
 }
 
 export type { NotificationItem, NotificationKind, NotificationList }

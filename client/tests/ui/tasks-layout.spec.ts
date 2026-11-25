@@ -238,10 +238,10 @@ test('checking a task off in the list closes its tab in the middle; another task
 })
 
 // 「使う機能」 (owner decision 2026-11-07, records.md "Features on and off"): with the task list turned
-// off, the small list 「確かめること」 takes its place; 今日の予定 and arrived minutes sit above it while
-// 会議と議事録 is on. Catches the やること tab still shown, the small list missing or listing ordinary
-// tasks, and 今日の予定 / minutes shown with 会議 off.
-test('「使う機能」 the task list off: no やること tab; 「確かめること」 shows 今日の予定, the arrived minutes, then only what ACB alone can act on', async ({ page }) => {
+// off, the small list 「確かめること」 takes its place; 今日の予定 sits above it while 会議と議事録 is on, and the arrived
+// minutes are the inbox's rows (2026-11-26). Catches the やること tab still shown, the small list missing or listing
+// ordinary tasks, and 今日の予定 / minutes shown with 会議 off.
+test('「使う機能」 the task list off: no やること tab; 「確かめること」 shows 今日の予定, then only what ACB alone can act on; the arrived minutes are in the inbox', async ({ page }) => {
   const state = await openPreview(page, 'skill-layout', { features: 'listoff' })
   await expect(leftTab(page, /^確かめること/)).toBeVisible()
   // Before any panel is opened only the tab strip has buttons named so.
@@ -249,7 +249,9 @@ test('「使う機能」 the task list off: no やること tab; 「確かめる
   await leftTab(page, /^確かめること/).click()
   const panel = page.getByRole('region', { name: '確かめること' })
   await expect(panel.getByTestId('press-calendar').getByText('朝会')).toBeVisible()
-  await expect(panel.getByRole('button', { name: 'AI に読ませる' })).toBeVisible()
+  await expect(panel.getByRole('button', { name: 'AI に読ませる', exact: true })).toHaveCount(0)
+  await page.locator('[data-inbox-button]').click()
+  await expect(page.getByRole('region', { name: '新着' }).locator('[data-inbox-row="record:meeting-0000cc"]').getByRole('button', { name: 'AI に読ませる', exact: true })).toBeVisible()
   const calendarTop = (await panel.getByTestId('press-calendar').boundingBox())!.y
   const listTop = (await panel.getByText('確かめること', { exact: true }).boundingBox())!.y
   expect(calendarTop).toBeLessThan(listTop)
@@ -266,7 +268,9 @@ test('「使う機能」 会議と議事録 off too: 「確かめること」 ha
   const panel = page.getByRole('region', { name: '確かめること' })
   await expect(panel.getByText('金額の変更')).toBeVisible()
   await expect(panel.getByTestId('press-calendar')).toHaveCount(0)
-  await expect(panel.getByRole('button', { name: 'AI に読ませる' })).toHaveCount(0)
+  await page.locator('[data-inbox-button]').click()
+  await expect(page.getByRole('region', { name: '受け箱' })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'AI に読ませる', exact: true })).toHaveCount(0)
   expectNoPageErrors(state)
 })
 

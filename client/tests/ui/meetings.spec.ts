@@ -1,12 +1,12 @@
 // Meetings seen by their attendees (tests/meetings-ui.tsx, minutes.md "Meetings for their attendees",
-// design §4-5). Guards: ［AI に読ませる］ only changes the banner (no consultation opens) and goes at
-// the version shown; 「読み終わりました」 says what was made and ［見る］ opens the card; ［読まない］
-// hides the line with 元に戻す (the undo of that entry); another attendee sees who chose it; a
+// design §4-5), as the inbox's rows since 2026-11-26. Guards: ［AI に読ませる］ only changes the row's line (no
+// consultation opens) and goes at the version shown, and the row is no longer counted as 新着 while the AI reads;
+// 「読み終わりました」 says what was made and is 新着 again, ［見る］ opens the card; ［読まない］
+// hides the row with 元に戻す (the undo of that entry); another attendee sees who chose it; a
 // member whose Google cannot open the minutes is told another attendee can press it; ［招待する］
 // says what the invited will see and that it cannot be undone before anything is sent; the
 // consultation opens only from the card's button; linking a 案件 says who will see part of it and
-// links only on ［つなぐ］ (from the question's ［はい］ too); a first discovery of many meetings shows two
-// one-line rows and 「ほか N 件」, never taking the pane from the list; the card keeps its order and says
+// links only on ［つなぐ］ (from the question's ［はい］ too); one meeting is one row; the card keeps its order and says
 // each thing once (「ごちゃついてる」, 2026-11-05); 「やることを足す」 makes the meeting's task and a close one
 // is only a quiet line — ［まとめる］ puts the new one away with its note and opens the earlier one,
 // ［元に戻す］ undoes that entry, ［このまま］ keeps both. 「届いた議事録を AI が自動で読む」 (4b-4 A2b): a
@@ -21,22 +21,30 @@ const finish = (page: import('@playwright/test').Page, id: string) =>
 
 test('read → 「AI が読んでいます…」 → 「読み終わりました」 → ［見る］ opens the card with the proposals', async ({ page }) => {
   const state = await openPreview(page, 'meetings')
-  const line = page.locator('[data-banner="meeting-teirei01"]')
-  await expect(page.getByRole('region', { name: '議事録が届きました' })).toContainText('議事録が届きました')
-  await expect(line).toContainText('定例ミーティング・今日 12:00')
+  const line = page.locator('[data-inbox-row="record:meeting-teirei01"]')
+  const news = page.getByRole('region', { name: '新着' }).first()
+  await expect(news.locator('[data-inbox-row="record:meeting-teirei01"]')).toContainText('議事録が届きました')
+  await expect(line).toContainText('定例ミーティング')
+  // One meeting is one row, its notice included.
+  await expect(page.locator('[data-inbox-row="record:meeting-teirei01"]')).toHaveCount(1)
   await expect(line).not.toContainText('人')
-  await line.getByRole('button', { name: 'AI に読ませる' }).click()
+  await expect(news.getByRole('heading')).toContainText('新着 2')
+  await line.getByRole('button', { name: 'AI に読ませる', exact: true }).click()
   await expect(page.locator('#log')).toHaveText('read meeting-teirei01@1')
   await expect(line).toContainText('AI が読んでいます…')
-  await expect(line.getByRole('button', { name: '読まない' })).toBeVisible()
+  await expect(line.getByRole('button', { name: '読まない', exact: true })).toBeVisible()
+  // While the AI reads it the row stays, not counted as 新着.
+  await expect(news.getByRole('heading')).toContainText('新着 1')
   // Nothing else opened: the card (and any consultation) only on ［見る］.
   await expect(page.getByTestId('record-card')).toHaveCount(0)
 
   await finish(page, 'meeting-teirei01')
-  await expect(line).toContainText('読み終わりました')
-  await expect(line).toContainText('定例ミーティング：決めたこと2・やることの案3')
-  await line.getByRole('button', { name: '見る' }).click()
-  await expect(line).toHaveCount(0)
+  await expect(line).toContainText('読み終わりました：決めたこと2・やることの案3')
+  await expect(news.getByRole('heading')).toContainText('新着 2')
+  await line.getByRole('button', { name: '見る', exact: true }).click()
+  // Looked at: 確認したもの, never 新着 again.
+  await expect(news.locator('[data-inbox-row="record:meeting-teirei01"]')).toHaveCount(0)
+  await expect(news.getByRole('heading')).toContainText('新着 1')
   const card = page.getByTestId('record-card')
   await expect(card.getByRole('region', { name: 'やることの案' })).toContainText('11月の勉強会の会場を押さえる')
   await expect(card).toContainText('参加者のうち ACB の人 3人')
@@ -49,46 +57,49 @@ test('read → 「AI が読んでいます…」 → 「読み終わりました
 
 test('［読まない］ hides the line with 元に戻す, which undoes that one entry', async ({ page }) => {
   const state = await openPreview(page, 'meetings')
-  const line = page.locator('[data-banner="meeting-mensetu1"]')
-  await line.getByRole('button', { name: '読まない' }).click()
-  await expect(line).toHaveCount(0)
+  const line = page.locator('[data-inbox-row="record:meeting-mensetu1"]')
+  await line.getByRole('button', { name: '読まない', exact: true }).click()
+  // Gone from 新着 (its notice stays findable in 確認したもの), with no buttons left anywhere.
+  await expect(page.getByRole('region', { name: '新着' }).first().locator('[data-inbox-row="record:meeting-mensetu1"]')).toHaveCount(0)
+  await expect(line.getByRole('button', { name: '読まない', exact: true })).toHaveCount(0)
   await expect(page.getByRole('status')).toContainText('「採用面接」は読まないにしました')
   await page.getByRole('button', { name: '元に戻す' }).click()
   await expect(page.locator('#log')).toHaveText('skip meeting-mensetu1@1\nundo meeting-mensetu1 2@2')
-  await expect(line.getByRole('button', { name: 'AI に読ませる' })).toBeVisible()
+  await expect(line.getByRole('button', { name: 'AI に読ませる', exact: true })).toBeVisible()
   expectNoPageErrors(state)
 })
 
 test('another attendee sees who chose ［読まない］, without buttons', async ({ page }) => {
   const state = await openPreview(page, 'meetings', { viewer: 'suzuki' })
-  const line = page.locator('[data-banner="meeting-mensetu1"]')
+  const line = page.locator('[data-inbox-row="record:meeting-mensetu1"]')
   await expect(line).toContainText('阿部さんが読まないにしました')
-  await expect(line.getByRole('button')).toHaveCount(0)
+  await expect(line.getByRole('button', { name: 'AI に読ませる', exact: true })).toHaveCount(0)
+  await expect(line.getByRole('button', { name: '読まない', exact: true })).toHaveCount(0)
   expectNoPageErrors(state)
 })
 
 test('the member\'s Google cannot open the minutes: told another attendee can press it, nothing changes', async ({ page }) => {
   const state = await openPreview(page, 'meetings', { noaccess: '1' })
-  const line = page.locator('[data-banner="meeting-teirei01"]')
-  await line.getByRole('button', { name: 'AI に読ませる' }).click()
-  await expect(line.getByRole('alert')).toContainText('ほかの参加者が［AI に読ませる］を押すと、その人の AI が読めます')
-  await expect(line.getByRole('button', { name: 'AI に読ませる' })).toBeVisible()
+  const line = page.locator('[data-inbox-row="record:meeting-teirei01"]')
+  await line.getByRole('button', { name: 'AI に読ませる', exact: true }).click()
+  await expect(line).toContainText('ほかの参加者が［AI に読ませる］を押すと、その人の AI が読めます')
+  await expect(line.getByRole('button', { name: 'AI に読ませる', exact: true })).toBeVisible()
   expectNoPageErrors(state)
 })
 
 test('a meeting only the clock asked for the organiser: named 「（主催）」, and the member\'s own ［AI に読ませる］ takes it; a press too late is said plainly', async ({ page }) => {
   const state = await openPreview(page, 'meetings', { clock: '1' })
-  const line = page.locator('[data-banner="meeting-teirei01"]')
+  const line = page.locator('[data-inbox-row="record:meeting-teirei01"]')
   await expect(line).toContainText('鈴木さん（主催）の AI が読む予定です')
-  await line.getByRole('button', { name: 'AI に読ませる' }).click()
+  await line.getByRole('button', { name: 'AI に読ませる', exact: true }).click()
   await expect(page.locator('#log')).toHaveText('read meeting-teirei01@1')
   await expect(line).toContainText('AI が読んでいます…')
-  await expect(line.getByRole('button', { name: 'AI に読ませる' })).toHaveCount(0)
+  await expect(line.getByRole('button', { name: 'AI に読ませる', exact: true })).toHaveCount(0)
 
   await page.goto(page.url().replace('clock=1', 'clock=taken'))
-  const again = page.locator('[data-banner="meeting-teirei01"]')
-  await again.getByRole('button', { name: 'AI に読ませる' }).click()
-  await expect(again.getByRole('alert')).toContainText('この会議は、もう AI が読んでいるか、読み終わっています。')
+  const again = page.locator('[data-inbox-row="record:meeting-teirei01"]')
+  await again.getByRole('button', { name: 'AI に読ませる', exact: true }).click()
+  await expect(again).toContainText('この会議は、もう AI が読んでいるか、読み終わっています。')
   expectNoPageErrors(state)
 })
 
@@ -96,7 +107,7 @@ test('the card: ［招待する］ says what the invited see and that it cannot 
   const state = await openPreview(page, 'meetings')
   await page.getByRole('button', { name: '定例ミーティングを開く' }).click()
   const card = page.getByTestId('record-card')
-  await expect(card.getByRole('button', { name: 'AI に読ませる' })).toBeVisible()
+  await expect(card.getByRole('button', { name: 'AI に読ませる', exact: true })).toBeVisible()
 
   await card.getByRole('button', { name: '招待する' }).click()
   const dialog = page.getByRole('dialog', { name: '会議に人を招待する' })
@@ -130,7 +141,7 @@ test('the card: ［招待する］ says what the invited see and that it cannot 
 const readCard = async (page: import('@playwright/test').Page, params?: Record<string, string>) => {
   const state = await openPreview(page, 'meetings', params)
   await finish(page, 'meeting-teirei01')
-  await page.locator('[data-banner="meeting-teirei01"]').getByRole('button', { name: '見る' }).click()
+  await page.locator('[data-inbox-row="record:meeting-teirei01"]').getByRole('button', { name: '見る', exact: true }).click()
   const card = page.getByTestId('record-card')
   await expect(card.getByRole('region', { name: 'やることの案' })).toBeVisible()
   return { state, card }
@@ -217,56 +228,24 @@ test('［案件はない］ closes the question and a 案件 can still be chosen
   expectNoPageErrors(state)
 })
 
-test('many meetings at once: two one-line rows, the rest folded in a bounded area, the list always there and scrollable', async ({ page }) => {
-  await page.setViewportSize({ width: 1000, height: 640 })
+test('many meetings at once: one row each in 新着, and 「すべて確認した」 takes the count to 0 without pressing anything', async ({ page }) => {
   const state = await openPreview(page, 'meetings', { flood: '12' })
-  const block = page.getByRole('region', { name: '議事録が届きました' })
-  const list = page.getByTestId('task-list')
-  const rows = block.locator('[data-banner]')
-  await expect(rows).toHaveCount(2)
-  // One line each, buttons included, however long the title.
-  await expect(block.getByRole('button', { name: 'ほか 12 件' })).toBeVisible()
-  for (const h of await rows.evaluateAll(els => els.map(e => e.getBoundingClientRect().height))) expect(h).toBeLessThan(32)
-  const pane = (await page.getByRole('complementary', { name: 'やること' }).boundingBox())!
-  const skip = (await rows.first().getByRole('button', { name: '読まない' }).boundingBox())!
-  expect(skip.x + skip.width).toBeLessThanOrEqual(pane.x + pane.width)
-  const scrollsDown = async () => {
-    const box = (await list.boundingBox())!
-    expect(box.height).toBeGreaterThan(page.viewportSize()!.height * 0.5)
-    await list.evaluate(el => { el.scrollTop = 200 })
-    expect(await list.evaluate(el => el.scrollTop)).toBe(200)
-  }
-  await scrollsDown()
-
-  // Opened: the rest scroll inside their own area, and the list keeps its place.
-  await block.getByRole('button', { name: 'ほか 12 件' }).click()
-  const folded = page.getByTestId('meetings-folded')
-  await expect(folded.locator('[data-banner]')).toHaveCount(12)
-  expect(await folded.evaluate(el => el.scrollHeight > el.clientHeight)).toBe(true)
-  await scrollsDown()
-  if (process.env.SCREENSHOTS) await page.screenshot({ path: `${process.env.SCREENSHOTS}/meetings-flood.png`, clip: { x: 0, y: 0, width: 320, height: 640 } })
-  // A short window: the block gives way, the list does not.
-  await page.setViewportSize({ width: 1000, height: 400 })
-  await scrollsDown()
-  await page.setViewportSize({ width: 1000, height: 640 })
-
-  // ［まとめて読まない］: the folded ones only, one 元に戻す for them all.
-  await block.getByRole('button', { name: 'まとめて読まない' }).click()
-  await expect(page.getByRole('status')).toContainText('12件を読まないにしました')
-  await expect(rows).toHaveCount(2)
-  await expect(page.locator('#log')).toContainText('skip meeting-flood011@1')
-  await expect(page.locator('#log')).not.toContainText('skip meeting-teirei01')
-  await page.getByRole('button', { name: '元に戻す' }).click()
-  await expect(block.getByRole('button', { name: 'ほか 12 件' })).toBeVisible()
-  await expect(page.locator('#log')).toContainText('undo meeting-flood011 2@2')
+  const news = page.getByRole('region', { name: '新着' }).first()
+  await expect(news.locator('[data-inbox-row^="record:meeting-"]')).toHaveCount(14)
+  await expect(news.getByRole('heading')).toContainText('新着 14')
+  await news.getByRole('button', { name: 'すべて確認した' }).click()
+  await expect(news.getByRole('heading')).toContainText('新着 0')
+  // Looked at, not decided: nothing was sent, and each still offers ［AI に読ませる］, in sight but no longer counted.
+  await expect(page.locator('#log')).toHaveText('')
+  await expect(page.getByRole('region', { name: '新着' }).first().locator('[data-inbox-row="record:meeting-teirei01"]').getByRole('button', { name: 'AI に読ませる', exact: true })).toBeVisible()
   expectNoPageErrors(state)
 })
 
 test('a Google permission from before the Docs API: one line on the card, and its button asks the 議事録 feature again', async ({ page }) => {
   await openPreview(page, 'meetings', { renew: '1' })
-  await page.locator('[data-banner="meeting-teirei01"]').getByRole('button', { name: 'AI に読ませる' }).click()
+  await page.locator('[data-inbox-row="record:meeting-teirei01"]').getByRole('button', { name: 'AI に読ませる', exact: true }).click()
   await finish(page, 'meeting-teirei01')
-  await page.locator('[data-banner="meeting-teirei01"]').getByRole('button', { name: '見る' }).click()
+  await page.locator('[data-inbox-row="record:meeting-teirei01"]').getByRole('button', { name: '見る', exact: true }).click()
   await expect(page.getByTestId('record-card')).toContainText('Google の許可をし直すと、メモも読めるようになります')
   await page.getByRole('button', { name: '許可をし直す' }).click()
   await expect(page.locator('#log')).toContainText('google minutes')
@@ -276,7 +255,7 @@ test('a Google permission from before the Docs API: one line on the card, and it
 test('「やることを足す」: a close item is a quiet line; ［まとめる］ puts the new one away, opens the earlier, and 元に戻す undoes it', async ({ page }) => {
   const state = await openPreview(page, 'meetings')
   await finish(page, 'meeting-teirei01')
-  await page.locator('[data-banner="meeting-teirei01"]').getByRole('button', { name: '見る' }).click()
+  await page.locator('[data-inbox-row="record:meeting-teirei01"]').getByRole('button', { name: '見る', exact: true }).click()
   const list = page.getByTestId('record-card').getByRole('region', { name: 'やることの案' })
   await list.getByRole('button', { name: 'やることを足す' }).click()
   const line = list.getByRole('textbox', { name: 'この会議のやること' })
@@ -317,17 +296,17 @@ test('a member who never chose is offered 「社外の人がいる会議だけ�
 
 test('a server that keeps three choices: the card shows them for a series, marks the current one, 「設定に従う」 sends none', async ({ page }) => {
   const state = await openPreview(page, 'meetings', { three: '1' })
-  const line = page.locator('[data-banner="meeting-teirei01"]')
-  await line.getByRole('button', { name: 'AI に読ませる' }).click()
+  const line = page.locator('[data-inbox-row="record:meeting-teirei01"]')
+  await line.getByRole('button', { name: 'AI に読ませる', exact: true }).click()
   await finish(page, 'meeting-teirei01')
-  await line.getByRole('button', { name: '見る' }).click()
+  await line.getByRole('button', { name: '見る', exact: true }).click()
   const card = page.getByTestId('record-card')
   const choice = card.getByRole('radiogroup', { name: 'この定例の議事録を自動で読むか' })
   await expect(choice.getByRole('radio', { name: '設定に従う' })).toHaveAttribute('aria-checked', 'true')
   // The older one-time offer is not shown beside it: each thing once.
   await expect(card.locator('[data-auto-offer]')).toHaveCount(0)
-  await choice.getByRole('radio', { name: '読まない' }).click()
-  await expect(choice.getByRole('radio', { name: '読まない' })).toHaveAttribute('aria-checked', 'true')
+  await choice.getByRole('radio', { name: '読まない', exact: true }).click()
+  await expect(choice.getByRole('radio', { name: '読まない', exact: true })).toHaveAttribute('aria-checked', 'true')
   await choice.getByRole('radio', { name: '設定に従う' }).click()
   await expect(page.locator('#log')).toContainText('auto meeting-teirei01 false\nauto meeting-teirei01 null')
   await expect(choice.getByRole('radio', { name: '設定に従う' })).toHaveAttribute('aria-checked', 'true')

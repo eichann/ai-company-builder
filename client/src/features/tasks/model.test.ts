@@ -5,7 +5,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import type { TaskListItem } from '../../../shared/tasks'
-import { bundleListWord, bundlePlacesOf, companyNow, mayMakePrivateBundle, privateBundleFolderNames, companyPathOf, dueText, dueWhen, listEvents, listRows, listSections, listShownFor, keptTaskTabFacts, taskTabShown, filterByTag, linkCandidates, meetingRowText, nextCard, postponeChoices } from './model'
+import { askedByOthers, bundleListWord, bundlePlacesOf, companyNow, mayMakePrivateBundle, privateBundleFolderNames, companyPathOf, dueText, dueWhen, listEvents, listRows, listSections, listShownFor, keptTaskTabFacts, taskTabShown, filterByTag, linkCandidates, meetingRowText, nextCard, nextMondayDue, overdueFixes, postponeChoices } from './model'
 import type { TaskCardData, TaskCardResult } from '../../../shared/task-card'
 
 // The card is no longer remounted per version (tasks-ui.md), so two reads can race: an older answer
@@ -67,20 +67,38 @@ test('by turn: only the member\'s own far future folds; meetings to come join th
     { ...item('far-started', 'mine', '2026-12-11'), state: 'in_progress' },
     { ...item('someday', 'mine', null), resting: true }, item('no-due-asked', 'mine', null),
     item('acc', 'acceptance', null), item('done', 'done', null),
+    item('late-mine', 'mine', '2026-11-03'), item('due-today', 'mine', '2026-11-05'),
   ], events, 'turn', NOW)
   const by = Object.fromEntries(sections.map(s => [s.key, s]))
-  assert.deepEqual(sections.map(s => s.key), ['acceptance', 'mine', 'others', 'later', 'someday', 'done'])
-  assert.deepEqual(by.mine.items.map(i => i.id), ['soon', 'far-started', 'no-due-asked'])
+  assert.deepEqual(sections.map(s => s.key), ['acceptance', 'overdue', 'today', 'next', 'others', 'later', 'someday', 'done'])
+  // The member's turn by when (owner decision 2026-11-26): 期限切れ (one line, まとめて直す), 今日, このあと.
+  assert.deepEqual([by.overdue.items.map(i => i.id), by.overdue.overdue], [['late-mine'], true])
+  assert.deepEqual(by.today.items.map(i => i.id), ['due-today'])
+  assert.deepEqual(by.next.items.map(i => i.id), ['soon', 'far-started', 'no-due-asked'])
+  assert.equal(by.next.title, 'このあと')
   // A task not started with no due waits in 「いつか」, folded (owner 2026-11-03).
   assert.deepEqual(by.someday.items.map(i => i.id), ['someday'])
   assert.equal(by.someday.foldable, true)
   assert.equal(by.someday.title, 'いつか')
-  assert.deepEqual(by.mine.events.map(e => e.event.id), ['e2'])
-  assert.equal(by.mine.events[0].start, '17:00')
+  assert.deepEqual(by.today.events.map(e => e.event.id), ['e2'])
+  assert.equal(by.today.events[0].start, '17:00')
   assert.deepEqual(by.later.items.map(i => i.id), ['far'])
   assert.equal(by.later.foldable, true)
   assert.deepEqual(by.others.items.map(i => i.id), ['far-other'])
   assert.deepEqual(by.done.events.map(e => e.event.id), ['e1'])
+})
+
+test('「まとめて直す」: a due is moved only where the type allows the member, 「やめる」 only on their own task; 来週の月曜 is that Monday', () => {
+  assert.deepEqual(overdueFixes(item('own', 'mine', '2026-11-03')), { move: true, drop: true })
+  assert.deepEqual(overdueFixes({ ...item('asked', 'mine', '2026-11-03'), own: false }), { move: true, drop: false })
+  assert.deepEqual(overdueFixes({ ...item('reply', 'mine', '2026-11-03'), type: 'reply_request' }), { move: true, drop: false })
+  assert.deepEqual(overdueFixes({ ...item('approval', 'mine', '2026-11-03'), type: 'approval' }), { move: false, drop: false })
+  // Before 「全部…」: how many of them someone else asked (their requester is told); one's own and a 返事のお願い are not.
+  assert.equal(askedByOthers([item('own', 'mine', '2026-11-03'), { ...item('asked', 'mine', '2026-11-03'), own: false }, { ...item('reply', 'mine', '2026-11-03'), type: 'reply_request', own: false }]), 1)
+  assert.equal(askedByOthers([item('own', 'mine', '2026-11-03')]), 0)
+  // NOW is Thursday 2026-11-05: next Monday is 11/9; on a Monday it is the one a week on.
+  assert.equal(nextMondayDue(NOW), '2026-11-09T09:00')
+  assert.equal(nextMondayDue(companyNow(Date.parse('2026-11-09T01:00:00.000Z'))), '2026-11-16T09:00')
 })
 
 test('by date: overdue, today, tomorrow, this week, later (folded), no due — whoever holds it', () => {

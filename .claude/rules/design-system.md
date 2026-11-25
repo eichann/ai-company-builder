@@ -340,7 +340,7 @@ fine), `color-opacity` (`bg-warning/10`).
   messages shown in a warning callout (`{error}` callouts in settings, absences, jobs) are `danger`.
 - **New-item mark = one primary dot** `NewDot` (primitives; `bg-unread`, `size-dot`, `role="img"` named
   by its word): the left tabs' dot, the bell's unread dot and its unread rows (were red; since I2 the title bar's
-  ［受け箱］ dot and the inbox rows' marks), the chat list's
+  inbox rows' marks; the ［受け箱］ dot until 2026-11-26), the chat list's
   「新着」 (was a green word, row and folded group), the file tree's new review (was a blinking amber
   dot). The count bubble (`LeftPanelTabs`) is `primary` / `on-primary` since P2d.
 - **「閲覧のみ」 replaces 「読むだけ」** in user-facing text: the bell 「起きたこと（閲覧のみ）」 (gone with the bell in I2), google-relay's
@@ -358,7 +358,7 @@ fine), `color-opacity` (`bg-warning/10`).
 - **Guarded by** `client/tests/ui/status-colours.spec.ts` (light and dark: every callout tone and badge
   variant against its `--color-*-rgb` tokens on `client/tests/status-ui.html`; the three stopped states
   differ in fill, icon and word; real screens — the task card's failed run, the pending approval card,
-  `download-folders-ui?tab=ownkeys&ownkey=stopped`, the title bar's ［受け箱］ (its dot `unread`, its count `primary`) and the inbox rows' dots; the amber places —
+  `download-folders-ui?tab=ownkeys&ownkey=stopped`, the title bar's ［受け箱］ (新着 the soft `selected-bg` / `selected-text` count, あなた待ち the soft `danger-bg` / `danger-text` one) and the inbox rows' dots; the amber places —
   `status-ui`'s task rows (`not-allowed` amber, failed red) and title bar (sync waiting),
   `download-folders-ui?tab=mine&company=off|later` (the notice, unfaded; the refusal a warning),
   `editor-tabs-ui?view=external` 「自動保存は止めています」), `autoSyncSchedule.test.ts`

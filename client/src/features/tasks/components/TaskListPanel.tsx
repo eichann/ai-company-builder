@@ -1,3 +1,5 @@
+// Over ~300 lines on purpose: every press of the list (☑, 引き受ける, まとまり, 期限切れ's まとめて直す) shares its busy and
+// message state and the list's reload; split, each would need them handed back.
 import { Fragment, useMemo, useState } from 'react'
 import { CaretDown, CaretRight, Briefcase, Table } from '@phosphor-icons/react'
 import type { AiTurnItemsView } from '../../../../shared/ai-turns'
@@ -7,7 +9,8 @@ import { actOnTask, createTask, declineMeetingBundle, linkMeetingBundle, undoTas
 import { useLinkDrop } from '../../../shared/hooks/useLinkDrop'
 import { LinkDropNotice } from '../../../shared/ui/LinkDropNotice'
 import { useCalendarToday } from '../hooks/useCalendarToday'
-import { bundleListWord, companyNow, departmentBundleKind, filterByTag, listEvents, listRows, listSections, tagCounts, type ListMode, type ListRow, type ListSection } from '../model'
+import { bundleListWord, companyNow, departmentBundleKind, dueText, filterByTag, listEvents, listRows, listSections, nextMondayDue, tagCounts, type ListMode, type ListRow, type ListSection } from '../model'
+import { OverdueFix, type OverdueDone } from './OverdueFix'
 import { CALM } from '../../../../shared/thing-words'
 import { ThingIcon } from '../../../shared/ui/ThingIcon'
 import { ArchiveSection } from './ArchiveSection'
@@ -59,6 +62,7 @@ export function TaskListPanel({ companyId, rootPath, list, aiTurns, activeRecord
   const [unfolded, setUnfolded] = useState<Record<string, boolean>>({})
   const [busy, setBusy] = useState<string | null>(null)
   const [message, setMessage] = useState<string | null>(null)
+  const [overdueDone, setOverdueDone] = useState<OverdueDone | null>(null)
   const [nowMs, setNowMs] = useState(() => Date.now())
   useInterval(() => setNowMs(Date.now()), 60_000)
   const now = useMemo(() => companyNow(nowMs), [nowMs])
@@ -143,6 +147,48 @@ export function TaskListPanel({ companyId, rootPath, list, aiTurns, activeRecord
       list.reload()
     }
   }
+  // 「まとめて直す」 of 期限切れ: each item at the version the list knows; what went through can be put back in one press.
+  const fixOverdue = async (items: readonly TaskListItem[], step: Omit<TaskActInput, 'expectedVersion'>, words: (n: number) => string) => {
+    setBusy('overdue')
+    setMessage(null)
+    const done: Array<{ id: string; version: number }> = []
+    let failure: string | null = null
+    try {
+      for (const item of items) {
+        // A thrown call is a refusal too: what went through before it keeps its 元に戻す (independent review).
+        const r = await actOnTask(companyId, item.id, { ...step, expectedVersion: item.version }).catch(() => ({ success: false as const, error: 'できませんでした。' }))
+        if (r.success) { if (r.entryVersion !== undefined) done.push({ id: item.id, version: r.entryVersion }) } else failure = failure ?? r.error
+      }
+    } finally {
+      setBusy(null)
+      list.reload()
+    }
+    if (failure) setMessage(failure)
+    if (done.length === 0) { setOverdueDone(null); return }
+    setOverdueDone({
+      text: words(done.length),
+      undo: () => void (async () => {
+        setBusy('overdue')
+        let undoFailure: string | null = null
+        try {
+          for (const d of done) {
+            const r = await undoTaskAction(companyId, d.id, d.version, d.version).catch(() => ({ success: false as const, error: 'できませんでした。' }))
+            if (!r.success) undoFailure = undoFailure ?? r.error
+          }
+        } finally {
+          setBusy(null)
+          list.reload()
+        }
+        // Put back: the list shows it; a failure is said where the list's messages are.
+        setOverdueDone(null)
+        if (undoFailure) setMessage(undoFailure)
+      })(),
+    })
+  }
+  const moveOverdue = (items: readonly TaskListItem[], due: string | null) =>
+    void fixOverdue(items, { action: 'set_due', args: { due } }, n => (due ? `${n} 件の期限を ${dueText(due, now)}にしました` : `${n} 件の期限を外しました（「いつか」へ）`))
+  const dropOverdue = (item: TaskListItem) =>
+    void fixOverdue([item], { action: 'cancel', note: '期限切れのため、やめました' }, () => `「${item.title}」をやめました（アーカイブ）`)
   const add = async (input: TaskCreateInput): Promise<string | null> => {
     const r = await createTask(companyId, input.assignee ? { ...input, folder: askFolder } : input)
     if (!r.success) return r.error
@@ -205,6 +251,7 @@ export function TaskListPanel({ companyId, rootPath, list, aiTurns, activeRecord
     )
   }
   const section = (s: ListSection) => {
+    if (s.overdue) return <OverdueFix key={s.key} items={s.items} now={now} nextMonday={nextMondayDue(now)} busy={busy !== null} done={overdueDone} onOpen={onOpen} onMove={moveOverdue} onDrop={dropOverdue} />
     const open = !s.foldable || unfolded[s.key] === true
     const header = <>
       {s.foldable && (open ? <CaretDown size={10} /> : <CaretRight size={10} />)}{s.bundle && <ThingIcon kind="bundle" typeLabel={s.bundle.typeLabel} size={12} />}{s.title}
@@ -277,6 +324,13 @@ export function TaskListPanel({ companyId, rootPath, list, aiTurns, activeRecord
           {list.data && sections.length === 0 && (
             <p className="px-2.5 py-4 text-small leading-relaxed text-gray-500 dark:text-zinc-400">
               {shownTag ? `#${shownTag} のやることはありません。` : `${CALM.emptyTasks}。上の1行で自分のやることを足せます。`}
+            </p>
+          )}
+          {/* Every overdue one fixed: the block is gone, what was done (and its 元に戻す) stays said (Codex review). */}
+          {overdueDone && !sections.some(s => s.overdue) && (
+            <p role="status" data-overdue-done className="mx-1 flex flex-wrap items-center gap-2 rounded-control border border-[color:var(--color-border)] px-2.5 py-1.5 text-small text-text">
+              {overdueDone.text}
+              {overdueDone.undo && <button type="button" disabled={busy !== null} onClick={overdueDone.undo} className="text-small text-link hover:text-link-hover">元に戻す</button>}
             </p>
           )}
           {sections.map(section)}
