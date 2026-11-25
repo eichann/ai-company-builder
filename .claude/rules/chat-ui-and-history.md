@@ -141,10 +141,15 @@ one place an added agent brings its own controls; everything else asks the regis
 - **Narrowed to what is open** (owner 2026-11-02, 新しい画面のデモ J): while a record is open in the
   middle (AppShell's `activeRecordId`, given as `focus`), the list shows only consultations whose
   main topic (`topicRecordId`) is that record itself — never those of the things inside it (a
-  案件's やること's consultations show when that やること is open) — plus the one on screen
-  (`focusConversationRows`). 「すべて表示」 lifts it for that record (「「…」の相談だけにする」 brings
+  案件's やること's consultations show when that やること is open) — under 「「…」についての相談」
+  (`focusConversationRows` `about`; none → 「このことについての相談は、まだありません。」). The one on
+  screen, when it is not about that record, stays listed but **apart**, under its own heading
+  「表示中の相談（このことについての相談ではありません）」 (`shown`; owner report 2026-11-25: listed under
+  the record's heading, an unrelated consultation read as one about a やること just opened, though
+  nothing was stored). 「すべて表示」 lifts it for that record (「「…」の相談だけにする」 brings
   it back; opening another record narrows again); a search always looks at every consultation.
-  Tests: `src/features/chat/conversation-rows.test.ts`, `tests/ui/chat-panel.spec.ts`.
+  Tests: `src/features/chat/conversation-rows.test.ts`, `tests/ui/chat-panel.spec.ts` (「narrowed to a
+  record, the consultation on screen … listed apart」).
 - **A record dropped on the input** (owner, 2026-11-03 「使い心地のメモ」 #5). A record drag (a task row,
   a 探す row, a record tab in the middle; `tasks-ui.md` "Drag sources") onto the composer:
   - **The drop frame says what will happen** (`features/chat/recordDrop.ts` `composerDragOf` /
