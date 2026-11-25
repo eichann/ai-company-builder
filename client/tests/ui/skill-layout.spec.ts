@@ -294,10 +294,39 @@ test('ログアウト is the one sign-out: the session ends and the company clos
   // signed in on the company list.
   await openPreview(page, 'skill-layout')
   await deptTab(page, '営業部').click()
-  await page.getByTitle('ログアウト').click()
+  await page.getByRole('button', { name: 'あなたのメニュー' }).click()
+  await page.getByRole('menuitem', { name: 'ログアウト' }).click()
   await expect.poll(() => page.evaluate(() => (window as unknown as { __acbLayout: { session(): unknown } }).__acbLayout.session()))
     .toEqual({ user: null, company: null })
   expect(await calls(page, 'signOut')).toEqual([[]])
+})
+
+// The tidied title bar (owner decision 2026-11-26): sign-out, light / dark and the language are never
+// on the bar itself, only in the member's menu (ログアウト last); the menu opens and closes by keyboard.
+test('the title bar has no sign-out, theme or language button: they are in あなたのメニュー, ログアウト last', async ({ page }) => {
+  await openPreview(page, 'skill-layout')
+  const bar = page.getByRole('banner').filter({ has: page.getByRole('button', { name: 'あなたのメニュー' }) })
+  for (const name of ['ログアウト', 'ダークモード', 'ライトモード', 'Switch to English', '日本語に切り替え', '設定', 'バックアップ履歴', 'いつもの形に戻す', '議事録を確かめる']) {
+    await expect(bar.getByRole('button', { name, exact: true })).toHaveCount(0)
+  }
+  const me = bar.getByRole('button', { name: 'あなたのメニュー' })
+  await me.focus()
+  await page.keyboard.press('Enter')
+  const menu = page.getByRole('menu', { name: 'あなたのメニュー' })
+  await expect(menu.getByRole('menuitem')).toHaveText(['設定', 'バックアップ履歴', '画面をいつもの形に戻す', /表示/, /言語/, 'ログアウト'])
+  await expect(menu.getByRole('menuitem', { name: '設定' })).toBeFocused()
+  await page.keyboard.press('Escape')
+  await expect(menu).toHaveCount(0)
+  await expect(me).toBeFocused()
+})
+
+test('同期の ▾: 変更を確認してから同期 opens the changes to review', async ({ page }) => {
+  // `manual=1`: the page that answers 「変更を確認」 with two changes.
+  await openPreview(page, 'skill-layout', { manual: '1' })
+  await page.getByRole('button', { name: '同期のほかの操作' }).click()
+  await page.getByRole('menuitem', { name: '変更を確認してから同期' }).click()
+  await expect(page.getByRole('dialog', { name: /変更されたファイル/ })).toBeVisible()
+  await expect(page.getByRole('menu')).toHaveCount(0)
 })
 
 // 今日のフォルダ (tasks-ui.md "今日のフォルダ"): from any department, ⌘⇧T (command files.openToday) or the
@@ -328,7 +357,8 @@ test('今日のフォルダを開く: from another department, made when missing
 test('自分の設定: 今日のフォルダ says where it is and which department おまかせ uses; a choice moves it', async ({ page }) => {
   await page.clock.install({ time: new Date('2026-11-03T00:00:00Z') })
   await openPreview(page, 'skill-layout')
-  await page.getByTitle('設定').first().click()
+  await page.getByRole('button', { name: 'あなたのメニュー' }).click()
+  await page.getByRole('menuitem', { name: '設定' }).click()
   const row = page.locator('[data-today-folder-setting]')
   await expect(row).toContainText('営業部/.personal/inbox/日付別/2026/20261103/')
   const select = row.getByRole('combobox', { name: '今日のフォルダを置く部署' })
@@ -345,7 +375,7 @@ test('a company without the shared folder: no sync, preview or backups (one shor
   await expect(page.getByRole('note')).toContainText('サーバーには残りません。PC のバックアップ機能で守ってください。やること・決めたことなどの記録はサーバーに残ります。')
   await page.keyboard.press('Escape')
   await expect(page.getByRole('note')).toHaveCount(0)
-  for (const name of ['サーバーと同期', '変更を確認', 'バックアップ履歴']) await expect(page.getByRole('button', { name })).toHaveCount(0)
+  for (const name of ['サーバーと同期', '同期のほかの操作', '変更を確認', 'バックアップ履歴']) await expect(page.getByRole('button', { name })).toHaveCount(0)
   // 開発部 is "not downloaded" for a git company: here every folder is on this PC.
   await deptTab(page, '開発部').click()
   await expect(overlay(page)).toHaveCount(0)
@@ -354,7 +384,9 @@ test('a company without the shared folder: no sync, preview or backups (one shor
   await leftTab(page, 'ファイル').click()
   await expect(page.getByRole('button', { name: 'README.md' })).toBeVisible()
   await expect(page.getByRole('button', { name: /^総務/ }).filter({ hasText: '閲覧のみ' })).toHaveCount(0)
-  await page.getByRole('button', { name: '設定' }).click()
+  await page.getByRole('button', { name: 'あなたのメニュー' }).click()
+  await expect(page.getByRole('menuitem', { name: 'バックアップ履歴' })).toHaveCount(0)
+  await page.getByRole('menuitem', { name: '設定' }).click()
   await expect(page.getByRole('button', { name: '自分の設定' })).toBeVisible()
   for (const name of ['ダウンロードするフォルダ', '自動同期', '同期しないファイル']) await expect(page.getByRole('button', { name })).toHaveCount(0)
   expect(await calls(page, 'gitSync')).toEqual([])

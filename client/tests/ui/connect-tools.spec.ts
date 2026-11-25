@@ -70,14 +70,14 @@ test('today\'s calendar is read again as soon as Google is allowed, not at its 1
   expectNoPageErrors(state)
 })
 
-test('「議事録を確かめる」 shows as soon as Google is allowed, without reopening the company or waiting for the 10-minute look', async ({ page }) => {
+test('minutes are looked at as soon as Google is allowed, without reopening the company or waiting for the 10-minute look', async ({ page }) => {
   const state = await openPreview(page, 'connect-tools', { state: 'first', minutes: '1' })
-  const button = page.getByRole('button', { name: '議事録を確かめる' })
+  const minutes = page.getByTestId('minutes')
   await expect.poll(async () => (await calls(page)).filter(c => c === 'watchMinutes')).toHaveLength(1)
-  await expect(button).toHaveCount(0)
+  await expect(minutes).toHaveText('off')
   const dialog = page.getByRole('dialog', { name: '仕事の道具をつなぐ' })
   await dialog.getByRole('button', { name: 'Google でつなぐ' }).click()
-  await expect(button).toBeVisible({ timeout: 10_000 })
+  await expect(minutes).toHaveText('available', { timeout: 10_000 })
   // One check for the change, not a faster loop: the screen's repeated reads of the same permission ask no more.
   expect((await calls(page)).filter(c => c === 'checkMinutes')).toHaveLength(1)
   expectNoPageErrors(state)

@@ -710,9 +710,9 @@ export function AppShell({ bottomPanel, inboxNewsSince }: AppShellProps = {}) {
             onStopWaiting={companySwitch.stopWaiting}
           />
         ) : undefined}
-        extra={meetings.titleBarButton}
+        onResetLayout={resetLayout}
         layoutControls={<LayoutControls leftShown={!hidden.has('fileTree')} chatShown={!hidden.has('chat')}
-          onToggleLeft={toggleLeft} onToggleChat={toggleChat} onReset={resetLayout} />}
+          onToggleLeft={toggleLeft} onToggleChat={toggleChat} />}
         inbox={inbox?.titleBarButton}
       />
       <LeaveConfirmDialog question={leaving.question} onAnswer={leaving.answer} />

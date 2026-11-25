@@ -94,7 +94,7 @@ client/src/app/AppDialogs.tsx arbitrary-value=1
 client/src/app/AppShell.tsx palette-color=19 white-black=1
 client/src/app/ChatWindowApp.tsx palette-color=10 shadow-scale=1 type-scale=2 white-black=2 z-index=2
 client/src/app/FileSidePanel.tsx arbitrary-value=1 palette-color=13 white-black=1
-client/src/app/TitleBar.tsx opacity-scale=3 palette-color=37 radius-scale=1 shadow-scale=1 type-scale=4 white-black=2 z-index=1
+client/src/app/TitleBar.tsx palette-color=16 radius-scale=1 shadow-scale=1 type-scale=3 white-black=2 z-index=1
 client/src/features/absences/components/AbsenceSection.tsx palette-color=23 white-black=4
 client/src/features/auth/components/LoginScreen.tsx type-scale=6
 client/src/features/auth/components/ServerSetupScreen.tsx type-scale=11
@@ -176,7 +176,6 @@ client/src/features/jobs/components/JobsSection.tsx palette-color=19 white-black
 client/src/features/jobs/components/RewatchPicker.tsx palette-color=3
 client/src/features/minutes/components/InviteDialog.tsx arbitrary-value=2 palette-color=12 radius-scale=2
 client/src/features/minutes/components/MeetingPanel.tsx palette-color=12
-client/src/features/minutes/components/MinutesCheckButton.tsx opacity-scale=1 palette-color=11 shadow-scale=1 type-scale=1 white-black=1 z-index=1
 client/src/features/plugin-steps/components/ContinueStepButton.tsx palette-color=4 type-scale=1
 client/src/features/plugin-steps/components/PersonStepButtons.tsx opacity-scale=1 palette-color=6 type-scale=1
 client/src/features/plugin-steps/components/StepDeliverables.tsx palette-color=8

@@ -310,6 +310,14 @@ D7–D9, confirmed 2026-10-30).
   the operations they are allowed, never `window.electronAPI`. Keep the data layer split into
   read / write / send-outside operations so permissions can be decided in one place.
 
+- **The title bar** (`src/app/TitleBar.tsx`, owner decision 2026-11-26, 依頼2): ［受け箱］［同期 ▾］｜［左の欄］
+  ［AIチャット］｜［?］［あなたの丸 ▾］. The sync ▾ holds 「変更を確認してから同期」 and the tooltip's status lines (last
+  automatic sync); the waiting sync keeps its amber mark. あなたの丸 (the name's first letter, else the email's) holds
+  name and company / 設定・バックアップ履歴・画面をいつもの形に戻す / 表示・言語 / ログアウト (last, apart). **Sign-out,
+  light / dark and the language are never on the bar itself** (owner). A company without the shared folder shows
+  「この PC だけで作業」 instead of sync and no バックアップ履歴. Menus: Enter / Space open (focus on the first item),
+  ↑ ↓ move, Esc (focus back) or a press outside closes (`useDismiss`). Test: `tests/ui/skill-layout.spec.ts` 「the
+  title bar has no sign-out, theme or language button…」, 「同期の ▾…」, 「a company without the shared folder…」.
 - **Commands (built, E1).** A feature that needs another feature's operation, or a shortcut,
   goes through a named command (`runCommand('file.open', { path })`), not a new React context, a
   store field or a window-wide key listener: `commands.md`.

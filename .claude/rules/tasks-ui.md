@@ -948,7 +948,7 @@ asked only while 決めたこと is on). AppShell reads them with `featuresFrom`
   morning summary's Mac notification opens the inbox. The arrived minutes are the inbox's rows
   (`notifications.md` "The inbox"), for whoever may see the meeting.
 - **会議と議事録 off**: no 「今日の予定」 (the list's `showCalendar`; `useCalendarToday` reads nothing),
-  no 「議事録が届きました」, no 「議事録を確かめる」, no ［自分で読み取る］.
+  no 「議事録が届きました」, no ［自分で読み取る］.
 - **決めたこと off**: the meeting lines say only やることの案 (`madeWords`, the inbox row's line and the ［AI に読ませる］ title), the
   manual reading's first message asks for no decision (`startMinutesReading(…, features)`).
 - **プロジェクト off**: `departmentBundleKind` gives null for the core's kind (`coreOff`), so nothing

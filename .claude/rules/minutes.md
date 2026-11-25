@@ -756,8 +756,7 @@ Records off → 404 `RECORDS_DISABLED`. The AI's emergency stop ends record toke
 
 - **Where it sits on the main screen** (2026-11-10): `src/features/minutes/hooks/useMinutesSlots.tsx`
   holds everything of minutes the screen shows — the received minutes and arrivals, the runner's
-  inputs (`aiTurnMinutes`, `askedMeetings`), the inbox's meeting rows, the task list's `meetingActions`, 「議事録を
-  確かめる」, their buttons and the 「元に戻す」 toast, the まとまり chooser's state and the meeting
+  inputs (`aiTurnMinutes`, `askedMeetings`), the inbox's meeting rows, the task list's `meetingActions`, their buttons and the 「元に戻す」 toast, the まとまり chooser's state and the meeting
   card's key. `AppShell` only places these parts and imports nothing else of `features/minutes`
   (`architecture-boundaries.test.ts` 「AppShell reaches the minutes feature only through its slot」);
   what needs another feature (the meeting card with the tasks feature's `MinutesReview`, the
@@ -767,10 +766,12 @@ Records off → 404 `RECORDS_DISABLED`. The AI's emergency stop ends record toke
 - **Checking** (`client/electron/features/minutes/checker.ts`, main; the session stays there):
   the renderer names the company it works in (`minutes:watch`, from `useMinutesNotices` in
   `useMinutesSlots`, which `AppShell` mounts; the subscription's end sends `null`); main then checks at once, every 10 minutes
-  (`MINUTES_CHECK_INTERVAL_MS`), on 「議事録を確かめる」 (`minutes:check`) and **once when the member's Google permission changes in
+  (`MINUTES_CHECK_INTERVAL_MS`) and **once when the member's Google permission changes in
   this app** (`useMinutesNotices` over `googlePermission`, the signal 設定 →「Google」 and 「仕事の道具をつなぐ」 give; 使い心地のメモ #38:
-  the title bar's button only showed after reopening the company). Nothing is polled more often. Test:
-  `tests/ui/connect-tools.spec.ts` 「「議事録を確かめる」 shows as soon as Google is allowed…」. Each check first asks
+  minutes only showed after reopening the company). There is no button to check by hand any more (owner
+  2026-11-26, 依頼2: the title bar's 「議事録を確かめる」 was removed; the inbox shows what arrives); `minutes:check` stays
+  for this look. Nothing is polled more often. Test:
+  `tests/ui/connect-tools.spec.ts` 「minutes are looked at as soon as Google is allowed…」. Each check first asks
   `GET /me/google`: **without an active grant that includes `minutes`, nothing about minutes is
   asked or shown** (no error either). With it: `POST /me/minutes/check` (the server puts stale
   readings back itself; for an older server each `stale` id still in `reading` is put back with the
@@ -787,8 +788,8 @@ Records off → 404 `RECORDS_DISABLED`. The AI's emergency stop ends record toke
   department bar is gone. A received record is a row of the task list's 「AI の番」 (the `ai-turn`
   answer), with the automatic runner's state; while the AI has not started it, the row offers
   「自分で読み取る」 (`src/features/minutes/startReading.ts`) and 「今は読まない」 (`minutes:skip` → the
-  type's `skip` with the session) — `tasks-ui.md` "Minutes and AI turns". 「議事録を確かめる」 is an
-  icon button in the title bar (`MinutesCheckButton.tsx`), shown only while the grant allows minutes.
+  type's `skip` with the session) — `tasks-ui.md` "Minutes and AI turns". No 「議事録を確かめる」 button
+  (removed from the title bar 2026-11-26, owner: the inbox is where minutes show).
 - **Automatic reading** (stage 2 S10, `ai-turns.md`): with the company's 「自動で進める」 on and
   Claude Code chosen, the main window reads received minutes by itself in a hidden consultation
   (claimed with `start_reading` at the record's version read just before, then the same first message wrapped by
