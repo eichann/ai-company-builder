@@ -2,7 +2,7 @@
 // date, which part of the future folds, how a due reads, and the tag filter. "Today" is the
 // company's day (Japan time until a company setting exists, calendar.md).
 import type { CalendarEvent } from '../../../shared/calendar'
-import type { TaskListItem } from '../../../shared/tasks'
+import type { TaskListData, TaskListItem } from '../../../shared/tasks'
 import type { TaskCardResult } from '../../../shared/task-card'
 import { DEFAULT_COMPANY_TIME_ZONE } from '../../../../shared/core/calendar'
 import { weekEndOf } from '../../../../shared/core/turn-timing'
@@ -12,6 +12,7 @@ import { bundleWords } from '../../../shared/thing-words'
 import type { BundleKind, BundleKindsResult } from '../../../../shared/types/records'
 import { defaultBundleFolder } from '../../../../shared/core/bundle-place'
 import { suggestFolderName } from '../../../../shared/core/names'
+import { featuresFrom } from '../../../../shared/core/features'
 
 /** 番ごと ｜ 〇〇ごと (what the items belong to: 案件, プロジェクト…) ｜ 日付ごと. */
 export type ListMode = 'turn' | 'bundle' | 'date'
@@ -272,6 +273,38 @@ export function filterByTag(items: readonly TaskListItem[], tag: string | null):
 export function listShownFor(departmentId: string | null, listDepartmentIds: readonly string[] | null): boolean {
   if (listDepartmentIds === null) return true
   return departmentId === null ? listDepartmentIds.length > 0 : listDepartmentIds.includes(departmentId)
+}
+
+/** What decides the やること tab: records on, 「やることの一覧」 on (使う機能) and the departments that show it. */
+export interface TaskTabFacts {
+  available: boolean
+  taskList: boolean
+  listDepartmentIds: string[] | null
+}
+
+/** The tab's facts from a list answer (an older main without `features` = everything on). */
+export function taskTabFactsOf(data: TaskListData): TaskTabFacts {
+  return { available: data.available, taskList: featuresFrom(data.features).taskList, listDepartmentIds: data.listDepartmentIds }
+}
+
+/** Facts this PC kept from an earlier answer (localStorage): anything malformed is none. */
+export function keptTaskTabFacts(raw: unknown): TaskTabFacts | null {
+  if (typeof raw !== 'object' || raw === null) return null
+  const r = raw as Record<string, unknown>
+  const ids = r.listDepartmentIds
+  if (typeof r.available !== 'boolean' || typeof r.taskList !== 'boolean') return null
+  if (ids !== null && !(Array.isArray(ids) && ids.every(x => typeof x === 'string'))) return null
+  return { available: r.available, taskList: r.taskList, listDepartmentIds: ids as string[] | null }
+}
+
+/**
+ * Whether the やること tab shows for the department on screen. `facts`: the list's answer, else (while it is read) what an
+ * earlier answer said. Not known yet → shown, with 「読み込んでいます」 inside: the tab is hidden only once an answer says the
+ * list is off here (a busy company's first list took long enough that the tab looked gone; 2026-11-25).
+ */
+export function taskTabShown(facts: TaskTabFacts | null, departmentId: string | null): boolean {
+  if (!facts) return true
+  return facts.available && facts.taskList && listShownFor(departmentId, facts.listDepartmentIds)
 }
 
 /**

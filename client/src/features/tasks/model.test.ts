@@ -5,7 +5,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import type { TaskListItem } from '../../../shared/tasks'
-import { bundleListWord, bundlePlacesOf, companyNow, mayMakePrivateBundle, privateBundleFolderNames, companyPathOf, dueText, dueWhen, listEvents, listRows, listSections, listShownFor, filterByTag, linkCandidates, meetingRowText, nextCard, postponeChoices } from './model'
+import { bundleListWord, bundlePlacesOf, companyNow, mayMakePrivateBundle, privateBundleFolderNames, companyPathOf, dueText, dueWhen, listEvents, listRows, listSections, listShownFor, keptTaskTabFacts, taskTabShown, filterByTag, linkCandidates, meetingRowText, nextCard, postponeChoices } from './model'
 import type { TaskCardData, TaskCardResult } from '../../../shared/task-card'
 
 // The card is no longer remounted per version (tasks-ui.md), so two reads can race: an older answer
@@ -123,6 +123,23 @@ test('the list shows only for the departments the company setting names (null = 
   assert.equal(listShownFor('d2', ['d2']), true)
   assert.equal(listShownFor(null, []), false)
   assert.equal(listShownFor(null, ['d2']), true)
+})
+
+// A busy company's first list took long enough that the やること tab looked gone (2026-11-25): the tab shows while the list is
+// read, and only an answer (or the one this PC kept) that says the list is off here hides it.
+test('the やること tab shows while the list is read; only a known answer hides it', () => {
+  assert.equal(taskTabShown(null, 'd1'), true)
+  assert.equal(taskTabShown(null, null), true)
+  const on = { available: true, taskList: true, listDepartmentIds: ['d2'] }
+  assert.equal(taskTabShown(on, 'd2'), true)
+  assert.equal(taskTabShown(on, 'd1'), false)
+  assert.equal(taskTabShown({ ...on, available: false }, 'd2'), false)
+  assert.equal(taskTabShown({ ...on, taskList: false }, 'd2'), false)
+  // What this PC kept is read strictly: anything malformed counts as not known.
+  assert.deepEqual(keptTaskTabFacts({ available: true, taskList: false, listDepartmentIds: null }), { available: true, taskList: false, listDepartmentIds: null })
+  assert.equal(keptTaskTabFacts({ available: true, taskList: 'yes', listDepartmentIds: null }), null)
+  assert.equal(keptTaskTabFacts({ available: true, taskList: true, listDepartmentIds: [1] }), null)
+  assert.equal(keptTaskTabFacts(null), null)
 })
 
 test('a dragged path is named inside the company folder; one outside it (or the folder itself) is not linked', () => {

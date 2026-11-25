@@ -167,6 +167,20 @@ async function leftTabsLook(page: Page) {
   return looks
 }
 
+// A busy company's first list took long enough that the やること tab looked gone after starting the app (2026-11-25):
+// the tab is there while the list is read, with 「読み込んでいます」 inside, and the list fills it when it answers.
+test('the やること tab shows while the list is still being read, with 読み込んでいます inside', async ({ page }) => {
+  const state = await openPreview(page, 'skill-layout', { tasks: 'slow' })
+  await expect(leftTab(page, /^やること/)).toBeVisible()
+  await leftTab(page, /^やること/).click()
+  const list = page.getByRole('region', { name: 'やることの一覧' })
+  await expect(list.getByText('読み込んでいます')).toBeVisible()
+  await page.evaluate(() => (window as unknown as { __acbLayout: { answerTasks: () => void } }).__acbLayout.answerTasks())
+  await expect(list.getByText('A社 提案書を仕上げる')).toBeVisible()
+  await expect(list.getByText('読み込んでいます')).toHaveCount(0)
+  expectNoPageErrors(state)
+})
+
 test('at 1440×900 every left tab shows its name on one line: stacked in the narrow column (even at its minimum), side by side when wide', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 })
   const state = await openPreview(page, 'skill-layout', { tasks: '1', plugin: '1' })

@@ -95,6 +95,11 @@ export interface RecordQuery {
    * private folder never counts for a path inside one. Not with `linkedTo`.
    */
   linkedToFile?: string
+  /**
+   * Only these records (1–200 ids), of those the caller reads — an unreadable or missing id is simply absent.
+   * Not with `linkedTo` / `linkedToFile`. An older server refuses the key (400 `Unknown query key`).
+   */
+  ids?: string[]
   /** Substring of the title or summary (0.23-1: not the full text). */
   text?: string
   /** 1–200, default 50. */

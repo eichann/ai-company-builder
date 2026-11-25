@@ -124,6 +124,8 @@ interface ParsedQuery {
   linkedTo?: { id: string; hops: 1 | 2 }
   /** Records linking to this company path (a file or folder). */
   linkedToFile?: string
+  /** Only these records (1–200 ids; the app's 「議事録を確認する」 rows read their meetings' times in one query). */
+  ids?: string[]
   text?: string
   limit: number
   offset: number
@@ -134,7 +136,7 @@ interface ParsedQuery {
 function parseQuery(body: unknown): ParsedQuery | string {
   if (typeof body !== 'object' || body === null || Array.isArray(body)) return 'The query must be an object'
   const b = body as Record<string, unknown>
-  const known = ['type', 'implements', 'state', 'fields', 'linkedTo', 'linkedToFile', 'link', 'sort', 'finishedSince', 'text', 'limit', 'offset', 'countOnly', 'includeOldConnection']
+  const known = ['type', 'implements', 'state', 'fields', 'linkedTo', 'linkedToFile', 'link', 'ids', 'sort', 'finishedSince', 'text', 'limit', 'offset', 'countOnly', 'includeOldConnection']
   for (const k of Object.keys(b)) if (!known.includes(k)) return `Unknown query key: ${k}`
   const q: ParsedQuery = { fields: [], contains: [], ranges: [], limit: 50, offset: 0, countOnly: b.countOnly === true, includeOldConnection: false }
   if (b.type !== undefined) {
@@ -190,6 +192,11 @@ function parseQuery(body: unknown): ParsedQuery | string {
     const p = typeof b.linkedToFile === 'string' && b.linkedToFile.length <= 1000 ? fileLinkPath(b.linkedToFile) : null
     if (!p) return 'linkedToFile must be a path inside the company folder'
     q.linkedToFile = p
+  }
+  if (b.ids !== undefined) {
+    if (q.linkedTo || q.linkedToFile) return 'ids cannot be used with linkedTo or linkedToFile'
+    if (!Array.isArray(b.ids) || b.ids.length === 0 || b.ids.length > 200 || !b.ids.every(id => typeof id === 'string' && RECORD_ID_RE.test(id))) return 'ids must be a list of 1–200 record ids'
+    q.ids = [...new Set(b.ids as string[])]
   }
   if (b.link !== undefined) {
     const l = b.link as { name?: unknown; id?: unknown }
@@ -474,6 +481,8 @@ export function createRecordService(deps: RecordServiceDeps) {
       if (q.state) filter.states = q.state
       if (q.fields.length > 0) filter.fields = q.fields
       if (q.text) filter.text = q.text
+      // Only these records — read access is applied below as for every query, so an id the caller cannot read is simply absent.
+      if (q.ids) filter.ids = q.ids
 
       const reader = recordReader(member, handleOf(member).scopes.listWithRules())
       if (q.linkedTo) {

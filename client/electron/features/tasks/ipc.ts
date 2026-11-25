@@ -124,6 +124,8 @@ const opKey = (key: unknown): key is string => typeof key === 'string' && OPERAT
 const BAD_INPUT = { success: false as const, offline: false, code: 'BAD_REQUEST', error: '入力が正しくありません。' }
 /** At most this many records get their まとまり looked up per read (the rest show without it). */
 const BUNDLE_LOOKUPS = 150
+/** A 「議事録を確認する」 whose meeting the member did not read at its detail read is read again at most this often. */
+const MEETING_RETRY_MS = 10 * 60_000
 
 /** The company's own holidays from `GET /task-settings` (dates only; unreadable → none: weekends and public holidays still count). */
 function holidaysOf(answer: Answer): string[] {
@@ -143,8 +145,8 @@ export function createTasksApi(deps: TasksDeps) {
   const doFetch = deps.fetch ?? fetch
   const log = deps.log ?? console
   const now = deps.now ?? Date.now
-  /** `<company>:<record>@<version>` → its まとまり and its meeting's time: a record's links change only with its version. */
-  const linkCache = new Map<string, { bundle: { id: string; title: string } | null; meetingAt: string | null }>()
+  /** `<company>:<record>@<version>` → its まとまり and (a 「議事録を確認する」) its meeting's id: a record's links change only with its version. */
+  const linkCache = new Map<string, { bundle: { id: string; title: string } | null; meetingId: string | null; readAt: number }>()
   /** The signed-in member's id per session (cookies), from /api/me. */
   let me: { cookies: string; id: string } | null = null
   /** Google's chooser open for 「Google Drive のファイルをつなぐ」, per company: what the card's ［やめる］ stops. */
@@ -206,14 +208,15 @@ export function createTasksApi(deps: TasksDeps) {
 
   /**
    * Each record's まとまり (its outgoing `bundle` link), looked up once per record version, and, for a 「議事録を確認する」, its
-   * meeting's time (使い心地のメモ #40: several of one meeting title side by side). The meeting's time comes only from the
-   * linked meeting the server answered, which it lists only while the member reads that meeting — and access to a meeting can
-   * change without the task's version (its list was copied when it was made), so such a task is read again on every list,
-   * never answered from the cache (a few rows: one per meeting read).
+   * meeting's time (使い心地のメモ #40: several of one meeting title side by side). The task's meeting is an origin link (never
+   * changed by hand), so its id is kept with the version like the まとまり. Whether the member reads the meeting **now** can
+   * change without the task's version (its list was copied when it was made), so its time is never kept: every list asks the
+   * server once for all those meetings (`meetingTimesOf`), which answers only the ones the member reads now. Never one read per
+   * row on every list (PR #831 did: 222 detail reads in 20 minutes on a busy company).
    */
   async function linkedOf(companyId: string, list: RecordSummary[]): Promise<{ bundles: Record<string, { id: string; title: string }>; meetingTimes: Record<string, string> }> {
     const out: Record<string, { id: string; title: string }> = {}
-    const meetingTimes: Record<string, string> = {}
+    const meetingOfTask = new Map<string, string>()
     const todo = list.filter(r => r.type === 'task' || r.type === 'meeting').slice(0, BUNDLE_LOOKUPS)
     let next = 0
     async function worker() {
@@ -221,26 +224,52 @@ export function createTasksApi(deps: TasksDeps) {
         const r = todo[next++]
         const key = `${companyId}:${r.id}@${r.version}`
         const review = r.fields.task_kind === 'minutes_review'
-        if (review || !linkCache.has(key)) {
+        const kept = linkCache.get(key)
+        // A meeting the member did not read then (the detail gave no id) may be readable now: looked for again, at most
+        // every MEETING_RETRY_MS — never on every list.
+        const retry = review && kept?.meetingId === null && now() - kept.readAt >= MEETING_RETRY_MS
+        if (!kept || retry) {
           const a = await call(companyId, 'GET', `/records/item/${encodeURIComponent(r.id)}`)
-          if (a?.status !== 200) { linkCache.delete(key); continue } // not cached: asked again next time
-          const links = (a.json?.data as RecordDetail).links
-          const link = links.find(l => l.name === 'bundle' && l.direction === 'out' && l.record)
-          const meeting = review
-            ? links.find(l => l.name === 'meeting' && l.direction === 'out' && l.record?.type === 'meeting')?.record : undefined
-          const at = meeting?.fields.meeting_at
-          linkCache.set(key, {
-            bundle: link?.record ? { id: link.record.id, title: link.record.title || '（名前なし）' } : null,
-            meetingAt: typeof at === 'string' && !Number.isNaN(Date.parse(at)) ? at : null,
-          })
+          if (a?.status === 200) {
+            const links = (a.json?.data as RecordDetail).links
+            const link = links.find(l => l.name === 'bundle' && l.direction === 'out' && l.record)
+            const meeting = review
+              ? links.find(l => l.name === 'meeting' && l.direction === 'out' && l.record?.type === 'meeting')?.record : undefined
+            linkCache.set(key, {
+              bundle: link?.record ? { id: link.record.id, title: link.record.title || '（名前なし）' } : null,
+              meetingId: meeting && RECORD_ID_RE.test(meeting.id) ? meeting.id : null,
+              readAt: now(),
+            })
+          } else if (!kept) continue // not cached: asked again next time
         }
         const c = linkCache.get(key)
         if (c?.bundle) out[r.id] = c.bundle
-        if (c?.meetingAt) meetingTimes[r.id] = c.meetingAt
+        if (review && c?.meetingId) meetingOfTask.set(r.id, c.meetingId)
       }
     }
     await Promise.all(Array.from({ length: 6 }, worker))
-    return { bundles: out, meetingTimes }
+    return { bundles: out, meetingTimes: await meetingTimesOf(companyId, meetingOfTask) }
+  }
+
+  /**
+   * The meetings' times for 「議事録を確認する」 rows, in one query (`POST /records/query { type: meeting, ids }`): the server
+   * answers only the meetings the member reads now, so a meeting left out shows no time. An older server refuses `ids` (400):
+   * no times, the list still shows.
+   */
+  async function meetingTimesOf(companyId: string, meetingOfTask: ReadonlyMap<string, string>): Promise<Record<string, string>> {
+    const ids = [...new Set(meetingOfTask.values())]
+    if (ids.length === 0) return {}
+    const at = new Map<string, string>()
+    for (const m of records(await call(companyId, 'POST', '/records/query', { type: 'meeting', ids, limit: ids.length })) ?? []) {
+      const v = m.type === 'meeting' ? m.fields.meeting_at : undefined
+      if (typeof v === 'string' && !Number.isNaN(Date.parse(v))) at.set(m.id, v)
+    }
+    const times: Record<string, string> = {}
+    for (const [taskId, meetingId] of meetingOfTask) {
+      const v = at.get(meetingId)
+      if (v) times[taskId] = v
+    }
+    return times
   }
 
   function failure(what: string, a: Answer): { success: false; offline: boolean; code: string | null; error: string } {

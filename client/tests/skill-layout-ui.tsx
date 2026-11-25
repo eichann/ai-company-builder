@@ -10,6 +10,7 @@
 //   seed      JSON {key: value} written to localStorage before the screen mounts
 //             (what an earlier version of the app saved)
 //   tasks     1 = records on with a task list: the やること tab shows (tests/ui/tasks-layout.spec.ts)
+//             slow = the same list, answered only after window.__acbLayout.answerTasks() (the tab while it loads)
 //   check     1 = (with tasks=1) each row offers its ☑ 完了にする, and the opened task's card its ［完了にする］;
 //             the press is recorded (actOnTask)
 //   plugin    1 = one business plugin with a left tab (番組): five tabs in the strip
@@ -274,6 +275,9 @@ let taskVersion = 2
 let taskFiles = ['営業部/提案書/A社_提案.md']
 let cardReads = 0
 let finishSync: (() => void) | null = null
+/** ?tasks=slow: the task list reads waiting for `answerTasks()`. */
+const taskWaiters: Array<() => void> = []
+let tasksAnswered = false
 const calls: Array<{ name: string; args: unknown[] }> = []
 const record = (name: string, args: unknown[]) => { calls.push({ name, args }) }
 
@@ -455,7 +459,8 @@ const api: Partial<ElectronAPI> = {
   getAgentInteractions: async () => [],
   signOut: async () => { record('signOut', []); return { success: true } },
   // ?features=listoff: the task list turned off (「使う機能」): the small list 「確かめること」.
-  getTaskList: async () => featuresParam.includes('listoff')
+  // ?tasks=slow: the first answer waits for window.__acbLayout.answerTasks().
+  getTaskList: async () => (params.get('tasks') === 'slow' && !tasksAnswered ? await new Promise<void>(resolve => { taskWaiters.push(resolve) }) : undefined, featuresParam.includes('listoff'))
     ? { success: true, data: { available: true, listDepartmentIds: null, features: { taskList: false, meetings: !featuresParam.includes('meetingsoff'), inbox: true, decisions: true, projects: true, afterMeeting: false },
       decisionsToConfirm: [{ id: 'decision-0000aa', title: '値引きは10%まで' }],
       items: [
@@ -468,7 +473,7 @@ const api: Partial<ElectronAPI> = {
       bundleKinds: { core: { type: 'project', name: 'プロジェクト', source: 'core' as const }, departments: [], kinds: [] },
       members: [{ id: 'u_me', name: '山田' }, { id: 'u_takahashi', name: '高橋' }, { id: 'u_sato', name: '佐藤' }],
       items: MANUAL_TASK_ITEMS } }
-    : params.get('tasks') === '1'
+    : params.get('tasks') === '1' || params.get('tasks') === 'slow'
     ? { success: true, data: { available: true, listDepartmentIds: null, items: Array.from({ length: 3 }, (_, i) => ({
       id: i === 0 ? RECORD_TASK.id : `task-row00${i}`, type: 'task', typeLabel: 'タスク', title: i === 0 ? RECORD_TASK.title : `やること ${i + 1}`, turn: 'mine' as const, state: 'todo', version: i === 0 ? taskVersion : 1, due: null,
       tags: [], waitingFor: null, personal: false, own: true, actingFor: null, bundle: null, finishedAt: null, stateLabel: null,
@@ -1074,6 +1079,8 @@ Object.assign((window as unknown as { __acbLayout: object }).__acbLayout, {
   session: () => ({ user: useAuthStore.getState().user?.id ?? null, company: useAppStore.getState().currentCompany?.id ?? null }),
   /** ?sync=manual: the running sync ends. */
   finishSync: () => { finishSync?.(); finishSync = null },
+  /** ?tasks=slow: the task list answers (every read waiting so far, and every one after). */
+  answerTasks: () => { tasksAnswered = true; for (const resolve of taskWaiters.splice(0)) resolve() },
   /** The company the selector would start with (a switch to a company this computer does not know). */
   companyToChoose: () => useAppStore.getState().companyToChoose,
   /** Like the app: back to the company list (the screen unmounts), then open another company. */
