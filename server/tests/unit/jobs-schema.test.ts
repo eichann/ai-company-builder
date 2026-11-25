@@ -73,6 +73,10 @@ const LATER_TABLES = [
   // agent-browser.md "The operator's window tools": the operator's runs and their log.
   'browser_runs',
   'browser_run_log',
+  // agent-browser.md "Writes within frames": a run's frames and the writes permitted.
+  'browser_frame_runs',
+  'browser_frames',
+  'browser_frame_writes',
   // private-folders.md "Access removed: holding tickets": who stopped reading which private folder.
   'holding_tickets',
   // private-folders.md "Holding: the member's upload": what members handed over with their tickets.

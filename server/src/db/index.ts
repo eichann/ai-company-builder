@@ -43,6 +43,7 @@ import { browserDeviceSchema } from './schema/browser-devices'
 import { browserRecordingSchema } from './schema/browser-recordings'
 import { browserSkillSchema } from './schema/browser-skills'
 import { browserRunSchema } from './schema/browser-runs'
+import { browserFrameSchema } from './schema/browser-frames'
 // lane C ▲
 // The migrations tests run on their own against older databases.
 export { migrateCompanyFolderKind, migrateInvitationClaims } from './schema/company'
@@ -127,6 +128,8 @@ const SCHEMA = [
   browserSkillSchema,
   // The operator's runs and their log (agent-browser.md "The operator's window tools"): new tables only.
   browserRunSchema,
+  // Writes within frames (agent-browser.md "Writes within frames"): new tables only.
+  browserFrameSchema,
   // lane C ▲
 ]
 

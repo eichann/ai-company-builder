@@ -74,6 +74,7 @@ import { browserRunsRoute } from './routes/browser-runs'
 import { browserDevicesRoute } from './routes/browser-devices'
 import { browserRecordingsRoute } from './routes/browser-recordings'
 import { browserSkillsRoute } from './routes/browser-skills'
+import { browserFramesRoute } from './routes/browser-frames'
 // lane C ▲
 import { requestLog } from './lib/request-log'
 import { appDownloadUrl } from './lib/config'
@@ -267,4 +268,5 @@ app.route('/api/companies/:companyId', browserRecordingsRoute)
 app.route('/api/companies/:companyId', browserSkillsRoute)
 app.route('/api', browserLineReportRoute)
 app.route('/api/companies/:companyId', browserRunsRoute)
+app.route('/api/companies/:companyId', browserFramesRoute)
 // lane C ▲

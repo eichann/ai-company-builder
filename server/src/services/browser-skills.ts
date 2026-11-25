@@ -306,6 +306,16 @@ export function createBrowserSkillService(deps: BrowserSkillDeps) {
       })
     },
 
+    /**
+     * Step ⑤'s second look inside the permit's transaction (synchronous: no git read): the latest approval of this skill
+     * is still in force for exactly this declaration hash. `approvedFrames` read the declaration before the transaction;
+     * this catches an approval revoked or superseded in between.
+     */
+    stillApproved(member: Pick<Member, 'companyId'>, skill: string, declarationHash: string): boolean {
+      if (!isValidSkillName(skill)) return false
+      return inForce(repo(member.companyId).latest(skillPathOf(skill)), declarationHash) !== null
+    },
+
     /** Step ⑤: the per-run card was shown for this version (`files` as `approvedFrames` gave it); false when the approval moved. */
     runCardShown(member: Pick<Member, 'companyId'>, skill: string, declarationHash: string, files: string): boolean {
       if (!isValidSkillName(skill)) return false

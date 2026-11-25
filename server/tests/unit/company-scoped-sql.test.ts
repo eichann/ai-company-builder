@@ -211,6 +211,10 @@ const HANDLE_TABLES: Record<string, string[]> = {
   // The operator's runs (agent-browser.md "The operator's window tools").
   browser_runs: ['adapters/sqlite/browser-runs.ts'],
   browser_run_log: ['adapters/sqlite/browser-runs.ts'],
+  // Writes within frames (agent-browser.md "Writes within frames").
+  browser_frame_runs: ['adapters/sqlite/browser-frames.ts'],
+  browser_frames: ['adapters/sqlite/browser-frames.ts'],
+  browser_frame_writes: ['adapters/sqlite/browser-frames.ts'],
   // lane C ▲
 }
 /** Handle repository factories (each bound to one company): only the handle source builds them. */
@@ -238,6 +242,7 @@ const HANDLE_FACTORIES = [
   'sqliteBrowserRecordingRepository',
   'sqliteBrowserSkillApprovalRepository',
   'sqliteBrowserRunRepository',
+  'sqliteBrowserFrameRepository',
   // lane C ▲
 ]
 const HANDLE_SOURCE = 'adapters/sqlite/company-data.ts'
