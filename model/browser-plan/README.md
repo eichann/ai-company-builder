@@ -2,8 +2,9 @@
 
 The life of one 「ブラウザ操作」 plan — register → approve → claim → send permit → send → report →
 confirm — written in TLA+ (`PlanLife.tla`), with the rules it must keep. A second model,
-`StepsLife.tla`, is the **several-writes design** (generalization PR 1, below: "StepsLife"), ahead of
-the code. The checker
+`StepsLife.tla`, is the **several-writes design** (generalization PR 1, below: "StepsLife"), kept as the
+model of the safe pattern. A third, `FramesLife.tla`, is **writes within frames** (redesign step ⑤a, below:
+"FramesLife"): free operation where only an upper bound per write target is known. The checker
 [tla-ts](https://www.npmjs.com/package/tla-ts) explores **every** reachable state and checks the
 rules in each. It catches what example-based tests miss: interleavings of two PCs, late network
 answers, crashes at any step, and clocks.
@@ -57,11 +58,11 @@ reachability rule, not a state formula: `reach.mjs` checks it on the checker's s
 
 ## What `check` verifies (numbers in `expected.txt`)
 
-1. Each real model (`model` lines: PlanLife, StepsLife) keeps every INVARIANT and has no dead end;
-   the rules checked are exactly `expected.txt`'s `rule <model>` lines (dropping one fails); a
+1. Each real model (`model` lines: PlanLife, StepsLife, FramesLife) keeps every INVARIANT and has no dead
+   end; the rules checked are exactly `expected.txt`'s `rule <model>` lines (dropping one fails); a
    `CHECK_DEADLOCK` line is refused.
-2. Its distinct state count equals `states <model>` (today PlanLife **57,618**, StepsLife **28,320**): a
-   guard against a checker that explores less than it should.
+2. Its distinct state count equals `states <model>` (today PlanLife **57,618**, StepsLife **28,320**,
+   FramesLife **169,008**): a guard against a checker that explores less than it should.
 3. R7 holds over all of those states (`reach.mjs` must walk the same number; one settled predicate for
    both models).
 4. Each `broken/` variant fails on its named rule. **A variant that passes fails the job**: the
@@ -189,6 +190,61 @@ Not tested by a variant, on purpose: the plan's limit on later permits (`ageFirs
 - The approval, the facts, the gate's checks (folded into `ServerRefusesPermit`), a person confirming
   wrongly, a modified app.
 
+## FramesLife: writes within frames (redesign step ⑤a)
+
+Design memo 「ブラウザ操作：記録から自動化へ」 §3 I3–I5 and its 「止まったら・2回動いたら・同時に動いたら」 list, §6-2, §7-2.
+The AI operates a registered domain freely; each write its page makes is held, matched to a **frame** of
+the run (a write target × at most `max` uses), sent once under a permit and reported. StepsLife assumed
+the writes were known in advance (one row per write, made at the claim, in order); here a run holds only
+an upper bound per frame and a write row is appended per permit. The contract is agent-browser.md
+"Writes within frames"; the server half (step ⑤a) is `server/src/services/browser-frames.ts`, whose
+functions the server actions name. The app's half (step ⑤b: holding the page's write, sending it once
+through the core's own write connection) copies the `App*` actions.
+
+Site-neutral: two frames, "a" (at most 2 uses) and "b" (at most 1), at most 3 writes in all. A run starts
+`waiting` (an ad-hoc plan, a per-run Skill, a Skill whose text changed: the card first) or `open` (a
+pre-approved Skill version). `gate`: `stopped` is the AI stop (the app and the server both see it);
+`closed` folds every cause only the server re-checks at each permit (the person lowered to 見るだけ, the
+site, the Skill's approval revoked or changed, another PC, the run's hour).
+
+| Rule | What it says | 日本語（意味） |
+|---|---|---|
+| `R1_AtMostOneSendPerWrite` | Each write reaches the site at most once | どの書き込みも、届くのは多くても1回（自動で送り直さない） |
+| `R2_NoSendWithoutApprovalAndLivePermit` | Nothing is sent without a live permit for that write; no permit before the plan was approved or after the run ended | 生きている許可なしに送らない。承認前・実行の終わったあとは許可しない |
+| `R4_NotSentMeansNotSent` | `not_sent` (or never permitted) never reached the site | 「送っていない」は本当に送っていない |
+| `R7_EverythingSettles` | Every state can reach a settled one (the run ended, nothing in flight) | どこからでも片付けられる |
+| `R10_NothingAfterUnknown` | After a write was unknown nothing more is permitted or sent in that run, not even after a late "done" | 「分からない」のあとは、その実行では何も送らない |
+| `R14_WithinFrames` | A frame is never used more than its max | 枠を超えない |
+| `R15_OneWriteAtATime` | One write of the run on its way at a time | 書き込みは1つずつ（2つ目は1つ目の結果が記録されるまで待つ） |
+| `R16_NoSendAfterStop` | Nothing is sent after the AI was stopped | 止めたあとは送らない |
+
+"Unused frames vanish at run end" is R2 (`BrokenFramesUsedAfterEnd`). Broken variants
+(`broken/BrokenFrames*`), one guard removed each:
+
+| Variant | Guard removed | Fails |
+|---|---|---|
+| `BrokenFramesExceedFrame` | the frame's units checked at the permit (`takeUnit` and the CHECK `used <= max`) | R14 |
+| `BrokenFramesSendAfterUnknown` | a locked run (a write unknown) gives no permit | R10 |
+| `BrokenFramesSendAfterStop` | the app's last check before the request leaves looks at the AI stop | R16 |
+| `BrokenFramesTwoInFlight` | one write in flight per run (the check and the partial unique index) | R15 |
+| `BrokenFramesNoApproval` | no permit while the run waits for the person's approval | R2 |
+| `BrokenFramesUsedAfterEnd` | an ended run's frames give nothing | R2 |
+
+### What FramesLife leaves out
+
+- **One app worker**: it asks for the next page write as soon as it sent the previous one (before that
+  one's result is recorded), so the server's one-in-flight rule is what makes it wait. A second worker would
+  also ask while a permit is held and not yet used — the same rule refuses it — and needs over 4 GB of the
+  checker; the server tests race two permits on the real code.
+- **Matching a page write to a frame** (method, path, the body's `_method` and fixed fields, a body that
+  cannot be read): ⑤b's, its own tests; a write matching no frame is refused before a permit is asked.
+- **A permit already given under a cause only the server sees** (`closed`) stays good for its 5 s: the app
+  cannot know; the next permit is refused and the run ends. The stretch between the app's last check and
+  the request leaving is PlanLife's accepted limit (`LimitFrozenAfterCheck`), the same here.
+- The run lock per company × domain (D10), the person confirming an unknown write (⑤b's card), the
+  run's time limits as real durations (folded into `closed` and `RunEnds`), a server clock jump (PlanLife's;
+  the server counts each write's window on both clocks all the same), the safe patterns (StepsLife).
+
 ## Drift: the model is copied by hand
 
 Nothing compares the model with the code mechanically: change the code and the model stays as it
@@ -216,6 +272,7 @@ was. What keeps them together:
 |---|---|
 | `PlanLife.tla` / `PlanLife.cfg` | The model of today's one-write code, its rules, the checker's settings and the `\* REACH` line |
 | `StepsLife.tla` / `StepsLife.cfg` | The several-writes design (generalization PR 1), the same way |
+| `FramesLife.tla` / `FramesLife.cfg` | Writes within frames (redesign step ⑤a), the same way |
 | `reach.mjs` | R7 on the state graph |
 | `expected.txt` | Rules, state count, each variant's expected result |
 | `broken/`, `limits/`, `holes/`, `proposals/` | The variants |

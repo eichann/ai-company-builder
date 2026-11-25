@@ -4,8 +4,9 @@
 //
 //   node reach.mjs <the checker's `-dump dot,actionlabels` output> <rule name>
 //
-// Settled (the same predicate as PlanLife.tla's and StepsLife.tla's `Settled`): every app idle (or
-// gone), no execution claimed / running / permitted / unknown, every lock free. Exit 0 when the rule
+// Settled (the same predicate as PlanLife.tla's, StepsLife.tla's and FramesLife.tla's `Settled`): every app
+// idle (or gone), no execution claimed / running / permitted / unknown (no run waiting / open / locked), every
+// lock (FramesLife: the run's in-flight slot) free. Exit 0 when the rule
 // holds. Exit 1 when it does not, printing the unsettleable state nearest to the start and the actions that lead there. Exit 2 when the graph cannot
 // be read (a checker or dump format change must not pass silently).
 import { readFileSync } from 'node:fs'
@@ -49,11 +50,11 @@ const value = (text, name) => {
   }
   return m[1]
 }
-// One predicate for both models, written as "only these words": PlanLife's `lock` is one value,
-// StepsLife's a function from lock keys (unquoted) to a plan or "none" — every quoted value in it must
-// be "none"; every app's phase must be "idle" (or StepsLife's "gone"); every execution not started or
-// final (PlanLife's and StepsLife's final words together; a new open state is never settled by mistake).
-const FINAL = ['none', 'succeeded', 'failed', 'cdone', 'cnotdone', 'void', 'partial', 'confirmed']
+// One predicate for every model, written as "only these words": PlanLife's and FramesLife's `lock` is one
+// value, StepsLife's a function from lock keys (unquoted) to a plan or "none" — every quoted value in it must
+// be "none"; every app's phase must be "idle" (or "gone"); every execution not started or final (the models'
+// final words together — FramesLife's run: "ended"; a new open state is never settled by mistake).
+const FINAL = ['none', 'succeeded', 'failed', 'cdone', 'cnotdone', 'void', 'partial', 'confirmed', 'ended']
 const only = (text, words) => {
   const quoted = text.match(/"[^"]*"/g) ?? []
   return quoted.length > 0 && quoted.every(q => words.includes(q.slice(1, -1)))
