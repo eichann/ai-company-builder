@@ -85,6 +85,8 @@ export interface BrowserWorkHooks {
   holdWrite(held: HeldPageWrite): Promise<HeldPageWriteAnswer>
   /** A read of the operated host the page or the operator must not make (a Skill's `never_read`). */
   neverRead(pathAndQuery: string): boolean
+  /** The window's DevTools connection went while a write was held (Chromium may then let the page's original go out). */
+  detached?(): void
 }
 
 /** Why a held write is refused before any frame is asked (fixed words). */
@@ -155,7 +157,12 @@ export function readHeldWrite(input: { method: string; url: string; host: string
   if (input.body.kind === 'unreadable') return { ok: false, problem: 'unreadable' }
   if (input.body.kind === 'none' || input.body.text === '') fields = new Map()
   else if (input.body.text.length > L.body) return { ok: false, problem: 'unreadable' }
-  else if (type.startsWith('application/x-www-form-urlencoded')) fields = formFields(input.body.text)
+  // A raw `;` is refused: some server stacks split a form body on it too, so `type=note&title=x;type=admin` could be read
+  // as another value than the one the frame was matched on (independent review of #856).
+  else if (type.startsWith('application/x-www-form-urlencoded')) {
+    if (input.body.text.includes(';')) return { ok: false, problem: 'unreadable' }
+    fields = formFields(input.body.text)
+  }
   else if (/^application\/([a-z0-9.+-]*\+)?json\b/.test(type)) {
     const j = jsonFields(input.body.text)
     if (!j) return { ok: false, problem: 'unreadable' }

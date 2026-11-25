@@ -77,10 +77,22 @@ export function createFrameWriter(deps: FrameWriterDeps) {
   let locked = false
   /** The server said the run is over (ended, refused by the gate). */
   let over = false
+  /**
+   * The window's DevTools connection went while a write was held (independent review of #856): Chromium may have let the
+   * page's original go out on its own, so a held write is never sent and is told `unknown`, never `not_sent`.
+   */
+  let originalMayHaveGone = false
 
-  const keep = (r: FrameWriteRecord, frame: number | null, method: string, path: string, outcome: BrowserRunWriteOutcome) => {
+  /** One held write from the moment it is held until its outcome is kept (once: `abandon` may keep it first). */
+  interface Held { method: string; path: string; line: string; frame: number | null; recorded: boolean }
+  const pending = new Set<Held>()
+
+  const keepRecord = (h: Held, r: FrameWriteRecord, outcome: BrowserRunWriteOutcome) => {
+    pending.delete(h)
+    if (h.recorded) return
+    h.recorded = true
     records.push(r)
-    if (log.length < 60) log.push(workWriteLogStep({ after: deps.stepsSoFar(), frame, method, path, host: deps.host, outcome }))
+    if (log.length < 60) log.push(workWriteLogStep({ after: deps.stepsSoFar(), frame: h.frame, method: h.method, path: h.path, host: deps.host, outcome }))
   }
 
   /** The report, sent at most 3 times with the same body; true once the server recorded it. */
@@ -93,30 +105,33 @@ export function createFrameWriter(deps: FrameWriterDeps) {
     return false
   }
 
-  async function decide(held: HeldPageWrite): Promise<HeldPageWriteAnswer> {
+  async function decide(held: HeldPageWrite, h: Held): Promise<HeldPageWriteAnswer> {
     const fail: HeldPageWriteAnswer = { kind: 'fail' }
+    const keep = (r: FrameWriteRecord, outcome: BrowserRunWriteOutcome) => keepRecord(h, r, outcome)
     const shapeOf = readHeldWrite({ method: held.method, url: held.url, host: deps.host, contentType: held.contentType, body: held.body })
-    let path = '/'
-    try { path = new URL(held.url).pathname } catch { /* kept as / */ }
-    // Stopped, locked, over: nothing is sent (the page sees a failure).
+    // Stopped, locked, over, abandoned: nothing is sent (the page sees a failure).
     if (closed || locked || over || !deps.going()) {
-      keep({ line: workWriteLine(held.method.toUpperCase(), null), outcome: 'not-sent', status: null, sent: null, path: null, answerText: null }, null, held.method, path, 'not-sent')
+      keep({ line: h.line, outcome: originalMayHaveGone ? 'unknown' : 'not-sent', status: null, sent: null, path: null, answerText: null }, originalMayHaveGone ? 'unknown' : 'not-sent')
       return fail
     }
     // A file, an unreadable body, another host, `_method` twice: refused, never asked for.
     if (!shapeOf.ok) {
-      keep({ line: workWriteLine(held.method.toUpperCase(), null), outcome: 'refused', status: null, sent: null, path: null, answerText: null }, null, held.method, path, 'refused')
+      keep({ line: h.line, outcome: 'refused', status: null, sent: null, path: null, answerText: null }, 'refused')
       return fail
     }
     const shape = shapeOf.shape
+    h.method = shape.method
+    h.path = shape.path
     // Outside every frame (an autosave, another target, a frame used up): refused, never asked for.
     const picked = pickFrame(deps.frames, shape)
     if ('mismatch' in picked) {
-      keep({ line: workWriteLine(shape.method, null), outcome: 'refused', status: null, sent: null, path: null, answerText: null }, null, shape.method, shape.path, 'refused')
+      keep({ line: workWriteLine(shape.method, null), outcome: 'refused', status: null, sent: null, path: null, answerText: null }, 'refused')
       return fail
     }
     const { frame, request } = picked
     const line = workWriteLine(frame.method, frame.path)
+    h.line = line
+    h.frame = frame.frame
     if (deps.readBefore) await deps.readBefore(shape.path).catch(() => {})
     let permit: BrowserFramePermit | null = null
     let askedMono = 0
@@ -146,9 +161,16 @@ export function createFrameWriter(deps: FrameWriterDeps) {
     })
     const permitted = permit as BrowserFramePermit | null
     if (!outcome.sent) {
-      // Never left: told `not_sent` when a unit was taken (no permit: nothing to tell).
+      // Never left: told `not_sent` when a unit was taken (no permit: nothing to tell) — unless the page's original may
+      // have gone out on its own (the window's DevTools connection went): then `unknown`.
+      if (originalMayHaveGone) {
+        locked = true
+        if (permitted) await report(permitted.write, 'unknown', 'context-changed')
+        keep({ line, outcome: 'unknown', status: null, sent: sentFields(shape), path: shape.path, answerText: null }, 'unknown')
+        return fail
+      }
       if (permitted && !(await report(permitted.write, 'not_sent', 'permit-late'))) locked = true
-      keep({ line, outcome: 'not-sent', status: null, sent: null, path: null, answerText: null }, frame.frame, shape.method, shape.path, 'not-sent')
+      keep({ line, outcome: 'not-sent', status: null, sent: null, path: null, answerText: null }, 'not-sent')
       return fail
     }
     const write = (permitted as BrowserFramePermit | null)?.write ?? 0
@@ -157,7 +179,7 @@ export function createFrameWriter(deps: FrameWriterDeps) {
       // It may have reached the site: unknown, the run sends nothing more, and it is never sent again.
       locked = true
       await report(write, 'unknown', 'no-answer')
-      keep({ line, outcome: 'unknown', status: null, sent: sentFields(shape), path: shape.path, answerText: null }, frame.frame, shape.method, shape.path, 'unknown')
+      keep({ line, outcome: 'unknown', status: null, sent: sentFields(shape), path: shape.path, answerText: null }, 'unknown')
       return fail
     }
     const success = answer.status >= 200 && answer.status < 400
@@ -169,7 +191,7 @@ export function createFrameWriter(deps: FrameWriterDeps) {
     keep({
       line, outcome: success ? 'done' : 'unknown', status: success ? null : answer.status, sent: sentFields(shape), path: shape.path,
       answerText: success ? answer.body : null,
-    }, frame.frame, shape.method, shape.path, success ? 'done' : 'unknown')
+    }, success ? 'done' : 'unknown')
     // The page gets the site's answer (its Set-Cookie never: the window drops it too), so its flow goes on.
     return { kind: 'fulfill', status: answer.status, headers: (answer.headers ?? []).filter(([k]) => !/^set-cookie2?$/i.test(k)), body: answer.bytes ?? new TextEncoder().encode(answer.body) }
   }
@@ -177,12 +199,32 @@ export function createFrameWriter(deps: FrameWriterDeps) {
   return {
     /** The window's hold: queued behind the write before it (its result recorded first). */
     hold(held: HeldPageWrite): Promise<HeldPageWriteAnswer> {
-      const next = chain.then(() => decide(held), () => decide(held))
+      let path = '/'
+      try { path = new URL(held.url).pathname } catch { /* kept as / */ }
+      const h: Held = { method: held.method.toUpperCase(), path, line: workWriteLine(held.method.toUpperCase(), null), frame: null, recorded: false }
+      pending.add(h)
+      const next = chain.then(() => decide(held, h), () => decide(held, h))
       chain = next.catch(() => undefined)
-      return next.catch((): HeldPageWriteAnswer => ({ kind: 'fail' }))
+      return next.catch((): HeldPageWriteAnswer => {
+        keepRecord(h, { line: h.line, outcome: 'unknown', status: null, sent: null, path: null, answerText: null }, 'unknown')
+        locked = true
+        return { kind: 'fail' }
+      })
     },
     /** The run is over: every write held from now on (and every one still queued) fails; one on its way finishes. */
     close() { closed = true },
+    /**
+     * Given up on the writes still held (independent review of #856): the wait for the one on its way ran out, or the
+     * window's DevTools connection went while one was held (`detached`: the page's original may have gone out on its own).
+     * Every write held and not yet kept is kept as `unknown` now (the card, the AI's words and the run log say so), the run
+     * is locked and closed — nothing more is sent; a held one not sent yet never will be.
+     */
+    abandon(why: 'timeout' | 'detached') {
+      if (why === 'detached' && pending.size > 0) originalMayHaveGone = true
+      closed = true
+      if (pending.size > 0) locked = true
+      for (const h of [...pending]) keepRecord(h, { line: h.line, outcome: 'unknown', status: null, sent: null, path: null, answerText: null }, 'unknown')
+    },
     /** Until the write on its way (if any) is recorded. */
     idle: () => chain.then(() => undefined),
     locked: () => locked,

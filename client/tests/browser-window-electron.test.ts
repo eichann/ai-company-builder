@@ -443,7 +443,8 @@ test('a write run sends each page write once within the plan: the page\'s own co
   const r = result.work
   assert.equal(r.entered, true)
   const work = r.work as Array<{ path: string; name: string; cookie: string; csrf: string; start: number; end: number }>
-  const saves = work.filter(w => w.path === '/work/save')
+  // (The last scenario's 'g' is the detach's: checked at the end.)
+  const saves = work.filter(w => w.path === '/work/save' && w.name !== 'g')
   // Exactly a, b and c reached the site, each once, with the page's cookie and CSRF header as the page made them.
   assert.deepEqual(saves.map(w => w.name).sort(), ['a', 'b', 'c'])
   for (const w of saves) {
@@ -479,4 +480,11 @@ test('a write run sends each page write once within the plan: the page\'s own co
   for (const secret of ['csrf-777', 'sid=1', '"a"', '4242']) assert.equal(told.includes(secret), false, secret)
   const reports = (r.calls as Array<{ kind: string; body: { result?: string } }>).filter(c => c.kind === 'report').map(c => c.body.result)
   assert.deepEqual(reports, ['done', 'done', 'done', 'not_sent', 'unknown'])
+  // The DevTools connection gone while a save was held: the run's copy never went (at most the page's own original), the
+  // write is unknown and told so, the run locked.
+  assert.ok(work.filter(w => w.name === 'g').length <= 1, 'never two')
+  assert.deepEqual(r.detachedRecords, ['unknown'])
+  assert.equal(r.detachedLocked, true)
+  const second = (r.calls as Array<{ kind: string; body: { result?: string } }>).filter(c => c.kind === 'report2').map(c => c.body.result)
+  assert.deepEqual(second, ['unknown'])
 })

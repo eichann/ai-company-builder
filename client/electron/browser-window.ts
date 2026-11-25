@@ -555,8 +555,12 @@ export function createBrowserWindowShell(options: {
       }
     }
     const onDetach = () => {
+      // A write held now may be let go by Chromium on its own once the connection is gone: the run is told, so its copy is
+      // never sent and the write counts as unknown (independent review of #856).
+      const hadHeld = heldIds.size > 0
       heldIds.clear()
       state.aiGateReady = false
+      if (hadHeld) { try { gate?.hold?.hooks.detached?.() } catch { /* the run's own failure */ } }
       // Gone: the next attach adds the listeners again (never twice).
       try { contents.debugger.removeListener('message', onMessage); contents.debugger.removeListener('detach', onDetach) } catch { /* the window is gone */ }
       // The connection went away under a recording (the window is going, or another client took it): it is discarded.
@@ -886,7 +890,8 @@ export function createBrowserWindowShell(options: {
       /** A write run's held write, sent once through the window's write session (exactly the page's request: step ⑤b). */
       const sendHeld = (request: SessionRequest, steps: BrowserWriteSteps): Promise<BrowserWriteOutcome> => {
         if (closed()) return Promise.resolve({ sent: false, stage: 'prepare' })
-        const asks = (r: BrowserSessionRequest) => state.contentsId === contentsId && state.mode === 'ai' && r.url === request.url && r.method === request.method
+        // Only while the gate still holds the page (a detached DevTools connection may have let the original go).
+        const asks = (r: BrowserSessionRequest) => state.contentsId === contentsId && state.mode === 'ai' && state.aiGateReady && r.url === request.url && r.method === request.method
         return writeThroughSession(lanes, writeKey, writes, request, asks, steps, () => !closed())
       }
       const browse: BrowserBrowseSurface = {

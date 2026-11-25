@@ -51,6 +51,8 @@ export interface BrowserWorkDeps {
   busyWindows?: Set<string>
   now?: () => number
   monoMs?: () => number
+  /** How long the run waits for a write on its way before giving it up as unknown (default 45 s; tests shorten it). */
+  idleMaxMs?: number
 }
 
 export interface BrowserWorkInput {
@@ -418,6 +420,8 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
       const hooks = {
         holdWrite: writer ? (held: Parameters<FrameWriter['hold']>[0]) => writer.hold(held) : async () => ({ kind: 'fail' as const }),
         neverRead: o.neverReadFits,
+        // The window's DevTools connection went while a write was held: the page's original may have gone out on its own.
+        detached: () => writer?.abandon('detached'),
       }
       if (!(await o.win.enter(() => deps.stopped(o.companyId) || !o.current(), hooks))) {
         reason = 'refused'
@@ -443,8 +447,14 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
       if (writer) {
         writer.close()
         let timer: ReturnType<typeof setTimeout> | undefined
-        await Promise.race([writer.idle(), new Promise(resolve => { timer = setTimeout(resolve, IDLE_MAX_MS) })])
+        const idle = await Promise.race([
+          writer.idle().then(() => true),
+          new Promise<false>(resolve => { timer = setTimeout(() => resolve(false), deps.idleMaxMs ?? IDLE_MAX_MS) }),
+        ])
         clearTimeout(timer)
+        // A write still on its way when the wait ran out: kept as unknown (the card, the AI's words, the run log) and the run
+        // locked, never counted as done or left out (independent review of #856).
+        if (!idle) writer.abandon('timeout')
       }
       if (entered) await o.win.leave().catch(() => {})
       const writes: BrowserRunWriteStep[] = writer?.log() ?? []
@@ -496,8 +506,10 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
         if (a.kind === 'refused') { e.phase = 'failed'; e.message = refusedWords(a); e.decide?.('cancelled') }
         return { ok: true, view: viewOf(e) }
       }
+      // The task may have ended meanwhile (the turn stopped, the card's time): the card stays as the task left it.
+      if (!e.decide) return { ok: true, view: viewOf(e) }
       e.phase = 'running'
-      e.decide?.('approved')
+      e.decide('approved')
       return { ok: true, view: viewOf(e) }
     },
     /** ［やめる］: the plan is not approved; the run ends (nothing is written). */

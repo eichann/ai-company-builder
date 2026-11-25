@@ -405,7 +405,11 @@ async function workScenarios(win: BrowserShellWindow, sites: Sites) {
   })
   await page.loadURL('https://op.test/work')
   await js(`document.cookie = 'sid=1; Secure; Path=/'; 1`)
-  out.entered = await win.browse.enter(() => false, { holdWrite: held => writer.hold(held), neverRead: p => p.startsWith('/work/never') })
+  // The writer the window's holds go to (a second one for the last scenario).
+  let current = writer
+  out.entered = await win.browse.enter(() => false, {
+    holdWrite: held => current.hold(held), neverRead: p => p.startsWith('/work/never'), detached: () => current.abandon('detached'),
+  })
   out.save = await js(`save('a')`)
   out.both = await js(`Promise.all([save('b'), save('c')])`)
   out.auto = await js(`auto()`)
@@ -428,7 +432,28 @@ async function workScenarios(win: BrowserShellWindow, sites: Sites) {
   out.afterLost = await js(`save('f')`)
   const ses = page.session
   out.windowCookies = (await ses.cookies.get({ url: 'https://op.test/' })).map(c => c.name)
+  // The window's DevTools connection goes while a save is held (its permit on the way): the run's copy is never sent and
+  // the write is unknown; at most the page's own original reaches the site (independent review of #856).
+  const second = createFrameWriter({
+    companyId: 'company-1', runId: `bf_${'c'.repeat(32)}`, host: 'op.test', going: () => true, stepsSoFar: () => 0,
+    frames: [{ frame: 1, method: 'POST', path: '/work/save', fields: {}, max: 2, left: 2 }],
+    api: {
+      async framePermit(_c, _r, body) { calls.push({ kind: 'permit2', body, at: Date.now() }); await wait(800); return { kind: 'ok', value: { write: 1, frame: 1, permittedAt: new Date().toISOString(), validMs: 5000 } } },
+      async frameReport(_c, _r, body) { calls.push({ kind: 'report2', body, at: Date.now() }); return { kind: 'ok', value: {} } },
+    },
+  })
+  current = second
+  const detachedSave = js(`save('g')`)
+  await wait(300)
+  page.debugger.detach()
+  out.detachedSave = await Promise.race([detachedSave, wait(5000).then(() => 'no answer')])
+  await wait(1500)
+  out.detachedRecords = second.records().map(r => r.outcome)
+  out.detachedLocked = second.locked()
+  out.cookiesAfterDetach = (await ses.cookies.get({ url: 'https://op.test/' })).map(c => c.name)
   await win.browse.leave()
+  // The original's own answer (let go by Chromium) set its cookie: removed, so the later login tests count from the same start.
+  await ses.cookies.remove('https://op.test/', 'rotated')
   out.calls = calls.map(c => ({ kind: c.kind, body: c.body }))
   out.reportsBeforePermits = (() => {
     // Every permit after the first comes after the previous write's report (one write at a time).

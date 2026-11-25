@@ -237,6 +237,12 @@ interface WorkWorld {
   site: Site
   reads: Record<string, string>
   runFinish: () => Promise<BrowserLinesAnswer>
+  /** The page's write is not awaited by the press (a real page's fetch goes on after the click). */
+  pressDoesNotWait: boolean
+  /** The site never answers the write (its request stays on its way). */
+  sendHangs: boolean
+  frameApprove: () => Promise<BrowserLinesAnswer>
+  idleMaxMs?: number
 }
 
 function workWorld(over: Partial<WorkWorld> = {}) {
@@ -245,6 +251,9 @@ function workWorld(over: Partial<WorkWorld> = {}) {
     frameStart: body => ({ kind: 'ok', value: started({ needsApproval: true, adhoc: 'plan' in (body as object) }) }),
     runStart: () => ({ kind: 'ok', value: { runId: `bo_${'a'.repeat(32)}`, leaseMs: 120_000 } }),
     runFinish: async () => ({ kind: 'ok', value: {} }),
+    pressDoesNotWait: false,
+    sendHangs: false,
+    frameApprove: async () => ({ kind: 'ok', value: {} }),
     ...over,
   }
   let permits = 0
@@ -256,7 +265,12 @@ function workWorld(over: Partial<WorkWorld> = {}) {
     async act(action) {
       w.calls.push(`act ${action.do}`)
       // 保存 makes the page's write (to the frame), 自動保存 one outside it.
-      if (action.do === 'click' && hooks) await hooks.holdWrite(held(w.site, 'POST', action.ref === 1 ? '/coupons' : '/autosave', JSON_TYPE, '{"title":"冬のクーポン","_token":"csrf-9"}'))
+      if (action.do === 'click' && hooks) {
+        const page = held(w.site, 'POST', action.ref === 1 ? '/coupons' : '/autosave', JSON_TYPE, '{"title":"冬のクーポン","_token":"csrf-9"}',
+          w.sendHangs ? () => new Promise<void>(() => {}) : undefined)
+        const holding = hooks.holdWrite(page)
+        if (!w.pressDoesNotWait) await holding
+      }
       return 'ok'
     },
     pageClean: () => true,
@@ -267,7 +281,7 @@ function workWorld(over: Partial<WorkWorld> = {}) {
     async runContinue() { return { kind: 'ok', value: {} } as BrowserLinesAnswer },
     async runFinish(_c: string, _r: string, body: unknown) { const a = await w.runFinish(); w.calls.push(`runFinish ${JSON.stringify(body)}`); return a },
     async frameStart(_c: string, body: unknown) { w.calls.push(`frameStart ${JSON.stringify(body)}`); return w.frameStart(body) },
-    async frameApprove(_c: string, _r: string, body: { planHash: string; approvalToken: string }) { w.calls.push(`frameApprove ${body.approvalToken === TOKEN}`); return { kind: 'ok', value: {} } as BrowserLinesAnswer },
+    async frameApprove(_c: string, _r: string, body: { planHash: string; approvalToken: string }) { w.calls.push(`frameApprove ${body.approvalToken === TOKEN}`); return w.frameApprove() },
     async framePermit(_c: string, _r: string, body: { frame: number }) { w.calls.push('framePermit'); return { kind: 'ok', value: { write: ++permits, frame: body.frame, permittedAt: '', validMs: 5000 } } as BrowserLinesAnswer },
     async frameReport(_c: string, _r: string, body: { result: string }) { w.calls.push(`frameReport ${body.result}`); return { kind: 'ok', value: {} } as BrowserLinesAnswer },
     async frameEnd() { w.calls.push('frameEnd'); return { kind: 'ok', value: {} } as BrowserLinesAnswer },
@@ -286,6 +300,7 @@ function workWorld(over: Partial<WorkWorld> = {}) {
     aiSwitch: () => true, userId: () => 'u-1', context, stopped: () => false, window: () => surface, registered: () => true,
     reader: () => ({ async read(address) { w.calls.push(`read ${address}`); return w.reads[address] !== undefined ? { status: 200, body: w.reads[address] } : { status: 404, body: '' } }, closed: () => false }),
     api: api as never, operator: () => operator, cliPath: () => '/bin/claude', parentEnv: () => ({}),
+    ...(w.idleMaxMs !== undefined ? { idleMaxMs: w.idleMaxMs } : {}),
   })
   const cards: string[] = []
   const tool = createBrowserWorkTool(input => wiring.work({
@@ -349,6 +364,54 @@ test('the preview\'s run lets the domain go before the frames run starts: a fini
   const lost = workWorld({ answers: [PLAN], runFinish: async () => ({ kind: 'no-answer' }) })
   assert.equal(await lost.tool.execute({ site: HOST, task: 'クーポンを作って' }), W.offline)
   assert.equal(lost.w.calls.some(c => c.startsWith('frameStart')), false)
+})
+
+test('a write still on its way when the run\'s wait runs out is unknown — in the card, the AI\'s words and the run log — and the run is locked', async () => {
+  const { w, wiring, tool } = workWorld({
+    answers: [CLICK_SAVE, DONE_PLAIN], pressDoesNotWait: true, sendHangs: true, idleMaxMs: 50,
+    frameStart: () => ({ kind: 'ok', value: started({ needsApproval: false }) }),
+  })
+  const said = await tool.execute({ site: HOST, task: 'x', skill: 'coupons' })
+  assert.equal(said, workWordsForAi({ kind: 'unknown' }, [], []))
+  const finish = w.calls.filter(c => c.startsWith('runFinish')).pop() ?? ''
+  assert.match(finish, /"outcome":"unknown"/)
+  const view = wiring.card(COMPANY, FRAME_RUN)
+  assert.ok(view?.ok && view.view.result?.outcome === 'unknown')
+  assert.deepEqual(view.ok && view.view.result?.unknown, ['POST /coupons'])
+})
+
+test('the window\'s DevTools connection gone while a write is held: its copy is never sent, it is told unknown, the run is locked', async () => {
+  const site: Site = { requests: [], answer: ok201 }
+  let abandonNow: () => void = () => {}
+  const w = writerWorld([frame({ max: 2, left: 2 })], {
+    async permit(n) { abandonNow(); return { kind: 'ok', value: { write: n, frame: 1, permittedAt: '', validMs: 5000 } } },
+  })
+  abandonNow = () => w.writer.abandon('detached')
+  assert.equal((await w.writer.hold(held(site, 'POST', '/coupons', FORM, 'name=a'))).kind, 'fail')
+  assert.deepEqual(site.requests, [])
+  assert.ok(w.calls.includes('report 1 unknown'), w.calls.join(','))
+  assert.deepEqual(w.writer.records().map(r => r.outcome), ['unknown'])
+  assert.deepEqual(w.writer.log().map(l => l.outcome), ['unknown'])
+  assert.equal(w.writer.locked(), true)
+  assert.equal((await w.writer.hold(held(site, 'POST', '/coupons', FORM, 'name=b'))).kind, 'fail')
+  assert.deepEqual(site.requests, [])
+})
+
+test('a form body with a raw `;` is refused (a server that splits on it would read another value)', () => {
+  assert.deepEqual(readHeldWrite({ method: 'POST', url: `https://${HOST}/coupons`, host: HOST, contentType: FORM, body: text('type=note&title=x;type=admin') }), { ok: false, problem: 'unreadable' })
+})
+
+test('［任せる］ answered after the task already ended leaves the card as the task left it', async () => {
+  let release: (a: BrowserLinesAnswer) => void = () => {}
+  const { wiring, tool, cards } = workWorld({ answers: [PLAN], frameApprove: () => new Promise(resolve => { release = resolve }) })
+  const words = tool.execute({ site: HOST, task: 'クーポンを作って' })
+  for (let i = 0; i < 50 && cards.length === 0; i++) await new Promise(resolve => setTimeout(resolve, 5))
+  const pressing = wiring.approve(COMPANY, FRAME_RUN, PLAN_HASH)
+  wiring.cancel(COMPANY, FRAME_RUN)
+  await words
+  release({ kind: 'ok', value: {} })
+  const after = await pressing
+  assert.equal(after?.ok && after.view.phase, 'failed')
 })
 
 test('［やめる］ on the card: nothing is permitted or sent, the run ends, the AI hears it was not approved', async () => {

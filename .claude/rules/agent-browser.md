@@ -3254,10 +3254,15 @@ else. **No site word** anywhere (a fictional site in the tests).
   The held copy keeps the page's own headers but the connection's and the cookies (`HELD_DROPPED_HEADERS`, `proxy-*`,
   `sec-*`): its CSRF header goes as the page set it, its login is the window's cookies for exactly that address (the
   write session's `copyCookies`). **A held write is failed before the gate lets go** (`failHeld` in `setMode('human')`
-  before `Fetch.disable`: Chromium would otherwise send a paused request on its own).
+  before `Fetch.disable`: Chromium would otherwise send a paused request on its own). **The DevTools connection gone while
+  a write is held** (verified on Electron 45: Chromium then lets the paused original go out, past the request hook it
+  already passed): the run is told (`BrowserWorkHooks.detached` → `abandon('detached')`), every write held is kept
+  `unknown` and its copy is never sent — the write session's hook asks `aiGateReady` too, the writer is closed — and a
+  permitted one is reported `unknown`, never `not_sent` (independent review of #856).
 - **Deciding one** (`createFrameWriter`, in this order; each `refused` / `not-sent` fails the page's request): the run
   over, locked or stopped → not sent; `readHeldWrite` — another host, a body that is not a form, JSON or multipart text
-  parts, **a part with a file**, `_method` twice → refused; `pickFrame` — the core's one rule `browserFrameMismatch` with
+  parts, **a part with a file**, `_method` twice, **a form body with a raw `;`** (some server stacks split on it, so the
+  frame could be matched on another value than the site reads; independent review) → refused; `pickFrame` — the core's one rule `browserFrameMismatch` with
   only the frame's fixed fields and `_method` (the path **with its query**, so a write with a query never fits —
   decision), a frame with no unit left → refused, **never asked for**; an after-read "before" read; then
   `held.send(steps)`: the write session prepared, **`ready`** asks the permit once (a unit taken is counted down here,
@@ -3296,7 +3301,10 @@ else. **No site word** anywhere (a fictional site in the tests).
 - **Stop**: the turn's signal (the member's stop, closing the consultation, an administrator's stop), the AI stop asked
   every 0.5 s, a closed window or a changed context end the run at once: the card's wait ends (the run ends, nothing
   written), a held write is not sent (`beforeSend`, `failHeld`), one already on its way becomes unknown if no answer
-  comes. The window leaves `ai` mode only after the writer is idle (≤ 45 s) and every held request was failed.
+  comes. The window leaves `ai` mode only after the writer is idle (≤ 45 s) and every held request was failed; **a write
+  still on its way when those 45 s run out** is kept `unknown` (`abandon('timeout')`: the card, the AI's words and the run
+  log say so, the run locked) — never counted as done or left out (independent review of #856). ［任せる］ answered after
+  the task already ended leaves the card as the task left it.
 - **The run log** (I8): each operator run's `finish` carries `writes` (`BrowserRunWriteStep`: after which logged step,
   the frame or null, the method — `OTHER` for any other —, the path as the recording's pattern, `done` / `not-sent` /
   `unknown` / `refused`); the server checks them (`browserRunWritesProblem`), keeps them in the additive table
@@ -3324,13 +3332,15 @@ handed back, no value in the log or the server's calls; the wiring — an ad-hoc
 view and the AI's words never hold the value or the hash), ［やめる］, a pre-approved Skill without the card, a text change
 with it, 見るだけ refused before the operator, a write outside the plan refused during the work, the after-read card's
 labels and bugs 1 / 4, the AI's words without page text or injection, the preview's finish taken before the frames run
-starts), `client/tests/ui/browser-inspection-card.spec.ts` (a `bf_` card: the key values and ［任せる］／［やめる］, then the
+starts, a write still on its way when the wait runs out → unknown everywhere, a detach while held → unknown and never
+sent, a form body with `;`, ［任せる］ after the task ended), `client/tests/ui/browser-inspection-card.spec.ts` (a `bf_` card: the key values and ［任せる］／［やめる］, then the
 after-read card by itself, each item's checker), `client/tests/browser-window-electron.test.ts` (a
 real window and a fictional site: a save sent once with the page's cookie and CSRF header, its 201 JSON reaching the
 page without the site's cookie in the page or the window, two saves at once one after the other, an autosave outside
 the plan, an upload with a file, a never-read address, a save past the frame's max and a save whose permit came after
 the stop never reach the site, a lost answer reaches it once and nothing more is sent; no cookie, CSRF or value in a
-permit, a report or the log), `client/tests/browser-core-words.test.ts` (the tool, its schema and both prompts name no
+permit, a report or the log; the DevTools connection detached while a save is held: the run's copy never sent, at most
+the page's original arrives, the write unknown and reported so), `client/tests/browser-core-words.test.ts` (the tool, its schema and both prompts name no
 site), `server/tests/unit/browser-runs.test.ts` (`write: true` at 見るだけ / on a 見るだけ site refused; the joined lock —
 only the member's run naming the frames run, `busy`, a run naming nothing → ended; write steps kept, listed, a value
 refused, append-only), `server/tests/unit/browser-frames.test.ts` (the start's `afterRead` / `neverRead`, not in `get`;
