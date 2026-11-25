@@ -145,9 +145,12 @@ export function wireBrowserPlans<E extends IpcInvokeEvent>(ipc: IpcRegistrar<E, 
     busyWindows,
     /** Whether the request tool may exist at all (the switch, asked per turn). */
     requestAvailable: () => aiSwitch(),
-    /** What the AI is told it may request: the operations of the declarations this build carries and approves. */
-    catalog: () => browserOperationCatalog(approvedBundledDeclarations(approved, carried, deps.connectors.declarations)
-      .map(text => parsePluginManifest(text)).flatMap(r => (r.ok && r.value.browser ? [{
+    /**
+     * What the AI is told it may request in this company: the operations of the declarations this build carries and
+     * approves, on a site the company registered (its current valid policy) — none of a site it did not.
+     */
+    catalog: (companyId: string) => browserOperationCatalog(approvedBundledDeclarations(approved, carried, deps.connectors.declarations)
+      .map(text => parsePluginManifest(text)).flatMap(r => (r.ok && r.value.browser && deps.windows.siteNow(companyId, r.value.browser.host) !== null ? [{
         id: r.value.id, label: r.value.label,
         operations: Object.entries(r.value.browser.operations).map(([name, op]) => ({ name, label: op.label, target: Object.keys(op.target), change: Object.keys(op.change) })),
       }] : []))),

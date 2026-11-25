@@ -199,6 +199,9 @@ export function sqliteBrowserLineRepository(conn: Database.Database, companyId: 
     removeSiteGrantsOf(userId) {
       conn.prepare('DELETE FROM browser_site_grants WHERE company_id = ? AND user_id = ?').run(companyId, userId)
     },
+    removeSiteWriteGrants(host) {
+      conn.prepare("DELETE FROM browser_site_grants WHERE company_id = ? AND host = ? AND level = 'write'").run(companyId, host)
+    },
 
     shapeNotices() {
       return (conn.prepare(`SELECT ${NOTICE_COLUMNS} FROM browser_shape_notices WHERE company_id = ? ORDER BY last_at DESC, site, map_version, thing`).all(companyId) as NoticeDbRow[]).map(toNotice)

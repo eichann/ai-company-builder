@@ -488,3 +488,26 @@ test('as it ships (the build\'s switch off): ［任せる］, the request and th
     fs.rmSync(dir, { recursive: true, force: true })
   }
 })
+
+test('the request tool tells the AI of a site\'s operations only where the company registered the site (agent-browser.md "The tools\' words")', () => {
+  const ipc = { handle() {}, on() {} } as unknown as IpcRegistrar
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'acb-plans-'))
+  try {
+    const wired = wireBrowserPlans(ipc, {
+      aiSwitch: () => true,
+      fromMainWindow: () => true, baseUrl: () => 'https://acb.example', cookies: () => ['s=1'], userId: () => 'u1', userDataDir: () => dir,
+      windows: { siteNow: companyId => (companyId === COMPANY ? SITE : null), runWindow: () => null, previewWindow: () => null },
+      stopped: () => false,
+      connectors: { declarations: [lstep.declaration], checkers: lstep.checkers, readers: lstep.readers },
+      operator: () => null, cliPath: () => '/bin/false', parentEnv: () => ({}),
+      fetch: (async () => { throw new Error('no') }) as unknown as typeof fetch,
+      log: { warn() {} },
+    })
+    const turn = (companyId: string) => browserRequestForTurn(wired, { companyId, conversationId: null, signal: new AbortController().signal, onPlan: () => {} })!.description
+    assert.ok(turn(COMPANY).includes('reminder_step_add_template'))
+    const elsewhere = turn('company-elsewhere')
+    for (const word of ['reminder_step_add_template', 'lstep', HOST, 'リマインダ']) assert.ok(!elsewhere.includes(word), word)
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true })
+  }
+})

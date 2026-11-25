@@ -119,6 +119,8 @@ export interface BrowserSiteGrantRepository {
   siteGrantOf(userId: string, host: string): BrowserSiteGrantRow | null
   saveSiteGrant(row: BrowserSiteGrantRow): void
   removeSiteGrantsOf(userId: string): void
+  /** Every 変えてよい (`write`) row on this host. */
+  removeSiteWriteGrants(host: string): void
 }
 
 export interface BrowserLineRepository extends BrowserSiteGrantRepository {

@@ -959,7 +959,6 @@ const CROSS: CrossRow[] = [
   x('POST /api/companies/:companyId/browser-line-plans/:planId/claim', (w, id) => ({ path: `${C(w)}/browser-line-plans/${id}/claim` }), w => w.other.browserLinePlan, NO_SUCH_LINE_PLAN),
   x('POST /api/companies/:companyId/browser-line-executions/:executionId/permit', (w, id) => ({ path: `${C(w)}/browser-line-executions/${id}/permit`, body: { index: 1 } }), w => w.other.browserLineExecution, NO_SUCH_LINE_EXECUTION),
   x('POST /api/companies/:companyId/browser-line-executions/:executionId/confirm', (w, id) => ({ path: `${C(w)}/browser-line-executions/${id}/confirm`, body: { index: 1, result: 'done' } }), w => w.other.browserLineExecution, NO_SUCH_LINE_EXECUTION),
-  x('PUT /api/companies/:companyId/browser-line-grants/:userId', (w, id) => ({ path: `${C(w)}/browser-line-grants/${id}`, body: { site: 'x_site', line: 'x_line', meaningHash: `sha256:${'a'.repeat(64)}`, mechanicsHash: `sha256:${'b'.repeat(64)}`, allowed: true } }), w => w.other.member, 'pm-nobody'),
   x('PUT /api/companies/:companyId/browser-site-grants/:userId', (w, id) => ({ path: `${C(w)}/browser-site-grants/${id}`, body: { host: 'shop.example.com', level: 'write' } }), w => w.other.member, 'pm-nobody'),
   x('POST /api/companies/:companyId/browser-devices/:deviceId/enable', (w, id) => ({ path: `${C(w)}/browser-devices/${id}/enable` }), w => w.other.browserDevice, NO_SUCH_DEVICE),
   x('POST /api/companies/:companyId/browser-devices/:deviceId/revoke', (w, id) => ({ path: `${C(w)}/browser-devices/${id}/revoke` }), w => w.other.browserDevice, NO_SUCH_DEVICE),
@@ -974,6 +973,7 @@ const CROSS: CrossRow[] = [
 const NOT_OBJECT_IDS: Record<string, string> = {
   'GET /api/companies/:companyId/me/plugin-steps/consultations/:conversationId': "the caller's own consultation id, looked up only among their own bindings in this company; anyone else's is null (plugin-steps.test.ts)",
   'GET /api/oauth/:provider/callback': 'a provider name, not an object: the company comes from the state, found only inside it (member-oauth.test.ts)',
+  'PUT /api/companies/:companyId/browser-line-grants/:userId': 'gone since the site grants: 410 to owners / admins whatever the id, reading and writing nothing (browser-lines.test.ts); the site grants\' PUT has its CROSS row',
   'GET /api/invitations/:token': 'an invitation link: the token finds the company (control plane; invitations tests)',
   'POST /api/invitations/:token/accept': 'an invitation link: the token finds the company (control plane; invitations tests)',
   'GET /api/broker/:service/*': 'the relay: the company comes from the relay token, never from the URL',

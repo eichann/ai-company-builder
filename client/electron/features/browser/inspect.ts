@@ -9,6 +9,7 @@
 // member has that consultation open (the turn's signal: closing or stopping the consultation stops the reads); the AI
 // gets only fixed words and each check's ✓ / ✗ / 「読み取れませんでした」 — the values the site showed are on the
 // member's card alone and never leave main but to the renderer's card (never to the server, the AI, a log or the disk).
+import type { BrowserOperationLevel } from '../../../../shared/core/browser-operation'
 import { browserLineCatalog } from '../../../shared/browser-tool-catalog'
 import type { IpcInvokeEvent, IpcMessageEvent, IpcRegistrar } from '../../ipc/registrar'
 import type { BrowserMap, BrowserThingReader } from '../../../../shared/core/browser-map'
@@ -55,6 +56,8 @@ export interface BrowserInspectionsDeps<E> {
   stopped(companyId: string): boolean
   /** The member's open window of the site as main reads through it (controller `previewWindow`); null: not open or not listed. */
   window(companyId: string, host: string): BrowserPreviewSurface | null
+  /** The site's level in the company's current valid policy (controller `siteNow`), null when the company did not register it. */
+  siteLevel(companyId: string, host: string): BrowserOperationLevel | null
   /** The maps this build bundles (client/connector-maps/), the opened lines (client/browser-lines/), the declarations. */
   sites: readonly BrowserInspectionSite[]
   lines: readonly BrowserOpenedLine[]
@@ -116,12 +119,13 @@ export function wireBrowserInspections<E extends IpcInvokeEvent>(ipc: IpcRegistr
   }
 
   /**
-   * What the AI is told it may ask (agent-browser.md "The tools' words"): the bundled lines of this kind whose row in the
-   * opened list is approved, on a site whose reviewed declaration this build carries. The tool's own words name no site.
+   * What the AI is told it may ask in this company (agent-browser.md "The tools' words"): the bundled lines of this kind
+   * whose row in the opened list is approved, on a site whose reviewed declaration this build carries **and the company
+   * registered** (its current valid policy). A company that registered none of them hears no site's words.
    */
-  const catalog = () => browserLineCatalog(
+  const catalog = (companyId: string) => browserLineCatalog(
     deps.lines.filter(l => file.lines?.some(r => r.name === l.name && r.version === l.version && r.site === l.read.site && r.status === 'approved')),
-    id => { const s = siteOf(id); return s ? { id, label: s.label } : null }, 'read')
+    id => { const s = siteOf(id); return s && deps.siteLevel(companyId, s.host) !== null ? { id, label: s.label } : null }, 'read')
 
   // One read runner (one run per window). Its context is the shared one, captured with the run's own turn signal.
   const runner = createBrowserReadRunner({

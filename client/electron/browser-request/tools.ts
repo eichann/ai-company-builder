@@ -98,8 +98,8 @@ export function createBrowserRequestTools(run: BrowserRequestRun, onPlan: (planI
 export interface BrowserRequestPlans {
   /** The switch (this PC's opt-in): off = the tool does not exist this turn. */
   requestAvailable(): boolean
-  /** What can be requested, from the declarations this build carries (`browserOperationCatalog`). */
-  catalog?(): string
+  /** What can be requested in this company, from the declarations this build carries (`browserOperationCatalog`). */
+  catalog?(companyId: string): string
   request(input: {
     companyId: string; conversationId: string | null; site: string; operation: string
     hints: { targetHints: Record<string, string>; changeHints: Record<string, string>; reason: string }; signal: AbortSignal
@@ -115,5 +115,5 @@ export function browserRequestForTurn(
   return createBrowserRequestTools(input => plans.request({
     companyId: turn.companyId, conversationId: turn.conversationId, site: input.site, operation: input.operation, signal: turn.signal,
     hints: { targetHints: input.targetHints, changeHints: input.changeHints, reason: input.reason },
-  }), turn.onPlan, plans.catalog?.())
+  }), turn.onPlan, plans.catalog?.(turn.companyId))
 }

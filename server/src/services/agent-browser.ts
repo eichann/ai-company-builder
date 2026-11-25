@@ -12,6 +12,7 @@
 import {
   BROWSER_OPERATION_MODES,
   DEFAULT_BROWSER_OPERATION_SETTINGS,
+  levelAllows,
   parseBrowserOperationSettings,
   type BrowserOperationMode,
   type BrowserOperationSettings,
@@ -21,6 +22,7 @@ import type { AccountDirectory } from '../ports/accounts'
 import type { AgentBrowserRepository, StoredAgentBrowserOverride } from '../ports/agent-browser'
 import type { Clock, IdGenerator } from '../ports/clock'
 import type { MembershipRepository } from '../ports/memberships'
+import type { Transactions } from '../ports/transactions'
 import { requireFullAccess, type Member } from './access'
 import { ok, refuse, type Outcome } from './outcome'
 
@@ -33,7 +35,22 @@ export interface AgentBrowserDeps {
   accounts: AccountDirectory
   clock: Clock
   ids: IdGenerator
+  transactions: Transactions
+  /**
+   * In the save's transaction: the hosts on which writing is no longer allowed (removed, or lowered to 見るだけ), so the
+   * people's 変えてよい there is cleared and never silently comes back when the site is raised or registered again
+   * (agent-browser.md "Who may use a site").
+   */
+  writeNoLongerAllowed?: (companyId: string, hosts: string[]) => void
   log?: Pick<Console, 'warn'>
+}
+
+/** The hosts of `before` on which `after` no longer allows writing (removed, or lowered below 入力・保存まで). */
+export function hostsNoLongerWritable(before: BrowserOperationSettings, after: BrowserOperationSettings): string[] {
+  return before.sites.filter(s => {
+    const now = after.sites.find(a => a.host === s.host)
+    return !now || !levelAllows(now.level, 'write')
+  }).map(s => s.host)
 }
 
 const defaults = (): BrowserOperationSettings => ({ ...DEFAULT_BROWSER_OPERATION_SETTINGS, sites: [] })
@@ -126,11 +143,15 @@ export function createAgentBrowserService(deps: AgentBrowserDeps) {
       const after = parsed.value
       if (JSON.stringify(before) !== JSON.stringify(after)) {
         const at = clock.now()
-        agentBrowser.save(
-          member.companyId,
-          { settings: JSON.stringify(after), updatedAt: at, updatedBy: member.userId },
-          { id: ids.newId(), changedAt: at, changedBy: member.userId, change: JSON.stringify({ target: 'company', before, after }) },
-        )
+        deps.transactions.run(() => {
+          agentBrowser.save(
+            member.companyId,
+            { settings: JSON.stringify(after), updatedAt: at, updatedBy: member.userId },
+            { id: ids.newId(), changedAt: at, changedBy: member.userId, change: JSON.stringify({ target: 'company', before, after }) },
+          )
+          const narrowed = hostsNoLongerWritable(before, after)
+          if (narrowed.length > 0) deps.writeNoLongerAllowed?.(member.companyId, narrowed)
+        })
       }
       return ok(view(member.companyId))
     },

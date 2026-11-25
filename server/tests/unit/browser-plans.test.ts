@@ -22,6 +22,7 @@ import { sqliteBrowserExecutionLookup } from '../../src/adapters/sqlite/browser-
 import { fileBrowserConnectorCatalog } from '../../src/adapters/browser-connector-catalog'
 import { sha256TokenDigest } from '../../src/adapters/system'
 import { hashCanonical } from '../../src/lib/content-hash'
+import { createBrowserSiteGrants } from '../../src/services/browser-site-grants'
 import { createBrowserPlanService, type BrowserPlanService } from '../../src/services/browser-plans'
 import type { ApprovedCombinationRow, BrowserPlanRepository } from '../../src/ports/browser-plans'
 import type { CompanyDataSource } from '../../src/ports/company-data'
@@ -69,6 +70,7 @@ function build() {
     tokenDigest: sha256TokenDigest, catalog: { combinations: () => rows }, executionLookup: sqliteBrowserExecutionLookup(conn),
     memberships: sqliteMembershipRepository(conn), accounts: { byIds: () => new Map() } as never,
     browserPolicy: () => policy, aiStops: () => stops, devices: anyPc, log: { warn: () => {} },
+    siteGrants: createBrowserSiteGrants({ companyData: data, clock: { now: () => iso(now), nowMs: () => now }, memberships: sqliteMembershipRepository(conn), browserPolicy: () => policy }),
   })
 }
 
@@ -89,12 +91,16 @@ beforeEach(() => {
   policy = { mode: 'on', sites: [SITE] }
   stops = { all: false, tools: [] }
   build()
-  for (const m of [alice, bob]) grant(m)
+  for (const m of [alice, bob]) { grant(m); siteLevel(m, 'write') }
 })
 
 function grant(m: Member, allowed = true) {
   const r = svc.setGrant(owner, m.userId, { connector: 'lstep', operation: OP, declarationHash: APPROVED.declarationHash, allowed })
   if (!r.ok) throw new Error(JSON.stringify(r.body))
+}
+/** The person's level on the site (「使える人」, agent-browser.md "Who may use a site"): this path asks it too. */
+function siteLevel(m: Member, level: 'none' | 'read' | 'write') {
+  data.forCompany(m.companyId).browserLines.saveSiteGrant({ userId: m.userId, host: SITE.host, level, grantedBy: owner.userId, updatedAt: iso(now) })
 }
 
 const fact = (value: unknown) => ({ status: 'known', value, complete: true, readAt: iso(now), source: '/line/episode/show/11' })
@@ -212,6 +218,17 @@ describe('registering a plan', () => {
     expect(code(svc.register(owner, input(), undefined))).toBe('BROWSER_TYPE_NOT_GRANTED')
     grant(alice, false)
     expect(code(svc.register(alice, input(), undefined))).toBe('BROWSER_TYPE_NOT_GRANTED')
+  })
+
+  it('the type grant alone is not enough: the person must be 変えてよい on the site (見るだけ, 使わない and the default refused)', () => {
+    for (const level of ['read', 'none'] as const) {
+      siteLevel(alice, level)
+      expect(code(svc.register(alice, input(), undefined)), level).toBe('BROWSER_TYPE_NOT_GRANTED')
+    }
+    data.forCompany(CO).browserLines.removeSiteGrantsOf(alice.userId)
+    expect(code(svc.register(alice, input(), undefined))).toBe('BROWSER_TYPE_NOT_GRANTED')
+    siteLevel(alice, 'write')
+    expect(code(svc.register(alice, input(), undefined))).toBe('ok')
   })
 
   it('a grant given before the member left and came back does not apply', () => {
@@ -394,6 +411,7 @@ describe('the send permit', () => {
       [() => { stops = { all: false, tools: ['web'] } }, () => { stops = { all: false, tools: [] } }, 'BROWSER_AI_STOPPED'],
       [() => { policy = { mode: 'off', sites: [SITE] } }, () => { policy = { mode: 'on', sites: [SITE] } }, 'BROWSER_NOT_ALLOWED'],
       [() => grant(alice, false), () => grant(alice), 'BROWSER_TYPE_NOT_GRANTED'],
+      [() => siteLevel(alice, 'read'), () => siteLevel(alice, 'write'), 'BROWSER_TYPE_NOT_GRANTED'],
       [() => { rows = [{ ...APPROVED, status: 'retired' }]; build() }, () => { rows = [APPROVED]; build() }, 'BROWSER_TYPE_RETIRED'],
       [() => { rows = [{ ...APPROVED, minAppVersion: '0.0.2' }]; build() }, () => { rows = [APPROVED]; build() }, 'BROWSER_APP_TOO_OLD'],
     ]
@@ -412,7 +430,7 @@ describe('the send permit', () => {
       expect(view.execution?.state).toBe('void')
       reasons.push(view.execution?.voidReason as string)
     }
-    expect(reasons).toEqual(['stopped', 'setting', 'not-granted', 'retired', 'app-too-old'])
+    expect(reasons).toEqual(['stopped', 'setting', 'not-granted', 'not-granted', 'retired', 'app-too-old'])
   })
 
   it('an execution that does not hold its target lock gets no permit', () => {
@@ -672,6 +690,7 @@ describe('compare-and-set', () => {
       tokenDigest: sha256TokenDigest, catalog: { combinations: () => rows }, executionLookup: sqliteBrowserExecutionLookup(conn),
       memberships: sqliteMembershipRepository(conn), accounts: { byIds: () => new Map() } as never,
       browserPolicy: () => policy, aiStops: () => stops, devices: anyPc, log: { warn: () => {} },
+      siteGrants: createBrowserSiteGrants({ companyData: data, clock: { now: () => iso(now), nowMs: () => now }, memberships: sqliteMembershipRepository(conn), browserPolicy: () => policy }),
     })
   }
 

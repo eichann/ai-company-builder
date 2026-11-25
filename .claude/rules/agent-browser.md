@@ -2501,8 +2501,10 @@ generic units only: **the host the company registered × 使わない / 見る�
   `updated_at`. **No row = 見るだけ** (owner decision D4: everyone starts at 見るだけ once the site is registered; an admin
   may set 使わない); 変えてよい only by a row, one person at a time. A row counts only when written while the person is a
   member this time (`updated_at` ≥ the membership's `created_at`); leaving removes the rows (`memberLeft`); someone not a
-  member gets nothing. A row for a host no longer registered counts nowhere (and is not shown); registering the host
-  again brings it back. Owners and admins follow the same table (no implicit 変えてよい).
+  member gets nothing. A row for a host no longer registered counts nowhere (and is not shown). **A host removed, or
+  lowered below 入力・保存まで, clears its 変えてよい rows in the setting's save transaction** (`services/agent-browser.ts`
+  `hostsNoLongerWritable` → `writeNoLongerAllowed`): raising the site or registering it again never brings a 変えてよい
+  back unseen; 使わない / 見るだけ rows stay. Owners and admins follow the same table (no implicit 変えてよい).
 - **Service** `services/browser-site-grants.ts` (`createBrowserSiteGrants`, built in `composition.ts` and injected into
   the line service as `siteGrants`): `allows(member, host, effect)` = the company's mode with the member's override on, the
   host registered, `browserPersonAllows(own level, site level, effect)`. `view` / `set` (owner/admin, else 403
@@ -2515,8 +2517,11 @@ generic units only: **the host the company registered × 使わない / 見る�
 - **The line gate** (create, approve, claim, every permit; "Plans of opened lines on the server") asks `allows` for the
   line's site host and effect (an inspection `read`: 見るだけ is enough — D7 keeps `landing_inspect` working; writes
   `write`) where it asked the per-line grant; the refusal code stays `BROWSER_TYPE_NOT_GRANTED` (released apps map it),
-  its sentence names no job. The shape notice and `GET /browser-lines-mine` ask the same. The old path's per-type grants
-  (`browser_type_grants`, `lstep@0.6.x`) are unchanged until step ⑦.
+  its sentence names no job. The shape notice and `GET /browser-lines-mine` ask the same. **The old path asks it too**
+  (`services/browser-plans.ts` `gate`, register / approve / claim / every permit, after its per-type grant: both are
+  needed, the operation's effect against the person's level) — so 使わない / 見るだけ on 「使える人」 stops the old path's
+  plans and permits as well (a refusal at a permit voids the execution, reason `not-granted`). Its per-type grants
+  (`browser_type_grants`, `lstep@0.6.x`) stay until step ⑦.
 - **The per-line grants are kept readable, never consulted**: `browser_line_grants` stays (no column or row changes;
   released builds and self-hosters' rows), a line grant alone allows nothing; `GET /browser-line-grants` answers its old
   shape **empty** (`{ lines: [], waiting: [], grants: [] }`, owner/admin; an older admin console then shows no job), `PUT
@@ -2532,7 +2537,10 @@ nor settable, 見るだけ cannot write, 使わない cannot read, the ceiling, 
 they came back, owners / admins only and no implicit 変えてよい, the view, the body), `browser-lines.test.ts` (the gate's
 order with the person's level, the old per-line grant alone allowing nothing and its routes naming no line, 見るだけ cannot
 make a write plan, `browser-lines-mine` listing a writing line only to 変えてよい, leaving), `browser-devices.test.ts` (`browser-lines-mine` per level), permission matrix rows + `CROSS`,
-`admin-contract.test.ts`, `company-scoped-sql.test.ts`, `jobs-schema.test.ts`, `admin/tests/agent-browser-people.test.tsx`
+`admin-contract.test.ts`, `company-scoped-sql.test.ts`, `jobs-schema.test.ts`, `browser-plans.test.ts` (the old path: the type
+grant alone not enough, 見るだけ / 使わない / the default refused at register, a lowered level voiding a claimed execution),
+`integration/agent-browser.test.ts` (a site lowered or removed clears its 変えてよい, raised keeps it),
+`admin/tests/agent-browser-people.test.tsx`
 (fictional sites: the cells, one `PUT` per choice, the cap, no site registered, no job words). Each guard mutation-checked.
 
 ## The tools' words (step ①: no site word in what every company ships)
@@ -2542,8 +2550,9 @@ make a write plan, `browser-lines-mine` listing a writing line only to 変えて
   with their headings — is a catalog built per turn from the site data the build carries
   (`client/shared/browser-tool-catalog.ts`: `browserLineCatalog` over the bundled lines whose opened row is approved on a
   site whose approved declaration the build carries; `browserOperationCatalog` over the approved declarations'
-  operations) and appended to the description (`description` on each tool object, read by `agents/claude.ts`). A build
-  without a site's data offers none (`BROWSER_CATALOG_NONE`).
+  operations), **only for sites the turn's company registered** (its current valid policy: `siteLevel` / `siteNow`), and
+  appended to the description (`description` on each tool object, read by `agents/claude.ts`). A company that registered
+  none of them, or a build without a site's data, hears no site word (`BROWSER_CATALOG_NONE`).
 - Refusal and tool words in `client/shared` (`BROWSER_INSPECT_WORDS`, `BROWSER_REQUEST_WORDS`), the server's browser
   refusals and the admin console's texts name no site.
 - **Test** `client/tests/browser-core-words.test.ts` (extends §17-2 to texts): the string literals, template text and JSX
@@ -2556,8 +2565,8 @@ make a write plan, `browser-lines-mine` listing a writing line only to 変えて
   `OLD_PATH`, removed with the old path in step ⑦: `shared/core/browser-plans.ts` (its one checker's facts), the old plan
   card `src/features/browser-plans/components/BrowserPlanCard.tsx` and its `model.ts` (`client/connectors/lstep/` is
   outside the scanned folders).
-- **Remaining (said)**: the catalog lists every approved line the build carries, whether or not the member's company
-  registered that site — text only (the server gates every call); filtering it by the company's sites is a later step.
+- Tests of the filter: `client/tests/browser-inspect-app.test.ts` and `browser-plans-app.test.ts` (another company of
+  the same member that registered nothing: no line, operation, site or host in the description).
 
 ## Not yet (later PRs)
 

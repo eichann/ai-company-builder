@@ -27,6 +27,8 @@ import { browserInspectForTurn } from '../electron/browser-request/inspect-tool'
 import { BROWSER_INSPECT_WORDS, readBrowserCard, type BrowserInspectionGetResult } from '../shared/browser-inspection'
 import type { BrowserPreviewSurface } from '../shared/browser-runner'
 import type { IpcInvokeEvent, IpcRegistrar } from '../electron/ipc/registrar'
+import { parsePluginManifest } from '../../shared/core/plugin-manifest'
+import { BROWSER_CATALOG_NONE } from '../shared/browser-tool-catalog'
 
 const HOST = 'manager.linestep.net'
 const COMPANY = 'company-1'
@@ -107,7 +109,7 @@ function surfaceOf(f: Fake): BrowserPreviewSurface {
   return surface
 }
 
-function harness(o: { on?: () => boolean; openedFile?: unknown; user?: () => string | null; stopped?: boolean } = {}) {
+function harness(o: { on?: () => boolean; openedFile?: unknown; user?: () => string | null; stopped?: boolean; registered?: (companyId: string, host: string) => boolean } = {}) {
   const f = fake()
   const surface = surfaceOf(f)
   const handlers = new Map<string, (event: IpcInvokeEvent, ...args: unknown[]) => Promise<unknown>>()
@@ -127,6 +129,7 @@ function harness(o: { on?: () => boolean; openedFile?: unknown; user?: () => str
     baseUrl: () => 'https://acb.example', cookies: () => ['s=1'], userId: user, context,
     stopped: () => o.stopped ?? false,
     window: (_c, host) => { f.hosts.push(host); return surface },
+    siteLevel: (companyId, host) => ((o.registered ?? (() => true))(companyId, host) ? 'read' : null),
     sites: [{ map: site.map, readers: site.readers, addresses: site.addresses, account: site.account }],
     lines: LINES, declarations: [lstep.declaration], fetch: fetchFake,
     ...(o.openedFile ? { openedFile: o.openedFile } : {}),
@@ -293,4 +296,17 @@ test('the renderer shows a card only in its shape: a mark outside the four words
   assert.equal(readBrowserCard({ ...good, checks: [{ label: 'c', mark: 'yes', fields: [] }] }), null)
   assert.equal(readBrowserCard({ ...good, sections: [{ heading: 's', rows: [{ label: 'l', value: { status: 'read', text: 1 } }] }] }), null)
   assert.equal(readBrowserCard({ ...good, state: 'ok' }), null)
+})
+
+test('the tool tells the AI of a site only where the company registered it: elsewhere no site word at all (agent-browser.md "The tools\' words")', () => {
+  const host = parsePluginManifest(lstep.declaration)
+  assert.ok(host.ok && host.value.browser)
+  const siteHost = host.value.browser.host
+  const registered = harness({ registered: (companyId, h) => companyId === COMPANY && h === siteHost })
+  const here = registered.tool()!.description
+  assert.ok(here.includes('landing_inspect'), here)
+  // Another company of the same member, which registered nothing: the description names no line, site or host.
+  const elsewhere = browserInspectForTurn(registered.wiring, { companyId: 'co-elsewhere', conversationId: null, signal: new AbortController().signal, onCard: () => {} })!.description
+  assert.ok(elsewhere.includes(BROWSER_CATALOG_NONE), elsewhere)
+  for (const word of ['landing_inspect', 'lstep', siteHost, '流入経路']) assert.ok(!elsewhere.includes(word), word)
 })

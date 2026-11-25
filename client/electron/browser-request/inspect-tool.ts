@@ -107,16 +107,16 @@ export function createBrowserInspectTools(
 export interface BrowserInspectPlans {
   /** The switch (this PC's opt-in): off = the tool does not exist this turn. */
   inspectAvailable(): boolean
-  /** What can be inspected, from the site data this build carries (`browserLineCatalog`). */
-  catalog?(): string
+  /** What can be inspected in this company, from the site data this build carries (`browserLineCatalog`). */
+  catalog?(companyId: string): string
   inspect(input: { companyId: string; conversationId: string | null; site: string; line: string; values: Record<string, string>; signal: AbortSignal }): Promise<BrowserInspectOutcome>
 }
 
 /** The write wiring's side the tool needs (features/browser/write-lines.ts). */
 export interface BrowserWritePlans {
   writeAvailable(): boolean
-  /** What can be proposed, from the site data this build carries (`browserLineCatalog`). */
-  catalog?(): string
+  /** What can be proposed in this company, from the site data this build carries (`browserLineCatalog`). */
+  catalog?(companyId: string): string
   propose(input: { companyId: string; conversationId: string | null; site: string; line: string; values: Record<string, string> }): Promise<BrowserWriteProposeOutcome>
 }
 
@@ -156,12 +156,12 @@ export function browserInspectForTurn(
   if (!plans || !plans.inspectAvailable()) return undefined
   const tools = createBrowserInspectTools(input => plans.inspect({
     companyId: turn.companyId, conversationId: turn.conversationId, signal: turn.signal, site: input.site, line: input.line, values: input.values,
-  }), turn.onCard, plans.catalog?.())
+  }), turn.onCard, plans.catalog?.(turn.companyId))
   if (!writes || !writes.writeAvailable()) return tools
   return {
     ...tools,
     write: createBrowserWriteTool(input => writes.propose({
       companyId: turn.companyId, conversationId: turn.conversationId, site: input.site, line: input.line, values: input.values,
-    }), turn.onCard, writes.catalog?.()),
+    }), turn.onCard, writes.catalog?.(turn.companyId)),
   }
 }

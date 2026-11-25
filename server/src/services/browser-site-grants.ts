@@ -101,6 +101,15 @@ export function createBrowserSiteGrants(deps: BrowserSiteGrantDeps) {
       return ok(view(member))
     },
 
+    /**
+     * In the company setting's save transaction (services/agent-browser.ts): writing is no longer allowed on these hosts
+     * (removed, or lowered to 見るだけ), so every 変えてよい there goes — raising the site or registering it again later
+     * never brings one back unseen. 使わない / 見るだけ rows stay.
+     */
+    writeNoLongerAllowed(companyId: string, hosts: readonly string[]): void {
+      for (const host of hosts) repo(companyId).removeSiteWriteGrants(host)
+    },
+
     /** In removeMember's transaction: their rows go (invited back, they start from the default). */
     memberLeft(companyId: string, userId: string): void {
       repo(companyId).removeSiteGrantsOf(userId)

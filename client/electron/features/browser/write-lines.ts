@@ -134,12 +134,13 @@ export function wireBrowserWriteLines<E extends IpcInvokeEvent>(ipc: IpcRegistra
     return found.length > 0 && hosts.size === 1 ? { host: found[0].host, label: found[found.length - 1].label } : null
   }
   /**
-   * What the AI is told it may ask (agent-browser.md "The tools' words"): the bundled lines of this kind whose row in the
-   * opened list is approved, on a site whose reviewed declaration this build carries. The tool's own words name no site.
+   * What the AI is told it may ask in this company (agent-browser.md "The tools' words"): the bundled lines of this kind
+   * whose row in the opened list is approved, on a site whose reviewed declaration this build carries **and the company
+   * registered** (its current valid policy). A company that registered none of them hears no site's words.
    */
-  const catalog = () => browserLineCatalog(
+  const catalog = (companyId: string) => browserLineCatalog(
     deps.lines.filter(l => file.lines?.some(r => r.name === l.name && r.version === l.version && r.site === l.read.site && r.status === 'approved')),
-    id => { const s = siteOf(id); return s ? { id, label: s.label } : null }, 'write')
+    id => { const s = siteOf(id); return s && deps.siteLevel(companyId, s.host) !== null ? { id, label: s.label } : null }, 'write')
   const reader = createBrowserReadRunner({
     aiSwitch: deps.aiSwitch, stopped: deps.stopped, window: deps.windows.previewWindow, context: scope => deps.context.capture(scope), reporter: http, now,
   })
