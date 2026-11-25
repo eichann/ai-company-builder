@@ -2,9 +2,11 @@
 # careless edit) passing something that is broken: a rule dropped, a state count that moved, a variant
 # that no longer fails. Change a line only together with the model, and say why in the PR.
 #
-# model <a real model check runs> (PlanLife = today's one-write code; StepsLife = the several-writes design)
+# model <a real model check runs> (PlanLife = today's one-write code; StepsLife = the several-writes design, the safe
+# pattern; FramesLife = writes within frames, redesign step ⑤)
 model PlanLife
 model StepsLife
+model FramesLife
 # rule <model> <a rule the real model must check> (must equal the INVARIANT line plus the "\* REACH" line
 # of <model>.cfg)
 rule PlanLife TypeOK
@@ -29,9 +31,19 @@ rule StepsLife R10_NoContinueAfterUnknown
 rule StepsLife R11_CreatedIsItsOwn
 rule StepsLife R12_PartialIsSure
 rule StepsLife R13_DoneMeansLanded
+rule FramesLife TypeOK
+rule FramesLife R1_AtMostOneSendPerWrite
+rule FramesLife R2_NoSendWithoutApprovalAndLivePermit
+rule FramesLife R4_NotSentMeansNotSent
+rule FramesLife R7_EverythingSettles
+rule FramesLife R10_NothingAfterUnknown
+rule FramesLife R14_WithinFrames
+rule FramesLife R15_OneWriteAtATime
+rule FramesLife R16_NoSendAfterStop
 # states <model> <distinct states of the real model (<model>.cfg)>
 states PlanLife 57618
 states StepsLife 28320
+states FramesLife 192816
 # broken <variant in broken/> <the rule it must break> (one guard removed; a guard added = a variant added)
 broken BrokenRetryAfterUnknown R1_AtMostOneSendPerPlan
 broken BrokenNoCheckBeforeSend R2_NoSendWithoutApprovalAndLivePermit
@@ -57,6 +69,13 @@ broken BrokenStepsResendAfterNoAnswer R1_AtMostOneSendPerWrite
 broken BrokenStepsSendWithoutPermitCheck R2_NoSendWithoutLivePermit
 broken BrokenStepsNotSentAfterSend R4_NotSentMeansNotSent
 broken BrokenStepsNoRereadBeforeWrite R6_NoDoubleApply
+# FramesLife's variants (writes within frames: step ⑤a's server and ⑤b's app must keep each guard)
+broken BrokenFramesExceedFrame R14_WithinFrames
+broken BrokenFramesSendAfterUnknown R10_NothingAfterUnknown
+broken BrokenFramesSendAfterStop R16_NoSendAfterStop
+broken BrokenFramesTwoInFlight R15_OneWriteAtATime
+broken BrokenFramesNoApproval R2_NoSendWithoutApprovalAndLivePermit
+broken BrokenFramesUsedAfterEnd R2_NoSendWithoutApprovalAndLivePermit
 # limit <variant in limits/> <the rule it breaks> (an accepted limit the rule file states; kept failing so
 # it neither disappears nor grows unnoticed)
 limit LimitFrozenAfterCheck R2_NoSendWithoutApprovalAndLivePermit

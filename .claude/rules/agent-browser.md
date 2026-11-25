@@ -1144,6 +1144,9 @@ README in the folder.
   checked by the same `check` with its own rules R1'–R13 and `broken/BrokenSteps*` variants. `PlanLife.tla`
   stays the copy of today's one-write code; `StepsLife.tla` is ahead of the code and is what PR 4 / PR 5
   copy. `expected.txt` names both (`model`, `rule <model>`, `states <model>`).
+- **A third real model, `FramesLife.tla`** (redesign step ⑤a, "Writes within frames"): free operation within frames,
+  its rules R1, R2, R4, R7, R10, R14–R16 and `broken/BrokenFrames*`; `StepsLife.tla` stays as the safe pattern's model.
+  `server/src/services/browser-frames.ts` is in area `model`.
 
 ## Executions with several writes (generalization PR 1: the state table and the model; PR 4 built the server's half)
 
@@ -2900,7 +2903,10 @@ with it yet. Only company-wide Skills (`.claude/skills/<name>`; a shelf item wit
   back with the hash; either one moved → 409 `BROWSER_SKILL_CHANGED`).
 - **For step ⑤**: `runCardShown`'s `files` must be the value its own `approvedFrames` call returned, never one the app sends
   (else an app could switch the card off); `approvedFrames` answers about the approval only — the permit still asks the
-  company's mode, the site, the person's level on it, this PC and the stops.
+  company's mode, the site, the person's level on it, this PC and the stops. Since ⑤a ("Writes within frames") the
+  frames service does exactly that, and asks `stillApproved(member, skill, hash, approval)` (synchronous, no git read;
+  `approval` = the row `approvedFrames` answered) inside each transaction after its `approvedFrames` read, so an approval
+  revoked, superseded or given another mode in between (a `pre_approved` turned `per_run`) counts.
 - **`approvedFrames(member, skill)`** (step ⑤'s question at every permit; a few git reads): the Skill read now, the declaration
   valid (`BROWSER_SKILL_BAD_DECLARATION`), its domain registered now (`BROWSER_SKILL_DOMAIN_NOT_REGISTERED`), the latest
   approval for this very hash and not revoked (`BROWSER_SKILL_NOT_APPROVED`), else `BROWSER_SKILL_NOT_FOUND` → `{ frames,
@@ -3068,6 +3074,121 @@ append-only, values refused whole, a timed-out run's log, unknown reasons not ke
 `company-scoped-sql.test.ts`, `jobs-schema.test.ts`. Mutation-checked: the window's write refusal (both Electron tests
 fail), the continue's refusal, the AI's words, the registered-domain check, the AI stop, the server's grant, PC, stop,
 lease and same-PC checks.
+
+## Writes within frames (step ⑤a of the redesign: the model and the server's state; the app's half is ⑤b)
+
+Design memo 「ブラウザ操作：記録から自動化へ」 §3 I3–I5 and its 「止まったら・2回動いたら・同時に動いたら」 list, §6, §7-2, §8,
+§12 row ⑤, D1, D10. The AI operates a registered domain freely; each write its page makes is held by the window (⑤b),
+matched to a **frame** of the run — a write target (method, path pattern, fixed body fields) × at most `max` uses — and
+sent **once** under a permit of the server. The state table of "Executions with several writes" assumed the writes were
+known in advance; here a run holds only an upper bound per frame. **The contract as a checked model**:
+`model/browser-plan/FramesLife.tla` (README "FramesLife"; R1, R2, R4, R7, R10, R14 never past a frame, R15 one write in
+flight, R16 nothing after the AI stop; six `BrokenFrames*` variants); `StepsLife.tla` stays the safe pattern's model.
+**Nothing in the app calls these routes yet** (⑤b: intercepting the page's write, sending it through the core's write
+connection, the plan card and the after-read card).
+
+- **Pieces.** `routes/browser-frames.ts` → `services/browser-frames.ts` (**the one owner of every state move**; each
+  function names its model action) → the handle's `browserFrames` (`ports/browser-frames.ts`,
+  `adapters/sqlite/browser-frames.ts`, tables in `db/schema/browser-frames.ts`, **new tables only**: nothing of
+  `browser_line_*` or the old path changes). Shapes: `shared/types/browser-frames.ts`. Wired in `composition.ts` with the
+  Skill service (`approvedFrames`, `stillApproved`, `runCardShown`), this PC's gate, the site grants, the policy and the stops.
+- **Tables.** `browser_frame_runs` (who, the registered domain, the PC, `source` `skill` | `adhoc`, the Skill's name,
+  declaration hash and folder version, the plan's hash, `state` `waiting` → `open` → `locked` → `ended`, `approval` `card` |
+  `pre_approved`, the Skill's approval row `approval_seq`, times; **at most one run not ended per company × domain** — a
+  partial unique index, D10 — and **no new run while an ended run's write to that domain is still `permitted`** (its 5 s
+  permit may still be used: two writes never travel to one site at once; the service); a trigger keeps
+  the fixed columns and moves the state only forward), `browser_frames` (one row per write target and `used`; **CHECK
+  `used <= max`**, and a trigger lets `used` only grow by one), `browser_frame_writes` (a row appended per permit with its
+  frame, state and both clocks' readings; **at most one `permitted` per run** — a partial unique index; a trigger allows
+  only `permitted` → `done` / `verified` / `not_sent` / `unknown` and `unknown` → `done` / `verified`).
+- **Where the frames come from** (`start`, `POST /browser-frame-runs { skill } | { plan: { domain, writes } }` +
+  `conversationId?`, the PC's key header): a company Skill's **approved** declaration, read by the server itself
+  (`approvedFrames`, never content an app sent; the very approval row it rested on looked at again inside the start's
+  transaction, `stillApproved` — a mode changed in between opens nothing), or an **ad-hoc plan** checked with the declaration's own rules (`browserSkillDeclarationFrom`: limits,
+  paths, `_method`, no login / CSRF field) **and one more: every path begins with a literal segment**
+  (`browserAdhocWritesProblem`: the AI wrote it, so a frame is never "any path" — `/{x}`, `/{n}/…`, `/`) — **never
+  pre-approvable**. The run opens at once only for a `pre_approved`
+  Skill version whose text nobody changed since (`needsRunCard` false); everything else waits for the person's approval
+  (owner decision D1). The answer carries the frames and `planHash` (sha256 of the canonical plan: company, member,
+  domain, source, Skill, declaration hash, folder version, frames) — the card shows it — and, for a run that waits for
+  its card, **a one-time approval value** (`approvalToken`, 256 bits): answered **only by the start** (never by `get`,
+  a permit, a report or any list), only its sha256 stored (`approval_token_hash`). ⑤b's main process keeps it for the
+  card and never puts it in anything an AI tool answers, so an AI that can call the routes with the member's session
+  still cannot approve. **One waiting run per member** (partial unique index): a new start ends the older card's run
+  (`superseded`); ⑤b's card calls `end` as soon as it is dismissed, so a dismissed card never holds the domain.
+  Availability trade-off (said): D10 keeps one live run per company × domain, so a card left open blocks that domain for
+  the others until it is approved, dismissed, replaced or 10 minutes pass.
+- **Approve** (`POST …/:runId/approve { planHash, approvalToken }`, exactly these keys): only `waiting`; the one-time
+  value (403 `BROWSER_FRAME_APPROVAL_REFUSED`; the run stays waiting); the hash the card showed (409
+  `BROWSER_FRAME_PLAN_CHANGED`); the gate; for a Skill run the declaration **and folder version read again now** equal to
+  the run's (else the run ends, 409 `BROWSER_SKILL_CHANGED`: the card showed another version) and the approval in force;
+  then `open` and `runCardShown(skill, hash, files)` with the `files` **of this server-side read — never a value from the
+  request** (no request field exists for it).
+- **Permit** (`POST …/:runId/permit { frame, request: { method, path, fields } }`, the PC's key header; one transaction
+  after the Skill's git read): time-outs first; `waiting` → `BROWSER_RUN_NOT_APPROVED`, `locked` →
+  `BROWSER_RUN_AFTER_UNKNOWN`, `ended` → `BROWSER_RUN_ENDED`; a write `permitted` → `BROWSER_RUN_WRITE_IN_FLIGHT` (the
+  second page write waits until the first's result is recorded); the frame's units used up → `BROWSER_FRAME_USED_UP`;
+  **the held write does not fit the frame** → 409 `BROWSER_FRAME_MISMATCH` with a fixed `reason` (`method` / `path` /
+  `method-override` / `fields`) — `shared/core/browser-frame-match.ts` `browserFrameMismatch`, **the one rule** ⑤b's app
+  asks too: the method exactly; the path (no query, fragment or backslash) against the pattern — literals exactly, `{n}`
+  digits, `{x}` one segment, never a dot segment or an encoded `/` / `\` —; the body's `_method` exactly the frame's
+  (an undeclared one never passes, I4); the frame's fixed fields exactly and **no other field named** (the app sends
+  the request's shape, never its other values) (nothing changes in those cases); then **the gate** — this PC (an enabled
+  registration, and the run's own: `BROWSER_DEVICE_ELSEWHERE`), the company's mode and the site's level allowing writes
+  (`BROWSER_NOT_ALLOWED`), the AI stop (`BROWSER_AI_STOPPED`), the person's own level 変えてよい (`BROWSER_TYPE_NOT_GRANTED`),
+  and for a Skill run **exactly what it started on** — the declaration, the folder version (the steps' text: a change
+  needs the card again) and the approval row (`approval_seq`: revoked, superseded or given another mode → another row),
+  read again now and that row still the latest inside the transaction (`approvedFrames`' refusal, or
+  `BROWSER_SKILL_CHANGED`) — **a refusal of the gate ends the run** (its
+  frames vanish; lifting the cause later revives nothing). Then one unit taken (compare-and-set `used < max`) and the write
+  appended `permitted`; answer `{ write, frame, permittedAt, validMs: 5000 }`.
+- **Report** (`POST …/:runId/report { write, result: done | not_sent | unknown, reason? }`): never gated by the stop or the
+  levels, but **`done` / `not_sent` only from the run's own PC** (its key header, as the gate checks it; else
+  `BROWSER_DEVICE_ELSEWHERE` and the write settles `unknown` at its time-out); `unknown` from any session of the member.
+  Judged after the time-outs. `permitted` → that result (`done` = "the site returned success"; **`verified` — "machine-checked as predicted"
+  — is reserved for the safe patterns: no route sets it**); `unknown` locks the run. `unknown` + `done` → `done` (late and
+  sure), the run stays locked. The same again → `same`; `not_sent` after `unknown` → `recorded` (kept unknown: it may have
+  been sent); any other contradiction → 409 `BROWSER_REPORT_CONFLICT`. A reason is kept only when it is a word of
+  `BROWSER_REPORT_REASONS`. **There is no "sent" state on the server**: `permitted` already means "may be on its way" (the
+  server cannot see the moment a request leaves; "not sent" is the app's word, said only before it leaves).
+- **Time** (judged on every touch): a write `permitted` and silent past permit + 5 s + 30 s **on both clocks** (as
+  "The clock fix") → `unknown`, the run locked; a run `waiting` ends after `BROWSER_FRAME_TIMES.approve` (10 min), any run
+  after `run` (30 min) — `expired`, its frames gone.
+- **End** (`POST …/:runId/end`): the run `ended`, its unused frames gone (the view's `left` is 0); a write still
+  `permitted` is left to its report or time-out. **Leaving the company** (`memberLeft`, in the removal's transaction):
+  every run of the member ends (`left`) and a write still `permitted` becomes `unknown` at once (nobody will report it) —
+  also a write of a run they had already ended (its end kept).
+- **Who**: a run is its member's own; anyone else's, another company's: the same 404 `BROWSER_FRAME_RUN_NOT_FOUND`
+  (permission matrix rows + `CROSS`). The member's session only (no secret: the run's PC is checked at every gated step).
+- **The text-changed card is shown once for the whole company** (owner decision 2026-11-25): `runCardShown` marks the
+  approval row's `files_seen`, so the first member who approves the card for that version clears it for everyone.
+- **Triggers**: the schema's `CREATE TRIGGER IF NOT EXISTS` never replaces a trigger already in a database — a changed
+  trigger body needs an explicit `DROP TRIGGER` + `CREATE TRIGGER` in a migration (as for every table here).
+- **Where the member's credentials live** (why an AI on the PC cannot replay the card): the session cookies are held in
+  main's memory only (`client/electron/services/session.ts`) and never handed to the renderer
+  (ipc-and-main-process.md, `ipc-app.test.ts` 「auth:signIn / auth:signUp never hand the session token」); this PC's key is
+  sealed by the OS keychain in `<userData>` ("This PC's registration", the app's half) and held in main; the AI sandbox
+  denies reads of the app's userData (`agent-sandbox.md`, `sandbox-policy.ts` `denyRead`, `sandbox-policy.test.ts`).
+  With the sandbox off for a company, the key file stays keychain-sealed; the approval value itself never leaves main.
+- **Decisions (safe side)**: a unit is used by the permit, not given back on `not_sent` (a run may ask again with a new
+  plan); a refused permit ends the run, also when the refusal is another PC's request of the same member; the domain lock
+  is this table's own until ⑤b joins it with step ④'s run lock; `GET /browser-frame-runs/:runId` answers `no-store`.
+
+Tests: `server/tests/unit/browser-frames.test.ts` (a fictional site; the ad-hoc plan waits and needs exactly the card's
+hash, the declaration's rules on a plan, a frame never past its max (also the CHECK), one write in flight (also the
+index, and two permits racing past their git reads), nothing after unknown — also after a late done —, a silent write
+unknown on both clocks and not on the wall clock alone, the AI stop / the person lowered to 見るだけ / the site lowered /
+another PC refused and ending the run, the Skill's approval revoked — also between the git read and the transaction, at
+the start and at a permit —, the declaration changed, pre-approved vs per-run, a text change: the card once, marked seen
+only with the server's files (an extra `files` in the request refused), a text changed again while the card was up ends
+the run and marks nothing, another member's and company's run not found, one run per domain, frames gone at the end,
+the run's times, leaving, the reports, the triggers), `model/browser-plan/check` (FramesLife and its broken variants),
+permission matrix rows + `CROSS`, `company-scoped-sql.test.ts`, `jobs-schema.test.ts`. Also: the approval's mode or the
+Skill's text changed mid-run (the run ends), the card's approval re-checking the gate and the approval, an ended run's
+write keeping the domain busy, leaving after ending a run with a write in flight, every trigger. Each guard
+mutation-checked (about 40 mutations); kept on purpose as second layers: the service's own used-up check (the
+compare-and-set `used < max` refuses the same, and the CHECK behind both) and the declaration / domain comparison of a
+Skill run (another declaration is another approval row, which `stillApproved` refuses).
 
 ## Not yet (later PRs)
 

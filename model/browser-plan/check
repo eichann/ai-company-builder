@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # model/browser-plan/check: run the browser plan lifecycle models (PlanLife.tla: today's one-write code;
-# StepsLife.tla: the several-writes design) through the checker tla-ts.
+# StepsLife.tla: the several-writes design, the safe pattern; FramesLife.tla: writes within frames, step ⑤)
+# through the checker tla-ts.
 # The one entry point, locally and in CI (job "Model (browser plan)"). Needs bash, Node and npm only.
 #   1. Each real model keeps every INVARIANT and has no dead end; the rules it checks are exactly
 #      expected.txt's `rule <model>` lines (dropping one fails); a CHECK_DEADLOCK line is refused; the
@@ -71,8 +72,9 @@ while read -r kind module _; do
   [ -e "$here/$d/$module.tla" ] || fail "expected.txt names $kind $module but $d/$module.tla is missing"
 done <"$here/expected.txt"
 
-# 1, 2, 3: the real models (PlanLife = today's one-write code; StepsLife = the several-writes design)
-models=(PlanLife StepsLife)
+# 1, 2, 3: the real models (PlanLife = today's one-write code; StepsLife = the several-writes design; FramesLife =
+# writes within frames)
+models=(PlanLife StepsLife FramesLife)
 listed=$(awk '$1 == "model" { print $2 }' "$here/expected.txt" | sort)
 [ "$listed" = "$(printf '%s\n' "${models[@]}" | sort)" ] || fail "expected.txt's model lines differ from the models check runs (${models[*]})"
 stray=$(awk -v ms=" ${models[*]} " '($1 == "rule" || $1 == "states") && index(ms, " " $2 " ") == 0' "$here/expected.txt")

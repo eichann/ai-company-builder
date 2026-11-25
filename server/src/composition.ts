@@ -68,6 +68,7 @@ import { createBrowserRecordingService } from './services/browser-recordings'
 import { BROWSER_SKILL_NOTICE_PREFIX, createBrowserSkillService } from './services/browser-skills'
 import { browserSkillSource } from './adapters/browser-skill-source'
 import { createBrowserRunService } from './services/browser-runs'
+import { createBrowserFrameService } from './services/browser-frames'
 import type { BrowserConnectorCatalog } from './ports/browser-plans'
 import type { BrowserOpenedListSource } from './ports/browser-lines'
 import { createTaskSettingsService } from './services/task-settings'
@@ -315,6 +316,11 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     registeredHosts: companyId => agentBrowser.policyFor({ companyId, userId: '' }).sites.map(s => s.host),
     sha256: text => sha256TokenDigest.digest(text),
     noticesChanged: (companyId, userIds) => push.notify(companyId, userIds, { kind: 'notifications', version: shared.ids.newToken().slice(0, 32) }),
+  })
+  // Writes within frames (agent-browser.md "Writes within frames"): the frames from an approved Skill or the card's plan.
+  const browserFrames = createBrowserFrameService({
+    ...shared, monotonic: systemMonotonicClock, tokenDigest: sha256TokenDigest, skills: browserSkills, devices: browserDevices.gate, siteGrants: browserSiteGrants,
+    browserPolicy: member => agentBrowser.policyFor(member), aiStops: member => agentStops.policyFor(member),
   })
   const browserPlans = createBrowserPlanService({
     ...shared, memberships: repos.memberships, tokenDigest: sha256TokenDigest, monotonic: systemMonotonicClock,
@@ -862,6 +868,7 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
         browserPlans.memberLeft(companyId, userId)
         browserLines.memberLeft(companyId, userId)
         browserRuns.memberLeft(companyId, userId)
+        browserFrames.memberLeft(companyId, userId)
         // …and every PC registration of theirs is stopped; invited back, nothing returns.
         browserDevices.memberLeft(companyId, userId, actorId)
       },
@@ -946,6 +953,7 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     browserRecordings,
     browserSkills,
     browserRuns,
+    browserFrames,
     agentStops,
     agentPolicy,
     secondOpinion,

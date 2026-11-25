@@ -62,6 +62,7 @@ import type { BrowserDeviceRepository } from './browser-devices'
 import type { BrowserRecordingRepository } from './browser-recordings'
 import type { BrowserSkillApprovalRepository } from './browser-skills'
 import type { BrowserRunRepository } from './browser-runs'
+import type { BrowserFrameRepository } from './browser-frames'
 // lane C ▲
 export interface CompanyData {
   /** The company this handle is limited to. */
@@ -135,6 +136,8 @@ export interface CompanyData {
   readonly browserSkills: BrowserSkillApprovalRepository
   /** The operator's runs of 「ブラウザ操作」 and their log (ports/browser-runs.ts, agent-browser.md "The operator's window tools"). */
   readonly browserRuns: BrowserRunRepository
+  /** Writes within frames: a run's frames and the writes permitted (ports/browser-frames.ts, agent-browser.md "Writes within frames"). */
+  readonly browserFrames: BrowserFrameRepository
   // lane C ▲
   /** Every row of the company, table by table (the per-company export, src/cli/company-archive.ts). */
   readonly archive: CompanyRowsExport

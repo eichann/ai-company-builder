@@ -135,6 +135,8 @@ interface World {
     /** A plan of an opened line of the other company's member, claimed, and its running execution (agent-browser.md "Plans of opened lines on the server"). */
     browserLinePlan: string
     browserLineExecution: string
+    /** A frames run of the other company's member, open, with a write permitted (agent-browser.md "Writes within frames"). */
+    browserFrameRun: string
     /** A PC registration of the other company's member, pending (agent-browser.md "This PC's registration"). */
     browserDevice: string
     /** A 「ブラウザ操作」 recording the other company's member sent (agent-browser.md "Recording"). */
@@ -180,6 +182,8 @@ const OTHER_EXECUTION = `bx_${'e'.repeat(32)}`
 const NO_SUCH_LINE_PLAN = `bl_${'0'.repeat(32)}`
 const NO_SUCH_LINE_EXECUTION = `bw_${'0'.repeat(32)}`
 const OTHER_LINE_PLAN = `bl_${'e'.repeat(32)}`
+const NO_SUCH_FRAME_RUN = `bf_${'0'.repeat(32)}`
+const OTHER_FRAME_RUN = `bf_${'e'.repeat(32)}`
 const OTHER_LINE_EXECUTION = `bw_${'e'.repeat(32)}`
 const NO_SUCH_DEVICE = `bd_${'0'.repeat(32)}`
 const OTHER_DEVICE = `bd_${'e'.repeat(32)}`
@@ -783,6 +787,13 @@ const MATRIX: Row[] = [
   r('POST /api/companies/:companyId/browser-runs/:runId/continue', w => ({ path: `${C(w)}/browser-runs/${NO_SUCH_RUN}/continue` }), [404, 404, 404, 404, 404, 401]),
   r('POST /api/companies/:companyId/browser-runs/:runId/finish', w => ({ path: `${C(w)}/browser-runs/${NO_SUCH_RUN}/finish`, body: { outcome: 'done', steps: [] } }), [404, 404, 404, 404, 404, 401]),
   r('GET /api/companies/:companyId/browser-runs', w => ({ path: `${C(w)}/browser-runs` }), MEMBERS),
+  // Writes within frames (agent-browser.md "Writes within frames"): a run is its member's own (anyone else's: 404).
+  r('POST /api/companies/:companyId/browser-frame-runs', w => ({ path: `${C(w)}/browser-frame-runs`, body: 'x' }), [400, 400, 400, 400, 404, 401]),
+  r('GET /api/companies/:companyId/browser-frame-runs/:runId', w => ({ path: `${C(w)}/browser-frame-runs/${NO_SUCH_FRAME_RUN}` }), [404, 404, 404, 404, 404, 401]),
+  r('POST /api/companies/:companyId/browser-frame-runs/:runId/approve', w => ({ path: `${C(w)}/browser-frame-runs/${NO_SUCH_FRAME_RUN}/approve`, body: {} }), [404, 404, 404, 404, 404, 401]),
+  r('POST /api/companies/:companyId/browser-frame-runs/:runId/permit', w => ({ path: `${C(w)}/browser-frame-runs/${NO_SUCH_FRAME_RUN}/permit`, body: { frame: 1 } }), [404, 404, 404, 404, 404, 401]),
+  r('POST /api/companies/:companyId/browser-frame-runs/:runId/report', w => ({ path: `${C(w)}/browser-frame-runs/${NO_SUCH_FRAME_RUN}/report`, body: {} }), [404, 404, 404, 404, 404, 401]),
+  r('POST /api/companies/:companyId/browser-frame-runs/:runId/end', w => ({ path: `${C(w)}/browser-frame-runs/${NO_SUCH_FRAME_RUN}/end` }), [404, 404, 404, 404, 404, 401]),
   // lane C ▲
 ]
 
@@ -985,6 +996,11 @@ const CROSS: CrossRow[] = [
   x('POST /api/companies/:companyId/browser-line-plans/:planId/approve', (w, id) => ({ path: `${C(w)}/browser-line-plans/${id}/approve`, body: { contentHash: `sha256:${'a'.repeat(64)}` } }), w => w.other.browserLinePlan, NO_SUCH_LINE_PLAN),
   x('POST /api/companies/:companyId/browser-line-plans/:planId/cancel', (w, id) => ({ path: `${C(w)}/browser-line-plans/${id}/cancel` }), w => w.other.browserLinePlan, NO_SUCH_LINE_PLAN),
   x('POST /api/companies/:companyId/browser-line-plans/:planId/claim', (w, id) => ({ path: `${C(w)}/browser-line-plans/${id}/claim` }), w => w.other.browserLinePlan, NO_SUCH_LINE_PLAN),
+  x('GET /api/companies/:companyId/browser-frame-runs/:runId', (w, id) => ({ path: `${C(w)}/browser-frame-runs/${id}` }), w => w.other.browserFrameRun, NO_SUCH_FRAME_RUN),
+  x('POST /api/companies/:companyId/browser-frame-runs/:runId/approve', (w, id) => ({ path: `${C(w)}/browser-frame-runs/${id}/approve`, body: { planHash: `sha256:${'a'.repeat(64)}` } }), w => w.other.browserFrameRun, NO_SUCH_FRAME_RUN),
+  x('POST /api/companies/:companyId/browser-frame-runs/:runId/permit', (w, id) => ({ path: `${C(w)}/browser-frame-runs/${id}/permit`, body: { frame: 1 } }), w => w.other.browserFrameRun, NO_SUCH_FRAME_RUN),
+  x('POST /api/companies/:companyId/browser-frame-runs/:runId/report', (w, id) => ({ path: `${C(w)}/browser-frame-runs/${id}/report`, body: { write: 1, result: 'done' } }), w => w.other.browserFrameRun, NO_SUCH_FRAME_RUN),
+  x('POST /api/companies/:companyId/browser-frame-runs/:runId/end', (w, id) => ({ path: `${C(w)}/browser-frame-runs/${id}/end` }), w => w.other.browserFrameRun, NO_SUCH_FRAME_RUN),
   x('POST /api/companies/:companyId/browser-line-executions/:executionId/permit', (w, id) => ({ path: `${C(w)}/browser-line-executions/${id}/permit`, body: { index: 1 } }), w => w.other.browserLineExecution, NO_SUCH_LINE_EXECUTION),
   x('POST /api/companies/:companyId/browser-line-executions/:executionId/confirm', (w, id) => ({ path: `${C(w)}/browser-line-executions/${id}/confirm`, body: { index: 1, result: 'done' } }), w => w.other.browserLineExecution, NO_SUCH_LINE_EXECUTION),
   x('PUT /api/companies/:companyId/browser-site-grants/:userId', (w, id) => ({ path: `${C(w)}/browser-site-grants/${id}`, body: { host: 'shop.example.com', level: 'write' } }), w => w.other.member, 'pm-nobody'),
@@ -1281,6 +1297,12 @@ async function seed(): Promise<World> {
   db.prepare(`INSERT INTO browser_execution_steps (company_id, execution_id, idx, write_kind, state, permitted_at) VALUES (?, ?, 1, 'create', 'permitted', ?), (?, ?, 2, 'change', 'pending', NULL)`)
     .run(other, OTHER_LINE_EXECUTION, expires, other, OTHER_LINE_EXECUTION)
   db.prepare("INSERT INTO browser_line_locks (company_id, lock_key, execution_id, created_at) VALUES (?, 'lock-other-line', ?, ?)").run(other, OTHER_LINE_EXECUTION, expires)
+  // A frames run of the other company's member, open, its frame with one unit used by a write in flight (rows as
+  // adapters/sqlite/browser-frames.ts writes them).
+  db.prepare(`INSERT INTO browser_frame_runs (company_id, id, user_id, host, source, plan_hash, state, approval, approved_at, created_at, expires_at)
+    VALUES (?, ?, ?, 'shop.example.test', 'adhoc', ?, 'open', 'card', ?, ?, '2100-01-01T00:00:00.000Z')`).run(other, OTHER_FRAME_RUN, otherMember, `sha256:${'a'.repeat(64)}`, expires, expires)
+  db.prepare(`INSERT INTO browser_frames (company_id, run_id, idx, method, path, fields, max, used) VALUES (?, ?, 1, 'POST', '/api/orders/register', '{}', 2, 1)`).run(other, OTHER_FRAME_RUN)
+  db.prepare(`INSERT INTO browser_frame_writes (company_id, run_id, seq, frame_idx, state, permitted_at) VALUES (?, ?, 1, 1, 'permitted', '2100-01-01T00:00:00.000Z')`).run(other, OTHER_FRAME_RUN)
   // A PC registration of the other company's member, pending (rows as adapters/sqlite/browser-devices.ts writes them).
   db.prepare(`INSERT INTO browser_devices (company_id, id, user_id, key_hash, label, state, requested_at) VALUES (?, ?, ?, ?, 'other PC', 'pending', ?)`)
     .run(other, OTHER_DEVICE, otherMember, '9'.repeat(64), expires)
@@ -1374,6 +1396,7 @@ async function seed(): Promise<World> {
       holdingWaiting: 'holding-item-other-2',
       browserLinePlan: OTHER_LINE_PLAN,
       browserLineExecution: OTHER_LINE_EXECUTION,
+      browserFrameRun: OTHER_FRAME_RUN,
       browserDevice: OTHER_DEVICE,
       browserRecording: OTHER_RECORDING,
       browserRun: OTHER_RUN,
