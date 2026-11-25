@@ -85,6 +85,9 @@ const TYPES: Record<string, string> = {
   BrowserRecordings: 'BrowserRecordingsList',
   BrowserRecording: 'BrowserRecordingDetail',
   BrowserRecordingDeleted: '{ deleted: true }',
+  BrowserSkills: 'BrowserSkillsView',
+  BrowserSkill: 'BrowserSkillView',
+  BrowserSkillRevoked: '{ revoked: true }',
   AgentStops: 'AgentStopView',
   SecondOpinion: 'SecondOpinionView',
   SecurityAlerts: 'SecurityAlertsView',
@@ -305,6 +308,7 @@ beforeAll(async () => {
   app.route('/api/companies/:companyId', agentBrowserRoute)
   app.route('/api/companies/:companyId', (await import('../../src/routes/browser-devices')).browserDevicesRoute)
   app.route('/api/companies/:companyId', (await import('../../src/routes/browser-recordings')).browserRecordingsRoute)
+  app.route('/api/companies/:companyId', (await import('../../src/routes/browser-skills')).browserSkillsRoute)
   app.route('/api/companies/:companyId', (await import('../../src/routes/browser-lines')).browserLinesRoute)
   app.route('/api/companies/:companyId', secondOpinionRoute)
   app.route('/api/companies/:companyId', taskSettingsRoute)
@@ -515,6 +519,31 @@ describe('admin API types (admin/src/lib/api.ts) match the server', () => {
     expect(list.items).toHaveLength(1)
     await expectShape('BrowserRecording', USERS.admin, 'GET', `${base}/browser-recordings/${id}`)
     await expectShape('BrowserRecordingDeleted', USERS.owner, 'DELETE', `${base}/browser-recordings/${id}`)
+  })
+
+  it('「Skill の承認」 (a shelf Skill with a browser declaration)', async () => {
+    const { db } = await import('../../src/db')
+    db.prepare("UPDATE companies SET folder_kind = 'none' WHERE id = ?").run(CO)
+    try {
+      await expectShape('AgentBrowser', USERS.owner, 'PUT', `${base}/agent-browser`, { mode: 'on', sites: [{ host: 'shop.example.test', level: 'write', assetHosts: [] }] })
+      const yaml = 'domain: shop.example.test\nwrites:\n  - { method: POST, path: /api/orders/register, max: 1 }\n'
+      const files = [
+        { path: 'SKILL.md', base64: Buffer.from('# copy\n').toString('base64') },
+        { path: 'browser.yaml', base64: Buffer.from(yaml).toString('base64') },
+      ]
+      // A member on 「Skill を直せる人」 would wait for approval; the owner's own publish counts as approved, so the list
+      // is read before the after-publish step may have run and both states are valid shapes.
+      const published = await call(USERS.owner, 'POST', `${base}/skill-shelf`, { kind: 'skill', departmentId: null, name: 'browser-contract', files, expectedVersion: null })
+      expect(published.status).toBe(201)
+      const list = await expectShape('BrowserSkills', USERS.admin, 'GET', `${base}/browser-skill-approvals`)
+      const item = (list.items as Loose[]).find(i => i.name === 'browser-contract') as Loose
+      expect(item).toBeDefined()
+      record('GET …/browser-skill-approvals → BrowserSkillView', shapes.check('BrowserSkill', item))
+      await expectShape('BrowserSkill', USERS.owner, 'POST', `${base}/browser-skill-approvals`, { skill: 'browser-contract', declarationHash: item.declarationHash, files: item.files, mode: 'pre_approved' })
+      await expectShape('BrowserSkillRevoked', USERS.owner, 'POST', `${base}/browser-skill-approvals/revoke`, { skill: 'browser-contract' })
+    } finally {
+      db.prepare("UPDATE companies SET folder_kind = 'git' WHERE id = ?").run(CO)
+    }
   })
 
   it('「もう一方の AI に聞く」', async () => {

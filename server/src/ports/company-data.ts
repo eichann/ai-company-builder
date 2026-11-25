@@ -60,6 +60,7 @@ import type { BrowserPlanRepository } from './browser-plans'
 import type { BrowserLineRepository } from './browser-lines'
 import type { BrowserDeviceRepository } from './browser-devices'
 import type { BrowserRecordingRepository } from './browser-recordings'
+import type { BrowserSkillApprovalRepository } from './browser-skills'
 // lane C ▲
 export interface CompanyData {
   /** The company this handle is limited to. */
@@ -129,6 +130,8 @@ export interface CompanyData {
   readonly browserDevices: BrowserDeviceRepository
   /** 「ブラウザ操作」 recordings members sent (ports/browser-recordings.ts, agent-browser.md "Recording"). */
   readonly browserRecordings: BrowserRecordingRepository
+  /** 「Skill の承認」: which version of a company Skill's `browser.yaml` is approved (ports/browser-skills.ts, agent-browser.md). */
+  readonly browserSkills: BrowserSkillApprovalRepository
   // lane C ▲
   /** Every row of the company, table by table (the per-company export, src/cli/company-archive.ts). */
   readonly archive: CompanyRowsExport

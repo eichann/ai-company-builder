@@ -24,6 +24,9 @@ import {
   browserDevicesSchema,
   browserSiteGrantsSchema,
   browserRecordingDeletedSchema,
+  browserSkillRevokedSchema,
+  browserSkillSchema,
+  browserSkillsSchema,
   browserRecordingSchema,
   browserRecordingsSchema,
   agentStopSchema,
@@ -975,6 +978,17 @@ export const browserRecordingsApi = {
   /** Deleted with its content, at once. */
   remove: (companyId: string, recordingId: string) =>
     getData(`/api/companies/${enc(companyId)}/browser-recordings/${enc(recordingId)}`, browserRecordingDeletedSchema, { method: 'DELETE' }),
+}
+
+export type { BrowserSkillApprovalMode, BrowserSkillStatus, BrowserSkillView, BrowserSkillsView } from '../../../shared/types/browser-skills'
+
+/** 「Skill の承認」: the company Skills with a browser declaration; approve exactly the version seen, or take it back. */
+export const browserSkillsApi = {
+  list: (companyId: string) => getData(`/api/companies/${enc(companyId)}/browser-skill-approvals`, browserSkillsSchema),
+  approve: (companyId: string, body: { skill: string; declarationHash: string; files: string; mode: 'per_run' | 'pre_approved' }) =>
+    getData(`/api/companies/${enc(companyId)}/browser-skill-approvals`, browserSkillSchema, { method: 'POST', body }),
+  revoke: (companyId: string, skill: string) =>
+    getData(`/api/companies/${enc(companyId)}/browser-skill-approvals/revoke`, browserSkillRevokedSchema, { method: 'POST', body: { skill } }),
 }
 
 export const browserPeopleApi = {

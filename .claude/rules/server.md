@@ -330,6 +330,9 @@ GET  /api/config                                  setup state (no auth)
                               GET|DELETE /browser-recordings/:recordingId (the sender or owner/admin)
                                                                              browser-recordings.ts
                                                                 (記録: agent-browser.md "Recording")
+                              GET|POST /browser-skill-approvals, POST /browser-skill-approvals/revoke (owner/admin)
+                                                                             browser-skills.ts
+                                                                (Skill の承認: agent-browser.md "A Skill's browser declaration and its approval")
                               GET|PUT /second-opinion                         second-opinion.ts
                                                                 (もう一方の AI に聞く: chat-and-agents.md)
                               GET /security-alerts, PUT /security-alerts/settings (owner/admin)

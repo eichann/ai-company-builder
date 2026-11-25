@@ -83,6 +83,11 @@ forever — the "permanently unable to sync" shape).
   `ACB_NODE`, and writes a per-request **snapshot** (pusher, scopes, rules, managed folders,
   `skillEditing` (「Skill を直せる人」: `{ everywhere, folders }`), reserved paths, `scopePath` for a scope repo; 0600 temp file, path in `ACB_PUSH_POLICY`,
   removed when the request ends; `preparePushCheck` in `lib/git-server`).
+- **What it accepted** (agent-browser.md "A Skill's browser declaration and its approval"): when `ACB_PUSH_NOTES` is set
+  (git-http's company pushes: a file beside the snapshot, stripped from what git-http inherits), an accepted push writes its
+  stdin's `<old> <new> <ref>` lines there; a refusal writes nothing, and a failure to write never turns an accept into a
+  refusal. git-http reads it before the temp dir goes and, once receive-pack reported success, tells
+  `browserSkills.afterPush` whose change a Skill's `browser.yaml` was. Output and markers are unchanged.
 - A snapshot is always enforced; an unreadable one rejects with `[HOOK_ERROR]`; no resolvable
   pusher denies every changed path unless writing is open to everyone.
 - The server's own pushes (department folders, company creation) carry `ACB_INTERNAL_PUSH=1`

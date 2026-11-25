@@ -101,6 +101,19 @@ paths:
   - "server/tests/unit/browser-recordings.test.ts"
   - "admin/src/lib/agent-browser-recordings.ts"
   - "admin/tests/agent-browser-recordings.test.tsx"
+  - "shared/core/browser-skill.ts"
+  - "shared/types/browser-skills.ts"
+  - "server/src/routes/browser-skills.ts"
+  - "server/src/services/browser-skills.ts"
+  - "server/src/ports/browser-skills.ts"
+  - "server/src/adapters/sqlite/browser-skills.ts"
+  - "server/src/adapters/browser-skill-source.ts"
+  - "server/src/db/schema/browser-skills.ts"
+  - "server/tests/unit/browser-skills.test.ts"
+  - "server/tests/unit/browser-skill-core.test.ts"
+  - "server/tests/integration/browser-skill-push.test.ts"
+  - "admin/src/lib/agent-browser-skills.ts"
+  - "admin/tests/agent-browser-skills.test.tsx"
 ---
 
 # Browser operation (「ブラウザ操作」): sites the chat AI may operate
@@ -2815,6 +2828,100 @@ server's refusal table), `{k}` for keys that are data, every digit of a label, l
 button, an option and a field named by `aria-labelledby` keep none — the real-Electron test), hiding a word and removing a
 host before sending (`browser-recorder.test.ts`, `browser-recording-app.test.ts`, `browser-settings.spec.ts`), the cap of 20
 (`browser-recordings.test.ts`) and the archive (`company-archive.test.ts`) — each mutation-checked.
+
+## A Skill's browser declaration and its approval (「Skill の承認」, step ⑥ of the redesign, part 1)
+
+Owner decisions 2026-11-25 (internal design memo 「ブラウザ操作：記録から自動化へ」 §3 I3–I5, §5, §6-3, §10 「Skill の承認」, §11
+`browser_skill_approvals`, §12 row ⑥, D1, D5, and the owner's additions of that day): the FDE turns a recording into a
+**company Skill** (`.claude/skills/<name>/` in the shared folder, or the company's Skill shelf without one) with a small
+declaration the core reads, `browser.yaml`; the AI may write only within an **approved version** of it, and **the server
+decides** what is approved and builds the write frames itself. Step ⑤ (writes) consumes `approvedFrames`; nothing writes
+with it yet. Only company-wide Skills (`.claude/skills/<name>`; a shelf item with no department) for now.
+
+- **The declaration** (`shared/core/browser-skill.ts`, pure; parsed with the core's strict YAML subset `yaml-lite.ts` — no
+  anchors, aliases, tags, block scalars or duplicate keys —, then checked strictly; knows no site): `domain` (its exact
+  spelling, `normalizeBrowserHost(d) === d`; **must be a domain the company registered**, `browserSkillDomainProblem`, judged
+  on every read), `writes` (1–16 of `{ method: POST | PUT | PATCH | DELETE, path, max: 1–20, fields? }`; `fields` ≤ 8 body
+  fields that must hold exactly these values — `_method` only on a POST and only PUT / PATCH / DELETE (I4), **never a login,
+  CSRF or session field** (`isSensitiveFieldName`), plain values; the same write twice refused), `never_read` (≤ 32 path
+  patterns, a query `key` / `key=value` allowed: a GET that changes something), `after_read` (≤ 16, `{created}` allowed),
+  `account_marker` (`{ meta: <name> }`, a generic `<meta name>`), `safe_pattern` (`none` only). Every object exactly its
+  keys, ≤ 8 KiB (UTF-8). **Path patterns** share the recording's placeholders (`{n}`, `{x}`): `/` + plain ASCII segments
+  (`A–Z a–z 0–9 . _ ~ -`, never `.` / `..`, no `%`, no empty segment but a trailing `/`), no query on a write or an
+  after-read. Problems are fixed words (`BROWSER_SKILL_PROBLEM_WORDS`), never a piece of the file. `browserSkillFrames` = a
+  frozen deep copy; `browserSkillWriteLine` = a target in plain words for the admin.
+- **The server reads its own copy** (`ports/browser-skills.ts` `BrowserSkillSource`, `adapters/browser-skill-source.ts`): the
+  company repository's shared branch (async git: `ls-tree`, `cat-file -s` first — over 8 KiB is never read whole) or the shelf's
+  current version. **No route or service takes Skill content from an app.** The approval key is `sha256:` of `browser.yaml`;
+  the whole folder's fingerprint (`git:<tree id>` / `shelf:<version>`) tells that the other files changed.
+- **Table** `browser_skill_approvals` (additive, `db/schema/browser-skills.ts`, behind the handle's `browserSkills`): company,
+  `skill_path`, `declaration_hash`, `mode` (`per_run` | `pre_approved`), `how` (`approved` | `edited`), `approved_by`,
+  `approved_at`, `files_seen`, `revoked_at` / `revoked_by`; a trigger fixes everything (`seq` included) but `files_seen` and a revoke set once.
+  **Only a skill's latest row counts, and only for its hash** (approving another version supersedes; a declaration put back
+  to an older text needs approving again).
+- **Who changed it** (owner decision): re-approval is needed only when `browser.yaml` changes. **An owner / admin's change
+  counts as approved** (`how: edited`, `approved_by` = who; the mode of the approval before is kept, `per_run` when none;
+  `files_seen` stays null, so **its first run shows the card once** even when pre-approved — the change may have been
+  written by the admin's AI, independent review) — **only when that change touched `browser.yaml` itself** (`declarationChanged`:
+  the blob at the push's old and new commit, or the shelf's version before and the one written; an owner / admin who changed
+  only the text of a Skill whose declaration someone else changed approves nothing, Codex review), **only while it is still
+  what the server holds** (each landing is compared with a fresh read right before it writes: a push or publish read in
+  another order, or an approval made meanwhile, is never superseded by an older landing, Codex review), and **only on top of
+  an approved declaration** — the one right before the change (`previousDeclaration`: the blob at the push's old commit, or
+  the shelf's version before) must be the latest approval's, in force (not revoked), or there was none and nothing was ever
+  approved (a new Skill); a skill editor's pending lines that a `pull --rebase` carried into an owner's push wait
+  (independent review M1). On the shelf only the publisher's **own upload** counts: putting an earlier version back
+  (`restore`) or publishing a member's request (「公開する」) waits for 「Skill の承認」 (review M2). Anyone else's change (「Skill を直せる人」) waits, and the other
+  owners / admins are told once per version; **listing 「Skill の承認」 also tells of any waiting version nobody was told of**
+  (a landing skipped, past the push's limit, a server-made commit; the notice's key keeps it once — review L4). A declaration that does not parse is never approved. **Whose change**: for a push, the pusher git-http authenticated and the role it read
+  (`routes/git-http.ts`, company repository only) — the push checker writes the `<old> <new> <ref>` lines it **accepted** to
+  `ACB_PUSH_NOTES` (a file in the request's private temp dir, `preparePushCheck`; never on a refusal; a failure to write only
+  means "not counted as approved"); after the push succeeded `services.browserSkills.afterPush` reads, off the request, each
+  touched company Skill **at the pushed commit** (`BrowserSkillSource.pushed`: never the tip, which may already be someone
+  else's). For the shelf, the publisher (`SkillShelfDeps.changed`, after a publish, a restore or a request published, with the
+  version before and **exactly the version written**, `BrowserSkillSource.shelfLanded`).
+- **Only the other files changed** (the steps' text, site notes): nothing is blocked; `approvedFrames` answers
+  `textChanged` / `needsRunCard: true` (also when pre-approved) until step ⑤ calls `runCardShown(skill, hash, files)`
+  once the per-run card was shown; owners / admins (but the person who changed it) are told 「手順が直りました」 once per folder
+  version. An explicit approval counts the files **as the page showed them** as seen (the approval sends the folder's `files`
+  back with the hash; either one moved → 409 `BROWSER_SKILL_CHANGED`).
+- **For step ⑤**: `runCardShown`'s `files` must be the value its own `approvedFrames` call returned, never one the app sends
+  (else an app could switch the card off); `approvedFrames` answers about the approval only — the permit still asks the
+  company's mode, the site, the person's level on it, this PC and the stops.
+- **`approvedFrames(member, skill)`** (step ⑤'s question at every permit; a few git reads): the Skill read now, the declaration
+  valid (`BROWSER_SKILL_BAD_DECLARATION`), its domain registered now (`BROWSER_SKILL_DOMAIN_NOT_REGISTERED`), the latest
+  approval for this very hash and not revoked (`BROWSER_SKILL_NOT_APPROVED`), else `BROWSER_SKILL_NOT_FOUND` → `{ frames,
+  declarationHash, files, mode, textChanged, needsRunCard }`. No route: the permit is the server's.
+- **Routes** (`routes/browser-skills.ts`, owner / admin, else 403 `BROWSER_SKILL_FORBIDDEN`): `GET /browser-skill-approvals`
+  (`BrowserSkillsView`, `shared/types/browser-skills.ts`: each Skill with its hash, status `waiting` / `approved` /
+  `pre_approved` / `text_changed` / `revoked` / `invalid`, the problem in plain Japanese, domain, write targets in plain words,
+  never-read and after-read addresses, account marker, the approval in force), `POST /browser-skill-approvals { skill,
+  declarationHash, files, mode }` (exactly these keys; the hash and the folder's version must be the ones read now, else 409 `BROWSER_SKILL_CHANGED`; an invalid
+  declaration or an unregistered domain 409), `POST /browser-skill-approvals/revoke { skill }` (the latest approval, 409
+  `BROWSER_SKILL_NOT_APPROVED` when none).
+- **Notices**: on the existing admin-only browser kind `browser_shape_changed` (recordless, built when read, shown only to
+  owners / admins; its label generalised to 「ブラウザ操作で管理者の確かめが要る（サイトの形・Skill。管理者だけ）」) with keys
+  `browser_skill:waiting:<skill>:<16 hex>` and `browser_skill:text:<skill>:<16 hex>` (composition hands `browser_skill:` keys to
+  `browserSkills.noticeText`): a new kind would grow every app's bundle and settings list.
+- **Admin** 「Skill の承認」 (`…/advanced/ai-safety/browser/skills`, linked from 「ブラウザ操作」; owner/admin only, a member or
+  manager sees 「このページはオーナーと管理者だけが使えます」 and nothing is asked; words `admin/src/lib/agent-browser-skills.ts`, no
+  site word): each Skill with its badge by meaning (承認待ち `awaiting`, 承認済み / 前もって承認 `success`, 手順の文が直った `info`,
+  取り消し済み `paused`, 使えません `failed`), the targets in plain words, the addresses, who approved (「宣言を直したので承認」 for
+  `edited`); ［承認する］ / ［前もって承認］ send the version shown; ［取り消す］ behind a confirm; nothing for an invalid one.
+
+Tests: `server/tests/unit/browser-skill-core.test.ts` (the shape, unknown keys, sizes in UTF-8 bytes, YAML anchors and
+duplicate keys, the path grammar, `_method`, sensitive fields, duplicates, the domain, the frozen frames, the plain words),
+`server/tests/unit/browser-skills.test.ts` (no frames until approved, exactly the version seen, pre-approved, owners / admins
+only, the strict body, revoked and an edit after it, only the latest counts, another company's approval, an unregistered
+domain, a bad declaration, an owner / admin's change approved with who and the mode kept and the card once, only a change of the
+declaration itself approving, a landing no longer current changing nothing, an editor's change waits and owners /
+admins told — not the editor, once —, an unreadable one never approved, the text change: frames kept, the card once even
+pre-approved, told once, `runCardShown`, an admin's own text change, the server's copy only, the trigger),
+`server/tests/integration/browser-skill-push.test.ts` (real git-http, checker and source: the checker hands over only what it
+accepted; an owner's push approved, an editor's waits, a refused push changes nothing, a text-only push, an owner's text-only push
+after an editor's declaration approving nothing, a push read at its own commit; the shelf's publisher), `admin/tests/agent-browser-skills.test.tsx`, `admin-contract.test.ts`, permission matrix rows,
+`company-scoped-sql.test.ts`, `jobs-schema.test.ts`, `client/tests/browser-core-words.test.ts` (the new files scanned).
+Each guard mutation-checked.
 
 ## Not yet (later PRs)
 

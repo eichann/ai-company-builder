@@ -768,6 +768,11 @@ const MATRIX: Row[] = [
   r('GET /api/companies/:companyId/browser-recordings', w => ({ path: `${C(w)}/browser-recordings` }), MEMBERS),
   r('GET /api/companies/:companyId/browser-recordings/:recordingId', w => ({ path: `${C(w)}/browser-recordings/${NO_SUCH_RECORDING}` }), [404, 404, 404, 404, 404, 401]),
   r('DELETE /api/companies/:companyId/browser-recordings/:recordingId', w => ({ path: `${C(w)}/browser-recordings/${NO_SUCH_RECORDING}` }), [404, 404, 404, 404, 404, 401]),
+  // 「Skill の承認」 (agent-browser.md "A Skill's browser declaration and its approval"): owners / admins only (a body that is
+  // no approval → 400 after the role check); the Skill is named in the body, so no CROSS row (no object id in the URL).
+  r('GET /api/companies/:companyId/browser-skill-approvals', w => ({ path: `${C(w)}/browser-skill-approvals` }), [200, 200, 403, 403, 404, 401]),
+  r('POST /api/companies/:companyId/browser-skill-approvals', w => ({ path: `${C(w)}/browser-skill-approvals`, body: { x: 1 } }), [400, 400, 403, 403, 404, 401]),
+  r('POST /api/companies/:companyId/browser-skill-approvals/revoke', w => ({ path: `${C(w)}/browser-skill-approvals/revoke`, body: { x: 1 } }), [400, 400, 403, 403, 404, 401]),
   // lane C ▲
 ]
 

@@ -91,6 +91,10 @@ const SCANNED = [
   'server/src/routes/browser-plans.ts',
   'server/src/routes/browser-devices.ts',
   'server/src/routes/agent-browser.ts',
+  // 「Skill の承認」 (agent-browser.md "A Skill's browser declaration and its approval").
+  'server/src/services/browser-skills.ts',
+  'server/src/routes/browser-skills.ts',
+  'server/src/adapters/browser-skill-source.ts',
 ]
 
 /**
@@ -176,6 +180,9 @@ describe('the core\'s texts name no site (design memo §3 I10)', () => {
     assert.ok(files.includes('client/shared/browser-inspection.ts'))
     assert.ok(files.includes('client/electron/browser-request/inspect-tool.ts'))
     assert.ok(files.includes('admin/src/lib/agent-browser-people.ts'))
+    assert.ok(files.includes('shared/core/browser-skill.ts'))
+    assert.ok(files.includes('admin/src/lib/agent-browser-skills.ts'))
+    assert.ok(files.includes('server/src/services/browser-skills.ts'))
   })
 
   for (const file of files) {

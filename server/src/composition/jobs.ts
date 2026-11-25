@@ -30,7 +30,7 @@ import { companyNow } from '../services/notifications'
 import type { PermissionViewService } from '../services/permission-views'
 import type { PushChannel } from '../services/push-channel'
 import type { ServiceRecordWriter } from '../services/record-engine'
-import { createSkillShelfService } from '../services/skill-shelf'
+import { createSkillShelfService, type SkillShelfDeps } from '../services/skill-shelf'
 import type { TaskSettingsService } from '../services/task-settings'
 import type { CompositionShared } from './shared'
 
@@ -53,6 +53,8 @@ export interface JobsWiringDeps<R extends { memberships: MembershipRepository }>
   /** Member proposals: whether a folder exists and its sub-folders (the permission editor's, over the repositories). */
   placeExists: JobProposalDeps['placeExists']
   placeFolders: JobProposalDeps['placeFolders']
+  /** A shelf version published or put back (agent-browser.md "A Skill's browser declaration and its approval"). */
+  shelfChanged?: SkillShelfDeps['changed']
 }
 
 export function wireJobs<R extends { memberships: MembershipRepository }>(deps: JobsWiringDeps<R>) {
@@ -66,6 +68,7 @@ export function wireJobs<R extends { memberships: MembershipRepository }>(deps: 
     managedFolders: permissionViews.managedFolders,
     skillEditing: permissionViews.skillEditing,
     sha256: sha256Bytes,
+    changed: deps.shelfChanged,
   })
   // 定期の仕事 (jobs.md): definitions and approval (PR 3a); occurrences and the server's operation later (PR 3b).
   const jobs = createJobService({

@@ -65,6 +65,8 @@ import { createBrowserLineService } from './services/browser-lines'
 import { createBrowserSiteGrants } from './services/browser-site-grants'
 import { createBrowserDeviceService } from './services/browser-devices'
 import { createBrowserRecordingService } from './services/browser-recordings'
+import { BROWSER_SKILL_NOTICE_PREFIX, createBrowserSkillService } from './services/browser-skills'
+import { browserSkillSource } from './adapters/browser-skill-source'
 import type { BrowserConnectorCatalog } from './ports/browser-plans'
 import type { BrowserOpenedListSource } from './ports/browser-lines'
 import { createTaskSettingsService } from './services/task-settings'
@@ -305,6 +307,14 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
   const browserRecordings = createBrowserRecordingService({
     ...shared, memberships: repos.memberships, siteGrants: browserSiteGrants, devices: browserDevices.gate,
   })
+  // 「Skill の承認」 (agent-browser.md "A Skill's browser declaration and its approval"): the server's own copy of the Skills.
+  const browserSkills = createBrowserSkillService({
+    ...shared, memberships: repos.memberships,
+    source: browserSkillSource({ companyData: shared.companyData, hasCompanyFolder: companyFolders.has }),
+    registeredHosts: companyId => agentBrowser.policyFor({ companyId, userId: '' }).sites.map(s => s.host),
+    sha256: text => sha256TokenDigest.digest(text),
+    noticesChanged: (companyId, userIds) => push.notify(companyId, userIds, { kind: 'notifications', version: shared.ids.newToken().slice(0, 32) }),
+  })
   const browserPlans = createBrowserPlanService({
     ...shared, memberships: repos.memberships, tokenDigest: sha256TokenDigest, monotonic: systemMonotonicClock,
     catalog: options.browserConnectors ?? fileBrowserConnectorCatalog(), executionLookup: sqliteBrowserExecutionLookup(conn),
@@ -392,6 +402,8 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
   // occurrences and the server's operation below (PR 3b).
   const { skillShelf, jobs, jobProposals } = wireJobs({
     repos, shared, hasCompanyFolder: companyFolders.has, permissionViews, push, taskSettings,
+    // A shelf Skill's `browser.yaml` changed: who published decides whether it counts as approved (bound late: built above).
+    shelfChanged: (member, item, versions) => browserSkills.shelfChanged(member, item, versions),
     // Member proposals (jobs.md "Member proposals"): the existing folders a candidate may name.
     // Without the shared folder only a department or a place set up inside one (what the listing offers) exists — never any
     // text below a department (`folderExists` answers that, for permission rules): its parent's listing names it.
@@ -417,7 +429,8 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
   const notifications = createNotificationService({
     ...shared,
     jobNoticeOf: (member, jobId) => jobs.noticeJob(member, jobId),
-    browserShapeNoticeOf: (member, dedupeKey) => browserLines.noticeText(member, dedupeKey),
+    // The admin-only browser notices: a Skill's approval (`browser_skill:`), else a site's shape.
+    browserShapeNoticeOf: (member, dedupeKey) => (dedupeKey?.startsWith(BROWSER_SKILL_NOTICE_PREFIX) ? browserSkills.noticeText(member, dedupeKey) : browserLines.noticeText(member, dedupeKey)),
     jobOccurrenceNoticeOf: (member, jobId, occurrenceId) => jobs.occurrenceNotice(member, jobId, occurrenceId),
     jobChainStoppedOf: (member, jobId, at) => jobs.chainStopNotice(member, jobId, at),
     jobDayLimitOf: (member, jobId) => jobs.dayLimitNotice(member, jobId),
@@ -923,6 +936,7 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     browserSiteGrants,
     browserDevices,
     browserRecordings,
+    browserSkills,
     agentStops,
     agentPolicy,
     secondOpinion,
