@@ -92,6 +92,21 @@ test('Codex did not apply the profile + company says record only: the turn runs 
   assert.equal(turned, true)
 })
 
+test('record only without the profile: the host removes what only enclosed turns may sit next to first; refused, no turn', async () => {
+  // agent-browser.md "Keeping a login on disk".
+  const order: string[] = []
+  const rpc = new FakeRpc(null)
+  const request = rpc.request.bind(rpc)
+  rpc.request = async <T>(method: string, params?: Record<string, unknown>) => { if (method === 'turn/start') order.push('turn'); return request<T>(method, params) }
+  const { out } = await run(rpc, { ...enforce('record-only'), beforeUnenclosed: async () => { order.push('removed') } })
+  assert.equal(out, `※ ${SANDBOX_MESSAGES.startFailedRecordOnly}\n\ndone`)
+  assert.deepEqual(order, ['removed', 'turn'])
+
+  const refused = await run(new FakeRpc(null), { ...enforce('record-only'), beforeUnenclosed: async () => { throw new Error('ログインを消せませんでした') } })
+  assert.equal(refused.out, '[error ログインを消せませんでした]')
+  assert.equal(refused.turned, false)
+})
+
 test('a command Codex\'s proxy refused is logged as blocked, with the host the command named', () => {
   const events: AgentToolEvent[] = []
   const tracker = createToolEventTracker({ agent: 'codex', companyRoot: COMPANY, home: HOME, sandbox: { mode: 'enforce', concern: call => sandboxConcern(resolved, call.tool, call.input, HOME) } }, e => events.push(e))

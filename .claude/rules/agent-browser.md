@@ -51,6 +51,10 @@ paths:
   - "client/src/features/settings/components/BrowserSection.tsx"
   - "client/src/features/settings/hooks/useBrowserSites.ts"
   - "client/tests/browser-window.test.ts"
+  - "client/tests/browser-kept-logins.test.ts"
+  - "client/tests/cookie-encryption-electron.test.ts"
+  - "client/electron/agents/claude-managed-settings.ts"
+  - "server/tests/integration/browser-login-levels.test.ts"
   - "client/tests/browser-asset-hosts.test.ts"
   - "client/tests/browser-window-electron.test.ts"
   - "client/tests/browser-window-harness/**"
@@ -154,9 +158,9 @@ run's frames ("Writes within frames, in the app"). Owner decisions
   writing: a changed site costs availability, never a wrong write. A site's level (見るだけ /
   入力・保存まで / 削除も) caps what an operation type may do there (`levelAllows`; an effect it does
   not know is never allowed).
-- **The login stays in memory** and is gone when the app quits (PR 4, safe side; "Not yet": the
-  owner's rule `browserLoginStorage` — on disk only for a member whose AI sandbox is `enforce` — waits
-  until it can be bound to every AI turn on the PC being enclosed).
+- **The login stays in memory** and is gone when the app quits — **except a login kept on this PC**
+  (owner's rule `browserLoginStorage`: a member whose AI sandbox is `enforce` and who may use the site),
+  bound to every AI turn on the PC being enclosed: "Keeping a login on disk".
 - **Default off.** No row = `DEFAULT_BROWSER_OPERATION_SETTINGS` (off, no sites); an older server
   sends no `browser` in the policy and the app treats that as off.
 
@@ -165,7 +169,8 @@ run's frames ("Writes within frames, in the app"). Owner decisions
 - `shared/core/browser-operation.ts` (pure; `shared-core.md`): the setting's shape, validation
   (`parseBrowserOperationSettings`, `normalizeBrowserHost` = the sandbox's host rules without
   `*.`), `levelAllows`, `decideBrowserRequest` (the window's one request rule),
-  `browserLoginStorage`.
+  `browserLoginStorage` (the company's half of "Keeping a login on disk": sandbox `enforce` and the
+  person's own level `read` / `write`; unknown = memory).
 - Tables `agent_browser_settings` (company → JSON setting), `agent_browser_overrides` (company,
   user → off / on), `agent_browser_history` (who, when, the change as JSON) in
   `server/src/db/schema/agents.ts`. A stored setting that no longer validates falls back to the
@@ -199,7 +204,8 @@ run's frames ("Writes within frames, in the app"). Owner decisions
 
 A member whose policy is on with at least one site sees Settings → 「ブラウザ操作」 (group 「AI と連携」;
 the item is not there otherwise): each site with 「開いてログイン」 and 「ログインを消す」, and
-「AI はまだこの窓を操作しません。 アプリを開き直すと、もう一度ログインが必要です。」. Words: `BROWSER_WORDS`
+「AI はまだこの窓を操作しません。 アプリを開き直すと、もう一度ログインが必要です。」 (a kept site: `loginKept`
+instead, "Keeping a login on disk"). Words: `BROWSER_WORDS`
 (`client/shared/browser-operation.ts`).
 
 - **Pieces.** `client/shared/browser-operation.ts` (pure: the IPC payloads, `decideWindowRequest`,
@@ -210,11 +216,13 @@ the item is not there otherwise): each site with 「開いてログイン」 and
   opens, closes and clears what; `leftovers.ts`; `ipc.ts` with `isMainFrameSender`); wired in
   `main.ts` (lane C) on the policy store's `onPolicy` / `onRefreshFailed`, sign-out and sign-in.
   Renderer: `src/features/settings/components/BrowserSection.tsx`, `hooks/useBrowserSites.ts`, `api.ts`.
-- **The login lives in memory only** (coordinator decision after review, safe side): every window's
-  session is `acb-browser-<sha256(user, company, host)[0..32]>`, never `persist:`, gone when the app
-  quits. At start, before any browser session exists, `removeLeftoverBrowserPartitions` deletes every
+- **The login lives in memory** (coordinator decision after review, safe side): every window's
+  session is `acb-browser-<sha256(user, company, host)[0..32]>`, not `persist:`, gone when the app
+  quits — unless it is kept on this PC ("Keeping a login on disk" below: `persist:acb-browser-keep-…`).
+  At start, before any browser session exists, `removeLeftoverBrowserPartitions` deletes every
   `<userData>/Partitions/acb-browser-*` folder (an earlier build's, or a later one rolled back; real
-  folders only, a link is never followed). Disk logins: "Not yet" below.
+  folders only, a link is never followed) **except an exact kept login's name** (`KEPT_LOGIN_FOLDER_RE`),
+  which the policy answers, the sign-in and the AI turns judge from the disk.
 - **Only a valid answer opens anything.** `agent-policy-store.ts` validates `browser`
   (`parseBrowserPolicy`, shared rules; invalid = left out = off) and reports every refresh without a
   valid answer (`onRefreshFailed`: no server, an error status, an answer that does not validate, a
@@ -308,6 +316,115 @@ It runs on macOS (CI "Client tests 2/2 (macOS)", `client-tests.mjs` `MACOS`) and
 `client/tests/ui/browser-settings.spec.ts` (preview `download-folders-ui.html?browser=…`): no item
 without a site, the notes, 「開いてログイン」, 「ログインを消す」 and its failure. Each guard mutation-checked
 (survivors above).
+
+## Keeping a login on disk (owner's rule `browserLoginStorage`, bound to every AI turn being enclosed)
+
+A person who logs in to a registered site once stays logged in across app restarts, so a task can use the window without
+a login each day. **The trust boundary**: a login on disk is readable by anything that runs as the member on this PC.
+The app keeps one only where **every AI turn the app starts on this PC is enclosed** by the company sandbox, which denies
+the app's data folder (`<userData>`, `agent-sandbox.md`: `appDataDirs`), where Electron keeps `Partitions/`. Trusted, as
+the app itself: what the owner / admin wrote into the company's protected config (`.mcp.json`, hooks — they run outside
+the sandbox) and the member's own config and programs. **Outside the boundary** (said, not closed): an AI or program
+started outside ACB (the member's own terminal), the same as their own browser's cookies today; a program an earlier
+unenclosed turn left running (it could read anything already); the sandbox's own gaps (`agent-sandbox.md` "Not covered").
+
+**The backstage guard behind the boundary: cookies are encrypted on disk** (owner decision 2026-11-25: safety from guards,
+not from taking tools away). The shipped build flips Electron's `EnableCookieEncryption` fuse (`client/package.json`
+`build.electronFuses`, electron-builder flips it right before signing): the cookie store holds no value in plain text,
+the key is the app's Keychain item (「<app> Safe Storage」, the one `safeStorage` already uses — no new prompt), so a
+program outside the sandbox (the member's own MCP servers, which stay usable) reads ciphertext unless the member lets
+it into that Keychain item. Effects: a store an earlier build wrote in plain text is still read and encrypted on its next
+write (tested); the fuse is one-way — a build without it cannot read cookies written after it (the app's own sessions
+keep nothing on disk that matters: the server session is in memory; a rolled-back build removes every kept login at start,
+"The app's window"); a development run (unpackaged Electron) is not encrypted; Local Storage / IndexedDB are not
+encrypted by the fuse (a site keeping its login there is protected by the boundary above only). Verify a release with
+`npx @electron/fuses read --app "<the .app>"` (`deployment.md`).
+
+What "every AI turn is enclosed" means in today's code, and what makes it hold:
+- **The conversation turns** (chat, consultations, 「AI の番」, job and plugin step runs — all through `chat-server.ts`):
+  `config.beforeAiTurn({ sandbox, companyRoot, workingDirectory, sandboxMayBeOff })` right after the turn's sandbox is
+  decided, before the agent starts. Enclosed = `enforce`, **a working folder** (Codex runs a turn without one in its
+  legacy read-only mode, which reads anything), **nothing outside the app able to switch the sandbox off**
+  (`AgentConnection.sandboxMayBeOff`: Claude Code reports nothing a turn could check — unlike Codex's
+  `activePermissionProfile` —, so any managed settings source naming `sandbox` counts: `agents/claude-managed-settings.ts`
+  reads `/Library/Application Support/ClaudeCode/managed-settings.json` and its `managed-settings.d/`, the managed
+  preferences plist, `/etc/claude-code/…` on Linux; `managedSettingsTouchSandbox`; a source that cannot be read counts;
+  settings Claude's admin console delivers from the server are not on disk here — a stated limit) **and**
+  `sandboxKeepsPlaceUnread(resolved, <userData>/Partitions, companyRoot)` (`client/shared/
+  agents/sandbox-policy.ts`: a denied place covers it that both CLIs really deny — Claude re-allows `allowRead`, Codex
+  leaves out a denied place containing one —, no allowed / writable root covers it, and it is not inside the company
+  folder). Anything else — observe, off, a policy never received, the API key's tools (no sandbox at all), `enforce` an
+  agent or a platform cannot take (`record-only` running it as observe) — is not.
+- **The record-only re-run** (`agents/claude.ts` when the sandbox cannot start, `agents/codex.ts` when the profile is not
+  in force): `TurnSandbox.beforeUnenclosed()` is awaited first; rejected → the turn ends with its sentence, never runs.
+- **Turns that are not conversations**: titles were the only ones with tools — Claude's title model now runs with
+  `tools: []`, no MCP server, `strictMcpConfig`; Codex's title process gets `CODEX_TEXT_OVERRIDES` (the shell and every
+  other tool off; `agents/codex-overrides.ts`, a leaf both read) and every MCP server the member configured disabled by
+  name (`config/read`, as the one-shots do). The one-shots (commit messages, voice, hand-off, the
+  second opinion, the Web reader, the browser operator, tag suggestions) already ran without file tools.
+- **Not enclosed → before it runs**: `controller.beforeAiTurn` stops keeping **for the rest of this app run** (set before
+  anything is awaited, so a window opened meanwhile lives in memory), closes every kept window and removes **every** kept
+  login on this PC (every account's and company's: such a turn can read them all), read from the disk — unless nothing can
+  be there (`kept.maybeOnDisk`: none found at creation, before any session exists, and none handed out since), so a PC that
+  never kept a login never refuses a turn over a disk it need not read. True only when none is left on disk; false → the
+  chat server answers 503 「この PC に覚えていたサイトのログインを消せなかったため、AI
+  を始めませんでした。…」 (`BROWSER_WORDS.keptNotRemoved`) and the turn never starts.
+
+The pieces:
+- **Where** (`features/browser/kept-logins.ts`, no Electron): `persist:acb-browser-keep-<u>-<c>-<h>` (16 hex of sha256 of
+  the account, account × company, account × company × site), so `<userData>/Partitions/acb-browser-keep-…`: one per
+  account × company × site — two members or two companies never share one, and every removal names exactly whose
+  (`keptFolderIn`: all / other accounts / an account's / a company's, with hosts kept / one site). The window's page-less
+  read and write sessions stay in memory (`browserReadPartition` / `browserWritePartition` drop `persist:`).
+- **Checked before Chromium writes there** (`keptPlaceSafe`, in `partition()`; Chromium follows links): `Partitions` a
+  real folder at exactly its own path (a link in its place is removed — the link, never its target —; a link above it
+  makes the real path differ), outside every company folder (`insideCompanyFolder` = `AllowedRoots.touches`: by name or
+  where it really is, so sync never sees it), and the site's folder, if any, a tree of real folders and files with one
+  name each (no symbolic link, no hard link that also names a file elsewhere: such a folder is removed). Anything else
+  → memory, and nothing is kept for the rest of this run. A removal and the start-up cleanup never follow a link in place
+  of `Partitions` either.
+- **When it is kept** (`controller.ts` `keepsNow`): `kept` given (main: always; `platformEncloses` =
+  `sandboxPlatform`, so never on Windows), this run never stopped keeping, and the last valid answer says
+  `browserLoginStorage(policy.sandbox.mode, level)` = disk for the site — the level from the policy's **`browserLevels`**
+  (the member's own level per registered domain, server `browser-site-grants.ts` `levelsFor`, a field of its own beside
+  `browser` only while it is on; a level change announces a new policy version; the app keeps only listed sites with a
+  known level, a site named twice = none: `parseBrowserLevels`). An older server (no `browserLevels`) → memory.
+- **When it goes** (from the disk, so an earlier run's or a crash's leftovers go too; the window closes first): every
+  valid answer removes the company's kept logins of sites no longer kept (sandbox not `enforce`, 使わない, the site or
+  the mode gone); a refusal of the policy (401 / 403 / 404: `onRefreshFailed`'s `refused`) removes that company's — no
+  server, a 5xx or an unreadable answer keeps them; 「ログインを消す」 removes the site's too (answers only once it is gone);
+  sign-out removes all; a sign-in (also a session restored at start) removes other accounts'. A company switch removes
+  nothing by itself (another company's logins are other partitions; its unenclosed turns remove all).
+- **Removing** (`kept.remove`, one after another): a session this run loaded is spent at once (never used again in this
+  run: its window gets memory) and cleared by the shell (`clearPartition`), then the folder is deleted (a link of that name
+  is unlinked, never followed), then read again — true only when nothing of the scope is left. A removal that leaves
+  something (any of the ways it goes) stops keeping for the rest of this run.
+- **Crash halfway**: the turn waits for the removal; a crash during it leaves the turn unstarted and some folders, which
+  the next start keeps only until a valid answer, a sign-in or the first unenclosed turn judges them; "stopped for this
+  run" is memory only (a restart starts keeping again: the remaining-limits stretch above).
+- Words: Settings shows `BROWSER_WORDS.loginKept` for a kept site (`BrowserSiteView.kept`: kept now, its partition not
+  removed earlier in this run — `kept.mayKeep` —, and no window of it already open in memory), else `loginNotKept`; the
+  admin's `BROWSER_LOGIN_NOTE` says who keeps it.
+
+Tests: `client/tests/browser-kept-logins.test.ts` (the rule; the place for both agents and the company folder; names and
+scopes; page-less sessions in memory; leftovers keep only exact kept names; kept for 囲う with a level, memory for observe
+/ off / 使わない / an older server / Windows; each way it goes, only that site / company / account; refused vs offline; two
+companies and two members; 「ログインを消す」; an enclosed turn removes nothing, any other removes every account's first,
+stops keeping before awaiting — a window opened meanwhile is in memory, also for a site never loaded —, and a failed
+removal refuses the turn; the chat server asks before the agent with no sandbox for the API key and answers 503; the
+policy's levels; the store's `refused`), `sandbox-claude.test.ts` / `sandbox-codex.test.ts` (the record-only re-run waits
+for the removal and never runs when it fails; the Claude title has no tool), `codex-connection.test.ts` (the Codex title's
+shell off), `browser-window-electron.test.ts` (a real `persist:` window keeps its cookies in `Partitions/<name>`, its
+page-less sessions never reach the disk, removing leaves no folder and no cookie, a removed partition is not reused),
+`server/tests/integration/browser-login-levels.test.ts` (each person's own level, 使わない, absent while off, announced),
+`client/tests/ui/browser-settings.spec.ts` (the kept sentence); since the review: the same test file (a link planted in
+place of `Partitions`, above it, inside a site's folder, a hard link, a company folder there; a removal never following a
+link; an earlier run's folder found at start; a PC that never kept one reads no disk; a failed removal stops keeping; no
+working folder or a managed `sandbox` → not enclosed; the managed settings' reader; the chat server passing both facts),
+`client/tests/cookie-encryption-electron.test.ts` (the shipped build flips exactly that fuse; a copy of Electron with it
+stores the cookie encrypted, reads a store an unencrypted build wrote, and reads its own back after a restart; macOS,
+Chromium's mock keychain). Each guard mutation-checked (56 mutations; one equivalent: reading a managed-settings folder
+as a file is "unreadable", which counts too).
 
 ## The runner (PR 5a: built and tested; the AI cannot reach it)
 
@@ -3424,12 +3541,9 @@ company's Skill shelf (a company without the shared folder: today the operator g
 person fills for an upload (design memo 追記: a file body is refused today), the person's confirm of an unknown write on
 the card (「済んでいた／されていなかった」: no route yet; the card says what to check by hand), safe patterns (step ⑧).
 
-**Keeping a login on disk** (`browserLoginStorage`, kept in `shared/core` for that PR): deferred until
-it can be bound to "every AI turn on this PC is enclosed". Reviews of PR 4 found that a member's
-`enforce` alone does not guarantee it: when the sandbox cannot start, `record-only` re-runs the turn
-unenclosed (`agents/claude.ts`, `agents/codex.ts`); another company opened in the same app (the company
-switcher) or a conversation with another agent (the API key's `executeCommand`, no sandbox) runs AI
-turns against the same userData unenclosed; and a refused policy refresh (403) would keep the login.
+**Keeping a login on disk**: built ("Keeping a login on disk" above). The four gaps PR 4's reviews found are closed
+there: the record-only re-run, another company's or another agent's unenclosed turns (every turn asks first), and a
+refused policy refresh (removes that company's).
 
 The AI does not operate the window yet: the runner, the first type and the server's plans (6a,
 above) exist but nothing starts a run. Still to come: **6b** — the operator AI and the preview's reads

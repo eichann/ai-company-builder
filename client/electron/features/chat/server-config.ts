@@ -117,6 +117,8 @@ export interface ChatServerConfigDeps {
   workingFolders?: Pick<WorkingFolders, 'has'>
   /** What the company delivered into a working folder (features/skill-shelf/store.ts). */
   skillShelf?: Pick<SkillShelfStore, 'managedPaths' | 'turn'>
+  /** Before every AI turn: a browser login kept on this PC goes first unless the turn is enclosed (agent-browser.md "Keeping a login on disk"). */
+  beforeAiTurn?: ChatServerConfig['beforeAiTurn']
 }
 
 function hostOf(url: string): string | undefined {
@@ -175,6 +177,7 @@ export function createChatServerConfig(deps: ChatServerConfigDeps): ChatServerCo
       deps.brokerTokens ? deps.brokerTokens.envFor({ companyId, conversationId, department, reservedServices: agentBrokerReservedServices(agent) }) : {},
     // 「もう一方の AI に聞く」: the company's setting from the policy (unknown = not allowed).
     secondOpinionAllowed: async companyId => secondOpinionAllowed(await deps.agentPolicy.refresh(companyId, { timeoutMs: 3000 })),
+    beforeAiTurn: deps.beforeAiTurn,
     getAgentSandbox: async (companyId, root) => {
       const policy = await deps.agentPolicy.refresh(companyId, { timeoutMs: 3000 })
       if (!policy) return undefined

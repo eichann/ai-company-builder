@@ -12,7 +12,7 @@
  * (composition/plugins.ts); unbound, the answer has no `plugins` (an app then
  * leaves what it keeps as it is).
  */
-import type { AgentPolicy } from '../../shared/types/agent-sandbox'
+import type { AgentPolicy, BrowserSiteLevel } from '../../shared/types/agent-sandbox'
 import type { DistributedPlugin } from '../../shared/types/plugins'
 import type { TokenDigest } from '../ports/key-broker'
 import type { AgentBrowserService } from './agent-browser'
@@ -27,6 +27,12 @@ export interface AgentPolicyDeps {
   agentBrowser: Pick<AgentBrowserService, 'policyFor'> & Partial<Pick<AgentBrowserService, 'sitePartsFor'>>
   agentStops: Pick<AgentStopService, 'policyFor'>
   secondOpinion: Pick<SecondOpinionSettingService, 'allowedFor'>
+  /**
+   * The member's own level on each registered domain while their browser part is on (browser-site-grants.ts
+   * `levelsFor`); the app keeps a login on disk only for a level other than 使わない (agent-browser.md "Keeping a
+   * login on disk"). Absent: the answer has no `browserLevels` (the app then keeps nothing on disk).
+   */
+  browserLevels?: (member: Pick<Member, 'companyId' | 'userId'>) => BrowserSiteLevel[]
   digest: TokenDigest
   push: Pick<PushChannel, 'announce'>
   log?: Pick<Console, 'warn'>
@@ -57,9 +63,13 @@ export function createAgentPolicyService(deps: AgentPolicyDeps) {
     // A registered domain's 「詳しい設定」 (redesign step ②): a field of its own, only when there is one, so
     // the `browser` part released apps validate keeps its shape (and its answer and version stay as before).
     const browserParts = deps.agentBrowser.sitePartsFor?.(member) ?? []
+    // The member's own level per registered domain (agent-browser.md "Keeping a login on disk"): likewise a field of
+    // its own, only while their browser part is on (`levelsFor`), so a company not using it keeps its answer and version.
+    const browserLevels = deps.browserLevels?.(member) ?? []
     const parts = {
       sandbox, stop, secondOpinion, browser,
       ...(browserParts.length > 0 ? { browserParts } : {}),
+      ...(browserLevels.length > 0 ? { browserLevels } : {}),
       ...(plugins ? { plugins } : {}),
       ...(pluginTrust ? { pluginTrust } : {}),
     }

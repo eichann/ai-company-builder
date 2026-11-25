@@ -212,6 +212,38 @@ export function codexSandboxConfig(resolved: ResolvedSandbox): Record<string, un
   }
 }
 
+/**
+ * Does an `enforce` turn with this sandbox keep `place` unreadable for **both** agents, and is the place outside
+ * the company folder the turn works in? (agent-browser.md "Keeping a login on disk": a login kept on disk lives
+ * there.) True only when a denied place contains it that both CLIs really deny — Claude re-allows `allowRead`
+ * roots inside a denied place (allowRead wins), Codex leaves out a denied place that contains one
+ * (`codexSandboxConfig`) — and no allowed root or writable place contains it. Lexical (NFC), like the rest.
+ */
+export function sandboxKeepsPlaceUnread(resolved: ResolvedSandbox, place: string, companyRoot: string | undefined): boolean {
+  if (companyRoot && isSameOrInside(place, companyRoot)) return false
+  if (resolved.allowRead.some(root => isSameOrInside(place, root))) return false
+  if (resolved.allowWrite.some(path => isSameOrInside(place, path))) return false
+  return resolved.denyRead.some(denied =>
+    isSameOrInside(place, denied) && !resolved.allowRead.some(root => isSameOrInside(root, denied)))
+}
+
+/**
+ * Could a managed settings source of Claude Code switch the sandbox the app hands it off or loosen it? Managed
+ * settings sit above the app's flag settings, and a managed `sandbox` (e.g. `enabledPlatforms` leaving macOS out)
+ * turns it off without an error — the CLI says nothing a turn could check, unlike Codex's `activePermissionProfile`.
+ * So any `sandbox` key there counts (a JSON file: a top-level `sandbox`, or a file that does not parse; a managed
+ * preferences plist: the word anywhere). Conservative on purpose.
+ */
+export function managedSettingsTouchSandbox(source: { kind: 'json' | 'plist'; text: string }): boolean {
+  if (source.kind === 'plist') return /sandbox/i.test(source.text)
+  try {
+    const value = JSON.parse(source.text) as unknown
+    return !value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).some(key => key.toLowerCase() === 'sandbox')
+  } catch {
+    return true
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Recording (observe) and reading the sandbox's refusals (enforce)
 // ---------------------------------------------------------------------------

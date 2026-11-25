@@ -166,7 +166,15 @@ company's `rootPath`), so the sandbox applies there exactly as for a git company
   `stop` → the turn ends with 「サンドボックスを開始できませんでした。会社の設定により、この PC では AI
   を使えません。管理者に相談してください。」; `record-only` → the turn re-runs without the sandbox
   and the reply starts with 「※ サンドボックスを開始できませんでした。会社の設定により、今回は記録だけで続けます。」.
-  Any other failure surfaces unchanged (never a silent unsandboxed re-run).
+  Any other failure surfaces unchanged (never a silent unsandboxed re-run). The re-run (and Codex's record-only turn
+  without its profile) first awaits `TurnSandbox.beforeUnenclosed()`, the host's check that removes a browser login kept
+  on this PC; rejected → the turn ends with its sentence (`agent-browser.md` "Keeping a login on disk"). Every chat turn
+  asks the same before its agent starts (`chat-server.ts` `beforeAiTurn`; an enforce Claude turn counts as enclosed only
+  while no managed settings source names `sandbox` — the CLI reports nothing a turn could check, so a managed
+  `enabledPlatforms` without macOS would switch it off unseen: `agents/claude-managed-settings.ts`,
+  `AgentConnection.sandboxMayBeOff`); `sandboxKeepsPlaceUnread` says whether an
+  enforce turn keeps a place unreadable for both CLIs. Chat titles run with no tool (Claude `tools: []`, no MCP; Codex
+  `CODEX_TEXT_OVERRIDES` and its configured MCP servers disabled), since they run without the sandbox.
 - A refused host / read: the PostToolUseFailure hook returns `additionalContext` with
   `blockedHostMessage(host)` = 「会社の設定で、この宛先（host）には接続できません。必要なら管理者に許可を依頼してください。」
   (or the read sentence) for the AI to relay; the event is `blocked` (S2).

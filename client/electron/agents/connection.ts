@@ -31,6 +31,13 @@ export interface TurnSandbox {
   /** The member's home folder (for `~/` in commands). */
   home: string
   onUnavailable: AgentSandboxUnavailable
+  /**
+   * The host's check before this turn goes on without the sandbox after all (`record-only` when the sandbox could
+   * not start): it removes what only an enclosed turn may sit next to (a browser login kept on this PC,
+   * agent-browser.md "Keeping a login on disk") and rejects, with a plain sentence, when it could not — the turn
+   * then never runs. Every agent's unenclosed re-run awaits it first.
+   */
+  beforeUnenclosed?: () => Promise<void>
 }
 
 /**
@@ -146,6 +153,12 @@ export interface AgentConnection {
     }
   }): LanguageModel
   createTitleModel(request?: { modelId?: string }): LanguageModel
+  /**
+   * Could something outside the app switch this agent's company sandbox off without the turn seeing it (Claude
+   * Code: a managed `sandbox`)? True = an `enforce` turn does not count as enclosed (agent-browser.md "Keeping a
+   * login on disk"). Absent = the agent checks it itself (Codex's `activePermissionProfile`) or has no sandbox.
+   */
+  sandboxMayBeOff?(): boolean
   readMetadata(metadata: Record<string, unknown> | undefined): {
     sessionId?: string
   }

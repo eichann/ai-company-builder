@@ -144,6 +144,30 @@ test('title is ephemeral and never inherits a conversation session', async () =>
   await response
 })
 
+test('a title runs with the shell and every other tool off (it runs without the company sandbox); a chat keeps them', async () => {
+  // agent-browser.md "Keeping a login on disk": an AI turn without the sandbox must not be able to read this PC's files.
+  const seen: Array<string[] | undefined> = []
+  const rpc = new FakeRpc()
+  // A member's own MCP server (one that could read files).
+  const request = rpc.request.bind(rpc)
+  rpc.request = async <T>(method: string, params?: Record<string, unknown>) =>
+    (method === 'config/read' ? { config: { mcp_servers: { files: { command: 'fs-server' } } } } as T : request<T>(method, params))
+  const connection = createCodexConnection({ getShellEnv: () => ({}) }, (_env, overrides) => { seen.push(overrides); return rpc })
+  const titled = (connection.createTitleModel() as Model).doGenerate({ prompt })
+  await tick(); await tick()
+  rpc.complete()
+  await titled
+  assert.ok(seen[0]?.includes('features.shell_tool=false'), 'no shell in a title')
+  assert.ok(seen[0]?.includes('features.unified_exec=false'))
+  const titleStart = rpc.calls.find(c => c.method === 'thread/start')!.params as { config?: { mcp_servers?: Record<string, unknown> } }
+  assert.deepEqual(titleStart.config?.mcp_servers, { files: { enabled: false } }, 'the member\'s MCP servers are off for a title')
+  const chat = (connection.createChatModel({ modelId: 'test-model' }) as Model).doGenerate({ prompt })
+  await tick(); await tick()
+  rpc.complete()
+  await chat
+  assert.deepEqual(seen[1], [], 'the chat\'s own process is unchanged')
+})
+
 test('Windows reports unsupported without starting Codex', async () => {
   const status = await getCodexStatus({}, 'win32')
   assert.equal(status.unsupported, true)

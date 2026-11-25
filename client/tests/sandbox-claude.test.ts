@@ -104,6 +104,30 @@ test('the sandbox cannot start + company says record only: the turn re-runs with
   assert.deepEqual(calls.map(c => !!c.sandbox), [true, false])
 })
 
+test('a re-run without the sandbox first asks the host to remove what only enclosed turns may sit next to; refused, it never runs', async () => {
+  // agent-browser.md "Keeping a login on disk": a browser login kept on this PC must be gone before an unenclosed turn.
+  const order: string[] = []
+  const calls: Options[] = []
+  const connection = createClaudeConnection(base, fakeFactory(o => { order.push(o.sandbox ? 'sandboxed' : 'unsandboxed'); return o.sandbox ? UNAVAILABLE : 'exit 0' }, calls))
+  const asked = { ...enforce('record-only'), beforeUnenclosed: async () => { order.push('removed') } }
+  assert.equal(await text(connection.createChatModel({ appSessionId: 'k1', sandbox: asked })), `※ ${SANDBOX_MESSAGES.startFailedRecordOnly}\n\nran unsandboxed`)
+  assert.deepEqual(order, ['sandboxed', 'removed', 'unsandboxed'])
+
+  const refusedCalls: Options[] = []
+  const refusing = createClaudeConnection(base, fakeFactory(o => (o.sandbox ? UNAVAILABLE : 'exit 0'), refusedCalls))
+  const refused = { ...enforce('record-only'), beforeUnenclosed: async () => { throw new Error('ログインを消せませんでした') } }
+  assert.equal(await text(refusing.createChatModel({ appSessionId: 'k2', sandbox: refused })), '[error ログインを消せませんでした]')
+  assert.equal(refusedCalls.length, 1, 'never re-run without the sandbox')
+})
+
+test('a chat title runs with no tool and no MCP server (it runs without the company sandbox)', () => {
+  const calls: Options[] = []
+  createClaudeConnection(base, fakeFactory(() => 'exit 0', calls)).createTitleModel()
+  assert.deepEqual(calls[0].tools, [])
+  assert.deepEqual(calls[0].mcpServers, {})
+  assert.equal(calls[0].strictMcpConfig, true)
+})
+
 test('other failures under the sandbox surface unchanged (never a silent unsandboxed re-run)', async () => {
   const calls: Options[] = []
   const connection = createClaudeConnection(base, fakeFactory(() => 'echo boom >&2; exit 1', calls))

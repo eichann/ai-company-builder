@@ -27,10 +27,10 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { parseAgentSandboxSettings } from '../../../shared/core/agent-sandbox'
-import { parseBrowserOperationSettings } from '../../../shared/core/browser-operation'
+import { isBrowserPersonLevel, parseBrowserOperationSettings } from '../../../shared/core/browser-operation'
 import { validBrowserSiteParts } from '../../../shared/core/browser-site-parts'
 import type { AgentBrowserPolicy } from '../../../shared/types/agent-browser'
-import type { AgentPolicy, AgentSandboxPolicy } from '../../../shared/types/agent-sandbox'
+import type { AgentPolicy, AgentSandboxPolicy, BrowserSiteLevel } from '../../../shared/types/agent-sandbox'
 import type { SecondOpinionPolicy } from '../../../shared/types/second-opinion'
 import { AGENT_STOP_SUPPORT_HEADER, parseAgentStopPolicy, type AgentStopPolicy } from '../../shared/agent-stop'
 import { parseDistributedPlugins } from '../../shared/plugin-packages'
@@ -71,8 +71,11 @@ export interface AgentPolicyStore {
   /**
    * Called when a refresh ended without a valid answer (no server, an error status, an answer
    * that does not validate, no answer at all). The cached policy is still served to the others.
+   * `refused`: the server answered 401 / 403 / 404 — this account may not have this company's
+   * policy (signed out there, removed from the company); a kept browser login goes then
+   * (agent-browser.md "Keeping a login on disk"). Offline, a 5xx or an unreadable answer is not that.
    */
-  onRefreshFailed(listener: (companyId: string) => void): void
+  onRefreshFailed(listener: (companyId: string, detail: { refused: boolean }) => void): void
   /**
    * The server answered this company's policy with its stop part in this app run, for this
    * account, at most `ms` ago (a stop restored from disk never counts; a clock that went back
@@ -107,10 +110,28 @@ export function parseAgentPolicy(data: unknown): AgentPolicy | undefined {
   // A registered domain's 「詳しい設定」 (agent-browser.md "A domain's parts and login helpers"): only with a valid
   // `browser` part, each re-checked against its registered domains (one not valid is left out, never the policy).
   const browserParts = browser ? validBrowserSiteParts((value as { browserParts?: unknown }).browserParts, browser.sites.map(s => s.host)).valid : []
+  // The member's own level per registered domain (agent-browser.md "Keeping a login on disk"): only with a valid
+  // `browser` part, only for its sites, once each, a known level; anything else is left out (= memory only).
+  const browserLevels = browser ? parseBrowserLevels((value as { browserLevels?: unknown }).browserLevels, browser.sites.map(s => s.host)) : []
   // Plugin trust's marker (plugin-trust.md "P2"): a short hex digest only; anything else is left out.
   const rawTrust = (value as { pluginTrust?: unknown }).pluginTrust
   const pluginTrust = typeof rawTrust === 'string' && /^[0-9a-f]{1,64}$/.test(rawTrust) ? rawTrust : undefined
-  return { version: value.version, sandbox: policy, ...(stop ? { stop } : {}), ...(plugins ? { plugins } : {}), ...(secondOpinion ? { secondOpinion } : {}), ...(browser ? { browser } : {}), ...(browserParts.length > 0 ? { browserParts } : {}), ...(pluginTrust ? { pluginTrust } : {}) }
+  return { version: value.version, sandbox: policy, ...(stop ? { stop } : {}), ...(plugins ? { plugins } : {}), ...(secondOpinion ? { secondOpinion } : {}), ...(browser ? { browser } : {}), ...(browserParts.length > 0 ? { browserParts } : {}), ...(browserLevels.length > 0 ? { browserLevels } : {}), ...(pluginTrust ? { pluginTrust } : {}) }
+}
+
+/** The policy's `browserLevels`: entries for the listed sites only, with a known level; a site named twice = none. */
+export function parseBrowserLevels(value: unknown, hosts: readonly string[]): BrowserSiteLevel[] {
+  if (!Array.isArray(value)) return []
+  const out: BrowserSiteLevel[] = []
+  for (const entry of value) {
+    const e = entry as { host?: unknown; level?: unknown } | null
+    if (!e || typeof e !== 'object' || Object.keys(e).some(k => k !== 'host' && k !== 'level')) continue
+    if (typeof e.host !== 'string' || !hosts.includes(e.host) || !isBrowserPersonLevel(e.level)) continue
+    // A site named twice: the answer cannot be read as one level per site, so none counts (memory only).
+    if (out.some(o => o.host === e.host)) return []
+    out.push({ host: e.host, level: e.level })
+  }
+  return out
 }
 
 /** The policy's `browser` part checked with the shared rules, or undefined (= off). */
@@ -147,10 +168,10 @@ export function createAgentPolicyStore(deps: AgentPolicyStoreDeps): AgentPolicyS
   const doFetch = deps.fetch ?? fetch
   const listeners: Array<(companyId: string, stop: AgentStopPolicy | undefined) => void> = []
   const policyListeners: Array<(companyId: string, policy: AgentPolicy) => void> = []
-  const failedListeners: Array<(companyId: string) => void> = []
-  const failed = (companyId: string) => {
+  const failedListeners: Array<(companyId: string, detail: { refused: boolean }) => void> = []
+  const failed = (companyId: string, refused = false) => {
     for (const listener of failedListeners) {
-      try { listener(companyId) } catch (error) {
+      try { listener(companyId, { refused }) } catch (error) {
         log.warn(`[agent-policy] ${companyId}: a failure listener failed (${error instanceof Error ? error.message : 'unknown'})`)
       }
     }
@@ -236,7 +257,7 @@ export function createAgentPolicyStore(deps: AgentPolicyStoreDeps): AgentPolicyS
       if (!res.ok) {
         // 404 from an older server that has no policy yet: the same as "off".
         log.warn(`[agent-policy] ${companyId}: HTTP ${res.status}; ${keep}`)
-        failed(companyId)
+        failed(companyId, res.status === 401 || res.status === 403 || res.status === 404)
         return cached
       }
       const data = (await res.json() as { data?: unknown })?.data

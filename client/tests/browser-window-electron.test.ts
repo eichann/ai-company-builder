@@ -57,6 +57,7 @@ interface Result {
   recording: Record<string, unknown>
   browse: Record<string, unknown>
   work: Record<string, unknown>
+  kept: Record<string, unknown>
 }
 
 function freePort(): Promise<number> {
@@ -133,6 +134,18 @@ test('what the request hook cannot see goes nowhere either: preconnect, reports,
 test('the login lives in memory only: no session folder on disk', { skip }, () => {
   assert.equal(result.partitionInMemory, true)
   assert.deepEqual(result.partitionFolders.filter(name => /^acb-browser-/i.test(name)), [])
+})
+
+test('a kept login lives in Partitions/<its name> (its page-less sessions in memory) and removing it leaves nothing', { skip }, () => {
+  // agent-browser.md "Keeping a login on disk": the folder is found by its name, so Electron's naming is load-bearing.
+  const kept = result.kept as Record<string, unknown>
+  assert.equal(kept.cookiesKept, 1)
+  assert.equal(kept.folderMade, true, 'the cookies are where the kept logins are looked for')
+  assert.deepEqual(kept.pagelessOnDisk, [], 'the read / write sessions never reach the disk')
+  assert.equal(kept.removed, true)
+  assert.equal(kept.folderLeft, false)
+  assert.equal(kept.cookiesAfter, 0, 'the live session holds nothing either')
+  assert.equal(kept.reusable, null, 'a removed partition is never used again in this run')
 })
 
 test('the window itself refuses popups, navigations and frames off the operated host (not only the request hook)', { skip }, () => {

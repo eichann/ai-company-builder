@@ -26,6 +26,13 @@ test('a site the company allowed: open it; the notes say the AI does not use it 
   await expect(page.getByRole('status')).toHaveText('このサイトのログインを消しました。')
 })
 
+test('a site whose login is kept on this PC says so (never 「もう一度ログインが必要」)', async ({ page }) => {
+  await openPreview(page, 'download-folders', { tab: 'mine', browser: 'kept' })
+  await nav(page).getByRole('button', { name: 'ブラウザ操作' }).click()
+  await expect(page.getByText(/ログインはこの PC に覚えておくので/)).toBeVisible()
+  await expect(page.getByText(/もう一度ログインが必要です/)).toHaveCount(0)
+})
+
 test('「ログインを消す」 that could not clear says so (never 「消しました」)', async ({ page }) => {
   await openPreview(page, 'download-folders', { tab: 'browser', browser: 'clearFails' })
   await page.getByRole('button', { name: 'ログインを消す' }).click()

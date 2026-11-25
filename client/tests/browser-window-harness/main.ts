@@ -14,6 +14,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { createBrowserWindowShell, type BrowserShellWindow } from '../../electron/browser-window'
 import { browserPartition } from '../../electron/features/browser/controller'
+import { createKeptLogins } from '../../electron/features/browser/kept-logins'
 import { createBrowserRunner } from '../../electron/features/browser/runner'
 import type { BrowserSiteSetting } from '../../../shared/core/browser-operation'
 import { browserLoginHelpers, createBrowserCheckerRegistry, createBrowserConnectors } from '../../shared/browser-checkers'
@@ -193,6 +194,8 @@ async function run() {
   await wait(500)
   result.untrustedUrl = other.webContents.getURL()
   other.close()
+
+  result.kept = await keptScenario(shell, site)
 
   // Late arrivals (reports are sent after a delay): give them a moment.
   await wait(2000)
@@ -747,6 +750,35 @@ async function runnerScenarios(win: BrowserShellWindow, site: BrowserSiteSetting
   // Back to the site's start page for the rest of the harness.
   await page.loadURL('https://op.test/').catch(() => {})
   await wait(300)
+  return out
+}
+
+/**
+ * A login kept on this PC (agent-browser.md "Keeping a login on disk"): Electron keeps a `persist:` partition's cookies in
+ * `<userData>/Partitions/<name>` (where the kept logins are looked for and removed), the window's page-less sessions stay
+ * in memory, and removing it leaves no folder and no cookie in the live session.
+ */
+async function keptScenario(shell: ReturnType<typeof createBrowserWindowShell>, site: BrowserSiteSetting) {
+  const out: Record<string, unknown> = {}
+  // Where it really is: the kept logins' check refuses a path with a link in it (the test's temp folder is /var → /private/var).
+  const partitions = path.join(fs.realpathSync(path.join(dir, 'userData')), 'Partitions')
+  const kept = createKeptLogins({ partitionsDir: () => partitions, clearSession: p => shell.clearPartition(p), platformEncloses: true, log: { warn() {} } })
+  const partition = kept.partition('user-1', 'company-1', 'op.test')!
+  const folder = partition.slice('persist:'.length)
+  trustTestCertificate(partition)
+  const win = shell.open({ partition, site, onClosed: () => {} })
+  await loaded(win)
+  await win.webContents.executeJavaScript(`document.cookie = 'sid=kept; Secure; Max-Age=3600'; 1`, true)
+  const ses = session.fromPartition(partition)
+  await ses.cookies.flushStore()
+  out.cookiesKept = (await ses.cookies.get({})).length
+  out.folderMade = fs.existsSync(path.join(partitions, folder))
+  out.pagelessOnDisk = fs.readdirSync(partitions).filter(name => name.startsWith(folder) && name !== folder)
+  win.close()
+  out.removed = await kept.remove({ all: true })
+  out.folderLeft = fs.existsSync(path.join(partitions, folder))
+  out.cookiesAfter = (await ses.cookies.get({})).length
+  out.reusable = kept.partition('user-1', 'company-1', 'op.test')
   return out
 }
 

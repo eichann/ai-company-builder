@@ -109,6 +109,8 @@ import { servePluginFiles } from './electron-adapter'
 // lane C ▼
 import { createBrowserWindowShell } from './browser-window'
 import { createBrowserController } from './features/browser/controller'
+import { createKeptLogins, turnEnclosesKeptLogins } from './features/browser/kept-logins'
+import { sandboxPlatform } from '../shared/agents/sandbox-policy'
 import { removeLeftoverBrowserPartitions } from './features/browser/leftovers'
 import { isMainFrameSender, registerBrowserIpc } from './features/browser/ipc'
 import { bundledAssetHosts, bundledLoginHelpers, wireBrowserPlans } from './features/browser/wire'
@@ -602,11 +604,23 @@ const stepWriteAreas = createStepWriteAreas({ baseUrl: getServerApiUrl, cookies:
 const bindPersonStep = createPersonStepBinder({ baseUrl: getServerApiUrl, cookies: session.cookies })
 // 「ブラウザ操作」 (agent-browser.md "The app's window"): the member opens a site the company allowed in a
 // window of its own and logs in there; the AI is not connected yet. Only a valid policy answer opens anything.
-// Its login lives in memory only: a browser session an earlier build kept on disk goes first.
+// Its login lives in memory, or is kept on this PC only next to enclosed AI turns (agent-browser.md "Keeping a login on
+// disk"): any other browser session an earlier build kept on disk goes first; kept ones are judged from the policy.
 removeLeftoverBrowserPartitions(userDataDir())
 const lstep = lstepConnector()
+const browserShell = createBrowserWindowShell()
+const browserPartitionsDir = () => path.join(userDataDir(), 'Partitions')
+const keptLogins = createKeptLogins({
+  partitionsDir: browserPartitionsDir,
+  clearSession: partition => browserShell.clearPartition(partition),
+  platformEncloses: sandboxPlatform(process.platform),
+  // Never where a company folder is (sync or an enclosed turn would read it there).
+  insideCompanyFolder: p => allowedRoots.touches(p),
+})
 const browser = createBrowserController({
-  shell: createBrowserWindowShell(),
+  shell: browserShell,
+  kept: keptLogins,
+  turnEnclosesKept: turn => turnEnclosesKeptLogins(browserPartitionsDir(), turn),
   // Where a domain's pages load parts from and what its login needs: the company's 「詳しい設定」 of that domain
   // (in the policy); a domain it set nothing for falls back, until step ⑦, to the bundled declaration's, when this
   // build carries it and the approved list approves it. Never the company's free text on the site — a developer
@@ -618,7 +632,7 @@ const browser = createBrowserController({
   onChanged: companyId => appWindow.send('browser:changed', { companyId }),
 })
 agentControl.policy.onPolicy((companyId, policy) => browser.policyAnswered(companyId, policy))
-agentControl.policy.onRefreshFailed(companyId => browser.policyFailed(companyId))
+agentControl.policy.onRefreshFailed((companyId, detail) => browser.policyFailed(companyId, detail))
 registerBrowserIpc(ipc, {
   browser,
   // The main window's own page only: not a consultation window, not a frame inside the page.
@@ -920,6 +934,8 @@ app.whenReady().then(async () => {
       runBound: (companyId, conversationId) => aiRunRegistry.runOf(companyId, conversationId) !== null,
       workingFolders,
       skillShelf,
+      // Every AI turn: a site login kept on this PC goes first unless the turn is enclosed (agent-browser.md).
+      beforeAiTurn: turn => browser.beforeAiTurn(turn),
     })
     // A business plugin's step run: only its step's tools (plugin-steps.md), from the claim main holds.
     const result = await startChatServer({
