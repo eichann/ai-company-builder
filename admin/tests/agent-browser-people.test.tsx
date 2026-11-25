@@ -167,7 +167,7 @@ const siteGrants = (over: Partial<BrowserSiteGrantsView> = {}): BrowserSiteGrant
 const peopleRoutes = (view: BrowserSiteGrantsView, mode: 'on' | 'off' = 'on') => ({
   [`GET ${base}/browser-site-grants`]: { body: ok(view) },
   [`GET ${base}/browser-devices`]: { body: ok(devices) },
-  [`GET ${base}/agent-browser`]: { body: ok({ settings: { mode, sites: [] }, overrides: [], updatedAt: null, updatedBy: null, history: [] } satisfies AgentBrowserView) },
+  [`GET ${base}/agent-browser`]: { body: ok({ settings: { mode, sites: [] }, overrides: [], updatedAt: null, updatedBy: null, history: [], siteParts: [] } satisfies AgentBrowserView) },
 })
 const cell = (name: string) => screen.getByRole('combobox', { name }) as HTMLSelectElement
 

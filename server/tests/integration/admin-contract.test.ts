@@ -463,6 +463,9 @@ describe('admin API types (admin/src/lib/api.ts) match the server', () => {
       mode: 'on', sites: [{ host: 'crm.example.com', level: 'write', assetHosts: ['cdn.example.net'] }],
     })
     await expectShape('AgentBrowser', USERS.owner, 'PUT', `${base}/agent-browser/overrides/${USERS.member}`, { mode: 'off' })
+    await expectShape('AgentBrowser', USERS.owner, 'PUT', `${base}/agent-browser/site-parts`, {
+      host: 'crm.example.com', assetHosts: ['img.example.net'], scriptHosts: [], loginHelpers: [{ host: 'check.example.org', pathPrefix: '/c/', frame: true, post: false }],
+    })
   })
 
   it('「ブラウザ操作に使う PC」 and 「使える人」', async () => {

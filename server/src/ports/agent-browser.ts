@@ -26,6 +26,15 @@ export interface AgentBrowserChangeRow {
   change: string
 }
 
+/** A registered domain's 「詳しい設定」 as stored (re-validated on read). */
+export interface StoredAgentBrowserSiteParts {
+  host: string
+  /** JSON of BrowserSiteParts. */
+  parts: string
+  updatedAt: string
+  updatedBy: string
+}
+
 export interface AgentBrowserRepository {
   /** null while the company never changed the defaults. */
   get(companyId: string): StoredAgentBrowser | null
@@ -40,4 +49,8 @@ export interface AgentBrowserRepository {
   saveOverride(companyId: string, userId: string, value: StoredAgentBrowserOverride | null, change: AgentBrowserChangeRow | null): void
   /** Newest first. */
   history(companyId: string, limit: number): AgentBrowserChangeRow[]
+  /** Every domain's 「詳しい設定」 the company stored, by host. */
+  siteParts(companyId: string): StoredAgentBrowserSiteParts[]
+  /** Set (a value) or remove (null) one domain's 「詳しい設定」, with its history row, in one transaction. */
+  saveSiteParts(companyId: string, host: string, value: StoredAgentBrowserSiteParts | null, change: AgentBrowserChangeRow): void
 }

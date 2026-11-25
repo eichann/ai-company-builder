@@ -7,7 +7,10 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import AiSafetyPage from '@/app/companies/[id]/advanced/ai-safety/page'
 import AgentBrowserPage from '@/app/companies/[id]/advanced/ai-safety/browser/page'
-import { BROWSER_INTRO, BROWSER_LEVEL_LABELS, BROWSER_LOGIN_NOTE, BROWSER_MODE_LABELS, BROWSER_NOT_YET_NOTE, BROWSER_PARTS_NOTE } from '@/lib/agent-browser'
+import {
+  BROWSER_INTRO, BROWSER_LEVEL_LABELS, BROWSER_LOGIN_NOTE, BROWSER_MODE_LABELS, BROWSER_NOT_YET_NOTE, BROWSER_PARTS_NOTE,
+  SITE_PARTS_APP_DEFAULT_BUTTON, SITE_PARTS_APP_DEFAULT_NOTE, SITE_PARTS_INTRO, SITE_PARTS_POST_WARNING, SITE_PARTS_SCRIPT_WARNING,
+} from '@/lib/agent-browser'
 import type { AgentBrowserView, Capabilities } from '@/lib/api'
 import { base, companyRoutes, renderInCompany } from './company-harness'
 import { managerCapabilities, ok, ownerCapabilities } from './fixtures'
@@ -25,6 +28,7 @@ const view: AgentBrowserView = {
   updatedAt: null,
   updatedBy: null,
   history: [],
+  siteParts: [],
 }
 
 type Reply = { status?: number; body: unknown }
@@ -163,5 +167,94 @@ describe('ブラウザ操作', () => {
     await waitFor(() => expect(calls.some((c) => c.method === 'PUT')).toBe(true))
     const puts = calls.filter((c) => c.method === 'PUT')
     expect(puts.map((c) => [c.url, c.body])).toEqual([[`${base}/agent-browser/overrides/u_owner`, { mode: 'on' }]])
+  })
+
+  describe('a saved site\'s 「詳しい設定」 (agent-browser.md "A domain\'s parts and login helpers")', () => {
+    const saved = { ...view, settings: { mode: 'on' as const, sites: [{ host: 'shop.example.com', level: 'write' as const, assetHosts: [] }, { host: 'desk.example.com', level: 'read' as const, assetHosts: [] }] } }
+    const echo = (call: Call) => ({ body: ok({ ...saved, siteParts: 'useAppDefault' in (call.body as object) ? [] : [call.body] }) })
+
+    it('is folded under each saved site, and saving sends that site\'s whole setting, normalized; scripts only from a ticked host, with the warning', async () => {
+      const calls = stubApi(ownerCapabilities, { [`PUT ${base}/agent-browser/site-parts`]: echo }, saved)
+      renderInCompany(<AgentBrowserPage />)
+      const group = await screen.findByRole('group', { name: 'shop.example.com の詳しい設定' })
+      expect(within(group).getByText(SITE_PARTS_APP_DEFAULT_NOTE)).toBeInTheDocument()
+      await userEvent.type(within(group).getByRole('textbox', { name: 'shop.example.com の部品を読み込む先' }), 'IMG.example.net\nimg.example.net\njs.example.net')
+      expect(within(group).getByText(SITE_PARTS_SCRIPT_WARNING)).toBeInTheDocument()
+      expect(within(group).getByRole('checkbox', { name: 'img.example.net のプログラムも読み込む' })).not.toBeChecked()
+      await userEvent.click(within(group).getByRole('checkbox', { name: 'js.example.net のプログラムも読み込む' }))
+      await userEvent.click(within(group).getByRole('button', { name: 'ログインの補助を追加' }))
+      await userEvent.type(within(group).getByRole('textbox', { name: 'ログインの補助 1 のアドレス' }), 'check.example.org')
+      await userEvent.type(within(group).getByRole('textbox', { name: 'ログインの補助 1 の道' }), '/challenge/')
+      await userEvent.click(within(group).getByRole('checkbox', { name: '画面の中に表示してよい' }))
+      await userEvent.click(within(group).getByRole('button', { name: '詳しい設定を保存' }))
+      await waitFor(() => expect(calls.some((c) => c.method === 'PUT')).toBe(true))
+      const puts = calls.filter((c) => c.method === 'PUT')
+      expect(puts.map((c) => [c.url, c.body])).toEqual([[`${base}/agent-browser/site-parts`, {
+        host: 'shop.example.com',
+        assetHosts: ['img.example.net', 'js.example.net'],
+        scriptHosts: ['js.example.net'],
+        loginHelpers: [{ host: 'check.example.org', pathPrefix: '/challenge/', frame: true, post: false }],
+      }]])
+    })
+
+    it('a helper that may be sent what is typed warns, and needs 「画面の中に表示してよい」 and a path of two steps or more', async () => {
+      const calls = stubApi(ownerCapabilities, {}, saved)
+      renderInCompany(<AgentBrowserPage />)
+      const group = await screen.findByRole('group', { name: 'shop.example.com の詳しい設定' })
+      await userEvent.click(within(group).getByRole('button', { name: 'ログインの補助を追加' }))
+      await userEvent.type(within(group).getByRole('textbox', { name: 'ログインの補助 1 のアドレス' }), 'check.example.org')
+      await userEvent.type(within(group).getByRole('textbox', { name: 'ログインの補助 1 の道' }), '/api/')
+      await userEvent.click(within(group).getByRole('checkbox', { name: '確かめの答えを送ってよい' }))
+      expect(within(group).getByText(SITE_PARTS_POST_WARNING)).toBeInTheDocument()
+      expect(await within(group).findByRole('alert')).toHaveTextContent('「画面の中に表示してよい」も選んでください')
+      await userEvent.click(within(group).getByRole('checkbox', { name: '画面の中に表示してよい' }))
+      expect(await within(group).findByRole('alert')).toHaveTextContent('2 段以上にしてください')
+      expect(within(group).getByRole('button', { name: '詳しい設定を保存' })).toBeDisabled()
+      expect(calls.some((c) => c.method === 'PUT')).toBe(false)
+    })
+
+    it('a registered site as another site\'s part or helper, a wildcard or a bad path cannot be saved', async () => {
+      const calls = stubApi(ownerCapabilities, {}, saved)
+      renderInCompany(<AgentBrowserPage />)
+      const group = await screen.findByRole('group', { name: 'shop.example.com の詳しい設定' })
+      const parts = within(group).getByRole('textbox', { name: 'shop.example.com の部品を読み込む先' })
+      await userEvent.type(parts, 'desk.example.com')
+      expect(await within(group).findByRole('alert')).toHaveTextContent('操作するサイトとして登録したアドレスは、ここには書けません: desk.example.com')
+      expect(within(group).getByRole('button', { name: '詳しい設定を保存' })).toBeDisabled()
+      await userEvent.clear(parts)
+      await userEvent.type(parts, '*.example.net')
+      expect(await within(group).findByRole('alert')).toHaveTextContent('使えない書き方があります: *.example.net')
+      await userEvent.clear(parts)
+      await userEvent.click(within(group).getByRole('button', { name: 'ログインの補助を追加' }))
+      await userEvent.type(within(group).getByRole('textbox', { name: 'ログインの補助 1 のアドレス' }), 'check.example.org')
+      await userEvent.type(within(group).getByRole('textbox', { name: 'ログインの補助 1 の道' }), '/')
+      expect(await within(group).findByRole('alert')).toHaveTextContent('ログインの補助の道は / で始まり / で終わる形')
+      expect(within(group).getByRole('button', { name: '詳しい設定を保存' })).toBeDisabled()
+      expect(calls.some((c) => c.method === 'PUT')).toBe(false)
+    })
+
+    it('saved with nothing in it means "nothing"; only 「アプリに入っている決まりに戻す」 goes back to what the app carries', async () => {
+      const calls = stubApi(ownerCapabilities, { [`PUT ${base}/agent-browser/site-parts`]: echo }, saved)
+      renderInCompany(<AgentBrowserPage />)
+      const group = await screen.findByRole('group', { name: 'shop.example.com の詳しい設定' })
+      expect(within(group).getByText(SITE_PARTS_INTRO)).toBeInTheDocument()
+      expect(within(group).queryByRole('button', { name: SITE_PARTS_APP_DEFAULT_BUTTON })).toBeNull()
+      await userEvent.click(within(group).getByRole('button', { name: '詳しい設定を保存' }))
+      await waitFor(() => expect(calls.filter((c) => c.method === 'PUT')).toHaveLength(1))
+      expect(calls.find((c) => c.method === 'PUT')!.body).toEqual({ host: 'shop.example.com', assetHosts: [], scriptHosts: [], loginHelpers: [] })
+      const after = await screen.findByRole('group', { name: 'shop.example.com の詳しい設定' })
+      await userEvent.click(await within(after).findByRole('button', { name: SITE_PARTS_APP_DEFAULT_BUTTON }))
+      await waitFor(() => expect(calls.filter((c) => c.method === 'PUT')).toHaveLength(2))
+      expect(calls.filter((c) => c.method === 'PUT')[1].body).toEqual({ host: 'shop.example.com', useAppDefault: true })
+    })
+
+    it('a site not saved yet has none (its setting needs the registered site first)', async () => {
+      stubApi(ownerCapabilities, {}, saved)
+      renderInCompany(<AgentBrowserPage />)
+      await screen.findByRole('group', { name: 'shop.example.com の詳しい設定' })
+      await userEvent.click(screen.getByRole('button', { name: 'サイトを追加' }))
+      await userEvent.type(screen.getByRole('textbox', { name: 'サイト 3 の操作するサイト' }), 'new.example.com')
+      expect(screen.queryByRole('group', { name: 'new.example.com の詳しい設定' })).toBeNull()
+    })
   })
 })

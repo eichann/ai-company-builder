@@ -8,6 +8,10 @@
  * - The caller's own policy (`/me/agent-policy`): any member; the override replaces only
  *   the mode, and only one set while the person is a member this time — an override from
  *   before they left the company never comes back with them.
+ * - A registered domain's 「詳しい設定」 (redesign step ②: its parts hosts and login helpers,
+ *   shared/core/browser-site-parts.ts): owner/admin only, recorded; stored beside the setting (never
+ *   inside it: released apps validate its shape) and re-checked against the registered domains on
+ *   every read, so a domain registered later can never be another domain's part.
  */
 import {
   BROWSER_OPERATION_MODES,
@@ -17,6 +21,7 @@ import {
   type BrowserOperationMode,
   type BrowserOperationSettings,
 } from '../../shared/core/browser-operation'
+import { parseBrowserSiteParts, validBrowserSiteParts, type BrowserSiteParts } from '../../shared/core/browser-site-parts'
 import type { AgentBrowserChange, AgentBrowserPolicy, AgentBrowserView } from '../../shared/types/agent-browser'
 import type { AccountDirectory } from '../ports/accounts'
 import type { AgentBrowserRepository, StoredAgentBrowserOverride } from '../ports/agent-browser'
@@ -53,6 +58,14 @@ export function hostsNoLongerWritable(before: BrowserOperationSettings, after: B
   }).map(s => s.host)
 }
 
+/** `{ host, useAppDefault: true }`: remove a domain's 「詳しい設定」 (back to what the app carries). */
+function isAppDefault(body: unknown): body is { host: string; useAppDefault: true } {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return false
+  const keys = Object.keys(body)
+  const b = body as { host?: unknown; useAppDefault?: unknown }
+  return keys.length === 2 && b.useAppDefault === true && typeof b.host === 'string'
+}
+
 const defaults = (): BrowserOperationSettings => ({ ...DEFAULT_BROWSER_OPERATION_SETTINGS, sites: [] })
 
 const isMode = (value: unknown): value is BrowserOperationMode => (BROWSER_OPERATION_MODES as readonly unknown[]).includes(value)
@@ -81,6 +94,34 @@ export function createAgentBrowserService(deps: AgentBrowserDeps) {
    */
   function applies(override: StoredAgentBrowserOverride, joinedAt: string | null | undefined): boolean {
     return isMode(override.mode) && typeof joinedAt === 'string' && override.updatedAt >= joinedAt
+  }
+
+  /**
+   * The company's 「詳しい設定」 of its registered domains, each valid against the registered hosts now. A host
+   * registered as a domain since a setting lent it is taken out of that setting (logged), the rest kept — even
+   * when nothing is left, so the domain then uses nothing rather than the app's fallback and the admin sees what
+   * applies. A removed domain's row is not handed out; a row that does not read is left out, logged.
+   */
+  function sitePartsOf(companyId: string, settings: BrowserOperationSettings): BrowserSiteParts[] {
+    const operated = settings.sites.map(s => s.host)
+    let narrowed = 0
+    const rows = agentBrowser.siteParts(companyId).filter(r => operated.includes(r.host)).map(r => {
+      let raw: unknown
+      try { raw = JSON.parse(r.parts) } catch { return null }
+      if (!raw || typeof raw !== 'object') return raw
+      const row = raw as { assetHosts?: unknown; scriptHosts?: unknown; loginHelpers?: unknown }
+      const lent = (h: unknown) => typeof h === 'string' && operated.includes(h)
+      if (!Array.isArray(row.assetHosts) || !Array.isArray(row.scriptHosts) || !Array.isArray(row.loginHelpers)) return raw
+      const assetHosts = row.assetHosts.filter(h => !lent(h))
+      const scriptHosts = row.scriptHosts.filter(h => !lent(h))
+      const loginHelpers = row.loginHelpers.filter(h => !lent((h as { host?: unknown } | null)?.host))
+      if (assetHosts.length !== row.assetHosts.length || loginHelpers.length !== row.loginHelpers.length) narrowed += 1
+      return { ...row, assetHosts, scriptHosts, loginHelpers }
+    })
+    if (narrowed > 0) log.warn(`[agent-browser] ${narrowed} domain setting(s) for ${companyId} named a host now registered as a domain; taken out`)
+    const { valid, dropped } = validBrowserSiteParts(rows, operated)
+    if (dropped > 0) log.warn(`[agent-browser] ${dropped} stored domain setting(s) for ${companyId} no longer valid; left out`)
+    return valid
   }
 
   function view(companyId: string): AgentBrowserView {
@@ -115,6 +156,7 @@ export function createAgentBrowserService(deps: AgentBrowserDeps) {
         email: people.get(row.changedBy)?.email ?? null,
         change: change.target === 'member' ? { ...change, memberName: people.get(change.userId)?.name ?? null } : change,
       })),
+      siteParts: sitePartsOf(companyId, settings),
     }
   }
 
@@ -183,6 +225,55 @@ export function createAgentBrowserService(deps: AgentBrowserDeps) {
         )
       }
       return ok(view(member.companyId))
+    },
+
+    /**
+     * PUT …/agent-browser/site-parts (owner/admin): one registered domain's 「詳しい設定」, whole. Saved with
+     * nothing in it, it means "nothing" (the app's fallback no longer applies there); `{ host, useAppDefault: true }`
+     * removes it (the domain then uses what the app carries, if anything). Refused: a domain not registered, a
+     * registered domain as a part or helper, a host not in its exact spelling, a script host that is no parts host,
+     * a POST helper not framed or too broad (shared/core/browser-site-parts.ts). Recorded when it changes.
+     */
+    setSiteParts(member: Member, body: unknown): Outcome<AgentBrowserView> {
+      const allowed = requireFullAccess(member, AGENT_BROWSER_FORBIDDEN)
+      if (!allowed.ok) return allowed
+      const { settings } = settingsOf(member.companyId)
+      const operated = settings.sites.map(s => s.host)
+      let host: string
+      let after: BrowserSiteParts | null
+      if (isAppDefault(body)) {
+        if (!operated.includes(body.host)) return refuse('not-found', 'host must be a registered site')
+        host = body.host
+        after = null
+      } else {
+        const parsed = parseBrowserSiteParts(body, operated)
+        if ('error' in parsed) return refuse(parsed.problem === 'not-registered' ? 'not-found' : 'bad-request', parsed.error)
+        host = parsed.value.host
+        after = parsed.value
+      }
+      const before = sitePartsOf(member.companyId, settings).find(p => p.host === host) ?? null
+      const stale = before === null && agentBrowser.siteParts(member.companyId).some(r => r.host === host)
+      if (JSON.stringify(before) !== JSON.stringify(after) || stale) {
+        const at = clock.now()
+        agentBrowser.saveSiteParts(
+          member.companyId,
+          host,
+          after ? { host: after.host, parts: JSON.stringify(after), updatedAt: at, updatedBy: member.userId } : null,
+          { id: ids.newId(), changedAt: at, changedBy: member.userId, change: JSON.stringify({ target: 'site-parts', host, before, after }) },
+        )
+      }
+      return ok(view(member.companyId))
+    },
+
+    /**
+     * The 「詳しい設定」 the caller's app takes (`/me/agent-policy` `browserParts`): the company's valid ones,
+     * only while the member's browser part is on.
+     */
+    sitePartsFor(member: Pick<Member, 'companyId' | 'userId'>): BrowserSiteParts[] {
+      const { settings } = settingsOf(member.companyId)
+      const own = overrideOf(member.companyId, member.userId)
+      if ((own ?? settings.mode) !== 'on') return []
+      return sitePartsOf(member.companyId, settings)
     },
 
     /** The caller's browser policy: the company setting with their own override's mode. */

@@ -54,7 +54,7 @@ describe('「初期値のまま」 or 「変えています」', () => {
     expect(aiSafetyChanged({ sandbox: sandbox(), secondOpinion: { allowed: false, updatedAt: null, updatedByName: null } })).toBe(false)
     expect(aiSafetyChanged({ sandbox: sandbox(), secondOpinion: { allowed: true, updatedAt: null, updatedByName: null } })).toBe(true)
     // 「ブラウザ操作」 starts as 「使わない」 with no sites: turning it on, a site or a member's own mode is a change.
-    const browser = (over: Partial<AgentBrowserView> = {}): AgentBrowserView => ({ settings: { mode: 'off', sites: [] }, overrides: [], updatedAt: null, updatedBy: null, history: [], ...over })
+    const browser = (over: Partial<AgentBrowserView> = {}): AgentBrowserView => ({ settings: { mode: 'off', sites: [] }, overrides: [], updatedAt: null, updatedBy: null, history: [], siteParts: [], ...over })
     expect(aiSafetyChanged({ sandbox: sandbox(), browser: browser() })).toBe(false)
     expect(aiSafetyChanged({ sandbox: sandbox(), browser: browser({ settings: { mode: 'on', sites: [] } }) })).toBe(true)
     expect(aiSafetyChanged({ sandbox: sandbox(), browser: browser({ settings: { mode: 'off', sites: [{ host: 'crm.example.com', level: 'read', assetHosts: [] }] } }) })).toBe(true)

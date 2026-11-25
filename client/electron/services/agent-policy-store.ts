@@ -28,6 +28,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { parseAgentSandboxSettings } from '../../../shared/core/agent-sandbox'
 import { parseBrowserOperationSettings } from '../../../shared/core/browser-operation'
+import { validBrowserSiteParts } from '../../../shared/core/browser-site-parts'
 import type { AgentBrowserPolicy } from '../../../shared/types/agent-browser'
 import type { AgentPolicy, AgentSandboxPolicy } from '../../../shared/types/agent-sandbox'
 import type { SecondOpinionPolicy } from '../../../shared/types/second-opinion'
@@ -103,10 +104,13 @@ export function parseAgentPolicy(data: unknown): AgentPolicy | undefined {
   const secondOpinion = parseSecondOpinionPolicy((value as { secondOpinion?: unknown }).secondOpinion)
   // 「ブラウザ操作」: absent (an older server) or not valid = left out, which the app reads as off.
   const browser = parseBrowserPolicy((value as { browser?: unknown }).browser)
+  // A registered domain's 「詳しい設定」 (agent-browser.md "A domain's parts and login helpers"): only with a valid
+  // `browser` part, each re-checked against its registered domains (one not valid is left out, never the policy).
+  const browserParts = browser ? validBrowserSiteParts((value as { browserParts?: unknown }).browserParts, browser.sites.map(s => s.host)).valid : []
   // Plugin trust's marker (plugin-trust.md "P2"): a short hex digest only; anything else is left out.
   const rawTrust = (value as { pluginTrust?: unknown }).pluginTrust
   const pluginTrust = typeof rawTrust === 'string' && /^[0-9a-f]{1,64}$/.test(rawTrust) ? rawTrust : undefined
-  return { version: value.version, sandbox: policy, ...(stop ? { stop } : {}), ...(plugins ? { plugins } : {}), ...(secondOpinion ? { secondOpinion } : {}), ...(browser ? { browser } : {}), ...(pluginTrust ? { pluginTrust } : {}) }
+  return { version: value.version, sandbox: policy, ...(stop ? { stop } : {}), ...(plugins ? { plugins } : {}), ...(secondOpinion ? { secondOpinion } : {}), ...(browser ? { browser } : {}), ...(browserParts.length > 0 ? { browserParts } : {}), ...(pluginTrust ? { pluginTrust } : {}) }
 }
 
 /** The policy's `browser` part checked with the shared rules, or undefined (= off). */

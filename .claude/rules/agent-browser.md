@@ -1,6 +1,9 @@
 ---
 paths:
   - "shared/core/browser-operation.ts"
+  - "shared/core/browser-site-parts.ts"
+  - "server/tests/integration/agent-browser-site-parts.test.ts"
+  - "client/tests/browser-site-parts.test.ts"
   - "shared/core/plugin-browser-declaration.ts"
   - "shared/core/browser-plans.ts"
   - "shared/core/browser-map.ts"
@@ -93,7 +96,8 @@ only through per-site operation types (later PRs), never by free clicking. Owner
 
 - **Admin-approved sites only.** Each site has one host the AI operates (writes go only there)
   and the exact hosts its pages load parts from (GET of scripts, styles, fonts, images only) —
-  since plan B the reviewed declaration's, not the admin's ("Asset hosts"); every other request is
+  since redesign step ② the company's 「詳しい設定」 of that domain, the reviewed bundled declaration's
+  only as a fallback until step ⑦ ("A domain's parts and login helpers"); every other request is
   refused. No `*.` wildcards.
 - **Per-site operation types, split in two (owner decision 2026-11-21, design memo §24).** An
   operation type is **data** (the connector's declaration: what is sent, `writes`, and what the
@@ -139,7 +143,7 @@ only through per-site operation types (later PRs), never by free clicking. Owner
 - Admin 「ブラウザ操作」 (`admin/src/app/companies/[id]/advanced/ai-safety/browser/page.tsx`,
   「詳しい設定 › AI の安全」, owner/admin): 会社全体 (使わない / 使う), サイトの一覧 (操作するサイト,
   段階; add / remove; a duplicate site blocks saving; `BROWSER_PARTS_NOTE` says the parts and login
-  hosts come from the site's reviewed declaration — the 画面の部品を取る先 field is the developer
+  hosts come from each saved site's folded 「詳しい設定」 ("A domain's parts and login helpers") — the 画面の部品を取る先 field is the developer
   setting, shown only in a console built with `NEXT_PUBLIC_ACB_BROWSER_DEVELOPER=1`, "Asset hosts"; there
   invalid lines or the operated host as a parts host are shown and block saving), the login note (kept only for
   members whose 「AI の囲い」 is 「囲う」), 「メンバーごとの動作」 (会社と同じ / 使わない / 使う) and the
@@ -558,8 +562,11 @@ the AI operates** (`ai` mode, a run's `enterAi` … `leaveAi`) they are shut. Th
     ログインを済ませた画面にしてから、相談で頼み直してください。」 (`BROWSER_RUN_REASONS`). A frame still
     loading at a check is caught by the request rule when its requests go out. A frame the window refused
     stays an empty document of the site and does not count (tested: the start page's two refused frames).
-- **Helpers only from an approved, carried declaration** (review L2): main hands the window
-  `bundledLoginHelpers` (`features/browser/wire.ts`) = `approvedBundledDeclarations`
+- **Since redesign step ②** a domain's helpers are the company's 「詳しい設定」 of that domain when it set one
+  ("A domain's parts and login helpers"); the bundled declaration below is only the fallback for a domain the
+  company set nothing for, until step ⑦. The rule above is unchanged whatever the source.
+- **Helpers only from an approved, carried declaration** (review L2): main hands the controller
+  `bundledLoginHelpers` (`features/browser/wire.ts`; as `loginHelpersOf`, the fallback since step ②) = `approvedBundledDeclarations`
   (`combination.ts`): a bundled declaration this build carries (`carried.json`, as for plans) whose one
   row in this build's `approved.json` (the server's source for plans) is `approved` with the same checker
   hash and exactly that declaration text. Pending, retired, another text or two rows: no helper (the login
@@ -603,6 +610,11 @@ to be among them (`browserOperationsAllowed`'s `asset-host-not-allowed`): the si
 least had to find them, and a wrong line widened the window for everyone (2026-11-23: `www.google.com`
 typed there broke the login, #768).
 
+**Since redesign step ②** this section is no longer the whole story: the admin (the FDE) **does** type a domain's parts
+hosts again — in its 「詳しい設定」, with the core's checks, and scripts only from hosts they mark ("A domain's parts and
+login helpers") — and those replace the declaration's for that domain. Everything below now describes only the
+**fallback** for a domain the company never set, until step ⑦; it no longer holds that "the admin types nothing".
+
 - **The window's site** (`browserWindowSite(site, declared, developer)`, `client/shared/browser-operation.ts`,
   applied once by the controller to every site of a valid policy answer — so the window, its proxy, its
   read / write sessions and `siteNow` see the same site): `host` and `level` from the policy; `assetHosts`
@@ -639,7 +651,11 @@ typed there broke the login, #768).
 - **Remaining limits** (said): a declared parts host also receives what a stylesheet or image GET carries
   (its address, the cookies the browser holds for that host) in both modes — reviewed per host, as before
   with the admin's list; a site whose pages need a host its declaration does not list looks incomplete
-  until a new declaration version is reviewed (the learning mode stays diagnosis only, §6-4).
+  until a new declaration version is reviewed (the learning mode stays diagnosis only, §6-4). **Since step ②**
+  the same holds for an admin-entered parts host, which is **not reviewed by anyone but that admin**: it receives
+  the parts GETs' addresses and its own cookies; a host the admin marks 「プログラムも読み込む」 runs its scripts
+  inside the page with the member's login (it can read the page and act as the page in `human` mode; in `ai` mode
+  the write gate still decides every write) — the admin page says so next to the tick.
 - **Who may use a site** (plan B's 「使える人」): not in this step (since the redesign's step ①: "Who may use a site" for
   the new path). The server's per-member type grant of the old path (`PUT /browser-type-grants/:userId`) has no admin page. Since "This PC's registration" (D2) the server
   asks for a registered PC at every gated step, so a grant to a member no longer turns them on wherever they
@@ -658,6 +674,95 @@ by 「前に書いたものを消す」; the field's checks in the developer con
 `bundledAssetHosts`' wiring through `approvedBundledDeclarations` (tested through its parts, as
 `bundledLoginHelpers`).
 Each guard mutation-checked.
+
+## A domain's parts and login helpers (redesign step ②: company data, the declaration only a fallback)
+
+Design memo 「ブラウザ操作：記録から自動化へ／サイトの言葉を本体から外す」 §3 I1, §7-1, §10, §11, §12 ②: a site's
+details live with the company, not in the core's shipped files. The hosts a registered domain's pages load parts from
+and the hosts a person's login needs are entered by an owner / admin (the FDE, after reading a recording) in that
+domain's folded 「詳しい設定」, so a new site works without a new app release. The rules that **use** them are unchanged
+(`decideBrowserRequest`'s parts rule, `decideLoginHelper`, the proxy, the frames: "Asset hosts", "Login helpers").
+
+- **The rule** (`shared/core/browser-site-parts.ts`, one copy for the server, the admin's form and the app):
+  `BrowserSiteParts = { host, assetHosts, scriptHosts, loginHelpers }`; `parseBrowserSiteParts(input, operatedHosts)`:
+  strict keys; `host` a registered domain (`not-registered`); every host in its very spelling (`normalizeBrowserHost(x)
+  === x`: no `*.`, IP, localhost, scheme, upper case — today's host rule, no wildcard); **never a domain the company
+  registered as one it operates** (`operated`: an operated domain cannot be lent to another as a part or a helper, nor to
+  itself); a host once, a helper never also a parts host (`twice`); ≤ 10 parts hosts and ≤ 5 helpers (the declaration's
+  limits); a helper's `pathPrefix` as the declaration's (`/whole/segments/`). **Scripts** (coordinator M1, owner's
+  standing rule: the safe recommendation): an admin-entered parts host loads stylesheets, fonts and images only;
+  `scriptHosts` (each one of `assetHosts`, `script-not-part`) are the hosts the admin ticked 「プログラムも読み込む」.
+  (`media` is not added: today's parts rule never allowed it, and nothing asked for it yet.) **A helper that may be sent
+  POSTs** (M2) must also be framed (`post-needs-frame`) and narrowed to at least
+  `BROWSER_SITE_PARTS_LIMITS.postHelperSegments` = **2** path segments (`post-path-short`: `/` and `/api/` refused,
+  `/check/api/` accepted — what the login page sends goes only to a deep path of a framed check). These two rules are the
+  company data's; the reviewed declarations keep their own (`plugins.md`), unchanged until step ⑦.
+  `validBrowserSiteParts(list, operated)` re-checks a list against the registered domains **now** (invalid entries, a
+  second one for a host: left out, counted; an entry with nothing in it is kept — the domain then uses nothing, never
+  the fallback).
+- **Server**: table `agent_browser_site_parts` (company, host, parts JSON, who / when; `db/schema/agents.ts`, additive);
+  `AgentBrowserRepository.siteParts` / `saveSiteParts` (with a history row, one transaction). `PUT
+  /agent-browser/site-parts { host, assetHosts, scriptHosts, loginHelpers }` (owner/admin; `AGENT_BROWSER_FORBIDDEN`; a
+  domain not registered → 404, any other refusal → 400). **Saved with nothing in it, it means "nothing"** (coordinator
+  L1: the row stays, the domain uses no parts and no helpers, never the fallback); only `{ host, useAppDefault: true }`
+  removes the row and brings back what the app carries (exactly these two keys). Recorded as `{ target: 'site-parts',
+  host, before, after }` (`after: null` = back to the app's) when it changes; announced on the push channel. `GET /agent-browser`
+  answers `siteParts` (valid now; optional in the type: an older server sends none). **Every read re-validates** against
+  the registered domains: a host registered as a domain after a setting lent it is **taken out of that setting** (its
+  parts, script and helper entries; logged), the rest kept — even when nothing is left, so the domain uses nothing rather than the fallback and the
+  admin sees what applies (independent review L1); a removed domain's row is not handed out (back if registered again).
+- **To the apps**: `/me/agent-policy` gains **`browserParts`** (`AgentPolicy.browserParts`, the valid settings, only
+  while the member's browser part is on, absent when none — so the answer and its version are as before for a company
+  that set nothing). **The `browser` part and `agent_browser_settings` keep their shape** (released apps validate it;
+  they ignore an unknown top-level field — tested on the server and the app).
+- **The app** (`agent-policy-store.ts`: `browserParts` kept only beside a valid `browser`, each re-checked with
+  `validBrowserSiteParts` against its sites; `controller.ts` `policyAnswered` → `browserWindowSiteFrom`,
+  `client/shared/browser-operation.ts`): per domain, **the company's setting when it set one, else the bundled
+  declaration's** (`assetHostsOf` / `loginHelpersOf`, `bundledAssetHosts` / `bundledLoginHelpers`: approved and carried
+  only, as before) — **never both** (decision: a company that sets a domain owns it, so removing the bundled data in
+  step ⑦ changes nothing for it; the union would hide that a company still leans on the bundle). The fallback is logged
+  once per change (`[browser] <host>: parts and login helpers from the app's bundled declaration (the company set
+  none)`, host only). Whatever the source, a registered domain is never a part or a helper and a helper never a part
+  (the fallback obeys the core's rule too). **Scripts**: a company-set domain's window site carries `scriptHosts` (its
+  ticked hosts; a development build's extra parts hosts keep scripts), and `decideBrowserRequest` refuses a script from
+  any other parts host (`asset-use`); a bundled-declaration site carries none, so its parts hosts load scripts as before
+  (until step ⑦). The window's site carries its helpers (`BrowserWindowSite.loginHelpers`);
+  the shell reads them from the site (`helpersOf`; its `loginHelpers` option is only for a site without, the harness).
+  The developer setting on the site ("Asset hosts") still only adds parts hosts in a development build that asks.
+- **Lステップ's current inspection**: its company has set nothing yet, so its login and parts keep coming from the
+  approved bundled declaration (`lstep@0.6.3`) exactly as before; once its admin fills the domain's 「詳しい設定」, the
+  company's apply instead.
+- **Admin**: under each **saved** site of 「サイトの一覧」, a folded `<details>` 「詳しい設定」 (`SitePartsEditor`, owner/admin
+  page): 「画面の部品を読み込む先」 (one per line) with, per listed host, 「プログラムも読み込む」 and its warning
+  (`SITE_PARTS_SCRIPT_WARNING`: the host's programs run with the member's login; only hosts the company trusts),
+  「ログインの補助」 rows (アドレス, 道, 「画面の中に表示してよい」 = frame, 「確かめの答えを送ってよい」 = post with its warning
+  `SITE_PARTS_POST_WARNING`: what is typed on the login page can go there; ≤ 5), 「詳しい設定を保存」 (disabled while
+  invalid or unchanged — a never-set domain may be saved empty, meaning nothing; the problems from the core in plain
+  Japanese: `sitePartsProblems`), 「アプリに入っている決まりに戻す」 once set; the page says that an empty save means
+  nothing and, while unset, that the app's rules apply (`SITE_PARTS_INTRO`, `SITE_PARTS_APP_DEFAULT_NOTE`); the history
+  says what changed (`sitePartsChangeLines`). Words: `admin/src/lib/agent-browser.ts` (`SITE_PARTS_*`), no site words.
+
+Tests: `server/tests/integration/agent-browser-site-parts.test.ts` (owner/admin only — a member, a stranger, signed out
+save nothing; a domain not registered, a registered domain as a part / helper / itself, wildcard, upper case, scheme,
+IP, a path, twice, a helper also a part, bad paths, extra or missing keys refused; a script host that is no parts host;
+a POST helper not framed, or on `/api/` or one segment; saved → `browserParts`, the `browser`
+part and its sites' keys exactly as before, a new version, an unchanged save records nothing; another company's setting
+never in this company's policy; a domain registered later is taken out of the setting that lent it, which stays the company's
+even when empty, and a removed domain's is not handed out; nothing while the member's browser is off; saved empty
+means nothing, only `useAppDefault` removes it, both recorded), `client/tests/browser-site-parts.test.ts`
+(the policy keeps only valid settings and the `browser` part is unchanged; an empty company setting still replaces the
+fallback; a development build's extra parts host never drops a helper (review L2); a script only from a ticked host, the
+bundled fallback's scripts as before; a POST helper not framed or too broad and a script host that is no part dropped
+from the policy; the window takes the company's, else the
+bundled (logged), never both; another company's never reaches this company's window; a registered domain never a part
+or helper from any source; a parts host from the company's setting is read-only in both modes — parts GET / HEAD only,
+never a fetch, a write, a page, a frame, a WebSocket — an unregistered host never passes, the helper only while a
+person logs in, under its path), `admin/tests/agent-browser.test.tsx` (the folded setting, what a save sends, a
+registered domain / wildcard / bad path cannot be saved, none for a site not saved yet), `admin-contract.test.ts`,
+the permission matrix's row, `jobs-schema.test.ts` (additive table), `browser-window.test.ts` (the window's site with
+its helpers). Each guard mutation-checked (the core's operated / registered / exact / twice checks, the owner/admin
+check, the policy's on-only and re-validation, the app's never-both, the operated filter on every source, the policy
+store's re-check, the per-host match, the fallback log).
 
 ## Plans, executions, permits and locks (PR 6a, 6b-2a: the server side; nothing in the app calls it yet)
 

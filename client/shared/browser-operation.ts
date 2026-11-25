@@ -9,6 +9,7 @@ import {
   type BrowserRequest, type BrowserRequestRefusal, type BrowserSiteSetting,
 } from '../../shared/core/browser-operation'
 import { METHOD_OVERRIDE_HEADERS, type BrowserLoginHelper } from '../../shared/core/plugin-browser-declaration'
+import type { BrowserSiteParts } from '../../shared/core/browser-site-parts'
 import type { BrowserPageReadAttempt } from './browser-runner'
 
 // ---------------------------------------------------------------------------
@@ -394,6 +395,49 @@ export function browserWindowSite(site: BrowserSiteSetting, declared: readonly s
     if (normalizeBrowserHost(host) === host && host !== site.host && !assetHosts.includes(host)) assetHosts.push(host)
   }
   return { host: site.host, level: site.level, assetHosts }
+}
+
+/** The site as its window applies it, with the login helpers it lends while a person logs in. */
+export interface BrowserWindowSite extends BrowserSiteSetting {
+  loginHelpers: BrowserLoginHelper[]
+  /**
+   * Which parts hosts may load scripts (`decideBrowserRequest`'s `scriptHosts`): set only for a domain the company
+   * set — the hosts its admin marked 「プログラムも読み込む」 —, absent when the bundled declaration lends the parts.
+   */
+  scriptHosts?: string[]
+}
+
+/**
+ * A registered domain's window site (redesign step ②, agent-browser.md "A domain's parts and login helpers"):
+ * the parts hosts and login helpers come from the company's 「詳しい設定」 of that domain (`company`, from the
+ * policy's `browserParts`) when it set one; otherwise — only until step ⑦ removes it — from the app's bundled,
+ * approved declaration (`bundled`), and `from` says which (main logs it). Never both: once a company sets a
+ * domain, the bundled ones no longer apply there. Whatever the source, no host the company registered as a
+ * domain it operates (`operated`) is ever a part or a helper, a helper is never also a part, each host exact and
+ * once (the core's rule, `parseBrowserSiteParts`, applied again here so a fallback obeys it too).
+ */
+export function browserWindowSiteFrom(
+  site: BrowserSiteSetting,
+  sources: { company: BrowserSiteParts | undefined; bundled: { assetHosts: readonly string[]; loginHelpers: readonly BrowserLoginHelper[] } },
+  developer: boolean,
+  operated: readonly string[],
+): { site: BrowserWindowSite; from: 'company' | 'bundled' | 'none' } {
+  const own = sources.company?.host === site.host ? sources.company : undefined
+  const chosen = own ?? sources.bundled
+  const base = browserWindowSite(site, chosen.assetHosts, developer)
+  const assetHosts = base.assetHosts.filter(h => !operated.includes(h))
+  const loginHelpers: BrowserLoginHelper[] = []
+  for (const h of chosen.loginHelpers) {
+    if (normalizeBrowserHost(h.host) !== h.host || h.host === site.host || operated.includes(h.host)) continue
+    // One rule per host within the chosen source; a development build's extra parts host never drops a helper (the
+    // window's precedence handles a host that is both: "Login helpers").
+    if (chosen.assetHosts.includes(h.host) || loginHelpers.some(x => x.host === h.host)) continue
+    loginHelpers.push({ host: h.host, pathPrefix: h.pathPrefix, frame: h.frame === true, post: h.post === true })
+  }
+  const from = own ? 'company' : (chosen.assetHosts.length > 0 || chosen.loginHelpers.length > 0 ? 'bundled' : 'none')
+  // The company's parts load scripts only where its admin said so; a development build's extra hosts as before.
+  const scriptHosts = own ? assetHosts.filter(h => own.scriptHosts.includes(h) || !own.assetHosts.includes(h)) : undefined
+  return { site: { ...base, assetHosts, loginHelpers, ...(scriptHosts ? { scriptHosts } : {}) }, from }
 }
 
 /**

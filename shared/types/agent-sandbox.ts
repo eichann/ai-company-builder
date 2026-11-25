@@ -5,6 +5,7 @@
  */
 import type { AgentSandboxMode, AgentSandboxSettings } from '../core/agent-sandbox'
 import type { AgentBrowserPolicy } from './agent-browser'
+import type { BrowserSiteParts } from '../core/browser-site-parts'
 import type { AgentStopPolicy } from './agent-stop'
 import type { DistributedPlugin } from './plugins'
 import type { SecondOpinionPolicy } from './second-opinion'
@@ -77,6 +78,13 @@ export interface AgentPolicy {
    * Absent from an older server: the app treats it as off.
    */
   browser?: AgentBrowserPolicy
+  /**
+   * The registered domains' parts hosts and login helpers the company set (redesign step ②,
+   * agent-browser.md "A domain's parts and login helpers"): only while `browser` is on, only valid ones,
+   * absent when none. A field of its own so the `browser` part released apps validate keeps its shape;
+   * they ignore it. A domain absent here uses what the app carries, if anything.
+   */
+  browserParts?: BrowserSiteParts[]
   /**
    * A digest of the plugin trust documents the server hands this company now (plugin-trust.md
    * "P2": roots, its signed list, its freshness document). Only a marker: a new value tells the

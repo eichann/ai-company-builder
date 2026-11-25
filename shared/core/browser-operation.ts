@@ -152,6 +152,15 @@ export type BrowserRequestRefusal = 'scheme' | 'port' | 'host' | 'asset-use' | '
 export type BrowserRequestDecision = { allow: true; use: 'operate' | 'asset' } | { allow: false; reason: BrowserRequestRefusal }
 
 const ASSET_RESOURCE_TYPES = new Set(['script', 'stylesheet', 'font', 'image'])
+
+/**
+ * Which parts hosts may load scripts (redesign step ②): present for a site whose parts the company entered — only
+ * the hosts the admin marked 「プログラムも読み込む」 —, absent for one whose parts come from a reviewed declaration
+ * (every parts host, as before; until step ⑦).
+ */
+export interface BrowserScriptLimit {
+  scriptHosts?: readonly string[]
+}
 const ASSET_METHODS = new Set(['GET', 'HEAD'])
 
 /**
@@ -162,7 +171,7 @@ const ASSET_METHODS = new Set(['GET', 'HEAD'])
  * HEAD of scripts, styles, fonts and images; anything else is refused,
  * including navigations, frames and fetches to asset hosts.
  */
-export function decideBrowserRequest(site: BrowserSiteSetting, request: BrowserRequest): BrowserRequestDecision {
+export function decideBrowserRequest(site: BrowserSiteSetting & BrowserScriptLimit, request: BrowserRequest): BrowserRequestDecision {
   let url: URL
   try { url = new URL(request.url) } catch { return { allow: false, reason: 'bad-url' } }
   if (url.username || url.password) return { allow: false, reason: 'bad-url' }
@@ -172,6 +181,9 @@ export function decideBrowserRequest(site: BrowserSiteSetting, request: BrowserR
   if (host && host === site.host) return { allow: true, use: 'operate' }
   if (url.protocol === 'wss:' || !host || !site.assetHosts.includes(host)) return { allow: false, reason: 'host' }
   if (!ASSET_METHODS.has(request.method.toUpperCase()) || !ASSET_RESOURCE_TYPES.has(request.resourceType)) return { allow: false, reason: 'asset-use' }
+  // A company-entered parts host loads scripts only when the admin said so (`scriptHosts`, agent-browser.md "A domain's
+  // parts and login helpers"); a site without the list (the bundled declaration's, a development build's) as before.
+  if (request.resourceType === 'script' && site.scriptHosts && !site.scriptHosts.includes(host)) return { allow: false, reason: 'asset-use' }
   return { allow: true, use: 'asset' }
 }
 

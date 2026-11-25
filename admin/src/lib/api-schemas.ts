@@ -350,7 +350,7 @@ export const agentSandboxSchema = topLevel<AgentSandboxView>({
 })
 // 「ブラウザ操作」 (shared/types/agent-browser.ts)
 export const agentBrowserSchema = topLevel<AgentBrowserView>({
-  settings: obj, overrides: list, updatedAt: nullableStr, updatedBy: nullableStr, history: list,
+  settings: obj, overrides: list, updatedAt: nullableStr, updatedBy: nullableStr, history: list, siteParts: z.optional(list),
 })
 // 「ブラウザ操作に使う PC」 (shared/types/browser-devices.ts) and 「使える人」 (shared/types/browser-lines.ts)
 export const browserDevicesSchema = topLevel<BrowserDevicesList>({ items: list, more: bool, history: list })

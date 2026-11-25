@@ -6,6 +6,7 @@
  * .claude/rules/agent-browser.md.
  */
 import type { BrowserOperationMode, BrowserOperationSettings } from '../core/browser-operation'
+import type { BrowserSiteParts } from '../core/browser-site-parts'
 
 /** A member whose mode differs from the company's (try it with one person first). */
 export interface AgentBrowserOverride {
@@ -26,6 +27,8 @@ export interface AgentBrowserChange {
   change:
     | { target: 'company'; before: BrowserOperationSettings; after: BrowserOperationSettings }
     | { target: 'member'; userId: string; memberName: string | null; before: BrowserOperationMode | null; after: BrowserOperationMode | null }
+    /** A registered domain's 「詳しい設定」 (parts hosts, login helpers); null = none set (what the app carries). */
+    | { target: 'site-parts'; host: string; before: BrowserSiteParts | null; after: BrowserSiteParts | null }
 }
 
 /** GET|PUT …/agent-browser (owner/admin). */
@@ -36,7 +39,20 @@ export interface AgentBrowserView {
   updatedBy: string | null
   /** Newest first, at most 20. */
   history: AgentBrowserChange[]
+  /**
+   * Each registered domain's 「詳しい設定」 that is set and valid now (redesign step ②, agent-browser.md "A
+   * domain's parts and login helpers"); a domain absent here uses what the app carries, if anything. Absent
+   * from an older server (read as none).
+   */
+  siteParts?: BrowserSiteParts[]
 }
+
+/**
+ * PUT …/agent-browser/site-parts (owner/admin): one registered domain's 「詳しい設定」, whole — saved with nothing
+ * in it, the domain uses nothing (not what the app carries) —, or `{ host, useAppDefault: true }` to remove it (the
+ * domain then uses what the app carries, if anything).
+ */
+export type AgentBrowserSitePartsInput = BrowserSiteParts | { host: string; useAppDefault: true }
 
 /** The browser part of the caller's policy: the company setting with their override applied. */
 export interface AgentBrowserPolicy extends BrowserOperationSettings {

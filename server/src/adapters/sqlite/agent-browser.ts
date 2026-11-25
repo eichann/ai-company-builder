@@ -46,6 +46,24 @@ export function sqliteAgentBrowserRepository(conn: Database.Database): AgentBrow
         if (change) addHistory(companyId, change)
       })()
     },
+    siteParts(companyId) {
+      return (conn.prepare('SELECT host, parts, updated_at, updated_by FROM agent_browser_site_parts WHERE company_id = ? ORDER BY host')
+        .all(companyId) as Array<{ host: string; parts: string; updated_at: string; updated_by: string }>)
+        .map(r => ({ host: r.host, parts: r.parts, updatedAt: r.updated_at, updatedBy: r.updated_by }))
+    },
+    saveSiteParts(companyId, host, value, change) {
+      conn.transaction(() => {
+        if (value) {
+          conn.prepare(`
+            INSERT INTO agent_browser_site_parts (company_id, host, parts, updated_at, updated_by) VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(company_id, host) DO UPDATE SET parts = excluded.parts, updated_at = excluded.updated_at, updated_by = excluded.updated_by
+          `).run(companyId, host, value.parts, value.updatedAt, value.updatedBy)
+        } else {
+          conn.prepare('DELETE FROM agent_browser_site_parts WHERE company_id = ? AND host = ?').run(companyId, host)
+        }
+        addHistory(companyId, change)
+      })()
+    },
     history(companyId, limit) {
       return (conn.prepare(`
         SELECT id, changed_at, changed_by, change FROM agent_browser_history
