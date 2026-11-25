@@ -23,7 +23,7 @@ import { BROWSER_ID_VALUE_RE } from '../../../../shared/core/plugin-browser-decl
 import { parsePluginManifest } from '../../../../shared/core/plugin-manifest'
 import type { BrowserLineRef } from '../../../../shared/types/browser-lines'
 import { BROWSER_COMPANY_ID_RE } from '../../../shared/browser-plans'
-import { BROWSER_LINE_PLAN_ID_RE, BROWSER_WRITE_CARD_REF_RE } from '../../../shared/browser-inspection'
+import { BROWSER_FRAME_RUN_REF_RE, BROWSER_LINE_PLAN_ID_RE, BROWSER_WRITE_CARD_REF_RE } from '../../../shared/browser-inspection'
 import {
   BROWSER_WRITE_CARD_WORDS as CW, BROWSER_WRITE_WORDS as W, browserStoppedLists, browserWriteSentences, lineWriteMechanicsProblem, writerKey,
   type BrowserLineWriters, type BrowserWriteCardValue, type BrowserWriteGetResult, type BrowserWriteResultView, type BrowserWriteView,
@@ -74,6 +74,15 @@ export interface BrowserWriteLinesDeps<E> {
   fetch?: typeof fetch
   now?: () => number
   log?: Pick<Console, 'warn'>
+  /**
+   * A write run's card (`bf_…`, step ⑤b: features/browser/work.ts), shown through the same IPC: read it, ［任せる］ (the
+   * one-time approval value stays in that wiring), ［やめる］. Null: no such card for the signed-in member.
+   */
+  frameCards?: {
+    card(companyId: string, runId: string): BrowserWriteGetResult | null
+    approve(companyId: string, runId: string, planHash: unknown): Promise<BrowserWriteGetResult | null>
+    cancel(companyId: string, runId: string): BrowserWriteGetResult | null
+  }
 }
 
 export type BrowserWriteProposeOutcome = { kind: 'card'; cardId: string; words: string } | { kind: 'refused'; words: string }
@@ -330,7 +339,18 @@ export function wireBrowserWriteLines<E extends IpcInvokeEvent>(ipc: IpcRegistra
   }
   const answer = (e: Entry): BrowserWriteGetResult => ({ ok: true, view: viewOf(e) })
 
+  /** A write run's card (`bf_…`) from the main window's page: this member's, or why not. */
+  const frameCard = (event: E, companyId: unknown, cardId: unknown): { companyId: string; runId: string } | { message: string } | null => {
+    if (typeof cardId !== 'string' || !BROWSER_FRAME_RUN_REF_RE.test(cardId)) return null
+    if (!deps.fromMainWindow(event)) return { message: MESSAGES.notMainWindow }
+    if (typeof companyId !== 'string' || !BROWSER_COMPANY_ID_RE.test(companyId) || !deps.frameCards) return { message: MESSAGES.badInput }
+    return { companyId, runId: cardId }
+  }
+  const gone = (r: BrowserWriteGetResult | null): BrowserWriteGetResult => r ?? { ok: false, message: CW.gone }
+
   ipc.handle('browserLines:writeCard', async (event, companyId, cardId): Promise<BrowserWriteGetResult> => {
+    const framed = frameCard(event, companyId, cardId)
+    if (framed) return 'message' in framed ? { ok: false, message: framed.message } : gone(deps.frameCards!.card(framed.companyId, framed.runId))
     const got = mine(event, companyId, cardId)
     if ('message' in got) return { ok: false, message: got.message }
     await refreshServer(got.e).catch(() => {})
@@ -353,6 +373,9 @@ export function wireBrowserWriteLines<E extends IpcInvokeEvent>(ipc: IpcRegistra
 
   // ［任せる］: the hash the card showed, once; then the run (the only way to the write runner).
   ipc.handle('browserLines:runWrite', async (event, companyId, cardId, contentHash): Promise<BrowserWriteGetResult> => {
+    // ［任せる］ on a write run's card: the hash the card showed; the approval value is the work wiring's own.
+    const framed = frameCard(event, companyId, cardId)
+    if (framed) return 'message' in framed ? { ok: false, message: framed.message } : gone(await deps.frameCards!.approve(framed.companyId, framed.runId, contentHash))
     const got = mine(event, companyId, cardId)
     if ('message' in got) return { ok: false, message: got.message }
     const e = got.e
@@ -372,6 +395,13 @@ export function wireBrowserWriteLines<E extends IpcInvokeEvent>(ipc: IpcRegistra
     e.phase = 'finished'
     await refreshServer(e).catch(() => {})
     return answer(e)
+  })
+
+  // ［やめる］ on a write run's card (step ⑤b): the plan is not approved and its run ends. No other card has it.
+  ipc.handle('browserLines:cancelWrite', async (event, companyId, cardId): Promise<BrowserWriteGetResult> => {
+    const framed = frameCard(event, companyId, cardId)
+    if (!framed) return { ok: false, message: MESSAGES.badInput }
+    return 'message' in framed ? { ok: false, message: framed.message } : gone(deps.frameCards!.cancel(framed.companyId, framed.runId))
   })
 
   // ［済んでいた］［されていなかった］: the write in doubt only, the person's answer to the server (it decides when).

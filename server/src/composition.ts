@@ -321,6 +321,8 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
   const browserFrames = createBrowserFrameService({
     ...shared, monotonic: systemMonotonicClock, tokenDigest: sha256TokenDigest, skills: browserSkills, devices: browserDevices.gate, siteGrants: browserSiteGrants,
     browserPolicy: member => agentBrowser.policyFor(member), aiStops: member => agentStops.policyFor(member),
+    // One lock per company × domain across both kinds of run (step ⑤b); called only after construction.
+    operatorRunOn: (companyId, host) => browserRuns.runningOn(companyId, host),
   })
   const browserPlans = createBrowserPlanService({
     ...shared, memberships: repos.memberships, tokenDigest: sha256TokenDigest, monotonic: systemMonotonicClock,
@@ -343,6 +345,7 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
   const browserRuns = createBrowserRunService({
     ...shared, browserPolicy: member => agentBrowser.policyFor(member), aiStops: member => agentStops.policyFor(member),
     devices: browserDevices.gate, siteGrants: browserSiteGrants,
+    frameRunOn: (companyId, host) => browserFrames.holderOn(companyId, host),
   })
   const brokerTokens = createBrokerTokenService({
     ...repos, ...shared, brokerVault, keyBroker, tokenDigest: sha256TokenDigest, ttlMinutes: BROKER_TOKEN_TTL_MINUTES,

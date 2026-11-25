@@ -23,8 +23,10 @@ import { BROWSER_CATALOG_NONE } from '../../shared/browser-tool-catalog'
 import { BROWSER_BROWSE_LIMITS, BROWSER_BROWSE_TOOL, BROWSER_BROWSE_WORDS as BW, browseHeading } from '../../shared/browser-browse'
 import { normalizeBrowserHost } from '../../../shared/core/browser-operation'
 import type { BrowserBrowseOutcome } from '../features/browser/browse'
+import { BROWSER_WORK_LIMITS, BROWSER_WORK_TOOL, BROWSER_WORK_WORDS as KW, workHeading } from '../../shared/browser-frame-writes'
+import { isValidSkillName } from '../../../shared/core/names'
 
-export { BROWSER_INSPECT_TOOL, BROWSER_WRITE_TOOL, BROWSER_BROWSE_TOOL }
+export { BROWSER_INSPECT_TOOL, BROWSER_WRITE_TOOL, BROWSER_BROWSE_TOOL, BROWSER_WORK_TOOL }
 
 const NAME_RE = /^[a-z][a-z0-9_]{0,63}$/
 const VALUE_KEY_RE = /^[a-z][a-z0-9_]{0,31}$/
@@ -65,6 +67,70 @@ export interface BrowserInspectTools {
    * done by the operator in the member's window. Given only with its wiring and the switch on. Fixed words only.
    */
   browse?: { description: string; execute(args: unknown): Promise<string> }
+  /**
+   * `browser_work` (redesign step ⑤b, agent-browser.md "Writes within frames, in the app"): a write task on a registered
+   * domain — a company Skill's or one the member approves on the card. Given only with its wiring and the switch on. Fixed
+   * words only; it waits for the card's ［任せる］ (or a pre-approved Skill) and the work, then answers.
+   */
+  work?: { description: string; execute(args: unknown): Promise<string> }
+}
+
+export const browserWorkSchema = z.object({
+  site: z.string().describe('サイトのドメイン（下の一覧のどれか）。The registered domain, as listed in the description.'),
+  task: z.string().describe('サイトでしてほしい作業を文で（1000字まで）。The task in words (1000 characters at most).'),
+  skill: z.string().optional().describe('会社の Skill を使うときだけ、その名前（.claude/skills/<名前>）。The company Skill to follow, if any.'),
+  items: z.array(z.string()).optional().describe('読み取ってほしいものの見出し（10個まで、各40字まで）。読めなかったものは見出しで返る。'),
+})
+
+/** The work tool's description for one turn: the shared words, then the domains this company registered. */
+export function browserWorkDescription(domains: readonly string[]): string {
+  return 'ユーザーにはっきり頼まれたとき、会社が登録したサイトで、書く作業（保存・作成など）を別の係の AI にしてもらう。' +
+    '会社の Skill があれば skill にその名前を入れる（Skill の手順と、管理者が承認した送り先の枠の中だけで書く）。Skill がなければ、係の AI が下見して計画を作り、ユーザーがカードで［任せる］を押したときだけ書く。' +
+    'ユーザーがこのパソコンでそのサイトの窓を開いてログインしていて、そのサイトを「変えてよい」になっている必要がある。結果はカードとして相談に出て、ユーザーだけが見る。' +
+    'あなたに返るのは決まった言葉（済みました／止まりました／分からない書き込みがあります／読めなかったもの：見出し）だけ。サイトの内容は見えないので推測して書かない。済んだら、相談や作業の次の段に進む。' +
+    '1回に数分かかる（カードの承認を待つ間も）。\n' +
+    'Ask a separate operator AI to do a writing task on a domain the company registered (within a company Skill\'s approved frames, ' +
+    'or a plan the member approves on the card). You get fixed words only.\n' +
+    `頼めるサイト（Registered domains）:
+${domains.length > 0 ? domains.map(d => `- ${d}`).join('\n') : BROWSER_CATALOG_NONE}`
+}
+
+/** `browser_work`'s tool: checks the input's shape, runs the write task (one per turn), puts the card's reference into the reply. */
+export function createBrowserWorkTool(
+  run: (input: { site: string; task: string; skill: string | null; items: string[] }) => Promise<{ words: string }>,
+  domains: readonly string[] = [],
+): { description: string; execute(args: unknown): Promise<string> } {
+  let calls = 0
+  return {
+    description: browserWorkDescription(domains),
+    async execute(args) {
+      if (calls >= BROWSER_WORK_LIMITS.callsPerTurn) return KW.tooMany
+      const a = (args && typeof args === 'object' ? args : {}) as Record<string, unknown>
+      if (typeof a.site !== 'string' || normalizeBrowserHost(a.site) !== a.site) return KW.badInput
+      if (typeof a.task !== 'string' || a.task.trim() === '' || a.task.length > BROWSER_BROWSE_LIMITS.task) return KW.badInput
+      if (a.skill !== undefined && (typeof a.skill !== 'string' || !isValidSkillName(a.skill))) return KW.badInput
+      const given = a.items === undefined ? [] : a.items
+      if (!Array.isArray(given) || given.length > BROWSER_BROWSE_LIMITS.items) return KW.badInput
+      const items: string[] = []
+      for (const h of given) {
+        const heading = workHeading(h)
+        if (!heading) return KW.badInput
+        items.push(heading)
+      }
+      calls++
+      try {
+        return (await run({ site: a.site, task: a.task, skill: typeof a.skill === 'string' ? a.skill : null, items })).words
+      } catch {
+        return KW.failed
+      }
+    },
+  }
+}
+
+/** The work wiring's side the tool needs (features/browser/work.ts). */
+export interface BrowserWorkPlans {
+  available(): boolean
+  work(input: { companyId: string; conversationId: string | null; companyRoot: string | null; site: string; task: string; skill: string | null; items: readonly string[]; signal: AbortSignal; onCard(runId: string): void }): Promise<{ words: string }>
 }
 
 export const browserBrowseSchema = z.object({
@@ -220,9 +286,10 @@ export function createBrowserWriteTool(
 /** The tool for one consultation turn, or undefined (no wiring, or the switch off: no tool at all). */
 export function browserInspectForTurn(
   plans: BrowserInspectPlans | undefined,
-  turn: { companyId: string; conversationId: string | null; signal: AbortSignal; onCard: (planId: string) => void },
+  turn: { companyId: string; conversationId: string | null; signal: AbortSignal; onCard: (planId: string) => void; companyRoot?: string | null },
   writes?: BrowserWritePlans,
   browses?: BrowserBrowsePlans,
+  works?: BrowserWorkPlans,
 ): BrowserInspectTools | undefined {
   if (!plans || !plans.inspectAvailable()) return undefined
   const inspect = createBrowserInspectTools(input => plans.inspect({
@@ -235,6 +302,13 @@ export function browserInspectForTurn(
       companyId: turn.companyId, conversationId: turn.conversationId, signal: turn.signal, site: input.site, task: input.task, items: input.items,
     }), turn.onCard, browses.domains(turn.companyId)),
   } : inspect
+  // A write task on a registered domain (step ⑤b): the same switch and turn signal; the domains are the browse wiring's.
+  if (works && works.available() && browses) {
+    tools.work = createBrowserWorkTool(input => works.work({
+      companyId: turn.companyId, conversationId: turn.conversationId, companyRoot: turn.companyRoot ?? null, signal: turn.signal,
+      site: input.site, task: input.task, skill: input.skill, items: input.items, onCard: turn.onCard,
+    }), browses.domains(turn.companyId))
+  }
   if (!writes || !writes.writeAvailable()) return tools
   return {
     ...tools,

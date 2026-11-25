@@ -73,6 +73,8 @@ const LATER_TABLES = [
   // agent-browser.md "The operator's window tools": the operator's runs and their log.
   'browser_runs',
   'browser_run_log',
+  // step ⑤b: a write run's page writes (no value).
+  'browser_run_writes',
   // agent-browser.md "Writes within frames": a run's frames and the writes permitted.
   'browser_frame_runs',
   'browser_frames',

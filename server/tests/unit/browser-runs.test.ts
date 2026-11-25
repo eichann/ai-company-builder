@@ -317,3 +317,53 @@ describe('the core\'s address and label rules', () => {
     expect(browserRunLogProblem([{ page: '/', action: 'click', label: l }])).toBeNull()
   })
 })
+
+describe('a write task\'s runs (step ⑤b): 変えてよい first, one lock with the frames run, the write steps kept without values', () => {
+  const FRAME = `bf_${'1'.repeat(32)}`
+  it('`write: true` needs the person at 変えてよい and the site allowing writes: 見るだけ is refused before anything is read', () => {
+    // alice is 見るだけ on OTHER_HOST (a write site) by default; HOST itself is a 見るだけ site.
+    expect(refusal(runs.start(alice, { host: OTHER_HOST, write: true }, keys[alice.userId]))).toBe('forbidden:BROWSER_TYPE_NOT_GRANTED')
+    value(grants.set(owner, alice.userId, { host: OTHER_HOST, level: 'write' }))
+    expect(refusal(runs.start(alice, { host: HOST, write: true }, keys[alice.userId]))).toBe('conflict:BROWSER_NOT_ALLOWED')
+    expect(refusal(runs.start(alice, { host: OTHER_HOST, write: 'yes' }, keys[alice.userId]))).toBe('bad-request:BROWSER_BAD_RUN')
+    expect(value(runs.start(alice, { host: OTHER_HOST, write: true }, keys[alice.userId])).runId).toMatch(/^bo_/)
+  })
+
+  it('while a frames run holds the domain only its member\'s run naming it starts; naming one that holds nothing is refused', () => {
+    let holder: { runId: string; userId: string } | 'busy' | null = { runId: FRAME, userId: alice.userId }
+    runs = createBrowserRunService({
+      companyData: data, transactions: sqliteTransactions(conn), clock: { now: () => iso(now), nowMs: () => now }, ids,
+      browserPolicy: m => policies[m.companyId], aiStops: () => ({ all: false, tools: [] }), devices: dev.gate, siteGrants: grants,
+      frameRunOn: () => holder,
+    })
+    expect(refusal(start(bob))).toBe('conflict:BROWSER_RUN_BUSY')
+    expect(refusal(start(alice))).toBe('conflict:BROWSER_RUN_BUSY')
+    expect(refusal(runs.start(bob, { host: HOST, frameRunId: FRAME }, keys[bob.userId]))).toBe('conflict:BROWSER_RUN_BUSY')
+    expect(refusal(runs.start(alice, { host: HOST, frameRunId: `bf_${'2'.repeat(32)}` }, keys[alice.userId]))).toBe('conflict:BROWSER_RUN_BUSY')
+    const started = value(runs.start(alice, { host: HOST, frameRunId: FRAME }, keys[alice.userId]))
+    value(runs.finish(alice, started.runId, { outcome: 'done', steps: [] }))
+    // An ended frames run's write may still be on its way: busy for everyone.
+    holder = 'busy'
+    expect(refusal(runs.start(alice, { host: HOST, frameRunId: FRAME }, keys[alice.userId]))).toBe('conflict:BROWSER_RUN_BUSY')
+    holder = null
+    expect(refusal(runs.start(alice, { host: HOST, frameRunId: FRAME }, keys[alice.userId]))).toBe('conflict:BROWSER_RUN_ENDED')
+    expect(value(start(alice)).runId).toMatch(/^bo_/)
+    // The frames run's start asks this side: a running operator run holds the domain.
+    expect(runs.runningOn(CO, HOST)).toBe(true)
+    expect(runs.runningOn(CO, OTHER_HOST)).toBe(false)
+  })
+
+  it('a run\'s write steps are kept and listed — the frame, method, path pattern and outcome only; a value anywhere refuses the whole finish', () => {
+    const id = value(start(alice)).runId
+    const write = { after: 0, frame: 1, method: 'POST', page: '/orders/{n}/note', outcome: 'done' }
+    for (const bad of [
+      [{ ...write, page: '/orders/88123/note' }], [{ ...write, body: 'x' }], [{ ...write, outcome: 'sent' }], [{ ...write, after: 2 }],
+      [{ ...write, method: 'post' }], [{ ...write, frame: 0 }],
+    ]) expect(refusal(runs.finish(alice, id, { outcome: 'done', steps: [], writes: bad }))).toBe('bad-request:BROWSER_BAD_RUN')
+    value(runs.finish(alice, id, { outcome: 'done', steps: [], writes: [write, { ...write, frame: null, method: 'OTHER', page: '/autosave', outcome: 'refused' }] }))
+    const listed = value(runs.list(alice)).runs.find(r => r.id === id)!
+    expect(listed.writes).toEqual([write, { after: 0, frame: null, method: 'OTHER', page: '/autosave', outcome: 'refused' }])
+    expect(() => conn.prepare("UPDATE browser_run_writes SET outcome = 'done'").run()).toThrow(/append-only/)
+    expect(() => conn.prepare('DELETE FROM browser_run_writes').run()).toThrow(/append-only/)
+  })
+})

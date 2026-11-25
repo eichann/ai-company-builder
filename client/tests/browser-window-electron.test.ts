@@ -56,6 +56,7 @@ interface Result {
   helpers: Record<string, unknown>
   recording: Record<string, unknown>
   browse: Record<string, unknown>
+  work: Record<string, unknown>
 }
 
 function freePort(): Promise<number> {
@@ -98,7 +99,7 @@ before(async () => {
     let err = ''
     child.stdout.on('data', chunk => { out += chunk })
     child.stderr.on('data', chunk => { err += chunk })
-    const timer = setTimeout(() => { child.kill('SIGKILL'); reject(new Error(`the Electron harness did not finish:\n${out}\n${err.slice(-4000)}`)) }, 180_000)
+    const timer = setTimeout(() => { child.kill('SIGKILL'); reject(new Error(`the Electron harness did not finish:\n${out}\n${err.slice(-4000)}`)) }, 240_000)
     // `close`: the process exited and its output streams ended; the result file was renamed into place before.
     child.on('close', () => { clearTimeout(timer); resolve(`${out}\n${err.slice(-4000)}`) })
   })
@@ -175,8 +176,8 @@ test('in ai mode no write reaches the operated host without an approving step; r
   assert.equal(w.websocket, 'refused')
   assert.equal(w.read, 200)
   // (The runner's own writes, to /line/…, are the next tests'.)
-  // (The recording's page saves through its own fetch, as a person does: the recording tests' own.)
-  const writes = hitsTo('op.test').filter(h => h.method !== 'GET' && !h.path.startsWith('/line/') && !h.path.startsWith('/rec-'))
+  // (The recording's page saves through its own fetch, as a person does: the recording tests' own; a write run's, /work/…, the last test's.)
+  const writes = hitsTo('op.test').filter(h => h.method !== 'GET' && !h.path.startsWith('/line/') && !h.path.startsWith('/rec-') && !h.path.startsWith('/work/'))
   // Only the member's own (human mode) writes and the one approved write arrived: no beacon, form, XHR, WebSocket.
   assert.deepEqual(writes.map(h => `${h.method} ${h.path} ${h.body}`), ['POST /human-save h', 'POST /ai-ok approved', 'POST /human-again h'])
   assert.equal(hitsTo('op.test').some(h => h.method === 'UPGRADE'), false)
@@ -436,4 +437,54 @@ test('the operator\'s window tools read only: a submit, a fetch button, a confir
   assert.equal(r.pick, 'ok')
   assert.ok(Number(r.choosers) > 0, 'the page opened a file chooser')
   assert.ok(result.refusalLog.some(l => l.includes('file-chooser')), 'the file chooser was intercepted and refused')
+})
+
+test('a write run sends each page write once within the plan: the page\'s own cookie and CSRF, its answer without Set-Cookie, one at a time; outside the plan, a file, past the max, after a stop and after a lost answer nothing is sent', { skip }, () => {
+  const r = result.work
+  assert.equal(r.entered, true)
+  const work = r.work as Array<{ path: string; name: string; cookie: string; csrf: string; start: number; end: number }>
+  // (The last scenario's 'g' is the detach's: checked at the end.)
+  const saves = work.filter(w => w.path === '/work/save' && w.name !== 'g')
+  // Exactly a, b and c reached the site, each once, with the page's cookie and CSRF header as the page made them.
+  assert.deepEqual(saves.map(w => w.name).sort(), ['a', 'b', 'c'])
+  for (const w of saves) {
+    assert.match(w.cookie, /(^|;\s*)sid=1(;|$)/)
+    assert.equal(w.csrf, 'csrf-777')
+  }
+  // The page got the site's answer and its flow went on; the cookie the site set reached neither the page nor the window.
+  const save = r.save as { status: number; body: { id: number }; cookie: string }
+  assert.equal(save.status, 201)
+  assert.equal(save.body.id, 4242)
+  assert.equal(save.cookie.includes('rotated'), false)
+  assert.equal((r.windowCookies as string[]).includes('rotated'), false)
+  // Two saves at once: the second reached the site only after the first was answered (and its result recorded).
+  const [b, c] = ['b', 'c'].map(n => saves.find(w => w.name === n)!)
+  assert.ok(Math.min(b.end, c.end) <= Math.max(b.start, c.start), 'one write at a time')
+  assert.equal(r.reportsBeforePermits, true)
+  // Outside the plan, a file, a never-read address, past the frame's max, after the stop: nothing sent.
+  assert.equal(r.auto, 'failed')
+  assert.equal(r.upload, 'failed')
+  assert.equal(r.never, 'refused')
+  assert.equal(r.stopped, 'failed')
+  assert.equal(r.pastMax, 'failed')
+  assert.equal(r.permitsForPastMax, 0)
+  assert.equal(result.hits.filter(h => h.path === '/work/auto' || h.path.startsWith('/work/never')).length, 0)
+  // The lost answer: one request reached the site (no resend), the run is locked, the next save is not sent.
+  assert.equal(r.lost, 'failed')
+  assert.equal(work.filter(w => w.path === '/work/lost').length, 1)
+  assert.equal(r.lockedAfterLost, true)
+  assert.equal(r.afterLost, 'failed')
+  assert.equal(saves.some(w => w.name === 'f' || w.name === 'e' || w.name === 'd' || w.name === 'u'), false)
+  // The server was told shapes and fixed words only: no cookie, CSRF value or body value in a permit or a report; nor in the log.
+  const told = JSON.stringify(r.calls) + JSON.stringify(r.log)
+  for (const secret of ['csrf-777', 'sid=1', '"a"', '4242']) assert.equal(told.includes(secret), false, secret)
+  const reports = (r.calls as Array<{ kind: string; body: { result?: string } }>).filter(c => c.kind === 'report').map(c => c.body.result)
+  assert.deepEqual(reports, ['done', 'done', 'done', 'not_sent', 'unknown'])
+  // The DevTools connection gone while a save was held: the run's copy never went (at most the page's own original), the
+  // write is unknown and told so, the run locked.
+  assert.ok(work.filter(w => w.name === 'g').length <= 1, 'never two')
+  assert.deepEqual(r.detachedRecords, ['unknown'])
+  assert.equal(r.detachedLocked, true)
+  const second = (r.calls as Array<{ kind: string; body: { result?: string } }>).filter(c => c.kind === 'report2').map(c => c.body.result)
+  assert.deepEqual(second, ['unknown'])
 })

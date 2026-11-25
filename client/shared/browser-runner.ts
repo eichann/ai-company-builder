@@ -451,7 +451,7 @@ export interface BrowserWriteSteps {
  */
 export type BrowserWriteOutcome =
   | { sent: false; stage: 'prepare' | 'ready' | 'before-send' }
-  | { sent: true; answer: { status: number; body: string } | null }
+  | { sent: true; answer: { status: number; body: string; headers?: ReadonlyArray<readonly [string, string]>; bytes?: Uint8Array } | null }
 
 /** The window as a run uses it (electron/browser-window.ts). */
 export interface BrowserRunSurface {

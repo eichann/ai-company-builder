@@ -233,7 +233,9 @@ export const BROWSER_WRITE_CARD_WORDS = {
   targetsHeading: 'サイトから読む対象（番号）',
   willDo: 'これからすること',
   readHeading: 'サイトから読み取った情報（AI には見せていません）',
+  previewValues: '下見で読んだ大事な値（AI には見せていません）',
   entrust: '任せる',
+  cancel: 'やめる',
   entrusting: '書いています…',
   preparing: 'サイトを読んで、計画を作っています…',
   doneAll: 'すべて済みました。書いたあと読んで、計画どおりの状態になっていることを確かめました。',
@@ -309,6 +311,8 @@ export interface BrowserWriteView {
   /** A plain sentence (why it cannot go on), or null. */
   message: string | null
   result: BrowserWriteResultView | null
+  /** ［やめる］ can be pressed (a write run's card waiting for ［任せる］, step ⑤b); absent: no such button. */
+  cancellable?: boolean
 }
 
 export type BrowserWriteGetResult = { ok: true; view: BrowserWriteView } | { ok: false; message: string }
@@ -346,8 +350,10 @@ export function readBrowserWriteView(v: unknown, readCard: (c: unknown) => Brows
     }
     result = { outcome: r.outcome as BrowserWriteResultView['outcome'], headline: r.headline, done: [...r.done], notDone: [...r.notDone], unknown: [...r.unknown], byHand: [...r.byHand], confirm }
   }
+  if (x.cancellable !== undefined && typeof x.cancellable !== 'boolean') return null
   return {
     title: x.title, siteLabel: x.siteLabel, phase: x.phase as BrowserWriteCardPhase, values, sentences: [...x.sentences], card,
     readAt: x.readAt as string | null, contentHash: x.contentHash as string | null, message: x.message as string | null, result,
+    ...(x.cancellable === true ? { cancellable: true } : {}),
   }
 }

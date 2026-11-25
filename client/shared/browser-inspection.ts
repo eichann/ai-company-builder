@@ -8,7 +8,7 @@
  * for each check, its label (the line's and the map's words) and its mark — ✓ / ✗ / 「読み取れませんでした」 — never a
  * value, a field heading of a ✗ or the account (owner decision, the PC-registration memo v2).
  */
-import { BROWSER_CARD_MARK_WORDS, type BrowserCard, type BrowserCardMark, type BrowserCardRow, type BrowserCardValue } from '../../shared/core/browser-card'
+import { BROWSER_CARD_MARK_WORDS, type BrowserCard, type BrowserCardCheckedBy, type BrowserCardMark, type BrowserCardRow, type BrowserCardValue } from '../../shared/core/browser-card'
 import { BROWSER_REQUEST_SERVER, BROWSER_COMPANY_ID_RE } from './browser-plans'
 import { BROWSER_RUN_ID_RE } from '../../shared/core/browser-run-log'
 
@@ -26,6 +26,8 @@ export const BROWSER_INSPECTION_PART_TYPE = 'data-browser-inspection'
 export const BROWSER_LINE_PLAN_ID_RE = /^bl_[0-9a-f]{32}$/
 /** A write card's id (main's own, generalization PR 5c): the reference names it instead of a server plan. */
 export const BROWSER_WRITE_CARD_REF_RE = /^wp_[0-9a-f]{32}$/
+/** A write run's card (step ⑤b): the server's frames run id names it (main holds the card; agent-browser.md "Writes within frames, in the app"). */
+export const BROWSER_FRAME_RUN_REF_RE = /^bf_[0-9a-f]{32}$/
 
 export interface BrowserInspectionRef {
   /** The card's own id (one per tool call). */
@@ -47,7 +49,7 @@ const isMap = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 
 export function readBrowserInspectionRef(data: unknown): BrowserInspectionRef | undefined {
   if (!isMap(data)) return undefined
   const d = data
-  if (!str(d.id, 200) || !str(d.companyId, 100) || !BROWSER_COMPANY_ID_RE.test(d.companyId) || !str(d.planId, 40) || !(BROWSER_LINE_PLAN_ID_RE.test(d.planId) || BROWSER_WRITE_CARD_REF_RE.test(d.planId) || BROWSER_RUN_ID_RE.test(d.planId)) || !str(d.at, 40)) return undefined
+  if (!str(d.id, 200) || !str(d.companyId, 100) || !BROWSER_COMPANY_ID_RE.test(d.companyId) || !str(d.planId, 40) || !(BROWSER_LINE_PLAN_ID_RE.test(d.planId) || BROWSER_WRITE_CARD_REF_RE.test(d.planId) || BROWSER_RUN_ID_RE.test(d.planId) || BROWSER_FRAME_RUN_REF_RE.test(d.planId)) || !str(d.at, 40)) return undefined
   return {
     id: d.id, companyId: d.companyId, planId: d.planId, at: d.at,
     conversationId: typeof d.conversationId === 'string' && d.conversationId.length <= 200 ? d.conversationId : null,
@@ -96,8 +98,18 @@ function readRow(r: unknown): BrowserCardRow | null {
   }
   const before = readValue(r.before)
   const after = readValue(r.after)
-  return before && after ? { label: r.label, before, after } : null
+  if (!before || !after) return null
+  // A write's after-read row (step ⑤b): what it is compared to, who checked it, whether it held — each only in its shape.
+  const compared = r.compared === undefined ? undefined : readValue(r.compared)
+  if (compared === null) return null
+  if (r.by !== undefined && !CHECKED_BY.includes(r.by as BrowserCardCheckedBy)) return null
+  if (r.mark !== undefined && r.mark !== 'ok' && r.mark !== 'ng') return null
+  return {
+    label: r.label, before, after, ...(compared ? { compared } : {}),
+    ...(r.by !== undefined ? { by: r.by as BrowserCardCheckedBy } : {}), ...(r.mark !== undefined ? { mark: r.mark as 'ok' | 'ng' } : {}),
+  }
 }
+const CHECKED_BY: readonly BrowserCardCheckedBy[] = ['machine', 'ai', 'none']
 
 /**
  * A card as the renderer is handed it (`browserLines:card`): every field the card shows checked for its shape and copied

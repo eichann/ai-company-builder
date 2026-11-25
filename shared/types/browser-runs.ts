@@ -2,11 +2,11 @@
  * API shapes of the operator's runs of 「ブラウザ操作」 (agent-browser.md "The operator's window tools"; redesign step ④).
  * Generic units only — a registered domain, page patterns, labels —: never a value the site showed or the operator typed.
  */
-import type { BrowserRunLogStep, BrowserRunOutcome, BrowserRunState } from '../core/browser-run-log'
+import type { BrowserRunLogStep, BrowserRunOutcome, BrowserRunState, BrowserRunWriteStep } from '../core/browser-run-log'
 
-export type { BrowserRunLogStep, BrowserRunOutcome, BrowserRunState }
+export type { BrowserRunLogStep, BrowserRunOutcome, BrowserRunState, BrowserRunWriteStep }
 
-/** POST /browser-runs { host, conversationId? } (+ this PC's key header): the run and its lease. */
+/** POST /browser-runs { host, conversationId?, frameRunId? } (+ this PC's key header): the run and its lease. */
 export interface BrowserRunStarted {
   runId: string
   /** How long the lock is held without a renewal (each step renews it). */
@@ -23,6 +23,8 @@ export interface BrowserRunFinish {
   outcome: BrowserRunOutcome
   reason?: string
   steps: BrowserRunLogStep[]
+  /** A write run's page writes (step ⑤b); absent for a read run. */
+  writes?: BrowserRunWriteStep[]
 }
 
 /** One run as GET /browser-runs lists it (the member's own; an owner / admin: everyone's). */
@@ -35,6 +37,8 @@ export interface BrowserRunView {
   startedAt: string
   endedAt: string | null
   steps: BrowserRunLogStep[]
+  /** Its page writes (step ⑤b): empty for a read run. Optional: an older server sends none. */
+  writes?: BrowserRunWriteStep[]
 }
 
 export interface BrowserRunsList {

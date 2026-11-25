@@ -24,7 +24,7 @@ import { REVIEW_SERVER } from './review-request'
 import { WEB_RESEARCH_SERVER, WEB_RESEARCH_TOOL } from './web-research'
 import { BROWSER_REQUEST_SERVER, BROWSER_REQUEST_TOOL } from './browser-plans'
 import { BROWSER_INSPECT_TOOL } from './browser-inspection'
-import { BROWSER_BROWSE_TOOL } from './browser-browse'
+import { BROWSER_BROWSE_TOOL, BROWSER_WORK_TOOL } from './browser-browse'
 import { commandHosts, type SandboxConcern, type SandboxViolation } from './agents/sandbox-policy'
 import {
   AGENT_EVENT_VERSION,
@@ -95,6 +95,8 @@ export function categorizeTool(toolName: string): ToolCategory {
     if (mcp.server === BROWSER_REQUEST_SERVER && mcp.tool === BROWSER_INSPECT_TOOL) return 'web'
     // …and its read task on a registered domain (the operator reads the site in the member's window).
     if (mcp.server === BROWSER_REQUEST_SERVER && mcp.tool === BROWSER_BROWSE_TOOL) return 'web'
+    // …and its write task (the operator writes within the run's frames in the member's window).
+    if (mcp.server === BROWSER_REQUEST_SERVER && mcp.tool === BROWSER_WORK_TOOL) return 'web'
     return APP_MCP_SERVERS.includes(mcp.server) ? 'app-tool' : 'mcp-external'
   }
   return Object.prototype.hasOwnProperty.call(TOOL_CATEGORIES, toolName) ? TOOL_CATEGORIES[toolName] : 'other'

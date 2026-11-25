@@ -28,6 +28,8 @@ import { startSites, type Sites } from './sites'
 import { createBrowserRecorder } from '../../shared/browser-recorder'
 import { browserRecordingProblem } from '../../../shared/core/browser-recording'
 import { newRecordingDigest } from '../../electron/features/browser/recording'
+import { createFrameWriter } from '../../electron/features/browser/frame-writes'
+import type { BrowserLinesAnswer } from '../../electron/features/browser/lines-api'
 
 const dir = process.env.BROWSER_TEST_DIR!
 const [port, evilPort, udpPort] = (process.env.BROWSER_TEST_PORTS ?? '').split(',').map(Number)
@@ -69,8 +71,9 @@ const fail = (error: unknown) => {
   writeResult({ error: error instanceof Error ? error.stack : String(error) })
   app.exit(1)
 }
-// The whole harness (the operator's window tools added ~20 s of scenarios on a quiet Mac): room for a busy runner.
-setTimeout(() => fail(new Error('the harness timed out')), 150_000)
+// The whole harness (the operator's window tools added ~20 s of scenarios on a quiet Mac, a write run ~10 s; a busy shared Mac took
+// 140 s): room for a busy runner.
+setTimeout(() => fail(new Error('the harness timed out')), 210_000)
 
 function loaded(win: BrowserShellWindow): Promise<void> {
   return new Promise(resolve => {
@@ -164,6 +167,7 @@ async function run() {
   result.runner = await runnerScenarios(win, site, sites, js, partition)
   result.recording = await recordingScenarios(win, shell, site, js)
   result.browse = await browseScenarios(win, sites)
+  result.work = await workScenarios(win, sites)
 
   // The login: a cookie and storage of the site, then cleared.
   await js(`document.cookie = 'sid=1; Secure; Max-Age=3600'; localStorage.setItem('k', 'v'); 1`)
@@ -361,6 +365,107 @@ async function browseScenarios(win: BrowserShellWindow, sites: Sites) {
   out.evilHits = sites.hits.filter(h => h.host === 'evil.test' && h.path.startsWith('/browse')).length
   await page.loadURL('https://op.test/')
   await wait(500)
+  return out
+}
+
+/**
+ * A write run (agent-browser.md "Writes within frames, in the app"): the window holds every write its page makes and the
+ * real frame writer decides it against a fake of the server's frames routes — a save within the plan is sent once with the
+ * page's own cookie and CSRF header and its answer reaches the page without Set-Cookie; two saves at once go one after the
+ * other; an autosave outside the plan, an upload with a file and a fourth save past the frame's max are never sent; a
+ * save whose permit comes after the run stopped is not sent; a write whose answer is lost reaches the site once and the
+ * run sends nothing more; a never-read address is refused.
+ */
+async function workScenarios(win: BrowserShellWindow, sites: Sites) {
+  const out: Record<string, unknown> = {}
+  const page = win.webContents
+  const js = (code: string) => page.executeJavaScript(code, true)
+  let going = true
+  let permitDelay = 0
+  let nextWrite = 0
+  const calls: Array<{ kind: string; body: unknown; at: number }> = []
+  const api = {
+    async framePermit(_c: string, _r: string, body: unknown): Promise<BrowserLinesAnswer> {
+      calls.push({ kind: 'permit', body, at: Date.now() })
+      if (permitDelay) await wait(permitDelay)
+      const frame = (body as { frame: number }).frame
+      return { kind: 'ok', value: { write: ++nextWrite, frame, permittedAt: new Date().toISOString(), validMs: 5000 } }
+    },
+    async frameReport(_c: string, _r: string, body: unknown): Promise<BrowserLinesAnswer> {
+      calls.push({ kind: 'report', body, at: Date.now() })
+      return { kind: 'ok', value: { outcome: 'applied' } }
+    },
+  }
+  const writer = createFrameWriter({
+    companyId: 'company-1', runId: `bf_${'a'.repeat(32)}`, host: 'op.test', api, going: () => going, stepsSoFar: () => 0,
+    frames: [
+      { frame: 1, method: 'POST', path: '/work/save', fields: {}, max: 4, left: 4 },
+      { frame: 2, method: 'POST', path: '/work/lost', fields: {}, max: 2, left: 2 },
+    ],
+  })
+  await page.loadURL('https://op.test/work')
+  await js(`document.cookie = 'sid=1; Secure; Path=/'; 1`)
+  // The writer the window's holds go to (a second one for the last scenario).
+  let current = writer
+  out.entered = await win.browse.enter(() => false, {
+    holdWrite: held => current.hold(held), neverRead: p => p.startsWith('/work/never'), detached: () => current.abandon('detached'),
+  })
+  out.save = await js(`save('a')`)
+  out.both = await js(`Promise.all([save('b'), save('c')])`)
+  out.auto = await js(`auto()`)
+  out.upload = await js(`upload()`)
+  out.never = await js(`fetch('/work/never?x=1').then(r => r.status, () => 'refused')`)
+  // The run stops while the permit is on its way: the write is never sent (the unit is used all the same).
+  permitDelay = 700
+  setTimeout(() => { going = false }, 200)
+  out.stopped = await js(`save('e')`)
+  permitDelay = 0
+  going = true
+  // The frame's max (4) is reached: one more save is refused without asking.
+  const permitsBefore = calls.filter(c => c.kind === 'permit').length
+  out.pastMax = await js(`save('d')`)
+  out.permitsForPastMax = calls.filter(c => c.kind === 'permit').length - permitsBefore
+  // The answer lost: sent once, then nothing more in the run.
+  out.lost = await js(`lost()`)
+  out.lockedAfterLost = writer.locked()
+  await wait(1500)
+  out.afterLost = await js(`save('f')`)
+  const ses = page.session
+  out.windowCookies = (await ses.cookies.get({ url: 'https://op.test/' })).map(c => c.name)
+  // The window's DevTools connection goes while a save is held (its permit on the way): the run's copy is never sent and
+  // the write is unknown; at most the page's own original reaches the site (independent review of #856).
+  const second = createFrameWriter({
+    companyId: 'company-1', runId: `bf_${'c'.repeat(32)}`, host: 'op.test', going: () => true, stepsSoFar: () => 0,
+    frames: [{ frame: 1, method: 'POST', path: '/work/save', fields: {}, max: 2, left: 2 }],
+    api: {
+      async framePermit(_c, _r, body) { calls.push({ kind: 'permit2', body, at: Date.now() }); await wait(800); return { kind: 'ok', value: { write: 1, frame: 1, permittedAt: new Date().toISOString(), validMs: 5000 } } },
+      async frameReport(_c, _r, body) { calls.push({ kind: 'report2', body, at: Date.now() }); return { kind: 'ok', value: {} } },
+    },
+  })
+  current = second
+  const detachedSave = js(`save('g')`)
+  await wait(300)
+  page.debugger.detach()
+  out.detachedSave = await Promise.race([detachedSave, wait(5000).then(() => 'no answer')])
+  await wait(1500)
+  out.detachedRecords = second.records().map(r => r.outcome)
+  out.detachedLocked = second.locked()
+  out.cookiesAfterDetach = (await ses.cookies.get({ url: 'https://op.test/' })).map(c => c.name)
+  await win.browse.leave()
+  // The original's own answer (let go by Chromium) set its cookie: removed, so the later login tests count from the same start.
+  await ses.cookies.remove('https://op.test/', 'rotated')
+  out.calls = calls.map(c => ({ kind: c.kind, body: c.body }))
+  out.reportsBeforePermits = (() => {
+    // Every permit after the first comes after the previous write's report (one write at a time).
+    const permits = calls.filter(c => c.kind === 'permit')
+    const reports = calls.filter(c => c.kind === 'report')
+    return permits.slice(1).every((p, i) => reports[i] !== undefined && reports[i].at <= p.at)
+  })()
+  out.records = writer.records().map(r => ({ line: r.line, outcome: r.outcome }))
+  out.log = writer.log()
+  out.work = sites.work.map(w => ({ ...w }))
+  await page.loadURL('https://op.test/').catch(() => {})
+  await wait(300)
   return out
 }
 

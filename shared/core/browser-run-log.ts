@@ -31,6 +31,8 @@ export const BROWSER_RUN_LIMITS = Object.freeze({
   runMs: 6 * 60_000,
   /** Runs listed at most (newest first). */
   list: 200,
+  /** Write steps kept per run (step ⑤b: each page write the window held). */
+  writes: 60,
 })
 
 /** One step of a run as stored: the page it was done on (a pattern), what was done, the label of what was pressed. */
@@ -72,9 +74,53 @@ export function browserRunLogProblem(steps: unknown): string | null {
 export const BROWSER_RUN_END_REASONS = [
   'not-found', 'need-person', 'blocked', 'stopped-by-person', 'ai-stopped', 'context-changed', 'window-closed',
   'timeout', 'rounds', 'bad-answer', 'operator-failed', 'refused', 'no-answer', 'other-frames',
+  // A write run (step ⑤b): a write that may have been sent without an answer; the plan not approved (dismissed, timed out).
+  'write-unknown', 'not-approved',
 ] as const
 export type BrowserRunEndReason = typeof BROWSER_RUN_END_REASONS[number]
 export const isBrowserRunEndReason = (v: unknown): v is BrowserRunEndReason => (BROWSER_RUN_END_REASONS as readonly unknown[]).includes(v)
 
 /** The run's id as the server makes it (put in an address only in this shape). */
 export const BROWSER_RUN_ID_RE = /^bo_[0-9a-f]{32}$/
+
+// ── Write steps (redesign step ⑤b: a write run's page writes; agent-browser.md "Writes within frames, in the app") ──────
+
+/** What became of a page write the window held: sent once and the site answered, not sent, may have been sent, refused. */
+export const BROWSER_RUN_WRITE_OUTCOMES = ['done', 'not-sent', 'unknown', 'refused'] as const
+export type BrowserRunWriteOutcome = typeof BROWSER_RUN_WRITE_OUTCOMES[number]
+/** The methods kept as they are; any other method of a write is kept as `OTHER`. */
+export const BROWSER_RUN_WRITE_METHODS = ['POST', 'PUT', 'PATCH', 'DELETE', 'OTHER'] as const
+
+/**
+ * One page write of a run as stored: after how many logged steps it came, the frame it was matched to (null: none fitted,
+ * refused), the method, the path as a pattern (the recording's rule: digits and names masked, query names only) and the
+ * outcome. **Never a value**: no body, field value, answer or header.
+ */
+export interface BrowserRunWriteStep {
+  after: number
+  frame: number | null
+  method: typeof BROWSER_RUN_WRITE_METHODS[number]
+  page: string
+  outcome: BrowserRunWriteOutcome
+}
+
+/** The method as a write step keeps it. */
+export const browserRunWriteMethod = (m: string): BrowserRunWriteStep['method'] =>
+  (BROWSER_RUN_WRITE_METHODS as readonly string[]).includes(m) && m !== 'OTHER' ? m as BrowserRunWriteStep['method'] : 'OTHER'
+
+/** Why a write-step list may not be stored, or null (exact keys, a page pattern, fixed words, `after` within the steps). */
+export function browserRunWritesProblem(writes: unknown, steps: number): string | null {
+  if (!Array.isArray(writes)) return 'writes'
+  if (writes.length > BROWSER_RUN_LIMITS.writes) return 'too-many'
+  for (const w of writes) {
+    if (!w || typeof w !== 'object' || Array.isArray(w)) return 'write'
+    const o = w as Record<string, unknown>
+    if (Object.keys(o).length !== 5 || !['after', 'frame', 'method', 'page', 'outcome'].every(k => k in o)) return 'write'
+    if (!Number.isSafeInteger(o.after) || (o.after as number) < 0 || (o.after as number) > steps) return 'after'
+    if (o.frame !== null && (!Number.isSafeInteger(o.frame) || (o.frame as number) < 1 || (o.frame as number) > 16)) return 'frame'
+    if (!(BROWSER_RUN_WRITE_METHODS as readonly unknown[]).includes(o.method)) return 'method'
+    if (!isBrowserRunPage(o.page)) return 'page'
+    if (!(BROWSER_RUN_WRITE_OUTCOMES as readonly unknown[]).includes(o.outcome)) return 'outcome'
+  }
+  return null
+}

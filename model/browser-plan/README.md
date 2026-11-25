@@ -250,6 +250,14 @@ site, the Skill's approval revoked or changed, another PC, the run's hour).
 - **Matching the request to the frame** is a precondition of `AppAsks` here (a write that fits no frame is never asked
   for); the server checks it too (`browserFrameMismatch`, the one rule in `shared/core`) and a mismatch takes nothing.
 - **The card's one-time approval value** (only the start's answer carries it) is folded into `PersonApproves`.
+- **Where the app's code (step ⑤b, `client/electron/features/browser/frame-writes.ts`) is stricter than the model** (each on
+  the safe side, no transition added): the worker asks for the next page write only once the previous one's **report
+  was recorded** (the model's worker asks right after sending; the server's one-in-flight rule is what the model
+  checks); a report the server did not record, a non-success answer of the site or a permit refusal that ends the run
+  make the app send nothing more in that run (the model sends on until the server refuses); a held write is matched to a
+  frame locally first, with the core's rule (`browserFrameMismatch`), so a mismatch never asks. The join of the frames
+  run's lock with the operator runs' (one run per company × domain across both, `services/browser-runs.ts` `frameRunOn`
+  and `browser-frames.ts` `holderOn`) is about more than one run: left out like the lock itself.
 - The run lock per company × domain (D10) and the domain kept busy by an ended run's write in flight (more than one run,
   the server's tests), the person confirming an unknown write (⑤b's card), the
   run's time limits as real durations (folded into `closed` and `RunEnds`), a server clock jump (PlanLife's;

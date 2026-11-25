@@ -67,7 +67,9 @@ Full text: `docs/architecture/main-process-and-ipc.md` (internal).
   in main's memory, main window only, `features/browser/inspect.ts`, `agent-browser.md` "The inspection in the chat" (also an
   operator run's card, a `bo_` id, held by `features/browser/browse.ts`: "The operator's window tools"); and
   browserLines:writeCard / confirmValue / runWrite / confirmWrite: a write card held in main's memory, main window only, the
-  member's own, `features/browser/write-lines.ts`, `agent-browser.md` "Writing on the new path"; and browserDevice:get / register /
+  member's own, `features/browser/write-lines.ts`, `agent-browser.md` "Writing on the new path" (also a write run's card, a
+  `bf_` id, held by `features/browser/work.ts`, and its ［やめる］ browserLines:cancelWrite: "Writes within frames, in the app";
+  the one-time approval value never leaves main); and browserDevice:get / register /
   withdraw: Settings' 「この PC」, main window only, a state and names — never the PC's key, `features/browser/device-ipc.ts`,
   `agent-browser.md` "This PC's registration"; and browserRecording:get / start / stop / removeLine / send / discard: Settings'
   「記録する」, main window only, lines in their kept form — never a value, `features/browser/recording-ipc.ts`, `agent-browser.md`

@@ -24,10 +24,22 @@ import type { BrowserOpenedLine } from './browser-opened'
 /** A value on the card: read (its text), or not read — never a stand-in. */
 export type BrowserCardValue = { status: 'read'; text: string } | { status: 'unreadable' }
 
-/** A row: one value (a read), or what it is now and what it will be (a write; later PRs). */
+/**
+ * Who checked a row of a write's after-read card (redesign step ⑤b, design memo §6-1 step 5): the core comparing what was
+ * read with what was sent (機械で確かめた), the operator AI reading the page (AI が確かめた), or nobody (確かめていない).
+ */
+export type BrowserCardCheckedBy = 'machine' | 'ai' | 'none'
+export const BROWSER_CARD_CHECKED_BY_WORDS: Readonly<Record<BrowserCardCheckedBy, string>> = {
+  machine: '機械で確かめた', ai: 'AI が確かめた', none: '確かめていない',
+}
+
+/**
+ * A row: one value (a read), or what it was and what it is now (a write) — with, for a write's after-read card, what it is
+ * compared to (比べ元), who checked it and, when someone did, whether it held (`ok`) or differs (`ng`).
+ */
 export type BrowserCardRow =
   | { label: string; value: BrowserCardValue }
-  | { label: string; before: BrowserCardValue; after: BrowserCardValue }
+  | { label: string; before: BrowserCardValue; after: BrowserCardValue; compared?: BrowserCardValue; by?: BrowserCardCheckedBy; mark?: 'ok' | 'ng' }
 
 export interface BrowserCardSection { heading: string; rows: readonly BrowserCardRow[] }
 

@@ -5,12 +5,14 @@ import { STATE_BOX, type StateBoxTone } from '../../../shared/ui/stateStyles'
 import { BROWSER_WRITE_CARD_WORDS as W, type BrowserWriteGetResult, type BrowserWriteView } from '../../../../shared/browser-line-writes'
 import type { BrowserInspectionView } from '../../../../shared/browser-inspection'
 import { useInterval } from '../../../shared/hooks/useInterval'
-import { confirmBrowserWrite, confirmBrowserWriteValue, getBrowserWriteCard, runBrowserWrite, type BrowserWriteAnswers, type BrowserWriteOutbound, type BrowserWriteReads } from '../api'
+import { cancelBrowserWrite, confirmBrowserWrite, confirmBrowserWriteValue, getBrowserWriteCard, runBrowserWrite, type BrowserWriteAnswers, type BrowserWriteOutbound, type BrowserWriteReads } from '../api'
 import { WRITE_CARD_UNREADABLE, useBrowserWrite } from '../hooks/useBrowserWrite'
 import { putWrite } from '../writeStore'
 
 /** A write in doubt is read again this often (the server opens the confirm at `confirmableAt`). */
 const UNSETTLED_REFRESH_MS = 15_000
+/** A write run's card is read again this often while its run goes on. */
+const LIVE_REFRESH_MS = 2_000
 
 // Confirming and awaiting ［任せる］ are amber (the member's turn), a run in doubt is amber too (they check the site),
 // all done green, a stop grey (design-system.md 「止まっている」の色).
@@ -53,10 +55,12 @@ export const BrowserWriteCard = memo(function BrowserWriteCard({ companyId, card
   const [busy, setBusy] = useState(false)
   // A write in doubt: main asks the server again so the confirm opens at its time (and a settled one shows).
   const waiting = view?.result?.confirm !== null && view?.result?.confirm !== undefined && !view.result.confirm.canNow
+  // A write run's card (`bf_…`) moves on in main by itself (the run, its end, the card's time): read again until it settles.
+  const live = cardId.startsWith('bf_') && !!view && view.phase !== 'finished' && view.phase !== 'failed'
   useInterval(() => {
     void (ports.reads ? getBrowserWriteCard(companyId, cardId, ports.reads) : getBrowserWriteCard(companyId, cardId))
       .then(r => putWrite(key, r, WRITE_CARD_UNREADABLE)).catch(() => {})
-  }, waiting && !busy ? UNSETTLED_REFRESH_MS : null)
+  }, live ? LIVE_REFRESH_MS : waiting && !busy ? UNSETTLED_REFRESH_MS : null)
   const press = (call: () => Promise<BrowserWriteGetResult>) => {
     setBusy(true)
     void call()
@@ -100,6 +104,20 @@ export const BrowserWriteCard = memo(function BrowserWriteCard({ companyId, card
         </div>
       )}
 
+      {cardId.startsWith('bf_') && view.values.length > 0 && (
+        <div className="mt-2">
+          <p className="text-small font-strong text-text-muted">{W.previewValues}</p>
+          <dl className="mt-1">
+            {view.values.map(v => (
+              <div key={v.name} className="flex flex-wrap gap-2 py-1">
+                <dt className="w-36 shrink-0 text-small text-text-muted">{v.label}</dt>
+                <dd className="min-w-0 flex-1 break-words text-body text-text">{v.value}</dd>
+              </div>
+            ))}
+          </dl>
+        </div>
+      )}
+
       <div className="mt-2">
         <p className="text-small font-strong text-text-muted">{W.willDo}</p>
         <ul className="mt-1 space-y-1">
@@ -117,6 +135,11 @@ export const BrowserWriteCard = memo(function BrowserWriteCard({ companyId, card
           <Button variant="primary" disabled={busy} onClick={() => press(() => (ports.outbound ? runBrowserWrite(companyId, cardId, view.contentHash as string, ports.outbound) : runBrowserWrite(companyId, cardId, view.contentHash as string)))}>
             {busy ? W.entrusting : W.entrust}
           </Button>
+          {view.cancellable && (
+            <Button disabled={busy} onClick={() => press(() => (ports.outbound ? cancelBrowserWrite(companyId, cardId, ports.outbound) : cancelBrowserWrite(companyId, cardId)))}>
+              {W.cancel}
+            </Button>
+          )}
         </div>
       )}
       {view.phase === 'running' && <p role="status" className="mt-2 text-body text-text-muted">{W.entrusting}</p>}

@@ -21,10 +21,10 @@
  *   an owner / admin everyone's; another company's run is the same 404 as none.
  * Nothing here reads, stores or answers a value the site showed or the operator typed.
  */
-import { browserAiStopped, normalizeBrowserHost, type BrowserOperationSettings } from '../../shared/core/browser-operation'
+import { browserAiStopped, levelAllows, normalizeBrowserHost, type BrowserOperationSettings } from '../../shared/core/browser-operation'
 import {
-  BROWSER_RUN_ID_RE, BROWSER_RUN_LIMITS, BROWSER_RUN_OUTCOMES, browserRunLogProblem, isBrowserRunEndReason,
-  type BrowserRunLogStep, type BrowserRunOutcome, type BrowserRunState,
+  BROWSER_RUN_ID_RE, BROWSER_RUN_LIMITS, BROWSER_RUN_OUTCOMES, browserRunLogProblem, browserRunWritesProblem, isBrowserRunEndReason,
+  type BrowserRunLogStep, type BrowserRunOutcome, type BrowserRunState, type BrowserRunWriteStep,
 } from '../../shared/core/browser-run-log'
 import type { BrowserRunContinued, BrowserRunsList, BrowserRunStarted, BrowserRunView } from '../../shared/types/browser-runs'
 import type { BrowserRunRepository, BrowserRunRow } from '../ports/browser-runs'
@@ -45,6 +45,11 @@ export interface BrowserRunDeps {
   aiStops: (member: Member) => { all: boolean; tools: readonly string[] }
   devices: Pick<BrowserDeviceGate, 'check'>
   siteGrants: Pick<BrowserSiteGrants, 'allows'>
+  /**
+   * The frames run holding this domain (services/browser-frames.ts `holderOn`; step ⑤b joins the two locks): its id and
+   * member, `busy` while an ended run's write may still be on its way, or null. Absent: no frames service (tests of ④).
+   */
+  frameRunOn?: (companyId: string, host: string) => { runId: string; userId: string } | 'busy' | null
 }
 
 export const BROWSER_OPERATOR_RUN_WORDS = {
@@ -60,6 +65,7 @@ export const BROWSER_OPERATOR_RUN_WORDS = {
 const W = BROWSER_OPERATOR_RUN_WORDS
 
 const CONVERSATION_RE = /^[A-Za-z0-9_-]{1,100}$/
+const FRAME_RUN_ID_RE = /^bf_[0-9a-f]{32}$/
 const isMap = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v)
 const iso = (ms: number) => new Date(ms).toISOString()
 
@@ -102,24 +108,45 @@ export function createBrowserRunService(deps: BrowserRunDeps) {
   }
 
   return {
-    /** POST /browser-runs { host, conversationId? } + this PC's key header: the gate, then the lock. */
+    /**
+     * POST /browser-runs { host, conversationId?, frameRunId? } + this PC's key header: the gate, then the lock. One lock per
+     * company × domain across both kinds of run (step ⑤b): while a frames run holds the domain, only its own member's run
+     * that names it (`frameRunId`: the preview of its plan, or its writes) may start; a run naming a frames run that no
+     * longer holds the domain is refused.
+     */
     start(member: Member, body: unknown, deviceKey: string | undefined): Outcome<BrowserRunStarted> {
-      if (!isMap(body) || Object.keys(body).some(k => k !== 'host' && k !== 'conversationId') || typeof body.host !== 'string'
-        || (body.conversationId !== undefined && (typeof body.conversationId !== 'string' || !CONVERSATION_RE.test(body.conversationId)))) {
+      if (!isMap(body) || Object.keys(body).some(k => k !== 'host' && k !== 'conversationId' && k !== 'frameRunId' && k !== 'write') || typeof body.host !== 'string'
+        || (body.write !== undefined && body.write !== true)
+        || (body.conversationId !== undefined && (typeof body.conversationId !== 'string' || !CONVERSATION_RE.test(body.conversationId)))
+        || (body.frameRunId !== undefined && (typeof body.frameRunId !== 'string' || !FRAME_RUN_ID_RE.test(body.frameRunId)))) {
         return refuse('bad-request', W.badRun, { code: 'BROWSER_BAD_RUN' })
       }
+      const frameRunId = typeof body.frameRunId === 'string' ? body.frameRunId : null
       const host = normalizeBrowserHost(body.host)
       if (!host || host !== body.host) return refuse('conflict', W.notAllowed, { code: 'BROWSER_NOT_ALLOWED' })
       const pc = deps.devices.check(member, deviceKey, null)
       if (!pc.ok) return pc
       const refused = allowed(member, host)
       if (refused) return refused
+      // A write task's run (step ⑤b, `write: true`): the person's own level 変えてよい and the site's level allowing writes,
+      // asked before anything is read — a person at 見るだけ never gets a write task's preview.
+      if (body.write === true) {
+        const site = deps.browserPolicy(member).sites.find(s => s.host === host)
+        if (!site || !levelAllows(site.level, 'write')) return refuse('conflict', W.notAllowed, { code: 'BROWSER_NOT_ALLOWED' })
+        if (!deps.siteGrants.allows(member, host, 'write')) return refuse('forbidden', W.notGranted, { code: 'BROWSER_TYPE_NOT_GRANTED' })
+      }
       const conversationId = typeof body.conversationId === 'string' ? body.conversationId : null
       return deps.transactions.run((): Outcome<BrowserRunStarted> => {
         const now = deps.clock.nowMs()
         const r = repo(member.companyId)
         const holder = r.runningOn(host)
         if (holder) settleTime(member.companyId, holder, now)
+        // The frames run's lock (step ⑤b): the same domain is never operated by two runs at once.
+        const framed = deps.frameRunOn ? deps.frameRunOn(member.companyId, host) : null
+        if (framed === 'busy' || (framed && (framed.runId !== frameRunId || framed.userId !== member.userId))) {
+          return refuse('conflict', W.busy, { code: 'BROWSER_RUN_BUSY' })
+        }
+        if (!framed && frameRunId) return refuse('conflict', W.ended, { code: 'BROWSER_RUN_ENDED' })
         const id = `bo_${deps.ids.newToken().slice(0, 32)}`
         const inserted = r.insert({
           id, userId: member.userId, host, deviceId: pc.value.deviceId, conversationId, state: 'running', reason: null,
@@ -158,11 +185,14 @@ export function createBrowserRunService(deps: BrowserRunDeps) {
     finish(member: Member, runId: string, body: unknown): Outcome<{ state: BrowserRunState }> {
       const row = ownRun(member, runId)
       if (!row) return refuse('not-found', W.notFound, { code: 'BROWSER_RUN_NOT_FOUND' })
-      if (!isMap(body) || Object.keys(body).some(k => k !== 'outcome' && k !== 'reason' && k !== 'steps')
+      if (!isMap(body) || Object.keys(body).some(k => k !== 'outcome' && k !== 'reason' && k !== 'steps' && k !== 'writes')
         || !(BROWSER_RUN_OUTCOMES as readonly unknown[]).includes(body.outcome) || browserRunLogProblem(body.steps)
+        || (body.writes !== undefined && browserRunWritesProblem(body.writes, (body.steps as unknown[]).length))
         || (body.reason !== undefined && typeof body.reason !== 'string')) {
         return refuse('bad-request', W.badRun, { code: 'BROWSER_BAD_RUN' })
       }
+      // Copied field by field (only the five kept words: nothing else of the body is stored).
+      const writes: BrowserRunWriteStep[] = ((body.writes ?? []) as BrowserRunWriteStep[]).map(w => ({ after: w.after, frame: w.frame, method: w.method, page: w.page, outcome: w.outcome }))
       const outcome = body.outcome as BrowserRunOutcome
       const reason = isBrowserRunEndReason(body.reason) ? body.reason : null
       const steps = body.steps as BrowserRunLogStep[]
@@ -175,6 +205,7 @@ export function createBrowserRunService(deps: BrowserRunDeps) {
         if (!r.markLogWritten(current.id)) return refuse('conflict', W.ended, { code: 'BROWSER_RUN_ENDED' })
         if (current.state === 'running' && !settleTime(member.companyId, current, now)) r.end(current.id, outcome, reason, iso(now))
         r.appendLog(steps.map((s, i) => ({ runId: current.id, idx: i + 1, page: s.page, action: s.action, label: s.label })))
+        if (writes.length > 0) r.appendWrites(current.id, writes)
         return ok({ state: r.byId(current.id)?.state ?? current.state })
       })
     },
@@ -186,9 +217,19 @@ export function createBrowserRunService(deps: BrowserRunDeps) {
       const now = deps.clock.nowMs()
       const settled = rows.map(row => (settleTime(member.companyId, row, now) ? r.byId(row.id) ?? row : row))
       const log = r.logOf(settled.map(row => row.id))
+      const writes = r.writesOf(settled.map(row => row.id))
       return ok({
-        runs: settled.map(row => view(row, log.filter(l => l.runId === row.id).map(l => ({ page: l.page, action: l.action, label: l.label })))),
+        runs: settled.map(row => ({
+          ...view(row, log.filter(l => l.runId === row.id).map(l => ({ page: l.page, action: l.action, label: l.label }))),
+          writes: writes.filter(w => w.runId === row.id).map(w => ({ after: w.after, frame: w.frame, method: w.method, page: w.page, outcome: w.outcome })),
+        })),
       })
+    },
+
+    /** Whether an operator run holds this domain now (a run past its time is ended first): the frames run's start asks it. */
+    runningOn(companyId: string, host: string): boolean {
+      const row = repo(companyId).runningOn(host)
+      return !!row && !settleTime(companyId, row, deps.clock.nowMs())
     },
 
     /** In removeMember's transaction: their running runs end (`left`), the lock goes. */

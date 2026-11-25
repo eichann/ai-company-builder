@@ -65,6 +65,7 @@ contract.invoke browser:sites
 contract.invoke browserDevice:get
 contract.invoke browserDevice:register
 contract.invoke browserDevice:withdraw
+contract.invoke browserLines:cancelWrite
 contract.invoke browserLines:card
 contract.invoke browserLines:confirmValue
 contract.invoke browserLines:confirmWrite
@@ -417,6 +418,7 @@ contract.type ElectronAPI.backupOpenFolder = backupOpenFolder: Invoke<'backup:op
 contract.type ElectronAPI.backupRestore = backupRestore: Invoke<'backup:restore'>
 contract.type ElectronAPI.callPluginBridge = callPluginBridge: Invoke<'plugins:bridge'>
 contract.type ElectronAPI.cancelBrowserPlan = cancelBrowserPlan: Invoke<'browserPlans:cancel'>
+contract.type ElectronAPI.cancelBrowserWrite = cancelBrowserWrite: Invoke<'browserLines:cancelWrite'>
 contract.type ElectronAPI.cancelClaudeSignIn = cancelClaudeSignIn: Invoke<'claudeSignIn:cancel'>
 contract.type ElectronAPI.checkMinutes = checkMinutes: Invoke<'minutes:check'>
 contract.type ElectronAPI.claimAiTurn = claimAiTurn: Invoke<'aiTurns:claim'>
@@ -877,6 +879,7 @@ contract.type IpcInvokeChannels.'browser:sites' = 'browser:sites': { args: [comp
 contract.type IpcInvokeChannels.'browserDevice:get' = 'browserDevice:get': { args: [companyId: string]; result: BrowserPcResult }
 contract.type IpcInvokeChannels.'browserDevice:register' = 'browserDevice:register': { args: [companyId: string, label: string]; result: BrowserPcResult }
 contract.type IpcInvokeChannels.'browserDevice:withdraw' = 'browserDevice:withdraw': { args: [companyId: string]; result: BrowserPcResult }
+contract.type IpcInvokeChannels.'browserLines:cancelWrite' = 'browserLines:cancelWrite': { args: [companyId: string, cardId: string]; result: BrowserWriteGetResult }
 contract.type IpcInvokeChannels.'browserLines:card' = 'browserLines:card': { args: [companyId: string, planId: string]; result: BrowserInspectionGetResult }
 contract.type IpcInvokeChannels.'browserLines:confirmValue' = 'browserLines:confirmValue': { args: [companyId: string, cardId: string, name: string]; result: BrowserWriteGetResult }
 contract.type IpcInvokeChannels.'browserLines:confirmWrite' = 'browserLines:confirmWrite': { args: [companyId: string, cardId: string, result: 'done' | 'not_done']; result: BrowserWriteGetResult }
@@ -1239,6 +1242,7 @@ main.handle browser:sites @ features/browser/ipc.ts (companyId)
 main.handle browserDevice:get @ features/browser/device-ipc.ts (companyId)
 main.handle browserDevice:register @ features/browser/device-ipc.ts (companyId, label)
 main.handle browserDevice:withdraw @ features/browser/device-ipc.ts (companyId)
+main.handle browserLines:cancelWrite @ features/browser/write-lines.ts (companyId, cardId)
 main.handle browserLines:card @ features/browser/inspect.ts (companyId, planId)
 main.handle browserLines:confirmValue @ features/browser/write-lines.ts (companyId, cardId, name)
 main.handle browserLines:confirmWrite @ features/browser/write-lines.ts (companyId, cardId, result)
@@ -1532,6 +1536,8 @@ preload callPluginBridge -> invoke plugins:bridge($0, $1, $2, $3)
 preload callPluginBridge : (companyId: string, plugin: PluginPackageRef, op: string, args: unknown) => Promise<PluginBridgeAnswer>
 preload cancelBrowserPlan -> invoke browserPlans:cancel($0, $1)
 preload cancelBrowserPlan : (companyId: string, planId: string) => Promise<BrowserPlanActAnswer>
+preload cancelBrowserWrite -> invoke browserLines:cancelWrite($0, $1)
+preload cancelBrowserWrite : (companyId: string, cardId: string) => Promise<BrowserWriteGetResult>
 preload cancelClaudeSignIn -> invoke claudeSignIn:cancel()
 preload cancelClaudeSignIn : () => Promise<boolean>
 preload checkMinutes -> invoke minutes:check($0)

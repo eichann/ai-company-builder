@@ -9,6 +9,8 @@ import https from 'node:https'
 import path from 'node:path'
 
 export interface Hit { host: string; method: string; path: string; body: string }
+/** A write run's save as the site saw it: the page's cookie and CSRF header as they arrived, when it started and was answered. */
+export interface WorkHit { path: string; name: string; cookie: string; csrf: string; start: number; end: number }
 
 /**
  * A page a person records on (agent-browser.md "Recording"): a labelled date field, a password field, a button whose
@@ -34,6 +36,20 @@ const BROWSE_PAGE = `<!doctype html><meta charset="utf-8"><title>events</title>
 <a id="evil" href="https://evil.test/browse-leak">外のサイト</a>
 <a id="next" href="/browse-next">次のページ</a>
 <script>document.addEventListener('click', e => { (window.__clicks = window.__clicks || []).push(e.target.id || e.target.tagName) }, true)</script>`
+
+/**
+ * A write run (agent-browser.md "Writes within frames, in the app"): the page's own script saves by fetch with a CSRF
+ * header and body field (the answer sets a cookie the page must never get), makes a write whose answer is lost, an
+ * autosave outside the plan, an upload with a file, and reads an address the run must not read.
+ */
+const WORK_PAGE = `<!doctype html><meta charset="utf-8"><title>work</title><p>work</p>
+<script>
+  window.save = name => fetch('/work/save', { method: 'POST', headers: { 'content-type': 'application/json', 'X-CSRF-Token': 'csrf-777' },
+    body: JSON.stringify({ name, _token: 'csrf-777' }) }).then(async r => ({ status: r.status, body: await r.json(), cookie: document.cookie }), () => 'failed')
+  window.lost = () => fetch('/work/lost', { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: 'a=1' }).then(r => r.status, () => 'failed')
+  window.auto = () => fetch('/work/auto', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' }).then(r => r.status, () => 'failed')
+  window.upload = () => { const f = new FormData(); f.append('name', 'u'); f.append('file', new Blob(['abc']), 'a.txt'); return fetch('/work/save', { method: 'POST', body: f }).then(r => r.status, () => 'failed') }
+</script>`
 
 const RECORDING_PAGE = `<!doctype html><meta charset="utf-8"><title>orders</title>
 <label for="end">受付終了日</label><input id="end" name="end_date" type="text">
@@ -165,12 +181,13 @@ export interface Sites {
   evilConnections: number
   /** UDP datagrams that reached the STUN stand-in. */
   udpPackets: number
+  work: WorkHit[]
   close(): void
 }
 
 export async function startSites(certDir: string, ports: { site: number; evil: number; udp: number }): Promise<Sites> {
   const tls = { key: fs.readFileSync(path.join(certDir, 'key.pem')), cert: fs.readFileSync(path.join(certDir, 'cert.pem')) }
-  const state: Sites = { hits: [], lstep: { 201: ['300'], 202: [] }, evilConnections: 0, udpPackets: 0, close: () => {} }
+  const state: Sites = { hits: [], lstep: { 201: ['300'], 202: [] }, evilConnections: 0, udpPackets: 0, work: [], close: () => {} }
   const record = (req: import('node:http').IncomingMessage, body: string) =>
     state.hits.push({ host: (req.headers.host ?? '').split(':')[0], method: req.method ?? '', path: req.url ?? '/', body })
 
@@ -227,6 +244,26 @@ export async function startSites(certDir: string, ports: { site: number; evil: n
         res.end('ok')
         return
       }
+      if (host === 'op.test' && url === '/work') {
+        res.setHeader('content-type', 'text/html; charset=utf-8')
+        res.end(WORK_PAGE)
+        return
+      }
+      if (host === 'op.test' && url === '/work/save' && req.method === 'POST') {
+        // Answered after a moment (so two saves at once would overlap here), with a cookie the page must never get.
+        let name = ''
+        try { name = String((JSON.parse(body) as { name?: unknown }).name ?? '') } catch { name = '?' }
+        const hit: WorkHit = { path: url, name, cookie: String(req.headers.cookie ?? ''), csrf: String(req.headers['x-csrf-token'] ?? ''), start: Date.now(), end: 0 }
+        state.work.push(hit)
+        setTimeout(() => {
+          hit.end = Date.now()
+          res.writeHead(201, { 'content-type': 'application/json', 'set-cookie': 'rotated=1; Path=/; Secure' })
+          res.end(JSON.stringify({ id: 4242, name }))
+        }, 300)
+        return
+      }
+      // A write that reaches the site whose answer is lost (the connection dropped): it must reach the site exactly once.
+      if (host === 'op.test' && url === '/work/lost') { state.work.push({ path: url, name: '', cookie: '', csrf: '', start: Date.now(), end: 0 }); req.socket.destroy(); return }
       // A page that never answers (the operator's navigation must still end when stopped).
       if (host === 'op.test' && url === '/browse-hang') return
       if (host === 'op.test' && (url === '/browse' || url === '/browse-next')) {

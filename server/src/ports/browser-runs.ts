@@ -3,7 +3,7 @@
  * handle (`CompanyData`), every method limited to that company. State changes are compare-and-set (true when the row
  * changed). Rules: services/browser-runs.ts. Nothing here holds a value the site showed or the operator typed.
  */
-import type { BrowserRunAction, BrowserRunState } from '../../shared/core/browser-run-log'
+import type { BrowserRunAction, BrowserRunState, BrowserRunWriteStep } from '../../shared/core/browser-run-log'
 
 export interface BrowserRunRow {
   id: string
@@ -42,6 +42,9 @@ export interface BrowserRunRepository {
   markLogWritten(id: string): boolean
   appendLog(rows: readonly BrowserRunLogRow[]): void
   logOf(runIds: readonly string[]): BrowserRunLogRow[]
+  /** A write run's page writes (step ⑤b), appended once with the log. */
+  appendWrites(runId: string, rows: readonly BrowserRunWriteStep[]): void
+  writesOf(runIds: readonly string[]): Array<BrowserRunWriteStep & { runId: string }>
   /** Newest first, at most `limit`; `userId` given: only that member's. */
   list(limit: number, userId?: string): BrowserRunRow[]
 }

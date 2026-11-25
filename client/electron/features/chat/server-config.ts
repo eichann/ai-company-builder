@@ -44,7 +44,7 @@ import type { WorkingFolders } from '../../services/working-folders'
 import type { SkillShelfStore } from '../skill-shelf/store'
 import { taskTopicOf, topicAfterTaskMade } from '../../../shared/consultation-task'
 import { browserRequestForTurn, type BrowserRequestPlans } from '../../browser-request/tools'
-import { browserInspectForTurn, type BrowserBrowsePlans, type BrowserInspectPlans, type BrowserWritePlans } from '../../browser-request/inspect-tool'
+import { browserInspectForTurn, type BrowserBrowsePlans, type BrowserInspectPlans, type BrowserWorkPlans, type BrowserWritePlans } from '../../browser-request/inspect-tool'
 
 export interface ChatServerConfigDeps {
   config: ConfigStore
@@ -76,6 +76,8 @@ export interface ChatServerConfigDeps {
   browserWrites?: BrowserWritePlans
   /** Its read task on a registered domain (features/browser/browse.ts): `browser_browse` exists only while the same switch is on. */
   browserBrowses?: BrowserBrowsePlans
+  /** Its write task on a registered domain (features/browser/work.ts, step ⑤b): `browser_work` exists only while the same switch is on. */
+  browserWorks?: BrowserWorkPlans
   /** Cancel a conversation's pending choice cards (agent-interactions.ts). */
   cancelChoicePrompts: (appSessionId: string) => void
   /** The AI action log (services/agent-events.ts). */
@@ -250,7 +252,7 @@ export function createChatServerConfig(deps: ChatServerConfigDeps): ChatServerCo
     requestInteraction: deps.requestInteraction,
     runAppCommand: deps.runAppCommand,
     createBrowserRequest: turn => browserRequestForTurn(deps.browserPlans, turn),
-    createBrowserInspect: turn => browserInspectForTurn(deps.browserInspections, turn, deps.browserWrites, deps.browserBrowses),
+    createBrowserInspect: turn => browserInspectForTurn(deps.browserInspections, turn, deps.browserWrites, deps.browserBrowses, deps.browserWorks),
     requestToolApproval: (toolName, toolInput, toolUseId, appSessionId, reason) => deps.toolApprovals.request(toolName, toolInput, toolUseId, appSessionId, reason),
     cancelInteractions: appSessionId => {
       deps.toolApprovals.cancel(appSessionId)
