@@ -249,6 +249,13 @@ describe('a run\'s budget of steps (shared/core/browser-run-budget.ts)', () => {
     initDatabase(before)
     expect(before.prepare("SELECT budget, steps FROM browser_runs WHERE id = 'bo_old'").get()).toEqual({ budget: 'standard', steps: 0 })
     expect(() => before.prepare("UPDATE browser_runs SET budget = 'skill' WHERE id = 'bo_old'").run()).toThrow(/only moves from running/)
+    // A second start finds the trigger as it should be and leaves it (never dropped and made again at every start).
+    const execs: string[] = []
+    const exec = before.exec.bind(before)
+    before.exec = ((sql: string) => { execs.push(sql); return exec(sql) }) as typeof before.exec
+    initDatabase(before)
+    before.exec = exec
+    expect(execs.filter(sql => /DROP TRIGGER IF EXISTS browser_runs_fixed/.test(sql))).toEqual([])
     // A new database ends with the same table and trigger.
     const fresh = new Database(':memory:')
     initDatabase(fresh)
@@ -385,7 +392,7 @@ describe('a write task\'s runs (step ⑤b): 変えてよい first, one lock with
   })
 
   it('while a frames run holds the domain only its member\'s run naming it starts; naming one that holds nothing is refused', () => {
-    let holder: { runId: string; userId: string } | 'busy' | null = { runId: FRAME, userId: alice.userId }
+    let holder: { runId: string; userId: string; source: string; state: string; endsAt: number } | 'busy' | null = { runId: FRAME, userId: alice.userId, source: 'adhoc', state: 'open', endsAt: T0 + 3_600_000 }
     runs = createBrowserRunService({
       companyData: data, transactions: sqliteTransactions(conn), clock: { now: () => iso(now), nowMs: () => now }, ids,
       browserPolicy: m => policies[m.companyId], aiStops: () => ({ all: false, tools: [] }), devices: dev.gate, siteGrants: grants,

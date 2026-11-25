@@ -168,6 +168,10 @@ export function createBrowserFrameService(deps: BrowserFrameDeps) {
     return (sameStart ? mono - (w.permittedMonoMs as number) : mono) >= window
   }
 
+  /** When a run not ended ends by its times: a waiting one at its card's time, any other at its hour. */
+  const endsAt = (run: FrameRunRow): number =>
+    run.state === 'waiting' ? Math.min(ms(run.createdAt) + BROWSER_FRAME_TIMES.approve, ms(run.expiresAt)) : ms(run.expiresAt)
+
   /** `RunEnds`: the run ended, its unused frames gone (a permitted write is left to its report or time-out). */
   function endRun(companyId: string, run: FrameRunRow, reason: string, now: number): void {
     repo(companyId).setRunState(run.id, run.state, 'ended', { endReason: reason, endedAt: iso(now) })
@@ -181,10 +185,7 @@ export function createBrowserFrameService(deps: BrowserFrameDeps) {
       r.setRunState(found.id, 'open', 'locked', {})
     }
     const run = r.run(found.id) as FrameRunRow
-    if (run.state !== 'ended') {
-      const limit = run.state === 'waiting' ? Math.min(ms(run.createdAt) + BROWSER_FRAME_TIMES.approve, ms(run.expiresAt)) : ms(run.expiresAt)
-      if (now >= limit) endRun(companyId, run, 'expired', now)
-    }
+    if (run.state !== 'ended' && now >= endsAt(run)) endRun(companyId, run, 'expired', now)
     return r.run(found.id) as FrameRunRow
   }
 
@@ -284,16 +285,17 @@ export function createBrowserFrameService(deps: BrowserFrameDeps) {
 
     /**
      * Who holds a domain for the operator runs' start (step ⑤b, services/browser-runs.ts): the run not ended there (its id,
-     * member, source and state — the operator run's budget is chosen from the last two), `busy` while an ended run's write
-     * to it may still be on its way, else null. Time-outs judged first.
+     * member, source and state — the operator run's budget is chosen from the last two — and when it ends by its times, ms:
+     * an operator run naming it never outlives it), `busy` while an ended run's write to it may still be on its way, else
+     * null. Time-outs judged first.
      */
-    holderOn(companyId: string, host: string): { runId: string; userId: string; source: FrameRunRow['source']; state: FrameRunRow['state'] } | 'busy' | null {
+    holderOn(companyId: string, host: string): { runId: string; userId: string; source: FrameRunRow['source']; state: FrameRunRow['state']; endsAt: number } | 'busy' | null {
       const now = clock.nowMs()
       const r = repo(companyId)
       const live = r.liveRunOn(host)
       if (live) settle(companyId, live, now)
       const still = r.liveRunOn(host)
-      if (still) return { runId: still.id, userId: still.userId, source: still.source, state: still.state }
+      if (still) return { runId: still.id, userId: still.userId, source: still.source, state: still.state, endsAt: endsAt(still) }
       for (const ended of r.runsInFlightOn(host)) settle(companyId, ended, now)
       return r.runsInFlightOn(host).length > 0 ? 'busy' : null
     },

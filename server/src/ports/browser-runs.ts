@@ -21,6 +21,10 @@ export interface BrowserRunRow {
   budget: BrowserRunBudgetName
   /** The operator's answers so far (each continue adds one). */
   steps: number
+  /** The frames run it named (fixed), or null. */
+  frameRunId: string | null
+  /** The lock's hard end (fixed; never past the named frames run's end); null for an older build's row (its start + standard). */
+  endsAt: string | null
 }
 
 export interface BrowserRunLogRow {
@@ -35,6 +39,8 @@ export interface BrowserRunRepository {
   /** A new `running` row; false when another run holds the company × domain lock (the partial unique index). */
   insert(row: BrowserRunRow): boolean
   byId(id: string): BrowserRunRow | null
+  /** Whether a `skill` run naming this frames run was ever started (at most one: the partial unique index). */
+  skillRunOf(frameRunId: string): boolean
   /** The `running` row of this domain, if any. */
   runningOn(host: string): BrowserRunRow | null
   /** One more step and the lease renewed, while the row runs and its steps are below `maxSteps` (compare-and-set). */

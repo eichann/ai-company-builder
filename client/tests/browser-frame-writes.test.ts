@@ -531,6 +531,25 @@ test('the work stops operating at its budget\'s time, counted from its own start
   assert.match(skill.w.calls.filter(c => c.startsWith('runFinish')).pop() ?? '', /"reason":"timeout"/)
 })
 
+test('the work operates no longer than the server said (never past the frames run); too late to start: the AI hears 時間切れ, nothing written', async () => {
+  let t = 1_000_000
+  const short = workWorld({
+    now: () => t,
+    onStep: prompt => { if (prompt === 'work') t += 60_000 },
+    answers: Array.from({ length: 40 }, () => WAIT), frameStart: () => ({ kind: 'ok', value: started({ needsApproval: false }) }),
+    runStart: () => ({ kind: 'ok', value: { runId: `bo_${'a'.repeat(32)}`, leaseMs: 120_000, budget: 'skill', operateMs: 3 * 60_000 } }),
+  })
+  await short.tool.execute({ site: HOST, task: 'いつものクーポン', skill: 'coupons' })
+  assert.equal(workSteps(short.w.calls), 3)
+  const late = workWorld({
+    frameStart: () => ({ kind: 'ok', value: started({ needsApproval: false }) }),
+    runStart: () => ({ kind: 'refused', code: 'BROWSER_RUN_TOO_LATE' }),
+  })
+  const said = await late.tool.execute({ site: HOST, task: 'いつものクーポン', skill: 'coupons' })
+  assert.equal(said, W.tooLate)
+  assert.equal(late.w.site.requests.length, 0)
+})
+
 test('the card waits no longer than the server keeps the frames run waiting: counted from when the run was asked for, so a long preview leaves less', async () => {
   let t = 1_000_000
   const late = workWorld({

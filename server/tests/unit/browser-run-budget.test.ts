@@ -5,7 +5,7 @@
  * and work fit in its frames run's life; the log keeps every step a budget allows.
  */
 import { describe, expect, it } from 'vitest'
-import { BROWSER_FRAME_RUN_TIMES, BROWSER_RUN_BUDGETS, browserRunBudget, browserRunBudgetFor } from '../../../shared/core/browser-run-budget'
+import { BROWSER_FRAME_RUN_TIMES, BROWSER_RUN_BUDGETS, BROWSER_RUN_MIN_OPERATE_MS, browserRunBudget, browserRunBudgetFor, browserRunWindow } from '../../../shared/core/browser-run-budget'
 import { BROWSER_RUN_LIMITS } from '../../../shared/core/browser-run-log'
 import { BROWSER_FRAME_TIMES } from '../../src/services/browser-frames'
 
@@ -34,7 +34,18 @@ describe('the times agree', () => {
     for (const b of Object.values(BROWSER_RUN_BUDGETS)) expect(b.runMs - b.operateMs).toBeGreaterThanOrEqual(AFTER_OPERATING_MS)
   })
 
-  it('a Skill run (frames made before its preview) fits: the card by `approve`, then the work\'s whole lock, before the frames run ends', () => {
+  it('a run never outlives the frames run it names, and operates until the same margin before its end; too little left: none', () => {
+    const b = BROWSER_RUN_BUDGETS.skill
+    const margin = b.runMs - b.operateMs
+    expect(browserRunWindow(b, 0, null)).toEqual({ endsAt: b.runMs, operateMs: b.operateMs })
+    expect(browserRunWindow(b, 0, 10 * b.runMs)).toEqual({ endsAt: b.runMs, operateMs: b.operateMs })
+    expect(browserRunWindow(b, 0, 600_000)).toEqual({ endsAt: 600_000, operateMs: 600_000 - margin })
+    expect(browserRunWindow(b, 0, margin + BROWSER_RUN_MIN_OPERATE_MS)).toEqual({ endsAt: margin + BROWSER_RUN_MIN_OPERATE_MS, operateMs: BROWSER_RUN_MIN_OPERATE_MS })
+    expect(browserRunWindow(b, 0, margin + BROWSER_RUN_MIN_OPERATE_MS - 1)).toBeNull()
+    expect(browserRunWindow(BROWSER_RUN_BUDGETS.standard, 0, 0)).toBeNull()
+  })
+
+  it('a Skill run whose work starts right after an approval at the card\'s last moment still has its whole budget before the frames run ends', () => {
     expect(BROWSER_FRAME_RUN_TIMES.approve + BROWSER_RUN_BUDGETS.skill.runMs + AFTER_OPERATING_MS).toBeLessThanOrEqual(BROWSER_FRAME_RUN_TIMES.run)
     // Its preview is standard and ends before the card's time does.
     expect(BROWSER_RUN_BUDGETS.standard.runMs).toBeLessThan(BROWSER_FRAME_RUN_TIMES.approve)

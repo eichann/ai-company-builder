@@ -11,9 +11,15 @@
  *   word): `skill` only for a run naming its member's frames run that was built from an approved company Skill's
  *   declaration and is already `open` (approved on the card, or a pre-approved version) — the work of a Skill run.
  *   Everything else — reading (`browser_browse`), any preview, an ad-hoc plan's work — is `standard`, as before.
+ *   **Once per frames run**: a later write run naming the same open Skill frames run is refused (the server's check and a
+ *   partial unique index): a frames run's work is one operator run.
+ * - **Never past the frames run** (`browserRunWindow`): a run naming a frames run ends no later than that frames run does
+ *   (a waiting one at its card's time, an open one at its hour), and the app operates only until `runMs - operateMs`
+ *   before that end. With less than `BROWSER_RUN_MIN_OPERATE_MS` left the server refuses to start it
+ *   (`BROWSER_RUN_TOO_LATE`; the consultation AI hears 時間切れ, nothing is written).
  * - **A frames run's times**: a run waiting for the card ends `approve` after it was made; any run ends `run` after it was
- *   made. A Skill run's frames run is made before its preview, so its preview (`standard`), the card and its work
- *   (`skill`) all fit in `approve` + the skill budget's `runMs` < `run`.
+ *   made. A Skill run whose work starts at once after an approval at the card's last moment still has its whole budget
+ *   (`approve` + the skill budget's `runMs` < `run`); one that starts later gets what is left (above).
  */
 
 export interface BrowserRunBudget {
@@ -43,6 +49,20 @@ export const browserRunBudget = (name: unknown): Readonly<BrowserRunBudget> => B
  */
 export function browserRunBudgetFor(run: { write: boolean; frameRun: { source: string; state: string } | null }): BrowserRunBudgetName {
   return run.write && run.frameRun !== null && run.frameRun.source === 'skill' && run.frameRun.state === 'open' ? 'skill' : 'standard'
+}
+
+/** The least operating time a run must have at its start: less → refused (`BROWSER_RUN_TOO_LATE`), never a run of seconds. */
+export const BROWSER_RUN_MIN_OPERATE_MS = 60_000
+
+/**
+ * At a run's start (`now`): its hard end — the budget's `runMs` from now, never past the end of the frames run it names
+ * (`frameEndsAt`, null: none) — and how long the app may operate in it (its budget's `operateMs`, ending the same margin
+ * `runMs - operateMs` before that end). Null when less than `BROWSER_RUN_MIN_OPERATE_MS` would be left.
+ */
+export function browserRunWindow(budget: Readonly<BrowserRunBudget>, now: number, frameEndsAt: number | null): { endsAt: number; operateMs: number } | null {
+  const endsAt = Math.min(now + budget.runMs, frameEndsAt ?? Number.POSITIVE_INFINITY)
+  const operateMs = Math.min(budget.operateMs, endsAt - now - (budget.runMs - budget.operateMs))
+  return operateMs >= BROWSER_RUN_MIN_OPERATE_MS ? { endsAt, operateMs } : null
 }
 
 export const BROWSER_FRAME_RUN_TIMES = Object.freeze({

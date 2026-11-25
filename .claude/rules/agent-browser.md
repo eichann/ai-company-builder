@@ -3370,9 +3370,25 @@ shared by the preview and the work. **The one rule and every time it depends on*
   (`browserFrames.holderOn` answers its source and state). A Skill run's preview (its frames run still `waiting`), an
   ad-hoc plan's work, a read task and a run naming nothing are `standard`. The request has no budget field (a body naming
   one is `BROWSER_BAD_RUN`). The choice is stored on the run (`browser_runs.budget`, additive with default `standard`,
-  `migrateBrowserRunBudget`; fixed by the trigger, replaced once by the migration) and answered (`BrowserRunStarted.budget`;
-  absent from an older server, and any name the app does not know, = `standard`: `browserRunBudget`).
-- **The server enforces it**: the lock ends at the budget's `runMs` from the start (renewals never pass it), and every
+  `migrateBrowserRunBudget`; fixed by the trigger, which the migration replaces when the stored one differs — compared as
+  SQLite keeps it, without `IF NOT EXISTS`, so a second start leaves it) and answered (`BrowserRunStarted.budget`; absent
+  from an older server, and any name the app does not know, = `standard`: `browserRunBudget`).
+- **Once per frames run** (independent review of #857): the first write run that gets `skill` for a frames run is its
+  work; a later one naming the same frames run (a modified app; the real app never starts a second) is **refused**
+  `BROWSER_RUN_WORK_TAKEN`, also while the first still runs — not given `standard` (decision: one operator run per
+  frames run's work). Guards: the check at the start (`skillRunOf`) and a partial unique index
+  (`idx_browser_runs_skill_once`, `browser_runs.frame_run_id`, fixed). A run that is not a write task's still starts,
+  `standard`.
+- **Never past the frames run** (`browserRunWindow`; independent review of #857: an approval at 9:59 and slow reads
+  before the work could start a 17-minute lock after minute 13, outliving the frames run, whose later writes would be
+  refused half-way): a run naming a frames run gets a hard end `ends_at` (fixed) = its budget's `runMs` from the start,
+  **never past that frames run's own end** (`holderOn`'s `endsAt`: a waiting one at its card's time, an open one at its
+  hour), and the answer's `operateMs` (`BrowserRunStarted.operateMs`) = its budget's `operateMs`, ending the same margin
+  (`runMs − operateMs`) before that end; the app operates no longer than both. **Less than one minute of operating left**
+  (`BROWSER_RUN_MIN_OPERATE_MS`) → refused `BROWSER_RUN_TOO_LATE`, nothing started; the consultation AI hears
+  `BROWSER_WORK_WORDS.tooLate` (時間切れ, nothing written).
+- **The server enforces it**: the lock ends at the run's `ends_at` (renewals never pass it; an older build's row: its start
+  + the budget's `runMs`), and every
   `continue` takes one of its steps (`browser_runs.steps`, compare-and-set `steps < max` with the lease; the trigger lets
   it only grow by one while running): past them the run ends `timed_out` / `rounds` and the domain is free.
 - **The app follows the answer** (`work.ts`): each operator run's steps and its deadline (its own start + `operateMs`) come
@@ -3381,8 +3397,8 @@ shared by the preview and the work. **The one rule and every time it depends on*
   for (`frameAskedAt`; a Skill's frames run is made before its preview, so the preview's minutes count), never longer.
   `BROWSER_BROWSE_LIMITS.rounds` / `totalMs` are the `standard` budget's (reading is unchanged).
 - **The frames run's times** (`BROWSER_FRAME_RUN_TIMES`, the server's `BROWSER_FRAME_TIMES` takes them): a waiting run ends
-  10 minutes after it was made, any run 30 minutes after. A Skill run fits: the card by 10 minutes, then the work's whole
-  lock (17) and the finish before 30. A write after the frames run's end is refused by its permit (never sent).
+  10 minutes after it was made, any run 30 minutes after. A Skill run whose work starts right after an approval at the
+  card's last moment fits whole (10 + 17 + 1 ≤ 30); one that starts later gets what is left, above.
 - **The AI's tool call** waits for all of it (preview ≤ 5, the card ≤ 10, the work ≤ 15 minutes, plus the after-read): the
   in-process MCP tool of the consultation has no time limit of its own in the app.
 - **Not changed**: `FramesLife.tla` (times are abstract there; the steps' budget is not one of its rules), the frames,
@@ -3392,11 +3408,13 @@ Tests: `server/tests/unit/browser-run-budget.test.ts` (the rule as a table; the 
 `server/tests/unit/browser-frames.test.ts` "room for a Skill run" (the real frames and operator runs services: a per-run
 Skill's preview standard and its approved work 60 steps; a pre-approved Skill's lock lasting 17 minutes; an ad-hoc plan's
 work, a read run naming an open Skill run and a run naming nothing standard — 20 steps, 6 minutes; no budget field in the
-request; the trigger keeps the budget and the step count), `server/tests/unit/browser-runs.test.ts` (20 steps then
-`rounds`; a database from before the budget reads `standard` and ends with the same table and trigger as a new one),
+request; the trigger keeps the budget, the frames run, the end and the step count; `skill` once per frames run, also by the
+index; a work started late ends with the frames run, too late refused), `server/tests/unit/browser-runs.test.ts` (20
+steps then `rounds`; a database from before the budget reads `standard` and ends with the same table and trigger as a new
+one; a second start does not drop the trigger),
 `client/tests/browser-frame-writes.test.ts` (the work's steps follow the server's answer — 60 for `skill`, 20 for none,
-`standard` or an unknown name —; the deadline from the run's own start; the card's wait counted from the frames run's
-start). Each guard mutation-checked (17 mutations, all caught).
+`standard` or an unknown name —; the deadline from the run's own start and never past the server's `operateMs`; 時間切れ
+words; the card's wait counted from the frames run's start). Each guard mutation-checked (28 mutations, all caught).
 
 ## Not yet (later PRs)
 

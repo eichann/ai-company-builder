@@ -17,6 +17,8 @@ export interface BrowserRunStarted {
    * times. Absent from an older server: `standard`.
    */
   budget?: BrowserRunBudgetName
+  /** How long the app may operate in this run (never past the frames run it names). Absent from an older server: the budget's. */
+  operateMs?: number
 }
 
 /** POST /browser-runs/:runId/continue (+ this PC's key header): the gate asked again, the lease renewed. */

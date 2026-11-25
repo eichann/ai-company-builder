@@ -22,7 +22,7 @@ import { sha256TokenDigest } from '../../src/adapters/system'
 import { createBrowserSkillService, type BrowserSkillService } from '../../src/services/browser-skills'
 import { BROWSER_FRAME_TIMES, createBrowserFrameService, type BrowserFrameService } from '../../src/services/browser-frames'
 import { createBrowserRunService, type BrowserRunService } from '../../src/services/browser-runs'
-import { BROWSER_RUN_BUDGETS } from '../../../shared/core/browser-run-budget'
+import { BROWSER_RUN_BUDGETS, BROWSER_RUN_MIN_OPERATE_MS } from '../../../shared/core/browser-run-budget'
 import type { BrowserSkillContent, BrowserSkillSource } from '../../src/ports/browser-skills'
 import type { BrowserOperationSettings } from '../../../shared/core/browser-operation'
 import type { BrowserFramePermitRequest, BrowserFrameRunStart, BrowserFrameRunView } from '../../../shared/types/browser-frames'
@@ -582,7 +582,7 @@ describe('step ⑤b: what the app is answered, one lock with the operator runs',
     expect(withRuns.holderOn(CO, DOMAIN)).toBeNull()
     operatorRunning = false
     const run = value(await withRuns.start(alice, { plan: adhoc }, PC))
-    expect(withRuns.holderOn(CO, DOMAIN)).toEqual({ runId: run.runId, userId: alice.userId, source: 'adhoc', state: 'waiting' })
+    expect(withRuns.holderOn(CO, DOMAIN)).toEqual({ runId: run.runId, userId: alice.userId, source: 'adhoc', state: 'waiting', endsAt: now + BROWSER_FRAME_TIMES.approve })
     expect(withRuns.holderOn(CO, 'other.example.test')).toBeNull()
     // Ended with a write permitted: busy until it is recorded or times out.
     value(await withRuns.approve(alice, run.runId, { planHash: run.planHash, approvalToken: run.approvalToken }, PC))
@@ -669,11 +669,64 @@ describe('room for a Skill run: the operator run\'s budget is the server\'s choi
     expect(plain.budget).toBe('standard')
   })
 
+  it('the skill budget once per frames run: a second write run naming it is refused, while the first runs and after it finished', async () => {
+    put(yaml)
+    await approveSkill('pre_approved')
+    const runs = operatorRuns()
+    const run = value(await frames.start(alice, { skill: SKILL }, PC))
+    const first = work(runs, run.runId)
+    expect(first.budget).toBe('skill')
+    expect(code(runs.start(alice, { host: DOMAIN, frameRunId: run.runId, write: true }, PC))).toBe('BROWSER_RUN_WORK_TAKEN')
+    value(runs.finish(alice, first.runId, { outcome: 'done', steps: [] }))
+    expect(code(runs.start(alice, { host: DOMAIN, frameRunId: run.runId, write: true }, PC))).toBe('BROWSER_RUN_WORK_TAKEN')
+    expect(conn.prepare("SELECT COUNT(*) AS n FROM browser_runs WHERE frame_run_id = ? AND budget = 'skill'").get(run.runId)).toEqual({ n: 1 })
+    // The database refuses a second skill run of one frames run by itself (behind the service's check).
+    expect(() => conn.prepare(`INSERT INTO browser_runs (company_id, id, user_id, host, state, reason, started_at, lease_until, ended_at, budget, frame_run_id)
+      VALUES (?, 'bo_x', ?, ?, 'done', NULL, ?, ?, ?, 'skill', ?)`).run(CO, alice.userId, DOMAIN, iso(now), iso(now), iso(now), run.runId)).toThrow(/UNIQUE/)
+    // A run that is not a write task's still starts (standard, as any read).
+    expect(value(runs.start(alice, { host: DOMAIN, frameRunId: run.runId }, PC)).budget).toBe('standard')
+  })
+
+  it('a run never outlives the frames run it names: a work started late gets what is left; too little left is refused (時間切れ)', async () => {
+    put(yaml)
+    await approveSkill('per_run')
+    const runs = operatorRuns()
+    const madeAt = now
+    const run = value(await frames.start(alice, { skill: SKILL }, PC))
+    // Approved at the card's last moment, the work started 11 minutes later (slow reads before it).
+    now = madeAt + BROWSER_FRAME_TIMES.approve - 1_000
+    value(await approve(alice, run))
+    now += 11 * 60_000
+    const late = work(runs, run.runId)
+    expect(late.budget).toBe('skill')
+    const frameEnd = madeAt + BROWSER_FRAME_TIMES.run
+    const margin = BROWSER_RUN_BUDGETS.skill.runMs - BROWSER_RUN_BUDGETS.skill.operateMs
+    expect(late.operateMs).toBe(frameEnd - now - margin)
+    expect(conn.prepare('SELECT ends_at FROM browser_runs WHERE id = ?').get(late.runId)).toEqual({ ends_at: iso(frameEnd) })
+    // Renewed to the end, never past it: the lock ends with the frames run.
+    while (now < frameEnd - 60_000) { now += 60_000; expect(runs.continue(alice, late.runId, PC).ok).toBe(true) }
+    now = frameEnd
+    expect(code(runs.continue(alice, late.runId, PC))).toBe('BROWSER_RUN_ENDED')
+    value(frames.end(alice, run.runId))
+
+    // Another run: started with less than a minute of operating left → refused, nothing started.
+    const madeAt2 = now
+    const run2 = value(await frames.start(alice, { skill: SKILL }, PC))
+    value(await approve(alice, run2))
+    now = madeAt2 + BROWSER_FRAME_TIMES.run - margin - BROWSER_RUN_MIN_OPERATE_MS + 1
+    expect(code(runs.start(alice, { host: DOMAIN, frameRunId: run2.runId, write: true }, PC))).toBe('BROWSER_RUN_TOO_LATE')
+    expect(conn.prepare('SELECT COUNT(*) AS n FROM browser_runs WHERE frame_run_id = ?').get(run2.runId)).toEqual({ n: 0 })
+    now -= 2
+    expect(work(runs, run2.runId).operateMs).toBe(BROWSER_RUN_MIN_OPERATE_MS + 1)
+  })
+
   it('the app cannot ask for a budget: a body naming one is refused, and the stored budget never changes', async () => {
     const runs = operatorRuns()
     expect(code(runs.start(alice, { host: DOMAIN, write: true, budget: 'skill' }, PC))).toBe('BROWSER_BAD_RUN')
     const plain = value(runs.start(alice, { host: DOMAIN }, PC))
     expect(() => conn.prepare("UPDATE browser_runs SET budget = 'skill' WHERE id = ?").run(plain.runId)).toThrow(/only moves from running/)
+    expect(() => conn.prepare('UPDATE browser_runs SET ends_at = ? WHERE id = ?').run(iso(now + 3_600_000), plain.runId)).toThrow(/only moves from running/)
+    expect(() => conn.prepare("UPDATE browser_runs SET frame_run_id = 'bf_x' WHERE id = ?").run(plain.runId)).toThrow(/only moves from running/)
     expect(() => conn.prepare('UPDATE browser_runs SET steps = steps + 2 WHERE id = ?').run(plain.runId)).toThrow(/only moves from running/)
     expect(() => conn.prepare('UPDATE browser_runs SET steps = steps - 1 WHERE id = ?').run(plain.runId)).toThrow(/CHECK|only moves from running/)
   })

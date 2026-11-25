@@ -97,6 +97,7 @@ function refusedWords(a: Exclude<BrowserLinesAnswer, { kind: 'ok' }>): string {
   if (a.kind === 'no-answer') return W.offline
   const code = a.code ?? ''
   if (code === 'BROWSER_RUN_BUSY') return W.busy
+  if (code === 'BROWSER_RUN_TOO_LATE') return W.tooLate
   if (code === 'BROWSER_NOT_ALLOWED') return W.notAllowed
   if (code === 'BROWSER_TYPE_NOT_GRANTED') return W.notGranted
   if (code === 'BROWSER_AI_STOPPED') return W.stopped
@@ -413,8 +414,11 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
     const browseRunId = (started.value as { runId?: unknown } | null)?.runId
     if (typeof browseRunId !== 'string' || !BROWSER_RUN_ID_RE.test(browseRunId)) return { kind: 'refused', words: W.failed }
     // The run's budget is the server's choice (a Skill's approved work gets more room); an older server's answer: standard.
-    const budget = browserRunBudget((started.value as { budget?: unknown } | null)?.budget)
-    const deadline = now() + budget.operateMs
+    // It operates no longer than the budget allows and the server said (never past the frames run's end).
+    const answered = started.value as { budget?: unknown; operateMs?: unknown } | null
+    const budget = browserRunBudget(answered?.budget)
+    const told = typeof answered?.operateMs === 'number' && Number.isFinite(answered.operateMs) ? Math.max(0, answered.operateMs) : budget.operateMs
+    const deadline = now() + Math.min(budget.operateMs, told)
     const log = o.log ?? []
     const writer = o.writer
     let outcome: BrowserRunOutcome = 'failed'
