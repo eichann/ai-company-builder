@@ -124,8 +124,9 @@ export function MeetingBanners({ companyId, items, aiTurns, onView, onChanged, n
   }
 
   const rows = items.flatMap(item => {
-    const m = asked.get(item.recordId) === item.version && (item.status === 'arrived' || item.status === 'failed' || item.status === 'skipped')
-      ? { ...item, status: 'asked' as const, byYou: true } : item
+    const pressable = item.status === 'arrived' || item.status === 'failed' || item.status === 'skipped' || (item.status === 'asked' && !item.byYou)
+    const m = asked.get(item.recordId) === item.version && pressable
+      ? { ...item, status: 'asked' as const, byYou: true, askedAutomatically: false } : item
     const banner = meetingBanner(m, { closed: closed.has(m.recordId), hidden: hidden.has(m.recordId), ai: aiTurns?.items.find(i => i.recordId === m.recordId) })
     return banner ? [{ m, banner }] : []
   })
@@ -181,6 +182,7 @@ export function MeetingBanners({ companyId, items, aiTurns, onView, onChanged, n
           </>}
           {banner.kind === 'reading' && <>
             {!banner.problem && <span title={readingWords(banner)} className="min-w-0 shrink truncate text-caption font-normal text-ai-text">{readingWords(banner)}</span>}
+            {banner.canRead && <button type="button" disabled={locked(m.recordId)} title="待たずに、あなたの AI が読みます" onClick={() => void read(m)} className={SHORT}>AI に読ませる</button>}
             {banner.problem?.canRetry && <button type="button" onClick={() => aiTurns?.retry(m.recordId)} className={QUIET}>もう一度</button>}
             {banner.canSkip && <button type="button" disabled={locked(m.recordId)} onClick={() => void skip(m)} className={QUIET}>読まない</button>}
           </>}

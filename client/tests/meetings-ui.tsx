@@ -10,6 +10,9 @@
 // 「やることを足す」 answers 「似ている」 for a title close to a proposal (the server decides in the app).
 // `?three=1`: a server that keeps a series' three choices (`seriesChoice`). `?autoread=new`: the member
 // never chose 「届いた議事録を AI が自動で読む」 and starts at 自動では読まない (else the server does not answer it).
+// `?clock=1`: the server's clock asked 定例ミーティング for 鈴木さん, its organiser, not started yet (`?clock=taken`: a
+// press then answers 409 MEETING_NOT_WAITING, someone's reading having started meanwhile).
+const CLOCK = new URLSearchParams(location.search).get('clock')
 import { useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import '../src/i18n'
@@ -39,7 +42,7 @@ const people: Record<string, string> = MANUAL
 const defs = new Map(coreTypeDefinitions().map(d => [d.name, d]))
 const today = (h: number) => { const d = new Date(); d.setHours(h, 0, 0, 0); return d.toISOString() }
 
-interface Meeting { id: string; title: string; at: string; state: string; version: number; by: string | null; series: boolean; members: string[] }
+interface Meeting { id: string; title: string; at: string; state: string; version: number; by: string | null; series: boolean; members: string[]; clockAsked?: boolean; organiser?: string }
 const meetings: Meeting[] = MANUAL ? [
   { id: 'meeting-teirei01', title: '営業部 定例', at: today(9), state: 'arrived', version: 1, by: null, series: true, members: ['u-abe', 'u-suzuki', 'u-tamura'] },
   { id: 'meeting-mensetu1', title: 'A社 打ち合わせ', at: today(10), state: 'arrived', version: 1, by: null, series: false, members: ['u-abe', 'u-suzuki'] },
@@ -47,6 +50,7 @@ const meetings: Meeting[] = MANUAL ? [
   { id: 'meeting-teirei01', title: '定例ミーティング', at: today(12), state: 'arrived', version: 1, by: null, series: true, members: ['u-abe', 'u-suzuki', 'u-tamura'] },
   { id: 'meeting-mensetu1', title: '採用面接', at: today(10), state: ME === 'u-suzuki' ? 'skipped' : 'arrived', version: ME === 'u-suzuki' ? 2 : 1, by: ME === 'u-suzuki' ? 'u-abe' : null, series: false, members: ['u-abe', 'u-suzuki'] },
 ]
+if (CLOCK) Object.assign(meetings[0], { state: 'asked', by: 'u-suzuki', clockAsked: true, organiser: 'u-suzuki' })
 const flood = Number(params.get('flood') ?? 0)
 for (let n = 0; n < flood; n++) {
   meetings.push({ id: `meeting-flood${String(n).padStart(3, '0')}`, title: `とても長い名前の部長会議 その${n}（会議室③・オンライン併用）`, at: today(9), state: 'arrived', version: 1, by: null, series: false, members: ['u-abe'] })
@@ -90,6 +94,8 @@ const arrivalOf = (m: Meeting): MeetingArrival => ({
   recordId: m.id, title: m.title, version: m.version, meetingAt: m.at, status: m.state as MeetingArrival['status'], attendeeCount: m.members.length,
   by: m.by ? { memberId: m.by, displayName: people[m.by] } : null, byYou: m.by === ME, series: m.series, autoSeries: m.series && autoSeries.has(m.id),
   ...(THREE && m.series ? { seriesChoice: autoSeries.has(m.id) ? 'auto' as const : seriesOff.has(m.id) ? 'off' as const : null } : {}),
+  ...(m.clockAsked ? { askedAutomatically: true } : {}),
+  ...(m.by && m.by === m.organiser ? { byOrganiser: true } : {}),
 })
 // What main counts for 「決めたことN・やることの案N」 (electron/features/minutes/meetings.ts, tested there).
 const madeOf = (d: ReturnType<typeof detailOf>) => ({ decisions: d.links.filter(l => l.record.type === 'decision').length, proposals: d.links.filter(l => l.record.type === 'task').length })
@@ -108,7 +114,8 @@ installElectronAPI({
   requestMeetingReading: async (_c, id, at) => {
     say(`read ${id}@${at}`)
     if (params.get('noaccess') === '1') return { success: false, error: MEETING_NO_ACCESS_TEXT, noAccess: true }
-    move(id, { state: 'asked', by: ME })
+    if (CLOCK === 'taken') return { success: false, error: 'この会議は、もう AI が読んでいるか、読み終わっています。' }
+    move(id, { state: 'asked', by: ME, clockAsked: false })
     return { success: true, version: find(id).version }
   },
   skipMeetingReading: async (_c, id, at) => { say(`skip ${id}@${at}`); move(id, { state: 'skipped', by: ME }); return { success: true, version: find(id).version } },

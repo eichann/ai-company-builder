@@ -84,9 +84,11 @@ export type MeetingBanner =
    * 「次から自動で読む」 series, or their 「届いた議事録を AI が自動で読む」 setting; `reader`: another
    * attendee's AI reads it (their name), `waiting` while it has not started (their PC may be closed:
    * 「〇〇さんの AI が読む予定」, owner decision D1-3); `canSkip`: still waiting for this member's AI
-   * (［読まない］ = 今回だけ); `problem`: this PC's AI cannot start it, in words (with 「もう一度」 when it may).
+   * (［読まない］ = 今回だけ); `problem`: this PC's AI cannot start it, in words (with 「もう一度」 when it may);
+   * `organiser`: that reader is the meeting's organiser (「（主催）」); `canRead`: only the clock asked it for
+   * another attendee and it has not started, so this member's own ［AI に読ませる］ takes it (server 2026-11-25).
    */
-  | { kind: 'reading'; auto: 'series' | 'setting' | null; reader: string | null; waiting: boolean; canSkip: boolean; problem: { reason: string; canRetry: boolean } | null }
+  | { kind: 'reading'; auto: 'series' | 'setting' | null; reader: string | null; organiser: boolean; waiting: boolean; canSkip: boolean; canRead: boolean; problem: { reason: string; canRetry: boolean } | null }
   /** 「読み終わりました」 with ［見る］ and ×. */
   | { kind: 'read' }
   /** 「〇〇さんが読まないにしました」 (another attendee chose it). */
@@ -110,8 +112,11 @@ export function meetingBanner(item: MeetingArrivalView, ctx: { closed: boolean; 
         kind: 'reading',
         auto: !item.byYou ? null : item.autoSeries ? 'series' : item.askedAutomatically ? 'setting' : null,
         reader: item.byYou ? null : (item.by?.displayName || null),
+        organiser: !item.byYou && item.byOrganiser === true,
         waiting: item.status === 'asked',
         canSkip: item.byYou && item.status === 'asked',
+        // Another person's own press is never taken (409), and an older server says nothing of who asked.
+        canRead: !item.byYou && item.status === 'asked' && item.askedAutomatically === true,
         problem: stuck && ctx.ai ? { reason: ctx.ai.reason, canRetry: ctx.ai.canRetry } : null,
       }
     }
@@ -127,7 +132,10 @@ export function readingWords(banner: Extract<MeetingBanner, { kind: 'reading' }>
   if (banner.auto === 'series') return '自動で読む定例です。AI が読んでいます…'
   if (banner.auto === 'setting') return '自動で読む設定のため、AI が読んでいます…'
   // Not a promise of one person: after a while another attendee's AI with the setting on may take it.
-  if (banner.reader) return banner.waiting ? `${banner.reader}さんの AI が読む予定です。しばらく読まれないときは、出ている人の AI が代わりに読みます` : `${banner.reader}さんの AI が読んでいます…`
+  if (banner.reader) {
+    const who = `${banner.reader}さん${banner.organiser ? '（主催）' : ''}`
+    return banner.waiting ? `${who}の AI が読む予定です。しばらく読まれないときは、出ている人の AI が代わりに読みます` : `${who}の AI が読んでいます…`
+  }
   return 'AI が読んでいます…'
 }
 

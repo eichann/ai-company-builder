@@ -419,6 +419,11 @@ or the decision service stops calling it, or another module uses the older per-m
   (also after a failed reading, 「前回読めず」); after ［AI に読ませる］ only the line changes to 「AI が読んでいます…」
   — nothing opens; the member's AI reads it as their 「AI の番」 (below) — with ［読まない］ (今回だけ)
   while it waits for their own AI, 「〇〇さんの AI が読んでいます…」 when another attendee pressed it,
+  「〇〇さん（主催）の…」 when that reader is the organiser (`byOrganiser`; absent → no label), ［AI に読ませる］
+  also on a meeting only the clock asked for another attendee that has not started (`asked`, not
+  `byYou`, `askedAutomatically`: the press takes it, "The organiser first"; another person's press or an
+  older server shows no button; a 409 `MEETING_NOT_WAITING` meanwhile is said in the server's words) —
+  on the banner's row and the card (`meetingBanner` `canRead`),
   and the runner's reason instead of the spinner when this PC cannot start it (Codex, not signed in,
   failed; 「もう一度」). The member's own automatic series: 「自動で読む定例です。AI が読んでいます…」 with
   ［次から自動で読まない］ (toast with 元に戻す). Read: 「読み終わりました　<title>：決めたことN・やることの案N」

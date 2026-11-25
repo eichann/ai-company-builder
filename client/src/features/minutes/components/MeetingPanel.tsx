@@ -79,9 +79,10 @@ export function MeetingPanel({ companyId, meetingId, members, onConsult, summary
     if (failure) setError(failure)
     else setNote(GOOGLE_OPENED_TEXT)
   }
-  const canRead = m?.status === 'arrived' || m?.status === 'skipped' || m?.status === 'failed'
   const reading = m?.status === 'asked' || m?.status === 'reading'
   const readingBanner = m && reading ? meetingBanner(m, { closed: false, hidden: false }) : null
+  // Also while only the clock asked it for another attendee: the member's own press takes it.
+  const canRead = m?.status === 'arrived' || m?.status === 'skipped' || m?.status === 'failed' || (readingBanner?.kind === 'reading' && readingBanner.canRead)
   // A server that keeps a series' three choices says which (`seriesChoice`); an older one keeps its two buttons.
   const threeChoices = !!m?.series && m.seriesChoice !== undefined
   return (
