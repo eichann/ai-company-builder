@@ -57,6 +57,7 @@ const LATER_TABLES = [
   'browser_line_reports',
   'browser_line_locks',
   'browser_line_grants',
+  'browser_site_grants',
   'browser_shape_notices',
   'browser_shape_report_counts',
   // agent-browser.md "This PC's registration": PC registrations, their history, each plan's PC.

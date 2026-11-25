@@ -36,6 +36,7 @@ import { browserPlansRoute, browserReportRoute } from '../../src/routes/browser-
 import { companiesRoute } from '../../src/routes/companies'
 import { agentBrowserRoute } from '../../src/routes/agent-browser'
 import { browserDevicesRoute } from '../../src/routes/browser-devices'
+import { browserLinesRoute } from '../../src/routes/browser-lines'
 import { fileBrowserConnectorCatalog } from '../../src/adapters/browser-connector-catalog'
 import { randomBytes } from 'crypto'
 
@@ -45,6 +46,7 @@ app.route('/api/companies/:companyId', agentBrowserRoute)
 app.route('/api/companies/:companyId', browserPlansRoute)
 app.route('/api', browserReportRoute)
 app.route('/api/companies/:companyId', browserDevicesRoute)
+app.route('/api/companies/:companyId', browserLinesRoute)
 
 const CO = 'bp-co'
 const BASE = `/api/companies/${CO}`
@@ -94,6 +96,10 @@ beforeAll(async () => {
   }
   const on = { mode: 'on', sites: [{ host: 'manager.linestep.net', level: 'write', assetHosts: ['d1nhtjid4lgi9y.cloudfront.net', 'profile.line-scdn.net'] }] }
   expect((await call('bp-owner', 'PUT', `${BASE}/agent-browser`, on)).status).toBe(200)
+  // Everyone 変えてよい on the site (「使える人」, agent-browser.md "Who may use a site"): this path asks it after the type grant.
+  for (const u of Object.keys(ROLE)) {
+    expect((await call('bp-owner', 'PUT', `${BASE}/browser-site-grants/${u}`, { host: 'manager.linestep.net', level: 'write' })).status).toBe(200)
+  }
   for (const user of Object.keys(PC)) {
     const asked = await call(user, 'POST', `${BASE}/browser-devices`, { label: `${user} の Mac` })
     expect(asked.status, JSON.stringify(asked.json)).toBe(201)

@@ -62,6 +62,7 @@ import { createAgentSandboxService } from './services/agent-sandbox'
 import { createAgentBrowserService } from './services/agent-browser'
 import { createBrowserPlanService } from './services/browser-plans'
 import { createBrowserLineService } from './services/browser-lines'
+import { createBrowserSiteGrants } from './services/browser-site-grants'
 import { createBrowserDeviceService } from './services/browser-devices'
 import type { BrowserConnectorCatalog } from './ports/browser-plans'
 import type { BrowserOpenedListSource } from './ports/browser-lines'
@@ -280,7 +281,11 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
   const push = createPushChannel()
   const agentSandbox = createAgentSandboxService({ ...repos, ...shared })
   // 「ブラウザ操作」 (agent-browser.md): kept here, handed to the apps in their policy.
-  const agentBrowser = createAgentBrowserService({ ...repos, ...shared })
+  const agentBrowser = createAgentBrowserService({
+    ...repos, ...shared,
+    // A site removed or lowered to 見るだけ clears its 変えてよい rows (agent-browser.md "Who may use a site"); built below.
+    writeNoLongerAllowed: (companyId, hosts) => browserSiteGrants.writeNoLongerAllowed(companyId, hosts),
+  })
   const agentStops = createAgentStopService({
     ...repos, ...shared,
     brokerEnabled: () => brokerVault.status().enabled,
@@ -293,11 +298,13 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
   // combinations from shared/browser-connectors/approved.json; the member's setting and stops now.
   // The PCs used for 「ブラウザ操作」 (agent-browser.md "This PC's registration"): the first check of both paths' gates.
   const browserDevices = createBrowserDeviceService({ ...shared, tokenDigest: sha256TokenDigest })
+  // Who may use which registered site, and how (agent-browser.md "Who may use a site"): both paths' gates ask it.
+  const browserSiteGrants = createBrowserSiteGrants({ ...shared, memberships: repos.memberships, browserPolicy: member => agentBrowser.policyFor(member) })
   const browserPlans = createBrowserPlanService({
     ...shared, memberships: repos.memberships, tokenDigest: sha256TokenDigest, monotonic: systemMonotonicClock,
     catalog: options.browserConnectors ?? fileBrowserConnectorCatalog(), executionLookup: sqliteBrowserExecutionLookup(conn),
     browserPolicy: member => agentBrowser.policyFor(member), aiStops: member => agentStops.policyFor(member),
-    devices: browserDevices.gate,
+    devices: browserDevices.gate, siteGrants: browserSiteGrants,
   })
   // Plans of opened lines (agent-browser.md "Plans of opened lines on the server"): the opened list from
   // shared/browser-connectors/opened.json, the site's host from its approved declaration.
@@ -306,7 +313,7 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     opened: options.browserOpened ?? fileBrowserOpenedList(), catalog: options.browserConnectors ?? fileBrowserConnectorCatalog(),
     executionLookup: sqliteBrowserLineExecutionLookup(conn),
     browserPolicy: member => agentBrowser.policyFor(member), aiStops: member => agentStops.policyFor(member),
-    devices: browserDevices.gate,
+    devices: browserDevices.gate, siteGrants: browserSiteGrants,
     noticesChanged: (companyId, userIds) => push.notify(companyId, userIds, { kind: 'notifications', version: shared.ids.newToken().slice(0, 32) }),
   })
   const brokerTokens = createBrokerTokenService({
@@ -906,6 +913,7 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     agentBrowser,
     browserPlans,
     browserLines,
+    browserSiteGrants,
     browserDevices,
     agentStops,
     agentPolicy,

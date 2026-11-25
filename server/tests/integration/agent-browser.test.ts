@@ -25,11 +25,13 @@ import { Hono } from 'hono'
 import { db, initDatabase } from '../../src/db'
 import { agentBrowserRoute } from '../../src/routes/agent-browser'
 import { agentSandboxRoute } from '../../src/routes/agent-sandbox'
+import { browserLinesRoute } from '../../src/routes/browser-lines'
 import { services } from '../../src/composition'
 
 const app = new Hono()
 app.route('/api/companies/:companyId', agentSandboxRoute)
 app.route('/api/companies/:companyId', agentBrowserRoute)
+app.route('/api/companies/:companyId', browserLinesRoute)
 
 const CO = 'br-co'
 const BASE = `/api/companies/${CO}`
@@ -178,5 +180,36 @@ describe('「ブラウザ操作」', () => {
   it('a stored setting that no longer validates is read as off', async () => {
     db.prepare('UPDATE agent_browser_settings SET settings = ? WHERE company_id = ?').run(JSON.stringify({ mode: 'on', sites: [{ host: '*', level: 'write', assetHosts: [] }] }), CO)
     expect((await policyOf('br-admin')).browser).toEqual({ mode: 'off', sites: [], source: 'company' })
+  })
+})
+
+describe('a site lowered or removed clears its 変えてよい (agent-browser.md "Who may use a site")', () => {
+  const HOST = 'shop.example.com'
+  const KEEP = 'tickets.example.net'
+  const sites = (level: 'read' | 'write' | 'delete' | null) => ({
+    mode: 'on', sites: [...(level ? [{ host: HOST, level, assetHosts: [] }] : []), { host: KEEP, level: 'write', assetHosts: [] }],
+  })
+  const levels = async () => (await call('br-owner', 'GET', `${BASE}/browser-site-grants`)).json.data.grants
+    .map((g: Json) => [g.userId, g.host, g.level]).sort()
+
+  it('lowered to 見るだけ or removed: the people\'s 変えてよい there goes, in the same save; 使わない and other sites stay', async () => {
+    for (const level of ['read', null] as const) {
+      expect((await call('br-owner', 'PUT', `${BASE}/agent-browser`, sites('write'))).status).toBe(200)
+      for (const [u, l, h] of [['br-member', 'write', HOST], ['br-member2', 'none', HOST], ['br-member', 'write', KEEP]]) {
+        expect((await call('br-owner', 'PUT', `${BASE}/browser-site-grants/${u}`, { host: h, level: l })).status).toBe(200)
+      }
+      expect((await call('br-owner', 'PUT', `${BASE}/agent-browser`, sites(level))).status).toBe(200)
+      // Raised / registered again: the 変えてよい does not come back unseen; the 使わない and the other site's rows stay.
+      expect((await call('br-owner', 'PUT', `${BASE}/agent-browser`, sites('write'))).status).toBe(200)
+      expect(await levels(), String(level)).toEqual([['br-member', KEEP, 'write'], ['br-member2', HOST, 'none']].sort())
+      expect(services.browserSiteGrants.allows({ companyId: CO, userId: 'br-member', role: 'member' }, HOST, 'write')).toBe(false)
+    }
+  })
+
+  it('raised (入力・保存まで → 削除も) keeps 変えてよい', async () => {
+    expect((await call('br-owner', 'PUT', `${BASE}/agent-browser`, sites('write'))).status).toBe(200)
+    expect((await call('br-owner', 'PUT', `${BASE}/browser-site-grants/br-member`, { host: HOST, level: 'write' })).status).toBe(200)
+    expect((await call('br-owner', 'PUT', `${BASE}/agent-browser`, sites('delete'))).status).toBe(200)
+    expect(await levels()).toContainEqual(['br-member', HOST, 'write'])
   })
 })

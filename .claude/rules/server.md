@@ -315,7 +315,9 @@ GET  /api/config                                  setup state (no auth)
                               POST /browser-line-plans, GET /browser-line-plans/:planId,
                               POST /browser-line-plans/:planId/result | approve | cancel | claim,
                               POST /browser-line-executions/:executionId/permit | confirm,
-                              GET|PUT /browser-line-grants(/:userId) (owner/admin),
+                              GET|PUT /browser-line-grants(/:userId) (owner/admin; replaced: GET empty, PUT 410),
+                              GET|PUT /browser-site-grants(/:userId) (owner/admin: who may use which registered
+                              site — 使わない / 見るだけ / 変えてよい; agent-browser.md "Who may use a site"),
                               POST /browser-shape-notices, GET /browser-shape-notices (owner/admin),
                               GET /browser-lines-mine                         browser-lines.ts
                                                                 (opened lines: agent-browser.md "Plans of opened lines on the server")

@@ -1,11 +1,15 @@
 /**
  * Words and helpers for 「ブラウザ操作に使う PC」 and 「使える人」 (owner/admin; .claude/rules/agent-browser.md
- * "This PC's registration" and "Per-line grants"; PC-registration design memo v2 §7-2). The server decides everything
- * (the gate, who may change what); these only say it in plain Japanese and work out which grant call a tick means.
- * Words: 「PC」 (never 「デバイス」), 「使えるようにする」, 「作業」 — never 「開ける」, no hash or version shown.
+ * "This PC's registration" and "Who may use a site"; PC-registration design memo v2 §7-2). The server decides everything
+ * (the gate, who may change what); these only say it in plain Japanese. 「使える人」 speaks of registered sites and
+ * 使わない / 見るだけ / 変えてよい only — never a site's job. Words: 「PC」 (never 「デバイス」), 「使えるようにする」 —
+ * never 「開ける」, no hash or version shown.
  */
 import { BROWSER_DEVICE_WORDS, type BrowserDeviceRevokeReason, type BrowserDeviceState } from '../../../shared/core/browser-device'
-import type { BrowserDevicesList, BrowserLineGrantsView, BrowserLineRef } from './api'
+import {
+  BROWSER_PERSON_LEVELS, effectiveBrowserPersonLevel, levelAllows, type BrowserOperationLevel, type BrowserPersonLevel,
+} from '../../../shared/core/browser-operation'
+import type { BrowserDevicesList, BrowserSiteGrantsView } from './api'
 
 // ---------------------------------------------------------------------------
 // 「ブラウザ操作に使う PC」
@@ -27,7 +31,7 @@ export const PC_REVOKE_REASONS: Record<BrowserDeviceRevokeReason, string> = {
   left: '会社を抜けたので止まりました',
 }
 
-export const PC_ENABLE_HELP = '使えるようにした PC でも、AI に任せられるのは「使える人」で選んだ作業だけです。'
+export const PC_ENABLE_HELP = '使えるようにした PC でも、AI に任せられるのは「使える人」で選んだサイトと使い方だけです。'
 
 export function pcEnableSentence(person: string, label: string): string {
   return `${person}さんの「${label}」を使えるようにします。`
@@ -66,117 +70,49 @@ export function pcHistoryLine(
 }
 
 // ---------------------------------------------------------------------------
-// 「使える人」
+// 「使える人」 (per registered site: agent-browser.md "Who may use a site")
 // ---------------------------------------------------------------------------
 
 export const PEOPLE_TITLE = 'ブラウザ操作を使える人'
 
-export const PEOPLE_INTRO = 'AI に任せてよい作業を、人ごとに選びます。選んだ人も、使えるようにした PC からしか使えません。'
+export const PEOPLE_INTRO =
+  '登録したサイトごとに、AI にどこまで任せてよいかを人ごとに選びます。サイトを登録すると、全員「見るだけ」から始まります。「変えてよい」は1人ずつ選んでください。選んだ人も、使えるようにした PC からしか使えません。'
 
 export const PEOPLE_COMPANY_OFF =
   '会社全体のブラウザ操作が「使わない」なので、「メンバーごとの動作」で「使う」にした人のほかは、選んでも今は使えません。'
 
 export const PEOPLE_NO_PC = '使えるようにした PC はまだありません'
 
-export const PEOPLE_WAITING = 'まだ使えません（確かめ待ち）'
+export const PEOPLE_NO_SITES = 'ブラウザ操作で使うサイトが、まだ登録されていません。「ブラウザ操作」でサイトを登録してください。'
 
-export const PEOPLE_CHANGED = 'この作業は内容が変わりました。使える人を選び直してください。'
-
-export const PEOPLE_UNTICK_NOTE = 'チェックを外すと、その人はこの作業をすぐに使えなくなります（前の版で使えるようにしていた分も含めて）。'
-
-export function lineKindLabel(writes: boolean): string {
-  return writes ? '書き込む' : '見るだけ'
+/** Each person level in plain words (使わない / 見るだけ / 変えてよい). */
+export const PERSON_LEVEL_LABELS: Record<BrowserPersonLevel, string> = {
+  none: '使わない',
+  read: '見るだけ',
+  write: '変えてよい',
 }
 
-/**
- * One column of the table: a 作業 (a site's line). `rows` are its approved rows that share the newest approved row's
- * meaning, oldest first; `target` is the newest. A line with no approved row yet is `waiting` (shown greyed, no box).
- */
-export type PeopleColumn =
-  | { kind: 'usable'; key: string; site: string; line: string; label: string; writes: boolean; target: BrowserLineRef; rows: BrowserLineRef[] }
-  | { kind: 'waiting'; key: string; site: string; line: string; label: string; writes: boolean }
+export const PERSON_LEVELS: readonly BrowserPersonLevel[] = BROWSER_PERSON_LEVELS
 
-const versionParts = (v: string) => v.split('.').map((n) => Number.parseInt(n, 10) || 0)
-function compareVersions(a: string, b: string): number {
-  const x = versionParts(a)
-  const y = versionParts(b)
-  for (let i = 0; i < Math.max(x.length, y.length); i++) {
-    const d = (x[i] ?? 0) - (y[i] ?? 0)
-    if (d !== 0) return d
-  }
-  return 0
-}
-/** Oldest first: the line's own version, then its map's. */
-function compareRows(a: BrowserLineRef, b: BrowserLineRef): number {
-  return compareVersions(a.version, b.version) || compareVersions(a.mapVersion, b.mapVersion)
+/** Under a column whose site the company set to 見るだけ: nobody can be 変えてよい there. */
+export const PEOPLE_SITE_READ_ONLY = '会社の設定が「見るだけ」のサイトです'
+
+/** In a cell whose person was set to 変えてよい before the company lowered the site to 見るだけ. */
+export const PEOPLE_CAPPED = 'いまは会社の設定で「見るだけ」です'
+
+export const PEOPLE_CHANGE_NOTE = '選ぶとすぐに変わります。「使わない」にすると、その人はそのサイトを AI に任せられなくなります。'
+
+/** The person's chosen level on a site (no choice = the default, 見るだけ). */
+export function personLevelOf(view: BrowserSiteGrantsView, userId: string, host: string): BrowserPersonLevel {
+  return view.grants.find((g) => g.userId === userId && g.host === host)?.level ?? view.defaultLevel
 }
 
-const refOf = (r: BrowserLineRef): BrowserLineRef => ({
-  site: r.site, line: r.line, version: r.version, mapVersion: r.mapVersion, meaningHash: r.meaningHash, mechanicsHash: r.mechanicsHash,
-})
-const sameRow = (a: BrowserLineRef, b: BrowserLineRef) =>
-  a.site === b.site && a.line === b.line && a.version === b.version && a.mapVersion === b.mapVersion
-  && a.meaningHash === b.meaningHash && a.mechanicsHash === b.mechanicsHash
-
-/** The table's columns: usable 作業 first (in the server's order), then those still waiting for their review. */
-export function peopleColumns(view: BrowserLineGrantsView): PeopleColumn[] {
-  const columns: PeopleColumn[] = []
-  const seen = new Set<string>()
-  for (const l of view.lines) {
-    const key = `${l.site}/${l.line}`
-    if (seen.has(key)) continue
-    seen.add(key)
-    const all = view.lines.filter((x) => x.site === l.site && x.line === l.line).sort(compareRows)
-    const newest = all[all.length - 1]
-    const rows = all.filter((x) => x.meaningHash === newest.meaningHash).map(refOf)
-    columns.push({ kind: 'usable', key, site: l.site, line: l.line, label: newest.label, writes: newest.writes, target: refOf(newest), rows })
-  }
-  for (const w of view.waiting) {
-    const key = `${w.site}/${w.line}`
-    if (seen.has(key)) continue
-    seen.add(key)
-    columns.push({ kind: 'waiting', key, site: w.site, line: w.line, label: w.label, writes: w.writes })
-  }
-  return columns
+/** What applies: the chosen level capped by the site's level (the server's rule, shared/core). */
+export function effectiveLevelOf(view: BrowserSiteGrantsView, userId: string, site: { host: string; level: BrowserOperationLevel }): BrowserPersonLevel {
+  return effectiveBrowserPersonLevel(personLevelOf(view, userId, site.host), site.level)
 }
 
-const inForce = (view: BrowserLineGrantsView, userId: string, row: BrowserLineRef) =>
-  view.grants.some((g) => g.userId === userId && sameRow(g, row))
-
-/**
- * Ticked: the person holds a grant in force on **any** approved row of the 作業 (any meaning) — so whatever the server
- * still lets them use is never shown unticked, and the untick (which takes every grant on the line away) is always one
- * press away (Codex review). `partial` when that does not include the newest row: the box is ticked, the cell says so,
- * and choosing again is untick + tick.
- */
-export function isTicked(view: BrowserLineGrantsView, column: PeopleColumn, userId: string): boolean {
-  return column.kind === 'usable' && view.grants.some((g) => g.userId === userId && g.site === column.site && g.line === column.line)
-}
-
-/** Ticked, but not on the newest approved row (an earlier content, or a fill that stopped halfway). */
-export function isPartial(view: BrowserLineGrantsView, column: PeopleColumn, userId: string): boolean {
-  return column.kind === 'usable' && isTicked(view, column, userId) && !column.rows.every((r) => inForce(view, userId, r))
-}
-
-export const PEOPLE_PARTIAL = '前の内容でだけ使えます'
-
-/**
- * The next row to grant when the box is ticked: the oldest of the 作業's rows (same meaning) on which the person holds
- * no grant in force, or null when every one is covered. Granting the oldest first lets a row's reviewed carry-over
- * (grantsFrom) cover the newer ones, so usually one call does it; an app still on an older map's version can then use
- * the 作業 too. Only approved rows of this very 作業 and meaning are ever sent.
- */
-export function nextGrantRow(view: BrowserLineGrantsView, column: PeopleColumn, userId: string): BrowserLineRef | null {
-  if (column.kind !== 'usable') return null
-  return column.rows.find((r) => !inForce(view, userId, r)) ?? null
-}
-
-/**
- * People who could use an earlier meaning of the 作業 but not this one (its content changed and no review called it
- * compatible): the column says to choose again.
- */
-export function changedFor(view: BrowserLineGrantsView, column: PeopleColumn): boolean {
-  if (column.kind !== 'usable') return false
-  return view.grants.some((g) => g.site === column.site && g.line === column.line && g.meaningHash !== column.target.meaningHash
-    && !inForce(view, g.userId, column.target))
+/** Whether 変えてよい can be chosen on this site (the company's level allows writing). */
+export function writeChoosable(site: { level: BrowserOperationLevel }): boolean {
+  return levelAllows(site.level, 'write')
 }

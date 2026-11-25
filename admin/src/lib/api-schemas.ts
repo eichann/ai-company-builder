@@ -23,7 +23,7 @@ import type {
 import type { AgentSandboxView } from '../../../shared/types/agent-sandbox'
 import type { AgentBrowserView } from '../../../shared/types/agent-browser'
 import type { BrowserDeviceView, BrowserDevicesList } from '../../../shared/types/browser-devices'
-import type { BrowserLineGrantsView } from '../../../shared/types/browser-lines'
+import type { BrowserSiteGrantsView } from '../../../shared/types/browser-site-grants'
 import type { RecordQueryResult } from '../../../shared/types/records'
 import type { AgentStopView } from '../../../shared/types/agent-stop'
 import type { FeaturesView } from '../../../shared/types/features'
@@ -358,7 +358,7 @@ export const browserDeviceSchema = topLevel<BrowserDeviceView>({
   id: str, userId: str, label: str, state: z.enum(['pending', 'enabled', 'revoked']), revokeReason: nullableStr,
   requestedAt: str, enabledAt: nullableStr, enabledBy: nullableStr, revokedAt: nullableStr, revokedBy: nullableStr, lastUsedAt: nullableStr,
 })
-export const browserLineGrantsSchema = topLevel<BrowserLineGrantsView>({ lines: list, waiting: list, grants: list })
+export const browserSiteGrantsSchema = topLevel<BrowserSiteGrantsView>({ sites: list, defaultLevel: str, grants: list })
 export const agentStopSchema = topLevel<AgentStopView>({ active: list, history: list, unsupported: list, keys: obj })
 
 // 「もう一方の AI に聞く」 (shared/types/second-opinion.ts)

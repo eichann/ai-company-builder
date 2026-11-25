@@ -8,7 +8,7 @@
  */
 import type Database from 'better-sqlite3'
 import type {
-  BrowserLineExecutionChange, BrowserLineExecutionLookup, BrowserLineExecutionRow, BrowserLineGrantRow, BrowserLinePlanChange,
+  BrowserLineExecutionChange, BrowserLineExecutionLookup, BrowserLineExecutionRow, BrowserLineGrantRow, BrowserLinePlanChange, BrowserSiteGrantRow,
   BrowserLinePlanRow, BrowserLineReportRow, BrowserLineRepository, BrowserShapeNoticeRow, BrowserStepChange, BrowserStepRow,
 } from '../../ports/browser-lines'
 
@@ -77,6 +77,8 @@ type GrantDbRow = { user_id: string; site: string; line_name: string; meaning_ha
 const toGrant = (r: GrantDbRow): BrowserLineGrantRow => ({
   userId: r.user_id, site: r.site, lineName: r.line_name, meaningHash: r.meaning_hash, mechanicsHash: r.mechanics_hash, grantedBy: r.granted_by, grantedAt: r.granted_at,
 })
+type SiteGrantDbRow = { user_id: string; host: string; level: string; granted_by: string; updated_at: string }
+const toSiteGrant = (r: SiteGrantDbRow): BrowserSiteGrantRow => ({ userId: r.user_id, host: r.host, level: r.level, grantedBy: r.granted_by, updatedAt: r.updated_at })
 const GRANT_COLUMNS = 'user_id, site, line_name, meaning_hash, mechanics_hash, granted_by, granted_at'
 
 type NoticeDbRow = { site: string; map_version: string; thing: string; unknown_keys: number; missing_keys: number; unreadable: number; reports: number; first_at: string; last_at: string }
@@ -178,6 +180,27 @@ export function sqliteBrowserLineRepository(conn: Database.Database, companyId: 
     },
     removeGrantsOf(userId) {
       conn.prepare('DELETE FROM browser_line_grants WHERE company_id = ? AND user_id = ?').run(companyId, userId)
+    },
+
+    siteGrants() {
+      return (conn.prepare('SELECT user_id, host, level, granted_by, updated_at FROM browser_site_grants WHERE company_id = ? ORDER BY user_id, host')
+        .all(companyId) as SiteGrantDbRow[]).map(toSiteGrant)
+    },
+    siteGrantOf(userId, host) {
+      const r = conn.prepare('SELECT user_id, host, level, granted_by, updated_at FROM browser_site_grants WHERE company_id = ? AND user_id = ? AND host = ?')
+        .get(companyId, userId, host) as SiteGrantDbRow | undefined
+      return r ? toSiteGrant(r) : null
+    },
+    saveSiteGrant(g) {
+      conn.prepare(`INSERT INTO browser_site_grants (company_id, user_id, host, level, granted_by, updated_at) VALUES (?, ?, ?, ?, ?, ?)
+          ON CONFLICT (company_id, user_id, host) DO UPDATE SET level = excluded.level, granted_by = excluded.granted_by, updated_at = excluded.updated_at`)
+        .run(companyId, g.userId, g.host, g.level, g.grantedBy, g.updatedAt)
+    },
+    removeSiteGrantsOf(userId) {
+      conn.prepare('DELETE FROM browser_site_grants WHERE company_id = ? AND user_id = ?').run(companyId, userId)
+    },
+    removeSiteWriteGrants(host) {
+      conn.prepare("DELETE FROM browser_site_grants WHERE company_id = ? AND host = ? AND level = 'write'").run(companyId, host)
     },
 
     shapeNotices() {

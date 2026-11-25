@@ -46,6 +46,7 @@ import type { MembershipRepository } from '../ports/memberships'
 import type { Transactions } from '../ports/transactions'
 import { hashCanonical } from '../lib/content-hash'
 import { hasFullAccess, type Member } from './access'
+import type { BrowserSiteGrants } from './browser-site-grants'
 import type { BrowserDeviceGate } from './browser-devices'
 import { ok, refuse, type Outcome, type Refusal } from './outcome'
 
@@ -67,6 +68,11 @@ export interface BrowserPlanDeps {
   aiStops: (member: Member) => { all: boolean; tools: readonly string[] }
   /** This PC's registration (agent-browser.md "This PC's registration"): the first check of the gate. */
   devices: BrowserDeviceGate
+  /**
+   * Who may use which registered site, and how (agent-browser.md "Who may use a site"): the old path asks it too, after
+   * its type grant, so 使わない / 見るだけ on the admin's 「使える人」 stops this path's plans and permits as well.
+   */
+  siteGrants: Pick<BrowserSiteGrants, 'allows'>
   log?: Pick<Console, 'warn'>
 }
 
@@ -227,7 +233,7 @@ export function createBrowserPlanService(deps: BrowserPlanDeps) {
    * Every rule a step of a plan must pass now (register, approve, claim, permit), in this order:
    * this PC (an enabled registration of the member, the plan's own registration — `devices.check`), the
    * combination approved and not retired, the app new enough, the operation known and allowed by the first
-   * version's rule, the company's setting, the AI stop, the member's grant.
+   * version's rule, the company's setting, the AI stop, the member's grant, the member's level on the site.
    */
   function gate(member: Member, key: Parsed['connector'] & { declarationHash: string; checkerHash: string; factsVersion: number }, operationName: string, appVersion: string | undefined,
     device: { key: string | undefined; planId: string | null }): Outcome<{ combination: Combination; operation: BrowserOperation; deviceId: string | null }> {
@@ -250,6 +256,8 @@ export function createBrowserPlanService(deps: BrowserPlanDeps) {
     if (!use.usable.includes(operationName)) return refuse('conflict', W.notAllowed, { code: 'BROWSER_NOT_ALLOWED' })
     if (browserAiStopped(deps.aiStops(member))) return refuse('conflict', W.aiStopped, { code: 'BROWSER_AI_STOPPED' })
     if (!granted(member, key.id, operationName, key.declarationHash)) return refuse('forbidden', W.notGranted, { code: 'BROWSER_TYPE_NOT_GRANTED' })
+    // The person's own level on the site (「使える人」): this path's type grant alone is not enough.
+    if (!deps.siteGrants.allows(member, combination.browser.host, operation.effect)) return refuse('forbidden', W.notGranted, { code: 'BROWSER_TYPE_NOT_GRANTED' })
     return ok({ combination, operation, deviceId: pc.value.deviceId })
   }
 

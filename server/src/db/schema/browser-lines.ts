@@ -141,7 +141,8 @@ export const browserLineSchema = `
       FOREIGN KEY (company_id, execution_id) REFERENCES browser_line_executions(company_id, id) ON DELETE CASCADE
     );
 
-    -- Who may use which opened line (§16-5, Q15): keyed by the line's meaning hash and the mechanics hash it was granted
+    -- Who could use which opened line (§16-5, Q15) — no longer consulted since browser_site_grants (step ①); kept for
+    -- released builds and self-hosters' rows: keyed by the line's meaning hash and the mechanics hash it was granted
     -- on; a later approved row carries it only when its reviewed grantsFrom names that mechanics hash.
     CREATE TABLE IF NOT EXISTS browser_line_grants (
       company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
@@ -153,6 +154,21 @@ export const browserLineSchema = `
       granted_by TEXT NOT NULL,
       granted_at TEXT NOT NULL,
       PRIMARY KEY (company_id, user_id, site, line_name, meaning_hash, mechanics_hash)
+    );
+
+    -- Who may use which registered site, and how (step ① of the redesign; agent-browser.md "Who may use a site"):
+    -- member × the host as the company registered it × none / read / write. No row = 見るだけ (read) once the company
+    -- registered the host (owner decision D4); the company's level is the ceiling. A row counts only when written while
+    -- the person is a member this time (updated_at ≥ the membership's created_at). Replaces browser_line_grants (kept,
+    -- no longer consulted). Additive only.
+    CREATE TABLE IF NOT EXISTS browser_site_grants (
+      company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+      user_id TEXT NOT NULL,
+      host TEXT NOT NULL,
+      level TEXT NOT NULL CHECK (level IN ('none', 'read', 'write')),
+      granted_by TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY (company_id, user_id, host)
     );
 
     -- The strict read's notice to owners / admins (§16-1): one row per company × site × map version × thing, the latest

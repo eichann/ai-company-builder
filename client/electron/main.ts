@@ -664,6 +664,7 @@ const browserInspections = wireBrowserInspections(ipc, {
   context: browserPlans.context,
   stopped: companyId => browserAiStopped(agentControl.policy.stop(companyId)),
   window: (companyId, host) => browser.previewWindow(companyId, host),
+  siteLevel: (companyId, host) => browser.siteNow(companyId, host)?.level ?? null,
   sites: [{ map: lstepLines.map, readers: lstepLines.readers, addresses: lstepLines.addresses, account: lstepLines.account }],
   lines: LSTEP_LINES,
   declarations: [lstep.declaration],

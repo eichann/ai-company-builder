@@ -6,8 +6,8 @@
  * hand.
  *
  * Guards: the opened list re-checked (a row whose hashes do not match is never used), the gate an exact match of six
- * fields on an approved row, the site setting, the stop and the per-line grant (meaning + mechanics, carried only by a
- * reviewed `grantsFrom`); where a value comes from (which / when never from the AI or the site, no record field yet, a
+ * fields on an approved row, the site setting, the stop and the person's level on the site (the old per-line grant no
+ * longer counts); where a value comes from (which / when never from the AI or the site, no record field yet, a
  * person's value confirmed); an inspection's result once, fixed words, consistent; plans of writes only of an approved
  * line that writes (the writes and locks derived by the server); the
  * strict read's notice (names of the map only, a member who may use the site, limits, one per key, owners / admins told
@@ -25,6 +25,7 @@ import { sqliteBrowserLineExecutionLookup } from '../../src/adapters/sqlite/brow
 import { fileBrowserConnectorCatalog, fileBrowserOpenedList } from '../../src/adapters/browser-connector-catalog'
 import { sha256TokenDigest } from '../../src/adapters/system'
 import { hashCanonical } from '../../src/lib/content-hash'
+import { createBrowserSiteGrants } from '../../src/services/browser-site-grants'
 import { createBrowserLineService, BROWSER_SHAPE_NOTICE_LIMITS, type BrowserLineService } from '../../src/services/browser-lines'
 import { createBrowserLineSteps, type BrowserLineWritesContent } from '../../src/services/browser-line-steps'
 import type { BrowserLinePlanRow } from '../../src/ports/browser-lines'
@@ -74,6 +75,7 @@ function build() {
     opened: { file: () => opened }, catalog: CATALOG, executionLookup: sqliteBrowserLineExecutionLookup(conn),
     memberships: sqliteMembershipRepository(conn), accounts: { byIds: () => new Map() },
     browserPolicy: () => policy, aiStops: () => stops, devices: anyPc, log: { warn: () => {} },
+    siteGrants: createBrowserSiteGrants({ companyData: data, clock, memberships: sqliteMembershipRepository(conn), browserPolicy: () => policy }),
   })
 }
 function join(companyId: string, userId: string, role: string, at = iso(T0 - 3_600_000)) {
@@ -84,8 +86,13 @@ function value<T>(r: { ok: true; value: T } | Refusal): T {
   return r.value
 }
 const code = (r: { ok: boolean; body?: { code?: unknown } }) => (r.ok ? 'ok' : r.body?.code)
-function grant(m: Member, row = approvedRow()) {
-  value(svc.setGrant(owner, m.userId, { site: row.site, line: row.name, meaningHash: row.meaningHash, mechanicsHash: row.mechanicsHash, allowed: true }))
+/** The person's level on the site (agent-browser.md "Who may use a site"), stored as an admin's change would be. */
+function setLevel(m: Member, level: 'none' | 'read' | 'write') {
+  data.forCompany(m.companyId).browserLines.saveSiteGrant({ userId: m.userId, host: HOST, level, grantedBy: owner.userId, updatedAt: iso(now) })
+}
+/** 変えてよい on the site (the company's level still caps it). */
+function grant(m: Member) {
+  setLevel(m, 'write')
 }
 const inspect = (m = alice, values: unknown = VALUES, row = approvedRow()) => svc.create(m, { line: refOf(row), values })
 
@@ -102,6 +109,8 @@ beforeEach(() => {
   stops = { all: false, tools: [] }
   build()
   grant(alice)
+  // Bob is at 使わない (everyone else starts at 見るだけ, owner decision D4).
+  setLevel(bob, 'none')
 })
 
 /** An opened file with these lines on the real map 1.0.1, their hashes computed as the script does. */
@@ -134,7 +143,7 @@ describe('the opened list and the gate', () => {
     expect(p.state).toBe('open')
     expect(p.writes).toBe(0)
     expect(p.line.label).toBe('流入経路を点検する')
-    // Even with a grant on that row's hashes (written as a later build could have).
+    // Even with a per-line grant on that row's hashes (the old table, written as an earlier build could have).
     const pending = pendingRow()
     data.forCompany(CO).browserLines.saveGrant({ userId: alice.userId, site: 'lstep', lineName: pending.name, meaningHash: pending.meaningHash, mechanicsHash: pending.mechanicsHash, grantedBy: owner.userId, grantedAt: iso(now) })
     expect(code(inspect(alice, VALUES, pending))).toBe('BROWSER_LINE_NOT_APPROVED')
@@ -174,7 +183,7 @@ describe('the opened list and the gate', () => {
     expect(code(inspect())).toBe('BROWSER_LINE_NOT_APPROVED')
   })
 
-  it('the site setting, the AI stop and the grant, in this order; a grant given before the member left and came back does not count', () => {
+  it('the site setting, the AI stop and the person\'s level on the site, in this order', () => {
     policy = { mode: 'off', sites: [{ host: HOST, level: 'read', assetHosts: [] }] }
     expect(code(inspect())).toBe('BROWSER_NOT_ALLOWED')
     policy = { mode: 'on', sites: [{ host: 'other.example', level: 'delete', assetHosts: [] }] }
@@ -183,55 +192,30 @@ describe('the opened list and the gate', () => {
     stops = { all: false, tools: ['web'] }
     expect(code(inspect())).toBe('BROWSER_AI_STOPPED')
     stops = { all: false, tools: [] }
+    // 使わない: not even an inspection; 見るだけ (also the default: no row) is enough for one.
     expect(code(inspect(bob))).toBe('BROWSER_TYPE_NOT_GRANTED')
-    // Alice leaves and is invited back: her old grant is not hers this time.
-    conn.prepare('UPDATE memberships SET created_at = ? WHERE company_id = ? AND user_id = ?').run(iso(T0 + 1000), CO, alice.userId)
+    setLevel(bob, 'read')
+    expect(code(inspect(bob))).toBe('ok')
+    data.forCompany(CO).browserLines.removeSiteGrantsOf(bob.userId)
+    expect(code(inspect(bob))).toBe('ok')
+  })
+
+  it('the old per-line grant alone no longer allows anything, and its routes name no line', () => {
+    setLevel(alice, 'none')
+    const row = approvedRow()
+    data.forCompany(CO).browserLines.saveGrant({ userId: alice.userId, site: row.site, lineName: row.name, meaningHash: row.meaningHash, mechanicsHash: row.mechanicsHash, grantedBy: owner.userId, grantedAt: iso(now) })
     expect(code(inspect())).toBe('BROWSER_TYPE_NOT_GRANTED')
-  })
-
-  it('a grant carries to a new mechanics hash only when the row names the old one in its reviewed grantsFrom (Q15)', () => {
-    const line = realLine()
-    const old = fileWith([{ line }]).lines[0]
-    const moved = fileWith([{ line }, { line, mechanicsOf: { readersHash: `sha256:${'9'.repeat(64)}` } }])
-    const newRow = moved.lines[1]
-    expect(newRow.meaningHash).toBe(old.meaningHash)
-    expect(newRow.mechanicsHash).not.toBe(old.mechanicsHash)
-    // Alice was granted on the old mechanics only.
-    opened = fileWith([{ line }]); build(); grant(alice, old)
-    opened = moved; build()
-    expect(code(inspect(alice, VALUES, newRow))).toBe('BROWSER_TYPE_NOT_GRANTED')
-    const carried = fileWith([{ line }, { line, mechanicsOf: { readersHash: `sha256:${'9'.repeat(64)}` }, grantsFrom: [old.mechanicsHash] }])
-    opened = carried; build()
-    expect(code(inspect(alice, VALUES, carried.lines[1]))).toBe('ok')
-    // The grants read says what is in force and where each came from.
-    expect(value(svc.grants(owner)).grants.filter(g => g.userId === alice.userId).map(g => [g.mechanicsHash, g.from.kind])).toEqual([
-      [old.mechanicsHash, 'direct'], [carried.lines[1].mechanicsHash, 'carried'],
-    ])
-    // One untick on the new row takes the carried grant away too (nothing stays in force behind the admin's back).
-    value(svc.setGrant(owner, alice.userId, { site: 'lstep', line: 'landing_inspect', meaningHash: carried.lines[1].meaningHash, mechanicsHash: carried.lines[1].mechanicsHash, allowed: false }))
-    expect(code(inspect(alice, VALUES, carried.lines[1]))).toBe('BROWSER_TYPE_NOT_GRANTED')
-    expect(code(inspect(alice, VALUES, old))).toBe('BROWSER_TYPE_NOT_GRANTED')
-    expect(value(svc.grants(owner)).grants).toEqual([])
-    // grantsFrom naming a hash no row of the same meaning has: the row is left out.
-    const bogus = fileWith([{ line }, { line, mechanicsOf: { readersHash: `sha256:${'9'.repeat(64)}` }, grantsFrom: [`sha256:${'7'.repeat(64)}`] }])
-    opened = bogus; build()
-    expect(code(inspect(alice, VALUES, bogus.lines[1]))).toBe('BROWSER_LINE_NOT_APPROVED')
-  })
-
-  it('grants: owners / admins only, only for an approved row exactly; leaving takes them away', () => {
+    expect(value(svc.mine(alice)).lines).toEqual([])
+    // GET /browser-line-grants keeps its shape for an older admin console, empty: no job name reaches any company.
+    expect(value(svc.grants(admin))).toEqual({ lines: [], waiting: [], grants: [] })
     expect(svc.grants(alice).ok).toBe(false)
-    expect(svc.setGrant(alice, bob.userId, { ...refOf(approvedRow()), allowed: true }).ok).toBe(false)
-    const pending = pendingRow()
-    expect(code(svc.setGrant(admin, bob.userId, { site: 'lstep', line: pending.name, meaningHash: pending.meaningHash, mechanicsHash: pending.mechanicsHash, allowed: true }))).toBe('BROWSER_LINE_NOT_APPROVED')
-    expect(value(svc.grants(admin)).lines.map(l => [l.line, l.mapVersion, l.writes])).toEqual([['landing_inspect', '1.0.1', false], ['landing_inspect', '1.0.2', false], ['landing_inspect', '1.0.4', false]])
-    // The lines still waiting for their review, once each, names only (the 「使える人」 page greys them); a line with an
-    // approved row is not waiting although it has a pending one too.
-    expect(value(svc.grants(admin)).waiting).toEqual([
-      { site: 'lstep', line: 'landing_create', label: '流入経路を複製して作る', writes: true },
-      { site: 'lstep', line: 'step_template_add', label: 'リマインダの段にテンプレートを足す', writes: true },
-    ])
+    const put = svc.setGrant(owner)
+    expect(put.ok ? null : [put.kind, put.body.code]).toEqual(['gone', 'BROWSER_LINE_GRANTS_REPLACED'])
+    expect(svc.setGrant(alice).ok ? null : (svc.setGrant(alice) as Refusal).kind).toBe('forbidden')
+    // Leaving still takes the old rows away (and the site levels).
     svc.memberLeft(CO, alice.userId)
-    expect(value(svc.grants(owner)).grants).toEqual([])
+    expect(data.forCompany(CO).browserLines.grants()).toEqual([])
+    expect(data.forCompany(CO).browserLines.siteGrants().filter(g => g.userId === alice.userId)).toEqual([])
   })
 })
 
@@ -251,7 +235,7 @@ describe('where a value comes from (§16-4, Q14)', () => {
     expect(code(inspect(alice, { ...VALUES, extra: site('1') }))).toBe('BROWSER_VALUE_REFUSED')
     expect(code(inspect(alice, { landing: site('a b'), source: site('400') }))).toBe('BROWSER_VALUE_REFUSED')
     const f = fileWith([{ line: lineWithWhich(['record_field', 'person']) }])
-    opened = f; build(); grant(alice, f.lines[0])
+    opened = f; build(); grant(alice)
     const dated = (round: unknown) => inspect(alice, { ...VALUES, round }, f.lines[0])
     expect(code(dated({ value: '2026-12-03', from: { kind: 'person', confirmed: false } }))).toBe('BROWSER_VALUE_UNCONFIRMED')
     expect(code(dated({ value: '2026-12-03', from: { kind: 'person', confirmed: true } }))).toBe('ok')
@@ -324,7 +308,7 @@ describe('plans of writes (generalization PR 5c)', () => {
     const rows = names.map(n => writing.lines.filter(l => l.name === n).at(-1)!)
     for (const r of rows) { expect(r.status).toBe('pending'); r.status = 'approved' }
     opened = writing; build()
-    for (const r of rows) grant(alice, r)
+    grant(alice)
     policy = { mode: 'on', sites: [{ host: HOST, level: 'write', assetHosts: [] }] }
     return rows
   }
@@ -390,7 +374,7 @@ describe('plans of writes (generalization PR 5c)', () => {
     expect(conn.prepare('SELECT COUNT(*) AS n FROM browser_line_plans').get()).toEqual({ n: 0 })
   })
 
-  it('a write plan needs 「入力・保存まで」, the stop off and the line\'s grant', () => {
+  it('a write plan needs 「入力・保存まで」, the stop off and 変えてよい for the person (見るだけ cannot write)', () => {
     const [row] = approve('step_template_add')
     policy = { mode: 'on', sites: [{ host: HOST, level: 'read', assetHosts: [] }] }
     expect(code(writePlan(row, STEP_VALUES))).toBe('BROWSER_NOT_ALLOWED')
@@ -399,6 +383,19 @@ describe('plans of writes (generalization PR 5c)', () => {
     expect(code(writePlan(row, STEP_VALUES))).toBe('BROWSER_AI_STOPPED')
     stops = { all: false, tools: [] }
     expect(code(writePlan(row, STEP_VALUES, '90171', bob))).toBe('BROWSER_TYPE_NOT_GRANTED')
+    setLevel(bob, 'read')
+    expect(code(writePlan(row, STEP_VALUES, '90171', bob))).toBe('BROWSER_TYPE_NOT_GRANTED')
+    setLevel(bob, 'write')
+    expect(code(writePlan(row, STEP_VALUES, '90171', bob))).toBe('ok')
+  })
+
+  it('GET /browser-lines-mine lists a line that writes only to 変えてよい (見るだけ sees the inspections alone)', () => {
+    const [row] = approve('landing_create')
+    const names = () => value(svc.mine(alice)).lines.map(l => l.line)
+    expect(names()).toContain(row.name)
+    setLevel(alice, 'read')
+    expect(names()).not.toContain(row.name)
+    expect(names()).toContain('landing_inspect')
   })
 
   it('a write plan in the database whose line writes nothing (an inspection\'s row) is never approved, claimed or permitted', () => {
@@ -426,7 +423,7 @@ describe('a line that writes (generalization PR 6)', () => {
     const row = writing.lines.find(l => l.name === 'step_template_add')!
     expect(row.status).toBe('pending')
     row.status = 'approved'
-    opened = writing; build(); grant(alice, row)
+    opened = writing; build(); grant(alice)
     const values = { reminder: site('7100002'), step: site('7200003'), template_folder: site('7300004'), template: site('7400005') }
     expect(code(inspect(alice, values, row))).toBe('BROWSER_LINE_WRITES_NOT_YET')
     expect(conn.prepare('SELECT COUNT(*) AS n FROM browser_line_plans').get()).toEqual({ n: 0 })
@@ -467,7 +464,7 @@ describe('the strict read\'s notice (§16-1)', () => {
     expect(told()).toEqual([])
   })
 
-  it('only a member who may use the site and holds a grant on one of its lines; limits per member a day', () => {
+  it('only a member who may use the site (not 使わない); limits per member a day', () => {
     expect(code(svc.shapeNotice(bob, notice()))).toBe('BROWSER_TYPE_NOT_GRANTED')
     policy = { mode: 'off', sites: [] }
     expect(code(svc.shapeNotice(alice, notice()))).toBe('BROWSER_TYPE_NOT_GRANTED')

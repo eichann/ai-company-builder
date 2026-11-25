@@ -13,8 +13,10 @@
  *   POST /browser-line-plans/:planId/approve | cancel | claim a plan of writes (only of an approved line that writes)
  *   POST /browser-line-executions/:executionId/permit         X-ACB-Browser-Execution: <secret>; { index }: one write
  *   POST /browser-line-executions/:executionId/confirm        { index, result: done | not_done }
- *   GET  /browser-line-grants                                 owner/admin: approved lines and who may use them
- *   PUT  /browser-line-grants/:userId                         owner/admin: { site, line, meaningHash, mechanicsHash, allowed }
+ *   GET  /browser-line-grants                                 owner/admin: the old per-line grants' shape, always empty (replaced)
+ *   PUT  /browser-line-grants/:userId                         owner/admin: 410 BROWSER_LINE_GRANTS_REPLACED
+ *   GET  /browser-site-grants                                 owner/admin: registered sites and who may use them how
+ *   PUT  /browser-site-grants/:userId                         owner/admin: { host, level: none | read | write }
  *   POST /browser-shape-notices                               a thing not read whole (the map's names, a kind, a count)
  *   GET  /browser-shape-notices                               owner/admin: what changed shape
  *   GET  /browser-lines-mine                                  the approved lines the member may use (names only)
@@ -29,7 +31,7 @@ import { companyMember, ownCredential, serviceBody } from './guards'
 import { BROWSER_EXECUTION_HEADER } from './browser-plans'
 
 export const browserLinesRoute = new Hono()
-const { browserLines } = services
+const { browserLines, browserSiteGrants } = services
 
 browserLinesRoute.post('/browser-line-plans', companyMember, serviceBody, (c) => {
   const r = browserLines.create(c.var.member, c.var.body, c.req.header(BROWSER_DEVICE_HEADER))
@@ -79,8 +81,19 @@ browserLinesRoute.get('/browser-line-grants', companyMember, (c) => {
   return r.ok ? c.json({ success: true, data: r.value }) : refusal(c, r)
 })
 
-browserLinesRoute.put('/browser-line-grants/:userId', companyMember, serviceBody, (c) => {
-  const r = browserLines.setGrant(c.var.member, c.req.param('userId'), c.var.body)
+// Gone since the site grants (410 for owners / admins); the param is kept so the route is the same as before.
+browserLinesRoute.put('/browser-line-grants/:userId', companyMember, (c) => {
+  const r = browserLines.setGrant(c.var.member)
+  return r.ok ? c.json({ success: true, data: r.value }) : refusal(c, r)
+})
+
+browserLinesRoute.get('/browser-site-grants', companyMember, (c) => {
+  const r = browserSiteGrants.view(c.var.member)
+  return r.ok ? c.json({ success: true, data: r.value }) : refusal(c, r)
+})
+
+browserLinesRoute.put('/browser-site-grants/:userId', companyMember, serviceBody, (c) => {
+  const r = browserSiteGrants.set(c.var.member, c.req.param('userId'), c.var.body)
   return r.ok ? c.json({ success: true, data: r.value }) : refusal(c, r)
 })
 

@@ -22,6 +22,7 @@ import { sqliteBrowserLineExecutionLookup } from '../../src/adapters/sqlite/brow
 import { fileBrowserConnectorCatalog, fileBrowserOpenedList } from '../../src/adapters/browser-connector-catalog'
 import { sha256TokenDigest } from '../../src/adapters/system'
 import { hashCanonical } from '../../src/lib/content-hash'
+import { createBrowserSiteGrants, type BrowserSiteGrants } from '../../src/services/browser-site-grants'
 import { createBrowserLineService, type BrowserLineService } from '../../src/services/browser-lines'
 import { createBrowserLineSteps } from '../../src/services/browser-line-steps'
 import { createBrowserDeviceService, type BrowserDeviceService } from '../../src/services/browser-devices'
@@ -57,6 +58,7 @@ let policy: BrowserOperationSettings
 let data: CompanyDataSource
 let dev: BrowserDeviceService
 let svc: BrowserLineService
+let sites: BrowserSiteGrants
 /** The opened list the lines service reads (a test may approve a writing line). */
 let opened: unknown
 const iso = (ms: number) => new Date(ms).toISOString()
@@ -68,11 +70,12 @@ const newKey = () => `v1.${randomBytes(32).toString('base64url')}`
 function build() {
   data = sqliteCompanyData(conn)
   dev = createBrowserDeviceService({ companyData: data, transactions: sqliteTransactions(conn), clock, ids, tokenDigest: sha256TokenDigest, accounts: { byIds: ids => new Map(ids.map(id => [id, { name: `Name ${id}`, email: `${id}@example.com` }])) } })
+  sites = createBrowserSiteGrants({ companyData: data, clock, memberships: sqliteMembershipRepository(conn), browserPolicy: () => policy })
   svc = createBrowserLineService({
     companyData: data, transactions: sqliteTransactions(conn), clock, monotonic, ids, tokenDigest: sha256TokenDigest,
     opened: { file: () => opened }, catalog: fileBrowserConnectorCatalog(), executionLookup: sqliteBrowserLineExecutionLookup(conn),
     memberships: sqliteMembershipRepository(conn), accounts: { byIds: () => new Map() },
-    browserPolicy: () => policy, aiStops: () => ({ all: false, tools: [] }), devices: dev.gate, log: { warn: () => {} },
+    browserPolicy: () => policy, aiStops: () => ({ all: false, tools: [] }), devices: dev.gate, siteGrants: sites, log: { warn: () => {} },
   })
 }
 function join(companyId: string, userId: string, role: string, at = iso(T0 - 3_600_000)) {
@@ -84,9 +87,9 @@ function value<T>(r: { ok: true; value: T } | Refusal): T {
 }
 const code = (r: { ok: boolean; body?: { code?: unknown } }) => (r.ok ? 'ok' : r.body?.code)
 const status = (r: { ok: boolean; kind?: string }) => (r.ok ? 'ok' : r.kind)
-function grant(m: Member, row = approvedRow()) {
-  value(svc.setGrant(m.role === 'owner' || m.companyId !== CO ? { ...owner, companyId: m.companyId, userId: m.companyId === CO ? owner.userId : otherOwner.userId } : owner, m.userId,
-    { site: row.site, line: row.name, meaningHash: row.meaningHash, mechanicsHash: row.mechanicsHash, allowed: true }))
+/** The person's level on the site (「使える人」, agent-browser.md "Who may use a site"), set by their company's owner. */
+function grant(m: Member, level: 'none' | 'read' | 'write' = 'write') {
+  value(sites.set(m.companyId === CO ? owner : otherOwner, m.userId, { host: HOST, level }))
 }
 const inspect = (m: Member, key: string | undefined) => svc.create(m, { line: refOf(approvedRow()), values: VALUES }, key)
 /** A PC registered by `m` and enabled by the owner (or an admin for another company's member). */
@@ -272,7 +275,7 @@ describe('the gate on the new path (an inspection: create)', () => {
 
   it('the PC check comes first: a stopped PC is refused even where the line or grant would refuse too', () => {
     const { key, device } = enabledPc(bob)
-    value(svc.setGrant(owner, bob.userId, { site: 'lstep', line: 'landing_inspect', meaningHash: approvedRow().meaningHash, mechanicsHash: approvedRow().mechanicsHash, allowed: false }))
+    grant(bob, 'none')
     expect(code(inspect(bob, key))).toBe('BROWSER_TYPE_NOT_GRANTED')
     value(dev.revoke(owner, device.id))
     expect(code(inspect(bob, key))).toBe('BROWSER_DEVICE_REVOKED')
@@ -364,7 +367,7 @@ describe('a plan goes on only on the PC that made it', () => {
     const row = writing.lines.filter(l => l.name === 'landing_create').at(-1)!
     row.status = 'approved'
     opened = writing; build()
-    value(svc.setGrant(owner, alice.userId, { site: row.site, line: row.name, meaningHash: row.meaningHash, mechanicsHash: row.mechanicsHash, allowed: true }))
+    grant(alice, 'write')
     policy = { mode: 'on', sites: [{ host: HOST, level: 'write', assetHosts: [] }] }
     const one = enabledPc(alice)
     const two = enabledPc(alice)
@@ -407,13 +410,14 @@ describe('leaving the company', () => {
 })
 
 describe('the lines the member may use (GET /browser-lines-mine)', () => {
-  it('only approved rows with a grant in force, names only', () => {
-    // The 1.0.1 row she was granted on, and any approved row that carries it (a reviewed grantsFrom); never a pending one.
+  it('every approved row of a site the member may use for its effect, names only; none at 使わない', () => {
+    // Every approved row of the registered site (the default 見るだけ is enough for a line that only reads); never a pending one.
+    grant(alice, 'read')
     const lines = value(svc.mine(alice)).lines
     expect(lines).toContainEqual({ ...refOf(approvedRow()), label: '流入経路を点検する', writes: false })
-    const approved = REAL_OPENED.lines.filter(l => l.status === 'approved' && l.name === 'landing_inspect')
-    expect(lines.map(l => l.mechanicsHash).sort()).toEqual(approved.filter(l => l.mechanicsHash === approvedRow().mechanicsHash || (l.grantsFrom ?? []).includes(approvedRow().mechanicsHash)).map(l => l.mechanicsHash).sort())
-    value(svc.setGrant(owner, alice.userId, { site: 'lstep', line: 'landing_inspect', meaningHash: approvedRow().meaningHash, mechanicsHash: approvedRow().mechanicsHash, allowed: false }))
+    const approved = REAL_OPENED.lines.filter(l => l.status === 'approved')
+    expect(lines.map(l => l.mechanicsHash).sort()).toEqual(approved.map(l => l.mechanicsHash).sort())
+    grant(alice, 'none')
     expect(value(svc.mine(alice)).lines).toEqual([])
   })
 })
