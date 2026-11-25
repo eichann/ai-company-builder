@@ -7,7 +7,6 @@ import { meetingNewsOfTurn, meetingTurns, type MeetingNewsRow, type RowButton } 
 import { meetingBundleWords, type TaskListItem } from '../../../../shared/tasks'
 import type { CompanyFeatures } from '../../../../../shared/core/features'
 import { declineMeetingBundle, skipMinutes } from '../api'
-import { MinutesCheckButton } from '../components/MinutesCheckButton'
 import { mergeMeetingRows } from '../model'
 import { startMinutesReading } from '../startReading'
 import { useMeetingArrivals } from './useMeetingArrivals'
@@ -60,8 +59,6 @@ export function useMinutesSlots({ companyId, features, taskItems, reloadTasks, a
     skip: async (recordId: string) => { const r = await skipMinutes(companyId, recordId); return r && !r.success ? r.error : null },
   } : undefined
 
-  const titleBarButton = minutes.available && features.meetings && companyId ? <MinutesCheckButton companyId={companyId} /> : undefined
-
   const meetingWords = meetingBundleWords(bundleWord)
   // A department without the task list: its meetings (received minutes, a まとまり to choose) are inbox rows too.
   const listMeetings = tasksShown || !companyId ? [] : meetingTurns(taskItems, aiTurnItems?.items ?? [], bundleWord)
@@ -89,7 +86,6 @@ export function useMinutesSlots({ companyId, features, taskItems, reloadTasks, a
     aiTurnMinutes,
     askedMeetings,
     taskListActions,
-    titleBarButton,
     /** The meetings as the inbox's rows (each with its buttons), `inboxMeetingSeen` for a finished one looked at on this PC. */
     inboxMeetings,
     inboxMeetingSeen: arrivalRows.markSeen,

@@ -96,7 +96,13 @@ const SKILLS_TAB = 'role=button[name="Skill" s]'
 const TASKS_TAB = 'role=button[name=/^やること/] >> nth=0'
 const SYNC = 'role=button[name="サーバーと同期" s]'
 const SYNC_WAITS = 'role=button[name="サーバーと同期（自動同期は止まっています）"]'
-const PREVIEW = 'role=button[name="変更を確認" s]'
+const SYNC_MORE = 'role=button[name="同期のほかの操作"]'
+const PREVIEW_ITEM = 'role=menuitem[name="変更を確認してから同期"]'
+/** 「変更を確認」: the sync button's ▾, then 変更を確認してから同期. */
+const PREVIEW: SceneStep[] = [{ click: SYNC_MORE }, { click: PREVIEW_ITEM }]
+/** あなたの丸 (the member's menu in the title bar: 設定, バックアップ履歴, いつもの形, 表示, 言語, ログアウト). */
+const ME = 'role=button[name="あなたのメニュー"]'
+const menuItem = (name: string) => `role=menuitem[name=/^${name}/]`
 /** One change's row in 「変更を確認」 (its file name, then 「変更を元に戻す」). */
 const PREVIEW_ROW = (name: string) => `role=dialog >> div.cursor-pointer:has(span[title$="${name}"])`
 const TITLE_BAR = 'header:has(button[aria-label="サーバーと同期"])'
@@ -407,15 +413,14 @@ export const scenes: Scene[] = [
   },
   {
     id: 'title-bar-zoom',
-    about: 'The title bar’s small buttons with their names (as their tooltips say).',
+    about: 'The title bar’s sync button with its ▾ open (変更を確認してから同期), and あなたの丸.',
     ...MAIN,
-    steps: [CLOSE_LIST],
-    crop: { region: { x: 560, y: 0, width: 720, height: 110 } },
+    steps: [CLOSE_LIST, { click: SYNC_MORE }],
+    crop: { region: { x: 560, y: 0, width: 720, height: 150 } },
     annotations: [
-      { note: { target: 'role=button[name="変更を確認"]', text: '① 変更を確認' } },
-      { box: SYNC }, { note: { target: SYNC, text: '② サーバーと同期', row: 2 } },
-      { note: { target: 'role=button[name="バックアップ履歴"]', text: '③ バックアップ履歴' } },
-      { note: { target: 'role=banner >> role=button[name="設定"]', text: '④ 設定', row: 2 } },
+      { box: SYNC }, { marker: { target: SYNC, label: '1', at: 'left' } },
+      { box: PREVIEW_ITEM }, { marker: { target: PREVIEW_ITEM, label: '2', at: 'left' } },
+      { marker: { target: ME, label: '3', at: 'below' } },
     ],
   },
   {
@@ -459,11 +464,11 @@ export const scenes: Scene[] = [
   },
   {
     id: 'reset-layout',
-    about: '「いつもの形に戻す」 in the title bar.',
+    about: '「画面をいつもの形に戻す」 in the member\'s menu (あなたの丸, right end of the title bar).',
     ...MAIN,
-    steps: [CLOSE_LIST],
-    crop: { region: { x: 560, y: 0, width: 720, height: 70 } },
-    annotations: [{ box: 'role=button[name="いつもの形に戻す"]' }, { marker: { target: 'role=button[name="いつもの形に戻す"]', label: '1', at: 'left' } }],
+    steps: [CLOSE_LIST, { click: ME }],
+    crop: { region: { x: 840, y: 0, width: 440, height: 330 } },
+    annotations: [{ box: menuItem('画面をいつもの形に戻す') }, { marker: { target: menuItem('画面をいつもの形に戻す'), label: '1', at: 'left' } }],
   },
 
   // ── 5章 ファイルを開いて直す ─────────────────────────────────────────────
@@ -589,7 +594,7 @@ export const scenes: Scene[] = [
     id: 'sync-preview',
     about: '「変更を確認」: the two changes, undo, the 作業メモ and この内容で同期.',
     ...MAIN,
-    steps: [CLOSE_LIST, { click: PREVIEW }, { waitFor: 'role=dialog' }],
+    steps: [CLOSE_LIST, ...PREVIEW, { waitFor: 'role=dialog' }],
     crop: { target: 'role=dialog', padding: 24 },
     annotations: [
       { box: PREVIEW_ROW('訪問メモ_1123.md') }, { marker: { target: PREVIEW_ROW('訪問メモ_1123.md'), label: '1', at: 'left' } },
@@ -603,7 +608,7 @@ export const scenes: Scene[] = [
     id: 'sync-preview-diff',
     about: 'A change opened from 「変更を確認」: the line added to 訪問メモ_1123.md.',
     ...MAIN,
-    steps: [CLOSE_LIST, { click: PREVIEW }, { click: PREVIEW_ROW('訪問メモ_1123.md') }, { waitFor: 'text=次回：12/1 に見積を持って再訪問' }],
+    steps: [CLOSE_LIST, ...PREVIEW, { click: PREVIEW_ROW('訪問メモ_1123.md') }, { waitFor: 'text=次回：12/1 に見積を持って再訪問' }],
     crop: { region: { x: 0, y: 50, width: 1280, height: 210 } },
     annotations: [{ box: 'text=次回：12/1 に見積を持って再訪問' }, { marker: { target: 'text=次回：12/1 に見積を持って再訪問', label: '1', at: 'below' } }],
   },
@@ -611,7 +616,7 @@ export const scenes: Scene[] = [
     id: 'sync-revert-confirm',
     about: '「元に戻す」 on the added file: what will happen, and that the current content is kept.',
     ...MAIN,
-    steps: [CLOSE_LIST, { click: PREVIEW }, { click: `${PREVIEW_ROW('見積_下書き.md')} >> role=button[name="変更を元に戻す"]` }, { waitFor: 'text=変更を元に戻しますか？' }],
+    steps: [CLOSE_LIST, ...PREVIEW, { click: `${PREVIEW_ROW('見積_下書き.md')} >> role=button[name="変更を元に戻す"]` }, { waitFor: 'text=変更を元に戻しますか？' }],
     crop: { target: 'role=alertdialog', padding: 24 },
     annotations: [
       { marker: { target: 'text=/今の内容は［バックアップ履歴］に保存します/', label: '1', at: 'left' } },
@@ -641,7 +646,7 @@ export const scenes: Scene[] = [
     id: 'backup-history',
     about: '「バックアップ履歴」 with the kept version opened: the file, 復元 and the folder.',
     ...MAIN,
-    steps: [CLOSE_LIST, { click: 'role=button[name="バックアップ履歴"]' }, { click: 'text="ほかの人も同じところを変えていたため、サーバーの版を残したときのあなたの版"' }, { waitFor: 'role=button[name="復元"]' }],
+    steps: [CLOSE_LIST, { click: ME }, { click: menuItem('バックアップ履歴') }, { click: 'text="ほかの人も同じところを変えていたため、サーバーの版を残したときのあなたの版"' }, { waitFor: 'role=button[name="復元"]' }],
     crop: { region: { x: 768, y: 0, width: 512, height: 420 } },
     annotations: [
       { marker: { target: 'text="ほかの人も同じところを変えていたため、サーバーの版を残したときのあなたの版"', label: '1', at: 'left' } },
@@ -653,7 +658,7 @@ export const scenes: Scene[] = [
     id: 'backup-restore-confirm',
     about: '「復元」 asks first: the file is replaced, its current content kept in the backups.',
     ...MAIN,
-    steps: [CLOSE_LIST, { click: 'role=button[name="バックアップ履歴"]' }, { click: 'text="ほかの人も同じところを変えていたため、サーバーの版を残したときのあなたの版"' }, { click: 'role=button[name="復元"]' }, { waitFor: 'text=バックアップから復元しますか？' }],
+    steps: [CLOSE_LIST, { click: ME }, { click: menuItem('バックアップ履歴') }, { click: 'text="ほかの人も同じところを変えていたため、サーバーの版を残したときのあなたの版"' }, { click: 'role=button[name="復元"]' }, { waitFor: 'text=バックアップから復元しますか？' }],
     crop: { target: 'role=dialog', padding: 24 },
     annotations: [
       { marker: { target: 'text=/今の内容もこの履歴に保存してから置き換えます/', label: '1', at: 'left' } },
@@ -1985,14 +1990,13 @@ export const scenes: Scene[] = [
   },
   {
     id: 'layout-controls',
-    about: 'The title bar\'s 「画面の形」: 左の欄 (⌘B), AIチャット (⌘⇧C) and いつもの形に戻す.',
+    about: 'The title bar\'s 「画面の形」: 左の欄 (⌘B) and AIチャット (⌘⇧C).',
     ...EXTRA,
     steps: [CLOSE_LIST],
     crop: { region: { x: 680, y: 0, width: 400, height: 110 } },
     annotations: [
       { box: 'role=button[name="左の欄 (⌘B)"]' }, { note: { target: 'role=button[name="左の欄 (⌘B)"]', text: '① 左の欄（⌘B）' } },
       { box: 'role=button[name="AIチャット (⌘⇧C)"]' }, { note: { target: 'role=button[name="AIチャット (⌘⇧C)"]', text: '② AIチャット（⌘⇧C）', row: 2 } },
-      { marker: { target: 'role=button[name="いつもの形に戻す"]', label: '3', at: 'below' } },
     ],
   },
   {
@@ -2033,7 +2037,7 @@ export const scenes: Scene[] = [
     id: 'settings-today-tabs',
     about: '設定 →「自分の設定」: 今日のフォルダ (おまかせ（営業部）) and 前の日のタブを自動で片づける.',
     ...EXTRA,
-    steps: [{ click: 'role=banner >> role=button[name="設定"]' }, { click: 'role=dialog >> role=button[name=/自分の設定/]' }, { waitFor: 'role=combobox[name="今日のフォルダを置く部署"]' }, SETTLE],
+    steps: [{ click: ME }, { click: menuItem('設定') }, { click: 'role=dialog >> role=button[name=/自分の設定/]' }, { waitFor: 'role=combobox[name="今日のフォルダを置く部署"]' }, SETTLE],
     crop: { region: { x: 380, y: 185, width: 760, height: 280 } },
     annotations: [
       { box: 'role=combobox[name="今日のフォルダを置く部署"]' }, { marker: { target: 'role=combobox[name="今日のフォルダを置く部署"]', label: '1', at: 'left' } },
@@ -2500,16 +2504,16 @@ export const scenes: Scene[] = [
   },
   {
     id: 'title-bar-account',
-    about: 'The right end of the title bar: language, light / dark, 使い方, settings and ログアウト.',
+    about: 'The right end of the title bar: 使い方, and あなたの丸 opened (設定, 表示, 言語, ログアウト).',
     ...MAIN,
-    steps: [CLOSE_LIST],
-    crop: { region: { x: 840, y: 0, width: 440, height: 90 } },
+    steps: [CLOSE_LIST, { click: ME }],
+    crop: { region: { x: 840, y: 0, width: 440, height: 330 } },
     annotations: [
-      { marker: { target: 'role=button[name="EN"]', label: '1', at: 'below' } },
-      { marker: { target: 'role=button[name="ダークモード"]', label: '2', at: 'below' } },
-      { marker: { target: 'role=button[name="使い方"]', label: '3', at: 'below' } },
-      { marker: { target: 'role=banner >> role=button[name="設定"]', label: '4', at: 'below' } },
-      { marker: { target: 'role=banner >> role=button[name="ログアウト"]', label: '5', at: 'below' } },
+      { box: 'role=button[name="使い方"]' }, { marker: { target: 'role=button[name="使い方"]', label: '1', at: 'left' } },
+      { marker: { target: menuItem('設定'), label: '2', at: 'left' } },
+      { marker: { target: menuItem('表示'), label: '3', at: 'left' } },
+      { marker: { target: menuItem('言語'), label: '4', at: 'left' } },
+      { marker: { target: menuItem('ログアウト'), label: '5', at: 'left' } },
     ],
   },
   {

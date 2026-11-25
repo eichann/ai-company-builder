@@ -1,7 +1,7 @@
-import { useCallback, useState, type ReactNode } from 'react'
-import { useTranslation } from 'react-i18next'
-import { ClockCounterClockwise, CloudArrowUp, GearSix, Globe, House, ListChecks, Moon, Question, SignOut, SpinnerGap, Sun, WarningCircle } from '@phosphor-icons/react'
+import { useCallback, useRef, useState, type ReactNode } from 'react'
+import { ArrowCounterClockwise, CaretDown, ClockCounterClockwise, CloudArrowUp, GearSix, Globe, House, ListChecks, Moon, Question, SignOut, SpinnerGap, Sun, WarningCircle } from '@phosphor-icons/react'
 import { useAppStore } from '../stores/appStore'
+import { useAuthStore } from '../stores/authStore'
 import { WORKING_FOLDER_BACKUP_NOTE, WORKING_FOLDER_NOTE } from '../../shared/company-folder'
 import { useDismiss } from '../shared/hooks/useDismiss'
 import { STOP_ICON } from '../shared/ui/stateStyles'
@@ -10,7 +10,7 @@ interface Props {
   companyName: string | undefined
   isLoadingPreview: boolean
   isSyncing: boolean
-  /** The sync button's tooltip (with the last automatic sync). */
+  /** The sync button's tooltip (with the last automatic sync); its lines after the first show in the sync menu. */
   syncTitle?: string
   /** Automatic sync stopped until the member syncs by hand: the button in the warning colour with a mark. */
   syncWaitsForYou?: boolean
@@ -24,131 +24,190 @@ interface Props {
   onShowManual?: () => void
   /** Sign out (saves the open tabs first: AppShell). */
   onLogout: () => void
-  /** A feature's button next to sync (「議事録を確かめる」 while Google may read minutes). */
-  extra?: ReactNode
+  /** 「画面をいつもの形に戻す」 in the member's menu (absent: not offered). */
+  onResetLayout?: () => void
   /** The one ［受け箱］ (features/inbox, I2: where 「あなたの番 N」 and the bell were), drawn by the core app only. */
   inbox?: ReactNode
   /** The company's name as a menu to switch companies (features/company), drawn instead of the plain name. */
   companySwitcher?: ReactNode
-  /** Show / hide the left column and the consultation, 「いつもの形に戻す」 (features/workspace). */
+  /** Show / hide the left column and the consultation (features/workspace). */
   layoutControls?: ReactNode
 }
 
-const ICON_BUTTON = 'p-2 rounded-control hover:bg-gray-100 dark:hover:bg-zinc-800 text-gray-500 dark:text-zinc-400 hover:text-gray-700 dark:hover:text-zinc-200 transition-colors'
+const ICON_BUTTON = 'p-2 rounded-control text-text-muted hover:bg-surface-sunken hover:text-text transition-colors'
+const MENU = 'absolute right-0 top-full z-menu mt-1 rounded-control border border-[color:var(--color-border)] bg-surface-raised p-1 shadow-pop'
+const MENU_ITEM = 'flex w-full items-center gap-2 rounded-small px-2 py-1.5 text-left text-small text-text hover:bg-surface-sunken focus-visible:bg-surface-sunken disabled:opacity-disabled'
+const DIVIDER = <div className="mx-1 h-4 w-px bg-border-strong" />
 
-/** The window's title bar (draggable): the company, 変更を確認 / 同期, backups, language, theme, settings, sign-out. */
-export function TitleBar({ companyName, isLoadingPreview, isSyncing, syncTitle = 'サーバーと同期', syncWaitsForYou = false, sharedFolder = true, onPreview, onSync, onShowBackups, onShowSettings, onShowManual, onLogout, extra, inbox, companySwitcher, layoutControls }: Props) {
-  const { t } = useTranslation()
+/**
+ * The window's title bar (draggable), tidied (owner decision 2026-11-26, 依頼2):
+ * ［受け箱］［同期 ▾］｜［左の欄］［AIチャット］｜［?］［あなたの丸 ▾］. Sign-out, light / dark and the
+ * language are never on the bar itself (owner): they are in the member's menu.
+ */
+export function TitleBar({ companyName, isLoadingPreview, isSyncing, syncTitle = 'サーバーと同期', syncWaitsForYou = false, sharedFolder = true, onPreview, onSync, onShowBackups, onShowSettings, onShowManual, onLogout, onResetLayout, inbox, companySwitcher, layoutControls }: Props) {
   const hasCompany = useAppStore((s) => s.currentCompany) != null
-  const theme = useAppStore((s) => s.theme)
-  const toggleTheme = useAppStore((s) => s.toggleTheme)
-  const language = useAppStore((s) => s.language)
-  const setLanguage = useAppStore((s) => s.setLanguage)
-
-  const toggleLanguage = useCallback(() => {
-    setLanguage(language === 'ja' ? 'en' : 'ja')
-  }, [language, setLanguage])
+  // The tooltip's first line is the button's name; the rest (last automatic sync, why it waits) goes in the menu.
+  const syncStatus = syncTitle.split('\n').slice(1).join('\n')
 
   return (
     <header className="flex-shrink-0 h-12 flex items-center justify-between pl-20 pr-4 border-b border-gray-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 app-drag">
       {companySwitcher ? <div className="app-no-drag">{companySwitcher}</div> : (
       <div className="flex items-center gap-3 app-no-drag">
-        <House size={18} className="text-gray-500 dark:text-zinc-400" />
+        <House size={18} className="text-text-muted" />
         <span className="text-sm font-medium text-gray-700 dark:text-zinc-200">
           {companyName || 'AI Company Builder'}
         </span>
       </div>
       )}
-      <div className="flex items-center gap-2 app-no-drag">
+      <div className="flex items-center gap-1 app-no-drag">
         {inbox}
         {!sharedFolder && <WorkingFolderNote />}
-        {sharedFolder && <>
-        <button
-          onClick={onPreview}
-          disabled={isLoadingPreview || !hasCompany}
-          className={`${ICON_BUTTON} disabled:opacity-50`}
-          title="変更を確認"
-        >
-          {isLoadingPreview ? (
-            <SpinnerGap size={18} className="animate-spin" />
-          ) : (
-            <ListChecks size={18} />
-          )}
-        </button>
-        <button
-          onClick={onSync}
-          disabled={isSyncing || !hasCompany}
-          className={`${ICON_BUTTON} relative disabled:opacity-50`}
-          title={syncTitle}
-          aria-label={syncWaitsForYou ? 'サーバーと同期（自動同期は止まっています）' : 'サーバーと同期'}
-          data-sync-waits={syncWaitsForYou ? 'true' : undefined}
-        >
-          {isSyncing ? (
-            <SpinnerGap size={18} className="animate-spin" />
-          ) : syncWaitsForYou ? (
-            <>
-              <CloudArrowUp size={18} className={STOP_ICON.needsAction} />
-              <WarningCircle size={10} weight="fill" aria-hidden className={`absolute right-1 top-1 ${STOP_ICON.needsAction}`} />
-            </>
-          ) : (
-            <CloudArrowUp size={18} />
-          )}
-        </button>
-        </>}
-        {extra}
-        <div className="w-px h-4 bg-gray-200 dark:bg-zinc-700" />
-        {layoutControls && <>{layoutControls}<div className="w-px h-4 bg-border-strong" /></>}
         {sharedFolder && (
-        <button
-          onClick={onShowBackups}
-          disabled={!hasCompany}
-          className={`${ICON_BUTTON} disabled:opacity-50`}
-          title="バックアップ履歴"
-        >
-          <ClockCounterClockwise size={18} />
-        </button>
+          <div className="flex items-center">
+            <button
+              onClick={onSync}
+              disabled={isSyncing || !hasCompany}
+              className={`${ICON_BUTTON} relative disabled:opacity-disabled`}
+              title={syncTitle}
+              aria-label={syncWaitsForYou ? 'サーバーと同期（自動同期は止まっています）' : 'サーバーと同期'}
+              data-sync-waits={syncWaitsForYou ? 'true' : undefined}
+            >
+              {isSyncing ? (
+                <SpinnerGap size={18} className="animate-spin" />
+              ) : syncWaitsForYou ? (
+                <>
+                  <CloudArrowUp size={18} className={STOP_ICON.needsAction} />
+                  <WarningCircle size={10} weight="fill" aria-hidden className={`absolute right-1 top-1 ${STOP_ICON.needsAction}`} />
+                </>
+              ) : (
+                <CloudArrowUp size={18} />
+              )}
+            </button>
+            <TitleMenu label="同期のほかの操作" width="w-64"
+              trigger={isLoadingPreview ? <SpinnerGap size={10} className="animate-spin" /> : <CaretDown size={10} />}
+              triggerClassName="flex h-8 w-4 items-center justify-center rounded-control text-text-subtle hover:bg-surface-sunken hover:text-text">
+              {close => <>
+                <button type="button" role="menuitem" className={MENU_ITEM} disabled={isLoadingPreview || !hasCompany}
+                  onClick={() => { close(); onPreview() }}>
+                  <ListChecks size={16} className="text-text-muted" />変更を確認してから同期
+                </button>
+                {syncStatus && <p className="whitespace-pre-line px-2 pb-1 pt-0.5 text-caption text-text-subtle">{syncStatus}</p>}
+              </>}
+            </TitleMenu>
+          </div>
         )}
-        <button
-          onClick={toggleLanguage}
-          className="flex items-center gap-1 px-2 py-1.5 rounded-control hover:bg-gray-100 dark:hover:bg-zinc-800 text-gray-500 dark:text-zinc-400 hover:text-gray-700 dark:hover:text-zinc-200 transition-colors text-xs font-medium"
-          title={language === 'ja' ? 'Switch to English' : '日本語に切り替え'}
-        >
-          <Globe size={16} />
-          <span>{language === 'ja' ? 'EN' : 'JA'}</span>
-        </button>
-        <button
-          onClick={toggleTheme}
-          className={ICON_BUTTON}
-          title={theme === 'dark' ? t('header.lightMode') : t('header.darkMode')}
-        >
-          {theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
-        </button>
+        {layoutControls && <>{DIVIDER}{layoutControls}</>}
+        {DIVIDER}
         {onShowManual && (
-        <button
-          onClick={onShowManual}
-          className={ICON_BUTTON}
-          title="使い方"
-          aria-label="使い方"
-        >
+        <button onClick={onShowManual} className={ICON_BUTTON} title="使い方" aria-label="使い方">
           <Question size={18} />
         </button>
         )}
-        <button
-          onClick={onShowSettings}
-          className={ICON_BUTTON}
-          title={t('header.settings')}
-        >
-          <GearSix size={18} />
-        </button>
-        <button
-          onClick={onLogout}
-          className="p-2 rounded-control hover:bg-gray-100 dark:hover:bg-zinc-800 text-gray-500 dark:text-zinc-400 hover:text-red-500 transition-colors"
-          title={t('header.logout')}
-        >
-          <SignOut size={18} />
-        </button>
+        <MemberMenu sharedFolder={sharedFolder} hasCompany={hasCompany} companyName={companyName}
+          onShowSettings={onShowSettings} onShowBackups={onShowBackups} onResetLayout={onResetLayout} onLogout={onLogout} />
       </div>
     </header>
+  )
+}
+
+/** The first letter of the member's name, else of their email (never empty). */
+function initialOf(name: string | null | undefined, email: string | undefined): string {
+  const from = name?.trim() || email?.trim() || ''
+  return from ? Array.from(from)[0].toUpperCase() : '?'
+}
+
+/** あなたの丸: who is signed in, then 設定・バックアップ履歴・いつもの形 / 表示・言語 / ログアウト (last, apart). */
+function MemberMenu({ sharedFolder, hasCompany, companyName, onShowSettings, onShowBackups, onResetLayout, onLogout }: {
+  sharedFolder: boolean; hasCompany: boolean; companyName: string | undefined
+  onShowSettings: () => void; onShowBackups: () => void; onResetLayout?: () => void; onLogout: () => void
+}) {
+  const user = useAuthStore((s) => s.user)
+  const theme = useAppStore((s) => s.theme)
+  const toggleTheme = useAppStore((s) => s.toggleTheme)
+  const language = useAppStore((s) => s.language)
+  const setLanguage = useAppStore((s) => s.setLanguage)
+  const who = user?.name?.trim() || user?.email || ''
+  return (
+    <TitleMenu label="あなたのメニュー" width="w-64"
+      trigger={<span aria-hidden>{initialOf(user?.name, user?.email)}</span>}
+      triggerClassName="ml-1 flex h-7 w-7 items-center justify-center rounded-full bg-selected-bg text-small font-strong text-selected-text hover:bg-selected-bg-hover">
+      {close => <>
+        {(who || companyName) && (
+          <div className="border-b border-[color:var(--color-border)] px-2 pb-2 pt-1">
+            {who && <p className="truncate text-small font-strong text-text">{who}</p>}
+            {companyName && <p className="truncate text-caption text-text-subtle">{companyName}</p>}
+          </div>
+        )}
+        <div className="py-1">
+          <button type="button" role="menuitem" className={MENU_ITEM} onClick={() => { close(); onShowSettings() }}>
+            <GearSix size={16} className="text-text-muted" />設定
+          </button>
+          {sharedFolder && (
+            <button type="button" role="menuitem" className={MENU_ITEM} disabled={!hasCompany} onClick={() => { close(); onShowBackups() }}>
+              <ClockCounterClockwise size={16} className="text-text-muted" />バックアップ履歴
+            </button>
+          )}
+          {onResetLayout && (
+            <button type="button" role="menuitem" className={MENU_ITEM} title="大きさと表示を最初に戻す" onClick={() => { close(); onResetLayout() }}>
+              <ArrowCounterClockwise size={16} className="text-text-muted" />画面をいつもの形に戻す
+            </button>
+          )}
+        </div>
+        {/* Switches: the menu stays open so the member sees the change. */}
+        <div className="border-t border-[color:var(--color-border)] py-1">
+          <button type="button" role="menuitem" className={MENU_ITEM} onClick={toggleTheme}>
+            {theme === 'dark' ? <Moon size={16} className="text-text-muted" /> : <Sun size={16} className="text-text-muted" />}
+            <span className="flex-1">表示</span><span className="text-caption text-text-subtle">{theme === 'dark' ? 'ダーク' : 'ライト'}</span>
+          </button>
+          <button type="button" role="menuitem" className={MENU_ITEM} onClick={() => setLanguage(language === 'ja' ? 'en' : 'ja')}>
+            <Globe size={16} className="text-text-muted" />
+            <span className="flex-1">言語</span><span className="text-caption text-text-subtle">{language === 'ja' ? '日本語' : 'English'}</span>
+          </button>
+        </div>
+        <div className="border-t border-[color:var(--color-border)] pt-1">
+          <button type="button" role="menuitem" className={MENU_ITEM} onClick={() => { close(); onLogout() }}>
+            <SignOut size={16} className="text-text-muted" />ログアウト
+          </button>
+        </div>
+      </>}
+    </TitleMenu>
+  )
+}
+
+/** A title-bar button with its menu: Enter / Space open it (focus on the first item), Esc or a press outside closes it. */
+function TitleMenu({ label, trigger, triggerClassName, width, children }: {
+  label: string; trigger: ReactNode; triggerClassName: string; width: string; children: (close: () => void) => ReactNode
+}) {
+  const [open, setOpen] = useState(false)
+  const [box, setBox] = useState<HTMLDivElement | null>(null)
+  const triggerRef = useRef<HTMLButtonElement>(null)
+  useDismiss(box, open, () => setOpen(false))
+  // An item that acts: focus back on the button first, so a dialog it opens returns focus there.
+  const close = () => { triggerRef.current?.focus(); setOpen(false) }
+  // Stable, so the first item is focused once when the menu opens, not on every render.
+  const focusFirst = useCallback((el: HTMLDivElement | null) => { el?.querySelector<HTMLElement>('[role="menuitem"]:not(:disabled)')?.focus() }, [])
+  return (
+    <div ref={setBox} className="relative">
+      <button ref={triggerRef} type="button" aria-label={label} title={label} aria-haspopup="menu" aria-expanded={open}
+        onClick={() => setOpen(o => !o)} className={triggerClassName}>
+        {trigger}
+      </button>
+      {open && (
+        <div role="menu" aria-label={label} className={`${MENU} ${width}`}
+          ref={focusFirst}
+          onKeyDown={e => {
+            // Esc (closed by useDismiss) gives the focus back to the button; ↑ ↓ move between the items.
+            if (e.key === 'Escape') triggerRef.current?.focus()
+            if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return
+            e.preventDefault()
+            const items = Array.from(e.currentTarget.querySelectorAll<HTMLElement>('[role="menuitem"]:not(:disabled)'))
+            const at = items.indexOf(document.activeElement as HTMLElement)
+            items[(at + (e.key === 'ArrowDown' ? 1 : items.length - 1)) % items.length]?.focus()
+          }}>
+          {children(close)}
+        </div>
+      )}
+    </div>
   )
 }
 

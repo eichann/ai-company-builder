@@ -456,7 +456,7 @@ replaced I1's ① 「the number = あなた待ち = this week's turn」 and ③ 
   over a department not downloaded on this PC (`renderer-structure.md` "The bottom panel"); opening a record from there
   switches to 全社 first.
 
-### The title bar's ［受け箱］ (owner decision 2026-11-26, look 「2」; 依頼2 tidies the bar's other icons later)
+### The title bar's ［受け箱］ (owner decision 2026-11-26, look 「2」; the rest of the bar: `renderer-structure.md` "The title bar")
 - **One button** (`components/InboxButton.tsx`, the slot's `titleBarButton`): the tray icon, **a soft blue count = 新着**
   (`selected-bg` / `selected-text`, `data-inbox-news`) and **a soft red count = あなた待ち** (`danger-bg` / `danger-text`,
   `data-inbox-waiting`), each exactly as the list counts it (`InboxView.counts`; 99+); no word 「受け箱」, no solid pill, no dot; a

@@ -327,7 +327,7 @@ test.describe('panel dividers', () => {
     expect(await at(chatDivider(page))).toBe(996)
   })
 
-  test('「いつもの形に戻す」 puts every size back and shows every pane', async ({ page }) => {
+  test('「画面をいつもの形に戻す」 (the member\'s menu) puts every size back and shows every pane', async ({ page }) => {
     await openPreview(page, 'skill-layout')
     await leftTab(page, 'ファイル').click()
     await drag(page, treeDivider(page), 100)
@@ -335,7 +335,8 @@ test.describe('panel dividers', () => {
     await toggleLeftShortcut(page)
     await toggleChatShortcut(page)
     await expect(showChat(page)).toBeVisible()
-    await page.getByRole('button', { name: 'いつもの形に戻す' }).click()
+    await page.getByRole('button', { name: 'あなたのメニュー' }).click()
+    await page.getByRole('menuitem', { name: '画面をいつもの形に戻す' }).click()
     await expect.poll(() => at(chatDivider(page))).toBe(860)
     expect(await at(treeDivider(page))).toBe(260)
     await expect(showLeft(page)).toHaveCount(0)
@@ -564,7 +565,8 @@ test.describe('the bottom panel', () => {
     await divider(page).focus()
     await page.keyboard.press('ArrowUp')
     await expect.poll(() => height(page)).toBe(276)
-    await page.getByRole('button', { name: 'いつもの形に戻す' }).click()
+    await page.getByRole('button', { name: 'あなたのメニュー' }).click()
+    await page.getByRole('menuitem', { name: '画面をいつもの形に戻す' }).click()
     await expect(panel(page)).toBeHidden()
     await pressJ(page)
     await expect.poll(() => height(page)).toBe(260)

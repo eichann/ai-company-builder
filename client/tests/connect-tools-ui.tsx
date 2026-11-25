@@ -5,7 +5,7 @@
 // has no Slack), `settings` (opened from 設定). 「Google でつなぐ」 here grants everything but
 // メール (the member unticked it on Google's page). `&theme=dark` for the dark look. `&calendar=1`
 // also mounts the task list's today's-calendar hook (one meeting once Google is allowed). `&minutes=1` mounts the
-// title bar's 「議事録を確かめる」 as the minutes slot shows it (only while main says minutes are available). `&manual=1`: the user
+// minutes slot's hook and says whether main reports minutes as available. `&manual=1`: the user
 // manual's company (検証A社's domain and 山田さん's address, client/tests/manual/scenes.ts chapter 28).
 import { useState } from 'react'
 import { createRoot } from 'react-dom/client'
@@ -13,7 +13,6 @@ import '../src/i18n'
 import '../src/index.css'
 import { ConnectToolsScreen } from '../src/features/settings/components/ConnectToolsScreen'
 import { useCalendarToday } from '../src/features/tasks/hooks/useCalendarToday'
-import { MinutesCheckButton } from '../src/features/minutes/components/MinutesCheckButton'
 import { useMinutesNotices } from '../src/features/minutes/hooks/useMinutesNotices'
 import type { MyGoogle } from '../shared/google'
 import type { MySlack } from '../shared/slack'
@@ -71,7 +70,7 @@ function CalendarProbe() {
 
 function MinutesProbe() {
   const minutes = useMinutesNotices('co-preview')
-  return minutes.available ? <MinutesCheckButton companyId="co-preview" /> : null
+  return <output data-testid="minutes">{minutes.available ? 'available' : 'off'}</output>
 }
 
 function Preview() {
