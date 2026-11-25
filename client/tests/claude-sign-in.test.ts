@@ -191,7 +191,8 @@ describe('signing in', () => {
     assert.equal((await pending).outcome, 'cancelled')
     assert.equal(service.cancel(), false)
     const again = service.start(ROOT)
-    await new Promise(r => setTimeout(r, 5))
+    // The second login starts after an auth status check; wait for it (bounded) instead of a fixed 5 ms.
+    for (let i = 0; i < 200 && logins().length < 2; i++) await new Promise(r => setTimeout(r, 5))
     assert.equal(logins().length, 2)
     service.cancel()
     await again
