@@ -24,10 +24,10 @@ test('an arrived meeting offers ［AI に読ませる］ / ［読まない］ to
 })
 
 test('being read: 今回だけ読まない only while it waits for the member\'s own AI; another attendee\'s AI is named', () => {
-  assert.deepEqual(meetingBanner(item({ status: 'asked', byYou: true }), ctx), { kind: 'reading', auto: null, reader: null, waiting: true, canSkip: true, problem: null })
+  assert.deepEqual(meetingBanner(item({ status: 'asked', byYou: true }), ctx), { kind: 'reading', auto: null, reader: null, organiser: false, waiting: true, canSkip: true, canRead: false, problem: null })
   assert.equal((meetingBanner(item({ status: 'reading', byYou: true }), ctx) as { canSkip: boolean }).canSkip, false)
   const other = meetingBanner(item({ status: 'asked', by: { memberId: 'u2', displayName: '鈴木' } }), ctx)
-  assert.deepEqual(other, { kind: 'reading', auto: null, reader: '鈴木', waiting: true, canSkip: false, problem: null })
+  assert.deepEqual(other, { kind: 'reading', auto: null, reader: '鈴木', organiser: false, waiting: true, canSkip: false, canRead: false, problem: null })
 })
 
 test('the member\'s own automatic series says so; this PC\'s AI unable to start says why (never a silent spinner)', () => {
@@ -42,6 +42,22 @@ test('another attendee\'s AI that has not started says it will read (their PC ma
   const suzuki = { memberId: 'u2', displayName: '鈴木' }
   assert.equal(reading({ status: 'asked', by: suzuki, askedAutomatically: true }), '鈴木さんの AI が読む予定です。しばらく読まれないときは、出ている人の AI が代わりに読みます')
   assert.equal(reading({ status: 'reading', by: suzuki }), '鈴木さんの AI が読んでいます…')
+})
+
+test('only the clock\'s ask for another attendee, not started, offers ［AI に読ませる］: never another\'s press, a started reading or an older server', () => {
+  const suzuki = { memberId: 'u2', displayName: '鈴木' }
+  const canRead = (over: Partial<MeetingArrivalView>) => (meetingBanner(item(over), ctx) as { canRead: boolean }).canRead
+  assert.equal(canRead({ status: 'asked', by: suzuki, askedAutomatically: true }), true)
+  assert.equal(canRead({ status: 'asked', by: suzuki }), false)
+  assert.equal(canRead({ status: 'reading', by: suzuki, askedAutomatically: true }), false)
+  assert.equal(canRead({ status: 'asked', byYou: true, askedAutomatically: true }), false)
+})
+
+test('the planned reader who organised the meeting is named 「（主催）」; an older server\'s answer names no one so', () => {
+  const reading = (over: Partial<MeetingArrivalView>) => readingWords(meetingBanner(item(over), ctx) as Extract<MeetingBanner, { kind: 'reading' }>)
+  const suzuki = { memberId: 'u2', displayName: '鈴木' }
+  assert.equal(reading({ status: 'asked', by: suzuki, askedAutomatically: true, byOrganiser: true }), '鈴木さん（主催）の AI が読む予定です。しばらく読まれないときは、出ている人の AI が代わりに読みます')
+  assert.equal(reading({ status: 'asked', by: suzuki, askedAutomatically: true }), '鈴木さんの AI が読む予定です。しばらく読まれないときは、出ている人の AI が代わりに読みます')
 })
 
 test('a meeting the member\'s own setting asked says so, and still offers 今回だけ読まない; a press says nothing of a setting', () => {
@@ -61,7 +77,7 @@ test('read: shown until the member closes it; ［読まない］: gone for who c
 
 test('two rows at most stay out; ［まとめて読まない］ takes only the folded ones still waiting', () => {
   const rows = ['arrived', 'arrived', 'arrived', 'reading', 'read'].map((kind, n) => ({
-    n, banner: (kind === 'arrived' ? { kind, failedBefore: false } : kind === 'read' ? { kind } : { kind, auto: null, reader: null, waiting: false, canSkip: true, problem: null }) as MeetingBanner,
+    n, banner: (kind === 'arrived' ? { kind, failedBefore: false } : kind === 'read' ? { kind } : { kind, auto: null, reader: null, organiser: false, waiting: false, canSkip: true, canRead: false, problem: null }) as MeetingBanner,
   }))
   const { shown, folded } = foldMeetings(rows)
   assert.deepEqual(shown.map(r => r.n), [0, 1])

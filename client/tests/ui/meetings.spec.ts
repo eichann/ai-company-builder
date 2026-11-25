@@ -76,6 +76,22 @@ test('the member\'s Google cannot open the minutes: told another attendee can pr
   expectNoPageErrors(state)
 })
 
+test('a meeting only the clock asked for the organiser: named 「（主催）」, and the member\'s own ［AI に読ませる］ takes it; a press too late is said plainly', async ({ page }) => {
+  const state = await openPreview(page, 'meetings', { clock: '1' })
+  const line = page.locator('[data-banner="meeting-teirei01"]')
+  await expect(line).toContainText('鈴木さん（主催）の AI が読む予定です')
+  await line.getByRole('button', { name: 'AI に読ませる' }).click()
+  await expect(page.locator('#log')).toHaveText('read meeting-teirei01@1')
+  await expect(line).toContainText('AI が読んでいます…')
+  await expect(line.getByRole('button', { name: 'AI に読ませる' })).toHaveCount(0)
+
+  await page.goto(page.url().replace('clock=1', 'clock=taken'))
+  const again = page.locator('[data-banner="meeting-teirei01"]')
+  await again.getByRole('button', { name: 'AI に読ませる' }).click()
+  await expect(again.getByRole('alert')).toContainText('この会議は、もう AI が読んでいるか、読み終わっています。')
+  expectNoPageErrors(state)
+})
+
 test('the card: ［招待する］ says what the invited see and that it cannot be undone; 相談 only from its button; 案件 linked only after the sentence', async ({ page }) => {
   const state = await openPreview(page, 'meetings')
   await page.getByRole('button', { name: '定例ミーティングを開く' }).click()

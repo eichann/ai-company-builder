@@ -54,6 +54,7 @@ function arrivalOf(x: unknown): MeetingArrival | null {
     // Absent from an older server: left absent, so the card keeps that server's two buttons.
     ...(a.seriesChoice === 'auto' || a.seriesChoice === 'off' || a.seriesChoice === null ? { seriesChoice: a.seriesChoice } : {}),
     ...(a.askedAutomatically === true ? { askedAutomatically: true } : {}),
+    ...(a.byOrganiser === true ? { byOrganiser: true } : {}),
   }
 }
 

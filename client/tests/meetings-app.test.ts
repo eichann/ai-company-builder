@@ -201,6 +201,13 @@ test('a series shows three choices only when the server keeps three: an older se
   assert.equal('seriesChoice' in await items({ seriesChoice: 'sometimes' }), false)
 })
 
+test('「（主催）」 only when the server says the reader is the organiser: absent from an older server, nothing else taken', async () => {
+  const items = async (over: Record<string, unknown>) => (await fakeServer({ arrivals: [arrival(over)] }).api.arrivals('co')).items[0]
+  assert.equal((await items({ byOrganiser: true })).byOrganiser, true)
+  assert.equal('byOrganiser' in await items({}), false)
+  assert.equal('byOrganiser' in await items({ byOrganiser: 'yes' }), false)
+})
+
 test('the suggestion goes only to a member who never chose and starts at 自動では読まない (D1-1)', () => {
   assert.equal(suggestsAutoRead({ mode: 'off', chosen: false }), true)
   assert.equal(suggestsAutoRead({ mode: 'off', chosen: true }), false)
