@@ -788,8 +788,17 @@ describe('recovering from a failed write: the site refused it; the person answer
     // The answer never unlocks the run: nothing more is permitted in it.
     expect(answered.state).toBe('locked')
     expect(code(await permit(run.runId, 2))).toBe('BROWSER_RUN_AFTER_UNKNOWN')
-    // And no later report changes what the person said.
-    expect(value(report(run.runId, 1, 'done')).outcome).toBe('recorded')
+    // And no later report changes what the person said: one that agrees is kept, one that contradicts is refused and noted.
+    expect(value(report(run.runId, 1, 'refused')).outcome).toBe('recorded')
+    const warned: string[] = []
+    const was = console.warn
+    console.warn = (...a: unknown[]) => { warned.push(a.join(' ')) }
+    try {
+      expect(code(report(run.runId, 1, 'done'))).toBe('BROWSER_REPORT_CONFLICT')
+    } finally {
+      console.warn = was
+    }
+    expect(warned).toEqual([`[browser-frames] run ${run.runId} write 1: a report "done" contradicts the person's answer "not_done"; kept as answered`])
     expect(value(frames.get(alice, run.runId)).writes[0].state).toBe('unknown')
   })
 
@@ -838,6 +847,23 @@ describe('recovering from a failed write: the site refused it; the person answer
     initDatabase(before)
     before.exec = exec
     expect(execs.filter(sql => /RENAME TO/.test(sql))).toEqual([])
+    // A row whose parent is gone (foreign keys on, as at startup) never stops the start: kept, counted in a log line.
+    const orphaned = new Database(':memory:')
+    orphaned.pragma('foreign_keys = OFF')
+    orphaned.exec(readFileSync(new URL('../fixtures/browser-writes-before-refused.sql', import.meta.url), 'utf8'))
+    orphaned.prepare(`INSERT INTO browser_frame_writes (company_id, run_id, seq, frame_idx, state, permitted_at) VALUES ('co-1', 'bf_gone', 1, 1, 'done', ?)`).run(iso(T0))
+    orphaned.pragma('foreign_keys = ON')
+    const warned: string[] = []
+    const was = console.warn
+    console.warn = (...a: unknown[]) => { warned.push(a.join(' ')) }
+    try {
+      initDatabase(orphaned)
+    } finally {
+      console.warn = was
+    }
+    expect(orphaned.prepare('SELECT run_id FROM browser_frame_writes').all()).toEqual([{ run_id: 'bf_gone' }])
+    expect(warned).toContain('[db] browser_frame_writes: 1 row(s) without their parent kept as they were')
+    expect(orphaned.pragma('foreign_keys', { simple: true })).toBe(1)
     // The upgraded tables take the new words and keep the old rules.
     before.prepare("UPDATE browser_frame_writes SET state = 'refused'").run()
     expect(() => before.prepare("UPDATE browser_frame_writes SET state = 'done'").run()).toThrow(/state table/)

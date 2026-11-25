@@ -90,6 +90,8 @@ export interface BrowserFramesApi {
    * `confirm`, reached from the main window's card IPC; no AI tool calls it). This PC's key: bound like a sure report.
    */
   frameConfirm(companyId: string, runId: string, body: { write: number; answer: 'done' | 'not_done' }): Promise<BrowserLinesAnswer>
+  /** `GET /browser-frame-runs/:runId` (the member's session): the run as the server holds it, for the card's write in doubt. */
+  frameGet(companyId: string, runId: string): Promise<BrowserLinesAnswer>
 }
 
 const FRAME_RUN_ID_RE = /^bf_[0-9a-f]{32}$/
@@ -146,6 +148,7 @@ export function createBrowserLinesHttp(deps: BrowserLinesHttpDeps): BrowserLines
     frameReport: async (companyId, runId, body) => frameOk(companyId, runId) && Number.isSafeInteger(body.write) && body.write >= 1
       ? post(`${company(companyId)}/browser-frame-runs/${runId}/report`, body, { device: true }) : refusedLocally,
     frameEnd: async (companyId, runId) => frameOk(companyId, runId) ? post(`${company(companyId)}/browser-frame-runs/${runId}/end`, {}) : refusedLocally,
+    frameGet: async (companyId, runId) => frameOk(companyId, runId) ? post(`${company(companyId)}/browser-frame-runs/${runId}`, null, { method: 'GET' }) : refusedLocally,
     frameConfirm: async (companyId, runId, body) => frameOk(companyId, runId) && Number.isSafeInteger(body.write) && body.write >= 1 && (body.answer === 'done' || body.answer === 'not_done')
       ? post(`${company(companyId)}/browser-frame-runs/${runId}/confirm`, { write: body.write, answer: body.answer }, { device: true }) : refusedLocally,
     createWrites: async (companyId, body) => companyOk(companyId) && typeof body.account === 'string'

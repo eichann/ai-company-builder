@@ -242,15 +242,15 @@ test('a write the site refused (a 4xx) is `site-refused`: told refused, the page
   assert.equal(browserRunWritesProblem(writer.log(), 0), null)
 })
 
-test('the statuses that do not prove nothing changed stay unknown and lock the run: 408, 409, 425, 429, 5xx, anything outside 200–499', async () => {
-  for (const status of [408, 409, 425, 429, 500, 503, 100, 600]) {
+test('only the listed 4xx are refused; every other status stays unknown and locks the run (408, 409, 424, 425, 429, proxy codes, 5xx, outside 200–499)', async () => {
+  for (const status of [402, 406, 407, 408, 409, 412, 416, 417, 418, 421, 423, 424, 425, 426, 428, 429, 431, 451, 460, 463, 499, 500, 503, 100, 600]) {
     const site: Site = { requests: [], answer: () => ({ status, body: '' }) }
     const { writer, calls } = writerWorld([frame({ max: 2, left: 2 })])
     await writer.hold(held(site, 'POST', '/coupons', FORM, 'name=a'))
     assert.equal(writer.locked(), true, String(status))
     assert.ok(calls.includes('report 1 unknown'), String(status))
   }
-  for (const status of [400, 401, 403, 404, 405, 410, 413, 415, 422]) assert.equal(browserWriteAnswerKind(status), 'refused', String(status))
+  for (const status of [400, 401, 403, 404, 405, 410, 411, 413, 414, 415, 419, 422]) assert.equal(browserWriteAnswerKind(status), 'refused', String(status))
   for (const status of [200, 201, 204, 302, 303]) assert.equal(browserWriteAnswerKind(status), 'done', String(status))
 })
 
@@ -278,6 +278,7 @@ interface WorkWorld {
   frameApprove: () => Promise<BrowserLinesAnswer>
   idleMaxMs?: number
   frameConfirm: () => Promise<BrowserLinesAnswer>
+  frameGet: () => Promise<BrowserLinesAnswer>
   /** The wiring's clock (default: the real one), and what each operator step does to it. */
   now?: () => number
   onStep?: (prompt: string) => void
@@ -293,6 +294,7 @@ function workWorld(over: Partial<WorkWorld> = {}) {
     sendHangs: false,
     frameApprove: async () => ({ kind: 'ok', value: {} }),
     frameConfirm: async () => ({ kind: 'ok', value: {} }),
+    frameGet: async () => ({ kind: 'no-answer' }),
     ...over,
   }
   let permits = 0
@@ -322,6 +324,7 @@ function workWorld(over: Partial<WorkWorld> = {}) {
     async frameStart(_c: string, body: unknown) { w.calls.push(`frameStart ${JSON.stringify(body)}`); return w.frameStart(body) },
     async frameApprove(_c: string, _r: string, body: { planHash: string; approvalToken: string }) { w.calls.push(`frameApprove ${body.approvalToken === TOKEN}`); return w.frameApprove() },
     async framePermit(_c: string, _r: string, body: { frame: number }) { w.calls.push('framePermit'); return { kind: 'ok', value: { write: ++permits, frame: body.frame, permittedAt: new Date((w.now ?? Date.now)()).toISOString(), validMs: 5000 } } as BrowserLinesAnswer },
+    async frameGet() { w.calls.push('frameGet'); return w.frameGet() },
     async frameConfirm(_c: string, _r: string, body: { write: number; answer: string }) { w.calls.push(`frameConfirm ${body.write} ${body.answer}`); return w.frameConfirm() },
     async frameReport(_c: string, _r: string, body: { result: string }) { w.calls.push(`frameReport ${body.result}`); return { kind: 'ok', value: {} } as BrowserLinesAnswer },
     async frameEnd() { w.calls.push('frameEnd'); return { kind: 'ok', value: {} } as BrowserLinesAnswer },
@@ -670,4 +673,80 @@ test('a write the site refused leaves the run going: the operator corrects and s
   assert.deepEqual(view.result?.notDone, ['POST /coupons'])
   assert.equal(view.result?.confirm, null)
   assert.match(JSON.stringify(view.card), /サイトが「422」を返して受け付けませんでした/)
+})
+
+test('an older server (no `refused`): the refused report is not recorded → kept unknown and locked; a run log it refuses as bad is sent once more with those steps unknown', async () => {
+  const site: Site = { requests: [], answer: () => ({ status: 422, body: '{}' }) }
+  const { writer } = writerWorld([frame({ max: 2, left: 2 })], { report: async () => ({ kind: 'refused', code: 'BROWSER_FRAME_BAD_REQUEST' }) })
+  await writer.hold(held(site, 'POST', '/coupons', FORM, 'name='))
+  assert.equal(writer.locked(), true)
+  assert.deepEqual(writer.records().map(r => r.outcome), ['unknown'])
+  assert.deepEqual(writer.log().map(l => l.outcome), ['unknown'])
+
+  // A newer server took `refused`, an older one refuses the log that names `site-refused`: the finish goes again without it.
+  let finishes = 0
+  const twice = { ...started({ needsApproval: false }), frames: [{ frame: 1, method: 'POST', path: '/coupons', fields: {}, max: 2, used: 0, left: 2 }] }
+  const old = workWorld({
+    site: { requests: [], answer: n => (n === 1 ? { status: 422, body: '{}' } : ok201()) },
+    answers: [CLICK_SAVE, CLICK_SAVE, DONE_PLAIN], frameStart: () => ({ kind: 'ok', value: twice }),
+    runFinish: async () => (++finishes === 1 ? { kind: 'refused', code: 'BROWSER_BAD_RUN' } : { kind: 'ok', value: {} }),
+  })
+  await old.tool.execute({ site: HOST, task: 'いつものクーポン', skill: 'coupons' })
+  const sent = old.w.calls.filter(c => c.startsWith('runFinish'))
+  assert.equal(sent.length, 2)
+  assert.match(sent[0], /"outcome":"site-refused"/)
+  assert.doesNotMatch(sent[1], /site-refused/)
+  assert.match(sent[1], /"outcome":"unknown"/)
+})
+
+test('the card follows the server: its time for the answer, an answer it already holds, a late answer of the site — never a loop of もう一度', async () => {
+  const t = Date.parse('2026-11-25T10:00:00.000Z')
+  const at = new Date(t + 40_000).toISOString()
+  let held: Record<string, unknown> = { write: 1, state: 'unknown', confirmableAt: at, confirmed: null }
+  const doubt = workWorld({
+    now: () => t,
+    site: { requests: [], answer: () => null },
+    answers: [CLICK_SAVE, DONE_PLAIN], frameStart: () => ({ kind: 'ok', value: started({ needsApproval: false }) }),
+    frameGet: async () => ({ kind: 'ok', value: { writes: [held] } }),
+    frameConfirm: async () => ({ kind: 'refused', code: 'BROWSER_FRAME_CONFIRMED' }),
+  })
+  await doubt.tool.execute({ site: HOST, task: 'いつものクーポン', skill: 'coupons' })
+  const card = () => (doubt.wiring.card(COMPANY, FRAME_RUN) as { ok: true; view: BrowserWriteView }).view
+  // The server's own time drives the buttons.
+  assert.deepEqual(card().result?.confirm, { from: at, canNow: false })
+  // Answered elsewhere already (another press, a reply lost): the card takes the server's answer instead of asking again.
+  held = { ...held, confirmed: { answer: 'not_done', by: 'u-1', at } }
+  const settled = await doubt.wiring.confirm(COMPANY, FRAME_RUN, 'done') as { ok: true; view: BrowserWriteView }
+  assert.equal(settled.ok, true)
+  assert.equal(settled.view.result?.confirm, null)
+  assert.equal(settled.view.result?.headline, CW.confirmedNotDone)
+  assert.deepEqual(settled.view.result?.notDone, ['POST /coupons'])
+
+  // No longer in doubt (the site's late answer came): the card says so and stops asking.
+  held = { write: 1, state: 'unknown', confirmableAt: at, confirmed: null }
+  const late = workWorld({
+    now: () => t,
+    site: { requests: [], answer: () => null },
+    answers: [CLICK_SAVE, DONE_PLAIN], frameStart: () => ({ kind: 'ok', value: started({ needsApproval: false }) }),
+    frameGet: async () => ({ kind: 'ok', value: { writes: [held] } }),
+    frameConfirm: async () => ({ kind: 'refused', code: 'BROWSER_FRAME_NOT_UNKNOWN' }),
+  })
+  await late.tool.execute({ site: HOST, task: 'いつものクーポン', skill: 'coupons' })
+  held = { write: 1, state: 'done', confirmableAt: null, confirmed: null }
+  const moved = await late.wiring.confirm(COMPANY, FRAME_RUN, 'not_done') as { ok: true; view: BrowserWriteView }
+  assert.equal(moved.view.result?.confirm, null)
+  assert.equal(moved.view.result?.headline, CW.lateDone)
+  // Refused again with nothing the read can show: the card stops asking all the same.
+  held = { write: 1, state: 'unknown', confirmableAt: at, confirmed: null }
+  const stuck = workWorld({
+    now: () => t,
+    site: { requests: [], answer: () => null },
+    answers: [CLICK_SAVE, DONE_PLAIN], frameStart: () => ({ kind: 'ok', value: started({ needsApproval: false }) }),
+    frameGet: async () => ({ kind: 'ok', value: { writes: [held] } }),
+    frameConfirm: async () => ({ kind: 'refused', code: 'BROWSER_FRAME_CONFIRMED' }),
+  })
+  await stuck.tool.execute({ site: HOST, task: 'いつものクーポン', skill: 'coupons' })
+  assert.deepEqual(await stuck.wiring.confirm(COMPANY, FRAME_RUN, 'done'), { ok: false, message: CW.confirmSettledElsewhere })
+  assert.equal(card().result?.confirm, null)
+  assert.equal((stuck.wiring.card(COMPANY, FRAME_RUN) as { ok: true; view: BrowserWriteView }).view.result?.confirm, null)
 })

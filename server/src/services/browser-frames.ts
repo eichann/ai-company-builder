@@ -74,6 +74,8 @@ export interface BrowserFrameDeps {
    * frames run never starts while another run operates the domain. Absent: no operator runs (tests of ⑤a).
    */
   operatorRunOn?: (companyId: string, host: string) => boolean
+  /** Where a report that contradicts the person's answer is noted (ids and fixed words only; default console). */
+  log?: Pick<Console, 'warn'>
 }
 
 export const BROWSER_FRAME_TIMES = {
@@ -490,8 +492,15 @@ export function createBrowserFrameService(deps: BrowserFrameDeps) {
           return answer('applied')
         }
         if (w.state === result || (w.state === 'verified' && result === 'done')) return answer('same')
-        // Once the person answered about it, no report changes it (kept as it was).
-        if (r.confirms(run.id).some(c => c.seq === seq)) return answer('recorded')
+        // Once the person answered about it, no report changes it. One that agrees is kept as it was; one that contradicts
+        // the answer (done after されていなかった, refused / not sent after 済んでいた) is refused and noted — ids and words only.
+        const answered = r.confirms(run.id).find(c => c.seq === seq)
+        if (answered) {
+          const contradicts = answered.answer === 'not_done' ? result === 'done' : result === 'refused' || result === 'not_sent'
+          if (!contradicts) return answer('recorded')
+          ;(deps.log ?? console).warn(`[browser-frames] run ${run.id} write ${seq}: a report "${result}" contradicts the person's answer "${answered.answer}"; kept as answered`)
+          return refuse('conflict', W.reportConflict, { code: 'BROWSER_REPORT_CONFLICT' })
+        }
         if (w.state === 'unknown' && (result === 'done' || result === 'refused')) {
           // Late and sure: the site's answer came after all; the run stays locked (never runs on after an unknown).
           r.setWriteState(run.id, seq, 'unknown', result, { settledAt: iso(now), reason })

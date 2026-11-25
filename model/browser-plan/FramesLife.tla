@@ -222,7 +222,7 @@ AppStopsBeforeSend(w) ==
 
 \* After the send: the site's answer -> done ("the site returned success"; never the machine-verified value of a safe
 \* pattern), refused (a 4xx that proves it was not taken: the run goes on; a corrected try is a NEW page write, its own
-\* permit and unit), or unknown (no answer, a 5xx, 408 / 409 / 425 / 429). Never sent again. The worker is free for the
+\* permit and unit; only the app's listed 4xx), or unknown (no answer, a 5xx, any other 4xx). Never sent again. The worker is free for the
 \* next page write.
 \* The site may refuse the run's first write, on frame "a" (max 2): one refused try, then a corrected one within the same
 \* max — the case that matters. Its report arrives once (never lost or repeated: a lost one is the time-out to unknown

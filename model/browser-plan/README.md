@@ -264,8 +264,8 @@ keeps the write `unknown` and the answer apart, folded here into `cdone` / `cnot
 - **Refused writes, narrowed** (`RefusedOrNot`, for the ceiling above): only the run's first write, on frame "a" (max 2),
   may be refused, and that report arrives exactly once — one refused try and a corrected one within the max is the case
   that matters; a lost refused report is the time-out to unknown and a repeated one the same answer, both explored for the
-  other answers; more refused tries repeat the same move. Statuses (which 4xx count as refused) are the app's rule
-  (`browserWriteAnswerKind`), tested there.
+  other answers; more refused tries repeat the same move. Statuses (which 4xx count as refused: an allowlist, every
+  other status unknown) are the app's rule (`browserWriteAnswerKind`), tested there.
 - **The person's answer, true when given** (`PersonConfirms`): 「されていなかった」 only while the write has not reached the
   site, 「済んでいた」 only once it has; a person answering wrongly is left out (as in PlanLife). Their PC and member binding
   is folded in (the server's tests).

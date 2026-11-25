@@ -199,7 +199,9 @@ export function createFrameWriter(deps: FrameWriterDeps) {
     const recorded = await report(write, kind, kind === 'unknown' ? 'other-state' : undefined)
     // A result the server did not record: nothing more is sent in this run (the server's time-out makes it unknown).
     if (!recorded) locked = true
-    const kept: BrowserRunWriteOutcome = kind === 'refused' ? 'site-refused' : kind
+    // A refusal the server did not record is kept as unknown (an older server does not know `refused`: its run log would
+    // refuse `site-refused` whole; independent review of #859) — the run is locked above anyway.
+    const kept: BrowserRunWriteOutcome = kind === 'refused' ? (recorded ? 'site-refused' : 'unknown') : kind
     keep({
       line, outcome: kept, status: kind === 'done' ? null : answer.status, sent: sentFields(shape), path: shape.path,
       answerText: kind === 'done' ? answer.body : null, ...ids,

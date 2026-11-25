@@ -117,18 +117,18 @@ function splitOnce(s: string): [string, string | null] {
 
 /**
  * What the site's answer to a sent write means (agent-browser.md "Recovering from a failed write"; the one rule the app
- * asks): `done` for a success or a redirect (2xx / 3xx: the site took it); `refused` for a 4xx that says the request was
- * not taken — the form was wrong, the login or the CSRF value had run out, the address does not exist —, so the run goes on
- * and the person or the operator may correct it and try again (a new write: its own permit and unit; nothing is resent
- * automatically); **`unknown`** for everything else, decided on the safe side: a 5xx, any status outside 200–499, and the
- * 4xx that do not prove nothing changed — 408 (timed out: it may have been processed), 409 (a conflict may follow a partial
- * change or a concurrent one), 425 (too early: replay-related) and 429 (rate limited: often in front of a server that may
- * have taken it). The run is then locked and nothing more is sent.
+ * asks): `done` for a success or a redirect (2xx / 3xx: the site took it — a classic form whose error is a 302 back to the
+ * form counts as done too: the after-read and the card show it); **`refused` only for the 4xx on this list**, the ones
+ * that say the request was not taken (a bad or invalid request, the login or the CSRF value run out, not allowed, no such
+ * address or method, too large, the wrong body type) — the run goes on, and a corrected try is a new write with its own
+ * permit and unit; nothing is resent automatically; **`unknown` for every other status**, decided on the safe side —
+ * every other 4xx (408 timed out, 409 a conflict after a partial or concurrent change, 424, 425, 429, a proxy's 460 / 463 /
+ * 499 …), every 5xx and anything outside 200–499 —: the run is then locked and nothing more is sent. This reverses the
+ * runner's earlier rule "every non-success is unknown" (6b-2c) for the listed codes only.
  */
-export const BROWSER_WRITE_UNKNOWN_4XX: readonly number[] = [408, 409, 425, 429]
+export const BROWSER_WRITE_REFUSED_4XX: readonly number[] = [400, 401, 403, 404, 405, 410, 411, 413, 414, 415, 419, 422]
 export function browserWriteAnswerKind(status: number): 'done' | 'refused' | 'unknown' {
   if (!Number.isInteger(status)) return 'unknown'
   if (status >= 200 && status < 400) return 'done'
-  if (status >= 400 && status < 500 && !BROWSER_WRITE_UNKNOWN_4XX.includes(status)) return 'refused'
-  return 'unknown'
+  return BROWSER_WRITE_REFUSED_4XX.includes(status) ? 'refused' : 'unknown'
 }
