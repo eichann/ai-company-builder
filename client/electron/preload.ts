@@ -40,6 +40,7 @@ import type { PluginPackageRef } from '../shared/plugin-bridge'
 // lane B ▲
 // lane C ▼
 import type { BrowserConfirmResult } from '../shared/browser-plans'
+import type { BrowserRecordingEdit } from '../shared/browser-recorder'
 // lane C ▲
 // Use require for CommonJS compatibility in Electron preload
 // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -474,6 +475,12 @@ const api: ElectronAPI = {
   getBrowserPc: (companyId: string) => invoke('browserDevice:get', companyId),
   registerBrowserPc: (companyId: string, label: string) => invoke('browserDevice:register', companyId, label),
   withdrawBrowserPc: (companyId: string) => invoke('browserDevice:withdraw', companyId),
+  getBrowserRecording: (companyId: string) => invoke('browserRecording:get', companyId),
+  startBrowserRecording: (companyId: string, host: string) => invoke('browserRecording:start', companyId, host),
+  stopBrowserRecording: (companyId: string) => invoke('browserRecording:stop', companyId),
+  editBrowserRecording: (companyId: string, change: BrowserRecordingEdit) => invoke('browserRecording:edit', companyId, change),
+  sendBrowserRecording: (companyId: string) => invoke('browserRecording:send', companyId),
+  discardBrowserRecording: (companyId: string) => invoke('browserRecording:discard', companyId),
   listPluginStepTurns: (companyId: string) => invoke('aiTurns:pluginTurns', companyId),
   listPersonSteps: (companyId: string, recordId: string) => invoke('pluginSteps:onRecord', companyId, recordId),
   startPersonStep: (companyId: string, recordId: string, pluginId: string, step: string, companyRoot?: string) => invoke('pluginSteps:start', companyId, recordId, pluginId, step, companyRoot),

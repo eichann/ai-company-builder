@@ -19,6 +19,8 @@
 // its page. A site's declared login helpers (a CAPTCHA) work only in `human` mode: entering `ai` mode
 // shuts them (the request rule, the frames' navigation and the proxy) and refuses to start while a
 // frame of another origin is still in the page (agent-browser.md "Login helpers").
+// The window's DevTools connection has one holder at a time (`createPageDebugger`): the `ai`-mode gate, or a recording
+// the person makes (agent-browser.md "Recording": observe only, the person's requests go out as in `human` mode).
 import net from 'node:net'
 import { BrowserWindow, net as electronNet, session, type Session, type WebContents, type WebFrameMain } from 'electron'
 import type { BrowserSiteSetting } from '../../shared/core/browser-operation'
@@ -30,6 +32,10 @@ import {
 } from '../shared/browser-operation'
 import type { BrowserGateDecision, BrowserPreviewSurface, BrowserRunSurface, BrowserSessionRequest } from '../shared/browser-runner'
 import type { BrowserShell, BrowserWindowHandle, BrowserWindowSpec } from './features/browser/controller'
+import {
+  BROWSER_RECORDING_BINDING, BROWSER_RECORDING_SCRIPT, BROWSER_RECORDING_WINDOW_TITLE, BROWSER_RECORDING_WORLD, createPageDebuggerOwner,
+  type BrowserRecordingObservation, type BrowserRecordingObserver, type BrowserRecordSurface,
+} from '../shared/browser-recorder'
 import { BrowserNotSentError, createSessionLanes, exactRead, throughSession, writeThroughSession, type PagelessSession } from './features/browser/read-session'
 
 /** What `ai` mode needs: the approved step's decider (none = no write) and the emergency stop. */
@@ -46,10 +52,16 @@ export interface BrowserShellWindow extends BrowserWindowHandle {
   setMode(mode: BrowserWindowMode, gate?: BrowserAiGate): Promise<void>
   run: BrowserRunSurface
   preview: BrowserPreviewSurface
+  record: BrowserRecordSurface
 }
 
 const RUN_REQUEST_MS = 30_000
 const RUN_ANSWER_MAX = 5 * 1024 * 1024
+/** A recording reads an answer's JSON key shape only up to this size, and a request body's field names up to the next. */
+const RECORDING_ANSWER_MAX = 1024 * 1024
+const RECORDING_BODY_MAX = 64 * 1024
+/** How long a recording waits for the window's first page before it gives up (and is discarded). */
+const RECORDING_START_MS = 20_000
 
 /**
  * One request through a session, its answer or a rejection (no answer). A redirect is an answer: its
@@ -306,18 +318,101 @@ export function createBrowserWindowShell(options: {
     contents.on('will-attach-webview', event => event.preventDefault())
   }
 
-  /** The `ai`-mode write gate on one window: DevTools Fetch interception of every request. */
-  function createAiGate(contents: WebContents, state: SessionState) {
+  /**
+   * The window's ONE DevTools connection (`webContents.debugger`) and who holds it (`createPageDebuggerOwner`): the
+   * `ai`-mode write gate (DevTools Fetch interception of every request) or a recording (agent-browser.md "Recording":
+   * Network, Page and an isolated world's binding, observe only) — never both. Only this function attaches and detaches;
+   * the recording only receives what it observes.
+   */
+  function createPageDebugger(contents: WebContents, state: SessionState) {
+    const owner = createPageDebuggerOwner()
     let gate: BrowserAiGate | null = null
     let loaded = false
     let pendingAttach = false
+    const firstLoad: Array<() => void> = []
     contents.once('did-finish-load', () => {
       loaded = true
       if (pendingAttach) void attach()
+      for (const go of firstLoad.splice(0)) go()
     })
-    const onDetach = () => { state.aiGateReady = false }
+    let recorder: BrowserRecordingObserver | null = null
+    /** The recording's own isolated worlds (only their binding calls count). */
+    const recordingContexts = new Set<number>()
+    /** Requests whose answer is JSON (its key shape is read once it finished). */
+    const jsonAnswers = new Set<string>()
+    let mainFrameId: string | null = null
+    const endRecording = (reason: 'closed' | 'lost') => {
+      const r = recorder
+      if (!r) return
+      recorder = null
+      recordingContexts.clear()
+      jsonAnswers.clear()
+      owner.release('recording')
+      try { r.ended(reason) } catch { /* the listener's own failure */ }
+    }
+    const onRecording = (method: string, params: Record<string, unknown>) => {
+      const r = recorder
+      if (!r) return
+      const observe = (o: BrowserRecordingObservation) => { try { r.observe(o) } catch { /* left out */ } }
+      switch (method) {
+        case 'Runtime.executionContextCreated': {
+          const ctx = params.context as { id?: number; name?: string } | undefined
+          if (ctx && ctx.name === BROWSER_RECORDING_WORLD && typeof ctx.id === 'number') recordingContexts.add(ctx.id)
+          return
+        }
+        case 'Runtime.executionContextDestroyed':
+          recordingContexts.delete(params.executionContextId as number)
+          return
+        case 'Runtime.executionContextsCleared':
+          recordingContexts.clear()
+          return
+        case 'Runtime.bindingCalled':
+          // The binding lives only in the recording's isolated world; a call from any other context is not the script's.
+          if (params.name === BROWSER_RECORDING_BINDING && recordingContexts.has(params.executionContextId as number) && typeof params.payload === 'string') {
+            observe({ kind: 'action', payload: params.payload.slice(0, 4000) })
+          }
+          return
+        case 'Page.frameNavigated': {
+          const frame = params.frame as { id?: string; parentId?: string; url?: string } | undefined
+          if (frame && !frame.parentId && typeof frame.url === 'string') {
+            mainFrameId = frame.id ?? null
+            observe({ kind: 'page', url: frame.url })
+          }
+          return
+        }
+        case 'Page.navigatedWithinDocument':
+          if (params.frameId === mainFrameId && typeof params.url === 'string') observe({ kind: 'page', url: params.url })
+          return
+        case 'Network.requestWillBeSent': {
+          const request = params.request as { url: string; method: string; headers?: Record<string, string>; postData?: string; hasPostData?: boolean; postDataEntries?: Array<{ bytes?: string }> }
+          const contentType = Object.entries(request.headers ?? {}).find(([k]) => k.toLowerCase() === 'content-type')?.[1]
+          const body = request.postData ?? (request.postDataEntries ? request.postDataEntries.map(e => Buffer.from(e.bytes ?? '', 'base64').toString('utf8')).join('') : undefined)
+          observe({ kind: 'request', id: String(params.requestId), method: request.method, url: request.url, resourceType: String(params.type ?? ''), contentType, body, hasBody: request.hasPostData === true || body !== undefined })
+          return
+        }
+        case 'Network.responseReceived': {
+          const response = params.response as { status: number; mimeType?: string }
+          const id = String(params.requestId)
+          if (/json/i.test(response.mimeType ?? '')) jsonAnswers.add(id)
+          observe({ kind: 'response', id, status: response.status })
+          return
+        }
+        case 'Network.loadingFinished': {
+          const id = String(params.requestId)
+          observe({ kind: 'finished', id })
+          if (!jsonAnswers.delete(id) || Number(params.encodedDataLength ?? 0) > RECORDING_ANSWER_MAX) return
+          // The answer's text is read here only to take its key shape; the recorder drops it at once.
+          contents.debugger.sendCommand('Network.getResponseBody', { requestId: id }).then((answer: { body?: string; base64Encoded?: boolean }) => {
+            if (recorder !== r || typeof answer.body !== 'string') return
+            const text = answer.base64Encoded ? Buffer.from(answer.body, 'base64').toString('utf8') : answer.body
+            if (text.length <= RECORDING_ANSWER_MAX) observe({ kind: 'response', id, status: 0, json: text })
+          }, () => { /* gone with its page */ })
+          return
+        }
+      }
+    }
     const onMessage = async (_event: unknown, method: string, params: Record<string, unknown>) => {
-      if (method !== 'Fetch.requestPaused') return
+      if (method !== 'Fetch.requestPaused') { onRecording(method, params); return }
       const requestId = params.requestId as string
       const request = params.request as { url: string; method: string; headers?: Record<string, string>; postData?: string; postDataEntries?: Array<{ bytes?: string }> }
       let allow = true
@@ -344,20 +439,40 @@ export function createBrowserWindowShell(options: {
         else await contents.debugger.sendCommand('Fetch.failRequest', { requestId, errorReason: 'BlockedByClient' })
       } catch { /* the request or the window is gone */ }
     }
-    async function attach() {
-      pendingAttach = false
-      if (contents.isDestroyed() || state.mode !== 'ai') return
+    const onDetach = () => {
+      state.aiGateReady = false
+      // Gone: the next attach adds the listeners again (never twice).
+      try { contents.debugger.removeListener('message', onMessage); contents.debugger.removeListener('detach', onDetach) } catch { /* the window is gone */ }
+      // The connection went away under a recording (the window is going, or another client took it): it is discarded.
+      if (recorder) endRecording(contents.isDestroyed() ? 'closed' : 'lost')
+    }
+    const connect = () => {
       const dbg = contents.debugger
       if (!dbg.isAttached()) {
         dbg.attach('1.3')
         dbg.on('message', onMessage)
         dbg.on('detach', onDetach)
       }
+      return dbg
+    }
+    const disconnect = () => {
+      const dbg = contents.debugger
+      if (contents.isDestroyed() || !dbg.isAttached()) return
+      dbg.removeListener('message', onMessage)
+      dbg.removeListener('detach', onDetach)
+      dbg.detach()
+    }
+    async function attach() {
+      pendingAttach = false
+      if (contents.isDestroyed() || state.mode !== 'ai' || owner.holder() !== 'ai') return
+      const dbg = connect()
       await dbg.sendCommand('Fetch.enable', { patterns: [{ urlPattern: '*', requestStage: 'Request' }] })
       state.aiGateReady = state.mode === 'ai'
     }
-    return async (mode: BrowserWindowMode, next?: BrowserAiGate) => {
+    const setMode = async (mode: BrowserWindowMode, next?: BrowserAiGate) => {
       if (mode === 'ai') {
+        // Never while a recording holds the connection: the window stays in `human` mode (a run then refuses to start).
+        if (!owner.claim('ai')) return
         gate = next ?? { stopped: () => true }
         state.mode = 'ai'
         if (state.aiGateReady) return
@@ -370,14 +485,59 @@ export function createBrowserWindowShell(options: {
       state.aiGateReady = false
       gate = null
       pendingAttach = false
-      const dbg = contents.debugger
-      if (!contents.isDestroyed() && dbg.isAttached()) {
-        try { await dbg.sendCommand('Fetch.disable') } catch { /* detaching anyway */ }
-        dbg.removeListener('message', onMessage)
-        dbg.removeListener('detach', onDetach)
-        dbg.detach()
+      // A recording's connection is the recording's: `human` mode never takes it away.
+      if (owner.holder() !== 'ai') return
+      owner.release('ai')
+      if (!contents.isDestroyed() && contents.debugger.isAttached()) {
+        try { await contents.debugger.sendCommand('Fetch.disable') } catch { /* detaching anyway */ }
       }
+      disconnect()
     }
+    const letGo = () => {
+      recorder = null
+      recordingContexts.clear()
+      jsonAnswers.clear()
+      owner.release('recording')
+      disconnect()
+    }
+    const record: BrowserRecordSurface = {
+      async start(observer) {
+        // Never while the AI operates the window (or is about to): the AI's gate holds the connection.
+        if (contents.isDestroyed() || !state.site || state.mode === 'ai' || recorder || !owner.claim('recording')) return false
+        try {
+          if (!loaded) {
+            const ok = await new Promise<boolean>(resolve => {
+              const timer = setTimeout(() => resolve(false), RECORDING_START_MS)
+              firstLoad.push(() => { clearTimeout(timer); resolve(true) })
+            })
+            if (!ok || contents.isDestroyed() || owner.holder() !== 'recording') throw new Error('not loaded')
+          }
+          recorder = observer
+          const dbg = connect()
+          await dbg.sendCommand('Runtime.enable')
+          await dbg.sendCommand('Runtime.addBinding', { name: BROWSER_RECORDING_BINDING, executionContextName: BROWSER_RECORDING_WORLD })
+          await dbg.sendCommand('Page.enable')
+          // The main frame's id now: a page already loaded navigates within itself (History API) before any new load.
+          const tree = await dbg.sendCommand('Page.getFrameTree') as { frameTree?: { frame?: { id?: string } } }
+          mainFrameId = tree.frameTree?.frame?.id ?? null
+          await dbg.sendCommand('Page.addScriptToEvaluateOnNewDocument', { source: BROWSER_RECORDING_SCRIPT, worldName: BROWSER_RECORDING_WORLD, runImmediately: true })
+          await dbg.sendCommand('Network.enable', { maxPostDataSize: RECORDING_BODY_MAX })
+          if (recorder !== observer) return false
+          // The page the window shows now is the first step.
+          observer.observe({ kind: 'page', url: contents.getURL() })
+          return true
+        } catch {
+          // Could not start: nothing is kept (the recording's owner discards it) and the connection is let go.
+          if (recorder === observer || recorder === null) letGo()
+          return false
+        }
+      },
+      async stop() {
+        if (recorder) letGo()
+      },
+      active: () => recorder !== null,
+    }
+    return { setMode, record, windowClosed: () => endRecording('closed') }
   }
 
   return {
@@ -415,7 +575,7 @@ export function createBrowserWindowShell(options: {
       const contentsId = contents.id
       state.contentsId = contentsId
       guardContents(contents, state)
-      const setGateMode = createAiGate(contents, state)
+      const pageDebugger = createPageDebugger(contents, state)
       /**
        * The mode, and the proxy to match: entering `ai` the request rule and the frames' navigation
        * refuse the login helpers at once (`state.mode` is set before any await), then the proxy drops
@@ -423,7 +583,7 @@ export function createBrowserWindowShell(options: {
        * Back in `human` they work again.
        */
       const setMode = async (mode: BrowserWindowMode, gate?: BrowserAiGate) => {
-        await setGateMode(mode, gate)
+        await pageDebugger.setMode(mode, gate)
         if (state.contentsId !== contentsId || !state.site) return
         await routeOnly(ses, state.site, state)
         if (mode === 'ai') await ses.closeAllConnections()
@@ -508,7 +668,8 @@ export function createBrowserWindowShell(options: {
         async read(address, signal) {
           // A fixed path, and a query only of plain `name=value` pairs: no fragment, `..`, `//` or
           // percent-encoding (the preview builds the address from the declaration, `explorePath`).
-          if (closed() || exploreAddressProblem(address)) throw new Error('window closed')
+          // Never while the person records (the AI reads nothing then: agent-browser.md "Recording").
+          if (closed() || pageDebugger.record.active() || exploreAddressProblem(address)) throw new Error('window closed')
           const url = `https://${state.site!.host}${address}`
           return throughSession(lanes, readKey, reads, { method: 'GET', url }, exactRead(url), signal, () => !closed())
         },
@@ -518,6 +679,8 @@ export function createBrowserWindowShell(options: {
       win.on('page-title-updated', event => event.preventDefault())
       if (options.show !== false) win.once('ready-to-show', () => win.show())
       win.on('closed', () => {
+        // A recording in progress is discarded with its window.
+        pageDebugger.windowClosed()
         revoke()
         flush(state)
         spec.onClosed()
@@ -531,6 +694,21 @@ export function createBrowserWindowShell(options: {
           if (!win.isDestroyed()) win.destroy()
         },
       ).catch(() => { /* refused or offline: the window says so */ })
+      const title = `${BROWSER_WORDS.section} — ${spec.site.host}`
+      // The title says while the window records (the page cannot change it: page-title-updated is refused).
+      const record: BrowserRecordSurface = {
+        async start(observer) {
+          if (closed()) return false
+          const ok = await pageDebugger.record.start(observer)
+          if (ok && !win.isDestroyed()) win.setTitle(`${title}${BROWSER_RECORDING_WINDOW_TITLE}`)
+          return ok
+        },
+        async stop() {
+          await pageDebugger.record.stop()
+          if (!win.isDestroyed()) win.setTitle(title)
+        },
+        active: () => pageDebugger.record.active(),
+      }
       return {
         webContents: contents,
         focus() {
@@ -558,6 +736,7 @@ export function createBrowserWindowShell(options: {
         setMode,
         run,
         preview,
+        record,
       }
     },
 

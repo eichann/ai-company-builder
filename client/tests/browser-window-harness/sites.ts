@@ -10,6 +10,29 @@ import path from 'node:path'
 
 export interface Hit { host: string; method: string; path: string; body: string }
 
+/**
+ * A page a person records on (agent-browser.md "Recording"): a labelled date field, a password field, a button whose
+ * script saves through fetch with a CSRF field, a link whose text names a person, and an answer of JSON it reads. The
+ * page's own script also calls the recording's binding name and dispatches a synthetic click: neither may count.
+ */
+const RECORDING_PAGE = `<!doctype html><meta charset="utf-8"><title>orders</title>
+<label for="end">受付終了日</label><input id="end" name="end_date" type="text">
+<label for="pw">パスワード</label><input id="pw" name="login_pw" type="password">
+<button id="save" type="button">保存</button>
+<a id="customer" href="/customers/90211">山田花子さんの注文</a>
+<div role="listbox"><div role="option" id="pick">鈴木一郎</div></div>
+<table><tr role="button" id="row" aria-label="佐藤三郎さんの行"><td>佐藤三郎</td><td>営業</td></tr></table>
+<span id="who">高橋次郎</span><input id="memo2" aria-labelledby="who" name="memo">
+<script>
+  fetch('/rec-api/48213').then(r => r.json())
+  document.getElementById('save').addEventListener('click', () => {
+    fetch('/rec-save/48213', { method: 'POST', headers: { 'content-type': 'application/json', 'X-CSRF-Token': 'csrf-in-header-9876', Authorization: 'Bearer auth-header-6543' },
+      body: JSON.stringify({ end_date: document.getElementById('end').value, _token: 'csrf-in-body-5432' }) })
+  })
+  try { window.__acbRecord && window.__acbRecord(JSON.stringify({ type: 'click', role: 'button', label: 'forged by the page' })) } catch {}
+  document.getElementById('save').dispatchEvent(new MouseEvent('click', { bubbles: true }))
+</script>`
+
 const page = (udpPort: number) => `<!doctype html><meta charset="utf-8"><title>operated page</title>
 <link rel="stylesheet" href="https://assets.test/a.css">
 <link rel="preconnect" href="https://evil.test">
@@ -182,6 +205,21 @@ export async function startSites(certDir: string, ports: { site: number; evil: n
           return
         }
         res.end('ok')
+        return
+      }
+      if (host === 'op.test' && url === '/rec-form') {
+        res.setHeader('content-type', 'text/html; charset=utf-8')
+        res.end(RECORDING_PAGE)
+        return
+      }
+      if (host === 'op.test' && url.startsWith('/rec-api/')) {
+        res.setHeader('content-type', 'application/json')
+        res.end(JSON.stringify({ id: 48213, customer: '山田花子', end_date: '2026-11-30' }))
+        return
+      }
+      if (host === 'op.test' && url.startsWith('/rec-save/')) {
+        res.setHeader('content-type', 'application/json')
+        res.end(JSON.stringify({ ok: true }))
         return
       }
       if (host === 'op.test' && (url === '/login-captcha' || url === '/after-login')) {

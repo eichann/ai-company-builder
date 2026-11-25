@@ -54,6 +54,7 @@ interface Result {
   urlDuringClicks: string
   runner: Record<string, unknown>
   helpers: Record<string, unknown>
+  recording: Record<string, unknown>
 }
 
 function freePort(): Promise<number> {
@@ -173,7 +174,8 @@ test('in ai mode no write reaches the operated host without an approving step; r
   assert.equal(w.websocket, 'refused')
   assert.equal(w.read, 200)
   // (The runner's own writes, to /line/…, are the next tests'.)
-  const writes = hitsTo('op.test').filter(h => h.method !== 'GET' && !h.path.startsWith('/line/'))
+  // (The recording's page saves through its own fetch, as a person does: the recording tests' own.)
+  const writes = hitsTo('op.test').filter(h => h.method !== 'GET' && !h.path.startsWith('/line/') && !h.path.startsWith('/rec-'))
   // Only the member's own (human mode) writes and the one approved write arrived: no beacon, form, XHR, WebSocket.
   assert.deepEqual(writes.map(h => `${h.method} ${h.path} ${h.body}`), ['POST /human-save h', 'POST /ai-ok approved', 'POST /human-again h'])
   assert.equal(hitsTo('op.test').some(h => h.method === 'UPGRADE'), false)
@@ -356,4 +358,47 @@ test('the run\'s gate on the real window: only the armed write with the plan\'s 
   assert.deepEqual(r.gateRefusals, ['not-armed', 'wrong-value', 'wrong-value', 'extra-key', 'not-armed', 'undeclared-read'])
   assert.equal(hitsTo('op.test').some(h => h.path === '/line/episode/show/102'), false)
   assert.equal(writesOfRuns().some(h => ['202/304', '201/305'].includes(idsOf(h.body))), false)
+})
+
+test('recording: the person\'s own clicks and typing are kept in their kept form only; no value, password, Cookie, CSRF or link text', { skip }, () => {
+  const r = result.recording
+  assert.equal(r.started, true)
+  assert.equal(r.problem, null, 'the recording passes the server\'s check as it is')
+  const content = r.content as { steps: Array<Record<string, unknown>>; hosts: unknown[] }
+  const json = JSON.stringify(content)
+  for (const secret of ['2026-12-03', 'pw-secret-value', '7777', 'csrf-in-header', 'csrf-in-body', 'auth-header-6543', '山田', '48213', '90211', 'forged by the page', 'login_pw', '_token', '鈴木', '佐藤', '高橋', 'memo-value']) {
+    assert.equal(json.includes(secret), false, secret)
+  }
+  const kinds = content.steps.map(s => `${s.kind}:${s.kind === 'page' || s.kind === 'send' ? s.address : s.label ?? s.address}`)
+  assert.ok(kinds.includes('page:/rec-form'), kinds.join(' | '))
+  assert.ok(kinds.includes('page:/rec-form/{n}'), `a same-document navigation before any new load: ${kinds.join(' | ')}`)
+  assert.ok(kinds.includes('input:受付終了日'), kinds.join(' | '))
+  assert.ok(kinds.includes('input:パスワード'), kinds.join(' | '))
+  assert.ok(kinds.includes('click:保存'), kinds.join(' | '))
+  assert.ok(kinds.includes('send:/rec-api/{n}'), kinds.join(' | '))
+  const password = content.steps.find(s => s.kind === 'input' && s.label === 'パスワード')
+  assert.equal(password?.value, 'secret')
+  const date = content.steps.find(s => s.kind === 'input' && s.label === '受付終了日')
+  const save = content.steps.filter(s => s.kind === 'send' && s.method === 'POST' && s.address === '/rec-save/{n}').at(-1) as { fields: Array<{ name: string; value: string }>; after: number | null; status: number }
+  assert.deepEqual(save.fields.map(f => f.name), ['end_date'])
+  assert.equal(save.fields[0].value, date?.value, 'the value typed and the value sent are the same symbol')
+  assert.equal(save.status, 200)
+  const click = content.steps.find(s => s.kind === 'click' && s.label === '保存')
+  assert.equal(save.after, click?.id, 'the save follows the press (推定)')
+  // The page's own synthetic click and its call of the binding name are not the person's.
+  assert.deepEqual(content.steps.filter(s => s.kind === 'click').map(s => `${s.target}:${s.label}`), ['button:保存', 'choice:null', 'button:null'],
+    'an option picked from a list, and a whole row made a button, keep no label (their text is often the data itself)')
+  const memo = content.steps.find(s => s.kind === 'input' && s.name === 'memo')
+  assert.equal(memo?.label, null, 'a field named only by text elsewhere on the page (aria-labelledby) keeps no label')
+})
+
+test('recording and the AI never hold the window together; the preview reads nothing while recording; closing the window ends it', { skip }, () => {
+  const r = result.recording
+  assert.equal(r.aiWhileRecording, false, 'the AI cannot enter the window while it records')
+  assert.equal(r.previewWhileRecording, 'refused')
+  assert.equal(r.aiAfter, true, 'once stopped, the AI can')
+  assert.equal(r.recordWhileAi, false, 'no recording while the AI holds the window')
+  assert.deepEqual(r.ended, [], 'stopping is not an end the recording is discarded for')
+  assert.equal(r.otherStarted, true)
+  assert.deepEqual(r.endedOnClose, ['closed'])
 })

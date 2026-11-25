@@ -19,6 +19,7 @@ import type { AgentPolicy } from '../../../../shared/types/agent-sandbox'
 import type { BrowserLoginHelper } from '../../../../shared/core/plugin-browser-declaration'
 import { BROWSER_WORDS, browserWindowSiteFrom, type BrowserActionResult, type BrowserSitesResult } from '../../../shared/browser-operation'
 import type { BrowserPreviewSurface, BrowserRunSurface } from '../../../shared/browser-runner'
+import type { BrowserRecordSurface } from '../../../shared/browser-recorder'
 
 export interface BrowserWindowSpec {
   partition: string
@@ -37,6 +38,8 @@ export interface BrowserWindowHandle {
   run?: BrowserRunSurface
   /** What the preview reads through (agent-browser.md "The operator and the preview"); the shell's window always has it. */
   preview?: BrowserPreviewSurface
+  /** What a recording observes through (agent-browser.md "Recording"); the shell's window always has it. */
+  record?: BrowserRecordSurface
 }
 
 /** What the shell provides (electron/browser-window.ts). */
@@ -215,6 +218,14 @@ export function createBrowserController(deps: BrowserControllerDeps) {
       if (!user || !sitesOf(companyId)?.some(s => s.host === host)) return null
       const win = [...windows.values()].find(w => w.userId === user && w.companyId === companyId && w.host === host)
       return win?.handle.preview ?? null
+    },
+
+    /** The signed-in member's open window of a site their current policy lists, as a recording observes it, or null. */
+    recordWindow(companyId: string, host: string): BrowserRecordSurface | null {
+      const user = deps.userId()
+      if (!user || !sitesOf(companyId)?.some(s => s.host === host)) return null
+      const win = [...windows.values()].find(w => w.userId === user && w.companyId === companyId && w.host === host)
+      return win?.handle.record ?? null
     },
 
     /** Sign-out: every window closes and every login is cleared. */

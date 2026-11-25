@@ -40,6 +40,7 @@ import { pluginRoleSchema } from './schema/plugin-roles'
 import { browserPlanSchema, migrateBrowserExecutionMonotonic, migrateBrowserPlanSummary } from './schema/browser-plans'
 import { browserLineSchema } from './schema/browser-lines'
 import { browserDeviceSchema } from './schema/browser-devices'
+import { browserRecordingSchema } from './schema/browser-recordings'
 // lane C ▲
 // The migrations tests run on their own against older databases.
 export { migrateCompanyFolderKind, migrateInvitationClaims } from './schema/company'
@@ -118,6 +119,8 @@ const SCHEMA = [
   browserLineSchema,
   // The PCs used for 「ブラウザ操作」 (agent-browser.md "This PC's registration"): new tables only.
   browserDeviceSchema,
+  // 「ブラウザ操作」 recordings (agent-browser.md "Recording"): a new table only.
+  browserRecordingSchema,
   // lane C ▲
 ]
 

@@ -86,6 +86,21 @@ paths:
   - "server/tests/unit/browser-devices.test.ts"
   - "server/tests/unit/browser-device-core.test.ts"
   - "server/tests/helpers/browser-devices.ts"
+  - "shared/core/browser-recording.ts"
+  - "shared/types/browser-recordings.ts"
+  - "client/shared/browser-recorder.ts"
+  - "client/src/features/settings/components/BrowserRecordingSection.tsx"
+  - "client/src/features/settings/hooks/useBrowserRecording.ts"
+  - "client/tests/browser-recorder.test.ts"
+  - "client/tests/browser-recording-app.test.ts"
+  - "server/src/routes/browser-recordings.ts"
+  - "server/src/services/browser-recordings.ts"
+  - "server/src/ports/browser-recordings.ts"
+  - "server/src/adapters/sqlite/browser-recordings.ts"
+  - "server/src/db/schema/browser-recordings.ts"
+  - "server/tests/unit/browser-recordings.test.ts"
+  - "admin/src/lib/agent-browser-recordings.ts"
+  - "admin/tests/agent-browser-recordings.test.tsx"
 ---
 
 # Browser operation (「ブラウザ操作」): sites the chat AI may operate
@@ -2673,6 +2688,134 @@ grant alone not enough, 見るだけ / 使わない / the default refused at reg
 - Tests of the filter: `client/tests/browser-inspect-app.test.ts` and `browser-plans-app.test.ts` (another company of
   the same member that registered nothing: no line, operation, site or host in the description).
 
+## Recording (「記録する」, step ③ of the redesign: a person records the work once; the FDE builds a company Skill from it)
+
+Owner decisions 2026-11-25 (internal design memo 「ブラウザ操作：記録から自動化へ」 §3 I7–I9, §4, §10 「記録」, §11 `browser_recordings`,
+§12 row ③, D2, D3): a member who knows the work presses 「記録する」 on a site in Settings › 「ブラウザ操作」, does the work once in
+the site's window, stops, looks through the lines, deletes what they do not want and presses ［送る］. The company's owners /
+admins (the FDE enters a company as an admin) read it in the admin console and build a company Skill from it. **Recordings are
+never handed to the AI**: no AI route, record token, tool or prompt reads them.
+
+- **What is kept** (`shared/core/browser-recording.ts`, pure, the one copy the app writes with and the server checks with;
+  tightened after the independent review of this PR): **a word is kept only as a plain lowercase ASCII word** joined by
+  `-` / `_` (a leading `_` too), ≤ 24 — anything with a digit, a capital, a dot, `@`, `%`, a character not ASCII or
+  longer becomes `{x}` whole (all digits `{n}`), never digit by digit. That rule applies to every path segment and query
+  key (`browserAddressPattern`: the query's keys only, no fragment, user or port; another host → none) and to every part
+  of a key — a JSON key, a form name's `name[part][part]` (`browserKeyPattern`) — so `/users/yamada.taro`,
+  `/invite/Kx7Pq2Rt9mZ`, a letters-only token with capitals, `user[Tanaka]` and camelCase keys are masked; **an object
+  with more than 5 keys whose values share one shape** (customers by name) keeps them as `{k}` (`browserJsonShape`).
+  The labels of buttons, choices and fields (`browserLabel`: NFKC, whitespace collapsed, e-mail-like text → `{mail}`, an
+  address → `{url}`, **every digit run** → `{n}`, ≤ 60); each value as a **symbol of this recording** (`値N`; `empty`,
+  `secret` for a password field, `file` for an upload); requests: method, `_method` override (PUT / PATCH / DELETE),
+  address pattern, the body's field names and symbols (form, JSON key paths, multipart; an unreadable body → `null`),
+  the answer's status and JSON key shape; the other hosts the window's pages asked for (`loaded` = one answered).
+  **Inferred links are marked `推定`**: a request's `after` (the person's action within 3 s before it) and a value's `from`
+  (the same value first seen in that step's answer, at that key; values of 2+ characters only). A GET of the same pattern is
+  one line with its `count`; a page's own load and its parts (scripts, styles, images, fonts) are not lines. A lowercase
+  name (`/search/tanaka`) still passes the word rule: **the person hides it** before sending (below).
+- **Never kept**: a password field's content (the page script never even reads it), Cookie, Authorization or any header,
+  CSRF / token / session / password / key fields — dropped whole, judged on the raw name **before** masking
+  (`isSensitiveFieldName`, a wide net: `pass`, `pwd`, `pw`, `secret`, `token`, `csrf`, `xsrf`, `session`, `auth`, `api key`,
+  `otp`, `cookie`, `credential`, `signature`, `nonce`, `captcha`), the same in an answer's keys —, values, a link's text (a link
+  is its address pattern only), page text and HTML, an answer's values, screenshots or video (D3: not in the first version).
+  The symbols are **not an anonymisation** (said, Codex point 6): they show a flow (「値3 を一覧から読み、値3 を送った」); a label
+  can still name what the page wrote on a button or field.
+- **The symbols**: `createBrowserValueSymbols(digest)` numbers values in the order first seen; `digest` is HMAC-SHA256 under
+  32 random bytes made for **this** recording (`newRecordingDigest`, `features/browser/recording.ts`), so nothing holds a value
+  and two recordings' symbols have nothing to do with each other.
+- **The window's one debugger owner** (`browser-window.ts` `createPageDebugger`, `createPageDebuggerOwner` in
+  `client/shared/browser-recorder.ts`): the `ai`-mode write gate and a recording are the two holders of the window's ONE
+  DevTools connection, never both — `setMode('ai')` does nothing while a recording holds it (the window stays `human`, so
+  `run.enterAi` answers false and a run refuses to start), `record.start` answers false while the AI holds it or is about to
+  (`state.mode === 'ai'`, a pending attach), and `setMode('human')` never takes a recording's connection away. Only this
+  function attaches and detaches; the recording receives observations (`BrowserRecordingObservation`). While recording the
+  preview / inspection reads nothing (`preview.read` refuses). Recording attaches `Runtime` (an isolated world
+  `acb-recording` with the binding `__acbRecord`, installed only there: `Runtime.addBinding` with `executionContextName`, and
+  only a call from that world's context ids counts), `Page` (`addScriptToEvaluateOnNewDocument` with `runImmediately`;
+  `frameNavigated` / `navigatedWithinDocument` of the main frame = the page lines; the main frame's id read with `Page.getFrameTree`
+  at the start, so a page already loaded that navigates within itself is seen) and `Network` (`maxPostDataSize` 64 KiB;
+  `getResponseBody` only for a JSON answer ≤ 1 MiB, its text handed to the recorder and dropped there). The script
+  (`BROWSER_RECORDING_SCRIPT`) hears only **trusted** clicks on buttons / choices / links and `change` of fields. **Labels come only from real controls**
+  (independent review): a field's own `aria-label`, its `<label>`'s own words (never the field's options or value),
+  `placeholder` or `title` — never `aria-labelledby` (text elsewhere on the page); a native button's own text only when it
+  holds ≤ 8 elements; anything else acting as a button or a choice only its `aria-label` / `title`, and nothing from a row,
+  cell, list item, option or menu item or an element holding many others (a page makes whole rows buttons) (never a
+  password's or a file's value; hidden fields ignored). The person's own requests go out as in `human` mode (it is their
+  work). The window's title says 「（記録中）」. A first page not loaded within 20 s, the connection lost (`detach`) or the
+  window closed end the recording (`ended('closed' | 'lost')`).
+- **In main** (`features/browser/recording.ts`, no Electron): one recording per member × company, **in memory only**; starting
+  needs the site in the member's current policy (`recordWindow`, the controller) and this PC allowed (`mayRecord` = the same
+  switch as the AI's: an enabled registration, or the owner's opt-in) — the server decides again on ［送る］. A start that
+  fails, the window closing, the connection lost, ［捨てる］ and sign-out **discard** it (nothing kept, nothing sent; one
+  discarded or stopped while still starting lets the window go once the start finishes); stopping stops observing; before
+  sending the person **［消す］ a line** (every reference to it cleared, `browserRecordingWithout`), **［伏せる］ a word everywhere**
+  — a label, an address segment or query key, a part of a field name or answer key, replaced by `{x}` wherever it stands
+  whole (`browserRecordingHideable` lists them, `browserRecordingHide`) — and **removes another host**
+  (`browserRecordingWithoutHost`); ［送る］ sends exactly what is left. A refusal or no answer keeps it for another try. IPC `browserRecording:get` / `start` / `stop` / `edit` (`{ kind: line | word | host }`) /
+  `send` / `discard` (`recording-ipc.ts`, main window's main frame only; the host only a name); a recording discarded by
+  itself sends `browser:changed` so the screen asks again. **This PC's key goes only on the send** (`X-ACB-Browser-Device`,
+  `createBrowserRecordingsHttp`).
+- **The screen** (`src/features/settings/components/BrowserRecordingSection.tsx`, `hooks/useBrowserRecording.ts`; words
+  `BROWSER_RECORDING_APP_WORDS`, button words only — the sentences come from main in the view's `notes` / `titles`, which keeps
+  the renderer bundle within its budget): 「記録する：<site>」 per site with what is and is not recorded; while recording the
+  line count, ［記録を止める］ ［捨てる］; then 「送る前に確かめてください」 with, first, **the warning that names of customers
+  may appear and how to hide them**, each line (ページ / 押した / 入力した / 送った, the core's `browserRecordingLine`,
+  `（推定）…` under it) with ［消す］, 「伏せる言葉」 (each hideable word, one press hides it everywhere), the other hosts with
+  ［消す］, ［送る］ ［捨てる］ and that it is seen only by the sender and the company's owners / admins and goes in 30 days.
+- **The server** (`routes/browser-recordings.ts` → `services/browser-recordings.ts` → the handle's `browserRecordings`,
+  `ports/browser-recordings.ts`, `adapters/sqlite/browser-recordings.ts`, table `browser_recordings` in
+  `db/schema/browser-recordings.ts`, **new table only**: company, `br_` + 32 hex, sender, domain, lines, the content as JSON,
+  `created_at`, `delete_at` = +30 days; a trigger refuses any change; shapes `shared/types/browser-recordings.ts`):
+  `POST /browser-recordings { domain, content }` + this PC's key header — this PC first (`devices.check`, the same first
+  check as every plan step: an enabled registration, or the owner's transition exception), then the body, the member's
+  setting 「使う」 with that domain registered (`BROWSER_NOT_ALLOWED`), and **the content exactly as the core writes it**
+  (`browserRecordingProblem`: every object exactly its keys, ids increasing, references only to earlier steps of the right
+  kind, every address / label / key already in its kept form — so no digit run, `%`, `@`, query value or token rides in one —,
+  every value a mark, no sensitive field, a password field only `secret`, other hosts valid and not the domain, ≤ 500 steps,
+  ≤ 512 KiB; `BROWSER_RECORDING_BAD`, `BROWSER_RECORDING_TOO_LARGE`), and **at most 20 kept per member and company**
+  (`BROWSER_RECORDING_PER_MEMBER`, 409 `BROWSER_RECORDING_LIMIT` in plain Japanese; one deleted or past its 30 days frees a
+  place). **Not in a company archive** (`ARCHIVE_EXCLUDED_TABLES`: temporary, read by the sender and that time's admins). `GET /browser-recordings` (an owner / admin every one of
+  the company; anyone else their own), `GET|DELETE /browser-recordings/:recordingId`. **Who reads** (D2, checked on every read
+  and delete): the sender — only what they sent while a member this time (`created_at` ≥ their membership's: someone who left
+  and came back sees nothing of before) — and current owners / admins (a role taken away counts at once); anyone else, another
+  company's and one past `delete_at` get the same 404 `BROWSER_RECORDING_NOT_FOUND`. The sender leaving keeps it for the
+  company until its 30 days. **Deleting** (the sender or an owner / admin) removes the row, content included. **30 days**:
+  every read leaves out a row past `delete_at`, and the server clock deletes them (`expireBrowserRecordings`, every company,
+  `ClockRun.recordingsDeleted`). **Who may record** is the AI's own rule ("Who may use a site"): `siteGrants.allows(member, domain, 'read')` — the company's 「使う」 with the domain registered and this person at least 見るだけ there (使わない is refused, owners and admins follow the same table).
+- **The admin console**: 「ブラウザ操作の記録」 (`…/advanced/ai-safety/browser/recordings`, linked from 「ブラウザ操作」 with the PCs and
+  people pages; owner/admin only, a member or a department manager sees 「このページはオーナーと管理者だけが使えます」 and nothing
+  is asked; words `admin/src/lib/agent-browser-recordings.ts`): who sent it, when, the site, lines, when it goes; ［開く］ shows the
+  steps in the core's words and the other hosts; ［消す］ behind a confirm.
+- **Remaining limits** (said): a lowercase name (`/users/tanaka`) passes the word rule — the person hides it before
+  sending; a label is what the page wrote on a button or field and may name a person; the symbols show a
+  flow, not anonymity; `推定` links are by time and equal values only; a page's own worker and an out-of-process frame are not
+  observed (their requests are not lines); a large body (> 64 KiB) or an upload has no field names (`null`).
+
+Tests: `client/tests/browser-recorder.test.ts` (a fictional site's run with a password, Cookie, Authorization, CSRF, session,
+a customer's name, e-mail and phone, a link text, an answer's values: none of them nor a fragment in the recording's JSON; what
+is kept, line by line; the same value the same symbol and two recordings unrelated; a token field masked to `{x}` still
+dropped; an upload, a raw body, a GET counted; deleting lines leaves nothing dangling and passes the server's check; the
+debugger's one holder), `client/tests/browser-recording-app.test.ts` (a start that fails, a window closed or the connection
+lost discard it; no PC, another site or a second recording refused; nothing sent before ［送る］, deleted lines never sent, a
+refusal kept; sign-out; the key only on the send), `client/tests/browser-window-electron.test.ts` (a real window: trusted typing
+and clicks recorded, the page's forged binding call and synthetic click not; no value, password, CSRF in header or body,
+Authorization, link text; the AI cannot enter while it records and no recording starts while the AI holds it; the preview
+reads nothing; a closed window ends it as `closed`), `client/tests/ui/browser-settings.spec.ts` (start, stop, delete a line,
+only the rest sent), `server/tests/unit/browser-recordings.test.ts` (the server's check refuses a value, a password field, a
+CSRF / session field, ids, query values, encoded names, tokens, a forged spelling around placeholders, link texts, labels with
+an e-mail or digits, unmasked answer keys, dangling references, extra keys; sending needs the PC, 「使う」, the domain and the person at least 見るだけ (使わない refused); the
+sender and owners / admins read, another member, another company, a demoted admin and a sender who left — also after coming
+back — do not; deleting; the 30 days on read and by the clock), `admin/tests/agent-browser-recordings.test.tsx`, permission
+matrix rows + `CROSS`, `company-scoped-sql.test.ts`, `jobs-schema.test.ts`, `admin-contract.test.ts`, `browser-device.test.ts`
+(the recordings' send names the header). Each guard mutation-checked; kept on purpose: the recorder's second sensitive-name
+check after masking (the raw-name check in `browserBodyFields` catches first), the binding's context-id check (the binding
+exists only in the isolated world), `onDetach` ending a recording as `closed` (the window's `closed` handler does first).
+After the independent review: the word rule (capitals, dots, tokens, digits masked whole; `browser-recorder.test.ts` and the
+server's refusal table), `{k}` for keys that are data, every digit of a label, labels only from real controls (a row made a
+button, an option and a field named by `aria-labelledby` keep none — the real-Electron test), hiding a word and removing a
+host before sending (`browser-recorder.test.ts`, `browser-recording-app.test.ts`, `browser-settings.spec.ts`), the cap of 20
+(`browser-recordings.test.ts`) and the archive (`company-archive.test.ts`) — each mutation-checked.
+
 ## Not yet (later PRs)
 
 **Keeping a login on disk** (`browserLoginStorage`, kept in `shared/core` for that PR): deferred until
@@ -2703,8 +2846,7 @@ isolated and signed** and handed out with their declarations from the shelf (des
 JavaScript engine without network, files or clock, limits on time and memory; only checkers div signed;
 the package's `signature.yaml` verified first), landing routes (the read-only inspection's map 1.0.1 and line exist, the line `approved`, and the server takes its
 plans and results: "The first map and the inspection line", "Plans of opened lines on the server"; the inspection is read in the
-app and shown on its card since PR 5b, "The inspection in the chat"; creating routes is a later line), a
-recording helper, JSON writes, types with more than one write (their state table and model are in
+app and shown on its card since PR 5b, "The inspection in the chat"; creating routes is a later line), JSON writes, types with more than one write (their state table and model are in
 "Executions with several writes"; the server's half is PR 4, unreachable until a line can write; the app's is PR 5), the shelf handing out browser connectors. WSS to the operated host stays refused (no type declares
 one). Until the AI operates, the admin page says next to the mode choice what 「使う」 does today
 (`BROWSER_NOT_YET_NOTE`); the PR that lets the AI operate removes that note (and its assertion in

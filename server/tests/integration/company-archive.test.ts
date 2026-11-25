@@ -104,6 +104,9 @@ beforeAll(async () => {
     db.prepare(`INSERT INTO agent_stops (id, company_id, user_id, tool, reason, stopped_at, stopped_by) VALUES (?, ?, NULL, NULL, '', ?, ?)`).run(`stop-${name}`, id, ts, owner)
     db.prepare(`INSERT INTO broker_tokens (id, company_id, user_id, token_hash, services, conversation_id, created_at, expires_at) VALUES (?, ?, ?, ?, '[]', 'c', ?, ?)`)
       .run(`tok-${name}`, id, member, createHash('sha256').update(`tok-${name}`).digest('hex'), ts, ts)
+    // A 「ブラウザ操作」 recording (agent-browser.md "Recording"): temporary, never in an archive.
+    db.prepare(`INSERT INTO browser_recordings (company_id, id, user_id, domain, lines, content, created_at, delete_at) VALUES (?, ?, ?, 'shop.example.test', 1, '{"recorded":"${name}"}', ?, '2100-01-01T00:00:00.000Z')`)
+      .run(id, `br_${name === 'A' ? 'a' : 'b'}${'0'.repeat(31)}`, member, ts)
     for (let i = 0; i < 3; i++) {
       db.prepare(`INSERT INTO agent_events (company_id, id, user_id, received_at, at, client_at, version, call_id, agent, tool, category, target_kind, target, decision)
         VALUES (?, ?, ?, ?, ?, ?, 1, ?, 'claude', 'Read', 'read', 'file', ?, 'allowed')`).run(id, `ev-${name}-${i}`, member, ts, ts, ts, `call-${i}`, `営業部/${name}-${i}.md`)
@@ -130,13 +133,15 @@ describe('per-company export and restore', () => {
     expect(manifest.heldContents).toEqual([join(holdingDir, co.A, 'item-a')])
     const source = companyRows(db, co.A)
     for (const [table, rows] of Object.entries(source)) {
-      if (table === 'broker_tokens') continue
+      if (table === 'broker_tokens' || table === 'browser_recordings') continue
       expect(manifest.counts[table], table).toBe(rows.length)
     }
     expect(manifest.counts.scope_rules).toBeGreaterThan(0)
     expect(manifest.counts.department_managers).toBe(1)
     expect(manifest.counts.agent_events).toBe(3)
     expect(manifest.counts.broker_tokens).toBeUndefined()
+    expect(source.browser_recordings).toHaveLength(1)
+    expect(manifest.counts.browser_recordings, 'recordings are temporary: never archived').toBeUndefined()
     expect(manifest.repos.map((r: Any) => [r.kind, r.state])).toEqual([['company', 'bundled'], ['private-folder', 'bundled']])
     expect(manifest.notes.kekIds).toHaveLength(1)
     expect(statSync(out).mode & 0o777).toBe(0o700)
@@ -164,6 +169,9 @@ describe('per-company export and restore', () => {
     const after = companyRows(conn, co.A)
     delete before.broker_tokens
     delete after.broker_tokens
+    expect(after.browser_recordings).toEqual([])
+    delete before.browser_recordings
+    delete after.browser_recordings
     before.invitations = before.invitations.map(r => ({ ...r, token: `redacted:${String(r.id)}` }))
     expect(after).toEqual(before)
 
@@ -187,6 +195,7 @@ describe('per-company export and restore', () => {
       .toEqual([co.A, co.B].sort().map(id => ({ company_id: id, n: 3 })))
     const again = companyRows(conn, co.A)
     delete again.broker_tokens
+    delete again.browser_recordings
     expect(again).toEqual(after)
 
     // The same company again: refused.

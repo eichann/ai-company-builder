@@ -66,6 +66,8 @@ const LATER_TABLES = [
   'browser_devices',
   'browser_device_history',
   'browser_plan_devices',
+  // agent-browser.md "Recording": the recordings members sent.
+  'browser_recordings',
   // private-folders.md "Access removed: holding tickets": who stopped reading which private folder.
   'holding_tickets',
   // private-folders.md "Holding: the member's upload": what members handed over with their tickets.

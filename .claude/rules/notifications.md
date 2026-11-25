@@ -276,6 +276,8 @@ compare-and-set and ledger), and writes notices.
 - **Notices**: `notifications.sweep(companyId, limit)` (overdue, stuck AI turns, acceptance
   waiting, 「明日が期限」 and 「今日のあなたの番」, above; at most `limit` members per run for the
   summary, the ones already told today skipped through `usersWithKey`).
+- **「ブラウザ操作」 recordings**: `expireBrowserRecordings` — every company, records on or off, deletes the recordings past
+  their 30 days (`agent-browser.md` "Recording"); `ClockRun.recordingsDeleted`.
 - **Expired content**: `expireContent` — the content store's retention, per company
   (`RecordContentEraser.eraseExpired`, reason `retention`; `records.md` "The content store").
 - **Incoming mail**: `pollInbox` — the inbox's `pollCompany` (`inbox.md` "Connections"):

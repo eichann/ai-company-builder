@@ -17,7 +17,7 @@ test('without a site the settings have no 「ブラウザ操作」', async ({ pa
 test('a site the company allowed: open it; the notes say the AI does not use it and the login is not kept', async ({ page }) => {
   await openPreview(page, 'download-folders', { tab: 'mine', browser: '1' })
   await nav(page).getByRole('button', { name: 'ブラウザ操作' }).click()
-  await expect(page.getByText('manager.example.net')).toBeVisible()
+  await expect(page.getByText('manager.example.net', { exact: true })).toBeVisible()
   await expect(page.getByText(/AI はまだこの窓を操作しません。/)).toBeVisible()
   await expect(page.getByText(/アプリを開き直すと、もう一度ログインが必要です。/)).toBeVisible()
   await page.getByRole('button', { name: '開いてログイン' }).click()
@@ -87,4 +87,36 @@ test('この PC: a refused registration shows the server\'s sentence and keeps t
   await pc.getByRole('button', { name: 'この PC を登録する' }).click()
   await expect(pc.getByRole('alert')).toHaveText(/登録できる PC の数を超えています/)
   await expect(pc.getByRole('button', { name: 'この PC を登録する' })).toBeVisible()
+})
+
+// 「記録する」 (agent-browser.md "Recording"): record, stop, check the lines (ページ → 入力した → 押した → 送った), delete what is not
+// wanted, send. What is kept and that nothing leaves before ［送る］ are main's (tests/browser-recording-app.test.ts).
+const recSection = (page: import('@playwright/test').Page) => page.getByRole('region', { name: '記録する' })
+
+test('記録する: start, stop, delete a line, send — only the lines left are sent', async ({ page }) => {
+  const { errors } = await openPreview(page, 'download-folders', { tab: 'browser', browser: '1' })
+  const rec = recSection(page)
+  await expect(rec.getByText('いつもの作業を、サイトの窓で1回通してやってください。')).toBeVisible()
+  await rec.getByRole('button', { name: '記録する：manager.example.net' }).click()
+  await expect(rec.getByRole('status')).toHaveText(/manager.example.net を記録しています（3行）/)
+  await rec.getByRole('button', { name: '記録を止める' }).click()
+  const list = rec.getByRole('list', { name: '送る前に確かめてください' })
+  await expect(list.getByRole('listitem')).toHaveCount(4)
+  await expect(list.getByText('（推定）手順3のあと')).toBeVisible()
+  await expect(rec.getByText(/お客さまなどの名前が入っていることがあります/)).toBeVisible()
+  await rec.getByRole('button', { name: '消す 2' }).click()
+  await expect(list.getByRole('listitem')).toHaveCount(3)
+  // A name hidden everywhere, and another host removed, before sending.
+  await rec.getByRole('button', { name: '伏せる tanaka' }).click()
+  await expect(rec.getByRole('button', { name: '伏せる tanaka' })).toHaveCount(0)
+  await rec.getByRole('button', { name: '消す cdn.example-assets.test' }).click()
+  await expect(rec.getByText('cdn.example-assets.test')).toHaveCount(0)
+  expect(await page.evaluate(() => (window as unknown as { recordingEdits?: unknown[] }).recordingEdits)).toEqual([
+    { kind: 'line', id: 2 }, { kind: 'word', word: 'tanaka' }, { kind: 'host', host: 'cdn.example-assets.test' },
+  ])
+  expect(await page.evaluate(() => (window as unknown as { recordingSent?: number[] }).recordingSent)).toBeUndefined()
+  await rec.getByRole('button', { name: '送る' }).click()
+  await expect(rec.getByRole('status')).toHaveText('記録を送りました。管理者に「記録を送りました」と伝えてください。')
+  expect(await page.evaluate(() => (window as unknown as { recordingSent?: number[] }).recordingSent)).toEqual([1, 3, 4])
+  expect(errors).toEqual([])
 })

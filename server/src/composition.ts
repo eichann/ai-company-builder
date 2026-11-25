@@ -64,6 +64,7 @@ import { createBrowserPlanService } from './services/browser-plans'
 import { createBrowserLineService } from './services/browser-lines'
 import { createBrowserSiteGrants } from './services/browser-site-grants'
 import { createBrowserDeviceService } from './services/browser-devices'
+import { createBrowserRecordingService } from './services/browser-recordings'
 import type { BrowserConnectorCatalog } from './ports/browser-plans'
 import type { BrowserOpenedListSource } from './ports/browser-lines'
 import { createTaskSettingsService } from './services/task-settings'
@@ -300,6 +301,10 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
   const browserDevices = createBrowserDeviceService({ ...shared, tokenDigest: sha256TokenDigest })
   // Who may use which registered site, and how (agent-browser.md "Who may use a site"): both paths' gates ask it.
   const browserSiteGrants = createBrowserSiteGrants({ ...shared, memberships: repos.memberships, browserPolicy: member => agentBrowser.policyFor(member) })
+  // 「ブラウザ操作」 recordings (agent-browser.md "Recording"): this PC's check and who may use the site (at least 見るだけ).
+  const browserRecordings = createBrowserRecordingService({
+    ...shared, memberships: repos.memberships, siteGrants: browserSiteGrants, devices: browserDevices.gate,
+  })
   const browserPlans = createBrowserPlanService({
     ...shared, memberships: repos.memberships, tokenDigest: sha256TokenDigest, monotonic: systemMonotonicClock,
     catalog: options.browserConnectors ?? fileBrowserConnectorCatalog(), executionLookup: sqliteBrowserExecutionLookup(conn),
@@ -879,6 +884,8 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
       interruptedSends: companyId => outboundMail.settleInterrupted(companyId),
       // Holding tickets past their 30 days (private-folders.md "Access removed"): every company.
       expireHoldingTickets: companyId => holdingTickets.expire(companyId),
+      // 「ブラウザ操作」 recordings past their 30 days (agent-browser.md "Recording"): every company.
+      expireBrowserRecordings: companyId => browserRecordings.expire(companyId),
       // The holding place's retention (private-folders.md "Holding: the member's upload"): every company.
       // First a take-in a stopped process left halfway is settled (private-folders.md "Holding: review").
       sweepHolding: async companyId => { await holdingReview.settleStale(companyId); return privateHolding.sweep(companyId) },
@@ -915,6 +922,7 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     browserLines,
     browserSiteGrants,
     browserDevices,
+    browserRecordings,
     agentStops,
     agentPolicy,
     secondOpinion,

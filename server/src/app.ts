@@ -71,6 +71,7 @@ import { pluginStepsRoute } from './routes/plugin-steps'
 import { browserPlansRoute, browserReportRoute } from './routes/browser-plans'
 import { browserLineReportRoute, browserLinesRoute } from './routes/browser-lines'
 import { browserDevicesRoute } from './routes/browser-devices'
+import { browserRecordingsRoute } from './routes/browser-recordings'
 // lane C ▲
 import { requestLog } from './lib/request-log'
 import { appDownloadUrl } from './lib/config'
@@ -260,5 +261,6 @@ app.route('/api/companies/:companyId', browserPlansRoute)
 app.route('/api', browserReportRoute)
 app.route('/api/companies/:companyId', browserLinesRoute)
 app.route('/api/companies/:companyId', browserDevicesRoute)
+app.route('/api/companies/:companyId', browserRecordingsRoute)
 app.route('/api', browserLineReportRoute)
 // lane C ▲

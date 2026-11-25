@@ -116,6 +116,8 @@ import { developerAssetHostsOn } from '../shared/browser-operation'
 import { createRegisteredPcSwitch, createThisPcSwitch } from './features/browser/ai-switch'
 import { createBrowserDevice, createBrowserDeviceKey } from './features/browser/device'
 import { registerBrowserDeviceIpc } from './features/browser/device-ipc'
+import { createBrowserRecordings, createBrowserRecordingsHttp } from './features/browser/recording'
+import { registerBrowserRecordingIpc } from './features/browser/recording-ipc'
 import { BROWSER_AI_OPT_IN_FILE } from '../shared/browser-ai'
 import { lstepConnector } from '../connectors/lstep'
 import { lstepReadLines } from '../connector-maps/lstep'
@@ -633,6 +635,17 @@ const browserAiSwitch = createRegisteredPcSwitch({
   optIn: createThisPcSwitch({ file: () => path.join(userDataDir(), BROWSER_AI_OPT_IN_FILE), server: getServerApiUrl, userId: session.userId }),
   registered: () => browserDevice.enabledHere(),
 })
+// 「記録する」 (agent-browser.md "Recording"): the member records the work once in the site's window and sends it to the
+// company. In main's memory only; it needs this PC allowed (the switch above) and the site in the policy; this PC's key
+// goes only on the send.
+const browserRecordings = createBrowserRecordings({
+  windows: browser,
+  userId: session.userId,
+  mayRecord: browserAiSwitch,
+  api: createBrowserRecordingsHttp({ baseUrl: getServerApiUrl, cookies: session.cookies, deviceKey: browserDeviceKey.header }),
+  changed: companyId => appWindow.send('browser:changed', { companyId }),
+})
+registerBrowserRecordingIpc(ipc, { recordings: browserRecordings, fromMainWindow: event => isMainFrameSender(event, id => mainWindowHost.isWindow(id)) })
 const browserPlans = wireBrowserPlans(ipc, {
   aiSwitch: browserAiSwitch,
   fromMainWindow: event => isMainFrameSender(event, id => mainWindowHost.isWindow(id)),
@@ -712,6 +725,7 @@ registerAuthIpc(ipc, {
     browserInspections.clear()
     browserWrites.clear()
     browserDevice.clear()
+    browserRecordings.clear()
   },
   onSignedIn: userId => {
     agentControl.eventSender.sessionStarted()

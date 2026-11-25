@@ -25,6 +25,9 @@ import { readBrowserFacts } from '../../shared/browser-facts'
 import { parseBrowserHtml } from '../../electron/features/browser/html'
 import { fakePlansServer, type FakeServerFaults } from '../browser-plans-fake'
 import { startSites, type Sites } from './sites'
+import { createBrowserRecorder } from '../../shared/browser-recorder'
+import { browserRecordingProblem } from '../../../shared/core/browser-recording'
+import { newRecordingDigest } from '../../electron/features/browser/recording'
 
 const dir = process.env.BROWSER_TEST_DIR!
 const [port, evilPort, udpPort] = (process.env.BROWSER_TEST_PORTS ?? '').split(',').map(Number)
@@ -158,6 +161,7 @@ async function run() {
 
   result.helpers = await helperScenarios(win, js)
   result.runner = await runnerScenarios(win, site, sites, js, partition)
+  result.recording = await recordingScenarios(win, shell, site, js)
 
   // The login: a cookie and storage of the site, then cleared.
   await js(`document.cookie = 'sid=1; Secure; Max-Age=3600'; localStorage.setItem('k', 'v'); 1`)
@@ -192,6 +196,76 @@ async function run() {
   sites.close()
   writeResult(result)
   app.quit()
+}
+
+/**
+ * Recording (agent-browser.md "Recording"): the person's trusted clicks and typing on the operated page are observed
+ * through the window's one debugger owner and kept in their kept form only; the page's own forged calls are not; the
+ * AI cannot enter the window while it records (nor a recording start while the AI holds it), the preview reads
+ * nothing meanwhile; a window closed while recording ends it as `closed`.
+ */
+async function recordingScenarios(win: BrowserShellWindow, shell: ReturnType<typeof createBrowserWindowShell>, site: BrowserSiteSetting, js: (code: string) => Promise<unknown>) {
+  const out: Record<string, unknown> = {}
+  const page = win.webContents
+  BrowserWindow.fromWebContents(page)?.showInactive()
+  await page.loadURL('https://op.test/rec-form')
+  await wait(800)
+  const recorder = createBrowserRecorder({ domain: 'op.test', digest: newRecordingDigest(), now: () => Date.now() })
+  const ended: string[] = []
+  out.started = await win.record.start({ observe: o => recorder.observe(o), ended: r => ended.push(r) })
+  // A page already loaded navigating within itself (History API) before any new load is a page line too.
+  await js(`history.pushState({}, '', '/rec-form/77'); 1`)
+  await wait(300)
+  // Reload so the page's load (its own script's read, its forged calls) is observed too.
+  await page.loadURL('https://op.test/rec-form')
+  await wait(1200)
+  const hooks = { stopped: () => false, pageRead: () => true, sessionRequest: () => ({ allow: false as const, reason: 'test' }) }
+  out.aiWhileRecording = await win.run.enterAi(hooks as never)
+  out.previewWhileRecording = await win.preview.read('/rec-api/1').then(() => 'read', () => 'refused')
+  const clickOn = async (id: string) => {
+    const r = await js(`(() => { const b = document.getElementById('${id}').getBoundingClientRect(); return [b.x + b.width / 2, b.y + b.height / 2] })()`) as [number, number]
+    page.sendInputEvent({ type: 'mouseDown', x: Math.round(r[0]), y: Math.round(r[1]), button: 'left', clickCount: 1 })
+    page.sendInputEvent({ type: 'mouseUp', x: Math.round(r[0]), y: Math.round(r[1]), button: 'left', clickCount: 1 })
+    await wait(300)
+  }
+  // Each field is entered by a click and left by a click elsewhere (a Tab's target depends on the runner's focus).
+  await clickOn('end')
+  page.insertText('2026-12-03')
+  await clickOn('pw')
+  page.insertText('pw-secret-value-7777')
+  await clickOn('end')
+  await clickOn('save')
+  await clickOn('pick')
+  // A whole row the page made a button, and a field named by text elsewhere on the page: no label from either.
+  await clickOn('row')
+  await clickOn('memo2')
+  page.insertText('memo-value-4321')
+  await clickOn('end')
+  await wait(1000)
+  await win.record.stop()
+  const content = recorder.content()
+  out.content = content
+  out.problem = browserRecordingProblem(content, 'op.test')
+  out.ended = ended
+  // Once stopped, the AI can take the window again.
+  out.aiAfter = await win.run.enterAi(hooks as never)
+  // …and while it holds it, no recording starts.
+  out.recordWhileAi = await win.record.start({ observe: () => {}, ended: () => {} })
+  await win.run.leaveAi()
+  // A window closed while recording: the recording hears `closed`.
+  const partition2 = browserPartition('user-2', 'company-1', 'op.test')
+  trustTestCertificate(partition2)
+  const other = shell.open({ partition: partition2, site, onClosed: () => {} })
+  await loaded(other)
+  await wait(500)
+  const endedOther: string[] = []
+  out.otherStarted = await other.record.start({ observe: () => {}, ended: r => endedOther.push(r) })
+  other.close()
+  await wait(500)
+  out.endedOnClose = endedOther
+  await page.loadURL('https://op.test/')
+  await wait(800)
+  return out
 }
 
 /**

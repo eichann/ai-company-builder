@@ -27,6 +27,8 @@
 //          one waiting item (chapter 42)
 //   pc     (with browser=…) 「この PC」: none (default) | pending | enabled | revoked | unavailable | unknown; pcFail=1 refuses
 //          a press with the server's sentence; lines=0 gives the member no usable combination
+//          「記録する」 (with browser=…): start → recording, stop → four sample lines to check, ［消す］ / ［送る］ / ［捨てる］ as main
+//          would answer; the lines sent land in window.recordingSent
 //   closed 1 = start with the settings closed: a 「設定を開く」 button (always there) opens them (Esc closes, focus returns)
 import { useState } from 'react'
 import { createRoot } from 'react-dom/client'
@@ -185,6 +187,22 @@ const pcView = () => ({
   lines: params.get('lines') === '0' ? [] : [{ label: '流入経路を点検する', writes: false }, { label: '流入経路を作る', writes: true }],
 })
 
+// 「記録する」: main's view of the member's recording (lines in their kept form only).
+const REC_LINES = [
+  { id: 1, kind: 'ページ', text: '/orders/{n}', estimated: null },
+  { id: 2, kind: '入力した', text: '「受付終了日」 (end_date) ＝ 値1', estimated: null },
+  { id: 3, kind: '押した', text: '「保存」', estimated: null },
+  { id: 4, kind: '送った', text: 'POST /api/orders/{n} ［end_date=値1］ → 200', estimated: '（推定）手順3のあと' },
+]
+const REC_NOTE = 'いつもの作業を、サイトの窓で1回通してやってください。'
+const REC_WARNING = 'ボタンや欄の見出し、ページのアドレスに、お客さまなどの名前が入っていることがあります。'
+type RecView =
+  | { state: 'none'; message: string | null; notes: string[] }
+  | { state: 'recording'; host: string; lines: number; notes: string[] }
+  | { state: 'review'; host: string; lines: typeof REC_LINES; message: string | null; notes: string[]; words: Array<{ word: string; count: number }>; hosts: Array<{ host: string; loaded: boolean }>; titles: { lines: string; words: string; hosts: string } }
+let rec: RecView = { state: 'none', message: null, notes: [REC_NOTE] }
+const recAnswer = () => ({ ok: true as const, view: rec })
+
 Object.assign(window, {
   electronAPI: {
     gitBinaryStatus: async () => ({ bundled: true, binary: 'bundled' }),
@@ -202,6 +220,25 @@ Object.assign(window, {
       return { ok: true, view: pcView() }
     },
     withdrawBrowserPc: async () => { pc = { state: 'revoked', label: pc.label }; return { ok: true, view: pcView() } },
+    getBrowserRecording: async () => recAnswer(),
+    startBrowserRecording: async (_companyId: string, host: string) => { rec = { state: 'recording', host, lines: 3, notes: [`${host} を記録しています（3行）。`] }; return recAnswer() },
+    stopBrowserRecording: async () => {
+      if (rec.state === 'recording') rec = { state: 'review', host: rec.host, lines: [...REC_LINES], message: null, notes: [REC_WARNING], titles: { lines: '送る前に確かめてください', words: '伏せる言葉', hosts: 'ほかのサイト' }, words: [{ word: 'orders', count: 2 }, { word: 'tanaka', count: 1 }], hosts: [{ host: 'cdn.example-assets.test', loaded: true }] }
+      return recAnswer()
+    },
+    editBrowserRecording: async (_companyId: string, change: { kind: 'line'; id: number } | { kind: 'word'; word: string } | { kind: 'host'; host: string }) => {
+      if (rec.state !== 'review') return recAnswer()
+      ;(window as unknown as { recordingEdits?: unknown[] }).recordingEdits = [...((window as unknown as { recordingEdits?: unknown[] }).recordingEdits ?? []), change]
+      if (change.kind === 'line') rec = { ...rec, lines: rec.lines.filter(l => l.id !== change.id) }
+      if (change.kind === 'word') rec = { ...rec, words: rec.words.filter(w => w.word !== change.word) }
+      if (change.kind === 'host') rec = { ...rec, hosts: rec.hosts.filter(h => h.host !== change.host) }
+      return recAnswer()
+    },
+    sendBrowserRecording: async () => {
+      if (rec.state === 'review') { (window as unknown as { recordingSent?: number[] }).recordingSent = rec.lines.map(l => l.id); rec = { state: 'none', message: '記録を送りました。管理者に「記録を送りました」と伝えてください。', notes: [REC_NOTE] } }
+      return recAnswer()
+    },
+    discardBrowserRecording: async () => { rec = { state: 'none', message: '記録を捨てました。', notes: [REC_NOTE] }; return recAnswer() },
     // 自分の設定 → 「Google で許可する」 opens the Google section: offline here, it says so (?google=ready: not allowed yet).
     getGoogleStatus: async () => (params.get('google') === 'ready'
       ? { success: true, data: { available: true, reason: null, connected: false, status: null, googleEmail: null, features: [], featuresOff: [], domain: 'kensho-a.example', practice: false, companyFeatures: ['minutes', 'mail'], seen: [] } }

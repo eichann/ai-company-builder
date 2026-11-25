@@ -24,6 +24,7 @@ import type { AgentSandboxView } from '../../../shared/types/agent-sandbox'
 import type { AgentBrowserView } from '../../../shared/types/agent-browser'
 import type { BrowserDeviceView, BrowserDevicesList } from '../../../shared/types/browser-devices'
 import type { BrowserSiteGrantsView } from '../../../shared/types/browser-site-grants'
+import type { BrowserRecordingDetail, BrowserRecordingsList } from '../../../shared/types/browser-recordings'
 import type { RecordQueryResult } from '../../../shared/types/records'
 import type { AgentStopView } from '../../../shared/types/agent-stop'
 import type { FeaturesView } from '../../../shared/types/features'
@@ -354,6 +355,12 @@ export const agentBrowserSchema = topLevel<AgentBrowserView>({
 })
 // 「ブラウザ操作に使う PC」 (shared/types/browser-devices.ts) and 「使える人」 (shared/types/browser-lines.ts)
 export const browserDevicesSchema = topLevel<BrowserDevicesList>({ items: list, more: bool, history: list })
+// 「ブラウザ操作の記録」 (shared/types/browser-recordings.ts)
+export const browserRecordingsSchema = topLevel<BrowserRecordingsList>({ items: list, more: bool })
+export const browserRecordingSchema = topLevel<BrowserRecordingDetail>({
+  id: str, userId: str, name: nullableStr, domain: str, lines: num, createdAt: str, deleteAt: str, mine: bool, content: obj,
+})
+export const browserRecordingDeletedSchema = topLevel<{ deleted: true }>({ deleted: z.literal(true) })
 export const browserDeviceSchema = topLevel<BrowserDeviceView>({
   id: str, userId: str, label: str, state: z.enum(['pending', 'enabled', 'revoked']), revokeReason: nullableStr,
   requestedAt: str, enabledAt: nullableStr, enabledBy: nullableStr, revokedAt: nullableStr, revokedBy: nullableStr, lastUsedAt: nullableStr,
