@@ -326,6 +326,10 @@ GET  /api/config                                  setup state (no auth)
                               GET /browser-devices, POST /browser-devices/:deviceId/enable | revoke (owner/admin)
                                                                              browser-devices.ts
                                                                 (this PC: agent-browser.md "This PC's registration")
+                              POST /browser-recordings (+ the PC's key header), GET /browser-recordings,
+                              GET|DELETE /browser-recordings/:recordingId (the sender or owner/admin)
+                                                                             browser-recordings.ts
+                                                                (記録: agent-browser.md "Recording")
                               GET|PUT /second-opinion                         second-opinion.ts
                                                                 (もう一方の AI に聞く: chat-and-agents.md)
                               GET /security-alerts, PUT /security-alerts/settings (owner/admin)

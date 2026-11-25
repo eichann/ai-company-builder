@@ -137,6 +137,8 @@ interface World {
     browserLineExecution: string
     /** A PC registration of the other company's member, pending (agent-browser.md "This PC's registration"). */
     browserDevice: string
+    /** A 「ブラウザ操作」 recording the other company's member sent (agent-browser.md "Recording"). */
+    browserRecording: string
     /** A holding ticket and item of the other company's member (private-folders.md "Holding: the member's upload"). */
     holdingTicket: string
     holdingItem: string
@@ -179,6 +181,8 @@ const OTHER_LINE_PLAN = `bl_${'e'.repeat(32)}`
 const OTHER_LINE_EXECUTION = `bw_${'e'.repeat(32)}`
 const NO_SUCH_DEVICE = `bd_${'0'.repeat(32)}`
 const OTHER_DEVICE = `bd_${'e'.repeat(32)}`
+const NO_SUCH_RECORDING = `br_${'0'.repeat(32)}`
+const OTHER_RECORDING = `br_${'e'.repeat(32)}`
 const NO_SUCH_HOLDING = '00000000-0000-4000-8000-0000000401d0'
 
 const MATRIX: Row[] = [
@@ -757,6 +761,13 @@ const MATRIX: Row[] = [
   r('GET /api/companies/:companyId/browser-devices', w => ({ path: `${C(w)}/browser-devices` }), [200, 200, 403, 403, 404, 401]),
   r('POST /api/companies/:companyId/browser-devices/:deviceId/enable', w => ({ path: `${C(w)}/browser-devices/${NO_SUCH_DEVICE}/enable` }), [404, 404, 403, 403, 404, 401]),
   r('POST /api/companies/:companyId/browser-devices/:deviceId/revoke', w => ({ path: `${C(w)}/browser-devices/${NO_SUCH_DEVICE}/revoke` }), [404, 404, 403, 403, 404, 401]),
+  // 「ブラウザ操作」 recordings (agent-browser.md "Recording"): any member sends (a body that is no recording → 400; the
+  // owner passes the PC check by the transition exception, the others are refused it first: 403) and lists their own;
+  // a recording is read or deleted by its sender or an owner / admin (none here → 404 for everyone).
+  r('POST /api/companies/:companyId/browser-recordings', w => ({ path: `${C(w)}/browser-recordings`, body: { x: 1 } }), [400, 403, 403, 403, 404, 401]),
+  r('GET /api/companies/:companyId/browser-recordings', w => ({ path: `${C(w)}/browser-recordings` }), MEMBERS),
+  r('GET /api/companies/:companyId/browser-recordings/:recordingId', w => ({ path: `${C(w)}/browser-recordings/${NO_SUCH_RECORDING}` }), [404, 404, 404, 404, 404, 401]),
+  r('DELETE /api/companies/:companyId/browser-recordings/:recordingId', w => ({ path: `${C(w)}/browser-recordings/${NO_SUCH_RECORDING}` }), [404, 404, 404, 404, 404, 401]),
   // lane C ▲
 ]
 
@@ -964,6 +975,8 @@ const CROSS: CrossRow[] = [
   x('PUT /api/companies/:companyId/browser-site-grants/:userId', (w, id) => ({ path: `${C(w)}/browser-site-grants/${id}`, body: { host: 'shop.example.com', level: 'write' } }), w => w.other.member, 'pm-nobody'),
   x('POST /api/companies/:companyId/browser-devices/:deviceId/enable', (w, id) => ({ path: `${C(w)}/browser-devices/${id}/enable` }), w => w.other.browserDevice, NO_SUCH_DEVICE),
   x('POST /api/companies/:companyId/browser-devices/:deviceId/revoke', (w, id) => ({ path: `${C(w)}/browser-devices/${id}/revoke` }), w => w.other.browserDevice, NO_SUCH_DEVICE),
+  x('GET /api/companies/:companyId/browser-recordings/:recordingId', (w, id) => ({ path: `${C(w)}/browser-recordings/${id}` }), w => w.other.browserRecording, NO_SUCH_RECORDING),
+  x('DELETE /api/companies/:companyId/browser-recordings/:recordingId', (w, id) => ({ path: `${C(w)}/browser-recordings/${id}` }), w => w.other.browserRecording, NO_SUCH_RECORDING),
   x('PUT /api/companies/:companyId/browser-type-grants/:userId', (w, id) => ({ path: `${C(w)}/browser-type-grants/${id}`, body: { connector: 'lstep', operation: 'reminder_step_add_template', declarationHash: `sha256:${'a'.repeat(64)}`, allowed: true } }), w => w.other.member, 'pm-nobody'),
   // lane C ▲
 ]
@@ -1254,6 +1267,9 @@ async function seed(): Promise<World> {
   // A PC registration of the other company's member, pending (rows as adapters/sqlite/browser-devices.ts writes them).
   db.prepare(`INSERT INTO browser_devices (company_id, id, user_id, key_hash, label, state, requested_at) VALUES (?, ?, ?, ?, 'other PC', 'pending', ?)`)
     .run(other, OTHER_DEVICE, otherMember, '9'.repeat(64), expires)
+  // A 「ブラウザ操作」 recording the other company's member sent (rows as adapters/sqlite/browser-recordings.ts writes them).
+  db.prepare(`INSERT INTO browser_recordings (company_id, id, user_id, domain, lines, content, created_at, delete_at) VALUES (?, ?, ?, 'shop.example.test', 1, '{}', ?, '2100-01-01T00:00:00.000Z')`)
+    .run(other, OTHER_RECORDING, otherMember, expires)
   // A Skill on the other company's shelf, published (rows as adapters/sqlite/skill-shelf.ts writes them).
   db.prepare(`INSERT INTO shelf_items (id, company_id, kind, department_id, name, current_version, created_at, created_by, changed_at, changed_by)
     VALUES ('shelf-other-1', ?, 'skill', NULL, 'other-skill', ?, ?, ?, ?, ?)`).run(other, 'a'.repeat(64), expires, otherMember, expires, otherMember)
@@ -1339,6 +1355,7 @@ async function seed(): Promise<World> {
       browserLinePlan: OTHER_LINE_PLAN,
       browserLineExecution: OTHER_LINE_EXECUTION,
       browserDevice: OTHER_DEVICE,
+      browserRecording: OTHER_RECORDING,
 
     },
   }

@@ -23,6 +23,9 @@ import {
   browserDeviceSchema,
   browserDevicesSchema,
   browserSiteGrantsSchema,
+  browserRecordingDeletedSchema,
+  browserRecordingSchema,
+  browserRecordingsSchema,
   agentStopSchema,
   recordSettingsSchema,
   secondOpinionSchema,
@@ -960,6 +963,18 @@ export const browserPcsApi = {
   /** 止める: final (the member registers again to use the PC again). */
   revoke: (companyId: string, deviceId: string) =>
     getData(`/api/companies/${enc(companyId)}/browser-devices/${enc(deviceId)}/revoke`, browserDeviceSchema, { method: 'POST' }),
+}
+
+export type { BrowserRecordingDetail, BrowserRecordingSummary, BrowserRecordingsList } from '../../../shared/types/browser-recordings'
+
+/** 「ブラウザ操作の記録」: what members recorded and sent (owner/admin see every one; never given to the AI). */
+export const browserRecordingsApi = {
+  list: (companyId: string) => getData(`/api/companies/${enc(companyId)}/browser-recordings`, browserRecordingsSchema),
+  get: (companyId: string, recordingId: string) =>
+    getData(`/api/companies/${enc(companyId)}/browser-recordings/${enc(recordingId)}`, browserRecordingSchema),
+  /** Deleted with its content, at once. */
+  remove: (companyId: string, recordingId: string) =>
+    getData(`/api/companies/${enc(companyId)}/browser-recordings/${enc(recordingId)}`, browserRecordingDeletedSchema, { method: 'DELETE' }),
 }
 
 export const browserPeopleApi = {

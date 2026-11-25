@@ -27,6 +27,8 @@
 //          one waiting item (chapter 42)
 //   pc     (with browser=…) 「この PC」: none (default) | pending | enabled | revoked | unavailable | unknown; pcFail=1 refuses
 //          a press with the server's sentence; lines=0 gives the member no usable combination
+//          「記録する」 (with browser=…): start → recording, stop → four sample lines to check, ［消す］ / ［送る］ / ［捨てる］ as main
+//          would answer; the lines sent land in window.recordingSent
 //   closed 1 = start with the settings closed: a 「設定を開く」 button (always there) opens them (Esc closes, focus returns)
 import { useState } from 'react'
 import { createRoot } from 'react-dom/client'
@@ -185,6 +187,16 @@ const pcView = () => ({
   lines: params.get('lines') === '0' ? [] : [{ label: '流入経路を点検する', writes: false }, { label: '流入経路を作る', writes: true }],
 })
 
+// 「記録する」: main's view of the member's recording (lines in their kept form only).
+const REC_LINES = [
+  { id: 1, kind: 'ページ', text: '/orders/{n}', estimated: null },
+  { id: 2, kind: '入力した', text: '「受付終了日」 (end_date) ＝ 値1', estimated: null },
+  { id: 3, kind: '押した', text: '「保存」', estimated: null },
+  { id: 4, kind: '送った', text: 'POST /api/orders/{n} ［end_date=値1］ → 200', estimated: '手順3のあと' },
+]
+let rec: { state: 'none'; message: string | null } | { state: 'recording'; host: string; lines: number; full: boolean } | { state: 'review'; host: string; lines: typeof REC_LINES; full: boolean; message: string | null } = { state: 'none', message: null }
+const recAnswer = () => ({ ok: true as const, view: rec })
+
 Object.assign(window, {
   electronAPI: {
     gitBinaryStatus: async () => ({ bundled: true, binary: 'bundled' }),
@@ -202,6 +214,15 @@ Object.assign(window, {
       return { ok: true, view: pcView() }
     },
     withdrawBrowserPc: async () => { pc = { state: 'revoked', label: pc.label }; return { ok: true, view: pcView() } },
+    getBrowserRecording: async () => recAnswer(),
+    startBrowserRecording: async (_companyId: string, host: string) => { rec = { state: 'recording', host, lines: 3, full: false }; return recAnswer() },
+    stopBrowserRecording: async () => { if (rec.state === 'recording') rec = { state: 'review', host: rec.host, lines: [...REC_LINES], full: false, message: null }; return recAnswer() },
+    removeBrowserRecordingLine: async (_companyId: string, id: number) => { if (rec.state === 'review') rec = { ...rec, lines: rec.lines.filter(l => l.id !== id) }; return recAnswer() },
+    sendBrowserRecording: async () => {
+      if (rec.state === 'review') { (window as unknown as { recordingSent?: number[] }).recordingSent = rec.lines.map(l => l.id); rec = { state: 'none', message: '記録を送りました。管理者に「記録を送りました」と伝えてください。' } }
+      return recAnswer()
+    },
+    discardBrowserRecording: async () => { rec = { state: 'none', message: '記録を捨てました。' }; return recAnswer() },
     // 自分の設定 → 「Google で許可する」 opens the Google section: offline here, it says so (?google=ready: not allowed yet).
     getGoogleStatus: async () => (params.get('google') === 'ready'
       ? { success: true, data: { available: true, reason: null, connected: false, status: null, googleEmail: null, features: [], featuresOff: [], domain: 'kensho-a.example', practice: false, companyFeatures: ['minutes', 'mail'], seen: [] } }

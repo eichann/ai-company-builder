@@ -82,6 +82,9 @@ const TYPES: Record<string, string> = {
   BrowserPcs: 'BrowserDevicesList',
   BrowserPc: 'BrowserDeviceView',
   BrowserPeople: 'BrowserSiteGrantsView',
+  BrowserRecordings: 'BrowserRecordingsList',
+  BrowserRecording: 'BrowserRecordingDetail',
+  BrowserRecordingDeleted: '{ deleted: true }',
   AgentStops: 'AgentStopView',
   SecondOpinion: 'SecondOpinionView',
   SecurityAlerts: 'SecurityAlertsView',
@@ -301,6 +304,7 @@ beforeAll(async () => {
   app.route('/api/companies/:companyId', agentSandboxRoute)
   app.route('/api/companies/:companyId', agentBrowserRoute)
   app.route('/api/companies/:companyId', (await import('../../src/routes/browser-devices')).browserDevicesRoute)
+  app.route('/api/companies/:companyId', (await import('../../src/routes/browser-recordings')).browserRecordingsRoute)
   app.route('/api/companies/:companyId', (await import('../../src/routes/browser-lines')).browserLinesRoute)
   app.route('/api/companies/:companyId', secondOpinionRoute)
   app.route('/api/companies/:companyId', taskSettingsRoute)
@@ -494,6 +498,23 @@ describe('admin API types (admin/src/lib/api.ts) match the server', () => {
     const granted = await expectShape('BrowserPeople', USERS.admin, 'PUT', `${base}/browser-site-grants/${USERS.member}`, { host: 'crm.example.com', level: 'write' })
     expect(granted.grants).toHaveLength(1)
     await expectShape('BrowserPeople', USERS.owner, 'PUT', `${base}/browser-site-grants/${USERS.member}`, { host: 'crm.example.com', level: 'none' })
+  })
+
+  it('「ブラウザ操作の記録」', async () => {
+    await expectShape('AgentBrowser', USERS.owner, 'PUT', `${base}/agent-browser`, { mode: 'on', sites: [{ host: 'shop.example.test', level: 'read', assetHosts: [] }] })
+    // The owner sends one the way the app does (no PC key yet: the owner's transition exception).
+    currentUser.id = USERS.owner
+    const sent = await app.request(`${base}/browser-recordings`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ domain: 'shop.example.test', content: { format: 1, domain: 'shop.example.test', steps: [{ id: 1, kind: 'page', address: '/orders/{n}' }], hosts: [] } }),
+    })
+    expect(sent.status).toBe(201)
+    const id = ((await sent.json()) as Loose).data.id as string
+    const list = await expectShape('BrowserRecordings', USERS.admin, 'GET', `${base}/browser-recordings`)
+    expect(list.items).toHaveLength(1)
+    await expectShape('BrowserRecording', USERS.admin, 'GET', `${base}/browser-recordings/${id}`)
+    await expectShape('BrowserRecordingDeleted', USERS.owner, 'DELETE', `${base}/browser-recordings/${id}`)
   })
 
   it('「もう一方の AI に聞く」', async () => {

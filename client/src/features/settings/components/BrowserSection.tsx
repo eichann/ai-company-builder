@@ -5,6 +5,7 @@ import { Button, Card, SectionHeader } from '../../../shared/ui/primitives'
 import { BROWSER_WORDS, type BrowserSiteView } from '../../../../shared/browser-operation'
 import { clearBrowserLogin, openBrowserSite } from '../api'
 import { BrowserPcSection } from './BrowserPcSection'
+import { BrowserRecordingSection } from './BrowserRecordingSection'
 
 export function BrowserSection({ companyId, sites }: { companyId: string; sites: BrowserSiteView[] }) {
   const [busy, setBusy] = useState(false)
@@ -43,6 +44,7 @@ export function BrowserSection({ companyId, sites }: { companyId: string; sites:
           </div>
         ))}
       </Card>
+      {sites.length > 0 && <BrowserRecordingSection companyId={companyId} sites={sites} />}
       <BrowserPcSection companyId={companyId} />
     </div>
   )

@@ -273,7 +273,7 @@ test('a refusal (left the company, no access) forgets a remembered 使える; no
   } finally { fs.rmSync(dir, { recursive: true, force: true }) }
 })
 
-test('only the PC module and the plan clients name the header, and only main.ts and the plan wirings hand the key on', () => {
+test('only the PC module, the plan clients and the recordings\' send name the header, and only main.ts and the plan wirings hand the key on', () => {
   const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
   const files: string[] = []
   const walk = (dir: string) => {
@@ -287,10 +287,11 @@ test('only the PC module and the plan clients name the header, and only main.ts 
   const naming = (re: RegExp) => files.filter(f => re.test(fs.readFileSync(f, 'utf8'))).map(rel).sort()
   assert.deepEqual(naming(/BROWSER_DEVICE_HEADER|X-ACB-Browser-Device/i), [
     'electron/features/browser/device.ts', 'electron/features/browser/lines-api.ts', 'electron/features/browser/plans-api.ts',
+    'electron/features/browser/recording.ts',
   ])
   assert.deepEqual(naming(/\bdeviceKey\b|\bbrowserDeviceKey\b/), [
     'electron/features/browser/inspect.ts', 'electron/features/browser/lines-api.ts', 'electron/features/browser/plans-api.ts',
-    'electron/features/browser/wire.ts', 'electron/features/browser/write-lines.ts', 'electron/main.ts',
+    'electron/features/browser/recording.ts', 'electron/features/browser/wire.ts', 'electron/features/browser/write-lines.ts', 'electron/main.ts',
   ])
 })
 

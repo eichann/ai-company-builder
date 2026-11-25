@@ -289,3 +289,15 @@ export function registerBrowserPc(companyId: string, label: string, port: Browse
 export function withdrawBrowserPc(companyId: string, port: BrowserPcPort = window.electronAPI) {
   return port.withdrawBrowserPc(companyId)
 }
+
+/** 「記録する」: the member's recording of a site (lines in their kept form — never a value). */
+export type BrowserRecordingPort = ElectronPort<'getBrowserRecording' | 'startBrowserRecording' | 'stopBrowserRecording' | 'removeBrowserRecordingLine' | 'sendBrowserRecording' | 'discardBrowserRecording'>
+
+export const browserRecordingCalls = (port: BrowserRecordingPort = window.electronAPI) => ({
+  get: (companyId: string) => port.getBrowserRecording(companyId),
+  start: (companyId: string, host: string) => port.startBrowserRecording(companyId, host),
+  stop: (companyId: string) => port.stopBrowserRecording(companyId),
+  removeLine: (companyId: string, lineId: number) => port.removeBrowserRecordingLine(companyId, lineId),
+  send: (companyId: string) => port.sendBrowserRecording(companyId),
+  discard: (companyId: string) => port.discardBrowserRecording(companyId),
+})

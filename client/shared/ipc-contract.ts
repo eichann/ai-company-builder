@@ -80,6 +80,7 @@ import type { BrowserConfirmResult, BrowserPlanActAnswer, BrowserPlanGetResult, 
 import type { BrowserInspectionGetResult } from './browser-inspection'
 import type { BrowserWriteGetResult } from './browser-line-writes'
 import type { BrowserPcResult } from './browser-device'
+import type { BrowserRecordingResult } from './browser-recorder'
 import type { SkillShelfMark, SkillShelfRequestInfo, SkillShelfRestoreResult, SkillShelfSendResult } from './skill-shelf'
 import type { PluginStepButton, PluginStepContinuation, PluginStepContinueResult, PluginStepStartResult, QueuedPluginStep } from './ai-turn-steps/plugin'
 import type { StepDeliverablesView } from './step-deliverables'
@@ -931,6 +932,18 @@ export interface IpcInvokeChannels {
   'browserDevice:register': { args: [companyId: string, label: string]; result: BrowserPcResult }
   /** 「取り下げる」 / 「この PC での利用をやめる」. */
   'browserDevice:withdraw': { args: [companyId: string]; result: BrowserPcResult }
+  /** Settings › 「記録する」: the member's recording in this company — lines in their kept form, never a value (main window only; agent-browser.md "Recording"). */
+  'browserRecording:get': { args: [companyId: string]; result: BrowserRecordingResult }
+  /** 「記録する」 on a site of the current policy: its window opens and is observed. */
+  'browserRecording:start': { args: [companyId: string, host: string]; result: BrowserRecordingResult }
+  /** 「記録を止める」. */
+  'browserRecording:stop': { args: [companyId: string]; result: BrowserRecordingResult }
+  /** ［消す］ on one line before sending. */
+  'browserRecording:removeLine': { args: [companyId: string, lineId: number]; result: BrowserRecordingResult }
+  /** ［送る］: to the company (the server checks it again). */
+  'browserRecording:send': { args: [companyId: string]; result: BrowserRecordingResult }
+  /** ［捨てる］. */
+  'browserRecording:discard': { args: [companyId: string]; result: BrowserRecordingResult }
   /** The member's records at a business plugin's ai_turn step (C5, plugin-steps.md); main remembers them for the claim. */
   'aiTurns:pluginTurns': { args: [companyId: string]; result: QueuedPluginStep[] }
   /** The `start: person` steps at a record's state (its card's buttons). */
@@ -1393,6 +1406,12 @@ export interface ElectronAPI {
   getBrowserPc: Invoke<'browserDevice:get'>
   registerBrowserPc: Invoke<'browserDevice:register'>
   withdrawBrowserPc: Invoke<'browserDevice:withdraw'>
+  getBrowserRecording: Invoke<'browserRecording:get'>
+  startBrowserRecording: Invoke<'browserRecording:start'>
+  stopBrowserRecording: Invoke<'browserRecording:stop'>
+  removeBrowserRecordingLine: Invoke<'browserRecording:removeLine'>
+  sendBrowserRecording: Invoke<'browserRecording:send'>
+  discardBrowserRecording: Invoke<'browserRecording:discard'>
   listPluginStepTurns: Invoke<'aiTurns:pluginTurns'>
   listPersonSteps: Invoke<'pluginSteps:onRecord'>
   startPersonStep: Invoke<'pluginSteps:start'>

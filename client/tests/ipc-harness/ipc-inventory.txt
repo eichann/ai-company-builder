@@ -75,6 +75,12 @@ contract.invoke browserPlans:confirm
 contract.invoke browserPlans:get
 contract.invoke browserPlans:list
 contract.invoke browserPlans:run
+contract.invoke browserRecording:discard
+contract.invoke browserRecording:get
+contract.invoke browserRecording:removeLine
+contract.invoke browserRecording:send
+contract.invoke browserRecording:start
+contract.invoke browserRecording:stop
 contract.invoke calendar:today
 contract.invoke chat-server:getInfo
 contract.invoke chatHistory:deleteSession
@@ -438,6 +444,7 @@ contract.type ElectronAPI.declineMinutesBundle = declineMinutesBundle: Invoke<'m
 contract.type ElectronAPI.deleteChatSession = deleteChatSession: Invoke<'chatHistory:deleteSession'>
 contract.type ElectronAPI.deleteItem = deleteItem: Invoke<'fs:delete'>
 contract.type ElectronAPI.deleteOwnBrokerKey = deleteOwnBrokerKey: Invoke<'brokerKeys:delete'>
+contract.type ElectronAPI.discardBrowserRecording = discardBrowserRecording: Invoke<'browserRecording:discard'>
 contract.type ElectronAPI.discardJobCandidate = discardJobCandidate: Invoke<'jobProposals:discard'>
 contract.type ElectronAPI.discardOutboundMail = discardOutboundMail: Invoke<'outboundMail:discard'>
 contract.type ElectronAPI.disconnectGoogle = disconnectGoogle: Invoke<'google:disconnect'>
@@ -465,6 +472,7 @@ contract.type ElectronAPI.getAutoTurnSettings = getAutoTurnSettings: Invoke<'aiT
 contract.type ElectronAPI.getBrowserInspection = getBrowserInspection: Invoke<'browserLines:card'>
 contract.type ElectronAPI.getBrowserPc = getBrowserPc: Invoke<'browserDevice:get'>
 contract.type ElectronAPI.getBrowserPlan = getBrowserPlan: Invoke<'browserPlans:get'>
+contract.type ElectronAPI.getBrowserRecording = getBrowserRecording: Invoke<'browserRecording:get'>
 contract.type ElectronAPI.getBrowserSites = getBrowserSites: Invoke<'browser:sites'>
 contract.type ElectronAPI.getBrowserWriteCard = getBrowserWriteCard: Invoke<'browserLines:writeCard'>
 contract.type ElectronAPI.getBundleChoices = getBundleChoices: Invoke<'tasks:bundles'>
@@ -613,6 +621,7 @@ contract.type ElectronAPI.registerAllowedRoot = registerAllowedRoot: Invoke<'fs:
 contract.type ElectronAPI.registerBrowserPc = registerBrowserPc: Invoke<'browserDevice:register'>
 contract.type ElectronAPI.reloadDocView = reloadDocView: Invoke<'docView:reload'>
 contract.type ElectronAPI.removeAbsence = removeAbsence: Invoke<'absences:remove'>
+contract.type ElectronAPI.removeBrowserRecordingLine = removeBrowserRecordingLine: Invoke<'browserRecording:removeLine'>
 contract.type ElectronAPI.removeOutboundMailAttachment = removeOutboundMailAttachment: Invoke<'outboundMail:removeAttachment'>
 contract.type ElectronAPI.renameItem = renameItem: Invoke<'fs:rename'>
 contract.type ElectronAPI.reportChatWindowStatus = reportChatWindowStatus: Invoke<'chatWindow:reportStatus'>
@@ -637,6 +646,7 @@ contract.type ElectronAPI.searchChatSessions = searchChatSessions: Invoke<'chatH
 contract.type ElectronAPI.searchRecords = searchRecords: Invoke<'recordViews:search'>
 contract.type ElectronAPI.selectDirectory = selectDirectory: Invoke<'dialog:selectDirectory'>
 contract.type ElectronAPI.sendBackApproval = sendBackApproval: Invoke<'approvals:sendBack'>
+contract.type ElectronAPI.sendBrowserRecording = sendBrowserRecording: Invoke<'browserRecording:send'>
 contract.type ElectronAPI.sendJobFeedback = sendJobFeedback: Invoke<'jobs:feedback'>
 contract.type ElectronAPI.sendOutboundMail = sendOutboundMail: Invoke<'outboundMail:send'>
 contract.type ElectronAPI.setAgentEnvPassthrough = setAgentEnvPassthrough: Invoke<'config:setAgentEnvPassthrough'>
@@ -667,10 +677,12 @@ contract.type ElectronAPI.skipMinutes = skipMinutes: Invoke<'minutes:skip'>
 contract.type ElectronAPI.sparseGetExclusions = sparseGetExclusions: Invoke<'git:sparseGetExclusions'>
 contract.type ElectronAPI.sparseSetExclusions = sparseSetExclusions: Invoke<'git:sparseSetExclusions'>
 contract.type ElectronAPI.sparseUncommittedChanges = sparseUncommittedChanges: Invoke<'git:sparseUncommittedChanges'>
+contract.type ElectronAPI.startBrowserRecording = startBrowserRecording: Invoke<'browserRecording:start'>
 contract.type ElectronAPI.startClaudeSignIn = startClaudeSignIn: Invoke<'claudeSignIn:start'>
 contract.type ElectronAPI.startDrag = startDrag: (...args: SendArgs<'fs:startDrag'>) => void
 contract.type ElectronAPI.startPersonStep = startPersonStep: Invoke<'pluginSteps:start'>
 contract.type ElectronAPI.startTool = startTool: Invoke<'tools:start'>
+contract.type ElectronAPI.stopBrowserRecording = stopBrowserRecording: Invoke<'browserRecording:stop'>
 contract.type ElectronAPI.stopDrivePick = stopDrivePick: Invoke<'tasks:cancelDrivePick'>
 contract.type ElectronAPI.stopTool = stopTool: Invoke<'tools:stop'>
 contract.type ElectronAPI.submitJobProposal = submitJobProposal: Invoke<'jobProposals:submit'>
@@ -875,6 +887,12 @@ contract.type IpcInvokeChannels.'browserPlans:confirm' = 'browserPlans:confirm':
 contract.type IpcInvokeChannels.'browserPlans:get' = 'browserPlans:get': { args: [companyId: string, planId: string]; result: BrowserPlanGetResult }
 contract.type IpcInvokeChannels.'browserPlans:list' = 'browserPlans:list': { args: [companyId: string]; result: BrowserPlanListResult }
 contract.type IpcInvokeChannels.'browserPlans:run' = 'browserPlans:run': { args: [companyId: string, planId: string, contentHash: string]; result: BrowserPlanRunAnswer }
+contract.type IpcInvokeChannels.'browserRecording:discard' = 'browserRecording:discard': { args: [companyId: string]; result: BrowserRecordingResult }
+contract.type IpcInvokeChannels.'browserRecording:get' = 'browserRecording:get': { args: [companyId: string]; result: BrowserRecordingResult }
+contract.type IpcInvokeChannels.'browserRecording:removeLine' = 'browserRecording:removeLine': { args: [companyId: string, lineId: number]; result: BrowserRecordingResult }
+contract.type IpcInvokeChannels.'browserRecording:send' = 'browserRecording:send': { args: [companyId: string]; result: BrowserRecordingResult }
+contract.type IpcInvokeChannels.'browserRecording:start' = 'browserRecording:start': { args: [companyId: string, host: string]; result: BrowserRecordingResult }
+contract.type IpcInvokeChannels.'browserRecording:stop' = 'browserRecording:stop': { args: [companyId: string]; result: BrowserRecordingResult }
 contract.type IpcInvokeChannels.'calendar:today' = 'calendar:today': { args: [companyId: string, options?: CalendarTodayOptions]; result: CalendarTodayResult }
 contract.type IpcInvokeChannels.'chat-server:getInfo' = 'chat-server:getInfo': { args: []; result: ChatServerInfo | null }
 contract.type IpcInvokeChannels.'chatHistory:deleteSession' = 'chatHistory:deleteSession': { args: [companyId: string, sessionId: string]; result: boolean }
@@ -1231,6 +1249,12 @@ main.handle browserPlans:confirm @ features/browser/plans-ipc.ts (companyId, exe
 main.handle browserPlans:get @ features/browser/plans-ipc.ts (companyId, planId)
 main.handle browserPlans:list @ features/browser/plans-ipc.ts (companyId)
 main.handle browserPlans:run @ features/browser/plans-ipc.ts (companyId, planId, contentHash)
+main.handle browserRecording:discard @ features/browser/recording-ipc.ts (companyId)
+main.handle browserRecording:get @ features/browser/recording-ipc.ts (companyId)
+main.handle browserRecording:removeLine @ features/browser/recording-ipc.ts (companyId, lineId)
+main.handle browserRecording:send @ features/browser/recording-ipc.ts (companyId)
+main.handle browserRecording:start @ features/browser/recording-ipc.ts (companyId, host)
+main.handle browserRecording:stop @ features/browser/recording-ipc.ts (companyId)
 main.handle calendar:today @ features/calendar/ipc.ts (companyId: string, options?: CalendarTodayOptions)
 main.handle chat-server:getInfo @ main.ts ()
 main.handle chatHistory:deleteSession @ features/chat-history/ipc.ts (companyId: string, sessionId: string)
@@ -1562,6 +1586,8 @@ preload deleteItem -> invoke fs:delete($0)
 preload deleteItem : (path: string) => Promise<FileOpResult>
 preload deleteOwnBrokerKey -> invoke brokerKeys:delete($0, $1)
 preload deleteOwnBrokerKey : (companyId: string, service: string) => Promise<OwnKeysResult>
+preload discardBrowserRecording -> invoke browserRecording:discard($0)
+preload discardBrowserRecording : (companyId: string) => Promise<BrowserRecordingResult>
 preload discardJobCandidate -> invoke jobProposals:discard($0, $1)
 preload discardJobCandidate : (companyId: string, candidateId: string) => Promise<JobCandidateDiscardResult>
 preload discardOutboundMail -> invoke outboundMail:discard($0, $1)
@@ -1616,6 +1642,8 @@ preload getBrowserPc -> invoke browserDevice:get($0)
 preload getBrowserPc : (companyId: string) => Promise<BrowserPcResult>
 preload getBrowserPlan -> invoke browserPlans:get($0, $1)
 preload getBrowserPlan : (companyId: string, planId: string) => Promise<BrowserPlanGetResult>
+preload getBrowserRecording -> invoke browserRecording:get($0)
+preload getBrowserRecording : (companyId: string) => Promise<BrowserRecordingResult>
 preload getBrowserSites -> invoke browser:sites($0)
 preload getBrowserSites : (companyId: string) => Promise<BrowserSitesResult>
 preload getBrowserWriteCard -> invoke browserLines:writeCard($0, $1)
@@ -1912,6 +1940,8 @@ preload reloadDocView -> invoke docView:reload($0)
 preload reloadDocView : (viewId: number) => Promise<void>
 preload removeAbsence -> invoke absences:remove($0, $1)
 preload removeAbsence : (companyId: string, absenceId: string) => Promise<AbsenceRemoveResult>
+preload removeBrowserRecordingLine -> invoke browserRecording:removeLine($0, $1)
+preload removeBrowserRecordingLine : (companyId: string, lineId: number) => Promise<BrowserRecordingResult>
 preload removeOutboundMailAttachment -> invoke outboundMail:removeAttachment($0, $1, $2, $3)
 preload removeOutboundMailAttachment : (companyId: string, messageId: string, sha256: string, expectedVersion: number) => Promise<OutboundMailResult>
 preload renameItem -> invoke fs:rename($0, $1)
@@ -1960,6 +1990,8 @@ preload selectDirectory -> invoke dialog:selectDirectory()
 preload selectDirectory : () => Promise<string | null>
 preload sendBackApproval -> invoke approvals:sendBack($0, $1, $2)
 preload sendBackApproval : (companyId: string, approvalId: string, reason: string) => Promise<ApprovalResult>
+preload sendBrowserRecording -> invoke browserRecording:send($0)
+preload sendBrowserRecording : (companyId: string) => Promise<BrowserRecordingResult>
 preload sendJobFeedback -> invoke jobs:feedback($0, $1, $2)
 preload sendJobFeedback : (companyId: string, occurrenceId: string, kind: string) => Promise<JobFeedbackResult>
 preload sendOutboundMail -> invoke outboundMail:send($0, $1, $2, $3, $4, $5)
@@ -2020,6 +2052,8 @@ preload sparseSetExclusions -> invoke git:sparseSetExclusions($0, $1)
 preload sparseSetExclusions : (repoPath: string, excluded: string[]) => Promise<SparseSetExclusionsResult>
 preload sparseUncommittedChanges -> invoke git:sparseUncommittedChanges($0, $1)
 preload sparseUncommittedChanges : (repoPath: string, folders: string[]) => Promise<SparseUncommittedChangesResult>
+preload startBrowserRecording -> invoke browserRecording:start($0, $1)
+preload startBrowserRecording : (companyId: string, host: string) => Promise<BrowserRecordingResult>
 preload startClaudeSignIn -> invoke claudeSignIn:start($0)
 preload startClaudeSignIn : (root?: string | undefined) => Promise<ClaudeSignInResult>
 preload startDrag -> send fs:startDrag($0)
@@ -2028,6 +2062,8 @@ preload startPersonStep -> invoke pluginSteps:start($0, $1, $2, $3, $4)
 preload startPersonStep : (companyId: string, recordId: string, pluginId: string, step: string, companyRoot?: string | undefined) => Promise<PluginStepStartResult>
 preload startTool -> invoke tools:start($0, $1, $2)
 preload startTool : (toolPath: string, startCommand?: string | undefined, companyId?: string | undefined) => Promise<StartToolResult>
+preload stopBrowserRecording -> invoke browserRecording:stop($0)
+preload stopBrowserRecording : (companyId: string) => Promise<BrowserRecordingResult>
 preload stopDrivePick -> invoke tasks:cancelDrivePick($0)
 preload stopDrivePick : (companyId: string) => Promise<{ stopped: boolean; }>
 preload stopTool -> invoke tools:stop($0)
