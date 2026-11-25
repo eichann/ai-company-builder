@@ -885,6 +885,8 @@ describe('an event run by the responsible person’s PC AI (schema 3)', () => {
 
 describe('a set watch — 「これから来る、条件に合うもの全部」 (schema 5, 4b-4 PR7)', () => {
   const OPENED = (): JobSetTrigger => JSON.parse(JSON.stringify(JOB_SET_WATCH_OPENED[0]))
+  // The second line (4b-4 A3): 「AI が議事録を読み終えたとき」, the one a new set watch starts at (A3b, owner decision D2).
+  const FIRST_READ = JOB_SET_WATCH_OPENED.findIndex((t) => t.event === 'first_read')
   const REASONS = { reasons: [{ code: 'internal', label: '社内の会議' }, { code: 'asked', label: '提案を求められた' }] }
   const setDef = (over: Record<string, unknown> = {}): JobDefinition => ({
     ...def(), schema: 5, name: '提案書のたたき台', actingUser: 'u_member', trigger: OPENED(), check: { kind: 'matched_record' },
@@ -910,13 +912,13 @@ describe('a set watch — 「これから来る、条件に合うもの全部」
     if (!parsed.ok) return
     const d = parsed.definition
     expect(d).toMatchObject({ schema: 5, placement: 'a', check: { kind: 'matched_record' }, run: { procedure: { source: 'department_skill', place: '営業部', skill: 'proposal-auto' } } })
-    expect(JSON.stringify(d.trigger)).toBe(JSON.stringify(JOB_SET_WATCH_OPENED[0]))
+    expect(JSON.stringify(d.trigger)).toBe(JSON.stringify(JOB_SET_WATCH_OPENED[FIRST_READ]))
     // Left-overs of another kind of job grant nothing: no record routes, no drafts, no place outside — the minutes route alone.
     expect(d.grant).toMatchObject({ routes: ['GET /minutes/:recordId/text'], outbound: 'none', creates: ['task'], tools: ['records', 'files_read', 'files_write'] })
     expect(d.grant.deliverTo).toBeUndefined()
     expect(d.grant.reads.skills?.map((p) => [p.place, p.skill])).toEqual([['営業部', 'proposal'], ['経営企画', 'pricing']])
     // Read back, the same choices.
-    expect(formFromDefinition(d)).toMatchObject({ when: 'set', kind: 'pc', setCombo: 0, skillPlace: '営業部', skillName: 'proposal-auto', readSkills: 'proposal\n経営企画/pricing' })
+    expect(formFromDefinition(d)).toMatchObject({ when: 'set', kind: 'pc', setCombo: FIRST_READ, skillPlace: '営業部', skillName: 'proposal-auto', readSkills: 'proposal\n経営企画/pricing' })
     // A combination that is not opened is never sent: the form offers no words of its own.
     const notOpened = definitionFromForm({ ...setForm(), setCombo: JOB_SET_WATCH_OPENED.length })
     expect(notOpened.ok).toBe(false)
@@ -930,9 +932,13 @@ describe('a set watch — 「これから来る、条件に合うもの全部」
   it('a new one starts at the owner’s numbers (30 minutes, 10 a day, one day’s wait, a missed one let go); editing keeps a version’s own', () => {
     const fresh = switchJobForm(emptyJobForm('u_member'), { when: 'set' }, true)
     expect(fresh).toMatchObject({ kind: 'pc', limits: { minutes: 30, runsPerDay: 10 }, expiresAfterMinutes: 1440, missedPolicy: 'skip' })
+    // 「いつ作るか」 starts at the recommended line, 「AI が議事録を読み終えたとき」 (owner decision D2).
+    expect(FIRST_READ).toBeGreaterThan(0)
+    expect(fresh.setCombo).toBe(FIRST_READ)
     const editing = formFromDefinition(setDef({ grant: { ...setDef().grant, limits: { minutes: 60, runsPerDay: 3 } }, missed: { policy: 'skip', expiresAfterMinutes: 4320 } }))
     const back = switchJobForm(switchJobForm(editing, { when: 'time' }, false), { when: 'set' }, false)
-    expect(back).toMatchObject({ limits: { minutes: 60, runsPerDay: 3 }, expiresAfterMinutes: 4320 })
+    // An edit keeps the version's own line (the first, 「議事録を確認する」 completed): never moved to the recommended one.
+    expect(back).toMatchObject({ limits: { minutes: 60, runsPerDay: 3 }, expiresAfterMinutes: 4320, setCombo: 0 })
   })
 
   it('edited only when the form says it back exactly (the server’s trees and reasons left out); a combination not opened never', () => {
@@ -959,10 +965,25 @@ describe('a set watch — 「これから来る、条件に合うもの全部」
     await userEvent.type(within(dialog).getByRole('textbox', { name: '名前' }), '提案書のたたき台')
     await userEvent.selectOptions(within(dialog).getByRole('combobox', { name: '責任者' }), 'u_member')
     await userEvent.selectOptions(within(dialog).getByRole('combobox', { name: 'いつ動くか' }), 'set')
-    // Only the opened combinations are offered, in their words; what each takes and never takes is said.
-    const combos = within(within(dialog).getByRole('combobox', { name: '条件' })).getAllByRole('option')
-    expect(combos.map((o) => o.textContent)).toEqual(JOB_SET_WATCH_OPENED.map((t) => jobSetTriggerText(t)))
-    expect(within(dialog).getByRole('note', { name: '条件の中身' })).toHaveTextContent('社外の人が1人以上出た会議だけ')
+    // 「いつ作るか」 (A3b, owner decision D2): every opened line and only those, the recommended 「AI が読み終えたとき」 first and
+    // chosen; what the chosen one takes and never takes is said, its subject the responsible person (never 「自分」).
+    const when = within(dialog).getByRole('radiogroup', { name: 'いつ作るか' })
+    const radios = within(when).getAllByRole('radio')
+    expect(radios).toHaveLength(JOB_SET_WATCH_OPENED.length)
+    expect(radios[0]).toHaveTextContent('AI が議事録を読み終えたとき（すぐ）')
+    expect(radios[0]).toHaveTextContent('おすすめ（法人営業の担当には、こちら）')
+    expect(radios[0]).toHaveAttribute('aria-checked', 'true')
+    expect(radios[1]).toHaveTextContent('責任者が「議事録を確認する」を済ませたとき')
+    expect(radios[1]).toHaveAttribute('aria-checked', 'false')
+    const note = within(dialog).getByRole('note', { name: '条件の中身' })
+    expect(note).toHaveTextContent(setWatchTriggerText(JOB_SET_WATCH_OPENED[FIRST_READ]))
+    expect(note).toHaveTextContent(/^責任者が出た会議の議事録を/)
+    for (const line of setWatchConditionLines(JOB_SET_WATCH_OPENED[FIRST_READ])) expect(note).toHaveTextContent(line)
+    // The admin chooses the first line: what is said and sent follow.
+    await userEvent.click(radios[1])
+    expect(radios[1]).toHaveAttribute('aria-checked', 'true')
+    expect(note).toHaveTextContent('社外の人が1人以上出た会議だけ')
+    expect(note).toHaveTextContent(/^責任者が担当の「議事録を確認する」/)
     expect(dialog).toHaveTextContent('上司やアシスタントが押した会議')
     expect(dialog).toHaveTextContent(SET_WATCH_SEEN_NOTE)
     // A set watch is always a Skill on the PC: 「すること」, a time job's check and a place outside are not offered.
@@ -979,7 +1000,7 @@ describe('a set watch — 「これから来る、条件に合うもの全部」
     const post = calls.find((c) => c.method === 'POST' && c.url.endsWith('/jobs'))!
     expect(post.headers['X-ACB-Job-Schemas']).toBe('1,2,3,4,5')
     expect((post.body as { definition: JobDefinition }).definition).toMatchObject({
-      schema: 5, trigger: { kind: 'record_set' }, check: { kind: 'matched_record' },
+      schema: 5, trigger: OPENED(), check: { kind: 'matched_record' },
       run: { procedure: { source: 'department_skill', place: '営業部', skill: 'proposal-auto' } },
       grant: { routes: ['GET /minutes/:recordId/text'], reads: { skills: [{ place: '営業部', skill: 'proposal' }] }, limits: { minutes: 30, runsPerDay: 10 } },
       missed: { policy: 'skip', expiresAfterMinutes: 1440 },
