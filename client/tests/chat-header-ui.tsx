@@ -113,6 +113,14 @@ function editSession() {
     { id: 'ea2', role: 'assistant', content: '単価を10月版にしました。', timestamp: at(7) },
   ] }
 }
+// history=many: a closed consultation opened from the list (its words, its topic as listed).
+function manySession(i: number) {
+  const at = new Date(now - (i + 1) * 3_600_000).toISOString()
+  return { id: `closed-${i}`, companyId: 'preview-company', title: `終わった相談 ${i + 1}`, createdAt: at, updatedAt: at, revision: 1, ...(MANY_TOPICS[i] ? { topicRecordId: MANY_TOPICS[i] } : {}), messages: [
+    { id: `mu${i}`, role: 'user', content: 'まとめて', timestamp: at },
+    { id: `ma${i}`, role: 'assistant', content: '以上です。', timestamp: at },
+  ] }
+}
 if (editHistory) {
   try { localStorage.setItem('chatTabs:preview-company', JSON.stringify({ tabs: [{ title: '見積書の相談', sessionId: 'edit-history' }], activeIndex: 0 })) } catch { /* preview only */ }
 }
@@ -207,7 +215,8 @@ installElectronAPI({
   // What the company server lets this member read of those topics: task-0000ff is not readable.
   getConsultationTopics: async (_company, ids) => ({ success: true, topics: Object.fromEntries(ids.map(id => [id, TOPICS[id] ?? null])) }),
   getChatSession: async (_company: string, id: string) => longHistory && id === 'long-history' ? longSession() as ChatSession
-    : editHistory && id === 'edit-history' ? editSession() as ChatSession : null,
+    : editHistory && id === 'edit-history' ? editSession() as ChatSession
+      : manyHistory && /^closed-\d+$/.test(id) ? manySession(Number(id.slice(7))) as ChatSession : null,
   getAgentInteractions: async () => [],
   onAgentInteraction: interactions.subscribe,
   onAgentInteractionClosed: interactionsClosed.subscribe,

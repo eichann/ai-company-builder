@@ -890,6 +890,27 @@ test('the list narrows to consultations about the record open in the middle; 「
   await expect(list.getByText('終わった相談 1', { exact: true })).toHaveCount(0)
 })
 
+test('narrowed to a record, the consultation on screen that is not about it is listed apart, never under the record', async ({ page }) => {
+  // Owner report 2026-11-25: a new やること opened in the middle while an unrelated consultation was on screen —
+  // the list read 「「…」についての相談」 with that consultation under it, as if it were about the やること.
+  await page.goto('/tests/chat-header-ui.html?history=many&focus=task-0000aa')
+  const list = page.getByRole('complementary', { name: 'AIへの相談' })
+  await list.getByRole('button', { name: 'すべて表示' }).click()
+  await list.locator('[data-conversation-id="closed-1"]').getByRole('button', { name: /終わった相談 2/ }).click()
+  await expect(list.locator('[data-conversation-id="closed-1"]')).toContainText('表示中')
+  await list.getByRole('button', { name: '「見積書を作り直す」の相談だけにする' }).click()
+  await expect(list).toContainText('「見積書を作り直す」についての相談')
+  const apart = list.getByRole('region', { name: '表示中の相談' })
+  await expect(apart).toContainText('このことについての相談ではありません')
+  await expect(apart.locator('[data-conversation-id="closed-1"]')).toBeVisible()
+  // The record's own consultations are only those about it.
+  for (const label of ['開いている相談', '終わったもの']) await expect(list.getByRole('region', { name: label }).locator('[data-conversation-id="closed-1"]')).toHaveCount(0)
+  await expect(list.getByRole('region', { name: '終わったもの' }).locator('[data-conversation-id="closed-3"]')).toBeVisible()
+  // Opening a consultation about the record itself: nothing apart.
+  await list.locator('[data-conversation-id="closed-3"]').getByRole('button', { name: /終わった相談 4/ }).click()
+  await expect(list.getByRole('region', { name: '表示中の相談' })).toHaveCount(0)
+})
+
 test('the search box finds consultations by the やること / 案件 they are about, live, never mid-IME, and Esc restores the list', async ({ page }) => {
   await page.goto('/tests/chat-header-ui.html?history=many')
   const list = page.getByRole('complementary', { name: 'AIへの相談' })
