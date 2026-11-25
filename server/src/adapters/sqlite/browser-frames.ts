@@ -38,9 +38,10 @@ export function sqliteBrowserFrameRepository(conn: Database.Database, companyId:
       const r = conn.prepare(`SELECT ${RUN_COLUMNS} FROM browser_frame_runs WHERE company_id = ? AND host = ? AND state <> 'ended'`).get(companyId, host) as RunDb | undefined
       return r ? toRun(r) : null
     },
-    liveRunsOf(userId) {
-      return (conn.prepare(`SELECT ${RUN_COLUMNS} FROM browser_frame_runs WHERE company_id = ? AND user_id = ? AND state <> 'ended' ORDER BY created_at, id`)
-        .all(companyId, userId) as RunDb[]).map(toRun)
+    unsettledRunsOf(userId) {
+      return (conn.prepare(`SELECT ${RUN_COLUMNS} FROM browser_frame_runs r WHERE r.company_id = ? AND r.user_id = ? AND (r.state <> 'ended'
+          OR EXISTS (SELECT 1 FROM browser_frame_writes w WHERE w.company_id = ? AND w.run_id = r.id AND w.state = 'permitted'))
+        ORDER BY r.created_at, r.id`).all(companyId, userId, companyId) as RunDb[]).map(toRun)
     },
     insertRun(run, frames) {
       conn.prepare(`INSERT INTO browser_frame_runs (company_id, ${RUN_COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(

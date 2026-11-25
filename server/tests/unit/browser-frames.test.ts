@@ -108,7 +108,7 @@ beforeEach(() => {
     siteGrants: { allows: (m, host, effect) => host === DOMAIN && (effect === 'read' ? level[m.userId] !== 'none' : level[m.userId] === 'write') },
     skills: {
       approvedFrames: async (m, s) => { const r = await skills.approvedFrames(m, s); betweenReadAndWrite?.(); return r },
-      stillApproved: (m, s, h) => skills.stillApproved(m, s, h),
+      stillApproved: (m, s, h, a) => skills.stillApproved(m, s, h, a),
       runCardShown: (m, s, h, f) => skills.runCardShown(m, s, h, f),
     },
   })
@@ -265,6 +265,34 @@ describe('frames: a run of free operation', () => {
     expect(conn.prepare('SELECT COUNT(*) AS n FROM browser_frame_runs').get()).toEqual({ n: 0 })
   })
 
+  it('a pre-approved approval turned per-run between the git read and the start: no run opens without the card', async () => {
+    put(yaml)
+    await approveSkill('pre_approved')
+    betweenReadAndWrite = () => {
+      betweenReadAndWrite = null
+      const item = store[CO][SKILL]
+      value(skills.revoke(owner, { skill: SKILL }))
+      conn.prepare(`INSERT INTO browser_skill_approvals (company_id, skill_path, declaration_hash, mode, how, approved_by, approved_at, files_seen)
+        VALUES (?, ?, ?, 'per_run', 'approved', ?, ?, ?)`).run(CO, `.claude/skills/${SKILL}`, `sha256:${sha(item.declaration as string)}`, owner.userId, iso(now), item.files)
+    }
+    expect(code(await frames.start(alice, { skill: SKILL }, PC))).toBe('BROWSER_SKILL_CHANGED')
+    const again = value(await frames.start(alice, { skill: SKILL }, PC))
+    expect(again).toMatchObject({ state: 'waiting', needsApproval: true })
+  })
+
+  it('a pre-approved approval turned per-run between the git read and a permit: refused', async () => {
+    put(yaml)
+    await approveSkill('pre_approved')
+    const run = value(await frames.start(alice, { skill: SKILL }, PC))
+    betweenReadAndWrite = () => {
+      betweenReadAndWrite = null
+      const item = store[CO][SKILL]
+      conn.prepare(`INSERT INTO browser_skill_approvals (company_id, skill_path, declaration_hash, mode, how, approved_by, approved_at, files_seen)
+        VALUES (?, ?, ?, 'per_run', 'approved', ?, ?, ?)`).run(CO, `.claude/skills/${SKILL}`, `sha256:${sha(item.declaration as string)}`, owner.userId, iso(now), item.files)
+    }
+    expect(code(await permit(run.runId, 1))).toBe('BROWSER_SKILL_CHANGED')
+  })
+
   it('the Skill\'s declaration changed mid-run: the run\'s frames are no longer the approved ones', async () => {
     put(yaml)
     await approveSkill('pre_approved')
@@ -355,6 +383,16 @@ describe('frames: a run of free operation', () => {
     const after = value(frames.get(alice, run.runId))
     expect(after.state).toBe('ended')
     expect(after.writes[0].state).toBe('unknown')
+  })
+
+  it('leaving after ending a run whose write is still on its way: that write is unknown, the run\'s end kept', async () => {
+    const run = await openAdhoc()
+    value(await permit(run.runId, 1))
+    value(frames.end(alice, run.runId))
+    frames.memberLeft(CO, alice.userId)
+    const row = conn.prepare('SELECT state, end_reason FROM browser_frame_runs WHERE company_id = ? AND id = ?').get(CO, run.runId)
+    expect(row).toEqual({ state: 'ended', end_reason: 'ended' })
+    expect(conn.prepare('SELECT state FROM browser_frame_writes WHERE company_id = ? AND run_id = ?').get(CO, run.runId)).toEqual({ state: 'unknown' })
   })
 
   it('reports: the same again is same, a contradiction is refused, not_sent after unknown is only recorded', async () => {

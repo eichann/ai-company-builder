@@ -2904,8 +2904,9 @@ with it yet. Only company-wide Skills (`.claude/skills/<name>`; a shelf item wit
 - **For step ⑤**: `runCardShown`'s `files` must be the value its own `approvedFrames` call returned, never one the app sends
   (else an app could switch the card off); `approvedFrames` answers about the approval only — the permit still asks the
   company's mode, the site, the person's level on it, this PC and the stops. Since ⑤a ("Writes within frames") the
-  frames service does exactly that, and asks `stillApproved(member, skill, hash)` (synchronous, no git read) inside each
-  transaction after its `approvedFrames` read, so an approval revoked in between counts.
+  frames service does exactly that, and asks `stillApproved(member, skill, hash, approval)` (synchronous, no git read;
+  `approval` = the row `approvedFrames` answered) inside each transaction after its `approvedFrames` read, so an approval
+  revoked, superseded or given another mode in between (a `pre_approved` turned `per_run`) counts.
 - **`approvedFrames(member, skill)`** (step ⑤'s question at every permit; a few git reads): the Skill read now, the declaration
   valid (`BROWSER_SKILL_BAD_DECLARATION`), its domain registered now (`BROWSER_SKILL_DOMAIN_NOT_REGISTERED`), the latest
   approval for this very hash and not revoked (`BROWSER_SKILL_NOT_APPROVED`), else `BROWSER_SKILL_NOT_FOUND` → `{ frames,
@@ -3100,8 +3101,8 @@ connection, the plan card and the after-read card).
   only `permitted` → `done` / `verified` / `not_sent` / `unknown` and `unknown` → `done` / `verified`).
 - **Where the frames come from** (`start`, `POST /browser-frame-runs { skill } | { plan: { domain, writes } }` +
   `conversationId?`, the PC's key header): a company Skill's **approved** declaration, read by the server itself
-  (`approvedFrames`, never content an app sent; its approval looked at again inside the start's transaction,
-  `stillApproved`), or an **ad-hoc plan** checked with the declaration's own rules (`browserSkillDeclarationFrom`: limits,
+  (`approvedFrames`, never content an app sent; the very approval row it rested on looked at again inside the start's
+  transaction, `stillApproved` — a mode changed in between opens nothing), or an **ad-hoc plan** checked with the declaration's own rules (`browserSkillDeclarationFrom`: limits,
   paths, `_method`, no login / CSRF field) — **never pre-approvable**. The run opens at once only for a `pre_approved`
   Skill version whose text nobody changed since (`needsRunCard` false); everything else waits for the person's approval
   (owner decision D1). The answer carries the frames and `planHash` (sha256 of the canonical plan: company, member,
@@ -3133,7 +3134,8 @@ connection, the plan card and the after-read card).
   after `run` (30 min) — `expired`, its frames gone.
 - **End** (`POST …/:runId/end`): the run `ended`, its unused frames gone (the view's `left` is 0); a write still
   `permitted` is left to its report or time-out. **Leaving the company** (`memberLeft`, in the removal's transaction):
-  every run of the member ends (`left`) and a write still `permitted` becomes `unknown` at once (nobody will report it).
+  every run of the member ends (`left`) and a write still `permitted` becomes `unknown` at once (nobody will report it) —
+  also a write of a run they had already ended (its end kept).
 - **Who**: a run is its member's own; anyone else's, another company's: the same 404 `BROWSER_FRAME_RUN_NOT_FOUND`
   (permission matrix rows + `CROSS`). The member's session only (no secret: the run's PC is checked at every gated step).
 - **Decisions (safe side)**: a unit is used by the permit, not given back on `not_sent` (a run may ask again with a new

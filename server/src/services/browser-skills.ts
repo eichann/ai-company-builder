@@ -94,6 +94,8 @@ export interface BrowserSkillApproved {
   files: string
   frames: BrowserSkillFrames
   mode: BrowserSkillApprovalMode
+  /** The approval row this answer rests on (hand it to `stillApproved` inside the caller's transaction). */
+  approval: number
   /** The Skill's other files changed since the approver or the last run's card saw them. */
   textChanged: boolean
   /** The run must show the per-run card: `per_run`, or the text changed. */
@@ -301,19 +303,20 @@ export function createBrowserSkillService(deps: BrowserSkillDeps) {
       const textChanged = approval.filesSeen !== null && approval.filesSeen !== content.files
       if (textChanged) noticeTextChanged(member.companyId, j, null)
       return ok({
-        skill, declarationHash: j.hash, files: content.files, frames: browserSkillFrames(j.declaration), mode: approval.mode,
+        skill, declarationHash: j.hash, files: content.files, frames: browserSkillFrames(j.declaration), mode: approval.mode, approval: approval.seq,
         textChanged, needsRunCard: approval.mode === 'per_run' || approval.filesSeen !== content.files,
       })
     },
 
     /**
-     * Step ⑤'s second look inside the permit's transaction (synchronous: no git read): the latest approval of this skill
-     * is still in force for exactly this declaration hash. `approvedFrames` read the declaration before the transaction;
-     * this catches an approval revoked or superseded in between.
+     * Step ⑤'s second look inside its transaction (synchronous: no git read): the approval `approvedFrames` answered
+     * (`approval`, its row) is still the skill's latest, in force, for exactly this declaration hash. `approvedFrames`
+     * read before the transaction; this catches an approval revoked, superseded or given another mode in between (a
+     * `pre_approved` replaced by `per_run` is a new row: Codex review of ⑤a).
      */
-    stillApproved(member: Pick<Member, 'companyId'>, skill: string, declarationHash: string): boolean {
+    stillApproved(member: Pick<Member, 'companyId'>, skill: string, declarationHash: string, approval: number): boolean {
       if (!isValidSkillName(skill)) return false
-      return inForce(repo(member.companyId).latest(skillPathOf(skill)), declarationHash) !== null
+      return inForce(repo(member.companyId).latest(skillPathOf(skill)), declarationHash)?.seq === approval
     },
 
     /** Step ⑤: the per-run card was shown for this version (`files` as `approvedFrames` gave it); false when the approval moved. */

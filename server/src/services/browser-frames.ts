@@ -116,6 +116,8 @@ interface StartFrames {
   writes: readonly BrowserSkillWrite[]
   /** The run may open at once (a pre-approved Skill version whose text nobody changed since). */
   preApproved: boolean
+  /** A Skill's approval row the frames rest on (checked again inside the start's transaction). */
+  approval: number | null
 }
 
 export function createBrowserFrameService(deps: BrowserFrameDeps) {
@@ -193,10 +195,15 @@ export function createBrowserFrameService(deps: BrowserFrameDeps) {
     return ok({ deviceId: pc.value.deviceId })
   }
 
-  /** A Skill run's approval as read now (before a transaction): still this very declaration and folder version? */
-  function sameSkill(run: FrameRunRow, now: Outcome<BrowserSkillApproved>): Refusal | null {
+  /**
+   * A Skill run's approval as read before the transaction: still the run's very declaration (and domain), and — asked
+   * inside the transaction — the approval row that read rested on still the skill's latest, in force (not revoked,
+   * superseded or given another mode in between).
+   */
+  function sameSkill(member: Member, run: FrameRunRow, now: Outcome<BrowserSkillApproved>): Refusal | null {
     if (!now.ok) return now
-    if (now.value.declarationHash !== run.declarationHash || now.value.frames.domain !== run.host) {
+    if (now.value.declarationHash !== run.declarationHash || now.value.frames.domain !== run.host
+      || !deps.skills.stillApproved(member, run.skill as string, run.declarationHash as string, now.value.approval)) {
       return refuse('conflict', W.skillChanged, { code: 'BROWSER_SKILL_CHANGED' })
     }
     return null
@@ -217,7 +224,7 @@ export function createBrowserFrameService(deps: BrowserFrameDeps) {
       const a = approved.value
       return ok({
         host: a.frames.domain, source: 'skill', skill: a.skill, declarationHash: a.declarationHash, files: a.files, writes: a.frames.writes,
-        preApproved: a.mode === 'pre_approved' && !a.needsRunCard,
+        preApproved: a.mode === 'pre_approved' && !a.needsRunCard, approval: a.approval,
       })
     }
     const plan = body.plan
@@ -227,7 +234,7 @@ export function createBrowserFrameService(deps: BrowserFrameDeps) {
     if (!parsed.ok) return refuse('bad-request', BROWSER_SKILL_PROBLEM_WORDS[parsed.problem], { code: 'BROWSER_FRAME_BAD_PLAN' })
     // Its domain must be a registered one with writes allowed: the gate below (the same check as every permit's).
     // An ad-hoc plan is never pre-approvable: the person approves it on the card.
-    return ok({ host: parsed.declaration.domain, source: 'adhoc', skill: null, declarationHash: null, files: null, writes: parsed.declaration.writes, preApproved: false })
+    return ok({ host: parsed.declaration.domain, source: 'adhoc', skill: null, declarationHash: null, files: null, writes: parsed.declaration.writes, preApproved: false, approval: null })
   }
 
   return {
@@ -247,8 +254,8 @@ export function createBrowserFrameService(deps: BrowserFrameDeps) {
       return transactions.run((): Outcome<BrowserFrameRunView> => {
         const passed = gate(member, f.host, deviceKey, null)
         if (!passed.ok) return passed
-        // A Skill's approval revoked since the read above: nothing is started.
-        if (f.source === 'skill' && !deps.skills.stillApproved(member, f.skill as string, f.declarationHash as string)) {
+        // A Skill's approval revoked or replaced (another mode included) since the read above: nothing is started.
+        if (f.source === 'skill' && !deps.skills.stillApproved(member, f.skill as string, f.declarationHash as string, f.approval as number)) {
           return refuse('conflict', W.skillChanged, { code: 'BROWSER_SKILL_CHANGED' })
         }
         const now = clock.nowMs()
@@ -295,9 +302,8 @@ export function createBrowserFrameService(deps: BrowserFrameDeps) {
         const passed = gate(member, run.host, deviceKey, run)
         if (!passed.ok) { endRun(member.companyId, run, String(passed.body.code ?? 'refused'), now); return passed }
         if (skillNow) {
-          const moved = sameSkill(run, skillNow)
+          const moved = sameSkill(member, run, skillNow)
             ?? (skillNow.ok && skillNow.value.files !== run.files ? refuse('conflict', W.skillChanged, { code: 'BROWSER_SKILL_CHANGED' }) : null)
-            ?? (deps.skills.stillApproved(member, run.skill as string, run.declarationHash as string) ? null : refuse('conflict', W.skillChanged, { code: 'BROWSER_SKILL_CHANGED' }))
           if (moved) { endRun(member.companyId, run, String(moved.body.code ?? 'refused'), now); return moved }
         }
         if (!repo(member.companyId).setRunState(run.id, 'waiting', 'open', { approval: 'card', approvedAt: iso(now) })) {
@@ -337,7 +343,7 @@ export function createBrowserFrameService(deps: BrowserFrameDeps) {
         const refused: Refusal | null = !passed.ok
           ? passed
           : skillNow
-            ? sameSkill(run, skillNow) ?? (deps.skills.stillApproved(member, run.skill as string, run.declarationHash as string) ? null : refuse('conflict', W.skillChanged, { code: 'BROWSER_SKILL_CHANGED' }))
+            ? sameSkill(member, run, skillNow)
             : null
         if (refused) {
           // The gate closed (stop, level, setting, PC, approval): for good in this run — its frames vanish.
@@ -408,11 +414,12 @@ export function createBrowserFrameService(deps: BrowserFrameDeps) {
     memberLeft(companyId: string, userId: string): void {
       const now = clock.nowMs()
       const r = repo(companyId)
-      for (const run of r.liveRunsOf(userId)) {
+      // Ended runs too, while a write of theirs is still permitted (ended by the member, then they left: Codex review).
+      for (const run of r.unsettledRunsOf(userId)) {
         for (const w of r.writes(run.id)) {
           if (w.state === 'permitted') r.setWriteState(run.id, w.seq, 'permitted', 'unknown', { settledAt: iso(now), reason: 'context-changed' })
         }
-        endRun(companyId, r.run(run.id) as FrameRunRow, 'left', now)
+        if (run.state !== 'ended') endRun(companyId, r.run(run.id) as FrameRunRow, 'left', now)
       }
     },
   }

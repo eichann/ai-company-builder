@@ -51,8 +51,8 @@ export interface BrowserFrameRepository {
   run(runId: string): FrameRunRow | null
   /** The run not ended on this domain, if any (at most one: a unique index). */
   liveRunOn(host: string): FrameRunRow | null
-  /** The member's runs not ended (leaving ends them). */
-  liveRunsOf(userId: string): FrameRunRow[]
+  /** The member's runs not ended, or ended with a write still `permitted` (leaving settles them). */
+  unsettledRunsOf(userId: string): FrameRunRow[]
   insertRun(run: FrameRunRow, frames: Array<Omit<FrameRow, 'used'>>): void
   frames(runId: string): FrameRow[]
   writes(runId: string): FrameWriteRow[]
