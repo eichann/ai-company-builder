@@ -202,3 +202,27 @@ test('only a consultation window asks, and only for a present file of its own co
   assert.deepEqual(w.fileRequests, [])
   assert.equal(w.mainFocused(), 0)
 })
+
+test('which windows may act on what a consultation shows: the main window, or the window opened for that very consultation — main frame only', async () => {
+  const w = world()
+  await w.call(MAIN, 'chatWindow:open', 's-1', context('s-1'))
+  await w.call(MAIN, 'chatWindow:open', 's-2', context('s-2'))
+  const [one, two] = [...w.open.keys()]
+  const ev = (id: number, frame = 1) => ({ sender: { id, mainFrame: { frameTreeNodeId: 1 } }, senderFrame: { frameTreeNodeId: frame } })
+  assert.equal(w.windows.showsConsultation(ev(MAIN), 'acme', 's-1'), true)
+  assert.equal(w.windows.showsConsultation(ev(MAIN), 'acme', null), true)
+  assert.equal(w.windows.showsConsultation(ev(one), 'acme', 's-1'), true)
+  // Another consultation's window, another company, no consultation, an unknown window (a preview page, the browser
+  // operation's window, a document view): never.
+  assert.equal(w.windows.showsConsultation(ev(two), 'acme', 's-1'), false)
+  assert.equal(w.windows.showsConsultation(ev(one), 'other', 's-1'), false)
+  assert.equal(w.windows.showsConsultation(ev(one), 'acme', null), false)
+  assert.equal(w.windows.showsConsultation(ev(999), 'acme', 's-1'), false)
+  // A frame inside the window (a plugin's frame, a document's) is not the window.
+  assert.equal(w.windows.showsConsultation(ev(one, 2), 'acme', 's-1'), false)
+  assert.equal(w.windows.showsConsultation(ev(MAIN, 2), 'acme', 's-1'), false)
+  assert.equal(w.windows.showsConsultation({ sender: { id: one } }, 'acme', 's-1'), false)
+  // A window that closed no longer counts.
+  w.memberCloses(one)
+  assert.equal(w.windows.showsConsultation(ev(one), 'acme', 's-1'), false)
+})

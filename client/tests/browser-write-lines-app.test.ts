@@ -80,7 +80,7 @@ const WRITERS: BrowserLineWriters = {
   },
 }
 
-function harness(o: { openedFile?: unknown; writers?: BrowserLineWriters; loseAnswer?: boolean; steps?: unknown[]; sites?: Parameters<typeof wireBrowserWriteLines>[1]['sites']; lines?: typeof LINES; extraGet?: (a: string) => { status: number; body: string } | null } = {}) {
+function harness(o: { openedFile?: unknown; writers?: BrowserLineWriters; loseAnswer?: boolean; steps?: unknown[]; sites?: Parameters<typeof wireBrowserWriteLines>[1]['sites']; lines?: typeof LINES; extraGet?: (a: string) => { status: number; body: string } | null; frameCards?: Parameters<typeof wireBrowserWriteLines>[1]['frameCards'] } = {}) {
   const landings = new Map<string, Record<string, unknown>>([['2597458', landing()]])
   const actions = new Map<string, Record<string, unknown>>([['7001', action([21])]])
   const reads: string[] = []
@@ -152,12 +152,18 @@ function harness(o: { openedFile?: unknown; writers?: BrowserLineWriters; loseAn
   const user = () => 'user-1'
   const records: BrowserStepRecord[] = []
   const wiring = wireBrowserWriteLines(ipc, {
-    aiSwitch: on, fromMainWindow: event => (event as { sender: { id: number } }).sender.id === 1,
+    // The shell's rule as main.ts injects it (chat-windows `showsConsultation`, tested there): 1 the main window, 2 the
+    // window of another consultation, 3 the window of this card's consultation.
+    aiSwitch: on, fromCardWindow: (event, place) => {
+      const id = (event as { sender: { id: number } }).sender.id
+      return id === 1 || (place.companyId === COMPANY && ((id === 2 && place.conversationId === 'conv-2') || (id === 3 && place.conversationId === 'conv-1')))
+    },
     baseUrl: () => 'https://acb.example', cookies: () => ['s=1'], userId: user, context: createBrowserContext({ userId: user, aiSwitch: on }),
     stopped: () => false, siteLevel: () => 'write', windows: { runWindow: () => run, previewWindow: () => preview },
     records: { has: id => records.some(r => r.planId === id), put: r => { records.push(r) } }, busyWindows: new Set(),
     sites: o.sites ?? [{ map: site.map, readers: site.readers, addresses: { ...site.addresses, tag: { kind: 'object', path: '/test-tags/{id}' } }, account: site.account, writers: o.writers ?? WRITERS }],
     lines: o.lines ?? LINES, declarations: [lstep.declaration], fetch: fetchFake, openedFile: o.openedFile ?? approvedOpened(),
+    ...(o.frameCards ? { frameCards: o.frameCards } : {}),
   })
   const ev = (sender: number) => ({ sender: { id: sender, isDestroyed: () => false, send() {} } }) as unknown as IpcInvokeEvent
   const call = (channel: string, sender: number, ...args: unknown[]) => handlers.get(channel)!(ev(sender), COMPANY, ...args) as Promise<BrowserWriteGetResult>
@@ -278,4 +284,57 @@ test('a line with nothing for a person to confirm (every value a target the read
   assert.equal(card.view.phase, 'ready')
   assert.ok(card.view.contentHash)
   assert.deepEqual(h.writes, [], 'nothing is written until ［任せる］')
+})
+
+test('a card is pressed from the window that shows its consultation too, never from another consultation\'s window', async () => {
+  const h = harness()
+  await h.tool().execute({ site: 'lstep', line: 'landing_create', values: PROPOSED })
+  const id = h.cards[0]
+  // Its consultation's own window (3) confirms the values and reads the card; another consultation's window (2) cannot.
+  assert.equal((await h.call('browserLines:confirmValue', 2, id, 'name')).ok, false)
+  for (const n of ['name', 'to_date', 'to_time']) assert.ok((await h.call('browserLines:confirmValue', 3, id, n)).ok)
+  assert.equal((await h.call('browserLines:writeCard', 2, id)).ok, false)
+  const card = await h.call('browserLines:writeCard', 3, id)
+  assert.ok(card.ok)
+  if (!card.ok) return
+  assert.equal((await h.call('browserLines:runWrite', 2, id, card.view.contentHash!)).ok, false)
+  assert.deepEqual(h.writes, [])
+  assert.ok((await h.call('browserLines:runWrite', 3, id, card.view.contentHash!)).ok)
+  assert.equal(h.writes.length > 0, true)
+})
+
+test('a write run\'s card (bf_) is read and pressed only from a window showing its consultation: ［任せる］, ［やめる］ and the answer', async () => {
+  const RUN = `bf_${'7'.repeat(32)}`
+  const pressed: string[] = []
+  const view = { ok: true as const, view: { title: 't', siteLabel: 's', phase: 'ready' as const, values: [], sentences: [], card: null, readAt: null, contentHash: null, message: null, result: null } }
+  let place: { conversationId: string | null } | null = { conversationId: 'conv-1' }
+  const h = harness({
+    frameCards: {
+      card: () => { pressed.push('card'); return view },
+      approve: async () => { pressed.push('approve'); return view },
+      cancel: () => { pressed.push('cancel'); return view },
+      confirm: async () => { pressed.push('confirm'); return view },
+      placeOf: () => place,
+    },
+  })
+  for (const sender of [2, 99]) {
+    assert.equal((await h.call('browserLines:writeCard', sender, RUN)).ok, false)
+    assert.equal((await h.call('browserLines:runWrite', sender, RUN, 'sha256:x')).ok, false)
+    assert.equal((await h.call('browserLines:cancelWrite', sender, RUN)).ok, false)
+    assert.equal((await h.call('browserLines:confirmWrite', sender, RUN, 'done')).ok, false)
+  }
+  assert.deepEqual(pressed, [])
+  for (const sender of [3, 1]) {
+    await h.call('browserLines:writeCard', sender, RUN)
+    await h.call('browserLines:runWrite', sender, RUN, 'sha256:x')
+    await h.call('browserLines:cancelWrite', sender, RUN)
+    await h.call('browserLines:confirmWrite', sender, RUN, 'done')
+  }
+  assert.deepEqual(pressed, ['card', 'approve', 'cancel', 'confirm', 'card', 'approve', 'cancel', 'confirm'])
+  // A card with no consultation: the main window only. No card for this member: gone, from anywhere.
+  place = { conversationId: null }
+  assert.equal((await h.call('browserLines:runWrite', 3, RUN, 'sha256:x')).ok, false)
+  place = null
+  assert.equal((await h.call('browserLines:runWrite', 1, RUN, 'sha256:x')).ok, false)
+  assert.equal(pressed.length, 8)
 })

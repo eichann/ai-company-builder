@@ -1874,7 +1874,8 @@ its runner takes the shared set of busy windows.
   gets the values with their sources (`site_fact` for targets, `person` confirmed for the confirmed ones) and the account
   read. The card then shows what was read (the generic card), what will be done (`browserWriteSentences`: the map's
   headings and the line's labels) and ［任せる］ with the draft's hash.
-- **［任せる］** (`browserLines:runWrite { companyId, cardId, contentHash }`, main window only, the hash the card shows,
+- **［任せる］** (`browserLines:runWrite { companyId, cardId, contentHash }`, from a window showing the card's consultation —
+  "A card in its consultation's own window" —, the hash the card shows,
   once: a card runs only from `ready`) → the runner: the switch → approve (the hash) → claim (once) → the fixed content
   must hash to that hash and hold exactly the line's row, the values sent, the account read, the declared host and the
   number of writes (else `fixed-mismatch`, given back) → this PC's record (`<userData>/browser-runs/line-records.json`;
@@ -3361,7 +3362,8 @@ else. **No site word** anywhere (a fictional site in the tests).
   run's id — accepted by `readBrowserInspectionRef` and drawn by `BrowserInspectionCard`): the operator's summary, who
   else is affected, each frame in plain words with its count (`browserSkillWriteLine`), the key values read
   (「下見で読んだ大事な値」, card only, never the AI), ［任せる］ (`browserLines:runWrite` with the plan's hash the card shows) and ［やめる］
-  (`browserLines:cancelWrite`, new; main window only; the run ends). **The one-time approval value** stays in the work
+  (`browserLines:cancelWrite`, new; from a window showing its consultation, "A card in its consultation's own window"; the
+  run ends). **The one-time approval value** stays in the work
   wiring's memory: never in a view, a tool's answer or a log; ［任せる］ is the only path to `approve` (the AI's tools
   cannot call it). A pre-approved Skill version whose text nobody changed runs without the card (its card shows the run
   and the result); a Skill whose text changed shows the card once (the server's `needsRunCard`). The card moves on in
@@ -3602,6 +3604,36 @@ page gets its error, the run goes on, the max holds; only the listed 4xx refused
 the wiring: a refused save then a corrected one; the card's answer from its time, sent with that write, never resending;
 only the card reaches it), `model/browser-plan/check`, permission matrix row + `CROSS`, `jobs-schema.test.ts`,
 `company-scoped-sql.test.ts`. Each guard mutation-checked.
+
+## A card in its consultation's own window (［任せる］／［やめる］／［済んでいた］ from 「別ウィンドウで開く」)
+
+A consultation opened in its own window (`chat-and-agents.md`, `features/chat-windows`) shows the write cards its AI made,
+so their buttons work there too — and only there and in the main window.
+
+- **The one rule** (`features/chat-windows/ipc.ts` `showsConsultation(event, companyId, sessionId)`, the shell's window
+  registry): the event comes from the **main frame** of the app's main window, or of the window the app opened for **that
+  very consultation** of that company (its registry entry: `sessionId` and `companyId` equal). Everything else is refused:
+  a window of another consultation, an unknown sender (a preview page, the browser operation's window — no preload —, a
+  document view), any frame inside a window (a plugin's frame, a document's). A card with no consultation (null): the main
+  window only. A window that closed no longer counts.
+- **Injected** (`main.ts`: `fromCardWindow: (event, place) => chatWindows.showsConsultation(event, place.companyId,
+  place.conversationId)`) into the write cards' IPC (`write-lines.ts`): every read and press of a card — the line path's
+  `bl_` write card (its entry's `conversationId`) and a write run's `bf_` card (`frameCards.placeOf`, the work wiring's
+  entry: the consultation `browser_work` ran in) — asks it with **that card's own consultation**; no BrowserWindow check
+  anywhere else. A card the member does not have answers `gone` from any window.
+- **One press wins** when the card shows in two windows (the main window's inbox and the consultation's window): a press
+  while another is on its way (`Entry.pressing`, ［任せる］ and the answer) asks the server nothing and returns the card as it
+  stands; the card moves on by itself in both (read again every 2 s while it runs). A later press finds the card no longer
+  `ready` (as before).
+- **Unchanged**: the one-time approval value stays in the work wiring (main's memory); the AI's tools reach none of this;
+  the read-only inspection's card (`browserLines:card`) stays main-window only.
+
+Tests: `client/tests/chat-windows.test.ts` (the rule: the main window, that consultation's window, not another's, not
+another company's, not with no consultation, not an unknown sender, not a frame inside, not once closed),
+`browser-write-lines-app.test.ts` (a `bl_` card from its consultation's window, never another's; a `bf_` card's read,
+［任せる］, ［やめる］ and answer only from a window showing its consultation, `gone` without a card),
+`browser-frame-writes.test.ts` (the card in two windows: one ［任せる］ and one answer asked of the server). Each guard
+mutation-checked.
 
 ## Not yet (later PRs)
 

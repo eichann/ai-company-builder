@@ -48,7 +48,12 @@ export interface BrowserWriteSite extends BrowserInspectionSite {
 
 export interface BrowserWriteLinesDeps<E> {
   aiSwitch: BrowserAiSwitch
-  fromMainWindow: (event: E) => boolean
+  /**
+   * Whether the event comes from a window that shows the card's consultation (the main window, or the window the app
+   * opened for that very consultation; main frame only): the shell's one rule (chat-windows `showsConsultation`),
+   * injected. A card is read and pressed only from such a window.
+   */
+  fromCardWindow: (event: E, place: { companyId: string; conversationId: string | null }) => boolean
   baseUrl: () => string
   cookies: () => string[]
   /** This PC's key header value (device.ts): only the plan client's gated steps send it. */
@@ -82,6 +87,8 @@ export interface BrowserWriteLinesDeps<E> {
     card(companyId: string, runId: string): BrowserWriteGetResult | null
     approve(companyId: string, runId: string, planHash: unknown): Promise<BrowserWriteGetResult | null>
     cancel(companyId: string, runId: string): BrowserWriteGetResult | null
+    /** The signed-in member's card of that run and the consultation it was made in (null: no such card). */
+    placeOf(companyId: string, runId: string): { conversationId: string | null } | null
     /** ［済んでいた］／［されていなかった］ about its write in doubt (absent: the card offers no answer). */
     confirm?(companyId: string, runId: string, answer: unknown): Promise<BrowserWriteGetResult | null>
   }
@@ -114,7 +121,7 @@ const own = (o: object, k: string) => Object.prototype.hasOwnProperty.call(o, k)
 
 /** Why the card cannot go on, in plain words (never a server's text). */
 const MESSAGES = {
-  notMainWindow: 'このカードは、アプリのメインの窓の相談で開いてください（別の窓では開けません）。',
+  notMainWindow: 'このカードは、この相談を開いている窓（またはアプリのメインの窓）から操作してください。',
   badInput: '入力が正しくありません。',
   off: 'この機能は、このアプリではまだ使えません。',
   stopped: 'AI の動きが止められているため、続けられません。',
@@ -331,21 +338,23 @@ export function wireBrowserWriteLines<E extends IpcInvokeEvent>(ipc: IpcRegistra
     }
   }
 
-  /** This member's card from the main window's page, or why not. */
+  /** This member's card, from a window that shows its consultation (`fromCardWindow`), or why not. */
   function mine(event: E, companyId: unknown, cardId: unknown): { e: Entry } | { message: string } {
-    if (!deps.fromMainWindow(event)) return { message: MESSAGES.notMainWindow }
     if (typeof companyId !== 'string' || !BROWSER_COMPANY_ID_RE.test(companyId) || typeof cardId !== 'string' || !BROWSER_WRITE_CARD_REF_RE.test(cardId)) return { message: MESSAGES.badInput }
     const userId = deps.userId()
     const e = entries.get(cardId)
-    return e && userId && e.userId === userId && e.companyId === companyId ? { e } : { message: CW.gone }
+    if (!e || !userId || e.userId !== userId || e.companyId !== companyId) return { message: CW.gone }
+    return deps.fromCardWindow(event, { companyId, conversationId: e.conversationId }) ? { e } : { message: MESSAGES.notMainWindow }
   }
   const answer = (e: Entry): BrowserWriteGetResult => ({ ok: true, view: viewOf(e) })
 
-  /** A write run's card (`bf_…`) from the main window's page: this member's, or why not. */
+  /** A write run's card (`bf_…`), from a window that shows its consultation: this member's, or why not. */
   const frameCard = (event: E, companyId: unknown, cardId: unknown): { companyId: string; runId: string } | { message: string } | null => {
     if (typeof cardId !== 'string' || !BROWSER_FRAME_RUN_REF_RE.test(cardId)) return null
-    if (!deps.fromMainWindow(event)) return { message: MESSAGES.notMainWindow }
     if (typeof companyId !== 'string' || !BROWSER_COMPANY_ID_RE.test(companyId) || !deps.frameCards) return { message: MESSAGES.badInput }
+    const place = deps.frameCards.placeOf(companyId, cardId)
+    if (!place) return { message: CW.gone }
+    if (!deps.fromCardWindow(event, { companyId, conversationId: place.conversationId })) return { message: MESSAGES.notMainWindow }
     return { companyId, runId: cardId }
   }
   const gone = (r: BrowserWriteGetResult | null): BrowserWriteGetResult => r ?? { ok: false, message: CW.gone }

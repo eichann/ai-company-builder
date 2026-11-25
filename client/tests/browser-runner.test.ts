@@ -371,14 +371,15 @@ test('only the card\'s ［任せる］ reaches the runner: one composition makes
   assert.deepEqual(mentioning(/\brunWindow\b/), ['electron/features/browser/controller.ts', 'electron/features/browser/wire.ts', 'electron/features/browser/write-lines.ts'])
   assert.deepEqual(mentioning(/\benterAi\b/), ['electron/browser-window.ts', 'electron/features/browser/runner.ts', 'electron/features/browser/write-line-runner.ts', 'shared/browser-runner.ts'])
   // The new path's write runner (PR 5c): made only by its wiring, run only by the card's ［任せる］ (`browserLines:runWrite`,
-  // after the main-window check), never named by an agent, the chat server, the preload or a page.
+  // after the card-window check), never named by an agent, the chat server, the preload or a page.
   assert.deepEqual(mentioning(/\bcreateBrowserWriteRunner\b/), ['electron/features/browser/write-line-runner.ts', 'electron/features/browser/write-lines.ts'])
   const writeSource = fs.readFileSync(path.join(clientDir, 'electron/features/browser/write-lines.ts'), 'utf8')
   assert.equal(writeSource.match(/runner\.run\(/g)?.length, 1)
   const runWrite = writeSource.slice(writeSource.indexOf("ipc.handle('browserLines:runWrite'"), writeSource.indexOf("ipc.handle('browserLines:confirmWrite'"))
   assert.match(runWrite, /runner\.run\(/)
   assert.ok(runWrite.indexOf('mine(event') >= 0 && runWrite.indexOf('mine(event') < runWrite.indexOf('runner.run('))
-  assert.match(writeSource.slice(writeSource.indexOf('function mine('), writeSource.indexOf('function mine(') + 300), /deps\.fromMainWindow\(event\)/)
+  // …from a window that shows the card's consultation (the shell's one rule, chat-windows `showsConsultation`).
+  assert.match(writeSource.slice(writeSource.indexOf('function mine('), writeSource.indexOf('const answer = (e: Entry)')), /deps\.fromCardWindow\(event, \{ companyId, conversationId: e\.conversationId \}\)/)
   for (const f of app.filter(f => /electron\/agents\/|chat-server|electron\/preload|\/src\/|browser-request\//.test(f))) {
     assert.doesNotMatch(fs.readFileSync(f, 'utf8'), /createBrowserWriteRunner|createLineWriteGate/, path.relative(clientDir, f))
   }

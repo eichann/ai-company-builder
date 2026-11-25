@@ -66,8 +66,10 @@ Full text: `docs/architecture/main-process-and-ipc.md` (internal).
   `agent-browser.md` "The card, the IPC and the request tool"; and browserLines:card: a read-only inspection's card held
   in main's memory, main window only, `features/browser/inspect.ts`, `agent-browser.md` "The inspection in the chat" (also an
   operator run's card, a `bo_` id, held by `features/browser/browse.ts`: "The operator's window tools"); and
-  browserLines:writeCard / confirmValue / runWrite / confirmWrite: a write card held in main's memory, main window only, the
-  member's own, `features/browser/write-lines.ts`, `agent-browser.md` "Writing on the new path" (also a write run's card, a
+  browserLines:writeCard / confirmValue / runWrite / confirmWrite: a write card held in main's memory, the member's own,
+  from a window that shows its consultation — the main window or the consultation's own window (「別ウィンドウで開く」), main
+  frame only: chat-windows `showsConsultation`, injected as `fromCardWindow`; `agent-browser.md` "A card in its
+  consultation's own window" —, `features/browser/write-lines.ts`, `agent-browser.md` "Writing on the new path" (also a write run's card, a
   `bf_` id, held by `features/browser/work.ts`, and its ［やめる］ browserLines:cancelWrite: "Writes within frames, in the app";
   the one-time approval value never leaves main); and browserDevice:get / register /
   withdraw: Settings' 「この PC」, main window only, a state and names — never the PC's key, `features/browser/device-ipc.ts`,
