@@ -99,8 +99,13 @@ meetings), `notifications.md` (「あなたの番」 in the inbox and the title 
   localStorage `tasks-seen:<company id>`, marked when the tab is opened or left; formerly badge = あなたの番
   + 引き受け待ち). Shown when records are on and the company setting `taskListDepartmentIds` names
   the department on screen (`null` = every department; 全社 = any department shows it:
-  `listShownFor`). The list itself is the member's, across the company (records carry no
-  department the app could filter by).
+  `listShownFor`). **While the list is read the tab is there** (`taskTabShown`, 2026-11-25: on a busy company the
+  first list took so long that the tab looked gone after starting the app), with 「読み込んでいます」 inside; it is hidden only
+  once an answer says the list is off for the department on screen — the list's answer, else, while it is read, what the
+  last answer said (`useTaskList` keeps records on / 「やることの一覧」 / the departments per company in localStorage
+  `tasks-tab:<company id>`, read strictly: `keptTaskTabFacts`; nothing kept → shown). Tests: `tests/ui/tasks-layout.spec.ts`
+  「the やること tab shows while the list is still being read…」 (`?tasks=slow`), `model.test.ts`. The list itself is the
+  member's, across the company (records carry no department the app could filter by).
 - `TaskListPanel`: the list, in the narrow column where the file tree sits. A row opens its item
   in a tab in the middle, next to the open files (`onOpen`; `files-and-editor.md` "Files and
   records share the middle's tabs"), and switching the left tab keeps it; the row of the active
@@ -182,11 +187,14 @@ meetings), `notifications.md` (「あなたの番」 in the inbox and the title 
   icon), not a ticked box, everywhere (card chip, ⌘K, search, links). Tests: `tasks-list.test.ts`,
   `tasks-list.spec.ts` (「人に頼んだもの」, not a box).
 - **A 「議事録を確認する」 row says its meeting's time** on the second line (「会議 11/24（月） 10:00」, `meetingRowText`, company
-  time; 使い心地のメモ #40: several of one meeting title side by side). Display only: main takes `meeting_at` from the linked meeting
-  in the task's own detail read (`linkedOf`), which the server answers only while the member reads that meeting — none otherwise.
-  Such a task is read again on every list, never answered from the per-version cache the まとまり uses (access to a meeting can
-  change without the task's version: its list was copied when it was made). Test: `tasks-list.test.ts` 「a 「議事録を確認する」 row carries its meeting's time…」,
-  `model.test.ts`.
+  time; 使い心地のメモ #40: several of one meeting title side by side). Display only: the task's meeting id (an origin link, never
+  changed by hand) is kept with the まとまり in the per-version cache of its detail read (`linkedOf`); the time is never kept —
+  every list asks the server **once** for all those meetings (`meetingTimesOf`: `POST /records/query { type: meeting, ids }`,
+  records.md "Reading"), which answers only the meetings the member reads now (access to a meeting can change without the
+  task's version: its list was copied when it was made), so a meeting left out shows no time; an older server refuses `ids`
+  → no times. **Never one detail read per row on every list** (#831 did: 222 `records/item` reads in 20 minutes on a busy
+  company, 2026-11-25). Tests: `tasks-list.test.ts` 「a 「議事録を確認する」 row carries its meeting's time only while…」, 「the
+  meetings' times cost one query per list…」, `model.test.ts`.
 - Rows (言葉の決まり 3b: what to do next, never a state word): ☑ or the kind's icon (`ThingIcon`), title,
   「あなただけ」, the small chip of the 案件 / プロジェクト it belongs to (opens it), due (期限切れ in red),
   whose turn / what it waits for, 「〇〇さんの代わり」 for a delegate, up to 3 tags; a finished one is

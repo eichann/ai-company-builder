@@ -115,3 +115,20 @@ describe('records linked to a file', () => {
     expect(linkedTo(m('u-alice', 'a'), '営業部/見積.md')).toEqual({ total: 0, records: [] })
   })
 })
+
+// `ids` (records.md "Reading"): the app reads its 「議事録を確認する」 rows' meetings in one query, and a
+// meeting's time must reach only its readers — an unreadable or another company's id is simply absent.
+describe('records by id', () => {
+  it('answers only the named records the caller reads', () => {
+    rawRecord('a', 'task-everyone1', null, null, '', '営業部/a.md')
+    rawRecord('a', 'task-accounts1', null, null, '経理', '経理/b.md')
+    rawRecord('a', 'task-notasked1', null, null, '', '営業部/c.md')
+    rawRecord('b', 'task-othercomp', null, null, '', '営業部/d.md')
+    const byIds = (member: Member) => ok(service.query(member, { ids: ['task-everyone1', 'task-accounts1', 'task-othercomp'] })).records.map(r => r.id).sort()
+    expect(byIds(m('u-bob'))).toEqual(['task-accounts1', 'task-everyone1'])
+    expect(byIds(m('u-mallory'))).toEqual(['task-everyone1'])
+    expect(service.query(m('u-bob'), { ids: [] })).toMatchObject({ ok: false, kind: 'bad-request' })
+    expect(service.query(m('u-bob'), { ids: ['../x'] })).toMatchObject({ ok: false, kind: 'bad-request' })
+    expect(service.query(m('u-bob'), { ids: ['task-everyone1'], linkedTo: { id: 'task-everyone1' } })).toMatchObject({ ok: false, kind: 'bad-request' })
+  })
+})

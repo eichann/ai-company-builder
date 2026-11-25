@@ -1082,7 +1082,7 @@ POST    /records/item/:recordId/opened         the app opened it: the turn-holde
 POST    /records/find              any member: 探す { text, today } → hits with department / mine / 案件, hub summaries ("探す" below)
 POST    /records/find-home         any member: 探す with nothing typed { today, from, to }
 POST    /records/query             any member: { type?, implements?, state?, fields? (value | { in } | { contains } | { gte?, lt? }), linkedTo?: { id, hops: 1|2 },
-                                   link?: { name, id }, linkedToFile?, sort?: { field, order? }, finishedSince?,
+                                   link?: { name, id }, linkedToFile?, ids?, sort?: { field, order? }, finishedSince?,
                                    text?, limit ≤ 200, offset ≤ 10000, countOnly? } → { total, records }
 GET     /records/item/:recordId    any member: the record + its readable links (both directions)
 ```
@@ -1123,6 +1123,10 @@ GET     /records/item/:recordId    any member: the record + its readable links (
   folder never counts for a path inside it (`linkAllowed`: the link is stored but never shown),
   one inside shows to that folder's readers only. Test: `tests/unit/record-linked-to-file.test.ts`
   (each guard mutation-checked).
+- `ids` (1–200 record ids; not with `linkedTo` / `linkedToFile`; 2026-11-25, additive): only those records, with read access
+  applied as always — an unreadable, missing or another company's id is simply absent. The app reads its 「議事録を確認する」
+  rows' meetings with it in one query per list (`tasks-ui.md`); an older server refuses the key (400). Test:
+  `tests/unit/record-linked-to-file.test.ts` 「records by id」 (mutation-checked).
 - Cross-company: the handle is `member.companyId`; another company's record id is a record that
   does not exist (permission matrix `CROSS` row, `tests/unit/record-index.test.ts`).
 - The detail route is `/records/item/:recordId`, not `/records/:recordId`: a parameter next to the

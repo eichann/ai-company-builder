@@ -85,7 +85,7 @@ import { featuresFrom } from '../../../shared/core/features'
 import { renderRecordBundleField } from './recordBundleField'
 import { renderRecordSource } from './recordSource'
 import { aiTurnQueue } from '../../shared/ai-turn-steps/registry'
-import { bundlePlacesOf, companyPathOf, departmentBundleKind, listShownFor, tagCounts } from '../features/tasks/model'
+import { bundlePlacesOf, companyPathOf, departmentBundleKind, tagCounts, taskTabShown } from '../features/tasks/model'
 import { LinkToTaskDialog } from '../features/tasks/components/LinkToTaskDialog'
 import { linkFileToTask, linkMeetingBundle, makeExistingBundlePrivate } from '../features/tasks/api'
 import { TaskCard } from '../features/tasks/components/TaskCard'
@@ -446,7 +446,8 @@ export function AppShell({ bottomPanel }: AppShellProps = {}) {
   const plugins = pluginSlots({ companyId: currentCompany?.id, rootPath, plugins: pluginScreens, taskItems: taskList.data?.items ?? [], onFileAction: setFileAction })
   // 「使う機能」 (records.md "Features on and off"): an older server or main without them = everything on.
   const features = featuresFrom(taskList.data?.features)
-  const tasksShown = !!taskList.data?.available && features.taskList && listShownFor(isCompanyWide ? null : selectedDeptId, taskList.data.listDepartmentIds)
+  // Shown while the list is still read (「読み込んでいます」 inside); hidden once an answer says it is off here (tasks-ui.md).
+  const tasksShown = !!currentCompany && taskTabShown(taskList.tabFacts, isCompanyWide ? null : selectedDeptId)
   // The task list turned off for the company: 「確かめること」, the small list of what only ACB can act on.
   const pressShown = !!taskList.data?.available && !features.taskList
   // What the department on screen makes as its 案件・プロジェクト (全社: the company's own kind; records.md "Bundle kinds").
@@ -536,7 +537,7 @@ export function AppShell({ bottomPanel }: AppShellProps = {}) {
     // From a department not downloaded here (its prompt hides the middle and the list), 全社 shows what was opened.
     companyId: currentCompany?.id, notices, meetings: meetings.titleBarMeetings, features,
     // Every source of its rows answered once (the task list behind the meetings, the arrivals): the dot's baseline.
-    ready: (tasksShown || taskList.data !== null || taskList.error !== null) && meetings.titleBarMeetingsRead,
+    ready: (taskList.data !== null || taskList.error !== null) && meetings.titleBarMeetingsRead,
     open: bottomOpen && !bottomPanel, onToggle: () => setBottomOpen(o => !o),
     onOpenRecord: id => { if (isSelectedDeptUnsynced) handleSelectDept(COMPANY_TAB_ID); openTab(recordTabKey(id)) },
     onOpenTasks: () => { if (isSelectedDeptUnsynced) handleSelectDept(COMPANY_TAB_ID); openTasks() },

@@ -4,18 +4,42 @@ import { useIpcEvent } from '../../../shared/hooks/useIpcEvent'
 import { useInterval } from '../../../shared/hooks/useInterval'
 import { getTaskList, onTasksMayHaveChanged } from '../api'
 import { nextListState, type TaskListState } from '../listAnswers'
+import { keptTaskTabFacts, taskTabFactsOf, type TaskTabFacts } from '../model'
 
 /** Read again at least this often while the list is mounted (others' changes reach no signal of ours). */
 const REFRESH_MS = 2 * 60_000
+
+/** Per company in localStorage: what the last answer said about the やること tab, used while the next list is read. */
+const TAB_KEY = 'tasks-tab:'
+
+function readTabFacts(companyId: string | undefined): TaskTabFacts | null {
+  if (!companyId) return null
+  try {
+    return keptTaskTabFacts(JSON.parse(localStorage.getItem(`${TAB_KEY}${companyId}`) ?? 'null'))
+  } catch {
+    return null
+  }
+}
+
+function keepTabFacts(companyId: string, facts: TaskTabFacts) {
+  try {
+    localStorage.setItem(`${TAB_KEY}${companyId}`, JSON.stringify(facts))
+  } catch {
+    // Storage may be unavailable: the tab then shows while the list is read, until the answer says otherwise.
+  }
+}
 
 /**
  * The company's task list, read from main: at mount, when its records may have changed
  * (`records:changed`), every 2 minutes and on `reload` (after the member's own change: a fresh
  * read, never one main began before the change). An answer older than the one shown is never taken
- * (`listAnswers.ts`). The last good answer stays on screen while a read fails.
+ * (`listAnswers.ts`). The last good answer stays on screen while a read fails. `tabFacts`: what decides
+ * the やること tab — from the answer shown, else (still reading) what this PC kept from the last one.
  */
 export function useTaskList(companyId: string | undefined) {
   const [state, setState] = useState<TaskListState>({ companyId, data: null, error: null, shown: 0 })
+  const [kept, setKept] = useState(() => ({ companyId, facts: readTabFacts(companyId) }))
+  if (kept.companyId !== companyId) setKept({ companyId, facts: readTabFacts(companyId) })
   const tickets = useRef(0)
   const read = useCallback((fresh: boolean) => {
     if (!companyId) return
@@ -23,6 +47,7 @@ export function useTaskList(companyId: string | undefined) {
     void getTaskList(companyId, undefined, fresh ? { fresh: true } : undefined).then((r: TaskListResult | undefined) => {
       // Never an answer older than the one shown (listAnswers.ts): a press's result is not put back.
       if (r) setState(s => nextListState(s, companyId, ticket, r))
+      if (r?.success) keepTabFacts(companyId, taskTabFactsOf(r.data))
     }, () => {})
   }, [companyId])
   const look = useCallback(() => read(false), [read])
@@ -36,5 +61,6 @@ export function useTaskList(companyId: string | undefined) {
   useInterval(look, companyId ? REFRESH_MS : null)
   // Another company's list never shows here (an answer may arrive after a switch).
   const current = state.companyId === companyId ? state : { data: null, error: null }
-  return { data: current.data, error: current.error, reload }
+  const tabFacts = current.data ? taskTabFactsOf(current.data) : kept.companyId === companyId ? kept.facts : null
+  return { data: current.data, error: current.error, reload, tabFacts }
 }
