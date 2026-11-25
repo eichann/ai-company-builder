@@ -315,6 +315,11 @@ test('the title bar has no sign-out, theme or language button: they are in あ�
   const menu = page.getByRole('menu', { name: 'あなたのメニュー' })
   await expect(menu.getByRole('menuitem')).toHaveText(['設定', 'バックアップ履歴', '画面をいつもの形に戻す', /表示/, /言語/, 'ログアウト'])
   await expect(menu.getByRole('menuitem', { name: '設定' })).toBeFocused()
+  // A switch keeps the menu open and the focus where it was (a re-render does not jump back to 設定).
+  for (let i = 0; i < 3; i++) await page.keyboard.press('ArrowDown')
+  await page.keyboard.press('Enter')
+  await expect(menu.getByRole('menuitem', { name: /表示/ })).toContainText('ダーク')
+  await expect(menu.getByRole('menuitem', { name: /表示/ })).toBeFocused()
   await page.keyboard.press('Escape')
   await expect(menu).toHaveCount(0)
   await expect(me).toBeFocused()

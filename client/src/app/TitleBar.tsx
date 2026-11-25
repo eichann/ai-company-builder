@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react'
+import { useCallback, useRef, useState, type ReactNode } from 'react'
 import { ArrowCounterClockwise, CaretDown, ClockCounterClockwise, CloudArrowUp, GearSix, Globe, House, ListChecks, Moon, Question, SignOut, SpinnerGap, Sun, WarningCircle } from '@phosphor-icons/react'
 import { useAppStore } from '../stores/appStore'
 import { useAuthStore } from '../stores/authStore'
@@ -180,20 +180,24 @@ function TitleMenu({ label, trigger, triggerClassName, width, children }: {
 }) {
   const [open, setOpen] = useState(false)
   const [box, setBox] = useState<HTMLDivElement | null>(null)
-  const close = () => setOpen(false)
-  useDismiss(box, open, close)
+  const triggerRef = useRef<HTMLButtonElement>(null)
+  useDismiss(box, open, () => setOpen(false))
+  // An item that acts: focus back on the button first, so a dialog it opens returns focus there.
+  const close = () => { triggerRef.current?.focus(); setOpen(false) }
+  // Stable, so the first item is focused once when the menu opens, not on every render.
+  const focusFirst = useCallback((el: HTMLDivElement | null) => { el?.querySelector<HTMLElement>('[role="menuitem"]:not(:disabled)')?.focus() }, [])
   return (
     <div ref={setBox} className="relative">
-      <button type="button" aria-label={label} title={label} aria-haspopup="menu" aria-expanded={open}
+      <button ref={triggerRef} type="button" aria-label={label} title={label} aria-haspopup="menu" aria-expanded={open}
         onClick={() => setOpen(o => !o)} className={triggerClassName}>
         {trigger}
       </button>
       {open && (
         <div role="menu" aria-label={label} className={`${MENU} ${width}`}
-          ref={el => { el?.querySelector<HTMLElement>('[role="menuitem"]:not(:disabled)')?.focus() }}
+          ref={focusFirst}
           onKeyDown={e => {
             // Esc (closed by useDismiss) gives the focus back to the button; ↑ ↓ move between the items.
-            if (e.key === 'Escape') box?.querySelector<HTMLElement>('[aria-haspopup="menu"]')?.focus()
+            if (e.key === 'Escape') triggerRef.current?.focus()
             if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return
             e.preventDefault()
             const items = Array.from(e.currentTarget.querySelectorAll<HTMLElement>('[role="menuitem"]:not(:disabled)'))
