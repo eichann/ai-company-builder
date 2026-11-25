@@ -18,8 +18,8 @@ import { createBrowserController, type BrowserShell, type BrowserWindowSpec } fr
 
 const SHOP = 'shop.example.com'
 const DESK = 'desk.example.com'
-const HELPER: BrowserLoginHelper = { host: 'check.example.org', pathPrefix: '/challenge/', frame: true, post: true }
-const OWN: BrowserSiteParts = { host: SHOP, assetHosts: ['img.example.net'], loginHelpers: [HELPER] }
+const HELPER: BrowserLoginHelper = { host: 'check.example.org', pathPrefix: '/challenge/api/', frame: true, post: true }
+const OWN: BrowserSiteParts = { host: SHOP, assetHosts: ['img.example.net', 'js.example.net'], scriptHosts: ['js.example.net'], loginHelpers: [HELPER] }
 const BUNDLED = { assets: ['bundled-img.example.net'], helpers: [{ host: 'bundled-check.example.org', pathPrefix: '/c/', frame: true, post: false }] as BrowserLoginHelper[] }
 
 const site = (host: string): BrowserSiteSetting => ({ host, level: 'write', assetHosts: [] })
@@ -41,6 +41,9 @@ test('the policy keeps only valid domain settings, beside a browser part whose s
     { ...OWN, host: 'other.example.com' },
     { ...OWN, host: DESK, assetHosts: ['*.example.net'], loginHelpers: [] },
     { ...OWN, loginHelpers: [{ ...HELPER, host: DESK }] },
+    { ...OWN, scriptHosts: ['other.example.net'] },
+    { ...OWN, loginHelpers: [{ ...HELPER, frame: false }] },
+    { ...OWN, loginHelpers: [{ ...HELPER, pathPrefix: '/api/' }] },
   ]))
   assert.ok(bad?.browser)
   assert.equal(bad?.browserParts, undefined)
@@ -84,7 +87,7 @@ test('the window takes the company\'s setting of its domain, else the bundled fa
 
 test('a company setting with nothing left (its hosts since registered as domains) still replaces the fallback', () => {
   const w = world()
-  w.browser.policyAnswered('c1', policy([site(SHOP)], [{ host: SHOP, assetHosts: [], loginHelpers: [] }]))
+  w.browser.policyAnswered('c1', policy([site(SHOP)], [{ host: SHOP, assetHosts: [], scriptHosts: [], loginHelpers: [] }]))
   w.browser.open('c1', SHOP)
   assert.deepEqual(w.opened[0].site.assetHosts, [])
   assert.deepEqual(w.opened[0].site.loginHelpers, [])
@@ -135,6 +138,10 @@ test('a parts host from the company\'s setting is read-only: parts only, never a
     const state: BrowserWindowState = { site: s, mode, aiGateReady: mode === 'ai', helpers: s.loginHelpers }
     const req = (url: string, resourceType: string, method = 'GET') => decideWindowRequest(state, { url, method, resourceType, fromWindow: true, pageFrame: true }).allow
     assert.equal(req('https://img.example.net/a.png', 'image'), true, mode)
+    // Scripts only from the parts host the admin marked 「プログラムも読み込む」.
+    assert.equal(req('https://img.example.net/a.js', 'script'), false, `${mode}: a script from an unmarked parts host`)
+    assert.equal(req('https://js.example.net/a.js', 'script'), true, `${mode}: a marked host's script`)
+    assert.equal(req('https://js.example.net/a', 'xhr'), false, `${mode}: a marked host is still parts only`)
     assert.equal(req('https://img.example.net/a.css', 'stylesheet', 'HEAD'), true, mode)
     assert.equal(req('https://img.example.net/a', 'xhr'), false, `${mode}: a fetch`)
     assert.equal(req('https://img.example.net/a', 'xhr', 'POST'), false, `${mode}: a write`)
@@ -146,7 +153,16 @@ test('a parts host from the company\'s setting is read-only: parts only, never a
     assert.equal(req('wss://img.example.net/', 'webSocket'), false, mode)
     assert.equal(req('https://unlisted.example.net/a.png', 'image'), false, `${mode}: an unregistered host`)
     // The login helper: only while a person logs in, under its path.
-    assert.equal(req('https://check.example.org/challenge/x.js', 'script'), mode === 'human', `${mode}: the helper`)
+    assert.equal(req('https://check.example.org/challenge/api/x.js', 'script'), mode === 'human', `${mode}: the helper`)
     assert.equal(req('https://check.example.org/other/x.js', 'script'), false, `${mode}: outside the helper's path`)
   }
+})
+
+test('parts from the bundled declaration keep loading scripts as before (until step ⑦)', () => {
+  const w = world()
+  w.browser.policyAnswered('c1', policy([site(SHOP)]))
+  const s = w.browser.siteNow('c1', SHOP) as BrowserWindowSite
+  assert.equal(s.scriptHosts, undefined)
+  const state: BrowserWindowState = { site: s, mode: 'human', aiGateReady: false, helpers: s.loginHelpers }
+  assert.equal(decideWindowRequest(state, { url: `https://${BUNDLED.assets[0]}/a.js`, method: 'GET', resourceType: 'script', fromWindow: true, pageFrame: true }).allow, true)
 })

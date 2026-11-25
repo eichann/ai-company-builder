@@ -464,7 +464,7 @@ describe('admin API types (admin/src/lib/api.ts) match the server', () => {
     })
     await expectShape('AgentBrowser', USERS.owner, 'PUT', `${base}/agent-browser/overrides/${USERS.member}`, { mode: 'off' })
     await expectShape('AgentBrowser', USERS.owner, 'PUT', `${base}/agent-browser/site-parts`, {
-      host: 'crm.example.com', assetHosts: ['img.example.net'], loginHelpers: [{ host: 'check.example.org', pathPrefix: '/c/', frame: true, post: false }],
+      host: 'crm.example.com', assetHosts: ['img.example.net'], scriptHosts: [], loginHelpers: [{ host: 'check.example.org', pathPrefix: '/c/', frame: true, post: false }],
     })
   })
 

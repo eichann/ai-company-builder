@@ -27,7 +27,7 @@ export interface AgentBrowserChange {
   change:
     | { target: 'company'; before: BrowserOperationSettings; after: BrowserOperationSettings }
     | { target: 'member'; userId: string; memberName: string | null; before: BrowserOperationMode | null; after: BrowserOperationMode | null }
-    /** A registered domain's 「詳しい設定」 (parts hosts, login helpers); null = none set (the app's fallback). */
+    /** A registered domain's 「詳しい設定」 (parts hosts, login helpers); null = none set (what the app carries). */
     | { target: 'site-parts'; host: string; before: BrowserSiteParts | null; after: BrowserSiteParts | null }
 }
 
@@ -48,10 +48,11 @@ export interface AgentBrowserView {
 }
 
 /**
- * PUT …/agent-browser/site-parts (owner/admin): one registered domain's 「詳しい設定」, whole. Both lists
- * empty removes it (the domain then uses what the app carries, if anything).
+ * PUT …/agent-browser/site-parts (owner/admin): one registered domain's 「詳しい設定」, whole — saved with nothing
+ * in it, the domain uses nothing (not what the app carries) —, or `{ host, useAppDefault: true }` to remove it (the
+ * domain then uses what the app carries, if anything).
  */
-export type AgentBrowserSitePartsInput = BrowserSiteParts
+export type AgentBrowserSitePartsInput = BrowserSiteParts | { host: string; useAppDefault: true }
 
 /** The browser part of the caller's policy: the company setting with their override applied. */
 export interface AgentBrowserPolicy extends BrowserOperationSettings {

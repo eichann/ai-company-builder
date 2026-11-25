@@ -38,8 +38,13 @@ import {
   BROWSER_SITES_HELP,
   BROWSER_SITE_LIMIT,
   BROWSER_TITLE,
+  SITE_PARTS_APP_DEFAULT_BUTTON,
+  SITE_PARTS_APP_DEFAULT_NOTE,
   SITE_PARTS_ASSETS_HELP,
   SITE_PARTS_FRAME_LABEL,
+  SITE_PARTS_POST_WARNING,
+  SITE_PARTS_SCRIPT_LABEL,
+  SITE_PARTS_SCRIPT_WARNING,
   SITE_PARTS_HELPERS_HELP,
   SITE_PARTS_HELPER_LIMIT,
   SITE_PARTS_INTRO,
@@ -48,6 +53,7 @@ import {
   browserChangeLines,
   developerAssetHostsShown,
   draftBrowserSettings,
+  draftPartsHosts,
   siteDrafts,
   sitePartsBody,
   sitePartsChangeLines,
@@ -338,12 +344,13 @@ function SitePartsEditor({ host, savedHosts, view, onSaved }: { host: string; sa
   const editHelper = (index: number, change: Partial<SitePartsDraft['loginHelpers'][number]>) =>
     setDraft((d) => ({ ...d, loginHelpers: d.loginHelpers.map((h, i) => (i === index ? { ...h, ...change } : h)) }))
 
-  const save = async () => {
-    if (problems.length > 0 || !changed) return
+  // Never set: a first save is a change even with nothing in it (it then means "nothing").
+  const dirty = changed || !stored
+  const send = async (input: Parameters<typeof agentBrowserApi.setSiteParts>[1], done: string) => {
     setBusy(true)
     try {
-      const next = await agentBrowserApi.setSiteParts(companyId, body)
-      toast.success('詳しい設定を保存しました', { description: '各メンバーのアプリには、次にサイトを開くときから反映されます。' })
+      const next = await agentBrowserApi.setSiteParts(companyId, input)
+      toast.success(done, { description: '各メンバーのアプリには、次にサイトを開くときから反映されます。' })
       onSaved(next)
     } catch (err) {
       toast.error('詳しい設定を保存できませんでした', { description: describeError(err) })
@@ -351,12 +358,18 @@ function SitePartsEditor({ host, savedHosts, view, onSaved }: { host: string; sa
       setBusy(false)
     }
   }
+  const save = () => {
+    if (problems.length > 0 || !dirty) return
+    void send(body, '詳しい設定を保存しました')
+  }
+  const partsHosts = draftPartsHosts(draft)
 
   return (
     <details className="rounded-control border px-4 py-3 text-body">
       <summary className="cursor-pointer font-medium">{SITE_PARTS_TITLE}</summary>
       <div role="group" aria-label={`${host} の詳しい設定`} className="mt-3 space-y-4">
         <p className="text-small text-muted-foreground">{SITE_PARTS_INTRO}</p>
+        {!stored && <p className="text-small text-muted-foreground">{SITE_PARTS_APP_DEFAULT_NOTE}</p>}
         <label className="block space-y-1">
           <span className="font-medium">画面の部品を読み込む先</span>
           <Textarea
@@ -368,6 +381,25 @@ function SitePartsEditor({ host, savedHosts, view, onSaved }: { host: string; sa
           />
           <span className="block text-small text-muted-foreground">{SITE_PARTS_ASSETS_HELP}</span>
         </label>
+        {partsHosts.length > 0 && (
+          <div role="group" aria-label={`${host} のプログラムを読み込む先`} className="space-y-1">
+            {partsHosts.map((h) => (
+              <label key={h} className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  aria-label={`${h} の${SITE_PARTS_SCRIPT_LABEL}`}
+                  checked={draft.scriptHosts.includes(h)}
+                  onChange={(e) =>
+                    setDraft((d) => ({ ...d, scriptHosts: e.target.checked ? [...d.scriptHosts, h] : d.scriptHosts.filter((x) => x !== h) }))
+                  }
+                />
+                <span className="font-mono">{h}</span>
+                <span>{SITE_PARTS_SCRIPT_LABEL}</span>
+              </label>
+            ))}
+            <p className="text-small text-warning-text">{SITE_PARTS_SCRIPT_WARNING}</p>
+          </div>
+        )}
         <div className="space-y-2">
           <p className="font-medium">ログインの補助</p>
           <p className="text-small text-muted-foreground">{SITE_PARTS_HELPERS_HELP}</p>
@@ -389,6 +421,7 @@ function SitePartsEditor({ host, savedHosts, view, onSaved }: { host: string; sa
                     {SITE_PARTS_POST_LABEL}
                   </label>
                 </div>
+                {h.post && <p className="text-small text-warning-text">{SITE_PARTS_POST_WARNING}</p>}
                 <Button variant="outline" size="sm" onClick={() => setDraft((d) => ({ ...d, loginHelpers: d.loginHelpers.filter((_, j) => j !== i) }))}>
                   <Trash size={14} />
                   この補助を外す
@@ -413,9 +446,16 @@ function SitePartsEditor({ host, savedHosts, view, onSaved }: { host: string; sa
             ))}
           </ul>
         )}
-        <Button size="sm" onClick={save} disabled={busy || problems.length > 0 || !changed}>
-          {busy ? '保存しています…' : '詳しい設定を保存'}
-        </Button>
+        <div className="flex flex-wrap gap-2">
+          <Button size="sm" onClick={save} disabled={busy || problems.length > 0 || !dirty}>
+            {busy ? '保存しています…' : '詳しい設定を保存'}
+          </Button>
+          {stored && (
+            <Button variant="outline" size="sm" disabled={busy} onClick={() => void send({ host, useAppDefault: true }, SITE_PARTS_APP_DEFAULT_BUTTON)}>
+              {SITE_PARTS_APP_DEFAULT_BUTTON}
+            </Button>
+          )}
+        </div>
       </div>
     </details>
   )

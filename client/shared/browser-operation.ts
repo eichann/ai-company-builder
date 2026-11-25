@@ -400,6 +400,11 @@ export function browserWindowSite(site: BrowserSiteSetting, declared: readonly s
 /** The site as its window applies it, with the login helpers it lends while a person logs in. */
 export interface BrowserWindowSite extends BrowserSiteSetting {
   loginHelpers: BrowserLoginHelper[]
+  /**
+   * Which parts hosts may load scripts (`decideBrowserRequest`'s `scriptHosts`): set only for a domain the company
+   * set — the hosts its admin marked 「プログラムも読み込む」 —, absent when the bundled declaration lends the parts.
+   */
+  scriptHosts?: string[]
 }
 
 /**
@@ -430,7 +435,9 @@ export function browserWindowSiteFrom(
     loginHelpers.push({ host: h.host, pathPrefix: h.pathPrefix, frame: h.frame === true, post: h.post === true })
   }
   const from = own ? 'company' : (chosen.assetHosts.length > 0 || chosen.loginHelpers.length > 0 ? 'bundled' : 'none')
-  return { site: { ...base, assetHosts, loginHelpers }, from }
+  // The company's parts load scripts only where its admin said so; a development build's extra hosts as before.
+  const scriptHosts = own ? assetHosts.filter(h => own.scriptHosts.includes(h) || !own.assetHosts.includes(h)) : undefined
+  return { site: { ...base, assetHosts, loginHelpers, ...(scriptHosts ? { scriptHosts } : {}) }, from }
 }
 
 /**

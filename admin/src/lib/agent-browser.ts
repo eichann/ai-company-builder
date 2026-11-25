@@ -63,7 +63,12 @@ export const BROWSER_PARTS_NOTE =
 export const SITE_PARTS_TITLE = '詳しい設定'
 
 export const SITE_PARTS_INTRO =
-  'サイトを見ながら作業を記録したものを読んで、必要な先だけを書きます。空のまま保存すると、アプリに入っている決まりを使います（ある場合）。'
+  'サイトを見ながら作業を記録したものを読んで、必要な先だけを書きます。何も書かずに保存すると、このサイトでは部品もログインの補助も使いません（アプリに入っている決まりも使いません）。'
+
+/** Shown while the domain has no setting of its own: what the app carries applies. */
+export const SITE_PARTS_APP_DEFAULT_NOTE = 'まだ書いていません。今は、アプリに入っている決まりがあればそれを使います。'
+
+export const SITE_PARTS_APP_DEFAULT_BUTTON = 'アプリに入っている決まりに戻す'
 
 export const SITE_PARTS_ASSETS_HELP =
   'このサイトの画面が、画像・文字の形・見た目の部品を読み込む先です。1行に1つ書きます。読み込むだけで、AI がその先を開いたり、何かを送ったりすることはありません。'
@@ -73,6 +78,14 @@ export const SITE_PARTS_HELPERS_HELP =
 
 export const SITE_PARTS_FRAME_LABEL = '画面の中に表示してよい'
 export const SITE_PARTS_POST_LABEL = '確かめの答えを送ってよい'
+
+/** Per parts host: its programs (scripts) load too — only for hosts the company trusts. */
+export const SITE_PARTS_SCRIPT_LABEL = 'プログラムも読み込む'
+export const SITE_PARTS_SCRIPT_WARNING =
+  'この先のプログラムは、メンバーのログインのまま、サイトの画面の中で動きます。会社が信頼している先だけにしてください。'
+
+/** Next to 「確かめの答えを送ってよい」: the login page may send there what is typed on it. */
+export const SITE_PARTS_POST_WARNING = `ログインの画面に入力したものを、この先へ送れるようになります。ログインの確かめに必要な先だけにしてください（「画面の中に表示してよい」も必要で、道は /check/api/ のように ${BROWSER_SITE_PARTS_LIMITS.postHelperSegments} 段以上にします）。`
 export const SITE_PARTS_HELPER_LIMIT = BROWSER_SITE_PARTS_LIMITS.loginHelpers
 
 /** One login helper as the form edits it. */
@@ -83,26 +96,37 @@ export interface HelperDraft {
   post: boolean
 }
 
-/** A domain's 「詳しい設定」 as the form edits it: the parts hosts as one-per-line text. */
+/** A domain's 「詳しい設定」 as the form edits it: the parts hosts as one-per-line text, the ticked script hosts. */
 export interface SitePartsDraft {
   assetHosts: string
+  scriptHosts: string[]
   loginHelpers: HelperDraft[]
 }
 
 export function sitePartsDraft(saved: BrowserSiteParts | undefined): SitePartsDraft {
   return {
     assetHosts: (saved?.assetHosts ?? []).join('\n'),
+    scriptHosts: [...(saved?.scriptHosts ?? [])],
     loginHelpers: (saved?.loginHelpers ?? []).map((h) => ({ ...h })),
   }
 }
 
-const hostOf = (line: string) => normalizeBrowserHost(line.trim()) ?? line.trim()
+/** The parts hosts the draft lists now (normalized, once each): the rows a 「プログラムも読み込む」 tick belongs to. */
+export function draftPartsHosts(draft: SitePartsDraft): string[] {
+  return [...new Set(linesOf(draft.assetHosts).map(hostOf))]
+}
 
-/** What the draft would save for `host` (hosts normalized, parts hosts de-duplicated). */
+function hostOf(line: string) {
+  return normalizeBrowserHost(line.trim()) ?? line.trim()
+}
+
+/** What the draft would save for `host` (hosts normalized, parts hosts de-duplicated; a tick only for a listed host). */
 export function sitePartsBody(host: string, draft: SitePartsDraft): BrowserSiteParts {
+  const assetHosts = draftPartsHosts(draft)
   return {
     host,
-    assetHosts: [...new Set(linesOf(draft.assetHosts).map(hostOf))],
+    assetHosts,
+    scriptHosts: assetHosts.filter((h) => draft.scriptHosts.includes(h)),
     loginHelpers: draft.loginHelpers.map((h) => ({ host: hostOf(h.host), pathPrefix: h.pathPrefix.trim(), frame: h.frame, post: h.post })),
   }
 }
@@ -123,17 +147,21 @@ export function sitePartsProblems(body: BrowserSiteParts, savedHosts: readonly s
     case 'twice': return [`同じアドレスが2回あります: ${at}（部品の読み込み先とログインの補助の両方にも書けません）`]
     case 'too-many': return [`部品の読み込み先は ${BROWSER_SITE_PARTS_LIMITS.assetHosts} 個まで、ログインの補助は ${BROWSER_SITE_PARTS_LIMITS.loginHelpers} 個までです`]
     case 'bad-path': return [`ログインの補助の道は / で始まり / で終わる形で書いてください（例: /check/）: ${at}`]
+    case 'post-needs-frame': return [`確かめの答えを送る先は、「${SITE_PARTS_FRAME_LABEL}」も選んでください: ${at}`]
+    case 'post-path-short': return [`確かめの答えを送る先の道は、/check/api/ のように ${BROWSER_SITE_PARTS_LIMITS.postHelperSegments} 段以上にしてください: ${at}`]
+    case 'script-not-part': return [`プログラムを読み込む先は、部品の読み込み先の中から選んでください: ${at}`]
     default: return ['書き方が正しくありません']
   }
 }
 
 /** Lines for a domain's 「詳しい設定」 in the history. */
 export function sitePartsChangeLines(host: string, before: BrowserSiteParts | null, after: BrowserSiteParts | null): string[] {
-  const list = (p: BrowserSiteParts | null) => (p && p.assetHosts.length ? p.assetHosts.join('、') : 'なし')
+  const list = (p: BrowserSiteParts | null) =>
+    (p && p.assetHosts.length ? p.assetHosts.map((h) => (p.scriptHosts.includes(h) ? `${h}（プログラムも）` : h)).join('、') : 'なし')
   const helper = (h: BrowserSiteParts['loginHelpers'][number]) =>
     `${h.host}${h.pathPrefix}${h.frame ? '（表示）' : ''}${h.post ? '（送信）' : ''}`
   const helpers = (p: BrowserSiteParts | null) => (p && p.loginHelpers.length ? p.loginHelpers.map(helper).join('、') : 'なし')
-  if (!after) return [`${host} の詳しい設定を空にしました（アプリに入っている決まりを使います）`]
+  if (!after) return [`${host} の詳しい設定を、アプリに入っている決まりに戻しました`]
   const lines: string[] = []
   if (list(before) !== list(after)) lines.push(`${host} の部品の読み込み先: ${list(before)} → ${list(after)}`)
   if (helpers(before) !== helpers(after)) lines.push(`${host} のログインの補助: ${helpers(before)} → ${helpers(after)}`)

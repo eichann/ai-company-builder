@@ -58,9 +58,11 @@ const setting = (sites: string[], mode = 'on') => ({ mode, sites: sites.map(host
 const parts = (over: Record<string, unknown> = {}) => ({
   host: SHOP,
   assetHosts: ['img.example.net', 'fonts.example.net'],
-  loginHelpers: [{ host: 'check.example.org', pathPrefix: '/challenge/', frame: true, post: true }],
+  scriptHosts: [],
+  loginHelpers: [{ host: 'check.example.org', pathPrefix: '/challenge/api/', frame: true, post: true }],
   ...over,
 })
+const none = (host: string) => ({ host, assetHosts: [], scriptHosts: [], loginHelpers: [] })
 const put = (user: string, body: unknown, base = BASE) => call(user, 'PUT', `${base}/agent-browser/site-parts`, body)
 
 beforeAll(async () => {
@@ -82,6 +84,7 @@ beforeAll(async () => {
 describe('a registered domain\'s 「詳しい設定」', () => {
   it('only owners and admins set it; a member\'s or a stranger\'s attempt saves nothing', async () => {
     expect((await put('sp-member', parts())).status).toBe(403)
+    expect((await put('sp-member', { host: SHOP, useAppDefault: true })).status).toBe(403)
     expect((await call(null, 'PUT', `${BASE}/agent-browser/site-parts`, parts())).status).toBe(401)
     expect((await put('sp-other-owner', parts())).status).toBe(404)
     expect((await policyOf('sp-member')).browserParts).toBeUndefined()
@@ -90,6 +93,7 @@ describe('a registered domain\'s 「詳しい設定」', () => {
 
   it('refuses a domain not registered, a registered domain as a part or a login helper, and hosts not in their exact spelling', async () => {
     expect((await put('sp-admin', parts({ host: 'unknown.example.com' }))).status).toBe(404)
+    expect((await put('sp-admin', { host: 'unknown.example.com', useAppDefault: true })).status).toBe(404)
     // A domain the company operates can never be lent to another one: not as a part, not as a login helper, not itself.
     expect((await put('sp-admin', parts({ assetHosts: [DESK] }))).status).toBe(400)
     expect((await put('sp-admin', parts({ assetHosts: [SHOP] }))).status).toBe(400)
@@ -104,7 +108,22 @@ describe('a registered domain\'s 「詳しい設定」', () => {
       expect((await put('sp-admin', parts({ loginHelpers: [{ host: 'check.example.org', pathPrefix, frame: false, post: false }] }))).status, pathPrefix).toBe(400)
     }
     expect((await put('sp-admin', { ...parts(), extra: true })).status).toBe(400)
+    expect((await put('sp-admin', { host: SHOP, useAppDefault: true, extra: 1 })).status).toBe(400)
     expect((await put('sp-admin', parts({ loginHelpers: [{ host: 'check.example.org', pathPrefix: '/c/' }] }))).status).toBe(400)
+    expect((await policyOf('sp-member')).browserParts).toBeUndefined()
+  })
+
+  it('scripts load only from a parts host the admin marked: a script host must be one of the parts hosts', async () => {
+    expect((await put('sp-admin', parts({ scriptHosts: ['js.example.net'] }))).status).toBe(400)
+    expect((await put('sp-admin', parts({ scriptHosts: ['img.example.net', 'img.example.net'] }))).status).toBe(400)
+    expect((await put('sp-admin', parts({ assetHosts: undefined }))).status).toBe(400)
+  })
+
+  it('a login helper that may be sent what is typed must be framed and narrowed to two path segments or more', async () => {
+    const helper = (pathPrefix: string, frame: boolean, post: boolean) => parts({ loginHelpers: [{ host: 'check.example.org', pathPrefix, frame, post }] })
+    expect((await put('sp-admin', helper('/challenge/api/', false, true))).status).toBe(400)
+    for (const short of ['/api/', '/challenge/']) expect((await put('sp-admin', helper(short, true, true))).status, short).toBe(400)
+    // Without POST one segment stays enough; nothing was saved by the refusals.
     expect((await policyOf('sp-member')).browserParts).toBeUndefined()
   })
 
@@ -128,42 +147,47 @@ describe('a registered domain\'s 「詳しい設定」', () => {
   })
 
   it('another company\'s settings never reach this company\'s members, nor this company\'s theirs', async () => {
-    expect((await put('sp-other-owner', parts({ host: DESK, assetHosts: ['other.example.net'], loginHelpers: [] }), OTHER_BASE)).status).toBe(200)
+    const theirs = parts({ host: DESK, assetHosts: ['other.example.net'], scriptHosts: ['other.example.net'], loginHelpers: [] })
+    expect((await put('sp-other-owner', theirs, OTHER_BASE)).status).toBe(200)
     expect((await policyOf('sp-member')).browserParts).toEqual([parts()])
-    expect((await policyOf('sp-other-member', OTHER_BASE)).browserParts).toEqual([{ host: DESK, assetHosts: ['other.example.net'], loginHelpers: [] }])
+    expect((await policyOf('sp-other-member', OTHER_BASE)).browserParts).toEqual([theirs])
   })
 
   it('a domain registered later is taken out of a setting that lent it, and the domain keeps using the company\'s (never the app\'s fallback)', async () => {
-    expect((await put('sp-owner', parts({ host: DESK, assetHosts: ['later.example.com', 'keep.example.net'], loginHelpers: [{ host: 'later.example.com', pathPrefix: '/x/', frame: false, post: false }] }))).status).toBe(400)
-    expect((await put('sp-owner', parts({ host: DESK, assetHosts: ['later.example.com', 'keep.example.net'], loginHelpers: [] }))).status).toBe(200)
+    const lending = parts({ host: DESK, assetHosts: ['later.example.com', 'keep.example.net'], scriptHosts: ['later.example.com'], loginHelpers: [] })
+    expect((await put('sp-owner', lending)).status).toBe(200)
     expect((await policyOf('sp-member')).browserParts.map((p: Json) => p.host)).toEqual([DESK, SHOP])
     expect((await call('sp-owner', 'PUT', `${BASE}/agent-browser`, setting([SHOP, DESK, 'later.example.com']))).status).toBe(200)
     const lent = (await policyOf('sp-member')).browserParts
-    expect(lent).toEqual([{ host: DESK, assetHosts: ['keep.example.net'], loginHelpers: [] }, parts()])
+    expect(lent).toEqual([{ host: DESK, assetHosts: ['keep.example.net'], scriptHosts: [], loginHelpers: [] }, parts()])
     expect((await call('sp-owner', 'GET', `${BASE}/agent-browser`)).json.data.siteParts).toEqual(lent)
     // Nothing left of it: still the company's (empty), so the app uses nothing for that domain, not its fallback.
-    expect((await put('sp-owner', { host: DESK, assetHosts: ['later.example.com'], loginHelpers: [] })).status).toBe(400)
     db.prepare('UPDATE agent_browser_site_parts SET parts = ? WHERE company_id = ? AND host = ?')
-      .run(JSON.stringify({ host: DESK, assetHosts: ['later.example.com'], loginHelpers: [] }), CO, DESK)
-    expect((await policyOf('sp-member')).browserParts[0]).toEqual({ host: DESK, assetHosts: [], loginHelpers: [] })
+      .run(JSON.stringify({ ...none(DESK), assetHosts: ['later.example.com'] }), CO, DESK)
+    expect((await policyOf('sp-member')).browserParts[0]).toEqual(none(DESK))
     // A removed domain's setting is not handed out; registered again, it applies again.
     expect((await call('sp-owner', 'PUT', `${BASE}/agent-browser`, setting([SHOP]))).status).toBe(200)
     expect((await policyOf('sp-member')).browserParts).toEqual([parts()])
     expect((await call('sp-owner', 'PUT', `${BASE}/agent-browser`, setting([SHOP, DESK]))).status).toBe(200)
-    expect((await policyOf('sp-member')).browserParts[0]).toEqual({ host: DESK, assetHosts: ['later.example.com'], loginHelpers: [] })
-    expect((await put('sp-owner', { host: DESK, assetHosts: [], loginHelpers: [] })).status).toBe(200)
+    expect((await policyOf('sp-member')).browserParts[0]).toEqual({ ...none(DESK), assetHosts: ['later.example.com'] })
+    expect((await put('sp-owner', { host: DESK, useAppDefault: true })).status).toBe(200)
     expect((await policyOf('sp-member')).browserParts).toEqual([parts()])
   })
 
-  it('nothing is handed out while the browser is off for the member; both lists empty removes the setting', async () => {
+  it('saved with nothing in it, a domain uses nothing; only 「アプリの決まりに戻す」 brings the app\'s fallback back', async () => {
     expect((await call('sp-owner', 'PUT', `${BASE}/agent-browser/overrides/sp-member`, { mode: 'off' })).status).toBe(200)
     expect((await policyOf('sp-member')).browserParts).toBeUndefined()
     expect((await policyOf('sp-admin')).browserParts).toEqual([parts()])
     expect((await call('sp-owner', 'PUT', `${BASE}/agent-browser/overrides/sp-member`, { mode: null })).status).toBe(200)
-    const cleared = await put('sp-owner', parts({ assetHosts: [], loginHelpers: [] }))
-    expect(cleared.status).toBe(200)
-    expect(cleared.json.data.siteParts).toEqual([])
-    expect(cleared.json.data.history[0].change).toEqual({ target: 'site-parts', host: SHOP, before: parts(), after: null })
+    const emptied = await put('sp-owner', none(SHOP))
+    expect(emptied.status).toBe(200)
+    expect(emptied.json.data.siteParts).toEqual([none(SHOP)])
+    expect(emptied.json.data.history[0].change).toEqual({ target: 'site-parts', host: SHOP, before: parts(), after: none(SHOP) })
+    expect((await policyOf('sp-member')).browserParts).toEqual([none(SHOP)])
+    const back = await put('sp-owner', { host: SHOP, useAppDefault: true })
+    expect(back.status).toBe(200)
+    expect(back.json.data.siteParts).toEqual([])
+    expect(back.json.data.history[0].change).toEqual({ target: 'site-parts', host: SHOP, before: none(SHOP), after: null })
     expect((await policyOf('sp-member')).browserParts).toBeUndefined()
   })
 })
