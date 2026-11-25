@@ -222,25 +222,25 @@ async function recordingScenarios(win: BrowserShellWindow, shell: ReturnType<typ
   const hooks = { stopped: () => false, pageRead: () => true, sessionRequest: () => ({ allow: false as const, reason: 'test' }) }
   out.aiWhileRecording = await win.run.enterAi(hooks as never)
   out.previewWhileRecording = await win.preview.read('/rec-api/1').then(() => 'read', () => 'refused')
-  const press = async (key: string) => { page.sendInputEvent({ type: 'keyDown', keyCode: key }); page.sendInputEvent({ type: 'keyUp', keyCode: key }); await wait(150) }
   const clickOn = async (id: string) => {
     const r = await js(`(() => { const b = document.getElementById('${id}').getBoundingClientRect(); return [b.x + b.width / 2, b.y + b.height / 2] })()`) as [number, number]
     page.sendInputEvent({ type: 'mouseDown', x: Math.round(r[0]), y: Math.round(r[1]), button: 'left', clickCount: 1 })
     page.sendInputEvent({ type: 'mouseUp', x: Math.round(r[0]), y: Math.round(r[1]), button: 'left', clickCount: 1 })
     await wait(300)
   }
+  // Each field is entered by a click and left by a click elsewhere (a Tab's target depends on the runner's focus).
   await clickOn('end')
   page.insertText('2026-12-03')
-  await press('Tab')
+  await clickOn('pw')
   page.insertText('pw-secret-value-7777')
-  await press('Tab')
+  await clickOn('end')
   await clickOn('save')
   await clickOn('pick')
   // A whole row the page made a button, and a field named by text elsewhere on the page: no label from either.
   await clickOn('row')
   await clickOn('memo2')
   page.insertText('memo-value-4321')
-  await press('Tab')
+  await clickOn('end')
   await wait(1000)
   await win.record.stop()
   const content = recorder.content()
