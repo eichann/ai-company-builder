@@ -27,10 +27,13 @@ const BROWSE_PAGE = `<!doctype html><meta charset="utf-8"><title>events</title>
 <button id="submit" type="submit">保存して送信</button></form>
 <button id="fetch" type="button" onclick="fetch('/browse-fetch', { method: 'POST', body: 'x' })">すぐ保存</button>
 <button id="confirm" type="button" onclick="if (confirm('消しますか？')) fetch('/browse-confirmed', { method: 'POST', body: 'y' })">消す</button>
-<button id="later" type="button" onclick="setTimeout(() => fetch('/browse-later', { method: 'POST', body: 'z' }), 1500)">あとで保存</button>
+<button id="later" type="button" onclick="setTimeout(() => fetch('/browse-later', { method: 'POST', body: 'z' }), 4000)">あとで保存</button>
+<button id="draft" type="button" onclick="window.onbeforeunload = e => { e.preventDefault(); e.returnValue = '' }; setTimeout(() => fetch('/browse-draft', { method: 'POST', body: 'd' }), 4500)">下書き</button>
+<input id="file" type="file" style="display:none"><button id="pick" type="button" onclick="document.getElementById('file').click()">ファイルを選ぶ</button>
 <label for="order">並び順</label><select id="order"><option>新しい順</option><option>古い順</option></select>
 <a id="evil" href="https://evil.test/browse-leak">外のサイト</a>
-<a id="next" href="/browse-next">次のページ</a>`
+<a id="next" href="/browse-next">次のページ</a>
+<script>document.addEventListener('click', e => { (window.__clicks = window.__clicks || []).push(e.target.id || e.target.tagName) }, true)</script>`
 
 const RECORDING_PAGE = `<!doctype html><meta charset="utf-8"><title>orders</title>
 <label for="end">受付終了日</label><input id="end" name="end_date" type="text">

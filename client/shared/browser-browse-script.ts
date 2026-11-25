@@ -107,12 +107,17 @@ export const BROWSER_SNAPSHOT_SCRIPT = `(() => {
 
 const element = (ref: number) => `(window.__acbBrowse || [])[${JSON.stringify(ref)}]`
 
-/** Scrolls the element into view and answers its centre in the viewport (CSS pixels) as JSON, or null when it is gone. */
+/**
+ * Scrolls the element into view and answers its centre in the viewport (CSS pixels) as JSON, or null when it is gone —
+ * after two frames, so the press lands on what is drawn (a page not drawn yet answers nothing and the press fails).
+ */
 export function browsePointScript(ref: number): string {
-  return `(() => {
+  return `(async () => {
   const el = ${element(ref)}
   if (!el || !el.isConnected) return null
   el.scrollIntoView({ block: 'center', inline: 'center' })
+  await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+  if (!el.isConnected) return null
   const r = el.getBoundingClientRect()
   if (r.width <= 0 || r.height <= 0) return null
   return JSON.stringify({ x: r.left + r.width / 2, y: r.top + r.height / 2 })

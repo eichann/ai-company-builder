@@ -64,6 +64,8 @@ interface World {
   user: string | null
   answers: string[]
   onStep?: (n: number) => void
+  /** The operator's step waits until its signal is aborted (a slow model). */
+  hold?: boolean
   start: BrowserLinesAnswer
   continue: (n: number) => BrowserLinesAnswer
   registered: boolean
@@ -102,6 +104,7 @@ function world(over: Partial<World> = {}) {
       materials.push(job.material)
       const n = steps++
       w.onStep?.(n)
+      if (w.hold) await new Promise<void>(resolve => { if (job.signal.aborted) resolve(); else job.signal.addEventListener('abort', () => resolve(), { once: true }) })
       if (job.signal.aborted) return { ok: false, code: 'cancelled' }
       return { ok: true, text: w.answers[n] ?? '{"do":"stop","why":"blocked","unread":[]}' }
     },
@@ -190,7 +193,7 @@ test('a good run: every step asked again, actions done in the window, a card for
     { page: '/events?page&q', action: 'click', label: '検索する' },
     { page: '/events?page&q', action: 'select', label: '並び順' },
     { page: '/events?page&q', action: 'click', label: null },
-    { page: '/events?page', action: 'go', label: null },
+    { page: '/{x}?{x}', action: 'go', label: null },
   ])
   for (const s of ['山田花子', '古い順', '88123', '=x']) assert.ok(!JSON.stringify(fin.steps).includes(s), s)
 })
@@ -246,6 +249,16 @@ test('stop: the turn\'s signal mid-step, or the AI stop, ends the run — no car
   assert.deepEqual(await b.run(), { kind: 'refused', words: W.interrupted })
   assert.equal(b.w.acted.length, 0)
   assert.deepEqual(b.w.finished.map(f => f.reason), ['ai-stopped'])
+})
+
+test('the emergency stop ends the operator\'s step while it is still thinking (its process is stopped at once)', { timeout: 10_000 }, async () => {
+  const c = world({ hold: true })
+  c.w.onStep = () => { setTimeout(() => { c.w.stopped = true }, 50) }
+  const at = Date.now()
+  assert.deepEqual(await c.run(), { kind: 'refused', words: W.interrupted })
+  assert.ok(Date.now() - at < 2000, 'not after the step\'s own time-out')
+  assert.deepEqual(c.w.finished.map(f => f.reason), ['ai-stopped'])
+  assert.equal(c.w.left, 1)
 })
 
 test('answers that would act outside what is offered act on nothing', async () => {
@@ -315,6 +328,9 @@ test('the snapshot and the log step: a password value never kept, another site\'
   assert.deepEqual(browseLogStep({ do: 'click', ref: 1 }, page('/a', ''), HOST), { page: '/a', action: 'click', label: '検索する' })
   const numbered = readBrowserPageSnapshot(JSON.stringify({ address: `https://${HOST}/orders/123`, title: '', text: '', elements: [{ ref: 0, role: 'button', name: '注文 123 を表示', logLabel: '注文 123 を表示' }] }), HOST)!
   assert.deepEqual(browseLogStep({ do: 'click', ref: 0 }, numbered, HOST), { page: '/orders/{n}', action: 'click', label: '注文 {n} を表示' })
+  // An address the operator typed keeps no word (a name could be in it); a link the page showed keeps its pattern.
+  assert.deepEqual(browseLogStep({ do: 'go', path: '/customers/tanaka-hanako?mail=x' }, page(), HOST), { page: '/{x}/{x}?{x}', action: 'go', label: null })
+  assert.deepEqual(browseLogStep({ do: 'go', path: '/entries/88123' }, page(), HOST), { page: '/entries/{n}', action: 'go', label: null })
   assert.deepEqual(browseLogStep({ do: 'click', ref: 6 }, page(), HOST), { page: '/events?page&q', action: 'click', label: null }, 'a row\'s text is never a stored label')
   assert.ok('problem' in parseBrowseAnswer('{"do":"wait","seconds":9}', { snapshot: p, items: 0 }))
 })

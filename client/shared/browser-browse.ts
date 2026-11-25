@@ -313,7 +313,14 @@ export function browseMaterial(input: {
  */
 export function browseLogStep(action: BrowserBrowseAction, page: BrowserPageSnapshot, host: string): BrowserRunLogStep {
   const at = (path: string) => browserRunAddressPattern(`https://${host}${path}`, host) ?? '/{x}'
-  if (action.do === 'go') return { page: at(action.path.split('#')[0]), action: 'go', label: null }
+  if (action.do === 'go') {
+    // An address the operator typed may carry data in its words (a name in a path): kept as a pattern only when it is a
+    // link the page itself showed; otherwise every segment (and the query, if any) is masked (independent review L2).
+    if (page.elements.some(e => e.path === action.path)) return { page: at(action.path), action: 'go', label: null }
+    const [path, query] = action.path.split('?')
+    const masked = path.split('/').map(seg => (seg === '' ? '' : '{x}')).join('/') || '/'
+    return { page: query !== undefined ? `${masked}?{x}` : masked, action: 'go', label: null }
+  }
   const element = 'ref' in action ? page.elements.find(e => e.ref === action.ref) : undefined
   const label = !element || element.role === 'link' || element.role === 'option' ? null : browserRunLabel(element.logLabel)
   return { page: at(page.address), action: action.do, label: action.do === 'back' || action.do === 'wait' ? null : label }

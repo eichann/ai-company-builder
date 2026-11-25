@@ -2970,15 +2970,21 @@ same switch as everything else (`BROWSER_AI_BUILD_SWITCH` / this PC's registrati
   `executeJavaScriptInIsolatedWorld`: the page's script cannot see the element list or replace the functions used): the
   snapshot is the address, title, visible text (`innerText`) and the visible usable elements — a text field named by its
   label / placeholder only, **a password field's value never read**, a link's path only when it stays on the domain. Presses
-  and typing are real input through the `ai` gate's DevTools connection (`Input.dispatchMouseEvent`, `Input.insertText`; the
-  window's one debugger owner, `command` only while the gate holds it); `go` loads only `https://<domain><path>` whose host
+  are the window's own trusted input (`sendInputEvent`, at the element's centre after two drawn frames) and typing goes
+  through the `ai` gate's DevTools connection (`Input.insertText`; the window's one debugger owner, `command` only while the
+  gate holds it), both only while the gate is ready. While the operator has the window it is kept as a shown page
+  (`setBackgroundThrottling(false)`, shown inactive if hidden: a hidden page takes no presses), restored when it is given
+  back; a press that did not land answers nothing new, and the operator sees the page again. `go` loads only `https://<domain><path>` whose host
   is the domain (`sameDomainPath`); the window's navigation rule refuses any other host as before. A navigation main starts
   is bounded (`navigate`: it ends at the run's signal or after 10 s, the load then stopped); after each action the page
-  settles (≤ 10 s). A file chooser is never listed (no dialog of this computer opens). **The page is loaded afresh under
+  settles (≤ 10 s). A file input is never listed, and a file chooser the page opens anyway is intercepted and refused
+  (`Page.setInterceptFileChooserDialog`, logged `file-chooser`): no dialog of this computer opens. **The page is loaded afresh under
   the gate on entering** (independent review: a WebSocket, stream or timer the page held from the member's time is gone, so
   no press can write through it) **and again before the member gets the window back** when the operator did anything
-  (Codex review: a write a press scheduled for later never fires in `human` mode; a load that does not end empties the
-  window instead). The member's unsaved typing in that window is lost (the AI takes the window). Never while the person
+  (Codex review: a write a press scheduled for later never fires in `human` mode). The page cannot ask to stay: while the
+  operator has the window a beforeunload is let go (`will-prevent-unload` prevented, its dialog answered "leave"; review M).
+  When that fresh load cannot be made under the gate — the DevTools connection gone, the load refused or not ending — the
+  window is **closed** instead of handed back with that document (its login stays; review M, L1). The member's unsaved typing in that window is lost (the AI takes the window). Never while the person
   records (the debugger owner refuses `ai`), never while a plan's run uses the window (the shared `busyWindows`); a gate
   that attached late or an `enter` that threw is still left (`finally`).
 - **The server decides** (`POST /browser-runs { host, conversationId? }` + this PC's key, before anything is read or
@@ -3013,12 +3019,15 @@ same switch as everything else (`BROWSER_AI_BUILD_SWITCH` / this PC's registrati
   else only its aria-label or title; nothing from a row, list item or cell; never what `aria-labelledby` points at — the
   independent review of #846), then `browserAddressPattern`, `browserLabel`, `isBrowserAddressPattern`
   (`shared/core/browser-recording.ts`: digits, mail, addresses masked; query values never; a link's or an option's text
-  never; what was typed or chosen never). The operator's `name` of an element (which may be a row's text) is never logged. The server checks every step with
+  never; what was typed or chosen never). The operator's `name` of an element (which may be a row's text) is never logged.
+  A `go` the operator typed keeps a pattern only when the page showed that very link; otherwise every segment is `{x}` (and
+  a query `?{x}`): an address it composed may hold a name (review L2). The server checks every step with
   `browserRunLogProblem` and refuses the whole list otherwise. A run that already ended (timed out, refused) still gets its
   log once. `GET /browser-runs`: the member's own runs, an owner / admin everyone's, newest first (200), with their logs;
   another company's run is the same 404 as none. (No admin page yet: "Not yet".)
-- **Stop**: the turn's signal (the member's stop, closing the consultation, an administrator's stop through `chatTurns`) and
-  the deadline abort the operator's step (its CLI killed) and every wait; the AI stop (`browserAiStopped`), a changed context
+- **Stop**: the turn's signal (the member's stop, closing the consultation, an administrator's stop through `chatTurns`),
+  the deadline and **the AI stop, asked every 0.5 s while the run goes on** (review L5) abort the operator's step (its CLI
+  killed) and every wait; the AI stop (`browserAiStopped`), a changed context
   (sign-in, the company's setting, the switch) or a closed / replaced window are checked after every answer; the window
   always leaves `ai` mode and `finish` is always sent (lost = the lease ends it). The emergency stop's `web` kind covers
   the tool (`agent-events.ts`), and the server refuses the next continue.
@@ -3032,7 +3041,12 @@ same switch as everything else (`BROWSER_AI_BUILD_SWITCH` / this PC's registrati
   anything — every write is refused, and a GET-only side effect is the I2 limit; dialogs are dismissed, so a page that
   needs a confirm to show something stays as it is; the done / stop words and the unread numbers are a channel of a few
   bits per call whose questions the chat AI writes (bounded by the 3 calls per turn; a member's approval per call was not
-  added: the owner's call).
+  added: the owner's call). Also (independent review, said): a run-log label comes from page-controlled attributes
+  (`aria-label`, `title`) and `browserLabel` masks only digits, mail and addresses, so a name a site put in a button's
+  `aria-label` is stored — seen by owners / admins only, as in a recording (L3); the run log is reported by the member's
+  app, and `finish` keeps any well-formed steps: it records what the app says it did, not proof (L6); entering and
+  leaving re-GET the address the window shows, so a page with a GET side effect can be hit once or twice more (the I2
+  limit, L7).
 
 Tests: `client/tests/browser-browse.test.ts` (switched off / a domain not registered / no window: nothing asked; each
 server refusal → plain words, the window never entered; a good run: a continue before every step, the operator's actions

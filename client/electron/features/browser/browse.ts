@@ -47,6 +47,9 @@ export type BrowserBrowseOutcome =
   | { kind: 'card'; runId: string; words: string }
   | { kind: 'refused'; words: string }
 
+/** How often the AI stop is asked while a run goes on (an emergency stop ends the operator's step within this). */
+const STOP_CHECK_MS = 500
+
 /** The cards kept in memory (per signed-in member), at most this many: the oldest go first. */
 const KEPT_CARDS = 100
 
@@ -119,6 +122,8 @@ export function wireBrowserBrowse(deps: BrowserBrowseDeps) {
     input.signal.addEventListener('abort', onTurn, { once: true })
     const deadline = now() + L.totalMs
     const timer = setTimeout(() => cut.abort(), L.totalMs)
+    // The emergency stop ends the operator's step at once (its CLI killed), not only after its answer (review L5).
+    const watchStop = setInterval(() => { if (deps.stopped(companyId)) cut.abort() }, STOP_CHECK_MS)
     const current = () => !cut.signal.aborted && stillCurrent() && !deps.stopped(companyId)
       && !win.closed() && deps.window(companyId, host) === win
     const whyNot = (): BrowserRunEndReason => (input.signal.aborted ? 'stopped-by-person' : deps.stopped(companyId) ? 'ai-stopped'
@@ -180,6 +185,7 @@ export function wireBrowserBrowse(deps: BrowserBrowseDeps) {
       return refused(W.interrupted)
     } finally {
       clearTimeout(timer)
+      clearInterval(watchStop)
       input.signal.removeEventListener('abort', onTurn)
       cut.abort()
       if (entered) await win.leave().catch(() => {})
