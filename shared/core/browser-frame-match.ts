@@ -11,8 +11,10 @@
  * Path patterns (`browser-skill.ts` `isBrowserSkillPath`): literal segments match exactly; `{n}` a run of ASCII digits;
  * `{x}` one non-empty segment of URL path characters — never `.` / `..` (also percent-encoded), never an encoded slash or
  * backslash; a trailing `/` must match a trailing `/`. `{created}` is an after-read placeholder: a write never has one.
+ * `{made:<n>}` (agent-browser.md "Writes only to what this run made") fits only an id the n-th frame's own write returned
+ * in this run — `made`, what the server recorded (and the app kept from the same answers); without it, nothing fits.
  */
-import type { BrowserSkillWrite } from './browser-skill'
+import { browserMadeSegmentPlace, type BrowserSkillWrite } from './browser-skill'
 
 export interface BrowserFrameRequest {
   /** The request's method as sent (upper case). */
@@ -24,8 +26,11 @@ export interface BrowserFrameRequest {
 }
 
 /** Why a request does not fit a frame: fixed words, never a piece of the request. */
-export type BrowserFrameMismatch = 'method' | 'path' | 'method-override' | 'fields'
-export const BROWSER_FRAME_MISMATCHES: readonly BrowserFrameMismatch[] = ['method', 'path', 'method-override', 'fields']
+export type BrowserFrameMismatch = 'method' | 'path' | 'made' | 'method-override' | 'fields'
+export const BROWSER_FRAME_MISMATCHES: readonly BrowserFrameMismatch[] = ['method', 'path', 'made', 'method-override', 'fields']
+
+/** What this run made, by the frame that made it (1-based): the ids its done writes returned. Absent: nothing made. */
+export type BrowserMadeIds = ReadonlyMap<number, ReadonlySet<string>>
 
 /** The most fields a request may name (the frame's fixed fields, ≤ 8, plus `_method`). */
 export const BROWSER_FRAME_REQUEST_LIMITS = Object.freeze({ path: 2000, fields: 9, fieldName: 64, fieldValue: 100 })
@@ -34,28 +39,47 @@ const PATH_SEGMENT_RE = /^[A-Za-z0-9._~!$&'()*+,;=:@%-]+$/
 const DOT_SEGMENT_RE = /^(?:\.|%2e){1,2}$/i
 const ENCODED_SEPARATOR_RE = /%(?:2f|5c)/i
 
-function segmentFits(pattern: string, segment: string): boolean {
+const anySegment = (segment: string) => segment.length > 0 && PATH_SEGMENT_RE.test(segment) && !DOT_SEGMENT_RE.test(segment) && !ENCODED_SEPARATOR_RE.test(segment)
+
+/** `made`: what this run made (for `{made:<n>}`); `'shape'`: any one segment stands in for it (only to tell `made` from `path`). */
+function segmentFits(pattern: string, segment: string, made: BrowserMadeIds | 'shape' | undefined): boolean {
   if (pattern === '{n}') return /^[0-9]+$/.test(segment)
-  if (pattern === '{x}') return segment.length > 0 && PATH_SEGMENT_RE.test(segment) && !DOT_SEGMENT_RE.test(segment) && !ENCODED_SEPARATOR_RE.test(segment)
+  if (pattern === '{x}') return anySegment(segment)
+  const place = browserMadeSegmentPlace(pattern)
+  if (place !== null) {
+    if (!anySegment(segment)) return false
+    if (made === 'shape') return true
+    return made?.get(place)?.has(segment) === true
+  }
   if (pattern.startsWith('{')) return false // `{created}` or anything unknown: never in a write
   return segment === pattern
 }
 
-/** True when the path matches the frame's path pattern segment by segment. */
-export function browserFramePathFits(pattern: string, path: string): boolean {
+/**
+ * True when the path matches the frame's path pattern segment by segment (`made`: what this run made, for a `{made:<n>}`
+ * segment — without it such a segment fits nothing).
+ */
+export function browserFramePathFits(pattern: string, path: string, made?: BrowserMadeIds): boolean {
+  return pathFits(pattern, path, made)
+}
+
+function pathFits(pattern: string, path: string, made: BrowserMadeIds | 'shape' | undefined): boolean {
   if (typeof path !== 'string' || path.length === 0 || path.length > BROWSER_FRAME_REQUEST_LIMITS.path) return false
   // A query, fragment or backslash: refused outright (a second layer — no literal or placeholder segment takes them).
   if (!path.startsWith('/') || /[?#\\]/.test(path)) return false
   const want = pattern.split('/').slice(1)
   const got = path.split('/').slice(1)
   if (want.length !== got.length) return false
-  return want.every((p, i) => (p === '' ? got[i] === '' && i === want.length - 1 : segmentFits(p, got[i])))
+  return want.every((p, i) => (p === '' ? got[i] === '' && i === want.length - 1 : segmentFits(p, got[i], made)))
 }
 
-/** Null when the request fits the frame; else why not. */
-export function browserFrameMismatch(frame: BrowserSkillWrite, request: BrowserFrameRequest): BrowserFrameMismatch | null {
+/**
+ * Null when the request fits the frame; else why not. `made`: what this run made (the server's record at a permit, the
+ * app's copy before asking) — a `{made:<n>}` frame fits only one of those ids (`made` when the path fits otherwise).
+ */
+export function browserFrameMismatch(frame: BrowserSkillWrite, request: BrowserFrameRequest, made?: BrowserMadeIds): BrowserFrameMismatch | null {
   if (request.method !== frame.method) return 'method'
-  if (!browserFramePathFits(frame.path, request.path)) return 'path'
+  if (!pathFits(frame.path, request.path, made)) return pathFits(frame.path, request.path, 'shape') ? 'made' : 'path'
   const declared = frame.fields._method
   const sent = Object.prototype.hasOwnProperty.call(request.fields, '_method') ? request.fields._method : undefined
   if (declared !== sent) return 'method-override'
@@ -69,9 +93,12 @@ export function browserFrameMismatch(frame: BrowserSkillWrite, request: BrowserF
 
 /**
  * A plan the AI wrote (ad hoc, approved on the card) is narrower than a reviewed `browser.yaml`: every write path must
- * begin with a literal segment, so a frame can never be "any path" (`/{x}`, `/{n}/{x}`, `/`). Null when it is.
+ * begin with a literal segment, so a frame can never be "any path" (`/{x}`, `/{n}/{x}`, `/`); and no `{made}` target
+ * (`made`: "only what this run made" is a reviewed company Skill's — its parsed place is no wire format either). Null when
+ * it is.
  */
-export function browserAdhocWritesProblem(writes: readonly BrowserSkillWrite[]): 'wide-path' | null {
+export function browserAdhocWritesProblem(writes: readonly BrowserSkillWrite[]): 'wide-path' | 'made' | null {
+  if (writes.some(w => w.path.split('/').some(seg => browserMadeSegmentPlace(seg) !== null))) return 'made'
   return writes.every((w) => {
     const first = w.path.split('/')[1] ?? ''
     return first !== '' && !first.startsWith('{')

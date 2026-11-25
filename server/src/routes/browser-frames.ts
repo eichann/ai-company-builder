@@ -9,7 +9,7 @@
  *   GET  /browser-frame-runs/:runId             the member's own (never the approval value)
  *   POST /browser-frame-runs/:runId/approve     { planHash, approvalToken }: the person approved the plan the card showed
  *   POST /browser-frame-runs/:runId/permit      { frame, request: { method, path, fields } }: one write that fits that frame
- *   POST /browser-frame-runs/:runId/report      { write, result: done | not_sent | unknown | refused, reason? }
+ *   POST /browser-frame-runs/:runId/report      { write, result: done | not_sent | unknown | refused, reason?, created? }
  *   POST /browser-frame-runs/:runId/confirm     { write, answer: done | not_done }: the person's answer about a write in
  *                                               doubt, from the card (this PC's key; it never moves the write or the run)
  *   POST /browser-frame-runs/:runId/end         the run ends; its unused frames vanish

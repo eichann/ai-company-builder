@@ -23,6 +23,12 @@
  * - **A report** names its write: `permitted` → `done` ("the site returned success"; `verified`, a safe pattern's machine
  *   check, is reserved) / `not_sent` / `unknown` (the run locks); `unknown` + `done` → `done` (late and sure; the run stays
  *   locked). A permitted write silent past permit + 5 s + 30 s on both clocks becomes `unknown` on the next touch.
+ * - **What this run made** (agent-browser.md "Writes only to what this run made"): a frame whose path has `{made:<n>}`
+ *   fits only an id the n-th frame's own `done` write returned in this run. The id comes with that write's `done` report
+ *   (`created`), from the run's own PC like every sure report, only while the write moves `permitted` → `done` and only for
+ *   a frame some frame of the run refers to; it is kept (`browser_frame_made`, the one page value the server keeps) and
+ *   every permit matches against it. An `unknown`, `refused` or `not_sent` write never gives one (a late `done` after
+ *   `unknown` neither: the run is locked anyway).
  * - **The end** (`end`, the run's time, leaving): the run `ended`, its unused frames gone. A write still `permitted` is left
  *   to its report or time-out (it may be on its way); leaving makes it `unknown` at once (nobody will report it).
  *
@@ -33,7 +39,8 @@ import { browserAiStopped, levelAllows, type BrowserOperationSettings } from '..
 import { BROWSER_PLAN_TIMES, BROWSER_REPORT_REASONS } from '../../shared/core/browser-plans'
 import { browserSkillDeclarationFrom, BROWSER_SKILL_PROBLEM_WORDS, type BrowserSkillWrite } from '../../shared/core/browser-skill'
 import { BROWSER_DEVICE_WORDS } from '../../shared/core/browser-device'
-import { browserAdhocWritesProblem, browserFrameMismatch, BROWSER_FRAME_REQUEST_LIMITS, type BrowserFrameRequest } from '../../shared/core/browser-frame-match'
+import { browserAdhocWritesProblem, browserFrameMismatch, BROWSER_FRAME_REQUEST_LIMITS, type BrowserFrameRequest, type BrowserMadeIds } from '../../shared/core/browser-frame-match'
+import { browserMadeFrom } from '../../shared/core/browser-skill'
 import { BROWSER_FRAME_RUN_TIMES } from '../../shared/core/browser-run-budget'
 import { canonicalJson } from '../../shared/core/fixed-content'
 import { isValidSkillName } from '../../shared/core/names'
@@ -108,6 +115,7 @@ export const BROWSER_FRAME_WORDS = {
   writeNotFound: 'その書き込みは見つかりません',
   mismatch: 'この書き込みは、計画の送り先の枠に合いません（送りません）',
   widePlan: '計画の送り先が広すぎます。送り先は決まった言葉で始まるアドレスにしてください',
+  madePlan: '「この作業で作ったものにだけ書く」指定は、承認された会社の Skill でだけ使えます',
   approvalRefused: 'この承認は受け付けられません。カードからもう一度確かめてください',
   confirmNotUnknown: 'この書き込みは、届いたか分からないものではありません',
   confirmTooEarly: 'まだ送られるかもしれないため、少し待ってから確かめてください',
@@ -120,6 +128,8 @@ const CONVERSATION_RE = /^[A-Za-z0-9_-]{1,100}$/
 const HASH_RE = /^sha256:[0-9a-f]{64}$/
 const TOKEN_RE = /^[0-9a-f]{64}$/
 const FIELD_NAME_RE = /^[A-Za-z_][A-Za-z0-9_.[\]-]*$/
+/** What a done write made, as its report names it (the app's `createdIdOf`: a plain token). */
+const MADE_RE = /^[A-Za-z0-9_-]{1,64}$/
 
 /** The permit's `request` as the app read the held write (only its shape: method, path, the frame's fixed fields). */
 function requestOf(v: unknown): BrowserFrameRequest | null {
@@ -142,6 +152,13 @@ const iso = (ms: number) => new Date(ms).toISOString()
 const ms = (s: string) => Date.parse(s)
 const RESULTS: readonly BrowserFrameWriteResult[] = ['done', 'not_sent', 'unknown', 'refused']
 const CONFIRM_ANSWERS: readonly BrowserFrameConfirmAnswer[] = ['done', 'not_done']
+
+/** What a run made, by the frame that made it (the permit's `{made:<n>}` matches against it). */
+function madeIds(rows: ReadonlyArray<{ frameIdx: number; made: string }>): BrowserMadeIds {
+  const out = new Map<number, Set<string>>()
+  for (const row of rows) out.set(row.frameIdx, (out.get(row.frameIdx) ?? new Set()).add(row.made))
+  return out
+}
 
 interface StartFrames {
   host: string
@@ -287,7 +304,9 @@ export function createBrowserFrameService(deps: BrowserFrameDeps) {
     const parsed = browserSkillDeclarationFrom({ domain: plan.domain, writes: plan.writes })
     if (!parsed.ok) return refuse('bad-request', BROWSER_SKILL_PROBLEM_WORDS[parsed.problem], { code: 'BROWSER_FRAME_BAD_PLAN' })
     // The AI wrote it: narrower than a reviewed declaration — every path begins with a literal segment (never "any path").
-    if (browserAdhocWritesProblem(parsed.declaration.writes)) return refuse('bad-request', W.widePlan, { code: 'BROWSER_FRAME_BAD_PLAN' })
+    // And never `{made}` (only a reviewed company Skill's declaration says "only what this run made").
+    const adhoc = browserAdhocWritesProblem(parsed.declaration.writes)
+    if (adhoc) return refuse('bad-request', adhoc === 'made' ? W.madePlan : W.widePlan, { code: 'BROWSER_FRAME_BAD_PLAN' })
     // Its domain must be a registered one with writes allowed: the gate below (the same check as every permit's).
     // An ad-hoc plan is never pre-approvable: the person approves it on the card.
     return ok({
@@ -436,7 +455,7 @@ export function createBrowserFrameService(deps: BrowserFrameDeps) {
         const frame = r.frames(run.id).find(f => f.idx === frameIdx)
         if (!frame) return bad()
         if (frame.used >= frame.max) return refuse('conflict', W.usedUp, { code: 'BROWSER_FRAME_USED_UP' })
-        const mismatch = browserFrameMismatch({ method: frame.method, path: frame.path, max: frame.max, fields: JSON.parse(frame.fields) as Record<string, string> }, request)
+        const mismatch = browserFrameMismatch({ method: frame.method, path: frame.path, max: frame.max, fields: JSON.parse(frame.fields) as Record<string, string> }, request, madeIds(r.made(run.id)))
         if (mismatch) return refuse('conflict', W.mismatch, { code: 'BROWSER_FRAME_MISMATCH', reason: mismatch })
         const passed = gate(member, run.host, deviceKey, run)
         const refused: Refusal | null = !passed.ok
@@ -457,19 +476,23 @@ export function createBrowserFrameService(deps: BrowserFrameDeps) {
     },
 
     /**
-     * `ServerGetsReport` — POST /browser-frame-runs/:runId/report { write, result: done | not_sent | unknown, reason? }:
-     * judged after the time-outs. Not gated by the stop or the levels (they never keep a write from settling), but a sure
+     * `ServerGetsReport` — POST /browser-frame-runs/:runId/report { write, result: done | not_sent | unknown, reason?,
+     * created? }: judged after the time-outs. Not gated by the stop or the levels (they never keep a write from settling), but a sure
      * answer — `done` or `not_sent` — counts only from **the run's own PC** (its key header; independent review of ⑤a):
      * from anywhere else it is refused and the write settles as unknown at its time-out. `unknown` is taken from any
-     * session of the member (it only makes the run stricter).
+     * session of the member (it only makes the run stricter). `created` (only with `done`, only for a frame another frame's
+     * `{made:<n>}` refers to, else 400): the id the site's answer named, kept with the write moving to `done` — the same
+     * report again is `same` only with the same id.
      */
     report(member: Member, runId: string, body: unknown, deviceKey?: string): Outcome<BrowserFrameReportAnswer> {
       const found = ownRun(member, runId)
       if (!found) return missing()
-      if (!isMap(body) || !keysWithin(body, ['write', 'result', 'reason']) || !Number.isSafeInteger(body.write) || (body.write as number) < 1
+      if (!isMap(body) || !keysWithin(body, ['write', 'result', 'reason', 'created']) || !Number.isSafeInteger(body.write) || (body.write as number) < 1
         || !(RESULTS as readonly unknown[]).includes(body.result) || (body.reason !== undefined && typeof body.reason !== 'string')) return bad()
+      if (body.created !== undefined && (body.result !== 'done' || typeof body.created !== 'string' || !MADE_RE.test(body.created))) return bad()
       const seq = body.write as number
       const result = body.result as BrowserFrameWriteResult
+      const created = body.created as string | undefined
       // Only a word of the one list is kept (never a page's text).
       const reason = typeof body.reason === 'string' && (BROWSER_REPORT_REASONS as readonly string[]).includes(body.reason) ? body.reason : null
       if (result !== 'unknown') {
@@ -484,14 +507,24 @@ export function createBrowserFrameService(deps: BrowserFrameDeps) {
         const w = r.writes(run.id).find(x => x.seq === seq)
         if (!w) return refuse('not-found', W.writeNotFound, { code: 'BROWSER_FRAME_WRITE_NOT_FOUND' })
         const answer = (outcome: BrowserFrameReportAnswer['outcome']) => ok({ outcome, run: view(member.companyId, r.run(run.id) as FrameRunRow) })
+        // An id only for a frame some frame of this run refers to (`{made:<n>}`): no other value of the page is kept.
+        if (created !== undefined && !r.frames(run.id).some(f => browserMadeFrom(f.path) === w.frameIdx)) return bad()
         if (w.state === 'permitted') {
           if (!r.setWriteState(run.id, seq, 'permitted', result, { settledAt: iso(now), reason })) throw new Error('browser frames: a write moved inside its transaction')
+          if (created !== undefined) r.insertMade(run.id, { seq, frameIdx: w.frameIdx, made: created }, iso(now))
           // `unknown`: nothing more is sent in this run (the run locks; an ended run stays ended). `refused` (the site said
           // no): the run goes on; the unit stays used, and trying again is a new write with its own permit.
           if (result === 'unknown') r.setRunState(run.id, 'open', 'locked', {})
           return answer('applied')
         }
-        if (w.state === result || (w.state === 'verified' && result === 'done')) return answer('same')
+        if (w.state === result || (w.state === 'verified' && result === 'done')) {
+          // The same done again (its answer lost on the way back) only with what it made then; another id is not the same.
+          const kept = r.made(run.id).find(m => m.seq === seq)?.made
+          if (result === 'done' && w.state === 'done' && created !== kept) {
+            return refuse('conflict', W.reportConflict, { code: 'BROWSER_REPORT_CONFLICT' })
+          }
+          return answer('same')
+        }
         // Once the person answered about it, no report changes it. One that agrees is kept as it was; one that contradicts
         // the answer (done after されていなかった, refused / not sent after 済んでいた) is refused and noted — ids and words only.
         const answered = r.confirms(run.id).find(c => c.seq === seq)
@@ -502,7 +535,8 @@ export function createBrowserFrameService(deps: BrowserFrameDeps) {
           return refuse('conflict', W.reportConflict, { code: 'BROWSER_REPORT_CONFLICT' })
         }
         if (w.state === 'unknown' && (result === 'done' || result === 'refused')) {
-          // Late and sure: the site's answer came after all; the run stays locked (never runs on after an unknown).
+          // Late and sure: the site's answer came after all; the run stays locked (never runs on after an unknown). A
+          // `created` with it is not kept: nothing more is permitted in this run anyway.
           r.setWriteState(run.id, seq, 'unknown', result, { settledAt: iso(now), reason })
           return answer('applied')
         }

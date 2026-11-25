@@ -59,6 +59,13 @@ export interface FrameWriteConfirmRow {
   confirmedAt: string
 }
 
+/** The id a done write's answer named, for a frame a later `{made:<n>}` refers to (the only page value kept). */
+export interface FrameMadeRow {
+  seq: number
+  frameIdx: number
+  made: string
+}
+
 export interface BrowserFrameRepository {
   run(runId: string): FrameRunRow | null
   /** The run not ended on this domain, if any (at most one: a unique index). */
@@ -79,6 +86,10 @@ export interface BrowserFrameRepository {
   confirms(runId: string): FrameWriteConfirmRow[]
   /** The person's answer, once per write (false when one is there already: the primary key). */
   insertConfirm(runId: string, row: FrameWriteConfirmRow): boolean
+  /** What this run made: the ids its done writes' answers named (`browser_frame_made`). */
+  made(runId: string): FrameMadeRow[]
+  /** Keep what a done write made (once per write; only beside a `done` write of that frame: the trigger). */
+  insertMade(runId: string, row: FrameMadeRow, recordedAt: string): void
   /** Compare-and-set of a write's state; false when it was not `from`. */
   setWriteState(runId: string, seq: number, from: FrameWriteState, to: FrameWriteState, change: { settledAt: string; reason?: string | null }): boolean
 }

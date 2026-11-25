@@ -4,8 +4,8 @@ import type Database from 'better-sqlite3'
  * Rebuild one table whose CHECK must widen (SQLite cannot alter a CHECK), keeping every row and its rowid, when its stored
  * text lacks `marker`. The new table, its indexes and triggers are made from **the same statements a new database runs**
  * (`create`, `after`), so an upgraded database ends exactly like a new one. Its own triggers and indexes are dropped first
- * (`drop`: they go with the old table's name otherwise). One transaction; nothing references the table (no foreign key
- * points at it). Foreign keys are off for the copy (`PRAGMA foreign_keys` cannot change inside a transaction): a row whose
+ * (`drop`: they go with the old table's name otherwise) — and so is another table's trigger that names it (SQLite would
+ * point it at the renamed old table). One transaction; no foreign key points at the table. Foreign keys are off for the copy (`PRAGMA foreign_keys` cannot change inside a transaction): a row whose
  * parent is gone is kept as it was and counted in a log line afterwards (`foreign_key_check`, ids only), so startup never
  * fails on it. Answers whether it rebuilt. Idempotent.
  */

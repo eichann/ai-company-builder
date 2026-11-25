@@ -2982,7 +2982,8 @@ with it yet. Only company-wide Skills (`.claude/skills/<name>`; a shelf item wit
   fields that must hold exactly these values — `_method` only on a POST and only PUT / PATCH / DELETE (I4), **never a login,
   CSRF or session field** (`isSensitiveFieldName`), plain values; the same write twice refused), `never_read` (≤ 32 path
   patterns, a query `key` / `key=value` allowed: a GET that changes something), `after_read` (≤ 16, `{created}` allowed),
-  `account_marker` (`{ meta: <name> }`, a generic `<meta name>`), `safe_pattern` (`none` only). Every object exactly its
+  `account_marker` (`{ meta: <name> }`, a generic `<meta name>`), `safe_pattern` (`none` only); a write's optional `id` and
+  a later write's `{made:<id>}` ("Writes only to what this run made"). Every object exactly its
   keys, ≤ 8 KiB (UTF-8). **Path patterns** share the recording's placeholders (`{n}`, `{x}`): `/` + plain ASCII segments
   (`A–Z a–z 0–9 . _ ~ -`, never `.` / `..`, no `%`, no empty segment but a trailing `/`), no query on a write or an
   after-read. Problems are fixed words (`BROWSER_SKILL_PROBLEM_WORDS`), never a piece of the file. `browserSkillFrames` = a
@@ -3264,7 +3265,8 @@ core's write connection, the plan card and the after-read card).
   `BROWSER_SKILL_CHANGED`) — **a refusal of the gate ends the run** (its
   frames vanish; lifting the cause later revives nothing). Then one unit taken (compare-and-set `used < max`) and the write
   appended `permitted`; answer `{ write, frame, permittedAt, validMs: 5000 }`.
-- **Report** (`POST …/:runId/report { write, result: done | not_sent | unknown, reason? }`): never gated by the stop or the
+- **Report** (`POST …/:runId/report { write, result: done | not_sent | unknown, reason?, created? }`; `created`: "Writes only
+  to what this run made"): never gated by the stop or the
   levels, but **`done` / `not_sent` only from the run's own PC** (its key header, as the gate checks it; else
   `BROWSER_DEVICE_ELSEWHERE` and the write settles `unknown` at its time-out); `unknown` from any session of the member.
   Judged after the time-outs. `permitted` → that result (`done` = "the site returned success"; **`verified` — "machine-checked as predicted"
@@ -3641,6 +3643,75 @@ never a frame inside it, `gone` without a card; a `bl_` card answered from two w
 `browser-frame-writes.test.ts` (the card in two windows: one ［任せる］ and one answer asked of the server, the other
 window shown the outcome; a lost reply frees the next press), `src/features/browser-plans/model.test.ts` (when a card
 reads itself again, and the back-off). Each guard mutation-checked.
+
+## Writes only to what this run made (`{made:<id>}` in a Skill's `browser.yaml`)
+
+A company Skill's declaration can say "this write may only target something this same run created": make a plan, then add
+items **to that plan only**, never to one the person (or an earlier run) made. A generic core rule (no site word in the core).
+
+```yaml
+writes:
+  - { id: new-plan, method: POST, path: /api/plans, max: 1 }
+  - { method: POST, path: "/api/plans/{made:new-plan}/items", max: 10 }   # quoted in a flow mapping ({ … })
+```
+
+- **The grammar** (`shared/core/browser-skill.ts`): a write target may carry `id` (`BROWSER_SKILL_WRITE_ID_RE`: a lower-case
+  letter, then lower-case letters, digits, `-`; ≤ 32; once per declaration, else `bad-write-id`); a write path may hold
+  **one** `{made:<id>}` segment naming an **earlier** target's id — an undeclared id, a later target, the target itself or
+  two such segments → `bad-made` (refused at parse, so 「Skill の承認」 and a run's start refuse it too). **Only in a
+  reviewed company Skill**: an ad-hoc plan (the AI wrote it) carrying `{made}` is refused — by the app before asking
+  (`parseWorkAnswer`, `plan-writes`) and by the server at its start (`browserAdhocWritesProblem` → `made`,
+  `BROWSER_FRAME_BAD_PLAN`; Codex review: the parsed place is no wire format). **Only a create names what it made**: an
+  `id` only on a POST without `_method` (`bad-maker`: a PATCH of the person's object answering its id would otherwise
+  hand that id on). **No broader target beside it**: another target of the same method whose pattern also fits the
+  `{made}` target's addresses (`{x}`, or `{n}` / another `{made}` where it has a placeholder; fixed fields not looked at)
+  → `made-covered`. Admins approving such a Skill check that the maker endpoint **mints** its ids (a create, not an
+  upsert or an id the caller chooses). Never in `after_read` / `never_read` (`isBrowserSkillPath`'s `made` only for writes). The
+  parsed path — and so the server's frames table, the plan hash and the card — carries the maker's **place** instead
+  (`{made:2}` = the second target; `browserMadeFrom`), so no table changed; the parsed spelling cannot be written by hand
+  (an id starts with a letter).
+- **The match** (`shared/core/browser-frame-match.ts`, the one rule): `browserFrameMismatch(frame, request, made?)` — a
+  `{made:<n>}` segment fits only one of `made.get(n)`, the ids the n-th frame's own done writes returned **in this run**,
+  and is still one plain segment (never a dot segment or an encoded `/`); without `made` nothing fits. A path that fits but
+  for that id → the fixed reason `made` (`BROWSER_FRAME_MISMATCHES`), otherwise `path` as before.
+- **The server decides** (`services/browser-frames.ts`): the id comes with the maker write's **`done` report**
+  (`{ write, result: done, created }`) — like every sure report only from **the run's own PC** —, only while that write
+  moves `permitted` → `done`, only a plain token (`^[A-Za-z0-9_-]{1,64}$`), only for a frame some frame of **this run**
+  refers to; anything else 400 and nothing moves. It is kept in **`browser_frame_made`** (additive, append-only: no update,
+  no delete while its run exists; a trigger accepts a row only beside a `done` write of that very frame; a CHECK on the
+  token) — **the only value of a site's page the server keeps**. Every permit reads that run's rows; another run never
+  inherits them. A repeated `done` report is `same` only with the same id (another id or none → `BROWSER_REPORT_CONFLICT`).
+  **No id**: an `unknown`, `refused` or `not_sent` write gives none; a late `done` after `unknown` records none (the run is
+  locked anyway); a refused try whose corrected try is `done` gives that one's id. `max` still applies to the `{made}` frame.
+- **The app** (`features/browser/frame-writes.ts`): a done write of a frame a later `{made:<n>}` names reports the id its
+  answer names (`createdIdOf`: `id`, else `data.id`, the same reading as an after-read `{created}`); once the server
+  recorded the report, the id is kept in main's memory and `pickFrame` matches later held writes against it with the same
+  core rule (so a write to another object is refused before any permit is asked). An id the held write itself carried (a
+  body field's value or a segment of its path: an upsert, an id the caller chose) is **never reported** (independent
+  review). No id in the answer → none reported, the
+  `{made}` frame stays shut for the run (availability, never a wider write). A report the server did not record locks the
+  run as before.
+- **The card** (the member's plan card and the admin's 「Skill の承認」, `browserSkillWriteLine`): 「…：10回まで（この作業の中で、
+  1つ目の書き込み先で作ったものにだけ）」.
+- **Rolling back**: an older server refuses a declaration with `id` (`bad-writes`), so no run with `{made}` frames exists
+  there, and an older app never sends `created`.
+- **The model** (`model/browser-plan/README.md` "FramesLife"): not modelled — which frame a held write fits is a
+  precondition of `AppAsks` there (matching is the core rule's, tested here); `{made}` only narrows which writes fit, so
+  every rule of FramesLife holds as it is, and the model stays under its state ceiling.
+
+Tests: `server/tests/unit/browser-skill-core.test.ts` (an id names a target, the place in the parsed path, block and flow
+style; undeclared / later / itself / two segments / a bad or repeated id / the parsed spelling written by hand refused;
+an id on a PATCH or an override refused; a broader target of the same method beside a `{made}` one refused;
+not in `after_read` / `never_read`; the card's words), `browser-frame-match.test.ts` (an ad-hoc plan's `{made}` refused;
+nothing fits without what was made,
+another frame's or another id; the rest of the path first; a made id one plain segment), `browser-frames.test.ts` (an
+ad-hoc plan with `{made}` starts nothing; the frames' paths; nothing fits before the maker's done with an id, only that id after, `max`; an id only with `done`, only a
+plain token, only for a maker; unknown / late done / refused give none, the corrected try does; another run inherits
+nothing; another PC records nothing; the same done with another id a conflict; the table's trigger, CHECK, no update /
+delete; a database from before rebuilt with the trigger as a new one has it), `client/tests/browser-frame-writes.test.ts`
+(an AI's plan with `{made}` refused; the maker's id with its done report, an id the request carried never reported, only that id written afterwards, none read → none written, a report not recorded →
+locked and nothing kept, a failed maker write gives none). Each guard mutation-checked; kept on purpose: keeping the id in
+the app only once the server recorded it (a report the server did not record locks the run, so nothing more is sent).
 
 ## Not yet (later PRs)
 

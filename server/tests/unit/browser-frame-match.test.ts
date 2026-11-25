@@ -3,7 +3,8 @@
  * rule the server's permit and ⑤b's app both ask. Guards: the path pattern never matches more than it says (a placeholder
  * is one segment, `{n}` digits only, no dot segment or encoded separator, no query, the trailing slash as written); an
  * undeclared `_method` never passes, a declared one must be exactly it; the frame's fixed fields exactly, and no other
- * field may be named; an AI-written plan may not be "any path". Fictional paths.
+ * field may be named; an AI-written plan may not be "any path"; a `{made:<n>}` segment fits only an id the n-th frame made
+ * in this run. Fictional paths.
  */
 import { describe, expect, it } from 'vitest'
 import { browserAdhocWritesProblem, browserFrameMismatch, browserFramePathFits } from '../../../shared/core/browser-frame-match'
@@ -73,5 +74,30 @@ describe('an AI-written plan', () => {
   it('begins every path with a literal segment', () => {
     expect(browserAdhocWritesProblem([frame('/api/{n}'), frame('/x/{x}/y')])).toBeNull()
     for (const p of ['/{x}', '/{n}/a', '/']) expect(browserAdhocWritesProblem([frame('/api/a'), frame(p)])).toBe('wide-path')
+    // "Only what this run made" is a reviewed Skill's, never an AI-written plan's.
+    expect(browserAdhocWritesProblem([frame('/api/a'), frame('/api/a/{made:1}/b')])).toBe('made')
+  })
+})
+
+describe('a {made:<n>} frame fits only what this run made', () => {
+  const f = frame('/api/plans/{made:1}/items')
+  const req = (id: string) => ({ method: 'POST', path: `/api/plans/${id}/items`, fields: {} })
+  const made = (ids: Record<number, string[]>) => new Map(Object.entries(ids).map(([k, v]) => [Number(k), new Set(v)]))
+
+  it('nothing fits without what was made, nor another frame\'s, nor another id', () => {
+    expect(browserFrameMismatch(f, req('77'))).toBe('made')
+    expect(browserFrameMismatch(f, req('77'), made({}))).toBe('made')
+    expect(browserFrameMismatch(f, req('77'), made({ 2: ['77'] }))).toBe('made')
+    expect(browserFrameMismatch(f, req('78'), made({ 1: ['77'] }))).toBe('made')
+    expect(browserFrameMismatch(f, req('77'), made({ 1: ['77'] }))).toBeNull()
+    expect(browserFrameMismatch(f, req('p9'), made({ 1: ['77', 'p9'] }))).toBeNull()
+  })
+
+  it('the rest of the path still decides first, and a made id is one plain segment', () => {
+    expect(browserFrameMismatch(f, { method: 'POST', path: '/api/plans/77/other', fields: {} }, made({ 1: ['77'] }))).toBe('path')
+    expect(browserFrameMismatch(f, { method: 'PUT', path: '/api/plans/77/items', fields: {} }, made({ 1: ['77'] }))).toBe('method')
+    for (const id of ['..', '%2e%2e', 'a%2Fb', '']) expect(browserFrameMismatch(f, req(id), made({ 1: [id] })), id).toBe('path')
+    expect(browserFramePathFits('/api/plans/{made:1}/items', '/api/plans/77/items')).toBe(false)
+    expect(browserFramePathFits('/api/plans/{made:1}/items', '/api/plans/77/items', made({ 1: ['77'] }))).toBe(true)
   })
 })
