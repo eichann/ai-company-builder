@@ -264,6 +264,11 @@ describe('the run log: what was done, never with what', () => {
     expect(value(runs.list(bob)).runs.map(x => [x.state, x.reason])).toEqual([['stopped', 'need-person']])
     expect(() => conn.prepare("UPDATE browser_run_log SET label = 'x'").run()).toThrow(/append-only/)
     expect(() => conn.prepare('DELETE FROM browser_run_log').run()).toThrow(/append-only/)
+    // Once, even when the first log was empty.
+    const e = value(start(alice))
+    value(runs.finish(alice, e.runId, { outcome: 'stopped', steps: [] }))
+    expect(refusal(runs.finish(alice, e.runId, { outcome: 'done', steps }))).toBe('conflict:BROWSER_RUN_ENDED')
+    expect(value(runs.list(alice)).runs.find(x => x.id === e.runId)?.steps).toEqual([])
   })
 
   it('a step that could carry a value is refused whole: nothing stored', () => {

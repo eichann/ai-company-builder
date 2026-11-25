@@ -308,7 +308,18 @@ async function browseScenarios(win: BrowserShellWindow, sites: Sites) {
   out.goOther = await win.browse.act({ do: 'go', path: '@evil.test/x' }, signal)
   out.go = await win.browse.act({ do: 'go', path: '/browse-next' }, signal)
   out.urlAfterGo = page.getURL()
+  // A navigation to a page that never answers ends when the run is stopped (and the load is stopped).
+  const stop = new AbortController()
+  setTimeout(() => stop.abort(), 500)
+  const hangAt = Date.now()
+  out.hang = await win.browse.act({ do: 'go', path: '/browse-hang' }, stop.signal)
+  out.hangMs = Date.now() - hangAt
+  // A press that starts a write for later (a timer): once the operator leaves, the page was loaded afresh, so it never fires.
+  await win.browse.act({ do: 'go', path: '/browse' }, signal)
+  const last = await win.browse.snapshot()
+  out.later = await win.browse.act({ do: 'click', ref: last?.elements.find(e => e.name === 'あとで保存')?.ref ?? -1 }, signal)
   await win.browse.leave()
+  await wait(2500)
   await wait(300)
   out.writes = sites.hits.filter(h => h.method !== 'GET' && h.method !== 'HEAD').slice(writesBefore).map(h => `${h.method} ${h.host}${h.path}`)
   out.evilHits = sites.hits.filter(h => h.host === 'evil.test' && h.path.startsWith('/browse')).length

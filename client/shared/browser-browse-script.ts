@@ -61,8 +61,28 @@ export const BROWSER_SNAPSHOT_SCRIPT = `(() => {
     if (role === 'textbox' || role === 'password' || role === 'select' || role === 'checkbox' || role === 'radio') {
       return clean(el.getAttribute('placeholder') || el.getAttribute('title') || el.getAttribute('name') || '')
     }
-    if (el.tagName.toLowerCase() === 'input') return clean(el.value || el.getAttribute('alt') || el.getAttribute('title') || '')
+    if (el.tagName.toLowerCase() === 'input') return clean(role === 'button' ? (el.value || el.getAttribute('alt') || el.getAttribute('title') || '') : (el.getAttribute('alt') || el.getAttribute('title') || ''))
     return clean(el.innerText || el.getAttribute('title') || el.getAttribute('alt') || '')
+  }
+  // The run log's label (never what the operator sees as a name): the recording's rules (shared/browser-recorder.ts,
+  // BROWSER_RECORDING_SCRIPT, independent review of #846) — a field's own aria-label, <label> words, placeholder or title;
+  // a native button's own text only when it holds few elements; anything else only its aria-label or title; nothing from a
+  // row, a list item or a cell, or an element holding many others. A page's data never becomes a stored label.
+  const SMALL = 8
+  const rowLike = el => el.matches('tr, td, th, li, [role=row], [role=gridcell], [role=cell], [role=listitem], [role=option], [role=menuitem]')
+  const ownText = label => { const c = label.cloneNode(true); c.querySelectorAll('input, select, textarea, option, datalist').forEach(n => n.remove()); return c.textContent || '' }
+  const fieldLabel = el => clean(el.getAttribute('aria-label') || (el.labels && el.labels[0] && ownText(el.labels[0])) || el.getAttribute('placeholder') || el.getAttribute('title') || '')
+  const nativeButton = el => el instanceof HTMLButtonElement || (el instanceof HTMLInputElement && /^(submit|button|reset|image)$/.test(el.type))
+  const controlLabel = el => {
+    if (el instanceof HTMLInputElement) return nativeButton(el) ? clean(el.getAttribute('aria-label') || el.value || el.getAttribute('title') || '') : fieldLabel(el)
+    if (rowLike(el) || el.querySelectorAll('*').length > SMALL) return ''
+    if (nativeButton(el)) return clean(el.getAttribute('aria-label') || el.innerText || el.getAttribute('title') || '')
+    return clean(el.getAttribute('aria-label') || el.getAttribute('title') || '')
+  }
+  const logLabelOf = (el, role) => {
+    if (role === 'link' || role === 'option') return ''
+    if (['textbox', 'password', 'select', 'checkbox', 'radio'].includes(role) && !el.isContentEditable) return fieldLabel(el)
+    return controlLabel(el)
   }
   const sel = 'a[href],button,input,select,textarea,summary,[role=button],[role=link],[role=tab],[role=menuitem],[role=checkbox],[role=radio],[role=option],[contenteditable=""],[contenteditable=true]'
   const elements = []
@@ -70,10 +90,11 @@ export const BROWSER_SNAPSHOT_SCRIPT = `(() => {
     if (elements.length >= MAX_EL) break
     if (el.disabled || !visible(el)) continue
     const role = roleOf(el)
-    if (el.tagName.toLowerCase() === 'input' && (el.getAttribute('type') || '').toLowerCase() === 'hidden') continue
+    // Never a hidden input, and never a file chooser (the operator must not open a dialog of this computer).
+    if (el.tagName.toLowerCase() === 'input' && ['hidden', 'file'].includes((el.getAttribute('type') || '').toLowerCase())) continue
     const ref = refs.length
     refs.push(el)
-    const item = { ref, role, name: nameOf(el, role) }
+    const item = { ref, role, name: nameOf(el, role), logLabel: logLabelOf(el, role) }
     if (role === 'link') item.href = el.href
     if (role === 'textbox' && !el.isContentEditable) item.value = clean(el.value)
     if (role === 'select') item.options = Array.from(el.options).slice(0, MAX_OPTIONS).map(o => clean(o.text))

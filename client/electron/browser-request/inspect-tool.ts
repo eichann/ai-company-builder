@@ -90,9 +90,13 @@ export function createBrowserBrowseTool(
   onCard: (runId: string) => void,
   domains: readonly string[] = [],
 ): { description: string; execute(args: unknown): Promise<string> } {
+  // A few read tasks per turn (independent review): the done / stop words and unread numbers are a channel of a few bits
+  // whose questions the chat AI writes, so the number of answers it can collect in one turn is bounded.
+  let calls = 0
   return {
     description: browserBrowseDescription(domains),
     async execute(args) {
+      if (calls >= BROWSER_BROWSE_LIMITS.callsPerTurn) return BW.tooMany
       const a = (args && typeof args === 'object' ? args : {}) as Record<string, unknown>
       if (typeof a.site !== 'string' || normalizeBrowserHost(a.site) !== a.site) return BW.badInput
       if (typeof a.task !== 'string' || a.task.trim() === '' || a.task.length > BROWSER_BROWSE_LIMITS.task) return BW.badInput
@@ -105,6 +109,7 @@ export function createBrowserBrowseTool(
         items.push(heading)
       }
       let outcome: BrowserBrowseOutcome
+      calls++
       try {
         outcome = await run({ site: a.site, task: a.task, items })
       } catch {

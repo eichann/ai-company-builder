@@ -129,10 +129,13 @@ export function wireBrowserBrowse(deps: BrowserBrowseDeps) {
       if (!resolved.ok) { reason = 'operator-failed'; return refused(W.failed) }
       if (!current()) { outcome = 'stopped'; reason = whyNot(); return refused(W.interrupted) }
       // `ai` mode: every write the page makes is refused, whatever the operator presses (step ⑤ adds writes).
-      entered = await win.enter(() => deps.stopped(companyId) || !current())
-      if (!entered) { reason = 'refused'; return refused(W.failed) }
+      // Left in `finally` whatever `enter` answers or throws (a gate attached late must not keep the window in `ai` mode).
+      entered = true
+      if (!(await win.enter(() => deps.stopped(companyId) || !current()))) { reason = 'refused'; return refused(W.failed) }
 
       const history: BrowserBrowseHistoryEntry[] = []
+      // The operator's own working memory between its fresh, tool-less steps (never the chat AI's).
+      let notes = ''
       for (let round = 1; round <= L.rounds; round++) {
         if (!current()) { outcome = 'stopped'; reason = whyNot(); return refused(W.interrupted) }
         // No frame the write gate does not see (a login check left in the page): stop, as a run does.
@@ -147,13 +150,14 @@ export function wireBrowserBrowse(deps: BrowserBrowseDeps) {
         if (left <= 0) { outcome = 'stopped'; reason = 'timeout'; return refused(W.interrupted) }
         const step = await operator.step({
           cli: resolved.cli, model: operator.model, signal: cut.signal, timeoutMs: Math.min(L.roundMs, left), parentEnv, prompt: 'browse',
-          material: browseMaterial({ task: input.task, items: input.items, page, history, round }),
+          material: browseMaterial({ task: input.task, items: input.items, page, history, notes, round }),
         })
         if (!current()) { outcome = 'stopped'; reason = whyNot(); return refused(W.interrupted) }
         if (!step.ok) { reason = 'operator-failed'; return refused(W.failed) }
         const parsed = parseBrowseAnswer(step.text, { snapshot: page, items: input.items.length })
         if ('problem' in parsed) { reason = 'bad-answer'; return refused(W.failed) }
         const answer = parsed.answer
+        if (parsed.notes !== undefined) notes = parsed.notes
         if (answer.do === 'done' || answer.do === 'stop') {
           const end = answer.do === 'done' ? { kind: 'done' as const, result: answer.result } : { kind: 'stopped' as const, why: answer.why as BrowserBrowseStop }
           outcome = answer.do === 'done' ? 'done' : 'stopped'

@@ -2960,7 +2960,9 @@ same switch as everything else (`BROWSER_AI_BUILD_SWITCH` / this PC's registrati
   one JSON object per step — `click` / `type` / `select` (an element `ref` of the page it was just shown, of a fitting role:
   typing only into a text field, never a password field; an option the select showed), `go` (a path of the domain: starts
   with `/`, no `//`, `\`, `#`, space or control), `back`, `wait` (1–5 s), `done { result, unread }` or `stop { why:
-  not-found | need-person | blocked, unread }`. Anything else ends the run (`bad-answer`), nothing done.
+  not-found | need-person | blocked, unread }`. Anything else ends the run (`bad-answer`), nothing done. Any answer may
+  carry `notes` (≤ 2000): the operator's own working memory, handed back to it at the next step (each step is a fresh
+  process; Codex review) and to nobody else.
 - **Main acts** in the member's own window (controller `browseWindow`): `enter` puts it in `ai` mode with a decider that
   **refuses every write** (`decide: () => false`; reads pass, the request rule and frames as in any `ai` run) and dialogs
   dismissed, never accepted (`dismissDialogs`: `Page.handleJavaScriptDialog { accept: false }`, so a confirm never says yes
@@ -2970,9 +2972,15 @@ same switch as everything else (`BROWSER_AI_BUILD_SWITCH` / this PC's registrati
   label / placeholder only, **a password field's value never read**, a link's path only when it stays on the domain. Presses
   and typing are real input through the `ai` gate's DevTools connection (`Input.dispatchMouseEvent`, `Input.insertText`; the
   window's one debugger owner, `command` only while the gate holds it); `go` loads only `https://<domain><path>` whose host
-  is the domain (`sameDomainPath`); the window's navigation rule refuses any other host as before. After each action the page
-  settles (≤ 10 s). Never while the person records (the debugger owner refuses `ai`), never while a plan's run uses the
-  window (the shared `busyWindows`).
+  is the domain (`sameDomainPath`); the window's navigation rule refuses any other host as before. A navigation main starts
+  is bounded (`navigate`: it ends at the run's signal or after 10 s, the load then stopped); after each action the page
+  settles (≤ 10 s). A file chooser is never listed (no dialog of this computer opens). **The page is loaded afresh under
+  the gate on entering** (independent review: a WebSocket, stream or timer the page held from the member's time is gone, so
+  no press can write through it) **and again before the member gets the window back** when the operator did anything
+  (Codex review: a write a press scheduled for later never fires in `human` mode; a load that does not end empties the
+  window instead). The member's unsaved typing in that window is lost (the AI takes the window). Never while the person
+  records (the debugger owner refuses `ai`), never while a plan's run uses the window (the shared `busyWindows`); a gate
+  that attached late or an `enter` that threw is still left (`finally`).
 - **The server decides** (`POST /browser-runs { host, conversationId? }` + this PC's key, before anything is read or
   started; then `POST /browser-runs/:runId/continue` + the key **before every step**): this PC (`devices.check`; on a
   continue the run's own registration, else `BROWSER_DEVICE_ELSEWHERE`), the company's mode with the member's override on and
@@ -2991,14 +2999,21 @@ same switch as everything else (`BROWSER_AI_BUILD_SWITCH` / this PC's registrati
   the operator's summary or anything else it wrote. (A hijacked operator can choose which numbers and which fixed reason:
   a channel of a few bits, no text — said.) The operator's summary (`done.result`, ≤ 4000) goes to the **member's card**
   only, held in main's memory per signed-in member (≤ 100, cleared on sign-out), shown by the generic card through the
-  inspection card's IPC (`browserLines:card` with the run's `bo_` id; the reference `data-browser-inspection` accepts it):
+  inspection card's IPC (`browserLines:card` with the run's `bo_` id; the reference `data-browser-inspection` accepts it).
+  **At most 3 read tasks per consultation turn** (`BROWSER_BROWSE_LIMITS.callsPerTurn`, independent review: the chat AI
+  writes the task and headings, so it could phrase questions whose answers are those bits; bounding the calls bounds what
+  it can collect). The card shows
   「AI のまとめ（サイトから読んだ内容。AI には見せていません）」, each asked heading 「読めました（AI の判断です）」 or
   「読み取れませんでした」, and the note that it is the AI's reading, not a machine check. Bug 4 (the ✗ wording) is not on this
   path (no comparison): it stays with step ⑤'s cards.
-- **The run log** (I8, `browser_run_log`, append-only by trigger, once per run): per action the page as a pattern, the
-  action, and the label of a button or field — **the recording's rules** (`browserAddressPattern`, `browserLabel`,
-  `isBrowserAddressPattern` in `shared/core/browser-recording.ts`: digits, mail, addresses masked; query values never; a
-  link's or an option's text never; what was typed or chosen never). The server checks every step with
+- **The run log** (I8, `browser_run_log`, append-only by trigger, once per run — `browser_runs.log_written` 0 → 1, so an
+  empty first log counts): per action the page as a pattern, the action, and the label of a button or field — **the
+  recording's rules**: the page script computes a separate `logLabel` exactly as the recording's script does (a field's own
+  aria-label, `<label>` words, placeholder or title; a native button's own text only when it holds few elements; anything
+  else only its aria-label or title; nothing from a row, list item or cell; never what `aria-labelledby` points at — the
+  independent review of #846), then `browserAddressPattern`, `browserLabel`, `isBrowserAddressPattern`
+  (`shared/core/browser-recording.ts`: digits, mail, addresses masked; query values never; a link's or an option's text
+  never; what was typed or chosen never). The operator's `name` of an element (which may be a row's text) is never logged. The server checks every step with
   `browserRunLogProblem` and refuses the whole list otherwise. A run that already ended (timed out, refused) still gets its
   log once. `GET /browser-runs`: the member's own runs, an owner / admin everyone's, newest first (200), with their logs;
   another company's run is the same 404 as none. (No admin page yet: "Not yet".)
@@ -3015,7 +3030,9 @@ same switch as everything else (`BROWSER_AI_BUILD_SWITCH` / this PC's registrati
 - **Remaining limits** (said): reading is free inside the domain, so a site that changes something on a GET (I2) is not
   stopped; the operator reads the page's text (D6: names of customers reach the model); a hijacked operator can still press
   anything — every write is refused, and a GET-only side effect is the I2 limit; dialogs are dismissed, so a page that
-  needs a confirm to show something stays as it is.
+  needs a confirm to show something stays as it is; the done / stop words and the unread numbers are a channel of a few
+  bits per call whose questions the chat AI writes (bounded by the 3 calls per turn; a member's approval per call was not
+  added: the owner's call).
 
 Tests: `client/tests/browser-browse.test.ts` (switched off / a domain not registered / no window: nothing asked; each
 server refusal → plain words, the window never entered; a good run: a continue before every step, the operator's actions

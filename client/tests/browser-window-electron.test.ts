@@ -404,7 +404,7 @@ test('recording and the AI never hold the window together; the preview reads not
   assert.deepEqual(r.endedOnClose, ['closed'])
 })
 
-test('the operator\'s window tools read only: a submit, a fetch button and a confirmed button send nothing; another site is never reached', { skip }, () => {
+test('the operator\'s window tools read only: a submit, a fetch button, a confirmed button and a write scheduled for after the run send nothing; another site is never reached; a stopped navigation ends', { skip }, () => {
   const r = result.browse
   assert.equal(r.entered, true)
   const snap = r.snapshot as { address: string; elements: Array<{ role: string; name: string; value?: string }> }
@@ -426,4 +426,7 @@ test('the operator\'s window tools read only: a submit, a fetch button and a con
   assert.equal(r.urlAfterBack, 'https://op.test/browse')
   assert.equal(r.goOther, 'failed')
   assert.equal(r.urlAfterGo, 'https://op.test/browse-next')
+  assert.equal(r.hang, 'failed')
+  assert.ok(Number(r.hangMs) < 3000, `a stopped navigation ends at once (${String(r.hangMs)} ms)`)
+  assert.equal(r.later, 'ok', 'the press itself worked; the write it scheduled for later must never leave (writes above are empty)')
 })

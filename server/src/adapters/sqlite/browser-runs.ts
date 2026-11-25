@@ -48,6 +48,9 @@ export function sqliteBrowserRunRepository(conn: Database.Database, companyId: s
     runningOf(userId) {
       return (conn.prepare("SELECT id FROM browser_runs WHERE company_id = ? AND user_id = ? AND state = 'running' ORDER BY rowid").all(companyId, userId) as Array<{ id: string }>).map(r => r.id)
     },
+    markLogWritten(id) {
+      return conn.prepare('UPDATE browser_runs SET log_written = 1 WHERE company_id = ? AND id = ? AND log_written = 0').run(companyId, id).changes === 1
+    },
     appendLog(rows: readonly BrowserRunLogRow[]) {
       const insert = conn.prepare('INSERT INTO browser_run_log (company_id, run_id, idx, page, action, label) VALUES (?, ?, ?, ?, ?, ?)')
       for (const r of rows) insert.run(companyId, r.runId, r.idx, r.page, r.action, r.label)

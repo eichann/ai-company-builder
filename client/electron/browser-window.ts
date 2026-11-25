@@ -741,6 +741,29 @@ export function createBrowserWindowShell(options: {
         function done() { clearTimeout(timer); signal.removeEventListener('abort', done); resolve() }
         signal.addEventListener('abort', done, { once: true })
       })
+      /**
+       * A navigation main starts, bounded: it ends at the signal or after `settleMs`, the load then stopped (a page that never
+       * finishes loading cannot keep a stopped run waiting). False when it did not load.
+       */
+      const navigate = async (start: () => Promise<void>, signal: AbortSignal): Promise<boolean> => {
+        const cut = new AbortController()
+        const onStop = () => cut.abort()
+        signal.addEventListener('abort', onStop, { once: true })
+        const timer = setTimeout(onStop, BROWSER_BROWSE_LIMITS.settleMs)
+        try {
+          const ended = await Promise.race([
+            start().then(() => true, () => false),
+            new Promise<false>(resolve => { if (cut.signal.aborted) resolve(false); else cut.signal.addEventListener('abort', () => resolve(false), { once: true }) }),
+          ])
+          if (!ended && !contents.isDestroyed()) contents.stop()
+          return ended
+        } finally {
+          clearTimeout(timer)
+          signal.removeEventListener('abort', onStop)
+        }
+      }
+      /** Whether the operator did anything in this run (then the page is loaded afresh before the member gets it back). */
+      let actedOnPage = false
       /** After an action: a moment, then until the page stops loading (at most `settleMs`). */
       const settle = async (signal: AbortSignal) => {
         await pause(300, signal)
@@ -752,9 +775,32 @@ export function createBrowserWindowShell(options: {
           if (closed() || pageDebugger.record.active()) return false
           await setMode('ai', { decide: () => false, stopped, dismissDialogs: true })
           browsing = !closed() && state.mode === 'ai' && state.aiGateReady
+          if (!browsing || !state.site) return false
+          // The page is loaded afresh under the gate before the operator sees it (independent review): what the page held
+          // open from the member's time — a WebSocket, a stream, a timer — is gone, so no press of the operator's can write
+          // through it. A GET of the address it shows (else the site's start page); a load that does not end refuses the run.
+          const host = state.site.host
+          const shown = contents.getURL()
+          browsing = await navigate(() => contents.loadURL(sameDomainPath(shown, host) !== null ? shown : `https://${host}/`), new AbortController().signal)
+          browsing &&= browseReady()
           return browsing
         },
         async leave() {
+          // What the operator's presses started on the page (a timer that sends later, an autosave, a retry) must not go out
+          // once the member has the window back: while the write gate still holds, the page is loaded afresh (a GET of the
+          // address it shows, else the site's start page) — that document and its timers are gone. A load that does not end
+          // in time is stopped, and the window is then emptied rather than handed back with that document.
+          if (actedOnPage && browseReady() && state.site) {
+            const host = state.site.host
+            const now = contents.getURL()
+            const url = sameDomainPath(now, host) !== null ? now : `https://${host}/`
+            const fresh = await navigate(() => contents.loadURL(url), new AbortController().signal)
+            if (!fresh && !contents.isDestroyed()) {
+              log.warn('[browser] the page could not be loaded afresh after the operator; the window is emptied')
+              await contents.loadURL('about:blank').catch(() => {})
+            }
+          }
+          actedOnPage = false
           browsing = false
           if (state.contentsId === contentsId) await setMode('human')
         },
@@ -764,6 +810,7 @@ export function createBrowserWindowShell(options: {
         },
         async act(action, signal) {
           if (!browseReady() || signal.aborted) return 'failed'
+          if (action.do !== 'wait') actedOnPage = true
           switch (action.do) {
             case 'click': {
               const at = await inWorld(browsePointScript(action.ref))
@@ -787,7 +834,7 @@ export function createBrowserWindowShell(options: {
               const host = state.site?.host
               const url = host ? `https://${host}${action.path}` : ''
               if (!host || sameDomainPath(url, host) === null) return 'failed'
-              try { await contents.loadURL(url) } catch { return 'failed' }
+              if (!(await navigate(() => contents.loadURL(url), signal))) return 'failed'
               break
             }
             case 'back':

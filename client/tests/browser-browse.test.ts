@@ -41,12 +41,14 @@ function page(address = '/events?page=2&q=x', extra = ''): BrowserPageSnapshot {
   return readBrowserPageSnapshot(JSON.stringify({
     address: `https://${HOST}${address}`, title: 'イベント一覧', text: `${PAGE_VALUE}\n${INJECTION}\n${extra}`, truncated: false,
     elements: [
-      { ref: 0, role: 'textbox', name: '検索', value: '' },
-      { ref: 1, role: 'button', name: '検索する' },
+      { ref: 0, role: 'textbox', name: '検索', value: '', logLabel: '検索' },
+      { ref: 1, role: 'button', name: '検索する', logLabel: '検索する' },
       { ref: 2, role: 'link', name: '山田花子さんの申し込み', href: `https://${HOST}/entries/88123` },
       { ref: 3, role: 'password', name: 'パスワード', value: 'never-read' },
-      { ref: 4, role: 'select', name: '並び順', options: ['新しい順', '古い順'] },
-      { ref: 5, role: 'button', name: '保存して送信' },
+      { ref: 4, role: 'select', name: '並び順', options: ['新しい順', '古い順'], logLabel: '並び順' },
+      { ref: 5, role: 'button', name: '保存して送信', logLabel: '保存して送信' },
+      // A whole row the page made a button: its text is data, so the page script gives it no log label.
+      { ref: 6, role: 'button', name: '山田花子 88123 12/24', logLabel: '' },
     ],
   }), HOST)!
 }
@@ -203,6 +205,20 @@ test('an operator that stops: the AI hears a fixed reason and its unread heading
   assert.ok(!words.includes(INJECTION))
 })
 
+test('the operator\'s notes carry what it read to its next fresh step, and to nobody else', async () => {
+  const NOTE = `第1ページ: ${PAGE_VALUE}`
+  const { run, materials } = world({ answers: [JSON.stringify({ do: 'click', ref: 1, notes: NOTE }), done('まとめ')] })
+  const r = await run()
+  assert.equal(r.kind, 'card')
+  assert.ok(JSON.stringify(materials[1]).includes(NOTE))
+  assert.ok(!JSON.stringify(materials[0]).includes('第1ページ'))
+  assert.ok(!(r.kind === 'card' ? r.words : '').includes('第1ページ'))
+  // Notes of the wrong shape refuse the answer.
+  const bad = world({ answers: [JSON.stringify({ do: 'click', ref: 1, notes: 'x'.repeat(2001) })] })
+  assert.deepEqual(await bad.run(), { kind: 'refused', words: W.failed })
+  assert.equal(bad.w.acted.length, 0)
+})
+
 test('a refusal at a step (the AI stopped, the person lowered) stops the run before the next action', async () => {
   const { w, run } = world({
     answers: ['{"do":"click","ref":1}', '{"do":"click","ref":1}'],
@@ -276,6 +292,11 @@ test('the tool: generic words, the company\'s domains only, a bad input asks not
   }
   assert.equal(await tools.browse!.execute({ site: HOST, task: 't', items: ['受付の終わり'] }), W.done)
   assert.deepEqual(seen, [RUN])
+  // At most three read tasks per turn: the answers' few bits cannot be collected without bound.
+  assert.equal(await tools.browse!.execute({ site: HOST, task: 't' }), W.done)
+  assert.equal(await tools.browse!.execute({ site: HOST, task: 't' }), W.done)
+  assert.equal(await tools.browse!.execute({ site: HOST, task: 't' }), W.tooMany)
+  assert.equal(seen.length, 3)
   // Off: no tool at all.
   const off = browserInspectForTurn(
     { inspectAvailable: () => true, inspect: async () => ({ kind: 'refused', words: '' }) },
@@ -292,7 +313,8 @@ test('the snapshot and the log step: a password value never kept, another site\'
   assert.equal(other.elements[0].path, undefined)
   assert.equal(readBrowserPageSnapshot(JSON.stringify({ address: 'https://evil.example/', title: '', text: '', elements: [] }), HOST), null)
   assert.deepEqual(browseLogStep({ do: 'click', ref: 1 }, page('/a', ''), HOST), { page: '/a', action: 'click', label: '検索する' })
-  const numbered = readBrowserPageSnapshot(JSON.stringify({ address: `https://${HOST}/orders/123`, title: '', text: '', elements: [{ ref: 0, role: 'button', name: '注文 123 を表示' }] }), HOST)!
+  const numbered = readBrowserPageSnapshot(JSON.stringify({ address: `https://${HOST}/orders/123`, title: '', text: '', elements: [{ ref: 0, role: 'button', name: '注文 123 を表示', logLabel: '注文 123 を表示' }] }), HOST)!
   assert.deepEqual(browseLogStep({ do: 'click', ref: 0 }, numbered, HOST), { page: '/orders/{n}', action: 'click', label: '注文 {n} を表示' })
+  assert.deepEqual(browseLogStep({ do: 'click', ref: 6 }, page(), HOST), { page: '/events?page&q', action: 'click', label: null }, 'a row\'s text is never a stored label')
   assert.ok('problem' in parseBrowseAnswer('{"do":"wait","seconds":9}', { snapshot: p, items: 0 }))
 })

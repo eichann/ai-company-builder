@@ -27,6 +27,7 @@ const BROWSE_PAGE = `<!doctype html><meta charset="utf-8"><title>events</title>
 <button id="submit" type="submit">保存して送信</button></form>
 <button id="fetch" type="button" onclick="fetch('/browse-fetch', { method: 'POST', body: 'x' })">すぐ保存</button>
 <button id="confirm" type="button" onclick="if (confirm('消しますか？')) fetch('/browse-confirmed', { method: 'POST', body: 'y' })">消す</button>
+<button id="later" type="button" onclick="setTimeout(() => fetch('/browse-later', { method: 'POST', body: 'z' }), 1500)">あとで保存</button>
 <label for="order">並び順</label><select id="order"><option>新しい順</option><option>古い順</option></select>
 <a id="evil" href="https://evil.test/browse-leak">外のサイト</a>
 <a id="next" href="/browse-next">次のページ</a>`
@@ -223,6 +224,8 @@ export async function startSites(certDir: string, ports: { site: number; evil: n
         res.end('ok')
         return
       }
+      // A page that never answers (the operator's navigation must still end when stopped).
+      if (host === 'op.test' && url === '/browse-hang') return
       if (host === 'op.test' && (url === '/browse' || url === '/browse-next')) {
         res.setHeader('content-type', 'text/html; charset=utf-8')
         res.end(url === '/browse' ? BROWSE_PAGE : '<!doctype html><meta charset="utf-8"><title>next</title><p>次のページ</p>')

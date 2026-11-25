@@ -6,7 +6,7 @@
  * - `browser_runs`: who, which registered domain, from which PC, when, the state and the lock's lease. **At most one
  *   `running` row per company × domain** (partial unique index: the lock, design memo D10); a run not heard from by its
  *   `lease_until` is over (the service ends it on the next touch). The trigger keeps the fixed columns and lets a state
- *   move only from `running` (every other state is final).
+ *   move only from `running` (every other state is final); `log_written` goes 0 → 1 once (the log is written once).
  * - `browser_run_log`: per step the page as a pattern, what was done, the label of what was pressed — never a value
  *   (shared/core/browser-run-log.ts). Append-only while its company exists.
  */
@@ -23,6 +23,7 @@ export const browserRunSchema = `
       started_at TEXT NOT NULL,
       lease_until TEXT NOT NULL,
       ended_at TEXT,
+      log_written INTEGER NOT NULL DEFAULT 0 CHECK (log_written IN (0, 1)),
       PRIMARY KEY (company_id, id),
       CHECK ((state = 'running') = (ended_at IS NULL))
     );
@@ -31,7 +32,8 @@ export const browserRunSchema = `
     CREATE TRIGGER IF NOT EXISTS browser_runs_fixed BEFORE UPDATE ON browser_runs
       WHEN NEW.id IS NOT OLD.id OR NEW.company_id IS NOT OLD.company_id OR NEW.user_id IS NOT OLD.user_id OR NEW.host IS NOT OLD.host
         OR NEW.device_id IS NOT OLD.device_id OR NEW.conversation_id IS NOT OLD.conversation_id OR NEW.started_at IS NOT OLD.started_at
-        OR OLD.state <> 'running'
+        OR (OLD.state <> 'running' AND (NEW.state IS NOT OLD.state OR NEW.reason IS NOT OLD.reason OR NEW.ended_at IS NOT OLD.ended_at OR NEW.lease_until IS NOT OLD.lease_until))
+        OR (OLD.log_written = 1 AND NEW.log_written <> 1)
     BEGIN
       SELECT RAISE(ABORT, 'a browser run only moves from running, once');
     END;

@@ -171,11 +171,9 @@ export function createBrowserRunService(deps: BrowserRunDeps) {
         const now = deps.clock.nowMs()
         const current = r.byId(row.id)
         if (!current) return refuse('not-found', W.notFound, { code: 'BROWSER_RUN_NOT_FOUND' })
-        if (current.state === 'running') {
-          if (!settleTime(member.companyId, current, now)) r.end(current.id, outcome, reason, iso(now))
-        } else if (r.logOf([current.id]).length > 0) {
-          return refuse('conflict', W.ended, { code: 'BROWSER_RUN_ENDED' })
-        }
+        // The log is written once, even an empty one (a flag on the run, not a count of its rows).
+        if (!r.markLogWritten(current.id)) return refuse('conflict', W.ended, { code: 'BROWSER_RUN_ENDED' })
+        if (current.state === 'running' && !settleTime(member.companyId, current, now)) r.end(current.id, outcome, reason, iso(now))
         r.appendLog(steps.map((s, i) => ({ runId: current.id, idx: i + 1, page: s.page, action: s.action, label: s.label })))
         return ok({ state: r.byId(current.id)?.state ?? current.state })
       })

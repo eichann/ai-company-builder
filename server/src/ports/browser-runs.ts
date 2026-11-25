@@ -38,6 +38,8 @@ export interface BrowserRunRepository {
   end(id: string, state: Exclude<BrowserRunState, 'running'>, reason: string | null, at: string): boolean
   /** The ids of this member's running rows. */
   runningOf(userId: string): string[]
+  /** Mark the run's log written (0 → 1, compare-and-set): false when it already was. */
+  markLogWritten(id: string): boolean
   appendLog(rows: readonly BrowserRunLogRow[]): void
   logOf(runIds: readonly string[]): BrowserRunLogRow[]
   /** Newest first, at most `limit`; `userId` given: only that member's. */
