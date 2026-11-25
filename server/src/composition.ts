@@ -67,6 +67,7 @@ import { createBrowserDeviceService } from './services/browser-devices'
 import { createBrowserRecordingService } from './services/browser-recordings'
 import { BROWSER_SKILL_NOTICE_PREFIX, createBrowserSkillService } from './services/browser-skills'
 import { browserSkillSource } from './adapters/browser-skill-source'
+import { createBrowserRunService } from './services/browser-runs'
 import type { BrowserConnectorCatalog } from './ports/browser-plans'
 import type { BrowserOpenedListSource } from './ports/browser-lines'
 import { createTaskSettingsService } from './services/task-settings'
@@ -330,6 +331,12 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     browserPolicy: member => agentBrowser.policyFor(member), aiStops: member => agentStops.policyFor(member),
     devices: browserDevices.gate, siteGrants: browserSiteGrants,
     noticesChanged: (companyId, userIds) => push.notify(companyId, userIds, { kind: 'notifications', version: shared.ids.newToken().slice(0, 32) }),
+  })
+  // The operator's runs (agent-browser.md "The operator's window tools"): the same PC, setting, stop and person checks, the
+  // company × domain lock and the run log.
+  const browserRuns = createBrowserRunService({
+    ...shared, browserPolicy: member => agentBrowser.policyFor(member), aiStops: member => agentStops.policyFor(member),
+    devices: browserDevices.gate, siteGrants: browserSiteGrants,
   })
   const brokerTokens = createBrokerTokenService({
     ...repos, ...shared, brokerVault, keyBroker, tokenDigest: sha256TokenDigest, ttlMinutes: BROKER_TOKEN_TTL_MINUTES,
@@ -854,6 +861,7 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
         // …and their browser plans close, a claimed execution is void, their type grants go (agent-browser.md).
         browserPlans.memberLeft(companyId, userId)
         browserLines.memberLeft(companyId, userId)
+        browserRuns.memberLeft(companyId, userId)
         // …and every PC registration of theirs is stopped; invited back, nothing returns.
         browserDevices.memberLeft(companyId, userId, actorId)
       },
@@ -937,6 +945,7 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     browserDevices,
     browserRecordings,
     browserSkills,
+    browserRuns,
     agentStops,
     agentPolicy,
     secondOpinion,

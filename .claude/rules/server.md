@@ -326,6 +326,9 @@ GET  /api/config                                  setup state (no auth)
                               GET /browser-devices, POST /browser-devices/:deviceId/enable | revoke (owner/admin)
                                                                              browser-devices.ts
                                                                 (this PC: agent-browser.md "This PC's registration")
+                              POST /browser-runs (+ the PC's key header), POST /browser-runs/:runId/continue (+ the key) | finish,
+                              GET /browser-runs (own; owner/admin everyone's)  browser-runs.ts
+                                                                (the operator's runs: agent-browser.md "The operator's window tools")
                               POST /browser-recordings (+ the PC's key header), GET /browser-recordings,
                               GET|DELETE /browser-recordings/:recordingId (the sender or owner/admin)
                                                                              browser-recordings.ts
