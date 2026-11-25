@@ -69,9 +69,23 @@ function isInside(filePath: string, root: string): boolean {
   return rel !== '' && !rel.startsWith('..') && !path.isAbsolute(rel)
 }
 
+/** An IPC event as far as telling its window and frame apart goes (Electron's invoke event has these). */
+export interface ConsultationSenderEvent {
+  sender: { id: number; mainFrame?: { frameTreeNodeId: number } | null }
+  senderFrame?: { frameTreeNodeId: number } | null
+}
+
 export interface ChatWindows {
   /** The window (webContents id) showing this consultation, if any: where its questions and approvals go. */
   windowForSession(sessionId: string): number | undefined
+  /**
+   * **The one rule of which windows may act on what a consultation shows** (a card's ［任せる］／［やめる］／［済んでいた］…):
+   * the app's main window, or the window the app opened for **that very consultation** of that company — and only its
+   * main frame (never a frame inside it). Every other sender — a window of another consultation, a preview page, the
+   * browser operation's window, a document view, a plugin's frame — is refused. A consultation with no id (null) only
+   * from the main window.
+   */
+  showsConsultation(event: ConsultationSenderEvent, companyId: string, sessionId: string | null): boolean
   isChatWindow(windowId: number): boolean
   /** Closes every consultation window without asking (sign-out, the main window closed, quitting). */
   closeAll(): void
@@ -183,8 +197,20 @@ export function registerChatWindowsIpc(ipc: IpcRegistrar, { host, paths, isMainW
     }
   }
 
+  const mainFrameOf = (event: ConsultationSenderEvent) => {
+    const frame = event.senderFrame
+    const main = event.sender.mainFrame
+    return !!frame && !!main && frame.frameTreeNodeId === main.frameTreeNodeId
+  }
+
   return {
     windowForSession: sessionId => registry.find(sessionId)?.windowId,
+    showsConsultation(event, companyId, sessionId) {
+      if (!mainFrameOf(event)) return false
+      if (isMainWindow(event.sender.id)) return true
+      const entry = registry.get(event.sender.id)
+      return sessionId !== null && !!entry && entry.context.sessionId === sessionId && entry.context.companyId === companyId
+    },
     isChatWindow: windowId => registry.get(windowId) !== undefined,
     closeAll,
   }

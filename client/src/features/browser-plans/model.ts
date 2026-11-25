@@ -6,6 +6,29 @@ import type { BrowserFact } from '../../../../shared/core/browser-plans'
 import type { BrowserPlanView } from '../../../../shared/types/browser-plans'
 import type { BrowserPlanCardData, BrowserPlanNotReady } from '../../../shared/browser-plans'
 import { BROWSER_RUN_WORDS, type BrowserRunReason, type BrowserRunResult } from '../../../shared/browser-runner'
+import type { BrowserWriteView } from '../../../shared/browser-line-writes'
+
+/** A write card is read again this often while its run goes on (a `bf_` card moves on in main by itself). */
+export const WRITE_CARD_LIVE_REFRESH_MS = 2_000
+/**
+ * …and while its answer buttons for a write in doubt are up, backing off (the polling-reduction plan): every 15 s for the
+ * first 2 minutes, then every 60 s up to 10 minutes in all, then not at all — until the card is shown again (mounted
+ * again) or its window comes to the front.
+ */
+export const WRITE_CARD_UNSETTLED_REFRESH = Object.freeze({ firstMs: 15_000, firstReads: 8, laterMs: 60_000, laterReads: 8 })
+
+/**
+ * How often a write card reads itself again, or null: while a `bf_` card's run goes on (every 2 s), and while the answer
+ * buttons of a write in doubt are up — also once they can be pressed — so an answer given in the card's other window (the
+ * main window and the consultation's own window) shows here too (agent-browser.md "A card in its consultation's own
+ * window"), backing off by `reads` (how many times it was read for its answer buttons since it was last shown or brought to the front).
+ */
+export function writeCardRefreshMs(cardId: string, view: BrowserWriteView | null, pressing: boolean, reads = 0): number | null {
+  if (cardId.startsWith('bf_') && !!view && view.phase !== 'finished' && view.phase !== 'failed') return WRITE_CARD_LIVE_REFRESH_MS
+  if (!view?.result?.confirm || pressing) return null
+  const r = WRITE_CARD_UNSETTLED_REFRESH
+  return reads < r.firstReads ? r.firstMs : reads < r.firstReads + r.laterReads ? r.laterMs : null
+}
 
 export const PLAN_WORDS = {
   title: '承認のお願い（ブラウザ操作）',

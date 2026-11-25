@@ -38,6 +38,7 @@ import type { BrowserContext } from './context'
 import { createBrowserLinesHttp } from './lines-api'
 import { createBrowserReadRunner } from './read-line-runner'
 import type { BrowserInspectionSite } from './inspect'
+import type { ChatWindows, ConsultationSenderEvent } from '../chat-windows/ipc'
 import type { BrowserRunRecords } from './runner'
 import { createBrowserWriteRunner, type BrowserWritePrepared, type BrowserWriteRunResult, type BrowserWriteRunSite } from './write-line-runner'
 
@@ -46,9 +47,17 @@ export interface BrowserWriteSite extends BrowserInspectionSite {
   writers: BrowserLineWriters
 }
 
-export interface BrowserWriteLinesDeps<E> {
+export interface BrowserWriteLinesDeps {
   aiSwitch: BrowserAiSwitch
-  fromMainWindow: (event: E) => boolean
+  /**
+   * The app's windows as the chat windows' registry knows them (`ChatWindows`, handed in by main.ts as it is): its one
+   * rule `showsConsultation` says whether the event comes from a window that shows the card's consultation — the main
+   * window, or the window the app opened for that very consultation; main frame only. A card is read and pressed only
+   * from such a window; this module asks it with the card's own company and consultation (`fromCardWindow` below). The
+   * whole registry, not one function: main.ts hands in the very object it made (a stand-in would have to be a whole
+   * registry), and the tests hand in a real one.
+   */
+  cardWindows: ChatWindows
   baseUrl: () => string
   cookies: () => string[]
   /** This PC's key header value (device.ts): only the plan client's gated steps send it. */
@@ -82,6 +91,8 @@ export interface BrowserWriteLinesDeps<E> {
     card(companyId: string, runId: string): BrowserWriteGetResult | null
     approve(companyId: string, runId: string, planHash: unknown): Promise<BrowserWriteGetResult | null>
     cancel(companyId: string, runId: string): BrowserWriteGetResult | null
+    /** The signed-in member's card of that run and the consultation it was made in (null: no such card). */
+    placeOf(companyId: string, runId: string): { conversationId: string | null } | null
     /** ［済んでいた］／［されていなかった］ about its write in doubt (absent: the card offers no answer). */
     confirm?(companyId: string, runId: string, answer: unknown): Promise<BrowserWriteGetResult | null>
   }
@@ -93,6 +104,8 @@ interface Entry {
   userId: string
   companyId: string
   conversationId: string | null
+  /** The answer about a write in doubt on its way: a press from the card's other window waits for it (one press wins). */
+  pressing: Promise<unknown> | null
   siteLabel: string
   site: BrowserWriteRunSite
   proposed: Record<string, string>
@@ -114,7 +127,7 @@ const own = (o: object, k: string) => Object.prototype.hasOwnProperty.call(o, k)
 
 /** Why the card cannot go on, in plain words (never a server's text). */
 const MESSAGES = {
-  notMainWindow: 'このカードは、アプリのメインの窓の相談で開いてください（別の窓では開けません）。',
+  notMainWindow: 'このカードは、この相談を開いている窓（またはアプリのメインの窓）から操作してください。',
   badInput: '入力が正しくありません。',
   off: 'この機能は、このアプリではまだ使えません。',
   stopped: 'AI の動きが止められているため、続けられません。',
@@ -132,7 +145,7 @@ const MESSAGES = {
   confirmFailed: '確かめを送れませんでした。少し待ってから、もう一度押してください。',
 } as const
 
-export function wireBrowserWriteLines<E extends IpcInvokeEvent>(ipc: IpcRegistrar<E, IpcMessageEvent>, deps: BrowserWriteLinesDeps<E>) {
+export function wireBrowserWriteLines<E extends IpcInvokeEvent>(ipc: IpcRegistrar<E, IpcMessageEvent>, deps: BrowserWriteLinesDeps) {
   const now = deps.now ?? Date.now
   const http = createBrowserLinesHttp({ baseUrl: deps.baseUrl, cookies: deps.cookies, deviceKey: deps.deviceKey, fetch: deps.fetch })
   const file = (deps.openedFile ?? opened) as BrowserOpenedFile
@@ -224,7 +237,7 @@ export function wireBrowserWriteLines<E extends IpcInvokeEvent>(ipc: IpcRegistra
     if (!isMap(input.values) || Object.keys(input.values).length !== names.length || !names.every(n => own(input.values, n) && typeof input.values[n] === 'string')) return refused(W.values)
     const ref: BrowserLineRef = { site: row.site, line: row.name, version: row.version, mapVersion: row.mapVersion, meaningHash: row.meaningHash, mechanicsHash: row.mechanicsHash }
     const e: Entry = {
-      userId, companyId: input.companyId, conversationId: input.conversationId, siteLabel: site.label,
+      userId, companyId: input.companyId, conversationId: input.conversationId, pressing: null, siteLabel: site.label,
       site: { host: site.host, ref, line, lineStatus: row.status, map: s.map, readers: s.readers, addresses: s.addresses, account: s.account, writers: s.writers },
       proposed: { ...input.values }, confirmed: new Set(), phase: 'confirming', message: null, planId: null, contentHash: null, prepared: null,
       card: null, readAt: null, run: null, confirmFrom: null,
@@ -331,21 +344,27 @@ export function wireBrowserWriteLines<E extends IpcInvokeEvent>(ipc: IpcRegistra
     }
   }
 
-  /** This member's card from the main window's page, or why not. */
+  /** The one place this module asks which window may act on a card: the registry's rule, with the card's own consultation. */
+  const fromCardWindow = (event: E, companyId: string, conversationId: string | null) =>
+    deps.cardWindows.showsConsultation(event as unknown as ConsultationSenderEvent, companyId, conversationId)
+
+  /** This member's card, from a window that shows its consultation (`fromCardWindow`), or why not. */
   function mine(event: E, companyId: unknown, cardId: unknown): { e: Entry } | { message: string } {
-    if (!deps.fromMainWindow(event)) return { message: MESSAGES.notMainWindow }
     if (typeof companyId !== 'string' || !BROWSER_COMPANY_ID_RE.test(companyId) || typeof cardId !== 'string' || !BROWSER_WRITE_CARD_REF_RE.test(cardId)) return { message: MESSAGES.badInput }
     const userId = deps.userId()
     const e = entries.get(cardId)
-    return e && userId && e.userId === userId && e.companyId === companyId ? { e } : { message: CW.gone }
+    if (!e || !userId || e.userId !== userId || e.companyId !== companyId) return { message: CW.gone }
+    return fromCardWindow(event, companyId, e.conversationId) ? { e } : { message: MESSAGES.notMainWindow }
   }
   const answer = (e: Entry): BrowserWriteGetResult => ({ ok: true, view: viewOf(e) })
 
-  /** A write run's card (`bf_…`) from the main window's page: this member's, or why not. */
+  /** A write run's card (`bf_…`), from a window that shows its consultation: this member's, or why not. */
   const frameCard = (event: E, companyId: unknown, cardId: unknown): { companyId: string; runId: string } | { message: string } | null => {
     if (typeof cardId !== 'string' || !BROWSER_FRAME_RUN_REF_RE.test(cardId)) return null
-    if (!deps.fromMainWindow(event)) return { message: MESSAGES.notMainWindow }
     if (typeof companyId !== 'string' || !BROWSER_COMPANY_ID_RE.test(companyId) || !deps.frameCards) return { message: MESSAGES.badInput }
+    const place = deps.frameCards.placeOf(companyId, cardId)
+    if (!place) return { message: CW.gone }
+    if (!fromCardWindow(event, companyId, place.conversationId)) return { message: MESSAGES.notMainWindow }
     return { companyId, runId: cardId }
   }
   const gone = (r: BrowserWriteGetResult | null): BrowserWriteGetResult => r ?? { ok: false, message: CW.gone }
@@ -417,15 +436,23 @@ export function wireBrowserWriteLines<E extends IpcInvokeEvent>(ipc: IpcRegistra
     const got = mine(event, companyId, cardId)
     if ('message' in got) return { ok: false, message: got.message }
     const e = got.e
+    // One press wins (the card in two windows): the other waits for it and shows the card as it then stands.
+    if (e.pressing) { await e.pressing.catch(() => {}); return answer(e) }
     const index = e.run ? e.run.states.findIndex(s => s === 'unknown') + 1 : 0
     if ((result !== 'done' && result !== 'not_done') || !e.run?.executionId || index < 1) return { ok: false, message: MESSAGES.badInput }
-    const sent = await http.confirm(e.companyId, e.run.executionId, index, result)
-    if (sent.kind !== 'ok') return { ok: false, message: MESSAGES.confirmFailed }
-    const states = [...e.run.states]
-    states[index - 1] = result === 'done' ? 'confirmed_done' : 'confirmed_not_done'
-    e.run = { ...e.run, states, outcome: result === 'done' && index === states.length ? 'succeeded' : 'partial' }
-    e.confirmFrom = null
-    return answer(e)
+    const executionId = e.run.executionId
+    const done = (async () => {
+      const sent = await http.confirm(e.companyId, executionId, index, result)
+      if (sent.kind !== 'ok' || !e.run) return false
+      const states = [...e.run.states]
+      states[index - 1] = result === 'done' ? 'confirmed_done' : 'confirmed_not_done'
+      e.run = { ...e.run, states, outcome: result === 'done' && index === states.length ? 'succeeded' : 'partial' }
+      e.confirmFrom = null
+      return true
+    })()
+    e.pressing = done
+    const taken = await done.finally(() => { e.pressing = null })
+    return taken ? answer(e) : { ok: false, message: MESSAGES.confirmFailed }
   })
 
   return {
