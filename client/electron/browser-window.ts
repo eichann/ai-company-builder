@@ -350,13 +350,6 @@ export function createBrowserWindowShell(options: {
       owner.release('recording')
       try { r.ended(reason) } catch { /* the listener's own failure */ }
     }
-    const onDetach = () => {
-      state.aiGateReady = false
-      // Gone: the next attach adds the listeners again (never twice).
-      try { contents.debugger.removeListener('message', onMessage); contents.debugger.removeListener('detach', onDetach) } catch { /* the window is gone */ }
-      // The connection went away under a recording (the window is going, or another client took it): it is discarded.
-      if (recorder) endRecording(contents.isDestroyed() ? 'closed' : 'lost')
-    }
     const onRecording = (method: string, params: Record<string, unknown>) => {
       const r = recorder
       if (!r) return
@@ -445,6 +438,13 @@ export function createBrowserWindowShell(options: {
         if (allow) await contents.debugger.sendCommand('Fetch.continueRequest', { requestId })
         else await contents.debugger.sendCommand('Fetch.failRequest', { requestId, errorReason: 'BlockedByClient' })
       } catch { /* the request or the window is gone */ }
+    }
+    const onDetach = () => {
+      state.aiGateReady = false
+      // Gone: the next attach adds the listeners again (never twice).
+      try { contents.debugger.removeListener('message', onMessage); contents.debugger.removeListener('detach', onDetach) } catch { /* the window is gone */ }
+      // The connection went away under a recording (the window is going, or another client took it): it is discarded.
+      if (recorder) endRecording(contents.isDestroyed() ? 'closed' : 'lost')
     }
     const connect = () => {
       const dbg = contents.debugger

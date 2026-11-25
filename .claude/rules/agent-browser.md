@@ -2727,9 +2727,11 @@ never handed to the AI**: no AI route, record token, tool or prompt reads them.
   preview / inspection reads nothing (`preview.read` refuses). Recording attaches `Runtime` (an isolated world
   `acb-recording` with the binding `__acbRecord`, installed only there: `Runtime.addBinding` with `executionContextName`, and
   only a call from that world's context ids counts), `Page` (`addScriptToEvaluateOnNewDocument` with `runImmediately`;
-  `frameNavigated` / `navigatedWithinDocument` of the main frame = the page lines) and `Network` (`maxPostDataSize` 64 KiB;
+  `frameNavigated` / `navigatedWithinDocument` of the main frame = the page lines; the main frame's id read with `Page.getFrameTree`
+  at the start, so a page already loaded that navigates within itself is seen) and `Network` (`maxPostDataSize` 64 KiB;
   `getResponseBody` only for a JSON answer ≤ 1 MiB, its text handed to the recorder and dropped there). The script
-  (`BROWSER_RECORDING_SCRIPT`) hears only **trusted** clicks on buttons / choices / links and `change` of fields (never a
+  (`BROWSER_RECORDING_SCRIPT`) hears only **trusted** clicks on buttons / choices / links (an option or menu item keeps no label: it is often the data itself; a
+  `<label>` wrapping its field gives its own words only) and `change` of fields (never a
   password's or a file's value; hidden fields ignored). The person's own requests go out as in `human` mode (it is their
   work). The window's title says 「（記録中）」. A first page not loaded within 20 s, the connection lost (`detach`) or the
   window closed end the recording (`ended('closed' | 'lost')`).
@@ -2764,13 +2766,13 @@ never handed to the AI**: no AI route, record token, tool or prompt reads them.
   company's and one past `delete_at` get the same 404 `BROWSER_RECORDING_NOT_FOUND`. The sender leaving keeps it for the
   company until its 30 days. **Deleting** (the sender or an owner / admin) removes the row, content included. **30 days**:
   every read leaves out a row past `delete_at`, and the server clock deletes them (`expireBrowserRecordings`, every company,
-  `ClockRun.recordingsDeleted`). Per-domain grants (step ①) are not asked: a member of the company with the domain registered
-  and this PC allowed may record; wiring it to the domain grants is a later change once they exist.
+  `ClockRun.recordingsDeleted`). **Who may record** is the AI's own rule ("Who may use a site"): `siteGrants.allows(member, domain, 'read')` — the company's 「使う」 with the domain registered and this person at least 見るだけ there (使わない is refused, owners and admins follow the same table).
 - **The admin console**: 「ブラウザ操作の記録」 (`…/advanced/ai-safety/browser/recordings`, linked from 「ブラウザ操作」 with the PCs and
   people pages; owner/admin only, a member or a department manager sees 「このページはオーナーと管理者だけが使えます」 and nothing
   is asked; words `admin/src/lib/agent-browser-recordings.ts`): who sent it, when, the site, lines, when it goes; ［開く］ shows the
   steps in the core's words and the other hosts; ［消す］ behind a confirm.
-- **Remaining limits** (said): a label is what the page wrote on a button or field and may name a person; the symbols show a
+- **Remaining limits** (said): a path segment or key of letters only is kept as written (`/users/yamada`; a token counts as
+  one only with a digit); a label is what the page wrote on a button or field and may name a person; the symbols show a
   flow, not anonymity; `推定` links are by time and equal values only; a page's own worker and an out-of-process frame are not
   observed (their requests are not lines); a large body (> 64 KiB) or an upload has no field names (`null`).
 
@@ -2786,7 +2788,7 @@ Authorization, link text; the AI cannot enter while it records and no recording 
 reads nothing; a closed window ends it as `closed`), `client/tests/ui/browser-settings.spec.ts` (start, stop, delete a line,
 only the rest sent), `server/tests/unit/browser-recordings.test.ts` (the server's check refuses a value, a password field, a
 CSRF / session field, ids, query values, encoded names, tokens, a forged spelling around placeholders, link texts, labels with
-an e-mail or digits, unmasked answer keys, dangling references, extra keys; sending needs the PC, 「使う」 and the domain; the
+an e-mail or digits, unmasked answer keys, dangling references, extra keys; sending needs the PC, 「使う」, the domain and the person at least 見るだけ (使わない refused); the
 sender and owners / admins read, another member, another company, a demoted admin and a sender who left — also after coming
 back — do not; deleting; the 30 days on read and by the clock), `admin/tests/agent-browser-recordings.test.tsx`, permission
 matrix rows + `CROSS`, `company-scoped-sql.test.ts`, `jobs-schema.test.ts`, `admin-contract.test.ts`, `browser-device.test.ts`
