@@ -80,6 +80,7 @@ CLIENT_MAC=(
   client/tests/voice-helper.test.ts client/tests/voice-polisher.test.ts client/tests/voice-probe.test.ts
   client/tests/browser-window-electron.test.ts client/tests/browser-window-harness/ client/tests/browser-operator.test.ts
   client/tests/doc-frame-electron.test.ts client/tests/doc-frame-harness/
+  client/tests/cookie-encryption-electron.test.ts client/tests/cookie-encryption-harness/
   client/tests/ipc-harness/ ':(glob)client/tsconfig*.json' client/package.json shared/
   .github/scripts/client-tests.mjs
 )
