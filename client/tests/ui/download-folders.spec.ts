@@ -116,9 +116,15 @@ test.describe('settings', () => {
     const times = page.getByRole('group', { name: '送る時刻' })
     await expect(times).toContainText('12:00')
     await expect(times).toContainText('18:00')
-    await page.getByRole('textbox', { name: '追加する時刻' }).fill('09:30')
+    // Owner FB #23: the add field starts empty and apart from the set times, so it never reads as one of them.
+    const add = page.getByRole('textbox', { name: '追加する時刻' })
+    await expect(add).toHaveValue('')
+    await expect(times.getByRole('textbox')).toHaveCount(0)
+    await expect(page.getByRole('button', { name: '時刻を追加' })).toBeDisabled()
+    await add.fill('09:30')
     await page.getByRole('button', { name: '時刻を追加' }).click()
     await expect(times).toContainText('09:30')
+    await expect(add).toHaveValue('')
 
     await page.reload()
     await page.getByRole('button', { name: '自動同期' }).click()

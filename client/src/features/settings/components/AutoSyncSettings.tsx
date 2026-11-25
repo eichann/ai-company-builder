@@ -33,7 +33,9 @@ function Toggle({ title, description, checked, onChange, children }: { title: st
 export function AutoSyncSettings() {
   const settings = useSyncExternalStore(autoSyncSettings.subscribe, autoSyncSettings.getSnapshot)
   const [error, setError] = useState('')
-  const [newTime, setNewTime] = useState('15:00')
+  // Empty until the member picks one: a pre-filled time read as one already set (owner FB #23).
+  const [newTime, setNewTime] = useState('')
+  const newTimeId = useId()
 
   const save = (next: Settings) => {
     try { autoSyncSettings.set(next); setError('') } catch { setError('保存できませんでした。もう一度お試しください') }
@@ -76,25 +78,31 @@ export function AutoSyncSettings() {
             決まった時刻に送る
           </label>
           {send.mode === 'times' && (
-            <div className="ml-6 flex flex-wrap items-center gap-2" role="group" aria-label="送る時刻">
-              {send.times.map(t => (
-                <span key={t} className="inline-flex h-7 items-center gap-1 rounded-md border border-zinc-200 px-2 text-body tabular-nums text-zinc-800 dark:border-white/10 dark:text-zinc-200">
-                  {t}
-                  {send.times.length > 1 && (
-                    <button type="button" aria-label={`${t} を削除`} onClick={() => setSend({ times: send.times.filter(x => x !== t) })} className="text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-100">
-                      <X size={12} />
-                    </button>
-                  )}
-                </span>
-              ))}
-              <input type="time" aria-label="追加する時刻" value={newTime} onChange={e => setNewTime(e.target.value)} className={SELECT} />
-              <button
-                type="button"
-                onClick={() => setSend({ times: normalizeTimes([...send.times, newTime]) })}
-                className="inline-flex h-7 items-center gap-1 rounded-md px-2 text-body text-indigo-600 hover:bg-indigo-50 dark:text-indigo-400 dark:hover:bg-white/[0.06]"
-              >
-                <Plus size={12} />時刻を追加
-              </button>
+            <div className="ml-6 space-y-2">
+              <div className="flex flex-wrap items-center gap-2" role="group" aria-label="送る時刻">
+                {send.times.map(t => (
+                  <span key={t} className="inline-flex h-7 items-center gap-1 rounded-md border border-zinc-200 px-2 text-body tabular-nums text-zinc-800 dark:border-white/10 dark:text-zinc-200">
+                    {t}
+                    {send.times.length > 1 && (
+                      <button type="button" aria-label={`${t} を削除`} onClick={() => setSend({ times: send.times.filter(x => x !== t) })} className="text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-100">
+                        <X size={12} />
+                      </button>
+                    )}
+                  </span>
+                ))}
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <label htmlFor={newTimeId} className="text-small text-text-muted">追加する時刻</label>
+                <input id={newTimeId} type="time" value={newTime} onChange={e => setNewTime(e.target.value)} className={SELECT} />
+                <button
+                  type="button"
+                  disabled={!newTime}
+                  onClick={() => { setSend({ times: normalizeTimes([...send.times, newTime]) }); setNewTime('') }}
+                  className="inline-flex h-7 items-center gap-1 rounded-md px-2 text-body text-indigo-600 hover:bg-indigo-50 disabled:opacity-disabled dark:text-indigo-400 dark:hover:bg-white/[0.06]"
+                >
+                  <Plus size={12} />時刻を追加
+                </button>
+              </div>
             </div>
           )}
           <label className="flex items-center gap-2 text-body text-zinc-700 dark:text-zinc-300">

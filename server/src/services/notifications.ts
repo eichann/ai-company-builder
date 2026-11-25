@@ -32,6 +32,7 @@
 import { isNotificationKind, JOB_OCCURRENCE_NOTIFICATION_KINDS, NOTIFICATION_DEFAULTS, NOTIFICATION_KINDS, NOTIFICATION_LIST_MAX, RECORDLESS_NOTIFICATION_KINDS } from '../../shared/types/notifications'
 import type { NotificationItem, NotificationKind, NotificationList, NotificationSettings } from '../../shared/types/notifications'
 import { DEFAULT_COMPANY_TIME_ZONE } from '../../shared/core/calendar'
+import { jobOutcomeWords } from '../../shared/core/job-words'
 import type { LedgerEntry, LedgerValue } from '../../shared/core/record-ledger'
 import { aiTurnStates, noTurnStates, type TypeDefinition } from '../../shared/core/record-types'
 import { addDays, isBusinessDay, nextBusinessDay } from '../../shared/core/business-days'
@@ -241,11 +242,17 @@ export function companyNow(nowMs: number, timeZone: string): string {
   return `${p('year')}-${p('month')}-${p('day')}T${p('hour')}:${p('minute')}`
 }
 
+/** The codes the fixed sentence below already says (the やること could not be made). */
+const TASK_CODES = new Set(['RECORDS_OFF', 'TASK_NOT_CREATED'])
+
 /** An occurrence's notice (jobs.md "Notices"), built when read: the job's name, the slot and why. */
 export function jobOccurrenceText(kind: string, occ: { name: string; dueSlot: string; outcomeCode: string | null }): string {
   const at = dueText(occ.dueSlot)
   if (kind === 'job_expired') return `定期の仕事「${occ.name}」の${at}の回は、期限までに動かなかったため見送りました`
   if (kind === 'job_skipped') return `定期の仕事「${occ.name}」の${at}の回は、責任者が不在のため見送りました（代わりの人は動かしません）`
+  // A failure the run reached (RUN_FAILED, TIME_LIMIT, …) is said in its own words; a missing or unknown code keeps the old sentence.
+  const reason = occ.outcomeCode && !TASK_CODES.has(occ.outcomeCode) ? jobOutcomeWords(occ.outcomeCode) : null
+  if (reason) return `定期の仕事「${occ.name}」の${at}の回：${reason}`
   const why = occ.outcomeCode === 'RECORDS_OFF' ? '記録の機能がオフのため、やることを作れませんでした' : 'やることを作れませんでした'
   return `定期の仕事「${occ.name}」の${at}の回：${why}。管理者に確かめてください`
 }

@@ -322,8 +322,10 @@ grant** — never a key, never a service account — so every switch above appli
   (address + name → 登録する; 登録をやめる asks first), 1人あたりの上限,
   全員の中継を止める / 再開 (asks first), 許可しているメンバー with today's count and
   この人の中継を止める / 再開 (asks first), the records (filter by person). App 設定 → Google →
-  「スプレッドシートを中継で使う」 (`GoogleRelayCard.tsx`, `hooks/useGoogleRelay.ts`, shown only
-  while the company offers it, `googleRelayCardView`): ［許可する］ = 「Google で許可」 for `sheets`
+  「スプレッドシートを中継で使う」 (`GoogleRelayCard.tsx`, `hooks/useGoogleRelay.ts`, `googleRelayCardView`; no card
+  while Google is not usable for the company (`available` false) or the server does not list the service; a service the
+  company has not turned on shows its card with 「会社でまだオンになっていません。使うときは管理者に頼んでください。」 and no
+  ［許可する］, owner FB #44 — `client/tests/google-relay-card.test.ts`): ［許可する］ = 「Google で許可」 for `sheets`
   (consent), or, when the member only turned it off, back on without a consent; ［やめる］ (asks
   first) = the member's own switch; the admin's stop; the member's own records. IPC (lane A):
   `google:relay`, `google:setRelay(companyId, on, service?)` (main sends only `{ feature: 'sheets' | 'documents', on }`;

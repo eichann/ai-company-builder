@@ -1,6 +1,6 @@
 // 設定 → Google 「スプレッドシートを中継で使う」 (google-connector.md "The relay"): what the card
 // offers must match what the server would do — no ［許可する］ for a relay the company does not
-// offer (the server refuses the consent), no second Google consent for a member who only turned it
+// offer (the server refuses the consent; the card says to ask an admin), no second Google consent for a member who only turned it
 // off (the permission is kept; the button turns it back on), and the admin's stop shown only to a
 // member who allowed it. The records' words say why ACB refused.
 import { describe, it } from 'node:test'
@@ -16,9 +16,16 @@ const withSheets = (s: Partial<MyGoogleRelay['services'][number]>, more: Partial
   ({ ...base, ...more, services: [{ ...base.services[0], ...s }] })
 
 describe('the relay card', () => {
-  it('is not shown when the company does not offer the relay or Google is unavailable', () => {
-    assert.equal(googleRelayCardView(withSheets({ offered: false })), null)
-    assert.equal(googleRelayCardView({ ...base, available: false, reason: 'off' }), null)
+  it('is not shown when Google is not usable for the company at all', () => {
+    for (const reason of ['not-configured', 'off', 'vault-off', 'operator-stopped'] as const) {
+      assert.equal(googleRelayCardView({ ...base, available: false, reason, services: [{ ...base.services[0], offered: false }] }), null)
+    }
+  })
+
+  it('a relay the company has not turned on is shown with why and no ［許可する］ (owner FB #44)', () => {
+    const view = googleRelayCardView(withSheets({ offered: false }))!
+    assert.equal(view.state, 'companyOff')
+    assert.equal(view.notice, '会社でまだオンになっていません。使うときは管理者に頼んでください。')
   })
 
   it('asks Google only when the member never allowed it; a member who turned it off gets it back without a consent', () => {
@@ -36,7 +43,8 @@ describe('the relay card', () => {
 
   it('the Docs card is its own: shown only when the company offers ドキュメント, with its own state', () => {
     const both: MyGoogleRelay = { ...base, services: [base.services[0], { service: 'docs', offered: false, allowed: false, turnedOff: false }] }
-    assert.equal(googleRelayCardView(both, 'docs'), null)
+    assert.equal(googleRelayCardView(both, 'docs')!.state, 'companyOff')
+    assert.equal(googleRelayCardView({ ...base }, 'docs'), null, 'a server that does not know ドキュメント: no card')
     assert.equal(googleRelayCardView(both, 'sheets')!.state, 'allow')
     const docsOn: MyGoogleRelay = { ...base, stopped: 'member', services: [{ ...base.services[0], allowed: true }, { service: 'docs', offered: true, allowed: false, turnedOff: true }] }
     assert.equal(googleRelayCardView(docsOn, 'docs')!.state, 'resume')

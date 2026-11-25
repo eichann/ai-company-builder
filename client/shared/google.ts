@@ -181,20 +181,31 @@ export type GoogleRelayResult =
   | { success: true; data: MyGoogleRelay }
   | { success: false; offline: boolean; error: string }
 
-/** What the card shows, or null when the company does not offer the relay (no card). */
+/** Said on the card while the company has not turned that relay on (Google itself is usable). */
+export const GOOGLE_RELAY_COMPANY_OFF_TEXT = '会社でまだオンになっていません。使うときは管理者に頼んでください。'
+
+/** What the card shows, or null when Google is not usable for the company at all (no card). */
 export interface GoogleRelayCardView {
-  /** allow: ［許可する］ opens Google's page (a consent); resume: ［許可する］ turns it back on (no consent: the permission is kept); allowed: ［やめる］. */
-  state: 'allow' | 'resume' | 'allowed'
+  /**
+   * allow: ［許可する］ opens Google's page (a consent); resume: ［許可する］ turns it back on (no consent: the permission is kept);
+   * allowed: ［やめる］; companyOff: no button, only `GOOGLE_RELAY_COMPANY_OFF_TEXT` (the server would refuse the consent).
+   */
+  state: 'allow' | 'resume' | 'allowed' | 'companyOff'
   /** 「今日 37回 ／ 上限 500回」 */
   usage: string
   /** Why scripts cannot reach a sheet / Doc now although the member allowed it (an admin's stop), or null. */
   notice: string | null
 }
 
-/** One relay service's card (`sheets` 「スプレッドシートを中継で使う」, `docs` 「ドキュメントを中継で使う」), or null when the company does not offer it. */
+/**
+ * One relay service's card (`sheets` 「スプレッドシートを中継で使う」, `docs` 「ドキュメントを中継で使う」). Null — no card — when Google
+ * is not usable for the company (`available` false: not set up, off, the vault off, the operator's stop) or the server does not
+ * know the service; a service the company has not turned on yet is `companyOff` (owner FB #44: say why, not hide it).
+ */
 export function googleRelayCardView(r: MyGoogleRelay, service: GoogleRelayService = 'sheets'): GoogleRelayCardView | null {
   const one = r.services.find(s => s.service === service)
-  if (!r.available || !one?.offered) return null
+  if (!r.available || !one) return null
+  if (!one.offered) return { state: 'companyOff', usage: `今日 ${r.usedToday}回 ／ 上限 ${r.capPerDay}回`, notice: GOOGLE_RELAY_COMPANY_OFF_TEXT }
   const state = one.allowed ? 'allowed' : one.turnedOff ? 'resume' : 'allow'
   const thing = service === 'docs' ? 'ドキュメント' : '表'
   const notice = !one.allowed ? null
