@@ -3221,8 +3221,9 @@ else. **No site word** anywhere (a fictional site in the tests).
   (read only) unless the Skill version is pre-approved and its text unchanged: an operator run (`POST /browser-runs
   { host, write: true, frameRunId? }`), every write the page makes held and failed, a never-read address refused; the
   operator answers `plan` (what will be done, who else is affected, the key values read; ad hoc also the frames in the
-  declaration's grammar, `browserAdhocWritesProblem` — a Skill plan names none) → **ad hoc**: `POST /browser-frame-runs
-  { plan }` → **the plan card** (a waiting run) → ［任せる］ → **the work**: a new operator run naming the frames run, the
+  declaration's grammar, `browserAdhocWritesProblem` — a Skill plan names none); its `finish` is **awaited** and must be
+  taken (the joined lock: the frames run cannot start while the preview's run holds the domain; Codex review) → **ad
+  hoc**: `POST /browser-frame-runs { plan }` → **the plan card** (a waiting run) → ［任せる］ → **the work**: a new operator run naming the frames run, the
   page's writes handed to the writer → **the after-read** → the result card → the frames run ends (`end`) whatever
   happened. The AI's tool call waits for the card and the work (up to the server's 10 minutes for the card), then
   answers; the conversation goes on with its next step.
@@ -3238,12 +3239,14 @@ else. **No site word** anywhere (a fictional site in the tests).
   closures called only after construction.
 - **The plan card (D1)** is the write card (`BrowserWriteView`, `BrowserWriteCard.tsx`, reference `bf_…` — the frames
   run's id — accepted by `readBrowserInspectionRef` and drawn by `BrowserInspectionCard`): the operator's summary, who
-  else is affected, each frame in plain words with its count (`browserSkillWriteLine`), the key values read (card only,
-  never the AI), ［任せる］ (`browserLines:runWrite` with the plan's hash the card shows) and ［やめる］
+  else is affected, each frame in plain words with its count (`browserSkillWriteLine`), the key values read
+  (「下見で読んだ大事な値」, card only, never the AI), ［任せる］ (`browserLines:runWrite` with the plan's hash the card shows) and ［やめる］
   (`browserLines:cancelWrite`, new; main window only; the run ends). **The one-time approval value** stays in the work
   wiring's memory: never in a view, a tool's answer or a log; ［任せる］ is the only path to `approve` (the AI's tools
   cannot call it). A pre-approved Skill version whose text nobody changed runs without the card (its card shows the run
-  and the result); a Skill whose text changed shows the card once (the server's `needsRunCard`).
+  and the result); a Skill whose text changed shows the card once (the server's `needsRunCard`). The card moves on in
+  main by itself (approved, running, the result, ended at the card's time): a `bf_` card is read again every 2 s until
+  it is finished or failed (`BrowserWriteCard`, Codex review).
 - **Holding a page write** (the shell, `ai` mode of a write run: `BrowserAiGate.hold`): every non-GET of the page is
   held — never continued — after the basic rule (`decideAiWrite` with a yes-decider: https on the operated host, the AI not
   stopped, no method-override header). The body is read from DevTools Fetch's `postDataEntries` (exact bytes) or
@@ -3320,7 +3323,9 @@ between the permit and the last check → not sent and `not_sent`, a non-success
 handed back, no value in the log or the server's calls; the wiring — an ad-hoc plan only after the card's ［任せる］ (the
 view and the AI's words never hold the value or the hash), ［やめる］, a pre-approved Skill without the card, a text change
 with it, 見るだけ refused before the operator, a write outside the plan refused during the work, the after-read card's
-labels and bugs 1 / 4, the AI's words without page text or injection), `client/tests/browser-window-electron.test.ts` (a
+labels and bugs 1 / 4, the AI's words without page text or injection, the preview's finish taken before the frames run
+starts), `client/tests/ui/browser-inspection-card.spec.ts` (a `bf_` card: the key values and ［任せる］／［やめる］, then the
+after-read card by itself, each item's checker), `client/tests/browser-window-electron.test.ts` (a
 real window and a fictional site: a save sent once with the page's cookie and CSRF header, its 201 JSON reaching the
 page without the site's cookie in the page or the window, two saves at once one after the other, an autosave outside
 the plan, an upload with a file, a never-read address, a save past the frame's max and a save whose permit came after

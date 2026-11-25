@@ -244,12 +244,15 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
       // The preview (read only): unless a pre-approved Skill version whose text nobody changed since.
       let plan: Extract<WorkAnswer, { do: 'plan' }> | null = null
       if (!frameRun || frameRun.needsApproval) {
+        const previewFinished = { ok: false }
         const previewed = await runOperator({
           phase: 'preview', companyId, host, win, operator, cli: resolved.cli, task: input.task, items: input.items, steps,
           adhoc: frameRun === null, frames: frameRun ? workFrames(frameRun.frames) : null, frameRunId: frameRun?.runId ?? null,
-          cut, deadline, current, conversation, neverReadFits, writer: null,
+          cut, deadline, current, conversation, neverReadFits, writer: null, finished: previewFinished,
         })
         if (previewed.kind === 'refused') return said(previewed.words)
+        // The preview's run must have let the domain go before the frames run starts (one lock across both, Codex review).
+        if (!previewFinished.ok) return said(W.offline)
         if (previewed.kind === 'end') return said(workWordsForAi(previewed.end, input.items, []))
         if (previewed.answer.do === 'stop') return said(workWordsForAi({ kind: 'stopped', why: previewed.answer.why }, input.items, previewed.answer.unread))
         if (previewed.answer.do !== 'plan') return said(W.failed)
@@ -392,6 +395,8 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
     neverReadFits: (pathAndQuery: string) => boolean
     writer: FrameWriter | null
     log?: BrowserRunLogStep[]
+    /** Set to whether the server took the run's finish (its log and the lock released), awaited before returning. */
+    finished?: { ok: boolean }
   }): Promise<
     | { kind: 'answer'; answer: Extract<WorkAnswer, { do: 'plan' | 'done' | 'stop' }> }
     | { kind: 'end'; reason: BrowserRunEndReason; end: WorkEnd }
@@ -443,7 +448,10 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
       }
       if (entered) await o.win.leave().catch(() => {})
       const writes: BrowserRunWriteStep[] = writer?.log() ?? []
-      void deps.api.runFinish(o.companyId, browseRunId, { outcome, ...(reason ? { reason } : {}), steps: log, ...(writes.length ? { writes } : {}) }).catch(() => {})
+      // Awaited: the next phase (the frames run, the work) needs this run's lock released first.
+      const finished = await deps.api.runFinish(o.companyId, browseRunId, { outcome, ...(reason ? { reason } : {}), steps: log, ...(writes.length ? { writes } : {}) })
+        .catch((): BrowserLinesAnswer => ({ kind: 'no-answer' }))
+      if (o.finished) o.finished.ok = finished.kind === 'ok'
     }
   }
 

@@ -233,6 +233,7 @@ export const BROWSER_WRITE_CARD_WORDS = {
   targetsHeading: 'サイトから読む対象（番号）',
   willDo: 'これからすること',
   readHeading: 'サイトから読み取った情報（AI には見せていません）',
+  previewValues: '下見で読んだ大事な値（AI には見せていません）',
   entrust: '任せる',
   cancel: 'やめる',
   entrusting: '書いています…',

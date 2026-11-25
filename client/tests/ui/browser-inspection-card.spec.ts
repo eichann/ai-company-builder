@@ -62,3 +62,22 @@ test('after a restart or in another window: one plain sentence, no value', async
     expectNoPageErrors(state)
   }
 })
+
+test('a write run\'s card: the plan shows the key values read and ［任せる］／［やめる］; after ［任せる］ it moves on by itself to the after-read card with who checked each item', async ({ page }) => {
+  const state = await openPreview(page, 'browser-inspection-card', q({ frame: '1' }))
+  const card = page.getByRole('group', { name: 'ブラウザ操作：AI に任せる書く作業' })
+  await expect(card).toContainText('下見で読んだ大事な値（AI には見せていません）')
+  await expect(card).toContainText('秋のクーポン（番号 3001）')
+  await expect(card.getByRole('button', { name: 'やめる' })).toBeVisible()
+  await card.getByRole('button', { name: '任せる' }).click()
+  // Nothing else is pressed: the card reads main again until the run settled.
+  const after = page.getByRole('group', { name: 'AI がサイトで書いたこと' })
+  await expect(after).toBeVisible({ timeout: 10_000 })
+  await expect(after.locator('[data-checked-by="machine"]')).toContainText('機械で確かめた')
+  await expect(after.locator('[data-checked-by="ai"]')).toContainText('AI が確かめた')
+  await expect(after.locator('[data-checked-by="none"]')).toContainText('確かめていない')
+  await expect(after).toContainText('「前の回」と違う項目があります。意図した変更か確かめてください。')
+  await expect(after.locator('[data-checked-by="ai"]')).toContainText('秋のクーポン')
+  await expect(card.getByRole('button', { name: '任せる' })).toHaveCount(0)
+  expectNoPageErrors(state)
+})

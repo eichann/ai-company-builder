@@ -236,6 +236,7 @@ interface WorkWorld {
   runStart: (body: { write?: true; frameRunId?: string }) => BrowserLinesAnswer
   site: Site
   reads: Record<string, string>
+  runFinish: () => Promise<BrowserLinesAnswer>
 }
 
 function workWorld(over: Partial<WorkWorld> = {}) {
@@ -243,6 +244,7 @@ function workWorld(over: Partial<WorkWorld> = {}) {
     calls: [], answers: [], site: { requests: [], answer: ok201 }, reads: {},
     frameStart: body => ({ kind: 'ok', value: started({ needsApproval: true, adhoc: 'plan' in (body as object) }) }),
     runStart: () => ({ kind: 'ok', value: { runId: `bo_${'a'.repeat(32)}`, leaseMs: 120_000 } }),
+    runFinish: async () => ({ kind: 'ok', value: {} }),
     ...over,
   }
   let permits = 0
@@ -263,7 +265,7 @@ function workWorld(over: Partial<WorkWorld> = {}) {
   const api = {
     async runStart(_c: string, body: { host: string; write?: true; frameRunId?: string }) { w.calls.push(`runStart ${body.write ? 'write' : ''} ${body.frameRunId ?? ''}`.trim()); return w.runStart(body) },
     async runContinue() { return { kind: 'ok', value: {} } as BrowserLinesAnswer },
-    async runFinish(_c: string, _r: string, body: unknown) { w.calls.push(`runFinish ${JSON.stringify(body)}`); return { kind: 'ok', value: {} } as BrowserLinesAnswer },
+    async runFinish(_c: string, _r: string, body: unknown) { const a = await w.runFinish(); w.calls.push(`runFinish ${JSON.stringify(body)}`); return a },
     async frameStart(_c: string, body: unknown) { w.calls.push(`frameStart ${JSON.stringify(body)}`); return w.frameStart(body) },
     async frameApprove(_c: string, _r: string, body: { planHash: string; approvalToken: string }) { w.calls.push(`frameApprove ${body.approvalToken === TOKEN}`); return { kind: 'ok', value: {} } as BrowserLinesAnswer },
     async framePermit(_c: string, _r: string, body: { frame: number }) { w.calls.push('framePermit'); return { kind: 'ok', value: { write: ++permits, frame: body.frame, permittedAt: '', validMs: 5000 } } as BrowserLinesAnswer },
@@ -334,6 +336,19 @@ test('an ad-hoc plan writes only after the card\'s ［任せる］: the AI\'s pa
   const finish = w.calls.filter(c => c.startsWith('runFinish')).pop() ?? ''
   assert.match(finish, /"writes":\[\{"after":1,"frame":1,"method":"POST","outcome":"done","page":"\/coupons"\}\]/)
   for (const leak of ['冬のクーポン', 'csrf-9']) assert.equal(finish.includes(leak), false, leak)
+})
+
+test('the preview\'s run lets the domain go before the frames run starts: a finish the server did not take starts nothing', async () => {
+  const slow = workWorld({ answers: [PLAN], runFinish: () => new Promise(resolve => setTimeout(() => resolve({ kind: 'ok', value: {} }), 30)) })
+  const words = slow.tool.execute({ site: HOST, task: 'クーポンを作って' })
+  for (let i = 0; i < 100 && slow.cards.length === 0; i++) await new Promise(resolve => setTimeout(resolve, 5))
+  const order = slow.w.calls.map(c => c.split(' ')[0])
+  assert.ok(order.indexOf('runFinish') < order.indexOf('frameStart'), order.join(','))
+  slow.wiring.cancel(COMPANY, FRAME_RUN)
+  await words
+  const lost = workWorld({ answers: [PLAN], runFinish: async () => ({ kind: 'no-answer' }) })
+  assert.equal(await lost.tool.execute({ site: HOST, task: 'クーポンを作って' }), W.offline)
+  assert.equal(lost.w.calls.some(c => c.startsWith('frameStart')), false)
 })
 
 test('［やめる］ on the card: nothing is permitted or sent, the run ends, the AI hears it was not approved', async () => {
