@@ -1,3 +1,19 @@
+import type Database from 'better-sqlite3'
+
+/**
+ * The trigger that keeps a run's fixed columns (since "Room for a Skill run" also its budget, and its step count only
+ * growing by one while it runs). One text for a new database and the migration, so both end the same.
+ */
+const BROWSER_RUNS_FIXED_TRIGGER = `CREATE TRIGGER IF NOT EXISTS browser_runs_fixed BEFORE UPDATE ON browser_runs
+      WHEN NEW.id IS NOT OLD.id OR NEW.company_id IS NOT OLD.company_id OR NEW.user_id IS NOT OLD.user_id OR NEW.host IS NOT OLD.host
+        OR NEW.device_id IS NOT OLD.device_id OR NEW.conversation_id IS NOT OLD.conversation_id OR NEW.started_at IS NOT OLD.started_at
+        OR NEW.budget IS NOT OLD.budget OR NEW.steps < OLD.steps OR NEW.steps > OLD.steps + 1
+        OR (OLD.state <> 'running' AND (NEW.state IS NOT OLD.state OR NEW.reason IS NOT OLD.reason OR NEW.ended_at IS NOT OLD.ended_at OR NEW.lease_until IS NOT OLD.lease_until OR NEW.steps IS NOT OLD.steps))
+        OR (OLD.log_written = 1 AND NEW.log_written <> 1)
+    BEGIN
+      SELECT RAISE(ABORT, 'a browser run only moves from running, once');
+    END`
+
 /**
  * The operator's runs of 「ブラウザ操作」 (redesign step ④; agent-browser.md "The operator's window tools"): one row per run
  * and its log. Behind the company handle (ports/browser-runs.ts). **New tables only**: nothing of the plan tables changes,
@@ -31,14 +47,7 @@ export const browserRunSchema = `
     );
     CREATE UNIQUE INDEX IF NOT EXISTS idx_browser_runs_lock ON browser_runs(company_id, host) WHERE state = 'running';
     CREATE INDEX IF NOT EXISTS idx_browser_runs_started ON browser_runs(company_id, started_at);
-    CREATE TRIGGER IF NOT EXISTS browser_runs_fixed BEFORE UPDATE ON browser_runs
-      WHEN NEW.id IS NOT OLD.id OR NEW.company_id IS NOT OLD.company_id OR NEW.user_id IS NOT OLD.user_id OR NEW.host IS NOT OLD.host
-        OR NEW.device_id IS NOT OLD.device_id OR NEW.conversation_id IS NOT OLD.conversation_id OR NEW.started_at IS NOT OLD.started_at
-        OR (OLD.state <> 'running' AND (NEW.state IS NOT OLD.state OR NEW.reason IS NOT OLD.reason OR NEW.ended_at IS NOT OLD.ended_at OR NEW.lease_until IS NOT OLD.lease_until))
-        OR (OLD.log_written = 1 AND NEW.log_written <> 1)
-    BEGIN
-      SELECT RAISE(ABORT, 'a browser run only moves from running, once');
-    END;
+    ${BROWSER_RUNS_FIXED_TRIGGER};
 
     CREATE TABLE IF NOT EXISTS browser_run_log (
       company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
@@ -80,3 +89,20 @@ export const browserRunSchema = `
       SELECT RAISE(ABORT, 'a browser run log is append-only');
     END;
 `
+
+/**
+ * A run's budget ("Room for a Skill run", shared/core/browser-run-budget.ts): `budget` (the name the server chose at the
+ * start; fixed) and `steps` (the operator's answers so far: each `continue` adds one, never past the budget). Added with
+ * defaults (`standard`, 0): an older build inserts without them and its rows read as before. The fixed-columns trigger is
+ * replaced once to cover them. Idempotent.
+ */
+export function migrateBrowserRunBudget(conn: Database.Database): void {
+  const cols = new Set((conn.prepare('PRAGMA table_info(browser_runs)').all() as Array<{ name: string }>).map(c => c.name))
+  if (!cols.has('budget')) conn.exec("ALTER TABLE browser_runs ADD COLUMN budget TEXT NOT NULL DEFAULT 'standard' CHECK (budget IN ('standard', 'skill'))")
+  if (!cols.has('steps')) conn.exec('ALTER TABLE browser_runs ADD COLUMN steps INTEGER NOT NULL DEFAULT 0 CHECK (steps >= 0)')
+  const trigger = conn.prepare("SELECT sql FROM sqlite_master WHERE type = 'trigger' AND name = 'browser_runs_fixed'").get() as { sql: string } | undefined
+  if (trigger?.sql !== BROWSER_RUNS_FIXED_TRIGGER) {
+    conn.exec('DROP TRIGGER IF EXISTS browser_runs_fixed')
+    conn.exec(BROWSER_RUNS_FIXED_TRIGGER)
+  }
+}

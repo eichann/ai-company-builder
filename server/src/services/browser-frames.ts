@@ -34,6 +34,7 @@ import { BROWSER_PLAN_TIMES, BROWSER_REPORT_REASONS } from '../../shared/core/br
 import { browserSkillDeclarationFrom, BROWSER_SKILL_PROBLEM_WORDS, type BrowserSkillWrite } from '../../shared/core/browser-skill'
 import { BROWSER_DEVICE_WORDS } from '../../shared/core/browser-device'
 import { browserAdhocWritesProblem, browserFrameMismatch, BROWSER_FRAME_REQUEST_LIMITS, type BrowserFrameRequest } from '../../shared/core/browser-frame-match'
+import { BROWSER_FRAME_RUN_TIMES } from '../../shared/core/browser-run-budget'
 import { canonicalJson } from '../../shared/core/fixed-content'
 import { isValidSkillName } from '../../shared/core/names'
 import type {
@@ -76,10 +77,10 @@ export interface BrowserFrameDeps {
 }
 
 export const BROWSER_FRAME_TIMES = {
-  /** A run waiting for the person's approval of its plan ends after this. */
-  approve: 10 * 60_000,
-  /** A run ends this long after it started, whatever its state (its unused frames are gone). */
-  run: 30 * 60_000,
+  /** A run waiting for the person's approval of its plan ends after this (shared/core/browser-run-budget.ts: the app's card waits as long). */
+  approve: BROWSER_FRAME_RUN_TIMES.approve,
+  /** A run ends this long after it started, whatever its state (its unused frames are gone; room for a Skill run's work). */
+  run: BROWSER_FRAME_RUN_TIMES.run,
   /** A permit is good for this long (the app sends only within it). */
   permit: BROWSER_PLAN_TIMES.permit,
   /** Beyond the permit, how long before a silent write becomes unknown. */
@@ -282,16 +283,17 @@ export function createBrowserFrameService(deps: BrowserFrameDeps) {
     pastWindow,
 
     /**
-     * Who holds a domain for the operator runs' start (step ⑤b, services/browser-runs.ts): the run not ended there (its id
-     * and member), `busy` while an ended run's write to it may still be on its way, else null. Time-outs judged first.
+     * Who holds a domain for the operator runs' start (step ⑤b, services/browser-runs.ts): the run not ended there (its id,
+     * member, source and state — the operator run's budget is chosen from the last two), `busy` while an ended run's write
+     * to it may still be on its way, else null. Time-outs judged first.
      */
-    holderOn(companyId: string, host: string): { runId: string; userId: string } | 'busy' | null {
+    holderOn(companyId: string, host: string): { runId: string; userId: string; source: FrameRunRow['source']; state: FrameRunRow['state'] } | 'busy' | null {
       const now = clock.nowMs()
       const r = repo(companyId)
       const live = r.liveRunOn(host)
       if (live) settle(companyId, live, now)
       const still = r.liveRunOn(host)
-      if (still) return { runId: still.id, userId: still.userId }
+      if (still) return { runId: still.id, userId: still.userId, source: still.source, state: still.state }
       for (const ended of r.runsInFlightOn(host)) settle(companyId, ended, now)
       return r.runsInFlightOn(host).length > 0 ? 'busy' : null
     },

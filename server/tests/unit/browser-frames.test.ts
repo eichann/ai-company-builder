@@ -21,6 +21,8 @@ import { sqliteMembershipRepository } from '../../src/adapters/sqlite/membership
 import { sha256TokenDigest } from '../../src/adapters/system'
 import { createBrowserSkillService, type BrowserSkillService } from '../../src/services/browser-skills'
 import { BROWSER_FRAME_TIMES, createBrowserFrameService, type BrowserFrameService } from '../../src/services/browser-frames'
+import { createBrowserRunService, type BrowserRunService } from '../../src/services/browser-runs'
+import { BROWSER_RUN_BUDGETS } from '../../../shared/core/browser-run-budget'
 import type { BrowserSkillContent, BrowserSkillSource } from '../../src/ports/browser-skills'
 import type { BrowserOperationSettings } from '../../../shared/core/browser-operation'
 import type { BrowserFramePermitRequest, BrowserFrameRunStart, BrowserFrameRunView } from '../../../shared/types/browser-frames'
@@ -580,7 +582,7 @@ describe('step ⑤b: what the app is answered, one lock with the operator runs',
     expect(withRuns.holderOn(CO, DOMAIN)).toBeNull()
     operatorRunning = false
     const run = value(await withRuns.start(alice, { plan: adhoc }, PC))
-    expect(withRuns.holderOn(CO, DOMAIN)).toEqual({ runId: run.runId, userId: alice.userId })
+    expect(withRuns.holderOn(CO, DOMAIN)).toEqual({ runId: run.runId, userId: alice.userId, source: 'adhoc', state: 'waiting' })
     expect(withRuns.holderOn(CO, 'other.example.test')).toBeNull()
     // Ended with a write permitted: busy until it is recorded or times out.
     value(await withRuns.approve(alice, run.runId, { planHash: run.planHash, approvalToken: run.approvalToken }, PC))
@@ -589,5 +591,90 @@ describe('step ⑤b: what the app is answered, one lock with the operator runs',
     expect(withRuns.holderOn(CO, DOMAIN)).toBe('busy')
     value(withRuns.report(alice, run.runId, { write: 1, result: 'done' }, PC))
     expect(withRuns.holderOn(CO, DOMAIN)).toBeNull()
+  })
+})
+
+describe('room for a Skill run: the operator run\'s budget is the server\'s choice (shared/core/browser-run-budget.ts)', () => {
+  /** The real operator runs service joined to this frames service, as composition.ts wires them. */
+  function operatorRuns(): BrowserRunService {
+    return createBrowserRunService({
+      companyData: sqliteCompanyData(conn), transactions: sqliteTransactions(conn), clock: { now: () => iso(now), nowMs: () => now },
+      ids: { newId: () => randomBytes(8).toString('hex'), newToken: () => randomBytes(32).toString('hex') },
+      browserPolicy: () => policy, aiStops: () => ({ all: stopped, tools: [] }),
+      devices: { check: (_m, key) => ({ ok: true, value: { deviceId: key === undefined ? null : `bd_${key}` } }) },
+      siteGrants: { allows: (m, host, effect) => host === DOMAIN && (effect === 'read' ? level[m.userId] !== 'none' : level[m.userId] === 'write') },
+      frameRunOn: (companyId, host) => frames.holderOn(companyId, host),
+    })
+  }
+  const work = (runs: BrowserRunService, frameRunId: string, write = true) =>
+    value(runs.start(alice, { host: DOMAIN, frameRunId, ...(write ? { write: true } : {}) }, PC))
+  /** Continues until the server refuses one: how many steps the run was given. */
+  function stepsGiven(runs: BrowserRunService, runId: string): number {
+    let n = 0
+    while (n < 100 && runs.continue(alice, runId, PC).ok) n++
+    return n
+  }
+  const runRow = (id: string) => conn.prepare('SELECT state, reason, budget FROM browser_runs WHERE id = ?').get(id)
+
+  it('an approved company Skill\'s work gets the skill budget: 60 steps and 17 minutes; its preview stays standard', async () => {
+    put(yaml)
+    await approveSkill('per_run')
+    const runs = operatorRuns()
+    const run = value(await frames.start(alice, { skill: SKILL }, PC))
+    // The preview (the frames run still waiting for the card): standard.
+    const preview = work(runs, run.runId)
+    expect(preview.budget).toBe('standard')
+    value(runs.finish(alice, preview.runId, { outcome: 'done', steps: [] }))
+    value(await approve(alice, run))
+    const worked = work(runs, run.runId)
+    expect(worked.budget).toBe('skill')
+    expect(stepsGiven(runs, worked.runId)).toBe(BROWSER_RUN_BUDGETS.skill.steps)
+    expect(runRow(worked.runId)).toEqual({ state: 'timed_out', reason: 'rounds', budget: 'skill' })
+  })
+
+  it('a skill run\'s lock lasts its 17 minutes (renewed), where a standard one ends at 6', async () => {
+    put(yaml)
+    await approveSkill('pre_approved')
+    const runs = operatorRuns()
+    const run = value(await frames.start(alice, { skill: SKILL }, PC))
+    const worked = work(runs, run.runId)
+    expect(worked.budget).toBe('skill')
+    const startedAt = now
+    while (now - startedAt < BROWSER_RUN_BUDGETS.skill.runMs - 60_000) {
+      now += 60_000
+      expect(runs.continue(alice, worked.runId, PC).ok).toBe(true)
+    }
+    now = startedAt + BROWSER_RUN_BUDGETS.skill.runMs
+    expect(code(runs.continue(alice, worked.runId, PC))).toBe('BROWSER_RUN_ENDED')
+    expect(runRow(worked.runId)).toMatchObject({ state: 'timed_out', reason: 'timeout' })
+  })
+
+  it('an ad-hoc plan\'s work, a read-only run naming a Skill run, and a run naming nothing stay standard: 20 steps, 6 minutes', async () => {
+    const runs = operatorRuns()
+    const adhocRun = await openAdhoc()
+    const adhocWork = work(runs, adhocRun.runId)
+    expect(adhocWork.budget).toBe('standard')
+    expect(stepsGiven(runs, adhocWork.runId)).toBe(BROWSER_RUN_BUDGETS.standard.steps)
+    value(frames.end(alice, adhocRun.runId))
+    // An open Skill run named by a run that is not a write task's.
+    put(yaml)
+    await approveSkill('pre_approved')
+    const skillRun = value(await frames.start(alice, { skill: SKILL }, PC))
+    const reading = work(runs, skillRun.runId, false)
+    expect(reading.budget).toBe('standard')
+    now += BROWSER_RUN_BUDGETS.standard.runMs
+    expect(code(runs.continue(alice, reading.runId, PC))).toBe('BROWSER_RUN_ENDED')
+    value(frames.end(alice, skillRun.runId))
+    const plain = value(runs.start(alice, { host: DOMAIN, write: true }, PC))
+    expect(plain.budget).toBe('standard')
+  })
+
+  it('the app cannot ask for a budget: a body naming one is refused, and the stored budget never changes', async () => {
+    const runs = operatorRuns()
+    expect(code(runs.start(alice, { host: DOMAIN, write: true, budget: 'skill' }, PC))).toBe('BROWSER_BAD_RUN')
+    const plain = value(runs.start(alice, { host: DOMAIN }, PC))
+    expect(() => conn.prepare("UPDATE browser_runs SET budget = 'skill' WHERE id = ?").run(plain.runId)).toThrow(/only moves from running/)
+    expect(() => conn.prepare('UPDATE browser_runs SET steps = steps + 2 WHERE id = ?').run(plain.runId)).toThrow(/only moves from running/)
+    expect(() => conn.prepare('UPDATE browser_runs SET steps = steps - 1 WHERE id = ?').run(plain.runId)).toThrow(/CHECK|only moves from running/)
   })
 })

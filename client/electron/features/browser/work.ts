@@ -23,6 +23,7 @@ import {
 import { browserNeverReadFits } from '../../../../shared/core/browser-frame-match'
 import { isValidSkillName } from '../../../../shared/core/names'
 import { BROWSER_RUN_ID_RE, BROWSER_RUN_LIMITS, type BrowserRunEndReason, type BrowserRunLogStep, type BrowserRunOutcome, type BrowserRunWriteStep } from '../../../../shared/core/browser-run-log'
+import { browserRunBudget, type BrowserRunBudget } from '../../../../shared/core/browser-run-budget'
 import type { BrowserFrameRunStart, BrowserFrameView } from '../../../../shared/types/browser-frames'
 import type { BrowserPreviewSurface } from '../../../shared/browser-runner'
 import type { BrowserWriteGetResult, BrowserWriteResultView, BrowserWriteView } from '../../../shared/browser-line-writes'
@@ -153,6 +154,8 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
     writes: () => FrameWriteRecord[]
     locked: () => boolean
     cut: AbortController
+    /** The run's budget as the server chose it, and when the app stops operating (its start + `operateMs`). */
+    budget: Readonly<BrowserRunBudget>
     deadline: number
     current: () => boolean
     log: BrowserRunLogStep[]
@@ -160,7 +163,7 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
     const history: BrowserBrowseHistoryEntry[] = []
     let notes = ''
     const interrupted = { kind: 'stopped' as const, why: 'interrupted' as const }
-    for (let round = 1; round <= BL.rounds; round++) {
+    for (let round = 1; round <= o.budget.steps; round++) {
       // A write that may have been sent without an answer: nothing more in this run.
       if (o.locked()) return { kind: 'end', reason: 'write-unknown', end: { kind: 'unknown' } }
       if (!o.current()) return { kind: 'end', reason: 'context-changed', end: interrupted }
@@ -177,7 +180,7 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
         prompt: o.phase === 'preview' ? 'work-preview' : 'work',
         material: workMaterial({
           phase: o.phase, task: o.task, items: o.items, steps: o.steps, frames: o.frames(), page, history,
-          writes: o.writes().map(w => w.outcome), notes, round,
+          writes: o.writes().map(w => w.outcome), notes, round, rounds: o.budget.steps,
         }),
       })
       if (o.locked()) return { kind: 'end', reason: 'write-unknown', end: { kind: 'unknown' } }
@@ -222,7 +225,6 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
     const cut = new AbortController()
     const onTurn = () => cut.abort()
     input.signal.addEventListener('abort', onTurn, { once: true })
-    const deadline = now() + BL.totalMs + L.approveMs
     const watchStop = setInterval(() => { if (deps.stopped(companyId)) cut.abort() }, STOP_CHECK_MS)
     const current = () => !cut.signal.aborted && stillCurrent() && !deps.stopped(companyId) && !win.closed() && deps.window(companyId, host) === win
     let frameRun: BrowserFrameRunStart | null = null
@@ -233,6 +235,8 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
       const steps = input.skill !== null && input.companyRoot && deps.skillSteps
         ? (await deps.skillSteps(input.companyRoot, input.skill).catch(() => null))?.slice(0, L.steps) ?? null : null
 
+      // When the frames run was asked for: the card waits no longer than the server keeps a waiting run (counted from then).
+      let frameAskedAt = now()
       // [a Skill] the server builds the frames from the approved declaration it reads itself.
       if (input.skill !== null) {
         const started = await deps.api.frameStart(companyId, { skill: input.skill, ...conversation })
@@ -250,7 +254,7 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
         const previewed = await runOperator({
           phase: 'preview', companyId, host, win, operator, cli: resolved.cli, task: input.task, items: input.items, steps,
           adhoc: frameRun === null, frames: frameRun ? workFrames(frameRun.frames) : null, frameRunId: frameRun?.runId ?? null,
-          cut, deadline, current, conversation, neverReadFits, writer: null, finished: previewFinished,
+          cut, current, conversation, neverReadFits, writer: null, finished: previewFinished,
         })
         if (previewed.kind === 'refused') return said(previewed.words)
         // The preview's run must have let the domain go before the frames run starts (one lock across both, Codex review).
@@ -261,6 +265,7 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
         plan = previewed.answer
         // [ad hoc] the frames from the plan, checked by the server with the declaration's rules; never pre-approvable.
         if (!frameRun) {
+          frameAskedAt = now()
           const started = await deps.api.frameStart(companyId, { plan: { domain: host, writes: plan.writes ?? [] }, ...conversation })
           if (started.kind !== 'ok') return said(refusedWords(started))
           frameRun = frameStartOf(started.value)
@@ -280,7 +285,7 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
       // The plan card: ［任せる］ (the one-time value, from here only) or ［やめる］, the turn's stop, or the server's 10 minutes.
       if (run.needsApproval) {
         const decision = await new Promise<'approved' | 'cancelled'>((resolve) => {
-          const timer = setTimeout(() => resolve('cancelled'), L.approveMs)
+          const timer = setTimeout(() => resolve('cancelled'), Math.max(0, frameAskedAt + L.approveMs - now()))
           let onCut = () => {}
           const done = (d: 'approved' | 'cancelled') => { clearTimeout(timer); cut.signal.removeEventListener('abort', onCut); e.decide = null; resolve(d) }
           onCut = () => done('cancelled')
@@ -328,7 +333,7 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
       })
       const worked = await runOperator({
         phase: 'work', companyId, host, win, operator, cli: resolved.cli, task: input.task, items: input.items, steps,
-        adhoc: run.source === 'adhoc', frames: () => writer.frames(), frameRunId: run.runId, cut, deadline, current, conversation,
+        adhoc: run.source === 'adhoc', frames: () => writer.frames(), frameRunId: run.runId, cut, current, conversation,
         neverReadFits, writer, log: workLog,
       })
       const records = writer.records()
@@ -391,7 +396,6 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
     frames: WorkFrame[] | null | (() => WorkFrame[])
     frameRunId: string | null
     cut: AbortController
-    deadline: number
     current: () => boolean
     conversation: { conversationId?: string }
     neverReadFits: (pathAndQuery: string) => boolean
@@ -408,6 +412,9 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
     if (started.kind !== 'ok') return { kind: 'refused', words: refusedWords(started) }
     const browseRunId = (started.value as { runId?: unknown } | null)?.runId
     if (typeof browseRunId !== 'string' || !BROWSER_RUN_ID_RE.test(browseRunId)) return { kind: 'refused', words: W.failed }
+    // The run's budget is the server's choice (a Skill's approved work gets more room); an older server's answer: standard.
+    const budget = browserRunBudget((started.value as { budget?: unknown } | null)?.budget)
+    const deadline = now() + budget.operateMs
     const log = o.log ?? []
     const writer = o.writer
     let outcome: BrowserRunOutcome = 'failed'
@@ -432,7 +439,7 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
         task: o.task, items: o.items, steps: o.steps, adhoc: o.adhoc,
         frames: () => (typeof o.frames === 'function' ? o.frames() : o.frames),
         writes: () => writer?.records() ?? [], locked: () => writer?.locked() ?? false,
-        cut: o.cut, deadline: o.deadline, current: o.current, log,
+        cut: o.cut, budget, deadline, current: o.current, log,
       })
       if (got.kind === 'end') {
         outcome = got.end.kind === 'unknown' ? 'failed' : 'stopped'

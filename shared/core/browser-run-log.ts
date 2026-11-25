@@ -23,12 +23,10 @@ export const BROWSER_RUN_STATES = ['running', 'done', 'stopped', 'failed', 'time
 export type BrowserRunState = typeof BROWSER_RUN_STATES[number]
 
 export const BROWSER_RUN_LIMITS = Object.freeze({
-  /** Steps kept per run (the operator's own limit is lower). */
+  /** Steps kept per run (at least the largest budget's steps: browser-run-budget.ts). */
   steps: 60,
   /** The lock's lease: each step renews it; a run not heard from for this long is over (crash, sleep, lost network). */
   leaseMs: 2 * 60_000,
-  /** A run never lasts longer than this, renewed or not. */
-  runMs: 6 * 60_000,
   /** Runs listed at most (newest first). */
   list: 200,
   /** Write steps kept per run (step ⑤b: each page write the window held). */

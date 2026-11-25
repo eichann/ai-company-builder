@@ -27,6 +27,7 @@ import { readBrowserPageSnapshot, type BrowserBrowseSurface, type BrowserPageSna
 import { readBrowserCard } from '../shared/browser-inspection'
 import { browserNeverReadFits } from '../../shared/core/browser-frame-match'
 import { browserRunWritesProblem } from '../../shared/core/browser-run-log'
+import { BROWSER_FRAME_RUN_TIMES, BROWSER_RUN_BUDGETS } from '../../shared/core/browser-run-budget'
 import { createFrameWriter, type FrameWritesApi } from '../electron/features/browser/frame-writes'
 import { wireBrowserWork } from '../electron/features/browser/work'
 import { createBrowserContext } from '../electron/features/browser/context'
@@ -243,6 +244,9 @@ interface WorkWorld {
   sendHangs: boolean
   frameApprove: () => Promise<BrowserLinesAnswer>
   idleMaxMs?: number
+  /** The wiring's clock (default: the real one), and what each operator step does to it. */
+  now?: () => number
+  onStep?: (prompt: string) => void
 }
 
 function workWorld(over: Partial<WorkWorld> = {}) {
@@ -292,6 +296,7 @@ function workWorld(over: Partial<WorkWorld> = {}) {
     async resolve() { return { ok: true, cli: { path: '/bin/claude', pathDirs: [] } } },
     async step(job) {
       w.calls.push(`step ${job.prompt}`)
+      w.onStep?.(job.prompt)
       return { ok: true, text: w.answers[steps++] ?? '{"do":"stop","why":"blocked","unread":[]}' }
     },
   }
@@ -301,6 +306,7 @@ function workWorld(over: Partial<WorkWorld> = {}) {
     reader: () => ({ async read(address) { w.calls.push(`read ${address}`); return w.reads[address] !== undefined ? { status: 200, body: w.reads[address] } : { status: 404, body: '' } }, closed: () => false }),
     api: api as never, operator: () => operator, cliPath: () => '/bin/claude', parentEnv: () => ({}),
     ...(w.idleMaxMs !== undefined ? { idleMaxMs: w.idleMaxMs } : {}),
+    ...(w.now ? { now: w.now } : {}),
   })
   const cards: string[] = []
   const tool = createBrowserWorkTool(input => wiring.work({
@@ -484,4 +490,59 @@ test('the result card for an unknown write says what to check by hand; the AI he
   assert.equal(card.headline, CW.unknown)
   assert.ok(card.notes.includes(CW.byHand('POST /coupons')))
   assert.equal(workWordsForAi({ kind: 'unknown' }, [], []), W.unknown)
+})
+
+// ── Room for a Skill run (shared/core/browser-run-budget.ts) ──────────────────────────────────────────────────────────
+
+const WAIT = '{"do":"wait","seconds":1}'
+const workSteps = (calls: string[]) => calls.filter(c => c === 'step work').length
+
+test('the work goes as far as the server\'s budget: a Skill\'s 60 steps when it answered `skill`; 20 otherwise, also for a name it does not know', async () => {
+  const answers = [...Array.from({ length: 30 }, () => WAIT), DONE_PLAIN]
+  const asSkill = workWorld({
+    answers: [...answers], frameStart: () => ({ kind: 'ok', value: started({ needsApproval: false }) }),
+    runStart: () => ({ kind: 'ok', value: { runId: `bo_${'a'.repeat(32)}`, leaseMs: 120_000, budget: 'skill' } }),
+  })
+  assert.equal((await asSkill.tool.execute({ site: HOST, task: 'いつものクーポン', skill: 'coupons' })).startsWith(W.done), true)
+  assert.equal(workSteps(asSkill.w.calls), 31)
+  for (const budget of [undefined, 'standard', 'huge']) {
+    const plain = workWorld({
+      answers: [...answers], frameStart: () => ({ kind: 'ok', value: started({ needsApproval: false }) }),
+      runStart: () => ({ kind: 'ok', value: { runId: `bo_${'a'.repeat(32)}`, leaseMs: 120_000, ...(budget ? { budget } : {}) } }),
+    })
+    const said = await plain.tool.execute({ site: HOST, task: 'いつものクーポン', skill: 'coupons' })
+    assert.equal(workSteps(plain.w.calls), BROWSER_RUN_BUDGETS.standard.steps, String(budget))
+    assert.equal(said.startsWith(W.done), false)
+    assert.match(plain.w.calls.filter(c => c.startsWith('runFinish')).pop() ?? '', /"reason":"rounds"/)
+  }
+})
+
+test('the work stops operating at its budget\'s time, counted from its own start', async () => {
+  let t = 1_000_000
+  const skill = workWorld({
+    now: () => t,
+    // Each work step takes a minute; the skill budget operates 15 minutes, so the 16th step is never asked.
+    onStep: prompt => { if (prompt === 'work') t += 60_000 },
+    answers: Array.from({ length: 40 }, () => WAIT), frameStart: () => ({ kind: 'ok', value: started({ needsApproval: false }) }),
+    runStart: () => ({ kind: 'ok', value: { runId: `bo_${'a'.repeat(32)}`, leaseMs: 120_000, budget: 'skill' } }),
+  })
+  await skill.tool.execute({ site: HOST, task: 'いつものクーポン', skill: 'coupons' })
+  assert.equal(workSteps(skill.w.calls), BROWSER_RUN_BUDGETS.skill.operateMs / 60_000)
+  assert.match(skill.w.calls.filter(c => c.startsWith('runFinish')).pop() ?? '', /"reason":"timeout"/)
+})
+
+test('the card waits no longer than the server keeps the frames run waiting: counted from when the run was asked for, so a long preview leaves less', async () => {
+  let t = 1_000_000
+  const late = workWorld({
+    now: () => t,
+    // The preview's one step takes the whole of the server's approval time.
+    onStep: prompt => { if (prompt === 'work-preview') t += BROWSER_FRAME_RUN_TIMES.approve },
+    answers: [SKILL_PLAN], frameStart: () => ({ kind: 'ok', value: started({ needsApproval: true }) }),
+  })
+  const said = await Promise.race([
+    late.tool.execute({ site: HOST, task: 'いつものクーポン', skill: 'coupons' }),
+    new Promise<string>(resolve => setTimeout(() => resolve('still waiting'), 3_000).unref()),
+  ])
+  assert.equal(said, workWordsForAi({ kind: 'stopped', why: 'not-approved' }, [], []))
+  assert.equal(late.w.calls.some(c => c.startsWith('frameApprove') || c === 'step work'), false)
 })

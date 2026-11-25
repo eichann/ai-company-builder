@@ -4,6 +4,7 @@
  * changed). Rules: services/browser-runs.ts. Nothing here holds a value the site showed or the operator typed.
  */
 import type { BrowserRunAction, BrowserRunState, BrowserRunWriteStep } from '../../shared/core/browser-run-log'
+import type { BrowserRunBudgetName } from '../../shared/core/browser-run-budget'
 
 export interface BrowserRunRow {
   id: string
@@ -16,6 +17,10 @@ export interface BrowserRunRow {
   startedAt: string
   leaseUntil: string
   endedAt: string | null
+  /** The budget the server chose at the start (shared/core/browser-run-budget.ts); fixed. */
+  budget: BrowserRunBudgetName
+  /** The operator's answers so far (each continue adds one). */
+  steps: number
 }
 
 export interface BrowserRunLogRow {
@@ -32,8 +37,8 @@ export interface BrowserRunRepository {
   byId(id: string): BrowserRunRow | null
   /** The `running` row of this domain, if any. */
   runningOn(host: string): BrowserRunRow | null
-  /** Renew the lease of a running row (compare-and-set on `running`). */
-  renew(id: string, leaseUntil: string): boolean
+  /** One more step and the lease renewed, while the row runs and its steps are below `maxSteps` (compare-and-set). */
+  renew(id: string, leaseUntil: string, maxSteps: number): boolean
   /** running → a final state (compare-and-set). */
   end(id: string, state: Exclude<BrowserRunState, 'running'>, reason: string | null, at: string): boolean
   /** The ids of this member's running rows. */

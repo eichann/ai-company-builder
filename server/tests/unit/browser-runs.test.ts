@@ -21,8 +21,35 @@ import type { Member } from '../../src/services/access'
 import type { Refusal } from '../../src/services/outcome'
 import type { BrowserOperationSettings } from '../../../shared/core/browser-operation'
 import { BROWSER_RUN_LIMITS, browserRunAddressPattern, browserRunLabel, browserRunLogProblem } from '../../../shared/core/browser-run-log'
+import { BROWSER_RUN_BUDGETS } from '../../../shared/core/browser-run-budget'
 
 const T0 = Date.parse('2026-11-25T00:00:00.000Z')
+const OLD_BROWSER_RUNS = `CREATE TABLE IF NOT EXISTS browser_runs (
+      company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+      id TEXT NOT NULL,
+      user_id TEXT NOT NULL,
+      host TEXT NOT NULL,
+      device_id TEXT,
+      conversation_id TEXT,
+      state TEXT NOT NULL CHECK (state IN ('running', 'done', 'stopped', 'failed', 'timed_out', 'refused', 'left')),
+      reason TEXT,
+      started_at TEXT NOT NULL,
+      lease_until TEXT NOT NULL,
+      ended_at TEXT,
+      log_written INTEGER NOT NULL DEFAULT 0 CHECK (log_written IN (0, 1)),
+      PRIMARY KEY (company_id, id),
+      CHECK ((state = 'running') = (ended_at IS NULL))
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_browser_runs_lock ON browser_runs(company_id, host) WHERE state = 'running';
+    CREATE INDEX IF NOT EXISTS idx_browser_runs_started ON browser_runs(company_id, started_at);
+    CREATE TRIGGER IF NOT EXISTS browser_runs_fixed BEFORE UPDATE ON browser_runs
+      WHEN NEW.id IS NOT OLD.id OR NEW.company_id IS NOT OLD.company_id OR NEW.user_id IS NOT OLD.user_id OR NEW.host IS NOT OLD.host
+        OR NEW.device_id IS NOT OLD.device_id OR NEW.conversation_id IS NOT OLD.conversation_id OR NEW.started_at IS NOT OLD.started_at
+        OR (OLD.state <> 'running' AND (NEW.state IS NOT OLD.state OR NEW.reason IS NOT OLD.reason OR NEW.ended_at IS NOT OLD.ended_at OR NEW.lease_until IS NOT OLD.lease_until))
+        OR (OLD.log_written = 1 AND NEW.log_written <> 1)
+    BEGIN
+      SELECT RAISE(ABORT, 'a browser run only moves from running, once');
+    END;`
 const CO = 'co-1'
 const OTHER_CO = 'co-2'
 const HOST = 'shop.example.com'
@@ -184,7 +211,7 @@ describe('the lock: one run per company × domain', () => {
       if (!c.ok) { expect(refusal(c)).toBe('conflict:BROWSER_RUN_ENDED'); ended = true }
     }
     expect(ended).toBe(true)
-    expect(now - secondAt).toBeLessThanOrEqual(BROWSER_RUN_LIMITS.runMs + BROWSER_RUN_LIMITS.leaseMs / 2)
+    expect(now - secondAt).toBeLessThanOrEqual(BROWSER_RUN_BUDGETS.standard.runMs + BROWSER_RUN_LIMITS.leaseMs / 2)
     expect(runRow(second.runId).state).toBe('timed_out')
   })
 
@@ -199,6 +226,34 @@ describe('the lock: one run per company × domain', () => {
     const r = value(start(alice))
     value(runs.finish(alice, r.runId, { outcome: 'done', steps: [] }))
     expect(() => conn.prepare("UPDATE browser_runs SET state = 'running', ended_at = NULL WHERE id = ?").run(r.runId)).toThrow(/only moves/)
+  })
+})
+
+describe('a run\'s budget of steps (shared/core/browser-run-budget.ts)', () => {
+  it('a standard run gets its 20 steps: the next continue ends it (timed_out, rounds) and frees the domain', () => {
+    const r = value(start(alice))
+    expect(r.budget).toBe('standard')
+    for (let i = 0; i < BROWSER_RUN_BUDGETS.standard.steps; i++) value(runs.continue(alice, r.runId, keys[alice.userId]))
+    expect(refusal(runs.continue(alice, r.runId, keys[alice.userId]))).toBe('conflict:BROWSER_RUN_ENDED')
+    expect(runRow(r.runId)).toEqual({ state: 'timed_out', reason: 'rounds' })
+    expect(start(bob).ok).toBe(true)
+  })
+
+  it('a database from before the budget: its running row reads as standard, and the trigger now keeps the budget', () => {
+    const before = new Database(':memory:')
+    // browser_runs as the build before this one made it (origin/main 7f6dcfc2), with a running row.
+    before.exec(`${OLD_BROWSER_RUNS}`)
+    before.pragma('foreign_keys = OFF')
+    before.prepare("INSERT INTO browser_runs (company_id, id, user_id, host, state, started_at, lease_until) VALUES ('co-1', 'bo_old', 'u', ?, 'running', ?, ?)").run(HOST, iso(now), iso(now))
+    initDatabase(before)
+    initDatabase(before)
+    expect(before.prepare("SELECT budget, steps FROM browser_runs WHERE id = 'bo_old'").get()).toEqual({ budget: 'standard', steps: 0 })
+    expect(() => before.prepare("UPDATE browser_runs SET budget = 'skill' WHERE id = 'bo_old'").run()).toThrow(/only moves from running/)
+    // A new database ends with the same table and trigger.
+    const fresh = new Database(':memory:')
+    initDatabase(fresh)
+    const shape = (c: Database.Database) => c.prepare("SELECT type, name, sql FROM sqlite_master WHERE tbl_name = 'browser_runs' ORDER BY type, name").all()
+    expect(shape(before)).toEqual(shape(fresh))
   })
 })
 
