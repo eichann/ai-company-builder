@@ -11,8 +11,8 @@
  *   lines), so a new site is covered by itself.
  *
  * Read with the TypeScript scanner: string literals, template text and JSX text — the words people and the AI see —, not
- * comments or identifiers. Excluded, each with its reason (`EXCLUDED`): the site data files themselves, which stay until
- * step ⑦ removes them, and the old path's site-specific pieces, removed with it.
+ * comments or identifiers. Excluded, each with its reason: the site data files themselves (`EXCLUDED`), which stay until
+ * step ⑦ removes them, and the old path's site-specific pieces (`OLD_PATH`), removed with it.
  */
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
@@ -62,15 +62,35 @@ const EXCLUDED: Record<string, string> = {
   'shared/browser-connectors/opened.json': 'the opened list (data): removed in step ⑦',
 }
 
+/**
+ * The old path (`lstep@0.6.x`: one operation type with its own card and facts), not the site data but written for one
+ * site's operation; it is removed with the data in step ⑦ (design memo §7-1, §12). Listed here so nothing else is skipped.
+ */
+const OLD_PATH: Record<string, string> = {
+  'client/src/features/browser-plans/components/BrowserPlanCard.tsx': 'the old path\'s plan card (one operation\'s fields): removed in step ⑦',
+  'client/src/features/browser-plans/model.ts': 'the old path\'s card words: removed in step ⑦',
+  'shared/core/browser-plans.ts': 'the old path\'s facts schema for its one checker: removed in step ⑦',
+}
+
 /** What is scanned: everything shipped to all companies that people or the AI read as text. */
 const SCANNED = [
   'client/shared',
+  'client/src',
+  'shared/core',
+  'shared/types',
   'client/electron/browser-request',
   'client/electron/features/browser',
   'admin/src',
   'server/src/services/browser-lines.ts',
+  'server/src/services/browser-line-steps.ts',
   'server/src/services/browser-site-grants.ts',
+  'server/src/services/browser-plans.ts',
+  'server/src/services/browser-devices.ts',
+  'server/src/services/agent-browser.ts',
   'server/src/routes/browser-lines.ts',
+  'server/src/routes/browser-plans.ts',
+  'server/src/routes/browser-devices.ts',
+  'server/src/routes/agent-browser.ts',
 ]
 
 /**
@@ -110,7 +130,7 @@ function siteNames(): string[] {
 
 function filesUnder(rel: string): string[] {
   const abs = join(ROOT, rel)
-  if (Object.keys(EXCLUDED).some(x => rel === x || rel.startsWith(`${x}/`))) return []
+  if ([...Object.keys(EXCLUDED), ...Object.keys(OLD_PATH)].some(x => rel === x || rel.startsWith(`${x}/`))) return []
   if (statSync(abs).isFile()) return /\.(ts|tsx)$/.test(rel) && !/\.(test|spec)\.tsx?$/.test(rel) ? [rel] : []
   return readdirSync(abs).flatMap(name => (name === 'node_modules' ? [] : filesUnder(`${rel}/${name}`)))
 }
@@ -147,10 +167,11 @@ describe('the core\'s texts name no site (design memo §3 I10)', () => {
   it('the excluded files exist and are exactly the site data kept until step ⑦', () => {
     for (const path of Object.keys(EXCLUDED)) assert.ok(statSync(join(ROOT, path)), path)
     assert.deepEqual(Object.keys(EXCLUDED).sort(), ['client/browser-lines/lstep.ts', 'client/connector-maps/lstep', 'shared/browser-connectors/opened.json'])
+    for (const path of Object.keys(OLD_PATH)) assert.ok(statSync(join(ROOT, path)), path)
   })
 
   const files = SCANNED.flatMap(filesUnder)
-  it('scans the shipped texts (client/shared, the browser tools and wiring, the admin console, the server\'s browser words)', () => {
+  it('scans the shipped texts (client/shared, the renderer, shared/core and types, the browser tools and wiring, the admin console, the server\'s browser words)', () => {
     assert.ok(files.length > 100, String(files.length))
     assert.ok(files.includes('client/shared/browser-inspection.ts'))
     assert.ok(files.includes('client/electron/browser-request/inspect-tool.ts'))

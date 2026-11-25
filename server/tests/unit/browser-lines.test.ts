@@ -389,6 +389,15 @@ describe('plans of writes (generalization PR 5c)', () => {
     expect(code(writePlan(row, STEP_VALUES, '90171', bob))).toBe('ok')
   })
 
+  it('GET /browser-lines-mine lists a line that writes only to 変えてよい (見るだけ sees the inspections alone)', () => {
+    const [row] = approve('landing_create')
+    const names = () => value(svc.mine(alice)).lines.map(l => l.line)
+    expect(names()).toContain(row.name)
+    setLevel(alice, 'read')
+    expect(names()).not.toContain(row.name)
+    expect(names()).toContain('landing_inspect')
+  })
+
   it('a write plan in the database whose line writes nothing (an inspection\'s row) is never approved, claimed or permitted', () => {
     policy = { mode: 'on', sites: [{ host: HOST, level: 'write', assetHosts: [] }] }
     const p = insertWritePlan('draft')

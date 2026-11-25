@@ -2531,7 +2531,7 @@ Tests: `server/tests/unit/browser-site-grants.test.ts` (another company's row ig
 nor settable, 見るだけ cannot write, 使わない cannot read, the ceiling, the company off, a member who left / a row from before
 they came back, owners / admins only and no implicit 変えてよい, the view, the body), `browser-lines.test.ts` (the gate's
 order with the person's level, the old per-line grant alone allowing nothing and its routes naming no line, 見るだけ cannot
-make a write plan, leaving), `browser-devices.test.ts` (`browser-lines-mine` per level), permission matrix rows + `CROSS`,
+make a write plan, `browser-lines-mine` listing a writing line only to 変えてよい, leaving), `browser-devices.test.ts` (`browser-lines-mine` per level), permission matrix rows + `CROSS`,
 `admin-contract.test.ts`, `company-scoped-sql.test.ts`, `jobs-schema.test.ts`, `admin/tests/agent-browser-people.test.tsx`
 (fictional sites: the cells, one `PUT` per choice, the cap, no site registered, no job words). Each guard mutation-checked.
 
@@ -2547,14 +2547,17 @@ make a write plan, leaving), `browser-devices.test.ts` (`browser-lines-mine` per
 - Refusal and tool words in `client/shared` (`BROWSER_INSPECT_WORDS`, `BROWSER_REQUEST_WORDS`), the server's browser
   refusals and the admin console's texts name no site.
 - **Test** `client/tests/browser-core-words.test.ts` (extends §17-2 to texts): the string literals, template text and JSX
-  text of `client/shared`, `client/electron/browser-request`, `client/electron/features/browser`, `admin/src` and the
-  server's browser line / site-grant service and route hold none of a **fictional site sample**'s words nor any name the
+  text of `client/shared`, `client/src`, `shared/core`, `shared/types`, `client/electron/browser-request`,
+  `client/electron/features/browser`, `admin/src` and the server's browser services and routes hold none of a **fictional site sample**'s words nor any name the
   carried site data gives (approved declarations, opened maps and lines; the everyday words 「タグ」「アクション」 alone are
   excepted, a site's phrase holding them is not); the tools' descriptions and schemas with an empty catalog hold none,
   and the sample's words reach a tool only through the catalog. `EXCLUDED`, each with its reason: the site data kept
-  until step ⑦ (`client/connector-maps/lstep`, `client/browser-lines/lstep.ts`, `shared/browser-connectors/opened.json`).
-  Not scanned yet (removed with the old path in step ⑦): `client/connectors/lstep/`, `shared/core/browser-plans.ts`'s
-  facts schema, the old plan card `src/features/browser-plans/components/BrowserPlanCard.tsx` and its `model.ts`.
+  until step ⑦ (`client/connector-maps/lstep`, `client/browser-lines/lstep.ts`, `shared/browser-connectors/opened.json`);
+  `OLD_PATH`, removed with the old path in step ⑦: `shared/core/browser-plans.ts` (its one checker's facts), the old plan
+  card `src/features/browser-plans/components/BrowserPlanCard.tsx` and its `model.ts` (`client/connectors/lstep/` is
+  outside the scanned folders).
+- **Remaining (said)**: the catalog lists every approved line the build carries, whether or not the member's company
+  registered that site — text only (the server gates every call); filtering it by the company's sites is a later step.
 
 ## Not yet (later PRs)
 
