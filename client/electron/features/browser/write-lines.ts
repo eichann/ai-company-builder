@@ -82,6 +82,8 @@ export interface BrowserWriteLinesDeps<E> {
     card(companyId: string, runId: string): BrowserWriteGetResult | null
     approve(companyId: string, runId: string, planHash: unknown): Promise<BrowserWriteGetResult | null>
     cancel(companyId: string, runId: string): BrowserWriteGetResult | null
+    /** ［済んでいた］／［されていなかった］ about its write in doubt (absent: the card offers no answer). */
+    confirm?(companyId: string, runId: string, answer: unknown): Promise<BrowserWriteGetResult | null>
   }
 }
 
@@ -406,6 +408,12 @@ export function wireBrowserWriteLines<E extends IpcInvokeEvent>(ipc: IpcRegistra
 
   // ［済んでいた］［されていなかった］: the write in doubt only, the person's answer to the server (it decides when).
   ipc.handle('browserLines:confirmWrite', async (event, companyId, cardId, result): Promise<BrowserWriteGetResult> => {
+    // A write run's card (`bf_…`): the work wiring sends the person's answer (this PC's key); the AI's tools never reach it.
+    const framed = frameCard(event, companyId, cardId)
+    if (framed) {
+      if ('message' in framed) return { ok: false, message: framed.message }
+      return deps.frameCards!.confirm ? gone(await deps.frameCards!.confirm(framed.companyId, framed.runId, result)) : { ok: false, message: MESSAGES.badInput }
+    }
     const got = mine(event, companyId, cardId)
     if ('message' in got) return { ok: false, message: got.message }
     const e = got.e

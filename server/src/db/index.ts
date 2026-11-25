@@ -42,8 +42,8 @@ import { browserLineSchema } from './schema/browser-lines'
 import { browserDeviceSchema } from './schema/browser-devices'
 import { browserRecordingSchema } from './schema/browser-recordings'
 import { browserSkillSchema } from './schema/browser-skills'
-import { browserRunSchema, migrateBrowserRunBudget } from './schema/browser-runs'
-import { browserFrameSchema } from './schema/browser-frames'
+import { browserRunSchema, migrateBrowserRunBudget, migrateBrowserRunWriteSiteRefused } from './schema/browser-runs'
+import { browserFrameSchema, migrateBrowserFrameWriteRefused } from './schema/browser-frames'
 // lane C ▲
 // The migrations tests run on their own against older databases.
 export { migrateCompanyFolderKind, migrateInvitationClaims } from './schema/company'
@@ -60,7 +60,8 @@ export { migrateSkillUseColumns } from './schema/skill-uses'
 export { migrateSecondOpinionSetting } from './schema/agents'
 export { migrateShelfHistoryRequester } from './schema/skill-shelf'
 export { migrateBrowserExecutionMonotonic, migrateBrowserPlanSummary } from './schema/browser-plans'
-export { migrateBrowserRunBudget } from './schema/browser-runs'
+export { migrateBrowserRunBudget, migrateBrowserRunWriteSiteRefused } from './schema/browser-runs'
+export { migrateBrowserFrameWriteRefused } from './schema/browser-frames'
 
 // Ensure data directory exists
 if (!fs.existsSync(DATA_DIR)) {
@@ -205,6 +206,9 @@ export function initDatabase(conn: Database.Database = sqlite) {
   migrateBrowserPlanSummary(conn)
   // An operator run's budget and its step count (agent-browser.md "Room for a Skill run").
   migrateBrowserRunBudget(conn)
+  // A write the site refused (4xx) is its own state and step outcome (agent-browser.md "Recovering from a failed write").
+  migrateBrowserFrameWriteRefused(conn)
+  migrateBrowserRunWriteSiteRefused(conn)
   // Before the seeding below: it deletes stale manager rows per company.
   migrateRuleAndManagerCompanies(conn)
   // After it: the rebuild keeps company_id and recreates its triggers.

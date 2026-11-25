@@ -72,6 +72,8 @@ export interface BrowserWorkInput {
 const STOP_CHECK_MS = 500
 const KEPT_CARDS = 100
 const IDLE_MAX_MS = 45_000
+/** A permit's 5 s and the 30 s after it (the server's window before a write in doubt can be answered about). */
+const CONFIRM_AFTER_MS = 35_000
 
 interface Entry {
   userId: string
@@ -90,6 +92,8 @@ interface Entry {
   result: BrowserWriteResultView | null
   /** The card's press or ［やめる］, waited for by the run (set while the card is up). */
   decide: ((d: 'approved' | 'cancelled') => void) | null
+  /** The write in doubt the person may answer about (the server's write and from when), or null. */
+  inDoubt: { write: number; from: string | null; line: string } | null
 }
 
 /** A server refusal → the consultation AI's fixed words. */
@@ -126,10 +130,14 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
   }
 
   function viewOf(e: Entry): BrowserWriteView {
+    // A write in doubt: ［済んでいた］［されていなかった］ from its time (the server decides at the press).
+    const result = e.result && e.inDoubt
+      ? { ...e.result, confirm: { from: e.inDoubt.from, canNow: e.inDoubt.from === null || now() >= Date.parse(e.inDoubt.from) } }
+      : e.result
     return {
       title: CW.title, siteLabel: e.host, phase: e.phase, values: e.values.map((v, i) => ({ name: `v${i + 1}`, label: v.label, value: v.value, needsConfirm: false, confirmed: false })),
       sentences: [...e.sentences], card: e.card, readAt: e.readAt, contentHash: e.phase === 'ready' ? e.planHash : null, message: e.message,
-      result: e.result, ...(e.phase === 'ready' ? { cancellable: true } : {}),
+      result, ...(e.phase === 'ready' ? { cancellable: true } : {}),
     }
   }
 
@@ -278,6 +286,7 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
         userId, companyId, runId: run.runId, host, phase: run.needsApproval ? 'ready' : 'running', values: plan?.values ?? [],
         sentences: workPlanSentences({ summary: plan?.summary ?? input.task, affects: plan?.affects ?? '', frames: workFrames(run.frames) }),
         planHash: run.planHash, approvalToken: run.approvalToken, card: null, readAt: null, message: null, result: null, decide: null,
+        inDoubt: null,
       }
       const e = entry
       keep(e)
@@ -368,6 +377,9 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
       e.readAt = new Date(now()).toISOString()
       e.phase = 'finished'
       e.result = resultOf(end, records, e.card.headline)
+      // The write in doubt the server knows (it had a permit): the person may answer about it on the card, past its window.
+      const doubt = records.find(r => r.outcome === 'unknown' && typeof r.write === 'number')
+      e.inDoubt = doubt ? { write: doubt.write as number, from: confirmableAt(doubt.permittedAt ?? null), line: doubt.line } : null
       const unread = answer && answer.do !== 'plan' ? answer.unread : []
       return said(worked.kind === 'refused' ? worked.words : workWordsForAi(end, input.items, unread, unreadAddresses))
     } finally {
@@ -476,6 +488,12 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
     }
   }
 
+  /** From when the server takes the person's answer: the permit + 5 s + 30 s (its estimate; it decides on both clocks). */
+  function confirmableAt(permittedAt: string | null): string | null {
+    const at = permittedAt === null ? Number.NaN : Date.parse(permittedAt)
+    return Number.isFinite(at) ? new Date(at + CONFIRM_AFTER_MS).toISOString() : null
+  }
+
   /** The card's result lists (the write card's shape): done, not sent, unknown and what to check by hand. */
   function resultOf(end: WorkEnd, records: readonly FrameWriteRecord[], headline: string | null): BrowserWriteResultView {
     const unknown = records.filter(r => r.outcome === 'unknown').map(r => r.line)
@@ -483,7 +501,7 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
       outcome: end.kind === 'done' ? 'succeeded' : end.kind === 'unknown' ? 'unknown' : records.some(r => r.outcome === 'done') ? 'partial' : 'stopped',
       headline: headline ?? (end.kind === 'stopped' ? W.stoppedBy[end.why] : CW.stopped),
       done: records.filter(r => r.outcome === 'done').map(r => r.line),
-      notDone: records.filter(r => r.outcome === 'not-sent' || r.outcome === 'refused').map(r => r.line),
+      notDone: records.filter(r => r.outcome === 'not-sent' || r.outcome === 'refused' || r.outcome === 'site-refused').map(r => r.line),
       unknown,
       byHand: unknown.map(CW.byHand),
       confirm: null,
@@ -521,6 +539,31 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
       if (!e.decide) return { ok: true, view: viewOf(e) }
       e.phase = 'running'
       e.decide('approved')
+      return { ok: true, view: viewOf(e) }
+    },
+    /**
+     * ［済んでいた］／［されていなかった］ on the card (main window only, the caller checked): the person's answer about the
+     * write in doubt, sent to the server with this PC's key. It never unlocks the run or sends anything again; after
+     * 「されていなかった」 the person asks again in the chat (a new run). The AI's tools never reach this.
+     */
+    async confirm(companyId: string, runId: string, answer: unknown): Promise<BrowserWriteGetResult | null> {
+      const e = mine(deps.userId(), companyId, runId)
+      if (!e) return null
+      if ((answer !== 'done' && answer !== 'not_done') || !e.inDoubt || !e.result) return { ok: false, message: CW.confirmNotNow }
+      const doubt = e.inDoubt
+      const sent = await deps.api.frameConfirm(companyId, runId, { write: doubt.write, answer })
+      if (sent.kind !== 'ok') return { ok: false, message: sent.kind === 'refused' && sent.code === 'BROWSER_TOO_EARLY' ? CW.confirmTooEarly : CW.confirmFailed }
+      const unknown = e.result.unknown.filter(l => l !== doubt.line)
+      e.result = {
+        ...e.result,
+        headline: answer === 'done' ? CW.confirmedDone : CW.confirmedNotDone,
+        unknown,
+        done: answer === 'done' ? [...e.result.done, doubt.line] : e.result.done,
+        notDone: answer === 'not_done' ? [...e.result.notDone, doubt.line] : e.result.notDone,
+        byHand: unknown.map(CW.byHand),
+        confirm: null,
+      }
+      e.inDoubt = null
       return { ok: true, view: viewOf(e) }
     },
     /** ［やめる］: the plan is not approved; the run ends (nothing is written). */

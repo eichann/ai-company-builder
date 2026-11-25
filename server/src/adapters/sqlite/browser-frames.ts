@@ -81,6 +81,15 @@ export function sqliteBrowserFrameRepository(conn: Database.Database, companyId:
       conn.prepare(`INSERT INTO browser_frame_writes (company_id, run_id, seq, frame_idx, state, permitted_at, permitted_mono_ms, permitted_boot)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`).run(companyId, runId, w.seq, w.frameIdx, w.state, w.permittedAt, w.permittedMonoMs, w.permittedBoot)
     },
+    confirms(runId) {
+      return (conn.prepare('SELECT seq, answer, confirmed_by, confirmed_at FROM browser_frame_write_confirms WHERE company_id = ? AND run_id = ? ORDER BY seq')
+        .all(companyId, runId) as Array<{ seq: number; answer: 'done' | 'not_done'; confirmed_by: string; confirmed_at: string }>)
+        .map(r => ({ seq: r.seq, answer: r.answer, confirmedBy: r.confirmed_by, confirmedAt: r.confirmed_at }))
+    },
+    insertConfirm(runId, row) {
+      return conn.prepare(`INSERT OR IGNORE INTO browser_frame_write_confirms (company_id, run_id, seq, answer, confirmed_by, confirmed_at)
+        VALUES (?, ?, ?, ?, ?, ?)`).run(companyId, runId, row.seq, row.answer, row.confirmedBy, row.confirmedAt).changes === 1
+    },
     setWriteState(runId, seq, from, to, change) {
       return conn.prepare('UPDATE browser_frame_writes SET state = ?, settled_at = ?, reason = COALESCE(?, reason) WHERE company_id = ? AND run_id = ? AND seq = ? AND state = ?')
         .run(to, change.settledAt, change.reason ?? null, companyId, runId, seq, from).changes === 1

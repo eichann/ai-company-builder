@@ -40,10 +40,11 @@ rule FramesLife R10_NothingAfterUnknown
 rule FramesLife R14_WithinFrames
 rule FramesLife R15_OneWriteAtATime
 rule FramesLife R16_NoSendAfterStop
+rule FramesLife R5_NotDoneStaysTrue
 # states <model> <distinct states of the real model (<model>.cfg)>
 states PlanLife 57618
 states StepsLife 28320
-states FramesLife 192816
+states FramesLife 264480
 # broken <variant in broken/> <the rule it must break> (one guard removed; a guard added = a variant added)
 broken BrokenRetryAfterUnknown R1_AtMostOneSendPerPlan
 broken BrokenNoCheckBeforeSend R2_NoSendWithoutApprovalAndLivePermit
@@ -76,6 +77,9 @@ broken BrokenFramesSendAfterStop R16_NoSendAfterStop
 broken BrokenFramesTwoInFlight R15_OneWriteAtATime
 broken BrokenFramesNoApproval R2_NoSendWithoutApprovalAndLivePermit
 broken BrokenFramesUsedAfterEnd R2_NoSendWithoutApprovalAndLivePermit
+broken BrokenFramesRefusedGivesUnitBack R14_WithinFrames
+broken BrokenFramesConfirmUnlocks R10_NothingAfterUnknown
+broken BrokenFramesConfirmBeforeWindow R5_NotDoneStaysTrue
 # limit <variant in limits/> <the rule it breaks> (an accepted limit the rule file states; kept failing so
 # it neither disappears nor grows unnoticed)
 limit LimitFrozenAfterCheck R2_NoSendWithoutApprovalAndLivePermit

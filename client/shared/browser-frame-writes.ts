@@ -459,6 +459,7 @@ export const WORK_WRITE_WORDS: Readonly<Record<BrowserRunWriteOutcome, string>> 
   'not-sent': '送っていません',
   unknown: '分からない（届いたか分かりません。もう書かないでください）',
   refused: '枠に合わないので止めました（送っていません）',
+  'site-refused': 'サイトが受け付けませんでした（エラーで、保存されていません）。画面のエラーを見て直し、もう一度押せます（新しい書き込みとして枠を1回使います）',
 }
 
 /** The material of one step of a write run: the task, the steps and frames (outside text), the page, the history. */
@@ -576,7 +577,9 @@ export const BROWSER_WORK_CARD_WORDS = {
     'not-sent': '送っていません',
     unknown: `届いたか分かりません（${BROWSER_CARD_CHECKED_BY_WORDS.none}）`,
     refused: '計画の枠に合わないので止めました（送っていません）',
+    'site-refused': 'サイトが受け付けませんでした（保存されていません）',
   } satisfies Record<BrowserRunWriteOutcome, string>,
+  siteRefusedStatus: (status: number) => `サイトが「${status}」を返して受け付けませんでした（保存されていません）`,
   failedStatus: (status: number) => `サイトが「${status}」を返しました。届いたかどうか、変わったかどうかは分かりません（${BROWSER_CARD_CHECKED_BY_WORDS.none}）`,
   reread: (address: string) => `読み直し：${address}`,
   created: 'なし（この作業で作ったもの）',
@@ -588,6 +591,11 @@ export const BROWSER_WORK_CARD_WORDS = {
   compare: (name: string) => `「${name}」と違う項目があります。意図した変更か確かめてください。`,
   sentDiffers: '送った値と、読み直した値が違う項目があります。サイトの画面で確かめてください。',
   byHand: (line: string) => `サイトの画面で、次の書き込みが入っているか確かめてください：${line}。アプリはもう一度は送りません。`,
+  confirmNotNow: 'この書き込みについては、いま答えられません。',
+  confirmTooEarly: 'まだ送られるかもしれないため、少し待ってから押してください。',
+  confirmFailed: '答えを送れませんでした。少し待ってから、もう一度押してください。',
+  confirmedDone: '「済んでいた」と答えました。アプリはもう一度は送りません。',
+  confirmedNotDone: '「されていなかった」と答えました。アプリは自動では送り直しません。続けるときは、相談で頼み直してください。',
   machineNote: '「機械で確かめた」はアプリが送った値と読み直した値を比べたもの、「AI が確かめた」は AI がページを読んで判断したもの、「確かめていない」は誰も比べていないものです。',
   defaultCompared: '比べ元',
 } as const
@@ -649,7 +657,8 @@ export function workResultCard(input: WorkCardInput): BrowserCard {
       heading: CW.writes,
       rows: input.writes.map((w, i) => ({
         label: `${i + 1}. ${w.line}`,
-        value: read(w.outcome === 'unknown' && w.status !== null ? CW.failedStatus(w.status) : CW.writeOutcome[w.outcome]),
+        value: read(w.status === null ? CW.writeOutcome[w.outcome]
+          : w.outcome === 'unknown' ? CW.failedStatus(w.status) : w.outcome === 'site-refused' ? CW.siteRefusedStatus(w.status) : CW.writeOutcome[w.outcome]),
       })),
     })
   }

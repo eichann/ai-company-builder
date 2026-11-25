@@ -1,3 +1,6 @@
+import type Database from 'better-sqlite3'
+import { rebuildTableFor } from './table-rebuild'
+
 /**
  * Writes within frames (redesign step ⑤a; agent-browser.md "Writes within frames"; `model/browser-plan/FramesLife.tla`):
  * a run's frames and the writes actually permitted. **New tables only** — separate from the opened lines'
@@ -19,9 +22,41 @@
  * - `browser_frame_writes`: one row appended per permit, with the frame it used, its state and both clocks' readings.
  *   **At most one `permitted` write per run** (partial unique index: the second page write waits until the first's
  *   result is recorded). The trigger allows only the state table's moves: `permitted` → `done` / `verified` / `not_sent`
- *   / `unknown`, `unknown` → `done` / `verified` (a late sure answer); nothing else ever changes. `verified` is reserved
- *   for the safe patterns (nothing sets it yet).
+ *   / `unknown` / `refused` (the site answered that it did not take it: a 4xx; agent-browser.md "Recovering from a failed
+ *   write"), `unknown` → `done` / `verified` / `refused` (a late sure answer); nothing else ever changes. `verified` is
+ *   reserved for the safe patterns (nothing sets it yet). `refused` came later: `migrateBrowserFrameWriteRefused` rebuilds
+ *   a table made before it (its CHECK cannot widen in place).
+ * - `browser_frame_write_confirms`: the person's answer about a write in doubt (「済んでいた」 `done` /
+ *   「されていなかった」 `not_done`), who and when; once per write (primary key), never changed or removed while its run
+ *   exists. It never moves the write or the run (a locked run stays locked).
  */
+
+/** The writes table, its in-flight index and its moves: one text for a new database and the rebuild. */
+const BROWSER_FRAME_WRITES_TABLE = `CREATE TABLE IF NOT EXISTS browser_frame_writes (
+      company_id TEXT NOT NULL,
+      run_id TEXT NOT NULL,
+      seq INTEGER NOT NULL CHECK (seq >= 1),
+      frame_idx INTEGER NOT NULL,
+      state TEXT NOT NULL CHECK (state IN ('permitted', 'done', 'verified', 'not_sent', 'unknown', 'refused')),
+      reason TEXT,
+      permitted_at TEXT NOT NULL,
+      permitted_mono_ms REAL,
+      permitted_boot TEXT,
+      settled_at TEXT,
+      PRIMARY KEY (company_id, run_id, seq),
+      FOREIGN KEY (company_id, run_id, frame_idx) REFERENCES browser_frames(company_id, run_id, idx) ON DELETE CASCADE
+    );`
+const BROWSER_FRAME_WRITES_IN_FLIGHT = `CREATE UNIQUE INDEX IF NOT EXISTS idx_browser_frame_writes_in_flight ON browser_frame_writes(company_id, run_id) WHERE state = 'permitted'`
+const BROWSER_FRAME_WRITES_MOVES = `CREATE TRIGGER IF NOT EXISTS browser_frame_writes_moves BEFORE UPDATE ON browser_frame_writes
+      WHEN NEW.company_id IS NOT OLD.company_id OR NEW.run_id IS NOT OLD.run_id OR NEW.seq IS NOT OLD.seq OR NEW.frame_idx IS NOT OLD.frame_idx
+        OR NEW.permitted_at IS NOT OLD.permitted_at OR NEW.permitted_mono_ms IS NOT OLD.permitted_mono_ms OR NEW.permitted_boot IS NOT OLD.permitted_boot
+        OR NOT (
+          (OLD.state = 'permitted' AND NEW.state IN ('done', 'verified', 'not_sent', 'unknown', 'refused'))
+          OR (OLD.state = 'unknown' AND NEW.state IN ('done', 'verified', 'refused'))
+        )
+    BEGIN
+      SELECT RAISE(ABORT, 'a frames write only moves as its state table allows');
+    END`
 export const browserFrameSchema = `
     CREATE TABLE IF NOT EXISTS browser_frame_runs (
       company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
@@ -85,29 +120,42 @@ export const browserFrameSchema = `
       SELECT RAISE(ABORT, 'a frame only gives one more unit at a time');
     END;
 
-    CREATE TABLE IF NOT EXISTS browser_frame_writes (
+    ${BROWSER_FRAME_WRITES_TABLE}
+    ${BROWSER_FRAME_WRITES_IN_FLIGHT};
+    ${BROWSER_FRAME_WRITES_MOVES};
+
+    CREATE TABLE IF NOT EXISTS browser_frame_write_confirms (
       company_id TEXT NOT NULL,
       run_id TEXT NOT NULL,
-      seq INTEGER NOT NULL CHECK (seq >= 1),
-      frame_idx INTEGER NOT NULL,
-      state TEXT NOT NULL CHECK (state IN ('permitted', 'done', 'verified', 'not_sent', 'unknown')),
-      reason TEXT,
-      permitted_at TEXT NOT NULL,
-      permitted_mono_ms REAL,
-      permitted_boot TEXT,
-      settled_at TEXT,
+      seq INTEGER NOT NULL,
+      answer TEXT NOT NULL CHECK (answer IN ('done', 'not_done')),
+      confirmed_by TEXT NOT NULL,
+      confirmed_at TEXT NOT NULL,
       PRIMARY KEY (company_id, run_id, seq),
-      FOREIGN KEY (company_id, run_id, frame_idx) REFERENCES browser_frames(company_id, run_id, idx) ON DELETE CASCADE
+      FOREIGN KEY (company_id, run_id) REFERENCES browser_frame_runs(company_id, id) ON DELETE CASCADE
     );
-    CREATE UNIQUE INDEX IF NOT EXISTS idx_browser_frame_writes_in_flight ON browser_frame_writes(company_id, run_id) WHERE state = 'permitted';
-    CREATE TRIGGER IF NOT EXISTS browser_frame_writes_moves BEFORE UPDATE ON browser_frame_writes
-      WHEN NEW.company_id IS NOT OLD.company_id OR NEW.run_id IS NOT OLD.run_id OR NEW.seq IS NOT OLD.seq OR NEW.frame_idx IS NOT OLD.frame_idx
-        OR NEW.permitted_at IS NOT OLD.permitted_at OR NEW.permitted_mono_ms IS NOT OLD.permitted_mono_ms OR NEW.permitted_boot IS NOT OLD.permitted_boot
-        OR NOT (
-          (OLD.state = 'permitted' AND NEW.state IN ('done', 'verified', 'not_sent', 'unknown'))
-          OR (OLD.state = 'unknown' AND NEW.state IN ('done', 'verified'))
-        )
+    CREATE TRIGGER IF NOT EXISTS browser_frame_write_confirms_no_update BEFORE UPDATE ON browser_frame_write_confirms
     BEGIN
-      SELECT RAISE(ABORT, 'a frames write only moves as its state table allows');
+      SELECT RAISE(ABORT, 'a person''s answer about a write is kept as given');
+    END;
+    CREATE TRIGGER IF NOT EXISTS browser_frame_write_confirms_no_delete BEFORE DELETE ON browser_frame_write_confirms
+      WHEN EXISTS (SELECT 1 FROM browser_frame_runs WHERE company_id = OLD.company_id AND id = OLD.run_id)
+    BEGIN
+      SELECT RAISE(ABORT, 'a person''s answer about a write is kept as given');
     END;
 `
+
+/**
+ * The write state `refused` ("Recovering from a failed write"): a `browser_frame_writes` made before it is rebuilt once
+ * with the wider CHECK and the trigger that allows `permitted` / `unknown` → `refused` (every row kept). Idempotent.
+ */
+export function migrateBrowserFrameWriteRefused(conn: Database.Database): boolean {
+  return rebuildTableFor(conn, {
+    table: 'browser_frame_writes',
+    marker: "'refused'",
+    create: BROWSER_FRAME_WRITES_TABLE,
+    after: [BROWSER_FRAME_WRITES_IN_FLIGHT, BROWSER_FRAME_WRITES_MOVES],
+    drop: ['DROP TRIGGER IF EXISTS browser_frame_writes_moves', 'DROP INDEX IF EXISTS idx_browser_frame_writes_in_flight'],
+    columns: ['company_id', 'run_id', 'seq', 'frame_idx', 'state', 'reason', 'permitted_at', 'permitted_mono_ms', 'permitted_boot', 'settled_at'],
+  })
+}

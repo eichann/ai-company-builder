@@ -17,6 +17,7 @@
  * - the after-read card shows both sides and labels who checked each item; bug 4's soft words.
  */
 import { test } from 'node:test'
+import { readdirSync, readFileSync } from 'node:fs'
 import assert from 'node:assert/strict'
 import {
   BROWSER_WORK_CARD_WORDS as CW, BROWSER_WORK_WORDS as W, afterReadAddress, beforeReadAddress, createdIdOf, frameRequestFor, parseWorkAnswer,
@@ -25,7 +26,7 @@ import {
 } from '../shared/browser-frame-writes'
 import { readBrowserPageSnapshot, type BrowserBrowseSurface, type BrowserPageSnapshot } from '../shared/browser-browse'
 import { readBrowserCard } from '../shared/browser-inspection'
-import { browserNeverReadFits } from '../../shared/core/browser-frame-match'
+import { browserNeverReadFits, browserWriteAnswerKind } from '../../shared/core/browser-frame-match'
 import { browserRunWritesProblem } from '../../shared/core/browser-run-log'
 import { BROWSER_FRAME_RUN_TIMES, BROWSER_RUN_BUDGETS } from '../../shared/core/browser-run-budget'
 import { createFrameWriter, type FrameWritesApi } from '../electron/features/browser/frame-writes'
@@ -35,6 +36,7 @@ import { createBrowserWorkTool } from '../electron/browser-request/inspect-tool'
 import type { BrowserLinesAnswer } from '../electron/features/browser/lines-api'
 import type { PreviewOperator } from '../electron/features/browser/preview'
 import type { BrowserWriteSteps } from '../shared/browser-runner'
+import type { BrowserWriteView } from '../shared/browser-line-writes'
 
 const HOST = 'shop.example.test'
 const COMPANY = 'company-1'
@@ -195,7 +197,7 @@ test('no answer: unknown, reported, the run sends nothing more and the write is 
   assert.deepEqual(calls.map(c => c.split(' ').slice(0, 3).join(' ')), ['permit 1 {"method":"POST","path":"/coupons","fields":{}}', 'report 1 unknown'])
 })
 
-test('a stop while the permit is on its way: not sent, told not_sent; a non-success answer is unknown; the page never gets Set-Cookie', async () => {
+test('a stop while the permit is on its way: not sent, told not_sent; a 5xx answer is unknown; the page never gets Set-Cookie', async () => {
   const site: Site = { requests: [], answer: n => (n === 1 ? { status: 422, body: '{}' } : ok201()) }
   const w = writerWorld([frame({ max: 3, left: 3 })])
   // The stop lands between the permit and the last check.
@@ -214,11 +216,42 @@ test('a stop while the permit is on its way: not sent, told not_sent; a non-succ
   for (const v of ['csrf-secret', 'name=a', '4242']) assert.equal(told.includes(v), false, v)
   assert.equal(browserRunWritesProblem(w2.writer.log(), 0), null)
 
-  const site3: Site = { requests: [], answer: () => ({ status: 422, body: '{}' }) }
+  const site3: Site = { requests: [], answer: () => ({ status: 500, body: '{}' }) }
   const w3 = writerWorld([frame({ max: 3, left: 3 })])
   assert.equal((await w3.writer.hold(held(site3, 'POST', '/coupons', FORM, 'name=a'))).kind, 'fulfill')
   assert.ok(w3.calls.includes('report 1 unknown'))
   assert.equal(w3.writer.locked(), true)
+})
+
+test('a write the site refused (a 4xx) is `site-refused`: told refused, the page gets the error, the run goes on; the corrected try is a new permit within the max', async () => {
+  const site: Site = { requests: [], answer: n => (n === 1 ? { status: 422, body: '{"errors":{"name":"required"}}' } : ok201()) }
+  const { writer, calls } = writerWorld([frame({ max: 2, left: 2 })])
+  const first = await writer.hold(held(site, 'POST', '/coupons', FORM, 'name='))
+  assert.equal(first.kind, 'fulfill')
+  assert.equal((first as Extract<HeldPageWriteAnswer, { kind: 'fulfill' }>).status, 422, 'the page shows the site\'s own error')
+  assert.equal(writer.locked(), false)
+  assert.equal(writer.frames()[0].left, 1, 'the refused write used its unit')
+  // Nothing is resent by itself: only the page's next save (a new hold) asks again.
+  assert.deepEqual(site.requests, ['POST /coupons name='])
+  assert.equal((await writer.hold(held(site, 'POST', '/coupons', FORM, 'name=a'))).kind, 'fulfill')
+  assert.equal((await writer.hold(held(site, 'POST', '/coupons', FORM, 'name=b'))).kind, 'fail', 'the frame\'s max holds across a refused try')
+  assert.deepEqual(site.requests, ['POST /coupons name=', 'POST /coupons name=a'])
+  assert.deepEqual(calls.map(c => c.split(' ').slice(0, 3).join(' ')).filter(c => c.startsWith('report')), ['report 1 refused', 'report 2 done'])
+  assert.deepEqual(writer.records().map(r => [r.outcome, r.status]), [['site-refused', 422], ['done', null], ['refused', null]])
+  assert.deepEqual(writer.log().map(l => l.outcome), ['site-refused', 'done', 'refused'])
+  assert.equal(browserRunWritesProblem(writer.log(), 0), null)
+})
+
+test('the statuses that do not prove nothing changed stay unknown and lock the run: 408, 409, 425, 429, 5xx, anything outside 200–499', async () => {
+  for (const status of [408, 409, 425, 429, 500, 503, 100, 600]) {
+    const site: Site = { requests: [], answer: () => ({ status, body: '' }) }
+    const { writer, calls } = writerWorld([frame({ max: 2, left: 2 })])
+    await writer.hold(held(site, 'POST', '/coupons', FORM, 'name=a'))
+    assert.equal(writer.locked(), true, String(status))
+    assert.ok(calls.includes('report 1 unknown'), String(status))
+  }
+  for (const status of [400, 401, 403, 404, 405, 410, 413, 415, 422]) assert.equal(browserWriteAnswerKind(status), 'refused', String(status))
+  for (const status of [200, 201, 204, 302, 303]) assert.equal(browserWriteAnswerKind(status), 'done', String(status))
 })
 
 // ── The write task wired in main ────────────────────────────────────────────────────────────────────────────────────
@@ -244,6 +277,7 @@ interface WorkWorld {
   sendHangs: boolean
   frameApprove: () => Promise<BrowserLinesAnswer>
   idleMaxMs?: number
+  frameConfirm: () => Promise<BrowserLinesAnswer>
   /** The wiring's clock (default: the real one), and what each operator step does to it. */
   now?: () => number
   onStep?: (prompt: string) => void
@@ -258,6 +292,7 @@ function workWorld(over: Partial<WorkWorld> = {}) {
     pressDoesNotWait: false,
     sendHangs: false,
     frameApprove: async () => ({ kind: 'ok', value: {} }),
+    frameConfirm: async () => ({ kind: 'ok', value: {} }),
     ...over,
   }
   let permits = 0
@@ -286,7 +321,8 @@ function workWorld(over: Partial<WorkWorld> = {}) {
     async runFinish(_c: string, _r: string, body: unknown) { const a = await w.runFinish(); w.calls.push(`runFinish ${JSON.stringify(body)}`); return a },
     async frameStart(_c: string, body: unknown) { w.calls.push(`frameStart ${JSON.stringify(body)}`); return w.frameStart(body) },
     async frameApprove(_c: string, _r: string, body: { planHash: string; approvalToken: string }) { w.calls.push(`frameApprove ${body.approvalToken === TOKEN}`); return w.frameApprove() },
-    async framePermit(_c: string, _r: string, body: { frame: number }) { w.calls.push('framePermit'); return { kind: 'ok', value: { write: ++permits, frame: body.frame, permittedAt: '', validMs: 5000 } } as BrowserLinesAnswer },
+    async framePermit(_c: string, _r: string, body: { frame: number }) { w.calls.push('framePermit'); return { kind: 'ok', value: { write: ++permits, frame: body.frame, permittedAt: new Date((w.now ?? Date.now)()).toISOString(), validMs: 5000 } } as BrowserLinesAnswer },
+    async frameConfirm(_c: string, _r: string, body: { write: number; answer: string }) { w.calls.push(`frameConfirm ${body.write} ${body.answer}`); return w.frameConfirm() },
     async frameReport(_c: string, _r: string, body: { result: string }) { w.calls.push(`frameReport ${body.result}`); return { kind: 'ok', value: {} } as BrowserLinesAnswer },
     async frameEnd() { w.calls.push('frameEnd'); return { kind: 'ok', value: {} } as BrowserLinesAnswer },
   }
@@ -564,4 +600,65 @@ test('the card waits no longer than the server keeps the frames run waiting: cou
   ])
   assert.equal(said, workWordsForAi({ kind: 'stopped', why: 'not-approved' }, [], []))
   assert.equal(late.w.calls.some(c => c.startsWith('frameApprove') || c === 'step work'), false)
+})
+
+// ── Recovering from a failed write: the person answers about a write in doubt from the card ──────────────────────────
+
+test('the card offers ［済んでいた］［されていなかった］ for a write in doubt from its time; the answer goes to the server with that write, never unlocks or resends', async () => {
+  let t = Date.parse('2026-11-25T10:00:00.000Z')
+  let early = true
+  const doubt = workWorld({
+    now: () => t,
+    site: { requests: [], answer: () => null },
+    answers: [CLICK_SAVE, DONE_PLAIN, CLICK_SAVE], frameStart: () => ({ kind: 'ok', value: started({ needsApproval: false }) }),
+    frameConfirm: async () => (early ? { kind: 'refused', code: 'BROWSER_TOO_EARLY' } : { kind: 'ok', value: {} }),
+  })
+  const said = await doubt.tool.execute({ site: HOST, task: 'いつものクーポン', skill: 'coupons' })
+  assert.equal(said, workWordsForAi({ kind: 'unknown' }, [], []))
+  const card = () => (doubt.wiring.card(COMPANY, FRAME_RUN) as { ok: true; view: BrowserWriteView }).view
+  assert.deepEqual(card().result?.confirm, { from: new Date(t + 35_000).toISOString(), canNow: false })
+  assert.deepEqual(card().result?.unknown, ['POST /coupons'])
+  // A bad answer asks nothing; one too early is the server's to refuse (it decides on both clocks).
+  assert.equal((await doubt.wiring.confirm(COMPANY, FRAME_RUN, 'maybe'))?.ok, false)
+  assert.equal(doubt.w.calls.some(c => c.startsWith('frameConfirm')), false)
+  assert.deepEqual(await doubt.wiring.confirm(COMPANY, FRAME_RUN, 'not_done'), { ok: false, message: CW.confirmTooEarly })
+  t += 35_000
+  early = false
+  assert.equal(card().result?.confirm?.canNow, true)
+  const answered = await doubt.wiring.confirm(COMPANY, FRAME_RUN, 'not_done') as { ok: true; view: BrowserWriteView }
+  assert.ok(doubt.w.calls.includes('frameConfirm 1 not_done'))
+  assert.equal(answered.view.result?.confirm, null)
+  assert.deepEqual(answered.view.result?.unknown, [])
+  assert.deepEqual(answered.view.result?.notDone, ['POST /coupons'])
+  assert.equal(answered.view.result?.headline, CW.confirmedNotDone)
+  // Nothing more was permitted or sent, and the card cannot be answered twice.
+  assert.equal(doubt.w.calls.filter(c => c === 'framePermit').length, 1)
+  assert.equal(doubt.w.site.requests.length, 1)
+  assert.equal((await doubt.wiring.confirm(COMPANY, FRAME_RUN, 'done'))?.ok, false)
+  assert.equal(doubt.w.calls.filter(c => c.startsWith('frameConfirm')).length, 2)
+})
+
+test('only the card reaches the person\'s answer: no AI tool, agent or chat server names it', () => {
+  const root = new URL('../electron/', import.meta.url)
+  const files = (dir: URL): string[] => readdirSync(dir, { withFileTypes: true }).flatMap(d => (d.isDirectory() ? files(new URL(`${d.name}/`, dir)) : d.name.endsWith('.ts') ? [new URL(d.name, dir).pathname] : []))
+  const naming = (word: RegExp) => files(root).filter(f => word.test(readFileSync(f, 'utf8'))).map(f => f.slice(root.pathname.length)).sort()
+  assert.deepEqual(naming(/frameConfirm/), ['features/browser/lines-api.ts', 'features/browser/work.ts'])
+  assert.deepEqual(naming(/browserWorks\.confirm/), ['main.ts'])
+  assert.deepEqual(naming(/frameCards!?\.confirm/), ['features/browser/write-lines.ts'])
+})
+
+test('a write the site refused leaves the run going: the operator corrects and saves again, the card says what the site refused and what was done', async () => {
+  const twice = { ...started({ needsApproval: false }), frames: [{ frame: 1, method: 'POST', path: '/coupons', fields: {}, max: 2, used: 0, left: 2 }] }
+  const fixed = workWorld({
+    site: { requests: [], answer: n => (n === 1 ? { status: 422, body: '{}' } : ok201()) },
+    answers: [CLICK_SAVE, CLICK_SAVE, DONE_PLAIN], frameStart: () => ({ kind: 'ok', value: twice }),
+  })
+  const said = await fixed.tool.execute({ site: HOST, task: 'いつものクーポン', skill: 'coupons' })
+  assert.equal(said, workWordsForAi({ kind: 'done' }, [], []))
+  assert.equal(fixed.w.site.requests.length, 2)
+  const view = (fixed.wiring.card(COMPANY, FRAME_RUN) as { ok: true; view: BrowserWriteView }).view
+  assert.deepEqual(view.result?.done, ['POST /coupons'])
+  assert.deepEqual(view.result?.notDone, ['POST /coupons'])
+  assert.equal(view.result?.confirm, null)
+  assert.match(JSON.stringify(view.card), /サイトが「422」を返して受け付けませんでした/)
 })

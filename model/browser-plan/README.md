@@ -62,7 +62,11 @@ reachability rule, not a state formula: `reach.mjs` checks it on the checker's s
    end; the rules checked are exactly `expected.txt`'s `rule <model>` lines (dropping one fails); a
    `CHECK_DEADLOCK` line is refused.
 2. Its distinct state count equals `states <model>` (today PlanLife **57,618**, StepsLife **28,320**,
-   FramesLife **192,816**): a guard against a checker that explores less than it should.
+   FramesLife **264,480**): a guard against a checker that explores less than it should. **A ceiling**: the
+   checker writes the whole state graph out as one string for `reach.mjs`, and a string cannot pass ~512 MB — about
+   1,750 bytes a state, so roughly **290,000 states** (FramesLife's graph is 463 MB). A change that grows a model past
+   that fails with `RangeError: Invalid string length`: narrow the model (as FramesLife's `RefusedOrNot`) rather than
+   the check.
 3. R7 holds over all of those states (`reach.mjs` must walk the same number; one settled predicate for
    both models).
 4. Each `broken/` variant fails on its named rule. **A variant that passes fails the job**: the
@@ -217,6 +221,13 @@ site, the Skill's approval revoked or changed, another PC, the run's hour).
 | `R14_WithinFrames` | A frame is never used more than its max | 枠を超えない |
 | `R15_OneWriteAtATime` | One write of the run on its way at a time | 書き込みは1つずつ（2つ目は1つ目の結果が記録されるまで待つ） |
 | `R16_NoSendAfterStop` | Nothing is sent after the AI was stopped | 止めたあとは送らない |
+| `R5_NotDoneStaysTrue` | A write the person answered 「されていなかった」 about never reached the site later either | 「されていなかった」があとから嘘にならない |
+
+**Recovering from a failed write** (agent-browser.md "Recovering from a failed write"): a write the site answered with a
+4xx that proves it was not taken is `refused` — the run goes on (no lock), its unit stays used (R14: a corrected try is a
+new write within the same max) —; the person may answer about a write in doubt from the card (`PersonConfirms`: only past
+its permit + 5 s + 30 s, true when given, never moving the write or the run — R10 covers "never unlocks"; the server
+keeps the write `unknown` and the answer apart, folded here into `cdone` / `cnotdone`, `InDoubt`).
 
 "Unused frames vanish at run end" is R2 (`BrokenFramesUsedAfterEnd`). Broken variants
 (`broken/BrokenFrames*`), one guard removed each:
@@ -229,6 +240,9 @@ site, the Skill's approval revoked or changed, another PC, the run's hour).
 | `BrokenFramesTwoInFlight` | one write in flight per run (the check and the partial unique index) | R15 |
 | `BrokenFramesNoApproval` | no permit while the run waits for the person's approval | R2 |
 | `BrokenFramesUsedAfterEnd` | an ended run's frames give nothing | R2 |
+| `BrokenFramesRefusedGivesUnitBack` | a refused write's unit stays used (`permit` counts it) | R14 |
+| `BrokenFramesConfirmUnlocks` | the person's answer never unlocks the run | R10 |
+| `BrokenFramesConfirmBeforeWindow` | the answer only past the write's permit + 5 s + 30 s (both clocks) | R5 |
 
 ### What FramesLife leaves out
 
@@ -247,19 +261,27 @@ site, the Skill's approval revoked or changed, another PC, the run's hour).
   at its approval or its time (the model ends it at once). `approve` under a closed gate ending the run is modelled
   (`PersonApproveRefused`), and so is leaving (`MemberLeaves`: the run ends, a write still permitted is unknown at once —
   that very write may still go out within its 5 s, which is no "more" after unknown).
+- **Refused writes, narrowed** (`RefusedOrNot`, for the ceiling above): only the run's first write, on frame "a" (max 2),
+  may be refused, and that report arrives exactly once — one refused try and a corrected one within the max is the case
+  that matters; a lost refused report is the time-out to unknown and a repeated one the same answer, both explored for the
+  other answers; more refused tries repeat the same move. Statuses (which 4xx count as refused) are the app's rule
+  (`browserWriteAnswerKind`), tested there.
+- **The person's answer, true when given** (`PersonConfirms`): 「されていなかった」 only while the write has not reached the
+  site, 「済んでいた」 only once it has; a person answering wrongly is left out (as in PlanLife). Their PC and member binding
+  is folded in (the server's tests).
 - **Matching the request to the frame** is a precondition of `AppAsks` here (a write that fits no frame is never asked
   for); the server checks it too (`browserFrameMismatch`, the one rule in `shared/core`) and a mismatch takes nothing.
 - **The card's one-time approval value** (only the start's answer carries it) is folded into `PersonApproves`.
 - **Where the app's code (step ⑤b, `client/electron/features/browser/frame-writes.ts`) is stricter than the model** (each on
   the safe side, no transition added): the worker asks for the next page write only once the previous one's **report
   was recorded** (the model's worker asks right after sending; the server's one-in-flight rule is what the model
-  checks); a report the server did not record, a non-success answer of the site or a permit refusal that ends the run
+  checks); a report the server did not record, an answer of the site that is neither a success nor a refusal (`browserWriteAnswerKind`) or a permit refusal that ends the run
   make the app send nothing more in that run (the model sends on until the server refuses); a held write is matched to a
   frame locally first, with the core's rule (`browserFrameMismatch`), so a mismatch never asks. The join of the frames
   run's lock with the operator runs' (one run per company × domain across both, `services/browser-runs.ts` `frameRunOn`
   and `browser-frames.ts` `holderOn`) is about more than one run: left out like the lock itself.
 - The run lock per company × domain (D10) and the domain kept busy by an ended run's write in flight (more than one run,
-  the server's tests), the person confirming an unknown write (⑤b's card), the
+  the server's tests), the
   run's time limits as real durations (folded into `closed` and `RunEnds`), a server clock jump (PlanLife's;
   the server counts each write's window on both clocks all the same), the safe patterns (StepsLife).
 

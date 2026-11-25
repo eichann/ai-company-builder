@@ -5,7 +5,8 @@
 //   read it (a file or an unreadable body → refused) → match a frame with the core's rule (none → refused, never asked)
 //   → the window's write session is prepared → the server's permit (once, with the request's shape only) → the last check,
 //   synchronously right before the request leaves (the permit's 5 s on both clocks, the run still going) → sent once →
-//   the report (done / not_sent / unknown) → the page gets the site's answer (without Set-Cookie) or a failure.
+//   the report (done / not_sent / unknown / refused: a 4xx that proves it was not taken, the run goes on) → the page gets
+//   the site's answer (without Set-Cookie) or a failure.
 //
 // **One at a time**: a second write the page makes waits until the first's result is recorded (a promise chain), so two
 // writes never travel to a site together and the server never sees a permit while one is in flight. **Never again**: a
@@ -17,13 +18,14 @@ import {
   type HeldPageWrite, type HeldPageWriteAnswer, type WorkFrame,
 } from '../../../shared/browser-frame-writes'
 import type { BrowserRunWriteOutcome, BrowserRunWriteStep } from '../../../../shared/core/browser-run-log'
+import { browserWriteAnswerKind } from '../../../../shared/core/browser-frame-match'
 import type { BrowserFramePermit, BrowserFramePermitRequest } from '../../../../shared/types/browser-frames'
 import type { BrowserLinesAnswer } from './lines-api'
 
 /** The server's frames routes as one write uses them (the member's session; the permit and a sure report carry this PC's key). */
 export interface FrameWritesApi {
   framePermit(companyId: string, runId: string, body: { frame: number; request: BrowserFramePermitRequest }): Promise<BrowserLinesAnswer>
-  frameReport(companyId: string, runId: string, body: { write: number; result: 'done' | 'not_sent' | 'unknown'; reason?: string }): Promise<BrowserLinesAnswer>
+  frameReport(companyId: string, runId: string, body: { write: number; result: 'done' | 'not_sent' | 'unknown' | 'refused'; reason?: string }): Promise<BrowserLinesAnswer>
 }
 
 /** One held write as the card and the operator learn of it (main's memory only). */
@@ -38,6 +40,9 @@ export interface FrameWriteRecord {
   path: string | null
   /** The site's answer as text, when it answered with success (what `{created}` is read from). */
   answerText: string | null
+  /** The server's write (its permit) and when it was permitted, when one was given (the card's answer about a write in doubt). */
+  write?: number | null
+  permittedAt?: string | null
 }
 
 export interface FrameWriterDeps {
@@ -96,7 +101,7 @@ export function createFrameWriter(deps: FrameWriterDeps) {
   }
 
   /** The report, sent at most 3 times with the same body; true once the server recorded it. */
-  async function report(write: number, result: 'done' | 'not_sent' | 'unknown', reason?: string): Promise<boolean> {
+  async function report(write: number, result: 'done' | 'not_sent' | 'unknown' | 'refused', reason?: string): Promise<boolean> {
     for (let i = 0; i < REPORT_TRIES; i++) {
       const a = await deps.api.frameReport(deps.companyId, deps.runId, { write, result, ...(reason ? { reason } : {}) }).catch((): BrowserLinesAnswer => ({ kind: 'no-answer' }))
       if (a.kind === 'ok') return true
@@ -166,7 +171,7 @@ export function createFrameWriter(deps: FrameWriterDeps) {
       if (originalMayHaveGone) {
         locked = true
         if (permitted) await report(permitted.write, 'unknown', 'context-changed')
-        keep({ line, outcome: 'unknown', status: null, sent: sentFields(shape), path: shape.path, answerText: null }, 'unknown')
+        keep({ line, outcome: 'unknown', status: null, sent: sentFields(shape), path: shape.path, answerText: null, write: permitted?.write ?? null, permittedAt: permitted?.permittedAt ?? null }, 'unknown')
         return fail
       }
       if (permitted && !(await report(permitted.write, 'not_sent', 'permit-late'))) locked = true
@@ -174,24 +179,28 @@ export function createFrameWriter(deps: FrameWriterDeps) {
       return fail
     }
     const write = (permitted as BrowserFramePermit | null)?.write ?? 0
+    const ids = { write: permitted ? write : null, permittedAt: (permitted as BrowserFramePermit | null)?.permittedAt ?? null }
     const answer = outcome.answer
     if (!answer) {
       // It may have reached the site: unknown, the run sends nothing more, and it is never sent again.
       locked = true
       await report(write, 'unknown', 'no-answer')
-      keep({ line, outcome: 'unknown', status: null, sent: sentFields(shape), path: shape.path, answerText: null }, 'unknown')
+      keep({ line, outcome: 'unknown', status: null, sent: sentFields(shape), path: shape.path, answerText: null, ...ids }, 'unknown')
       return fail
     }
-    const success = answer.status >= 200 && answer.status < 400
-    // A non-success answer: the site saw the request, what it changed is not known (the safe side: unknown, locked).
-    if (!success) locked = true
-    const recorded = await report(write, success ? 'done' : 'unknown', success ? undefined : 'other-state')
+    // The core's one rule (browserWriteAnswerKind): 2xx / 3xx done; a 4xx that proves it was not taken → refused (the run
+    // goes on: the page shows its error and a corrected try is a new write, its own permit and unit; nothing is resent
+    // here); anything else → unknown, locked (the safe side).
+    const kind = browserWriteAnswerKind(answer.status)
+    if (kind === 'unknown') locked = true
+    const recorded = await report(write, kind, kind === 'unknown' ? 'other-state' : undefined)
     // A result the server did not record: nothing more is sent in this run (the server's time-out makes it unknown).
     if (!recorded) locked = true
+    const kept: BrowserRunWriteOutcome = kind === 'refused' ? 'site-refused' : kind
     keep({
-      line, outcome: success ? 'done' : 'unknown', status: success ? null : answer.status, sent: sentFields(shape), path: shape.path,
-      answerText: success ? answer.body : null,
-    }, success ? 'done' : 'unknown')
+      line, outcome: kept, status: kind === 'done' ? null : answer.status, sent: sentFields(shape), path: shape.path,
+      answerText: kind === 'done' ? answer.body : null, ...ids,
+    }, kept)
     // The page gets the site's answer (its Set-Cookie never: the window drops it too), so its flow goes on.
     return { kind: 'fulfill', status: answer.status, headers: (answer.headers ?? []).filter(([k]) => !/^set-cookie2?$/i.test(k)), body: answer.bytes ?? new TextEncoder().encode(answer.body) }
   }

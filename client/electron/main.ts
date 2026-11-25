@@ -762,6 +762,7 @@ const browserWrites = wireBrowserWriteLines(ipc, {
     card: (companyId, runId) => browserWorks.card(companyId, runId),
     approve: (companyId, runId, planHash) => browserWorks.approve(companyId, runId, planHash),
     cancel: (companyId, runId) => browserWorks.cancel(companyId, runId),
+    confirm: (companyId, runId, answer) => browserWorks.confirm(companyId, runId, answer),
   },
 })
 // lane C ▲

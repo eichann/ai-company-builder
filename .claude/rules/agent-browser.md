@@ -3220,7 +3220,8 @@ core's write connection, the plan card and the after-read card).
   the fixed columns and moves the state only forward), `browser_frames` (one row per write target and `used`; **CHECK
   `used <= max`**, and a trigger lets `used` only grow by one), `browser_frame_writes` (a row appended per permit with its
   frame, state and both clocks' readings; **at most one `permitted` per run** — a partial unique index; a trigger allows
-  only `permitted` → `done` / `verified` / `not_sent` / `unknown` and `unknown` → `done` / `verified`).
+  only `permitted` → `done` / `verified` / `not_sent` / `unknown` and `unknown` → `done` / `verified`; since "Recovering
+  from a failed write" also → `refused`).
 - **Where the frames come from** (`start`, `POST /browser-frame-runs { skill } | { plan: { domain, writes } }` +
   `conversationId?`, the PC's key header): a company Skill's **approved** declaration, read by the server itself
   (`approvedFrames`, never content an app sent; the very approval row it rested on looked at again inside the start's
@@ -3390,8 +3391,9 @@ else. **No site word** anywhere (a fictional site in the tests).
   Not sent after a permit → `not_sent` reported. No answer → **unknown**: reported, the run **locked** (nothing more is
   held through, the operator is stopped), never sent again; the page's own retry is a new hold, refused. An answer:
   2xx / 3xx → `done`, the page gets it (`Fetch.fulfillRequest`, **without `Set-Cookie`** — dropped by the writer and again
-  by the shell — nor `content-encoding` / `-length`); **any other status → unknown, locked** (decision: the site saw the
-  request; what it changed is not known), the page still gets the answer. A report the server did not record (3 tries)
+  by the shell — nor `content-encoding` / `-length`); **a 4xx that proves it was not taken → `refused`, the run goes on;
+  any other status → unknown, locked** ("Recovering from a failed write"; before it every non-success status was
+  unknown), the page still gets the answer. A report the server did not record (3 tries)
   locks the run too. **One at a time**: the next held write starts only once this one's report was recorded (a promise
   chain); a write held meanwhile waits paused.
 - **Kept for the card** (main's memory): each write's frame line (the frame's method and pattern — never the path the
@@ -3438,7 +3440,8 @@ else. **No site word** anywhere (a fictional site in the tests).
   person sees it (§8); a site that sets a new cookie on each save gets none back (decision of the runner's write
   session; 追記2 showed the real site goes on); a site's GET with a side effect is stopped only when `never_read` names
   it; `{created}` pairing by the longest common beginning is a heuristic (an ambiguous one is not read, never guessed);
-  a non-success answer locks the run (a validation error ends the task: ask again); the Skill's steps come from the
+  an answer that is neither a success nor a refusal locks the run (a 4xx refusal does not: "Recovering from a failed
+  write"); the Skill's steps come from the
   member's own checkout (they may be older or newer than the version the server approved — the frames are always the
   server's); an upload with a file is refused (design memo 追記: the file chooser filled by the core is a later step).
 
@@ -3533,13 +3536,65 @@ one; a second start does not drop the trigger),
 `standard` or an unknown name —; the deadline from the run's own start and never past the server's `operateMs`; 時間切れ
 words; the card's wait counted from the frames run's start). Each guard mutation-checked (28 mutations, all caught).
 
+## Recovering from a failed write (a write the site refused; the person's answer about a write in doubt)
+
+Before this, any answer of the site that was not a success made the write `unknown` and locked the run, so a form the
+site rejected (a missing field, an expired login) ended a whole Skill run; and a write in doubt could only be checked by
+hand. Two changes, each on the safe side.
+
+- **A refusal is not a doubt** (`shared/core/browser-frame-match.ts` `browserWriteAnswerKind`, the one rule the writer
+  asks): 2xx / 3xx → `done`; a **4xx that proves the request was not taken** → `refused`; **everything else stays
+  `unknown`** and locks the run as before — a 5xx, no answer, a time-out, any status outside 200–499, and the 4xx that do
+  not prove nothing changed (`BROWSER_WRITE_UNKNOWN_4XX`): **408** (timed out: it may have been processed), **409** (a
+  conflict may follow a partial or concurrent change), **425** (replay-related) and **429** (rate limited, often in front
+  of a server that may have taken it).
+- **A refused write** (`frame-writes.ts`): reported `refused` (a sure answer: only from the run's own PC, like `done`),
+  kept for the card and the run log as `site-refused` (the log's outcome `refused` stays "refused by the app before
+  asking"), and the page gets the site's answer, so its own error shows. **The run goes on** (no lock): the operator may
+  correct the form and press 「保存」 again. That is **a new page write**: held, matched, its own permit and **one more
+  unit of the frame** — a refused write's unit is never given back, so the frame's `max` counts every try. Nothing is
+  ever resent by the app. A report the server did not record still locks the run.
+- **The server** (`services/browser-frames.ts`): the write state `refused` (`permitted` → `refused`; a late one after
+  `unknown` → `refused`, the run stays locked; never `done`, so nothing counts it as done) and the run step outcome
+  `site-refused`. Both tables' CHECKs could not widen in place: `migrateBrowserFrameWriteRefused` and
+  `migrateBrowserRunWriteSiteRefused` rebuild them once (`db/schema/table-rebuild.ts`: every row and rowid kept, the
+  table, index and triggers made from the same statements a new database runs, so both end the same; a later start
+  rebuilds nothing). An older build reading a `refused` write answers a report for it as a conflict (409), never moves it.
+- **The person's answer about a write in doubt** (「済んでいた」／「されていなかった」, the write card's existing buttons for a
+  `bf_` card): `POST /browser-frame-runs/:runId/confirm { write, answer: done | not_done }` (exactly these keys) with this
+  PC's key — **bound like a sure report**: the member's own run (anyone else's, another company's: the same 404) and
+  **the run's own PC** (`BROWSER_DEVICE_ELSEWHERE`). Only a write that is `unknown` (`BROWSER_FRAME_NOT_UNKNOWN`), only
+  **past its permit + 5 s + 30 s on both clocks** (`BROWSER_TOO_EARLY`: it may still be on its way), **once**
+  (`BROWSER_FRAME_CONFIRMED`). Kept in `browser_frame_write_confirms` (additive: the answer, **who** and **when**; never
+  changed or removed while its run exists, by trigger). **It never moves the write or the run**: a locked run stays
+  locked whatever the answer (simple: an answer is the person's word, not the site's), and no report changes the write
+  once answered (`recorded`). After 「されていなかった」 the person asks again in the chat — a new run; nothing is sent again
+  by itself. The run's view carries `confirmableAt` and `confirmed` per write.
+- **The AI never reaches it**: no AI tool, no AI-side IPC. Only the card's buttons → `browserLines:confirmWrite` (main
+  window only, the IPC that already served the line path's answer) → the work wiring's `confirm` (main's memory: the write
+  in doubt and its time) → `frameConfirm` with this PC's key (`client/tests/browser-frame-writes.test.ts` checks which
+  files name them). The card shows the buttons from the server's time estimate (`confirmableAt`) and says what it
+  recorded; the server decides at the press.
+- **The model** (`FramesLife.tla`, README): `refused` (the run goes on, its unit kept: `BrokenFramesRefusedGivesUnitBack`
+  → R14), `PersonConfirms` (R5 `R5_NotDoneStaysTrue`: `BrokenFramesConfirmBeforeWindow`; never unlocking:
+  `BrokenFramesConfirmUnlocks` → R10). 264,480 states.
+
+Tests: `server/tests/unit/browser-frames.test.ts` "recovering from a failed write" (a refused write never done, the run
+open, the corrected try a new permit within the max; refused only from the run's PC, late after unknown keeps the lock;
+the answer once, past the window, from the run's PC, the member's own, exact keys, who and when, never unlocking, no
+report after it; only an unknown write; the tables' moves and the answer kept as given; a database from before rebuilt
+once with its rows, ending like a new one), `client/tests/browser-frame-writes.test.ts` (a 4xx `site-refused`: the
+page gets its error, the run goes on, the max holds; 408 / 409 / 425 / 429 / 5xx / outside 200–499 unknown and locked;
+the wiring: a refused save then a corrected one; the card's answer from its time, sent with that write, never resending;
+only the card reaches it), `model/browser-plan/check`, permission matrix row + `CROSS`, `jobs-schema.test.ts`,
+`company-scoped-sql.test.ts`. Each guard mutation-checked.
+
 ## Not yet (later PRs)
 
 **The operator's window tools, later** (step ④'s follow-ups): an admin page for the run log (the API is there:
 `GET /browser-runs`, its write steps included). **Writes, later** (step ⑤b's follow-ups): the Skill's steps from the
 company's Skill shelf (a company without the shared folder: today the operator gets the task only), a file chooser the
-person fills for an upload (design memo 追記: a file body is refused today), the person's confirm of an unknown write on
-the card (「済んでいた／されていなかった」: no route yet; the card says what to check by hand), safe patterns (step ⑧).
+person fills for an upload (design memo 追記: a file body is refused today), safe patterns (step ⑧).
 
 **Keeping a login on disk**: built ("Keeping a login on disk" above). The four gaps PR 4's reviews found are closed
 there: the record-only re-run, another company's or another agent's unenclosed turns (every turn asks first), and a
