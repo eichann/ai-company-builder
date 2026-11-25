@@ -637,6 +637,7 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     afterAction: (member, actor, done) => recordEngine.afterAction(member, actor, done),
     // Built below; called only after construction.
     readingAskedAgain: (companyId, recordId) => aiRuns.askedAgain(companyId, recordId, 'minutes-reading'),
+    readingClaimed: (companyId, recordId) => aiRuns.claimedNow(companyId, recordId, 'minutes-reading'),
   })
 
   // Outbound mail (milestone 4 G8, outbound-mail.md; composition/outbound-mail.ts).

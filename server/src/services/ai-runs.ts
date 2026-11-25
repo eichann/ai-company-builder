@@ -509,6 +509,16 @@ export function createAiRunService(deps: AiRunDeps) {
     },
 
     /**
+     * Whether an app holds the record's step now: its run `running` with a live lease (one whose lease ran
+     * out is not held: its app stopped renewing it). The minutes' takeover (minutes.md "The organiser first")
+     * never moves such a meeting to another reader.
+     */
+    claimedNow(companyId: string, recordId: string, step: string): boolean {
+      const run = repo(companyId).openRun({ kind: 'record', id: recordId }, step)
+      return !!run && run.state === 'running' && run.claimExpiresAt !== null && Date.parse(run.claimExpiresAt) > clock.nowMs()
+    },
+
+    /**
      * A person asked for the record's step anew (［AI に読ませる］, minutes.md): that is the answer the
      * stopped run waits for, whoever's run it was (another attendee may press; `retry` is the run's
      * own member only). A run someone is on, or one with an unknown outside result, stays as it is.

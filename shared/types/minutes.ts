@@ -199,6 +199,11 @@ export interface MeetingArrival {
    * press. Absent from an older server.
    */
   askedAutomatically?: boolean
+  /**
+   * The reader (`by`) is the meeting's organiser (2026-11-25; the app shows 「（主催）」). Absent from an older
+   * server, false on a meeting recorded before then.
+   */
+  byOrganiser?: boolean
 }
 
 /**

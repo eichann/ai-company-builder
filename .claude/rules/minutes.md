@@ -293,8 +293,10 @@ or the decision service stops calling it, or another module uses the older per-m
   Google refuses the text" below, nothing changes; then → `received` with **assignee = the presser**
   (`request_reading` = `MEETING_READ_REQUEST_ACTION`, quiet): the AI's turn on their PC (`ai-turn`,
   the existing reading, `text` with their grant). Same member while it waits for their AI → the same
-  answer, nothing written on the record; `reading` / `read` / someone else's `received` → 409
-  `MEETING_NOT_WAITING`. **The press is a fresh attempt** (production 2026-11-05: a press after a
+  answer, nothing written on the record (except once when only the clock had asked it for them: the press is
+  then written, so it is theirs and never taken over); `reading` / `read` / someone else's `received` → 409
+  `MEETING_NOT_WAITING` — unless that `received` is only the clock's ask, not started (taken by the press:
+  "The organiser first" below). **The press is a fresh attempt** (production 2026-11-05: a press after a
   failed reading answered 200 and nothing ran): both answers also give back an earlier run of the
   reading that stopped for a person, whoever's it was (`readingAskedAgain` → `aiRuns.askedAgain`,
   `ai-turns.md` "Asked again"); the app drops its own hand-off there too.
@@ -331,20 +333,45 @@ or the decision service stops calling it, or another module uses the older per-m
   exactly as ［AI に読ませる］ (the presser's Google tried first; not shared → it stays `arrived`), actor
   `CLOCK_ACTOR`, note 「自動で読む設定のため、AI に読ませました」. A mode the member **chose** applies to
   meetings recorded at or after the choice (`updated_at`): choosing never reads the last days' backlog at
-  once; a member who never chose (no row) has no such bound, so their first discovery may read the last
-  3 days' outside meetings still `arrived` (open owner decision). **After the try of the text** (an await)
+  once; a member who never chose (no row) reads only meetings **held** (`meeting_at`) at or after they joined
+  the company (`MinutesMember.joinedAt` = the membership's `created_at`; without it, the first time the clock
+  looked at them, in the process only) — owner decision 2026-11-25, so their first run never reads older
+  waiting meetings. A series' 読む is their own choice and has no such bound. **After the try of the text** (an await)
   the series' choice and the setting are read again in the synchronous stretch of the write: turned off
   meanwhile → nothing is asked (Codex review). **Google budget**: the try counts two calls per document
   against the run's `MEETING_CALLS_PER_RUN` (a spent run leaves it to the next); a try Google refused (not
   shared, nothing readable) is not made again for that member and meeting for an hour (in the process
   only: a restart tries once more); Google asking to wait (`GOOGLE_UNAVAILABLE`) stops that member's run
   and is tried on the next. **One reader**: the first discovery that asks wins (the meeting leaves `arrived`); another
-  attendee's run finds it not arrived and does nothing; a second run writes nothing. **D1-2**: it reads
+  attendee's run finds it not arrived and does nothing (except the takeover below); a second run writes nothing. **D1-2**: it reads
   whatever the company's 「自動で進める」 says (the app runs an asked meeting as a press; a scheduled job
   made from the reading still follows the company's switch); stopping is the AI's emergency stop.
   **D1-3**: a closed PC keeps the meeting `received` for its reader until it opens; others see 「〇〇さんの
-  AI が読む予定」 (arrivals' `status: asked`, `by`); nothing hands it on. Arrivals add `askedAutomatically`
-  (the latest `request_reading` was the clock's). Tests: `server/tests/integration/meeting-auto-read.test.ts`,
+  AI が読む予定」 (arrivals' `status: asked`, `by`) — except "The organiser first" below. Arrivals add
+  `askedAutomatically` (the latest `request_reading` was the clock's) and `byOrganiser` (the reader is the
+  meeting's organiser: the app's 「（主催）」; false on meetings recorded before 2026-11-25, absent from an older
+  server).
+- **The organiser first** (owner decisions 2026-11-25; `ORGANISER_FIRST_MS` = 15 minutes, one constant). The
+  organiser counts only when on the event's list by an address Google verified for them (never an organizer
+  who is not on the list; no address is stored — the member id is kept as `source_ref.organiser` on meetings
+  recorded from then on, for `byOrganiser`; the rules below read it from the finder's event):
+  - within 15 minutes of the meeting arriving (the record's creation), another attendee's automatic reading
+    waits when the organiser's own series or setting would read it (`organiserFirst`); after that any attendee
+    with automatic reading on may ask first, and the first ask wins as above;
+  - a meeting **only the clock asked** (`clockAskedOnly`: `received`, the latest `request_reading` the
+    clock's — never a person's press —, no `start_reading` since, also not after a stale reading was put back,
+    and no app holding the reading's run: `aiRuns.claimedNow`, a `running` run with a live lease; one whose
+    lease ran out holds nothing) for the **organiser**, 15 minutes after that ask, is taken by another attendee
+    whose automatic reading wants it: a field-only `request_reading` (assignee = them, note
+    「主催者の AI が読み始めなかったため、自動で読む設定のほかの参加者の AI に読ませました」, actor the clock) at the record's
+    version, so the organiser's later `start_reading` fails and does nothing. Once: the new reader is not the
+    organiser, and a reading the clock asked for anyone else is never taken over automatically. Everything is
+    checked again after the try of the text, in the write's synchronous stretch.
+  - **A person's own ［AI に読ませる］ always reads**: a meeting only the clock asked for someone else (any
+    reader, at once) is taken by the press the same way (note 「AI に読ませる」, the person as actor); never a
+    reading started or claimed, never another person's press (those stay 409 `MEETING_NOT_WAITING`) — also
+    the reader's own press on a meeting the clock asked for them (it is written then, above).
+  Tests: `server/tests/integration/meeting-auto-read.test.ts` (with 「the organiser first」),
   `server/tests/unit/meeting-auto-read.test.ts` (each mutation-checked).
 - **「議事録が届きました」**: `GET /me/minutes/arrivals` → `MeetingArrivals { days, items }` — the
   meetings whose list names the caller (`listedRecordIds`, no company-wide scan) that took place in the last `MEETING_ARRIVED_DAYS` (3) days, newest
@@ -622,7 +649,8 @@ Stored (the record, server only, members-only — its list in `record_viewers`; 
 2026-11-04 keep the minutes folder): title = the event's title, fields
 `meeting_at` and `occurred_at` (the same start time; `occurred_at` is the common outside time,
 `records.md` "Outside time"), `assignee` (the reader, once someone asked), `attendees` (JSON of member ids, ≤ 500 characters), `external_count`,
-`source_ref` (JSON of Google ids only: conference, event, documents, the recurring series), `doc_version`
+`source_ref` (JSON of Google ids: conference, event, documents, the recurring series — and, from 2026-11-25,
+the organiser's member id when on the list), `doc_version`
 (`notes:7,transcript:7`), `summary_text` (the AI's ≤ 300 at the end); links `bundle`, `counterpart`.
 Ledger actor of the creation: external `google` (note: which member's calendar).
 **Never** stored, logged or answered elsewhere: the notes / transcript text, attendees' email
