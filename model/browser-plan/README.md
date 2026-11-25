@@ -271,6 +271,10 @@ keeps the write `unknown` and the answer apart, folded here into `cdone` / `cnot
   is folded in (the server's tests).
 - **Matching the request to the frame** is a precondition of `AppAsks` here (a write that fits no frame is never asked
   for); the server checks it too (`browserFrameMismatch`, the one rule in `shared/core`) and a mismatch takes nothing.
+  **`{made:<n>}` frames** (agent-browser.md "Writes only to what this run made": a write only to an id this run's n-th
+  frame's done write returned) are part of that matching and only narrow which writes fit; the id rides on a `done`
+  report, which the model already has, and adds no state or transition, so every rule here holds as it is. Not modelled,
+  which also keeps FramesLife under the state ceiling; tested in the core, server and app tests.
 - **The card's one-time approval value** (only the start's answer carries it) is folded into `PersonApproves`.
 - **Where the app's code (step ⑤b, `client/electron/features/browser/frame-writes.ts`) is stricter than the model** (each on
   the safe side, no transition added): the worker asks for the next page write only once the previous one's **report

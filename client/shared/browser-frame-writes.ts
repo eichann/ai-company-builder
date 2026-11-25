@@ -15,7 +15,7 @@
  * Cookies and CSRF values the page put in its request are sent as the page made them and never read into anything here.
  */
 import { outsideValue, type OutsideValue } from '../../shared/core/outside-text'
-import { browserFrameMismatch, browserFramePathFits, browserAdhocWritesProblem, type BrowserFrameMismatch, type BrowserFrameRequest } from '../../shared/core/browser-frame-match'
+import { browserFrameMismatch, browserFramePathFits, browserAdhocWritesProblem, type BrowserFrameMismatch, type BrowserFrameRequest, type BrowserMadeIds } from '../../shared/core/browser-frame-match'
 import { browserSkillDeclarationFrom, browserSkillWriteLine, type BrowserSkillWrite } from '../../shared/core/browser-skill'
 import { isSensitiveFieldName } from '../../shared/core/browser-recording'
 import { browserRunAddressPattern, browserRunWriteMethod, type BrowserRunWriteOutcome, type BrowserRunWriteStep } from '../../shared/core/browser-run-log'
@@ -197,13 +197,17 @@ export function frameRequestFor(frame: Pick<WorkFrame, 'fields'>, shape: HeldWri
   return { method: shape.method, path: shape.query === '' ? shape.path : `${shape.path}?${shape.query}`, fields }
 }
 
-/** The first frame with a unit left that the held write fits, or why none (`used-up` when one fits but is spent, else the first frame's reason). */
-export function pickFrame(frames: readonly WorkFrame[], shape: HeldWriteShape): { frame: WorkFrame; request: BrowserFrameRequest } | { mismatch: BrowserFrameMismatch | 'used-up' | 'none' } {
+/**
+ * The first frame with a unit left that the held write fits, or why none (`used-up` when one fits but is spent, else the
+ * first frame's reason). `made`: what this run made so far (the ids the server recorded from this run's done writes), for a
+ * `{made:<n>}` frame.
+ */
+export function pickFrame(frames: readonly WorkFrame[], shape: HeldWriteShape, made?: BrowserMadeIds): { frame: WorkFrame; request: BrowserFrameRequest } | { mismatch: BrowserFrameMismatch | 'used-up' | 'none' } {
   let first: BrowserFrameMismatch | null = null
   let usedUp = false
   for (const f of frames) {
     const request = frameRequestFor(f, shape)
-    const why = request ? browserFrameMismatch({ method: f.method, path: f.path, max: f.max, fields: f.fields }, request) : 'fields'
+    const why = request ? browserFrameMismatch({ method: f.method, path: f.path, max: f.max, fields: f.fields }, request, made) : 'fields'
     if (why === null && request) {
       if (f.left > 0) return { frame: f, request }
       usedUp = true
@@ -231,7 +235,7 @@ export function sentFields(shape: HeldWriteShape): Record<string, string> {
 
 const CREATED_ID_RE = /^[A-Za-z0-9_-]{1,64}$/
 
-/** The id a write's JSON answer names (`id`, else `data.id`): what `{created}` stands for. Null when none or not plain. */
+/** The id a write's JSON answer names (`id`, else `data.id`): what `{created}` and `{made:<n>}` stand for. Null when none or not plain. */
 export function createdIdOf(answerText: string): string | null {
   let v: unknown
   try { v = JSON.parse(answerText) } catch { return null }

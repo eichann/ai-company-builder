@@ -14,7 +14,8 @@
  * - an ad-hoc plan writes only after the card's ［任せる］ — the approval value never leaves the wiring; a pre-approved Skill
  *   runs without the card, a Skill whose text changed shows it; a person at 見るだけ never starts a write task;
  * - the consultation AI's words never carry the page's text (injection included), the operator's words or a value;
- * - the after-read card shows both sides and labels who checked each item; bug 4's soft words.
+ * - the after-read card shows both sides and labels who checked each item; bug 4's soft words;
+ * - a `{made}` frame takes only an id this run's maker write returned and the server recorded (none read, none written).
  */
 import { test } from 'node:test'
 import { readdirSync, readFileSync } from 'node:fs'
@@ -147,7 +148,7 @@ function writerWorld(frames: WorkFrame[], over: { permit?: (n: number) => Promis
       const n = ++permits
       return over.permit ? over.permit(n) : { kind: 'ok', value: { write: n, frame: body.frame, permittedAt: new Date().toISOString(), validMs: 5000 } }
     },
-    async frameReport(_c, _r, body) { calls.push(`report ${body.write} ${body.result}`); return over.report ? over.report() : { kind: 'ok', value: {} } },
+    async frameReport(_c, _r, body) { calls.push(`report ${body.write} ${body.result}${body.created !== undefined ? ` created=${body.created}` : ''}`); return over.report ? over.report() : { kind: 'ok', value: {} } },
   }
   let going = true
   const writer = createFrameWriter({ companyId: COMPANY, runId: FRAME_RUN, host: HOST, frames, api, going: () => going, stepsSoFar: () => 0 })
@@ -252,6 +253,48 @@ test('only the listed 4xx are refused; every other status stays unknown and lock
   }
   for (const status of [400, 401, 403, 404, 405, 410, 411, 413, 414, 415, 419, 422]) assert.equal(browserWriteAnswerKind(status), 'refused', String(status))
   for (const status of [200, 201, 204, 302, 303]) assert.equal(browserWriteAnswerKind(status), 'done', String(status))
+})
+
+test('a {made} frame: the maker\'s id goes with its done report, and only that id is written to afterwards — none read, none written', async () => {
+  const frames = () => [
+    frame({ frame: 1, path: '/plans', max: 2, left: 2 }),
+    frame({ frame: 2, path: '/plans/{made:1}/items', max: 3, left: 3 }),
+  ]
+  const madeAnswer = (n: number) => (n === 1 ? { status: 201, body: '{"data":{"id":"p77"}}' } : ok201())
+  const site: Site = { requests: [], answer: madeAnswer }
+  const { writer, calls } = writerWorld(frames())
+  // Before the plan is made, nothing fits the items frame: refused, never asked for.
+  assert.equal((await writer.hold(held(site, 'POST', '/plans/p77/items', FORM, 'name=a'))).kind, 'fail')
+  assert.equal((await writer.hold(held(site, 'POST', '/plans', FORM, 'title=x'))).kind, 'fulfill')
+  assert.ok(calls.includes('report 1 done created=p77'), JSON.stringify(calls))
+  // Another plan (the person's own) is never written; the one this run made is.
+  assert.equal((await writer.hold(held(site, 'POST', '/plans/p78/items', FORM, 'name=a'))).kind, 'fail')
+  assert.equal((await writer.hold(held(site, 'POST', '/plans/p77/items', FORM, 'name=a'))).kind, 'fulfill')
+  assert.deepEqual(site.requests, ['POST /plans title=x', 'POST /plans/p77/items name=a'])
+  // A done write of a frame nobody refers to reports no id.
+  assert.ok(calls.includes('report 2 done'))
+
+  // The site's answer names no id: nothing is kept, so the items frame stays shut.
+  const site2: Site = { requests: [], answer: () => ({ status: 201, body: '{"ok":true}' }) }
+  const w2 = writerWorld(frames())
+  await w2.writer.hold(held(site2, 'POST', '/plans', FORM, 'title=x'))
+  assert.ok(w2.calls.includes('report 1 done'))
+  assert.equal((await w2.writer.hold(held(site2, 'POST', '/plans/4242/items', FORM, 'name=a'))).kind, 'fail')
+
+  // The server did not record the done (with its id): the run is locked and nothing is kept.
+  const site3: Site = { requests: [], answer: madeAnswer }
+  const w3 = writerWorld(frames(), { report: async () => ({ kind: 'refused', status: 400, code: 'BROWSER_FRAME_BAD_REQUEST' }) as BrowserLinesAnswer })
+  await w3.writer.hold(held(site3, 'POST', '/plans', FORM, 'title=x'))
+  assert.equal(w3.writer.locked(), true)
+  assert.equal((await w3.writer.hold(held(site3, 'POST', '/plans/p77/items', FORM, 'name=a'))).kind, 'fail')
+  assert.deepEqual(site3.requests, ['POST /plans title=x'])
+
+  // A maker's write that failed (no answer) makes nothing either.
+  const site4: Site = { requests: [], answer: () => null }
+  const w4 = writerWorld(frames())
+  await w4.writer.hold(held(site4, 'POST', '/plans', FORM, 'title=x'))
+  assert.ok(w4.calls.includes('report 1 unknown'))
+  assert.equal(w4.calls.some(c => c.includes('created=')), false)
 })
 
 // ── The write task wired in main ────────────────────────────────────────────────────────────────────────────────────

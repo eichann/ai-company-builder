@@ -86,6 +86,15 @@ export function sqliteBrowserFrameRepository(conn: Database.Database, companyId:
         .all(companyId, runId) as Array<{ seq: number; answer: 'done' | 'not_done'; confirmed_by: string; confirmed_at: string }>)
         .map(r => ({ seq: r.seq, answer: r.answer, confirmedBy: r.confirmed_by, confirmedAt: r.confirmed_at }))
     },
+    made(runId) {
+      return (conn.prepare('SELECT seq, frame_idx, made FROM browser_frame_made WHERE company_id = ? AND run_id = ? ORDER BY seq')
+        .all(companyId, runId) as Array<{ seq: number; frame_idx: number; made: string }>)
+        .map(r => ({ seq: r.seq, frameIdx: r.frame_idx, made: r.made }))
+    },
+    insertMade(runId, row, recordedAt) {
+      conn.prepare('INSERT INTO browser_frame_made (company_id, run_id, seq, frame_idx, made, recorded_at) VALUES (?, ?, ?, ?, ?, ?)')
+        .run(companyId, runId, row.seq, row.frameIdx, row.made, recordedAt)
+    },
     insertConfirm(runId, row) {
       return conn.prepare(`INSERT OR IGNORE INTO browser_frame_write_confirms (company_id, run_id, seq, answer, confirmed_by, confirmed_at)
         VALUES (?, ?, ?, ?, ?, ?)`).run(companyId, runId, row.seq, row.answer, row.confirmedBy, row.confirmedAt).changes === 1

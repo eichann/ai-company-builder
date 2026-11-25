@@ -5,11 +5,12 @@
  * Guards: strict keys at every level, every list and string within its limit, the file's size, the strict YAML subset
  * (no anchors or aliases), the path grammar (no query on a write, `{created}` only after writing, no dot segments or
  * encodings), `_method` only on a POST and only as PUT / PATCH / DELETE, no login / CSRF field fixed in a company file, a
- * domain in its exact spelling and registered, the frames a copy nothing outside can change.
+ * domain in its exact spelling and registered, the frames a copy nothing outside can change; a `{made:<id>}` names only an
+ * earlier target's id, once per path, only in a write, and is said in plain words.
  */
 import { describe, expect, it } from 'vitest'
 import {
-  BROWSER_SKILL_LIMITS, browserSkillDomainProblem, browserSkillFrames, browserSkillWriteLine, isBrowserSkillPath, parseBrowserSkillDeclaration,
+  BROWSER_SKILL_LIMITS, browserMadeFrom, browserSkillDomainProblem, browserSkillFrames, browserSkillWriteLine, isBrowserSkillPath, parseBrowserSkillDeclaration,
 } from '../../../shared/core/browser-skill'
 
 const GOOD = `
@@ -160,6 +161,61 @@ describe('browser.yaml', () => {
     expect(r.declaration.writes.map(browserSkillWriteLine)).toEqual([
       '/api/orders/register に送る（作る・保存する）：1回まで',
       '/api/orders/{n} に一部を変える：2回まで（決まった項目：_method=PATCH、action=copy）',
+    ])
+  })
+})
+
+describe('writes only to what this run made ({made:<id>})', () => {
+  const decl = (writes: string) => `domain: shop.example.test\nwrites:\n${writes}`
+  const MADE = decl([
+    '  - { id: new-plan, method: POST, path: /api/plans, max: 1 }',
+    '  - { id: item, method: POST, path: "/api/plans/{made:new-plan}/items", max: 10 }',
+    '  - { method: PATCH, path: "/api/items/{made:item}", max: 10 }',
+  ].join('\n') + '\n')
+
+  it('an id names a target; a later target\'s {made:<id>} becomes that target\'s place', () => {
+    const r = parseBrowserSkillDeclaration(MADE)
+    if (!r.ok) throw new Error(r.problem)
+    expect(r.declaration.writes.map(w => w.path)).toEqual(['/api/plans', '/api/plans/{made:1}/items', '/api/items/{made:2}'])
+    expect(r.declaration.writes.map(w => browserMadeFrom(w.path))).toEqual([null, 1, 2])
+    // The id itself is not kept: the frames carry only the place.
+    expect(Object.keys(r.declaration.writes[0]).sort()).toEqual(['fields', 'max', 'method', 'path'])
+    // Block style too.
+    expect(problemOf(decl('  - id: a\n    method: POST\n    path: /x\n    max: 1\n  - method: POST\n    path: "/x/{made:a}"\n    max: 1\n'))).toBeNull()
+  })
+
+  it('refuses an undeclared id, a later one, itself, two in one path, and a bad or repeated id', () => {
+    const two = (first: string, second: string) => decl(`  - { ${first} }\n  - { ${second} }\n`)
+    expect(problemOf(two('id: a, method: POST, path: /x, max: 1', 'method: POST, path: "/x/{made:b}", max: 1'))).toBe('bad-made')
+    expect(problemOf(two('method: POST, path: "/x/{made:b}", max: 1', 'id: b, method: POST, path: /y, max: 1'))).toBe('bad-made')
+    expect(problemOf(two('id: a, method: POST, path: "/x/{made:a}", max: 1', 'method: POST, path: /y, max: 1'))).toBe('bad-made')
+    expect(problemOf(two('id: a, method: POST, path: /x, max: 1', 'method: POST, path: "/x/{made:a}/{made:a}", max: 1'))).toBe('bad-made')
+    expect(problemOf(two('id: a, method: POST, path: /x, max: 1', 'id: a, method: POST, path: /y, max: 1'))).toBe('bad-write-id')
+    for (const id of ['A', '1a', 'a_b', 'a:b', '"a b"', `a${'b'.repeat(32)}`, '""', '7']) {
+      expect(problemOf(two(`id: ${id}, method: POST, path: /x, max: 1`, 'method: POST, path: /y, max: 1')), id).toBe('bad-write-id')
+    }
+    // The parsed place cannot be written by hand, nor an unknown spelling.
+    for (const p of ['/x/{made:1}', '/x/{made:}', '/x/{made:A}', '/x/{made: a}', '/x/{made}', '/x/a{made:a}']) {
+      expect(problemOf(two('id: a, method: POST, path: /x, max: 1', `method: POST, path: "${p}", max: 1`)), p).toBe('bad-path')
+    }
+  })
+
+  it('only in a write: never in after_read or never_read', () => {
+    expect(isBrowserSkillPath('/x/{made:a}')).toBe(false)
+    expect(isBrowserSkillPath('/x/{made:a}', { made: true })).toBe(true)
+    expect(isBrowserSkillPath('/x/{made:a}', { created: true, query: true })).toBe(false)
+    const base = '  - { id: a, method: POST, path: /x, max: 1 }\n'
+    expect(problemOf(`${decl(base)}after_read: [ "/x/{made:a}" ]\n`)).toBe('bad-after-read')
+    expect(problemOf(`${decl(base)}never_read: [ "/x/{made:a}" ]\n`)).toBe('bad-never-read')
+  })
+
+  it('says in plain words that the write goes only to what this run made', () => {
+    const r = parseBrowserSkillDeclaration(MADE)
+    if (!r.ok) throw new Error(r.problem)
+    expect(r.declaration.writes.map(browserSkillWriteLine)).toEqual([
+      '/api/plans に送る（作る・保存する）：1回まで',
+      '/api/plans/{made:1}/items に送る（作る・保存する）：10回まで（この作業の中で、1つ目の書き込み先で作ったものにだけ）',
+      '/api/items/{made:2} に一部を変える：10回まで（この作業の中で、2つ目の書き込み先で作ったものにだけ）',
     ])
   })
 })

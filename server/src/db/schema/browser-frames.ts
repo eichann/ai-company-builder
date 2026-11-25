@@ -29,6 +29,10 @@ import { rebuildTableFor } from './table-rebuild'
  * - `browser_frame_write_confirms`: the person's answer about a write in doubt (「済んでいた」 `done` /
  *   「されていなかった」 `not_done`), who and when; once per write (primary key), never changed or removed while its run
  *   exists. It never moves the write or the run (a locked run stays locked).
+ * - `browser_frame_made` (agent-browser.md "Writes only to what this run made"): the id a `done` write's answer named, for a
+ *   frame a later frame's `{made:<n>}` refers to — **the only value of a site's page the server keeps**, so a later permit
+ *   can fit only that id. Once per write, only beside a `done` write of that same frame (trigger), never changed or
+ *   removed while its run exists; a plain token of at most 64 characters (CHECK).
  */
 
 /** The writes table, its in-flight index and its moves: one text for a new database and the rebuild. */
@@ -56,6 +60,16 @@ const BROWSER_FRAME_WRITES_MOVES = `CREATE TRIGGER IF NOT EXISTS browser_frame_w
         )
     BEGIN
       SELECT RAISE(ABORT, 'a frames write only moves as its state table allows');
+    END`
+/**
+ * What a run made is kept only beside its done write. It names `browser_frame_writes`, so the rebuild of that table drops
+ * it first and makes it again (SQLite would otherwise point it at the renamed old table, which is then dropped).
+ */
+const BROWSER_FRAME_MADE_DONE = `CREATE TRIGGER IF NOT EXISTS browser_frame_made_done BEFORE INSERT ON browser_frame_made
+      WHEN NOT EXISTS (SELECT 1 FROM browser_frame_writes WHERE company_id = NEW.company_id AND run_id = NEW.run_id AND seq = NEW.seq
+        AND frame_idx = NEW.frame_idx AND state = 'done')
+    BEGIN
+      SELECT RAISE(ABORT, 'what a run made is kept only beside its done write');
     END`
 export const browserFrameSchema = `
     CREATE TABLE IF NOT EXISTS browser_frame_runs (
@@ -143,6 +157,27 @@ export const browserFrameSchema = `
     BEGIN
       SELECT RAISE(ABORT, 'a person''s answer about a write is kept as given');
     END;
+
+    CREATE TABLE IF NOT EXISTS browser_frame_made (
+      company_id TEXT NOT NULL,
+      run_id TEXT NOT NULL,
+      seq INTEGER NOT NULL,
+      frame_idx INTEGER NOT NULL,
+      made TEXT NOT NULL CHECK (length(made) BETWEEN 1 AND 64 AND made NOT GLOB '*[^A-Za-z0-9_-]*'),
+      recorded_at TEXT NOT NULL,
+      PRIMARY KEY (company_id, run_id, seq),
+      FOREIGN KEY (company_id, run_id) REFERENCES browser_frame_runs(company_id, id) ON DELETE CASCADE
+    );
+    ${BROWSER_FRAME_MADE_DONE};
+    CREATE TRIGGER IF NOT EXISTS browser_frame_made_no_update BEFORE UPDATE ON browser_frame_made
+    BEGIN
+      SELECT RAISE(ABORT, 'what a run made is kept as reported');
+    END;
+    CREATE TRIGGER IF NOT EXISTS browser_frame_made_no_delete BEFORE DELETE ON browser_frame_made
+      WHEN EXISTS (SELECT 1 FROM browser_frame_runs WHERE company_id = OLD.company_id AND id = OLD.run_id)
+    BEGIN
+      SELECT RAISE(ABORT, 'what a run made is kept as reported');
+    END;
 `
 
 /**
@@ -154,8 +189,8 @@ export function migrateBrowserFrameWriteRefused(conn: Database.Database): boolea
     table: 'browser_frame_writes',
     marker: "'refused'",
     create: BROWSER_FRAME_WRITES_TABLE,
-    after: [BROWSER_FRAME_WRITES_IN_FLIGHT, BROWSER_FRAME_WRITES_MOVES],
-    drop: ['DROP TRIGGER IF EXISTS browser_frame_writes_moves', 'DROP INDEX IF EXISTS idx_browser_frame_writes_in_flight'],
+    after: [BROWSER_FRAME_WRITES_IN_FLIGHT, BROWSER_FRAME_WRITES_MOVES, BROWSER_FRAME_MADE_DONE],
+    drop: ['DROP TRIGGER IF EXISTS browser_frame_writes_moves', 'DROP INDEX IF EXISTS idx_browser_frame_writes_in_flight', 'DROP TRIGGER IF EXISTS browser_frame_made_done'],
     columns: ['company_id', 'run_id', 'seq', 'frame_idx', 'state', 'reason', 'permitted_at', 'permitted_mono_ms', 'permitted_boot', 'settled_at'],
   })
 }

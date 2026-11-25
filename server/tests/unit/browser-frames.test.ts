@@ -837,7 +837,7 @@ describe('recovering from a failed write: the site refused it; the person answer
     initDatabase(before)
     expect(before.prepare('SELECT state FROM browser_frame_writes').all()).toEqual([{ state: 'unknown' }])
     expect(before.prepare('SELECT outcome FROM browser_run_writes').all()).toEqual([{ outcome: 'done' }])
-    const shape = (c: Database.Database) => c.prepare("SELECT type, name, sql FROM sqlite_master WHERE tbl_name IN ('browser_frame_writes', 'browser_run_writes') ORDER BY type, name").all()
+    const shape = (c: Database.Database) => c.prepare("SELECT type, name, sql FROM sqlite_master WHERE tbl_name IN ('browser_frame_writes', 'browser_run_writes', 'browser_frame_made') ORDER BY type, name").all()
     const fresh = new Database(':memory:')
     initDatabase(fresh)
     expect(shape(before)).toEqual(shape(fresh))
@@ -869,5 +869,114 @@ describe('recovering from a failed write: the site refused it; the person answer
     expect(() => before.prepare("UPDATE browser_frame_writes SET state = 'done'").run()).toThrow(/state table/)
     before.prepare(`INSERT INTO browser_run_writes (company_id, run_id, idx, after_step, frame, method, page, outcome) VALUES ('co-1', 'bo_1', 2, 0, 1, 'POST', '/a', 'site-refused')`).run()
     expect(() => before.prepare('UPDATE browser_run_writes SET page = \'/b\'').run()).toThrow(/append-only/)
+  })
+})
+
+describe('frames: writes only to what this run made ({made:<id>})', () => {
+  // A plan is made (frame 1, the site answers its id), then items are added to that plan only (frame 2).
+  const madeYaml = `domain: ${DOMAIN}\nwrites:\n  - id: new-plan\n    method: POST\n    path: /api/plans\n    max: 2\n  - method: POST\n    path: "/api/plans/{made:new-plan}/items"\n    max: 2\n`
+  const item = (id: string): BrowserFramePermitRequest => ({ method: 'POST', path: `/api/plans/${id}/items`, fields: {} })
+  const MAKE: BrowserFramePermitRequest = { method: 'POST', path: '/api/plans', fields: {} }
+  const done = (runId: string, write: number, created?: string, key: string | undefined = PC) =>
+    frames.report(alice, runId, { write, result: 'done', ...(created !== undefined ? { created } : {}) }, key)
+  const madeRows = () => conn.prepare('SELECT run_id, seq, frame_idx, made FROM browser_frame_made ORDER BY run_id, seq').all()
+  async function openMade(): Promise<BrowserFrameRunView> {
+    put(madeYaml)
+    await approveSkill('per_run')
+    return value(await approve(alice, value(await frames.start(alice, { skill: SKILL }, PC))))
+  }
+  const reason = (r: Outcome<unknown>) => [code(r as Refusal), (r as Refusal).body?.reason]
+
+  it('the frames carry the maker\'s place, and nothing fits {made} before the maker\'s write is done with an id', async () => {
+    const run = await openMade()
+    expect(run.frames.map(f => f.path)).toEqual(['/api/plans', '/api/plans/{made:1}/items'])
+    expect(reason(await permit(run.runId, 2, alice, item('77')))).toEqual(['BROWSER_FRAME_MISMATCH', 'made'])
+    expect(value(await permit(run.runId, 1, alice, MAKE)).write).toBe(1)
+    value(await done(run.runId, 1, '77'))
+    expect(madeRows()).toEqual([{ run_id: run.runId, seq: 1, frame_idx: 1, made: '77' }])
+    // Only that id: another plan (one the person or an earlier run made) is never written.
+    expect(reason(await permit(run.runId, 2, alice, item('78')))).toEqual(['BROWSER_FRAME_MISMATCH', 'made'])
+    expect(reason(await permit(run.runId, 2, alice, { method: 'POST', path: '/api/plans/77/other', fields: {} }))).toEqual(['BROWSER_FRAME_MISMATCH', 'path'])
+    value(await permit(run.runId, 2, alice, item('77')))
+    value(await done(run.runId, 2))
+    // `max` still applies.
+    value(await permit(run.runId, 2, alice, item('77')))
+    value(await done(run.runId, 3))
+    expect(code(await permit(run.runId, 2, alice, item('77')))).toBe('BROWSER_FRAME_USED_UP')
+    expect(value(frames.get(alice, run.runId)).frames.map(f => f.used)).toEqual([1, 2])
+  })
+
+  /** An ad-hoc plan without `{made}` (every run not ended is ended first: one run per domain). */
+  async function openPlain(): Promise<BrowserFrameRunView> {
+    for (const r of conn.prepare("SELECT id FROM browser_frame_runs WHERE state <> 'ended'").all() as Array<{ id: string }>) value(frames.end(alice, r.id))
+    const plan = { domain: DOMAIN, writes: [{ method: 'POST', path: '/api/plans', max: 1 }] }
+    return value(await approve(alice, value(await frames.start(alice, { plan }, PC))))
+  }
+
+  it('a done without an id records nothing; an id only with done, only for a maker, only a plain token', async () => {
+    const run = await openMade()
+    value(await permit(run.runId, 1, alice, MAKE))
+    for (const body of [
+      { write: 1, result: 'unknown', created: '77' },
+      { write: 1, result: 'refused', created: '77' },
+      { write: 1, result: 'done', created: '../x' },
+      { write: 1, result: 'done', created: '' },
+      { write: 1, result: 'done', created: 'a'.repeat(65) },
+      { write: 1, result: 'done', created: 77 },
+    ]) expect(code(frames.report(alice, run.runId, body, PC)), JSON.stringify(body)).toBe('BROWSER_FRAME_BAD_REQUEST')
+    value(await done(run.runId, 1))
+    expect(madeRows()).toEqual([])
+    expect(reason(await permit(run.runId, 2, alice, item('77')))).toEqual(['BROWSER_FRAME_MISMATCH', 'made'])
+    // A frame no later frame names makes nothing: an id with its done is refused, the write stays permitted.
+    const other = await openPlain()
+    value(await permit(other.runId, 1, alice, MAKE))
+    expect(code(await done(other.runId, 1, '5'))).toBe('BROWSER_FRAME_BAD_REQUEST')
+    expect(value(frames.get(alice, other.runId)).writes[0].state).toBe('permitted')
+    expect(madeRows()).toEqual([])
+  })
+
+  it('an unknown write gives no id, a late done after it neither; a refused one none, its retry that is done does', async () => {
+    const run = await openMade()
+    value(await permit(run.runId, 1, alice, MAKE))
+    value(await report(run.runId, 1, 'refused'))
+    value(await permit(run.runId, 1, alice, MAKE))
+    value(await done(run.runId, 2, 'p9'))
+    value(await permit(run.runId, 2, alice, item('p9')))
+    value(await report(run.runId, 3, 'unknown'))
+    expect(madeRows()).toEqual([{ run_id: run.runId, seq: 2, frame_idx: 1, made: 'p9' }])
+    value(frames.end(alice, run.runId))
+    const second = value(await approve(alice, value(await frames.start(alice, { skill: SKILL }, PC))))
+    // Another run never inherits what an earlier run made.
+    expect(reason(await permit(second.runId, 2, alice, item('p9')))).toEqual(['BROWSER_FRAME_MISMATCH', 'made'])
+    value(await permit(second.runId, 1, alice, MAKE))
+    value(await report(second.runId, 1, 'unknown'))
+    value(await done(second.runId, 1, 'p10'))
+    expect(madeRows()).toEqual([{ run_id: run.runId, seq: 2, frame_idx: 1, made: 'p9' }])
+  })
+
+  it('the same done again is the same only with the same id; a done from another PC records nothing', async () => {
+    const run = await openMade()
+    value(await permit(run.runId, 1, alice, MAKE))
+    expect(code(await done(run.runId, 1, '77', 'pc-other'))).toBe('BROWSER_DEVICE_ELSEWHERE')
+    expect(madeRows()).toEqual([])
+    expect(value(await done(run.runId, 1, '77')).outcome).toBe('applied')
+    expect(value(await done(run.runId, 1, '77')).outcome).toBe('same')
+    expect(code(await done(run.runId, 1, '78'))).toBe('BROWSER_REPORT_CONFLICT')
+    expect(code(await done(run.runId, 1))).toBe('BROWSER_REPORT_CONFLICT')
+    expect(madeRows()).toEqual([{ run_id: run.runId, seq: 1, frame_idx: 1, made: '77' }])
+  })
+
+  it('the table keeps an id only beside its done write, as reported', async () => {
+    const run = await openMade()
+    value(await permit(run.runId, 1, alice, MAKE))
+    const insert = (seq: number, frame: number, made: string) => conn.prepare('INSERT INTO browser_frame_made (company_id, run_id, seq, frame_idx, made, recorded_at) VALUES (?, ?, ?, ?, ?, ?)').run(CO, run.runId, seq, frame, made, iso(now))
+    expect(() => insert(1, 1, '77')).toThrow(/done write/)
+    value(await done(run.runId, 1))
+    expect(() => insert(1, 2, '77')).toThrow(/done write/)
+    expect(() => insert(1, 1, 'a/b')).toThrow(/CHECK/)
+    insert(1, 1, '77')
+    expect(() => insert(1, 1, '78')).toThrow(/UNIQUE|PRIMARY/)
+    expect(() => conn.prepare("UPDATE browser_frame_made SET made = '78'").run()).toThrow(/as reported/)
+    expect(() => conn.prepare('DELETE FROM browser_frame_made').run()).toThrow(/as reported/)
   })
 })

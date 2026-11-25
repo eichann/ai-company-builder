@@ -8,15 +8,21 @@
 //   the report (done / not_sent / unknown / refused: a 4xx that proves it was not taken, the run goes on) → the page gets
 //   the site's answer (without Set-Cookie) or a failure.
 //
+// **What this run made** (agent-browser.md "Writes only to what this run made"): a done write of a frame that a later
+// frame's `{made:<n>}` refers to reports the id the site's answer named (`createdIdOf`: `id` / `data.id`), and once the
+// server recorded it, it is kept here too, so a later write is matched against it before any permit is asked (the server
+// asks the same rule against its own record). No id read → nothing kept: a later `{made}` write is refused.
+//
 // **One at a time**: a second write the page makes waits until the first's result is recorded (a promise chain), so two
 // writes never travel to a site together and the server never sees a permit while one is in flight. **Never again**: a
 // write that left without an answer is `unknown`, the run sends nothing more (`locked`), and nothing here resends — the
 // page's own retry is a new hold that needs a new unit. A write held when the run stops or the window goes is failed,
 // never sent. No Electron; the HTTP client and the clocks are injected.
 import {
-  pickFrame, readHeldWrite, sentFields, workWriteLogStep, workWriteLine,
+  createdIdOf, pickFrame, readHeldWrite, sentFields, workWriteLogStep, workWriteLine,
   type HeldPageWrite, type HeldPageWriteAnswer, type WorkFrame,
 } from '../../../shared/browser-frame-writes'
+import { browserMadeFrom } from '../../../../shared/core/browser-skill'
 import type { BrowserRunWriteOutcome, BrowserRunWriteStep } from '../../../../shared/core/browser-run-log'
 import { browserWriteAnswerKind } from '../../../../shared/core/browser-frame-match'
 import type { BrowserFramePermit, BrowserFramePermitRequest } from '../../../../shared/types/browser-frames'
@@ -25,7 +31,7 @@ import type { BrowserLinesAnswer } from './lines-api'
 /** The server's frames routes as one write uses them (the member's session; the permit and a sure report carry this PC's key). */
 export interface FrameWritesApi {
   framePermit(companyId: string, runId: string, body: { frame: number; request: BrowserFramePermitRequest }): Promise<BrowserLinesAnswer>
-  frameReport(companyId: string, runId: string, body: { write: number; result: 'done' | 'not_sent' | 'unknown' | 'refused'; reason?: string }): Promise<BrowserLinesAnswer>
+  frameReport(companyId: string, runId: string, body: { write: number; result: 'done' | 'not_sent' | 'unknown' | 'refused'; reason?: string; created?: string }): Promise<BrowserLinesAnswer>
 }
 
 /** One held write as the card and the operator learn of it (main's memory only). */
@@ -87,6 +93,10 @@ export function createFrameWriter(deps: FrameWriterDeps) {
    * page's original go out on its own, so a held write is never sent and is told `unknown`, never `not_sent`.
    */
   let originalMayHaveGone = false
+  /** What this run made, by the frame that made it: only ids the server recorded (the same answers its permits read). */
+  const made = new Map<number, Set<string>>()
+  /** Frames a later frame's `{made:<n>}` refers to: only their done writes report what they made. */
+  const makers = new Set(deps.frames.map(f => browserMadeFrom(f.path)).filter((n): n is number => n !== null))
 
   /** One held write from the moment it is held until its outcome is kept (once: `abandon` may keep it first). */
   /** `write` / `permittedAt`: its permit once given, so a write given up as unknown can still be answered about on the card. */
@@ -102,9 +112,9 @@ export function createFrameWriter(deps: FrameWriterDeps) {
   }
 
   /** The report, sent at most 3 times with the same body; true once the server recorded it. */
-  async function report(write: number, result: 'done' | 'not_sent' | 'unknown' | 'refused', reason?: string): Promise<boolean> {
+  async function report(write: number, result: 'done' | 'not_sent' | 'unknown' | 'refused', reason?: string, created?: string): Promise<boolean> {
     for (let i = 0; i < REPORT_TRIES; i++) {
-      const a = await deps.api.frameReport(deps.companyId, deps.runId, { write, result, ...(reason ? { reason } : {}) }).catch((): BrowserLinesAnswer => ({ kind: 'no-answer' }))
+      const a = await deps.api.frameReport(deps.companyId, deps.runId, { write, result, ...(reason ? { reason } : {}), ...(created !== undefined ? { created } : {}) }).catch((): BrowserLinesAnswer => ({ kind: 'no-answer' }))
       if (a.kind === 'ok') return true
       if (a.kind === 'refused') return false
     }
@@ -129,7 +139,7 @@ export function createFrameWriter(deps: FrameWriterDeps) {
     h.method = shape.method
     h.path = shape.path
     // Outside every frame (an autosave, another target, a frame used up): refused, never asked for.
-    const picked = pickFrame(deps.frames, shape)
+    const picked = pickFrame(deps.frames, shape, made)
     if ('mismatch' in picked) {
       keep({ line: workWriteLine(shape.method, null), outcome: 'refused', status: null, sent: null, path: null, answerText: null }, 'refused')
       return fail
@@ -196,9 +206,12 @@ export function createFrameWriter(deps: FrameWriterDeps) {
     // here); anything else → unknown, locked (the safe side).
     const kind = browserWriteAnswerKind(answer.status)
     if (kind === 'unknown') locked = true
-    const recorded = await report(write, kind, kind === 'unknown' ? 'other-state' : undefined)
+    // What it made, when a later frame may write only to that (a done write of such a frame; none read → none kept).
+    const createdNow = kind === 'done' && makers.has(frame.frame) ? createdIdOf(answer.body) ?? undefined : undefined
+    const recorded = await report(write, kind, kind === 'unknown' ? 'other-state' : undefined, createdNow)
     // A result the server did not record: nothing more is sent in this run (the server's time-out makes it unknown).
     if (!recorded) locked = true
+    else if (createdNow !== undefined) made.set(frame.frame, (made.get(frame.frame) ?? new Set()).add(createdNow))
     // A refusal the server did not record is kept as unknown (an older server does not know `refused`: its run log would
     // refuse `site-refused` whole; independent review of #859) — the run is locked above anyway.
     const kept: BrowserRunWriteOutcome = kind === 'refused' ? (recorded ? 'site-refused' : 'unknown') : kind
