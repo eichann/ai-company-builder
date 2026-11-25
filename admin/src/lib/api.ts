@@ -9,6 +9,7 @@ import type { ZodMiniType } from 'zod/mini'
 import type { ClientBuild } from '../../../shared/core/client-version'
 import type { CompanyFolderKind } from '../../../shared/core/company-folder'
 import type { SecurityAlertView } from '../../../shared/types/security-alerts'
+import type { BrowserSiteGrantChange } from '../../../shared/types/browser-site-grants'
 import {
   absenceCreatedSchema,
   absenceRemovedSchema,
@@ -21,7 +22,7 @@ import {
   agentBrowserSchema,
   browserDeviceSchema,
   browserDevicesSchema,
-  browserLineGrantsSchema,
+  browserSiteGrantsSchema,
   agentStopSchema,
   recordSettingsSchema,
   secondOpinionSchema,
@@ -940,12 +941,12 @@ export const agentBrowserApi = {
 }
 
 // ---------------------------------------------------------------------------
-// 「ブラウザ操作に使う PC」 and 「使える人」 (agent-browser.md "This PC's registration", "Per-line grants"):
-// shapes from shared/types/browser-devices.ts and browser-lines.ts. Owners/admins (others 403).
+// 「ブラウザ操作に使う PC」 and 「使える人」 (agent-browser.md "This PC's registration", "Who may use a site"):
+// shapes from shared/types/browser-devices.ts and browser-site-grants.ts. Owners/admins (others 403).
 // ---------------------------------------------------------------------------
 
 export type { BrowserDeviceState, BrowserDeviceView, BrowserDevicesList } from '../../../shared/types/browser-devices'
-export type { BrowserLineGrantsView, BrowserLineRef } from '../../../shared/types/browser-lines'
+export type { BrowserPersonLevel, BrowserSiteGrantChange, BrowserSiteGrantsView } from '../../../shared/types/browser-site-grants'
 
 export const browserPcsApi = {
   list: (companyId: string) => getData(`/api/companies/${enc(companyId)}/browser-devices`, browserDevicesSchema),
@@ -957,21 +958,13 @@ export const browserPcsApi = {
     getData(`/api/companies/${enc(companyId)}/browser-devices/${enc(deviceId)}/revoke`, browserDeviceSchema, { method: 'POST' }),
 }
 
-/** One grant change: the exact approved row for `allowed: true`; `false` takes away every grant of the person on the line. */
-export interface BrowserLineGrantChange {
-  site: string
-  line: string
-  meaningHash: string
-  mechanicsHash: string
-  allowed: boolean
-}
-
 export const browserPeopleApi = {
-  get: (companyId: string) => getData(`/api/companies/${enc(companyId)}/browser-line-grants`, browserLineGrantsSchema),
-  set: (companyId: string, userId: string, change: BrowserLineGrantChange) =>
-    getData(`/api/companies/${enc(companyId)}/browser-line-grants/${enc(userId)}`, browserLineGrantsSchema, {
+  get: (companyId: string) => getData(`/api/companies/${enc(companyId)}/browser-site-grants`, browserSiteGrantsSchema),
+  /** One person × one registered site: 使わない / 見るだけ / 変えてよい (the site's level caps it). */
+  set: (companyId: string, userId: string, change: BrowserSiteGrantChange) =>
+    getData(`/api/companies/${enc(companyId)}/browser-site-grants/${enc(userId)}`, browserSiteGrantsSchema, {
       method: 'PUT',
-      body: { site: change.site, line: change.line, meaningHash: change.meaningHash, mechanicsHash: change.mechanicsHash, allowed: change.allowed },
+      body: { host: change.host, level: change.level },
     }),
 }
 

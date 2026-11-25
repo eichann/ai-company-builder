@@ -81,7 +81,7 @@ const TYPES: Record<string, string> = {
   AgentBrowser: 'AgentBrowserView',
   BrowserPcs: 'BrowserDevicesList',
   BrowserPc: 'BrowserDeviceView',
-  BrowserPeople: 'BrowserLineGrantsView',
+  BrowserPeople: 'BrowserSiteGrantsView',
   AgentStops: 'AgentStopView',
   SecondOpinion: 'SecondOpinionView',
   SecurityAlerts: 'SecurityAlertsView',
@@ -479,12 +479,18 @@ describe('admin API types (admin/src/lib/api.ts) match the server', () => {
     expect(pcs.items).toHaveLength(1)
     await expectShape('BrowserPc', USERS.admin, 'POST', `${base}/browser-devices/${deviceId}/enable`)
     await expectShape('BrowserPc', USERS.owner, 'POST', `${base}/browser-devices/${deviceId}/revoke`)
-    const people = await expectShape('BrowserPeople', USERS.owner, 'GET', `${base}/browser-line-grants`)
-    const row = people.lines[0]
-    const change = { site: row.site, line: row.line, meaningHash: row.meaningHash, mechanicsHash: row.mechanicsHash }
-    const granted = await expectShape('BrowserPeople', USERS.admin, 'PUT', `${base}/browser-line-grants/${USERS.member}`, { ...change, allowed: true })
-    expect(granted.grants.length).toBeGreaterThan(0)
-    await expectShape('BrowserPeople', USERS.owner, 'PUT', `${base}/browser-line-grants/${USERS.member}`, { ...change, allowed: false })
+    // 「使える人」 per registered site (agent-browser.md "Who may use a site").
+    currentUser.id = USERS.owner
+    const saved = await app.request(`${base}/agent-browser`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mode: 'on', sites: [{ host: 'crm.example.com', level: 'write', assetHosts: [] }] }),
+    })
+    expect(saved.status).toBe(200)
+    const people = await expectShape('BrowserPeople', USERS.owner, 'GET', `${base}/browser-site-grants`)
+    expect(people.sites).toEqual([{ host: 'crm.example.com', level: 'write' }])
+    const granted = await expectShape('BrowserPeople', USERS.admin, 'PUT', `${base}/browser-site-grants/${USERS.member}`, { host: 'crm.example.com', level: 'write' })
+    expect(granted.grants).toHaveLength(1)
+    await expectShape('BrowserPeople', USERS.owner, 'PUT', `${base}/browser-site-grants/${USERS.member}`, { host: 'crm.example.com', level: 'none' })
   })
 
   it('「もう一方の AI に聞く」', async () => {

@@ -7,9 +7,9 @@ import { RECORDS_SERVER, recordToolId } from '../records/tools'
 import { WEB_RESEARCH_SERVER, WEB_RESEARCH_TOOL, webResearchDescription, webResearchSchema } from '../web-research/tools'
 import { SECOND_OPINION_SERVER, secondOpinionSchema } from './second-opinion'
 import { WEB_RESEARCH_TOOL_ID } from '../../shared/web-research'
-import { BROWSER_REQUEST_SERVER, BROWSER_REQUEST_TOOL, browserRequestDescription, browserRequestSchema } from '../browser-request/tools'
+import { BROWSER_REQUEST_SERVER, BROWSER_REQUEST_TOOL, browserRequestSchema } from '../browser-request/tools'
 import { BROWSER_REQUEST_TOOL_ID } from '../../shared/browser-plans'
-import { BROWSER_INSPECT_TOOL, BROWSER_WRITE_TOOL, browserInspectDescription, browserInspectSchema, browserWriteDescription, browserWriteSchema } from '../browser-request/inspect-tool'
+import { BROWSER_INSPECT_TOOL, BROWSER_WRITE_TOOL, browserInspectSchema, browserWriteSchema } from '../browser-request/inspect-tool'
 import { BROWSER_INSPECT_TOOL_ID, BROWSER_WRITE_TOOL_ID } from '../../shared/browser-inspection'
 import { wrapLanguageModel } from 'ai'
 import { MissingAgentSession } from './recovery'
@@ -427,10 +427,10 @@ export function createClaudeConnection(config: ClaudeConnectionConfig, createMod
         // 「ブラウザ操作」's request (browser-request/tools.ts): makes a plan and its card; it never sends.
         // Its inspection (browser-request/inspect-tool.ts, generalization PR 5b): reads only; the AI gets marks, never values.
         const browserTools = [
-          ...(browserRequest ? [tool(BROWSER_REQUEST_TOOL, browserRequestDescription, browserRequestSchema.shape, async args => ({ content: [{ type: 'text' as const, text: await browserRequest.execute(args) }] }), { annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true } })] : []),
-          ...(browserInspect ? [tool(BROWSER_INSPECT_TOOL, browserInspectDescription, browserInspectSchema.shape, async args => ({ content: [{ type: 'text' as const, text: await browserInspect.execute(args) }] }), { annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true } })] : []),
+          ...(browserRequest ? [tool(BROWSER_REQUEST_TOOL, browserRequest.description, browserRequestSchema.shape, async args => ({ content: [{ type: 'text' as const, text: await browserRequest.execute(args) }] }), { annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true } })] : []),
+          ...(browserInspect ? [tool(BROWSER_INSPECT_TOOL, browserInspect.description, browserInspectSchema.shape, async args => ({ content: [{ type: 'text' as const, text: await browserInspect.execute(args) }] }), { annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true } })] : []),
           // Its write proposal (generalization PR 5c): a card only; the member confirms the values and presses ［任せる］.
-          ...(browserInspect?.write ? [tool(BROWSER_WRITE_TOOL, browserWriteDescription, browserWriteSchema.shape, async args => ({ content: [{ type: 'text' as const, text: await browserInspect.write!.execute(args) }] }), { annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true } })] : []),
+          ...(browserInspect?.write ? [tool(BROWSER_WRITE_TOOL, browserInspect.write.description, browserWriteSchema.shape, async args => ({ content: [{ type: 'text' as const, text: await browserInspect.write!.execute(args) }] }), { annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true } })] : []),
         ]
         const browserRequestServer = browserTools.length > 0 ? createSdkMcpServer({ name: BROWSER_REQUEST_SERVER, alwaysLoad: true, tools: browserTools }) : undefined
         // 「もう一方の AI に聞く」 (second-opinion.ts): only the agents the member named this turn.

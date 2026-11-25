@@ -108,6 +108,39 @@ export function levelAllows(level: BrowserOperationLevel, effect: BrowserOperati
   return e >= 0 && l >= e
 }
 
+/**
+ * What one person may do on one registered site (「使える人」, design memo §10 / owner decision D4, agent-browser.md
+ * "Who may use a site"): `none` 使わない, `read` 見るだけ, `write` 変えてよい. Generic: a domain and a level, never a
+ * site's job. Once the company registers a site every member starts at `read` (an admin may set `none`); `write` is
+ * set one person at a time. The company's level for the site is the ceiling.
+ */
+export type BrowserPersonLevel = 'none' | 'read' | 'write'
+export const BROWSER_PERSON_LEVELS: readonly BrowserPersonLevel[] = ['none', 'read', 'write']
+/** The level of a member nobody chose one for (owner decision D4: 全員「見るだけ」から). */
+export const BROWSER_PERSON_DEFAULT_LEVEL: BrowserPersonLevel = 'read'
+
+export function isBrowserPersonLevel(v: unknown): v is BrowserPersonLevel {
+  return typeof v === 'string' && (BROWSER_PERSON_LEVELS as readonly string[]).includes(v)
+}
+
+/**
+ * May a person at `person` do something with `effect` on a site the company registered at `site`? Both must allow it:
+ * `write` (変えてよい) lets the person do whatever the company's level allows, `read` only reads, `none` (and anything
+ * unknown) nothing.
+ */
+export function browserPersonAllows(person: BrowserPersonLevel, site: BrowserOperationLevel, effect: BrowserOperationEffect): boolean {
+  if (!levelAllows(site, effect)) return false
+  if (person === 'write') return true
+  if (person === 'read') return effect === 'read'
+  return false
+}
+
+/** The level a person has in effect on a site: their own, capped by the company's (shown on the admin's 「使える人」). */
+export function effectiveBrowserPersonLevel(person: BrowserPersonLevel, site: BrowserOperationLevel): BrowserPersonLevel {
+  if (!isBrowserPersonLevel(person) || person === 'none') return 'none'
+  return person === 'write' && levelAllows(site, 'write') ? 'write' : 'read'
+}
+
 /** The request facts the browser window's one request hook knows (Electron's `resourceType` names). */
 export interface BrowserRequest {
   url: string

@@ -640,8 +640,8 @@ typed there broke the login, #768).
   (its address, the cookies the browser holds for that host) in both modes — reviewed per host, as before
   with the admin's list; a site whose pages need a host its declaration does not list looks incomplete
   until a new declaration version is reviewed (the learning mode stays diagnosis only, §6-4).
-- **Who may use a site** (plan B's 「使える人」): not in this step. The server's per-member type grant
-  (`PUT /browser-type-grants/:userId`) has no admin page yet. Since "This PC's registration" (D2) the server
+- **Who may use a site** (plan B's 「使える人」): not in this step (since the redesign's step ①: "Who may use a site" for
+  the new path). The server's per-member type grant of the old path (`PUT /browser-type-grants/:userId`) has no admin page. Since "This PC's registration" (D2) the server
   asks for a registered PC at every gated step, so a grant to a member no longer turns them on wherever they
   write the opt-in file; the admin page 「使える人」 (PR A, new path only) is "The admin pages: PCs and people".
 
@@ -1331,12 +1331,14 @@ path holds the same lock key (below).
   site, name, version, map version, meaning hash and mechanics hash all equal the request's (`BROWSER_LINE_NOT_APPROVED`;
   `retired` → `BROWSER_LINE_RETIRED`); the member's setting (mode on, the site's host listed, its level allowing the
   line's effect — 「見るだけ」 for an inspection, 「入力・保存まで」 for writes — `BROWSER_NOT_ALLOWED`); the AI stop
-  (`BROWSER_AI_STOPPED`); the member's **per-line grant** (`BROWSER_TYPE_NOT_GRANTED`). Results, reports, confirms and
+  (`BROWSER_AI_STOPPED`); the member's **own level on the site** (`BROWSER_TYPE_NOT_GRANTED`; "Who may use a site",
+  step ① — before it, a per-line grant). Results, reports, confirms and
   leaving never ask it (clean-up never stops). **First of all** (D2, "This PC's registration"): this PC — an enabled
   registration of the member, and for a plan the registration that made it (`devices.check`, injected); the plan's
   PC is a row of `browser_plan_devices` (path `line`), so no column here changed. A refusal at a permit ends the
   execution like any gate refusal (`void` / `partial`, the refusal's code kept as the reason).
-- **Per-line grants** (§16-5, owner decision Q15): `browser_line_grants` = member × site × line × **meaning hash** ×
+- **Per-line grants — replaced by "Who may use a site" (step ①), kept readable, never consulted.** What follows is how
+  they worked (§16-5, owner decision Q15): `browser_line_grants` = member × site × line × **meaning hash** ×
   the mechanics hash it was given on. `PUT /browser-line-grants/:userId { site, line, meaningHash, mechanicsHash,
   allowed }` (owner/admin): `true` only for an approved row exactly; **`false` takes away every grant of that person on
   that line** (any meaning or mechanics: a carried one too — nothing stays in force behind an untick). `GET
@@ -1404,7 +1406,7 @@ path holds the same lock key (below).
 - **The strict read's notice** (§16-1 with Codex round 2 R1 / R2): `POST /browser-shape-notices { site, mapVersion,
   thing, change: unknown_keys | missing_keys | unreadable, count 1..2000 }` (exactly these keys: **no key name can be
   sent**) — a map an approved line uses and a thing it has (`BROWSER_BAD_NOTICE`), from a member whose setting allows the
-  site and who holds a grant on one of its approved lines (`BROWSER_TYPE_NOT_GRANTED`), at most 20 a member and 200 a
+  site and whose own level there is not 使わない (`BROWSER_TYPE_NOT_GRANTED`), at most 20 a member and 200 a
   company per site and day (`BROWSER_NOTICE_LIMIT`, 429; `browser_shape_report_counts`; only an accepted report is
   counted, so a member past their own limit never uses up the company's). One row per company × site ×
   version × thing (`browser_shape_notices`: the latest count of each kind, reports, first / last), and only the first one
@@ -2368,8 +2370,9 @@ the guards they were.
   409 `BROWSER_DEVICE_STATE_CHANGED`; **their own PC too, one press, no further check** — owner decision 11/24),
   `POST /browser-devices/:deviceId/revoke` (owner/admin; a stopped one answered as it is). A missing or malformed header is
   400 `BROWSER_DEVICE_BAD_KEY`; another company's registration is the same 404 `BROWSER_DEVICE_NOT_FOUND` as none (the
-  handle). `GET /browser-lines-mine` (any member, `routes/browser-lines.ts`): the approved lines they hold a grant in
-  force for — ref, label, `writes` — for the app's 「この PC」 and the request tool (D4, L1).
+  handle). `GET /browser-lines-mine` (any member, `routes/browser-lines.ts`): the approved lines they may use now (their
+  level on the site allows the line's effect: "Who may use a site") — ref, label, `writes` — for the app's 「この PC」 and
+  the request tool (D4, L1).
 - **The gate** (`devices.check`, the **first** check of the old path's `gate` and the new path's `gate` — so register /
   approve / claim / permit and create / approve / claim / every permit; the route passes the header): no header → only
   an **owner** passes, with no registration (the transition's exception: "This PC's opt-in"); a header that is not one
@@ -2471,25 +2474,87 @@ Types from `shared/types/browser-devices.ts` / `browser-lines.ts` via `admin/src
   too); ［止める］ on 確認待ち and 使える, always behind a destructive confirm that says what stops (`PC_STOP_EFFECTS`: new
   requests refused at once, the one being sent may go, a run stops before its next write, registering again to use it).
   One call per press, to that PC's id.
-- **「ブラウザ操作を使える人」** (`…/browser/people`): rows = members, columns = 作業 (one per site × line, its newest
-  approved row's label and 「見るだけ」/「書き込む」). A box changes the grant at once (no save button). Ticked = a grant in
-  force on **any** approved row of the line (Codex review: what the server still allows is never shown unticked, so one
-  untick can always take it away); 「前の内容でだけ使えます」 when that does not cover every row of the newest meaning. **A tick** grants, one call at a time, the oldest approved row of that 作業 with the
-  newest row's meaning on which the person holds nothing in force, until every such row is covered (usually one call:
-  the reviewed `grantsFrom` carries it forward; an app on an older map's version can then use the 作業 too) — only
-  approved rows of that very 作業 and meaning are ever sent. **An untick** is one `allowed: false`, which the server turns
-  into "every grant of that person on that line" (carried ones too). A `waiting` 作業 is shown greyed with
-  「まだ使えません（確かめ待ち）」 and a disabled box. Notes: 「この作業は内容が変わりました…」 when someone holds only an
-  earlier meaning; 「使えるようにした PC はまだありません」 (link to the PCs page) for a person with no `enabled` PC; the
-  company's setting 「使わない」 above the table (naming the member override as the exception).
+- **「ブラウザ操作を使える人」** (`…/browser/people`): since step ① rows = members, columns = the registered sites,
+  cell = 使わない / 見るだけ / 変えてよい ("Who may use a site"; before, one column per site × line, which showed one site's
+  jobs to every company). Notes: 「使えるようにした PC はまだありません」 (link to the PCs page) for a person with no
+  `enabled` PC; the company's setting 「使わない」 above the table (naming the member override as the exception).
 - Not done (memo §7-2, left for later): 「変えています」 on 「詳しい設定」 for PCs / grants, a per-person 「使わない」 note.
 
 Tests: `admin/tests/agent-browser-people.test.tsx` (the links; a member / manager sees neither page and nothing is asked;
-each state and what may be pressed; enable and stop ask first and send one call to that PC; キャンセル sends nothing; a
-tick's exact body and the oldest-first fill; an untick in one call; a waiting 作業 disabled; the changed note; nothing of
-hashes or versions on screen), `server/tests/unit/browser-lines.test.ts` (`waiting`, `writes`),
-`server/tests/integration/admin-contract.test.ts`. Guards mutation-checked (the stop's confirm, the oldest-row fill, the
-waiting box disabled). Administrator guide: 13節 「使う PC と使える人」 (scene `browser-pcs`).
+each state and what may be pressed; enable and stop ask first and send one call to that PC; キャンセル sends nothing; 「使える人」:
+"Who may use a site"), `server/tests/integration/admin-contract.test.ts`. Guards mutation-checked (the stop's confirm).
+Administrator guide: 13節 「使う PC と使える人」 (scene `browser-pcs`).
+
+## Who may use a site (step ① of the redesign: domain × 見るだけ／変えてよい)
+
+Owner-approved design memo 「ブラウザ操作：記録から自動化へ／サイトの言葉を本体から外す」 (2026-11-25) §3 I5 / I10, §10, §11,
+§12 row ①, §13 D4 / D7. The per-line grant made every company's 「使える人」 list one site's jobs (a design failure: a site's
+words must never appear in a core screen, an AI tool's description or a refusal shared by all companies). The core keeps
+generic units only: **the host the company registered × 使わない / 見るだけ / 変えてよい**.
+
+- **Rule** (`shared/core/browser-operation.ts`): `BrowserPersonLevel` `none` | `read` | `write`,
+  `BROWSER_PERSON_DEFAULT_LEVEL` = `read`, `browserPersonAllows(person, siteLevel, effect)` (both must allow: `write`
+  lets the person do what the company's level allows, `read` only reads, `none` / anything unknown nothing),
+  `effectiveBrowserPersonLevel` (what the admin page shows as applying).
+- **Table** `browser_site_grants` (additive, in `db/schema/browser-lines.ts`, behind the browser lines' handle as
+  `BrowserSiteGrantRepository`): company × user × host (the company's very spelling) × level (CHECK), `granted_by`,
+  `updated_at`. **No row = 見るだけ** (owner decision D4: everyone starts at 見るだけ once the site is registered; an admin
+  may set 使わない); 変えてよい only by a row, one person at a time. A row counts only when written while the person is a
+  member this time (`updated_at` ≥ the membership's `created_at`); leaving removes the rows (`memberLeft`); someone not a
+  member gets nothing. A row for a host no longer registered counts nowhere (and is not shown); registering the host
+  again brings it back. Owners and admins follow the same table (no implicit 変えてよい).
+- **Service** `services/browser-site-grants.ts` (`createBrowserSiteGrants`, built in `composition.ts` and injected into
+  the line service as `siteGrants`): `allows(member, host, effect)` = the company's mode with the member's override on, the
+  host registered, `browserPersonAllows(own level, site level, effect)`. `view` / `set` (owner/admin, else 403
+  `manageForbidden`): `GET /browser-site-grants` → `BrowserSiteGrantsView` (`shared/types/browser-site-grants.ts`: the
+  registered sites with their level, `defaultLevel`, the rows in force); `PUT /browser-site-grants/:userId { host, level }`
+  — the user must be a member (404), exactly these two keys and a known level (400 `BROWSER_BAD_SITE_GRANT`), the host
+  exactly a registered one (400 `BROWSER_SITE_NOT_REGISTERED`), `write` only on a site whose level allows writing (409
+  `BROWSER_SITE_LEVEL_ABOVE_SITE`; a row set before the company lowered the level stays but is capped). Answers the whole
+  view.
+- **The line gate** (create, approve, claim, every permit; "Plans of opened lines on the server") asks `allows` for the
+  line's site host and effect (an inspection `read`: 見るだけ is enough — D7 keeps `landing_inspect` working; writes
+  `write`) where it asked the per-line grant; the refusal code stays `BROWSER_TYPE_NOT_GRANTED` (released apps map it),
+  its sentence names no job. The shape notice and `GET /browser-lines-mine` ask the same. The old path's per-type grants
+  (`browser_type_grants`, `lstep@0.6.x`) are unchanged until step ⑦.
+- **The per-line grants are kept readable, never consulted**: `browser_line_grants` stays (no column or row changes;
+  released builds and self-hosters' rows), a line grant alone allows nothing; `GET /browser-line-grants` answers its old
+  shape **empty** (`{ lines: [], waiting: [], grants: [] }`, owner/admin; an older admin console then shows no job), `PUT
+  /browser-line-grants/:userId` answers 410 `BROWSER_LINE_GRANTS_REPLACED` to owners / admins (403 to others, as before).
+  Only the admin console read them (the desktop app reads `/browser-lines-mine`).
+- **Admin 「ブラウザ操作を使える人」** (`…/browser/people`, words `admin/src/lib/agent-browser-people.ts`): rows = members,
+  columns = registered hosts with the company's level, cell = a select 使わない / 見るだけ / 変えてよい (見るだけ when nobody
+  chose; 変えてよい disabled on a 見るだけ site; 「いまは会社の設定で「見るだけ」です」 under a capped row). A choice is one
+  `PUT` at once. No job, line, hash or version on screen.
+
+Tests: `server/tests/unit/browser-site-grants.test.ts` (another company's row ignored, an unregistered host never allowed
+nor settable, 見るだけ cannot write, 使わない cannot read, the ceiling, the company off, a member who left / a row from before
+they came back, owners / admins only and no implicit 変えてよい, the view, the body), `browser-lines.test.ts` (the gate's
+order with the person's level, the old per-line grant alone allowing nothing and its routes naming no line, 見るだけ cannot
+make a write plan, leaving), `browser-devices.test.ts` (`browser-lines-mine` per level), permission matrix rows + `CROSS`,
+`admin-contract.test.ts`, `company-scoped-sql.test.ts`, `jobs-schema.test.ts`, `admin/tests/agent-browser-people.test.tsx`
+(fictional sites: the cells, one `PUT` per choice, the cap, no site registered, no job words). Each guard mutation-checked.
+
+## The tools' words (step ①: no site word in what every company ships)
+
+- The AI's browser tools (`browser_inspect`, `browser_write`, `browser_request`) describe themselves in shared words;
+  their schemas say "as listed in the description". **What can be asked** — site, line / operation, value or hint names
+  with their headings — is a catalog built per turn from the site data the build carries
+  (`client/shared/browser-tool-catalog.ts`: `browserLineCatalog` over the bundled lines whose opened row is approved on a
+  site whose approved declaration the build carries; `browserOperationCatalog` over the approved declarations'
+  operations) and appended to the description (`description` on each tool object, read by `agents/claude.ts`). A build
+  without a site's data offers none (`BROWSER_CATALOG_NONE`).
+- Refusal and tool words in `client/shared` (`BROWSER_INSPECT_WORDS`, `BROWSER_REQUEST_WORDS`), the server's browser
+  refusals and the admin console's texts name no site.
+- **Test** `client/tests/browser-core-words.test.ts` (extends §17-2 to texts): the string literals, template text and JSX
+  text of `client/shared`, `client/electron/browser-request`, `client/electron/features/browser`, `admin/src` and the
+  server's browser line / site-grant service and route hold none of a **fictional site sample**'s words nor any name the
+  carried site data gives (approved declarations, opened maps and lines; the everyday words 「タグ」「アクション」 alone are
+  excepted, a site's phrase holding them is not); the tools' descriptions and schemas with an empty catalog hold none,
+  and the sample's words reach a tool only through the catalog. `EXCLUDED`, each with its reason: the site data kept
+  until step ⑦ (`client/connector-maps/lstep`, `client/browser-lines/lstep.ts`, `shared/browser-connectors/opened.json`).
+  Not scanned yet (removed with the old path in step ⑦): `client/connectors/lstep/`, `shared/core/browser-plans.ts`'s
+  facts schema, the old plan card `src/features/browser-plans/components/BrowserPlanCard.tsx` and its `model.ts`.
 
 ## Not yet (later PRs)
 

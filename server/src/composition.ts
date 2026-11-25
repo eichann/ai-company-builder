@@ -62,6 +62,7 @@ import { createAgentSandboxService } from './services/agent-sandbox'
 import { createAgentBrowserService } from './services/agent-browser'
 import { createBrowserPlanService } from './services/browser-plans'
 import { createBrowserLineService } from './services/browser-lines'
+import { createBrowserSiteGrants } from './services/browser-site-grants'
 import { createBrowserDeviceService } from './services/browser-devices'
 import type { BrowserConnectorCatalog } from './ports/browser-plans'
 import type { BrowserOpenedListSource } from './ports/browser-lines'
@@ -301,12 +302,14 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
   })
   // Plans of opened lines (agent-browser.md "Plans of opened lines on the server"): the opened list from
   // shared/browser-connectors/opened.json, the site's host from its approved declaration.
+  // Who may use which registered site, and how (agent-browser.md "Who may use a site"): the line gate's person check.
+  const browserSiteGrants = createBrowserSiteGrants({ ...shared, memberships: repos.memberships, browserPolicy: member => agentBrowser.policyFor(member) })
   const browserLines = createBrowserLineService({
     ...shared, memberships: repos.memberships, tokenDigest: sha256TokenDigest, monotonic: systemMonotonicClock,
     opened: options.browserOpened ?? fileBrowserOpenedList(), catalog: options.browserConnectors ?? fileBrowserConnectorCatalog(),
     executionLookup: sqliteBrowserLineExecutionLookup(conn),
     browserPolicy: member => agentBrowser.policyFor(member), aiStops: member => agentStops.policyFor(member),
-    devices: browserDevices.gate,
+    devices: browserDevices.gate, siteGrants: browserSiteGrants,
     noticesChanged: (companyId, userIds) => push.notify(companyId, userIds, { kind: 'notifications', version: shared.ids.newToken().slice(0, 32) }),
   })
   const brokerTokens = createBrokerTokenService({
@@ -906,6 +909,7 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     agentBrowser,
     browserPlans,
     browserLines,
+    browserSiteGrants,
     browserDevices,
     agentStops,
     agentPolicy,

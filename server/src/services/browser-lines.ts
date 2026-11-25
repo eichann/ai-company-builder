@@ -10,8 +10,9 @@
  *   plan's own registration: services/browser-devices.ts); then the line is an `approved` row whose site, name, version, map
  *   version, meaning hash and mechanics hash are **all exactly** the request's (`BROWSER_LINE_NOT_APPROVED` /
  *   `BROWSER_LINE_RETIRED`); the member's browser setting lets them use the site at the level the line needs; the AI is
- *   not stopped; the member holds a grant for the line's meaning on this mechanics hash or one the row's reviewed
- *   `grantsFrom` names (Q15), given while they are a member this time.
+ *   not stopped; the member's own level on the site's registered host allows the line's effect (services/browser-site-
+ *   grants.ts: 見るだけ by default, 変えてよい one person at a time, the company's level the ceiling). The per-line grants
+ *   (`browser_line_grants`) are kept readable but no longer consulted, and no line's name is answered to admins.
  * - **Where values come from** (§16-4, Q14): the core's rule (`browserLineValuesProblem`: `which` only from a bound
  *   record field or a person's confirmation, `target` only from the site, the AI only for `write`), and — until a business
  *   plugin's binding exists for the server to re-read — **no record-field value at all** (`BROWSER_VALUE_SOURCE_NOT_YET`).
@@ -29,7 +30,7 @@
  *   PR 4's build (deployment.md "Rolling back production"): never roll back below it once this build ran.
  * - **The strict read's notice** (§16-1 with Codex round 2 R1 / R2): the app reports a thing it could not read whole as
  *   the map's site, version and thing, a fixed kind and a count — never a key name; only for a map an approved line uses,
- *   only from a member who may use the site and holds a grant on one of its lines, within limits; one notice per company ×
+ *   only from a member who may use the site and whose own level there is not 使わない, within limits; one notice per company ×
  *   site × version × thing; every owner / admin told once (`browser_shape_changed`). It is an unchecked diagnosis: it
  *   never stops or approves anything.
  *
@@ -62,6 +63,7 @@ import type { Transactions } from '../ports/transactions'
 import { hashCanonical } from '../lib/content-hash'
 import { hasFullAccess, type Member } from './access'
 import type { BrowserDeviceGate } from './browser-devices'
+import type { BrowserSiteGrants } from './browser-site-grants'
 import { BROWSER_LINE_TIMES, createBrowserLineSteps, type BrowserLineWritesContent } from './browser-line-steps'
 import { ok, refuse, type Outcome, type Refusal } from './outcome'
 
@@ -82,6 +84,8 @@ export interface BrowserLineDeps {
   aiStops: (member: Member) => { all: boolean; tools: readonly string[] }
   /** This PC's registration (agent-browser.md "This PC's registration"): the first check of the gate. */
   devices: BrowserDeviceGate
+  /** Who may use which registered site, and how (agent-browser.md "Who may use a site"): the gate's person check. */
+  siteGrants: Pick<BrowserSiteGrants, 'allows' | 'memberLeft'>
   /** Tell these members their notices changed (push channel). */
   noticesChanged?: (companyId: string, userIds: string[]) => void
   log?: Pick<Console, 'warn'>
@@ -95,7 +99,7 @@ export const BROWSER_LINE_WORDS = {
   retired: 'この点検・操作の行は、もう使えません',
   notAllowed: 'この会社では、いまこのサイトは使えません',
   aiStopped: 'AI が止められているので、ブラウザ操作はできません',
-  notGranted: 'この点検・操作は、管理者からまだ任されていません',
+  notGranted: 'このサイトで AI にこれを任せることは、管理者からまだ認められていません',
   valueSource: '値の出どころが認められていません',
   valueUnconfirmed: '値を、カードで1つずつ確かめてください',
   valueSourceNotYet: '記録の欄から読む値は、まだ使えません',
@@ -113,6 +117,7 @@ export const BROWSER_LINE_WORDS = {
   memberNotFound: 'Member not found',
   badNotice: '知らせの形が正しくありません',
   tooManyNotices: '今日は、このサイトの知らせをもう受け取れません',
+  lineGrantsReplaced: '使える人は、サイトごとに選ぶ形になりました。管理画面を新しくしてください',
 } as const
 const W = BROWSER_LINE_WORDS
 
@@ -276,13 +281,14 @@ export function createBrowserLineService(deps: BrowserLineDeps) {
     site: p.site, line: p.lineName, version: p.lineVersion, mapVersion: p.mapVersion, meaningHash: p.meaningHash, mechanicsHash: p.mechanicsHash,
   })
 
-  /** Whether the member holds a grant for this row now (§16-5, Q15): its meaning, on its mechanics or one it carries from. */
-  function granted(member: Member, row: BrowserOpenedLineRow): boolean {
-    const joined = memberships.joinedAt(member.companyId, member.userId)
-    if (typeof joined !== 'string') return false
-    const carried = new Set([row.mechanicsHash, ...(row.grantsFrom ?? [])])
-    return repo(member.companyId).grantsOf(member.userId, row.site, row.name)
-      .some(g => g.meaningHash === row.meaningHash && carried.has(g.mechanicsHash) && g.grantedAt >= joined)
+  /**
+   * May the member use this site for this effect (agent-browser.md "Who may use a site"): their level on the site's
+   * registered host — 見るだけ by default, 変えてよい one person at a time —, capped by the company's level. The per-line
+   * grants (`browser_line_grants`) are no longer consulted: a grant on a line alone allows nothing.
+   */
+  function granted(member: Member, site: string, effect: BrowserOperationEffect): boolean {
+    const s = siteOf(site)
+    return !!s && deps.siteGrants.allows(member, s.host, effect)
   }
 
   /** May the member use the site at this level now (the company's setting with their own mode)? */
@@ -295,7 +301,7 @@ export function createBrowserLineService(deps: BrowserLineDeps) {
 
   /**
    * Every rule a line plan's step must pass now, in this order (create, approve, claim, every permit): this PC (an enabled
-   * registration of the member, the plan's own registration — `devices.check`), the line, the setting, the stop, the grant.
+   * registration of the member, the plan's own registration — `devices.check`), the line, the setting, the stop, the person's level on the site.
    */
   function gate(member: Member, ref: BrowserLineRef, effect: BrowserOperationEffect, device: { key: string | undefined; planId: string | null }):
     Outcome<LoadedLine & { deviceId: string | null }> {
@@ -306,7 +312,7 @@ export function createBrowserLineService(deps: BrowserLineDeps) {
     if (line.row.status !== 'approved') return refuse('conflict', W.retired, { code: 'BROWSER_LINE_RETIRED' })
     if (!siteAllowed(member, ref.site, effect)) return refuse('conflict', W.notAllowed, { code: 'BROWSER_NOT_ALLOWED' })
     if (browserAiStopped(deps.aiStops(member))) return refuse('conflict', W.aiStopped, { code: 'BROWSER_AI_STOPPED' })
-    if (!granted(member, line.row)) return refuse('forbidden', W.notGranted, { code: 'BROWSER_TYPE_NOT_GRANTED' })
+    if (!granted(member, ref.site, effect)) return refuse('forbidden', W.notGranted, { code: 'BROWSER_TYPE_NOT_GRANTED' })
     return ok({ ...line, deviceId: pc.value.deviceId })
   }
 
@@ -388,42 +394,6 @@ export function createBrowserLineService(deps: BrowserLineDeps) {
     const allRead = names.every(n => reads[n] === 'ok')
     const state = !allRead ? 'not_read' : checks.every(c => c === 'ok') ? 'all_ok' : 'ng'
     return { state, reads: reads as Record<string, string>, checks: checks as string[] }
-  }
-
-  function grantsView(member: Member): BrowserLineGrantsView {
-    const writesOf = (l: LoadedLine) => l.row.line.writes !== undefined
-    const lines = load().lines.filter(l => l.row.status === 'approved').map(l => ({ ...refOf(l), label: lineName(l), writes: writesOf(l) }))
-    // The 「使える人」 page greys a line still waiting for its review: no approved row yet, a pending one (names only).
-    const waiting: BrowserLineGrantsView['waiting'] = []
-    for (const l of load().lines) {
-      if (l.row.status !== 'pending' || lines.some(a => a.site === l.row.site && a.line === l.row.name)) continue
-      if (waiting.some(w => w.site === l.row.site && w.line === l.row.name)) continue
-      waiting.push({ site: l.row.site, line: l.row.name, label: lineName(l), writes: writesOf(l) })
-    }
-    const rows = repo(member.companyId).grants().filter(g => {
-      const joined = memberships.joinedAt(member.companyId, g.userId)
-      return typeof joined === 'string' && g.grantedAt >= joined
-    })
-    const people = deps.accounts.byIds([...new Set(rows.map(g => g.userId))])
-    // The grants **in force**, per approved row and person: given on that row's own mechanics (`direct`) or carried by
-    // its reviewed grantsFrom from another row (`carried`, which row) — never a stored pair that counts nowhere.
-    const all = load().lines
-    const grants: BrowserLineGrantsView['grants'] = []
-    for (const l of all.filter(x => x.row.status === 'approved')) {
-      const carried = new Set(l.row.grantsFrom ?? [])
-      for (const g of rows) {
-        if (g.site !== l.row.site || g.lineName !== l.row.name || g.meaningHash !== l.row.meaningHash) continue
-        const direct = g.mechanicsHash === l.row.mechanicsHash
-        if (!direct && !carried.has(g.mechanicsHash)) continue
-        const origin = direct ? null : all.find(x => x.row.site === l.row.site && x.row.name === l.row.name && x.row.mechanicsHash === g.mechanicsHash) ?? null
-        grants.push({
-          userId: g.userId, name: people.get(g.userId)?.name ?? null, ...refOf(l),
-          from: direct ? { kind: 'direct' } : { kind: 'carried', version: origin?.row.version ?? null, mapVersion: origin?.row.mapVersion ?? null, mechanicsHash: g.mechanicsHash },
-          grantedAt: g.grantedAt, grantedBy: g.grantedBy,
-        })
-      }
-    }
-    return { lines, waiting, grants }
   }
 
   const DEDUPE_RE = /^browser_shape:([a-z][a-z0-9_]{0,39}):([0-9.]{5,14}):([a-z][a-z0-9_]{0,39})$/
@@ -689,49 +659,34 @@ export function createBrowserLineService(deps: BrowserLineDeps) {
       })
     },
 
-    /** GET /browser-line-grants (owner/admin): the approved lines and who may use them. */
+    /**
+     * GET /browser-line-grants (owner/admin): replaced by the site grants (`GET /browser-site-grants`). Kept answering its
+     * old shape, empty, for an admin console of an earlier version: no line's name or label reaches any company's screen.
+     */
     grants(member: Member): Outcome<BrowserLineGrantsView> {
       if (!hasFullAccess(member.role)) return refuse('forbidden', W.manageForbidden)
-      return ok(grantsView(member))
+      return ok({ lines: [], waiting: [], grants: [] })
     },
 
     /**
-     * GET /browser-lines-mine: the approved lines the member holds a grant in force for — names, labels and whether the line
-     * writes, nothing else (the app's settings screen and request tool: whether to offer anything at all). Any member.
+     * GET /browser-lines-mine: the approved lines the member may use now (their site level allows the line's effect) —
+     * names, labels and whether the line writes, nothing else (the app's settings screen and request tool: whether to
+     * offer anything at all). Any member: their own app, for a site their company registered.
      */
     mine(member: Member): Outcome<BrowserLinesMine> {
+      const usable = (l: LoadedLine) => {
+        const effect: BrowserOperationEffect = l.row.line.writes !== undefined ? 'write' : 'read'
+        return l.row.status === 'approved' && siteAllowed(member, l.row.site, effect) && granted(member, l.row.site, effect)
+      }
       return ok({
-        lines: load().lines.filter(l => l.row.status === 'approved' && granted(member, l.row))
-          .map(l => ({ ...refOf(l), label: lineName(l), writes: l.row.line.writes !== undefined })),
+        lines: load().lines.filter(usable).map(l => ({ ...refOf(l), label: lineName(l), writes: l.row.line.writes !== undefined })),
       })
     },
 
-    /**
-     * PUT /browser-line-grants/:userId { site, line, meaningHash, mechanicsHash, allowed } (owner/admin): a grant only for
-     * an approved row exactly; taking one away removes that exact grant.
-     */
-    setGrant(member: Member, userId: string, body: unknown): Outcome<BrowserLineGrantsView> {
+    /** PUT /browser-line-grants/:userId (owner/admin): gone — who may use a site is set per site (`PUT /browser-site-grants`). */
+    setGrant(member: Member): Outcome<never> {
       if (!hasFullAccess(member.role)) return refuse('forbidden', W.manageForbidden)
-      if (memberships.roleOf(member.companyId, userId) === null) return refuse('not-found', W.memberNotFound)
-      if (!isMap(body) || !exactKeys(body, ['site', 'line', 'meaningHash', 'mechanicsHash', 'allowed']) || typeof body.allowed !== 'boolean') {
-        return refuse('bad-request', W.badPlan, { code: 'BROWSER_BAD_GRANT' })
-      }
-      const { site, line, meaningHash, mechanicsHash } = body
-      if (typeof site !== 'string' || !NAME_RE.test(site) || typeof line !== 'string' || !NAME_RE.test(line)
-        || typeof meaningHash !== 'string' || !HASH_RE.test(meaningHash) || typeof mechanicsHash !== 'string' || !HASH_RE.test(mechanicsHash)) {
-        return refuse('bad-request', W.badPlan, { code: 'BROWSER_BAD_GRANT' })
-      }
-      const r = repo(member.companyId)
-      if (!body.allowed) {
-        // Unticking takes away every grant of this person on this line — the one given here and any a reviewed
-        // grantsFrom carries (owner's 「使える人」 design §11): nothing stays in force behind the admin's back.
-        r.removeLineGrantsOf(userId, site, line)
-        return ok(grantsView(member))
-      }
-      const known = load().lines.some(l => l.row.status === 'approved' && l.row.site === site && l.row.name === line && l.row.meaningHash === meaningHash && l.row.mechanicsHash === mechanicsHash)
-      if (!known) return refuse('bad-request', W.notApproved, { code: 'BROWSER_LINE_NOT_APPROVED' })
-      r.saveGrant({ userId, site, lineName: line, meaningHash, mechanicsHash, grantedBy: member.userId, grantedAt: clock.now() })
-      return ok(grantsView(member))
+      return refuse('gone', W.lineGrantsReplaced, { code: 'BROWSER_LINE_GRANTS_REPLACED' })
     },
 
     /**
@@ -751,7 +706,7 @@ export function createBrowserLineService(deps: BrowserLineDeps) {
       const map = o.maps.find(m => m.site === site && m.version === mapVersion)?.map
       const lines = o.lines.filter(l => l.row.status === 'approved' && l.row.site === site)
       if (!map || !own(map.things, thing) || !lines.some(l => l.row.mapVersion === mapVersion)) return refuse('bad-request', W.badNotice, { code: 'BROWSER_BAD_NOTICE' })
-      if (!siteAllowed(member, site, 'read') || !lines.some(l => granted(member, l.row))) return refuse('forbidden', W.notGranted, { code: 'BROWSER_TYPE_NOT_GRANTED' })
+      if (!siteAllowed(member, site, 'read') || !granted(member, site, 'read')) return refuse('forbidden', W.notGranted, { code: 'BROWSER_TYPE_NOT_GRANTED' })
       const kind = change as BrowserShapeChange
       return transactions.run(() => {
         const now = clock.now()
@@ -818,6 +773,7 @@ export function createBrowserLineService(deps: BrowserLineDeps) {
         steps.giveBack(companyId, e, p, 'left', now)
       }
       r.removeGrantsOf(userId)
+      deps.siteGrants.memberLeft(companyId, userId)
     },
   }
 }

@@ -100,7 +100,28 @@ export interface BrowserStepChange {
   permittedAt?: string; permittedMonoMs?: number; permittedBoot?: string; settledAt?: string; createdId?: string; createdLockKey?: string; confirmedBy?: string
 }
 
-export interface BrowserLineRepository {
+/**
+ * Who may use which registered site (agent-browser.md "Who may use a site"): one row per member × host. Kept on the
+ * browser lines' handle (the same table module), behind this interface of its own so the site grants' service sees
+ * nothing else. Rules: services/browser-site-grants.ts.
+ */
+export interface BrowserSiteGrantRow {
+  userId: string
+  host: string
+  /** `none` / `read` / `write` (a CHECK keeps it so). */
+  level: string
+  grantedBy: string
+  updatedAt: string
+}
+
+export interface BrowserSiteGrantRepository {
+  siteGrants(): BrowserSiteGrantRow[]
+  siteGrantOf(userId: string, host: string): BrowserSiteGrantRow | null
+  saveSiteGrant(row: BrowserSiteGrantRow): void
+  removeSiteGrantsOf(userId: string): void
+}
+
+export interface BrowserLineRepository extends BrowserSiteGrantRepository {
   insertPlan(row: BrowserLinePlanRow): void
   plan(planId: string): BrowserLinePlanRow | null
   /** A member's plans in these states (leaving the company closes them); every row. */
@@ -126,6 +147,7 @@ export interface BrowserLineRepository {
   /** Every lock this execution holds goes (only its own). */
   releaseLocksOf(executionId: string): void
 
+  /** The per-line grants (no longer consulted since the site grants; kept readable). */
   grants(): BrowserLineGrantRow[]
   grantsOf(userId: string, site: string, lineName: string): BrowserLineGrantRow[]
   saveGrant(row: BrowserLineGrantRow): void

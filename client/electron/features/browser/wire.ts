@@ -4,6 +4,7 @@
 // controller, the policy store's reads, the session and the bundled connectors. Everything that reads
 // a site, starts the operator or sends asks the switch first (off unless this PC's opt-in, ai-switch.ts);
 // the card's reads, ［やめる］ and the confirm do not (clean-up paths).
+import { browserOperationCatalog } from '../../../shared/browser-tool-catalog'
 import path from 'node:path'
 import type { IpcInvokeEvent, IpcMessageEvent, IpcRegistrar } from '../../ipc/registrar'
 import type { BrowserSiteSetting } from '../../../../shared/core/browser-operation'
@@ -14,6 +15,7 @@ import approved from '../../../../shared/browser-connectors/approved.json'
 import carried from '../../../../shared/browser-connectors/carried.json'
 import { buildAiSwitch, type BrowserAiSwitch } from './ai-switch'
 import { approvedBundledDeclarations, createCarriedCombinations } from './combination'
+import { parsePluginManifest } from '../../../../shared/core/plugin-manifest'
 import { createBrowserContext } from './context'
 import { parseBrowserHtml } from './html'
 import { createBrowserPlansHttp } from './plans-api'
@@ -143,6 +145,12 @@ export function wireBrowserPlans<E extends IpcInvokeEvent>(ipc: IpcRegistrar<E, 
     busyWindows,
     /** Whether the request tool may exist at all (the switch, asked per turn). */
     requestAvailable: () => aiSwitch(),
+    /** What the AI is told it may request: the operations of the declarations this build carries and approves. */
+    catalog: () => browserOperationCatalog(approvedBundledDeclarations(approved, carried, deps.connectors.declarations)
+      .map(text => parsePluginManifest(text)).flatMap(r => (r.ok && r.value.browser ? [{
+        id: r.value.id, label: r.value.label,
+        operations: Object.entries(r.value.browser.operations).map(([name, op]) => ({ name, label: op.label, target: Object.keys(op.target), change: Object.keys(op.change) })),
+      }] : []))),
     request,
   }
 }

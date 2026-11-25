@@ -199,6 +199,7 @@ const HANDLE_TABLES: Record<string, string[]> = {
   browser_line_reports: ['adapters/sqlite/browser-lines.ts'],
   browser_line_locks: ['adapters/sqlite/browser-lines.ts'],
   browser_line_grants: ['adapters/sqlite/browser-lines.ts'],
+  browser_site_grants: ['adapters/sqlite/browser-lines.ts'],
   browser_shape_notices: ['adapters/sqlite/browser-lines.ts'],
   browser_shape_report_counts: ['adapters/sqlite/browser-lines.ts'],
   // The PCs used for 「ブラウザ操作」 (agent-browser.md "This PC's registration").

@@ -10,6 +10,7 @@
 //
 // The AI gets fixed words only (`BROWSER_WRITE_WORDS`): never a value the site showed, the plan's values, a hash or a
 // result. What the site showed lives on the member's card alone (never sent to the server, the AI, a log or the disk).
+import { browserLineCatalog } from '../../../shared/browser-tool-catalog'
 import { randomBytes } from 'node:crypto'
 import type { IpcInvokeEvent, IpcMessageEvent, IpcRegistrar } from '../../ipc/registrar'
 import type { BrowserOperationLevel } from '../../../../shared/core/browser-operation'
@@ -132,6 +133,13 @@ export function wireBrowserWriteLines<E extends IpcInvokeEvent>(ipc: IpcRegistra
     const hosts = new Set(found.map(d => d.host))
     return found.length > 0 && hosts.size === 1 ? { host: found[0].host, label: found[found.length - 1].label } : null
   }
+  /**
+   * What the AI is told it may ask (agent-browser.md "The tools' words"): the bundled lines of this kind whose row in the
+   * opened list is approved, on a site whose reviewed declaration this build carries. The tool's own words name no site.
+   */
+  const catalog = () => browserLineCatalog(
+    deps.lines.filter(l => file.lines?.some(r => r.name === l.name && r.version === l.version && r.site === l.read.site && r.status === 'approved')),
+    id => { const s = siteOf(id); return s ? { id, label: s.label } : null }, 'write')
   const reader = createBrowserReadRunner({
     aiSwitch: deps.aiSwitch, stopped: deps.stopped, window: deps.windows.previewWindow, context: scope => deps.context.capture(scope), reporter: http, now,
   })
@@ -384,6 +392,7 @@ export function wireBrowserWriteLines<E extends IpcInvokeEvent>(ipc: IpcRegistra
   return {
     /** Whether the write tool may exist at all (the switch, asked per turn). */
     writeAvailable: () => deps.aiSwitch(),
+    catalog,
     propose,
     /** Sign-out: no card of the previous account stays in memory. */
     clear: () => entries.clear(),

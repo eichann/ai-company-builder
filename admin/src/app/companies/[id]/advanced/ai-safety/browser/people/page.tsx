@@ -10,32 +10,31 @@ import { EmptyState, ErrorState, ListSkeleton, PageHeader } from '@/components/a
 import { Callout } from '@/components/ui/callout'
 import { Card } from '@/components/ui/card'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+import { BROWSER_LEVEL_LABELS } from '@/lib/agent-browser'
 import {
-  PEOPLE_CHANGED,
+  PEOPLE_CAPPED,
+  PEOPLE_CHANGE_NOTE,
   PEOPLE_COMPANY_OFF,
   PEOPLE_INTRO,
   PEOPLE_NO_PC,
-  PEOPLE_PARTIAL,
+  PEOPLE_NO_SITES,
+  PEOPLE_SITE_READ_ONLY,
   PEOPLE_TITLE,
-  PEOPLE_UNTICK_NOTE,
-  PEOPLE_WAITING,
-  changedFor,
-  isPartial,
-  isTicked,
-  lineKindLabel,
-  nextGrantRow,
-  peopleColumns,
-  type PeopleColumn,
+  PERSON_LEVELS,
+  PERSON_LEVEL_LABELS,
+  effectiveLevelOf,
+  personLevelOf,
+  writeChoosable,
 } from '@/lib/agent-browser-people'
-import { agentBrowserApi, browserPcsApi, browserPeopleApi, companiesApi, type BrowserLineGrantsView } from '@/lib/api'
+import { agentBrowserApi, browserPcsApi, browserPeopleApi, companiesApi, type BrowserPersonLevel, type BrowserSiteGrantsView } from '@/lib/api'
 import { useCompany } from '@/lib/company-context'
 import { describeError } from '@/lib/errors'
 import { useQuery } from '@/lib/use-query'
-import { cn } from '@/lib/utils'
 
 /**
- * 「詳しい設定 › AI の安全 › ブラウザ操作 › ブラウザ操作を使える人」 (owner/admin; agent-browser.md "Per-line grants"): rows are
- * people, columns are 作業 (usable combinations); a box changes the person's grant at once.
+ * 「詳しい設定 › AI の安全 › ブラウザ操作 › ブラウザ操作を使える人」 (owner/admin; agent-browser.md "Who may use a site"): rows
+ * are people, columns are the company's registered sites, a cell is 使わない / 見るだけ / 変えてよい (capped by the site's
+ * level). A choice changes the person's level at once. Nothing of a site's jobs is shown.
  */
 export default function BrowserPeoplePage() {
   const { companyId, role, isAdmin } = useCompany()
@@ -56,26 +55,12 @@ export default function BrowserPeoplePage() {
     )
   }
 
-  const change = async (userId: string, name: string, column: PeopleColumn, allow: boolean) => {
-    if (column.kind !== 'usable' || !view.data) return
-    const cell = `${userId}:${column.key}`
-    setBusy(cell)
+  const change = async (userId: string, name: string, host: string, level: BrowserPersonLevel) => {
+    setBusy(`${userId}:${host}`)
     try {
-      let current: BrowserLineGrantsView = view.data
-      if (allow) {
-        // Each approved row of this 作業 the person cannot use yet, oldest first (bounded by the rows there are).
-        for (let i = 0; i < column.rows.length; i++) {
-          const row = nextGrantRow(current, column, userId)
-          if (!row) break
-          current = await browserPeopleApi.set(companyId, userId, { site: row.site, line: row.line, meaningHash: row.meaningHash, mechanicsHash: row.mechanicsHash, allowed: true })
-          view.setData(() => current)
-        }
-      } else {
-        const t = column.target
-        current = await browserPeopleApi.set(companyId, userId, { site: t.site, line: t.line, meaningHash: t.meaningHash, mechanicsHash: t.mechanicsHash, allowed: false })
-        view.setData(() => current)
-      }
-      toast.success(allow ? `${name}さんが「${column.label}」を使えるようになりました` : `${name}さんの「${column.label}」を外しました`)
+      const next = await browserPeopleApi.set(companyId, userId, { host, level })
+      view.setData(() => next)
+      toast.success(`${name}さんの「${host}」を「${PERSON_LEVEL_LABELS[level]}」にしました`)
     } catch (err) {
       toast.error('変更できませんでした', { description: describeError(err) })
       view.reload()
@@ -106,7 +91,7 @@ export default function BrowserPeoplePage() {
             busy={busy}
             onChange={change}
           />
-          <p className="text-small text-muted-foreground">{PEOPLE_UNTICK_NOTE}</p>
+          <p className="text-small text-muted-foreground">{PEOPLE_CHANGE_NOTE}</p>
         </div>
       ) : null}
     </>
@@ -121,16 +106,15 @@ function PeopleTable({
   busy,
   onChange,
 }: {
-  view: BrowserLineGrantsView
+  view: BrowserSiteGrantsView
   people: Array<{ userId: string; name: string }>
   usablePc: Set<string> | null
   pcsHref: string
   busy: string | null
-  onChange: (userId: string, name: string, column: PeopleColumn, allow: boolean) => void
+  onChange: (userId: string, name: string, host: string, level: BrowserPersonLevel) => void
 }) {
-  const columns = peopleColumns(view)
-  if (columns.length === 0) {
-    return <p className="text-body text-muted-foreground">AI に任せられる作業は、まだありません。</p>
+  if (view.sites.length === 0) {
+    return <p className="text-body text-muted-foreground">{PEOPLE_NO_SITES}</p>
   }
   return (
     <Card className="px-5 py-2">
@@ -138,12 +122,11 @@ function PeopleTable({
         <TableHeader>
           <TableRow>
             <TableHead>人</TableHead>
-            {columns.map((c) => (
-              <TableHead key={c.key} data-column={c.key} className={cn('align-bottom whitespace-normal', c.kind === 'waiting' && 'opacity-disabled')}>
-                <span className="block text-foreground">{c.label}</span>
-                <span className="block">（{lineKindLabel(c.writes)}）</span>
-                {c.kind === 'waiting' && <span className="block">{PEOPLE_WAITING}</span>}
-                {changedFor(view, c) && <span className="block text-warning-text">{PEOPLE_CHANGED}</span>}
+            {view.sites.map((s) => (
+              <TableHead key={s.host} data-column={s.host} className="align-bottom whitespace-normal">
+                <span className="block text-foreground">{s.host}</span>
+                <span className="block">（会社の設定：{BROWSER_LEVEL_LABELS[s.level]}）</span>
+                {!writeChoosable(s) && <span className="block">{PEOPLE_SITE_READ_ONLY}</span>}
               </TableHead>
             ))}
           </TableRow>
@@ -159,19 +142,25 @@ function PeopleTable({
                   </Link>
                 )}
               </TableCell>
-              {columns.map((c) => {
-                const ticked = isTicked(view, c, p.userId)
+              {view.sites.map((s) => {
+                const chosen = personLevelOf(view, p.userId, s.host)
+                const capped = chosen !== effectiveLevelOf(view, p.userId, s)
                 return (
-                  <TableCell key={c.key} className={cn(c.kind === 'waiting' && 'opacity-disabled')}>
-                    <input
-                      type="checkbox"
-                      className="size-4"
-                      aria-label={c.kind === 'waiting' ? `${p.name}：${c.label}（${PEOPLE_WAITING}）` : `${p.name}：${c.label}`}
-                      checked={ticked}
-                      disabled={c.kind === 'waiting' || busy !== null}
-                      onChange={(e) => onChange(p.userId, p.name, c, e.target.checked)}
-                    />
-                    {isPartial(view, c, p.userId) && <span className="block text-small text-warning-text">{PEOPLE_PARTIAL}</span>}
+                  <TableCell key={s.host}>
+                    <select
+                      aria-label={`${p.name}：${s.host}`}
+                      className="rounded-control border bg-background px-2 py-1 text-body"
+                      value={chosen}
+                      disabled={busy !== null}
+                      onChange={(e) => onChange(p.userId, p.name, s.host, e.target.value as BrowserPersonLevel)}
+                    >
+                      {PERSON_LEVELS.map((level) => (
+                        <option key={level} value={level} disabled={level === 'write' && !writeChoosable(s) && chosen !== 'write'}>
+                          {PERSON_LEVEL_LABELS[level]}
+                        </option>
+                      ))}
+                    </select>
+                    {capped && <span className="block text-small text-warning-text">{PEOPLE_CAPPED}</span>}
                   </TableCell>
                 )
               })}

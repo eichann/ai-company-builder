@@ -9,6 +9,7 @@
 // member has that consultation open (the turn's signal: closing or stopping the consultation stops the reads); the AI
 // gets only fixed words and each check's ✓ / ✗ / 「読み取れませんでした」 — the values the site showed are on the
 // member's card alone and never leave main but to the renderer's card (never to the server, the AI, a log or the disk).
+import { browserLineCatalog } from '../../../shared/browser-tool-catalog'
 import type { IpcInvokeEvent, IpcMessageEvent, IpcRegistrar } from '../../ipc/registrar'
 import type { BrowserMap, BrowserThingReader } from '../../../../shared/core/browser-map'
 import { browserLineValuesProblem, type BrowserSuppliedValue } from '../../../../shared/core/browser-read-line'
@@ -114,6 +115,14 @@ export function wireBrowserInspections<E extends IpcInvokeEvent>(ipc: IpcRegistr
     return found.length > 0 && hosts.size === 1 ? { host: found[0].host, label: found[found.length - 1].label } : null
   }
 
+  /**
+   * What the AI is told it may ask (agent-browser.md "The tools' words"): the bundled lines of this kind whose row in the
+   * opened list is approved, on a site whose reviewed declaration this build carries. The tool's own words name no site.
+   */
+  const catalog = () => browserLineCatalog(
+    deps.lines.filter(l => file.lines?.some(r => r.name === l.name && r.version === l.version && r.site === l.read.site && r.status === 'approved')),
+    id => { const s = siteOf(id); return s ? { id, label: s.label } : null }, 'read')
+
   // One read runner (one run per window). Its context is the shared one, captured with the run's own turn signal.
   const runner = createBrowserReadRunner({
     aiSwitch: deps.aiSwitch, stopped: deps.stopped, window: deps.window, context: scope => deps.context.capture(scope), reporter: http, now,
@@ -208,6 +217,7 @@ export function wireBrowserInspections<E extends IpcInvokeEvent>(ipc: IpcRegistr
   return {
     /** Whether the inspection tool may exist at all (the switch, asked per turn). */
     inspectAvailable: () => deps.aiSwitch(),
+    catalog,
     inspect,
     /** Sign-out: no card of the previous account stays in memory. */
     clear: () => cards.clear(),

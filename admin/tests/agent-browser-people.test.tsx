@@ -1,7 +1,7 @@
-// 「ブラウザ操作に使う PC」 and 「ブラウザ操作を使える人」 (agent-browser.md "This PC's registration", "Per-line grants"):
+// 「ブラウザ操作に使う PC」 and 「ブラウザ操作を使える人」 (agent-browser.md "This PC's registration", "Who may use a site"):
 // who sees the pages, each PC state and what may be pressed on it, that 使えるようにする / 止める ask first and send exactly
-// one call to that PC, that a tick sends exactly the approved row of that 作業 for that person, that an untick takes
-// the 作業 away in one call, and that a 作業 still waiting for its review cannot be ticked.
+// one call to that PC; 「使える人」 shows registered sites × people with 使わない / 見るだけ / 変えてよい (見るだけ when
+// nobody chose), sends exactly the chosen person × site × level, caps 変えてよい by the site's level, and shows no job name.
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
@@ -11,14 +11,15 @@ import BrowserPcsPage from '@/app/companies/[id]/advanced/ai-safety/browser/pcs/
 import BrowserPeoplePage from '@/app/companies/[id]/advanced/ai-safety/browser/people/page'
 import {
   PC_STOP_EFFECTS,
-  PEOPLE_CHANGED,
+  PEOPLE_CAPPED,
   PEOPLE_COMPANY_OFF,
   PEOPLE_NO_PC,
-  PEOPLE_PARTIAL,
-  PEOPLE_WAITING,
+  PEOPLE_NO_SITES,
+  PEOPLE_SITE_READ_ONLY,
+  PERSON_LEVEL_LABELS,
   pcEnableSentence,
 } from '@/lib/agent-browser-people'
-import type { AgentBrowserView, BrowserDevicesList, BrowserLineGrantsView, Capabilities } from '@/lib/api'
+import type { AgentBrowserView, BrowserDevicesList, BrowserSiteGrantsView, Capabilities } from '@/lib/api'
 import { base, companyRoutes, renderInCompany } from './company-harness'
 import { managerCapabilities, ok, ownerCapabilities } from './fixtures'
 import type { Call } from './mock-api'
@@ -82,7 +83,7 @@ describe('ブラウザ操作に使う PC', () => {
       const calls = stubApi(managerCapabilities)
       const { unmount } = renderInCompany(<Page />)
       expect(await screen.findByText('このページはオーナーと管理者だけが使えます')).toBeInTheDocument()
-      expect(calls.some((c) => /browser-devices|browser-line-grants|agent-browser/.test(c.url))).toBe(false)
+      expect(calls.some((c) => /browser-devices|browser-site-grants|agent-browser/.test(c.url))).toBe(false)
       unmount()
     }
   })
@@ -151,133 +152,76 @@ describe('ブラウザ操作に使う PC', () => {
 })
 
 // ---------------------------------------------------------------------------
-// People
+// People (per registered site: agent-browser.md "Who may use a site")
 // ---------------------------------------------------------------------------
 
-const H = (c: string) => `sha256:${c.repeat(64)}`
-const MEANING = H('a')
-const inspect = (mapVersion: string, mechanicsHash: string) => ({
-  site: 'lstep', line: 'landing_inspect', version: '1.0.0', mapVersion, meaningHash: MEANING, mechanicsHash, label: '流入経路を点検する', writes: false,
-})
-// Three approved rows of one 作業 (map 1.0.1, 1.0.2, 1.0.4), listed newest-first on purpose: the page orders them itself.
-const ROWS = [inspect('1.0.4', H('4')), inspect('1.0.1', H('1')), inspect('1.0.2', H('2'))]
-const grant = (userId: string, r: typeof ROWS[number], from: BrowserLineGrantsView['grants'][number]['from'] = { kind: 'direct' }) => ({
-  site: r.site, line: r.line, version: r.version, mapVersion: r.mapVersion, meaningHash: r.meaningHash, mechanicsHash: r.mechanicsHash,
-  userId, name: null, from, grantedAt: '2026-11-24T00:00:00.000Z', grantedBy: 'u_owner',
-})
-const carried = { kind: 'carried' as const, version: '1.0.0', mapVersion: '1.0.1', mechanicsHash: H('1') }
-const grants = (over: Partial<BrowserLineGrantsView> = {}): BrowserLineGrantsView => ({
-  lines: ROWS,
-  waiting: [{ site: 'lstep', line: 'landing_create', label: '流入経路を複製して作る', writes: true }],
-  // 鈴木 holds a grant on the first row that the later rows carry: in force everywhere, so ticked.
-  grants: [grant('u_admin', ROWS[1]), grant('u_admin', ROWS[2], carried), grant('u_admin', ROWS[0], carried)],
+// Fictional sites: the page must work from the company's own list, whatever the site.
+const SHOP = 'shop.example.com'
+const TICKETS = 'tickets.example.net'
+const siteGrants = (over: Partial<BrowserSiteGrantsView> = {}): BrowserSiteGrantsView => ({
+  sites: [{ host: SHOP, level: 'write' }, { host: TICKETS, level: 'read' }],
+  defaultLevel: 'read',
+  grants: [{ userId: 'u_admin', host: SHOP, level: 'write', grantedBy: 'u_owner', updatedAt: '2026-11-25T00:00:00.000Z' }],
   ...over,
 })
-const peopleRoutes = (view: BrowserLineGrantsView, mode: 'on' | 'off' = 'on') => ({
-  [`GET ${base}/browser-line-grants`]: { body: ok(view) },
+const peopleRoutes = (view: BrowserSiteGrantsView, mode: 'on' | 'off' = 'on') => ({
+  [`GET ${base}/browser-site-grants`]: { body: ok(view) },
   [`GET ${base}/browser-devices`]: { body: ok(devices) },
   [`GET ${base}/agent-browser`]: { body: ok({ settings: { mode, sites: [] }, overrides: [], updatedAt: null, updatedBy: null, history: [] } satisfies AgentBrowserView) },
 })
-const box = (name: RegExp) => screen.getByRole('checkbox', { name })
+const cell = (name: string) => screen.getByRole('combobox', { name }) as HTMLSelectElement
 
 describe('ブラウザ操作を使える人', () => {
-  it('rows are people, columns are 作業 in plain words; ticks show grants in force; a 作業 waiting for review is greyed and cannot be ticked', async () => {
-    const calls = stubApi(ownerCapabilities, peopleRoutes(grants(), 'off'))
+  it('rows are people, columns are the registered sites; a cell is the person\'s level (見るだけ when nobody chose); no job names', async () => {
+    stubApi(ownerCapabilities, peopleRoutes(siteGrants(), 'off'))
     renderInCompany(<BrowserPeoplePage />)
-    await screen.findByRole('checkbox', { name: '鈴木 一郎：流入経路を点検する' })
-    expect(screen.getAllByText('流入経路を点検する')).toHaveLength(1) // one column for the three rows
-    expect(screen.getByText('（見るだけ）')).toBeInTheDocument()
-    expect(screen.getByText('（書き込む）')).toBeInTheDocument()
-    expect(screen.getByText(PEOPLE_WAITING)).toBeInTheDocument()
-    expect(box(/^鈴木 一郎：流入経路を点検する$/)).toBeChecked()
-    expect(box(/^田中 太郎：流入経路を点検する$/)).not.toBeChecked()
-    const waiting = box(/田中 太郎：流入経路を複製して作る（まだ使えません/)
-    expect(waiting).toBeDisabled()
-    await userEvent.click(waiting)
-    expect(writes(calls)).toEqual([])
+    await screen.findByRole('combobox', { name: `鈴木 一郎：${SHOP}` })
+    expect(screen.getByText(SHOP)).toBeInTheDocument()
+    expect(screen.getByText(TICKETS)).toBeInTheDocument()
+    expect(cell(`鈴木 一郎：${SHOP}`).value).toBe('write')
+    expect(cell(`田中 太郎：${SHOP}`).value).toBe('read')
+    expect(cell(`佐藤 花子：${TICKETS}`).value).toBe('read')
+    expect([...cell(`田中 太郎：${SHOP}`).options].map((o) => o.textContent)).toEqual([PERSON_LEVEL_LABELS.none, PERSON_LEVEL_LABELS.read, PERSON_LEVEL_LABELS.write])
     // The notes: the company's setting off; a person with no usable PC (田中 has a pending and a stopped one only).
     expect(screen.getByText(PEOPLE_COMPANY_OFF)).toBeInTheDocument()
-    const tanaka = screen.getByRole('checkbox', { name: /^田中 太郎：流入経路を点検する$/ }).closest('tr') as HTMLElement
+    const tanaka = cell(`田中 太郎：${SHOP}`).closest('tr') as HTMLElement
     expect(within(tanaka).getByRole('link', { name: PEOPLE_NO_PC })).toHaveAttribute('href', '/companies/co_123/advanced/ai-safety/browser/pcs')
-    const suzuki = box(/^鈴木 一郎：流入経路を点検する$/).closest('tr') as HTMLElement
-    expect(within(suzuki).queryByText(PEOPLE_NO_PC)).toBeNull()
-    // Nothing about hashes or versions on screen.
-    expect(document.body.textContent).not.toMatch(/sha256|1\.0\.\d/)
+    // Generic units only: no site's job words, no hash or version.
+    expect(document.body.textContent).not.toMatch(/sha256|1\.0\.\d|作業|点検/)
   })
 
-  it('a tick sends exactly the oldest approved row of that 作業 for that person, and stops once the newer rows carry it', async () => {
+  it('a choice sends exactly that person × site × level, once', async () => {
     const calls = stubApi(ownerCapabilities, {
-      ...peopleRoutes(grants()),
-      [`PUT ${base}/browser-line-grants/u_member`]: (call) => ({
-        body: ok(grants({ grants: [...grants().grants, grant('u_member', ROWS[1]), grant('u_member', ROWS[2], carried), grant('u_member', ROWS[0], carried)] })),
-        ...(call.body ? {} : { status: 400 }),
-      }),
+      ...peopleRoutes(siteGrants()),
+      [`PUT ${base}/browser-site-grants/u_member`]: { body: ok(siteGrants({ grants: [{ userId: 'u_member', host: SHOP, level: 'write', grantedBy: 'u_owner', updatedAt: '2026-11-25T00:00:00.000Z' }] })) },
     })
     renderInCompany(<BrowserPeoplePage />)
-    await userEvent.click(await screen.findByRole('checkbox', { name: '田中 太郎：流入経路を点検する' }))
-    await waitFor(() => expect(box(/^田中 太郎：流入経路を点検する$/)).toBeChecked())
-    expect(writes(calls)).toHaveLength(1)
-    expect(writes(calls)[0]).toMatchObject({ method: 'PUT', url: `${base}/browser-line-grants/u_member` })
-    expect(writes(calls)[0].body).toEqual({ site: 'lstep', line: 'landing_inspect', meaningHash: MEANING, mechanicsHash: H('1'), allowed: true })
+    await screen.findByRole('combobox', { name: `田中 太郎：${SHOP}` })
+    await userEvent.selectOptions(cell(`田中 太郎：${SHOP}`), 'write')
+    await waitFor(() => expect(writes(calls)).toHaveLength(1))
+    expect(writes(calls)[0]).toMatchObject({ method: 'PUT', url: `${base}/browser-site-grants/u_member`, body: { host: SHOP, level: 'write' } })
+    await waitFor(() => expect(cell(`田中 太郎：${SHOP}`).value).toBe('write'))
   })
 
-  it('a row no grant carries to gets its own call (oldest first), and nothing for another 作業 or person', async () => {
-    let n = 0
-    const calls = stubApi(ownerCapabilities, {
-      ...peopleRoutes(grants()),
-      [`PUT ${base}/browser-line-grants/u_member`]: () => {
-        n += 1
-        // The first grant is carried to 1.0.2 but not to 1.0.4 (no reviewed carry-over): a second call for 1.0.4.
-        const mine = n === 1 ? [grant('u_member', ROWS[1]), grant('u_member', ROWS[2], carried)]
-          : [grant('u_member', ROWS[1]), grant('u_member', ROWS[2], carried), grant('u_member', ROWS[0])]
-        return { body: ok(grants({ grants: [...grants().grants, ...mine] })) }
-      },
-    })
+  it('a site the company set to 見るだけ cannot be chosen 変えてよい; a person set so before shows the cap', async () => {
+    stubApi(ownerCapabilities, peopleRoutes(siteGrants({
+      grants: [{ userId: 'u_admin', host: TICKETS, level: 'write', grantedBy: 'u_owner', updatedAt: '2026-11-25T00:00:00.000Z' }],
+    })))
     renderInCompany(<BrowserPeoplePage />)
-    await userEvent.click(await screen.findByRole('checkbox', { name: '田中 太郎：流入経路を点検する' }))
-    await waitFor(() => expect(writes(calls)).toHaveLength(2))
-    expect(writes(calls).map((c) => [c.url, (c.body as { mechanicsHash: string }).mechanicsHash])).toEqual([
-      [`${base}/browser-line-grants/u_member`, H('1')],
-      [`${base}/browser-line-grants/u_member`, H('4')],
-    ])
-    expect(writes(calls).every((c) => (c.body as { line: string; allowed: boolean }).line === 'landing_inspect' && (c.body as { allowed: boolean }).allowed)).toBe(true)
+    await screen.findByRole('combobox', { name: `田中 太郎：${TICKETS}` })
+    expect(screen.getByText(PEOPLE_SITE_READ_ONLY)).toBeInTheDocument()
+    const write = [...cell(`田中 太郎：${TICKETS}`).options].find((o) => o.value === 'write')!
+    expect(write.disabled).toBe(true)
+    const suzuki = cell(`鈴木 一郎：${TICKETS}`).closest('td') as HTMLElement
+    expect(within(suzuki).getByText(PEOPLE_CAPPED)).toBeInTheDocument()
+    // On a site that allows writing, 変えてよい can be chosen.
+    expect([...cell(`田中 太郎：${SHOP}`).options].find((o) => o.value === 'write')!.disabled).toBe(false)
   })
 
-  it('an untick takes the 作業 away from that person in one call (the server removes carried grants too)', async () => {
-    const calls = stubApi(ownerCapabilities, {
-      ...peopleRoutes(grants()),
-      [`PUT ${base}/browser-line-grants/u_admin`]: { body: ok(grants({ grants: [] })) },
-    })
+  it('no registered site: says so and offers nothing to choose', async () => {
+    stubApi(ownerCapabilities, peopleRoutes(siteGrants({ sites: [], grants: [] })))
     renderInCompany(<BrowserPeoplePage />)
-    await userEvent.click(await screen.findByRole('checkbox', { name: '鈴木 一郎：流入経路を点検する' }))
-    await waitFor(() => expect(box(/^鈴木 一郎：流入経路を点検する$/)).not.toBeChecked())
-    expect(writes(calls)).toHaveLength(1)
-    expect(writes(calls)[0].body).toEqual({ site: 'lstep', line: 'landing_inspect', meaningHash: MEANING, mechanicsHash: H('4'), allowed: false })
-  })
-
-  it('a 作業 whose content changed asks to choose again; access to the earlier content shows ticked and one untick takes it away (Codex review)', async () => {
-    const old = { ...ROWS[1], meaningHash: H('o'), mechanicsHash: H('9'), mapVersion: '0.9.0' }
-    const calls = stubApi(ownerCapabilities, {
-      ...peopleRoutes(grants({ lines: [...ROWS, old], grants: [grant('u_member', old)] })),
-      [`PUT ${base}/browser-line-grants/u_member`]: { status: 400, body: { error: 'まだ使えない作業です', code: 'BROWSER_LINE_NOT_APPROVED' } },
-    })
-    renderInCompany(<BrowserPeoplePage />)
-    expect(await screen.findByText(PEOPLE_CHANGED)).toBeInTheDocument()
-    const tanaka = box(/^田中 太郎：流入経路を点検する$/)
-    expect(tanaka).toBeChecked()
-    expect(within(tanaka.closest('td') as HTMLElement).getByText(PEOPLE_PARTIAL)).toBeInTheDocument()
-    await userEvent.click(tanaka)
-    // A refused change is said and the table read again.
-    await waitFor(() => expect(calls.filter((c) => c.method === 'GET' && c.url.endsWith('/browser-line-grants'))).toHaveLength(2))
-    expect(writes(calls).map((c) => c.body)).toEqual([{ site: 'lstep', line: 'landing_inspect', meaningHash: MEANING, mechanicsHash: H('4'), allowed: false }])
-  })
-
-  it('a fill that stopped halfway still shows ticked (with the note), so it can be taken away', async () => {
-    stubApi(ownerCapabilities, peopleRoutes(grants({ grants: [grant('u_member', ROWS[1]), grant('u_member', ROWS[2], carried)] })))
-    renderInCompany(<BrowserPeoplePage />)
-    const tanaka = await screen.findByRole('checkbox', { name: '田中 太郎：流入経路を点検する' })
-    expect(tanaka).toBeChecked()
-    expect(within(tanaka.closest('td') as HTMLElement).getByText(PEOPLE_PARTIAL)).toBeInTheDocument()
-    expect(screen.queryByText(PEOPLE_CHANGED)).toBeNull()
+    expect(await screen.findByText(PEOPLE_NO_SITES)).toBeInTheDocument()
+    expect(screen.queryByRole('combobox')).toBeNull()
   })
 })
