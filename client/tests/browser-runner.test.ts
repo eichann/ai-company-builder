@@ -379,7 +379,7 @@ test('only the card\'s ［任せる］ reaches the runner: one composition makes
   assert.match(runWrite, /runner\.run\(/)
   assert.ok(runWrite.indexOf('mine(event') >= 0 && runWrite.indexOf('mine(event') < runWrite.indexOf('runner.run('))
   // …from a window that shows the card's consultation (the shell's one rule, chat-windows `showsConsultation`).
-  assert.match(writeSource.slice(writeSource.indexOf('function mine('), writeSource.indexOf('const answer = (e: Entry)')), /deps\.fromCardWindow\(event, \{ companyId, conversationId: e\.conversationId \}\)/)
+  assert.match(writeSource.slice(writeSource.indexOf('function mine('), writeSource.indexOf('const answer = (e: Entry)')), /fromCardWindow\(event, companyId, e\.conversationId\)/)
   for (const f of app.filter(f => /electron\/agents\/|chat-server|electron\/preload|\/src\/|browser-request\//.test(f))) {
     assert.doesNotMatch(fs.readFileSync(f, 'utf8'), /createBrowserWriteRunner|createLineWriteGate/, path.relative(clientDir, f))
   }

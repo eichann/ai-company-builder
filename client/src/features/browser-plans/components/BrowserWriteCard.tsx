@@ -5,6 +5,7 @@ import { STATE_BOX, type StateBoxTone } from '../../../shared/ui/stateStyles'
 import { BROWSER_WRITE_CARD_WORDS as W, type BrowserWriteGetResult, type BrowserWriteView } from '../../../../shared/browser-line-writes'
 import type { BrowserInspectionView } from '../../../../shared/browser-inspection'
 import { useInterval } from '../../../shared/hooks/useInterval'
+import { useEventListener } from '../../../shared/hooks/useEventListener'
 import { cancelBrowserWrite, confirmBrowserWrite, confirmBrowserWriteValue, getBrowserWriteCard, runBrowserWrite, type BrowserWriteAnswers, type BrowserWriteOutbound, type BrowserWriteReads } from '../api'
 import { WRITE_CARD_UNREADABLE, useBrowserWrite } from '../hooks/useBrowserWrite'
 import { putWrite } from '../writeStore'
@@ -50,11 +51,15 @@ export const BrowserWriteCard = memo(function BrowserWriteCard({ companyId, card
 }) {
   const { view, message, key } = useBrowserWrite(companyId, cardId, ports.reads)
   const [busy, setBusy] = useState(false)
-  // Read again while a run goes on or answer buttons are up (an answer given in the card's other window shows here too).
+  // Read again while a run goes on or answer buttons are up (an answer given in the card's other window shows here too),
+  // backing off; the window coming to the front starts the count again.
+  const [reads, setReads] = useState(0)
+  useEventListener(window, 'focus', () => setReads(0))
   useInterval(() => {
+    if (view?.result?.confirm) setReads(n => n + 1)
     void (ports.reads ? getBrowserWriteCard(companyId, cardId, ports.reads) : getBrowserWriteCard(companyId, cardId))
       .then(r => putWrite(key, r, WRITE_CARD_UNREADABLE)).catch(() => {})
-  }, writeCardRefreshMs(cardId, view ?? null, busy))
+  }, writeCardRefreshMs(cardId, view ?? null, busy, reads))
   const press = (call: () => Promise<BrowserWriteGetResult>) => {
     setBusy(true)
     void call()

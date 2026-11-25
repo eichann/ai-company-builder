@@ -3616,27 +3616,31 @@ so their buttons work there too — and only there and in the main window.
   a window of another consultation, an unknown sender (a preview page, the browser operation's window — no preload —, a
   document view), any frame inside a window (a plugin's frame, a document's). A card with no consultation (null): the main
   window only. A window that closed no longer counts.
-- **Injected** (`main.ts`: `fromCardWindow: (event, place) => chatWindows.showsConsultation(event, place.companyId,
-  place.conversationId)`) into the write cards' IPC (`write-lines.ts`): every read and press of a card — the line path's
-  `bl_` write card (its entry's `conversationId`) and a write run's `bf_` card (`frameCards.placeOf`, the work wiring's
-  entry: the consultation `browser_work` ran in) — asks it with **that card's own consultation**; no BrowserWindow check
-  anywhere else. A card the member does not have answers `gone` from any window.
+- **Injected as the registry itself** (`main.ts`: `cardWindows: chatWindows`, the very `ChatWindows` it made — a stand-in
+  would have to be a whole registry, by type) into the write cards' IPC (`write-lines.ts`), whose one `fromCardWindow`
+  asks it, for every read and press of a card — the line path's `bl_` write card (its entry's `conversationId`) and a
+  write run's `bf_` card (`frameCards.placeOf`, the work wiring's entry: the consultation `browser_work` ran in) —, with
+  **that card's own company and consultation**; no BrowserWindow check anywhere else. A card the member does not have
+  answers `gone` from any window. Tested with the real registry (independent review of #860).
 - **One press wins** when the card shows in two windows (the main window's inbox and the consultation's window): a press
-  while another is on its way (`Entry.pressing`, ［任せる］ and the answer) asks the server nothing and returns the card as it
-  stands **once that press is through** (Codex review: it waits for it, so it never shows buttons already answered); the
-  card moves on by itself in both — read again every 2 s while its run goes on and every 15 s while answer buttons are up,
-  also once they can be pressed (`writeCardRefreshMs`, `src/features/browser-plans/model.ts`), so an answer given in the
-  other window shows. A later press finds the card no longer `ready` (as before).
+  while another is on its way (`Entry.pressing`: a `bf_` card's ［任せる］ and answer, a `bl_` card's answer) asks the server
+  nothing and returns the card as it stands **once that press is through** (Codex review: it waits for it, so it never
+  shows buttons already answered); the card moves on by itself in both — read again every 2 s while a `bf_` run goes on,
+  and while answer buttons are up, also once they can be pressed, **backing off** (the polling-reduction plan;
+  `writeCardRefreshMs` / `WRITE_CARD_UNSETTLED_REFRESH`, `src/features/browser-plans/model.ts`): every 15 s for the first
+  2 minutes, every 60 s up to 10 minutes in all, then not at all until the card is shown again or its window comes to the
+  front (a `bl_` card's read asks the server). A later press finds the card no longer `ready` (as before).
 - **Unchanged**: the one-time approval value stays in the work wiring (main's memory); the AI's tools reach none of this;
   the read-only inspection's card (`browserLines:card`) stays main-window only.
 
 Tests: `client/tests/chat-windows.test.ts` (the rule: the main window, that consultation's window, not another's, not
 another company's, not with no consultation, not an unknown sender, not a frame inside, not once closed),
-`browser-write-lines-app.test.ts` (a `bl_` card from its consultation's window, never another's; a `bf_` card's read,
-［任せる］, ［やめる］ and answer only from a window showing its consultation, `gone` without a card),
+`browser-write-lines-app.test.ts` (with the real registry: a `bl_` card from its consultation's window, never another's
+or a frame inside its own; a `bf_` card's read, ［任せる］, ［やめる］ and answer only from a window showing its consultation,
+never a frame inside it, `gone` without a card; a `bl_` card answered from two windows at once: one answer asked),
 `browser-frame-writes.test.ts` (the card in two windows: one ［任せる］ and one answer asked of the server, the other
 window shown the outcome; a lost reply frees the next press), `src/features/browser-plans/model.test.ts` (when a card
-reads itself again). Each guard mutation-checked.
+reads itself again, and the back-off). Each guard mutation-checked.
 
 ## Not yet (later PRs)
 

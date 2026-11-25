@@ -24,6 +24,7 @@ import { canonicalJson } from '../../shared/core/fixed-content'
 import type { BrowserOpenedFile } from '../../shared/core/browser-opened'
 import { createBrowserContext } from '../electron/features/browser/context'
 import { wireBrowserWriteLines } from '../electron/features/browser/write-lines'
+import { registerChatWindowsIpc } from '../electron/features/chat-windows/ipc'
 import { browserInspectForTurn } from '../electron/browser-request/inspect-tool'
 import { BROWSER_WRITE_WORDS, type BrowserLineWriters, type BrowserWriteGetResult } from '../shared/browser-line-writes'
 import type { BrowserRunSurface, BrowserStepRecord, BrowserWriteOutcome } from '../shared/browser-runner'
@@ -80,7 +81,7 @@ const WRITERS: BrowserLineWriters = {
   },
 }
 
-function harness(o: { openedFile?: unknown; writers?: BrowserLineWriters; loseAnswer?: boolean; steps?: unknown[]; sites?: Parameters<typeof wireBrowserWriteLines>[1]['sites']; lines?: typeof LINES; extraGet?: (a: string) => { status: number; body: string } | null; frameCards?: Parameters<typeof wireBrowserWriteLines>[1]['frameCards'] } = {}) {
+function harness(o: { openedFile?: unknown; writers?: BrowserLineWriters; loseAnswer?: boolean; steps?: unknown[]; sites?: Parameters<typeof wireBrowserWriteLines>[1]['sites']; lines?: typeof LINES; extraGet?: (a: string) => { status: number; body: string } | null; frameCards?: Parameters<typeof wireBrowserWriteLines>[1]['frameCards']; confirmWait?: () => Promise<void> } = {}) {
   const landings = new Map<string, Record<string, unknown>>([['2597458', landing()]])
   const actions = new Map<string, Record<string, unknown>>([['7001', action([21])]])
   const reads: string[] = []
@@ -136,6 +137,7 @@ function harness(o: { openedFile?: unknown; writers?: BrowserLineWriters; loseAn
       })
       return ok({ id: `bl_${'c'.repeat(32)}`, state: 'draft', contentHash: `sha256:${createHash('sha256').update(content).digest('hex')}` }, 201)
     }
+    if (path.endsWith('/confirm') && o.confirmWait) await o.confirmWait()
     if (path.endsWith('/approve')) return ok({})
     if (path.endsWith('/claim')) return ok({ executionId: `bw_${'d'.repeat(32)}`, secret: 'e'.repeat(64), fixed: { content, contentHash: `sha256:${createHash('sha256').update(content).digest('hex')}` } })
     if (path.endsWith('/permit')) {
@@ -148,16 +150,23 @@ function harness(o: { openedFile?: unknown; writers?: BrowserLineWriters; loseAn
   }) as unknown as typeof fetch
   const handlers = new Map<string, (event: IpcInvokeEvent, ...args: unknown[]) => Promise<unknown>>()
   const ipc = { handle: (c: string, h: (event: IpcInvokeEvent, ...args: unknown[]) => Promise<unknown>) => { handlers.set(c, h) }, on() {} } as unknown as IpcRegistrar
+  let nextWindow = 2
+  const chatWindows = registerChatWindowsIpc(ipc, {
+    host: { open: () => nextWindow++, focus() {}, close() {} },
+    paths: { validate: p => p, rootOf: () => '/companies/one' },
+    isMainWindow: id => id === 1,
+    mainWindow: { send() {} },
+    focusMainWindow: () => true,
+    files: { notDownloadedFolder: () => null, isFile: () => false },
+    log: { warn() {} },
+  })
   const on = () => true
   const user = () => 'user-1'
   const records: BrowserStepRecord[] = []
   const wiring = wireBrowserWriteLines(ipc, {
-    // The shell's rule as main.ts injects it (chat-windows `showsConsultation`, tested there): 1 the main window, 2 the
-    // window of another consultation, 3 the window of this card's consultation.
-    aiSwitch: on, fromCardWindow: (event, place) => {
-      const id = (event as { sender: { id: number } }).sender.id
-      return id === 1 || (place.companyId === COMPANY && ((id === 2 && place.conversationId === 'conv-2') || (id === 3 && place.conversationId === 'conv-1')))
-    },
+    // The real chat windows' registry, handed in as main.ts hands it: 1 the main window, 2 the window the app opened for
+    // another consultation, 3 the one it opened for this card's consultation (opened below).
+    aiSwitch: on, cardWindows: chatWindows,
     baseUrl: () => 'https://acb.example', cookies: () => ['s=1'], userId: user, context: createBrowserContext({ userId: user, aiSwitch: on }),
     stopped: () => false, siteLevel: () => 'write', windows: { runWindow: () => run, previewWindow: () => preview },
     records: { has: id => records.some(r => r.planId === id), put: r => { records.push(r) } }, busyWindows: new Set(),
@@ -165,12 +174,17 @@ function harness(o: { openedFile?: unknown; writers?: BrowserLineWriters; loseAn
     lines: o.lines ?? LINES, declarations: [lstep.declaration], fetch: fetchFake, openedFile: o.openedFile ?? approvedOpened(),
     ...(o.frameCards ? { frameCards: o.frameCards } : {}),
   })
-  const ev = (sender: number) => ({ sender: { id: sender, isDestroyed: () => false, send() {} } }) as unknown as IpcInvokeEvent
+  // Every event from a window's main frame unless a frame inside it is named (a plugin's or a document's frame).
+  const ev = (sender: number, frame = 1) => ({ sender: { id: sender, isDestroyed: () => false, send() {}, mainFrame: { frameTreeNodeId: 1 } }, senderFrame: { frameTreeNodeId: frame } }) as unknown as IpcInvokeEvent
+  for (const conversation of ['conv-2', 'conv-1']) {
+    void handlers.get('chatWindow:open')!(ev(1), conversation, { companyId: COMPANY, companyName: 'One', rootPath: '/companies/one' })
+  }
   const call = (channel: string, sender: number, ...args: unknown[]) => handlers.get(channel)!(ev(sender), COMPANY, ...args) as Promise<BrowserWriteGetResult>
+  const callFromFrame = (channel: string, sender: number, ...args: unknown[]) => handlers.get(channel)!(ev(sender, 2), COMPANY, ...args) as Promise<BrowserWriteGetResult>
   const cards: string[] = []
   const tool = () => browserInspectForTurn({ inspectAvailable: () => true, inspect: async () => ({ kind: 'refused', words: '' }) },
     { companyId: COMPANY, conversationId: 'conv-1', signal: new AbortController().signal, onCard: id => cards.push(id) }, wiring)!.write!
-  return { wiring, call, cards, tool, reads, writes, server }
+  return { wiring, call, callFromFrame, cards, tool, reads, writes, server }
 }
 
 test('the AI proposes and gets fixed words only; nothing is read or asked until every person\'s value is confirmed on the card', async () => {
@@ -298,6 +312,8 @@ test('a card is pressed from the window that shows its consultation too, never f
   assert.ok(card.ok)
   if (!card.ok) return
   assert.equal((await h.call('browserLines:runWrite', 2, id, card.view.contentHash!)).ok, false)
+  // A frame inside its own window (a plugin's or a document's) is not the window.
+  assert.equal((await h.callFromFrame('browserLines:runWrite', 3, id, card.view.contentHash!)).ok, false)
   assert.deepEqual(h.writes, [])
   assert.ok((await h.call('browserLines:runWrite', 3, id, card.view.contentHash!)).ok)
   assert.equal(h.writes.length > 0, true)
@@ -318,6 +334,8 @@ test('a write run\'s card (bf_) is read and pressed only from a window showing i
     },
   })
   for (const sender of [2, 99]) {
+    assert.equal((await h.callFromFrame('browserLines:runWrite', 3, RUN, 'sha256:x')).ok, false)
+    assert.equal((await h.callFromFrame('browserLines:confirmWrite', 3, RUN, 'done')).ok, false)
     assert.equal((await h.call('browserLines:writeCard', sender, RUN)).ok, false)
     assert.equal((await h.call('browserLines:runWrite', sender, RUN, 'sha256:x')).ok, false)
     assert.equal((await h.call('browserLines:cancelWrite', sender, RUN)).ok, false)
@@ -337,4 +355,25 @@ test('a write run\'s card (bf_) is read and pressed only from a window showing i
   place = null
   assert.equal((await h.call('browserLines:runWrite', 1, RUN, 'sha256:x')).ok, false)
   assert.equal(pressed.length, 8)
+})
+
+test('a write in doubt answered from two windows at once: one answer reaches the server, the other window shows it', async () => {
+  let release: () => void = () => {}
+  const held = new Promise<void>(resolve => { release = resolve })
+  const h = harness({ loseAnswer: true, confirmWait: () => held, steps: [{ index: 1, state: 'unknown', confirmableAt: new Date(Date.now() - 1_000).toISOString() }, { index: 2, state: 'pending', confirmableAt: null }] })
+  await h.tool().execute({ site: 'lstep', line: 'landing_create', values: PROPOSED })
+  const id = h.cards[0]
+  for (const n of ['name', 'to_date', 'to_time']) await h.call('browserLines:confirmValue', 1, id, n)
+  const card = await h.call('browserLines:writeCard', 1, id)
+  if (!card.ok) throw new Error('no card')
+  await h.call('browserLines:runWrite', 1, id, card.view.contentHash!)
+  const mainPress = h.call('browserLines:confirmWrite', 1, id, 'not_done')
+  const popoutPress = h.call('browserLines:confirmWrite', 3, id, 'done')
+  await new Promise(resolve => setTimeout(resolve, 10))
+  release()
+  const [first, second] = await Promise.all([mainPress, popoutPress])
+  assert.ok(first.ok && second.ok)
+  assert.equal(h.server.filter(r => r.path.endsWith('/confirm')).length, 1)
+  assert.deepEqual(first.ok && first.view.result, second.ok && second.view.result, 'the other window shows the one answer given')
+  assert.equal(second.ok && second.view.result?.confirm, null)
 })

@@ -743,8 +743,8 @@ const browserInspections = wireBrowserInspections(ipc, {
 // come with the owner's test write, PR 7), so every line that writes is refused before anything is read.
 const browserWrites = wireBrowserWriteLines(ipc, {
   aiSwitch: browserAiSwitch,
-  // A write card is pressed only from a window showing its consultation: the chat windows' one rule.
-  fromCardWindow: (event, place) => chatWindows.showsConsultation(event, place.companyId, place.conversationId),
+  // A write card is pressed only from a window showing its consultation: the chat windows' registry and its one rule.
+  cardWindows: chatWindows,
   baseUrl: getServerApiUrl,
   cookies: session.cookies,
   deviceKey: browserDeviceKey.header,

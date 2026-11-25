@@ -3,7 +3,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import type { BrowserFact } from '../../../../shared/core/browser-plans'
 import type { BrowserExecutionView, BrowserPlanView } from '../../../../shared/types/browser-plans'
-import { WRITE_CARD_LIVE_REFRESH_MS, WRITE_CARD_UNSETTLED_REFRESH_MS, notReadyText, planContent, planStatus, runResultText, writeCardRefreshMs } from './model'
+import { WRITE_CARD_LIVE_REFRESH_MS, WRITE_CARD_UNSETTLED_REFRESH, notReadyText, planContent, planStatus, runResultText, writeCardRefreshMs } from './model'
 import type { BrowserWriteView } from '../../../shared/browser-line-writes'
 
 const at = '2026-11-22T03:00:00.000Z'
@@ -77,8 +77,16 @@ test('a write card reads itself again while its run goes on, and while answer bu
   const result = (confirm: { from: string | null; canNow: boolean } | null) => ({ outcome: 'unknown' as const, headline: '', done: [], notDone: [], unknown: ['x'], byHand: [], confirm })
   const bf = `bf_${'1'.repeat(32)}`
   assert.equal(writeCardRefreshMs(bf, card({ phase: 'running' }), false), WRITE_CARD_LIVE_REFRESH_MS)
-  assert.equal(writeCardRefreshMs(bf, card({ result: result({ from: null, canNow: true }) }), false), WRITE_CARD_UNSETTLED_REFRESH_MS)
-  assert.equal(writeCardRefreshMs(bf, card({ result: result({ from: at, canNow: false }) }), false), WRITE_CARD_UNSETTLED_REFRESH_MS)
+  assert.equal(writeCardRefreshMs(bf, card({ result: result({ from: null, canNow: true }) }), false), 15_000)
+  assert.equal(writeCardRefreshMs(bf, card({ result: result({ from: at, canNow: false }) }), false), 15_000)
+  // Backing off: 15 s for the first 2 minutes, 60 s up to 10 minutes in all, then nothing (until shown or focused again).
+  const doubt = card({ result: result({ from: null, canNow: true }) })
+  const delays = Array.from({ length: 20 }, (_, reads) => writeCardRefreshMs(bf, doubt, false, reads))
+  assert.deepEqual(delays.slice(0, 8), Array(8).fill(15_000))
+  assert.deepEqual(delays.slice(8, 16), Array(8).fill(60_000))
+  assert.deepEqual(delays.slice(16), Array(4).fill(null))
+  assert.equal(delays.reduce<number>((sum, d) => sum + (d ?? 0), 0), 10 * 60_000)
+  assert.deepEqual(WRITE_CARD_UNSETTLED_REFRESH, { firstMs: 15_000, firstReads: 8, laterMs: 60_000, laterReads: 8 })
   assert.equal(writeCardRefreshMs(bf, card({ result: result({ from: null, canNow: true }) }), true), null)
   assert.equal(writeCardRefreshMs(bf, card({ result: result(null) }), false), null)
   assert.equal(writeCardRefreshMs(`bl_${'1'.repeat(32)}`, card({ phase: 'running' }), false), null)

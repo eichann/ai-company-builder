@@ -68,7 +68,7 @@ Full text: `docs/architecture/main-process-and-ipc.md` (internal).
   operator run's card, a `bo_` id, held by `features/browser/browse.ts`: "The operator's window tools"); and
   browserLines:writeCard / confirmValue / runWrite / confirmWrite: a write card held in main's memory, the member's own,
   from a window that shows its consultation — the main window or the consultation's own window (「別ウィンドウで開く」), main
-  frame only: chat-windows `showsConsultation`, injected as `fromCardWindow`; `agent-browser.md` "A card in its
+  frame only: chat-windows `showsConsultation`, the registry injected as `cardWindows`; `agent-browser.md` "A card in its
   consultation's own window" —, `features/browser/write-lines.ts`, `agent-browser.md` "Writing on the new path" (also a write run's card, a
   `bf_` id, held by `features/browser/work.ts`, and its ［やめる］ browserLines:cancelWrite: "Writes within frames, in the app";
   the one-time approval value never leaves main); and browserDevice:get / register /
