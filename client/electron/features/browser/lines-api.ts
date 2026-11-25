@@ -21,6 +21,8 @@ import { BROWSER_LINE_PLAN_ID_RE } from '../../../shared/browser-inspection'
 import type { BrowserInspectionReport, BrowserLineReporter } from './read-line-runner'
 import { BROWSER_EXECUTION_HEADER } from './plans-api'
 import { BROWSER_DEVICE_HEADER } from '../../../../shared/core/browser-device'
+import { BROWSER_RUN_ID_RE } from '../../../../shared/core/browser-run-log'
+import type { BrowserRunFinish } from '../../../../shared/types/browser-runs'
 
 /** A server answer (the same three kinds as the plans' client; this module never imports the old path's runner). */
 export type BrowserLinesAnswer = { kind: 'ok'; value: unknown } | { kind: 'refused'; code: string | null } | { kind: 'no-answer' }
@@ -60,9 +62,19 @@ export interface BrowserLineWritesApi {
   confirm(companyId: string, executionId: string, index: number, result: 'done' | 'not_done'): Promise<BrowserLinesAnswer>
 }
 
+/** The operator's runs (agent-browser.md "The operator's window tools"; server routes/browser-runs.ts). */
+export interface BrowserRunsApi {
+  /** `POST /browser-runs { host, conversationId? }` + this PC's key: the server's gate and the company × domain lock. */
+  runStart(companyId: string, body: { host: string; conversationId?: string }): Promise<BrowserLinesAnswer>
+  /** `POST /browser-runs/:runId/continue` + this PC's key: the gate again before a step; the lease renewed. */
+  runContinue(companyId: string, runId: string): Promise<BrowserLinesAnswer>
+  /** `POST /browser-runs/:runId/finish { outcome, reason?, steps }`: the log (no value) and the lock released. */
+  runFinish(companyId: string, runId: string, body: BrowserRunFinish): Promise<BrowserLinesAnswer>
+}
+
 const refusedLocally: BrowserLinesAnswer = { kind: 'refused', code: null }
 
-export function createBrowserLinesHttp(deps: BrowserLinesHttpDeps): BrowserLinesHttp & BrowserLineWritesApi {
+export function createBrowserLinesHttp(deps: BrowserLinesHttpDeps): BrowserLinesHttp & BrowserLineWritesApi & BrowserRunsApi {
   const doFetch = deps.fetch ?? fetch
 
   /** 2xx with `data` → ok; 4xx → refused (the server's code); anything else → no answer. */
@@ -116,6 +128,13 @@ export function createBrowserLinesHttp(deps: BrowserLinesHttpDeps): BrowserLines
       ? post('/api/browser-line-executions/report', body, { session: false, secret }) : refusedLocally,
     confirm: async (companyId, executionId, index, result) => execOk(companyId, executionId) && Number.isSafeInteger(index) && index >= 1
       ? post(`${company(companyId)}/browser-line-executions/${executionId}/confirm`, { index, result }) : refusedLocally,
+    // The operator's runs (agent-browser.md "The operator's window tools"): the start and every continue are gated (this PC's
+    // key); the finish is clean-up (the log and the lock), never gated.
+    runStart: async (companyId, body) => companyOk(companyId) ? post(`${company(companyId)}/browser-runs`, body, { device: true }) : refusedLocally,
+    runContinue: async (companyId, runId) => companyOk(companyId) && BROWSER_RUN_ID_RE.test(runId)
+      ? post(`${company(companyId)}/browser-runs/${runId}/continue`, {}, { device: true }) : refusedLocally,
+    runFinish: async (companyId, runId, body) => companyOk(companyId) && BROWSER_RUN_ID_RE.test(runId)
+      ? post(`${company(companyId)}/browser-runs/${runId}/finish`, body) : refusedLocally,
     createInspection: async (companyId, body) => companyOk(companyId) ? post(`${company(companyId)}/browser-line-plans`, body, { device: true }) : refusedLocally,
     // The result: exactly { reads, checks } (fixed words), once per plan; the runner calls it only for a judged run.
     result: async (companyId: string, planId: string, report: BrowserInspectionReport) => companyOk(companyId) && BROWSER_LINE_PLAN_ID_RE.test(planId)

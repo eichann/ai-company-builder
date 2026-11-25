@@ -70,6 +70,7 @@ import { pluginBridgeRoute } from './routes/plugin-bridge'
 import { pluginStepsRoute } from './routes/plugin-steps'
 import { browserPlansRoute, browserReportRoute } from './routes/browser-plans'
 import { browserLineReportRoute, browserLinesRoute } from './routes/browser-lines'
+import { browserRunsRoute } from './routes/browser-runs'
 import { browserDevicesRoute } from './routes/browser-devices'
 import { browserRecordingsRoute } from './routes/browser-recordings'
 import { browserSkillsRoute } from './routes/browser-skills'
@@ -265,4 +266,5 @@ app.route('/api/companies/:companyId', browserDevicesRoute)
 app.route('/api/companies/:companyId', browserRecordingsRoute)
 app.route('/api/companies/:companyId', browserSkillsRoute)
 app.route('/api', browserLineReportRoute)
+app.route('/api/companies/:companyId', browserRunsRoute)
 // lane C ▲

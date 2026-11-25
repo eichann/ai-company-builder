@@ -69,7 +69,8 @@ const fail = (error: unknown) => {
   writeResult({ error: error instanceof Error ? error.stack : String(error) })
   app.exit(1)
 }
-setTimeout(() => fail(new Error('the harness timed out')), 90_000)
+// The whole harness (the operator's window tools added ~20 s of scenarios on a quiet Mac): room for a busy runner.
+setTimeout(() => fail(new Error('the harness timed out')), 150_000)
 
 function loaded(win: BrowserShellWindow): Promise<void> {
   return new Promise(resolve => {
@@ -162,6 +163,7 @@ async function run() {
   result.helpers = await helperScenarios(win, js)
   result.runner = await runnerScenarios(win, site, sites, js, partition)
   result.recording = await recordingScenarios(win, shell, site, js)
+  result.browse = await browseScenarios(win, sites)
 
   // The login: a cookie and storage of the site, then cleared.
   await js(`document.cookie = 'sid=1; Secure; Max-Age=3600'; localStorage.setItem('k', 'v'); 1`)
@@ -265,6 +267,100 @@ async function recordingScenarios(win: BrowserShellWindow, shell: ReturnType<typ
   out.endedOnClose = endedOther
   await page.loadURL('https://op.test/')
   await wait(800)
+  return out
+}
+
+/**
+ * The operator's window tools (agent-browser.md "The operator's window tools"): in the window's `ai` mode with a gate that
+ * refuses every write, the operator's real presses and typing — a form's submit, a button that writes by fetch, one behind a
+ * confirm dialog — send nothing; a link to another site goes nowhere; a page of the site opens; the snapshot never reads a
+ * password field's value.
+ */
+async function browseScenarios(win: BrowserShellWindow, sites: Sites) {
+  const out: Record<string, unknown> = {}
+  const page = win.webContents
+  await page.loadURL('https://op.test/browse')
+  await wait(800)
+  const writesBefore = sites.hits.filter(h => h.method !== 'GET' && h.method !== 'HEAD').length
+  // File choosers the page opened (the gate's DevTools connection tells every listener).
+  let choosers = 0
+  const onMessage = (_e: unknown, method: string) => { if (method === 'Page.fileChooserOpened') choosers++ }
+  out.entered = await win.browse.enter(() => false)
+  page.debugger.on('message', onMessage)
+  const signal = new AbortController().signal
+  const snapshot = async () => {
+    const s = await win.browse.snapshot()
+    return (name: string) => s?.elements.find(e => e.name === name)?.ref ?? -1
+  }
+  /** The page's own record of the presses that reached it (its script, sites.ts). */
+  const pressed = async (): Promise<string[]> => JSON.parse(String(await page.executeJavaScript('JSON.stringify(window.__clicks || [])', true).catch(() => '[]')))
+  /**
+   * A press, done again (at most 3 times) until the page saw it: on a busy machine a real press may land before the page is
+   * drawn. What is asserted is what the presses could never do (a write, another site), so a retry hides nothing.
+   */
+  const press = async (name: string, id: string): Promise<string> => {
+    let result = 'failed'
+    for (let i = 0; i < 3; i++) {
+      const ref = await snapshot()
+      result = await win.browse.act({ do: 'click', ref: ref(name) }, signal)
+      if ((await pressed()).includes(id)) return result
+      await wait(300)
+    }
+    return `${result} (not seen by the page)`
+  }
+  const first = await snapshot()
+  out.snapshot = await win.browse.snapshot()
+  out.typed = await win.browse.act({ do: 'type', ref: first('検索'), text: '山田花子' }, signal)
+  out.typedValue = await page.executeJavaScript(`document.getElementById('q').value`, true)
+  out.selected = await win.browse.act({ do: 'select', ref: first('並び順'), option: '古い順' }, signal)
+  out.selectedValue = await page.executeJavaScript(`document.getElementById('order').value`, true)
+  // The form's submit: its POST is refused by the gate, and the page is left on its error page.
+  out.submit = await win.browse.act({ do: 'click', ref: first('保存して送信') }, signal)
+  await win.browse.act({ do: 'go', path: '/browse' }, signal)
+  out.fetchClick = await press('すぐ保存', 'fetch')
+  out.confirmClick = await press('消す', 'confirm')
+  out.evilClick = await press('外のサイト', 'evil')
+  out.urlAfterEvil = page.getURL()
+  // A link of the site: pressed again until the page went there (it is a press that may land before a frame is drawn).
+  for (let i = 0; i < 3 && page.getURL() !== 'https://op.test/browse-next'; i++) {
+    const ref = await snapshot()
+    out.next = await win.browse.act({ do: 'click', ref: ref('次のページ') }, signal)
+    for (let j = 0; j < 30 && page.getURL() !== 'https://op.test/browse-next'; j++) await wait(100)
+  }
+  out.urlAfterNext = page.getURL()
+  out.back = await win.browse.act({ do: 'back' }, signal)
+  out.urlAfterBack = page.getURL()
+  // An address that would name another host (the parser refuses it first; the window checks again).
+  out.goOther = await win.browse.act({ do: 'go', path: '@evil.test/x' }, signal)
+  out.go = await win.browse.act({ do: 'go', path: '/browse-next' }, signal)
+  out.urlAfterGo = page.getURL()
+  // A navigation to a page that never answers ends when the run is stopped (and the load is stopped).
+  const stop = new AbortController()
+  setTimeout(() => stop.abort(), 500)
+  const hangAt = Date.now()
+  out.hang = await win.browse.act({ do: 'go', path: '/browse-hang' }, stop.signal)
+  out.hangMs = Date.now() - hangAt
+  // A press that starts a write for later (a timer): once the operator leaves, the page was loaded afresh, so it never fires.
+  await win.browse.act({ do: 'go', path: '/browse' }, signal)
+  // A file chooser never opens a dialog of this computer (intercepted; its event comes a moment after the press).
+  for (let i = 0; i < 3 && choosers === 0; i++) {
+    out.pick = await press('ファイルを選ぶ', 'pick')
+    for (let j = 0; j < 10 && choosers === 0; j++) await wait(100)
+  }
+  out.choosers = choosers
+  out.later = await press('あとで保存', 'later')
+  // A page that asks to stay (beforeunload) while a debounced save waits: it is let go all the same (review M).
+  out.draft = await press('下書き', 'draft')
+  page.debugger.removeListener('message', onMessage)
+  await win.browse.leave()
+  out.openAfterLeave = !page.isDestroyed()
+  out.urlAfterLeave = page.isDestroyed() ? '' : page.getURL()
+  // The writes the presses scheduled (4 s, 4.5 s) would have gone by now.
+  await wait(5500)
+  out.writes = sites.hits.filter(h => h.method !== 'GET' && h.method !== 'HEAD').slice(writesBefore).map(h => `${h.method} ${h.host}${h.path}`)
+  out.evilHits = sites.hits.filter(h => h.host === 'evil.test' && h.path.startsWith('/browse')).length
+  await page.loadURL('https://op.test/')
+  await wait(500)
   return out
 }
 

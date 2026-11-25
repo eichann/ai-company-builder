@@ -20,8 +20,11 @@ import { BROWSER_WRITE_TOOL } from '../../shared/browser-inspection'
 import { BROWSER_WRITE_WORDS as WW } from '../../shared/browser-line-writes'
 import type { BrowserWriteProposeOutcome } from '../features/browser/write-lines'
 import { BROWSER_CATALOG_NONE } from '../../shared/browser-tool-catalog'
+import { BROWSER_BROWSE_LIMITS, BROWSER_BROWSE_TOOL, BROWSER_BROWSE_WORDS as BW, browseHeading } from '../../shared/browser-browse'
+import { normalizeBrowserHost } from '../../../shared/core/browser-operation'
+import type { BrowserBrowseOutcome } from '../features/browser/browse'
 
-export { BROWSER_INSPECT_TOOL, BROWSER_WRITE_TOOL }
+export { BROWSER_INSPECT_TOOL, BROWSER_WRITE_TOOL, BROWSER_BROWSE_TOOL }
 
 const NAME_RE = /^[a-z][a-z0-9_]{0,63}$/
 const VALUE_KEY_RE = /^[a-z][a-z0-9_]{0,31}$/
@@ -57,6 +60,73 @@ export interface BrowserInspectTools {
    * card; the AI gets fixed words only.
    */
   write?: { description: string; execute(args: unknown): Promise<string> }
+  /**
+   * `browser_browse` (redesign step ④, agent-browser.md "The operator's window tools"): a read task on a registered domain,
+   * done by the operator in the member's window. Given only with its wiring and the switch on. Fixed words only.
+   */
+  browse?: { description: string; execute(args: unknown): Promise<string> }
+}
+
+export const browserBrowseSchema = z.object({
+  site: z.string().describe('サイトのドメイン（下の一覧のどれか）。The registered domain, as listed in the description.'),
+  task: z.string().describe('サイトでしてほしいことを文で（読むだけ。1000字まで）。The read task in words (1000 characters at most).'),
+  items: z.array(z.string()).optional().describe('読んでほしいものの見出し（10個まで、各40字まで）。読めなかったものは見出しで返る。Headings of what to read; the unread ones come back by heading.'),
+})
+
+/** The browse tool's description for one turn: the shared words, then the domains this company registered. */
+export function browserBrowseDescription(domains: readonly string[]): string {
+  return 'ユーザーに頼まれたとき、会社が登録したサイトの画面を、別の係の AI に読んでもらう（読むだけ。サイトは何も変えない。保存や送信はアプリが止める）。' +
+    'ユーザーがこのパソコンでそのサイトの窓を開いてログインしている必要がある。読み取った内容はカードとして相談に出て、ユーザーだけが見る。' +
+    'あなたに返るのは決まった言葉（済みました／止まりました／読めなかったもの：あなたが渡した見出し）だけ。サイトの内容はあなたには見えないので、推測して書かない。' +
+    '1回に数分かかることがある。ユーザーがはっきり頼んだときだけ呼ぶ。\n' +
+    'Ask a separate operator AI to read pages of a domain the company registered, in the member\'s logged-in window (read only). ' +
+    'The result is a card for the member; you get fixed words only.\n' +
+    `頼めるサイト（Registered domains）:\n${domains.length > 0 ? domains.map(d => `- ${d}`).join('\n') : BROWSER_CATALOG_NONE}`
+}
+
+/** `browser_browse`'s tool: checks the input's shape, runs the read task, puts the card's reference into the reply. */
+export function createBrowserBrowseTool(
+  run: (input: { site: string; task: string; items: string[] }) => Promise<BrowserBrowseOutcome>,
+  onCard: (runId: string) => void,
+  domains: readonly string[] = [],
+): { description: string; execute(args: unknown): Promise<string> } {
+  // A few read tasks per turn (independent review): the done / stop words and unread numbers are a channel of a few bits
+  // whose questions the chat AI writes, so the number of answers it can collect in one turn is bounded.
+  let calls = 0
+  return {
+    description: browserBrowseDescription(domains),
+    async execute(args) {
+      if (calls >= BROWSER_BROWSE_LIMITS.callsPerTurn) return BW.tooMany
+      const a = (args && typeof args === 'object' ? args : {}) as Record<string, unknown>
+      if (typeof a.site !== 'string' || normalizeBrowserHost(a.site) !== a.site) return BW.badInput
+      if (typeof a.task !== 'string' || a.task.trim() === '' || a.task.length > BROWSER_BROWSE_LIMITS.task) return BW.badInput
+      const given = a.items === undefined ? [] : a.items
+      if (!Array.isArray(given) || given.length > BROWSER_BROWSE_LIMITS.items) return BW.badInput
+      const items: string[] = []
+      for (const h of given) {
+        const heading = browseHeading(h)
+        if (!heading) return BW.badInput
+        items.push(heading)
+      }
+      let outcome: BrowserBrowseOutcome
+      calls++
+      try {
+        outcome = await run({ site: a.site, task: a.task, items })
+      } catch {
+        return BW.failed
+      }
+      if (outcome.kind === 'card') onCard(outcome.runId)
+      return outcome.words
+    },
+  }
+}
+
+/** The browse wiring's side the tool needs (features/browser/browse.ts). */
+export interface BrowserBrowsePlans {
+  available(): boolean
+  /** The domains this company registered (its current valid policy): the only ones the tool names. */
+  domains(companyId: string): string[]
+  browse(input: { companyId: string; conversationId: string | null; site: string; task: string; items: readonly string[]; signal: AbortSignal }): Promise<BrowserBrowseOutcome>
 }
 
 export const browserWriteSchema = z.object({
@@ -152,11 +222,19 @@ export function browserInspectForTurn(
   plans: BrowserInspectPlans | undefined,
   turn: { companyId: string; conversationId: string | null; signal: AbortSignal; onCard: (planId: string) => void },
   writes?: BrowserWritePlans,
+  browses?: BrowserBrowsePlans,
 ): BrowserInspectTools | undefined {
   if (!plans || !plans.inspectAvailable()) return undefined
-  const tools = createBrowserInspectTools(input => plans.inspect({
+  const inspect = createBrowserInspectTools(input => plans.inspect({
     companyId: turn.companyId, conversationId: turn.conversationId, signal: turn.signal, site: input.site, line: input.line, values: input.values,
   }), turn.onCard, plans.catalog?.(turn.companyId))
+  // The read task on a registered domain: the same switch, the turn's signal (closing or stopping the consultation stops it).
+  const tools: BrowserInspectTools = browses && browses.available() ? {
+    ...inspect,
+    browse: createBrowserBrowseTool(input => browses.browse({
+      companyId: turn.companyId, conversationId: turn.conversationId, signal: turn.signal, site: input.site, task: input.task, items: input.items,
+    }), turn.onCard, browses.domains(turn.companyId)),
+  } : inspect
   if (!writes || !writes.writeAvailable()) return tools
   return {
     ...tools,

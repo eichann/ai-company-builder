@@ -55,6 +55,7 @@ interface Result {
   runner: Record<string, unknown>
   helpers: Record<string, unknown>
   recording: Record<string, unknown>
+  browse: Record<string, unknown>
 }
 
 function freePort(): Promise<number> {
@@ -97,7 +98,7 @@ before(async () => {
     let err = ''
     child.stdout.on('data', chunk => { out += chunk })
     child.stderr.on('data', chunk => { err += chunk })
-    const timer = setTimeout(() => { child.kill('SIGKILL'); reject(new Error(`the Electron harness did not finish:\n${out}\n${err.slice(-4000)}`)) }, 120_000)
+    const timer = setTimeout(() => { child.kill('SIGKILL'); reject(new Error(`the Electron harness did not finish:\n${out}\n${err.slice(-4000)}`)) }, 180_000)
     // `close`: the process exited and its output streams ended; the result file was renamed into place before.
     child.on('close', () => { clearTimeout(timer); resolve(`${out}\n${err.slice(-4000)}`) })
   })
@@ -401,4 +402,38 @@ test('recording and the AI never hold the window together; the preview reads not
   assert.deepEqual(r.ended, [], 'stopping is not an end the recording is discarded for')
   assert.equal(r.otherStarted, true)
   assert.deepEqual(r.endedOnClose, ['closed'])
+})
+
+test('the operator\'s window tools read only: a submit, a fetch button, a confirmed button and a write scheduled for after the run send nothing; another site is never reached; a stopped navigation ends', { skip }, () => {
+  const r = result.browse
+  assert.equal(r.entered, true)
+  const snap = r.snapshot as { address: string; elements: Array<{ role: string; name: string; value?: string }> }
+  assert.equal(snap.address, '/browse')
+  assert.equal(JSON.stringify(snap).includes('pw-in-page-5555'), false, 'a password field\'s value is never read')
+  assert.deepEqual(snap.elements.find(e => e.role === 'password')?.value, undefined)
+  // Real typing and choosing work…
+  assert.equal(r.typed, 'ok')
+  assert.equal(r.typedValue, '山田花子')
+  assert.equal(r.selected, 'ok')
+  assert.equal(r.selectedValue, '古い順')
+  // …but no press made a write leave the window: the form's submit, a fetch, a confirm (dismissed, never accepted).
+  assert.deepEqual(r.writes, [])
+  assert.equal(r.evilHits, 0)
+  assert.match(String(r.urlAfterEvil), /^https:\/\/op\.test\//)
+  // Pages of the site open (a link, back, an address of the site); another site's address does not.
+  assert.equal(r.next, 'ok')
+  assert.equal(r.urlAfterNext, 'https://op.test/browse-next')
+  assert.equal(r.back, 'ok')
+  assert.equal(r.urlAfterBack, 'https://op.test/browse')
+  assert.equal(r.goOther, 'failed')
+  assert.equal(r.urlAfterGo, 'https://op.test/browse-next')
+  assert.equal(r.hang, 'failed')
+  assert.ok(Number(r.hangMs) < 3000, `a stopped navigation ends at once (${String(r.hangMs)} ms)`)
+  for (const k of ['fetchClick', 'confirmClick', 'evilClick', 'later', 'draft']) assert.equal(r[k], 'ok', `${k}: the page saw the press`)
+  assert.equal(r.draft, 'ok')
+  assert.equal(r.openAfterLeave, true, 'a page asking to stay (beforeunload) is loaded afresh all the same, not closed')
+  assert.equal(r.urlAfterLeave, 'https://op.test/browse')
+  assert.equal(r.pick, 'ok')
+  assert.ok(Number(r.choosers) > 0, 'the page opened a file chooser')
+  assert.ok(result.refusalLog.some(l => l.includes('file-chooser')), 'the file chooser was intercepted and refused')
 })

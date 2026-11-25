@@ -16,6 +16,7 @@ import {
   readOperatorMessage, resolveClaudeBrowserOperatorCli, runClaudeBrowserOperatorStep, type BrowserOperatorCli,
 } from '../electron/agents/claude-browser-operator'
 import { browserOperatorArgs, BROWSER_OPERATOR_SYSTEM_PROMPT, operatorInitProblem } from '../shared/browser-operator'
+import { BROWSER_OPERATOR_BROWSE_PROMPT } from '../shared/browser-browse'
 import { AGENTS } from '../shared/agents/registry'
 import { browserOperatorOf } from '../electron/agents/registry'
 
@@ -107,6 +108,12 @@ test('the operator starts with exactly the closed arguments, in a fresh empty fo
     '--setting-sources', '', '--disable-slash-commands', '--no-session-persistence', '--max-turns', '1',
     '--output-format', 'stream-json', '--verbose', '--system-prompt', BROWSER_OPERATOR_SYSTEM_PROMPT,
   ])
+  // The window tools' start (agent-browser.md "The operator's window tools") is the same closed start — still no tool —
+  // with only its own fixed prompt.
+  const browse = browserOperatorArgs(MODEL, 'browse')
+  assert.deepEqual(browse.slice(0, -1), browserOperatorArgs(MODEL).slice(0, -1))
+  assert.equal(browse.at(-1), BROWSER_OPERATOR_BROWSE_PROMPT)
+  assert.equal(browse[browse.indexOf('--tools') + 1], '')
   assert.equal(call.stdin, JSON.stringify({ request: 'material' }), 'the material is data on stdin')
   // The final environment the child got: the table, plus what /bin/sh itself sets.
   const shellOwn = new Set(['PWD', 'SHLVL', '_', 'OLDPWD', '__CF_USER_TEXT_ENCODING'])

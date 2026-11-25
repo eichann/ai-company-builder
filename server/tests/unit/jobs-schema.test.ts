@@ -70,6 +70,9 @@ const LATER_TABLES = [
   'browser_recordings',
   // agent-browser.md "A Skill's browser declaration and its approval": which version of a Skill's declaration is approved.
   'browser_skill_approvals',
+  // agent-browser.md "The operator's window tools": the operator's runs and their log.
+  'browser_runs',
+  'browser_run_log',
   // private-folders.md "Access removed: holding tickets": who stopped reading which private folder.
   'holding_tickets',
   // private-folders.md "Holding: the member's upload": what members handed over with their tickets.

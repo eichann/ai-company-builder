@@ -10,6 +10,7 @@
  */
 import { BROWSER_CARD_MARK_WORDS, type BrowserCard, type BrowserCardMark, type BrowserCardRow, type BrowserCardValue } from '../../shared/core/browser-card'
 import { BROWSER_REQUEST_SERVER, BROWSER_COMPANY_ID_RE } from './browser-plans'
+import { BROWSER_RUN_ID_RE } from '../../shared/core/browser-run-log'
 
 /** The consultation AI's inspection tool (`mcp__acb_browser__browser_inspect`; electron/browser-request/inspect-tool.ts). */
 export const BROWSER_INSPECT_TOOL = 'browser_inspect'
@@ -31,7 +32,10 @@ export interface BrowserInspectionRef {
   id: string
   companyId: string
   conversationId: string | null
-  /** An inspection's server plan (`bl_…`), or a write card's id (`wp_…`, main's: PR 5c). */
+  /**
+   * An inspection's server plan (`bl_…`), a write card's id (`wp_…`, main's: PR 5c), or an operator run's id (`bo_…`:
+   * agent-browser.md "The operator's window tools"; its card is drawn by the same generic card).
+   */
   planId: string
   at: string
 }
@@ -43,7 +47,7 @@ const isMap = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 
 export function readBrowserInspectionRef(data: unknown): BrowserInspectionRef | undefined {
   if (!isMap(data)) return undefined
   const d = data
-  if (!str(d.id, 200) || !str(d.companyId, 100) || !BROWSER_COMPANY_ID_RE.test(d.companyId) || !str(d.planId, 40) || !(BROWSER_LINE_PLAN_ID_RE.test(d.planId) || BROWSER_WRITE_CARD_REF_RE.test(d.planId)) || !str(d.at, 40)) return undefined
+  if (!str(d.id, 200) || !str(d.companyId, 100) || !BROWSER_COMPANY_ID_RE.test(d.companyId) || !str(d.planId, 40) || !(BROWSER_LINE_PLAN_ID_RE.test(d.planId) || BROWSER_WRITE_CARD_REF_RE.test(d.planId) || BROWSER_RUN_ID_RE.test(d.planId)) || !str(d.at, 40)) return undefined
   return {
     id: d.id, companyId: d.companyId, planId: d.planId, at: d.at,
     conversationId: typeof d.conversationId === 'string' && d.conversationId.length <= 200 ? d.conversationId : null,
