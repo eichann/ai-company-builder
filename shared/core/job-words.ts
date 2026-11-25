@@ -257,6 +257,11 @@ const STATE_WORDS: Record<JobOccurrenceState, string> = {
 }
 
 /** An occurrence's state: a short label and, when there is one, why. */
+/** An outcome code's words, or null for a code these words do not know. */
+export function jobOutcomeWords(code: string): string | null {
+  return Object.prototype.hasOwnProperty.call(OUTCOME_WORDS, code) ? OUTCOME_WORDS[code] : null
+}
+
 export function jobOccurrenceText(state: JobOccurrenceState, outcomeCode: string | null): { label: string; why: string | null } {
   return { label: STATE_WORDS[state] ?? state, why: outcomeCode ? OUTCOME_WORDS[outcomeCode] ?? null : null }
 }

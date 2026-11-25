@@ -1,5 +1,5 @@
 // 設定 → Google → 「スプレッドシートを中継で使う」 / 「ドキュメントを中継で使う」 (google-connector.md "The
-// relay"): each shown only when the company offers it. ［許可する］ asks Google once (the browser);
+// relay"): each shown while Google is usable; one the company has not turned on says so, with no ［許可する］. ［許可する］ asks Google once (the browser);
 // ［やめる］ turns that one off without leaving Google's permission; the member's own relay records
 // below (never a cell's or a Doc's content).
 import { useState } from 'react'
@@ -66,12 +66,12 @@ export function GoogleRelayCard({ companyId, account, busy: parentBusy, waiting,
               <div className="flex flex-wrap items-center gap-2">
                 {service === 'docs' ? <FileText size={18} className="text-info-icon" /> : <Table size={18} className="text-success-icon" />}
                 <p className="text-[14px] font-medium">{title}</p>
-                <span className="rounded-md bg-zinc-100 px-1.5 py-0.5 text-caption font-normal text-zinc-600 ring-1 ring-inset ring-zinc-200 dark:bg-white/[0.06] dark:text-zinc-300">会社が許可しています</span>
+                {view.state !== 'companyOff' && <span className="rounded-md bg-zinc-100 px-1.5 py-0.5 text-caption font-normal text-zinc-600 ring-1 ring-inset ring-zinc-200 dark:bg-white/[0.06] dark:text-zinc-300">会社が許可しています</span>}
               </div>
               <ul className="space-y-1 text-body text-zinc-600 dark:text-zinc-300">
                 {points.map(p => <li key={p} className="flex gap-2"><CheckCircle size={15} className="mt-0.5 shrink-0 text-zinc-400" />{p}</li>)}
               </ul>
-              {view.state === 'allowed' ? (
+              {view.state === 'companyOff' ? null : view.state === 'allowed' ? (
                 <div className="flex flex-wrap items-center gap-3 rounded-control bg-emerald-50 px-3 py-2.5 text-body text-emerald-900 ring-1 ring-inset ring-emerald-200 dark:bg-emerald-500/10 dark:text-emerald-200">
                   <CheckCircle size={16} weight="fill" className="text-emerald-600" />
                   <span>許可済み{account ? `（${account}）` : ''}</span>
@@ -94,7 +94,7 @@ export function GoogleRelayCard({ companyId, account, busy: parentBusy, waiting,
                   <Button size="sm" variant="ghost" disabled={disabled} onClick={() => setConfirming(null)}>やめない</Button>
                 </div>
               )}
-              {view.notice && <Callout tone="warning">{view.notice}</Callout>}
+              {view.notice && <Callout tone={view.state === 'companyOff' ? 'info' : 'warning'}>{view.notice}</Callout>}
             </Card>
           ))}
           {data.records.length > 0 && (

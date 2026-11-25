@@ -393,7 +393,10 @@ Rolling forward again: a `due` one left behind expires (told) at the next clock 
 job's creator (while an owner / admin), in the same transaction as the occurrence's change, then the
 bare `notifications` push (both recipient checks are tested: a creator demoted to member and a
 responsible person who left are not written to). Key `<kind>:<job>:<occurrence>` (once per occurrence and member; `…:<retries>` after a 「もう一度」, 5b). Text built
-when read (`notifications.ts` `jobOccurrenceText`, through `jobs.occurrenceNotice`): shown only while
+when read (`notifications.ts` `jobOccurrenceText`, through `jobs.occurrenceNotice`; a `job_failed` says its outcome code's
+words from `job-words.ts` — `RUN_FAILED`, `TIME_LIMIT`, `RESULT_UNKNOWN`, `MADE_THEN_STOPPED`, `PLACE_NOT_USABLE`… —, while
+`RECORDS_OFF`, `TASK_NOT_CREATED`, an unknown or no code keep 「…やることを作れませんでした。管理者に確かめてください」, owner FB #32,
+`server/tests/unit/notifications.test.ts`): shown only while
 the reader may see the job (owner / admin, or its responsible person), its name 「定期の仕事」 when a
 place the newest version names is not theirs to read. `occurrenceNotice` and `noticeJob` also answer the occurrence's /
 job's state now: an unread `job_failed` / `job_expired` whose occurrence ran afterwards, or `job_paused` whose job is active

@@ -23,7 +23,7 @@ import { sqliteTransactions } from '../../src/adapters/sqlite/transactions'
 import type { CompanyDataSource } from '../../src/ports/company-data'
 import { ensureCoreTypes } from '../../src/services/record-index'
 import { createRecordEngine, createServiceRecordWriter, type RecordChange, type RecordEngine, type ServiceRecordWriter } from '../../src/services/record-engine'
-import { createNotificationService, type NotificationService } from '../../src/services/notifications'
+import { createNotificationService, jobOccurrenceText, type NotificationService } from '../../src/services/notifications'
 import { createPushChannel, type PushChannel } from '../../src/services/push-channel'
 import type { Member } from '../../src/services/access'
 import type { PushEvent } from '../../../shared/types/agent-stop'
@@ -560,5 +560,20 @@ describe('a task the member\'s reply finished (owner FB #19)', () => {
     const third = ok(engine.create(m('u-alice'), HUMAN, { type: 'task', title: '期限だけ', personal: true, fields: { assignee: 'u-alice' } })).record
     ok(await engine.act(m('u-alice'), AI_ACTOR, third.id, 'set_due', { expectedVersion: 1, args: { due: '2026-11-06' } }))
     expect(ofKind('u-alice', 'replied_done').map(i => i.recordId)).toEqual([t.id])
+  })
+})
+
+// Owner FB #32: a scheduled job's run that came back to a person said 「やることを作れませんでした」 whatever
+// happened. The notice now says why, in the words the job screens use; an unknown or missing code keeps the old sentence.
+describe('a job_failed notice says why the run came back', () => {
+  const occ = (outcomeCode: string | null) => ({ name: '週の報告', dueSlot: '2026-11-16T09:00', outcomeCode })
+  it('names the reason the run reached; the task refusals and an unknown code keep today’s sentence', () => {
+    expect(jobOccurrenceText('job_failed', occ('RUN_FAILED'))).toBe('定期の仕事「週の報告」の11月16日 09:00の回：AI がこの回を終えられなかったため、人が確かめる必要があります')
+    expect(jobOccurrenceText('job_failed', occ('TIME_LIMIT'))).toContain('承認された時間を過ぎたため AI を止めました')
+    expect(jobOccurrenceText('job_failed', occ('PLACE_NOT_USABLE'))).toContain('置き先が使えなくなっていました')
+    expect(jobOccurrenceText('job_failed', occ('RECORDS_OFF'))).toBe('定期の仕事「週の報告」の11月16日 09:00の回：記録の機能がオフのため、やることを作れませんでした。管理者に確かめてください')
+    for (const code of ['TASK_NOT_CREATED', 'SOMETHING_LATER', 'toString', null]) {
+      expect(jobOccurrenceText('job_failed', occ(code))).toBe('定期の仕事「週の報告」の11月16日 09:00の回：やることを作れませんでした。管理者に確かめてください')
+    }
   })
 })
