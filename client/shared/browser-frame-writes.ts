@@ -554,7 +554,7 @@ export const workHeading = browseHeading
 // ── The member's cards ──────────────────────────────────────────────────────────────────────────────────────────────
 
 export const BROWSER_WORK_CARD_WORDS = {
-  title: 'ブラウザ操作：AI に任せる書く作業',
+  title: 'ブラウザ操作：AI が書く作業',
   plan: 'これからすること（AI が下見して書いたものです）',
   affects: (s: string) => `ほかに影響する人・もの：${s}`,
   frame: (f: WorkFrame) => `書く先：${browserSkillWriteLine({ method: f.method, path: f.path, max: f.max, fields: f.fields })}`,

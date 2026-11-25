@@ -76,7 +76,7 @@ const afterCard: BrowserCard = {
   notes: [],
 }
 const frameView = (): BrowserWriteView => ({
-  title: 'ブラウザ操作：AI に任せる書く作業', siteLabel: 'shop.example.test',
+  title: 'ブラウザ操作：AI が書く作業', siteLabel: 'shop.example.test',
   phase: frameStep === 'ready' ? 'ready' : frameStep === 'running' ? 'running' : frameStep === 'cancelled' ? 'failed' : 'finished',
   values: [{ name: 'v1', label: '複製元', value: '秋のクーポン（番号 3001）', needsConfirm: false, confirmed: false }],
   sentences: ['秋のクーポンを複製して、冬のクーポンを作ります', '書く先：/coupons に作成：1回まで'],

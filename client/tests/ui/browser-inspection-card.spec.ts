@@ -65,7 +65,7 @@ test('after a restart or in another window: one plain sentence, no value', async
 
 test('a write run\'s card: the plan shows the key values read and ［任せる］／［やめる］; after ［任せる］ it moves on by itself to the after-read card with who checked each item', async ({ page }) => {
   const state = await openPreview(page, 'browser-inspection-card', q({ frame: '1' }))
-  const card = page.getByRole('group', { name: 'ブラウザ操作：AI に任せる書く作業' })
+  const card = page.getByRole('group', { name: 'ブラウザ操作：AI が書く作業' })
   await expect(card).toContainText('下見で読んだ大事な値（AI には見せていません）')
   await expect(card).toContainText('秋のクーポン（番号 3001）')
   await expect(card.getByRole('button', { name: 'やめる' })).toBeVisible()
