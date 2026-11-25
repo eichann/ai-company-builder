@@ -114,6 +114,8 @@ test('the operator\'s answers are read strictly: a plan only in the preview, an 
   assert.ok('answer' in parseWorkAnswer(plan([{ method: 'POST', path: '/coupons', max: 1 }]), { ...ctx, phase: 'preview', adhoc: true }))
   assert.deepEqual(parseWorkAnswer(plan([{ method: 'POST', path: '/{x}', max: 1 }]), { ...ctx, phase: 'preview', adhoc: true }), { problem: 'plan-writes' })
   assert.deepEqual(parseWorkAnswer(plan([{ method: 'POST', path: '/coupons', max: 1, fields: { _token: 'a' } }]), { ...ctx, phase: 'preview', adhoc: true }), { problem: 'plan-writes' })
+  // "Only what this run made" is a reviewed Skill's: an AI-written plan never carries it.
+  assert.deepEqual(parseWorkAnswer(plan([{ id: 'c', method: 'POST', path: '/coupons', max: 1 }, { method: 'POST', path: '/coupons/{made:c}/items', max: 1 }]), { ...ctx, phase: 'preview', adhoc: true }), { problem: 'plan-writes' })
   assert.deepEqual(parseWorkAnswer(plan([{ method: 'POST', path: '/coupons', max: 1 }]), { ...ctx, phase: 'preview', adhoc: false }), { problem: 'plan-writes' })
   assert.deepEqual(parseWorkAnswer(plan(), { ...ctx, phase: 'work', adhoc: false }), { problem: 'plan' })
   assert.deepEqual(parseWorkAnswer('{"do":"done","result":"x","unread":[]}', { ...ctx, phase: 'preview', adhoc: false }), { problem: 'done' })
@@ -281,7 +283,15 @@ test('a {made} frame: the maker\'s id goes with its done report, and only that i
   assert.ok(w2.calls.includes('report 1 done'))
   assert.equal((await w2.writer.hold(held(site2, 'POST', '/plans/4242/items', FORM, 'name=a'))).kind, 'fail')
 
-  // The server did not record the done (with its id): the run is locked and nothing is kept.
+  // The request itself carried the id (an upsert, an id the caller chose): not one the site made for this run — none reported.
+  const site5: Site = { requests: [], answer: madeAnswer }
+  const w5 = writerWorld(frames())
+  await w5.writer.hold(held(site5, 'POST', '/plans', FORM, 'id=p77&title=x'))
+  assert.ok(w5.calls.includes('report 1 done'), JSON.stringify(w5.calls))
+  assert.equal((await w5.writer.hold(held(site5, 'POST', '/plans/p77/items', FORM, 'name=a'))).kind, 'fail')
+  assert.deepEqual(site5.requests, ['POST /plans id=p77&title=x'])
+
+  // The server did not record the done (with its id): the run is locked, so nothing more is sent.
   const site3: Site = { requests: [], answer: madeAnswer }
   const w3 = writerWorld(frames(), { report: async () => ({ kind: 'refused', status: 400, code: 'BROWSER_FRAME_BAD_REQUEST' }) as BrowserLinesAnswer })
   await w3.writer.hold(held(site3, 'POST', '/plans', FORM, 'title=x'))

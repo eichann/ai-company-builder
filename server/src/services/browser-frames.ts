@@ -115,6 +115,7 @@ export const BROWSER_FRAME_WORDS = {
   writeNotFound: 'その書き込みは見つかりません',
   mismatch: 'この書き込みは、計画の送り先の枠に合いません（送りません）',
   widePlan: '計画の送り先が広すぎます。送り先は決まった言葉で始まるアドレスにしてください',
+  madePlan: '「この作業で作ったものにだけ書く」指定は、承認された会社の Skill でだけ使えます',
   approvalRefused: 'この承認は受け付けられません。カードからもう一度確かめてください',
   confirmNotUnknown: 'この書き込みは、届いたか分からないものではありません',
   confirmTooEarly: 'まだ送られるかもしれないため、少し待ってから確かめてください',
@@ -303,7 +304,9 @@ export function createBrowserFrameService(deps: BrowserFrameDeps) {
     const parsed = browserSkillDeclarationFrom({ domain: plan.domain, writes: plan.writes })
     if (!parsed.ok) return refuse('bad-request', BROWSER_SKILL_PROBLEM_WORDS[parsed.problem], { code: 'BROWSER_FRAME_BAD_PLAN' })
     // The AI wrote it: narrower than a reviewed declaration — every path begins with a literal segment (never "any path").
-    if (browserAdhocWritesProblem(parsed.declaration.writes)) return refuse('bad-request', W.widePlan, { code: 'BROWSER_FRAME_BAD_PLAN' })
+    // And never `{made}` (only a reviewed company Skill's declaration says "only what this run made").
+    const adhoc = browserAdhocWritesProblem(parsed.declaration.writes)
+    if (adhoc) return refuse('bad-request', adhoc === 'made' ? W.madePlan : W.widePlan, { code: 'BROWSER_FRAME_BAD_PLAN' })
     // Its domain must be a registered one with writes allowed: the gate below (the same check as every permit's).
     // An ad-hoc plan is never pre-approvable: the person approves it on the card.
     return ok({
@@ -532,7 +535,8 @@ export function createBrowserFrameService(deps: BrowserFrameDeps) {
           return refuse('conflict', W.reportConflict, { code: 'BROWSER_REPORT_CONFLICT' })
         }
         if (w.state === 'unknown' && (result === 'done' || result === 'refused')) {
-          // Late and sure: the site's answer came after all; the run stays locked (never runs on after an unknown).
+          // Late and sure: the site's answer came after all; the run stays locked (never runs on after an unknown). A
+          // `created` with it is not kept: nothing more is permitted in this run anyway.
           r.setWriteState(run.id, seq, 'unknown', result, { settledAt: iso(now), reason })
           return answer('applied')
         }

@@ -74,6 +74,8 @@ describe('an AI-written plan', () => {
   it('begins every path with a literal segment', () => {
     expect(browserAdhocWritesProblem([frame('/api/{n}'), frame('/x/{x}/y')])).toBeNull()
     for (const p of ['/{x}', '/{n}/a', '/']) expect(browserAdhocWritesProblem([frame('/api/a'), frame(p)])).toBe('wide-path')
+    // "Only what this run made" is a reviewed Skill's, never an AI-written plan's.
+    expect(browserAdhocWritesProblem([frame('/api/a'), frame('/api/a/{made:1}/b')])).toBe('made')
   })
 })
 

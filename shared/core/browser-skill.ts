@@ -89,6 +89,8 @@ export type BrowserSkillProblem =
   | 'duplicate-write'
   | 'bad-write-id'
   | 'bad-made'
+  | 'bad-maker'
+  | 'made-covered'
   | 'bad-never-read'
   | 'bad-after-read'
   | 'bad-account-marker'
@@ -112,6 +114,8 @@ export const BROWSER_SKILL_PROBLEM_WORDS: Readonly<Record<BrowserSkillProblem, s
   'duplicate-write': '同じ書き込み先が2回書かれています。',
   'bad-write-id': '書き込み先の名前（id）は、英小文字で始まる英小文字・数字・ハイフン（32文字まで）で、ほかと重ならないようにしてください。',
   'bad-made': '「この作業で作ったもの」の指定（{made:名前}）は、それより前に書いた書き込み先の名前を1つだけ指してください。',
+  'bad-maker': '名前（id）をつけられるのは、新しく作る書き込み先（_method のない POST）だけです。',
+  'made-covered': '「この作業で作ったもの」にだけ書く書き込み先と同じ方法で、ほかのものにも書ける広い書き込み先があります。',
   'bad-never-read': '読んではいけないアドレスの書き方が決まりに合っていません。',
   'bad-after-read': '書いたあとに読むアドレスの書き方が決まりに合っていません。',
   'bad-account-marker': 'アカウントの目印の書き方が決まりに合っていません。',
@@ -225,6 +229,9 @@ function writeOf(v: unknown): { id: string | null; write: BrowserSkillWrite } | 
   if ('_method' in fields) {
     if (method !== 'POST' || !(OVERRIDE_METHODS as readonly string[]).includes(fields._method)) return 'bad-override'
   }
+  // Only a create names what it made: a write that changes something that already exists (another method, an override)
+  // would hand on an id the run did not make (independent review).
+  if (v.id !== undefined && (method !== 'POST' || '_method' in fields)) return 'bad-maker'
   return { id: (v.id as string | undefined) ?? null, write: { method, path: v.path, max: v.max, fields: Object.freeze(fields) } }
 }
 
@@ -285,6 +292,12 @@ export function browserSkillDeclarationFrom(value: unknown): BrowserSkillParse {
     seen.add(key)
     writes.push(Object.freeze(write))
   }
+  // A `{made}` target means "only what this run made" only when no other target of the same method fits those addresses
+  // too (`/a/{x}/items` beside `/a/{made:1}/items` would take any id): refused (independent review).
+  for (const w of writes) {
+    if (browserMadeFrom(w.path) === null) continue
+    if (writes.some(o => o !== w && o.method === w.method && patternCovers(o.path, w.path))) return { ok: false, problem: 'made-covered' }
+  }
   const neverRead = pathList(value.never_read, { query: true }, BROWSER_SKILL_LIMITS.neverRead)
   if (!neverRead) return { ok: false, problem: 'bad-never-read' }
   const afterRead = pathList(value.after_read, { created: true }, BROWSER_SKILL_LIMITS.afterRead)
@@ -309,6 +322,22 @@ export function browserSkillDeclarationFrom(value: unknown): BrowserSkillParse {
       safePattern: 'none' as const,
     }),
   }
+}
+
+/**
+ * Whether every address `made` (a `{made:<n>}` pattern) fits could also fit `other`: the same number of segments, and at
+ * each one the same text, `{x}` (any segment), or `{n}` / another `{made}` where `made` has a placeholder (an id may be
+ * digits). On the safe side: overlap is enough.
+ */
+function patternCovers(other: string, made: string): boolean {
+  const o = other.split('/')
+  const m = made.split('/')
+  if (o.length !== m.length) return false
+  return o.every((seg, i) => {
+    if (seg === m[i] || seg === '{x}') return true
+    const placeholder = m[i].startsWith('{')
+    return placeholder && (seg === '{n}' || browserMadeSegmentPlace(seg) !== null)
+  })
 }
 
 /** The file's text → the declaration (size first, then the strict YAML subset, then the strict shape). */

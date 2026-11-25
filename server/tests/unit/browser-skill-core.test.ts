@@ -200,6 +200,22 @@ describe('writes only to what this run made ({made:<id>})', () => {
     }
   })
 
+  it('only a create names what it made, and no broader target of the same method sits beside a {made} one', () => {
+    const two = (first: string, second: string) => decl(`  - { ${first} }\n  - { ${second} }\n`)
+    const item = 'method: POST, path: "/api/plans/{made:p}/items", max: 1'
+    expect(problemOf(two('id: p, method: PATCH, path: "/api/plans/{n}", max: 1', item))).toBe('bad-maker')
+    expect(problemOf(two('id: p, method: POST, path: "/api/plans/{n}", max: 1, fields: { _method: PATCH }', item))).toBe('bad-maker')
+    expect(problemOf(two('id: p, method: POST, path: "/api/plans/{n}/copies", max: 1', item))).toBeNull()
+    const three = (third: string) => decl(`  - { id: p, method: POST, path: /api/plans, max: 1 }\n  - { ${item} }\n  - { ${third} }\n`)
+    for (const wide of ['/api/plans/{x}/items', '/api/plans/{n}/items', '/api/{x}/{x}/items']) {
+      expect(problemOf(three(`method: POST, path: "${wide}", max: 1`)), wide).toBe('made-covered')
+    }
+    expect(problemOf(three('method: POST, path: "/api/plans/{x}/items", max: 1, fields: { kind: a }'))).toBe('made-covered')
+    for (const apart of ['method: PATCH, path: "/api/plans/{x}/items"', 'method: POST, path: "/api/plans/{x}/notes"', 'method: POST, path: "/api/plans/7/items"']) {
+      expect(problemOf(three(`${apart}, max: 1`)), apart).toBeNull()
+    }
+  })
+
   it('only in a write: never in after_read or never_read', () => {
     expect(isBrowserSkillPath('/x/{made:a}')).toBe(false)
     expect(isBrowserSkillPath('/x/{made:a}', { made: true })).toBe(true)

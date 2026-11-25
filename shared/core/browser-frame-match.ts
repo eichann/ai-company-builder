@@ -93,9 +93,12 @@ export function browserFrameMismatch(frame: BrowserSkillWrite, request: BrowserF
 
 /**
  * A plan the AI wrote (ad hoc, approved on the card) is narrower than a reviewed `browser.yaml`: every write path must
- * begin with a literal segment, so a frame can never be "any path" (`/{x}`, `/{n}/{x}`, `/`). Null when it is.
+ * begin with a literal segment, so a frame can never be "any path" (`/{x}`, `/{n}/{x}`, `/`); and no `{made}` target
+ * (`made`: "only what this run made" is a reviewed company Skill's — its parsed place is no wire format either). Null when
+ * it is.
  */
-export function browserAdhocWritesProblem(writes: readonly BrowserSkillWrite[]): 'wide-path' | null {
+export function browserAdhocWritesProblem(writes: readonly BrowserSkillWrite[]): 'wide-path' | 'made' | null {
+  if (writes.some(w => w.path.split('/').some(seg => browserMadeSegmentPlace(seg) !== null))) return 'made'
   return writes.every((w) => {
     const first = w.path.split('/')[1] ?? ''
     return first !== '' && !first.startsWith('{')

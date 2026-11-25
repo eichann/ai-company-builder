@@ -913,6 +913,12 @@ describe('frames: writes only to what this run made ({made:<id>})', () => {
     return value(await approve(alice, value(await frames.start(alice, { plan }, PC))))
   }
 
+  it('an ad-hoc plan (the AI wrote it) never carries {made}: refused at its start', async () => {
+    const plan = { domain: DOMAIN, writes: [{ id: 'p', method: 'POST', path: '/api/plans', max: 1 }, { method: 'POST', path: '/api/plans/{made:p}/items', max: 1 }] }
+    expect(code(await frames.start(alice, { plan }, PC))).toBe('BROWSER_FRAME_BAD_PLAN')
+    expect(conn.prepare('SELECT COUNT(*) AS n FROM browser_frame_runs').get()).toEqual({ n: 0 })
+  })
+
   it('a done without an id records nothing; an id only with done, only for a maker, only a plain token', async () => {
     const run = await openMade()
     value(await permit(run.runId, 1, alice, MAKE))

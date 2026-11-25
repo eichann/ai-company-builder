@@ -20,7 +20,7 @@
 // never sent. No Electron; the HTTP client and the clocks are injected.
 import {
   createdIdOf, pickFrame, readHeldWrite, sentFields, workWriteLogStep, workWriteLine,
-  type HeldPageWrite, type HeldPageWriteAnswer, type WorkFrame,
+  type HeldPageWrite, type HeldPageWriteAnswer, type HeldWriteShape, type WorkFrame,
 } from '../../../shared/browser-frame-writes'
 import { browserMadeFrom } from '../../../../shared/core/browser-skill'
 import type { BrowserRunWriteOutcome, BrowserRunWriteStep } from '../../../../shared/core/browser-run-log'
@@ -69,6 +69,9 @@ export interface FrameWriterDeps {
 }
 
 const PERMIT_MAX_MS = 5000
+/** Whether the held write itself carried this value (any body field's value, or a segment of its path). */
+const sentCarries = (shape: HeldWriteShape, value: string): boolean =>
+  shape.path.split('/').includes(value) || [...shape.fields.values()].some(values => values.includes(value))
 const REPORT_TRIES = 3
 const isPermit = (v: unknown): v is BrowserFramePermit => {
   const p = v as Record<string, unknown> | null
@@ -206,8 +209,11 @@ export function createFrameWriter(deps: FrameWriterDeps) {
     // here); anything else → unknown, locked (the safe side).
     const kind = browserWriteAnswerKind(answer.status)
     if (kind === 'unknown') locked = true
-    // What it made, when a later frame may write only to that (a done write of such a frame; none read → none kept).
-    const createdNow = kind === 'done' && makers.has(frame.frame) ? createdIdOf(answer.body) ?? undefined : undefined
+    // What it made, when a later frame may write only to that (a done write of such a frame; none read → none kept). An id
+    // the request itself carried (a body value or a path segment: an upsert, an id the caller chose) is not one the site
+    // minted for this run — never reported (independent review).
+    const named = kind === 'done' && makers.has(frame.frame) ? createdIdOf(answer.body) : null
+    const createdNow = named !== null && !sentCarries(shape, named) ? named : undefined
     const recorded = await report(write, kind, kind === 'unknown' ? 'other-state' : undefined, createdNow)
     // A result the server did not record: nothing more is sent in this run (the server's time-out makes it unknown).
     if (!recorded) locked = true
