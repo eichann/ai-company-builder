@@ -49,6 +49,7 @@ const SQLITE_CATALOG = new Set(['sqlite_master', 'json_each'])
  * company — reviewed by hand, covered by that module's own tests.
  */
 const DYNAMIC_TABLE_SQL: Record<string, string> = {
+  'db/schema/table-rebuild.ts': 'a startup migration that rebuilds one whole table to widen its CHECK (every row of every company copied as it was; agent-browser.md "Recovering from a failed write", tests/unit/browser-frames.test.ts)',
   'adapters/sqlite/company-archive.ts': 'the per-company export / restore walks every company table from the schema: export binds company_id = ?, restore refuses rows of another company (tests/integration/company-archive.test.ts)',
 }
 

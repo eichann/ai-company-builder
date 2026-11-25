@@ -16,13 +16,18 @@ export type BrowserFrameEndReason = string
 /**
  * A write's state: `permitted` (it may be on its way), `done` (the site returned success), `verified` (reserved: a safe
  * pattern's machine check that it landed as predicted — nothing sets it yet), `not_sent` (the app stopped before the
- * request left), `unknown` (it may have been sent; the run is locked).
+ * request left), `unknown` (it may have been sent; the run is locked), `refused` (the site answered that it did not take
+ * it — a 4xx, shared/core/browser-frame-match.ts `browserWriteAnswerKind`; never done, the run goes on, and trying again
+ * is a new write with its own permit and unit).
  */
-export type BrowserFrameWriteState = 'permitted' | 'done' | 'verified' | 'not_sent' | 'unknown'
-export const BROWSER_FRAME_WRITE_STATES: readonly BrowserFrameWriteState[] = ['permitted', 'done', 'verified', 'not_sent', 'unknown']
+export type BrowserFrameWriteState = 'permitted' | 'done' | 'verified' | 'not_sent' | 'unknown' | 'refused'
+export const BROWSER_FRAME_WRITE_STATES: readonly BrowserFrameWriteState[] = ['permitted', 'done', 'verified', 'not_sent', 'unknown', 'refused']
 
 /** What the app reports for one write (never `verified`: that is the server's, for a safe pattern). */
-export type BrowserFrameWriteResult = 'done' | 'not_sent' | 'unknown'
+export type BrowserFrameWriteResult = 'done' | 'not_sent' | 'unknown' | 'refused'
+
+/** The person's answer about a write in doubt, from the card: 「済んでいた」 / 「されていなかった」. */
+export type BrowserFrameConfirmAnswer = 'done' | 'not_done'
 
 export interface BrowserFrameView {
   /** 1-based, in the declaration's order. */
@@ -42,6 +47,10 @@ export interface BrowserFrameWriteView {
   state: BrowserFrameWriteState
   permittedAt: string
   settledAt: string | null
+  /** For an `unknown` write: from when the person may answer about it (the server's estimate; it decides at the press). */
+  confirmableAt?: string | null
+  /** The person's answer about it, who and when (null: none). Absent from an older server. */
+  confirmed?: { answer: BrowserFrameConfirmAnswer; by: string; at: string } | null
 }
 
 export interface BrowserFrameRunView {

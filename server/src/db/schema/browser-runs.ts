@@ -1,4 +1,5 @@
 import type Database from 'better-sqlite3'
+import { rebuildTableFor } from './table-rebuild'
 
 /**
  * The trigger that keeps a run's fixed columns (since "Room for a Skill run" also its budget, the frames run it named and
@@ -15,6 +16,31 @@ const BROWSER_RUNS_FIXED_TRIGGER = `CREATE TRIGGER IF NOT EXISTS browser_runs_fi
     BEGIN
       SELECT RAISE(ABORT, 'a browser run only moves from running, once');
     END`
+/**
+ * The write steps' table and its two triggers: one text for a new database and the rebuild that added the outcome
+ * `site-refused` ("Recovering from a failed write": the site answered that it did not take the write).
+ */
+const BROWSER_RUN_WRITES_TABLE = `CREATE TABLE IF NOT EXISTS browser_run_writes (
+      company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+      run_id TEXT NOT NULL,
+      idx INTEGER NOT NULL,
+      after_step INTEGER NOT NULL CHECK (after_step >= 0),
+      frame INTEGER,
+      method TEXT NOT NULL CHECK (method IN ('POST', 'PUT', 'PATCH', 'DELETE', 'OTHER')),
+      page TEXT NOT NULL,
+      outcome TEXT NOT NULL CHECK (outcome IN ('done', 'not-sent', 'unknown', 'refused', 'site-refused')),
+      PRIMARY KEY (company_id, run_id, idx)
+    );`
+const BROWSER_RUN_WRITES_NO_UPDATE = `CREATE TRIGGER IF NOT EXISTS browser_run_writes_no_update BEFORE UPDATE ON browser_run_writes
+    BEGIN
+      SELECT RAISE(ABORT, 'a browser run log is append-only');
+    END`
+const BROWSER_RUN_WRITES_NO_DELETE = `CREATE TRIGGER IF NOT EXISTS browser_run_writes_no_delete BEFORE DELETE ON browser_run_writes
+      WHEN EXISTS (SELECT 1 FROM companies WHERE id = OLD.company_id)
+    BEGIN
+      SELECT RAISE(ABORT, 'a browser run log is append-only');
+    END`
+
 /** The trigger as SQLite keeps it in `sqlite_master` (it drops `IF NOT EXISTS`): what the migration compares with. */
 const BROWSER_RUNS_FIXED_TRIGGER_STORED = BROWSER_RUNS_FIXED_TRIGGER.replace('CREATE TRIGGER IF NOT EXISTS ', 'CREATE TRIGGER ')
 
@@ -30,7 +56,8 @@ const BROWSER_RUNS_FIXED_TRIGGER_STORED = BROWSER_RUNS_FIXED_TRIGGER.replace('CR
  * - `browser_run_log`: per step the page as a pattern, what was done, the label of what was pressed — never a value
  *   (shared/core/browser-run-log.ts). Append-only while its company exists.
  * - `browser_run_writes` (step ⑤b, additive): a write run's page writes — after which step, the frame, the method, the
- *   path as a pattern, the outcome. Never a value. Append-only like the log.
+ *   path as a pattern, the outcome (`site-refused` since "Recovering from a failed write", `migrateBrowserRunWriteSiteRefused`).
+ *   Never a value. Append-only like the log.
  */
 export const browserRunSchema = `
     CREATE TABLE IF NOT EXISTS browser_runs (
@@ -72,26 +99,9 @@ export const browserRunSchema = `
       SELECT RAISE(ABORT, 'a browser run log is append-only');
     END;
 
-    CREATE TABLE IF NOT EXISTS browser_run_writes (
-      company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
-      run_id TEXT NOT NULL,
-      idx INTEGER NOT NULL,
-      after_step INTEGER NOT NULL CHECK (after_step >= 0),
-      frame INTEGER,
-      method TEXT NOT NULL CHECK (method IN ('POST', 'PUT', 'PATCH', 'DELETE', 'OTHER')),
-      page TEXT NOT NULL,
-      outcome TEXT NOT NULL CHECK (outcome IN ('done', 'not-sent', 'unknown', 'refused')),
-      PRIMARY KEY (company_id, run_id, idx)
-    );
-    CREATE TRIGGER IF NOT EXISTS browser_run_writes_no_update BEFORE UPDATE ON browser_run_writes
-    BEGIN
-      SELECT RAISE(ABORT, 'a browser run log is append-only');
-    END;
-    CREATE TRIGGER IF NOT EXISTS browser_run_writes_no_delete BEFORE DELETE ON browser_run_writes
-      WHEN EXISTS (SELECT 1 FROM companies WHERE id = OLD.company_id)
-    BEGIN
-      SELECT RAISE(ABORT, 'a browser run log is append-only');
-    END;
+    ${BROWSER_RUN_WRITES_TABLE}
+    ${BROWSER_RUN_WRITES_NO_UPDATE};
+    ${BROWSER_RUN_WRITES_NO_DELETE};
 `
 
 /**
@@ -115,4 +125,16 @@ export function migrateBrowserRunBudget(conn: Database.Database): void {
     conn.exec('DROP TRIGGER IF EXISTS browser_runs_fixed')
     conn.exec(BROWSER_RUNS_FIXED_TRIGGER)
   }
+}
+
+/** The write steps' outcome `site-refused`: a `browser_run_writes` made before it is rebuilt once (every row kept). Idempotent. */
+export function migrateBrowserRunWriteSiteRefused(conn: Database.Database): boolean {
+  return rebuildTableFor(conn, {
+    table: 'browser_run_writes',
+    marker: "'site-refused'",
+    create: BROWSER_RUN_WRITES_TABLE,
+    after: [BROWSER_RUN_WRITES_NO_UPDATE, BROWSER_RUN_WRITES_NO_DELETE],
+    drop: ['DROP TRIGGER IF EXISTS browser_run_writes_no_update', 'DROP TRIGGER IF EXISTS browser_run_writes_no_delete'],
+    columns: ['company_id', 'run_id', 'idx', 'after_step', 'frame', 'method', 'page', 'outcome'],
+  })
 }

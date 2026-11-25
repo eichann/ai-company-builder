@@ -83,8 +83,12 @@ export const BROWSER_RUN_ID_RE = /^bo_[0-9a-f]{32}$/
 
 // ── Write steps (redesign step ⑤b: a write run's page writes; agent-browser.md "Writes within frames, in the app") ──────
 
-/** What became of a page write the window held: sent once and the site answered, not sent, may have been sent, refused. */
-export const BROWSER_RUN_WRITE_OUTCOMES = ['done', 'not-sent', 'unknown', 'refused'] as const
+/**
+ * What became of a page write the window held: sent once and the site answered success (`done`), not sent, may have been
+ * sent (`unknown`), refused by the app before asking (`refused`: outside the plan, a file…), or sent and the site answered
+ * that it did not take it (`site-refused`: a 4xx, browser-frame-match.ts `browserWriteAnswerKind`).
+ */
+export const BROWSER_RUN_WRITE_OUTCOMES = ['done', 'not-sent', 'unknown', 'refused', 'site-refused'] as const
 export type BrowserRunWriteOutcome = typeof BROWSER_RUN_WRITE_OUTCOMES[number]
 /** The methods kept as they are; any other method of a write is kept as `OTHER`. */
 export const BROWSER_RUN_WRITE_METHODS = ['POST', 'PUT', 'PATCH', 'DELETE', 'OTHER'] as const

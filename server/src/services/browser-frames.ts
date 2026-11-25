@@ -38,7 +38,7 @@ import { BROWSER_FRAME_RUN_TIMES } from '../../shared/core/browser-run-budget'
 import { canonicalJson } from '../../shared/core/fixed-content'
 import { isValidSkillName } from '../../shared/core/names'
 import type {
-  BrowserFramePermit, BrowserFrameReportAnswer, BrowserFrameRunStart, BrowserFrameRunView, BrowserFrameWriteResult,
+  BrowserFrameConfirmAnswer, BrowserFramePermit, BrowserFrameReportAnswer, BrowserFrameRunStart, BrowserFrameRunView, BrowserFrameWriteResult,
 } from '../../shared/types/browser-frames'
 import type { TokenDigest } from '../ports/key-broker'
 import type { BrowserFrameRepository, FrameRunRow, FrameWriteRow } from '../ports/browser-frames'
@@ -74,6 +74,8 @@ export interface BrowserFrameDeps {
    * frames run never starts while another run operates the domain. Absent: no operator runs (tests of ⑤a).
    */
   operatorRunOn?: (companyId: string, host: string) => boolean
+  /** Where a report that contradicts the person's answer is noted (ids and fixed words only; default console). */
+  log?: Pick<Console, 'warn'>
 }
 
 export const BROWSER_FRAME_TIMES = {
@@ -107,6 +109,9 @@ export const BROWSER_FRAME_WORDS = {
   mismatch: 'この書き込みは、計画の送り先の枠に合いません（送りません）',
   widePlan: '計画の送り先が広すぎます。送り先は決まった言葉で始まるアドレスにしてください',
   approvalRefused: 'この承認は受け付けられません。カードからもう一度確かめてください',
+  confirmNotUnknown: 'この書き込みは、届いたか分からないものではありません',
+  confirmTooEarly: 'まだ送られるかもしれないため、少し待ってから確かめてください',
+  confirmDone: 'この書き込みについては、もう答えてあります',
 } as const
 const W = BROWSER_FRAME_WORDS
 
@@ -135,7 +140,8 @@ const own = (o: object, k: string) => Object.prototype.hasOwnProperty.call(o, k)
 const keysWithin = (o: Record<string, unknown>, allowed: readonly string[]) => Object.keys(o).every(k => allowed.includes(k))
 const iso = (ms: number) => new Date(ms).toISOString()
 const ms = (s: string) => Date.parse(s)
-const RESULTS: readonly BrowserFrameWriteResult[] = ['done', 'not_sent', 'unknown']
+const RESULTS: readonly BrowserFrameWriteResult[] = ['done', 'not_sent', 'unknown', 'refused']
+const CONFIRM_ANSWERS: readonly BrowserFrameConfirmAnswer[] = ['done', 'not_done']
 
 interface StartFrames {
   host: string
@@ -200,7 +206,17 @@ export function createBrowserFrameService(deps: BrowserFrameDeps) {
         frame: f.idx, method: f.method, path: f.path, fields: JSON.parse(f.fields) as Record<string, string>, max: f.max, used: f.used,
         left: usable ? f.max - f.used : 0,
       })),
-      writes: r.writes(run.id).map(w => ({ write: w.seq, frame: w.frameIdx, state: w.state, permittedAt: w.permittedAt, settledAt: w.settledAt })),
+      writes: (() => {
+        const confirms = new Map(r.confirms(run.id).map(c => [c.seq, c]))
+        return r.writes(run.id).map(w => {
+          const c = confirms.get(w.seq)
+          return {
+            write: w.seq, frame: w.frameIdx, state: w.state, permittedAt: w.permittedAt, settledAt: w.settledAt,
+            confirmableAt: w.state === 'unknown' && !c ? iso(ms(w.permittedAt) + BROWSER_FRAME_TIMES.permit + BROWSER_FRAME_TIMES.grace) : null,
+            confirmed: c ? { answer: c.answer, by: c.confirmedBy, at: c.confirmedAt } : null,
+          }
+        })
+      })(),
     }
   }
 
@@ -470,19 +486,66 @@ export function createBrowserFrameService(deps: BrowserFrameDeps) {
         const answer = (outcome: BrowserFrameReportAnswer['outcome']) => ok({ outcome, run: view(member.companyId, r.run(run.id) as FrameRunRow) })
         if (w.state === 'permitted') {
           if (!r.setWriteState(run.id, seq, 'permitted', result, { settledAt: iso(now), reason })) throw new Error('browser frames: a write moved inside its transaction')
-          // `unknown`: nothing more is sent in this run (the run locks; an ended run stays ended).
+          // `unknown`: nothing more is sent in this run (the run locks; an ended run stays ended). `refused` (the site said
+          // no): the run goes on; the unit stays used, and trying again is a new write with its own permit.
           if (result === 'unknown') r.setRunState(run.id, 'open', 'locked', {})
           return answer('applied')
         }
         if (w.state === result || (w.state === 'verified' && result === 'done')) return answer('same')
-        if (w.state === 'unknown' && result === 'done') {
-          // Late and sure: the write is done; the run stays locked (never runs on after an unknown).
-          r.setWriteState(run.id, seq, 'unknown', 'done', { settledAt: iso(now), reason })
+        // Once the person answered about it, no report changes it. One that agrees is kept as it was; one that contradicts
+        // the answer (done after されていなかった, refused / not sent after 済んでいた) is refused and noted — ids and words only.
+        const answered = r.confirms(run.id).find(c => c.seq === seq)
+        if (answered) {
+          const contradicts = answered.answer === 'not_done' ? result === 'done' : result === 'refused' || result === 'not_sent'
+          if (!contradicts) return answer('recorded')
+          ;(deps.log ?? console).warn(`[browser-frames] run ${run.id} write ${seq}: a report "${result}" contradicts the person's answer "${answered.answer}"; kept as answered`)
+          return refuse('conflict', W.reportConflict, { code: 'BROWSER_REPORT_CONFLICT' })
+        }
+        if (w.state === 'unknown' && (result === 'done' || result === 'refused')) {
+          // Late and sure: the site's answer came after all; the run stays locked (never runs on after an unknown).
+          r.setWriteState(run.id, seq, 'unknown', result, { settledAt: iso(now), reason })
           return answer('applied')
         }
         // `not_sent` after `unknown`: it may have been sent all the same — kept as it was.
         if (w.state === 'unknown' && result === 'not_sent') return answer('recorded')
         return refuse('conflict', W.reportConflict, { code: 'BROWSER_REPORT_CONFLICT' })
+      })
+    },
+
+    /**
+     * `PersonConfirms` — POST /browser-frame-runs/:runId/confirm { write, answer: done | not_done } with this PC's key
+     * header (agent-browser.md "Recovering from a failed write"): the person's answer about a write in doubt, from the
+     * card. Bound like a sure report — the member's own run and **its own PC** — and only for an `unknown` write, only past
+     * its permit + 5 s + 30 s on both clocks (it may still be on its way before), once (another answer after it:
+     * `BROWSER_FRAME_CONFIRMED`; the same answer again — a lost answer of ours — is answered as kept, nothing written). Kept
+     * with who and when; it **never moves the write or the run**: a locked run stays locked whatever the answer, and
+     * nothing is sent again (「されていなかった」: the person asks again in the chat — a new run).
+     */
+    confirm(member: Member, runId: string, body: unknown, deviceKey?: string): Outcome<BrowserFrameRunView> {
+      const found = ownRun(member, runId)
+      if (!found) return missing()
+      if (!isMap(body) || Object.keys(body).length !== 2 || !Number.isSafeInteger(body.write) || (body.write as number) < 1
+        || !(CONFIRM_ANSWERS as readonly unknown[]).includes(body.answer)) return bad()
+      const pc = deps.devices.check(member, deviceKey, null)
+      if (!pc.ok) return pc
+      if (pc.value.deviceId !== found.deviceId) return refuse('conflict', BROWSER_DEVICE_WORDS.refusals.BROWSER_DEVICE_ELSEWHERE, { code: 'BROWSER_DEVICE_ELSEWHERE' })
+      const seq = body.write as number
+      const given = body.answer as BrowserFrameConfirmAnswer
+      return transactions.run((): Outcome<BrowserFrameRunView> => {
+        const now = clock.nowMs()
+        const r = repo(member.companyId)
+        const run = settle(member.companyId, found, now)
+        const w = r.writes(run.id).find(x => x.seq === seq)
+        if (!w) return refuse('not-found', W.writeNotFound, { code: 'BROWSER_FRAME_WRITE_NOT_FOUND' })
+        // Once: the same answer again (its first answer lost on the way back) is answered as kept; another one is refused.
+        const before = r.confirms(run.id).find(c => c.seq === seq)
+        if (before) return before.answer === given ? ok(view(member.companyId, run)) : refuse('conflict', W.confirmDone, { code: 'BROWSER_FRAME_CONFIRMED' })
+        if (w.state !== 'unknown') return refuse('conflict', W.confirmNotUnknown, { code: 'BROWSER_FRAME_NOT_UNKNOWN' })
+        if (!pastWindow(w, now)) return refuse('conflict', W.confirmTooEarly, { code: 'BROWSER_TOO_EARLY' })
+        if (!r.insertConfirm(run.id, { seq, answer: given, confirmedBy: member.userId, confirmedAt: iso(now) })) {
+          return refuse('conflict', W.confirmDone, { code: 'BROWSER_FRAME_CONFIRMED' })
+        }
+        return ok(view(member.companyId, r.run(run.id) as FrameRunRow))
       })
     },
 

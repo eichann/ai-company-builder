@@ -793,6 +793,7 @@ const MATRIX: Row[] = [
   r('POST /api/companies/:companyId/browser-frame-runs/:runId/approve', w => ({ path: `${C(w)}/browser-frame-runs/${NO_SUCH_FRAME_RUN}/approve`, body: {} }), [404, 404, 404, 404, 404, 401]),
   r('POST /api/companies/:companyId/browser-frame-runs/:runId/permit', w => ({ path: `${C(w)}/browser-frame-runs/${NO_SUCH_FRAME_RUN}/permit`, body: { frame: 1 } }), [404, 404, 404, 404, 404, 401]),
   r('POST /api/companies/:companyId/browser-frame-runs/:runId/report', w => ({ path: `${C(w)}/browser-frame-runs/${NO_SUCH_FRAME_RUN}/report`, body: {} }), [404, 404, 404, 404, 404, 401]),
+  r('POST /api/companies/:companyId/browser-frame-runs/:runId/confirm', w => ({ path: `${C(w)}/browser-frame-runs/${NO_SUCH_FRAME_RUN}/confirm`, body: {} }), [404, 404, 404, 404, 404, 401]),
   r('POST /api/companies/:companyId/browser-frame-runs/:runId/end', w => ({ path: `${C(w)}/browser-frame-runs/${NO_SUCH_FRAME_RUN}/end` }), [404, 404, 404, 404, 404, 401]),
   // lane C ▲
 ]
@@ -1000,6 +1001,7 @@ const CROSS: CrossRow[] = [
   x('POST /api/companies/:companyId/browser-frame-runs/:runId/approve', (w, id) => ({ path: `${C(w)}/browser-frame-runs/${id}/approve`, body: { planHash: `sha256:${'a'.repeat(64)}` } }), w => w.other.browserFrameRun, NO_SUCH_FRAME_RUN),
   x('POST /api/companies/:companyId/browser-frame-runs/:runId/permit', (w, id) => ({ path: `${C(w)}/browser-frame-runs/${id}/permit`, body: { frame: 1 } }), w => w.other.browserFrameRun, NO_SUCH_FRAME_RUN),
   x('POST /api/companies/:companyId/browser-frame-runs/:runId/report', (w, id) => ({ path: `${C(w)}/browser-frame-runs/${id}/report`, body: { write: 1, result: 'done' } }), w => w.other.browserFrameRun, NO_SUCH_FRAME_RUN),
+  x('POST /api/companies/:companyId/browser-frame-runs/:runId/confirm', (w, id) => ({ path: `${C(w)}/browser-frame-runs/${id}/confirm`, body: { write: 1, answer: 'not_done' } }), w => w.other.browserFrameRun, NO_SUCH_FRAME_RUN),
   x('POST /api/companies/:companyId/browser-frame-runs/:runId/end', (w, id) => ({ path: `${C(w)}/browser-frame-runs/${id}/end` }), w => w.other.browserFrameRun, NO_SUCH_FRAME_RUN),
   x('POST /api/companies/:companyId/browser-line-executions/:executionId/permit', (w, id) => ({ path: `${C(w)}/browser-line-executions/${id}/permit`, body: { index: 1 } }), w => w.other.browserLineExecution, NO_SUCH_LINE_EXECUTION),
   x('POST /api/companies/:companyId/browser-line-executions/:executionId/confirm', (w, id) => ({ path: `${C(w)}/browser-line-executions/${id}/confirm`, body: { index: 1, result: 'done' } }), w => w.other.browserLineExecution, NO_SUCH_LINE_EXECUTION),

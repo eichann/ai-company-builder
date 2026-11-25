@@ -14,6 +14,7 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import Database from 'better-sqlite3'
 import { createHash, randomBytes } from 'crypto'
+import { readFileSync } from 'fs'
 import { initDatabase } from '../../src/db'
 import { sqliteCompanyData } from '../../src/adapters/sqlite/company-data'
 import { sqliteTransactions } from '../../src/adapters/sqlite/transactions'
@@ -729,5 +730,144 @@ describe('room for a Skill run: the operator run\'s budget is the server\'s choi
     expect(() => conn.prepare("UPDATE browser_runs SET frame_run_id = 'bf_x' WHERE id = ?").run(plain.runId)).toThrow(/only moves from running/)
     expect(() => conn.prepare('UPDATE browser_runs SET steps = steps + 2 WHERE id = ?').run(plain.runId)).toThrow(/only moves from running/)
     expect(() => conn.prepare('UPDATE browser_runs SET steps = steps - 1 WHERE id = ?').run(plain.runId)).toThrow(/CHECK|only moves from running/)
+  })
+})
+
+describe('recovering from a failed write: the site refused it; the person answers about one in doubt', () => {
+  /** The person's answer from the card (this PC's key by default). */
+  const confirm = (runId: string, write: number, answer: string, m: Member = alice, key: string | undefined = PC) =>
+    frames.confirm(m, runId, { write, answer }, key)
+
+  it('a write the site refused (4xx) is `refused`: never done, the run goes on, trying again is a new write within the frame\'s max', async () => {
+    const run = await openAdhoc()
+    value(await permit(run.runId, 1))
+    const refused = value(report(run.runId, 1, 'refused'))
+    expect(refused.run.writes[0].state).toBe('refused')
+    expect(refused.run.state).toBe('open')
+    // The unit it took is not given back: frame 1 (max 2) has one left for the corrected try.
+    expect(refused.run.frames[0]).toMatchObject({ used: 1, left: 1 })
+    const again = value(await permit(run.runId, 1))
+    expect(again.write).toBe(2)
+    value(report(run.runId, 2, 'done'))
+    expect(code(await permit(run.runId, 1))).toBe('BROWSER_FRAME_USED_UP')
+    expect(value(frames.get(alice, run.runId)).writes.map(w => w.state)).toEqual(['refused', 'done'])
+  })
+
+  it('`refused` is a sure answer: only from the run\'s own PC; a late one after unknown keeps the run locked', async () => {
+    const run = await openAdhoc()
+    value(await permit(run.runId, 1))
+    expect(code(report(run.runId, 1, 'refused', alice, 'other-pc'))).toBe('BROWSER_DEVICE_ELSEWHERE')
+    value(report(run.runId, 1, 'unknown'))
+    const late = value(report(run.runId, 1, 'refused'))
+    expect(late.run.writes[0].state).toBe('refused')
+    expect(late.run.state).toBe('locked')
+    expect(code(await permit(run.runId, 2))).toBe('BROWSER_RUN_AFTER_UNKNOWN')
+  })
+
+  it('the person answers about a write in doubt once, past its window, from the run\'s own PC; who and when are kept', async () => {
+    const run = await openAdhoc()
+    value(await permit(run.runId, 1))
+    value(report(run.runId, 1, 'unknown'))
+    const seen = value(frames.get(alice, run.runId)).writes[0]
+    expect(seen.confirmableAt).toBe(iso(Date.parse(seen.permittedAt) + 35_000))
+    expect(seen.confirmed).toBeNull()
+    // It may still be on its way: too early.
+    expect(code(confirm(run.runId, 1, 'not_done'))).toBe('BROWSER_TOO_EARLY')
+    now += 35_000
+    expect(code(confirm(run.runId, 1, 'not_done', alice, 'other-pc'))).toBe('BROWSER_DEVICE_ELSEWHERE')
+    expect(code(confirm(run.runId, 1, 'not_done', bob))).toBe('BROWSER_FRAME_RUN_NOT_FOUND')
+    expect(code(confirm(run.runId, 1, 'maybe'))).toBe('BROWSER_FRAME_BAD_REQUEST')
+    expect(code(frames.confirm(alice, run.runId, { write: 1, answer: 'not_done', unlock: true }, PC))).toBe('BROWSER_FRAME_BAD_REQUEST')
+    const answered = value(confirm(run.runId, 1, 'not_done'))
+    expect(answered.writes[0]).toMatchObject({ state: 'unknown', confirmed: { answer: 'not_done', by: alice.userId, at: iso(now) }, confirmableAt: null })
+    expect(code(confirm(run.runId, 1, 'done'))).toBe('BROWSER_FRAME_CONFIRMED')
+    // The same answer again (ours lost on the way back): answered as kept, still once, still by the first press.
+    now += 1_000
+    expect(value(confirm(run.runId, 1, 'not_done')).writes[0].confirmed).toEqual({ answer: 'not_done', by: alice.userId, at: iso(now - 1_000) })
+    expect(conn.prepare('SELECT COUNT(*) AS n FROM browser_frame_write_confirms').get()).toEqual({ n: 1 })
+    // The answer never unlocks the run: nothing more is permitted in it.
+    expect(answered.state).toBe('locked')
+    expect(code(await permit(run.runId, 2))).toBe('BROWSER_RUN_AFTER_UNKNOWN')
+    // And no later report changes what the person said: one that agrees is kept, one that contradicts is refused and noted.
+    expect(value(report(run.runId, 1, 'refused')).outcome).toBe('recorded')
+    const warned: string[] = []
+    const was = console.warn
+    console.warn = (...a: unknown[]) => { warned.push(a.join(' ')) }
+    try {
+      expect(code(report(run.runId, 1, 'done'))).toBe('BROWSER_REPORT_CONFLICT')
+    } finally {
+      console.warn = was
+    }
+    expect(warned).toEqual([`[browser-frames] run ${run.runId} write 1: a report "done" contradicts the person's answer "not_done"; kept as answered`])
+    expect(value(frames.get(alice, run.runId)).writes[0].state).toBe('unknown')
+  })
+
+  it('only a write in doubt can be answered about; the answer is kept as given (table)', async () => {
+    const run = await openAdhoc()
+    value(await permit(run.runId, 1))
+    value(report(run.runId, 1, 'done'))
+    now += 35_000
+    expect(code(confirm(run.runId, 1, 'done'))).toBe('BROWSER_FRAME_NOT_UNKNOWN')
+    expect(code(confirm(run.runId, 2, 'done'))).toBe('BROWSER_FRAME_WRITE_NOT_FOUND')
+    value(await permit(run.runId, 1))
+    value(report(run.runId, 2, 'unknown'))
+    now += 35_000
+    value(confirm(run.runId, 2, 'done'))
+    expect(() => conn.prepare("UPDATE browser_frame_write_confirms SET answer = 'not_done'").run()).toThrow(/kept as given/)
+    expect(() => conn.prepare('DELETE FROM browser_frame_write_confirms').run()).toThrow(/kept as given/)
+  })
+
+  it('the tables let a write move to `refused` only from permitted or unknown', async () => {
+    const run = await openAdhoc()
+    value(await permit(run.runId, 1))
+    value(report(run.runId, 1, 'done'))
+    expect(() => conn.prepare("UPDATE browser_frame_writes SET state = 'refused' WHERE run_id = ?").run(run.runId)).toThrow(/state table/)
+    value(await permit(run.runId, 1))
+    value(report(run.runId, 2, 'refused'))
+    expect(() => conn.prepare("UPDATE browser_frame_writes SET state = 'done' WHERE run_id = ? AND seq = 2").run(run.runId)).toThrow(/state table/)
+  })
+
+  it('a database from before: both tables rebuilt once with every row kept, ending like a new one; a later start changes nothing', () => {
+    const before = new Database(':memory:')
+    // Rows without their parents: only the two tables are under test here.
+    before.pragma('foreign_keys = OFF')
+    before.exec(readFileSync(new URL('../fixtures/browser-writes-before-refused.sql', import.meta.url), 'utf8'))
+    before.prepare(`INSERT INTO browser_frame_writes (company_id, run_id, seq, frame_idx, state, permitted_at) VALUES ('co-1', 'bf_1', 1, 1, 'unknown', ?)`).run(iso(T0))
+    before.prepare(`INSERT INTO browser_run_writes (company_id, run_id, idx, after_step, frame, method, page, outcome) VALUES ('co-1', 'bo_1', 1, 0, 1, 'POST', '/a', 'done')`).run()
+    initDatabase(before)
+    expect(before.prepare('SELECT state FROM browser_frame_writes').all()).toEqual([{ state: 'unknown' }])
+    expect(before.prepare('SELECT outcome FROM browser_run_writes').all()).toEqual([{ outcome: 'done' }])
+    const shape = (c: Database.Database) => c.prepare("SELECT type, name, sql FROM sqlite_master WHERE tbl_name IN ('browser_frame_writes', 'browser_run_writes') ORDER BY type, name").all()
+    const fresh = new Database(':memory:')
+    initDatabase(fresh)
+    expect(shape(before)).toEqual(shape(fresh))
+    const execs: string[] = []
+    const exec = before.exec.bind(before)
+    before.exec = ((sql: string) => { execs.push(sql); return exec(sql) }) as typeof before.exec
+    initDatabase(before)
+    before.exec = exec
+    expect(execs.filter(sql => /RENAME TO/.test(sql))).toEqual([])
+    // A row whose parent is gone (foreign keys on, as at startup) never stops the start: kept, counted in a log line.
+    const orphaned = new Database(':memory:')
+    orphaned.pragma('foreign_keys = OFF')
+    orphaned.exec(readFileSync(new URL('../fixtures/browser-writes-before-refused.sql', import.meta.url), 'utf8'))
+    orphaned.prepare(`INSERT INTO browser_frame_writes (company_id, run_id, seq, frame_idx, state, permitted_at) VALUES ('co-1', 'bf_gone', 1, 1, 'done', ?)`).run(iso(T0))
+    orphaned.pragma('foreign_keys = ON')
+    const warned: string[] = []
+    const was = console.warn
+    console.warn = (...a: unknown[]) => { warned.push(a.join(' ')) }
+    try {
+      initDatabase(orphaned)
+    } finally {
+      console.warn = was
+    }
+    expect(orphaned.prepare('SELECT run_id FROM browser_frame_writes').all()).toEqual([{ run_id: 'bf_gone' }])
+    expect(warned).toContain('[db] browser_frame_writes: 1 row(s) without their parent kept as they were')
+    expect(orphaned.pragma('foreign_keys', { simple: true })).toBe(1)
+    // The upgraded tables take the new words and keep the old rules.
+    before.prepare("UPDATE browser_frame_writes SET state = 'refused'").run()
+    expect(() => before.prepare("UPDATE browser_frame_writes SET state = 'done'").run()).toThrow(/state table/)
+    before.prepare(`INSERT INTO browser_run_writes (company_id, run_id, idx, after_step, frame, method, page, outcome) VALUES ('co-1', 'bo_1', 2, 0, 1, 'POST', '/a', 'site-refused')`).run()
+    expect(() => before.prepare('UPDATE browser_run_writes SET page = \'/b\'').run()).toThrow(/append-only/)
   })
 })

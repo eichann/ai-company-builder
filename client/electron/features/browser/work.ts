@@ -72,6 +72,8 @@ export interface BrowserWorkInput {
 const STOP_CHECK_MS = 500
 const KEPT_CARDS = 100
 const IDLE_MAX_MS = 45_000
+/** A permit's 5 s and the 30 s after it (the server's window before a write in doubt can be answered about). */
+const CONFIRM_AFTER_MS = 35_000
 
 interface Entry {
   userId: string
@@ -90,6 +92,8 @@ interface Entry {
   result: BrowserWriteResultView | null
   /** The card's press or ［やめる］, waited for by the run (set while the card is up). */
   decide: ((d: 'approved' | 'cancelled') => void) | null
+  /** The write in doubt the person may answer about (the server's write and from when), or null. */
+  inDoubt: { write: number; from: string | null; line: string } | null
 }
 
 /** A server refusal → the consultation AI's fixed words. */
@@ -126,10 +130,14 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
   }
 
   function viewOf(e: Entry): BrowserWriteView {
+    // A write in doubt: ［済んでいた］［されていなかった］ from its time (the server decides at the press).
+    const result = e.result && e.inDoubt
+      ? { ...e.result, confirm: { from: e.inDoubt.from, canNow: e.inDoubt.from === null || now() >= Date.parse(e.inDoubt.from) } }
+      : e.result
     return {
       title: CW.title, siteLabel: e.host, phase: e.phase, values: e.values.map((v, i) => ({ name: `v${i + 1}`, label: v.label, value: v.value, needsConfirm: false, confirmed: false })),
       sentences: [...e.sentences], card: e.card, readAt: e.readAt, contentHash: e.phase === 'ready' ? e.planHash : null, message: e.message,
-      result: e.result, ...(e.phase === 'ready' ? { cancellable: true } : {}),
+      result, ...(e.phase === 'ready' ? { cancellable: true } : {}),
     }
   }
 
@@ -278,6 +286,7 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
         userId, companyId, runId: run.runId, host, phase: run.needsApproval ? 'ready' : 'running', values: plan?.values ?? [],
         sentences: workPlanSentences({ summary: plan?.summary ?? input.task, affects: plan?.affects ?? '', frames: workFrames(run.frames) }),
         planHash: run.planHash, approvalToken: run.approvalToken, card: null, readAt: null, message: null, result: null, decide: null,
+        inDoubt: null,
       }
       const e = entry
       keep(e)
@@ -368,6 +377,11 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
       e.readAt = new Date(now()).toISOString()
       e.phase = 'finished'
       e.result = resultOf(end, records, e.card.headline)
+      // The write in doubt the server knows (it had a permit): the person may answer about it on the card, past its window.
+      const doubt = records.find(r => r.outcome === 'unknown' && typeof r.write === 'number')
+      e.inDoubt = doubt ? { write: doubt.write as number, from: confirmableAt(doubt.permittedAt ?? null), line: doubt.line } : null
+      // The server's own time for the answer (and whatever it already knows of that write) drives the card's buttons.
+      if (e.inDoubt) await syncDoubt(e)
       const unread = answer && answer.do !== 'plan' ? answer.unread : []
       return said(worked.kind === 'refused' ? worked.words : workWordsForAi(end, input.items, unread, unreadAddresses))
     } finally {
@@ -470,10 +484,61 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
       if (entered) await o.win.leave().catch(() => {})
       const writes: BrowserRunWriteStep[] = writer?.log() ?? []
       // Awaited: the next phase (the frames run, the work) needs this run's lock released first.
-      const finished = await deps.api.runFinish(o.companyId, browseRunId, { outcome, ...(reason ? { reason } : {}), steps: log, ...(writes.length ? { writes } : {}) })
+      const finish = (w: BrowserRunWriteStep[]) => deps.api.runFinish(o.companyId, browseRunId, { outcome, ...(reason ? { reason } : {}), steps: log, ...(w.length ? { writes: w } : {}) })
         .catch((): BrowserLinesAnswer => ({ kind: 'no-answer' }))
+      let finished = await finish(writes)
+      // An older server knows no `site-refused`: it refuses the whole log as a bad run (and keeps the lock until its lease).
+      // Once more with those steps as `unknown` (independent review of #859).
+      if (finished.kind === 'refused' && finished.code === 'BROWSER_BAD_RUN' && writes.some(w => w.outcome === 'site-refused')) {
+        finished = await finish(writes.map(w => (w.outcome === 'site-refused' ? { ...w, outcome: 'unknown' as const } : w)))
+      }
       if (o.finished) o.finished.ok = finished.kind === 'ok'
     }
+  }
+
+  /** The write in doubt settled on the card: a person's answer (theirs, or one the server already holds), or the site's late one. */
+  function settleDoubt(e: Entry, to: 'done' | 'not_done', headline: string): void {
+    const doubt = e.inDoubt
+    if (!doubt || !e.result) return
+    const unknown = e.result.unknown.filter(l => l !== doubt.line)
+    e.result = {
+      ...e.result, headline, unknown,
+      done: to === 'done' ? [...e.result.done, doubt.line] : e.result.done,
+      notDone: to === 'not_done' ? [...e.result.notDone, doubt.line] : e.result.notDone,
+      byHand: unknown.map(CW.byHand), confirm: null,
+    }
+    e.inDoubt = null
+  }
+
+  /**
+   * Read the run again (`GET /browser-frame-runs/:runId`) and take what the server holds of the write in doubt: an answer
+   * already kept (`confirmed`), a late sure answer of the site (its state moved), or its time (`confirmableAt`). Nothing
+   * read → as it was.
+   */
+  async function syncDoubt(e: Entry): Promise<void> {
+    const doubt = e.inDoubt
+    if (!doubt) return
+    const got = await Promise.resolve().then(() => deps.api.frameGet(e.companyId, e.runId)).catch((): BrowserLinesAnswer => ({ kind: 'no-answer' }))
+    if (got.kind !== 'ok') return
+    const w = (got.value as { writes?: unknown } | null)?.writes
+    const write = Array.isArray(w) ? (w as Array<Record<string, unknown>>).find(x => x?.write === doubt.write) : undefined
+    if (!write) return
+    const confirmed = write.confirmed as { answer?: unknown } | null | undefined
+    if (confirmed && (confirmed.answer === 'done' || confirmed.answer === 'not_done')) {
+      settleDoubt(e, confirmed.answer, confirmed.answer === 'done' ? CW.confirmedDone : CW.confirmedNotDone)
+    } else if (write.state === 'done' || write.state === 'verified') {
+      settleDoubt(e, 'done', CW.lateDone)
+    } else if (write.state === 'refused') {
+      settleDoubt(e, 'not_done', CW.lateRefused)
+    } else if (write.state === 'unknown' && typeof write.confirmableAt === 'string' && Number.isFinite(Date.parse(write.confirmableAt))) {
+      doubt.from = write.confirmableAt
+    }
+  }
+
+  /** From when the server takes the person's answer: the permit + 5 s + 30 s (its estimate; it decides on both clocks). */
+  function confirmableAt(permittedAt: string | null): string | null {
+    const at = permittedAt === null ? Number.NaN : Date.parse(permittedAt)
+    return Number.isFinite(at) ? new Date(at + CONFIRM_AFTER_MS).toISOString() : null
   }
 
   /** The card's result lists (the write card's shape): done, not sent, unknown and what to check by hand. */
@@ -483,7 +548,7 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
       outcome: end.kind === 'done' ? 'succeeded' : end.kind === 'unknown' ? 'unknown' : records.some(r => r.outcome === 'done') ? 'partial' : 'stopped',
       headline: headline ?? (end.kind === 'stopped' ? W.stoppedBy[end.why] : CW.stopped),
       done: records.filter(r => r.outcome === 'done').map(r => r.line),
-      notDone: records.filter(r => r.outcome === 'not-sent' || r.outcome === 'refused').map(r => r.line),
+      notDone: records.filter(r => r.outcome === 'not-sent' || r.outcome === 'refused' || r.outcome === 'site-refused').map(r => r.line),
       unknown,
       byHand: unknown.map(CW.byHand),
       confirm: null,
@@ -522,6 +587,33 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
       e.phase = 'running'
       e.decide('approved')
       return { ok: true, view: viewOf(e) }
+    },
+    /**
+     * ［済んでいた］／［されていなかった］ on the card (main window only, the caller checked): the person's answer about the
+     * write in doubt, sent to the server with this PC's key. It never unlocks the run or sends anything again; after
+     * 「されていなかった」 the person asks again in the chat (a new run). The AI's tools never reach this.
+     */
+    async confirm(companyId: string, runId: string, answer: unknown): Promise<BrowserWriteGetResult | null> {
+      const e = mine(deps.userId(), companyId, runId)
+      if (!e) return null
+      if ((answer !== 'done' && answer !== 'not_done') || !e.inDoubt || !e.result) return { ok: false, message: CW.confirmNotNow }
+      const sent = await deps.api.frameConfirm(companyId, runId, { write: e.inDoubt.write, answer })
+      if (sent.kind === 'ok') {
+        settleDoubt(e, answer, answer === 'done' ? CW.confirmedDone : CW.confirmedNotDone)
+        return { ok: true, view: viewOf(e) }
+      }
+      // Not taken: the server's word decides what the card shows next (already answered, no longer in doubt, its time) —
+      // never a loop of 「もう一度押してください」 (independent review of #859).
+      await syncDoubt(e)
+      if (!e.inDoubt) return { ok: true, view: viewOf(e) }
+      if (sent.kind === 'refused' && sent.code === 'BROWSER_TOO_EARLY') return { ok: false, message: CW.confirmTooEarly }
+      if (sent.kind === 'refused' && (sent.code === 'BROWSER_FRAME_CONFIRMED' || sent.code === 'BROWSER_FRAME_NOT_UNKNOWN')) {
+        // The server holds another answer or state the read could not bring: the card stops asking.
+        e.inDoubt = null
+        if (e.result) e.result = { ...e.result, confirm: null }
+        return { ok: false, message: CW.confirmSettledElsewhere }
+      }
+      return { ok: false, message: CW.confirmFailed }
     },
     /** ［やめる］: the plan is not approved; the run ends (nothing is written). */
     cancel(companyId: string, runId: string): BrowserWriteGetResult | null {

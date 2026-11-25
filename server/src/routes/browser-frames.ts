@@ -9,7 +9,9 @@
  *   GET  /browser-frame-runs/:runId             the member's own (never the approval value)
  *   POST /browser-frame-runs/:runId/approve     { planHash, approvalToken }: the person approved the plan the card showed
  *   POST /browser-frame-runs/:runId/permit      { frame, request: { method, path, fields } }: one write that fits that frame
- *   POST /browser-frame-runs/:runId/report      { write, result: done | not_sent | unknown, reason? }
+ *   POST /browser-frame-runs/:runId/report      { write, result: done | not_sent | unknown | refused, reason? }
+ *   POST /browser-frame-runs/:runId/confirm     { write, answer: done | not_done }: the person's answer about a write in
+ *                                               doubt, from the card (this PC's key; it never moves the write or the run)
  *   POST /browser-frame-runs/:runId/end         the run ends; its unused frames vanish
  */
 import { Hono } from 'hono'
@@ -49,6 +51,11 @@ browserFramesRoute.post('/browser-frame-runs/:runId/permit', companyMember, serv
 
 browserFramesRoute.post('/browser-frame-runs/:runId/report', companyMember, serviceBody, (c) => {
   const r = browserFrames.report(c.var.member, c.req.param('runId'), c.var.body, c.req.header(BROWSER_DEVICE_HEADER))
+  return r.ok ? c.json({ success: true, data: r.value }) : refusal(c, r)
+})
+
+browserFramesRoute.post('/browser-frame-runs/:runId/confirm', companyMember, serviceBody, (c) => {
+  const r = browserFrames.confirm(c.var.member, c.req.param('runId'), c.var.body, c.req.header(BROWSER_DEVICE_HEADER))
   return r.ok ? c.json({ success: true, data: r.value }) : refusal(c, r)
 })
 

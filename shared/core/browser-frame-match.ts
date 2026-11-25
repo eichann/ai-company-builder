@@ -114,3 +114,21 @@ function splitOnce(s: string): [string, string | null] {
   const q = s.indexOf('?')
   return q === -1 ? [s, null] : [s.slice(0, q), s.slice(q + 1)]
 }
+
+/**
+ * What the site's answer to a sent write means (agent-browser.md "Recovering from a failed write"; the one rule the app
+ * asks): `done` for a success or a redirect (2xx / 3xx: the site took it — a classic form whose error is a 302 back to the
+ * form counts as done too: the after-read and the card show it); **`refused` only for the 4xx on this list**, the ones
+ * that say the request was not taken (a bad or invalid request, the login or the CSRF value run out, not allowed, no such
+ * address or method, too large, the wrong body type) — the run goes on, and a corrected try is a new write with its own
+ * permit and unit; nothing is resent automatically; **`unknown` for every other status**, decided on the safe side —
+ * every other 4xx (408 timed out, 409 a conflict after a partial or concurrent change, 424, 425, 429, a proxy's 460 / 463 /
+ * 499 …), every 5xx and anything outside 200–499 —: the run is then locked and nothing more is sent. This reverses the
+ * runner's earlier rule "every non-success is unknown" (6b-2c) for the listed codes only.
+ */
+export const BROWSER_WRITE_REFUSED_4XX: readonly number[] = [400, 401, 403, 404, 405, 410, 411, 413, 414, 415, 419, 422]
+export function browserWriteAnswerKind(status: number): 'done' | 'refused' | 'unknown' {
+  if (!Number.isInteger(status)) return 'unknown'
+  if (status >= 200 && status < 400) return 'done'
+  return BROWSER_WRITE_REFUSED_4XX.includes(status) ? 'refused' : 'unknown'
+}

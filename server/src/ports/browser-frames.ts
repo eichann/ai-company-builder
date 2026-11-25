@@ -4,7 +4,7 @@
  * services/browser-frames.ts alone; the table's CHECKs and triggers (db/schema/browser-frames.ts) are the second layer.
  */
 export type FrameRunState = 'waiting' | 'open' | 'locked' | 'ended'
-export type FrameWriteState = 'permitted' | 'done' | 'verified' | 'not_sent' | 'unknown'
+export type FrameWriteState = 'permitted' | 'done' | 'verified' | 'not_sent' | 'unknown' | 'refused'
 
 export interface FrameRunRow {
   id: string
@@ -51,6 +51,14 @@ export interface FrameWriteRow {
   settledAt: string | null
 }
 
+/** The person's answer about a write in doubt (「済んでいた」 / 「されていなかった」), who and when; kept as given. */
+export interface FrameWriteConfirmRow {
+  seq: number
+  answer: 'done' | 'not_done'
+  confirmedBy: string
+  confirmedAt: string
+}
+
 export interface BrowserFrameRepository {
   run(runId: string): FrameRunRow | null
   /** The run not ended on this domain, if any (at most one: a unique index). */
@@ -67,6 +75,10 @@ export interface BrowserFrameRepository {
   /** One more unit of the frame, only while `used < max`; false when used up. */
   takeUnit(runId: string, idx: number): boolean
   insertWrite(runId: string, write: Omit<FrameWriteRow, 'settledAt' | 'reason'>): void
+  /** The person's answers about this run's writes in doubt. */
+  confirms(runId: string): FrameWriteConfirmRow[]
+  /** The person's answer, once per write (false when one is there already: the primary key). */
+  insertConfirm(runId: string, row: FrameWriteConfirmRow): boolean
   /** Compare-and-set of a write's state; false when it was not `from`. */
   setWriteState(runId: string, seq: number, from: FrameWriteState, to: FrameWriteState, change: { settledAt: string; reason?: string | null }): boolean
 }

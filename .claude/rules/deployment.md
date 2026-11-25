@@ -366,6 +366,15 @@ is the first build whose server makes plans of writes — but only of an approve
 owner's test write (PR 7): deploy it only on top of PR 4 in production, and from the first plan of writes on, never below
 PR 4.
 
+### Browser operation: the server before the app (writes the site refused)
+
+Since "Recovering from a failed write" (`agent-browser.md`) the app reports a write the site refused (`refused`) and the
+run log's step `site-refused`, and the person's answer about a write in doubt has its own route. **Deploy the server
+before handing out the app.** An app ahead of its server stays safe but loses something: the server refuses the report
+`refused` (the app then keeps the write `unknown` and locks the run — the old behaviour), refuses a run log naming
+`site-refused` (the app sends it once more with those steps `unknown`), and has no answer route (the card's buttons say
+they could not send). Guards: `client/tests/browser-frame-writes.test.ts` 「an older server (no `refused`)…」.
+
 ### The previous floor (stage 4-0.1)
 
 **Once event-triggered jobs (stage 4a) are in production, never roll production back to a version older than
