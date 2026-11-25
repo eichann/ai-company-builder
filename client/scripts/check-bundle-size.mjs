@@ -17,6 +17,10 @@
 // 2026-11-03: 2.55 → 3.0 MiB (owner decision: 「ちょっと上げて良い」). In exchange each pull request may
 // grow the renderer JS by at most 50 KB over its base (`--base`, below): the absolute budget catches the
 // total, the growth guard catches one change that adds a lot (a new dependency) while there is room.
+// 2026-11-25: 3.0 → 3.2 MiB (owner's standing rule: take the recommendation). Browser operation's
+// 「記録する」 (#846) and company site settings (#847) each passed alone but together left main at
+// 3,146,245 bytes (517 over). Lazy chunks count here, so splitting would not lower it; the 50 KB
+// growth guard per pull request stays.
 //
 // Usage: node scripts/check-bundle-size.mjs [distDir] [--budget-mib N] [--base baseDistDir] [--max-growth-kb N]
 import fs from 'node:fs'
@@ -29,7 +33,7 @@ for (let i = 0; i < args.length; i++) {
   if (args[i].startsWith('--')) options.set(args[i], args[++i])
   else positional.push(args[i])
 }
-const budgetMiB = options.has('--budget-mib') ? Number(options.get('--budget-mib')) : 3.0
+const budgetMiB = options.has('--budget-mib') ? Number(options.get('--budget-mib')) : 3.2
 const maxGrowthKb = options.has('--max-growth-kb') ? Number(options.get('--max-growth-kb')) : 50
 const dist = positional[0] ?? 'dist'
 
