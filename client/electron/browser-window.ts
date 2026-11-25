@@ -155,11 +155,13 @@ export function startRefusingProxy(): Promise<number> {
 export function createBrowserWindowShell(options: {
   log?: Pick<Console, 'warn'>
   show?: boolean
-  /** The login helpers the bundled declaration of a site's host lists (main composes it; none = none). */
+  /** Login helpers for a site that does not carry its own (`BrowserWindowSite.loginHelpers`); none = none. */
   loginHelpers?: (host: string) => readonly BrowserLoginHelper[]
 } = {}): BrowserShell & { open(spec: BrowserWindowSpec): BrowserShellWindow } {
   const log = options.log ?? console
-  const helpersOf = (site: BrowserSiteSetting) => options.loginHelpers?.(site.host) ?? []
+  // A domain's login helpers come with its site (the controller composes them: the company's 「詳しい設定」, else the
+  // bundled fallback; agent-browser.md "A domain's parts and login helpers"); `loginHelpers` only for a site without.
+  const helpersOf = (site: BrowserSiteSetting & { loginHelpers?: readonly BrowserLoginHelper[] }) => site.loginHelpers ?? options.loginHelpers?.(site.host) ?? []
   const states = new Map<string, SessionState>()
   let refusingProxy: Promise<number> | null = null
   /** One lane per page-less session name, for the whole app run (a reopened window's too). */

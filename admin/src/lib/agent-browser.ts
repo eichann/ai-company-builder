@@ -11,6 +11,7 @@ import {
   type BrowserOperationMode,
   type BrowserOperationSettings,
 } from '../../../shared/core/browser-operation'
+import { BROWSER_SITE_PARTS_LIMITS, parseBrowserSiteParts, type BrowserSiteParts } from '../../../shared/core/browser-site-parts'
 import { linesOf } from './agent-sandbox'
 
 export const BROWSER_TITLE = 'ブラウザ操作'
@@ -51,12 +52,93 @@ export const BROWSER_SITES_HELP =
   '「操作するサイト」は AI が操作するサイトのアドレス（例: crm.example.com）です。'
 
 /**
- * Since plan B (owner decision 2026-11-23) where a site's pages load their parts from — and what its
- * login needs — is the site's reviewed declaration's: the admin types no address (agent-browser.md
- * "Asset hosts").
+ * Since redesign step ② where a domain's pages load their parts from — and what its login needs — is the
+ * company's setting of that domain (each site's 「詳しい設定」, agent-browser.md "A domain's parts and login
+ * helpers"); a domain without one uses what the app carries, if anything.
  */
 export const BROWSER_PARTS_NOTE =
-  '画面の表示に使う部品（画像・文字の形など）を読み込む先と、ログインの確かめに使う先は、サイトごとに用意され確かめ済みの決まりで決まります。ここで書く必要はありません。部品の読み込み先からは読み込むだけで、計測や広告の通信は止めます。'
+  '画面の表示に使う部品（画像・文字の形など）を読み込む先と、ログインの確かめに使う先は、保存したサイトごとの「詳しい設定」で決めます。書いていないサイトは、アプリに入っている決まりがあればそれを使います。部品の読み込み先からは読み込むだけで、それ以外の通信は止めます。'
+
+/** A domain's 「詳しい設定」 (the parts hosts and login helpers; agent-browser.md "A domain's parts and login helpers"). */
+export const SITE_PARTS_TITLE = '詳しい設定'
+
+export const SITE_PARTS_INTRO =
+  'サイトを見ながら作業を記録したものを読んで、必要な先だけを書きます。空のまま保存すると、アプリに入っている決まりを使います（ある場合）。'
+
+export const SITE_PARTS_ASSETS_HELP =
+  'このサイトの画面が、画像・文字の形・見た目の部品を読み込む先です。1行に1つ書きます。読み込むだけで、AI がその先を開いたり、何かを送ったりすることはありません。'
+
+export const SITE_PARTS_HELPERS_HELP =
+  '人がログインするときだけ使う先です（ログインの確かめの画面など）。書いた道の中だけを使い、AI が操作している間は使いません。'
+
+export const SITE_PARTS_FRAME_LABEL = '画面の中に表示してよい'
+export const SITE_PARTS_POST_LABEL = '確かめの答えを送ってよい'
+export const SITE_PARTS_HELPER_LIMIT = BROWSER_SITE_PARTS_LIMITS.loginHelpers
+
+/** One login helper as the form edits it. */
+export interface HelperDraft {
+  host: string
+  pathPrefix: string
+  frame: boolean
+  post: boolean
+}
+
+/** A domain's 「詳しい設定」 as the form edits it: the parts hosts as one-per-line text. */
+export interface SitePartsDraft {
+  assetHosts: string
+  loginHelpers: HelperDraft[]
+}
+
+export function sitePartsDraft(saved: BrowserSiteParts | undefined): SitePartsDraft {
+  return {
+    assetHosts: (saved?.assetHosts ?? []).join('\n'),
+    loginHelpers: (saved?.loginHelpers ?? []).map((h) => ({ ...h })),
+  }
+}
+
+const hostOf = (line: string) => normalizeBrowserHost(line.trim()) ?? line.trim()
+
+/** What the draft would save for `host` (hosts normalized, parts hosts de-duplicated). */
+export function sitePartsBody(host: string, draft: SitePartsDraft): BrowserSiteParts {
+  return {
+    host,
+    assetHosts: [...new Set(linesOf(draft.assetHosts).map(hostOf))],
+    loginHelpers: draft.loginHelpers.map((h) => ({ host: hostOf(h.host), pathPrefix: h.pathPrefix.trim(), frame: h.frame, post: h.post })),
+  }
+}
+
+/**
+ * What is wrong with the draft (empty = fine), in words for the page: the server's own rule
+ * (`parseBrowserSiteParts`) against the saved sites' hosts.
+ */
+export function sitePartsProblems(body: BrowserSiteParts, savedHosts: readonly string[]): string[] {
+  if (body.loginHelpers.some((h) => !h.host)) return ['ログインの補助のアドレスを書いてください']
+  const parsed = parseBrowserSiteParts(body, savedHosts)
+  if (!('error' in parsed)) return []
+  const at = parsed.at ?? ''
+  switch (parsed.problem) {
+    case 'not-registered': return ['このサイトはまだ保存されていません。先に下の「保存」をしてください']
+    case 'bad-host': return [`使えない書き方があります: ${at}（${BROWSER_HOST_RULE}）`]
+    case 'operated': return [`操作するサイトとして登録したアドレスは、ここには書けません: ${at}`]
+    case 'twice': return [`同じアドレスが2回あります: ${at}（部品の読み込み先とログインの補助の両方にも書けません）`]
+    case 'too-many': return [`部品の読み込み先は ${BROWSER_SITE_PARTS_LIMITS.assetHosts} 個まで、ログインの補助は ${BROWSER_SITE_PARTS_LIMITS.loginHelpers} 個までです`]
+    case 'bad-path': return [`ログインの補助の道は / で始まり / で終わる形で書いてください（例: /check/）: ${at}`]
+    default: return ['書き方が正しくありません']
+  }
+}
+
+/** Lines for a domain's 「詳しい設定」 in the history. */
+export function sitePartsChangeLines(host: string, before: BrowserSiteParts | null, after: BrowserSiteParts | null): string[] {
+  const list = (p: BrowserSiteParts | null) => (p && p.assetHosts.length ? p.assetHosts.join('、') : 'なし')
+  const helper = (h: BrowserSiteParts['loginHelpers'][number]) =>
+    `${h.host}${h.pathPrefix}${h.frame ? '（表示）' : ''}${h.post ? '（送信）' : ''}`
+  const helpers = (p: BrowserSiteParts | null) => (p && p.loginHelpers.length ? p.loginHelpers.map(helper).join('、') : 'なし')
+  if (!after) return [`${host} の詳しい設定を空にしました（アプリに入っている決まりを使います）`]
+  const lines: string[] = []
+  if (list(before) !== list(after)) lines.push(`${host} の部品の読み込み先: ${list(before)} → ${list(after)}`)
+  if (helpers(before) !== helpers(after)) lines.push(`${host} のログインの補助: ${helpers(before)} → ${helpers(after)}`)
+  return lines
+}
 
 /**
  * The company's free-text parts hosts are a developer setting (owner decision 2026-11-23: kept, not

@@ -43,6 +43,8 @@ const LATER_TABLES = [
   'agent_browser_settings',
   'agent_browser_overrides',
   'agent_browser_history',
+  // agent-browser.md "A domain's parts and login helpers" (redesign step ②): each registered domain's 詳しい設定.
+  'agent_browser_site_parts',
   // agent-browser.md "Plans, executions, permits and locks": plans, executions, reports, target locks, type grants.
   'browser_plans',
   'browser_executions',

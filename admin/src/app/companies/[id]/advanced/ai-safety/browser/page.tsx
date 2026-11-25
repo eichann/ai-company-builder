@@ -38,12 +38,24 @@ import {
   BROWSER_SITES_HELP,
   BROWSER_SITE_LIMIT,
   BROWSER_TITLE,
+  SITE_PARTS_ASSETS_HELP,
+  SITE_PARTS_FRAME_LABEL,
+  SITE_PARTS_HELPERS_HELP,
+  SITE_PARTS_HELPER_LIMIT,
+  SITE_PARTS_INTRO,
+  SITE_PARTS_POST_LABEL,
+  SITE_PARTS_TITLE,
   browserChangeLines,
   developerAssetHostsShown,
   draftBrowserSettings,
   siteDrafts,
+  sitePartsBody,
+  sitePartsChangeLines,
+  sitePartsDraft,
+  sitePartsProblems,
   siteProblems,
   type SiteDraft,
+  type SitePartsDraft,
 } from '@/lib/agent-browser'
 import { PCS_TITLE, PEOPLE_TITLE } from '@/lib/agent-browser-people'
 import { linesOf } from '@/lib/agent-sandbox'
@@ -126,6 +138,7 @@ function SettingsForm({ saved, onSaved }: { saved: AgentBrowserView; onSaved: (n
   const [busy, setBusy] = useState(false)
 
   const problems = sites.map((s, i) => siteProblems(s, sites.slice(0, i)))
+  const savedHosts = saved.settings.sites.map((s) => s.host)
   const developer = developerAssetHostsShown()
   const invalid = problems.some((p) => p.length > 0)
   const after = draftBrowserSettings(mode, sites)
@@ -244,6 +257,15 @@ function SettingsForm({ saved, onSaved }: { saved: AgentBrowserView; onSaved: (n
                     ))}
                   </ul>
                 )}
+                {savedHosts.includes(site.host) && (
+                  <SitePartsEditor
+                    key={`${site.host}:${JSON.stringify((saved.siteParts ?? []).find((p) => p.host === site.host) ?? null)}`}
+                    host={site.host}
+                    savedHosts={savedHosts}
+                    view={saved}
+                    onSaved={onSaved}
+                  />
+                )}
                 <Button variant="outline" size="sm" onClick={() => setSites((all) => all.filter((_, j) => j !== i))}>
                   <Trash size={14} />
                   このサイトを外す
@@ -298,6 +320,104 @@ function SettingsForm({ saved, onSaved }: { saved: AgentBrowserView; onSaved: (n
         </div>
       </div>
     </>
+  )
+}
+
+/**
+ * A saved site's 「詳しい設定」 (agent-browser.md "A domain's parts and login helpers"): where its pages load parts
+ * from and what a person's login needs, saved on its own (folded: the FDE fills it after reading a recording).
+ */
+function SitePartsEditor({ host, savedHosts, view, onSaved }: { host: string; savedHosts: string[]; view: AgentBrowserView; onSaved: (next: AgentBrowserView) => void }) {
+  const { companyId } = useCompany()
+  const stored = (view.siteParts ?? []).find((p) => p.host === host)
+  const [draft, setDraft] = useState<SitePartsDraft>(sitePartsDraft(stored))
+  const [busy, setBusy] = useState(false)
+  const body = sitePartsBody(host, draft)
+  const problems = sitePartsProblems(body, savedHosts)
+  const changed = JSON.stringify(body) !== JSON.stringify(sitePartsBody(host, sitePartsDraft(stored)))
+  const editHelper = (index: number, change: Partial<SitePartsDraft['loginHelpers'][number]>) =>
+    setDraft((d) => ({ ...d, loginHelpers: d.loginHelpers.map((h, i) => (i === index ? { ...h, ...change } : h)) }))
+
+  const save = async () => {
+    if (problems.length > 0 || !changed) return
+    setBusy(true)
+    try {
+      const next = await agentBrowserApi.setSiteParts(companyId, body)
+      toast.success('詳しい設定を保存しました', { description: '各メンバーのアプリには、次にサイトを開くときから反映されます。' })
+      onSaved(next)
+    } catch (err) {
+      toast.error('詳しい設定を保存できませんでした', { description: describeError(err) })
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <details className="rounded-control border px-4 py-3 text-body">
+      <summary className="cursor-pointer font-medium">{SITE_PARTS_TITLE}</summary>
+      <div role="group" aria-label={`${host} の詳しい設定`} className="mt-3 space-y-4">
+        <p className="text-small text-muted-foreground">{SITE_PARTS_INTRO}</p>
+        <label className="block space-y-1">
+          <span className="font-medium">画面の部品を読み込む先</span>
+          <Textarea
+            aria-label={`${host} の部品を読み込む先`}
+            className="min-h-20 font-mono"
+            placeholder="img.example.net"
+            value={draft.assetHosts}
+            onChange={(e) => setDraft((d) => ({ ...d, assetHosts: e.target.value }))}
+          />
+          <span className="block text-small text-muted-foreground">{SITE_PARTS_ASSETS_HELP}</span>
+        </label>
+        <div className="space-y-2">
+          <p className="font-medium">ログインの補助</p>
+          <p className="text-small text-muted-foreground">{SITE_PARTS_HELPERS_HELP}</p>
+          {draft.loginHelpers.map((h, i) => {
+            const n = i + 1
+            return (
+              <div key={i} role="group" aria-label={`${host} のログインの補助 ${n}`} className="space-y-2 rounded-control border p-3">
+                <div className="grid gap-2 md:grid-cols-2">
+                  <Input aria-label={`ログインの補助 ${n} のアドレス`} className="font-mono" placeholder="check.example.org" value={h.host} onChange={(e) => editHelper(i, { host: e.target.value })} />
+                  <Input aria-label={`ログインの補助 ${n} の道`} className="font-mono" placeholder="/check/" value={h.pathPrefix} onChange={(e) => editHelper(i, { pathPrefix: e.target.value })} />
+                </div>
+                <div className="flex flex-wrap gap-4">
+                  <label className="flex items-center gap-2">
+                    <input type="checkbox" checked={h.frame} onChange={(e) => editHelper(i, { frame: e.target.checked })} />
+                    {SITE_PARTS_FRAME_LABEL}
+                  </label>
+                  <label className="flex items-center gap-2">
+                    <input type="checkbox" checked={h.post} onChange={(e) => editHelper(i, { post: e.target.checked })} />
+                    {SITE_PARTS_POST_LABEL}
+                  </label>
+                </div>
+                <Button variant="outline" size="sm" onClick={() => setDraft((d) => ({ ...d, loginHelpers: d.loginHelpers.filter((_, j) => j !== i) }))}>
+                  <Trash size={14} />
+                  この補助を外す
+                </Button>
+              </div>
+            )
+          })}
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={draft.loginHelpers.length >= SITE_PARTS_HELPER_LIMIT}
+            onClick={() => setDraft((d) => ({ ...d, loginHelpers: [...d.loginHelpers, { host: '', pathPrefix: '', frame: false, post: false }] }))}
+          >
+            <Plus size={14} />
+            ログインの補助を追加
+          </Button>
+        </div>
+        {problems.length > 0 && (
+          <ul className="text-body text-destructive" role="alert">
+            {problems.map((p) => (
+              <li key={p}>{p}</li>
+            ))}
+          </ul>
+        )}
+        <Button size="sm" onClick={save} disabled={busy || problems.length > 0 || !changed}>
+          {busy ? '保存しています…' : '詳しい設定を保存'}
+        </Button>
+      </div>
+    </details>
   )
 }
 
@@ -374,6 +494,7 @@ function describeChange(c: AgentBrowserChange['change']): string[] {
     const label = (m: BrowserOperationMode | null) => (m ? BROWSER_MODE_LABELS[m] : '会社と同じ')
     return [`${who}の動作: ${label(c.before)} → ${label(c.after)}`]
   }
+  if (c.target === 'site-parts') return sitePartsChangeLines(c.host, c.before, c.after)
   return browserChangeLines(c.before, c.after)
 }
 

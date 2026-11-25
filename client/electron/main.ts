@@ -600,12 +600,13 @@ const bindPersonStep = createPersonStepBinder({ baseUrl: getServerApiUrl, cookie
 removeLeftoverBrowserPartitions(userDataDir())
 const lstep = lstepConnector()
 const browser = createBrowserController({
-  // A site's login helpers (a CAPTCHA while the member logs in): only its bundled declaration's, when this
-  // build carries it and the approved list approves it, as for plans.
-  shell: createBrowserWindowShell({ loginHelpers: bundledLoginHelpers([lstep.declaration]) }),
-  // Where its pages load parts from (fonts, images): the same declaration's, never the company's free text —
-  // a developer setting, honoured only by a development build started with ACB_BROWSER_DEVELOPER_ASSET_HOSTS=1.
+  shell: createBrowserWindowShell(),
+  // Where a domain's pages load parts from and what its login needs: the company's 「詳しい設定」 of that domain
+  // (in the policy); a domain it set nothing for falls back, until step ⑦, to the bundled declaration's, when this
+  // build carries it and the approved list approves it. Never the company's free text on the site — a developer
+  // setting, honoured only by a development build started with ACB_BROWSER_DEVELOPER_ASSET_HOSTS=1.
   assetHostsOf: bundledAssetHosts([lstep.declaration]),
+  loginHelpersOf: bundledLoginHelpers([lstep.declaration]),
   developerAssetHosts: developerAssetHostsOn({ packaged: app.isPackaged }, process.env),
   userId: session.userId,
   onChanged: companyId => appWindow.send('browser:changed', { companyId }),

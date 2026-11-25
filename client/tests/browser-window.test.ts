@@ -182,7 +182,7 @@ test('a run finds only the signed-in member\'s open window of a site their curre
   w.browser.open('c1', site.host)
   assert.ok(w.browser.runWindow('c1', site.host))
   // The company's free-text asset hosts are not the window's (agent-browser.md "Asset hosts").
-  assert.deepEqual(w.browser.siteNow('c1', site.host), { ...site, assetHosts: [] })
+  assert.deepEqual(w.browser.siteNow('c1', site.host), { ...site, assetHosts: [], loginHelpers: [] })
   w.browser.policyAnswered('c2', policy(on()))
   assert.equal(w.browser.runWindow('c2', site.host), null, 'another company\'s window of the same site')
   w.setUser('user-2')
@@ -259,7 +259,7 @@ test('a changed site (its level, a development build\'s asset hosts) reaches the
   w.browser.open('c1', site.host)
   const next = { ...site, level: 'read' as const, assetHosts: ['cdn2.example.net'] }
   w.browser.policyAnswered('c1', policy(on([next])))
-  assert.deepEqual(w.opened[0].site, next)
+  assert.deepEqual(w.opened[0].site, { ...next, loginHelpers: [] })
   assert.equal(w.opened[0].closed, false)
 })
 

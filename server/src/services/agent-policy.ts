@@ -24,7 +24,7 @@ import type { SecondOpinionSettingService } from './second-opinion-setting'
 
 export interface AgentPolicyDeps {
   agentSandbox: Pick<AgentSandboxService, 'policyFor'>
-  agentBrowser: Pick<AgentBrowserService, 'policyFor'>
+  agentBrowser: Pick<AgentBrowserService, 'policyFor'> & Partial<Pick<AgentBrowserService, 'sitePartsFor'>>
   agentStops: Pick<AgentStopService, 'policyFor'>
   secondOpinion: Pick<SecondOpinionSettingService, 'allowedFor'>
   digest: TokenDigest
@@ -54,8 +54,12 @@ export function createAgentPolicyService(deps: AgentPolicyDeps) {
     const stop = deps.agentStops.policyFor(as)
     const secondOpinion = { allowed: deps.secondOpinion.allowedFor(member.companyId) }
     const browser = deps.agentBrowser.policyFor(member)
+    // A registered domain's 「詳しい設定」 (redesign step ②): a field of its own, only when there is one, so
+    // the `browser` part released apps validate keeps its shape (and its answer and version stay as before).
+    const browserParts = deps.agentBrowser.sitePartsFor?.(member) ?? []
     const parts = {
       sandbox, stop, secondOpinion, browser,
+      ...(browserParts.length > 0 ? { browserParts } : {}),
       ...(plugins ? { plugins } : {}),
       ...(pluginTrust ? { pluginTrust } : {}),
     }

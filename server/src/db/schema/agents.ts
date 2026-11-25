@@ -118,6 +118,19 @@ export const agentSchema = `
       change TEXT NOT NULL
     );
 
+    -- A registered domain's 「詳しい設定」 (redesign step ②, agent-browser.md "A domain's parts and login
+    -- helpers"): parts JSON = { host, assetHosts, loginHelpers }, re-validated against the registered
+    -- domains whenever read. No row = nothing set (the app's fallback). Added beside the setting, whose
+    -- shape released apps read, never inside it.
+    CREATE TABLE IF NOT EXISTS agent_browser_site_parts (
+      company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+      host TEXT NOT NULL,
+      parts TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      updated_by TEXT NOT NULL,
+      PRIMARY KEY (company_id, host)
+    );
+
     -- The emergency stop (monitoring M2, .claude/rules/agent-stop.md): one row per
     -- stop an owner/admin made. user_id NULL = everyone; tool NULL = the whole AI
     -- (else command / write / web / mcp-external). released_at NULL = in force.

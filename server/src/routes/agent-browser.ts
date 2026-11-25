@@ -7,6 +7,7 @@
  *   GET  /agent-browser                       setting + overrides + history (owner/admin)
  *   PUT  /agent-browser                       the whole setting (owner/admin)
  *   PUT  /agent-browser/overrides/:userId     { mode: off|on|null } (owner/admin)
+ *   PUT  /agent-browser/site-parts            one registered domain's 「詳しい設定」 (owner/admin)
  *
  * A change is announced on the push channel (/me/events), like a sandbox change.
  * Non-members get 404 like every company route.
@@ -36,6 +37,14 @@ agentBrowserRoute.put('/agent-browser', companyMember, serviceBody, async (c) =>
 agentBrowserRoute.put('/agent-browser/overrides/:userId', companyMember, serviceBody, async (c) => {
   const member = c.var.member
   const result = agentBrowser.setOverride(member, c.req.param('userId'), c.var.body)
+  if (!result.ok) return refusal(c, result)
+  agentPolicy.announce(member.companyId)
+  return c.json({ success: true, data: result.value })
+})
+
+agentBrowserRoute.put('/agent-browser/site-parts', companyMember, serviceBody, async (c) => {
+  const member = c.var.member
+  const result = agentBrowser.setSiteParts(member, c.var.body)
   if (!result.ok) return refusal(c, result)
   agentPolicy.announce(member.companyId)
   return c.json({ success: true, data: result.value })

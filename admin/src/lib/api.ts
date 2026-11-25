@@ -926,7 +926,8 @@ export const agentSandboxApi = {
 // 「ブラウザ操作」 (agent-browser.md): shapes from shared/types/agent-browser.ts. Owners/admins.
 // ---------------------------------------------------------------------------
 
-export type { AgentBrowserChange, AgentBrowserOverride, AgentBrowserView } from '../../../shared/types/agent-browser'
+export type { AgentBrowserChange, AgentBrowserOverride, AgentBrowserSitePartsInput, AgentBrowserView } from '../../../shared/types/agent-browser'
+import type { AgentBrowserSitePartsInput } from '../../../shared/types/agent-browser'
 export type { BrowserOperationLevel, BrowserOperationMode, BrowserOperationSettings } from '../../../shared/core/browser-operation'
 
 import type { BrowserOperationMode, BrowserOperationSettings } from '../../../shared/core/browser-operation'
@@ -938,6 +939,9 @@ export const agentBrowserApi = {
   /** A member's own mode; null = follow the company again. */
   setOverride: (companyId: string, userId: string, mode: BrowserOperationMode | null) =>
     getData(`/api/companies/${enc(companyId)}/agent-browser/overrides/${enc(userId)}`, agentBrowserSchema, { method: 'PUT', body: { mode } }),
+  /** A saved site's 「詳しい設定」, whole (both lists empty: back to what the app carries). */
+  setSiteParts: (companyId: string, parts: AgentBrowserSitePartsInput) =>
+    getData(`/api/companies/${enc(companyId)}/agent-browser/site-parts`, agentBrowserSchema, { method: 'PUT', body: parts }),
 }
 
 // ---------------------------------------------------------------------------

@@ -111,7 +111,7 @@ export const sandbox: AgentSandboxView = {
   overrides: [], updatedAt: null, updatedBy: null, history: [],
 }
 
-export const browser: AgentBrowserView = { settings: { ...DEFAULT_BROWSER_OPERATION_SETTINGS }, overrides: [], updatedAt: null, updatedBy: null, history: [] }
+export const browser: AgentBrowserView = { settings: { ...DEFAULT_BROWSER_OPERATION_SETTINGS }, overrides: [], updatedAt: null, updatedBy: null, history: [], siteParts: [] }
 
 export const eventSettings: AgentEventSettings = { retentionDays: 180, viewers: 'admins', updatedAt: null, updatedBy: null, history: [] }
 export const eventPage: AgentEventPage = { events: [], nextCursor: null }

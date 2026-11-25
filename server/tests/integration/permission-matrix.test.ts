@@ -351,6 +351,8 @@ const MATRIX: Row[] = [
   r('GET /api/companies/:companyId/agent-browser', w => ({ path: `${C(w)}/agent-browser` }), [200, 200, 403, 403, 404, 401]),
   r('PUT /api/companies/:companyId/agent-browser', w => ({ path: `${C(w)}/agent-browser`, body: 'x' }), [400, 400, 403, 403, 404, 401]),
   r('PUT /api/companies/:companyId/agent-browser/overrides/:userId', w => ({ path: `${C(w)}/agent-browser/overrides/${USER.member}`, body: 'x' }), [400, 400, 403, 403, 404, 401]),
+  // A registered domain's 「詳しい設定」 (redesign step ②; agent-browser.md "A domain's parts and login helpers"): owner/admin.
+  r('PUT /api/companies/:companyId/agent-browser/site-parts', w => ({ path: `${C(w)}/agent-browser/site-parts`, body: 'x' }), [400, 400, 403, 403, 404, 401]),
   // 「もう一方の AI に聞く」 (chat-and-agents.md "Asking the other AI"): owner/admin, like the other AI settings.
   r('GET /api/companies/:companyId/second-opinion', w => ({ path: `${C(w)}/second-opinion` }), [200, 200, 403, 403, 404, 401]),
   r('PUT /api/companies/:companyId/second-opinion', w => ({ path: `${C(w)}/second-opinion`, body: 'x' }), [400, 400, 403, 403, 404, 401]),

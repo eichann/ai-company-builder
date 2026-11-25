@@ -8,13 +8,16 @@
 //   validate = off until the next valid one (`policyFailed` closes the company's windows).
 // - A valid answer that drops a site or turns the mode off closes its window and clears its login.
 // - Signing out clears every login; signing in as another account clears the others'.
-// - A site's asset hosts are its reviewed declaration's (`assetHostsOf`), never the company's free-text
-//   list, which only a development build that asks for it adds (`developerAssetHosts`; agent-browser.md
-//   "Asset hosts").
+// - A site's parts hosts and login helpers are the company's 「詳しい設定」 of that domain (the policy's
+//   `browserParts`, redesign step ②: agent-browser.md "A domain's parts and login helpers"); a domain the
+//   company set nothing for falls back to the reviewed bundled declaration (`assetHostsOf` / `loginHelpersOf`,
+//   until step ⑦), logged. Never the company's free-text list on the site, which only a development build that
+//   asks for it adds (`developerAssetHosts`; "Asset hosts").
 import { createHash } from 'node:crypto'
 import type { BrowserSiteSetting } from '../../../../shared/core/browser-operation'
 import type { AgentPolicy } from '../../../../shared/types/agent-sandbox'
-import { BROWSER_WORDS, browserWindowSite, type BrowserActionResult, type BrowserSitesResult } from '../../../shared/browser-operation'
+import type { BrowserLoginHelper } from '../../../../shared/core/plugin-browser-declaration'
+import { BROWSER_WORDS, browserWindowSiteFrom, type BrowserActionResult, type BrowserSitesResult } from '../../../shared/browser-operation'
 import type { BrowserPreviewSurface, BrowserRunSurface } from '../../../shared/browser-runner'
 
 export interface BrowserWindowSpec {
@@ -70,6 +73,8 @@ export interface BrowserControllerDeps {
    * list approves (main composes it, `bundledAssetHosts`); absent = none.
    */
   assetHostsOf?: (host: string) => readonly string[]
+  /** The login helpers of the same bundled declaration (`bundledLoginHelpers`): the fallback likewise; absent = none. */
+  loginHelpersOf?: (host: string) => readonly BrowserLoginHelper[]
   /** A development build that asks for it also adds the company's free-text asset hosts (a developer setting). */
   developerAssetHosts?: boolean
   log?: Pick<Console, 'warn'>
@@ -91,6 +96,8 @@ export function createBrowserController(deps: BrowserControllerDeps) {
   /** Partitions used this run (their login lives until the app quits or they are cleared). */
   const partitions = new Map<string, { userId: string; companyId: string; host: string }>()
   const keyOf = (userId: string, companyId: string) => `${userId}\0${companyId}`
+  /** Where each domain's parts came from at the last answer, so the fallback is logged once per change. */
+  const sourceSaid = new Map<string, 'company' | 'bundled' | 'none'>()
 
   const clear = async (partition: string): Promise<boolean> => {
     partitions.delete(partition)
@@ -116,7 +123,22 @@ export function createBrowserController(deps: BrowserControllerDeps) {
     policyAnswered(companyId: string, policy: AgentPolicy) {
       const user = deps.userId()
       if (!user) return
-      const sites = browserSitesOf(policy).map(s => browserWindowSite(s, deps.assetHostsOf?.(s.host) ?? [], deps.developerAssetHosts === true))
+      const listed = browserSitesOf(policy)
+      const operated = listed.map(s => s.host)
+      const sites = listed.map(s => {
+        const { site, from } = browserWindowSiteFrom(s, {
+          company: policy.browserParts?.find(p => p.host === s.host),
+          bundled: { assetHosts: deps.assetHostsOf?.(s.host) ?? [], loginHelpers: deps.loginHelpersOf?.(s.host) ?? [] },
+        }, deps.developerAssetHosts === true, operated)
+        // Which source a domain's parts come from, said once per change (host only): the bundled one is the
+        // fallback until step ⑦, so a company still relying on it shows in the log.
+        const said = `${user}\0${companyId}\0${s.host}`
+        if (sourceSaid.get(said) !== from) {
+          sourceSaid.set(said, from)
+          if (from === 'bundled') log.warn(`[browser] ${s.host}: parts and login helpers from the app's bundled declaration (the company set none)`)
+        }
+        return site
+      })
       const before = known.get(keyOf(user, companyId))
       known.set(keyOf(user, companyId), sites)
       const site = (host: string) => sites.find(s => s.host === host)

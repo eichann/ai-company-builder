@@ -303,7 +303,8 @@ GET  /api/config                                  setup state (no auth)
                               GET|PUT /agent-sandbox, PUT /agent-sandbox/overrides/:userId,
                               GET /me/agent-policy                            agent-sandbox.ts
                                                                 (「AI の囲い」: agent-sandbox.md)
-                              GET|PUT /agent-browser, PUT /agent-browser/overrides/:userId
+                              GET|PUT /agent-browser, PUT /agent-browser/overrides/:userId,
+                              PUT /agent-browser/site-parts (a domain's 詳しい設定)
                                                                              agent-browser.ts
                                                                 (「ブラウザ操作」: agent-browser.md)
                               POST /browser-plans, GET /browser-plans-open, GET /browser-plans/:planId,
