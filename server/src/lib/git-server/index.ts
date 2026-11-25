@@ -21,12 +21,16 @@
  *   ACB_PUSH_POLICY    path of the request's permission snapshot (0600 file
  *                      in a private temp dir, removed when the request ends)
  *   ACB_INTERNAL_PUSH  "1" on the server's own git invocations only
+ *   ACB_PUSH_NOTES     where the checker writes the ref updates it accepted
+ *                      (same private temp dir; read by git-http once the
+ *                      push succeeded: agent-browser.md "A Skill's browser
+ *                      declaration and its approval")
  * A client cannot set any of them: git-http passes request headers to the CGI
  * only as CONTENT_TYPE / HTTP_CONTENT_ENCODING, and strips ACB_* it would
  * otherwise inherit (scrubPushCheckEnv).
  */
 import { execFileSync } from 'child_process'
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'fs'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { basename, join } from 'path'
 import { installPreReceiveHook } from './hook'
@@ -109,7 +113,7 @@ export function configureAllBareRepos(reposDir: string): { total: number; failed
 }
 
 /** Variables only the server may set for the hook. */
-const SERVER_ONLY_VARS = ['ACB_PUSH_POLICY', 'ACB_INTERNAL_PUSH'] as const
+const SERVER_ONLY_VARS = ['ACB_PUSH_POLICY', 'ACB_INTERNAL_PUSH', 'ACB_PUSH_NOTES'] as const
 
 /**
  * Environment for the server's own git invocations that may push (department
@@ -147,6 +151,11 @@ export interface PreparedPushCheck {
   env: Record<string, string>
   /** Remove the snapshot (call when the request has finished). Idempotent. */
   cleanup: () => void
+  /**
+   * The `<old> <new> <ref>` lines the checker accepted, or null (rejected, not written, already cleaned up). Read it
+   * before `cleanup`. Only what this request's own hook wrote: the file lives in this request's private temp dir.
+   */
+  acceptedUpdates?: () => string | null
 }
 
 /**
@@ -173,10 +182,20 @@ export function preparePushCheck(req: PushCheckRequest): PreparedPushCheck {
     chmodSync(dir, 0o700)
     const file = join(dir, 'policy.json')
     writeFileSync(file, JSON.stringify(policy), { mode: 0o600 })
+    const notes = join(dir, 'accepted.txt')
     const created = dir
     let done = false
     return {
-      env: { ACB_PUSH_POLICY: file },
+      env: { ACB_PUSH_POLICY: file, ACB_PUSH_NOTES: notes },
+      acceptedUpdates: () => {
+        if (done) return null
+        try {
+          const text = readFileSync(notes, 'latin1')
+          return text.length <= 64 * 1024 ? text : null
+        } catch {
+          return null
+        }
+      },
       cleanup: () => {
         if (done) return
         done = true

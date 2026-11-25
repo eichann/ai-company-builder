@@ -78,7 +78,9 @@ a plugin can never draw a notice (§2-2).
   default, recordless: a member's app could not read a site's thing whole by its map — to every owner / admin, once per
   company × site × map version × thing, key `browser_shape:<site>:<version>:<thing>`; built when read from the stored names
   and counts, never a key name; shown only while the reader is an owner / admin; the inbox's amber stop row —
-  `agent-browser.md` "Plans of opened lines on the server"). **Also with records off**: `GET /me/notifications` then answers `available: false` with only
+  `agent-browser.md` "Plans of opened lines on the server"; since redesign step ⑥ it also carries 「Skill の承認」's notices,
+  keys `browser_skill:waiting|text:<skill>:<hash>`, built by `browserSkills.noticeText` — `agent-browser.md` "A Skill's
+  browser declaration and its approval"). **Also with records off**: `GET /me/notifications` then answers `available: false` with only
   these company notices (never a record's), and the app's watcher, seeing `/records/my-turn` 404, shows the inbox with
   those notices alone (`NoticesState.bellOnly`, no 「あなたの番」) when there is one, else nothing as before (`restore-pause.test.ts`,
   `client/tests/notifications.test.ts`),

@@ -41,6 +41,7 @@ import { browserPlanSchema, migrateBrowserExecutionMonotonic, migrateBrowserPlan
 import { browserLineSchema } from './schema/browser-lines'
 import { browserDeviceSchema } from './schema/browser-devices'
 import { browserRecordingSchema } from './schema/browser-recordings'
+import { browserSkillSchema } from './schema/browser-skills'
 // lane C ▲
 // The migrations tests run on their own against older databases.
 export { migrateCompanyFolderKind, migrateInvitationClaims } from './schema/company'
@@ -121,6 +122,8 @@ const SCHEMA = [
   browserDeviceSchema,
   // 「ブラウザ操作」 recordings (agent-browser.md "Recording"): a new table only.
   browserRecordingSchema,
+  // 「Skill の承認」 (agent-browser.md "A Skill's browser declaration and its approval"): a new table only.
+  browserSkillSchema,
   // lane C ▲
 ]
 

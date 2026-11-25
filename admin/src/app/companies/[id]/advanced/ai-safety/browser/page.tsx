@@ -3,7 +3,7 @@
 import Link from 'next/link'
 import { useState } from 'react'
 import { toast } from 'sonner'
-import { Browsers, CaretRight, ClockCounterClockwise, Desktop, Globe, Key, Plus, ShieldSlash, Trash, UserSwitch, UsersThree, VideoCamera } from '@phosphor-icons/react'
+import { Browsers, CaretRight, ClockCounterClockwise, Desktop, Globe, Key, Plus, SealCheck, ShieldSlash, Trash, UserSwitch, UsersThree, VideoCamera } from '@phosphor-icons/react'
 
 import { RadioCard } from '@/components/app/radio-card'
 import { EmptyState, ErrorState, ListSkeleton, PageHeader } from '@/components/app/states'
@@ -65,6 +65,7 @@ import {
 } from '@/lib/agent-browser'
 import { PCS_TITLE, PEOPLE_TITLE } from '@/lib/agent-browser-people'
 import { RECORDINGS_LINK_DESCRIPTION, RECORDINGS_TITLE } from '@/lib/agent-browser-recordings'
+import { SKILLS_LINK_DESCRIPTION, SKILLS_TITLE } from '@/lib/agent-browser-skills'
 import { linesOf } from '@/lib/agent-sandbox'
 import { useCompany } from '@/lib/company-context'
 import { describeError } from '@/lib/errors'
@@ -117,6 +118,7 @@ function BrowserSubPages({ companyId }: { companyId: string }) {
     { segment: 'pcs', title: PCS_TITLE, description: 'メンバーが登録した PC を確かめて、使えるようにする・止める', icon: Desktop },
     { segment: 'people', title: PEOPLE_TITLE, description: 'AI に任せてよい作業を、人ごとに選ぶ', icon: UsersThree },
     { segment: 'recordings', title: RECORDINGS_TITLE, description: RECORDINGS_LINK_DESCRIPTION, icon: VideoCamera },
+    { segment: 'skills', title: SKILLS_TITLE, description: SKILLS_LINK_DESCRIPTION, icon: SealCheck },
   ]
   return (
     <ul aria-label="ブラウザ操作の PC と使える人" className="divide-y overflow-hidden rounded-card border bg-card">

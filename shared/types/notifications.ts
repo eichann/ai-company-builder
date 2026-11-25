@@ -103,7 +103,9 @@ export const NOTIFICATION_KINDS = [
   // 「ブラウザ操作」: a site's thing could not be read whole by its map (agent-browser.md "The strict read's notice", design
   // memo §16-1): to every owner / admin, once per company × site × map version × thing (key
   // `browser_shape:<site>:<version>:<thing>`), about no record; built when read from the map's names and counts — never a
-  // key name. An app released before it keeps an unknown kind as waiting for the member.
+  // key name. An app released before it keeps an unknown kind as waiting for the member. Since redesign step ⑥ the same
+  // kind also carries 「Skill の承認」's notices (key `browser_skill:waiting|text:<skill>:<hash>`, agent-browser.md "A
+  // Skill's browser declaration and its approval"): one admin-only browser kind, so no app's bundle or settings list grows.
   'browser_shape_changed',
   'others',
 ] as const
@@ -153,7 +155,7 @@ export const NOTIFICATION_KIND_LABELS: Record<NotificationKind, string> = {
   job_proposal: '社員から定期の仕事の案が届いた（管理者だけ）',
   job_proposal_returned: '出した定期の仕事の案が差し戻された',
   company_restored: '会社のデータをバックアップから戻したため、自動の仕事を止めた（管理者だけ）',
-  browser_shape_changed: 'ブラウザ操作のサイトの形が変わり、地図の確かめが要る（管理者だけ）',
+  browser_shape_changed: 'ブラウザ操作で管理者の確かめが要る（サイトの形・Skill。管理者だけ）',
   others: 'そのほかの動き（担当になった・差し戻された・中止されたなど）',
 }
 

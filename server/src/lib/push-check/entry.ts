@@ -9,7 +9,7 @@
  * uncaught exception (exit 1) — makes the hook print [HOOK_ERROR] and reject:
  * a push is never accepted unchecked.
  */
-import { readFileSync } from 'fs'
+import { readFileSync, writeFileSync } from 'fs'
 import { isRunnable, runPushCheck } from './check'
 import { parsePushPolicy, reservedPathsFor, writeGateFor, type WriteGate } from './policy'
 import { hookErrorLine } from './report'
@@ -68,7 +68,8 @@ async function main(): Promise<number> {
   // runtime; skill/agent/command contents then count as uninspectable and
   // fail closed, as they did when the shell hook's embedded check could not run.
   const contentCheckAvailable = env.ACB_NODE === undefined || env.ACB_NODE === '' || isRunnable(env.ACB_NODE)
-  const result = await runPushCheck(readFileSync(0), {
+  const updates = readFileSync(0)
+  const result = await runPushCheck(updates, {
     pusherRole: env.ACB_PUSHER_ROLE,
     writeGate: gates.write,
     reserved: gates.reserved,
@@ -82,7 +83,15 @@ async function main(): Promise<number> {
     ...(gates.scopePath !== undefined ? { scopePath: gates.scopePath } : {}),
     contentCheckAvailable,
   })
-  if (!result.rejected) return 0
+  if (!result.rejected) {
+    // Accepted: hand git-http the ref updates it checked (agent-browser.md "A Skill's browser declaration and its
+    // approval": whose change a Skill's declaration is). Best effort — a failure here never turns an accept into a reject;
+    // the server then simply does not count the change as approved.
+    if (env.ACB_PUSH_NOTES) {
+      try { writeFileSync(env.ACB_PUSH_NOTES, updates, { mode: 0o600 }) } catch { /* not counted as approved */ }
+    }
+    return 0
+  }
   await new Promise<void>((resolve) => process.stderr.write(result.output, () => resolve()))
   return REJECT_EXIT
 }

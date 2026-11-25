@@ -479,6 +479,7 @@ function trackActivity(
   userId: string,
   companyId: string,
   op: 'other' | 'fetch' | 'push',
+  afterAccepted?: () => void,
 ): CgiObserver | undefined {
   const { version, platform } = clientIdentityFromHeaders((n) => c.req.header(n))
   services.clientActivity.record({ userId, companyId, kind: 'seen', version, platform })
@@ -503,6 +504,7 @@ function trackActivity(
           if (member) services.companyScopes.scheduleOrphanCheck(member)
           // The company map (records.md): index what the push changed, off the request.
           if (member) services.records.afterPush(member)
+          try { afterAccepted?.() } catch (err) { logError('git-http', 'after-push step failed', err) }
         } else {
           // Rejected (or unproven): record any pre-receive hook sections it
           // printed. Deferred and non-throwing — see services/push-rejections.ts.
@@ -547,7 +549,13 @@ gitHttpRoute.post('/:repo/git-receive-pack', ownCredential(SMART_HTTP_AUTH), asy
   if (result instanceof Response) return result
   const { user, companyId, role } = result
 
-  const observer = trackActivity(c, user.id, companyId, 'push')
+  // What the checker accepted, read before its temp dir goes (cleanup runs before the observer).
+  let accepted: string | null = null
+  // A company Skill's `browser.yaml` changed by this push: whose change it is (agent-browser.md "A Skill's browser
+  // declaration and its approval"); the role is the one this request authenticated.
+  const observer = trackActivity(c, user.id, companyId, 'push', () => {
+    if (accepted) services.browserSkills.afterPush(companyId, { userId: user.id, role }, accepted)
+  })
   // Registered BEFORE the snapshot: creating a private folder waits for every
   // push whose snapshot may predate its reservation (lib/private-folders.ts).
   const endPush = beginCompanyPush(companyId)
@@ -555,6 +563,7 @@ gitHttpRoute.post('/:repo/git-receive-pack', ownCredential(SMART_HTTP_AUTH), asy
   const pushCheck: PreparedPushCheck = {
     env: check.env,
     cleanup: () => {
+      accepted ??= check.acceptedUpdates?.() ?? null
       check.cleanup()
       endPush()
     },

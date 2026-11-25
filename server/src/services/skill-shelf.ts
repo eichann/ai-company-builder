@@ -116,6 +116,12 @@ export interface SkillShelfDeps {
   ids: IdGenerator
   /** sha256 of bytes, lower-case hex (composition: node's crypto). */
   sha256(bytes: Uint8Array): string
+  /**
+   * A version was published or put back by `member` (agent-browser.md "A Skill's browser declaration and its approval":
+   * the publisher's role decides whether a changed `browser.yaml` counts as approved). Called right after the write;
+   * never throws into the publish.
+   */
+  changed?(member: Member, item: { kind: ShelfKind; departmentId: string | null; name: string }): void
 }
 
 const isObject = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v)
@@ -178,6 +184,9 @@ export function parseShelfContent(kind: ShelfKind, name: string, body: Record<st
 
 export function createSkillShelfService(deps: SkillShelfDeps) {
   const { companyData, accounts, clock, ids } = deps
+  const announce = (member: Member, item: { kind: ShelfKind; departmentId: string | null; name: string }) => {
+    try { deps.changed?.(member, item) } catch { /* the publish stands; the change is seen at the next read */ }
+  }
 
   const notHere = (): Refusal => refuse('conflict', SHELF_NOT_HERE.error, { code: SHELF_NOT_HERE.code })
   const itemNotFound = (): Refusal => refuse('not-found', SHELF_ITEM_NOT_FOUND.error, { code: SHELF_ITEM_NOT_FOUND.code })
@@ -480,6 +489,7 @@ export function createSkillShelfService(deps: SkillShelfDeps) {
         if (written.reason === 'full') return refuse('conflict', SHELF_COMPANY_FULL.error, { code: SHELF_COMPANY_FULL.code })
         return itemNotFound()
       }
+      if (written.changed) announce(member, { kind, departmentId, name })
       return ok({ ...result(ctx, written.itemId, written.changed), created: !existing })
     },
 
@@ -503,6 +513,7 @@ export function createSkillShelfService(deps: SkillShelfDeps) {
       if (secret) return secret
       const written = ctx.handle.skillShelf.setCurrent(row.id, expected.value, body.version, clock.now(), member.userId)
       if (!written.ok) return written.reason === 'conflict' ? changed(written.currentVersion) : itemNotFound()
+      if (written.changed) announce(member, row)
       return ok(result(ctx, row.id, written.changed))
     },
 
@@ -676,6 +687,7 @@ export function createSkillShelfService(deps: SkillShelfDeps) {
         if (written.reason === 'full') return refuse('conflict', SHELF_COMPANY_FULL.error, { code: SHELF_COMPANY_FULL.code })
         return itemNotFound()
       }
+      if (written.changed) announce(member, { kind: 'skill', departmentId: row.departmentId, name: row.name })
       return ok(decidedView(ctx, member, row.id, written.itemId))
     },
 

@@ -207,6 +207,7 @@ const HANDLE_TABLES: Record<string, string[]> = {
   browser_device_history: ['adapters/sqlite/browser-devices.ts'],
   browser_plan_devices: ['adapters/sqlite/browser-devices.ts'],
   browser_recordings: ['adapters/sqlite/browser-recordings.ts'],
+  browser_skill_approvals: ['adapters/sqlite/browser-skills.ts'],
   // lane C ▲
 }
 /** Handle repository factories (each bound to one company): only the handle source builds them. */
@@ -232,6 +233,7 @@ const HANDLE_FACTORIES = [
   'sqliteBrowserLineRepository',
   'sqliteBrowserDeviceRepository',
   'sqliteBrowserRecordingRepository',
+  'sqliteBrowserSkillApprovalRepository',
   // lane C ▲
 ]
 const HANDLE_SOURCE = 'adapters/sqlite/company-data.ts'
