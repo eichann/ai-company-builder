@@ -34,6 +34,7 @@ import { withoutBrokerEnv } from '../../shared/broker-env'
 import { categorizeTool } from '../../shared/agent-events'
 import { AGENT_STOP_MESSAGES } from '../../shared/agent-stop'
 import { DANGEROUS_COMMANDS } from '../../shared/dangerous-commands'
+import { claudeManagedSandboxPresent } from './claude-managed-settings'
 import { CLAUDE_SANDBOX_UNAVAILABLE_RE, SANDBOX_MESSAGES, claudeSandboxOptions, parseSandboxViolation, skillWriteRefusalContext, sandboxConcern, sandboxRefusalContext } from '../../shared/agents/sandbox-policy'
 
 type StreamPart = Awaited<ReturnType<ReturnType<typeof claudeCode>['doStream']>>['stream'] extends ReadableStream<infer P> ? P : never
@@ -42,6 +43,8 @@ export interface ClaudeConnectionConfig extends AgentHostConfig {
   getPermissionMode: () => PermissionMode
   isClaudeCodeAuthenticated: () => boolean
   getClaudeCodeCliPath: () => string
+  /** A managed settings source names `sandbox` (claude-managed-settings.ts); tests inject it. */
+  managedSandboxPresent?: () => boolean
 
 }
 
@@ -150,6 +153,8 @@ export function createClaudeConnection(config: ClaudeConnectionConfig, createMod
     id: 'claude-code',
     ownsConversation: true,
     authenticationError: () => config.isClaudeCodeAuthenticated() ? undefined : 'Claude Code CLIが認証されていません。',
+    // The CLI reports nothing a turn could check (unlike Codex's profile), so a managed `sandbox` counts as "may be off".
+    sandboxMayBeOff: () => (config.managedSandboxPresent ?? claudeManagedSandboxPresent)(),
     isMissingSession(error, sessionId) {
       if (error instanceof MissingAgentSession) return error.sessionId === sessionId
       const value = error as { data?: { stderr?: string }; message?: string } | undefined

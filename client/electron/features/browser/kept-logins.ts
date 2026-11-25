@@ -20,19 +20,71 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { sandboxKeepsPlaceUnread, type ResolvedSandbox } from '../../../shared/agents/sandbox-policy'
 
-/** What the chat server knows of an AI turn about to run: its sandbox as decided (none = undefined) and its company folder. */
+/**
+ * What the chat server knows of an AI turn about to run: its sandbox as decided (none = undefined), its company
+ * folder, its working folder, and whether something outside the app may switch the agent's sandbox off
+ * (`sandboxMayBeOff`: Claude Code's managed settings naming `sandbox`, `agents/claude-managed-settings.ts`).
+ */
 export interface AiTurnFacts {
   sandbox?: { mode: 'observe' | 'enforce'; resolved: ResolvedSandbox }
   companyRoot?: string
+  workingDirectory?: string
+  sandboxMayBeOff?: boolean
 }
 
 /**
- * Is this AI turn one a kept login may sit next to? Only `enforce`, with the kept logins' folder denied to both
- * agents and outside the turn's company folder (`sandboxKeepsPlaceUnread`). Anything else — observe, off, no
- * sandbox (the API key's tools, a policy never received), a company folder around the app's data — is not.
+ * Is this AI turn one a kept login may sit next to? Only `enforce` with a working folder (Codex runs a turn without
+ * one in its legacy read-only mode, which reads anything), nothing outside the app able to switch the sandbox off,
+ * and the kept logins' folder denied to both agents and outside the turn's company folder (`sandboxKeepsPlaceUnread`).
+ * Anything else — observe, off, no sandbox (the API key's tools, a policy never received), a company folder around
+ * the app's data — is not.
  */
 export function turnEnclosesKeptLogins(partitionsDir: string, turn: AiTurnFacts): boolean {
-  return turn.sandbox?.mode === 'enforce' && sandboxKeepsPlaceUnread(turn.sandbox.resolved, partitionsDir, turn.companyRoot)
+  return turn.sandbox?.mode === 'enforce' && !!turn.workingDirectory && turn.sandboxMayBeOff !== true &&
+    sandboxKeepsPlaceUnread(turn.sandbox.resolved, partitionsDir, turn.companyRoot)
+}
+
+/**
+ * Is a kept login's folder safe to hand to Chromium (it follows links when it writes)? `Partitions` a real folder at
+ * exactly its own path (no link in it or above it), outside every company folder, and the site's folder, if any, a
+ * tree of real folders and files with one name each (no symbolic link, no hard link that also names a file elsewhere).
+ * Anything else is removed — a link itself, never what it points to — and the answer is no. Synchronous (main hands
+ * the partition to a window at once); the folders are small.
+ */
+export function keptPlaceSafe(dir: string, name: string, insideCompanyFolder: (p: string) => boolean, log: Pick<Console, 'warn'>): boolean {
+  try {
+    let stat: fs.Stats
+    try { stat = fs.lstatSync(dir) } catch (error) {
+      if ((error as NodeJS.ErrnoException)?.code !== 'ENOENT') return false
+      fs.mkdirSync(dir, { mode: 0o700 })
+      stat = fs.lstatSync(dir)
+    }
+    if (!stat.isDirectory()) {
+      fs.unlinkSync(dir)
+      log.warn('[browser] the browser sessions\' folder was not a real folder: removed, nothing kept this run')
+      return false
+    }
+    if (fs.realpathSync(dir) !== path.resolve(dir) || insideCompanyFolder(dir)) return false
+    const target = path.join(dir, name)
+    if (!fs.existsSync(target) && !isLink(target)) return true
+    if (treeIsPlain(target)) return true
+    fs.rmSync(target, { recursive: true, force: true })
+    log.warn('[browser] a kept login\'s folder held a link: removed, nothing kept this run')
+    return false
+  } catch {
+    return false
+  }
+}
+
+function isLink(p: string): boolean {
+  try { return fs.lstatSync(p).isSymbolicLink() } catch { return false }
+}
+
+function treeIsPlain(p: string): boolean {
+  const stat = fs.lstatSync(p)
+  if (stat.isFile()) return stat.nlink === 1
+  if (!stat.isDirectory()) return false
+  return fs.readdirSync(p).every(child => treeIsPlain(path.join(p, child)))
 }
 
 const PREFIX = 'acb-browser-keep-'
@@ -72,6 +124,8 @@ export interface KeptLoginsDeps {
   clearSession: (partition: string) => Promise<void>
   /** This platform runs the company sandbox (`sandboxPlatform`); false = nothing is ever kept (earlier folders still go). */
   platformEncloses: boolean
+  /** Does this path lie in a company folder, by name or where it really is (`AllowedRoots.touches`)? Absent = no. */
+  insideCompanyFolder?: (p: string) => boolean
   log?: Pick<Console, 'warn'>
 }
 
@@ -80,6 +134,20 @@ export function createKeptLogins(deps: KeptLoginsDeps) {
   let stopped = !deps.platformEncloses
   /** Folders whose session this run loaded (a window was opened on them). */
   const loaded = new Set<string>()
+  /**
+   * Could a kept login be on disk? Read once at creation (before any session exists); true from the first partition
+   * handed out; false again only after everything was removed. An unenclosed AI turn reads the disk only while true,
+   * so a PC that never kept one never refuses a turn over a disk it need not read.
+   */
+  let maybeOnDisk = (() => {
+    try {
+      const dir = deps.partitionsDir()
+      if (!fs.lstatSync(dir).isDirectory()) return true
+      return fs.readdirSync(dir).some(name => KEPT_LOGIN_FOLDER_RE.test(name))
+    } catch (error) {
+      return (error as NodeJS.ErrnoException)?.code !== 'ENOENT'
+    }
+  })()
   /** Folders removed this run: their session is never used again (a new window gets memory instead). */
   const spent = new Set<string>()
   /** Removals one after another, so a later one reads the disk after an earlier one finished. */
@@ -100,6 +168,12 @@ export function createKeptLogins(deps: KeptLoginsDeps) {
   async function removeNow(scope: KeptLoginScope): Promise<boolean> {
     await clearLoaded(scope)
     const dir = deps.partitionsDir()
+    // A link in place of the folder (an earlier unenclosed turn's): the link goes, never what it points to.
+    try {
+      if ((await fs.promises.lstat(dir)).isSymbolicLink()) await fs.promises.unlink(dir)
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException)?.code !== 'ENOENT') return false
+    }
     const matching = async () => {
       try { return (await fs.promises.readdir(dir)).filter(name => keptFolderIn(name, scope)) } catch (error) {
         return (error as NodeJS.ErrnoException)?.code === 'ENOENT' ? [] : null
@@ -123,7 +197,9 @@ export function createKeptLogins(deps: KeptLoginsDeps) {
     // A session loaded while this ran (an earlier run's folder opened meanwhile): cleared too, never used again.
     await clearLoaded(scope)
     const left = await matching()
-    return left !== null && left.length === 0
+    const ok = left !== null && left.length === 0
+    if (ok && 'all' in scope && loaded.size === 0) maybeOnDisk = false
+    return ok
   }
 
   return {
@@ -138,13 +214,24 @@ export function createKeptLogins(deps: KeptLoginsDeps) {
       return !stopped && !spent.has(keptLoginFolder(userId, companyId, host))
     },
 
-    /** The `persist:` partition of a site's kept login, or null when it may not be kept now (memory then). */
+    /**
+     * The `persist:` partition of a site's kept login, or null when it may not be kept now (memory then). Its place is
+     * checked first (`keptPlaceSafe`): a link or a company folder there stops keeping for this run.
+     */
     partition(userId: string, companyId: string, host: string): string | null {
       const name = keptLoginFolder(userId, companyId, host)
       if (stopped || spent.has(name)) return null
+      if (!keptPlaceSafe(deps.partitionsDir(), name, deps.insideCompanyFolder ?? (() => false), log)) {
+        stopped = true
+        return null
+      }
       loaded.add(name)
+      maybeOnDisk = true
       return `persist:${name}`
     },
+
+    /** Could a kept login be on disk (see `maybeOnDisk`)? */
+    maybeOnDisk(): boolean { return maybeOnDisk },
 
     /** Is this a partition `partition` gave? */
     isKept(partition: string): boolean {

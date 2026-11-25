@@ -50,17 +50,17 @@ export interface AgentSandboxPolicy extends AgentSandboxSettings {
   source: 'company' | 'member'
 }
 
-/**
- * GET …/me/agent-policy (any member): what the app's AI must follow. `version`
- * (also the ETag) changes whenever the answer changes; the push channel
- * (`/me/events`) announces new versions.
- */
 /** One registered domain and the caller's own level there (`AgentPolicy.browserLevels`). */
 export interface BrowserSiteLevel {
   host: string
   level: BrowserPersonLevel
 }
 
+/**
+ * GET …/me/agent-policy (any member): what the app's AI must follow. `version`
+ * (also the ETag) changes whenever the answer changes; the push channel
+ * (`/me/events`) announces new versions.
+ */
 export interface AgentPolicy {
   version: string
   sandbox: AgentSandboxPolicy

@@ -15,6 +15,8 @@ export const BROWSER_PARTITION_FOLDER_RE = /^acb-browser-/i
 export function removeLeftoverBrowserPartitions(userDataDir: string, log: Pick<Console, 'warn'> = console): number {
   const dir = path.join(userDataDir, 'Partitions')
   let names: string[]
+  // A link in place of the folder is never followed (the kept logins' check removes it before any is kept).
+  try { if (!fs.lstatSync(dir).isDirectory()) return 0 } catch { return 0 }
   try { names = fs.readdirSync(dir) } catch { return 0 }
   let removed = 0
   for (const name of names) {

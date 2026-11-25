@@ -153,6 +153,12 @@ export interface AgentConnection {
     }
   }): LanguageModel
   createTitleModel(request?: { modelId?: string }): LanguageModel
+  /**
+   * Could something outside the app switch this agent's company sandbox off without the turn seeing it (Claude
+   * Code: a managed `sandbox`)? True = an `enforce` turn does not count as enclosed (agent-browser.md "Keeping a
+   * login on disk"). Absent = the agent checks it itself (Codex's `activePermissionProfile`) or has no sandbox.
+   */
+  sandboxMayBeOff?(): boolean
   readMetadata(metadata: Record<string, unknown> | undefined): {
     sessionId?: string
   }

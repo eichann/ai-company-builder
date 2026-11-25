@@ -488,6 +488,13 @@ is public, so anyone can open a PR; code from a fork must never run on that Mac.
   methods (`secretBox` in `electron-adapter.ts`) are deprecated in 45 and removed in 46: move to
   the async ones before that bump.
 
+- **Cookie encryption fuse** (`client/package.json` `build.electronFuses: { enableCookieEncryption: true }`, the only
+  fuse flipped; `agent-browser.md` "Keeping a login on disk"): electron-builder flips it right before signing. One-way: a
+  build without it cannot read cookies written after it (nothing the app relies on; a rolled-back build removes kept
+  logins at start). A plain store from before is read and encrypted on its next write. Check a release with
+  `npx @electron/fuses read --app "<the .app>"` (`EnableCookieEncryption is Enabled`). Test:
+  `client/tests/cookie-encryption-electron.test.ts` (macOS: a copy of Electron with the fuse; the shipped config).
+
 ## Universal bundled git (macOS app)
 
 electron-builder's `beforePack` hook (`client/scripts/before-pack.mjs`: first the release build's

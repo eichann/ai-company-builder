@@ -227,6 +227,23 @@ export function sandboxKeepsPlaceUnread(resolved: ResolvedSandbox, place: string
     isSameOrInside(place, denied) && !resolved.allowRead.some(root => isSameOrInside(root, denied)))
 }
 
+/**
+ * Could a managed settings source of Claude Code switch the sandbox the app hands it off or loosen it? Managed
+ * settings sit above the app's flag settings, and a managed `sandbox` (e.g. `enabledPlatforms` leaving macOS out)
+ * turns it off without an error — the CLI says nothing a turn could check, unlike Codex's `activePermissionProfile`.
+ * So any `sandbox` key there counts (a JSON file: a top-level `sandbox`, or a file that does not parse; a managed
+ * preferences plist: the word anywhere). Conservative on purpose.
+ */
+export function managedSettingsTouchSandbox(source: { kind: 'json' | 'plist'; text: string }): boolean {
+  if (source.kind === 'plist') return /sandbox/i.test(source.text)
+  try {
+    const value = JSON.parse(source.text) as unknown
+    return !value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).some(key => key.toLowerCase() === 'sandbox')
+  } catch {
+    return true
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Recording (observe) and reading the sandbox's refusals (enforce)
 // ---------------------------------------------------------------------------

@@ -50,6 +50,9 @@
       "node_modules/dugite/git/**"
     ],
     "beforePack": "./scripts/before-pack.mjs",
+    "electronFuses": {
+      "enableCookieEncryption": true
+    },
     "mac": {
       "category": "public.app-category.productivity",
       "target": [

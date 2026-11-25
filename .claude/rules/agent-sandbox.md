@@ -169,7 +169,10 @@ company's `rootPath`), so the sandbox applies there exactly as for a git company
   Any other failure surfaces unchanged (never a silent unsandboxed re-run). The re-run (and Codex's record-only turn
   without its profile) first awaits `TurnSandbox.beforeUnenclosed()`, the host's check that removes a browser login kept
   on this PC; rejected → the turn ends with its sentence (`agent-browser.md` "Keeping a login on disk"). Every chat turn
-  asks the same before its agent starts (`chat-server.ts` `beforeAiTurn`); `sandboxKeepsPlaceUnread` says whether an
+  asks the same before its agent starts (`chat-server.ts` `beforeAiTurn`; an enforce Claude turn counts as enclosed only
+  while no managed settings source names `sandbox` — the CLI reports nothing a turn could check, so a managed
+  `enabledPlatforms` without macOS would switch it off unseen: `agents/claude-managed-settings.ts`,
+  `AgentConnection.sandboxMayBeOff`); `sandboxKeepsPlaceUnread` says whether an
   enforce turn keeps a place unreadable for both CLIs. Chat titles run with no tool (Claude `tools: []`, no MCP; Codex
   `CODEX_TEXT_OVERRIDES` and its configured MCP servers disabled), since they run without the sandbox.
 - A refused host / read: the PostToolUseFailure hook returns `additionalContext` with

@@ -19,7 +19,9 @@ import type { BrowserSiteSetting } from '../../shared/core/browser-operation'
 import type { AgentPolicy, BrowserSiteLevel } from '../../shared/types/agent-sandbox'
 import { browserLoginStorage } from '../../shared/core/browser-operation'
 import { browserReadPartition, browserWritePartition } from '../shared/browser-operation'
-import { resolveSandbox, sandboxKeepsPlaceUnread, type ResolvedSandbox } from '../shared/agents/sandbox-policy'
+import { managedSettingsTouchSandbox, resolveSandbox, sandboxKeepsPlaceUnread, type ResolvedSandbox } from '../shared/agents/sandbox-policy'
+import { claudeManagedSandboxPresent } from '../electron/agents/claude-managed-settings'
+import { createClaudeConnection } from '../electron/agents/claude'
 import { createBrowserController, type BrowserShell, type BrowserWindowSpec } from '../electron/features/browser/controller'
 import {
   createKeptLogins, keptFolderIn, keptLoginFolder, turnEnclosesKeptLogins, type AiTurnFacts,
@@ -41,10 +43,11 @@ function policy(mode: 'enforce' | 'observe' | 'off', sites: BrowserSiteSetting[]
   }
 }
 
-function world(options: { platformEncloses?: boolean; partitionsDir?: string } = {}) {
-  const userData = fs.mkdtempSync(path.join(os.tmpdir(), 'acb-kept-'))
+function world(options: { platformEncloses?: boolean; partitionsDir?: string; insideCompanyFolder?: (p: string) => boolean; before?: (userData: string) => void } = {}) {
+  const userData = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'acb-kept-')))
   const partitions = options.partitionsDir ?? path.join(userData, 'Partitions')
   fs.mkdirSync(path.join(userData, 'Partitions'), { recursive: true })
+  options.before?.(userData)
   const opened: Array<BrowserWindowSpec & { closed: boolean }> = []
   const cleared: string[] = []
   const shell: BrowserShell = {
@@ -61,7 +64,7 @@ function world(options: { platformEncloses?: boolean; partitionsDir?: string } =
     },
     async clearPartition(partition) { cleared.push(partition) },
   }
-  const kept = createKeptLogins({ partitionsDir: () => partitions, clearSession: p => shell.clearPartition(p), platformEncloses: options.platformEncloses ?? true, log: { warn() {} } })
+  const kept = createKeptLogins({ partitionsDir: () => partitions, clearSession: p => shell.clearPartition(p), platformEncloses: options.platformEncloses ?? true, insideCompanyFolder: options.insideCompanyFolder, log: { warn() {} } })
   let user: string | null = 'user-1'
   const changed: string[] = []
   const browser = createBrowserController({
@@ -75,7 +78,7 @@ function world(options: { platformEncloses?: boolean; partitionsDir?: string } =
 const HOME = '/Users/member'
 const resolvedFor = (userData: string, companyRoot = `${HOME}/AI Company Builder/acme`): ResolvedSandbox =>
   resolveSandbox({ allowedDomains: [], deniedReadPaths: [] }, { home: HOME, companyRoot, appDataDirs: [userData] })
-const enclosed = (userData: string): AiTurnFacts => ({ sandbox: { mode: 'enforce', resolved: resolvedFor(userData) }, companyRoot: `${HOME}/AI Company Builder/acme` })
+const enclosed = (userData: string): AiTurnFacts => ({ sandbox: { mode: 'enforce', resolved: resolvedFor(userData) }, companyRoot: `${HOME}/AI Company Builder/acme`, workingDirectory: `${HOME}/AI Company Builder/acme` })
 
 // ---------------------------------------------------------------------------
 // The rule and the place
@@ -106,7 +109,10 @@ test('the place: denied to both agents under 囲う, never in or around a compan
   // A place no denied place covers.
   assert.equal(sandboxKeepsPlaceUnread(resolvedFor(userData), `${HOME}/elsewhere/Partitions`, `${HOME}/AI Company Builder/acme`), false)
   // The turn: only enforce counts.
-  assert.equal(turnEnclosesKeptLogins(place, { sandbox: { mode: 'enforce', resolved: resolvedFor(userData) }, companyRoot: `${HOME}/AI Company Builder/acme` }), true)
+  assert.equal(turnEnclosesKeptLogins(place, { sandbox: { mode: 'enforce', resolved: resolvedFor(userData) }, companyRoot: `${HOME}/AI Company Builder/acme`, workingDirectory: `${HOME}/AI Company Builder/acme` }), true)
+  const enforced = { sandbox: { mode: 'enforce' as const, resolved: resolvedFor(userData) }, companyRoot: `${HOME}/AI Company Builder/acme` }
+  assert.equal(turnEnclosesKeptLogins(place, enforced), false, 'no working folder (Codex then runs its legacy read-only mode)')
+  assert.equal(turnEnclosesKeptLogins(place, { ...enforced, workingDirectory: enforced.companyRoot, sandboxMayBeOff: true }), false, 'a managed setting may switch it off')
   assert.equal(turnEnclosesKeptLogins(place, { sandbox: { mode: 'observe', resolved: resolvedFor(userData) } }), false)
   assert.equal(turnEnclosesKeptLogins(place, {}), false, 'no sandbox at all (the API key\'s tools, no policy)')
 })
@@ -361,4 +367,169 @@ test('the store says a refused policy (401 / 403 / 404) apart from no server or 
   store.onRefreshFailed((_c, detail) => seen.push(detail.refused))
   for (const s of [403, 401, 404, 500, 0]) { status = s; await store.refresh('c1') }
   assert.deepEqual(seen, [true, true, true, false, false])
+})
+
+// ---------------------------------------------------------------------------
+// The place, as Chromium will write it (it follows links)
+// ---------------------------------------------------------------------------
+
+test('a link planted in place of the sessions\' folder: the link goes, its target stays, nothing is kept this run', () => {
+  const company = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'acb-kept-company-')))
+  fs.writeFileSync(path.join(company, 'memo.md'), 'x')
+  const w = world({ before: userData => {
+    fs.rmSync(path.join(userData, 'Partitions'), { recursive: true })
+    fs.symlinkSync(company, path.join(userData, 'Partitions'))
+  } })
+  w.browser.policyAnswered('c1', policy('enforce'))
+  w.browser.open('c1', SITE.host)
+  assert.doesNotMatch(w.opened[0].partition, /^persist:/, 'memory, never a cookie written through the link')
+  assert.equal(fs.existsSync(path.join(w.userData, 'Partitions')), false, 'the link itself is gone')
+  assert.ok(fs.existsSync(path.join(company, 'memo.md')), 'what it pointed to is untouched')
+  assert.deepEqual(fs.readdirSync(company), ['memo.md'], 'nothing was written into the company folder')
+  assert.deepEqual(w.browser.sites('c1'), { sites: [{ host: SITE.host }] }, 'nothing kept this run')
+})
+
+test('a link or a shared file planted inside a kept login\'s folder: the folder goes, nothing is kept this run', () => {
+  const company = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'acb-kept-company-')))
+  for (const plant of [
+    (folder: string) => fs.symlinkSync(company, path.join(folder, 'Network')),
+    (folder: string) => { fs.writeFileSync(path.join(company, 'Cookies'), ''); fs.linkSync(path.join(company, 'Cookies'), path.join(folder, 'Cookies')) },
+  ]) {
+    const name = keptLoginFolder('user-1', 'c1', SITE.host)
+    const w = world({ before: userData => { const folder = path.join(userData, 'Partitions', name); fs.mkdirSync(folder); plant(folder) } })
+    w.browser.policyAnswered('c1', policy('enforce'))
+    w.browser.open('c1', SITE.host)
+    assert.doesNotMatch(w.opened[0].partition, /^persist:/)
+    assert.ok(!w.onDisk().includes(name), 'the planted folder is removed')
+    assert.ok(fs.existsSync(company), 'never followed')
+  }
+})
+
+test('a link above the sessions\' folder (where it really is differs) is never used', () => {
+  const real = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'acb-kept-real-')))
+  fs.mkdirSync(path.join(real, 'Partitions'))
+  const link = `${real}-link`
+  fs.symlinkSync(real, link)
+  const kept = createKeptLogins({ partitionsDir: () => path.join(link, 'Partitions'), clearSession: async () => {}, platformEncloses: true, log: { warn() {} } })
+  assert.equal(kept.partition('u', 'c', SITE.host), null)
+  const direct = createKeptLogins({ partitionsDir: () => path.join(real, 'Partitions'), clearSession: async () => {}, platformEncloses: true, log: { warn() {} } })
+  assert.match(direct.partition('u', 'c', SITE.host) ?? '', /^persist:/, 'the same folder by its real path is used')
+})
+
+test('a removal never follows a link planted in place of the sessions\' folder', async () => {
+  const company = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'acb-kept-company-')))
+  const lookalike = keptLoginFolder('someone', 'cx', 'x.example.net')
+  fs.mkdirSync(path.join(company, lookalike))
+  const w = world()
+  w.browser.policyAnswered('c1', policy('enforce'))
+  w.browser.open('c1', SITE.host)
+  fs.renameSync(path.join(w.userData, 'Partitions'), path.join(w.userData, 'Moved'))
+  fs.symlinkSync(company, path.join(w.userData, 'Partitions'))
+  assert.equal(await w.browser.beforeAiTurn({}), true)
+  assert.ok(fs.existsSync(path.join(company, lookalike)), 'nothing in the company folder is removed')
+  assert.equal(fs.existsSync(path.join(w.userData, 'Partitions')), false, 'the link itself is gone')
+})
+
+test('a kept login an earlier run left is found at start and removed before an unenclosed turn', async () => {
+  const name = keptLoginFolder('someone', 'cx', 'x.example.net')
+  const w = world({ before: userData => fs.mkdirSync(path.join(userData, 'Partitions', name)) })
+  assert.equal(await w.browser.beforeAiTurn({}), true)
+  assert.deepEqual(w.onDisk(), [])
+})
+
+test('a sessions\' folder inside a company folder (by name or where it really is) is never used', () => {
+  const w = world({ insideCompanyFolder: () => true })
+  w.browser.policyAnswered('c1', policy('enforce'))
+  w.browser.open('c1', SITE.host)
+  assert.doesNotMatch(w.opened[0].partition, /^persist:/)
+  assert.deepEqual(w.onDisk(), [])
+})
+
+test('an earlier kept login of this account is reused when its folder is plain', () => {
+  const name = keptLoginFolder('user-1', 'c1', SITE.host)
+  const w = world({ before: userData => { fs.mkdirSync(path.join(userData, 'Partitions', name, 'Network'), { recursive: true }); fs.writeFileSync(path.join(userData, 'Partitions', name, 'Network', 'Cookies'), 'x') } })
+  w.browser.policyAnswered('c1', policy('enforce'))
+  w.browser.open('c1', SITE.host)
+  assert.equal(w.opened[0].partition, `persist:${name}`)
+})
+
+// ---------------------------------------------------------------------------
+// What a failure or a PC that never kept anything does
+// ---------------------------------------------------------------------------
+
+test('a PC that never kept a login reads no disk before an unenclosed turn (no turn refused over it)', async () => {
+  const w = world()
+  w.browser.policyAnswered('c1', policy('observe'))
+  // The disk would refuse every read now: nothing was found at start and nothing was kept since, so it is not read.
+  fs.rmSync(path.join(w.userData, 'Partitions'), { recursive: true })
+  fs.writeFileSync(path.join(w.userData, 'Partitions'), 'x')
+  assert.equal(await w.browser.beforeAiTurn({}), true)
+})
+
+test('a removal that leaves something on disk stops keeping for the rest of the run', async () => {
+  const w = world()
+  w.browser.policyAnswered('c1', policy('enforce'))
+  w.browser.policyAnswered('c2', policy('enforce'))
+  w.browser.open('c1', SITE.host)
+  fs.renameSync(path.join(w.userData, 'Partitions'), path.join(w.userData, 'Moved'))
+  fs.writeFileSync(path.join(w.userData, 'Partitions'), 'x')
+  w.browser.policyFailed('c1', { refused: true })
+  await settle()
+  assert.deepEqual(w.browser.sites('c2'), { sites: [{ host: SITE.host }] }, 'another company\'s site is not kept either')
+})
+
+// ---------------------------------------------------------------------------
+// Claude Code's managed settings may switch its sandbox off
+// ---------------------------------------------------------------------------
+
+test('a managed `sandbox` (or a managed file that cannot be read) counts as "may be off"', () => {
+  assert.equal(managedSettingsTouchSandbox({ kind: 'json', text: '{"permissions":{"deny":["Read(~/.ssh/**)"]}}' }), false)
+  assert.equal(managedSettingsTouchSandbox({ kind: 'json', text: '{"sandbox":{"enabledPlatforms":["linux"]}}' }), true)
+  assert.equal(managedSettingsTouchSandbox({ kind: 'json', text: '{"Sandbox":{}}' }), true)
+  assert.equal(managedSettingsTouchSandbox({ kind: 'json', text: 'not json' }), true)
+  assert.equal(managedSettingsTouchSandbox({ kind: 'plist', text: '<key>sandbox</key>' }), true)
+  assert.equal(managedSettingsTouchSandbox({ kind: 'plist', text: '<key>permissions</key>' }), false)
+
+  const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'acb-managed-')))
+  const file = path.join(dir, 'managed-settings.json')
+  const folder = path.join(dir, 'managed-settings.d')
+  const sources = [{ kind: 'json' as const, path: file }, { kind: 'json' as const, path: folder, folder: true }]
+  assert.equal(claudeManagedSandboxPresent(sources), false, 'none at all')
+  fs.writeFileSync(file, '{"permissions":{}}')
+  assert.equal(claudeManagedSandboxPresent(sources), false)
+  fs.mkdirSync(folder)
+  fs.writeFileSync(path.join(folder, '10-mdm.json'), '{"sandbox":{"enabled":false}}')
+  assert.equal(claudeManagedSandboxPresent(sources), true, 'a drop-in file')
+
+  const connection = (present: boolean) => createClaudeConnection({
+    getPermissionMode: () => 'default', isClaudeCodeAuthenticated: () => true, getClaudeCodeCliPath: () => '/test/claude',
+    getShellEnv: () => ({}), managedSandboxPresent: () => present,
+  })
+  assert.equal(connection(true).sandboxMayBeOff?.(), true)
+  assert.equal(connection(false).sandboxMayBeOff?.(), false)
+})
+
+test('the chat server tells the gate an enforce Claude turn\'s working folder and that its sandbox may be off', async () => {
+  const { startChatServer } = await import('../electron/chat-server')
+  const facts: AiTurnFacts[] = []
+  const server = await startChatServer({
+    getAuthMode: () => 'claude-code', getApiKey: () => undefined, buildSystemPrompt: () => '', getShellEnv: () => ({}),
+    getPermissionMode: () => 'default', isClaudeCodeAuthenticated: () => true, getClaudeCodeCliPath: () => '/test/claude', listenPort: 0,
+    managedSandboxPresent: () => true,
+    getAgentSandbox: async (_c, root) => ({ settings: { mode: 'enforce', allowedDomains: [], deniedReadPaths: [], onUnavailable: 'stop' }, host: { home: HOME, companyRoot: root } }),
+    beforeAiTurn: async turn => { facts.push(turn); return false },
+  })
+  try {
+    const res = await fetch(`http://127.0.0.1:${server.port}/api/chat`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${server.authToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ messages: [{ id: 'm', role: 'user', parts: [{ type: 'text', text: 'hi' }] }], companyId: 'co', appSessionId: 'conv', companyRootPath: '/tmp/acme', workingDirectory: '/tmp/acme' }),
+    })
+    assert.equal(res.status, 503)
+    assert.equal(facts[0].sandbox?.mode, 'enforce')
+    assert.equal(facts[0].sandboxMayBeOff, true)
+    assert.equal(facts[0].workingDirectory, '/tmp/acme')
+  } finally {
+    server.server.close()
+  }
 })

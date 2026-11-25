@@ -614,6 +614,8 @@ const keptLogins = createKeptLogins({
   partitionsDir: browserPartitionsDir,
   clearSession: partition => browserShell.clearPartition(partition),
   platformEncloses: sandboxPlatform(process.platform),
+  // Never where a company folder is (sync or an enclosed turn would read it there).
+  insideCompanyFolder: p => allowedRoots.touches(p),
 })
 const browser = createBrowserController({
   shell: browserShell,

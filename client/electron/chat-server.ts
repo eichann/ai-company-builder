@@ -166,7 +166,7 @@ export interface ChatServerConfig extends AgentHost {
    * next to (a browser login kept on this PC) could not be removed first, and the turn does not start. A turn that
    * falls back to running without the sandbox (`record-only`) asks again with no sandbox (`TurnSandbox.beforeUnenclosed`).
    */
-  beforeAiTurn?: (turn: { sandbox?: { mode: 'observe' | 'enforce'; resolved: ResolvedSandbox }; companyRoot?: string }) => Promise<boolean>
+  beforeAiTurn?: (turn: { sandbox?: { mode: 'observe' | 'enforce'; resolved: ResolvedSandbox }; companyRoot?: string; workingDirectory?: string; sandboxMayBeOff?: boolean }) => Promise<boolean>
   /**
    * The key broker's variables for this turn's AI process (K6, broker-env.ts):
    * the consultation's short-lived token where SDKs look for an API key and
@@ -711,7 +711,8 @@ export async function startChatServer(config: ChatServerConfig) {
     }
     const sandbox: TurnSandbox | undefined = sandboxInput && sandboxDecision && sandboxDecision.mode !== 'off'
       ? { mode: sandboxDecision.mode, resolved: sandboxDecision.resolved, home: sandboxInput.host.home, onUnavailable: sandboxDecision.onUnavailable, beforeUnenclosed } : undefined
-    if (config.beforeAiTurn && !(await config.beforeAiTurn({ sandbox, companyRoot: companyRootPath }).catch(() => false))) {
+    const sandboxMayBeOff = sandbox?.mode === 'enforce' && (() => { try { return connection.sandboxMayBeOff?.() === true } catch { return true } })()
+    if (config.beforeAiTurn && !(await config.beforeAiTurn({ sandbox, companyRoot: companyRootPath, workingDirectory, sandboxMayBeOff }).catch(() => false))) {
       turn?.end('failed')
       return c.json({ error: BROWSER_WORDS.keptNotRemoved }, 503)
     }

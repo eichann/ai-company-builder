@@ -760,7 +760,8 @@ async function runnerScenarios(win: BrowserShellWindow, site: BrowserSiteSetting
  */
 async function keptScenario(shell: ReturnType<typeof createBrowserWindowShell>, site: BrowserSiteSetting) {
   const out: Record<string, unknown> = {}
-  const partitions = path.join(dir, 'userData', 'Partitions')
+  // Where it really is: the kept logins' check refuses a path with a link in it (the test's temp folder is /var → /private/var).
+  const partitions = path.join(fs.realpathSync(path.join(dir, 'userData')), 'Partitions')
   const kept = createKeptLogins({ partitionsDir: () => partitions, clearSession: p => shell.clearPartition(p), platformEncloses: true, log: { warn() {} } })
   const partition = kept.partition('user-1', 'company-1', 'op.test')!
   const folder = partition.slice('persist:'.length)

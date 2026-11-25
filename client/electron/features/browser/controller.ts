@@ -152,7 +152,11 @@ export function createBrowserController(deps: BrowserControllerDeps) {
     if (!deps.kept) return true
     for (const win of [...windows.values()]) if (deps.kept.isKept(win.partition) && closeWhere(win)) closeWindow(win)
     const ok = await deps.kept.remove(scope)
-    if (!ok) log.warn('[browser] a kept login is still on disk after removing it')
+    if (!ok) {
+      // Nothing more is kept in this run once a removal failed (the disk is not what the rules say).
+      deps.kept.stop()
+      log.warn('[browser] a kept login is still on disk after removing it; nothing more is kept this run')
+    }
     return ok
   }
 
@@ -238,7 +242,8 @@ export function createBrowserController(deps: BrowserControllerDeps) {
       if (deps.turnEnclosesKept?.(turn)) return true
       const wasKeeping = deps.kept.keeping()
       deps.kept.stop()
-      const ok = await removeKept({ all: true }, () => true)
+      // A PC where nothing was ever kept (none found at start, none handed out since) has nothing to read or refuse.
+      const ok = deps.kept.maybeOnDisk() ? await removeKept({ all: true }, () => true) : true
       if (wasKeeping) {
         const user = deps.userId()
         for (const [key, hosts] of keptHosts) {
