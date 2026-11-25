@@ -365,7 +365,7 @@ export const browserRecordingDeletedSchema = topLevel<{ deleted: true }>({ delet
 // 「Skill の承認」 (shared/types/browser-skills.ts)
 export const browserSkillsSchema = topLevel<BrowserSkillsView>({ items: list })
 export const browserSkillSchema = topLevel<BrowserSkillView>({
-  name: str, declarationHash: str,
+  name: str, declarationHash: str, files: str,
   status: z.enum(['waiting', 'approved', 'pre_approved', 'text_changed', 'revoked', 'invalid']),
   problem: nullableStr, domain: nullableStr, writes: list, neverRead: list, afterRead: list, accountMarker: nullableStr,
   approval: z.nullable(obj),

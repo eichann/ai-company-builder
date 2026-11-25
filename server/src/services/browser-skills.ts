@@ -30,7 +30,7 @@ import {
   BROWSER_SKILL_APPROVAL_MODES, type BrowserSkillApprovalMode, type BrowserSkillStatus, type BrowserSkillsView, type BrowserSkillView,
 } from '../../shared/types/browser-skills'
 import type { AccountDirectory } from '../ports/accounts'
-import type { BrowserSkillApprovalRepository, BrowserSkillApprovalRow, BrowserSkillContent, BrowserSkillSource } from '../ports/browser-skills'
+import type { BrowserSkillApprovalRepository, BrowserSkillApprovalRow, BrowserSkillContent, BrowserSkillLanded, BrowserSkillSource } from '../ports/browser-skills'
 import type { Clock, IdGenerator } from '../ports/clock'
 import type { CompanyDataSource } from '../ports/company-data'
 import type { MembershipRepository } from '../ports/memberships'
@@ -125,7 +125,7 @@ export function createBrowserSkillService(deps: BrowserSkillDeps) {
     if (j.problem) return 'invalid'
     if (!latest || latest.declarationHash !== j.hash) return 'waiting'
     if (latest.revokedAt !== null) return 'revoked'
-    if (latest.filesSeen !== j.content.files) return 'text_changed'
+    if (latest.filesSeen !== null && latest.filesSeen !== j.content.files) return 'text_changed'
     return latest.mode === 'pre_approved' ? 'pre_approved' : 'approved'
   }
 
@@ -137,6 +137,7 @@ export function createBrowserSkillService(deps: BrowserSkillDeps) {
     return {
       name: j.content.name,
       declarationHash: j.hash,
+      files: j.content.files,
       status: statusOf(j, latest),
       problem: j.problem ? BROWSER_SKILL_PROBLEM_WORDS[j.problem] : null,
       domain: d?.domain ?? null,
@@ -173,15 +174,17 @@ export function createBrowserSkillService(deps: BrowserSkillDeps) {
   /** 「手順が直りました」 once per folder version (the notice's dedupe key), when an approval in force has not seen this version. */
   function noticeTextChanged(companyId: string, j: Judged, except: string | null): void {
     const approval = inForce(repo(companyId).latest(skillPathOf(j.content.name)), j.hash)
-    if (!approval || approval.filesSeen === j.content.files) return
+    if (!approval || approval.filesSeen === null || approval.filesSeen === j.content.files) return
     tell(companyId, `${BROWSER_SKILL_NOTICE_PREFIX}text:${j.content.name}:${short(j.content.files)}`, except)
   }
 
   /**
    * A Skill someone landed (a push the checker accepted, read at the pushed commit; or the shelf's version they published).
-   * `by`: who, with their role at that time.
+   * `by`: who, with their role at that time. `current`: the Skill as the server reads it now — a landing that is no longer
+   * what is there (a later push or publish, read in another order) changes nothing: the later one is judged on its own.
    */
-  function landed(companyId: string, by: { userId: string; role: string }, content: BrowserSkillContent): void {
+  function landed(companyId: string, by: { userId: string; role: string }, content: BrowserSkillLanded, current: BrowserSkillContent | null): void {
+    if (!current || current.files !== content.files) return
     const j = judge(companyId, content)
     const r = repo(companyId)
     const path = skillPathOf(content.name)
@@ -193,10 +196,15 @@ export function createBrowserSkillService(deps: BrowserSkillDeps) {
     }
     // A declaration that cannot be read is nothing to approve: 「Skill の承認」 shows its problem.
     if (!j.declaration || j.problem === 'too-large') return
+    // Only a change of the declaration itself counts as its approval: an owner / admin who changed only the text of a
+    // Skill whose declaration someone else changed approves nothing by that (Codex review).
+    if (!content.declarationChanged) return
     if (hasFullAccess(by.role) && (latest === null || latest.revokedAt === null)) {
       r.insert({
         skillPath: path, declarationHash: j.hash, mode: latest?.mode ?? 'per_run', how: 'edited',
-        approvedBy: by.userId, approvedAt: deps.clock.now(), filesSeen: content.files,
+        // Not counted as seen: the first run of a declaration changed this way shows the card once, also when pre-approved
+        // (the change may have been written by the admin's AI; independent review).
+        approvedBy: by.userId, approvedAt: deps.clock.now(), filesSeen: null,
       })
       return
     }
@@ -224,20 +232,21 @@ export function createBrowserSkillService(deps: BrowserSkillDeps) {
       return ok({ items })
     },
 
-    /** POST /browser-skill-approvals { skill, declarationHash, mode } (owner/admin): approve exactly what was seen. */
+    /** POST /browser-skill-approvals { skill, declarationHash, files, mode } (owner/admin): approve exactly what was seen. */
     async approve(member: Member, body: unknown): Promise<Outcome<BrowserSkillView>> {
       if (!hasFullAccess(member.role)) return forbidden()
-      if (!isMap(body) || !exactKeys(body, ['skill', 'declarationHash', 'mode'])) return bad()
-      const { skill, declarationHash, mode } = body
+      if (!isMap(body) || !exactKeys(body, ['skill', 'declarationHash', 'files', 'mode'])) return bad()
+      const { skill, declarationHash, files, mode } = body
       if (typeof skill !== 'string' || !isValidSkillName(skill)) return bad()
       if (typeof declarationHash !== 'string' || !CONTENT_HASH_RE.test(declarationHash)) return bad()
+      if (typeof files !== 'string' || files.length > 200) return bad()
       if (!(BROWSER_SKILL_APPROVAL_MODES as readonly unknown[]).includes(mode)) return bad()
       const content = await deps.source.read(member.companyId, skill)
       if (!content) return notFound()
       const j = judge(member.companyId, content)
       if (j.problem) return refuse('conflict', BROWSER_SKILL_PROBLEM_WORDS[j.problem], { code: j.problem === 'not-registered' ? 'BROWSER_SKILL_DOMAIN_NOT_REGISTERED' : 'BROWSER_SKILL_BAD_DECLARATION' })
-      if (j.hash !== declarationHash) return refuse('conflict', W.changed, { code: 'BROWSER_SKILL_CHANGED' })
-      // Approving is approving the version as a whole: its files as they are now count as seen.
+      if (j.hash !== declarationHash || content.files !== files) return refuse('conflict', W.changed, { code: 'BROWSER_SKILL_CHANGED' })
+      // Approving is approving the version as a whole, as the page showed it: its files count as seen.
       repo(member.companyId).insert({
         skillPath: skillPathOf(skill), declarationHash: j.hash, mode: mode as BrowserSkillApprovalMode, how: 'approved',
         approvedBy: member.userId, approvedAt: deps.clock.now(), filesSeen: content.files,
@@ -272,11 +281,12 @@ export function createBrowserSkillService(deps: BrowserSkillDeps) {
       }
       const approval = inForce(repo(member.companyId).latest(skillPathOf(skill)), j.hash)
       if (!approval) return refuse('conflict', W.notApproved, { code: 'BROWSER_SKILL_NOT_APPROVED' })
-      const textChanged = approval.filesSeen !== content.files
+      // `filesSeen` null: approved by an owner / admin's own change, not yet run — the card once, nobody told.
+      const textChanged = approval.filesSeen !== null && approval.filesSeen !== content.files
       if (textChanged) noticeTextChanged(member.companyId, j, null)
       return ok({
         skill, declarationHash: j.hash, files: content.files, frames: browserSkillFrames(j.declaration), mode: approval.mode,
-        textChanged, needsRunCard: approval.mode === 'per_run' || textChanged,
+        textChanged, needsRunCard: approval.mode === 'per_run' || approval.filesSeen !== content.files,
       })
     },
 
@@ -296,18 +306,24 @@ export function createBrowserSkillService(deps: BrowserSkillDeps) {
      */
     afterPush(companyId: string, by: { userId: string; role: string }, refUpdates: string): void {
       later('Reading a push for browser Skills failed', companyId, async () => {
-        for (const content of await deps.source.pushed(companyId, refUpdates)) landed(companyId, by, content)
+        for (const content of await deps.source.pushed(companyId, refUpdates)) {
+          const current = await deps.source.read(companyId, content.name)
+          // Synchronous from here: no other landing or approval runs between this read and the write.
+          landed(companyId, by, content, current)
+        }
       })
     },
 
     /** After the shelf published or put back a version (services/skill-shelf.ts): the publisher and their role. */
-    shelfChanged(member: Member, item: { kind: string; departmentId: string | null; name: string }): void {
+    shelfChanged(member: Member, item: { kind: string; departmentId: string | null; name: string }, versions: { before: string | null; written: string }): void {
       if (item.kind !== 'skill' || item.departmentId !== null) return
-      // Started now, not deferred: the shelf's read is synchronous behind one microtask, so no other request (another
-      // publisher) runs between this publish and the read — what is judged is what this member published.
-      deps.source.read(member.companyId, item.name)
-        .then(content => { if (content) landed(member.companyId, member, content) })
-        .catch(err => logError('browser-skills', 'Reading a shelf Skill for browser Skills failed', err, { company: member.companyId }))
+      // Judged at exactly the version this member wrote, and only while it is still the current one (as a push).
+      later('Reading a shelf Skill for browser Skills failed', member.companyId, async () => {
+        const content = await deps.source.shelfLanded(member.companyId, item.name, versions)
+        if (!content) return
+        const current = await deps.source.read(member.companyId, item.name)
+        landed(member.companyId, member, content, current)
+      })
     },
 
     /** The inbox's text of a `browser_skill:` notice, built when read (owner / admin only; else not shown). */

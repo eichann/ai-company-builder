@@ -40,6 +40,11 @@ export interface BrowserSkillContent {
   files: string
 }
 
+/** A Skill as one change left it, and whether that change touched `browser.yaml` (added or changed it). */
+export interface BrowserSkillLanded extends BrowserSkillContent {
+  declarationChanged: boolean
+}
+
 export interface BrowserSkillSource {
   /** The company-wide Skills that carry `browser.yaml`, by name (sorted, bounded). */
   list(companyId: string): Promise<string[]>
@@ -50,5 +55,7 @@ export interface BrowserSkillSource {
    * company-wide Skills with `browser.yaml` that it touched, each read **at the pushed commit** (not the tip, which may
    * already be someone else's).
    */
-  pushed(companyId: string, refUpdates: string): Promise<BrowserSkillContent[]>
+  pushed(companyId: string, refUpdates: string): Promise<BrowserSkillLanded[]>
+  /** A shelf Skill at exactly the version one publish wrote, against the version current before it (null: none). */
+  shelfLanded(companyId: string, name: string, versions: { before: string | null; written: string }): Promise<BrowserSkillLanded | null>
 }

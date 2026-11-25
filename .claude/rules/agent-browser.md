@@ -2856,24 +2856,33 @@ with it yet. Only company-wide Skills (`.claude/skills/<name>`; a shelf item wit
   the whole folder's fingerprint (`git:<tree id>` / `shelf:<version>`) tells that the other files changed.
 - **Table** `browser_skill_approvals` (additive, `db/schema/browser-skills.ts`, behind the handle's `browserSkills`): company,
   `skill_path`, `declaration_hash`, `mode` (`per_run` | `pre_approved`), `how` (`approved` | `edited`), `approved_by`,
-  `approved_at`, `files_seen`, `revoked_at` / `revoked_by`; a trigger fixes everything but `files_seen` and a revoke set once.
+  `approved_at`, `files_seen`, `revoked_at` / `revoked_by`; a trigger fixes everything (`seq` included) but `files_seen` and a revoke set once.
   **Only a skill's latest row counts, and only for its hash** (approving another version supersedes; a declaration put back
   to an older text needs approving again).
 - **Who changed it** (owner decision): re-approval is needed only when `browser.yaml` changes. **An owner / admin's change
-  counts as approved** (`how: edited`, `approved_by` = who; the mode of the approval before is kept, `per_run` when none; the
-  files they landed count as seen) — **unless the latest approval was revoked** (it stays revoked whoever edits). Anyone else's
-  change (「Skill を直せる人」) waits, and the other owners / admins are told once per version. A declaration that does not
-  parse is never approved. **Whose change**: for a push, the pusher git-http authenticated and the role it read
+  counts as approved** (`how: edited`, `approved_by` = who; the mode of the approval before is kept, `per_run` when none;
+  `files_seen` stays null, so **its first run shows the card once** even when pre-approved — the change may have been
+  written by the admin's AI, independent review) — **only when that change touched `browser.yaml` itself** (`declarationChanged`:
+  the blob at the push's old and new commit, or the shelf's version before and the one written; an owner / admin who changed
+  only the text of a Skill whose declaration someone else changed approves nothing, Codex review), **only while it is still
+  what the server holds** (each landing is compared with a fresh read right before it writes: a push or publish read in
+  another order, or an approval made meanwhile, is never superseded by an older landing, Codex review), and **unless the
+  latest approval was revoked** (it stays revoked whoever edits). Anyone else's change (「Skill を直せる人」) waits, and the other
+  owners / admins are told once per version. A declaration that does not parse is never approved. **Whose change**: for a push, the pusher git-http authenticated and the role it read
   (`routes/git-http.ts`, company repository only) — the push checker writes the `<old> <new> <ref>` lines it **accepted** to
   `ACB_PUSH_NOTES` (a file in the request's private temp dir, `preparePushCheck`; never on a refusal; a failure to write only
   means "not counted as approved"); after the push succeeded `services.browserSkills.afterPush` reads, off the request, each
   touched company Skill **at the pushed commit** (`BrowserSkillSource.pushed`: never the tip, which may already be someone
-  else's). For the shelf, the publisher (`SkillShelfDeps.changed`, after a publish, a restore or a request published), read at
-  once (the shelf's read is synchronous behind one microtask, so no other publish runs between).
+  else's). For the shelf, the publisher (`SkillShelfDeps.changed`, after a publish, a restore or a request published, with the
+  version before and **exactly the version written**, `BrowserSkillSource.shelfLanded`).
 - **Only the other files changed** (the steps' text, site notes): nothing is blocked; `approvedFrames` answers
   `textChanged` / `needsRunCard: true` (also when pre-approved) until step ⑤ calls `runCardShown(skill, hash, files)`
   once the per-run card was shown; owners / admins (but the person who changed it) are told 「手順が直りました」 once per folder
-  version. An explicit approval counts the files as they are as seen.
+  version. An explicit approval counts the files **as the page showed them** as seen (the approval sends the folder's `files`
+  back with the hash; either one moved → 409 `BROWSER_SKILL_CHANGED`).
+- **For step ⑤**: `runCardShown`'s `files` must be the value its own `approvedFrames` call returned, never one the app sends
+  (else an app could switch the card off); `approvedFrames` answers about the approval only — the permit still asks the
+  company's mode, the site, the person's level on it, this PC and the stops.
 - **`approvedFrames(member, skill)`** (step ⑤'s question at every permit; a few git reads): the Skill read now, the declaration
   valid (`BROWSER_SKILL_BAD_DECLARATION`), its domain registered now (`BROWSER_SKILL_DOMAIN_NOT_REGISTERED`), the latest
   approval for this very hash and not revoked (`BROWSER_SKILL_NOT_APPROVED`), else `BROWSER_SKILL_NOT_FOUND` → `{ frames,
@@ -2882,7 +2891,7 @@ with it yet. Only company-wide Skills (`.claude/skills/<name>`; a shelf item wit
   (`BrowserSkillsView`, `shared/types/browser-skills.ts`: each Skill with its hash, status `waiting` / `approved` /
   `pre_approved` / `text_changed` / `revoked` / `invalid`, the problem in plain Japanese, domain, write targets in plain words,
   never-read and after-read addresses, account marker, the approval in force), `POST /browser-skill-approvals { skill,
-  declarationHash, mode }` (exactly these keys; the hash must be the one read now, else 409 `BROWSER_SKILL_CHANGED`; an invalid
+  declarationHash, files, mode }` (exactly these keys; the hash and the folder's version must be the ones read now, else 409 `BROWSER_SKILL_CHANGED`; an invalid
   declaration or an unregistered domain 409), `POST /browser-skill-approvals/revoke { skill }` (the latest approval, 409
   `BROWSER_SKILL_NOT_APPROVED` when none).
 - **Notices**: on the existing admin-only browser kind `browser_shape_changed` (recordless, built when read, shown only to
@@ -2899,12 +2908,13 @@ Tests: `server/tests/unit/browser-skill-core.test.ts` (the shape, unknown keys, 
 duplicate keys, the path grammar, `_method`, sensitive fields, duplicates, the domain, the frozen frames, the plain words),
 `server/tests/unit/browser-skills.test.ts` (no frames until approved, exactly the version seen, pre-approved, owners / admins
 only, the strict body, revoked and an edit after it, only the latest counts, another company's approval, an unregistered
-domain, a bad declaration, an owner / admin's change approved with who and the mode kept, an editor's change waits and owners /
+domain, a bad declaration, an owner / admin's change approved with who and the mode kept and the card once, only a change of the
+declaration itself approving, a landing no longer current changing nothing, an editor's change waits and owners /
 admins told — not the editor, once —, an unreadable one never approved, the text change: frames kept, the card once even
 pre-approved, told once, `runCardShown`, an admin's own text change, the server's copy only, the trigger),
 `server/tests/integration/browser-skill-push.test.ts` (real git-http, checker and source: the checker hands over only what it
-accepted; an owner's push approved, an editor's waits, a refused push changes nothing, a text-only push, a push read at its own
-commit; the shelf's publisher), `admin/tests/agent-browser-skills.test.tsx`, `admin-contract.test.ts`, permission matrix rows,
+accepted; an owner's push approved, an editor's waits, a refused push changes nothing, a text-only push, an owner's text-only push
+after an editor's declaration approving nothing, a push read at its own commit; the shelf's publisher), `admin/tests/agent-browser-skills.test.tsx`, `admin-contract.test.ts`, permission matrix rows,
 `company-scoped-sql.test.ts`, `jobs-schema.test.ts`, `client/tests/browser-core-words.test.ts` (the new files scanned).
 Each guard mutation-checked.
 

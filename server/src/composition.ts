@@ -403,7 +403,7 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
   const { skillShelf, jobs, jobProposals } = wireJobs({
     repos, shared, hasCompanyFolder: companyFolders.has, permissionViews, push, taskSettings,
     // A shelf Skill's `browser.yaml` changed: who published decides whether it counts as approved (bound late: built above).
-    shelfChanged: (member, item) => browserSkills.shelfChanged(member, item),
+    shelfChanged: (member, item, versions) => browserSkills.shelfChanged(member, item, versions),
     // Member proposals (jobs.md "Member proposals"): the existing folders a candidate may name.
     // Without the shared folder only a department or a place set up inside one (what the listing offers) exists — never any
     // text below a department (`folderExists` answers that, for permission rules): its parent's listing names it.

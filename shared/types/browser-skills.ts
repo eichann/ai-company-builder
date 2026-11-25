@@ -30,6 +30,8 @@ export interface BrowserSkillView {
   name: string
   /** `sha256:` of `browser.yaml` as the server read it: what an approval is for. */
   declarationHash: string
+  /** The whole folder's version as the server read it (sent back with an approval: the version shown). */
+  files: string
   status: BrowserSkillStatus
   /** Plain Japanese when `invalid`, else null. */
   problem: string | null
@@ -53,6 +55,7 @@ export interface BrowserSkillsView {
 export interface BrowserSkillApproveBody {
   skill: string
   declarationHash: string
+  files: string
   mode: BrowserSkillApprovalMode
 }
 

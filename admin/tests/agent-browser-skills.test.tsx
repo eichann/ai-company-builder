@@ -35,7 +35,7 @@ function stubApi(caps: Capabilities, routes: Record<string, Reply> = {}) {
 
 const HASH = `sha256:${'a'.repeat(64)}`
 const waiting: BrowserSkillView = {
-  name: 'order-copy', declarationHash: HASH, status: 'waiting', problem: null, domain: 'shop.example.test',
+  name: 'order-copy', declarationHash: HASH, files: 'git:abc', status: 'waiting', problem: null, domain: 'shop.example.test',
   writes: ['/api/orders/register に送る（作る・保存する）：1回まで'], neverRead: ['/api/orders/{n}?copy=1'], afterRead: ['/api/orders/{created}'],
   accountMarker: 'shop-account-id', approval: null,
 }
@@ -92,8 +92,8 @@ describe('Skill の承認', () => {
     await userEvent.click(within(await row('order-copy')).getByRole('button', { name: '前もって承認' }))
     await waitFor(() => expect(calls.filter((c) => c.method === 'POST')).toHaveLength(2))
     expect(calls.filter((c) => c.method === 'POST').map((c) => c.body)).toEqual([
-      { skill: 'order-copy', declarationHash: HASH, mode: 'per_run' },
-      { skill: 'order-copy', declarationHash: HASH, mode: 'pre_approved' },
+      { skill: 'order-copy', declarationHash: HASH, files: 'git:abc', mode: 'per_run' },
+      { skill: 'order-copy', declarationHash: HASH, files: 'git:abc', mode: 'pre_approved' },
     ])
   })
 

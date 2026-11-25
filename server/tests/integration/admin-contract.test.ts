@@ -539,7 +539,7 @@ describe('admin API types (admin/src/lib/api.ts) match the server', () => {
       const item = (list.items as Loose[]).find(i => i.name === 'browser-contract') as Loose
       expect(item).toBeDefined()
       record('GET …/browser-skill-approvals → BrowserSkillView', shapes.check('BrowserSkill', item))
-      await expectShape('BrowserSkill', USERS.owner, 'POST', `${base}/browser-skill-approvals`, { skill: 'browser-contract', declarationHash: item.declarationHash, mode: 'pre_approved' })
+      await expectShape('BrowserSkill', USERS.owner, 'POST', `${base}/browser-skill-approvals`, { skill: 'browser-contract', declarationHash: item.declarationHash, files: item.files, mode: 'pre_approved' })
       await expectShape('BrowserSkillRevoked', USERS.owner, 'POST', `${base}/browser-skill-approvals/revoke`, { skill: 'browser-contract' })
     } finally {
       db.prepare("UPDATE companies SET folder_kind = 'git' WHERE id = ?").run(CO)

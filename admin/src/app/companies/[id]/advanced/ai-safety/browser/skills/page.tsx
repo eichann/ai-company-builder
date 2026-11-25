@@ -54,7 +54,7 @@ export default function BrowserSkillsPage() {
   const approve = async (s: BrowserSkillView, mode: BrowserSkillApprovalMode) => {
     setBusy(s.name)
     try {
-      await browserSkillsApi.approve(companyId, { skill: s.name, declarationHash: s.declarationHash, mode })
+      await browserSkillsApi.approve(companyId, { skill: s.name, declarationHash: s.declarationHash, files: s.files, mode })
       toast.success(mode === 'pre_approved' ? '前もって承認しました' : '承認しました')
     } catch (err) {
       toast.error('承認できませんでした', { description: describeError(err) })

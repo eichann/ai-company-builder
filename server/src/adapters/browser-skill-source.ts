@@ -10,7 +10,7 @@ import { isValidSkillName } from '../../shared/core/names'
 import { companyRepoPath } from '../lib/config'
 import { gitAsync } from '../lib/git-exec'
 import { resolveSharedBranch } from '../lib/repo-folders'
-import type { BrowserSkillContent, BrowserSkillSource } from '../ports/browser-skills'
+import type { BrowserSkillContent, BrowserSkillLanded, BrowserSkillSource } from '../ports/browser-skills'
 import type { CompanyDataSource } from '../ports/company-data'
 
 const SKILLS = '.claude/skills'
@@ -71,16 +71,23 @@ export function browserSkillSource(deps: { companyData: CompanyDataSource; hasCo
     return ref ? { repo, ref } : null
   }
 
-  function shelfRead(companyId: string, name: string): BrowserSkillContent | null {
+  /** A shelf item's `browser.yaml` at one version (base64 as stored), or null. */
+  function shelfDeclaration(companyId: string, itemId: string, version: string): string | null {
+    return deps.companyData.forCompany(companyId).skillShelf.versionFiles(itemId, version)?.find(f => f.path === BROWSER_SKILL_FILE)?.base64 ?? null
+  }
+
+  /** A shelf Skill at one version (the current one when none is named), or null. */
+  function shelfRead(companyId: string, name: string, version?: string): BrowserSkillContent | null {
     if (!isValidSkillName(name)) return null
     const shelf = deps.companyData.forCompany(companyId).skillShelf
     const item = shelf.itemAt('skill', null, name)
-    if (!item?.currentVersion) return null
-    const file = shelf.versionFiles(item.id, item.currentVersion)?.find(f => f.path === BROWSER_SKILL_FILE)
-    if (!file) return null
-    const bytes = Buffer.from(file.base64, 'base64')
+    const at = version ?? item?.currentVersion
+    if (!item || !at) return null
+    const base64 = shelfDeclaration(companyId, item.id, at)
+    if (base64 === null) return null
+    const bytes = Buffer.from(base64, 'base64')
     const declaration = bytes.length > BROWSER_SKILL_LIMITS.bytes ? 'too-large' : bytes.toString('utf8')
-    return { name, declaration, files: `shelf:${item.currentVersion}` }
+    return { name, declaration, files: `shelf:${at}` }
   }
 
   return {
@@ -111,10 +118,21 @@ export function browserSkillSource(deps: { companyData: CompanyDataSource; hasCo
       return shelfRead(companyId, name)
     },
 
+    async shelfLanded(companyId, name, versions) {
+      if (deps.hasCompanyFolder(companyId)) return null
+      // Exactly the version this publish wrote, whatever is current by now.
+      const content = shelfRead(companyId, name, versions.written)
+      if (!content) return null
+      const item = deps.companyData.forCompany(companyId).skillShelf.itemAt('skill', null, name)
+      const before = item && versions.before ? shelfDeclaration(companyId, item.id, versions.before) : null
+      const after = item ? shelfDeclaration(companyId, item.id, versions.written) : null
+      return { ...content, declarationChanged: before !== after }
+    },
+
     async pushed(companyId, refUpdates) {
       const git = await repoOf(companyId)
       if (!git) return []
-      const out: BrowserSkillContent[] = []
+      const out: BrowserSkillLanded[] = []
       for (const line of refUpdates.split('\n')) {
         const [oldId, newId, ref, ...rest] = line.trim().split(' ')
         if (rest.length > 0 || ref !== git.ref || !OBJECT_RE.test(oldId ?? '') || !OBJECT_RE.test(newId ?? '') || ZERO_RE.test(newId)) continue
@@ -129,7 +147,12 @@ export function browserSkillSource(deps: { companyData: CompanyDataSource; hasCo
         for (const name of skillNamesIn(paths, false)) {
           // Read at the pushed commit: what this pusher landed, whatever came after it.
           const content = await readAt(git.repo, newId, name)
-          if (content) out.push(content)
+          if (!content) continue
+          // Did this push touch the declaration itself (an added file counts), or only the other files?
+          const file = `${SKILLS}/${name}/${BROWSER_SKILL_FILE}`
+          const before = ZERO_RE.test(oldId) ? null : await entryOf(git.repo, oldId, file, 'blob')
+          const after = await entryOf(git.repo, newId, file, 'blob')
+          out.push({ ...content, declarationChanged: before !== after })
         }
       }
       return out.slice(0, MAX_SKILLS)

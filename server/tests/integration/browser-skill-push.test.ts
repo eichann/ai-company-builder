@@ -222,7 +222,7 @@ describe('a company with the shared folder: whose push it was', () => {
     const list = await services.browserSkills.list(owner)
     const item = list.ok ? list.value.items.find(i => i.name === SKILL) : undefined
     expect(item?.status).toBe('waiting')
-    const approved = await services.browserSkills.approve(owner, { skill: SKILL, declarationHash: item!.declarationHash, mode: 'pre_approved' })
+    const approved = await services.browserSkills.approve(owner, { skill: SKILL, declarationHash: item!.declarationHash, files: item!.files, mode: 'pre_approved' })
     expect(approved.ok).toBe(true)
     expect(code(await services.browserSkills.approvedFrames(editor, SKILL))).toBe('ok')
   })
@@ -247,6 +247,23 @@ describe('a company with the shared folder: whose push it was', () => {
     const frames = await services.browserSkills.approvedFrames(owner, SKILL)
     expect(frames.ok && frames.value).toMatchObject({ mode: 'pre_approved', textChanged: true, needsRunCard: true })
     expect(rowCount(CO)).toBe(2)
+  })
+})
+
+describe('an owner\'s text-only push after an editor\'s declaration (Codex review)', () => {
+  it('approves nothing it did not change', async () => {
+    const before = noticeKeys(CO, 'u-owner').filter(k => k.startsWith('browser_skill:waiting:')).length
+    write(`${PATH}/browser.yaml`, yaml(3))
+    commit()
+    expect((await pushAs('tok-editor')).ok).toBe(true)
+    await until(() => noticeKeys(CO, 'u-owner').filter(k => k.startsWith('browser_skill:waiting:')).length > before, 'the owner told')
+    const rows = rowCount(CO)
+    write(`${PATH}/SKILL.md`, '# copy an order (wording)\n')
+    commit()
+    expect((await pushAs('tok-owner')).ok).toBe(true)
+    await new Promise(r => setTimeout(r, 1500))
+    expect(rowCount(CO)).toBe(rows)
+    expect(code(await services.browserSkills.approvedFrames(owner, SKILL))).toBe('BROWSER_SKILL_NOT_APPROVED')
   })
 })
 

@@ -47,6 +47,7 @@ const source: BrowserSkillSource = {
   list: async companyId => Object.keys(store[companyId] ?? {}).sort(),
   read: async (companyId, name) => store[companyId]?.[name] ?? null,
   pushed: async () => [],
+  shelfLanded: async () => null,
 }
 function put(companyId: string, name: string, declaration: string, text = 'v1'): BrowserSkillContent {
   const content = { name, declaration, files: `git:${sha(`${declaration}\0${text}`).slice(0, 40)}` }
@@ -54,9 +55,12 @@ function put(companyId: string, name: string, declaration: string, text = 'v1'):
   return content
 }
 /** A change landed by `by` (what afterPush / shelfChanged hand the service, without waiting for them). */
-async function land(by: Member, declaration: string, text = 'v1') {
-  const content = put(by.companyId, SKILL, declaration, text)
-  // `landed` is internal: reach it the way the shelf does, through a fake pushed() list.
+async function land(by: Member, declaration: string, text = 'v1', opts: { thenCurrent?: () => void } = {}) {
+  const before = store[by.companyId]?.[SKILL]?.declaration ?? null
+  const content = { ...put(by.companyId, SKILL, declaration, text), declarationChanged: before !== declaration }
+  // Another change landing after this one, before it is read (the server reads its copy again: `current`).
+  opts.thenCurrent?.()
+  // `landed` is internal: reach it the way a push does, through a stand-in pushed() list.
   const was = source.pushed
   source.pushed = async () => [content]
   svc.afterPush(by.companyId, by, 'x')
@@ -105,9 +109,11 @@ describe('approving a Skill\'s declaration', () => {
     expect(seen).toMatchObject({ name: SKILL, status: 'waiting', domain: DOMAIN, approval: null })
     expect(seen.writes).toEqual(['/api/orders/register に送る（作る・保存する）：1回まで'])
     // A version not the one now (someone changed it meanwhile) is refused.
-    expect(code(await svc.approve(owner, { skill: SKILL, declarationHash: `sha256:${'0'.repeat(64)}`, mode: 'per_run' }))).toBe('BROWSER_SKILL_CHANGED')
+    expect(code(await svc.approve(owner, { skill: SKILL, declarationHash: `sha256:${'0'.repeat(64)}`, files: store[CO]?.[SKILL]?.files ?? '', mode: 'per_run' }))).toBe('BROWSER_SKILL_CHANGED')
+    // The declaration as shown but the steps' text changed since the page read it (independent review): refused too.
+    expect(code(await svc.approve(owner, { skill: SKILL, declarationHash: seen.declarationHash, files: 'git:0000', mode: 'per_run' }))).toBe('BROWSER_SKILL_CHANGED')
     expect(code(await svc.approvedFrames(owner, SKILL))).toBe('BROWSER_SKILL_NOT_APPROVED')
-    const approved = value(await svc.approve(admin, { skill: SKILL, declarationHash: seen.declarationHash, mode: 'per_run' }))
+    const approved = value(await svc.approve(admin, { skill: SKILL, declarationHash: seen.declarationHash, files: store[CO]?.[SKILL]?.files ?? '', mode: 'per_run' }))
     expect(approved).toMatchObject({ status: 'approved', approval: { mode: 'per_run', how: 'approved', approvedBy: admin.userId } })
     const frames = value(await svc.approvedFrames(editor, SKILL))
     expect(frames).toMatchObject({ mode: 'per_run', textChanged: false, needsRunCard: true })
@@ -117,7 +123,7 @@ describe('approving a Skill\'s declaration', () => {
 
   it('pre-approved needs no card', async () => {
     put(CO, SKILL, yaml())
-    value(await svc.approve(owner, { skill: SKILL, declarationHash: await hashOf(owner), mode: 'pre_approved' }))
+    value(await svc.approve(owner, { skill: SKILL, declarationHash: await hashOf(owner), files: store[CO]?.[SKILL]?.files ?? '', mode: 'pre_approved' }))
     expect(value(await svc.approvedFrames(owner, SKILL))).toMatchObject({ mode: 'pre_approved', needsRunCard: false })
   })
 
@@ -125,9 +131,9 @@ describe('approving a Skill\'s declaration', () => {
     put(CO, SKILL, yaml())
     const hash = await hashOf(owner)
     expect(code(await svc.list(editor))).toBe('BROWSER_SKILL_FORBIDDEN')
-    expect(code(await svc.approve(editor, { skill: SKILL, declarationHash: hash, mode: 'pre_approved' }))).toBe('BROWSER_SKILL_FORBIDDEN')
+    expect(code(await svc.approve(editor, { skill: SKILL, declarationHash: hash, files: store[CO]?.[SKILL]?.files ?? '', mode: 'pre_approved' }))).toBe('BROWSER_SKILL_FORBIDDEN')
     expect(code(await svc.approvedFrames(owner, SKILL))).toBe('BROWSER_SKILL_NOT_APPROVED')
-    value(await svc.approve(owner, { skill: SKILL, declarationHash: hash, mode: 'per_run' }))
+    value(await svc.approve(owner, { skill: SKILL, declarationHash: hash, files: store[CO]?.[SKILL]?.files ?? '', mode: 'per_run' }))
     expect(code(svc.revoke(editor, { skill: SKILL }))).toBe('BROWSER_SKILL_FORBIDDEN')
     expect(code(await svc.approvedFrames(owner, SKILL))).toBe('ok')
   })
@@ -139,12 +145,12 @@ describe('approving a Skill\'s declaration', () => {
       { skill: '../x', declarationHash: hash, mode: 'per_run' }, { skill: SKILL, declarationHash: hash, mode: 'per_run', extra: 1 }]) {
       expect(code(await svc.approve(owner, body)), JSON.stringify(body)).toBe('BROWSER_SKILL_BAD_REQUEST')
     }
-    expect(code(await svc.approve(owner, { skill: 'no-such', declarationHash: hash, mode: 'per_run' }))).toBe('BROWSER_SKILL_NOT_FOUND')
+    expect(code(await svc.approve(owner, { skill: 'no-such', declarationHash: hash, files: store[CO]?.[SKILL]?.files ?? '', mode: 'per_run' }))).toBe('BROWSER_SKILL_NOT_FOUND')
   })
 
   it('revoked → no frames; an edit by an owner afterwards does not approve it', async () => {
     put(CO, SKILL, yaml())
-    value(await svc.approve(owner, { skill: SKILL, declarationHash: await hashOf(owner), mode: 'pre_approved' }))
+    value(await svc.approve(owner, { skill: SKILL, declarationHash: await hashOf(owner), files: store[CO]?.[SKILL]?.files ?? '', mode: 'pre_approved' }))
     value(svc.revoke(admin, { skill: SKILL }))
     expect(code(await svc.approvedFrames(owner, SKILL))).toBe('BROWSER_SKILL_NOT_APPROVED')
     expect(value(await svc.list(owner)).items[0].status).toBe('revoked')
@@ -155,9 +161,9 @@ describe('approving a Skill\'s declaration', () => {
 
   it('only the latest approval counts: a declaration put back needs approving again', async () => {
     put(CO, SKILL, yaml(1))
-    value(await svc.approve(owner, { skill: SKILL, declarationHash: await hashOf(owner), mode: 'per_run' }))
+    value(await svc.approve(owner, { skill: SKILL, declarationHash: await hashOf(owner), files: store[CO]?.[SKILL]?.files ?? '', mode: 'per_run' }))
     put(CO, SKILL, yaml(2))
-    value(await svc.approve(owner, { skill: SKILL, declarationHash: await hashOf(owner), mode: 'per_run' }))
+    value(await svc.approve(owner, { skill: SKILL, declarationHash: await hashOf(owner), files: store[CO]?.[SKILL]?.files ?? '', mode: 'per_run' }))
     put(CO, SKILL, yaml(1))
     expect(code(await svc.approvedFrames(owner, SKILL))).toBe('BROWSER_SKILL_NOT_APPROVED')
   })
@@ -165,7 +171,7 @@ describe('approving a Skill\'s declaration', () => {
   it('another company\'s approval counts nowhere else', async () => {
     put(CO, SKILL, yaml())
     put(OTHER_CO, SKILL, yaml())
-    value(await svc.approve(otherOwner, { skill: SKILL, declarationHash: (value(await svc.list(otherOwner)).items[0]).declarationHash, mode: 'pre_approved' }))
+    value(await svc.approve(otherOwner, { skill: SKILL, declarationHash: (value(await svc.list(otherOwner)).items[0]).declarationHash, files: store[OTHER_CO]?.[SKILL]?.files ?? '', mode: 'pre_approved' }))
     expect(code(await svc.approvedFrames(otherOwner, SKILL))).toBe('ok')
     expect(code(await svc.approvedFrames(owner, SKILL))).toBe('BROWSER_SKILL_NOT_APPROVED')
     expect(value(await svc.list(owner)).items[0].status).toBe('waiting')
@@ -177,18 +183,18 @@ describe('approving a Skill\'s declaration', () => {
   it('a domain the company did not register: no frames, no approval', async () => {
     put(CO, SKILL, yaml())
     const hash = await hashOf(owner)
-    value(await svc.approve(owner, { skill: SKILL, declarationHash: hash, mode: 'per_run' }))
+    value(await svc.approve(owner, { skill: SKILL, declarationHash: hash, files: store[CO]?.[SKILL]?.files ?? '', mode: 'per_run' }))
     registered[CO] = ['other.example.test']
     expect(code(await svc.approvedFrames(owner, SKILL))).toBe('BROWSER_SKILL_DOMAIN_NOT_REGISTERED')
     expect(value(await svc.list(owner)).items[0]).toMatchObject({ status: 'invalid', problem: expect.stringContaining('登録されていません') })
-    expect(code(await svc.approve(owner, { skill: SKILL, declarationHash: hash, mode: 'per_run' }))).toBe('BROWSER_SKILL_DOMAIN_NOT_REGISTERED')
+    expect(code(await svc.approve(owner, { skill: SKILL, declarationHash: hash, files: store[CO]?.[SKILL]?.files ?? '', mode: 'per_run' }))).toBe('BROWSER_SKILL_DOMAIN_NOT_REGISTERED')
   })
 
   it('a declaration that breaks the shape: no frames, no approval', async () => {
     put(CO, SKILL, `${yaml()}extra: 1\n`)
     const hash = await hashOf(owner)
     expect(value(await svc.list(owner)).items[0].status).toBe('invalid')
-    expect(code(await svc.approve(owner, { skill: SKILL, declarationHash: hash, mode: 'per_run' }))).toBe('BROWSER_SKILL_BAD_DECLARATION')
+    expect(code(await svc.approve(owner, { skill: SKILL, declarationHash: hash, files: store[CO]?.[SKILL]?.files ?? '', mode: 'per_run' }))).toBe('BROWSER_SKILL_BAD_DECLARATION')
     expect(code(await svc.approvedFrames(owner, SKILL))).toBe('BROWSER_SKILL_BAD_DECLARATION')
     store[CO][SKILL] = { ...store[CO][SKILL], declaration: 'too-large' }
     expect(code(await svc.approvedFrames(owner, SKILL))).toBe('BROWSER_SKILL_BAD_DECLARATION')
@@ -198,10 +204,15 @@ describe('approving a Skill\'s declaration', () => {
 describe('who changed the declaration', () => {
   it('an owner / admin\'s change counts as approved, who is kept (the mode stays)', async () => {
     await land(admin, yaml(1))
-    expect(value(await svc.approvedFrames(owner, SKILL))).toMatchObject({ mode: 'per_run', textChanged: false })
+    expect(value(await svc.approvedFrames(owner, SKILL))).toMatchObject({ mode: 'per_run', textChanged: false, needsRunCard: true })
     expect(value(await svc.list(owner)).items[0].approval).toMatchObject({ how: 'edited', approvedBy: admin.userId, approvedByName: `Name ${admin.userId}` })
-    value(await svc.approve(owner, { skill: SKILL, declarationHash: await hashOf(owner), mode: 'pre_approved' }))
+    value(await svc.approve(owner, { skill: SKILL, declarationHash: await hashOf(owner), files: store[CO]?.[SKILL]?.files ?? '', mode: 'pre_approved' }))
     await land(owner, yaml(3))
+    // Pre-approved stays, but the first run of a declaration changed this way shows the card once (independent review).
+    const first = value(await svc.approvedFrames(owner, SKILL))
+    expect(first).toMatchObject({ mode: 'pre_approved', textChanged: false, needsRunCard: true })
+    expect(value(await svc.list(owner)).items[0].status).toBe('pre_approved')
+    expect(svc.runCardShown(owner, SKILL, first.declarationHash, first.files)).toBe(true)
     expect(value(await svc.approvedFrames(owner, SKILL))).toMatchObject({ mode: 'pre_approved', needsRunCard: false })
     expect(value(await svc.approvedFrames(owner, SKILL)).frames.writes[0].max).toBe(3)
     expect(noticesOf(owner.userId)).toEqual([])
@@ -224,8 +235,29 @@ describe('who changed the declaration', () => {
     await land(editor, yaml(5))
     expect(noticesOf(owner.userId)).toHaveLength(1)
     // An owner approves it.
-    value(await svc.approve(owner, { skill: SKILL, declarationHash: await hashOf(owner), mode: 'per_run' }))
+    value(await svc.approve(owner, { skill: SKILL, declarationHash: await hashOf(owner), files: store[CO]?.[SKILL]?.files ?? '', mode: 'per_run' }))
     expect(value(await svc.approvedFrames(owner, SKILL)).frames.writes[0].max).toBe(5)
+  })
+
+  it('an owner / admin who changed only the text does not approve someone else\'s declaration (Codex review)', async () => {
+    await land(owner, yaml(1))
+    await land(editor, yaml(5))
+    expect(code(await svc.approvedFrames(owner, SKILL))).toBe('BROWSER_SKILL_NOT_APPROVED')
+    await land(admin, yaml(5), 'v2')
+    expect(code(await svc.approvedFrames(owner, SKILL))).toBe('BROWSER_SKILL_NOT_APPROVED')
+    expect(value(await svc.list(owner)).items[0].status).toBe('waiting')
+  })
+
+  it('a landing that is no longer what the server holds changes nothing (read in another order)', async () => {
+    // An owner's change, read only after a skill editor's later change landed: not approved, and the editor's waits.
+    await land(owner, yaml(1), 'v1', { thenCurrent: () => put(CO, SKILL, yaml(8), 'v1') })
+    expect(code(await svc.approvedFrames(owner, SKILL))).toBe('BROWSER_SKILL_NOT_APPROVED')
+    // An owner's approval made meanwhile is not superseded by an older landing.
+    put(CO, SKILL, yaml(2))
+    value(await svc.approve(owner, { skill: SKILL, declarationHash: await hashOf(owner), files: store[CO]?.[SKILL]?.files ?? '', mode: 'pre_approved' }))
+    await land(admin, yaml(3), 'v1', { thenCurrent: () => put(CO, SKILL, yaml(2)) })
+    expect(value(await svc.approvedFrames(owner, SKILL))).toMatchObject({ mode: 'pre_approved' })
+    expect(value(await svc.approvedFrames(owner, SKILL)).frames.writes[0].max).toBe(2)
   })
 
   it('a declaration that cannot be read is not approved by an owner\'s change either', async () => {
@@ -240,7 +272,7 @@ describe('who changed the declaration', () => {
 describe('only the steps\' text changed', () => {
   it('frames still given; the card needed once even when pre-approved; owners / admins told once', async () => {
     put(CO, SKILL, yaml())
-    value(await svc.approve(owner, { skill: SKILL, declarationHash: await hashOf(owner), mode: 'pre_approved' }))
+    value(await svc.approve(owner, { skill: SKILL, declarationHash: await hashOf(owner), files: store[CO]?.[SKILL]?.files ?? '', mode: 'pre_approved' }))
     await land(editor, yaml(), 'v2')
     const after = value(await svc.approvedFrames(owner, SKILL))
     expect(after).toMatchObject({ mode: 'pre_approved', textChanged: true, needsRunCard: true })
@@ -261,13 +293,13 @@ describe('only the steps\' text changed', () => {
     expect(value(await svc.approvedFrames(owner, SKILL))).toMatchObject({ textChanged: true, needsRunCard: true })
     expect(noticesOf(owner.userId)).toHaveLength(2)
     // Approving again counts the text as seen.
-    value(await svc.approve(owner, { skill: SKILL, declarationHash: await hashOf(owner), mode: 'pre_approved' }))
+    value(await svc.approve(owner, { skill: SKILL, declarationHash: await hashOf(owner), files: store[CO]?.[SKILL]?.files ?? '', mode: 'pre_approved' }))
     expect(value(await svc.approvedFrames(owner, SKILL))).toMatchObject({ textChanged: false, needsRunCard: false })
   })
 
   it('an admin\'s own text change tells the other owners / admins, not them', async () => {
     put(CO, SKILL, yaml())
-    value(await svc.approve(owner, { skill: SKILL, declarationHash: await hashOf(owner), mode: 'per_run' }))
+    value(await svc.approve(owner, { skill: SKILL, declarationHash: await hashOf(owner), files: store[CO]?.[SKILL]?.files ?? '', mode: 'per_run' }))
     await land(admin, yaml(), 'v2')
     expect(noticesOf(owner.userId)).toHaveLength(1)
     expect(noticesOf(admin.userId)).toEqual([])
@@ -276,7 +308,7 @@ describe('only the steps\' text changed', () => {
 
   it('runCardShown does nothing for another declaration', async () => {
     put(CO, SKILL, yaml())
-    value(await svc.approve(owner, { skill: SKILL, declarationHash: await hashOf(owner), mode: 'pre_approved' }))
+    value(await svc.approve(owner, { skill: SKILL, declarationHash: await hashOf(owner), files: store[CO]?.[SKILL]?.files ?? '', mode: 'pre_approved' }))
     put(CO, SKILL, yaml(), 'v2')
     expect(svc.runCardShown(owner, SKILL, `sha256:${'1'.repeat(64)}`, store[CO][SKILL].files)).toBe(false)
     expect(value(await svc.approvedFrames(owner, SKILL)).needsRunCard).toBe(true)
@@ -286,7 +318,7 @@ describe('only the steps\' text changed', () => {
 describe('the server\'s own copy', () => {
   it('frames come only from what the source holds now', async () => {
     put(CO, SKILL, yaml(1))
-    value(await svc.approve(owner, { skill: SKILL, declarationHash: await hashOf(owner), mode: 'per_run' }))
+    value(await svc.approve(owner, { skill: SKILL, declarationHash: await hashOf(owner), files: store[CO]?.[SKILL]?.files ?? '', mode: 'per_run' }))
     // The API takes no content: whatever an app holds, the source decides. A changed copy is another version.
     store[CO][SKILL] = { ...store[CO][SKILL], declaration: yaml(9) }
     expect(code(await svc.approvedFrames(owner, SKILL))).toBe('BROWSER_SKILL_NOT_APPROVED')
@@ -299,6 +331,7 @@ describe('the server\'s own copy', () => {
     conn.prepare(`INSERT INTO browser_skill_approvals (company_id, skill_path, declaration_hash, mode, how, approved_by, approved_at) VALUES (?, '.claude/skills/x', 'sha256:a', 'per_run', 'approved', 'u', 't')`).run(CO)
     expect(() => conn.prepare(`UPDATE browser_skill_approvals SET declaration_hash = 'sha256:b'`).run()).toThrow(/fixed/)
     expect(() => conn.prepare(`UPDATE browser_skill_approvals SET mode = 'pre_approved'`).run()).toThrow(/fixed/)
+    expect(() => conn.prepare(`UPDATE browser_skill_approvals SET seq = seq + 100`).run()).toThrow(/fixed/)
     conn.prepare(`UPDATE browser_skill_approvals SET revoked_at = 't2', revoked_by = 'u'`).run()
     expect(() => conn.prepare(`UPDATE browser_skill_approvals SET revoked_at = NULL, revoked_by = NULL`).run()).toThrow(/fixed/)
   })

@@ -985,7 +985,7 @@ export type { BrowserSkillApprovalMode, BrowserSkillStatus, BrowserSkillView, Br
 /** 「Skill の承認」: the company Skills with a browser declaration; approve exactly the version seen, or take it back. */
 export const browserSkillsApi = {
   list: (companyId: string) => getData(`/api/companies/${enc(companyId)}/browser-skill-approvals`, browserSkillsSchema),
-  approve: (companyId: string, body: { skill: string; declarationHash: string; mode: 'per_run' | 'pre_approved' }) =>
+  approve: (companyId: string, body: { skill: string; declarationHash: string; files: string; mode: 'per_run' | 'pre_approved' }) =>
     getData(`/api/companies/${enc(companyId)}/browser-skill-approvals`, browserSkillSchema, { method: 'POST', body }),
   revoke: (companyId: string, skill: string) =>
     getData(`/api/companies/${enc(companyId)}/browser-skill-approvals/revoke`, browserSkillRevokedSchema, { method: 'POST', body: { skill } }),

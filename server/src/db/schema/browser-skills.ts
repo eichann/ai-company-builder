@@ -29,7 +29,7 @@ export const browserSkillSchema = `
     );
     CREATE INDEX IF NOT EXISTS idx_browser_skill_approvals_skill ON browser_skill_approvals(company_id, skill_path, seq);
     CREATE TRIGGER IF NOT EXISTS browser_skill_approvals_fixed BEFORE UPDATE ON browser_skill_approvals
-    WHEN NEW.company_id IS NOT OLD.company_id OR NEW.skill_path IS NOT OLD.skill_path OR NEW.declaration_hash IS NOT OLD.declaration_hash
+    WHEN NEW.seq IS NOT OLD.seq OR NEW.company_id IS NOT OLD.company_id OR NEW.skill_path IS NOT OLD.skill_path OR NEW.declaration_hash IS NOT OLD.declaration_hash
       OR NEW.mode IS NOT OLD.mode OR NEW.how IS NOT OLD.how OR NEW.approved_by IS NOT OLD.approved_by OR NEW.approved_at IS NOT OLD.approved_at
       OR (OLD.revoked_at IS NOT NULL AND (NEW.revoked_at IS NOT OLD.revoked_at OR NEW.revoked_by IS NOT OLD.revoked_by))
     BEGIN
