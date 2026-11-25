@@ -124,6 +124,8 @@ const opKey = (key: unknown): key is string => typeof key === 'string' && OPERAT
 const BAD_INPUT = { success: false as const, offline: false, code: 'BAD_REQUEST', error: '入力が正しくありません。' }
 /** At most this many records get their まとまり looked up per read (the rest show without it). */
 const BUNDLE_LOOKUPS = 150
+/** A 「議事録を確認する」 whose meeting the member did not read at its detail read is read again at most this often. */
+const MEETING_RETRY_MS = 10 * 60_000
 
 /** The company's own holidays from `GET /task-settings` (dates only; unreadable → none: weekends and public holidays still count). */
 function holidaysOf(answer: Answer): string[] {
@@ -144,7 +146,7 @@ export function createTasksApi(deps: TasksDeps) {
   const log = deps.log ?? console
   const now = deps.now ?? Date.now
   /** `<company>:<record>@<version>` → its まとまり and (a 「議事録を確認する」) its meeting's id: a record's links change only with its version. */
-  const linkCache = new Map<string, { bundle: { id: string; title: string } | null; meetingId: string | null }>()
+  const linkCache = new Map<string, { bundle: { id: string; title: string } | null; meetingId: string | null; readAt: number }>()
   /** The signed-in member's id per session (cookies), from /api/me. */
   let me: { cookies: string; id: string } | null = null
   /** Google's chooser open for 「Google Drive のファイルをつなぐ」, per company: what the card's ［やめる］ stops. */
@@ -222,17 +224,23 @@ export function createTasksApi(deps: TasksDeps) {
         const r = todo[next++]
         const key = `${companyId}:${r.id}@${r.version}`
         const review = r.fields.task_kind === 'minutes_review'
-        if (!linkCache.has(key)) {
+        const kept = linkCache.get(key)
+        // A meeting the member did not read then (the detail gave no id) may be readable now: looked for again, at most
+        // every MEETING_RETRY_MS — never on every list.
+        const retry = review && kept?.meetingId === null && now() - kept.readAt >= MEETING_RETRY_MS
+        if (!kept || retry) {
           const a = await call(companyId, 'GET', `/records/item/${encodeURIComponent(r.id)}`)
-          if (a?.status !== 200) continue // not cached: asked again next time
-          const links = (a.json?.data as RecordDetail).links
-          const link = links.find(l => l.name === 'bundle' && l.direction === 'out' && l.record)
-          const meeting = review
-            ? links.find(l => l.name === 'meeting' && l.direction === 'out' && l.record?.type === 'meeting')?.record : undefined
-          linkCache.set(key, {
-            bundle: link?.record ? { id: link.record.id, title: link.record.title || '（名前なし）' } : null,
-            meetingId: meeting && RECORD_ID_RE.test(meeting.id) ? meeting.id : null,
-          })
+          if (a?.status === 200) {
+            const links = (a.json?.data as RecordDetail).links
+            const link = links.find(l => l.name === 'bundle' && l.direction === 'out' && l.record)
+            const meeting = review
+              ? links.find(l => l.name === 'meeting' && l.direction === 'out' && l.record?.type === 'meeting')?.record : undefined
+            linkCache.set(key, {
+              bundle: link?.record ? { id: link.record.id, title: link.record.title || '（名前なし）' } : null,
+              meetingId: meeting && RECORD_ID_RE.test(meeting.id) ? meeting.id : null,
+              readAt: now(),
+            })
+          } else if (!kept) continue // not cached: asked again next time
         }
         const c = linkCache.get(key)
         if (c?.bundle) out[r.id] = c.bundle

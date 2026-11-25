@@ -192,9 +192,11 @@ meetings), `notifications.md` (「あなたの番」 in the inbox and the title 
   every list asks the server **once** for all those meetings (`meetingTimesOf`: `POST /records/query { type: meeting, ids }`,
   records.md "Reading"), which answers only the meetings the member reads now (access to a meeting can change without the
   task's version: its list was copied when it was made), so a meeting left out shows no time; an older server refuses `ids`
-  → no times. **Never one detail read per row on every list** (#831 did: 222 `records/item` reads in 20 minutes on a busy
+  → no times. A task whose detail gave no meeting (the member did not read it then) is read again at most every 10 minutes
+  (`MEETING_RETRY_MS`), so a meeting given later shows its time. **Never one detail read per row on every list** (#831 did: 222 `records/item` reads in 20 minutes on a busy
   company, 2026-11-25). Tests: `tasks-list.test.ts` 「a 「議事録を確認する」 row carries its meeting's time only while…」, 「the
-  meetings' times cost one query per list…」, `model.test.ts`.
+  meetings' times cost one query per list…」, 「a meeting the member could not read … is looked for again after a while…」,
+  `model.test.ts`.
 - Rows (言葉の決まり 3b: what to do next, never a state word): ☑ or the kind's icon (`ThingIcon`), title,
   「あなただけ」, the small chip of the 案件 / プロジェクト it belongs to (opens it), due (期限切れ in red),
   whose turn / what it waits for, 「〇〇さんの代わり」 for a delegate, up to 3 tags; a finished one is

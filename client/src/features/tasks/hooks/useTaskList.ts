@@ -41,13 +41,18 @@ export function useTaskList(companyId: string | undefined) {
   const [kept, setKept] = useState(() => ({ companyId, facts: readTabFacts(companyId) }))
   if (kept.companyId !== companyId) setKept({ companyId, facts: readTabFacts(companyId) })
   const tickets = useRef(0)
+  /** The newest read whose tab facts were kept: an older answer landing later never overwrites them. */
+  const keptTicket = useRef(0)
   const read = useCallback((fresh: boolean) => {
     if (!companyId) return
     const ticket = ++tickets.current
     void getTaskList(companyId, undefined, fresh ? { fresh: true } : undefined).then((r: TaskListResult | undefined) => {
       // Never an answer older than the one shown (listAnswers.ts): a press's result is not put back.
       if (r) setState(s => nextListState(s, companyId, ticket, r))
-      if (r?.success) keepTabFacts(companyId, taskTabFactsOf(r.data))
+      if (r?.success && ticket > keptTicket.current) {
+        keptTicket.current = ticket
+        keepTabFacts(companyId, taskTabFactsOf(r.data))
+      }
     }, () => {})
   }, [companyId])
   const look = useCallback(() => read(false), [read])

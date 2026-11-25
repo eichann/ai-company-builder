@@ -525,9 +525,10 @@ function meetingTimeWorld() {
     readable: new Set(['meeting-aaaaaa01', 'meeting-bbbbbb02']),
     detailReads: 0,
     meetingQueries: [] as unknown[],
+    now: Date.parse('2026-11-25T06:00:00.000Z'),
   }
   const api = createTasksApi({
-    baseUrl: () => 'https://acb.test', cookies: () => ['s=1'], log: { warn: () => {} }, now: () => Date.parse('2026-11-25T06:00:00.000Z'),
+    baseUrl: () => 'https://acb.test', cookies: () => ['s=1'], log: { warn: () => {} }, now: () => world.now,
     fetch: (async (url: string, init: RequestInit) => {
       const path = url.replace('https://acb.test/api/companies/co1', '')
       const json = (body: unknown) => new Response(JSON.stringify(body), { status: 200 })
@@ -548,7 +549,11 @@ function meetingTimeWorld() {
       return new Response('{}', { status: 404 })
     }) as unknown as typeof fetch,
   })
-  return { api, world }
+  /** The task's detail as the server answers it now: the meeting's record only while the member reads it. */
+  const withMeeting = (id: string, meetingId: string | null) => {
+    details[id] = detail(review(id), [{ name: 'meeting', direction: 'out', ...(meetingId ? { record: meeting(meetingId) } : {}) }])
+  }
+  return { api, world, withMeeting }
 }
 
 test('a 「議事録を確認する」 row carries its meeting\'s time only while the server answers that meeting to the member', async () => {
@@ -574,4 +579,24 @@ test('the meetings\' times cost one query per list: no task detail is read again
   for (let i = 0; i < 3; i++) assert.ok((await api.list('co1')).success)
   assert.equal(world.detailReads, first)
   assert.equal(world.meetingQueries.length, 4)
+})
+
+test('a meeting the member could not read when its 「議事録を確認する」 was first read is looked for again after a while, not on every list', async () => {
+  const { api, world, withMeeting } = meetingTimeWorld()
+  world.readable.delete('meeting-bbbbbb02')
+  withMeeting('task-rv0002', null)
+  assert.ok((await api.list('co1')).success)
+  const reads = world.detailReads
+  // The member is given the meeting; the task's version stays.
+  world.readable.add('meeting-bbbbbb02')
+  withMeeting('task-rv0002', 'meeting-bbbbbb02')
+  const soon = await api.list('co1')
+  assert.ok(soon.success)
+  assert.equal(world.detailReads, reads)
+  assert.equal(soon.data.items.find(i => i.id === 'task-rv0002')?.meetingAt, undefined)
+  world.now += 10 * 60_000
+  const later = await api.list('co1')
+  assert.ok(later.success)
+  assert.equal(world.detailReads, reads + 1)
+  assert.equal(later.data.items.find(i => i.id === 'task-rv0002')?.meetingAt, '2026-11-24T01:00:00.000Z')
 })
