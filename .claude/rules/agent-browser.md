@@ -3094,7 +3094,9 @@ connection, the plan card and the after-read card).
   Skill service (`approvedFrames`, `stillApproved`, `runCardShown`), this PC's gate, the site grants, the policy and the stops.
 - **Tables.** `browser_frame_runs` (who, the registered domain, the PC, `source` `skill` | `adhoc`, the Skill's name,
   declaration hash and folder version, the plan's hash, `state` `waiting` → `open` → `locked` → `ended`, `approval` `card` |
-  `pre_approved`, times; **at most one run not ended per company × domain** — a partial unique index, D10; a trigger keeps
+  `pre_approved`, the Skill's approval row `approval_seq`, times; **at most one run not ended per company × domain** — a
+  partial unique index, D10 — and **no new run while an ended run's write to that domain is still `permitted`** (its 5 s
+  permit may still be used: two writes never travel to one site at once; the service); a trigger keeps
   the fixed columns and moves the state only forward), `browser_frames` (one row per write target and `used`; **CHECK
   `used <= max`**, and a trigger lets `used` only grow by one), `browser_frame_writes` (a row appended per permit with its
   frame, state and both clocks' readings; **at most one `permitted` per run** — a partial unique index; a trigger allows
@@ -3118,8 +3120,10 @@ connection, the plan card and the after-read card).
   units used up → `BROWSER_FRAME_USED_UP` (nothing changes in those cases); then **the gate** — this PC (an enabled
   registration, and the run's own: `BROWSER_DEVICE_ELSEWHERE`), the company's mode and the site's level allowing writes
   (`BROWSER_NOT_ALLOWED`), the AI stop (`BROWSER_AI_STOPPED`), the person's own level 変えてよい (`BROWSER_TYPE_NOT_GRANTED`),
-  and for a Skill run the approval for the run's very declaration (`approvedFrames`' refusal, or `BROWSER_SKILL_CHANGED`
-  when it moved or was revoked between the git read and the transaction) — **a refusal of the gate ends the run** (its
+  and for a Skill run **exactly what it started on** — the declaration, the folder version (the steps' text: a change
+  needs the card again) and the approval row (`approval_seq`: revoked, superseded or given another mode → another row),
+  read again now and that row still the latest inside the transaction (`approvedFrames`' refusal, or
+  `BROWSER_SKILL_CHANGED`) — **a refusal of the gate ends the run** (its
   frames vanish; lifting the cause later revives nothing). Then one unit taken (compare-and-set `used < max`) and the write
   appended `permitted`; answer `{ write, frame, permittedAt, validMs: 5000 }`.
 - **Report** (`POST …/:runId/report { write, result: done | not_sent | unknown, reason? }`, never gated): judged after the
@@ -3151,9 +3155,12 @@ the start and at a permit —, the declaration changed, pre-approved vs per-run,
 only with the server's files (an extra `files` in the request refused), a text changed again while the card was up ends
 the run and marks nothing, another member's and company's run not found, one run per domain, frames gone at the end,
 the run's times, leaving, the reports, the triggers), `model/browser-plan/check` (FramesLife and its broken variants),
-permission matrix rows + `CROSS`, `company-scoped-sql.test.ts`, `jobs-schema.test.ts`. Each guard mutation-checked (29
-mutations); kept on purpose as second layers: the service's own used-up check (the compare-and-set `used < max` refuses
-the same, and the CHECK behind both).
+permission matrix rows + `CROSS`, `company-scoped-sql.test.ts`, `jobs-schema.test.ts`. Also: the approval's mode or the
+Skill's text changed mid-run (the run ends), the card's approval re-checking the gate and the approval, an ended run's
+write keeping the domain busy, leaving after ending a run with a write in flight, every trigger. Each guard
+mutation-checked (about 40 mutations); kept on purpose as second layers: the service's own used-up check (the
+compare-and-set `used < max` refuses the same, and the CHECK behind both) and the declaration / domain comparison of a
+Skill run (another declaration is another approval row, which `stillApproved` refuses).
 
 ## Not yet (later PRs)
 

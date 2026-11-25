@@ -241,7 +241,13 @@ site, the Skill's approval revoked or changed, another PC, the run's hour).
 - **A permit already given under a cause only the server sees** (`closed`) stays good for its 5 s: the app
   cannot know; the next permit is refused and the run ends. The stretch between the app's last check and
   the request leaving is PlanLife's accepted limit (`LimitFrozenAfterCheck`), the same here.
-- The run lock per company × domain (D10), the person confirming an unknown write (⑤b's card), the
+- **Where the code is stricter than the model** (each on the safe side, none breaking a rule): the code checks "a write
+  in flight" and "used up" before the gate, so a closed gate ends the run only when those pass (the model ends it on
+  any refusal under a closed gate); a run `waiting` whose gate closed answers "not approved" and ends only at its
+  approval or its time (the model ends it at once); `approve` under a closed gate ends the run (the model's
+  `PersonApproves` is just not enabled).
+- The run lock per company × domain (D10) and the domain kept busy by an ended run's write in flight (more than one run,
+  the server's tests), the person confirming an unknown write (⑤b's card), the
   run's time limits as real durations (folded into `closed` and `RunEnds`), a server clock jump (PlanLife's;
   the server counts each write's window on both clocks all the same), the safe patterns (StepsLife).
 

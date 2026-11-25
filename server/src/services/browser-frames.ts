@@ -196,14 +196,17 @@ export function createBrowserFrameService(deps: BrowserFrameDeps) {
   }
 
   /**
-   * A Skill run's approval as read before the transaction: still the run's very declaration (and domain), and — asked
-   * inside the transaction — the approval row that read rested on still the skill's latest, in force (not revoked,
-   * superseded or given another mode in between).
+   * A Skill run's Skill as read before the transaction: still exactly what the run started on — the declaration (and
+   * domain), the folder version (the steps' text: a change needs the card again, so the run ends) and the approval row —,
+   * and, asked inside the transaction, that row still the skill's latest, in force (not revoked, superseded or given
+   * another mode since: independent review of ⑤a).
    */
   function sameSkill(member: Member, run: FrameRunRow, now: Outcome<BrowserSkillApproved>): Refusal | null {
     if (!now.ok) return now
-    if (now.value.declarationHash !== run.declarationHash || now.value.frames.domain !== run.host
-      || !deps.skills.stillApproved(member, run.skill as string, run.declarationHash as string, now.value.approval)) {
+    // The declaration and domain compared here are a second layer: another declaration has another approval row, which
+    // `stillApproved` (the run's own row still the latest) refuses by itself.
+    if (now.value.declarationHash !== run.declarationHash || now.value.frames.domain !== run.host || now.value.files !== run.files
+      || !deps.skills.stillApproved(member, run.skill as string, run.declarationHash as string, run.approvalSeq as number)) {
       return refuse('conflict', W.skillChanged, { code: 'BROWSER_SKILL_CHANGED' })
     }
     return null
@@ -263,10 +266,14 @@ export function createBrowserFrameService(deps: BrowserFrameDeps) {
         const holder = r.liveRunOn(f.host)
         if (holder) settle(member.companyId, holder, now)
         if (r.liveRunOn(f.host)) return refuse('conflict', W.busy, { code: 'BROWSER_RUN_BUSY' })
+        // An ended run's write may still be on its way to this domain (its 5 s permit): the domain stays busy until that
+        // write is recorded or times out, so two writes never travel to one site at once (independent review of ⑤a).
+        for (const ended of r.runsInFlightOn(f.host)) settle(member.companyId, ended, now)
+        if (r.runsInFlightOn(f.host).length > 0) return refuse('conflict', W.busy, { code: 'BROWSER_RUN_BUSY' })
         const run: FrameRunRow = {
           id: `bf_${ids.newToken().slice(0, 32)}`, userId: member.userId, host: f.host, deviceId: passed.value.deviceId,
           conversationId: (body.conversationId as string | undefined) ?? null, source: f.source, skill: f.skill,
-          declarationHash: f.declarationHash, files: f.files, planHash: planHashOf(member, f),
+          declarationHash: f.declarationHash, files: f.files, approvalSeq: f.approval, planHash: planHashOf(member, f),
           state: f.preApproved ? 'open' : 'waiting', approval: f.preApproved ? 'pre_approved' : null, approvedAt: f.preApproved ? iso(now) : null,
           endReason: null, createdAt: iso(now), expiresAt: iso(now + BROWSER_FRAME_TIMES.run), endedAt: null,
         }
@@ -303,7 +310,6 @@ export function createBrowserFrameService(deps: BrowserFrameDeps) {
         if (!passed.ok) { endRun(member.companyId, run, String(passed.body.code ?? 'refused'), now); return passed }
         if (skillNow) {
           const moved = sameSkill(member, run, skillNow)
-            ?? (skillNow.ok && skillNow.value.files !== run.files ? refuse('conflict', W.skillChanged, { code: 'BROWSER_SKILL_CHANGED' }) : null)
           if (moved) { endRun(member.companyId, run, String(moved.body.code ?? 'refused'), now); return moved }
         }
         if (!repo(member.companyId).setRunState(run.id, 'waiting', 'open', { approval: 'card', approvedAt: iso(now) })) {

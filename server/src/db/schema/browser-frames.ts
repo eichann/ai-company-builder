@@ -5,7 +5,8 @@
  * rules are services/browser-frames.ts (one owner of every state move).
  *
  * - `browser_frame_runs`: who, which registered domain, from which PC, where the frames came from (a Skill's approved
- *   declaration: its hash and folder version; or the ad-hoc plan the person approves), the plan's hash the card shows,
+ *   declaration: its hash, folder version and the approval row it rested on; or the ad-hoc plan the person approves), the
+ *   plan's hash the card shows,
  *   the state (`waiting` → `open` → `locked` → `ended`; `ended` is final) and its times. **At most one run not ended per
  *   company × domain** (partial unique index: design memo D10). The trigger keeps the fixed columns and lets the state move
  *   only forward.
@@ -30,6 +31,7 @@ export const browserFrameSchema = `
       skill TEXT,
       declaration_hash TEXT,
       files TEXT,
+      approval_seq INTEGER,
       plan_hash TEXT NOT NULL CHECK (plan_hash GLOB 'sha256:*'),
       state TEXT NOT NULL CHECK (state IN ('waiting', 'open', 'locked', 'ended')),
       approval TEXT CHECK (approval IN ('card', 'pre_approved')),
@@ -39,7 +41,7 @@ export const browserFrameSchema = `
       expires_at TEXT NOT NULL,
       ended_at TEXT,
       PRIMARY KEY (company_id, id),
-      CHECK ((source = 'skill') = (skill IS NOT NULL AND declaration_hash IS NOT NULL AND files IS NOT NULL)),
+      CHECK ((source = 'skill') = (skill IS NOT NULL AND declaration_hash IS NOT NULL AND files IS NOT NULL AND approval_seq IS NOT NULL)),
       CHECK ((state = 'ended') = (ended_at IS NOT NULL)),
       CHECK (state = 'waiting' OR state = 'ended' OR approval IS NOT NULL)
     );
@@ -49,6 +51,7 @@ export const browserFrameSchema = `
       WHEN NEW.company_id IS NOT OLD.company_id OR NEW.id IS NOT OLD.id OR NEW.user_id IS NOT OLD.user_id OR NEW.host IS NOT OLD.host
         OR NEW.device_id IS NOT OLD.device_id OR NEW.conversation_id IS NOT OLD.conversation_id OR NEW.source IS NOT OLD.source
         OR NEW.skill IS NOT OLD.skill OR NEW.declaration_hash IS NOT OLD.declaration_hash OR NEW.files IS NOT OLD.files
+        OR NEW.approval_seq IS NOT OLD.approval_seq
         OR NEW.plan_hash IS NOT OLD.plan_hash OR NEW.created_at IS NOT OLD.created_at OR NEW.expires_at IS NOT OLD.expires_at
         OR (OLD.approval IS NOT NULL AND (NEW.approval IS NOT OLD.approval OR NEW.approved_at IS NOT OLD.approved_at))
         OR (OLD.state = 'ended' AND (NEW.state IS NOT OLD.state OR NEW.end_reason IS NOT OLD.end_reason OR NEW.ended_at IS NOT OLD.ended_at))

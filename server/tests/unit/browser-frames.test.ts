@@ -293,6 +293,43 @@ describe('frames: a run of free operation', () => {
     expect(code(await permit(run.runId, 1))).toBe('BROWSER_SKILL_CHANGED')
   })
 
+  it('the approval\'s mode or the Skill\'s text changed mid-run: the run ends', async () => {
+    put(yaml)
+    await approveSkill('pre_approved')
+    const run = value(await frames.start(alice, { skill: SKILL }, PC))
+    value(await permit(run.runId, 1)); value(report(run.runId, 1, 'done'))
+    await approveSkill('per_run') // the same declaration, now per run: another approval row
+    expect(code(await permit(run.runId, 1))).toBe('BROWSER_SKILL_CHANGED')
+    expect(value(frames.get(alice, run.runId)).state).toBe('ended')
+    await approveSkill('pre_approved')
+    const second = value(await frames.start(alice, { skill: SKILL }, PC))
+    put(yaml, 'v2') // only the steps' text
+    expect(code(await permit(second.runId, 1))).toBe('BROWSER_SKILL_CHANGED')
+  })
+
+  it('approving the card checks the gate and the approval again (between the git read and the transaction too)', async () => {
+    const run = value(await frames.start(alice, { plan: adhoc }, PC))
+    stopped = true
+    expect(code(await frames.approve(alice, run.runId, { planHash: run.planHash }, PC))).toBe('BROWSER_AI_STOPPED')
+    expect(value(frames.get(alice, run.runId)).state).toBe('ended')
+    stopped = false
+    put(yaml)
+    await approveSkill('per_run')
+    const skillRun = value(await frames.start(alice, { skill: SKILL }, PC))
+    betweenReadAndWrite = () => { betweenReadAndWrite = null; value(skills.revoke(owner, { skill: SKILL })) }
+    expect(code(await frames.approve(alice, skillRun.runId, { planHash: skillRun.planHash }, PC))).toBe('BROWSER_SKILL_CHANGED')
+    expect(value(frames.get(alice, skillRun.runId)).state).toBe('ended')
+  })
+
+  it('a write of an ended run still on its way keeps the domain busy until it is recorded', async () => {
+    const run = await openAdhoc()
+    value(await permit(run.runId, 1))
+    value(frames.end(alice, run.runId))
+    expect(code(await frames.start(bob, { plan: adhoc }, PC))).toBe('BROWSER_RUN_BUSY')
+    value(report(run.runId, 1, 'done'))
+    expect(code(await frames.start(bob, { plan: adhoc }, PC))).toBe('ok')
+  })
+
   it('the Skill\'s declaration changed mid-run: the run\'s frames are no longer the approved ones', async () => {
     put(yaml)
     await approveSkill('pre_approved')
@@ -415,5 +452,12 @@ describe('frames: a run of free operation', () => {
     expect(() => conn.prepare(`UPDATE browser_frame_writes SET state = 'permitted' WHERE company_id = ? AND run_id = ?`).run(CO, run.runId)).toThrow()
     value(frames.end(alice, run.runId))
     expect(() => conn.prepare(`UPDATE browser_frame_runs SET state = 'open', ended_at = NULL WHERE company_id = ? AND id = ?`).run(CO, run.runId)).toThrow()
+    const locked = await openAdhoc()
+    value(await permit(locked.runId, 1)); value(report(locked.runId, 1, 'unknown'))
+    expect(() => conn.prepare(`UPDATE browser_frame_runs SET state = 'open' WHERE company_id = ? AND id = ?`).run(CO, locked.runId)).toThrow()
+    // A frame's units: one at a time, never back, never past max — whatever the code does.
+    expect(() => conn.prepare('UPDATE browser_frames SET used = used + 2 WHERE company_id = ? AND run_id = ? AND idx = 2').run(CO, locked.runId)).toThrow()
+    expect(() => conn.prepare('UPDATE browser_frames SET used = 0 WHERE company_id = ? AND run_id = ? AND idx = 1').run(CO, locked.runId)).toThrow()
+    expect(() => conn.prepare('UPDATE browser_frames SET max = 9 WHERE company_id = ? AND run_id = ? AND idx = 1').run(CO, locked.runId)).toThrow()
   })
 })

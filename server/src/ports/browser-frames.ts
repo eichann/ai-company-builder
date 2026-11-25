@@ -16,6 +16,8 @@ export interface FrameRunRow {
   skill: string | null
   declarationHash: string | null
   files: string | null
+  /** A Skill run: the approval row (`browser_skill_approvals.seq`) it started on; any other row since ends it. */
+  approvalSeq: number | null
   planHash: string
   state: FrameRunState
   approval: 'card' | 'pre_approved' | null
@@ -53,6 +55,8 @@ export interface BrowserFrameRepository {
   liveRunOn(host: string): FrameRunRow | null
   /** The member's runs not ended, or ended with a write still `permitted` (leaving settles them). */
   unsettledRunsOf(userId: string): FrameRunRow[]
+  /** Runs on this domain (ended ones included) with a write still `permitted`. */
+  runsInFlightOn(host: string): FrameRunRow[]
   insertRun(run: FrameRunRow, frames: Array<Omit<FrameRow, 'used'>>): void
   frames(runId: string): FrameRow[]
   writes(runId: string): FrameWriteRow[]
