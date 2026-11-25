@@ -4,7 +4,7 @@
  *
  * Mounted at /api/companies/:companyId:
  *   GET  /browser-skill-approvals          the company Skills with `browser.yaml`, as the server reads them now
- *   POST /browser-skill-approvals          { skill, declarationHash, mode }: approve exactly the declaration seen
+ *   POST /browser-skill-approvals          { skill, declarationHash, files, mode }: approve exactly the version seen
  *   POST /browser-skill-approvals/revoke   { skill }: take the approval back
  */
 import { Hono } from 'hono'

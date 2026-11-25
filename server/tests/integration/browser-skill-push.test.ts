@@ -273,9 +273,14 @@ describe('the server\'s own copy at the pushed commit', () => {
     const source = browserSkillSource({ companyData: (await import('../../src/adapters/sqlite/company-data')).sqliteCompanyData(db), hasCompanyFolder: () => true })
     const bare = join(process.env.REPOS_DIR!, `${CO}.git`)
     const first = git(['-C', bare, 'rev-parse', 'refs/heads/main']).trim()
+    const rows = rowCount(CO)
     write(`${PATH}/browser.yaml`, yaml(4))
     commit()
     expect((await pushAs('tok-owner')).ok).toBe(true)
+    // On top of the skill editor's pending declaration (above): the owner's change approves nothing (review M1).
+    await new Promise(r => setTimeout(r, 1500))
+    expect(rowCount(CO)).toBe(rows)
+    expect(code(await services.browserSkills.approvedFrames(owner, SKILL))).toBe('BROWSER_SKILL_NOT_APPROVED')
     const second = git(['-C', bare, 'rev-parse', 'refs/heads/main']).trim()
     write(`${PATH}/browser.yaml`, yaml(6))
     commit()
@@ -310,6 +315,35 @@ describe('a company without the shared folder: whose publish it was', () => {
     publish(shelfEditor, 3)
     await until(() => noticeKeys(SHELF_CO, 'u-owner').some(k => k.startsWith('browser_skill:waiting:')), 'the owner told')
     expect(rowCount(SHELF_CO)).toBe(1)
+    expect(code(await services.browserSkills.approvedFrames(shelfOwner, SKILL))).toBe('BROWSER_SKILL_NOT_APPROVED')
+  })
+
+  it('an owner putting an earlier version back, or publishing a member\'s request, approves nothing (review M2)', async () => {
+    // The after-publish step runs off the request (setImmediate + reads): give it time, then nothing may have been approved.
+    const settled = () => new Promise(r => setTimeout(r, 1000))
+    // Approve the editor's 3 on the page, then the owner restores the first version (max 1).
+    const list = await services.browserSkills.list(shelfOwner)
+    const item = list.ok ? list.value.items.find(i => i.name === SKILL) : undefined
+    expect((await services.browserSkills.approve(shelfOwner, { skill: SKILL, declarationHash: item!.declarationHash, files: item!.files, mode: 'per_run' })).ok).toBe(true)
+    const versions = services.skillShelf.versions(shelfOwner, (services.skillShelf.list(shelfOwner) as { ok: true; value: { items: Array<{ id: string; name: string }> } }).value.items.find(i => i.name === SKILL)!.id)
+    if (!versions.ok) throw new Error(JSON.stringify(versions.body))
+    const itemId = (services.skillShelf.list(shelfOwner) as { ok: true; value: { items: Array<{ id: string; name: string }> } }).value.items.find(i => i.name === SKILL)!.id
+    const oldest = versions.value.versions[versions.value.versions.length - 1].version
+    const rows = rowCount(SHELF_CO)
+    const restored = services.skillShelf.restore(shelfOwner, itemId, { version: oldest, expectedVersion: version })
+    if (!restored.ok) throw new Error(JSON.stringify(restored.body))
+    version = restored.value.item.version
+    await settled()
+    expect(rowCount(SHELF_CO)).toBe(rows)
+    expect(code(await services.browserSkills.approvedFrames(shelfOwner, SKILL))).toBe('BROWSER_SKILL_NOT_APPROVED')
+    // A plain member asks; the owner publishes the request.
+    const plain = { companyId: SHELF_CO, userId: 'u-plain', role: 'member' }
+    const asked = services.skillShelf.createRequest(plain, { departmentId: null, name: SKILL, files: files(9) })
+    if (!asked.ok) throw new Error(JSON.stringify(asked.body))
+    const done = services.skillShelf.publishRequest(shelfOwner, asked.value.id, { requestVersion: asked.value.version, expectedVersion: version })
+    if (!done.ok) throw new Error(JSON.stringify(done.body))
+    await settled()
+    expect(rowCount(SHELF_CO)).toBe(rows)
     expect(code(await services.browserSkills.approvedFrames(shelfOwner, SKILL))).toBe('BROWSER_SKILL_NOT_APPROVED')
   })
 })

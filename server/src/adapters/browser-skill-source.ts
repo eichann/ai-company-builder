@@ -32,6 +32,17 @@ async function entryOf(repo: string, treeish: string, path: string, type: 'tree'
   }
 }
 
+/** A blob's text when it is at most the declaration's limit, else `too-large` (null: no such blob or unreadable). */
+async function blobText(repo: string, blob: string): Promise<string | null> {
+  try {
+    const size = Number((await gitAsync(['-C', repo, 'cat-file', '-s', blob], GIT)).trim())
+    if (!Number.isFinite(size)) return null
+    return size > BROWSER_SKILL_LIMITS.bytes ? 'too-large' : await gitAsync(['-C', repo, 'cat-file', 'blob', blob], GIT)
+  } catch {
+    return null
+  }
+}
+
 /** One Skill at `treeish` (a commit or the shared branch), or null. */
 async function readAt(repo: string, treeish: string, name: string): Promise<BrowserSkillContent | null> {
   if (!isValidSkillName(name)) return null
@@ -126,7 +137,9 @@ export function browserSkillSource(deps: { companyData: CompanyDataSource; hasCo
       const item = deps.companyData.forCompany(companyId).skillShelf.itemAt('skill', null, name)
       const before = item && versions.before ? shelfDeclaration(companyId, item.id, versions.before) : null
       const after = item ? shelfDeclaration(companyId, item.id, versions.written) : null
-      return { ...content, declarationChanged: before !== after }
+      const bytes = before === null ? null : Buffer.from(before, 'base64')
+      const previousDeclaration = bytes === null ? null : bytes.length > BROWSER_SKILL_LIMITS.bytes ? 'too-large' : bytes.toString('utf8')
+      return { ...content, declarationChanged: before !== after, previousDeclaration }
     },
 
     async pushed(companyId, refUpdates) {
@@ -152,7 +165,11 @@ export function browserSkillSource(deps: { companyData: CompanyDataSource; hasCo
           const file = `${SKILLS}/${name}/${BROWSER_SKILL_FILE}`
           const before = ZERO_RE.test(oldId) ? null : await entryOf(git.repo, oldId, file, 'blob')
           const after = await entryOf(git.repo, newId, file, 'blob')
-          out.push({ ...content, declarationChanged: before !== after })
+          // What the declaration was before this push: an owner / admin's change counts as approval only on top of an
+          // approved one (independent review M1: a pull --rebase carries a skill editor's pending lines along).
+          const previousDeclaration = before === null ? null : await blobText(git.repo, before)
+          if (before !== null && previousDeclaration === null) continue
+          out.push({ ...content, declarationChanged: before !== after, previousDeclaration })
         }
       }
       return out.slice(0, MAX_SKILLS)

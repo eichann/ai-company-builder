@@ -43,6 +43,8 @@ export interface BrowserSkillContent {
 /** A Skill as one change left it, and whether that change touched `browser.yaml` (added or changed it). */
 export interface BrowserSkillLanded extends BrowserSkillContent {
   declarationChanged: boolean
+  /** `browser.yaml` right before this change (null: there was none; `too-large`: never read whole). */
+  previousDeclaration: string | null
 }
 
 export interface BrowserSkillSource {

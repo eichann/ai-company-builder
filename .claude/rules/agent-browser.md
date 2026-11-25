@@ -2866,9 +2866,14 @@ with it yet. Only company-wide Skills (`.claude/skills/<name>`; a shelf item wit
   the blob at the push's old and new commit, or the shelf's version before and the one written; an owner / admin who changed
   only the text of a Skill whose declaration someone else changed approves nothing, Codex review), **only while it is still
   what the server holds** (each landing is compared with a fresh read right before it writes: a push or publish read in
-  another order, or an approval made meanwhile, is never superseded by an older landing, Codex review), and **unless the
-  latest approval was revoked** (it stays revoked whoever edits). Anyone else's change (「Skill を直せる人」) waits, and the other
-  owners / admins are told once per version. A declaration that does not parse is never approved. **Whose change**: for a push, the pusher git-http authenticated and the role it read
+  another order, or an approval made meanwhile, is never superseded by an older landing, Codex review), and **only on top of
+  an approved declaration** — the one right before the change (`previousDeclaration`: the blob at the push's old commit, or
+  the shelf's version before) must be the latest approval's, in force (not revoked), or there was none and nothing was ever
+  approved (a new Skill); a skill editor's pending lines that a `pull --rebase` carried into an owner's push wait
+  (independent review M1). On the shelf only the publisher's **own upload** counts: putting an earlier version back
+  (`restore`) or publishing a member's request (「公開する」) waits for 「Skill の承認」 (review M2). Anyone else's change (「Skill を直せる人」) waits, and the other
+  owners / admins are told once per version; **listing 「Skill の承認」 also tells of any waiting version nobody was told of**
+  (a landing skipped, past the push's limit, a server-made commit; the notice's key keeps it once — review L4). A declaration that does not parse is never approved. **Whose change**: for a push, the pusher git-http authenticated and the role it read
   (`routes/git-http.ts`, company repository only) — the push checker writes the `<old> <new> <ref>` lines it **accepted** to
   `ACB_PUSH_NOTES` (a file in the request's private temp dir, `preparePushCheck`; never on a refusal; a failure to write only
   means "not counted as approved"); after the push succeeded `services.browserSkills.afterPush` reads, off the request, each

@@ -199,7 +199,14 @@ export function createBrowserSkillService(deps: BrowserSkillDeps) {
     // Only a change of the declaration itself counts as its approval: an owner / admin who changed only the text of a
     // Skill whose declaration someone else changed approves nothing by that (Codex review).
     if (!content.declarationChanged) return
-    if (hasFullAccess(by.role) && (latest === null || latest.revokedAt === null)) {
+    // An owner / admin's change approves only on top of what was approved: the declaration right before it was the
+    // approved one (in force), or there was none and nothing was ever approved (a new Skill). Anything else — a skill
+    // editor's pending declaration carried along by a pull --rebase, a revoked one — waits (independent review M1).
+    const before = content.previousDeclaration
+    const onApproved = before === null
+      ? latest === null
+      : before !== 'too-large' && latest !== null && latest.revokedAt === null && latest.declarationHash === `sha256:${deps.sha256(before)}`
+    if (hasFullAccess(by.role) && onApproved) {
       r.insert({
         skillPath: path, declarationHash: j.hash, mode: latest?.mode ?? 'per_run', how: 'edited',
         // Not counted as seen: the first run of a declaration changed this way shows the card once, also when pre-approved
@@ -208,7 +215,12 @@ export function createBrowserSkillService(deps: BrowserSkillDeps) {
       })
       return
     }
-    tell(companyId, `${BROWSER_SKILL_NOTICE_PREFIX}waiting:${content.name}:${short(j.hash)}`, by.userId)
+    noticeWaiting(companyId, j, by.userId)
+  }
+
+  /** 「宣言が直されました…承認してください」 once per declaration version (the notice's dedupe key). */
+  function noticeWaiting(companyId: string, j: Judged, except: string | null): void {
+    tell(companyId, `${BROWSER_SKILL_NOTICE_PREFIX}waiting:${j.content.name}:${short(j.hash)}`, except)
   }
 
   const later = (what: string, companyId: string, work: () => Promise<void>) => {
@@ -227,7 +239,11 @@ export function createBrowserSkillService(deps: BrowserSkillDeps) {
         if (!content) continue
         const j = judge(member.companyId, content)
         noticeTextChanged(member.companyId, j, null)
-        items.push(viewOf(member.companyId, j))
+        const view = viewOf(member.companyId, j)
+        // A waiting declaration whose notice a landing could not send (read in another order, past the push's limit, a
+        // server-made commit): told now, once per version by its key (independent review L4).
+        if (view.status === 'waiting') noticeWaiting(member.companyId, j, null)
+        items.push(view)
       }
       return ok({ items })
     },
@@ -315,14 +331,20 @@ export function createBrowserSkillService(deps: BrowserSkillDeps) {
     },
 
     /** After the shelf published or put back a version (services/skill-shelf.ts): the publisher and their role. */
-    shelfChanged(member: Member, item: { kind: string; departmentId: string | null; name: string }, versions: { before: string | null; written: string }): void {
+    shelfChanged(
+      member: Member, item: { kind: string; departmentId: string | null; name: string },
+      versions: { before: string | null; written: string; how: 'publish' | 'restore' | 'request' },
+    ): void {
       if (item.kind !== 'skill' || item.departmentId !== null) return
+      // Only the publisher's own upload counts as their change. Putting an earlier version back or publishing a member's
+      // request lands a declaration nobody reviewed on 「Skill の承認」: it waits (independent review M2).
+      const by = versions.how === 'publish' ? member : { userId: member.userId, role: 'member' }
       // Judged at exactly the version this member wrote, and only while it is still the current one (as a push).
       later('Reading a shelf Skill for browser Skills failed', member.companyId, async () => {
         const content = await deps.source.shelfLanded(member.companyId, item.name, versions)
         if (!content) return
         const current = await deps.source.read(member.companyId, item.name)
-        landed(member.companyId, member, content, current)
+        landed(member.companyId, by, content, current)
       })
     },
 

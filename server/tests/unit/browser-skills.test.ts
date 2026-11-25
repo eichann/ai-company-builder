@@ -57,7 +57,7 @@ function put(companyId: string, name: string, declaration: string, text = 'v1'):
 /** A change landed by `by` (what afterPush / shelfChanged hand the service, without waiting for them). */
 async function land(by: Member, declaration: string, text = 'v1', opts: { thenCurrent?: () => void } = {}) {
   const before = store[by.companyId]?.[SKILL]?.declaration ?? null
-  const content = { ...put(by.companyId, SKILL, declaration, text), declarationChanged: before !== declaration }
+  const content = { ...put(by.companyId, SKILL, declaration, text), declarationChanged: before !== declaration, previousDeclaration: before }
   // Another change landing after this one, before it is read (the server reads its copy again: `current`).
   opts.thenCurrent?.()
   // `landed` is internal: reach it the way a push does, through a stand-in pushed() list.
@@ -239,6 +239,31 @@ describe('who changed the declaration', () => {
     expect(value(await svc.approvedFrames(owner, SKILL)).frames.writes[0].max).toBe(5)
   })
 
+  it('an owner / admin\'s change on top of a pending declaration waits (a pull --rebase carries it along; review M1)', async () => {
+    await land(owner, yaml(1))
+    await land(editor, yaml(5))
+    expect(code(await svc.approvedFrames(owner, SKILL))).toBe('BROWSER_SKILL_NOT_APPROVED')
+    await land(admin, yaml(6))
+    expect(code(await svc.approvedFrames(owner, SKILL))).toBe('BROWSER_SKILL_NOT_APPROVED')
+    // Told of this version too (the admin who pushed it is not).
+    expect(noticesOf(owner.userId).filter(n => n.k.startsWith('browser_skill:waiting:'))).toHaveLength(2)
+    expect(noticesOf(admin.userId).filter(n => n.k.startsWith('browser_skill:waiting:'))).toHaveLength(1)
+    expect(value(await svc.list(owner)).items[0].status).toBe('waiting')
+    // On top of an approved one it counts again.
+    value(await svc.approve(owner, { skill: SKILL, declarationHash: await hashOf(owner), files: store[CO]?.[SKILL]?.files ?? '', mode: 'per_run' }))
+    await land(admin, yaml(7))
+    expect(code(await svc.approvedFrames(owner, SKILL))).toBe('ok')
+  })
+
+  it('a waiting declaration nobody was told of is told when listed, once (review L4)', async () => {
+    put(CO, SKILL, yaml(4))
+    expect(noticesOf(owner.userId)).toEqual([])
+    await svc.list(admin)
+    await svc.list(owner)
+    expect(noticesOf(owner.userId).map(n => n.k)).toEqual([expect.stringMatching(/^browser_skill:waiting:order-copy:/)])
+    expect(noticesOf(admin.userId)).toHaveLength(1)
+  })
+
   it('an owner / admin who changed only the text does not approve someone else\'s declaration (Codex review)', async () => {
     await land(owner, yaml(1))
     await land(editor, yaml(5))
@@ -270,6 +295,7 @@ describe('who changed the declaration', () => {
 })
 
 describe('only the steps\' text changed', () => {
+  const textNotices = (userId: string) => noticesOf(userId).filter(n => n.k.startsWith('browser_skill:text:'))
   it('frames still given; the card needed once even when pre-approved; owners / admins told once', async () => {
     put(CO, SKILL, yaml())
     value(await svc.approve(owner, { skill: SKILL, declarationHash: await hashOf(owner), files: store[CO]?.[SKILL]?.files ?? '', mode: 'pre_approved' }))
@@ -277,21 +303,21 @@ describe('only the steps\' text changed', () => {
     const after = value(await svc.approvedFrames(owner, SKILL))
     expect(after).toMatchObject({ mode: 'pre_approved', textChanged: true, needsRunCard: true })
     expect(value(await svc.list(owner)).items[0].status).toBe('text_changed')
-    const keys = noticesOf(owner.userId).map(n => n.k)
+    const keys = textNotices(owner.userId).map(n => n.k)
     expect(keys).toHaveLength(1)
     expect(keys[0]).toMatch(/^browser_skill:text:order-copy:[0-9a-f]{16}$/)
     expect(svc.noticeText(admin, keys[0])).toContain('手順が直りました')
-    expect(noticesOf(editor.userId)).toEqual([])
+    expect(textNotices(editor.userId)).toEqual([])
     // Read again (the lazy check of approvedFrames / list): still one notice.
     await svc.approvedFrames(owner, SKILL)
     await svc.list(owner)
-    expect(noticesOf(owner.userId)).toHaveLength(1)
+    expect(textNotices(owner.userId)).toHaveLength(1)
     // Step ⑤ showed the card: no more card, until the text moves again.
     expect(svc.runCardShown(owner, SKILL, after.declarationHash, after.files)).toBe(true)
     expect(value(await svc.approvedFrames(owner, SKILL))).toMatchObject({ textChanged: false, needsRunCard: false })
     put(CO, SKILL, yaml(), 'v3')
     expect(value(await svc.approvedFrames(owner, SKILL))).toMatchObject({ textChanged: true, needsRunCard: true })
-    expect(noticesOf(owner.userId)).toHaveLength(2)
+    expect(textNotices(owner.userId)).toHaveLength(2)
     // Approving again counts the text as seen.
     value(await svc.approve(owner, { skill: SKILL, declarationHash: await hashOf(owner), files: store[CO]?.[SKILL]?.files ?? '', mode: 'pre_approved' }))
     expect(value(await svc.approvedFrames(owner, SKILL))).toMatchObject({ textChanged: false, needsRunCard: false })
@@ -301,8 +327,8 @@ describe('only the steps\' text changed', () => {
     put(CO, SKILL, yaml())
     value(await svc.approve(owner, { skill: SKILL, declarationHash: await hashOf(owner), files: store[CO]?.[SKILL]?.files ?? '', mode: 'per_run' }))
     await land(admin, yaml(), 'v2')
-    expect(noticesOf(owner.userId)).toHaveLength(1)
-    expect(noticesOf(admin.userId)).toEqual([])
+    expect(textNotices(owner.userId)).toHaveLength(1)
+    expect(textNotices(admin.userId)).toEqual([])
     expect(value(await svc.approvedFrames(owner, SKILL)).textChanged).toBe(true)
   })
 
