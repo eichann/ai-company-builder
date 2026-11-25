@@ -89,7 +89,8 @@ export function createFrameWriter(deps: FrameWriterDeps) {
   let originalMayHaveGone = false
 
   /** One held write from the moment it is held until its outcome is kept (once: `abandon` may keep it first). */
-  interface Held { method: string; path: string; line: string; frame: number | null; recorded: boolean }
+  /** `write` / `permittedAt`: its permit once given, so a write given up as unknown can still be answered about on the card. */
+  interface Held { method: string; path: string; line: string; frame: number | null; recorded: boolean; write: number | null; permittedAt: string | null }
   const pending = new Set<Held>()
 
   const keepRecord = (h: Held, r: FrameWriteRecord, outcome: BrowserRunWriteOutcome) => {
@@ -151,6 +152,8 @@ export function createFrameWriter(deps: FrameWriterDeps) {
         if (a.kind === 'refused' && a.code && RUN_OVER.has(a.code)) over = true
         if (a.kind !== 'ok' || !isPermit(a.value) || a.value.frame !== frame.frame) return false
         permit = a.value
+        h.write = a.value.write
+        h.permittedAt = typeof a.value.permittedAt === 'string' ? a.value.permittedAt : null
         // The unit is the server's now (never given back, also when this write is not sent).
         frame.left = Math.max(0, frame.left - 1)
         return true
@@ -210,12 +213,12 @@ export function createFrameWriter(deps: FrameWriterDeps) {
     hold(held: HeldPageWrite): Promise<HeldPageWriteAnswer> {
       let path = '/'
       try { path = new URL(held.url).pathname } catch { /* kept as / */ }
-      const h: Held = { method: held.method.toUpperCase(), path, line: workWriteLine(held.method.toUpperCase(), null), frame: null, recorded: false }
+      const h: Held = { method: held.method.toUpperCase(), path, line: workWriteLine(held.method.toUpperCase(), null), frame: null, recorded: false, write: null, permittedAt: null }
       pending.add(h)
       const next = chain.then(() => decide(held, h), () => decide(held, h))
       chain = next.catch(() => undefined)
       return next.catch((): HeldPageWriteAnswer => {
-        keepRecord(h, { line: h.line, outcome: 'unknown', status: null, sent: null, path: null, answerText: null }, 'unknown')
+        keepRecord(h, { line: h.line, outcome: 'unknown', status: null, sent: null, path: null, answerText: null, write: h.write, permittedAt: h.permittedAt }, 'unknown')
         locked = true
         return { kind: 'fail' }
       })
@@ -232,7 +235,7 @@ export function createFrameWriter(deps: FrameWriterDeps) {
       if (why === 'detached' && pending.size > 0) originalMayHaveGone = true
       closed = true
       if (pending.size > 0) locked = true
-      for (const h of [...pending]) keepRecord(h, { line: h.line, outcome: 'unknown', status: null, sent: null, path: null, answerText: null }, 'unknown')
+      for (const h of [...pending]) keepRecord(h, { line: h.line, outcome: 'unknown', status: null, sent: null, path: null, answerText: null, write: h.write, permittedAt: h.permittedAt }, 'unknown')
     },
     /** Until the write on its way (if any) is recorded. */
     idle: () => chain.then(() => undefined),

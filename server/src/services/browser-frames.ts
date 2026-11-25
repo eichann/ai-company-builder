@@ -507,7 +507,8 @@ export function createBrowserFrameService(deps: BrowserFrameDeps) {
      * `PersonConfirms` — POST /browser-frame-runs/:runId/confirm { write, answer: done | not_done } with this PC's key
      * header (agent-browser.md "Recovering from a failed write"): the person's answer about a write in doubt, from the
      * card. Bound like a sure report — the member's own run and **its own PC** — and only for an `unknown` write, only past
-     * its permit + 5 s + 30 s on both clocks (it may still be on its way before), once (`BROWSER_FRAME_CONFIRMED`). Kept
+     * its permit + 5 s + 30 s on both clocks (it may still be on its way before), once (another answer after it:
+     * `BROWSER_FRAME_CONFIRMED`; the same answer again — a lost answer of ours — is answered as kept, nothing written). Kept
      * with who and when; it **never moves the write or the run**: a locked run stays locked whatever the answer, and
      * nothing is sent again (「されていなかった」: the person asks again in the chat — a new run).
      */
@@ -527,7 +528,9 @@ export function createBrowserFrameService(deps: BrowserFrameDeps) {
         const run = settle(member.companyId, found, now)
         const w = r.writes(run.id).find(x => x.seq === seq)
         if (!w) return refuse('not-found', W.writeNotFound, { code: 'BROWSER_FRAME_WRITE_NOT_FOUND' })
-        if (r.confirms(run.id).some(c => c.seq === seq)) return refuse('conflict', W.confirmDone, { code: 'BROWSER_FRAME_CONFIRMED' })
+        // Once: the same answer again (its first answer lost on the way back) is answered as kept; another one is refused.
+        const before = r.confirms(run.id).find(c => c.seq === seq)
+        if (before) return before.answer === given ? ok(view(member.companyId, run)) : refuse('conflict', W.confirmDone, { code: 'BROWSER_FRAME_CONFIRMED' })
         if (w.state !== 'unknown') return refuse('conflict', W.confirmNotUnknown, { code: 'BROWSER_FRAME_NOT_UNKNOWN' })
         if (!pastWindow(w, now)) return refuse('conflict', W.confirmTooEarly, { code: 'BROWSER_TOO_EARLY' })
         if (!r.insertConfirm(run.id, { seq, answer: given, confirmedBy: member.userId, confirmedAt: iso(now) })) {

@@ -420,6 +420,8 @@ test('a write still on its way when the run\'s wait runs out is unknown — in t
   const view = wiring.card(COMPANY, FRAME_RUN)
   assert.ok(view?.ok && view.view.result?.outcome === 'unknown')
   assert.deepEqual(view.ok && view.view.result?.unknown, ['POST /coupons'])
+  // Given up as unknown, it can still be answered about on the card (its permit was kept: Codex review).
+  assert.ok(view.ok && view.view.result?.confirm, 'the card offers the answer for a write given up while on its way')
 })
 
 test('the window\'s DevTools connection gone while a write is held: its copy is never sent, it is told unknown, the run is locked', async () => {
@@ -607,11 +609,12 @@ test('the card waits no longer than the server keeps the frames run waiting: cou
 test('the card offers ［済んでいた］［されていなかった］ for a write in doubt from its time; the answer goes to the server with that write, never unlocks or resends', async () => {
   let t = Date.parse('2026-11-25T10:00:00.000Z')
   let early = true
+  let lost = false
   const doubt = workWorld({
     now: () => t,
     site: { requests: [], answer: () => null },
     answers: [CLICK_SAVE, DONE_PLAIN, CLICK_SAVE], frameStart: () => ({ kind: 'ok', value: started({ needsApproval: false }) }),
-    frameConfirm: async () => (early ? { kind: 'refused', code: 'BROWSER_TOO_EARLY' } : { kind: 'ok', value: {} }),
+    frameConfirm: async () => (early ? { kind: 'refused', code: 'BROWSER_TOO_EARLY' } : lost ? { kind: 'no-answer' } : { kind: 'ok', value: {} }),
   })
   const said = await doubt.tool.execute({ site: HOST, task: 'いつものクーポン', skill: 'coupons' })
   assert.equal(said, workWordsForAi({ kind: 'unknown' }, [], []))
@@ -625,6 +628,12 @@ test('the card offers ［済んでいた］［されていなかった］ for a 
   t += 35_000
   early = false
   assert.equal(card().result?.confirm?.canNow, true)
+  // The server's answer lost on the way back: the card still offers it, and the same press again settles it (the server
+  // answers the same answer as kept).
+  lost = true
+  assert.deepEqual(await doubt.wiring.confirm(COMPANY, FRAME_RUN, 'not_done'), { ok: false, message: CW.confirmFailed })
+  assert.ok(card().result?.confirm)
+  lost = false
   const answered = await doubt.wiring.confirm(COMPANY, FRAME_RUN, 'not_done') as { ok: true; view: BrowserWriteView }
   assert.ok(doubt.w.calls.includes('frameConfirm 1 not_done'))
   assert.equal(answered.view.result?.confirm, null)
@@ -635,7 +644,7 @@ test('the card offers ［済んでいた］［されていなかった］ for a 
   assert.equal(doubt.w.calls.filter(c => c === 'framePermit').length, 1)
   assert.equal(doubt.w.site.requests.length, 1)
   assert.equal((await doubt.wiring.confirm(COMPANY, FRAME_RUN, 'done'))?.ok, false)
-  assert.equal(doubt.w.calls.filter(c => c.startsWith('frameConfirm')).length, 2)
+  assert.equal(doubt.w.calls.filter(c => c.startsWith('frameConfirm')).length, 3)
 })
 
 test('only the card reaches the person\'s answer: no AI tool, agent or chat server names it', () => {

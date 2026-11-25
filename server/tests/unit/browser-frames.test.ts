@@ -781,6 +781,10 @@ describe('recovering from a failed write: the site refused it; the person answer
     const answered = value(confirm(run.runId, 1, 'not_done'))
     expect(answered.writes[0]).toMatchObject({ state: 'unknown', confirmed: { answer: 'not_done', by: alice.userId, at: iso(now) }, confirmableAt: null })
     expect(code(confirm(run.runId, 1, 'done'))).toBe('BROWSER_FRAME_CONFIRMED')
+    // The same answer again (ours lost on the way back): answered as kept, still once, still by the first press.
+    now += 1_000
+    expect(value(confirm(run.runId, 1, 'not_done')).writes[0].confirmed).toEqual({ answer: 'not_done', by: alice.userId, at: iso(now - 1_000) })
+    expect(conn.prepare('SELECT COUNT(*) AS n FROM browser_frame_write_confirms').get()).toEqual({ n: 1 })
     // The answer never unlocks the run: nothing more is permitted in it.
     expect(answered.state).toBe('locked')
     expect(code(await permit(run.runId, 2))).toBe('BROWSER_RUN_AFTER_UNKNOWN')

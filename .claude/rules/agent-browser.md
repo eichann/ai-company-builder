@@ -3564,8 +3564,10 @@ hand. Two changes, each on the safe side.
   `bf_` card): `POST /browser-frame-runs/:runId/confirm { write, answer: done | not_done }` (exactly these keys) with this
   PC's key — **bound like a sure report**: the member's own run (anyone else's, another company's: the same 404) and
   **the run's own PC** (`BROWSER_DEVICE_ELSEWHERE`). Only a write that is `unknown` (`BROWSER_FRAME_NOT_UNKNOWN`), only
-  **past its permit + 5 s + 30 s on both clocks** (`BROWSER_TOO_EARLY`: it may still be on its way), **once**
-  (`BROWSER_FRAME_CONFIRMED`). Kept in `browser_frame_write_confirms` (additive: the answer, **who** and **when**; never
+  **past its permit + 5 s + 30 s on both clocks** (`BROWSER_TOO_EARLY`: it may still be on its way), **once** (another
+  answer after it: `BROWSER_FRAME_CONFIRMED`; the same answer again — the first one's reply lost — is answered as kept,
+  nothing written, so the card's second press settles it; Codex review). A write the app gave up while on its way (the
+  run's wait ran out, the DevTools connection went) keeps its permit for this (`Held.write`; Codex review). Kept in `browser_frame_write_confirms` (additive: the answer, **who** and **when**; never
   changed or removed while its run exists, by trigger). **It never moves the write or the run**: a locked run stays
   locked whatever the answer (simple: an answer is the person's word, not the site's), and no report changes the write
   once answered (`recorded`). After 「されていなかった」 the person asks again in the chat — a new run; nothing is sent again
