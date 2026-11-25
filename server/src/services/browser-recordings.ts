@@ -44,6 +44,8 @@ export interface BrowserRecordingDeps {
 }
 
 export const BROWSER_RECORDING_LIST_LIMIT = 200
+/** Recordings one member may have kept in a company at once (each goes after 30 days, or when deleted). */
+export const BROWSER_RECORDING_PER_MEMBER = 20
 const DAY_MS = 24 * 60 * 60 * 1000
 const ID_RE = /^br_[0-9a-f]{32}$/
 const iso = (ms: number) => new Date(ms).toISOString()
@@ -53,6 +55,7 @@ export const BROWSER_RECORDING_SERVER_WORDS = Object.freeze({
   notFound: 'この記録は見つかりません（消されたか、30日が過ぎました）。',
   badBody: '記録の形が正しくありません。アプリを新しくしてから、もう一度記録してください。',
   tooLarge: '記録が大きすぎます。',
+  tooMany: '送った記録が多すぎます（ひとり20件まで）。要らない記録を管理者に消してもらうか、30日たって消えるのを待ってください。',
   notAllowed: 'このサイトは、いまは記録できません（会社の設定で「使う」になっていないか、登録されていないか、あなたが使えるようになっていません）。',
 })
 const W = BROWSER_RECORDING_SERVER_WORDS
@@ -91,6 +94,9 @@ export function createBrowserRecordingService(deps: BrowserRecordingDeps) {
       if (problem) return refuse('bad-request', W.badBody, { code: 'BROWSER_RECORDING_BAD', problem })
       const content = body.content as BrowserRecordingContent
       const at = deps.clock.nowMs()
+      if (repo(member.companyId).countOf(member.userId, iso(at)) >= BROWSER_RECORDING_PER_MEMBER) {
+        return refuse('conflict', W.tooMany, { code: 'BROWSER_RECORDING_LIMIT' })
+      }
       const row = {
         id: `br_${deps.ids.newToken().slice(0, 32)}`, userId: member.userId, domain, lines: content.steps.length,
         content: JSON.stringify(content), createdAt: iso(at), deleteAt: iso(at + BROWSER_RECORDING_DAYS * DAY_MS),

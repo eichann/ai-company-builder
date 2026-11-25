@@ -2,7 +2,7 @@
 //   browserRecording:get         the member's recording in this company (none / recording / waiting to be sent)
 //   browserRecording:start       「記録する」 on a site of the current policy
 //   browserRecording:stop        「記録を止める」
-//   browserRecording:removeLine  ［消す］ on one line before sending
+//   browserRecording:edit        ［消す］ a line, ［伏せる］ a word, remove another host — before sending
 //   browserRecording:send        ［送る］
 //   browserRecording:discard     ［捨てる］
 // Only the main window's main frame may ask; the host is only a name (main records only a site its current policy lists).
@@ -12,7 +12,7 @@ import type { BrowserRecordingResult } from '../../../shared/browser-recorder'
 import { BROWSER_RECORDING_MAIN_WORDS, type BrowserRecordings } from './recording'
 
 export interface BrowserRecordingIpcDeps<E> {
-  recordings: Pick<BrowserRecordings, 'view' | 'start' | 'stop' | 'removeLine' | 'send' | 'discard'>
+  recordings: Pick<BrowserRecordings, 'view' | 'start' | 'stop' | 'edit' | 'send' | 'discard'>
   fromMainWindow: (event: E) => boolean
 }
 
@@ -27,8 +27,8 @@ export function registerBrowserRecordingIpc<E extends IpcInvokeEvent>(ipc: IpcRe
     fromMainWindow(event) && id(companyId) && id(host) ? recordings.start(companyId, host) : notMain)
   ipc.handle('browserRecording:stop', async (event, companyId) =>
     fromMainWindow(event) && id(companyId) ? recordings.stop(companyId) : notMain)
-  ipc.handle('browserRecording:removeLine', (event, companyId, lineId) =>
-    fromMainWindow(event) && id(companyId) && typeof lineId === 'number' ? recordings.removeLine(companyId, lineId) : notMain)
+  ipc.handle('browserRecording:edit', (event, companyId, change) =>
+    fromMainWindow(event) && id(companyId) && change && typeof change === 'object' ? recordings.edit(companyId, change) : notMain)
   ipc.handle('browserRecording:send', async (event, companyId) =>
     fromMainWindow(event) && id(companyId) ? recordings.send(companyId) : notMain)
   ipc.handle('browserRecording:discard', async (event, companyId) =>

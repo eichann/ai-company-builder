@@ -224,6 +224,7 @@ DATA_DIR=/tmp/acb-scratch AUTH_SECRET=… node --import tsx src/cli/company-arch
     manifest; the KEK is per server today), so restoring elsewhere means keys must be
     re-entered unless that KEK is installed.
   - Relay tokens (`broker_tokens`) are left out.
+  - 「ブラウザ操作」 recordings (`browser_recordings`, kept 30 days at most) are left out (`agent-browser.md` "Recording").
   - Invitation link tokens are replaced (`redacted:<id>`): old links stop working, send new ones.
   - Better Auth accounts (`auth.sqlite`) are shared by all companies and not moved; memberships
     keep the user ids, so members need accounts on the target server (same ids) to sign in.

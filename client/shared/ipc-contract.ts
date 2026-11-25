@@ -80,7 +80,7 @@ import type { BrowserConfirmResult, BrowserPlanActAnswer, BrowserPlanGetResult, 
 import type { BrowserInspectionGetResult } from './browser-inspection'
 import type { BrowserWriteGetResult } from './browser-line-writes'
 import type { BrowserPcResult } from './browser-device'
-import type { BrowserRecordingResult } from './browser-recorder'
+import type { BrowserRecordingEdit, BrowserRecordingResult } from './browser-recorder'
 import type { SkillShelfMark, SkillShelfRequestInfo, SkillShelfRestoreResult, SkillShelfSendResult } from './skill-shelf'
 import type { PluginStepButton, PluginStepContinuation, PluginStepContinueResult, PluginStepStartResult, QueuedPluginStep } from './ai-turn-steps/plugin'
 import type { StepDeliverablesView } from './step-deliverables'
@@ -938,8 +938,8 @@ export interface IpcInvokeChannels {
   'browserRecording:start': { args: [companyId: string, host: string]; result: BrowserRecordingResult }
   /** 「記録を止める」. */
   'browserRecording:stop': { args: [companyId: string]; result: BrowserRecordingResult }
-  /** ［消す］ on one line before sending. */
-  'browserRecording:removeLine': { args: [companyId: string, lineId: number]; result: BrowserRecordingResult }
+  /** Before sending: ［消す］ a line, ［伏せる］ a word everywhere, remove another host. */
+  'browserRecording:edit': { args: [companyId: string, change: BrowserRecordingEdit]; result: BrowserRecordingResult }
   /** ［送る］: to the company (the server checks it again). */
   'browserRecording:send': { args: [companyId: string]; result: BrowserRecordingResult }
   /** ［捨てる］. */
@@ -1409,7 +1409,7 @@ export interface ElectronAPI {
   getBrowserRecording: Invoke<'browserRecording:get'>
   startBrowserRecording: Invoke<'browserRecording:start'>
   stopBrowserRecording: Invoke<'browserRecording:stop'>
-  removeBrowserRecordingLine: Invoke<'browserRecording:removeLine'>
+  editBrowserRecording: Invoke<'browserRecording:edit'>
   sendBrowserRecording: Invoke<'browserRecording:send'>
   discardBrowserRecording: Invoke<'browserRecording:discard'>
   listPluginStepTurns: Invoke<'aiTurns:pluginTurns'>

@@ -15,16 +15,28 @@
 // - This PC's key goes only on the send (`X-ACB-Browser-Device`, the server's gate), never on the other calls.
 import { createHmac, randomBytes } from 'node:crypto'
 import { BROWSER_DEVICE_HEADER } from '../../../../shared/core/browser-device'
-import { browserRecordingLine, browserRecordingWithout, type BrowserRecordingContent } from '../../../../shared/core/browser-recording'
+import {
+  browserRecordingHide, browserRecordingHideable, browserRecordingLine, browserRecordingWithout, browserRecordingWithoutHost,
+  type BrowserRecordingContent,
+} from '../../../../shared/core/browser-recording'
 import {
   createBrowserRecorder,
-  type BrowserRecorder, type BrowserRecordingResult, type BrowserRecordingView, type BrowserRecordSurface,
+  type BrowserRecorder, type BrowserRecordingEdit, type BrowserRecordingResult, type BrowserRecordingView, type BrowserRecordSurface,
 } from '../../../shared/browser-recorder'
 import { BROWSER_COMPANY_ID_RE } from '../../../shared/browser-plans'
 import type { BrowserActionResult } from '../../../shared/browser-operation'
 
-/** Main's sentences for the member (the screen's own words are `BROWSER_RECORDING_APP_WORDS`). */
+/** Main's sentences for the member (the screen's own button words are `BROWSER_RECORDING_APP_WORDS`). */
 export const BROWSER_RECORDING_MAIN_WORDS = {
+  recordNote: 'いつもの作業を、サイトの窓で1回通してやってください。押したボタンと入力した欄の見出し、開いたページの形だけを記録します。入力した値・パスワード・ログインの情報は記録しません。',
+  recording: (host: string, lines: number) => `${host} を記録しています（${lines}行）。作業が終わったら［記録を止める］を押してください。`,
+  namesWarning: 'ボタンや欄の見出し、ページのアドレスに、お客さまなどの名前が入っていることがあります。送る前に下の「伏せる言葉」で、名前を押して伏せてください。要らない行は［消す］で消せます。',
+  reviewNote: '送った記録は、あなたと会社のオーナー・管理者だけが見られ、30日で消えます。',
+  full: '長いので、ここで記録を止めました（500行まで）。',
+  reviewTitle: (host: string) => `送る前に確かめてください（${host}）`,
+  wordsTitle: '伏せる言葉（押すと、すべての行で {x} になります）',
+  hostsTitle: '窓が読み込もうとした、ほかのサイト',
+  estimated: (text: string) => `（推定）${text}`,
   sent: '記録を送りました。管理者に「記録を送りました」と伝えてください。',
   discarded: '記録を捨てました。',
   closed: 'サイトの窓を閉じたので、記録を捨てました。',
@@ -138,12 +150,19 @@ export function createBrowserRecordings(deps: BrowserRecordingsDeps) {
     const s = current(companyId)
     if (!s || !user) {
       const message = user ? notes.get(keyOf(user, companyId)) ?? null : null
-      return { state: 'none', message }
+      return { state: 'none', message, notes: [W.recordNote] }
     }
-    if (s.phase !== 'review' || !s.content) return { state: 'recording', host: s.host, lines: s.recorder.lines(), full: s.recorder.full() }
+    const full = s.recorder.full() ? [W.full] : []
+    if (s.phase !== 'review' || !s.content) return { state: 'recording', host: s.host, lines: s.recorder.lines(), notes: [W.recording(s.host, s.recorder.lines()), ...full] }
     return {
-      state: 'review', host: s.host, full: s.recorder.full(), message: s.message,
-      lines: s.content.steps.map(step => ({ id: step.id, ...browserRecordingLine(step) })),
+      state: 'review', host: s.host, message: s.message, notes: [W.namesWarning, W.reviewNote, ...full],
+      titles: { lines: W.reviewTitle(s.host), words: W.wordsTitle, hosts: W.hostsTitle },
+      lines: s.content.steps.map(step => {
+        const line = browserRecordingLine(step)
+        return { id: step.id, ...line, estimated: line.estimated && W.estimated(line.estimated) }
+      }),
+      words: browserRecordingHideable(s.content),
+      hosts: s.content.hosts,
     }
   }
   const answer = (companyId: string): BrowserRecordingResult => ({ ok: true, view: view(companyId) })
@@ -210,11 +229,13 @@ export function createBrowserRecordings(deps: BrowserRecordingsDeps) {
       return answer(companyId)
     },
 
-    /** ［消す］ on one line before sending (what points at it is cleared). */
-    removeLine(companyId: string, id: number): BrowserRecordingResult {
+    /** Before sending: ［消す］ a line, ［伏せる］ a word everywhere, or remove another host (what points at a line is cleared). */
+    edit(companyId: string, change: BrowserRecordingEdit): BrowserRecordingResult {
       const s = current(companyId)
-      if (!s || s.phase !== 'review' || !s.content || s.sending || !Number.isSafeInteger(id)) return answer(companyId)
-      s.content = browserRecordingWithout(s.content, [id])
+      if (!s || s.phase !== 'review' || !s.content || s.sending || !change || typeof change !== 'object') return answer(companyId)
+      if (change.kind === 'line' && Number.isSafeInteger(change.id)) s.content = browserRecordingWithout(s.content, [change.id])
+      else if (change.kind === 'word' && typeof change.word === 'string') s.content = browserRecordingHide(s.content, change.word)
+      else if (change.kind === 'host' && typeof change.host === 'string') s.content = browserRecordingWithoutHost(s.content, change.host)
       if (s.content.steps.length === 0) discard(s, W.discarded)
       return answer(companyId)
     },

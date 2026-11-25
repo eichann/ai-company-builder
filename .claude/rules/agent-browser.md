@@ -2696,18 +2696,23 @@ the site's window, stops, looks through the lines, deletes what they do not want
 admins (the FDE enters a company as an admin) read it in the admin console and build a company Skill from it. **Recordings are
 never handed to the AI**: no AI route, record token, tool or prompt reads them.
 
-- **What is kept** (`shared/core/browser-recording.ts`, pure, the one copy the app writes with and the server checks with):
-  page addresses as patterns (`browserAddressPattern`: digit runs → `{n}`, a token / an encoded or non-plain segment → `{x}`,
-  the query's keys only, no fragment, user or port; another host → none); the labels of buttons, choices and fields
-  (`browserLabel`: NFKC, whitespace collapsed, e-mail-like text → `{mail}`, an address → `{url}`, runs of two or more digits →
-  `{n}`, ≤ 60); a field's `name` as a key (`browserKeyPattern`: all digits `{n}`, e-mail-like `{mail}`, a token or anything not
-  a plain ASCII name `{x}`, digit runs `{n}`); each value as a **symbol of this recording** (`値N`; `empty`, `secret` for a
-  password field, `file` for an upload); requests: method, `_method` override (PUT / PATCH / DELETE), address pattern, the
-  body's field names and symbols (form, JSON key paths, multipart; an unreadable body → `null`), the answer's status and JSON
-  key shape (`browserJsonShape`, keys masked); the other hosts the window's pages asked for (`loaded` = one answered).
+- **What is kept** (`shared/core/browser-recording.ts`, pure, the one copy the app writes with and the server checks with;
+  tightened after the independent review of this PR): **a word is kept only as a plain lowercase ASCII word** joined by
+  `-` / `_` (a leading `_` too), ≤ 24 — anything with a digit, a capital, a dot, `@`, `%`, a character not ASCII or
+  longer becomes `{x}` whole (all digits `{n}`), never digit by digit. That rule applies to every path segment and query
+  key (`browserAddressPattern`: the query's keys only, no fragment, user or port; another host → none) and to every part
+  of a key — a JSON key, a form name's `name[part][part]` (`browserKeyPattern`) — so `/users/yamada.taro`,
+  `/invite/Kx7Pq2Rt9mZ`, a letters-only token with capitals, `user[Tanaka]` and camelCase keys are masked; **an object
+  with more than 5 keys whose values share one shape** (customers by name) keeps them as `{k}` (`browserJsonShape`).
+  The labels of buttons, choices and fields (`browserLabel`: NFKC, whitespace collapsed, e-mail-like text → `{mail}`, an
+  address → `{url}`, **every digit run** → `{n}`, ≤ 60); each value as a **symbol of this recording** (`値N`; `empty`,
+  `secret` for a password field, `file` for an upload); requests: method, `_method` override (PUT / PATCH / DELETE),
+  address pattern, the body's field names and symbols (form, JSON key paths, multipart; an unreadable body → `null`),
+  the answer's status and JSON key shape; the other hosts the window's pages asked for (`loaded` = one answered).
   **Inferred links are marked `推定`**: a request's `after` (the person's action within 3 s before it) and a value's `from`
   (the same value first seen in that step's answer, at that key; values of 2+ characters only). A GET of the same pattern is
-  one line with its `count`; a page's own load and its parts (scripts, styles, images, fonts) are not lines.
+  one line with its `count`; a page's own load and its parts (scripts, styles, images, fonts) are not lines. A lowercase
+  name (`/search/tanaka`) still passes the word rule: **the person hides it** before sending (below).
 - **Never kept**: a password field's content (the page script never even reads it), Cookie, Authorization or any header,
   CSRF / token / session / password / key fields — dropped whole, judged on the raw name **before** masking
   (`isSensitiveFieldName`, a wide net: `pass`, `pwd`, `pw`, `secret`, `token`, `csrf`, `xsrf`, `session`, `auth`, `api key`,
@@ -2730,25 +2735,33 @@ never handed to the AI**: no AI route, record token, tool or prompt reads them.
   `frameNavigated` / `navigatedWithinDocument` of the main frame = the page lines; the main frame's id read with `Page.getFrameTree`
   at the start, so a page already loaded that navigates within itself is seen) and `Network` (`maxPostDataSize` 64 KiB;
   `getResponseBody` only for a JSON answer ≤ 1 MiB, its text handed to the recorder and dropped there). The script
-  (`BROWSER_RECORDING_SCRIPT`) hears only **trusted** clicks on buttons / choices / links (an option or menu item keeps no label: it is often the data itself; a
-  `<label>` wrapping its field gives its own words only) and `change` of fields (never a
+  (`BROWSER_RECORDING_SCRIPT`) hears only **trusted** clicks on buttons / choices / links and `change` of fields. **Labels come only from real controls**
+  (independent review): a field's own `aria-label`, its `<label>`'s own words (never the field's options or value),
+  `placeholder` or `title` — never `aria-labelledby` (text elsewhere on the page); a native button's own text only when it
+  holds ≤ 8 elements; anything else acting as a button or a choice only its `aria-label` / `title`, and nothing from a row,
+  cell, list item, option or menu item or an element holding many others (a page makes whole rows buttons) (never a
   password's or a file's value; hidden fields ignored). The person's own requests go out as in `human` mode (it is their
   work). The window's title says 「（記録中）」. A first page not loaded within 20 s, the connection lost (`detach`) or the
   window closed end the recording (`ended('closed' | 'lost')`).
 - **In main** (`features/browser/recording.ts`, no Electron): one recording per member × company, **in memory only**; starting
   needs the site in the member's current policy (`recordWindow`, the controller) and this PC allowed (`mayRecord` = the same
   switch as the AI's: an enabled registration, or the owner's opt-in) — the server decides again on ［送る］. A start that
-  fails, the window closing, the connection lost, ［捨てる］ and sign-out **discard** it (nothing kept, nothing sent); stopping
-  stops observing; ［消す］ removes a line and clears every reference to it (`browserRecordingWithout`); ［送る］ sends exactly
-  what is left. A refusal or no answer keeps it for another try. IPC `browserRecording:get` / `start` / `stop` / `removeLine` /
+  fails, the window closing, the connection lost, ［捨てる］ and sign-out **discard** it (nothing kept, nothing sent; one
+  discarded or stopped while still starting lets the window go once the start finishes); stopping stops observing; before
+  sending the person **［消す］ a line** (every reference to it cleared, `browserRecordingWithout`), **［伏せる］ a word everywhere**
+  — a label, an address segment or query key, a part of a field name or answer key, replaced by `{x}` wherever it stands
+  whole (`browserRecordingHideable` lists them, `browserRecordingHide`) — and **removes another host**
+  (`browserRecordingWithoutHost`); ［送る］ sends exactly what is left. A refusal or no answer keeps it for another try. IPC `browserRecording:get` / `start` / `stop` / `edit` (`{ kind: line | word | host }`) /
   `send` / `discard` (`recording-ipc.ts`, main window's main frame only; the host only a name); a recording discarded by
   itself sends `browser:changed` so the screen asks again. **This PC's key goes only on the send** (`X-ACB-Browser-Device`,
   `createBrowserRecordingsHttp`).
 - **The screen** (`src/features/settings/components/BrowserRecordingSection.tsx`, `hooks/useBrowserRecording.ts`; words
-  `BROWSER_RECORDING_APP_WORDS`): 「記録する：<site>」 per site with what is and is not recorded; while recording the line
-  count, ［記録を止める］ ［捨てる］; then 「送る前に確かめてください」 with each line (ページ / 押した / 入力した / 送った, the
-  core's `browserRecordingLine`, `（推定）…` under it), ［消す］ per line, ［送る］ ［捨てる］ and that it is seen only by the
-  sender and the company's owners / admins and goes in 30 days.
+  `BROWSER_RECORDING_APP_WORDS`, button words only — the sentences come from main in the view's `notes` / `titles`, which keeps
+  the renderer bundle within its budget): 「記録する：<site>」 per site with what is and is not recorded; while recording the
+  line count, ［記録を止める］ ［捨てる］; then 「送る前に確かめてください」 with, first, **the warning that names of customers
+  may appear and how to hide them**, each line (ページ / 押した / 入力した / 送った, the core's `browserRecordingLine`,
+  `（推定）…` under it) with ［消す］, 「伏せる言葉」 (each hideable word, one press hides it everywhere), the other hosts with
+  ［消す］, ［送る］ ［捨てる］ and that it is seen only by the sender and the company's owners / admins and goes in 30 days.
 - **The server** (`routes/browser-recordings.ts` → `services/browser-recordings.ts` → the handle's `browserRecordings`,
   `ports/browser-recordings.ts`, `adapters/sqlite/browser-recordings.ts`, table `browser_recordings` in
   `db/schema/browser-recordings.ts`, **new table only**: company, `br_` + 32 hex, sender, domain, lines, the content as JSON,
@@ -2759,7 +2772,9 @@ never handed to the AI**: no AI route, record token, tool or prompt reads them.
   (`browserRecordingProblem`: every object exactly its keys, ids increasing, references only to earlier steps of the right
   kind, every address / label / key already in its kept form — so no digit run, `%`, `@`, query value or token rides in one —,
   every value a mark, no sensitive field, a password field only `secret`, other hosts valid and not the domain, ≤ 500 steps,
-  ≤ 512 KiB; `BROWSER_RECORDING_BAD`, `BROWSER_RECORDING_TOO_LARGE`). `GET /browser-recordings` (an owner / admin every one of
+  ≤ 512 KiB; `BROWSER_RECORDING_BAD`, `BROWSER_RECORDING_TOO_LARGE`), and **at most 20 kept per member and company**
+  (`BROWSER_RECORDING_PER_MEMBER`, 409 `BROWSER_RECORDING_LIMIT` in plain Japanese; one deleted or past its 30 days frees a
+  place). **Not in a company archive** (`ARCHIVE_EXCLUDED_TABLES`: temporary, read by the sender and that time's admins). `GET /browser-recordings` (an owner / admin every one of
   the company; anyone else their own), `GET|DELETE /browser-recordings/:recordingId`. **Who reads** (D2, checked on every read
   and delete): the sender — only what they sent while a member this time (`created_at` ≥ their membership's: someone who left
   and came back sees nothing of before) — and current owners / admins (a role taken away counts at once); anyone else, another
@@ -2771,8 +2786,8 @@ never handed to the AI**: no AI route, record token, tool or prompt reads them.
   people pages; owner/admin only, a member or a department manager sees 「このページはオーナーと管理者だけが使えます」 and nothing
   is asked; words `admin/src/lib/agent-browser-recordings.ts`): who sent it, when, the site, lines, when it goes; ［開く］ shows the
   steps in the core's words and the other hosts; ［消す］ behind a confirm.
-- **Remaining limits** (said): a path segment or key of letters only is kept as written (`/users/yamada`; a token counts as
-  one only with a digit); a label is what the page wrote on a button or field and may name a person; the symbols show a
+- **Remaining limits** (said): a lowercase name (`/users/tanaka`) passes the word rule — the person hides it before
+  sending; a label is what the page wrote on a button or field and may name a person; the symbols show a
   flow, not anonymity; `推定` links are by time and equal values only; a page's own worker and an out-of-process frame are not
   observed (their requests are not lines); a large body (> 64 KiB) or an upload has no field names (`null`).
 
@@ -2795,6 +2810,11 @@ matrix rows + `CROSS`, `company-scoped-sql.test.ts`, `jobs-schema.test.ts`, `adm
 (the recordings' send names the header). Each guard mutation-checked; kept on purpose: the recorder's second sensitive-name
 check after masking (the raw-name check in `browserBodyFields` catches first), the binding's context-id check (the binding
 exists only in the isolated world), `onDetach` ending a recording as `closed` (the window's `closed` handler does first).
+After the independent review: the word rule (capitals, dots, tokens, digits masked whole; `browser-recorder.test.ts` and the
+server's refusal table), `{k}` for keys that are data, every digit of a label, labels only from real controls (a row made a
+button, an option and a field named by `aria-labelledby` keep none — the real-Electron test), hiding a word and removing a
+host before sending (`browser-recorder.test.ts`, `browser-recording-app.test.ts`, `browser-settings.spec.ts`), the cap of 20
+(`browser-recordings.test.ts`) and the archive (`company-archive.test.ts`) — each mutation-checked.
 
 ## Not yet (later PRs)
 

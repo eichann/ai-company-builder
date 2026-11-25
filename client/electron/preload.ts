@@ -40,6 +40,7 @@ import type { PluginPackageRef } from '../shared/plugin-bridge'
 // lane B ▲
 // lane C ▼
 import type { BrowserConfirmResult } from '../shared/browser-plans'
+import type { BrowserRecordingEdit } from '../shared/browser-recorder'
 // lane C ▲
 // Use require for CommonJS compatibility in Electron preload
 // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -477,7 +478,7 @@ const api: ElectronAPI = {
   getBrowserRecording: (companyId: string) => invoke('browserRecording:get', companyId),
   startBrowserRecording: (companyId: string, host: string) => invoke('browserRecording:start', companyId, host),
   stopBrowserRecording: (companyId: string) => invoke('browserRecording:stop', companyId),
-  removeBrowserRecordingLine: (companyId: string, lineId: number) => invoke('browserRecording:removeLine', companyId, lineId),
+  editBrowserRecording: (companyId: string, change: BrowserRecordingEdit) => invoke('browserRecording:edit', companyId, change),
   sendBrowserRecording: (companyId: string) => invoke('browserRecording:send', companyId),
   discardBrowserRecording: (companyId: string) => invoke('browserRecording:discard', companyId),
   listPluginStepTurns: (companyId: string) => invoke('aiTurns:pluginTurns', companyId),

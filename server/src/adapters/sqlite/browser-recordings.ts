@@ -29,6 +29,9 @@ export function sqliteBrowserRecordingRepository(conn: Database.Database, compan
           .all(companyId, now, limit)
       return (rows as Array<Omit<DbRow, 'content'>>).map(toHead)
     },
+    countOf(userId, now) {
+      return (conn.prepare('SELECT COUNT(*) AS n FROM browser_recordings WHERE company_id = ? AND user_id = ? AND delete_at > ?').get(companyId, userId, now) as { n: number }).n
+    },
     delete(id) {
       return conn.prepare('DELETE FROM browser_recordings WHERE company_id = ? AND id = ?').run(companyId, id).changes === 1
     },

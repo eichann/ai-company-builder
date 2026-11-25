@@ -222,28 +222,40 @@ export type BrowserRecorder = ReturnType<typeof createBrowserRecorder>
 /** One line of the list the person sees before sending (only what the recording holds). */
 export interface BrowserRecordingLineView { id: number; kind: string; text: string; estimated: string | null }
 
-/** The member's recording in this company: none, recording (how many lines so far), or waiting to be checked and sent. */
+/**
+ * The member's recording in this company: none, recording (how many lines so far), or waiting to be checked and sent.
+ * `notes` are main's sentences for the screen (the renderer's bundle holds only short button words).
+ */
 export type BrowserRecordingView =
-  | { state: 'none'; message: string | null }
-  | { state: 'recording'; host: string; lines: number; full: boolean }
-  | { state: 'review'; host: string; lines: BrowserRecordingLineView[]; full: boolean; message: string | null }
+  | { state: 'none'; message: string | null; notes: string[] }
+  | { state: 'recording'; host: string; lines: number; notes: string[] }
+  | {
+    state: 'review'; host: string; lines: BrowserRecordingLineView[]; message: string | null; notes: string[]
+    /** The list's, the words' and the hosts' headings (main's words). */
+    titles: { lines: string; words: string; hosts: string }
+    /** Words the person may hide everywhere (`{x}`), with how often each appears. */
+    words: Array<{ word: string; count: number }>
+    /** The other hosts the window's pages asked for: kept unless the person removes them. */
+    hosts: Array<{ host: string; loaded: boolean }>
+  }
 
 export type BrowserRecordingResult = { ok: true; view: BrowserRecordingView } | { ok: false; message: string }
 
-/** The screen's words (the renderer's bundle holds only these; main's own sentences are in features/browser/recording.ts). */
+/** One change the person makes before sending: delete a line, hide a word everywhere, remove another host. */
+export type BrowserRecordingEdit = { kind: 'line'; id: number } | { kind: 'word'; word: string } | { kind: 'host'; host: string }
+
+/** The screen's words (the renderer's bundle holds only these; main's sentences are in features/browser/recording.ts). */
 export const BROWSER_RECORDING_APP_WORDS = {
   record: '記録する',
-  windowRecording: '（記録中）',
-  recordNote: 'いつもの作業を、サイトの窓で1回通してやってください。押したボタンと入力した欄の見出し、開いたページの形だけを記録します。入力した値・パスワード・ログインの情報は記録しません。',
-  recording: (host: string, lines: number) => `${host} を記録しています（${lines}行）。作業が終わったら［記録を止める］を押してください。`,
   stop: '記録を止める',
   discard: '捨てる',
   send: '送る',
   deleteLine: '消す',
-  reviewTitle: '送る前に確かめてください',
-  reviewNote: '要らない行は［消す］で消せます。送った記録は、あなたと会社のオーナー・管理者だけが見られ、30日で消えます。',
-  full: '長いので、ここで記録を止めました（500行まで）。',
+  hide: '伏せる',
 }
+
+/** What the window's title adds while it records (the shell's). */
+export const BROWSER_RECORDING_WINDOW_TITLE = '（記録中）'
 
 /** Who hears a recording's observations; `ended`: the window closed or the connection was lost (the recording is discarded). */
 export interface BrowserRecordingObserver {
@@ -274,22 +286,31 @@ export const BROWSER_RECORDING_SCRIPT = `(() => {
   // The binding's name is BROWSER_RECORDING_BINDING (spelled out: no call runs when the renderer loads this module).
   const send = (o) => { try { globalThis.__acbRecord(JSON.stringify(o)); } catch (e) {} };
   const clip = (s) => (typeof s === 'string' ? s : '').slice(0, 200);
-  const byIds = (ids) => (ids || '').split(/\\s+/).map(id => document.getElementById(id)).filter(Boolean).map(el => el.innerText || '').join(' ');
-  // A <label> wrapping its field: its own words only, never the field's options or value.
+  // Labels only from real controls (independent review of #846: a page makes whole rows buttons, and their text is data):
+  // a form field's own aria-label, <label> words, placeholder or title — never text another element points at; a native
+  // button's own text only when it holds few elements; anything else acting as a button or a choice only its aria-label
+  // or title, and nothing from a row, a list item or a cell, or an element holding many others.
+  const SMALL = 8;
+  const rowLike = (el) => el.matches('tr, td, th, li, [role=row], [role=gridcell], [role=cell], [role=listitem], [role=option], [role=menuitem]');
+  // A <label> of its field: its own words only, never the field's options or value.
   const ownText = (label) => { const c = label.cloneNode(true); c.querySelectorAll('input, select, textarea, option, datalist').forEach(n => n.remove()); return c.textContent || ''; };
-  const fieldLabel = (el) => clip(el.getAttribute('aria-label') || byIds(el.getAttribute('aria-labelledby'))
+  const fieldLabel = (el) => clip(el.getAttribute('aria-label')
     || (el.labels && el.labels[0] && ownText(el.labels[0])) || el.getAttribute('placeholder') || el.getAttribute('title') || '');
-  const buttonLabel = (el) => clip(el.getAttribute('aria-label') || byIds(el.getAttribute('aria-labelledby'))
-    || (el instanceof HTMLInputElement ? el.value : el.innerText) || el.getAttribute('title') || '');
+  const nativeButton = (el) => el instanceof HTMLButtonElement || (el instanceof HTMLInputElement && /^(submit|button|reset|image)$/.test(el.type));
+  const controlLabel = (el) => {
+    if (el instanceof HTMLInputElement) return nativeButton(el) ? clip(el.getAttribute('aria-label') || el.value || el.getAttribute('title') || '') : fieldLabel(el);
+    if (rowLike(el) || el.querySelectorAll('*').length > SMALL) return '';
+    if (nativeButton(el)) return clip(el.getAttribute('aria-label') || el.innerText || el.getAttribute('title') || '');
+    return clip(el.getAttribute('aria-label') || el.getAttribute('title') || '');
+  };
   document.addEventListener('click', (e) => {
     if (!e.isTrusted || !(e.target instanceof Element)) return;
     const t = e.target;
     const button = t.closest('button, [role=button], input[type=submit], input[type=button], input[type=reset], input[type=image]');
     const choice = t.closest('input[type=checkbox], input[type=radio], [role=checkbox], [role=radio], [role=tab], [role=menuitem], [role=option], [role=switch]');
     const link = t.closest('a[href]');
-    if (button) send({ type: 'click', role: 'button', label: buttonLabel(button) });
-    // An option or a menu item is often the data itself (a customer in a list): no label.
-    else if (choice) send({ type: 'click', role: 'choice', label: choice instanceof HTMLInputElement ? fieldLabel(choice) : choice.matches('[role=option], [role=menuitem]') ? '' : buttonLabel(choice) });
+    if (button) send({ type: 'click', role: 'button', label: controlLabel(button) });
+    else if (choice) send({ type: 'click', role: 'choice', label: controlLabel(choice) });
     else if (link) send({ type: 'click', role: 'link', href: link.href });
   }, true);
   document.addEventListener('change', (e) => {

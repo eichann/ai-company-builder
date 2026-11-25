@@ -96,15 +96,24 @@ const recSection = (page: import('@playwright/test').Page) => page.getByRole('re
 test('記録する: start, stop, delete a line, send — only the lines left are sent', async ({ page }) => {
   const { errors } = await openPreview(page, 'download-folders', { tab: 'browser', browser: '1' })
   const rec = recSection(page)
-  await expect(rec.getByText(/入力した値・パスワード・ログインの情報は記録しません。/)).toBeVisible()
+  await expect(rec.getByText('いつもの作業を、サイトの窓で1回通してやってください。')).toBeVisible()
   await rec.getByRole('button', { name: '記録する：manager.example.net' }).click()
   await expect(rec.getByRole('status')).toHaveText(/manager.example.net を記録しています（3行）/)
   await rec.getByRole('button', { name: '記録を止める' }).click()
   const list = rec.getByRole('list', { name: '送る前に確かめてください' })
   await expect(list.getByRole('listitem')).toHaveCount(4)
   await expect(list.getByText('（推定）手順3のあと')).toBeVisible()
+  await expect(rec.getByText(/お客さまなどの名前が入っていることがあります/)).toBeVisible()
   await rec.getByRole('button', { name: '消す 2' }).click()
   await expect(list.getByRole('listitem')).toHaveCount(3)
+  // A name hidden everywhere, and another host removed, before sending.
+  await rec.getByRole('button', { name: '伏せる tanaka' }).click()
+  await expect(rec.getByRole('button', { name: '伏せる tanaka' })).toHaveCount(0)
+  await rec.getByRole('button', { name: '消す cdn.example-assets.test' }).click()
+  await expect(rec.getByText('cdn.example-assets.test')).toHaveCount(0)
+  expect(await page.evaluate(() => (window as unknown as { recordingEdits?: unknown[] }).recordingEdits)).toEqual([
+    { kind: 'line', id: 2 }, { kind: 'word', word: 'tanaka' }, { kind: 'host', host: 'cdn.example-assets.test' },
+  ])
   expect(await page.evaluate(() => (window as unknown as { recordingSent?: number[] }).recordingSent)).toBeUndefined()
   await rec.getByRole('button', { name: '送る' }).click()
   await expect(rec.getByRole('status')).toHaveText('記録を送りました。管理者に「記録を送りました」と伝えてください。')

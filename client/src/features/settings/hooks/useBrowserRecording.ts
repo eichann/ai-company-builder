@@ -2,7 +2,7 @@
 // the section mounts, replaced by the answer of each press, and read again when main says it changed by itself (the
 // site's window closed and the recording was discarded).
 import { useCallback, useRef, useState } from 'react'
-import type { BrowserRecordingResult, BrowserRecordingView } from '../../../../shared/browser-recorder'
+import type { BrowserRecordingEdit, BrowserRecordingResult, BrowserRecordingView } from '../../../../shared/browser-recorder'
 import { useIpcEvent } from '../../../shared/hooks/useIpcEvent'
 import { browserRecordingCalls, onBrowserChanged } from '../api'
 
@@ -41,7 +41,7 @@ export function useBrowserRecording(companyId: string) {
     loadRef, view, message, busy,
     start: (host: string) => run(() => calls.start(companyId, host)),
     stop: () => run(() => calls.stop(companyId)),
-    removeLine: (id: number) => run(() => calls.removeLine(companyId, id)),
+    edit: (change: BrowserRecordingEdit) => run(() => calls.edit(companyId, change)),
     send: () => run(() => calls.send(companyId)),
     discard: () => run(() => calls.discard(companyId)),
   }

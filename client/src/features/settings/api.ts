@@ -6,6 +6,7 @@
 import type { ElectronAPI, ElectronPort } from '../../shared/ipc/electron-api'
 import type { GoogleFeature, GoogleRelayService } from '../../../shared/google'
 import type { SlackFeature } from '../../../shared/slack'
+import type { BrowserRecordingEdit } from '../../../shared/browser-recorder'
 import { FULL_ACCESS_ROLES } from '../../../../shared/core/permissions'
 import type { MeetingAutoReadMode } from '../../../../shared/core/minutes'
 import { googlePermission } from '../../shared/lib/googlePermission'
@@ -291,13 +292,13 @@ export function withdrawBrowserPc(companyId: string, port: BrowserPcPort = windo
 }
 
 /** 「記録する」: the member's recording of a site (lines in their kept form — never a value). */
-export type BrowserRecordingPort = ElectronPort<'getBrowserRecording' | 'startBrowserRecording' | 'stopBrowserRecording' | 'removeBrowserRecordingLine' | 'sendBrowserRecording' | 'discardBrowserRecording'>
+export type BrowserRecordingPort = ElectronPort<'getBrowserRecording' | 'startBrowserRecording' | 'stopBrowserRecording' | 'editBrowserRecording' | 'sendBrowserRecording' | 'discardBrowserRecording'>
 
 export const browserRecordingCalls = (port: BrowserRecordingPort = window.electronAPI) => ({
   get: (companyId: string) => port.getBrowserRecording(companyId),
   start: (companyId: string, host: string) => port.startBrowserRecording(companyId, host),
   stop: (companyId: string) => port.stopBrowserRecording(companyId),
-  removeLine: (companyId: string, lineId: number) => port.removeBrowserRecordingLine(companyId, lineId),
+  edit: (companyId: string, change: BrowserRecordingEdit) => port.editBrowserRecording(companyId, change),
   send: (companyId: string) => port.sendBrowserRecording(companyId),
   discard: (companyId: string) => port.discardBrowserRecording(companyId),
 })

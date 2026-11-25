@@ -100,46 +100,49 @@ const SENSITIVE_RE = /pass|pwd|secret|token|csrf|xsrf|session|sess_?id|auth|api[
 const PW_RE = /(^|[^a-z])pw([^a-z]|$)/i
 export const isSensitiveFieldName = (name: string): boolean => SENSITIVE_RE.test(name) || PW_RE.test(name)
 
-const TOKEN_LIKE = (s: string) =>
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s)
-  || (/^[0-9a-f]{12,}$/i.test(s) && /[0-9]/.test(s))
-  || (s.length >= 16 && /^[A-Za-z0-9_~=.-]+$/.test(s) && /[0-9]/.test(s) && /[A-Za-z]/.test(s))
-const DIGITS = /[0-9]+/g
-const PLACEHOLDERS = ['{n}', '{x}', '{mail}'] as const
+/**
+ * A word a recording keeps as written (a path segment, a query key, one part of a key): lowercase ASCII letters joined by
+ * `-` or `_` (a leading `_` too: `_method`), at most 24. Anything else — a digit, a capital, a dot, `@`, `%`, a character
+ * not ASCII, longer — is not kept: it may be a name, an e-mail or a token (independent review of #846). A lowercase name
+ * such as `tanaka` still passes: the person hides it on the review screen (`browserRecordingHide`).
+ */
+const WORD_RE = /^_?[a-z]+(?:[-_][a-z]+)*$/
+const WORD_MAX = 24
+const isWord = (s: string) => s.length <= WORD_MAX && WORD_RE.test(s)
+/** `{n}` a number, `{x}` anything not kept (or hidden by the person), `{k}` keys that are data (many of one shape). */
+const PLACEHOLDERS = ['{n}', '{x}', '{k}'] as const
+const isPlaceholder = (s: string) => (PLACEHOLDERS as readonly string[]).includes(s)
 
-/** One segment of a path: digit runs → `{n}`, a token / anything encoded or not plain → `{x}`. */
-function segmentPattern(seg: string): string {
-  if (seg === '') return ''
-  if (seg.length > BROWSER_RECORDING_LIMITS.key || /[^A-Za-z0-9_.~-]/.test(seg) || TOKEN_LIKE(seg)) return '{x}'
-  if (seg === '.' || seg === '..') return '{x}'
-  return seg.replace(DIGITS, '{n}')
+/** One word as kept: all digits → `{n}`, a plain word as it is, anything else → `{x}` (whole, never digit by digit). */
+function wordPattern(s: string): string {
+  if (/^[0-9]+$/.test(s)) return '{n}'
+  return isWord(s) ? s : '{x}'
 }
 
 /**
- * A key as a recording keeps it (a field name, a query key, a JSON key): all digits → `{n}`, e-mail-like → `{mail}`, a
- * token or anything not a plain name → `{x}`, else its digit runs → `{n}`. `json`: one JSON key (no `.` or `[]`, which
- * the key shape uses as its separators).
+ * A key as a recording keeps it. `json`: one JSON key (a key path's part). Otherwise a form field's name or a query key,
+ * `name[part][part]` with each part a word (`items[0][name]` → `items[{n}][name]`, `user[Tanaka]` → `user[{x}]`).
  */
 export function browserKeyPattern(key: string, json = false): string {
-  if (/^[0-9]+$/.test(key)) return '{n}'
-  if (/@/.test(key)) return '{mail}'
-  const plain = json ? /^[A-Za-z_$][A-Za-z0-9_$-]*$/ : /^[A-Za-z_$][A-Za-z0-9_$.\-[\]]*$/
-  if (key.length > BROWSER_RECORDING_LIMITS.key || !plain.test(key) || TOKEN_LIKE(key)) return '{x}'
-  return key.replace(DIGITS, '{n}')
+  if (json) return wordPattern(key)
+  const m = /^([^[\]]+)((?:\[[^[\]]*\])*)$/.exec(key)
+  if (!m || key.length > 120) return '{x}'
+  const parts = [...m[2].matchAll(/\[([^[\]]*)\]/g)].map(p => (p[1] === '' ? '[]' : `[${wordPattern(p[1])}]`))
+  return `${wordPattern(m[1])}${parts.join('')}`
 }
 
 /**
- * An address of the operated host as a pattern (`/items/{n}/edit?page&q`), or null for another host, another scheme or
+ * An address of the operated host as a pattern (`/orders/{n}/edit?page&q`), or null for another host, another scheme or
  * something that is not an address. Never its query values, fragment, user or port.
  */
 export function browserAddressPattern(url: string, domain: string): string | null {
   let u: URL
   try { u = new URL(url) } catch { return null }
   if (u.protocol !== 'https:' || u.hostname !== domain) return null
-  const path = u.pathname.split('/').map(segmentPattern).join('/') || '/'
+  const path = u.pathname.split('/').map(seg => (seg === '' ? '' : wordPattern(seg))).join('/') || '/'
   const keys: string[] = []
   for (const k of u.searchParams.keys()) {
-    const p = browserKeyPattern(k)
+    const p = wordPattern(k)
     if (!keys.includes(p) && keys.length < BROWSER_RECORDING_LIMITS.queryKeys) keys.push(p)
   }
   const pattern = keys.length > 0 ? `${path}?${keys.join('&')}` : path
@@ -157,13 +160,13 @@ export function browserOtherHost(url: string, domain: string): string | null {
 
 /**
  * A button's or field's label as kept: NFKC, whitespace collapsed, e-mail-like text → `{mail}`, an address → `{url}`,
- * runs of two or more digits → `{n}` (an amount, a phone number, an id), at most 60 characters. Applying it twice changes
- * nothing (the server checks a stored label is already in this form). Empty → null.
+ * **every digit run** → `{n}` (an amount, a phone number, an id, a date), at most 60 characters. Applying it twice
+ * changes nothing (the server checks a stored label is already in this form). Empty → null.
  */
 export function browserLabel(text: unknown): string | null {
   if (typeof text !== 'string') return null
   let s = text.normalize('NFKC').replace(/[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u2028-\u202e\u2066-\u2069]/g, ' ')
-  s = s.replace(/\S+@\S+/g, '{mail}').replace(/(https?|wss?):\/\/\S*/gi, '{url}').replace(/[0-9]{2,}/g, '{n}')
+  s = s.replace(/\S+@\S+/g, '{mail}').replace(/(https?|wss?):\/\/\S*/gi, '{url}').replace(/[0-9]+/g, '{n}')
   s = s.replace(/\s+/g, ' ').trim()
   if (s.length > BROWSER_RECORDING_LIMITS.label) s = `${s.slice(0, BROWSER_RECORDING_LIMITS.label - 3).trimEnd()}...`
   return s === '' ? null : s
@@ -195,6 +198,11 @@ export function createBrowserValueSymbols(digest: (value: string) => string) {
 }
 export type BrowserValueSymbols = ReturnType<typeof createBrowserValueSymbols>
 
+/** More keys than this sharing one value shape in an object are data (customers by name), kept as `{k}`. */
+const DATA_KEYS_AFTER = 5
+const shapeOf = (v: unknown): string =>
+  Array.isArray(v) ? 'a' : v && typeof v === 'object' ? `o:${Object.keys(v as object).sort().join(',')}` : typeof v
+
 /** The JSON key shape of an answer (`items[].id`, keys masked) and its scalar leaves (for "seen before"; never kept). */
 export function browserJsonShape(value: unknown): { keys: string[]; leaves: Array<{ key: string; value: string }> } {
   const keys: string[] = []
@@ -206,10 +214,13 @@ export function browserJsonShape(value: unknown): { keys: string[]; leaves: Arra
       return
     }
     if (v && typeof v === 'object') {
-      for (const [k, child] of Object.entries(v as Record<string, unknown>).slice(0, 200)) {
-        // A password / token / session key goes whole, with everything under it.
-        if (isSensitiveFieldName(k)) continue
-        const p = path === '' ? browserKeyPattern(k, true) : `${path}.${browserKeyPattern(k, true)}`
+      // A password / token / session key goes whole, with everything under it.
+      const entries = Object.entries(v as Record<string, unknown>).filter(([k]) => !isSensitiveFieldName(k))
+      const shapes = new Map<string, number>()
+      for (const [, child] of entries) shapes.set(shapeOf(child), (shapes.get(shapeOf(child)) ?? 0) + 1)
+      for (const [k, child] of entries.slice(0, 200)) {
+        const part = (shapes.get(shapeOf(child)) ?? 0) > DATA_KEYS_AFTER ? '{k}' : browserKeyPattern(k, true)
+        const p = path === '' ? part : `${path}.${part}`
         if (!keys.includes(p) && keys.length < BROWSER_RECORDING_LIMITS.answerKeys) keys.push(p)
         walk(child, p, depth + 1)
       }
@@ -262,39 +273,39 @@ export function browserBodyFields(contentType: string | undefined, body: string)
 
 // ── Checking a stored recording (the server's rule) ─────────────────────────
 
-const ADDRESS_RE = /^\/[A-Za-z_.~\-{}/]*(\?[A-Za-z_$.\-[\]{}&]*)?$/
 const METHODS = ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS', 'OTHER'] as const
 const OVERRIDES = ['PUT', 'PATCH', 'DELETE'] as const
 
-const placeholdersOnly = (s: string) => !/[{}]/.test(PLACEHOLDERS.reduce((t, p) => t.split(p).join(''), s))
+/** A word as `wordPattern` writes it (or a placeholder). */
+const isKeptWord = (s: string) => isPlaceholder(s) || isWord(s)
 
 export function isBrowserAddressPattern(s: unknown): s is string {
-  if (typeof s !== 'string' || s.length > BROWSER_RECORDING_LIMITS.address || !ADDRESS_RE.test(s) || !placeholdersOnly(s)) return false
-  const [path, query] = s.split('?')
-  if (path.split('/').some(seg => seg !== '' && segmentPattern(seg.split('{n}').join('0')) !== seg && seg !== '{x}')) return false
+  if (typeof s !== 'string' || s.length > BROWSER_RECORDING_LIMITS.address || !s.startsWith('/')) return false
+  const [path, query, ...rest] = s.split('?')
+  if (rest.length > 0 || path.split('/').some(seg => seg !== '' && !isKeptWord(seg))) return false
   if (query !== undefined) {
     const keys = query.split('&')
     if (keys.length > BROWSER_RECORDING_LIMITS.queryKeys || new Set(keys).size !== keys.length) return false
-    if (keys.some(k => k === '' || !isKeyPattern(k, false))) return false
+    if (keys.some(k => !isKeptWord(k))) return false
   }
   return true
 }
 
-/** A key as `browserKeyPattern` writes it (it holds no digit: digit runs are `{n}`). */
-function isKeyPattern(k: string, json: boolean): boolean {
-  if ((PLACEHOLDERS as readonly string[]).includes(k)) return true
-  if (/[0-9]/.test(k) || !placeholdersOnly(k)) return false
-  return browserKeyPattern(k.split('{n}').join('0'), json) === k
+/** A form field's name as `browserKeyPattern` writes it. */
+function isFormName(k: string): boolean {
+  const m = /^([^[\]]+)((?:\[[^[\]]*\])*)$/.exec(k)
+  if (!m || !isKeptWord(m[1])) return false
+  return [...m[2].matchAll(/\[([^[\]]*)\]/g)].every(p => p[1] === '' || isKeptWord(p[1]))
 }
 
 /** An answer key path (`items[].id`) or a body field's name (a JSON body's are paths too). */
 function isKeyPath(p: unknown, allowFormName: boolean): p is string {
   if (typeof p !== 'string' || p === '' || p.length > 300) return false
-  if (allowFormName && isKeyPattern(p, false)) return true
+  if (allowFormName && isFormName(p)) return true
   // A root array's items are `[]` / `[].id` (browserJsonShape): only the first segment may be bare brackets.
   return p.split('.').every((seg, i) => {
     const base = seg.replace(/(\[\])+$/, '')
-    return base === '' ? i === 0 && seg !== '' : isKeyPattern(base, true)
+    return base === '' ? i === 0 && seg !== '' : isKeptWord(base)
   })
 }
 
@@ -350,7 +361,7 @@ export function browserRecordingProblem(content: unknown, domain: string): strin
         break
       case 'input':
         if (!exactKeys(s, ['id', 'kind', 'label', 'name', 'value', 'from'])) return 'input'
-        if (!isLabel(s.label) || !(s.name === null || isKeyPattern(s.name as string, false)) || !isBrowserValueMark(s.value)) return 'input'
+        if (!isLabel(s.label) || !(s.name === null || isFormName(s.name as string)) || !isBrowserValueMark(s.value)) return 'input'
         if (typeof s.name === 'string' && isSensitiveFieldName(s.name) && s.value !== 'secret') return 'input'
         if (!source(s.from, s.id)) return 'input'
         break
@@ -401,6 +412,76 @@ export function browserRecordingWithout(content: BrowserRecordingContent, ids: r
       }
     }
     return s
+  })
+  return { ...content, steps }
+}
+
+/** The recording without one of the other hosts (the person removed it before sending). */
+export function browserRecordingWithoutHost(content: BrowserRecordingContent, host: string): BrowserRecordingContent {
+  return { ...content, hosts: content.hosts.filter(h => h.host !== host) }
+}
+
+// ── Hiding a word everywhere (the person, before sending) ──────────────────
+
+/** Every word of an address (its segments and query keys). */
+const addressWords = (a: string) => {
+  const [path, query] = a.split('?')
+  return [...path.split('/'), ...(query ? query.split('&') : [])]
+}
+/** Every word of a key path or a form name (`items[].id`, `user[name]`). */
+const keyWords = (k: string) => k.split(/[.[\]]+/)
+const hideInAddress = (a: string, word: string) => {
+  const [path, query] = a.split('?')
+  const p = path.split('/').map(seg => (seg === word ? '{x}' : seg)).join('/')
+  if (query === undefined) return p
+  const keys = [...new Set(query.split('&').map(k => (k === word ? '{x}' : k)))]
+  return `${p}?${keys.join('&')}`
+}
+const hideInKey = (k: string, word: string) => k.replace(/[^.[\]]+/g, part => (part === word ? '{x}' : part))
+
+/**
+ * The words of a recording a person may hide (`browserRecordingHide`): every label and every word of an address, a field
+ * name or an answer key that is not already a placeholder — each once, with how often it appears.
+ */
+export function browserRecordingHideable(content: BrowserRecordingContent): Array<{ word: string; count: number }> {
+  const counts = new Map<string, number>()
+  const add = (w: string | null | undefined) => {
+    if (!w || isPlaceholder(w) || w === '[]') return
+    counts.set(w, (counts.get(w) ?? 0) + 1)
+  }
+  for (const s of content.steps) {
+    if (s.kind === 'page') addressWords(s.address).forEach(add)
+    if (s.kind === 'click') { add(s.label); if (s.address) addressWords(s.address).forEach(add) }
+    if (s.kind === 'input') { add(s.label); if (s.name) keyWords(s.name).forEach(add); if (s.from) keyWords(s.from.key).forEach(add) }
+    if (s.kind === 'send') {
+      addressWords(s.address).forEach(add)
+      for (const f of s.fields ?? []) { keyWords(f.name).forEach(add); if (f.from) keyWords(f.from.key).forEach(add) }
+      for (const k of s.answerKeys ?? []) keyWords(k).forEach(add)
+    }
+  }
+  return [...counts].map(([word, count]) => ({ word, count })).sort((a, b) => a.word.localeCompare(b.word))
+}
+
+/**
+ * The recording with `word` replaced by `{x}` everywhere it stands whole: a label equal to it, an address's segment or
+ * query key, a part of a field name, an answer key or a value's source. What remains still passes the server's check.
+ */
+export function browserRecordingHide(content: BrowserRecordingContent, word: string): BrowserRecordingContent {
+  if (!word || isPlaceholder(word)) return content
+  const label = (l: string | null) => (l === word ? '{x}' : l)
+  const from = (f: BrowserRecordedSource | null) => (f ? { ...f, key: hideInKey(f.key, word) } : null)
+  const steps = content.steps.map((s): BrowserRecordingStep => {
+    switch (s.kind) {
+      case 'page': return { ...s, address: hideInAddress(s.address, word) }
+      case 'click': return { ...s, label: label(s.label), address: s.address ? hideInAddress(s.address, word) : null }
+      case 'input': return { ...s, label: label(s.label), name: s.name ? hideInKey(s.name, word) : null, from: from(s.from) }
+      case 'send': return {
+        ...s,
+        address: hideInAddress(s.address, word),
+        fields: s.fields ? s.fields.map(f => ({ ...f, name: hideInKey(f.name, word), from: from(f.from) })) : null,
+        answerKeys: s.answerKeys ? [...new Set(s.answerKeys.map(k => hideInKey(k, word)))] : null,
+      }
+    }
   })
   return { ...content, steps }
 }

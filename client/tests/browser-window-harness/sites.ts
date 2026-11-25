@@ -21,6 +21,8 @@ const RECORDING_PAGE = `<!doctype html><meta charset="utf-8"><title>orders</titl
 <button id="save" type="button">保存</button>
 <a id="customer" href="/customers/90211">山田花子さんの注文</a>
 <div role="listbox"><div role="option" id="pick">鈴木一郎</div></div>
+<table><tr role="button" id="row" aria-label="佐藤三郎さんの行"><td>佐藤三郎</td><td>営業</td></tr></table>
+<span id="who">高橋次郎</span><input id="memo2" aria-labelledby="who" name="memo">
 <script>
   fetch('/rec-api/48213').then(r => r.json())
   document.getElementById('save').addEventListener('click', () => {

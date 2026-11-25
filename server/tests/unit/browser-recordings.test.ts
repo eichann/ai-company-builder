@@ -118,6 +118,12 @@ describe('what may be stored (the server\'s own check)', () => {
     expect(browserRecordingProblem(rooted, DOMAIN)).toBeNull()
     ;(rooted.steps[1] as { answerKeys: string[] }).answerKeys = ['id.[]']
     expect(browserRecordingProblem(rooted, DOMAIN)).not.toBeNull()
+    // Keys that are data, and words the person hid.
+    const hidden = recording()
+    ;(hidden.steps[1] as { answerKeys: string[] }).answerKeys = ['customers', 'customers.{k}', 'customers.{k}.phone']
+    ;(hidden.steps[3] as { label: string }).label = '{x}'
+    ;(hidden.steps[0] as { address: string }).address = '/orders/{x}?{x}'
+    expect(browserRecordingProblem(hidden, DOMAIN)).toBeNull()
   })
 
   it('a value, a token field, an unmasked address, label or key, or a dangling reference is refused', () => {
@@ -136,6 +142,12 @@ describe('what may be stored (the server\'s own check)', () => {
       ['a link with its text', c => { (c.steps[5] as { label: string | null }).label = '山田花子さんの注文' }],
       ['a label with an e-mail', c => { (c.steps[3] as { label: string }).label = 'hanako@example.com に送る' }],
       ['a label with a number', c => { (c.steps[3] as { label: string }).label = '注文 48213 を保存' }],
+      ['a label with a single digit (review of #846: every digit is masked)', c => { (c.steps[3] as { label: string }).label = '3件を保存' }],
+      ['a name with a capital in an address', c => { (c.steps[0] as { address: string }).address = '/users/Yamada' }],
+      ['a name with a dot in an address', c => { (c.steps[0] as { address: string }).address = '/users/yamada.taro' }],
+      ['a letters-only token in an address', c => { (c.steps[0] as { address: string }).address = '/reset/abcdefghijklmnopqrstuvwxyz' }],
+      ['a capitalised answer key', c => { (c.steps[1] as { answerKeys: string[] }).answerKeys.push('Tanaka') }],
+      ['a capitalised part of a field name', c => { (c.steps[4] as { fields: unknown[] }).fields.push({ name: 'user[Tanaka]', value: '値2', from: null }) }],
       ['an e-mail as an answer key', c => { (c.steps[1] as { answerKeys: string[] }).answerKeys.push('hanako@example.com') }],
       ['a number as an answer key', c => { (c.steps[1] as { answerKeys: string[] }).answerKeys.push('48213') }],
       ['a non-ASCII answer key', c => { (c.steps[1] as { answerKeys: string[] }).answerKeys.push('山田花子') }],
@@ -156,12 +168,12 @@ describe('what may be stored (the server\'s own check)', () => {
     }
   })
 
-  it('the kept forms: digit runs and tokens masked, query keys only, labels without numbers or e-mails, applying twice changes nothing', () => {
+  it('the kept forms: numbers, tokens and anything not a plain lowercase word masked, query keys only, labels without digits or e-mails, applying twice changes nothing', () => {
     expect(browserAddressPattern(`https://${DOMAIN}/orders/48213/items/a8f3k2j9d0s8f7g6h5j4?page=2&q=山田#x`, DOMAIN)).toBe('/orders/{n}/items/{x}?page&q')
     expect(browserAddressPattern(`https://other.example.test/orders/1`, DOMAIN)).toBeNull()
     expect(browserAddressPattern(`http://${DOMAIN}/orders/1`, DOMAIN)).toBeNull()
     expect(browserKeyPattern('48213')).toBe('{n}')
-    expect(browserKeyPattern('hanako@example.com')).toBe('{mail}')
+    expect(browserKeyPattern('hanako@example.com')).toBe('{x}')
     expect(browserKeyPattern('山田')).toBe('{x}')
     expect(browserKeyPattern('items[0][name]')).toBe('items[{n}][name]')
     for (const text of ['  保存 ', '注文 48213 を保存', 'hanako@example.com に送る', 'https://x.test/a を開く', '受付終了日'.repeat(20)]) {
@@ -206,6 +218,19 @@ describe('sending', () => {
     // Owners and admins follow the same table.
     value(grants.set(owner, owner.userId, { host: DOMAIN, level: 'none' }))
     expect(code(send(owner, undefined))).toBe('BROWSER_NOT_ALLOWED')
+  })
+
+  it('one member keeps at most 20 recordings in a company at once (each goes after 30 days or when deleted)', () => {
+    const key = enabledPc(alice)
+    const sent = Array.from({ length: 20 }, () => value(send(alice, key)))
+    const refused = send(alice, key)
+    expect(code(refused)).toBe('BROWSER_RECORDING_LIMIT')
+    expect(refused.ok ? '' : refused.body.error).toMatch(/20件/)
+    expect(status(send(bob, enabledPc(bob)))).toBe('ok')
+    value(svc.remove(alice, sent[0].id))
+    expect(status(send(alice, key))).toBe('ok')
+    now = T0 + 30 * DAY
+    expect(status(send(alice, key))).toBe('ok')
   })
 
   it('a recording that is not in its kept form is refused and nothing is stored', () => {

@@ -76,8 +76,8 @@ contract.invoke browserPlans:get
 contract.invoke browserPlans:list
 contract.invoke browserPlans:run
 contract.invoke browserRecording:discard
+contract.invoke browserRecording:edit
 contract.invoke browserRecording:get
-contract.invoke browserRecording:removeLine
 contract.invoke browserRecording:send
 contract.invoke browserRecording:start
 contract.invoke browserRecording:stop
@@ -451,6 +451,7 @@ contract.type ElectronAPI.disconnectGoogle = disconnectGoogle: Invoke<'google:di
 contract.type ElectronAPI.disconnectSlack = disconnectSlack: Invoke<'slack:disconnect'>
 contract.type ElectronAPI.dismissAppLinkServer = dismissAppLinkServer: Invoke<'appLink:dismissServer'>
 contract.type ElectronAPI.dropLinkOnRecord = dropLinkOnRecord: Invoke<'tasks:dropLink'>
+contract.type ElectronAPI.editBrowserRecording = editBrowserRecording: Invoke<'browserRecording:edit'>
 contract.type ElectronAPI.editCompanySkillLocally = editCompanySkillLocally: Invoke<'skillShelf:editLocally'>
 contract.type ElectronAPI.exists = exists: Invoke<'fs:exists'>
 contract.type ElectronAPI.exportManual = exportManual: Invoke<'manual:export'>
@@ -621,7 +622,6 @@ contract.type ElectronAPI.registerAllowedRoot = registerAllowedRoot: Invoke<'fs:
 contract.type ElectronAPI.registerBrowserPc = registerBrowserPc: Invoke<'browserDevice:register'>
 contract.type ElectronAPI.reloadDocView = reloadDocView: Invoke<'docView:reload'>
 contract.type ElectronAPI.removeAbsence = removeAbsence: Invoke<'absences:remove'>
-contract.type ElectronAPI.removeBrowserRecordingLine = removeBrowserRecordingLine: Invoke<'browserRecording:removeLine'>
 contract.type ElectronAPI.removeOutboundMailAttachment = removeOutboundMailAttachment: Invoke<'outboundMail:removeAttachment'>
 contract.type ElectronAPI.renameItem = renameItem: Invoke<'fs:rename'>
 contract.type ElectronAPI.reportChatWindowStatus = reportChatWindowStatus: Invoke<'chatWindow:reportStatus'>
@@ -888,8 +888,8 @@ contract.type IpcInvokeChannels.'browserPlans:get' = 'browserPlans:get': { args:
 contract.type IpcInvokeChannels.'browserPlans:list' = 'browserPlans:list': { args: [companyId: string]; result: BrowserPlanListResult }
 contract.type IpcInvokeChannels.'browserPlans:run' = 'browserPlans:run': { args: [companyId: string, planId: string, contentHash: string]; result: BrowserPlanRunAnswer }
 contract.type IpcInvokeChannels.'browserRecording:discard' = 'browserRecording:discard': { args: [companyId: string]; result: BrowserRecordingResult }
+contract.type IpcInvokeChannels.'browserRecording:edit' = 'browserRecording:edit': { args: [companyId: string, change: BrowserRecordingEdit]; result: BrowserRecordingResult }
 contract.type IpcInvokeChannels.'browserRecording:get' = 'browserRecording:get': { args: [companyId: string]; result: BrowserRecordingResult }
-contract.type IpcInvokeChannels.'browserRecording:removeLine' = 'browserRecording:removeLine': { args: [companyId: string, lineId: number]; result: BrowserRecordingResult }
 contract.type IpcInvokeChannels.'browserRecording:send' = 'browserRecording:send': { args: [companyId: string]; result: BrowserRecordingResult }
 contract.type IpcInvokeChannels.'browserRecording:start' = 'browserRecording:start': { args: [companyId: string, host: string]; result: BrowserRecordingResult }
 contract.type IpcInvokeChannels.'browserRecording:stop' = 'browserRecording:stop': { args: [companyId: string]; result: BrowserRecordingResult }
@@ -1250,8 +1250,8 @@ main.handle browserPlans:get @ features/browser/plans-ipc.ts (companyId, planId)
 main.handle browserPlans:list @ features/browser/plans-ipc.ts (companyId)
 main.handle browserPlans:run @ features/browser/plans-ipc.ts (companyId, planId, contentHash)
 main.handle browserRecording:discard @ features/browser/recording-ipc.ts (companyId)
+main.handle browserRecording:edit @ features/browser/recording-ipc.ts (companyId, change)
 main.handle browserRecording:get @ features/browser/recording-ipc.ts (companyId)
-main.handle browserRecording:removeLine @ features/browser/recording-ipc.ts (companyId, lineId)
 main.handle browserRecording:send @ features/browser/recording-ipc.ts (companyId)
 main.handle browserRecording:start @ features/browser/recording-ipc.ts (companyId, host)
 main.handle browserRecording:stop @ features/browser/recording-ipc.ts (companyId)
@@ -1600,6 +1600,8 @@ preload dismissAppLinkServer -> invoke appLink:dismissServer()
 preload dismissAppLinkServer : () => Promise<void>
 preload dropLinkOnRecord -> invoke tasks:dropLink($0, $1, $2, $3)
 preload dropLinkOnRecord : (companyId: string, targetId: string, dropped: DroppedThing, link?: string | undefined) => Promise<DropLinkResult>
+preload editBrowserRecording -> invoke browserRecording:edit($0, $1)
+preload editBrowserRecording : (companyId: string, change: BrowserRecordingEdit) => Promise<BrowserRecordingResult>
 preload editCompanySkillLocally -> invoke skillShelf:editLocally($0, $1)
 preload editCompanySkillLocally : (rootPath: string, skillPath: string) => Promise<SimpleResult>
 preload exists -> invoke fs:exists($0)
@@ -1940,8 +1942,6 @@ preload reloadDocView -> invoke docView:reload($0)
 preload reloadDocView : (viewId: number) => Promise<void>
 preload removeAbsence -> invoke absences:remove($0, $1)
 preload removeAbsence : (companyId: string, absenceId: string) => Promise<AbsenceRemoveResult>
-preload removeBrowserRecordingLine -> invoke browserRecording:removeLine($0, $1)
-preload removeBrowserRecordingLine : (companyId: string, lineId: number) => Promise<BrowserRecordingResult>
 preload removeOutboundMailAttachment -> invoke outboundMail:removeAttachment($0, $1, $2, $3)
 preload removeOutboundMailAttachment : (companyId: string, messageId: string, sha256: string, expectedVersion: number) => Promise<OutboundMailResult>
 preload renameItem -> invoke fs:rename($0, $1)

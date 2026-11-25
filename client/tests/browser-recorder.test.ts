@@ -9,7 +9,10 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { createBrowserRecorder, createPageDebuggerOwner, type BrowserRecordingObservation } from '../shared/browser-recorder'
-import { browserRecordingProblem, browserRecordingWithout, type BrowserRecordedSend } from '../../shared/core/browser-recording'
+import {
+  browserAddressPattern, browserJsonShape, browserKeyPattern, browserLabel, browserRecordingHide, browserRecordingHideable, browserRecordingProblem,
+  browserRecordingWithout, browserRecordingWithoutHost, type BrowserRecordedSend,
+} from '../../shared/core/browser-recording'
 import { newRecordingDigest } from '../electron/features/browser/recording'
 
 const DOMAIN = 'shop.example.test'
@@ -113,7 +116,7 @@ test('what is kept: address patterns, button and field labels, field names, symb
     'click button ログイン',
     'send POST /session [email=値1,remember=値2] 302 - after=4',
     'page /orders/{n}?tab&q',
-    'send GET /api/orders/{n}?include [] 200 {n},{n}.note,id,name,customer,customer.name,customer.phone,{mail},items,items[].id,items[].qty,end_date after=null',
+    'send GET /api/orders/{n}?include [] 200 {n},{n}.note,id,name,customer,customer.name,customer.phone,{x},items,items[].id,items[].qty,end_date after=null',
     'click link  /customers/{n}',
     'input 受付終了日 end_date 値3 from 7:end_date',
     'input 担当メモ({n}-{n}-{n}) memo 値4 from 7:customer.name',
@@ -194,4 +197,45 @@ test('the window\'s DevTools connection: the AI\'s gate and a recording never ho
   assert.equal(owner.claim('ai'), true)
   assert.equal(owner.claim('recording'), false, 'no recording while the AI operates')
   assert.equal(owner.claim('ai'), true, 'the holder may ask again')
+})
+
+
+test('addresses and keys keep only plain lowercase words: names, tokens, capitals, dots, digits are masked whole (review of #846)', () => {
+  const a = (path: string) => browserAddressPattern(`https://${DOMAIN}${path}`, DOMAIN)
+  assert.equal(a('/users/yamada.taro/edit'), '/users/{x}/edit')
+  assert.equal(a('/invite/Kx7Pq2Rt9mZ'), '/invite/{x}')
+  assert.equal(a('/reset/KxPqRtmZabcdQw'), '/reset/{x}', 'a letters-only token with capitals')
+  assert.equal(a('/reset/abcdefghijklmnopqrstuvwxyz'), '/reset/{x}', 'longer than 24')
+  assert.equal(a('/orders/48213/a1b2'), '/orders/{n}/{x}', 'digits mask a whole segment, never digit by digit')
+  assert.equal(a('/顧客/山田'), '/{x}/{x}')
+  assert.equal(a('/search/tanaka?Name=x&page=2'), '/search/tanaka?{x}&page', 'a lowercase name passes: the person hides it')
+  assert.equal(browserKeyPattern('user[Tanaka][phone]'), 'user[{x}][phone]')
+  assert.equal(browserKeyPattern('items[0][name]'), 'items[{n}][name]')
+  assert.equal(browserKeyPattern('createdAt', true), '{x}', 'a capital anywhere is masked')
+  assert.equal(browserKeyPattern('_method'), '_method')
+})
+
+test('keys that are data — many of one shape in an object — are kept as {k}; a label keeps no digit at all', () => {
+  const customers = Object.fromEntries(['yamada', 'tanaka', 'suzuki', 'sato', 'ito', 'kato'].map(n => [n, { phone: 'x', email: 'y' }]))
+  assert.deepEqual(browserJsonShape({ customers, total: 6 }).keys, ['customers', 'customers.{k}', 'customers.{k}.phone', 'customers.{k}.email', 'total'])
+  const five = Object.fromEntries(['a', 'b', 'c', 'd', 'e'].map(n => [n, 1]))
+  assert.deepEqual(browserJsonShape(five).keys, ['a', 'b', 'c', 'd', 'e'], 'five keys of one shape stay as they are')
+  assert.equal(browserLabel('3件を保存'), '{n}件を保存')
+  assert.equal(browserLabel('第2営業部へ'), '第{n}営業部へ')
+})
+
+test('before sending the person hides a word everywhere and removes a host; the result passes the server\'s check', () => {
+  const r = createBrowserRecorder({ domain: DOMAIN, digest: newRecordingDigest(), now: () => 0 })
+  r.observe({ kind: 'page', url: `https://${DOMAIN}/customers/tanaka` })
+  r.observe({ kind: 'action', payload: JSON.stringify({ type: 'click', role: 'button', label: 'tanaka' }) })
+  r.observe({ kind: 'request', id: 'q', method: 'POST', url: `https://${DOMAIN}/customers/tanaka/notes`, resourceType: 'Fetch', contentType: 'application/json', body: JSON.stringify({ tanaka: { memo: 'x' } }), hasBody: true })
+  r.observe({ kind: 'request', id: 'h', method: 'GET', url: 'https://cdn.example-assets.test/x.js', resourceType: 'Script', hasBody: false })
+  let content = r.content()
+  assert.ok(browserRecordingHideable(content).some(w => w.word === 'tanaka'))
+  content = browserRecordingHide(content, 'tanaka')
+  assert.equal(JSON.stringify(content).includes('tanaka'), false)
+  assert.equal(browserRecordingHideable(content).some(w => w.word === 'tanaka'), false)
+  content = browserRecordingWithoutHost(content, 'cdn.example-assets.test')
+  assert.deepEqual(content.hosts, [])
+  assert.equal(browserRecordingProblem(content, DOMAIN), null)
 })

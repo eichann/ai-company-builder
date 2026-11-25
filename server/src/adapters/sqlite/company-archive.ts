@@ -27,6 +27,7 @@ type Conn = Database.Database
 /** Tables with company rows that an archive leaves out, with the reason. */
 export const ARCHIVE_EXCLUDED_TABLES: Record<string, string> = {
   broker_tokens: 'short-lived relay tokens (minutes): a restore must not bring any back',
+  browser_recordings: 'kept 30 days at most and read only by their sender and the admins of that time (agent-browser.md "Recording"): an archive must not keep them longer',
 }
 
 /** Columns whose value is a bearer secret: replaced in the archive, with the reason. */

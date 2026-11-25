@@ -33,7 +33,7 @@ import {
 import type { BrowserGateDecision, BrowserPreviewSurface, BrowserRunSurface, BrowserSessionRequest } from '../shared/browser-runner'
 import type { BrowserShell, BrowserWindowHandle, BrowserWindowSpec } from './features/browser/controller'
 import {
-  BROWSER_RECORDING_APP_WORDS, BROWSER_RECORDING_BINDING, BROWSER_RECORDING_SCRIPT, BROWSER_RECORDING_WORLD, createPageDebuggerOwner,
+  BROWSER_RECORDING_BINDING, BROWSER_RECORDING_SCRIPT, BROWSER_RECORDING_WINDOW_TITLE, BROWSER_RECORDING_WORLD, createPageDebuggerOwner,
   type BrowserRecordingObservation, type BrowserRecordingObserver, type BrowserRecordSurface,
 } from '../shared/browser-recorder'
 import { BrowserNotSentError, createSessionLanes, exactRead, throughSession, writeThroughSession, type PagelessSession } from './features/browser/read-session'
@@ -700,7 +700,7 @@ export function createBrowserWindowShell(options: {
         async start(observer) {
           if (closed()) return false
           const ok = await pageDebugger.record.start(observer)
-          if (ok && !win.isDestroyed()) win.setTitle(`${title}${BROWSER_RECORDING_APP_WORDS.windowRecording}`)
+          if (ok && !win.isDestroyed()) win.setTitle(`${title}${BROWSER_RECORDING_WINDOW_TITLE}`)
           return ok
         },
         async stop() {

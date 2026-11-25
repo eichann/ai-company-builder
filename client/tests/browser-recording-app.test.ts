@@ -68,7 +68,7 @@ test('closing the window (or losing its connection) while recording discards the
     assert.equal((await w.recordings.start(CO, HOST)).ok, true)
     w.typed('2026-12-03')
     w.end(reason)
-    assert.deepEqual(w.recordings.view(CO), { state: 'none', message: reason === 'closed' ? W.closed : W.lost })
+    assert.deepEqual(w.recordings.view(CO), { state: 'none', message: reason === 'closed' ? W.closed : W.lost, notes: [W.recordNote] })
     assert.deepEqual(w.changed, [CO])
     // Nothing of it can be stopped, reviewed or sent any more.
     await w.recordings.stop(CO)
@@ -97,13 +97,13 @@ test('nothing is sent before ［送る］; the person\'s deleted lines never lea
   const lines = stopped.ok && stopped.view.state === 'review' ? stopped.view.lines : []
   assert.deepEqual(lines.map(l => `${l.kind} ${l.text}`), ['ページ /orders/{n}', '入力した 「受付終了日」 (end_date) ＝ 値1', '押した 「保存」'])
   assert.deepEqual(w.sent, [])
-  w.recordings.removeLine(CO, lines[1].id)
+  w.recordings.edit(CO, { kind: "line", id: lines[1].id })
   w.answer('refused')
   const refused = await w.recordings.send(CO)
   assert.ok(refused.ok && refused.view.state === 'review' && refused.view.message?.includes('記録できません'))
   w.answer('ok')
   const done = await w.recordings.send(CO)
-  assert.deepEqual(done, { ok: true, view: { state: 'none', message: W.sent } })
+  assert.deepEqual(done, { ok: true, view: { state: 'none', message: W.sent, notes: [W.recordNote] } })
   assert.equal(w.sent.length, 2)
   const body = w.sent[1].body as { domain: string; content: { steps: Array<{ kind: string }> } }
   assert.equal(body.domain, HOST)
@@ -155,4 +155,24 @@ test('discarded or stopped while it is still starting: the window is let go once
     assert.equal(held, false, `${press}: the window is no longer held by a recording`)
     assert.equal(recordings.view(CO).state, 'none')
   }
+})
+
+
+test('the review screen says names may appear and how to hide them; a word is hidden everywhere and a host removed before sending', async () => {
+  const w = world()
+  await w.recordings.start(CO, HOST)
+  w.observe({ kind: 'page', url: `https://${HOST}/customers/tanaka` })
+  w.observe({ kind: 'request', id: 'h', method: 'GET', url: 'https://cdn.example-assets.test/a.js', resourceType: 'Script', hasBody: false })
+  const stopped = await w.recordings.stop(CO)
+  assert.ok(stopped.ok && stopped.view.state === 'review')
+  const view = stopped.ok && stopped.view.state === 'review' ? stopped.view : null
+  assert.equal(view?.notes[0], W.namesWarning)
+  assert.deepEqual(view?.words.map(x => x.word), ['customers', 'tanaka'])
+  assert.deepEqual(view?.hosts, [{ host: 'cdn.example-assets.test', loaded: false }])
+  w.recordings.edit(CO, { kind: 'word', word: 'tanaka' })
+  w.recordings.edit(CO, { kind: 'host', host: 'cdn.example-assets.test' })
+  await w.recordings.send(CO)
+  const sent = JSON.stringify(w.sent[0].body)
+  assert.equal(sent.includes('tanaka'), false)
+  assert.equal(sent.includes('example-assets'), false)
 })

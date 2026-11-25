@@ -236,6 +236,11 @@ async function recordingScenarios(win: BrowserShellWindow, shell: ReturnType<typ
   await press('Tab')
   await clickOn('save')
   await clickOn('pick')
+  // A whole row the page made a button, and a field named by text elsewhere on the page: no label from either.
+  await clickOn('row')
+  await clickOn('memo2')
+  page.insertText('memo-value-4321')
+  await press('Tab')
   await wait(1000)
   await win.record.stop()
   const content = recorder.content()
