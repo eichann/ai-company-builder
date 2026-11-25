@@ -298,13 +298,20 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
   })
   // 「もう一方の AI に聞く」: kept here, handed to the apps in their policy (chat-and-agents.md).
   const secondOpinion = createSecondOpinionSettingService(shared)
-  const agentPolicy = createAgentPolicyService({ agentSandbox, agentBrowser, agentStops, secondOpinion, digest: sha256TokenDigest, push })
+  const agentPolicy = createAgentPolicyService({
+    agentSandbox, agentBrowser, agentStops, secondOpinion, digest: sha256TokenDigest, push,
+    // The member's own level per registered domain (agent-browser.md "Keeping a login on disk"); built below.
+    browserLevels: member => browserSiteGrants.levelsFor(member),
+  })
   // 「ブラウザ操作」 plans (agent-browser.md "Plans, executions, permits and locks"): the approved
   // combinations from shared/browser-connectors/approved.json; the member's setting and stops now.
   // The PCs used for 「ブラウザ操作」 (agent-browser.md "This PC's registration"): the first check of both paths' gates.
   const browserDevices = createBrowserDeviceService({ ...shared, tokenDigest: sha256TokenDigest })
   // Who may use which registered site, and how (agent-browser.md "Who may use a site"): both paths' gates ask it.
-  const browserSiteGrants = createBrowserSiteGrants({ ...shared, memberships: repos.memberships, browserPolicy: member => agentBrowser.policyFor(member) })
+  const browserSiteGrants = createBrowserSiteGrants({
+    ...shared, memberships: repos.memberships, browserPolicy: member => agentBrowser.policyFor(member),
+    onChange: companyId => agentPolicy.announce(companyId),
+  })
   // 「ブラウザ操作」 recordings (agent-browser.md "Recording"): this PC's check and who may use the site (at least 見るだけ).
   const browserRecordings = createBrowserRecordingService({
     ...shared, memberships: repos.memberships, siteGrants: browserSiteGrants, devices: browserDevices.gate,

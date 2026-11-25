@@ -6,6 +6,7 @@
 import type { AgentSandboxMode, AgentSandboxSettings } from '../core/agent-sandbox'
 import type { AgentBrowserPolicy } from './agent-browser'
 import type { BrowserSiteParts } from '../core/browser-site-parts'
+import type { BrowserPersonLevel } from '../core/browser-operation'
 import type { AgentStopPolicy } from './agent-stop'
 import type { DistributedPlugin } from './plugins'
 import type { SecondOpinionPolicy } from './second-opinion'
@@ -54,6 +55,12 @@ export interface AgentSandboxPolicy extends AgentSandboxSettings {
  * (also the ETag) changes whenever the answer changes; the push channel
  * (`/me/events`) announces new versions.
  */
+/** One registered domain and the caller's own level there (`AgentPolicy.browserLevels`). */
+export interface BrowserSiteLevel {
+  host: string
+  level: BrowserPersonLevel
+}
+
 export interface AgentPolicy {
   version: string
   sandbox: AgentSandboxPolicy
@@ -85,6 +92,14 @@ export interface AgentPolicy {
    * they ignore it. A domain absent here uses what the app carries, if anything.
    */
   browserParts?: BrowserSiteParts[]
+  /**
+   * The caller's own level on each registered domain (「ブラウザ操作を使える人」, agent-browser.md "Who may
+   * use a site"): only while `browser` is on, one entry per listed site, absent when none. The app keeps a
+   * site's login on disk only for a level other than `none` (`browserLoginStorage`, agent-browser.md
+   * "Keeping a login on disk"); absent (an older server) = not known = memory only. A field of its own,
+   * as `browserParts`, so released apps ignore it.
+   */
+  browserLevels?: BrowserSiteLevel[]
   /**
    * A digest of the plugin trust documents the server hands this company now (plugin-trust.md
    * "P2": roots, its signed list, its freshness document). Only a marker: a new value tells the

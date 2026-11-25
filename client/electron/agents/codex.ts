@@ -15,6 +15,7 @@ import os from 'node:os'
 import type { CodexModel, CodexStatus } from '../../shared/agent'
 import type { AgentConnection, AgentHostConfig } from './connection'
 import { CodexRpc, type RpcMessage } from './codex-rpc'
+import { CODEX_TEXT_OVERRIDES } from './codex-overrides'
 import { startLoopbackMcp } from './loopback-mcp'
 import { CODEX_ASK_USER_INSTRUCTIONS, codexAskUserTool } from './choice-tools'
 import { CHOICE_TIMEOUT_MS, CODEX_CHOICE_SERVER, CODEX_CHOICE_TOOL } from '../../shared/choice-prompt'
@@ -266,7 +267,9 @@ function createModel(config: Config, request: Request, title = false, createRpc:
             // The key broker's variables for this consultation (turnEnv) replace any of the same names.
             // A working folder has no `.git`: without this Codex reads only the folder it starts in.
             const rootOverride = request.projectRootMarker ? [`project_root_markers=${JSON.stringify([request.projectRootMarker])}`] : []
-            rpc = createRpc({ ...withoutBrokerEnv(config.getShellEnv()), ...request.turnEnv }, rootOverride)
+            // A title is text only: the shell and the other tools are off for its process, so this AI turn (which
+            // runs without the company sandbox) cannot read a file of this PC (agent-browser.md "Keeping a login on disk").
+            rpc = createRpc({ ...withoutBrokerEnv(config.getShellEnv()), ...request.turnEnv }, title ? [...rootOverride, ...CODEX_TEXT_OVERRIDES] : rootOverride)
             rpc.onFailure = error => finish(error)
             rpc.onMessage = message => {
               if (ended) return
@@ -383,6 +386,10 @@ function createModel(config: Config, request: Request, title = false, createRpc:
             if (sandboxed && (result.activePermissionProfile?.id ?? null) !== CODEX_SANDBOX_PROFILE) {
               console.warn('[agent-sandbox] Codex did not apply the permission profile; following the company setting:', request.sandbox!.onUnavailable)
               if (request.sandbox!.onUnavailable !== 'record-only') throw new Error(SANDBOX_MESSAGES.startFailedStop)
+              // Without the profile from here: the host removes what only an enclosed turn may sit next to first
+              // (agent-browser.md "Keeping a login on disk"); if it cannot, the turn ends (its sentence) before any input.
+              await request.sandbox!.beforeUnenclosed?.()
+              if (ended) return
               const id = `sandbox-notice-${crypto.randomUUID()}`
               emit({ type: 'text-start', id }); emit({ type: 'text-delta', id, delta: `※ ${SANDBOX_MESSAGES.startFailedRecordOnly}\n\n` }); emit({ type: 'text-end', id })
             }

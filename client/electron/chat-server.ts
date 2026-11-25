@@ -41,7 +41,8 @@ import {
 import { createChunkInjector, limitedUIMessageStreamResponse, type ChunkInjector } from './ui-stream-limits'
 import { acbToolDisplays, toolDisplayTransform } from './tool-display-stream'
 import type { AgentEvent, AgentHostConfig, AskUser, TurnSandbox } from './agents/connection'
-import { SANDBOX_INSTRUCTIONS, SANDBOX_MESSAGES, decideTurnSandbox, sandboxPlatform, type SandboxHost } from '../shared/agents/sandbox-policy'
+import { SANDBOX_INSTRUCTIONS, SANDBOX_MESSAGES, decideTurnSandbox, sandboxPlatform, type ResolvedSandbox, type SandboxHost } from '../shared/agents/sandbox-policy'
+import { BROWSER_WORDS } from '../shared/browser-operation'
 import type { AgentSandboxSettings } from '../../shared/core/agent-sandbox'
 import { CHOICE_PART_TYPE, type ChoicePromptRecord, type ChoiceResult } from '../shared/choice-prompt'
 import { createAgentConnection, type AgentHost } from './agents/registry'
@@ -159,6 +160,13 @@ export interface ChatServerConfig extends AgentHost {
    * (「AI の囲い」, sandbox-policy.ts); undefined = unknown (off this turn).
    */
   getAgentSandbox?: (companyId: string, companyRoot: string) => Promise<{ settings: AgentSandboxSettings; host: SandboxHost } | undefined>
+  /**
+   * Asked right before every turn's agent starts, with the turn's sandbox as decided (undefined = none) and its
+   * company folder (agent-browser.md "Keeping a login on disk"): false = something only an enclosed turn may sit
+   * next to (a browser login kept on this PC) could not be removed first, and the turn does not start. A turn that
+   * falls back to running without the sandbox (`record-only`) asks again with no sandbox (`TurnSandbox.beforeUnenclosed`).
+   */
+  beforeAiTurn?: (turn: { sandbox?: { mode: 'observe' | 'enforce'; resolved: ResolvedSandbox }; companyRoot?: string }) => Promise<boolean>
   /**
    * The key broker's variables for this turn's AI process (K6, broker-env.ts):
    * the consultation's short-lived token where SDKs look for an API key and
@@ -696,8 +704,17 @@ export async function startChatServer(config: ChatServerConfig) {
       console.warn(`[agent-sandbox] ${authMode} cannot run the sandbox here; recording only this turn`)
     }
     if (sandboxDecision?.mode === 'enforce') finalSystemPrompt = (finalSystemPrompt || '') + SANDBOX_INSTRUCTIONS
+    // A browser login kept on this PC sits next to enclosed turns only (agent-browser.md "Keeping a login on disk"):
+    // asked before this turn's agent starts, and again by an agent about to fall back to running without the sandbox.
+    const beforeUnenclosed = async () => {
+      if (config.beforeAiTurn && !(await config.beforeAiTurn({ companyRoot: companyRootPath }))) throw new Error(BROWSER_WORDS.keptNotRemoved)
+    }
     const sandbox: TurnSandbox | undefined = sandboxInput && sandboxDecision && sandboxDecision.mode !== 'off'
-      ? { mode: sandboxDecision.mode, resolved: sandboxDecision.resolved, home: sandboxInput.host.home, onUnavailable: sandboxDecision.onUnavailable } : undefined
+      ? { mode: sandboxDecision.mode, resolved: sandboxDecision.resolved, home: sandboxInput.host.home, onUnavailable: sandboxDecision.onUnavailable, beforeUnenclosed } : undefined
+    if (config.beforeAiTurn && !(await config.beforeAiTurn({ sandbox, companyRoot: companyRootPath }).catch(() => false))) {
+      turn?.end('failed')
+      return c.json({ error: BROWSER_WORDS.keptNotRemoved }, 503)
+    }
     // The key broker (key-broker.md K6): a token per consultation, refreshed before it runs out.
     // Never for an unattended turn (a scheduled job's, an 「AI の番」 step's: owner decision D3): no one is there, so it
     // gets no pass to the relay at all (key-broker.md "Unattended turns get no pass").

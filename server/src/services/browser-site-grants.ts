@@ -30,7 +30,12 @@ export interface BrowserSiteGrantDeps {
   clock: Clock
   memberships: Pick<MembershipRepository, 'roleOf' | 'joinedAt'>
   /** The member's browser setting now (the company's with their own mode). */
-  browserPolicy: (member: Member) => BrowserOperationSettings
+  browserPolicy: (member: Pick<Member, 'companyId' | 'userId'>) => BrowserOperationSettings
+  /**
+   * A person's level changed: their policy carries it (`browserLevels`, agent-browser.md "Keeping a login on disk"),
+   * so the company's apps are told a new version (agent-policy.ts `announce`).
+   */
+  onChange?: (companyId: string) => void
 }
 
 export const BROWSER_SITE_GRANT_WORDS = {
@@ -98,7 +103,18 @@ export function createBrowserSiteGrants(deps: BrowserSiteGrantDeps) {
       if (!host || !site || host !== b.host) return refuse('bad-request', W.notRegistered, { code: 'BROWSER_SITE_NOT_REGISTERED' })
       if (b.level === 'write' && !levelAllows(site.level, 'write')) return refuse('conflict', W.aboveSite, { code: 'BROWSER_SITE_LEVEL_ABOVE_SITE' })
       repo(member.companyId).saveSiteGrant({ userId, host, level: b.level, grantedBy: member.userId, updatedAt: deps.clock.now() })
+      deps.onChange?.(member.companyId)
       return ok(view(member))
+    },
+
+    /**
+     * The member's own level on each registered domain, while their browser part is on (none otherwise): what their
+     * policy carries as `browserLevels`, so the app keeps a login on disk only where they may use the site.
+     */
+    levelsFor(member: Pick<Member, 'companyId' | 'userId'>): Array<{ host: string; level: BrowserPersonLevel }> {
+      const settings = deps.browserPolicy(member)
+      if (settings.mode !== 'on') return []
+      return settings.sites.map(s => ({ host: s.host, level: personLevel(member.companyId, member.userId, s.host) }))
     },
 
     /**

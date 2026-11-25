@@ -622,6 +622,11 @@ export function createClaudeConnection(config: ClaudeConnectionConfig, createMod
         if (sandbox?.onUnavailable !== 'record-only') {
           return { stream: new ReadableStream<StreamPart>({ start(c) { c.enqueue({ type: 'stream-start', warnings: [] }); c.enqueue({ type: 'error', error: new Error(SANDBOX_MESSAGES.startFailedStop) }); c.close() } }) }
         }
+        // Without the sandbox from here: the host removes what only an enclosed turn may sit next to first
+        // (agent-browser.md "Keeping a login on disk"); if it cannot, the turn ends with its sentence.
+        try { await sandbox.beforeUnenclosed?.() } catch (error) {
+          return { stream: new ReadableStream<StreamPart>({ start(c) { c.enqueue({ type: 'stream-start', warnings: [] }); c.enqueue({ type: 'error', error: error instanceof Error ? error : new Error(String(error)) }); c.close() } }) }
+        }
         const retry = createNative(cliLacksAuto ? 'default' : permissionMode, false)
         const result = await retry.model.doStream(params)
         return { ...result, stream: relay(result.stream, retry.state, () => SANDBOX_MESSAGES.startFailedRecordOnly, false) }
@@ -684,6 +689,11 @@ export function createClaudeConnection(config: ClaudeConnectionConfig, createMod
         pathToClaudeCodeExecutable: config.getClaudeCodeCliPath(),
         env: config.getShellEnv(),
         settingSources: ['user', 'project'],
+        // A title is text only: no built-in tool and no MCP server, so this AI turn (which runs without the company
+        // sandbox) cannot read a file of this PC (agent-browser.md "Keeping a login on disk").
+        tools: [],
+        mcpServers: {},
+        strictMcpConfig: true,
         spawnClaudeCodeProcess,
       })
     },

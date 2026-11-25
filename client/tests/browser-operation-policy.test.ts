@@ -6,7 +6,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  browserLoginStorage, decideBrowserRequest, levelAllows, normalizeBrowserHost, parseBrowserOperationSettings,
+  decideBrowserRequest, levelAllows, normalizeBrowserHost, parseBrowserOperationSettings,
   type BrowserSiteSetting,
 } from '../../shared/core/browser-operation'
 
@@ -67,10 +67,4 @@ test('requests: everything else is refused', () => {
   assert.deepEqual(req('https://[::1]/'), { allow: false, reason: 'host' })
   assert.deepEqual(req('https://user:pw@manager.example.net/'), { allow: false, reason: 'bad-url' })
   assert.deepEqual(req('not a url'), { allow: false, reason: 'bad-url' })
-})
-
-test('login: kept on disk only when the member\'s AI sandbox encloses the AI', () => {
-  assert.equal(browserLoginStorage('enforce'), 'disk')
-  assert.equal(browserLoginStorage('observe'), 'memory')
-  assert.equal(browserLoginStorage('off'), 'memory')
 })

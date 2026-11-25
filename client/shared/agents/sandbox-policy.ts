@@ -212,6 +212,21 @@ export function codexSandboxConfig(resolved: ResolvedSandbox): Record<string, un
   }
 }
 
+/**
+ * Does an `enforce` turn with this sandbox keep `place` unreadable for **both** agents, and is the place outside
+ * the company folder the turn works in? (agent-browser.md "Keeping a login on disk": a login kept on disk lives
+ * there.) True only when a denied place contains it that both CLIs really deny — Claude re-allows `allowRead`
+ * roots inside a denied place (allowRead wins), Codex leaves out a denied place that contains one
+ * (`codexSandboxConfig`) — and no allowed root or writable place contains it. Lexical (NFC), like the rest.
+ */
+export function sandboxKeepsPlaceUnread(resolved: ResolvedSandbox, place: string, companyRoot: string | undefined): boolean {
+  if (companyRoot && isSameOrInside(place, companyRoot)) return false
+  if (resolved.allowRead.some(root => isSameOrInside(place, root))) return false
+  if (resolved.allowWrite.some(path => isSameOrInside(place, path))) return false
+  return resolved.denyRead.some(denied =>
+    isSameOrInside(place, denied) && !resolved.allowRead.some(root => isSameOrInside(root, denied)))
+}
+
 // ---------------------------------------------------------------------------
 // Recording (observe) and reading the sandbox's refusals (enforce)
 // ---------------------------------------------------------------------------

@@ -188,12 +188,15 @@ export function decideBrowserRequest(site: BrowserSiteSetting & BrowserScriptLim
 }
 
 /**
- * Where the browser window keeps the site's login (design memo §18): on disk
- * only when the member's sandbox is `enforce` (the app's data is then out of
- * the AI's reach); otherwise in memory, gone when the app quits.
+ * Where the browser window keeps the site's login (design memo §18; agent-browser.md "Keeping a login on
+ * disk"): on disk only when the member's sandbox is `enforce` (the app's data is then out of the AI's
+ * reach) **and** the server says the person may use the site (their own level, `none` = 使わない; an
+ * older server that does not say = not known = memory). Otherwise in memory, gone when the app quits.
+ * This is the company's half of the rule; the PC's half (the platform runs the sandbox, no AI turn
+ * without it has run here, the place is denied to every enclosed turn) is the app's.
  */
-export function browserLoginStorage(sandboxMode: AgentSandboxMode): 'disk' | 'memory' {
-  return sandboxMode === 'enforce' ? 'disk' : 'memory'
+export function browserLoginStorage(sandboxMode: AgentSandboxMode, personLevel: BrowserPersonLevel | undefined): 'disk' | 'memory' {
+  return sandboxMode === 'enforce' && (personLevel === 'read' || personLevel === 'write') ? 'disk' : 'memory'
 }
 
 /**

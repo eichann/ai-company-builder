@@ -16,9 +16,13 @@ import type { BrowserPageReadAttempt } from './browser-runner'
 // IPC payloads (browser:sites / browser:open / browser:clearLogin)
 // ---------------------------------------------------------------------------
 
-/** One site the member may open, as the settings show it (its login lives in memory only). */
+/**
+ * One site the member may open, as the settings show it. `kept`: a login made in its window now is kept on
+ * this PC across restarts (agent-browser.md "Keeping a login on disk"); false or absent = in memory only.
+ */
 export interface BrowserSiteView {
   host: string
+  kept?: boolean
 }
 
 /** The member's sites now: empty when 「ブラウザ操作」 is off, unknown or the policy could not be read. */
@@ -33,6 +37,10 @@ export const BROWSER_WORDS = {
   intro: '会社が許可したサイトを、アプリの中の窓で開けます。ログインはご自分でしてください。',
   aiNotYet: 'AI はまだこの窓を操作しません。',
   loginNotKept: 'アプリを開き直すと、もう一度ログインが必要です。',
+  /** The login is kept on this PC (agent-browser.md "Keeping a login on disk"). */
+  loginKept: 'ログインはこの PC に覚えておくので、アプリを開き直してもそのままです。囲いのない AI がこの PC で動くときは、その前に消します。',
+  /** An AI turn could not start because a kept login could not be removed first. */
+  keptNotRemoved: 'この PC に覚えていたサイトのログインを消せなかったため、AI を始めませんでした。もう一度お試しください。',
   open: '開いてログイン',
   clearLogin: 'ログインを消す',
   cleared: 'このサイトのログインを消しました。',
@@ -256,7 +264,15 @@ function FindProxyForURL(url, host) {
  * named after it (so it is an `acb-browser-*` partition too).
  */
 export function browserWritePartition(partition: string): string {
-  return `${partition}-write`
+  return `${inMemory(partition)}-write`
+}
+
+/**
+ * A page-less session is always in memory, also beside a window whose login is kept on disk (`persist:`,
+ * agent-browser.md "Keeping a login on disk"): its name is the window's without the prefix.
+ */
+function inMemory(partition: string): string {
+  return partition.startsWith('persist:') ? partition.slice('persist:'.length) : partition
 }
 
 /**
@@ -264,7 +280,7 @@ export function browserWritePartition(partition: string): string {
  * "The operator and the preview"): page-less, one per window session, in memory, named after it.
  */
 export function browserReadPartition(partition: string): string {
-  return `${partition}-read`
+  return `${inMemory(partition)}-read`
 }
 
 /** Response headers that register a reporting endpoint (Reporting API, NEL): never kept. */
