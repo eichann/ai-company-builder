@@ -6,10 +6,13 @@
  *
  * - `browser_frame_runs`: who, which registered domain, from which PC, where the frames came from (a Skill's approved
  *   declaration: its hash, folder version and the approval row it rested on; or the ad-hoc plan the person approves), the
- *   plan's hash the card shows,
- *   the state (`waiting` → `open` → `locked` → `ended`; `ended` is final) and its times. **At most one run not ended per
- *   company × domain** (partial unique index: design memo D10). The trigger keeps the fixed columns and lets the state move
- *   only forward.
+ *   plan's hash the card shows, the sha256 of the card's one-time approval value, the state (`waiting` → `open` → `locked`
+ *   → `ended`; `ended` is final) and its times. **At most one run not ended per company × domain** (partial unique index:
+ *   design memo D10) and **at most one waiting run per member**. The trigger keeps the fixed columns and lets the state
+ *   move only forward.
+ *
+ * `CREATE TRIGGER IF NOT EXISTS` never replaces a trigger already there: a changed trigger body needs an explicit
+ * `DROP TRIGGER` + `CREATE TRIGGER` in a migration, or databases made before keep the old one.
  * - `browser_frames`: one row per write target of the run (method, path, fixed fields, `max`) and `used`, the units the
  *   permits took. **`used <= max` is a CHECK** and the trigger lets `used` only grow by one: a frame can never be exceeded,
  *   whatever the code does.
@@ -33,6 +36,7 @@ export const browserFrameSchema = `
       files TEXT,
       approval_seq INTEGER,
       plan_hash TEXT NOT NULL CHECK (plan_hash GLOB 'sha256:*'),
+      approval_token_hash TEXT,
       state TEXT NOT NULL CHECK (state IN ('waiting', 'open', 'locked', 'ended')),
       approval TEXT CHECK (approval IN ('card', 'pre_approved')),
       approved_at TEXT,
@@ -46,13 +50,14 @@ export const browserFrameSchema = `
       CHECK (state = 'waiting' OR state = 'ended' OR approval IS NOT NULL)
     );
     CREATE UNIQUE INDEX IF NOT EXISTS idx_browser_frame_runs_domain ON browser_frame_runs(company_id, host) WHERE state <> 'ended';
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_browser_frame_runs_waiting ON browser_frame_runs(company_id, user_id) WHERE state = 'waiting';
     CREATE INDEX IF NOT EXISTS idx_browser_frame_runs_user ON browser_frame_runs(company_id, user_id, state);
     CREATE TRIGGER IF NOT EXISTS browser_frame_runs_fixed BEFORE UPDATE ON browser_frame_runs
       WHEN NEW.company_id IS NOT OLD.company_id OR NEW.id IS NOT OLD.id OR NEW.user_id IS NOT OLD.user_id OR NEW.host IS NOT OLD.host
         OR NEW.device_id IS NOT OLD.device_id OR NEW.conversation_id IS NOT OLD.conversation_id OR NEW.source IS NOT OLD.source
         OR NEW.skill IS NOT OLD.skill OR NEW.declaration_hash IS NOT OLD.declaration_hash OR NEW.files IS NOT OLD.files
         OR NEW.approval_seq IS NOT OLD.approval_seq
-        OR NEW.plan_hash IS NOT OLD.plan_hash OR NEW.created_at IS NOT OLD.created_at OR NEW.expires_at IS NOT OLD.expires_at
+        OR NEW.plan_hash IS NOT OLD.plan_hash OR NEW.approval_token_hash IS NOT OLD.approval_token_hash OR NEW.created_at IS NOT OLD.created_at OR NEW.expires_at IS NOT OLD.expires_at
         OR (OLD.approval IS NOT NULL AND (NEW.approval IS NOT OLD.approval OR NEW.approved_at IS NOT OLD.approved_at))
         OR (OLD.state = 'ended' AND (NEW.state IS NOT OLD.state OR NEW.end_reason IS NOT OLD.end_reason OR NEW.ended_at IS NOT OLD.ended_at))
         OR (OLD.state = 'open' AND NEW.state = 'waiting')

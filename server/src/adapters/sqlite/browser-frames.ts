@@ -8,13 +8,13 @@ import type { BrowserFrameRepository, FrameRow, FrameRunRow, FrameWriteRow } fro
 
 type RunDb = {
   id: string; user_id: string; host: string; device_id: string | null; conversation_id: string | null; source: string
-  skill: string | null; declaration_hash: string | null; files: string | null; approval_seq: number | null; plan_hash: string; state: string
+  skill: string | null; declaration_hash: string | null; files: string | null; approval_seq: number | null; plan_hash: string; approval_token_hash: string | null; state: string
   approval: string | null; approved_at: string | null; end_reason: string | null; created_at: string; expires_at: string; ended_at: string | null
 }
-const RUN_COLUMNS = 'id, user_id, host, device_id, conversation_id, source, skill, declaration_hash, files, approval_seq, plan_hash, state, approval, approved_at, end_reason, created_at, expires_at, ended_at'
+const RUN_COLUMNS = 'id, user_id, host, device_id, conversation_id, source, skill, declaration_hash, files, approval_seq, plan_hash, approval_token_hash, state, approval, approved_at, end_reason, created_at, expires_at, ended_at'
 const toRun = (r: RunDb): FrameRunRow => ({
   id: r.id, userId: r.user_id, host: r.host, deviceId: r.device_id, conversationId: r.conversation_id, source: r.source as FrameRunRow['source'],
-  skill: r.skill, declarationHash: r.declaration_hash, files: r.files, approvalSeq: r.approval_seq, planHash: r.plan_hash, state: r.state as FrameRunRow['state'],
+  skill: r.skill, declarationHash: r.declaration_hash, files: r.files, approvalSeq: r.approval_seq, planHash: r.plan_hash, approvalTokenHash: r.approval_token_hash, state: r.state as FrameRunRow['state'],
   approval: r.approval as FrameRunRow['approval'], approvedAt: r.approved_at, endReason: r.end_reason, createdAt: r.created_at,
   expiresAt: r.expires_at, endedAt: r.ended_at,
 })
@@ -49,9 +49,9 @@ export function sqliteBrowserFrameRepository(conn: Database.Database, companyId:
         ORDER BY r.created_at, r.id`).all(companyId, host, companyId) as RunDb[]).map(toRun)
     },
     insertRun(run, frames) {
-      conn.prepare(`INSERT INTO browser_frame_runs (company_id, ${RUN_COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+      conn.prepare(`INSERT INTO browser_frame_runs (company_id, ${RUN_COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
         companyId, run.id, run.userId, run.host, run.deviceId, run.conversationId, run.source, run.skill, run.declarationHash, run.files, run.approvalSeq,
-        run.planHash, run.state, run.approval, run.approvedAt, run.endReason, run.createdAt, run.expiresAt, run.endedAt,
+        run.planHash, run.approvalTokenHash, run.state, run.approval, run.approvedAt, run.endReason, run.createdAt, run.expiresAt, run.endedAt,
       )
       const insert = conn.prepare('INSERT INTO browser_frames (company_id, run_id, idx, method, path, fields, max) VALUES (?, ?, ?, ?, ?, ?, ?)')
       for (const f of frames) insert.run(companyId, run.id, f.idx, f.method, f.path, f.fields, f.max)

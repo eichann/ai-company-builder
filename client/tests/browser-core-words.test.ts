@@ -96,6 +96,9 @@ const SCANNED = [
   'server/src/services/browser-skills.ts',
   'server/src/routes/browser-skills.ts',
   'server/src/adapters/browser-skill-source.ts',
+  // Writes within frames (agent-browser.md "Writes within frames").
+  'server/src/services/browser-frames.ts',
+  'server/src/routes/browser-frames.ts',
 ]
 
 /**

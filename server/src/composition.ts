@@ -319,7 +319,7 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
   })
   // Writes within frames (agent-browser.md "Writes within frames"): the frames from an approved Skill or the card's plan.
   const browserFrames = createBrowserFrameService({
-    ...shared, monotonic: systemMonotonicClock, skills: browserSkills, devices: browserDevices.gate, siteGrants: browserSiteGrants,
+    ...shared, monotonic: systemMonotonicClock, tokenDigest: sha256TokenDigest, skills: browserSkills, devices: browserDevices.gate, siteGrants: browserSiteGrants,
     browserPolicy: member => agentBrowser.policyFor(member), aiStops: member => agentStops.policyFor(member),
   })
   const browserPlans = createBrowserPlanService({

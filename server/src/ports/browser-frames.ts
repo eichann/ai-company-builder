@@ -19,6 +19,8 @@ export interface FrameRunRow {
   /** A Skill run: the approval row (`browser_skill_approvals.seq`) it started on; any other row since ends it. */
   approvalSeq: number | null
   planHash: string
+  /** sha256 of the card's one-time approval value (null when the run opened without a card). */
+  approvalTokenHash: string | null
   state: FrameRunState
   approval: 'card' | 'pre_approved' | null
   approvedAt: string | null

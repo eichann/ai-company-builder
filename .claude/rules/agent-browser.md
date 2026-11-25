@@ -3105,19 +3105,35 @@ connection, the plan card and the after-read card).
   `conversationId?`, the PC's key header): a company Skill's **approved** declaration, read by the server itself
   (`approvedFrames`, never content an app sent; the very approval row it rested on looked at again inside the start's
   transaction, `stillApproved` — a mode changed in between opens nothing), or an **ad-hoc plan** checked with the declaration's own rules (`browserSkillDeclarationFrom`: limits,
-  paths, `_method`, no login / CSRF field) — **never pre-approvable**. The run opens at once only for a `pre_approved`
+  paths, `_method`, no login / CSRF field) **and one more: every path begins with a literal segment**
+  (`browserAdhocWritesProblem`: the AI wrote it, so a frame is never "any path" — `/{x}`, `/{n}/…`, `/`) — **never
+  pre-approvable**. The run opens at once only for a `pre_approved`
   Skill version whose text nobody changed since (`needsRunCard` false); everything else waits for the person's approval
   (owner decision D1). The answer carries the frames and `planHash` (sha256 of the canonical plan: company, member,
-  domain, source, Skill, declaration hash, folder version, frames) — the card shows it.
-- **Approve** (`POST …/:runId/approve { planHash }`, exactly that key): only `waiting`; the hash the card showed (409
+  domain, source, Skill, declaration hash, folder version, frames) — the card shows it — and, for a run that waits for
+  its card, **a one-time approval value** (`approvalToken`, 256 bits): answered **only by the start** (never by `get`,
+  a permit, a report or any list), only its sha256 stored (`approval_token_hash`). ⑤b's main process keeps it for the
+  card and never puts it in anything an AI tool answers, so an AI that can call the routes with the member's session
+  still cannot approve. **One waiting run per member** (partial unique index): a new start ends the older card's run
+  (`superseded`); ⑤b's card calls `end` as soon as it is dismissed, so a dismissed card never holds the domain.
+  Availability trade-off (said): D10 keeps one live run per company × domain, so a card left open blocks that domain for
+  the others until it is approved, dismissed, replaced or 10 minutes pass.
+- **Approve** (`POST …/:runId/approve { planHash, approvalToken }`, exactly these keys): only `waiting`; the one-time
+  value (403 `BROWSER_FRAME_APPROVAL_REFUSED`; the run stays waiting); the hash the card showed (409
   `BROWSER_FRAME_PLAN_CHANGED`); the gate; for a Skill run the declaration **and folder version read again now** equal to
   the run's (else the run ends, 409 `BROWSER_SKILL_CHANGED`: the card showed another version) and the approval in force;
   then `open` and `runCardShown(skill, hash, files)` with the `files` **of this server-side read — never a value from the
   request** (no request field exists for it).
-- **Permit** (`POST …/:runId/permit { frame }`, the PC's key header; one transaction after the Skill's git read): time-outs
-  first; `waiting` → `BROWSER_RUN_NOT_APPROVED`, `locked` → `BROWSER_RUN_AFTER_UNKNOWN`, `ended` → `BROWSER_RUN_ENDED`; a write
-  `permitted` → `BROWSER_RUN_WRITE_IN_FLIGHT` (the second page write waits until the first's result is recorded); the frame's
-  units used up → `BROWSER_FRAME_USED_UP` (nothing changes in those cases); then **the gate** — this PC (an enabled
+- **Permit** (`POST …/:runId/permit { frame, request: { method, path, fields } }`, the PC's key header; one transaction
+  after the Skill's git read): time-outs first; `waiting` → `BROWSER_RUN_NOT_APPROVED`, `locked` →
+  `BROWSER_RUN_AFTER_UNKNOWN`, `ended` → `BROWSER_RUN_ENDED`; a write `permitted` → `BROWSER_RUN_WRITE_IN_FLIGHT` (the
+  second page write waits until the first's result is recorded); the frame's units used up → `BROWSER_FRAME_USED_UP`;
+  **the held write does not fit the frame** → 409 `BROWSER_FRAME_MISMATCH` with a fixed `reason` (`method` / `path` /
+  `method-override` / `fields`) — `shared/core/browser-frame-match.ts` `browserFrameMismatch`, **the one rule** ⑤b's app
+  asks too: the method exactly; the path (no query, fragment or backslash) against the pattern — literals exactly, `{n}`
+  digits, `{x}` one segment, never a dot segment or an encoded `/` / `\` —; the body's `_method` exactly the frame's
+  (an undeclared one never passes, I4); the frame's fixed fields exactly and **no other field named** (the app sends
+  the request's shape, never its other values) (nothing changes in those cases); then **the gate** — this PC (an enabled
   registration, and the run's own: `BROWSER_DEVICE_ELSEWHERE`), the company's mode and the site's level allowing writes
   (`BROWSER_NOT_ALLOWED`), the AI stop (`BROWSER_AI_STOPPED`), the person's own level 変えてよい (`BROWSER_TYPE_NOT_GRANTED`),
   and for a Skill run **exactly what it started on** — the declaration, the folder version (the steps' text: a change
@@ -3126,8 +3142,10 @@ connection, the plan card and the after-read card).
   `BROWSER_SKILL_CHANGED`) — **a refusal of the gate ends the run** (its
   frames vanish; lifting the cause later revives nothing). Then one unit taken (compare-and-set `used < max`) and the write
   appended `permitted`; answer `{ write, frame, permittedAt, validMs: 5000 }`.
-- **Report** (`POST …/:runId/report { write, result: done | not_sent | unknown, reason? }`, never gated): judged after the
-  time-outs. `permitted` → that result (`done` = "the site returned success"; **`verified` — "machine-checked as predicted"
+- **Report** (`POST …/:runId/report { write, result: done | not_sent | unknown, reason? }`): never gated by the stop or the
+  levels, but **`done` / `not_sent` only from the run's own PC** (its key header, as the gate checks it; else
+  `BROWSER_DEVICE_ELSEWHERE` and the write settles `unknown` at its time-out); `unknown` from any session of the member.
+  Judged after the time-outs. `permitted` → that result (`done` = "the site returned success"; **`verified` — "machine-checked as predicted"
   — is reserved for the safe patterns: no route sets it**); `unknown` locks the run. `unknown` + `done` → `done` (late and
   sure), the run stays locked. The same again → `same`; `not_sent` after `unknown` → `recorded` (kept unknown: it may have
   been sent); any other contradiction → 409 `BROWSER_REPORT_CONFLICT`. A reason is kept only when it is a word of
@@ -3142,6 +3160,16 @@ connection, the plan card and the after-read card).
   also a write of a run they had already ended (its end kept).
 - **Who**: a run is its member's own; anyone else's, another company's: the same 404 `BROWSER_FRAME_RUN_NOT_FOUND`
   (permission matrix rows + `CROSS`). The member's session only (no secret: the run's PC is checked at every gated step).
+- **The text-changed card is shown once for the whole company** (owner decision 2026-11-25): `runCardShown` marks the
+  approval row's `files_seen`, so the first member who approves the card for that version clears it for everyone.
+- **Triggers**: the schema's `CREATE TRIGGER IF NOT EXISTS` never replaces a trigger already in a database — a changed
+  trigger body needs an explicit `DROP TRIGGER` + `CREATE TRIGGER` in a migration (as for every table here).
+- **Where the member's credentials live** (why an AI on the PC cannot replay the card): the session cookies are held in
+  main's memory only (`client/electron/services/session.ts`) and never handed to the renderer
+  (ipc-and-main-process.md, `ipc-app.test.ts` 「auth:signIn / auth:signUp never hand the session token」); this PC's key is
+  sealed by the OS keychain in `<userData>` ("This PC's registration", the app's half) and held in main; the AI sandbox
+  denies reads of the app's userData (`agent-sandbox.md`, `sandbox-policy.ts` `denyRead`, `sandbox-policy.test.ts`).
+  With the sandbox off for a company, the key file stays keychain-sealed; the approval value itself never leaves main.
 - **Decisions (safe side)**: a unit is used by the permit, not given back on `not_sent` (a run may ask again with a new
   plan); a refused permit ends the run, also when the refusal is another PC's request of the same member; the domain lock
   is this table's own until ⑤b joins it with step ④'s run lock; `GET /browser-frame-runs/:runId` answers `no-store`.

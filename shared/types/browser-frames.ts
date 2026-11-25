@@ -65,6 +65,22 @@ export interface BrowserFrameRunView {
   writes: BrowserFrameWriteView[]
 }
 
+/**
+ * The answer to a start: the run, and — only here, only for a run waiting for its card — the one-time approval value the
+ * card's ［任せる］ sends back. The app's main process keeps it for the card and never hands it to an AI tool's answer.
+ */
+export interface BrowserFrameRunStart extends BrowserFrameRunView {
+  approvalToken: string | null
+}
+
+/** What the app read of the held write, sent with a permit: its shape only, never the body's other values. */
+export interface BrowserFramePermitRequest {
+  method: string
+  path: string
+  /** The frame's fixed fields as the body holds them, and `_method` when the body has one. */
+  fields: Record<string, string>
+}
+
 /** The answer to a permit: send this one write once, within `validMs` of asking. */
 export interface BrowserFramePermit {
   write: number

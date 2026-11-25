@@ -43,7 +43,7 @@ rule FramesLife R16_NoSendAfterStop
 # states <model> <distinct states of the real model (<model>.cfg)>
 states PlanLife 57618
 states StepsLife 28320
-states FramesLife 169008
+states FramesLife 192816
 # broken <variant in broken/> <the rule it must break> (one guard removed; a guard added = a variant added)
 broken BrokenRetryAfterUnknown R1_AtMostOneSendPerPlan
 broken BrokenNoCheckBeforeSend R2_NoSendWithoutApprovalAndLivePermit

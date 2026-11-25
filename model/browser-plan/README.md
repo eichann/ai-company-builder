@@ -62,7 +62,7 @@ reachability rule, not a state formula: `reach.mjs` checks it on the checker's s
    end; the rules checked are exactly `expected.txt`'s `rule <model>` lines (dropping one fails); a
    `CHECK_DEADLOCK` line is refused.
 2. Its distinct state count equals `states <model>` (today PlanLife **57,618**, StepsLife **28,320**,
-   FramesLife **169,008**): a guard against a checker that explores less than it should.
+   FramesLife **192,816**): a guard against a checker that explores less than it should.
 3. R7 holds over all of those states (`reach.mjs` must walk the same number; one settled predicate for
    both models).
 4. Each `broken/` variant fails on its named rule. **A variant that passes fails the job**: the
@@ -243,9 +243,13 @@ site, the Skill's approval revoked or changed, another PC, the run's hour).
   the request leaving is PlanLife's accepted limit (`LimitFrozenAfterCheck`), the same here.
 - **Where the code is stricter than the model** (each on the safe side, none breaking a rule): the code checks "a write
   in flight" and "used up" before the gate, so a closed gate ends the run only when those pass (the model ends it on
-  any refusal under a closed gate); a run `waiting` whose gate closed answers "not approved" and ends only at its
-  approval or its time (the model ends it at once); `approve` under a closed gate ends the run (the model's
-  `PersonApproves` is just not enabled).
+  any refusal under a closed gate); a run `waiting` whose gate closed answers "not approved" to a permit and ends only
+  at its approval or its time (the model ends it at once). `approve` under a closed gate ending the run is modelled
+  (`PersonApproveRefused`), and so is leaving (`MemberLeaves`: the run ends, a write still permitted is unknown at once —
+  that very write may still go out within its 5 s, which is no "more" after unknown).
+- **Matching the request to the frame** is a precondition of `AppAsks` here (a write that fits no frame is never asked
+  for); the server checks it too (`browserFrameMismatch`, the one rule in `shared/core`) and a mismatch takes nothing.
+- **The card's one-time approval value** (only the start's answer carries it) is folded into `PersonApproves`.
 - The run lock per company × domain (D10) and the domain kept busy by an ended run's write in flight (more than one run,
   the server's tests), the person confirming an unknown write (⑤b's card), the
   run's time limits as real durations (folded into `closed` and `RunEnds`), a server clock jump (PlanLife's;

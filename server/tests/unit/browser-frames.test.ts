@@ -18,11 +18,12 @@ import { initDatabase } from '../../src/db'
 import { sqliteCompanyData } from '../../src/adapters/sqlite/company-data'
 import { sqliteTransactions } from '../../src/adapters/sqlite/transactions'
 import { sqliteMembershipRepository } from '../../src/adapters/sqlite/memberships'
+import { sha256TokenDigest } from '../../src/adapters/system'
 import { createBrowserSkillService, type BrowserSkillService } from '../../src/services/browser-skills'
 import { BROWSER_FRAME_TIMES, createBrowserFrameService, type BrowserFrameService } from '../../src/services/browser-frames'
 import type { BrowserSkillContent, BrowserSkillSource } from '../../src/ports/browser-skills'
 import type { BrowserOperationSettings } from '../../../shared/core/browser-operation'
-import type { BrowserFrameRunView } from '../../../shared/types/browser-frames'
+import type { BrowserFramePermitRequest, BrowserFrameRunStart, BrowserFrameRunView } from '../../../shared/types/browser-frames'
 import type { Member } from '../../src/services/access'
 import type { Outcome, Refusal } from '../../src/services/outcome'
 
@@ -99,7 +100,7 @@ beforeEach(() => {
     source, registeredHosts: () => policy.sites.map(s => s.host), sha256: sha,
   })
   frames = createBrowserFrameService({
-    companyData: data, transactions: sqliteTransactions(conn), clock, ids,
+    companyData: data, transactions: sqliteTransactions(conn), clock, ids, tokenDigest: sha256TokenDigest,
     monotonic: { bootId: 'boot-1', monoMs: () => now - monoBase },
     browserPolicy: () => policy,
     aiStops: () => ({ all: stopped, tools: [] }),
@@ -114,12 +115,21 @@ beforeEach(() => {
   })
 })
 
+/** The card's ［任せる］: the plan's hash and the one-time value only the start's answer carried. */
+const approve = (m: Member, run: BrowserFrameRunStart, key: string | undefined = PC) =>
+  frames.approve(m, run.runId, { planHash: run.planHash, approvalToken: run.approvalToken }, key)
 async function openAdhoc(m: Member = alice): Promise<BrowserFrameRunView> {
-  const run = value(await frames.start(m, { plan: adhoc }, PC))
-  return value(await frames.approve(m, run.runId, { planHash: run.planHash }, PC))
+  return value(await approve(m, value(await frames.start(m, { plan: adhoc }, PC))))
 }
-const permit = (runId: string, frame: number, m: Member = alice) => frames.permit(m, runId, { frame }, PC)
-const report = (runId: string, write: number, result: string, m: Member = alice) => frames.report(m, runId, { write, result })
+/** A held write that fits each frame of `yaml` / `adhoc` (frame 1: register; frame 2: a note on order 42). */
+const FITS: Record<number, BrowserFramePermitRequest> = {
+  1: { method: 'POST', path: '/api/orders/register', fields: {} },
+  2: { method: 'POST', path: '/api/orders/42/note', fields: {} },
+}
+const permit = (runId: string, frame: number, m: Member = alice, request: BrowserFramePermitRequest = FITS[frame] ?? FITS[1]) =>
+  frames.permit(m, runId, { frame, request }, PC)
+const report = (runId: string, write: number, result: string, m: Member = alice, key: string | undefined = PC) =>
+  frames.report(m, runId, { write, result }, key)
 
 describe('frames: a run of free operation', () => {
   it('an ad-hoc plan waits for the person to approve exactly what the card showed', async () => {
@@ -127,10 +137,89 @@ describe('frames: a run of free operation', () => {
     expect(run).toMatchObject({ state: 'waiting', needsApproval: true, source: 'adhoc', approval: null })
     expect(run.frames.map(f => [f.frame, f.path, f.max, f.used])).toEqual([[1, '/api/orders/register', 2, 0], [2, '/api/orders/{n}/note', 1, 0]])
     expect(code(await permit(run.runId, 1))).toBe('BROWSER_RUN_NOT_APPROVED')
-    expect(code(await frames.approve(alice, run.runId, { planHash: `sha256:${'0'.repeat(64)}` }, PC))).toBe('BROWSER_FRAME_PLAN_CHANGED')
-    const open = value(await frames.approve(alice, run.runId, { planHash: run.planHash }, PC))
+    expect(code(await frames.approve(alice, run.runId, { planHash: `sha256:${'0'.repeat(64)}`, approvalToken: run.approvalToken }, PC))).toBe('BROWSER_FRAME_PLAN_CHANGED')
+    const open = value(await approve(alice, run))
     expect(open).toMatchObject({ state: 'open', approval: 'card' })
     expect(code(await permit(run.runId, 1))).toBe('ok')
+  })
+
+  it('only the one-time value the start answered approves: never from the run\'s view, never guessed, never twice', async () => {
+    const run = value(await frames.start(alice, { plan: adhoc }, PC))
+    expect(run.approvalToken).toMatch(/^[0-9a-f]{64}$/)
+    const seen = value(frames.get(alice, run.runId))
+    expect(JSON.stringify(seen)).not.toContain(run.approvalToken as string)
+    expect(seen).not.toHaveProperty('approvalToken')
+    expect(code(await frames.approve(alice, run.runId, { planHash: run.planHash }, PC))).toBe('BROWSER_FRAME_BAD_REQUEST')
+    expect(code(await frames.approve(alice, run.runId, { planHash: run.planHash, approvalToken: 'a'.repeat(64) }, PC))).toBe('BROWSER_FRAME_APPROVAL_REFUSED')
+    expect(value(frames.get(alice, run.runId)).state).toBe('waiting')
+    value(await approve(alice, run))
+    expect(code(await approve(alice, run))).toBe('BROWSER_RUN_NOT_WAITING')
+    // A pre-approved run opens without a card: no value to hand out.
+    put(yaml)
+    await approveSkill('pre_approved')
+    value(frames.end(alice, run.runId))
+    expect(value(await frames.start(alice, { skill: SKILL }, PC)).approvalToken).toBeNull()
+  })
+
+  it('a permit is given only for a held write that fits its frame; a mismatch takes nothing', async () => {
+    const run = await openAdhoc()
+    const tries: Array<[number, BrowserFramePermitRequest, string]> = [
+      [1, { method: 'PUT', path: '/api/orders/register', fields: {} }, 'method'],
+      [1, { method: 'POST', path: '/api/orders/register/x', fields: {} }, 'path'],
+      [1, { method: 'POST', path: '/api/orders/register?copy=1', fields: {} }, 'path'],
+      [2, { method: 'POST', path: '/api/orders/abc/note', fields: {} }, 'path'],
+      [1, { method: 'POST', path: '/api/orders/register', fields: { _method: 'DELETE' } }, 'method-override'],
+      [1, { method: 'POST', path: '/api/orders/register', fields: { title: 'x' } }, 'fields'],
+    ]
+    for (const [frame, request, reason] of tries) {
+      const r = await permit(run.runId, frame, alice, request)
+      expect([code(r), (r as Refusal).body?.reason]).toEqual(['BROWSER_FRAME_MISMATCH', reason])
+    }
+    const after = value(frames.get(alice, run.runId))
+    expect(after.state).toBe('open')
+    expect(after.frames.map(f => f.used)).toEqual([0, 0])
+    expect(after.writes).toEqual([])
+    expect(code(await frames.permit(alice, run.runId, { frame: 1 }, PC))).toBe('BROWSER_FRAME_BAD_REQUEST')
+    expect(code(await permit(run.runId, 2))).toBe('ok')
+  })
+
+  it('a frame that fixes fields and `_method` needs exactly them', async () => {
+    const plan = { domain: DOMAIN, writes: [{ method: 'POST', path: '/api/orders/{n}', max: 1, fields: { _method: 'PATCH', status: 'closed' } }] }
+    const run = value(await approve(alice, value(await frames.start(alice, { plan }, PC))))
+    const fit = { method: 'POST', path: '/api/orders/7', fields: { _method: 'PATCH', status: 'closed' } }
+    expect((await permit(run.runId, 1, alice, { ...fit, fields: { status: 'closed' } }) as Refusal).body.reason).toBe('method-override')
+    expect((await permit(run.runId, 1, alice, { ...fit, fields: { _method: 'DELETE', status: 'closed' } }) as Refusal).body.reason).toBe('method-override')
+    expect((await permit(run.runId, 1, alice, { ...fit, fields: { _method: 'PATCH', status: 'open' } }) as Refusal).body.reason).toBe('fields')
+    expect((await permit(run.runId, 1, alice, { ...fit, fields: { _method: 'PATCH' } }) as Refusal).body.reason).toBe('fields')
+    expect(code(await permit(run.runId, 1, alice, fit))).toBe('ok')
+  })
+
+  it('an ad-hoc plan may not be "any path"', async () => {
+    for (const path of ['/{x}', '/{n}/note', '/']) {
+      expect(code(await frames.start(alice, { plan: { domain: DOMAIN, writes: [{ method: 'POST', path, max: 1 }] } }, PC))).toBe('BROWSER_FRAME_BAD_PLAN')
+    }
+  })
+
+  it('a sure report counts only from the run\'s own PC; unknown from anywhere', async () => {
+    const run = await openAdhoc()
+    value(await permit(run.runId, 1))
+    expect(code(report(run.runId, 1, 'not_sent', alice, 'pc-2'))).toBe('BROWSER_DEVICE_ELSEWHERE')
+    expect(code(frames.report(alice, run.runId, { write: 1, result: 'done' }, undefined))).toBe('BROWSER_DEVICE_ELSEWHERE')
+    expect(value(frames.get(alice, run.runId)).writes[0].state).toBe('permitted')
+    expect(value(report(run.runId, 1, 'unknown', alice, 'pc-2')).run.state).toBe('locked')
+  })
+
+  it('one waiting card per member: a new start replaces the older card', async () => {
+    const first = value(await frames.start(alice, { plan: adhoc }, PC))
+    const second = value(await frames.start(alice, { plan: adhoc }, PC))
+    expect(value(frames.get(alice, first.runId))).toMatchObject({ state: 'ended', endReason: 'superseded' })
+    expect(code(await approve(alice, first))).toBe('BROWSER_RUN_ENDED')
+    expect(value(await approve(alice, second)).state).toBe('open')
+    // The table holds at most one waiting run per member as well.
+    expect(() => conn.prepare(`INSERT INTO browser_frame_runs (company_id, id, user_id, host, source, plan_hash, state, created_at, expires_at)
+      VALUES (?, ?, ?, 'x.example.test', 'adhoc', ?, 'waiting', ?, ?)`).run(CO, `bf_${'1'.repeat(32)}`, alice.userId, `sha256:${'a'.repeat(64)}`, iso(now), iso(now))).not.toThrow()
+    expect(() => conn.prepare(`INSERT INTO browser_frame_runs (company_id, id, user_id, host, source, plan_hash, state, created_at, expires_at)
+      VALUES (?, ?, ?, 'y.example.test', 'adhoc', ?, 'waiting', ?, ?)`).run(CO, `bf_${'2'.repeat(32)}`, alice.userId, `sha256:${'a'.repeat(64)}`, iso(now), iso(now))).toThrow()
   })
 
   it('an ad-hoc plan is checked with the declaration\'s rules and only on a registered domain', async () => {
@@ -234,7 +323,7 @@ describe('frames: a run of free operation', () => {
 
   it('another PC cannot use the run (and that ends it)', async () => {
     const run = await openAdhoc()
-    expect(code(await frames.permit(alice, run.runId, { frame: 1 }, 'pc-2'))).toBe('BROWSER_DEVICE_ELSEWHERE')
+    expect(code(await frames.permit(alice, run.runId, { frame: 1, request: FITS[1] }, 'pc-2'))).toBe('BROWSER_DEVICE_ELSEWHERE')
     expect(code(await permit(run.runId, 1))).toBe('BROWSER_RUN_ENDED')
   })
 
@@ -310,14 +399,14 @@ describe('frames: a run of free operation', () => {
   it('approving the card checks the gate and the approval again (between the git read and the transaction too)', async () => {
     const run = value(await frames.start(alice, { plan: adhoc }, PC))
     stopped = true
-    expect(code(await frames.approve(alice, run.runId, { planHash: run.planHash }, PC))).toBe('BROWSER_AI_STOPPED')
+    expect(code(await approve(alice, run))).toBe('BROWSER_AI_STOPPED')
     expect(value(frames.get(alice, run.runId)).state).toBe('ended')
     stopped = false
     put(yaml)
     await approveSkill('per_run')
     const skillRun = value(await frames.start(alice, { skill: SKILL }, PC))
     betweenReadAndWrite = () => { betweenReadAndWrite = null; value(skills.revoke(owner, { skill: SKILL })) }
-    expect(code(await frames.approve(alice, skillRun.runId, { planHash: skillRun.planHash }, PC))).toBe('BROWSER_SKILL_CHANGED')
+    expect(code(await approve(alice, skillRun))).toBe('BROWSER_SKILL_CHANGED')
     expect(value(frames.get(alice, skillRun.runId)).state).toBe('ended')
   })
 
@@ -356,8 +445,8 @@ describe('frames: a run of free operation', () => {
     const first = value(await frames.start(alice, { skill: SKILL }, PC))
     expect(first.state).toBe('waiting')
     // The approval names nothing but the plan's hash: a `files` from the request is refused.
-    expect(code(await frames.approve(alice, first.runId, { planHash: first.planHash, files: 'git:0000' }, PC))).toBe('BROWSER_FRAME_BAD_REQUEST')
-    value(await frames.approve(alice, first.runId, { planHash: first.planHash }, PC))
+    expect(code(await frames.approve(alice, first.runId, { planHash: first.planHash, approvalToken: first.approvalToken, files: 'git:0000' }, PC))).toBe('BROWSER_FRAME_BAD_REQUEST')
+    value(await approve(alice, first))
     expect(value(await skills.approvedFrames(alice, SKILL))).toMatchObject({ textChanged: false, needsRunCard: false })
     value(frames.end(alice, first.runId))
     expect(value(await frames.start(alice, { skill: SKILL }, PC)).state).toBe('open')
@@ -369,7 +458,7 @@ describe('frames: a run of free operation', () => {
     put(yaml, 'v2')
     const run = value(await frames.start(alice, { skill: SKILL }, PC))
     put(yaml, 'v3')
-    expect(code(await frames.approve(alice, run.runId, { planHash: run.planHash }, PC))).toBe('BROWSER_SKILL_CHANGED')
+    expect(code(await approve(alice, run))).toBe('BROWSER_SKILL_CHANGED')
     expect(value(frames.get(alice, run.runId)).state).toBe('ended')
     expect(value(await skills.approvedFrames(alice, SKILL)).needsRunCard).toBe(true)
   })
@@ -378,7 +467,7 @@ describe('frames: a run of free operation', () => {
     const run = await openAdhoc()
     expect(code(frames.get(bob, run.runId))).toBe('BROWSER_FRAME_RUN_NOT_FOUND')
     expect(code(await permit(run.runId, 1, bob))).toBe('BROWSER_FRAME_RUN_NOT_FOUND')
-    expect(code(await frames.approve(bob, run.runId, { planHash: run.planHash }, PC))).toBe('BROWSER_FRAME_RUN_NOT_FOUND')
+    expect(code(await frames.approve(bob, run.runId, { planHash: run.planHash, approvalToken: 'a'.repeat(64) }, PC))).toBe('BROWSER_FRAME_RUN_NOT_FOUND')
     expect(code(frames.end(bob, run.runId))).toBe('BROWSER_FRAME_RUN_NOT_FOUND')
     expect(code(frames.get(otherOwner, run.runId))).toBe('BROWSER_FRAME_RUN_NOT_FOUND')
     expect(code(await permit(run.runId, 1, otherOwner))).toBe('BROWSER_FRAME_RUN_NOT_FOUND')
@@ -443,7 +532,7 @@ describe('frames: a run of free operation', () => {
     expect(value(report(run.runId, 2, 'not_sent')).outcome).toBe('recorded')
     expect(value(frames.get(alice, run.runId)).writes[1].state).toBe('unknown')
     expect(code(report(run.runId, 7, 'done'))).toBe('BROWSER_FRAME_WRITE_NOT_FOUND')
-    expect(code(frames.report(alice, run.runId, { write: 1, result: 'verified' }))).toBe('BROWSER_FRAME_BAD_REQUEST')
+    expect(code(frames.report(alice, run.runId, { write: 1, result: 'verified' }, PC))).toBe('BROWSER_FRAME_BAD_REQUEST')
   })
 
   it('the tables let a write move only forward', async () => {

@@ -84,6 +84,22 @@ PersonApproves ==
     /\ exSt' = "open" /\ approved' = TRUE
     /\ UNCHANGED <<n, fr, st, age, lock, gate, everUnknown, afterUnknown, badPermit, badSend, stopSend, rep, ph, sends>>
 
+\* `approve` with the gate closed (the AI stopped, the level lowered, another PC, the approval revoked …): the run ends.
+PersonApproveRefused ==
+    /\ exSt = "waiting" /\ gate # "open"
+    /\ exSt' = "ended"
+    /\ UNCHANGED <<approved, n, fr, st, age, lock, gate, everUnknown, afterUnknown, badPermit, badSend, stopSend, rep, ph, sends>>
+
+\* `memberLeft` (inside the removal's transaction): the run ends, and a write still permitted becomes unknown at once —
+\* also one of a run already ended (nobody will report it).
+MemberLeaves ==
+    /\ exSt # "ended" \/ (n > 0 /\ st[n] = "permitted")
+    /\ exSt' = "ended"
+    /\ IF n > 0 /\ st[n] = "permitted"
+         THEN st' = [st EXCEPT ![n] = "unknown"] /\ lock' = "none" /\ everUnknown' = TRUE
+         ELSE UNCHANGED <<st, lock, everUnknown>>
+    /\ UNCHANGED <<approved, n, fr, age, gate, afterUnknown, badPermit, badSend, stopSend, rep, ph, sends>>
+
 \* `permit` (one transaction): the run open (approved, not locked, not ended), the gate open, nothing in flight, the
 \* frame's units not used up — then a write row `permitted`, one unit of the frame taken, the in-flight slot held. The
 \* answer may be lost (the worker gives that page write up; the write then times out unknown and the run locks).
@@ -163,10 +179,12 @@ AppAsks(w) ==
 
 \* The last check right before the request leaves: the permit live (both clocks) and the AI not stopped; then the page's
 \* write goes out ONCE through the core's own write connection (lost, or reaches the site).
+\* (A write the server already marked unknown because its member left — `MemberLeaves` — may still be in its 5 s: that
+\* very write going out is no "more" after unknown; any other write is.)
 SendNow(w) ==
-    /\ badSend' = (badSend \/ ~(st[n] = "permitted" /\ age < PERMIT))
+    /\ badSend' = (badSend \/ ~(st[n] \in {"permitted", "unknown"} /\ age < PERMIT))
     /\ stopSend' = (stopSend \/ gate = "stopped")
-    /\ afterUnknown' = (afterUnknown \/ everUnknown)
+    /\ afterUnknown' = (afterUnknown \/ (everUnknown /\ st[n] # "unknown"))
     /\ \/ UNCHANGED sends
        \/ sends' = [sends EXCEPT ![n] = Min(sends[n] + 1, 2)]
     /\ ph' = [ph EXCEPT ![w] = "sent"]
@@ -210,7 +228,7 @@ Done ==
     /\ UNCHANGED vars
 
 ServerNext ==
-    \/ PersonApproves \/ RunEnds \/ Tick \/ ServerSettlesUnknown
+    \/ PersonApproves \/ PersonApproveRefused \/ MemberLeaves \/ RunEnds \/ Tick \/ ServerSettlesUnknown
     \/ \E w \in Workers : ServerPermits(w) \/ ServerRefuses(w)
     \/ \E k \in Ids : ServerGetsReport(k) \/ ReportLost(k)
 

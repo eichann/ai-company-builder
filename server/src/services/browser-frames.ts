@@ -33,11 +33,13 @@ import { browserAiStopped, levelAllows, type BrowserOperationSettings } from '..
 import { BROWSER_PLAN_TIMES, BROWSER_REPORT_REASONS } from '../../shared/core/browser-plans'
 import { browserSkillDeclarationFrom, BROWSER_SKILL_PROBLEM_WORDS, type BrowserSkillWrite } from '../../shared/core/browser-skill'
 import { BROWSER_DEVICE_WORDS } from '../../shared/core/browser-device'
+import { browserAdhocWritesProblem, browserFrameMismatch, BROWSER_FRAME_REQUEST_LIMITS, type BrowserFrameRequest } from '../../shared/core/browser-frame-match'
 import { canonicalJson } from '../../shared/core/fixed-content'
 import { isValidSkillName } from '../../shared/core/names'
 import type {
-  BrowserFramePermit, BrowserFrameReportAnswer, BrowserFrameRunView, BrowserFrameWriteResult,
+  BrowserFramePermit, BrowserFrameReportAnswer, BrowserFrameRunStart, BrowserFrameRunView, BrowserFrameWriteResult,
 } from '../../shared/types/browser-frames'
+import type { TokenDigest } from '../ports/key-broker'
 import type { BrowserFrameRepository, FrameRunRow, FrameWriteRow } from '../ports/browser-frames'
 import type { Clock, IdGenerator, MonotonicClock } from '../ports/clock'
 import type { CompanyDataSource } from '../ports/company-data'
@@ -55,6 +57,8 @@ export interface BrowserFrameDeps {
   clock: Clock
   monotonic: MonotonicClock
   ids: IdGenerator
+  /** sha256 of the card's one-time approval value (only its digest is stored). */
+  tokenDigest: TokenDigest
   /** The member's browser setting now (the company's mode with their own, the registered sites and their levels). */
   browserPolicy: (member: Member) => BrowserOperationSettings
   aiStops: (member: Member) => { all: boolean; tools: readonly string[] }
@@ -94,12 +98,32 @@ export const BROWSER_FRAME_WORDS = {
   notWaiting: 'この計画は、もう承認を待っていません',
   reportConflict: '前の報告と食い違う報告です',
   writeNotFound: 'その書き込みは見つかりません',
+  mismatch: 'この書き込みは、計画の送り先の枠に合いません（送りません）',
+  widePlan: '計画の送り先が広すぎます。送り先は決まった言葉で始まるアドレスにしてください',
+  approvalRefused: 'この承認は受け付けられません。カードからもう一度確かめてください',
 } as const
 const W = BROWSER_FRAME_WORDS
 
 const RUN_ID_RE = /^bf_[0-9a-f]{32}$/
 const CONVERSATION_RE = /^[A-Za-z0-9_-]{1,100}$/
 const HASH_RE = /^sha256:[0-9a-f]{64}$/
+const TOKEN_RE = /^[0-9a-f]{64}$/
+const FIELD_NAME_RE = /^[A-Za-z_][A-Za-z0-9_.[\]-]*$/
+
+/** The permit's `request` as the app read the held write (only its shape: method, path, the frame's fixed fields). */
+function requestOf(v: unknown): BrowserFrameRequest | null {
+  if (!isMap(v) || Object.keys(v).length !== 3 || typeof v.method !== 'string' || typeof v.path !== 'string' || !isMap(v.fields)) return null
+  if (v.method.length > 10 || v.path.length > BROWSER_FRAME_REQUEST_LIMITS.path) return null
+  const entries = Object.entries(v.fields)
+  if (entries.length > BROWSER_FRAME_REQUEST_LIMITS.fields) return null
+  const fields: Record<string, string> = {}
+  for (const [k, value] of entries) {
+    if (k.length > BROWSER_FRAME_REQUEST_LIMITS.fieldName || !FIELD_NAME_RE.test(k)) return null
+    if (typeof value !== 'string' || value.length > BROWSER_FRAME_REQUEST_LIMITS.fieldValue) return null
+    fields[k] = value
+  }
+  return { method: v.method, path: v.path, fields }
+}
 const isMap = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v)
 const own = (o: object, k: string) => Object.prototype.hasOwnProperty.call(o, k)
 const keysWithin = (o: Record<string, unknown>, allowed: readonly string[]) => Object.keys(o).every(k => allowed.includes(k))
@@ -121,7 +145,7 @@ interface StartFrames {
 }
 
 export function createBrowserFrameService(deps: BrowserFrameDeps) {
-  const { companyData, transactions, clock, monotonic, ids } = deps
+  const { companyData, transactions, clock, monotonic, ids, tokenDigest } = deps
   const repo = (companyId: string): BrowserFrameRepository => companyData.forCompany(companyId).browserFrames
   const bad = (): Refusal => refuse('bad-request', W.badRequest, { code: 'BROWSER_FRAME_BAD_REQUEST' })
   const missing = (): Refusal => refuse('not-found', W.notFound, { code: 'BROWSER_FRAME_RUN_NOT_FOUND' })
@@ -235,6 +259,8 @@ export function createBrowserFrameService(deps: BrowserFrameDeps) {
     // The same strict rules as a Skill's `browser.yaml` (exact keys, limits, paths, `_method`, no login / CSRF field).
     const parsed = browserSkillDeclarationFrom({ domain: plan.domain, writes: plan.writes })
     if (!parsed.ok) return refuse('bad-request', BROWSER_SKILL_PROBLEM_WORDS[parsed.problem], { code: 'BROWSER_FRAME_BAD_PLAN' })
+    // The AI wrote it: narrower than a reviewed declaration — every path begins with a literal segment (never "any path").
+    if (browserAdhocWritesProblem(parsed.declaration.writes)) return refuse('bad-request', W.widePlan, { code: 'BROWSER_FRAME_BAD_PLAN' })
     // Its domain must be a registered one with writes allowed: the gate below (the same check as every permit's).
     // An ad-hoc plan is never pre-approvable: the person approves it on the card.
     return ok({ host: parsed.declaration.domain, source: 'adhoc', skill: null, declarationHash: null, files: null, writes: parsed.declaration.writes, preApproved: false, approval: null })
@@ -246,15 +272,18 @@ export function createBrowserFrameService(deps: BrowserFrameDeps) {
     /**
      * POST /browser-frame-runs { skill } | { plan: { domain, writes } } (+ conversationId?) with the PC's key header: a
      * run with its frames, built here. `waiting` until the person approves the plan on the card, or `open` at once for a
-     * pre-approved Skill version whose text nobody changed since.
+     * pre-approved Skill version whose text nobody changed since. A waiting run carries a **one-time approval value**
+     * (`approvalToken`), answered here only — never by `get` or anything else — so only the app's main process that
+     * started the run (and shows the card) can approve it; only its sha256 is stored. A member has at most one waiting
+     * run: a new start ends the older one (`superseded`; its card can no longer approve).
      */
-    async start(member: Member, body: unknown, deviceKey?: string): Promise<Outcome<BrowserFrameRunView>> {
+    async start(member: Member, body: unknown, deviceKey?: string): Promise<Outcome<BrowserFrameRunStart>> {
       if (!isMap(body) || !keysWithin(body, ['skill', 'plan', 'conversationId'])) return bad()
       if (body.conversationId !== undefined && (typeof body.conversationId !== 'string' || !CONVERSATION_RE.test(body.conversationId))) return bad()
       const framed = await framesOf(member, body)
       if (!framed.ok) return framed
       const f = framed.value
-      return transactions.run((): Outcome<BrowserFrameRunView> => {
+      return transactions.run((): Outcome<BrowserFrameRunStart> => {
         const passed = gate(member, f.host, deviceKey, null)
         if (!passed.ok) return passed
         // A Skill's approval revoked or replaced (another mode included) since the read above: nothing is started.
@@ -263,6 +292,10 @@ export function createBrowserFrameService(deps: BrowserFrameDeps) {
         }
         const now = clock.nowMs()
         const r = repo(member.companyId)
+        // At most one waiting run per member (a partial unique index too): the older card is replaced, its domain freed.
+        for (const older of r.unsettledRunsOf(member.userId)) {
+          if (older.state === 'waiting') endRun(member.companyId, older, 'superseded', now)
+        }
         const holder = r.liveRunOn(f.host)
         if (holder) settle(member.companyId, holder, now)
         if (r.liveRunOn(f.host)) return refuse('conflict', W.busy, { code: 'BROWSER_RUN_BUSY' })
@@ -270,15 +303,17 @@ export function createBrowserFrameService(deps: BrowserFrameDeps) {
         // write is recorded or times out, so two writes never travel to one site at once (independent review of ⑤a).
         for (const ended of r.runsInFlightOn(f.host)) settle(member.companyId, ended, now)
         if (r.runsInFlightOn(f.host).length > 0) return refuse('conflict', W.busy, { code: 'BROWSER_RUN_BUSY' })
+        const approvalToken = f.preApproved ? null : ids.newToken()
         const run: FrameRunRow = {
           id: `bf_${ids.newToken().slice(0, 32)}`, userId: member.userId, host: f.host, deviceId: passed.value.deviceId,
           conversationId: (body.conversationId as string | undefined) ?? null, source: f.source, skill: f.skill,
           declarationHash: f.declarationHash, files: f.files, approvalSeq: f.approval, planHash: planHashOf(member, f),
+          approvalTokenHash: approvalToken === null ? null : tokenDigest.digest(approvalToken),
           state: f.preApproved ? 'open' : 'waiting', approval: f.preApproved ? 'pre_approved' : null, approvedAt: f.preApproved ? iso(now) : null,
           endReason: null, createdAt: iso(now), expiresAt: iso(now + BROWSER_FRAME_TIMES.run), endedAt: null,
         }
         r.insertRun(run, f.writes.map((w, i) => ({ idx: i + 1, method: w.method, path: w.path, fields: canonicalJson({ ...w.fields }), max: w.max })))
-        return ok(view(member.companyId, run))
+        return ok({ ...view(member.companyId, run), approvalToken })
       })
     },
 
@@ -290,21 +325,24 @@ export function createBrowserFrameService(deps: BrowserFrameDeps) {
     },
 
     /**
-     * `PersonApproves` — POST /browser-frame-runs/:runId/approve { planHash } with the PC's key header: the person approved
-     * the plan the card showed (its hash). A Skill run is read again first: a declaration or folder version that moved
+     * `PersonApproves` — POST /browser-frame-runs/:runId/approve { planHash, approvalToken } with the PC's key header: the
+     * person approved the plan the card showed (its hash), with the one-time value only the start's answer carried. A Skill run is read again first: a declaration or folder version that moved
      * since the run started ends it (the card showed another version). Then `runCardShown` with the files of **this**
      * read — never a value from the request.
      */
     async approve(member: Member, runId: string, body: unknown, deviceKey?: string): Promise<Outcome<BrowserFrameRunView>> {
       const found = ownRun(member, runId)
       if (!found) return missing()
-      if (!isMap(body) || Object.keys(body).length !== 1 || typeof body.planHash !== 'string' || !HASH_RE.test(body.planHash)) return bad()
+      if (!isMap(body) || Object.keys(body).length !== 2 || typeof body.planHash !== 'string' || !HASH_RE.test(body.planHash)
+        || typeof body.approvalToken !== 'string' || !TOKEN_RE.test(body.approvalToken)) return bad()
       const planHash = body.planHash
+      const approvalHash = tokenDigest.digest(body.approvalToken)
       const skillNow = found.source === 'skill' ? await deps.skills.approvedFrames(member, found.skill as string) : null
       return transactions.run((): Outcome<BrowserFrameRunView> => {
         const now = clock.nowMs()
         const run = settle(member.companyId, found, now)
         if (run.state !== 'waiting') return refuse('conflict', run.state === 'ended' ? W.ended : W.notWaiting, { code: run.state === 'ended' ? 'BROWSER_RUN_ENDED' : 'BROWSER_RUN_NOT_WAITING' })
+        if (run.approvalTokenHash === null || approvalHash !== run.approvalTokenHash) return refuse('forbidden', W.approvalRefused, { code: 'BROWSER_FRAME_APPROVAL_REFUSED' })
         if (planHash !== run.planHash) return refuse('conflict', W.planChanged, { code: 'BROWSER_FRAME_PLAN_CHANGED' })
         const passed = gate(member, run.host, deviceKey, run)
         if (!passed.ok) { endRun(member.companyId, run, String(passed.body.code ?? 'refused'), now); return passed }
@@ -322,15 +360,19 @@ export function createBrowserFrameService(deps: BrowserFrameDeps) {
     },
 
     /**
-     * `ServerPermits` / `ServerRefuses` — POST /browser-frame-runs/:runId/permit { frame } with the PC's key header: one
-     * write's permit for one unit of that frame. Refused (nothing taken) while not open, while a write is in flight or
-     * when the frame is used up; a refusal of the gate (or of the Skill's approval) also ends the run.
+     * `ServerPermits` / `ServerRefuses` — POST /browser-frame-runs/:runId/permit { frame, request: { method, path, fields } }
+     * with the PC's key header: one write's permit for one unit of that frame, **for a held write whose shape fits it**
+     * (`browserFrameMismatch`, the one rule ⑤b's app asks too: method, path pattern, the body's `_method`, the frame's fixed
+     * fields — never any other value). Refused (nothing taken) while not open, while a write is in flight, when the frame
+     * is used up or the request does not fit; a refusal of the gate (or of the Skill's approval) also ends the run.
      */
     async permit(member: Member, runId: string, body: unknown, deviceKey?: string): Promise<Outcome<BrowserFramePermit>> {
       const found = ownRun(member, runId)
       if (!found) return missing()
-      if (!isMap(body) || Object.keys(body).length !== 1 || !Number.isSafeInteger(body.frame) || (body.frame as number) < 1) return bad()
+      if (!isMap(body) || Object.keys(body).length !== 2 || !Number.isSafeInteger(body.frame) || (body.frame as number) < 1) return bad()
       const frameIdx = body.frame as number
+      const request = requestOf(body.request)
+      if (!request) return bad()
       // The git read happens before the transaction; the approval row is looked at again inside it.
       const skillNow = found.source === 'skill' ? await deps.skills.approvedFrames(member, found.skill as string) : null
       return transactions.run((): Outcome<BrowserFramePermit> => {
@@ -345,6 +387,8 @@ export function createBrowserFrameService(deps: BrowserFrameDeps) {
         const frame = r.frames(run.id).find(f => f.idx === frameIdx)
         if (!frame) return bad()
         if (frame.used >= frame.max) return refuse('conflict', W.usedUp, { code: 'BROWSER_FRAME_USED_UP' })
+        const mismatch = browserFrameMismatch({ method: frame.method, path: frame.path, max: frame.max, fields: JSON.parse(frame.fields) as Record<string, string> }, request)
+        if (mismatch) return refuse('conflict', W.mismatch, { code: 'BROWSER_FRAME_MISMATCH', reason: mismatch })
         const passed = gate(member, run.host, deviceKey, run)
         const refused: Refusal | null = !passed.ok
           ? passed
@@ -365,9 +409,12 @@ export function createBrowserFrameService(deps: BrowserFrameDeps) {
 
     /**
      * `ServerGetsReport` — POST /browser-frame-runs/:runId/report { write, result: done | not_sent | unknown, reason? }:
-     * judged after the time-outs. Never gated (a stop or a lowered level never keeps a write from settling).
+     * judged after the time-outs. Not gated by the stop or the levels (they never keep a write from settling), but a sure
+     * answer — `done` or `not_sent` — counts only from **the run's own PC** (its key header; independent review of ⑤a):
+     * from anywhere else it is refused and the write settles as unknown at its time-out. `unknown` is taken from any
+     * session of the member (it only makes the run stricter).
      */
-    report(member: Member, runId: string, body: unknown): Outcome<BrowserFrameReportAnswer> {
+    report(member: Member, runId: string, body: unknown, deviceKey?: string): Outcome<BrowserFrameReportAnswer> {
       const found = ownRun(member, runId)
       if (!found) return missing()
       if (!isMap(body) || !keysWithin(body, ['write', 'result', 'reason']) || !Number.isSafeInteger(body.write) || (body.write as number) < 1
@@ -376,6 +423,11 @@ export function createBrowserFrameService(deps: BrowserFrameDeps) {
       const result = body.result as BrowserFrameWriteResult
       // Only a word of the one list is kept (never a page's text).
       const reason = typeof body.reason === 'string' && (BROWSER_REPORT_REASONS as readonly string[]).includes(body.reason) ? body.reason : null
+      if (result !== 'unknown') {
+        const pc = deps.devices.check(member, deviceKey, null)
+        if (!pc.ok) return pc
+        if (pc.value.deviceId !== found.deviceId) return refuse('conflict', BROWSER_DEVICE_WORDS.refusals.BROWSER_DEVICE_ELSEWHERE, { code: 'BROWSER_DEVICE_ELSEWHERE' })
+      }
       return transactions.run((): Outcome<BrowserFrameReportAnswer> => {
         const now = clock.nowMs()
         const r = repo(member.companyId)

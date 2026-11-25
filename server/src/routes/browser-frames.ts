@@ -1,14 +1,14 @@
 /**
  * 「ブラウザ操作」's writes within frames (redesign step ⑤a; agent-browser.md "Writes within frames"). Rules:
- * services/browser-frames.ts; shapes: shared/types/browser-frames.ts. The member's session only; the steps the server
- * gates (start, approve, permit) also take this PC's key header (`X-ACB-Browser-Device`). Nothing in the app calls them
- * yet (step ⑤b).
+ * services/browser-frames.ts; shapes: shared/types/browser-frames.ts. The member's session only; start, approve, permit
+ * and a sure report also take this PC's key header (`X-ACB-Browser-Device`). Nothing in the app calls them yet (step ⑤b).
  *
  * Mounted at /api/companies/:companyId:
- *   POST /browser-frame-runs                    { skill } | { plan: { domain, writes } } (+ conversationId): a run and its frames
- *   GET  /browser-frame-runs/:runId             the member's own
- *   POST /browser-frame-runs/:runId/approve     { planHash }: the person approved the plan the card showed
- *   POST /browser-frame-runs/:runId/permit      { frame }: one write's permit for one unit of that frame
+ *   POST /browser-frame-runs                    { skill } | { plan: { domain, writes } } (+ conversationId): a run and its
+ *                                               frames; a waiting run's one-time `approvalToken` is answered here only
+ *   GET  /browser-frame-runs/:runId             the member's own (never the approval value)
+ *   POST /browser-frame-runs/:runId/approve     { planHash, approvalToken }: the person approved the plan the card showed
+ *   POST /browser-frame-runs/:runId/permit      { frame, request: { method, path, fields } }: one write that fits that frame
  *   POST /browser-frame-runs/:runId/report      { write, result: done | not_sent | unknown, reason? }
  *   POST /browser-frame-runs/:runId/end         the run ends; its unused frames vanish
  */
@@ -48,7 +48,7 @@ browserFramesRoute.post('/browser-frame-runs/:runId/permit', companyMember, serv
 })
 
 browserFramesRoute.post('/browser-frame-runs/:runId/report', companyMember, serviceBody, (c) => {
-  const r = browserFrames.report(c.var.member, c.req.param('runId'), c.var.body)
+  const r = browserFrames.report(c.var.member, c.req.param('runId'), c.var.body, c.req.header(BROWSER_DEVICE_HEADER))
   return r.ok ? c.json({ success: true, data: r.value }) : refusal(c, r)
 })
 
