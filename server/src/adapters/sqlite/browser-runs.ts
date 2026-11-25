@@ -7,22 +7,22 @@ import type Database from 'better-sqlite3'
 import type { BrowserRunLogRow, BrowserRunRepository, BrowserRunRow } from '../../ports/browser-runs'
 import type { BrowserRunWriteStep } from '../../../shared/core/browser-run-log'
 
-const COLUMNS = 'id, user_id, host, device_id, conversation_id, state, reason, started_at, lease_until, ended_at'
+const COLUMNS = 'id, user_id, host, device_id, conversation_id, state, reason, started_at, lease_until, ended_at, budget, steps, frame_run_id, ends_at'
 type DbRow = {
   id: string; user_id: string; host: string; device_id: string | null; conversation_id: string | null; state: BrowserRunRow['state']
-  reason: string | null; started_at: string; lease_until: string; ended_at: string | null
+  reason: string | null; started_at: string; lease_until: string; ended_at: string | null; budget: BrowserRunRow['budget']; steps: number; frame_run_id: string | null; ends_at: string | null
 }
 const toRow = (r: DbRow): BrowserRunRow => ({
   id: r.id, userId: r.user_id, host: r.host, deviceId: r.device_id, conversationId: r.conversation_id, state: r.state,
-  reason: r.reason, startedAt: r.started_at, leaseUntil: r.lease_until, endedAt: r.ended_at,
+  reason: r.reason, startedAt: r.started_at, leaseUntil: r.lease_until, endedAt: r.ended_at, budget: r.budget, steps: r.steps, frameRunId: r.frame_run_id, endsAt: r.ends_at,
 })
 
 export function sqliteBrowserRunRepository(conn: Database.Database, companyId: string): BrowserRunRepository {
   return {
     insert(row) {
       try {
-        conn.prepare(`INSERT INTO browser_runs (company_id, ${COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
-          companyId, row.id, row.userId, row.host, row.deviceId, row.conversationId, row.state, row.reason, row.startedAt, row.leaseUntil, row.endedAt,
+        conn.prepare(`INSERT INTO browser_runs (company_id, ${COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+          companyId, row.id, row.userId, row.host, row.deviceId, row.conversationId, row.state, row.reason, row.startedAt, row.leaseUntil, row.endedAt, row.budget, row.steps, row.frameRunId, row.endsAt,
         )
         return true
       } catch (error) {
@@ -35,12 +35,16 @@ export function sqliteBrowserRunRepository(conn: Database.Database, companyId: s
       const r = conn.prepare(`SELECT ${COLUMNS} FROM browser_runs WHERE company_id = ? AND id = ?`).get(companyId, id) as DbRow | undefined
       return r ? toRow(r) : null
     },
+    skillRunOf(frameRunId) {
+      return conn.prepare("SELECT 1 FROM browser_runs WHERE company_id = ? AND frame_run_id = ? AND budget = 'skill'").get(companyId, frameRunId) !== undefined
+    },
     runningOn(host) {
       const r = conn.prepare(`SELECT ${COLUMNS} FROM browser_runs WHERE company_id = ? AND host = ? AND state = 'running'`).get(companyId, host) as DbRow | undefined
       return r ? toRow(r) : null
     },
-    renew(id, leaseUntil) {
-      return conn.prepare("UPDATE browser_runs SET lease_until = ? WHERE company_id = ? AND id = ? AND state = 'running'").run(leaseUntil, companyId, id).changes === 1
+    renew(id, leaseUntil, maxSteps) {
+      return conn.prepare("UPDATE browser_runs SET lease_until = ?, steps = steps + 1 WHERE company_id = ? AND id = ? AND state = 'running' AND steps < ?")
+        .run(leaseUntil, companyId, id, maxSteps).changes === 1
     },
     end(id, state, reason, at) {
       return conn.prepare("UPDATE browser_runs SET state = ?, reason = ?, ended_at = ? WHERE company_id = ? AND id = ? AND state = 'running'")

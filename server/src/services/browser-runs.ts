@@ -13,9 +13,18 @@
  *   (`refused`) and lets the lock go. Finishing and the list never ask it: clean-up never stops.
  * - **The lock** (D10): at most one running run per company × domain — the partial unique index on `browser_runs`; a
  *   second start is `BROWSER_RUN_BUSY` and changes nothing. A run holds it until it finishes, is refused, its member
- *   leaves, its lease (`BROWSER_RUN_LIMITS.leaseMs`, renewed by each continue) runs out, or it reaches
- *   `BROWSER_RUN_LIMITS.runMs` whatever its renewals — judged on every touch (start on that domain, continue, finish),
- *   never by a timer, so a crashed app frees the domain at the latest a lease later.
+ *   leaves, its lease (`BROWSER_RUN_LIMITS.leaseMs`, renewed by each continue) runs out, or it reaches its budget's
+ *   `runMs` whatever its renewals — judged on every touch (start on that domain, continue, finish), never by a timer, so
+ *   a crashed app frees the domain at the latest a lease later.
+ * - **The budget** ("Room for a Skill run", shared/core/browser-run-budget.ts): chosen here at the start by the core's one
+ *   rule `browserRunBudgetFor` from this server's own rows — `skill` only for a write task's run naming its member's
+ *   frames run of an approved company Skill that is open; everything else `standard` — stored with the row (fixed by
+ *   trigger) and answered. **Once per frames run**: a later write run naming a frames run that already had its `skill`
+ *   run is refused (`BROWSER_RUN_WORK_TAKEN`; the check here and a partial unique index). Every continue takes one of its
+ *   `steps` (compare-and-set): past them the run ends (`timed_out`, `rounds`).
+ * - **Never past the frames run** (`browserRunWindow`): a run naming a frames run ends (`ends_at`, fixed) no later than
+ *   that frames run does, and the answer's `operateMs` tells the app how long it may operate; with less than a minute left
+ *   it is refused (`BROWSER_RUN_TOO_LATE`).
  * - **The log** (I8): only steps that pass `browserRunLogProblem` (page patterns, the fixed actions, labels already in
  *   the kept form): no value can be stored. Written once per run, append-only (trigger). The member sees their own runs,
  *   an owner / admin everyone's; another company's run is the same 404 as none.
@@ -26,6 +35,7 @@ import {
   BROWSER_RUN_ID_RE, BROWSER_RUN_LIMITS, BROWSER_RUN_OUTCOMES, browserRunLogProblem, browserRunWritesProblem, isBrowserRunEndReason,
   type BrowserRunLogStep, type BrowserRunOutcome, type BrowserRunState, type BrowserRunWriteStep,
 } from '../../shared/core/browser-run-log'
+import { BROWSER_RUN_BUDGETS, browserRunBudgetFor, browserRunWindow } from '../../shared/core/browser-run-budget'
 import type { BrowserRunContinued, BrowserRunsList, BrowserRunStarted, BrowserRunView } from '../../shared/types/browser-runs'
 import type { BrowserRunRepository, BrowserRunRow } from '../ports/browser-runs'
 import type { Clock, IdGenerator } from '../ports/clock'
@@ -46,10 +56,12 @@ export interface BrowserRunDeps {
   devices: Pick<BrowserDeviceGate, 'check'>
   siteGrants: Pick<BrowserSiteGrants, 'allows'>
   /**
-   * The frames run holding this domain (services/browser-frames.ts `holderOn`; step ⑤b joins the two locks): its id and
-   * member, `busy` while an ended run's write may still be on its way, or null. Absent: no frames service (tests of ④).
+   * The frames run holding this domain (services/browser-frames.ts `holderOn`; step ⑤b joins the two locks): its id,
+   * member, source and state (the budget's rule reads the last two) and when it ends by its times (ms), `busy` while an
+   * ended run's write may still be on its
+   * way, or null. Absent: no frames service (tests of ④).
    */
-  frameRunOn?: (companyId: string, host: string) => { runId: string; userId: string } | 'busy' | null
+  frameRunOn?: (companyId: string, host: string) => { runId: string; userId: string; source: string; state: string; endsAt: number } | 'busy' | null
 }
 
 export const BROWSER_OPERATOR_RUN_WORDS = {
@@ -61,6 +73,8 @@ export const BROWSER_OPERATOR_RUN_WORDS = {
   busy: 'このサイトでは、いま別の AI の作業が動いています。終わってから、もう一度頼んでください',
   ended: 'この作業は、もう終わっています',
   elsewhere: 'この作業は、別の PC で始めたものです',
+  workTaken: 'この計画の作業は、もう始まっています。もう一度頼んでください',
+  tooLate: '時間切れです。計画の残り時間が足りないため、作業を始めませんでした。もう一度頼んでください',
 } as const
 const W = BROWSER_OPERATOR_RUN_WORDS
 
@@ -86,9 +100,10 @@ export function createBrowserRunService(deps: BrowserRunDeps) {
     return null
   }
 
-  /** Has a running row run out (its lease, or the whole run's limit)? */
-  const outOfTime = (row: BrowserRunRow, now: number) =>
-    Date.parse(row.leaseUntil) <= now || Date.parse(row.startedAt) + BROWSER_RUN_LIMITS.runMs <= now
+  /** A run's hard end: as fixed at its start (an older build's row: its start + its budget's `runMs`). */
+  const endOf = (row: BrowserRunRow) => (row.endsAt !== null ? Date.parse(row.endsAt) : Date.parse(row.startedAt) + BROWSER_RUN_BUDGETS[row.budget].runMs)
+  /** Has a running row run out (its lease, or its hard end)? */
+  const outOfTime = (row: BrowserRunRow, now: number) => Date.parse(row.leaseUntil) <= now || endOf(row) <= now
 
   /** A running row past its time ends `timed_out` (on every touch). True when it did. */
   function settleTime(companyId: string, row: BrowserRunRow, now: number): boolean {
@@ -147,13 +162,22 @@ export function createBrowserRunService(deps: BrowserRunDeps) {
           return refuse('conflict', W.busy, { code: 'BROWSER_RUN_BUSY' })
         }
         if (!framed && frameRunId) return refuse('conflict', W.ended, { code: 'BROWSER_RUN_ENDED' })
+        // The budget: from this server's own frames run (its member's, the one named, checked just above), never the app's word.
+        const named = framed && frameRunId ? framed : null
+        const budget = browserRunBudgetFor({ write: body.write === true, frameRun: named })
+        // A frames run's work is one operator run: the `skill` budget once (a modified app cannot start a second one).
+        if (budget === 'skill' && named && r.skillRunOf(named.runId)) return refuse('conflict', W.workTaken, { code: 'BROWSER_RUN_WORK_TAKEN' })
+        // Never past the frames run it names; too little time left → refused, nothing started.
+        const window = browserRunWindow(BROWSER_RUN_BUDGETS[budget], now, named ? named.endsAt : null)
+        if (!window) return refuse('conflict', W.tooLate, { code: 'BROWSER_RUN_TOO_LATE' })
         const id = `bo_${deps.ids.newToken().slice(0, 32)}`
         const inserted = r.insert({
           id, userId: member.userId, host, deviceId: pc.value.deviceId, conversationId, state: 'running', reason: null,
-          startedAt: iso(now), leaseUntil: iso(now + BROWSER_RUN_LIMITS.leaseMs), endedAt: null,
+          startedAt: iso(now), leaseUntil: iso(Math.min(now + BROWSER_RUN_LIMITS.leaseMs, window.endsAt)), endedAt: null, budget, steps: 0,
+          frameRunId: named ? named.runId : null, endsAt: iso(window.endsAt),
         })
         if (!inserted) return refuse('conflict', W.busy, { code: 'BROWSER_RUN_BUSY' })
-        return ok({ runId: id, leaseMs: BROWSER_RUN_LIMITS.leaseMs })
+        return ok({ runId: id, leaseMs: BROWSER_RUN_LIMITS.leaseMs, budget, operateMs: window.operateMs })
       })
     },
 
@@ -173,8 +197,13 @@ export function createBrowserRunService(deps: BrowserRunDeps) {
         repo(member.companyId).end(row.id, 'refused', REFUSAL_REASON[refused.body.code as string] ?? 'refused', iso(now))
         return refused
       }
-      const until = Math.min(now + BROWSER_RUN_LIMITS.leaseMs, Date.parse(row.startedAt) + BROWSER_RUN_LIMITS.runMs)
-      if (!repo(member.companyId).renew(row.id, iso(until))) return refuse('conflict', W.ended, { code: 'BROWSER_RUN_ENDED' })
+      const budget = BROWSER_RUN_BUDGETS[row.budget]
+      const until = Math.min(now + BROWSER_RUN_LIMITS.leaseMs, endOf(row))
+      // One of the budget's steps (compare-and-set): past them the run ends here.
+      if (!repo(member.companyId).renew(row.id, iso(until), budget.steps)) {
+        repo(member.companyId).end(row.id, 'timed_out', 'rounds', iso(now))
+        return refuse('conflict', W.ended, { code: 'BROWSER_RUN_ENDED' })
+      }
       return ok({ leaseMs: until - now })
     },
 

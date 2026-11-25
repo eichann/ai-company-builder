@@ -19,6 +19,7 @@ import { browserFrameMismatch, browserFramePathFits, browserAdhocWritesProblem, 
 import { browserSkillDeclarationFrom, browserSkillWriteLine, type BrowserSkillWrite } from '../../shared/core/browser-skill'
 import { isSensitiveFieldName } from '../../shared/core/browser-recording'
 import { browserRunAddressPattern, browserRunWriteMethod, type BrowserRunWriteOutcome, type BrowserRunWriteStep } from '../../shared/core/browser-run-log'
+import { BROWSER_FRAME_RUN_TIMES } from '../../shared/core/browser-run-budget'
 import { BROWSER_CARD_CHECKED_BY_WORDS, type BrowserCard, type BrowserCardCheck, type BrowserCardRow, type BrowserCardSection, type BrowserCardValue } from '../../shared/core/browser-card'
 import type { BrowserFrameView } from '../../shared/types/browser-frames'
 import type { BrowserWriteOutcome, BrowserWriteSteps } from './browser-runner'
@@ -51,8 +52,8 @@ export const BROWSER_WORK_LIMITS = Object.freeze({
   afterValue: 300,
   /** A company Skill's steps handed to the operator. */
   steps: 20_000,
-  /** How long the card waits for ［任せる］ (the server ends a waiting run at 10 minutes). */
-  approveMs: 10 * 60_000,
+  /** How long the card waits for ［任せる］, counted from when the frames run was asked for: exactly as long as the server keeps a waiting run. */
+  approveMs: BROWSER_FRAME_RUN_TIMES.approve,
 })
 const L = BROWSER_WORK_LIMITS
 
@@ -472,6 +473,8 @@ export function workMaterial(input: {
   writes: readonly BrowserRunWriteOutcome[]
   notes: string
   round: number
+  /** The run's budget of steps (the server's answer: browser-run-budget.ts). */
+  rounds: number
 }): unknown {
   const o = (s: string): OutsideValue => outsideValue(s)
   const p = input.page
@@ -495,7 +498,7 @@ export function workMaterial(input: {
     writes: input.writes.map((w, i) => ({ number: i + 1, result: WORK_WRITE_WORDS[w] })),
     notes: o(input.notes),
     round: input.round,
-    roundsLeft: BROWSER_BROWSE_LIMITS.rounds - input.round,
+    roundsLeft: input.rounds - input.round,
   }
 }
 
@@ -522,6 +525,7 @@ export const BROWSER_WORK_WORDS = {
   stopped: 'AI の動きが止められているため、サイトに触れませんでした。ユーザーにそう伝えてください。',
   noWindow: 'このパソコンでサイトの窓が開いていません。設定の「ブラウザ操作」で窓を開いてログインしてから、もう一度頼むようユーザーに伝えてください。',
   busy: 'このサイトでは、いま別の AI の作業が動いています。終わってから、もう一度頼むようユーザーに伝えてください。',
+  tooLate: '時間切れ：計画の残り時間が足りないため、作業を始めませんでした。サイトには何も書いていません。もう一度頼むようユーザーに伝えてください。',
   pc: 'この PC は、ブラウザ操作に使えるようになっていません。設定の「ブラウザ操作」の「この PC」を確かめるようユーザーに伝えてください。',
   noOperator: 'この AI では、サイトを操作する係を使えません（Claude Code のときだけ使えます）。ユーザーにそう伝えてください。',
   offline: 'サーバーにつながらなかったため、サイトに触れませんでした。少し待ってから、もう一度頼むようユーザーに伝えてください。',

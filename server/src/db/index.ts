@@ -42,7 +42,7 @@ import { browserLineSchema } from './schema/browser-lines'
 import { browserDeviceSchema } from './schema/browser-devices'
 import { browserRecordingSchema } from './schema/browser-recordings'
 import { browserSkillSchema } from './schema/browser-skills'
-import { browserRunSchema } from './schema/browser-runs'
+import { browserRunSchema, migrateBrowserRunBudget } from './schema/browser-runs'
 import { browserFrameSchema } from './schema/browser-frames'
 // lane C ▲
 // The migrations tests run on their own against older databases.
@@ -60,6 +60,7 @@ export { migrateSkillUseColumns } from './schema/skill-uses'
 export { migrateSecondOpinionSetting } from './schema/agents'
 export { migrateShelfHistoryRequester } from './schema/skill-shelf'
 export { migrateBrowserExecutionMonotonic, migrateBrowserPlanSummary } from './schema/browser-plans'
+export { migrateBrowserRunBudget } from './schema/browser-runs'
 
 // Ensure data directory exists
 if (!fs.existsSync(DATA_DIR)) {
@@ -202,6 +203,8 @@ export function initDatabase(conn: Database.Database = sqlite) {
   migrateBrowserExecutionMonotonic(conn)
   // The open-plans list's copies of a plan's target and consultation (agent-browser.md).
   migrateBrowserPlanSummary(conn)
+  // An operator run's budget and its step count (agent-browser.md "Room for a Skill run").
+  migrateBrowserRunBudget(conn)
   // Before the seeding below: it deletes stale manager rows per company.
   migrateRuleAndManagerCompanies(conn)
   // After it: the rebuild keeps company_id and recreates its triggers.

@@ -14,6 +14,7 @@
  */
 import { outsideValue, type OutsideValue } from '../../shared/core/outside-text'
 import { browserRunAddressPattern, browserRunLabel, type BrowserRunLogStep } from '../../shared/core/browser-run-log'
+import { BROWSER_RUN_BUDGETS } from '../../shared/core/browser-run-budget'
 import type { BrowserCard } from '../../shared/core/browser-card'
 import { BROWSER_REQUEST_SERVER } from './browser-plans'
 import type { BrowserWorkHooks } from './browser-frame-writes'
@@ -26,11 +27,11 @@ export const BROWSER_WORK_TOOL = 'browser_work'
 export const BROWSER_WORK_TOOL_ID = `mcp__${BROWSER_REQUEST_SERVER}__${BROWSER_WORK_TOOL}`
 
 export const BROWSER_BROWSE_LIMITS = Object.freeze({
-  /** Steps (one closed CLI start each) per request. */
-  rounds: 20,
-  /** One step, and the whole request. */
+  /** Steps (one closed CLI start each) per request, and the whole request: the `standard` budget (browser-run-budget.ts). */
+  rounds: BROWSER_RUN_BUDGETS.standard.steps,
+  totalMs: BROWSER_RUN_BUDGETS.standard.operateMs,
+  /** One step. */
   roundMs: 90_000,
-  totalMs: 5 * 60_000,
   /** The chat AI's instruction, the headings it asks for, each heading. */
   task: 1000,
   items: 10,
