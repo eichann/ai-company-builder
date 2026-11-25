@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { Button, Card, SectionHeader } from '../../../shared/ui/primitives'
 import { BROWSER_WORDS, type BrowserSiteView } from '../../../../shared/browser-operation'
 import { clearBrowserLogin, openBrowserSite } from '../api'
+import { BrowserPcSection } from './BrowserPcSection'
 
 export function BrowserSection({ companyId, sites }: { companyId: string; sites: BrowserSiteView[] }) {
   const [busy, setBusy] = useState(false)
@@ -42,6 +43,7 @@ export function BrowserSection({ companyId, sites }: { companyId: string; sites:
           </div>
         ))}
       </Card>
+      <BrowserPcSection companyId={companyId} />
     </div>
   )
 }

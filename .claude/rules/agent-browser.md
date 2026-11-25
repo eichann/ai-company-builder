@@ -2287,7 +2287,8 @@ and the owner's PC is registered.
 
 - **The build constant stays `false`** (`BROWSER_AI_BUILD_SWITCH`): no build is on for everyone. main
   composes `createThisPcSwitch({ file: <userData>/browser-ai-this-pc.json, server, userId })`
-  (`features/browser/ai-switch.ts`) and hands it to `wireBrowserPlans` as the switch.
+  (`features/browser/ai-switch.ts`) and, since D4, folds it into `createRegisteredPcSwitch` (on when the opt-in **or**
+  this PC's enabled registration says so: "This PC's registration", the app's half) — the switch every wiring gets.
 - **The opt-in** is a file the person writes **by hand** in the app's userData folder (never a company
   folder), exactly `{ "browserAi": "this-pc", "server": "<origin>", "userId": "<id>", "until": "<ISO
   time with zone>" }` (`browserAiOptInOn`, `client/shared/browser-ai.ts`, pure): on only while `server`
@@ -2331,7 +2332,7 @@ off), `browser-execute.test.ts` (the opt-in removed between the permit and the s
 context composed as main does: the last check refuses, failed, nothing reaches the site). Each guard mutation-checked; second layer kept on purpose: the regular-file check after
 `O_NOFOLLOW` / `O_NONBLOCK` (a folder or a pipe already fails to read).
 
-## This PC's registration (D2: the server's half; the app sends no key yet)
+## This PC's registration (D2: the server's half; D4: the app's half)
 
 Owner-approved design memo 「ブラウザ操作を担当者の PC で使う」 v2 (2026-11-24) §3–§8, §10, §14-1 (「必要最低限に絞る」: everything
 in §14-3 「あとから足せる」 stays out — a confirmation number, expiries, extra checks on one's own PC, per-company keys, the
@@ -2390,6 +2391,41 @@ the guards they were.
   admin session can register and enable its own PC (no confirmation number: §14-3). The member's own browser MCPs are
   outside this (their visibility is §14-3). The request log prints `deviceId` (an opaque id), never the header.
 
+- **The app's half (D4)** (design memo v2 §3-2, §7-1, §8-2): `client/electron/features/browser/device.ts`
+  (`createBrowserDeviceKey`: 32 random bytes as `v1.` + base64url, made the first time the member registers, **kept only
+  sealed by the OS keychain** — `SecretBox`, safeStorage handed in by main.ts as for the API key — in
+  `<userData>/browser-device-key-<sha256(origin)[0..16]>` — **one key per server origin**, the sealed text naming its
+  origin (independent review: the key one server trusts is never sent to another server the app is pointed at; a file
+  sealed for another origin is no key) — (0600, a fresh `O_EXCL` temporary file synced and renamed, a link never
+  followed), read once and then held in main's memory; no keychain (`available()` false, Linux without one) → nothing
+  made, the screen 「この PC では使えません（安全な保存ができません）。」 and registering refused in that sentence; a sealed key that
+  cannot be opened (another computer, a reset or denied keychain) = none, and registering again keeps that file aside
+  (`.unreadable-<time>`, never overwritten) and makes a new key = a new registration. `createBrowserDevice`: `GET
+  /browser-devices-me`, `POST /browser-devices { label }`, `DELETE /browser-devices-me` with the header, `GET
+  /browser-lines-mine` without it; the remembered state per server × member × company — kept only for the scope it was
+  asked for and not across a sign-out (an answer arriving later is dropped), forgotten on a refusal (left the company), kept
+  on no answer —, asked again when the settings open, after each press and when the company's policy is answered (at
+  most once a minute per company, only once this PC has a key); cleared on sign-out).
+  **The header goes only** on those PC routes and, through `deviceKey` handed to the plan clients, on the steps the
+  gate asks: old path register / approve / claim / permit (`plans-api.ts`), new path a plan's creation (inspection or
+  writes) / approve / claim / every permit (`lines-api.ts`) — never on get, the lists, cancel, confirm, a result, a
+  notice or a report, and **never on any other request main makes** (no global fetch wrapper: the server's
+  `routes/broker-relay.ts` forwards request headers to outside services). A PC without a key sends none, so the owner's
+  hand-placed opt-in keeps working through the server's exception; **once this PC has a key it always sends it** (a
+  pending or stopped registration is then refused by the server even for the owner — the stricter reading of §10).
+  The switch (`createRegisteredPcSwitch`): the opt-in file (until D5) **or** "this PC is `enabled` for the signed-in member
+  on this server" in some company (synchronous, from the remembered state; another company's steps are still the server's
+  to refuse). IPC `browserDevice:get` / `register` / `withdraw` (`device-ipc.ts`, main window's main frame only) answer a
+  `BrowserPcView` (`client/shared/browser-device.ts`): the state (`none` / `pending` / `enabled` / `revoked` /
+  `unavailable` / `unknown`), the PC's name, a suggested name (this computer's), the combinations' labels and whether they
+  write — **never the key, its hash or the registration's id**. Settings › 「ブラウザ操作」 › 「この PC」
+  (`src/features/settings/components/BrowserPcSection.tsx`, `hooks/useBrowserPc.ts`; words `BROWSER_PC_WORDS`): each
+  state in plain Japanese with what to do next (確認待ち: 「管理者に「登録しました」と伝えて、使えるようにしてもらってください。」),
+  the usable combinations (「使える作業はまだありません。管理者に使えるようにしてもらってください。」 when none), 「この PC を登録する」
+  with the PC's name (shown whatever the combinations: the owner's old-path grant is not one of them), 「取り下げる」 /
+  「この PC での利用をやめる」 behind a danger confirm, 「登録し直す」 once stopped. The section shows wherever the 「ブラウザ操作」
+  item does (the company's setting on with a site). No confirmation number, expiry or extra check (§14-3).
+
 Tests: `server/tests/unit/browser-device-core.test.ts` (the key's one spelling, the name, the moves, the gate's rule as
 a table: every state × role × plan binding, the exception for an owner only and none once it ends),
 `server/tests/unit/browser-devices.test.ts` (the real device and opened-lines services: registering twice, after a stop,
@@ -2404,7 +2440,21 @@ exception, a plan bound to its PC, a revoked PC voiding the claimed execution (`
 `browser-devices-me` uncached and own only, the real member removal stopping the PC), the old and new paths' own tests
 (with a stand-in PC check, `tests/helpers/browser-devices.ts`), permission matrix rows + `CROSS`,
 `company-scoped-sql.test.ts`, `jobs-schema.test.ts`. Each guard mutation-checked (32 mutations; one survivor kept on purpose: enable's own
-`pending` check, behind the compare-and-set and the trigger, each of which refuses the same).
+`pending` check, behind the compare-and-set and the trigger, each of which refuses the same). The app's half: `client/tests/browser-device.test.ts` (the key's
+one spelling every time; made once, sealed — no plain key on disk, 0600 —, read back after a restart, another keychain's
+or a linked file = none; one key per server (another server gets none, a file sealed for another origin is none); a key
+the keychain will not open kept aside, never overwritten; an answer arriving after a sign-out or another sign-in never
+remembered; a refusal forgets 使える, no answer keeps it; only `device.ts` and the two plan clients name the header and
+only main.ts and the plan wirings hand the key on (a source scan); no keychain: nothing made or sent, the plain sentence; registering sends the key in the header
+and the name alone in the body, the answers never hold the key or the id, the usable list asked without it; a refusal's
+sentence, no answer `unknown`; the refresh once a minute and only with a key; the old and new plan clients carry it on
+exactly the gated steps; no key → no header and the opt-in alone turns the switch on), `client/tests/ipc-browser-device.test.ts`
+(the real main.ts: every request main made carries the key only on the PC routes, never in an answer, a log, an address,
+a body or on disk in the clear; another window refused; no keychain refused), `client/tests/ui/browser-settings.spec.ts`
+(「この PC」 on `download-folders-ui.html?tab=browser&browser=1&pc=…`: the states, the combinations, register with the name,
+stop behind the confirm, none / no keychain / no server, a refusal's sentence). Mutation-checked (the gated header on
+each client, the main-window check; survivor kept on purpose: `register`'s own keychain check, behind `ensure()`
+refusing the same).
 
 ## The admin pages: PCs and people (PR A)
 
@@ -2458,8 +2508,8 @@ the execution (6b-2c, "Executing a plan": claim → re-read → permit → send 
 the card, its IPC and the request tool (6b-2d, "The card, the IPC and the request tool"), all switched
 off, and the inbox's rows (switched off too); **6c** — on for the owner's PC only through "This PC's
 opt-in" (built, `lstep@0.6.3` approved: "Login helpers" lets the person log in, "Asset hosts" draws the page), and **the server's PC
-registration** (the server's half is built: "This PC's registration"; still to come: the admin pages, PR A; the app's
-key, header and 「この PC」, D4; the end of the transition, D5) before it is on for anyone else;
+registration** (the server's half, the app's half and the admin pages are built: "This PC's registration", "The admin pages: PCs and people"; still to come:
+the end of the transition, D5) before it is on for anyone else;
 `irreversible` types and more than one write (refused by the first version's rule today); **the method override and the swap** (design memo §24: a write may
 declare `method: DELETE` / `PATCH` with `override: form_field`, sent as POST with `_method=<method>` in the
 body; `matchDeclaredWrite` would then match the effective method and the declared `_method` pair, still

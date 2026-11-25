@@ -45,6 +45,8 @@ export interface BrowserInspectionsDeps<E> {
   fromMainWindow: (event: E) => boolean
   baseUrl: () => string
   cookies: () => string[]
+  /** This PC's key header value (device.ts): only the plan client's gated steps send it. */
+  deviceKey?: () => string | null
   userId: () => string | null
   /** The context the plans use too (sign-in, the company's setting, quitting, the switch): main advances it. */
   context: BrowserContext
@@ -100,7 +102,7 @@ function runRefusedWords(reason: BrowserReadRunRefusal): string {
 
 export function wireBrowserInspections<E extends IpcInvokeEvent>(ipc: IpcRegistrar<E, IpcMessageEvent>, deps: BrowserInspectionsDeps<E>) {
   const now = deps.now ?? Date.now
-  const http = createBrowserLinesHttp({ baseUrl: deps.baseUrl, cookies: deps.cookies, fetch: deps.fetch })
+  const http = createBrowserLinesHttp({ baseUrl: deps.baseUrl, cookies: deps.cookies, deviceKey: deps.deviceKey, fetch: deps.fetch })
   const file = (deps.openedFile ?? opened) as BrowserOpenedFile
   // The site's operated host and name only from its reviewed declaration that this build carries and the approved list
   // approves (as the window's helpers): never from the request, so a map's GETs go nowhere but the site the map names.

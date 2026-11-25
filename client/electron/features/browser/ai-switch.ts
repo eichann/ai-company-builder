@@ -45,3 +45,14 @@ export function createThisPcSwitch(deps: {
     }
   }
 }
+
+/**
+ * The switch main composes since D4 (agent-browser.md "This PC's registration"; design memo v2 §8-2): on when the
+ * build constant or this PC's opt-in file says so (the transition: D5 removes the file), **or** when the server last
+ * said this PC is `enabled` for the signed-in member on this server (device.ts `enabledHere`, synchronous). Read on
+ * every ask, like the opt-in. The server still decides every gated step (its PC check, the grant, the setting): this
+ * only says where the app offers the tools and runs at all.
+ */
+export function createRegisteredPcSwitch(deps: { optIn: BrowserAiSwitch; registered: () => boolean }): BrowserAiSwitch {
+  return () => deps.optIn() || deps.registered()
+}

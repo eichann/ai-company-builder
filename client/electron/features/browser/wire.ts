@@ -29,6 +29,8 @@ export interface BrowserPlansWireDeps<E> {
   fromMainWindow: (event: E) => boolean
   baseUrl: () => string
   cookies: () => string[]
+  /** This PC's key header value (device.ts): only the plan client's gated steps send it. */
+  deviceKey?: () => string | null
   userId: () => string | null
   userDataDir: () => string
   /** The window controller's reads (controller.ts). */
@@ -67,7 +69,7 @@ export function bundledAssetHosts(declarations: readonly string[]): (host: strin
 
 export function wireBrowserPlans<E extends IpcInvokeEvent>(ipc: IpcRegistrar<E, IpcMessageEvent>, deps: BrowserPlansWireDeps<E>) {
   const aiSwitch = deps.aiSwitch ?? buildAiSwitch
-  const http = createBrowserPlansHttp({ baseUrl: deps.baseUrl, cookies: deps.cookies, fetch: deps.fetch })
+  const http = createBrowserPlansHttp({ baseUrl: deps.baseUrl, cookies: deps.cookies, deviceKey: deps.deviceKey, fetch: deps.fetch })
   // "Still the same?" also asks the switch: this PC's opt-in removed mid-run stops the run or the registration.
   const context = createBrowserContext({ userId: deps.userId, aiSwitch })
   const connector = createBrowserConnectors(deps.connectors.declarations)

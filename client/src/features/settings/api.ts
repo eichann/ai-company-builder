@@ -274,3 +274,18 @@ export function openBrowserSite(companyId: string, host: string, actions: Browse
 export function clearBrowserLogin(companyId: string, host: string, actions: BrowserSiteActions = window.electronAPI) {
   return actions.clearBrowserLogin(companyId, host)
 }
+
+/** 「この PC」: this PC's registration for 「ブラウザ操作」 (state and names only — main keeps the PC's key). */
+export type BrowserPcPort = ElectronPort<'getBrowserPc' | 'registerBrowserPc' | 'withdrawBrowserPc'>
+
+export function getBrowserPc(companyId: string, port: BrowserPcPort = window.electronAPI) {
+  return port.getBrowserPc(companyId)
+}
+
+export function registerBrowserPc(companyId: string, label: string, port: BrowserPcPort = window.electronAPI) {
+  return port.registerBrowserPc(companyId, label)
+}
+
+export function withdrawBrowserPc(companyId: string, port: BrowserPcPort = window.electronAPI) {
+  return port.withdrawBrowserPc(companyId)
+}

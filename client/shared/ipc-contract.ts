@@ -79,6 +79,7 @@ import type { BrowserActionResult, BrowserSitesResult } from './browser-operatio
 import type { BrowserConfirmResult, BrowserPlanActAnswer, BrowserPlanGetResult, BrowserPlanListResult, BrowserPlanRunAnswer } from './browser-plans'
 import type { BrowserInspectionGetResult } from './browser-inspection'
 import type { BrowserWriteGetResult } from './browser-line-writes'
+import type { BrowserPcResult } from './browser-device'
 import type { SkillShelfMark, SkillShelfRequestInfo, SkillShelfRestoreResult, SkillShelfSendResult } from './skill-shelf'
 import type { PluginStepButton, PluginStepContinuation, PluginStepContinueResult, PluginStepStartResult, QueuedPluginStep } from './ai-turn-steps/plugin'
 import type { StepDeliverablesView } from './step-deliverables'
@@ -924,6 +925,12 @@ export interface IpcInvokeChannels {
   'browserLines:confirmValue': { args: [companyId: string, cardId: string, name: string]; result: BrowserWriteGetResult }
   'browserLines:runWrite': { args: [companyId: string, cardId: string, contentHash: string]; result: BrowserWriteGetResult }
   'browserLines:confirmWrite': { args: [companyId: string, cardId: string, result: 'done' | 'not_done']; result: BrowserWriteGetResult }
+  /** Settings › 「この PC」: this PC's registration state and the member's usable combinations — never the PC's key (main window only; agent-browser.md "This PC's registration"). */
+  'browserDevice:get': { args: [companyId: string]; result: BrowserPcResult }
+  /** 「この PC を登録する」: main makes the key (OS keychain) and registers it; answers the new state only. */
+  'browserDevice:register': { args: [companyId: string, label: string]; result: BrowserPcResult }
+  /** 「取り下げる」 / 「この PC での利用をやめる」. */
+  'browserDevice:withdraw': { args: [companyId: string]; result: BrowserPcResult }
   /** The member's records at a business plugin's ai_turn step (C5, plugin-steps.md); main remembers them for the claim. */
   'aiTurns:pluginTurns': { args: [companyId: string]; result: QueuedPluginStep[] }
   /** The `start: person` steps at a record's state (its card's buttons). */
@@ -1383,6 +1390,9 @@ export interface ElectronAPI {
   confirmBrowserWriteValue: Invoke<'browserLines:confirmValue'>
   runBrowserWrite: Invoke<'browserLines:runWrite'>
   confirmBrowserWrite: Invoke<'browserLines:confirmWrite'>
+  getBrowserPc: Invoke<'browserDevice:get'>
+  registerBrowserPc: Invoke<'browserDevice:register'>
+  withdrawBrowserPc: Invoke<'browserDevice:withdraw'>
   listPluginStepTurns: Invoke<'aiTurns:pluginTurns'>
   listPersonSteps: Invoke<'pluginSteps:onRecord'>
   startPersonStep: Invoke<'pluginSteps:start'>
