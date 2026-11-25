@@ -625,7 +625,7 @@ test.describe('the bottom panel', () => {
     const prompt = page.getByRole('button', { name: 'ダウンロードして同期を開始' })
     await expect(prompt).toBeVisible()
     await pressJ(page)
-    await panel(page).locator('[data-inbox-row="notice:n-1"]').getByRole('button', { name: '開く' }).click()
+    await panel(page).locator('[data-inbox-row="record:task-done0001"]').getByRole('button', { name: '開く' }).click()
     await expect(prompt).toBeHidden()
     await expect(panel(page)).toBeVisible()
   })
@@ -647,7 +647,7 @@ test.describe('the bottom panel', () => {
     await expect(panel(page).locator('[data-inbox-row^="browser:"]')).toHaveCount(0)
     await page.keyboard.press('Escape')
     // Opening a done row marks it seen (the bell's same read state).
-    await panel(page).locator('[data-inbox-row="notice:n-1"]').getByRole('button', { name: '開く' }).click()
+    await panel(page).locator('[data-inbox-row="record:task-done0001"]').getByRole('button', { name: '開く' }).click()
     await expect.poll(async () => (await layout(page)).evaluate(l => l.calls.filter(c => c.name === 'markNotificationsRead').length)).toBe(1)
   })
 
@@ -655,11 +655,11 @@ test.describe('the bottom panel', () => {
     await openPreview(page, 'skill-layout', { inbox: '1' })
     const inboxButton = page.locator('[data-inbox-button]')
     // One approval waits; the unread done notice is new. No 「あなたの番」 pill and no bell any more.
-    await expect(inboxButton).toHaveAccessibleName('受け箱（あなた待ち 1 件・新着あり）')
+    await expect(inboxButton).toHaveAccessibleName('受け箱：新着 1 件・あなた待ち 1 件 (⌘J)')
     await expect(page.getByRole('button', { name: /^起きたこと/ })).toHaveCount(0)
     await inboxButton.click()
     await expect(panel(page)).toBeVisible()
-    await expect(inboxButton).toHaveAccessibleName('受け箱（あなた待ち 1 件）')
+    await expect(inboxButton).toHaveAttribute('aria-pressed', 'true')
     await inboxButton.click()
     await expect(panel(page)).toBeHidden()
 

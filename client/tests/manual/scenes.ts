@@ -137,8 +137,8 @@ const QUICK_CHIP = (which: 'due' | 'who' | 'bundle' | 'whenDone') => `[data-quic
 // 18〜24章: a task's card as 山田さん sees it (task-card-ui.html ?manual=1).
 const CARD = { page: 'task-card', query: { manual: '1' }, viewport: { width: 1100, height: 900 } } as const
 // 24章: the meetings 山田さん attended (meetings-ui.html ?manual=1).
-const MEETINGS = { page: 'meetings', query: { manual: '1' }, viewport: { width: 1100, height: 900 } } as const
-const MINUTES_BLOCK = 'role=region[name="議事録が届きました"]'
+const MEETINGS = { page: 'meetings', query: { manual: '1' }, viewport: { width: 1320, height: 900 } } as const
+const MINUTES_BLOCK = 'role=region[name="新着"] >> nth=0'
 // 17章: 「記録の一覧」 as 山田さん reads it (records-table-ui.html ?manual=1).
 const TABLE = { page: 'records-table', query: { manual: '1' }, viewport: { width: 1100, height: 700 } } as const
 const CARD_MORE = 'role=button[name="その他の操作"] >> nth=0'
@@ -1019,14 +1019,29 @@ export const scenes: Scene[] = [
   // The task list as 山田さん sees it (tasks-list-ui.html ?manual=1: 営業部, プロジェクト, 高橋さん and 佐藤さん).
   {
     id: 'tasks-list-by-turn',
-    about: 'The task list by turn: 引き受け待ち, あなたの番 (with today\'s meeting), AI の番, ほかの人の番・返事待ち.',
+    about: 'The task list by turn: 引き受け待ち, 今日 (with today\'s meeting), このあと, AI の番, ほかの人の番・返事待ち.',
     ...TASKS,
     annotations: [
       { marker: { target: TASK_SECTION('引き受け待ち'), label: '1', at: 'right' } },
-      { marker: { target: TASK_SECTION('あなたの番'), label: '2', at: 'right' } },
-      { marker: { target: TASK_SECTION('AI の番'), label: '3', at: 'right' } },
-      { marker: { target: TASK_SECTION('ほかの人の番・返事待ち'), label: '4', at: 'right' } },
-      { marker: { target: TASK_SECTION('今日終わったこと'), label: '5', at: 'right' } },
+      { marker: { target: TASK_SECTION('今日'), label: '2', at: 'right' } },
+      { marker: { target: TASK_SECTION('このあと'), label: '3', at: 'right' } },
+      { marker: { target: TASK_SECTION('AI の番'), label: '4', at: 'right' } },
+      { marker: { target: TASK_SECTION('ほかの人の番・返事待ち'), label: '5', at: 'right' } },
+      { marker: { target: TASK_SECTION('今日終わったこと'), label: '6', at: 'right' } },
+    ],
+  },
+  {
+    id: 'tasks-overdue',
+    about: '期限切れ as one line, 「まとめて直す…」 opened: all to next Monday or without a due, one by one 来週へ / やめる.',
+    ...TASKS,
+    query: { manual: '1', overdue: '1' },
+    steps: [{ click: 'role=button[name="まとめて直す…"]' }, { waitFor: '[data-overdue-row] >> nth=0' }, SETTLE],
+    crop: { target: 'role=region[name="期限切れ"s]', padding: { x: 8, y: 8 } },
+    annotations: [
+      { box: 'role=button[name=/^全部 来週の月曜へ/]' }, { marker: { target: 'role=button[name=/^全部 来週の月曜へ/]', label: '1', at: 'right' } },
+      { box: 'role=button[name="全部 期限なしに"]' }, { marker: { target: 'role=button[name="全部 期限なしに"]', label: '2', at: 'right' } },
+      { marker: { target: '[data-overdue-asked]', label: '3', at: 'right' } },
+      { box: '[data-overdue-row] >> nth=0' }, { marker: { target: '[data-overdue-row] >> nth=0', label: '4', at: 'left' } },
     ],
   },
   {
@@ -1056,10 +1071,10 @@ export const scenes: Scene[] = [
   },
   {
     id: 'quick-add-added',
-    about: 'After Enter: the new task in あなたの番, 「あなただけ」.',
+    about: 'After Enter: the new task in このあと, 「あなただけ」.',
     ...TASKS,
     steps: [{ click: QUICK_ADD }, { fill: QUICK_ADD, text: '見積を直す 月曜15時まで #営業' }, { press: 'Enter' }, { waitFor: 'role=button[name=/^見積を直す/]' }, SETTLE],
-    crop: { target: 'role=region[name="あなたの番"]', padding: { x: 0, y: 8 } },
+    crop: { target: 'role=region[name="このあと"]', padding: { x: 0, y: 8 } },
     annotations: [
       { box: 'role=button[name=/^見積を直す/] >> xpath=..' },
     ],
@@ -1116,7 +1131,7 @@ export const scenes: Scene[] = [
     about: '山田さん covers 高橋さん while he is away: 「高橋さんの代わり」 on the row.',
     ...TASKS,
     query: { manual: '1', absent: '1' },
-    crop: { target: 'role=region[name="あなたの番"]', padding: { x: 0, y: 8 } },
+    crop: { target: 'role=region[name="今日"s]', padding: { x: 0, y: 8 } },
     annotations: [{ box: 'text=高橋さんの代わり' }],
   },
   {
@@ -1344,7 +1359,7 @@ export const scenes: Scene[] = [
   },
   {
     id: 'minutes-arrived',
-    about: '「議事録が届きました」 above the list: ［AI に読ませる］［読まない］ on each meeting.',
+    about: '「議事録が届きました」 in the inbox\'s 新着: ［AI に読ませる］［読まない］ on each meeting.',
     ...MEETINGS,
     crop: { target: MINUTES_BLOCK, padding: { x: 0, y: 4 } },
     annotations: [
@@ -1356,7 +1371,7 @@ export const scenes: Scene[] = [
     id: 'minutes-read-done',
     about: 'The AI read it: 「読み終わりました …：決めたことN・やることの案N」 with ［見る］.',
     ...MEETINGS,
-    steps: [{ click: 'role=button[name="AI に読ませる"] >> nth=1' }, { waitFor: 'text=/が読んでいます/' }, { run: "window.__acbMeetings.finish('meeting-mensetu1')" }, { waitFor: 'role=button[name="見る"]' }, SETTLE],
+    steps: [{ click: 'role=button[name="AI に読ませる"] >> nth=1' }, { waitFor: 'text=AI が読んでいます…' }, { run: "window.__acbMeetings.finish('meeting-mensetu1')" }, { waitFor: 'role=button[name="見る"]' }, SETTLE],
     crop: { target: MINUTES_BLOCK, padding: { x: 0, y: 4 } },
     annotations: [{ box: 'role=button[name="見る"]' }],
   },
@@ -1365,7 +1380,7 @@ export const scenes: Scene[] = [
     about: 'The meeting\'s card: who attended and who can see it, the summary, the AI\'s proposals, ［招待する］.',
     ...MEETINGS,
     steps: [{ run: "window.__acbMeetings.finish('meeting-teirei01')" }, { click: 'role=button[name="見る"] >> nth=0' }, { waitFor: 'role=button[name="招待する"]' }, SETTLE],
-    crop: { region: { x: 300, y: 0, width: 800, height: 900 } },
+    crop: { region: { x: 520, y: 0, width: 800, height: 900 } },
     annotations: [
       { marker: { target: 'text=/参加者のうち ACB の人/', label: '1', at: 'left' } },
       { marker: { target: 'text=決めたことの案 >> nth=0', label: '2', at: 'right' } },
@@ -1384,37 +1399,42 @@ export const scenes: Scene[] = [
   },
   {
     id: 'title-bar-inbox',
-    about: 'The title bar\'s ［受け箱］: the number of things waiting for you and the dot for something new.',
+    about: 'The title bar\'s ［受け箱］: the blue count of 新着 and the red count of あなた待ち.',
     page: 'title-bar-notices',
     viewport: { width: 760, height: 400 },
     crop: { region: { x: 520, y: 0, width: 240, height: 80 } },
     annotations: [
-      { marker: { target: '[data-inbox-count]', label: '1', at: 'below' } },
-      { marker: { target: '[data-testid="inbox-news-dot"]', label: '2', at: 'below' } },
+      { marker: { target: '[data-inbox-news]', label: '1', at: 'below' } },
+      { marker: { target: '[data-inbox-waiting]', label: '2', at: 'below' } },
     ],
   },
   {
     id: 'inbox-panel',
-    about: 'The inbox (受け箱) opened below: the chips, あなた待ち first, the buttons that only open a card.',
+    about: 'The inbox (受け箱) opened below: あなた待ち (a mail to check before it goes), then 新着 with ［確認した］.',
     page: 'inbox',
     query: { manual: '1' },
     viewport: { width: 1000, height: 800 },
     crop: { target: 'role=region[name="受け箱"]', padding: 0 },
     annotations: [
-      { box: 'role=button[name=/^あなた待ち/]' }, { marker: { target: 'role=button[name=/^あなた待ち/]', label: '1', at: 'below' } },
+      { box: 'role=region[name="あなた待ち"] >> h3' }, { marker: { target: 'role=region[name="あなた待ち"] >> h3', label: '1', at: 'right' } },
       { box: 'role=button[name=/^確かめて送る/] >> nth=0' }, { marker: { target: 'role=button[name=/^確かめて送る/] >> nth=0', label: '2', at: 'left' } },
-      { marker: { target: 'role=button[name="知らせの設定"]', label: '3', at: 'below' } },
+      { box: 'role=region[name="新着"] >> h3' }, { marker: { target: 'role=region[name="新着"] >> h3', label: '3', at: 'right' } },
+      { box: 'role=button[name="確認した"] >> nth=0' }, { marker: { target: 'role=button[name="確認した"] >> nth=0', label: '4', at: 'left' } },
+      { marker: { target: 'role=button[name="知らせの設定"]', label: '5', at: 'below' } },
     ],
   },
   {
     id: 'inbox-done',
-    about: 'できた・未確認: what others finished, and ［まとめて確認済みにする］.',
+    about: '［すべて確認した］ pressed: 新着 0; what was looked at stays under 「確認したもの」.',
     page: 'inbox',
     query: { manual: '1' },
     viewport: { width: 1000, height: 800 },
-    steps: [{ click: 'role=button[name=/^できた・未確認/]' }, SETTLE],
+    steps: [{ click: 'role=button[name="すべて確認した"]' }, { waitFor: 'text=新着はありません。全部確認しました。' }, SETTLE],
     crop: { target: 'role=region[name="受け箱"]', padding: 0 },
-    annotations: [{ box: 'role=button[name="まとめて確認済みにする"]' }],
+    annotations: [
+      { box: 'role=button[name=/^新着 0/]' }, { marker: { target: 'role=button[name=/^新着 0/]', label: '1', at: 'below' } },
+      { box: 'role=button[name=/^確認したもの/]' }, { marker: { target: 'role=button[name=/^確認したもの/]', label: '2', at: 'below' } },
+    ],
   },
   {
     id: 'inbox-settings',

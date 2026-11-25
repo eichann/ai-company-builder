@@ -2509,9 +2509,10 @@ paths and never ask the switch.
   nothing, so there is no row (6c: the switch is per PC, which the renderer cannot know by itself). A draft → あなた待ち amber 「承認を待っています」
   ［承認する…］ (with the approvals); an `unknown` run the server says can be confirmed now (its `canConfirm`,
   never this PC's clock) → あなた待ち amber 「届いたか分かりません」 ［確かめる…］ (right after the stops); an approved
-  plan not started, a `permitted` run and an `unknown` one not yet confirmable → 作業中. Every row only opens this
+  plan not started, a `permitted` run and an `unknown` one not yet confirmable → shown under 新着, never counted (作業中 before
+  2026-11-26). Every row only opens this
   card in `InboxCardDialog` (the type guard in `model.test.ts` refuses an action kind that approves, sends, runs
-  or confirms). Settled = in neither list = gone (nothing stored; no できた・未確認, the server keeps no notice for
+  or confirms). Settled = in neither list = gone (nothing stored; no 新着, the server keeps no notice for
   plans). **Read** when the inbox mounts, when the panel opens, when a card in the inbox closes, **when a plan's
   state moves on any card** (`planStore` `subscribePlanStates`: ［任せる］ in the consultation's card, a cancel, a
   confirm, a settled result — not a card's first look or the same state read again), a second after the next

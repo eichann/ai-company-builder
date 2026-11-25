@@ -93,15 +93,16 @@ for (const theme of ['light', 'dark'] as const) {
       await expectSet(page, badge, sets('paused'), 'stopped own key')
     })
 
-    test('the title bar\'s ［受け箱］: the new dot is the new-item mark, the number the primary count; its rows\' dots too, never 「読むだけ」', async ({ page }) => {
+    test('the title bar\'s ［受け箱］: 新着 a soft blue count, あなた待ち a soft red one (no solid pill); its rows\' dots the new-item mark, never 「読むだけ」', async ({ page }) => {
       await open(page, 'title-bar-notices', theme)
-      const dot = page.getByTestId('inbox-news-dot')
-      expect(await style(dot, 'backgroundColor')).toBe(await token(page, 'unread'))
-      const count = page.locator('[data-inbox-count]')
-      expect(await style(count, 'backgroundColor')).toBe(await token(page, 'primary'))
-      expect(await style(count, 'color')).toBe(await token(page, 'on-primary'))
+      const news = page.locator('[data-inbox-news]')
+      expect(await style(news, 'backgroundColor')).toBe(await token(page, 'selected-bg'))
+      expect(await style(news, 'color')).toBe(await token(page, 'selected-text'))
+      const waiting = page.locator('[data-inbox-waiting]')
+      expect(await style(waiting, 'backgroundColor')).toBe(await token(page, 'danger-bg'))
+      expect(await style(waiting, 'color')).toBe(await token(page, 'danger-text'))
       await page.locator('[data-inbox-button]').click()
-      const unread = page.getByRole('region', { name: '受け箱' }).getByRole('img', { name: '新しい知らせ' }).first()
+      const unread = page.getByRole('region', { name: '受け箱' }).getByRole('img', { name: '新着' }).first()
       expect(await style(unread, 'backgroundColor')).toBe(await token(page, 'unread'))
       await expect(page.locator('body')).not.toContainText('読むだけ')
     })

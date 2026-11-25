@@ -136,11 +136,40 @@ export interface ListSection {
   note?: string
   /** 〇〇ごと: the bundle this section is (its title opens it). */
   bundle?: { id: string; title: string; typeLabel?: string }
+  /** 番ごと's 期限切れ: one line with 「まとめて直す…」, its rows only inside it. */
+  overdue?: true
+}
+
+/** The kinds whose type lets the member move its due (`set_due`: a task's requester or assignee, a 返事のお願い's assignee). */
+const DUE_MOVABLE_TYPES: ReadonlySet<string> = new Set(['task', 'reply_request'])
+
+/**
+ * What 「まとめて直す」 may do to an overdue row: move its due (`set_due`), and drop it — 「やめる」, the task's 「アーカイブ」
+ * (`cancel`, a requester's action: only the member's own task). Anything else is opened and handled on its card.
+ */
+export function overdueFixes(item: TaskListItem): { move: boolean; drop: boolean } {
+  return { move: DUE_MOVABLE_TYPES.has(item.type), drop: item.type === 'task' && item.own }
 }
 
 /**
- * The sections of the list. By turn: 引き受け待ち, あなたの番 (today's meetings to come mixed
- * in), AI の番, ほかの人の番・返事待ち, 先のこと (tasks not started due after this week, folded),
+ * Of what 「全部…」 would move, the tasks someone else asked of the member: moving their due tells the requester (the type's
+ * `set_due` notifies `requested_by`), so the block says so before the press (owner decision 2026-11-26). 0 = nobody is told.
+ */
+export function askedByOthers(items: readonly TaskListItem[]): number {
+  return items.filter(i => i.type === 'task' && !i.own && overdueFixes(i).move).length
+}
+
+/**
+ * 「来週の月曜」 from today (company time), 09:00 — the Monday itself, as the button says, also when it is a holiday (the
+ * list knows no company holidays; the member moves one on its card when it matters).
+ */
+export function nextMondayDue(now: CompanyNow): string {
+  return `${addDays(now.date, ((8 - now.weekday) % 7) || 7)}T09:00`
+}
+
+/**
+ * The sections of the list. By turn: 引き受け待ち, 期限切れ / 今日 (today's meetings to come mixed
+ * in) / このあと (the member's turn), AI の番, ほかの人の番・返事待ち, 先のこと (tasks not started due after this week, folded),
  * いつか (tasks not started with no due, folded),
  * 今日終わったこと (with today's meetings that are over). By date: 期限切れ, 今日,
  * 明日, 今週, あとで (folded), 期限なし, 今日終わったこと. By bundle: each one with its open items,
@@ -161,9 +190,16 @@ export function listSections(items: readonly TaskListItem[], events: readonly Li
     const mine = open.filter(i => i.turn === 'mine')
     const later = mine.filter(i => i.resting && dueWhen(i.due, now) === 'later')
     const someday = mine.filter(i => i.resting && i.due === null)
+    // 「あなたの番」 by when (owner decision 2026-11-26: a due today is the left list's, never the inbox's): 期限切れ
+    // as one line with まとめて直す, 今日 (today's meetings to come mixed in), このあと.
+    const turnNow = mine.filter(i => !later.includes(i) && !someday.includes(i))
+    const overdue = turnNow.filter(i => dueWhen(i.due, now) === 'overdue')
+    const today = turnNow.filter(i => dueWhen(i.due, now) === 'today')
     sections.push(
       { key: 'acceptance', title: '引き受け待ち', items: sorted(open.filter(i => i.turn === 'acceptance')), events: [], foldable: false, note: '引き受けるか、受けられないかを決めてください' },
-      { key: 'mine', title: 'あなたの番', items: sorted(mine.filter(i => !later.includes(i) && !someday.includes(i))), events: coming, foldable: false },
+      { key: 'overdue', title: '期限切れ', items: sorted(overdue), events: [], foldable: false, overdue: true },
+      { key: 'today', title: '今日', items: sorted(today), events: coming, foldable: false },
+      { key: 'next', title: 'このあと', items: sorted(turnNow.filter(i => !overdue.includes(i) && !today.includes(i))), events: [], foldable: false },
       { key: 'ai', title: 'AI の番', items: sorted(open.filter(i => i.turn === 'ai')), events: [], foldable: false },
       { key: 'others', title: 'ほかの人の番・返事待ち', items: sorted(open.filter(i => i.turn === 'others')), events: [], foldable: false },
       { key: 'later', title: '先のこと', items: sorted(later), events: [], foldable: true, note: `${dueText(addDays(weekEnd(now), 1), now)}から` },

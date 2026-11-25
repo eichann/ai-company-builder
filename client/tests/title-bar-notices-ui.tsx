@@ -8,19 +8,20 @@
 // `#opened`. `?undo=1`: a notice that the member's AI completed a task their reply finished (`replied_done`),
 // whose ［元に戻す］ writes the undo asked for (`<record>|<version>|<expectedVersion>`) to `#undone`;
 // `?undo=mail`: a mail closed because it was archived in Gmail, and one archived there (2026-11-05);
-// `?undo=ai`: the AI changed a deal automatically; `?undo=turn` and `?late=1`: below. `?features=off`: 会議と議事録 and 受信 are off in 「使う機能」.
+// `?undo=ai`: the AI changed a deal automatically; `?undo=turn`: below. `?features=off`: 会議と議事録 and 受信 are off in 「使う機能」.
+// `?stop=1`: a scheduled job's run failed (a stop of あなた待ち; `__acbTitleBar.settle()` = it ran afterwards).
 import { useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import '../src/i18n'
 import '../src/index.css'
 import { useNotices } from '../src/features/notifications/hooks/useNotices'
-import { useInboxSlot, type InboxMeeting } from '../src/features/inbox/hooks/useInboxSlot'
+import { useInboxSlot } from '../src/features/inbox/hooks/useInboxSlot'
 import { BottomPanel } from '../src/features/workspace/components/BottomPanel'
-import type { NoticesState } from '../shared/notifications-app'
+import type { MeetingNewsRow, NoticesState } from '../shared/notifications-app'
 import { NOTIFICATION_KINDS } from '../../shared/types/notifications'
 import { emitter, installElectronAPI } from './ui/fixtures/electron-api'
 
-// Within today and the last 14 days (the inbox keeps できた・未確認 that long; older ones fold into one line).
+// Recent notices (the preview hands the inbox a first day long before them: every unread one is 新着).
 const recent = (minutesAgo: number) => new Date(Date.now() - minutesAgo * 60_000).toISOString()
 const changed = emitter<{ companyId: string }>()
 let state: NoticesState = {
@@ -81,11 +82,12 @@ if (new URLSearchParams(location.search).get('undo') === 'turn') {
     { id: 'n-old', kind: 'ai_changed', recordId: 'deal-preview03', recordType: 'deal', recordTitle: 'C社 更新', version: 2, text: 'あなたの AIが「C社 更新」を自動で変えました：確度 C → B', createdAt: days(3), read: true, aiChange: { pluginId: 'corporate-sales', operationId: 'op-old01', undone: false } },
   ] } }
 }
-// `?late=1`: everything already read, and the meetings (with the task list behind them) answer only at
-// `window.__acbTitleBar.load()` — the dot's baseline waits for them.
-const late = new URLSearchParams(location.search).get('late') === '1'
-if (late) state = { ...state, notices: { ...state.notices, unread: 0, items: state.notices.items.map(i => ({ ...i, read: true })) } }
-let loadLate: () => void = () => {}
+if (new URLSearchParams(location.search).get('stop') === '1') {
+  state = { ...state, notices: { ...state.notices, unread: state.notices.unread + 1, items: [
+    { id: 'n-stop', kind: 'job_failed', recordId: '', recordType: '', recordTitle: '', version: 0, text: '定期の仕事「朝の問い合わせまとめ」の今日の回が、うまくできませんでした', createdAt: recent(15), read: false },
+    ...state.notices.items,
+  ] } }
+}
 
 function Preview() {
   const [opened, setOpened] = useState('')
@@ -117,11 +119,9 @@ function Preview() {
     },
   })
   const notices = useNotices('co-preview')
-  const [loaded, setLoaded] = useState(!late)
-  loadLate = () => setLoaded(true)
-  const meetings: InboxMeeting[] = (withMeetings || late) && loaded ? MEETINGS(setOpened) : []
+  const meetings: MeetingNewsRow[] = withMeetings ? MEETINGS(setOpened) : []
   const inbox = useInboxSlot({
-    companyId: 'co-preview', notices, meetings, features, open, ready: loaded, onToggle: () => setOpen(o => !o),
+    companyId: 'co-preview', notices, meetings, features, open, onToggle: () => setOpen(o => !o), newsSince: '2026-01-01T00:00:00.000Z',
     onOpenRecord: id => setOpened(`record ${id}`), onOpenTasks: () => setOpened('task list'), onOpenJobs: () => setOpened('jobs'),
     renderApprovalCard: id => <p>承認のカード {id}</p>, renderMailDraft: id => <p>メールのカード {id}</p>,
   })
@@ -138,17 +138,23 @@ function Preview() {
   )
 }
 
-const MEETINGS = (setOpened: (s: string) => void): InboxMeeting[] => [
-  { id: 'meeting-read01', title: 'A社 定例', kind: 'bundle', text: 'どの案件・プロジェクトの会議か選んでください', needsPerson: true, ai: null, actions: [{ label: '案件を選ぶ', run: () => setOpened('choose meeting-read01') }] },
-  { id: 'meeting-new001', title: 'B社 打合せ', kind: 'minutes', text: 'AI が読み取っています', needsPerson: false, ai: { recordId: 'meeting-new001', state: 'running', reason: '', canRetry: false, canHand: false }, actions: [] },
-  { id: 'meeting-new002', title: 'C社 商談', kind: 'minutes', text: 'AI が読み取れませんでした：議事録が空でした', needsPerson: true, ai: { recordId: 'meeting-new002', state: 'failed', reason: '議事録が空でした', canRetry: true, canHand: true }, actions: [{ label: '自分で読み取る', run: () => setOpened('read meeting-new002') }] },
+const meetingRow = (id: string, title: string, stage: MeetingNewsRow['stage'], line: string, over: Partial<MeetingNewsRow> = {}): MeetingNewsRow =>
+  ({ id, title, stage, line, meetingAt: recent(90), expiresSoon: false, seen: false, actions: [], ...over })
+const MEETINGS = (setOpened: (s: string) => void): MeetingNewsRow[] => [
+  meetingRow('meeting-read01', 'A社 定例', 'ask', 'どの案件・プロジェクトの会議か選んでください', { actions: [{ label: '案件を選ぶ', run: () => setOpened('choose meeting-read01') }] }),
+  meetingRow('meeting-new001', 'B社 打合せ', 'reading', 'AI が読み取っています'),
+  meetingRow('meeting-new002', 'C社 商談', 'stopped', 'AI が読み取れませんでした：議事録が空でした', { stop: 'failed', actions: [{ label: '自分で読み取る', run: () => setOpened('read meeting-new002') }] }),
+  meetingRow('meeting-new003', 'D社 定例', 'read', '読み終わりました：決めたこと1・やることの案2', { actions: [{ label: '見る', primary: true, run: () => setOpened('view meeting-new003') }] }),
 ]
 
 const TASK = state.myTurn.items.find(i => i.id === 'task-preview02')!
 Object.assign(window, {
   __acbTitleBar: {
-    /** The late sources (the task list, the arrivals) answer: the meetings come. */
-    load() { loadLate() },
+    /** The failed run of `?stop=1` ran afterwards (「もう一度」): the server marks its notice settled. */
+    settle() {
+      state = { ...state, notices: { ...state.notices, items: state.notices.items.map(i => (i.id === 'n-stop' ? { ...i, settled: true } : i)) } }
+      changed.emit({ companyId: 'co-preview' })
+    },
     /** The AI changes 「見積書を作る」 once more (`?undo=turn`): a new change to undo on the same row. */
     changeAgain() {
       const item = { id: 'n-ait2', kind: 'ai_changed' as const, recordId: 'task-preview02', recordType: 'task', recordTitle: '見積書を作る', version: 8, text: 'あなたの AIが「見積書を作る」をまた変えました：期限 11/6 → 11/7', createdAt: new Date().toISOString(), read: false, aiChange: { pluginId: 'corporate-sales', operationId: 'op-turn02', undone: false } }

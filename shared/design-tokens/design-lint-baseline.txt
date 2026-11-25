@@ -175,7 +175,6 @@ client/src/features/history/components/FileVersions.tsx palette-color=11 radius-
 client/src/features/jobs/components/JobsSection.tsx palette-color=19 white-black=1
 client/src/features/jobs/components/RewatchPicker.tsx palette-color=3
 client/src/features/minutes/components/InviteDialog.tsx arbitrary-value=2 palette-color=12 radius-scale=2
-client/src/features/minutes/components/MeetingBanners.tsx arbitrary-value=2 palette-color=29 shadow-scale=1 white-black=1
 client/src/features/minutes/components/MeetingPanel.tsx palette-color=12
 client/src/features/minutes/components/MinutesCheckButton.tsx opacity-scale=1 palette-color=11 shadow-scale=1 type-scale=1 white-black=1 z-index=1
 client/src/features/plugin-steps/components/ContinueStepButton.tsx palette-color=4 type-scale=1

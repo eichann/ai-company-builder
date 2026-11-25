@@ -10,9 +10,9 @@ test('by turn: sections, meetings mixed in, the far future folded, the date view
   const state = await openPreview(page, 'tasks-list')
   const section = (name: string) => page.getByRole('region', { name, exact: true })
   await expect(section('引き受け待ち')).toContainText('セキュリティのチェックシート')
-  await expect(section('あなたの番')).toContainText('お礼メールを確かめて送る')
-  await expect(section('あなたの番')).toContainText('B社 見積のオンライン確認')
-  await expect(section('あなたの番')).toContainText('A社 問い合わせ対応')
+  await expect(section('今日')).toContainText('お礼メールを確かめて送る')
+  await expect(section('今日')).toContainText('B社 見積のオンライン確認')
+  await expect(section('今日')).toContainText('A社 問い合わせ対応')
   await expect(section('AI の番')).toContainText('日程の候補を探す')
   await expect(section('ほかの人の番・返事待ち')).toContainText('阿部さんの番')
   await expect(section('今日終わったこと')).toContainText('営業部 週次定例')
@@ -24,7 +24,7 @@ test('by turn: sections, meetings mixed in, the far future folded, the date view
   await expect(later).toContainText('来期の研修メニュー')
   // Not started with no due: 「いつか」, folded, not in あなたの番 (owner 2026-11-03).
   const someday = section('いつか')
-  await expect(section('あなたの番')).not.toContainText('業界の本を読む')
+  await expect(section('このあと')).not.toContainText('業界の本を読む')
   await expect(someday).not.toContainText('業界の本を読む')
   await someday.getByRole('button', { name: /いつか/ }).click()
   await expect(someday).toContainText('業界の本を読む')
@@ -38,7 +38,56 @@ test('by turn: sections, meetings mixed in, the far future folded, the date view
   await page.getByRole('button', { name: '日付ごと' }).click()
   await expect(section('今日')).toContainText('お礼メールを確かめて送る')
   await expect(section('期限なし')).toContainText('日程の候補を探す')
-  await expect(page.getByRole('region', { name: 'あなたの番' })).toHaveCount(0)
+  await expect(page.getByRole('region', { name: 'このあと' })).toHaveCount(0)
+  expectNoPageErrors(state)
+})
+
+// Owner decision 2026-11-26 (受け箱の作り直し 依頼1): overdue tasks were a wall of red; now one line, and 「まとめて直す…」.
+// Catches the rows shown outside the block, a press at another version, 「やめる」 offered on a task someone else asked, and
+// 元に戻す not putting every moved one back.
+test('期限切れ is one line with 「まとめて直す…」: all to next Monday or one by one, each with 元に戻す; やめる only on one\'s own task', async ({ page }) => {
+  const state = await openPreview(page, 'tasks-list', { overdue: '1' })
+  const block = page.getByRole('region', { name: '期限切れ', exact: true })
+  await expect(block).toContainText('期限切れ 2 件。期限を直すか、やめるかを選んでください。')
+  await expect(block.locator('[data-overdue-row]')).toHaveCount(0)
+  await expect(page.getByRole('region', { name: 'このあと' })).not.toContainText('経費の精算をする')
+  await block.getByRole('button', { name: 'まとめて直す…' }).click()
+  await expect(block.locator('[data-overdue-row="task-late01"]').getByRole('button', { name: 'やめる' })).toBeVisible()
+  await expect(block.locator('[data-overdue-row="task-late02"]').getByRole('button', { name: 'やめる' })).toHaveCount(0)
+  // Said before the press (owner decision 2026-11-26): moving what 田中さん asked tells 田中さん.
+  await expect(block.locator('[data-overdue-asked]')).toHaveText('うち 1 件は頼まれたものです。頼んだ人に知らせが届きます。')
+  await block.getByRole('button', { name: /^全部 来週の月曜へ/ }).click()
+  await expect(page.locator('#acted')).toHaveText('task-late02:set_due@2,task-late01:set_due@2')
+  await expect(page.getByRole('region', { name: '期限切れ', exact: true })).toHaveCount(0)
+  await expect(page.getByRole('region', { name: 'このあと' })).toContainText('経費の精算をする')
+  // The block is gone with nothing left overdue, but what was done and its 元に戻す stay (Codex review).
+  await page.locator('[data-overdue-done]').getByRole('button', { name: '元に戻す' }).click()
+  await expect(page.locator('#acted')).toContainText('task-late02:undo 3@3,task-late01:undo 3@3')
+  await expect(page.getByRole('region', { name: '期限切れ', exact: true })).toContainText('期限切れ 2 件')
+  expectNoPageErrors(state)
+})
+
+test('期限切れ with only one\'s own tasks: nobody is told, so nothing is said before 「全部…」', async ({ page }) => {
+  const state = await openPreview(page, 'tasks-list', { overdue: 'own' })
+  const block = page.getByRole('region', { name: '期限切れ', exact: true })
+  await block.getByRole('button', { name: 'まとめて直す…' }).click()
+  await expect(block.getByRole('button', { name: '全部 期限なしに' })).toBeVisible()
+  await expect(block.locator('[data-overdue-asked]')).toHaveCount(0)
+  expectNoPageErrors(state)
+})
+
+test('期限切れ: 元に戻す after 「来週へ」 puts the due back; 「やめる」 archives one\'s own task', async ({ page }) => {
+  const state = await openPreview(page, 'tasks-list', { overdue: '1' })
+  const block = page.getByRole('region', { name: '期限切れ', exact: true })
+  await block.getByRole('button', { name: 'まとめて直す…' }).click()
+  await block.locator('[data-overdue-row="task-late02"]').getByRole('button', { name: '来週へ' }).click()
+  await expect(block.getByRole('status')).toContainText('1 件の期限を')
+  await block.getByRole('button', { name: '元に戻す' }).click()
+  await expect(page.locator('#acted')).toHaveText('task-late02:set_due@2,task-late02:undo 3@3')
+  await expect(block).toContainText('期限切れ 2 件')
+  await block.locator('[data-overdue-row="task-late01"]').getByRole('button', { name: 'やめる' }).click()
+  await expect(page.locator('#acted')).toContainText('task-late01:cancel@2')
+  await expect(block).toContainText('期限切れ 1 件')
   expectNoPageErrors(state)
 })
 
@@ -46,13 +95,13 @@ test('by turn: sections, meetings mixed in, the far future folded, the date view
 // Catches the box missing, a press at another version, and 元に戻す not offered in 今日終わったこと.
 test('a 来た連絡 to confirm: its ☑ is 「済んだ」, it moves to 今日終わったこと with 「元に戻す」', async ({ page }) => {
   const state = await openPreview(page, 'tasks-list')
-  await page.getByRole('region', { name: 'あなたの番' }).getByRole('button', { name: '「日程のご相談」を済んだ' }).click()
+  await page.getByRole('region', { name: 'このあと' }).getByRole('button', { name: '「日程のご相談」を済んだ' }).click()
   await expect(page.locator('#acted')).toHaveText('interaction-0001:settle@2')
   await expect(page.getByRole('region', { name: '今日終わったこと' })).toContainText('日程のご相談')
-  await expect(page.getByRole('region', { name: 'あなたの番' })).not.toContainText('日程のご相談')
+  await expect(page.getByRole('region', { name: 'このあと' })).not.toContainText('日程のご相談')
   await page.getByRole('region', { name: '今日終わったこと' }).getByRole('button', { name: '「日程のご相談」を元に戻す' }).click()
   await expect(page.locator('#acted')).toHaveText('interaction-0001:settle@2,interaction-0001:undo 3@3')
-  await expect(page.getByRole('region', { name: 'あなたの番' })).toContainText('日程のご相談')
+  await expect(page.getByRole('region', { name: 'このあと' })).toContainText('日程のご相談')
   expectNoPageErrors(state)
 })
 
@@ -60,7 +109,7 @@ test('accepting and finishing from the list; a row opens its card', async ({ pag
   const state = await openPreview(page, 'tasks-list')
   await page.getByRole('region', { name: '引き受け待ち' }).getByRole('button', { name: '引き受ける' }).click()
   await expect(page.locator('#acted')).toHaveText('task-acc001:accept@2')
-  await expect(page.getByRole('region', { name: 'あなたの番' })).toContainText('セキュリティのチェックシート')
+  await expect(page.getByRole('region', { name: 'このあと' })).toContainText('セキュリティのチェックシート')
   await expect(page.getByRole('region', { name: '引き受け待ち' })).toHaveCount(0)
 
   // ☑ completes at once from any state (task v9: no made-up start); not offered where the card decides.
@@ -105,7 +154,7 @@ test('the one line adds a task with its due and tags; a tag narrows the list', a
   await input.fill('請求書を出す 明日15時まで #経理')
   await input.press('Enter')
   await expect(input).toHaveValue('')
-  await expect(page.getByRole('region', { name: 'あなたの番' })).toContainText('請求書を出す')
+  await expect(page.getByRole('region', { name: 'このあと' })).toContainText('請求書を出す')
 
   await page.getByRole('group', { name: 'タグで絞る' }).getByRole('button', { name: /#経理/ }).click()
   await expect(page.getByTestId('task-row')).toHaveCount(1)
@@ -192,9 +241,9 @@ test('a file dragged from the file tree onto a task row is linked to it, named i
   expectNoPageErrors(state)
 })
 
-test('a meeting read without a まとまり asks in あなたの番; choosing links it and the item goes', async ({ page }) => {
+test('a meeting read without a まとまり asks in このあと (the member\'s turn); choosing links it and the item goes', async ({ page }) => {
   const state = await openPreview(page, 'tasks-list')
-  const mine = page.getByRole('region', { name: 'あなたの番' })
+  const mine = page.getByRole('region', { name: 'このあと' })
   // In the department's kind's name (営業部 → 案件), never 「まとまり」 (owner 2026-11-02).
   await expect(mine).toContainText('どの案件の会議か選んでください')
   await expect(mine).not.toContainText('まとまり')
@@ -210,7 +259,7 @@ test('a meeting read without a まとまり asks in あなたの番; choosing li
 
 test('「『…』の会議ですか？」: はい links the suggested まとまり; ちがう／選ぶ opens the chooser instead', async ({ page }) => {
   const state = await openPreview(page, 'tasks-list')
-  const row = page.getByRole('region', { name: 'あなたの番' }).getByTestId('task-row').filter({ hasText: 'E社 打ち合わせ' })
+  const row = page.getByRole('region', { name: 'このあと' }).getByTestId('task-row').filter({ hasText: 'E社 打ち合わせ' })
   await expect(row).toContainText('『E社 研修導入』の会議ですか？')
   await row.getByRole('button', { name: 'ちがう／選ぶ' }).click()
   const dialog = page.getByRole('dialog', { name: 'どの案件の会議ですか？' })
@@ -219,13 +268,13 @@ test('「『…』の会議ですか？」: はい links the suggested まとま
   await expect(page.locator('#acted')).toHaveText('')
   await row.getByRole('button', { name: 'はい', exact: true }).click()
   await expect(page.locator('#acted')).toHaveText('meeting-00cc31:bundle deal-e00001')
-  await expect(page.getByRole('region', { name: 'あなたの番' })).not.toContainText('E社 打ち合わせ')
+  await expect(page.getByRole('region', { name: 'このあと' })).not.toContainText('E社 打ち合わせ')
   expectNoPageErrors(state)
 })
 
 test('meetings of one series are one row 「案件を選ぶ会議 n件」 that opens; 「案件はない」 closes a question without choosing', async ({ page }) => {
   const state = await openPreview(page, 'tasks-list')
-  const mine = page.getByRole('region', { name: 'あなたの番' })
+  const mine = page.getByRole('region', { name: 'このあと' })
   const group = mine.getByTestId('bundle-group')
   await expect(group).toContainText('案件を選ぶ会議 2件')
   await expect(group).toContainText('D社 定例')

@@ -113,8 +113,7 @@ a plugin can never draw a notice (§2-2).
   member switches kinds (`PUT /me/notifications/settings`); kept per company × member on the
   server, so both PCs agree. Kinds filter at read time (notices are always stored).
 - **Noticing one's own turn without Slack** (owner decision 2026-11-03; all on by default, each
-  switchable like the other kinds; no new counter — they are notices, the title bar's ［受け箱］ count
-  stays あなた待ち's):
+  switchable like the other kinds; no new counter — they are notices: the inbox's 新着, never its あなた待ち):
   - `asked` 「Aliceさんから「…」を頼まれました」 (`askedOf`): a request type's entry that leaves the
     member its assignee in a person's turn and either made them the assignee (a create, an
     `assign`; by a person or anyone's AI) or handed it over from a turn that told nobody
@@ -139,7 +138,7 @@ a plugin can never draw a notice (§2-2).
     made from that message"): the member's **own AI** completed their task because their own reply
     finished it (ledger action `replied_done`, the inbox's reply check through the service writer, which
     names them in `notify` so they are told although their AI was the actor — the writer's `tell`
-    keeps the actor only then). The inbox's row (できた・未確認) has **［元に戻す］** (`useInboxSlot`, `undoNoticedChange`
+    keeps the actor only then). The inbox's row (新着) has **［元に戻す］** (`useInboxSlot`, `undoNoticedChange`
     → `tasks:undo` of that entry at the notice's version: the server refuses when something changed
     since); then 「元に戻しました」. Not a person's own completion, not the AI's other actions.
     Tests: `notifications.test.ts` 「a task the member's reply finished」, `tests/ui/title-bar-notices.spec.ts`
@@ -179,8 +178,8 @@ a plugin can never draw a notice (§2-2).
     `AI_CHANGES_NAMED` titles, then ほか) — the member's `ai_changed` notices since their last morning
     summary before today (all kept ones when there was none) that are not **確かめた**, about a record
     they read now. **確かめた** = the notice was read (its row opened in the inbox, which marks it read, or
-    「まとめて確認済みにする」) or the change was written back (by anyone). Opening the record elsewhere does not
-    count (simple and visible: the inbox's できた・未確認 is the same state). A member with no turn but such
+    「すべて確認した」) or the change was written back (by anyone). Opening the record elsewhere does not
+    count (simple and visible: the inbox's 新着 is the same state). A member with no turn but such
     changes still gets the morning notice (and its Mac notification).
   - `due_tomorrow` 「「…」は明日（11月5日）が期限です」: the server clock, from `DUE_TOMORROW_FROM`
     09:00 of **the last business day before the due's day** (`dueTomorrowDays`: today a business
@@ -376,140 +375,107 @@ owner-only record, another company hear nothing; content-free) — mutation-chec
   `client/shared/notifications-app.ts` `desktopNoticeFor` (the record's title as the body).
 - Renderer: `src/features/notifications/` holds the notices' port (`api.ts`) and `useNotices` (what main read
   for the company on screen); since I2 the **inbox** (`src/features/inbox`, "The inbox" below) is their only
-  screen: the title bar's one ［受け箱］ replaced 「あなたの番 N」 and the bell (owner decision ①, "The title bar's
-  ［受け箱］" below). **Only this week's turn** (owner decision 2026-11-03): main reads the whole
+  screen: the title bar's one ［受け箱］ replaced 「あなたの番 N」 and the bell ("The title bar's ［受け箱］" below).
+  **Only this week's turn** (owner decision 2026-11-03): main reads the whole
   `/records/my-turn` (unchanged: a released app still counts it all) and keeps the items whose
-  `turnTiming` is `now` (`thisWeeksTurn`, `client/shared/notifications-app.ts`, the company's today);
-  the others (`resting`) get one line, 「…は、やることの一覧の「先のこと」「いつか」にあります」. The
-  list's 「あなたの番」, the morning summary and the inbox's あなた待ち use the same rule, so they agree.
+  `turnTiming` is `now` (`thisWeeksTurn`, `client/shared/notifications-app.ts`, the company's today); the list's
+  「今日」「このあと」 and the morning summary use the same rule. Since 2026-11-26 the inbox takes only the approvals and
+  mail drafts of it (あなた待ち); tasks are the list's.
   「知らせの設定」 (one checkbox per kind, `NOTIFICATION_KIND_LABELS`; none for a kind of a feature
   that is off in 「使う機能」, `noticeKindsShown`, `records.md` "Features on and off"; none of the owner / admin-only kinds
   `job_proposal` / `job_paused` / `company_restored` unless the member is an owner / admin — `noticeKindsForRole`, the role read with the
   dialog through `api:getCompanies`, not known → not offered; switching one keeps it, `settingsAfterSwitch`) opens from the inbox's heading (`NoticeSettingsDialog`). Opening a row marks only its notices read.
-- **Arrived minutes** (owner decision 2026-11-07): where the department shows no task list, the
-  meetings that arrived and nobody asked the AI to read (`arrived`) are rows of the 「会議」 part too,
-  needing a person, with ［AI に読ませる］ (`arrivedMeetingTurns`, `client/shared/notifications-app.ts`;
-  AppShell reads them from the arrivals). A feature turned off writes none of its notices
-  (`records.md` "Features on and off").
-- **Meetings where the department shows no task list** (`tasks-ui.md` "Minutes and AI turns"):
-  the inbox takes `meetings` (the minutes feature's `useMinutesSlots` `titleBarMeetings`, placed by AppShell, only
-  while the task list is hidden; `inboxView`'s third argument) — a まとまり to choose and received minutes with
-  the automatic runner's state, each row with its own buttons (`InboxItem.meetingId` → the feature's actions):
-  those waiting for the member (`needsPerson`: a まとまり to choose; minutes the AI is not reading or about to
-  read — a failed reading red, one the AI may not do amber, first) in あなた待ち and its count; the others (the
-  AI reading or about to) in 作業中, not counted. One already in the server's turn stays that one row, with the meeting's buttons; an unread notice
-  about a meeting (waiting or the AI's) is that row's news, never a second row. Nothing is
-  stored or sent for them: they come from the list main already read.
+- **Meetings** (owner decision 2026-11-26: the banner on やること is gone): the inbox takes `meetings` (the minutes
+  feature's `useMinutesSlots` `inboxMeetings`, placed by AppShell; `inboxView`'s second argument) — every meeting of the
+  arrivals (any department), and where the department shows no task list also a まとまり to choose and received minutes
+  with the automatic runner's state (`meetingTurns` → `meetingNewsOfTurn`; merged by id, `mergeMeetingRows`), each row
+  with its own buttons (`InboxItem.meetingId` → the feature's actions). Where each goes: "The inbox" below. A feature
+  turned off writes none of its notices and hands no meeting (`records.md` "Features on and off"). Nothing is stored or
+  sent for them but the minutes feature's closed list on this PC.
 - Opening an item runs `record.open` (`commands.md`): the record's card in the editor area, the
   same as a search hit. The consultation a record belongs to opens from there once S12 links them.
 
-## The inbox (受け箱, I1; owner design 「下のパネルを「受け箱」1 つにする」 2026-11-22, decisions ①–⑧)
-The bottom panel's content (`renderer-structure.md` "The bottom panel"): **one list** of what the server
-already says concerns the member, by what it needs from them — no tabs by source, chips by state
-(すべて / あなた待ち / 作業中 / できた・未確認, with counts, 99+). `src/features/inbox/model.ts` `inboxView`
-(pure) builds it from the `NoticesState` main already reads (`useNotices`, this week's turn through
-`thisWeeksTurn`); **no new server table, API or IPC, nothing stored**: rows are rebuilt from every answer.
-- With records off the server still sends the company's own notices (`bellOnly`, `company_restored`): they are
-  rows too (あなた待ち), and the inbox is there for them.
-- **Visibility is the server's**: every row comes from `/records/my-turn` and `/me/notifications`, which
-  already left out what the member cannot read; the inbox never filters on the client instead. AppShell is
-  keyed by company and `useNotices` drops another company's answer, so a switch or sign-out shows nothing old;
-  a row that a re-read no longer lists (removed, closed out, approved elsewhere) is gone.
-- **あなた待ち** (never folded, never capped; >10 adds 「多いときは、期限の近いものから」; items past the
-  server's first 200 are 「ほかに N 件」): this week's turn plus unread stop notices — by what the stop means
-  for the member (`STOP_LOOK`): `job_failed` red 止まりました; `job_paused`, `ai_turn_stuck`, `job_expired`,
-  `job_chain_stopped`, `delegate_stopped`, `company_restored` amber 止まっています — and every unread notice that
-  **asks for something** whose record is not a listed row (`asked` for a later task, `overdue`,
-  `acceptance_waiting`, `request_returned`, `intake_unsure`, `wait_over`, `reply_arrived`, `due_tomorrow`,
-  `minutes_arrived`, `job_accept_needed`) **and any kind this app does not know** (the safe side:
-  `noticePlace`). These rows **leave when opened** (today's read state, decision ③: no new 「済んだ」) — or when the
-  server marks them `settled` ("Settled notices" above): such an unread notice is a できた・未確認 row 「片付きました」
-  (`SETTLED_WORDS`), out of あなた待ち and the title bar's number, never a stop, still unread (opening it marks it read,
-  「まとめて確認済みにする」 includes it, the dot treats it as any unread できた notice); about a row that waits it stays that
-  row's news and changes nothing of the row. Order:
-  stopped → (AI questions, I3) → approval → mail draft → check (minutes check, review) → the rest; then
-  nearest due, newest.
-- **One job is one row**: an unread notice about a record in あなた待ち is that row's line and new mark
-  (not a row; a stop makes the row a stop, first and with its badge); opening the row marks exactly those
-  notices read (`markNoticesRead`, both PCs agree; a failure shows 「サーバーにつながりませんでした…」).
-- **できた・未確認**: only the notices that tell of something finished (`request_done`, `ok_completed`,
-  `request_accepted`, `approval_result`, `replied_done` / `mail_*` with ［元に戻す］, `job_skipped` grey
-  止めています — skipped on purpose) or changed (`due_changed`, `others`, `ai_changed` 「変わりました」 — but
-  while the server's turn is past its first 200 these may be about a waiting record: あなた待ち); off kinds
-  never arrive (decision ④); `morning_summary` is no row. Older than `DONE_KEEP_DAYS` (14) → one line 「14 日より前のもの N 件」
-  (decision ⑥). **Every read notice the server listed stays findable** (its newest 50, read ones included, as the
-  bell showed them — also a read stop or ask, and one about a record that waits now), folded at the bottom: made
-  today → 「きょう確認したもの」, earlier → 「前に確認したもの」 (`seenBefore`, newest first), each with ［元に戻す］ where
-  it offers one; counted nowhere (there is no 「未確認に戻す」: the server has no unread). **Unread notices past the
-  server's list** (`notices.unread` above the listed unread, `unreadNotListed`) are one line 「ほかに未読 N 件（古いもの）」
-  and count in すべて, never dropped silently. **［元に戻す］ in every state**: a change that can be undone keeps its
-  button on whatever row its notice lands — a waiting row it is the news of (the AI changed a task that is the
-  member's turn; the newest such notice — 「元に戻しました」 is kept per notice, so a later change there can be undone
-  again), a notice row in あなた待ち (the turn past its first 200), できた, or the
-  folded lists. At most `INBOX_MAX_ROWS` (100) rows: the oldest できた go first, あなた待ち never.
-- **「まとめて確認済みにする」 only for できた・未確認** (decision ⑦): `bulkSeenIds` gives every できた
-  notice's id (shown, left out by the row limit, or folded; owner 2026-11-22: as the rule says) — never a stop,
-  a notice that asks for something, a row's news, or the server's 「すべて」. No 「未確認に戻す」 for now (owner).
-- **Nothing irreversible from a row** (decision on 承認): `InboxAction` has no approve or send —
-  ［承認する…］ / a sent-back request's ［開く…］ open the approval card (`ApprovalCard`, which re-reads the
-  request each time: approved elsewhere → 「承認されました」 and no button; the server's hash and CAS stop a
-  stale press), ［確かめて送る…］ the mail draft card (`PreparedMailCard`), both composed by AppShell in
-  `InboxCardDialog` (the shared `Dialog`). Other rows open their record (`record.open`'s tab), the task list
-  or 「定期の仕事」, or only mark seen. A type test (`model.test.ts`) and the hook's exhaustive switch fail to
-  compile when an action kind that approves, sends, runs or confirms is added.
-- **「ブラウザ操作」 plans** (`agent-browser.md` "The inbox's rows"; a second source besides `NoticesState`, the
-  member's own through `browserPlans:list`, **only while the build's switch is on** — off, AppShell hands no
-  list: no row, nothing read): a draft waits with the approvals (amber 「承認を待っています」 ［承認する…］), a run
-  nobody knows the result of waits right after the stops once the server says its confirm can be pressed (amber
-  「届いたか分かりません」 ［確かめる…］), the rest is 作業中; each opens the plan's own card (`BrowserPlanCard`,
-  composed by AppShell) in `InboxCardDialog`, never acts. Key `browser:<planId>`; no notice, so nothing to mark
-  seen; a settled plan is in no list and gone. Rows count in あなた待ち (and the title bar's number) and are
-  news for the dot like any row; the dot's baseline also waits for the plans' first answer.
-- The panel stays reachable over a department not downloaded on this PC: its prompt covers the left side's
-  top, the panel spans the side under it (`renderer-structure.md` "The bottom panel"); opening a record or the
-  task list from there switches to 全社 first, so what was opened shows instead of the prompt.
-- 作業中 holds only the meetings the AI is reading and unsettled browser plans (above) until I3 / I4 add the
-  consultations and 「AI の番」, and says where to look meanwhile.
+## The inbox (受け箱; redesign of 2026-11-26, owner decisions in 「受け箱の作り直し_開発への依頼」 依頼1)
+The bottom panel's content (`renderer-structure.md` "The bottom panel"). **Two things only** (owner decisions 2026-11-26, which
+replaced I1's ① 「the number = あなた待ち = this week's turn」 and ③ 「no 済んだ, a row leaves when opened」):
 
-### The title bar's ［受け箱］ (I2, owner decisions ① and ②)
-- **One button** where 「あなたの番 N」 and the bell were (`components/InboxButton.tsx`, the slot's `titleBarButton`,
-  `TitleBar`'s `inbox`): 「受け箱」 with **the number = あなた待ち** exactly as the list counts it
-  (`InboxView.counts.waiting`: this week's turn + waiting meetings + unread stops and asks + 「ほかに N 件」; the
-  primary count, 99+) and **the dot = something new** (`NewDot`). Pressing it opens or closes the bottom panel —
-  the same state as ⌘J (the 「画面の形」 panel button was removed as its duplicate, owner 2026-11-22: add one back
-  when the panel holds something else). No count or dot when there is no inbox (records off without
-  company notices: no button at all).
-- **The dot** (`inboxNewsKeys` / `inboxNewsBaseline` / `hasInboxNews`, pure): every waiting / working row by key
-  and state, every unread notice, and one key per unread notice past the server's list (more of them is news); a
-  key not there when the inbox was last on screen is new. Before it was on screen in this window, the rows count as
-  seen and unread notices do not — so at the start the dot is the old bell's (something unread on the server, the
-  same on the member's PCs); that baseline follows the rows **until every source answered once** (the slot's
-  `ready`: the task list behind the meetings, the arrivals — `useMeetingArrivals` `read`), so meetings that load late
-  are not news. While the panel shows, **what the chosen chip shows** counts as seen (`seenWhileShown`: あなた待ち
-  hidden by 「できた・未確認」 stays new), and a row that left meanwhile and comes back after it closed is new again;
-  a row leaving is not news. Memory only (AppShell is keyed by company): nothing stored, a restart starts
-  from the server's unread again.
-- **Where each part of the bell and 「あなたの番」 went**: the turn list → あなた待ち; 「…は「先のこと」「いつか」にあります」
-  → the same line there; the bell's list → rows by meaning (above); ［元に戻す］ → the row (then 「「…」を元に戻しました。」 above the list
-  until the panel closes or opens again: marked seen, the row folds into 「きょう確認したもの」, as the bell's row said
-  「元に戻しました」); the bell's read notices → 「きょう確認したもの」 / 「前に確認したもの」; 「知らせの設定」 → the
-  inbox's heading (a late answer never reopens it once closed); the meetings and their buttons → rows (above); the morning summary's line (no row, decision) →
-  its Mac notification opens the inbox; 「すべて読んだ」 → 「まとめて確認済みにする」 for できた・未確認 only (decision ⑦:
-  a stop or an ask is opened one by one). ⌘K 「受け箱」 (also あなたの番 / 知らせ / 通知 / ベル) opens it
-  (`AppDialogs` palette action, only while there is an inbox).
-- Tests: `tests/ui/title-bar-notices.spec.ts` (`tests/title-bar-notices-ui.html`: the number equals あなた待ち with
-  meetings, the dot goes once shown and comes back for the next new thing, opening marks only its notice, the
-  meetings' buttons, every ［元に戻す］ and its line — also on a waiting row the AI changed —, 「前に確認したもの」 and
-  「ほかに未読」, the dot only for the chip shown and not for meetings that load late, 「知らせの設定」 by feature),
-  `model.test.ts` (meeting rows, the dot's keys, a できた notice the row limit left out still new, ［元に戻す］ in every
-  state, the read lists, unread past the list),
-  `skill-layout-state.spec.ts` (the button and ⌘J one panel, ⌘K, the Mac notification opens it),
-  `status-colours.spec.ts` (the dot `unread`, the count `primary`) — mutation-checked.
-- Tests: `src/features/inbox/model.test.ts` (settled notices out of あなた待ち and in できた, a settled row's news, order, one row per record, stops leave once read, the 14-day
-  fold, the bulk only for できた, あなた待ち never capped, no approving action), `tests/ui/inbox.spec.ts`
-  (`tests/inbox-ui.html`: order and chips, ［承認する…］ opens the real card and calls nothing, opening
-  marks exactly its notices, a request approved elsewhere leaves, the fold and the bulk; `?plans=1|off`: a plan's rows open the real plan card and nothing runs, a plan approved elsewhere leaves on the next read, ［任せる］ on a card elsewhere moves the row at once, a read every minute while a plan is listed and a few minutes on through a run claimed elsewhere, then none, switched off no row and no read),
-  `skill-layout-state.spec.ts` (⌘J, the wide tab, the real inbox in the screen — as shipped it never reads the plans), `model.test.ts` (the plans' order and states) — mutation-checked.
+- **あなた待ち** (red; named by why it waits, never 「すぐ」「急ぎ」): what is stopped until the member acts — an unread stop
+  notice the server has not settled (`STOP_NOTICES` by `STOP_LOOK`: `job_failed` red, `job_paused`, `ai_turn_stuck`,
+  `job_expired`, `job_chain_stopped`, `delegate_stopped`, `company_restored`, `browser_shape_changed` amber), an approval
+  (pending, or sent back to its requester) and a mail draft to check (`waitingTurnRow`: only those types of the server's
+  turn), a 「ブラウザ操作」 draft or a run due for its confirm, and a meeting this PC's AI stopped on (`stage: 'stopped'`).
+  **It leaves only when done**: the turn no longer lists the record, the server settles the stop (`settled`, "Settled
+  notices" above: then it is 新着 「片付きました」), or the member presses the stop's ［済んだ］ (marks it read). **Opening a stop
+  never marks it read** (`InboxItem.stop`, `useInboxSlot` `openItem`; looking is not dealing with it). A stop the server can
+  never settle stays until ［済んだ］ (owner 2026-11-26). Order: stopped → a run nobody knows the result of → approval → mail;
+  then nearest due, newest.
+- **新着** (blue): what the member has not looked at — every unread notice that is no row's news (any kind, also one this
+  app does not know: 「お知らせ」), and a meeting's 「読み終わりました」 not yet looked at on this PC. **One thing is one row**:
+  the notices about one record are one row (`record:<id>`, its newest unread notice the line; a recordless notice
+  `notice:<id>`); a notice about a row of あなた待ち is that row's news (its dot), never a 新着 row. **Opening the row or
+  ［確認した］ marks exactly its notices read** (`markNoticesRead`, both PCs agree) — the blue count goes down by exactly one;
+  it grows only when a new notice (or a finished reading) comes. 「すべて確認した」 marks every 新着 row (`newsNoticeIds`,
+  `newsMeetingIds`), never あなた待ち and never the server's 「すべて」. Pressing one of a row's own buttons (a meeting's
+  ［AI に読ませる］…) marks its notices read too. Newest first.
+- **「確認したもの」** (its own chip): what was looked at — read notices the server listed (its newest 50) and meetings looked at (finished and seen here, set aside by
+  another attendee) — newest first, each with ［元に戻す］ where it offers one; unread notices past the server's list are one line
+  there, 「ほかに未読 N 件（古いもの）」, never counted (they are older than every listed one).
+- **Moving on without the member** (under 新着, no dot, never counted): a meeting the AI reads or will (`stage: 'reading'`),
+  a meeting question only the member answers (`stage: 'ask'`, a department without the task list), a meeting still
+  waiting to be read whose notice was already read, switched off or from before the first day (`arrived`: never hidden in
+  確認したもの — it may run out, and a failed reading says so on its line), and approved
+  browser plans waiting for their result.
+- **Tasks are never rows or counts here** (decision ②/E4): the task list's 「今日」「このあと」「期限切れ」 hold them
+  (`tasks-ui.md`); a task due today is not in the inbox. 「今日が期限のものを含め、あなたのやることは左の「やること」にあります。
+  受け箱では数えません。」 says so at the bottom.
+- **The first day** (decision Q4): `INBOX_NEWS_SINCE` (2026-11-26 00:00 Japan) — a notice (or a finished meeting) from before
+  it starts in 「確認したもの」 (still unread on the server: opening it marks it read). **One fixed instant, nothing stored**:
+  a 「first day of this PC」 marker would, on the member's second PC opened later, take notices that came after the first
+  PC's first day; a fixed instant never takes a notice made after it, however often and wherever it runs. A release later
+  than it shows those days as 新着 (the safe side); the constant is set to the release day just before shipping (owner
+  2026-11-26). Stops have no cutoff. Only a preview on a fixed clock hands another (`useInboxSlot` `newsSince`,
+  `AppShell` `inboxNewsSince`).
+- **Meetings** (owner 2026-11-26: the banner above やること is gone): the minutes feature hands `MeetingNewsRow`s
+  (`client/shared/notifications-app.ts`: `stage` arrived / reading / read / stopped / ask / skipped, `line`, `meetingAt`,
+  `expiresSoon`, `seen`, their buttons; `minutes.md` "In the app"). One meeting is one row: its 「議事録が届きました」 notice is the
+  row's news. An arrived (or skipped by another attendee) meeting with an unread notice is 新着, with ［AI に読ませる］［読まない］;
+  reading it moves on uncounted (「AI が読んでいます…」); finished it is 新着 again until looked at on this PC
+  (`onMeetingSeen`, the minutes feature's closed list); 「あと1日で読めなくなります」 on one still waiting from its second day.
+  A notice kind 「読み終わりました」 does not exist on the server: none was added (the look is per PC, like the banner's ×).
+- **Visibility is the server's**: every row comes from `/records/my-turn`, `/me/notifications`, the arrivals and the plans,
+  which already left out what the member cannot read; the inbox never filters on the client instead. AppShell is keyed by
+  company and `useNotices` drops another company's answer. **Nothing is stored** (`inboxView` rebuilds every answer; no new
+  server table, API or IPC).
+- **Nothing irreversible from a row**: `InboxAction` has no approve or send — ［承認する…］ / ［開く…］ open the approval card
+  (`ApprovalCard`), ［確かめて送る…］ the mail draft card, a plan's ［承認する…］ / ［確かめる…］ its card (`InboxCardDialog`).
+  The type test in `model.test.ts` and the hook's exhaustive switch fail to compile when an action kind that approves,
+  sends, runs or confirms is added. The one blue button of a row is what あなた待ち asks for; news only opens.
+- **［元に戻す］** (`replied_done`, `mail_*`, `ai_changed`): on whatever row its notice lands, the newest such notice of a
+  row; then 「「…」を元に戻しました。」 above the list until the panel closes or opens again.
+- With records off the server still sends the company's own notices (`bellOnly`): they are rows too. The panel stays reachable
+  over a department not downloaded on this PC (`renderer-structure.md` "The bottom panel"); opening a record from there
+  switches to 全社 first.
+
+### The title bar's ［受け箱］ (owner decision 2026-11-26, look 「2」; 依頼2 tidies the bar's other icons later)
+- **One button** (`components/InboxButton.tsx`, the slot's `titleBarButton`): the tray icon, **a soft blue count = 新着**
+  (`selected-bg` / `selected-text`, `data-inbox-news`) and **a soft red count = あなた待ち** (`danger-bg` / `danger-text`,
+  `data-inbox-waiting`), each exactly as the list counts it (`InboxView.counts`; 99+); no word 「受け箱」, no solid pill, no dot; a
+  count of 0 is not shown. Its name (aria-label and tooltip alike, `inboxButtonName`): 「受け箱：新着 N 件・あなた待ち N 件 (⌘J)」.
+  Pressing it opens or closes the bottom panel — the same state as ⌘J. No button when there is no inbox.
+- The morning summary's Mac notification and ⌘K 「受け箱」 open the inbox (`useOpenTasksRequest`, `AppDialogs`).
+- 「知らせの設定」 is in the inbox's heading (a late answer never reopens it once closed).
+
+- Tests: `src/features/inbox/model.test.ts` (the red count holds only stops, approvals and mail — never a task due today, a
+  resting turn item or a notice that only tells; opening one 新着 row lowers the count by one and only a new notice raises it;
+  「すべて確認した」 never reaches あなた待ち; a stop is not done by being opened, settled it is 新着; one meeting one row; reading
+  uncounted, finished 新着 until seen; the first day: before it 確認したもの, after it never taken however often it runs;
+  no approving action; unknown kinds kept; unread past the list told, not counted; the plans), `src/features/minutes/model.test.ts`
+  (a meeting's row, 「あと1日で読めなくなります」, one row per meeting), `tests/ui/title-bar-notices.spec.ts` (the two counts and the
+  name, a task never counted, opening / ［確認した］ / 「すべて確認した」, a stop only by ［済んだ］ or settled, meetings, every
+  ［元に戻す］, 確認したもの, 「知らせの設定」 by feature), `tests/ui/inbox.spec.ts` (order, approvals only through their card, a
+  request approved elsewhere leaves, the bulk never reaches あなた待ち, offline, the plans), `tests/ui/meetings.spec.ts` (the
+  meetings' rows), `skill-layout-state.spec.ts` (the button and ⌘J one panel, ⌘K, the Mac notification),
+  `status-colours.spec.ts` (the two counts' tokens, the rows' dots `unread`) — mutation-checked.
 
 ## Tests
 

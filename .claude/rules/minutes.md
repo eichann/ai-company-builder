@@ -394,7 +394,7 @@ or the decision service stops calling it, or another module uses the older per-m
   checked field by field; a `read` one carries `made { decisions, proposals }` counted from the
   meeting's links (decisions not retracted; tasks linked to it except the review task and archived
   ones), looked up once per version. **An older server** (no route: any non-200) → `available:
-  false`: no banner, and `minutes:meeting` answers a failure with an empty error: the card shows no
+  false`: no meeting rows in the inbox, and `minutes:meeting` answers a failure with an empty error: the card shows no
   new buttons (quietly). `minutes:meeting` (the card: the record's state and version now, the
   arrival's series / by when listed, `review` = `reviewOf` once read), `minutes:requestReading` /
   `minutes:skipReading` (at the version shown; 403 `MINUTES_NO_ACCESS` → `MEETING_NO_ACCESS_TEXT`
@@ -403,34 +403,29 @@ or the decision service stops calling it, or another module uses the older per-m
   `minutes:autoSeries`, `minutes:invite` (`POST /records/item/:id/members`, any members-only record;
   member ids checked, de-duplicated; groups / departments sent as `{ subjectType, subjectId }`) and
   `minutes:inviteChoices` (`GET …/members/choices`: what the dialog may offer besides people). Malformed ids never reach a URL.
-- **The banner** (`src/features/minutes/components/MeetingBanners.tsx`, the words in `model.ts`
-  `meetingBanner`): at the top of やること (`useMinutesSlots` `banners()`, placed by AppShell above `TaskListPanel`; `useMeetingArrivals`: at
-  mount, on `records:changed` (once per change: `minutes:changed` / `notifications:changed` caused
-  by the same change no longer re-read it; main sends `records:changed` when the checker's own look
-  found the received minutes changed, `onAiTurnChanged`), every 2 minutes, after a
-  press). **It never takes the pane** (first discovery brings many meetings at once, 2026-11-05): one
-  block of at most 45% of the pane with the heading 「議事録が届きました」 and `MEETING_ROWS_SHOWN` (2)
-  one-line rows (`meetingRowWords` 「<title>・今日 12:00」, cut with the whole text as the tooltip, small
-  buttons); the rest behind 「ほか N 件」, opened in an area of its own height that scrolls; the list
-  below keeps the rest and scrolls. Opened, ［まとめて読まない］ skips the folded meetings still
-  arrived (`skippableMeetings`), toast 「N件を読まないにしました」 with one 元に戻す for all of them. **No
-  count on a row**: `attendeeCount` is the members ACB matched, not who attended (the card says
-  what it counts). Per meeting: ［AI に読ませる］［読まない］
-  (also after a failed reading, 「前回読めず」); after ［AI に読ませる］ only the line changes to 「AI が読んでいます…」
-  — nothing opens; the member's AI reads it as their 「AI の番」 (below) — with ［読まない］ (今回だけ)
-  while it waits for their own AI, 「〇〇さんの AI が読んでいます…」 when another attendee pressed it,
-  「〇〇さん（主催）の…」 when that reader is the organiser (`byOrganiser`; absent → no label), ［AI に読ませる］
-  also on a meeting only the clock asked for another attendee that has not started (`asked`, not
-  `byYou`, `askedAutomatically`: the press takes it, "The organiser first"; another person's press or an
-  older server shows no button; a 409 `MEETING_NOT_WAITING` meanwhile is said in the server's words) —
-  on the banner's row and the card (`meetingBanner` `canRead`),
-  and the runner's reason instead of the spinner when this PC cannot start it (Codex, not signed in,
-  failed; 「もう一度」). The member's own automatic series: 「自動で読む定例です。AI が読んでいます…」 with
-  ［次から自動で読まない］ (toast with 元に戻す). Read: 「読み終わりました　<title>：決めたことN・やることの案N」
-  ［見る］ (opens the card) and ×, closed per PC (localStorage `meeting-banners-closed:<company>`).
-  ［読まない］: the line goes at once, toast 「「…」は読まないにしました」 with 元に戻す = the generic undo of
-  that entry (`tasks:undo` at the skip's version); the other attendees see 「〇〇さんが読まないにしました」
-  (no buttons). The server drops a meeting after 3 days.
+- **The inbox's rows** (owner decision 2026-11-26: the banner 「議事録が届きました」 above やること is gone, unified into the inbox;
+  `notifications.md` "The inbox"): `useMeetingInboxRows` (`src/features/minutes/hooks/`, from `useMinutesSlots`, which hands
+  `inboxMeetings`, `inboxMeetingSeen`, `meetingToast`, `meetingSuggestion` to AppShell) turns each arrival into a
+  `MeetingNewsRow` (`meetingNewsOf` over `meetingBanner`, the words in `model.ts`; `useMeetingArrivals`: at mount, on
+  `records:changed` (once per change: `minutes:changed` / `notifications:changed` caused by the same change no longer re-read
+  it; main sends `records:changed` when the checker's own look found the received minutes changed, `onAiTurnChanged`), every
+  2 minutes, after a press). One meeting is one row (its 「議事録が届きました」 notice is the row's news, `mergeMeetingRows` with a
+  department-without-list's turns). **No count on a row**: `attendeeCount` is the members ACB matched, not who attended.
+  Per meeting: `arrived` 「AI に読ませると、決めたこととやることの案を作ります」 ［AI に読ませる］［読まない］ (also after a failed
+  reading: 「前回は AI が読めませんでした…」); after ［AI に読ませる］ only the line changes to 「AI が読んでいます…」 and the row is no
+  longer counted as 新着 — nothing opens; the member's AI reads it as their 「AI の番」 (below) — with ［読まない］ (今回だけ) while it
+  waits for their own AI, 「〇〇さんの AI が読んでいます…」 when another attendee pressed it, 「〇〇さん（主催）の…」 when that
+  reader is the organiser (`byOrganiser`), ［AI に読ませる］ also on a meeting only the clock asked for another attendee that has
+  not started (`canRead`; a 409 `MEETING_NOT_WAITING` meanwhile is said in the server's words on the row's line), and the
+  runner's reason when this PC cannot start it (Codex, not signed in, failed; 「もう一度」). The member's own automatic series:
+  ［次から自動で読まない］ (toast with 元に戻す). Read: 「読み終わりました：決めたことN・やることの案N」 ［見る］ (opens the card) — 新着
+  again until looked at on this PC (opened, ［見る］, ［確認した］ or 「すべて確認した」: the closed list kept per PC in localStorage
+  `meeting-banners-closed:<company>`; the server has no such notice and none was added). ［読まない］: the row goes at once, toast
+  「「…」は読まないにしました」 with 元に戻す = the generic undo of that entry (`tasks:undo` at the skip's version); the other
+  attendees see 「〇〇さんが読まないにしました」 (no buttons). **「あと1日で読めなくなります」** on a meeting still waiting to be read
+  from its second day (`MEETING_EXPIRES_SOON_MS`; the server drops a meeting after 3 days). Many meetings at once are one row
+  each; 「すべて確認した」 takes them out of 新着 without deciding anything (the banner's fold and ［まとめて読まない］ are gone, owner
+  2026-11-26).
 - **AI turn**: a meeting the arrivals answer as `asked` by the member (`byYou`) is queued with
   `asked` (`aiTurnQueue`) and runs even while 「自動で進める」 is off — the press is the start
   (`ai-turns.md`). No consultation opens; the hidden run is the existing reading.
@@ -464,7 +459,7 @@ or the decision service stops calling it, or another module uses the older per-m
   `MEETING_AUTO_READ_NOTE` (this PC's AI; a closed PC reads when it opens; Claude Code only); a member who
   never chose and starts at 自動では読まない (`suggestsAutoRead`) is told the recommendation; picking
   「全部」 says `MEETING_AUTO_READ_ALL_HINT` once per PC (`showsAutoReadAllHint`, localStorage
-  `meeting-auto-read-all-hint:<company>`: past per-series 読まない were not kept, D1-4). **The banner**
+  `meeting-auto-read-all-hint:<company>`: past per-series 読まない were not kept, D1-4). **The inbox, above its meetings,**
   suggests ［社外の人がいる会議だけ自動で読む］ / 今はいい to the same members (`useAutoReadSuggestion`,
   closed per PC in `meeting-auto-read-suggested:<company>`; toast with 元に戻す = `off`). A meeting the
   setting asked (`askedAutomatically`, no auto series) says 「自動で読む設定のため、AI が読んでいます…」 with
@@ -477,17 +472,17 @@ or the decision service stops calling it, or another module uses the older per-m
   those two. Tests: `client/tests/meetings-app.test.ts` (hidden for an older server or an unknown mode,
   never sends one; `seriesChoice` only when the server gives it; the suggestion and the hint rules),
   `src/features/minutes/model.test.ts` (「読む予定」, the setting's words), `tests/ui/meetings.spec.ts`
-  (the banner's suggestion; the card's three choices), `tests/ui/my-switches.spec.ts` (the setting, the
+  (the inbox's suggestion; the card's three choices), `tests/ui/my-switches.spec.ts` (the setting, the
   hint once, hidden without the server).
 - Not built from the demo: the consultation's first answer as the AI's summary; ［部署に出す］ on the card.
 - Tests: `client/tests/meetings-app.test.ts` (older server quiet, counts, the card's decisions, the
   press with the session and the runner re-read, NO_ACCESS words, malformed input never sent, the
-  words), `src/features/minutes/model.test.ts` (each banner state), `src/features/chat/aiTurns.test.ts`
+  words), `src/features/minutes/model.test.ts` (each meeting's state and row, 「あと1日で読めなくなります」, one row per meeting), `src/features/chat/aiTurns.test.ts`
   (an asked meeting runs while off, nothing else), `client/tests/ui/meetings.spec.ts`
   (`tests/meetings-ui.html`: read → reading → finished → 見る; 読まない + 元に戻す; another attendee's
   view; NO_ACCESS; invite words and the press; consult; the 案件 sentence before the link, ［はい］ too;
-  the card's order wide and narrow, each thing once; `?flood=12`:
-  two rows, the fold's own scroll, the list's height and scroll also in a short window, ［まとめて読まない］ and its 元に戻す),
+  the card's order wide and narrow, each thing once; reading not counted as 新着, finished 新着 again; `?flood=12`:
+  one row each, 「すべて確認した」 to 0 with nothing sent),
   `record-card.spec.ts` (「新しいプロジェクトにする」 on a meeting asks first).
 
 ## The text
@@ -574,7 +569,7 @@ character) is moved to a file, and the unattended run has no tool to open it.
   (`autoMinutesFirstMessage`) say to read every part before deciding; the step's tool list is
   unchanged (`minutes_read` with a `part` is the same tool).
 - **A meeting that went to 「読めなかった」 before** (`failed`) is read again from its card or the
-  banner's row (［AI に読ませる］, 「前回読めず」, "Meetings for their attendees" above) once the app has
+  inbox's row (［AI に読ませる］, 「前回は AI が読めませんでした」, "Meetings for their attendees" above) once the app has
   this.
 - Tests: `client/tests/records-tools.test.ts` (`minutesParts` boundaries; a 60,000-character text in
   parts, each block on its own and below the limit, one read, the card once, every line once; short
@@ -761,8 +756,8 @@ Records off → 404 `RECORDS_DISABLED`. The AI's emergency stop ends record toke
 
 - **Where it sits on the main screen** (2026-11-10): `src/features/minutes/hooks/useMinutesSlots.tsx`
   holds everything of minutes the screen shows — the received minutes and arrivals, the runner's
-  inputs (`aiTurnMinutes`, `askedMeetings`), the banners, the task list's `meetingActions`, 「議事録を
-  確かめる」, the title bar's meeting rows and their buttons, the まとまり chooser's state and the meeting
+  inputs (`aiTurnMinutes`, `askedMeetings`), the inbox's meeting rows, the task list's `meetingActions`, 「議事録を
+  確かめる」, their buttons and the 「元に戻す」 toast, the まとまり chooser's state and the meeting
   card's key. `AppShell` only places these parts and imports nothing else of `features/minutes`
   (`architecture-boundaries.test.ts` 「AppShell reaches the minutes feature only through its slot」);
   what needs another feature (the meeting card with the tasks feature's `MinutesReview`, the
@@ -832,7 +827,7 @@ Records off → 404 `RECORDS_DISABLED`. The AI's emergency stop ends record toke
   the current one.
 - Meetings are members-only since 2026-11-04 ("Meetings for their attendees"): the intake passes no
   folder, the review task and decisions take the meeting's list, the text answers `folder: null`.
-  The app still finds received minutes in 「AI の番」; the banner and the card's buttons: "In the app"
+  The app still finds received minutes in 「AI の番」; the inbox's rows and the card's buttons: "In the app"
   above.
 
 ## Tests

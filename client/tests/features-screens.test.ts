@@ -4,7 +4,6 @@
 //   on) and asks for 決めたこと to confirm only while 決めたこと is on;
 // - 「確かめること」 lists only approvals waiting for the member and what the AI prepared for them —
 //   never an ordinary or resting task, never someone else's;
-// - the title bar counts arrived minutes (nobody asked the AI yet) once, with what the list has;
 // - a record's card is 「見るだけ」 exactly when its type's feature is off;
 // - プロジェクト off: nothing of the core's kind is offered to make; a business plugin's kind still is;
 // - 決めたこと off: the meeting's line does not speak of decisions.
@@ -13,7 +12,6 @@ import assert from 'node:assert/strict'
 import { createTasksApi } from '../electron/features/tasks/ipc'
 import { createRecordViewsApi } from '../electron/features/record-views/ipc'
 import { corePressItems, type TaskListItem } from '../shared/tasks'
-import { arrivedMeetingTurns } from '../shared/notifications-app'
 import { departmentBundleKind } from '../src/features/tasks/model'
 import { madeWords } from '../src/features/minutes/model'
 import type { BundleKindsResult } from '../../shared/types/records'
@@ -82,16 +80,6 @@ test('「確かめること」: approvals waiting for the member and what the AI
   ])
   assert.deepEqual(r.approvals.map(i => i.id), ['approval-1'])
   assert.deepEqual(r.prepared.map(i => i.id), ['task-prepared'])
-})
-
-test('the title bar counts arrived minutes nobody asked to read yet, each once', () => {
-  const rows = arrivedMeetingTurns([
-    { recordId: 'meeting-1', title: '定例', status: 'arrived' },
-    { recordId: 'meeting-2', title: '読んだ会議', status: 'read' },
-    { recordId: 'meeting-3', title: '頼んだ会議', status: 'asked' },
-    { recordId: 'meeting-4', title: 'AI の番にもある', status: 'arrived' },
-  ], new Set(['meeting-4']))
-  assert.deepEqual(rows.map(r => [r.id, r.needsPerson]), [['meeting-1', true]])
 })
 
 test('a record\'s card is 「見るだけ」 exactly when its type\'s feature is off', async () => {
