@@ -685,15 +685,17 @@ domain's folded 「詳しい設定」, so a new site works without a new app rel
   one it operates** (`operated`: an operated domain cannot be lent to another as a part or a helper, nor to itself); a
   host once, a helper never also a parts host (`twice`); ≤ 10 parts hosts and ≤ 5 helpers (the declaration's limits);
   a helper's `pathPrefix` as the declaration's (`/whole/segments/`). `validBrowserSiteParts(list, operated)` re-checks a
-  list against the registered domains **now** (empty or invalid entries, a second one for a host: left out, counted).
+  list against the registered domains **now** (invalid entries, a second one for a host: left out, counted; an entry
+  with both lists empty is kept — the domain then uses nothing, never the fallback).
 - **Server**: table `agent_browser_site_parts` (company, host, parts JSON, who / when; `db/schema/agents.ts`, additive);
   `AgentBrowserRepository.siteParts` / `saveSiteParts` (with a history row, one transaction). `PUT
   /agent-browser/site-parts { host, assetHosts, loginHelpers }` (owner/admin; `AGENT_BROWSER_FORBIDDEN`; a domain not
   registered → 404, any other refusal → 400; both lists empty removes the row = back to the fallback; recorded as
   `{ target: 'site-parts', host, before, after }` when it changes; announced on the push channel). `GET /agent-browser`
   answers `siteParts` (valid now; optional in the type: an older server sends none). **Every read re-validates** against
-  the registered domains: a domain registered after a setting that lent it makes that setting invalid (left out,
-  logged); a removed domain's row is not handed out (and comes back valid if registered again).
+  the registered domains: a host registered as a domain after a setting lent it is **taken out of that setting**
+  (logged), the rest kept — even when nothing is left, so the domain uses nothing rather than the fallback and the
+  admin sees what applies (independent review L1); a removed domain's row is not handed out (back if registered again).
 - **To the apps**: `/me/agent-policy` gains **`browserParts`** (`AgentPolicy.browserParts`, the valid settings, only
   while the member's browser part is on, absent when none — so the answer and its version are as before for a company
   that set nothing). **The `browser` part and `agent_browser_settings` keep their shape** (released apps validate it;
@@ -722,9 +724,10 @@ Tests: `server/tests/integration/agent-browser-site-parts.test.ts` (owner/admin 
 save nothing; a domain not registered, a registered domain as a part / helper / itself, wildcard, upper case, scheme,
 IP, a path, twice, a helper also a part, bad paths, extra or missing keys refused; saved → `browserParts`, the `browser`
 part and its sites' keys exactly as before, a new version, an unchanged save records nothing; another company's setting
-never in this company's policy; a domain registered later invalidates the setting that lent it, and a removed domain's
-is not handed out; nothing while the member's browser is off; empty removes, recorded), `client/tests/browser-site-parts.test.ts`
-(the policy keeps only valid settings and the `browser` part is unchanged; the window takes the company's, else the
+never in this company's policy; a domain registered later is taken out of the setting that lent it, which stays the company's
+even when empty, and a removed domain's is not handed out; nothing while the member's browser is off; empty removes, recorded), `client/tests/browser-site-parts.test.ts`
+(the policy keeps only valid settings and the `browser` part is unchanged; an empty company setting still replaces the
+fallback; a development build's extra parts host never drops a helper (review L2); the window takes the company's, else the
 bundled (logged), never both; another company's never reaches this company's window; a registered domain never a part
 or helper from any source; a parts host from the company's setting is read-only in both modes — parts GET / HEAD only,
 never a fetch, a write, a page, a frame, a WebSocket — an unregistered host never passes, the helper only while a

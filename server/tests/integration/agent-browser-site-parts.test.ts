@@ -133,18 +133,25 @@ describe('a registered domain\'s 「詳しい設定」', () => {
     expect((await policyOf('sp-other-member', OTHER_BASE)).browserParts).toEqual([{ host: DESK, assetHosts: ['other.example.net'], loginHelpers: [] }])
   })
 
-  it('a domain registered later as an operated one makes a setting that lent it invalid: left out, never applied', async () => {
-    expect((await put('sp-owner', parts({ host: DESK, assetHosts: ['later.example.com'], loginHelpers: [] }))).status).toBe(200)
+  it('a domain registered later is taken out of a setting that lent it, and the domain keeps using the company\'s (never the app\'s fallback)', async () => {
+    expect((await put('sp-owner', parts({ host: DESK, assetHosts: ['later.example.com', 'keep.example.net'], loginHelpers: [{ host: 'later.example.com', pathPrefix: '/x/', frame: false, post: false }] }))).status).toBe(400)
+    expect((await put('sp-owner', parts({ host: DESK, assetHosts: ['later.example.com', 'keep.example.net'], loginHelpers: [] }))).status).toBe(200)
     expect((await policyOf('sp-member')).browserParts.map((p: Json) => p.host)).toEqual([DESK, SHOP])
     expect((await call('sp-owner', 'PUT', `${BASE}/agent-browser`, setting([SHOP, DESK, 'later.example.com']))).status).toBe(200)
-    expect((await policyOf('sp-member')).browserParts.map((p: Json) => p.host)).toEqual([SHOP])
-    expect((await call('sp-owner', 'GET', `${BASE}/agent-browser`)).json.data.siteParts.map((p: Json) => p.host)).toEqual([SHOP])
-    // Once that domain is no longer registered the setting is valid again; a removed domain's setting is not handed out.
-    expect((await call('sp-owner', 'PUT', `${BASE}/agent-browser`, setting([DESK]))).status).toBe(200)
-    expect((await policyOf('sp-member')).browserParts.map((p: Json) => p.host)).toEqual([DESK])
-    expect((await put('sp-owner', { host: DESK, assetHosts: [], loginHelpers: [] })).status).toBe(200)
-    expect((await policyOf('sp-member')).browserParts).toBeUndefined()
+    const lent = (await policyOf('sp-member')).browserParts
+    expect(lent).toEqual([{ host: DESK, assetHosts: ['keep.example.net'], loginHelpers: [] }, parts()])
+    expect((await call('sp-owner', 'GET', `${BASE}/agent-browser`)).json.data.siteParts).toEqual(lent)
+    // Nothing left of it: still the company's (empty), so the app uses nothing for that domain, not its fallback.
+    expect((await put('sp-owner', { host: DESK, assetHosts: ['later.example.com'], loginHelpers: [] })).status).toBe(400)
+    db.prepare('UPDATE agent_browser_site_parts SET parts = ? WHERE company_id = ? AND host = ?')
+      .run(JSON.stringify({ host: DESK, assetHosts: ['later.example.com'], loginHelpers: [] }), CO, DESK)
+    expect((await policyOf('sp-member')).browserParts[0]).toEqual({ host: DESK, assetHosts: [], loginHelpers: [] })
+    // A removed domain's setting is not handed out; registered again, it applies again.
+    expect((await call('sp-owner', 'PUT', `${BASE}/agent-browser`, setting([SHOP]))).status).toBe(200)
+    expect((await policyOf('sp-member')).browserParts).toEqual([parts()])
     expect((await call('sp-owner', 'PUT', `${BASE}/agent-browser`, setting([SHOP, DESK]))).status).toBe(200)
+    expect((await policyOf('sp-member')).browserParts[0]).toEqual({ host: DESK, assetHosts: ['later.example.com'], loginHelpers: [] })
+    expect((await put('sp-owner', { host: DESK, assetHosts: [], loginHelpers: [] })).status).toBe(200)
     expect((await policyOf('sp-member')).browserParts).toEqual([parts()])
   })
 

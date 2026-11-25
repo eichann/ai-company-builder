@@ -424,7 +424,9 @@ export function browserWindowSiteFrom(
   const loginHelpers: BrowserLoginHelper[] = []
   for (const h of chosen.loginHelpers) {
     if (normalizeBrowserHost(h.host) !== h.host || h.host === site.host || operated.includes(h.host)) continue
-    if (assetHosts.includes(h.host) || loginHelpers.some(x => x.host === h.host)) continue
+    // One rule per host within the chosen source; a development build's extra parts host never drops a helper (the
+    // window's precedence handles a host that is both: "Login helpers").
+    if (chosen.assetHosts.includes(h.host) || loginHelpers.some(x => x.host === h.host)) continue
     loginHelpers.push({ host: h.host, pathPrefix: h.pathPrefix, frame: h.frame === true, post: h.post === true })
   }
   const from = own ? 'company' : (chosen.assetHosts.length > 0 || chosen.loginHelpers.length > 0 ? 'bundled' : 'none')

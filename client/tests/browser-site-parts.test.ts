@@ -82,6 +82,26 @@ test('the window takes the company\'s setting of its domain, else the bundled fa
   assert.deepEqual(w.browser.siteNow('c1', SHOP)?.assetHosts, OWN.assetHosts)
 })
 
+test('a company setting with nothing left (its hosts since registered as domains) still replaces the fallback', () => {
+  const w = world()
+  w.browser.policyAnswered('c1', policy([site(SHOP)], [{ host: SHOP, assetHosts: [], loginHelpers: [] }]))
+  w.browser.open('c1', SHOP)
+  assert.deepEqual(w.opened[0].site.assetHosts, [])
+  assert.deepEqual(w.opened[0].site.loginHelpers, [])
+  assert.equal(w.logged.length, 0, 'not the fallback')
+})
+
+test('a development build\'s extra parts host never drops a login helper of the chosen source', () => {
+  const dev = createBrowserController({
+    shell: { open: () => ({ focus() {}, close() {}, updateSite() {} }), clearPartition: async () => {} },
+    userId: () => 'user-1', log: { warn() {} }, developerAssetHosts: true,
+  })
+  dev.policyAnswered('c1', policy([{ ...site(SHOP), assetHosts: [HELPER.host] }], [OWN]))
+  const s = dev.siteNow('c1', SHOP) as BrowserWindowSite
+  assert.deepEqual(s.loginHelpers, [HELPER])
+  assert.ok(s.assetHosts.includes(HELPER.host))
+})
+
 test('another company\'s domain settings never reach this company\'s window', () => {
   const w = world()
   w.browser.policyAnswered('c1', policy([site(SHOP)], [OWN]))

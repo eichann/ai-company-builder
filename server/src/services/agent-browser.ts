@@ -89,14 +89,27 @@ export function createAgentBrowserService(deps: AgentBrowserDeps) {
   }
 
   /**
-   * The company's 「詳しい設定」 of its registered domains, each valid against the registered hosts now (a
-   * stored row that is not — a domain registered since used as a part, a removed domain — is left out, logged).
+   * The company's 「詳しい設定」 of its registered domains, each valid against the registered hosts now. A host
+   * registered as a domain since a setting lent it is taken out of that setting (logged), the rest kept — even
+   * when nothing is left, so the domain then uses nothing rather than the app's fallback and the admin sees what
+   * applies. A removed domain's row is not handed out; a row that does not read is left out, logged.
    */
   function sitePartsOf(companyId: string, settings: BrowserOperationSettings): BrowserSiteParts[] {
     const operated = settings.sites.map(s => s.host)
+    let narrowed = 0
     const rows = agentBrowser.siteParts(companyId).filter(r => operated.includes(r.host)).map(r => {
-      try { return JSON.parse(r.parts) as unknown } catch { return null }
+      let raw: unknown
+      try { raw = JSON.parse(r.parts) } catch { return null }
+      if (!raw || typeof raw !== 'object') return raw
+      const row = raw as { assetHosts?: unknown; loginHelpers?: unknown }
+      const lent = (h: unknown) => typeof h === 'string' && operated.includes(h)
+      if (!Array.isArray(row.assetHosts) || !Array.isArray(row.loginHelpers)) return raw
+      const assetHosts = row.assetHosts.filter(h => !lent(h))
+      const loginHelpers = row.loginHelpers.filter(h => !lent((h as { host?: unknown } | null)?.host))
+      if (assetHosts.length !== row.assetHosts.length || loginHelpers.length !== row.loginHelpers.length) narrowed += 1
+      return { ...row, assetHosts, loginHelpers }
     })
+    if (narrowed > 0) log.warn(`[agent-browser] ${narrowed} domain setting(s) for ${companyId} named a host now registered as a domain; taken out`)
     const { valid, dropped } = validBrowserSiteParts(rows, operated)
     if (dropped > 0) log.warn(`[agent-browser] ${dropped} stored domain setting(s) for ${companyId} no longer valid; left out`)
     return valid

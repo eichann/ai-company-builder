@@ -101,9 +101,11 @@ export function browserSitePartsEmpty(parts: Pick<BrowserSiteParts, 'assetHosts'
 }
 
 /**
- * The parts settings of a list, each re-checked against the registered hosts now (a domain registered after
- * a setting was saved makes that setting invalid): the valid ones, one per registered host, in the given order.
- * Used by the server for the policy and by the app for what it takes from the policy.
+ * The parts settings of a list, each re-checked against the registered hosts now: the valid ones, one per
+ * registered host, in the given order. An entry with both lists empty is kept (the company set the domain and
+ * nothing is left of it — the server's reading of a setting whose hosts were since registered as domains: the
+ * domain then uses nothing, never the app's fallback). Used by the server for the policy and by the app for
+ * what it takes from the policy.
  */
 export function validBrowserSiteParts(list: unknown, operatedHosts: readonly string[]): { valid: BrowserSiteParts[]; dropped: number } {
   if (!Array.isArray(list)) return { valid: [], dropped: 0 }
@@ -111,7 +113,7 @@ export function validBrowserSiteParts(list: unknown, operatedHosts: readonly str
   let dropped = 0
   for (const item of list) {
     const parsed = parseBrowserSiteParts(item, operatedHosts)
-    if ('error' in parsed || valid.some(v => v.host === parsed.value.host) || browserSitePartsEmpty(parsed.value)) dropped += 1
+    if ('error' in parsed || valid.some(v => v.host === parsed.value.host)) dropped += 1
     else valid.push(parsed.value)
   }
   return { valid, dropped }
