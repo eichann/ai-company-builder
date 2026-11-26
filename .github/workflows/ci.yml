@@ -444,6 +444,29 @@ jobs:
           node-version: 22
       - run: model/browser-plan/check
 
+  model-drive-view:
+    name: Model (Drive view)
+    # The Drive video viewing model (model/drive-view/, google-drive.md "Streaming a picked video"): the checker tla-ts
+    # explores every reachable state of DriveView.tla (the view pick and the streaming of its bytes, R1-R6), checks the
+    # state count against expected.txt and that each broken variant fails on its named rule (~20 s). Runs when area
+    # model changes (check-areas.mjs keeps its list in step with the files the model cites), on push to main and
+    # nightly. Same isolation as the browser plan's job: the checker installed by model/drive-view/check from its own
+    # package-lock.json with install scripts off, no secrets, the read-only token, no persisted git credentials.
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.model != 'false' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: 22
+      - run: model/drive-view/check
+
   lint-changed:
     name: Lint (changed files)
     runs-on: ubuntu-latest
