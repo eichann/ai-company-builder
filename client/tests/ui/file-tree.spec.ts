@@ -146,18 +146,60 @@ test('dragging a file onto a folder moves it there; onto a private folder it ask
   ])
 })
 
-test('files dropped from Finder move in under a free name; other types and files over 20 MB are refused with the reason', async ({ page }) => {
-  await open(page)
-  const data = await page.evaluateHandle(() => {
+/** A drop from Finder onto `target`: these files, as Chromium hands them over (no internal drag data). */
+async function dropFromFinder(page: Page, target: Locator, files: { name: string; size?: number }[]) {
+  const data = await page.evaluateHandle(list => {
     const dt = new DataTransfer()
-    dt.items.add(new File(['x'], '10月.md'))
-    dt.items.add(new File(['x'], 'setup.exe'))
-    dt.items.add(new File([new Uint8Array(21 * 1024 * 1024)], '大きい.pdf'))
+    for (const f of list) dt.items.add(new File([new Uint8Array(f.size ?? 1)], f.name))
     return dt
-  })
-  await row(page, '議事録').dispatchEvent('drop', { dataTransfer: data })
-  await expect(page.getByText(/setup\.exe: 非対応の形式\s+大きい\.pdf: 20MBを超えています/)).toBeVisible()
-  expect(await calls(page)).toEqual([['moveFromExternal', '/Users/demo/Downloads/10月.md', `${DEPT}/議事録/10月 (1).md`]])
+  }, files)
+  await target.dispatchEvent('dragover', { dataTransfer: data })
+  await target.dispatchEvent('drop', { dataTransfer: data })
+}
+
+test('files dropped from Finder move in under a free name, HTML too; other types and files over 20 MB are refused with the reason', async ({ page }) => {
+  await open(page)
+  await dropFromFinder(page, row(page, '議事録'), [
+    { name: '10月.md' }, { name: '資料.html' }, { name: 'setup.exe' }, { name: '大きい.pdf', size: 21 * 1024 * 1024 },
+  ])
+  await expect(page.getByRole('alert')).toHaveText(/setup\.exe: 非対応の形式\s+大きい\.pdf: 20MBを超えています/)
+  expect(await calls(page)).toEqual([
+    ['moveFromExternal', '/Users/demo/Downloads/10月.md', `${DEPT}/議事録/10月 (1).md`],
+    ['moveFromExternal', '/Users/demo/Downloads/資料.html', `${DEPT}/議事録/資料.html`],
+  ])
+})
+
+test('a drop on a file goes into that file\'s folder: from Finder, and a row dragged there (a private folder still asks first)', async ({ page }) => {
+  await open(page)
+  await dropFromFinder(page, row(page, '見積.xlsx'), [{ name: '案内.htm' }, { name: 'setup.exe' }])
+  await expect(page.getByRole('alert')).toHaveText('setup.exe: 非対応の形式')
+  expect(await calls(page)).toEqual([['moveFromExternal', '/Users/demo/Downloads/案内.htm', `${DEPT}/提案書/案内.htm`]])
+
+  // Onto a file in another folder: into that folder. Onto a file beside it: nothing moves.
+  await drag(page, row(page, 'README.md'), row(page, '10月.md'))
+  await drag(page, row(page, /^2026春\.md/), row(page, '見積.xlsx'))
+  await expect.poll(() => calls(page)).toHaveLength(2)
+  expect((await calls(page))[1]).toEqual(['moveItem', `${DEPT}/README.md`, `${DEPT}/議事録/README.md`])
+
+  await drag(page, row(page, 'ロゴ.png'), row(page, '契約.md'))
+  await expect(page.getByRole('heading', { name: '非公開フォルダへ移動します' })).toBeVisible()
+  expect(await calls(page)).toHaveLength(2)
+  await page.getByRole('button', { name: '移動する' }).click()
+  await expect.poll(() => calls(page)).toEqual(expect.arrayContaining([['moveItem', `${DEPT}/ロゴ.png`, `${DEPT}/機密/ロゴ.png`]]))
+  expect(await calls(page)).toHaveLength(3)
+})
+
+test('a newer refusal stays its full time: the older one\'s timer does not take it away', async ({ page }) => {
+  await page.clock.install()
+  await open(page)
+  await dropFromFinder(page, row(page, '議事録'), [{ name: 'setup.exe' }])
+  await expect(page.getByRole('alert')).toHaveText('setup.exe: 非対応の形式')
+  await page.clock.runFor(4000)
+  await dropFromFinder(page, row(page, '議事録'), [{ name: 'tool.dmg' }])
+  await page.clock.runFor(2000)
+  await expect(page.getByRole('alert')).toHaveText('tool.dmg: 非対応の形式')
+  await page.clock.runFor(3500)
+  await expect(page.getByRole('alert')).toHaveCount(0)
 })
 
 test('a new file or a rename onto a name that is taken is refused in the dialog; the file there is untouched', async ({ page }) => {

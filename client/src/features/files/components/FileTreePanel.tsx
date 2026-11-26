@@ -77,9 +77,12 @@ export function FileTreePanel({
 
   const [notice, setNotice] = useState<string | null>(null)
   const [dropWarning, setDropWarning] = useState<string | null>(null)
+  const warnTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const warn = useCallback((message: string, ms: number) => {
     setDropWarning(message)
-    setTimeout(() => setDropWarning(null), ms)
+    // A newer warning keeps its full time: an older one's timer must not clear it.
+    if (warnTimer.current) clearTimeout(warnTimer.current)
+    warnTimer.current = setTimeout(() => setDropWarning(null), ms)
   }, [])
   const showNotice = useCallback((message: string) => {
     setNotice(message)
@@ -333,7 +336,7 @@ export function FileTreePanel({
       )}
 
       {dropWarning && (
-        <div className="absolute bottom-2 left-2 right-2 px-3 py-2 rounded-control bg-danger-bg border border-danger-border text-xs text-danger-text whitespace-pre-wrap">
+        <div role="alert" className="absolute bottom-2 left-2 right-2 px-3 py-2 rounded-control bg-danger-bg border border-danger-border text-xs text-danger-text whitespace-pre-wrap">
           {dropWarning}
         </div>
       )}

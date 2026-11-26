@@ -104,7 +104,8 @@ export const TreeRow = memo(function TreeRow({
       onDragStart={e => actions.current.dragStart(entry, e)}
       onDragEnd={() => actions.current.dragEnd()}
       onDragOver={e => actions.current.dragOver(entry, e)}
-      onDragLeave={e => { if (isDragOver) actions.current.dragLeave(entry, e) }}
+      // Always: over a file row, the lit row is its folder's, not this one.
+      onDragLeave={e => actions.current.dragLeave(entry, e)}
       onDrop={e => actions.current.drop(entry, e)}
       onClick={e => actions.current.click(entry, e)}
       onDoubleClick={() => actions.current.doubleClick(entry)}

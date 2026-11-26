@@ -89,7 +89,15 @@ freeze the window on a 15k-file company. Measurements and the dropped chokidar d
   `useTreeSelection.ts` (⌘ / shift selection, the right-click menu's snapshot),
   `useFileOperations.ts` (new / rename / delete / copy path, their dialogs, the reserved-name and
   private-root refusals), `useTreeDragDrop.ts` (moves, the private-edge confirm, Finder drops:
-  allowed types, 20 MB, a free name), `contextMenuItems.tsx`, `components/FileTreeHeader.tsx`. The menu's
+  allowed types, 20 MB, a free name), `contextMenuItems.tsx`, `components/FileTreeHeader.tsx`.
+  **Drops**: a drop on a folder row goes into that folder, on a file row into that file's folder
+  (owner, 2026-11-26: an `.html` dropped on a file did nothing), on empty space into the
+  department; a row dropped where it already is moves nothing (it used to become 「name (1)」).
+  Every move still goes through `requestMove` (private-root refusal, private-edge confirm, reserved
+  names) and main's not-downloaded refusal. Finder's allowed types are the one list
+  `ALLOWED_DROP_EXTENSIONS` (main's `fs:moveFromExternal` checks only the destination), HTML
+  included since the sandboxed viewer (`doc-frame.md`); a refused file is named in the panel's
+  warning (`role="alert"`, 「<name>: 非対応の形式」), and a newer warning keeps its full time. The menu's
   「やることにつなぐ…」 is the core's (owner decision 2026-11-01: the task list is the core's, so
   linking is too): it shows only when the panel gets `onLinkToTask` — `AppShell` passes it while
   the task list shows for the department on screen — and opens the task feature's chooser
@@ -141,7 +149,8 @@ freeze the window on a 15k-file company. Measurements and the dropped chokidar d
 - UI test: `client/tests/ui/file-tree.spec.ts` on the preview `client/tests/file-tree-ui.html`
   (selection and ⌘/shift ranges, new file / rename / delete and their dialogs, the reserved-name
   and private-root refusals, internal moves and the private-edge confirm, Finder drops: free
-  name, type and 20 MB refusals, hidden sidecars and the review mark).
+  name, HTML accepted, type and 20 MB refusals, a drop on a file row landing in its folder, the
+  warning's timer; hidden sidecars and the review mark).
 
 ## Previews never show a stale file
 
