@@ -420,7 +420,7 @@ document's scripts can never read its review.
   read in one linear walk (end tags found case-insensitively from where they start, never by
   lower-casing the file: that was quadratic, and 「İ」 lower-cases to two characters) and kept for that
   text (`wordsOf`), shared by every comment, the finder and 「位置不明」: a 3.5 MB page with 50 comments
-  in well under a second (`htmlReview.test.ts`, budget 1 s; 576 KB took 4.6 s before).
+  in about 0.3 s on a developer Mac (`htmlReview.test.ts`, budget 3 s: CI runners are slower; 576 KB took 4.6 s before).
 - **On screen** (`HtmlDocumentPane`): the review's banners above the toolbar, ［レビュー履歴］ and
   ［レビューする］ in it, the side panel beside the document, the comment box **over the side panel,
   never over the document** (the view is drawn above the page), 「変更を確認」 in place of the document
