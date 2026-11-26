@@ -233,8 +233,14 @@ export function externalRepositoryInstruction(companyRootPath?: string): string 
  * (chat-write-guard.md "Skill files"), whose refusal says why.
  */
 export function skillFileInstruction(): string {
-  return '【Skill のファイル】Skill のファイル（.claude/skills/ や .agents/skills/ の中）を作る・直すときは、コマンド（cp・mv・python・sed・リダイレクトなど）ではなく、ファイルを書く道具（Claude Code なら Edit / Write）を使ってください。コマンドからは、守りの囲いで .claude/ の中に書き込めないことがあります。ファイルを書く道具で書けるかどうかはアプリが判断し、断るときは理由を表示します。コマンドで書けなかっただけで「権限がない」とユーザーに伝えないでください。'
+  return '【Skill のファイル】Skill のファイル（.claude/skills/ や .agents/skills/ の中）はファイルを書く道具（Edit / Write）で書いてください。コマンドからは守りの囲いで .claude/ の中に書けないことがありますが、それは権限の話ではありません。書けるかどうかはアプリが判断し、断るときは理由を表示します。コマンドで書けなかっただけで「権限がない」とユーザーに伝えないでください。'
 }
+
+/**
+ * Who reads the reply and where (chat-and-agents.md "What ACB tells the AI"): Claude Code's preset says its text is
+ * shown in a terminal to a developer; ACB's members read it in the app and are not engineers.
+ */
+export const MEMBER_SCREEN_INSTRUCTION = '【返事の読み手】あなたの返事はターミナルではなく、AI Company Builder（ACB）のチャット画面に表示されます。読むのはエンジニアではない会社の社員です。Git・コマンド・プログラムの言葉を使わず、やさしい日本語で書いてください。'
 
 /**
  * The host for one consultation's turn (records.md "Which Skill"): every tool
@@ -429,25 +435,29 @@ export async function startChatServer(config: ChatServerConfig) {
     const turnStop = companyId ? await Promise.resolve(config.prepareAgentStop?.(companyId)).catch(() => undefined) : undefined
     if (turnStop?.refused) return c.json({ error: turnStop.refused, code: 'AI_STOPPED' }, 403)
 
-    // Native agents own their system prompts; ACB supplies only workspace context.
+    // Native agents own their system prompts; ACB adds what it must say. Two parts (chat-and-agents.md "What ACB tells the AI"):
+    // `finalSystemPrompt` — what holds for the whole conversation (the agent's own instructions slot: Claude Code's
+    // preset append, Codex's developer instructions) — and `turnPrompt` — what this turn says (the department on screen,
+    // the topic, attachments, a one-turn tool), which rides with the turn so a change never waits for a new conversation.
     // API key mode: build full system prompt as before.
     let finalSystemPrompt: string | undefined
+    let turnPrompt = ''
     if (connection.ownsConversation) {
       if (workingDirectory) {
-        finalSystemPrompt = `あなたの作業ディレクトリは「${workingDirectory}」です。\nファイル操作はこのディレクトリ内で行ってください。\n日本語で回答してください。`
+        finalSystemPrompt = `${MEMBER_SCREEN_INSTRUCTION}\n\nあなたの作業ディレクトリは「${workingDirectory}」です。\nファイル操作はこのディレクトリ内で行ってください。\n日本語で回答してください。`
         finalSystemPrompt += `\n\n【重要】スクリーンショット、テスト結果、一時ファイル、設定ファイル（.playwright/, test-results/ 等）など、ユーザーのコンテンツではない生成物は必ず「.workspace/」ディレクトリ内に出力してください。.workspace/ が存在しない場合は作成してください。作業ディレクトリのルートを汚さないでください。`
         finalSystemPrompt += `\n\n${externalRepositoryInstruction(companyRootPath)}`
         finalSystemPrompt += `\n\n${skillFileInstruction()}`
         if (activeDepartment) {
-          finalSystemPrompt += `\n\n現在ユーザーが閲覧中の部署: 「${activeDepartment.name}」（フォルダ: ${activeDepartment.folder}/）\nユーザーの質問やファイル操作は、特に指定がなければこの部署のフォルダ内が対象です。`
+          turnPrompt += `\n\n現在ユーザーが閲覧中の部署: 「${activeDepartment.name}」（フォルダ: ${activeDepartment.folder}/）\nユーザーの質問やファイル操作は、特に指定がなければこの部署のフォルダ内が対象です。`
         } else {
-          finalSystemPrompt += `\n\n現在ユーザーは全社共通の画面を閲覧しています。`
+          turnPrompt += `\n\n現在ユーザーは全社共通の画面を閲覧しています。`
         }
       }
       if (referenceFiles && referenceFiles.length > 0) {
         const fileList = referenceFiles.map(p => `- ${p}`).join('\n')
         const refInstruction = `\n\n重要: ユーザーが以下のファイルを参照として添付しました。回答する前に、必ずこれらのファイルを読み込み、内容を踏まえて回答してください:\n${fileList}`
-        finalSystemPrompt = (finalSystemPrompt || '') + refInstruction
+        turnPrompt += refInstruction
       }
     } else {
       finalSystemPrompt = (systemPrompt || config.buildSystemPrompt(workingDirectory)) + SECURITY_POLICY
@@ -553,7 +563,7 @@ export async function startChatServer(config: ChatServerConfig) {
     // nothing of the company reaches the other vendor from this turn.
     const secondOpinionAllowed = config.secondOpinionAllowed
     const secondOpinionChoice = await secondOpinionTurn(namedTargets, companyId && secondOpinionAllowed ? () => secondOpinionAllowed(companyId) : undefined)
-    if (secondOpinionChoice.forbidden) finalSystemPrompt = (finalSystemPrompt || '') + secondOpinionForbiddenInstructions(namedTargets)
+    if (secondOpinionChoice.forbidden) turnPrompt += secondOpinionForbiddenInstructions(namedTargets)
     const secondOpinion = runSecondOpinion && appSessionId && companyRootPath
       ? createSecondOpinionTools({
         asker: authMode, targets: secondOpinionChoice.targets, conversationId: appSessionId, messages, root: companyRootPath,
@@ -566,7 +576,7 @@ export async function startChatServer(config: ChatServerConfig) {
         onAnswer: record => injector.push({ type: SECOND_OPINION_PART_TYPE, id: `second-opinion-${record.id}`, data: record }),
       })
       : undefined
-    if (secondOpinion) finalSystemPrompt = (finalSystemPrompt || '') + secondOpinionInstructions(secondOpinion.tools.map(t => t.target))
+    if (secondOpinion) turnPrompt += secondOpinionInstructions(secondOpinion.tools.map(t => t.target))
     // The company map (records/tools.ts): look-ups for every agent that has them, actions only where the registry says.
     // A connector's update (corporate-sales__update_deal) becomes a card of the reply, stored with it (plugin-operations.ts).
     // A person step's consultation is bound before its first tools exist; never run it unbound.
@@ -636,7 +646,7 @@ export async function startChatServer(config: ChatServerConfig) {
     } : allRecords
     if (records) finalSystemPrompt = (finalSystemPrompt || '') + records.instructions
     const repeatAsk = repeatAskForTurn(config.jobRepeatAsk, { unattended: !!aiTurnStep, sightings: !!sightingTurn, records, companyId, companyRoot: companyRootPath, workingDirectory }, repeatSkill)
-    if (repeatAsk) finalSystemPrompt = (finalSystemPrompt || '') + repeatAsk
+    if (repeatAsk) turnPrompt += repeatAsk
     // A consultation about a task (consultation-task.ts): new files are linked to it; a task only the
     // member sees keeps them in the member's 今日のフォルダ. Unattended steps are left as they are.
     const topicOf = () => {
@@ -644,11 +654,11 @@ export async function startChatServer(config: ChatServerConfig) {
     }
     const topicAtStart = records && !aiTurnStep ? topicOf() : null
     const topicTask = topicAtStart ? await records!.readTask(topicAtStart) : null
-    if (topicTask) finalSystemPrompt = (finalSystemPrompt || '') + taskTopicInstructions(topicTask, isTodayFolderPath(requestedTodayFolder) ? requestedTodayFolder : null)
+    if (topicTask) turnPrompt += taskTopicInstructions(topicTask, isTodayFolderPath(requestedTodayFolder) ? requestedTodayFolder : null)
     else if (records && !aiTurnStep) {
       // A topic that is not a やること (案件, 会議…): one line naming it, never its contents (record-drop.ts).
       const topicId = (() => { try { return companyId && appSessionId ? config.consultationTopic?.(companyId, appSessionId)?.topicRecordId : undefined } catch { return undefined } })()
-      if (topicId && TOPIC_RECORD_RE.test(topicId)) finalSystemPrompt = (finalSystemPrompt || '') + recordTopicInstructions(topicId)
+      if (topicId && TOPIC_RECORD_RE.test(topicId)) turnPrompt += recordTopicInstructions(topicId)
     }
     // Records dropped on the input (record-drop.ts): read now, once, with the member's token; the summary goes
     // with this message only (it stays in the agent's own session; later turns are told to use records_get).
@@ -728,7 +738,11 @@ export async function startChatServer(config: ChatServerConfig) {
     const turnEnv = !aiTurnStep && companyId && appSessionId
       ? await Promise.resolve(config.getBrokerEnv?.({ agent: authMode, companyId, conversationId: appSessionId, department: activeDepartment?.folder ?? null })).catch(() => undefined)
       : undefined
-    const modelRequest = { workingDirectory, appSessionId, modelId, effort, resumeId: existingCliSessionId, references, companyFiles: companyFiles?.tools, review, appCommands, records, webResearch: webResearch?.tools, browserRequest, browserInspect, secondOpinion, writeGuard, privateReads, askUser, onEvent, steering: turn?.steering, onPromptSuggestion: turn?.onPromptSuggestion, toolEventContext, sandbox, turnEnv, toolStop: turnStop?.toolStopped, ...(shelf?.rootMarker ? { projectRootMarker: shelf.rootMarker } : {}), ...(aiTurnStep ? { unattended: { builtinTools: aiTurnStep.builtinTools, ...(stepArea && typeof stepArea === 'object' && stepArea.readOutside ? { readDirs: [stepArea.readOutside] } : {}) } } : {}) }
+    // The conversation's standing instructions go to the agent's own instructions slot; an unattended step (no member,
+    // settings off) and the API key keep everything in the system message as before.
+    const standingSlot = connection.ownsConversation && !aiTurnStep
+    const turnSystem = standingSlot ? turnPrompt.trim() : `${finalSystemPrompt || ''}${turnPrompt}`
+    const modelRequest = { ...(standingSlot && finalSystemPrompt ? { standingInstructions: finalSystemPrompt } : {}), workingDirectory, appSessionId, modelId, effort, resumeId: existingCliSessionId, references, companyFiles: companyFiles?.tools, review, appCommands, records, webResearch: webResearch?.tools, browserRequest, browserInspect, secondOpinion, writeGuard, privateReads, askUser, onEvent, steering: turn?.steering, onPromptSuggestion: turn?.onPromptSuggestion, toolEventContext, sandbox, turnEnv, toolStop: turnStop?.toolStopped, ...(shelf?.rootMarker ? { projectRootMarker: shelf.rootMarker } : {}), ...(aiTurnStep ? { unattended: { builtinTools: aiTurnStep.builtinTools, ...(stepArea && typeof stepArea === 'object' && stepArea.readOutside ? { readDirs: [stepArea.readOutside] } : {}) } } : {}) }
     let usedMemo = false
     const recoveryEvent = (status: HandoffRecovery['status']) => {
       if (companyId && appSessionId) config.onRecovery?.(companyId, appSessionId, { status, usedMemo, at: new Date().toISOString() })
@@ -855,7 +869,7 @@ export async function startChatServer(config: ChatServerConfig) {
       abortSignal: running.signal,
       maxRetries: 0,
       model,
-      ...(finalSystemPrompt ? { system: finalSystemPrompt } : {}),
+      ...(turnSystem ? { system: turnSystem } : {}),
       messages: finalMessages,
       ...(tools ? { tools, stopWhen: stepCountIs(10) } : {}),
       onStepFinish: ({ finishReason, usage, toolCalls, providerMetadata }) => {

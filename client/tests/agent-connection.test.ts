@@ -108,3 +108,20 @@ test('dangerous gate denies without a handler and honors explicit approval', asy
     assert.equal(result.hookSpecificOutput.permissionDecision, approved ? 'allow' : 'deny')
   }
 })
+
+// Measured 2026-11-26: without `systemPrompt` the SDK sends an empty system prompt (136 characters), so the chat ran
+// without Claude Code's own instructions and ACB's rules rode in the member's message (chat-and-agents.md
+// "What ACB tells the AI").
+test('a consultation runs on Claude Code\'s own system prompt with ACB\'s standing instructions after it, and no auto memory', () => {
+  const { connection, read } = capture()
+  connection.createChatModel({ workingDirectory: '/project', standingInstructions: '【返事の読み手】ACB の決まり' })
+  const chat = read().options
+  assert.deepEqual(chat.systemPrompt, { type: 'preset', preset: 'claude_code', append: '【返事の読み手】ACB の決まり', snapshot: false })
+  assert.equal(chat.env.CLAUDE_CODE_DISABLE_AUTO_MEMORY, '1')
+})
+
+test('an unattended step keeps its bare prompt: no preset, even when standing instructions are passed', () => {
+  const { connection, read } = capture()
+  connection.createChatModel({ workingDirectory: '/project', standingInstructions: 'x', unattended: { builtinTools: [] } })
+  assert.equal(read().options.systemPrompt, undefined)
+})

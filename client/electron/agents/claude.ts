@@ -161,7 +161,7 @@ export function createClaudeConnection(config: ClaudeConnectionConfig, createMod
       const text = value?.data?.stderr || value?.message || ''
       return text.split('\n').some(line => line.trim() === `No conversation found with session ID: ${sessionId}`)
     },
-    createChatModel({ workingDirectory, appSessionId, modelId, effort, resumeId: existingCliSessionId, references: givenReferences, companyFiles: givenCompanyFiles, review: givenReview, appCommands: givenAppCommands, records, webResearch: givenWebResearch, browserRequest: givenBrowserRequest, browserInspect: givenBrowserInspect, secondOpinion: givenSecondOpinion, writeGuard, privateReads, askUser: givenAskUser, onEvent, steering: givenSteering, onPromptSuggestion: givenSuggestion, toolEventContext, sandbox, turnEnv, toolStop, unattended }) {
+    createChatModel({ workingDirectory, appSessionId, modelId, effort, resumeId: existingCliSessionId, references: givenReferences, companyFiles: givenCompanyFiles, review: givenReview, appCommands: givenAppCommands, records, webResearch: givenWebResearch, browserRequest: givenBrowserRequest, browserInspect: givenBrowserInspect, secondOpinion: givenSecondOpinion, writeGuard, privateReads, askUser: givenAskUser, onEvent, steering: givenSteering, onPromptSuggestion: givenSuggestion, toolEventContext, sandbox, turnEnv, toolStop, unattended, standingInstructions }) {
       // An unattended step (ai-turns.md) gets only its record tools: nothing else the app adds, nobody to ask.
       const references = unattended ? undefined : givenReferences
       const companyFiles = unattended ? undefined : givenCompanyFiles
@@ -502,7 +502,16 @@ export function createClaudeConnection(config: ClaudeConnectionConfig, createMod
             ...withoutBrokerEnv(config.getShellEnv()),
             ...turnEnv,
             ...(onPromptSuggestion ? { CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION: 'true' } : {}),
+            // No auto memory: the CLI's own notes would sit outside the company folder, where a private folder's
+            // talk could stay behind (chat-and-agents.md "What ACB tells the AI").
+            CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1',
           },
+          // Claude Code's own system prompt, with the conversation's standing instructions after it
+          // (chat-and-agents.md "What ACB tells the AI"). Without `systemPrompt` the SDK sends an empty one
+          // (measured 2026-11-26: 136 characters). `snapshot: false`: rendered fresh every request, so a company's
+          // change (a feature, the sandbox, a delivered instruction) reaches a conversation already going.
+          // An unattended step stays without it (no member settings, its own fixed first message: ai-turns.md).
+          ...(standingInstructions && !unattended ? { systemPrompt: { type: 'preset' as const, preset: 'claude_code' as const, append: standingInstructions, snapshot: false } } : {}),
           // Unattended: none of the member's own settings, MCP servers, hooks or plugins (like the hand-off agent).
           settingSources: unattended ? [] : ['user', 'project'],
           ...(unattended ? { strictMcpConfig: true, tools: [...unattended.builtinTools] } : {}),

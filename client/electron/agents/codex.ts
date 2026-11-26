@@ -352,7 +352,8 @@ function createModel(config: Config, request: Request, title = false, createRpc:
             if (!selected) throw new Error('選択したCodexモデルが利用できません。モデルを選び直してください。')
             const effort = title ? (selected.efforts.includes('low') ? 'low' : selected.defaultEffort) : request.effort || selected.defaultEffort
             if (!selected.efforts.includes(effort)) throw new Error('このCodexモデルは選択したeffortに対応していません。')
-            const system = options.prompt.filter(m => m.role === 'system').map(m => m.content).join('\n') + (askMcp ? CODEX_ASK_USER_INSTRUCTIONS : '')
+            // The conversation's standing instructions first, then this turn's (chat-server.ts): developer instructions take both, every turn.
+            const system = [request.standingInstructions, ...options.prompt.filter(m => m.role === 'system').map(m => m.content)].filter(Boolean).join('\n') + (askMcp ? CODEX_ASK_USER_INSTRUCTIONS : '')
             // A title is text only: every MCP server the member configured is disabled one by one, as the one-shots do
             // (an empty table would merge with the user's configuration; agent-browser.md "Keeping a login on disk").
             const titleOff = title
