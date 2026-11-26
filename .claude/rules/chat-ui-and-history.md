@@ -41,11 +41,17 @@ is in `chat-and-agents.md`. Full text: `docs/architecture/chat-and-agents.md`, `
 
 `src/features/chat/components/`: `ChatPanel.tsx` (tabs, sidebar, settings overlay) → `ChatConversation.tsx`
 (one tab, `ChatPanelChat`, memo: hooks + composition) → `ChatHeader.tsx` (label, usage meter,
-per-agent model pickers, buttons; owns its width observer: under 420 px — a pane at its narrowest —
-only the meter, the model picker, ＋, the list and settings stay, and nothing is drawn outside the
-pane: `tests/ui/chat-narrow.spec.ts`; the header clips its row, so a popover from it — the usage
-meter's details — goes through `src/shared/ui/HoverTooltip.tsx` (drawn on `document.body`,
-fixed, kept in the window): `tests/ui/chat-usage-popover.spec.ts`), `ChatMessageList.tsx`
+per-agent model pickers, buttons; owns its width observer, `hooks/useHeaderFit.ts`, which reads the
+header's **border box** — set by the pane, never by what the header shows (measuring the content box
+made the narrow layout's padding undo itself every frame, owner FB 2026-11-26). As the pane narrows
+the header gives way in a fixed order: the meter to its fullest window, then to its bar alone (the %
+in its name and popover), then the pickers capped narrower, then the Markdown toggle and
+「別ウィンドウで開く」 into 「…」, then the effort picker into 「…」 (280 px, the pane's minimum). ＋, the
+list, settings and the model picker always stay; controls never overlap and nothing is drawn outside
+the pane: `tests/ui/chat-header-fit.spec.ts` (280–720 px, a resize settles, a running turn),
+`tests/ui/chat-narrow.spec.ts`; the header clips its row, so a popover from it — the usage
+meter's details, 「…」's menu (`ContextMenu`, fixed) — is drawn outside it (`src/shared/ui/HoverTooltip.tsx`:
+on `document.body`, fixed, kept in the window): `tests/ui/chat-usage-popover.spec.ts`), `ChatMessageList.tsx`
 (`MessageList`, `MessageItem`, `UserMessageBubble`), `ChatComposer.tsx` (`ChatInput`: voice input,
 dropped files and images in `ComposerAttachments.tsx`, and the text input
 `CodeMirrorChatInput.tsx` — its editor setup in `chatInputEditor.ts` — or the debug

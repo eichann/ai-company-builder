@@ -7,7 +7,8 @@ import { agentShortLabel } from '../../../../shared/agents/registry'
 import { HoverTooltip } from '../../../shared/ui/HoverTooltip'
 
 // The chat header's plan usage meter (shared/rate-limits.ts has the mapping).
-// Full: every window as label + bar + %; compact: the fullest window only.
+// full: every window as label + bar + %; compact: the fullest window only (bar + %); bar: that
+// bar alone (a narrow header; the % stays in the button's name and in the popover).
 // Details (reset times, warnings) in a popover on hover / keyboard focus, drawn outside the
 // header (HoverTooltip) because the header clips its row to the pane.
 
@@ -49,7 +50,8 @@ function useMinuteClock() {
   return now
 }
 
-export function RateLimitMeter({ provider, compact = false }: { provider: RateLimitProvider; compact?: boolean }) {
+export function RateLimitMeter({ provider, size = 'full' }: { provider: RateLimitProvider; size?: 'full' | 'compact' | 'bar' }) {
+  const compact = size !== 'full'
   const snapshot = useRateLimits(provider)
   const now = useMinuteClock()
   const view = meterView(snapshot, provider, now)
@@ -68,7 +70,7 @@ export function RateLimitMeter({ provider, compact = false }: { provider: RateLi
           type="button"
           aria-label={summary}
           aria-describedby={describedBy}
-          className={`h-6 inline-flex items-center gap-2 px-2 rounded-md border text-[10px] tabular-nums transition-colors hover:border-selected-border focus:outline-none focus-visible:ring-1 focus-visible:ring-focus-ring ${FRAME[view.level]}`}
+          className={`h-6 inline-flex items-center gap-2 ${size === 'bar' ? 'px-1.5' : 'px-2'} rounded-md border text-[10px] tabular-nums transition-colors hover:border-selected-border focus:outline-none focus-visible:ring-1 focus-visible:ring-focus-ring ${FRAME[view.level]}`}
         >
           {shown.length === 0 ? (
             <span className={`inline-flex items-center gap-1 ${TEXT.unknown}`}>
@@ -79,7 +81,7 @@ export function RateLimitMeter({ provider, compact = false }: { provider: RateLi
             <span key={w.id} className="inline-flex items-center gap-1">
               {!compact && <span className="text-gray-400 dark:text-zinc-500">{w.label}</span>}
               <Bar window={w} className={compact ? 'w-6' : 'w-8'} />
-              <span className={`font-medium ${TEXT[w.level]}`}>{percentText(w.percent)}</span>
+              {size !== 'bar' && <span className={`font-medium ${TEXT[w.level]}`}>{percentText(w.percent)}</span>}
             </span>
           ))}
         </button>
