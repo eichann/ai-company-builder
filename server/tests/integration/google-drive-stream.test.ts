@@ -534,6 +534,32 @@ describe('an answer ends by itself (review 2026-11-27)', () => {
     await expect(res.arrayBuffer()).rejects.toThrow()
   })
 
+  it('the metadata\'s body stalls after its headers: the answer\'s deadline (started with the slot) releases it, and Google\'s call is aborted', async () => {
+    process.env.ACB_DRIVE_VIEW_ANSWER_MS = '300'
+    google.stallNextFileGets(1)
+    const startedAt = Date.now()
+    const r = await json(await view('m-sato', VIDEO, 'bytes=0-99'))
+    expect(r.status).toBe(503)
+    expect(r.body.code).toBe('DRIVE_VIEW_UPSTREAM')
+    expect(Date.now() - startedAt).toBeLessThan(3000)
+    expect(services.googleDriveView.openStreams(CO, 'm-sato')).toBe(0)
+    expect(usage('m-sato')).toBe(0)
+    await until(() => google.mediaAnswers.at(-1)!.range === 'meta' && google.mediaAnswers.at(-1)!.state === 'aborted')
+  })
+
+  it('the viewer closes while the metadata is awaited: the slot is released at once and Google\'s call is aborted', async () => {
+    google.stallNextFileGets(1)
+    const controller = new AbortController()
+    const pending = view('m-sato', VIDEO, 'bytes=0-99', controller.signal)
+    await until(() => google.mediaAnswers.at(-1)?.range === 'meta' && google.mediaAnswers.at(-1)?.state === 'streaming')
+    expect(services.googleDriveView.openStreams(CO, 'm-sato')).toBe(1)
+    controller.abort()
+    await until(() => services.googleDriveView.openStreams(CO, 'm-sato') === 0)
+    await until(() => google.mediaAnswers.at(-1)!.state === 'aborted')
+    await pending.catch(() => null)
+    expect(usage('m-sato')).toBe(0)
+  })
+
   it('Google ending before the promised length (no Content-Length) or losing the connection: the answer errors, never a clean end', async () => {
     for (const fault of ['too-short', 'broken'] as const) {
       google.paceMedia(0, 10)

@@ -333,6 +333,8 @@ export interface FakeGoogle {
    * Content-Length), `broken` (half the range, then the connection fails, with the Content-Length promised).
    */
   misanswerNextMedia(fault: FakeMediaFault): void
+  /** The next `count` metadata answers of a binary Drive file (`files.get` without `alt=media`) send their headers and then stall. */
+  stallNextFileGets(count?: number): void
   /** Every media answer with a Range or a pace, in order: how it ended and how many bytes went. */
   mediaAnswers: FakeDriveMediaAnswer[]
   /** Someone deletes this Drive file for good (every call about it answers 404). */
@@ -1019,6 +1021,7 @@ export function createFakeGoogle(options: FakeGoogleOptions = {}): FakeGoogle {
   // ---- a file's bytes (`alt=media`), with Range, paced, and every answer's end reported (streaming a picked video) ----
   const mediaPace = { ms: 0, chunk: 64 * 1024 }
   let mediaFault: FakeMediaFault | null = null
+  let metaStalls = 0
   const mediaLog: FakeDriveMediaAnswer[] = []
   /**
    * Drive's media answer as real Drive gives it for a binary file: no Range → 200 with every byte; one `bytes=a-b` /
@@ -1391,6 +1394,19 @@ export function createFakeGoogle(options: FakeGoogleOptions = {}): FakeGoogle {
         const range = c.req.header('range')
         if (range === undefined && mediaPace.ms === 0) return c.body(new Uint8Array(f.content), 200, { 'content-type': f.mimeType })
         return mediaAnswer(c.req.raw.signal, f.id, f.content, f.mimeType, range ?? null)
+      }
+      if (metaStalls > 0) {
+        // `stallNextFileGets`: the headers go, the body starts and never ends (reported in `mediaAnswers` as range `meta`).
+        metaStalls--
+        const entry: FakeDriveMediaAnswer = { id: f.id, range: 'meta', status: 200, bytes: 1, state: 'streaming' }
+        mediaLog.push(entry)
+        const signal = c.req.raw.signal
+        signal.addEventListener('abort', () => { if (entry.state === 'streaming') entry.state = 'aborted' }, { once: true })
+        const body = new ReadableStream<Uint8Array>({
+          start(controller) { controller.enqueue(new TextEncoder().encode('{')) },
+          cancel() { if (entry.state === 'streaming') entry.state = 'aborted' },
+        })
+        return new Response(body, { status: 200, headers: { 'content-type': 'application/json; charset=UTF-8' } })
       }
       if (fileGetFailures > 0 && f.mimeType === DOC_MIME) {
         fileGetFailures--
@@ -2018,6 +2034,7 @@ export function createFakeGoogle(options: FakeGoogleOptions = {}): FakeGoogle {
     },
     paceMedia(ms, chunk = 64 * 1024) { mediaPace.ms = ms; mediaPace.chunk = chunk },
     misanswerNextMedia(fault) { mediaFault = fault },
+    stallNextFileGets(count = 1) { metaStalls = count },
     mediaAnswers: mediaLog,
     deleteDriveFile(id) {
       driveFiles.delete(id)

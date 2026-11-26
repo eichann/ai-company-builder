@@ -111,6 +111,11 @@ export interface GoogleRequest {
    * (google-drive.md), so a stop or a re-claim during the token's refresh still stops the upload.
    */
   beforeSend?: () => boolean
+  /**
+   * The caller's end (optional; absent = as before): aborting it aborts the call — its headers and its body — and no retry
+   * follows (`not-sent` `aborted`). The streaming route's metadata read uses it, so a body that stalls never holds a slot.
+   */
+  signal?: AbortSignal
 }
 
 export type GoogleResult =
@@ -629,6 +634,7 @@ export function createGoogleClient(deps: GoogleClientDeps) {
       let retriedAfter401 = false
       for (let attempt = 0; ; attempt++) {
         // Every switch, before every attempt (a stop during a wait applies to the retry too).
+        if (req.signal?.aborted) return { ok: false, kind: 'not-sent', reason: 'aborted' }
         const off = await switchesOff(companyId, userId)
         if (off) return notSent(off)
         const connectors = deps.companyData.forCompany(companyId).connectors
@@ -647,7 +653,7 @@ export function createGoogleClient(deps: GoogleClientDeps) {
         const sent = await deps.upstream.send({
           host, method: req.method, path, headers,
           body: body ? (async function* () { yield body })() : null,
-          allowPrivateHosts: [], signal: new AbortController().signal, headersTimeoutMs: HEADERS_TIMEOUT_MS,
+          allowPrivateHosts: [], signal: req.signal ?? new AbortController().signal, headersTimeoutMs: HEADERS_TIMEOUT_MS,
         })
         connectors.touchGrant('google', userId, deps.clock.now())
         let failure: GoogleResult
@@ -661,6 +667,7 @@ export function createGoogleClient(deps: GoogleClientDeps) {
           const { status } = sent.response
           const bytes = await readBody(sent.response.body).catch(() => null)
           if (!req.recordedByCaller) deps.record(companyId, userId, { operation: req.operation, api: req.api, host, status, ok: status >= 200 && status < 300 })
+          if (!bytes && req.signal?.aborted) return { ok: false, kind: isRead ? 'not-sent' : 'unknown', reason: 'aborted', status }
           if (!bytes) return { ok: false, kind: isRead ? 'server-error' : 'unknown', reason: 'answer-too-large', status }
           const json = parseJson(bytes)
           if (status >= 200 && status < 300) {
@@ -691,7 +698,7 @@ export function createGoogleClient(deps: GoogleClientDeps) {
           // Writes are never retried here: the caller decides (re-reading, asking the person).
           if (!isRead) return failure
         }
-        if (attempt >= MAX_READ_RETRIES) return failure
+        if (attempt >= MAX_READ_RETRIES || req.signal?.aborted) return failure
         await deps.sleep(retryAfterMs ?? 1000 * 2 ** attempt)
       }
     },

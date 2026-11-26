@@ -116,7 +116,14 @@ interface Session {
    * Read once per session and grant (shared by answers asked at the same time); read again for another grant (a
    * re-consent, maybe another Google account) and after a refusal.
    */
-  meta: { grantId: string; value: Promise<Outcome<SessionMeta>> } | null
+  meta: {
+    grantId: string
+    value: Promise<Outcome<SessionMeta>>
+    /** Answers waiting for it now; when the last leaves before it came, `abort` ends the call to Google. */
+    waiters: number
+    settled: boolean
+    abort(): void
+  } | null
 }
 
 const MAX_SESSIONS = 10_000
@@ -191,13 +198,15 @@ export function createDriveViewService(deps: DriveViewDeps) {
     return refuse('unavailable', UPSTREAM, { code: 'DRIVE_VIEW_UPSTREAM' })
   }
 
-  async function readMeta(member: Member, fileId: string): Promise<Outcome<SessionMeta>> {
+  async function readMeta(member: Member, fileId: string, signal: AbortSignal): Promise<Outcome<SessionMeta>> {
     const r = await deps.google.request(member.companyId, member.userId, {
       api: 'drive', method: 'GET', path: `/drive/v3/files/${fileId}`,
       query: { fields: 'id,mimeType,size,trashed', supportsAllDrives: 'true' },
       scope: GOOGLE_SCOPE.driveFile, operation: 'drive.view.meta',
       // The session's one line is the record (this client would add one per call).
       recordedByCaller: true,
+      // Aborted when every answer waiting for it left, or at its own deadline (a body that stalls never holds a slot).
+      signal,
     })
     if (!r.ok) return googleRefusal(r)
     const j = (r.json && typeof r.json === 'object' ? r.json : {}) as Record<string, unknown>
@@ -256,13 +265,24 @@ export function createDriveViewService(deps: DriveViewDeps) {
       session.lastAtMs = nowMs
       session.inFlight++
 
-      // From here the slot is held: every way out ends it exactly once (`end`), also on an exception.
+      // From here the slot is held: every way out ends it exactly once (`end`), also on an exception. The answer's
+      // life starts now, not when Google's headers arrive (Codex re-review of #875): its deadline and the viewer leaving
+      // end it during the metadata's and the media call's awaits too, whatever Google does meanwhile.
       let ended = false
       let reserved = 0
       let delivered = 0
+      const life = new AbortController()
+      let controllerRef: ReadableStreamDefaultController<Uint8Array> | null = null
+      let abortMedia: (() => void) | null = null
+      let leaveMeta: (() => void) | null = null
       const end = (how: 'refused' | 'ok' | 'viewer' | 'failed') => {
         if (ended) return
         ended = true
+        clearTimeout(deadline)
+        signal.removeEventListener('abort', onViewerGone)
+        life.abort()
+        leaveMeta?.()
+        abortMedia?.()
         if (reserved - delivered > 0) deps.usage.add(member.companyId, member.userId, day, -(reserved - delivered), 0)
         reserved = delivered
         session.bytes += delivered
@@ -275,11 +295,51 @@ export function createDriveViewService(deps: DriveViewDeps) {
         if (n <= 0) open.delete(mk)
         else open.set(mk, n)
       }
+      /** The deadline or the viewer: the answer ends now; a stream already handed out errors (it must not look complete). */
+      const stop = (how: 'viewer' | 'failed') => {
+        if (ended) return
+        end(how)
+        if (how === 'failed') {
+          try { controllerRef?.error(new Error('the video answer ended early')) } catch { /* already closed */ }
+        }
+      }
+      const onViewerGone = () => stop('viewer')
+      const deadline = setTimeout(() => stop('failed'), limits.answerMs)
+      deadline.unref?.()
+      signal.addEventListener('abort', onViewerGone, { once: true })
+      if (signal.aborted) stop('viewer')
+      /** Settles when the answer ended (deadline, viewer): an await raced with it never outlives the answer. */
+      const lifeOver = new Promise<'ended'>(resolve => {
+        if (life.signal.aborted) resolve('ended')
+        else life.signal.addEventListener('abort', () => resolve('ended'), { once: true })
+      })
+      const gone = (): DriveViewAnswer => refused(refuse('unavailable', UPSTREAM, { code: 'DRIVE_VIEW_UPSTREAM' }))
       try {
-        // 5. Type and size, once per session and grant.
-        if (!session.meta || session.meta.grantId !== use.value.grantId) session.meta = { grantId: use.value.grantId, value: readMeta(member, id) }
+        // 5. Type and size, once per session and grant. Shared by the answers waiting for it; when the last one leaves
+        //    (deadline, viewer) before it came, the call to Google is aborted. It also has a deadline of its own.
+        if (!session.meta || session.meta.grantId !== use.value.grantId) {
+          const ctrl = new AbortController()
+          const metaDeadline = setTimeout(() => ctrl.abort(), limits.answerMs)
+          metaDeadline.unref?.()
+          const value = readMeta(member, id, ctrl.signal)
+          void value.finally(() => clearTimeout(metaDeadline))
+          session.meta = { grantId: use.value.grantId, value, waiters: 0, settled: false, abort: () => ctrl.abort() }
+          const made = session.meta
+          void value.then(() => { made.settled = true })
+        }
         const metaPromise = session.meta
-        const meta = await metaPromise.value
+        metaPromise.waiters++
+        leaveMeta = () => {
+          leaveMeta = null
+          metaPromise.waiters--
+          if (metaPromise.waiters <= 0 && !metaPromise.settled) {
+            metaPromise.abort()
+            if (session.meta === metaPromise) session.meta = null
+          }
+        }
+        const meta = await Promise.race([metaPromise.value, lifeOver])
+        leaveMeta?.()
+        if (meta === 'ended' || ended) return gone()
         if (!meta.ok) {
           if (session.meta === metaPromise) session.meta = null
           session.failed++
@@ -328,19 +388,25 @@ export function createDriveViewService(deps: DriveViewDeps) {
         deps.usage.add(member.companyId, member.userId, day, length, 1)
         reserved = length
 
-        // 7. The bytes from Google, under the grant step 2 saw.
-        const media = await deps.google.streamMedia(member.companyId, member.userId, { fileId: id, start, end: last, grantId: use.value.grantId, signal, operation: 'drive.view.media' })
+        // 7. The bytes from Google, under the grant step 2 saw. The answer's life aborts the call (the viewer leaving,
+        //    the deadline); the await is raced with it too (a token refresh that stalls must not hold the slot).
+        const call = deps.google.streamMedia(member.companyId, member.userId, { fileId: id, start, end: last, grantId: use.value.grantId, signal: life.signal, operation: 'drive.view.media' })
+        const media = await Promise.race([call, lifeOver])
+        if (media === 'ended' || ended) {
+          void call.then(m => { if (m.ok) m.abort() })
+          return gone()
+        }
         if (!media.ok) {
           session.lastStatus = media.status ?? null
           if (media.kind === 'refused') session.meta = null
           end(media.reason === 'aborted' ? 'viewer' : 'failed')
           return refused(googleRefusal(media))
         }
+        abortMedia = media.abort
         // Google must answer exactly what was asked (a 200 only when the whole file was asked).
         const wholeFile = start === 0 && last === size - 1
         const rangeOk = media.status === 206 ? media.contentRange === `bytes ${start}-${last}/${size}` : wholeFile
         if (!rangeOk || (media.contentLength !== null && media.contentLength !== length)) {
-          media.abort()
           session.meta = null
           session.lastStatus = media.status
           end('failed')
@@ -349,22 +415,7 @@ export function createDriveViewService(deps: DriveViewDeps) {
         session.lastStatus = status
 
         // The answer: exactly `length` bytes, passed on as they arrive. It ends once: the last byte, the viewer gone,
-        // Google failing or ending short, or its own deadline — which does not wait for the viewer to read.
-        let controllerRef: ReadableStreamDefaultController<Uint8Array> | null = null
-        const fail = (how: 'viewer' | 'failed') => {
-          if (ended) return
-          clearTimeout(deadline)
-          media.abort()
-          end(how)
-          if (how === 'failed') {
-            // An answer cut short must not look complete: the stream errors, so the connection is destroyed (the
-            // viewer sees fewer bytes than Content-Length, never a clean end).
-            try { controllerRef?.error(new Error('the video answer ended early')) } catch { /* already closed */ }
-          }
-        }
-        const deadline = setTimeout(() => fail('failed'), limits.answerMs)
-        deadline.unref?.()
-        signal.addEventListener('abort', () => fail('viewer'), { once: true })
+        // Google failing or ending short, or its deadline (started with the slot) — which does not wait for the viewer.
         const iterator = media.body[Symbol.asyncIterator]()
         const body = new ReadableStream<Uint8Array>({
           start(controller) { controllerRef = controller },
@@ -374,8 +425,8 @@ export function createDriveViewService(deps: DriveViewDeps) {
               if (ended) return
               if (next.done) {
                 // Google ended before the promised length (a chunked answer cut short): an error, never a clean end.
-                if (delivered < length) fail('failed')
-                else { clearTimeout(deadline); media.abort(); end('ok'); controller.close() }
+                if (delivered < length) stop('failed')
+                else { end('ok'); controller.close() }
                 return
               }
               const room = length - delivered
@@ -383,18 +434,16 @@ export function createDriveViewService(deps: DriveViewDeps) {
               delivered += part.byteLength
               controller.enqueue(part)
               if (delivered >= length) {
-                clearTimeout(deadline)
-                media.abort()
                 end('ok')
                 controller.close()
               }
             } catch {
-              fail('failed')
+              stop('failed')
             }
           },
           cancel() {
             // The viewer left (the connection closed): Google's call is aborted with it.
-            fail('viewer')
+            stop('viewer')
           },
         })
         return { kind: 'stream', status, headers: viewHeaders(contentType, length, status === 206 ? `bytes ${start}-${last}/${size}` : null), body }
