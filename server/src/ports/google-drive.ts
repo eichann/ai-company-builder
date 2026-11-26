@@ -143,6 +143,23 @@ export interface DriveFolderTrust {
 }
 
 /**
+ * A Drive video the member chose to play in ACB's own player (google-drive.md "Viewing a video"): kept apart from
+ * `DrivePickRow` — a separate table and separate methods, so nothing that lists or reads picks (the AI's status and
+ * `drive_read`, 「つなぐ」's list, linking) can see it. Keyed by company (the handle), member, the Google account the
+ * member's grant had when it was picked, and the file. `lastViewedAt`: the last play (null: not played yet).
+ */
+export interface DriveViewPickRow {
+  userId: string
+  accountEmail: string
+  fileId: string
+  name: string
+  mimeType: string
+  pickedAt: string
+  lastViewedAt: string | null
+  expiresAt: string
+}
+
+/**
  * A one-time pick ticket for Google Picker in the member's browser (google-drive.md "Picker and its
  * token"): only the ticket's sha256 is stored. `result` is the JSON of the picks the server kept (the
  * service writes and reads it), `error` a fixed sentence when the picking failed.
@@ -152,8 +169,11 @@ export interface DrivePickTicketRow {
   userId: string
   ticketHash: string
   mode: 'folder' | 'files'
-  /** Files mode: `read` (for the AI: readable types only) or `link` (linked to a record by the person: every type). */
-  purpose: 'read' | 'link'
+  /**
+   * Files mode: `read` (for the AI: readable types only), `link` (linked to a record by the person: every type) or `view`
+   * (one video to play: bound to its one `fileIds` entry; kept as a view pick, never as a pick).
+   */
+  purpose: 'read' | 'link' | 'view'
   maxItems: number
   fileIds: string[]
   state: 'open' | 'saving' | 'picked' | 'cancelled' | 'failed'
@@ -191,6 +211,18 @@ export interface GoogleDriveRepository {
   /** The member's pick of this file / folder whether or not it is still live (an expired one until pruned), or null. */
   anyPick(userId: string, fileId: string): DrivePickRow | null
 
+  /** Keeps (or renews: picked again) the member's view pick of a video for that Google account. */
+  saveViewPick(row: DriveViewPickRow): void
+  /** The member's live view pick of this file for this Google account at `now`, or null. */
+  viewPick(userId: string, accountEmail: string, fileId: string, now: string): DriveViewPickRow | null
+  /**
+   * A play of a live view pick: `lastViewedAt` = `now`, the expiry moved to `expiresAt` (never shortened). False when there
+   * was no live one (expired, unknown, another account's) — nothing changed.
+   */
+  touchViewPick(userId: string, accountEmail: string, fileId: string, now: string, expiresAt: string): boolean
+  /** Removes expired view picks (every member). */
+  pruneViewPicks(now: string): void
+
   /** Keeps what the AI read of a document in a consultation (the newest read replaces the one before). */
   keepDocRead(row: DriveDocRead): void
   /** The newest read of this document in this consultation by the member's AI, or null. */
@@ -221,7 +253,7 @@ export interface GoogleDriveRepository {
   untrustFolder(userId: string, folderId: string): boolean
   /** The member's trusted folders, newest first. */
   trustedFolders(userId: string): DriveFolderTrust[]
-  /** A member left the company: their waiting confirmations (with their content), their reads and trusted folders are removed. */
+  /** A member left the company: their waiting confirmations (with their content), their reads, trusted folders and view picks are removed. */
   forgetMember(userId: string): void
   /** Removes the content of every confirmation expired at `now`, and the rows that expired before `deleteBefore` (every member). */
   pruneOverwriteConfirmations(now: string, deleteBefore: string): void

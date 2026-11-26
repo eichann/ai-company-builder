@@ -7,7 +7,7 @@ import { describe, expect, it } from 'vitest'
 import { GOOGLE_ALLOWED_SCOPES, GOOGLE_FEATURE_SCOPES, GOOGLE_NEVER_SCOPES, GOOGLE_SCOPE, googleScopesFor, normalizeGrantedScopes } from '../../shared/core/google'
 import {
   checkDriveFileName, checkDrivePutContent, DRIVE_DOC_MIME, driveFileIdFromLink, driveFileIdsFromText, driveFolderReachesOutside, drivePreselectIds, drivePutForm, drivePutKindOf,
-  driveDocFetchesOutside, driveRevisionOf, isDrivePickerTokenScope,
+  driveDocFetchesOutside, driveRevisionOf, isDrivePickerTokenScope, DRIVE_VIEW_MIMES, drivePickableFor, isDriveViewMime, isDrivePickPurpose,
 } from '../../shared/core/google-drive'
 
 const enc = (s: string) => new TextEncoder().encode(s)
@@ -32,6 +32,30 @@ describe('Drive scopes: drive.file and nothing wider', () => {
     expect(isDrivePickerTokenScope(`openid ${GOOGLE_SCOPE.driveFile}`)).toBe(false)
     expect(isDrivePickerTokenScope('')).toBe(false)
     expect(isDrivePickerTokenScope(undefined)).toBe(false)
+  })
+})
+
+describe('a view pick keeps a video only (google-drive.md "Viewing a video")', () => {
+  it('the fixed list is the common video types, every one video/*', () => {
+    expect([...DRIVE_VIEW_MIMES].sort()).toEqual([
+      'video/3gpp', 'video/mp4', 'video/mpeg', 'video/ogg', 'video/quicktime', 'video/webm', 'video/x-m4v', 'video/x-matroska', 'video/x-msvideo',
+    ])
+  })
+
+  it('only those exact types count: no prefix match, no other kind of file', () => {
+    for (const m of DRIVE_VIEW_MIMES) expect(isDriveViewMime(m)).toBe(true)
+    for (const m of ['video/', 'video/mp4; codecs=avc1', 'VIDEO/MP4', 'video/x-unknown', 'application/pdf', 'application/vnd.google-apps.document', 'application/vnd.google-apps.folder',
+      'application/vnd.google-apps.shortcut', 'image/png', '', undefined, 7]) {
+      expect(isDriveViewMime(m), String(m)).toBe(false)
+    }
+    expect(drivePickableFor('view', 'video/mp4')).toBe(true)
+    expect(drivePickableFor('view', 'application/pdf')).toBe(false)
+    expect(drivePickableFor('view', 'application/vnd.google-apps.document')).toBe(false)
+    // The other purposes unchanged.
+    expect(drivePickableFor('read', 'video/mp4')).toBe(false)
+    expect(drivePickableFor('link', 'video/mp4')).toBe(true)
+    expect(isDrivePickPurpose('view')).toBe(true)
+    expect(isDrivePickPurpose('watch')).toBe(false)
   })
 })
 

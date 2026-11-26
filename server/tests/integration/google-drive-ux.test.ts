@@ -24,6 +24,7 @@ import type { AddressInfo } from 'net'
 import { serve, type ServerType } from '@hono/node-server'
 import { createFakeGoogle, type FakeGoogle } from '../fakes/google/fake-google'
 import { defaultGoogleSeed, GOOGLE_SEED } from '../fakes/google/seed'
+import { keepDrivePicks } from '../helpers/drive-picks'
 
 vi.setConfig({ testTimeout: 60_000, hookTimeout: 60_000 })
 
@@ -157,7 +158,7 @@ beforeAll(async () => {
   await allow('m-sato', ['drive'])
   await allow('m-tanaka', ['drive'])
   google.pick(CLIENT_ID, GOOGLE_SEED.member, [GOOGLE_SEED.proposalsFolder, GOOGLE_SEED.sharedOutsideFolder, GOOGLE_SEED.pastProposalDoc, GOOGLE_SEED.handNotesPdf, DOCX, SHORTCUT])
-  expect((await person('m-sato', 'POST', '/me/google/drive/picks', { mode: 'folder', ids: [GOOGLE_SEED.proposalsFolder] })).status).toBe(200)
+  expect((await keepDrivePicks(call, CO, 'm-sato', { mode: 'folder', ids: [GOOGLE_SEED.proposalsFolder] })).status).toBe(200)
 })
 
 afterAll(async () => {

@@ -20,6 +20,7 @@ import type { AddressInfo } from 'net'
 import { serve, type ServerType } from '@hono/node-server'
 import { createFakeGoogle, type FakeGoogle } from '../fakes/google/fake-google'
 import { GOOGLE_SEED } from '../fakes/google/seed'
+import { keepDrivePicks } from '../helpers/drive-picks'
 
 vi.setConfig({ testTimeout: 60_000, hookTimeout: 60_000 })
 
@@ -123,6 +124,7 @@ beforeAll(async () => {
   const drive = await import('../../src/routes/google-drive')
   app.route('/api/companies/:companyId', drive.googleDriveRoute)
   app.route('/api/records-ai/google/drive', drive.googleDriveAiRoute)
+  app.route('/api/google-picker', drive.googlePickerPageRoute)
   app.route('/api/oauth', (await import('../../src/routes/oauth')).oauthRoute)
 
   db.prepare('INSERT INTO companies (id, name, slug, owner_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)').run(CO, CO, CO, 'm-owner', ts(), ts())
@@ -141,7 +143,7 @@ beforeAll(async () => {
   await allow('m-sato')
   google.pick(CLIENT_ID, GOOGLE_SEED.member, [GOOGLE_SEED.proposalsFolder, GOOGLE_SEED.sharedOutsideFolder])
   for (const id of [GOOGLE_SEED.proposalsFolder, GOOGLE_SEED.sharedOutsideFolder]) {
-    expect((await person('m-sato', 'POST', '/me/google/drive/picks', { mode: 'folder', ids: [id] })).body.data.picks).toHaveLength(1)
+    expect((await keepDrivePicks(call, CO, 'm-sato', { mode: 'folder', ids: [id] })).body.data.picks).toHaveLength(1)
   }
 })
 

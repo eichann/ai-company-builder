@@ -24,6 +24,7 @@ import type { AddressInfo } from 'net'
 import { serve, type ServerType } from '@hono/node-server'
 import { createFakeGoogle, type FakeGoogle } from '../fakes/google/fake-google'
 import { GOOGLE_SEED } from '../fakes/google/seed'
+import { keepDrivePicks } from '../helpers/drive-picks'
 
 vi.setConfig({ testTimeout: 60_000, hookTimeout: 120_000 })
 
@@ -88,7 +89,7 @@ async function allow(user: string) {
 }
 async function pickFolder(user: string, id: string) {
   google.pick(CLIENT_ID, EMAILS[user], [id])
-  const r = await as(user, 'POST', '/me/google/drive/picks', { mode: 'folder', ids: [id] })
+  const r = await keepDrivePicks(call, CO, user, { mode: 'folder', ids: [id] })
   expect(r.body.data.picks, r.text).toHaveLength(1)
 }
 
@@ -170,6 +171,7 @@ beforeAll(async () => {
   const drive = await import('../../src/routes/google-drive')
   app.route('/api/companies/:companyId', drive.googleDriveRoute)
   app.route('/api/records-ai/google/drive', drive.googleDriveAiRoute)
+  app.route('/api/google-picker', drive.googlePickerPageRoute)
   app.route('/api/records-ai', (await import('../../src/routes/records-ai')).recordsAiRoute)
   app.route('/api/oauth', (await import('../../src/routes/oauth')).oauthRoute)
 
@@ -208,7 +210,7 @@ describe('accepting a job that puts into a place outside', () => {
     expect((await services.jobs.accept(alice(), job, { version: 1, place: { ...PLACE, ref: 'fake-folder-bobs-only-0001' } }, undefined, true)).body.code).toBe('JOB_PLACE_NOT_USABLE')
     // A file she picked is not a folder.
     google.pick(CLIENT_ID, EMAILS['jd-alice'], [GOOGLE_SEED.pastProposalDoc])
-    expect((await as('jd-alice', 'POST', '/me/google/drive/picks', { mode: 'files', ids: [GOOGLE_SEED.pastProposalDoc] })).body.data.picks).toHaveLength(1)
+    expect((await keepDrivePicks(call, CO, 'jd-alice', { mode: 'files', ids: [GOOGLE_SEED.pastProposalDoc] })).body.data.picks).toHaveLength(1)
     expect((await services.jobs.accept(alice(), job, { version: 1, place: { ...PLACE, ref: GOOGLE_SEED.pastProposalDoc } }, undefined, true)).body.code).toBe('JOB_PLACE_NOT_USABLE')
     expect((await services.jobs.get(alice(), job)).value.accepted).toBe(false)
     // The acceptance notice says the place is chosen there (an older app cannot: it says to update).
