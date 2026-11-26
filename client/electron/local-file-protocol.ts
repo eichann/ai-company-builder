@@ -5,6 +5,7 @@
  * before the query was introduced.
  */
 import fs from 'node:fs'
+import type { FileHandle } from 'node:fs/promises'
 import path from 'node:path'
 import { Readable } from 'node:stream'
 import { localFilePathFromUrl } from '../shared/local-file-url'
@@ -68,20 +69,31 @@ export function localVideoTarget(url: string, allowedRoots: Iterable<string>): L
   return insideRoots(filePath, allowedRoots)
 }
 
+const O_NOFOLLOW = fs.constants.O_NOFOLLOW ?? 0
+const O_NONBLOCK = fs.constants.O_NONBLOCK ?? 0
 const VIDEO_TYPES: Record<string, string> = { '.mp4': 'video/mp4', '.mov': 'video/quicktime' }
 
 /**
  * A checked video file, streamed from disk: the whole file (200), only the
  * bytes a `Range` header asks for (206), or 416. Never cached. 404 when it is
- * gone or not a regular file.
+ * gone, is a link (opened with `O_NOFOLLOW` where the system has it) or is not
+ * a regular file. Opened once and read from that handle, so a link swapped in
+ * after the checks leads nowhere.
  */
 export async function videoFileResponse(filePath: string, rangeHeader: string | null): Promise<Response> {
+  let handle: FileHandle
   let size: number
   try {
-    const stat = await fs.promises.stat(filePath)
-    if (!stat.isFile()) return new Response('Not found', { status: 404 })
+    handle = await fs.promises.open(filePath, fs.constants.O_RDONLY | O_NOFOLLOW | O_NONBLOCK)
+  } catch {
+    return new Response('Not found', { status: 404 })
+  }
+  try {
+    const stat = await handle.stat()
+    if (!stat.isFile()) throw new Error('not a file')
     size = stat.size
   } catch {
+    await handle.close()
     return new Response('Not found', { status: 404 })
   }
   const headers: Record<string, string> = {
@@ -90,12 +102,14 @@ export async function videoFileResponse(filePath: string, rangeHeader: string | 
     'Content-Type': VIDEO_TYPES[path.extname(filePath).toLowerCase()] ?? 'application/octet-stream',
   }
   const range = byteRange(rangeHeader, size)
-  if (range.kind === 'unsatisfiable') {
+  if (range.kind === 'unsatisfiable' || size === 0) {
+    await handle.close()
+    if (size === 0) return new Response(null, { status: 200, headers: { ...headers, 'Content-Length': '0' } })
     return new Response(null, { status: 416, headers: { ...headers, 'Content-Range': `bytes */${size}` } })
   }
   const { start, end } = range.kind === 'part' ? range : { start: 0, end: size - 1 }
-  const body = size === 0 ? null : Readable.toWeb(fs.createReadStream(filePath, { start, end })) as ReadableStream<Uint8Array>
-  headers['Content-Length'] = String(size === 0 ? 0 : end - start + 1)
+  const body = Readable.toWeb(handle.createReadStream({ start, end, autoClose: true })) as ReadableStream<Uint8Array>
+  headers['Content-Length'] = String(end - start + 1)
   if (range.kind === 'part') headers['Content-Range'] = `bytes ${start}-${end}/${size}`
   return new Response(body, { status: range.kind === 'part' ? 206 : 200, headers })
 }

@@ -17,6 +17,7 @@ import { NAME_TAKEN_MESSAGE } from '../../../shared/file-names'
 import { isAtomicSaveRename, nameTaken, notDownloadedRefusal } from '../../file-guards'
 import { createCompanyWatchers } from './watchers'
 import { isVideoFileName } from '../../../shared/video-files'
+import { DROP_WORDS, dropRefusal } from '../../../shared/file-drop'
 
 export interface FsDeps {
   paths: PathGuard
@@ -257,35 +258,38 @@ export function registerFsIpc(ipc: IpcRegistrar, deps: FsDeps): FsFeature {
     }
   })
 
-  // Move file from external location (e.g. Finder drop)
-  // Source path is NOT validated (external), only destination is validated
-  ipc.handle('fs:moveFromExternal', async (_, sourcePath: string, destinationPath: string) => {
+  // A Finder drop, copied in: the original (a camera's card, the Desktop) is never moved or
+  // deleted (owner, 2026-11-26). The source lies outside by design and is only read; the
+  // destination is checked like any write, and main decides the drop rule (type, size).
+  ipc.handle('fs:copyFromExternal', async (_, sourcePath: string, destinationPath: string) => {
+    let made: 'file' | 'folder' | null = null
+    let safeDest = ''
     try {
-      const safeDest = paths.validate(destinationPath)
+      safeDest = paths.validate(destinationPath)
       const resolved = path.resolve(sourcePath)
       const refused = notDownloadedRefusal(safeDest) ?? await writeRefusal(safeDest)
       if (refused) return { success: false, error: refused }
       if (await nameTaken(safeDest)) return TAKEN
-
-      try {
-        await fs.promises.rename(resolved, safeDest)
-      } catch (err: unknown) {
-        if (err && typeof err === 'object' && 'code' in err && err.code === 'EXDEV') {
-          // Cross-volume: copy then delete original
-          const stat = await fs.promises.stat(resolved)
-          if (stat.isDirectory()) {
-            await fs.promises.cp(resolved, safeDest, { recursive: true })
-            await fs.promises.rm(resolved, { recursive: true, force: true })
-          } else {
-            await fs.promises.copyFile(resolved, safeDest)
-            await fs.promises.unlink(resolved)
-          }
-        } else {
-          throw err
-        }
+      const source = await fs.promises.stat(resolved)
+      if (!source.isFile() && !source.isDirectory()) return { success: false, error: DROP_WORDS.type }
+      const tooMuch = dropRefusal(path.basename(safeDest), { isDirectory: source.isDirectory(), size: source.size })
+      if (tooMuch) return { success: false, error: tooMuch }
+      if (source.isDirectory()) {
+        // Made first and alone (no replace), then filled; removed again if the copy fails.
+        await fs.promises.mkdir(safeDest)
+        made = 'folder'
+        await fs.promises.cp(resolved, safeDest, { recursive: true, force: false, errorOnExist: true })
+      } else {
+        made = 'file'
+        await fs.promises.copyFile(resolved, safeDest, fs.constants.COPYFILE_EXCL)
       }
       return { success: true }
     } catch (error) {
+      const code = error && typeof error === 'object' && 'code' in error ? error.code : null
+      // What this call made is removed (a half copy: a full disk, the card pulled out); never
+      // a name someone else took meanwhile (EEXIST: copyFile / mkdir made nothing).
+      if (made && code !== 'EEXIST') await fs.promises.rm(safeDest, { recursive: made === 'folder', force: true }).catch(() => {})
+      if (code === 'EEXIST') return TAKEN
       return { success: false, error: error instanceof Error ? error.message : 'Unknown error' }
     }
   })

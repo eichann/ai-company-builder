@@ -45,7 +45,7 @@ const GUARDED: Record<string, { args: unknown[]; paths: number[]; fromChatWindow
   'fs:rename': { args: [IN_FILE, IN_FILE], paths: [0, 1] },
   'fs:move': { args: [IN_FILE, IN_FILE], paths: [0, 1] },
   'fs:copy': { args: [IN_FILE, IN_FILE], paths: [0, 1] },
-  'fs:moveFromExternal': { args: [IN_FILE, IN_FILE], paths: [1] },
+  'fs:copyFromExternal': { args: [IN_FILE, IN_FILE], paths: [1] },
   'fs:stat': { args: [IN], paths: [0] },
   'fs:watch': { args: [IN], paths: [0] },
   'fs:unwatch': { args: [IN], paths: [0] },
@@ -107,7 +107,7 @@ const GUARDED: Record<string, { args: unknown[]; paths: number[]; fromChatWindow
 /** Parameters named like a path that are not a local path to check (channel → parameter → why). */
 const EXEMPT: Record<string, Record<string, string>> = {
   'fs:registerAllowedRoot': { dirPath: 'adds a root (the company folder the member chose); nothing is read or written' },
-  'fs:moveFromExternal': { sourcePath: 'a Finder drop comes from outside by design; only the destination is checked' },
+  'fs:copyFromExternal': { sourcePath: 'a Finder drop comes from outside by design; it is only read (copied), and checked against the drop rule' },
   'tools:stop': { toolPath: 'only a key into the tools tools:start started (after validating); nothing on disk is touched' },
   'backup:restore': { filePath: 'relative to the backup and the repository; both joined paths are checked' },
   'git:revertFile': { filePath: 'a repository pathspec; a new file is checked after joining' },

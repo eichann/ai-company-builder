@@ -130,12 +130,12 @@ contract.invoke editor:backupBeforeOverwrite
 contract.invoke env:status
 contract.invoke env:update
 contract.invoke fs:copy
+contract.invoke fs:copyFromExternal
 contract.invoke fs:createDirectory
 contract.invoke fs:createFile
 contract.invoke fs:delete
 contract.invoke fs:exists
 contract.invoke fs:move
-contract.invoke fs:moveFromExternal
 contract.invoke fs:openVideo
 contract.invoke fs:readDirectory
 contract.invoke fs:readDirectoryTree
@@ -437,6 +437,7 @@ contract.type ElectronAPI.connectGoogle = connectGoogle: Invoke<'google:connect'
 contract.type ElectronAPI.connectGoogleAll = connectGoogleAll: Invoke<'google:connectAll'>
 contract.type ElectronAPI.connectSlack = connectSlack: Invoke<'slack:connect'>
 contract.type ElectronAPI.continueStep = continueStep: Invoke<'pluginSteps:continue'>
+contract.type ElectronAPI.copyFromExternal = copyFromExternal: Invoke<'fs:copyFromExternal'>
 contract.type ElectronAPI.copyItem = copyItem: Invoke<'fs:copy'>
 contract.type ElectronAPI.createBundle = createBundle: Invoke<'tasks:createBundle'>
 contract.type ElectronAPI.createCompany = createCompany: Invoke<'api:createCompany'>
@@ -574,7 +575,6 @@ contract.type ElectronAPI.markGoogleSeen = markGoogleSeen: Invoke<'google:markSe
 contract.type ElectronAPI.markNotificationsRead = markNotificationsRead: Invoke<'notifications:markRead'>
 contract.type ElectronAPI.markSlackSeen = markSlackSeen: Invoke<'slack:markSeen'>
 contract.type ElectronAPI.moveEnvKeyToServer = moveEnvKeyToServer: Invoke<'brokerKeys:moveFromEnv'>
-contract.type ElectronAPI.moveFromExternal = moveFromExternal: Invoke<'fs:moveFromExternal'>
 contract.type ElectronAPI.moveItem = moveItem: Invoke<'fs:move'>
 contract.type ElectronAPI.noteAfterMeeting = noteAfterMeeting: Invoke<'afterMeeting:note'>
 contract.type ElectronAPI.onAgentInteraction = onAgentInteraction: Subscribe<'agent-interaction:request'>
@@ -952,12 +952,12 @@ contract.type IpcInvokeChannels.'editor:backupBeforeOverwrite' = 'editor:backupB
 contract.type IpcInvokeChannels.'env:status' = 'env:status': { args: [rootPath: string]; result: EnvStatusResult }
 contract.type IpcInvokeChannels.'env:update' = 'env:update': { args: [rootPath: string, changes: Record<string, string | null>]; result: SimpleResult }
 contract.type IpcInvokeChannels.'fs:copy' = 'fs:copy': { args: [sourcePath: string, destPath: string]; result: FileOpResult }
+contract.type IpcInvokeChannels.'fs:copyFromExternal' = 'fs:copyFromExternal': { args: [sourcePath: string, destPath: string]; result: FileOpResult }
 contract.type IpcInvokeChannels.'fs:createDirectory' = 'fs:createDirectory': { args: [path: string]; result: boolean }
 contract.type IpcInvokeChannels.'fs:createFile' = 'fs:createFile': { args: [path: string, content: string]; result: FileOpResult }
 contract.type IpcInvokeChannels.'fs:delete' = 'fs:delete': { args: [path: string]; result: FileOpResult }
 contract.type IpcInvokeChannels.'fs:exists' = 'fs:exists': { args: [path: string]; result: boolean }
 contract.type IpcInvokeChannels.'fs:move' = 'fs:move': { args: [sourcePath: string, destPath: string]; result: FileOpResult }
-contract.type IpcInvokeChannels.'fs:moveFromExternal' = 'fs:moveFromExternal': { args: [sourcePath: string, destPath: string]; result: FileOpResult }
 contract.type IpcInvokeChannels.'fs:openVideo' = 'fs:openVideo': { args: [path: string]; result: SimpleResult }
 contract.type IpcInvokeChannels.'fs:readDirectory' = 'fs:readDirectory': { args: [path: string]; result: DirectoryEntry[] }
 contract.type IpcInvokeChannels.'fs:readDirectoryTree' = 'fs:readDirectoryTree': { args: [path: string, maxDepth: number]; result: DirectoryTreeNode[] }
@@ -1319,12 +1319,12 @@ main.handle editor:backupBeforeOverwrite @ features/fs/ipc.ts (rootPath: string,
 main.handle env:status @ features/env/ipc.ts (rootPath: string)
 main.handle env:update @ features/env/ipc.ts (rootPath: string, changes: Record<string, string | null>)
 main.handle fs:copy @ features/fs/ipc.ts (sourcePath: string, destinationPath: string)
+main.handle fs:copyFromExternal @ features/fs/ipc.ts (sourcePath: string, destinationPath: string)
 main.handle fs:createDirectory @ features/fs/ipc.ts (dirPath: string)
 main.handle fs:createFile @ features/fs/ipc.ts (filePath: string, content: string)
 main.handle fs:delete @ features/fs/ipc.ts (targetPath: string)
 main.handle fs:exists @ features/fs/ipc.ts (targetPath: string)
 main.handle fs:move @ features/fs/ipc.ts (sourcePath: string, destinationPath: string)
-main.handle fs:moveFromExternal @ features/fs/ipc.ts (sourcePath: string, destinationPath: string)
 main.handle fs:openVideo @ features/fs/ipc.ts (filePath: string)
 main.handle fs:readDirectory @ features/fs/ipc.ts (dirPath: string)
 main.handle fs:readDirectoryTree @ features/fs/ipc.ts (dirPath: string, maxDepth: number = 2)
@@ -1582,6 +1582,8 @@ preload connectSlack -> invoke slack:connect($0, $1)
 preload connectSlack : (companyId: string, features: ("read" | "reply" | "notices")[]) => Promise<SlackConnectResult>
 preload continueStep -> invoke pluginSteps:continue($0, $1, $2)
 preload continueStep : (companyId: string, recordId: string, companyRoot?: string | undefined) => Promise<PluginStepContinueResult>
+preload copyFromExternal -> invoke fs:copyFromExternal($0, $1)
+preload copyFromExternal : (sourcePath: string, destPath: string) => Promise<FileOpResult>
 preload copyItem -> invoke fs:copy($0, $1)
 preload copyItem : (sourcePath: string, destPath: string) => Promise<FileOpResult>
 preload createBundle -> invoke tasks:createBundle($0, $1)
@@ -1856,8 +1858,6 @@ preload markSlackSeen -> invoke slack:markSeen($0)
 preload markSlackSeen : (companyId: string) => Promise<SlackStatusResult>
 preload moveEnvKeyToServer -> invoke brokerKeys:moveFromEnv($0, $1, $2)
 preload moveEnvKeyToServer : (companyId: string, rootPath: string, name: string) => Promise<OwnKeyMoveResult>
-preload moveFromExternal -> invoke fs:moveFromExternal($0, $1)
-preload moveFromExternal : (sourcePath: string, destPath: string) => Promise<FileOpResult>
 preload moveItem -> invoke fs:move($0, $1)
 preload moveItem : (sourcePath: string, destPath: string) => Promise<FileOpResult>
 preload noteAfterMeeting -> invoke afterMeeting:note($0, $1, $2, $3)

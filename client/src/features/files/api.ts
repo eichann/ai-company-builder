@@ -42,11 +42,11 @@ export type FileTreeReads = ElectronPort<'readDirectory' | 'readDirectoryTree' |
 /** Changing the company folder on this computer: new file or folder, rename, move inside it, delete. */
 export type FileTreeWrites = ElectronPort<'createFile' | 'createDirectory' | 'renameItem' | 'moveItem' | 'deleteItem'>
 /**
- * Moving a file dropped from Finder into the company folder: it takes a file
- * from anywhere on this computer (the original is gone), so it has its own port.
- * `getPathForFile` tells where the dropped file lies (preload, no IPC).
+ * Copying a file dropped from Finder into the company folder: it reads a file
+ * from anywhere on this computer (the original stays where it was), so it has its
+ * own port. `getPathForFile` tells where the dropped file lies (preload, no IPC).
  */
-export type FileImportWrites = ElectronPort<'moveFromExternal' | 'getPathForFile'>
+export type FileImportWrites = ElectronPort<'copyFromExternal' | 'getPathForFile'>
 /**
  * Checking a name the member typed against private folders they cannot read:
  * main asks the company server (paths/check), so the name leaves the computer.
@@ -89,8 +89,8 @@ export function deleteItem(path: string, writes: FileTreeWrites = window.electro
   return writes.deleteItem(path)
 }
 
-export function moveFromExternal(sourcePath: string, destPath: string, writes: FileImportWrites = window.electronAPI) {
-  return writes.moveFromExternal(sourcePath, destPath)
+export function copyFromExternal(sourcePath: string, destPath: string, writes: FileImportWrites = window.electronAPI) {
+  return writes.copyFromExternal(sourcePath, destPath)
 }
 
 /** Where a file dropped from Finder lies on this computer; '' when it has no place on disk. */

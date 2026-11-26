@@ -562,7 +562,11 @@ export interface IpcInvokeChannels {
   'fs:delete': { args: [path: string]; result: FileOpResult }
   'fs:rename': { args: [oldPath: string, newPath: string]; result: FileOpResult & { newPath?: string } }
   'fs:move': { args: [sourcePath: string, destPath: string]; result: FileOpResult }
-  'fs:moveFromExternal': { args: [sourcePath: string, destPath: string]; result: FileOpResult }
+  /**
+   * A Finder drop, copied in (the original is never touched): main checks the destination like any
+   * write and the source against the drop rule (`client/shared/file-drop.ts`: type, 20 MB, a video 100 MB).
+   */
+  'fs:copyFromExternal': { args: [sourcePath: string, destPath: string]; result: FileOpResult }
   'fs:copy': { args: [sourcePath: string, destPath: string]; result: FileOpResult }
   'fs:stat': { args: [path: string]; result: { success: boolean; data?: FileStats } }
   'fs:watch': { args: [rootPath: string]; result: SimpleResult }
@@ -1107,7 +1111,7 @@ export interface ElectronAPI {
   deleteItem: Invoke<'fs:delete'>
   renameItem: Invoke<'fs:rename'>
   moveItem: Invoke<'fs:move'>
-  moveFromExternal: Invoke<'fs:moveFromExternal'>
+  copyFromExternal: Invoke<'fs:copyFromExternal'>
   /**
    * Where a file dropped from Finder lies on this computer ('' for a file that has
    * none). Not a channel: preload asks Electron (`webUtils.getPathForFile`; the

@@ -165,15 +165,15 @@ async function dropFromFinder(page: Page, target: Locator, files: { name: string
   await target.dispatchEvent('drop', { dataTransfer: data })
 }
 
-test('files dropped from Finder move in under a free name, HTML too; other types and files over 20 MB are refused with the reason', async ({ page }) => {
+test('files dropped from Finder are copied in under a free name, HTML too; other types and files over 20 MB are refused with the reason', async ({ page }) => {
   await open(page)
   await dropFromFinder(page, row(page, '議事録'), [
     { name: '10月.md' }, { name: '資料.html' }, { name: 'setup.exe' }, { name: '大きい.pdf', size: 21 * 1024 * 1024 },
   ])
   await expect(page.getByRole('alert')).toHaveText(/setup\.exe: 非対応の形式\s+大きい\.pdf: 20MBを超えています/)
   expect(await calls(page)).toEqual([
-    ['moveFromExternal', '/Users/demo/Downloads/10月.md', `${DEPT}/議事録/10月 (1).md`],
-    ['moveFromExternal', '/Users/demo/Downloads/資料.html', `${DEPT}/議事録/資料.html`],
+    ['copyFromExternal', '/Users/demo/Downloads/10月.md', `${DEPT}/議事録/10月 (1).md`],
+    ['copyFromExternal', '/Users/demo/Downloads/資料.html', `${DEPT}/議事録/資料.html`],
   ])
 })
 
@@ -186,8 +186,8 @@ test('a video (.mp4, .mov) dropped from Finder may be as large as sync shares (1
   ])
   await expect(page.getByRole('alert')).toHaveText(/撮影\.mov: 100MBを超える動画はほかの人と共有できないため、入れられません\s+資料\.pdf: 20MBを超えています/)
   expect(await calls(page)).toEqual([
-    ['moveFromExternal', '/Users/demo/Downloads/研修.mp4', `${DEPT}/議事録/研修.mp4`],
-    ['moveFromExternal', '/Users/demo/Downloads/会議.MOV', `${DEPT}/議事録/会議.MOV`],
+    ['copyFromExternal', '/Users/demo/Downloads/研修.mp4', `${DEPT}/議事録/研修.mp4`],
+    ['copyFromExternal', '/Users/demo/Downloads/会議.MOV', `${DEPT}/議事録/会議.MOV`],
   ])
 })
 
@@ -195,7 +195,7 @@ test('a drop on a file goes into that file\'s folder: from Finder, and a row dra
   await open(page)
   await dropFromFinder(page, row(page, '見積.xlsx'), [{ name: '案内.htm' }, { name: 'setup.exe' }])
   await expect(page.getByRole('alert')).toHaveText('setup.exe: 非対応の形式')
-  expect(await calls(page)).toEqual([['moveFromExternal', '/Users/demo/Downloads/案内.htm', `${DEPT}/提案書/案内.htm`]])
+  expect(await calls(page)).toEqual([['copyFromExternal', '/Users/demo/Downloads/案内.htm', `${DEPT}/提案書/案内.htm`]])
 
   // Onto a file in another folder: into that folder. Onto a file beside it: nothing moves.
   await drag(page, row(page, 'README.md'), row(page, '10月.md'))

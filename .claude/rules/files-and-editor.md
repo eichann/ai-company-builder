@@ -38,6 +38,7 @@ paths:
   - "client/shared/local-file-url.ts"
   - "client/shared/video-files.ts"
   - "client/shared/large-file-limit.ts"
+  - "client/shared/file-drop.ts"
   - "client/tests/video-electron*"
   - "client/tests/fixtures/video/**"
   - "client/tests/company-watcher.test.ts"
@@ -98,8 +99,14 @@ freeze the window on a 15k-file company. Measurements and the dropped chokidar d
   (owner, 2026-11-26: an `.html` dropped on a file did nothing), on empty space into the
   department; a row dropped where it already is moves nothing (it used to become 「name (1)」).
   Every move still goes through `requestMove` (private-root refusal, private-edge confirm, reserved
-  names) and main's not-downloaded refusal. Finder's allowed types are the one list
-  `ALLOWED_DROP_EXTENSIONS` (main's `fs:moveFromExternal` checks only the destination), HTML
+  names) and main's not-downloaded refusal. **A Finder drop copies** (owner decision 2026-11-26, review of #869):
+  `fs:copyFromExternal` never moves or deletes the original — it used to rename it in, or across volumes copy
+  and unlink it, so a video dropped from a camera's card or the Desktop was gone from there. Main checks the
+  destination like any write (allowed roots, not downloaded, reserved names / skill files, a free name: `wx`-like
+  `COPYFILE_EXCL`, a folder made alone first) and removes what a failed copy wrote. Finder's allowed types and
+  sizes are one rule, `dropRefusal` in `client/shared/file-drop.ts` (`DROP_EXTENSIONS`): the tree asks it for
+  the per-file warning and **main decides** (the source's `stat`, the name it gets in the company folder; a
+  folder named like a video is refused, a file without an extension is held to the size). HTML
   included since the sandboxed viewer (`doc-frame.md`); a refused file is named in the panel's
   warning (`role="alert"`, 「<name>: 非対応の形式」), and a newer warning keeps its full time.
   **Size** (owner, 2026-11-26): 20 MB, except a video (`.mp4` / `.mov`, `client/shared/video-files.ts`), which may be
@@ -136,14 +143,14 @@ freeze the window on a 15k-file company. Measurements and the dropped chokidar d
 - IPC goes through `src/features/files/api.ts`: `FileTreeReads` (listings, stat),
   `UnsharedLargeFileReads` (the too-large files, read-only git),
   `FileTreeWrites` (new file / folder, rename, move inside, delete), `FileImportWrites` (a Finder
-  drop: takes a file from anywhere on the computer; where the dropped file lies comes from
+  drop: copies a file from anywhere on the computer, the original untouched; where the dropped file lies comes from
   `getPathForFile`, preload's `webUtils.getPathForFile`, no IPC — `File.path` is gone since
   Electron 32), `ReservedNameOutbound` (the typed name goes to
   the server's `paths/check`), `FileDragOutbound` (Alt-drag hands a file to another app), plus the
   private-folder ports (`private-folders-client.md`).
 - **Nothing is replaced by accident** (owner, 2026-10-31: 新規ファイル with an existing name emptied
   that file, a rename onto a taken name replaced it, and sync spread it). Main is the authority:
-  `fs:createFile` writes with `wx`; `fs:rename` / `fs:move` / `fs:moveFromExternal` / `fs:copy`
+  `fs:createFile` writes with `wx`; `fs:rename` / `fs:move` / `fs:copyFromExternal` / `fs:copy`
   refuse a target that exists (`code: 'name_taken'`,
   「同じ名前のファイルまたはフォルダがすでにあります。別の名前にしてください。」,
   `electron/file-guards.ts`), except the same entry under another spelling (a case-only
@@ -158,7 +165,8 @@ freeze the window on a 15k-file company. Measurements and the dropped chokidar d
 - UI test: `client/tests/ui/file-tree.spec.ts` on the preview `client/tests/file-tree-ui.html`
   (selection and ⌘/shift ranges, new file / rename / delete and their dialogs, the reserved-name
   and private-root refusals, internal moves and the private-edge confirm, Finder drops: free
-  name, HTML accepted, type and 20 MB refusals, a video up to 100 MB accepted and one byte over refused,
+  name, HTML accepted, type and 20 MB refusals, a video up to 100 MB accepted and one byte over refused
+  (`ipc-fs.test.ts`: main's own refusals, the original kept — also across volumes —, a half copy removed),
   a drop on a file row landing in its folder, the warning's timer; hidden sidecars and the review mark).
 
 ## Previews never show a stale file
@@ -189,8 +197,9 @@ position and zoom; data files and other folders do not.
   `acb-media` is registered `standard`, `secure`, `stream` (no fetch, CORS or CSP bypass) on the app's session
   only (not the document session), and its handler (`electron-adapter.ts` `serveLocalFiles`) serves **only a
   `.mp4` / `.mov` name inside the allowed roots by name** (`localVideoTarget`, `local-file-protocol.ts`), **then by
-  real location** (`AllowedRoots.validate`: a link out of the company folder is refused), a regular file, streamed
-  from disk: 200 whole, 206 one range, 416 past the end, `Cache-Control: no-store` (`videoFileResponse`,
+  real location** (`AllowedRoots.validate`: a link out of the company folder is refused), opened once with
+  `O_NOFOLLOW | O_NONBLOCK` (a link as the file itself, even one pointing inside, is 404), `fstat` a regular file,
+  streamed from that handle: 200 whole, 206 one range, 416 past the end, `Cache-Control: no-store` (`videoFileResponse`,
   `byteRange`). A not-downloaded folder has no file to serve; a private folder's video is on disk only for its
   readers. The app page's CSP has `media-src 'self' acb-media:` (`index.html`); a plugin frame's and a document's
   CSP have no media source.

@@ -139,7 +139,7 @@ Background and the rejected cone-mode design: `docs/architecture/download-choice
 ## Writes into a not-downloaded folder are refused in three layers
 
 1. App file operations (`fs:writeFile`, `fs:createDirectory`, targets of `fs:rename` / `fs:move`
-   / `fs:moveFromExternal` / `fs:copy`) refuse in main (`notDownloadedRefusal`); the renderer
+   / `fs:copyFromExternal` / `fs:copy`) refuse in main (`notDownloadedRefusal`); the renderer
    disables those actions with the same explanation (`notDownloadedUserMessage`).
 2. The chat's PreToolUse write guard (`chat-write-guard.md`).
 3. Sync's outside-checkout hold-back (`sync-guards.md`).
