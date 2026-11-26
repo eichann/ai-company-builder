@@ -16,20 +16,27 @@ interface Props {
   purpose: string | null
   canEdit: { title: boolean; purpose: boolean }
   busy: boolean
+  /**
+   * The member is the assignee of a request still 引き受け待ち: saving accepts it (every action of the assignee does,
+   * records.md "Acceptance"), so the form says so before the press.
+   */
+  accepts: boolean
   /** The changes to send; a refusal's words, or null when saved. */
   onSave: (steps: TextEditSteps) => Promise<string | null>
 }
 
-export function TaskTextEdit({ title, purpose, canEdit, busy, onSave }: Props) {
+export function TaskTextEdit({ title, purpose, canEdit, busy, accepts, onSave }: Props) {
   const [draft, setDraft] = useState<{ title: string; purpose: string } | null>(null)
   const [error, setError] = useState<string | null>(null)
   const may = canEdit.title || canEdit.purpose
   const close = () => { setDraft(null); setError(null) }
   const save = async () => {
     if (!draft) return
-    if (canEdit.title && 'error' in normalizeRecordTitle(draft.title)) { setError(`件名は1行・${RECORD_TITLE_MAX}文字までで書いてください`); return }
     const steps = editSteps({ title, purpose }, draft, canEdit)
     if (steps.length === 0) { close(); return }
+    // The title rule only when the title is sent: a 目的 alone saves under a title stored before the rule.
+    const renamed = steps.find(s => s.action === 'retitle')
+    if (renamed && 'error' in normalizeRecordTitle(renamed.args.title)) { setError(`件名は1行・${RECORD_TITLE_MAX}文字までで書いてください`); return }
     const failure = await onSave(steps)
     if (failure === null) close()
     else setError(failure)
@@ -71,6 +78,7 @@ export function TaskTextEdit({ title, purpose, canEdit, busy, onSave }: Props) {
             onChange={e => setDraft({ ...draft, purpose: e.target.value })} className={FIELD} />
         </label>
       )}
+      {accepts && <p data-edit-accepts className="text-small text-text-muted">保存すると、このやることを引き受けたことになります。</p>}
       {error && <p role="alert" className="text-small text-danger-text">{error}</p>}
       <div className="flex justify-end gap-2">
         <Button type="button" variant="secondary" size="sm" disabled={busy} onClick={close}>やめる</Button>

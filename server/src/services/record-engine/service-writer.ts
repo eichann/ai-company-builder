@@ -1,7 +1,7 @@
 import { SERVICE_MADE_TYPES, SERVICE_OWNED_TYPES, SERVICE_RECEIPT_TYPES, SERVICE_TRANSITIONS, serviceTransitionAllowed } from '../../../shared/core/core-types'
 import { findPrivateScope, type ScopeWithRules } from '../../../shared/core/permissions'
 import { normalizeRepoPath } from '../../../shared/core/paths'
-import type { TypeDefinition } from '../../../shared/core/record-types'
+import { normalizeRecordTitle, titleOnOneLine, type TypeDefinition } from '../../../shared/core/record-types'
 import { SYSTEM_ACTOR_PREFIX, type LedgerChange, type LedgerEntry, type LedgerValue, type LedgerVia } from '../../../shared/core/record-ledger'
 import { newRecordId, RECORD_ID_RE } from '../../../shared/core/records'
 import type { RecordSummary } from '../../../shared/types/records'
@@ -254,8 +254,11 @@ export function createServiceRecordWriter(deps: Pick<RecordEngineDeps, 'companyD
     if (!SERVICE_RECEIPT_TYPES.includes(input.type) && deps.featureOff?.(companyId, input.type)) return fail('feature-off')
     const def = currentTypes(records).get(input.type)?.definition
     if (!def) return fail('type-unknown')
-    const title = input.title.normalize('NFC').trim()
-    if (title === '' || title.length > 200) return fail('bad-value', 'title: 1–200 characters')
+    // The one title rule (records.md "Task version 16"), after a title taken from outside (a calendar event, a mail
+    // subject) is folded onto one line: a line break never refuses a meeting or a mail it would record.
+    const titled = normalizeRecordTitle(titleOnOneLine(input.title))
+    if ('error' in titled) return fail('bad-value', titled.error)
+    const title = titled.title
     const summary = (input.summary ?? '').normalize('NFC').slice(0, 300)
     const scopes = companyData.forCompany(companyId).scopes.listWithRules()
     if (def.storage === 'file') return fail('bad-place', 'records of this type are files')

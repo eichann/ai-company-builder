@@ -69,7 +69,7 @@ const MAX_GROUPS = 200
 export interface MeetingOutputServiceDeps {
   companyData: CompanyDataSource
   /** The engine's action (cancel / retract), as the owner/admin who merges. */
-  act: (member: Member, actor: ActorInput, recordId: string, action: string, body: unknown) => Promise<Outcome<{ record: RecordSummary; entry: LedgerEntry }>>
+  act: (member: Member, actor: ActorInput, recordId: string, action: string, body: unknown) => Promise<Outcome<{ record: RecordSummary; entry: LedgerEntry | null }>>
   /** The company's members with their roles (who reads a duplicate and the kept one). */
   members: (companyId: string) => Array<{ userId: string; role: string }>
 }

@@ -90,6 +90,19 @@ test('件名・目的を直す: edited in place, only what changed is sent at th
   expectNoPageErrors(state)
 })
 
+test('件名・目的を直す on a title stored before the rule: 目的 alone saves; the assignee of a request 引き受け待ち is told it accepts', async ({ page }) => {
+  const state = await openPreview(page, 'task-card', { task: 'legacy' })
+  const card = page.getByTestId('task-card')
+  await card.getByRole('button', { name: '件名・目的を直す' }).click()
+  const form = card.getByRole('form', { name: '件名・目的を直す' })
+  await expect(form).toContainText('保存すると、このやることを引き受けたことになります。')
+  await form.getByLabel('目的').fill('来週の提案に間に合わせる')
+  await form.getByRole('button', { name: '保存' }).click()
+  await expect(page.locator('#acted')).toHaveText('set_purpose@3:purpose=来週の提案に間に合わせる')
+  await expect(card.getByRole('alert')).toHaveCount(0)
+  expectNoPageErrors(state)
+})
+
 test('「＋ファイル・フォルダをつなぐ」 links a company file; a linked file is taken away from its 「…」 and put back; a dropped file is linked', async ({ page }) => {
   const state = await openPreview(page, 'task-card')
   await page.getByRole('button', { name: 'ファイル・フォルダをつなぐ' }).click()

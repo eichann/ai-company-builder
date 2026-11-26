@@ -541,7 +541,8 @@ function CardBody({ card, top, onEditText, jobPart, meetingTitle, team, rootPath
         onPostpone={postpone ? due => void onRun([{ action: 'set_due', args: { due } }], card.names.requester && !card.roles.requester ? `期限を延ばしました。頼んだ${card.names.requester}さんに知らせました` : '期限を延ばしました') : null} />
       {/* 目的, and 「件名・目的を直す」 for the requester / the assignee (task version 16). Not keyed by version: a reload
           (someone else's change, a press half done) keeps the draft and the refusal in the form. */}
-      <TaskTextEdit key={record.id} title={record.title} purpose={card.purpose} canEdit={card.canEdit} busy={busy} onSave={onEditText} />
+      <TaskTextEdit key={record.id} title={record.title} purpose={card.purpose} canEdit={card.canEdit} busy={busy}
+        accepts={card.roles.assignee && record.state === 'awaiting_acceptance'} onSave={onEditText} />
       <ShareToDepartment folders={shareFolders} busy={busy} onShare={onShare} />
       {/* もとの連絡: only for a task that came from one (no read, no 「読み込んでいます」 on every task). */}
       <RecordSourcePanel record={record}>{card.fromIncoming ? renderSource(record) : null}</RecordSourcePanel>

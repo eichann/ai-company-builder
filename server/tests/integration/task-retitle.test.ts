@@ -130,9 +130,31 @@ describe('件名を直す by a person', () => {
     expect((await retitle('u-bob', id, '消す前の新しい件名', 1)).status).toBe(200)
     sqliteRecordContentEraser(db).eraseRecord(CO, id, 'request', ts())
     expect((await detail(id)).title).toMatch(/^消去済み/)
-    expect(await session('u-bob', 'POST', `/records/item/${id}/undo`, { version: 2, expectedVersion: 2 })).toMatchObject({ status: 409, body: { code: 'CHANGED_SINCE' } })
+    expect(await session('u-bob', 'POST', `/records/item/${id}/undo`, { version: 2, expectedVersion: 2 })).toMatchObject({ status: 409, body: { code: 'TITLE_ERASED' } })
     expect(await detail(id)).toMatchObject({ version: 2 })
     expect(JSON.stringify(db.prepare('SELECT text FROM record_contents WHERE company_id = ? AND record_id = ? AND text IS NOT NULL').all(CO, id))).not.toContain('消す前')
+  })
+
+  it('an undo brings back a title stored before the title rule exactly as it was (no misleading CHANGED_SINCE)', async () => {
+    const id = await task('u-bob', '今の件名', { fields: { assignee: 'u-bob' }, place: 'company' })
+    // A title of two lines, as the create stored them before task version 16.
+    db.prepare('UPDATE records SET title = ? WHERE company_id = ? AND id = ?').run('一行目\n二行目', CO, id)
+    expect((await retitle('u-bob', id, '一行の件名', 1)).status).toBe(200)
+    expect((await session('u-bob', 'POST', `/records/item/${id}/undo`, { version: 2, expectedVersion: 2 })).status).toBe(200)
+    expect((await detail(id)).title).toBe('一行目\n二行目')
+  })
+
+  it('the same title again is no change: no entry, no new version (and not one of the AI\'s turn)', async () => {
+    const id = await task('u-bob', '同じ件名', { fields: { assignee: 'u-bob', purpose: '同じ目的' }, place: 'company' })
+    const same = await retitle('u-bob', id, ' 同じ件名 ', 1)
+    expect(same.status).toBe(200)
+    expect(same.body.data.entry).toBeNull()
+    expect((await setPurpose('u-bob', id, '同じ目的', 1)).body.data.entry).toBeNull()
+    const t = await token('u-bob')
+    expect((await ai(t.token, 'POST', `/item/${id}/actions/retitle`, { expectedVersion: 1, args: { title: '同じ件名' } })).body.data.entry).toBeNull()
+    expect(await detail(id)).toMatchObject({ version: 1 })
+    expect((await history('u-bob', id)).map(e => e.action)).toEqual(['create'])
+    expect((db.prepare('SELECT asked_closes AS n FROM record_ai_tokens WHERE company_id = ? AND id = ?').get(CO, t.tokenId) as { n: number }).n).toBe(0)
   })
 
   it('the requester may too; another reader, and the company\'s owner, may not (nothing written)', async () => {

@@ -180,6 +180,16 @@ describe('service-owned types', () => {
 })
 
 describe('the service writer', () => {
+  // Task version 16: one title rule — a title from outside (an event name, a mail subject) is folded onto one line, never refused.
+  it('the one title rule: a title taken from outside is folded onto one line and trimmed; empty or too long is refused', () => {
+    const made = (title: string) => writer.create('a', { type: 'meeting', title, folder: null, state: 'received', fields: { assignee: 'u-alice', external_count: 0 }, actor: { id: 'u-alice', kind: 'human', source: null } })
+    const r = made('  定例\n（第2回）\t ')
+    if (!r.ok) throw new Error(r.reason)
+    expect(r.record.title).toBe('定例 （第2回）')
+    expect(made('   ')).toMatchObject({ ok: false, reason: 'bad-value' })
+    expect(made('あ'.repeat(201))).toMatchObject({ ok: false, reason: 'bad-value' })
+  })
+
   it('moves state only along the table, compare-and-set on the version, with the actor it is given', () => {
     const a = newApproval()
     expect(a).toMatchObject({ state: 'pending', fields: { requested_by: 'u-alice', assignee: 'u-bob', next_actor: 'u-bob' } })

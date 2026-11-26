@@ -33,7 +33,8 @@
  * - `ai_on_request` names only person fields already in `who`; the core's task 15 / reply_request 6 add it
  *   without a breaking change, and `who` stays without `ai`;
  * - an action's `title: text` names the record's own title (task 16): only on a type stored on the server, only
- *   kind text; a type with a server field `title` keeps that field; the core's 件名を直す / 目的を直す are additive.
+ *   kind text (a type's `title` field can only be `source: file`); the core's 件名を直す / 目的を直す are additive;
+ *   only a correction of words (`isCorrection`) goes without the member's setting.
  */
 import { describe, expect, it } from 'vitest'
 import { parseYamlLite } from '../../../shared/core/yaml-lite'
@@ -550,10 +551,12 @@ describe('ai_on_request (task 15, reply_request 6: the AI at the member\'s reque
     expect(Object.entries(task.actions).filter(([, a]) => a.aiOnRequest && aiAskedNeedsSetting(a)).map(([n]) => n)).toEqual(['complete'])
     expect(Object.entries(rr.actions).filter(([, a]) => a.aiOnRequest && aiAskedNeedsSetting(a)).map(([n]) => n).sort()).toEqual(['close', 'replied_elsewhere'])
     // Only a correction of words goes without it — anything a company's or a plugin's type may declare else still needs it.
-    expect(aiAskedNeedsSetting({ to: null, args: { title: 'text', purpose: 'long_text' } })).toBe(false)
-    for (const a of [{ to: 'declined', args: {} }, { to: 'declined', args: { purpose: 'long_text' as const } }, { to: null, args: { assignee: 'person' as const } },
-      { to: null, args: { due: 'date' as const } }, { to: null, args: { purpose: 'long_text' as const }, links: ['bundle'] }, { to: null, args: {} }]) {
-      expect(aiAskedNeedsSetting(a)).toBe(true)
+    const words = { to: null, args: { title: 'text' as const, purpose: 'long_text' as const }, notify: [], handTo: null, attach: [], approval: 'none' as const, decision: false }
+    expect(aiAskedNeedsSetting(words)).toBe(false)
+    for (const more of [{ to: 'declined' }, { args: {} }, { args: { assignee: 'person' as const } }, { args: { due: 'date' as const } },
+      { args: { purpose: 'long_text' as const, due: 'date' as const } }, { links: ['bundle'] }, { notify: ['requested_by'] }, { handTo: 'assignee' },
+      { attach: ['files'] }, { okFrom: ['assignee'] }, { approval: 'undoable' as const }, { approval: 'prior' as const }, { decision: true }]) {
+      expect(aiAskedNeedsSetting({ ...words, ...more }), JSON.stringify(more)).toBe(true)
     }
     expect(Object.entries(rr.actions).filter(([, a]) => a.aiOnRequest).map(([n, a]) => [n, a.aiOnRequest]).sort()).toEqual([['close', ['assignee']], ['replied_elsewhere', ['assignee']]])
     // `who` is unchanged, so an app or server that does not know the key still refuses the AI.

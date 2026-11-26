@@ -361,20 +361,39 @@ export function normalizeRecordTitle(value: unknown): { title: string } | { erro
   return { title }
 }
 
+/**
+ * A title the server's own services take from outside (a calendar event's name, a mail subject) folded onto one line —
+ * every run of control or line-separator characters becomes one space — before `normalizeRecordTitle`, so a line
+ * break never refuses what a service records. A person's and an AI's title are refused instead. Pure.
+ */
+export function titleOnOneLine(value: string): string {
+  return value.replace(new RegExp(`${TAG_FORBIDDEN_RE.source}+`, 'g'), ' ')
+}
+
 /** How many actions the AI may run at the member's request in one conversation turn (one record token). */
 export const AI_ASKED_PER_TURN = 20
 
 /**
- * Whether the member's own setting 「AI に完了を頼めるようにする」 governs an `ai_on_request` action. Every such action
- * needs it but **a correction of words**: no state change (`to` null), no record links, and only text arguments —
- * the record's title, `text` or `long_text` fields (件名を直す, 目的を直す). A correction needs the turn the member
- * started and nothing else — it ends nothing, is recorded and undone (owner decision 2026-11-27). Anything else a
- * company's or a plugin's type may declare (a state change, a person, a date…) still needs the setting. Pure.
+ * **A correction of words** (task version 16: 件名を直す, 目的を直す): an action that only rewrites text — no state
+ * change, no record links, at least one argument and every one of them text (the record's title, `text` or
+ * `long_text` fields), and nothing else said of it: nobody told (`notify`), no hand-over (`hand_to`), no attached
+ * files, no OK statement, no approval, not a decision. Read from what the definition already says, so a company's
+ * or a plugin's type gets no new key to learn and anything more than words is never one. Pure.
  */
-export function aiAskedNeedsSetting(action: Pick<ActionDef, 'to' | 'args' | 'links'>): boolean {
+export function isCorrection(action: Pick<ActionDef, 'to' | 'args' | 'links' | 'notify' | 'handTo' | 'attach' | 'okFrom' | 'approval' | 'decision'>): boolean {
   const kinds = Object.values(action.args)
-  const correction = action.to === null && (action.links?.length ?? 0) === 0 && kinds.length > 0 && kinds.every(k => k === 'text' || k === 'long_text')
-  return !correction
+  return action.to === null && (action.links?.length ?? 0) === 0 && kinds.length > 0 && kinds.every(k => k === 'text' || k === 'long_text')
+    && action.notify.length === 0 && action.handTo === null && action.attach.length === 0 && (action.okFrom?.length ?? 0) === 0
+    && action.approval === 'none' && !action.decision
+}
+
+/**
+ * Whether the member's own setting 「AI に完了を頼めるようにする」 governs an `ai_on_request` action: every one but a
+ * correction of words (`isCorrection`), which needs the turn the member started and nothing else — it ends nothing,
+ * is recorded and undone (owner decision 2026-11-27). Pure.
+ */
+export function aiAskedNeedsSetting(action: Parameters<typeof isCorrection>[0]): boolean {
+  return !isCorrection(action)
 }
 
 /** The refusals of the AI at the member's request: fixed sentences the AI relays as they are. */

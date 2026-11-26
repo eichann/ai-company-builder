@@ -620,14 +620,22 @@ two actions, one generic piece of definition syntax, no new route.
   (`act.ts`) takes it through **the one title rule** `normalizeRecordTitle` (NFC, trimmed, 1–`RECORD_TITLE_MAX` (200)
   characters, one line: no control or line-separator characters; else 400 `BAD_VALUE`, nothing written) — the same
   rule the generic create now applies (`create.ts`: it also trims, and refuses a title with a line break, which it
-  stored before) — writes the row's title **inside the write's transaction, after the version's compare-and-set**
+  stored before) and the service writer's create too, after folding a title taken from outside onto one line
+  (`titleOnOneLine`: each run of control / line-separator characters → one space, so a line break in an event name or
+  a mail subject never refuses what a service records). **Exceptions, kept as they were**: the external writer (a
+  plugin's import: NFC, cut at 200, the type's label when empty) and the inbox's `retitle` of its own placeholder — both
+  outside text a service must never drop. A title stored before the rule stays as it is until someone renames it.
+  It writes the row's title **inside the write's transaction, after the version's compare-and-set**
   (`writeTitle`: the row read again there), and keeps the change in the ledger as `record.title`
   (`RECORD_TITLE_CHANGE`, `shared/core/record-ledger.ts`: a dotted name no field can have, like `links.*` / `place.*`)
   before / after. It never lands in the server fields (`isPlaceOrLinkChange`); a replay shows it. **Its texts are
   content** (the content store keeps them; `record_ledger` holds references: `isContentChange` in
   `adapters/sqlite/record-contents.ts`), so erasing a record erases them too. Version + 1 (`VERSION_CONFLICT`).
   **Undo** is the generic one: `record.title` compared with the row's title now (`CHANGED_SINCE` otherwise) and written
-  back the same way — never an erased title (「消去済み（…）」 before or after → `CHANGED_SINCE`). Why an action argument and not a route of its own: `who`, `from`, `ai_on_request`, `via`, notes,
+  back exactly as it was stored (also a title from before the rule: it was the record's title) — never an erased one
+  (「消去済み（…）」 before or after → 409 `TITLE_ERASED`). **The same title or 目的 again is no change**: a correction
+  (`isCorrection`) whose changes are empty writes nothing — no entry (`entry: null`), no new version, not one of the AI
+  turn's 20. Why an action argument and not a route of its own: `who`, `from`, `ai_on_request`, `via`, notes,
   the ledger, undo, the AI's tool and the card's offer all exist for actions — one place, and a definition still says
   only what the engine does (an argument is copied into what it names).
 - **Task**: `retitle` (件名を直す, `args: { title: text }`) and `set_purpose` (目的を直す, `args: { purpose: long_text }`; an
@@ -635,12 +643,17 @@ two actions, one generic piece of definition syntax, no new route.
   awaiting_acceptance, proposed), `who: [requested_by, assignee]` (their delegate during an absence too, as for any
   person field), `note: optional`, nobody told. **Two actions, not one**: a released app shows each in 「…」 as one
   field it can fill (an action's args are all required), so it keeps working. Acting as the assignee on a request still
-  in 引き受け待ち accepts it, as every action of the assignee does ("Acceptance").
+  in 引き受け待ち accepts it, as every action of the assignee does ("Acceptance"); the card's form says so before the
+  press (「保存すると、このやることを引き受けたことになります。」) — chosen over a narrower `from` for the assignee,
+  which the definition format cannot say per person.
 - **Their AI only in a turn the member started** (`ai_on_request: [requested_by, assignee]`, "The AI at the member's
   request": the member themself in that field, a token with `memberTurn`, never one bound to a run — so never 「AI の番」,
   a plugin step's or a job's run; `via` is the default, so never a plugin's screen either). **No member setting**:
-  `aiAskedNeedsSetting` lets an action go without 「AI に完了を頼めるようにする」 only when it is a correction of words (no
-  `to`, no record links, only text arguments: the title, `text`, `long_text`); every other `ai_on_request` action — a company's or a plugin's too — still needs it. Correcting ends nothing, is recorded with `askedBy` and undone with ［取り消す］. It counts toward the
+  `aiAskedNeedsSetting` lets an action go without 「AI に完了を頼めるようにする」 only when it is **a correction of words**
+  (`isCorrection`, read from what the definition already says — no new key: no `to`, no record links, at least one
+  argument and every one text (the title, `text`, `long_text`), empty `notify` and `attach`, no `hand_to`, no
+  `ok_from`, `approval: none`, not a decision); every other `ai_on_request` action — a company's or a plugin's too —
+  still needs it. Correcting ends nothing, is recorded with `askedBy` and undone with ［取り消す］. It counts toward the
   turn's cap like the others (`AI_ASKED_REFUSALS.limit` now says 「頼まれて変えられるのは」).
 - **No leaks**: an owner-only, a members-only (not listed) and another company's task answer exactly as a missing one
   (the reader comes first); nothing logs a title.
@@ -2180,8 +2193,8 @@ to press each one. Now the member may let their own AI do exactly that, **in a c
   設定 → 自分の設定 when the server answers it (`MyWorkSwitches.aiCompletes`, optional). Engine dep `aiAskedOn`
   (composition: `workSwitches.isOn(…, 'aiCompletes')`; absent = off). Off → 403 `AI_ASK_OFF` with the fixed sentence
   `AI_ASKED_REFUSALS.off` (「…AI からは片づけられません（完了にする・終わりにする・もう返した）。設定の「自分の設定」で
-  オンにすると…」), nothing written; the AI relays it. **Not for a correction of words** (`aiAskedNeedsSetting`: no `to`, no links, only
-  text arguments); task version 16's 件名を直す / 目的を直す need the turn alone ("Task version 16").
+  オンにすると…」), nothing written; the AI relays it. **Not for a correction of words** (`aiAskedNeedsSetting` / `isCorrection`: only text
+  arguments, nothing else said of the action, "Task version 16"); task version 16's 件名を直す / 目的を直す need the turn alone ("Task version 16").
 - **Only a turn the member started** (how the server knows): `POST /me/record-tokens { …, memberTurn: true }` — the app
   says the turn started from the member's own words. The server keeps the mark (`record_ai_tokens.member_turn`) **only
   for an `act` token not bound to a run** (`record-ai-tokens.ts` `issue`; `authenticate` and `aiActor` drop it for a run
@@ -2219,7 +2232,7 @@ to press each one. Now the member may let their own AI do exactly that, **in a c
 - **The chat**: in a marked turn those tools say 「メンバーがはっきり頼んだときだけ」 and the turn gets
   `AI_ASKED_INSTRUCTIONS`; each success (the answer's `entry.askedBy`) joins **one card per turn** (`data-ai-asked`, the
   same id pushed again with every item; stored as `aiAsked`, latest copy wins): 「AI が頼まれてしたこと（n件）」, one line
-  per record with ［取り消す］ (`AiAskedCard.tsx` → `tasks:undo` with the member's session at the entry's version — on `VERSION_CONFLICT` once more at the record's version now (`undoAiAsked`: the AI changed the same record again in the turn, task version 16); undone
+  per record with ［取り消す］ (`AiAskedCard.tsx` → `tasks:undo` with the member's session at the entry's version — for every line, on `VERSION_CONFLICT` once more at the record's version now (`undoAiAsked`, task version 16: the AI changed the same record again in the turn, or anyone changed it since; the server still refuses with `CHANGED_SINCE` when that later change touched the same values); undone
   already or changed since — `AI_ASKED_UNDO_STALE_CODES` — it says so with the record's state now, read from the server).
 - Tests: `server/tests/integration/ai-asked-close.test.ts` (setting off by default and the member's alone, the fixed
   refusal, nothing written; the member's own task completed and recorded with who asked and the conversation, undone by

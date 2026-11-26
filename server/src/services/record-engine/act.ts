@@ -1,7 +1,7 @@
 /** Running an action of a record's type: the engine's five duties (records.md "The state engine"). */
 import { FULL_ACCESS_ROLES, findPrivateScope } from '../../../shared/core/permissions'
 import { isSameOrAncestorPath } from '../../../shared/core/paths'
-import { actionWho, AI_ASKED_PER_TURN, AI_ASKED_REFUSALS, aiAskedNeedsSetting, aiOnRequestField, INTERFACES, isSystemOnly, linkPersonWho, linkWhoName, normalizeRecordTitle, OK_FIELDS, RECORD_TITLE_ARG, setsRecordTitle, viaOf, type ActionDef, type TypeDefinition } from '../../../shared/core/record-types'
+import { actionWho, AI_ASKED_PER_TURN, AI_ASKED_REFUSALS, aiAskedNeedsSetting, aiOnRequestField, INTERFACES, isCorrection, isSystemOnly, linkPersonWho, linkWhoName, normalizeRecordTitle, OK_FIELDS, RECORD_TITLE_ARG, setsRecordTitle, viaOf, type ActionDef, type TypeDefinition } from '../../../shared/core/record-types'
 import { ROLE_WHO_PREFIX } from '../../../shared/core/plugin-roles'
 import { RECORD_TITLE_CHANGE, type LedgerAttachment, type LedgerChange, type LedgerDecision, type LedgerEntry, type LedgerValue } from '../../../shared/core/record-ledger'
 import { driveLinkTarget, fileLinkPath, RECORD_ID_RE } from '../../../shared/core/records'
@@ -211,7 +211,7 @@ export function acting(ctx: EngineContext) {
     },
 
     /** Run an action of the record's type. */
-    async act(member: Member, actor: ActorInput, recordId: string, actionName: string, body: unknown): Promise<Outcome<{ record: RecordSummary; entry: LedgerEntry }>> {
+    async act(member: Member, actor: ActorInput, recordId: string, actionName: string, body: unknown): Promise<Outcome<{ record: RecordSummary; entry: LedgerEntry | null }>> {
       const opened = open(member)
       if (!opened) return refuse('not-found', RECORDS_DISABLED.error, { code: RECORDS_DISABLED.code })
       const { records, reader } = opened
@@ -503,6 +503,8 @@ export function acting(ctx: EngineContext) {
       // Duty 3: state and ledger together, only if nobody changed the record since `expectedVersion`.
       const expected = b.expectedVersion as number
       if (expected !== current.version) return conflict('ほかの人が先に変えました。最新の状態を見てからもう一度お試しください', 'VERSION_CONFLICT', { version: current.version })
+      // A correction that changes nothing (the same 件名, the same 目的): no entry, no new version, not one of the turn's.
+      if (isCorrection(action) && changes.length === 0) return ok({ record: summaryOf(records, row.id), entry: null })
       let written: boolean | ReturnType<typeof refuse>
       try {
         written = transactions.run(() => {
