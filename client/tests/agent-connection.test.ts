@@ -116,7 +116,13 @@ test('a consultation runs on Claude Code\'s own system prompt with ACB\'s standi
   const { connection, read } = capture()
   connection.createChatModel({ workingDirectory: '/project', standingInstructions: '【返事の読み手】ACB の決まり' })
   const chat = read().options
-  assert.deepEqual(chat.systemPrompt, { type: 'preset', preset: 'claude_code', append: '【返事の読み手】ACB の決まり', snapshot: false })
+  assert.equal(chat.systemPrompt.type, 'preset')
+  assert.equal(chat.systemPrompt.preset, 'claude_code')
+  assert.equal(chat.systemPrompt.snapshot, false)
+  assert.ok(chat.systemPrompt.append.startsWith('【返事の読み手】ACB の決まり'))
+  // Measured 2026-11-27: without naming them, Claude read the company folder with cat / find, which the app sees only
+  // on a best-effort basis (private-read guard, tool rows).
+  assert.match(chat.systemPrompt.append, /中身を読むときは Read を使ってください/)
   assert.equal(chat.env.CLAUDE_CODE_DISABLE_AUTO_MEMORY, '1')
   // Measured 2026-11-27: otherwise the branch, recent commits and the commit / PR rules open the first message; sync owns Git.
   assert.equal(chat.settings?.includeGitInstructions, false)

@@ -52,6 +52,16 @@ export interface ClaudeConnectionConfig extends AgentHostConfig {
 /** Claude Code's own web tools, denied when the app's web research is given. */
 export const CLAUDE_BUILTIN_WEB_TOOLS = ['WebFetch', 'WebSearch'] as const
 
+/**
+ * How a consultation reads the company folder (owner decision 2026-11-27, chat-and-agents.md "What ACB tells the AI"):
+ * measured on the staging company, Claude read files with `cat` / `find` even with its own system prompt. What a shell
+ * command reads the app sees only on a best-effort basis (the private-read guard, the tool rows, the action log), so the
+ * Read tool is asked for by name. Finding files stays with commands: Claude Code 2.1.332 has no Glob / Grep (naming them
+ * sent the AI searching for them: 7 ToolSearch calls in 10 tasks). Measured with this text: shell reads 13 → 4, time +10 %.
+ * Claude Code's own tool: said here, by the connection that has it.
+ */
+export const CLAUDE_FILE_READING_INSTRUCTION = '【ファイルの読み方】ファイルの中身を読むときは Read を使ってください（cat・head・sed などのコマンドで中身を読まないでください）。ファイルの名前や場所を探すのはコマンドで構いません。アプリは Read で読んだものしか、何を読んだか・非公開フォルダを読んだかを正しく見分けられません。いくつものファイルを読むときは、Read を一度にまとめて呼んでください。'
+
 /** Built-in shell, web, file-write and delegation tools an unattended step never gets unless it declares them. */
 export const CLAUDE_UNATTENDED_DENIED_TOOLS: readonly string[] = [
   'Bash', 'BashOutput', 'KillShell', 'WebFetch', 'WebSearch', 'Write', 'Edit', 'MultiEdit', 'NotebookEdit', 'Task', 'Agent',
@@ -513,7 +523,7 @@ export function createClaudeConnection(config: ClaudeConnectionConfig, createMod
           // (measured 2026-11-26: 136 characters). `snapshot: false`: rendered fresh every request, so a company's
           // change (a feature, the sandbox, a delivered instruction) reaches a conversation already going.
           // An unattended step stays without it (no member settings, its own fixed first message: ai-turns.md).
-          ...(withPreset ? { systemPrompt: { type: 'preset' as const, preset: 'claude_code' as const, append: standingInstructions, snapshot: false } } : {}),
+          ...(withPreset ? { systemPrompt: { type: 'preset' as const, preset: 'claude_code' as const, append: `${standingInstructions}\n\n${CLAUDE_FILE_READING_INSTRUCTION}`, snapshot: false } } : {}),
           // Unattended: none of the member's own settings, MCP servers, hooks or plugins (like the hand-off agent).
           settingSources: unattended ? [] : ['user', 'project'],
           ...(unattended ? { strictMcpConfig: true, tools: [...unattended.builtinTools] } : {}),

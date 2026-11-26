@@ -178,6 +178,12 @@ before irreversible acts, honest reports). Now two parts, built in `chat-server.
   message with the repository's branch and recent commits and the commit / pull-request rules; the app's sync owns Git.
 - An unattended step and the API key keep everything in the system message as before (no preset: an unattended step
   loads no settings at all; nor `MEMBER_SCREEN_INSTRUCTION`: nobody reads it in the chat).
+- Claude Code also gets `CLAUDE_FILE_READING_INSTRUCTION` after the standing part (`agents/claude.ts`, owner decision
+  2026-11-27): read a file's content with Read, never `cat` / `head` / `sed`; finding names and places with commands
+  is fine (CLI 2.1.332 has no Glob / Grep; naming them sent the AI searching: 7 ToolSearch calls in 10 tasks). Measured on
+  the staging company (10 tasks): shell reads 13 → 4, Read 0 → 38, time +10 %, cost +13 %. What a command reads the app
+  sees only on a best-effort basis (the private-read guard, the tool rows, the action log). Said by the connection that has
+  the tool (Codex has no Read).
 - Auto memory is off for chat turns (`CLAUDE_CODE_DISABLE_AUTO_MEMORY=1`): the CLI's notes would sit outside the
   company folder, where talk of a private folder could stay behind.
 - Removed with it (covered by the preset's tool rules or plain repeats): the English copies of the task-topic,
