@@ -6,7 +6,7 @@ import { useTextSelection } from '../../doc-review/hooks/useTextSelection'
 import { markReviewSeen } from '../../doc-review/model'
 import { useAuthStore } from '../../../stores/authStore'
 import { isHtmlFile, isMarkdownFile } from '../fileKinds'
-import { htmlQuoteFinder } from '../htmlReview'
+import { htmlReading } from '../htmlReview'
 
 /**
  * The review of the active document (Markdown, or HTML in its view), the text selection that starts a
@@ -15,7 +15,7 @@ import { htmlQuoteFinder } from '../htmlReview'
 export function useEditorReview(activeFilePath: string | null, content: string) {
   const authUser = useAuthStore(state => state.user)
   const html = !!activeFilePath && isHtmlFile(activeFilePath)
-  const review = useMarkdownReview(activeFilePath, authUser?.name || 'Anonymous', authUser?.email || '', authUser?.id, html ? htmlQuoteFinder : undefined)
+  const review = useMarkdownReview(activeFilePath, authUser?.name || 'Anonymous', authUser?.email || '', authUser?.id, html ? htmlReading : undefined)
   const textSelection = useTextSelection(
     review.isReviewing,
     content,

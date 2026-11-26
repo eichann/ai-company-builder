@@ -392,8 +392,9 @@ and by the AI: **do not change them by one character** (no renamed key, no reord
   (`request_review`, `client/shared/review-request.ts`).
 - **Opening or viewing a document never writes or deletes a sidecar** (owner, 2026-10-29: members
   fix the document from the reviews, so everyone must still be able to read them). 「位置不明」 is
-  computed in memory (`markOrphanedComments`, with the document kind's `QuoteFinder`: Markdown as
-  written, HTML its page's words); completed reviews stay even when all comments are
+  computed in memory (`markOrphanedComments`, with the document kind's `DocumentReading`: Markdown as
+  written, HTML its page's words — also what an HTML review's `snapshot` keeps, its readable text);
+  completed reviews stay even when all comments are
   resolved and remain in レビュー履歴. Only the reviewer's own actions write their review file;
   replies and resolved marks go to the member's own reply file.
 - Saving (`api.ts`): every sidecar write goes to `.<name>.acb-tmp-<random>` next to it

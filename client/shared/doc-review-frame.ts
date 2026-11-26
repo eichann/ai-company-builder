@@ -43,8 +43,11 @@ export const DOC_REVIEW_RAW_MAX = 4 * DOC_REVIEW_QUOTE_MAX
 export const DOC_REVIEW_QUOTES_MAX = 500
 const NTH_MAX = 10_000
 
-/** Control characters and the bidi overrides a page could use to make a quote read differently. */
-const UNSEEN = /[\p{Cc}‎‏‪-‮⁦-⁩]/gu
+/**
+ * Characters a page could use to make a quote read differently or hide words in it: control
+ * characters, bidi marks and overrides, zero-width characters and the byte-order mark, tag characters.
+ */
+const UNSEEN = /[\p{Cc}\u200B-\u200F\u202A-\u202E\u2060\u2066-\u2069\uFEFF\u{E0000}-\u{E007F}]/gu
 
 /** Whitespace runs as one space, unseen characters dropped, trimmed. */
 export function plainQuote(text: string): string {
@@ -77,22 +80,33 @@ export function docReviewSelectionOf(value: unknown): DocReviewSelection | null 
   }
 }
 
+/** A mark main keeps: the quote and its place in the list the window sent (`docView:findQuote`'s index). */
+export interface CheckedQuote extends DocReviewQuote {
+  index: number
+}
+
+/** What the view does for the review, as main keeps it after the check. */
+export interface CheckedReview {
+  selecting: boolean
+  quotes: CheckedQuote[]
+}
+
 /**
- * What the window asked the view to do for the review, or null when it is not that shape: `selecting`
- * a boolean, at most `DOC_REVIEW_QUOTES_MAX` quotes of a visible text (cut to `DOC_REVIEW_QUOTE_MAX`),
- * a whole `nth` from 0, a boolean `resolved`.
+ * What the window asked the view to do for the review, or null when it is not that shape (`selecting`
+ * a boolean, `quotes` a list). Quotes are checked one by one — a visible text (cut to
+ * `DOC_REVIEW_QUOTE_MAX`), a whole `nth` from 0, a boolean `resolved` — and a bad one is dropped
+ * alone; the first `DOC_REVIEW_QUOTES_MAX` are looked at. Each keeps its index in the list sent, so
+ * `docView:findQuote` still names the window's own comment.
  */
-export function docViewReviewOf(value: unknown): DocViewReview | null {
+export function docViewReviewOf(value: unknown): CheckedReview | null {
   if (!isRecord(value) || typeof value.selecting !== 'boolean' || !Array.isArray(value.quotes)) return null
-  if (value.quotes.length > DOC_REVIEW_QUOTES_MAX) return null
-  const quotes: DocReviewQuote[] = []
-  for (const q of value.quotes as unknown[]) {
-    if (!isRecord(q) || typeof q.text !== 'string' || typeof q.resolved !== 'boolean') return null
-    if (typeof q.nth !== 'number' || !Number.isInteger(q.nth) || q.nth < 0 || q.nth > NTH_MAX) return null
+  const quotes: CheckedQuote[] = []
+  ;(value.quotes as unknown[]).slice(0, DOC_REVIEW_QUOTES_MAX).forEach((q, index) => {
+    if (!isRecord(q) || typeof q.text !== 'string' || typeof q.resolved !== 'boolean') return
+    if (typeof q.nth !== 'number' || !Number.isInteger(q.nth) || q.nth < 0 || q.nth > NTH_MAX) return
     const text = plainQuote(q.text.slice(0, DOC_REVIEW_RAW_MAX)).slice(0, DOC_REVIEW_QUOTE_MAX)
-    if (!text) return null
-    quotes.push({ text, nth: q.nth, resolved: q.resolved })
-  }
+    if (text) quotes.push({ text, nth: q.nth, resolved: q.resolved, index })
+  })
   return { selecting: value.selecting, quotes }
 }
 

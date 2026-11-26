@@ -58,6 +58,8 @@ export interface DocViewSnapshot {
   bandShown: boolean
   /** The text the member selected in it while reviewing (`seq` tells one selection from the next), until used or dropped. */
   selection: (DocReviewSelection & { seq: number }) | null
+  /** The view shows another page than its document (a link, the page's script): the review pauses meanwhile. */
+  elsewhere: boolean
 }
 
 /** Several file events of one write (temp file, rename, its styles) reload once. */
@@ -68,7 +70,7 @@ const MUTATION_CHECK_MS = 100
 const WATCHED_ATTRIBUTES = ['class', 'style', 'hidden', 'open', 'aria-hidden', 'data-state']
 
 export class DocViewSession {
-  private snapshot: DocViewSnapshot = { status: { kind: 'opening' }, zoom: 1, fullScreen: false, refreshed: false, link: null, blocked: null, bandShown: false, selection: null }
+  private snapshot: DocViewSnapshot = { status: { kind: 'opening' }, zoom: 1, fullScreen: false, refreshed: false, link: null, blocked: null, bandShown: false, selection: null, elsewhere: false }
   /** What the view does for the review (reports selections, draws marks): sent again to every new view. */
   private review: DocViewReview | null = null
   private selectionSeq = 0
@@ -174,7 +176,7 @@ export class DocViewSession {
     const generation = ++this.generation
     // A new view (also ［もう一度表示する］ after ［止める］ or a crash): a new band; ［×］ holds for its reloads only.
     this.dismissed = null
-    this.set({ status: { kind: 'opening' }, link: null, blocked: null, bandShown: false, selection: null })
+    this.set({ status: { kind: 'opening' }, link: null, blocked: null, bandShown: false, selection: null, elsewhere: false })
     const result = await this.source.open().catch(() => null)
     if (generation !== this.generation) {
       // Another tab, 中身 or ［止める］ came first: this view is nobody's.
@@ -252,7 +254,12 @@ export class DocViewSession {
       return
     }
     if (event.kind === 'selection') {
-      if (this.review?.selecting) this.set({ selection: { ...event.quote, seq: ++this.selectionSeq } })
+      if (this.review?.selecting && !this.snapshot.elsewhere) this.set({ selection: { ...event.quote, seq: ++this.selectionSeq } })
+      return
+    }
+    if (event.kind === 'page') {
+      // Another page of the folder: a selection made for the reviewed document no longer stands.
+      this.set(event.own ? { elsewhere: false } : { elsewhere: true, selection: null })
       return
     }
     if (event.kind === 'gone') {

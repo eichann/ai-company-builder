@@ -5,8 +5,8 @@ import {
   replyFileKey,
   markOrphanedComments,
   mergeRepliesIntoReviews,
-  quoteAsWritten,
-  type QuoteFinder,
+  readAsWritten,
+  type DocumentReading,
   type CommentReply,
   type CommentSeverity,
   type ResolutionEntry,
@@ -36,10 +36,10 @@ export interface ReviewSaveFailure {
 }
 
 /**
- * `findQuote`: how this kind of document tells whether a quote is still in it (「位置不明」); Markdown's
+ * `reading`: how this kind of document is read for its review (「位置不明」, the snapshot); Markdown's
  * as written by default, the HTML viewer hands its own (the words of the page, without its tags).
  */
-export function useMarkdownReview(filePath: string | null, reviewerName: string, reviewerEmail: string, memberId?: string | null, findQuote: QuoteFinder = quoteAsWritten) {
+export function useMarkdownReview(filePath: string | null, reviewerName: string, reviewerEmail: string, memberId?: string | null, reading: DocumentReading = readAsWritten) {
   const [reviews, setReviews] = useState<Review[]>([])
   const [activeReview, setActiveReview] = useState<Review | null>(null)
   const [loading, setLoading] = useState(false)
@@ -73,7 +73,7 @@ export function useMarkdownReview(filePath: string | null, reviewerName: string,
 
       // Opening a document only reads: 「位置不明」 is computed here, and completed
       // reviews stay (all resolved too) because members fix the document from them.
-      const cleaned = markOrphanedComments(allReviews, docContent, findQuote)
+      const cleaned = markOrphanedComments(allReviews, docContent, reading.findQuote)
 
       setReviews(prev => {
         if (JSON.stringify(prev) === JSON.stringify(cleaned)) return prev
@@ -112,7 +112,7 @@ export function useMarkdownReview(filePath: string | null, reviewerName: string,
     } finally {
       if (seq === loadSeqRef.current) setLoading(false)
     }
-  }, [reviewerEmail, findQuote])
+  }, [reviewerEmail, reading])
 
   useEffect(() => {
     setSaveError(null)
@@ -194,12 +194,13 @@ export function useMarkdownReview(filePath: string | null, reviewerName: string,
     const review = activeReview
     return attempt('other', async () => {
       // Save snapshot of document content at review completion time
-      const snapshot = await readDocument(filePath) || undefined
+      const text = await readDocument(filePath)
+      const snapshot = text ? reading.snapshotOf(text) || undefined : undefined
       const saved = await saveOwnReview(filePath, { ...review, status: 'completed' as const, completedAt: new Date().toISOString(), snapshot })
       setReviews(prev => prev.map(r => r.id === saved.id ? saved : r))
       setActiveReview(null)
     })
-  }, [activeReview, filePath, attempt, saveOwnReview])
+  }, [activeReview, filePath, attempt, saveOwnReview, reading])
 
   const cancelReview = useCallback(async (): Promise<boolean> => {
     if (!activeReview || !filePath) return false

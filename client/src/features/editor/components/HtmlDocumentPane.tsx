@@ -61,7 +61,7 @@ export function HtmlDocumentPane({ filePath, onShowSource, leavingForSource, zoo
     const ports = docViewPorts()
     return new DocViewSession(fileDocument(filePath, ports.views, leavingForSource), ports.views, ports.links, tabZoom, onZoom)
   })
-  const { status, zoom, fullScreen, refreshed, link, blocked, bandShown, selection } = useSyncExternalStore(session.subscribe, session.getSnapshot)
+  const { status, zoom, fullScreen, refreshed, link, blocked, bandShown, selection, elsewhere } = useSyncExternalStore(session.subscribe, session.getSnapshot)
   const canAskAi = useCommandAvailable('chat.insertText')
   const rootPath = useAppStore(s => s.currentCompany?.rootPath ?? null)
   const running = status.kind === 'shown' || status.kind === 'opening'
@@ -81,7 +81,7 @@ export function HtmlDocumentPane({ filePath, onShowSource, leavingForSource, zoo
   const showComment = (commentId: string, quote: string) => {
     if (showDiff) { diffRef.current?.scrollToText(quote); return }
     const index = marks.ids.indexOf(commentId)
-    if (index < 0) return
+    if (index < 0 || elsewhere) return
     void session.findQuote(index).then(found => setNotShown(found === 'shown' ? null : NOT_SHOWN[found]))
   }
   // The comment box sits over the side panel, never over the document (the view is drawn above the page).
@@ -138,7 +138,12 @@ export function HtmlDocumentPane({ filePath, onShowSource, leavingForSource, zoo
           onAskAi={canAskAi ? () => void runCommand('chat.insertText', { text: rebuildRequestOf(filePath, rootPath) }) : undefined}
         />
       )}
-      {notShown && (
+      {elsewhere && (reviewing || viewingCompleted) && (
+        <p aria-live="polite" className="px-card py-1 border-b border-[color:var(--color-border)] text-small text-text-muted">
+          いまは資料の中の別のページを表示しているため、レビューを止めています。元の資料に戻ると再開します。
+        </p>
+      )}
+      {notShown && !elsewhere && (
         <p aria-live="polite" className="flex items-center gap-2 px-card py-1 border-b border-[color:var(--color-border)] text-small text-text-muted">
           <span className="flex-1">{notShown}</span>
           <button type="button" className={TOOL} aria-label="閉じる" onClick={() => setNotShown(null)}><X size={12} aria-hidden /></button>
@@ -146,9 +151,9 @@ export function HtmlDocumentPane({ filePath, onShowSource, leavingForSource, zoo
       )}
       <div className="flex-1 min-h-0 min-w-0 flex">
         {showDiff && activeReview?.snapshot ? (
-          // 「変更を確認」: the page's words then and now (the view closes meanwhile and opens again after).
+          // 「変更を確認」: the page's words then (the snapshot keeps them, `htmlReading`) and now; the view closes meanwhile.
           <div className="flex-1 min-w-0 overflow-hidden">
-            <MarkdownDiffView ref={diffRef} snapshot={htmlReadableText(activeReview.snapshot)} current={htmlReadableText(content)} />
+            <MarkdownDiffView ref={diffRef} snapshot={activeReview.snapshot} current={htmlReadableText(content)} />
           </div>
         ) : (
           // The document's own view is placed over this area; what is written here shows only when it is not.

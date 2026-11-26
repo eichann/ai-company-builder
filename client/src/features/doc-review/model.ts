@@ -176,6 +176,20 @@ export type QuoteFinder = (documentText: string) => (quote: string) => boolean
 export const quoteAsWritten: QuoteFinder = documentText => quote => documentText.includes(quote)
 
 /**
+ * How a kind of document is read for its review: where a quote is (「位置不明」) and what a completed
+ * review keeps as its `snapshot` (「変更を確認」 compares it with the same reading of the file now).
+ * Markdown: as written. An HTML page hands its own: its visible words, not its HTML (a page with
+ * embedded images would put megabytes into the company folder's sidecar). The stored shape is the
+ * same string either way.
+ */
+export interface DocumentReading {
+  findQuote: QuoteFinder
+  snapshotOf: (documentText: string) => string
+}
+
+export const readAsWritten: DocumentReading = { findQuote: quoteAsWritten, snapshotOf: documentText => documentText }
+
+/**
  * For display only: a completed review's comment is 「位置不明」 (`orphaned`) when
  * its text is no longer in the document. Never written back — members fix the
  * document from these reviews, so opening one must not change anyone's file.

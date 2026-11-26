@@ -10,7 +10,7 @@
  * on both sides.
  */
 import type { DocReviewQuote, DocReviewSelection } from '../../../shared/doc-review-frame'
-import type { QuoteFinder } from '../doc-review/model'
+import type { DocumentReading, QuoteFinder } from '../doc-review/model'
 
 /** Elements whose content is not shown as the page's words. */
 const HIDDEN_TEXT = new Set(['script', 'style', 'noscript', 'template', 'textarea', 'title'])
@@ -96,8 +96,12 @@ function walkHtml(html: string, visit: Visitor, hiddenText: ReadonlySet<string> 
       const closing = m[1] === '/'
       visit.tag?.(name, closing)
       if (!closing && RAW_TEXT.has(name)) {
-        const close = html.toLowerCase().indexOf(`</${name}`, i)
-        const end = close < 0 ? n : close
+        // Its end tag, found from here in any letter case without changing the file (lower-casing it
+        // per element was quadratic, and 「İ」 lower-cases to two characters, shifting every index).
+        const endTag = new RegExp(`</${name}(?=[\\s/>]|$)`, 'gi')
+        endTag.lastIndex = i
+        const close = endTag.exec(html)
+        const end = close ? close.index : n
         if (!hiddenText?.has(name)) for (let k = i; k < end; k++) visit.text(html[k], k)
         i = end
       } else if (!closing && name === 'template' && hiddenText?.has('template')) {
@@ -122,18 +126,25 @@ function walkHtml(html: string, visit: Visitor, hiddenText: ReadonlySet<string> 
 
 const squash = (text: string) => text.replace(/\s+/g, '')
 
-/** The page's words without whitespace, and where each character starts in the file. */
+/** The words of the last file read, per way of reading: every comment, the finder and 位置不明 share one walk. */
+const lastWords = new Map<ReadonlySet<string> | null, { html: string; words: { text: string; at: number[] } }>()
+
+/** The page's words without whitespace, and where each character starts in the file (read once per file text). */
 function wordsOf(html: string, hiddenText: ReadonlySet<string> | null = HIDDEN_TEXT): { text: string; at: number[] } {
-  let text = ''
+  const kept = lastWords.get(hiddenText)
+  if (kept && kept.html === html) return kept.words
+  const chars: string[] = []
   const at: number[] = []
   walkHtml(html, {
     text(char, from) {
       if (/\s/.test(char)) return
-      text += char
+      chars.push(char)
       at.push(from)
     },
   }, hiddenText)
-  return { text, at }
+  const words = { text: chars.join(''), at }
+  lastWords.set(hiddenText, { html, words })
+  return words
 }
 
 /** Every start of `quote` in `text`. */
@@ -199,8 +210,10 @@ export function htmlQuoteNth(html: string, quote: string, startOffset: number): 
  * 「位置不明」 for an HTML document: the quote is still among the file's words — scripts' too (a
  * chart's labels are written in its script), not styles.
  */
+const STYLES_ONLY: ReadonlySet<string> = new Set(['style'])
+
 export const htmlQuoteFinder: QuoteFinder = html => {
-  const { text } = wordsOf(html, new Set(['style']))
+  const { text } = wordsOf(html, STYLES_ONLY)
   return quote => text.includes(squash(quote))
 }
 
@@ -230,3 +243,10 @@ export function htmlReviewMarks(html: string, comments: ReadonlyArray<{ id: stri
     ids: shown.map(c => c.id),
   }
 }
+
+/**
+ * How an HTML document is read for its review: quotes found among its page's words, and the snapshot a
+ * completed review keeps is its readable text (`htmlReadableText`) — what 「変更を確認」 compares — not
+ * the HTML (owner decision 2026-11-26: embedded images would put megabytes into the sidecar).
+ */
+export const htmlReading: DocumentReading = { findQuote: htmlQuoteFinder, snapshotOf: htmlReadableText }

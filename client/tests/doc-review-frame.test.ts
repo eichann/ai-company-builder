@@ -6,7 +6,7 @@
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { createDocViews, type DocViewHandle, type DocViewHooks, type DocViewPort } from '../electron/features/doc-frames/views'
+import { createDocViews, SELECTION_READ_LIMIT_MS, type DocViewHandle, type DocViewHooks, type DocViewPort } from '../electron/features/doc-frames/views'
 import { registerDocViewsIpc } from '../electron/features/doc-frames/ipc'
 import { READ_SELECTION_CODE } from '../electron/features/doc-frames/review-world'
 import {
@@ -28,17 +28,22 @@ test('a selection from the view is taken only in its exact shape, cut to size, w
   assert.equal(long.text.length, DOC_REVIEW_QUOTE_MAX)
   assert.equal(long.prefix, 'p'.repeat(DOC_REVIEW_CONTEXT_MAX), 'the end of the text before')
   assert.equal(long.suffix, 's'.repeat(DOC_REVIEW_CONTEXT_MAX), 'the start of the text after')
-  // A page could reverse how a quote reads (bidi overrides) or hide characters in it.
-  assert.equal(docReviewSelectionOf({ text: '支払‮い先\u0007', prefix: '', suffix: '' })!.text, '支払い先')
+  // A page could reverse how a quote reads (bidi overrides) or hide characters or words in it.
+  const hidden = '支\u202E払\u200Bい\u200D先\uFEFF\u2060\u{E0041}\u{E007F}\u0007'
+  assert.equal(docReviewSelectionOf({ text: hidden, prefix: '', suffix: '' })!.text, '支払い先')
 })
 
-test('what the window asks the view to draw is checked: booleans, whole occurrences, visible quotes, a cap', () => {
-  assert.deepEqual(docViewReviewOf({ selecting: true, quotes: [{ text: ' a\nb ', nth: 2, resolved: false }] }), { selecting: true, quotes: [{ text: 'a b', nth: 2, resolved: false }] })
-  for (const bad of [null, { selecting: 'yes', quotes: [] }, { selecting: true }, { selecting: true, quotes: [{ text: 'a', nth: -1, resolved: false }] },
-    { selecting: true, quotes: [{ text: 'a', nth: 1.5, resolved: false }] }, { selecting: true, quotes: [{ text: ' ', nth: 0, resolved: false }] },
-    { selecting: true, quotes: Array.from({ length: DOC_REVIEW_QUOTES_MAX + 1 }, () => ({ text: 'a', nth: 0, resolved: false })) }]) {
-    assert.equal(docViewReviewOf(bad), null)
-  }
+test('what the window asks the view to draw is checked quote by quote: a bad one is dropped alone, each keeps its index, a cap', () => {
+  assert.deepEqual(docViewReviewOf({ selecting: true, quotes: [{ text: ' a\nb ', nth: 2, resolved: false }] }), { selecting: true, quotes: [{ text: 'a b', nth: 2, resolved: false, index: 0 }] })
+  for (const bad of [null, { selecting: 'yes', quotes: [] }, { selecting: true }, { selecting: true, quotes: 'a' }]) assert.equal(docViewReviewOf(bad), null)
+  const mixed = docViewReviewOf({ selecting: false, quotes: [
+    { text: 'a', nth: -1, resolved: false }, { text: 'ok', nth: 0, resolved: true }, { text: 'a', nth: 1.5, resolved: false },
+    { text: ' ', nth: 0, resolved: false }, { text: 'b', nth: 0, resolved: 'no' }, { text: 'last', nth: 3, resolved: false, body: 'not ours' },
+  ] })!
+  assert.equal(mixed.selecting, false)
+  assert.deepEqual(mixed.quotes, [{ text: 'ok', nth: 0, resolved: true, index: 1 }, { text: 'last', nth: 3, resolved: false, index: 5 }])
+  const many = docViewReviewOf({ selecting: true, quotes: Array.from({ length: DOC_REVIEW_QUOTES_MAX + 10 }, () => ({ text: 'a', nth: 0, resolved: false })) })!
+  assert.equal(many.quotes.length, DOC_REVIEW_QUOTES_MAX)
   assert.equal(docQuoteFoundOf('shown'), 'shown')
   assert.equal(docQuoteFoundOf({ toString: () => 'shown' }), 'missing', 'anything else from the page is "not there"')
 })
@@ -74,7 +79,8 @@ async function setUp() {
     frames: { grant: () => 'acb-doc://0123456789abcdef0123456789abcdef/a.html', revoke: () => {} },
     shell: shell.port,
     notify: (windowId, event) => { events.push([windowId, event]) },
-    later: fn => { fn(); return () => {} },
+    // At once, but for the read's time limit (a test of its own).
+    later: (fn, ms) => { if (ms !== SELECTION_READ_LIMIT_MS) fn(); return () => {} },
   })
   const id = (await views.open({} as OpenableDocument, views.begin(MAIN)))!
   const settle = () => new Promise(resolve => setImmediate(resolve))
@@ -167,4 +173,89 @@ test('docView:review and docView:findQuote are the main window\'s page\'s only, 
   assert.equal(await handlers.get('docView:findQuote')!(ev(true), id, 1), 'missing', 'only an index of the marks set')
   assert.equal(await handlers.get('docView:findQuote')!(ev(true), id, 0), 'missing', 'the fake page answers 0: anything but shown / hidden is "not there"')
   assert.ok(shell.codes.some(([, code]) => code.includes("return 'shown'") && code.includes('目標は 2,600 万円')))
+})
+
+test('another page of the folder in the view (a link, the page\'s script): the review pauses — no selection, no marks — and resumes on the reviewed document', async () => {
+  const { shell, events, views, id, settle } = await setUp()
+  const OWN = 'acb-doc://0123456789abcdef0123456789abcdef/a.html'
+  const OTHER = 'acb-doc://0123456789abcdef0123456789abcdef/b.html'
+  shell.answer.value = { text: 'B の言葉', prefix: '', suffix: '' }
+  views.review(id, MAIN, { selecting: true, quotes: [{ text: 'A の言葉', nth: 0, resolved: false }] })
+  shell.hooks(id).onPageStart(id, OWN)
+  assert.deepEqual(events.filter(([, e]) => e.kind === 'page'), [], 'its own page tells nothing')
+  shell.hooks(id).onPageStart(id, OTHER)
+  assert.deepEqual(events.filter(([, e]) => e.kind === 'page'), [[MAIN, { viewId: id, kind: 'page', own: false }]])
+  const drawnBefore = shell.codes.filter(([, code]) => code.includes('A の言葉')).length
+  shell.hooks(id).onPageLoaded(id)
+  shell.hooks(id).onReviewInput(id)
+  await settle()
+  assert.equal(shell.codes.filter(([, code]) => code.includes('A の言葉')).length, drawnBefore, 'A\'s marks are not drawn into B')
+  assert.equal(shell.codes.filter(([, code]) => code === READ_SELECTION_CODE).length, 0, 'B\'s selection is not read')
+  assert.deepEqual(selections(events), [])
+  assert.equal(await views.findQuote(id, MAIN, 0), 'missing')
+  // Back on the reviewed document (with a fragment or query, the same page).
+  shell.hooks(id).onPageStart(id, `${OWN}?v=2#top`)
+  assert.deepEqual(events.filter(([, e]) => e.kind === 'page').at(-1), [MAIN, { viewId: id, kind: 'page', own: true }])
+  shell.hooks(id).onPageLoaded(id)
+  assert.equal(shell.codes.filter(([, code]) => code.includes('A の言葉')).length, drawnBefore + 1)
+  shell.hooks(id).onReviewInput(id)
+  await settle()
+  assert.equal(selections(events).length, 1)
+})
+
+test('a selection read on a page that went away meanwhile hands nothing over', async () => {
+  const shell = fakeShell()
+  const events: Array<[number, DocViewEvent]> = []
+  const queued: Array<() => void> = []
+  const views = createDocViews({
+    frames: { grant: () => 'acb-doc://0123456789abcdef0123456789abcdef/a.html', revoke: () => {} },
+    shell: shell.port,
+    notify: (windowId, event) => { events.push([windowId, event]) },
+    later: (fn, ms) => { if (ms !== SELECTION_READ_LIMIT_MS) queued.push(fn); return () => {} },
+  })
+  const id = (await views.open({} as OpenableDocument, views.begin(MAIN)))!
+  shell.answer.value = { text: '前年同月比 112%', prefix: '', suffix: '' }
+  views.review(id, MAIN, { selecting: true, quotes: [] })
+  shell.hooks(id).onReviewInput(id)
+  // The page reloads (even its own) before the read: what is selected then is not what the member released on.
+  shell.hooks(id).onPageStart(id, 'acb-doc://0123456789abcdef0123456789abcdef/a.html')
+  for (const fn of queued.splice(0)) fn()
+  await new Promise(resolve => setImmediate(resolve))
+  assert.deepEqual(selections(events), [])
+})
+
+test('a page that never answers a selection read does not stop the next one (time limit)', async () => {
+  const shell = fakeShell()
+  const events: Array<[number, DocViewEvent]> = []
+  const limits: Array<() => void> = []
+  const views = createDocViews({
+    frames: { grant: () => 'acb-doc://0123456789abcdef0123456789abcdef/a.html', revoke: () => {} },
+    shell: shell.port,
+    notify: (windowId, event) => { events.push([windowId, event]) },
+    later: (fn, ms) => { if (ms === SELECTION_READ_LIMIT_MS) limits.push(fn); else fn(); return () => {} },
+  })
+  const id = (await views.open({} as OpenableDocument, views.begin(MAIN)))!
+  views.review(id, MAIN, { selecting: true, quotes: [] })
+  let answer: (value: unknown) => void = () => {}
+  shell.answer.value = new Promise(resolve => { answer = resolve })
+  shell.hooks(id).onReviewInput(id)
+  await new Promise(resolve => setImmediate(resolve))
+  shell.hooks(id).onReviewInput(id)
+  assert.equal(shell.codes.filter(([, code]) => code === READ_SELECTION_CODE).length, 1, 'one read at a time')
+  for (const fn of limits.splice(0)) fn()
+  shell.answer.value = { text: '次の選択', prefix: '', suffix: '' }
+  shell.hooks(id).onReviewInput(id)
+  await new Promise(resolve => setImmediate(resolve))
+  assert.equal(shell.codes.filter(([, code]) => code === READ_SELECTION_CODE).length, 2, 'read again after the limit')
+  answer({ text: '遅い答え', prefix: '', suffix: '' })
+  await new Promise(resolve => setImmediate(resolve))
+  assert.deepEqual(selections(events).map(([, e]) => (e as { quote: { text: string } }).quote.text), ['次の選択'], 'the late answer is dropped')
+})
+
+test('findQuote names the window\'s own comment even when a bad quote before it was dropped', async () => {
+  const { shell, views, id } = await setUp()
+  views.review(id, MAIN, { selecting: false, quotes: [{ text: ' ', nth: 0, resolved: false }, { text: '二つ目', nth: 0, resolved: false }] })
+  await views.findQuote(id, MAIN, 1)
+  assert.ok(shell.codes.some(([, code]) => code.includes("return 'shown'") && code.includes('二つ目')))
+  assert.equal(await views.findQuote(id, MAIN, 0), 'missing', 'the dropped one finds nothing')
 })

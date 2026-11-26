@@ -252,7 +252,7 @@ export function createDocViewShell(options: DocViewShellOptions): DocViewPort {
       // What its page wanted from the internet and did not get, for the band (hosts only leave main).
       blockedReporters.set(id, url => hooks.onBlocked(id, url))
       watchCspRefusals(contents, url => hooks.onBlocked(id, url), log)
-      contents.on('did-navigate', () => hooks.onPageStart(id))
+      contents.on('did-navigate', (_event, url) => hooks.onPageStart(id, url))
       contents.on('did-finish-load', () => hooks.onPageLoaded(id))
       contents.on('input-event', (_event, input) => {
         const at = Date.now()

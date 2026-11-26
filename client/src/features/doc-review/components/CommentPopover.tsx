@@ -47,9 +47,9 @@ export function CommentPopover({
       style={{ left: position.x, top: position.y + 8 }}
     >
       <div className="p-3">
-        {/* Selected text quote */}
+        {/* The whole quote, scrolling when long: what is saved is what the member sees (an HTML page could set the selection). */}
         {selectedText && (
-          <div className="mb-2 px-2 py-1.5 border-l-2 border-gray-300 dark:border-zinc-600 bg-gray-50 dark:bg-zinc-900/50 rounded-r-small text-caption font-normal text-gray-500 dark:text-zinc-400 line-clamp-3 leading-relaxed">
+          <div data-testid="comment-quote" className="mb-2 px-2 py-1.5 border-l-2 border-gray-300 dark:border-zinc-600 bg-gray-50 dark:bg-zinc-900/50 rounded-r-small text-caption font-normal text-gray-500 dark:text-zinc-400 max-h-32 overflow-y-auto whitespace-pre-wrap break-words leading-relaxed">
             {selectedText}
           </div>
         )}

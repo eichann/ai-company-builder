@@ -357,8 +357,11 @@ The same document review as Markdown's (`files-and-editor.md` "Document review")
 selected text, replies, resolved marks, レビュー履歴 and 「変更を確認」, the AI reading the sidecars —
 **the same sidecar files and JSON shapes, unchanged** (`<doc>.html.review.<uuid>.json`,
 `<doc>.html.reply.<key>.json`; `selectedText` is the page's words, `startOffset` / `endOffset` where
-they are in the `.html` file). The sidecars are `.json`: not a served type, so a document's scripts
-can never read its review.
+they are in the `.html` file). **The `snapshot` of a completed review is the page's readable text**
+(`htmlReadableText`, owner decision 2026-11-26), not the HTML — the same string field; it keeps
+sidecars small (a page with embedded images would put megabytes into the company folder), and it is
+what 「変更を確認」 compares with the file's text now. The sidecars are `.json`: not a served type, so a
+document's scripts can never read its review.
 
 - **Where trust ends.** The renderer and main are trusted; **everything inside the view is not**
   (the document's scripts own its DOM, its selection and its timing). The app's piece runs in the
@@ -373,12 +376,24 @@ can never read its review.
   exists: `frame-src 'none'`). What comes back is checked (`docReviewSelectionOf`,
   `client/shared/doc-review-frame.ts`): exactly `{ text, prefix, suffix }`, strings of at most 4,000
   characters (the piece cuts there), the text cut to 1,000 and the context to 32 characters,
-  whitespace collapsed, control characters and bidi overrides dropped; anything else is ignored. Only
-  then is `{ kind: 'selection', quote }` sent to that view's window, and the keyboard is given back to
-  the app's page (the comment box takes it). One read at a time per view; a review ended meanwhile
-  sends nothing.
+  whitespace collapsed, control characters, bidi marks and overrides, zero-width characters
+  (U+200B–200D, U+2060, U+FEFF) and tag characters (U+E0000–E007F) dropped; anything else is ignored.
+  Only then is `{ kind: 'selection', quote }` sent to that view's window, and the keyboard is given
+  back to the app's page (the comment box takes it, and shows the **whole** quote, scrolling when long,
+  before anything is saved). One read at a time per view, at most `SELECTION_READ_LIMIT_MS` (1 s: a
+  page that never answers does not stop the next read; a late answer is dropped); a review ended, or a
+  page loaded, meanwhile sends nothing.
+- **The reviewed document only.** The view may go to another `.html` page of the same folder (a link,
+  the page's script: the navigation lock allows its own grant). Main keeps which page the view opened
+  (`views.ts` `pages`) and, on every main-frame navigation (`did-navigate`, the address), whether it
+  still shows it (path under the grant's folder; a query or fragment is the same page): while it does
+  not, no selection is read, no marks are drawn, `findQuote` finds nothing, and the window hears
+  `{ kind: 'page', own: false }` (and `own: true` when the document is back) — the pane says
+  「いまは資料の中の別のページを表示しているため、レビューを止めています。元の資料に戻ると再開します。」 and drops a
+  selection it held. So nothing of page B lands in document A's review, nor A's marks in B.
 - **What goes into the view**: only each shown comment's quoted text, which occurrence of it, and
-  whether it is resolved (`docViewReviewOf`: at most 500 quotes, checked shape) — never a comment's
+  whether it is resolved (`docViewReviewOf`: the first 500 looked at, each checked alone — a bad one is
+  dropped, the others kept with their index in the list sent, which `findQuote(index)` names) — never a comment's
   body, a name, an email or an id. Marks are the CSS Custom Highlight API (`CSS.highlights`; the DOM
   is not changed, so a page that re-renders itself is not broken), coloured by a constructed
   stylesheet the piece adopts while it draws (`REVIEW_HIGHLIGHT_CSS`, kept in the isolated world's own
@@ -401,7 +416,11 @@ can never read its review.
   nearest that offset (`htmlQuoteNth`). 「位置不明」: doc-review's `markOrphanedComments` with the HTML
   finder (`htmlQuoteFinder`, a `QuoteFinder` port handed in by the editor's `useEditorReview`; scripts'
   words count there — a chart's labels are written in its script). 「変更を確認」 compares the page's
-  words a line per block (`htmlReadableText`), not the HTML.
+  words a line per block (`htmlReadableText`), not the HTML. **Once per file text**: the words are
+  read in one linear walk (end tags found case-insensitively from where they start, never by
+  lower-casing the file: that was quadratic, and 「İ」 lower-cases to two characters) and kept for that
+  text (`wordsOf`), shared by every comment, the finder and 「位置不明」: a 3.5 MB page with 50 comments
+  in well under a second (`htmlReview.test.ts`, budget 1 s; 576 KB took 4.6 s before).
 - **On screen** (`HtmlDocumentPane`): the review's banners above the toolbar, ［レビュー履歴］ and
   ［レビューする］ in it, the side panel beside the document, the comment box **over the side panel,
   never over the document** (the view is drawn above the page), 「変更を確認」 in place of the document
@@ -542,7 +561,11 @@ hosts, and nothing else):
   new tally, the scheme / host rule, dedupe, both caps, the interval, the cancel on close, the
   editor's 中身 → 見る, the dismissed hosts, the chat row's state / failure / tool / folder / segment
   checks. Kept on purpose: the request hook's report (no request reaches it past the CSP today).
-- Review (above): `doc-frame-electron.test.ts` 「review: …」 — a page that replaces the built-ins the piece
+- Review (above): `doc-review-frame.test.ts` also — another page of the folder pauses the review (no
+  read, no marks, no find; told to the window; resumed on the document), a read across a page load hands
+  nothing over, the read's time limit, quotes dropped one by one with their index kept, the hidden
+  characters; `htmlReview.test.ts` — the large page's budget, 「İ」, templates, a two-unit entity;
+  `doc-frame-electron.test.ts` 「review: …」 — a page that replaces the built-ins the piece
   uses (`getSelection`, `Selection.toString`, `Range`, `createTreeWalker`, `CSS.highlights.set`) and keeps
   making a selection and firing synthetic mouse-up / pointer-up / Shift key-up events gets no selection read;
   the member's real drag reads the real words and none of the page's replaced built-ins is called (the

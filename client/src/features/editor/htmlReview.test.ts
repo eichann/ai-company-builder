@@ -67,6 +67,30 @@ test('a template\'s content (nested ones too) is not counted, as the view does n
   assert.equal(htmlQuoteNth(html, 'same', second.start), 1)
 })
 
+test('a character whose lower case is longer (İ) does not shift where an end tag is found', () => {
+  const html = '<p>İİİİ</p><SCRIPT>const x = "same"</ScRiPt><p>first same</p><style>p{}</style><p>second same</p>'
+  const at = anchorHtmlQuote(html, { text: 'same', prefix: 'second', suffix: '' })!
+  assert.equal(html.slice(at.start, at.end), 'same')
+  assert.equal(htmlQuoteNth(html, 'same', at.start), 1, 'the script\'s words are not counted')
+})
+
+test('a large page (3.5 MB, 50 comments) is read once: marks, 位置不明 and anchoring stay well under a second', () => {
+  const block = (i: number) => `<section><h2>第${i}節</h2><p>売上は前年比 ${100 + (i % 50)}% でした。<b>担当</b>は営業${i % 7}課です &amp; 確認中。</p><script>const v${i} = '${'x'.repeat(40)}'</script><style>.c${i}{color:red}</style></section>\n`
+  let html = '<!doctype html><html><head><title>大きな報告</title></head><body>'
+  for (let i = 0; html.length < 3_500_000; i++) html += block(i)
+  html += '</body></html>'
+  const comments = Array.from({ length: 50 }, (_, i) => ({ id: `c${i}`, selectedText: `第${i * 97}節`, startOffset: html.indexOf(`第${i * 97}節`), resolved: false }))
+  const started = performance.now()
+  const marks = htmlReviewMarks(html, comments)
+  const has = htmlQuoteFinder(html)
+  for (const c of comments) assert.equal(has(c.selectedText), true)
+  for (const c of comments.slice(0, 10)) assert.ok(anchorHtmlQuote(html, { text: c.selectedText, prefix: '', suffix: '売上は' }))
+  const took = performance.now() - started
+  assert.equal(marks.quotes.length, 50)
+  console.log(`[perf] html-review-3.5mb-50-comments=${Math.round(took)} ms (budget 1000)`)
+  assert.ok(took < 1000, `took ${Math.round(took)} ms`)
+})
+
 test('an entity standing for two UTF-16 units (an emoji) keeps the file positions in step', () => {
   const html = '<p>&#x1F600;hello</p>'
   const at = anchorHtmlQuote(html, { text: 'hello', prefix: '', suffix: '' })!

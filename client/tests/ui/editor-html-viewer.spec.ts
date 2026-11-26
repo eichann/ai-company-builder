@@ -317,8 +317,24 @@ test('review: selections count only while reviewing and only from this view, the
   // Another view's selection is not this tab's.
   await sendEvent(page, selection(99))
   await expect(commentBox).toHaveCount(0)
+  // Another page of the folder shown in the view: the review pauses and says so; a selection then opens nothing.
+  await sendEvent(page, { viewId: 7, kind: 'page', own: false })
+  await expect(page.getByText(/別のページを表示しているため、レビューを止めています/)).toBeVisible()
+  await sendEvent(page, selection(7))
+  await expect(commentBox).toHaveCount(0)
+  await sendEvent(page, { viewId: 7, kind: 'page', own: true })
+  await expect(page.getByText(/別のページを表示しているため/)).toHaveCount(0)
   await sendEvent(page, selection(7))
   await expect(commentBox).toBeVisible()
+  // A selection held when the view goes to another page is dropped (it was the document's, not that page's).
+  await sendEvent(page, { viewId: 7, kind: 'page', own: false })
+  await expect(commentBox).toHaveCount(0)
+  await sendEvent(page, { viewId: 7, kind: 'page', own: true })
+  await sendEvent(page, selection(7))
+  await expect(commentBox).toBeVisible()
+  // The whole quote is shown before saving (it scrolls when long; never cut to a few lines).
+  const quoteStyle = await page.getByTestId('comment-quote').evaluate(el => ({ overflowY: getComputedStyle(el).overflowY, clamp: getComputedStyle(el).webkitLineClamp }))
+  expect(quoteStyle).toEqual({ overflowY: 'auto', clamp: 'none' })
   // The view is drawn above the page: the box must not lie over the document's area (nor hide it).
   const areaBox = (await area(page).boundingBox())!
   expect((await commentBox.boundingBox())!.x).toBeGreaterThanOrEqual(areaBox.x + areaBox.width - 1)
@@ -342,11 +358,18 @@ test('review: selections count only while reviewing and only from this view, the
   // Done: the view reports nothing more and draws nothing.
   await page.getByRole('button', { name: 'レビュー完了' }).click()
   await expect.poll(lastReview).toEqual(['review', 7, null])
+  // The snapshot keeps the page's readable text, not its HTML (owner decision 2026-11-26).
+  const completed = async () => JSON.parse(Object.entries(await files()).find(([p]) => p.startsWith(`${DOC}.review.`))![1]).review
+  await expect.poll(async () => (await completed()).status).toBe('completed')
+  expect((await completed()).snapshot).toBe('11月の売上\n売上は前年比 120% でした。')
   // Looking at it again from the history: its marks, but no selections (nothing can be added).
   await page.getByRole('button', { name: /レビュー履歴/ }).click()
   await page.getByRole('button', { name: /1件/ }).click()
   await expect.poll(lastReview).toEqual(['review', 7, { selecting: false, quotes: [{ text: '前年比 120%', nth: 0, resolved: false }] }])
   await sendEvent(page, selection(7))
   await expect(commentBox).toHaveCount(0)
+  // 「変更を確認」 reads that snapshot against the page's text now: unchanged.
+  await page.getByRole('button', { name: '変更を確認' }).click()
+  await expect(page.getByText('レビュー時点から変更はありません')).toBeVisible()
   expectNoPageErrors(state)
 })

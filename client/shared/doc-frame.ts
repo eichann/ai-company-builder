@@ -270,6 +270,11 @@ export type DocViewEvent =
   | ({ viewId: number; kind: 'blocked' } & DocBlockedParts)
   /** The member selected text while reviewing it (`doc-review-frame.ts`): checked text and context only. */
   | { viewId: number; kind: 'selection'; quote: DocReviewSelection }
+  /**
+   * Whether the view's main frame shows the document it opened (`own`), told when that changes: a link
+   * or the page's script can go to another page of the same folder; the review pauses there.
+   */
+  | { viewId: number; kind: 'page'; own: boolean }
 
 /**
  * The internet parts a document's page wanted and did not get (doc-frame.md "The band of blocked
