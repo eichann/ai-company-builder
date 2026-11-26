@@ -38,6 +38,10 @@ export function sqliteBrowserRunRepository(conn: Database.Database, companyId: s
     skillRunOf(frameRunId) {
       return conn.prepare("SELECT 1 FROM browser_runs WHERE company_id = ? AND frame_run_id = ? AND budget = 'skill'").get(companyId, frameRunId) !== undefined
     },
+    skillRunFor(frameRunId) {
+      const r = conn.prepare(`SELECT ${COLUMNS} FROM browser_runs WHERE company_id = ? AND frame_run_id = ? AND budget = 'skill'`).get(companyId, frameRunId) as DbRow | undefined
+      return r ? toRow(r) : null
+    },
     runningOn(host) {
       const r = conn.prepare(`SELECT ${COLUMNS} FROM browser_runs WHERE company_id = ? AND host = ? AND state = 'running'`).get(companyId, host) as DbRow | undefined
       return r ? toRow(r) : null

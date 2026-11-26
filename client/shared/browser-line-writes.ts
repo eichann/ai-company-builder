@@ -232,8 +232,9 @@ export const BROWSER_WRITE_CARD_WORDS = {
   confirmed: '確かめました',
   targetsHeading: 'サイトから読む対象（番号）',
   willDo: 'これからすること',
-  readHeading: 'サイトから読み取った情報（AI には見せていません）',
-  previewValues: '下見で読んだ大事な値（AI には見せていません）',
+  readHeading: 'アプリがサイトから読み取った情報（相談の AI には渡していません）',
+  /** A write run's card: values the operator AI read on the page during its preview — read by an AI, never machine-checked. */
+  previewValues: '下見で読んだ大事な値（ブラウザ操作の係の AI がページから読んだ値です。相談の AI には渡していません。機械で確かめた値ではありません）',
   entrust: '任せる',
   cancel: 'やめる',
   entrusting: '書いています…',

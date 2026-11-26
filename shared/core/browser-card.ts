@@ -30,7 +30,7 @@ export type BrowserCardValue = { status: 'read'; text: string } | { status: 'unr
  */
 export type BrowserCardCheckedBy = 'machine' | 'ai' | 'none'
 export const BROWSER_CARD_CHECKED_BY_WORDS: Readonly<Record<BrowserCardCheckedBy, string>> = {
-  machine: '機械で確かめた', ai: 'AI が確かめた', none: '確かめていない',
+  machine: '機械で確かめた', ai: '係の AI が確かめた（機械ではない）', none: '確かめていない',
 }
 
 /**

@@ -17,8 +17,8 @@ import { BROWSER_COMPANY_ID_RE } from '../../../shared/browser-plans'
 import { BROWSER_BROWSE_LIMITS as BL, browseLogStep, type BrowserBrowseAction, type BrowserBrowseHistoryEntry, type BrowserBrowseStop, type BrowserBrowseSurface, type BrowserPageSnapshot } from '../../../shared/browser-browse'
 import {
   BROWSER_WORK_CARD_WORDS as CW, BROWSER_WORK_LIMITS as L, BROWSER_WORK_WORDS as W, afterReadTarget, beforeReadAddress, createdIdOf, parseWorkAnswer,
-  topFields, workFrameOf, workMaterial, workPlanSentences, workResultCard, workWordsForAi,
-  type AfterReadResult, type WorkAnswer, type WorkEnd, type WorkFrame, type WorkPlanValue,
+  topFields, workBusyWords, workFrameOf, workMaterial, workPlanSentences, workResultCard, workWordsForAi,
+  type AfterReadResult, type WorkAnswer, type WorkEnd, type WorkFrame, type WorkPlanValue, type WorkStopReason,
 } from '../../../shared/browser-frame-writes'
 import { browserNeverReadFits } from '../../../../shared/core/browser-frame-match'
 import { isValidSkillName } from '../../../../shared/core/names'
@@ -31,6 +31,7 @@ import type { BrowserAiSwitch } from './ai-switch'
 import type { BrowserContext } from './context'
 import { createFrameWriter, type FrameWriteRecord, type FrameWriter } from './frame-writes'
 import type { BrowserFramesApi, BrowserLinesAnswer, BrowserRunsApi } from './lines-api'
+import { sendEnd, type PendingEnds } from './pending-ends'
 import type { PreviewOperator, PreviewOperatorCli } from './preview'
 
 export interface BrowserWorkDeps {
@@ -54,6 +55,8 @@ export interface BrowserWorkDeps {
   monoMs?: () => number
   /** How long the run waits for a write on its way before giving it up as unknown (default 45 s; tests shorten it). */
   idleMaxMs?: number
+  /** Ends the server did not hear (a lost `end` / `finish`): retried, and flushed before this member's next task. */
+  pendingEnds?: PendingEnds
 }
 
 export interface BrowserWorkInput {
@@ -100,11 +103,11 @@ interface Entry {
   pressing: Promise<unknown> | null
 }
 
-/** A server refusal → the consultation AI's fixed words. */
-function refusedWords(a: Exclude<BrowserLinesAnswer, { kind: 'ok' }>): string {
+/** A server refusal → the consultation AI's fixed words (busy: with roughly when the domain frees up, when the server said). */
+function refusedWords(a: Exclude<BrowserLinesAnswer, { kind: 'ok' }>, now: number): string {
   if (a.kind === 'no-answer') return W.offline
   const code = a.code ?? ''
-  if (code === 'BROWSER_RUN_BUSY') return W.busy
+  if (code === 'BROWSER_RUN_BUSY') return workBusyWords(a.freeAt, now)
   if (code === 'BROWSER_RUN_TOO_LATE') return W.tooLate
   if (code === 'BROWSER_NOT_ALLOWED') return W.notAllowed
   if (code === 'BROWSER_TYPE_NOT_GRANTED') return W.notGranted
@@ -113,6 +116,10 @@ function refusedWords(a: Exclude<BrowserLinesAnswer, { kind: 'ok' }>): string {
   if (code.startsWith('BROWSER_SKILL_')) return W.skill
   return W.failed
 }
+
+/** A refusal of the operator run's continue → why the card and the AI say it stopped. */
+const continueStop = (a: Exclude<BrowserLinesAnswer, { kind: 'ok' }>): WorkStopReason =>
+  a.kind === 'no-answer' ? 'network' : a.code === 'BROWSER_AI_STOPPED' ? 'ai-stopped' : a.code === 'BROWSER_RUN_ENDED' ? 'timeout' : 'server-refused'
 
 const frameStartOf = (v: unknown): BrowserFrameRunStart | null => {
   const r = v as BrowserFrameRunStart | null
@@ -170,23 +177,25 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
     budget: Readonly<BrowserRunBudget>
     deadline: number
     current: () => boolean
+    /** Why `current()` said no (the AI stop, the member's stop or the consultation closed, the window, the context). */
+    whyNot: () => WorkStopReason
     log: BrowserRunLogStep[]
   }): Promise<{ kind: 'answer'; answer: Extract<WorkAnswer, { do: 'plan' | 'done' | 'stop' }> } | { kind: 'end'; reason: BrowserRunEndReason; end: WorkEnd }> {
     const history: BrowserBrowseHistoryEntry[] = []
     let notes = ''
-    const interrupted = { kind: 'stopped' as const, why: 'interrupted' as const }
+    const stopped = (why: WorkStopReason) => ({ kind: 'stopped' as const, why })
     for (let round = 1; round <= o.budget.steps; round++) {
       // A write that may have been sent without an answer: nothing more in this run.
       if (o.locked()) return { kind: 'end', reason: 'write-unknown', end: { kind: 'unknown' } }
-      if (!o.current()) return { kind: 'end', reason: 'context-changed', end: interrupted }
-      if (!o.win.pageClean()) return { kind: 'end', reason: 'other-frames', end: { kind: 'stopped', why: 'blocked' } }
+      if (!o.current()) return { kind: 'end', reason: 'context-changed', end: stopped(o.whyNot()) }
+      if (!o.win.pageClean()) return { kind: 'end', reason: 'other-frames', end: stopped('blocked') }
       const going = await deps.api.runContinue(o.companyId, o.browseRunId)
-      if (going.kind !== 'ok') return { kind: 'end', reason: going.kind === 'no-answer' ? 'no-answer' : 'refused', end: interrupted }
+      if (going.kind !== 'ok') return { kind: 'end', reason: going.kind === 'no-answer' ? 'no-answer' : 'refused', end: stopped(continueStop(going)) }
       const page: BrowserPageSnapshot | null = await o.win.snapshot()
-      if (!o.current()) return { kind: 'end', reason: 'context-changed', end: interrupted }
-      if (!page) return { kind: 'end', reason: 'blocked', end: { kind: 'stopped', why: 'blocked' } }
+      if (!o.current()) return { kind: 'end', reason: 'context-changed', end: stopped(o.whyNot()) }
+      if (!page) return { kind: 'end', reason: 'blocked', end: stopped('blocked') }
       const left = o.deadline - now()
-      if (left <= 0) return { kind: 'end', reason: 'timeout', end: interrupted }
+      if (left <= 0) return { kind: 'end', reason: 'timeout', end: stopped('timeout') }
       const step = await o.operator.step({
         cli: o.cli, model: o.operator.model, signal: o.cut.signal, timeoutMs: Math.min(BL.roundMs, left), parentEnv: o.parentEnv,
         prompt: o.phase === 'preview' ? 'work-preview' : 'work',
@@ -196,10 +205,10 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
         }),
       })
       if (o.locked()) return { kind: 'end', reason: 'write-unknown', end: { kind: 'unknown' } }
-      if (!o.current()) return { kind: 'end', reason: 'context-changed', end: interrupted }
-      if (!step.ok) return { kind: 'end', reason: 'operator-failed', end: interrupted }
+      if (!o.current()) return { kind: 'end', reason: 'context-changed', end: stopped(o.whyNot()) }
+      if (!step.ok) return { kind: 'end', reason: 'operator-failed', end: stopped('operator') }
       const parsed = parseWorkAnswer(step.text, { snapshot: page, items: o.items.length, phase: o.phase, adhoc: o.adhoc, domain: o.host })
-      if ('problem' in parsed) return { kind: 'end', reason: 'bad-answer', end: interrupted }
+      if ('problem' in parsed) return { kind: 'end', reason: 'bad-answer', end: stopped('operator') }
       if (parsed.notes !== undefined) notes = parsed.notes
       const answer = parsed.answer
       if (answer.do === 'plan' || answer.do === 'done' || answer.do === 'stop') return { kind: 'answer', answer }
@@ -208,7 +217,7 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
       const done = await o.win.act(action, o.cut.signal)
       history.push({ do: action.do, ...('ref' in action ? { ref: action.ref } : {}), outcome: done })
     }
-    return { kind: 'end', reason: 'rounds', end: interrupted }
+    return { kind: 'end', reason: 'rounds', end: stopped('rounds') }
   }
 
   /** The consultation AI's write task. Off: nothing asked, started or sent. Its words only: never the page's text. */
@@ -230,7 +239,7 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
     const windowKey = `${companyId}\0${host}`
     if (busyWindows.has(windowKey)) return said(W.busy)
     const stillCurrent = deps.context.capture({ companyId, signal: input.signal })
-    if (!stillCurrent()) return said(W.stoppedBy.interrupted)
+    if (!stillCurrent()) return said(W.stoppedBy[input.signal.aborted ? 'stop-button' : 'context-changed'])
     busyWindows.add(windowKey)
 
     const conversation = input.conversationId ? { conversationId: input.conversationId } : {}
@@ -239,11 +248,16 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
     input.signal.addEventListener('abort', onTurn, { once: true })
     const watchStop = setInterval(() => { if (deps.stopped(companyId)) cut.abort() }, STOP_CHECK_MS)
     const current = () => !cut.signal.aborted && stillCurrent() && !deps.stopped(companyId) && !win.closed() && deps.window(companyId, host) === win
+    // The AI stop first (an administrator's stop also ends the turn), then the member's stop or the consultation closed.
+    const whyNot = (): WorkStopReason => (deps.stopped(companyId) ? 'ai-stopped' : input.signal.aborted ? 'stop-button'
+      : win.closed() || deps.window(companyId, host) !== win ? 'window-closed' : 'context-changed')
     let frameRun: BrowserFrameRunStart | null = null
     let entry: Entry | null = null
     try {
       const resolved = await operator.resolve(deps.cliPath(), deps.parentEnv())
       if (!resolved.ok) return said(W.noOperator)
+      // This member's own leftover ends on this company (a lost `end` / `finish`) go first, so the lock they hold is let go.
+      await deps.pendingEnds?.flush(userId, companyId)
       const steps = input.skill !== null && input.companyRoot && deps.skillSteps
         ? (await deps.skillSteps(input.companyRoot, input.skill).catch(() => null))?.slice(0, L.steps) ?? null : null
 
@@ -252,7 +266,7 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
       // [a Skill] the server builds the frames from the approved declaration it reads itself.
       if (input.skill !== null) {
         const started = await deps.api.frameStart(companyId, { skill: input.skill, ...conversation })
-        if (started.kind !== 'ok') return said(refusedWords(started))
+        if (started.kind !== 'ok') return said(refusedWords(started, now()))
         frameRun = frameStartOf(started.value)
         if (!frameRun || frameRun.host !== host) return said(W.failed)
       }
@@ -264,9 +278,9 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
       if (!frameRun || frameRun.needsApproval) {
         const previewFinished = { ok: false }
         const previewed = await runOperator({
-          phase: 'preview', companyId, host, win, operator, cli: resolved.cli, task: input.task, items: input.items, steps,
+          phase: 'preview', userId, companyId, host, win, operator, cli: resolved.cli, task: input.task, items: input.items, steps,
           adhoc: frameRun === null, frames: frameRun ? workFrames(frameRun.frames) : null, frameRunId: frameRun?.runId ?? null,
-          cut, current, conversation, neverReadFits, writer: null, finished: previewFinished,
+          cut, current, whyNot, conversation, neverReadFits, writer: null, finished: previewFinished,
         })
         if (previewed.kind === 'refused') return said(previewed.words)
         // The preview's run must have let the domain go before the frames run starts (one lock across both, Codex review).
@@ -279,7 +293,7 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
         if (!frameRun) {
           frameAskedAt = now()
           const started = await deps.api.frameStart(companyId, { plan: { domain: host, writes: plan.writes ?? [] }, ...conversation })
-          if (started.kind !== 'ok') return said(refusedWords(started))
+          if (started.kind !== 'ok') return said(refusedWords(started, now()))
           frameRun = frameStartOf(started.value)
           if (!frameRun || frameRun.host !== host || !frameRun.needsApproval) return said(W.failed)
         }
@@ -308,10 +322,12 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
         })
         e.approvalToken = null
         if (decision !== 'approved' || !current()) {
+          // The card dismissed or its time over → not approved; anything else that ended the wait says its own reason.
+          const why: WorkStopReason = decision === 'approved' || cut.signal.aborted ? whyNot() : 'not-approved'
           e.phase = 'failed'
           e.message = decision === 'approved' ? null : CW.stopped
-          e.result = resultOf({ kind: 'stopped', why: decision === 'approved' ? 'interrupted' : 'not-approved' }, [], null)
-          return said(workWordsForAi({ kind: 'stopped', why: decision === 'approved' ? 'interrupted' : 'not-approved' }, input.items, []))
+          e.result = resultOf({ kind: 'stopped', why }, [], null)
+          return said(workWordsForAi({ kind: 'stopped', why }, input.items, []))
         }
       }
 
@@ -345,8 +361,8 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
         },
       })
       const worked = await runOperator({
-        phase: 'work', companyId, host, win, operator, cli: resolved.cli, task: input.task, items: input.items, steps,
-        adhoc: run.source === 'adhoc', frames: () => writer.frames(), frameRunId: run.runId, cut, current, conversation,
+        phase: 'work', userId, companyId, host, win, operator, cli: resolved.cli, task: input.task, items: input.items, steps,
+        adhoc: run.source === 'adhoc', frames: () => writer.frames(), frameRunId: run.runId, cut, current, whyNot, conversation,
         neverReadFits, writer, log: workLog,
       })
       const records = writer.records()
@@ -367,7 +383,7 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
       }
       const unreadAddresses = reads.filter(r => !r.after).map(r => r.pattern)
       const end: WorkEnd = writer.locked() && records.some(r => r.outcome === 'unknown') ? { kind: 'unknown' }
-        : worked.kind === 'refused' ? { kind: 'stopped', why: 'interrupted' }
+        : worked.kind === 'refused' ? { kind: 'stopped', why: worked.why }
           : worked.kind === 'end' ? worked.end
             : worked.answer.do === 'done' ? { kind: 'done' } : { kind: 'stopped', why: worked.answer.do === 'stop' ? worked.answer.why : 'blocked' }
       const answer = worked.kind === 'answer' ? worked.answer : null
@@ -395,13 +411,19 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
       if (entry && entry.phase !== 'finished' && entry.phase !== 'failed') entry.phase = 'failed'
       busyWindows.delete(windowKey)
       // The frames run ends with the task: its unused frames vanish (a write on its way is left to its report or time-out).
-      if (frameRun) void deps.api.frameEnd(companyId, frameRun.runId).catch(() => {})
+      // An end lost to the network is kept and sent again until the run's own hour (agent-browser.md "Letting a domain go").
+      if (frameRun) {
+        const ending = frameRun
+        const until = Date.parse(ending.expiresAt)
+        void sendEnd(deps.pendingEnds, { runId: ending.runId, userId, companyId, until: Number.isFinite(until) ? until : now() }, () => deps.api.frameEnd(companyId, ending.runId))
+      }
     }
   }
 
   /** One browse run of the task (the server's run and lock, the window in `ai` mode), its log and lock always told. */
   async function runOperator(o: {
     phase: 'preview' | 'work'
+    userId: string
     companyId: string
     host: string
     win: BrowserBrowseSurface
@@ -415,6 +437,7 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
     frameRunId: string | null
     cut: AbortController
     current: () => boolean
+    whyNot: () => WorkStopReason
     conversation: { conversationId?: string }
     neverReadFits: (pathAndQuery: string) => boolean
     writer: FrameWriter | null
@@ -424,12 +447,12 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
   }): Promise<
     | { kind: 'answer'; answer: Extract<WorkAnswer, { do: 'plan' | 'done' | 'stop' }> }
     | { kind: 'end'; reason: BrowserRunEndReason; end: WorkEnd }
-    | { kind: 'refused'; words: string }
+    | { kind: 'refused'; words: string; why: WorkStopReason }
   > {
     const started = await deps.api.runStart(o.companyId, { host: o.host, ...o.conversation, ...(o.frameRunId ? { frameRunId: o.frameRunId } : {}), write: true })
-    if (started.kind !== 'ok') return { kind: 'refused', words: refusedWords(started) }
+    if (started.kind !== 'ok') return { kind: 'refused', words: refusedWords(started, now()), why: started.kind === 'no-answer' ? 'network' : 'server-refused' }
     const browseRunId = (started.value as { runId?: unknown } | null)?.runId
-    if (typeof browseRunId !== 'string' || !BROWSER_RUN_ID_RE.test(browseRunId)) return { kind: 'refused', words: W.failed }
+    if (typeof browseRunId !== 'string' || !BROWSER_RUN_ID_RE.test(browseRunId)) return { kind: 'refused', words: W.failed, why: 'server-refused' }
     // The run's budget is the server's choice (a Skill's approved work gets more room); an older server's answer: standard.
     // It operates no longer than the budget allows and the server said (never past the frames run's end).
     const answered = started.value as { budget?: unknown; operateMs?: unknown } | null
@@ -442,7 +465,7 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
     let reason: BrowserRunEndReason | undefined
     let entered = false
     try {
-      if (!o.current()) { outcome = 'stopped'; reason = 'context-changed'; return { kind: 'end', reason, end: { kind: 'stopped', why: 'interrupted' } } }
+      if (!o.current()) { outcome = 'stopped'; reason = 'context-changed'; return { kind: 'end', reason, end: { kind: 'stopped', why: o.whyNot() } } }
       entered = true
       // The preview holds every write and fails it (read only); the work hands each to the writer. A never-read address is refused in both.
       const hooks = {
@@ -460,7 +483,7 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
         task: o.task, items: o.items, steps: o.steps, adhoc: o.adhoc,
         frames: () => (typeof o.frames === 'function' ? o.frames() : o.frames),
         writes: () => writer?.records() ?? [], locked: () => writer?.locked() ?? false,
-        cut: o.cut, budget, deadline, current: o.current, log,
+        cut: o.cut, budget, deadline, current: o.current, whyNot: o.whyNot, log,
       })
       if (got.kind === 'end') {
         outcome = got.end.kind === 'unknown' ? 'failed' : 'stopped'
@@ -489,12 +512,18 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
       // Awaited: the next phase (the frames run, the work) needs this run's lock released first.
       const finish = (w: BrowserRunWriteStep[]) => deps.api.runFinish(o.companyId, browseRunId, { outcome, ...(reason ? { reason } : {}), steps: log, ...(w.length ? { writes: w } : {}) })
         .catch((): BrowserLinesAnswer => ({ kind: 'no-answer' }))
-      let finished = await finish(writes)
-      // An older server knows no `site-refused`: it refuses the whole log as a bad run (and keeps the lock until its lease).
-      // Once more with those steps as `unknown` (independent review of #859).
-      if (finished.kind === 'refused' && finished.code === 'BROWSER_BAD_RUN' && writes.some(w => w.outcome === 'site-refused')) {
-        finished = await finish(writes.map(w => (w.outcome === 'site-refused' ? { ...w, outcome: 'unknown' as const } : w)))
+      const finishAll = async (): Promise<BrowserLinesAnswer> => {
+        const first = await finish(writes)
+        // An older server knows no `site-refused`: it refuses the whole log as a bad run (and keeps the lock until its lease).
+        // Once more with those steps as `unknown` (independent review of #859).
+        if (first.kind === 'refused' && first.code === 'BROWSER_BAD_RUN' && writes.some(w => w.outcome === 'site-refused')) {
+          return finish(writes.map(w => (w.outcome === 'site-refused' ? { ...w, outcome: 'unknown' as const } : w)))
+        }
+        return first
       }
+      // Not heard (the network): kept and sent again until its lease is surely over — the lock goes with it, and a run past
+      // its lease counts as ended on the server anyway (agent-browser.md "Letting a domain go").
+      const finished = await sendEnd(deps.pendingEnds, { runId: browseRunId, userId: o.userId, companyId: o.companyId, until: now() + BROWSER_RUN_LIMITS.leaseMs }, finishAll)
       if (o.finished) o.finished.ok = finished.kind === 'ok'
     }
   }
@@ -587,7 +616,7 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
       const done = (async () => {
         const a = await deps.api.frameApprove(companyId, runId, { planHash: hash, approvalToken: token })
         if (a.kind !== 'ok') {
-          if (a.kind === 'refused') { e.phase = 'failed'; e.message = refusedWords(a); e.decide?.('cancelled') }
+          if (a.kind === 'refused') { e.phase = 'failed'; e.message = refusedWords(a, now()); e.decide?.('cancelled') }
           return
         }
         // The task may have ended meanwhile (the turn stopped, the card's time): the card stays as the task left it.

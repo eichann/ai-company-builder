@@ -128,6 +128,7 @@ import { wireBrowserInspections } from './features/browser/inspect'
 import { wireBrowserWriteLines } from './features/browser/write-lines'
 import { wireBrowserBrowse } from './features/browser/browse'
 import { wireBrowserWork } from './features/browser/work'
+import { createPendingEnds } from './features/browser/pending-ends'
 import { readBrowserSkillSteps } from './features/browser/skill-steps'
 import { createBrowserLinesHttp } from './features/browser/lines-api'
 import { createBrowserRunRecords } from './features/browser/run-records'
@@ -685,6 +686,9 @@ lifecycle.beforeQuit(() => browserPlans.context.quitting())
 // Its read task on a registered domain (agent-browser.md "The operator's window tools"): the chat's `browser_browse`, the
 // operator acting in the member's own window (reading only), the server's gate, lock and run log; the card through the
 // inspection card's IPC. The same switch, context and busy windows as the plans.
+// Ends of the operator's and frames runs the server did not hear (a network drop): retried until heard or the run's own
+// time is over, and sent again before this member's next browser task (agent-browser.md "Letting a domain go").
+const browserPendingEnds = createPendingEnds()
 const browserBrowses = wireBrowserBrowse({
   aiSwitch: browserAiSwitch,
   userId: session.userId,
@@ -697,6 +701,7 @@ const browserBrowses = wireBrowserBrowse({
   cliPath: () => claudeCli.path(),
   parentEnv: () => shellEnv.env(),
   busyWindows: browserPlans.busyWindows,
+  pendingEnds: browserPendingEnds,
 })
 // Its write task on a registered domain (agent-browser.md "Writes within frames, in the app", step ⑤b): the chat's
 // `browser_work`, the server's frames run (a company Skill's approved declaration, or the plan the member approves on the
@@ -716,6 +721,7 @@ const browserWorks = wireBrowserWork({
   // A Skill's steps from the member's own company folder (the name is a valid Skill name; every path through the allowed roots).
   skillSteps: (companyRoot, skill) => readBrowserSkillSteps(companyRoot, skill, p => allowedRoots.validate(p)),
   busyWindows: browserPlans.busyWindows,
+  pendingEnds: browserPendingEnds,
 })
 // Its read-only inspection (agent-browser.md "The inspection in the chat"): the chat's `browser_inspect`, the read runner
 // over the member's own window and the card's IPC — the same switch and context as the plans; the site's map and lines are
@@ -789,6 +795,7 @@ registerAuthIpc(ipc, {
     browserInspections.clear()
     browserBrowses.clear()
     browserWorks.clear()
+    browserPendingEnds.clear()
     browserWrites.clear()
     browserDevice.clear()
     browserRecordings.clear()

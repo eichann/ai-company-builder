@@ -68,7 +68,7 @@ const afterCard: BrowserCard = {
       { label: 'title', before: read('なし（この作業で作ったもの）'), after: read('冬のクーポン'), compared: read('冬のクーポン'), by: 'machine', mark: 'ok' },
       { label: 'id', before: read('なし（この作業で作ったもの）'), after: read('4242'), by: 'none' },
     ] },
-    { heading: 'AI が確かめたこと（AI の判断です。機械で確かめた値ではありません）', rows: [
+    { heading: 'ブラウザ操作の係の AI が確かめたこと（係の AI の判断です。機械で確かめた値ではありません）', rows: [
       { label: '名前', before: read('秋のクーポン'), after: read('冬のクーポン'), compared: read('秋のクーポン'), by: 'ai', mark: 'ng' },
     ] },
   ],

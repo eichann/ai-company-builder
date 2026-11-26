@@ -287,6 +287,12 @@ keeps the write `unknown` and the answer apart, folded here into `cdone` / `cnot
   frame locally first, with the core's rule (`browserFrameMismatch`), so a mismatch never asks. The join of the frames
   run's lock with the operator runs' (one run per company × domain across both, `services/browser-runs.ts` `frameRunOn`
   and `browser-frames.ts` `holderOn`) is about more than one run: left out like the lock itself.
+- **The server ending a Skill run whose one work run is over** (agent-browser.md "Letting a domain go", `settle` in
+  `browser-frames.ts`, end reason `work-ended`): only an `open` run, only with no write `permitted` — an instance of
+  `RunEnds` with a narrower guard (`RunEnds` may already end a run from any state at any time, a permitted write left to
+  its report), so no transition is added and every rule holds as it is; the state count is unchanged. What it changes is
+  when the domain is let go to *another* run, which is the lock across runs, left out below. The app's ends lost to the
+  network and sent again (`pending-ends.ts`) are more `RunEnds` and a repeated `end` (idempotent), likewise.
 - The run lock per company × domain (D10) and the domain kept busy by an ended run's write in flight (more than one run,
   the server's tests), the
   run's time limits as real durations (folded into `closed` and `RunEnds`), a server clock jump (PlanLife's;

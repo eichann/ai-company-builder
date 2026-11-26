@@ -19,6 +19,7 @@ import { BROWSER_RUN_ID_RE, BROWSER_RUN_LIMITS, type BrowserRunEndReason, type B
 import type { BrowserAiSwitch } from './ai-switch'
 import type { BrowserContext } from './context'
 import type { BrowserLinesAnswer, BrowserRunsApi } from './lines-api'
+import { sendEnd, type PendingEnds } from './pending-ends'
 import type { PreviewOperator } from './preview'
 
 export interface BrowserBrowseDeps {
@@ -41,6 +42,8 @@ export interface BrowserBrowseDeps {
   busyWindows?: Set<string>
   now?: () => number
   log?: Pick<Console, 'warn'>
+  /** Ends the server did not hear (a lost `finish`): retried, and flushed before this member's next task. */
+  pendingEnds?: PendingEnds
 }
 
 export type BrowserBrowseOutcome =
@@ -103,6 +106,8 @@ export function wireBrowserBrowse(deps: BrowserBrowseDeps) {
     busyWindows.add(windowKey)
     let runId = ''
     try {
+      // This member's own leftover ends on this company go first, so the lock they hold is let go.
+      await deps.pendingEnds?.flush(userId, companyId)
       const started = await deps.api.runStart(companyId, { host, ...(input.conversationId ? { conversationId: input.conversationId } : {}) })
       if (started.kind !== 'ok') return refused(refusedWords(started))
       const id = (started.value as { runId?: unknown } | null)?.runId
@@ -190,8 +195,10 @@ export function wireBrowserBrowse(deps: BrowserBrowseDeps) {
       cut.abort()
       if (entered) await win.leave().catch(() => {})
       busyWindows.delete(windowKey)
-      // The log and the lock: always told (no value in it); lost = the lease ends it on the server.
-      void deps.api.runFinish(companyId, runId, { outcome, ...(reason ? { reason } : {}), steps }).catch(() => {})
+      // The log and the lock: always told (no value in it); lost to the network = kept and sent again until its lease is
+      // over (agent-browser.md "Letting a domain go"; a run past its lease counts as ended on the server anyway).
+      const body = { outcome, ...(reason ? { reason } : {}), steps }
+      void sendEnd(deps.pendingEnds, { runId, userId, companyId, until: now() + BROWSER_RUN_LIMITS.leaseMs }, () => deps.api.runFinish(companyId, runId, body))
     }
   }
 
