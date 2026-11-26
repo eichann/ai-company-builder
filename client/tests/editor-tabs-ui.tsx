@@ -54,7 +54,7 @@ const TOP_DOC = `${ROOT}/会社案内.html`
 const SLIDES_DOC = `${ROOT}/営業部/報告/提案スライド.html`
 if (htmlView) {
   for (const key of Object.keys(files)) delete files[key]
-  files[HTML_DOC] = '<!doctype html><h1>11月の売上</h1>'
+  files[HTML_DOC] = '<!doctype html><h1>11月の売上</h1><p>売上は前年比 120% でした。</p>'
   files[`${ROOT}/営業部/提案書.md`] = '# 提案書\n\n来期のご提案。'
   files[TOP_DOC] = '<!doctype html><p>会社案内</p>'
   files[SLIDES_DOC] = '<!doctype html><h1>提案スライド</h1>'
@@ -86,6 +86,7 @@ let emitChanges: ((changes: { type: string; path: string }[]) => void) | null = 
 Object.assign(window, {
   electronAPI: {
     readFile: async (p: string) => (p in files ? files[p] : null),
+    exists: async (p: string) => p in files,
     readFileBinary: async () => null,
     writeFile: async (p: string, content: string) => {
       if (failWrites.has(p)) return false
@@ -97,8 +98,17 @@ Object.assign(window, {
     answerCloseRequest: async (answer: string) => { closeAnswers.push(answer) },
     createDirectory: async () => true,
     backupBeforeOverwrite: async () => ({ success: true, backupPath: `${ROOT}/.backups/2026-10-23T01-02-03-456_editor_overwrite` }),
-    readDirectory: async () => [],
-    deleteItem: async () => ({ success: true }),
+    // The review's sidecars live next to the document (?view=html: its review, doc-frame.md "Review in the document view").
+    readDirectory: async (dir: string) => Object.keys(files)
+      .filter(p => p.startsWith(`${dir}/`) && !p.slice(dir.length + 1).includes('/'))
+      .map(p => ({ name: p.slice(dir.length + 1), path: p, isDirectory: false })),
+    renameItem: async (from: string, to: string) => {
+      if (!(from in files)) return { success: false, error: 'ENOENT' }
+      files[to] = files[from]
+      delete files[from]
+      return { success: true, newPath: to }
+    },
+    deleteItem: async (p: string) => { delete files[p]; return { success: true } },
     onFileChanges: (cb: (changes: { type: string; path: string }[]) => void) => { emitChanges = cb; return () => { emitChanges = null } },
     openDocView: async (filePath: string) => {
       docCalls.push(['open', filePath])
@@ -112,6 +122,12 @@ Object.assign(window, {
     setDocViewBounds: async (viewId: number, bounds: unknown) => { docCalls.push(['bounds', viewId, bounds]) },
     setDocViewZoom: async (viewId: number, factor: number) => { docCalls.push(['zoom', viewId, factor]) },
     reloadDocView: async (viewId: number) => { docCalls.push(['reload', viewId]) },
+    setDocViewReview: async (viewId: number, review: unknown) => { docCalls.push(['review', viewId, review]) },
+    // What finding a comment's place answers (a spec sets it): 'shown' by default.
+    findDocViewQuote: async (viewId: number, index: number) => {
+      docCalls.push(['find', viewId, index])
+      return (window as unknown as { __acbFound?: string }).__acbFound ?? 'shown'
+    },
     onDocViewEvent: (cb: (event: unknown) => void) => { docEvent = cb; return () => { if (docEvent === cb) docEvent = null } },
     openExternal: async (url: string) => { opened.push(url); return { success: true } },
   },

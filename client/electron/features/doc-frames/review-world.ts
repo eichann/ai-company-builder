@@ -7,10 +7,12 @@
  * moment, so what comes back is untrusted.
  *
  * Marks are drawn with the CSS Custom Highlight API: the document's DOM is not changed (a page that
- * re-renders itself is not broken by them), and the colours are a stylesheet main inserts
- * (`REVIEW_HIGHLIGHT_CSS`; an author sheet — measured on Electron 45, Chromium paints no
- * `::highlight` from a user sheet —, so a page can restyle or remove marks on itself, which only
- * hides them there). Only quoted text — the
+ * re-renders itself is not broken by them), and the colours are a constructed stylesheet the piece
+ * adopts while it draws (`REVIEW_HIGHLIGHT_CSS`, kept in the isolated world's own global). Not
+ * `webContents.insertCSS`: Chromium paints no `::highlight` from a user sheet (measured, Electron 45),
+ * and a view closed while an `insertCSS` was pending made `close()` throw ("Render frame was disposed
+ * before the request completed", the real-Electron harness). A page can restyle or remove the marks
+ * on itself, which only hides them there. Only quoted text — the
  * document's own words — is ever put in; never a comment's body, a name or an id.
  */
 import { DOC_REVIEW_CONTEXT_MAX, DOC_REVIEW_RAW_MAX, type DocReviewQuote } from '../../../shared/doc-review-frame'
@@ -22,7 +24,7 @@ const OPEN = 'acb-review'
 const RESOLVED = 'acb-review-resolved'
 const FOCUS = 'acb-review-focus'
 
-/** The marks' colours (inserted by main into every page of the view). */
+/** The marks' colours (adopted by the piece when it draws). */
 export const REVIEW_HIGHLIGHT_CSS = [
   `::highlight(${OPEN}) { background-color: rgba(251, 191, 36, 0.45) !important; color: inherit !important; }`,
   `::highlight(${RESOLVED}) { background-color: rgba(134, 239, 172, 0.35) !important; color: inherit !important; }`,
@@ -35,6 +37,15 @@ export const REVIEW_HIGHLIGHT_CSS = [
  * scripts, styles, templates, `noscript`, text areas), so the n-th occurrence means the same here.
  */
 const TEXT_INDEX = `
+const ensureStyle = () => {
+  let sheet = globalThis.__acbReviewSheet
+  if (!sheet) {
+    sheet = new CSSStyleSheet()
+    sheet.replaceSync(${JSON.stringify(REVIEW_HIGHLIGHT_CSS)})
+    globalThis.__acbReviewSheet = sheet
+  }
+  if (!document.adoptedStyleSheets.includes(sheet)) document.adoptedStyleSheets = [...document.adoptedStyleSheets, sheet]
+}
 const SKIP = new Set(['SCRIPT', 'STYLE', 'NOSCRIPT', 'TEMPLATE', 'TEXTAREA', 'TITLE'])
 const squash = s => s.replace(/\\s+/g, '')
 const textIndex = () => {
@@ -93,6 +104,7 @@ export function drawQuotesCode(quotes: readonly DocReviewQuote[]): string {
   return `(() => {
 ${TEXT_INDEX}
   if (typeof CSS === 'undefined' || !CSS.highlights) return 0
+  ensureStyle()
   const quotes = ${JSON.stringify(quotes)}
   const index = textIndex()
   const open = new Highlight(), resolved = new Highlight()

@@ -351,7 +351,7 @@ carrying a secret in its user name reached a local listener). Each document is s
   ［もう一度表示する］ after ［止める］ or a crash) starts with no dismissal (Codex review): ［×］ holds for
   that view's reloads only.
 
-## Review in the document view (owner, 2026-11-26; demo, not merged)
+## Review in the document view (owner, 2026-11-26)
 
 The same document review as Markdown's (`files-and-editor.md` "Document review"): comments on
 selected text, replies, resolved marks, レビュー履歴 and 「変更を確認」, the AI reading the sidecars —
@@ -380,10 +380,12 @@ can never read its review.
 - **What goes into the view**: only each shown comment's quoted text, which occurrence of it, and
   whether it is resolved (`docViewReviewOf`: at most 500 quotes, checked shape) — never a comment's
   body, a name, an email or an id. Marks are the CSS Custom Highlight API (`CSS.highlights`; the DOM
-  is not changed, so a page that re-renders itself is not broken) coloured by a stylesheet main
-  inserts on every page (`REVIEW_HIGHLIGHT_CSS`, an author sheet: measured on Electron 45, Chromium
-  paints no `::highlight` from a user sheet). The page can see and remove the marks — its own words,
-  on itself.
+  is not changed, so a page that re-renders itself is not broken), coloured by a constructed
+  stylesheet the piece adopts while it draws (`REVIEW_HIGHLIGHT_CSS`, kept in the isolated world's own
+  global; only while a review is shown). Not `webContents.insertCSS` (measured, Electron 45): Chromium
+  paints no `::highlight` from a user sheet, and a view closed while an `insertCSS` was pending made
+  `close()` throw (「Render frame was disposed before the request completed」; the harness's whole run
+  failed about every other time). The page can see and remove the marks — its own words, on itself.
 - **Pages that rewrite themselves** (tabs, charts): marks are drawn again after every load and after
   every member click in the view. A click on a comment (`docView:findQuote(viewId, index)`, an index of
   the marks main holds) finds the quote again in the page as it is now, scrolls it to the middle and
@@ -409,10 +411,12 @@ can never read its review.
   releases the mouse (its scripts can set the selection), so the quote in the comment box may be words
   the member did not select — the box shows the quote before anything is saved, and a quote is at most
   1,000 characters of the document's own text. It can also hide or move its marks on itself.
-- Demo: `cd client && node tests/html-review-demo/run.mjs` (real Electron, real views, a fictional
-  company folder; `--shots <dir>` plays the scenario and writes screenshots). Not yet in the
-  real-Electron test (`doc-frame-electron.test.ts`): the isolated world's code hidden from the page,
-  synthetic events reading nothing — to add before the PR.
+- **A manual check** (not run in CI): `cd client && node tests/html-review-demo/run.mjs` opens the
+  real app's editor (`tests/html-review-ui.html`) in a real Electron with the real document views, on a
+  fictional company folder, to try reviewing by hand; `--shots <dir>` plays the whole review (select,
+  comment, a hidden tab, reply, resolve, complete, the HTML changed → 位置不明, 「変更を確認」) and writes
+  screenshots — the quickest way to see a change to this area on screen. If it breaks and nobody
+  needs it, delete the folder rather than leave it broken.
 
 ## The CSP: one policy object (`docFramePolicy` → `docFrameCsp`)
 
@@ -538,7 +542,15 @@ hosts, and nothing else):
   new tally, the scheme / host rule, dedupe, both caps, the interval, the cancel on close, the
   editor's 中身 → 見る, the dismissed hosts, the chat row's state / failure / tool / folder / segment
   checks. Kept on purpose: the request hook's report (no request reaches it past the CSP today).
-- Review (above): `tests/doc-review-frame.test.ts` — the selection's and the marks' shapes and caps, a
+- Review (above): `doc-frame-electron.test.ts` 「review: …」 — a page that replaces the built-ins the piece
+  uses (`getSelection`, `Selection.toString`, `Range`, `createTreeWalker`, `CSS.highlights.set`) and keeps
+  making a selection and firing synthetic mouse-up / pointer-up / Shift key-up events gets no selection read;
+  the member's real drag reads the real words and none of the page's replaced built-ins is called (the
+  piece's own world); the mark is drawn and found (mutation-checked: the piece in the main world, a read
+  by timer); `editor-html-viewer.spec.ts` 「review: …」 — selections only while reviewing and only from
+  its view, the comment box beside the document, the sidecar's shape and offsets, the quote to the view,
+  a hidden place said, nothing reported after completion or when viewing it from the history;
+  `tests/doc-review-frame.test.ts` — the selection's and the marks' shapes and caps, a
   selection only to its own window, only while selecting, only in shape, not after the review ended,
   the page not even asked when not selecting, nothing but quotes into the page, marks again after a
   load, `docView:review` / `findQuote` main-window-only and only an index set; `htmlReview.test.ts` —

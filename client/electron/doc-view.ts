@@ -26,8 +26,7 @@
 // registry (`onBlocked`), which keeps only the host for the band. Nothing is loaded because of it.
 //
 // Review (doc-frame.md "Review in the document view"): the registry runs the app's small review piece
-// in the page's isolated world `REVIEW_WORLD` (its marks' colours a stylesheet main inserts on every
-// page); after the member's real mouse or Shift-key release in the shown view it is told
+// in the page's isolated world `REVIEW_WORLD` (it brings its marks' colours itself); after the member's real mouse or Shift-key release in the shown view it is told
 // (`onReviewInput`) and pulls the selection. The page gets no channel to the app: nothing it does
 // sends anything, and its synthetic events never reach `input-event`.
 import { BrowserWindow, session, WebContentsView, webContents as allWebContents, type Session, type WebContents } from 'electron'
@@ -35,7 +34,7 @@ import { DOC_SCHEME, docSessionRequestAllowed, docViewNavigationAllowed, docView
 import { startRefusingProxy } from './browser-window'
 import type { DocViewBounds } from '../shared/doc-frame'
 import type { DocViewHandle, DocViewHooks, DocViewPort } from './features/doc-frames/views'
-import { REVIEW_HIGHLIGHT_CSS, REVIEW_WORLD } from './features/doc-frames/review-world'
+import { REVIEW_WORLD } from './features/doc-frames/review-world'
 
 /** A focus of the view counts as the member's when a click (or touch) in it came this close to it. */
 export const FOCUS_CLICK_WINDOW_MS = 600
@@ -254,8 +253,6 @@ export function createDocViewShell(options: DocViewShellOptions): DocViewPort {
       blockedReporters.set(id, url => hooks.onBlocked(id, url))
       watchCspRefusals(contents, url => hooks.onBlocked(id, url), log)
       contents.on('did-navigate', () => hooks.onPageStart(id))
-      // The review marks' colours, on every page it loads (an author sheet: Chromium paints no ::highlight from a user sheet).
-      contents.on('dom-ready', () => { if (!contents.isDestroyed()) contents.insertCSS(REVIEW_HIGHLIGHT_CSS).catch(() => {}) })
       contents.on('did-finish-load', () => hooks.onPageLoaded(id))
       contents.on('input-event', (_event, input) => {
         const at = Date.now()
