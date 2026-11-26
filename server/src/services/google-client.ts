@@ -34,7 +34,7 @@
  */
 import { checkUpstreamPath } from '../../shared/core/upstream-path'
 import { GOOGLE_API_HOSTS, GOOGLE_AUTHORIZE_PATH, GOOGLE_SCOPE, docsCallAllowed, driveMetadataCallAllowed, gmailCallAllowed, googleCallFeature, googleCompanyFeatureOn, isPracticeGoogleSecret, type GoogleApi, type GoogleFeature } from '../../shared/core/google'
-import { isDrivePickerTokenScope } from '../../shared/core/google-drive'
+import { isDriveId, isDrivePickerTokenScope } from '../../shared/core/google-drive'
 import type { CompanyDataSource } from '../ports/company-data'
 import type { ConnectorGrantRow, ConnectorRepository } from '../ports/connectors'
 import type { Clock } from '../ports/clock'
@@ -44,6 +44,10 @@ import { grantSealContext } from './member-oauth'
 import { logError } from '../lib/error-log'
 
 const HEADERS_TIMEOUT_MS = 30_000
+/** A video range's whole answer (headers and body) must arrive within this; then the call is aborted. */
+const MEDIA_DEADLINE_MS = 120_000
+/** An error answer of a media call is read only this far (for Google's short reason). */
+const MEDIA_ERROR_BYTES = 64 * 1024
 const MAX_READ_RETRIES = 2
 const RETRY_AFTER_CAP_MS = 10_000
 /** Drive's export limit is 10 MB; a little room for JSON around it. */
@@ -71,6 +75,8 @@ export type GoogleStopReason =
    * (`docsCallAllowed`); a shared scope whose call names no feature that holds it (`googleCallFeature`).
    */
   | 'call-not-allowed'
+  /** A video's bytes (`streamMedia`): the member's grant is no longer the one the caller checked (a re-consent, another account). */
+  | 'grant-changed'
 
 export interface GoogleRequest {
   api: Exclude<GoogleApi, 'oauth' | 'userinfo'>
@@ -105,6 +111,11 @@ export interface GoogleRequest {
    * (google-drive.md), so a stop or a re-claim during the token's refresh still stops the upload.
    */
   beforeSend?: () => boolean
+  /**
+   * The caller's end (optional; absent = as before): aborting it aborts the call — its headers and its body — and no retry
+   * follows (`not-sent` `aborted`). The streaming route's metadata read uses it, so a body that stalls never holds a slot.
+   */
+  signal?: AbortSignal
 }
 
 export type GoogleResult =
@@ -130,6 +141,45 @@ export type GoogleResult =
     reason: GoogleStopReason | UpstreamFailure | 'answer-too-large' | 'refused' | 'rate-limited' | 'server-error'
     status?: number
     /** Google's short error code (`insufficientPermissions`, `notFound`, `PERMISSION_DENIED`), never its message. */
+    googleReason?: string
+  }
+
+/**
+ * One range of a picked Drive video's bytes (`streamMedia`, google-drive.md "Streaming a picked video"): `files.get` with
+ * `alt=media` and a `Range` header, the answer streamed, never buffered.
+ */
+export interface GoogleMediaRequest {
+  /** A Drive id (the caller checked its shape and the member's view pick). */
+  fileId: string
+  /** The first and the last byte asked (inclusive); the caller keeps `end - start + 1` within its per-answer ceiling. */
+  start: number
+  end: number
+  /** The grant the caller's check saw: another grant now (a re-consent, another Google account) → not sent. */
+  grantId: string
+  /** The viewer's request: aborting it aborts the call to Google (headers or body). */
+  signal: AbortSignal
+  /** A short name for the caller's record (`drive.view.media`); this client files no line for it. */
+  operation: string
+}
+
+export type GoogleMediaResult =
+  | {
+    ok: true
+    /** 200 or 206, as Google answered. */
+    status: number
+    /** Google's `Content-Range` and `Content-Length`, as sent (the caller checks them against what it asked). */
+    contentRange: string | null
+    contentLength: number | null
+    /** The bytes as they arrive (iterate once). Ends early when aborted. */
+    body: AsyncIterable<Uint8Array>
+    /** Ends the call to Google (the viewer left, the caller stopped reading); safe to call more than once. */
+    abort(): void
+  }
+  | {
+    ok: false
+    kind: 'not-sent' | 'refused' | 'rate-limited' | 'server-error'
+    reason: GoogleStopReason | UpstreamFailure | 'refused' | 'rate-limited' | 'server-error'
+    status?: number
     googleReason?: string
   }
 
@@ -180,6 +230,19 @@ async function readBody(body: AsyncIterable<Uint8Array>): Promise<Uint8Array | n
   let at = 0
   for (const c of chunks) { out.set(c, at); at += c.byteLength }
   return out
+}
+
+/** The first `limit` bytes of an answer (the rest is not read). */
+async function readSome(body: AsyncIterable<Uint8Array>, limit: number): Promise<Uint8Array> {
+  const out = new Uint8Array(limit)
+  let at = 0
+  for await (const chunk of body) {
+    const part = chunk.subarray(0, Math.min(chunk.byteLength, limit - at))
+    out.set(part, at)
+    at += part.byteLength
+    if (at >= limit) break
+  }
+  return out.subarray(0, at)
 }
 
 function parseJson(bytes: Uint8Array): unknown {
@@ -441,6 +504,111 @@ export function createGoogleClient(deps: GoogleClientDeps) {
     },
 
     /**
+     * A range of a picked Drive video's bytes, streamed (google-drive.md "Streaming a picked video"). The buffered
+     * `request` stays as it was (its 12 MB answer limit, its retries); this path never holds the answer in memory. Every
+     * switch, the grant (and that it is still `grantId`), `drive.file` and the `drive` feature are checked as for any
+     * Drive call, before every attempt and again after the access token (refreshed as there, which can take seconds; from
+     * that last check to the request leaving nothing is awaited); a 401 drops it and tries once more. Not
+     * retried otherwise (the player asks again). The viewer's `signal` and a deadline abort the call to Google, its body
+     * included. Files no action-log line: the caller records one line per viewing session.
+     */
+    async streamMedia(companyId: string, userId: string, req: GoogleMediaRequest): Promise<GoogleMediaResult> {
+      const host = GOOGLE_API_HOSTS.drive
+      const notSent = (reason: GoogleStopReason | UpstreamFailure): GoogleMediaResult => ({ ok: false, kind: 'not-sent', reason })
+      if (!Number.isSafeInteger(req.start) || !Number.isSafeInteger(req.end) || req.start < 0 || req.end < req.start) return notSent('bad-path')
+      if (!isDriveId(req.fileId)) return notSent('bad-path')
+      const path = pathWithQuery({ api: 'drive', method: 'GET', path: `/drive/v3/files/${req.fileId}`, query: { alt: 'media', supportsAllDrives: 'true' }, scope: GOOGLE_SCOPE.driveFile, operation: req.operation })
+      if (!path) return notSent('bad-path')
+      let retriedAfter401 = false
+      for (;;) {
+        // Every switch, before every attempt (as `request`), and the grant the caller checked.
+        const off = await switchesOff(companyId, userId)
+        if (off) return notSent(off)
+        const connectors = deps.companyData.forCompany(companyId).connectors
+        const grant = connectors.grant('google', userId)
+        const stop = grantStop(grant)
+        if (stop) return notSent(stop)
+        if (grant!.grantId !== req.grantId) return notSent('grant-changed')
+        const scoped = scopeStop(companyId, connectors, grant!, GOOGLE_SCOPE.driveFile)
+        if (scoped) return notSent(scoped)
+        const token = await accessTokenFor(companyId, userId, grant!)
+        if ('stop' in token) return notSent(token.stop)
+        if ('failure' in token) return notSent(token.failure === 'answer-too-large' ? 'token-unavailable' : token.failure)
+        // A refresh can take seconds: every switch and the grant once more after it, and from this last check to the
+        // request leaving nothing is awaited (the call "in flight" of google-drive.md "Streaming a picked video").
+        const offAfter = await switchesOff(companyId, userId)
+        if (offAfter) return notSent(offAfter)
+        const grantNow = connectors.grant('google', userId)
+        const stopNow = grantStop(grantNow)
+        if (stopNow) return notSent(stopNow)
+        if (grantNow!.grantId !== req.grantId) return notSent('grant-changed')
+        const scopedNow = scopeStop(companyId, connectors, grantNow!, GOOGLE_SCOPE.driveFile)
+        if (scopedNow) return notSent(scopedNow)
+        if (req.signal.aborted) return notSent('aborted')
+
+        // One controller for the call: the viewer leaving, the deadline, or the caller's abort() end it.
+        const controller = new AbortController()
+        const onViewerGone = () => controller.abort()
+        req.signal.addEventListener('abort', onViewerGone, { once: true })
+        const deadline = setTimeout(() => controller.abort(), MEDIA_DEADLINE_MS)
+        deadline.unref?.()
+        let ended = false
+        const end = () => {
+          if (ended) return
+          ended = true
+          clearTimeout(deadline)
+          req.signal.removeEventListener('abort', onViewerGone)
+        }
+        const abort = () => { controller.abort(); end() }
+
+        const sent = await deps.upstream.send({
+          host, method: 'GET', path,
+          headers: { authorization: `Bearer ${token.token}`, accept: '*/*', 'accept-encoding': 'identity', range: `bytes=${req.start}-${req.end}` },
+          body: null, allowPrivateHosts: [], signal: controller.signal, headersTimeoutMs: HEADERS_TIMEOUT_MS,
+        })
+        connectors.touchGrant('google', userId, deps.clock.now())
+        if (!sent.ok) {
+          end()
+          return { ok: false, kind: BEFORE_SENDING.includes(sent.reason) || sent.reason === 'aborted' ? 'not-sent' : 'server-error', reason: sent.reason }
+        }
+        const { status, headers } = sent.response
+        if (status === 200 || status === 206) {
+          const header = (name: string) => headers.find(([n]) => n === name)?.[1] ?? null
+          const lengthText = header('content-length')
+          const length = Number(lengthText)
+          const upstreamBody = sent.response.body
+          return {
+            ok: true, status,
+            contentRange: header('content-range'),
+            contentLength: lengthText !== null && /^\d{1,15}$/.test(lengthText) ? length : null,
+            body: (async function* () {
+              try {
+                for await (const chunk of upstreamBody) yield chunk
+              } finally {
+                end()
+              }
+            })(),
+            abort,
+          }
+        }
+        const bytes = await readSome(sent.response.body, MEDIA_ERROR_BYTES).catch(() => new Uint8Array(0))
+        abort()
+        if (status === 401 && !retriedAfter401) {
+          // The access token stopped working (revoked, expired early): nothing was done, so drop it and try once more.
+          forget(companyId, userId)
+          retriedAfter401 = true
+          continue
+        }
+        const googleReason = googleReasonOf(parseJson(bytes))
+        logError('google', 'call refused', undefined, { companyId, operation: req.operation, status, reason: googleReason ?? 'none' })
+        const why = googleReason ? { googleReason } : {}
+        if (status === 429) return { ok: false, kind: 'rate-limited', reason: 'rate-limited', status, ...why }
+        if (status >= 500) return { ok: false, kind: 'server-error', reason: 'server-error', status, ...why }
+        return { ok: false, kind: 'refused', reason: 'refused', status, ...why }
+      }
+    },
+
+    /**
      * One API call on a member's behalf — the entry point for later features
      * (minutes: Calendar / Meet / Drive; mail: Gmail). Every switch is checked
      * first; then the access token; then the call through the way out.
@@ -466,6 +634,7 @@ export function createGoogleClient(deps: GoogleClientDeps) {
       let retriedAfter401 = false
       for (let attempt = 0; ; attempt++) {
         // Every switch, before every attempt (a stop during a wait applies to the retry too).
+        if (req.signal?.aborted) return { ok: false, kind: 'not-sent', reason: 'aborted' }
         const off = await switchesOff(companyId, userId)
         if (off) return notSent(off)
         const connectors = deps.companyData.forCompany(companyId).connectors
@@ -484,7 +653,7 @@ export function createGoogleClient(deps: GoogleClientDeps) {
         const sent = await deps.upstream.send({
           host, method: req.method, path, headers,
           body: body ? (async function* () { yield body })() : null,
-          allowPrivateHosts: [], signal: new AbortController().signal, headersTimeoutMs: HEADERS_TIMEOUT_MS,
+          allowPrivateHosts: [], signal: req.signal ?? new AbortController().signal, headersTimeoutMs: HEADERS_TIMEOUT_MS,
         })
         connectors.touchGrant('google', userId, deps.clock.now())
         let failure: GoogleResult
@@ -498,6 +667,7 @@ export function createGoogleClient(deps: GoogleClientDeps) {
           const { status } = sent.response
           const bytes = await readBody(sent.response.body).catch(() => null)
           if (!req.recordedByCaller) deps.record(companyId, userId, { operation: req.operation, api: req.api, host, status, ok: status >= 200 && status < 300 })
+          if (!bytes && req.signal?.aborted) return { ok: false, kind: isRead ? 'not-sent' : 'unknown', reason: 'aborted', status }
           if (!bytes) return { ok: false, kind: isRead ? 'server-error' : 'unknown', reason: 'answer-too-large', status }
           const json = parseJson(bytes)
           if (status >= 200 && status < 300) {
@@ -528,7 +698,7 @@ export function createGoogleClient(deps: GoogleClientDeps) {
           // Writes are never retried here: the caller decides (re-reading, asking the person).
           if (!isRead) return failure
         }
-        if (attempt >= MAX_READ_RETRIES) return failure
+        if (attempt >= MAX_READ_RETRIES || req.signal?.aborted) return failure
         await deps.sleep(retryAfterMs ?? 1000 * 2 ** attempt)
       }
     },

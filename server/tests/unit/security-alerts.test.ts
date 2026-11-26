@@ -194,7 +194,7 @@ describe('plugin reads, key use', () => {
     expect(alerts()[0]).toMatchObject({ kind: 'plugin_paced', user_id: 'u-alice' })
   })
 
-  it('key use far above the member\'s normal → alert; at a high normal → none; refusal counters are not use', async () => {
+  it('key use far above the member\'s normal → alert; at a high normal → none; refusal counters and a video\'s playing are not use', async () => {
     const use = (user: string, day: string, requests: number, key = 'k1') =>
       conn.prepare("INSERT INTO broker_usage (company_id, key_id, user_id, day, requests, tokens) VALUES ('a', ?, ?, ?, ?, 0)").run(key, user, day, requests)
     const today = '2026-11-05'
@@ -203,6 +203,9 @@ describe('plugin reads, key use', () => {
     for (const d of ['2026-10-30', '2026-10-31', '2026-11-01', '2026-11-02', '2026-11-03', '2026-11-04']) use('u-bob', d, 1000)
     use('u-bob', today, 3000)
     use('u-owner', today, 5000, 'person-relay:google:refused')
+    // A video's playing (google-drive.md "Streaming a picked video") counts its answers there too: not key use.
+    use('u-owner', today, 5000, 'drive-view:bytes')
+    use('u-owner', today, 5000, 'drive-view:refused')
     expect(await svc.sweep('a')).toBe(1)
     expect(alerts()[0]).toMatchObject({ kind: 'key_use', user_id: 'u-alice' })
   })

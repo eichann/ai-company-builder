@@ -120,15 +120,18 @@ SERVER=(server/ shared/ staging/ manual/ manual-admin/ .github/rollback-floor-co
 # manual-admin/ and the app's screens (client/src, client/shared): admin-guide-pages.test.ts checks the
 # administrator guide's pictures and the ［names］ it cites against the admin console and the app.
 ADMIN=(admin/ shared/ manual-admin/ client/src/ client/shared/)
-# The browser plan lifecycle model (model/browser-plan/, agent-browser.md "The plan model"): the model
-# itself and the code it copies by hand. check-areas.mjs fails when the model cites a file not listed
-# here (each action names the code it copies), so a lifecycle change always runs the model.
+# The TLA+ models (model/browser-plan/, agent-browser.md "The plan model"; model/drive-view/, google-drive.md
+# "Streaming a picked video"): each model itself and the code it copies by hand. check-areas.mjs fails when a
+# model cites a file not listed here (each action names the code it copies), so a change always runs the models.
 MODEL=(
   model/browser-plan/ shared/core/browser-plans.ts server/src/services/browser-plans.ts
   client/shared/browser-runner.ts client/electron/features/browser/runner.ts client/electron/features/browser/read-session.ts
   server/src/services/browser-line-steps.ts server/src/services/browser-lines.ts
   client/electron/features/browser/write-line-runner.ts client/shared/browser-line-writes.ts
   server/src/services/browser-frames.ts client/electron/features/browser/frame-writes.ts
+  # The Drive video viewing model (model/drive-view/, google-drive.md "Streaming a picked video") and what it copies.
+  model/drive-view/ shared/core/google-drive.ts server/src/services/google-drive.ts
+  server/src/services/google-drive-view.ts server/src/services/google-client.ts
 )
 
 pathspecs() {

@@ -454,7 +454,8 @@ grant** (a refresh token comes only with a consent).
 ## `google-client.ts`: the one place that talks to Google
 
 `googleClient.request(companyId, userId, { api: 'calendar'|'meet'|'drive'|'gmail', method, path,
-query?, body?, rawBody? (Drive's multipart upload), binary? (an answer's bytes), scope, operation })` → `{ ok: true, status, json, text }` (`text` when the answer
+query?, body?, rawBody? (Drive's multipart upload), binary? (an answer's bytes), scope, operation, signal? })` (`signal`:
+the caller's end — aborting it aborts the call, head and body, and no retry follows; absent = as before) → `{ ok: true, status, json, text }` (`text` when the answer
 is not JSON, e.g. Drive export) or `{ ok: false, kind: 'not-sent'|'refused'|'rate-limited'|
 'server-error'|'unknown', reason, status?, googleReason? }`. `googleReason` is Google's short code
 only (never its message). Hosts: calendar / drive / userinfo `www.googleapis.com`, meet
@@ -483,6 +484,15 @@ removed · Google refusing the token. A stopped / revoked grant is resumed only 
 
 `pickerToken(companyId, userId)`: the Picker's own `drive.file`-only token (`google-drive.md`),
 after the same switches and the grant's `drive.file`.
+
+`streamMedia(companyId, userId, { fileId, start, end, grantId, signal, operation })`: a picked video's bytes
+(`google-drive.md` "Streaming a picked video") — a path of its own so `request`'s contract (its 12 MB buffered answer, its
+retries) stays as it is. The same switches and grant checks before every attempt — **and again after the access token** (a refresh can
+take seconds; nothing is awaited from that last check to the request leaving) —, plus **the grant must still be
+`grantId`** (the one the caller's check saw; else `grant-changed`, nothing sent); `files.get?alt=media` with `Range:
+bytes=start-end`; the answer's body handed back as it arrives (`{ ok, status, contentRange, contentLength, body, abort }`),
+never buffered; the caller's `signal` and a 120 s deadline abort the call (head or body); a 401 retried once with a fresh
+token, nothing else retried; no AI-action-log line (the caller files one per viewing session).
 
 Users of the grant: the minutes (`minutes.md`), outbound mail (`outbound-mail.md`), Drive
 (`google-drive.md`) and

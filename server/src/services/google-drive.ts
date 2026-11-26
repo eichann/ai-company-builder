@@ -108,6 +108,8 @@ export interface DriveViewUse {
   name: string
   mimeType: string
   expiresAt: string
+  /** The grant this use was checked against (internal, never answered): the bytes are asked only under it (`streamMedia`). */
+  grantId: string
 }
 
 /** Who puts a file: the member's AI (record token) or the member. */
@@ -1102,8 +1104,9 @@ export function createGoogleDriveService(deps: GoogleDriveDeps) {
     },
 
     /**
-     * The member's own player plays a Drive video (google-drive.md "Viewing a video"; the streaming route of a later change
-     * calls this at every play, with the session's member): usable only while the company's Google is on, the member's
+     * The member's own player plays a Drive video (google-drive.md "Viewing a video"; the streaming route,
+     * services/google-drive-view.ts, calls this at every range, with the session's member; it then asks the bytes only
+     * under `grantId`, the grant seen here): usable only while the company's Google is on, the member's
      * grant is active with `drive.file` and Drive not turned off, and they have a live **view** pick of exactly this file
      * under the Google account their grant has now — an ordinary pick (the AI's, 「つなぐ」's) never counts, nor another
      * member's or another account's. A use renews it: `lastViewedAt` now, 90 days more. Nothing is asked of Google here.
@@ -1128,7 +1131,7 @@ export function createGoogleDriveService(deps: GoogleDriveDeps) {
       const expiresAt = new Date(clock.nowMs() + DRIVE_VIEW_PICK_TTL_MS).toISOString()
       // The same synchronous stretch as the read: nothing can expire or remove it in between.
       if (!h.googleDrive.touchViewPick(member.userId, account, fileId, now, expiresAt)) return refuse('forbidden', VIEW_NOT_PICKED, { code: 'DRIVE_VIEW_NOT_PICKED' })
-      return ok({ fileId, name: pick.name, mimeType: pick.mimeType, expiresAt: expiresAt > pick.expiresAt ? expiresAt : pick.expiresAt })
+      return ok({ fileId, name: pick.name, mimeType: pick.mimeType, expiresAt: expiresAt > pick.expiresAt ? expiresAt : pick.expiresAt, grantId: grant.grantId })
     },
 
     /** The record step took the member's link of this file (records route): their live pick of it is renewed. */

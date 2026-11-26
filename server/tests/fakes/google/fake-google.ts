@@ -167,6 +167,18 @@ export interface SentMessage {
   attachments: Array<{ filename: string | null; contentType: string; disposition: string; bytes: Buffer }>
 }
 
+export type FakeMediaFault = 'ignore-range' | 'too-long' | 'too-short' | 'broken'
+
+/** One `alt=media` answer of the fake (`mediaAnswers`). */
+export interface FakeDriveMediaAnswer {
+  id: string
+  range: string | null
+  status: number
+  bytes: number
+  /** streaming until the last byte went (finished) or the caller closed the connection first (aborted). */
+  state: 'streaming' | 'finished' | 'aborted'
+}
+
 export interface FakeGoogleRequestLog {
   method: string
   path: string
@@ -311,6 +323,20 @@ export interface FakeGoogle {
   refuseKeepForever(id: string): void
   /** Someone moves this Drive file to the trash (`files.get` answers `trashed: true`). */
   trashDriveFile(id: string): void
+  /** A Drive file's bytes become these (a video's content; optionally its type changes too). */
+  setDriveFileBytes(id: string, bytes: Uint8Array, mimeType?: string): void
+  /** Media answers (`alt=media`) are sent in pieces of `chunk` bytes, `ms` apart (0: at once). */
+  paceMedia(ms: number, chunk?: number): void
+  /**
+   * The next media answer misbehaves: `ignore-range` (200 with every byte, as if no Range was sent), `too-long` (the
+   * named range, then more bytes, without a Content-Length), `too-short` (half the range, then a clean end, without a
+   * Content-Length), `broken` (half the range, then the connection fails, with the Content-Length promised).
+   */
+  misanswerNextMedia(fault: FakeMediaFault): void
+  /** The next `count` metadata answers of a binary Drive file (`files.get` without `alt=media`) send their headers and then stall. */
+  stallNextFileGets(count?: number): void
+  /** Every media answer with a Range or a pace, in order: how it ended and how many bytes went. */
+  mediaAnswers: FakeDriveMediaAnswer[]
   /** Someone deletes this Drive file for good (every call about it answers 404). */
   deleteDriveFile(id: string): void
   /** Someone edits this Drive file in Drive itself (a new revision / version, not ACB's), as `by` (default `SOMEONE_ELSE`). */
@@ -992,6 +1018,68 @@ export function createFakeGoogle(options: FakeGoogleOptions = {}): FakeGoogle {
       history: [{ id: head, modifiedTime: iso(created), by: f.owner }], comments: [], lastBy: f.owner,
     }]
   }))
+  // ---- a file's bytes (`alt=media`), with Range, paced, and every answer's end reported (streaming a picked video) ----
+  const mediaPace = { ms: 0, chunk: 64 * 1024 }
+  let mediaFault: FakeMediaFault | null = null
+  let metaStalls = 0
+  const mediaLog: FakeDriveMediaAnswer[] = []
+  /**
+   * Drive's media answer as real Drive gives it for a binary file: no Range → 200 with every byte; one `bytes=a-b` /
+   * `bytes=a-` → 206 with `Content-Range: bytes a-b/size` (`b` cut at the end); a start past the end → 416 with
+   * `Content-Range: bytes *\/size`. The body is sent in pieces (`mediaPace`); the viewer's side closing the connection is
+   * reported as `aborted`.
+   */
+  function mediaAnswer(signal: AbortSignal, id: string, content: Buffer, mimeType: string, range: string | null): Response {
+    const size = content.byteLength
+    let start = 0
+    let end = size - 1
+    let status = 200
+    const fault = mediaFault
+    mediaFault = null
+    if (fault === 'ignore-range') range = null
+    if (range !== null) {
+      const m = /^bytes=(\d+)-(\d*)$/.exec(range)
+      if (!m || Number(m[1]) >= size) {
+        mediaLog.push({ id, range, status: 416, bytes: 0, state: 'finished' })
+        return new Response(JSON.stringify({ error: { code: 416, message: 'Request range not satisfiable', errors: [{ reason: 'requestedRangeNotSatisfiable' }] } }), { status: 416, headers: { 'content-type': 'application/json', 'content-range': `bytes */${size}` } })
+      }
+      start = Number(m[1])
+      end = m[2] === '' ? size - 1 : Math.min(Number(m[2]), size - 1)
+      status = 206
+    }
+    const entry: FakeDriveMediaAnswer = { id, range, status, bytes: 0, state: 'streaming' }
+    mediaLog.push(entry)
+    let at = start
+    const body = new ReadableStream<Uint8Array>({
+      async pull(controller) {
+        if (signal.aborted) { entry.state = 'aborted'; controller.close(); return }
+        if (at > end) { entry.state = 'finished'; controller.close(); return }
+        if (mediaPace.ms > 0) await new Promise(r => setTimeout(r, mediaPace.ms))
+        if (signal.aborted) { entry.state = 'aborted'; controller.close(); return }
+        // `too-short` / `broken`: half the range, then a clean end (no Content-Length) or a failed connection.
+        if ((fault === 'too-short' || fault === 'broken') && at >= start + Math.ceil((end + 1 - start) / 2)) {
+          if (fault === 'broken') { entry.state = 'finished'; controller.error(new Error('fake: connection lost')); return }
+          entry.state = 'finished'; controller.close(); return
+        }
+        // `too-long`: a misbehaving answer that runs past the range it named (no Content-Length to stop it).
+        if (fault === 'too-long' && at > end - mediaPace.chunk) { controller.enqueue(new Uint8Array(content.subarray(at, Math.min(at + mediaPace.chunk, end + 1)))); controller.enqueue(new Uint8Array(64).fill(7)); entry.bytes += end + 1 - at + 64; at = end + 1; return }
+        const next = Math.min(at + mediaPace.chunk, end + 1)
+        controller.enqueue(new Uint8Array(content.subarray(at, next)))
+        entry.bytes += next - at
+        at = next
+      },
+      cancel() { if (entry.state === 'streaming') entry.state = 'aborted' },
+    })
+    signal.addEventListener('abort', () => { if (entry.state === 'streaming') entry.state = 'aborted' }, { once: true })
+    return new Response(body, {
+      status,
+      headers: {
+        'content-type': mimeType, ...(fault === 'too-long' || fault === 'too-short' ? {} : { 'content-length': String(end - start + 1) }),
+        ...(status === 206 ? { 'content-range': `bytes ${start}-${end}/${size}` } : {}),
+      },
+    })
+  }
+
   /** What Drive converts into a Google document on upload (the importable text types this fake knows). */
   const DOC_IMPORTS = new Set(['text/html', 'text/markdown', 'text/plain'])
   const DOC_MIME = 'application/vnd.google-apps.document'
@@ -1303,7 +1391,22 @@ export function createFakeGoogle(options: FakeGoogleOptions = {}): FakeGoogle {
       const f = visibleDriveFile(a, c.req.param('fileId') ?? '')
       if (c.req.query('alt') === 'media') {
         if (f.mimeType.startsWith('application/vnd.google-apps.')) throw apiError(403, 'Only files with binary content can be downloaded. Use Export with Docs Editors files.', 'fileNotDownloadable')
-        return c.body(new Uint8Array(f.content), 200, { 'content-type': f.mimeType })
+        const range = c.req.header('range')
+        if (range === undefined && mediaPace.ms === 0) return c.body(new Uint8Array(f.content), 200, { 'content-type': f.mimeType })
+        return mediaAnswer(c.req.raw.signal, f.id, f.content, f.mimeType, range ?? null)
+      }
+      if (metaStalls > 0) {
+        // `stallNextFileGets`: the headers go, the body starts and never ends (reported in `mediaAnswers` as range `meta`).
+        metaStalls--
+        const entry: FakeDriveMediaAnswer = { id: f.id, range: 'meta', status: 200, bytes: 1, state: 'streaming' }
+        mediaLog.push(entry)
+        const signal = c.req.raw.signal
+        signal.addEventListener('abort', () => { if (entry.state === 'streaming') entry.state = 'aborted' }, { once: true })
+        const body = new ReadableStream<Uint8Array>({
+          start(controller) { controller.enqueue(new TextEncoder().encode('{')) },
+          cancel() { if (entry.state === 'streaming') entry.state = 'aborted' },
+        })
+        return new Response(body, { status: 200, headers: { 'content-type': 'application/json; charset=UTF-8' } })
       }
       if (fileGetFailures > 0 && f.mimeType === DOC_MIME) {
         fileGetFailures--
@@ -1923,6 +2026,16 @@ export function createFakeGoogle(options: FakeGoogleOptions = {}): FakeGoogle {
       if (!f) throw new Error(`fake Google: no Drive file ${id}`)
       f.trashed = true
     },
+    setDriveFileBytes(id, bytes, mimeType) {
+      const f = driveFiles.get(id)
+      if (!f) throw new Error(`fake Google: no Drive file ${id}`)
+      f.content = Buffer.from(bytes)
+      if (mimeType !== undefined) f.mimeType = mimeType
+    },
+    paceMedia(ms, chunk = 64 * 1024) { mediaPace.ms = ms; mediaPace.chunk = chunk },
+    misanswerNextMedia(fault) { mediaFault = fault },
+    stallNextFileGets(count = 1) { metaStalls = count },
+    mediaAnswers: mediaLog,
     deleteDriveFile(id) {
       driveFiles.delete(id)
       const at = uploadOrder.indexOf(id)

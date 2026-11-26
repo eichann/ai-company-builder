@@ -16,7 +16,7 @@ import { GOOGLE_AUTHORIZE_HOST, GOOGLE_CALLBACK_PATH } from '../../shared/core/g
 import { GOOGLE_PICKER_PAGE_PATH } from '../../shared/core/google-drive'
 import { sqlitePickTicketDirectory } from '../adapters/sqlite/google-drive'
 import { sha256TokenDigest } from '../adapters/system'
-import { driveDocTiming, type PracticeUpstream } from '../lib/config'
+import { driveDocTiming, driveViewLimits, type PracticeUpstream } from '../lib/config'
 import { logError } from '../lib/error-log'
 import type { AgentEventRepository } from '../ports/agent-events'
 import type { BrokerKeyRepository } from '../ports/key-broker'
@@ -28,6 +28,7 @@ import type { BrokerVault } from '../services/broker-vault'
 import { createGoogleClient, type GoogleClientDeps } from '../services/google-client'
 import { createGoogleConnector } from '../services/google-connector'
 import { createGoogleDriveService, type GoogleDriveDeps } from '../services/google-drive'
+import { createDriveViewService } from '../services/google-drive-view'
 import { createGoogleRelay, GOOGLE_RELAY_TOOL } from '../services/google-relay'
 import { createMemberOAuth, oauthCallbackPath } from '../services/member-oauth'
 import type { PluginShelf } from '../services/plugin-shelf'
@@ -40,6 +41,10 @@ import type { CompositionShared } from './shared'
 const GOOGLE_RELAY_USAGE_KEY = 'person-relay:google'
 /** Its refused calls per member and day (only how many are recorded). */
 const GOOGLE_RELAY_REFUSED_KEY = 'person-relay:google:refused'
+/** A picked Drive video's bytes served per member and day in `broker_usage` (`tokens` = bytes, `requests` = answers; google-drive.md "Streaming a picked video"). */
+const DRIVE_VIEW_USAGE_KEY = 'drive-view:bytes'
+/** Its requests a cap refused, per member and day (how many only; neither counts as key use in 「気になる動き」). */
+const DRIVE_VIEW_REFUSED_KEY = 'drive-view:refused'
 
 export interface GoogleWiringDeps {
   conn: Database.Database
@@ -166,6 +171,34 @@ export function wireGoogle(deps: GoogleWiringDeps) {
       : 'https://apis.google.com',
   })
 
+  // Streaming a picked Drive video to the member's own player (google-drive.md "Streaming a picked video"): the view pick,
+  // the video caps (their own, apart from the relay's), one AI-action-log line per viewing session.
+  const googleDriveView = createDriveViewService({
+    views: googleDrive,
+    google: googleClient,
+    clock: shared.clock,
+    limits: () => driveViewLimits(),
+    dayOf: deps.dayOf,
+    usage: {
+      used: (companyId, userId, day) => {
+        const u = repos.brokerKeys.usage(companyId, DRIVE_VIEW_USAGE_KEY, userId, day)
+        return { company: u.tokens, member: u.memberTokens }
+      },
+      add: (companyId, userId, day, bytes, requests) => repos.brokerKeys.addUsage(companyId, DRIVE_VIEW_USAGE_KEY, userId, day, requests, bytes),
+      refused: (companyId, userId, day) => repos.brokerKeys.addUsage(companyId, DRIVE_VIEW_REFUSED_KEY, userId, day, 1, 0),
+    },
+    record: (companyId, userId, e) => agentEvents.recordServerEvent(companyId, userId, {
+      agent: 'script',
+      tool: 'google:drive.view',
+      category: 'broker',
+      durationMs: e.durationMs,
+      // Never the file's id or name: the operation, the bytes served and how the session's last answer went.
+      target: { kind: 'broker', service: 'google', host: 'www.googleapis.com', path: 'drive.view', operation: 'drive.view', bytesOut: e.bytes, ...(e.lastStatus !== null ? { status: e.lastStatus } : {}) },
+      decision: 'auto-allowed',
+      outcome: e.failed === 0 ? 'ok' : 'error',
+    }),
+  })
+
   // A scheduled job's deliverable place outside ACB (jobs.md "A deliverable place outside"): the job names a connector
   // and a kind of place (never a service's own field); the connector that declares it answers here. Google: a Drive
   // folder the responsible person picked (`drive.file`: their own pick only), and the run's puts linked to its やること.
@@ -192,5 +225,5 @@ export function wireGoogle(deps: GoogleWiringDeps) {
     },
   }
 
-  return { googleClient, memberOAuth, googleConnector, googleRelay, googleDrive, deliveryPlaces }
+  return { googleClient, memberOAuth, googleConnector, googleRelay, googleDrive, googleDriveView, deliveryPlaces }
 }

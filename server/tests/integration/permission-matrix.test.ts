@@ -129,6 +129,7 @@ interface World {
     pickTicket: string
     driveConfirmation: string
     trustedFolder: string
+    viewPick: string
     /** A 「ブラウザ操作」 plan of the other company's member, approved, and its permitted execution (agent-browser.md). */
     browserPlan: string
     browserExecution: string
@@ -623,6 +624,7 @@ const MATRIX: Row[] = [
   r('POST /api/companies/:companyId/me/google/drive/overwrite-confirmations/:confirmationId', w => ({ path: `${C(w)}/me/google/drive/overwrite-confirmations/drive-confirm-nosuch`, body: { action: 'confirm' } }), [404, 404, 404, 404, 404, 401], 'the member\'s own confirmation only (google-drive-continue.test.ts)'),
   r('GET /api/companies/:companyId/me/google/drive/trusted-folders', w => ({ path: `${C(w)}/me/google/drive/trusted-folders` }), MEMBERS, 'only the caller\'s own trusted folders (google-drive-audience.test.ts)'),
   r('DELETE /api/companies/:companyId/me/google/drive/trusted-folders/:folderId', w => ({ path: `${C(w)}/me/google/drive/trusted-folders/fake-folder-nosuch-0001` }), [404, 404, 404, 404, 404, 401], 'the member\'s own trust only (google-drive-audience.test.ts)'),
+  r('GET /api/companies/:companyId/me/google/drive/view/:fileId', w => ({ path: `${C(w)}/me/google/drive/view/fake-video-nosuch-0001` }), [403, 403, 403, 403, 404, 401], 'session only; the member\'s own view pick (google-drive-stream.test.ts); Google is not set up here: GOOGLE_STOPPED'),
   r('GET /api/records-ai/google/drive/status', () => ({ path: '/api/records-ai/google/drive/status' }), [401, 401, 401, 401, 401, 401], 'a session is not a record token'),
   r('POST /api/records-ai/google/drive/read', () => ({ path: '/api/records-ai/google/drive/read', body: {} }), [401, 401, 401, 401, 401, 401], 'a session is not a record token'),
   r('POST /api/records-ai/google/drive/put', () => ({ path: '/api/records-ai/google/drive/put', body: {} }), [401, 401, 401, 401, 401, 401], 'a session is not a record token'),
@@ -920,6 +922,7 @@ const CROSS: CrossRow[] = [
   x('GET /api/companies/:companyId/me/google/drive/pick-tickets/:ticketId', (w, id) => ({ path: `${C(w)}/me/google/drive/pick-tickets/${id}` }), w => w.other.pickTicket),
   x('DELETE /api/companies/:companyId/me/google/drive/pick-tickets/:ticketId', (w, id) => ({ path: `${C(w)}/me/google/drive/pick-tickets/${id}` }), w => w.other.pickTicket),
   x('DELETE /api/companies/:companyId/me/google/drive/trusted-folders/:folderId', (w, id) => ({ path: `${C(w)}/me/google/drive/trusted-folders/${id}` }), w => w.other.trustedFolder, 'fake-folder-nosuch-0001'),
+  x('GET /api/companies/:companyId/me/google/drive/view/:fileId', (w, id) => ({ path: `${C(w)}/me/google/drive/view/${id}` }), w => w.other.viewPick, 'fake-video-nosuch-0001'),
   x('POST /api/companies/:companyId/me/google/drive/overwrite-confirmations/:confirmationId', (w, id) => ({ path: `${C(w)}/me/google/drive/overwrite-confirmations/${id}`, body: { action: 'confirm' } }), w => w.other.driveConfirmation, 'drive-confirm-nosuch'),
   x('PATCH /api/companies/:companyId/groups/:groupId', (w, id) => ({ path: `${C(w)}/groups/${id}`, body: { name: '乗っ取り' } }), w => w.other.group),
   x('PUT /api/companies/:companyId/groups/:groupId/members', (w, id) => ({ path: `${C(w)}/groups/${id}/members`, body: { userIds: [] } }), w => w.other.group),
@@ -1268,6 +1271,9 @@ async function seed(): Promise<World> {
   // The other company's member's 「このフォルダはもう聞かない」 (google-drive.md "Asking before a put").
   db.prepare(`INSERT INTO google_drive_folder_trust (company_id, user_id, folder_id, folder_name, audience_sig, created_at)
     VALUES (?, ?, 'folderOtherTrusted01', '他社のフォルダ', ?, ?)`).run(other, otherMember, 'd'.repeat(64), expires)
+  // The other company's member's view pick of a Drive video (google-drive.md "Streaming a picked video").
+  db.prepare(`INSERT INTO google_drive_view_picks (company_id, user_id, account_email, file_id, name, mime_type, picked_at, expires_at)
+    VALUES (?, ?, 'other@other.example', 'fakeVideoOther000001', '他社の動画.mp4', 'video/mp4', ?, '2100-01-01T00:00:00.000Z')`).run(other, otherMember, expires)
   // An absence of the other company's member, current until far ahead.
   db.prepare("INSERT INTO member_absences (company_id, id, user_id, from_day, until_day, delegate_id, set_by, set_at) VALUES (?, 'absence-other-1', ?, '2000-01-01', '2100-12-31', ?, ?, ?)")
     .run(other, otherMember, USER.outsider, USER.outsider, expires)
@@ -1391,6 +1397,7 @@ async function seed(): Promise<World> {
       pickTicket: 'pick-ticket-other-1',
       driveConfirmation: 'drive-confirm-other-1',
       trustedFolder: 'folderOtherTrusted01',
+      viewPick: 'fakeVideoOther000001',
       browserPlan: OTHER_PLAN,
       browserExecution: OTHER_EXECUTION,
       holdingTicket: 'holding-ticket-other-1',

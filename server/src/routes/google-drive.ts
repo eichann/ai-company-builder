@@ -15,6 +15,8 @@
  *                                                  or before a put where others see it (`trust`: 「このフォルダはもう聞かない」)
  *   GET    /me/google/drive/trusted-folders         the member's own 「このフォルダはもう聞かない」 folders
  *   DELETE /me/google/drive/trusted-folders/:folderId  asks again before every put there
+ *   GET    /me/google/drive/view/:fileId           one range of a video the member picked to view (google-drive.md
+ *                                                  "Streaming a picked video"): session only, Range in, the bytes streamed out
  *
  * The member's AI (record token), mounted at /api/records-ai/google/drive:
  *   GET  /status            whether the Drive tools work now, the member's live picks
@@ -47,7 +49,7 @@ import { aiActor, keyedWrite } from './record-ai-auth'
 import { refusal } from './respond'
 import { aiActs, aiReads, companyMember, publicRoute, serviceBody } from './guards'
 
-const { googleDrive, recordEngine, jobRuns } = services
+const { googleDrive, googleDriveView, recordEngine, jobRuns } = services
 
 function answer<T>(c: Context, result: Outcome<T>) {
   c.header('Cache-Control', 'no-store')
@@ -93,6 +95,26 @@ googleDriveRoute.get('/me/google/drive/files', companyMember, async (c) => {
 // 「このフォルダはもう聞かない」 (google-drive.md "Asking before a put"): the member's own list, and taking one away.
 googleDriveRoute.get('/me/google/drive/trusted-folders', companyMember, (c) => answer(c, googleDrive.trustedFolders(c.var.member)))
 googleDriveRoute.delete('/me/google/drive/trusted-folders/:folderId', companyMember, (c) => answer(c, googleDrive.untrustFolder(c.var.member, c.req.param('folderId'))))
+
+/**
+ * A range of a picked Drive video for the member's own player (google-drive.md "Streaming a picked video"): the session
+ * only — no record token, AI token or broker token reaches it (`companyMember`). The service checks the view pick, the
+ * caps and Google; every refusal is a fixed sentence and code, never the file's name. The viewer's request signal goes
+ * to the call to Google, so a closed player stops it. Nothing of the file is logged (`:fileId` is not in the request
+ * log's OPAQUE_PARAMS).
+ */
+googleDriveRoute.get('/me/google/drive/view/:fileId', companyMember, async (c) => {
+  const member = c.var.member
+  const answer = await googleDriveView.open(member, c.req.param('fileId'), c.req.header('range'), c.req.raw.signal)
+  if (answer.kind === 'stream') return new Response(answer.body, { status: answer.status, headers: answer.headers })
+  c.header('Cache-Control', 'no-store')
+  c.header('X-Content-Type-Options', 'nosniff')
+  if (answer.kind === 'unsatisfiable') {
+    if (answer.size !== null) c.header('Content-Range', `bytes */${answer.size}`)
+    return c.json(answer.refusal.body, 416)
+  }
+  return refusal(c, answer.refusal)
+})
 
 /**
  * 「上書きする」 / 「やめる」 on the card (google-drive.md "Continuing a document people edited"): a person's press, with

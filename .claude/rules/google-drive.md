@@ -16,6 +16,9 @@ paths:
   - "client/src/features/chat/components/DriveOverwriteCard.tsx"
   - "client/tests/drive-overwrite.test.ts"
   - "server/tests/integration/google-drive-view.test.ts"
+  - "server/src/services/google-drive-view.ts"
+  - "server/tests/integration/google-drive-stream.test.ts"
+  - "model/drive-view/**"
 ---
 
 # Google Drive through the Google connection (feature `drive`, `drive.file`)
@@ -246,9 +249,9 @@ member's **own** rows (`DRIVE_PICK_TTL_MS`, `renewPick`):
 ## Viewing a video (`purpose: 'view'`, owner decisions 2026-11-26)
 
 A Drive video linked or embedded in an HTML document is to play inside ACB with ACB's own player (placed over the link's
-spot in the document view; the player and the streaming route are later changes). The video stays in Drive; the scope stays
+spot in the document view; the player is a later change; the streaming route is "Streaming a picked video" below). The video stays in Drive; the scope stays
 `drive.file` + Picker. Each viewer presses ［選択］ once per video in the Picker (accepted by the owner). **This part: the
-pick, its storage and the function the streaming route will call.**
+pick, its storage and the function the streaming route calls** (the route: "Streaming a picked video").
 
 - **Why it is its own purpose** (independent review + Codex): a document (or an AI it steered) can name any Drive id, and a
   Picker narrowed to it (`setFileIds`) lets the member grant it with one press. **Google's `drive.file` grant cannot be taken
@@ -284,7 +287,7 @@ pick, its storage and the function the streaming route will call.**
   **never** in `drive_picked` / the AI's `/status`, `drive_read` (`DRIVE_NOT_PICKED`), 「つなぐ」's `GET …/drive/files`, a
   record link (`linkable`: `DRIVE_NOT_PICKED`) or anything another member sees; and an ordinary pick of a video is never a
   view pick. `POST …/me/google/drive/picks` makes nothing (it fails closed).
-- **Using it** (`googleDrive.useViewPick(member, fileId)`, for the later streaming route; no route yet): the company's Google
+- **Using it** (`googleDrive.useViewPick(member, fileId)`, called by the streaming route at every range: "Streaming a picked video"): the company's Google
   on (operator, client, switch, vault — the Picker's registration is not needed to play) else `GOOGLE_STOPPED`; the member's
   grant active with `drive.file` (`GOOGLE_CONSENT_NEEDED`) and `drive` not off by the member (`GOOGLE_FEATURE_OFF`); the
   **company's** Drive switch (「会社で使うもの」, `googleCompanyFeatureOn('drive', …)`, the rule `google-client.ts` `scopeStop`
@@ -318,6 +321,121 @@ pick, its storage and the function the streaming route will call.**
   with the account changed while Google was asked, `POST …/picks` failing closed for a file a view ticket refused), `server/tests/unit/google-drive-core.test.ts` (the list, exact match,
   `drivePickableFor`) — mutation-checked; the account, member and expiry conditions are in both `viewPick` and
   `touchViewPick`'s SQL, so each alone survives and both removed fail.
+
+## Streaming a picked video (owner decisions 2026-11-26)
+
+The bytes of a view pick go to the member's own player through ACB's server (owner accepted); the video stays in Drive.
+`GET /api/companies/:companyId/me/google/drive/view/:fileId` (`routes/google-drive.ts` → `services/google-drive-view.ts`
+`open` → `googleClient.streamMedia`). **Session only** (`companyMember`): no record token, AI token or broker token reaches
+it. The player is a later change (it asks range by range, as a `<video>` does). The model of the pick and of this route:
+`model/drive-view/` (TLA+, R1–R7; README there) — **a change to the view pick or this route changes the model in the
+same PR**.
+
+- **One request = one answer of at most `chunkBytes`** (8 MB): every range is authorized again, so a revocation lets at
+  most the answers already in flight finish (never a new range; "In flight" below). In order, nothing sent to Google
+  before the last step:
+  1. **requests per member per minute** (`memberPerMinute`, 120) → 429 `DRIVE_VIEW_TOO_FAST`: first and in memory only, so
+     a flood reads and writes nothing — not even the pick's renewal (review 2026-11-27).
+  2. **the view pick**: `useViewPick` ("Viewing a video": operator stop, the company's Google and its Drive switch, the
+     grant active with `drive.file`, Drive on, a live view pick of exactly that file by that member under the account the
+     grant has now; renews it). Its refusal is answered as is (403 `DRIVE_VIEW_NOT_PICKED`, `GOOGLE_STOPPED`, 409
+     `GOOGLE_CONSENT_NEEDED` / `GOOGLE_FEATURE_OFF`); a bad id 400. Another member's, another company's or an unknown id
+     all answer the same not-picked refusal.
+  3. **the Range's form** (`parseViewRange`): absent, or exactly one `bytes=a-b` / `bytes=a-`. Anything else — several
+     ranges, a suffix (`bytes=-n`), another unit, `b < a` — → 416 `DRIVE_VIEW_RANGE_UNSUPPORTED` (no `Content-Range`),
+     before anything is counted or asked. Decision: refuse rather than answer 200 (a whole video would pass the ceiling).
+  4. **the caps**, in one synchronous stretch with taking the stream slot (video only: their own counters, apart from the
+     relay's and the key broker's budgets): answers streaming at once per member (`memberStreams`, 4) → 429
+     `DRIVE_VIEW_TOO_MANY_STREAMS`; bytes today per member (`memberDayBytes`, 3 GiB) → 429 `DRIVE_VIEW_MEMBER_DAY`; bytes
+     today in the company (`companyDayBytes`, 50 GiB, cost protection) → 429 `DRIVE_VIEW_COMPANY_DAY`. Each with a Japanese
+     `error` and `Retry-After`; nothing asked of Google. The day is the key broker's (`BROKER_DAY_UTC_OFFSET_MINUTES`); the
+     bytes are kept in `broker_usage` under the key id `drive-view:bytes` (`tokens` = bytes, `requests` = answers) and every
+     cap refusal (the minute's too) is counted under `drive-view:refused` (`requests` only) — key ids no key can have,
+     pruned with the rest of `broker_usage`, and left out of 「気になる動き」's key use (`security-alerts.md`); the minute,
+     the open answers and the sessions are in memory (**one server process**). `lib/config.ts` `driveViewLimits` reads each
+     per use (`ACB_DRIVE_VIEW_CHUNK_BYTES`, `_MEMBER_DAY_BYTES`, `_COMPANY_DAY_BYTES`, `_MEMBER_STREAMS`,
+     `_MEMBER_PER_MINUTE`, `_SESSION_IDLE_MS`, `_ANSWER_MS`; out of bounds → the default).
+  5. **the session's metadata**: `files.get` (`id,mimeType,size,trashed`, `recordedByCaller`) once per viewing session
+     **and grant** (shared by answers asked at the same time; read again for another grant — a re-consent, maybe another
+     Google account — and after a refusal), so each later range is **one** Google call. The read carries its own signal
+     (`GoogleRequest.signal`): aborted when the last answer waiting for it leaves (its deadline, the viewer) and at its own
+     `answerMs`, so a body that stalls is never read for ever. Trashed / another id / Google's
+     403 / 404 → 403 `DRIVE_VIEW_NO_ACCESS`; a type not exactly one of `DRIVE_VIEW_MIMES` → 403 `DRIVE_VIEW_NOT_VIDEO`; an
+     unreadable size → 503 `DRIVE_VIEW_UPSTREAM`.
+  6. **which bytes**: a range starting at or past the size → 416 `DRIVE_VIEW_RANGE_OUTSIDE` with `Content-Range: bytes
+     */<size>`; else `end = min(asked end, size − 1, start + chunkBytes − 1)` (an open or long range gets a **shorter 206**,
+     which HTTP allows). **No Range**: 200 with the whole file only when it fits one answer, else 416
+     `DRIVE_VIEW_RANGE_NEEDED` with the size (a `<video>` always sends a Range). Then **the bytes are reserved** — the day's
+     counts **read again after the metadata's await**, in a synchronous stretch, the range cut to what is left of the
+     member's and the company's day (a 200 that does not fit → 429) — so answers that passed the caps together can never
+     pass them together (test 「two answers awaiting the metadata at once…」; model `BrokenReserveStale`).
+  7. **`googleClient.streamMedia`** (the buffered `request` and its contract are unchanged): every switch, the grant —
+     **and that it is still the grant the pick check saw** (`DriveViewUse.grantId`; a re-consent meanwhile, maybe with
+     another Google account → not sent, `grant-changed` → 409 `GOOGLE_CONSENT_NEEDED`) —, `drive.file` and Drive on,
+     before the access token **and again after it** (a refresh can take seconds; review 2026-11-27), then nothing awaited
+     until the request leaves; the access token as for any call (a 401 drops it and tries once more); `files.get?alt=media`
+     with `Range: bytes=start-end`; **never buffered** (the body passed on as it arrives); no other retry (the player asks
+     again); headers in 30 s and the whole call in 120 s, else aborted; an error answer read only 64 KB for Google's short
+     reason. Mapped to fixed answers: not sent for a switch / grant → the codes of step 2; Google 403 / 404 → 403
+     `DRIVE_VIEW_NO_ACCESS`; 429, 5xx, a connection or timeout failure → 503 `DRIVE_VIEW_UPSTREAM`.
+- **Google's answer must be what was asked**: a 206 with exactly `Content-Range: bytes start-end/size` (and a
+  `Content-Length` of that length when given), or a 200 only when the whole file was asked; anything else is aborted, the
+  bytes given back and 503 `DRIVE_VIEW_UPSTREAM` (the session's metadata read again next time). The answer passes on at most
+  the reserved length (a longer body is cut and aborted); **a body ending short** (a chunked answer cut, the connection
+  lost) **errors the stream** — never a clean end, so the viewer's connection is destroyed with fewer bytes than its
+  `Content-Length` instead of looking complete.
+- **The answer's headers**: 200 / 206, `Content-Type` = the entry of ACB's fixed list that equals Google's reported type
+  (`DRIVE_VIEW_MIMES`; Google's string itself is never sent), `Content-Length`, `Content-Range` (206), `Accept-Ranges:
+  bytes`, `Cache-Control: no-store`, `X-Content-Type-Options: nosniff`, `Content-Disposition: inline` with **no file name**.
+  Refusals carry `no-store` and `nosniff`; no refusal names the file.
+- **It ends once** (`end`): the last byte passed on, the viewer gone (the request's `AbortSignal`, which also reaches the
+  upstream fetch through `streamMedia`, or the body cancelled), Google failing or ending short, **the answer's own deadline**
+  (`answerMs`, 120 s, a server timer **started when the slot is taken** that fires **whether or not the viewer reads**: a
+  viewer that stops reading but keeps the connection open would otherwise keep its slot and its reserved bytes — review
+  2026-11-27 —, and a metadata or token answer that sends its headers and stalls its body would hold it for ever — Codex
+  re-review of #875: the deadline and the viewer's abort are installed with the slot and every await after it is raced
+  with them), or an exception on the way
+  (the `catch` in `open`): the stream slot is released and the bytes reserved but not passed on are given back, exactly
+  once; a failure or the deadline also errors the stream. The viewer leaving **aborts the call to Google** (head or body),
+  so no bytes are fetched for nobody. The model's R7: under the fairness of the server's own steps every held slot is
+  released.
+- **In flight** (the model's word): a request whose call passed `streamMedia`'s last check (after the token). A revocation
+  (grant revoked or replaced, Drive or Google off, the member removed, the pick lapsing) does not cut it: it finishes its
+  ≤ 8 MB answer or meets its deadline; the next range is refused at step 2 or 7. At most `memberStreams` answers of a member
+  are in flight.
+- **A viewing session and its log line** (`agent_events`, `recordServerEvent`): one per member × file, from the first range
+  until `sessionIdleMs` (10 minutes) without a request **and with no answer streaming** (a session is never ended under an
+  answer, so its bytes are never lost to a new one); then one line `google:drive.view` (category `broker`, agent `script`,
+  target `{ kind: broker, service: google, host: www.googleapis.com, path: drive.view, operation: drive.view, bytesOut:
+  <bytes served>, status: <the last answer's> }`, `durationMs`, outcome `error` only when Google, the metadata or the
+  deadline failed an answer — the viewer leaving one (a seek) is normal and stays `ok`) — **never the file id or name**;
+  nothing per range (the metadata call is `recordedByCaller`, the media call files none). A session ends at the next
+  request of its company after its idle time (each request sweeps only its own company; the server clock's `driveSweep`,
+  every 5 minutes, sweeps every company and forgets old per-minute counts). Accepted: a session still open when the process
+  stops loses its line (its bytes stay counted in `broker_usage`). ≤ 10,000 sessions in memory (the oldest with nothing
+  streaming ended first).
+- **Logs**: `:fileId` is not in the request log's `OPAQUE_PARAMS` (the line shows the route pattern only); Google's
+  refusals log the operation (`drive.view.meta` / `drive.view.media`), status and short reason only.
+- Unverified against real Google: that `files.get?alt=media` honours `Range` with a 206 and the exact `Content-Range` for
+  every video type in the list (if Google answered a 200 or another range, each such answer is refused — safe, no video
+  plays — and the fake's `misanswerNextMedia` tests exactly that), that `size` is answered under `drive.file` for a picked
+  video, and how Google meters many range requests of one file (its per-user quota: a 429 is answered 503 and the player
+  asks again).
+- Tests: `server/tests/integration/google-drive-stream.test.ts` against the fake Google (`alt=media` with Range from seeded
+  bytes, `paceMedia`, `mediaAnswers` reporting each answer's end, `misanswerNextMedia`: `ignore-range`, `too-long`,
+  `too-short`, `broken`): the Range forms (exact headers, the ceiling, the end of the file, 416 with and without the size, no
+  Range), Google's answer of another range refused, a longer one cut, a shorter one or a lost connection erroring the
+  stream, the type only from the list (exact match), refusals with Google not asked and no name (no session, a non-member,
+  not picked, another member, another company's pick with Google on, expired, another account, the company's and the
+  member's Drive off, Google off, the grant revoked, a re-consent between the check and the bytes, a revocation during the
+  token's refresh, a record token), each cap (cut to what is left, then 429 and counted; the company total; two answers
+  awaiting the metadata at once; concurrency released on the viewer leaving, on Google failing and on an exception; the
+  minute, with no renewal of the pick), a viewer that never reads (the deadline), the viewer leaving aborts Google's answer
+  (the signal, and a real HTTP connection closed), a metadata body that stalls (the deadline from the slot releases it and
+  aborts Google's call) and the viewer closing while the metadata is awaited, one line per session with the bytes, a seek not a failure, a session not
+  ended under a streaming answer, the metadata read once per grant, no file id or name in any log line; the permission
+  matrix row and `CROSS`; `tests/unit/security-alerts.test.ts` (`drive-view:*` is not key use) — mutation-checked (survivors
+  named in the PR). `model/drive-view/check` (CI "Model (Drive view)").
 
 ## The AI's routes (`/api/records-ai/google/drive`, record token) and tools
 

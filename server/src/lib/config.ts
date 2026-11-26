@@ -238,6 +238,38 @@ export function driveDocTiming(env: Readonly<Record<string, string | undefined>>
 }
 
 /**
+ * The limits of streaming a picked Drive video (google-drive.md "Streaming a picked video"), read per use. Each can be
+ * lowered (or raised within its bound) by its variable; anything else falls back to the default.
+ * - chunkBytes: at most this many bytes per answer, whatever range was asked (a shorter 206 is valid);
+ * - memberDayBytes / companyDayBytes: bytes served per member and per company in a day (the key broker's day);
+ * - memberStreams: answers being streamed to one member at once;
+ * - memberPerMinute: requests of one member in a minute;
+ * - sessionIdleMs: a viewing session (member × file) ends after this long without a request (its one log line then);
+ * - answerMs: an answer ends (its slot released, its unsent bytes given back) this long after it started, read or not.
+ */
+const MIB = 1024 * 1024
+const GIB = 1024 * MIB
+
+export function driveViewLimits(env: Readonly<Record<string, string | undefined>> = process.env): {
+  chunkBytes: number; memberDayBytes: number; companyDayBytes: number; memberStreams: number; memberPerMinute: number; sessionIdleMs: number; answerMs: number
+} {
+  const read = (name: string, min: number, max: number, fallback: number) => {
+    const raw = env[name]
+    const n = Number(raw)
+    return raw !== undefined && Number.isSafeInteger(n) && n >= min && n <= max ? n : fallback
+  }
+  return {
+    chunkBytes: read('ACB_DRIVE_VIEW_CHUNK_BYTES', 1, 64 * MIB, 8 * MIB),
+    memberDayBytes: read('ACB_DRIVE_VIEW_MEMBER_DAY_BYTES', 1, 1024 * GIB, 3 * GIB),
+    companyDayBytes: read('ACB_DRIVE_VIEW_COMPANY_DAY_BYTES', 1, 64 * 1024 * GIB, 50 * GIB),
+    memberStreams: read('ACB_DRIVE_VIEW_MEMBER_STREAMS', 1, 64, 4),
+    memberPerMinute: read('ACB_DRIVE_VIEW_MEMBER_PER_MINUTE', 1, 10_000, 120),
+    sessionIdleMs: read('ACB_DRIVE_VIEW_SESSION_IDLE_MS', 1, 24 * 60 * 60 * 1000, 10 * 60 * 1000),
+    answerMs: read('ACB_DRIVE_VIEW_ANSWER_MS', 1, 10 * 60 * 1000, 120_000),
+  }
+}
+
+/**
  * The address browsers reach this server at (Google's redirect URI is built
  * from it). Read per call; default http://localhost:3001, no trailing slash.
  */

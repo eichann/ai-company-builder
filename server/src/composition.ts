@@ -664,7 +664,7 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
 
   // Google (composition/google.ts): the one Google client, members' own OAuth permissions, the connector,
   // the relay with the member's own permission, Drive, and a job's deliverable places outside ACB.
-  const { googleClient, memberOAuth, googleConnector, googleRelay, googleDrive, deliveryPlaces } = wireGoogle({
+  const { googleClient, memberOAuth, googleConnector, googleRelay, googleDrive, googleDriveView, deliveryPlaces } = wireGoogle({
     conn, shared, brokerVault, upstream, practiceList, brokerKeys: repos.brokerKeys, agentEventRows: repos.agentEvents,
     agentEvents, agentStops, pluginShelf, memberOf: access.memberOf, readIncoming, taskSettings, workSwitches, recordEngine,
     dayOf: brokerDayOf, publicUrl,
@@ -855,6 +855,7 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     googleClient,
     googleConnector,
     googleDrive,
+    googleDriveView,
     googleRelay,
     memberOAuth,
     minutes,
@@ -919,7 +920,7 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
       // 「気になる動き」 (security-alerts.md): every company, records on or off.
       securitySweep: companyId => securityAlerts.sweep(companyId),
       // Google Drive (google-drive.md): a waiting overwrite's content goes once it expired; old reads go.
-      driveSweep: companyId => googleDrive.sweep(companyId),
+      driveSweep: companyId => { googleDrive.sweep(companyId); googleDriveView.sweep(companyId) },
       // A mail / Slack reply left `sending` by a stopped process → unknown, for its person (outbound-mail.md).
       interruptedSends: companyId => outboundMail.settleInterrupted(companyId),
       // Holding tickets past their 30 days (private-folders.md "Access removed"): every company.

@@ -1,0 +1,31 @@
+# What model/drive-view/check compares against on every run. It exists to catch the checker (or a careless edit)
+# passing something that is broken: a rule dropped, a state count that moved, a variant that no longer fails. Change a
+# line only together with the model, and say why in the PR.
+#
+# model <the real model check runs>
+model DriveView
+# rule <model> <a rule the real model must check> (must equal the INVARIANT and PROPERTY lines of DriveView.cfg)
+rule DriveView TypeOK
+rule DriveView R1_ViewPickOnlyBoundVideo
+rule DriveView R2_StreamOnlyForLivePick
+rule DriveView R3_OnlyInFlightOutlivesRevocation
+rule DriveView R4_StreamsPerMember
+rule DriveView R5_BytesPerDay
+rule DriveView R6_ViewPickNeverAiPick
+rule DriveView R7_SlotReleased
+# states <model> <distinct states the checker must find>
+states DriveView 267040
+# broken <variant in broken/> <the rule it must fail on>
+broken BrokenResultKeepsAnyId R1_ViewPickOnlyBoundVideo
+broken BrokenResultNoVideoCheck R1_ViewPickOnlyBoundVideo
+broken BrokenViewKeepsAiPick R6_ViewPickNeverAiPick
+broken BrokenCheckAnyMembersPick R2_StreamOnlyForLivePick
+broken BrokenCheckNoAccount R2_StreamOnlyForLivePick
+broken BrokenPassAnyGrant R2_StreamOnlyForLivePick
+broken BrokenPassNoSwitches R2_StreamOnlyForLivePick
+broken BrokenNoStreamCap R4_StreamsPerMember
+broken BrokenAbortKeepsSlot R4_StreamsPerMember
+broken BrokenReserveNoCut R5_BytesPerDay
+broken BrokenAbortNoGiveBack R5_BytesPerDay
+broken BrokenReserveStale R5_BytesPerDay
+broken BrokenDeadlineAfterHeaders R7_SlotReleased
