@@ -28,7 +28,7 @@ async function open(page: Page) {
 
 test('an .html tab opens as 見る: its view is placed exactly over the tab\'s area, and closed when another tab is chosen', async ({ page }) => {
   const state = await open(page)
-  expect((await calls(page))[0]).toEqual(['open', DOC])
+  expect((await calls(page))[0]).toEqual(['open', DOC, 'demo'])
   const box = await area(page).boundingBox()
   const placed = (await lastBounds(page))!
   for (const k of ['x', 'y', 'width', 'height'] as const) expect(Math.abs(placed[k] - box![k])).toBeLessThan(1)
@@ -196,6 +196,24 @@ test('a link pressed in the document asks first, its domain large; only 「ブ�
   expectNoPageErrors(state)
 })
 
+test('a Drive file link also offers ［ACB で再生］, which asks main by view and main\'s number for the link (never the address); other links do not', async ({ page }) => {
+  const state = await open(page)
+  const opened = () => page.evaluate(() => (window as unknown as { __acbOpened: string[] }).__acbOpened)
+  expect((await calls(page)).find(c => c[0] === 'open'), 'the view is opened for the current company').toEqual(['open', DOC, 'demo'])
+  await sendEvent(page, { viewId: 7, kind: 'link', url: 'https://example.com/a' })
+  const dialog = page.getByRole('dialog', { name: '外のサイトを開きますか？' })
+  await expect(dialog).toBeVisible()
+  await expect(dialog.getByRole('button', { name: 'ACB で再生' })).toHaveCount(0)
+  await dialog.getByRole('button', { name: 'やめる' }).click()
+  await sendEvent(page, { viewId: 7, kind: 'link', url: 'https://drive.google.com/file/d/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA/view', videoLink: 3 })
+  await expect(dialog.getByTestId('link-host')).toHaveText('drive.google.com')
+  await dialog.getByRole('button', { name: 'ACB で再生' }).click()
+  await expect(dialog).toHaveCount(0)
+  await expect.poll(async () => (await calls(page)).filter(c => c[0] === 'playLink')).toEqual([['playLink', 7, 3]])
+  expect(await opened(), 'nothing opened in the browser').toEqual([])
+  expectNoPageErrors(state)
+})
+
 test('zoom steps, 止める and もう一度表示する, and a view that went by itself', async ({ page }) => {
   const state = await open(page)
   await page.getByRole('button', { name: '拡大' }).click()
@@ -310,11 +328,14 @@ test('the band lists the document\'s Google Drive videos (counts only) with ［�
   await expect(band(page)).toHaveCount(0)
   // Nothing else blocked: the Drive part shows alone, without the internet parts' sentence.
   await sendEvent(page, { viewId: 7, kind: 'driveVideos', count: 2, total: 2, seen: 2 })
-  await expect(videos(page)).toContainText('この資料には Google Drive の動画が 2 本あります。資料の中では再生できないので、ブラウザで開いて見てください。')
+  await expect(videos(page)).toContainText('この資料には Google Drive の動画が 2 本あります。［ACB で再生］で、アプリの中のプレイヤーで見られます')
   await expect(band(page)).not.toContainText('部品を')
-  await expect(videos(page).getByRole('listitem')).toHaveText(['動画 1ブラウザで開く', '動画 2ブラウザで開く'])
+  await expect(videos(page).getByRole('listitem')).toHaveText(['動画 1ACB で再生ブラウザで開く', '動画 2ACB で再生ブラウザで開く'])
   await videos(page).getByRole('button', { name: '動画 2 をブラウザで開く' }).click()
   await expect.poll(async () => (await calls(page)).filter(c => c[0] === 'driveVideo')).toEqual([['driveVideo', 7, 1]])
+  // ［ACB で再生］: main's player over the document plays it, asked by view and row only.
+  await videos(page).getByRole('button', { name: '動画 1 を ACB で再生' }).click()
+  await expect.poll(async () => (await calls(page)).filter(c => c[0] === 'playVideo')).toEqual([['playVideo', 7, 0]])
   // With the blocked parts too: both parts, one band.
   await sendEvent(page, { viewId: 7, kind: 'blocked', count: 2, hosts: ['drive.google.com'], hostCount: 1 })
   await expect(band(page)).toContainText('部品を 2 件')

@@ -3,7 +3,7 @@
 // never hands over an address). Its Google Drive videos are listed too, each opened in the member's
 // browser by main (counts only here). Not a `status` / `alert`: the viewer would read it as an overlay.
 import { useState } from 'react'
-import { ArrowSquareOut, GlobeHemisphereWest, VideoCamera, X } from '@phosphor-icons/react'
+import { ArrowSquareOut, GlobeHemisphereWest, Play, VideoCamera, X } from '@phosphor-icons/react'
 import { DOC_BLOCKED_HOSTS_MAX, DOC_BLOCKED_PARTS_MAX, type DocBlockedParts, type DocDriveVideos } from '../../../../shared/doc-frame'
 
 const BAND_BUTTON = 'inline-flex items-center gap-1 h-control-sm px-control-sm-x rounded-control border border-warning-border text-small text-warning-text hover:bg-surface-raised focus-visible:outline-none focus-visible:ring-focus focus-visible:ring-focus-ring'
@@ -15,12 +15,14 @@ interface BlockedPartsBandProps {
   driveVideos?: DocDriveVideos | null
   /** ［ブラウザで開く］ on the `index`-th video (main opens Drive's own page for it). */
   onOpenDriveVideo?: (index: number) => void
+  /** ［ACB で再生］ on the `index`-th video (ACB's own player over the document plays it). */
+  onPlayDriveVideo?: (index: number) => void
   onDismiss: () => void
   /** ［AI に直してもらう］: puts a request in the chat's input (absent where no chat can take it). */
   onAskAi?: () => void
 }
 
-export function BlockedPartsBand({ parts, driveVideos = null, onOpenDriveVideo, onDismiss, onAskAi }: BlockedPartsBandProps) {
+export function BlockedPartsBand({ parts, driveVideos = null, onOpenDriveVideo, onPlayDriveVideo, onDismiss, onAskAi }: BlockedPartsBandProps) {
   const [open, setOpen] = useState(false)
   const showParts = parts !== null && parts.count > 0
   const videoRows = driveVideos && driveVideos.count > 0 ? Array.from({ length: driveVideos.count }, (_, i) => i) : []
@@ -53,11 +55,16 @@ export function BlockedPartsBand({ parts, driveVideos = null, onOpenDriveVideo, 
           <div data-testid="drive-videos" className="flex items-start gap-2">
             <VideoCamera size={14} aria-hidden className="mt-0.5 flex-shrink-0 text-warning-icon" />
             <div className="flex-1 min-w-0">
-              <p><b>この資料には Google Drive の動画が {Math.max(driveVideos.total, driveVideos.count)} 本あります。</b>資料の中では再生できないので、ブラウザで開いて見てください。</p>
+              <p><b>この資料には Google Drive の動画が {Math.max(driveVideos.total, driveVideos.count)} 本あります。</b>{onPlayDriveVideo ? '［ACB で再生］で、アプリの中のプレイヤーで見られます（はじめての動画は、ブラウザで選んでから再生します）。' : '資料の中では再生できないので、ブラウザで開いて見てください。'}</p>
               <ul aria-label="Google Drive の動画" className="mt-1 flex flex-col gap-1">
                 {videoRows.map(index => (
                   <li key={index} className="flex items-center gap-2">
                     <span>動画 {index + 1}</span>
+                    {onPlayDriveVideo && (
+                      <button type="button" className={BAND_BUTTON} aria-label={`動画 ${index + 1} を ACB で再生`} onClick={() => onPlayDriveVideo(index)}>
+                        <Play size={12} aria-hidden />ACB で再生
+                      </button>
+                    )}
                     <button type="button" className={BAND_BUTTON} aria-label={`動画 ${index + 1} をブラウザで開く`} onClick={() => onOpenDriveVideo?.(index)}>
                       <ArrowSquareOut size={12} aria-hidden />ブラウザで開く
                     </button>

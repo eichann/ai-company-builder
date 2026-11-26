@@ -89,6 +89,8 @@ export function TabbedEditorPanel({
   // The tab whose 「差分を見る」 view (disk version vs. the tab's edits) is open.
   const [externalDiffPath, setExternalDiffPath] = useState<string | null>(null)
   const rootPath = useAppStore(s => s.currentCompany?.rootPath ?? null)
+  // Another company is another document view (its Drive videos play with that company's session).
+  const companyId = useAppStore(s => s.currentCompany?.id ?? null)
   const { mdViewMode, setMdViewModePersisted } = useMarkdownViewMode()
   const scroll = useScrollMemory(fileTabs, shownFile, mdViewMode)
   const { saveCurrentScrollPosition } = scroll
@@ -281,7 +283,7 @@ export function TabbedEditorPanel({
         ) : activeFile && activeFilePath && isHtmlFile(activeFilePath) && !htmlSources.has(activeFilePath) ? (
           // One view per file and per showing: another tab or 中身 closes it (its scripts stop).
           <HtmlDocumentPane
-            key={activeFilePath}
+            key={`${companyId ?? ''}\n${activeFilePath}`}
             filePath={activeFilePath}
             onShowSource={() => showHtmlSource(activeFilePath, true)}
             leavingForSource={() => htmlSourcesNow.current.has(activeFilePath)}

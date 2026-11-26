@@ -20,8 +20,10 @@ export type EditorRefusals = ElectronPort<'reservedPathRefusal'>
  * reloads it; closing it revokes the document's grant. Main tells the window
  * about a link the member pressed in it, or a view that went by itself. While the document is reviewed,
  * main reports the text the member selects in it and draws the comments' marks (quoted text only).
+ * Its Google Drive videos play in ACB's own player, which main places over the document (by view and
+ * index only: main keeps the ids; doc-frame.md "ACB's player over Drive embeds (plan 4)").
  */
-export type DocViewControls = ElectronPort<'openDocView' | 'closeDocView' | 'setDocViewBounds' | 'setDocViewZoom' | 'reloadDocView' | 'onDocViewEvent' | 'setDocViewReview' | 'findDocViewQuote' | 'openDocViewDriveVideo'>
+export type DocViewControls = ElectronPort<'openDocView' | 'closeDocView' | 'setDocViewBounds' | 'setDocViewZoom' | 'reloadDocView' | 'onDocViewEvent' | 'setDocViewReview' | 'findDocViewQuote' | 'openDocViewDriveVideo' | 'playDocViewDriveVideo' | 'playDocViewLinkedVideo'>
 
 /** 「ほかのアプリで開く」: a video the editor cannot play, handed to this computer's own app for it. */
 export type VideoOutbound = ElectronPort<'openVideo'>
