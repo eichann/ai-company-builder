@@ -896,6 +896,13 @@ test('a record open in the middle: its consultations on top (「この件の相�
   await about.locator('[data-about-row="rec-send"]').click()
   await expect(about.locator('[data-about-row="rec-send"]')).toHaveAttribute('aria-current', 'page')
   await expect(list.locator('[data-conversation-id="rec-send"]').getByRole('button', { name: /見積書の送り方/ })).toHaveAttribute('aria-current', 'page')
+  // A search shows only its matches: the section waits until the box is empty again.
+  await list.getByRole('textbox', { name: '相談を検索' }).fill('経費')
+  await expect(list.locator('[data-conversation-id]')).toHaveCount(1)
+  await expect(about).toHaveCount(0)
+  await expect(list.getByRole('note', { name: 'この件の相談' })).toHaveCount(0)
+  await list.getByRole('button', { name: '検索をクリア' }).click()
+  await expect(about.locator('[data-about-row]')).toHaveCount(2)
 })
 
 test('a record with no consultation: one quiet line, the full list stays; no record open: no section', async ({ page }) => {
