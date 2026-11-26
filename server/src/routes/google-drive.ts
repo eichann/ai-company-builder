@@ -5,7 +5,7 @@
  *
  * The member's app (session), mounted at /api/companies/:companyId:
  *   POST   /me/google/drive/picker                  { mode }  released apps' Picker window: fails closed (update the app)
- *   POST   /me/google/drive/pick-tickets            { mode, fileIds? }  a one-time pick ticket for the page in the browser
+ *   POST   /me/google/drive/pick-tickets            { mode, fileIds?, purpose? }  a one-time pick ticket for the page in the browser
  *   GET    /me/google/drive/pick-tickets/:ticketId  the member's own ticket: waiting (saving), or its result until acknowledged
  *   DELETE /me/google/drive/pick-tickets/:ticketId  the app read the result (acknowledged) or stopped waiting
  *   POST   /me/google/drive/picks                   { mode, ids }  keep what the person picked (each checked with Google)
@@ -212,7 +212,8 @@ googleDriveAiRoute.get('/puts/:putId', aiReads, async (c) => {
  * Google Picker, and posts only the picked ids — or a cancel, also when the page is closed — to `result`.
  * With `fileIds` (a Drive link the member pasted on a task card) the view shows just those files
  * (`DocsView.setFileIds`, which Google says not to combine with `setEnableDrives`); the member still
- * presses 「選択」 — that is the pick. Served from the server so the Picker's origin is the one the admin
+ * presses 「選択」 — that is the pick. A view pick (`purpose: 'view'`, one video a document asks for) shows just that file,
+ * only the video types, and lets only a video be selected (`setSelectableMimeTypes`), under ACB's own title. Served from the server so the Picker's origin is the one the admin
  * allows on the API key (`<origin>/*`: with this Referrer-Policy Google sees the origin only).
  */
 const PICKER_SCRIPT = `(function () {
@@ -259,6 +260,8 @@ const PICKER_SCRIPT = `(function () {
   })
   var BACK = '（このタブは閉じてかまいません）'
   var AI_ASKED = 'AI が、このファイルを選ぶよう求めています。中身に覚えがなければ選ばないでください。'
+  // A view pick (google-drive.md "Viewing a video"): ACB's own words, never the document's.
+  var VIEW_ASKED = '資料が、この動画を選ぶよう求めています。動画のときだけ［選択］を押してください。'
   post('/config', { ticket: ticket }).then(function (a) {
     var cfg = a.ok && a.j && a.j.data
     if (!cfg) { finished = true; say(problem(a, 'Google Drive のファイル選びを始められませんでした。アプリに戻ってください。')); return }
@@ -269,6 +272,7 @@ const PICKER_SCRIPT = `(function () {
       window.gapi.load('picker', { callback: function () {
         var P = window.google.picker
         var folder = cfg.mode === 'folder'
+        var viewing = !folder && cfg.purpose === 'view'
         // Linking offers every type (no MIME filter); reading, the types the AI reads.
         var mimes = folder ? 'application/vnd.google-apps.folder' : (Array.isArray(cfg.mimeTypes) ? cfg.mimeTypes.join(',') : '')
         var typed = function (v) { return mimes ? v.setMimeTypes(mimes) : v }
@@ -282,6 +286,8 @@ const PICKER_SCRIPT = `(function () {
         }
         var views = []
         var only = cfg.mode === 'files' && Array.isArray(cfg.fileIds) ? cfg.fileIds.filter(function (id) { return typeof id === 'string' && /^[A-Za-z0-9_-]{10,200}$/.test(id) }).slice(0, 10) : []
+        // A view pick shows only the one video it was made for, or nothing at all (never the whole Drive).
+        if (viewing && only.length !== 1) { finish({ ticket: ticket, action: 'cancel' }, 'Google Drive から選ぶ画面を開けませんでした。アプリに戻ってください。' + BACK); return }
         if (only.length > 0) {
           // A pasted link: just those files (Google: setFileIds is not combined with setEnableDrives).
           var picked = typed(new P.DocsView(P.ViewId.DOCS))
@@ -303,21 +309,23 @@ const PICKER_SCRIPT = `(function () {
         var b = new P.PickerBuilder()
         views.forEach(function (v) { b = b.addView(v) })
         b = b.setOAuthToken(cfg.accessToken).setDeveloperKey(cfg.apiKey).setAppId(cfg.appId)
-          .setOrigin(window.location.origin).setLocale('ja').setTitle(folder ? '置き場所のフォルダを選んでください' : cfg.purpose === 'link' ? 'つなぐファイルを選んでください' : aiAsked ? AI_ASKED : 'AI に読ませるファイルを選んでください')
+          .setOrigin(window.location.origin).setLocale('ja').setTitle(folder ? '置き場所のフォルダを選んでください' : viewing ? VIEW_ASKED : cfg.purpose === 'link' ? 'つなぐファイルを選んでください' : aiAsked ? AI_ASKED : 'AI に読ませるファイルを選んでください')
           .setCallback(function (data) {
             if (data.action === P.Action.PICKED) {
-              var ids = (data.docs || []).map(function (d) { return d && d.id }).filter(function (id) { return typeof id === 'string' && /^[A-Za-z0-9_-]{10,200}$/.test(id) }).slice(0, cfg.maxItems)
+              var ids = (data.docs || []).map(function (d) { return d && d.id }).filter(function (id) { return typeof id === 'string' && /^[A-Za-z0-9_-]{10,200}$/.test(id) && (!viewing || id === only[0]) }).slice(0, cfg.maxItems)
               if (ids.length === 0) finish({ ticket: ticket, action: 'cancel' }, '選べるものがありませんでした。アプリに戻ってください。' + BACK)
               else finish({ ticket: ticket, mode: cfg.mode, action: 'picked', ids: ids }, '選びました。アプリに戻ってください。' + BACK)
             } else if (data.action === P.Action.CANCEL) {
               finish({ ticket: ticket, action: 'cancel' }, '選ぶのをやめました。アプリに戻ってください。' + BACK)
             }
           })
-        if (cfg.mode === 'files') b = b.enableFeature(P.Feature.MULTISELECT_ENABLED).setMaxItems(cfg.maxItems)
+        if (cfg.mode === 'files' && !viewing) b = b.enableFeature(P.Feature.MULTISELECT_ENABLED).setMaxItems(cfg.maxItems)
+        // Only a video can be selected (Google's PickerBuilder.setSelectableMimeTypes), on top of the view's own filter.
+        if (viewing && Array.isArray(cfg.mimeTypes) && cfg.mimeTypes.length > 0 && typeof b.setSelectableMimeTypes === 'function') b = b.setSelectableMimeTypes(cfg.mimeTypes.join(','))
         if (typeof cfg.account === 'string' && typeof b.setAuthUser === 'function') b = b.setAuthUser(cfg.account)
         b.build().setVisible(true)
         cfg.accessToken = ''
-        say((aiAsked ? AI_ASKED + ' ' : '') + (typeof cfg.account === 'string' ? 'Google アカウント「' + cfg.account + '」で選んでください（ブラウザで別のアカウントになっているときは、このアカウントに切り替えてください）。' : ''))
+        say((viewing ? VIEW_ASKED + ' ' : aiAsked ? AI_ASKED + ' ' : '') + (typeof cfg.account === 'string' ? 'Google アカウント「' + cfg.account + '」で選んでください（ブラウザで別のアカウントになっているときは、このアカウントに切り替えてください）。' : ''))
       }, onerror: function () { finish({ ticket: ticket, action: 'cancel' }, 'Google の画面を読み込めませんでした。アプリに戻ってください。' + BACK) } })
     }
     document.head.appendChild(s)

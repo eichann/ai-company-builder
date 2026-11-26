@@ -74,7 +74,8 @@ core connector serving the roles 予定を読む / メールを読む・送る /
 - `connector_history`: every change (client, on/off, grant new / replaced / added, stopped,
   revoked, stop-all) as JSON without any secret.
 - `google_oauth_clients.picker_api_key` / `picker_app_id`: Google Picker's registration
-  (`google-drive.md`); `google_drive_picks` / `google_drive_puts` (Drive's picks and receipts).
+  (`google-drive.md`); `google_drive_picks` / `google_drive_puts` (Drive's picks and receipts); `google_drive_view_picks`
+  (a video chosen to play in ACB's player, kept apart from the picks: `google-drive.md` "Viewing a video").
 - The **access token** lives only in `google-client.ts`'s memory (per company, member and grant),
   until Google's expiry minus a minute and never more than 1 hour. It is dropped when a grant
   ends, the client or switch changes, or Google answers 401.

@@ -241,22 +241,57 @@ export function driveAiReadable(mimeType: unknown): boolean {
  * Why a files pick is made (owner decision 2026-11-14, 「つなぐだけ」): `read` — for the AI to read (the Picker offers
  * only what `drive_read` reads, as before); `link` — to link to a record (a person's 「Google Drive のファイルをつなぐ」):
  * any file but a folder, also a type the AI cannot read (Word, Excel, an image, a zip…), kept as a pick and linked
- * with no sha256 — 「AI では中身を読めません」, never a decision material or an attachment (`DRIVE_VERSION_NOT_FIXED`).
+ * with no sha256 — 「AI では中身を読めません」, never a decision material or an attachment (`DRIVE_VERSION_NOT_FIXED`);
+ * `view` (owner decision 2026-11-26) — to play one Drive video a document links or embeds in ACB's own player: exactly
+ * one file id, bound to the ticket, a video only (`DRIVE_VIEW_MIMES`), kept apart from every other pick (never the AI's).
  */
-export type DrivePickPurpose = 'read' | 'link'
+export type DrivePickPurpose = 'read' | 'link' | 'view'
 
 export function isDrivePickPurpose(v: unknown): v is DrivePickPurpose {
-  return v === 'read' || v === 'link'
+  return v === 'read' || v === 'link' || v === 'view'
 }
+
+/**
+ * The video types a `view` pick may keep (google-drive.md "Viewing a video", owner decision 2026-11-26): a document links
+ * or embeds a Drive video and ACB's own player plays it. A fixed list on purpose — the Picker shows and lets the member
+ * select only these (view filter and `setSelectableMimeTypes`), and the server keeps a view pick only when Google says the
+ * file is one of them: a document (or an AI it steered) must not be able to get any other file granted through it.
+ */
+export const DRIVE_VIEW_MIMES: readonly string[] = [
+  'video/mp4',
+  'video/x-m4v',
+  'video/quicktime',
+  'video/webm',
+  'video/x-matroska',
+  'video/mpeg',
+  'video/3gpp',
+  'video/ogg',
+  'video/x-msvideo',
+]
+
+/** Whether Google's MIME type of a file is one of the video types a `view` pick keeps (exactly; no prefix match). */
+export function isDriveViewMime(mimeType: unknown): boolean {
+  return typeof mimeType === 'string' && DRIVE_VIEW_MIMES.includes(mimeType)
+}
+
+/**
+ * A view pick lasts this long **since it was last viewed** (google-drive.md "Viewing a video"): every play renews it, so a
+ * video a document keeps showing is never chosen again; one nobody played for 90 days ends (choose it again).
+ */
+export const DRIVE_VIEW_PICK_TTL_MS = 90 * 24 * 60 * 60 * 1000
 
 /** Whether a picked file of this type may be kept for this purpose (never a folder, a shortcut or nothing). */
 export function drivePickableFor(purpose: DrivePickPurpose, mimeType: string): boolean {
   if (purpose === 'read') return DRIVE_PICKABLE_MIMES.includes(mimeType)
+  if (purpose === 'view') return isDriveViewMime(mimeType)
   return mimeType !== '' && mimeType !== DRIVE_FOLDER_MIME && mimeType !== 'application/vnd.google-apps.shortcut'
 }
 
-/** Why a picked id was not kept (said to the person in the browser and in the app; `drivePickRefusedText`). */
-export type DrivePickRefusal = 'gone' | 'no-access' | 'type' | 'folder' | 'shortcut' | 'not-folder' | 'cannot-add'
+/**
+ * Why a picked id was not kept (said to the person in the browser and in the app; `drivePickRefusedText`). A view pick
+ * adds `not-video` (Google says it is not a video) and `not-requested` (not the one video the document asked for).
+ */
+export type DrivePickRefusal = 'gone' | 'no-access' | 'type' | 'folder' | 'shortcut' | 'not-folder' | 'cannot-add' | 'not-video' | 'not-requested'
 export type DrivePickRefusedWhy = Partial<Record<DrivePickRefusal, number>>
 
 const REFUSAL_WORDS: Record<DrivePickRefusal, string> = {
@@ -267,6 +302,8 @@ const REFUSAL_WORDS: Record<DrivePickRefusal, string> = {
   shortcut: 'ショートカット（元のファイルを選んでください）',
   'not-folder': 'フォルダではない',
   'cannot-add': 'ファイルを追加する権限がない',
+  'not-video': '動画ではない',
+  'not-requested': '資料が求めた動画とは違う',
 }
 
 /** 「2件は使えませんでした。ゴミ箱に入っている 1件・…。」 — null when nothing was refused. */

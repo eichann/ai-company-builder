@@ -33,7 +33,7 @@
  */
 import { GOOGLE_SCOPE } from '../../shared/core/google'
 import {
-  checkDriveFileName, checkDrivePutContent, DRIVE_DOC_MIME, DRIVE_OVERWRITE_CONFIRM_TTL_MS, DRIVE_DOC_REFUSED_OUTSIDE, drivePickableFor, drivePickRefusedText, driveFolderSharingText, isDrivePickPurpose, type DriveFolderSharing, type DrivePickPurpose, type DrivePickRefusedWhy, DRIVE_FOLDER_MIME, DRIVE_PICK_MAX_FILES, DRIVE_PICK_SAVING_GRACE_MS, DRIVE_PICK_TICKET_KEPT_AFTER_MS, DRIVE_PICK_TICKETS_OPEN_MAX, DRIVE_PICK_TICKET_TTL_MS, DRIVE_PICK_TTL_MS, drivePreselectIds, isDrivePickTicket, DRIVE_PICKABLE_MIMES, DRIVE_PUT_MAX_BYTES, DRIVE_READ_AS,
+  checkDriveFileName, checkDrivePutContent, DRIVE_DOC_MIME, DRIVE_OVERWRITE_CONFIRM_TTL_MS, DRIVE_DOC_REFUSED_OUTSIDE, drivePickableFor, drivePickRefusedText, driveFolderSharingText, isDrivePickPurpose, type DriveFolderSharing, type DrivePickPurpose, type DrivePickRefusedWhy, DRIVE_FOLDER_MIME, DRIVE_PICK_MAX_FILES, DRIVE_PICK_SAVING_GRACE_MS, DRIVE_PICK_TICKET_KEPT_AFTER_MS, DRIVE_PICK_TICKETS_OPEN_MAX, DRIVE_PICK_TICKET_TTL_MS, DRIVE_PICK_TTL_MS, DRIVE_VIEW_MIMES, DRIVE_VIEW_PICK_TTL_MS, drivePreselectIds, isDriveViewMime, isDrivePickTicket, DRIVE_PICKABLE_MIMES, DRIVE_PUT_MAX_BYTES, DRIVE_READ_AS,
   DRIVE_READ_PDF_MAX_BYTES, DRIVE_READ_TEXT_MAX, DRIVE_TEXT_FOOTER, DRIVE_TEXT_HEADER, driveAudience, driveAudienceUnion, type DriveAudience, driveDocFetchesOutside, driveFolderReachesOutside, drivePutForm, driveRevisionOf, isDriveId, isDrivePickMode,
   type DrivePermissionLike,
 } from '../../shared/core/google-drive'
@@ -42,7 +42,7 @@ import { neutralizeOutsideText, outsideTextFlags } from '../../shared/core/outsi
 import type { DriveAiStatus, DriveOverwriteConfirmation, DriveOverwriteDecision, DriveTrustedFolder, DriveOwnFile, DriveOwnFiles, DrivePick, DrivePickerPageConfig, DrivePickTicketStarted, DrivePickTicketState, DrivePicksResult, DrivePutAnswer, DrivePutView, DriveReadAnswer, DriveUpdatableFile } from '../../shared/types/google-drive'
 import type { Clock, IdGenerator } from '../ports/clock'
 import type { CompanyDataSource } from '../ports/company-data'
-import type { DriveConfirmAudience, DriveDocBaseline, DriveOverwriteConfirmationRow, DrivePickRow, DrivePutRow, GoogleDriveRepository, PickTicketDirectory } from '../ports/google-drive'
+import type { DriveConfirmAudience, DriveDocBaseline, DriveOverwriteConfirmationRow, DrivePickRow, DrivePutRow, DriveViewPickRow, GoogleDriveRepository, PickTicketDirectory } from '../ports/google-drive'
 import type { Member } from './access'
 import type { GoogleClient, GoogleRequest, GoogleResult } from './google-client'
 import { cleanExportText } from './google-meetings'
@@ -96,6 +96,17 @@ export interface DriveLinkableFile {
 export interface DriveJobScope {
   folderId: string
   sameJob(runId: string): boolean
+}
+
+/**
+ * A view pick the member's own player may use now (google-drive.md "Viewing a video"): the video's id, its name and type
+ * as Google gave them when picked, and until when it lasts (renewed by this very use).
+ */
+export interface DriveViewUse {
+  fileId: string
+  name: string
+  mimeType: string
+  expiresAt: string
 }
 
 /** Who puts a file: the member's AI (record token) or the member. */
@@ -315,6 +326,11 @@ export const PUT_INTERRUPTED_AFTER_MS = 15 * 60_000
 /** A scheduled job's run found its folder pick gone (it renews with every put; 90 days without one end it). */
 const JOB_FOLDER_LAPSED = '責任者が選んだ置き先のフォルダが使えなくなっています（90日のあいだ何も置かれなかったか、選び直しが要ります）。この回では置けません。もう一度置こうとせず、置けなかったことを報告してください。責任者が「定期の仕事」の「置き先を選び直す」で選び直すと、次の回から置けます。'
 /** The member's pick of a file lapsed (7 days without a read or a link): said so, rather than 「選んだものではありません」. */
+const VIEW_NOT_PICKED = 'この動画は、まだ ACB で再生できるよう選ばれていません（選んでから90日のあいだ再生されなかったときも、選び直しが要ります）。資料の動画のところから、もう一度選んでください。'
+const VIEW_TICKET_BAD = 'purpose view needs mode files and exactly one Drive id in fileIds'
+/** A Google account as a view pick's key: the grant's email, compared without case. */
+const accountKey = (email: string) => email.trim().toLowerCase()
+
 const PICK_LAPSED = 'メンバーがこのファイルを選んでから7日のあいだ使われなかったため、読めなくなりました（やることにつないだファイルは期限なしで読めます）。drive_pick_files でもう一度選んでもらってください。'
 /** Asking before a put into a place others see (google-drive.md "Asking before a put"): the sentences. */
 const AUDIENCE_WAITING = 'この置き場所はほかの人（社外の人や、非公開の資料を見られない人）も見られるため、置くのはメンバーの確認待ちです。アプリのカードでメンバーが押すと、この内容で置かれます。押されるまで、置き直したり別の場所に置いたりしないでください。'
@@ -330,12 +346,16 @@ export function createGoogleDriveService(deps: GoogleDriveDeps) {
   const drive = (companyId: string, userId: string, req: Omit<GoogleRequest, 'api' | 'scope'>) =>
     google.request(companyId, userId, { api: 'drive', scope: GOOGLE_SCOPE.driveFile, ...req })
 
+  /** The company's Google is on (operator, client, switch, vault). */
+  async function googleOn(companyId: string): Promise<boolean> {
+    if (await deps.operatorStopped()) return false
+    const client = handle(companyId).connectors.client()
+    return !!client && client.enabled && deps.vaultEnabled()
+  }
+
   /** The company's Google is on (operator, client, switch, vault) and the Picker is registered. */
   async function available(companyId: string): Promise<boolean> {
-    if (await deps.operatorStopped()) return false
-    const c = handle(companyId).connectors
-    const client = c.client()
-    return !!client && client.enabled && deps.vaultEnabled() && c.picker() !== null
+    return (await googleOn(companyId)) && handle(companyId).connectors.picker() !== null
   }
 
   /** A file's metadata as drive.file lets ACB see it. */
@@ -632,7 +652,8 @@ export function createGoogleDriveService(deps: GoogleDriveDeps) {
     }
     const kind = body.mode === 'folder' ? 'folder' : 'file'
     const now = clock.now()
-    const expiresAt = new Date(clock.nowMs() + DRIVE_PICK_TTL_MS[kind]).toISOString()
+    // A view pick lasts since its last play (`DRIVE_VIEW_PICK_TTL_MS`); every other pick since its last use.
+    const expiresAt = new Date(clock.nowMs() + (purpose === 'view' ? DRIVE_VIEW_PICK_TTL_MS : DRIVE_PICK_TTL_MS[kind])).toISOString()
     const rows: DrivePickRow[] = []
     let refused = 0
     const why: DrivePickRefusedWhy = {}
@@ -654,7 +675,7 @@ export function createGoogleDriveService(deps: GoogleDriveDeps) {
       if (kind === 'folder' && !canAdd) { refuseOne('cannot-add'); continue }
       if (kind === 'file' && !drivePickableFor(purpose, mimeType)) {
         // A folder or a shortcut is not "a type the AI cannot read": its own words (review of #690).
-        refuseOne(mimeType === DRIVE_FOLDER_MIME ? 'folder' : mimeType === 'application/vnd.google-apps.shortcut' ? 'shortcut' : 'type')
+        refuseOne(mimeType === DRIVE_FOLDER_MIME ? 'folder' : mimeType === 'application/vnd.google-apps.shortcut' ? 'shortcut' : purpose === 'view' ? 'not-video' : 'type')
         continue
       }
       rows.push({ userId: member.userId, fileId: id, kind, name, mimeType, pickedAt: now, expiresAt })
@@ -691,6 +712,19 @@ export function createGoogleDriveService(deps: GoogleDriveDeps) {
     const h = handle(member.companyId).googleDrive
     h.prunePicks(clock.now())
     if (rows.length > 0) h.savePicks(rows)
+  }
+
+  /**
+   * Keeps a checked view pick (google-drive.md "Viewing a video") under the member's Google account now — in its own
+   * table, never among the picks. Synchronous: called in the same stretch as the ticket's compare-and-set.
+   */
+  function keepViewPicks(member: Member, accountEmail: string, rows: DrivePickRow[]): void {
+    const h = handle(member.companyId).googleDrive
+    h.pruneViewPicks(clock.now())
+    for (const r of rows) {
+      const row: DriveViewPickRow = { userId: member.userId, accountEmail, fileId: r.fileId, name: r.name, mimeType: r.mimeType, pickedAt: r.pickedAt, lastViewedAt: null, expiresAt: r.expiresAt }
+      h.saveViewPick(row)
+    }
   }
 
   /** POST …/me/google/drive/picks: keeps what the person picked, each checked with Google. */
@@ -806,9 +840,15 @@ export function createGoogleDriveService(deps: GoogleDriveDeps) {
     async startPick(member: Member, body: unknown): Promise<Outcome<DrivePickTicketStarted>> {
       if (!isObj(body) || !isDrivePickMode(body.mode)) return refuse('bad-request', 'mode must be folder or files')
       const mode = body.mode
-      if (body.purpose !== undefined && !isDrivePickPurpose(body.purpose)) return refuse('bad-request', 'purpose must be read or link')
+      if (body.purpose !== undefined && !isDrivePickPurpose(body.purpose)) return refuse('bad-request', 'purpose must be read, link or view')
+      // `view` (one video a document asks for, google-drive.md "Viewing a video") never falls back to another purpose: files
+      // mode and exactly one Drive id — the ticket is bound to it — or 400.
+      const view = body.purpose === 'view'
+      if (view && (mode !== 'files' || !Array.isArray(body.fileIds) || body.fileIds.length !== 1 || !isDriveId(body.fileIds[0]))) {
+        return refuse('bad-request', VIEW_TICKET_BAD)
+      }
       // `link` (a person linking files to a record) is a files pick only; anything else reads (the AI's).
-      const purpose: DrivePickPurpose = mode === 'files' && body.purpose === 'link' ? 'link' : 'read'
+      const purpose: DrivePickPurpose = view ? 'view' : mode === 'files' && body.purpose === 'link' ? 'link' : 'read'
       if (await deps.operatorStopped()) return refuse('forbidden', STOPPED, { code: 'GOOGLE_STOPPED' })
       const ready = pickReady(member)
       if (ready) return ready
@@ -825,7 +865,7 @@ export function createGoogleDriveService(deps: GoogleDriveDeps) {
       const expiresAt = new Date(Date.parse(now) + DRIVE_PICK_TICKET_TTL_MS).toISOString()
       const id = ids.newId()
       h.createPickTicket({
-        id, userId: member.userId, ticketHash: ticketHash(ticket), mode, purpose, maxItems: mode === 'folder' ? 1 : DRIVE_PICK_MAX_FILES,
+        id, userId: member.userId, ticketHash: ticketHash(ticket), mode, purpose, maxItems: mode === 'folder' || view ? 1 : DRIVE_PICK_MAX_FILES,
         fileIds: mode === 'files' ? drivePreselectIds(body.fileIds) : [], state: 'open', configHandedAt: null, result: null,
         createdAt: now, expiresAt, finishedAt: null,
       })
@@ -897,7 +937,8 @@ export function createGoogleDriveService(deps: GoogleDriveDeps) {
         accessToken: token.accessToken, apiKey: picker.apiKey, appId: picker.appId, scriptOrigin: deps.pickerScriptOrigin, mode: row.mode,
         // Linking offers every file type (「AI では中身を読めません」 for the ones drive_read cannot read); reading, the readable ones.
         ...(row.mode === 'files' ? { purpose: row.purpose } : {}),
-        mimeTypes: row.mode === 'files' && row.purpose === 'link' ? [] : DRIVE_PICKABLE_MIMES, maxItems: row.maxItems, ...(row.mode === 'files' && row.fileIds.length > 0 ? { fileIds: row.fileIds } : {}),
+        // A view pick: the video types only (the page also makes only those selectable).
+        mimeTypes: row.mode === 'files' && row.purpose === 'link' ? [] : row.mode === 'files' && row.purpose === 'view' ? DRIVE_VIEW_MIMES : DRIVE_PICKABLE_MIMES, maxItems: row.maxItems, ...(row.mode === 'files' && row.fileIds.length > 0 ? { fileIds: row.fileIds } : {}),
         ...(account ? { account } : {}),
       })
     },
@@ -932,23 +973,38 @@ export function createGoogleDriveService(deps: GoogleDriveDeps) {
         failed(TICKET_GONE.body.error)
         return TICKET_GONE
       }
+      // A view pick (google-drive.md "Viewing a video"): only the one video the ticket was made for — another id is refused
+      // before Google is asked (Google has granted it by now and ACB cannot take that back; ACB keeps nothing of it).
+      const view = row.purpose === 'view'
       let checked: Awaited<ReturnType<typeof checkPicks>>
-      try {
-        checked = await checkPicks(member, { mode: row.mode, ids: b.ids }, row.purpose, true)
-      } catch (error) {
-        failed(GOOGLE_UNAVAILABLE_TEXT)
-        throw error
+      if (view && (row.fileIds.length !== 1 || b.ids.length !== 1 || b.ids[0] !== row.fileIds[0])) {
+        checked = ok({ rows: [], refused: b.ids.length, why: { 'not-requested': b.ids.length }, sharing: new Map<string, DriveFolderSharing>() })
+      } else {
+        try {
+          checked = await checkPicks(member, { mode: row.mode, ids: b.ids }, row.purpose, true)
+        } catch (error) {
+          failed(GOOGLE_UNAVAILABLE_TEXT)
+          throw error
+        }
       }
       if (!checked.ok) {
         failed(checked.body.error)
         return checked
+      }
+      // Kept under the Google account the member's grant has now (the one whose token just opened it).
+      const viewAccount = view ? handle(companyId).connectors.grant('google', member.userId)?.accountEmail ?? null : null
+      if (view && viewAccount === null && checked.value.rows.length > 0) {
+        failed(NO_CONSENT)
+        return refuse('conflict', NO_CONSENT, { code: 'GOOGLE_CONSENT_NEEDED', needsGoogleConsent: 'drive' })
       }
       const { rows, refused, why, sharing } = checked.value
       const picks = rows.map(r => ({ ...pickView(r), ...(sharing.has(r.fileId) ? { sharing: sharing.get(r.fileId) } : {}) }))
       const result: DrivePicksResult & { refusedWhy: DrivePickRefusedWhy } = { picks, refused, refusedWhy: why }
       // No await between the compare-and-set and the write: nothing else can run in between.
       if (!h.movePickTicket(row.id, ['saving'], 'picked', { result: JSON.stringify(result), finishedAt: clock.now() })) return TICKET_GONE
-      keepPicks(member, rows)
+      // A view pick never joins the picks (the AI's tools, 「つなぐ」, links): its own table, for the member's player only.
+      if (view) keepViewPicks(member, accountKey(viewAccount ?? ''), rows)
+      else keepPicks(member, rows)
       // What the page says (the app says it too): how many were not usable and why; a folder the AI cannot put into.
       const notUsable = drivePickRefusedText(refused, why)
       const outside = picks.map(p => driveFolderSharingText(p.sharing)).find(t => t !== null) ?? null
@@ -1025,6 +1081,34 @@ export function createGoogleDriveService(deps: GoogleDriveDeps) {
       repo.pruneOverwriteConfirmations(now, weekAgo)
       repo.pruneDocReads(weekAgo)
       repo.interruptPuts(new Date(clock.nowMs() - PUT_INTERRUPTED_AFTER_MS).toISOString())
+      // A view pick nobody played for 90 days (google-drive.md "Viewing a video").
+      repo.pruneViewPicks(now)
+    },
+
+    /**
+     * The member's own player plays a Drive video (google-drive.md "Viewing a video"; the streaming route of a later change
+     * calls this at every play, with the session's member): usable only while the company's Google is on, the member's
+     * grant is active with `drive.file` and Drive not turned off, and they have a live **view** pick of exactly this file
+     * under the Google account their grant has now — an ordinary pick (the AI's, 「つなぐ」's) never counts, nor another
+     * member's or another account's. A use renews it: `lastViewedAt` now, 90 days more. Nothing is asked of Google here.
+     */
+    async useViewPick(member: Member, fileId: unknown): Promise<Outcome<DriveViewUse>> {
+      if (!isDriveId(fileId)) return refuse('bad-request', 'fileId must be a Drive id')
+      if (!(await googleOn(member.companyId))) return refuse('forbidden', STOPPED, { code: 'GOOGLE_STOPPED' })
+      const h = handle(member.companyId)
+      const grant = h.connectors.grant('google', member.userId)
+      if (!grant || grant.status !== 'active' || !grant.scopes.includes(GOOGLE_SCOPE.driveFile)) {
+        return refuse('conflict', NO_CONSENT, { code: 'GOOGLE_CONSENT_NEEDED', needsGoogleConsent: 'drive' })
+      }
+      if (grant.featuresOff.includes('drive')) return refuse('conflict', FEATURE_OFF, { code: 'GOOGLE_FEATURE_OFF', feature: 'drive' })
+      const account = accountKey(grant.accountEmail)
+      const now = clock.now()
+      const pick = h.googleDrive.viewPick(member.userId, account, fileId, now)
+      if (!pick || !isDriveViewMime(pick.mimeType)) return refuse('forbidden', VIEW_NOT_PICKED, { code: 'DRIVE_VIEW_NOT_PICKED' })
+      const expiresAt = new Date(clock.nowMs() + DRIVE_VIEW_PICK_TTL_MS).toISOString()
+      // The same synchronous stretch as the read: nothing can expire or remove it in between.
+      if (!h.googleDrive.touchViewPick(member.userId, account, fileId, now, expiresAt)) return refuse('forbidden', VIEW_NOT_PICKED, { code: 'DRIVE_VIEW_NOT_PICKED' })
+      return ok({ fileId, name: pick.name, mimeType: pick.mimeType, expiresAt: expiresAt > pick.expiresAt ? expiresAt : pick.expiresAt })
     },
 
     /** The record step took the member's link of this file (records route): their live pick of it is renewed. */

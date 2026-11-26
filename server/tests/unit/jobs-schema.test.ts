@@ -26,6 +26,8 @@ const LATER_TABLES = [
   'google_drive_doc_reads',
   'google_drive_overwrite_confirmations',
   'google_drive_folder_trust',
+  // google-drive.md "Viewing a video": a member's choice of one Drive video to play, apart from every other pick.
+  'google_drive_view_picks',
   // records.md "Delivery order": the per-company counter of the ledger's delivery numbers.
   'record_ledger_seq',
   // jobs.md "Event-triggered jobs" (stage 4a): each job's cursor and watch target, and the stretches nothing runs in.

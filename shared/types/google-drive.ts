@@ -11,7 +11,7 @@ import type { SkillUse } from '../core/skill-uses'
 export type { DriveFolderSharing, DrivePickMode, DrivePickPurpose, DrivePickRefusedWhy } from '../core/google-drive'
 
 /**
- * POST /api/companies/:id/me/google/drive/pick-tickets { mode, fileIds? } (session): a one-time pick
+ * POST /api/companies/:id/me/google/drive/pick-tickets { mode, fileIds?, purpose? } (session): a one-time pick
  * ticket for the Picker page in the member's browser. `ticket` is answered only here, once; the server
  * keeps its sha256. `ticketId` is what the app polls and cancels with its session.
  */
@@ -43,9 +43,12 @@ export interface DrivePickerPageConfig {
   /** Where the Picker's script comes from: Google's, or the practice Google's origin on staging. */
   scriptOrigin: string
   mode: DrivePickMode
-  /** Files mode: `read` (for the AI: the readable types only) or `link` (to link to a record: every file type). */
+  /**
+   * Files mode: `read` (for the AI: the readable types only), `link` (to link to a record: every file type) or `view` (one
+   * video a document asks for: the Picker shows and lets select only the video types, `setSelectableMimeTypes`).
+   */
   purpose?: DrivePickPurpose
-  /** The types the Picker shows; empty = every type (a `link` pick). */
+  /** The types the Picker shows; empty = every type (a `link` pick). A `view` pick: the video types, also the only selectable ones. */
   mimeTypes: readonly string[]
   maxItems: number
   /** Files mode only: the files the Picker shows (a pasted Drive link), already checked as Drive ids. */

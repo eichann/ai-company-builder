@@ -86,6 +86,23 @@ export const connectorSchema = `
       PRIMARY KEY (company_id, user_id, file_id)
     );
 
+    -- A Drive video a member chose to play in ACB's own player (google-drive.md "Viewing a video"): kept apart
+    -- from google_drive_picks on purpose — nothing that lists or reads picks (the AI's tools, 「つなぐ」, links)
+    -- reads this table. One row per company, member, Google account (the grant's email when picked) and file;
+    -- a video type only; renewed at every view (last_viewed_at, expires_at), unused for 90 days it ends.
+    CREATE TABLE IF NOT EXISTS google_drive_view_picks (
+      company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+      user_id TEXT NOT NULL,
+      account_email TEXT NOT NULL,
+      file_id TEXT NOT NULL,
+      name TEXT NOT NULL,
+      mime_type TEXT NOT NULL,
+      picked_at TEXT NOT NULL,
+      last_viewed_at TEXT,
+      expires_at TEXT NOT NULL,
+      PRIMARY KEY (company_id, user_id, account_email, file_id)
+    );
+
     -- Google Drive puts (操作の控え): written before the upload; one per member
     -- and request key (the same put is never sent twice). Never content or a
     -- local path. state: sending → done | unknown (a lost answer; found later
@@ -325,7 +342,8 @@ export function migrateDrivePutConfirmations(conn: Database.Database): void {
 /**
  * Why a files pick ticket was made (google-drive.md "Linking any file", owner decision 2026-11-14): `read` (for the AI:
  * the readable types only — every ticket before this column) or `link` (a person links it to a record: every file
- * type). Additive: an older build ignores it. Every startup, idempotent.
+ * type); since 2026-11-26 also `view` (one video to play; "Viewing a video" — no CHECK, so no rebuild). Additive: an
+ * older build ignores it. Every startup, idempotent.
  */
 export function migrateDrivePickTicketPurpose(conn: Database.Database): void {
   const cols = new Set((conn.prepare('PRAGMA table_info(google_drive_pick_tickets)').all() as Array<{ name: string }>).map(c => c.name))

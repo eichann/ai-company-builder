@@ -32,7 +32,7 @@ const toTicket = (r: TicketRow): DrivePickTicketRow => {
     if (Array.isArray(parsed)) fileIds = parsed.filter((v): v is string => typeof v === 'string')
   } catch { /* stored by this module only */ }
   return {
-    id: r.id, userId: r.user_id, ticketHash: r.ticket_hash, mode: r.mode as DrivePickTicketRow['mode'], purpose: r.purpose === 'link' ? 'link' : 'read', maxItems: r.max_items, fileIds,
+    id: r.id, userId: r.user_id, ticketHash: r.ticket_hash, mode: r.mode as DrivePickTicketRow['mode'], purpose: r.purpose === 'link' || r.purpose === 'view' ? r.purpose : 'read', maxItems: r.max_items, fileIds,
     state: r.state as DrivePickTicketRow['state'], configHandedAt: r.config_handed_at, result: r.result, createdAt: r.created_at, expiresAt: r.expires_at,
     finishedAt: r.finished_at,
   }
@@ -136,6 +136,31 @@ export function sqliteGoogleDriveRepository(conn: Database.Database, companyId: 
       return r ? toPick(r) : null
     },
 
+    saveViewPick(v) {
+      conn.prepare(`INSERT INTO google_drive_view_picks (company_id, user_id, account_email, file_id, name, mime_type, picked_at, last_viewed_at, expires_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT (company_id, user_id, account_email, file_id) DO UPDATE SET name = excluded.name, mime_type = excluded.mime_type,
+          picked_at = excluded.picked_at, expires_at = MAX(google_drive_view_picks.expires_at, excluded.expires_at)`)
+        .run(companyId, v.userId, v.accountEmail, v.fileId, v.name, v.mimeType, v.pickedAt, v.lastViewedAt, v.expiresAt)
+    },
+    viewPick(userId, accountEmail, fileId, now) {
+      const r = conn.prepare(`SELECT user_id, account_email, file_id, name, mime_type, picked_at, last_viewed_at, expires_at FROM google_drive_view_picks
+        WHERE company_id = ? AND user_id = ? AND account_email = ? AND file_id = ? AND expires_at > ?`).get(companyId, userId, accountEmail, fileId, now) as
+        { user_id: string; account_email: string; file_id: string; name: string; mime_type: string; picked_at: string; last_viewed_at: string | null; expires_at: string } | undefined
+      return r ? {
+        userId: r.user_id, accountEmail: r.account_email, fileId: r.file_id, name: r.name, mimeType: r.mime_type, pickedAt: r.picked_at,
+        lastViewedAt: r.last_viewed_at, expiresAt: r.expires_at,
+      } : null
+    },
+    touchViewPick(userId, accountEmail, fileId, now, expiresAt) {
+      return conn.prepare(`UPDATE google_drive_view_picks SET last_viewed_at = ?, expires_at = MAX(expires_at, ?)
+        WHERE company_id = ? AND user_id = ? AND account_email = ? AND file_id = ? AND expires_at > ?`)
+        .run(now, expiresAt, companyId, userId, accountEmail, fileId, now).changes === 1
+    },
+    pruneViewPicks(now) {
+      conn.prepare('DELETE FROM google_drive_view_picks WHERE company_id = ? AND expires_at <= ?').run(companyId, now)
+    },
+
     keepDocRead(d: DriveDocRead) {
       conn.prepare(`INSERT INTO google_drive_doc_reads (company_id, user_id, conversation_id, file_id, fingerprint, revision, revision_at, comments_seen, read_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT (company_id, user_id, conversation_id, file_id) DO UPDATE SET fingerprint = excluded.fingerprint, revision = excluded.revision,
@@ -205,6 +230,7 @@ export function sqliteGoogleDriveRepository(conn: Database.Database, companyId: 
       conn.prepare('DELETE FROM google_drive_overwrite_confirmations WHERE company_id = ? AND user_id = ?').run(companyId, userId)
       conn.prepare('DELETE FROM google_drive_folder_trust WHERE company_id = ? AND user_id = ?').run(companyId, userId)
       conn.prepare('DELETE FROM google_drive_doc_reads WHERE company_id = ? AND user_id = ?').run(companyId, userId)
+      conn.prepare('DELETE FROM google_drive_view_picks WHERE company_id = ? AND user_id = ?').run(companyId, userId)
     },
     pruneOverwriteConfirmations(now, deleteBefore) {
       conn.prepare('UPDATE google_drive_overwrite_confirmations SET content = NULL WHERE company_id = ? AND expires_at <= ? AND content IS NOT NULL').run(companyId, now)
