@@ -31,6 +31,18 @@ export function appInstructionOf(message: { metadata?: unknown }): AppInstructio
   return metadata && typeof metadata === 'object' ? readAppInstruction((metadata as { appInstruction?: unknown }).appInstruction) : null
 }
 
+/**
+ * A message the app sent in the member's place when it started a consultation (`chat.newConsultation`: a Skill's 実行,
+ * reading minutes, 「会議のたたき台を作る」, 「AI に直してもらう」; and an automatic 「AI の番」's first message): shown as a
+ * bubble like the member's, but not words the member typed. Its text may carry outside text (minutes, a Skill someone
+ * else wrote), so it never counts as the member's own request (records.md "The AI at the member's request",
+ * `latestMemberText`). AI SDK `metadata.appSent`, stored with the message.
+ */
+export function appSentOf(message: { metadata?: unknown }): boolean {
+  const metadata = message.metadata
+  return !!metadata && typeof metadata === 'object' && (metadata as { appSent?: unknown }).appSent === true
+}
+
 /** The chip's text at the top of the consultation. */
 export function appInstructionLabel(instruction: AppInstruction): string {
   const title = instruction.title.trim() || (instruction.kind === 'task' ? 'やること' : '手順')

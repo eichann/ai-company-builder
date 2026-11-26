@@ -63,6 +63,8 @@ export interface ChatSession {
     toolLines?: Record<string, StoredToolLine>
     /** The app composed this message for the AI (app-instruction.ts): sent, never shown or previewed as the member's words. */
     appInstruction?: AppInstruction
+    /** The app sent this message in the member's place (app-instruction.ts `appSentOf`): never the member's own request. */
+    appSent?: true
     /** Records the member dropped on the input that went to the AI with this message (record-drop.ts): a line in its bubble. */
     droppedRecords?: DroppedRecordRef[]
   }>

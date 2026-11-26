@@ -567,6 +567,8 @@ export const SERVICE_TRANSITIONS: Readonly<Record<string, ReadonlyArray<{ from: 
     { from: ['draft'], to: 'sent' },
     { from: ['draft'], to: 'unknown' },
     { from: ['draft', 'unknown'], to: 'discarded' },
+    // 「もう返した」 undone: a draft that action discarded back to 下書き (the inbox only; nothing is sent by it).
+    { from: ['discarded'], to: 'draft' },
     // 「送られていた」/「送られていなかった」 after an unknown result.
     { from: ['unknown'], to: 'sent' },
     { from: ['unknown'], to: 'draft' },
@@ -739,6 +741,11 @@ export const INBOX_ACTIONS = Object.freeze({
   replyArrived: 'reply_arrived',
   /** A reply_request: someone of the company replied in the thread. */
   memberReplied: 'member_replied',
+  /**
+   * A mail draft: 「もう返した」 was undone, so the drafts that very 「もう返した」 discarded come back to 下書き
+   * (records.md "The AI at the member's request"; only one still exactly as it discarded it, body kept).
+   */
+  draftRestored: 'draft_restored',
   /** An interaction: the AI's judgement (route records-ai-inbox). */
   judged: 'judge',
   /** An interaction: a department's mail taken by a member (引き受ける). */

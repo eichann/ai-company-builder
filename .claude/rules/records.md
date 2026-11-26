@@ -2133,7 +2133,8 @@ to press each one. Now the member may let their own AI do exactly that, **in a c
   admin setting reaches it; `PUT /me/work-switches { switch: 'aiCompletes', on }` (their own only). The app shows it in
   設定 → 自分の設定 when the server answers it (`MyWorkSwitches.aiCompletes`, optional). Engine dep `aiAskedOn`
   (composition: `workSwitches.isOn(…, 'aiCompletes')`; absent = off). Off → 403 `AI_ASK_OFF` with the fixed sentence
-  `AI_ASKED_REFUSALS.off` (it names 設定の「自分の設定」), nothing written; the AI relays it.
+  `AI_ASKED_REFUSALS.off` (「…AI からは片づけられません（完了にする・終わりにする・もう返した）。設定の「自分の設定」で
+  オンにすると…」), nothing written; the AI relays it.
 - **Only a turn the member started** (how the server knows): `POST /me/record-tokens { …, memberTurn: true }` — the app
   says the turn started from the member's own words. The server keeps the mark (`record_ai_tokens.member_turn`) **only
   for an `act` token not bound to a run** (`record-ai-tokens.ts` `issue`; `authenticate` and `aiActor` drop it for a run
@@ -2141,7 +2142,11 @@ to press each one. Now the member may let their own AI do exactly that, **in a c
   a scheduled job's run — runs with a run-bound token (`ai-turns.md`, `jobs.md`), so it can never carry it. A released
   app sends no mark, so its tokens never may. The app (`chat-server.ts`) asks it only when the request is no step, no
   plugin step, not a step's consultation (`stepWriteArea` none) and its last message is the member's own words
-  (`latestMemberText`: not an app instruction). Like the agent name, the mark is the app's word: it stops a mistaken
+  (`latestMemberText`: not an app instruction, and not a message the app sent in the member's place to start a
+  consultation — `chat.newConsultation`'s first message: a Skill's 実行 `/<skill> `, minutes reading, 「会議のたたき台を作る」,
+  「AI に直してもらう」, and an automatic 「AI の番」's — marked `metadata.appSent`, stored with the message as `appSent`,
+  `appSentOf` in `client/shared/app-instruction.ts`: its text may carry minutes or someone else's SKILL.md, so it is never
+  the member's request until they write themselves). Like the agent name, the mark is the app's word: it stops a mistaken
   app, not a forged one — what the server decides itself is the setting, the record's field and the run. A plain token
   → 403 `NOT_ALLOWED` (the words of today, 「この操作は AI からはできません…」).
 - **Cap**: `AI_ASKED_PER_TURN` (20) per token — one token per chat turn — counted by a compare-and-set on
@@ -2151,20 +2156,37 @@ to press each one. Now the member may let their own AI do exactly that, **in a c
 - **Recorded**: actor kind `ai`, `conversation_id` the token's (no message text), and `record_ledger.asked_by` = the member
   (`LedgerEntry.askedBy`, additive column, `migrateAiAskedColumns`; informational — set only when the server allowed it).
   Cause stays `ai`. 経緯 says 「AI が（本人の頼みで）完了にしました」 (`aiAskedHistoryText`, `client/shared/ai-asked.ts`).
-  ［取り消す］ is the generic undo: the entry's actor id is the member's (`undo.ts`, unchanged). Afterwards everything is
-  as for the member's own press (notify, `afterAct`: 「もう返した」 still drops the reply drafts).
+  ［取り消す］ is the generic undo: the entry's actor id is the member's (`undo.ts`, unchanged). **Afterwards everything is
+  as for the member's own press** (owner decision 2026-11-26): notify (a notice already sent to the requester cannot be
+  unsent), `afterAct` — 「もう返した」 drops the reply drafts, and the Gmail archive follow-up treats such a close as the
+  person's own act (`inbox.ts` `personsOwnAct`: `askedBy` = the actor; `inbox.md` "Mail archived in the mailbox").
+  **Undoing 「もう返した」** (the person's or after their AI's) brings back the drafts that very action discarded
+  (`restoreDrafts`, `afterAct` on the undo: a draft whose newest entry is still that discard — note
+  「ほかの経路で返信済み（もう返した）」, at or after the undone entry — whose mail row is not finished and whose body is
+  kept; ledger `draft_restored`, `SERVICE_TRANSITIONS.outbound_message` discarded → draft, the inbox only). Nothing is
+  sent by it.
+- **Outside text in a member's turn** (owner decision asked, safe side recorded): in such a conversation the AI also reads
+  outside text (mail, minutes, the web), and the server cannot tell an instruction planted there from the member's
+  request. What limits it: only the member's own records (assignee), only these three actions, at most 20 a turn, each on
+  the card with ［取り消す］ and in 経緯 with `askedBy` and the conversation; a turn the app started (`appSent`) never counts.
 - **The chat**: in a marked turn the three tools say 「メンバーがはっきり頼んだときだけ」 and the turn gets
   `AI_ASKED_INSTRUCTIONS`; each success (the answer's `entry.askedBy`) joins **one card per turn** (`data-ai-asked`, the
   same id pushed again with every item; stored as `aiAsked`, latest copy wins): 「AI が頼まれて片づけました（n件）」, one line
-  per record with ［取り消す］ (`AiAskedCard.tsx` → `tasks:undo` with the member's session at the entry's version).
+  per record with ［取り消す］ (`AiAskedCard.tsx` → `tasks:undo` with the member's session at the entry's version; undone
+  already or changed since — `AI_ASKED_UNDO_STALE_CODES` — it says so with the record's state now, read from the server).
 - Tests: `server/tests/integration/ai-asked-close.test.ts` (setting off by default and the member's alone, the fixed
   refusal, nothing written; the member's own task completed and recorded with who asked and the conversation, undone by
   them; another's task, one they only requested, a 確かめてから task, decline / cancel refused; a released app's plain
   token and a run-bound token refused; the cap, a refused write taking none, the next turn starting again; turned off
-  later), `server/tests/unit/inbox.test.ts` 「the AI at the member's request (reply_request v6)」 (off, a run's token,
-  drop, bob, her own 「もう返した」 / 「終わりにする」 with `askedBy`, her undo), `record-types.test.ts` 「ai_on_request」 (only
+  later), `server/tests/unit/inbox.test.ts` 「the AI at the member's request (reply_request v6)」 (off, a run's actor even
+  if marked, drop, bob, her own 「もう返した」 / 「終わりにする」 with `askedBy`, her undo), 「…a write that loses its
+  compare-and-set takes nothing from the turn's count」, 「…her setting turned off while the call is under way…」, 「［取り消す］ of
+  「もう返した」 … brings back exactly the drafts it discarded」, `inbox-archive.test.ts` 「her own AI completing the last task at her
+  request archives like her own press」, `record-types.test.ts` 「ai_on_request」 (only
   fields in `who`, additive versions, `who` without `ai`), `client/tests/ai-asked.test.ts` (the mark only for the
-  member's own words — never a step, a job, a step's consultation or an app instruction — and never with a run; the
+  member's own words — never a step, a job, a step's consultation, an app instruction or an `appSent` message, kept
+  through the history — and never with a run; `tests/ui/chat-panel.spec.ts` 「chat commands」 (a new consultation's
+  message is sent `appSent`); the
   descriptions and instructions only with the server's mark; one card per turn only with `askedBy`; the stored card;
   the undo; 経緯's words). Mutation-checked (PR body lists each guard).
 

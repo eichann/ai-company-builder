@@ -358,7 +358,10 @@ request / status shapes and their checks, `closeStopsTheAI`), the window registr
   (its main topic, 主な話題), also in its summary, so the next 「相談する」 finds it
   (`tasks-ui.md` "Consulting about a task"). A message the app wrote for the AI keeps
   `appInstruction` (`client/shared/app-instruction.ts`): restored as `metadata.appInstruction`,
-  never drawn as a bubble, previewed or searched (`tasks-ui.md`).
+  never drawn as a bubble, previewed or searched (`tasks-ui.md`). A message the app sent in the member's place to start a
+  consultation (`chat.newConsultation`'s first message, an automatic 「AI の番」's) keeps `appSent` (`metadata.appSent`,
+  `appSentOf`): drawn as a bubble as before, but never the member's own request (`records.md` "The AI at the member's
+  request").
 - **`updatedAt` is when the conversation changed** (staging 2026-11-02: every conversation showed the
   time a new app version first opened, and the list lost its order): `save()` keeps the stored time
   unless a message (id, role, words) or the draft differs — a save of the same words with other fields

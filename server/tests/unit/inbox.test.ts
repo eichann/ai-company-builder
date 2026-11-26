@@ -954,6 +954,27 @@ describe('B4: the member already replied (Gmail, Slack, or somewhere ACB cannot 
     expect((conn.prepare('SELECT asked_closes AS n FROM record_ai_tokens WHERE id = ?').get('tok-race') as { n: number }).n).toBe(0)
   })
 
+  it('the AI at the member\'s request: her setting turned off while the call is under way — read again in the write — writes nothing', async () => {
+    inbox.receive('a', 'u-alice', mail())
+    const [row] = interactions()
+    const rr = ok(inbox.judge(m('u-alice'), AI('u-alice'), row.id, { expectedVersion: 1, outcome: 'reply', reason: '返事が要る' })).replyRequestId!
+    handle().records.insertAiToken({ id: 'tok-flip', userId: 'u-alice', tokenHash: 'h-flip', scope: 'act', agent: 'claude-code', conversationId: 'conv-ask', createdAt: TS, expiresAt: '2099-01-01T00:00:00.000Z', revokedAt: null, memberTurn: true })
+    const clock = { now: () => new Date(nowMs).toISOString(), nowMs: () => nowMs }
+    const roleOf = (_co: string, userId: string) => (MEMBERS.includes(userId) ? ROLES[userId] ?? 'member' : null)
+    // On when the call is checked, off by the time it writes.
+    let asks = 0
+    const flipping = createRecordEngine({
+      companyData: source, transactions: sqliteTransactions(conn), clock, ids: { newId: () => 'x', newToken: () => 'y' },
+      files: { appendHistoryLine: async () => true, fileAtCommit: async () => true },
+      managedFolders: () => [], isMember: (co, u) => roleOf(co, u) !== null, roleOf, notify: () => {}, aiAskedOn: () => ++asks === 1,
+    })
+    const asked = { id: 'u-alice', kind: 'ai' as const, source: 'claude-code', conversationId: 'conv-ask', askedTurn: { tokenId: 'tok-flip' } }
+    expect(await flipping.act(m('u-alice'), asked, rr, 'close', { expectedVersion: 1 })).toMatchObject({ ok: false, body: { code: 'AI_ASK_OFF' } })
+    expect(asks).toBe(2)
+    expect(stateOf(rr)).toMatchObject({ state: 'preparing', version: 1 })
+    expect((conn.prepare('SELECT asked_closes AS n FROM record_ai_tokens WHERE id = ?').get('tok-flip') as { n: number }).n).toBe(0)
+  })
+
   it('「終わりにする」 while the AI prepares the draft (準備中) too', async () => {
     const person = (u: string) => ({ id: u, kind: 'human' as const, source: null })
     inbox.receive('a', 'u-alice', mail())
@@ -990,6 +1011,37 @@ describe('B4: the member already replied (Gmail, Slack, or somewhere ACB cannot 
     expect(stateOf(fromCard).state).toBe('discarded')
     expect(handle().records.ledger(fromCard).at(-1)?.note).toBe('ほかの経路で返信済み（もう返した）')
     expect(stateOf(elsewhere).state).toBe('draft')
+  })
+
+  it('［取り消す］ of 「もう返した」 (hers, or her AI\'s at her request) brings back exactly the drafts it discarded — never one discarded otherwise, changed since, finished or whose body is gone', async () => {
+    inbox.receive('a', 'u-alice', mail())
+    const [row] = interactions()
+    const rr = ok(inbox.judge(m('u-alice'), AI('u-alice'), row.id, { expectedVersion: 1, outcome: 'reply', reason: '返事が要る' })).replyRequestId!
+    const draft = (over: { finishedAt?: string; bodyDeletedAt?: string } = {}) => {
+      const d = serviceWriter.create('a', {
+        type: 'outbound_message', title: 'Re: お見積り', personalOwner: 'u-alice',
+        fields: { assignee: 'u-alice', requested_by: 'u-alice', channel: 'email' }, links: { interaction: [row.id] },
+        actor: { id: 'u-alice', kind: 'human', source: null }, note: '', quiet: true,
+      })
+      if (!d.ok) throw new Error(d.reason)
+      handle().outbound.insertMail({ messageId: d.record.id, authorId: 'u-alice', fromEmail: 'alice@acme.example', meetingId: null, bundleId: null, createdAt: TS, finishedAt: over.finishedAt ?? null, bodyDeletedAt: over.bodyDeletedAt ?? null })
+      return d.record.id
+    }
+    const kept = draft()
+    const gone = draft({ bodyDeletedAt: TS })
+    const finished = draft({ finishedAt: TS })
+    // Discarded before, for another reason: stays discarded after the undo.
+    const before = draft()
+    ok(serviceWriter.transition('a', { recordId: before, action: 'discard', expectedVersion: 1, to: 'discarded', actor: { id: 'u-alice', kind: 'human', source: null }, note: '' }))
+    askedOn.add('u-alice')
+    handle().records.insertAiToken({ id: 'tok-undo', userId: 'u-alice', tokenHash: 'h-undo', scope: 'act', agent: 'claude-code', conversationId: 'conv-ask', createdAt: TS, expiresAt: '2099-01-01T00:00:00.000Z', revokedAt: null, memberTurn: true })
+    ok(await engine.act(m('u-alice'), { id: 'u-alice', kind: 'ai', source: 'claude-code', conversationId: 'conv-ask', askedTurn: { tokenId: 'tok-undo' } }, rr, 'replied_elsewhere', { expectedVersion: 1 }))
+    expect([kept, gone, finished].map(id => stateOf(id).state)).toEqual(['discarded', 'discarded', 'discarded'])
+    ok(await engine.undo(m('u-alice'), { id: 'u-alice', kind: 'human', source: null }, rr, { version: 2, expectedVersion: 2 }))
+    expect(stateOf(rr).state).toBe('preparing')
+    expect(stateOf(kept).state).toBe('draft')
+    expect(handle().records.ledger(kept).at(-1)).toMatchObject({ action: 'draft_restored', fromState: 'discarded', toState: 'draft' })
+    expect([gone, finished, before].map(id => stateOf(id).state)).toEqual(['discarded', 'discarded', 'discarded'])
   })
 })
 

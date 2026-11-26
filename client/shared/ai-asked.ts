@@ -61,6 +61,14 @@ export function aiAskedDoneWords(label: string): string {
 /** 経緯's line of such an entry (owner decision 2026-11-26): 「AI が（本人の頼みで）完了にしました」. */
 export const aiAskedHistoryText = (label: string) => `AI が（本人の頼みで）${aiAskedDoneWords(label)}`
 
+/** The server's answers that mean the entry can no longer be undone as it stands: undone already, or changed since. */
+export const AI_ASKED_UNDO_STALE_CODES: readonly string[] = ['VERSION_CONFLICT', 'CHANGED_SINCE', 'NOT_UNDOABLE', 'ENTRY_NOT_FOUND']
+
+/** ［取り消す］ refused because of that: what to say, with the record's state now when the server answered it. */
+export function aiAskedUndoStaleText(stateNow: string | null): string {
+  return `取り消せませんでした。もう取り消したか、このあと別の変更がありました。${stateNow ? `（いまは「${stateNow}」です）` : ''}`
+}
+
 /** The card's heading. */
 export const aiAskedHeading = (n: number) => `AI が頼まれて片づけました（${n}件）`
 

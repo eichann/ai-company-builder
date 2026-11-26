@@ -337,7 +337,7 @@ export const AI_ASKED_PER_TURN = 20
 /** The refusals of the AI at the member's request: fixed sentences the AI relays as they are. */
 export const AI_ASKED_REFUSALS = {
   /** The member's own setting is off. */
-  off: { code: 'AI_ASK_OFF', error: '「AI に完了を頼めるようにする」がオフのため、AI からは完了にできません。設定の「自分の設定」でオンにすると、AI に頼めるようになります（それまではご自身で押してください）。' },
+  off: { code: 'AI_ASK_OFF', error: '「AI に完了を頼めるようにする」がオフのため、AI からは片づけられません（完了にする・終わりにする・もう返した）。設定の「自分の設定」でオンにすると、AI に頼めるようになります（それまではご自身で押してください）。' },
   /** More than `AI_ASKED_PER_TURN` in one turn. */
   limit: { code: 'AI_ASK_LIMIT', error: `AI が一度のやりとりで完了にできるのは ${AI_ASKED_PER_TURN} 件までです。続きは、もう一度頼んでください。` },
 } as const

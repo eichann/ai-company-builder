@@ -2,7 +2,9 @@
  * The app's side of the AI at the member's request (records.md "The AI at the member's request", owner decision
  * 2026-11-26 「AI に完了を頼めるようにする」). The server decides every call; the app only asks and shows. Guards:
  * - the turn's token is asked as a member's turn only for a turn the member started with their own words — never an
- *   unattended step, a job's run, a step's consultation or a message the app composed — and never with a run;
+ *   unattended step, a job's run, a step's consultation, a message the app composed (an instruction) or one it sent in
+ *   the member's place to start a consultation (a Skill's 実行, minutes reading: `appSent`, kept with the message) — and
+ *   never with a run;
  * - only a token the server marked gets the asked-only description and instructions; any other keeps 「本人が画面で」;
  * - what was done becomes one card per turn (the same id, every item), only when the server says it was at the
  *   member's request; ［取り消す］ is the member's own undo of that entry with their session;
@@ -19,6 +21,7 @@ import { coreTypeDefinitions } from '../../shared/core/core-types'
 import type { LedgerEntry } from '../../shared/core/record-ledger'
 import { sessionMessageToUIMessage, uiMessageToSessionMessage } from '../src/features/chat/chatSessionMessages'
 import { undoAiAsked } from '../src/features/chat/api'
+import { latestMemberText } from '../shared/agents/second-opinion'
 
 const TOKEN = 'acb_rec_co.' + 'b'.repeat(64)
 const TASK = 'task-0123456789abcdef'
@@ -104,6 +107,15 @@ test('the card is read strictly and kept with the message: the latest copy of a 
   assert.equal(restored.parts.filter(p => p.type === AI_ASKED_PART_TYPE).length, 1)
 })
 
+test('a message the app sent in the member\'s place keeps that mark through the history (a restart never makes it theirs)', () => {
+  const sent = uiMessageToSessionMessage({ id: 'u1', role: 'user', metadata: { appSent: true }, parts: [{ type: 'text', text: '/weekly-report ' }] } as never, new Date())
+  assert.equal(sent.appSent, true)
+  const back = sessionMessageToUIMessage(sent)
+  assert.equal(latestMemberText([back as never]), '')
+  const own = sessionMessageToUIMessage(uiMessageToSessionMessage({ id: 'u2', role: 'user', parts: [{ type: 'text', text: '完了にして' }] } as never, new Date()))
+  assert.equal(latestMemberText([own as never]), '完了にして')
+})
+
 test('［取り消す］ is the member\'s own undo of that entry (tasks:undo with the version it made)', async () => {
   const calls: unknown[][] = []
   await undoAiAsked('co', TASK, 4, { undoTaskAction: async (...args: unknown[]) => { calls.push(args); return { success: true, recordId: TASK } } } as never)
@@ -149,6 +161,11 @@ test('the chat server marks only a turn the member started with their own words'
   assert.deepEqual(await chatTurn({ appSessionId: 'conv-plain-0001' }), [true])
   // A message the app composed (an app instruction) is not the member's words.
   assert.deepEqual(await chatTurn({ appSessionId: 'conv-app-00001', messages: [{ id: 'm', role: 'user', metadata: { appInstruction: { kind: 'task-consult' } }, parts: [{ type: 'text', text: '完了にして' }] }] }), [false])
+  // A message the app sent in the member's place (a Skill's 実行 `/<skill> `, minutes reading, …): the text may carry outside
+  // text (minutes, someone else's SKILL.md), so never the member's own request — until the member writes themselves.
+  const appSent = { id: 'm', role: 'user', metadata: { appSent: true }, parts: [{ type: 'text', text: '/weekly-report ' }] }
+  assert.deepEqual(await chatTurn({ appSessionId: 'conv-skill-001', messages: [appSent] }), [false])
+  assert.deepEqual(await chatTurn({ appSessionId: 'conv-skill-002', messages: [appSent, { id: 'a', role: 'assistant', parts: [{ type: 'text', text: 'はい' }] }, { id: 'm2', role: 'user', parts: [{ type: 'text', text: 'この7件を完了にして' }] }] }), [true])
   // An unattended 「AI の番」 step, a job's run and a step's consultation never.
   assert.deepEqual(await chatTurn({ appSessionId: 'conv-turn-0001', aiTurnStep: 'minutes-reading' }), [false])
   const ceiling = { pluginStepTools: () => ({ allowsRecordTool: () => true, builtinTools: [] }), stepWriteArea: async () => ({ nowhere: true, reads: [] }) }

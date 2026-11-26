@@ -188,9 +188,10 @@ nor archived in one.
   closes count, and why:
   - **The owner's own action into 対応済み / やることにしなかった** — 「済んだ」 (`settle`), 「取り込まない」
     (`drop`), `handle`, 「自分で確かめる」 (`check_myself`): a person (actor kind `human`) who is the
-    record's owner. The member decided it is done.
+    record's owner — or their own AI at their request (`askedBy` = the actor, `personsOwnAct`; `records.md` "The AI at
+    the member's request"). The member decided it is done.
   - **Every task made from it done by a person** (a task reaching 完了 through the engine, actor kind
-    `human`), the interaction itself closed and no task or 返事のお願い open — the work the mail asked
+    `human`, or the person's own AI at their request — the same `personsOwnAct`), the interaction itself closed and no task or 返事のお願い open — the work the mail asked
     for is over. The reply check's `replied_done` (the member's own AI completing tasks) archives
     nothing: the AI's judgement alone never archives (owner); the member's 「自分で確かめる」 or their
     own completion does.

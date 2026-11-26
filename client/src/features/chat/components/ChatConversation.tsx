@@ -257,7 +257,8 @@ export const ChatPanelChat = memo(function ChatPanelChat({ tabId, isShown, depar
   // `editedMessageId`: an edited message is resent — the conversation is cut
   // just before it and the new text sent in its place, through the same steps
   // (synchronous save first, attachments staged) as any other message.
-  const sendTurn = useCallback(async (text: string, files?: File[], filePaths?: string[], editedMessageId?: string, instruction?: AppInstruction, onCreated?: (messageId: string) => void) => {
+  // `appSent`: the app sends it in the member's place (a new consultation's or an AI turn's first message: app-instruction.ts).
+  const sendTurn = useCallback(async (text: string, files?: File[], filePaths?: string[], editedMessageId?: string, instruction?: AppInstruction, onCreated?: (messageId: string) => void, appSent?: boolean) => {
     if (!text.trim() && (!files || files.length === 0)) return
     const editing = editedMessageId !== undefined
     // An edit replaces part of the conversation: only while nothing runs.
@@ -318,7 +319,7 @@ export const ChatPanelChat = memo(function ChatPanelChat({ tabId, isShown, depar
         setPendingRecords([])
       }
 
-      const metadata = { ...(instruction ? { appInstruction: instruction } : {}), ...(dropped.length > 0 ? { droppedRecords: dropped } : {}) }
+      const metadata = { ...(instruction ? { appInstruction: instruction } : {}), ...(appSent ? { appSent: true } : {}), ...(dropped.length > 0 ? { droppedRecords: dropped } : {}) }
       const message: UIMessage = {
         id: crypto.randomUUID(), role: 'user',
         ...(Object.keys(metadata).length > 0 ? { metadata } : {}),
@@ -431,7 +432,7 @@ export const ChatPanelChat = memo(function ChatPanelChat({ tabId, isShown, depar
         onTitleChange?.(title)
         if (minutesId) minutesIdRef.current = minutesId
         aiTurnStepRef.current = step
-        void sendTurn(message, undefined, undefined, undefined, undefined, onSent)
+        void sendTurn(message, undefined, undefined, undefined, undefined, onSent, true)
       })
       return
     }
@@ -453,7 +454,7 @@ export const ChatPanelChat = memo(function ChatPanelChat({ tabId, isShown, depar
       setTopicSwitch(null)
       if (pluginStep) pluginStepRef.current = pluginStep
       const conversationId = appSessionIdRef.current
-      if (message) void sendTurn(message, undefined, undefined, undefined, instruction, onSent && conversationId ? messageId => onSent({ tabId, conversationId, messageId }) : undefined)
+      if (message) void sendTurn(message, undefined, undefined, undefined, instruction, onSent && conversationId ? messageId => onSent({ tabId, conversationId, messageId }) : undefined, true)
     })
   }, [inputRequest, isRestoringSession, isShown, chatInputApiRef])
 

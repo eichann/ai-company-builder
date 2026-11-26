@@ -395,6 +395,9 @@ export function createInboxService(deps: InboxDeps) {
     }
   }
 
+  /** The note of the drafts 「もう返した」 discards: what `restoreDrafts` recognises them by. */
+  const REPLIED_ELSEWHERE_NOTE = 'ほかの経路で返信済み（もう返した）'
+
   /**
    * The 返事のお願い's prepared drafts still in 下書き — and, with `alsoThread`, every reply draft to its
    * 連絡 (the card's own, outbound-mail.md "Replies") — discarded: the reply went out elsewhere, so
@@ -414,6 +417,34 @@ export function createInboxService(deps: InboxDeps) {
       logFailure('draft discarded', deps.writer.transition(companyId, {
         recordId: row.id, action: INBOX_ACTIONS.memberReplied, expectedVersion: cur.version, to: 'discarded',
         actor: INBOX_ACTOR, note, quiet: true,
+      }))
+    }
+  }
+
+  /**
+   * 「もう返した」 undone (its entry, at `since`): the reply drafts that very action discarded come back to 下書き, so the
+   * card offers them again — only a draft whose newest entry is still that discard (nothing changed it since) and whose
+   * body is kept (never one finished by the mail service or cleared by retention). Nothing is sent: sending stays the
+   * person's (records.md "The AI at the member's request").
+   */
+  function restoreDrafts(companyId: string, handle: CompanyData, replyRequestId: string, since: string): void {
+    const links = handle.records.linksFrom([replyRequestId])
+    const ids = new Set(links.filter(l => l.name === 'prepared' && l.targetId).map(l => l.targetId as string))
+    const interactionId = links.find(l => l.name === 'interaction' && l.targetId)?.targetId
+    if (interactionId) {
+      for (const r of handle.records.candidates({ types: ['outbound_message'], link: { name: 'interaction', id: interactionId } }, 50)) ids.add(r.id)
+    }
+    for (const row of handle.records.byIds([...ids])) {
+      if (row.type !== 'outbound_message' || row.removedAt !== null) continue
+      const cur = fieldsOf(handle, row.id)
+      if (cur.state !== 'discarded') continue
+      const last = handle.records.ledger(row.id).at(-1)
+      if (!last || last.action !== INBOX_ACTIONS.memberReplied || last.note !== REPLIED_ELSEWHERE_NOTE || last.at < since) continue
+      const mail = handle.outbound.mail(row.id)
+      if (!mail || mail.finishedAt !== null || mail.bodyDeletedAt !== null) continue
+      logFailure('draft restored', deps.writer.transition(companyId, {
+        recordId: row.id, action: INBOX_ACTIONS.draftRestored, expectedVersion: cur.version, to: 'draft',
+        actor: INBOX_ACTOR, note: '「もう返した」を取り消したため、下書きに戻しました', quiet: true,
       }))
     }
   }
@@ -911,7 +942,14 @@ export function createInboxService(deps: InboxDeps) {
    * on a task made from a message, reaching 完了 (its message is then checked: closed, every task
    * finished, at least one done). The undo of 「…でもアーカイブしました」 puts it back.
    */
-  function mailboxFollowUp(companyId: string, change: { type: string; entry: { recordId: string; action: string; actorId: string; actorKind: string; fromState: string | null; toState: string | null; reversesVersion?: number | null } }): void {
+  /**
+   * The person's own act: their press, or their own AI at their request (records.md "The AI at the member's request",
+   * owner decision 2026-11-26: such a close behaves exactly like the member pressing it, the archive included).
+   */
+  const personsOwnAct = (entry: { actorId: string; actorKind: string; askedBy?: string | null }) =>
+    entry.actorKind === 'human' || (entry.actorKind === 'ai' && typeof entry.askedBy === 'string' && entry.askedBy === entry.actorId)
+
+  function mailboxFollowUp(companyId: string, change: { type: string; entry: { recordId: string; action: string; actorId: string; actorKind: string; fromState: string | null; toState: string | null; reversesVersion?: number | null; askedBy?: string | null } }): void {
     const { type, entry } = change
     const handle = handleOf(companyId)
     if (type === 'interaction') {
@@ -921,13 +959,13 @@ export function createInboxService(deps: InboxDeps) {
         return
       }
       const row = handle.records.byIds([entry.recordId])[0]
-      if (!row || entry.actorKind !== 'human' || entry.actorId !== row.personalOwner) return
+      if (!row || !personsOwnAct(entry) || entry.actorId !== row.personalOwner) return
       if (entry.toState === null || entry.toState === entry.fromState || !CLOSED_STATES.includes(entry.toState)) return
       track(archiveThere(companyId, entry.recordId))
       return
     }
-    // A task a person completed (the AI's own completion — the reply check — is not the member's say).
-    if (type === 'task' && entry.toState === 'done' && entry.fromState !== 'done' && entry.action !== 'undo' && entry.actorKind === 'human') {
+    // A task a person completed — or their own AI at their request (the AI's own completion, the reply check, is not their say).
+    if (type === 'task' && entry.toState === 'done' && entry.fromState !== 'done' && entry.action !== 'undo' && personsOwnAct(entry)) {
       for (const l of handle.records.linksFrom([entry.recordId])) {
         if (l.name === 'interaction' && l.targetId) track(archiveThere(companyId, l.targetId))
       }
@@ -1030,11 +1068,19 @@ export function createInboxService(deps: InboxDeps) {
      * The engine wrote an action (composition.ts `afterAct`): the person's 「もう返した」 (a reply ACB
      * cannot see) drops every reply draft for that 返事のお願い, as a reply seen in the thread does.
      */
-    afterAct(companyId: string, change: { type: string; entry: { recordId: string; action: string; actorId: string; actorKind: string; fromState: string | null; toState: string | null; reversesVersion?: number | null } }): void {
+    afterAct(companyId: string, change: { type: string; entry: { recordId: string; action: string; actorId: string; actorKind: string; fromState: string | null; toState: string | null; reversesVersion?: number | null; askedBy?: string | null } }): void {
       // A close by the mailbox's owner archives the mail there too, when they allowed it (2026-11-05).
       try { mailboxFollowUp(companyId, change) } catch { /* the action stands */ }
-      if (change.type !== 'reply_request' || change.entry.action !== 'replied_elsewhere') return
-      discardDrafts(companyId, handleOf(companyId), change.entry.recordId, 'ほかの経路で返信済み（もう返した）', true)
+      if (change.type !== 'reply_request') return
+      // 「もう返した」 taken back (［取り消す］, the person's or after their AI's): the drafts it discarded come back.
+      if (change.entry.action === 'undo') {
+        const handle = handleOf(companyId)
+        const reversed = handle.records.ledger(change.entry.recordId).find(e => e.version === change.entry.reversesVersion)
+        if (reversed?.action === 'replied_elsewhere') restoreDrafts(companyId, handle, change.entry.recordId, reversed.at)
+        return
+      }
+      if (change.entry.action !== 'replied_elsewhere') return
+      discardDrafts(companyId, handleOf(companyId), change.entry.recordId, REPLIED_ELSEWHERE_NOTE, true)
     },
 
     /** The mailbox follow-ups still running (archive / put back): tests wait for them. */
