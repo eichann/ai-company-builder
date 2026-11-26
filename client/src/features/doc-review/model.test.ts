@@ -174,6 +174,15 @@ test('markOrphanedComments: completed reviews only, in memory; unknown document 
   assert.equal(markOrphanedComments(unknown, null), unknown)
 })
 
+test('markOrphanedComments asks the document kind\'s own finder (an HTML page\'s words, not its tags)', () => {
+  const done = review('r1', [{ id: 'c1' }])
+  const quote = done.comments[0].selectedText
+  const html = `<p>${quote.slice(0, 1)}<b>${quote.slice(1)}</b></p>`
+  assert.equal(markOrphanedComments([done], html)[0].comments[0].orphaned, true, 'as written, the tag splits the quote')
+  const wordsOnly = (text: string) => (q: string) => text.replace(/<[^>]*>/g, '').includes(q)
+  assert.equal(markOrphanedComments([done], html, wordsOnly)[0].comments[0].orphaned, false)
+})
+
 test('mergeReviewEdits: the reviewer\'s file changed elsewhere', () => {
   const base: Review = { ...review('r1', [{ id: 'a' }, { id: 'b' }, { id: 'c' }]), status: 'in_progress', completedAt: null }
   const mine: Review = { ...base, comments: [...base.comments.filter(c => c.id !== 'c'), { ...base.comments[0], id: 'new-here' }] }

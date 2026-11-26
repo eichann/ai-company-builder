@@ -301,3 +301,75 @@ test('the band says what the document wanted from the internet (count, hosts), s
   await expect(band(page)).toContainText('部品を 1 件')
   expectNoPageErrors(state)
 })
+
+test('review: selections count only while reviewing and only from this view, the comment box stays off the document, the comment is saved in the Markdown review\'s shape, a hidden place is said', async ({ page }) => {
+  const state = await open(page)
+  const files = () => page.evaluate(() => (window as unknown as { __acbFiles: Record<string, string> }).__acbFiles)
+  const lastReview = async () => (await calls(page)).filter(c => c[0] === 'review').at(-1)
+  const commentBox = page.getByPlaceholder(/コメントを入力/)
+  const selection = (viewId: number) => ({ viewId, kind: 'selection', quote: { text: '前年比 120%', prefix: '売上は', suffix: 'でした' } })
+  expect(await lastReview()).toBeUndefined()
+  // Told while not reviewing: nothing opens.
+  await sendEvent(page, selection(7))
+  await expect(commentBox).toHaveCount(0)
+  await page.getByRole('button', { name: 'レビューする' }).click()
+  await expect.poll(lastReview).toEqual(['review', 7, { selecting: true, quotes: [] }])
+  // Another view's selection is not this tab's.
+  await sendEvent(page, selection(99))
+  await expect(commentBox).toHaveCount(0)
+  // Another page of the folder shown in the view: the review pauses and says so; a selection then opens nothing.
+  await sendEvent(page, { viewId: 7, kind: 'page', own: false })
+  await expect(page.getByText(/別のページを表示しているため、レビューを止めています/)).toBeVisible()
+  await sendEvent(page, selection(7))
+  await expect(commentBox).toHaveCount(0)
+  await sendEvent(page, { viewId: 7, kind: 'page', own: true })
+  await expect(page.getByText(/別のページを表示しているため/)).toHaveCount(0)
+  await sendEvent(page, selection(7))
+  await expect(commentBox).toBeVisible()
+  // A selection held when the view goes to another page is dropped (it was the document's, not that page's).
+  await sendEvent(page, { viewId: 7, kind: 'page', own: false })
+  await expect(commentBox).toHaveCount(0)
+  await sendEvent(page, { viewId: 7, kind: 'page', own: true })
+  await sendEvent(page, selection(7))
+  await expect(commentBox).toBeVisible()
+  // The whole quote is shown before saving (it scrolls when long; never cut to a few lines).
+  const quoteStyle = await page.getByTestId('comment-quote').evaluate(el => ({ overflowY: getComputedStyle(el).overflowY, clamp: getComputedStyle(el).webkitLineClamp }))
+  expect(quoteStyle).toEqual({ overflowY: 'auto', clamp: 'none' })
+  // The view is drawn above the page: the box must not lie over the document's area (nor hide it).
+  const areaBox = (await area(page).boundingBox())!
+  expect((await commentBox.boundingBox())!.x).toBeGreaterThanOrEqual(areaBox.x + areaBox.width - 1)
+  expect(await lastBounds(page)).toBeTruthy()
+  await commentBox.fill('出どころを書いてください。')
+  await page.getByRole('button', { name: 'コメント', exact: true }).click()
+  await expect(commentBox).toHaveCount(0)
+  // The Markdown review's sidecar and shape; where the words are in the file; only the quote goes to the view.
+  await expect.poll(async () => Object.keys(await files()).filter(p => p.startsWith(`${DOC}.review.`)).length).toBe(1)
+  const saved = JSON.parse(Object.entries(await files()).find(([p]) => p.startsWith(`${DOC}.review.`))![1])
+  expect(Object.keys(saved)).toEqual(['version', 'review'])
+  const comment = saved.review.comments[0]
+  expect(Object.keys(comment)).toEqual(['id', 'authorName', 'severity', 'selectedText', 'startOffset', 'endOffset', 'body', 'createdAt', 'resolved', 'replies'])
+  expect((await files())[DOC].slice(comment.startOffset, comment.endOffset)).toBe('前年比 120%')
+  await expect.poll(lastReview).toEqual(['review', 7, { selecting: true, quotes: [{ text: '前年比 120%', nth: 0, resolved: false }] }])
+  // Its place is in a closed part of the document right now.
+  await page.evaluate(() => { (window as unknown as { __acbFound: string }).__acbFound = 'hidden' })
+  await page.locator('[data-comment-id]').first().click()
+  await expect.poll(async () => (await calls(page)).some(c => c[0] === 'find' && c[1] === 7 && c[2] === 0)).toBe(true)
+  await expect(page.getByText(/この部分はいま隠れています/)).toBeVisible()
+  // Done: the view reports nothing more and draws nothing.
+  await page.getByRole('button', { name: 'レビュー完了' }).click()
+  await expect.poll(lastReview).toEqual(['review', 7, null])
+  // The snapshot keeps the page's readable text, not its HTML (owner decision 2026-11-26).
+  const completed = async () => JSON.parse(Object.entries(await files()).find(([p]) => p.startsWith(`${DOC}.review.`))![1]).review
+  await expect.poll(async () => (await completed()).status).toBe('completed')
+  expect((await completed()).snapshot).toBe('11月の売上\n売上は前年比 120% でした。')
+  // Looking at it again from the history: its marks, but no selections (nothing can be added).
+  await page.getByRole('button', { name: /レビュー履歴/ }).click()
+  await page.getByRole('button', { name: /1件/ }).click()
+  await expect.poll(lastReview).toEqual(['review', 7, { selecting: false, quotes: [{ text: '前年比 120%', nth: 0, resolved: false }] }])
+  await sendEvent(page, selection(7))
+  await expect(commentBox).toHaveCount(0)
+  // 「変更を確認」 reads that snapshot against the page's text now: unchanged.
+  await page.getByRole('button', { name: '変更を確認' }).click()
+  await expect(page.getByText('レビュー時点から変更はありません')).toBeVisible()
+  expectNoPageErrors(state)
+})

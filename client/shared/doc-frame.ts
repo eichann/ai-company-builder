@@ -15,6 +15,7 @@
 
 import { COMMANDS } from './commands/catalog'
 import { isMacControlKey, shortcutOf, type CommandArea, type KeyInput } from './commands/define'
+import type { DocReviewSelection } from './doc-review-frame'
 
 export const DOC_SCHEME = 'acb-doc'
 
@@ -259,13 +260,21 @@ export function docZoomFactor(input: unknown): number | null {
  * itself (`gone`: its page crashed, or more views were opened than a window keeps), or the member
  * pressed one of the app's shortcuts while the document had the keyboard (`shortcut`: the key, run
  * by the window as if pressed in the document's tab), or its page wanted internet parts that were
- * not loaded (`blocked`: the whole tally so far, hosts only — `DocBlockedParts`).
+ * not loaded (`blocked`: the whole tally so far, hosts only — `DocBlockedParts`), or the member selected
+ * text in it while reviewing (`selection`).
  */
 export type DocViewEvent =
   | { viewId: number; kind: 'link'; url: string }
   | { viewId: number; kind: 'gone' }
   | { viewId: number; kind: 'shortcut'; key: KeyInput }
   | ({ viewId: number; kind: 'blocked' } & DocBlockedParts)
+  /** The member selected text while reviewing it (`doc-review-frame.ts`): checked text and context only. */
+  | { viewId: number; kind: 'selection'; quote: DocReviewSelection }
+  /**
+   * Whether the view's main frame shows the document it opened (`own`), told when that changes: a link
+   * or the page's script can go to another page of the same folder; the review pauses there.
+   */
+  | { viewId: number; kind: 'page'; own: boolean }
 
 /**
  * The internet parts a document's page wanted and did not get (doc-frame.md "The band of blocked

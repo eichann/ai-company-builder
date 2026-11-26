@@ -311,6 +311,8 @@ function fakeShell(options: { fail?: boolean; hold?: boolean } = {}) {
         place: bounds => { calls.push([id, 'place', bounds]) },
         zoom: factor => { calls.push([id, 'zoom', factor]) },
         reload: () => { calls.push([id, 'reload']) },
+        inReviewWorld: async () => null,
+        releaseKeyboard: () => {},
       }
     },
   }
@@ -321,7 +323,7 @@ function fakeShell(options: { fail?: boolean; hold?: boolean } = {}) {
     link: (id: number, url: string) => hooksOf.get(id)?.onLink(id, url),
     shortcut: (id: number, key: KeyInput) => hooksOf.get(id)?.onShortcut(id, key),
     blocked: (id: number, url: string) => hooksOf.get(id)?.onBlocked(id, url),
-    pageStart: (id: number) => hooksOf.get(id)?.onPageStart(id),
+    pageStart: (id: number) => hooksOf.get(id)?.onPageStart(id, shown.get(id)!),
     resetWindow: (windowId: number) => reset(windowId),
   }
 }

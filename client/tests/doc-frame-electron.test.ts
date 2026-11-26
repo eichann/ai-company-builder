@@ -48,6 +48,7 @@ interface Result {
   backToApp: { clickedIn: { app: boolean; doc: boolean }; after: { app: boolean; doc: boolean } }
   links: { events: unknown[]; stayed: boolean }
   crashEvents: unknown[]
+  review: { syntheticTries: number; afterSynthetic: number; selections: unknown[]; pageHooksCalled: string[]; marked: boolean; found: string }
   otherViewId: number | null
   keys: {
     afterFind: { shortcuts: string[]; keys: string }
@@ -257,4 +258,14 @@ test('what a document wanted from the internet reaches the window as hosts and a
 
 test('a new page of the document starts the tally again: the window hears 0 when it wants nothing', { skip }, () => {
   assert.deepEqual(result.blockedAfterOwnPage, { viewId: result.blocked.at(-1)!.viewId, kind: 'blocked', count: 0, hosts: [], hostCount: 0 })
+})
+
+test('review: the page\'s synthetic events read nothing; the member\'s drag reads the real words through the app\'s own piece, which the page cannot reach', { skip }, () => {
+  assert.ok(result.review.syntheticTries > 10, 'the page kept selecting and firing mouse-up / Shift key-up events')
+  assert.equal(result.review.afterSynthetic, 0, 'no selection read from a synthetic event')
+  assert.equal(result.review.selections.length, 1)
+  assert.deepEqual((result.review.selections[0] as { quote: { text: string } }).quote.text, '前年同月比 112%', 'the real words, not the page\'s FAKE')
+  assert.deepEqual(result.review.pageHooksCalled, [], 'the piece never used the built-ins the page replaced (its own world)')
+  assert.equal(result.review.marked, true, 'the comment\'s mark is drawn')
+  assert.equal(result.review.found, 'shown')
 })

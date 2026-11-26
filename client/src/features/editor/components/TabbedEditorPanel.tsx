@@ -287,6 +287,8 @@ export function TabbedEditorPanel({
             leavingForSource={() => htmlSourcesNow.current.has(activeFilePath)}
             zoom={htmlZooms.current.get(activeFilePath)}
             onZoom={zoom => htmlZooms.current.set(activeFilePath, zoom)}
+            review={review}
+            content={activeFile.content}
           />
         ) : activeFile?.isLoading ? (
           <div className="h-full flex items-center justify-center text-gray-400 dark:text-zinc-500">

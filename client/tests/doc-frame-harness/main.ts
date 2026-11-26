@@ -116,6 +116,34 @@ function setUp() {
   fs.writeFileSync(path.join(folder, 'late.html'), `<!doctype html><meta charset="utf-8"><div style="height:3000px"></div>
 <script>addEventListener('load', () => { const i = document.createElement('input'); i.id = 'late'; i.autofocus = true; document.body.prepend(i) })</script>`)
   fs.writeFileSync(path.join(folder, 'page2.html'), '<!doctype html><p>2</p>')
+  // Review (doc-frame.md "Review in the document view"): a page that replaces the built-ins the app's
+  // piece uses (it must not see or steer the piece) and keeps making a selection and firing synthetic
+  // mouse-up / Shift key-up events (they must read nothing) until the harness says stop.
+  fs.writeFileSync(path.join(folder, 'review.html'), `<!doctype html><meta charset="utf-8"><p id="t">11月の売上は 2,340 万円で、前年同月比 112% でした。</p>
+<script>
+const realRange = Range, realSelection = getSelection.bind(window)
+window.__called = []
+const spy = name => function () { window.__called.push(name); return 'FAKE' }
+Selection.prototype.toString = spy('Selection.toString')
+window.getSelection = spy('getSelection')
+document.createTreeWalker = spy('createTreeWalker')
+CSS.highlights.set = spy('CSS.highlights.set')
+window.Range = spy('Range')
+window.__fake = true
+window.__synthetic = 0
+setInterval(() => {
+  if (!window.__fake) return
+  const n = document.getElementById('t').firstChild
+  const r = new realRange(); r.setStart(n, 0); r.setEnd(n, 6)
+  const s = realSelection(); s.removeAllRanges(); s.addRange(r)
+  for (const target of [document, document.body, n.parentElement]) {
+    target.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, button: 0 }))
+    target.dispatchEvent(new PointerEvent('pointerup', { bubbles: true }))
+    target.dispatchEvent(new KeyboardEvent('keyup', { key: 'Shift', shiftKey: true, bubbles: true }))
+  }
+  window.__synthetic++
+}, 30)
+</script>`)
   fs.writeFileSync(path.join(folder, 'style.css'), 'p { color: red }')
   fs.writeFileSync(path.join(folder, 'mod.js'), 'window.moduleRan = true\n')
   fs.writeFileSync(path.join(folder, 'images', 'graph.png'), PNG)
@@ -454,6 +482,40 @@ async function run() {
     plainCloseThenOpen: await again.contents.executeJavaScript('window.scrollY', true),
   }
   views.close(again.viewId, win.webContents.id)
+
+  // Review: the page's synthetic events read nothing; the member's real drag reads the real words,
+  // through the piece's own built-ins (the page's replaced ones are never called); the marks draw.
+  const reviewed = await open(path.join(folder, 'review.html'))
+  views.place(reviewed.viewId, win.webContents.id, { x: 0, y: 0, width: 800, height: 600 })
+  await framesDrawn(reviewed.contents)
+  views.review(reviewed.viewId, win.webContents.id, { selecting: true, quotes: [{ text: '前年同月比 112%', nth: 0, resolved: false }] })
+  events.length = 0
+  await wait(1200)
+  const selectionsOf = () => events.filter(e => (e as { kind: string }).kind === 'selection')
+  const syntheticTries = await reviewed.contents.executeJavaScript('window.__fake = false; window.__synthetic', true)
+  const afterSynthetic = selectionsOf().length
+  // Where the words are, read in a world of the harness's own (the page replaced the main world's built-ins).
+  const box = await reviewed.contents.executeJavaScriptInIsolatedWorld(999, [{ code: `(() => {
+    const n = document.getElementById('t').firstChild
+    const at = n.data.indexOf('前年同月比 112%')
+    const r = new Range(); r.setStart(n, at); r.setEnd(n, at + '前年同月比 112%'.length)
+    const b = r.getBoundingClientRect()
+    return { left: Math.round(b.left) + 1, right: Math.round(b.right) - 1, y: Math.round((b.top + b.bottom) / 2) }
+  })()` }]) as { left: number; right: number; y: number }
+  reviewed.contents.sendInputEvent({ type: 'mouseDown', x: box.left, y: box.y, button: 'left', clickCount: 1 })
+  for (let i = 1; i <= 6; i++) reviewed.contents.sendInputEvent({ type: 'mouseMove', x: Math.round(box.left + ((box.right - box.left) * i) / 6), y: box.y, button: 'left', modifiers: ['leftButtonDown'] })
+  reviewed.contents.sendInputEvent({ type: 'mouseUp', x: box.right, y: box.y, button: 'left', clickCount: 1 })
+  for (let i = 0; i < 40 && selectionsOf().length === afterSynthetic; i++) await wait(50)
+  await wait(300)
+  result.review = {
+    syntheticTries,
+    afterSynthetic,
+    selections: selectionsOf().slice(afterSynthetic),
+    pageHooksCalled: await reviewed.contents.executeJavaScript('window.__called', true),
+    marked: await reviewed.contents.executeJavaScript("CSS.highlights.has('acb-review')", true),
+    found: await views.findQuote(reviewed.viewId, win.webContents.id, 0),
+  }
+  views.close(reviewed.viewId, win.webContents.id)
 
   // The app's page reloads: every view of the window closes and its grant goes.
   win.webContents.reload()
