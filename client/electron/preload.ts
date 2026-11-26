@@ -99,6 +99,7 @@ const api: ElectronAPI = {
   readDirectoryTree: (path: string, maxDepth?: number) => invoke('fs:readDirectoryTree', path, maxDepth ?? 2),
   readFile: (path: string) => invoke('fs:readFile', path),
   readFileBinary: (path: string) => invoke('fs:readFileBinary', path),
+  openVideo: (path: string) => invoke('fs:openVideo', path),
   openDocView: (filePath: string) => invoke('docView:open', filePath),
   closeDocView: (viewId: number, keepPlace?: boolean) => invoke('docView:close', viewId, keepPlace),
   setDocViewBounds: (viewId: number, bounds: DocViewBounds | null) => invoke('docView:setBounds', viewId, bounds),

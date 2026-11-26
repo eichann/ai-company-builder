@@ -5,7 +5,7 @@
 // (&view=external: buttons that change / delete the open file on "disk", for
 // the external-change banner — type in the editor first;
 // &view=tabs: tabs close, the last one opened is a preview tab, a long
-// Markdown file, an image and a PDF; window.__acbWrites lists every save and
+// Markdown file, an image, a PDF and two videos; window.__acbWrites lists every save and
 // window.__acbPinned every pinned tab;
 // &view=html: an HTML document and one at the company folder's top level; the document views are
 // faked and the editor sits between dividers as in the app (the left column's and the chat's beside it,
@@ -47,6 +47,9 @@ if (tabsView) {
   files[LONG_DOC] = ['# 議事録', ...Array.from({ length: 60 }, (_, i) => `## 第${i + 1}回\n\n担当は山田です。予算の確認をしました。`)].join('\n\n')
   files[`${ROOT}/営業部/ロゴ.png`] = ''
   files[`${ROOT}/営業部/契約書.pdf`] = ''
+  // Videos: the spec serves their bytes (acb-media:// is the app's own scheme); 素材.mov is ProRes.
+  files[`${ROOT}/営業部/研修.mp4`] = ''
+  files[`${ROOT}/営業部/素材.mov`] = ''
 }
 const htmlView = params.get('view') === 'html'
 const HTML_DOC = `${ROOT}/営業部/報告/11月の売上.html`
@@ -134,6 +137,8 @@ Object.assign(window, {
     openDocViewDriveVideo: async (viewId: number, index: number) => { docCalls.push(['driveVideo', viewId, index]) },
     onDocViewEvent: (cb: (event: unknown) => void) => { docEvent = cb; return () => { if (docEvent === cb) docEvent = null } },
     openExternal: async (url: string) => { opened.push(url); return { success: true } },
+    // 「ほかのアプリで開く」 for a video the player cannot read.
+    openVideo: async (path: string) => { opened.push(`video:${path}`); return { success: true } },
   },
 })
 

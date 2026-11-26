@@ -3,6 +3,8 @@ import { boundaryCrossing, crossingMessage } from '../../../../shared/private-fo
 import { droppedFilePath, getStats, moveFromExternal, moveItem, startDrag } from '../api'
 import type { FileEntry, FileTreeModel } from '../fileTreeModel'
 import { FILE_PATHS_DRAG_TYPE, FILE_TREE_EFFECT_ALLOWED } from '../../../shared/lib/dragTypes'
+import { LARGE_FILE_THRESHOLD } from '../../../../shared/large-file-limit'
+import { VIDEO_EXTENSIONS } from '../../../../shared/video-files'
 import type { SetSelectedPaths } from './useTreeSelection'
 import type { usePrivateFolders } from './usePrivateFolders'
 
@@ -13,8 +15,19 @@ const ALLOWED_DROP_EXTENSIONS = new Set([
   'png', 'jpg', 'jpeg', 'gif', 'webp', 'svg',
   'md', 'txt', 'csv', 'pdf', 'docx', 'xlsx', 'pptx', 'html', 'htm',
   'json', 'yaml', 'yml',
+  ...VIDEO_EXTENSIONS,
 ])
 const MAX_DROP_FILE_SIZE = 20 * 1024 * 1024 // 20MB
+const VIDEO_DROP_EXTENSIONS = new Set(VIDEO_EXTENSIONS)
+
+/** Why a dropped file is refused, or null. A video may be as large as sync still shares (sync.md step 4). */
+function dropRefusal(name: string, ext: string, size: number): string | null {
+  if (!ALLOWED_DROP_EXTENSIONS.has(ext)) return `${name}: 非対応の形式`
+  if (VIDEO_DROP_EXTENSIONS.has(ext)) {
+    return size > LARGE_FILE_THRESHOLD ? `${name}: 100MBを超える動画はほかの人と共有できないため、入れられません` : null
+  }
+  return size > MAX_DROP_FILE_SIZE ? `${name}: 20MBを超えています` : null
+}
 const INTERNAL_PATHS = FILE_PATHS_DRAG_TYPE
 
 const parentDir = (p: string) => p.substring(0, p.lastIndexOf('/'))
@@ -75,15 +88,10 @@ export function useTreeDragDrop({ model, privateFolders, selectedPathsRef, setSe
 
       // Extension and size validation (skip for entries without extension — likely folders)
       const ext = file.name.includes('.') ? file.name.split('.').pop()?.toLowerCase() : ''
-      if (ext) {
-        if (!ALLOWED_DROP_EXTENSIONS.has(ext)) {
-          warnings.push(`${file.name}: 非対応の形式`)
-          continue
-        }
-        if (file.size > MAX_DROP_FILE_SIZE) {
-          warnings.push(`${file.name}: 20MBを超えています`)
-          continue
-        }
+      const refused = ext ? dropRefusal(file.name, ext, file.size) : null
+      if (refused) {
+        warnings.push(refused)
+        continue
       }
 
       const destPath = await resolveUniquePath(destDir, file.name)

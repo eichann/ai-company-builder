@@ -136,6 +136,7 @@ contract.invoke fs:delete
 contract.invoke fs:exists
 contract.invoke fs:move
 contract.invoke fs:moveFromExternal
+contract.invoke fs:openVideo
 contract.invoke fs:readDirectory
 contract.invoke fs:readDirectoryTree
 contract.invoke fs:readFile
@@ -609,6 +610,7 @@ contract.type ElectronAPI.openExternal = openExternal: Invoke<'shell:openExterna
 contract.type ElectronAPI.openFileInMainWindow = openFileInMainWindow: Invoke<'chatWindow:openFile'>
 contract.type ElectronAPI.openManual = openManual: Invoke<'manual:open'>
 contract.type ElectronAPI.openOutboundMailAttachment = openOutboundMailAttachment: Invoke<'outboundMail:openAttachment'>
+contract.type ElectronAPI.openVideo = openVideo: Invoke<'fs:openVideo'>
 contract.type ElectronAPI.openWorkingFolder = openWorkingFolder: Invoke<'companySetup:openWorkingFolder'>
 contract.type ElectronAPI.patchChatSession = patchChatSession: Invoke<'chatHistory:patchSession'>
 contract.type ElectronAPI.pauseJob = pauseJob: Invoke<'jobs:pause'>
@@ -956,6 +958,7 @@ contract.type IpcInvokeChannels.'fs:delete' = 'fs:delete': { args: [path: string
 contract.type IpcInvokeChannels.'fs:exists' = 'fs:exists': { args: [path: string]; result: boolean }
 contract.type IpcInvokeChannels.'fs:move' = 'fs:move': { args: [sourcePath: string, destPath: string]; result: FileOpResult }
 contract.type IpcInvokeChannels.'fs:moveFromExternal' = 'fs:moveFromExternal': { args: [sourcePath: string, destPath: string]; result: FileOpResult }
+contract.type IpcInvokeChannels.'fs:openVideo' = 'fs:openVideo': { args: [path: string]; result: SimpleResult }
 contract.type IpcInvokeChannels.'fs:readDirectory' = 'fs:readDirectory': { args: [path: string]; result: DirectoryEntry[] }
 contract.type IpcInvokeChannels.'fs:readDirectoryTree' = 'fs:readDirectoryTree': { args: [path: string, maxDepth: number]; result: DirectoryTreeNode[] }
 contract.type IpcInvokeChannels.'fs:readFile' = 'fs:readFile': { args: [path: string]; result: string | null }
@@ -1322,6 +1325,7 @@ main.handle fs:delete @ features/fs/ipc.ts (targetPath: string)
 main.handle fs:exists @ features/fs/ipc.ts (targetPath: string)
 main.handle fs:move @ features/fs/ipc.ts (sourcePath: string, destinationPath: string)
 main.handle fs:moveFromExternal @ features/fs/ipc.ts (sourcePath: string, destinationPath: string)
+main.handle fs:openVideo @ features/fs/ipc.ts (filePath: string)
 main.handle fs:readDirectory @ features/fs/ipc.ts (dirPath: string)
 main.handle fs:readDirectoryTree @ features/fs/ipc.ts (dirPath: string, maxDepth: number = 2)
 main.handle fs:readFile @ features/fs/ipc.ts (filePath: string)
@@ -1924,6 +1928,8 @@ preload openManual -> invoke manual:open($0, $1)
 preload openManual : (pageId: string, anchor: string | null) => Promise<ManualOpenResult>
 preload openOutboundMailAttachment -> invoke outboundMail:openAttachment($0, $1, $2)
 preload openOutboundMailAttachment : (companyId: string, messageId: string, sha256: string) => Promise<MailAttachmentOpenResult>
+preload openVideo -> invoke fs:openVideo($0)
+preload openVideo : (path: string) => Promise<SimpleResult>
 preload openWorkingFolder -> invoke companySetup:openWorkingFolder($0, $1)
 preload openWorkingFolder : (folder: string, companyId: string) => Promise<{ success: boolean; error?: string | undefined; }>
 preload patchChatSession -> invoke chatHistory:patchSession($0, $1, $2)

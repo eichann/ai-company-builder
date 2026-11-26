@@ -35,6 +35,7 @@ const GUARDED: Record<string, { args: unknown[]; paths: number[]; fromChatWindow
   'fs:readDirectoryTree': { args: [IN, 2], paths: [0] },
   'fs:readFile': { args: [IN_FILE], paths: [0] },
   'fs:readFileBinary': { args: [IN_FILE], paths: [0] },
+  'fs:openVideo': { args: [IN_FILE], paths: [0] },
   'docView:open': { args: [IN_FILE], paths: [0], fromMainFrame: true },
   'fs:writeFile': { args: [IN_FILE, 'x'], paths: [0] },
   'fs:createFile': { args: [IN_FILE, 'x'], paths: [0] },

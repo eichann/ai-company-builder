@@ -148,7 +148,9 @@ leading `#`/`!`, trailing spaces escaped; a root file anchored as `/name`), kept
 `ACB large files` block of `.git/info/exclude` (a private folder's clone: its own); lines of
 files that are gone are dropped. Tracked files over the limit still get their line and stay
 tracked. The sync message still counts the newly ignored files. Threshold:
-`SyncDeps.largeFileThreshold`. Tests: `client/tests/sync/large-files.test.ts`.
+`SyncDeps.largeFileThreshold`, default `LARGE_FILE_THRESHOLD` from `client/shared/large-file-limit.ts`: the same
+value the file tree's Finder drop of a video is refused over (`files-and-editor.md`), so a dropped video is never
+one sync keeps local. Tests: `client/tests/sync/large-files.test.ts`.
 
 ## Conflict resolution
 

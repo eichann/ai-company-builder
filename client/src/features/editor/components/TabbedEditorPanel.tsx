@@ -6,7 +6,7 @@ import { ConfirmDialog } from '../../../shared/ui/ConfirmDialog'
 import { MarkdownDiffView } from '../../doc-review/components/MarkdownDiffView'
 import { useWriteAccess } from '../../../shared/hooks/useWriteAccess'
 import { useAppStore } from '../../../stores/appStore'
-import { fileNameOf, isHtmlFile, isImageFile, isMarkdownFile, isPdfFile } from '../fileKinds'
+import { fileNameOf, isHtmlFile, isImageFile, isMarkdownFile, isPdfFile, isVideoFile } from '../fileKinds'
 import { useOpenFiles } from '../hooks/useOpenFiles'
 import { useFileSaving } from '../hooks/useFileSaving'
 import { useEditorReview } from '../hooks/useEditorReview'
@@ -16,7 +16,7 @@ import { EditorTabBar } from './EditorTabBar'
 import type { TabArrangement } from '../hooks/useTabArrangement'
 import { fileTabsOf, recordIdOfTab, viewOfTab, type RecordTabLook, type ViewTabLook } from '../editorTabs'
 import { EditorError, EditorNotice, ExternalChangeBanner, MissingFileNotice, ReadOnlyNotice } from './EditorNotices'
-import { LocalImage, PdfPreview } from './BinaryPreviews'
+import { LocalImage, PdfPreview, VideoPreview } from './BinaryPreviews'
 import { MarkdownPreviewPane } from './MarkdownPreviewPane'
 import { HtmlDocumentPane } from './HtmlDocumentPane'
 import { HtmlSourceBar } from './HtmlViewToggle'
@@ -304,6 +304,8 @@ export function TabbedEditorPanel({
           </div>
         ) : activeFile && activeFilePath && isPdfFile(activeFilePath) ? (
           <PdfPreview filePath={activeFilePath} />
+        ) : activeFile && activeFilePath && isVideoFile(activeFilePath) ? (
+          <VideoPreview filePath={activeFilePath} />
         ) : activeFile && activeFilePath && isMarkdownFile(activeFilePath) && mdViewMode === 'preview' ? (
           <MarkdownPreviewPane
             // One preview per file: it restores that file's scroll position when mounted.

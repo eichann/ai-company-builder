@@ -146,11 +146,19 @@ test('dragging a file onto a folder moves it there; onto a private folder it ask
   ])
 })
 
-/** A drop from Finder onto `target`: these files, as Chromium hands them over (no internal drag data). */
-async function dropFromFinder(page: Page, target: Locator, files: { name: string; size?: number }[]) {
+/**
+ * A drop from Finder onto `target`: these files, as Chromium hands them over (no internal drag data).
+ * `reportedSize` stands for a file too large to make in the page (a 100 MB video): the File says
+ * that size, as Finder's would; only its size is read before main moves it.
+ */
+async function dropFromFinder(page: Page, target: Locator, files: { name: string; size?: number; reportedSize?: number }[]) {
   const data = await page.evaluateHandle(list => {
     const dt = new DataTransfer()
-    for (const f of list) dt.items.add(new File([new Uint8Array(f.size ?? 1)], f.name))
+    for (const f of list) {
+      const file = new File([new Uint8Array(f.size ?? 1)], f.name)
+      if (f.reportedSize !== undefined) Object.defineProperty(file, 'size', { value: f.reportedSize })
+      dt.items.add(file)
+    }
     return dt
   }, files)
   await target.dispatchEvent('dragover', { dataTransfer: data })
@@ -166,6 +174,20 @@ test('files dropped from Finder move in under a free name, HTML too; other types
   expect(await calls(page)).toEqual([
     ['moveFromExternal', '/Users/demo/Downloads/10月.md', `${DEPT}/議事録/10月 (1).md`],
     ['moveFromExternal', '/Users/demo/Downloads/資料.html', `${DEPT}/議事録/資料.html`],
+  ])
+})
+
+test('a video (.mp4, .mov) dropped from Finder may be as large as sync shares (100 MB); a larger one is refused with the reason', async ({ page }) => {
+  const MB = 1024 * 1024
+  await open(page)
+  await dropFromFinder(page, row(page, '議事録'), [
+    { name: '研修.mp4', reportedSize: 100 * MB }, { name: '会議.MOV', reportedSize: 30 * MB },
+    { name: '撮影.mov', reportedSize: 100 * MB + 1 }, { name: '資料.pdf', reportedSize: 30 * MB },
+  ])
+  await expect(page.getByRole('alert')).toHaveText(/撮影\.mov: 100MBを超える動画はほかの人と共有できないため、入れられません\s+資料\.pdf: 20MBを超えています/)
+  expect(await calls(page)).toEqual([
+    ['moveFromExternal', '/Users/demo/Downloads/研修.mp4', `${DEPT}/議事録/研修.mp4`],
+    ['moveFromExternal', '/Users/demo/Downloads/会議.MOV', `${DEPT}/議事録/会議.MOV`],
   ])
 })
 

@@ -2,7 +2,9 @@ import React, { useEffect, useState } from 'react'
 import { Warning } from '@phosphor-icons/react'
 import { useFileVersion } from '../hooks/useFileVersion'
 import { localFileUrl } from '../../../../shared/local-file-url'
-import { readFileBinary } from '../api'
+import { localVideoUrl } from '../../../../shared/video-files'
+import { openVideoInOtherApp, readFileBinary } from '../api'
+import { Button } from '../../../shared/ui/primitives'
 
 /**
  * An image from the company folder. Its `local-file://` URL carries the
@@ -74,5 +76,49 @@ export function PdfPreview({ filePath }: { filePath: string }) {
       src={`${url}#toolbar=1`}
       className="w-full h-full border-0"
     />
+  )
+}
+
+/**
+ * A video from the company folder (files-and-editor.md "Videos"): the player's own controls, never
+ * started by itself, streamed by `acb-media://` (only the parts the player asks for). A file the
+ * player cannot read (a codec Chromium lacks, such as ProRes) says so and offers the OS's own app.
+ */
+export function VideoPreview({ filePath }: { filePath: string }) {
+  const version = useFileVersion(filePath)
+  const src = localVideoUrl(filePath, version)
+  const [failedSrc, setFailedSrc] = useState<string | null>(null)
+  const [openError, setOpenError] = useState<string | null>(null)
+  const name = filePath.split('/').pop() || ''
+
+  if (failedSrc === src) {
+    const openElsewhere = async () => {
+      const result = await openVideoInOtherApp(filePath)
+      setOpenError(result.success ? null : 'ほかのアプリで開けませんでした。Finder で開いてみてください。')
+    }
+    return (
+      <div className="h-full flex flex-col items-center justify-center gap-3 p-6 text-center text-body text-text-muted">
+        <p className="flex items-center gap-1.5">
+          <Warning size={16} />
+          この動画はアプリの中では再生できません（動画の形式が対応していないか、ファイルが読み込めません）。
+        </p>
+        <Button type="button" onClick={() => void openElsewhere()}>ほかのアプリで開く</Button>
+        {openError && <p role="alert" className="text-small text-danger-text">{openError}</p>}
+      </div>
+    )
+  }
+
+  return (
+    <div className="h-full flex items-center justify-center overflow-hidden bg-surface-sunken">
+      <video
+        key={src}
+        src={src}
+        controls
+        preload="metadata"
+        aria-label={name}
+        className="max-w-full max-h-full"
+        onError={() => setFailedSrc(src)}
+      />
+    </div>
   )
 }

@@ -17,6 +17,7 @@ import path from 'node:path'
 import { git, loadMain, writeFiles, type MainHarness } from './ipc-harness/main-harness.ts'
 import { writePrivateScopesCache } from '../electron/sync/private-folders'
 import { notDownloadedUserMessage } from '../shared/sparse-paths'
+import { localVideoUrl } from '../shared/video-files'
 
 let h: MainHarness
 let root: string
@@ -71,8 +72,10 @@ test('every path-taking fs handler refuses paths outside the allowed roots, with
     ['editor:backupBeforeOverwrite', t => [path.dirname(t), t], err],
     ['editor:backupBeforeOverwrite', t => [root, t], err],
     ['privateFolders:reservedPathRefusal', t => [t], null],
+    ['fs:openVideo', t => [t.replace(/\.txt$/, '.mp4')], err],
   ]
   for (const t of targets) {
+    fs.writeFileSync(t.replace(/\.txt$/, '.mp4'), 'video')
     for (const [channel, args, expected] of table) {
       assert.deepEqual(await h.invoke(channel, ...args(t)), expected, `${channel} ${path.relative(h.base, t)}`)
     }
@@ -81,7 +84,9 @@ test('every path-taking fs handler refuses paths outside the allowed roots, with
   // Nothing outside was touched, nothing was pulled in.
   assert.equal(fs.readFileSync(secret, 'utf-8'), 'outside')
   assert.equal(fs.readFileSync(path.join(`${root}-other`, 'x.txt'), 'utf-8'), 'sibling')
-  assert.deepEqual(fs.readdirSync(outside), ['secret.txt'])
+  assert.deepEqual(fs.readdirSync(outside).filter(n => !n.endsWith('.mp4')), ['secret.txt'])
+  assert.deepEqual(h.fake.openedPaths, [], 'no video outside was handed to another app')
+  for (const t of targets) fs.rmSync(t.replace(/\.txt$/, '.mp4'), { force: true })
   assert.equal(fs.existsSync(path.join(root, 'stolen.txt')), false)
   assert.equal(fs.readFileSync(inside, 'utf-8'), 'inside')
 })
@@ -431,6 +436,55 @@ test('local-file:// serves files inside the allowed roots only, never cached', a
   assert.equal(viaLink.status, 403)
   assert.equal(await viaLink.text(), 'Forbidden: path is outside allowed directories')
   fs.rmSync(path.join(root, 'served-out'))
+})
+
+test('acb-media:// streams only videos inside the allowed roots, by byte range, never cached; a link out or another type is refused', async () => {
+  await h.startApp()
+  assert.deepEqual(h.fake.privilegedSchemes.find(s => (s as { scheme: string }).scheme === 'acb-media'), { scheme: 'acb-media', privileges: { standard: true, secure: true, stream: true } })
+  const serve = h.fake.protocolHandlers.get('acb-media')!
+  const bytes = Buffer.from(Array.from({ length: 1000 }, (_, i) => i % 256))
+  writeFiles(root, { '動画/説明 #1.mov': bytes, '動画/メモ.txt': 'not a video', '動画/偽.mp4/x.txt': 'a folder' })
+  const url = (p: string, v = 3) => localVideoUrl(p, v)
+  const video = path.join(root, '動画', '説明 #1.mov')
+
+  const whole = await serve(new Request(url(video)))
+  assert.equal(whole.status, 200)
+  assert.equal(whole.headers.get('Accept-Ranges'), 'bytes')
+  assert.equal(whole.headers.get('Cache-Control'), 'no-store')
+  assert.deepEqual(Buffer.from(await whole.arrayBuffer()), bytes)
+  const part = await serve(new Request(url(video), { headers: { Range: 'bytes=900-' } }))
+  assert.equal(part.status, 206)
+  assert.equal(part.headers.get('Content-Range'), 'bytes 900-999/1000')
+  assert.deepEqual(Buffer.from(await part.arrayBuffer()), bytes.subarray(900))
+  const past = await serve(new Request(url(video), { headers: { Range: 'bytes=1000-' } }))
+  assert.equal(past.status, 416)
+  assert.equal(past.headers.get('Content-Range'), 'bytes */1000')
+
+  fs.symlinkSync(path.join(outside, 'secret.txt'), path.join(root, '動画', 'link-out.mp4'))
+  writeFiles(outside, { 'clip.mp4': 'outside video' })
+  for (const p of [
+    path.join(root, '動画', 'メモ.txt'), // not a video
+    path.join(outside, 'clip.mp4'), path.join(root, '..', 'outside', 'clip.mp4'), path.join(`${root}-other`, 'clip.mp4'),
+    path.join(root, '動画', 'link-out.mp4'), // inside by name, outside by its real location
+  ]) {
+    const res = await serve(new Request(url(p)))
+    assert.equal(res.status, 403, p)
+    assert.equal((await res.text()).includes('secret'), false)
+  }
+  assert.equal((await serve(new Request(`acb-media://video/${encodeURIComponent(root)}/x.mp4`))).status, 400, 'a path split by the URL parser is not read')
+  assert.equal((await serve(new Request(url(path.join(root, '動画', '偽.mp4'))))).status, 404, 'a folder named like a video')
+  fs.rmSync(path.join(root, '動画', 'link-out.mp4'))
+})
+
+test('fs:openVideo hands only a video file inside the company folder to another app: not another type, a folder, or a link', async () => {
+  writeFiles(root, { 'open/clip.MP4': 'v', 'open/run.command': '#!/bin/sh', 'open/app.mov/Contents/x': 'bundle' })
+  fs.symlinkSync(path.join(root, 'open', 'run.command'), path.join(root, 'open', 'linked.mov'))
+  h.fake.openedPaths.length = 0
+  assert.deepEqual(await h.invoke('fs:openVideo', path.join(root, 'open', 'clip.MP4')), { success: true })
+  for (const name of ['run.command', 'app.mov', 'linked.mov']) {
+    assert.equal((await h.invoke('fs:openVideo', path.join(root, 'open', name))).success, false, name)
+  }
+  assert.deepEqual(h.fake.openedPaths, [path.join(root, 'open', 'clip.MP4')])
 })
 
 test('fs:watch sends the watcher batches to the window as fs:changes; fs:unwatch stops them', async () => {

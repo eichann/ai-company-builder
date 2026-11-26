@@ -514,6 +514,11 @@ export interface IpcInvokeChannels {
   'fs:readFile': { args: [path: string]; result: string | null }
   'fs:readFileBinary': { args: [path: string]; result: ArrayBuffer | null }
   /**
+   * 「ほかのアプリで開く」 for a video the editor cannot play (files-and-editor.md "Videos"): a `.mp4` /
+   * `.mov` regular file inside the allowed roots, handed to the OS's own app; nothing else.
+   */
+  'fs:openVideo': { args: [path: string]; result: SimpleResult }
+  /**
    * The HTML viewer (doc-frame.md): a view of its own showing the document, on the document session,
    * with a grant for the document's folder; the renderer gets only the view's id. Main window only.
    */
@@ -1078,6 +1083,7 @@ export interface ElectronAPI {
   readDirectoryTree: (path: string, maxDepth?: number) => Promise<InvokeResult<'fs:readDirectoryTree'>>
   readFile: Invoke<'fs:readFile'>
   readFileBinary: Invoke<'fs:readFileBinary'>
+  openVideo: Invoke<'fs:openVideo'>
   openDocView: Invoke<'docView:open'>
   closeDocView: Invoke<'docView:close'>
   setDocViewBounds: Invoke<'docView:setBounds'>

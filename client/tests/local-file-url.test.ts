@@ -2,7 +2,8 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import path from 'node:path'
 import { localFilePathFromUrl, localFileUrl } from '../shared/local-file-url'
-import { localFileTarget } from '../electron/local-file-protocol'
+import { byteRange, localFileTarget, localVideoTarget } from '../electron/local-file-protocol'
+import { isVideoFileName, localVideoPathFromUrl, localVideoUrl } from '../shared/video-files'
 import { FileVersionStore } from '../src/shared/lib/fileVersions'
 
 const ROOT = path.resolve('/Users/me/Documents/AI Company Builder/abe-shoten')
@@ -60,4 +61,39 @@ test('file versions: bumped per path on every event; a removed folder bumps what
   assert.equal(store.get(img), 4)
   assert.equal(store.get(`${ROOT}/部署2/x.png`), 0)
   assert.equal(notified, 4)
+})
+
+test('acb-media:// URLs: the whole path is one segment, so no name (%, ?, #, .., a space, Japanese) changes what is read', () => {
+  for (const name of ['説明 1.mov', '50%off.mp4', 'what?.mp4', 'no#1.MOV', '..%2F..%2Fx.mp4']) {
+    const p = `${ROOT}/動画/${name}`
+    assert.equal(localVideoPathFromUrl(localVideoUrl(p, 4)), p, name)
+    // What Chromium hands the handler for a standard scheme: the URL as parsed.
+    assert.equal(localVideoPathFromUrl(new URL(localVideoUrl(p, 4)).href), p, name)
+  }
+  assert.equal(localVideoUrl(`${ROOT}/a.mp4`, 0).includes('?'), false)
+  assert.equal(localVideoPathFromUrl('acb-media://video/a/b.mp4'), null)
+  assert.equal(localVideoPathFromUrl('acb-media://other/%2Fa.mp4'), null)
+  assert.equal(localVideoPathFromUrl('local-file:///a.mp4'), null)
+})
+
+test('acb-media:// reads videos inside the roots only, never another type', () => {
+  assert.deepEqual(localVideoTarget(localVideoUrl(`${ROOT}/動画/a.mov`), [ROOT]), { ok: true, path: `${ROOT}/動画/a.mov` })
+  assert.deepEqual(localVideoTarget(localVideoUrl(`${ROOT}/../other/a.mp4`), [ROOT]), { ok: false, status: 403 })
+  assert.deepEqual(localVideoTarget(localVideoUrl(`${ROOT}/.env`), [ROOT]), { ok: false, status: 403 })
+  assert.deepEqual(localVideoTarget(localVideoUrl(`${ROOT}/memo.mp4.txt`), [ROOT]), { ok: false, status: 403 })
+  assert.equal(isVideoFileName('.mp4'), false)
+  assert.equal(isVideoFileName('a.MOV'), true)
+})
+
+test('a byte range: one range, clipped to the file; several ranges or other units read the whole file; past the end is 416', () => {
+  assert.deepEqual(byteRange(null, 100), { kind: 'full' })
+  assert.deepEqual(byteRange('bytes=0-', 100), { kind: 'part', start: 0, end: 99 })
+  assert.deepEqual(byteRange('bytes=10-19', 100), { kind: 'part', start: 10, end: 19 })
+  assert.deepEqual(byteRange('bytes=90-500', 100), { kind: 'part', start: 90, end: 99 })
+  assert.deepEqual(byteRange('bytes=-30', 100), { kind: 'part', start: 70, end: 99 })
+  assert.deepEqual(byteRange('bytes=-300', 100), { kind: 'part', start: 0, end: 99 })
+  assert.deepEqual(byteRange('bytes=100-', 100), { kind: 'unsatisfiable' })
+  assert.deepEqual(byteRange('bytes=-0', 100), { kind: 'unsatisfiable' })
+  assert.deepEqual(byteRange('bytes=0-', 0), { kind: 'unsatisfiable' })
+  for (const other of ['bytes=0-1,5-9', 'items=0-1', 'bytes=-', 'bytes=20-10', 'bytes=x-1']) assert.deepEqual(byteRange(other, 100), { kind: 'full' }, other)
 })

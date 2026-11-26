@@ -3,7 +3,7 @@
 // writes are refused inside a folder not downloaded on this computer, at a
 // folder name the member may not use (a private folder they cannot read) and
 // on a skill file they may not change, and a new file, rename, move or copy never replaces what is already there.
-//   dialog:selectDirectory, fs:* (fs:startDrag is a send), fs:watch /
+//   dialog:selectDirectory, fs:* (fs:startDrag is a send; fs:openVideo hands a video to the OS's app), fs:watch /
 //   fs:unwatch (sends fs:changes), editor:backupBeforeOverwrite
 
 import fs from 'fs'
@@ -16,10 +16,11 @@ import type { DesktopShell, PathGuard, WindowPort } from '../ports'
 import { NAME_TAKEN_MESSAGE } from '../../../shared/file-names'
 import { isAtomicSaveRename, nameTaken, notDownloadedRefusal } from '../../file-guards'
 import { createCompanyWatchers } from './watchers'
+import { isVideoFileName } from '../../../shared/video-files'
 
 export interface FsDeps {
   paths: PathGuard
-  shell: Pick<DesktopShell, 'selectDirectory' | 'startDrag'>
+  shell: Pick<DesktopShell, 'selectDirectory' | 'startDrag' | 'openPath'>
   window: WindowPort
   /**
    * The sentence when changing `absPath` is refused: a folder name the member
@@ -128,6 +129,20 @@ export function registerFsIpc(ipc: IpcRegistrar, deps: FsDeps): FsFeature {
       return buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength)
     } catch {
       return null
+    }
+  })
+
+  // A video the editor cannot play, opened in the OS's app for it. openPath launches whatever it
+  // is given (an .app, a script): only a .mp4 / .mov name, a regular file and no link.
+  ipc.handle('fs:openVideo', async (_, filePath: string) => {
+    try {
+      const safePath = paths.validate(filePath)
+      if (!isVideoFileName(path.basename(safePath))) return { success: false, error: 'Not a video' }
+      if (!(await fs.promises.lstat(safePath)).isFile()) return { success: false, error: 'Not a video' }
+      const problem = await shell.openPath(safePath)
+      return problem ? { success: false, error: problem } : { success: true }
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' }
     }
   })
 

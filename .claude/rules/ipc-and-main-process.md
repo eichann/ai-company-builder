@@ -31,7 +31,7 @@ Full text: `docs/architecture/main-process-and-ipc.md` (internal).
   (`features/ports.ts`), services, stores. Domains: `settings` (config:*, codex:status, claudeSignIn:* — `chat-and-agents.md` "Signing in to Claude Code"), `env`,
   `backups`, `auth` (auth:*, api:*), `chat-history` (chatHistory:*, handoff:*),
   `agent-interactions` (tool approvals), `fs` (fs:*, dialog:selectDirectory,
-  editor:backupBeforeOverwrite; company watchers in `fs/watchers.ts`), `git-history`
+  editor:backupBeforeOverwrite; fs:openVideo hands a `.mp4` / `.mov` file to the OS's app, `files-and-editor.md` "Videos"; company watchers in `fs/watchers.ts`), `git-history`
   (git:preview, diffs, revert, summary, log of a folder or a file, listFiles, grep, getBinaryStatus),
   `sync` (git:sync, git:autoSync, writeAccess:get), `private-folders` (privateFolders:*; `guards.ts`),
   `company-setup` (git:inspectCompanyFolder, git:setupCompanyRemote), `broker` (brokerKeys:*,
@@ -158,7 +158,7 @@ Full text: `docs/architecture/main-process-and-ipc.md` (internal).
 - `electron/electron-adapter.ts` — Electron's implementations of the ports (`DesktopShell`,
   `WindowPort`, `SecretBox` (safeStorage), sync's message boxes), the windows (`createAppPages`:
   the page and web preferences; `createMainWindowHost`: the main window with its close guard;
-  `createChatWindowHost`), the `local-file://` protocol registration, `acb-plugin://` (a
+  `createChatWindowHost`), the `local-file://` and `acb-media://` (videos, `files-and-editor.md` "Videos") protocols, `acb-plugin://` (a
   plugin's screen: `servePluginFiles`, frame navigation; `plugin-frame.md`) and the `acb-doc://` scheme's
   privileges (served only on the document session by `doc-view.ts`, never on the app's session;
   `doc-frame.md`).

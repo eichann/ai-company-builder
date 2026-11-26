@@ -36,6 +36,10 @@ paths:
   - "client/shared/skills-refresh.ts"
   - "client/shared/editor-disk-state.ts"
   - "client/shared/local-file-url.ts"
+  - "client/shared/video-files.ts"
+  - "client/shared/large-file-limit.ts"
+  - "client/tests/video-electron*"
+  - "client/tests/fixtures/video/**"
   - "client/tests/company-watcher.test.ts"
   - "client/tests/git-search.test.ts"
   - "client/tests/editor-*"
@@ -89,7 +93,7 @@ freeze the window on a 15k-file company. Measurements and the dropped chokidar d
   `useTreeSelection.ts` (⌘ / shift selection, the right-click menu's snapshot),
   `useFileOperations.ts` (new / rename / delete / copy path, their dialogs, the reserved-name and
   private-root refusals), `useTreeDragDrop.ts` (moves, the private-edge confirm, Finder drops:
-  allowed types, 20 MB, a free name), `contextMenuItems.tsx`, `components/FileTreeHeader.tsx`.
+  allowed types, 20 MB — a video 100 MB —, a free name), `contextMenuItems.tsx`, `components/FileTreeHeader.tsx`.
   **Drops**: a drop on a folder row goes into that folder, on a file row into that file's folder
   (owner, 2026-11-26: an `.html` dropped on a file did nothing), on empty space into the
   department; a row dropped where it already is moves nothing (it used to become 「name (1)」).
@@ -97,7 +101,12 @@ freeze the window on a 15k-file company. Measurements and the dropped chokidar d
   names) and main's not-downloaded refusal. Finder's allowed types are the one list
   `ALLOWED_DROP_EXTENSIONS` (main's `fs:moveFromExternal` checks only the destination), HTML
   included since the sandboxed viewer (`doc-frame.md`); a refused file is named in the panel's
-  warning (`role="alert"`, 「<name>: 非対応の形式」), and a newer warning keeps its full time. The menu's
+  warning (`role="alert"`, 「<name>: 非対応の形式」), and a newer warning keeps its full time.
+  **Size** (owner, 2026-11-26): 20 MB, except a video (`.mp4` / `.mov`, `client/shared/video-files.ts`), which may be
+  as large as sync still shares — `LARGE_FILE_THRESHOLD` (100 MB, `client/shared/large-file-limit.ts`, the one
+  value sync's step 4 uses) — and is refused over it (「<name>: 100MBを超える動画はほかの人と共有できないため、入れられません」):
+  nothing the drop takes in is then silently kept on this computer only. A video copied in another way (Finder,
+  the AI) still meets sync's rule and 「共有されていません」 below. The menu's
   「やることにつなぐ…」 is the core's (owner decision 2026-11-01: the task list is the core's, so
   linking is too): it shows only when the panel gets `onLinkToTask` — `AppShell` passes it while
   the task list shows for the department on screen — and opens the task feature's chooser
@@ -149,8 +158,8 @@ freeze the window on a 15k-file company. Measurements and the dropped chokidar d
 - UI test: `client/tests/ui/file-tree.spec.ts` on the preview `client/tests/file-tree-ui.html`
   (selection and ⌘/shift ranges, new file / rename / delete and their dialogs, the reserved-name
   and private-root refusals, internal moves and the private-edge confirm, Finder drops: free
-  name, HTML accepted, type and 20 MB refusals, a drop on a file row landing in its folder, the
-  warning's timer; hidden sidecars and the review mark).
+  name, HTML accepted, type and 20 MB refusals, a video up to 100 MB accepted and one byte over refused,
+  a drop on a file row landing in its folder, the warning's timer; hidden sidecars and the review mark).
 
 ## Previews never show a stale file
 
@@ -161,11 +170,41 @@ freeze the window on a 15k-file company. Measurements and the dropped chokidar d
 `Cache-Control: no-store`. An open file that is deleted shows a notice; one replaced reloads.
 
 `local-file://` reads anything in the company folders, so it is for images and PDFs shown by the
-app's own page only. An HTML document never loads through it: it is shown in a view of its own
+app's own page only. Videos have a scheme of their own ("Videos" below). An HTML document never loads through it: it is shown in a view of its own
 on the document session from `acb-doc://`, which serves only that document's own folder under a
 CSP with no network (`doc-frame.md`). A change of the document or of a file it can load (a served
 type in its folder or below: `htmlViewer.ts` `changeShowsIn`) reloads its view, keeping the scroll
 position and zoom; data files and other folders do not.
+
+## Videos (`.mp4`, `.mov`; owner, 2026-11-26)
+
+- **Shown in the editor** with the browser's own player (`BinaryPreviews.tsx` `VideoPreview`: `<video controls
+  preload="metadata">`, **never autoplay**), from `acb-media://video/<the whole path, one encoded segment>?v=<n>`
+  (`client/shared/video-files.ts` `localVideoUrl`; the version as for images). Never loaded as text, never read
+  whole over IPC (`isBinaryFile`).
+- **Why a scheme of its own** (measured on Electron 45): Chromium's media player seeks — asks for a byte range,
+  needed for a 100 MB file and for a `.mov` whose index (`moov`) is at its end, as cameras write it — only on a
+  **standard** scheme; on `local-file://` (not standard, no host) the second range was dropped at once
+  (「data source error」), and `net.fetch` of a `file://` URL answers a range 200 without `Content-Range`. So
+  `acb-media` is registered `standard`, `secure`, `stream` (no fetch, CORS or CSP bypass) on the app's session
+  only (not the document session), and its handler (`electron-adapter.ts` `serveLocalFiles`) serves **only a
+  `.mp4` / `.mov` name inside the allowed roots by name** (`localVideoTarget`, `local-file-protocol.ts`), **then by
+  real location** (`AllowedRoots.validate`: a link out of the company folder is refused), a regular file, streamed
+  from disk: 200 whole, 206 one range, 416 past the end, `Cache-Control: no-store` (`videoFileResponse`,
+  `byteRange`). A not-downloaded folder has no file to serve; a private folder's video is on disk only for its
+  readers. The app page's CSP has `media-src 'self' acb-media:` (`index.html`); a plugin frame's and a document's
+  CSP have no media source.
+- **Codecs** (Electron 45 on a Mac, measured): H.264, HEVC (`hvc1`, through macOS), VP9 and AV1 play, in `.mp4`
+  and `.mov` alike; **ProRes does not** (`MEDIA_ERR_SRC_NOT_SUPPORTED`). A video the player cannot read shows
+  「この動画はアプリの中では再生できません（…）」 with ［ほかのアプリで開く］: `fs:openVideo` (port `VideoOutbound`,
+  `features/editor/api.ts`) hands it to the OS's app — only a `.mp4` / `.mov` name, inside the allowed roots,
+  `lstat` a regular file (no link, no folder or app bundle named `x.mov`): `openPath` launches whatever it is given.
+- Tests: `tests/video-electron.test.ts` (real Electron, the real registration and handler under `index.html`'s CSP:
+  a `.mov` with its index 3 MB past its start gets its length and seeks, VP9 plays, ProRes fails with code 4, a
+  video outside or through a link out never plays; each of `standard`, the range answer, `media-src` and the
+  real-location check mutation-checked), `ipc-fs.test.ts` (privileges; whole / range / 416; another type, outside,
+  a link out, a folder; `fs:openVideo`'s refusals), `local-file-url.test.ts` (`byteRange`, the URL's one segment),
+  `tests/ui/editor-panel.spec.ts` 「a video opens in a player…」 (controls, not playing, ProRes → ［ほかのアプリで開く］).
 
 ## Skills list freshness (`client/shared/skills-refresh.ts`)
 
@@ -252,7 +291,7 @@ the result, disable their buttons meanwhile and show the reason (`role="alert"`)
   `description` shown in a small quiet box above it — `markdownFrontmatter.ts`, owner 2026-11-23: a
   SKILL.md's block read as a bold underlined heading; the source view is unchanged;
   test `markdownFrontmatter.test.ts`), `MarkdownPreviewPane` (preview + review UI), `BinaryPreviews`
-  (image, PDF), `HtmlDocumentPane` (an `.html` / `.htm` file's 見る: its document in a view of its
+  (image, PDF, video: "Videos"), `HtmlDocumentPane` (an `.html` / `.htm` file's 見る: its document in a view of its
   own, `doc-frame.md` "The viewer (A2)"; 中身 is the code editor under the same ［見る｜中身］
   (`HtmlViewToggle`; back to 見る where the member was reading), ⌘⇧V switches, 見る by default and
   per tab for the app's run; the band of blocked internet parts `BlockedPartsBand` and the chat's
