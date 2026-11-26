@@ -1,7 +1,9 @@
 /** Reversing an earlier ledger entry with a new one (records.md "The state engine"). */
 import { undoableByAssignee } from '../../../shared/core/core-types'
 import { FULL_ACCESS_ROLES } from '../../../shared/core/permissions'
-import { replayRecordState, type LedgerEntry, type LedgerValue } from '../../../shared/core/record-ledger'
+import { RECORD_TITLE_CHANGE, replayRecordState, type LedgerEntry, type LedgerValue } from '../../../shared/core/record-ledger'
+import { normalizeRecordTitle } from '../../../shared/core/record-types'
+import { writeTitle } from './act'
 import { isOwnOnlyLinkTarget, RECORD_ID_RE } from '../../../shared/core/records'
 import type { RecordSummary } from '../../../shared/types/records'
 import type { RecordLinkRow } from '../../ports/records'
@@ -77,6 +79,8 @@ export function undoing(ctx: EngineContext) {
       }
       const valueOf = (field: string): LedgerValue | undefined => {
         if (field === 'state') return now.state
+        // The record's own title (「件名を直す」): compared with the record as it is now.
+        if (field === RECORD_TITLE_CHANGE) return row.title
         if (!field.startsWith('links.')) return now.fields[field] ?? null
         const l = linkOf(field)
         return l ? linkLedgerValue(l.target, currentLinks.filter(x => x.name === l.name)) : undefined
@@ -88,8 +92,15 @@ export function undoing(ctx: EngineContext) {
       const nextFields = Object.fromEntries(Object.entries(now.fields).filter(([k]) => !isPlaceOrLinkChange(k)))
       let nextState = now.state
       let nextLinks: RecordLinkRow[] | null = null
+      let nextTitle: string | null = null
       for (const c of changes) {
         if (c.field === 'state') nextState = typeof c.after === 'string' ? c.after : null
+        else if (c.field === RECORD_TITLE_CHANGE) {
+          // A title brought back keeps today's rule (a title erased since, or none, is not written back).
+          const t = normalizeRecordTitle(c.after)
+          if ('error' in t || row.path !== null) return conflict('そのあとにも変更があるため、この変更だけを取り消せません', 'CHANGED_SINCE')
+          nextTitle = t.title
+        }
         else if (c.field.startsWith('links.')) {
           const l = linkOf(c.field) as { name: string; target: string }
           const targets = linkTargetsOf(l.target, c.after)
@@ -121,6 +132,7 @@ export function undoing(ctx: EngineContext) {
       const written = transactions.run(() => {
         if (!records.writeState({ recordId: row.id, state: nextState, fields: JSON.stringify(nextFields), version: entry.version, updatedAt: at }, latest)) return false
         if (nextLinks) records.replaceLinks(row.id, nextLinks)
+        if (nextTitle !== null) writeTitle(records, row.id, nextTitle, at)
         records.appendLedger(entry)
         return true
       })

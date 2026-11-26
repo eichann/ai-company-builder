@@ -191,3 +191,24 @@ export function doneWords(a: TaskCardAction, card: TaskCardData): string {
     default: return `${a.title}：しました`
   }
 }
+
+/** 「件名・目的を直す」's presses: one action per value that changed (task version 16). */
+export type TextEditSteps = Array<{ action: 'retitle'; args: { title: string } } | { action: 'set_purpose'; args: { purpose: string } }>
+
+/**
+ * What 「件名・目的を直す」 sends: `retitle` when the title changed (compared trimmed — the server keeps the
+ * trimmed title), `set_purpose` when 目的 changed (an emptied one clears it), each only where the member may.
+ */
+export function editSteps(now: { title: string; purpose: string | null }, draft: { title: string; purpose: string }, may: { title: boolean; purpose: boolean }): TextEditSteps {
+  const steps: TextEditSteps = []
+  const title = draft.title.trim()
+  if (may.title && title !== now.title.trim()) steps.push({ action: 'retitle', args: { title } })
+  const purpose = draft.purpose.trim()
+  if (may.purpose && purpose !== (now.purpose ?? '').trim()) steps.push({ action: 'set_purpose', args: { purpose } })
+  return steps
+}
+
+/** What the card says after 「件名・目的を直す」 saved. */
+export function editDoneWords(steps: TextEditSteps): string {
+  return `${steps.map(s => (s.action === 'retitle' ? '件名' : '目的')).join('と')}を直しました`
+}

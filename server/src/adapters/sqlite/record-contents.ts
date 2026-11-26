@@ -20,7 +20,7 @@ import type Database from 'better-sqlite3'
 import {
   contentExpiry, contentFieldNames, contentRef, erasedText, parseContentRef, retentionClassOf, type RetentionClass,
 } from '../../../shared/core/record-contents'
-import type { LedgerChange, LedgerDecision, LedgerEntry, LedgerValue } from '../../../shared/core/record-ledger'
+import { RECORD_TITLE_CHANGE, type LedgerChange, type LedgerDecision, type LedgerEntry, type LedgerValue } from '../../../shared/core/record-ledger'
 import { hashCanonical } from '../../lib/content-hash'
 import type { RecordContentEraser, RecordContentInfo } from '../../ports/record-contents'
 
@@ -34,6 +34,9 @@ interface PendingContent {
   text: string
   retention: RetentionClass
 }
+
+/** A ledger change whose before / after are content: a content field's, or the record's own title (`record.title`). */
+const isContentChange = (names: ReadonlySet<string>, field: string): boolean => names.has(field) || field === RECORD_TITLE_CHANGE
 
 /** sha256(record id, hash) → 32 hex: the same text of one record is one row. */
 function contentId(recordId: string, hash: string): string {
@@ -138,7 +141,7 @@ export function sqliteContentStore(conn: Database.Database, companyId: string) {
     /** A ledger entry with its note, decision reason and content field values as references. */
     storeEntry(b: ReturnType<typeof batch>, type: string | null, e: LedgerEntry): LedgerEntry {
       const names = type === null ? new Set<string>() : fieldsOfType(type)
-      const changes: LedgerChange[] = e.changes.map(c => names.has(c.field) ? { field: c.field, before: b.value(c.before), after: b.value(c.after) } : c)
+      const changes: LedgerChange[] = e.changes.map(c => isContentChange(names, c.field) ? { field: c.field, before: b.value(c.before), after: b.value(c.after) } : c)
       const decision: LedgerDecision | null = e.decision ? { ...e.decision, reason: b.put(e.decision.reason) } : null
       return { ...e, note: b.put(e.note), changes, decision }
     },
@@ -149,14 +152,14 @@ export function sqliteContentStore(conn: Database.Database, companyId: string) {
       const values: Array<{ recordId: string; value: unknown }> = []
       for (const e of entries) {
         values.push({ recordId, value: e.note }, { recordId, value: e.decision?.reason })
-        for (const c of e.changes) if (names.has(c.field)) values.push({ recordId, value: c.before }, { recordId, value: c.after })
+        for (const c of e.changes) if (isContentChange(names, c.field)) values.push({ recordId, value: c.before }, { recordId, value: c.after })
       }
       const resolve = resolver(values)
       return entries.map(e => ({
         ...e,
         note: resolve(recordId, e.note),
         decision: e.decision ? { ...e.decision, reason: resolve(recordId, e.decision.reason) } : null,
-        changes: e.changes.map(c => names.has(c.field) ? { field: c.field, before: resolve(recordId, c.before), after: resolve(recordId, c.after) } : c),
+        changes: e.changes.map(c => isContentChange(names, c.field) ? { field: c.field, before: resolve(recordId, c.before), after: resolve(recordId, c.after) } : c),
       }))
     },
 
@@ -241,7 +244,7 @@ export function migrateCompanyContents(conn: Database.Database, companyId: strin
       const note = toRef(b, e.record_id, e.note) as string
       let changes: LedgerChange[] = []
       try { changes = JSON.parse(e.changes) as LedgerChange[] } catch { changes = [] }
-      changes = changes.map(c => names.has(c.field) ? { field: c.field, before: toRef(b, e.record_id, c.before), after: toRef(b, e.record_id, c.after) } : c)
+      changes = changes.map(c => isContentChange(names, c.field) ? { field: c.field, before: toRef(b, e.record_id, c.before), after: toRef(b, e.record_id, c.after) } : c)
       let decision: LedgerDecision | null = null
       try { decision = e.decision ? JSON.parse(e.decision) as LedgerDecision : null } catch { decision = null }
       if (decision) decision = { ...decision, reason: toRef(b, e.record_id, decision.reason) as string }

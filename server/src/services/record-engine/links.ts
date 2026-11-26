@@ -4,7 +4,7 @@
  * and a record's link rows with one link replaced.
  */
 import { INTERFACES, type LinkDef } from '../../../shared/core/record-types'
-import type { LedgerValue } from '../../../shared/core/record-ledger'
+import { RECORD_TITLE_CHANGE, type LedgerValue } from '../../../shared/core/record-ledger'
 import { RECORD_ID_RE } from '../../../shared/core/records'
 import type { RecordAccessRow, RecordLinkRow, RecordRepository } from '../../ports/records'
 import { currentTypes } from '../record-index'
@@ -37,10 +37,11 @@ export const MAX_LINK_TARGETS = 50
 /**
  * Ledger changes that describe the record's place and links, not a server
  * field: `links.<name>` (restored to the link rows) and `place.<what>` (an
- * owner-only record shared to a folder; never undone). A replay shows them;
+ * owner-only record shared to a folder; never undone) and `record.title` (the
+ * record's own title, restored to the record row). A replay shows them;
  * they never land in the server fields.
  */
-export const isPlaceOrLinkChange = (field: string) => field.startsWith('links.') || field.startsWith('place.')
+export const isPlaceOrLinkChange = (field: string) => field.startsWith('links.') || field.startsWith('place.') || field === RECORD_TITLE_CHANGE
 
 /**
  * A link's targets as one ledger value (`links.<name>` before / after):

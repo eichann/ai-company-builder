@@ -25,7 +25,7 @@
 import { z, type ZodTypeAny } from 'zod'
 import { argDefaultOf, SERVICE_OWNED_TYPES, SERVICE_STATE_TYPES } from '../../../shared/core/core-types'
 import { DEFAULT_FEATURES, featuresFrom, toolAllowed, typeIsViewOnly, type CompanyFeatures } from '../../../shared/core/features'
-import { DATE_VALUE_RE, isSystemOnly, TAG_MAX_LENGTH, TAGS_MAX_COUNT, type FieldKind, type TypeDefinition } from '../../../shared/core/record-types'
+import { DATE_VALUE_RE, isSystemOnly, RECORD_TITLE_ARG, RECORD_TITLE_MAX, setsRecordTitle, TAG_MAX_LENGTH, TAGS_MAX_COUNT, type FieldKind, type TypeDefinition } from '../../../shared/core/record-types'
 import { CALL_CURSOR_RE } from '../../../shared/core/plugin-call-answer'
 import type { PluginAiOperation, PluginAiTools } from '../../../shared/types/plugins'
 import { OLD_CONNECTION_LABEL, type RecordDetail } from '../../../shared/types/records'
@@ -579,7 +579,10 @@ export function actionToolSpecs(types: TypeDefinition[], place: { department?: s
         const byDefault = argDefaultOf(t.name, name, arg)
         shape[arg] = byDefault
           ? kindSchema(kind, t.fields[arg]?.options).optional().describe(`${t.fields[arg]?.label ?? arg}：いつごろ来そうか。相手の言葉（「金曜までに」「来週」）や中身から考えて必ず入れる。省くと ${byDefault.businessDays} 営業日後になる。日付（YYYY-MM-DD）か日時（YYYY-MM-DDTHH:MM） / when it is expected: always give it (from what they said or the matter); left out = ${byDefault.businessDays} business days later`)
-          : kindSchema(kind, t.fields[arg]?.options)
+          // The record's own title (task version 16 「件名を直す」): the one title rule, one line.
+          : arg === RECORD_TITLE_ARG && setsRecordTitle(t, a)
+            ? z.string().min(1).max(RECORD_TITLE_MAX).describe(`新しい件名（1行・${RECORD_TITLE_MAX}文字まで。改行は入れない） / the new title: one line, up to ${RECORD_TITLE_MAX} characters`)
+            : kindSchema(kind, t.fields[arg]?.options)
       }
       // Record links the action sets (task: set_bundle → bundle, finish_prep → prepared). Left out = unchanged.
       const links = a.links ?? []
@@ -592,8 +595,9 @@ export function actionToolSpecs(types: TypeDefinition[], place: { department?: s
       const from = a.from ? a.from.map(shownState).join(' / ') : 'どの状態からでも'
       // `ai_on_request` in a turn the member started (records.md "The AI at the member's request"): only when they asked.
       const asked = place.askedTurn === true && (a.aiOnRequest?.length ?? 0) > 0 && !a.who.includes('ai')
+      const askedWhose = (a.aiOnRequest ?? []).map(f => t.fields[f]?.label ?? f).join('か')
       const aiNote = a.who.includes('ai') ? '' : asked
-        ? ' メンバー本人が担当の記録で、メンバーがこの会話ではっきり頼んだときだけ使える（自分の判断では使わない）。断られたら error の文をそのまま伝える。' +
+        ? ` メンバー本人が${askedWhose}の記録で、メンバーがこの会話ではっきり頼んだときだけ使える（自分の判断では使わない）。断られたら error の文をそのまま伝える。` +
           ' Only on the member\'s own record and only when they explicitly asked in this conversation; relay a refusal\'s error sentence exactly.'
         : ' この操作は AI からはできない（本人が画面で行う）。This action is not open to the AI: ask the member to do it.' +
         // ok_from (task complete): the person may do it on someone's OK; the AI only suggests it.

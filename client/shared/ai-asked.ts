@@ -69,18 +69,21 @@ export function aiAskedUndoStaleText(stateNow: string | null): string {
   return `取り消せませんでした。もう取り消したか、このあと別の変更がありました。${stateNow ? `（いまは「${stateNow}」です）` : ''}`
 }
 
-/** The card's heading. */
-export const aiAskedHeading = (n: number) => `AI が頼まれて片づけました（${n}件）`
+/** The card's heading: closes and corrections (task version 16: 件名・目的を直す) land on the same card. */
+export const aiAskedHeading = (n: number) => `AI が頼まれてしたこと（${n}件）`
 
 /**
  * What the AI is told about these tools in a turn the member started (appended to the record tools'
  * instructions). The refusal sentences themselves are the server's (`AI_ASKED_REFUSALS`).
  */
-export const AI_ASKED_INSTRUCTIONS = '\n\n【メンバーに頼まれたときだけ完了にできる操作】このやりとりはメンバー本人が始めたものなので、' +
+export const AI_ASKED_INSTRUCTIONS = '\n\n【メンバーに頼まれたときだけ使える操作】このやりとりはメンバー本人が始めたものなので、' +
   '担当がメンバー本人の「やること」の「完了にする」（task__complete）と、「返事のお願い」の「終わりにする」（reply_request__close）・' +
   '「もう返した」（reply_request__replied_elsewhere）を、メンバーがこの会話ではっきり頼んだときだけ使ってよい。' +
+  '担当か頼んだ人がメンバー本人の「やること」の件名・目的を直す（task__retitle・task__set_purpose）のも同じで、頼まれたときだけ。' +
+  '件名・目的が古いと気づいたら、直してよいかを先に聞く。' +
   '頼まれていないのに自分の判断で使わない。どれを片づけるか迷うときは、先に一覧を見せて確かめる。' +
-  `1回のやりとりで ${AI_ASKED_PER_TURN} 件まで。断られたら、返ってきた error の文をそのまま伝える（設定がオフのときは、設定でオンにできることがその文に書いてある）。` +
-  '片づけたものは画面に取り消しボタン付きの一覧で出るので、返事ではその件数と「取り消すときはその一覧から」とだけ短く伝える。' +
-  '\nOnly when the member explicitly asked in this conversation: complete their own やること / end their own 返事のお願い with those tools; never on your own judgement. ' +
+  `1回のやりとりで ${AI_ASKED_PER_TURN} 件まで。断られたら、返ってきた error の文をそのまま伝える（完了にする・終わりにする・もう返した は本人の設定がオフだと断られ、オンにできることがその文に書いてある）。` +
+  'したことは画面に取り消しボタン付きの一覧で出るので、返事ではその件数と「取り消すときはその一覧から」とだけ短く伝える。' +
+  '\nOnly when the member explicitly asked in this conversation: complete their own やること / end their own 返事のお願い with those tools, ' +
+  'or correct the title / purpose of a やること they are assigned to or asked for (task__retitle, task__set_purpose); never on your own judgement. ' +
   `At most ${AI_ASKED_PER_TURN} per turn. On a refusal, relay its error sentence exactly.`

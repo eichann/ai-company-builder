@@ -120,6 +120,11 @@ export interface TaskCardData {
   actions: TaskCardAction[]
   /** The member may set its tags (タグを付ける: requester or assignee, not finished); tag suggestions add through it. */
   canSetTags: boolean
+  /**
+   * 「件名・目的を直す」 in place (task version 16: `retitle`, `set_purpose`): what the member may correct now — the
+   * requester or the assignee of an open task. Both false on an older server's type (no such actions).
+   */
+  canEdit: { title: boolean; purpose: boolean }
   /** 「佐藤さんが田中さんの了承を得たとして完了にしました」 while the task stands on that OK. */
   okLine: string | null
   /** What the AI checked and made (its preparation). */
@@ -163,6 +168,8 @@ export type TaskCardResult =
 
 /** Actions that are the AI's own or need a chooser the card does not have. */
 const NOT_ON_CARD = new Set(['finish_prep', 'hand_over', 'set_bundle', 'set_tags', 'set_wait_until',
+  // 「件名・目的を直す」 edits the title and 目的 in place (`canEdit`), not from 「…」.
+  'retitle', 'set_purpose',
   // 「別のもの」 answers 「似ている案があります」 on the meeting's list of proposals (MinutesReview), not here.
   'keep_apart'])
 const FIELDS_SHOWN_ELSEWHERE = new Set(['title', 'due', 'tags', 'prep_summary', 'ok_by', 'ok_note', 'accepted_by', 'purpose', 'similar_to', 'apart_by'])
@@ -265,6 +272,12 @@ export function taskCardOf(src: TaskCardSources): TaskCardData {
 
   const setTags = def?.actions.set_tags
   const canSetTags = !!setTags && personMay(setTags.who) && !(def?.final ?? []).includes(r.state ?? '')
+  // An action of the type the member may run on screen now: its `from` holds the state and a person field names them.
+  const mayRun = (name: string) => {
+    const a = def && Object.prototype.hasOwnProperty.call(def.actions, name) ? def.actions[name] : undefined
+    return !!a && (!a.from || (r.state !== null && a.from.includes(r.state))) && personMay(actionWho(a, r.fields))
+  }
+  const canEdit = { title: mayRun('retitle'), purpose: mayRun('set_purpose') }
 
   const okBy = str(r.fields.ok_by)
   const okNote = str(r.fields.ok_note)
@@ -345,7 +358,7 @@ export function taskCardOf(src: TaskCardSources): TaskCardData {
     review: r.fields.task_kind === 'minutes_review' && src.meeting ? reviewOf(src.meeting, me, people) : null,
     teamMode: src.teamMode === true,
     roles, names, reviewerId: str(r.fields.reviewer), assigneeId: str(r.fields.assignee), self: { id: me, name: people[me] ?? null }, whenDone, bundle, origin, fromIncoming,
-    canSetBundle: !!def?.links.bundle && !def.links.bundle.origin && !(def.final ?? []).includes(r.state ?? ''), actions, canSetTags, okLine,
+    canSetBundle: !!def?.links.bundle && !def.links.bundle.origin && !(def.final ?? []).includes(r.state ?? ''), actions, canSetTags, canEdit, okLine,
     prepSummary: str(r.fields.prep_summary),
     prepared, files, localFiles, driveFiles, links, history, runs,
     people: Object.entries(people).filter(([id]) => id !== me).map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name, 'ja')),

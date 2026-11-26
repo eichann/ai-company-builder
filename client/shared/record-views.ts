@@ -6,7 +6,7 @@ import type { LinkedDriveFile } from './drive-links'
 import type { TypeDefinition } from '../../shared/core/record-types'
 import { parseTagsValue } from '../../shared/core/record-types'
 import { BUNDLE_PART_ENDED_ACTION, OUTSIDE_TIME_ACTION, WAIT_OVER_ACTION } from '../../shared/core/core-types'
-import type { LedgerEntry } from '../../shared/core/record-ledger'
+import { RECORD_TITLE_CHANGE, type LedgerEntry } from '../../shared/core/record-ledger'
 import { fileLinkPath } from '../../shared/core/records'
 import type { RecordFieldValue, RecordFindHit, RecordFindHub, RecordSummary } from '../../shared/types/records'
 import type { RecordDetailView } from './record-details'
@@ -311,16 +311,23 @@ export function historyEntries(entries: readonly LedgerEntry[], def: TypeDefinit
   return entries.filter(e => !labelOnlyEntry(e, def)).sort((a, b) => b.version - a.version)
 }
 
+/** 経緯's words for a change of the record's own title (task version 16), before 「（前）→（後）」. */
+export const RETITLED_WORDS = '件名を直しました'
+
 /** One line of 経緯 per ledger entry shown (`historyEntries`), newest first. */
 export function historyLines(entries: LedgerEntry[], def: TypeDefinition | undefined, people: Record<string, string>): RecordCardHistoryLine[] {
   return historyEntries(entries, def).map(e => {
-    const what = def?.actions[e.action]?.label ?? ENGINE_ACTIONS[e.action] ?? e.action
     const who = e.actorKind === 'ai' ? 'AI' : e.actorKind === 'external' ? (e.actorSource ?? '外のサービス') : (people[e.actorId] ?? 'メンバー')
+    // 「件名を直しました（「前」→「後」）」 (task version 16): the record's own title, before and after.
+    const retitled = e.changes.find(c => c.field === RECORD_TITLE_CHANGE)
+    const titleWords = retitled ? `${e.action === 'undo' ? '件名：' : ''}「${String(retitled.before ?? '')}」→「${String(retitled.after ?? '')}」` : null
+    const what = titleWords && e.action !== 'undo' ? RETITLED_WORDS : def?.actions[e.action]?.label ?? ENGINE_ACTIONS[e.action] ?? e.action
+    const tail = [titleWords, e.note || null].filter(Boolean).map(x => `（${x}）`).join('')
     // The clock's note already says why (「返事の見込み（11/6）を過ぎました」): one line, not two.
     if (e.action === WAIT_OVER_ACTION && e.note) return { at: e.at, text: `${who}：${e.note}`, ai: false, version: e.version, who }
     // The AI at the member's request (records.md "The AI at the member's request"): said as such.
-    if (e.actorKind === 'ai' && e.askedBy) return { at: e.at, text: `${aiAskedHistoryText(def?.actions[e.action]?.label ?? e.action)}${e.note ? `（${e.note}）` : ''}`, ai: true, version: e.version, who }
-    return { at: e.at, text: `${who}：${what}${e.note ? `（${e.note}）` : ''}`, ai: e.actorKind === 'ai', version: e.version, who }
+    if (e.actorKind === 'ai' && e.askedBy) return { at: e.at, text: `${aiAskedHistoryText(def?.actions[e.action]?.label ?? e.action)}${tail}`, ai: true, version: e.version, who }
+    return { at: e.at, text: `${who}：${what}${tail}`, ai: e.actorKind === 'ai', version: e.version, who }
   })
 }
 

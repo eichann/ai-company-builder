@@ -234,7 +234,7 @@ client/src/features/tasks/components/ShowToBundle.tsx opacity-scale=1 palette-co
 client/src/features/tasks/components/SimilarHint.tsx opacity-scale=1 palette-color=8 radius-scale=2
 client/src/features/tasks/components/TagField.tsx arbitrary-value=5 opacity-scale=4 palette-color=52 radius-scale=3 shadow-scale=1 white-black=2 z-index=1
 client/src/features/tasks/components/TaskActions.tsx arbitrary-value=2 palette-color=19 radius-scale=1
-client/src/features/tasks/components/TaskCard.tsx opacity-scale=1 palette-color=28 radius-scale=2 type-scale=2
+client/src/features/tasks/components/TaskCard.tsx opacity-scale=1 palette-color=25 radius-scale=2 type-scale=2
 client/src/features/tasks/components/TaskFiles.tsx arbitrary-value=3 opacity-scale=1 palette-color=15
 client/src/features/tasks/components/TaskHead.tsx arbitrary-value=4 palette-color=27 shadow-scale=1 white-black=1 z-index=1
 client/src/features/tasks/components/TaskListPanel.tsx arbitrary-value=2 opacity-scale=1 palette-color=39 radius-scale=1 white-black=2

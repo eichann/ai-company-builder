@@ -59,6 +59,34 @@ test('a task completed on someone\'s OK says so in words, never as an approval',
   await expect(card).toContainText('佐藤さんが阿部さんの了承を得たとして完了にしました（電話で）')
   await card.getByRole('button', { name: /経緯/ }).click()
   await expect(card.getByRole('region', { name: '経緯' })).toContainText('佐藤さんが阿部さんの了承を得たとして完了にしました')
+  // A finished task's title and 目的 are not edited (task version 16: from open states only).
+  await expect(card.getByRole('button', { name: '件名・目的を直す' })).toHaveCount(0)
+  expectNoPageErrors(state)
+})
+
+test('件名・目的を直す: edited in place, only what changed is sent at the version shown, one 取り消す reverses both; nothing changed sends nothing', async ({ page }) => {
+  const state = await openPreview(page, 'task-card')
+  const card = page.getByTestId('task-card')
+  await card.getByRole('button', { name: '件名・目的を直す' }).click()
+  let form = card.getByRole('form', { name: '件名・目的を直す' })
+  // Unchanged: closes without a request.
+  await form.getByRole('button', { name: '保存' }).click()
+  await expect(form).toHaveCount(0)
+  await expect(page.locator('#acted')).toHaveText('')
+  await card.getByRole('button', { name: '件名・目的を直す' }).click()
+  form = card.getByRole('form', { name: '件名・目的を直す' })
+  await form.getByLabel('件名').fill('A社 見積書を 140万円 で作り直す')
+  await form.getByLabel('目的').fill('来週の提案に間に合わせる')
+  await form.getByRole('button', { name: '保存' }).click()
+  await expect(page.locator('#acted')).toContainText('retitle@3:title=A社 見積書を 140万円 で作り直す')
+  await expect(page.locator('#acted')).toContainText('set_purpose@4:purpose=来週の提案に間に合わせる')
+  const done = page.getByRole('status').filter({ hasText: '件名と目的を直しました' })
+  await done.getByRole('button', { name: '取り消す' }).click()
+  await expect(page.locator('#acted')).toContainText('undo 5@5,undo 4@6')
+  // Esc leaves the form without sending; 「…」 has no separate 件名を直す.
+  await card.getByRole('button', { name: '件名・目的を直す' }).click()
+  await card.getByRole('form', { name: '件名・目的を直す' }).getByLabel('件名').press('Escape')
+  await expect(card.getByRole('form', { name: '件名・目的を直す' })).toHaveCount(0)
   expectNoPageErrors(state)
 })
 

@@ -68,13 +68,22 @@ test('the token is asked as a member\'s turn only when the chat server says so, 
 
 test('the asked-only description and instructions only for a marked token; otherwise 「本人が画面で」 as before', async () => {
   const marked = await turn({ memberTurn: true })
-  for (const name of ['task__complete', 'reply_request__close', 'reply_request__replied_elsewhere']) {
+  for (const name of ['task__complete', 'reply_request__close', 'reply_request__replied_elsewhere', 'task__retitle', 'task__set_purpose']) {
     assert.match(spec(marked.tools, name).description, /はっきり頼んだときだけ/, name)
     assert.ok(spec(marked.tools, name).askedCard, name)
   }
+  // Task version 16: the requester's AI too, said by the type's own field names.
+  assert.match(spec(marked.tools, 'task__retitle').description, /メンバー本人が依頼した人か担当の記録で/)
+  assert.match(spec(marked.tools, 'task__complete').description, /メンバー本人が担当の記録で/)
+  assert.match(marked.tools.instructions, /task__retitle/)
+  // The title argument is the one title rule: one line, up to 200 characters.
+  const retitle = spec(marked.tools, 'task__retitle')
+  assert.equal(retitle.schema.safeParse({ id: TASK, expectedVersion: 1, title: 'A社 見積書' }).success, true)
+  assert.equal(retitle.schema.safeParse({ id: TASK, expectedVersion: 1, title: 'あ'.repeat(201) }).success, false)
+  assert.equal(retitle.schema.safeParse({ id: TASK, expectedVersion: 1, title: '' }).success, false)
   assert.doesNotMatch(spec(marked.tools, 'task__decline').description, /はっきり頼んだ/)
   assert.ok(!spec(marked.tools, 'reply_request__drop').askedCard)
-  assert.match(marked.tools.instructions, /メンバーに頼まれたときだけ完了にできる操作/)
+  assert.match(marked.tools.instructions, /メンバーに頼まれたときだけ使える操作/)
   for (const t of [await turn(), await turn({ memberTurn: true, bound: true })]) {
     assert.match(spec(t.tools, 'task__complete').description, /AI からはできない/)
     assert.ok(!spec(t.tools, 'task__complete').askedCard)

@@ -15,7 +15,14 @@ import type { SkillUse } from './skill-uses'
 
 export type LedgerValue = string | number | boolean | null
 
-/** `state` is the record's state; any other name is a server field. */
+/**
+ * The change of a record's own title (件名, task version 16 「件名を直す」): before / after are the titles. The dot
+ * keeps it apart from every field name (`[a-z][a-z0-9_]*`), like `links.<name>` and `place.<what>`; it is content
+ * (the content store keeps its texts) and never lands in the server fields.
+ */
+export const RECORD_TITLE_CHANGE = 'record.title'
+
+/** `state` is the record's state; any other name is a server field (or `links.*`, `place.*`, `record.title`). */
 export interface LedgerChange {
   field: string
   before: LedgerValue
