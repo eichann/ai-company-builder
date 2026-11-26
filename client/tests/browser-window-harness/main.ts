@@ -402,8 +402,8 @@ async function workScenarios(win: BrowserShellWindow, sites: Sites) {
   const writer = createFrameWriter({
     companyId: 'company-1', runId: `bf_${'a'.repeat(32)}`, host: 'op.test', api, going: () => going, stepsSoFar: () => 0,
     frames: [
-      { frame: 1, method: 'POST', path: '/work/save', fields: {}, max: 4, left: 4 },
-      { frame: 2, method: 'POST', path: '/work/lost', fields: {}, max: 2, left: 2 },
+      { frame: 1, method: 'POST', path: '/work/save', query: null, fields: {}, max: 4, left: 4 },
+      { frame: 2, method: 'POST', path: '/work/lost', query: null, fields: {}, max: 2, left: 2 },
     ],
   })
   await page.loadURL('https://op.test/work')
@@ -439,7 +439,7 @@ async function workScenarios(win: BrowserShellWindow, sites: Sites) {
   // the write is unknown; at most the page's own original reaches the site (independent review of #856).
   const second = createFrameWriter({
     companyId: 'company-1', runId: `bf_${'c'.repeat(32)}`, host: 'op.test', going: () => true, stepsSoFar: () => 0,
-    frames: [{ frame: 1, method: 'POST', path: '/work/save', fields: {}, max: 2, left: 2 }],
+    frames: [{ frame: 1, method: 'POST', path: '/work/save', query: null, fields: {}, max: 2, left: 2 }],
     api: {
       async framePermit(_c, _r, body) { calls.push({ kind: 'permit2', body, at: Date.now() }); await wait(800); return { kind: 'ok', value: { write: 1, frame: 1, permittedAt: new Date().toISOString(), validMs: 5000 } } },
       async frameReport(_c, _r, body) { calls.push({ kind: 'report2', body, at: Date.now() }); return { kind: 'ok', value: {} } },
