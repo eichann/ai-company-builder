@@ -102,8 +102,8 @@ live next to the task settings but in their own table: `records.md` "Features on
   — `MEMBER_ONLY_POLICY` (always allowed, starts off; not in the task settings, no company or admin setting reaches it).
   On, the member's own AI may complete their やること and end their 返事のお願い when they ask in a conversation
   (`records.md` "The AI at the member's request"). `GET` answers it as the optional `aiCompletes`; the app shows it only
-  then (`MySwitchesSection.tsx`). Test: `server/tests/integration/ai-asked-close.test.ts`. It governs only actions that
-  end the record: 「件名・目的を直す」 by the member's AI (task version 16) needs no switch (`records.md` "Task version 16").
+  then (`MySwitchesSection.tsx`). Test: `server/tests/integration/ai-asked-close.test.ts`. It governs every such action but a
+  correction of words: 「件名・目的を直す」 by the member's AI (task version 16) needs no switch (`records.md` "Task version 16").
 - Stored per member behind the handle (`member_work_switches`, `tasks.workSwitches` /
   `saveWorkSwitches`; a leaver's row goes with `removeMember`). When the table is first made
   (`migrateMemberWorkSwitches`, once), a member who read incoming messages — Google's 受信を読む

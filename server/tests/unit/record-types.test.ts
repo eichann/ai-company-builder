@@ -547,8 +547,14 @@ describe('ai_on_request (task 15, reply_request 6: the AI at the member\'s reque
       ['complete', ['assignee']], ['retitle', ['requested_by', 'assignee']], ['set_purpose', ['requested_by', 'assignee']],
     ])
     // Only the closing ones need the member's own setting (task 16: correcting ends nothing).
-    expect(Object.entries(task.actions).filter(([, a]) => a.aiOnRequest && aiAskedNeedsSetting(task, a)).map(([n]) => n)).toEqual(['complete'])
-    expect(Object.entries(rr.actions).filter(([, a]) => a.aiOnRequest && aiAskedNeedsSetting(rr, a)).map(([n]) => n).sort()).toEqual(['close', 'replied_elsewhere'])
+    expect(Object.entries(task.actions).filter(([, a]) => a.aiOnRequest && aiAskedNeedsSetting(a)).map(([n]) => n)).toEqual(['complete'])
+    expect(Object.entries(rr.actions).filter(([, a]) => a.aiOnRequest && aiAskedNeedsSetting(a)).map(([n]) => n).sort()).toEqual(['close', 'replied_elsewhere'])
+    // Only a correction of words goes without it — anything a company's or a plugin's type may declare else still needs it.
+    expect(aiAskedNeedsSetting({ to: null, args: { title: 'text', purpose: 'long_text' } })).toBe(false)
+    for (const a of [{ to: 'declined', args: {} }, { to: 'declined', args: { purpose: 'long_text' as const } }, { to: null, args: { assignee: 'person' as const } },
+      { to: null, args: { due: 'date' as const } }, { to: null, args: { purpose: 'long_text' as const }, links: ['bundle'] }, { to: null, args: {} }]) {
+      expect(aiAskedNeedsSetting(a)).toBe(true)
+    }
     expect(Object.entries(rr.actions).filter(([, a]) => a.aiOnRequest).map(([n, a]) => [n, a.aiOnRequest]).sort()).toEqual([['close', ['assignee']], ['replied_elsewhere', ['assignee']]])
     // `who` is unchanged, so an app or server that does not know the key still refuses the AI.
     expect(task.actions.complete.who).not.toContain('ai')

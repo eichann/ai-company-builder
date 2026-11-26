@@ -34,6 +34,7 @@ import { aiRunsRoute } from '../../src/routes/ai-runs'
 import { taskSettingsRoute } from '../../src/routes/task-settings'
 import { services } from '../../src/composition'
 import { RECORD_TITLE_CHANGE } from '../../../shared/core/record-ledger'
+import { sqliteRecordContentEraser } from '../../src/adapters/sqlite/record-contents'
 
 const app = new Hono()
 app.route('/api/companies/:companyId', recordsRoute)
@@ -122,6 +123,16 @@ describe('件名を直す by a person', () => {
     expect((await retitle('u-bob', id, '三回目', 2)).status).toBe(200)
     expect(await session('u-bob', 'POST', `/records/item/${id}/undo`, { version: 2, expectedVersion: 3 })).toMatchObject({ status: 409, body: { code: 'CHANGED_SINCE' } })
     expect(await detail(id)).toMatchObject({ title: '三回目', version: 3 })
+  })
+
+  it('an undo never writes an erased title back as live text', async () => {
+    const id = await task('u-bob', '消す前の件名', { fields: { assignee: 'u-bob' }, place: 'company' })
+    expect((await retitle('u-bob', id, '消す前の新しい件名', 1)).status).toBe(200)
+    sqliteRecordContentEraser(db).eraseRecord(CO, id, 'request', ts())
+    expect((await detail(id)).title).toMatch(/^消去済み/)
+    expect(await session('u-bob', 'POST', `/records/item/${id}/undo`, { version: 2, expectedVersion: 2 })).toMatchObject({ status: 409, body: { code: 'CHANGED_SINCE' } })
+    expect(await detail(id)).toMatchObject({ version: 2 })
+    expect(JSON.stringify(db.prepare('SELECT text FROM record_contents WHERE company_id = ? AND record_id = ? AND text IS NOT NULL').all(CO, id))).not.toContain('消す前')
   })
 
   it('the requester may too; another reader, and the company\'s owner, may not (nothing written)', async () => {

@@ -627,7 +627,7 @@ two actions, one generic piece of definition syntax, no new route.
   content** (the content store keeps them; `record_ledger` holds references: `isContentChange` in
   `adapters/sqlite/record-contents.ts`), so erasing a record erases them too. Version + 1 (`VERSION_CONFLICT`).
   **Undo** is the generic one: `record.title` compared with the row's title now (`CHANGED_SINCE` otherwise) and written
-  back the same way. Why an action argument and not a route of its own: `who`, `from`, `ai_on_request`, `via`, notes,
+  back the same way — never an erased title (「消去済み（…）」 before or after → `CHANGED_SINCE`). Why an action argument and not a route of its own: `who`, `from`, `ai_on_request`, `via`, notes,
   the ledger, undo, the AI's tool and the card's offer all exist for actions — one place, and a definition still says
   only what the engine does (an argument is copied into what it names).
 - **Task**: `retitle` (件名を直す, `args: { title: text }`) and `set_purpose` (目的を直す, `args: { purpose: long_text }`; an
@@ -639,15 +639,15 @@ two actions, one generic piece of definition syntax, no new route.
 - **Their AI only in a turn the member started** (`ai_on_request: [requested_by, assignee]`, "The AI at the member's
   request": the member themself in that field, a token with `memberTurn`, never one bound to a run — so never 「AI の番」,
   a plugin step's or a job's run; `via` is the default, so never a plugin's screen either). **No member setting**:
-  `aiAskedNeedsSetting` asks 「AI に完了を頼めるようにする」 only for an action into a final state (完了・終わりにする・
-  もう返した); correcting ends nothing, is recorded with `askedBy` and undone with ［取り消す］. It counts toward the
+  `aiAskedNeedsSetting` lets an action go without 「AI に完了を頼めるようにする」 only when it is a correction of words (no
+  `to`, no record links, only text arguments: the title, `text`, `long_text`); every other `ai_on_request` action — a company's or a plugin's too — still needs it. Correcting ends nothing, is recorded with `askedBy` and undone with ［取り消す］. It counts toward the
   turn's cap like the others (`AI_ASKED_REFUSALS.limit` now says 「頼まれて変えられるのは」).
 - **No leaks**: an owner-only, a members-only (not listed) and another company's task answer exactly as a missing one
   (the reader comes first); nothing logs a title.
 - **The app**: the card's 「件名・目的を直す」 (`tasks-ui.md` "The card"); 経緯 「件名を直しました（「前」→「後」）」
   (`historyLines`); the AI's `task__retitle` / `task__set_purpose` (`client/electron/records/tools.ts`, the title as one
   line ≤ 200).
-- Migration: `TASK_VERSION` 16 (the "Task version 9" mechanism). Tests: `server/tests/integration/task-retitle.test.ts`
+- Migration: `TASK_VERSION` 16 (the "Task version 9" mechanism). **No server rollback below it** without removing the stored task v16 definition first: an older engine reads `args: { title }` as a field and would store the title in the server fields (as plain text), leaving the record's title unchanged. Tests: `server/tests/integration/task-retitle.test.ts`
   (rename / undo / CHANGED_SINCE; who; the title rule and the create's; stale version, a finished task; owner-only,
   members-only, another company = missing; no title in rows or logs; the AI without the setting, never a plain or
   run-bound token or another's task; 目的), `record-types.test.ts` (the argument's rules, the core actions additive,
@@ -2180,8 +2180,8 @@ to press each one. Now the member may let their own AI do exactly that, **in a c
   設定 → 自分の設定 when the server answers it (`MyWorkSwitches.aiCompletes`, optional). Engine dep `aiAskedOn`
   (composition: `workSwitches.isOn(…, 'aiCompletes')`; absent = off). Off → 403 `AI_ASK_OFF` with the fixed sentence
   `AI_ASKED_REFUSALS.off` (「…AI からは片づけられません（完了にする・終わりにする・もう返した）。設定の「自分の設定」で
-  オンにすると…」), nothing written; the AI relays it. **Only for an action that ends the record** (`aiAskedNeedsSetting`:
-  its `to` is a final state of the type); task version 16's 件名を直す / 目的を直す need the turn alone ("Task version 16").
+  オンにすると…」), nothing written; the AI relays it. **Not for a correction of words** (`aiAskedNeedsSetting`: no `to`, no links, only
+  text arguments); task version 16's 件名を直す / 目的を直す need the turn alone ("Task version 16").
 - **Only a turn the member started** (how the server knows): `POST /me/record-tokens { …, memberTurn: true }` — the app
   says the turn started from the member's own words. The server keeps the mark (`record_ai_tokens.member_turn`) **only
   for an `act` token not bound to a run** (`record-ai-tokens.ts` `issue`; `authenticate` and `aiActor` drop it for a run

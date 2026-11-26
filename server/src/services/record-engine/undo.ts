@@ -3,6 +3,7 @@ import { undoableByAssignee } from '../../../shared/core/core-types'
 import { FULL_ACCESS_ROLES } from '../../../shared/core/permissions'
 import { RECORD_TITLE_CHANGE, replayRecordState, type LedgerEntry, type LedgerValue } from '../../../shared/core/record-ledger'
 import { normalizeRecordTitle } from '../../../shared/core/record-types'
+import { ERASED_PREFIX } from '../../../shared/core/record-contents'
 import { writeTitle } from './act'
 import { isOwnOnlyLinkTarget, RECORD_ID_RE } from '../../../shared/core/records'
 import type { RecordSummary } from '../../../shared/types/records'
@@ -96,9 +97,10 @@ export function undoing(ctx: EngineContext) {
       for (const c of changes) {
         if (c.field === 'state') nextState = typeof c.after === 'string' ? c.after : null
         else if (c.field === RECORD_TITLE_CHANGE) {
-          // A title brought back keeps today's rule (a title erased since, or none, is not written back).
+          // A title brought back keeps today's rule; an erased one (「消去済み（…）」) is never written back as live text.
           const t = normalizeRecordTitle(c.after)
-          if ('error' in t || row.path !== null) return conflict('そのあとにも変更があるため、この変更だけを取り消せません', 'CHANGED_SINCE')
+          const erased = [c.before, c.after].some(v => typeof v === 'string' && v.startsWith(ERASED_PREFIX))
+          if ('error' in t || erased || row.path !== null) return conflict('そのあとにも変更があるため、この変更だけを取り消せません', 'CHANGED_SINCE')
           nextTitle = t.title
         }
         else if (c.field.startsWith('links.')) {

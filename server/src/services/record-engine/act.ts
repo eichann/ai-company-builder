@@ -253,7 +253,7 @@ export function acting(ctx: EngineContext) {
       // setting is on. The cap is counted in the write's transaction.
       const askedField = !byWho && actor.kind === 'ai' ? aiOnRequestField(action, current.fields, member.userId) : null
       const askedTurn = askedField && actor.askedTurn && !actor.runId ? actor.askedTurn : null
-      const askedNeedsSetting = askedTurn !== null && aiAskedNeedsSetting(def, action)
+      const askedNeedsSetting = askedTurn !== null && aiAskedNeedsSetting(action)
       if (askedNeedsSetting && deps.aiAskedOn?.(member.companyId, member.userId) !== true) {
         return refuse('forbidden', AI_ASKED_REFUSALS.off.error, { code: AI_ASKED_REFUSALS.off.code })
       }

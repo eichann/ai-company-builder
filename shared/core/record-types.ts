@@ -365,13 +365,16 @@ export function normalizeRecordTitle(value: unknown): { title: string } | { erro
 export const AI_ASKED_PER_TURN = 20
 
 /**
- * Whether the member's own setting 「AI に完了を頼めるようにする」 governs an `ai_on_request` action: one that ends
- * the record (its `to` is a final state of the type — 完了にする, 終わりにする, もう返した). An action that only
- * corrects the record (件名を直す, 目的を直す: no state change) needs the turn the member started and nothing
- * else — reversible and recorded (owner decision 2026-11-27). Pure.
+ * Whether the member's own setting 「AI に完了を頼めるようにする」 governs an `ai_on_request` action. Every such action
+ * needs it but **a correction of words**: no state change (`to` null), no record links, and only text arguments —
+ * the record's title, `text` or `long_text` fields (件名を直す, 目的を直す). A correction needs the turn the member
+ * started and nothing else — it ends nothing, is recorded and undone (owner decision 2026-11-27). Anything else a
+ * company's or a plugin's type may declare (a state change, a person, a date…) still needs the setting. Pure.
  */
-export function aiAskedNeedsSetting(def: Pick<TypeDefinition, 'final'>, action: Pick<ActionDef, 'to'>): boolean {
-  return action.to !== null && def.final.includes(action.to)
+export function aiAskedNeedsSetting(action: Pick<ActionDef, 'to' | 'args' | 'links'>): boolean {
+  const kinds = Object.values(action.args)
+  const correction = action.to === null && (action.links?.length ?? 0) === 0 && kinds.length > 0 && kinds.every(k => k === 'text' || k === 'long_text')
+  return !correction
 }
 
 /** The refusals of the AI at the member's request: fixed sentences the AI relays as they are. */
