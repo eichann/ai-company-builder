@@ -61,6 +61,14 @@ test('acb-doc:// is registered without CSP bypass or fetch, and never served on 
   assert.equal(fake.protocolHandlers.has('acb-doc'), false)
 })
 
+// ACB's player over a document's Drive videos (doc-frame.md "plan 4"): standard + secure only (no stream,
+// fetch, CORS or CSP bypass), served on the players' own session, never on the app's.
+test('acb-drive-video:// is registered standard and secure only, and never served on the app\'s session', () => {
+  assert.deepEqual(fake.privilegedSchemes.find(s => (s as { scheme: string }).scheme === 'acb-drive-video'),
+    { scheme: 'acb-drive-video', privileges: { standard: true, secure: true } })
+  assert.equal(fake.protocolHandlers.has('acb-drive-video'), false)
+})
+
 test('a plugin\'s frame cannot navigate, and its window.open never reaches the browser', () => {
   const main = BrowserWindow.all[0].webContents
   const frameNavigate = (frameUrl: string, url: string) => {

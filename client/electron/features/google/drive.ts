@@ -157,8 +157,9 @@ export function createDrivePicking(deps: DrivePickingDeps) {
       if (consent) return consent
       if (signal?.aborted) return STOPPED
       const fileIds = mode === 'files' ? drivePreselectIds(options.fileIds) : []
-      // `link` (a person linking files to a record): every file type; otherwise the readable ones (the AI's).
-      const purpose = mode === 'files' && options.purpose === 'link' ? { purpose: 'link' } : {}
+      // `link` (a person linking files to a record): every file type; `view` (one video a document asks for,
+      // ACB's player): that one video only, kept apart; otherwise the readable ones (the AI's).
+      const purpose = mode === 'files' && (options.purpose === 'link' || options.purpose === 'view') ? { purpose: options.purpose } : {}
       const started = await session(companyId, '/pick-tickets', { mode, ...(fileIds.length > 0 ? { fileIds } : {}), ...purpose }, undefined, signal)
       if (!started) return signal?.aborted ? STOPPED : { ok: false, reason: 'offline', message: 'サーバーに接続できませんでした。' }
       const t = started.json.data as DrivePickTicketStarted | undefined

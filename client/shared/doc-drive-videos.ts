@@ -50,10 +50,18 @@ function decodeUrlEntities(value: string): string {
   })
 }
 
-/** The Drive file id of a video's address: `https`, exactly `drive.google.com`, the core's file-link rule. */
+/**
+ * The Drive file id of an address as a browser holds it (already decoded: a link the member pressed, an
+ * element's `src` in the page's DOM): `https`, exactly `drive.google.com`, the core's file-link rule.
+ * The one narrowing for the band, ACB's player over an embed and a pressed link (`doc-drive-player.ts`).
+ */
+export function driveAddressVideoId(url: unknown): string | null {
+  return typeof url === 'string' && url.length <= 4096 && DRIVE_PREFIX.test(url) ? driveFileIdFromLink(url) : null
+}
+
+/** The Drive file id of a video's address as written in the HTML (`&amp;` and the like decoded first). */
 function driveVideoIdOf(raw: string): string | null {
-  const url = decodeUrlEntities(raw)
-  return DRIVE_PREFIX.test(url) ? driveFileIdFromLink(url) : null
+  return driveAddressVideoId(decodeUrlEntities(raw))
 }
 
 /** Where the case-insensitive end tag `</name` starts at or after `from` (linear), or -1. */

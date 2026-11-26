@@ -12,6 +12,7 @@ import { MEDIA_SCHEME } from '../shared/video-files'
 import { isPluginAddress, PLUGIN_SCHEME, pluginFrameNavigationAllowed } from '../shared/plugin-bridge'
 import type { PluginFileServer } from './features/plugins/protocol'
 import { DOC_SCHEME } from '../shared/doc-frame'
+import { DRIVE_PLAYER_SCHEME } from '../shared/doc-drive-player'
 import { allowPermission, isAppPage, type AppPage } from './permission-policy'
 import { webLinkForBrowser } from './external-url'
 import type { DesktopShell, WindowPort } from './features/ports'
@@ -417,6 +418,12 @@ export function registerLocalFileScheme(): void {
     // `standard` puts the token in the host, so each document is its own site (its own process).
     // Served on the document session only (doc-view.ts), never on the app's default session.
     { scheme: DOC_SCHEME, privileges: { standard: true, secure: true, corsEnabled: true } },
+    // ACB's own player over a document's Google Drive video (doc-frame.md "ACB's player over Drive embeds
+    // (plan 4)"): ACB's page and the bytes main relays, never the document's. `standard` (measured: without
+    // it the video never got past its first range) and `secure`, nothing more — not `stream` (measured,
+    // Electron 45: the relayed video plays and seeks the same without it), no fetch, CORS or CSP bypass.
+    // Served on the player's own session only (doc-view.ts `createDrivePlayerShell`).
+    { scheme: DRIVE_PLAYER_SCHEME, privileges: { standard: true, secure: true } },
   ])
 }
 

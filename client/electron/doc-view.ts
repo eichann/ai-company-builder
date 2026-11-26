@@ -35,6 +35,9 @@ import { startRefusingProxy } from './browser-window'
 import type { DocViewBounds } from '../shared/doc-frame'
 import type { DocViewHandle, DocViewHooks, DocViewPort } from './features/doc-frames/views'
 import { REVIEW_WORLD } from './features/doc-frames/review-world'
+import { DRIVE_PLAYER_SCHEME, parseDrivePlayerUrl } from '../shared/doc-drive-player'
+import type { DrivePlayerHandle, DrivePlayerHooks, DrivePlayerPort } from './features/doc-frames/players'
+import { stageCode } from './features/doc-frames/player-page'
 
 /** A focus of the view counts as the member's when a click (or touch) in it came this close to it. */
 export const FOCUS_CLICK_WINDOW_MS = 600
@@ -64,12 +67,12 @@ function scrollPosition(value: unknown): [number, number] | null {
  * The page cannot send or see these (its `console` and `securitypolicyviolation` events are its
  * own and are not read). Without a debugger (one already attached) there is simply no report.
  */
-function watchCspRefusals(contents: WebContents, report: (url: string) => void, log: Pick<Console, 'warn'>): void {
+function watchCspRefusals(contents: WebContents, report: (url: string) => void, log: Pick<Console, 'warn'>): boolean {
   try {
     contents.debugger.attach('1.3')
   } catch {
     log.warn('[doc-frame] cannot read what a document\'s CSP refused')
-    return
+    return false
   }
   contents.debugger.on('message', (_event, method, params) => {
     if (method !== 'Audits.issueAdded') return
@@ -78,6 +81,60 @@ function watchCspRefusals(contents: WebContents, report: (url: string) => void, 
     if (typeof url === 'string') report(url)
   })
   contents.debugger.sendCommand('Audits.enable').catch(() => {})
+  return true
+}
+
+/** The elements that may embed a Drive video (ACB's player goes over them): read through the DevTools protocol only. */
+const EMBED_SELECTORS = ['iframe[src*="drive.google.com" i]', 'video']
+/** At most this many elements are looked at per read (a page of thousands costs no more). */
+const EMBED_NODES_MAX = 40
+/** A read of where the embeds are waits at most this long (a page spinning its CPU never answers). */
+const EMBED_READ_MS = 1000
+
+/**
+ * Where a document lays out the elements that may embed a Drive video — each one's `src` (a `<video>`'s
+ * own, else its first `<source src>`) and its border box in the view's own DIP — read with the view's
+ * debugger in main (DOM.querySelectorAll, DOM.getAttributes, DOM.getBoxModel): nothing runs in the
+ * page's context and the page cannot call or see it. The page owns its DOM, so this says only where;
+ * the registry plays only ids main read from the served bytes. An element with no box (hidden) is left out.
+ */
+async function readEmbedBoxes(contents: WebContents): Promise<Array<{ src: string; box: DocViewBounds }>> {
+  type Send = (method: string, params?: Record<string, unknown>) => Promise<any> // eslint-disable-line @typescript-eslint/no-explicit-any
+  const send: Send = (method, params) => contents.debugger.sendCommand(method, params)
+  const attribute = (list: unknown, name: string) => {
+    if (!Array.isArray(list)) return null
+    for (let i = 0; i + 1 < list.length; i += 2) if (String(list[i]).toLowerCase() === name) return typeof list[i + 1] === 'string' ? list[i + 1] as string : null
+    return null
+  }
+  const { root } = await send('DOM.getDocument', { depth: 0 })
+  // CSS px of the page → the view's DIP (the document's own zoom).
+  const scale = contents.getZoomFactor()
+  const out: Array<{ src: string; box: DocViewBounds }> = []
+  let looked = 0
+  for (const selector of EMBED_SELECTORS) {
+    const { nodeIds } = await send('DOM.querySelectorAll', { nodeId: root.nodeId, selector }) as { nodeIds: number[] }
+    for (const nodeId of nodeIds) {
+      if (++looked > EMBED_NODES_MAX) return out
+      let src = attribute((await send('DOM.getAttributes', { nodeId })).attributes, 'src')
+      if (src === null && selector === 'video') {
+        const { nodeId: source } = await send('DOM.querySelector', { nodeId, selector: 'source[src]' }) as { nodeId: number }
+        if (source) src = attribute((await send('DOM.getAttributes', { nodeId: source })).attributes, 'src')
+      }
+      if (src === null || !/drive\.google\.com/i.test(src)) continue
+      let quad: number[]
+      try {
+        quad = (await send('DOM.getBoxModel', { nodeId })).model.border as number[]
+      } catch {
+        continue
+      }
+      if (!Array.isArray(quad) || quad.length !== 8 || !quad.every(Number.isFinite)) continue
+      const xs = [quad[0], quad[2], quad[4], quad[6]]
+      const ys = [quad[1], quad[3], quad[5], quad[7]]
+      // The box model is relative to the viewport (scrolled), in the page's CSS px.
+      out.push({ src, box: { x: Math.min(...xs) * scale, y: Math.min(...ys) * scale, width: (Math.max(...xs) - Math.min(...xs)) * scale, height: (Math.max(...ys) - Math.min(...ys)) * scale } })
+    }
+  }
+  return out
 }
 
 /** In memory (no `persist:`): nothing a document stores outlives the app run. */
@@ -251,7 +308,9 @@ export function createDocViewShell(options: DocViewShellOptions): DocViewPort {
       guard(contents, () => token)
       // What its page wanted from the internet and did not get, for the band (hosts only leave main).
       blockedReporters.set(id, url => hooks.onBlocked(id, url))
-      watchCspRefusals(contents, url => hooks.onBlocked(id, url), log)
+      const debuggerOn = watchCspRefusals(contents, url => hooks.onBlocked(id, url), log)
+      /** Where the view is on screen now (window DIP), or null while hidden. */
+      let area: DocViewBounds | null = null
       contents.on('did-navigate', (_event, url) => hooks.onPageStart(id, url))
       contents.on('did-finish-load', () => hooks.onPageLoaded(id))
       contents.on('input-event', (_event, input) => {
@@ -324,6 +383,7 @@ export function createDocViewShell(options: DocViewShellOptions): DocViewPort {
         view.setVisible(false)
         view.setBounds({ x: 0, y: 0, width: 0, height: 0 })
         contents.setAudioMuted(true)
+        area = null
         if (hadKeyboard) focusApp()
       }
       return {
@@ -352,12 +412,13 @@ export function createDocViewShell(options: DocViewShellOptions): DocViewPort {
         },
         place(bounds: DocViewBounds | null) {
           if (gone || win.isDestroyed()) return
-          const area = bounds && docViewOnScreen(bounds, owner?.getZoomFactor() ?? 1, win.getContentSize())
-          if (!area) {
+          const placed = bounds && docViewOnScreen(bounds, owner?.getZoomFactor() ?? 1, win.getContentSize())
+          if (!placed) {
             hide()
             return
           }
-          view.setBounds(area)
+          view.setBounds(placed)
+          area = placed
           view.setVisible(true)
           contents.setAudioMuted(false)
           shown = true
@@ -373,6 +434,13 @@ export function createDocViewShell(options: DocViewShellOptions): DocViewPort {
         },
         releaseKeyboard() {
           if (!gone && !contents.isDestroyed() && contents.isFocused()) focusApp()
+        },
+        placedArea: () => (gone ? null : area),
+        readEmbeds() {
+          if (gone || !debuggerOn || contents.isDestroyed()) return Promise.resolve([])
+          let timer: ReturnType<typeof setTimeout> | undefined
+          const limit = new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('timed out')), EMBED_READ_MS) })
+          return Promise.race([readEmbedBoxes(contents), limit]).finally(() => clearTimeout(timer))
         },
         reload() {
           if (gone || !token) return
@@ -401,6 +469,170 @@ export function createDocViewShell(options: DocViewShellOptions): DocViewPort {
           contents.executeJavaScriptInIsolatedWorld(SCROLL_WORLD, [{ code: '[window.scrollX, window.scrollY]' }]).then(done, () => done(null))
           if (shown) reloadWaiting.limit()
         },
+      }
+    },
+  }
+}
+
+
+/** In memory (no `persist:`): ACB's players over a document's Drive videos have a session of their own. */
+export const PLAYER_PARTITION = 'acb-player'
+
+export interface DrivePlayerShellOptions {
+  /** The `acb-drive-video://` server (features/doc-frames/players.ts `serve`). */
+  serve: (request: { url: string; method: string; range: string | null }) => Promise<Response>
+  /** Whether a request of the page `pageId` may reach `url` (its own player's token only). */
+  owns: (pageId: number, url: string) => boolean
+  mac?: boolean
+  log?: Pick<Console, 'warn'>
+}
+
+/**
+ * ACB's player over a Google Drive video of a document (doc-frame.md "ACB's player over Drive embeds
+ * (plan 4)"): a view of its own, above the document's view in the same window, showing ACB's page for
+ * that player (`players.ts`) from `acb-drive-video://<token>/`. Not the document's: its own in-memory
+ * session (`acb-player`), which serves only that scheme — every other request is cancelled, and a page
+ * reaches only its own player's token (`owns`, by the requesting page's id) —; no preload, sandboxed, no
+ * Node; every permission and download refused. Its page's links and script ask for actions by going to
+ * `acb-drive-video://<token>/<action>`: the navigation is refused and the action handed to the registry;
+ * it goes nowhere else. Like the document's view it never takes the keyboard by itself, and the app's
+ * shortcuts pressed in it go to the app.
+ */
+export function createDrivePlayerShell(options: DrivePlayerShellOptions): DrivePlayerPort {
+  const log = options.log ?? console
+  const mac = options.mac ?? process.platform === 'darwin'
+  let prepared: Session | null = null
+  const prepare = () => {
+    if (prepared) return prepared
+    const ses = session.fromPartition(PLAYER_PARTITION)
+    // The session's one request hook: only a player page's own address (its page, its video).
+    ses.webRequest.onBeforeRequest((details, callback) => {
+      const allowed = typeof details.webContentsId === 'number' && options.owns(details.webContentsId, details.url)
+      if (!allowed) log.warn('[doc-player] refused a request')
+      callback({ cancel: !allowed })
+    })
+    ses.setPermissionRequestHandler((_contents, _permission, callback) => callback(false))
+    ses.setPermissionCheckHandler(() => false)
+    ses.setDevicePermissionHandler(() => false)
+    ses.on('will-download', event => event.preventDefault())
+    ses.setSpellCheckerEnabled(false)
+    ses.protocol.handle('file', NOT_FOUND)
+    ses.protocol.handle(DRIVE_PLAYER_SCHEME, request => options.serve({ url: request.url, method: request.method, range: request.headers.get('range') }))
+    prepared = ses
+    return ses
+  }
+
+  return {
+    async create(windowId, hooks: DrivePlayerHooks): Promise<DrivePlayerHandle | null> {
+      const owner = allWebContents.fromId(windowId)
+      const win = owner ? BrowserWindow.fromWebContents(owner) : null
+      if (!win || win.isDestroyed()) return null
+      prepare()
+      const view = new WebContentsView({
+        webPreferences: {
+          partition: PLAYER_PARTITION,
+          sandbox: true,
+          contextIsolation: true,
+          nodeIntegration: false,
+          nodeIntegrationInSubFrames: false,
+          webviewTag: false,
+          spellcheck: false,
+          navigateOnDragDrop: false,
+          backgroundThrottling: true,
+        },
+      })
+      const contents = view.webContents
+      const id = contents.id
+      let gone = false
+      let shown = false
+      let lastPointerAt = -Infinity
+      let token: string | null = null
+      const focusApp = () => {
+        if (!win.isDestroyed() && owner && !owner.isDestroyed()) owner.focus()
+      }
+      const finish = () => {
+        if (gone) return
+        gone = true
+        const hadKeyboard = !contents.isDestroyed() && contents.isFocused()
+        if (!win.isDestroyed()) win.contentView.removeChildView(view)
+        if (hadKeyboard) focusApp()
+        if (!contents.isDestroyed()) contents.close()
+        hooks.onGone(id)
+      }
+      contents.setWebRTCIPHandlingPolicy('disable_non_proxied_udp')
+      contents.setWindowOpenHandler(() => ({ action: 'deny' }))
+      // Only its own page loads; its own actions are asked for by going to them (refused, then acted on).
+      const navigate = (event: { url: string; isMainFrame: boolean; preventDefault: () => void }) => {
+        const target = parseDrivePlayerUrl(event.url)
+        if (event.isMainFrame && target && target.token === token && target.kind === 'page') return
+        event.preventDefault()
+        if (event.isMainFrame && target && target.token === token && target.kind === 'action') hooks.onAction(id, target.action)
+      }
+      contents.on('will-frame-navigate', navigate)
+      contents.on('will-redirect', event => event.preventDefault())
+      contents.on('will-attach-webview', event => event.preventDefault())
+      contents.on('certificate-error', (event, _url, _error, _certificate, callback) => { event.preventDefault(); callback(false) })
+      contents.on('select-client-certificate', (event, _url, _list, callback) => {
+        event.preventDefault()
+        ;(callback as (certificate?: unknown) => void)()
+      })
+      contents.on('login', (event, _details, _authInfo, callback) => { event.preventDefault(); callback() })
+      contents.on('input-event', (_event, input) => {
+        if (input.type === 'mouseDown' || input.type === 'touchStart' || input.type === 'gestureTap') lastPointerAt = Date.now()
+      })
+      contents.on('blur', () => { lastPointerAt = -Infinity })
+      // Loading a page focuses its view (measured for the document's): the keyboard stays the app's unless clicked.
+      contents.on('focus', () => {
+        if (!shown) { focusApp(); return }
+        setTimeout(() => {
+          if (gone || contents.isDestroyed() || !contents.isFocused()) return
+          if (!shown || Date.now() - lastPointerAt > FOCUS_CLICK_WINDOW_MS) focusApp()
+        }, FOCUS_CHECK_DELAY_MS)
+      })
+      contents.on('before-input-event', (event, input) => {
+        if (input.type !== 'keyDown') return
+        const key = { key: input.key, metaKey: input.meta, ctrlKey: input.control, shiftKey: input.shift, altKey: input.alt }
+        if (!docViewShortcutOf(key, mac)) return
+        event.preventDefault()
+        if (!input.isAutoRepeat) hooks.onShortcut(id, key)
+      })
+      contents.once('destroyed', finish)
+      contents.on('render-process-gone', finish)
+      contents.setAudioMuted(true)
+      view.setVisible(false)
+      win.contentView.addChildView(view)
+      view.setBounds({ x: 0, y: 0, width: 0, height: 0 })
+      let stage = ''
+      const putStage = () => {
+        if (!gone && !contents.isDestroyed() && stage) contents.executeJavaScript(stage).catch(() => {})
+      }
+      contents.on('did-finish-load', putStage)
+      return {
+        id,
+        load(url) {
+          if (gone) return
+          token = parseDrivePlayerUrl(url)?.token ?? null
+          contents.loadURL(url).catch(() => {})
+        },
+        place(placement) {
+          if (gone || win.isDestroyed()) return
+          if (!placement) {
+            const hadKeyboard = contents.isFocused()
+            shown = false
+            view.setVisible(false)
+            view.setBounds({ x: 0, y: 0, width: 0, height: 0 })
+            contents.setAudioMuted(true)
+            if (hadKeyboard) focusApp()
+            return
+          }
+          view.setBounds(placement.bounds)
+          view.setVisible(true)
+          contents.setAudioMuted(false)
+          shown = true
+          stage = stageCode(placement.stage)
+          putStage()
+        },
+        destroy: finish,
       }
     },
   }

@@ -275,7 +275,11 @@ test('purpose: the card\'s pick asks for every file type (link); the AI\'s does 
   await createDrivePicking(deps).pick('co', 'files', undefined, { purpose: 'link' })
   await createDrivePicking(deps).pick('co', 'files')
   await createDrivePicking(deps).pick('co', 'folder', undefined, { purpose: 'link' })
-  assert.deepEqual(bodies, [{ mode: 'files', purpose: 'link' }, { mode: 'files' }, { mode: 'folder' }])
+  // ACB's player over a document (doc-frame.md "plan 4"): the one video, kept apart — never sent as an AI-reading pick.
+  const video = 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA'
+  await createDrivePicking(deps).pick('co', 'files', undefined, { fileIds: [video], purpose: 'view' })
+  await createDrivePicking(deps).pick('co', 'folder', undefined, { purpose: 'view' })
+  assert.deepEqual(bodies, [{ mode: 'files', purpose: 'link' }, { mode: 'files' }, { mode: 'folder' }, { mode: 'files', fileIds: [video], purpose: 'view' }, { mode: 'folder' }])
 })
 
 function tasksHarness(over: Partial<TasksDeps>) {

@@ -264,7 +264,11 @@ export function docZoomFactor(input: unknown): number | null {
  * text in it while reviewing (`selection`), or its document embeds Google Drive videos (`driveVideos`).
  */
 export type DocViewEvent =
-  | { viewId: number; kind: 'link'; url: string }
+  /**
+   * `videoLink`: the link is a Google Drive file that may play in ACB's player — main's number for it,
+   * which `docView:playLinkedVideo` names (never the id itself).
+   */
+  | { viewId: number; kind: 'link'; url: string; videoLink?: number }
   | { viewId: number; kind: 'gone' }
   | { viewId: number; kind: 'shortcut'; key: KeyInput }
   | ({ viewId: number; kind: 'blocked' } & DocBlockedParts)
