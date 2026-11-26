@@ -167,6 +167,8 @@ export interface SentMessage {
   attachments: Array<{ filename: string | null; contentType: string; disposition: string; bytes: Buffer }>
 }
 
+export type FakeMediaFault = 'ignore-range' | 'too-long' | 'too-short' | 'broken'
+
 /** One `alt=media` answer of the fake (`mediaAnswers`). */
 export interface FakeDriveMediaAnswer {
   id: string
@@ -325,8 +327,12 @@ export interface FakeGoogle {
   setDriveFileBytes(id: string, bytes: Uint8Array, mimeType?: string): void
   /** Media answers (`alt=media`) are sent in pieces of `chunk` bytes, `ms` apart (0: at once). */
   paceMedia(ms: number, chunk?: number): void
-  /** The next media answer misbehaves: `ignore-range` (200 with every byte, as if no Range was sent), `too-long` (the named range, then more bytes, without a Content-Length). */
-  misanswerNextMedia(fault: 'ignore-range' | 'too-long'): void
+  /**
+   * The next media answer misbehaves: `ignore-range` (200 with every byte, as if no Range was sent), `too-long` (the
+   * named range, then more bytes, without a Content-Length), `too-short` (half the range, then a clean end, without a
+   * Content-Length), `broken` (half the range, then the connection fails, with the Content-Length promised).
+   */
+  misanswerNextMedia(fault: FakeMediaFault): void
   /** Every media answer with a Range or a pace, in order: how it ended and how many bytes went. */
   mediaAnswers: FakeDriveMediaAnswer[]
   /** Someone deletes this Drive file for good (every call about it answers 404). */
@@ -1012,7 +1018,7 @@ export function createFakeGoogle(options: FakeGoogleOptions = {}): FakeGoogle {
   }))
   // ---- a file's bytes (`alt=media`), with Range, paced, and every answer's end reported (streaming a picked video) ----
   const mediaPace = { ms: 0, chunk: 64 * 1024 }
-  let mediaFault: 'ignore-range' | 'too-long' | null = null
+  let mediaFault: FakeMediaFault | null = null
   const mediaLog: FakeDriveMediaAnswer[] = []
   /**
    * Drive's media answer as real Drive gives it for a binary file: no Range → 200 with every byte; one `bytes=a-b` /
@@ -1047,6 +1053,11 @@ export function createFakeGoogle(options: FakeGoogleOptions = {}): FakeGoogle {
         if (at > end) { entry.state = 'finished'; controller.close(); return }
         if (mediaPace.ms > 0) await new Promise(r => setTimeout(r, mediaPace.ms))
         if (signal.aborted) { entry.state = 'aborted'; controller.close(); return }
+        // `too-short` / `broken`: half the range, then a clean end (no Content-Length) or a failed connection.
+        if ((fault === 'too-short' || fault === 'broken') && at >= start + Math.ceil((end + 1 - start) / 2)) {
+          if (fault === 'broken') { entry.state = 'finished'; controller.error(new Error('fake: connection lost')); return }
+          entry.state = 'finished'; controller.close(); return
+        }
         // `too-long`: a misbehaving answer that runs past the range it named (no Content-Length to stop it).
         if (fault === 'too-long' && at > end - mediaPace.chunk) { controller.enqueue(new Uint8Array(content.subarray(at, Math.min(at + mediaPace.chunk, end + 1)))); controller.enqueue(new Uint8Array(64).fill(7)); entry.bytes += end + 1 - at + 64; at = end + 1; return }
         const next = Math.min(at + mediaPace.chunk, end + 1)
@@ -1060,7 +1071,7 @@ export function createFakeGoogle(options: FakeGoogleOptions = {}): FakeGoogle {
     return new Response(body, {
       status,
       headers: {
-        'content-type': mimeType, ...(fault === 'too-long' ? {} : { 'content-length': String(end - start + 1) }),
+        'content-type': mimeType, ...(fault === 'too-long' || fault === 'too-short' ? {} : { 'content-length': String(end - start + 1) }),
         ...(status === 206 ? { 'content-range': `bytes ${start}-${end}/${size}` } : {}),
       },
     })

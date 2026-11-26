@@ -244,13 +244,14 @@ export function driveDocTiming(env: Readonly<Record<string, string | undefined>>
  * - memberDayBytes / companyDayBytes: bytes served per member and per company in a day (the key broker's day);
  * - memberStreams: answers being streamed to one member at once;
  * - memberPerMinute: requests of one member in a minute;
- * - sessionIdleMs: a viewing session (member × file) ends after this long without a request (its one log line then).
+ * - sessionIdleMs: a viewing session (member × file) ends after this long without a request (its one log line then);
+ * - answerMs: an answer ends (its slot released, its unsent bytes given back) this long after it started, read or not.
  */
 const MIB = 1024 * 1024
 const GIB = 1024 * MIB
 
 export function driveViewLimits(env: Readonly<Record<string, string | undefined>> = process.env): {
-  chunkBytes: number; memberDayBytes: number; companyDayBytes: number; memberStreams: number; memberPerMinute: number; sessionIdleMs: number
+  chunkBytes: number; memberDayBytes: number; companyDayBytes: number; memberStreams: number; memberPerMinute: number; sessionIdleMs: number; answerMs: number
 } {
   const read = (name: string, min: number, max: number, fallback: number) => {
     const raw = env[name]
@@ -264,6 +265,7 @@ export function driveViewLimits(env: Readonly<Record<string, string | undefined>
     memberStreams: read('ACB_DRIVE_VIEW_MEMBER_STREAMS', 1, 64, 4),
     memberPerMinute: read('ACB_DRIVE_VIEW_MEMBER_PER_MINUTE', 1, 10_000, 120),
     sessionIdleMs: read('ACB_DRIVE_VIEW_SESSION_IDLE_MS', 1, 24 * 60 * 60 * 1000, 10 * 60 * 1000),
+    answerMs: read('ACB_DRIVE_VIEW_ANSWER_MS', 1, 10 * 60 * 1000, 120_000),
   }
 }
 

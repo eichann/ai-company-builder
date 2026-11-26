@@ -28,7 +28,7 @@ hourly download counter and the alerts themselves.
 | `push_probing` | `push_rejections` | last hour ≥ 10 refusals **and** ≥ 10 different paths (a stuck sync retries the same ones) |
 | `plugin_reads` | `plugin_access_log` (contract 3) | last hour ≥ 300 **and** ≥ 10× the member's hourly average of the 7 days before |
 | `plugin_paced` | `plugin_call_paced` | ≥ 100 refused by the pace in the last 2 hours |
-| `key_use` | `broker_usage` (the relay, Google relay included; `:refused` counters left out) | today (broker day) ≥ 2000 requests **and** ≥ 5× the member's daily average of the 7 days before |
+| `key_use` | `broker_usage` (the relay, Google relay included; `:refused` counters and a Drive video's playing, `drive-view:*`, left out) | today (broker day) ≥ 2000 requests **and** ≥ 5× the member's daily average of the 7 days before |
 | `role_raised` | `memberships` (`updated_at`) | someone became owner / admin in the last 24 h (not the founding owner) |
 | `company_key_added` | `broker_keys` (`scope = 'company'`) | created in the last 24 h (members' own keys are not reported) |
 | `skill_editing_opened` | `skill_editing_settings` | 「全員が直せる」 on, switched in the last 24 h |

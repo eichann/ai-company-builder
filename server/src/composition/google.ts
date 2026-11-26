@@ -43,6 +43,8 @@ const GOOGLE_RELAY_USAGE_KEY = 'person-relay:google'
 const GOOGLE_RELAY_REFUSED_KEY = 'person-relay:google:refused'
 /** A picked Drive video's bytes served per member and day in `broker_usage` (`tokens` = bytes, `requests` = answers; google-drive.md "Streaming a picked video"). */
 const DRIVE_VIEW_USAGE_KEY = 'drive-view:bytes'
+/** Its requests a cap refused, per member and day (how many only; neither counts as key use in 「気になる動き」). */
+const DRIVE_VIEW_REFUSED_KEY = 'drive-view:refused'
 
 export interface GoogleWiringDeps {
   conn: Database.Database
@@ -183,6 +185,7 @@ export function wireGoogle(deps: GoogleWiringDeps) {
         return { company: u.tokens, member: u.memberTokens }
       },
       add: (companyId, userId, day, bytes, requests) => repos.brokerKeys.addUsage(companyId, DRIVE_VIEW_USAGE_KEY, userId, day, requests, bytes),
+      refused: (companyId, userId, day) => repos.brokerKeys.addUsage(companyId, DRIVE_VIEW_REFUSED_KEY, userId, day, 1, 0),
     },
     record: (companyId, userId, e) => agentEvents.recordServerEvent(companyId, userId, {
       agent: 'script',

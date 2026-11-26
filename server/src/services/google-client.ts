@@ -528,6 +528,16 @@ export function createGoogleClient(deps: GoogleClientDeps) {
         const token = await accessTokenFor(companyId, userId, grant!)
         if ('stop' in token) return notSent(token.stop)
         if ('failure' in token) return notSent(token.failure === 'answer-too-large' ? 'token-unavailable' : token.failure)
+        // A refresh can take seconds: every switch and the grant once more after it, and from this last check to the
+        // request leaving nothing is awaited (the call "in flight" of google-drive.md "Streaming a picked video").
+        const offAfter = await switchesOff(companyId, userId)
+        if (offAfter) return notSent(offAfter)
+        const grantNow = connectors.grant('google', userId)
+        const stopNow = grantStop(grantNow)
+        if (stopNow) return notSent(stopNow)
+        if (grantNow!.grantId !== req.grantId) return notSent('grant-changed')
+        const scopedNow = scopeStop(companyId, connectors, grantNow!, GOOGLE_SCOPE.driveFile)
+        if (scopedNow) return notSent(scopedNow)
         if (req.signal.aborted) return notSent('aborted')
 
         // One controller for the call: the viewer leaving, the deadline, or the caller's abort() end it.

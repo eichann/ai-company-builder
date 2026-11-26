@@ -61,6 +61,7 @@ const LIMITS: Record<string, string> = {
   ACB_DRIVE_VIEW_MEMBER_PER_MINUTE: '10000',
   // Every request its own session unless a test says otherwise (metadata read each time).
   ACB_DRIVE_VIEW_SESSION_IDLE_MS: '1',
+  ACB_DRIVE_VIEW_ANSWER_MS: '120000',
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -91,6 +92,7 @@ const view = async (user: string, fileId: string, range?: string, signal?: Abort
 const bytesOf = async (res: Response) => new Uint8Array(await res.arrayBuffer())
 const usage = (userId?: string) => (db.prepare(`SELECT COALESCE(SUM(tokens), 0) AS n FROM broker_usage WHERE company_id = ? AND key_id = ?${userId ? ' AND user_id = ?' : ''}`)
   .get(...[CO, USAGE_KEY, ...(userId ? [userId] : [])]) as Json).n as number
+const refusals = (userId: string) => (db.prepare("SELECT COALESCE(SUM(requests), 0) AS n FROM broker_usage WHERE company_id = ? AND key_id = 'drive-view:refused' AND user_id = ?").get(CO, userId) as Json).n as number
 const sessionLines = () => db.prepare("SELECT * FROM agent_events WHERE company_id = ? AND tool = 'google:drive.view' ORDER BY seq").all(CO) as Json[]
 const media = () => google.mediaAnswers.filter(a => a.id === VIDEO || a.id === OTHER_VIDEO)
 const until = async (ok: () => boolean, ms = 3000) => {
@@ -180,7 +182,7 @@ beforeAll(async () => {
 beforeEach(() => {
   Object.assign(process.env, LIMITS)
   google.paceMedia(0)
-  db.prepare('DELETE FROM broker_usage WHERE key_id = ?').run(USAGE_KEY)
+  db.prepare("DELETE FROM broker_usage WHERE key_id LIKE 'drive-view:%'").run()
 })
 
 afterAll(async () => {
@@ -388,6 +390,8 @@ describe('caps (video only; nothing asked of Google when over one)', () => {
     expect(over.status).toBe(429)
     expect(over.headers.get('retry-after')).not.toBeNull()
     expect((await json(over)).body.code).toBe('DRIVE_VIEW_MEMBER_DAY')
+    // Counted as a refusal (how many only), never as bytes.
+    expect(refusals('m-sato')).toBe(1)
     expect(google.requests.length).toBe(asked)
     // Another member still plays (the cap is per member).
     const other = await view('m-tanaka', VIDEO, 'bytes=0-9')
@@ -463,15 +467,22 @@ describe('caps (video only; nothing asked of Google when over one)', () => {
 
   it('requests per minute per member: then 429 with Retry-After, Google not asked', async () => {
     process.env.ACB_DRIVE_VIEW_MEMBER_PER_MINUTE = '3'
-    // The owner's own view pick (its minute starts empty).
+    // The owner's own view pick (its minute holds at most the one refused request of an earlier test).
     await pickToView('m-owner', VIDEO)
     for (let i = 0; i < 3; i++) await (await view('m-owner', VIDEO, 'bytes=0-9')).arrayBuffer()
     const asked = google.requests.length
+    const lastViewed = () => (db.prepare('SELECT last_viewed_at FROM google_drive_view_picks WHERE company_id = ? AND user_id = ?').get(CO, 'm-owner') as Json).last_viewed_at
+    const viewedBefore = lastViewed()
+    const refusedBefore = refusals('m-owner')
+    await new Promise(r => setTimeout(r, 5))
     const res = await view('m-owner', VIDEO, 'bytes=0-9')
     expect(res.status).toBe(429)
     expect(Number(res.headers.get('retry-after'))).toBeGreaterThan(0)
     expect((await json(res)).body.code).toBe('DRIVE_VIEW_TOO_FAST')
     expect(google.requests.length).toBe(asked)
+    // A flood writes nothing: the pick is not renewed by a refused request; the refusal is counted.
+    expect(lastViewed()).toBe(viewedBefore)
+    expect(refusals('m-owner')).toBe(refusedBefore + 1)
   })
 })
 
@@ -508,7 +519,141 @@ describe('the viewer leaving aborts the call to Google', () => {
   })
 })
 
+describe('an answer ends by itself (review 2026-11-27)', () => {
+  it('a viewer that stops reading but keeps the connection: the answer\'s deadline releases the slot, gives the bytes back and errors the stream', async () => {
+    process.env.ACB_DRIVE_VIEW_ANSWER_MS = '300'
+    google.paceMedia(20, 50)
+    const res = await view('m-sato', VIDEO, 'bytes=0-')
+    expect(res.status).toBe(206)
+    expect(services.googleDriveView.openStreams(CO, 'm-sato')).toBe(1)
+    // Nothing is read: no pull, no cancel, no abort from the viewer.
+    await until(() => services.googleDriveView.openStreams(CO, 'm-sato') === 0)
+    expect(usage('m-sato')).toBeLessThan(1000)
+    await until(() => media().at(-1)!.state === 'aborted')
+    // The answer never looks complete: reading it now fails.
+    await expect(res.arrayBuffer()).rejects.toThrow()
+  })
+
+  it('Google ending before the promised length (no Content-Length) or losing the connection: the answer errors, never a clean end', async () => {
+    for (const fault of ['too-short', 'broken'] as const) {
+      google.paceMedia(0, 10)
+      google.misanswerNextMedia(fault)
+      const res = await view('m-sato', VIDEO, 'bytes=0-99')
+      expect(res.status, fault).toBe(206)
+      expect(res.headers.get('content-length')).toBe('100')
+      await expect(res.arrayBuffer(), fault).rejects.toThrow()
+      await until(() => services.googleDriveView.openStreams(CO, 'm-sato') === 0)
+      // Only what reached the viewer counts.
+      expect(usage('m-sato'), fault).toBeLessThan(100)
+      db.prepare("DELETE FROM broker_usage WHERE key_id LIKE 'drive-view:%'").run()
+    }
+  })
+
+  it('a re-consent or a revocation while the access token is refreshed: the bytes are not asked', async () => {
+    process.env.ACB_DRIVE_VIEW_SESSION_IDLE_MS = '60000'
+    // The session's metadata is read first (the token is fresh then).
+    await (await view('m-tanaka', VIDEO, 'bytes=0-9')).arrayBuffer()
+    // The next range needs a new access token, and Google takes its time to answer the refresh.
+    services.googleClient.forget(CO, 'm-tanaka')
+    google.faults.delayMs = 400
+    const before = media().length
+    try {
+      const pending = view('m-tanaka', VIDEO, 'bytes=10-19')
+      await new Promise(r => setTimeout(r, 200))
+      // Meanwhile the grant ends (as 「許可をやめる」 leaves it, the refresh token gone).
+      db.prepare("UPDATE connector_grants SET status = 'revoked', refresh_token_sealed = NULL WHERE company_id = ? AND user_id = ? AND provider = 'google'").run(CO, 'm-tanaka')
+      const r = await json(await pending)
+      expect(r.status, r.text).toBe(409)
+      expect(r.body.code).toBe('GOOGLE_CONSENT_NEEDED')
+      expect(media().length).toBe(before)
+      expect(services.googleDriveView.openStreams(CO, 'm-tanaka')).toBe(0)
+    } finally {
+      google.faults.delayMs = 0
+      await allow('m-tanaka', ['drive'])
+    }
+  })
+
+  it('two answers awaiting the metadata at once near the day\'s cap: the reservation re-reads the count, so together they stay within it', async () => {
+    process.env.ACB_DRIVE_VIEW_MEMBER_DAY_BYTES = '1500'
+    // Both pass the caps (nothing used yet), then wait on Google for the session's metadata.
+    google.faults.delayMs = 200
+    try {
+      const [a, b] = await Promise.all([view('m-sato', VIDEO, 'bytes=0-'), view('m-sato', VIDEO, 'bytes=1000-')])
+      const lengths = await Promise.all([a, b].map(async r => (r.status === 206 ? (await bytesOf(r)).byteLength : (await r.text(), 0))))
+      expect(lengths[0] + lengths[1]).toBe(1500)
+      expect(usage('m-sato')).toBe(1500)
+    } finally {
+      google.faults.delayMs = 0
+    }
+  })
+
+  it('the session\'s metadata is read again under a new grant (a re-consent), not reused', async () => {
+    process.env.ACB_DRIVE_VIEW_SESSION_IDLE_MS = '60000'
+    const metaCalls = () => google.requests.filter(r => r.path === `/drive/v3/files/${VIDEO}` && !r.search.includes('alt=media')).length
+    await (await view('m-tanaka', VIDEO, 'bytes=0-9')).arrayBuffer()
+    const first = metaCalls()
+    await (await view('m-tanaka', VIDEO, 'bytes=10-19')).arrayBuffer()
+    expect(metaCalls()).toBe(first)
+    // A new grant (Google gives a refresh token only to a consent without an active grant).
+    db.prepare("UPDATE connector_grants SET status = 'revoked', refresh_token_sealed = NULL WHERE company_id = ? AND user_id = ? AND provider = 'google'").run(CO, 'm-tanaka')
+    await allow('m-tanaka', ['drive'])
+    await (await view('m-tanaka', VIDEO, 'bytes=20-29')).arrayBuffer()
+    expect(metaCalls()).toBe(first + 1)
+  })
+
+  it('another company\'s view pick of the same video for the same person counts for nothing here (Google on)', async () => {
+    db.prepare('INSERT OR IGNORE INTO companies (id, name, slug, owner_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)').run('drive-stream-other', 'other', 'drive-stream-other', 'm-sato', ts(), ts())
+    db.prepare(`INSERT OR REPLACE INTO google_drive_view_picks (company_id, user_id, account_email, file_id, name, mime_type, picked_at, expires_at)
+      VALUES ('drive-stream-other', 'm-sato', ?, ?, '別の動画.mp4', 'video/mp4', ?, '2100-01-01T00:00:00.000Z')`).run(GOOGLE_SEED.member.toLowerCase(), OTHER_VIDEO, ts())
+    const asked = google.requests.length
+    const r = await json(await view('m-sato', OTHER_VIDEO, 'bytes=0-9'))
+    expect(r.status).toBe(403)
+    expect(r.body.code).toBe('DRIVE_VIEW_NOT_PICKED')
+    expect(google.requests.length).toBe(asked)
+  })
+})
+
 describe('the record: one line per viewing session, nothing of the file', () => {
+  it('a seek (the viewer leaving an answer) is not a failure; a session with an answer streaming is not ended under it', async () => {
+    process.env.ACB_DRIVE_VIEW_SESSION_IDLE_MS = '1'
+    services.googleDriveView.sweep(CO)
+    const lines = sessionLines().length
+    google.paceMedia(20, 100)
+    const a = await view('m-sato', VIDEO, 'bytes=0-')
+    const reader = a.body!.getReader()
+    await reader.read()
+    // The server clock passes while the answer streams: the session is not ended under it.
+    await new Promise(r => setTimeout(r, 5))
+    services.googleDriveView.sweep(CO)
+    expect(sessionLines().length).toBe(lines)
+    let got = 0
+    for (;;) {
+      const next = await reader.read()
+      if (next.done) break
+      got += next.value.byteLength
+    }
+    expect(got).toBeGreaterThan(0)
+    await new Promise(r => setTimeout(r, 5))
+    services.googleDriveView.sweep(CO)
+    const added = sessionLines().slice(lines)
+    expect(added).toHaveLength(1)
+    expect(JSON.parse(added[0].target).bytesOut).toBe(1000)
+    // A seek: the player drops an answer and asks another range — normal, the session's outcome stays ok.
+    process.env.ACB_DRIVE_VIEW_SESSION_IDLE_MS = '60000'
+    const b = await view('m-sato', VIDEO, 'bytes=0-')
+    const r2 = b.body!.getReader()
+    await r2.read()
+    await r2.cancel()
+    google.paceMedia(0)
+    await (await view('m-sato', VIDEO, 'bytes=2000-2099')).arrayBuffer()
+    process.env.ACB_DRIVE_VIEW_SESSION_IDLE_MS = '1'
+    await new Promise(r => setTimeout(r, 5))
+    services.googleDriveView.sweep(CO)
+    const seek = sessionLines().slice(lines + 1)
+    expect(seek).toHaveLength(1)
+    expect(seek[0].outcome).toBe('ok')
+  })
+
   it('several ranges of one session file one line when it ends, with the bytes served; the metadata call files none', async () => {
     process.env.ACB_DRIVE_VIEW_SESSION_IDLE_MS = '1'
     services.googleDriveView.sweep(CO)

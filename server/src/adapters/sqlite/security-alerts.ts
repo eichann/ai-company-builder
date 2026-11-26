@@ -116,7 +116,7 @@ export function sqliteSecurityAlertRepository(conn: Database.Database, companyId
     keyRequests(fromDay, toDay) {
       return (conn.prepare(`
         SELECT user_id, day, SUM(requests) AS requests FROM broker_usage
-        WHERE company_id = ? AND day >= ? AND day <= ? AND key_id NOT LIKE '%:refused'
+        WHERE company_id = ? AND day >= ? AND day <= ? AND key_id NOT LIKE '%:refused' AND key_id NOT LIKE 'drive-view:%'
         GROUP BY user_id, day
       `).all(companyId, fromDay, toDay) as Array<{ user_id: string; day: string; requests: number }>)
         .map(r => ({ userId: r.user_id, day: r.day, requests: r.requests }))
