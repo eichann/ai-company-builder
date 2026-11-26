@@ -2219,7 +2219,7 @@ to press each one. Now the member may let their own AI do exactly that, **in a c
 - **The chat**: in a marked turn those tools say 「メンバーがはっきり頼んだときだけ」 and the turn gets
   `AI_ASKED_INSTRUCTIONS`; each success (the answer's `entry.askedBy`) joins **one card per turn** (`data-ai-asked`, the
   same id pushed again with every item; stored as `aiAsked`, latest copy wins): 「AI が頼まれてしたこと（n件）」, one line
-  per record with ［取り消す］ (`AiAskedCard.tsx` → `tasks:undo` with the member's session at the entry's version; undone
+  per record with ［取り消す］ (`AiAskedCard.tsx` → `tasks:undo` with the member's session at the entry's version — on `VERSION_CONFLICT` once more at the record's version now (`undoAiAsked`: the AI changed the same record again in the turn, task version 16); undone
   already or changed since — `AI_ASKED_UNDO_STALE_CODES` — it says so with the record's state now, read from the server).
 - Tests: `server/tests/integration/ai-asked-close.test.ts` (setting off by default and the member's alone, the fixed
   refusal, nothing written; the member's own task completed and recorded with who asked and the conversation, undone by

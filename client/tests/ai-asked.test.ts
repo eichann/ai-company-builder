@@ -131,6 +131,24 @@ test('［取り消す］ is the member\'s own undo of that entry (tasks:undo wit
   assert.deepEqual(calls, [['co', TASK, 4, 4]])
 })
 
+// Task version 16: the AI fixed a task's 件名 (v4) and then its 目的 (v5) in one turn — the earlier line's ［取り消す］ is
+// sent once more at the record's version now (the server still judges CHANGED_SINCE); any other refusal is not retried.
+test('［取り消す］ of an earlier entry on the same record is retried once at the record\'s version now', async () => {
+  const calls: unknown[][] = []
+  const port = (first: { code: string }) => ({
+    undoTaskAction: async (...args: unknown[]) => {
+      calls.push(args)
+      return calls.length === 1 ? { success: false, offline: false, error: 'x', ...first } : { success: true, recordId: TASK }
+    },
+    getRecordCard: async () => ({ success: true, card: { version: 5 } }),
+  }) as never
+  assert.equal((await undoAiAsked('co', TASK, 4, port({ code: 'VERSION_CONFLICT' }))).success, true)
+  assert.deepEqual(calls, [['co', TASK, 4, 4], ['co', TASK, 4, 5]])
+  calls.length = 0
+  assert.equal((await undoAiAsked('co', TASK, 4, port({ code: 'CHANGED_SINCE' }))).success, false)
+  assert.deepEqual(calls, [['co', TASK, 4, 4]])
+})
+
 test('経緯 says the AI did it at the member\'s request; other AI entries read as before', () => {
   const task = coreTypeDefinitions().find(d => d.name === 'task')!
   const rr = coreTypeDefinitions().find(d => d.name === 'reply_request')!
