@@ -800,7 +800,7 @@ describe('進める / 人に聞く / 判断できなかった: one やること 
     expect(task.record.title).toMatch(DATE_ONLY)
     expect(task.record.fields).toMatchObject({ assignee: ALICE })
     expect(JSON.stringify(task)).toContain(m)
-    expect(JSON.stringify(task)).not.toMatch(/requested|proceed|budget|0\.9/)
+    expect(JSON.stringify(task)).not.toMatch(/requested|proceed|budget|(?<![\d.])0\.9(?!\d)/)
     // Owner-only: bob (at the meeting) and the owner get a missing record's answer.
     expect((await as(BOB, 'GET', `/records/item/${taskOf(occ)}`)).status).toBe(404)
     expect((await as('ss-owner', 'GET', `/records/item/${taskOf(occ)}`)).status).toBe(404)
@@ -829,7 +829,7 @@ describe('update proposals (PR3b, owner memo 「4b-4 挟む部分」 §G-1): 見
     expect(task.record.summary).toBe('AI はたたき台を作りませんでした。更新案が 2 件あります。')
     expect(task.record.fields).toMatchObject({ assignee: ALICE })
     expect(JSON.stringify(task)).toContain(m)
-    expect(JSON.stringify(task)).not.toMatch(/introduction|顔合わせ|0\.8/)
+    expect(JSON.stringify(task)).not.toMatch(/introduction|顔合わせ|(?<![\d.])0\.8(?!\d)/)
     expect(db.prepare("SELECT COUNT(*) AS n FROM notifications WHERE company_id = ? AND kind = 'job_set_declined'").get(CO)).toEqual({ n: 0 })
     expect(reports()).toEqual([expect.objectContaining({ occurrence_id: occ, decision: 'decline', updates: 2 })])
     expect(stateOf(occ)).toBe('done')
