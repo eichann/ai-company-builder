@@ -44,6 +44,7 @@ import { MEETING_OUTPUT_REUSED_NOTE } from '../../../shared/core/meeting-outputs
 import { startLoopbackMcp } from '../agents/loopback-mcp'
 import { shortText, type ToolDisplay } from '../../shared/tool-display'
 import { actionToolDisplay, pluginOperationDisplay, recordToolDisplay } from '../../shared/acb-tool-displays'
+import { AI_ASKED_INSTRUCTIONS, aiAskedDoneWords, type AiAskedCard, type AiAskedItem } from '../../shared/ai-asked'
 import { RecordsApiError, type RecordTurnAccess } from './api'
 import type { MailAttachmentRead } from './mail-attachments'
 import { RECORD_ID_RE } from '../../../shared/core/records'
@@ -109,6 +110,8 @@ export interface RecordToolSpec extends RecordToolDescriptor {
   format?(answer: unknown, input: Record<string, unknown>, turn: { minutesChars: number }): string
   /** Reading minutes: when no まとまり is linked and not exactly one candidate, the app's 「どのまとまりの会議ですか？」 card. */
   bundleChoice?: boolean
+  /** An action the AI runs at the member's request (`ai_on_request`): what it did joins the turn's card with ［取り消す］. */
+  askedCard?: { label: string }
 }
 
 const id = z.string().regex(/^[a-z][a-z0-9_]{0,39}-[0-9a-z]{6,32}$/)
@@ -519,7 +522,7 @@ export function narrowCreateTypes<T extends RecordToolDescriptor>(spec: T, types
  * (the server refuses them anyway) — and a feature's own tools (decisions_record,
  * minutes_link_bundle) are offered only while it is on, whatever types exist.
  */
-export function actionToolSpecs(types: TypeDefinition[], place: { department?: string | null; companyScreen?: boolean } = {}, features: CompanyFeatures = DEFAULT_FEATURES): RecordToolSpec[] {
+export function actionToolSpecs(types: TypeDefinition[], place: { department?: string | null; companyScreen?: boolean; askedTurn?: boolean } = {}, features: CompanyFeatures = DEFAULT_FEATURES): RecordToolSpec[] {
   const specs: RecordToolSpec[] = []
   const live = types.filter(t => !typeIsViewOnly(t.name, features))
   // Service-owned types (議事録・承認のお願い・送るメール・決めたこと) are made by the server's own steps only.
@@ -587,7 +590,12 @@ export function actionToolSpecs(types: TypeDefinition[], place: { department?: s
       // A state the type names (`state_labels`) reads 「準備中（planning）」: the AI says the name to the member.
       const shownState = (st: string) => (t.stateLabels && Object.prototype.hasOwnProperty.call(t.stateLabels, st) ? `${t.stateLabels[st]}（${st}）` : st)
       const from = a.from ? a.from.map(shownState).join(' / ') : 'どの状態からでも'
-      const aiNote = a.who.includes('ai') ? '' : ' この操作は AI からはできない（本人が画面で行う）。This action is not open to the AI: ask the member to do it.' +
+      // `ai_on_request` in a turn the member started (records.md "The AI at the member's request"): only when they asked.
+      const asked = place.askedTurn === true && (a.aiOnRequest?.length ?? 0) > 0 && !a.who.includes('ai')
+      const aiNote = a.who.includes('ai') ? '' : asked
+        ? ' メンバー本人が担当の記録で、メンバーがこの会話ではっきり頼んだときだけ使える（自分の判断では使わない）。断られたら error の文をそのまま伝える。' +
+          ' Only on the member\'s own record and only when they explicitly asked in this conversation; relay a refusal\'s error sentence exactly.'
+        : ' この操作は AI からはできない（本人が画面で行う）。This action is not open to the AI: ask the member to do it.' +
         // ok_from (task complete): the person may do it on someone's OK; the AI only suggests it.
         (a.okFrom && !a.who.includes('ai')
           ? ` ${a.okFrom.map(f => t.fields[f]?.label ?? f).join('・')}も、誰の OK か（OK した人か、ACB の外でもらった OK のいきさつ）を書けば画面で行える。済んだようなら本人に提案してよい。` +
@@ -600,6 +608,7 @@ export function actionToolSpecs(types: TypeDefinition[], place: { department?: s
       specs.push({
         name: tool, readOnly: false, schema: z.object(shape).strict(),
         ...(ALWAYS_LOADED_ACTION_TYPES.includes(t.name) ? {} : { onDemand: true }),
+        ...(asked ? { askedCard: { label: a.label } } : {}),
         display: actionToolDisplay(a.label),
         description: `「${t.label}」の「${a.label}」（${from} → ${a.to ? shownState(a.to) : '状態はそのまま'}${t.stateLabels ? '。メンバーには状態を表示名で言う / say a state by its label to the member' : ''}）。${a.note === 'required' ? 'note（ひとことの理由）が必須。' : ''}${defaultNote}${aiNote}\n` +
           `${t.name}.${name}: from ${a.from ? a.from.join('/') : 'any state'} to ${a.to ?? 'the same state'}.${a.note === 'required' ? ' `note` is required.' : ''}${defaulted.length > 0 ? ` Give ${defaulted.join(', ')} too (when it passes, the task returns to its assignee for a follow-up).` : ''}`,
@@ -910,6 +919,8 @@ export interface RecordToolsOptions {
   jobProposals?: boolean
   /** A job proposal candidate was made: the app's card for the reply (it reads the candidate with the session). */
   onJobProposalCard?: (card: JobProposalCardRef) => void
+  /** The AI ran an action at the member's request: the turn's one card (every item so far), pushed again with each. */
+  onAskedClose?: (card: AiAskedCard) => void
   /** A mail draft was made or changed: its card for the reply. */
   onMailDraft?: (card: MailDraftCard) => void
   /** Connectors' tools on the same token (`tool-providers.ts`); each one's null / failure = none of its tools this turn. */
@@ -970,10 +981,14 @@ export async function createRecordTools(access: RecordTurnAccess, signal?: Abort
   const mail = types.some(t => t.name === 'outbound_message') ? [MAIL_LOOKUP_TOOL, MAIL_SHOW_TOOL, ...(access.scope === 'act' ? mailActionTools(features) : [])] : []
   // A member's job proposal: a person present (never an unattended run), an act token not bound to a run.
   const offersJobProposals = options.jobProposals === true && access.scope === 'act' && access.boundToRun !== true
+  // A turn the member started, as the server marked its token (records.md "The AI at the member's request").
+  const askedTurn = access.memberTurn === true && access.scope === 'act' && access.boundToRun !== true
+  const askedItems: AiAskedItem[] = []
+  const askedCardId = (options.newId ?? (() => crypto.randomUUID()))()
   // A feature's tools follow the feature, not whether its type exists (the types stay installed).
   const specs: RecordToolSpec[] = [
     ...LOOKUPS, ...(types.some(t => t.name === 'meeting') ? [minutesReadTool(features)] : []), ...(types.some(t => t.name === 'approval') ? APPROVAL_LOOKUPS : []),
-    ...(access.scope === 'act' ? actionToolSpecs(types, { department: options.department, companyScreen: options.companyScreen }, features) : []), ...pluginToolSpecs(plugins, access.scope === 'act'), ...pluginCallToolSpecs(plugins), ...mail,
+    ...(access.scope === 'act' ? actionToolSpecs(types, { department: options.department, companyScreen: options.companyScreen, askedTurn }, features) : []), ...pluginToolSpecs(plugins, access.scope === 'act'), ...pluginCallToolSpecs(plugins), ...mail,
     ...(offersJobProposals ? jobProposalToolSpecs() : []),
   ].filter(spec => toolAllowed(spec.name, features))
   const newId = options.newId ?? (() => crypto.randomUUID())
@@ -1018,7 +1033,8 @@ export async function createRecordTools(access: RecordTurnAccess, signal?: Abort
   }
   return {
     specs: [...specs, ...extraSpecs],
-    instructions: recordsInstructions(features) + (offersJobProposals ? JOB_PROPOSAL_INSTRUCTIONS : '') + extraInstructions,
+    instructions: recordsInstructions(features) + (offersJobProposals ? JOB_PROPOSAL_INSTRUCTIONS : '')
+      + (askedTurn && specs.some(s => s.askedCard) ? AI_ASKED_INSTRUCTIONS : '') + extraInstructions,
     close: () => access.close(),
     readTask,
     linkNewFile,
@@ -1053,6 +1069,7 @@ export async function createRecordTools(access: RecordTurnAccess, signal?: Abort
           if (minutesKept.size > MINUTES_KEPT) minutesKept.delete(minutesKept.keys().next().value as string)
         }
         if (!spec.readOnly) changed()
+        if (spec.askedCard) return askedDone(spec.askedCard.label, answer)
         if (spec.name === 'records_create') {
           const made = (answer as { record?: { id?: unknown; type?: unknown } } | undefined)?.record
           if (made) try { options.onRecordCreated?.({ id: made.id, type: made.type }) } catch { /* the topic is a nicety */ }
@@ -1090,6 +1107,26 @@ export async function createRecordTools(access: RecordTurnAccess, signal?: Abort
 
   function changed() {
     try { options.onRecordChanged?.() } catch { /* the list's own looks catch up */ }
+  }
+
+  /** The server ran it at the member's request: the item joins the turn's card (with ［取り消す］), the AI gets a short answer. */
+  function askedDone(label: string, answer: unknown): string {
+    const a = answer as { record?: { id?: unknown; title?: unknown; state?: unknown }; entry?: { version?: unknown; askedBy?: unknown } } | undefined
+    const recordId = a?.record?.id
+    const version = a?.entry?.version
+    const companyId = options.companyId
+    const shown = typeof recordId === 'string' && typeof version === 'number' && !!a?.entry?.askedBy && !!companyId
+    if (shown) {
+      const title = typeof a.record?.title === 'string' && a.record.title.trim() ? a.record.title.trim().slice(0, 200) : '（件名なし）'
+      askedItems.push({ recordId, title, done: aiAskedDoneWords(label), version })
+      try {
+        options.onAskedClose?.({ id: askedCardId, companyId, conversationId: options.conversationId ?? null, items: [...askedItems], at: now().toISOString() })
+      } catch { /* the record is done either way; the card is a nicety */ }
+    }
+    return JSON.stringify({
+      done: true, id: recordId, state: a?.record?.state, version: a?.record && (a.record as { version?: unknown }).version,
+      ...(shown ? { shown: '画面の一覧に出しました（取り消しボタン付き）。返事では件数と「取り消すときはその一覧から」とだけ伝える。 / Shown on the app\'s list with an undo button.' } : {}),
+    })
   }
 
   /**

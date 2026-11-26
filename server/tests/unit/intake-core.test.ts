@@ -131,7 +131,7 @@ describe('the core types the inbox writes', () => {
 
   it('reply_request 5: the assignee may end it in the AI\'s turn too (owner report 2026-11-05), additive over 4', () => {
     const rr = def('reply_request')
-    expect(rr.version).toBe(5)
+    expect(rr.version).toBeGreaterThanOrEqual(5)
     // Every open state, 準備中 and 確かめ中 included: no 返事のお願い is left with nothing for its person to press.
     expect(rr.actions.close).toMatchObject({ from: ['preparing', 'open', 'waiting_reply', 'checking'], to: 'closed', who: ['assignee'] })
     const open = rr.states.filter(s => !rr.final.includes(s))

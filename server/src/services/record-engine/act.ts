@@ -1,7 +1,7 @@
 /** Running an action of a record's type: the engine's five duties (records.md "The state engine"). */
 import { FULL_ACCESS_ROLES, findPrivateScope } from '../../../shared/core/permissions'
 import { isSameOrAncestorPath } from '../../../shared/core/paths'
-import { actionWho, INTERFACES, isSystemOnly, linkPersonWho, linkWhoName, OK_FIELDS, viaOf, type ActionDef, type TypeDefinition } from '../../../shared/core/record-types'
+import { actionWho, AI_ASKED_PER_TURN, AI_ASKED_REFUSALS, aiOnRequestField, INTERFACES, isSystemOnly, linkPersonWho, linkWhoName, OK_FIELDS, viaOf, type ActionDef, type TypeDefinition } from '../../../shared/core/record-types'
 import { ROLE_WHO_PREFIX } from '../../../shared/core/plugin-roles'
 import type { LedgerAttachment, LedgerChange, LedgerDecision, LedgerEntry, LedgerValue } from '../../../shared/core/record-ledger'
 import { driveLinkTarget, fileLinkPath, RECORD_ID_RE } from '../../../shared/core/records'
@@ -121,6 +121,9 @@ function japanNow(ms: number): string {
   return `${p.year}-${p.month}-${p.day}T${p.hour}:${p.minute}`
 }
 
+/** The per-turn cap reached inside the write's transaction: thrown to roll the write back (records.md "The AI at the member's request"). */
+class AskedLimitReached extends Error {}
+
 /** An action called from where its type's `via` does not list (records.md "Where an action may be called from"). */
 export const NOT_VIA = { error: 'この操作はここからはできません。本体の画面から行ってください', code: 'NOT_VIA' } as const
 
@@ -234,7 +237,15 @@ export function acting(ctx: EngineContext) {
       const { byWho, onBehalfOf } = decideWho(member, actor, records, reader, row, def, action, current.fields)
       // …or, for a person `ok_from` names (never the AI), with a statement of whose OK it was.
       const withOk = !byWho && actor.kind === 'human' && (action.okFrom ?? []).some(w => current.fields[w] === member.userId)
-      if (!byWho && !withOk) {
+      // …or, for the member's own AI, at their request (`ai_on_request`; records.md "The AI at the member's request"):
+      // the record's field (never a delegate's) names the member and qualifies in `who` now, the token is a turn the
+      // member started (never a run's), and their own setting is on. The cap is counted in the write's transaction.
+      const askedField = !byWho && actor.kind === 'ai' ? aiOnRequestField(action, current.fields, member.userId) : null
+      const askedTurn = askedField && actor.askedTurn && !actor.runId ? actor.askedTurn : null
+      if (askedTurn && deps.aiAskedOn?.(member.companyId, member.userId) !== true) {
+        return refuse('forbidden', AI_ASKED_REFUSALS.off.error, { code: AI_ASKED_REFUSALS.off.code })
+      }
+      if (!byWho && !withOk && !askedTurn) {
         return refuse('forbidden', actor.kind === 'ai' && !action.who.includes('ai')
           ? 'この操作は AI からはできません。本人が画面から行ってください'
           : 'この操作をする権限がありません', { code: 'NOT_ALLOWED' })
@@ -463,19 +474,30 @@ export function acting(ctx: EngineContext) {
         decision, isDecision: action.decision, typeVersion: row.typeVersion, reversesVersion: null, ...provenance(actor),
         ...(onBehalfOf ? { onBehalfOf } : {}),
         ...(via === 'plugin' && actor.via ? { via: { plugin: actor.via.plugin, version: actor.via.version } } : {}),
+        ...(askedTurn ? { askedBy: member.userId } : {}),
       }
       // Duty 3: state and ledger together, only if nobody changed the record since `expectedVersion`.
       const expected = b.expectedVersion as number
       if (expected !== current.version) return conflict('ほかの人が先に変えました。最新の状態を見てからもう一度お試しください', 'VERSION_CONFLICT', { version: current.version })
-      const written = transactions.run(() => {
-        // The run's fence again, after the awaits above (attached files): a stop or a re-claim meanwhile writes nothing.
-        const fenced = runFenceRefusal(deps, member, actor)
-        if (fenced) return fenced
-        if (!records.writeState({ recordId: row.id, state: nextState, fields: JSON.stringify(nextFields), version: entry.version, updatedAt: at }, expected)) return false
-        if (nextLinks) records.replaceLinks(row.id, nextLinks)
-        records.appendLedger(entry)
-        return true
-      })
+      let written: boolean | ReturnType<typeof refuse>
+      try {
+        written = transactions.run(() => {
+          // The run's fence again, after the awaits above (attached files): a stop or a re-claim meanwhile writes nothing.
+          const fenced = runFenceRefusal(deps, member, actor)
+          if (fenced) return fenced
+          // The member's setting again, after those awaits: turned off meanwhile, nothing is written.
+          if (askedTurn && deps.aiAskedOn?.(member.companyId, member.userId) !== true) return refuse('forbidden', AI_ASKED_REFUSALS.off.error, { code: AI_ASKED_REFUSALS.off.code })
+          if (!records.writeState({ recordId: row.id, state: nextState, fields: JSON.stringify(nextFields), version: entry.version, updatedAt: at }, expected)) return false
+          // One of the turn's `AI_ASKED_PER_TURN`, taken with the write (a write refused gives it back).
+          if (askedTurn && !records.takeAskedAction(member.userId, askedTurn.tokenId, AI_ASKED_PER_TURN)) throw new AskedLimitReached()
+          if (nextLinks) records.replaceLinks(row.id, nextLinks)
+          records.appendLedger(entry)
+          return true
+        })
+      } catch (error) {
+        if (error instanceof AskedLimitReached) return refuse('conflict', AI_ASKED_REFUSALS.limit.error, { code: AI_ASKED_REFUSALS.limit.code })
+        throw error
+      }
       if (written !== true && written !== false) return written
       if (!written) return conflict('ほかの人が先に変えました。最新の状態を見てからもう一度お試しください', 'VERSION_CONFLICT')
 

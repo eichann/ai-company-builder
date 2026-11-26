@@ -1,5 +1,5 @@
 /**
- * Wire shapes of each member's own switches (自分の設定: 受信を読む, AI が自動で進める).
+ * Wire shapes of each member's own switches (自分の設定: 受信を読む, AI が自動で進める, AI に完了を頼めるようにする).
  * The rule is shared/core/work-switches.ts; the company's side (使ってよいか, 各自の
  * 初めの値) is in the task settings (`readIncoming`, `autoRun.enabled` / `memberDefault`).
  *
@@ -20,6 +20,12 @@ export interface MyWorkSwitches {
     connected: { mail: boolean; chat: boolean }
   }
   autoRun: WorkSwitchState
+  /**
+   * 「AI に完了を頼めるようにする」 (owner decision 2026-11-26): the member's alone, always `allowed`, off
+   * until they turn it on (records.md "The AI at the member's request"). Absent from an older server:
+   * the app shows no such switch.
+   */
+  aiCompletes?: WorkSwitchState
   /**
    * The company's チームの進め方 (task settings `teamMode`, default off): the team's steps on a task
    * (引き受け待ち, 確かめる人・レビューと差し戻し, 受けられない, 返事待ち, 代わりの人) are offered.

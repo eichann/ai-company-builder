@@ -2035,7 +2035,7 @@ preload setServerUrl : (url: string) => Promise<boolean>
 preload setSlackFeature -> invoke slack:setFeature($0, $1, $2)
 preload setSlackFeature : (companyId: string, feature: "read" | "reply" | "notices", on: boolean) => Promise<SlackStatusResult>
 preload setWorkSwitch -> invoke workSwitches:set($0, $1, $2)
-preload setWorkSwitch : (companyId: string, which: "readIncoming" | "autoRun", on: boolean) => Promise<WorkSwitchesResult>
+preload setWorkSwitch : (companyId: string, which: "readIncoming" | "autoRun" | "aiCompletes", on: boolean) => Promise<WorkSwitchesResult>
 preload settleAiTurn -> invoke aiTurns:settle($0, $1)
 preload settleAiTurn : (companyId: string, recordId: string) => Promise<AiTurnSettleResult>
 preload shareTask -> invoke tasks:share($0, $1, $2, $3)

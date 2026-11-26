@@ -5,7 +5,8 @@
 // neither mail nor chat connected shows no 受信を読む switch, only the line on what connecting does;
 // 「届いた議事録を AI が自動で読む」 suggests 「社外の人がいる会議だけ」 to a member who never chose, sends the
 // choice, says once (per PC) that past per-series 読まない are gone when 「全部」 is picked, and stays
-// hidden for a server that does not answer it.
+// hidden for a server that does not answer it; 「AI に完了を頼めるようにする」 (the member's alone) starts off, is sent for
+// itself, and is not shown for a server that does not answer it.
 import { test, expect } from '@playwright/test'
 import { expectNoPageErrors, openPreview } from './helpers'
 
@@ -79,4 +80,19 @@ test('a server that does not answer 「届いた議事録を AI が自動で読�
   await expect(page.getByRole('switch', { name: 'AI が自動で進める' })).toBeVisible()
   await expect(page.locator('[data-auto-read]')).toHaveCount(0)
   expectNoPageErrors(state)
+})
+
+test('「AI に完了を頼めるようにする」: off at first, the member\'s own, sent for itself; absent from an older server', async ({ page }) => {
+  const state = await openPreview(page, 'download-folders', { tab: 'mine' })
+  const ask = page.getByRole('switch', { name: 'AI に完了を頼めるようにする' })
+  await expect(ask).toHaveAttribute('aria-checked', 'false')
+  await expect(ask).toBeEnabled()
+  await ask.click()
+  await expect(ask).toHaveAttribute('aria-checked', 'true')
+  expect(await page.evaluate(() => (window as unknown as { __switchesSet: string[] }).__switchesSet)).toEqual(['aiCompletes:true'])
+  expectNoPageErrors(state)
+  const older = await openPreview(page, 'download-folders', { tab: 'mine', aiCompletes: 'none' })
+  await expect(page.getByRole('switch', { name: '受信を読む' })).toBeVisible()
+  await expect(page.getByRole('switch', { name: 'AI に完了を頼めるようにする' })).toHaveCount(0)
+  expectNoPageErrors(older)
 })

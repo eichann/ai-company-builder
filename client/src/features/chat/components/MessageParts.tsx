@@ -21,6 +21,8 @@ import { APPROVAL_PART_TYPE, readApprovalCardRef } from '../../../../shared/appr
 import { JOB_PROPOSAL_PART_TYPE, readJobProposalCardRef } from '../../../../shared/job-proposals'
 import { ApprovalCard } from './ApprovalCard'
 import { JobProposalCard } from './JobProposalCard'
+import { AI_ASKED_PART_TYPE, readAiAskedCard } from '../../../../shared/ai-asked'
+import { AiAskedCardView } from './AiAskedCard'
 import { BROWSER_PLAN_PART_TYPE, readBrowserPlanCardRef } from '../../../../shared/browser-plans'
 import { BrowserPlanCard } from '../../browser-plans/components/BrowserPlanCard'
 import { BROWSER_INSPECTION_PART_TYPE, readBrowserInspectionRef } from '../../../../shared/browser-inspection'
@@ -146,6 +148,10 @@ export function AssistantMessageParts({ parts, isStreaming, markdown }: { parts:
         if (part.type === JOB_PROPOSAL_PART_TYPE) {
           const ref = readJobProposalCardRef((part as { data?: unknown }).data)
           return ref ? <JobProposalCard key={item.key} card={ref} /> : null
+        }
+        if (part.type === AI_ASKED_PART_TYPE) {
+          const card = readAiAskedCard((part as { data?: unknown }).data)
+          return card ? <AiAskedCardView key={item.key} card={card} /> : null
         }
         if (part.type === BROWSER_PLAN_PART_TYPE) {
           const ref = readBrowserPlanCardRef((part as { data?: unknown }).data)

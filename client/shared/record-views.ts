@@ -13,6 +13,7 @@ import type { RecordDetailView } from './record-details'
 import type { ViewersLabel } from '../../shared/types/viewers'
 import type { MyPrivateFolder, PrivateFolderMember } from '../../shared/types/private-folders'
 import { stateWord, thingKindOf, thingName, type ThingKind } from './thing-words'
+import { aiAskedHistoryText } from './ai-asked'
 
 /** The four kinds people see (design §7-2), plus anything else a company defined. */
 export type RecordKind = 'bundle' | 'task' | 'decision' | 'interaction' | 'other'
@@ -317,6 +318,8 @@ export function historyLines(entries: LedgerEntry[], def: TypeDefinition | undef
     const who = e.actorKind === 'ai' ? 'AI' : e.actorKind === 'external' ? (e.actorSource ?? '外のサービス') : (people[e.actorId] ?? 'メンバー')
     // The clock's note already says why (「返事の見込み（11/6）を過ぎました」): one line, not two.
     if (e.action === WAIT_OVER_ACTION && e.note) return { at: e.at, text: `${who}：${e.note}`, ai: false, version: e.version, who }
+    // The AI at the member's request (records.md "The AI at the member's request"): said as such.
+    if (e.actorKind === 'ai' && e.askedBy) return { at: e.at, text: `${aiAskedHistoryText(def?.actions[e.action]?.label ?? e.action)}${e.note ? `（${e.note}）` : ''}`, ai: true, version: e.version, who }
     return { at: e.at, text: `${who}：${what}${e.note ? `（${e.note}）` : ''}`, ai: e.actorKind === 'ai', version: e.version, who }
   })
 }

@@ -12,6 +12,7 @@ import { REVIEW_PART_TYPE } from '../shared/review-request'
 import { PLUGIN_OPERATION_PART_TYPE, type PluginOperationCard } from '../shared/plugin-operations'
 import { APPROVAL_PART_TYPE, type ApprovalCardRef } from '../shared/approvals'
 import { JOB_PROPOSAL_PART_TYPE, type JobProposalCardRef } from '../shared/job-proposals'
+import { AI_ASKED_PART_TYPE, type AiAskedCard } from '../shared/ai-asked'
 import { BROWSER_PLAN_PART_TYPE, type BrowserPlanCardRef } from '../shared/browser-plans'
 import type { BrowserRequestTools } from './browser-request/tools'
 import type { BrowserInspectTools } from './browser-request/inspect-tool'
@@ -22,7 +23,7 @@ import { DRIVE_OVERWRITE_PART_TYPE, type DriveOverwriteCard } from '../shared/dr
 import type { WebResearchTools } from './web-research/tools'
 import { createSecondOpinionBudget, createSecondOpinionTools, secondOpinionTurn } from './agents/second-opinion'
 import type { SecondOpinionRequest, SecondOpinionResult } from './agents/second-opinion-runner'
-import { SECOND_OPINION_PART_TYPE, askedTargets, secondOpinionForbiddenInstructions, secondOpinionInstructions } from '../shared/agents/second-opinion'
+import { SECOND_OPINION_PART_TYPE, askedTargets, latestMemberText, secondOpinionForbiddenInstructions, secondOpinionInstructions } from '../shared/agents/second-opinion'
 import { recoverSessionModel } from './agents/recovery'
 import type { HandoffRecovery } from '../shared/handoff'
 import { resumeSession, agentInputMessages } from './agents/session'
@@ -104,7 +105,7 @@ export interface ChatServerConfig extends AgentHost {
    * folder under `<department>/.personal/` its writes are held to this turn; null = an ordinary one.
    */
   stepWriteArea?: (companyId: string, conversationId: string) => Promise<string | WriteArea | null>
-  createRecordTools?: (request: { companyId: string; conversationId: string; agent: string; actions: boolean; requireRun?: boolean; companyRoot?: string; department?: string | null; companyScreen?: boolean; largeContext?: boolean; onOperationCard?: (card: PluginOperationCard) => void; onApprovalCard?: (card: ApprovalCardRef) => void; onBundleChoice?: (card: MinutesBundleChoiceCard) => void; onMailDraft?: (card: MailDraftCard) => void; onDriveOverwrite?: (card: DriveOverwriteCard) => void; jobProposals?: boolean; onJobProposalCard?: (card: JobProposalCardRef) => void }, signal: AbortSignal) => Promise<RecordTools | null>
+  createRecordTools?: (request: { companyId: string; conversationId: string; agent: string; actions: boolean; requireRun?: boolean; memberTurn?: boolean; onAskedClose?: (card: AiAskedCard) => void; companyRoot?: string; department?: string | null; companyScreen?: boolean; largeContext?: boolean; onOperationCard?: (card: PluginOperationCard) => void; onApprovalCard?: (card: ApprovalCardRef) => void; onBundleChoice?: (card: MinutesBundleChoiceCard) => void; onMailDraft?: (card: MailDraftCard) => void; onDriveOverwrite?: (card: DriveOverwriteCard) => void; jobProposals?: boolean; onJobProposalCard?: (card: JobProposalCardRef) => void }, signal: AbortSignal) => Promise<RecordTools | null>
   /**
    * The consultation's topic as stored (chat history): the task its new files are linked to
    * (consultation-task.ts). Read at each new file, so a task the AI made earlier in the turn counts.
@@ -612,6 +613,11 @@ export async function startChatServer(config: ChatServerConfig) {
         // A member's proposal of a time job (jobs.md "Member proposals"): only where the member is present — never an
         // unattended run or a step's consultation (the server refuses a run-bound token too). The card is the app's own.
         jobProposals: !aiTurnStep && !requestedPluginStep && !requestedStep && 'area' in stepLookup && !stepLookup.area,
+        // A turn the member started with their own words (records.md "The AI at the member's request"): never an unattended
+        // run or step, a step's consultation, or a message the app composed. The server drops the mark for a run's token too.
+        memberTurn: !aiTurnStep && !requestedPluginStep && requestedStep === undefined && 'area' in stepLookup && !stepLookup.area
+          && latestMemberText(messages).trim() !== '',
+        onAskedClose: card => injector.push({ type: AI_ASKED_PART_TYPE, id: `ai-asked-${card.id}`, data: card }),
         onJobProposalCard: card => injector.push({ type: JOB_PROPOSAL_PART_TYPE, id: `job-proposal-${card.id}`, data: card }),
       }, c.req.raw.signal)).catch(() => null) ?? undefined
       : undefined

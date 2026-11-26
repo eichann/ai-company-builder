@@ -1,6 +1,6 @@
 /**
  * Each member's own switches (自分の設定: 受信を読む, AI が自動で進める; owner decision
- * 2026-11-02, `.claude/rules/tasks.md` "Each member's switches"). The rule is
+ * 2026-11-02; and AI に完了を頼めるようにする, the member's alone, 2026-11-26, `.claude/rules/tasks.md` "Each member's switches"). The rule is
  * shared/core/work-switches.ts; the company's side (使ってよいか, 各自の初めの値) is in
  * the task settings (`workSwitchPoliciesOf`); the member's choices are behind the
  * company handle (`tasks.workSwitches`).
@@ -70,6 +70,7 @@ export function createWorkSwitches(deps: WorkSwitchesDeps) {
         connected: deps.readingConnected?.(companyId, userId) ?? { mail: false, chat: false },
       },
       autoRun: workSwitchState(policies.autoRun, choices.autoRun),
+      aiCompletes: workSwitchState(policies.aiCompletes, choices.aiCompletes),
       teamMode: { on: settings.teamMode },
       ...(channels ? { channels } : {}),
     }
@@ -96,7 +97,7 @@ export function createWorkSwitches(deps: WorkSwitchesDeps) {
      */
     async set(member: Member, body: unknown): Promise<Outcome<MyWorkSwitches>> {
       if (!isObject(body) || !isWorkSwitch(body.switch) || typeof body.on !== 'boolean') {
-        return refuse('bad-request', 'switch must be readIncoming or autoRun; on must be true or false')
+        return refuse('bad-request', 'switch must be readIncoming, autoRun or aiCompletes; on must be true or false')
       }
       const policies = workSwitchPoliciesOf(deps.settingsOf(member.companyId))
       const next = chooseWorkSwitch(policies, choicesOf(member.companyId, member.userId), body.switch, body.on)

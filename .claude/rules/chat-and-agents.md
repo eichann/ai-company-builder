@@ -416,6 +416,9 @@ A member's proposal of a time job (`job_proposal_places`, `job_proposal_create`,
 only to a consultation the member is in — the chat server passes `jobProposals` false for every 「AI の番」, job run and
 step consultation, and the tools need an `act` token not bound to a run (`RecordTurnAccess.boundToRun`); the candidate
 becomes the app's card, and only the member's press submits it (`jobs.md` "Member proposals" "The app (PR C)").
+A turn the member started with their own words asks its token with `memberTurn` (`records.md` "The AI at the member's
+request"): only then may the AI complete the member's やること / end their 返事のお願い when they ask, each shown on one card
+per turn with ［取り消す］ (`client/shared/ai-asked.ts`).
 In such a turn (the create tool really offered, never an unattended step: `repeatAskForTurn`) main may add a one-time
 question 「毎週同じ時間にやりましょうか？」 for a company Skill used on 3 distinct days (`jobRepeatAsk`, `jobs.md` "Asking after
 repeats (PR D)").

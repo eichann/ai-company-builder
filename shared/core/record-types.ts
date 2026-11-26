@@ -231,6 +231,18 @@ export interface ActionDef {
    */
   whoFallback?: string[]
   /**
+   * YAML `ai_on_request` (task version 15, reply_request version 6; owner decision 2026-11-26
+   * 「AI に完了を頼めるようにする」): person fields of `who` whose holder may ALSO have their own AI run
+   * the action, when they asked for it in a conversation they are in. Never widens who acts: only the
+   * member held in that field (never a delegate) and only while that field qualifies in `who` now
+   * (`who_unless` applied). The server alone decides the rest at every call — the member's own
+   * setting on, a record token of a turn the member started (never one bound to an execution run),
+   * at most `AI_ASKED_PER_TURN` a turn (records.md "The AI at the member's request"). Absent = none
+   * (left out of the definition then, so existing stored JSON compares equal); an app or server that
+   * does not know the key ignores it, so the AI stays refused there.
+   */
+  aiOnRequest?: string[]
+  /**
    * YAML `links`: record links (not file links) the action may set (task
    * version 5: `set_bundle` → `bundle`, `finish_prep` → `prepared`). The body
    * gives `links: { <name>: id | [ids] | null }`; a link left out stays as it
@@ -306,6 +318,29 @@ export function actionWho(action: Pick<ActionDef, 'who' | 'whoUnless'>, fields: 
     return !when || !Object.entries(when).every(([field, option]) => fields[field] === option)
   })
 }
+
+/**
+ * `ai_on_request`: the field through which `userId`'s own AI may run the action at their request on a
+ * record holding `fields` — one the action lists, holding exactly that member, and still in `who` now
+ * (`actionWho`: a 「確かめてから」 task's assignee does not complete it, so neither does their AI). Null
+ * otherwise. Only the type's say: the server adds the setting, the turn and the cap. Pure.
+ */
+export function aiOnRequestField(action: Pick<ActionDef, 'who' | 'whoUnless' | 'aiOnRequest'>, fields: Readonly<Record<string, unknown>>, userId: string): string | null {
+  if (!action.aiOnRequest || action.aiOnRequest.length === 0) return null
+  const who = actionWho(action, fields)
+  return action.aiOnRequest.find(f => who.includes(f) && typeof fields[f] === 'string' && fields[f] === userId) ?? null
+}
+
+/** How many actions the AI may run at the member's request in one conversation turn (one record token). */
+export const AI_ASKED_PER_TURN = 20
+
+/** The refusals of the AI at the member's request: fixed sentences the AI relays as they are. */
+export const AI_ASKED_REFUSALS = {
+  /** The member's own setting is off. */
+  off: { code: 'AI_ASK_OFF', error: '「AI に完了を頼めるようにする」がオフのため、AI からは完了にできません。設定の「自分の設定」でオンにすると、AI に頼めるようになります（それまではご自身で押してください）。' },
+  /** More than `AI_ASKED_PER_TURN` in one turn. */
+  limit: { code: 'AI_ASK_LIMIT', error: `AI が一度のやりとりで完了にできるのは ${AI_ASKED_PER_TURN} 件までです。続きは、もう一度頼んでください。` },
+} as const
 
 /** The server fields an action with `ok_from` writes (whose OK it was / an OK from outside ACB). */
 export const OK_FIELDS = { by: 'ok_by', note: 'ok_note' } as const
@@ -657,7 +692,7 @@ export function validateTypeDefinition(name: string, raw: YamlValue): TypeParseR
     for (const [aname, a] of Object.entries(rawActions)) {
       if (!ONTOLOGY_NAME_RE.test(aname)) { err(`操作の名前「${aname}」は英小文字・数字・_ で書いてください`); continue }
       if (!isYamlMap(a)) { err(`操作「${aname}」は { label, from, to, who } の形で書いてください`); continue }
-      const allowed = ['label', 'from', 'to', 'who', 'who_fallback', 'notify', 'attach', 'note', 'history_line', 'decision', 'approval', 'args', 'hand_to', 'ok_from', 'who_unless', 'links', 'via']
+      const allowed = ['label', 'from', 'to', 'who', 'who_fallback', 'notify', 'attach', 'note', 'history_line', 'decision', 'approval', 'args', 'hand_to', 'ok_from', 'who_unless', 'links', 'via', 'ai_on_request']
       for (const k of Object.keys(a)) if (!allowed.includes(k)) err(`操作「${aname}」に知らない項目「${k}」があります（式・連鎖・自動実行は書けません）`)
       if (!isStr(a.label)) err(`操作「${aname}」に label を書いてください`)
       let from: string[] | null = null
@@ -734,6 +769,14 @@ export function validateTypeDefinition(name: string, raw: YamlValue): TypeParseR
           err(`操作「${aname}」に ok_from を書くときは、欄「${OK_FIELDS.by}」（kind: person, source: server）と「${OK_FIELDS.note}」（kind: text, source: server）が要ります`)
         } else okFrom = o as string[]
       }
+      // `ai_on_request` (task 15, reply_request 6): person fields already in `who` whose own AI may run it when asked.
+      let aiOnRequest: string[] | undefined
+      if (a.ai_on_request !== undefined && a.ai_on_request !== null) {
+        const r = list(a.ai_on_request)
+        if (!r || r.length === 0 || !r.every(w => typeof w === 'string' && personFields.has(w) && (who ?? []).includes(w)) || isSystemOnly((who ?? []) as string[])) {
+          err(`操作「${aname}」の ai_on_request は、who に書いた人の欄の名前で書いてください`)
+        } else aiOnRequest = [...new Set(r as string[])]
+      }
       let whoUnless: Record<string, Record<string, string>> | undefined
       if (a.who_unless !== undefined && a.who_unless !== null) {
         const wu = a.who_unless
@@ -787,6 +830,7 @@ export function validateTypeDefinition(name: string, raw: YamlValue): TypeParseR
         ...(okFrom ? { okFrom } : {}),
         ...(whoUnless ? { whoUnless } : {}),
         ...(whoFallback ? { whoFallback } : {}),
+        ...(aiOnRequest ? { aiOnRequest } : {}),
         ...(actionLinks ? { links: actionLinks } : {}),
         ...(via ? { via } : {}),
       }

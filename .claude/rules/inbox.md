@@ -436,7 +436,9 @@ private folder → 400, the folder never named), `GET /inbox/status`, `POST /inb
   `wait_until` is B5. v4 (additive): the origin link `task` (もとのタスク: the やること a mail we sent
   first came from). v5 (additive; owner report 2026-11-05: a request sat in 「AI が確かめている」 after the
   member's reply, with nothing to press): the assignee's 「終わりにする」 (`close`) from **every open state**,
-  準備中 / 確かめ中 — the AI's turn — included. The AI never has it (`who: [assignee]`); a check that was
+  準備中 / 確かめ中 — the AI's turn — included. The AI never has it (`who: [assignee]`) — except, since v6, the
+  assignee's own AI at their request (`ai_on_request: [assignee]` on `close` and `replied_elsewhere`, `records.md` "The AI
+  at the member's request"; never `ai_close`'s judgement nor `drop`); a check that was
   running and writes after the close is refused (its `from` no longer holds, and the version moved).
   ［取り消す］ is the generic undo of that entry. The record card offers it (`tasks-ui.md` 「A 返事のお願い's
   card」). Tests: `inbox.test.ts` 「終わりにする」 (who, the AI's late writes refused, undo, 準備中),

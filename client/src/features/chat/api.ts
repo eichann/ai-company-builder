@@ -373,6 +373,16 @@ export function retryAiTurn(companyId: string, recordId: string, writes: AiTurnW
 }
 
 /**
+ * 「AI が頼まれて片づけました」 (ai-asked.ts): ［取り消す］ is the member's own generic undo of the AI's entry, with their
+ * session in main (`tasks:undo`) — the version it made, expected unchanged since. The AI has no path to it.
+ */
+export type AiAskedCardPort = ElectronPort<'undoTaskAction'>
+
+export function undoAiAsked(companyId: string, recordId: string, version: number, port: AiAskedCardPort = window.electronAPI) {
+  return port.undoTaskAction(companyId, recordId, version, version)
+}
+
+/**
  * The job proposal card (jobs.md "Member proposals" "The app (PR C)"): reading the candidate and the member's own presses —
  * 「これで管理者に出す」 and 「取り下げる」 — with their session in main. The AI has no path to these.
  */

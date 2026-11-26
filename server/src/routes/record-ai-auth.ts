@@ -39,8 +39,10 @@ export async function connectorRoleRefusal(c: Context, h: RecordTokenHolder, rol
 
 // The conversation and the execution run come from the token, never the body (a body's proposedBy / conversationId is ignored here).
 // The run's generation rides along so the engine and the Drive put fence the run again at the write (records.md "Execution runs").
+// `askedTurn`: only a member's turn's token, never one bound to a run (records.md "The AI at the member's request").
 export const aiActor = (h: RecordTokenHolder) => ({
   kind: 'ai' as const, source: h.agent, conversationId: h.conversationId, runId: h.run?.id ?? null, runGeneration: h.run?.generation ?? null,
+  askedTurn: h.memberTurn && !h.run ? { tokenId: h.tokenId } : null,
 })
 
 /**

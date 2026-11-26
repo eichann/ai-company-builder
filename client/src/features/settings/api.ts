@@ -6,6 +6,7 @@
 import type { ElectronAPI, ElectronPort } from '../../shared/ipc/electron-api'
 import type { GoogleFeature, GoogleRelayService } from '../../../shared/google'
 import type { SlackFeature } from '../../../shared/slack'
+import type { WorkSwitch } from '../../../shared/work-switches'
 import type { BrowserRecordingEdit } from '../../../shared/browser-recorder'
 import { FULL_ACCESS_ROLES } from '../../../../shared/core/permissions'
 import type { MeetingAutoReadMode } from '../../../../shared/core/minutes'
@@ -229,7 +230,7 @@ export function getWorkSwitches(companyId: string, reads: WorkSwitchReads = wind
   return reads.getWorkSwitches(companyId)
 }
 
-export function setWorkSwitch(companyId: string, which: 'readIncoming' | 'autoRun', on: boolean, writes: WorkSwitchWrites = window.electronAPI) {
+export function setWorkSwitch(companyId: string, which: WorkSwitch, on: boolean, writes: WorkSwitchWrites = window.electronAPI) {
   return writes.setWorkSwitch(companyId, which, on)
 }
 

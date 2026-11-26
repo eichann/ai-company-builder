@@ -30,6 +30,8 @@ export interface LedgerInsert {
   reversesVersion: number | null; proposedBy: string | null; conversationId: string | null; receipt: string | null
   onBehalfOf: string | null; runId: string | null; skills: string | null; via: string | null
   origin: LedgerOrigin | null
+  /** The member who asked their AI for this entry (records.md "The AI at the member's request"); null otherwise. */
+  askedBy?: string | null
 }
 
 /** Insert one engine ledger row with its delivery number (one transaction: a savepoint inside the caller's). */
@@ -39,11 +41,11 @@ export function insertLedgerRow(conn: Database.Database, companyId: string, e: L
     // An entry written in an execution run copies the run's procedure as it is now (records.md "Which procedure").
     conn.prepare(`INSERT INTO record_ledger (company_id, record_id, version, action, from_state, to_state, actor_id, actor_kind, actor_source, at, note,
         changes, attachments, decision, is_decision, type_version, reverses_version, proposed_by, conversation_id, receipt, on_behalf_of, run_id, procedure, skills, via,
-        delivery_seq, origin)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, (SELECT procedure FROM ai_runs WHERE company_id = ? AND id = ?), ?, ?, ?, ?)`)
+        delivery_seq, origin${e.askedBy ? ', asked_by' : ''})
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, (SELECT procedure FROM ai_runs WHERE company_id = ? AND id = ?), ?, ?, ?, ?${e.askedBy ? ', ?' : ''})`)
       .run(companyId, e.recordId, e.version, e.action, e.fromState, e.toState, e.actorId, e.actorKind, e.actorSource, e.at, e.note,
         e.changes, e.attachments, e.decision, e.isDecision, e.typeVersion, e.reversesVersion, e.proposedBy, e.conversationId, e.receipt, e.onBehalfOf, e.runId,
-        companyId, e.runId, e.skills, e.via, seq, e.origin)
+        companyId, e.runId, e.skills, e.via, seq, e.origin, ...(e.askedBy ? [e.askedBy] : []))
     return seq
   })()
 }

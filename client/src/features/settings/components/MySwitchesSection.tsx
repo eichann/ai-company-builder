@@ -1,4 +1,5 @@
-// 設定 → 自分の設定: the member's own 「受信を読む」 and 「AI が自動で進める」 (言葉の決まり 5c), and
+// 設定 → 自分の設定: the member's own 「受信を読む」 and 「AI が自動で進める」 (言葉の決まり 5c), 「AI に完了を頼めるようにする」
+// (the member's alone, shown only when the server answers it; records.md "The AI at the member's request"), and
 // 「届いた議事録を AI が自動で読む」 (MeetingAutoReadSetting).
 // The company decides whether each may be used (管理画面の「詳しい設定」); one it stops is greyed
 // with 「会社の設定で止まっています」 — in the warning colour, since an admin can turn it back on
@@ -21,6 +22,10 @@ const SWITCHES: Array<{ key: WorkSwitch; title: string; text: string }> = [
     key: 'autoRun', title: WORK_SWITCH_NAMES.autoRun,
     text: '会議が終わったときなど、あなたの AI の番を AI が自分で始めます。オフなら「AI に進めてもらう」を押すまで待ちます。送る・承認するは、どちらでも必ず人です。',
   },
+  {
+    key: 'aiCompletes', title: WORK_SWITCH_NAMES.aiCompletes,
+    text: 'AI との相談で「この7件を完了にして」のように頼むと、あなたが担当のやることを AI が完了にし、返事のお願いを「終わりにする」「もう返した」にします。頼んだときだけで、AI が自分の判断ですることはありません。片づけたものは相談の中に一覧で出て、そこから取り消せます。この設定はあなただけのものです。',
+  },
 ]
 
 /** `onOpenGoogle`: 受信を読む is on but Google has not let ACB read the mail yet — the way to 「Google で許可」. */
@@ -38,6 +43,8 @@ export function MySwitchesSection({ companyId, onOpenGoogle }: { companyId: stri
           <Card className="divide-y divide-zinc-100 dark:divide-white/[0.06]">
             {SWITCHES.map(w => {
               const s = switches[w.key]
+              // An older server answers no aiCompletes: no such switch then.
+              if (!s) return null
               // No mail or chat in the company (owner decision 2026-11-03): one line on what connecting does, no switch.
               if (w.key === 'readIncoming' && !companyHasMailOrChat(switches)) {
                 return (

@@ -15,7 +15,7 @@ import type {
   RecordRow, RecordStateRow, RecordTypeRow,
   MeetingEventRow,
 } from '../../ports/records'
-import { BUNDLE_PART_ENDED_ACTION, coreTypeDefinitions, DECISION_VERSION, MIGRATION_ACTOR, OUTSIDE_TIME_ACTION, TASK_VERSION } from '../../../shared/core/core-types'
+import { BUNDLE_PART_ENDED_ACTION, coreTypeDefinitions, DECISION_VERSION, MIGRATION_ACTOR, OUTSIDE_TIME_ACTION, REPLY_REQUEST_VERSION, TASK_VERSION } from '../../../shared/core/core-types'
 import { canonicalTypeJson } from '../../../shared/core/record-types'
 import { driveLinkTarget } from '../../../shared/core/records'
 import { CONTENT_REF_PREFIX } from '../../../shared/core/record-contents'
@@ -100,7 +100,7 @@ type LedgerRow = {
   actor_kind: LedgerEntry['actorKind']; actor_source: string | null; at: string; note: string; changes: string; attachments: string
   decision: string | null; is_decision: number; type_version: number | null; reverses_version: number | null
   proposed_by: string | null; conversation_id: string | null; receipt: string | null; on_behalf_of: string | null; run_id: string | null
-  procedure: string | null; skills: string | null; via: string | null
+  procedure: string | null; skills: string | null; via: string | null; asked_by: string | null
 }
 const toLedger = (r: LedgerRow): LedgerEntry => ({
   recordId: r.record_id, version: r.version, action: r.action, fromState: r.from_state, toState: r.to_state, actorId: r.actor_id,
@@ -113,6 +113,7 @@ const toLedger = (r: LedgerRow): LedgerEntry => ({
   ...(r.skills ? { skills: parseSkillUses(r.skills) } : {}),
   ...(r.on_behalf_of ? { onBehalfOf: r.on_behalf_of } : {}),
   ...(r.via ? { via: parseLedgerVia(r.via) } : {}),
+  ...(r.asked_by ? { askedBy: r.asked_by } : {}),
 })
 
 /** A stored `via` (`{ plugin, version }`), or null when it is not that shape. */
@@ -266,6 +267,11 @@ export function migrateCompanyTaskVersion(conn: Database.Database, companyId: st
  */
 export function migrateCompanyDecisionVersion(conn: Database.Database, companyId: string, at: string): number {
   return migrateCompanyCoreTypeVersion(conn, companyId, 'decision', DECISION_VERSION, at)
+}
+
+/** The same for 返事のお願い (reply_request version 6: `ai_on_request`, `REPLY_REQUEST_VERSION`). Additive. */
+export function migrateCompanyReplyRequestVersion(conn: Database.Database, companyId: string, at: string): number {
+  return migrateCompanyCoreTypeVersion(conn, companyId, 'reply_request', REPLY_REQUEST_VERSION, at)
 }
 
 /** One core type's records moved to `version` (the core definition stored first when missing). */
@@ -555,7 +561,7 @@ export function sqliteRecordRepository(conn: Database.Database, companyId: strin
 
     ledger(recordId) {
       const entries = (conn.prepare(`SELECT record_id, version, action, from_state, to_state, actor_id, actor_kind, actor_source, at, note, changes, attachments,
-          decision, is_decision, type_version, reverses_version, proposed_by, conversation_id, receipt, on_behalf_of, run_id, procedure, skills, via FROM record_ledger WHERE company_id = ? AND record_id = ? ORDER BY version`)
+          decision, is_decision, type_version, reverses_version, proposed_by, conversation_id, receipt, on_behalf_of, run_id, procedure, skills, via, asked_by FROM record_ledger WHERE company_id = ? AND record_id = ? ORDER BY version`)
         .all(companyId, recordId) as LedgerRow[]).map(toLedger)
       return contents.resolveEntries(recordId, contents.typeOfRecord(recordId), entries)
     },
@@ -585,6 +591,7 @@ export function sqliteRecordRepository(conn: Database.Database, companyId: strin
         skills: e.actorKind === 'ai' ? skillUsesJson(conn, companyId, e.actorId, e.conversationId) : null,
         via: e.via ? JSON.stringify({ plugin: e.via.plugin, version: e.via.version }) : null,
         origin: ledgerOriginOf(e.actorId),
+        askedBy: e.askedBy ?? null,
       })
       b.flush(e.at)
     },
@@ -677,17 +684,23 @@ export function sqliteRecordRepository(conn: Database.Database, companyId: strin
     },
 
     insertAiToken(t) {
-      conn.prepare(`INSERT INTO record_ai_tokens (id, company_id, user_id, token_hash, scope, agent, conversation_id, created_at, expires_at, revoked_at, run_id, run_generation)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)`).run(t.id, companyId, t.userId, t.tokenHash, t.scope, t.agent, t.conversationId, t.createdAt, t.expiresAt,
-        t.runId ?? null, t.runGeneration ?? null)
+      conn.prepare(`INSERT INTO record_ai_tokens (id, company_id, user_id, token_hash, scope, agent, conversation_id, created_at, expires_at, revoked_at, run_id, run_generation, member_turn)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?)`).run(t.id, companyId, t.userId, t.tokenHash, t.scope, t.agent, t.conversationId, t.createdAt, t.expiresAt,
+        t.runId ?? null, t.runGeneration ?? null, t.memberTurn === true ? 1 : null)
     },
     aiTokenByHash(tokenHash) {
-      const r = conn.prepare('SELECT id, user_id, token_hash, scope, agent, conversation_id, created_at, expires_at, revoked_at, run_id, run_generation FROM record_ai_tokens WHERE company_id = ? AND token_hash = ?')
-        .get(companyId, tokenHash) as { id: string; user_id: string; token_hash: string; scope: 'read' | 'act'; agent: string; conversation_id: string; created_at: string; expires_at: string; revoked_at: string | null; run_id: string | null; run_generation: number | null } | undefined
+      const r = conn.prepare('SELECT id, user_id, token_hash, scope, agent, conversation_id, created_at, expires_at, revoked_at, run_id, run_generation, member_turn FROM record_ai_tokens WHERE company_id = ? AND token_hash = ?')
+        .get(companyId, tokenHash) as { id: string; user_id: string; token_hash: string; scope: 'read' | 'act'; agent: string; conversation_id: string; created_at: string; expires_at: string; revoked_at: string | null; run_id: string | null; run_generation: number | null; member_turn: number | null } | undefined
       return r ? {
         id: r.id, userId: r.user_id, tokenHash: r.token_hash, scope: r.scope, agent: r.agent, conversationId: r.conversation_id,
         createdAt: r.created_at, expiresAt: r.expires_at, revokedAt: r.revoked_at, runId: r.run_id, runGeneration: r.run_generation,
+        memberTurn: r.member_turn === 1,
       } : null
+    },
+    takeAskedAction(userId, tokenId, max) {
+      // Compare-and-set inside the caller's transaction: a rolled-back action gives its count back.
+      return conn.prepare(`UPDATE record_ai_tokens SET asked_closes = asked_closes + 1
+        WHERE company_id = ? AND user_id = ? AND id = ? AND member_turn = 1 AND run_id IS NULL AND asked_closes < ?`).run(companyId, userId, tokenId, max).changes === 1
     },
     revokeAiToken(userId, tokenId, at) {
       return conn.prepare('UPDATE record_ai_tokens SET revoked_at = ? WHERE company_id = ? AND user_id = ? AND id = ? AND revoked_at IS NULL').run(at, companyId, userId, tokenId).changes === 1

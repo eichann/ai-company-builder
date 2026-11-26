@@ -2,8 +2,8 @@ import Database from 'better-sqlite3'
 import fs from 'fs'
 import { seedPermissionScopes } from '../adapters/sqlite/permission-store'
 import { migrateCompanyContents } from '../adapters/sqlite/record-contents'
-import { migrateCompanyBundleParts, migrateCompanyCoreInterfaceLinks, migrateCompanyDecisionVersion, migrateCompanyOutsideTimes, migrateCompanyTaskVersion } from '../adapters/sqlite/records'
-import { DECISION_VERSION, TASK_VERSION } from '../../shared/core/core-types'
+import { migrateCompanyBundleParts, migrateCompanyCoreInterfaceLinks, migrateCompanyDecisionVersion, migrateCompanyOutsideTimes, migrateCompanyReplyRequestVersion, migrateCompanyTaskVersion } from '../adapters/sqlite/records'
+import { DECISION_VERSION, REPLY_REQUEST_VERSION, TASK_VERSION } from '../../shared/core/core-types'
 import { APP_DB_PATH, DATA_DIR } from '../lib/config'
 import { agentSchema, migrateAgentEventSandbox, migrateSecondOpinionSetting } from './schema/agents'
 import { aiRunSchema, migrateAiRunColumns, migrateAiRunSubjects } from './schema/ai-runs'
@@ -17,7 +17,7 @@ import { migrateNotificationsForUser, notificationSchema } from './schema/notifi
 import { migrateOutboundAttachments, migrateOutboundSendSources, outboundMailSchema } from './schema/outbound-mail'
 import { migrateDepartmentRuleSubject, migrateGroupRuleSubject, migrateRuleAndManagerCompanies, permissionSchema } from './schema/permissions'
 import { migratePluginInstallKeyReference, migratePluginOperationCreates, migratePluginTables, pluginSchema } from './schema/plugins'
-import { migrateMeetingAutoRead, migrateMeetingAutoSeries, migrateRecordLedgerDelivery, migrateRecordLedgerProvenance, migrateRecordLinkCreator, migrateRecordPersonalOwner, migrateRecordTypeSources, migrateRecordViewerSets, migrateRecordViewers, recordSchema } from './schema/records'
+import { migrateAiAskedColumns, migrateMeetingAutoRead, migrateMeetingAutoSeries, migrateRecordLedgerDelivery, migrateRecordLedgerProvenance, migrateRecordLinkCreator, migrateRecordPersonalOwner, migrateRecordTypeSources, migrateRecordViewerSets, migrateRecordViewers, recordSchema } from './schema/records'
 import { migrateMemberAbsenceHistory, migrateMemberWorkSwitches, taskSchema } from './schema/tasks'
 import { migrateSkillUseColumns, skillUseSchema } from './schema/skill-uses'
 import { securityAlertSchema } from './schema/security-alerts'
@@ -177,6 +177,7 @@ export function initDatabase(conn: Database.Database = sqlite) {
   // Tasks to the core version (9: 完了 from any state, 「終わったら」; 10: origin links) — records.md "Task version 9".
   migrateTaskVersion(conn)
   migrateDecisionVersion(conn)
+  migrateReplyRequestVersion(conn)
   migrateConnectorProviders(conn)
   migrateGooglePicker(conn)
   migrateFixedPayloads(conn)
@@ -246,6 +247,8 @@ export function initDatabase(conn: Database.Database = sqlite) {
   migrateMemberWorkSwitches(conn)
   // Who asked for a version published from a request (plugins.md "Requests to publish").
   migrateShelfHistoryRequester(conn)
+  // The AI at the member's request (records.md "The AI at the member's request"): tokens' turn mark and count, the ledger's mark.
+  migrateAiAskedColumns(conn)
 
   // Company scope + default `everyone: read + write` rule, one scope per
   // department. Idempotent; repairs drift left by older server builds.
@@ -316,6 +319,15 @@ export function migrateTaskVersion(conn: Database.Database): void {
   for (const { id } of conn.prepare('SELECT id FROM companies').all() as Array<{ id: string }>) {
     const moved = migrateCompanyTaskVersion(conn, id, at)
     if (moved > 0 && conn === sqlite) console.log(`[records] task version ${TASK_VERSION}: ${moved} task(s) moved in company ${id}`)
+  }
+}
+
+/** Every company's 返事のお願い move to the core reply_request version (`REPLY_REQUEST_VERSION`), idempotent. */
+export function migrateReplyRequestVersion(conn: Database.Database): void {
+  const at = new Date().toISOString()
+  for (const { id } of conn.prepare('SELECT id FROM companies').all() as Array<{ id: string }>) {
+    const moved = migrateCompanyReplyRequestVersion(conn, id, at)
+    if (moved > 0 && conn === sqlite) console.log(`[records] reply_request version ${REPLY_REQUEST_VERSION}: ${moved} record(s) moved in company ${id}`)
   }
 }
 

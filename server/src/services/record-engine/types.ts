@@ -104,6 +104,12 @@ export interface RecordEngineDeps {
    */
   featureOff?: (companyId: string, type: string) => boolean
   /**
+   * 「AI に完了を頼めるようにする」 (records.md "The AI at the member's request"): is the member's own setting
+   * on now (services/work-switches.ts `isOn(…, 'aiCompletes')`)? Asked before the write and again inside its
+   * transaction. Absent → off (the AI is refused, fails closed).
+   */
+  aiAskedOn?: (companyId: string, userId: string) => boolean
+  /**
    * The execution run's fence at the write (services/ai-runs.ts `writeFence`; records.md "Execution runs"): asked
    * inside the write's transaction for an AI actor bound to a run (`runId` + `runGeneration`), so a stop, a re-claim
    * or a lease that ran out during the request's awaits writes nothing. Absent → not asked.
@@ -168,6 +174,12 @@ export interface ActorInput {
    * then include `plugin`; the ledger keeps it.
    */
   via?: LedgerVia | null
+  /**
+   * For the AI: the record token of a turn the member started (records.md "The AI at the member's request"),
+   * from the token, never the body — null for a run's token, a consultation's token an app did not mark, and
+   * a person. Only with it may the AI run an `ai_on_request` action; its count is the per-turn cap.
+   */
+  askedTurn?: { tokenId: string } | null
 }
 
 /**

@@ -58,6 +58,11 @@ export interface RecordTurnAccess {
    * a person must be present for (a member's proposal of a job) are not offered. Absent = not bound.
    */
   boundToRun?: boolean
+  /**
+   * The server marked the token a turn the member started (records.md "The AI at the member's request"): the AI may
+   * be offered the actions the type lets it run at the member's request. Absent = not marked (an older server, a run).
+   */
+  memberTurn?: boolean
   /** `timeoutMs`: this request's own limit (default the API's; a Drive upload takes longer). */
   call(method: 'GET' | 'POST' | 'PUT' | 'DELETE', path: string, body?: unknown, signal?: AbortSignal, opts?: { timeoutMs?: number }): Promise<unknown>
   /** Revoke the token (the turn ended). */
@@ -69,8 +74,11 @@ export interface RecordsApi {
    * A token for one turn, or null when the company map is off for the company
    * (or the member is signed out / offline: the turn simply has no record tools).
    */
-  /** `requireRun`: only with a run this app holds for the consultation (a scheduled job's): none → no token at all. */
-  openTurn(companyId: string, opts: { conversationId: string; agent: string; scope: 'read' | 'act'; requireRun?: boolean }): Promise<RecordTurnAccess | null>
+  /**
+   * `requireRun`: only with a run this app holds for the consultation (a scheduled job's): none → no token at all.
+   * `memberTurn`: the turn was started by the member's own message — asked for an `act` token only, never with a run.
+   */
+  openTurn(companyId: string, opts: { conversationId: string; agent: string; scope: 'read' | 'act'; requireRun?: boolean; memberTurn?: boolean }): Promise<RecordTurnAccess | null>
 }
 
 /** The request as one text, keys sorted: what its idempotency key is made from. */
@@ -126,7 +134,8 @@ export function createRecordsApi(deps: RecordsApiDeps): RecordsApi {
       const run = deps.runOf?.(companyId, opts.conversationId) ?? null
       // A job's run without its run (taken away just now): never an ordinary token.
       if (opts.requireRun && !run) return null
-      const ask = { conversationId: opts.conversationId, agent: opts.agent, scope: opts.scope }
+      // A run has nobody present: never asked as a member's turn (the server drops it there too).
+      const ask = { conversationId: opts.conversationId, agent: opts.agent, scope: opts.scope, ...(opts.memberTurn === true && !run && opts.scope === 'act' ? { memberTurn: true } : {}) }
       let issued: { status: number; body: { data?: unknown } }
       try {
         issued = await request(`${root}/api/companies/${encodeURIComponent(companyId)}/me/record-tokens`, {
@@ -137,7 +146,7 @@ export function createRecordsApi(deps: RecordsApiDeps): RecordsApi {
       } catch {
         return null
       }
-      const data = issued.body.data as { token?: string; tokenId?: string; scope?: 'read' | 'act' } | undefined
+      const data = issued.body.data as { token?: string; tokenId?: string; scope?: 'read' | 'act'; memberTurn?: unknown } | undefined
       if (issued.status !== 201 || !data?.token || !data.tokenId) return null
       const token = data.token
       const conversationId = opts.conversationId
@@ -155,6 +164,7 @@ export function createRecordsApi(deps: RecordsApiDeps): RecordsApi {
       return {
         scope: data.scope === 'act' ? 'act' : 'read',
         boundToRun: run !== null,
+        memberTurn: data.memberTurn === true && run === null,
         async call(method, path, body, signal, opts) {
           if (closed) throw new RecordsApiError('TURN_ENDED', 'この会話のターンは終わりました。')
           if (method !== 'GET' && deps.beforeWrite) await deps.beforeWrite(conversationId).catch(() => undefined)

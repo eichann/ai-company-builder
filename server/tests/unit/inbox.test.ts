@@ -100,6 +100,8 @@ let pluginNotifiers: ConnectedNotifier[] = []
 let autoRunOff = new Set<string>()
 /** Companies whose 「使う機能」 受信の振り分け・返事のお願い is off (records.md "Features on and off"). */
 let inboxOff = new Set<string>()
+/** Members whose own 「AI に完了を頼めるようにする」 is on (the composition's `aiAskedOn`). */
+let askedOn = new Set<string>()
 
 const m = (userId: string, co = 'a'): Member => ({ companyId: co, userId, role: ROLES[userId] ?? 'member' })
 const AI = (userId: string): ServiceActor => ({ id: userId, kind: 'ai', source: 'claude-code', conversationId: 'conv-1', runId: null })
@@ -160,6 +162,7 @@ beforeEach(() => {
   pluginNotifiers = []
   autoRunOff = new Set()
   inboxOff = new Set()
+  askedOn = new Set()
   told = []
   mailbox = {}
   ready = new Set()
@@ -205,6 +208,7 @@ beforeEach(() => {
     afterAct: (co, change) => inbox.afterAct(co, change),
     // As composition.ts: the company's reply 目安 with its own holidays.
     replyGuideline: (_co, at) => replyTarget(at, defaultTaskSettings().reply, companyHolidays).date,
+    aiAskedOn: (_co, u) => askedOn.has(u),
   })
   const fake: InboxSource = {
     async listSince(_co, userId, since) {
@@ -886,6 +890,68 @@ describe('B4: the member already replied (Gmail, Slack, or somewhere ACB cannot 
     // ［取り消す］: her own entry, nothing changed since.
     ok(await engine.undo(m('u-alice'), person('u-alice'), rr, { version: v + 1, expectedVersion: v + 1 }))
     expect(stateOf(rr).state).toBe('checking')
+  })
+
+  it('the AI at the member\'s request (reply_request v6): 「もう返した」 / 「終わりにする」 by her own AI only in her own turn with her setting on, never for someone else; undone by her', async () => {
+    const person = (u: string) => ({ id: u, kind: 'human' as const, source: null })
+    /**
+     * A record token of a turn she started (records.md "The AI at the member's request"); `run` binds it to a run — and,
+     * as if the mark had slipped through every earlier layer, still carries it: the engine refuses a run's actor itself.
+     */
+    const turnToken = (u: string, id: string, run = false) => {
+      handle().records.insertAiToken({ id, userId: u, tokenHash: `h-${id}`, scope: 'act', agent: 'claude-code', conversationId: 'conv-ask', createdAt: TS, expiresAt: '2099-01-01T00:00:00.000Z', revokedAt: null, memberTurn: true, ...(run ? { runId: 'run-1', runGeneration: 1 } : {}) })
+      return { id: u, kind: 'ai' as const, source: 'claude-code', conversationId: 'conv-ask', ...(run ? { runId: 'run-1' } : {}), askedTurn: { tokenId: id } }
+    }
+    inbox.receive('a', 'u-alice', mail())
+    inbox.receive('a', 'u-alice', mail())
+    const [one, two] = interactions()
+    const rr1 = ok(inbox.judge(m('u-alice'), AI('u-alice'), one.id, { expectedVersion: 1, outcome: 'reply', reason: '返事が要る' })).replyRequestId!
+    const rr2 = ok(inbox.judge(m('u-alice'), AI('u-alice'), two.id, { expectedVersion: 1, outcome: 'reply', reason: '返事が要る' })).replyRequestId!
+    const asked = turnToken('u-alice', 'tok-ask')
+    // Her setting off: refused with the fixed sentence, nothing written.
+    expect(await engine.act(m('u-alice'), asked, rr1, 'replied_elsewhere', { expectedVersion: 1 })).toMatchObject({ ok: false, body: { code: 'AI_ASK_OFF' } })
+    askedOn.add('u-alice')
+    // A run's token (an unattended turn) never: the type's own refusal, as before.
+    expect(await engine.act(m('u-alice'), turnToken('u-alice', 'tok-run', true), rr1, 'replied_elsewhere', { expectedVersion: 1 })).toMatchObject({ ok: false, body: { code: 'NOT_ALLOWED' } })
+    // Not drop, not someone else's record (bob is no assignee; the owner-only request is not even his to read).
+    expect(await engine.act(m('u-alice'), asked, rr1, 'drop', { expectedVersion: 1, note: 'いらない' })).toMatchObject({ ok: false, body: { code: 'NOT_ALLOWED' } })
+    askedOn.add('u-bob')
+    expect((await engine.act(m('u-bob'), turnToken('u-bob', 'tok-bob'), rr1, 'close', { expectedVersion: 1 })).ok).toBe(false)
+    expect(stateOf(rr1)).toMatchObject({ state: 'preparing', version: 1 })
+    // Hers, asked in her turn: 「もう返した」 and 「終わりにする」, each marked as asked by her in that conversation.
+    ok(await engine.act(m('u-alice'), asked, rr1, 'replied_elsewhere', { expectedVersion: 1 }))
+    ok(await engine.act(m('u-alice'), asked, rr2, 'close', { expectedVersion: 1 }))
+    expect([stateOf(rr1).state, stateOf(rr2).state]).toEqual(['closed', 'closed'])
+    expect(handle().records.ledger(rr1).at(-1)).toMatchObject({ action: 'replied_elsewhere', actorId: 'u-alice', actorKind: 'ai', askedBy: 'u-alice', conversationId: 'conv-ask' })
+    // ［取り消す］: her generic undo of the AI's entry.
+    ok(await engine.undo(m('u-alice'), person('u-alice'), rr1, { version: 2, expectedVersion: 2 }))
+    expect(stateOf(rr1).state).toBe('preparing')
+  })
+
+  it('the AI at the member\'s request: a write that loses its compare-and-set takes nothing from the turn\'s count', async () => {
+    inbox.receive('a', 'u-alice', mail())
+    const [row] = interactions()
+    const rr = ok(inbox.judge(m('u-alice'), AI('u-alice'), row.id, { expectedVersion: 1, outcome: 'reply', reason: '返事が要る' })).replyRequestId!
+    askedOn.add('u-alice')
+    handle().records.insertAiToken({ id: 'tok-race', userId: 'u-alice', tokenHash: 'h-race', scope: 'act', agent: 'claude-code', conversationId: 'conv-ask', createdAt: TS, expiresAt: '2099-01-01T00:00:00.000Z', revokedAt: null, memberTurn: true })
+    // Someone else's write lands between the engine's read and its own write (the state's compare-and-set fails).
+    const racing: CompanyDataSource = {
+      ...source,
+      forCompany: (co: string) => {
+        const h = source.forCompany(co)
+        return { ...h, records: { ...h.records, writeState: () => false } } as typeof h
+      },
+    } as CompanyDataSource
+    const clock = { now: () => new Date(nowMs).toISOString(), nowMs: () => nowMs }
+    const roleOf = (_co: string, userId: string) => (MEMBERS.includes(userId) ? ROLES[userId] ?? 'member' : null)
+    const lost = createRecordEngine({
+      companyData: racing, transactions: sqliteTransactions(conn), clock, ids: { newId: () => 'x', newToken: () => 'y' },
+      files: { appendHistoryLine: async () => true, fileAtCommit: async () => true },
+      managedFolders: () => [], isMember: (co, u) => roleOf(co, u) !== null, roleOf, notify: () => {}, aiAskedOn: (_co, u) => askedOn.has(u),
+    })
+    const asked = { id: 'u-alice', kind: 'ai' as const, source: 'claude-code', conversationId: 'conv-ask', askedTurn: { tokenId: 'tok-race' } }
+    expect(await lost.act(m('u-alice'), asked, rr, 'close', { expectedVersion: 1 })).toMatchObject({ ok: false, body: { code: 'VERSION_CONFLICT' } })
+    expect((conn.prepare('SELECT asked_closes AS n FROM record_ai_tokens WHERE id = ?').get('tok-race') as { n: number }).n).toBe(0)
   })
 
   it('「終わりにする」 while the AI prepares the draft (準備中) too', async () => {
