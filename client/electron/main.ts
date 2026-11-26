@@ -867,7 +867,12 @@ const docViews = createDocViews({
   shell: createDocViewShell({ serve: request => docFrames.serve(request) }),
   notify: (_windowId, event) => appWindow.send('docView:event', event),
 })
-registerDocViewsIpc(ipc, { frames: docFrames, views: docViews, fromMainWindow: event => isMainFrameSender(event, id => mainWindowHost.isWindow(id)) })
+registerDocViewsIpc(ipc, {
+  frames: docFrames,
+  views: docViews,
+  fromMainWindow: event => isMainFrameSender(event, id => mainWindowHost.isWindow(id)),
+  openExternal: url => desktopShell.openExternal(url),
+})
 // The user manual (files-and-editor.md "The user manual"): this computer's copy of the server's /manual/,
 // shown through the same document views (a grant for that copy alone) and written only outside company folders.
 registerManualIpc(ipc, {

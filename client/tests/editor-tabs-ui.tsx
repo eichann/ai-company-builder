@@ -116,7 +116,10 @@ Object.assign(window, {
       const delay = (window as unknown as { __acbDocDelay?: number }).__acbDocDelay
       if (delay) await new Promise(resolve => setTimeout(resolve, delay))
       if (filePath === TOP_DOC) return { ok: false, reason: 'top_level', message: '会社フォルダのいちばん上にある HTML は表示できません。部署などのフォルダに入れてください。' }
-      return { ok: true, viewId: nextViewId++ }
+      // Events main sends for the new view before its id reaches the page (a spec sets them).
+      const viewId = nextViewId++
+      for (const event of (window as unknown as { __acbEarlyEvents?: object[] }).__acbEarlyEvents ?? []) docEvent?.({ ...event, viewId })
+      return { ok: true, viewId }
     },
     closeDocView: async (viewId: number, keepPlace?: boolean) => { docCalls.push(keepPlace === undefined ? ['close', viewId] : ['close', viewId, keepPlace]) },
     setDocViewBounds: async (viewId: number, bounds: unknown) => { docCalls.push(['bounds', viewId, bounds]) },
@@ -128,6 +131,7 @@ Object.assign(window, {
       docCalls.push(['find', viewId, index])
       return (window as unknown as { __acbFound?: string }).__acbFound ?? 'shown'
     },
+    openDocViewDriveVideo: async (viewId: number, index: number) => { docCalls.push(['driveVideo', viewId, index]) },
     onDocViewEvent: (cb: (event: unknown) => void) => { docEvent = cb; return () => { if (docEvent === cb) docEvent = null } },
     openExternal: async (url: string) => { opened.push(url); return { success: true } },
   },

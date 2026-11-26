@@ -1,6 +1,7 @@
 ---
 paths:
   - "client/shared/doc-frame.ts"
+  - "client/shared/doc-drive-videos.ts"
   - "client/electron/doc-view.ts"
   - "client/electron/features/doc-frames/**"
   - "client/tests/doc-frame-*"
@@ -154,7 +155,12 @@ carrying a secret in its user name reached a local listener). Each document is s
   without its window asking (its page crashed, the cap closed it); `{ kind: 'shortcut', key }` — the
   member pressed one of the app's shortcuts in it (below), only for a registered view;
   `{ kind: 'blocked', count, hosts, hostCount }` — what its page wanted from the internet and did not get
-  ("The band of blocked internet parts (A3)"), hosts only, only for a registered view.
+  ("The band of blocked internet parts (A3)"), hosts only, only for a registered view;
+  `{ kind: 'driveVideos', count, total, seen }` — the Google Drive videos its document embeds, counts
+  only ("Google Drive videos (plan A)" below).
+- **`docView:openDriveVideo(viewId, index)`** (main window's main frame only, only a view of that
+  window, an integer index of the list main holds for it — anything else opens nothing): main opens
+  Drive's page for that id in the member's browser (the shell's `openExternal`).
 - **Revocation goes with the view** (`views.ts`): `docView:close(viewId, keepPlace?)` by its own window; the
   view destroyed or its page crashed (`onGone`); the window's page reloading, crashing or closing
   (`onWindowReset`: every view of that window closes); at most `MAX_VIEWS_PER_WINDOW` (32) per
@@ -349,7 +355,64 @@ carrying a secret in its user name reached a local listener). Each document is s
   seen before — named, or past the cap (`hostCount` grew; Codex review) — brings it back
   (`blockedBandShown`). ［止める］ and a view gone hide the band; a new view (another tab and back,
   ［もう一度表示する］ after ［止める］ or a crash) starts with no dismissal (Codex review): ［×］ holds for
-  that view's reloads only.
+  that view's reloads only. ［×］ also remembers the Drive videos' `seen` (below): a video the view had not
+  had brings the band back, the same ones (or fewer) do not.
+
+### Google Drive videos (plan A, owner decision 2026-11-26)
+
+A document may embed a Drive video (`<video src="https://drive.google.com/file/d/<id>/…">`,
+`<source src=…>`, Drive's 「埋め込む」 `<iframe src=".../preview">`). The view loads nothing from the
+internet and keeps doing so — **the CSP and the session's request hook are unchanged; nothing new is
+loaded into the view; no server endpoint, no Google API, no Picker**. The band lists the videos and
+the member opens each in their own browser (Drive's own player and login).
+
+- **When main reads**: `protocol.ts` hands the exact bytes of **every answer for the grant's own
+  document** — the file its view was opened on (`segments` = its `name`), never another page of the
+  folder, a style or a script — to `DocFrames.onDocumentServed` (one listener, set by `views.ts`; one
+  that throws never stops the answer), with the file's identity as opened (`version`: device, inode,
+  size, modified and changed times). Whoever asked counts the same — the main frame's load, or the page
+  (or another page of the folder) asking for the document as an image or a frame: such requests cost
+  nothing more, because **a version already read (or being read) is not read again**. The read runs
+  **after the answer went** (`later`, never on the request's path), **one at a time per view**; bytes
+  served meanwhile wait, only the newest kept, and are read next if their version differs.
+- **What it reads** (`client/shared/doc-drive-videos.ts` `driveVideoIdsOf`, pure). One linear pass (a
+  20 MB page in well under a second, `<` looked at once, attributes read forward, a quoted `>` does not
+  end a tag): the **first** `src` of `video` / `source` / `iframe` start tags (names in any case, quoted
+  or not), only `&amp;`-style entities decoded (ASCII numeric, `amp` `quot` `apos` `lt` `gt`);
+  comments (`<!-->` and `<!--->` end at once, as in HTML), `script`, `style`, `textarea`, `title`,
+  `noscript`, `template`, `xmp`, `iframe`, `noembed`, `noframes` contents and everything after
+  `plaintext` are not the page's markup. **Static only**: what a script builds is not
+  seen, on purpose. `<a href>` is not collected (a link goes through the link confirmation, A2). An
+  address counts only if it starts exactly `https://drive.google.com` then `/`, `?` or `#` (also the
+  cheap filter) **and** the core's one Drive link rule accepts it as a file link
+  (`shared/core/google-drive.ts` `driveFileIdFromLink`: no user-info or port, `/file/d/<id>/…` incl.
+  `/preview`, `open?id=`, `uc?id=`; `isDriveId`) — `docs.google.com`, look-alike hosts, `http`,
+  folders are not. Distinct ids in the order written, at most `DOC_DRIVE_VIDEOS_MAX` (10); `total` the
+  distinct count.
+- **Kept in main only** (`views.ts` `videos`, per view; gone with the view): the ids and, for
+  `seen`, every different id the view has had (at most `DRIVE_VIDEOS_SEEN_MAX` 1000). The window hears
+  `{ kind: 'driveVideos', count, total, seen }` when what is offered changed (the same file served
+  again says nothing); **never an id or an address**. **The list read is kept apart from whether it is
+  offered**: it is offered — counts in the event, `docView:openDriveVideo` answering — only while the
+  view's main frame shows the document (`views.ts` `pages` / `onOwnPage`, from `did-navigate`'s
+  address, which in Electron comes *after* the serve). On another page of the folder the window hears
+  `count: 0, total: 0` and no row opens, even if that page asks for the document (read, not offered);
+  back on the document (`did-navigate`) the list as last read is offered again. A closed view is told
+  nothing. **The window's side**: a view's first band state may come before its id reaches the page
+  (`docView:open`'s answer), so while opening `DocViewSession` keeps the newest `blocked` /
+  `driveVideos` of a few view ids and applies the opened view's own once its id is known.
+- **Opening** (`docView:openDriveVideo(viewId, index)`, above): the address is **built by main from
+  the id** — `https://drive.google.com/file/d/<id>/view` (`driveVideoViewUrl`) — never the page's own
+  address text (its query, `resourcekey`, fragment). No confirmation dialog: the address is Drive's
+  own page for a file id the member's browser then asks Drive about with the member's own login; the
+  document chooses only which Drive file (as a link the member presses would).
+- **The band** shows a Drive part when `count > 0`, with or without the internet parts' sentence
+  (which keeps its own rule, `count > 0` of `blocked`; `drive.google.com` among the hosts there is
+  normal — the CSP refused the video): 「この資料には Google Drive の動画が N 本あります。資料の中では再生
+  できないので、ブラウザで開いて見てください。」 (N = `total`), one row per listed video 「動画 1」「動画 2」…
+  with ［ブラウザで開く］ (`aria-label` 「動画 n をブラウザで開く」), and 「ほかにもあります」 when `total >
+  count`. The button sends only the view id and the row's index. The band's region is named
+  「インターネットの部品」 when that sentence shows, else 「資料の中の動画」.
 
 ## Review in the document view (owner, 2026-11-26)
 
@@ -446,7 +509,9 @@ origin, `data:`; `media-src`, `frame-src`, `connect-src`, `child-src`, `worker-s
 policy has **no network source** (test: 「the default policy names no network source…」). A grant
 made with `noScripts` (the user manual) gets `script-src 'none'` instead (`client/tests/manual.test.ts`).
 
-**Later (owner, 2026-11-22; planned, not built).** Each adds sources to the policy object only,
+**Later (owner, 2026-11-22; planned, not built).** Google Drive videos are listed for the member's
+browser (plan A, "Google Drive videos" above, built 2026-11-26); playing them inside the view remains
+later (it would need Drive's player in a nested frame of the sandboxed document — measure first, as for 2.). Each adds sources to the policy object only,
 never loosens another directive (the session's proxy and request hook then need the same exact
 hosts, and nothing else):
 1. Pictures the HTML file itself names (`<img src="https://…">`, read statically when opened):
@@ -471,6 +536,12 @@ hosts, and nothing else):
 - **A link the member agrees to open**: a document can put text into a link's address; once the
   member presses 「ブラウザで開く」 on the confirmation (A2) it leaves with the link. A document
   holds only its own content and what the member typed into it.
+- **A Drive video the member opens** (plan A): the document chooses which Drive file id its row opens
+  (any file it names, not only a video), and the row's 「動画 n」 says nothing of what it is. The address
+  carries only that id (main builds it), and Drive answers with the member's own login and the file's
+  own sharing — the same as a Drive link the member presses. Only the file's bytes as written are read,
+  so the document's scripts cannot put what they can read (its folder's files) into an id. A link
+  that needed Drive's `resourcekey` (some files shared before 2021) may then ask the member for access.
 - **The document's own folder and below are readable by its scripts**: anything of a served type
   there (not hidden, not another repository) — that is what lets its images and styles show. A
   document in a department's folder can read that department's pictures, styles, scripts and
@@ -561,6 +632,28 @@ hosts, and nothing else):
   new tally, the scheme / host rule, dedupe, both caps, the interval, the cancel on close, the
   editor's 中身 → 見る, the dismissed hosts, the chat row's state / failure / tool / folder / segment
   checks. Kept on purpose: the request hook's report (no request reaches it past the CSP today).
+- Drive videos (plan A): `doc-frame-drive-videos.test.ts` — only the static `src` of video / source /
+  iframe (not `<a href>`, `<img>`, other attributes or tags, comments, scripts, templates; the first
+  `src`; entities), only https `drive.google.com` file links (look-alikes, http, a port, user-info,
+  Docs, folders refused), dedupe and the cap with `total`, 20 MB pages of adversarial shapes each
+  under 2 s, the canonical address, the policy still naming no network source, `<!-->`, `iframe` /
+  `noembed` / `noframes` content and `plaintext`; through the real protocol and registry: the list
+  from the bytes served for the view's own document only (not its style, not another page — none
+  offered there, also when that page asks for the document; offered again back on it), counts only to
+  the window, read after the answer (none on the request's path), once per file version (the page
+  asking for itself as an image / frame reads nothing more), one at a time with only the newest next,
+  re-read on a changed file with `seen` growing, nothing after close, a throwing listener still served; `docView:openDriveVideo` refused for
+  a frame inside the page / another window / an unknown view / an index not held (also `'0'`, 1.5),
+  and opening exactly Drive's `/view` page of the id. `htmlViewer.test.ts` — the band for videos alone,
+  ［×］ by `seen`. `editor-html-viewer.spec.ts` 「the band lists the document's Google Drive videos…」 —
+  another view's ignored, the part alone and beside the blocked sentence, N rows, the button asks with
+  view id and index, ［×］ kept for the same videos and back for a new one, 「ほかにもあります」, `count: 0`
+  gone; 「a view's first band state that arrives before its id does…」 — the early state applied, another
+  view's not, the neutral label. Mutation-checked: the own-document condition in `serve`, its
+  try / catch, the deferred read, the version skip, one read at a time, the sender / window / index /
+  own-page checks, offering only on the document and again on return, the early state, the host narrowing, the tag list, skipped content, the first `src`,
+  dedupe, the cap, the id check of the canonical address, comments (also `<!-->`), the added skipped
+  elements, entities.
 - Review (above): `doc-review-frame.test.ts` also — another page of the folder pauses the review (no
   read, no marks, no find; told to the window; resumed on the document), a read across a page load hands
   nothing over, the read's time limit, quotes dropped one by one with their index kept, the hidden

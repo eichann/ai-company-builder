@@ -21,7 +21,7 @@ export type EditorRefusals = ElectronPort<'reservedPathRefusal'>
  * about a link the member pressed in it, or a view that went by itself. While the document is reviewed,
  * main reports the text the member selects in it and draws the comments' marks (quoted text only).
  */
-export type DocViewControls = ElectronPort<'openDocView' | 'closeDocView' | 'setDocViewBounds' | 'setDocViewZoom' | 'reloadDocView' | 'onDocViewEvent' | 'setDocViewReview' | 'findDocViewQuote'>
+export type DocViewControls = ElectronPort<'openDocView' | 'closeDocView' | 'setDocViewBounds' | 'setDocViewZoom' | 'reloadDocView' | 'onDocViewEvent' | 'setDocViewReview' | 'findDocViewQuote' | 'openDocViewDriveVideo'>
 
 /** Opening a link of a document in the member's browser, after they said yes. */
 export type DocLinkOutbound = ElectronPort<'openExternal'>

@@ -261,7 +261,7 @@ export function docZoomFactor(input: unknown): number | null {
  * pressed one of the app's shortcuts while the document had the keyboard (`shortcut`: the key, run
  * by the window as if pressed in the document's tab), or its page wanted internet parts that were
  * not loaded (`blocked`: the whole tally so far, hosts only — `DocBlockedParts`), or the member selected
- * text in it while reviewing (`selection`).
+ * text in it while reviewing (`selection`), or its document embeds Google Drive videos (`driveVideos`).
  */
 export type DocViewEvent =
   | { viewId: number; kind: 'link'; url: string }
@@ -275,6 +275,22 @@ export type DocViewEvent =
    * or the page's script can go to another page of the same folder; the review pauses there.
    */
   | { viewId: number; kind: 'page'; own: boolean }
+  /** The Google Drive videos its document embeds (`DocDriveVideos`): counts only, main keeps the ids. */
+  | ({ viewId: number; kind: 'driveVideos' } & DocDriveVideos)
+
+/**
+ * The Google Drive videos a document's HTML embeds (`doc-drive-videos.ts`, read by main from the bytes
+ * it serves for the view's own document, each time it is served), for the band's 「ブラウザで開く」 rows:
+ * `count` rows (at most `DOC_DRIVE_VIDEOS_MAX`), `total` different videos in all, and `seen` — how many
+ * different videos this view has had since it opened (a new one after an auto refresh brings a
+ * dismissed band back). `count: 0` = none (another page of the folder is shown, or the file changed).
+ * **Counts only**: the ids stay in main, which opens a row by its index (`docView:openDriveVideo`).
+ */
+export interface DocDriveVideos {
+  count: number
+  total: number
+  seen: number
+}
 
 /**
  * The internet parts a document's page wanted and did not get (doc-frame.md "The band of blocked

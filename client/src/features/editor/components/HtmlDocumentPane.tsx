@@ -61,7 +61,7 @@ export function HtmlDocumentPane({ filePath, onShowSource, leavingForSource, zoo
     const ports = docViewPorts()
     return new DocViewSession(fileDocument(filePath, ports.views, leavingForSource), ports.views, ports.links, tabZoom, onZoom)
   })
-  const { status, zoom, fullScreen, refreshed, link, blocked, bandShown, selection, elsewhere } = useSyncExternalStore(session.subscribe, session.getSnapshot)
+  const { status, zoom, fullScreen, refreshed, link, blocked, driveVideos, bandShown, selection, elsewhere } = useSyncExternalStore(session.subscribe, session.getSnapshot)
   const canAskAi = useCommandAvailable('chat.insertText')
   const rootPath = useAppStore(s => s.currentCompany?.rootPath ?? null)
   const running = status.kind === 'shown' || status.kind === 'opening'
@@ -131,9 +131,11 @@ export function HtmlDocumentPane({ filePath, onShowSource, leavingForSource, zoo
           ? <button type="button" className={TOOL} onClick={() => session.stop()} title="資料の中のプログラムを止めます"><Stop size={14} aria-hidden />止める</button>
           : <button type="button" className={TOOL} onClick={() => session.restart()}><Eye size={14} aria-hidden />もう一度表示する</button>}
       </div>
-      {bandShown && blocked && (
+      {bandShown && (
         <BlockedPartsBand
           parts={blocked}
+          driveVideos={driveVideos}
+          onOpenDriveVideo={index => session.openDriveVideo(index)}
           onDismiss={() => session.dismissBand()}
           onAskAi={canAskAi ? () => void runCommand('chat.insertText', { text: rebuildRequestOf(filePath, rootPath) }) : undefined}
         />

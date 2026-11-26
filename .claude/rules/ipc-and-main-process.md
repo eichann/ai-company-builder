@@ -83,9 +83,11 @@ Full text: `docs/architecture/main-process-and-ipc.md` (internal).
   (aiTurns:settings / claim / settle: the automatic 「AI の番」's claim by version and settle, main
   window only; the run itself is a hidden consultation in the renderer, `ai-turns.md`). `tasks`
   (tasks:list / create / act / card / linkFile / unlinkFile / retryRun / reconcile: the task list and card, read and
-  changed with the session; `tasks-ui.md`). `doc-frames` (docView:open / close / setBounds / setZoom / reload / review / findQuote and the event
+  changed with the session; `tasks-ui.md`). `doc-frames` (docView:open / close / setBounds / setZoom / reload / review / findQuote / openDriveVideo and the event
   `docView:event` (a link the member pressed, a view that went by itself, an app shortcut pressed in
-  it, the internet parts its page wanted — hosts and counts only —, the text the member selected while reviewing): the HTML
+  it, the internet parts its page wanted — hosts and counts only —, the text the member selected while reviewing,
+  how many Google Drive videos its document embeds — counts only; openDriveVideo opens one by index, main building
+  Drive's address from the id it holds): the HTML
   viewer's document in a view of its own with a grant for its folder; only the view's id goes
   back; main window's main frame only, decided before any file is read; `protocol.ts` serves the
   scheme, `views.ts` ties grants to views; the views and their session are the shell's

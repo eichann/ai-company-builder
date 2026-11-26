@@ -56,6 +56,8 @@ export interface DocFrameDeps {
 
 interface Grant {
   ownerId: number
+  /** The file the view was opened on (its own document, directly in `folder`). */
+  name: string
   root: string
   /** The document's folder as opened (inside `root` by name, never `root` itself). */
   folder: string
@@ -65,11 +67,16 @@ interface Grant {
   noScripts?: boolean
 }
 
-/** A document `check` let through, before it is granted. */
-export interface OpenableDocument extends Omit<Grant, 'ownerId'> {
-  /** The file's name in its folder. */
-  name: string
-}
+/** A document `check` let through, before it is granted (`name`: the file's name in its folder). */
+export type OpenableDocument = Omit<Grant, 'ownerId'>
+
+/**
+ * Told the exact bytes served for a view's own document (each answer for its name), with the file's
+ * identity as opened (`version`: device, inode, size, change times — the same file unchanged gives the
+ * same one), so the listener can skip what it already read. Main only; called before the answer
+ * returns, so the listener must not do heavy work there.
+ */
+export type DocumentServedListener = (ownerId: number, bytes: Uint8Array, version: string) => void
 
 const REFUSALS: Readonly<Record<DocFrameRefusal, DocFrameRefused>> = Object.fromEntries(
   (Object.keys(DOC_FRAME_WORDS) as DocFrameRefusal[]).map(reason => [reason, { ok: false, reason, message: DOC_FRAME_WORDS[reason] }]),
@@ -107,6 +114,7 @@ export function createDocFrames(deps: DocFrameDeps) {
   const newToken = deps.newToken ?? (() => randomBytes(16).toString('hex'))
   /** Token → grant. */
   const grants = new Map<string, Grant>()
+  let documentServed: DocumentServedListener | null = null
 
   // The same answer for every refusal, whatever was asked: it names nothing.
   const notFound = () => new Response(NOT_FOUND_BODY, {
@@ -121,8 +129,8 @@ export function createDocFrames(deps: DocFrameDeps) {
     return sameFile(await fs.stat(real), opened)
   }
 
-  /** The bytes of `segments` under the grant's folder, or null for every refusal. */
-  async function readInside(grant: Grant, segments: readonly string[]): Promise<Buffer | null> {
+  /** The bytes of `segments` under the grant's folder and the file's identity, or null for every refusal. */
+  async function readInside(grant: Grant, segments: readonly string[]): Promise<{ bytes: Buffer; version: string } | null> {
     // Segments are plain names (`parseDocFrameUrl`): the target is below the folder by name.
     const target = path.join(grant.folder, ...segments)
     if (excludedFolderOf(deps.notDownloaded(grant.root), relativeTo(grant.root, target))) return null
@@ -148,7 +156,7 @@ export function createDocFrames(deps: DocFrameDeps) {
         const { bytesRead } = await handle.read(buffer, 0, opened.size, 0)
         // And again after reading: a swap back during the read is refused too.
         if (!(await stillTheFile(grant, target, opened))) return null
-        return buffer.subarray(0, bytesRead)
+        return { bytes: buffer.subarray(0, bytesRead), version: `${opened.dev}:${opened.ino}:${opened.size}:${opened.mtimeMs}:${opened.ctimeMs}` }
       } finally {
         await handle.close()
       }
@@ -209,13 +217,23 @@ export function createDocFrames(deps: DocFrameDeps) {
     grant(doc: OpenableDocument, ownerId: number): string {
       let token = newToken()
       while (grants.has(token)) token = newToken()
-      grants.set(token, { ownerId, root: doc.root, folder: doc.folder, realFolder: doc.realFolder, noScripts: doc.noScripts })
+      grants.set(token, { ownerId, name: doc.name, root: doc.root, folder: doc.folder, realFolder: doc.realFolder, noScripts: doc.noScripts })
       return docFrameUrl(token, doc.name)
     },
 
     /** Revoke every grant of a view (it closed, was destroyed or its page crashed). */
     revoke(ownerId: number): void {
       for (const [token, grant] of grants) if (grant.ownerId === ownerId) grants.delete(token)
+    },
+
+    /**
+     * Hear the bytes of each answer for a grant's own document — the file its view was opened on, not
+     * another page of the folder — whoever asked for it (the main frame, or the page itself as an image
+     * or a frame: the listener decides what counts, `views.ts`). One listener; one that throws never
+     * stops the answer.
+     */
+    onDocumentServed(listener: DocumentServedListener): void {
+      documentServed = listener
     },
 
     /** Serve one request (`protocol.handle` on the document session). */
@@ -227,13 +245,20 @@ export function createDocFrames(deps: DocFrameDeps) {
       if (!grant) return notFound()
       const type = docFileType(parsed.segments[parsed.segments.length - 1])
       if (!type) return notFound()
-      const bytes = await readInside(grant, parsed.segments)
+      const read = await readInside(grant, parsed.segments)
       // Revoked while the file was read (the view closed meanwhile): nothing is answered.
-      if (!bytes || grants.get(parsed.token) !== grant) {
-        if (!bytes) log.warn('[doc-frame] refused a request')
+      if (!read || grants.get(parsed.token) !== grant) {
+        if (!read) log.warn('[doc-frame] refused a request')
         return notFound()
       }
-      return new Response(new Uint8Array(bytes), {
+      if (parsed.segments.length === 1 && parsed.segments[0] === grant.name) {
+        try {
+          documentServed?.(grant.ownerId, read.bytes, read.version)
+        } catch {
+          // What the band is told never stops the document being shown.
+        }
+      }
+      return new Response(new Uint8Array(read.bytes), {
         status: 200,
         headers: {
           ...BASE_HEADERS,

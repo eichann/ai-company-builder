@@ -6,9 +6,11 @@
 //   docView:setZoom (viewId, factor) / docView:reload (viewId) → the document's zoom; load it again
 //   docView:review (viewId, review | null) → report the member's selections / draw the comments' marks
 //   docView:findQuote (viewId, index) → scroll to a mark: 'shown' | 'hidden' | 'missing'
+//   docView:openDriveVideo (viewId, index) → the view's index-th Google Drive video opens in the member's
+//                  browser, at the Drive page main builds from the id it read (never an address the page wrote)
 // (main → window: `docView:event`, sent by main.ts: a link the member pressed, a view that went, an
 // app shortcut pressed in it, the internet parts its page wanted — hosts and a count only —, the text
-// the member selected while reviewing.)
+// the member selected while reviewing, how many Google Drive videos its document embeds — counts only.)
 // Only the main window's own page may ask (not a consultation window, not a frame inside the page),
 // and that is decided before anything is read from the disk. The path goes through the allowed roots.
 // The document's address stays in main: the renderer only ever holds a view id.
@@ -19,13 +21,15 @@ import type { DocViews } from './views'
 
 export interface DocViewsIpcDeps<E> {
   frames: Pick<DocFrames, 'check'>
-  views: Pick<DocViews, 'begin' | 'open' | 'close' | 'place' | 'zoom' | 'reload' | 'review' | 'findQuote'>
+  views: Pick<DocViews, 'begin' | 'open' | 'close' | 'place' | 'zoom' | 'reload' | 'review' | 'findQuote' | 'driveVideoUrl'>
+  /** The member's browser (the shell's `openExternal`). */
+  openExternal: (url: string) => Promise<void>
   /** The event came from the main window's main frame. */
   fromMainWindow: (event: E) => boolean
 }
 
 export function registerDocViewsIpc<E extends IpcInvokeEvent>(ipc: IpcRegistrar<E>, deps: DocViewsIpcDeps<E>): void {
-  const { frames, views, fromMainWindow } = deps
+  const { frames, views, fromMainWindow, openExternal } = deps
   ipc.handle('docView:open', async (event, filePath): Promise<DocViewOpenResult> => {
     if (!fromMainWindow(event)) return refuseDoc('not_allowed')
     // The page as it is now: if it reloads or crashes while the file is checked or the view made,
@@ -54,5 +58,10 @@ export function registerDocViewsIpc<E extends IpcInvokeEvent>(ipc: IpcRegistrar<
   ipc.handle('docView:findQuote', async (event, viewId, index) => {
     if (!fromMainWindow(event)) return 'missing'
     return views.findQuote(viewId, event.sender.id, index)
+  })
+  ipc.handle('docView:openDriveVideo', async (event, viewId, index) => {
+    if (!fromMainWindow(event)) return
+    const url = views.driveVideoUrl(viewId, event.sender.id, index)
+    if (url) await openExternal(url)
   })
 }

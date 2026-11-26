@@ -10,7 +10,7 @@
  * does an element marked `data-under-document` (a divider's grab strip reaching
  * a few px over the area's edge): the document is drawn over it, too.
  */
-import { docFileType, type DocBlockedParts, type DocViewBounds } from '../../../shared/doc-frame'
+import { docFileType, type DocBlockedParts, type DocDriveVideos, type DocViewBounds } from '../../../shared/doc-frame'
 import { isPathWithin, normalizePathSeparators } from '../../shared/lib/path'
 
 /** Grid spacing (CSS px): an overlay smaller than this both ways can slip between the points. */
@@ -103,19 +103,24 @@ export function changeShowsIn(documentPath: string, changedPath: string): boolea
   return folder !== '' && changed !== folder && isPathWithin(changed, folder) && docFileType(changed.slice(changed.lastIndexOf('/') + 1)) !== null
 }
 
-/** What ［×］ on the band dismissed: the hosts it named and how many hosts there were in all. */
-export interface DismissedParts { hosts: ReadonlySet<string>; hostCount: number }
+/**
+ * What ［×］ on the band dismissed: the hosts it named, how many hosts there were in all, and how many
+ * different Drive videos the view had had (`DocDriveVideos.seen`).
+ */
+export interface DismissedParts { hosts: ReadonlySet<string>; hostCount: number; videosSeen: number }
 
 /**
- * Whether the band of blocked internet parts shows (doc-frame.md "The band of blocked internet
- * parts (A3)"): the page wanted something from the internet, and nothing new since ［×］ — a host not
- * dismissed, or more hosts than then (past the named ones) bring it back; an auto refresh asking the
- * same ones does not.
+ * Whether the band over the document shows (doc-frame.md "The band of blocked internet parts (A3)"):
+ * the page wanted something from the internet, or its document embeds Google Drive videos, and
+ * something is new since ［×］ — a host not dismissed, more hosts than then (past the named ones), or a
+ * video the view had not had (an auto refresh after the AI added one); an auto refresh asking the same
+ * ones does not.
  */
-export function blockedBandShown(parts: DocBlockedParts | null, dismissed: DismissedParts | null): boolean {
-  if (parts === null || parts.count <= 0) return false
-  if (dismissed === null) return true
-  return parts.hostCount > dismissed.hostCount || parts.hosts.some(host => !dismissed.hosts.has(host))
+export function blockedBandShown(parts: DocBlockedParts | null, dismissed: DismissedParts | null, videos: DocDriveVideos | null = null): boolean {
+  const partsShown = parts !== null && parts.count > 0
+    && (dismissed === null || parts.hostCount > dismissed.hostCount || parts.hosts.some(host => !dismissed.hosts.has(host)))
+  const videosShown = videos !== null && videos.count > 0 && (dismissed === null || videos.seen > dismissed.videosSeen)
+  return partsShown || videosShown
 }
 
 /** What ［AI に直してもらう］ puts in the chat's input (nothing is sent): the file, company-relative. */

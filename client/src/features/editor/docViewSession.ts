@@ -7,7 +7,7 @@
  * React reads it through `subscribe` / `getSnapshot` (useSyncExternalStore)
  * and attaches the area with a callback ref, so no effect is needed.
  */
-import { DOC_ZOOM_STEPS, type DocBlockedParts, type DocViewBounds, type DocViewEvent } from '../../../shared/doc-frame'
+import { DOC_ZOOM_STEPS, type DocBlockedParts, type DocDriveVideos, type DocViewBounds, type DocViewEvent } from '../../../shared/doc-frame'
 import type { DocQuoteFound, DocReviewSelection, DocViewReview } from '../../../shared/doc-review-frame'
 import { handleKeyAt } from '../../shared/commands/commands'
 import { subscribeFileChanges } from '../../shared/lib/fileEvents'
@@ -54,7 +54,9 @@ export interface DocViewSnapshot {
   link: string | null
   /** What the shown page wanted from the internet and did not get (hosts and a count), for the band. */
   blocked: DocBlockedParts | null
-  /** The band shows: something was blocked and not all of it dismissed (`blockedBandShown`). */
+  /** The Google Drive videos its document embeds (counts only), for the band's 「ブラウザで開く」 rows. */
+  driveVideos: DocDriveVideos | null
+  /** The band shows: something was blocked or Drive videos are there, and not all of it dismissed (`blockedBandShown`). */
   bandShown: boolean
   /** The text the member selected in it while reviewing (`seq` tells one selection from the next), until used or dropped. */
   selection: (DocReviewSelection & { seq: number }) | null
@@ -67,18 +69,25 @@ const RELOAD_DELAY_MS = 250
 const REFRESHED_SHOWN_MS = 2500
 /** DOM changes (a chat answer streaming) trigger a check at once, then at most this often. */
 const MUTATION_CHECK_MS = 100
+/** View ids whose early band state is kept while opening (other tabs' views send theirs too). */
+const EARLY_VIEWS_MAX = 8
 const WATCHED_ATTRIBUTES = ['class', 'style', 'hidden', 'open', 'aria-hidden', 'data-state']
 
 export class DocViewSession {
-  private snapshot: DocViewSnapshot = { status: { kind: 'opening' }, zoom: 1, fullScreen: false, refreshed: false, link: null, blocked: null, bandShown: false, selection: null, elsewhere: false }
+  private snapshot: DocViewSnapshot = { status: { kind: 'opening' }, zoom: 1, fullScreen: false, refreshed: false, link: null, blocked: null, driveVideos: null, bandShown: false, selection: null, elsewhere: false }
   /** What the view does for the review (reports selections, draws marks): sent again to every new view. */
   private review: DocViewReview | null = null
   private selectionSeq = 0
-  /** Hosts the member dismissed the band for (［×］), while this tab shows the document. */
+  /** Hosts and videos the member dismissed the band for (［×］), while this tab shows the document. */
   private dismissed: DismissedParts | null = null
   private listeners = new Set<() => void>()
   private area: HTMLElement | null = null
   private viewId: number | null = null
+  /**
+   * While an open is under way: the newest band state (`blocked`, `driveVideos`) heard for each view id
+   * (a few), since a view's first state can arrive before its id does; the opened view's is applied then.
+   */
+  private early = new Map<number, DocViewEvent[]>()
   /** Bumped on every open and detach: an answer for an earlier one closes its view. */
   private generation = 0
   private placed: DocViewBounds | null = null
@@ -176,8 +185,11 @@ export class DocViewSession {
     const generation = ++this.generation
     // A new view (also ［もう一度表示する］ after ［止める］ or a crash): a new band; ［×］ holds for its reloads only.
     this.dismissed = null
-    this.set({ status: { kind: 'opening' }, link: null, blocked: null, bandShown: false, selection: null, elsewhere: false })
+    this.set({ status: { kind: 'opening' }, link: null, blocked: null, driveVideos: null, bandShown: false, selection: null, elsewhere: false })
+    this.early.clear()
     const result = await this.source.open().catch(() => null)
+    const early = result?.ok ? this.early.get(result.viewId) ?? [] : []
+    this.early.clear()
     if (generation !== this.generation) {
       // Another tab, 中身 or ［止める］ came first: this view is nobody's.
       if (result?.ok) void this.views.closeDocView(result.viewId).catch(() => {})
@@ -196,6 +208,7 @@ export class DocViewSession {
     if (this.snapshot.zoom !== 1) void this.views.setDocViewZoom(result.viewId, this.snapshot.zoom).catch(() => {})
     if (this.review) void this.views.setDocViewReview(result.viewId, this.review).catch(() => {})
     this.set({ status: { kind: 'shown', covered: false } })
+    for (const event of early) this.onEvent(event)
     this.schedule()
   }
 
@@ -239,6 +252,13 @@ export class DocViewSession {
   }
 
   private onEvent(event: DocViewEvent) {
+    if (this.viewId === null && this.snapshot.status.kind === 'opening' && (event.kind === 'blocked' || event.kind === 'driveVideos')) {
+      const kept = (this.early.get(event.viewId) ?? []).filter(e => e.kind !== event.kind)
+      this.early.delete(event.viewId)
+      this.early.set(event.viewId, [...kept, event])
+      for (const old of [...this.early.keys()].slice(0, Math.max(0, this.early.size - EARLY_VIEWS_MAX))) this.early.delete(old)
+      return
+    }
     if (event.viewId !== this.viewId) return
     if (event.kind === 'shortcut') {
       // One of the app's shortcuts pressed while the document had the keyboard (main took it from
@@ -250,7 +270,13 @@ export class DocViewSession {
     if (event.kind === 'blocked') {
       // Hosts and a count only (main keeps the addresses); `count: 0` = the page loaded again.
       const blocked = { count: event.count, hosts: event.hosts, hostCount: event.hostCount }
-      this.set({ blocked, bandShown: blockedBandShown(blocked, this.dismissed) })
+      this.set({ blocked, bandShown: blockedBandShown(blocked, this.dismissed, this.snapshot.driveVideos) })
+      return
+    }
+    if (event.kind === 'driveVideos') {
+      // Counts only (main keeps the ids and opens a row by its index).
+      const driveVideos = { count: event.count, total: event.total, seen: event.seen }
+      this.set({ driveVideos, bandShown: blockedBandShown(this.snapshot.blocked, this.dismissed, driveVideos) })
       return
     }
     if (event.kind === 'selection') {
@@ -265,7 +291,7 @@ export class DocViewSession {
     if (event.kind === 'gone') {
       this.viewId = null
       this.placed = null
-      this.set({ status: { kind: 'gone' }, link: null, blocked: null, bandShown: false, selection: null })
+      this.set({ status: { kind: 'gone' }, link: null, blocked: null, driveVideos: null, bandShown: false, selection: null })
     } else if (this.snapshot.link === null) {
       this.set({ link: event.url })
     }
@@ -305,11 +331,20 @@ export class DocViewSession {
     if (this.snapshot.selection) this.set({ selection: null })
   }
 
-  /** ［×］ on the band: hidden until the page wants a host not dismissed yet. */
+  /** ［×］ on the band: hidden until the page wants a host not dismissed yet, or its document gets a new Drive video. */
   dismissBand() {
     const shown = this.snapshot.blocked
-    if (shown) this.dismissed = { hosts: new Set([...(this.dismissed?.hosts ?? []), ...shown.hosts]), hostCount: Math.max(this.dismissed?.hostCount ?? 0, shown.hostCount) }
+    this.dismissed = {
+      hosts: new Set([...(this.dismissed?.hosts ?? []), ...(shown?.hosts ?? [])]),
+      hostCount: Math.max(this.dismissed?.hostCount ?? 0, shown?.hostCount ?? 0),
+      videosSeen: Math.max(this.dismissed?.videosSeen ?? 0, this.snapshot.driveVideos?.seen ?? 0),
+    }
     this.set({ bandShown: false })
+  }
+
+  /** The band's ［ブラウザで開く］ on its `index`-th Drive video: main opens Drive's page for it in the member's browser. */
+  openDriveVideo(index: number) {
+    if (this.viewId !== null) void this.views.openDocViewDriveVideo(this.viewId, index).catch(() => {})
   }
 
   /** ［止める］: the document's view closes (its scripts stop); ［もう一度表示する］ opens it again. */
@@ -317,7 +352,7 @@ export class DocViewSession {
     this.generation++
     this.closeView()
     if (this.snapshot.fullScreen) this.setFullScreen(false)
-    this.set({ status: { kind: 'stopped' }, link: null, blocked: null, bandShown: false, selection: null })
+    this.set({ status: { kind: 'stopped' }, link: null, blocked: null, driveVideos: null, bandShown: false, selection: null })
   }
 
   restart() {

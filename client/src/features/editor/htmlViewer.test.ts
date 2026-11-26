@@ -6,7 +6,7 @@ import { areaCovered, blockedBandShown, changeShowsIn, COVER_STEP, rebuildReques
 
 test('the band shows while the page wanted something from the internet, until each host was dismissed; a new host brings it back', () => {
   const parts = { count: 3, hosts: ['cdn.example.com', 'fonts.example.net'], hostCount: 2 }
-  const dismissed = (hosts: string[], hostCount = hosts.length) => ({ hosts: new Set(hosts), hostCount })
+  const dismissed = (hosts: string[], hostCount = hosts.length) => ({ hosts: new Set(hosts), hostCount, videosSeen: 0 })
   assert.equal(blockedBandShown(null, null), false)
   assert.equal(blockedBandShown({ count: 0, hosts: [], hostCount: 0 }, null), false, 'the page loaded again and wanted nothing yet')
   assert.equal(blockedBandShown(parts, null), true)
@@ -17,6 +17,17 @@ test('the band shows while the page wanted something from the internet, until ea
   const capped = Array.from({ length: 20 }, (_, i) => `h${i}.example`)
   assert.equal(blockedBandShown({ count: 21, hosts: capped, hostCount: 21 }, dismissed(capped, 20)), true)
   assert.equal(blockedBandShown({ count: 22, hosts: capped, hostCount: 21 }, dismissed(capped, 21)), false, 'more addresses of known hosts stay quiet')
+})
+
+test('the band shows for a document\'s Google Drive videos (even with nothing else blocked) until dismissed; a video the view had not had brings it back', () => {
+  const none = { count: 0, hosts: [], hostCount: 0 }
+  const videos = (count: number, seen: number) => ({ count, total: count, seen })
+  const dismissedAt = (videosSeen: number) => ({ hosts: new Set<string>(), hostCount: 0, videosSeen })
+  assert.equal(blockedBandShown(none, null, videos(2, 2)), true, 'Drive videos alone show the band')
+  assert.equal(blockedBandShown(null, null, videos(0, 2)), false, 'another page of the folder: no videos listed')
+  assert.equal(blockedBandShown(none, dismissedAt(2), videos(2, 2)), false, 'an auto refresh with the same videos stays quiet')
+  assert.equal(blockedBandShown(none, dismissedAt(2), videos(1, 2)), false, 'one taken out stays quiet')
+  assert.equal(blockedBandShown(none, dismissedAt(2), videos(2, 3)), true, 'a video not seen before brings it back')
 })
 
 test('［AI に直してもらう］ names the file by its company path (never the absolute one) and asks for one file without internet parts', () => {
