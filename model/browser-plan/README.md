@@ -275,6 +275,9 @@ keeps the write `unknown` and the answer apart, folded here into `cdone` / `cnot
   frame's done write returned) are part of that matching and only narrow which writes fit; the id rides on a `done`
   report, which the model already has, and adds no state or transition, so every rule here holds as it is. Not modelled,
   which also keeps FramesLife under the state ceiling; tested in the core, server and app tests.
+  **A frame's exact `query`** (agent-browser.md "A write with an exact query") is the same kind of narrowing: a held
+  write fits a query frame only with exactly that raw query, and a frame without one only with none; nothing is added to
+  the run, its frames' units or the writes' states, so the model is unchanged.
 - **The card's one-time approval value** (only the start's answer carries it) is folded into `PersonApproves`.
 - **Where the app's code (step ⑤b, `client/electron/features/browser/frame-writes.ts`) is stricter than the model** (each on
   the safe side, no transition added): the worker asks for the next page write only once the previous one's **report

@@ -95,9 +95,12 @@ export type HeldWriteProblem = 'host' | 'file' | 'unreadable' | 'repeated-method
 
 export interface HeldWriteShape {
   method: string
-  /** The path (no query); `query` the raw query string, '' for none. */
+  /**
+   * The path (no query); `query` the raw query string after the `?`, null when the address has no `?` at all — `''` for a
+   * bare `?` (the URL parser's `search` drops it, but the site receives it: a frame without a query must not fit it).
+   */
   path: string
-  query: string
+  query: string | null
   /** Every body field by name (form, multipart text parts, a JSON object's top-level keys), values as text. */
   fields: ReadonlyMap<string, readonly string[]>
 }
@@ -175,14 +178,27 @@ export function readHeldWrite(input: { method: string; url: string; host: string
     fields = mp
   } else return { ok: false, problem: 'unreadable' }
   if ((fields.get('_method')?.length ?? 0) > 1) return { ok: false, problem: 'repeated-method' }
-  return { ok: true, shape: { method: input.method.toUpperCase(), path: u.pathname, query: u.search.replace(/^\?/, ''), fields } }
+  // `search` is '' both for no `?` and for a bare one; the address (without its fragment) tells them apart.
+  const query = u.search !== '' ? u.search.slice(1) : u.href.split('#')[0].includes('?') ? '' : null
+  return { ok: true, shape: { method: input.method.toUpperCase(), path: u.pathname, query, fields } }
 }
 
 /** One frame of the run as the app holds it: the server's view (its fixed fields, how many units are left). */
-export type WorkFrame = Pick<BrowserFrameView, 'frame' | 'method' | 'path' | 'fields' | 'max' | 'left'>
+export type WorkFrame = Pick<BrowserFrameView, 'frame' | 'method' | 'path' | 'fields' | 'max' | 'left'> & {
+  /** The exact query (null: none; the server's view leaves it out then). Required here so no copy of a frame drops it. */
+  query: string | null
+}
+
+/** The frame as the core's one rule reads it. */
+const frameWrite = (f: WorkFrame): BrowserSkillWrite => ({ method: f.method, path: f.path, query: f.query, max: f.max, fields: f.fields })
+
+/** The server's frame as the app holds it (`query` absent from the view = none). */
+export const workFrameOf = (f: BrowserFrameView): WorkFrame =>
+  ({ frame: f.frame, method: f.method, path: f.path, query: typeof f.query === 'string' ? f.query : null, fields: { ...f.fields }, max: f.max, left: f.left })
 
 /**
- * The request a permit carries for this frame: the method, the path (with its query, so a write with a query never fits),
+ * The request a permit carries for this frame: the method, the path with its raw query (a frame without one never fits a
+ * query; one with a query only that exact string: agent-browser.md "A write with an exact query"),
  * the frame's fixed fields as the body holds them and the body's `_method` — nothing else (the server asks the same rule).
  * Null when a fixed field or `_method` is given more than once (it cannot be one value).
  */
@@ -194,7 +210,7 @@ export function frameRequestFor(frame: Pick<WorkFrame, 'fields'>, shape: HeldWri
     if (values.length !== 1) return null
     fields[name] = values[0]
   }
-  return { method: shape.method, path: shape.query === '' ? shape.path : `${shape.path}?${shape.query}`, fields }
+  return { method: shape.method, path: shape.query === null ? shape.path : `${shape.path}?${shape.query}`, fields }
 }
 
 /**
@@ -207,7 +223,7 @@ export function pickFrame(frames: readonly WorkFrame[], shape: HeldWriteShape, m
   let usedUp = false
   for (const f of frames) {
     const request = frameRequestFor(f, shape)
-    const why = request ? browserFrameMismatch({ method: f.method, path: f.path, max: f.max, fields: f.fields }, request, made) : 'fields'
+    const why = request ? browserFrameMismatch(frameWrite(f), request, made) : 'fields'
     if (why === null && request) {
       if (f.left > 0) return { frame: f, request }
       usedUp = true
@@ -330,7 +346,7 @@ export interface WorkCheck { item: string; before: string | null; after: string;
 export type WorkAnswer =
   | BrowserBrowseAction
   /** The preview's plan for the card: what will be done, who else is affected, the key values read, and (ad hoc) the frames. */
-  | { do: 'plan'; summary: string; affects: string; values: WorkPlanValue[]; writes: BrowserSkillWrite[] | null; unread: number[] }
+  | { do: 'plan'; summary: string; affects: string; values: WorkPlanValue[]; writes: AdhocPlanWrite[] | null; unread: number[] }
   /** Done writing: the summary for the card, the headings not read, what the operator checked (AI が確かめた). */
   | { do: 'done'; result: string; unread: number[]; checks: WorkCheck[]; comparedName: string | null }
   | { do: 'stop'; why: BrowserBrowseStop; unread: number[] }
@@ -350,6 +366,13 @@ function unreadOf(v: unknown, items: number): number[] | null {
   }
   return [...seen].sort((a, b) => a - b)
 }
+
+/**
+ * An ad-hoc plan's write as the start sends it (`POST /browser-frame-runs { plan }`): written as `browser.yaml` writes are,
+ * so **no `query` key** — an AI-written plan never carries one (`browserAdhocWritesProblem`), and the server's strict
+ * parser refuses even `query: null`.
+ */
+export type AdhocPlanWrite = Omit<BrowserSkillWrite, 'query'>
 
 /**
  * The operator's answer in a write run: one of the window tools' actions (`parseBrowseAnswer`, the same rules), or — in
@@ -378,7 +401,7 @@ export function parseWorkAnswer(text: string, ctx: { snapshot: BrowserPageSnapsh
       if (!label || value === null) return { problem: 'plan' }
       values.push({ label, value })
     }
-    let writes: BrowserSkillWrite[] | null = null
+    let writes: AdhocPlanWrite[] | null = null
     if (ctx.adhoc) {
       const parsed = browserSkillDeclarationFrom({ domain: ctx.domain, writes: v.writes })
       if (!parsed.ok || browserAdhocWritesProblem(parsed.declaration.writes)) return { problem: 'plan-writes' }
@@ -488,7 +511,7 @@ export function workMaterial(input: {
     task: o(input.task),
     items: input.items.map((heading, i) => ({ number: i + 1, heading: o(heading) })),
     steps: o(input.steps ?? ''),
-    frames: input.frames ? input.frames.map(f => ({ frame: f.frame, method: f.method, path: f.path, fields: f.fields, left: f.left })) : null,
+    frames: input.frames ? input.frames.map(f => ({ frame: f.frame, method: f.method, path: f.path, ...(f.query !== null ? { query: f.query } : {}), fields: f.fields, left: f.left })) : null,
     page: {
       address: o(p.address), title: o(p.title), text: o(p.text), truncated: p.truncated,
       elements: p.elements.map(e => ({
@@ -573,7 +596,7 @@ export const BROWSER_WORK_CARD_WORDS = {
   title: 'ブラウザ操作：AI が書く作業',
   plan: 'これからすること（AI が下見して書いたものです）',
   affects: (s: string) => `ほかに影響する人・もの：${s}`,
-  frame: (f: WorkFrame) => `書く先：${browserSkillWriteLine({ method: f.method, path: f.path, max: f.max, fields: f.fields })}`,
+  frame: (f: WorkFrame) => `書く先：${browserSkillWriteLine(frameWrite(f))}`,
   resultTitle: 'AI がサイトで書いたこと',
   writes: '書いたこと',
   writeOutcome: {
@@ -702,4 +725,5 @@ export function workResultCard(input: WorkCardInput): BrowserCard {
 }
 
 /** A frame's write line for the card (the method, the path as the page sent it is never shown: only the frame's pattern). */
-export const workWriteLine = (method: string, framePath: string | null): string => `${method} ${framePath ?? '（枠の外）'}`
+export const workWriteLine = (method: string, framePath: string | null, frameQuery: string | null = null): string =>
+  `${method} ${framePath === null ? '（枠の外）' : frameQuery === null ? framePath : `${framePath}?${frameQuery}`}`

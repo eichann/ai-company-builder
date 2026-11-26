@@ -17,7 +17,7 @@ import { BROWSER_COMPANY_ID_RE } from '../../../shared/browser-plans'
 import { BROWSER_BROWSE_LIMITS as BL, browseLogStep, type BrowserBrowseAction, type BrowserBrowseHistoryEntry, type BrowserBrowseStop, type BrowserBrowseSurface, type BrowserPageSnapshot } from '../../../shared/browser-browse'
 import {
   BROWSER_WORK_CARD_WORDS as CW, BROWSER_WORK_LIMITS as L, BROWSER_WORK_WORDS as W, afterReadTarget, beforeReadAddress, createdIdOf, parseWorkAnswer,
-  topFields, workMaterial, workPlanSentences, workResultCard, workWordsForAi,
+  topFields, workFrameOf, workMaterial, workPlanSentences, workResultCard, workWordsForAi,
   type AfterReadResult, type WorkAnswer, type WorkEnd, type WorkFrame, type WorkPlanValue,
 } from '../../../shared/browser-frame-writes'
 import { browserNeverReadFits } from '../../../../shared/core/browser-frame-match'
@@ -118,8 +118,7 @@ const frameStartOf = (v: unknown): BrowserFrameRunStart | null => {
   const r = v as BrowserFrameRunStart | null
   return r && typeof r.runId === 'string' && /^bf_[0-9a-f]{32}$/.test(r.runId) && Array.isArray(r.frames) && typeof r.planHash === 'string' ? r : null
 }
-const workFrames = (frames: readonly BrowserFrameView[]): WorkFrame[] =>
-  frames.map(f => ({ frame: f.frame, method: f.method, path: f.path, fields: { ...f.fields }, max: f.max, left: f.left }))
+const workFrames = (frames: readonly BrowserFrameView[]): WorkFrame[] => frames.map(workFrameOf)
 
 export function wireBrowserWork(deps: BrowserWorkDeps) {
   const now = deps.now ?? Date.now

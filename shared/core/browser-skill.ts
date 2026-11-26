@@ -14,6 +14,10 @@
  * after-read address may also use `{created}` (what a write of this run created). A literal segment is plain ASCII
  * (`A–Z a–z 0–9 . _ ~ -`, never `.` or `..`), so an address cannot hide an encoded slash, a dot segment or a query.
  *
+ * **An exact query** (agent-browser.md "A write with an exact query"): a write target may carry `query`, the raw query
+ * string its address must carry **exactly** (`key` or `key=value` plain words joined by `&`, in the declared order, each key
+ * once, never a method override or a login / CSRF / session name). Without it, an address with any query fits nothing.
+ *
  * **What this run made** (agent-browser.md "Writes only to what this run made"): a write target may carry an `id`, and a
  * later target's path one `{made:<id>}` segment — that segment then fits only an id the named target's own write returned
  * in this same run (the server records it from the run's PC's report; `browser-frame-match.ts` asks it). An id named before
@@ -40,6 +44,8 @@ export const BROWSER_SKILL_LIMITS = Object.freeze({
   path: 200,
   segments: 16,
   queryParts: 5,
+  /** A write target's exact query (its raw string, without the `?`). */
+  writeQuery: 100,
   fieldName: 64,
   fieldValue: 100,
   marker: 64,
@@ -50,10 +56,15 @@ export const BROWSER_SKILL_METHODS: readonly BrowserSkillMethod[] = ['POST', 'PU
 /** What a body's `_method` may say (I4: only on a POST, and only when the frame names it). */
 const OVERRIDE_METHODS = ['PUT', 'PATCH', 'DELETE'] as const
 
-/** One write target: the method, the path pattern, at most `max` uses, and body fields that must hold exactly these values. */
+/**
+ * One write target: the method, the path pattern, the exact query (null: the address carries none), at most `max` uses, and
+ * body fields that must hold exactly these values. `query` is required in the type, so no copy of a frame can drop it (a
+ * frame that lost its query would let the same path through without it).
+ */
 export interface BrowserSkillWrite {
   method: BrowserSkillMethod
   path: string
+  query: string | null
   max: number
   fields: Readonly<Record<string, string>>
 }
@@ -85,6 +96,7 @@ export type BrowserSkillProblem =
   | 'bad-path'
   | 'bad-max'
   | 'bad-fields'
+  | 'bad-query'
   | 'bad-override'
   | 'duplicate-write'
   | 'bad-write-id'
@@ -110,6 +122,7 @@ export const BROWSER_SKILL_PROBLEM_WORDS: Readonly<Record<BrowserSkillProblem, s
   'bad-path': '書き込み先のアドレスの書き方が決まりに合っていません。',
   'bad-max': '書き込み先の回数は 1〜20 にしてください。',
   'bad-fields': '書き込み先の決まった項目の書き方が決まりに合っていません。',
+  'bad-query': '書き込み先のアドレスの後ろ（?のあと、query）は、「名前」か「名前=値」（英数字と . _ ~ - だけ）を & でつないだもの（5つまで、同じ名前は1回）にしてください。method やログイン・合言葉にかかわる名前は書けません。',
   'bad-override': '_method は POST の書き込み先にだけ、PUT・PATCH・DELETE のどれかで書けます。',
   'duplicate-write': '同じ書き込み先が2回書かれています。',
   'bad-write-id': '書き込み先の名前（id）は、英小文字で始まる英小文字・数字・ハイフン（32文字まで）で、ほかと重ならないようにしてください。',
@@ -126,7 +139,7 @@ export const BROWSER_SKILL_PROBLEM_WORDS: Readonly<Record<BrowserSkillProblem, s
 export type BrowserSkillParse = { ok: true; declaration: BrowserSkillDeclaration } | { ok: false; problem: BrowserSkillProblem }
 
 const TOP_KEYS = ['domain', 'writes', 'never_read', 'after_read', 'account_marker', 'safe_pattern'] as const
-const WRITE_KEYS = ['id', 'method', 'path', 'max', 'fields'] as const
+const WRITE_KEYS = ['id', 'method', 'path', 'query', 'max', 'fields'] as const
 /** A write target's name (`id`), what a later target's `{made:<id>}` refers to. */
 export const BROWSER_SKILL_WRITE_ID_RE = /^[a-z][a-z0-9-]{0,31}$/
 const MADE_BY_ID_RE = /^\{made:([a-z][a-z0-9-]{0,31})\}$/
@@ -194,6 +207,32 @@ export function isBrowserSkillPath(s: unknown, allow: { query?: boolean; created
   })
 }
 
+/**
+ * A write target's exact query: the one canonical spelling, so the match can compare the held address's raw query byte for
+ * byte (agent-browser.md "A write with an exact query"). 1–5 parts joined by `&`; a part is `key` or `key=value`, each a
+ * plain word (`A–Z a–z 0–9 . _ ~ -`: no `%`, `+`, `;`, `#`, `?`, space or empty part, so no encoding has two spellings); a key
+ * once (A–Z folded: a site may read `Return` and `return` alike); `key=` (an empty value) is refused — a bare `key` is the
+ * only way to say "present without a value", so the two can never be confused; **no key naming a method** (`_method`,
+ * `X-HTTP-Method-Override`, `method`… anything containing `method`, A–Z folded: an override never rides in the address)
+ * and no login, CSRF or session name (`isSensitiveFieldName`). Null when it is one.
+ */
+export function browserSkillQueryProblem(q: unknown): 'bad-query' | null {
+  if (typeof q !== 'string' || q.length === 0 || q.length > BROWSER_SKILL_LIMITS.writeQuery) return 'bad-query'
+  const parts = q.split('&')
+  if (parts.length > BROWSER_SKILL_LIMITS.queryParts) return 'bad-query'
+  const keys = new Set<string>()
+  for (const part of parts) {
+    const at = part.indexOf('=')
+    const key = at === -1 ? part : part.slice(0, at)
+    const value = at === -1 ? null : part.slice(at + 1)
+    if (!QUERY_WORD_RE.test(key) || (value !== null && !QUERY_WORD_RE.test(value))) return 'bad-query'
+    const folded = key.replace(/[A-Z]/g, c => c.toLowerCase())
+    if (keys.has(folded) || folded.includes('method') || isSensitiveFieldName(key)) return 'bad-query'
+    keys.add(folded)
+  }
+  return null
+}
+
 const FIELD_NAME_RE = /^[A-Za-z_][A-Za-z0-9_.[\]-]*$/
 const FIELD_VALUE_RE = /^[A-Za-z0-9_.:-]+$/
 
@@ -222,6 +261,7 @@ function writeOf(v: unknown): { id: string | null; write: BrowserSkillWrite } | 
   if (v.id !== undefined && (typeof v.id !== 'string' || !BROWSER_SKILL_WRITE_ID_RE.test(v.id))) return 'bad-write-id'
   if (typeof v.method !== 'string' || !(BROWSER_SKILL_METHODS as readonly string[]).includes(v.method)) return 'bad-method'
   if (!isBrowserSkillPath(v.path, { made: true })) return 'bad-path'
+  if (v.query !== undefined && browserSkillQueryProblem(v.query)) return 'bad-query'
   if (typeof v.max !== 'number' || !Number.isSafeInteger(v.max) || v.max < 1 || v.max > BROWSER_SKILL_LIMITS.max) return 'bad-max'
   const fields = fieldsOf(v.fields)
   if (!fields) return 'bad-fields'
@@ -232,7 +272,8 @@ function writeOf(v: unknown): { id: string | null; write: BrowserSkillWrite } | 
   // Only a create names what it made: a write that changes something that already exists (another method, an override)
   // would hand on an id the run did not make (independent review).
   if (v.id !== undefined && (method !== 'POST' || '_method' in fields)) return 'bad-maker'
-  return { id: (v.id as string | undefined) ?? null, write: { method, path: v.path, max: v.max, fields: Object.freeze(fields) } }
+  const query = (v.query as string | undefined) ?? null
+  return { id: (v.id as string | undefined) ?? null, write: { method, path: v.path, query, max: v.max, fields: Object.freeze(fields) } }
 }
 
 /**
@@ -287,7 +328,7 @@ export function browserSkillDeclarationFrom(value: unknown): BrowserSkillParse {
       if (ids.has(parsed.id)) return { ok: false, problem: 'bad-write-id' }
       ids.set(parsed.id, writes.length + 1)
     }
-    const key = JSON.stringify([write.method, write.path, Object.entries(write.fields).sort(([a], [b]) => (a < b ? -1 : 1))])
+    const key = JSON.stringify([write.method, write.path, write.query, Object.entries(write.fields).sort(([a], [b]) => (a < b ? -1 : 1))])
     if (seen.has(key)) return { ok: false, problem: 'duplicate-write' }
     seen.add(key)
     writes.push(Object.freeze(write))
@@ -360,7 +401,7 @@ export function browserSkillDomainProblem(declaration: Pick<BrowserSkillDeclarat
 export function browserSkillFrames(declaration: BrowserSkillDeclaration): BrowserSkillFrames {
   return Object.freeze({
     domain: declaration.domain,
-    writes: Object.freeze(declaration.writes.map(w => Object.freeze({ method: w.method, path: w.path, max: w.max, fields: Object.freeze({ ...w.fields }) }))),
+    writes: Object.freeze(declaration.writes.map(w => Object.freeze({ method: w.method, path: w.path, query: w.query, max: w.max, fields: Object.freeze({ ...w.fields }) }))),
     neverRead: Object.freeze([...declaration.neverRead]),
     afterRead: Object.freeze([...declaration.afterRead]),
     accountMarker: declaration.accountMarker ? Object.freeze({ meta: declaration.accountMarker.meta }) : null,
@@ -377,7 +418,8 @@ const METHOD_WORDS: Readonly<Record<BrowserSkillMethod, string>> = Object.freeze
 
 /**
  * One write target in plain words for the admin's 「Skill の承認」 and the member's card (the path and fields are the
- * company's data). A `{made:<n>}` target says that it writes only to what this run made with the n-th target.
+ * company's data). A `{made:<n>}` target says that it writes only to what this run made with the n-th target; a target
+ * with a query shows it right after the path and says that the address must end exactly so.
  */
 export function browserSkillWriteLine(write: BrowserSkillWrite): string {
   const effective = write.fields._method as BrowserSkillMethod | undefined
@@ -385,5 +427,6 @@ export function browserSkillWriteLine(write: BrowserSkillWrite): string {
   const fixed = Object.entries(write.fields).map(([k, v]) => `${k}=${v}`)
   const made = browserMadeFrom(write.path)
   const only = made === null ? '' : `（この作業の中で、${made}つ目の書き込み先で作ったものにだけ）`
-  return `${write.path} に${what}：${write.max}回まで${only}${fixed.length > 0 ? `（決まった項目：${fixed.join('、')}）` : ''}`
+  const query = write.query === null ? '' : `?${write.query}（アドレスの ? のあとが「${write.query}」とまったく同じときだけ）`
+  return `${write.path}${query} に${what}：${write.max}回まで${only}${fixed.length > 0 ? `（決まった項目：${fixed.join('、')}）` : ''}`
 }

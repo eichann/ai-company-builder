@@ -169,7 +169,7 @@ describe('frames: a run of free operation', () => {
     const tries: Array<[number, BrowserFramePermitRequest, string]> = [
       [1, { method: 'PUT', path: '/api/orders/register', fields: {} }, 'method'],
       [1, { method: 'POST', path: '/api/orders/register/x', fields: {} }, 'path'],
-      [1, { method: 'POST', path: '/api/orders/register?copy=1', fields: {} }, 'path'],
+      [1, { method: 'POST', path: '/api/orders/register?copy=1', fields: {} }, 'query'],
       [2, { method: 'POST', path: '/api/orders/abc/note', fields: {} }, 'path'],
       [1, { method: 'POST', path: '/api/orders/register', fields: { _method: 'DELETE' } }, 'method-override'],
       [1, { method: 'POST', path: '/api/orders/register', fields: { title: 'x' } }, 'fields'],
@@ -984,5 +984,71 @@ describe('frames: writes only to what this run made ({made:<id>})', () => {
     expect(() => insert(1, 1, '78')).toThrow(/UNIQUE|PRIMARY/)
     expect(() => conn.prepare("UPDATE browser_frame_made SET made = '78'").run()).toThrow(/as reported/)
     expect(() => conn.prepare('DELETE FROM browser_frame_made').run()).toThrow(/as reported/)
+  })
+})
+
+describe('frames: a write with an exact query (agent-browser.md "A write with an exact query")', () => {
+  const queryYaml = (q: string) => `domain: ${DOMAIN}\nwrites:\n  - { method: POST, path: /api/labels, query: "${q}", max: 2 }\n  - { method: POST, path: /api/labels, max: 1 }\n`
+  const at = (path: string): BrowserFramePermitRequest => ({ method: 'POST', path, fields: {} })
+  const reason = (r: Outcome<unknown>) => [code(r as Refusal), (r as Refusal).body?.reason]
+  async function openQuery(q = 'return') {
+    put(queryYaml(q))
+    await approveSkill('per_run')
+    return value(await approve(alice, value(await frames.start(alice, { skill: SKILL }, PC))))
+  }
+
+  it('the frame carries its query; the permit takes exactly it and refuses every near miss, taking nothing', async () => {
+    const run = await openQuery()
+    expect(run.frames.map(f => [f.path, f.query])).toEqual([['/api/labels', 'return'], ['/api/labels', undefined]])
+    expect('query' in run.frames[1]).toBe(false)
+    for (const path of ['/api/labels', '/api/labels?', '/api/labels?return=', '/api/labels?return=1', '/api/labels?Return', '/api/labels?return&return',
+      '/api/labels?return&x', '/api/labels?x&return', '/api/labels?%72eturn', '/api/labels?return;x', '/api/labels?return#x', '/api/labels?return+',
+      '/api/labels?return&_method=DELETE', '/api/labels?_method=DELETE']) {
+      expect([path, ...reason(await permit(run.runId, 1, alice, at(path)))]).toEqual([path, 'BROWSER_FRAME_MISMATCH', 'query'])
+    }
+    expect(reason(await permit(run.runId, 1, alice, at('/api/labels/x?return')))).toEqual(['BROWSER_FRAME_MISMATCH', 'path'])
+    // The frame without a query beside it refuses any query, as before.
+    expect(reason(await permit(run.runId, 2, alice, at('/api/labels?return')))).toEqual(['BROWSER_FRAME_MISMATCH', 'query'])
+    expect(value(frames.get(alice, run.runId)).frames.map(f => f.used)).toEqual([0, 0])
+    expect(value(await permit(run.runId, 1, alice, at('/api/labels?return'))).frame).toBe(1)
+    value(report(run.runId, 1, 'done'))
+    expect(value(await permit(run.runId, 2, alice, at('/api/labels'))).frame).toBe(2)
+  })
+
+  it('another query is another declaration: approved anew, a run on the old one ends, and the plan\'s hash moves', async () => {
+    const run = await openQuery('return')
+    put(queryYaml('back'))
+    expect(code(await permit(run.runId, 1, alice, at('/api/labels?return')))).toBe('BROWSER_SKILL_NOT_APPROVED')
+    expect(value(frames.get(alice, run.runId)).state).toBe('ended')
+    expect(code(await frames.start(alice, { skill: SKILL }, PC))).toBe('BROWSER_SKILL_NOT_APPROVED')
+    await approveSkill('per_run')
+    const next = value(await frames.start(alice, { skill: SKILL }, PC))
+    expect(next.frames[0].query).toBe('back')
+    expect(next.planHash).not.toBe(run.planHash)
+  })
+
+  it('an ad-hoc plan (the AI wrote it) may carry no query', async () => {
+    const plan = { domain: DOMAIN, writes: [{ method: 'POST', path: '/api/labels', query: 'return', max: 1 }] }
+    expect(code(await frames.start(alice, { plan }, PC))).toBe('BROWSER_FRAME_BAD_PLAN')
+  })
+
+  it('the stored query is fixed and plain (trigger, CHECK); a frame row from before the column reads as no query', async () => {
+    const run = await openQuery()
+    expect(() => conn.prepare("UPDATE browser_frames SET query = 'x' WHERE company_id = ? AND run_id = ? AND idx = 1").run(CO, run.runId)).toThrow(/query never changes/)
+    expect(() => conn.prepare("UPDATE browser_frames SET query = NULL WHERE company_id = ? AND run_id = ? AND idx = 1").run(CO, run.runId)).toThrow(/query never changes/)
+    expect(() => conn.prepare(`INSERT INTO browser_frames (company_id, run_id, idx, method, path, query, fields, max) VALUES (?, ?, 9, 'POST', '/a', 'a%20b', '{}', 1)`).run(CO, run.runId)).toThrow(/CHECK/)
+    expect(() => conn.prepare(`INSERT INTO browser_frames (company_id, run_id, idx, method, path, query, fields, max) VALUES (?, ?, 9, 'POST', '/a', '', '{}', 1)`).run(CO, run.runId)).toThrow(/CHECK/)
+    // A database whose browser_frames predates the column: its rows keep their meaning (null = no query).
+    const before = new Database(':memory:')
+    before.pragma('foreign_keys = OFF')
+    before.exec(`CREATE TABLE browser_frames (company_id TEXT NOT NULL, run_id TEXT NOT NULL, idx INTEGER NOT NULL CHECK (idx >= 1),
+      method TEXT NOT NULL CHECK (method IN ('POST', 'PUT', 'PATCH', 'DELETE')), path TEXT NOT NULL, fields TEXT NOT NULL,
+      max INTEGER NOT NULL CHECK (max >= 1), used INTEGER NOT NULL DEFAULT 0 CHECK (used >= 0 AND used <= max), PRIMARY KEY (company_id, run_id, idx))`)
+    before.prepare(`INSERT INTO browser_frames (company_id, run_id, idx, method, path, fields, max) VALUES ('co-1', 'bf_old', 1, 'POST', '/api/orders/register', '{}', 1)`).run()
+    initDatabase(before)
+    initDatabase(before) // idempotent
+    expect(before.prepare('SELECT path, query FROM browser_frames').all()).toEqual([{ path: '/api/orders/register', query: null }])
+    expect(sqliteCompanyData(before).forCompany('co-1').browserFrames.frames('bf_old')).toEqual([{ idx: 1, method: 'POST', path: '/api/orders/register', query: null, fields: '{}', max: 1, used: 0 }])
+    expect(() => before.prepare("UPDATE browser_frames SET query = 'x'").run()).toThrow(/query never changes/)
   })
 })

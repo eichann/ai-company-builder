@@ -34,6 +34,12 @@ export interface BrowserFrameView {
   frame: number
   method: 'POST' | 'PUT' | 'PATCH' | 'DELETE'
   path: string
+  /**
+   * The exact raw query the address must carry (without the `?`; agent-browser.md "A write with an exact query"). Absent:
+   * the address carries none (also from an older server). An older app ignores it and so never fits a write to it: it
+   * refuses any address with a query, and the server refuses one without.
+   */
+  query?: string
   fields: Record<string, string>
   max: number
   used: number

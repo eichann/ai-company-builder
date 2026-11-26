@@ -116,6 +116,7 @@ export const BROWSER_FRAME_WORDS = {
   mismatch: 'この書き込みは、計画の送り先の枠に合いません（送りません）',
   widePlan: '計画の送り先が広すぎます。送り先は決まった言葉で始まるアドレスにしてください',
   madePlan: '「この作業で作ったものにだけ書く」指定は、承認された会社の Skill でだけ使えます',
+  queryPlan: '送り先のアドレスの ? のあと（query）の指定は、承認された会社の Skill でだけ使えます',
   approvalRefused: 'この承認は受け付けられません。カードからもう一度確かめてください',
   confirmNotUnknown: 'この書き込みは、届いたか分からないものではありません',
   confirmTooEarly: 'まだ送られるかもしれないため、少し待ってから確かめてください',
@@ -220,7 +221,8 @@ export function createBrowserFrameService(deps: BrowserFrameDeps) {
       planHash: run.planHash, needsApproval: run.state === 'waiting', approval: run.approval,
       createdAt: run.createdAt, expiresAt: run.expiresAt, endedAt: run.endedAt,
       frames: r.frames(run.id).map(f => ({
-        frame: f.idx, method: f.method, path: f.path, fields: JSON.parse(f.fields) as Record<string, string>, max: f.max, used: f.used,
+        frame: f.idx, method: f.method, path: f.path, ...(f.query !== null ? { query: f.query } : {}),
+        fields: JSON.parse(f.fields) as Record<string, string>, max: f.max, used: f.used,
         left: usable ? f.max - f.used : 0,
       })),
       writes: (() => {
@@ -281,7 +283,9 @@ export function createBrowserFrameService(deps: BrowserFrameDeps) {
 
   const planHashOf = (member: Member, f: StartFrames) => hashCanonical(canonicalJson({
     company: member.companyId, user: member.userId, host: f.host, source: f.source, skill: f.skill, declarationHash: f.declarationHash,
-    files: f.files, writes: f.writes.map(w => ({ method: w.method, path: w.path, max: w.max, fields: { ...w.fields } })),
+    // A frame's query is part of what the card shows and the person approves (absent when none: a plan without queries
+    // hashes as before).
+    files: f.files, writes: f.writes.map(w => ({ method: w.method, path: w.path, ...(w.query !== null ? { query: w.query } : {}), max: w.max, fields: { ...w.fields } })),
   }))
 
   /** What a start's body names: a Skill (its approved frames, read now) or an ad-hoc plan (checked as a declaration). */
@@ -306,7 +310,7 @@ export function createBrowserFrameService(deps: BrowserFrameDeps) {
     // The AI wrote it: narrower than a reviewed declaration — every path begins with a literal segment (never "any path").
     // And never `{made}` (only a reviewed company Skill's declaration says "only what this run made").
     const adhoc = browserAdhocWritesProblem(parsed.declaration.writes)
-    if (adhoc) return refuse('bad-request', adhoc === 'made' ? W.madePlan : W.widePlan, { code: 'BROWSER_FRAME_BAD_PLAN' })
+    if (adhoc) return refuse('bad-request', adhoc === 'made' ? W.madePlan : adhoc === 'query' ? W.queryPlan : W.widePlan, { code: 'BROWSER_FRAME_BAD_PLAN' })
     // Its domain must be a registered one with writes allowed: the gate below (the same check as every permit's).
     // An ad-hoc plan is never pre-approvable: the person approves it on the card.
     return ok({
@@ -380,7 +384,7 @@ export function createBrowserFrameService(deps: BrowserFrameDeps) {
           state: f.preApproved ? 'open' : 'waiting', approval: f.preApproved ? 'pre_approved' : null, approvedAt: f.preApproved ? iso(now) : null,
           endReason: null, createdAt: iso(now), expiresAt: iso(now + BROWSER_FRAME_TIMES.run), endedAt: null,
         }
-        r.insertRun(run, f.writes.map((w, i) => ({ idx: i + 1, method: w.method, path: w.path, fields: canonicalJson({ ...w.fields }), max: w.max })))
+        r.insertRun(run, f.writes.map((w, i) => ({ idx: i + 1, method: w.method, path: w.path, query: w.query, fields: canonicalJson({ ...w.fields }), max: w.max })))
         return ok({ ...view(member.companyId, run), approvalToken, afterRead: [...f.afterRead], neverRead: [...f.neverRead] })
       })
     },
@@ -455,7 +459,7 @@ export function createBrowserFrameService(deps: BrowserFrameDeps) {
         const frame = r.frames(run.id).find(f => f.idx === frameIdx)
         if (!frame) return bad()
         if (frame.used >= frame.max) return refuse('conflict', W.usedUp, { code: 'BROWSER_FRAME_USED_UP' })
-        const mismatch = browserFrameMismatch({ method: frame.method, path: frame.path, max: frame.max, fields: JSON.parse(frame.fields) as Record<string, string> }, request, madeIds(r.made(run.id)))
+        const mismatch = browserFrameMismatch({ method: frame.method, path: frame.path, query: frame.query, max: frame.max, fields: JSON.parse(frame.fields) as Record<string, string> }, request, madeIds(r.made(run.id)))
         if (mismatch) return refuse('conflict', W.mismatch, { code: 'BROWSER_FRAME_MISMATCH', reason: mismatch })
         const passed = gate(member, run.host, deviceKey, run)
         const refused: Refusal | null = !passed.ok
