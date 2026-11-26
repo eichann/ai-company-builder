@@ -83,8 +83,11 @@ async function json(res: Response) {
 const C = `/api/companies/${CO}`
 const person = async (user: string, method: string, path: string, body?: unknown) => json(await call({ user, method, path: `${C}${path}`, body }))
 /** GET the view route (the raw Response: its body is the stream). */
-const view = (user: string, fileId: string, range?: string, signal?: AbortSignal) =>
-  call({ user, method: 'GET', path: `${C}/me/google/drive/view/${fileId}`, ...(range !== undefined ? { headers: { Range: range } } : {}), ...(signal ? { signal } : {}) })
+const view = async (user: string, fileId: string, range?: string, signal?: AbortSignal) => {
+  // A few ms first: with the 1 ms session idle, each request is its own session (its metadata read again).
+  await new Promise(r => setTimeout(r, 3))
+  return call({ user, method: 'GET', path: `${C}/me/google/drive/view/${fileId}`, ...(range !== undefined ? { headers: { Range: range } } : {}), ...(signal ? { signal } : {}) })
+}
 const bytesOf = async (res: Response) => new Uint8Array(await res.arrayBuffer())
 const usage = (userId?: string) => (db.prepare(`SELECT COALESCE(SUM(tokens), 0) AS n FROM broker_usage WHERE company_id = ? AND key_id = ?${userId ? ' AND user_id = ?' : ''}`)
   .get(...[CO, USAGE_KEY, ...(userId ? [userId] : [])]) as Json).n as number
@@ -245,6 +248,26 @@ describe('Range', () => {
     expect(whole.headers.get('content-range')).toBeNull()
     expect(whole.headers.get('content-length')).toBe(String(SIZE))
     expect(Buffer.from(await bytesOf(whole)).equals(BYTES)).toBe(true)
+  })
+})
+
+describe('Google\'s answer must be the range asked', () => {
+  it('Google ignoring the Range (a 200 of the whole file) is refused, nothing passed on, the bytes given back', async () => {
+    google.misanswerNextMedia('ignore-range')
+    const r = await json(await view('m-sato', VIDEO, 'bytes=0-99'))
+    expect(r.status).toBe(503)
+    expect(r.body.code).toBe('DRIVE_VIEW_UPSTREAM')
+    expect(usage('m-sato')).toBe(0)
+    expect(services.googleDriveView.openStreams(CO, 'm-sato')).toBe(0)
+    await until(() => media().at(-1)!.state !== 'streaming')
+  })
+
+  it('an answer running past its range is cut at the range\'s length', async () => {
+    google.misanswerNextMedia('too-long')
+    const res = await view('m-sato', VIDEO, 'bytes=0-99')
+    expect(res.status).toBe(206)
+    expect(Buffer.from(await bytesOf(res)).equals(BYTES.subarray(0, 100))).toBe(true)
+    expect(usage('m-sato')).toBe(100)
   })
 })
 

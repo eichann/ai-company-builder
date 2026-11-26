@@ -325,6 +325,8 @@ export interface FakeGoogle {
   setDriveFileBytes(id: string, bytes: Uint8Array, mimeType?: string): void
   /** Media answers (`alt=media`) are sent in pieces of `chunk` bytes, `ms` apart (0: at once). */
   paceMedia(ms: number, chunk?: number): void
+  /** The next media answer misbehaves: `ignore-range` (200 with every byte, as if no Range was sent), `too-long` (the named range, then more bytes, without a Content-Length). */
+  misanswerNextMedia(fault: 'ignore-range' | 'too-long'): void
   /** Every media answer with a Range or a pace, in order: how it ended and how many bytes went. */
   mediaAnswers: FakeDriveMediaAnswer[]
   /** Someone deletes this Drive file for good (every call about it answers 404). */
@@ -1010,6 +1012,7 @@ export function createFakeGoogle(options: FakeGoogleOptions = {}): FakeGoogle {
   }))
   // ---- a file's bytes (`alt=media`), with Range, paced, and every answer's end reported (streaming a picked video) ----
   const mediaPace = { ms: 0, chunk: 64 * 1024 }
+  let mediaFault: 'ignore-range' | 'too-long' | null = null
   const mediaLog: FakeDriveMediaAnswer[] = []
   /**
    * Drive's media answer as real Drive gives it for a binary file: no Range → 200 with every byte; one `bytes=a-b` /
@@ -1022,6 +1025,9 @@ export function createFakeGoogle(options: FakeGoogleOptions = {}): FakeGoogle {
     let start = 0
     let end = size - 1
     let status = 200
+    const fault = mediaFault
+    mediaFault = null
+    if (fault === 'ignore-range') range = null
     if (range !== null) {
       const m = /^bytes=(\d+)-(\d*)$/.exec(range)
       if (!m || Number(m[1]) >= size) {
@@ -1041,6 +1047,8 @@ export function createFakeGoogle(options: FakeGoogleOptions = {}): FakeGoogle {
         if (at > end) { entry.state = 'finished'; controller.close(); return }
         if (mediaPace.ms > 0) await new Promise(r => setTimeout(r, mediaPace.ms))
         if (signal.aborted) { entry.state = 'aborted'; controller.close(); return }
+        // `too-long`: a misbehaving answer that runs past the range it named (no Content-Length to stop it).
+        if (fault === 'too-long' && at > end - mediaPace.chunk) { controller.enqueue(new Uint8Array(content.subarray(at, Math.min(at + mediaPace.chunk, end + 1)))); controller.enqueue(new Uint8Array(64).fill(7)); entry.bytes += end + 1 - at + 64; at = end + 1; return }
         const next = Math.min(at + mediaPace.chunk, end + 1)
         controller.enqueue(new Uint8Array(content.subarray(at, next)))
         entry.bytes += next - at
@@ -1052,7 +1060,7 @@ export function createFakeGoogle(options: FakeGoogleOptions = {}): FakeGoogle {
     return new Response(body, {
       status,
       headers: {
-        'content-type': mimeType, 'content-length': String(end - start + 1),
+        'content-type': mimeType, ...(fault === 'too-long' ? {} : { 'content-length': String(end - start + 1) }),
         ...(status === 206 ? { 'content-range': `bytes ${start}-${end}/${size}` } : {}),
       },
     })
@@ -1998,6 +2006,7 @@ export function createFakeGoogle(options: FakeGoogleOptions = {}): FakeGoogle {
       if (mimeType !== undefined) f.mimeType = mimeType
     },
     paceMedia(ms, chunk = 64 * 1024) { mediaPace.ms = ms; mediaPace.chunk = chunk },
+    misanswerNextMedia(fault) { mediaFault = fault },
     mediaAnswers: mediaLog,
     deleteDriveFile(id) {
       driveFiles.delete(id)
