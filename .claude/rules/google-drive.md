@@ -128,7 +128,7 @@ never matches).
   ticket. `cancel` (the Picker's 「キャンセル」, or the page closed: `pagehide` sends it with
   `keepalive`) → `cancelled`. `picked` only after the config was handed out, `mode` must be the
   ticket's (400), 1 … the ticket's maximum of `isDriveId` ids (400) → the ticket moves to `saving`
-  (atomic) → **checked for the ticket's member exactly as `POST /me/google/drive/picks` checks** (the one
+  (atomic) → **checked for the ticket's member** (the one
   `checkPicks`: each id opened with Google, folder / file kind, `refused` counted) → kept only through one
   synchronous compare-and-set `saving → picked` followed by the write (`keepPicks`): a ticket the app
   closed meanwhile keeps nothing and the page gets 410. The body names no member. The page posts the
@@ -202,11 +202,15 @@ Drive is not available) — what the app's 「Google Drive のファイルをつ
 Only the caller's rows: another member's names never reach them (test 「the member's own files for
 「つなぐ」」).
 
-`POST /me/google/drive/picks { mode, ids }` (session; folder: 1 id, files: ≤ 10): each id is
+A pick is made **only through a pick ticket's result** ("Picker and its token"; folder: 1 id, files: ≤ 10): each id is
 opened with Google first (`drive.file` answers only for files picked for this app); a folder
-must be a folder the member can add to, a file a readable type (`DRIVE_READ_AS`); anything else
+must be a folder the member can add to, a file a type its purpose keeps (`drivePickableFor`); anything else
 is counted `refused`, not kept. Kept 90 days (folders) / 7 days (files) **since last used** ("How long a pick
-lasts", below); a re-pick renews.
+lasts", below); a re-pick renews. `POST /me/google/drive/picks { mode, ids }` **fails closed** (review 2026-11-26, "Viewing
+a video"): a bad body 400, else 409 `DRIVE_PICKER_APP_UPDATE_NEEDED` (the released apps' sentence, as `POST …/picker`). It
+kept any id the member's `drive.file` token opens with no Picker press of its own; no app calls it — the current app picks
+through a ticket, and the apps that did (≤ release-20261109) can no longer get a Picker token. Tests keep picks through a
+ticket (`server/tests/helpers/drive-picks.ts` `keepDrivePicks`).
 The AI reads and writes **only** the member's own live picks — and the files the member's **own** puts made
 (reading them back and overwriting them: `putOfFile`, below) and the files the member **linked to a record** themselves
 (reading them only).
@@ -267,19 +271,28 @@ pick, its storage and the function the streaming route will call.**
   `mimeType` exactly one of the list, no prefix match) → otherwise refused `not-video` (「動画ではない」). Refused → nothing
   kept anywhere (the ticket's result says why, as for any pick). **The honest limit**: by then Google has granted ACB's
   `drive.file` access to whatever the member pressed 選択 on, and ACB cannot revoke one file's grant; ACB only keeps nothing
-  usable of it. That is why the filter is applied before the click (view filter + selectable types + one file).
+  usable of it. That is why the filter is applied before the click (view filter + selectable types + one file), and why no
+  route keeps a pick without a ticket's own Picker press (`POST …/picks` fails closed, "Picks" below): such a file becomes
+  usable only if the member picks it again, knowingly, in a ticket of another purpose. **Residual**: that later knowing
+  pick is the member's; and a build before this one (rollback) still has the old `POST …/picks`.
+- **The account** (`pageResult`): the member's grant is read **before** Google is asked (active with `drive.file`, else
+  `GOOGLE_CONSENT_NEEDED` and nothing asked) and again after; another account or no usable grant by then → 409
+  `GOOGLE_ACCOUNT_CHANGED` 「選んでいる間に Google の許可が変わりました…」, nothing kept, the ticket `failed`.
 - **Kept apart** (`google_drive_view_picks`, behind the handle's `googleDrive`: `saveViewPick`, `viewPick`, `touchViewPick`,
   `pruneViewPicks`): key company × member × Google account (the grant's email when picked, lower case) × file; name and type
   as Google gave them; `picked_at`, `last_viewed_at`, `expires_at`. A separate table, read by nothing else, so a view pick is
   **never** in `drive_picked` / the AI's `/status`, `drive_read` (`DRIVE_NOT_PICKED`), 「つなぐ」's `GET …/drive/files`, a
   record link (`linkable`: `DRIVE_NOT_PICKED`) or anything another member sees; and an ordinary pick of a video is never a
-  view pick. `POST …/me/google/drive/picks` cannot make one (it ignores `purpose`).
+  view pick. `POST …/me/google/drive/picks` makes nothing (it fails closed).
 - **Using it** (`googleDrive.useViewPick(member, fileId)`, for the later streaming route; no route yet): the company's Google
   on (operator, client, switch, vault — the Picker's registration is not needed to play) else `GOOGLE_STOPPED`; the member's
-  grant active with `drive.file` (`GOOGLE_CONSENT_NEEDED`) and `drive` not off (`GOOGLE_FEATURE_OFF`); a live view pick of
-  exactly that file by that member under the Google account the grant has **now** — else 403 `DRIVE_VIEW_NOT_PICKED`
-  (「…資料の動画のところから、もう一度選んでください。」). Nothing is asked of Google there. Each use **touches** it in the same
-  synchronous stretch: `last_viewed_at` now, `expires_at` now + `DRIVE_VIEW_PICK_TTL_MS`.
+  grant active with `drive.file` (`GOOGLE_CONSENT_NEEDED`) and `drive` not off by the member (`GOOGLE_FEATURE_OFF`); the
+  **company's** Drive switch (「会社で使うもの」, `googleCompanyFeatureOn('drive', …)`, the rule `google-client.ts` `scopeStop`
+  applies to every Drive call) on, else `GOOGLE_STOPPED` as any Drive call refused for it; a live view pick of exactly that
+  file by that member under the Google account the grant has **now**, of a video type — else 403 `DRIVE_VIEW_NOT_PICKED`
+  (「…最後に再生してから90日たったときも、選び直しが要ります。資料の動画のところから、もう一度選んでください。」). Nothing is
+  asked of Google there; a refusal touches nothing. Each use **touches** it in the same synchronous stretch:
+  `last_viewed_at` now, `expires_at` now + `DRIVE_VIEW_PICK_TTL_MS` (never shortened; a re-pick never shortens it either).
 - **How long** (decision on the safe side): **90 days since the last play** (a video a document keeps showing is never chosen
   again; one nobody played for 90 days is chosen again); a re-pick renews. Expired rows are pruned by the server clock's
   `driveSweep` and at each new view pick.
@@ -289,7 +302,9 @@ pick, its storage and the function the streaming route will call.**
   Google stopped (unusable while so). The company deleted: cascade.
 - **Rollback**: a build before this one maps a ticket's `view` to `read` (its adapter knows only `link`); a view ticket still
   open (≤ 10 minutes) across a rollback would be offered as an AI-reading pick narrowed to that id, with the AI's warning
-  title. Accepted (no released app sends `view`). The table is ignored by an older build.
+  title. Accepted (no released app sends `view`). The table is ignored by an older build — also by its `forgetMember`, so a
+  member who leaves while it runs keeps their view rows until this build's sweep expires them (they cannot use them: no
+  membership); and its `POST …/picks` keeps any id again (above).
 - Unverified against real Google: that `PickerBuilder.setSelectableMimeTypes` exists and greys out other types (if not, the
   view's own filter and the server's `not-video` still hold — only the grant could not be prevented); the MIME types Drive
   reports for each video container (a video Drive reports as another `video/*` type is refused `not-video`).
@@ -298,7 +313,9 @@ pick, its storage and the function the streaming route will call.**
   with Google not asked; a PDF `not-video`; not in the status, `drive_read`, 「つなぐ」's list or a link; `useViewPick`: renewal,
   another member, another account, expiry and the sweep, an ordinary pick, the switch, Google off, a member leaving; the
   other purposes unchanged; the page: the selectable types, the title, the one view, no multi-select, nothing opened
-  without its file, another id not sent), `server/tests/unit/google-drive-core.test.ts` (the list, exact match,
+  without its file, another id not sent; after the review: the company's Drive switch, a grant revoked / stopped / without
+  `drive.file`, a stored non-video row, a re-pick never shortening, the result with no usable grant (Google not asked) and
+  with the account changed while Google was asked, `POST …/picks` failing closed for a file a view ticket refused), `server/tests/unit/google-drive-core.test.ts` (the list, exact match,
   `drivePickableFor`) — mutation-checked; the account, member and expiry conditions are in both `viewPick` and
   `touchViewPick`'s SQL, so each alone survives and both removed fail.
 
@@ -837,7 +854,7 @@ other schemes, folders, bad ids refused); `client/tests/google-drive-tools.test.
 permission, stored as its sha256, the config once, expiry (page and app), another company's or a forged
 ticket, a member who left, another member cannot read / close it and the picks are the ticket member's,
 a pick only after the config, the ticket's mode, at most its maximum, Drive ids only, checked and
-counted by `savePicks`, closed after the result, the app's cancel, a released app's route fails closed,
+counted by `checkPicks`, closed after the result, the app's cancel, a released app's route fails closed,
 the fragment taken off the address, `connect-src 'self'`, the page end to end and with staging's
 stand-in; in the app (`google-drive-tools.test.ts`): only the server's page with a ticket of the right
 shape is opened, the ticket in no AI output / record-token request / log, the session to start and wait,

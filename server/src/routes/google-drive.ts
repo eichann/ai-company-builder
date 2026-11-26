@@ -8,7 +8,7 @@
  *   POST   /me/google/drive/pick-tickets            { mode, fileIds?, purpose? }  a one-time pick ticket for the page in the browser
  *   GET    /me/google/drive/pick-tickets/:ticketId  the member's own ticket: waiting (saving), or its result until acknowledged
  *   DELETE /me/google/drive/pick-tickets/:ticketId  the app read the result (acknowledged) or stopped waiting
- *   POST   /me/google/drive/picks                   { mode, ids }  keep what the person picked (each checked with Google)
+ *   POST   /me/google/drive/picks                   { mode, ids }  fails closed: update the app (picks come only through a ticket)
  *   GET  /me/google/drive/files                   the member's own picked / put files, with names (「つなぐ」's list)
  *   POST   /me/google/drive/overwrite-confirmations/:id  { action: confirm | decline }  the member's press on the card that
  *                                                  asks before the AI's text replaces a Google document someone else edited,
@@ -79,9 +79,10 @@ googleDriveRoute.delete('/me/google/drive/pick-tickets/:ticketId', companyMember
   return answer(c, googleDrive.cancelPick(member, c.req.param('ticketId')))
 })
 
-googleDriveRoute.post('/me/google/drive/picks', companyMember, serviceBody, async (c) => {
+// Fails closed (google-drive.md "Viewing a video"): a pick is made only through a ticket's Picker press.
+googleDriveRoute.post('/me/google/drive/picks', companyMember, serviceBody, (c) => {
   const member = c.var.member
-  return answer(c, await googleDrive.savePicks(member, c.var.body))
+  return answer(c, googleDrive.savePicks(member, c.var.body))
 })
 
 googleDriveRoute.get('/me/google/drive/files', companyMember, async (c) => {
@@ -371,7 +372,7 @@ googlePickerPageRoute.post('/config', publicRoute('the one-time pick ticket the 
   return answer(c, await googleDrive.pageConfig(c.var.body))
 })
 
-/** The person's choice (Drive ids only) or a cancel, once per pick ticket; kept as `POST /me/google/drive/picks` keeps it. */
+/** The person's choice (Drive ids only) or a cancel, once per pick ticket; each id checked with Google before it is kept. */
 googlePickerPageRoute.post('/result', publicRoute('the one-time pick ticket is the proof; only Drive ids, checked with Google for the ticket\'s member'), serviceBody, async (c) => {
   pickerHeaders(c)
   return answer(c, await googleDrive.pageResult(c.var.body))

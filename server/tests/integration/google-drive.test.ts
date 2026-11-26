@@ -35,6 +35,7 @@ import type { AddressInfo } from 'net'
 import { serve, type ServerType } from '@hono/node-server'
 import { createFakeGoogle, type FakeGoogle } from '../fakes/google/fake-google'
 import { GOOGLE_SEED } from '../fakes/google/seed'
+import { keepDrivePicks } from '../helpers/drive-picks'
 
 vi.setConfig({ testTimeout: 60_000, hookTimeout: 60_000 })
 
@@ -200,19 +201,19 @@ describe('the Drive permission', () => {
 
 describe('picks', () => {
   it('an id Google does not let ACB open (not picked in the Picker) is not kept', async () => {
-    const r = await person('m-sato', 'POST', '/me/google/drive/picks', { mode: 'folder', ids: [GOOGLE_SEED.proposalsFolder] })
+    const r = await keepDrivePicks(call, CO, 'm-sato', { mode: 'folder', ids: [GOOGLE_SEED.proposalsFolder] })
     expect(r.status, r.text).toBe(200)
     expect(r.body.data).toEqual({ picks: [], refused: 1 })
   })
 
   it('picked in the Picker: kept; a folder pick must be a folder', async () => {
     google.pick(CLIENT_ID, GOOGLE_SEED.member, [GOOGLE_SEED.proposalsFolder, GOOGLE_SEED.sharedOutsideFolder, GOOGLE_SEED.pastProposalDoc, GOOGLE_SEED.pastProposalSlides, GOOGLE_SEED.handNotesPdf])
-    const wrong = await person('m-sato', 'POST', '/me/google/drive/picks', { mode: 'folder', ids: [GOOGLE_SEED.pastProposalDoc] })
+    const wrong = await keepDrivePicks(call, CO, 'm-sato', { mode: 'folder', ids: [GOOGLE_SEED.pastProposalDoc] })
     expect(wrong.body.data).toEqual({ picks: [], refused: 1 })
-    const folder = await person('m-sato', 'POST', '/me/google/drive/picks', { mode: 'folder', ids: [GOOGLE_SEED.proposalsFolder] })
+    const folder = await keepDrivePicks(call, CO, 'm-sato', { mode: 'folder', ids: [GOOGLE_SEED.proposalsFolder] })
     expect(folder.body.data.picks).toMatchObject([{ id: GOOGLE_SEED.proposalsFolder, kind: 'folder', name: '提案書' }])
-    expect((await person('m-sato', 'POST', '/me/google/drive/picks', { mode: 'folder', ids: [GOOGLE_SEED.sharedOutsideFolder] })).body.data.picks).toHaveLength(1)
-    const files = await person('m-sato', 'POST', '/me/google/drive/picks', { mode: 'files', ids: [GOOGLE_SEED.pastProposalDoc, GOOGLE_SEED.pastProposalSlides, GOOGLE_SEED.handNotesPdf] })
+    expect((await keepDrivePicks(call, CO, 'm-sato', { mode: 'folder', ids: [GOOGLE_SEED.sharedOutsideFolder] })).body.data.picks).toHaveLength(1)
+    const files = await keepDrivePicks(call, CO, 'm-sato', { mode: 'files', ids: [GOOGLE_SEED.pastProposalDoc, GOOGLE_SEED.pastProposalSlides, GOOGLE_SEED.handNotesPdf] })
     expect(files.body.data.picks.map((p: Json) => p.kind)).toEqual(['file', 'file', 'file'])
     // Another member's picks are not this member's.
     const tanaka = await tokenFor('m-tanaka', 'read')
@@ -901,7 +902,7 @@ describe('Markdown and text as they are (google-drive.md "Markdown and text as t
   it('a picked Markdown file is read as outside text, as written (text/x-markdown from Drive, text/markdown from ACB\'s own put)', async () => {
     const put = (await ai(await tokenFor('m-sato', 'act'), 'POST', '/put', mdBody({ name: '読ませる型.md' }))).body.data.drivePut
     google.pick(CLIENT_ID, GOOGLE_SEED.member, [GOOGLE_SEED.salesNotesMd, put.fileId])
-    const picked = await person('m-sato', 'POST', '/me/google/drive/picks', { mode: 'files', ids: [GOOGLE_SEED.salesNotesMd, put.fileId] })
+    const picked = await keepDrivePicks(call, CO, 'm-sato', { mode: 'files', ids: [GOOGLE_SEED.salesNotesMd, put.fileId] })
     expect(picked.body.data, picked.text).toMatchObject({ refused: 0 })
     const token = await tokenFor('m-sato', 'read')
     const seeded = await ai(token, 'POST', '/read', { fileId: GOOGLE_SEED.salesNotesMd })
@@ -938,7 +939,7 @@ describe('HTML and JSON are read as text; the AI reads back its own puts without
     expect((await ai(token, 'POST', '/read', { fileId: GOOGLE_SEED.definitionJson })).body.code).toBe('DRIVE_NOT_PICKED')
     expect(google.requests.length).toBe(calls)
     google.pick(CLIENT_ID, GOOGLE_SEED.member, [GOOGLE_SEED.viewerHtml, GOOGLE_SEED.definitionJson])
-    const picked = await person('m-sato', 'POST', '/me/google/drive/picks', { mode: 'files', ids: [GOOGLE_SEED.viewerHtml, GOOGLE_SEED.definitionJson] })
+    const picked = await keepDrivePicks(call, CO, 'm-sato', { mode: 'files', ids: [GOOGLE_SEED.viewerHtml, GOOGLE_SEED.definitionJson] })
     expect(picked.body.data, picked.text).toMatchObject({ refused: 0 })
     expect(picked.body.data.picks.map((p: Json) => p.mimeType)).toEqual(['text/html', 'application/json'])
     const html = await ai(token, 'POST', '/read', { fileId: GOOGLE_SEED.viewerHtml })
@@ -1017,7 +1018,7 @@ describe('HTML and JSON are read as text; the AI reads back its own puts without
   it('a token bound to a run never reads (a consultation\'s only) — even a built-in step\'s run from an app too old to be route-scoped', async () => {
     const made = await putFile('m-sato', { name: '実行からは読めない.html' })
     google.pick(CLIENT_ID, GOOGLE_SEED.member, [GOOGLE_SEED.handNotesPdf])
-    await person('m-sato', 'POST', '/me/google/drive/picks', { mode: 'files', ids: [GOOGLE_SEED.handNotesPdf] })
+    await keepDrivePicks(call, CO, 'm-sato', { mode: 'files', ids: [GOOGLE_SEED.handNotesPdf] })
     const at = ts()
     db.prepare(`INSERT INTO ai_runs (company_id, id, subject_kind, record_id, step, user_id, state, generation, device_id, conversation_id, claim_expires_at, created_at, updated_at)
       VALUES (?, 'run-drive-read', 'record', 'rec-drive-read', 'ai', 'm-sato', 'running', 1, 'device-aaaa', 'conv-drive', ?, ?, ?)`)

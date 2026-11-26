@@ -331,6 +331,127 @@ describe('using a view pick (what the later streaming route calls)', () => {
   })
 })
 
+/** Runs `fn` with the member's Google grant changed in the table, then puts the row back exactly. */
+async function withGrant(user: string, change: Record<string, unknown>, fn: () => Promise<void>) {
+  const row = db.prepare("SELECT * FROM connector_grants WHERE company_id = ? AND user_id = ? AND provider = 'google'").get(CO, user) as Json
+  const sets = Object.keys(change).map(k => `${k} = ?`).join(', ')
+  db.prepare(`UPDATE connector_grants SET ${sets} WHERE company_id = ? AND user_id = ? AND provider = 'google'`).run(...Object.values(change), CO, user)
+  try { await fn() } finally {
+    const cols = Object.keys(row)
+    db.prepare(`INSERT OR REPLACE INTO connector_grants (${cols.join(', ')}) VALUES (${cols.map(() => '?').join(', ')})`).run(...Object.values(row))
+  }
+}
+
+describe('review of the view pick (2026-11-26)', () => {
+  it('the company\'s Drive switch off: not usable, nothing touched', async () => {
+    clearViews()
+    await viewOf('m-sato', VIDEO)
+    const before = viewRows()[0]
+    expect((await person('m-owner', 'PUT', '/google/features', { feature: 'drive', on: false })).status).toBe(200)
+    try {
+      const r = await services.googleDrive.useViewPick(member('m-sato'), VIDEO)
+      expect(r.ok).toBe(false)
+      expect(r.body.code).toBe('GOOGLE_STOPPED')
+      expect(viewRows()[0]).toEqual(before)
+    } finally {
+      expect((await person('m-owner', 'PUT', '/google/features', { feature: 'drive', on: true })).status).toBe(200)
+    }
+    expect((await services.googleDrive.useViewPick(member('m-sato'), VIDEO)).ok).toBe(true)
+  })
+
+  it('a grant revoked, stopped or without drive.file: consent needed, nothing touched', async () => {
+    clearViews()
+    await viewOf('m-sato', VIDEO)
+    const before = viewRows()[0]
+    const scopes = JSON.parse((db.prepare("SELECT scopes FROM connector_grants WHERE company_id = ? AND user_id = 'm-sato'").get(CO) as Json).scopes) as string[]
+    for (const change of [
+      { status: 'revoked', refresh_token_sealed: null },
+      { status: 'stopped', refresh_token_sealed: null },
+      { scopes: JSON.stringify(scopes.filter(sc => !sc.endsWith('/drive.file'))) },
+    ]) {
+      await withGrant('m-sato', change, async () => {
+        const r = await services.googleDrive.useViewPick(member('m-sato'), VIDEO)
+        expect(r.ok, JSON.stringify(change)).toBe(false)
+        expect(r.body.code, JSON.stringify(change)).toBe('GOOGLE_CONSENT_NEEDED')
+      })
+    }
+    expect(viewRows()[0]).toEqual(before)
+  })
+
+  it('a stored row that is not a video is never used (defence: only videos are kept)', async () => {
+    clearViews()
+    await viewOf('m-sato', VIDEO)
+    db.prepare("UPDATE google_drive_view_picks SET mime_type = 'application/pdf' WHERE company_id = ?").run(CO)
+    expect((await services.googleDrive.useViewPick(member('m-sato'), VIDEO)).body.code).toBe('DRIVE_VIEW_NOT_PICKED')
+  })
+
+  it('picking again never shortens a pick that lasts longer', async () => {
+    clearViews()
+    await viewOf('m-sato', VIDEO)
+    const far = new Date(Date.now() + 200 * 86_400_000).toISOString()
+    db.prepare('UPDATE google_drive_view_picks SET expires_at = ? WHERE company_id = ?').run(far, CO)
+    await viewOf('m-sato', VIDEO)
+    expect(viewRows()[0].expires_at).toBe(far)
+  })
+
+  it('the result: no usable grant when it arrives → consent needed before Google is asked, nothing kept', async () => {
+    clearViews()
+    const t = await person('m-sato', 'POST', '/me/google/drive/pick-tickets', { mode: 'files', purpose: 'view', fileIds: [VIDEO] })
+    expect((await page('config', { ticket: t.body.data.ticket })).status).toBe(200)
+    const spy = vi.spyOn(services.googleClient, 'request')
+    try {
+      await withGrant('m-sato', { status: 'stopped', refresh_token_sealed: null }, async () => {
+        const r = await page('result', { ticket: t.body.data.ticket, mode: 'files', action: 'picked', ids: [VIDEO] })
+        expect(r.body.code).toBe('GOOGLE_CONSENT_NEEDED')
+      })
+      // Refused before Google is asked about the id.
+      expect(spy).not.toHaveBeenCalled()
+    } finally { spy.mockRestore() }
+    expect((await person('m-sato', 'GET', `/me/google/drive/pick-tickets/${t.body.data.ticketId}`)).body.data.state).toBe('failed')
+    await person('m-sato', 'DELETE', `/me/google/drive/pick-tickets/${t.body.data.ticketId}`)
+    expect(viewRows()).toEqual([])
+  })
+
+  it('the result: the Google account changed while Google was asked → refused, nothing kept', async () => {
+    clearViews()
+    const t = await person('m-sato', 'POST', '/me/google/drive/pick-tickets', { mode: 'files', purpose: 'view', fileIds: [VIDEO] })
+    expect((await page('config', { ticket: t.body.data.ticket })).status).toBe(200)
+    const original = (db.prepare("SELECT account_email FROM connector_grants WHERE company_id = ? AND user_id = 'm-sato'").get(CO) as Json).account_email
+    const real = services.googleClient.request.bind(services.googleClient)
+    const spy = vi.spyOn(services.googleClient, 'request').mockImplementation(async (c: string, u: string, req: Json) => {
+      const answer = await real(c, u, req)
+      // Another account allowed while Google answered about the picked id.
+      if (req.path?.includes(VIDEO)) db.prepare("UPDATE connector_grants SET account_email = 'someone-else@div.example' WHERE company_id = ? AND user_id = 'm-sato'").run(CO)
+      return answer
+    })
+    try {
+      const r = await page('result', { ticket: t.body.data.ticket, mode: 'files', action: 'picked', ids: [VIDEO] })
+      expect(r.body.code).toBe('GOOGLE_ACCOUNT_CHANGED')
+    } finally {
+      spy.mockRestore()
+      db.prepare("UPDATE connector_grants SET account_email = ? WHERE company_id = ? AND user_id = 'm-sato'").run(original, CO)
+    }
+    await person('m-sato', 'DELETE', `/me/google/drive/pick-tickets/${t.body.data.ticketId}`)
+    expect(viewRows()).toEqual([])
+  })
+
+  it('POST …/me/google/drive/picks fails closed: a file Google granted through a view ticket never becomes a pick', async () => {
+    clearViews()
+    // The member pressed 選択 on a PDF in a view ticket (Google ignored the filters): refused there as not-video …
+    const viewed = await viewOf('m-sato', GOOGLE_SEED.handNotesPdf)
+    expect(viewed.state.refusedWhy).toEqual({ 'not-video': 1 })
+    // … and the old route cannot keep it: only through a ticket's own Picker press.
+    for (const mode of ['files', 'folder']) {
+      const r = await person('m-sato', 'POST', '/me/google/drive/picks', { mode, ids: [GOOGLE_SEED.handNotesPdf] })
+      expect([r.status, r.body.code]).toEqual([409, 'DRIVE_PICKER_APP_UPDATE_NEEDED'])
+    }
+    expect((await person('m-sato', 'POST', '/me/google/drive/picks', { mode: 'all' })).status).toBe(400)
+    expect(pickRows(GOOGLE_SEED.handNotesPdf)).toEqual([])
+    const token = await tokenFor('m-sato', 'read')
+    expect((await ai(token, 'POST', '/read', { fileId: GOOGLE_SEED.handNotesPdf })).body.code).toBe('DRIVE_NOT_PICKED')
+  })
+})
+
 describe('the other purposes are unchanged', () => {
   it('reading and linking keep their types, maxima and storage', async () => {
     const read = await pickThroughTicket('m-sato', { mode: 'files' }, [GOOGLE_SEED.handNotesPdf])

@@ -72,7 +72,7 @@ export interface DrivePick {
   sharing?: DriveFolderSharing
 }
 
-/** POST …/me/google/drive/picks { mode, ids } → the picks kept. */
+/** The picks a pick ticket kept (`POST …/me/google/drive/picks`, which answered this, fails closed now). */
 export interface DrivePicksResult {
   picks: DrivePick[]
   /** Ids Google did not let ACB open (not picked through the Picker, gone, wrong kind). */
