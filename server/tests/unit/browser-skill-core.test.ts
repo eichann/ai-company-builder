@@ -3,14 +3,16 @@
  * declaration and its approval"). The site is fictional.
  *
  * Guards: strict keys at every level, every list and string within its limit, the file's size, the strict YAML subset
- * (no anchors or aliases), the path grammar (no query on a write, `{created}` only after writing, no dot segments or
+ * (no anchors or aliases), the path grammar (no query in a write's path, `{created}` only after writing, no dot segments or
  * encodings), `_method` only on a POST and only as PUT / PATCH / DELETE, no login / CSRF field fixed in a company file, a
  * domain in its exact spelling and registered, the frames a copy nothing outside can change; a `{made:<id>}` names only an
- * earlier target's id, once per path, only in a write, and is said in plain words.
+ * earlier target's id, once per path, only in a write, and is said in plain words; a write's exact `query` is one canonical
+ * spelling (no override, login or empty value), kept and shown.
  */
 import { describe, expect, it } from 'vitest'
 import {
-  BROWSER_SKILL_LIMITS, browserMadeFrom, browserSkillDomainProblem, browserSkillFrames, browserSkillWriteLine, isBrowserSkillPath, parseBrowserSkillDeclaration,
+  BROWSER_SKILL_LIMITS, browserMadeFrom, browserSkillDomainProblem, browserSkillFrames, browserSkillQueryProblem, browserSkillWriteLine, isBrowserSkillPath,
+  parseBrowserSkillDeclaration,
 } from '../../../shared/core/browser-skill'
 
 const GOOD = `
@@ -40,8 +42,8 @@ describe('browser.yaml', () => {
     expect(r.declaration).toEqual({
       domain: 'shop.example.test',
       writes: [
-        { method: 'POST', path: '/api/orders/register', max: 1, fields: {} },
-        { method: 'POST', path: '/api/orders/{n}', max: 2, fields: { _method: 'PATCH', action: 'copy' } },
+        { method: 'POST', path: '/api/orders/register', query: null, max: 1, fields: {} },
+        { method: 'POST', path: '/api/orders/{n}', query: null, max: 2, fields: { _method: 'PATCH', action: 'copy' } },
       ],
       neverRead: ['/api/orders/{n}?copy=1'],
       afterRead: ['/api/orders/{created}', '/api/orders'],
@@ -179,7 +181,7 @@ describe('writes only to what this run made ({made:<id>})', () => {
     expect(r.declaration.writes.map(w => w.path)).toEqual(['/api/plans', '/api/plans/{made:1}/items', '/api/items/{made:2}'])
     expect(r.declaration.writes.map(w => browserMadeFrom(w.path))).toEqual([null, 1, 2])
     // The id itself is not kept: the frames carry only the place.
-    expect(Object.keys(r.declaration.writes[0]).sort()).toEqual(['fields', 'max', 'method', 'path'])
+    expect(Object.keys(r.declaration.writes[0]).sort()).toEqual(['fields', 'max', 'method', 'path', 'query'])
     // Block style too.
     expect(problemOf(decl('  - id: a\n    method: POST\n    path: /x\n    max: 1\n  - method: POST\n    path: "/x/{made:a}"\n    max: 1\n'))).toBeNull()
   })
@@ -233,5 +235,56 @@ describe('writes only to what this run made ({made:<id>})', () => {
       '/api/plans/{made:1}/items に送る（作る・保存する）：10回まで（この作業の中で、1つ目の書き込み先で作ったものにだけ）',
       '/api/items/{made:2} に一部を変える：10回まで（この作業の中で、2つ目の書き込み先で作ったものにだけ）',
     ])
+  })
+})
+
+describe('a write with an exact query (agent-browser.md "A write with an exact query")', () => {
+  const one = (query: string) => `domain: shop.example.test\nwrites:\n  - { method: POST, path: /api/labels, query: ${JSON.stringify(query)}, max: 1 }\n`
+  const parsed = (text: string) => {
+    const r = parseBrowserSkillDeclaration(text)
+    if (!r.ok) throw new Error(r.problem)
+    return r.declaration
+  }
+
+  it.each([
+    ['return', true],
+    ['a=1&b=x.y_z~-', true],
+    ['a&b&c&d&e', true],
+    ['A=B', true],
+    ['', false], // empty
+    ['a&b&c&d&e&f', false], // more than five parts
+    ['a&&b', false], ['&a', false], ['a&', false], // an empty part
+    ['a=', false], // an empty value: only a bare key says "no value"
+    ['=1', false],
+    ['a=1=2', false],
+    ['a&a', false], ['a=1&a=2', false], ['Return&return', false], // a key twice (also A–Z folded)
+    ['a%3D1', false], ['a=%31', false], ['a+b', false], ['a b', false], ['a;b', false], ['a#b', false], ['a?b', false], ['a/b', false], ['ä', false],
+    ['_method=DELETE', false], ['_METHOD=PUT', false], ['x&_method=PATCH', false], ['X-HTTP-Method-Override=PUT', false], ['method=put', false], ['_HttpMethod=PUT', false],
+    ['_token=abc', false], ['csrf=1', false], ['session=1', false], ['password=1', false],
+    ['x'.repeat(101), false],
+  ])('%s → %s', (query, ok) => {
+    expect(browserSkillQueryProblem(query)).toBe(ok ? null : 'bad-query')
+    expect(problemOf(one(query))).toBe(ok ? null : 'bad-query')
+  })
+
+  it('a query is a string, never a number or a map', () => {
+    expect(browserSkillQueryProblem(1)).toBe('bad-query')
+    expect(problemOf('domain: shop.example.test\nwrites:\n  - { method: POST, path: /api/labels, query: 1, max: 1 }\n')).toBe('bad-query')
+    expect(problemOf('domain: shop.example.test\nwrites:\n  - { method: POST, path: /api/labels, query: { return: "" }, max: 1 }\n')).toBe('bad-query')
+    // A query is never part of the path itself (as before).
+    expect(problemOf('domain: shop.example.test\nwrites:\n  - { method: POST, path: "/api/labels?return", max: 1 }\n')).toBe('bad-path')
+  })
+
+  it('kept exactly as written, absent = null; the same path with and without a query are two targets; the frames keep it', () => {
+    const d = parsed(`domain: shop.example.test\nwrites:\n  - { method: POST, path: /api/labels, query: "b=2&a", max: 1 }\n  - { method: POST, path: /api/labels, max: 1 }\n  - method: POST\n    path: /api/labels\n    query: return\n    max: 1\n`)
+    expect(d.writes.map(w => w.query)).toEqual(['b=2&a', null, 'return'])
+    expect(browserSkillFrames(d).writes.map(w => w.query)).toEqual(['b=2&a', null, 'return'])
+    expect(problemOf('domain: shop.example.test\nwrites:\n  - { method: POST, path: /x, query: a, max: 1 }\n  - { method: POST, path: /x, query: a, max: 2 }\n')).toBe('duplicate-write')
+    expect(problemOf('domain: shop.example.test\nwrites:\n  - { method: POST, path: /x, query: a, max: 1 }\n  - { method: POST, path: /x, query: b, max: 2 }\n')).toBeNull()
+  })
+
+  it('in plain words, right after the path', () => {
+    const d = parsed(one('return'))
+    expect(browserSkillWriteLine(d.writes[0])).toBe('/api/labels?return（アドレスの ? のあとが「return」とまったく同じときだけ） に送る（作る・保存する）：1回まで')
   })
 })

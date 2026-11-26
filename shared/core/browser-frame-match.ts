@@ -4,7 +4,7 @@
  * (step ⑤b) asks it before it asks for a permit. Pure (shared-core.md); **knows no site** — the frames are a company's
  * data (`browser-skill.ts`).
  *
- * The request is given as the app sees it **without its values**: the method, the path (no query, no fragment) and only
+ * The request is given as the app sees it **without its values**: the method, the path with its raw query (no fragment) and only
  * the body fields the frame fixes, plus the body's `_method` whenever the body carries one. A request that names any other
  * field, or a `_method` the frame does not declare (I4: never through any write), does not fit.
  *
@@ -13,21 +13,30 @@
  * backslash; a trailing `/` must match a trailing `/`. `{created}` is an after-read placeholder: a write never has one.
  * `{made:<n>}` (agent-browser.md "Writes only to what this run made") fits only an id the n-th frame's own write returned
  * in this run — `made`, what the server recorded (and the app kept from the same answers); without it, nothing fits.
+ *
+ * The query (agent-browser.md "A write with an exact query"): a frame without one fits only an address with **no** `?` at all;
+ * a frame with one fits only an address whose raw query (everything after the first `?`) is **byte for byte** the declared
+ * one — no decoding, no reordering, so an encoding trick, `;`, `+`, a fragment, a repeated or extra key, `key=` for `key`
+ * or another order is simply another string. The declared query is the parser's one canonical spelling
+ * (`browserSkillQueryProblem`), asked again here: a frame whose query is not one fits nothing.
  */
-import { browserMadeSegmentPlace, type BrowserSkillWrite } from './browser-skill'
+import { browserMadeSegmentPlace, browserSkillQueryProblem, type BrowserSkillWrite } from './browser-skill'
 
 export interface BrowserFrameRequest {
   /** The request's method as sent (upper case). */
   method: string
-  /** The path only: no scheme, host, query or fragment. */
+  /**
+   * The path, and — only when the address has one — `?` and its raw query exactly as sent (no scheme, host or fragment).
+   * The wire shape of the permit since ⑤b: a query used to make it fit nothing.
+   */
   path: string
   /** The body fields the frame fixes, and `_method` when the body has one (values as strings). Nothing else. */
   fields: Readonly<Record<string, string>>
 }
 
 /** Why a request does not fit a frame: fixed words, never a piece of the request. */
-export type BrowserFrameMismatch = 'method' | 'path' | 'made' | 'method-override' | 'fields'
-export const BROWSER_FRAME_MISMATCHES: readonly BrowserFrameMismatch[] = ['method', 'path', 'made', 'method-override', 'fields']
+export type BrowserFrameMismatch = 'method' | 'path' | 'made' | 'query' | 'method-override' | 'fields'
+export const BROWSER_FRAME_MISMATCHES: readonly BrowserFrameMismatch[] = ['method', 'path', 'made', 'query', 'method-override', 'fields']
 
 /** What this run made, by the frame that made it (1-based): the ids its done writes returned. Absent: nothing made. */
 export type BrowserMadeIds = ReadonlyMap<number, ReadonlySet<string>>
@@ -79,7 +88,10 @@ function pathFits(pattern: string, path: string, made: BrowserMadeIds | 'shape' 
  */
 export function browserFrameMismatch(frame: BrowserSkillWrite, request: BrowserFrameRequest, made?: BrowserMadeIds): BrowserFrameMismatch | null {
   if (request.method !== frame.method) return 'method'
-  if (!pathFits(frame.path, request.path, made)) return pathFits(frame.path, request.path, 'shape') ? 'made' : 'path'
+  if (typeof request.path !== 'string' || request.path.length > BROWSER_FRAME_REQUEST_LIMITS.path) return 'path'
+  const [path, query] = splitOnce(request.path)
+  if (!pathFits(frame.path, path, made)) return pathFits(frame.path, path, 'shape') ? 'made' : 'path'
+  if (frame.query === null ? query !== null : browserSkillQueryProblem(frame.query) !== null || query !== frame.query) return 'query'
   const declared = frame.fields._method
   const sent = Object.prototype.hasOwnProperty.call(request.fields, '_method') ? request.fields._method : undefined
   if (declared !== sent) return 'method-override'
@@ -94,11 +106,13 @@ export function browserFrameMismatch(frame: BrowserSkillWrite, request: BrowserF
 /**
  * A plan the AI wrote (ad hoc, approved on the card) is narrower than a reviewed `browser.yaml`: every write path must
  * begin with a literal segment, so a frame can never be "any path" (`/{x}`, `/{n}/{x}`, `/`); and no `{made}` target
- * (`made`: "only what this run made" is a reviewed company Skill's — its parsed place is no wire format either). Null when
- * it is.
+ * (`made`: "only what this run made" is a reviewed company Skill's — its parsed place is no wire format either); and no
+ * query (`query`: a write with an exact query is a reviewed company Skill's too — a query can change what a write does, and
+ * an AI-written plan has nobody but the card to review it). Null when it is.
  */
-export function browserAdhocWritesProblem(writes: readonly BrowserSkillWrite[]): 'wide-path' | 'made' | null {
+export function browserAdhocWritesProblem(writes: readonly BrowserSkillWrite[]): 'wide-path' | 'made' | 'query' | null {
   if (writes.some(w => w.path.split('/').some(seg => browserMadeSegmentPlace(seg) !== null))) return 'made'
+  if (writes.some(w => w.query !== null)) return 'query'
   return writes.every((w) => {
     const first = w.path.split('/')[1] ?? ''
     return first !== '' && !first.startsWith('{')

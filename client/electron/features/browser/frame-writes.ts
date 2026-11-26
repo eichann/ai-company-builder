@@ -69,9 +69,10 @@ export interface FrameWriterDeps {
 }
 
 const PERMIT_MAX_MS = 5000
-/** Whether the held write itself carried this value (any body field's value, or a segment of its path). */
+/** Whether the held write itself carried this value (any body field's value, a segment of its path or a word of its query). */
 const sentCarries = (shape: HeldWriteShape, value: string): boolean =>
-  shape.path.split('/').includes(value) || [...shape.fields.values()].some(values => values.includes(value))
+  shape.path.split('/').includes(value) || (shape.query !== '' && shape.query.split(/[&=]/).includes(value))
+  || [...shape.fields.values()].some(values => values.includes(value))
 const REPORT_TRIES = 3
 const isPermit = (v: unknown): v is BrowserFramePermit => {
   const p = v as Record<string, unknown> | null
@@ -148,7 +149,7 @@ export function createFrameWriter(deps: FrameWriterDeps) {
       return fail
     }
     const { frame, request } = picked
-    const line = workWriteLine(frame.method, frame.path)
+    const line = workWriteLine(frame.method, frame.path, frame.query)
     h.line = line
     h.frame = frame.frame
     if (deps.readBefore) await deps.readBefore(shape.path).catch(() => {})

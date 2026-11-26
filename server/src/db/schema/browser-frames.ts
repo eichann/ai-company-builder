@@ -181,6 +181,25 @@ export const browserFrameSchema = `
 `
 
 /**
+ * A frame's exact query (agent-browser.md "A write with an exact query"): a nullable column added to `browser_frames` —
+ * additive, so an older build still inserts without it and a row made before reads null = "the address carries no query",
+ * exactly what it meant then. The CHECK repeats the query's alphabet (`browserSkillQueryProblem`: plain words, `=`, `&`;
+ * no `%`, `+`, `;`, `#`, space) as a second layer; fixed like the rest of the frame by a trigger of its own (the first one
+ * cannot be changed in place). Idempotent.
+ */
+export function migrateBrowserFrameQuery(conn: Database.Database): void {
+  const cols = new Set((conn.prepare('PRAGMA table_info(browser_frames)').all() as Array<{ name: string }>).map(c => c.name))
+  if (!cols.has('query')) {
+    conn.exec(`ALTER TABLE browser_frames ADD COLUMN query TEXT CHECK (query IS NULL OR (length(query) BETWEEN 1 AND 100 AND query NOT GLOB '*[^A-Za-z0-9._~=&-]*'))`)
+  }
+  conn.exec(`CREATE TRIGGER IF NOT EXISTS browser_frames_fixed_query BEFORE UPDATE ON browser_frames
+    WHEN NEW.query IS NOT OLD.query
+  BEGIN
+    SELECT RAISE(ABORT, 'a frame''s query never changes');
+  END`)
+}
+
+/**
  * The write state `refused` ("Recovering from a failed write"): a `browser_frame_writes` made before it is rebuilt once
  * with the wider CHECK and the trigger that allows `permitted` / `unknown` → `refused` (every row kept). Idempotent.
  */

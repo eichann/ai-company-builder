@@ -34,6 +34,9 @@ export interface FrameRow {
   idx: number
   method: 'POST' | 'PUT' | 'PATCH' | 'DELETE'
   path: string
+  /** The exact raw query the address must carry (agent-browser.md "A write with an exact query"); null: none. A row made
+   *  before the column existed reads null. */
+  query: string | null
   /** Canonical JSON of the fixed body fields. */
   fields: string
   max: number

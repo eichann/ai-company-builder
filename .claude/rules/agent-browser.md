@@ -2986,8 +2986,8 @@ with it yet. Only company-wide Skills (`.claude/skills/<name>`; a shelf item wit
   `account_marker` (`{ meta: <name> }`, a generic `<meta name>`), `safe_pattern` (`none` only); a write's optional `id` and
   a later write's `{made:<id>}` ("Writes only to what this run made"). Every object exactly its
   keys, ≤ 8 KiB (UTF-8). **Path patterns** share the recording's placeholders (`{n}`, `{x}`): `/` + plain ASCII segments
-  (`A–Z a–z 0–9 . _ ~ -`, never `.` / `..`, no `%`, no empty segment but a trailing `/`), no query on a write or an
-  after-read. Problems are fixed words (`BROWSER_SKILL_PROBLEM_WORDS`), never a piece of the file. `browserSkillFrames` = a
+  (`A–Z a–z 0–9 . _ ~ -`, never `.` / `..`, no `%`, no empty segment but a trailing `/`), no query in a write's or an
+  after-read's path — a write declares its exact query apart, as `query` ("A write with an exact query"). Problems are fixed words (`BROWSER_SKILL_PROBLEM_WORDS`), never a piece of the file. `browserSkillFrames` = a
   frozen deep copy; `browserSkillWriteLine` = a target in plain words for the admin.
 - **The server reads its own copy** (`ports/browser-skills.ts` `BrowserSkillSource`, `adapters/browser-skill-source.ts`): the
   company repository's shared branch (async git: `ls-tree`, `cat-file -s` first — over 8 KiB is never read whole) or the shelf's
@@ -3253,9 +3253,10 @@ core's write connection, the plan card and the after-read card).
   `BROWSER_RUN_AFTER_UNKNOWN`, `ended` → `BROWSER_RUN_ENDED`; a write `permitted` → `BROWSER_RUN_WRITE_IN_FLIGHT` (the
   second page write waits until the first's result is recorded); the frame's units used up → `BROWSER_FRAME_USED_UP`;
   **the held write does not fit the frame** → 409 `BROWSER_FRAME_MISMATCH` with a fixed `reason` (`method` / `path` /
-  `method-override` / `fields`) — `shared/core/browser-frame-match.ts` `browserFrameMismatch`, **the one rule** ⑤b's app
-  asks too: the method exactly; the path (no query, fragment or backslash) against the pattern — literals exactly, `{n}`
-  digits, `{x}` one segment, never a dot segment or an encoded `/` / `\` —; the body's `_method` exactly the frame's
+  `made` / `query` / `method-override` / `fields`) — `shared/core/browser-frame-match.ts` `browserFrameMismatch`, **the one
+  rule** ⑤b's app asks too: the method exactly; the path (no fragment or backslash) against the pattern — literals
+  exactly, `{n}` digits, `{x}` one segment, never a dot segment or an encoded `/` / `\` —; the raw query exactly the
+  frame's (none at all when the frame has none: "A write with an exact query"); the body's `_method` exactly the frame's
   (an undeclared one never passes, I4); the frame's fixed fields exactly and **no other field named** (the app sends
   the request's shape, never its other values) (nothing changes in those cases); then **the gate** — this PC (an enabled
   registration, and the run's own: `BROWSER_DEVICE_ELSEWHERE`), the company's mode and the site's level allowing writes
@@ -3388,8 +3389,8 @@ else. **No site word** anywhere (a fictional site in the tests).
   over, locked or stopped → not sent; `readHeldWrite` — another host, a body that is not a form, JSON or multipart text
   parts, **a part with a file**, `_method` twice, **a form body with a raw `;`** (some server stacks split on it, so the
   frame could be matched on another value than the site reads; independent review) → refused; `pickFrame` — the core's one rule `browserFrameMismatch` with
-  only the frame's fixed fields and `_method` (the path **with its query**, so a write with a query never fits —
-  decision), a frame with no unit left → refused, **never asked for**; an after-read "before" read; then
+  only the frame's fixed fields and `_method` (the path **with its raw query**: a frame without a query never fits one, a
+  frame with one only exactly it — "A write with an exact query"), a frame with no unit left → refused, **never asked for**; an after-read "before" read; then
   `held.send(steps)`: the write session prepared, **`ready`** asks the permit once (a unit taken is counted down here,
   never given back), **`beforeSend`** synchronously right before the request leaves — the permit under `min(validMs,
   5000)` on both clocks, the run still going (the turn's signal, the AI stop, the window, the context) — then sent once.
@@ -3713,6 +3714,77 @@ delete; a database from before rebuilt with the trigger as a new one has it), `c
 (an AI's plan with `{made}` refused; the maker's id with its done report, an id the request carried never reported, only that id written afterwards, none read → none written, a report not recorded →
 locked and nothing kept, a failed maker write gives none). Each guard mutation-checked; kept on purpose: keeping the id in
 the app only once the server recorded it (a report the server did not record locks the run, so nothing more is sent).
+
+## A write with an exact query (`query` on a write of a Skill's `browser.yaml`)
+
+A real site creates an object with `POST /api/…?return` (the query says what to answer). Before this, any held write whose
+address carried a query fit no frame, so a company Skill could not permit it. A write target may now declare the **exact**
+query its address must carry; everything else about frames is unchanged. A generic core rule (no site word in the core).
+
+```yaml
+writes:
+  - { method: POST, path: /api/labels, query: "return", max: 1 }   # only POST /api/labels?return
+  - { method: POST, path: /api/labels, max: 1 }                    # only POST /api/labels (no query at all)
+```
+
+- **The shape: one string, the raw query without `?`** (decision: not a map). The string is exactly what the address
+  carries, so the match is a byte comparison and the card shows what is sent; a YAML map would lose the order, could not
+  tell a bare `key` from `key=`, and would read `1` as a number. **The grammar** (`browserSkillQueryProblem`,
+  `shared/core/browser-skill.ts`, the one canonical spelling): 1–5 parts joined by `&` (≤ 100 characters,
+  `BROWSER_SKILL_LIMITS.writeQuery`); a part is `key` or `key=value`, each a plain word (`A–Z a–z 0–9 . _ ~ -`: no `%`,
+  `+`, `;`, `#`, `?`, space, no empty part), so no character has two spellings; **`key=` (an empty value) is refused** — a
+  bare `key` is the only way to say "present without a value"; a key once (A–Z folded); **no key containing `method`**
+  (A–Z folded: `_method`, `X-HTTP-Method-Override`, `_HttpMethod`… — an override never rides in the address, I4) and no
+  login / CSRF / session name (`isSensitiveFieldName`). Anything else → `bad-query`. Values are fixed words: no
+  placeholder or wildcard exists in a query. The path itself still never holds a `?` (`bad-path`).
+- **The parsed write** (`BrowserSkillWrite.query: string | null`, **required in the type**, so no copy of a frame can drop
+  it — a frame that lost its query would let the same path through without one). The same path with and without a query,
+  or with two queries, are separate targets (the duplicate check includes it). `{n}`, `{x}`, `{made:<id>}` and every path
+  rule are unchanged; `made-covered` still compares paths only (overlap is enough, the safe side).
+- **The match** (`browserFrameMismatch`, the one rule the server's permit and the app ask): the request's `path` is the path
+  and — only when the address has one — `?` + its raw query exactly as sent (the permit's wire shape is unchanged: a query
+  used to make it fit nothing). Split at the first `?`; the path checked as before (`path` / `made`); then **a frame without
+  a query fits only an address with no `?` at all** (also `/a?`), **a frame with one only the identical raw string** —
+  no decoding or reordering, so another order, `%72`, `;`, `+`, a fragment, a repeated or extra key, `key=` for `key` are
+  each just another string → reason **`query`**; a frame whose query is not the grammar's (not from a parsed declaration)
+  fits nothing. The body's `_method` and the fixed fields are asked after it, as before.
+- **Only a reviewed company Skill**: an ad-hoc plan (the AI wrote it) with a query is refused — by the app's
+  `parseWorkAnswer` (`plan-writes`) and the server's start (`browserAdhocWritesProblem` → `query`,
+  `BROWSER_FRAME_BAD_PLAN`), like `{made}` (decision, safe side: a query can change what a write does and only the card
+  would review it).
+- **Approval** — the Skill's approval key is the hash of `browser.yaml`, so another query is another declaration: it needs
+  approving again, and a run on the old one ends at its next permit (`BROWSER_SKILL_NOT_APPROVED`). The run's `planHash`
+  also covers each frame's query (only when it has one, so a plan without queries hashes as before; a second layer behind
+  the declaration hash, which already moves).
+- **Stored** (`browser_frames.query`, `migrateBrowserFrameQuery`: an additive nullable column, idempotent; **a row from
+  before reads null = no query**, what it meant then; a CHECK repeats the alphabet, 1–100 characters; trigger
+  `browser_frames_fixed_query` keeps it fixed). Answered in the run's view as `BrowserFrameView.query`, **absent when
+  none** (an older app ignores it: it refuses every address with a query by itself, and the server refuses one without, so
+  a query frame is simply unusable there; its card would show the path alone, for a write it can never send).
+- **The app** (`client/shared/browser-frame-writes.ts`): `workFrameOf` keeps the view's query (`WorkFrame.query` required,
+  null for none); `pickFrame` asks the core with it; the permit carries `path?query` as read from the held URL
+  (`readHeldWrite`: the WHATWG URL's `search`, so the bytes compared are the ones the write session sends). The operator's
+  frames list it. An id the held write's query carried is never reported as made (`sentCarries`).
+- **The card** (`browserSkillWriteLine`, the member's plan card and the admin's 「Skill の承認」):
+  「/api/labels?return（アドレスの ? のあとが「return」とまったく同じときだけ） に送る（作る・保存する）：1回まで」; the result
+  card's line is `POST /api/labels?return`.
+- **The model** (`model/browser-plan/README.md` "FramesLife"): unchanged — which frame a held write fits is a precondition
+  of `AppAsks`, and a query only narrows which writes fit (as `{made}`); no state or transition is added.
+- **Rolling back**: an older server refuses a declaration with `query` (`bad-writes`) and has no column use (the column
+  stays, nullable); an older app never fits a query frame (above).
+
+Tests: `server/tests/unit/browser-skill-core.test.ts` (the grammar as an accept / refuse table — empty, six parts, an empty
+part, `key=`, `=v`, `a=1=2`, a key twice or in another case, `%`, `+`, space, `;`, `#`, `?`, `/`, non-ASCII, every
+method-override spelling, login / CSRF / session names, over 100; a number or a map; a `?` in the path; kept as written,
+null when absent, two targets by query, the frames' copy; the plain words), `browser-frame-match.test.ts` (a frame without
+a query refuses any, `?` alone too; the exact string and every near miss; the declared order only; the path and `{made}`
+first; an override still asked in the body; a frame holding a query the grammar refuses fits nothing; an ad-hoc plan),
+`browser-frames.test.ts` (the view carries it, absent for none; the permit takes exactly it and refuses each near miss,
+taking no unit; another query needs approving again and ends a run on the old one; an ad-hoc plan with a query refused;
+the column's trigger and CHECK; a database from before the column: its row reads null and keeps its meaning),
+`client/tests/browser-frame-writes.test.ts` (the view's query kept, absent = null; exact fit only; the permit's path; the
+card and result lines; an id the query carried never reported). Each guard mutation-checked; kept on purpose: the plan
+hash's query (the declaration hash already moves with it).
 
 ## Not yet (later PRs)
 

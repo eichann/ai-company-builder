@@ -4,13 +4,13 @@
  * is one segment, `{n}` digits only, no dot segment or encoded separator, no query, the trailing slash as written); an
  * undeclared `_method` never passes, a declared one must be exactly it; the frame's fixed fields exactly, and no other
  * field may be named; an AI-written plan may not be "any path"; a `{made:<n>}` segment fits only an id the n-th frame made
- * in this run. Fictional paths.
+ * in this run; a query fits only a frame that declares exactly that raw string. Fictional paths.
  */
 import { describe, expect, it } from 'vitest'
 import { browserAdhocWritesProblem, browserFrameMismatch, browserFramePathFits } from '../../../shared/core/browser-frame-match'
 import type { BrowserSkillWrite } from '../../../shared/core/browser-skill'
 
-const frame = (path: string, fields: Record<string, string> = {}, method: BrowserSkillWrite['method'] = 'POST'): BrowserSkillWrite => ({ method, path, max: 1, fields })
+const frame = (path: string, fields: Record<string, string> = {}, method: BrowserSkillWrite['method'] = 'POST', query: string | null = null): BrowserSkillWrite => ({ method, path, query, max: 1, fields })
 
 describe('a path fits a frame\'s pattern', () => {
   it.each([
@@ -99,5 +99,54 @@ describe('a {made:<n>} frame fits only what this run made', () => {
     for (const id of ['..', '%2e%2e', 'a%2Fb', '']) expect(browserFrameMismatch(f, req(id), made({ 1: [id] })), id).toBe('path')
     expect(browserFramePathFits('/api/plans/{made:1}/items', '/api/plans/77/items')).toBe(false)
     expect(browserFramePathFits('/api/plans/{made:1}/items', '/api/plans/77/items', made({ 1: ['77'] }))).toBe(true)
+  })
+})
+
+describe('a request with a query (agent-browser.md "A write with an exact query")', () => {
+  const at = (path: string, fields: Record<string, string> = {}) => ({ method: 'POST', path, fields })
+
+  it('a frame without a query refuses any query, even an empty one', () => {
+    expect(browserFrameMismatch(frame('/a'), at('/a'))).toBeNull()
+    for (const p of ['/a?', '/a?x', '/a?x=1', '/a?#']) expect([p, browserFrameMismatch(frame('/a'), at(p))]).toEqual([p, 'query'])
+  })
+
+  it('a frame with a query takes exactly that raw string and nothing near it', () => {
+    const f = frame('/a', {}, 'POST', 'return')
+    expect(browserFrameMismatch(f, at('/a?return'))).toBeNull()
+    for (const p of ['/a', '/a?', '/a?return=', '/a?return=1', '/a?Return', '/a?RETURN', '/a?return&return', '/a?return&x', '/a?x&return',
+      '/a?%72eturn', '/a?return%00', '/a?return;', '/a?return;x=1', '/a?return#', '/a?return#x', '/a?return+', '/a?+return', '/a?return&_method=DELETE',
+      '/a??return', '/a?return?']) {
+      expect([p, browserFrameMismatch(f, at(p))]).toEqual([p, 'query'])
+    }
+  })
+
+  it('key=value pairs in the declared order only', () => {
+    const f = frame('/a', {}, 'POST', 'b=2&a=1')
+    expect(browserFrameMismatch(f, at('/a?b=2&a=1'))).toBeNull()
+    expect(browserFrameMismatch(f, at('/a?a=1&b=2'))).toBe('query')
+    expect(browserFrameMismatch(f, at('/a?b=2&a=1&a=1'))).toBe('query')
+    expect(browserFrameMismatch(f, at('/a?b=02&a=1'))).toBe('query')
+  })
+
+  it('the path still decides first; {n} / {made} unchanged', () => {
+    const f = frame('/a/{n}', {}, 'POST', 'return')
+    expect(browserFrameMismatch(f, at('/a/7?return'))).toBeNull()
+    expect(browserFrameMismatch(f, at('/a/x?return'))).toBe('path')
+    expect(browserFrameMismatch(f, at('/a/7/?return'))).toBe('path')
+    const m = frame('/a/{made:1}/b', {}, 'POST', 'return')
+    expect(browserFrameMismatch(m, at('/a/77/b?return'), new Map([[1, new Set(['77'])]]))).toBeNull()
+    expect(browserFrameMismatch(m, at('/a/78/b?return'), new Map([[1, new Set(['77'])]]))).toBe('made')
+  })
+
+  it('an override never rides in the address: the body\'s `_method` is still asked, and a frame holding a bad query fits nothing', () => {
+    const f = frame('/a', {}, 'POST', 'return')
+    expect(browserFrameMismatch(f, at('/a?return', { _method: 'DELETE' }))).toBe('method-override')
+    // A frame that somehow holds a query the parser would refuse (not from a parsed declaration) fits nothing, even exactly.
+    for (const q of ['_method=DELETE', 'a%20b', 'a;b', 'a&a', 'a=']) expect([q, browserFrameMismatch(frame('/a', {}, 'POST', q), at(`/a?${q}`))]).toEqual([q, 'query'])
+  })
+
+  it('an AI-written plan carries no query', () => {
+    expect(browserAdhocWritesProblem([frame('/api/a', {}, 'POST', 'return')])).toBe('query')
+    expect(browserAdhocWritesProblem([frame('/api/a')])).toBeNull()
   })
 })

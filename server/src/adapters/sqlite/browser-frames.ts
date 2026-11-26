@@ -53,11 +53,11 @@ export function sqliteBrowserFrameRepository(conn: Database.Database, companyId:
         companyId, run.id, run.userId, run.host, run.deviceId, run.conversationId, run.source, run.skill, run.declarationHash, run.files, run.approvalSeq,
         run.planHash, run.approvalTokenHash, run.state, run.approval, run.approvedAt, run.endReason, run.createdAt, run.expiresAt, run.endedAt,
       )
-      const insert = conn.prepare('INSERT INTO browser_frames (company_id, run_id, idx, method, path, fields, max) VALUES (?, ?, ?, ?, ?, ?, ?)')
-      for (const f of frames) insert.run(companyId, run.id, f.idx, f.method, f.path, f.fields, f.max)
+      const insert = conn.prepare('INSERT INTO browser_frames (company_id, run_id, idx, method, path, query, fields, max) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+      for (const f of frames) insert.run(companyId, run.id, f.idx, f.method, f.path, f.query, f.fields, f.max)
     },
     frames(runId) {
-      return conn.prepare('SELECT idx, method, path, fields, max, used FROM browser_frames WHERE company_id = ? AND run_id = ? ORDER BY idx')
+      return conn.prepare('SELECT idx, method, path, query, fields, max, used FROM browser_frames WHERE company_id = ? AND run_id = ? ORDER BY idx')
         .all(companyId, runId) as FrameRow[]
     },
     writes(runId) {

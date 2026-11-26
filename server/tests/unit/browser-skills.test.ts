@@ -117,7 +117,7 @@ describe('approving a Skill\'s declaration', () => {
     expect(approved).toMatchObject({ status: 'approved', approval: { mode: 'per_run', how: 'approved', approvedBy: admin.userId } })
     const frames = value(await svc.approvedFrames(editor, SKILL))
     expect(frames).toMatchObject({ mode: 'per_run', textChanged: false, needsRunCard: true })
-    expect(frames.frames.writes).toEqual([{ method: 'POST', path: '/api/orders/register', max: 1, fields: {} }])
+    expect(frames.frames.writes).toEqual([{ method: 'POST', path: '/api/orders/register', query: null, max: 1, fields: {} }])
     expect(frames.frames.afterRead).toEqual(['/api/orders/{created}'])
   })
 
