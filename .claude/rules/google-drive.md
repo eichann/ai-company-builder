@@ -357,7 +357,9 @@ same PR**.
      `_MEMBER_PER_MINUTE`, `_SESSION_IDLE_MS`, `_ANSWER_MS`; out of bounds → the default).
   5. **the session's metadata**: `files.get` (`id,mimeType,size,trashed`, `recordedByCaller`) once per viewing session
      **and grant** (shared by answers asked at the same time; read again for another grant — a re-consent, maybe another
-     Google account — and after a refusal), so each later range is **one** Google call. Trashed / another id / Google's
+     Google account — and after a refusal), so each later range is **one** Google call. The read carries its own signal
+     (`GoogleRequest.signal`): aborted when the last answer waiting for it leaves (its deadline, the viewer) and at its own
+     `answerMs`, so a body that stalls is never read for ever. Trashed / another id / Google's
      403 / 404 → 403 `DRIVE_VIEW_NO_ACCESS`; a type not exactly one of `DRIVE_VIEW_MIMES` → 403 `DRIVE_VIEW_NOT_VIDEO`; an
      unreadable size → 503 `DRIVE_VIEW_UPSTREAM`.
   6. **which bytes**: a range starting at or past the size → 416 `DRIVE_VIEW_RANGE_OUTSIDE` with `Content-Range: bytes
@@ -388,8 +390,11 @@ same PR**.
   Refusals carry `no-store` and `nosniff`; no refusal names the file.
 - **It ends once** (`end`): the last byte passed on, the viewer gone (the request's `AbortSignal`, which also reaches the
   upstream fetch through `streamMedia`, or the body cancelled), Google failing or ending short, **the answer's own deadline**
-  (`answerMs`, 120 s, a server timer that fires **whether or not the viewer reads**: a viewer that stops reading but keeps
-  the connection open would otherwise keep its slot and its reserved bytes — review 2026-11-27), or an exception on the way
+  (`answerMs`, 120 s, a server timer **started when the slot is taken** that fires **whether or not the viewer reads**: a
+  viewer that stops reading but keeps the connection open would otherwise keep its slot and its reserved bytes — review
+  2026-11-27 —, and a metadata or token answer that sends its headers and stalls its body would hold it for ever — Codex
+  re-review of #875: the deadline and the viewer's abort are installed with the slot and every await after it is raced
+  with them), or an exception on the way
   (the `catch` in `open`): the stream slot is released and the bytes reserved but not passed on are given back, exactly
   once; a failure or the deadline also errors the stream. The viewer leaving **aborts the call to Google** (head or body),
   so no bytes are fetched for nobody. The model's R7: under the fairness of the server's own steps every held slot is
@@ -426,7 +431,8 @@ same PR**.
   token's refresh, a record token), each cap (cut to what is left, then 429 and counted; the company total; two answers
   awaiting the metadata at once; concurrency released on the viewer leaving, on Google failing and on an exception; the
   minute, with no renewal of the pick), a viewer that never reads (the deadline), the viewer leaving aborts Google's answer
-  (the signal, and a real HTTP connection closed), one line per session with the bytes, a seek not a failure, a session not
+  (the signal, and a real HTTP connection closed), a metadata body that stalls (the deadline from the slot releases it and
+  aborts Google's call) and the viewer closing while the metadata is awaited, one line per session with the bytes, a seek not a failure, a session not
   ended under a streaming answer, the metadata read once per grant, no file id or name in any log line; the permission
   matrix row and `CROSS`; `tests/unit/security-alerts.test.ts` (`drive-view:*` is not key use) — mutation-checked (survivors
   named in the PR). `model/drive-view/check` (CI "Model (Drive view)").

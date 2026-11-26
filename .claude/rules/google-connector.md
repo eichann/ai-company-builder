@@ -454,7 +454,8 @@ grant** (a refresh token comes only with a consent).
 ## `google-client.ts`: the one place that talks to Google
 
 `googleClient.request(companyId, userId, { api: 'calendar'|'meet'|'drive'|'gmail', method, path,
-query?, body?, rawBody? (Drive's multipart upload), binary? (an answer's bytes), scope, operation })` → `{ ok: true, status, json, text }` (`text` when the answer
+query?, body?, rawBody? (Drive's multipart upload), binary? (an answer's bytes), scope, operation, signal? })` (`signal`:
+the caller's end — aborting it aborts the call, head and body, and no retry follows; absent = as before) → `{ ok: true, status, json, text }` (`text` when the answer
 is not JSON, e.g. Drive export) or `{ ok: false, kind: 'not-sent'|'refused'|'rate-limited'|
 'server-error'|'unknown', reason, status?, googleReason? }`. `googleReason` is Google's short code
 only (never its message). Hosts: calendar / drive / userinfo `www.googleapis.com`, meet

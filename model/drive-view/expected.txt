@@ -28,4 +28,4 @@ broken BrokenAbortKeepsSlot R4_StreamsPerMember
 broken BrokenReserveNoCut R5_BytesPerDay
 broken BrokenAbortNoGiveBack R5_BytesPerDay
 broken BrokenReserveStale R5_BytesPerDay
-broken BrokenNoAnswerDeadline R7_SlotReleased
+broken BrokenDeadlineAfterHeaders R7_SlotReleased

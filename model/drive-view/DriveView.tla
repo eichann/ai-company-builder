@@ -264,10 +264,11 @@ Fail(r) ==
     /\ EndHolding(r, "failed")
     /\ UNCHANGED <<pickVars, envVars, others, seen, delivered, flags>>
 
-\* The answer's own deadline (`answerMs`, a timer of the server's: it fires whether or not the viewer reads): the same
-\* ending. Under weak fairness it is what makes R7 hold for a viewer that keeps the connection open and reads nothing.
+\* The answer's own deadline (`answerMs`, a timer of the server's started when the slot is taken — google-drive-view.ts
+\* `open`, after the caps — so it also ends an answer whose metadata or media call stalls, and it fires whether or not the
+\* viewer reads): the same ending. Under weak fairness it is what makes R7 hold, whatever Google and the viewer do.
 Deadline(r) ==
-    /\ ph[r] = "inflight"
+    /\ ph[r] \in Holding
     /\ EndHolding(r, "failed")
     /\ UNCHANGED <<pickVars, envVars, others, seen, delivered, flags>>
 
@@ -282,9 +283,10 @@ StreamNext == \E r \in Reqs : Check(r) \/ Caps(r) \/ Meta(r) \/ Reserve(r) \/ Pa
 Next == PickNext \/ EnvNext \/ StreamNext \/ Done
 Spec == Init /\ [][Next]_vars
 
-\* The server's own steps are weakly fair (each awaits something with a time limit: the metadata, the token, its
-\* deadline); the viewer's (Deliver, Abort) and Google's (Fail) are not — a viewer may read nothing for ever.
-ServerFair == \A r \in Reqs : WF_vars(Caps(r)) /\ WF_vars(Meta(r)) /\ WF_vars(Reserve(r)) /\ WF_vars(Pass(r)) /\ WF_vars(Deadline(r))
+\* Only the server's own synchronous steps and its timer are weakly fair (Caps, Reserve, Deadline). The steps that await
+\* Google (Meta: the metadata; Pass: the token before the call) are not — Google may answer its headers and stall its body
+\* for ever (Codex re-review of #875) — nor are the viewer's (Deliver, Abort) or Google's failure (Fail).
+ServerFair == \A r \in Reqs : WF_vars(Caps(r)) /\ WF_vars(Reserve(r)) /\ WF_vars(Deadline(r))
 LiveSpec == Spec /\ ServerFair
 
 \* R7 (liveness, under ServerFair) A held stream slot is always released: every answer that took a slot ends

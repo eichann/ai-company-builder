@@ -43,7 +43,7 @@ CI: job "Model (Drive view)" in `.github/workflows/ci.yml`, run when area `model
 | `R4_StreamsPerMember` | Answers streamed at once per member stay within the cap, and the count is exactly the answers holding a slot (released on finish, abort and failure) | 同時に流す数は上限まで。止めたら必ず数を戻す |
 | `R5_BytesPerDay` | The day's bytes stay within the member's and the company's caps, and what is counted is exactly what is reserved by answers under way plus what ended answers passed on | 1日の量は本人・会社の上限まで。途中でやめた分は戻す |
 | `R6_ViewPickNeverAiPick` | A view pick never becomes an AI-readable pick: the AI's picks are only files pressed in a reading ticket | 再生用に選んだ動画を AI は読めない |
-| `R7_SlotReleased` | (liveness) Every answer that took a stream slot ends — its slot released, its unsent bytes given back — under the weak fairness of the server's own steps (`ServerFair`: the caps, the metadata, the reservation, the last check, the answer's deadline), even when the viewer never reads and Google never fails | 読まない相手がつながったままでも、枠と予約は必ず戻る（答えごとの期限） |
+| `R7_SlotReleased` | (liveness) Every answer that took a stream slot ends — its slot released, its unsent bytes given back — under the weak fairness of the server's own synchronous steps and its timer only (`ServerFair`: the caps, the reservation, the answer's deadline — started when the slot is taken), even when the viewer never reads, Google never fails and Google stalls the metadata or the token for ever | 読まない相手がつながったままでも、枠と予約は必ず戻る（答えごとの期限） |
 
 "In flight" is a request that passed `streamMedia`'s last checks: its call to Google left (or will with no further
 await). One request is one answer of at most `CH` bytes (the per-answer ceiling), so a revocation lets at most the
@@ -76,7 +76,7 @@ fails the check.
 | `BrokenReserveNoCut` | A whole range is reserved whatever is left of the day | R5 |
 | `BrokenAbortNoGiveBack` | An answer ended early keeps its whole reservation counted | R5 |
 | `BrokenReserveStale` | The reservation uses what was left of the day at the caps, not the counts read again after the metadata's await | R5 |
-| `BrokenNoAnswerDeadline` | The answer has no deadline of its own: only the viewer reading to the end, leaving, or Google failing ends it (review 2026-11-27) | R7 |
+| `BrokenDeadlineAfterHeaders` | The answer's deadline (and the viewer's abort) start only once Google's media headers arrived: a stalled metadata, token or media head holds the slot for ever (Codex re-review of #875) | R7 |
 
 R3 has no variant of its own: what could break it (a new range leaving after a revocation, more answers in flight than
 the cap, an answer longer than `CH`) is caught first by R2 (`BrokenPassNoSwitches`, `BrokenPassAnyGrant`) and R4
@@ -101,8 +101,8 @@ the cap, an answer longer than `CH`) is caught first by R2 (`BrokenPassNoSwitche
 - **One server process**: the per-minute counts, the open answers and the sessions are in its memory; two processes
   would each keep their own (the daily bytes, in the database, would still hold).
 - **What releases a slot** (R7's steps): the last byte passed on (`Finish`), the viewer leaving (`Abort`), Google failing or
-  ending short (`Fail`), the answer's own deadline (`Deadline`, `ACB_DRIVE_VIEW_ANSWER_MS`, which fires whether or not the
-  viewer reads), and a refusal before the call (`Meta`, `Reserve`, `Pass`). The viewer's and Google's steps are not
-  assumed to happen.
+  ending short (`Fail`), the answer's own deadline (`Deadline`, `ACB_DRIVE_VIEW_ANSWER_MS`, started when the slot is taken: it
+  also ends an answer waiting on the metadata or the token, and fires whether or not the viewer reads), and a refusal
+  before the call (`Meta`, `Reserve`, `Pass`). The viewer's and Google's steps — and the awaits on Google (`Meta`,
+  `Pass`) — are not assumed to happen.
 - **The viewing session's log line** (one per session) and the request log are the tests' job.
-- No liveness under fairness ("eventually ends"): the dead-end check says no state is stuck.
