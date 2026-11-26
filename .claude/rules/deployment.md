@@ -421,7 +421,8 @@ are additive and travel in a company archive like every `company_id` table; the 
   (Linux), Sync harness 1–4/4 (macOS) + the aggregate "Sync harness (macOS)", Performance
   baselines (macOS), Universal bundled git (macOS), Server tests (ubuntu, vitest), Admin tests
   (ubuntu, vitest + jsdom), Model (browser plan) (ubuntu; `model/browser-plan/check`, its npm
-  checker installed with scripts off in that job only; `agent-browser.md` "The plan model"). Required: Typecheck, Lint (changed files), Server tests, Client tests
+  checker installed with scripts off in that job only; `agent-browser.md` "The plan model"), Model (Drive view) (ubuntu;
+  `model/drive-view/check`, the same way; `google-drive.md` "Streaming a picked video"). Required: Typecheck, Lint (changed files), Server tests, Client tests
   (macOS), Sync harness (macOS) — keep those names (branch protection), or change protection with
   them.
 - Every macOS job's `runs-on` is `needs.changes.outputs.mac-runner`: the repository variable

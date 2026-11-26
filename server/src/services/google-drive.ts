@@ -1104,8 +1104,9 @@ export function createGoogleDriveService(deps: GoogleDriveDeps) {
     },
 
     /**
-     * The member's own player plays a Drive video (google-drive.md "Viewing a video"; the streaming route of a later change
-     * calls this at every play, with the session's member): usable only while the company's Google is on, the member's
+     * The member's own player plays a Drive video (google-drive.md "Viewing a video"; the streaming route,
+     * services/google-drive-view.ts, calls this at every range, with the session's member; it then asks the bytes only
+     * under `grantId`, the grant seen here): usable only while the company's Google is on, the member's
      * grant is active with `drive.file` and Drive not turned off, and they have a live **view** pick of exactly this file
      * under the Google account their grant has now — an ordinary pick (the AI's, 「つなぐ」's) never counts, nor another
      * member's or another account's. A use renews it: `lastViewedAt` now, 90 days more. Nothing is asked of Google here.

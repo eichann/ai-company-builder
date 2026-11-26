@@ -403,6 +403,12 @@ GET  /api/config                                  setup state (no auth)
                               DELETE /google/grants/:userId,
                               GET|DELETE /me/google, POST /me/google/connect    google.ts
                                                                 (Google: google-connector.md)
+                              POST|GET|DELETE /me/google/drive/pick-tickets(/:ticketId), GET /me/google/drive/files,
+                              POST /me/google/drive/overwrite-confirmations/:confirmationId, GET|DELETE
+                              /me/google/drive/trusted-folders(/:folderId), GET /me/google/drive/view/:fileId (session
+                              only: one range of a video the member picked to view, streamed from Drive with its own
+                              caps; google-drive.md "Streaming a picked video")       google-drive.ts
+                                                                (Drive: google-drive.md)
                               POST /outbound-recipients, POST /outbound,
                               GET|PUT /outbound/:messageId, GET|POST …/recipients,
                               POST …/attachments, GET|DELETE …/attachments/:sha256,
@@ -1004,6 +1010,8 @@ no-exec-sync). CI runs the whole suite on ubuntu ("Server tests").
   records / smartNotes / transcripts (`docsDestination`), Drive v3 file metadata
   (`version`, `modifiedTime`) and text export (BOM + CRLF, 10 MB → 403
   `exportSizeLimitExceeded`; with only `drive.meet.readonly` a file Meet did not create is 404),
+  a binary file's bytes (`alt=media`) with one `Range` (206 / 416 as Drive answers; `setDriveFileBytes`, `paceMedia`,
+  `mediaAnswers` — how each answer ended, `aborted` when the caller closed it —, `misanswerNextMedia`),
   Gmail `messages.send` and its media upload `/upload/gmail/…/messages/send?uploadType=media`
   (stored decoded in `fake.sent` with `via`, the raw message and its attachments; a From that is
   not the token's account is refused), and Sheets v4 (spreadsheets.get / batchUpdate, values get / batchGet / update /
