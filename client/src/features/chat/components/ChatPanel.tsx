@@ -49,7 +49,7 @@ interface ChatPanelProps {
   onAiTurnItems?: (view: AiTurnItemsView) => void
   /** The company's 「使う機能」 (absent = all on): the runner's first messages follow it. */
   features?: CompanyFeatures
-  /** The record open in the middle: the list narrows to consultations about it (「すべて表示」 lifts it). */
+  /** The record open in the middle: its consultations on top of the list, and a new consultation's topic (the member may take it off). */
   focus?: { recordId: string; title: string } | null
   /** The member's 今日のフォルダ now (company path; today-folder.ts), sent with each request. */
   todayFolder?: () => string | null
@@ -108,6 +108,15 @@ function CompanyChatPanel({ userId, departmentPath, activeDepartment, slashComma
   }, [chatWindows, moveToWindow, openSession, paneId])
   // Which consultations this pane has open (chatPanes.ts): one is never open in two panes.
   const showHere = useLatestRef(openSession)
+  // 「AIに相談する」 / ＋ while a record is open: the new consultation starts about it (its topic chip above the input, × takes
+  // it off before anything is stored). Read once by the new tab; one per tab, so a pane of its own keeps its own.
+  const [startTopics, setStartTopics] = useState<Readonly<Record<string, string>>>({})
+  const focusRef = useLatestRef(focus)
+  const startNew = useCallback(() => {
+    const tabId = createNewTab()
+    const recordId = focusRef.current?.recordId
+    if (recordId) setStartTopics(map => ({ ...map, [tabId]: recordId }))
+  }, [createNewTab, focusRef])
   useEffect(() => publishChatPane(paneId, tabs.flatMap(tab => tab.sessionId ? [tab.sessionId] : []), id => showHere.current(id)), [paneId, tabs, showHere])
 
   // chat.newConsultation / chat.insertText for this pane wait here until the active tab can take them.
@@ -243,7 +252,7 @@ function CompanyChatPanel({ userId, departmentPath, activeDepartment, slashComma
             windows={chatWindows} onOpenInWindow={id => void moveToWindow(id)}
             onSelectTab={id => { setActiveTabId(id); if (compact) setSidebarOpen(false) }}
             onOpenSession={id => { openOrFocus(id); if (compact) setSidebarOpen(false) }}
-            onCloseTab={closeTab} onNew={() => { createNewTab(); if (compact) setSidebarOpen(false) }}
+            onCloseTab={closeTab} onNew={() => { startNew(); if (compact) setSidebarOpen(false) }}
             onHide={() => setSidebarOpen(false)} />
         </div>
       </>}
@@ -273,7 +282,8 @@ function CompanyChatPanel({ userId, departmentPath, activeDepartment, slashComma
                 slashCommands={slashCommands}
                 onShowSettings={openSettings}
                 onTitleChange={tabCallbacks(tab.id).title}
-                onNewTab={createNewTab}
+                onNewTab={startNew}
+                initialTopicRecordId={startTopics[tab.id]}
                 onToggleSidebar={toggleSidebar}
                 sidebarOpen={sidebarOpen}
                 initialSessionId={tab.sessionId}

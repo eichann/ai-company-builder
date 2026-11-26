@@ -112,7 +112,7 @@ client/src/features/chat/components/ChatHeader.tsx arbitrary-value=6 opacity-sca
 client/src/features/chat/components/ChatMarkdownImage.tsx opacity-scale=1 palette-color=2
 client/src/features/chat/components/ChatMessageList.tsx arbitrary-value=8 color-opacity=1 palette-color=25 radius-scale=15 shadow-scale=1 type-scale=4 white-black=5
 client/src/features/chat/components/ChatPanel.tsx shadow-scale=1 white-black=1 z-index=3
-client/src/features/chat/components/ChatSidebar.tsx arbitrary-value=1 opacity-scale=1 palette-color=68 radius-scale=2 type-scale=12 white-black=3 z-index=1
+client/src/features/chat/components/ChatSidebar.tsx arbitrary-value=1 opacity-scale=1 palette-color=67 radius-scale=2 type-scale=11 white-black=3 z-index=1
 client/src/features/chat/components/ChoicePrompt.tsx arbitrary-value=4 opacity-scale=1 palette-color=47 radius-scale=4 shadow-scale=1 type-scale=8 white-black=4
 client/src/features/chat/components/ClaudeSignInCard.tsx type-scale=13
 client/src/features/chat/components/CodeMirrorChatInput.tsx arbitrary-value=5 opacity-scale=1 palette-color=8 shadow-scale=2 white-black=1

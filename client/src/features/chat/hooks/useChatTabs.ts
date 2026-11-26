@@ -30,10 +30,12 @@ export function useChatTabs(companyId: string, paneId: string, newChatTitle: str
   const tabsRef = useRef(tabs)
   tabsRef.current = tabs
 
+  /** A new consultation in front; its tab id. */
   const createNewTab = useCallback(() => {
     const newTab = newChatTab(newChatTitle)
     setTabs(prev => [...prev, newTab])
     setActiveTabId(newTab.id)
+    return newTab.id
   }, [newChatTitle])
 
   /** A new consultation behind the shown one (an automatic AI turn); its tab id. */

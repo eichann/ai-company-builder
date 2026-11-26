@@ -878,37 +878,91 @@ test.describe('two chat panes', () => {
   })
 })
 
-test('the list narrows to consultations about the record open in the middle; 「すべて表示」 lifts it', async ({ page }) => {
-  await page.goto('/tests/chat-header-ui.html?history=many&focus=task-0000aa')
+test('a record open in the middle: its consultations on top (「この件の相談」), the full list unchanged below with the same rows marked', async ({ page }) => {
+  // Owner 2026-11-26: opening a record never hides the list nor switches the consultation on screen.
+  await page.goto('/tests/chat-header-ui.html?history=record&focus=task-0000aa')
   const list = page.getByRole('complementary', { name: 'AIへの相談' })
-  await expect(list).toContainText('「見積書を作り直す」についての相談')
-  await expect(list.getByText('終わった相談 4', { exact: true })).toBeVisible()
-  await expect(list.getByText('終わった相談 1', { exact: true })).toHaveCount(0)
-  await list.getByRole('button', { name: 'すべて表示' }).click()
-  await expect(list.getByText('終わった相談 1', { exact: true })).toBeVisible()
-  await list.getByRole('button', { name: '「見積書を作り直す」の相談だけにする' }).click()
-  await expect(list.getByText('終わった相談 1', { exact: true })).toHaveCount(0)
+  const about = list.getByRole('region', { name: 'この件の相談' })
+  await expect(about.getByRole('heading')).toHaveText('この件の相談（2）')
+  await expect(about.locator('[data-about-row]')).toHaveCount(2)
+  for (const id of ['rec-price', 'rec-send']) await expect(about.locator(`[data-about-row="${id}"]`)).toBeVisible()
+  // The full list: every consultation, the open one still on screen, the two marked 「この件」 and no other.
+  await expect(list.locator('[data-conversation-id]')).toHaveCount(7)
+  await expect(list.locator('[data-conversation-id="rec-meeting"]').getByRole('button', { name: /来週の定例の議題/ })).toHaveAttribute('aria-current', 'page')
+  await expect(list.locator('[data-badge="selected"]', { hasText: 'この件' })).toHaveCount(2)
+  for (const id of ['rec-price', 'rec-send']) await expect(list.locator(`[data-conversation-id="${id}"] [data-badge="selected"]`)).toHaveText('この件')
+  await expect(list.getByRole('region', { name: '表示中の相談' })).toHaveCount(0)
+  // A row on top opens that consultation like its row below.
+  await about.locator('[data-about-row="rec-send"]').click()
+  await expect(about.locator('[data-about-row="rec-send"]')).toHaveAttribute('aria-current', 'page')
+  await expect(list.locator('[data-conversation-id="rec-send"]').getByRole('button', { name: /見積書の送り方/ })).toHaveAttribute('aria-current', 'page')
 })
 
-test('narrowed to a record, the consultation on screen that is not about it is listed apart, never under the record', async ({ page }) => {
-  // Owner report 2026-11-25: a new やること opened in the middle while an unrelated consultation was on screen —
-  // the list read 「「…」についての相談」 with that consultation under it, as if it were about the やること.
-  await page.goto('/tests/chat-header-ui.html?history=many&focus=task-0000aa')
+test('a record with no consultation: one quiet line, the full list stays; no record open: no section', async ({ page }) => {
+  await page.goto('/tests/chat-header-ui.html?history=record&focus=task-0000cc')
   const list = page.getByRole('complementary', { name: 'AIへの相談' })
-  await list.getByRole('button', { name: 'すべて表示' }).click()
-  await list.locator('[data-conversation-id="closed-1"]').getByRole('button', { name: /終わった相談 2/ }).click()
-  await expect(list.locator('[data-conversation-id="closed-1"]')).toContainText('表示中')
-  await list.getByRole('button', { name: '「見積書を作り直す」の相談だけにする' }).click()
-  await expect(list).toContainText('「見積書を作り直す」についての相談')
-  const apart = list.getByRole('region', { name: '表示中の相談' })
-  await expect(apart).toContainText('このことについての相談ではありません')
-  await expect(apart.locator('[data-conversation-id="closed-1"]')).toBeVisible()
-  // The record's own consultations are only those about it.
-  for (const label of ['開いている相談', '終わったもの']) await expect(list.getByRole('region', { name: label }).locator('[data-conversation-id="closed-1"]')).toHaveCount(0)
-  await expect(list.getByRole('region', { name: '終わったもの' }).locator('[data-conversation-id="closed-3"]')).toBeVisible()
-  // Opening a consultation about the record itself: nothing apart.
-  await list.locator('[data-conversation-id="closed-3"]').getByRole('button', { name: /終わった相談 4/ }).click()
-  await expect(list.getByRole('region', { name: '表示中の相談' })).toHaveCount(0)
+  await expect(list.getByRole('note', { name: 'この件の相談' })).toHaveText('この件の相談はまだありません')
+  await expect(list.getByRole('region', { name: 'この件の相談' })).toHaveCount(0)
+  await expect(list.locator('[data-conversation-id]')).toHaveCount(7)
+  await expect(list.locator('[data-badge="selected"]')).toHaveCount(0)
+  await page.goto('/tests/chat-header-ui.html?history=record')
+  await expect(list.locator('[data-conversation-id]')).toHaveCount(7)
+  await expect(list.getByRole('region', { name: 'この件の相談' })).toHaveCount(0)
+  await expect(list.getByRole('note', { name: 'この件の相談' })).toHaveCount(0)
+})
+
+test('「AIに相談する」 while a record is open: the new consultation carries its chip above the input (stored with the first message); × leaves it unlinked', async ({ page }) => {
+  await page.goto('/tests/chat-header-ui.html?history=record&focus=task-0000aa&turn=manual')
+  const list = page.getByRole('complementary', { name: 'AIへの相談' })
+  await list.getByRole('button', { name: 'AIに相談する' }).click()
+  const chip = page.locator('[data-topic-chip="composer"]').locator('visible=true')
+  await expect(chip).toHaveText('このやること：見積書を作り直す')
+  // Before the first message the chip is by the input, not under the header.
+  await expect(page.locator('[data-topic-chip]:not([data-topic-chip="composer"])').locator('visible=true')).toHaveCount(0)
+  await send(page, '単価の根拠を教えて')
+  await turnStarted(page)
+  const flushed = await chat(page, c => c.requests.filter(r => r.path === 'flushChatSession').map(r => r.body?.topicRecordId ?? null))
+  expect(flushed.at(-1)).toBe('task-0000aa')
+  // Sent: the chip moves under the header as for any consultation about a record.
+  await expect(chip).toHaveCount(0)
+  await expect(page.locator('[data-topic-chip]').locator('visible=true')).toContainText('このやることについての相談：見積書を作り直す')
+
+  // Another new one, the chip taken off: nothing links it.
+  await chat(page, c => c.finish())
+  await list.getByRole('button', { name: 'AIに相談する' }).click()
+  await expect(chip).toHaveText('このやること：見積書を作り直す')
+  await chip.getByRole('button', { name: 'このやることにつなげない' }).click()
+  await expect(chip).toHaveCount(0)
+  await send(page, '別件です')
+  await expect.poll(() => chat(page, c => c.requests.filter(r => r.path === 'flushChatSession').length)).toBe(2)
+  const second = await chat(page, c => c.requests.filter(r => r.path === 'flushChatSession').map(r => r.body?.topicRecordId ?? null))
+  expect(second.at(-1)).toBeNull()
+  await expect(page.locator('[data-topic-chip]').locator('visible=true')).toHaveCount(0)
+})
+
+test('the screenshots of 「この件の相談」 for the owner (SCREENSHOTS=<dir>)', async ({ page }) => {
+  const dir = process.env.SCREENSHOTS
+  test.skip(!dir, 'only when SCREENSHOTS is set')
+  await page.setViewportSize({ width: 1280, height: 760 })
+  const shoot = (name: string) => page.screenshot({ path: `${dir}/${name}.png` })
+  const list = page.getByRole('complementary', { name: 'AIへの相談' })
+  await page.goto('/tests/chat-header-ui.html?history=record&focus=task-0000aa&turn=manual')
+  await expect(list.getByRole('region', { name: 'この件の相談' })).toContainText('見積書の送り方')
+  await shoot('a-record-open-2-related')
+  await page.goto('/tests/chat-header-ui.html?history=record&focus=task-0000cc&turn=manual')
+  await expect(list.getByRole('note', { name: 'この件の相談' })).toBeVisible()
+  await shoot('b-record-open-0-related')
+  await page.goto('/tests/chat-header-ui.html?history=record&turn=manual')
+  await expect(list.locator('[data-conversation-id]')).toHaveCount(7)
+  await shoot('c-no-record-open')
+  await page.goto('/tests/chat-header-ui.html?history=record&focus=task-0000aa&turn=manual')
+  await list.getByRole('button', { name: 'AIに相談する' }).click()
+  const chip = page.locator('[data-topic-chip="composer"]').locator('visible=true')
+  await expect(chip).toHaveText('このやること：見積書を作り直す')
+  await shoot('d-new-consultation-with-chip')
+  await chip.getByRole('button', { name: 'このやることにつなげない' }).click()
+  await expect(chip).toHaveCount(0)
+  await shoot('e-chip-removed')
 })
 
 test('the search box finds consultations by the やること / 案件 they are about, live, never mid-IME, and Esc restores the list', async ({ page }) => {

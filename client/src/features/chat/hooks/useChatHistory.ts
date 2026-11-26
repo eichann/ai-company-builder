@@ -13,6 +13,8 @@ export interface ChatHistoryOptions {
   conversation: Conversation
   /** The conversation this tab was opened with (null: a new chat). */
   initialSessionId: string | null | undefined
+  /** A new conversation's topic from the start (「AIに相談する」 while a record is open in the middle); the member may take it off. */
+  initialTopicRecordId?: string
   companyId: string | undefined
   /** The greeting of a new conversation, and the title of one without a user message yet. */
   greeting: string
@@ -116,7 +118,7 @@ export function useChatHistory(o: ChatHistoryOptions) {
           if (initialSessionId) {
             appSessionIdRef.current = crypto.randomUUID()
             setCurrentSessionId(appSessionIdRef.current)
-          }
+          } else if (o.initialTopicRecordId) setTopic(o.initialTopicRecordId)
           setMessages(greetingMessages(o.greeting))
         }
         historyReadyRef.current = true

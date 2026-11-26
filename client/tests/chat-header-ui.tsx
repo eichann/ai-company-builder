@@ -53,6 +53,9 @@ import { useTabArrangement } from '../src/features/editor/hooks/useTabArrangemen
 //                  with ×; taking it off is recorded in __acbChat.patches)
 //   ?tabs=1        the middle's tab bar beside the chat: a やること, a 案件 and a file tab, to drag onto the
 //                  consultation's input (a record becomes its topic; a file is read)
+//   ?history=record  the 「AIへの相談」 list beside a record open in the middle (with ?focus=<id>): 「この件の相談」 on top,
+//                  the full list below. task-0000aa has two consultations, task-0000cc none; no ?focus = no record open.
+//                  「AIに相談する」 then starts a consultation with the record's chip above the input (× takes it off).
 //   ?minutes=1     the task list beside the chat with one received minutes record in 「AI の番」
 //                  (「自分で読み取る」); the deal choice card's links are recorded in __acbChat.minutesLinks
 
@@ -69,13 +72,27 @@ const editHistory = params.get('history') === 'edit'
 // Enough closed conversations that the 「AIへの相談」 list scrolls (sticky group headings).
 const manyHistory = params.get('history') === 'many'
 const topicOn = params.get('topic') === '1'
+const recordHistory = params.get('history') === 'record'
 // history=many: 終わった相談 4 is about a やること (in a 案件), 6 about one the member cannot read, 7 about a 案件.
 const MANY_TOPICS: Record<number, string> = { 3: 'task-0000aa', 5: 'task-0000ff', 6: 'deal-0000bb' }
 const DEAL = { id: 'deal-0000bb', title: '株式会社サンプル', thing: 'bundle' as const, typeLabel: '案件', kindName: '案件' }
 const TOPICS: Record<string, ConsultationTopic> = {
   'task-0000aa': { own: { id: 'task-0000aa', title: '見積書を作り直す', thing: 'task', typeLabel: null, kindName: 'やること' }, bundle: DEAL },
   'deal-0000bb': { own: null, bundle: DEAL },
+  'task-0000cc': { own: { id: 'task-0000cc', title: '備品の発注をまとめる', thing: 'task', typeLabel: null, kindName: 'やること' }, bundle: null },
+  'task-0000dd': { own: { id: 'task-0000dd', title: '新人研修の資料を直す', thing: 'task', typeLabel: null, kindName: 'やること' }, bundle: null },
 }
+// history=record: the consultations (title, topic, hours ago, last words); the first is open in the chat.
+const RECORD_HISTORY: Array<{ id: string; title: string; topic?: string; hours: number; preview: string }> = [
+  { id: 'rec-meeting', title: '来週の定例の議題', hours: 1, preview: '議題を3つにまとめました。' },
+  { id: 'rec-price', title: '見積書の単価を確かめる', topic: 'task-0000aa', hours: 3, preview: '10月版の単価で計算し直しました。' },
+  { id: 'rec-training', title: '研修資料の構成', topic: 'task-0000dd', hours: 5, preview: '章立てを4つに分けました。' },
+  { id: 'rec-expense', title: '経費の締め日', hours: 20, preview: '毎月25日締めです。' },
+  { id: 'rec-send', title: '見積書の送り方', topic: 'task-0000aa', hours: 26, preview: 'PDF にしてメールで送ります。' },
+  { id: 'rec-sample', title: '株式会社サンプルへの提案', topic: 'deal-0000bb', hours: 50, preview: '提案の骨子を作りました。' },
+  { id: 'rec-news', title: '社内報の原稿', hours: 70, preview: '見出しを直しました。' },
+]
+const RECORD_TITLES: Record<string, string> = { 'task-0000aa': '見積書を作り直す', 'task-0000cc': '備品の発注をまとめる' }
 let signedOut = params.get('auth') === 'none'
 const signInCalls = { statusRoots: [] as Array<string | undefined>, startRoots: [] as Array<string | undefined> }
 ;(window as unknown as { __acbSignIn: typeof signInCalls }).__acbSignIn = signInCalls
@@ -123,6 +140,22 @@ function manySession(i: number) {
 }
 if (editHistory) {
   try { localStorage.setItem('chatTabs:preview-company', JSON.stringify({ tabs: [{ title: '見積書の相談', sessionId: 'edit-history' }], activeIndex: 0 })) } catch { /* preview only */ }
+}
+if (recordHistory) {
+  try { localStorage.setItem('chatTabs:preview-company', JSON.stringify({ tabs: [{ title: '来週の定例の議題', sessionId: 'rec-meeting' }], activeIndex: 0 })) } catch { /* preview only */ }
+}
+function recordSummary(c: (typeof RECORD_HISTORY)[number]) {
+  const at = new Date(now - c.hours * 3_600_000).toISOString()
+  return { id: c.id, companyId: 'preview-company', title: c.title, ...(c.topic ? { topicRecordId: c.topic } : {}), messageCount: 2, sent: true, preview: c.preview, createdAt: at, updatedAt: at }
+}
+function recordSession(id: string) {
+  const c = RECORD_HISTORY.find(r => r.id === id)
+  if (!c) return null
+  const summary = recordSummary(c)
+  return { ...summary, revision: 1, messages: [
+    { id: `${id}-u`, role: 'user', content: `${c.title}について教えて`, timestamp: summary.updatedAt },
+    { id: `${id}-a`, role: 'assistant', content: c.preview, timestamp: summary.updatedAt },
+  ] }
 }
 if (longHistory) {
   try { localStorage.setItem('chatTabs:preview-company', JSON.stringify({ tabs: [{ title: '長い相談（240件）', sessionId: 'long-history' }, { title: '別の相談', sessionId: null }], activeIndex: 0 })) } catch { /* preview only */ }
@@ -209,6 +242,7 @@ installElectronAPI({
   hasApiKey: async () => false,
   getCodexStatus: async () => ({ available: true, authenticated: true, models: [{ id: 'gpt-5.5-codex', label: 'GPT-5.5-Codex', efforts: ['low', 'medium', 'high'], defaultEffort: 'medium', isDefault: true }] }) as CodexStatus,
   getChatSessionSummaries: async () => manyHistory ? Array.from({ length: 30 }, (_, i) => ({ id: `closed-${i}`, companyId: 'preview-company', title: `終わった相談 ${i + 1}`, ...(MANY_TOPICS[i] ? { topicRecordId: MANY_TOPICS[i] } : {}), messageCount: 2, sent: true, preview: '以上です。', createdAt: new Date(now - (i + 1) * 3_600_000).toISOString(), updatedAt: new Date(now - (i + 1) * 3_600_000).toISOString() })) as never
+    : recordHistory ? RECORD_HISTORY.map(recordSummary) as never
     : longHistory ? [{ id: 'long-history', companyId: 'preview-company', title: '長い相談（240件）', messageCount: 240, preview: '以上です。', createdAt: new Date(now).toISOString(), updatedAt: new Date(now).toISOString() }] as never
     : editHistory ? [{ id: 'edit-history', companyId: 'preview-company', title: '見積書の相談', topicRecordId: topicOn ? 'task-0000aa' : 'task-0000ed', messageCount: 4, preview: '単価を10月版にしました。', createdAt: new Date(now).toISOString(), updatedAt: new Date(now).toISOString() }] as never : [],
   searchChatSessions: async () => [],
@@ -216,7 +250,8 @@ installElectronAPI({
   getConsultationTopics: async (_company, ids) => ({ success: true, topics: Object.fromEntries(ids.map(id => [id, TOPICS[id] ?? null])) }),
   getChatSession: async (_company: string, id: string) => longHistory && id === 'long-history' ? longSession() as ChatSession
     : editHistory && id === 'edit-history' ? editSession() as ChatSession
-      : manyHistory && /^closed-\d+$/.test(id) ? manySession(Number(id.slice(7))) as ChatSession : null,
+      : manyHistory && /^closed-\d+$/.test(id) ? manySession(Number(id.slice(7))) as ChatSession
+        : recordHistory ? recordSession(id) as ChatSession | null : null,
   getAgentInteractions: async () => [],
   onAgentInteraction: interactions.subscribe,
   onAgentInteractionClosed: interactionsClosed.subscribe,
@@ -423,6 +458,18 @@ function MiddleTabs() {
   )
 }
 
+/** history=record: a stand-in for the middle, saying which record is open there (or none). */
+function OpenRecordStandIn({ recordId }: { recordId: string | null }) {
+  return (
+    <div data-testid="middle-stand-in" className="h-full min-w-0 flex-1 bg-surface-raised p-dialog text-body text-text">
+      <p className="text-caption font-normal text-text-subtle">真ん中に開いているもの（プレビュー用の見本）</p>
+      {recordId
+        ? <h1 className="mt-2 text-heading">やること「{RECORD_TITLES[recordId] ?? recordId}」</h1>
+        : <p className="mt-2 text-text-muted">やることは開いていません</p>}
+    </div>
+  )
+}
+
 const width = Number(params.get('width')) || 760
 createRoot(document.getElementById('root')!).render(params.get('panes') === '2'
   ? <div className="h-screen flex bg-gray-50 dark:bg-zinc-950">
@@ -432,9 +479,10 @@ createRoot(document.getElementById('root')!).render(params.get('panes') === '2'
   : <div className="h-screen flex justify-end bg-gray-50 dark:bg-zinc-950">
       {(params.get('minutes') === '1' || autoTurn) && <AutoTurnList />}
       {params.get('tabs') === '1' && <MiddleTabs />}
+      {recordHistory && <OpenRecordStandIn recordId={params.get('focus')} />}
       <div style={{ width }} className="h-full flex-shrink-0 border-l border-gray-200 dark:border-zinc-800">
         <ChatPanel departmentPath="/tmp/acb-preview" aiTurnQueue={autoTurn ? [MINUTES_NOTICE] : undefined} onAiTurnItems={autoTurn ? view => showAiTurns(view) : undefined}
-          focus={params.get('focus') ? { recordId: params.get('focus')!, title: '見積書を作り直す' } : null} />
+          focus={params.get('focus') ? { recordId: params.get('focus')!, title: RECORD_TITLES[params.get('focus')!] ?? '見積書を作り直す' } : null} />
       </div>
     </div>,
 )

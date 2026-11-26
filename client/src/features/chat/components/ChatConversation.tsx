@@ -81,6 +81,8 @@ export interface ChatPanelChatProps {
   onToggleSidebar: () => void
   sidebarOpen: boolean
   initialSessionId?: string | null
+  /** A new conversation's topic from the start (ChatPanel's 「AIに相談する」 while a record is open). */
+  initialTopicRecordId?: string
   onSessionIdChange?: (sessionId: string | null) => void
   /** Closes this tab: the member left it for another conversation with nothing typed (useDiscardBlankOnLeave). */
   onLeftBlank?: () => void
@@ -110,7 +112,7 @@ export type ChatInputRequest =
 
 // Memoised: every tab stays mounted, and the parent re-renders on any tab's
 // title change or tab switch. Its props are stable (see CompanyChatPanel).
-export const ChatPanelChat = memo(function ChatPanelChat({ tabId, isShown, departmentPath, activeDepartment, chatServer, authMode, codexStatus, slashCommands, onShowSettings, onTitleChange, onNewTab, onToggleSidebar, sidebarOpen, initialSessionId, onSessionIdChange, onLeftBlank, inputRequest, onInputRequestConsumed, onOpenInWindow, standalone, paneId = 'chat', todayFolder }: ChatPanelChatProps) {
+export const ChatPanelChat = memo(function ChatPanelChat({ tabId, isShown, departmentPath, activeDepartment, chatServer, authMode, codexStatus, slashCommands, onShowSettings, onTitleChange, onNewTab, onToggleSidebar, sidebarOpen, initialSessionId, initialTopicRecordId, onSessionIdChange, onLeftBlank, inputRequest, onInputRequestConsumed, onOpenInWindow, standalone, paneId = 'chat', todayFolder }: ChatPanelChatProps) {
   const { t } = useTranslation()
   const currentCompany = useAppStore((state) => state.currentCompany)
   const models = useAgentModelSelection(authMode, codexStatus)
@@ -207,6 +209,7 @@ export const ChatPanelChat = memo(function ChatPanelChat({ tabId, isShown, depar
   const { isRestoringSession, historyReadyRef, deletedRef, unmountedRef, messagesRef, titleGenerationDoneRef, customTitleRef, minutesIdRef, topicRecordId: topicShown, setTopic, startNewChat } = useChatHistory({
     conversation,
     initialSessionId,
+    initialTopicRecordId,
     companyId: currentCompany?.id,
     greeting: t('chat.greeting', { company: currentCompany?.name || '' }),
     newChatTitle: t('chat.newChat'),
@@ -476,6 +479,15 @@ export const ChatPanelChat = memo(function ChatPanelChat({ tabId, isShown, depar
     return null
   }, [messages])
 
+  // The topic this new consultation started with (the record open in the middle), until the member's first message:
+  // a proposal by the input, not yet the consultation's heading. A dropped record's topic stays under the header.
+  const topicBeforeFirstMessage = !!topicShown && topicShown === initialTopicRecordId && !messages.some(message => message.role === 'user')
+  const removeTopic = useCallback(() => {
+    const sessionId = appSessionIdRef.current
+    setTopic(null)
+    if (currentCompany?.id && sessionId) void patchChatSession(currentCompany.id, sessionId, { topicRecordId: null }).catch(() => {})
+  }, [setTopic, appSessionIdRef, currentCompany?.id])
+
   // ============================================================================
   // Render
   // ============================================================================
@@ -500,13 +512,10 @@ export const ChatPanelChat = memo(function ChatPanelChat({ tabId, isShown, depar
       {currentCompany?.id && appSessionIdRef.current && <HandoffControl companyId={currentCompany.id} sessionId={appSessionIdRef.current} active={isShown} />}
 
 
-      {/* The topic chip says the same as a task's instruction chip, with × (consultation-task.ts). */}
-      {topicShown && currentCompany?.id
-        ? <TopicChip companyId={currentCompany.id} recordId={topicShown} fallbackTitle={instructionShown?.recordId === topicShown ? instructionShown.title : undefined} onRemove={() => {
-          const sessionId = appSessionIdRef.current
-          setTopic(null)
-          if (sessionId) void patchChatSession(currentCompany.id, sessionId, { topicRecordId: null }).catch(() => {})
-        }} />
+      {/* The topic chip says the same as a task's instruction chip, with × (consultation-task.ts). A new consultation's
+          starting topic sits above the input instead until the first message (on by default). */}
+      {topicShown && currentCompany?.id && !topicBeforeFirstMessage
+        ? <TopicChip companyId={currentCompany.id} recordId={topicShown} fallbackTitle={instructionShown?.recordId === topicShown ? instructionShown.title : undefined} onRemove={removeTopic} />
         : null}
       {instructionShown && !(topicShown && instructionShown.kind === 'task' && instructionShown.recordId === topicShown) && <AppInstructionChip instruction={instructionShown} />}
 
@@ -588,7 +597,9 @@ export const ChatPanelChat = memo(function ChatPanelChat({ tabId, isShown, depar
             onRemoveRecord={removePendingRecord}
             above={topicSwitch && topicShown && currentCompany?.id
               ? <TopicSwitchAsk companyId={currentCompany.id} fromRecordId={topicShown} to={topicSwitch} onSwitch={() => applyTopic(topicSwitch.id)} onKeep={() => setTopicSwitch(null)} />
-              : null}
+              : topicBeforeFirstMessage && topicShown && currentCompany?.id
+                ? <TopicChip place="composer" companyId={currentCompany.id} recordId={topicShown} onRemove={removeTopic} />
+                : null}
           />
         </div>
       </div>
