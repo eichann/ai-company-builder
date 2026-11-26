@@ -486,7 +486,8 @@ after the same switches and the grant's `drive.file`.
 
 `streamMedia(companyId, userId, { fileId, start, end, grantId, signal, operation })`: a picked video's bytes
 (`google-drive.md` "Streaming a picked video") — a path of its own so `request`'s contract (its 12 MB buffered answer, its
-retries) stays as it is. The same switches and grant checks before every attempt, plus **the grant must still be
+retries) stays as it is. The same switches and grant checks before every attempt — **and again after the access token** (a refresh can
+take seconds; nothing is awaited from that last check to the request leaving) —, plus **the grant must still be
 `grantId`** (the one the caller's check saw; else `grant-changed`, nothing sent); `files.get?alt=media` with `Range:
 bytes=start-end`; the answer's body handed back as it arrives (`{ ok, status, contentRange, contentLength, body, abort }`),
 never buffered; the caller's `signal` and a 120 s deadline abort the call (head or body); a 401 retried once with a fresh

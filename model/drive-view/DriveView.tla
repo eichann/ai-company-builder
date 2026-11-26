@@ -227,8 +227,9 @@ Reserve(r) ==
     /\ UNCHANGED <<pickVars, envVars, others, seen, delivered, flags>>
 
 \* google-client.ts streamMedia: every switch, the grant active and still the one the pick check saw (`grant-changed`
-\* otherwise), drive.file, Drive on — the last check before the call leaves (the token's await before it is folded
-\* into this step: a cached token sends with no further await). Not passing: nothing sent, the slot released.
+\* otherwise), drive.file, Drive on — checked before the access token and again after it (a refresh can take seconds),
+\* and from that last check to the call leaving nothing is awaited: this step is that last check. Not passing: nothing
+\* sent, the slot released.
 Pass(r) ==
     LET m == Who[r] IN
     /\ ph[r] = "reserved"
@@ -257,8 +258,15 @@ Abort(r) ==
     /\ EndHolding(r, "aborted")
     /\ UNCHANGED <<pickVars, envVars, others, seen, delivered, flags>>
 
-\* Google failed mid-answer, or the deadline passed: `finish(false)`.
+\* Google failed mid-answer or ended short: `fail('failed')` (the stream errors).
 Fail(r) ==
+    /\ ph[r] = "inflight"
+    /\ EndHolding(r, "failed")
+    /\ UNCHANGED <<pickVars, envVars, others, seen, delivered, flags>>
+
+\* The answer's own deadline (`answerMs`, a timer of the server's: it fires whether or not the viewer reads): the same
+\* ending. Under weak fairness it is what makes R7 hold for a viewer that keeps the connection open and reads nothing.
+Deadline(r) ==
     /\ ph[r] = "inflight"
     /\ EndHolding(r, "failed")
     /\ UNCHANGED <<pickVars, envVars, others, seen, delivered, flags>>
@@ -269,10 +277,18 @@ Done == Settled /\ UNCHANGED vars
 
 PickNext == OpenTicket \/ ResultFinish \/ ReadPick("f2") \/ (\E f \in Files : ResultStart(f) \/ Expire(f))
 EnvNext == DriveOff \/ OthersStream \/(\E m \in Members : Revoke(m) \/ Remove(m) \/ (\E a \in Accounts : Reconsent(m, a)))
-StreamNext == \E r \in Reqs : Check(r) \/ Caps(r) \/ Meta(r) \/ Reserve(r) \/ Pass(r) \/ Deliver(r) \/ Finish(r) \/ Abort(r) \/ Fail(r)
+StreamNext == \E r \in Reqs : Check(r) \/ Caps(r) \/ Meta(r) \/ Reserve(r) \/ Pass(r) \/ Deliver(r) \/ Finish(r) \/ Abort(r) \/ Fail(r) \/ Deadline(r)
 
 Next == PickNext \/ EnvNext \/ StreamNext \/ Done
 Spec == Init /\ [][Next]_vars
+
+\* The server's own steps are weakly fair (each awaits something with a time limit: the metadata, the token, its
+\* deadline); the viewer's (Deliver, Abort) and Google's (Fail) are not — a viewer may read nothing for ever.
+ServerFair == \A r \in Reqs : WF_vars(Caps(r)) /\ WF_vars(Meta(r)) /\ WF_vars(Reserve(r)) /\ WF_vars(Pass(r)) /\ WF_vars(Deadline(r))
+LiveSpec == Spec /\ ServerFair
+
+\* R7 (liveness, under ServerFair) A held stream slot is always released: every answer that took a slot ends
+R7_SlotReleased == \A r \in Reqs : (ph[r] \in Holding) ~> (ph[r] \in Final)
 
 \* =========================== the rules ===========================
 

@@ -502,7 +502,8 @@ export function createGoogleClient(deps: GoogleClientDeps) {
      * A range of a picked Drive video's bytes, streamed (google-drive.md "Streaming a picked video"). The buffered
      * `request` stays as it was (its 12 MB answer limit, its retries); this path never holds the answer in memory. Every
      * switch, the grant (and that it is still `grantId`), `drive.file` and the `drive` feature are checked as for any
-     * Drive call, before every attempt; the access token is refreshed as there; a 401 drops it and tries once more. Not
+     * Drive call, before every attempt and again after the access token (refreshed as there, which can take seconds; from
+     * that last check to the request leaving nothing is awaited); a 401 drops it and tries once more. Not
      * retried otherwise (the player asks again). The viewer's `signal` and a deadline abort the call to Google, its body
      * included. Files no action-log line: the caller records one line per viewing session.
      */

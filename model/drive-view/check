@@ -2,8 +2,9 @@
 # model/drive-view/check: run the Drive video viewing model (DriveView.tla: the view pick and the streaming of its
 # bytes) through the checker tla-ts. The one entry point, locally and in CI (job "Model (Drive view)"). Needs bash,
 # Node and npm only. The same structure as model/browser-plan/check:
-#   1. The real model keeps every INVARIANT and has no dead end (a finished run stutters in `Done`); the rules it checks
-#      are exactly expected.txt's `rule DriveView` lines (dropping one fails); a CHECK_DEADLOCK line is refused.
+#   1. The real model keeps every INVARIANT and the PROPERTY R7 (liveness: a held stream slot is always released, under
+#      the weak fairness of the server's own steps) and has no dead end (a finished run stutters in `Done`); the rules it
+#      checks are exactly expected.txt's `rule DriveView` lines (dropping one fails); a CHECK_DEADLOCK line is refused.
 #   2. Its distinct state count equals expected.txt's `states DriveView` (a guard against a checker that explores less).
 #   3. Each broken variant (broken/) fails on exactly the rule expected.txt names. A variant that passes fails this
 #      script: the checker must not wave through something known to be broken.
@@ -37,7 +38,7 @@ run() { # run <module> → $tmp/out, $code
   (cd "$tmp/run" && "${checker[@]}" -config "$m.cfg" -workers 1 -metadir "$tmp/states" "$m.tla") >"$tmp/out" 2>&1 || code=$?
 }
 show() { sed 's/^/     | /' "$tmp/out" | tail -40 >&2; }
-violated() { sed -n 's/.*Invariant \([A-Za-z0-9_]*\) is violated.*/\1/p' "$tmp/out" | head -1; }
+violated() { sed -n -e 's/.*Invariant \([A-Za-z0-9_]*\) is violated.*/\1/p' -e 's/.*Temporal property \([A-Za-z0-9_]*\) was violated.*/\1/p' "$tmp/out" | head -1; }
 states_found() { grep -oE '[0-9,]+ distinct states found' "$tmp/out" | tail -1 | cut -d' ' -f1 | tr -d ,; }
 passed() { [ "$code" -eq 0 ] && grep -q "No error has been found" "$tmp/out"; }
 
@@ -57,7 +58,7 @@ done <"$here/expected.txt"
 model=DriveView
 [ "$(awk '$1 == "model" { print $2 }' "$here/expected.txt")" = "$model" ] || fail "expected.txt's model line is not $model"
 ! grep -qE '^[[:space:]]*CHECK_DEADLOCK' "$here/$model.cfg" || fail "$model.cfg has a CHECK_DEADLOCK line (dead ends must stay checked)"
-have=$(sed -n 's/^INVARIANT //p' "$here/$model.cfg" | tr ' ' '\n' | sed '/^$/d' | sort)
+have=$(sed -n -e 's/^INVARIANT //p' -e 's/^PROPERTY //p' "$here/$model.cfg" | tr ' ' '\n' | sed '/^$/d' | sort)
 need=$(awk -v m="$model" '$1 == "rule" && $2 == m { print $3 }' "$here/expected.txt" | sort)
 [ "$have" = "$need" ] || fail "the rules $model.cfg checks differ from expected.txt's rule lines"
 run "$model"
@@ -65,7 +66,7 @@ passed || { show; fail "the real model $model breaks a rule or has a dead end (e
 got=$(states_found)
 want=$(awk -v m="$model" '$1 == "states" && $2 == m { print $3 }' "$here/expected.txt")
 [ "$got" = "$want" ] || fail "the real model $model has $got distinct states, expected.txt says $want (changed the model? update expected.txt and say why in the PR)"
-echo "ok   real model $model: keeps all $(wc -l <<<"$have" | tr -d ' ') INVARIANTs, no dead end, ${got} distinct states (as expected)"
+echo "ok   real model $model: keeps all $(wc -l <<<"$have" | tr -d ' ') rules (R7 under the server's fairness), no dead end, ${got} distinct states (as expected)"
 
 # 3: broken variants must fail on their named rule
 n=0
@@ -74,7 +75,8 @@ while read -r kind module rule; do
   n=$((n + 1))
   run "$module"
   broke=$(violated)
-  { [ "$code" -eq 12 ] && [ "$broke" = "$rule" ]; } || { show; fail "broken $module does not fail on $rule (exit code ${code}, rule broken: ${broke:-none})"; }
+  # 12: an INVARIANT broken; 13: a temporal PROPERTY (R7) broken
+  { { [ "$code" -eq 12 ] || [ "$code" -eq 13 ]; } && [ "$broke" = "$rule" ]; } || { show; fail "broken $module does not fail on $rule (exit code ${code}, rule broken: ${broke:-none})"; }
   echo "ok   broken $module fails $rule"
 done <"$here/expected.txt"
 [ "$n" -gt 0 ] || fail "expected.txt has no broken line"

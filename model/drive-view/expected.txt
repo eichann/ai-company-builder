@@ -4,7 +4,7 @@
 #
 # model <the real model check runs>
 model DriveView
-# rule <model> <a rule the real model must check> (must equal the INVARIANT line of DriveView.cfg)
+# rule <model> <a rule the real model must check> (must equal the INVARIANT and PROPERTY lines of DriveView.cfg)
 rule DriveView TypeOK
 rule DriveView R1_ViewPickOnlyBoundVideo
 rule DriveView R2_StreamOnlyForLivePick
@@ -12,6 +12,7 @@ rule DriveView R3_OnlyInFlightOutlivesRevocation
 rule DriveView R4_StreamsPerMember
 rule DriveView R5_BytesPerDay
 rule DriveView R6_ViewPickNeverAiPick
+rule DriveView R7_SlotReleased
 # states <model> <distinct states the checker must find>
 states DriveView 267040
 # broken <variant in broken/> <the rule it must fail on>
@@ -26,3 +27,5 @@ broken BrokenNoStreamCap R4_StreamsPerMember
 broken BrokenAbortKeepsSlot R4_StreamsPerMember
 broken BrokenReserveNoCut R5_BytesPerDay
 broken BrokenAbortNoGiveBack R5_BytesPerDay
+broken BrokenReserveStale R5_BytesPerDay
+broken BrokenNoAnswerDeadline R7_SlotReleased

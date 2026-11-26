@@ -447,8 +447,9 @@ jobs:
   model-drive-view:
     name: Model (Drive view)
     # The Drive video viewing model (model/drive-view/, google-drive.md "Streaming a picked video"): the checker tla-ts
-    # explores every reachable state of DriveView.tla (the view pick and the streaming of its bytes, R1-R6), checks the
-    # state count against expected.txt and that each broken variant fails on its named rule (~20 s). Runs when area
+    # explores every reachable state of DriveView.tla (the view pick and the streaming of its bytes, R1-R6, and the
+    # liveness rule R7 under the server's fairness), checks the state count against expected.txt and that each broken
+    # variant fails on its named rule (~100 s). Runs when area
     # model changes (check-areas.mjs keeps its list in step with the files the model cites), on push to main and
     # nightly. Same isolation as the browser plan's job: the checker installed by model/drive-view/check from its own
     # package-lock.json with install scripts off, no secrets, the read-only token, no persisted git credentials.

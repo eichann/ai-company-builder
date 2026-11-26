@@ -17,7 +17,7 @@ model/drive-view/check
 ```
 
 Needs bash, Node (22 in CI) and npm only. The checker is installed from `package-lock.json` into a temporary folder (no
-install scripts run); nothing is written to the repository or to HOME. About 20 s. Outside the pnpm workspace on
+install scripts run); nothing is written to the repository or to HOME. About 100 s (the liveness rule R7 takes most of it). Outside the pnpm workspace on
 purpose, like `model/browser-plan/` (same pinned `tla-ts` version).
 
 CI: job "Model (Drive view)" in `.github/workflows/ci.yml`, run when area `model` changes
@@ -31,7 +31,7 @@ CI: job "Model (Drive view)" in `.github/workflows/ci.yml`, run when area `model
 | The view ticket (one id, bound), the Picker's result in two halves (the grant read before Google is asked, then the bound id, the video type and the same account), the pick kept apart from the AI's picks | `server/src/services/google-drive.ts` (`startPick`, `pageResult`, `keepViewPicks`), `shared/core/google-drive.ts` (`DRIVE_VIEW_MIMES`, `drivePickableFor`) |
 | The pick checked at every range (member, file, the account the grant has now, the switches) | `server/src/services/google-drive.ts` `useViewPick` |
 | The caps, the session's metadata, the bytes reserved and cut, the answer ending once (finish, the viewer leaving, a failure) | `server/src/services/google-drive-view.ts` `open` |
-| The last checks before the call leaves (every switch, the grant still the one the pick check saw) | `server/src/services/google-client.ts` `streamMedia` |
+| The last checks before the call leaves (every switch, the grant still the one the pick check saw — before the access token and again after it, then nothing awaited until the call leaves) | `server/src/services/google-client.ts` `streamMedia` |
 
 ## Rules
 
@@ -43,6 +43,7 @@ CI: job "Model (Drive view)" in `.github/workflows/ci.yml`, run when area `model
 | `R4_StreamsPerMember` | Answers streamed at once per member stay within the cap, and the count is exactly the answers holding a slot (released on finish, abort and failure) | 同時に流す数は上限まで。止めたら必ず数を戻す |
 | `R5_BytesPerDay` | The day's bytes stay within the member's and the company's caps, and what is counted is exactly what is reserved by answers under way plus what ended answers passed on | 1日の量は本人・会社の上限まで。途中でやめた分は戻す |
 | `R6_ViewPickNeverAiPick` | A view pick never becomes an AI-readable pick: the AI's picks are only files pressed in a reading ticket | 再生用に選んだ動画を AI は読めない |
+| `R7_SlotReleased` | (liveness) Every answer that took a stream slot ends — its slot released, its unsent bytes given back — under the weak fairness of the server's own steps (`ServerFair`: the caps, the metadata, the reservation, the last check, the answer's deadline), even when the viewer never reads and Google never fails | 読まない相手がつながったままでも、枠と予約は必ず戻る（答えごとの期限） |
 
 "In flight" is a request that passed `streamMedia`'s last checks: its call to Google left (or will with no further
 await). One request is one answer of at most `CH` bytes (the per-answer ceiling), so a revocation lets at most the
@@ -53,7 +54,7 @@ fails the check.
 
 ## What `check` verifies (numbers in `expected.txt`)
 
-1. The real model keeps every INVARIANT and has no dead end; the rules checked are exactly `expected.txt`'s
+1. The real model (`LiveSpec` = the spec with `ServerFair`) keeps every INVARIANT and the PROPERTY R7, and has no dead end; the rules checked are exactly `expected.txt`'s
    `rule DriveView` lines; a `CHECK_DEADLOCK` line is refused.
 2. Its distinct state count equals `states DriveView` (today **267,040**): a guard against a checker that explores less.
 3. Each `broken/` variant fails on its named rule. **A variant that passes fails the job.**
@@ -74,6 +75,8 @@ fails the check.
 | `BrokenAbortKeepsSlot` | The viewer leaving does not release the slot (a leak) | R4 |
 | `BrokenReserveNoCut` | A whole range is reserved whatever is left of the day | R5 |
 | `BrokenAbortNoGiveBack` | An answer ended early keeps its whole reservation counted | R5 |
+| `BrokenReserveStale` | The reservation uses what was left of the day at the caps, not the counts read again after the metadata's await | R5 |
+| `BrokenNoAnswerDeadline` | The answer has no deadline of its own: only the viewer reading to the end, leaving, or Google failing ends it (review 2026-11-27) | R7 |
 
 R3 has no variant of its own: what could break it (a new range leaving after a revocation, more answers in flight than
 the cap, an answer longer than `CH`) is caught first by R2 (`BrokenPassNoSwitches`, `BrokenPassAnyGrant`) and R4
@@ -93,6 +96,13 @@ the cap, an answer longer than `CH`) is caught first by R2 (`BrokenPassNoSwitche
   revocations in one run; each such pair is explored against every point of every request.
 - **The metadata** (type and size) is one step that may fail; the type list, the Range forms and Google answering a
   different range than asked are the tests' job (`server/tests/integration/google-drive-stream.test.ts`).
-- **The token's await** before the call leaves is folded into the last check (a cached token sends without one).
+- **The token's await**: `streamMedia` checks before the token and again after it, and awaits nothing from that last check
+  to the call leaving, so `Pass` is that last check.
+- **One server process**: the per-minute counts, the open answers and the sessions are in its memory; two processes
+  would each keep their own (the daily bytes, in the database, would still hold).
+- **What releases a slot** (R7's steps): the last byte passed on (`Finish`), the viewer leaving (`Abort`), Google failing or
+  ending short (`Fail`), the answer's own deadline (`Deadline`, `ACB_DRIVE_VIEW_ANSWER_MS`, which fires whether or not the
+  viewer reads), and a refusal before the call (`Meta`, `Reserve`, `Pass`). The viewer's and Google's steps are not
+  assumed to happen.
 - **The viewing session's log line** (one per session) and the request log are the tests' job.
 - No liveness under fairness ("eventually ends"): the dead-end check says no state is stuck.
