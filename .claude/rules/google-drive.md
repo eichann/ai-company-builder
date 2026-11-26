@@ -249,7 +249,8 @@ member's **own** rows (`DRIVE_PICK_TTL_MS`, `renewPick`):
 ## Viewing a video (`purpose: 'view'`, owner decisions 2026-11-26)
 
 A Drive video linked or embedded in an HTML document is to play inside ACB with ACB's own player (placed over the link's
-spot in the document view; the player is a later change; the streaming route is "Streaming a picked video" below). The video stays in Drive; the scope stays
+spot in the document view, or over the document for a pressed link / a band row: `doc-frame.md` "ACB's player over Drive
+embeds (plan 4)"; the streaming route is "Streaming a picked video" below). The video stays in Drive; the scope stays
 `drive.file` + Picker. Each viewer presses ［選択］ once per video in the Picker (accepted by the owner). **This part: the
 pick, its storage and the function the streaming route calls** (the route: "Streaming a picked video").
 
@@ -327,7 +328,9 @@ pick, its storage and the function the streaming route calls** (the route: "Stre
 The bytes of a view pick go to the member's own player through ACB's server (owner accepted); the video stays in Drive.
 `GET /api/companies/:companyId/me/google/drive/view/:fileId` (`routes/google-drive.ts` → `services/google-drive-view.ts`
 `open` → `googleClient.streamMedia`). **Session only** (`companyMember`): no record token, AI token or broker token reaches
-it. The player is a later change (it asks range by range, as a `<video>` does). The model of the pick and of this route:
+it. The player (`doc-frame.md` "ACB's player over Drive embeds (plan 4)") asks range by range, as a `<video>` does: main
+forwards each `Range` with the member's session and joins the route's chunks into the range the `<video>` asked (Chromium's
+player on a custom scheme does not take a shorter 206; measured), each chunk still its own request authorized here. The model of the pick and of this route:
 `model/drive-view/` (TLA+, R1–R7; README there) — **a change to the view pick or this route changes the model in the
 same PR**.
 

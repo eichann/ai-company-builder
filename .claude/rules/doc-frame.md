@@ -18,6 +18,8 @@ paths:
   - "client/src/features/editor/components/BlockedPartsBand.tsx"
   - "client/src/features/editor/components/HtmlViewToggle.tsx"
   - "client/src/features/chat/documentLink*.ts"
+  - "client/shared/doc-drive-player.ts"
+  - "client/tests/doc-player*"
 ---
 
 # The HTML viewer's document view (`acb-doc://`)
@@ -122,7 +124,9 @@ carrying a secret in its user name reached a local listener). Each document is s
   company), no `.git` segment, no link anywhere from the company folder down (each step
   `lstat`ed), not in a folder this computer did not download, ≤ 20 MB — then `views.open` makes a
   view (`DocViewPort.create`) and `grant`s **that view** a token (16 random bytes) for the
-  document's folder; the view loads `acb-doc://<token>/<encoded name>`. **The renderer gets only
+  document's folder; the view loads `acb-doc://<token>/<encoded name>`. A second argument names the
+  member's current company (a plain id shape, else none): its session plays the document's Drive videos
+  in ACB's player ("ACB's player over Drive embeds (plan 4)"); it opens nothing by itself. **The renderer gets only
   `{ ok: true, viewId }`**: the address never leaves main (and never carries an absolute path).
   Refusals are plain Japanese (`DOC_FRAME_WORDS`; `unavailable` when no view could be made). Each
   view is its own grant: two views of one file, two tokens. Renderer port:
@@ -157,7 +161,8 @@ carrying a secret in its user name reached a local listener). Each document is s
   `{ kind: 'blocked', count, hosts, hostCount }` — what its page wanted from the internet and did not get
   ("The band of blocked internet parts (A3)"), hosts only, only for a registered view;
   `{ kind: 'driveVideos', count, total, seen }` — the Google Drive videos its document embeds, counts
-  only ("Google Drive videos (plan A)" below).
+  only ("Google Drive videos (plan A)" below). A `link` to a Drive file also carries `videoLink` (main's
+  number for it: "ACB's player over Drive embeds (plan 4)").
 - **`docView:openDriveVideo(viewId, index)`** (main window's main frame only, only a view of that
   window, an integer index of the list main holds for it — anything else opens nothing): main opens
   Drive's page for that id in the member's browser (the shell's `openExternal`).
@@ -408,11 +413,139 @@ the member opens each in their own browser (Drive's own player and login).
   document chooses only which Drive file (as a link the member presses would).
 - **The band** shows a Drive part when `count > 0`, with or without the internet parts' sentence
   (which keeps its own rule, `count > 0` of `blocked`; `drive.google.com` among the hosts there is
-  normal — the CSP refused the video): 「この資料には Google Drive の動画が N 本あります。資料の中では再生
-  できないので、ブラウザで開いて見てください。」 (N = `total`), one row per listed video 「動画 1」「動画 2」…
-  with ［ブラウザで開く］ (`aria-label` 「動画 n をブラウザで開く」), and 「ほかにもあります」 when `total >
-  count`. The button sends only the view id and the row's index. The band's region is named
+  normal — the CSP refused the video): 「この資料には Google Drive の動画が N 本あります。」 (N = `total`) and,
+  since plan 4, 「［ACB で再生］で、アプリの中のプレイヤーで見られます（はじめての動画は、ブラウザで選んでから再生
+  します）。」 (without a player: 「資料の中では再生できないので、ブラウザで開いて見てください。」), one row per listed
+  video 「動画 1」「動画 2」… with ［ACB で再生］ (below) and ［ブラウザで開く］ (`aria-label` 「動画 n をブラウザで開く」),
+  and 「ほかにもあります」 when `total > count`. The button sends only the view id and the row's index. The band's region is named
   「インターネットの部品」 when that sentence shows, else 「資料の中の動画」.
+
+### ACB's player over Drive embeds (plan 4, owner decisions 2026-11-26/27)
+
+The member plays a document's Drive videos **in ACB's own player, placed over the spot where the document
+embeds them** (Drive's 「埋め込む」 `<iframe src=".../file/d/<id>/preview">`, a `<video>` / `<source>`), or over
+the document's area for a link the member pressed or a row of the band. The video stays in Drive; the viewer
+presses ［選択］ once per video in Google's Picker (`purpose: 'view'`, `google-drive.md` "Viewing a video");
+the bytes come from the server's stream route ("Streaming a picked video"). **The document is unchanged**: its
+CSP still names no network source, nothing is streamed into its origin or its session, its bytes are not
+rewritten — the player is ACB's UI, a view of its own drawn above the document's.
+
+- **Where the embeds are** (`doc-view.ts` `readEmbedBoxes`, through the handle's `readEmbeds`): read with the
+  view's own DevTools protocol, the debugger main already attached for the band (`DOM.getDocument`,
+  `DOM.querySelectorAll` of `iframe[src*="drive.google.com" i]` and `video` (its `src`, else its first
+  `<source src>`), `DOM.getAttributes`, `DOM.getBoxModel`'s border quad) — **nothing runs in the page's
+  context and the page cannot call or see it**. At most 40 elements per read, a read at most 1 s; an element
+  with no box (hidden) is left out. **Measured (harness, Electron 45)**: the box model is relative to the
+  scrolled viewport in the page's CSS px; times the document's zoom it is the view's own DIP — the players
+  landed exactly over the embeds at zoom 1, scrolled by 100 px and at 150 %. While the view is shown and
+  offers videos, the read repeats every `EMBED_POLL_MS` (80 ms, one at a time; at once after a placement, an
+  offer or a reload of the page), and stops while it is hidden.
+- **Which file plays is main's alone** (`players.ts`): an element counts only when its `src` names, by the
+  band's own narrowing (`driveAddressVideoId`: `https://drive.google.com` exactly + the core's file-link
+  rule), an id **main read from the document's served bytes** ("Google Drive videos (plan A)": the list
+  offered for the view); the first such element per id. The page owns its DOM: it can move, hide or
+  duplicate an element (positions are cosmetic), and an element its script makes with another id gets no
+  player. One player per offered id, at most `DRIVE_PLAYERS_MAX` (10, the band's list), made when its embed
+  is first on screen.
+- **Placement** (`client/shared/doc-drive-player.ts`, pure): the player covers the part of the embed's box
+  inside the document's area (`embedPlacement`; a box under 24 px either way, or not finite, places
+  nothing) and its video keeps the whole box's size, shifted inside the player (`stageCode`, numbers only,
+  run in the player's own page): an embed half scrolled out is cut, not squeezed. A player over the area
+  (`overlayPlacement`): centred, 16:9 plus its bar, a 24 px margin. **Hidden** whenever the document's view
+  is (an overlay of the app, another tab, the link confirmation: `views.place` hands the view's on-screen
+  area, or null, to the players), muted while hidden.
+- **The player's view** (`doc-view.ts` `createDrivePlayerShell`, shell layer): a `WebContentsView` added
+  above the document's view in the same window; no preload, `sandbox`, `contextIsolation`, no Node; its own
+  in-memory session **`acb-player`**: serves only `acb-drive-video://` (and `file://` 404), its one request
+  hook lets a request through only when it names **the requesting page's own player's token** (`owns`, by
+  `webContentsId`), every permission and download refused; popups denied, every navigation refused but its
+  own page. Like the document's view it never takes the keyboard by itself (a focus without a click within
+  `FOCUS_CLICK_WINDOW_MS` goes back to the app; measured: the app kept the keyboard while players loaded) and
+  the app's shortcuts pressed in it go to the app as if pressed in the document's tab.
+- **Its page is ACB's** (`electron/features/doc-frames/player-page.ts`, drawn by main from the player's
+  state; never the document's content): the bar 「ACB のプレイヤー｜Google Drive の動画」 and a 2 px primary outline
+  (a document cannot draw over another view, so the mark cannot be faked over the player — a document can
+  of course draw a look-alike of it in itself); 「Google Drive の動画」［ここで再生］ (「はじめて再生するときは、
+  ブラウザで動画を選びます。」), 「準備しています…」, 「ブラウザに Google Drive の画面を開きました。この動画で間違い
+  なければ［選択］を押してください。」［やめる］, the `<video controls autoplay>`, or the reason with ［もう一度］ /
+  ［ブラウザで開く］; ［閉じる］ on a player over the area. Colours and sizes from the design tokens
+  (`tokens.json`'s dark theme). CSP: `default-src 'none'`, `media-src 'self'`, its one script by sha256
+  (the video's `error` → `unplayable` for codes 3 / 4, else `failed`), inline styles, nothing else. Its links
+  and script ask for actions by going to `acb-drive-video://<token>/<action>` (`play`, `browser`, `cancel`,
+  `close`, `unplayable`, `failed`): the navigation is refused and the registry acts; the page names nothing
+  else.
+- **Playing** (`players.ts` `start`): a probe `Range: bytes=0-0` of the server's route; 403
+  `DRIVE_VIEW_NOT_PICKED` / 409 `GOOGLE_CONSENT_NEEDED` → the Picker flow for that one id (`main.ts`:
+  `drivePicking.pick(…, { fileIds: [id], purpose: 'view' })`, consent first when needed) → probe again →
+  play. The member's ［やめる］ aborts the pick. Words (`DRIVE_PLAYER_WORDS`): not picked and cancelled
+  「動画が選ばれなかったため、再生していません。…」, timed out, nothing kept (+ `drivePickRefusedText`), offline,
+  the server's own sentence for a refusal (a cap's 429, Google's refusal; `drivePlayerRefusal`), not a video
+  (no ［もう一度］), a codec the app cannot play 「この動画はアプリの中では再生できない形式です。ブラウザで開いて
+  見てください。」, a sign-in that lapsed. ［ブラウザで開く］ opens Drive's own page built from the id
+  (`driveVideoViewUrl`).
+- **The bytes** (`acb-drive-video://<token>/video`, only while the player plays): main asks the server's
+  route with the member's session cookies, forwarding the `<video>`'s `Range`, and passes the 200 / 206 /
+  416 on with `Content-Type` (a `video/*` only), `Content-Length`, `Content-Range`, `Accept-Ranges`,
+  `no-store`, `nosniff`. **Chunks joined** (measured, Electron 45): the route answers at most one chunk per
+  request (a shorter 206), and Chromium's player on this scheme does not take a shorter 206 than it asked
+  — the clip was 「unplayable」 after its first 512 KB — so main answers the whole range asked as one 206 and
+  fills it with the route's answers in order, each asked only once the one before was read (back pressure),
+  each starting exactly where the last ended (else the answer ends with an error); every chunk is
+  authorized again by the server, as before. A refusal on the way shows its reason in the player. A
+  player's streams are aborted when it closes, and when the `<video>` stops reading (a seek): the server
+  then releases their slots.
+- **Scheme privileges**: `standard` + `secure` only (`registerLocalFileScheme`). Measured: without
+  `standard` the video never got past its first range (the harness's second run); without `stream` it
+  played and sought the same, so `stream` is not given (the relayed bytes are ACB's, but fewer privileges
+  is the rule); never `supportFetchAPI`, `corsEnabled`, `bypassCSP`.
+- **The token is one player's**: 16 random bytes, the address's host; refused for another player's page (its
+  CSP's `media-src 'self'` and the session's hook), and **revoked with its player** (404). The renderer
+  never sees a token, an id or an address.
+- **Links** ("Links" above): a Drive file link the member pressed (`driveAddressVideoId` again) reaches the
+  window as `{ kind: 'link', url, videoLink }` — `videoLink` is main's number for it (the newest 4 kept per
+  view), never the id; the confirmation then also says 「Google Drive の動画なら、アプリの中の ACB のプレイヤーでも
+  見られます。」 with ［ACB で再生］ → `docView:playLinkedVideo(viewId, videoLink)` (once per number; main window's
+  main frame, the view's own window); nothing goes to the browser. Other links are unchanged.
+- **The band** ("The band" above) says 「［ACB で再生］で、アプリの中のプレイヤーで見られます（はじめての動画は、
+  ブラウザで選んでから再生します）。」 and each row has ［ACB で再生］ (`aria-label` 「動画 n を ACB で再生」) beside
+  ［ブラウザで開く］ → `docView:playDriveVideo(viewId, index)` (the same checks as `openDriveVideo`): a player over
+  the area plays that row's id. One player over the area per view; another replaces it.
+- **Lifecycle**: every player of a view closes (tokens revoked, streams aborted) when the view closes — 中身,
+  another tab, the tab closed, ［止める］, its page crashed, the window's page reloaded —, on another page of
+  the folder (as the band's list), when the offered list changes (an auto refresh with other videos;
+  the same list keeps them, playing), on sign-out (`main.ts` `onSignedOut`) and on quit. The company: the
+  renderer opens the view with its current company's id (`docView:open(filePath, companyId)`, a plain id
+  shape or none — then no player is made, e.g. the user manual) and the editor's pane is keyed by company
+  and file, so another company is another view.
+- **Not protected (honestly)**: the document decides where its players appear (it can place one anywhere
+  inside its own area, or over its own fake controls), and which of the ids it statically names gets which
+  spot — never another file. A player over an embed shows ACB's mark, but the member decides by the
+  Picker's own screen (the one bound video, video types only) what is granted. The positions follow the
+  page within one poll (80 ms): a fast scroll shows the player a moment behind.
+- Tests: `tests/doc-player.test.ts` (no Electron: the address grammar, the page's CSP and escaping, placement,
+  ranges, refusals' words; through the real protocol, registry and players with fake shells — an element
+  plays only an id main read (an unknown id, a duplicate, Docs' host), the band's index and the link's
+  number from their own window only (another window, a frame, another view, an index not held, an id, a
+  number used once), not picked → the Picker → plays, a cancel's words, ［ブラウザで開く］, the range forwarded
+  and the chunks joined exactly, the token refused for another page / after close / while not playing,
+  closing and sign-out abort streams, hidden with the document, closed on another page and back, no
+  company no player); `tests/doc-player-electron.test.ts` (real Electron, `tests/doc-player-harness/main.ts`,
+  a fake stream route serving a real clip in 512 KB chunks: placement at zoom 1 / scrolled / 150 % / cut, no
+  player for a script's element, hidden with the document, the keyboard kept, not picked → pick → plays and
+  seeks with 206s and the member's cookie, another player's page refused with no request to the server,
+  closing aborts a paced stream; a second run without `standard` does not play); `ipc-window-links.test.ts`
+  (privileges, not on the app's session); `editor-html-viewer.spec.ts` (the band's ［ACB で再生］ asks by view
+  and row; a Drive link's ［ACB で再生］ asks by view and number, other links have none, the view opened for
+  the company). Mutation-checked: the element's id among main's own, the first element per id, the link
+  narrowing and its number used once, the index's shape, the own-window / main-window checks of both
+  channels, the company id's shape, `owns` by page id, the token revoked on close, bytes only while playing,
+  streams aborted on close, the range forwarded, the chunks joined and each starting where the last ended,
+  hidden with the document, closed on another page (the player over the area too), closed with the view,
+  the pick when not picked, the `view` purpose sent (`google-drive-ux.test.ts`); in Electron: the chunks
+  joined, `standard`, the embed's box times the document's zoom. Kept on purpose (layers no single
+  removal shows): the id check while reading the boxes (layout only walks main's ids), `serve`'s closed
+  check (the token is gone), the poll's no-company check (no player is made without one), the players'
+  request hook by page id (each page's CSP `media-src 'self'` already refuses another token).
 
 ## Review in the document view (owner, 2026-11-26)
 
@@ -510,8 +643,8 @@ policy has **no network source** (test: 「the default policy names no network s
 made with `noScripts` (the user manual) gets `script-src 'none'` instead (`client/tests/manual.test.ts`).
 
 **Later (owner, 2026-11-22; planned, not built).** Google Drive videos are listed for the member's
-browser (plan A, "Google Drive videos" above, built 2026-11-26); playing them inside the view remains
-later (it would need Drive's player in a nested frame of the sandboxed document — measure first, as for 2.). Each adds sources to the policy object only,
+browser (plan A, built 2026-11-26) and play in ACB's own player over the document (plan 4, "ACB's player
+over Drive embeds", built 2026-11-27) — never inside the view, whose policy is unchanged. Each of these adds sources to the policy object only,
 never loosens another directive (the session's proxy and request hook then need the same exact
 hosts, and nothing else):
 1. Pictures the HTML file itself names (`<img src="https://…">`, read statically when opened):
