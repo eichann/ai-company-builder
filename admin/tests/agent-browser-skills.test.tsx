@@ -35,16 +35,16 @@ function stubApi(caps: Capabilities, routes: Record<string, Reply> = {}) {
 
 const HASH = `sha256:${'a'.repeat(64)}`
 const waiting: BrowserSkillView = {
-  name: 'order-copy', declarationHash: HASH, files: 'git:abc', status: 'waiting', problem: null, domain: 'shop.example.test',
+  name: 'order-copy', path: '.claude/skills/order-copy', department: null, declarationHash: HASH, files: 'git:abc', status: 'waiting', problem: null, domain: 'shop.example.test',
   writes: ['/api/orders/register に送る（作る・保存する）：1回まで'], neverRead: ['/api/orders/{n}?copy=1'], afterRead: ['/api/orders/{created}'],
   accountMarker: 'shop-account-id', approval: null,
 }
 const approved: BrowserSkillView = {
-  ...waiting, name: 'order-close', status: 'pre_approved',
+  ...waiting, name: 'order-close', path: '.claude/skills/order-close', status: 'pre_approved',
   approval: { mode: 'pre_approved', how: 'edited', approvedBy: 'u_owner', approvedByName: '山田 花子', approvedAt: '2026-11-25T01:00:00.000Z' },
 }
 const invalid: BrowserSkillView = {
-  ...waiting, name: 'broken', status: 'invalid', problem: '宣言のドメインが、この会社のブラウザ操作に登録されていません。', domain: null, writes: [], neverRead: [], afterRead: [], accountMarker: null,
+  ...waiting, name: 'broken', path: '.claude/skills/broken', status: 'invalid', problem: '宣言のドメインが、この会社のブラウザ操作に登録されていません。', domain: null, writes: [], neverRead: [], afterRead: [], accountMarker: null,
 }
 const list: BrowserSkillsView = { items: [waiting, approved, invalid] }
 const routes = { [`GET ${base}/browser-skill-approvals`]: { body: ok(list) } }
@@ -92,8 +92,8 @@ describe('Skill の承認', () => {
     await userEvent.click(within(await row('order-copy')).getByRole('button', { name: '前もって承認' }))
     await waitFor(() => expect(calls.filter((c) => c.method === 'POST')).toHaveLength(2))
     expect(calls.filter((c) => c.method === 'POST').map((c) => c.body)).toEqual([
-      { skill: 'order-copy', declarationHash: HASH, files: 'git:abc', mode: 'per_run' },
-      { skill: 'order-copy', declarationHash: HASH, files: 'git:abc', mode: 'pre_approved' },
+      { skill: '.claude/skills/order-copy', declarationHash: HASH, files: 'git:abc', mode: 'per_run' },
+      { skill: '.claude/skills/order-copy', declarationHash: HASH, files: 'git:abc', mode: 'pre_approved' },
     ])
   })
 
@@ -111,6 +111,24 @@ describe('Skill の承認', () => {
     dialog = await screen.findByRole('alertdialog')
     await userEvent.click(within(dialog).getByRole('button', { name: '取り消す' }))
     await waitFor(() => expect(calls.filter((c) => c.method === 'POST')).toHaveLength(1))
-    expect(calls.find((c) => c.method === 'POST')).toMatchObject({ url: `${base}/browser-skill-approvals/revoke`, body: { skill: 'order-close' } })
+    expect(calls.find((c) => c.method === 'POST')).toMatchObject({ url: `${base}/browser-skill-approvals/revoke`, body: { skill: '.claude/skills/order-close' } })
+  })
+
+  it('two departments\' Skills of one name are two rows, each with its department, and each approves by its own path', async () => {
+    const sales: BrowserSkillView = { ...waiting, path: '営業/.claude/skills/order-copy', department: '営業', files: 'git:sales' }
+    const support: BrowserSkillView = { ...waiting, path: 'support/.claude/skills/order-copy', department: 'support', files: 'git:support' }
+    const calls = stubApi(ownerCapabilities, {
+      [`GET ${base}/browser-skill-approvals`]: { body: ok({ items: [waiting, sales, support] }) },
+      [`POST ${base}/browser-skill-approvals`]: { body: ok({ ...support, status: 'approved' }) },
+    })
+    const { container } = renderInCompany(<BrowserSkillsPage />)
+    await screen.findAllByText('order-copy')
+    const rowOf = (path: string) => container.querySelector(`li[data-skill="${path}"]`) as HTMLElement
+    expect(within(rowOf(waiting.path)).getByText('全社')).toBeInTheDocument()
+    expect(within(rowOf(sales.path)).getByText('部署「営業」')).toBeInTheDocument()
+    expect(within(rowOf(support.path)).getByText('部署「support」')).toBeInTheDocument()
+    await userEvent.click(within(rowOf(support.path)).getByRole('button', { name: '承認する' }))
+    await waitFor(() => expect(calls.filter((c) => c.method === 'POST')).toHaveLength(1))
+    expect(calls.find((c) => c.method === 'POST')?.body).toEqual({ skill: 'support/.claude/skills/order-copy', declarationHash: HASH, files: 'git:support', mode: 'per_run' })
   })
 })

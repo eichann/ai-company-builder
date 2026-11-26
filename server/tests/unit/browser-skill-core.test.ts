@@ -12,7 +12,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   BROWSER_SKILL_LIMITS, browserMadeFrom, browserSkillDomainProblem, browserSkillFrames, browserSkillQueryProblem, browserSkillWriteLine, isBrowserSkillPath,
-  parseBrowserSkillDeclaration,
+  parseBrowserSkillDeclaration, parseBrowserSkillPath, browserSkillRef,
 } from '../../../shared/core/browser-skill'
 
 const GOOD = `
@@ -286,5 +286,23 @@ describe('a write with an exact query (agent-browser.md "A write with an exact q
   it('in plain words, right after the path', () => {
     const d = parsed(one('return'))
     expect(browserSkillWriteLine(d.writes[0])).toBe('/api/labels?return（アドレスの ? のあとが「return」とまったく同じときだけ） に送る（作る・保存する）：1回まで')
+  })
+})
+
+describe('where a browser Skill stands (agent-browser.md "Department Skills")', () => {
+  it('the company\'s and one department folder\'s `.claude/skills/<name>`, nothing deeper or stranger', () => {
+    expect(parseBrowserSkillPath('.claude/skills/order-copy')).toEqual({ department: null, name: 'order-copy', path: '.claude/skills/order-copy' })
+    expect(parseBrowserSkillPath('営業/.claude/skills/order-copy')).toEqual({ department: '営業', name: 'order-copy', path: '営業/.claude/skills/order-copy' })
+    for (const bad of [
+      'order-copy', '/.claude/skills/x', '.claude/skills/x/', '.claude/skills/X', '.claude/skills/../x', 'a/b/.claude/skills/x',
+      '../.claude/skills/x', '.hidden/.claude/skills/x', '営業/.claude/agents/x', '営 業/.claude/skills/x', 'ガ/.claude/skills/x'.normalize('NFD'),
+      `${'a'.repeat(400)}/.claude/skills/x`, 42, null,
+    ]) expect(parseBrowserSkillPath(bad), String(bad)).toBeNull()
+  })
+
+  it('the AI names a Skill by its name or its path (NFC); anything else is no Skill', () => {
+    expect(browserSkillRef('order-copy')).toBe('order-copy')
+    expect(browserSkillRef('ガ/.claude/skills/x'.normalize('NFD'))).toBe('ガ/.claude/skills/x')
+    for (const bad of ['', '../x', 'a/b/.claude/skills/x', 'Order', 1]) expect(browserSkillRef(bad), String(bad)).toBeNull()
   })
 })

@@ -66,6 +66,10 @@ export interface BrowserFrameRunView {
   host: string
   /** `skill`: frames from a company Skill's approved declaration; `adhoc`: from the plan the person approves on the card. */
   source: 'skill' | 'adhoc'
+  /**
+   * A Skill run's Skill, by its path (`.claude/skills/<name>` or `<department>/.claude/skills/<name>`): the one the server
+   * resolved a name to. A run started before department Skills holds the bare name (the company's).
+   */
   skill: string | null
   /** The hash of the plan the card shows; approving sends it back. */
   planHash: string

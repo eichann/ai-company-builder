@@ -982,7 +982,10 @@ export const browserRecordingsApi = {
 
 export type { BrowserSkillApprovalMode, BrowserSkillStatus, BrowserSkillView, BrowserSkillsView } from '../../../shared/types/browser-skills'
 
-/** 「Skill の承認」: the company Skills with a browser declaration; approve exactly the version seen, or take it back. */
+/**
+ * 「Skill の承認」: the company's and departments' Skills with a browser declaration; approve exactly the version seen, or
+ * take it back. `skill` is the Skill's path (`BrowserSkillView.path`): two departments may each have a Skill of one name.
+ */
 export const browserSkillsApi = {
   list: (companyId: string) => getData(`/api/companies/${enc(companyId)}/browser-skill-approvals`, browserSkillsSchema),
   approve: (companyId: string, body: { skill: string; declarationHash: string; files: string; mode: 'per_run' | 'pre_approved' }) =>

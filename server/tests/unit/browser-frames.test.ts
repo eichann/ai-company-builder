@@ -40,6 +40,9 @@ const bob: Member = { companyId: CO, userId: 'u-bob', role: 'member' }
 const otherOwner: Member = { companyId: OTHER_CO, userId: 'u-other', role: 'owner' }
 const DOMAIN = 'shop.example.test'
 const SKILL = 'order-copy'
+/** The company's Skill by its path (what a run keeps), and a department's of the same name (agent-browser.md "Department Skills"). */
+const SKILL_P = `.claude/skills/${SKILL}`
+const DEPT_P = `営業/.claude/skills/${SKILL}`
 const PC = 'pc-1'
 
 const yaml = `domain: ${DOMAIN}\nwrites:\n  - { method: POST, path: /api/orders/register, max: 2 }\n  - { method: POST, path: "/api/orders/{n}/note", max: 1 }\n`
@@ -54,22 +57,24 @@ let stopped: boolean
 let level: Record<string, 'none' | 'read' | 'write'>
 let skills: BrowserSkillService
 let betweenReadAndWrite: (() => void) | null
+/** Who does not read the department 営業 now (the core's read rules, as a test sets them). */
+let notReadingSales: Set<string>
 let frames: BrowserFrameService
 const iso = (ms: number) => new Date(ms).toISOString()
 const sha = (t: string) => createHash('sha256').update(t, 'utf8').digest('hex')
 
 const source: BrowserSkillSource = {
   list: async companyId => Object.keys(store[companyId] ?? {}).sort(),
-  read: async (companyId, name) => store[companyId]?.[name] ?? null,
+  read: async (companyId, path) => store[companyId]?.[path] ?? null,
   pushed: async () => [],
   shelfLanded: async () => null,
 }
-function put(declaration: string, text = 'v1') {
-  store[CO] = { ...(store[CO] ?? {}), [SKILL]: { name: SKILL, declaration, files: `git:${sha(`${declaration}\0${text}`).slice(0, 40)}` } }
+function put(declaration: string, text = 'v1', path = SKILL_P) {
+  store[CO] = { ...(store[CO] ?? {}), [path]: { path, declaration, files: `git:${sha(`${path}\0${declaration}\0${text}`).slice(0, 40)}` } }
 }
-async function approveSkill(mode: 'per_run' | 'pre_approved') {
-  const item = (await skills.list(owner) as { ok: true; value: { items: Array<{ declarationHash: string; files: string }> } }).value.items[0]
-  value(await skills.approve(owner, { skill: SKILL, declarationHash: item.declarationHash, files: item.files, mode }))
+async function approveSkill(mode: 'per_run' | 'pre_approved', path = SKILL_P) {
+  const item = (await skills.list(owner) as { ok: true; value: { items: Array<{ path: string; declarationHash: string; files: string }> } }).value.items.find(i => i.path === path)!
+  value(await skills.approve(owner, { skill: path, declarationHash: item.declarationHash, files: item.files, mode }))
 }
 
 function value<T>(r: Outcome<T>): T {
@@ -95,6 +100,7 @@ beforeEach(() => {
   stopped = false
   level = { [alice.userId]: 'write', [bob.userId]: 'write', [owner.userId]: 'write', [otherOwner.userId]: 'write' }
   betweenReadAndWrite = null
+  notReadingSales = new Set([bob.userId])
   const data = sqliteCompanyData(conn)
   const clock = { now: () => iso(now), nowMs: () => now }
   const ids = { newId: () => randomBytes(8).toString('hex'), newToken: () => randomBytes(32).toString('hex') }
@@ -102,6 +108,8 @@ beforeEach(() => {
     companyData: data, clock, ids, memberships: sqliteMembershipRepository(conn),
     accounts: { byIds: list => new Map(list.map(id => [id, { name: id, email: `${id}@example.test` }])) },
     source, registeredHosts: () => policy.sites.map(s => s.host), sha256: sha,
+    // Bob does not read the department 営業 (alice and owners / admins do), unless a test changes it.
+    readsPath: (m, path) => !(notReadingSales.has(m.userId) && path.startsWith('営業/')),
   })
   frames = makeFrames()
 })
@@ -120,6 +128,7 @@ function makeFrames(extra: Partial<Parameters<typeof createBrowserFrameService>[
     devices: { check: (_m, key) => ({ ok: true, value: { deviceId: key === undefined ? null : `bd_${key}` } }) },
     siteGrants: { allows: (m, host, effect) => host === DOMAIN && (effect === 'read' ? level[m.userId] !== 'none' : level[m.userId] === 'write') },
     skills: {
+      resolve: (m, s) => skills.resolve(m, s),
       approvedFrames: async (m, s) => { const r = await skills.approvedFrames(m, s); betweenReadAndWrite?.(); return r },
       stillApproved: (m, s, h, a) => skills.stillApproved(m, s, h, a),
       runCardShown: (m, s, h, f) => skills.runCardShown(m, s, h, f),
@@ -372,7 +381,7 @@ describe('frames: a run of free operation', () => {
     await approveSkill('pre_approved')
     betweenReadAndWrite = () => {
       betweenReadAndWrite = null
-      const item = store[CO][SKILL]
+      const item = store[CO][SKILL_P]
       value(skills.revoke(owner, { skill: SKILL }))
       conn.prepare(`INSERT INTO browser_skill_approvals (company_id, skill_path, declaration_hash, mode, how, approved_by, approved_at, files_seen)
         VALUES (?, ?, ?, 'per_run', 'approved', ?, ?, ?)`).run(CO, `.claude/skills/${SKILL}`, `sha256:${sha(item.declaration as string)}`, owner.userId, iso(now), item.files)
@@ -388,7 +397,7 @@ describe('frames: a run of free operation', () => {
     const run = value(await frames.start(alice, { skill: SKILL }, PC))
     betweenReadAndWrite = () => {
       betweenReadAndWrite = null
-      const item = store[CO][SKILL]
+      const item = store[CO][SKILL_P]
       conn.prepare(`INSERT INTO browser_skill_approvals (company_id, skill_path, declaration_hash, mode, how, approved_by, approved_at, files_seen)
         VALUES (?, ?, ?, 'per_run', 'approved', ?, ?, ?)`).run(CO, `.claude/skills/${SKILL}`, `sha256:${sha(item.declaration as string)}`, owner.userId, iso(now), item.files)
     }
@@ -445,7 +454,7 @@ describe('frames: a run of free operation', () => {
     put(yaml)
     await approveSkill('per_run')
     const perRun = value(await frames.start(alice, { skill: SKILL }, PC))
-    expect(perRun).toMatchObject({ state: 'waiting', needsApproval: true, source: 'skill', skill: SKILL })
+    expect(perRun).toMatchObject({ state: 'waiting', needsApproval: true, source: 'skill', skill: SKILL_P })
     value(frames.end(alice, perRun.runId))
     await approveSkill('pre_approved')
     expect(value(await frames.start(alice, { skill: SKILL }, PC))).toMatchObject({ state: 'open', approval: 'pre_approved', needsApproval: false })
@@ -586,7 +595,7 @@ describe('step ⑤b: what the app is answered, one lock with the operator runs',
       monotonic: { bootId: 'boot-1', monoMs: () => now - monoBase }, browserPolicy: () => policy, aiStops: () => ({ all: false, tools: [] }),
       devices: { check: (_m, key) => ({ ok: true, value: { deviceId: key === undefined ? null : `bd_${key}` } }) },
       siteGrants: { allows: () => true },
-      skills: { approvedFrames: async () => { throw new Error('no skill here') }, stillApproved: () => false, runCardShown: () => {} },
+      skills: { resolve: async () => { throw new Error('no skill here') }, approvedFrames: async () => { throw new Error('no skill here') }, stillApproved: () => false, runCardShown: () => {} },
       operatorRunOn: () => (operatorRunning ? { until: now + 60_000 } : null),
     })
     expect(code(await withRuns.start(alice, { plan: adhoc }, PC))).toBe('BROWSER_RUN_BUSY')
@@ -1181,5 +1190,49 @@ describe('frames: a write with an exact query (agent-browser.md "A write with an
     expect(before.prepare('SELECT path, query FROM browser_frames').all()).toEqual([{ path: '/api/orders/register', query: null }])
     expect(sqliteCompanyData(before).forCompany('co-1').browserFrames.frames('bf_old')).toEqual([{ idx: 1, method: 'POST', path: '/api/orders/register', query: null, fields: '{}', max: 1, used: 0 }])
     expect(() => before.prepare("UPDATE browser_frames SET query = 'x'").run()).toThrow(/query never changes/)
+  })
+})
+
+describe('frames: a department Skill (agent-browser.md "Department Skills")', () => {
+  it('a run from a department Skill keeps its path; a name shared with the company\'s Skill is refused, never guessed', async () => {
+    put(yaml, 'v1', DEPT_P)
+    await approveSkill('pre_approved', DEPT_P)
+    // The name alone: only the department's has it, so it is that one.
+    const byName = value(await frames.start(alice, { skill: SKILL }, PC))
+    expect(byName).toMatchObject({ state: 'open', source: 'skill', skill: DEPT_P })
+    value(frames.end(alice, byName.runId))
+    // The company's Skill of the same name appears: the name is now two Skills.
+    put(yaml, 'v1', SKILL_P)
+    expect(code(await frames.start(alice, { skill: SKILL }, PC))).toBe('BROWSER_SKILL_AMBIGUOUS')
+    // By its path, each is its own: the department's approved, the company's not.
+    expect(value(await frames.start(alice, { skill: DEPT_P }, PC))).toMatchObject({ skill: DEPT_P })
+  })
+
+  it('a member who cannot read the department cannot run its Skill; one who loses it mid-run gets no permit', async () => {
+    put(yaml, 'v1', DEPT_P)
+    await approveSkill('pre_approved', DEPT_P)
+    expect(code(await frames.start(bob, { skill: DEPT_P }, PC))).toBe('BROWSER_SKILL_NOT_FOUND')
+    expect(code(await frames.start(bob, { skill: SKILL }, PC))).toBe('BROWSER_SKILL_NOT_FOUND')
+    // Alice runs it; taken off the department during the run, her next permit is refused and nothing is written.
+    const run = value(await frames.start(alice, { skill: DEPT_P }, PC))
+    notReadingSales.add(alice.userId)
+    expect(code(await permit(run.runId, 1))).toBe('BROWSER_SKILL_NOT_FOUND')
+    expect(value(frames.get(alice, run.runId)).state).toBe('ended')
+    expect(value(frames.get(alice, run.runId)).writes).toEqual([])
+    // Within the transaction too: lost between the permit's read and its write (`stillApproved`).
+    notReadingSales.delete(alice.userId)
+    const second = value(await frames.start(alice, { skill: DEPT_P }, PC))
+    betweenReadAndWrite = () => { betweenReadAndWrite = null; notReadingSales.add(alice.userId) }
+    expect(code(await permit(second.runId, 1))).toBe('BROWSER_SKILL_CHANGED')
+    notReadingSales.delete(alice.userId)
+    const third = value(await frames.start(alice, { skill: DEPT_P }, PC))
+    expect(code(await permit(third.runId, 1))).toBe('ok')
+  })
+
+  it('a body naming neither a Skill name nor a Skill path is refused', async () => {
+    for (const skill of ['', 'x'.repeat(500), 42]) {
+      expect(code(await frames.start(alice, { skill }, PC)), String(skill)).toBe('BROWSER_FRAME_BAD_REQUEST')
+    }
+    expect(code(await frames.start(alice, { skill: 'a/b/.claude/skills/x' }, PC))).toBe('BROWSER_SKILL_NOT_FOUND')
   })
 })

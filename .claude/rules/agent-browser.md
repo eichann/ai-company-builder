@@ -2974,7 +2974,7 @@ Owner decisions 2026-11-25 (internal design memo 「ブラウザ操作：記録�
 **company Skill** (`.claude/skills/<name>/` in the shared folder, or the company's Skill shelf without one) with a small
 declaration the core reads, `browser.yaml`; the AI may write only within an **approved version** of it, and **the server
 decides** what is approved and builds the write frames itself. Step ⑤ (writes) consumes `approvedFrames`; nothing writes
-with it yet. Only company-wide Skills (`.claude/skills/<name>`; a shelf item with no department) for now.
+with it yet. The company's Skills and the departments' ("Department Skills" below).
 
 - **The declaration** (`shared/core/browser-skill.ts`, pure; parsed with the core's strict YAML subset `yaml-lite.ts` — no
   anchors, aliases, tags, block scalars or duplicate keys —, then checked strictly; knows no site): `domain` (its exact
@@ -3037,19 +3037,61 @@ with it yet. Only company-wide Skills (`.claude/skills/<name>`; a shelf item wit
 - **Routes** (`routes/browser-skills.ts`, owner / admin, else 403 `BROWSER_SKILL_FORBIDDEN`): `GET /browser-skill-approvals`
   (`BrowserSkillsView`, `shared/types/browser-skills.ts`: each Skill with its hash, status `waiting` / `approved` /
   `pre_approved` / `text_changed` / `revoked` / `invalid`, the problem in plain Japanese, domain, write targets in plain words,
-  never-read and after-read addresses, account marker, the approval in force), `POST /browser-skill-approvals { skill,
-  declarationHash, files, mode }` (exactly these keys; the hash and the folder's version must be the ones read now, else 409 `BROWSER_SKILL_CHANGED`; an invalid
+  never-read and after-read addresses, account marker, the approval in force; its `path` and `department`), `POST
+  /browser-skill-approvals { skill, declarationHash, files, mode }` (`skill`: the Skill's path, a bare name = the company's; exactly these keys; the hash and the folder's version must be the ones read now, else 409 `BROWSER_SKILL_CHANGED`; an invalid
   declaration or an unregistered domain 409), `POST /browser-skill-approvals/revoke { skill }` (the latest approval, 409
   `BROWSER_SKILL_NOT_APPROVED` when none).
 - **Notices**: on the existing admin-only browser kind `browser_shape_changed` (recordless, built when read, shown only to
   owners / admins; its label generalised to 「ブラウザ操作で管理者の確かめが要る（サイトの形・Skill。管理者だけ）」) with keys
-  `browser_skill:waiting:<skill>:<16 hex>` and `browser_skill:text:<skill>:<16 hex>` (composition hands `browser_skill:` keys to
+  `browser_skill:waiting:<name>:<16 hex>` and `browser_skill:text:<name>:<16 hex>` (a department Skill's hex also hashes
+  its path: "Department Skills"; composition hands `browser_skill:` keys to
   `browserSkills.noticeText`): a new kind would grow every app's bundle and settings list.
 - **Admin** 「Skill の承認」 (`…/advanced/ai-safety/browser/skills`, linked from 「ブラウザ操作」; owner/admin only, a member or
   manager sees 「このページはオーナーと管理者だけが使えます」 and nothing is asked; words `admin/src/lib/agent-browser-skills.ts`, no
   site word): each Skill with its badge by meaning (承認待ち `awaiting`, 承認済み / 前もって承認 `success`, 手順の文が直った `info`,
   取り消し済み `paused`, 使えません `failed`), the targets in plain words, the addresses, who approved (「宣言を直したので承認」 for
   `edited`); ［承認する］ / ［前もって承認］ send the version shown; ［取り消す］ behind a confirm; nothing for an invalid one.
+  Each row says where the Skill belongs (「全社」 / 「部署「<folder>」」, `skillPlaceWords`) and sends its `path`.
+
+### Department Skills (owner bug report 2026-11-27: most companies keep their Skills per department)
+
+- **Where** (`shared/core/browser-skill.ts` `parseBrowserSkillPath`, `BrowserSkillPlace`): the company's
+  `.claude/skills/<name>` and a department folder's `<department>/.claude/skills/<name>` — exactly where Claude Code reads
+  Skills for a consultation (its working folder is the company folder or a department's, `settingSources: ['project']`
+  reads `.claude/skills/` there and in its parents) and where the shelf places a department's Skill (`shelfTargets`;
+  also a set watch's `department_skill`, `jobs.md`). One department folder by the department folder name rule, NFC, a
+  valid Skill name; nothing deeper (`<dept>/x/.claude/skills/…`: Claude Code does not load it at the start of a
+  consultation — decision for the owner), no `.agents/skills/` (Codex's twin; the declaration is read from
+  `.claude/skills/` only, as before). The git source finds them with one `ls-tree -d` of the shared branch's top folders
+  and one `ls-tree -r` / `diff-tree` over `.claude/skills/` and each `<folder>/.claude/skills/` (async, ≤ 500 folders,
+  ≤ 100 Skills); the shelf source takes items with a department too (`<department folder as stored>/.claude/skills/<name>`;
+  a department gone → none).
+- **Never a private folder's**: its files are in its own scope repository, which nothing here reads; and a path at or
+  under a private folder's path (`privateFolders.paths()`, compared by `pathKey`) is left out of `list`, `read` and
+  `pushed` even if the company repository held one, so its name is in no answer (decision on the safe side: a Skill
+  inside a private folder is out of scope).
+- **A Skill is its path**: `browser_skill_approvals.skill_path`, the frames run's `skill`, the source's
+  `BrowserSkillContent.path`, the admin's `BrowserSkillView.path` (+ `department`) and the approve / revoke body's `skill`.
+  **A bare name means the company's** (`browserSkillPlaceOf`): rows written before (`.claude/skills/<name>`), a run started
+  before, an older admin page — all keep their meaning. Two departments' Skills of one name are two Skills: approving,
+  revoking, the frames and the notices never cross (a department Skill's notice key hashes its path with the version:
+  `browser_skill:waiting:<name>:<16 hex>` stays one per Skill and version; its text names the Skill by name).
+  Renaming a department moves its Skills' paths, so they need approving again (safe side).
+- **The AI names it by name or path** (`browser_work`'s `skill`, `browserSkillRef`): the app sends it as given (a path
+  in NFC); the server's `resolve` takes a name only when exactly **one** Skill with `browser.yaml` of that name is there
+  **for this member** (the company's, or a department's they read) — two → 409 `BROWSER_SKILL_AMBIGUOUS` (the AI gets
+  `BROWSER_WORK_WORDS.skillAmbiguous`: give the path, or ask the person), none → `BROWSER_SKILL_NOT_FOUND`. Never a
+  guess, never a preference for the department on screen. The run keeps the resolved path, and the app reads the
+  operator's steps (SKILL.md, site-notes.md) from **that** path in the member's company folder
+  (`features/browser/skill-steps.ts`; after the frames run started, never from the AI's word).
+- **Who uses it**: a department's Skill only by a member who **reads its path now** (`BrowserSkillDeps.readsPath`,
+  composition: `resolveAccess` over the company's scopes — read-restricted places of a company without the shared
+  folder, private folders' gates), asked by `resolve`, by `approvedFrames` at every start, approve and permit (else the
+  same `BROWSER_SKILL_NOT_FOUND` as a missing one, and a permit's refusal ends the run) and by `stillApproved` inside
+  the permit's transaction. The company's Skills are used as before (no new check). Approving and revoking stay owner /
+  admin. **Whose change**: unchanged — the pusher's company role as git-http authenticated it, or the shelf publisher's;
+  a department's 部署の管理役 or 「Skill を直せる人」 is not an owner / admin, so their change to a department Skill's
+  declaration waits like any other.
 
 Tests: `server/tests/unit/browser-skill-core.test.ts` (the shape, unknown keys, sizes in UTF-8 bytes, YAML anchors and
 duplicate keys, the path grammar, `_method`, sensitive fields, duplicates, the domain, the frozen frames, the plain words),
@@ -3063,6 +3105,18 @@ pre-approved, told once, `runCardShown`, an admin's own text change, the server'
 accepted; an owner's push approved, an editor's waits, a refused push changes nothing, a text-only push, an owner's text-only push
 after an editor's declaration approving nothing, a push read at its own commit; the shelf's publisher), `admin/tests/agent-browser-skills.test.tsx`, `admin-contract.test.ts`, permission matrix rows,
 `company-scoped-sql.test.ts`, `jobs-schema.test.ts`, `client/tests/browser-core-words.test.ts` (the new files scanned).
+Department Skills: `browser-skill-core.test.ts` (where a Skill stands, the AI's name or path), `browser-skills.test.ts`
+"department Skills" (listed with the department and approved by path; two departments of one name kept apart — approval,
+revoke, notices —; a name refused when two Skills share it, candidates only what the member reads; a member who cannot
+read the department, also mid-run (`stillApproved`); an old `.claude/skills/<name>` row by name and path; an owner's own
+edit approves, an editor's waits; bad paths), `browser-frames.test.ts` "a department Skill" (the run keeps the resolved
+path, a shared name refused, a member losing the department mid-run gets no permit — before and inside the
+transaction), `browser-skill-push.test.ts` "department Skills" (real git: an owner's department push approved and
+listed, a deeper one never listed, an editor's waits, approval by path; a private folder's path never listed or read,
+its name in no answer; the shelf's department item and a read-restricted department), `client/tests/browser-frame-writes.test.ts`
+(the AI's name or NFC path sent as given, the steps read from the server's path, `skillAmbiguous`, bad references refused
+before anything; `readBrowserSkillSteps` reads only the Skill's own folder), `admin/tests/agent-browser-skills.test.tsx`
+(two departments' rows, each approving by its path).
 Each guard mutation-checked.
 
 ## The operator's window tools (step ④ of the redesign: the operator reads a registered domain freely; writes stay refused)
@@ -3334,7 +3388,7 @@ else. **No site word** anywhere (a fictional site in the tests).
   `workPlanSentences` / `workResultCard`; the window port `HeldPageWrite` / `HeldPageWriteAnswer` / `BrowserWorkHooks`);
   `electron/features/browser/frame-writes.ts` (`createFrameWriter`: one held write at a time; no Electron);
   `electron/features/browser/work.ts` (`wireBrowserWork`: the task's flow, the cards in memory); `skill-steps.ts` (a
-  Skill's `SKILL.md` / `site-notes.md` from the member's company folder, through the allowed roots); the shell's hold
+  Skill's `SKILL.md` / `site-notes.md` from the member's company folder at the path the frames run names — the company's or a department's, "Department Skills" —, through the allowed roots); the shell's hold
   (`browser-window.ts`: `BrowserAiGate.hold`, `holdPageWrite`, `sendHeld`); the tool `browser_work`
   (`electron/browser-request/inspect-tool.ts`, registered in `agents/claude.ts`, category `web`); the core's
   `browserNeverReadFits` (`shared/core/browser-frame-match.ts`), the card row's `compared` / `by` / `mark`
@@ -3342,7 +3396,7 @@ else. **No site word** anywhere (a fictional site in the tests).
   `browserRunWritesProblem`).
 - **The flow** (`work`; each refusal is a fixed word, nothing sent): the switch, a registered domain, not stopped, the
   member's window and its read session, the operator, one run per window → **a Skill**: `POST /browser-frame-runs
-  { skill }` (the server's approved frames, its `afterRead` / `neverRead` — answered by the start only) → **the preview**
+  { skill }` (a name or a path; the server resolves it — "Department Skills" — and answers the path; the server's approved frames, its `afterRead` / `neverRead` — answered by the start only) → **the preview**
   (read only) unless the Skill version is pre-approved and its text unchanged: an operator run (`POST /browser-runs
   { host, write: true, frameRunId? }`), every write the page makes held and failed, a never-read address refused; the
   operator answers `plan` (what will be done, who else is affected, the key values read; ad hoc also the frames in the

@@ -49,3 +49,9 @@ export function skillActions(status: BrowserSkillStatus): { approve: boolean; pr
 }
 
 export const howWords = (how: 'approved' | 'edited') => (how === 'edited' ? '宣言を直したので承認' : '承認')
+
+/** Where a Skill belongs: the whole company's, or a department folder's (two departments may each have one name). */
+export const skillPlaceWords = (department: string | null) => (department === null ? '全社' : `部署「${department}」`)
+
+/** A row's name for screen readers: its name and where it belongs. */
+export const skillLabel = (s: { name: string; department: string | null }) => `${s.name}（${skillPlaceWords(s.department)}）`

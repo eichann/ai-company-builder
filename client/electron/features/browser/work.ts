@@ -21,7 +21,7 @@ import {
   type AfterReadResult, type WorkAnswer, type WorkEnd, type WorkFrame, type WorkPlanValue, type WorkStopReason,
 } from '../../../shared/browser-frame-writes'
 import { browserNeverReadFits } from '../../../../shared/core/browser-frame-match'
-import { isValidSkillName } from '../../../../shared/core/names'
+import { browserSkillRef } from '../../../../shared/core/browser-skill'
 import { BROWSER_RUN_ID_RE, BROWSER_RUN_LIMITS, type BrowserRunEndReason, type BrowserRunLogStep, type BrowserRunOutcome, type BrowserRunWriteStep } from '../../../../shared/core/browser-run-log'
 import { browserRunBudget, type BrowserRunBudget } from '../../../../shared/core/browser-run-budget'
 import type { BrowserFrameRunStart, BrowserFrameView } from '../../../../shared/types/browser-frames'
@@ -48,7 +48,7 @@ export interface BrowserWorkDeps {
   operator(): PreviewOperator | null
   cliPath(): string
   parentEnv(): Readonly<Record<string, string | undefined>>
-  /** A company Skill's steps (its SKILL.md and site notes) from the member's company folder; null when there is none. */
+  /** A company or department Skill's steps (its SKILL.md and site notes) from the member's company folder, by the Skill's path; null when there is none. */
   skillSteps?(companyRoot: string, skill: string): Promise<string | null>
   busyWindows?: Set<string>
   now?: () => number
@@ -113,6 +113,7 @@ function refusedWords(a: Exclude<BrowserLinesAnswer, { kind: 'ok' }>, now: numbe
   if (code === 'BROWSER_TYPE_NOT_GRANTED') return W.notGranted
   if (code === 'BROWSER_AI_STOPPED') return W.stopped
   if (code.startsWith('BROWSER_DEVICE_')) return W.pc
+  if (code === 'BROWSER_SKILL_AMBIGUOUS') return W.skillAmbiguous
   if (code.startsWith('BROWSER_SKILL_')) return W.skill
   return W.failed
 }
@@ -226,7 +227,7 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
     if (!deps.aiSwitch()) return said(W.off)
     const userId = deps.userId()
     if (!userId || !BROWSER_COMPANY_ID_RE.test(input.companyId)) return said(W.failed)
-    if (input.skill !== null && !isValidSkillName(input.skill)) return said(W.badInput)
+    if (input.skill !== null && browserSkillRef(input.skill) !== input.skill) return said(W.badInput)
     const { companyId } = input
     const host = input.site
     if (!deps.registered(companyId, host)) return said(W.notAllowed)
@@ -258,18 +259,19 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
       if (!resolved.ok) return said(W.noOperator)
       // This member's own leftover ends on this company (a lost `end` / `finish`) go first, so the lock they hold is let go.
       await deps.pendingEnds?.flush(userId, companyId)
-      const steps = input.skill !== null && input.companyRoot && deps.skillSteps
-        ? (await deps.skillSteps(input.companyRoot, input.skill).catch(() => null))?.slice(0, L.steps) ?? null : null
-
       // When the frames run was asked for: the card waits no longer than the server keeps a waiting run (counted from then).
       let frameAskedAt = now()
-      // [a Skill] the server builds the frames from the approved declaration it reads itself.
+      // [a Skill] the server builds the frames from the approved declaration it reads itself, and says which Skill a name
+      // means (its path: the company's or a department's; a name two Skills share is refused, never guessed).
       if (input.skill !== null) {
         const started = await deps.api.frameStart(companyId, { skill: input.skill, ...conversation })
         if (started.kind !== 'ok') return said(refusedWords(started, now()))
         frameRun = frameStartOf(started.value)
         if (!frameRun || frameRun.host !== host) return said(W.failed)
       }
+      // The steps of exactly the Skill the server's frames come from (never the name the AI typed).
+      const steps = frameRun?.skill && input.companyRoot && deps.skillSteps
+        ? (await deps.skillSteps(input.companyRoot, frameRun.skill).catch(() => null))?.slice(0, L.steps) ?? null : null
       const neverRead = frameRun?.neverRead ?? []
       const neverReadFits = (pq: string) => neverRead.some(p => browserNeverReadFits(p, pq))
 

@@ -33,7 +33,11 @@ export interface BrowserSkillApprovalRepository {
 
 /** One Skill as the server's own copy holds it. */
 export interface BrowserSkillContent {
-  name: string
+  /**
+   * Its identity: `.claude/skills/<name>` (the company's) or `<department>/.claude/skills/<name>` (a department's),
+   * shared/core/browser-skill.ts `parseBrowserSkillPath`; as the server's copy spells it (the department folder as stored).
+   */
+  path: string
   /** `browser.yaml`'s text, or `too-large` (never read whole). */
   declaration: string | 'too-large'
   /** The whole folder's fingerprint (`git:<tree id>` / `shelf:<version>`): moves when any file of the Skill changes. */
@@ -48,16 +52,22 @@ export interface BrowserSkillLanded extends BrowserSkillContent {
 }
 
 export interface BrowserSkillSource {
-  /** The company-wide Skills that carry `browser.yaml`, by name (sorted, bounded). */
+  /**
+   * The company's and its departments' Skills that carry `browser.yaml`, by path (sorted, bounded) — never one inside a
+   * private folder (its own repository; its name must not leak).
+   */
   list(companyId: string): Promise<string[]>
-  /** One Skill now (null: no such Skill, or no `browser.yaml` in it). */
-  read(companyId: string, name: string): Promise<BrowserSkillContent | null>
+  /** One Skill now, by its path (null: no such Skill, no `browser.yaml` in it, not a Skill path, or a private folder's). */
+  read(companyId: string, path: string): Promise<BrowserSkillContent | null>
   /**
    * What one accepted push to the company repository changed (`<old> <new> <ref>` lines the push checker accepted): the
-   * company-wide Skills with `browser.yaml` that it touched, each read **at the pushed commit** (not the tip, which may
-   * already be someone else's).
+   * company's and departments' Skills with `browser.yaml` that it touched, each read **at the pushed commit** (not the
+   * tip, which may already be someone else's).
    */
   pushed(companyId: string, refUpdates: string): Promise<BrowserSkillLanded[]>
-  /** A shelf Skill at exactly the version one publish wrote, against the version current before it (null: none). */
-  shelfLanded(companyId: string, name: string, versions: { before: string | null; written: string }): Promise<BrowserSkillLanded | null>
+  /**
+   * A shelf Skill (the company's, `departmentId` null, or a department's) at exactly the version one publish wrote,
+   * against the version current before it (null: none).
+   */
+  shelfLanded(companyId: string, item: { departmentId: string | null; name: string }, versions: { before: string | null; written: string }): Promise<BrowserSkillLanded | null>
 }
