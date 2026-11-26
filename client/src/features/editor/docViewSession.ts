@@ -69,6 +69,8 @@ const RELOAD_DELAY_MS = 250
 const REFRESHED_SHOWN_MS = 2500
 /** DOM changes (a chat answer streaming) trigger a check at once, then at most this often. */
 const MUTATION_CHECK_MS = 100
+/** View ids whose early band state is kept while opening (other tabs' views send theirs too). */
+const EARLY_VIEWS_MAX = 8
 const WATCHED_ATTRIBUTES = ['class', 'style', 'hidden', 'open', 'aria-hidden', 'data-state']
 
 export class DocViewSession {
@@ -81,6 +83,11 @@ export class DocViewSession {
   private listeners = new Set<() => void>()
   private area: HTMLElement | null = null
   private viewId: number | null = null
+  /**
+   * While an open is under way: the newest band state (`blocked`, `driveVideos`) heard for each view id
+   * (a few), since a view's first state can arrive before its id does; the opened view's is applied then.
+   */
+  private early = new Map<number, DocViewEvent[]>()
   /** Bumped on every open and detach: an answer for an earlier one closes its view. */
   private generation = 0
   private placed: DocViewBounds | null = null
@@ -179,7 +186,10 @@ export class DocViewSession {
     // A new view (also ［もう一度表示する］ after ［止める］ or a crash): a new band; ［×］ holds for its reloads only.
     this.dismissed = null
     this.set({ status: { kind: 'opening' }, link: null, blocked: null, driveVideos: null, bandShown: false, selection: null, elsewhere: false })
+    this.early.clear()
     const result = await this.source.open().catch(() => null)
+    const early = result?.ok ? this.early.get(result.viewId) ?? [] : []
+    this.early.clear()
     if (generation !== this.generation) {
       // Another tab, 中身 or ［止める］ came first: this view is nobody's.
       if (result?.ok) void this.views.closeDocView(result.viewId).catch(() => {})
@@ -198,6 +208,7 @@ export class DocViewSession {
     if (this.snapshot.zoom !== 1) void this.views.setDocViewZoom(result.viewId, this.snapshot.zoom).catch(() => {})
     if (this.review) void this.views.setDocViewReview(result.viewId, this.review).catch(() => {})
     this.set({ status: { kind: 'shown', covered: false } })
+    for (const event of early) this.onEvent(event)
     this.schedule()
   }
 
@@ -241,6 +252,13 @@ export class DocViewSession {
   }
 
   private onEvent(event: DocViewEvent) {
+    if (this.viewId === null && this.snapshot.status.kind === 'opening' && (event.kind === 'blocked' || event.kind === 'driveVideos')) {
+      const kept = (this.early.get(event.viewId) ?? []).filter(e => e.kind !== event.kind)
+      this.early.delete(event.viewId)
+      this.early.set(event.viewId, [...kept, event])
+      for (const old of [...this.early.keys()].slice(0, Math.max(0, this.early.size - EARLY_VIEWS_MAX))) this.early.delete(old)
+      return
+    }
     if (event.viewId !== this.viewId) return
     if (event.kind === 'shortcut') {
       // One of the app's shortcuts pressed while the document had the keyboard (main took it from

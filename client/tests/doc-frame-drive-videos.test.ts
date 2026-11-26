@@ -39,6 +39,10 @@ test('Drive videos are read from the static src of <video>, <source> and <iframe
   // Static only: markup in comments, scripts and inert templates is not the page's.
   assert.deepEqual(ids(`<!-- <video src="${file(A)}"> --><script>const v = '<video src="${file(B)}">'</script><template><iframe src="${file(C)}"></iframe></template>`), [])
   assert.deepEqual(ids(`<SCRIPT>x('</scriptx><video src="${file(A)}">')</Script ><video src="${file(B)}">`), [B], 'the script ends at its own end tag only')
+  assert.deepEqual(ids(`<iframe src="${file(A, '/preview')}"><video src="${file(B)}"></iframe>`), [A], 'an iframe\'s content is text, its src is read')
+  assert.deepEqual(ids(`<noembed><video src="${file(A)}"></noembed><noframes><video src="${file(B)}"></noframes><video src="${file(C)}">`), [C])
+  assert.deepEqual(ids(`<plaintext><video src="${file(A)}">`), [], 'plaintext runs to the end')
+  assert.deepEqual(ids(`<!--><video src="${file(A)}"><!---><video src="${file(B)}"><!-- --><video src="${file(C)}">`), [A, B, C], '<!--> and <!---> end at once')
 })
 
 test('only https Drive file links on exactly drive.google.com: look-alike hosts, http, a port, user-info, folders and Docs are not', () => {
@@ -155,7 +159,17 @@ function world() {
     },
   }
   const events: Array<[number, DocViewEvent]> = []
-  const views = createDocViews({ frames, shell, notify: (windowId, event) => events.push([windowId, event]) })
+  // Main's deferred work runs when the test lets it (`flush`): a read never happens on the request's path.
+  const queued: Array<() => void> = []
+  const reads = { count: 0 }
+  const views = createDocViews({
+    frames,
+    shell,
+    notify: (windowId, event) => events.push([windowId, event]),
+    later: fn => { queued.push(fn); return () => {} },
+    readDriveVideos: html => { reads.count++; return driveVideoIdsOf(html) },
+  })
+  const flush = () => { while (queued.length > 0) queued.shift()!() }
   const opened: string[] = []
   const handlers = new Map<string, (event: unknown, ...args: unknown[]) => unknown>()
   const ipc = { handle: (channel: string, fn: (event: unknown, ...args: unknown[]) => unknown) => { handlers.set(channel, fn) }, on: () => {} }
@@ -165,7 +179,7 @@ function world() {
     fromMainWindow: ((event: { main: boolean }) => event.main) as never,
     openExternal: async url => { opened.push(url) },
   })
-  const settle = () => new Promise(resolve => setTimeout(resolve, 30))
+  const settle = async () => { await new Promise(resolve => setTimeout(resolve, 30)); flush() }
   const open = async (windowId = MAIN) => {
     const result = await handlers.get('docView:open')!({ main: true, sender: { id: windowId } }, path.join(root, '営業/report.html')) as { ok: true; viewId: number }
     assert.ok(result.ok)
@@ -175,7 +189,7 @@ function world() {
   const ev = (main: boolean, windowId = MAIN) => ({ main, sender: { id: windowId } })
   const openVideo = async (event: unknown, viewId: unknown, index: unknown) => { await handlers.get('docView:openDriveVideo')!(event, viewId, index) }
   const videoEvents = () => events.filter(([, e]) => e.kind === 'driveVideos')
-  return { root, write, views, events, videoEvents, opened, open, ev, openVideo, settle, shownUrl, hooksOf, load }
+  return { root, write, frames, views, events, videoEvents, opened, open, ev, openVideo, settle, flush, reads, shownUrl, hooksOf, load }
 }
 
 test('main reads the videos from its own document as served and tells its window counts only', async () => {
@@ -228,13 +242,16 @@ test('another page of the folder (or a style of it) is never read; while it is s
   const own = w.shownUrl.get(viewId)!
   const style = `${own.slice(0, own.lastIndexOf('/'))}/style.css`
   await w.load(viewId, style, false)
+  w.flush()
   assert.equal(w.videoEvents().length, 1, 'a served style is not the document')
   const other = `${own.slice(0, own.lastIndexOf('/'))}/other.html`
   await w.load(viewId, other)
+  w.flush()
   assert.deepEqual(w.videoEvents().at(-1)![1], { viewId, kind: 'driveVideos', count: 0, total: 0, seen: 2 }, 'the document\'s videos are not offered over page B, nor B\'s read')
   await w.openVideo(w.ev(true), viewId, 0)
   assert.deepEqual(w.opened, [])
   await w.load(viewId, own)
+  w.flush()
   assert.deepEqual(w.videoEvents().at(-1)![1], { viewId, kind: 'driveVideos', count: 2, total: 2, seen: 2 })
 })
 
@@ -246,5 +263,65 @@ test('a closed view is told nothing more', async () => {
   const before = w.events.length
   w.write('営業/report.html', `<video src="${file(C)}"></video>`)
   await w.load(viewId, own)
+  w.flush()
   assert.equal(w.events.length, before)
+})
+
+test('the document is read after its answer went, once per file version, one read at a time: asking for itself as an image or a frame reads nothing more', async () => {
+  const w = world()
+  const viewId = await w.open()
+  assert.equal(w.reads.count, 1)
+  const own = w.shownUrl.get(viewId)!
+  // The page asks for itself as an image (in a loop) and as a frame: the same file, nothing read again.
+  for (let i = 0; i < 5; i++) await w.load(viewId, `${own}?${i}`, false)
+  w.flush()
+  assert.equal(w.reads.count, 1)
+  assert.equal(w.videoEvents().length, 1)
+  // A changed file: the answer comes first, the read after it.
+  w.write('営業/report.html', `<video src="${file(C)}"></video>`)
+  await w.load(viewId, own)
+  assert.equal(w.reads.count, 1, 'not on the request\'s path')
+  w.flush()
+  assert.equal(w.reads.count, 2)
+  // Changed three times while a read waits: the one under way, then only the newest.
+  w.write('営業/report.html', `<video src="${file(A)}"></video>`)
+  await w.load(viewId, own, false)
+  w.write('営業/report.html', `<video src="${file(B)}"></video><!-- longer -->`)
+  await w.load(viewId, own, false)
+  w.write('営業/report.html', `<video src="${file(B)}"></video><video src="${file(C)}"></video>`)
+  await w.load(viewId, own, false)
+  w.flush()
+  assert.equal(w.reads.count, 4)
+  await w.openVideo(w.ev(true), viewId, 1)
+  assert.deepEqual(w.opened, [`https://drive.google.com/file/d/${C}/view`], 'the newest file\'s list')
+})
+
+test('the document asked for from another page of the folder does not bring its videos back there; back on the document they are offered again', async () => {
+  const w = world()
+  const viewId = await w.open()
+  const own = w.shownUrl.get(viewId)!
+  await w.load(viewId, `${own.slice(0, own.lastIndexOf('/'))}/other.html`)
+  w.flush()
+  assert.equal(w.videoEvents().at(-1)![1].count, 0)
+  // Page B asks for the document (an image, a frame) — also a changed one, which is read.
+  w.write('営業/report.html', `<video src="${file(C)}"></video>`)
+  await w.load(viewId, `${own}?from-b`, false)
+  w.flush()
+  assert.equal(w.reads.count, 2)
+  assert.equal(w.videoEvents().at(-1)![1].count, 0, 'nothing offered over page B')
+  await w.openVideo(w.ev(true), viewId, 0)
+  assert.deepEqual(w.opened, [], 'nor opened from it')
+  await w.load(viewId, own)
+  w.flush()
+  assert.deepEqual(w.videoEvents().at(-1)![1], { viewId, kind: 'driveVideos', count: 1, total: 1, seen: 3 })
+  await w.openVideo(w.ev(true), viewId, 0)
+  assert.deepEqual(w.opened, [`https://drive.google.com/file/d/${C}/view`])
+})
+
+test('a listener that throws never stops the document being served', async () => {
+  const w = world()
+  const viewId = await w.open()
+  w.frames.onDocumentServed(() => { throw new Error('boom') })
+  const answer = await w.frames.serve({ url: w.shownUrl.get(viewId)!, method: 'GET' })
+  assert.equal(answer.status, 200)
 })

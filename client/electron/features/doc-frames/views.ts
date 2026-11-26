@@ -116,6 +116,8 @@ export const BLOCKED_INTERVAL_MS = 500
 export interface DocViewsDeps {
   /** `onDocumentServed`: the bytes of each view's own document as served (its Drive videos). */
   frames: Pick<DocFrames, 'grant' | 'revoke'> & Partial<Pick<DocFrames, 'onDocumentServed'>>
+  /** How a document's Drive videos are read (default `driveVideoIdsOf`; a test counts the reads). */
+  readDriveVideos?: (html: string) => { ids: string[]; total: number }
   shell: DocViewPort
   /** Tell the window about one of its views (`docView:event`). */
   notify?: (windowId: number, event: DocViewEvent) => void
@@ -150,7 +152,10 @@ interface BlockedTally {
 /** Different Drive videos remembered per view (for `seen`); past it a new one no longer brings a dismissed band back. */
 export const DRIVE_VIDEOS_SEEN_MAX = 1000
 
-/** The Google Drive videos of one view's own document (main only; the window gets counts). */
+/**
+ * The Google Drive videos of one view's own document (main only; the window gets counts). The list read
+ * is kept apart from whether it is offered: only while the view's main frame shows that document.
+ */
 interface DriveVideos {
   /** The ids, in the order written, at most `DOC_DRIVE_VIDEOS_MAX`: a row's index names one. */
   ids: string[]
@@ -159,6 +164,12 @@ interface DriveVideos {
   seen: Set<string>
   /** What the window was last told. */
   told: { count: number; total: number; seen: number }
+  /** The file identity (`version`) of the bytes read last, or being read: the same file is not read again. */
+  version: string | null
+  /** A read is under way (one at a time per view). */
+  reading: boolean
+  /** The newest bytes served meanwhile, read when the one under way ends (only the newest is kept). */
+  next: { bytes: Uint8Array; version: string } | null
 }
 
 /** The same document for a kept place: its folder and name (main's own; never sent). */
@@ -199,10 +210,14 @@ export function createDocViews(deps: DocViewsDeps) {
   const reading = new Set<number>()
   /** View id → the Drive videos its own document embeds, as last served. */
   const videos = new Map<number, DriveVideos>()
-  /** Tell the window the view's videos when the counts changed (a reload serving the same file says nothing). */
+  /**
+   * Tell the window the view's videos when what is offered changed: the list only while its main frame
+   * shows the document (`onOwnPage`), else none; a reload serving the same file says nothing.
+   */
   const tellVideos = (viewId: number, list: DriveVideos) => {
     const view = views.get(viewId)
-    const counts = { count: list.ids.length, total: list.total, seen: list.seen.size }
+    const offered = onOwnPage(viewId)
+    const counts = { count: offered ? list.ids.length : 0, total: offered ? list.total : 0, seen: list.seen.size }
     if (!view || (counts.count === list.told.count && counts.total === list.told.total && counts.seen === list.told.seen)) return
     list.told = counts
     deps.notify?.(view.windowId, { viewId, kind: 'driveVideos', ...counts })
@@ -287,13 +302,9 @@ export function createDocViews(deps: DocViewsDeps) {
           deps.notify?.(view.windowId, { viewId, kind: 'page', own })
         }
       }
-      // Another page of the folder: its videos are not listed (not read), and the document's are not shown.
+      // Another page of the folder: the document's videos are not offered over it; back on the document they are.
       const list = videos.get(viewId)
-      if (list && page && !page.own) {
-        list.ids = []
-        list.total = 0
-        tellVideos(viewId, list)
-      }
+      if (list) tellVideos(viewId, list)
       const tally = blocked.get(viewId)
       if (!tally || !views.has(viewId)) return
       // A new page: its own tally. The window hears `count: 0` only if it was told something before.
@@ -346,17 +357,37 @@ export function createDocViews(deps: DocViewsDeps) {
     forget(viewId)
     view?.handle.destroy()
   }
-  // The view's own document as served (its first load, every reload): its Drive videos, read from those
-  // exact bytes. Another page of the folder is never read here (the protocol tells its own document only).
-  deps.frames.onDocumentServed?.((viewId, bytes) => {
+  const readDriveVideos = deps.readDriveVideos ?? driveVideoIdsOf
+  /** Read `bytes` after the answer went (never on the request's path), then the newest served meanwhile. */
+  const readVideos = (viewId: number, list: DriveVideos, bytes: Uint8Array, version: string) => {
+    list.reading = true
+    list.version = version
+    later(() => {
+      if (videos.get(viewId) !== list) return
+      const { ids, total } = readDriveVideos(Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength).toString('latin1'))
+      list.ids = ids
+      list.total = total
+      for (const id of ids) if (list.seen.size < DRIVE_VIDEOS_SEEN_MAX) list.seen.add(id)
+      list.reading = false
+      tellVideos(viewId, list)
+      const next = list.next
+      list.next = null
+      if (next && next.version !== list.version) readVideos(viewId, list, next.bytes, next.version)
+    }, 0)
+  }
+  // Each answer for the view's own document (its loads, and the page asking for itself as an image or a
+  // frame, also from another page of the folder): its Drive videos, read from those exact bytes — once
+  // per file version, one read at a time. Whether they are offered is `onOwnPage`'s (`tellVideos`).
+  deps.frames.onDocumentServed?.((viewId, bytes, version) => {
     if (!views.has(viewId)) return
-    const { ids, total } = driveVideoIdsOf(Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength).toString('latin1'))
     let list = videos.get(viewId)
-    if (!list) videos.set(viewId, list = { ids: [], total: 0, seen: new Set(), told: { count: 0, total: 0, seen: 0 } })
-    list.ids = ids
-    list.total = total
-    for (const id of ids) if (list.seen.size < DRIVE_VIDEOS_SEEN_MAX) list.seen.add(id)
-    tellVideos(viewId, list)
+    if (!list) videos.set(viewId, list = { ids: [], total: 0, seen: new Set(), told: { count: 0, total: 0, seen: 0 }, version: null, reading: false, next: null })
+    if (list.reading) {
+      if (version !== list.version) list.next = { bytes, version }
+      else list.next = null
+      return
+    }
+    if (version !== list.version) readVideos(viewId, list, bytes, version)
   })
   // The window reloaded, crashed or closed: every view it holds closes and its grant is revoked,
   // and an open still under way for the page that is gone registers nothing.
@@ -462,11 +493,11 @@ export function createDocViews(deps: DocViewsDeps) {
 
     /**
      * The address to open in the member's browser for the view's `index`-th Drive video (its canonical
-     * Drive page, built from the id main read), or null: only its own window, an index of the list as
-     * last served (another page shown → none).
+     * Drive page, built from the id main read), or null: only its own window, only while its main frame
+     * shows the document (as offered: `tellVideos`), an index of the list last read.
      */
     driveVideoUrl(viewId: unknown, windowId: number, index: unknown): string | null {
-      if (!own(viewId, windowId) || typeof index !== 'number' || !Number.isInteger(index)) return null
+      if (!own(viewId, windowId) || typeof index !== 'number' || !Number.isInteger(index) || !onOwnPage(viewId as number)) return null
       const id = videos.get(viewId as number)?.ids[index]
       return id === undefined ? null : driveVideoViewUrl(id)
     },

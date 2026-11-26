@@ -335,6 +335,32 @@ test('the band lists the document\'s Google Drive videos (counts only) with ［�
   expectNoPageErrors(state)
 })
 
+test('a view\'s first band state that arrives before its id does is still shown (another view\'s is not); only Drive videos: a neutral label', async ({ page }) => {
+  const state = await open(page)
+  await page.getByRole('button', { name: '止める' }).click()
+  await page.evaluate(() => {
+    const w = window as unknown as { __acbEarlyEvents: object[]; __acbDocEvent: (e: unknown) => void }
+    w.__acbEarlyEvents = [{ kind: 'driveVideos', count: 1, total: 1, seen: 1 }]
+  })
+  await page.getByRole('button', { name: 'もう一度表示する' }).click()
+  await expect(band(page).getByTestId('drive-videos')).toContainText('動画が 1 本あります')
+  await expect(page.getByRole('region', { name: '資料の中の動画' })).toBeVisible()
+  await expect(page.getByRole('region', { name: 'インターネットの部品' })).toHaveCount(0)
+  // Another view's early state stays its own.
+  await page.getByRole('button', { name: '止める' }).click()
+  await page.evaluate(() => {
+    const w = window as unknown as { __acbEarlyEvents: object[]; __acbDocDelay: number }
+    w.__acbEarlyEvents = []
+    w.__acbDocDelay = 300
+  })
+  await page.getByRole('button', { name: 'もう一度表示する' }).click()
+  await sendEvent(page, { viewId: 1234, kind: 'driveVideos', count: 3, total: 3, seen: 3 })
+  await expect.poll(async () => (await calls(page)).filter(c => c[0] === 'open').length).toBe(3)
+  await page.waitForTimeout(600)
+  await expect(band(page)).toHaveCount(0)
+  expectNoPageErrors(state)
+})
+
 test('review: selections count only while reviewing and only from this view, the comment box stays off the document, the comment is saved in the Markdown review\'s shape, a hidden place is said', async ({ page }) => {
   const state = await open(page)
   const files = () => page.evaluate(() => (window as unknown as { __acbFiles: Record<string, string> }).__acbFiles)

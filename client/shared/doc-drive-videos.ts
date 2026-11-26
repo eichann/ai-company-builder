@@ -30,9 +30,9 @@ const VIDEO_TAGS = new Set(['video', 'source', 'iframe'])
 /**
  * Elements whose content is not the page's markup (raw text, or inert until a script uses it): a
  * `<video>` written inside them is not a video of the page. The same idea as the review's reading
- * (`htmlReview.ts`), kept small here.
+ * (`htmlReview.ts`), kept small here. `plaintext` has no end: the rest of the file is its text.
  */
-const SKIPPED_CONTENT = new Set(['script', 'style', 'textarea', 'title', 'noscript', 'template', 'xmp'])
+const SKIPPED_CONTENT = new Set(['script', 'style', 'textarea', 'title', 'noscript', 'template', 'xmp', 'iframe', 'noembed', 'noframes', 'plaintext'])
 
 const isSpace = (c: number) => c === 0x20 || c === 0x09 || c === 0x0a || c === 0x0c || c === 0x0d
 const isLetter = (c: number) => (c >= 0x41 && c <= 0x5a) || (c >= 0x61 && c <= 0x7a)
@@ -80,6 +80,11 @@ export function driveVideoIdsOf(html: string): { ids: string[]; total: number } 
   let at = html.indexOf('<')
   while (at >= 0 && at < n) {
     if (html.startsWith('<!--', at)) {
+      // `<!-->` and `<!--->` end at once (HTML's abrupt comment end); otherwise at the next `-->`.
+      if (html.startsWith('>', at + 4) || html.startsWith('->', at + 4)) {
+        at = html.indexOf('<', at + 4)
+        continue
+      }
       const end = html.indexOf('-->', at + 4)
       if (end < 0) break
       at = html.indexOf('<', end + 3)
