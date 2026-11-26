@@ -60,3 +60,15 @@ test('the view is given the shown comments\' quotes only, in order, with their i
   assert.deepEqual(marks.ids, ['a', 'c'])
   assert.deepEqual(marks.quotes, [{ text: '前年比', nth: 1, resolved: true }, { text: '未定です', nth: 0, resolved: false }])
 })
+
+test('a template\'s content (nested ones too) is not counted, as the view does not count it', () => {
+  const html = '<template><p>same</p><template>same</template>same</template><p>first same</p><p>second same</p>'
+  const second = anchorHtmlQuote(html, { text: 'same', prefix: 'second', suffix: '' })!
+  assert.equal(htmlQuoteNth(html, 'same', second.start), 1)
+})
+
+test('an entity standing for two UTF-16 units (an emoji) keeps the file positions in step', () => {
+  const html = '<p>&#x1F600;hello</p>'
+  const at = anchorHtmlQuote(html, { text: 'hello', prefix: '', suffix: '' })!
+  assert.equal(html.slice(at.start, at.end), 'hello')
+})

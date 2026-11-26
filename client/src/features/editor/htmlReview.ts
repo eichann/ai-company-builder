@@ -41,6 +41,18 @@ function entityAt(html: string, at: number): { text: string; end: number } | nul
   return text === undefined ? null : { text, end: at + m[0].length }
 }
 
+/** Where the `<template>` whose content starts at `from` ends (its closing tag), counting nested templates. */
+function templateEnd(html: string, from: number): number {
+  const tags = /<(\/?)template\b/gi
+  tags.lastIndex = from
+  let depth = 1
+  for (let m = tags.exec(html); m; m = tags.exec(html)) {
+    depth += m[1] ? -1 : 1
+    if (depth === 0) return m.index
+  }
+  return html.length
+}
+
 interface Visitor {
   /** A character of the page's words and where it starts in the file. */
   text(char: string, at: number): void
@@ -88,13 +100,17 @@ function walkHtml(html: string, visit: Visitor, hiddenText: ReadonlySet<string> 
         const end = close < 0 ? n : close
         if (!hiddenText?.has(name)) for (let k = i; k < end; k++) visit.text(html[k], k)
         i = end
+      } else if (!closing && name === 'template' && hiddenText?.has('template')) {
+        // A template's content is not on the page (the view's walk skips it too): to its own end, nested ones included.
+        i = templateEnd(html, i)
       }
       continue
     }
     if (c === '&') {
       const entity = entityAt(html, i)
       if (entity) {
-        for (const ch of entity.text) visit.text(ch, i)
+        // One file position for each UTF-16 unit (an emoji is two), so the words' indices stay in step.
+        for (let k = 0; k < entity.text.length; k++) visit.text(entity.text[k], i)
         i = entity.end
         continue
       }
