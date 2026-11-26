@@ -3804,8 +3804,8 @@ Skill wrote 【】.
   second `finish` is refused `BROWSER_RUN_ENDED` and changes nothing (both idempotent on the server) — or until the run's
   own time is over (a frames run: its `expiresAt`; an operator run: now + its lease), after which the server frees the
   domain by itself. **Before the member's next task** on the company (`browser_work`, `browser_browse`), its kept ends
-  are sent once more and awaited, before anything is started. Sign-out drops them (another account's session never
-  carries them). An end is one per run id; the body is the one first sent (the `site-refused` fallback included).
+  are sent once more and awaited, before anything is started. Sign-out drops them — also an end whose first try was
+  still on its way then (a generation counter, Codex review) — so another account's session never carries them. An end is one per run id; the body is the one first sent (the `site-refused` fallback included).
 - **The server lets a Skill run's domain go when its work is over** (`services/browser-frames.ts` `settle`, asked by
   `holderOn`, start, permit, report, get and end; `BrowserFrameDeps.workRunOver` → `services/browser-runs.ts`
   `workRunOver`, wired in `composition.ts`): a Skill run allows exactly one work run (`BROWSER_RUN_WORK_TAKEN`, "Room for

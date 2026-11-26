@@ -21,7 +21,7 @@ import {
   workBusyWords, workMaterial, workWordsForAi,
 } from '../shared/browser-frame-writes'
 import { readBrowserPageSnapshot, type BrowserBrowseSurface, type BrowserPageSnapshot } from '../shared/browser-browse'
-import { createPendingEnds, PENDING_END_DELAYS_MS } from '../electron/features/browser/pending-ends'
+import { createPendingEnds, PENDING_END_DELAYS_MS, sendEnd } from '../electron/features/browser/pending-ends'
 import { wireBrowserWork } from '../electron/features/browser/work'
 import { wireBrowserBrowse } from '../electron/features/browser/browse'
 import { createBrowserContext } from '../electron/features/browser/context'
@@ -104,6 +104,14 @@ test('the next task flushes only this member\'s ends on this company, awaited; s
   pending.clear()
   assert.equal(pending.size(), 0)
   assert.equal(c.pending(), 0, 'no timer left after sign-out')
+  // A first try still on its way at sign-out is not kept when it comes back unanswered (Codex review).
+  let release: (a: BrowserLinesAnswer) => void = () => {}
+  const first = sendEnd(pending, { runId: 'bf_late', userId: 'u-1', companyId: COMPANY, until: T0 + 60 * 60_000 }, () => new Promise(resolve => { release = resolve }))
+  pending.clear()
+  release({ kind: 'no-answer' })
+  await first
+  assert.equal(pending.size(), 0)
+  assert.equal(c.pending(), 0)
 })
 
 // ── The write task wired: ends kept, words per stop, the Skill's steps as written ──────────────────────────────────────

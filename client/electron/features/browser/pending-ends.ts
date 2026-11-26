@@ -42,6 +42,8 @@ export function createPendingEnds(deps: PendingEndsDeps = {}) {
   const log = deps.log ?? console
   interface Kept { end: PendingEnd; tries: number; timer: unknown; sending: Promise<void> | null }
   const kept = new Map<string, Kept>()
+  /** Moves on every sign-out: an end whose first try began before it is never kept after it (Codex review). */
+  let generation = 0
 
   const drop = (k: Kept) => {
     if (kept.get(k.end.runId) !== k) return
@@ -76,8 +78,12 @@ export function createPendingEnds(deps: PendingEndsDeps = {}) {
   }
 
   return {
-    /** The first try already went unanswered: keep the end and try again with back-off. */
-    keep(end: PendingEnd): void {
+    /**
+     * The first try already went unanswered: keep the end and try again with back-off. `since`: the `generation()` read
+     * before that first try — a sign-out meanwhile drops it (its retries would go with the next account's session).
+     */
+    keep(end: PendingEnd, since: number = generation): void {
+      if (since !== generation) return
       const before = kept.get(end.runId)
       if (before) drop(before)
       if (now() >= end.until) return
@@ -91,8 +97,11 @@ export function createPendingEnds(deps: PendingEndsDeps = {}) {
     },
     /** How many ends are kept (tests, diagnostics). */
     size: () => kept.size,
-    /** Sign-out: nothing of the previous account is sent with the next one's session. */
+    /** The current sign-in's generation (read before a first try: `sendEnd`). */
+    generation: () => generation,
+    /** Sign-out: nothing of the previous account is sent with the next one's session — kept or still on its first try. */
     clear(): void {
+      generation++
       for (const k of [...kept.values()]) drop(k)
     },
   }
@@ -105,7 +114,8 @@ export type PendingEnds = ReturnType<typeof createPendingEnds>
  * is returned so a caller that waits for it (the preview's finish) still sees it.
  */
 export async function sendEnd(pending: PendingEnds | undefined, end: Omit<PendingEnd, 'send'>, send: () => Promise<BrowserLinesAnswer>): Promise<BrowserLinesAnswer> {
+  const since = pending?.generation()
   const answer = await send().catch((): BrowserLinesAnswer => ({ kind: 'no-answer' }))
-  if (answer.kind === 'no-answer') pending?.keep({ ...end, send })
+  if (answer.kind === 'no-answer') pending?.keep({ ...end, send }, since)
   return answer
 }
