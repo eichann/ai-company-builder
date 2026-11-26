@@ -95,9 +95,12 @@ export type HeldWriteProblem = 'host' | 'file' | 'unreadable' | 'repeated-method
 
 export interface HeldWriteShape {
   method: string
-  /** The path (no query); `query` the raw query string, '' for none. */
+  /**
+   * The path (no query); `query` the raw query string after the `?`, null when the address has no `?` at all — `''` for a
+   * bare `?` (the URL parser's `search` drops it, but the site receives it: a frame without a query must not fit it).
+   */
   path: string
-  query: string
+  query: string | null
   /** Every body field by name (form, multipart text parts, a JSON object's top-level keys), values as text. */
   fields: ReadonlyMap<string, readonly string[]>
 }
@@ -175,7 +178,9 @@ export function readHeldWrite(input: { method: string; url: string; host: string
     fields = mp
   } else return { ok: false, problem: 'unreadable' }
   if ((fields.get('_method')?.length ?? 0) > 1) return { ok: false, problem: 'repeated-method' }
-  return { ok: true, shape: { method: input.method.toUpperCase(), path: u.pathname, query: u.search.replace(/^\?/, ''), fields } }
+  // `search` is '' both for no `?` and for a bare one; the address (without its fragment) tells them apart.
+  const query = u.search !== '' ? u.search.slice(1) : u.href.split('#')[0].includes('?') ? '' : null
+  return { ok: true, shape: { method: input.method.toUpperCase(), path: u.pathname, query, fields } }
 }
 
 /** One frame of the run as the app holds it: the server's view (its fixed fields, how many units are left). */
@@ -205,7 +210,7 @@ export function frameRequestFor(frame: Pick<WorkFrame, 'fields'>, shape: HeldWri
     if (values.length !== 1) return null
     fields[name] = values[0]
   }
-  return { method: shape.method, path: shape.query === '' ? shape.path : `${shape.path}?${shape.query}`, fields }
+  return { method: shape.method, path: shape.query === null ? shape.path : `${shape.path}?${shape.query}`, fields }
 }
 
 /**
@@ -341,7 +346,7 @@ export interface WorkCheck { item: string; before: string | null; after: string;
 export type WorkAnswer =
   | BrowserBrowseAction
   /** The preview's plan for the card: what will be done, who else is affected, the key values read, and (ad hoc) the frames. */
-  | { do: 'plan'; summary: string; affects: string; values: WorkPlanValue[]; writes: BrowserSkillWrite[] | null; unread: number[] }
+  | { do: 'plan'; summary: string; affects: string; values: WorkPlanValue[]; writes: AdhocPlanWrite[] | null; unread: number[] }
   /** Done writing: the summary for the card, the headings not read, what the operator checked (AI が確かめた). */
   | { do: 'done'; result: string; unread: number[]; checks: WorkCheck[]; comparedName: string | null }
   | { do: 'stop'; why: BrowserBrowseStop; unread: number[] }
@@ -361,6 +366,13 @@ function unreadOf(v: unknown, items: number): number[] | null {
   }
   return [...seen].sort((a, b) => a - b)
 }
+
+/**
+ * An ad-hoc plan's write as the start sends it (`POST /browser-frame-runs { plan }`): written as `browser.yaml` writes are,
+ * so **no `query` key** — an AI-written plan never carries one (`browserAdhocWritesProblem`), and the server's strict
+ * parser refuses even `query: null`.
+ */
+export type AdhocPlanWrite = Omit<BrowserSkillWrite, 'query'>
 
 /**
  * The operator's answer in a write run: one of the window tools' actions (`parseBrowseAnswer`, the same rules), or — in
@@ -389,11 +401,11 @@ export function parseWorkAnswer(text: string, ctx: { snapshot: BrowserPageSnapsh
       if (!label || value === null) return { problem: 'plan' }
       values.push({ label, value })
     }
-    let writes: BrowserSkillWrite[] | null = null
+    let writes: AdhocPlanWrite[] | null = null
     if (ctx.adhoc) {
       const parsed = browserSkillDeclarationFrom({ domain: ctx.domain, writes: v.writes })
       if (!parsed.ok || browserAdhocWritesProblem(parsed.declaration.writes)) return { problem: 'plan-writes' }
-      writes = parsed.declaration.writes.map(w => ({ method: w.method, path: w.path, query: w.query, max: w.max, fields: { ...w.fields } }))
+      writes = parsed.declaration.writes.map(w => ({ method: w.method, path: w.path, max: w.max, fields: { ...w.fields } }))
     } else if (v.writes !== undefined) return { problem: 'plan-writes' }
     return withNotes({ do: 'plan', summary, affects, values, writes, unread })
   }

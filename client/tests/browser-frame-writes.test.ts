@@ -29,6 +29,7 @@ import { readBrowserPageSnapshot, type BrowserBrowseSurface, type BrowserPageSna
 import { readBrowserCard } from '../shared/browser-inspection'
 import { browserNeverReadFits, browserWriteAnswerKind } from '../../shared/core/browser-frame-match'
 import { browserRunWritesProblem } from '../../shared/core/browser-run-log'
+import { browserSkillDeclarationFrom } from '../../shared/core/browser-skill'
 import { BROWSER_FRAME_RUN_TIMES, BROWSER_RUN_BUDGETS } from '../../shared/core/browser-run-budget'
 import { createFrameWriter, type FrameWritesApi } from '../electron/features/browser/frame-writes'
 import { wireBrowserWork } from '../electron/features/browser/work'
@@ -116,6 +117,14 @@ test('the operator\'s answers are read strictly: a plan only in the preview, an 
   assert.deepEqual(parseWorkAnswer(plan([{ method: 'POST', path: '/coupons', max: 1, fields: { _token: 'a' } }]), { ...ctx, phase: 'preview', adhoc: true }), { problem: 'plan-writes' })
   // "Only what this run made" is a reviewed Skill's: an AI-written plan never carries it.
   assert.deepEqual(parseWorkAnswer(plan([{ id: 'c', method: 'POST', path: '/coupons', max: 1 }, { method: 'POST', path: '/coupons/{made:c}/items', max: 1 }]), { ...ctx, phase: 'preview', adhoc: true }), { problem: 'plan-writes' })
+  // An exact query is a reviewed Skill's too; a plan without one goes to the server's strict parser as it reads it.
+  assert.deepEqual(parseWorkAnswer(plan([{ method: 'POST', path: '/coupons', query: 'return', max: 1 }]), { ...ctx, phase: 'preview', adhoc: true }), { problem: 'plan-writes' })
+  const read = parseWorkAnswer(plan([{ method: 'POST', path: '/coupons', max: 1, fields: { kind: 'a' } }]), { ...ctx, phase: 'preview', adhoc: true })
+  assert.ok('answer' in read && read.answer.do === 'plan' && read.answer.writes)
+  const sent = JSON.parse(JSON.stringify({ domain: HOST, writes: (read.answer as { writes: unknown }).writes }))
+  const server = browserSkillDeclarationFrom(sent)
+  assert.ok(server.ok, JSON.stringify(server))
+  assert.equal(server.declaration.writes[0].query, null)
   assert.deepEqual(parseWorkAnswer(plan([{ method: 'POST', path: '/coupons', max: 1 }]), { ...ctx, phase: 'preview', adhoc: false }), { problem: 'plan-writes' })
   assert.deepEqual(parseWorkAnswer(plan(), { ...ctx, phase: 'work', adhoc: false }), { problem: 'plan' })
   assert.deepEqual(parseWorkAnswer('{"do":"done","result":"x","unread":[]}', { ...ctx, phase: 'preview', adhoc: false }), { problem: 'done' })
@@ -316,6 +325,10 @@ test('a frame with an exact query: the held write fits only with exactly that ra
   const frames = [workFrameOf(view), workFrameOf({ ...plain, frame: 2, max: 1, left: 1 })]
   assert.equal((pickFrame(frames, shape('POST', `https://${HOST}/labels?return`, FORM, text('name=a'))) as { frame: WorkFrame }).frame.frame, 1)
   assert.equal((pickFrame(frames, shape('POST', `https://${HOST}/labels`, FORM, text('name=a'))) as { frame: WorkFrame }).frame.frame, 2)
+  // A bare `?` (the URL parser's `search` is '' for it) is still a query: neither frame fits.
+  assert.equal(shape('POST', `https://${HOST}/labels?`, FORM, text('')).query, '')
+  assert.equal(shape('POST', `https://${HOST}/labels#x?y`, FORM, text('')).query, null)
+  assert.deepEqual(pickFrame(frames, shape('POST', `https://${HOST}/labels?`, FORM, text('name=a'))), { mismatch: 'query' })
   for (const q of ['?return=', '?return&x', '?x&return', '?Return', '?return%20', '?return;x', '?return+']) {
     assert.deepEqual([q, pickFrame(frames, shape('POST', `https://${HOST}/labels${q}`, FORM, text('name=a')))], [q, { mismatch: 'query' }])
   }

@@ -3763,8 +3763,11 @@ writes:
   a query frame is simply unusable there; its card would show the path alone, for a write it can never send).
 - **The app** (`client/shared/browser-frame-writes.ts`): `workFrameOf` keeps the view's query (`WorkFrame.query` required,
   null for none); `pickFrame` asks the core with it; the permit carries `path?query` as read from the held URL
-  (`readHeldWrite`: the WHATWG URL's `search`, so the bytes compared are the ones the write session sends). The operator's
-  frames list it. An id the held write's query carried is never reported as made (`sentCarries`).
+  (`readHeldWrite`: the WHATWG URL's `search`, so the bytes compared are the ones the write session sends; a bare `?`, which
+  `search` drops, is kept as an empty query — `HeldWriteShape.query` null only when the address has no `?` — so no frame
+  fits it, independent review). The operator's frames list it. An id the held write's query carried is never reported as
+  made (`sentCarries`). An ad-hoc plan's writes go to the start **without** a `query` key (`AdhocPlanWrite`: the server's
+  strict parser refuses even `query: null`; Codex review), tested by a round trip through the server's parser.
 - **The card** (`browserSkillWriteLine`, the member's plan card and the admin's 「Skill の承認」):
   「/api/labels?return（アドレスの ? のあとが「return」とまったく同じときだけ） に送る（作る・保存する）：1回まで」; the result
   card's line is `POST /api/labels?return`.
