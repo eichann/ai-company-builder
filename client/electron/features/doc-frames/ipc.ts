@@ -4,8 +4,11 @@
 //                  中身): main keeps where its document was scrolled for its next open in this window
 //   docView:setBounds (viewId, bounds | null) → placed over the tab and shown, or hidden (and muted)
 //   docView:setZoom (viewId, factor) / docView:reload (viewId) → the document's zoom; load it again
+//   docView:review (viewId, review | null) → report the member's selections / draw the comments' marks
+//   docView:findQuote (viewId, index) → scroll to a mark: 'shown' | 'hidden' | 'missing'
 // (main → window: `docView:event`, sent by main.ts: a link the member pressed, a view that went, an
-// app shortcut pressed in it, the internet parts its page wanted — hosts and a count only.)
+// app shortcut pressed in it, the internet parts its page wanted — hosts and a count only —, the text
+// the member selected while reviewing.)
 // Only the main window's own page may ask (not a consultation window, not a frame inside the page),
 // and that is decided before anything is read from the disk. The path goes through the allowed roots.
 // The document's address stays in main: the renderer only ever holds a view id.
@@ -16,7 +19,7 @@ import type { DocViews } from './views'
 
 export interface DocViewsIpcDeps<E> {
   frames: Pick<DocFrames, 'check'>
-  views: Pick<DocViews, 'begin' | 'open' | 'close' | 'place' | 'zoom' | 'reload'>
+  views: Pick<DocViews, 'begin' | 'open' | 'close' | 'place' | 'zoom' | 'reload' | 'review' | 'findQuote'>
   /** The event came from the main window's main frame. */
   fromMainWindow: (event: E) => boolean
 }
@@ -44,5 +47,12 @@ export function registerDocViewsIpc<E extends IpcInvokeEvent>(ipc: IpcRegistrar<
   })
   ipc.handle('docView:reload', (event, viewId) => {
     if (fromMainWindow(event)) views.reload(viewId, event.sender.id)
+  })
+  ipc.handle('docView:review', (event, viewId, review) => {
+    if (fromMainWindow(event)) views.review(viewId, event.sender.id, review)
+  })
+  ipc.handle('docView:findQuote', async (event, viewId, index) => {
+    if (!fromMainWindow(event)) return 'missing'
+    return views.findQuote(viewId, event.sender.id, index)
   })
 }

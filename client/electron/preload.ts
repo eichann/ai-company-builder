@@ -22,6 +22,7 @@ import type { SetWatchChoice } from '../shared/job-proposals'
 import type { RecordsTableQuery } from '../shared/records-table'
 import type { AfterMeetingChange } from '../shared/after-meeting'
 import type { DocViewBounds } from '../shared/doc-frame'
+import type { DocViewReview } from '../shared/doc-review-frame'
 import type { WorkSwitch } from '../shared/work-switches'
 import type { ViewersQuery } from '../shared/viewers'
 import type { InviteSet } from '../shared/minutes-app'
@@ -103,6 +104,8 @@ const api: ElectronAPI = {
   setDocViewBounds: (viewId: number, bounds: DocViewBounds | null) => invoke('docView:setBounds', viewId, bounds),
   setDocViewZoom: (viewId: number, factor: number) => invoke('docView:setZoom', viewId, factor),
   reloadDocView: (viewId: number) => invoke('docView:reload', viewId),
+  setDocViewReview: (viewId: number, review: DocViewReview | null) => invoke('docView:review', viewId, review),
+  findDocViewQuote: (viewId: number, index: number) => invoke('docView:findQuote', viewId, index),
   onDocViewEvent: callback => subscribe('docView:event', callback),
   openManual: (pageId: string, anchor: string | null) => invoke('manual:open', pageId, anchor),
   exportManual: () => invoke('manual:export'),

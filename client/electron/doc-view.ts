@@ -24,11 +24,18 @@
 // (Chromium's own report: DevTools `Audits` issues, read in main through the view's debugger; the
 // page can neither send nor see them) or cancelled by the session's request hook — is handed to the
 // registry (`onBlocked`), which keeps only the host for the band. Nothing is loaded because of it.
+//
+// Review (doc-frame.md "Review in the document view"): the registry runs the app's small review piece
+// in the page's isolated world `REVIEW_WORLD` (its marks' colours a stylesheet main inserts on every
+// page); after the member's real mouse or Shift-key release in the shown view it is told
+// (`onReviewInput`) and pulls the selection. The page gets no channel to the app: nothing it does
+// sends anything, and its synthetic events never reach `input-event`.
 import { BrowserWindow, session, WebContentsView, webContents as allWebContents, type Session, type WebContents } from 'electron'
 import { DOC_SCHEME, docSessionRequestAllowed, docViewNavigationAllowed, docViewOnScreen, docViewShortcutOf, parseDocFrameUrl } from '../shared/doc-frame'
 import { startRefusingProxy } from './browser-window'
 import type { DocViewBounds } from '../shared/doc-frame'
 import type { DocViewHandle, DocViewHooks, DocViewPort } from './features/doc-frames/views'
+import { REVIEW_HIGHLIGHT_CSS, REVIEW_WORLD } from './features/doc-frames/review-world'
 
 /** A focus of the view counts as the member's when a click (or touch) in it came this close to it. */
 export const FOCUS_CLICK_WINDOW_MS = 600
@@ -247,10 +254,15 @@ export function createDocViewShell(options: DocViewShellOptions): DocViewPort {
       blockedReporters.set(id, url => hooks.onBlocked(id, url))
       watchCspRefusals(contents, url => hooks.onBlocked(id, url), log)
       contents.on('did-navigate', () => hooks.onPageStart(id))
+      // The review marks' colours, on every page it loads (an author sheet: Chromium paints no ::highlight from a user sheet).
+      contents.on('dom-ready', () => { if (!contents.isDestroyed()) contents.insertCSS(REVIEW_HIGHLIGHT_CSS).catch(() => {}) })
+      contents.on('did-finish-load', () => hooks.onPageLoaded(id))
       contents.on('input-event', (_event, input) => {
         const at = Date.now()
         if (input.type === 'mouseDown' || input.type === 'touchStart' || input.type === 'gestureTap') lastPointerAt = at
         if (input.type === 'mouseDown' || input.type === 'touchStart' || input.type === 'gestureTap' || input.type === 'keyDown' || input.type === 'rawKeyDown') lastInputAt = at
+        // A selection may have been made (drag, double-click, Shift + arrows): the registry may read it.
+        if (shown && (input.type === 'mouseUp' || (input.type === 'keyUp' && (input.modifiers?.includes('shift') || (input as { keyCode?: string }).keyCode === 'Shift')))) hooks.onReviewInput(id)
       })
       // Only a click made since the view last lost the keyboard counts: after the member went back to
       // the app (the chat, typing), a page reloading or calling focus() must not use an older click.
@@ -357,6 +369,13 @@ export function createDocViewShell(options: DocViewShellOptions): DocViewPort {
         zoom(factor) {
           zoomFactor = factor
           if (!gone) contents.setZoomFactor(factor)
+        },
+        inReviewWorld(code) {
+          if (gone || contents.isDestroyed()) return Promise.resolve(null)
+          return contents.executeJavaScriptInIsolatedWorld(REVIEW_WORLD, [{ code }]).catch(() => null)
+        },
+        releaseKeyboard() {
+          if (!gone && !contents.isDestroyed() && contents.isFocused()) focusApp()
         },
         reload() {
           if (gone || !token) return

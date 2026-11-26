@@ -5,6 +5,11 @@ paths:
   - "client/electron/features/doc-frames/**"
   - "client/tests/doc-frame-*"
   - "client/tests/doc-frame-harness/**"
+  - "client/shared/doc-review-frame.ts"
+  - "client/tests/doc-review-frame.test.ts"
+  - "client/src/features/editor/htmlReview*.ts"
+  - "client/tests/html-review-*"
+  - "client/tests/html-review-demo/**"
   - "client/src/features/editor/htmlViewer*.ts"
   - "client/src/features/editor/docViewSession.ts"
   - "client/src/features/editor/components/HtmlDocumentPane.tsx"
@@ -346,6 +351,69 @@ carrying a secret in its user name reached a local listener). Each document is s
   ［もう一度表示する］ after ［止める］ or a crash) starts with no dismissal (Codex review): ［×］ holds for
   that view's reloads only.
 
+## Review in the document view (owner, 2026-11-26; demo, not merged)
+
+The same document review as Markdown's (`files-and-editor.md` "Document review"): comments on
+selected text, replies, resolved marks, レビュー履歴 and 「変更を確認」, the AI reading the sidecars —
+**the same sidecar files and JSON shapes, unchanged** (`<doc>.html.review.<uuid>.json`,
+`<doc>.html.reply.<key>.json`; `selectedText` is the page's words, `startOffset` / `endOffset` where
+they are in the `.html` file). The sidecars are `.json`: not a served type, so a document's scripts
+can never read its review.
+
+- **Where trust ends.** The renderer and main are trusted; **everything inside the view is not**
+  (the document's scripts own its DOM, its selection and its timing). The app's piece runs in the
+  view page's isolated world `REVIEW_WORLD` (1002; `electron/features/doc-frames/review-world.ts`):
+  its own JavaScript globals, put there by main only (`executeJavaScriptInIsolatedWorld`), never by
+  the document, which shares the DOM with it and nothing else. **The document gets no channel to
+  the app**: no preload, no message, no event the app listens to. Main *pulls*: the shell tells the
+  registry of a real `mouseUp` (or a key release with Shift) in the shown view (`input-event`: a page's
+  synthetic events never arrive there — `onReviewInput`); if that view's own window asked for
+  selections (`docView:review` with `selecting: true`, only while the member reviews), main reads the
+  selection 40 ms later (`READ_SELECTION_CODE`), from that view's main frame only (no other frame
+  exists: `frame-src 'none'`). What comes back is checked (`docReviewSelectionOf`,
+  `client/shared/doc-review-frame.ts`): exactly `{ text, prefix, suffix }`, strings of at most 4,000
+  characters (the piece cuts there), the text cut to 1,000 and the context to 32 characters,
+  whitespace collapsed, control characters and bidi overrides dropped; anything else is ignored. Only
+  then is `{ kind: 'selection', quote }` sent to that view's window, and the keyboard is given back to
+  the app's page (the comment box takes it). One read at a time per view; a review ended meanwhile
+  sends nothing.
+- **What goes into the view**: only each shown comment's quoted text, which occurrence of it, and
+  whether it is resolved (`docViewReviewOf`: at most 500 quotes, checked shape) — never a comment's
+  body, a name, an email or an id. Marks are the CSS Custom Highlight API (`CSS.highlights`; the DOM
+  is not changed, so a page that re-renders itself is not broken) coloured by a stylesheet main
+  inserts on every page (`REVIEW_HIGHLIGHT_CSS`, an author sheet: measured on Electron 45, Chromium
+  paints no `::highlight` from a user sheet). The page can see and remove the marks — its own words,
+  on itself.
+- **Pages that rewrite themselves** (tabs, charts): marks are drawn again after every load and after
+  every member click in the view. A click on a comment (`docView:findQuote(viewId, index)`, an index of
+  the marks main holds) finds the quote again in the page as it is now, scrolls it to the middle and
+  makes it flash (`shown`), or the pane says 「この部分はいま隠れています…」 (`hidden`: in a closed tab, a
+  folded part) / 「この部分はいまの表示では見つかりません…」 (`missing`); anything else the page answers
+  counts as `missing`.
+- **Finding a quote** (`src/features/editor/htmlReview.ts`, pure): the page's words read from the file
+  without running anything (tags and comments out, entities read; the title, styles, scripts,
+  templates, `noscript`, text areas not words of the page — the piece's walk skips the same, so
+  "the n-th occurrence" means the same on both sides), compared **without whitespace** (`<td>前年比</td>
+  <td>120%</td>` shows as 「前年比 120%」). At comment time the occurrence whose surrounding words match the
+  selection's prefix / suffix is stored as `startOffset` / `endOffset`; the view draws the occurrence
+  nearest that offset (`htmlQuoteNth`). 「位置不明」: doc-review's `markOrphanedComments` with the HTML
+  finder (`htmlQuoteFinder`, a `QuoteFinder` port handed in by the editor's `useEditorReview`; scripts'
+  words count there — a chart's labels are written in its script). 「変更を確認」 compares the page's
+  words a line per block (`htmlReadableText`), not the HTML.
+- **On screen** (`HtmlDocumentPane`): the review's banners above the toolbar, ［レビュー履歴］ and
+  ［レビューする］ in it, the side panel beside the document, the comment box **over the side panel,
+  never over the document** (the view is drawn above the page), 「変更を確認」 in place of the document
+  (its view closes meanwhile). doc-review's components and hook as they are; doc-review imports
+  nothing of the viewer.
+- **Not protected (honestly)**: the document can change what is selected at the moment the member
+  releases the mouse (its scripts can set the selection), so the quote in the comment box may be words
+  the member did not select — the box shows the quote before anything is saved, and a quote is at most
+  1,000 characters of the document's own text. It can also hide or move its marks on itself.
+- Demo: `cd client && node tests/html-review-demo/run.mjs` (real Electron, real views, a fictional
+  company folder; `--shots <dir>` plays the scenario and writes screenshots). Not yet in the
+  real-Electron test (`doc-frame-electron.test.ts`): the isolated world's code hidden from the page,
+  synthetic events reading nothing — to add before the PR.
+
 ## The CSP: one policy object (`docFramePolicy` → `docFrameCsp`)
 
 `default-src 'none'`; `script-src` the grant's origin + `'unsafe-inline'` (the owner's decision;
@@ -470,6 +538,12 @@ hosts, and nothing else):
   new tally, the scheme / host rule, dedupe, both caps, the interval, the cancel on close, the
   editor's 中身 → 見る, the dismissed hosts, the chat row's state / failure / tool / folder / segment
   checks. Kept on purpose: the request hook's report (no request reaches it past the CSP today).
+- Review (above): `tests/doc-review-frame.test.ts` — the selection's and the marks' shapes and caps, a
+  selection only to its own window, only while selecting, only in shape, not after the review ended,
+  the page not even asked when not selecting, nothing but quotes into the page, marks again after a
+  load, `docView:review` / `findQuote` main-window-only and only an index set; `htmlReview.test.ts` —
+  across tags / spaces / entities, the occurrence by its context, the n-th as the view counts it, 位置不明,
+  the readable text; `doc-review/model.test.ts` — the finder port. Mutation-checked.
 - `ipc-window-links.test.ts` (privileges; the app's session does not serve `acb-doc`),
   `ipc-path-guard.test.ts` (`docView:open` from the main frame reaches the allowed roots),
   `ipc-contract.test.ts`.

@@ -311,6 +311,8 @@ function fakeShell(options: { fail?: boolean; hold?: boolean } = {}) {
         place: bounds => { calls.push([id, 'place', bounds]) },
         zoom: factor => { calls.push([id, 'zoom', factor]) },
         reload: () => { calls.push([id, 'reload']) },
+        inReviewWorld: async () => null,
+        releaseKeyboard: () => {},
       }
     },
   }

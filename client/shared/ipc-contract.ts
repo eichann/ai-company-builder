@@ -61,6 +61,7 @@ import type { MailAttachmentOpenResult, MailAwaitReply, MailDraftEdit, OutboundM
 import type { AppCommandAnswer, AppCommandRequest } from './app-commands'
 import type { CompanyFolderKind } from './company-folder'
 import type { DocViewBounds, DocViewEvent, DocViewOpenResult } from './doc-frame'
+import type { DocQuoteFound, DocViewReview } from './doc-review-frame'
 import type { ManualExportResult, ManualOpenResult } from './manual'
 // Lanes (ipc-and-main-process.md "Lane markers"): add only right under your lane's ▼.
 // lane A ▼
@@ -528,6 +529,13 @@ export interface IpcInvokeChannels {
   'docView:setZoom': { args: [viewId: number, factor: number]; result: void }
   /** Load the document again (its file changed on disk). */
   'docView:reload': { args: [viewId: number]; result: void }
+  /**
+   * Reviewing the document (doc-frame.md "Review in the document view"): whether the view reports the
+   * member's selections, and the comments' marks it draws (quoted text only); null: neither.
+   */
+  'docView:review': { args: [viewId: number, review: DocViewReview | null]; result: void }
+  /** Scroll to the review's `index`-th mark and make it flash: shown, there but hidden now, or not there. */
+  'docView:findQuote': { args: [viewId: number, index: number]; result: DocQuoteFound }
   /**
    * The user manual (files-and-editor.md "The user manual"): its page (and heading) in a document view
    * of its own, from this computer's copy of the server's manual (refreshed first when the server
@@ -1070,6 +1078,8 @@ export interface ElectronAPI {
   setDocViewBounds: Invoke<'docView:setBounds'>
   setDocViewZoom: Invoke<'docView:setZoom'>
   reloadDocView: Invoke<'docView:reload'>
+  setDocViewReview: Invoke<'docView:review'>
+  findDocViewQuote: Invoke<'docView:findQuote'>
   onDocViewEvent: Subscribe<'docView:event'>
   openManual: Invoke<'manual:open'>
   exportManual: Invoke<'manual:export'>

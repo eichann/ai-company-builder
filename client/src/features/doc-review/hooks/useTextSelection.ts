@@ -48,15 +48,5 @@ export function useTextSelection(
     window.getSelection()?.removeAllRanges()
   }, [])
 
-  useEffect(() => {
-    if (!popover) return
-    const handler = (e: MouseEvent) => {
-      const target = e.target as HTMLElement
-      if (target.closest('.fixed.z-50')) return
-    }
-    document.addEventListener('mousedown', handler)
-    return () => document.removeEventListener('mousedown', handler)
-  }, [popover])
-
   return { popover, handleMouseUp, handleSubmitComment, closePopover }
 }

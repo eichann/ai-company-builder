@@ -5,12 +5,17 @@ import { useMarkdownReview } from '../../doc-review/hooks/useMarkdownReview'
 import { useTextSelection } from '../../doc-review/hooks/useTextSelection'
 import { markReviewSeen } from '../../doc-review/model'
 import { useAuthStore } from '../../../stores/authStore'
-import { isMarkdownFile } from '../fileKinds'
+import { isHtmlFile, isMarkdownFile } from '../fileKinds'
+import { htmlQuoteFinder } from '../htmlReview'
 
-/** The review of the active Markdown file, the text selection that starts a comment, and its 「seen」 mark. */
+/**
+ * The review of the active document (Markdown, or HTML in its view), the text selection that starts a
+ * comment in a Markdown preview, and its 「seen」 mark. An HTML document's quotes are its page's words.
+ */
 export function useEditorReview(activeFilePath: string | null, content: string) {
   const authUser = useAuthStore(state => state.user)
-  const review = useMarkdownReview(activeFilePath, authUser?.name || 'Anonymous', authUser?.email || '', authUser?.id)
+  const html = !!activeFilePath && isHtmlFile(activeFilePath)
+  const review = useMarkdownReview(activeFilePath, authUser?.name || 'Anonymous', authUser?.email || '', authUser?.id, html ? htmlQuoteFinder : undefined)
   const textSelection = useTextSelection(
     review.isReviewing,
     content,
@@ -19,7 +24,7 @@ export function useEditorReview(activeFilePath: string | null, content: string) 
 
   // Mark reviews as seen when user opens a file with reviews
   useEffect(() => {
-    if (!activeFilePath || !isMarkdownFile(activeFilePath)) return
+    if (!activeFilePath || !(isMarkdownFile(activeFilePath) || isHtmlFile(activeFilePath))) return
     if (review.reviews.length === 0 && !review.loading) return
     if (review.loading) return
     // Reconstruct review file names from review IDs

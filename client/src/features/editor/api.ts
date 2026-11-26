@@ -18,9 +18,10 @@ export type EditorRefusals = ElectronPort<'reservedPathRefusal'>
  * file in a view of its own (its own session, no network) and hands back only
  * the view's id; the viewer places it over the tab (null hides it), zooms and
  * reloads it; closing it revokes the document's grant. Main tells the window
- * about a link the member pressed in it, or a view that went by itself.
+ * about a link the member pressed in it, or a view that went by itself. While the document is reviewed,
+ * main reports the text the member selects in it and draws the comments' marks (quoted text only).
  */
-export type DocViewControls = ElectronPort<'openDocView' | 'closeDocView' | 'setDocViewBounds' | 'setDocViewZoom' | 'reloadDocView' | 'onDocViewEvent'>
+export type DocViewControls = ElectronPort<'openDocView' | 'closeDocView' | 'setDocViewBounds' | 'setDocViewZoom' | 'reloadDocView' | 'onDocViewEvent' | 'setDocViewReview' | 'findDocViewQuote'>
 
 /** Opening a link of a document in the member's browser, after they said yes. */
 export type DocLinkOutbound = ElectronPort<'openExternal'>

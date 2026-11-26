@@ -15,6 +15,8 @@
  * the same time cannot pass it.
  */
 import { createHash } from 'node:crypto'
+import { docQuoteFoundOf, docReviewSelectionOf, docViewReviewOf, type DocQuoteFound, type DocViewReview } from '../../../shared/doc-review-frame'
+import { drawQuotesCode, findQuoteCode, READ_SELECTION_CODE } from './review-world'
 import { blockedWebHost, docViewBounds, docZoomFactor, DOC_BLOCKED_HOSTS_MAX, DOC_BLOCKED_PARTS_MAX, type DocViewBounds, type DocViewEvent } from '../../../shared/doc-frame'
 import { webLinkForBrowser } from '../../external-url'
 import type { KeyInput } from '../../../shared/commands/define'
@@ -45,6 +47,13 @@ export interface DocViewHandle {
   zoom(factor: number): void
   /** Load the document again (its file changed on disk). */
   reload(): void
+  /**
+   * Run one of the review piece's calls (`review-world.ts`) in the page's isolated world and answer
+   * its value (untrusted: the caller checks it), or null when the page could not answer.
+   */
+  inReviewWorld(code: string): Promise<unknown>
+  /** The keyboard back to the app's page if the document has it (the comment box wants it). */
+  releaseKeyboard(): void
 }
 
 /** What the shell tells the registry about one view. */
@@ -63,6 +72,13 @@ export interface DocViewHooks {
   onBlocked(viewId: number, url: string): void
   /** Its page (re)loaded: a new page, a new tally of blocked parts. */
   onPageStart(viewId: number): void
+  /** Its page finished loading (the review's marks are drawn again). */
+  onPageLoaded(viewId: number): void
+  /**
+   * The member let go of the mouse, or of a key with Shift, in the shown view: a real input (a
+   * page's synthetic events never come here), so a selection may have been made.
+   */
+  onReviewInput(viewId: number): void
 }
 
 export interface DocViewPort {
@@ -106,6 +122,9 @@ export interface DocViewsDeps {
   later?: (fn: () => void, ms: number) => () => void
 }
 
+/** After the member's input, the selection is read this much later (the page settles it first). */
+export const SELECTION_READ_DELAY_MS = 40
+
 /** What one view's page wanted from the internet so far (main only; the window gets hosts and a count). */
 interface BlockedTally {
   /** Different addresses (never sent): what `count` counts, each kept as its SHA-256 (44 characters, however long the address). */
@@ -142,10 +161,24 @@ export function createDocViews(deps: DocViewsDeps) {
   /** Window → how many times its page reset (reloaded, crashed, closed). */
   const generations = new Map<number, number>()
   const generationOf = (windowId: number) => generations.get(windowId) ?? 0
+  /**
+   * View id → what its window asked the view to do for the review (report selections, draw marks).
+   * Kept here so a reload or the page's own next page draws the marks again.
+   */
+  const reviews = new Map<number, DocViewReview>()
+  /** Views whose selection is being read (one read at a time per view). */
+  const reading = new Set<number>()
+  const drawMarks = (viewId: number) => {
+    const view = views.get(viewId)
+    const review = reviews.get(viewId)
+    if (view && review) void view.handle.inReviewWorld(drawQuotesCode(review.quotes)).catch(() => {})
+  }
 
   const forget = (viewId: number) => {
     views.delete(viewId)
     lastLink.delete(viewId)
+    reviews.delete(viewId)
+    reading.delete(viewId)
     blocked.get(viewId)?.cancel?.()
     blocked.delete(viewId)
     deps.frames.revoke(viewId)
@@ -211,6 +244,29 @@ export function createDocViews(deps: DocViewsDeps) {
       tally.hosts = []
       tally.dirty = tally.told
       tellBlocked(viewId)
+    },
+    onPageLoaded(viewId) {
+      drawMarks(viewId)
+    },
+    onReviewInput(viewId) {
+      const view = views.get(viewId)
+      const review = reviews.get(viewId)
+      if (!view || !review) return
+      // A page that rewrites itself (its tabs, a chart) dropped the marks of what it replaced.
+      if (review.quotes.length > 0) later(() => drawMarks(viewId), SELECTION_READ_DELAY_MS)
+      if (!review.selecting || reading.has(viewId)) return
+      reading.add(viewId)
+      later(() => {
+        void view.handle.inReviewWorld(READ_SELECTION_CODE).then(value => {
+          reading.delete(viewId)
+          // Still this view, still reviewing: the window gets the checked text only.
+          if (views.get(viewId) !== view || !reviews.get(viewId)?.selecting) return
+          const quote = docReviewSelectionOf(value)
+          if (!quote) return
+          deps.notify?.(view.windowId, { viewId, kind: 'selection', quote })
+          view.handle.releaseKeyboard()
+        }, () => { reading.delete(viewId) })
+      }, SELECTION_READ_DELAY_MS)
     },
   }
   /** The view, when `windowId` holds it. */
@@ -300,6 +356,33 @@ export function createDocViews(deps: DocViewsDeps) {
     /** Load the document again; only its own window may. */
     reload(viewId: unknown, windowId: number): void {
       own(viewId, windowId)?.handle.reload()
+    },
+
+    /**
+     * What the view does for the review (`null`: nothing, its marks cleared); only its own window may,
+     * and only in the checked shape (`docViewReviewOf`; anything else is ignored).
+     */
+    review(viewId: unknown, windowId: number, review: unknown): void {
+      const view = own(viewId, windowId)
+      if (!view) return
+      const id = viewId as number
+      if (review === null) {
+        if (reviews.has(id)) void view.handle.inReviewWorld(drawQuotesCode([])).catch(() => {})
+        reviews.delete(id)
+        return
+      }
+      const checked = docViewReviewOf(review)
+      if (!checked) return
+      reviews.set(id, checked)
+      drawMarks(id)
+    },
+
+    /** Scroll to the review's `index`-th mark (as last set) and make it flash; only its own window may. */
+    async findQuote(viewId: unknown, windowId: number, index: unknown): Promise<DocQuoteFound> {
+      const view = own(viewId, windowId)
+      const quote = view && typeof index === 'number' && Number.isInteger(index) ? reviews.get(viewId as number)?.quotes[index] : undefined
+      if (!view || !quote) return 'missing'
+      return docQuoteFoundOf(await view.handle.inReviewWorld(findQuoteCode(quote)).catch(() => null))
     },
   }
 }

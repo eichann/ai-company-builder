@@ -5,6 +5,8 @@ import {
   replyFileKey,
   markOrphanedComments,
   mergeRepliesIntoReviews,
+  quoteAsWritten,
+  type QuoteFinder,
   type CommentReply,
   type CommentSeverity,
   type ResolutionEntry,
@@ -33,7 +35,11 @@ export interface ReviewSaveFailure {
   retry?: () => void
 }
 
-export function useMarkdownReview(filePath: string | null, reviewerName: string, reviewerEmail: string, memberId?: string | null) {
+/**
+ * `findQuote`: how this kind of document tells whether a quote is still in it (「位置不明」); Markdown's
+ * as written by default, the HTML viewer hands its own (the words of the page, without its tags).
+ */
+export function useMarkdownReview(filePath: string | null, reviewerName: string, reviewerEmail: string, memberId?: string | null, findQuote: QuoteFinder = quoteAsWritten) {
   const [reviews, setReviews] = useState<Review[]>([])
   const [activeReview, setActiveReview] = useState<Review | null>(null)
   const [loading, setLoading] = useState(false)
@@ -67,7 +73,7 @@ export function useMarkdownReview(filePath: string | null, reviewerName: string,
 
       // Opening a document only reads: 「位置不明」 is computed here, and completed
       // reviews stay (all resolved too) because members fix the document from them.
-      const cleaned = markOrphanedComments(allReviews, docContent)
+      const cleaned = markOrphanedComments(allReviews, docContent, findQuote)
 
       setReviews(prev => {
         if (JSON.stringify(prev) === JSON.stringify(cleaned)) return prev
@@ -106,7 +112,7 @@ export function useMarkdownReview(filePath: string | null, reviewerName: string,
     } finally {
       if (seq === loadSeqRef.current) setLoading(false)
     }
-  }, [reviewerEmail])
+  }, [reviewerEmail, findQuote])
 
   useEffect(() => {
     setSaveError(null)

@@ -373,7 +373,8 @@ the result, disable their buttons meanwhile and show the reason (`role="alert"`)
 
 ## Document review (`src/features/doc-review/`, shown inside `TabbedEditorPanel`)
 
-A Markdown preview can be reviewed: comments on selected text, replies, resolved marks. Everything
+A Markdown preview — and an HTML document in its view (`doc-frame.md` "Review in the document
+view", same files and shapes) — can be reviewed: comments on selected text, replies, resolved marks. Everything
 lives in sidecar files next to the document, one writer per file so teammates never conflict in
 git. These names and JSON shapes are stored in company folders and read by every member's app
 and by the AI: **do not change them by one character** (no renamed key, no reordered key).
@@ -391,7 +392,8 @@ and by the AI: **do not change them by one character** (no renamed key, no reord
   (`request_review`, `client/shared/review-request.ts`).
 - **Opening or viewing a document never writes or deletes a sidecar** (owner, 2026-10-29: members
   fix the document from the reviews, so everyone must still be able to read them). 「位置不明」 is
-  computed in memory (`markOrphanedComments`); completed reviews stay even when all comments are
+  computed in memory (`markOrphanedComments`, with the document kind's `QuoteFinder`: Markdown as
+  written, HTML its page's words); completed reviews stay even when all comments are
   resolved and remain in レビュー履歴. Only the reviewer's own actions write their review file;
   replies and resolved marks go to the member's own reply file.
 - Saving (`api.ts`): every sidecar write goes to `.<name>.acb-tmp-<random>` next to it

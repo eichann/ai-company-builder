@@ -167,16 +167,27 @@ export function mergeReviewEdits(base: Review, onDisk: Review, mine: Review): Re
 }
 
 /**
+ * How a kind of document tells whether a comment's quoted text is still in it, from the file's
+ * text: prepared once per document, then asked per comment. A Markdown document: as written
+ * (`quoteAsWritten`); another kind (an HTML page, whose file has tags between the words) hands its own.
+ */
+export type QuoteFinder = (documentText: string) => (quote: string) => boolean
+
+export const quoteAsWritten: QuoteFinder = documentText => quote => documentText.includes(quote)
+
+/**
  * For display only: a completed review's comment is 「位置不明」 (`orphaned`) when
  * its text is no longer in the document. Never written back — members fix the
  * document from these reviews, so opening one must not change anyone's file.
  * Unknown document text (it could not be read) keeps what the file says.
  */
-export function markOrphanedComments(reviews: Review[], documentText: string | null): Review[] {
+export function markOrphanedComments(reviews: Review[], documentText: string | null, findQuote: QuoteFinder = quoteAsWritten): Review[] {
   if (documentText === null) return reviews
+  if (!reviews.some(r => r.status === 'completed')) return reviews
+  const has = findQuote(documentText)
   return reviews.map(review => review.status !== 'completed' ? review : {
     ...review,
-    comments: review.comments.map(c => ({ ...c, orphaned: !documentText.includes(c.selectedText) })),
+    comments: review.comments.map(c => ({ ...c, orphaned: !has(c.selectedText) })),
   })
 }
 

@@ -8,6 +8,7 @@
  * and attaches the area with a callback ref, so no effect is needed.
  */
 import { DOC_ZOOM_STEPS, type DocBlockedParts, type DocViewBounds, type DocViewEvent } from '../../../shared/doc-frame'
+import type { DocQuoteFound, DocReviewSelection, DocViewReview } from '../../../shared/doc-review-frame'
 import { handleKeyAt } from '../../shared/commands/commands'
 import { subscribeFileChanges } from '../../shared/lib/fileEvents'
 import type { DocLinkOutbound, DocViewControls } from './api'
@@ -55,6 +56,8 @@ export interface DocViewSnapshot {
   blocked: DocBlockedParts | null
   /** The band shows: something was blocked and not all of it dismissed (`blockedBandShown`). */
   bandShown: boolean
+  /** The text the member selected in it while reviewing (`seq` tells one selection from the next), until used or dropped. */
+  selection: (DocReviewSelection & { seq: number }) | null
 }
 
 /** Several file events of one write (temp file, rename, its styles) reload once. */
@@ -65,7 +68,10 @@ const MUTATION_CHECK_MS = 100
 const WATCHED_ATTRIBUTES = ['class', 'style', 'hidden', 'open', 'aria-hidden', 'data-state']
 
 export class DocViewSession {
-  private snapshot: DocViewSnapshot = { status: { kind: 'opening' }, zoom: 1, fullScreen: false, refreshed: false, link: null, blocked: null, bandShown: false }
+  private snapshot: DocViewSnapshot = { status: { kind: 'opening' }, zoom: 1, fullScreen: false, refreshed: false, link: null, blocked: null, bandShown: false, selection: null }
+  /** What the view does for the review (reports selections, draws marks): sent again to every new view. */
+  private review: DocViewReview | null = null
+  private selectionSeq = 0
   /** Hosts the member dismissed the band for (［×］), while this tab shows the document. */
   private dismissed: DismissedParts | null = null
   private listeners = new Set<() => void>()
@@ -168,7 +174,7 @@ export class DocViewSession {
     const generation = ++this.generation
     // A new view (also ［もう一度表示する］ after ［止める］ or a crash): a new band; ［×］ holds for its reloads only.
     this.dismissed = null
-    this.set({ status: { kind: 'opening' }, link: null, blocked: null, bandShown: false })
+    this.set({ status: { kind: 'opening' }, link: null, blocked: null, bandShown: false, selection: null })
     const result = await this.source.open().catch(() => null)
     if (generation !== this.generation) {
       // Another tab, 中身 or ［止める］ came first: this view is nobody's.
@@ -186,6 +192,7 @@ export class DocViewSession {
     this.viewId = result.viewId
     this.placed = null
     if (this.snapshot.zoom !== 1) void this.views.setDocViewZoom(result.viewId, this.snapshot.zoom).catch(() => {})
+    if (this.review) void this.views.setDocViewReview(result.viewId, this.review).catch(() => {})
     this.set({ status: { kind: 'shown', covered: false } })
     this.schedule()
   }
@@ -244,10 +251,14 @@ export class DocViewSession {
       this.set({ blocked, bandShown: blockedBandShown(blocked, this.dismissed) })
       return
     }
+    if (event.kind === 'selection') {
+      if (this.review?.selecting) this.set({ selection: { ...event.quote, seq: ++this.selectionSeq } })
+      return
+    }
     if (event.kind === 'gone') {
       this.viewId = null
       this.placed = null
-      this.set({ status: { kind: 'gone' }, link: null, blocked: null, bandShown: false })
+      this.set({ status: { kind: 'gone' }, link: null, blocked: null, bandShown: false, selection: null })
     } else if (this.snapshot.link === null) {
       this.set({ link: event.url })
     }
@@ -265,6 +276,28 @@ export class DocViewSession {
     }, RELOAD_DELAY_MS)
   }
 
+  /**
+   * What the view does for the review: report the member's selections (only while reviewing) and draw
+   * these marks. Sent when it changed, and again to each new view (another tab and back, a restart).
+   */
+  setReview(review: DocViewReview | null) {
+    if (JSON.stringify(review) === JSON.stringify(this.review)) return
+    this.review = review
+    if (!review?.selecting && this.snapshot.selection) this.set({ selection: null })
+    if (this.viewId !== null) void this.views.setDocViewReview(this.viewId, review).catch(() => {})
+  }
+
+  /** Scroll the document to the review's `index`-th mark: whether it is there now (`missing` with no view). */
+  findQuote(index: number): Promise<DocQuoteFound> {
+    if (this.viewId === null) return Promise.resolve('missing')
+    return this.views.findDocViewQuote(this.viewId, index).catch(() => 'missing' as const)
+  }
+
+  /** The selection was used (a comment) or dropped (the box closed). */
+  clearSelection() {
+    if (this.snapshot.selection) this.set({ selection: null })
+  }
+
   /** ［×］ on the band: hidden until the page wants a host not dismissed yet. */
   dismissBand() {
     const shown = this.snapshot.blocked
@@ -277,7 +310,7 @@ export class DocViewSession {
     this.generation++
     this.closeView()
     if (this.snapshot.fullScreen) this.setFullScreen(false)
-    this.set({ status: { kind: 'stopped' }, link: null, blocked: null, bandShown: false })
+    this.set({ status: { kind: 'stopped' }, link: null, blocked: null, bandShown: false, selection: null })
   }
 
   restart() {
