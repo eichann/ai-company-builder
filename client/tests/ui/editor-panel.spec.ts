@@ -1,6 +1,8 @@
 // The editor panel's own behaviour (tests/editor-tabs-ui.tsx?view=tabs): tabs,
 // saving, the Markdown preview and its shortcuts, images and PDFs. External
 // changes: editor-tabs.spec.ts; reviews inside the preview: doc-review.spec.ts.
+import fs from 'node:fs'
+import path from 'node:path'
 import { test, expect, type Page } from '@playwright/test'
 import { expectNoPageErrors, openPreview } from './helpers'
 
@@ -215,6 +217,50 @@ test('an image and a PDF show as such, and say so when they cannot be read', asy
   await expect(editor(page)).toHaveCount(0)
   await tab(page, `${ROOT}/営業部/契約書.pdf`).click()
   await expect(page.getByText('PDFを表示できません（削除されたか、読み込めません）')).toBeVisible()
+})
+
+/**
+ * Videos load from `acb-media://`, the app's own scheme (main streams them): the browser here has
+ * none, so the page's video addresses are pointed at a route that answers with the fixture's bytes.
+ */
+async function serveVideos(page: Page, files: Record<string, string>) {
+  await page.addInitScript(() => {
+    const toRoute = (value: string) => value.startsWith('acb-media://video/')
+      ? `/__acb-media/${encodeURIComponent(decodeURIComponent(value.slice('acb-media://video/'.length).split('?')[0]).split('/').pop() ?? '')}`
+      : value
+    const setAttribute = Element.prototype.setAttribute
+    Element.prototype.setAttribute = function (name: string, value: string) {
+      return setAttribute.call(this, name, this instanceof HTMLMediaElement && name === 'src' ? toRoute(String(value)) : value)
+    }
+    const src = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, 'src')!
+    Object.defineProperty(HTMLMediaElement.prototype, 'src', { ...src, set(value: string) { src.set!.call(this, toRoute(String(value))) } })
+  })
+  await page.route('**/__acb-media/**', route => {
+    const name = decodeURIComponent(new URL(route.request().url()).pathname.split('/').pop() ?? '')
+    const fixture = files[name]
+    return fixture
+      ? route.fulfill({ status: 200, contentType: 'video/mp4', body: fs.readFileSync(path.join(import.meta.dirname, '..', 'fixtures', 'video', fixture)) })
+      : route.fulfill({ status: 404 })
+  })
+}
+
+test('a video opens in a player with its controls and never starts by itself; one the player cannot read offers another app', async ({ page }) => {
+  await serveVideos(page, { '研修.mp4': 'vp9.mp4', '素材.mov': 'prores.mov' })
+  const state = await open(page)
+  await tab(page, `${ROOT}/営業部/研修.mp4`).click()
+  const video = page.locator('video')
+  await expect(video).toHaveAttribute('controls', '')
+  await expect(video).toHaveAttribute('aria-label', '研修.mp4')
+  await expect.poll(() => video.evaluate((v: HTMLVideoElement) => v.readyState)).toBeGreaterThanOrEqual(1)
+  expect(await video.evaluate((v: HTMLVideoElement) => ({ autoplay: v.autoplay, paused: v.paused, duration: v.duration }))).toEqual({ autoplay: false, paused: true, duration: 1 })
+  await expect(editor(page)).toHaveCount(0)
+
+  await tab(page, `${ROOT}/営業部/素材.mov`).click()
+  await expect(page.getByText('この動画はアプリの中では再生できません（動画の形式が対応していないか、ファイルが読み込めません）。')).toBeVisible()
+  await expect(page.locator('video')).toHaveCount(0)
+  await page.getByRole('button', { name: 'ほかのアプリで開く' }).click()
+  await expect.poll(() => page.evaluate(() => (window as unknown as { __acbOpened: string[] }).__acbOpened)).toEqual([`video:${ROOT}/営業部/素材.mov`])
+  expectNoPageErrors(state)
 })
 
 const closeAnswers = (page: Page) => page.evaluate(() => (window as unknown as { __acbCloseAnswers: string[] }).__acbCloseAnswers)

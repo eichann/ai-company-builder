@@ -1,20 +1,12 @@
 import { useCallback, useState } from 'react'
 import { boundaryCrossing, crossingMessage } from '../../../../shared/private-folder-ui'
-import { droppedFilePath, getStats, moveFromExternal, moveItem, startDrag } from '../api'
+import { copyFromExternal, droppedFilePath, getStats, moveItem, startDrag } from '../api'
 import type { FileEntry, FileTreeModel } from '../fileTreeModel'
 import { FILE_PATHS_DRAG_TYPE, FILE_TREE_EFFECT_ALLOWED } from '../../../shared/lib/dragTypes'
+import { dropRefusal } from '../../../../shared/file-drop'
 import type { SetSelectedPaths } from './useTreeSelection'
 import type { usePrivateFolders } from './usePrivateFolders'
 
-// What a Finder drop may bring in. The only list: main's fs:moveFromExternal
-// checks the destination, not the type. HTML is shown in the sandboxed
-// document view (doc-frame.md), so it is allowed like any other document.
-const ALLOWED_DROP_EXTENSIONS = new Set([
-  'png', 'jpg', 'jpeg', 'gif', 'webp', 'svg',
-  'md', 'txt', 'csv', 'pdf', 'docx', 'xlsx', 'pptx', 'html', 'htm',
-  'json', 'yaml', 'yml',
-])
-const MAX_DROP_FILE_SIZE = 20 * 1024 * 1024 // 20MB
 const INTERNAL_PATHS = FILE_PATHS_DRAG_TYPE
 
 const parentDir = (p: string) => p.substring(0, p.lastIndexOf('/'))
@@ -58,7 +50,7 @@ interface Deps {
 
 /**
  * Drag & drop: moves inside the tree (confirmed when they cross a private
- * folder's edge), files dropped from Finder, and Alt-drag out to other apps.
+ * folder's edge), files dropped from Finder (copied in), and Alt-drag out to other apps.
  */
 export function useTreeDragDrop({ model, privateFolders, selectedPathsRef, setSelectedPaths, showChangeIn, refusePrivateRoot, refuseReserved, warn }: Deps) {
   const [dragOverPath, setDragOverPath] = useState<string | null>(null)
@@ -67,36 +59,32 @@ export function useTreeDragDrop({ model, privateFolders, selectedPathsRef, setSe
 
   const dropFromOutside = useCallback(async (fileList: FileList, destDir: string) => {
     const warnings: string[] = []
-    let moved = 0
+    let added = 0
 
     for (const file of Array.from(fileList)) {
       const sourcePath = droppedFilePath(file)
       if (!sourcePath) continue
 
-      // Extension and size validation (skip for entries without extension — likely folders)
-      const ext = file.name.includes('.') ? file.name.split('.').pop()?.toLowerCase() : ''
-      if (ext) {
-        if (!ALLOWED_DROP_EXTENSIONS.has(ext)) {
-          warnings.push(`${file.name}: 非対応の形式`)
-          continue
-        }
-        if (file.size > MAX_DROP_FILE_SIZE) {
-          warnings.push(`${file.name}: 20MBを超えています`)
-          continue
-        }
+      // The type and size rule (client/shared/file-drop.ts) said here per file; main decides again.
+      // An entry without an extension is likely a folder, which a File cannot tell.
+      const refused = file.name.lastIndexOf('.') > 0 ? dropRefusal(file.name, { isDirectory: false, size: file.size }) : null
+      if (refused) {
+        warnings.push(`${file.name}: ${refused}`)
+        continue
       }
 
+      // A copy: the original (a camera's card, the Desktop) is never touched.
       const destPath = await resolveUniquePath(destDir, file.name)
-      const result = await moveFromExternal(sourcePath, destPath)
+      const result = await copyFromExternal(sourcePath, destPath)
       if (result.success) {
-        moved++
+        added++
       } else {
-        warnings.push(`${file.name}: ${result.error || '移動に失敗'}`)
+        warnings.push(`${file.name}: ${result.error || '取り込めませんでした'}`)
       }
     }
 
     if (warnings.length > 0) warn(warnings.join('\n'), 5000)
-    if (moved > 0) void showChangeIn(destDir)
+    if (added > 0) void showChangeIn(destDir)
   }, [showChangeIn, warn])
 
   // Public → private: their past versions stay in everyone's history;

@@ -17,6 +17,7 @@ import path from 'node:path'
 import { git, loadMain, writeFiles, type MainHarness } from './ipc-harness/main-harness.ts'
 import { writePrivateScopesCache } from '../electron/sync/private-folders'
 import { notDownloadedUserMessage } from '../shared/sparse-paths'
+import { localVideoUrl } from '../shared/video-files'
 
 let h: MainHarness
 let root: string
@@ -63,7 +64,7 @@ test('every path-taking fs handler refuses paths outside the allowed roots, with
     ['fs:copy', t => [t, path.join(root, 'stolen.txt')], err],
     ['fs:copy', t => [inside, t], err],
     // The source of a Finder drop is outside by design; only the destination is checked.
-    ['fs:moveFromExternal', t => [inside, t], err],
+    ['fs:copyFromExternal', t => [inside, t], err],
     ['fs:watch', t => [path.dirname(t)], err],
     ['fs:unwatch', t => [path.dirname(t)], err],
     ['env:status', t => [path.dirname(t)], err],
@@ -71,8 +72,10 @@ test('every path-taking fs handler refuses paths outside the allowed roots, with
     ['editor:backupBeforeOverwrite', t => [path.dirname(t), t], err],
     ['editor:backupBeforeOverwrite', t => [root, t], err],
     ['privateFolders:reservedPathRefusal', t => [t], null],
+    ['fs:openVideo', t => [t.replace(/\.txt$/, '.mp4')], err],
   ]
   for (const t of targets) {
+    fs.writeFileSync(t.replace(/\.txt$/, '.mp4'), 'video')
     for (const [channel, args, expected] of table) {
       assert.deepEqual(await h.invoke(channel, ...args(t)), expected, `${channel} ${path.relative(h.base, t)}`)
     }
@@ -81,7 +84,9 @@ test('every path-taking fs handler refuses paths outside the allowed roots, with
   // Nothing outside was touched, nothing was pulled in.
   assert.equal(fs.readFileSync(secret, 'utf-8'), 'outside')
   assert.equal(fs.readFileSync(path.join(`${root}-other`, 'x.txt'), 'utf-8'), 'sibling')
-  assert.deepEqual(fs.readdirSync(outside), ['secret.txt'])
+  assert.deepEqual(fs.readdirSync(outside).filter(n => !n.endsWith('.mp4')), ['secret.txt'])
+  assert.deepEqual(h.fake.openedPaths, [], 'no video outside was handed to another app')
+  for (const t of targets) fs.rmSync(t.replace(/\.txt$/, '.mp4'), { force: true })
   assert.equal(fs.existsSync(path.join(root, 'stolen.txt')), false)
   assert.equal(fs.readFileSync(inside, 'utf-8'), 'inside')
 })
@@ -134,7 +139,7 @@ test('symbolic links: judged by their real location — a link leading out of th
     assert.deepEqual(await h.invoke('fs:copy', t, at('stolen.md')), err, where)
     assert.deepEqual(await h.invoke('fs:copy', at('docs', 'a.md'), t), err, where)
     assert.deepEqual(await h.invoke('fs:move', at('docs', 'a.md'), t), err, where)
-    assert.deepEqual(await h.invoke('fs:moveFromExternal', path.join(h.companyDir('finder-links'), 'x.md'), t), err, where)
+    assert.deepEqual(await h.invoke('fs:copyFromExternal', path.join(h.companyDir('finder-links'), 'x.md'), t), err, where)
     assert.deepEqual(await h.invoke('editor:backupBeforeOverwrite', company, t), err, where)
     assert.throws(() => h.send('fs:startDrag', t), { message: LINK_ESCAPE }, where)
   }
@@ -216,7 +221,7 @@ test('a save into a folder that no longer exists fails instead of creating the f
   assert.equal(fs.existsSync(path.join(dir, 'no-such-dir')), false)
 })
 
-test('rename, move and copy bring the whole content along; a file dropped in from outside is moved (the original is gone)', async () => {
+test('rename, move and copy bring the whole content along; a file dropped in from outside is copied (the original stays)', async () => {
   const dir = shapes('move')
   fs.writeFileSync(path.join(dir, 'w.md'), 'written')
   await h.invoke('fs:rename', path.join(dir, 'w.md'), path.join(dir, 'r.md'))
@@ -228,9 +233,72 @@ test('rename, move and copy bring the whole content along; a file dropped in fro
   assert.equal(fs.readFileSync(path.join(dir, 'sub', 'deeper', 'deepest', 'x.md'), 'utf-8'), 'x')
   const dropped = path.join(h.companyDir('finder'), 'drop.md')
   fs.writeFileSync(dropped, 'dropped')
-  await h.invoke('fs:moveFromExternal', dropped, path.join(dir, 'drop.md'))
+  await h.invoke('fs:copyFromExternal', dropped, path.join(dir, 'drop.md'))
   assert.equal(fs.readFileSync(path.join(dir, 'drop.md'), 'utf-8'), 'dropped')
-  assert.equal(fs.existsSync(dropped), false)
+  assert.equal(fs.readFileSync(dropped, 'utf-8'), 'dropped', 'a Finder drop leaves the original where it was')
+})
+
+test('a Finder drop copies: the original file or folder stays, also across volumes (where a rename cannot work)', async () => {
+  // A drop used to rename the original into the company folder, or across volumes copy and then
+  // delete it: a video dropped from a camera's card or the Desktop was gone from there.
+  const dir = shapes('finder-copy')
+  const finder = h.companyDir('finder-copy-src')
+  writeFiles(finder, { 'clip.mov': 'video', 'folder/a.md': 'a', 'folder/sub/b.md': 'b' })
+  const rename = fs.promises.rename
+  // Another volume: every rename across it fails as the OS would say.
+  fs.promises.rename = (async () => { throw Object.assign(new Error('EXDEV: cross-device link not permitted'), { code: 'EXDEV' }) }) as typeof fs.promises.rename
+  try {
+    assert.deepEqual(await h.invoke('fs:copyFromExternal', path.join(finder, 'clip.mov'), path.join(dir, 'clip.mov')), { success: true })
+    assert.deepEqual(await h.invoke('fs:copyFromExternal', path.join(finder, 'folder'), path.join(dir, 'folder')), { success: true })
+  } finally {
+    fs.promises.rename = rename
+  }
+  assert.equal(fs.readFileSync(path.join(dir, 'clip.mov'), 'utf-8'), 'video')
+  assert.equal(fs.readFileSync(path.join(dir, 'folder', 'sub', 'b.md'), 'utf-8'), 'b')
+  assert.equal(fs.readFileSync(path.join(finder, 'clip.mov'), 'utf-8'), 'video')
+  assert.equal(fs.readFileSync(path.join(finder, 'folder', 'a.md'), 'utf-8'), 'a')
+  assert.equal(fs.readFileSync(path.join(finder, 'folder', 'sub', 'b.md'), 'utf-8'), 'b')
+  // Same volume, no stub: still a copy.
+  assert.deepEqual(await h.invoke('fs:copyFromExternal', path.join(finder, 'clip.mov'), path.join(dir, 'clip (1).mov')), { success: true })
+  assert.equal(fs.readFileSync(path.join(finder, 'clip.mov'), 'utf-8'), 'video')
+})
+
+test('main decides what a Finder drop may bring: type, 20 MB, a video up to sync\'s 100 MB, no folder named like a video; a half copy is removed', async () => {
+  const dir = shapes('finder-rule')
+  const finder = h.companyDir('finder-rule-src')
+  const MB = 1024 * 1024
+  writeFiles(finder, { 'setup.exe': 'x', 'clip.mp4/inner.txt': 'a folder named like a video', 'ok.md': 'fine' })
+  // Sparse files: the size is what is checked, nothing is written.
+  const sized = (name: string, size: number) => { const f = path.join(finder, name); fs.writeFileSync(f, ''); fs.truncateSync(f, size); return f }
+  const refusals: Array<[string, string, string]> = [
+    [path.join(finder, 'setup.exe'), 'setup.exe', '非対応の形式'],
+    [sized('big.pdf', 20 * MB + 1), 'big.pdf', '20MBを超えています'],
+    [sized('long.mov', 100 * MB + 1), 'long.mov', '100MBを超える動画はほかの人と共有できないため、入れられません'],
+    // The name it gets in the company folder counts: a video renamed to .mp4 is held to the video rule.
+    [sized('raw.bin', 100 * MB + 1), 'raw.mp4', '100MBを超える動画はほかの人と共有できないため、入れられません'],
+    [path.join(finder, 'clip.mp4'), 'clip.mp4', '非対応の形式'],
+  ]
+  for (const [source, name, error] of refusals) {
+    assert.deepEqual(await h.invoke('fs:copyFromExternal', source, path.join(dir, name)), { success: false, error }, name)
+    assert.equal(fs.existsSync(path.join(dir, name)), false, name)
+  }
+  assert.deepEqual(await h.invoke('fs:copyFromExternal', sized('talk.MOV', 30 * MB), path.join(dir, 'talk.MOV')), { success: true }, 'a video over 20 MB')
+  assert.equal(fs.statSync(path.join(dir, 'talk.MOV')).size, 30 * MB)
+
+  // The copy fails half-way (a full disk, the card pulled out): what it wrote goes, the original stays.
+  const copyFile = fs.promises.copyFile
+  fs.promises.copyFile = (async (_from: string, to: string) => {
+    fs.writeFileSync(to, 'half')
+    throw Object.assign(new Error('ENOSPC: no space left on device'), { code: 'ENOSPC' })
+  }) as typeof fs.promises.copyFile
+  try {
+    const failed = await h.invoke<{ success: boolean }>('fs:copyFromExternal', path.join(finder, 'ok.md'), path.join(dir, 'ok.md'))
+    assert.equal(failed.success, false)
+  } finally {
+    fs.promises.copyFile = copyFile
+  }
+  assert.equal(fs.existsSync(path.join(dir, 'ok.md')), false)
+  assert.equal(fs.readFileSync(path.join(finder, 'ok.md'), 'utf-8'), 'fine')
 })
 
 test('a new file, rename, move, copy or Finder drop never replaces what is already there; saving still does', async () => {
@@ -248,7 +316,7 @@ test('a new file, rename, move, copy or Finder drop never replaces what is alrea
   assert.deepEqual(await h.invoke('fs:copy', at('sub'), at('sub-copy')), taken)
   const dropped = path.join(h.companyDir('finder-taken'), 'keep.md')
   fs.writeFileSync(dropped, 'from finder')
-  assert.deepEqual(await h.invoke('fs:moveFromExternal', dropped, at('keep.md')), taken)
+  assert.deepEqual(await h.invoke('fs:copyFromExternal', dropped, at('keep.md')), taken)
   assert.equal(fs.readFileSync(at('keep.md'), 'utf-8'), 'keep me')
   assert.equal(fs.readFileSync(at('other.md'), 'utf-8'), 'other')
   assert.equal(fs.readFileSync(at('folder', 'inner.md'), 'utf-8'), 'inner')
@@ -302,7 +370,7 @@ test('writes into a not-downloaded folder or at a reserved folder name are refus
   for (const [target, message] of [[path.join(company, '営業部', 'a.md'), notDownloaded], [path.join(company, '評価', 'a.md'), reserved]] as const) {
     assert.equal(await h.invoke('fs:writeFile', target, 'x'), false)
     assert.equal(await h.invoke('fs:createDirectory', path.dirname(target)), false)
-    for (const channel of ['fs:rename', 'fs:move', 'fs:copy', 'fs:moveFromExternal']) {
+    for (const channel of ['fs:rename', 'fs:move', 'fs:copy', 'fs:copyFromExternal']) {
       assert.deepEqual(await h.invoke(channel, src, target), { success: false, error: message }, channel)
     }
     assert.equal(await h.invoke('privateFolders:reservedPathRefusal', target), message === reserved ? reserved : null)
@@ -431,6 +499,60 @@ test('local-file:// serves files inside the allowed roots only, never cached', a
   assert.equal(viaLink.status, 403)
   assert.equal(await viaLink.text(), 'Forbidden: path is outside allowed directories')
   fs.rmSync(path.join(root, 'served-out'))
+})
+
+test('acb-media:// streams only videos inside the allowed roots, by byte range, never cached; a link out or another type is refused', async () => {
+  await h.startApp()
+  assert.deepEqual(h.fake.privilegedSchemes.find(s => (s as { scheme: string }).scheme === 'acb-media'), { scheme: 'acb-media', privileges: { standard: true, secure: true, stream: true } })
+  const serve = h.fake.protocolHandlers.get('acb-media')!
+  const bytes = Buffer.from(Array.from({ length: 1000 }, (_, i) => i % 256))
+  writeFiles(root, { '動画/説明 #1.mov': bytes, '動画/メモ.txt': 'not a video', '動画/偽.mp4/x.txt': 'a folder' })
+  const url = (p: string, v = 3) => localVideoUrl(p, v)
+  const video = path.join(root, '動画', '説明 #1.mov')
+
+  const whole = await serve(new Request(url(video)))
+  assert.equal(whole.status, 200)
+  assert.equal(whole.headers.get('Accept-Ranges'), 'bytes')
+  assert.equal(whole.headers.get('Cache-Control'), 'no-store')
+  assert.deepEqual(Buffer.from(await whole.arrayBuffer()), bytes)
+  const part = await serve(new Request(url(video), { headers: { Range: 'bytes=900-' } }))
+  assert.equal(part.status, 206)
+  assert.equal(part.headers.get('Content-Range'), 'bytes 900-999/1000')
+  assert.deepEqual(Buffer.from(await part.arrayBuffer()), bytes.subarray(900))
+  const past = await serve(new Request(url(video), { headers: { Range: 'bytes=1000-' } }))
+  assert.equal(past.status, 416)
+  assert.equal(past.headers.get('Content-Range'), 'bytes */1000')
+
+  fs.symlinkSync(path.join(outside, 'secret.txt'), path.join(root, '動画', 'link-out.mp4'))
+  writeFiles(outside, { 'clip.mp4': 'outside video' })
+  for (const p of [
+    path.join(root, '動画', 'メモ.txt'), // not a video
+    path.join(outside, 'clip.mp4'), path.join(root, '..', 'outside', 'clip.mp4'), path.join(`${root}-other`, 'clip.mp4'),
+    path.join(root, '動画', 'link-out.mp4'), // inside by name, outside by its real location
+  ]) {
+    const res = await serve(new Request(url(p)))
+    assert.equal(res.status, 403, p)
+    assert.equal((await res.text()).includes('secret'), false)
+  }
+  assert.equal((await serve(new Request(`acb-media://video/${encodeURIComponent(root)}/x.mp4`))).status, 400, 'a path split by the URL parser is not read')
+  assert.equal((await serve(new Request(url(path.join(root, '動画', '偽.mp4'))))).status, 404, 'a folder named like a video')
+  // A link whose target is inside the company passes the real-location check, but the file is
+  // opened without following a link: one swapped in after the checks leads nowhere.
+  fs.symlinkSync(video, path.join(root, '動画', 'link-in.mov'))
+  assert.equal((await serve(new Request(url(path.join(root, '動画', 'link-in.mov'))))).status, 404, 'a link, even one inside')
+  fs.rmSync(path.join(root, '動画', 'link-in.mov'))
+  fs.rmSync(path.join(root, '動画', 'link-out.mp4'))
+})
+
+test('fs:openVideo hands only a video file inside the company folder to another app: not another type, a folder, or a link', async () => {
+  writeFiles(root, { 'open/clip.MP4': 'v', 'open/run.command': '#!/bin/sh', 'open/app.mov/Contents/x': 'bundle' })
+  fs.symlinkSync(path.join(root, 'open', 'run.command'), path.join(root, 'open', 'linked.mov'))
+  h.fake.openedPaths.length = 0
+  assert.deepEqual(await h.invoke('fs:openVideo', path.join(root, 'open', 'clip.MP4')), { success: true })
+  for (const name of ['run.command', 'app.mov', 'linked.mov']) {
+    assert.equal((await h.invoke('fs:openVideo', path.join(root, 'open', name))).success, false, name)
+  }
+  assert.deepEqual(h.fake.openedPaths, [path.join(root, 'open', 'clip.MP4')])
 })
 
 test('fs:watch sends the watcher batches to the window as fs:changes; fs:unwatch stops them', async () => {

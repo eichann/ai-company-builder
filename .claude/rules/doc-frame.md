@@ -192,7 +192,7 @@ carrying a secret in its user name reached a local listener). Each document is s
   `Cache-Control: no-store`, `Referrer-Policy: no-referrer`, `X-DNS-Prefetch-Control: off`. No
   `Access-Control-Allow-Origin`: a module script of the folder runs without it (fonts not
   measured; A2 adds `null` with a test only if one fails to load).
-- **Scheme privileges** (`registerLocalFileScheme`, one list with `local-file` and `acb-plugin`):
+- **Scheme privileges** (`registerLocalFileScheme`, one list with `local-file`, `acb-media` and `acb-plugin`):
   `standard`, `secure`, `corsEnabled` (without it a module script of the folder does not run:
   measured). Never `bypassCSP`, `supportFetchAPI`, `stream`, `allowServiceWorkers`.
 

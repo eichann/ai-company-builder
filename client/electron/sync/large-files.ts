@@ -38,8 +38,10 @@ import fs from 'fs'
 import path from 'path'
 import type { SimpleGit } from 'simple-git'
 import { isLocalOnlyPath } from '../protected-config'
+import { LARGE_FILE_THRESHOLD } from '../../shared/large-file-limit'
 
-export const LARGE_FILE_THRESHOLD = 100 * 1024 * 1024 // 100MB
+// One limit with the file tree's Finder drop of a video (client/shared/large-file-limit.ts).
+export { LARGE_FILE_THRESHOLD }
 
 /**
  * Folder names the scan never enters, at any depth: the old walk's `.git`,

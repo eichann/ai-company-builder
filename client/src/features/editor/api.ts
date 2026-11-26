@@ -23,6 +23,13 @@ export type EditorRefusals = ElectronPort<'reservedPathRefusal'>
  */
 export type DocViewControls = ElectronPort<'openDocView' | 'closeDocView' | 'setDocViewBounds' | 'setDocViewZoom' | 'reloadDocView' | 'onDocViewEvent' | 'setDocViewReview' | 'findDocViewQuote' | 'openDocViewDriveVideo'>
 
+/** 「ほかのアプリで開く」: a video the editor cannot play, handed to this computer's own app for it. */
+export type VideoOutbound = ElectronPort<'openVideo'>
+
+export function openVideoInOtherApp(filePath: string, outbound: VideoOutbound = window.electronAPI) {
+  return outbound.openVideo(filePath)
+}
+
 /** Opening a link of a document in the member's browser, after they said yes. */
 export type DocLinkOutbound = ElectronPort<'openExternal'>
 

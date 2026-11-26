@@ -47,6 +47,8 @@ const MACOS = {
   'tests/cookie-encryption-electron.test.ts': 'flips the fuse on a macOS copy of Electron and launches it',
   // The HTML viewer's document frame in a real Electron (doc-frame.md): same reason.
   'tests/doc-frame-electron.test.ts': 'launches the real Electron app, which needs a display',
+  // Company videos played by Chromium's real media player (files-and-editor.md "Videos"): same reason.
+  'tests/video-electron.test.ts': 'launches the real Electron app, which needs a display',
 }
 
 const os = process.argv[2]

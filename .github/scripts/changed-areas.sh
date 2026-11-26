@@ -41,6 +41,7 @@ SYNC=(
   client/electron/sync/ client/electron/protected-config.ts client/electron/write-guard.ts
   client/shared/auto-sync.ts client/shared/sparse-paths.ts client/shared/temp-save-file.ts client/shared/office-lock-files.ts
   client/shared/skill-leftovers.ts client/shared/skill-shelf.ts client/shared/write-access.ts client/shared/sync-notice-text.ts
+  client/shared/large-file-limit.ts
   client/tests/sync/ client/tests/sync-harness/
   client/package.json ':(glob)client/tsconfig*.json'
   server/src/lib/push-check/ server/src/lib/git-exec.ts server/src/lib/git-server/
@@ -81,6 +82,8 @@ CLIENT_MAC=(
   client/tests/browser-window-electron.test.ts client/tests/browser-window-harness/ client/tests/browser-operator.test.ts
   client/tests/doc-frame-electron.test.ts client/tests/doc-frame-harness/
   client/tests/cookie-encryption-electron.test.ts client/tests/cookie-encryption-harness/
+  client/tests/video-electron.test.ts client/tests/video-electron-harness/ client/tests/fixtures/video/
+  client/index.html
   client/tests/ipc-harness/ ':(glob)client/tsconfig*.json' client/package.json shared/
   .github/scripts/client-tests.mjs
 )

@@ -102,7 +102,7 @@ installElectronAPI({
     remove(p)
     return { success: true }
   },
-  moveFromExternal: async (from, to) => { calls.push(['moveFromExternal', from, to]); add(to, false); return { success: true } },
+  copyFromExternal: async (from, to) => { calls.push(['copyFromExternal', from, to]); add(to, false); return { success: true } },
   // Electron's preload tells a dropped File's place on disk (webUtils.getPathForFile); Chromium does not.
   getPathForFile: file => `/Users/demo/Downloads/${file.name}`,
   // A name a private folder this member cannot read already uses (the server knows).

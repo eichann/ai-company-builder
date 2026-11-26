@@ -7,7 +7,8 @@ import path from 'path'
 import { pathToFileURL } from 'url'
 import { app, BrowserWindow, dialog, nativeImage, net, Notification, protocol, safeStorage, screen, session, shell, type Session, type WebContents, type WebPreferences } from 'electron'
 import type { AllowedRoots } from './allowed-roots'
-import { localFileTarget } from './local-file-protocol'
+import { localFileTarget, localVideoTarget, videoFileResponse } from './local-file-protocol'
+import { MEDIA_SCHEME } from '../shared/video-files'
 import { isPluginAddress, PLUGIN_SCHEME, pluginFrameNavigationAllowed } from '../shared/plugin-bridge'
 import type { PluginFileServer } from './features/plugins/protocol'
 import { DOC_SCHEME } from '../shared/doc-frame'
@@ -398,7 +399,8 @@ export function guardEverySession(page: AppPage): void {
 
 /**
  * Register the app's schemes (must run before app.whenReady(); Electron takes
- * one list): local-file://, acb-plugin:// (a plugin's screen,
+ * one list): local-file://, acb-media:// (a company video in the editor,
+ * files-and-editor.md "Videos"), acb-plugin:// (a plugin's screen,
  * plugin-frame.md) and acb-doc:// (the HTML viewer, doc-frame.md). acb-plugin is `standard` (relative paths resolve inside
  * the package) and `secure`; `corsEnabled` only so the frame's module scripts
  * load (its origin is opaque). Never `bypassCSP`, `supportFetchAPI`,
@@ -407,6 +409,9 @@ export function guardEverySession(page: AppPage): void {
 export function registerLocalFileScheme(): void {
   protocol.registerSchemesAsPrivileged([
     { scheme: 'local-file', privileges: { stream: true, supportFetchAPI: true } },
+    // `standard` because Chromium's media player asks a non-standard scheme for no byte range (no seeking,
+    // an index at a video's end never reached); `secure` like the others. No fetch, CORS or CSP bypass.
+    { scheme: MEDIA_SCHEME, privileges: { standard: true, secure: true, stream: true } },
     { scheme: PLUGIN_SCHEME, privileges: { standard: true, secure: true, corsEnabled: true } },
     // The HTML viewer's documents (doc-frame.md): the same privileges as acb-plugin and nothing more.
     // `standard` puts the token in the host, so each document is its own site (its own process).
@@ -450,8 +455,8 @@ export function servePluginFiles(files: PluginFileServer): void {
 }
 
 /**
- * Serve local-file:// from inside the allowed roots only (by name, then by
- * real location: a link must not lead out of the company folder).
+ * Serve local-file:// and acb-media:// from inside the allowed roots only (by
+ * name, then by real location: a link must not lead out of the company folder).
  * `?v=<n>` (a per-path version the renderer bumps on file events) is dropped
  * before resolving; responses are never cached, so a replaced file shows.
  */
@@ -472,5 +477,20 @@ export function serveLocalFiles(roots: AllowedRoots): void {
     const headers = new Headers(response.headers)
     headers.set('Cache-Control', 'no-store')
     return new Response(response.body, { status: response.status, statusText: response.statusText, headers })
+  })
+  // Videos only, with the same two checks; streamed by byte range (net.fetch of a file:// URL
+  // answers a range 200 without Content-Range, which the player reads as the file's start).
+  protocol.handle(MEDIA_SCHEME, async (request) => {
+    const target = localVideoTarget(request.url, roots)
+    if (!target.ok) {
+      return new Response(target.status === 403 ? 'Forbidden' : 'Bad request', { status: target.status })
+    }
+    let resolved: string
+    try {
+      resolved = roots.validate(target.path)
+    } catch {
+      return new Response('Forbidden', { status: 403 })
+    }
+    return videoFileResponse(resolved, request.headers.get('range'))
   })
 }

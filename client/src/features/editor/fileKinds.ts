@@ -1,4 +1,6 @@
 // How the editor shows a file, by its extension.
+import { isVideoFileName } from '../../../shared/video-files'
+
 const IMAGE_EXTENSIONS = new Set(['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'ico', 'bmp'])
 
 export function isImageFile(filePath: string): boolean {
@@ -10,9 +12,14 @@ export function isPdfFile(filePath: string): boolean {
   return filePath.split('.').pop()?.toLowerCase() === 'pdf'
 }
 
-/** Images and PDFs: shown from disk (local-file:// URL or bytes), never loaded as text. */
+/** A video the editor plays (`.mp4`, `.mov`): streamed from disk by `acb-media://`. */
+export function isVideoFile(filePath: string): boolean {
+  return isVideoFileName(filePath.split('/').pop() || '')
+}
+
+/** Images, PDFs and videos: shown from disk (a URL or bytes), never loaded as text. */
 export function isBinaryFile(filePath: string): boolean {
-  return isImageFile(filePath) || isPdfFile(filePath)
+  return isImageFile(filePath) || isPdfFile(filePath) || isVideoFile(filePath)
 }
 
 export function isMarkdownFile(filePath: string): boolean {
