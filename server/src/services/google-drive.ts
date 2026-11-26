@@ -108,6 +108,8 @@ export interface DriveViewUse {
   name: string
   mimeType: string
   expiresAt: string
+  /** The grant this use was checked against (internal, never answered): the bytes are asked only under it (`streamMedia`). */
+  grantId: string
 }
 
 /** Who puts a file: the member's AI (record token) or the member. */
@@ -1128,7 +1130,7 @@ export function createGoogleDriveService(deps: GoogleDriveDeps) {
       const expiresAt = new Date(clock.nowMs() + DRIVE_VIEW_PICK_TTL_MS).toISOString()
       // The same synchronous stretch as the read: nothing can expire or remove it in between.
       if (!h.googleDrive.touchViewPick(member.userId, account, fileId, now, expiresAt)) return refuse('forbidden', VIEW_NOT_PICKED, { code: 'DRIVE_VIEW_NOT_PICKED' })
-      return ok({ fileId, name: pick.name, mimeType: pick.mimeType, expiresAt: expiresAt > pick.expiresAt ? expiresAt : pick.expiresAt })
+      return ok({ fileId, name: pick.name, mimeType: pick.mimeType, expiresAt: expiresAt > pick.expiresAt ? expiresAt : pick.expiresAt, grantId: grant.grantId })
     },
 
     /** The record step took the member's link of this file (records route): their live pick of it is renewed. */
