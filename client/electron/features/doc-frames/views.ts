@@ -18,6 +18,7 @@ import { createHash } from 'node:crypto'
 import { docQuoteFoundOf, docReviewSelectionOf, docViewReviewOf, type CheckedReview, type DocQuoteFound } from '../../../shared/doc-review-frame'
 import { drawQuotesCode, findQuoteCode, READ_SELECTION_CODE } from './review-world'
 import { blockedWebHost, docViewBounds, parseDocFrameUrl, docZoomFactor, DOC_BLOCKED_HOSTS_MAX, DOC_BLOCKED_PARTS_MAX, type DocViewBounds, type DocViewEvent } from '../../../shared/doc-frame'
+import { driveVideoIdsOf, driveVideoViewUrl } from '../../../shared/doc-drive-videos'
 import { webLinkForBrowser } from '../../external-url'
 import type { KeyInput } from '../../../shared/commands/define'
 import type { DocFrames, OpenableDocument } from './protocol'
@@ -113,7 +114,8 @@ export const LINK_INTERVAL_MS = 1000
 export const BLOCKED_INTERVAL_MS = 500
 
 export interface DocViewsDeps {
-  frames: Pick<DocFrames, 'grant' | 'revoke'>
+  /** `onDocumentServed`: the bytes of each view's own document as served (its Drive videos). */
+  frames: Pick<DocFrames, 'grant' | 'revoke'> & Partial<Pick<DocFrames, 'onDocumentServed'>>
   shell: DocViewPort
   /** Tell the window about one of its views (`docView:event`). */
   notify?: (windowId: number, event: DocViewEvent) => void
@@ -143,6 +145,20 @@ interface BlockedTally {
   told: boolean
   /** A send is waiting for `BLOCKED_INTERVAL_MS` to pass. */
   cancel: (() => void) | null
+}
+
+/** Different Drive videos remembered per view (for `seen`); past it a new one no longer brings a dismissed band back. */
+export const DRIVE_VIDEOS_SEEN_MAX = 1000
+
+/** The Google Drive videos of one view's own document (main only; the window gets counts). */
+interface DriveVideos {
+  /** The ids, in the order written, at most `DOC_DRIVE_VIDEOS_MAX`: a row's index names one. */
+  ids: string[]
+  total: number
+  /** Every different id this view has had since it opened. */
+  seen: Set<string>
+  /** What the window was last told. */
+  told: { count: number; total: number; seen: number }
 }
 
 /** The same document for a kept place: its folder and name (main's own; never sent). */
@@ -181,6 +197,16 @@ export function createDocViews(deps: DocViewsDeps) {
   const onOwnPage = (viewId: number) => pages.get(viewId)?.own !== false
   /** Views whose selection is being read (one read at a time per view). */
   const reading = new Set<number>()
+  /** View id → the Drive videos its own document embeds, as last served. */
+  const videos = new Map<number, DriveVideos>()
+  /** Tell the window the view's videos when the counts changed (a reload serving the same file says nothing). */
+  const tellVideos = (viewId: number, list: DriveVideos) => {
+    const view = views.get(viewId)
+    const counts = { count: list.ids.length, total: list.total, seen: list.seen.size }
+    if (!view || (counts.count === list.told.count && counts.total === list.told.total && counts.seen === list.told.seen)) return
+    list.told = counts
+    deps.notify?.(view.windowId, { viewId, kind: 'driveVideos', ...counts })
+  }
   const drawMarks = (viewId: number) => {
     const view = views.get(viewId)
     const review = reviews.get(viewId)
@@ -193,6 +219,7 @@ export function createDocViews(deps: DocViewsDeps) {
     reviews.delete(viewId)
     reading.delete(viewId)
     pages.delete(viewId)
+    videos.delete(viewId)
     blocked.get(viewId)?.cancel?.()
     blocked.delete(viewId)
     deps.frames.revoke(viewId)
@@ -260,6 +287,13 @@ export function createDocViews(deps: DocViewsDeps) {
           deps.notify?.(view.windowId, { viewId, kind: 'page', own })
         }
       }
+      // Another page of the folder: its videos are not listed (not read), and the document's are not shown.
+      const list = videos.get(viewId)
+      if (list && page && !page.own) {
+        list.ids = []
+        list.total = 0
+        tellVideos(viewId, list)
+      }
       const tally = blocked.get(viewId)
       if (!tally || !views.has(viewId)) return
       // A new page: its own tally. The window hears `count: 0` only if it was told something before.
@@ -312,6 +346,18 @@ export function createDocViews(deps: DocViewsDeps) {
     forget(viewId)
     view?.handle.destroy()
   }
+  // The view's own document as served (its first load, every reload): its Drive videos, read from those
+  // exact bytes. Another page of the folder is never read here (the protocol tells its own document only).
+  deps.frames.onDocumentServed?.((viewId, bytes) => {
+    if (!views.has(viewId)) return
+    const { ids, total } = driveVideoIdsOf(Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength).toString('latin1'))
+    let list = videos.get(viewId)
+    if (!list) videos.set(viewId, list = { ids: [], total: 0, seen: new Set(), told: { count: 0, total: 0, seen: 0 } })
+    list.ids = ids
+    list.total = total
+    for (const id of ids) if (list.seen.size < DRIVE_VIDEOS_SEEN_MAX) list.seen.add(id)
+    tellVideos(viewId, list)
+  })
   // The window reloaded, crashed or closed: every view it holds closes and its grant is revoked,
   // and an open still under way for the page that is gone registers nothing.
   deps.shell.onWindowReset(windowId => {
@@ -412,6 +458,17 @@ export function createDocViews(deps: DocViewsDeps) {
       if (!checked) return
       reviews.set(id, checked)
       drawMarks(id)
+    },
+
+    /**
+     * The address to open in the member's browser for the view's `index`-th Drive video (its canonical
+     * Drive page, built from the id main read), or null: only its own window, an index of the list as
+     * last served (another page shown → none).
+     */
+    driveVideoUrl(viewId: unknown, windowId: number, index: unknown): string | null {
+      if (!own(viewId, windowId) || typeof index !== 'number' || !Number.isInteger(index)) return null
+      const id = videos.get(viewId as number)?.ids[index]
+      return id === undefined ? null : driveVideoViewUrl(id)
     },
 
     /**

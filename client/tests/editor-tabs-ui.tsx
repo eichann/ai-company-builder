@@ -128,6 +128,7 @@ Object.assign(window, {
       docCalls.push(['find', viewId, index])
       return (window as unknown as { __acbFound?: string }).__acbFound ?? 'shown'
     },
+    openDocViewDriveVideo: async (viewId: number, index: number) => { docCalls.push(['driveVideo', viewId, index]) },
     onDocViewEvent: (cb: (event: unknown) => void) => { docEvent = cb; return () => { if (docEvent === cb) docEvent = null } },
     openExternal: async (url: string) => { opened.push(url); return { success: true } },
   },

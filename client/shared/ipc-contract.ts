@@ -537,6 +537,11 @@ export interface IpcInvokeChannels {
   /** Scroll to the review's `index`-th mark and make it flash: shown, there but hidden now, or not there. */
   'docView:findQuote': { args: [viewId: number, index: number]; result: DocQuoteFound }
   /**
+   * Open the view's `index`-th Google Drive video (as `driveVideos` counted them) in the member's browser:
+   * main opens Drive's own page for the id it read from the document; nothing is loaded into the view.
+   */
+  'docView:openDriveVideo': { args: [viewId: number, index: number]; result: void }
+  /**
    * The user manual (files-and-editor.md "The user manual"): its page (and heading) in a document view
    * of its own, from this computer's copy of the server's manual (refreshed first when the server
    * answers). Then placed, zoomed and closed as any document view. Main window only.
@@ -1080,6 +1085,7 @@ export interface ElectronAPI {
   reloadDocView: Invoke<'docView:reload'>
   setDocViewReview: Invoke<'docView:review'>
   findDocViewQuote: Invoke<'docView:findQuote'>
+  openDocViewDriveVideo: Invoke<'docView:openDriveVideo'>
   onDocViewEvent: Subscribe<'docView:event'>
   openManual: Invoke<'manual:open'>
   exportManual: Invoke<'manual:export'>

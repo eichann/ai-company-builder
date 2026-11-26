@@ -106,6 +106,7 @@ const api: ElectronAPI = {
   reloadDocView: (viewId: number) => invoke('docView:reload', viewId),
   setDocViewReview: (viewId: number, review: DocViewReview | null) => invoke('docView:review', viewId, review),
   findDocViewQuote: (viewId: number, index: number) => invoke('docView:findQuote', viewId, index),
+  openDocViewDriveVideo: (viewId: number, index: number) => invoke('docView:openDriveVideo', viewId, index),
   onDocViewEvent: callback => subscribe('docView:event', callback),
   openManual: (pageId: string, anchor: string | null) => invoke('manual:open', pageId, anchor),
   exportManual: () => invoke('manual:export'),
