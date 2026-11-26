@@ -131,6 +131,14 @@ export interface LedgerEntry {
    * screens, a consultation, a run).
    */
   via?: LedgerVia | null
+
+  /**
+   * 「AI が（本人の頼みで）」 (records.md "The AI at the member's request", owner decision 2026-11-26): the
+   * member who asked their own AI, in a conversation they were in, to run this action (an AI entry only;
+   * equal to `actorId` today). Set by the server when it allowed the action — never from a body; the
+   * conversation is `conversationId`. Informational afterwards: nothing decides on it. Absent otherwise.
+   */
+  askedBy?: string | null
 }
 
 /** A change made through a plugin's screen (its bridge): which plugin, which version of its package. */

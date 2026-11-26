@@ -202,7 +202,7 @@ missing or not a boolean is its default —, `TYPE_FEATURE`, `FEATURE_TOOLS`, `F
   `states`, `state_labels` (how each state is shown — "State names" below), `initial`, `create_states` (states a create may start in instead — "Task version
   5"), `proposal_states` (proposals: nobody's turn — "Task version 11"), `actions` (from / to / who / notify / attach / note / history_line /
   decision / approval / args / ok_from — "Completing on someone's OK" — / who_unless — "Task
-  version 9" — / links — record links the action sets, "Task version 5"), `implements` (interfaces, `INTERFACES`, "Core interfaces"
+  version 9" — / links — record links the action sets, "Task version 5" — / ai_on_request — "The AI at the member's request"), `implements` (interfaces, `INTERFACES`, "Core interfaces"
   below: `request` needs `requested_by`, `assignee`, `next_actor`, `waiting_on`, `due` on the
   server; `bundle` (まとまり) needs `owner` (person) and `purpose` (text) on the server and final
   states; `counterpart` (相手) needs `counterpart_kind` (choice offering company and person),
@@ -798,8 +798,8 @@ Additive over version 8 (who / from / notify / labels widened, one field, two ac
   entry carries `accepted_by` (`ACCEPTANCE.finishes`, `services/record-engine/acceptance.ts` with
   the action's `fromState`). The requester completing it does not.
 - **Migration** (`migrateTaskVersion` in `db/index.ts` → `adapters/sqlite/records.ts`
-  `migrateCompanyTaskVersion`, `TASK_VERSION` = the core task version, 14 since "Task version
-  14"): at startup, every company whose map has the task type stores that core version when
+  `migrateCompanyTaskVersion`, `TASK_VERSION` = the core task version, 15 since "The AI at the
+  member's request"; `REPLY_REQUEST_VERSION` 6 the same way for 返事のお願い): at startup, every company whose map has the task type stores that core version when
   nothing as new is stored, then every task's index row says it (`type_version`). No value changes, so no ledger entry. Idempotent.
 - Test: `server/tests/unit/record-task-v9.test.ts` (from 未着手 with no start made up, requester
   told and reopening; never from 準備中; the AI never; 確かめてから hands over from 未着手 and the
@@ -1008,7 +1008,8 @@ Additive over version 4 (tasks indexed under 4 keep their `typeVersion` and run 
 - **受けられない** (`decline`): from todo / in_progress / waiting, `who: [assignee]` only (never
   the AI, never the requester), note required, `hand_to` and `notify` the requester → state
   `declined`, **not final**: the requester's turn, who `assign`s someone else, `cancel`s or
-  `reopen`s it (back to the same assignee). The AI never completes or declines.
+  `reopen`s it (back to the same assignee). The AI never declines, and completes only at the assignee's request
+  (task version 15: "The AI at the member's request").
 - **Action links** (generic syntax `links: [<record link>]` on an action; never a file link —
   those are "Linking files later"): body `links: { <name>: id | [ids] | null }`, a link left out
   stays. Each target must be a live record of this company that the actor reads, of the link's
@@ -1831,7 +1832,8 @@ clock's, a separate service writing through the service writer: `notifications.m
   `link:<name>.<field>` entries — names a member who can read the record (`ownPeopleOf`,
   `whoWithFallback` in `record-engine/act.ts`); the parser allows it only with such an entry in `who`.
   Roles do not bypass `who`. The member's **AI** may act only where `who` lists `ai`, and then only for a
-  member who qualifies on their own — so the AI cannot complete a task. When `who` is `[ai]`
+  member who qualifies on their own — so the AI cannot complete a task, except at the assignee's own request
+  (`ai_on_request`, "The AI at the member's request"). When `who` is `[ai]`
   alone, only the AI of the record's own people: `assignee`, `next_actor` (the 「AI の番」 rule) or
   `requested_by` (a task the member's consultation made in 準備中) is the member — never another
   member's or another department's record, owners and admins included (audit B-M4,
@@ -2109,6 +2111,85 @@ POST /ai-runs/:runId/operations/:key/reconcile   { done }
   logs, tree id equal on a clone, dirty, nothing for private / not in HEAD / ambiguous / shadowed /
   plugin, no path sent, once per version, a write waits for a report in flight).
 
+## The AI at the member's request (owner decision 2026-11-26 「AI に完了を頼めるようにする」)
+
+Before, the AI could never complete a task or end a 返事のお願い: asked 「この7件を終わりにして」, it had to send the member
+to press each one. Now the member may let their own AI do exactly that, **in a conversation they are in, when they ask**.
+
+- **Data, not code** (`ai_on_request`, `ActionDef.aiOnRequest`, `shared/core/record-types.ts`): an action key listing
+  person fields **already in `who`** (parser error otherwise; never with `who: [system]`). Core: task v15 `complete`,
+  reply_request v6 `close` (終わりにする) and `replied_elsewhere` (もう返した) — each `ai_on_request: [assignee]`. `who`
+  is unchanged (no `ai`), so a server or app that does not know the key keeps refusing the AI, `aiTurnStates` and
+  「AI の番」 are unchanged, and a released app's tools still say 「本人が画面で」. Additive: `compareTypeDefinitions`
+  finds nothing breaking; `TASK_VERSION` 15 and `REPLY_REQUEST_VERSION` 6 move the records at startup (the "Task
+  version 9" mechanism, `migrateReplyRequestVersion`). Absent from a definition when not written. A company's own
+  `.acb/types/task.md` at version ≥ 15 without the key keeps the core's out (the AI stays refused there).
+- **Who** (`aiOnRequestField`, the one evaluation): the member's own AI only, on a record whose listed field holds
+  **the member themself** (never a delegate, never someone `who` names otherwise — a task the member only requested is
+  not theirs to have closed), and only while that field qualifies in `who` now (`actionWho`: a 「確かめてから」 task's
+  assignee does not complete it, so neither does their AI). Not `decline`, `drop`, `cancel` or any other action.
+- **The member's own setting** 「AI に完了を頼めるようにする」 (work switch `aiCompletes`, `shared/core/work-switches.ts`):
+  **the member's alone** — `MEMBER_ONLY_POLICY` (always allowed, starts off), not in the task settings, so no company or
+  admin setting reaches it; `PUT /me/work-switches { switch: 'aiCompletes', on }` (their own only). The app shows it in
+  設定 → 自分の設定 when the server answers it (`MyWorkSwitches.aiCompletes`, optional). Engine dep `aiAskedOn`
+  (composition: `workSwitches.isOn(…, 'aiCompletes')`; absent = off). Off → 403 `AI_ASK_OFF` with the fixed sentence
+  `AI_ASKED_REFUSALS.off` (「…AI からは片づけられません（完了にする・終わりにする・もう返した）。設定の「自分の設定」で
+  オンにすると…」), nothing written; the AI relays it.
+- **Only a turn the member started** (how the server knows): `POST /me/record-tokens { …, memberTurn: true }` — the app
+  says the turn started from the member's own words. The server keeps the mark (`record_ai_tokens.member_turn`) **only
+  for an `act` token not bound to a run** (`record-ai-tokens.ts` `issue`; `authenticate` and `aiActor` drop it for a run
+  too, and the engine refuses an actor with a `runId`): every unattended AI — 「AI の番」, a business plugin step's run,
+  a scheduled job's run — runs with a run-bound token (`ai-turns.md`, `jobs.md`), so it can never carry it. A released
+  app sends no mark, so its tokens never may. The app (`chat-server.ts`) asks it only when the request is no step, no
+  plugin step, not a step's consultation (`stepWriteArea` none) and its last message is the member's own words
+  (`latestMemberText`: not an app instruction, and not a message the app sent in the member's place to start a
+  consultation — `chat.newConsultation`'s first message: a Skill's 実行 `/<skill> `, minutes reading, 「会議のたたき台を作る」,
+  「AI に直してもらう」, and an automatic 「AI の番」's — marked `metadata.appSent`, stored with the message as `appSent`,
+  `appSentOf` in `client/shared/app-instruction.ts`: its text may carry minutes or someone else's SKILL.md, so it is never
+  the member's request until they write themselves). Like the agent name, the mark is the app's word: it stops a mistaken
+  app, not a forged one — what the server decides itself is the setting, the record's field and the run. A plain token
+  → 403 `NOT_ALLOWED` (the words of today, 「この操作は AI からはできません…」).
+- **Cap**: `AI_ASKED_PER_TURN` (20) per token — one token per chat turn — counted by a compare-and-set on
+  `record_ai_tokens.asked_closes` **inside the action's write transaction, after the state's compare-and-set**: a write
+  refused (stale version) takes none; over the cap the write is rolled back and 409 `AI_ASK_LIMIT`
+  (`AI_ASKED_REFUSALS.limit`). The setting is read again in the same transaction (turned off during the awaits → refused).
+- **Recorded**: actor kind `ai`, `conversation_id` the token's (no message text), and `record_ledger.asked_by` = the member
+  (`LedgerEntry.askedBy`, additive column, `migrateAiAskedColumns`; informational — set only when the server allowed it).
+  Cause stays `ai`. 経緯 says 「AI が（本人の頼みで）完了にしました」 (`aiAskedHistoryText`, `client/shared/ai-asked.ts`).
+  ［取り消す］ is the generic undo: the entry's actor id is the member's (`undo.ts`, unchanged). **Afterwards everything is
+  as for the member's own press** (owner decision 2026-11-26): notify (a notice already sent to the requester cannot be
+  unsent), `afterAct` — 「もう返した」 drops the reply drafts, and the Gmail archive follow-up treats such a close as the
+  person's own act (`inbox.ts` `personsOwnAct`: `askedBy` = the actor; `inbox.md` "Mail archived in the mailbox").
+  **Undoing 「もう返した」** (the person's or after their AI's) brings back the drafts that very action discarded
+  (`restoreDrafts`, `afterAct` on the undo: a draft whose newest entry is still that discard — note
+  「ほかの経路で返信済み（もう返した）」, at or after the undone entry — whose mail row is not finished and whose body is
+  kept; ledger `draft_restored`, `SERVICE_TRANSITIONS.outbound_message` discarded → draft, the inbox only). Nothing is
+  sent by it.
+- **Outside text in a member's turn** (owner decision asked, safe side recorded): in such a conversation the AI also reads
+  outside text (mail, minutes, the web), and the server cannot tell an instruction planted there from the member's
+  request. What limits it: only the member's own records (assignee), only these three actions, at most 20 a turn, each on
+  the card with ［取り消す］ and in 経緯 with `askedBy` and the conversation; a turn the app started (`appSent`) never counts.
+- **The chat**: in a marked turn the three tools say 「メンバーがはっきり頼んだときだけ」 and the turn gets
+  `AI_ASKED_INSTRUCTIONS`; each success (the answer's `entry.askedBy`) joins **one card per turn** (`data-ai-asked`, the
+  same id pushed again with every item; stored as `aiAsked`, latest copy wins): 「AI が頼まれて片づけました（n件）」, one line
+  per record with ［取り消す］ (`AiAskedCard.tsx` → `tasks:undo` with the member's session at the entry's version; undone
+  already or changed since — `AI_ASKED_UNDO_STALE_CODES` — it says so with the record's state now, read from the server).
+- Tests: `server/tests/integration/ai-asked-close.test.ts` (setting off by default and the member's alone, the fixed
+  refusal, nothing written; the member's own task completed and recorded with who asked and the conversation, undone by
+  them; another's task, one they only requested, a 確かめてから task, decline / cancel refused; a released app's plain
+  token and a run-bound token refused; the cap, a refused write taking none, the next turn starting again; turned off
+  later), `server/tests/unit/inbox.test.ts` 「the AI at the member's request (reply_request v6)」 (off, a run's actor even
+  if marked, drop, bob, her own 「もう返した」 / 「終わりにする」 with `askedBy`, her undo), 「…a write that loses its
+  compare-and-set takes nothing from the turn's count」, 「…her setting turned off while the call is under way…」, 「［取り消す］ of
+  「もう返した」 … brings back exactly the drafts it discarded」, `inbox-archive.test.ts` 「her own AI completing the last task at her
+  request archives like her own press」, `record-types.test.ts` 「ai_on_request」 (only
+  fields in `who`, additive versions, `who` without `ai`), `client/tests/ai-asked.test.ts` (the mark only for the
+  member's own words — never a step, a job, a step's consultation, an app instruction or an `appSent` message, kept
+  through the history — and never with a run; `tests/ui/chat-panel.spec.ts` 「chat commands」 (a new consultation's
+  message is sent `appSent`); the
+  descriptions and instructions only with the server's mark; one card per turn only with `askedBy`; the stored card;
+  the undo; 経緯's words). Mutation-checked (PR body lists each guard).
+
 ## The content store (中身の箱, owner decision 2026-11-01)
 
 Text that easily holds personal data is kept apart from the append-only ledger so an operator can
@@ -2210,6 +2291,8 @@ complete and idempotent; the immutability trigger — mutation-checked).
   403 `ACB_STOPPED`, and while the whole AI is stopped for the token's member a run-bound token
   gets 503 `AI_STOPPED` (`agent-stop.md` "Runs with no person present").
 - No undo for the AI (people undo).
+- `memberTurn` ("The AI at the member's request"): a token the app asks for a turn the member started; kept only
+  for an `act` token not bound to a run.
 - Tests: `server/tests/integration/record-tokens.test.ts` (a token call is recorded as ai and
   cannot run an action without `ai` even when the body claims human; a session call is recorded
   as human even when the body claims ai; read scope, forged company, revoked, removed member,

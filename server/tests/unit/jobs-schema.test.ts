@@ -105,8 +105,10 @@ const LATER_INDEXES = [
 const LATER_COLUMNS: Record<string, string[]> = {
   // google-drive.md "Overwriting": the file a put gave a new revision; "A Google document's own changes": its baseline.
   google_drive_puts: ['updated_file_id TEXT', 'doc_fingerprint TEXT', 'doc_revision TEXT', 'doc_revision_at TEXT', 'doc_baseline_at TEXT'],
-  // records.md "Delivery order": each row's delivery number and origin mark.
-  record_ledger: ['delivery_seq INTEGER', 'origin TEXT'],
+  // records.md "Delivery order": each row's delivery number and origin mark; "The AI at the member's request": who asked.
+  record_ledger: ['delivery_seq INTEGER', 'origin TEXT', 'asked_by TEXT'],
+  // records.md "The AI at the member's request": a member's turn's mark and its count.
+  record_ai_tokens: ['member_turn INTEGER', 'asked_closes INTEGER NOT NULL DEFAULT 0'],
   // jobs.md "The set watch (schema 5)": the scheduled job whose approval closed a plugin step's request.
   plugin_step_requests: ['done_by_job TEXT'],
 }

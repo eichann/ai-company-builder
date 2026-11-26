@@ -188,9 +188,10 @@ nor archived in one.
   closes count, and why:
   - **The owner's own action into 対応済み / やることにしなかった** — 「済んだ」 (`settle`), 「取り込まない」
     (`drop`), `handle`, 「自分で確かめる」 (`check_myself`): a person (actor kind `human`) who is the
-    record's owner. The member decided it is done.
+    record's owner — or their own AI at their request (`askedBy` = the actor, `personsOwnAct`; `records.md` "The AI at
+    the member's request"). The member decided it is done.
   - **Every task made from it done by a person** (a task reaching 完了 through the engine, actor kind
-    `human`), the interaction itself closed and no task or 返事のお願い open — the work the mail asked
+    `human`, or the person's own AI at their request — the same `personsOwnAct`), the interaction itself closed and no task or 返事のお願い open — the work the mail asked
     for is over. The reply check's `replied_done` (the member's own AI completing tasks) archives
     nothing: the AI's judgement alone never archives (owner); the member's 「自分で確かめる」 or their
     own completion does.
@@ -436,7 +437,9 @@ private folder → 400, the folder never named), `GET /inbox/status`, `POST /inb
   `wait_until` is B5. v4 (additive): the origin link `task` (もとのタスク: the やること a mail we sent
   first came from). v5 (additive; owner report 2026-11-05: a request sat in 「AI が確かめている」 after the
   member's reply, with nothing to press): the assignee's 「終わりにする」 (`close`) from **every open state**,
-  準備中 / 確かめ中 — the AI's turn — included. The AI never has it (`who: [assignee]`); a check that was
+  準備中 / 確かめ中 — the AI's turn — included. The AI never has it (`who: [assignee]`) — except, since v6, the
+  assignee's own AI at their request (`ai_on_request: [assignee]` on `close` and `replied_elsewhere`, `records.md` "The AI
+  at the member's request"; never `ai_close`'s judgement nor `drop`); a check that was
   running and writes after the close is refused (its `from` no longer holds, and the version moved).
   ［取り消す］ is the generic undo of that entry. The record card offers it (`tasks-ui.md` 「A 返事のお願い's
   card」). Tests: `inbox.test.ts` 「終わりにする」 (who, the AI's late writes refused, undo, 準備中),

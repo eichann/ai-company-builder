@@ -49,13 +49,15 @@ const state = params.get('state') ?? 'normal'
 const role = params.get('role') ?? 'owner'
 const tab = params.get('tab') ?? 'sync'
 // 自分の設定: the member's two switches as the server would answer them.
-const policy = { readIncoming: params.get('company') !== 'off' && params.get('company') !== 'later', autoRun: true }
+// 「AI に完了を頼めるようにする」 is the member's alone (always allowed); `?aiCompletes=none` = a server without it.
+const policy = { readIncoming: params.get('company') !== 'off' && params.get('company') !== 'later', autoRun: true, aiCompletes: true }
 let stoppedLater = params.get('company') === 'later'
 let autoRead = { mode: 'off' as 'outside' | 'all' | 'off', chosen: false }
 const autoReadSet: string[] = []
-const chosen: Record<string, boolean | null> = { readIncoming: null, autoRun: null }
-const switchState = (k: 'readIncoming' | 'autoRun', def: boolean) => ({ on: policy[k] && (chosen[k] ?? def), allowed: policy[k] || (k === 'readIncoming' && stoppedLater), companyDefault: def, chosen: chosen[k] })
+const chosen: Record<string, boolean | null> = { readIncoming: null, autoRun: null, aiCompletes: null }
+const switchState = (k: 'readIncoming' | 'autoRun' | 'aiCompletes', def: boolean) => ({ on: policy[k] && (chosen[k] ?? def), allowed: policy[k] || (k === 'readIncoming' && stoppedLater), companyDefault: def, chosen: chosen[k] })
 const mySwitches = () => ({ readIncoming: { ...switchState('readIncoming', false), connected: { mail: params.get('mail') !== 'no', chat: false } }, autoRun: switchState('autoRun', true),
+  ...(params.get('aiCompletes') === 'none' ? {} : { aiCompletes: switchState('aiCompletes', false) }),
   ...(params.get('channels') === 'none' ? { channels: { mail: false, chat: false } } : {}) })
 const switchesSet: string[] = []
 let repeatAskOn = true
@@ -263,7 +265,7 @@ Object.assign(window, {
     // 「AI から定期の仕事を提案してもらう」: this PC's own setting (on).
     getJobRepeatAsk: async () => ({ success: true, on: repeatAskOn }),
     setJobRepeatAsk: async (_companyId: string, on: boolean) => { repeatAskOn = on; return { success: true, on } },
-    setWorkSwitch: async (_companyId: string, which: 'readIncoming' | 'autoRun', on: boolean) => {
+    setWorkSwitch: async (_companyId: string, which: 'readIncoming' | 'autoRun' | 'aiCompletes', on: boolean) => {
       switchesSet.push(`${which}:${on}`)
       ;(window as unknown as { __switchesSet: string[] }).__switchesSet = switchesSet
       if (on && !policy[which]) { stoppedLater = false; return { success: false, offline: false, code: 'WORK_SWITCH_COMPANY_OFF', error: '会社の設定で止まっています。管理者に確かめてください。' } }

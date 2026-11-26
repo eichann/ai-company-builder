@@ -1,5 +1,5 @@
 /**
- * The two switches each member sets for themselves (自分の設定, owner decision
+ * The switches each member sets for themselves (自分の設定, owner decision
  * 2026-11-02, plan「新しい画面のデモ」J「2つのスイッチは人ごとにも」) — one copy of
  * the rule for the server (the member's API, the clock, the Google client,
  * Slack's signals), the desktop app (whether its AI turns start by themselves)
@@ -13,7 +13,12 @@
  *   and work still arrives (a minutes check is still delivered; only the AI's
  *   work waits).
  *
- * The company decides, per switch, whether members may use it (`allowed`) and
+ * - AI に完了を頼めるようにする (`aiCompletes`, owner decision 2026-11-26): the member's own AI may
+ *   complete their やること and end their 返事のお願い when they ask for it in a conversation
+ *   (records.md "The AI at the member's request"). **The member's alone**: no company or admin
+ *   setting reaches it (`MEMBER_ONLY_POLICY`), and each member starts off.
+ *
+ * The company decides, per switch (but `aiCompletes`), whether members may use it (`allowed`) and
  * what a member who never chose starts with (`memberDefault`); each member
  * turns their own on or off. A switch the company does not allow is off for
  * everyone and cannot be turned on (turning it off is always possible).
@@ -21,7 +26,7 @@
  * Pure: imports only shared/core (server/tests/unit/core-purity.test.ts).
  */
 
-export const WORK_SWITCHES = ['readIncoming', 'autoRun'] as const
+export const WORK_SWITCHES = ['readIncoming', 'autoRun', 'aiCompletes'] as const
 export type WorkSwitch = typeof WORK_SWITCHES[number]
 
 export const isWorkSwitch = (v: unknown): v is WorkSwitch => (WORK_SWITCHES as readonly unknown[]).includes(v)
@@ -40,9 +45,16 @@ export type WorkSwitchPolicies = Record<WorkSwitch, WorkSwitchPolicy>
  * Owner decision 2026-11-02: 受信を読む is allowed and each member starts off;
  * AI が自動で進める is allowed and each member starts on.
  */
+/**
+ * A switch that is the member's alone (`aiCompletes`): always allowed, off until the member turns it
+ * on. Not in the task settings, so nothing a company or an admin saves changes it.
+ */
+export const MEMBER_ONLY_POLICY: WorkSwitchPolicy = Object.freeze({ allowed: true, memberDefault: false })
+
 export const DEFAULT_WORK_SWITCH_POLICIES: WorkSwitchPolicies = Object.freeze({
   readIncoming: Object.freeze({ allowed: true, memberDefault: false }),
   autoRun: Object.freeze({ allowed: true, memberDefault: true }),
+  aiCompletes: MEMBER_ONLY_POLICY,
 }) as WorkSwitchPolicies
 
 /** What a member chose; a switch left out was never chosen (the company's 初めの値 applies). */

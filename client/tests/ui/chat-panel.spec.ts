@@ -693,6 +693,9 @@ test('chat commands: a new consultation sends its message; inserted text waits i
   await run('chat.newConsultation', { message: '/monthly-report ' })
   await expect.poll(async () => (await chatBodies()).length).toBe(1)
   expect((await chatBodies())[0]).toContain('/monthly-report')
+  // The app sent it in the member's place: marked, so it is never taken as the member's own request (app-instruction.ts).
+  const sent = await chat(page, c => c.requests.filter(r => r.path === '/api/chat')[0].body as { messages: Array<{ role: string; metadata?: { appSent?: boolean } }> })
+  expect(sent.messages.filter(m => m.role === 'user').at(-1)?.metadata?.appSent).toBe(true)
   await turnStarted(page)
   await chat(page, c => c.finish())
 

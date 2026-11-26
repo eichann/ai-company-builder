@@ -206,8 +206,8 @@ export function createChatServerConfig(deps: ChatServerConfigDeps): ChatServerCo
         instructions: companyFilesInstructions(notDownloaded),
       }
     },
-    createRecordTools: async ({ companyId, conversationId, agent, actions, requireRun, companyRoot, department, companyScreen, largeContext, onOperationCard, onApprovalCard, onBundleChoice, onMailDraft, onDriveOverwrite, jobProposals, onJobProposalCard }, signal) => {
-      const access = await deps.records.openTurn(companyId, { conversationId, agent, scope: actions ? 'act' : 'read', ...(requireRun ? { requireRun } : {}) })
+    createRecordTools: async ({ companyId, conversationId, agent, actions, requireRun, memberTurn, onAskedClose, companyRoot, department, companyScreen, largeContext, onOperationCard, onApprovalCard, onBundleChoice, onMailDraft, onDriveOverwrite, jobProposals, onJobProposalCard }, signal) => {
+      const access = await deps.records.openTurn(companyId, { conversationId, agent, scope: actions ? 'act' : 'read', ...(requireRun ? { requireRun } : {}), ...(memberTurn && actions ? { memberTurn } : {}) })
       // Connectors' tools ride on the same token (records/tool-providers.ts: Google Drive, …).
       // A Drive put in a consultation about a やること is linked to it by the server (google-drive.md).
       const topicTask = () => taskTopicOf(deps.history.get(companyId, conversationId))
@@ -222,7 +222,7 @@ export function createChatServerConfig(deps: ChatServerConfigDeps): ChatServerCo
       }
       // A mail draft's PDFs are read here, in main, inside this consultation's company folder only.
       const readAttachment = companyRoot ? (file: string) => readMailAttachment(file, companyRoot) : undefined
-      return access ? createRecordTools(access, signal, { companyId, conversationId, department, companyScreen, largeContext, onRecordChanged, onRecordCreated, onOperationCard, onApprovalCard, onBundleChoice, onMailDraft, jobProposals, onJobProposalCard, toolProviders, readMailAttachment: readAttachment,
+      return access ? createRecordTools(access, signal, { companyId, conversationId, department, companyScreen, largeContext, onRecordChanged, onRecordCreated, onOperationCard, onApprovalCard, onBundleChoice, onMailDraft, jobProposals, onJobProposalCard, onAskedClose, toolProviders, readMailAttachment: readAttachment,
         ...(deps.jobMinutesRead ? { onMinutesText: (recordId: string, text: string, docVersion: string | null) => deps.jobMinutesRead?.(conversationId, recordId, text, docVersion) } : {}) }) : null
     },
     consultationTopic: (companyId, conversationId) => {

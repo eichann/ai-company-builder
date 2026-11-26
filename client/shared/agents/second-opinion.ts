@@ -11,6 +11,7 @@
  */
 import { AGENTS, AGENT_IDS, type AgentId } from './registry'
 import { findInstructionLikeText } from '../../../shared/core/instruction-like'
+import { appSentOf } from '../app-instruction'
 
 export const SECOND_OPINION_SERVER = 'acb_second_opinion'
 
@@ -118,7 +119,8 @@ const composedByApp = (message: ConversationMessage) =>
  */
 export function latestMemberText(messages: readonly ConversationMessage[]): string {
   const last = messages.at(-1)
-  if (!last || last.role !== 'user' || composedByApp(last)) return ''
+  // Nor a message the app sent in the member's place (a Skill's 実行, minutes reading: app-instruction.ts `appSentOf`).
+  if (!last || last.role !== 'user' || composedByApp(last) || appSentOf(last)) return ''
   return textOf(last)
 }
 

@@ -15,7 +15,7 @@
  * Version 4 (2026-11-01): the assignee may complete too, saying whose OK it
  * was (`ok_from: [assignee]` → `ok_by` a member, or `ok_note` for an OK from
  * outside ACB); the OK-giver is told and may reopen (「取り消す」). The
- * requester / reviewer complete as before; the AI never.
+ * requester / reviewer complete as before; the AI never (until version 15, below).
  * Version 5 (stage 2 S2, 2026-11-01): tags, `wait_until` (when a reply or
  * delivery is expected — what 追いかけ looks at), a `bundle` link (まとまり),
  * 「AI が用意したもの」 (`prep_summary` + `prepared` links to the mail drafts /
@@ -28,7 +28,10 @@
  * requester take it from the AI at any time. `decline` (受けられない): the assignee only, with a note, hands it
  * back to the requester, who reassigns, cancels or reopens it from
  * `declined` (not final: it is the requester's turn). The AI never
- * completes or declines.
+ * declines, and completes only at the assignee's request (version 15).
+ *
+ * Version 15 (owner decision 2026-11-26): `complete` has `ai_on_request: [assignee]` — see
+ * reply_request v6 below.
  *
  * Version 6 (core interfaces, owner decision 2026-11-01 night): the `customer`
  * link is gone — a task reaches its customer through its `bundle` — and a
@@ -92,6 +95,11 @@
  * `reply_request` v5 (owner report 2026-11-05: a request sat in 確かめ中 after the member's reply with
  * nothing to press): the assignee's 「終わりにする」 (`close`) also from 準備中 / 確かめ中 — the AI's turn —
  * so the member can always end it; the AI's later writes are refused by state and version. Additive.
+ * `reply_request` v6 and `task` v15 (owner decision 2026-11-26 「AI に完了を頼めるようにする」): the
+ * assignee's 「終わりにする」 / 「もう返した」 and a task's 完了 carry `ai_on_request: [assignee]` — the
+ * assignee's own AI may run them when the assignee asked in a conversation they are in, while their
+ * own setting is on; the server decides every call (records.md "The AI at the member's request").
+ * Additive: `who` is unchanged, so an app or server that does not know the key still refuses the AI.
  *
  * interaction (やりとり): the common receipt for what comes from outside
  * (mail, Slack, LINE…). Server only, no body — a summary and a pointer to the
@@ -163,7 +171,7 @@ import { parseTypeFile, type TypeDefinition } from './record-types'
 export const CORE_TYPE_FILES: Record<string, string> = {
   task: `---
 label: タスク
-version: 14
+version: 15
 implements: [request]
 storage: server
 fields:
@@ -207,7 +215,7 @@ actions:
   assign:         { label: 担当を替える, from: [todo, in_progress, review, waiting, declined, awaiting_acceptance], who: [assignee, requested_by, dept_manager, admin, ai], args: { assignee: person }, notify: assignee, note: required, approval: undoable, decision: true, hand_to: assignee }
   wait:           { label: 返事待ちにする, from: [todo, in_progress], to: waiting, who: [assignee, ai], args: { waiting_on: text, wait_until: date }, note: optional }
   set_due:        { label: 期限を変える, who: [requested_by, assignee, ai], args: { due: date }, notify: requested_by, note: optional, approval: undoable }
-  complete:       { label: 完了にする, from: [todo, in_progress, review, waiting, awaiting_acceptance, declined], to: done, who: [assignee, requested_by, reviewer], who_unless: { assignee: { when_done: check } }, ok_from: [assignee], notify: [requested_by, reviewer, ok_by], attach: [files], note: optional, decision: true }
+  complete:       { label: 完了にする, from: [todo, in_progress, review, waiting, awaiting_acceptance, declined], to: done, who: [assignee, requested_by, reviewer], who_unless: { assignee: { when_done: check } }, ok_from: [assignee], notify: [requested_by, reviewer, ok_by], attach: [files], note: optional, decision: true, ai_on_request: [assignee] }
   cancel:         { label: 中止する, from: [todo, in_progress, review, waiting, preparing, declined, awaiting_acceptance], to: cancelled, who: [requested_by, admin], notify: assignee, note: required, decision: true }
   reopen:         { label: やり直す, from: [done, cancelled, declined], to: in_progress, who: [requested_by, reviewer, ok_by, admin], notify: assignee, note: optional, hand_to: assignee }
   finish_prep:    { label: 用意ができた, from: [preparing], to: todo, who: [ai], args: { prep_summary: long_text }, links: [prepared], notify: assignee, hand_to: assignee }
@@ -231,7 +239,7 @@ ACB に最初からある「依頼」の形。記録はサーバーだけが持�
 「準備中」は AI の番です。AI が下ごしらえ（確かめたこと・下書き）を済ませて「用意ができた」で担当に渡します。期限が近い・うまくいかなかった・情報が足りないときは、AI が理由を添えて「先に渡す」で早めに渡します。担当と頼んだ人は「自分で進める」でいつでも引き取れます。担当は「受けられない」で頼んだ人に返せます（ひとことの理由つき）。
 お客さまなどの相手は「まとまり」（案件など）からたどります。まとまりに入らないタスクだけ、「相手」を直接つなぎます。
 ほかの部署の人に頼んだタスクは「引き受け待ち」になり、担当が「引き受ける」と担当の番になります（どんなときに自動で引き受けたことになるかは会社の設定で決めます）。
-完了はどの状態からでもできます（準備中だけは先に「自分で進める」）。「終わったら」が「知らせるだけ」（初めはこれ）なら担当が完了にし、頼んだ人に知らせます（頼んだ人は「やり直す」で戻せます）。「確かめてから」なら担当は「終わったので見てもらう」で確かめる人に渡し、確かめる人の OK で完了します（確かめる人が ACB の外で OK したときは、担当がそのいきさつを書いて完了にできます）。
+完了はどの状態からでもできます（準備中だけは先に「自分で進める」）。担当が自分の設定で「AI に完了を頼めるようにする」をオンにしているときは、担当が相談の中で頼むと、AI が担当のやることを完了にできます（取り消せます）。「終わったら」が「知らせるだけ」（初めはこれ）なら担当が完了にし、頼んだ人に知らせます（頼んだ人は「やり直す」で戻せます）。「確かめてから」なら担当は「終わったので見てもらう」で確かめる人に渡し、確かめる人の OK で完了します（確かめる人が ACB の外で OK したときは、担当がそのいきさつを書いて完了にできます）。
 「返事待ち」にするときは、いつごろ来そうか（返事の見込み）も決めます。決めなければ 3 営業日後です。見込みを過ぎても返事待ちのままなら、担当の番に戻ります（自動で進めるなら、AI が催促の下書きを用意します）。
 会議から AI が作る宿題は、会社の設定が「案として出す」（初めはこれ）なら「案」になります。案はだれの番でもなく、一覧にも出ません。「議事録を確認する」やることの中で、人が「足す」とふつうのやることに、「要らない」でしまいます（消しません。「案に戻す」で戻せます）。
 会議の案は、その会議を読める人ならだれでも「足す」「要らない」「案に戻す」ができます。AI は案ごとに根拠になった議事録の文を添え、同じ根拠の案は1つにまとまります。件名が似ている案は「似ている案があります」と並び、人が「同じ」（新しいほうを要らないに）か「別のもの」を選びます。
@@ -417,7 +425,7 @@ AI が残したものは「決めたことの案」です。決める立場の�
 `,
   reply_request: `---
 label: 返事のお願い
-version: 5
+version: 6
 implements: [request, prepared, outside_event]
 storage: server
 fields:
@@ -452,10 +460,10 @@ actions:
   take_over:     { label: 自分で進める, from: [preparing, checking], to: open, who: [assignee], note: optional, hand_to: assignee }
   await_reply:   { label: 相手の返事待ちにする, from: [open, checking], to: waiting_reply, who: [assignee, ai], args: { waiting_on: text }, note: optional }
   resume:        { label: 自分の番に戻す, from: [waiting_reply], to: open, who: [assignee], note: optional, hand_to: assignee }
-  close:         { label: 終わりにする, from: [preparing, open, waiting_reply, checking], to: closed, who: [assignee], note: optional }
+  close:         { label: 終わりにする, from: [preparing, open, waiting_reply, checking], to: closed, who: [assignee], note: optional, ai_on_request: [assignee] }
   drop:          { label: 返事をしない, from: [preparing, open, waiting_reply, checking], to: dropped, who: [assignee], note: required }
   reopen:        { label: やり直す, from: [closed, dropped], to: open, who: [assignee], note: optional, hand_to: assignee }
-  replied_elsewhere: { label: もう返した, from: [preparing, open, waiting_reply, checking], to: closed, who: [assignee], note: optional }
+  replied_elsewhere: { label: もう返した, from: [preparing, open, waiting_reply, checking], to: closed, who: [assignee], note: optional, ai_on_request: [assignee] }
   set_end_condition: { label: 終わりの条件を決める, who: [assignee, ai], args: { end_condition: long_text }, note: optional }
   set_due:       { label: 期限を変える, who: [assignee, ai], args: { due: date }, note: optional }
   set_wait_until: { label: 返事の見込みを決める, who: [assignee, ai], args: { wait_until: date }, note: optional }
@@ -463,7 +471,7 @@ actions:
 # 返事のお願い
 
 来た連絡から生まれる「返事をする」仕事。ふつうのやることとは別の型で、終わりの条件を持ちます（返事が来れば・日程が決まれば など。AI が作るときに入れ、人が直せます）。
-「準備中」と「確かめ中」は AI の番です。AI が返事の下書きを用意して担当に渡し、返事が来たとき・こちらが返信したときは、終わりの条件と照らして終わりにするか（「AI が判断して終わりにする」）、相手の返事待ちにするか、担当の番に戻すかを決めます。この型の中でだけ、AI が終わりにできます（やり直せます）。
+「準備中」と「確かめ中」は AI の番です。AI が返事の下書きを用意して担当に渡し、返事が来たとき・こちらが返信したときは、終わりの条件と照らして終わりにするか（「AI が判断して終わりにする」）、相手の返事待ちにするか、担当の番に戻すかを決めます。AI が判断して終わりにできるのはこの型だけです（やり直せます）。担当が自分の設定で「AI に完了を頼めるようにする」をオンにしているときは、担当が相談の中で頼むと、AI が「終わりにする」「もう返した」もできます（取り消せます）。
 電話や別の経路で返したときなど、ACB から見えない返事は、担当が「もう返した」で終わりにします。
 担当は「終わりにする」で、AI が用意している間や確かめている間でも、いつでも終わりにできます。
 期限は、連絡に締切が書いてあればそれ、なければ会社の「返事の目安」です。目安で入れた期限は「目安」と分かるように出します。
@@ -559,6 +567,8 @@ export const SERVICE_TRANSITIONS: Readonly<Record<string, ReadonlyArray<{ from: 
     { from: ['draft'], to: 'sent' },
     { from: ['draft'], to: 'unknown' },
     { from: ['draft', 'unknown'], to: 'discarded' },
+    // 「もう返した」 undone: a draft that action discarded back to 下書き (the inbox only; nothing is sent by it).
+    { from: ['discarded'], to: 'draft' },
     // 「送られていた」/「送られていなかった」 after an unknown result.
     { from: ['unknown'], to: 'sent' },
     { from: ['unknown'], to: 'draft' },
@@ -663,7 +673,13 @@ export const ACCEPTANCE: Readonly<Record<string, {
  * `migrateCompanyTaskVersion`): the core definition of that version is stored first, then each task's
  * index row says it (no value changes, so no ledger entry).
  */
-export const TASK_VERSION = 14
+export const TASK_VERSION = 15
+
+/**
+ * The reply_request version every 返事のお願い is moved to at startup (the `TASK_VERSION` mechanism:
+ * adapters/sqlite/records.ts `migrateCompanyCoreTypeVersion`). Version 6 only adds `ai_on_request`.
+ */
+export const REPLY_REQUEST_VERSION = 6
 
 /**
  * The decision version every decision is moved to at startup (decision version 6, the
@@ -725,6 +741,11 @@ export const INBOX_ACTIONS = Object.freeze({
   replyArrived: 'reply_arrived',
   /** A reply_request: someone of the company replied in the thread. */
   memberReplied: 'member_replied',
+  /**
+   * A mail draft: 「もう返した」 was undone, so the drafts that very 「もう返した」 discarded come back to 下書き
+   * (records.md "The AI at the member's request"; only one still exactly as it discarded it, body kept).
+   */
+  draftRestored: 'draft_restored',
   /** An interaction: the AI's judgement (route records-ai-inbox). */
   judged: 'judge',
   /** An interaction: a department's mail taken by a member (引き受ける). */

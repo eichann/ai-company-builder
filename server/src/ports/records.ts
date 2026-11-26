@@ -169,6 +169,11 @@ export interface RecordAiTokenRow {
   /** The execution run the token is bound to and its claim generation (S10b); absent / null for a consultation's token. */
   runId?: string | null
   runGeneration?: number | null
+  /**
+   * The member's app asked for it for a turn the member started with their own message (records.md "The AI
+   * at the member's request"); never with a run. Absent / false for every other token.
+   */
+  memberTurn?: boolean
 }
 
 /** The first time a turn's holder (or their delegate) opened a record in the app. */
@@ -316,6 +321,11 @@ export interface RecordRepository {
   clearHeads(): void
 
   insertAiToken(row: RecordAiTokenRow): void
+  /**
+   * One more action the AI ran at the member's request with this token (a member-turn token, not bound to a
+   * run), only while fewer than `max` were: false = the cap (or no such token). Call inside the action's transaction.
+   */
+  takeAskedAction(userId: string, tokenId: string, max: number): boolean
   /** The token of this company with this digest (another company's never matches). */
   aiTokenByHash(tokenHash: string): RecordAiTokenRow | null
   /** End one of the member's tokens; false when it is not theirs (or already ended). */

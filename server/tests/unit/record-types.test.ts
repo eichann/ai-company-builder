@@ -29,13 +29,16 @@
  * - `state_labels` names only states of the type, once each, with a short
  *   one-line name no two states share; it is display only, so adding, changing
  *   or dropping one is not breaking (a higher version, like any change) and it
- *   is absent from the definition when not written.
+ *   is absent from the definition when not written;
+ * - `ai_on_request` names only person fields already in `who`; the core's task 15 / reply_request 6 add it
+ *   without a breaking change, and `who` stays without `ai`.
  */
 import { describe, expect, it } from 'vitest'
 import { parseYamlLite } from '../../../shared/core/yaml-lite'
 import { canonicalTypeJson, compareTypeDefinitions, normalizeTagsValue, parseTagsValue, parseTypeFile, TAG_MAX_LENGTH, TAGS_MAX_COUNT, type TypeDefinition } from '../../../shared/core/record-types'
 import { newRecordId, parseRecordFile } from '../../../shared/core/records'
 import { companyExtensionConflicts } from '../../../shared/core/plugin-type-upgrade'
+import { CORE_TYPE_FILES, REPLY_REQUEST_VERSION, TASK_VERSION } from '../../../shared/core/core-types'
 
 const TASK = `---
 label: タスク
@@ -462,5 +465,45 @@ describe('how a state is shown (state_labels, owner decision 2026-11-24)', () =>
     // A company's extension of a plugin type may name states the plugin's does not, and drop them again.
     expect(companyExtensionConflicts({ ...named, version: 5 }, plain)).toEqual([])
     expect(companyExtensionConflicts({ ...plain, version: 5 }, named)).toEqual([])
+  })
+})
+
+describe('ai_on_request (task 15, reply_request 6: the AI at the member\'s request)', () => {
+  const core = (name: string) => {
+    const text = CORE_TYPE_FILES[name]
+    const parsed = parseTypeFile(name, text)
+    if (!parsed.ok) throw new Error(parsed.errors.join('\n'))
+    return { text, def: parsed.definition }
+  }
+  /** The version before: the same text without the key, one version lower. */
+  const before = (name: string, version: number) => {
+    const { text } = core(name)
+    const parsed = parseTypeFile(name, text.replaceAll(', ai_on_request: [assignee]', '').replace(/^version: \d+$/m, `version: ${version}`))
+    if (!parsed.ok) throw new Error(parsed.errors.join('\n'))
+    return parsed.definition
+  }
+
+  it('the core declares it on exactly the assignee\'s 完了 / 終わりにする / もう返した, and the versions stay compatible (additive, a higher version)', () => {
+    const task = core('task').def
+    const rr = core('reply_request').def
+    expect(Object.entries(task.actions).filter(([, a]) => a.aiOnRequest).map(([n, a]) => [n, a.aiOnRequest])).toEqual([['complete', ['assignee']]])
+    expect(Object.entries(rr.actions).filter(([, a]) => a.aiOnRequest).map(([n, a]) => [n, a.aiOnRequest]).sort()).toEqual([['close', ['assignee']], ['replied_elsewhere', ['assignee']]])
+    // `who` is unchanged, so an app or server that does not know the key still refuses the AI.
+    expect(task.actions.complete.who).not.toContain('ai')
+    expect(rr.actions.close.who).toEqual(['assignee'])
+    for (const [name, version] of [['task', 14], ['reply_request', 5]] as const) {
+      expect(compareTypeDefinitions(before(name, version), core(name).def)).toMatchObject({ changed: true, breaking: [], versionProblem: null })
+      // Dropping it again only narrows: not breaking either (a higher version, like any change).
+      expect(compareTypeDefinitions(core(name).def, { ...before(name, version), version: version + 2 }).breaking).toEqual([])
+    }
+    expect(TASK_VERSION).toBe(task.version)
+    expect(REPLY_REQUEST_VERSION).toBe(rr.version)
+  })
+
+  it('absent when not written; only person fields already in `who`', () => {
+    expect(Object.values(before('task', 14).actions).some(a => 'aiOnRequest' in a)).toBe(false)
+    const withKey = (ask: string) => core('task').text.replace('ai_on_request: [assignee]', `ai_on_request: [${ask}]`)
+    expect(parseTypeFile('task', withKey('assignee')).ok).toBe(true)
+    for (const bad of ['next_actor', 'ai', 'admin', 'nobody']) expect(parseTypeFile('task', withKey(bad)).ok).toBe(false)
   })
 })

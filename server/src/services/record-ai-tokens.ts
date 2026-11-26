@@ -21,6 +21,14 @@
  * found there (another company's id finds nothing), and the holder must
  * still be a member. While the company's AI is stopped (emergency stop,
  * agent-stop.md) every token is refused.
+ *
+ * `memberTurn` (records.md "The AI at the member's request", owner decision 2026-11-26): the app says the
+ * token is for a turn the member started with their own message. Kept only for an `act` token **not bound
+ * to a run** — a run (「AI の番」, a plugin step's, a scheduled job's) has nobody present, so it never
+ * carries it, whatever the app asked — and only with it may the AI run an action at the member's request
+ * (`ai_on_request`). An app that does not send it (every released build) never gets it. Like the agent
+ * name, it is the app's word: it stops a mistaken app, not a forged one; the member's own setting and the
+ * record's assignee are the server's.
  */
 import { RECORD_ACTION_AGENTS } from '../../shared/types/records'
 import type { Clock, IdGenerator } from '../ports/clock'
@@ -42,6 +50,8 @@ export interface RecordTokenIssued {
   tokenId: string
   scope: 'read' | 'act'
   expiresAt: string
+  /** The token is a member's turn's (see above): what the app may offer. Absent from an older server. */
+  memberTurn: boolean
 }
 
 /** Who a valid token acts for. */
@@ -55,6 +65,8 @@ export interface RecordTokenHolder {
   tokenId: string
   /** The execution run the token is bound to (S10b), checked current on every call; null for a consultation. */
   run: { id: string; generation: number } | null
+  /** Issued for a turn the member started with their own message, never with a run (see above). */
+  memberTurn: boolean
 }
 
 export interface RecordAiTokenDeps {
@@ -94,6 +106,7 @@ export function createRecordAiTokenService(deps: RecordAiTokenDeps) {
       }
       if (typeof agent !== 'string' || !/^[a-z0-9_-]{1,40}$/.test(agent)) return refuse('bad-request', 'agent is a short name')
       if (scope !== 'read' && scope !== 'act') return refuse('bad-request', 'scope is read or act')
+      if (b.memberTurn !== undefined && typeof b.memberTurn !== 'boolean') return refuse('bad-request', 'memberTurn is true or false')
       let run: { runId: string; generation: number } | null = null
       if (b.run !== undefined && b.run !== null) {
         const bound = deps.runs.bindable(member, b.run, conversationId)
@@ -109,6 +122,8 @@ export function createRecordAiTokenService(deps: RecordAiTokenDeps) {
       }
       // Codex (or any agent not listed) never gets an act token, whatever the app asked.
       const granted: 'read' | 'act' = scope === 'act' && RECORD_ACTION_AGENTS.includes(agent) ? 'act' : 'read'
+      // A run has nobody present: never a member's turn, whatever the app said (records.md "The AI at the member's request").
+      const memberTurn = b.memberTurn === true && run === null && granted === 'act'
       const secret = ids.newToken()
       const token = `${RECORD_TOKEN_PREFIX}${member.companyId}.${secret}`
       const tokenId = ids.newId()
@@ -116,8 +131,9 @@ export function createRecordAiTokenService(deps: RecordAiTokenDeps) {
       records.insertAiToken({
         id: tokenId, userId: member.userId, tokenHash: tokenDigest.digest(token), scope: granted, agent, conversationId,
         createdAt: new Date(now).toISOString(), expiresAt, revokedAt: null, runId: run?.runId ?? null, runGeneration: run?.generation ?? null,
+        memberTurn,
       })
-      return ok({ token, tokenId, scope: granted, expiresAt })
+      return ok({ token, tokenId, scope: granted, expiresAt, memberTurn })
     },
 
     /** DELETE …/me/record-tokens/:tokenId — the member's own token only. */
@@ -147,7 +163,7 @@ export function createRecordAiTokenService(deps: RecordAiTokenDeps) {
       // A run with nobody present stops with the member's AI (a consultation's token is the app's to stop).
       // 503 like the claim: the app's tool fails; nothing reaches the handler, so no operation key is taken.
       if (run && deps.runs.runStopped(member, run)) return refuse('unavailable', AI_RUN_STOPPED.error, { code: AI_RUN_STOPPED.code })
-      return ok({ member, scope: row.scope, agent: row.agent, tokenId: row.id, conversationId: row.conversationId, run })
+      return ok({ member, scope: row.scope, agent: row.agent, tokenId: row.id, conversationId: row.conversationId, run, memberTurn: row.memberTurn === true && run === null })
     },
   }
 }

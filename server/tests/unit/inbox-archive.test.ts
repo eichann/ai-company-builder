@@ -141,6 +141,7 @@ beforeEach(() => {
     managedFolders: () => [], isMember: (co, u) => roleOf(co, u) !== null, roleOf,
     notify: (_companyId, userIds, change) => { told.push({ userIds, change }) },
     afterAct: (co, change) => inbox.afterAct(co, change),
+    aiAskedOn: () => true,
   })
   const fake: InboxSource = {
     label: 'Gmail',
@@ -441,6 +442,17 @@ describe('review of #607: what the archive never does', () => {
     expect(stateOf(task).state).toBe('done')
     await inbox.whenIdle()
     expect(archiveCalls).toEqual([])
+  })
+
+  it('her own AI completing the last task at her request archives like her own press (records.md "The AI at the member\'s request")', async () => {
+    archiveAllowed.add('u-alice')
+    const t = await aliceMail()
+    const task = ok(await engine.create(m('u-alice'), AI('u-alice'), { type: 'task', title: '見積書を送る', personal: true, fields: { assignee: 'u-alice' }, links: { interaction: [t.id] } })).record.id
+    ok(inbox.judge(m('u-alice'), AI('u-alice'), t.id, { expectedVersion: 1, outcome: 'task', reason: '見積の依頼', taskId: task }))
+    handle().records.insertAiToken({ id: 'tok-ask', userId: 'u-alice', tokenHash: 'h-ask', scope: 'act', agent: 'claude-code', conversationId: 'conv-1', createdAt: TS, expiresAt: '2099-01-01T00:00:00.000Z', revokedAt: null, memberTurn: true })
+    ok(await engine.act(m('u-alice'), { ...AI('u-alice'), askedTurn: { tokenId: 'tok-ask' } }, task, 'complete', { expectedVersion: stateOf(task).version }))
+    await inbox.whenIdle()
+    expect(archiveCalls).toEqual([{ userId: 'u-alice', refs: [t.msg.sourceRef], back: false }])
   })
 
   it('more watched records than one look checks: the cursor waits until every one was checked', async () => {

@@ -6,6 +6,7 @@ import type { ReviewRecord } from './review-request'
 import type { PluginOperationCard } from './plugin-operations'
 import type { ApprovalCardRef } from './approvals'
 import type { JobProposalCardRef } from './job-proposals'
+import type { AiAskedCard } from './ai-asked'
 import type { BrowserPlanCardRef } from './browser-plans'
 import type { BrowserInspectionRef } from './browser-inspection'
 import type { MinutesBundleChoiceCard } from './minutes-app'
@@ -40,6 +41,8 @@ export interface ChatSession {
     approvals?: ApprovalCardRef[]
     /** Job proposal candidates the AI made in this reply (job-proposals.ts): a reference; the card reads the candidate from the server. */
     jobProposals?: JobProposalCardRef[]
+    /** What the AI completed or ended at the member's request in this reply, with ［取り消す］ per item (ai-asked.ts). */
+    aiAsked?: AiAskedCard[]
     /** 「ブラウザ操作」 plans made in this reply (browser-plans.ts): a reference; the card reads the plan from the server. */
     browserPlans?: BrowserPlanCardRef[]
     /** 「ブラウザ操作」 inspections made in this reply (browser-inspection.ts): a reference; main holds the card in memory only. */
@@ -60,6 +63,8 @@ export interface ChatSession {
     toolLines?: Record<string, StoredToolLine>
     /** The app composed this message for the AI (app-instruction.ts): sent, never shown or previewed as the member's words. */
     appInstruction?: AppInstruction
+    /** The app sent this message in the member's place (app-instruction.ts `appSentOf`): never the member's own request. */
+    appSent?: true
     /** Records the member dropped on the input that went to the AI with this message (record-drop.ts): a line in its bubble. */
     droppedRecords?: DroppedRecordRef[]
   }>

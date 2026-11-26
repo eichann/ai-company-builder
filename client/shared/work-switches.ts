@@ -1,8 +1,9 @@
 import type { MyWorkSwitches, WorkSwitch } from '../../shared/types/work-switches'
 
 /**
- * 自分の設定 → 「受信を読む」「AI が自動で進める」 (owner decision 2026-11-02;
- * shared/core/work-switches.ts): the member's own two switches, read and changed
+ * 自分の設定 → 「受信を読む」「AI が自動で進める」 (owner decision 2026-11-02) and
+ * 「AI に完了を頼めるようにする」 (owner decision 2026-11-26, the member's alone; records.md "The AI at the
+ * member's request"; shared/core/work-switches.ts): the member's own switches, read and changed
  * with the member's session in main (IPC `workSwitches:*`).
  *
  * A switch the company does not allow comes with `allowed: false`: shown greyed
@@ -12,7 +13,7 @@ import type { MyWorkSwitches, WorkSwitch } from '../../shared/types/work-switche
 export type { MyWorkSwitches, WorkSwitch }
 
 /** Each switch's name, as 自分の設定 shows it; other screens that point to a switch say this name. */
-export const WORK_SWITCH_NAMES: Readonly<Record<WorkSwitch, string>> = { readIncoming: '受信を読む', autoRun: 'AI が自動で進める' }
+export const WORK_SWITCH_NAMES: Readonly<Record<WorkSwitch, string>> = { readIncoming: '受信を読む', autoRun: 'AI が自動で進める', aiCompletes: 'AI に完了を頼めるようにする' }
 
 export const WORK_SWITCHES_OFFLINE_TEXT = 'サーバーにつながらないため、いまは自分の設定を読み込めません。つながると自動で読み直します。'
 export const WORK_SWITCH_COMPANY_OFF_TEXT = '会社の設定で止まっています'

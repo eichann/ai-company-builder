@@ -6,6 +6,7 @@ import { REVIEW_PART_TYPE, readReviewRecord, type ReviewRecord } from '../../../
 import { PLUGIN_OPERATION_PART_TYPE, readPluginOperationCard, type PluginOperationCard } from '../../../shared/plugin-operations'
 import { APPROVAL_PART_TYPE, readApprovalCardRef, type ApprovalCardRef } from '../../../shared/approvals'
 import { JOB_PROPOSAL_PART_TYPE, readJobProposalCardRef, type JobProposalCardRef } from '../../../shared/job-proposals'
+import { AI_ASKED_PART_TYPE, readAiAskedCard, type AiAskedCard } from '../../../shared/ai-asked'
 import { BROWSER_PLAN_PART_TYPE, readBrowserPlanCardRef, type BrowserPlanCardRef } from '../../../shared/browser-plans'
 import { BROWSER_INSPECTION_PART_TYPE, readBrowserInspectionRef, type BrowserInspectionRef } from '../../../shared/browser-inspection'
 import { MINUTES_BUNDLE_CHOICE_PART_TYPE, readMinutesBundleChoiceCard, type MinutesBundleChoiceCard } from '../../../shared/minutes-app'
@@ -15,7 +16,7 @@ import { FILE_LINKED_PART_TYPE, readFileLinkedPart, type FileLinkedPart } from '
 import { restoreTextWithChoices, storedChoiceFromPart, storedSteerFromPart, type StoredChoicePrompt, type StoredSteer } from './choiceHistory'
 import { RESTORED_TOOL_PART_TYPE, TOOL_MARKER_RE, restoredToolLine, storedToolLine, type StoredToolLine } from '../../../shared/tool-display'
 import { toolRowOf } from './toolRows'
-import { appInstructionOf, readAppInstruction } from '../../../shared/app-instruction'
+import { appInstructionOf, appSentOf, readAppInstruction } from '../../../shared/app-instruction'
 import { droppedRecordsOf, readDroppedRecords } from '../../../shared/record-drop'
 import { SECOND_OPINION_PART_TYPE, readSecondOpinionRecord, type SecondOpinionRecord } from '../../../shared/agents/second-opinion'
 
@@ -38,6 +39,7 @@ export function uiMessageToSessionMessage(msg: UIMessage, timestamp: Date): Sess
   const pluginOperations: PluginOperationCard[] = []
   const approvals: ApprovalCardRef[] = []
   const jobProposals: JobProposalCardRef[] = []
+  const aiAsked: AiAskedCard[] = []
   const browserPlans: BrowserPlanCardRef[] = []
   const browserInspections: BrowserInspectionRef[] = []
   const minutesDealChoices: MinutesBundleChoiceCard[] = []
@@ -59,6 +61,15 @@ export function uiMessageToSessionMessage(msg: UIMessage, timestamp: Date): Sess
     if (part.type === JOB_PROPOSAL_PART_TYPE) {
       const ref = readJobProposalCardRef((part as { data?: unknown }).data)
       if (ref && !jobProposals.some(j => j.id === ref.id)) { jobProposals.push(ref); cardOrder.push(`job-proposal-${ref.id}`) }
+      continue
+    }
+    // One card per turn, sent again with every item: the latest copy wins.
+    if (part.type === AI_ASKED_PART_TYPE) {
+      const card = readAiAskedCard((part as { data?: unknown }).data)
+      if (!card) continue
+      const at = aiAsked.findIndex(c => c.id === card.id)
+      if (at >= 0) aiAsked[at] = card
+      else { aiAsked.push(card); cardOrder.push(`ai-asked-${card.id}`) }
       continue
     }
     if (part.type === BROWSER_PLAN_PART_TYPE) {
@@ -138,6 +149,7 @@ export function uiMessageToSessionMessage(msg: UIMessage, timestamp: Date): Sess
     ...(pluginOperations.length ? { pluginOperations } : {}),
     ...(approvals.length ? { approvals } : {}),
     ...(jobProposals.length ? { jobProposals } : {}),
+    ...(aiAsked.length ? { aiAsked } : {}),
     ...(browserPlans.length ? { browserPlans } : {}),
     ...(browserInspections.length ? { browserInspections } : {}),
     ...(minutesDealChoices.length ? { minutesDealChoices } : {}),
@@ -148,6 +160,7 @@ export function uiMessageToSessionMessage(msg: UIMessage, timestamp: Date): Sess
     ...(secondOpinions.length ? { secondOpinions } : {}),
     ...(Object.keys(toolLines).length ? { toolLines } : {}),
     ...(appInstruction ? { appInstruction } : {}),
+    ...(appSentOf(msg) ? { appSent: true as const } : {}),
     ...(droppedRecords.length ? { droppedRecords } : {}),
   }
 }
@@ -199,6 +212,10 @@ export function sessionMessageToUIMessage(msg: SessionMessage): UIMessage {
     const ref = readJobProposalCardRef(stored)
     if (ref) cards.push({ type: JOB_PROPOSAL_PART_TYPE, id: `job-proposal-${ref.id}`, data: ref })
   }
+  for (const stored of msg.aiAsked || []) {
+    const card = readAiAskedCard(stored)
+    if (card) cards.push({ type: AI_ASKED_PART_TYPE, id: `ai-asked-${card.id}`, data: card })
+  }
   for (const stored of msg.browserPlans || []) {
     const ref = readBrowserPlanCardRef(stored)
     if (ref) cards.push({ type: BROWSER_PLAN_PART_TYPE, id: `browser-plan-${ref.id}`, data: ref })
@@ -237,7 +254,8 @@ export function sessionMessageToUIMessage(msg: SessionMessage): UIMessage {
   return {
     id: msg.id,
     role: msg.role as 'user' | 'assistant',
-    ...(appInstruction || droppedRecords.length ? { metadata: { ...(appInstruction ? { appInstruction } : {}), ...(droppedRecords.length ? { droppedRecords } : {}) } } : {}),
+    ...(appInstruction || msg.appSent === true || droppedRecords.length
+      ? { metadata: { ...(appInstruction ? { appInstruction } : {}), ...(msg.appSent === true ? { appSent: true } : {}), ...(droppedRecords.length ? { droppedRecords } : {}) } } : {}),
     parts,
   }
 }

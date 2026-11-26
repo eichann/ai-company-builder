@@ -29,7 +29,7 @@
  * Pure: imports only shared/core (server/tests/unit/core-purity.test.ts).
  */
 import { isBusinessDay, isCalendarDate, nextBusinessDay } from './business-days'
-import { DEFAULT_WORK_SWITCH_POLICIES, type WorkSwitchPolicies, type WorkSwitchPolicy } from './work-switches'
+import { DEFAULT_WORK_SWITCH_POLICIES, MEMBER_ONLY_POLICY, type WorkSwitchPolicies, type WorkSwitchPolicy } from './work-switches'
 
 /** `next-business-day` = 翌営業日; `same-day` = 当日中 (before the cutoff). */
 export type ReplyRule = 'next-business-day' | 'same-day'
@@ -268,6 +268,8 @@ export function workSwitchPoliciesOf(settings: TaskSettings): WorkSwitchPolicies
   return {
     readIncoming: { allowed: settings.readIncoming.allowed, memberDefault: settings.readIncoming.memberDefault },
     autoRun: { allowed: settings.autoRun.enabled, memberDefault: settings.autoRun.memberDefault },
+    // The member's alone: the company's settings never reach it.
+    aiCompletes: MEMBER_ONLY_POLICY,
   }
 }
 

@@ -526,6 +526,8 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
       return replyTarget(receivedAt, s.reply, s.companyHolidays.map(h => h.date)).date
     },
     featureOff: typeOff,
+    // 「AI に完了を頼めるようにする」: the member's own switch (records.md "The AI at the member's request").
+    aiAskedOn: (companyId, userId) => workSwitches.isOn(companyId, userId, 'aiCompletes'),
     // The execution run's fence at the write (records.md "Execution runs"; built below, called only after construction).
     runFence: (member, run) => aiRuns.writeFence(member, run),
     // 全社 is a choice: nothing given is refused once every active member's app names 全社 explicitly (records.md);

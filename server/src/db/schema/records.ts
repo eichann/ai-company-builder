@@ -164,6 +164,23 @@ export const recordSchema = `
 `
 
 /**
+ * The AI at the member's request (records.md "The AI at the member's request", owner decision 2026-11-26),
+ * additive and nullable, so an older build keeps inserting without them:
+ * record_ai_tokens.member_turn — 1 when the member's app asked for the token for a turn the member started
+ * with their own message (never with a run); asked_closes — how many actions the AI ran at the member's
+ * request with it (the per-turn cap, counted in the action's own transaction);
+ * record_ledger.asked_by — the member who asked their AI for that entry (informational: the server decided
+ * when it was written).
+ */
+export function migrateAiAskedColumns(conn: Database.Database): void {
+  const cols = (table: string) => new Set((conn.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>).map(c => c.name))
+  const tokens = cols('record_ai_tokens')
+  if (!tokens.has('member_turn')) conn.exec('ALTER TABLE record_ai_tokens ADD COLUMN member_turn INTEGER')
+  if (!tokens.has('asked_closes')) conn.exec('ALTER TABLE record_ai_tokens ADD COLUMN asked_closes INTEGER NOT NULL DEFAULT 0')
+  if (!cols('record_ledger').has('asked_by')) conn.exec('ALTER TABLE record_ledger ADD COLUMN asked_by TEXT')
+}
+
+/**
  * Where a ledger entry came from (records.md "Provenance"), added after the
  * ledger shipped: nullable, so an older build keeps inserting without them.
  * proposed_by: 'ai' when a person confirmed what their AI suggested;

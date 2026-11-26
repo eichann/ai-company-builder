@@ -98,13 +98,18 @@ live next to the task settings but in their own table: `records.md` "Features on
   `readIncoming`). On = the company allows it **and** (the member's choice, else the 初めの値). A
   switch the company does not allow is off for everyone and cannot be turned on (409
   `WORK_SWITCH_COMPANY_OFF`, nothing stored); turning off is always kept.
+- **「AI に完了を頼めるようにする」** (`aiCompletes`, owner decision 2026-11-26): the third switch, **the member's alone**
+  — `MEMBER_ONLY_POLICY` (always allowed, starts off; not in the task settings, no company or admin setting reaches it).
+  On, the member's own AI may complete their やること and end their 返事のお願い when they ask in a conversation
+  (`records.md` "The AI at the member's request"). `GET` answers it as the optional `aiCompletes`; the app shows it only
+  then (`MySwitchesSection.tsx`). Test: `server/tests/integration/ai-asked-close.test.ts`.
 - Stored per member behind the handle (`member_work_switches`, `tasks.workSwitches` /
   `saveWorkSwitches`; a leaver's row goes with `removeMember`). When the table is first made
   (`migrateMemberWorkSwitches`, once), a member who read incoming messages — Google's 受信を読む
   granted and not turned off, or Slack's reading granted and not turned off — gets 受信を読む
   chosen on (Google's own toggle turned off → chosen off), so the 初めの値 "off" changes nothing
   for them.
-- `GET|PUT /api/companies/:id/me/work-switches` (`{ switch: 'readIncoming' | 'autoRun', on }`, any
+- `GET|PUT /api/companies/:id/me/work-switches` (`{ switch: 'readIncoming' | 'autoRun' | 'aiCompletes', on }`, any
   member, their own only) → `MyWorkSwitches` (`shared/types/work-switches.ts`: per switch `on`,
   `allowed`, `companyDefault`, `chosen` (null = never chose); 受信を読む adds `connected: { mail,
   chat }` — what Google / Slack let ACB read, so the app can offer 「Google で許可」), plus the
