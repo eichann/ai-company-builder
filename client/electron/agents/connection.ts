@@ -65,6 +65,12 @@ export interface AgentConnection {
   isMissingSession?(error: unknown, sessionId: string): boolean
   authenticationError(): string | undefined
   createChatModel(request: {
+    /**
+     * What ACB tells the AI for the whole conversation (chat-server.ts): the agent puts it in its own instructions
+     * slot — Claude Code after its preset system prompt, Codex in its developer instructions — while this turn's
+     * words come as the system message. Absent for an unattended step and agents that do not own the conversation.
+     */
+    standingInstructions?: string
     workingDirectory?: string
     appSessionId?: string
     modelId?: string

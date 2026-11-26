@@ -113,13 +113,12 @@ export function droppedRecordsContext(summaries: ReadonlyArray<string | null>): 
     'メンバーがこの記録を相談の入力欄に落としました。下はその時点の要約です（メンバーが見られるものだけ）。この要約で答えられることは、道具を呼ばずにそのまま答えてください。',
     'この要約は二度と渡されません。あとで、もっと詳しく（つながったファイルの中身・経緯・最新の状態）が要るときは、records_get / records_history（ファイルはふだんの読み方）で必要な深さまで読んでください。メンバーへの返事では id を見せないでください。',
     ...read,
-    'The member dropped these records on the input; above is a summary read once, now (only what they may read). Answer from it without calling tools when it is enough; it will not be given again — later, use records_get / records_history when you need more depth.',
   ].join('\n')
 }
 
 /** What the AI is told each turn in a consultation about a record that is not a やること (a task's own line is taskTopicInstructions). */
 export function recordTopicInstructions(recordId: string): string {
-  return `\n\n【この相談の主題】この相談は記録 ${recordId} についての相談です。中身や最新の状態が要るときは records_get で読んでください。 / This consultation is about record ${recordId}; read it with records_get when you need it.`
+  return `\n\n【この相談の主題】この相談は記録 ${recordId} についての相談です。中身や最新の状態が要るときは records_get で読んでください。`
 }
 
 /** The messages with `text` put first in the latest user message (only that one; the others as they were). */

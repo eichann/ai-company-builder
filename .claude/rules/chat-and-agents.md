@@ -155,6 +155,39 @@ callers ask capabilities instead of branching on agent ids. Related: `chat-write
   gets only `config:getApiKeyStatus` (`set`, `last4`, flags), never the key; never log the key or
   its length. Tests: `tests/api-key-store.test.ts`, `tests/ipc-app.test.ts`.
 
+## What ACB tells the AI (owner decision 2026-11-26)
+
+Measured 2026-11-26: the chat passed no `systemPrompt`, and the Agent SDK then sends an **empty** one (136
+characters: a billing line and 「You are a Claude agent, built on Anthropic's Claude Agent SDK.」), while the provider put
+ACB's text at the head of the member's message. So the chat ran without Claude Code's own instructions (tool use, care
+before irreversible acts, honest reports). Now two parts, built in `chat-server.ts`:
+
+- **Standing instructions** (`finalSystemPrompt` → the request's `standingInstructions`): what holds for the whole
+  conversation — `MEMBER_SCREEN_INSTRUCTION` (the reply is read in the app by members who are not engineers: plain
+  Japanese, no Git or command words; it answers the preset's 「displayed in a terminal」), the working folder,
+  `.workspace/`, `externalRepositoryInstruction`, `skillFileInstruction`, the shelf, the record / company-file /
+  past-consultation / review / web tools' paragraphs, the sandbox. Claude Code puts them after its preset:
+  `systemPrompt: { type: 'preset', preset: 'claude_code', append, snapshot: false }` (`agents/claude.ts`; `snapshot:
+  false` renders it per request, so a company's change reaches a conversation already going); Codex puts them first in
+  its developer instructions (`agents/codex.ts`).
+- **This turn's words** (`turnPrompt` → the system message): the department on screen, attached files, the task /
+  record topic, the other AI's tool, the repeat question. They stay out of the standing part so it changes rarely (the
+  shelf of a company without the shared folder still follows the department on screen; `snapshot: false` keeps it
+  current).
+- With the preset, `settings.includeGitInstructions: false`: measured 2026-11-27, the preset otherwise opens the first
+  message with the repository's branch and recent commits and the commit / pull-request rules; the app's sync owns Git.
+- An unattended step and the API key keep everything in the system message as before (no preset: an unattended step
+  loads no settings at all; nor `MEMBER_SCREEN_INSTRUCTION`: nobody reads it in the chat).
+- Auto memory is off for chat turns (`CLAUDE_CODE_DISABLE_AUTO_MEMORY=1`): the CLI's notes would sit outside the
+  company folder, where talk of a private folder could stay behind.
+- Removed with it (covered by the preset's tool rules or plain repeats): the English copies of the task-topic,
+  record-topic and dropped-record paragraphs, and the 「use Write, not the shell」 lines (the ACB-specific consequence —
+  a shell-made file is not linked, a shell refused in `.claude/` is not a missing right — stays).
+- Tests: `client/tests/agent-connection.test.ts` (preset + append, no auto memory, no Git instructions; none for an
+  unattended step), `client/tests/chat-standing-instructions.test.ts` (the chat server's split: standing rules to the
+  agent's slot, the department with the turn; `ChatServerConfig.createConnection` hands in a fake agent) —
+  mutation-checked.
+
 ## Project config the agents load from the company folder
 
 - Claude Code: `settingSources: ['user', 'project']` — `.claude/settings*.json`, `.mcp.json`,
