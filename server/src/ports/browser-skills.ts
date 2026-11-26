@@ -57,6 +57,11 @@ export interface BrowserSkillSource {
    * private folder (its own repository; its name must not leak).
    */
   list(companyId: string): Promise<string[]>
+  /**
+   * Every Skill with `browser.yaml` of this name — the company's and each department's —, not bounded like `list`
+   * (`resolve` must see them all to refuse a name two share). `complete` false: some place could not be looked into.
+   */
+  withName(companyId: string, name: string): Promise<{ paths: string[]; complete: boolean }>
   /** One Skill now, by its path (null: no such Skill, no `browser.yaml` in it, not a Skill path, or a private folder's). */
   read(companyId: string, path: string): Promise<BrowserSkillContent | null>
   /**

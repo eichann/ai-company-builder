@@ -65,6 +65,7 @@ const sha = (t: string) => createHash('sha256').update(t, 'utf8').digest('hex')
 
 const source: BrowserSkillSource = {
   list: async companyId => Object.keys(store[companyId] ?? {}).sort(),
+  withName: async (companyId, name) => ({ paths: Object.keys(store[companyId] ?? {}).filter(p => p.endsWith(`/${name}`)).sort(), complete: true }),
   read: async (companyId, path) => store[companyId]?.[path] ?? null,
   pushed: async () => [],
   shelfLanded: async () => null,

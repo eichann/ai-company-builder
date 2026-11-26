@@ -85,6 +85,8 @@ async function skillPathspecs(repo: string, treeishes: readonly string[]): Promi
   }
   return [`${SKILLS}/`, ...[...folders].sort().slice(0, MAX_FOLDERS).map(f => `${f}/${SKILLS}/`)]
 }
+/** Were all top-level folders looked into (`skillPathspecs` takes at most `MAX_FOLDERS`)? */
+const allFoldersIn = (specs: readonly string[]) => specs.length - 1 < MAX_FOLDERS
 
 /** The Skill places among paths (relative to the repository root): a file directly in a Skill folder, or deeper. */
 function placesIn(paths: string[], onlyWithDeclaration: boolean, privatePaths: readonly string[]): BrowserSkillPlace[] {
@@ -175,6 +177,28 @@ export function browserSkillSource(deps: { companyData: CompanyDataSource; hasCo
         .filter((p): p is string => p !== null)
         .sort()
         .slice(0, MAX_SKILLS)
+    },
+
+    async withName(companyId, name) {
+      const git = await repoOf(companyId)
+      if (git) {
+        try {
+          // Every place by that name, none left out by the list's bound: only `browser.yaml` of the Skill asked for.
+          const specs = await skillPathspecs(git.repo, [git.ref])
+          const out = await gitAsync(['-C', git.repo, 'ls-tree', '-r', '-z', '--name-only', git.ref, '--', ...specs.map(s => `${s}${name}/${BROWSER_SKILL_FILE}`)], GIT)
+          const paths = placesIn(out.split('\0'), true, privatePaths(companyId)).filter(p => p.name === name).map(p => p.path)
+          return { paths, complete: allFoldersIn(specs) }
+        } catch {
+          return { paths: [], complete: false }
+        }
+      }
+      if (deps.hasCompanyFolder(companyId)) return { paths: [], complete: true }
+      const paths = deps.companyData.forCompany(companyId).skillShelf.items()
+        .filter(i => i.kind === 'skill' && i.name === name && i.currentVersion !== null)
+        .map(i => shelfRead(companyId, i)?.path ?? null)
+        .filter((p): p is string => p !== null)
+        .sort()
+      return { paths, complete: true }
     },
 
     async read(companyId, path) {

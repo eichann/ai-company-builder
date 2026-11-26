@@ -3081,7 +3081,12 @@ with it yet. The company's Skills and the departments' ("Department Skills" belo
   in NFC); the server's `resolve` takes a name only when exactly **one** Skill with `browser.yaml` of that name is there
   **for this member** (the company's, or a department's they read) — two → 409 `BROWSER_SKILL_AMBIGUOUS` (the AI gets
   `BROWSER_WORK_WORDS.skillAmbiguous`: give the path, or ask the person), none → `BROWSER_SKILL_NOT_FOUND`. Never a
-  guess, never a preference for the department on screen. The run keeps the resolved path, and the app reads the
+  guess, never a preference for the department on screen. The name is looked up in every place (`BrowserSkillSource.withName`,
+  not the admin list's bound of 100: a second Skill past it would be guessed away — Codex review); when some place could
+  not be looked into (over 500 top folders, git failing) even one match is refused the same way. An older app that sends
+  a bare name meant for the company's Skill is now refused while a department the member reads has one of that name too
+  (its words: the generic 「使えません」; safe side). A top folder whose name is not NFC (a Mac commit without precomposed
+  Unicode) is not looked into: its Skills are not listed (safe side, known). The run keeps the resolved path, and the app reads the
   operator's steps (SKILL.md, site-notes.md) from **that** path in the member's company folder
   (`features/browser/skill-steps.ts`; after the frames run started, never from the AI's word).
 - **Who uses it**: a department's Skill only by a member who **reads its path now** (`BrowserSkillDeps.readsPath`,

@@ -333,11 +333,14 @@ export function createBrowserSkillService(deps: BrowserSkillDeps) {
         const place = parseBrowserSkillPath(skill.normalize('NFC'))
         return place ? ok(place.path) : notFound()
       }
-      const matches = (await deps.source.list(member.companyId))
+      // Every Skill of that name, not the bounded list (a second one past its bound would be guessed away: Codex review).
+      const found = await deps.source.withName(member.companyId, skill)
+      const matches = found.paths
         .map(parseBrowserSkillPath)
         .filter((p): p is BrowserSkillPlace => p !== null && p.name === skill && mayUse(member, p))
       if (matches.length === 0) return notFound()
-      if (matches.length > 1) return refuse('conflict', W.ambiguous, { code: 'BROWSER_SKILL_AMBIGUOUS' })
+      // Two — or one, when some place could not be looked into (another may stand there) — is never a guess: give the path.
+      if (matches.length > 1 || !found.complete) return refuse('conflict', W.ambiguous, { code: 'BROWSER_SKILL_AMBIGUOUS' })
       return ok(matches[0].path)
     },
 

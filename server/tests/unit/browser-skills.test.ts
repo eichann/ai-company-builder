@@ -48,12 +48,15 @@ let store: Record<string, Record<string, BrowserSkillContent>>
 let svc: BrowserSkillService
 /** The department folders each member reads (owners / admins read all), as the core's read rules would answer. */
 let reads: Record<string, string[]>
+/** Whether the server's copy could look into every place for a name (false: some were left out). */
+let everyPlaceRead: boolean
 const iso = (ms: number) => new Date(ms).toISOString()
 const sha = (t: string) => createHash('sha256').update(t, 'utf8').digest('hex')
 
 /** The server's own copy, as a test sets it (the real one is git or the shelf). */
 const source: BrowserSkillSource = {
   list: async companyId => Object.keys(store[companyId] ?? {}).sort(),
+  withName: async (companyId, name) => ({ paths: Object.keys(store[companyId] ?? {}).filter(p => p.endsWith(`/${name}`)).sort(), complete: everyPlaceRead }),
   read: async (companyId, path) => store[companyId]?.[path] ?? null,
   pushed: async () => [],
   shelfLanded: async () => null,
@@ -104,6 +107,7 @@ beforeEach(() => {
   registered = { [CO]: [DOMAIN], [OTHER_CO]: [DOMAIN] }
   store = {}
   reads = { [editor.userId]: [SALES] }
+  everyPlaceRead = true
   svc = createBrowserSkillService({
     companyData: sqliteCompanyData(conn),
     clock: { now: () => iso(now), nowMs: () => now },
@@ -435,6 +439,25 @@ describe('department Skills (a Skill is its path)', () => {
     expect(code(await svc.resolve(owner, SKILL))).toBe('BROWSER_SKILL_AMBIGUOUS')
     expect(code(await svc.resolve(editor, 'no-such'))).toBe('BROWSER_SKILL_NOT_FOUND')
     expect(code(await svc.resolve(editor, '営業/x/.claude/skills/order-copy'))).toBe('BROWSER_SKILL_NOT_FOUND')
+  })
+
+  it('a name is checked against every Skill of it, not the bounded list; when some place could not be looked into, one match is refused too (Codex review)', async () => {
+    // The list (admin page) is bounded; the name's own lookup is not: a second Skill past the list's bound still counts.
+    put(CO, SALES_P, yaml(1))
+    put(CO, SUPPORT_P, yaml(1))
+    const was = source.list
+    source.list = async () => [SALES_P]
+    try {
+      expect(code(await svc.resolve(owner, SKILL))).toBe('BROWSER_SKILL_AMBIGUOUS')
+    } finally {
+      source.list = was
+    }
+    delete store[CO][SUPPORT_P]
+    expect(value(await svc.resolve(owner, SKILL))).toBe(SALES_P)
+    everyPlaceRead = false
+    expect(code(await svc.resolve(owner, SKILL))).toBe('BROWSER_SKILL_AMBIGUOUS')
+    // A path still names exactly one.
+    expect(value(await svc.resolve(owner, SALES_P))).toBe(SALES_P)
   })
 
   it('a member who cannot read the department cannot use its Skill (the same answer as a missing one), also mid-run', async () => {
