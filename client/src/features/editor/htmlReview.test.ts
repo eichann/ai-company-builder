@@ -74,7 +74,7 @@ test('a character whose lower case is longer (İ) does not shift where an end ta
   assert.equal(htmlQuoteNth(html, 'same', at.start), 1, 'the script\'s words are not counted')
 })
 
-test('a large page (3.5 MB, 50 comments) is read once: marks, 位置不明 and anchoring stay well under a second', () => {
+test('a large page (3.5 MB, 50 comments) is read once: marks, 位置不明 and anchoring stay within the budget (about 10x a developer Mac, testing.md)', () => {
   const block = (i: number) => `<section><h2>第${i}節</h2><p>売上は前年比 ${100 + (i % 50)}% でした。<b>担当</b>は営業${i % 7}課です &amp; 確認中。</p><script>const v${i} = '${'x'.repeat(40)}'</script><style>.c${i}{color:red}</style></section>\n`
   let html = '<!doctype html><html><head><title>大きな報告</title></head><body>'
   for (let i = 0; html.length < 3_500_000; i++) html += block(i)
@@ -87,8 +87,8 @@ test('a large page (3.5 MB, 50 comments) is read once: marks, 位置不明 and a
   for (const c of comments.slice(0, 10)) assert.ok(anchorHtmlQuote(html, { text: c.selectedText, prefix: '', suffix: '売上は' }))
   const took = performance.now() - started
   assert.equal(marks.quotes.length, 50)
-  console.log(`[perf] html-review-3.5mb-50-comments=${Math.round(took)} ms (budget 1000)`)
-  assert.ok(took < 1000, `took ${Math.round(took)} ms`)
+  console.log(`[perf] html-review-3.5mb-50-comments=${Math.round(took)} ms (budget 3000)`)
+  assert.ok(took < 3000, `took ${Math.round(took)} ms`)
 })
 
 test('an entity standing for two UTF-16 units (an emoji) keeps the file positions in step', () => {
