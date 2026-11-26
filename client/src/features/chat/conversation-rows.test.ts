@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { buildConversationRows, focusConversationRows, markMatches, paginateConversationRows, paletteConsultations } from './conversationRows'
+import { buildConversationRows, rowsAboutRecord, markMatches, paginateConversationRows, paletteConsultations } from './conversationRows'
 import type { ChatSessionSummary } from '../../../shared/chat-history'
 const session = (id: string, extra: Partial<ChatSessionSummary> = {}): ChatSessionSummary => ({ id, companyId: 'company', title: id, messageCount: 0, preview: '', createdAt: '2026-01-01', updatedAt: '2026-01-01', ...extra })
 test('open conversations appear once, ahead of pinned and closed history', () => {
@@ -40,19 +40,14 @@ test('history expands by page while open/pinned rows stay visible and search cov
   assert.equal(searched.visibleRows[0].session?.id,'history-44')
   assert.equal(searched.remaining,0)
 })
-test('narrowed to the record open in the middle: only consultations whose topic is that record itself; the one on screen kept apart', () => {
+test('the consultations about the record open in the middle: only those whose topic is that record itself, the one on screen included only when it is', () => {
   const sessions = [session('deal', { topicRecordId: 'deal-01', updatedAt: '2026-01-03' }), session('task-of-deal', { topicRecordId: 'task-01' }), session('plain'), session('shown', { updatedAt: '2026-01-02' })]
   const rows = buildConversationRows(sessions, [{ id: 'tab-shown', title: 'shown', sessionId: 'shown' }, { id: 'tab-deal', title: 'deal', sessionId: 'deal' }], '')
-  // The conversation on screen is not about the record: it stays listed, but never among the record's own
-  // (owner report 2026-11-25: an unrelated consultation read as one about a やること just opened).
-  const narrowed = focusConversationRows(rows, 'deal-01', 'tab-shown')
-  assert.deepEqual(narrowed.about.map(r => r.session?.id), ['deal'])
-  assert.equal(narrowed.shown?.session?.id, 'shown')
-  // On screen and about the record: one of the record's own, nothing apart.
-  const own = focusConversationRows(rows, 'deal-01', 'tab-deal')
-  assert.deepEqual(own.about.map(r => r.session?.id), ['deal'])
-  assert.equal(own.shown, null)
-  assert.deepEqual(focusConversationRows(rows, 'deal-01', 'other-tab'), { about: own.about, shown: null })
+  // The conversation on screen is not about the record: never counted as one (owner report 2026-11-25).
+  assert.deepEqual(rowsAboutRecord(rows, 'deal-01').map(r => r.session?.id), ['deal'])
+  // A 案件's やること's consultation is not one about the 案件.
+  assert.deepEqual(rowsAboutRecord(rows, 'task-01').map(r => r.session?.id), ['task-of-deal'])
+  assert.deepEqual(rowsAboutRecord(rows, 'nothing'), [])
 })
 test('探す ⌘K lists the consultations the list keeps (blank leftovers never), pinned first, then newest', () => {
   const sessions = [

@@ -112,13 +112,11 @@ export function paginateConversationRows(rows: ReturnType<typeof buildConversati
 }
 
 /**
- * The list narrowed to what is open in the middle (新しい画面のデモ J): `about` = only consultations whose
- * main topic is that record itself — not those of the things inside it (a 案件's やること's consultations
- * show when that やること is open). The conversation on screen, when it is not about the record, is
- * `shown`: listed apart so it never vanishes, and never under the record's heading (owner report
- * 2026-11-25: an unrelated consultation read as one about the やること just opened).
+ * The consultations about the record open in the middle (owner 2026-11-26, replacing the narrowed list): only those whose
+ * stored main topic is that record itself — not those of the things inside it (a 案件's やること's consultations show when
+ * that やること is open). Shown as a small section above the full list, which stays as it is; the conversation on screen
+ * is never counted as one about the record unless its topic says so.
  */
-export function focusConversationRows<T extends { tab?: ConversationTab; session?: ChatSessionSummary }>(rows: T[], recordId: string, activeTabId: string): { about: T[]; shown: T | null } {
-  const isAbout = (row: T) => row.session?.topicRecordId === recordId
-  return { about: rows.filter(isAbout), shown: rows.find(row => row.tab?.id === activeTabId && !isAbout(row)) ?? null }
+export function rowsAboutRecord<T extends { session?: ChatSessionSummary }>(rows: readonly T[], recordId: string): T[] {
+  return rows.filter(row => row.session?.topicRecordId === recordId)
 }

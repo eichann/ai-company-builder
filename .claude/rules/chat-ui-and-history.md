@@ -138,18 +138,25 @@ one place an added agent brings its own controls; everything else asks the regis
   hidden. Folding only hides rows: pagination counts all rows, and 「続きを読み込む」 hides while
   終わったもの is folded. Tests: `src/features/chat/conversationGroups.test.ts`,
   `tests/ui/chat-panel.spec.ts`.
-- **Narrowed to what is open** (owner 2026-11-02, 新しい画面のデモ J): while a record is open in the
-  middle (AppShell's `activeRecordId`, given as `focus`), the list shows only consultations whose
-  main topic (`topicRecordId`) is that record itself — never those of the things inside it (a
-  案件's やること's consultations show when that やること is open) — under 「「…」についての相談」
-  (`focusConversationRows` `about`; none → 「このことについての相談は、まだありません。」). The one on
-  screen, when it is not about that record, stays listed but **apart**, under its own heading
-  「表示中の相談（このことについての相談ではありません）」 (`shown`; owner report 2026-11-25: listed under
-  the record's heading, an unrelated consultation read as one about a やること just opened, though
-  nothing was stored). 「すべて表示」 lifts it for that record (「「…」の相談だけにする」 brings
-  it back; opening another record narrows again); a search always looks at every consultation.
-  Tests: `src/features/chat/conversation-rows.test.ts`, `tests/ui/chat-panel.spec.ts` (「narrowed to a
-  record, the consultation on screen … listed apart」).
+- **「この件の相談」: the record open in the middle** (owner 2026-11-26, replacing the narrowed list of
+  2026-11-02 and its 「表示中の相談（このことについての相談ではありません）」 box: the whole list disappearing read as odd).
+  Opening a record (AppShell's `activeRecordId`, given as `focus`) never hides the list and never switches the
+  consultation on screen. Above the full list, a small section 「この件の相談（N）」 lists the consultations whose
+  stored main topic (`topicRecordId`) is that record itself — never those of the things inside it (a 案件's やること's
+  consultations show when that やること is open) — from all rows, not only the loaded page (`rowsAboutRecord` in
+  `conversationRows.ts`; one line each: state, title, date; pressing it opens it like its row). The full list below is
+  unchanged; the same rows carry a small 「この件」 mark (`StatusBadge` `selected`). None → one quiet line
+  「この件の相談はまだありません」 (no box); no record open, or text in the search box → no section.
+  **A new consultation started while a record is open** (「AIに相談する」 or the header's ＋; `ChatPanel` `startNew`)
+  takes that record as its topic from the start (`initialTopicRecordId` → `useChatHistory`'s `setTopic`, the same
+  `topicRecordId` the first save stores, as 「相談する」 does: no new link). Until the member's first message this starting topic's
+  chip sits above the input (a dropped record's stays under the header) (`TopicChip place="composer"`: 「このやること：<title>」, on by default); its × takes it off
+  (`setTopic(null)`, plus `patch { topicRecordId: null }` if a copy is stored), so the consultation is not linked. After
+  the first message the chip is the header's as for any topic. Each chat pane does this with its own `focus` and tabs,
+  so stacked panes (later) each get their own chip. Tests: `src/features/chat/conversation-rows.test.ts`,
+  `tests/ui/chat-panel.spec.ts` (「a record open in the middle…」, 「a record with no consultation…」, 「「AIに相談する」
+  while a record is open…」; preview `chat-header-ui.html?history=record&focus=task-0000aa|task-0000cc`,
+  `SCREENSHOTS=<dir>` shoots the five states).
 - **A record dropped on the input** (owner, 2026-11-03 「使い心地のメモ」 #5). A record drag (a task row,
   a 探す row, a record tab in the middle; `tasks-ui.md` "Drag sources") onto the composer:
   - **The drop frame says what will happen** (`features/chat/recordDrop.ts` `composerDragOf` /
@@ -187,8 +194,7 @@ one place an added agent brings its own controls; everything else asks the regis
   record → topic + one request only; switching asks; file tab → read, no topic; `SCREENSHOTS=<dir>`).
 - **Searching the list** (owner, 2026-11-03). The box at the top of 「AIへの相談」 narrows as the
   member types (no Enter; 200 ms after the last key; an IME's unconfirmed text never narrows,
-  confirming does; Esc or × empties it, and empty is the normal list, the narrowing to the record
-  open in the middle included). It matches the consultation's title, its draft, its body (main's
+  confirming does; Esc or × empties it, and empty is the normal list, 「この件の相談」 included). It matches the consultation's title, its draft, its body (main's
   `searchChatSessions`) and the title of the record it is about: its own やること (the topic
   record), else its 案件 (the topic when that is a 案件) — `consultationLinkedRecord` in
   `client/shared/consultation-topics.ts`, the same rule 探す uses; a task consultation is not found
