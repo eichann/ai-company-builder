@@ -41,7 +41,7 @@ import {
 } from 'ai'
 import { createChunkInjector, limitedUIMessageStreamResponse, type ChunkInjector } from './ui-stream-limits'
 import { acbToolDisplays, toolDisplayTransform } from './tool-display-stream'
-import type { AgentEvent, AgentHostConfig, AskUser, TurnSandbox } from './agents/connection'
+import type { AgentConnection, AgentEvent, AgentHostConfig, AskUser, TurnSandbox } from './agents/connection'
 import { SANDBOX_INSTRUCTIONS, SANDBOX_MESSAGES, decideTurnSandbox, sandboxPlatform, type ResolvedSandbox, type SandboxHost } from '../shared/agents/sandbox-policy'
 import { BROWSER_WORDS } from '../shared/browser-operation'
 import type { AgentSandboxSettings } from '../../shared/core/agent-sandbox'
@@ -79,6 +79,8 @@ export interface AiTurnToolCeiling {
 }
 
 export interface ChatServerConfig extends AgentHost {
+  /** How a turn's agent is started; tests hand in a fake agent to see what the chat server gives it. Default: the registry's. */
+  createConnection?: (id: AgentId, host: AgentHost) => AgentConnection
   /** Runs one of the app's AI commands in the window showing the consultation (features/app-commands/ipc.ts). */
   runAppCommand?: (sessionId: string, companyId: string, commandId: string, args: unknown, signal?: AbortSignal) => Promise<AppCommandAnswer>
   /** Where to listen; 0 = any free port (tests running in parallel). Default: the first free port of 3300–3399. */
@@ -415,7 +417,7 @@ export async function startChatServer(config: ChatServerConfig) {
     const sightingTurn = companyId && appSessionId && companyRootPath && !requestedStep
       ? { companyId, conversationId: appSessionId, companyRoot: companyRootPath, workingDirectory } : undefined
     const host = withSkillSightings(config, sightingTurn, repeatSkill)
-    const connection = createAgentConnection(authMode, host)
+    const connection = (config.createConnection ?? createAgentConnection)(authMode, host)
     const can = AGENTS[authMode].capabilities
     // An unattended 「AI の番」 step (ai-turns.md): only its tools, only an agent that takes record actions.
     // A step's tool ceiling: a declared kind's (ai-turn-steps/), or a business plugin step's that main's claim holds.
@@ -444,7 +446,7 @@ export async function startChatServer(config: ChatServerConfig) {
     let turnPrompt = ''
     if (connection.ownsConversation) {
       if (workingDirectory) {
-        finalSystemPrompt = `${MEMBER_SCREEN_INSTRUCTION}\n\nあなたの作業ディレクトリは「${workingDirectory}」です。\nファイル操作はこのディレクトリ内で行ってください。\n日本語で回答してください。`
+        finalSystemPrompt = `${aiTurnStep ? '' : `${MEMBER_SCREEN_INSTRUCTION}\n\n`}あなたの作業ディレクトリは「${workingDirectory}」です。\nファイル操作はこのディレクトリ内で行ってください。\n日本語で回答してください。`
         finalSystemPrompt += `\n\n【重要】スクリーンショット、テスト結果、一時ファイル、設定ファイル（.playwright/, test-results/ 等）など、ユーザーのコンテンツではない生成物は必ず「.workspace/」ディレクトリ内に出力してください。.workspace/ が存在しない場合は作成してください。作業ディレクトリのルートを汚さないでください。`
         finalSystemPrompt += `\n\n${externalRepositoryInstruction(companyRootPath)}`
         finalSystemPrompt += `\n\n${skillFileInstruction()}`

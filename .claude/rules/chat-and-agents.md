@@ -171,16 +171,21 @@ before irreversible acts, honest reports). Now two parts, built in `chat-server.
   false` renders it per request, so a company's change reaches a conversation already going); Codex puts them first in
   its developer instructions (`agents/codex.ts`).
 - **This turn's words** (`turnPrompt` → the system message): the department on screen, attached files, the task /
-  record topic, the other AI's tool, the repeat question. They stay out of the standing part so the prompt prefix
-  stays stable while the member moves between tabs.
+  record topic, the other AI's tool, the repeat question. They stay out of the standing part so it changes rarely (the
+  shelf of a company without the shared folder still follows the department on screen; `snapshot: false` keeps it
+  current).
+- With the preset, `settings.includeGitInstructions: false`: measured 2026-11-27, the preset otherwise opens the first
+  message with the repository's branch and recent commits and the commit / pull-request rules; the app's sync owns Git.
 - An unattended step and the API key keep everything in the system message as before (no preset: an unattended step
-  loads no settings at all).
+  loads no settings at all; nor `MEMBER_SCREEN_INSTRUCTION`: nobody reads it in the chat).
 - Auto memory is off for chat turns (`CLAUDE_CODE_DISABLE_AUTO_MEMORY=1`): the CLI's notes would sit outside the
   company folder, where talk of a private folder could stay behind.
 - Removed with it (covered by the preset's tool rules or plain repeats): the English copies of the task-topic,
   record-topic and dropped-record paragraphs, and the 「use Write, not the shell」 lines (the ACB-specific consequence —
   a shell-made file is not linked, a shell refused in `.claude/` is not a missing right — stays).
-- Test: `client/tests/agent-connection.test.ts` (preset + append + no auto memory; none for an unattended step) —
+- Tests: `client/tests/agent-connection.test.ts` (preset + append, no auto memory, no Git instructions; none for an
+  unattended step), `client/tests/chat-standing-instructions.test.ts` (the chat server's split: standing rules to the
+  agent's slot, the department with the turn; `ChatServerConfig.createConnection` hands in a fake agent) —
   mutation-checked.
 
 ## Project config the agents load from the company folder

@@ -490,6 +490,8 @@ export function createClaudeConnection(config: ClaudeConnectionConfig, createMod
             if (answered) onPromptSuggestion?.(null)
           })
         } : undefined
+        // Claude Code's own system prompt for a consultation (never an unattended step): chat-and-agents.md "What ACB tells the AI".
+        const withPreset = !!standingInstructions && !unattended
         const model = createModel(resolvedModel, {
           pathToClaudeCodeExecutable: claudePath,
           permissionMode: mode,
@@ -511,7 +513,7 @@ export function createClaudeConnection(config: ClaudeConnectionConfig, createMod
           // (measured 2026-11-26: 136 characters). `snapshot: false`: rendered fresh every request, so a company's
           // change (a feature, the sandbox, a delivered instruction) reaches a conversation already going.
           // An unattended step stays without it (no member settings, its own fixed first message: ai-turns.md).
-          ...(standingInstructions && !unattended ? { systemPrompt: { type: 'preset' as const, preset: 'claude_code' as const, append: standingInstructions, snapshot: false } } : {}),
+          ...(withPreset ? { systemPrompt: { type: 'preset' as const, preset: 'claude_code' as const, append: standingInstructions, snapshot: false } } : {}),
           // Unattended: none of the member's own settings, MCP servers, hooks or plugins (like the hand-off agent).
           settingSources: unattended ? [] : ['user', 'project'],
           ...(unattended ? { strictMcpConfig: true, tools: [...unattended.builtinTools] } : {}),
@@ -525,12 +527,18 @@ export function createClaudeConnection(config: ClaudeConnectionConfig, createMod
           // `disallowedTools`: the provider ignores it whenever allowedTools is set.
           // Under the company sandbox the same flag settings also deny reading its secret places
           // (the sandbox covers only Bash; the Read tool needs these rules).
-          ...(webResearch || sandboxed || unattended ? { settings: { permissions: { deny: [...new Set([
-            ...(webResearch ? CLAUDE_BUILTIN_WEB_TOOLS : []),
-            ...(sandboxed && enforced ? enforced.permissionsDeny : []),
-            // Unattended: shell, web and file writes denied too, unless the step declares them.
-            ...(unattended ? CLAUDE_UNATTENDED_DENIED_TOOLS.filter(name => !unattended.builtinTools.includes(name)) : []),
-          ])] } } } : {}),
+          // With Claude Code's own system prompt (below), its Git workflow and the repository's status are left out
+          // (`includeGitInstructions: false`, measured 2026-11-27: the branch, recent commits and the commit / PR
+          // attribution rules otherwise open the first message): the app's sync owns Git, never the AI.
+          ...(webResearch || sandboxed || unattended || withPreset ? { settings: {
+            ...(webResearch || sandboxed || unattended ? { permissions: { deny: [...new Set([
+              ...(webResearch ? CLAUDE_BUILTIN_WEB_TOOLS : []),
+              ...(sandboxed && enforced ? enforced.permissionsDeny : []),
+              // Unattended: shell, web and file writes denied too, unless the step declares them.
+              ...(unattended ? CLAUDE_UNATTENDED_DENIED_TOOLS.filter(name => !unattended.builtinTools.includes(name)) : []),
+            ])] } } : {}),
+            ...(withPreset ? { includeGitInstructions: false } : {}),
+          } } : {}),
           // The company sandbox (agent-sandbox.md): --settings layer, so the company
           // repository's .claude/settings.json cannot loosen it (strictAllowlist,
           // allowUnsandboxedCommands: false). failIfUnavailable: a CLI that cannot

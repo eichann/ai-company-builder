@@ -118,10 +118,13 @@ test('a consultation runs on Claude Code\'s own system prompt with ACB\'s standi
   const chat = read().options
   assert.deepEqual(chat.systemPrompt, { type: 'preset', preset: 'claude_code', append: '【返事の読み手】ACB の決まり', snapshot: false })
   assert.equal(chat.env.CLAUDE_CODE_DISABLE_AUTO_MEMORY, '1')
+  // Measured 2026-11-27: otherwise the branch, recent commits and the commit / PR rules open the first message; sync owns Git.
+  assert.equal(chat.settings?.includeGitInstructions, false)
 })
 
 test('an unattended step keeps its bare prompt: no preset, even when standing instructions are passed', () => {
   const { connection, read } = capture()
   connection.createChatModel({ workingDirectory: '/project', standingInstructions: 'x', unattended: { builtinTools: [] } })
   assert.equal(read().options.systemPrompt, undefined)
+  assert.equal(read().options.settings?.includeGitInstructions, undefined)
 })
