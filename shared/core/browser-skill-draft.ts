@@ -253,7 +253,9 @@ export function browserSkillDraftFrom(recordings: readonly BrowserRecordingConte
 
   const writes = kept.map((g, i): BrowserSkillDraftWriteNote => {
     const linked = links.has(g)
-    const changesExisting = !linked && (g.method !== 'POST' || g.override !== null || g.path.split('/').some(isPlaceholder))
+    // A query name saying id with a value left open (`?item_id={x}`) may point at any existing thing (independent review).
+    const openIdInQuery = g.query !== null && g.query.split('&').some(p => p.endsWith('={x}') && namesAnId(p.slice(0, p.indexOf('='))))
+    const changesExisting = openIdInQuery || (!linked && (g.method !== 'POST' || g.override !== null || g.path.split('/').some(isPlaceholder)))
     const creates = g.method === 'POST' && g.override === null
     const idFields = creates ? [...g.idFields].sort() : []
     const marks: BrowserSkillDraftMark[] = []

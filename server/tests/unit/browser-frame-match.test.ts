@@ -158,7 +158,9 @@ describe('a request with a query (agent-browser.md "A write with an exact query"
     // `{n}`: digits only.
     const n = frame('/api/tags', {}, 'POST', 'page={n}')
     expect(browserFrameMismatch(n, at('/api/tags?page=12'))).toBeNull()
-    for (const p of ['/api/tags?page=1a', '/api/tags?page=', '/api/tags?page=-1', '/api/tags?page=%31']) expect([p, browserFrameMismatch(n, at(p))]).toEqual([p, 'query'])
+    for (const p of ['/api/tags?page=1a', '/api/tags?page=', '/api/tags?page=-1', '/api/tags?page=%31', '/api/tags?page={n}']) expect([p, browserFrameMismatch(n, at(p))]).toEqual([p, 'query'])
+    // The placeholder sent literally is not a value of its kind (Codex review: no shortcut on equal strings).
+    expect(browserFrameMismatch(x, at('/api/tags?return={x}'))).toBe('query')
     // Two keys: the declared order, a literal beside a placeholder compared byte for byte.
     const two = frame('/api/tags', {}, 'POST', 'kind=label&return={x}')
     expect(browserFrameMismatch(two, at('/api/tags?kind=label&return=7'))).toBeNull()

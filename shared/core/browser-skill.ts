@@ -250,10 +250,9 @@ const QUERY_PLACEHOLDER_FITS: Readonly<Record<string, RegExp>> = Object.freeze({
  * Without a placeholder: the identical string, byte for byte. With one: the same number of `&` parts in the same order,
  * each name byte for byte, an `=` exactly where the declaration has one, a literal value byte for byte and a placeholder
  * value as `QUERY_PLACEHOLDER_FITS` says — so another order, an extra / missing / repeated key, an empty or encoded value,
- * `;`, `+`, `#` or a second `=` never fit.
+ * `;`, `+`, `#` or a second `=` never fit. No shortcut on equal strings: a sent `page={n}` is not a number (Codex review).
  */
 export function browserSkillQueryFits(declared: string, sent: string): boolean {
-  if (declared === sent) return true
   const want = declared.split('&')
   const got = sent.split('&')
   if (want.length !== got.length) return false

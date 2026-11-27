@@ -4030,7 +4030,8 @@ saying 「画面が先に進めませんでした」. Generic (no site word in t
 - **The match** (`browserSkillQueryFits`, asked by `browserFrameMismatch` — the server's permit and the app's pre-check
   alike): a declaration without a placeholder is still the identical string; with one, the same number of `&` parts in the
   declared order, each name byte for byte, an `=` exactly where declared, a literal value byte for byte and a placeholder
-  value of its kind. So an empty value (`?return=`), a bare name (`?return`), an encoded value (`%41`), `+`, `;`, `#`,
+  value of its kind — compared part by part even when the strings are equal (a sent `?page={n}` is no number: Codex
+  review). So an empty value (`?return=`), a bare name (`?return`), an encoded value (`%41`), `+`, `;`, `#`,
   a second `=`, `/`, non-ASCII, over 64, a missing / extra / repeated / reordered name and `_method` never fit (`query`).
 - **Stored** (`browser_frames.query`): its CHECK (added in place, unchangeable without a rebuild) allows only the plain
   alphabet, so the adapter keeps a placeholder value as `==n` / `==x` (`storedFrameQuery` / `frameQueryFromStored`,
@@ -4043,7 +4044,8 @@ saying 「画面が先に進めませんでした」. Generic (no site word in t
   result card's line `POST /api/tags?return=（何かの値）` — never the value sent.
 - **The draft** ("A Skill's draft from a recording"): a recorded write with `bareQuery: false` is no longer left out — each
   kept name becomes `name={x}` (`?kind&return` → `kind={x}&return={x}`), marked `query-value-open` (the words say the value
-  is not kept and fits any; fix it to the fixed value when there is one). D8 holds: no value is stored, only placeholders. A
+  is not kept and fits any; fix it to the fixed value when there is one); a name whose last word ends in `id` with its
+  value open (`?item_id={x}`) is also marked `updates-existing` — it may point at any existing thing (independent review). D8 holds: no value is stored, only placeholders. A
   masked name (`{x}` in the kept query) is still left out (`query`); a format-1 recording still cannot say how its query was
   sent (`query-values`).
 - **Why the run stopped** (`workEndAfterRefusals`, `client/shared/browser-frame-writes.ts`, applied in `work.ts`): when a

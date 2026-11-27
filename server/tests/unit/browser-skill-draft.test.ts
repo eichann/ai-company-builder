@@ -225,6 +225,9 @@ describe('what is left out, and why', () => {
     const masked = draftOf([recording(SHOP, [send(1, 'POST', '/api/a?{x}', { bareQuery: false }), send(2, 'POST', '/api/b?purge', { bareQuery: false })])])
     expect(masked.leftOut).toEqual([{ recording: 0, step: 1, reason: 'query' }])
     expect(masked.writes[0].marks).toEqual(['may-delete', 'query-value-open'])
+    // A name that says id with its value left open may point at any existing thing: marked as changing what exists.
+    const ids = draftOf([recording(SHOP, [send(1, 'POST', '/api/notes?item_id', { bareQuery: false }), send(2, 'POST', '/api/notes?paid', { bareQuery: true })])])
+    expect(ids.writes.map(w => w.marks)).toEqual([['updates-existing', 'query-value-open'], []])
   })
 
   it('a write whose address says delete or remove is marked: only the method DELETE is left out', () => {
