@@ -8,8 +8,11 @@
 //   → disk for (the member's sandbox `enforce` and their own level not 使わない), and only while this run
 //   never ran an AI turn without the sandbox (`beforeAiTurn`, which removes every kept login first).
 // - Only a valid policy answer opens anything: no answer, an error or an answer that does not
-//   validate = off until the next valid one (`policyFailed` closes the company's windows). A refusal
-//   (the server says this account may not have this company's policy) also removes its kept logins.
+//   validate = off for the AI until the next valid one; the member's open windows stay (a brief network
+//   drop must not cost them their window, owner 2026-11-27). A refusal (the server says this account may not
+//   have this company's policy) closes the company's windows and removes its kept logins.
+// - A run that needs a site's window opens it again by itself (`windowForRun`) while this app run holds the
+//   member's login for the site, through the same path as 「開いてログイン」 (agent-browser.md "The window a run needs").
 // - A valid answer that drops a site or turns the mode off closes its window and clears its login; one
 //   whose site is no longer to be kept (sandbox or level) removes its kept login (the window closes).
 // - Signing out clears every login, kept ones included; signing in as another account clears the others'.
@@ -23,7 +26,9 @@ import { browserLoginStorage, type BrowserSiteSetting } from '../../../../shared
 import type { AiTurnFacts, KeptLogins } from './kept-logins'
 import type { AgentPolicy } from '../../../../shared/types/agent-sandbox'
 import type { BrowserLoginHelper } from '../../../../shared/core/plugin-browser-declaration'
-import { BROWSER_WORDS, browserWindowSiteFrom, type BrowserActionResult, type BrowserSitesResult } from '../../../shared/browser-operation'
+import {
+  BROWSER_WORDS, browserWindowSiteFrom, type BrowserActionResult, type BrowserRunWindow, type BrowserSitesResult,
+} from '../../../shared/browser-operation'
 import type { BrowserPreviewSurface, BrowserRunSurface } from '../../../shared/browser-runner'
 import type { BrowserBrowseSurface } from '../../../shared/browser-browse'
 import type { BrowserRecordSurface } from '../../../shared/browser-recorder'
@@ -33,6 +38,11 @@ export interface BrowserWindowSpec {
   site: BrowserSiteSetting
   /** The window is gone (closed by the member or by the app). */
   onClosed: () => void
+  /**
+   * Shown without taking the keyboard (a window an AI run opened again: the member may be typing elsewhere in the app,
+   * agent-browser.md "The window a run needs"); absent = shown and focused, as 「開いてログイン」.
+   */
+  inactive?: boolean
 }
 
 export interface BrowserWindowHandle {
@@ -49,6 +59,8 @@ export interface BrowserWindowHandle {
   record?: BrowserRecordSurface
   /** What the operator's window tools act through (agent-browser.md "The operator's window tools"); the shell's window always has it. */
   browse?: BrowserBrowseSurface
+  /** Resolves once the page has loaded the first time (true), or false when it did not in time, closed or the signal ended. */
+  whenLoaded?(signal: AbortSignal): Promise<boolean>
 }
 
 /** What the shell provides (electron/browser-window.ts). */
@@ -119,6 +131,14 @@ export function createBrowserController(deps: BrowserControllerDeps) {
   const keyOf = (userId: string, companyId: string) => `${userId}\0${companyId}`
   /** Where each domain's parts came from at the last answer, so the fallback is logged once per change. */
   const sourceSaid = new Map<string, 'company' | 'bundled' | 'none'>()
+  /** `${user}\0${company}` → whether the last valid answer's sandbox for the member was 囲う (Settings' login line). */
+  const enclosed = new Map<string, boolean>()
+  /**
+   * `${user}\0${company}\0${host}` → the app removed the site's kept login for safety (its sandbox or level changed, or an
+   * AI turn without the sandbox ran): a run that then finds no window says why. Gone when the member opens or clears it.
+   */
+  const loginRemoved = new Set<string>()
+  const siteKey = (userId: string, companyId: string, host: string) => `${userId}\0${companyId}\0${host}`
 
   const clear = async (partition: string): Promise<boolean> => {
     partitions.delete(partition)
@@ -159,6 +179,31 @@ export function createBrowserController(deps: BrowserControllerDeps) {
     }
     return ok
   }
+  /**
+   * Opens the member's window of a site their current valid policy lists (false: not listed). `focus`: the member asked
+   * (「開いてログイン」) — a window already open comes forward and a new one takes the keyboard; otherwise (a run) neither.
+   */
+  const openWindow = (companyId: string, host: string, how: { focus: boolean }): boolean => {
+    const user = deps.userId()
+    const site = sitesOf(companyId)?.find(s => s.host === host)
+    if (!user || !site) return false
+    loginRemoved.delete(siteKey(user, companyId, host))
+    const existing = [...windows.values()].find(w => w.userId === user && w.companyId === companyId && w.host === host)
+    if (existing) { if (how.focus) existing.handle.focus(); return true }
+    // Kept on this PC when the current answer and this run allow it (`keepsNow`), else in memory.
+    const keptPartition = keepsNow(user, companyId, host) ? deps.kept!.partition(user, companyId, host) : null
+    const partition = keptPartition ?? browserPartition(user, companyId, host)
+    if (!keptPartition) partitions.set(partition, { userId: user, companyId, host })
+    const entry: OpenWindow = {
+      userId: user, companyId, host, partition,
+      handle: deps.shell.open({
+        partition, site, ...(how.focus ? {} : { inactive: true }),
+        onClosed: () => { if (windows.get(partition) === entry) windows.delete(partition) },
+      }),
+    }
+    windows.set(partition, entry)
+    return true
+  }
 
   return {
     /** A valid policy answer (200, or 304 for the one held). */
@@ -190,6 +235,9 @@ export function createBrowserController(deps: BrowserControllerDeps) {
         .map(s => s.host))
       const keptBefore = [...keptHosts.get(keyOf(user, companyId)) ?? []]
       keptHosts.set(keyOf(user, companyId), disk)
+      enclosed.set(keyOf(user, companyId), policy.sandbox.mode === 'enforce')
+      // A site still listed whose kept login now goes: a run that then finds no window says why.
+      for (const host of keptBefore) if (!disk.has(host) && operated.includes(host) && deps.kept?.held(user, companyId, host)) loginRemoved.add(siteKey(user, companyId, host))
       // A site whose login may no longer be kept (removed, the mode off, the sandbox not 囲う, 使わない): its kept
       // login goes — found on the disk, so one an earlier run left goes too; its window closes.
       void removeKept({ userId: user, companyId, exceptHosts: [...disk] }, win => win.userId === user && win.companyId === companyId && !disk.has(win.host))
@@ -207,26 +255,37 @@ export function createBrowserController(deps: BrowserControllerDeps) {
     },
 
     /**
-     * A refresh without a valid answer: off until the next one; windows close (the memory login stays, and a kept
-     * one stays on disk: offline is not a reason to forget it). `refused`: the server refused this account the
-     * company's policy (signed out there, left the company) — its kept logins go as well.
+     * A refresh without a valid answer: off until the next one — nothing opens, and no run finds a window (`siteNow`,
+     * `runWindow`, `browseWindow`… answer null), so an AI step in progress stops at its next check. No server, a timeout, a
+     * 5xx or an answer that does not validate leave the member's windows and their pages alone (owner 2026-11-27: a brief
+     * network drop closed them; the next valid answer closes any site it no longer lists). `refused`: the server refused
+     * this account the company's policy (401 / 403 / 404: signed out there, left the company) — the windows close and its
+     * kept logins go (the memory login stays until the app quits).
      */
     policyFailed(companyId: string, detail?: { refused?: boolean }) {
       const user = deps.userId()
       if (!user) return
       const had = known.delete(keyOf(user, companyId))
-      keptHosts.delete(keyOf(user, companyId))
-      for (const win of [...windows.values()]) {
-        if (win.userId === user && win.companyId === companyId) closeWindow(win)
+      // Which sites were kept stays through an outage (nothing opens meanwhile: `sitesOf` is gone), so the next answer
+      // that takes keeping away still tells a run why (`loginRemoved`).
+      if (detail?.refused) keptHosts.delete(keyOf(user, companyId))
+      if (detail?.refused) {
+        for (const win of [...windows.values()]) {
+          if (win.userId === user && win.companyId === companyId) closeWindow(win)
+        }
+        void removeKept({ userId: user, companyId }, win => win.userId === user && win.companyId === companyId)
       }
-      if (detail?.refused) void removeKept({ userId: user, companyId }, win => win.userId === user && win.companyId === companyId)
       if (had) deps.onChanged?.(companyId)
     },
 
     sites(companyId: string): BrowserSitesResult {
       const user = deps.userId()
       return {
-        sites: (sitesOf(companyId) ?? []).map(s => ({ host: s.host, ...(user && keptShown(user, companyId, s.host) ? { kept: true } : {}) })),
+        sites: (sitesOf(companyId) ?? []).map(s => {
+          if (user && keptShown(user, companyId, s.host)) return { host: s.host, kept: true }
+          // In memory because the member's sandbox is not 囲う: Settings says so (else the plain memory line).
+          return { host: s.host, ...(user && enclosed.get(keyOf(user, companyId)) === false ? { notKeptBySandbox: true } : {}) }
+        }),
       }
     },
 
@@ -243,6 +302,8 @@ export function createBrowserController(deps: BrowserControllerDeps) {
       const wasKeeping = deps.kept.keeping()
       deps.kept.stop()
       // A PC where nothing was ever kept (none found at start, none handed out since) has nothing to read or refuse.
+      // What was kept goes now: a run that then finds no window says why.
+      if (wasKeeping) for (const [key, hosts] of keptHosts) for (const host of hosts) loginRemoved.add(`${key}\0${host}`)
       const ok = deps.kept.maybeOnDisk() ? await removeKept({ all: true }, () => true) : true
       if (wasKeeping) {
         const user = deps.userId()
@@ -256,27 +317,41 @@ export function createBrowserController(deps: BrowserControllerDeps) {
 
     /** 「開いてログイン」: only a site of the member's current, valid policy (the renderer's host is only a name). */
     open(companyId: string, host: string): BrowserActionResult {
+      return openWindow(companyId, host, { focus: true }) ? { ok: true } : { ok: false, message: BROWSER_WORDS.notAllowed }
+    },
+
+    /**
+     * A run needs the site's window (agent-browser.md "The window a run needs"; asked before the run looks for it): the
+     * open one; else — only while this app run holds the member's login for a site their current valid policy lists (its
+     * memory session used this run and not cleared, or a kept login on this PC) — one opened now through `open`'s own path,
+     * every check of it included. Waits (bounded, and never past the signal) until its page has loaded once. A login form
+     * there is the run's to meet (its `need-login` stop): the member logs in in the window that opened.
+     */
+    async windowForRun(companyId: string, host: string, signal: AbortSignal): Promise<BrowserRunWindow> {
       const user = deps.userId()
-      const site = sitesOf(companyId)?.find(s => s.host === host)
-      if (!user || !site) return { ok: false, message: BROWSER_WORDS.notAllowed }
-      const existing = [...windows.values()].find(w => w.userId === user && w.companyId === companyId && w.host === host)
-      if (existing) { existing.handle.focus(); return { ok: true } }
-      // Kept on this PC when the current answer and this run allow it (`keepsNow`), else in memory.
-      const keptPartition = keepsNow(user, companyId, host) ? deps.kept!.partition(user, companyId, host) : null
-      const partition = keptPartition ?? browserPartition(user, companyId, host)
-      if (!keptPartition) partitions.set(partition, { userId: user, companyId, host })
-      const entry: OpenWindow = {
-        userId: user, companyId, host, partition,
-        handle: deps.shell.open({ partition, site, onClosed: () => { if (windows.get(partition) === entry) windows.delete(partition) } }),
+      if (!user || !sitesOf(companyId)?.some(s => s.host === host)) return { kind: 'none', loginRemoved: false }
+      const find = () => [...windows.values()].find(w => w.userId === user && w.companyId === companyId && w.host === host)
+      let win = find()
+      let kind: 'open' | 'opened' = 'open'
+      if (!win) {
+        // A memory login made before keeping was allowed counts too (the window then opens kept: one login there).
+        const held = partitions.has(browserPartition(user, companyId, host))
+          || (keepsNow(user, companyId, host) && !!deps.kept?.held(user, companyId, host))
+        if (!held) return { kind: 'none', loginRemoved: loginRemoved.has(siteKey(user, companyId, host)) }
+        if (!openWindow(companyId, host, { focus: false })) return { kind: 'none', loginRemoved: false }
+        log.warn(`[browser] ${host}: the window a run needs was opened again (its login is still held)`)
+        win = find()
+        kind = 'opened'
       }
-      windows.set(partition, entry)
-      return { ok: true }
+      if (win?.handle.whenLoaded) await win.handle.whenLoaded(signal).catch(() => false)
+      return { kind }
     },
 
     /** 「ログインを消す」: the window closes and the site's login is cleared; success only once it is. */
     async clearLogin(companyId: string, host: string): Promise<BrowserActionResult> {
       const user = deps.userId()
       if (!user || !sitesOf(companyId)?.some(s => s.host === host)) return { ok: false, message: BROWSER_WORDS.notAllowed }
+      loginRemoved.delete(siteKey(user, companyId, host))
       for (const win of [...windows.values()]) {
         if (win.userId === user && win.companyId === companyId && win.host === host) closeWindow(win)
       }

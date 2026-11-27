@@ -23,6 +23,8 @@ import type { BrowserPageReadAttempt } from './browser-runner'
 export interface BrowserSiteView {
   host: string
   kept?: boolean
+  /** Not kept because the company's 「AI の囲い」 for the member is not 囲う (`enforce`): Settings says so. */
+  notKeptBySandbox?: boolean
 }
 
 /** The member's sites now: empty when 「ブラウザ操作」 is off, unknown or the policy could not be read. */
@@ -32,13 +34,28 @@ export interface BrowserSitesResult {
 
 export type BrowserActionResult = { ok: true } | { ok: false; message: string }
 
+/**
+ * The window a run needs (agent-browser.md "The window a run needs"), asked before the run looks for it: `open` (it was),
+ * `opened` (opened now through the same path as 「開いてログイン」, the login this app run holds), `none` (nothing to open
+ * again; `loginRemoved`: the app removed the login kept on this PC for safety, which the run's words then say).
+ */
+export type BrowserRunWindow = { kind: 'open' | 'opened' } | { kind: 'none'; loginRemoved: boolean }
+
+/** A run's "no window" words, with why the login is gone when the app removed it (else the words as they are). */
+export function noWindowWords(noWindow: string, found: BrowserRunWindow | undefined): string {
+  return found?.kind === 'none' && found.loginRemoved ? `${BROWSER_WORDS.loginRemoved}${noWindow}` : noWindow
+}
+
 export const BROWSER_WORDS = {
   section: 'ブラウザ操作',
-  intro: '会社が許可したサイトを、アプリの中の窓で開けます。ログインはご自分でしてください。',
-  aiNotYet: 'AI はまだこの窓を操作しません。',
-  loginNotKept: 'アプリを開き直すと、もう一度ログインが必要です。',
+  intro: '会社が許可したサイトを、アプリの中の窓で開けます。ログインはご自分でしてください。AI に頼んだときに窓が閉じていれば、ログインが残っている間は自動で開きます。',
+  loginNotKept: 'ログインはアプリを閉じるまで覚えています。アプリを開き直すと、もう一度ログインが必要です。',
+  /** Not kept because the member's 「AI の囲い」 is not 囲う (agent-browser.md "Keeping a login on disk"). */
+  loginNotKeptBySandbox: 'ログインはアプリを閉じるまで覚えています（会社の「AI の囲い」が「囲う」ではないため、この PC には残しません）。アプリを開き直すと、もう一度ログインが必要です。',
   /** The login is kept on this PC (agent-browser.md "Keeping a login on disk"). */
-  loginKept: 'ログインはこの PC に覚えておくので、アプリを開き直してもそのままです。囲いのない AI がこの PC で動くときは、その前に消します。',
+  loginKept: 'ログインはこの PC に残ります（アプリを開き直してもそのままです）。囲いのない AI がこの PC で動くときは、その前に消します。',
+  /** A run found no window because the app removed the login kept on this PC (`noWindowWords`). */
+  loginRemoved: 'この PC に覚えていたサイトのログインは、安全のため消しました（会社の「AI の囲い」の設定が変わったか、囲いのない AI がこの PC で動いたため）。',
   /** An AI turn could not start because a kept login could not be removed first. */
   keptNotRemoved: 'この PC に覚えていたサイトのログインを消せなかったため、AI を始めませんでした。もう一度お試しください。',
   open: '開いてログイン',

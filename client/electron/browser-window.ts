@@ -88,6 +88,8 @@ const RECORDING_ANSWER_MAX = 1024 * 1024
 const RECORDING_BODY_MAX = 64 * 1024
 /** How long a recording waits for the window's first page before it gives up (and is discarded). */
 const RECORDING_START_MS = 20_000
+/** How long a run waits for the first page of a window it opened again (then it goes on, and the run's own checks decide). */
+const RUN_WINDOW_LOAD_MS = 20_000
 
 /**
  * One request through a session, its answer or a rejection (no answer). A redirect is an answer: its
@@ -668,7 +670,25 @@ export function createBrowserWindowShell(options: {
       if (contents.isDestroyed() || owner.holder() !== 'ai' || state.mode !== 'ai' || !state.aiGateReady || !contents.debugger.isAttached()) return false
       try { await contents.debugger.sendCommand(method, params); return true } catch { return false }
     }
-    return { setMode, record, command, windowClosed: () => endRecording('closed') }
+    /** The page's first load (the one an `ai` gate waits for before attaching): true once it happened, false at `ms` or the signal. */
+    const firstLoaded = (signal: AbortSignal, ms: number): Promise<boolean> => new Promise(resolve => {
+      if (loaded) { resolve(true); return }
+      if (contents.isDestroyed() || signal.aborted) { resolve(false); return }
+      let timer: ReturnType<typeof setTimeout> | undefined
+      function done(ok: boolean) {
+        clearTimeout(timer)
+        signal.removeEventListener('abort', onAbort)
+        if (!contents.isDestroyed()) contents.removeListener('destroyed', onAbort)
+        resolve(ok)
+      }
+      function onAbort() { done(false) }
+      timer = setTimeout(onAbort, ms)
+      signal.addEventListener('abort', onAbort, { once: true })
+      // A window closed before its first page answers at once (no wait to the end).
+      contents.once('destroyed', onAbort)
+      firstLoad.push(() => done(true))
+    })
+    return { setMode, record, command, firstLoaded, windowClosed: () => endRecording('closed') }
   }
 
   return {
@@ -808,7 +828,8 @@ export function createBrowserWindowShell(options: {
       }
       // The title always names the site, whatever the page calls itself.
       win.on('page-title-updated', event => event.preventDefault())
-      if (options.show !== false) win.once('ready-to-show', () => win.show())
+      // A window a run opened again is shown without the keyboard: the member's typing stays where it was.
+      if (options.show !== false) win.once('ready-to-show', () => { if (spec.inactive) win.showInactive(); else win.show() })
       win.on('closed', () => {
         // A recording in progress is discarded with its window.
         pageDebugger.windowClosed()
@@ -927,7 +948,7 @@ export function createBrowserWindowShell(options: {
           // in time is stopped, and the window is then emptied rather than handed back with that document.
           // The page cannot refuse to go (a beforeunload is let go: `will-prevent-unload` and the dialog handler). When the
           // fresh load cannot be made under the gate — the gate gone, the load refused or not ending — the window is closed
-          // instead of handed back with that document (its login stays: 「開いてログイン」 opens it again; review M, L1).
+          // instead of handed back with that document (its login stays: the next run opens it again, agent-browser.md "The window a run needs"; review M, L1).
           if (actedOnPage) {
             let fresh = false
             if (browseReady() && state.site) {
@@ -1045,6 +1066,8 @@ export function createBrowserWindowShell(options: {
         preview,
         record,
         browse,
+        // A run that opened the window again waits for its page before entering it (agent-browser.md "The window a run needs").
+        whenLoaded: signal => pageDebugger.firstLoaded(signal, RUN_WINDOW_LOAD_MS),
       }
     },
 

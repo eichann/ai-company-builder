@@ -29,6 +29,7 @@ import {
 import { browserRunLogProblem } from '../../shared/core/browser-run-log'
 import { readBrowserCard } from '../shared/browser-inspection'
 import { BROWSER_CATALOG_NONE } from '../shared/browser-tool-catalog'
+import { BROWSER_WORDS, type BrowserRunWindow } from '../shared/browser-operation'
 
 const HOST = 'shop.example.test'
 const COMPANY = 'company-1'
@@ -70,13 +71,16 @@ interface World {
   continue: (n: number) => BrowserLinesAnswer
   registered: boolean
   window: BrowserBrowseSurface | null
+  /** The controller's `windowForRun` (absent: main hands none). */
+  openWindow?: (w: World, surface: BrowserBrowseSurface) => BrowserRunWindow
+  opens: number
 }
 
 function world(over: Partial<World> = {}) {
   const w: World = {
     calls: [], acted: [], finished: [], entered: 0, left: 0, stopped: false, switchOn: true, user: 'u-1', answers: [],
     start: { kind: 'ok', value: { runId: RUN, leaseMs: 120_000 } }, continue: () => ({ kind: 'ok', value: { leaseMs: 120_000 } }),
-    registered: true, window: null, ...over,
+    registered: true, window: null, opens: 0, ...over,
   }
   let continues = 0
   const api: BrowserRunsApi = {
@@ -113,6 +117,7 @@ function world(over: Partial<World> = {}) {
   const wiring = wireBrowserBrowse({
     aiSwitch: () => w.switchOn, userId: () => w.user, context, stopped: () => w.stopped,
     window: () => w.window, registered: () => w.registered, api, operator: () => operator, cliPath: () => '/bin/claude', parentEnv: () => ({}),
+    ...(w.openWindow ? { openWindow: async () => { w.opens++; return w.openWindow!(w, surface) } } : {}),
   })
   const run = (input: Partial<{ task: string; items: string[]; signal: AbortSignal }> = {}) => wiring.browse({
     companyId: COMPANY, conversationId: 'conv-1', site: HOST, task: input.task ?? '一覧の受付の終わりを並べて',
@@ -132,6 +137,53 @@ test('switched off, a domain not registered, no window: nothing asked of the ser
     assert.equal(w.entered, 0)
     assert.deepEqual(prompts, [])
   }
+})
+
+test('a window closed meanwhile opens again for the run (the controller decides), never for a site not registered or switched off', async () => {
+  const reopen = (w: World, surface: BrowserBrowseSurface): BrowserRunWindow => { w.window = surface; return { kind: 'opened' } }
+  const { w, run } = world({ window: null, openWindow: reopen, answers: [done('受付は 12/24 まで')] })
+  const r = await run()
+  assert.equal(r.kind, 'card', 'the run goes on in the window that opened')
+  assert.equal(w.opens, 1)
+  assert.equal(w.entered, 1)
+  for (const over of [{ switchOn: false }, { registered: false }]) {
+    const other = world({ ...over, window: null, openWindow: reopen })
+    assert.equal((await other.run()).kind, 'refused')
+    assert.equal(other.w.opens, 0, JSON.stringify(over))
+  }
+})
+
+test('a sign-in as another member while the window opens stops the run before the server is asked', async () => {
+  const { w, run } = world({ window: null, openWindow: (wd, surface) => { wd.window = surface; wd.user = 'u-2'; return { kind: 'opened' } } })
+  assert.deepEqual(await run(), { kind: 'refused', words: W.interrupted })
+  assert.deepEqual(w.calls, [])
+  assert.equal(w.entered, 0)
+})
+
+test('an outage mid-run (the context moved, no window handed out) is logged as context-changed, never window-closed', async () => {
+  const { w, run } = world({ answers: ['{"do":"wait","seconds":1}'], onStep: () => { w.user = 'u-2'; w.window = null } })
+  await run()
+  assert.equal((w.finished[0] as { reason?: string }).reason, 'context-changed')
+})
+
+test('the AI stopped while the window opened: nothing is asked of the server', async () => {
+  const { w, run } = world({ window: null, openWindow: (wd, surface) => { wd.window = surface; wd.stopped = true; return { kind: 'opened' } } })
+  assert.deepEqual(await run(), { kind: 'refused', words: W.stopped })
+  assert.deepEqual(w.calls, [])
+})
+
+test('no window and nothing to open: the words say so, and why when the app removed the kept login for safety', async () => {
+  const none = world({ window: null, openWindow: () => ({ kind: 'none', loginRemoved: false }) })
+  assert.deepEqual(await none.run(), { kind: 'refused', words: W.noWindow })
+  const removed = world({ window: null, openWindow: () => ({ kind: 'none', loginRemoved: true }) })
+  assert.deepEqual(await removed.run(), { kind: 'refused', words: `${BROWSER_WORDS.loginRemoved}${W.noWindow}` })
+  assert.deepEqual(removed.w.calls, [])
+})
+
+test('a login page in the window: the AI hears the plain sentence to log in in the window that opened', async () => {
+  const { run } = world({ answers: ['{"do":"stop","why":"need-login","unread":[]}'] })
+  const r = await run()
+  assert.match(r.kind === 'card' ? r.words : '', /サイトのログインが必要です。開いた窓でログインしてから、もう一度頼んでください/)
 })
 
 test('the server decides first: a PC not registered, 使わない, busy, the AI stopped → plain words, the window never entered', async () => {

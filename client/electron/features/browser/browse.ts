@@ -16,6 +16,7 @@ import {
 } from '../../../shared/browser-browse'
 import type { BrowserInspectionView } from '../../../shared/browser-inspection'
 import { createOperatorTrail } from '../../../shared/browser-operator-trail'
+import { noWindowWords, type BrowserRunWindow } from '../../../shared/browser-operation'
 import { BROWSER_RUN_ID_RE, BROWSER_RUN_LIMITS, type BrowserRunEndReason, type BrowserRunLogStep, type BrowserRunOutcome } from '../../../../shared/core/browser-run-log'
 import type { BrowserAiSwitch } from './ai-switch'
 import type { BrowserContext } from './context'
@@ -34,6 +35,11 @@ export interface BrowserBrowseDeps {
   window(companyId: string, host: string): BrowserBrowseSurface | null
   /** Whether the company registered the domain (its current valid policy, controller `siteNow`). */
   registered(companyId: string, host: string): boolean
+  /**
+   * The window a run needs (controller `windowForRun`, agent-browser.md "The window a run needs"): asked before the run
+   * looks for it, so a window closed meanwhile opens again by itself while this app run holds the member's login.
+   */
+  openWindow?(companyId: string, host: string, signal: AbortSignal): Promise<BrowserRunWindow>
   api: BrowserRunsApi
   /** The member's agent's operator (`browserOperatorOf`), its CLI and the app's environment. */
   operator(): PreviewOperator | null
@@ -93,13 +99,16 @@ export function wireBrowserBrowse(deps: BrowserBrowseDeps) {
     // Only a domain the company registered (its current valid policy): the request's host is a name, nothing more.
     if (!deps.registered(companyId, host)) return refused(W.notAllowed)
     if (deps.stopped(companyId)) return refused(W.stopped)
-    const win = deps.window(companyId, host)
-    if (!win || win.closed()) return refused(W.noWindow)
     const operator = deps.operator()
     if (!operator) return refused(W.noOperator)
+    // The context is taken before the wait for the window, so a sign-in or setting change meanwhile is seen (Codex review).
+    const stillCurrent = deps.context.capture({ companyId, signal: input.signal })
+    const found = await deps.openWindow?.(companyId, host, input.signal)
+    if (found && deps.stopped(companyId)) return refused(W.stopped)
+    const win = deps.window(companyId, host)
+    if (!win || win.closed()) return refused(noWindowWords(W.noWindow, found))
     const windowKey = `${companyId}\0${host}`
     if (busyWindows.has(windowKey)) return refused(W.busy)
-    const stillCurrent = deps.context.capture({ companyId, signal: input.signal })
     if (!stillCurrent()) return refused(W.interrupted)
 
     // The server decides first: nothing is read or started unless it gives the run (and its lock). The window is taken
@@ -133,7 +142,8 @@ export function wireBrowserBrowse(deps: BrowserBrowseDeps) {
     const current = () => !cut.signal.aborted && stillCurrent() && !deps.stopped(companyId)
       && !win.closed() && deps.window(companyId, host) === win
     const whyNot = (): BrowserRunEndReason => (input.signal.aborted ? 'stopped-by-person' : deps.stopped(companyId) ? 'ai-stopped'
-      : win.closed() || deps.window(companyId, host) !== win ? 'window-closed' : now() >= deadline ? 'timeout' : 'context-changed')
+      : !stillCurrent() ? 'context-changed'
+        : win.closed() || deps.window(companyId, host) !== win ? 'window-closed' : now() >= deadline ? 'timeout' : 'context-changed')
     try {
       const parentEnv = deps.parentEnv()
       const resolved = await operator.resolve(deps.cliPath(), parentEnv)

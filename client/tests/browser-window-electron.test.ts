@@ -58,6 +58,10 @@ interface Result {
   browse: Record<string, unknown>
   work: Record<string, unknown>
   kept: Record<string, unknown>
+  whenLoadedCut: boolean
+  whenLoaded: boolean
+  whenLoadedUrl: string
+  focus: { appFocusedFirst: boolean; inactive: { visible: boolean; appKeepsKeyboard: boolean }; active: { visible: boolean; appKeepsKeyboard: boolean } }
 }
 
 function freePort(): Promise<number> {
@@ -129,6 +133,18 @@ test('what the request hook cannot see goes nowhere either: preconnect, reports,
   // Not even a TCP connection to evil.test (a preconnect, a NEL report, TURN over TCP open one).
   assert.equal(result.evilConnections, 0)
   assert.equal(result.udpPackets, 0, 'no STUN datagram')
+})
+
+test('a run that opened the window waits until its first page has loaded (not past its signal)', { skip }, () => {
+  assert.equal(result.whenLoadedCut, false, 'a stopped run does not wait')
+  assert.equal(result.whenLoaded, true)
+  assert.equal(result.whenLoadedUrl, 'https://op.test/', 'the site\'s page is there when it answers')
+})
+
+test('a window a run opens again is shown without taking the keyboard from the app; 「開いてログイン」 takes it', { skip }, () => {
+  assert.equal(result.focus.appFocusedFirst, true, JSON.stringify(result.focus))
+  assert.deepEqual(result.focus.inactive, { visible: true, appKeepsKeyboard: true })
+  assert.deepEqual(result.focus.active, { visible: true, appKeepsKeyboard: false })
 })
 
 test('the login lives in memory only: no session folder on disk', { skip }, () => {

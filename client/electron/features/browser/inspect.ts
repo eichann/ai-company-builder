@@ -26,6 +26,7 @@ import {
   type BrowserInspectionGetResult, type BrowserInspectionView,
 } from '../../../shared/browser-inspection'
 import type { BrowserPreviewSurface } from '../../../shared/browser-runner'
+import { noWindowWords, type BrowserRunWindow } from '../../../shared/browser-operation'
 import approved from '../../../../shared/browser-connectors/approved.json'
 import carried from '../../../../shared/browser-connectors/carried.json'
 import opened from '../../../../shared/browser-connectors/opened.json'
@@ -57,6 +58,11 @@ export interface BrowserInspectionsDeps<E> {
   stopped(companyId: string): boolean
   /** The member's open window of the site as main reads through it (controller `previewWindow`); null: not open or not listed. */
   window(companyId: string, host: string): BrowserPreviewSurface | null
+  /**
+   * The window a run needs (controller `windowForRun`, agent-browser.md "The window a run needs"): asked before the run
+   * looks for it, so a window closed meanwhile opens again by itself while this app run holds the member's login.
+   */
+  openWindow?(companyId: string, host: string, signal: AbortSignal): Promise<BrowserRunWindow>
   /** The site's level in the company's current valid policy (controller `siteNow`), null when the company did not register it. */
   siteLevel(companyId: string, host: string): BrowserOperationLevel | null
   /** The maps this build bundles (client/connector-maps/), the opened lines (client/browser-lines/), the declarations. */
@@ -187,11 +193,14 @@ export function wireBrowserInspections<E extends IpcInvokeEvent>(ipc: IpcRegistr
     const site = siteOf(line.read.site)
     if (!site) return refused(W.notAllowed)
     if (deps.stopped(input.companyId)) return refused(W.stopped)
+    // The context is taken before the wait for the window, so a sign-in or setting change meanwhile is seen (Codex review).
+    const stillCurrent = deps.context.capture({ companyId: input.companyId, signal: input.signal })
+    const windowFound = await deps.openWindow?.(input.companyId, site.host, input.signal)
+    if (windowFound && deps.stopped(input.companyId)) return refused(W.stopped)
     const win = deps.window(input.companyId, site.host)
-    if (!win || win.closed()) return refused(W.noWindow)
+    if (!win || win.closed()) return refused(noWindowWords(W.noWindow, windowFound))
 
     // The server's gate first: nothing is read unless it makes the plan (and no plan for a turn already stopped).
-    const stillCurrent = deps.context.capture({ companyId: input.companyId, signal: input.signal })
     if (!stillCurrent()) return refused(W.interrupted)
     const ref: BrowserLineRef = { site: row.site, line: row.name, version: row.version, mapVersion: row.mapVersion, meaningHash: row.meaningHash, mechanicsHash: row.mechanicsHash }
     const made = await http.createInspection(input.companyId, { line: ref, values: supplied, ...(input.conversationId ? { conversationId: input.conversationId } : {}) })

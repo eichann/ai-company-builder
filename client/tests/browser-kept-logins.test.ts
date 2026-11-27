@@ -48,11 +48,11 @@ function world(options: { platformEncloses?: boolean; partitionsDir?: string; in
   const partitions = options.partitionsDir ?? path.join(userData, 'Partitions')
   fs.mkdirSync(path.join(userData, 'Partitions'), { recursive: true })
   options.before?.(userData)
-  const opened: Array<BrowserWindowSpec & { closed: boolean }> = []
+  const opened: Array<BrowserWindowSpec & { closed: boolean; close: () => void }> = []
   const cleared: string[] = []
   const shell: BrowserShell = {
     open(spec) {
-      const entry = { ...spec, closed: false }
+      const entry = { ...spec, closed: false, close() { entry.closed = true; spec.onClosed() } }
       opened.push(entry)
       // What Chromium does for a `persist:` partition: its folder under Partitions.
       if (spec.partition.startsWith('persist:')) {
@@ -60,7 +60,7 @@ function world(options: { platformEncloses?: boolean; partitionsDir?: string; in
         fs.mkdirSync(dir, { recursive: true })
         fs.writeFileSync(path.join(dir, 'Cookies'), 'sid=secret')
       }
-      return { focus() {}, close() { entry.closed = true; spec.onClosed() }, updateSite() {} }
+      return { focus() {}, close: () => entry.close(), updateSite() {} }
     },
     async clearPartition(partition) { cleared.push(partition) },
   }
@@ -164,7 +164,9 @@ test('kept for 囲う with a level; memory for everyone else, as before', () => 
   ] as const) {
     const m = world()
     m.browser.policyAnswered('c1', p)
-    assert.deepEqual(m.browser.sites('c1'), { sites: [{ host: SITE.host }] }, label)
+    // Settings says the sandbox is why when it is (agent-browser.md "The window a run needs").
+    const bySandbox = label === 'observe' || label === 'off'
+    assert.deepEqual(m.browser.sites('c1'), { sites: [{ host: SITE.host, ...(bySandbox ? { notKeptBySandbox: true } : {}) }] }, label)
     m.browser.open('c1', SITE.host)
     assert.doesNotMatch(m.opened[0].partition, /^persist:/, label)
   }
@@ -288,6 +290,51 @@ test('an enclosed turn leaves the kept logins; any other removes every one on th
   w.browser.policyAnswered('c1', policy('enforce'))
   w.browser.signedIn('user-1')
   assert.deepEqual(w.browser.sites('c1'), { sites: [{ host: SITE.host }] }, 'a new answer does not bring keeping back in this run')
+})
+
+test('a run reopens the window of a login kept on this PC (also one an earlier run left), never one the app removed — and says why', async () => {
+  const signal = new AbortController().signal
+  // An earlier run's kept login, on disk: the run opens its window in that same kept session.
+  const w = world({ before: u => fs.mkdirSync(path.join(u, 'Partitions', keptLoginFolder('user-1', 'c1', SITE.host))) })
+  w.browser.policyAnswered('c1', policy('enforce', [SITE, OTHER]))
+  assert.deepEqual(await w.browser.windowForRun('c1', SITE.host, signal), { kind: 'opened' })
+  assert.equal(w.opened[0].partition, `persist:${keptLoginFolder('user-1', 'c1', SITE.host)}`)
+  assert.deepEqual(await w.browser.windowForRun('c1', OTHER.host, signal), { kind: 'none', loginRemoved: false }, 'nothing kept for that site')
+  // A turn without the sandbox removes it: no window opens again, and the run says why.
+  assert.equal(await w.browser.beforeAiTurn({}), true)
+  assert.deepEqual(await w.browser.windowForRun('c1', SITE.host, signal), { kind: 'none', loginRemoved: true })
+  assert.equal(w.opened.length, 1)
+  // The member opens it again: the reason is gone with it.
+  w.browser.open('c1', SITE.host)
+  w.opened[1].close()
+  assert.deepEqual(await w.browser.windowForRun('c1', SITE.host, signal), { kind: 'opened' }, 'its memory login now')
+  w.browser.policyAnswered('c1', policy('enforce', [OTHER]))
+  w.browser.policyAnswered('c1', policy('enforce', [SITE, OTHER]))
+  assert.deepEqual(await w.browser.windowForRun('c1', SITE.host, signal), { kind: 'none', loginRemoved: false }, 'that reason is not said again once the member opened it')
+
+  // A memory login made while the sandbox was 記録だけ still counts once keeping is allowed (it then opens kept).
+  const upgraded = world()
+  upgraded.browser.policyAnswered('c1', policy('observe'))
+  upgraded.browser.open('c1', SITE.host)
+  upgraded.opened[0].close()
+  upgraded.browser.policyAnswered('c1', policy('enforce'))
+  assert.deepEqual(await upgraded.browser.windowForRun('c1', SITE.host, signal), { kind: 'opened' })
+
+  // The sandbox loosened while the server could not be reached: the next answer still says why.
+  const outage = world()
+  outage.browser.policyAnswered('c1', policy('enforce'))
+  outage.browser.open('c1', SITE.host)
+  outage.browser.policyFailed('c1')
+  outage.browser.policyAnswered('c1', policy('observe'))
+  await settle()
+  assert.deepEqual(await outage.browser.windowForRun('c1', SITE.host, signal), { kind: 'none', loginRemoved: true }, 'told after an outage too')
+
+  const changed = world()
+  changed.browser.policyAnswered('c1', policy('enforce'))
+  changed.browser.open('c1', SITE.host)
+  changed.browser.policyAnswered('c1', policy('observe'))
+  await settle()
+  assert.deepEqual(await changed.browser.windowForRun('c1', SITE.host, signal), { kind: 'none', loginRemoved: true }, 'the sandbox is no longer 囲う')
 })
 
 test('observe, no sandbox and an enforce turn whose company folder holds the app\'s data are not enclosed', async () => {

@@ -381,6 +381,8 @@ interface WorkWorld {
   onStep?: (prompt: string) => void
   /** The Skill steps read from the company folder (by the Skill the server's frames run names); none: no company folder. */
   skillSteps?: (skill: string) => string | null
+  /** The window starts closed; the controller's `windowForRun` opens it (true) or has nothing to open (false). */
+  reopens?: boolean
 }
 
 function workWorld(over: Partial<WorkWorld> = {}) {
@@ -439,9 +441,11 @@ function workWorld(over: Partial<WorkWorld> = {}) {
     },
   }
   const context = createBrowserContext({ userId: () => 'u-1', aiSwitch: () => true })
+  let shown = w.reopens === undefined
   const wiring = wireBrowserWork({
-    aiSwitch: () => true, userId: () => 'u-1', context, stopped: () => false, window: () => surface, registered: () => true,
-    reader: () => ({ async read(address) { w.calls.push(`read ${address}`); return w.reads[address] !== undefined ? { status: 200, body: w.reads[address] } : { status: 404, body: '' } }, closed: () => false }),
+    aiSwitch: () => true, userId: () => 'u-1', context, stopped: () => false, window: () => (shown ? surface : null), registered: () => true,
+    ...(w.reopens !== undefined ? { openWindow: async () => { w.calls.push('openWindow'); shown = w.reopens!; return shown ? { kind: 'opened' as const } : { kind: 'none' as const, loginRemoved: false } } } : {}),
+    reader: () => shown ? ({ async read(address) { w.calls.push(`read ${address}`); return w.reads[address] !== undefined ? { status: 200, body: w.reads[address] } : { status: 404, body: '' } }, closed: () => false }) : null,
     api: api as never, operator: () => operator, cliPath: () => '/bin/claude', parentEnv: () => ({}),
     ...(w.idleMaxMs !== undefined ? { idleMaxMs: w.idleMaxMs } : {}),
     ...(w.now ? { now: w.now } : {}),
@@ -964,4 +968,15 @@ test('a Skill name two Skills share: the server refuses and the AI is told to gi
     assert.equal(await bad.tool.execute({ site: HOST, task: 'x', skill }), W.badInput, skill)
     assert.equal(bad.w.calls.length, 0, skill)
   }
+})
+
+test('a write task whose window was closed opens it again first (the controller decides), else says there is none', async () => {
+  const { w, tool } = workWorld({ reopens: true })
+  await tool.execute({ site: HOST, task: 'クーポンを作る', skill: 'coupons' })
+  assert.equal(w.calls[0], 'openWindow')
+  assert.ok(w.calls.includes('enter'), 'the run went on in the window that opened')
+  const none = workWorld({ reopens: false })
+  const said = await none.tool.execute({ site: HOST, task: 'クーポンを作る', skill: 'coupons' })
+  assert.match(JSON.stringify(said), /サイトの窓が開いていません/)
+  assert.deepEqual(none.w.calls, ['openWindow'], 'nothing asked of the server or the window')
 })

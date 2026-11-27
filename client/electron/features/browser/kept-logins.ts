@@ -230,6 +230,16 @@ export function createKeptLogins(deps: KeptLoginsDeps) {
       return `persist:${name}`
     },
 
+    /**
+     * Is there a kept login of the site to open again (agent-browser.md "The window a run needs"): its folder was loaded
+     * this run or is on disk (a real folder, never through a link). Asked only while it may be kept (`mayKeep`).
+     */
+    held(userId: string, companyId: string, host: string): boolean {
+      const name = keptLoginFolder(userId, companyId, host)
+      if (loaded.has(name)) return true
+      try { return fs.lstatSync(path.join(deps.partitionsDir(), name)).isDirectory() } catch { return false }
+    },
+
     /** Could a kept login be on disk (see `maybeOnDisk`)? */
     maybeOnDisk(): boolean { return maybeOnDisk },
 
