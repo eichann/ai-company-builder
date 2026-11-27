@@ -597,3 +597,25 @@ test('a meeting output whose basis quote is not in the minutes this turn read ne
   // The tool never offers a serial key any more.
   assert.equal(tools!.specs.find(s => s.name === 'records_create')!.schema.safeParse({ type: 'task', title: 'x', key: 'task:1' }).success, false)
 })
+
+test('moving a linked file (gap report 2026-11-27 Bug B): the AI is told a move inside the company folder follows, .personal/ links are allowed and the linker\'s own, and only private folders cannot be linked', async () => {
+  const { api } = fakeServer('act')
+  const tools = await createRecordTools((await api.openTurn('co', { conversationId: 'c', agent: 'claude-code', scope: 'act' }))!)
+  const get = tools.specs.find(s => s.name === 'records_get')!.description
+  const link = tools.specs.find(s => s.name === 'records_link_file')!.description
+  for (const text of [tools.instructions, link]) {
+    assert.match(text, /\.personal\/ の中のファイルもつなげ/)
+    assert.match(text, /本人にだけ見え/)
+  }
+  assert.match(tools.instructions, /同期したあと、つながりは新しい場所に自動で付け替わります/)
+  assert.match(link, /自動で付いていくので、つなぎ直さない/)
+  assert.match(get, /\.personal\/ の中へのつながりはサーバーから見えないので、いつも broken: true/)
+  assert.doesNotMatch(get + link, /たどれない場所|外の記録にはつなげない/)
+})
+
+test('an operation without an AI tool: the AI says where in the app to do it, never 「つながっていません」', async () => {
+  const { api } = fakeServer('act')
+  const tools = await createRecordTools((await api.openTurn('co', { conversationId: 'c', agent: 'claude-code', scope: 'act' }))!)
+  assert.match(tools.instructions, /「つながっていません」とは言わず、メンバーがアプリのどこで行うかを伝えて/)
+  for (const where of ['［部署に出す］', '［取り消す］', '［アーカイブ］', '［終わったら］', '［済んだ］']) assert.ok(tools.instructions.includes(where), where)
+})

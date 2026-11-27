@@ -183,6 +183,8 @@ test('a refused link answers false and never throws; a read token links nothing;
 test('a task only the member sees keeps new files in today\'s folder; a shared one is only told about the links', () => {
   const own = taskTopicInstructions({ id: 'task-0001ab', title: '見積を直す', personal: true }, '営業/.personal/inbox/日付別/2026/20261103')
   assert.match(own, /自動でこのやることにつなぎます/)
+  // Bug B (gap report 2026-11-27): a moved file is not linked by itself; .personal/ moves need linking again.
+  assert.match(own, /既にあるファイルを動かしても、自動ではつながりません。\.personal\/ への出し入れのときは、records_link_file でつなぎ直して/)
   assert.match(own, /今日のフォルダ「営業\/\.personal\/inbox\/日付別\/2026\/20261103\/」/)
   const shared = taskTopicInstructions({ id: 'task-0001ab', title: '見積を直す', personal: false }, '営業/.personal/inbox/日付別/2026/20261103')
   assert.match(shared, /自動でこのやることにつなぎます/)

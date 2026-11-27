@@ -425,6 +425,19 @@ nothing to anyone else. It links a Drive file or a file of the member's own PC i
   so such an undo answers `CHANGED_SINCE`) and never lands in the server fields. A replay
   (`versions/:version`) shows `links.<name>` as of that version.
 - No existence check: a path not synced yet links and reads `broken` until it arrives.
+- **What the AI is told about moves** (gap report 2026-11-27 Bug B: the AI said a move to another
+  department could break a link and that `.personal/` files cannot be linked — both wrong):
+  `RECORDS_INSTRUCTIONS` (`FILE_MOVES_INSTRUCTIONS`, `client/electron/records/tools.ts`) says a move or
+  rename inside the company folder (a folder too) follows after the member syncs (shown at the old
+  place until then; a move together with a big edit may not be recognised), that a move into or out
+  of `.personal/` or a private folder does not follow (unlink the old place, link the new one), that
+  `.personal/` files link (the link is the linker's alone) while a private folder's files link to no
+  record, and to tell the member before moving. `records_get`'s description says `broken: true` is
+  "not on the server now" (deleted, not synced, moved into `.personal/` or a private folder) and that a
+  `.personal/` link always reads broken (check the member's Mac with the file tools);
+  `records_link_file`'s says the same about `.personal/`, private folders and moves;
+  `taskTopicInstructions` that a moved file is not linked by itself. Test:
+  `client/tests/records-tools.test.ts` 「moving a linked file…」, `consultation-task.test.ts`.
 - The core app's entrances (owner decision 2026-11-01: the task list is the core's, and linking
   comes back with it — not from a plugin): the file tree's 「やることにつなぐ…」, dragging a file
   from the tree onto a task row or the task card, and the card's 「＋ファイルをつなぐ」 / 「外す」,
@@ -2335,7 +2348,11 @@ complete and idempotent; the immutability trigger — mutation-checked).
   token was issued for. These routes never accept a session.
 - The app's main process gets the token per chat turn with the session (`POST
   /me/record-tokens { conversationId, agent, scope }`, ≤ 50 live per member, 120 minutes) and
-  revokes it when the turn ends (`DELETE /me/record-tokens/:tokenId`, the member's own only). The
+  revokes it when the turn ends (`DELETE /me/record-tokens/:tokenId`, the member's own only). A new
+  token not bound to a run ends the member's earlier live tokens of the same consultation not bound
+  to one either (`revokeConversationAiTokens`; one turn runs at a time in a consultation, and a token
+  whose end the app could not report — offline — no longer counts against the 50 for two hours); a
+  run's tokens are its run's ("When the record tools are missing" below). The
   AI process never receives the session: Claude's record tools run in main (in-process MCP), Codex
   reaches them through a loopback endpoint that main serves (`client/electron/records/`).
 - `scope`: `read` (look up) or `act` (also create / run actions). The app asks `act` only for
@@ -2420,6 +2437,52 @@ complete and idempotent; the immutability trigger — mutation-checked).
 - Not done (TODO): the plugin-SDK and admin-API surfaces of the same definitions (stages 5 / 7);
   pushing an action's attached files before calling it (0.18-1 — the tools send no
   `attachments` yet); the app assigning ids to new record files and repairing duplicates.
+- **What has no AI tool** (gap report 2026-11-27 Bug A #2: asked to do something it has no tool for,
+  the AI said 「つながっていません」): `RECORDS_INSTRUCTIONS` lists the screen-only operations with
+  where the member does them (`SCREEN_ONLY_OPERATIONS`, `tools.ts`: 部署に出す, 取り消す, 引き受ける /
+  受けられない, アーカイブ, 終わったら, 差し戻す, つながりを外す, a 案件's なんのため・期限・責任者・終える,
+  来た連絡's 済んだ / 取り込まない, そうです / 違う, approvals, the admin console) and tells the AI to say
+  where to press — never 「つながっていません」 — also for anything else it has no tool for. **A row
+  leaves the list in the PR that gives the AI a tool for it.** Test: `records-tools.test.ts` 「an
+  operation without an AI tool…」.
+
+### When the record tools are missing (gap report 2026-11-27 Bug A)
+
+A turn whose tools could not be prepared went on silently without them (`chat-server.ts`
+`.catch(() => null)`, the instructions only with tools), and a Claude conversation that had them on an
+earlier turn told the member 「この会話から記録の道具につながっていません」. Now:
+
+- **Asked once more** — `RecordsApi.openTurnFor` (`api.ts`; `openTurn` is it without the reason):
+  no answer or the server's own error (5xx) when asking for the token is asked again once after
+  `retryDelayMs` (500 ms), and so is `createRecordTools`' read of the type definitions — only when the
+  first try failed fast (`onceMore`: within half the time limit), so a member never waits two full
+  time-outs. Every other refusal is not retried.
+- **Why, not null** — `openTurnFor` answers `{ access }` or `{ missing }`: `signed-out` (no session,
+  401), `too-many` (429), `disabled` (404 `RECORDS_DISABLED`), `old-server` (404 without it),
+  `offline`, `server-error`, `unknown`, and `no-run` (a job's run without its run, as before: no turn).
+  `createRecordTools` throws the types read's `RecordsApiError` after ending the token
+  (`missingReasonOf`). The chat server's hook answers `{ unavailable: reason }`; a hook that threw
+  counts as `unknown`, never as silence.
+- **Said to the AI and the screen** (`client/shared/record-tools-missing.ts`): the AI gets one
+  paragraph with the turn (`recordToolsMissingInstructions`: the reason, that this is why tools of an
+  earlier turn are gone, and to tell the member the reason and the fix rather than 「つながっていません」);
+  the reply starts with one muted line (`data-record-tools-missing`, `MessageParts.tsx`:
+  「この回は、会社の記録（やること・案件など）の道具なしで答えています。理由：…。…」), live only — not
+  stored with the reply (the AI's own words about it are). A company with records off (`disabled`) is
+  no failure: the AI is told records are off there and where an admin turns them on, the screen says
+  nothing; an unattended step gets the AI paragraph only.
+- **An expired token mid-turn** (a turn past the token's 120 minutes): a call answered 401
+  `RECORD_TOKEN_INVALID` issues the token again **once per turn** and repeats the call — only a
+  consultation's token (a run's ends with its run: `job-runs.ts` stops on that code), never after the
+  turn ended, and **without `memberTurn`**, so the AI's actions at the member's request stay within the
+  first token's count; `close` ends the token in use. A second one is said in the member's words
+  (「記録の道具の期限が切れました。もう一度送ってください。」, code unchanged).
+- **Older tokens of the consultation end** when a new one is issued ("Who is acting" above).
+- Tests: `client/tests/record-tools-missing.test.ts` (each reason and how often it is asked; the
+  re-issue once, without the mark, never for a run, the token in use ended; the types read again and
+  the token ended; the AI paragraph and the line, none on screen for `disabled`, a throwing hook),
+  `server/tests/integration/record-tokens.test.ts` (「a consultation's new turn ends its earlier turns'
+  tokens…」) — each guard mutation-checked.
 
 ## Outside systems (milestone 3, `plugins.md`)
 

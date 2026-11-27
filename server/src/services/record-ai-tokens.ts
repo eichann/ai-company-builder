@@ -22,6 +22,11 @@
  * still be a member. While the company's AI is stopped (emergency stop,
  * agent-stop.md) every token is refused.
  *
+ * A new token not bound to a run ends the member's earlier live tokens of the same consultation that are
+ * not bound to one either: one turn runs at a time in a consultation, and a token whose end the app could
+ * not report (offline) no longer counts against RECORD_TOKENS_PER_MEMBER (records.md "When the record
+ * tools are missing").
+ *
  * `memberTurn` (records.md "The AI at the member's request", owner decision 2026-11-26): the app says the
  * token is for a turn the member started with their own message. Kept only for an `act` token **not bound
  * to a run** — a run (「AI の番」, a plugin step's, a scheduled job's) has nobody present, so it never
@@ -117,6 +122,9 @@ export function createRecordAiTokenService(deps: RecordAiTokenDeps) {
       if (!records.settings().enabled) return refuse('not-found', 'この会社では記録の機能が有効になっていません', { code: 'RECORDS_DISABLED' })
       const now = clock.nowMs()
       records.pruneAiTokens(new Date(now - 86_400_000).toISOString())
+      // A consultation's new turn ends its earlier turns' tokens (one whose end was never heard — the app offline
+      // then — would otherwise count against the member for its two hours). A run's tokens are its run's.
+      if (run === null) records.revokeConversationAiTokens(member.userId, conversationId, new Date(now).toISOString())
       if (records.liveAiTokens(member.userId, new Date(now).toISOString()) >= RECORD_TOKENS_PER_MEMBER) {
         return refuse('rate-limited', 'Too many live record tokens', { code: 'TOO_MANY_TOKENS', retryAfterSeconds: 60 })
       }

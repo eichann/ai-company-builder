@@ -9,7 +9,7 @@ import { normalizePermissionMode } from '../../../shared/permission-mode'
 import type { ChatServerConfig } from '../../chat-server'
 import type { ChatHistoryStore } from '../../chat-history-store'
 import type { CompanyFilesApi } from '../../company-files/api'
-import type { RecordsApi } from '../../records/api'
+import { missingReasonOf, type RecordsApi } from '../../records/api'
 import { createRecordTools, type ExtraRecordTools } from '../../records/tools'
 import { readMailAttachment } from '../../records/mail-attachments'
 import { recordToolProviders } from '../../records/tool-providers'
@@ -210,7 +210,10 @@ export function createChatServerConfig(deps: ChatServerConfigDeps): ChatServerCo
       }
     },
     createRecordTools: async ({ companyId, conversationId, agent, actions, requireRun, memberTurn, onAskedClose, companyRoot, department, companyScreen, largeContext, onOperationCard, onApprovalCard, onBundleChoice, onMailDraft, onDriveOverwrite, jobProposals, onJobProposalCard }, signal) => {
-      const access = await deps.records.openTurn(companyId, { conversationId, agent, scope: actions ? 'act' : 'read', ...(requireRun ? { requireRun } : {}), ...(memberTurn && actions ? { memberTurn } : {}) })
+      const opened = await deps.records.openTurnFor(companyId, { conversationId, agent, scope: actions ? 'act' : 'read', ...(requireRun ? { requireRun } : {}), ...(memberTurn && actions ? { memberTurn } : {}) })
+      // No token: why, for the AI and the screen (records.md "When the record tools are missing").
+      if ('missing' in opened) return { unavailable: opened.missing }
+      const access = opened.access
       // Connectors' tools ride on the same token (records/tool-providers.ts: Google Drive, …).
       // A Drive put in a consultation about a やること is linked to it by the server (google-drive.md).
       const topicTask = () => taskTopicOf(deps.history.get(companyId, conversationId))
@@ -225,8 +228,9 @@ export function createChatServerConfig(deps: ChatServerConfigDeps): ChatServerCo
       }
       // A mail draft's PDFs are read here, in main, inside this consultation's company folder only.
       const readAttachment = companyRoot ? (file: string) => readMailAttachment(file, companyRoot) : undefined
-      return access ? createRecordTools(access, signal, { companyId, conversationId, department, companyScreen, largeContext, onRecordChanged, onRecordCreated, onOperationCard, onApprovalCard, onBundleChoice, onMailDraft, jobProposals, onJobProposalCard, onAskedClose, toolProviders, readMailAttachment: readAttachment,
-        ...(deps.jobMinutesRead ? { onMinutesText: (recordId: string, text: string, docVersion: string | null) => deps.jobMinutesRead?.(conversationId, recordId, text, docVersion) } : {}) }) : null
+      return createRecordTools(access, signal, { companyId, conversationId, department, companyScreen, largeContext, onRecordChanged, onRecordCreated, onOperationCard, onApprovalCard, onBundleChoice, onMailDraft, jobProposals, onJobProposalCard, onAskedClose, toolProviders, readMailAttachment: readAttachment,
+        ...(deps.jobMinutesRead ? { onMinutesText: (recordId: string, text: string, docVersion: string | null) => deps.jobMinutesRead?.(conversationId, recordId, text, docVersion) } : {}) })
+        .catch(error => ({ unavailable: missingReasonOf(error) }))
     },
     consultationTopic: (companyId, conversationId) => {
       const session = deps.history.get(companyId, conversationId)

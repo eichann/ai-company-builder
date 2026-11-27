@@ -783,12 +783,13 @@ describe('what a meeting\'s reading makes is made once (FB 29)', () => {
 
   it('an older app (serial key, no quote): reused only inside the same consultation; another reading never loses its item', async () => {
     followUpId = minutesRows().find(r => r.title.includes('2回目')).id
-    const token = await tokenFor('mn-sato')
+    let token = await tokenFor('mn-sato')
     const made = await task(token, salesId, TITLE, 'task:1')
     expect(made.status, made.text).toBe(201)
     first = made.body.data.record.id
     // A retry inside the same consultation: the same key (its title reworded), and no key but the same title in other spacing.
-    const again = await task(await tokenFor('mn-sato'), salesId, '修正見積を鈴木様へ', 'task:1')
+    // (A new turn of the same consultation: its token replaces the earlier one.)
+    const again = await task(token = await tokenFor('mn-sato'), salesId, '修正見積を鈴木様へ', 'task:1')
     expect([again.status, again.body.data.record.id, again.body.data.reused]).toEqual([200, first, true])
     expect(again.body.data.note).toContain('同じ根拠の案がもうあります')
     const reworded = await task(token, salesId, '修正見積 (１５０万円) を 鈴木様へ送付。')
