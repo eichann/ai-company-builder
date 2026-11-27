@@ -47,7 +47,9 @@ export function getBrowserInspection(companyId: string, planId: string, reads: B
 /** Reading a write card main holds in memory for the signed-in member (`browserLines:writeCard`). */
 export type BrowserWriteReads = ElectronPort<'getBrowserWriteCard'>
 /** ［確かめた］ (a person's value) and ［済んでいた］［されていなかった］: the member's own answers. */
-export type BrowserWriteAnswers = ElectronPort<'confirmBrowserWriteValue' | 'confirmBrowserWrite'>
+export type BrowserWriteAnswers = ElectronPort<'confirmBrowserWriteValue' | 'confirmBrowserWrite' | 'allowBrowserWrite'>
+/** ［そのまま進める］／［やめる］ on a stopped card: its fixed answer, kept in main (agent-browser.md "The stopped card's answer"). */
+export type BrowserStopDecisions = ElectronPort<'decideBrowserStop'>
 /** ［任せる］: the app writes the plan to the site; ［やめる］ (a write run's card): it does not. */
 export type BrowserWriteOutbound = ElectronPort<'runBrowserWrite' | 'cancelBrowserWrite'>
 
@@ -61,6 +63,15 @@ export function confirmBrowserWriteValue(companyId: string, cardId: string, name
 
 export function confirmBrowserWrite(companyId: string, cardId: string, result: 'done' | 'not_done', answers: BrowserWriteAnswers = window.electronAPI) {
   return answers.confirmBrowserWrite(companyId, cardId, result)
+}
+
+/** ［書いてよい］／［書かない］ about a write outside the run's promise (agent-browser.md "The run's promise"). */
+export function allowBrowserWrite(companyId: string, cardId: string, allow: boolean, answers: BrowserWriteAnswers = window.electronAPI) {
+  return answers.allowBrowserWrite(companyId, cardId, allow)
+}
+
+export function decideBrowserStop(companyId: string, cardId: string, choice: 'proceed' | 'stop', decisions: BrowserStopDecisions = window.electronAPI) {
+  return decisions.decideBrowserStop(companyId, cardId, choice)
 }
 
 export function runBrowserWrite(companyId: string, cardId: string, contentHash: string, outbound: BrowserWriteOutbound = window.electronAPI) {

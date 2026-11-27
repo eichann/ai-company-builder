@@ -8,8 +8,13 @@
  *                                               frames; a waiting run's one-time `approvalToken` is answered here only
  *   GET  /browser-frame-runs/:runId             the member's own (never the approval value)
  *   POST /browser-frame-runs/:runId/approve     { planHash, approvalToken }: the person approved the plan the card showed
- *   POST /browser-frame-runs/:runId/permit      { frame, request: { method, path, fields } }: one write that fits that frame
- *   POST /browser-frame-runs/:runId/report      { write, result: done | not_sent | unknown | refused, reason?, created? }
+ *   POST /browser-frame-runs/:runId/promise     { values, binds, decisions }: the run's promise, once, before its first
+ *                                               permit (this PC's key; agent-browser.md "The run's promise")
+ *   POST /browser-frame-runs/:runId/promise-add { frame, fields, targets, binds }: the person's 「書いてよい」 on the card
+ *   POST /browser-frame-runs/:runId/permit      { frame, request: { method, path, fields }, check? }: one write that fits
+ *                                               that frame (and keeps the run's promise, when it has one)
+ *   POST /browser-frame-runs/:runId/report      { write, result: done | not_sent | unknown | refused, reason?, created?,
+ *                                               checked? }
  *   POST /browser-frame-runs/:runId/confirm     { write, answer: done | not_done }: the person's answer about a write in
  *                                               doubt, from the card (this PC's key; it never moves the write or the run)
  *   POST /browser-frame-runs/:runId/end         the run ends; its unused frames vanish
@@ -39,6 +44,16 @@ browserFramesRoute.get('/browser-frame-runs/:runId', companyMember, (c) => {
 
 browserFramesRoute.post('/browser-frame-runs/:runId/approve', companyMember, serviceBody, async (c) => {
   const r = await browserFrames.approve(c.var.member, c.req.param('runId'), c.var.body, c.req.header(BROWSER_DEVICE_HEADER))
+  return r.ok ? c.json({ success: true, data: r.value }) : refusal(c, r)
+})
+
+browserFramesRoute.post('/browser-frame-runs/:runId/promise', companyMember, serviceBody, (c) => {
+  const r = browserFrames.promise(c.var.member, c.req.param('runId'), c.var.body, c.req.header(BROWSER_DEVICE_HEADER))
+  return r.ok ? c.json({ success: true, data: r.value }) : refusal(c, r)
+})
+
+browserFramesRoute.post('/browser-frame-runs/:runId/promise-add', companyMember, serviceBody, (c) => {
+  const r = browserFrames.promiseAdd(c.var.member, c.req.param('runId'), c.var.body, c.req.header(BROWSER_DEVICE_HEADER))
   return r.ok ? c.json({ success: true, data: r.value }) : refusal(c, r)
 })
 

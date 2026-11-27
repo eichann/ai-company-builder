@@ -44,7 +44,7 @@ import { browserRecordingSchema } from './schema/browser-recordings'
 import { browserSkillDraftSchema } from './schema/browser-skill-drafts'
 import { browserSkillSchema } from './schema/browser-skills'
 import { browserRunSchema, migrateBrowserRunBudget, migrateBrowserRunPreviewBudget, migrateBrowserRunWriteSiteRefused } from './schema/browser-runs'
-import { browserFrameSchema, migrateBrowserFrameQuery, migrateBrowserFrameWriteRefused } from './schema/browser-frames'
+import { browserFrameSchema, migrateBrowserFramePromise, migrateBrowserFrameQuery, migrateBrowserFrameWriteRefused } from './schema/browser-frames'
 // lane C ▲
 // The migrations tests run on their own against older databases.
 export { migrateCompanyFolderKind, migrateInvitationClaims } from './schema/company'
@@ -62,7 +62,7 @@ export { migrateSecondOpinionSetting } from './schema/agents'
 export { migrateShelfHistoryRequester } from './schema/skill-shelf'
 export { migrateBrowserExecutionMonotonic, migrateBrowserPlanSummary } from './schema/browser-plans'
 export { migrateBrowserRunBudget, migrateBrowserRunPreviewBudget, migrateBrowserRunWriteSiteRefused } from './schema/browser-runs'
-export { migrateBrowserFrameQuery, migrateBrowserFrameWriteRefused } from './schema/browser-frames'
+export { migrateBrowserFramePromise, migrateBrowserFrameQuery, migrateBrowserFrameWriteRefused } from './schema/browser-frames'
 
 // Ensure data directory exists
 if (!fs.existsSync(DATA_DIR)) {
@@ -218,6 +218,7 @@ export function initDatabase(conn: Database.Database = sqlite) {
   migrateBrowserFrameWriteRefused(conn)
   // A frame's exact query (agent-browser.md "A write with an exact query"): a nullable column, old rows = none.
   migrateBrowserFrameQuery(conn)
+  migrateBrowserFramePromise(conn)
   migrateBrowserRunWriteSiteRefused(conn)
   // Before the seeding below: it deletes stale manager rows per company.
   migrateRuleAndManagerCompanies(conn)

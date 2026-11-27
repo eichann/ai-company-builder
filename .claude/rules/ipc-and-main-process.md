@@ -72,6 +72,8 @@ Full text: `docs/architecture/main-process-and-ipc.md` (internal).
   frame only: chat-windows `showsConsultation`, the registry injected as `cardWindows`; `agent-browser.md` "A card in its
   consultation's own window" —, `features/browser/write-lines.ts`, `agent-browser.md` "Writing on the new path" (also a write run's card, a
   `bf_` id, held by `features/browser/work.ts`, and its ［やめる］ browserLines:cancelWrite: "Writes within frames, in the app";
+  its ［書いてよい］／［書かない］ browserLines:allowWrite: "The run's promise"; a stopped `bo_` / `bf_` card's
+  ［そのまま進める］／［やめる］ browserLines:decide, the answer kept in main: "The stopped card's answer";
   the one-time approval value never leaves main); and browserDevice:get / register /
   withdraw: Settings' 「この PC」, main window only, a state and names — never the PC's key, `features/browser/device-ipc.ts`,
   `agent-browser.md` "This PC's registration"; and browserRecording:get / start / stop / removeLine / send / discard: Settings'

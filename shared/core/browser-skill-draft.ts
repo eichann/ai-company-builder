@@ -33,7 +33,8 @@
  *   marker may be added: they only narrow.
  */
 import { browserRecordingProblem, type BrowserRecordedSend, type BrowserRecordingContent } from './browser-recording'
-import { browserMadeSegmentPlace, browserSkillQueryHasPlaceholder, browserSkillQueryProblem, BROWSER_SKILL_LIMITS, isBrowserSkillPath, parseBrowserSkillDeclaration, type BrowserSkillDeclaration, type BrowserSkillWrite } from './browser-skill'
+import { browserMadeSegmentPlace, browserPromiseFieldName, browserSkillQueryHasPlaceholder, browserSkillQueryProblem, BROWSER_SKILL_LIMITS, isBrowserSkillPath, parseBrowserSkillDeclaration, type BrowserSkillDeclaration, type BrowserSkillWrite } from './browser-skill'
+import { isSensitiveFieldName } from './browser-recording'
 
 export const BROWSER_SKILL_DRAFT_LIMITS = Object.freeze({
   /** Recordings one draft is made from (the person's own, of one domain). */
@@ -111,6 +112,12 @@ interface DraftTarget {
   /** Its first create's answer named an id (`id` / `data.id`). */
   answersId: boolean
   recording: number
+  /**
+   * The body fields every recorded send of it carried (agent-browser.md "The run's promise": the draft's `body`), or null when
+   * a send's body could not be read or a name cannot be written as a promise field (a masked name, `{n}` in it): then no
+   * `body` is drafted and no field is "outside the promise" for it.
+   */
+  bodyNames: Set<string> | null
 }
 
 /** A recorded send as a write target, or why it is left out. */
@@ -149,7 +156,7 @@ const saysDelete = (path: string, query: string | null) =>
 const namesAnId = (name: string) => /id$/i.test(name.split(/[.[\]]+/).filter(Boolean).pop() ?? '')
 
 /** The declaration's one spelling: flow mappings, every string double-quoted (the words hold no `"` or `\`). */
-function declarationText(domain: string, writes: ReadonlyArray<{ id: string | null; method: string; path: string; query: string | null; max: number; override: string | null }>): string {
+function declarationText(domain: string, writes: ReadonlyArray<{ id: string | null; method: string; path: string; query: string | null; max: number; override: string | null; body: readonly string[] | null }>): string {
   const lines = [`domain: ${domain}`, 'writes:']
   for (const w of writes) {
     const parts = [
@@ -159,6 +166,7 @@ function declarationText(domain: string, writes: ReadonlyArray<{ id: string | nu
       ...(w.query !== null ? [`query: "${w.query}"`] : []),
       `max: ${w.max}`,
       ...(w.override ? [`fields: { _method: ${w.override} }`] : []),
+      ...(w.body && w.body.length > 0 ? [`body: [${w.body.map(n => `"${n}"`).join(', ')}]`] : []),
     ]
     lines.push(`  - { ${parts.join(', ')} }`)
   }
@@ -194,13 +202,23 @@ export function browserSkillDraftFrom(recordings: readonly BrowserRecordingConte
       const key = JSON.stringify([t.method, t.override, t.path, t.query])
       let g = groups.get(key)
       if (!g) {
-        g = { ...t, seen: [], perRecording: new Map(), idFields: new Set(), first: order, answersId: false, recording }
+        g = { ...t, seen: [], perRecording: new Map(), idFields: new Set(), first: order, answersId: false, recording, bodyNames: new Set() }
         groups.set(key, g)
         g.answersId = t.method === 'POST' && t.override === null && (s.answerKeys ?? []).some((k: string) => ANSWER_ID_KEYS.includes(k))
       }
       g.seen.push({ recording, step: s.id })
       g.perRecording.set(recording, (g.perRecording.get(recording) ?? 0) + 1)
       for (const f of s.fields ?? []) if (f.from === null && f.value !== 'empty' && namesAnId(f.name)) g.idFields.add(f.name)
+      // The draft's `body`: every name the sends carried (never `_method` or a login / CSRF / session one); one the promise
+      // cannot name, or a body not read, leaves it undeclared.
+      if (g.bodyNames !== null) {
+        if (s.fields === null) g.bodyNames = null
+        else for (const f of s.fields) {
+          if (f.name === '_method' || isSensitiveFieldName(f.name)) continue
+          if (!browserPromiseFieldName(f.name)) { g.bodyNames = null; break }
+          g.bodyNames.add(f.name)
+        }
+      }
     }
   })
 
@@ -228,7 +246,8 @@ export function browserSkillDraftFrom(recordings: readonly BrowserRecordingConte
       const path = maker ? g.path.split('/').map(seg => (isPlaceholder(seg) ? `{made:${ids.get(maker)}}` : seg)).join('/') : g.path
       // What one run of the work did: the most it was sent in one recording, never the sum over recordings (review).
       const max = Math.min(Math.max(...g.perRecording.values()), BROWSER_SKILL_LIMITS.max)
-      return { id: ids.get(g) ?? null, method: g.method, path, query: g.query, max, override: g.override }
+      const body = g.bodyNames && g.bodyNames.size > 0 && g.bodyNames.size <= BROWSER_SKILL_LIMITS.body ? [...g.bodyNames].sort() : null
+      return { id: ids.get(g) ?? null, method: g.method, path, query: g.query, max, override: g.override, body }
     }))
   }
 

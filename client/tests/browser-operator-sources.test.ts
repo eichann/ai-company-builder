@@ -150,7 +150,7 @@ const PLAN = JSON.stringify({ do: 'plan', summary: '元の行をコピーして�
 test('with a Skill the operator works from the person\'s words and the sealed steps — never the consultation AI\'s own request', async () => {
   const w = world({ answers: [CLICK, DONE], needsApproval: false, seal: sealOf(STEPS), said: ['既存の行は変えない'], values: [{ label: '回', value: '【冬の回】' }] })
   const words = await w.run()
-  assert.equal(words.startsWith(WW.done), true, words)
+  assert.equal(words.startsWith(WW.doneUnconfirmed), true, words)
   for (const m of w.materials) {
     assert.equal(JSON.stringify(m).includes(AI_ADDED), false, 'the consultation AI\'s added stop condition never reaches the operator')
     assert.equal(m.request, null)
@@ -175,7 +175,7 @@ test('with a Skill the operator works from the person\'s words and the sealed st
   assert.ok(String(bare.materials[0].request).includes('一覧の行をコピーして登録する'))
   // A company without the company folder: no steps here, so the request is kept and the work starts as before.
   const shelf = world({ answers: [CLICK, DONE], needsApproval: false, seal: sealOf(STEPS), noFolder: true })
-  assert.equal((await shelf.run()).startsWith(WW.done), true)
+  assert.equal((await shelf.run()).startsWith(WW.doneUnconfirmed), true)
   assert.equal(shelf.materials[0].steps, null)
   assert.ok(String(shelf.materials[0].request).includes('一覧の行をコピーして登録する'))
 })
@@ -211,9 +211,9 @@ test('a Skill\'s steps that are not exactly the sealed text start nothing: chang
   assert.equal(asked.calls.includes('frameGet'), false, asked.calls.join('\n'))
   // The same text on both sides, or no steps on either: it starts.
   const same = world({ answers: [CLICK, DONE], needsApproval: false, seal: sealOf(STEPS) })
-  assert.equal((await same.run()).startsWith(WW.done), true)
+  assert.equal((await same.run()).startsWith(WW.doneUnconfirmed), true)
   const none = world({ answers: [CLICK, DONE], needsApproval: false, seal: { state: 'none' }, local: 'none' })
-  assert.equal((await none.run()).startsWith(WW.done), true)
+  assert.equal((await none.run()).startsWith(WW.doneUnconfirmed), true)
   assert.equal(none.materials[0].steps, null)
 })
 
@@ -236,7 +236,7 @@ test('the plan the person approved on the preview\'s card is the work\'s materia
   const w = world({ answers: [PLAN, CLICK, DONE], needsApproval: true, seal: sealOf(STEPS) })
   const done = w.run()
   await w.approveWhenReady()
-  assert.equal((await done).startsWith(WW.done), true)
+  assert.equal((await done).startsWith(WW.doneUnconfirmed), true)
   assert.equal('plan' in w.materials[0], false, 'the preview has no plan of its own yet')
   for (const m of w.materials.slice(1)) {
     assert.deepEqual(m.plan, { summary: '元の行をコピーして【回】の名前で登録します', affects: 'なし', values: [{ label: 'コピー元', value: '【秋の回】' }] })

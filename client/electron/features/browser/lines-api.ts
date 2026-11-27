@@ -23,6 +23,7 @@ import { BROWSER_EXECUTION_HEADER } from './plans-api'
 import { BROWSER_DEVICE_HEADER } from '../../../../shared/core/browser-device'
 import { BROWSER_RUN_ID_RE } from '../../../../shared/core/browser-run-log'
 import type { BrowserRunFinish } from '../../../../shared/types/browser-runs'
+import type { BrowserPermitCheck, BrowserRunPromiseAddition, BrowserRunPromiseInput } from '../../../../shared/core/browser-run-promise'
 
 /** A server answer (the same three kinds as the plans' client; this module never imports the old path's runner). */
 export type BrowserLinesAnswer =
@@ -87,8 +88,12 @@ const refusedLocally: BrowserLinesAnswer = { kind: 'refused', code: null }
 export interface BrowserFramesApi {
   frameStart(companyId: string, body: { skill: string; conversationId?: string } | { plan: { domain: string; writes: unknown[] }; conversationId?: string }): Promise<BrowserLinesAnswer>
   frameApprove(companyId: string, runId: string, body: { planHash: string; approvalToken: string }): Promise<BrowserLinesAnswer>
-  framePermit(companyId: string, runId: string, body: { frame: number; request: { method: string; path: string; fields: Record<string, string> } }): Promise<BrowserLinesAnswer>
-  frameReport(companyId: string, runId: string, body: { write: number; result: 'done' | 'not_sent' | 'unknown' | 'refused'; reason?: string }): Promise<BrowserLinesAnswer>
+  framePermit(companyId: string, runId: string, body: { frame: number; request: { method: string; path: string; fields: Record<string, string> }; check?: BrowserPermitCheck }): Promise<BrowserLinesAnswer>
+  frameReport(companyId: string, runId: string, body: { write: number; result: 'done' | 'not_sent' | 'unknown' | 'refused'; reason?: string; created?: string; checked?: 'unchanged' }): Promise<BrowserLinesAnswer>
+  /** The run's promise (agent-browser.md "The run's promise"), once, before its first permit; this PC's key. */
+  framePromise?(companyId: string, runId: string, body: BrowserRunPromiseInput): Promise<BrowserLinesAnswer>
+  /** The person's 「書いてよい」 on the card for one held write (the work wiring's card only; no AI tool reaches it); this PC's key. */
+  framePromiseAdd?(companyId: string, runId: string, body: BrowserRunPromiseAddition): Promise<BrowserLinesAnswer>
   frameEnd(companyId: string, runId: string): Promise<BrowserLinesAnswer>
   /**
    * The person's answer about a write in doubt, from the card's ［済んでいた］／［されていなかった］ only (the work wiring's
@@ -153,7 +158,10 @@ export function createBrowserLinesHttp(deps: BrowserLinesHttpDeps): BrowserLines
     frameApprove: async (companyId, runId, body) => frameOk(companyId, runId) && HASH_RE.test(body.planHash) && APPROVAL_TOKEN_RE.test(body.approvalToken)
       ? post(`${company(companyId)}/browser-frame-runs/${runId}/approve`, { planHash: body.planHash, approvalToken: body.approvalToken }, { device: true }) : refusedLocally,
     framePermit: async (companyId, runId, body) => frameOk(companyId, runId) && Number.isSafeInteger(body.frame) && body.frame >= 1
-      ? post(`${company(companyId)}/browser-frame-runs/${runId}/permit`, { frame: body.frame, request: body.request }, { device: true }) : refusedLocally,
+      ? post(`${company(companyId)}/browser-frame-runs/${runId}/permit`, { frame: body.frame, request: body.request, ...(body.check ? { check: body.check } : {}) }, { device: true }) : refusedLocally,
+    framePromise: async (companyId, runId, body) => frameOk(companyId, runId) ? post(`${company(companyId)}/browser-frame-runs/${runId}/promise`, body, { device: true }) : refusedLocally,
+    framePromiseAdd: async (companyId, runId, body) => frameOk(companyId, runId) && Number.isSafeInteger(body.frame) && body.frame >= 1
+      ? post(`${company(companyId)}/browser-frame-runs/${runId}/promise-add`, body, { device: true }) : refusedLocally,
     // A sure answer (done / not_sent) counts only from the run's own PC: the key goes with every report.
     frameReport: async (companyId, runId, body) => frameOk(companyId, runId) && Number.isSafeInteger(body.write) && body.write >= 1
       ? post(`${company(companyId)}/browser-frame-runs/${runId}/report`, body, { device: true }) : refusedLocally,

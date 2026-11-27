@@ -2,18 +2,22 @@ import { useState } from 'react'
 import { Question } from '@phosphor-icons/react'
 import { Button } from '../../../shared/ui/primitives'
 import { BROWSER_STOP_WORDS as W, stopAnswerMessage, type BrowserStopNext, type BrowserStopScreen } from '../../../../shared/browser-operator-trail'
-import { openBrowserSite } from '../api'
+import { decideBrowserStop, openBrowserSite, type BrowserStopDecisions } from '../api'
 
 /**
  * What a stopped write task asks the member, first on its card (agent-browser.md "The stopped card asks one thing"):
- * 「決めてほしいこと：…」 with ［そのまま進める］［やめる］, or ［開いてログイン］. The two answers are the member's own message
- * to the consultation, sent through the chat's ordinary send (`say`): nothing here reaches the site — the consultation AI
- * asks again and the new run reads the site afresh. The question is the operator's words (outside text): React text only.
- * Beside it, the screen the operator stopped on (agent-browser.md "The stopped card shows the screen"): an image held in
- * memory only, handed with the card's view — never kept by the chat.
+ * 「決めてほしいこと：…」 with ［そのまま進める］［やめる］, or ［開いてログイン］. An answer is kept in main bound to this card
+ * (`browserLines:decide`, agent-browser.md "The stopped card's answer"), then the member's message — fixed words and the
+ * card's id, **never the question** (a page could have shaped it) — goes through the chat's ordinary send (`say`): nothing
+ * here reaches the site, and the run that continues takes the answer into its promise. The question is the operator's words
+ * (outside text): React text only. Beside it, the screen the operator stopped on (agent-browser.md "The stopped card shows
+ * the screen"): an image held in memory only, handed with the card's view — never kept by the chat.
  */
-export function StopAsk({ next, companyId, host, say, screen }: { next: BrowserStopNext; companyId: string; host: string; say?: (text: string) => void; screen?: BrowserStopScreen }) {
-  const [sent, setSent] = useState(false)
+export function StopAsk({ next, companyId, cardId, host, say, screen, decisions }: {
+  next: BrowserStopNext; companyId: string; cardId?: string; host: string; say?: (text: string) => void; screen?: BrowserStopScreen
+  decisions?: BrowserStopDecisions
+}) {
+  const [sent, setSent] = useState<'no' | 'pending' | 'sent' | 'failed'>('no')
   const shot = screen ? <StopScreen screen={screen} /> : null
   if (next.kind === 'login') {
     return (
@@ -24,9 +28,15 @@ export function StopAsk({ next, companyId, host, say, screen }: { next: BrowserS
     )
   }
   const answer = (a: 'proceed' | 'cancel') => {
-    if (!say || sent) return
-    setSent(true)
-    say(stopAnswerMessage(a, next.question))
+    if (!say || !cardId || sent !== 'no') return
+    setSent('pending')
+    void (decisions ? decideBrowserStop(companyId, cardId, a === 'proceed' ? 'proceed' : 'stop', decisions) : decideBrowserStop(companyId, cardId, a === 'proceed' ? 'proceed' : 'stop'))
+      .catch(() => ({ ok: false as const, message: W.notKept }))
+      .then((r) => {
+        if (!r.ok) { setSent('failed'); return }
+        setSent('sent')
+        say(stopAnswerMessage(a, cardId))
+      })
   }
   return (
     <div data-stop-ask className="mt-2">
@@ -36,17 +46,19 @@ export function StopAsk({ next, companyId, host, say, screen }: { next: BrowserS
       </p>
       {/* The run already wrote something: no answer button (it would start the work over as a new run). */}
       {next.kind === 'question' && <p className="mt-1 text-small text-text-muted">{W.askAgain}</p>}
-      {next.kind === 'decide' && say && (sent
+      {next.kind === 'decide' && say && cardId && (sent === 'sent'
         ? <p role="status" className="mt-1 text-small text-text-muted">{W.sent}</p>
-        : (
-          <>
-            <div className="mt-2 flex flex-wrap gap-2">
-              <Button variant="primary" size="sm" onClick={() => answer('proceed')}>{W.proceed}</Button>
-              <Button size="sm" onClick={() => answer('cancel')}>{W.cancel}</Button>
-            </div>
-            <p className="mt-1 text-small text-text-muted">{W.sendsNote}</p>
-          </>
-        ))}
+        : sent === 'failed'
+          ? <p role="status" className="mt-1 text-small text-text-muted">{W.notKept}</p>
+          : (
+            <>
+              <div className="mt-2 flex flex-wrap gap-2">
+                <Button variant="primary" size="sm" disabled={sent === 'pending'} onClick={() => answer('proceed')}>{W.proceed}</Button>
+                <Button size="sm" disabled={sent === 'pending'} onClick={() => answer('cancel')}>{W.cancel}</Button>
+              </div>
+              <p className="mt-1 text-small text-text-muted">{W.sendsNote}</p>
+            </>
+          ))}
       {shot}
     </div>
   )

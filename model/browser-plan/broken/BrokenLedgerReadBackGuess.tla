@@ -7,7 +7,7 @@ EXTENDS LedgerLife
 BrokenReadsBack(r) ==
     /\ st[r] = "unknown" /\ ans[r] = "none" /\ rep[r] = "none"
     /\ rep' = [rep EXCEPT ![r] = "done"]
-    /\ UNCHANGED <<exSt, st, lock, ans, live, ph, sends, knownAt>>
+    /\ UNCHANGED <<exSt, st, lock, ans, live, ph, sends, knownAt, chk>>
 
 BrokenNext == Next \/ \E r \in Runs : BrokenReadsBack(r)
 BrokenSpec == Init /\ [][BrokenNext]_vars

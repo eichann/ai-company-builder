@@ -793,7 +793,13 @@ const browserWrites = wireBrowserWriteLines(ipc, {
     approve: (companyId, runId, planHash) => browserWorks.approve(companyId, runId, planHash),
     cancel: (companyId, runId) => browserWorks.cancel(companyId, runId),
     confirm: (companyId, runId, answer) => browserWorks.confirm(companyId, runId, answer),
+    allow: (companyId, runId, allow) => browserWorks.allow(companyId, runId, allow),
     placeOf: (companyId, runId) => browserWorks.placeOf(companyId, runId),
+  },
+  // A stopped card's ［そのまま進める］／［やめる］ (a `bo_` or `bf_` card) is the work wiring's too.
+  stopCards: {
+    decide: (companyId, cardId, choice) => browserWorks.decide(companyId, cardId, choice),
+    placeOf: (companyId, cardId) => browserWorks.decidePlace(companyId, cardId),
   },
 })
 // lane C ▲

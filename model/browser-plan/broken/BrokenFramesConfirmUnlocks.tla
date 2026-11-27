@@ -7,7 +7,7 @@ BrokenConfirms(k) ==
     /\ k = n /\ st[k] = "unknown" /\ Past /\ sends[k] = 0
     /\ st' = [st EXCEPT ![k] = "cnotdone"]
     /\ exSt' = IF exSt = "locked" THEN "open" ELSE exSt
-    /\ UNCHANGED <<approved, n, fr, age, lock, gate, everUnknown, afterUnknown, badPermit, badSend, stopSend, rep, ph, sends>>
+    /\ UNCHANGED <<approved, n, fr, age, lock, gate, everUnknown, afterUnknown, badPermit, badSend, stopSend, outPermit, rep, ph, sends>>
 
 BrokenNext == ServerNext \/ AppNext \/ Env \/ \E k \in Ids : BrokenConfirms(k)
 BrokenSpec == Init /\ [][BrokenNext]_vars

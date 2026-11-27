@@ -65,12 +65,36 @@ export function sqliteBrowserFrameRepository(conn: Database.Database, companyId:
         companyId, run.id, run.userId, run.host, run.deviceId, run.conversationId, run.source, run.skill, run.declarationHash, run.files, run.approvalSeq,
         run.planHash, run.approvalTokenHash, run.state, run.approval, run.approvedAt, run.endReason, run.createdAt, run.expiresAt, run.endedAt,
       )
-      const insert = conn.prepare('INSERT INTO browser_frames (company_id, run_id, idx, method, path, query, fields, max) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
-      for (const f of frames) insert.run(companyId, run.id, f.idx, f.method, f.path, storedFrameQuery(f.query), f.fields, f.max)
+      const insert = conn.prepare('INSERT INTO browser_frames (company_id, run_id, idx, method, path, query, fields, max, promise) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
+      for (const f of frames) insert.run(companyId, run.id, f.idx, f.method, f.path, storedFrameQuery(f.query), f.fields, f.max, f.promise)
     },
     frames(runId) {
-      return (conn.prepare('SELECT idx, method, path, query, fields, max, used FROM browser_frames WHERE company_id = ? AND run_id = ? ORDER BY idx')
+      return (conn.prepare('SELECT idx, method, path, query, fields, max, used, promise FROM browser_frames WHERE company_id = ? AND run_id = ? ORDER BY idx')
         .all(companyId, runId) as FrameRow[]).map(f => ({ ...f, query: frameQueryFromStored(f.query) }))
+    },
+    promise(runId) {
+      const r = conn.prepare('SELECT content FROM browser_frame_promises WHERE company_id = ? AND run_id = ?').get(companyId, runId) as { content: string } | undefined
+      return r ? r.content : null
+    },
+    insertPromise(runId, content, createdAt) {
+      return conn.prepare('INSERT OR IGNORE INTO browser_frame_promises (company_id, run_id, content, created_at) VALUES (?, ?, ?, ?)')
+        .run(companyId, runId, content, createdAt).changes === 1
+    },
+    promiseAdds(runId) {
+      return (conn.prepare('SELECT content FROM browser_frame_promise_adds WHERE company_id = ? AND run_id = ? ORDER BY seq')
+        .all(companyId, runId) as Array<{ content: string }>).map(r => r.content)
+    },
+    insertPromiseAdd(runId, seq, content, addedBy, addedAt) {
+      conn.prepare('INSERT INTO browser_frame_promise_adds (company_id, run_id, seq, content, added_by, added_at) VALUES (?, ?, ?, ?, ?, ?)')
+        .run(companyId, runId, seq, content, addedBy, addedAt)
+    },
+    refusalChecks(runId) {
+      return (conn.prepare('SELECT seq FROM browser_frame_refusal_checks WHERE company_id = ? AND run_id = ? ORDER BY seq')
+        .all(companyId, runId) as Array<{ seq: number }>).map(r => r.seq)
+    },
+    insertRefusalCheck(runId, seq, checkedAt) {
+      return conn.prepare('INSERT OR IGNORE INTO browser_frame_refusal_checks (company_id, run_id, seq, checked_at) VALUES (?, ?, ?, ?)')
+        .run(companyId, runId, seq, checkedAt).changes === 1
     },
     writes(runId) {
       return (conn.prepare(`SELECT seq, frame_idx, state, reason, permitted_at, permitted_mono_ms, permitted_boot, settled_at
@@ -115,15 +139,22 @@ export function sqliteBrowserFrameRepository(conn: Database.Database, companyId:
       conn.prepare(`INSERT INTO browser_write_ledger (company_id, run_id, seq, user_id, host, account, target, recorded_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`).run(companyId, row.runId, row.seq, row.userId, row.host, row.account, row.target, recordedAt)
     },
-    ledgerDoubts(host, account, target) {
+    ledgerDoubts(host, account, target, exceptRun) {
+      // A refused write is in doubt too (the site's error proves nothing was saved only once the app read it again and found
+      // it unchanged: agent-browser.md "Sent is not done") — not for its own run (its corrected try goes on), and not once a
+      // later write of that run to the same target was done.
       return (conn.prepare(`SELECT l.run_id, l.seq, l.target, w.state, w.permitted_at, f.method, f.path, f.query, f.fields
         FROM browser_write_ledger l
         JOIN browser_frame_writes w ON w.company_id = l.company_id AND w.run_id = l.run_id AND w.seq = l.seq
         JOIN browser_frames f ON f.company_id = w.company_id AND f.run_id = w.run_id AND f.idx = w.frame_idx
-        WHERE l.company_id = ? AND l.host = ? AND l.account = ? AND (? IS NULL OR l.target = ?) AND w.state IN ('permitted', 'unknown')
+        WHERE l.company_id = ? AND l.host = ? AND l.account = ? AND (? IS NULL OR l.target = ?)
+          AND (w.state IN ('permitted', 'unknown') OR (w.state = 'refused' AND (? IS NULL OR l.run_id <> ?)
+            AND NOT EXISTS (SELECT 1 FROM browser_frame_refusal_checks k WHERE k.company_id = ? AND k.run_id = l.run_id AND k.seq = l.seq)
+            AND NOT EXISTS (SELECT 1 FROM browser_write_ledger l2 JOIN browser_frame_writes w2 ON w2.company_id = l2.company_id AND w2.run_id = l2.run_id AND w2.seq = l2.seq
+              WHERE l2.company_id = ? AND l2.run_id = l.run_id AND l2.target = l.target AND l2.seq > l.seq AND w2.state IN ('done', 'verified'))))
           AND NOT EXISTS (SELECT 1 FROM browser_frame_write_confirms c WHERE c.company_id = ? AND c.run_id = l.run_id AND c.seq = l.seq)
-        ORDER BY w.permitted_at, l.run_id, l.seq`).all(companyId, host, account, target ?? null, target ?? null, companyId) as Array<{
-        run_id: string; seq: number; target: string; state: 'permitted' | 'unknown'; permitted_at: string
+        ORDER BY w.permitted_at, l.run_id, l.seq`).all(companyId, host, account, target ?? null, target ?? null, exceptRun ?? null, exceptRun ?? null, companyId, companyId, companyId) as Array<{
+        run_id: string; seq: number; target: string; state: 'permitted' | 'unknown' | 'refused'; permitted_at: string
         method: FrameRow['method']; path: string; query: string | null; fields: string
       }>).map(r => ({
         runId: r.run_id, seq: r.seq, target: r.target, state: r.state, permittedAt: r.permitted_at,

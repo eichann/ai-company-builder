@@ -106,6 +106,11 @@ export const BROWSER_SKILL_LIMITS = Object.freeze({
   fieldName: 64,
   fieldValue: 100,
   marker: 64,
+  /** The body fields a write target lists as free to carry (`body`; agent-browser.md "The run's promise"). */
+  body: 32,
+  /** The body fields bound to a promised value (`bind`) and each value's label. */
+  bind: 8,
+  bindLabel: 40,
 })
 
 export type BrowserSkillMethod = 'POST' | 'PUT' | 'PATCH' | 'DELETE'
@@ -124,6 +129,17 @@ export interface BrowserSkillWrite {
   query: string | null
   max: number
   fields: Readonly<Record<string, string>>
+  /**
+   * The run's promise (agent-browser.md "The run's promise"): the other body fields a write of this target may carry
+   * (`body`: besides its fixed fields, its `bind` fields, `_method` and login / CSRF / session fields). Absent: not declared,
+   * so no field is "outside the promise" (a Skill written before keeps working as it did).
+   */
+  body?: readonly string[]
+  /**
+   * The body fields that must hold the value the run promised under a label (`bind: { title: 名前 }`): the person's own
+   * value of that name, or one they approved on a card. Absent: none.
+   */
+  bind?: Readonly<Record<string, string>>
 }
 
 export interface BrowserSkillDeclaration {
@@ -155,6 +171,8 @@ export type BrowserSkillProblem =
   | 'bad-fields'
   | 'bad-query'
   | 'bad-override'
+  | 'bad-body'
+  | 'bad-bind'
   | 'duplicate-write'
   | 'bad-write-id'
   | 'bad-made'
@@ -181,6 +199,8 @@ export const BROWSER_SKILL_PROBLEM_WORDS: Readonly<Record<BrowserSkillProblem, s
   'bad-fields': '書き込み先の決まった項目の書き方が決まりに合っていません。',
   'bad-query': '書き込み先のアドレスの後ろ（?のあと、query）は、「名前」か「名前=値」（英数字と . _ ~ - だけ。決まっていない値は {n}（数字）か {x}）を & でつないだもの（5つまで、同じ名前は1回）にしてください。method やログイン・合言葉にかかわる名前は書けません。',
   'bad-override': '_method は POST の書き込み先にだけ、PUT・PATCH・DELETE のどれかで書けます。',
+  'bad-body': '書き込み先の body（ほかに送ってよい項目の名前の一覧）は、英字で始まる項目の名前を 32 個まで、重ねずに書いてください。決まった項目・_method・ログインや合言葉にかかわる名前は書けません。',
+  'bad-bind': '書き込み先の bind（約束した値を入れる項目）は、「項目の名前: 値の呼び名（40文字まで）」を 8 個まで書いてください。決まった項目・_method・ログインや合言葉にかかわる項目は書けず、body を書いたときは body にある項目だけです。',
   'duplicate-write': '同じ書き込み先が2回書かれています。',
   'bad-write-id': '書き込み先の名前（id）は、英小文字で始まる英小文字・数字・ハイフン（32文字まで）で、ほかと重ならないようにしてください。',
   'bad-made': '「この作業で作ったもの」の指定（{made:名前}）は、それより前に書いた書き込み先の名前を1つだけ指してください。',
@@ -196,7 +216,7 @@ export const BROWSER_SKILL_PROBLEM_WORDS: Readonly<Record<BrowserSkillProblem, s
 export type BrowserSkillParse = { ok: true; declaration: BrowserSkillDeclaration } | { ok: false; problem: BrowserSkillProblem }
 
 const TOP_KEYS = ['domain', 'writes', 'never_read', 'after_read', 'account_marker', 'safe_pattern'] as const
-const WRITE_KEYS = ['id', 'method', 'path', 'query', 'max', 'fields'] as const
+const WRITE_KEYS = ['id', 'method', 'path', 'query', 'max', 'fields', 'body', 'bind'] as const
 /** A write target's name (`id`), what a later target's `{made:<id>}` refers to. */
 export const BROWSER_SKILL_WRITE_ID_RE = /^[a-z][a-z0-9-]{0,31}$/
 const MADE_BY_ID_RE = /^\{made:([a-z][a-z0-9-]{0,31})\}$/
@@ -377,7 +397,53 @@ function writeOf(v: unknown): { id: string | null; write: BrowserSkillWrite } | 
   // would hand on an id the run did not make (independent review).
   if (v.id !== undefined && (method !== 'POST' || '_method' in fields)) return 'bad-maker'
   const query = (v.query as string | undefined) ?? null
-  return { id: (v.id as string | undefined) ?? null, write: { method, path: v.path, query, max: v.max, fields: Object.freeze(fields) } }
+  const body = bodyOf(v.body, fields)
+  if (body === false) return 'bad-body'
+  const bind = bindOf(v.bind, fields, body)
+  if (bind === false) return 'bad-bind'
+  return {
+    id: (v.id as string | undefined) ?? null,
+    write: {
+      method, path: v.path, query, max: v.max, fields: Object.freeze(fields),
+      ...(body ? { body: Object.freeze(body) } : {}), ...(bind ? { bind: Object.freeze(bind) } : {}),
+    },
+  }
+}
+
+/** A body field the promise may name: a plain field name, never `_method` or a login / CSRF / session field. */
+export const browserPromiseFieldName = (k: unknown): k is string =>
+  typeof k === 'string' && k.length <= BROWSER_SKILL_LIMITS.fieldName && FIELD_NAME_RE.test(k) && k !== '_method' && !isSensitiveFieldName(k)
+/** What a label may not hold: control, bidirectional and zero-width characters. */
+// eslint-disable-next-line no-control-regex
+const LABEL_BAD_RE = /[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u202a-\u202e\u2066-\u2069\ufeff]/
+
+/** `body`: 1–32 distinct field names, none of them fixed; absent → undefined; anything else → false. */
+function bodyOf(v: unknown, fixed: Readonly<Record<string, string>>): string[] | undefined | false {
+  if (v === undefined) return undefined
+  if (!Array.isArray(v) || v.length === 0 || v.length > BROWSER_SKILL_LIMITS.body) return false
+  if (!v.every(browserPromiseFieldName) || new Set(v).size !== v.length) return false
+  if (v.some(k => Object.prototype.hasOwnProperty.call(fixed, k))) return false
+  return [...v]
+}
+
+/**
+ * `bind`: 1–8 `field: label`; a field never fixed, never `_method` or a login / CSRF / session one, and listed in `body`
+ * when that is declared; a label one clean line of 1–40 characters in NFC. Absent → undefined; anything else → false.
+ */
+function bindOf(v: unknown, fixed: Readonly<Record<string, string>>, body: readonly string[] | undefined): Record<string, string> | undefined | false {
+  if (v === undefined) return undefined
+  if (!isMap(v)) return false
+  const keys = Object.keys(v)
+  if (keys.length === 0 || keys.length > BROWSER_SKILL_LIMITS.bind) return false
+  const out: Record<string, string> = {}
+  for (const k of keys) {
+    if (!browserPromiseFieldName(k) || Object.prototype.hasOwnProperty.call(fixed, k) || (body !== undefined && !body.includes(k))) return false
+    const label = v[k]
+    if (typeof label !== 'string' || label.length === 0 || label.length > BROWSER_SKILL_LIMITS.bindLabel || label.trim() !== label
+      || label.normalize('NFC') !== label || LABEL_BAD_RE.test(label)) return false
+    out[k] = label
+  }
+  return out
 }
 
 /**
@@ -505,7 +571,10 @@ export function browserSkillDomainProblem(declaration: Pick<BrowserSkillDeclarat
 export function browserSkillFrames(declaration: BrowserSkillDeclaration): BrowserSkillFrames {
   return Object.freeze({
     domain: declaration.domain,
-    writes: Object.freeze(declaration.writes.map(w => Object.freeze({ method: w.method, path: w.path, query: w.query, max: w.max, fields: Object.freeze({ ...w.fields }) }))),
+    writes: Object.freeze(declaration.writes.map(w => Object.freeze({
+      method: w.method, path: w.path, query: w.query, max: w.max, fields: Object.freeze({ ...w.fields }),
+      ...(w.body ? { body: Object.freeze([...w.body]) } : {}), ...(w.bind ? { bind: Object.freeze({ ...w.bind }) } : {}),
+    }))),
     neverRead: Object.freeze([...declaration.neverRead]),
     afterRead: Object.freeze([...declaration.afterRead]),
     accountMarker: declaration.accountMarker ? Object.freeze({ meta: declaration.accountMarker.meta }) : null,
@@ -535,5 +604,7 @@ export function browserSkillWriteLine(write: BrowserSkillWrite): string {
   const query = write.query === null ? ''
     : browserSkillQueryHasPlaceholder(write.query) ? `?${shown}（アドレスの ? のあとが「${shown}」の形のときだけ。（何かの…）のところの値は決まっていません）`
       : `?${write.query}（アドレスの ? のあとが「${write.query}」とまったく同じときだけ）`
+  const bound = Object.entries(write.bind ?? {}).map(([k, label]) => `${k}＝「${label}」`)
   return `${write.path}${query} に${what}：${write.max}回まで${only}${fixed.length > 0 ? `（決まった項目：${fixed.join('、')}）` : ''}`
+    + `${bound.length > 0 ? `（約束した値を入れる項目：${bound.join('、')}）` : ''}${write.body ? `（ほかに送ってよい項目：${write.body.join('、')}）` : ''}`
 }

@@ -321,6 +321,11 @@ export interface BrowserWriteView {
   next?: BrowserStopNext
   /** The screen when it stopped to ask (beside `next` only; memory only: agent-browser.md "The stopped card shows the screen"). */
   screen?: BrowserStopScreen
+  /**
+   * A write outside the run's promise waiting for the person's ［書いてよい］／［書かない］ (agent-browser.md "The run's promise"):
+   * its line and what is outside the promise, in plain words (the person's card only); absent: none waiting.
+   */
+  ask?: { line: string; items: string[] }
 }
 
 export type BrowserWriteGetResult = { ok: true; view: BrowserWriteView } | { ok: false; message: string }
@@ -365,9 +370,13 @@ export function readBrowserWriteView(v: unknown, readCard: (c: unknown) => Brows
   const next = x.next === undefined ? null : readBrowserStopNext(x.next)
   // The stop screen only beside what the card asks, and only in its exact shape (else left off; the card still shows).
   const screen = next && x.screen !== undefined ? readBrowserStopScreen(x.screen) : null
+  // A question about the promise only in its exact shape (else left off: the write then waits until the card's time).
+  const a = x.ask as Record<string, unknown> | undefined
+  const ask = a && typeof a === 'object' && Object.keys(a).length === 2 && isStrMax(a.line, 300) && strList(a.items, 50) ? { line: a.line, items: [...a.items] } : null
   return {
     title: x.title, siteLabel: x.siteLabel, phase: x.phase as BrowserWriteCardPhase, values, sentences: [...x.sentences], card,
     readAt: x.readAt as string | null, contentHash: x.contentHash as string | null, message: x.message as string | null, result,
     ...(x.cancellable === true ? { cancellable: true } : {}), ...(trail ? { trail } : {}), ...(next ? { next } : {}), ...(screen ? { screen } : {}),
+    ...(ask ? { ask } : {}),
   }
 }

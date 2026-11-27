@@ -12,7 +12,7 @@ BrokenPermit(r) ==
     /\ st' = [st EXCEPT ![r] = "permitted"] /\ lock' = [lock EXCEPT ![r] = "held"] /\ live' = [live EXCEPT ![r] = TRUE]
     /\ knownAt' = [knownAt EXCEPT ![r] = {j \in Runs : j # r /\ ~Doubt(j)}]
     /\ ph' \in {[ph EXCEPT ![r] = "permitted"], [ph EXCEPT ![r] = "gone"]}
-    /\ UNCHANGED <<exSt, ans, rep, sends>>
+    /\ UNCHANGED <<exSt, ans, rep, sends, chk>>
 
 BrokenNext == Next \/ \E r \in Runs : BrokenPermit(r)
 BrokenSpec == Init /\ [][BrokenNext]_vars

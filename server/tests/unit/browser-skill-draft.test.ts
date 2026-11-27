@@ -107,10 +107,10 @@ describe('a draft from the two Lステップ recordings', () => {
   it('holds exactly the writes the site took, in the order they were made, with the recorded query names', () => {
     expect(draft.text).toBe(`domain: manager.linestep.net
 writes:
-  - { method: POST, path: "/api/tags", query: "return", max: 1 }
+  - { method: POST, path: "/api/tags", query: "return", max: 1, body: ["group_id", "name"] }
   - { method: POST, path: "/api/action/register", max: 1 }
-  - { method: POST, path: "/api/landings", max: 1 }
-  - { method: POST, path: "/api/landings/{n}", max: 1 }
+  - { method: POST, path: "/api/landings", max: 1, body: ["action_id", "group_id", "name"] }
+  - { method: POST, path: "/api/landings/{n}", max: 1, body: ["name"] }
 safe_pattern: none
 `)
     expect(draft.leftOut).toEqual([])
@@ -492,5 +492,14 @@ writes:
     expect(change('  - { method: POST, path: "/api/orders/{n}", query: "return", max: 1, fields: { _method: DELETE } }')).toEqual({ problem: 'deletes', write: 1 })
     const wideBase = parsed('domain: shop.example.test\nwrites:\n  - { method: PUT, path: "/{x}/{x}", max: 1 }\n')
     expect(browserSkillDraftCoveredProblem(parsed('domain: shop.example.test\nwrites:\n  - { method: PUT, path: "/{x}/a", max: 1 }\n'), wideBase)).toEqual({ problem: 'wide-path', write: 1 })
+  })
+})
+
+describe('the draft\'s `body` (agent-browser.md "The run\'s promise": the fields a recorded write carried)', () => {
+  it('lists the names every send carried (never `_method` or a login / CSRF / session field); a body not read or a name the promise cannot name leaves it out', () => {
+    const writes = draftOf([TAG_RECORDING, COPY_RECORDING]).declaration.writes
+    // Each drafted body parses back as the declaration's `body` (the parser's own rules: plain names, none sensitive).
+    for (const w of writes) for (const n of w.body ?? []) expect(n === '_method' || /token|csrf|session|password/i.test(n)).toBe(false)
+    expect(writes.map(w => w.body ?? null)).toEqual([['group_id', 'name'], null, ['action_id', 'group_id', 'name'], ['name']])
   })
 })

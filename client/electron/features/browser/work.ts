@@ -10,15 +10,20 @@
 //   → the work: the operator presses on, each page write held by the window and sent once (frame-writes.ts)
 //   → the after-read (the Skill's `after_read` addresses read again; `{created}` from the answers) → the result card.
 //
+// **The run's promise** (agent-browser.md "The run's promise"): before the plan card (or, for a pre-approved Skill, before
+// the work) the run's promise is made on the server from what the person approved — their own values, the preview's values
+// the card shows, a stopped card's answer this run continues — as digests under a key this wiring holds for the run alone;
+// a write outside it is asked about on the card (［書いてよい］／［書かない］) while the page waits.
+//
 // One lock per company × domain on the server joins the frames run and the operator's runs (each run names its frames run).
 // The page's text, the plan's words, the values read and the site's answers go to the member's card only (kept here in
 // memory, per signed-in member); the consultation AI gets `workWordsForAi`. No Electron.
-import { createHash } from 'node:crypto'
+import { createHash, createHmac, randomBytes } from 'node:crypto'
 import { BROWSER_COMPANY_ID_RE } from '../../../shared/browser-plans'
 import { BROWSER_BROWSE_LIMITS as BL, aimedAction, browseHistoryEntry, browseLogStep, pageWithScreen, type BrowserBrowseAction, type BrowserBrowseHistoryEntry, type BrowserBrowseStop, type BrowserBrowseSurface, type BrowserOperatorImage, type BrowserPageSnapshot } from '../../../shared/browser-browse'
 import {
   BROWSER_WORK_CARD_WORDS as CW, BROWSER_WORK_LIMITS as L, BROWSER_WORK_WORDS as W, afterReadTarget, beforeReadAddress, createdIdOf, parseWorkAnswer,
-  readBackLanded, topFields, workBusyWords, workEndAfterRefusals, workFrameOf, workMaterial, workPlanSentences, workPreviewStoppedCard, workResultCard, workRetrySentence, workStopNext,
+  readBackLanded, topFields, workBusinessOf, workBusyWords, workEndAfterRefusals, workFrameOf, workMaterial, workPlanSentences, workPreviewStoppedCard, workResultCard, workRetrySentence, workStopNext,
   workWordsForAi, workWriteLine,
   type AfterReadResult, type WorkAnswer, type WorkApprovedPlan, type WorkEnd, type WorkFrame, type WorkPerson, type WorkPlanValue, type WorkStopReason, type WorkWriteSeen,
 } from '../../../shared/browser-frame-writes'
@@ -35,7 +40,8 @@ import type { BrowserInspectionView } from '../../../shared/browser-inspection'
 import { answerProblemOf, browserStopScreen, createOperatorTrail, trailForCard, type BrowserStopNext, type BrowserStopScreen, type BrowserTrailRun, type OperatorTrailRecorder } from '../../../shared/browser-operator-trail'
 import type { BrowserAiSwitch } from './ai-switch'
 import type { BrowserContext } from './context'
-import { createFrameWriter, type FrameWriteRecord, type FrameWriter } from './frame-writes'
+import { createFrameWriter, type FrameWriteRecord, type FrameWriter, type PromiseAsk, type WriterPromise } from './frame-writes'
+import { browserPromiseState, buildBrowserRunPromise, type BrowserRunPromiseAddition, type BrowserRunPromiseInput } from '../../../../shared/core/browser-run-promise'
 import type { BrowserFramesApi, BrowserLinesAnswer, BrowserRunsApi } from './lines-api'
 import { sendEnd, type PendingEnds } from './pending-ends'
 import type { PreviewOperator, PreviewOperatorCli } from './preview'
@@ -87,6 +93,11 @@ export interface BrowserWorkInput {
   /** What the person said: their prohibitions and limits, and values (the operator's first source; absent = none). */
   said?: readonly string[]
   values?: ReadonlyArray<{ label: string; value: string }>
+  /**
+   * The stopped card this request continues (its `bo_` / `bf_` id), which the member answered ［そのまま進める］ here
+   * (agent-browser.md "The stopped card's answer"); absent / null: none.
+   */
+  decision?: string | null
   items: readonly string[]
   signal: AbortSignal
   /** Puts the card's reference (the frames run's id) into the reply. */
@@ -95,6 +106,10 @@ export interface BrowserWorkInput {
 
 const STOP_CHECK_MS = 500
 const KEPT_CARDS = 100
+/** How long a stopped card's answer may be continued (the member's ［そのまま進める］ → the AI's new request). */
+const DECISION_MS = 30 * 60_000
+/** How long the card waits for the person's ［書いてよい］／［書かない］ about a write outside the promise (never past the run). */
+const ASK_MS = 10 * 60_000
 const IDLE_MAX_MS = 45_000
 /** A permit's 5 s and the 30 s after it (the server's window before a write in doubt can be answered about). */
 const CONFIRM_AFTER_MS = 35_000
@@ -133,7 +148,18 @@ interface Entry {
   next: BrowserStopNext | null
   /** The screen the operator last looked at when it stopped to ask (beside `next` only; memory only). */
   screen: BrowserStopScreen | null
+  /** A write outside the run's promise the card asks about now (its line and items; the person's card only), or null. */
+  ask?: { line: string; items: string[] } | null
+  /** The card's ［書いてよい］／［書かない］, waited for by the writer (set while `ask` is up). */
+  answerAsk?: ((allow: boolean) => void) | null
 }
+
+/**
+ * A stopped card that asks the member to decide (agent-browser.md "The stopped card's answer"): what the next request must
+ * match to continue it — the site, the Skill as the AI named it, the consultation — and the operator's question, which goes
+ * back only to the next run's operator (never to the consultation AI). `choice` once the member pressed.
+ */
+interface Decidable { host: string; skill: string | null; conversationId: string | null; question: string; choice: 'proceed' | 'stop' | null; at: number; used: boolean }
 
 /** A server refusal → the consultation AI's fixed words (busy: with roughly when the domain frees up, when the server said). */
 function refusedWords(a: Exclude<BrowserLinesAnswer, { kind: 'ok' }>, now: number): string {
@@ -213,7 +239,17 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
       title: CW.title, siteLabel: e.host, phase: e.phase, values: e.values.map((v, i) => ({ name: `v${i + 1}`, label: v.label, value: v.value, needsConfirm: false, confirmed: false })),
       sentences: [...e.sentences], card: e.card, readAt: e.readAt, contentHash: e.phase === 'ready' ? e.planHash : null, message: e.message,
       result, ...(e.phase === 'ready' ? { cancellable: true } : {}), ...trailOf(e.trails), ...(e.next ? { next: e.next, ...(e.screen ? { screen: e.screen } : {}) } : {}),
+      ...(e.ask ? { ask: { line: e.ask.line, items: [...e.ask.items] } } : {}),
     }
+  }
+
+  /** Stopped cards that ask the member to decide, and their answers (main's memory, per member; agent-browser.md "The stopped card's answer"). */
+  const decidables = new Map<string, Decidable>()
+  const keepDecidable = (userId: string, companyId: string, cardId: string, d: Omit<Decidable, 'choice' | 'at' | 'used'>) => {
+    const k = key(userId, companyId, cardId)
+    decidables.delete(k)
+    decidables.set(k, { ...d, choice: null, at: now(), used: false })
+    while (decidables.size > KEPT_CARDS) decidables.delete(decidables.keys().next().value as string)
   }
 
   // A stopped preview's card (no plan, so no frames run card): named by the preview's operator run (`bo_…`), shown by the
@@ -417,7 +453,7 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
    * none on its way → the operator looks at the page as it is.
    */
   async function settleWrites(writer: FrameWriter, win: BrowserBrowseSurface, afterAction: boolean, signal: AbortSignal): Promise<boolean> {
-    const limit = performance.now() + (deps.idleMaxMs ?? IDLE_MAX_MS)
+    let limit = performance.now() + (deps.idleMaxMs ?? IDLE_MAX_MS)
     const left = () => limit - performance.now()
     const moment = deps.writeStartMs ?? L.writeStartMs
     let watch = afterAction
@@ -429,7 +465,13 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
       const since = writer.heldCount()
       if (watch) await watchForWrite(writer, since, Math.min(moment, left()), signal)
       if (writer.sending() > 0) {
-        if (!(await idleWithin(writer, left(), signal))) { ranOut = true; break }
+        if (!(await idleWithin(writer, left(), signal))) {
+          // A write waiting for the person's answer on the card is not on its way: its wait is the card's (it ends by the
+          // person, the card's time or the run's stop), so the limit starts again once it is answered.
+          if (writer.asking() > 0 && !signal.aborted) { limit = performance.now() + (deps.idleMaxMs ?? IDLE_MAX_MS); continue }
+          ranOut = true
+          break
+        }
       } else if (writer.heldCount() === since) break
       // The page got answers (or refusals): it may go on with another write — the same moment again, within the limit.
       answered = true
@@ -462,6 +504,16 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
     const host = input.site
     if (!deps.registered(companyId, host)) return said(W.notAllowed)
     if (deps.stopped(companyId)) return said(W.stopped)
+    // A stopped card this request continues: the member answered it here, for this site and Skill, not used yet, in time.
+    // Its question goes back only to the next operator, never to the consultation AI (agent-browser.md "The stopped card's answer").
+    let decided: { question: string; answer: 'proceed' } | null = null
+    if (input.decision !== undefined && input.decision !== null) {
+      const d = decidables.get(key(userId, companyId, input.decision))
+      if (!d || d.used || d.choice !== 'proceed' || d.host !== host || d.skill !== input.skill || now() - d.at > DECISION_MS
+        || (d.conversationId !== null && d.conversationId !== input.conversationId)) return said(W.badDecision)
+      d.used = true
+      decided = { question: d.question, answer: 'proceed' }
+    }
     const operator = deps.operator()
     if (!operator) return said(W.noOperator)
     // The context is taken before the wait for the window, so a sign-in or setting change meanwhile is seen (Codex review).
@@ -574,7 +626,7 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
         const earlier = await askEarlier(frameRun, input.task)
         if (earlier) return stoppedBefore(earlier)
       }
-      const person: WorkPerson = { said: input.said ?? [], values: input.values ?? [] }
+      const person: WorkPerson = { said: input.said ?? [], values: input.values ?? [], ...(decided ? { decided: [decided] } : {}) }
       // The consultation AI's request is withheld only when the Skill's steps are what the operator works from: a Skill with
       // no steps here (none in it, or a company without the company folder) keeps the request, as before (Codex review).
       const skillRun = steps !== null
@@ -607,6 +659,7 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
         if (previewEnd && previewRan.runId && deps.userId() === userId) {
           const shot = previewed.kind === 'answer' ? stopScreen(previewed.screen) : null
           keepPreview(userId, companyId, previewRan.runId, previewStoppedView(host, previewEnd, now(), previewTrail.view(), previewNext, shot))
+          if (previewNext?.kind === 'decide') keepDecidable(userId, companyId, previewRan.runId, { host, skill: input.skill, conversationId: input.conversationId, question: previewNext.question })
           input.onCard(previewRan.runId)
           asked = previewNext?.kind === 'decide'
         }
@@ -637,6 +690,53 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
       const e = entry
       keep(e)
       if (!cardShown) { input.onCard(run.runId); cardShown = true }
+
+      // The run's promise (agent-browser.md "The run's promise"), before the card and any permit: the person's own values, the
+      // preview's values this card shows them (only when there is a card: a pre-approved Skill's run has no preview, so
+      // nothing read from the screen is promised), a stopped card's answer it continues. Digests under this run's own key.
+      const runKey = randomBytes(32)
+      const digest = (v: string) => `hmac:${createHmac('sha256', runKey).update(v.normalize('NFC'), 'utf8').digest('hex')}`
+      const built = buildBrowserRunPromise({
+        // A plan exists only from a preview, which runs only for a run with a card: a pre-approved run promises nothing read.
+        frames: workFrames(run.frames), person: person.values, preview: plan ? plan.values : null, decisions: decided ? ['proceed'] : [], digest,
+      })
+      let promised: BrowserRunPromiseInput | null = null
+      const added: BrowserRunPromiseAddition[] = []
+      if (deps.api.framePromise) {
+        const made = await deps.api.framePromise(companyId, run.runId, built.promise).catch((): BrowserLinesAnswer => ({ kind: 'no-answer' }))
+        if (made.kind === 'ok') promised = built.promise
+        // An older server has no such route: the run goes on without a promise (that server checks none either).
+        else if (!(made.kind === 'refused' && made.code === 'NOT_FOUND')) {
+          e.phase = 'failed'
+          const why: WorkStopReason = made.kind === 'no-answer' ? 'network' : 'server-refused'
+          e.result = resultOf({ kind: 'stopped', why }, [], null)
+          return said(workWordsForAi({ kind: 'stopped', why }, input.items, []))
+        }
+      }
+      /** The card's question about a write outside the promise: true once the person said 「書いてよい」 and the server took it. */
+      const askPerson = async (q: PromiseAsk): Promise<boolean> => {
+        if (!promised || !deps.api.framePromiseAdd) return false
+        const allowed = await new Promise<boolean>((resolve) => {
+          const until = Math.min(now() + ASK_MS, Date.parse(run.expiresAt) || now() + ASK_MS)
+          let timer: ReturnType<typeof setTimeout> | undefined
+          let onCut = () => {}
+          const done = (a: boolean) => { clearTimeout(timer); cut.signal.removeEventListener('abort', onCut); e.ask = null; e.answerAsk = null; resolve(a) }
+          timer = setTimeout(() => done(false), Math.max(0, until - now()))
+          onCut = () => done(false)
+          cut.signal.addEventListener('abort', onCut, { once: true })
+          e.ask = { line: q.line, items: q.items }
+          e.answerAsk = done
+          if (cut.signal.aborted) done(false)
+        })
+        if (!allowed) return false
+        const a = await deps.api.framePromiseAdd(companyId, run.runId, q.addition).catch((): BrowserLinesAnswer => ({ kind: 'no-answer' }))
+        if (a.kind !== 'ok') return false
+        added.push(q.addition)
+        return true
+      }
+      const writerPromise: WriterPromise | null = promised
+        ? { state: () => browserPromiseState(promised as BrowserRunPromiseInput, added), digest, ask: askPerson }
+        : null
 
       // The plan card: ［任せる］ (the one-time value, from here only) or ［やめる］, the turn's stop, or the server's 10 minutes.
       if (run.needsApproval) {
@@ -698,6 +798,14 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
             if (a !== null) await readBefore(p, a)
           }
         },
+        // A refused write's own address read again: "not saved" only when it reads exactly as it did right before the write.
+        readAgain: async (heldPath) => {
+          const was = beforeAt.get(heldPath)
+          if (was === undefined || was === null) return null
+          const nowText = (await readBoth(heldPath)).text
+          return nowText !== null && nowText === was ? 'unchanged' : null
+        },
+        promise: () => writerPromise,
       })
       // The plan the person approved on the card goes to the work as its material; none → no preview (a pre-approved Skill).
       const approvedPlan: WorkApprovedPlan | null = plan ? { summary: plan.summary, affects: plan.affects, values: plan.values } : null
@@ -735,24 +843,28 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
           reads.push({
             pattern: p, before: p.includes('{created}') ? 'created' : befores.get(p) ?? null,
             after: target === null ? null : await readTop(target.address),
-            // What the write the address came from sent: the card's machine check compares the read with it.
+            // What the write the address came from sent and what the run promised for it: the card's machine check.
             sent: target === null || target.from === null ? null : doneRecords[target.from].sent,
+            promised: target === null || target.from === null ? null : doneRecords[target.from].promised ?? null,
+            from: target === null ? null : target.from,
           })
         }
       }
       const unreadAddresses = reads.filter(r => !r.after).map(r => r.pattern)
+      // Sent is not done (agent-browser.md "Sent is not done"): what reading back says of the writes the site took.
+      const business = workBusinessOf(doneRecords.length, reads)
       // A held write refused as outside the frames is why the operator then stopped: said first (incident 2026-11-27).
       const end: WorkEnd = writer.locked() && records.some(r => r.outcome === 'unknown') ? { kind: 'unknown' }
         : worked.kind === 'refused' ? { kind: 'stopped', why: worked.why }
           // The work stopped at the lost answer; the read-back found that write landed.
           : landed && worked.kind === 'end' && worked.end.kind === 'unknown' ? { kind: 'stopped', why: 'read-back' }
           : workEndAfterRefusals(worked.kind === 'end' ? worked.end
-            : worked.answer.do === 'done' ? { kind: 'done' } : { kind: 'stopped', why: worked.answer.do === 'stop' ? worked.answer.why : 'blocked' }, records.map(r => r.outcome))
+            : worked.answer.do === 'done' ? { kind: 'done', business } : { kind: 'stopped', why: worked.answer.do === 'stop' ? worked.answer.why : 'blocked' }, records.map(r => r.outcome))
       const answer = worked.kind === 'answer' ? worked.answer : null
       const checks = answer?.do === 'done' ? answer.checks : []
       e.card = workResultCard({
         end, summary: answer?.do === 'done' ? answer.result : null,
-        writes: records.map(r => ({ line: r.line, outcome: r.outcome, status: r.status })),
+        writes: records.map(r => ({ line: r.line, outcome: r.outcome, status: r.status, ...(r.refusal ? { refusal: r.refusal } : {}) })),
         afterReads: reads, checks, comparedName: answer?.do === 'done' ? answer.comparedName : null,
       })
       // Said once on the card, so the person knows the app (not the site's answer) found it done.
@@ -763,10 +875,12 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
       // The operator's question (need-person) or the window (need-login) first on the card; the AI hears only that it asks.
       // After any held write the answers are not offered (a new run would start the work over: Codex review).
       e.next = workStopNext(end, answer?.do === 'stop' ? operatorQuestion(answer, workTrail) : null, records.length)
+      if (e.next?.kind === 'decide') keepDecidable(userId, companyId, run.runId, { host, skill: input.skill, conversationId: input.conversationId, question: e.next.question })
       // The screen it stopped on goes beside what the card asks (memory only, this member's card).
       e.screen = e.next && worked.kind === 'answer' ? stopScreen(worked.screen) : null
-      // The write in doubt the server knows (it had a permit): the person may answer about it on the card, past its window.
-      const doubt = records.find(r => r.outcome === 'unknown' && typeof r.write === 'number')
+      // The write in doubt the server knows (it had a permit): the person may answer about it on the card, past its window —
+      // an unknown one, else a refused one nobody found unchanged (agent-browser.md "Sent is not done").
+      const doubt = records.find(r => r.outcome === 'unknown' && typeof r.write === 'number') ?? openRefusals(records).find(r => typeof r.write === 'number')
       e.inDoubt = doubt ? { write: doubt.write as number, from: confirmableAt(doubt.permittedAt ?? null), line: doubt.line } : null
       // The server's own time for the answer (and whatever it already knows of that write) drives the card's buttons.
       if (e.inDoubt) await syncDoubt(e)
@@ -938,9 +1052,10 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
       settleDoubt(e, confirmed.answer, confirmed.answer === 'done' ? CW.confirmedDone : CW.confirmedNotDone)
     } else if (write.state === 'done' || write.state === 'verified') {
       settleDoubt(e, 'done', CW.lateDone)
-    } else if (write.state === 'refused') {
+    } else if (write.state === 'refused' && write.checked !== false) {
+      // Read again and found unchanged (or an older server, which says nothing of it): not saved.
       settleDoubt(e, 'not_done', CW.lateRefused)
-    } else if (write.state === 'unknown' && typeof write.confirmableAt === 'string' && Number.isFinite(Date.parse(write.confirmableAt))) {
+    } else if ((write.state === 'unknown' || write.state === 'refused') && typeof write.confirmableAt === 'string' && Number.isFinite(Date.parse(write.confirmableAt))) {
       doubt.from = write.confirmableAt
     }
   }
@@ -953,16 +1068,27 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
 
   /** The card's result lists (the write card's shape): done, not sent, unknown and what to check by hand. */
   function resultOf(end: WorkEnd, records: readonly FrameWriteRecord[], headline: string | null): BrowserWriteResultView {
-    const unknown = records.filter(r => r.outcome === 'unknown').map(r => r.line)
+    // A refused write nobody found unchanged is not "not done" (agent-browser.md "Sent is not done"): it is listed as not known.
+    const open = new Set(openRefusals(records))
+    const unknown = records.filter(r => r.outcome === 'unknown' || open.has(r)).map(r => r.line)
     return {
       outcome: end.kind === 'done' ? 'succeeded' : end.kind === 'unknown' ? 'unknown' : records.some(r => r.outcome === 'done') ? 'partial' : 'stopped',
-      headline: headline ?? (end.kind === 'stopped' ? W.stoppedBy[end.why] : end.kind === 'unknown' ? CW.unknown : CW.done),
+      headline: headline ?? (end.kind === 'stopped' ? W.stoppedBy[end.why] : end.kind === 'unknown' ? CW.unknown : CW.doneUnconfirmed),
       done: records.filter(r => r.outcome === 'done').map(r => r.line),
-      notDone: records.filter(r => r.outcome === 'not-sent' || r.outcome === 'refused' || r.outcome === 'site-refused').map(r => r.line),
+      notDone: records.filter(r => r.outcome === 'not-sent' || r.outcome === 'refused' || (r.outcome === 'site-refused' && !open.has(r))).map(r => r.line),
       unknown,
       byHand: unknown.map(CW.byHand),
       confirm: null,
     }
+  }
+
+  /**
+   * The refused writes whether saved or not is not known (agent-browser.md "Sent is not done"): not read again and found
+   * unchanged, and not followed by a done write of this run to the very same address (its corrected try settled it).
+   */
+  function openRefusals(records: readonly FrameWriteRecord[]): FrameWriteRecord[] {
+    return records.filter((r, i) => r.outcome === 'site-refused' && r.refusal !== 'unchanged'
+      && !records.slice(i + 1).some(o => o.outcome === 'done' && o.path !== null && o.path === r.path))
   }
 
   /** This member's card (the main window's IPC asks it; the renderer never gets the approval value). */
@@ -1039,6 +1165,40 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
       }
       return { ok: false, message: CW.confirmFailed }
     },
+    /**
+     * ［書いてよい］／［書かない］ on the card (a window showing its consultation, the caller checked): the person's answer about a
+     * write outside the run's promise, while the page's request waits (agent-browser.md "The run's promise"). The AI's tools
+     * never reach this.
+     */
+    allow(companyId: string, runId: string, allow: unknown): BrowserWriteGetResult | null {
+      const e = mine(deps.userId(), companyId, runId)
+      if (!e) return null
+      if (typeof allow !== 'boolean' || !e.answerAsk) return { ok: false, message: CW.askGone }
+      e.answerAsk(allow)
+      return { ok: true, view: viewOf(e) }
+    },
+    /**
+     * ［そのまま進める］／［やめる］ on a stopped card that asks the member to decide (agent-browser.md "The stopped card's answer"):
+     * kept as the card's fixed answer, once. Only a later request that names this card (`decision`) continues it; nothing here
+     * reaches the site or an AI.
+     */
+    decide(companyId: string, cardId: string, choice: unknown): { ok: true } | { ok: false; message: string } | null {
+      const userId = deps.userId()
+      if (!userId) return null
+      const d = decidables.get(key(userId, companyId, cardId))
+      if (!d) return null
+      if (choice !== 'proceed' && choice !== 'stop') return { ok: false, message: CW.askGone }
+      if (d.choice !== null && d.choice !== choice) return { ok: false, message: CW.askGone }
+      d.choice = choice
+      d.at = now()
+      return { ok: true }
+    },
+    /** A stopped card's consultation (the caller lets only a window showing it answer). */
+    decidePlace(companyId: string, cardId: string): { conversationId: string | null } | null {
+      const userId = deps.userId()
+      const d = userId ? decidables.get(key(userId, companyId, cardId)) : undefined
+      return d ? { conversationId: d.conversationId } : null
+    },
     /** ［やめる］: the plan is not approved; the run ends (nothing is written). */
     cancel(companyId: string, runId: string): BrowserWriteGetResult | null {
       const e = mine(deps.userId(), companyId, runId)
@@ -1055,7 +1215,7 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
     previewCard(userId: string, companyId: string, runId: string): BrowserInspectionView | undefined {
       return previews.get(key(userId, companyId, runId))
     },
-    clear: () => { entries.clear(); previews.clear() },
+    clear: () => { entries.clear(); previews.clear(); decidables.clear() },
   }
 }
 

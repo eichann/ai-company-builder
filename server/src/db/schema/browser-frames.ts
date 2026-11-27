@@ -39,6 +39,11 @@ import { rebuildTableFor } from './table-rebuild'
  *   write and with its run's member and domain (trigger); never changed, never removed while its run exists. What became
  *   of each write is its row in `browser_frame_writes` and `browser_frame_write_confirms`: a target with a write still
  *   `permitted` / `unknown` and no answer is **in doubt** for every later run, with no time limit.
+ * - `browser_frame_promises` / `browser_frame_promise_adds` (agent-browser.md "The run's promise"): the run's promise as the
+ *   app sent it once before the first permit (digests only: never a value or a label), and each addition the person made
+ *   on the card while the run wrote. Never changed, never removed while their run exists.
+ * - `browser_frame_refusal_checks` (agent-browser.md "Sent is not done"): a `refused` write the app read again and found
+ *   unchanged — only then is it known "not saved"; a refused write without one is in doubt for every later run.
  */
 
 /** The writes table, its in-flight index and its moves: one text for a new database and the rebuild. */
@@ -87,6 +92,21 @@ const BROWSER_WRITE_LEDGER_BESIDE_WRITE = `CREATE TRIGGER IF NOT EXISTS browser_
         OR NOT EXISTS (SELECT 1 FROM browser_frame_runs WHERE company_id = NEW.company_id AND id = NEW.run_id AND user_id = NEW.user_id AND host = NEW.host)
     BEGIN
       SELECT RAISE(ABORT, 'a ledger row is written only beside its permitted write, with its run''s member and domain');
+    END`
+/**
+ * A refused write found unchanged is kept only beside its `refused` write. Names `browser_frame_writes`, so the writes table's
+ * rebuild drops it first and makes it again (as the two above).
+ */
+const BROWSER_FRAME_REFUSAL_CHECK_BESIDE = `CREATE TRIGGER IF NOT EXISTS browser_frame_refusal_checks_beside BEFORE INSERT ON browser_frame_refusal_checks
+      WHEN NOT EXISTS (SELECT 1 FROM browser_frame_writes WHERE company_id = NEW.company_id AND run_id = NEW.run_id AND seq = NEW.seq AND state = 'refused')
+    BEGIN
+      SELECT RAISE(ABORT, 'a refused write read again is kept only beside its refused write');
+    END`
+/** A run's promise only before its first permit. Names `browser_frame_writes`: the rebuild drops it and makes it again. */
+const BROWSER_FRAME_PROMISES_BEFORE_WRITES = `CREATE TRIGGER IF NOT EXISTS browser_frame_promises_before_writes BEFORE INSERT ON browser_frame_promises
+      WHEN EXISTS (SELECT 1 FROM browser_frame_writes WHERE company_id = NEW.company_id AND run_id = NEW.run_id)
+    BEGIN
+      SELECT RAISE(ABORT, 'a run''s promise is made before its first permit');
     END`
 export const browserFrameSchema = `
     CREATE TABLE IF NOT EXISTS browser_frame_runs (
@@ -219,6 +239,64 @@ export const browserFrameSchema = `
     BEGIN
       SELECT RAISE(ABORT, 'the write ledger is kept as written');
     END;
+
+    CREATE TABLE IF NOT EXISTS browser_frame_promises (
+      company_id TEXT NOT NULL,
+      run_id TEXT NOT NULL,
+      content TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      PRIMARY KEY (company_id, run_id),
+      FOREIGN KEY (company_id, run_id) REFERENCES browser_frame_runs(company_id, id) ON DELETE CASCADE
+    );
+    CREATE TRIGGER IF NOT EXISTS browser_frame_promises_no_update BEFORE UPDATE ON browser_frame_promises
+    BEGIN
+      SELECT RAISE(ABORT, 'a run''s promise is kept as made');
+    END;
+    CREATE TRIGGER IF NOT EXISTS browser_frame_promises_no_delete BEFORE DELETE ON browser_frame_promises
+      WHEN EXISTS (SELECT 1 FROM browser_frame_runs WHERE company_id = OLD.company_id AND id = OLD.run_id)
+    BEGIN
+      SELECT RAISE(ABORT, 'a run''s promise is kept as made');
+    END;
+    ${BROWSER_FRAME_PROMISES_BEFORE_WRITES};
+
+    CREATE TABLE IF NOT EXISTS browser_frame_promise_adds (
+      company_id TEXT NOT NULL,
+      run_id TEXT NOT NULL,
+      seq INTEGER NOT NULL CHECK (seq >= 1),
+      content TEXT NOT NULL,
+      added_by TEXT NOT NULL,
+      added_at TEXT NOT NULL,
+      PRIMARY KEY (company_id, run_id, seq),
+      FOREIGN KEY (company_id, run_id) REFERENCES browser_frame_promises(company_id, run_id) ON DELETE CASCADE
+    );
+    CREATE TRIGGER IF NOT EXISTS browser_frame_promise_adds_no_update BEFORE UPDATE ON browser_frame_promise_adds
+    BEGIN
+      SELECT RAISE(ABORT, 'what the person added to a promise is kept as given');
+    END;
+    CREATE TRIGGER IF NOT EXISTS browser_frame_promise_adds_no_delete BEFORE DELETE ON browser_frame_promise_adds
+      WHEN EXISTS (SELECT 1 FROM browser_frame_runs WHERE company_id = OLD.company_id AND id = OLD.run_id)
+    BEGIN
+      SELECT RAISE(ABORT, 'what the person added to a promise is kept as given');
+    END;
+
+    CREATE TABLE IF NOT EXISTS browser_frame_refusal_checks (
+      company_id TEXT NOT NULL,
+      run_id TEXT NOT NULL,
+      seq INTEGER NOT NULL,
+      checked_at TEXT NOT NULL,
+      PRIMARY KEY (company_id, run_id, seq),
+      FOREIGN KEY (company_id, run_id) REFERENCES browser_frame_runs(company_id, id) ON DELETE CASCADE
+    );
+    ${BROWSER_FRAME_REFUSAL_CHECK_BESIDE};
+    CREATE TRIGGER IF NOT EXISTS browser_frame_refusal_checks_no_update BEFORE UPDATE ON browser_frame_refusal_checks
+    BEGIN
+      SELECT RAISE(ABORT, 'a refused write read again is kept as found');
+    END;
+    CREATE TRIGGER IF NOT EXISTS browser_frame_refusal_checks_no_delete BEFORE DELETE ON browser_frame_refusal_checks
+      WHEN EXISTS (SELECT 1 FROM browser_frame_runs WHERE company_id = OLD.company_id AND id = OLD.run_id)
+    BEGIN
+      SELECT RAISE(ABORT, 'a refused write read again is kept as found');
+    END;
 `
 
 /**
@@ -241,6 +319,21 @@ export function migrateBrowserFrameQuery(conn: Database.Database): void {
 }
 
 /**
+ * A frame's promise fields (agent-browser.md "The run's promise"): the `body` and `bind` its Skill's `browser.yaml` declared,
+ * as canonical JSON, or null (none declared; an ad-hoc plan; a row made before the column). Additive and nullable, fixed by
+ * a trigger of its own like the query. Idempotent.
+ */
+export function migrateBrowserFramePromise(conn: Database.Database): void {
+  const cols = new Set((conn.prepare('PRAGMA table_info(browser_frames)').all() as Array<{ name: string }>).map(c => c.name))
+  if (!cols.has('promise')) conn.exec('ALTER TABLE browser_frames ADD COLUMN promise TEXT')
+  conn.exec(`CREATE TRIGGER IF NOT EXISTS browser_frames_fixed_promise BEFORE UPDATE ON browser_frames
+    WHEN NEW.promise IS NOT OLD.promise
+  BEGIN
+    SELECT RAISE(ABORT, 'a frame''s promise fields never change');
+  END`)
+}
+
+/**
  * The write state `refused` ("Recovering from a failed write"): a `browser_frame_writes` made before it is rebuilt once
  * with the wider CHECK and the trigger that allows `permitted` / `unknown` → `refused` (every row kept). Idempotent.
  */
@@ -249,9 +342,10 @@ export function migrateBrowserFrameWriteRefused(conn: Database.Database): boolea
     table: 'browser_frame_writes',
     marker: "'refused'",
     create: BROWSER_FRAME_WRITES_TABLE,
-    after: [BROWSER_FRAME_WRITES_IN_FLIGHT, BROWSER_FRAME_WRITES_MOVES, BROWSER_FRAME_MADE_DONE, BROWSER_WRITE_LEDGER_BESIDE_WRITE],
+    after: [BROWSER_FRAME_WRITES_IN_FLIGHT, BROWSER_FRAME_WRITES_MOVES, BROWSER_FRAME_MADE_DONE, BROWSER_WRITE_LEDGER_BESIDE_WRITE, BROWSER_FRAME_REFUSAL_CHECK_BESIDE, BROWSER_FRAME_PROMISES_BEFORE_WRITES],
     drop: ['DROP TRIGGER IF EXISTS browser_frame_writes_moves', 'DROP INDEX IF EXISTS idx_browser_frame_writes_in_flight', 'DROP TRIGGER IF EXISTS browser_frame_made_done',
-      'DROP TRIGGER IF EXISTS browser_write_ledger_beside_write'],
+      'DROP TRIGGER IF EXISTS browser_write_ledger_beside_write', 'DROP TRIGGER IF EXISTS browser_frame_refusal_checks_beside',
+      'DROP TRIGGER IF EXISTS browser_frame_promises_before_writes'],
     columns: ['company_id', 'run_id', 'seq', 'frame_idx', 'state', 'reason', 'permitted_at', 'permitted_mono_ms', 'permitted_boot', 'settled_at'],
   })
 }

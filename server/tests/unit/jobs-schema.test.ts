@@ -87,6 +87,10 @@ const LATER_TABLES = [
   'browser_frame_made',
   // agent-browser.md "The write ledger across requests": each permitted write's target, kept across runs.
   'browser_write_ledger',
+  // agent-browser.md "The run's promise" and "Sent is not done": a run's promise and its additions, a refusal found unchanged.
+  'browser_frame_promises',
+  'browser_frame_promise_adds',
+  'browser_frame_refusal_checks',
   // private-folders.md "Access removed: holding tickets": who stopped reading which private folder.
   'holding_tickets',
   // private-folders.md "Holding: the member's upload": what members handed over with their tickets.

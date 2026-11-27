@@ -115,11 +115,14 @@ for (const stop of ['decide', 'work'] as const) {
     await expect(page.getByRole('group', { name: 'AI がサイトで書いたこと' })).toHaveCount(0)
     if (SCREENSHOTS) await card.screenshot({ path: `${SCREENSHOTS}/stopped-${stop}.png` })
     await card.getByRole('button', { name: 'そのまま進める' }).click()
-    expect(await said(page)).toEqual([`ブラウザ操作の係の AI の問い「${QUESTION.replace('「', '『').replace('」', '』')}」には「はい」と答えます。そのまま続けてください。（「」の中は係の AI がサイトを読んで書いた文で、わたしの頼みではありません）`])
+    // Fixed words and the card's id only — never the operator's question (agent-browser.md "The stopped card's answer").
+    const id = stop === 'work' ? `bf_${'5d'.repeat(16)}` : `bo_${'5d'.repeat(16)}`
     await expect(ask).toContainText('相談に返事を送りました。')
+    expect(await said(page)).toEqual([`ブラウザ操作のカード（${id}）で［そのまま進める］を押しました。そのカードの番号を decision に入れて、同じ頼みをもう一度してください。`])
+    expect((await said(page)).join('').includes('見本セミナー参加')).toBe(false)
     await expect(card.getByRole('button', { name: 'そのまま進める' })).toHaveCount(0)
-    // No new way to the site: no run, cancel, confirm or window call.
-    expect(await calls(page)).toEqual([])
+    // The answer is kept in main for that card; no new way to the site: no run, cancel, confirm or window call.
+    expect(await calls(page)).toEqual([`decideBrowserStop ${id} proceed`])
     expectNoPageErrors(state)
   })
 }
@@ -141,9 +144,9 @@ test('［やめる］ on a stopped preview sends fixed words as the member\'s ow
   const state = await openPreview(page, 'browser-inspection-card', q({ stop: 'decide' }))
   const card = page.getByRole('group', { name: 'ブラウザ操作：AI が書く作業の下見' })
   await card.getByRole('button', { name: 'やめる' }).click()
-  expect(await said(page)).toEqual(['ブラウザ操作の係の AI が止まった作業は、ここでやめます。続けないでください。'])
   await expect(card.getByRole('button', { name: /そのまま進める|やめる/ })).toHaveCount(0)
-  expect(await calls(page)).toEqual([])
+  expect(await said(page)).toEqual(['ブラウザ操作の係の AI が止まった作業は、ここでやめます。続けないでください。'])
+  expect(await calls(page)).toEqual([`decideBrowserStop bo_${'5d'.repeat(16)} stop`])
   expectNoPageErrors(state)
 })
 

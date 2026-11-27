@@ -341,8 +341,8 @@ GET  /api/config                                  setup state (no auth)
                                                                              browser-skills.ts
                                                                 (Skill の承認: agent-browser.md "A Skill's browser declaration and its approval")
                               POST /browser-frame-runs, GET /browser-frame-runs/:runId,
-                              POST /browser-frame-runs/:runId/approve | permit | report | end (the run's member;
-                              + the PC's key header on start / approve / permit)   browser-frames.ts
+                              POST /browser-frame-runs/:runId/approve | promise | promise-add | permit | report | end
+                              (the run's member; + the PC's key header on start / approve / promise / permit)   browser-frames.ts
                                                                 (枠の中の書き込み: agent-browser.md "Writes within frames")
                               GET|PUT /second-opinion                         second-opinion.ts
                                                                 (もう一方の AI に聞く: chat-and-agents.md)

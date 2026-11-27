@@ -849,7 +849,10 @@ async function workPressScenario(win: BrowserShellWindow, sites: Sites) {
  * the window's held writes) and a scripted operator — no model. The preview answers a plan, the card is approved, the work
  * opens a row's menu, copies, chooses the setting again in the dialog and decides (the page writes the copy), types the
  * person's name and date on the copy's page and registers (the page writes again), then is done. Exactly the two writes,
- * each within its frame and once, must reach the site: any later guard that stops this flow fails it.
+ * each within its frame and once, must reach the site: any later guard that stops this flow fails it. Since the run's
+ * promise (agent-browser.md "The run's promise", "Sent is not done") the Skill binds the registration's name and date to
+ * the person's values and lists the copy's body: the promise is made, nothing is asked, the copy's id counts as made by
+ * the run, and reading the copy back matches what was promised — "済みました".
  */
 async function workFlowScenario(win: BrowserShellWindow, sites: Sites) {
   const out: Record<string, unknown> = {}
@@ -860,6 +863,8 @@ async function workFlowScenario(win: BrowserShellWindow, sites: Sites) {
   const STEPS = '# SKILL.md\n1. 一覧の行のメニューから「コピー」\n2. 設定を「B設定」に選び直して「決定」\n3. 名前と日付を入れて「登録」'
   const ok = (value: unknown): BrowserLinesAnswer => ({ kind: 'ok', value })
   const calls: string[] = []
+  const promises: unknown[] = []
+  const checks: unknown[] = []
   let permits = 0
   const api = {
     async runStart() { calls.push('runStart'); return ok({ runId: `bo_${'f'.repeat(32)}`, leaseMs: 120_000 }) },
@@ -870,15 +875,18 @@ async function workFlowScenario(win: BrowserShellWindow, sites: Sites) {
         runId: RUN, state: 'waiting', endReason: null, host: 'op.test', source: 'skill', skill: '.claude/skills/flow', planHash: PLAN,
         needsApproval: true, approval: null, createdAt: '', expiresAt: new Date(Date.now() + 3_600_000).toISOString(), endedAt: null,
         frames: [
-          { frame: 1, method: 'POST', path: '/flow/copy', fields: {}, max: 1, used: 0, left: 1 },
-          { frame: 2, method: 'POST', path: '/flow/items/{n}', fields: {}, max: 1, used: 0, left: 1 },
+          { frame: 1, method: 'POST', path: '/flow/copy', fields: {}, max: 1, used: 0, left: 1, body: ['source', 'setting'] },
+          { frame: 2, method: 'POST', path: '/flow/items/{n}', fields: {}, max: 1, used: 0, left: 1, body: ['name', 'date'], bind: { name: '名前', date: '日付' } },
         ],
-        writes: [], approvalToken: 'a'.repeat(64), afterRead: [], neverRead: [],
+        // The copy read back by what it made, the registration by its own address: every write the site took is read again.
+        writes: [], approvalToken: 'a'.repeat(64), afterRead: ['/flow/items/{created}', '/flow/items/{n}'], neverRead: [],
         steps: { state: 'sealed', hash: `sha256:${crypto.createHash('sha256').update(STEPS, 'utf8').digest('hex')}` },
       })
     },
     async frameApprove() { calls.push('approve'); return ok({}) },
-    async framePermit(_c: string, _r: string, body: { frame: number; request: { path: string } }) { calls.push(`permit ${body.frame} ${body.request.path}`); permits++; return ok({ write: permits, frame: body.frame, permittedAt: new Date().toISOString(), validMs: 5000 }) },
+    async framePromise(_c: string, _r: string, body: unknown) { calls.push('promise'); promises.push(body); return ok({ made: true }) },
+    async framePromiseAdd() { calls.push('promise-add'); return ok({ added: 1 }) },
+    async framePermit(_c: string, _r: string, body: { frame: number; request: { path: string }; check?: unknown }) { calls.push(`permit ${body.frame} ${body.request.path}`); checks.push(body.check ?? null); permits++; return ok({ write: permits, frame: body.frame, permittedAt: new Date().toISOString(), validMs: 5000 }) },
     async frameReport(_c: string, _r: string, body: { result: string }) { calls.push(`report ${body.result}`); return ok({}) },
     async frameEnd() { return ok({}) },
     async frameGet() { return { kind: 'no-answer' } as BrowserLinesAnswer },
@@ -929,7 +937,16 @@ async function workFlowScenario(win: BrowserShellWindow, sites: Sites) {
   }
   const works = wireBrowserWork({
     aiSwitch: () => true, userId: () => 'u-1', context: createBrowserContext({ userId: () => 'u-1', aiSwitch: () => true }),
-    stopped: () => false, window: () => win.browse, reader: () => ({ async read() { return { status: 404, body: '' } }, closed: () => false }),
+    // The page-less read session, as the site answers a GET of the copy: what the copy and the registration wrote, as JSON.
+    stopped: () => false, window: () => win.browse,
+    reader: () => ({
+      async read(address: string) {
+        if (!/^\/flow\/items\/99$/.test(address)) return { status: 404, body: '' }
+        const parts = sites.flow.filter(f => f.path === '/flow/copy' || f.path === address).map(f => JSON.parse(f.body) as Record<string, unknown>)
+        return parts.length > 0 ? { status: 200, body: JSON.stringify(Object.assign({}, ...parts)) } : { status: 404, body: '' }
+      },
+      closed: () => false,
+    }),
     registered: () => true, api: api as never, operator: () => operator, cliPath: () => '/bin/true', parentEnv: () => ({}),
     skillSteps: async () => ({ kind: 'text', text: STEPS }),
     writeStartMs: 200, pressGapMs: 300,
@@ -952,6 +969,10 @@ async function workFlowScenario(win: BrowserShellWindow, sites: Sites) {
   out.calls = calls
   out.done = done
   out.workMaterials = materials.filter(m => m.phase === 'work').map(m => ({ person: m.person, steps: m.steps, plan: m.plan, request: m.request }))
+  out.promises = promises
+  out.checks = checks
+  const card = works.card('company-1', RUN)
+  out.cardState = card?.ok ? card.view.card?.state ?? null : null
   await win.webContents.loadURL('https://op.test/').catch(() => {})
   await wait(300)
   return out

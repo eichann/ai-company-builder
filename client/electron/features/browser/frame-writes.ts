@@ -13,15 +13,24 @@
 // server recorded it, it is kept here too, so a later write is matched against it before any permit is asked (the server
 // asks the same rule against its own record). No id read → nothing kept: a later `{made}` write is refused.
 //
+// **The run's promise** (agent-browser.md "The run's promise"): with one, a held write is checked with the core's rule
+// before any permit (the server asks the same): a bound field with another value → refused, never sent, never asked; a field,
+// target or value not in it yet → the person is asked once on the card while the page's request waits, and only their
+// 「書いてよい」 (added on the server) lets it go on. The permit carries the write's check (digests, never a value).
+//
+// **Sent is not done** (agent-browser.md "Sent is not done"): a refused write (the site's error) is read again at its own
+// address before it is reported; only an answer identical to the one read before it says "not saved" (`checked`).
+//
 // **One at a time**: a second write the page makes waits until the first's result is recorded (a promise chain), so two
 // writes never travel to a site together and the server never sees a permit while one is in flight. **Never again**: a
 // write that left without an answer is `unknown`, the run sends nothing more (`locked`), and nothing here resends — the
 // page's own retry is a new hold that needs a new unit. A write held when the run stops or the window goes is failed,
 // never sent. No Electron; the HTTP client and the clocks are injected.
 import {
-  createdIdOf, pickFrame, readHeldWrite, sentBodyWhole, sentFields, workRefusedWriteLine, workWriteLogStep, workWriteLine,
+  BROWSER_WORK_CARD_WORDS as CW, createdIdOf, pickFrame, promiseCheckOf, readHeldWrite, sentBodyWhole, sentFields, workRefusedWriteLine, workWriteLogStep, workWriteLine,
   type HeldPageWrite, type HeldPageWriteAnswer, type HeldWriteShape, type WorkFrame, type WorkWriteSeen, type WorkWriteWhy,
 } from '../../../shared/browser-frame-writes'
+import { browserPathSegments, browserPromiseVerdict, type BrowserPermitCheck, type BrowserPromiseState, type BrowserRunPromiseAddition } from '../../../../shared/core/browser-run-promise'
 import { browserMadeFrom } from '../../../../shared/core/browser-skill'
 import type { BrowserRunWriteOutcome, BrowserRunWriteStep } from '../../../../shared/core/browser-run-log'
 import { browserWriteAnswerKind } from '../../../../shared/core/browser-frame-match'
@@ -30,8 +39,22 @@ import type { BrowserLinesAnswer } from './lines-api'
 
 /** The server's frames routes as one write uses them (the member's session; the permit and a sure report carry this PC's key). */
 export interface FrameWritesApi {
-  framePermit(companyId: string, runId: string, body: { frame: number; request: BrowserFramePermitRequest }): Promise<BrowserLinesAnswer>
-  frameReport(companyId: string, runId: string, body: { write: number; result: 'done' | 'not_sent' | 'unknown' | 'refused'; reason?: string; created?: string }): Promise<BrowserLinesAnswer>
+  framePermit(companyId: string, runId: string, body: { frame: number; request: BrowserFramePermitRequest; check?: BrowserPermitCheck }): Promise<BrowserLinesAnswer>
+  frameReport(companyId: string, runId: string, body: { write: number; result: 'done' | 'not_sent' | 'unknown' | 'refused'; reason?: string; created?: string; checked?: 'unchanged' }): Promise<BrowserLinesAnswer>
+}
+
+/** What the card asks before a write outside the run's promise is sent: its line and each item in plain words (the person's card only). */
+export interface PromiseAsk { frame: number; line: string; items: string[]; addition: BrowserRunPromiseAddition }
+
+/**
+ * The run's promise as the writer uses it (the work wiring holds it): the promise in force, the run's keyed digest, and the
+ * card's question — true only once the person said 「書いてよい」 and the server took exactly that addition (the state then
+ * holds it).
+ */
+export interface WriterPromise {
+  state(): BrowserPromiseState
+  digest(value: string): string
+  ask(q: PromiseAsk): Promise<boolean>
 }
 
 /** One held write as the card and the operator learn of it (main's memory only). */
@@ -55,6 +78,10 @@ export interface FrameWriteRecord {
   frame: number | null
   afterAction: number
   why: WorkWriteWhy | null
+  /** A refused write read again and found unchanged, or not (agent-browser.md "Sent is not done"). */
+  refusal?: 'unchanged' | 'unconfirmed'
+  /** What the run promised for its bound fields, as the write sent them (the card's read-back compares with it). */
+  promised?: Record<string, string> | null
 }
 
 export interface FrameWriterDeps {
@@ -72,6 +99,13 @@ export interface FrameWriterDeps {
   actionsSoFar?(): number
   /** An after-read address to read before the first write that fits it (its "before"), awaited before the permit. */
   readBefore?(heldPath: string): Promise<void>
+  /**
+   * A refused write's own address read again (agent-browser.md "Sent is not done"): `unchanged` only when it was read right
+   * before the write and reads exactly so now; null otherwise (not read before, unreadable, changed).
+   */
+  readAgain?(heldPath: string): Promise<'unchanged' | null>
+  /** The run's promise (absent or null: none — an older server; nothing is checked and only the old reports are sent). */
+  promise?: () => WriterPromise | null
   now?: () => number
   monoMs?: () => number
 }
@@ -112,9 +146,14 @@ export function createFrameWriter(deps: FrameWriterDeps) {
   /** Frames a later frame's `{made:<n>}` refers to: only their done writes report what they made. */
   const makers = new Set(deps.frames.map(f => browserMadeFrom(f.path)).filter((n): n is number => n !== null))
 
+  /** Every id this run's done writes made, as the server recorded it (the promise's "a target this run made"). */
+  const madeAll = new Set<string>()
+  /** Held writes waiting for the person's answer on the card (no permit asked yet). */
+  let asking = 0
+
   /** One held write from the moment it is held until its outcome is kept (once: `abandon` may keep it first). */
   /** `write` / `permittedAt`: its permit once given, so a write given up as unknown can still be answered about on the card. */
-  interface Held { method: string; path: string; line: string; frame: number | null; recorded: boolean; write: number | null; permittedAt: string | null; afterAction: number }
+  interface Held { method: string; path: string; line: string; frame: number | null; recorded: boolean; write: number | null; permittedAt: string | null; afterAction: number; asking: boolean }
   type Kept = Omit<FrameWriteRecord, 'frame' | 'afterAction' | 'why'> & { why?: WorkWriteWhy }
   const pending = new Set<Held>()
   /** Every write held in this run (a write that came and went between two looks still counts). */
@@ -129,9 +168,9 @@ export function createFrameWriter(deps: FrameWriterDeps) {
   }
 
   /** The report, sent at most 3 times with the same body; true once the server recorded it. */
-  async function report(write: number, result: 'done' | 'not_sent' | 'unknown' | 'refused', reason?: string, created?: string): Promise<boolean> {
+  async function report(write: number, result: 'done' | 'not_sent' | 'unknown' | 'refused', reason?: string, created?: string, checked?: 'unchanged'): Promise<boolean> {
     for (let i = 0; i < REPORT_TRIES; i++) {
-      const a = await deps.api.frameReport(deps.companyId, deps.runId, { write, result, ...(reason ? { reason } : {}), ...(created !== undefined ? { created } : {}) }).catch((): BrowserLinesAnswer => ({ kind: 'no-answer' }))
+      const a = await deps.api.frameReport(deps.companyId, deps.runId, { write, result, ...(reason ? { reason } : {}), ...(created !== undefined ? { created } : {}), ...(checked ? { checked } : {}) }).catch((): BrowserLinesAnswer => ({ kind: 'no-answer' }))
       if (a.kind === 'ok') return true
       if (a.kind === 'refused') return false
     }
@@ -167,6 +206,53 @@ export function createFrameWriter(deps: FrameWriterDeps) {
     const line = workWriteLine(frame.method, frame.path, frame.query)
     h.line = line
     h.frame = frame.frame
+    // The run's promise: the core's rule before any permit (the server asks the same with the check this write carries).
+    const promise = deps.promise?.() ?? null
+    let check: BrowserPermitCheck | undefined
+    if (promise) {
+      const c = promiseCheckOf(frame, shape, promise.digest)
+      if (!c) {
+        keep({ line, outcome: 'refused', status: null, sent: null, path: null, answerText: null, why: 'unreadable' }, 'refused')
+        return fail
+      }
+      const verdictNow = () => browserPromiseVerdict({ frameIdx: frame.frame, frame, path: shape.path, check: c, promise: promise.state(), made: madeAll })
+      let verdict = verdictNow()
+      if (verdict.kind === 'broken') {
+        keep({ line, outcome: 'refused', status: null, sent: null, path: null, answerText: null, why: 'outside-promise' }, 'refused')
+        return fail
+      }
+      if (verdict.kind === 'ask') {
+        // Asked once on the card while the page's request waits (no permit yet); only the person's 「書いてよい」 goes on.
+        const segments = browserPathSegments(shape.path)
+        const items = [
+          // The person's card only: names and values of the page's own write (never the consultation AI, a log or the server).
+          ...verdict.fields.map(CW.askField),
+          ...verdict.targets.map(i => CW.askTarget(segments[i] ?? '')),
+          ...verdict.values.map(f => CW.askValue(f, (shape.fields.get(f) ?? []).join('、'))),
+        ]
+        const addition: BrowserRunPromiseAddition = {
+          frame: frame.frame, fields: verdict.fields, targets: verdict.targets.map(i => c.segments[i] as string),
+          binds: verdict.values.map(f => ({ field: f, digest: c.fields[f] })),
+        }
+        h.asking = true
+        asking++
+        const allowed = await promise.ask({ frame: frame.frame, line, items, addition }).catch(() => false)
+        asking--
+        h.asking = false
+        if (closed || locked || over || !deps.going()) {
+          keep({ line, outcome: 'not-sent', status: null, sent: null, path: null, answerText: null, why: 'run-over' }, 'not-sent')
+          return fail
+        }
+        verdict = allowed ? verdictNow() : verdict
+        if (!allowed || verdict.kind !== 'kept') {
+          keep({ line, outcome: 'refused', status: null, sent: null, path: null, answerText: null, why: 'not-allowed' }, 'refused')
+          return fail
+        }
+      }
+      check = c
+    }
+    // What the run promised for this frame's bound fields, as this write carries them (the card's read-back compares with it).
+    const promised = promise && frame.bind ? Object.fromEntries(Object.keys(frame.bind).map(k => [k, (shape.fields.get(k) ?? [''])[0]])) : null
     if (deps.readBefore) await deps.readBefore(shape.path).catch(() => {})
     let permit: BrowserFramePermit | null = null
     let askedMono = 0
@@ -177,7 +263,7 @@ export function createFrameWriter(deps: FrameWriterDeps) {
         if (closed || locked || over || !deps.going()) return false
         askedMono = monoMs()
         askedWall = now()
-        const a = await deps.api.framePermit(deps.companyId, deps.runId, { frame: frame.frame, request }).catch((): BrowserLinesAnswer => ({ kind: 'no-answer' }))
+        const a = await deps.api.framePermit(deps.companyId, deps.runId, { frame: frame.frame, request, ...(check ? { check } : {}) }).catch((): BrowserLinesAnswer => ({ kind: 'no-answer' }))
         if (a.kind === 'refused' && a.code && RUN_OVER.has(a.code)) over = true
         if (a.kind !== 'ok' || !isPermit(a.value) || a.value.frame !== frame.frame) return false
         permit = a.value
@@ -225,21 +311,27 @@ export function createFrameWriter(deps: FrameWriterDeps) {
     // here); anything else → unknown, locked (the safe side).
     const kind = browserWriteAnswerKind(answer.status)
     if (kind === 'unknown') locked = true
-    // What it made, when a later frame may write only to that (a done write of such a frame; none read → none kept). An id
-    // the request itself carried (a body value or a path segment: an upsert, an id the caller chose) is not one the site
+    // What it made, when a later frame may write only to that (a done write of such a frame; none read → none kept) — and,
+    // with the run's promise (a server that keeps ids of every frame), what any done write made: a target this run made. An
+    // id the request itself carried (a body value or a path segment: an upsert, an id the caller chose) is not one the site
     // minted for this run — never reported (independent review).
-    const named = kind === 'done' && makers.has(frame.frame) ? createdIdOf(answer.body) : null
+    const named = kind === 'done' && (makers.has(frame.frame) || promise) ? createdIdOf(answer.body) : null
     const createdNow = named !== null && !sentCarries(shape, named) ? named : undefined
-    const recorded = await report(write, kind, kind === 'unknown' ? 'other-state' : undefined, createdNow)
+    // The site's error proves nothing was saved only when the write's own address, read right before it, reads the same now.
+    const refusal = kind === 'refused' ? ((await deps.readAgain?.(shape.path).catch(() => null)) === 'unchanged' ? 'unchanged' as const : 'unconfirmed' as const) : undefined
+    const recorded = await report(write, kind, kind === 'unknown' ? 'other-state' : undefined, createdNow, refusal === 'unchanged' && promise ? 'unchanged' : undefined)
     // A result the server did not record: nothing more is sent in this run (the server's time-out makes it unknown).
     if (!recorded) locked = true
-    else if (createdNow !== undefined) made.set(frame.frame, (made.get(frame.frame) ?? new Set()).add(createdNow))
+    else if (createdNow !== undefined) {
+      madeAll.add(createdNow)
+      if (makers.has(frame.frame)) made.set(frame.frame, (made.get(frame.frame) ?? new Set()).add(createdNow))
+    }
     // A refusal the server did not record is kept as unknown (an older server does not know `refused`: its run log would
     // refuse `site-refused` whole; independent review of #859) — the run is locked above anyway.
     const kept: BrowserRunWriteOutcome = kind === 'refused' ? (recorded ? 'site-refused' : 'unknown') : kind
     keep({
       line, outcome: kept, status: kind === 'done' ? null : answer.status, sent: sentFields(shape), sentWhole: sentBodyWhole(shape), path: shape.path,
-      answerText: kind === 'done' ? answer.body : null, ...ids,
+      answerText: kind === 'done' ? answer.body : null, ...ids, ...(kept === 'site-refused' && refusal ? { refusal } : {}), ...(promised ? { promised } : {}),
     }, kept)
     // The page gets the site's answer (its Set-Cookie never: the window drops it too), so its flow goes on.
     return { kind: 'fulfill', status: answer.status, headers: (answer.headers ?? []).filter(([k]) => !/^set-cookie2?$/i.test(k)), body: answer.bytes ?? new TextEncoder().encode(answer.body) }
@@ -250,7 +342,7 @@ export function createFrameWriter(deps: FrameWriterDeps) {
     hold(held: HeldPageWrite): Promise<HeldPageWriteAnswer> {
       let path = '/'
       try { path = new URL(held.url).pathname } catch { /* kept as / */ }
-      const h: Held = { method: held.method.toUpperCase(), path, line: workWriteLine(held.method.toUpperCase(), null), frame: null, recorded: false, write: null, permittedAt: null, afterAction: deps.actionsSoFar?.() ?? 0 }
+      const h: Held = { method: held.method.toUpperCase(), path, line: workWriteLine(held.method.toUpperCase(), null), frame: null, recorded: false, write: null, permittedAt: null, afterAction: deps.actionsSoFar?.() ?? 0, asking: false }
       pending.add(h)
       heldSoFar++
       const next = chain.then(() => decide(held, h), () => decide(held, h))
@@ -274,7 +366,12 @@ export function createFrameWriter(deps: FrameWriterDeps) {
       closed = true
       gaveUp = true
       if (pending.size > 0) locked = true
-      for (const h of [...pending]) keepRecord(h, { line: h.line, outcome: 'unknown', status: null, sent: null, path: null, answerText: null, write: h.write, permittedAt: h.permittedAt }, 'unknown')
+      // A write still waiting for the person's answer on the card has asked for no permit: it was never sent (unless the
+      // page's original may have gone out on its own).
+      for (const h of [...pending]) {
+        if (h.asking && !originalMayHaveGone) keepRecord(h, { line: h.line, outcome: 'not-sent', status: null, sent: null, path: null, answerText: null, why: 'run-over' }, 'not-sent')
+        else keepRecord(h, { line: h.line, outcome: 'unknown', status: null, sent: null, path: null, answerText: null, write: h.write, permittedAt: h.permittedAt }, 'unknown')
+      }
     },
     /**
      * Until every write held so far is decided — also one the page makes while this waits (it joins the chain, so the
@@ -289,6 +386,8 @@ export function createFrameWriter(deps: FrameWriterDeps) {
     },
     /** Writes held and not yet kept (on their way, or queued behind one): the operator is told they are being sent. */
     sending: () => pending.size,
+    /** Held writes waiting for the person's answer on the card (the wait for them is the card's, not the 45 s of a send). */
+    asking: () => asking,
     /** How many writes were held in this run so far (activity, also of one already decided). */
     heldCount: () => heldSoFar,
     /**

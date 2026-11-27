@@ -44,6 +44,16 @@
  *   doubts its frames may meet (`doubts`) so the app asks first. A doubt never times out: the person's answer
  *   (`confirm`) or the site's answer (a late sure report, or the app's read-back `done` with reason `read-back`) ends it.
  *
+ * - **The run's promise** (agent-browser.md "The run's promise"; `promise`, `promiseAdd`): what the run may write, made once
+ *   by the app before the first permit (digests of the values the person approved, the fields they bind, the stopped
+ *   card's answer it continues) and added to only by the person's 「書いてよい」 on the card. Every permit of a run with a
+ *   promise asks `browserPromiseVerdict` (shared/core/browser-run-promise.ts, the app asks the same): a bound field with
+ *   another value or missing → `BROWSER_PROMISE_BROKEN`; a field, target or value not in it yet → `BROWSER_PROMISE_ASK`.
+ *   Nothing is taken either way. A run without one (an older app) is not checked.
+ * - **Sent is not done** (agent-browser.md "Sent is not done"): `refused` is the site's error, not proof that nothing was
+ *   saved; only a refused write the app read again and found unchanged (`checked`) is known "not saved". Any other refused
+ *   write stays in doubt for every later run (the write ledger) and may be answered about, like an unknown one.
+ *
  * Time-outs are judged on every touch, never by a timer. Everything is the member's own session; another member's or
  * another company's run is the same 404 as one that does not exist.
  */
@@ -54,9 +64,12 @@ import { BROWSER_DEVICE_WORDS } from '../../shared/core/browser-device'
 import {
   browserAdhocWritesProblem, browserFrameMismatch, browserFramesMayMeet, browserWriteTarget, BROWSER_FRAME_REQUEST_LIMITS, type BrowserFrameRequest, type BrowserMadeIds,
 } from '../../shared/core/browser-frame-match'
-import { browserMadeFrom } from '../../shared/core/browser-skill'
 import { BROWSER_FRAME_RUN_TIMES, browserFrameApproveMs } from '../../shared/core/browser-run-budget'
 import { canonicalJson } from '../../shared/core/fixed-content'
+import {
+  BROWSER_PROMISE_LIMITS, browserPathSegments, browserPromiseState, browserPromiseVerdict, readBrowserPermitCheck, readBrowserRunPromise, readBrowserRunPromiseAddition,
+  type BrowserPromiseFrame, type BrowserRunPromiseAddition, type BrowserRunPromiseInput,
+} from '../../shared/core/browser-run-promise'
 import type {
   BrowserFrameConfirmAnswer, BrowserFrameDoubt, BrowserFramePermit, BrowserFrameReportAnswer, BrowserFrameRunStart, BrowserFrameRunView, BrowserFrameWriteResult,
 } from '../../shared/types/browser-frames'
@@ -144,6 +157,12 @@ export const BROWSER_FRAME_WORDS = {
   confirmTooEarly: 'まだ送られるかもしれないため、少し待ってから確かめてください',
   confirmDone: 'この書き込みについては、もう答えてあります',
   inDoubt: '前にこの送り先へ送った書き込みの結果が分からないままです。済んでいたかどうかを答えてから、もう一度頼んでください',
+  promiseBroken: 'この書き込みは、この作業で約束した値と違うので送りません',
+  promiseAsk: 'この書き込みには、この作業の約束にないものがあります。カードで本人に確かめてください',
+  promiseMade: 'この作業の約束は、もう決まっています',
+  promiseLate: 'この作業の約束は、最初の書き込みの前にだけ決められます',
+  promiseMissing: 'この作業には約束がありません',
+  promiseFull: 'この作業の約束には、これ以上書き足せません',
 } as const
 const W = BROWSER_FRAME_WORDS
 
@@ -186,6 +205,14 @@ const keysWithin = (o: Record<string, unknown>, allowed: readonly string[]) => O
 const iso = (ms: number) => new Date(ms).toISOString()
 const ms = (s: string) => Date.parse(s)
 const RESULTS: readonly BrowserFrameWriteResult[] = ['done', 'not_sent', 'unknown', 'refused']
+/** A frame's promise fields as the frames table keeps them (`{ body?, bind? }`), or null when none were declared. */
+const framePromiseColumn = (w: BrowserSkillWrite): string | null =>
+  (w.body || w.bind ? canonicalJson({ ...(w.body ? { body: [...w.body] } : {}), ...(w.bind ? { bind: { ...w.bind } } : {}) }) : null)
+/** A frame row as the promise reads it. */
+const promiseFrameOf = (f: { path: string; fields: string; promise: string | null }): BrowserPromiseFrame => {
+  const p = f.promise === null ? {} : JSON.parse(f.promise) as { body?: string[]; bind?: Record<string, string> }
+  return { path: f.path, fields: JSON.parse(f.fields) as Record<string, string>, ...(p.body ? { body: p.body } : {}), ...(p.bind ? { bind: p.bind } : {}) }
+}
 const CONFIRM_ANSWERS: readonly BrowserFrameConfirmAnswer[] = ['done', 'not_done']
 
 /**
@@ -281,19 +308,27 @@ export function createBrowserFrameService(deps: BrowserFrameDeps) {
       runId: run.id, state: run.state, endReason: run.endReason, host: run.host, source: run.source, skill: run.skill,
       planHash: run.planHash, needsApproval: run.state === 'waiting', approval: run.approval,
       createdAt: run.createdAt, expiresAt: run.expiresAt, endedAt: run.endedAt,
-      frames: r.frames(run.id).map(f => ({
-        frame: f.idx, method: f.method, path: f.path, ...(f.query !== null ? { query: f.query } : {}),
-        fields: JSON.parse(f.fields) as Record<string, string>, max: f.max, used: f.used,
-        left: usable ? f.max - f.used : 0,
-      })),
+      frames: r.frames(run.id).map((f) => {
+        const p = promiseFrameOf(f)
+        return {
+          frame: f.idx, method: f.method, path: f.path, ...(f.query !== null ? { query: f.query } : {}),
+          fields: p.fields as Record<string, string>, max: f.max, used: f.used,
+          left: usable ? f.max - f.used : 0,
+          ...(p.body ? { body: [...p.body] } : {}), ...(p.bind ? { bind: { ...p.bind } } : {}),
+        }
+      }),
       writes: (() => {
         const confirms = new Map(r.confirms(run.id).map(c => [c.seq, c]))
+        const checked = new Set(r.refusalChecks(run.id))
         return r.writes(run.id).map(w => {
           const c = confirms.get(w.seq)
+          // A refused write never read again and found unchanged may be answered about like an unknown one.
+          const doubtful = w.state === 'unknown' || (w.state === 'refused' && !checked.has(w.seq))
           return {
             write: w.seq, frame: w.frameIdx, state: w.state, permittedAt: w.permittedAt, settledAt: w.settledAt,
-            confirmableAt: w.state === 'unknown' && !c ? iso(ms(w.permittedAt) + BROWSER_FRAME_TIMES.permit + BROWSER_FRAME_TIMES.grace) : null,
+            confirmableAt: doubtful && !c ? iso(ms(w.permittedAt) + BROWSER_FRAME_TIMES.permit + BROWSER_FRAME_TIMES.grace) : null,
             confirmed: c ? { answer: c.answer, by: c.confirmedBy, at: c.confirmedAt } : null,
+            ...(w.state === 'refused' ? { checked: checked.has(w.seq) } : {}),
           }
         })
       })(),
@@ -344,6 +379,14 @@ export function createBrowserFrameService(deps: BrowserFrameDeps) {
 
   /** A held write's target as the ledger keeps it (its hash only: the path is never kept as text). */
   const targetOf = (request: BrowserFrameRequest): string => hashCanonical(canonicalJson(browserWriteTarget(request)))
+
+  /** The run's promise in force (the first one and the person's additions), or null when the run has none. */
+  function promiseOf(companyId: string, runId: string) {
+    const r = repo(companyId)
+    const first = r.promise(runId)
+    if (first === null) return null
+    return browserPromiseState(JSON.parse(first) as BrowserRunPromiseInput, r.promiseAdds(runId).map(a => JSON.parse(a) as BrowserRunPromiseAddition))
+  }
 
   /**
    * `ServerKeepsDoubt` (LedgerLife.tla): the earlier writes in doubt on this domain for this member's account whose frame
@@ -401,8 +444,10 @@ export function createBrowserFrameService(deps: BrowserFrameDeps) {
     if (adhoc) return refuse('bad-request', adhoc === 'made' ? W.madePlan : adhoc === 'query' ? W.queryPlan : W.widePlan, { code: 'BROWSER_FRAME_BAD_PLAN' })
     // Its domain must be a registered one with writes allowed: the gate below (the same check as every permit's).
     // An ad-hoc plan is never pre-approvable: the person approves it on the card.
+    // An AI-written plan binds nothing: its frames carry no promise fields (only a reviewed Skill's do).
     return ok({
-      host: parsed.declaration.domain, source: 'adhoc', skill: null, declarationHash: null, files: null, writes: parsed.declaration.writes,
+      host: parsed.declaration.domain, source: 'adhoc', skill: null, declarationHash: null, files: null,
+      writes: parsed.declaration.writes.map(w => ({ method: w.method, path: w.path, query: w.query, max: w.max, fields: w.fields })),
       afterRead: [], neverRead: [], preApproved: false, approval: null, steps: null,
     })
   }
@@ -477,7 +522,7 @@ export function createBrowserFrameService(deps: BrowserFrameDeps) {
           state: f.preApproved ? 'open' : 'waiting', approval: f.preApproved ? 'pre_approved' : null, approvedAt: f.preApproved ? iso(now) : null,
           endReason: null, createdAt: iso(now), expiresAt: iso(now + BROWSER_FRAME_TIMES.run), endedAt: null,
         }
-        r.insertRun(run, f.writes.map((w, i) => ({ idx: i + 1, method: w.method, path: w.path, query: w.query, fields: canonicalJson({ ...w.fields }), max: w.max })))
+        r.insertRun(run, f.writes.map((w, i) => ({ idx: i + 1, method: w.method, path: w.path, query: w.query, fields: canonicalJson({ ...w.fields }), max: w.max, promise: framePromiseColumn(w) })))
         // The write ledger: earlier writes in doubt this run's frames may meet — the app asks the person before writing.
         const doubts = doubtsFor(member.companyId, f.host, member.userId, f.writes)
         return ok({ ...view(member.companyId, run), approvalToken, afterRead: [...f.afterRead], neverRead: [...f.neverRead], doubts, ...(f.steps ? { steps: f.steps } : {}) })
@@ -536,10 +581,14 @@ export function createBrowserFrameService(deps: BrowserFrameDeps) {
     async permit(member: Member, runId: string, body: unknown, deviceKey?: string): Promise<Outcome<BrowserFramePermit>> {
       const found = ownRun(member, runId)
       if (!found) return missing()
-      if (!isMap(body) || Object.keys(body).length !== 2 || !Number.isSafeInteger(body.frame) || (body.frame as number) < 1) return bad()
+      if (!isMap(body) || !keysWithin(body, ['frame', 'request', 'check']) || !own(body, 'request') || !Number.isSafeInteger(body.frame) || (body.frame as number) < 1) return bad()
       const frameIdx = body.frame as number
       const request = requestOf(body.request)
       if (!request) return bad()
+      // The promise's check (agent-browser.md "The run's promise"): read against the request's own path, segment by segment.
+      const requestPath = request.path.split('?')[0]
+      const check = own(body, 'check') ? readBrowserPermitCheck(body.check, browserPathSegments(requestPath).length) : null
+      if (own(body, 'check') && !check) return bad()
       // The git read happens before the transaction; the approval row is looked at again inside it.
       const skillNow = found.source === 'skill' ? await deps.skills.approvedFrames(member, found.skill as string) : null
       return transactions.run((): Outcome<BrowserFramePermit> => {
@@ -560,8 +609,19 @@ export function createBrowserFrameService(deps: BrowserFrameDeps) {
         // in any run however old, whose result nobody knows → no permit until the person answers or the site's answer
         // comes. Nothing is taken and the run goes on (another target is not held up).
         const target = targetOf(request)
-        if (r.ledgerDoubts(run.host, ledgerAccountOf(run.userId), target).some(d => d.target === target)) {
+        if (r.ledgerDoubts(run.host, ledgerAccountOf(run.userId), target, run.id).some(d => d.target === target)) {
           return refuse('conflict', W.inDoubt, { code: 'BROWSER_WRITE_IN_DOUBT' })
+        }
+        // The run's promise (agent-browser.md "The run's promise"): with one, every permit carries its check and the write
+        // keeps it — a bound field with another value or missing is never permitted; anything not in it yet is asked of
+        // the person first (the app does it on the card). Nothing is taken either way. A run without one: not checked.
+        const promised = promiseOf(member.companyId, run.id)
+        if (promised) {
+          if (!check) return refuse('conflict', W.promiseAsk, { code: 'BROWSER_PROMISE_CHECK_MISSING' })
+          const made = new Set(r.made(run.id).map(m => m.made))
+          const verdict = browserPromiseVerdict({ frameIdx, frame: promiseFrameOf(frame), path: requestPath, check, promise: promised, made })
+          if (verdict.kind === 'broken') return refuse('conflict', W.promiseBroken, { code: 'BROWSER_PROMISE_BROKEN', reason: verdict.reason, field: verdict.field })
+          if (verdict.kind === 'ask') return refuse('conflict', W.promiseAsk, { code: 'BROWSER_PROMISE_ASK', fields: verdict.fields, targets: verdict.targets, values: verdict.values })
         }
         const passed = gate(member, run.host, deviceKey, run)
         const refused: Refusal | null = !passed.ok
@@ -594,9 +654,12 @@ export function createBrowserFrameService(deps: BrowserFrameDeps) {
     report(member: Member, runId: string, body: unknown, deviceKey?: string): Outcome<BrowserFrameReportAnswer> {
       const found = ownRun(member, runId)
       if (!found) return missing()
-      if (!isMap(body) || !keysWithin(body, ['write', 'result', 'reason', 'created']) || !Number.isSafeInteger(body.write) || (body.write as number) < 1
+      if (!isMap(body) || !keysWithin(body, ['write', 'result', 'reason', 'created', 'checked']) || !Number.isSafeInteger(body.write) || (body.write as number) < 1
         || !(RESULTS as readonly unknown[]).includes(body.result) || (body.reason !== undefined && typeof body.reason !== 'string')) return bad()
       if (body.created !== undefined && (body.result !== 'done' || typeof body.created !== 'string' || !MADE_RE.test(body.created))) return bad()
+      // `checked`: a refused write the app read again and found unchanged (agent-browser.md "Sent is not done").
+      if (body.checked !== undefined && (body.result !== 'refused' || body.checked !== 'unchanged')) return bad()
+      const checked = body.checked === 'unchanged'
       const seq = body.write as number
       const result = body.result as BrowserFrameWriteResult
       const created = body.created as string | undefined
@@ -614,11 +677,12 @@ export function createBrowserFrameService(deps: BrowserFrameDeps) {
         const w = r.writes(run.id).find(x => x.seq === seq)
         if (!w) return refuse('not-found', W.writeNotFound, { code: 'BROWSER_FRAME_WRITE_NOT_FOUND' })
         const answer = (outcome: BrowserFrameReportAnswer['outcome']) => ok({ outcome, run: view(member.companyId, r.run(run.id) as FrameRunRow) })
-        // An id only for a frame some frame of this run refers to (`{made:<n>}`): no other value of the page is kept.
-        if (created !== undefined && !r.frames(run.id).some(f => browserMadeFrom(f.path) === w.frameIdx)) return bad()
+        // An id any done write's answer named (a plain token): a `{made:<n>}` frame fits only its maker's, and the run's
+        // promise counts every one as a target this run made (agent-browser.md "The run's promise").
         if (w.state === 'permitted') {
           if (!r.setWriteState(run.id, seq, 'permitted', result, { settledAt: iso(now), reason })) throw new Error('browser frames: a write moved inside its transaction')
           if (created !== undefined) r.insertMade(run.id, { seq, frameIdx: w.frameIdx, made: created }, iso(now))
+          if (checked) r.insertRefusalCheck(run.id, seq, iso(now))
           // `unknown`: nothing more is sent in this run (the run locks; an ended run stays ended). `refused` (the site said
           // no): the run goes on; the unit stays used, and trying again is a new write with its own permit.
           if (result === 'unknown') r.setRunState(run.id, 'open', 'locked', {})
@@ -630,6 +694,8 @@ export function createBrowserFrameService(deps: BrowserFrameDeps) {
           if (result === 'done' && w.state === 'done' && created !== kept) {
             return refuse('conflict', W.reportConflict, { code: 'BROWSER_REPORT_CONFLICT' })
           }
+          // The same refusal again, now read again and found unchanged (its first report's answer lost): kept once.
+          if (checked && w.state === 'refused' && !r.confirms(run.id).some(c => c.seq === seq)) r.insertRefusalCheck(run.id, seq, iso(now))
           return answer('same')
         }
         // Once the person answered about it, no report changes it. One that agrees is kept as it was; one that contradicts
@@ -645,6 +711,8 @@ export function createBrowserFrameService(deps: BrowserFrameDeps) {
           // Late and sure: the site's answer came after all; the run stays locked (never runs on after an unknown). A
           // `created` with it is not kept: nothing more is permitted in this run anyway.
           r.setWriteState(run.id, seq, 'unknown', result, { settledAt: iso(now), reason })
+          // A late refusal ends the doubt only once the app read it again and found it unchanged ("Sent is not done").
+          if (checked && result === 'refused') r.insertRefusalCheck(run.id, seq, iso(now))
           return answer('applied')
         }
         // `not_sent` after `unknown`: it may have been sent all the same — kept as it was.
@@ -681,12 +749,71 @@ export function createBrowserFrameService(deps: BrowserFrameDeps) {
         // Once: the same answer again (its first answer lost on the way back) is answered as kept; another one is refused.
         const before = r.confirms(run.id).find(c => c.seq === seq)
         if (before) return before.answer === given ? ok(view(member.companyId, run)) : refuse('conflict', W.confirmDone, { code: 'BROWSER_FRAME_CONFIRMED' })
-        if (w.state !== 'unknown') return refuse('conflict', W.confirmNotUnknown, { code: 'BROWSER_FRAME_NOT_UNKNOWN' })
+        // An unknown write, or a refused one nobody read again and found unchanged (agent-browser.md "Sent is not done").
+        if (w.state !== 'unknown' && !(w.state === 'refused' && !r.refusalChecks(run.id).includes(seq))) {
+          return refuse('conflict', W.confirmNotUnknown, { code: 'BROWSER_FRAME_NOT_UNKNOWN' })
+        }
         if (!pastWindow(w, now)) return refuse('conflict', W.confirmTooEarly, { code: 'BROWSER_TOO_EARLY' })
         if (!r.insertConfirm(run.id, { seq, answer: given, confirmedBy: member.userId, confirmedAt: iso(now) })) {
           return refuse('conflict', W.confirmDone, { code: 'BROWSER_FRAME_CONFIRMED' })
         }
         return ok(view(member.companyId, r.run(run.id) as FrameRunRow))
+      })
+    },
+
+    /**
+     * `PromiseMade` — POST /browser-frame-runs/:runId/promise { values, binds, decisions } with this PC's key (agent-browser.md
+     * "The run's promise"): the run's promise, once, before its first permit, while it waits for its card or is open — read
+     * strictly against the run's own frames (a bind only for a field its frame binds, to a value of this promise). The same
+     * promise again (its first answer lost) is answered as kept; another one → `BROWSER_PROMISE_MADE`.
+     */
+    promise(member: Member, runId: string, body: unknown, deviceKey?: string): Outcome<{ made: true }> {
+      const found = ownRun(member, runId)
+      if (!found) return missing()
+      const pc = deps.devices.check(member, deviceKey, null)
+      if (!pc.ok) return pc
+      if (pc.value.deviceId !== found.deviceId) return refuse('conflict', BROWSER_DEVICE_WORDS.refusals.BROWSER_DEVICE_ELSEWHERE, { code: 'BROWSER_DEVICE_ELSEWHERE' })
+      return transactions.run((): Outcome<{ made: true }> => {
+        const now = clock.nowMs()
+        const r = repo(member.companyId)
+        const run = settle(member.companyId, found, now)
+        const input = readBrowserRunPromise(body, r.frames(run.id).map(promiseFrameOf))
+        if (!input) return bad()
+        const content = canonicalJson(input)
+        const before = r.promise(run.id)
+        if (before !== null) return before === content ? ok({ made: true }) : refuse('conflict', W.promiseMade, { code: 'BROWSER_PROMISE_MADE' })
+        if (run.state !== 'waiting' && run.state !== 'open') return refuse('conflict', W.ended, { code: run.state === 'locked' ? 'BROWSER_RUN_AFTER_UNKNOWN' : 'BROWSER_RUN_ENDED' })
+        if (r.writes(run.id).length > 0) return refuse('conflict', W.promiseLate, { code: 'BROWSER_PROMISE_TOO_LATE' })
+        if (!r.insertPromise(run.id, content, iso(now))) return refuse('conflict', W.promiseMade, { code: 'BROWSER_PROMISE_MADE' })
+        return ok({ made: true })
+      })
+    },
+
+    /**
+     * `PersonAdds` — POST /browser-frame-runs/:runId/promise-add { frame, fields, targets, binds } with this PC's key: the
+     * person's 「書いてよい」 on the card for one held write, adding exactly what the card showed — fields allowed on that frame,
+     * targets (digests of path segments), values for bound fields that had none (an addition never changes a promised value).
+     * Only an open run with a promise, at most `BROWSER_PROMISE_LIMITS.additions` times. The AI's tools never reach it (main's
+     * card only).
+     */
+    promiseAdd(member: Member, runId: string, body: unknown, deviceKey?: string): Outcome<{ added: number }> {
+      const found = ownRun(member, runId)
+      if (!found) return missing()
+      const pc = deps.devices.check(member, deviceKey, null)
+      if (!pc.ok) return pc
+      if (pc.value.deviceId !== found.deviceId) return refuse('conflict', BROWSER_DEVICE_WORDS.refusals.BROWSER_DEVICE_ELSEWHERE, { code: 'BROWSER_DEVICE_ELSEWHERE' })
+      return transactions.run((): Outcome<{ added: number }> => {
+        const now = clock.nowMs()
+        const r = repo(member.companyId)
+        const run = settle(member.companyId, found, now)
+        const add = readBrowserRunPromiseAddition(body, r.frames(run.id).map(promiseFrameOf))
+        if (!add) return bad()
+        if (run.state !== 'open') return refuse('conflict', run.state === 'waiting' ? W.notApproved : W.ended, { code: run.state === 'waiting' ? 'BROWSER_RUN_NOT_APPROVED' : run.state === 'locked' ? 'BROWSER_RUN_AFTER_UNKNOWN' : 'BROWSER_RUN_ENDED' })
+        if (r.promise(run.id) === null) return refuse('conflict', W.promiseMissing, { code: 'BROWSER_PROMISE_MISSING' })
+        const adds = r.promiseAdds(run.id)
+        if (adds.length >= BROWSER_PROMISE_LIMITS.additions) return refuse('conflict', W.promiseFull, { code: 'BROWSER_PROMISE_FULL' })
+        r.insertPromiseAdd(run.id, adds.length + 1, canonicalJson(add), member.userId, iso(now))
+        return ok({ added: adds.length + 1 })
       })
     },
 

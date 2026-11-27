@@ -6,7 +6,8 @@ import { BROWSER_WRITE_CARD_WORDS as W, type BrowserWriteGetResult, type Browser
 import type { BrowserInspectionView } from '../../../../shared/browser-inspection'
 import { useInterval } from '../../../shared/hooks/useInterval'
 import { useEventListener } from '../../../shared/hooks/useEventListener'
-import { cancelBrowserWrite, confirmBrowserWrite, confirmBrowserWriteValue, getBrowserWriteCard, runBrowserWrite, type BrowserWriteAnswers, type BrowserWriteOutbound, type BrowserWriteReads } from '../api'
+import { BROWSER_WORK_CARD_WORDS as WW } from '../../../../shared/browser-frame-writes'
+import { allowBrowserWrite, cancelBrowserWrite, confirmBrowserWrite, confirmBrowserWriteValue, getBrowserWriteCard, runBrowserWrite, type BrowserStopDecisions, type BrowserWriteAnswers, type BrowserWriteOutbound, type BrowserWriteReads } from '../api'
 import { WRITE_CARD_UNREADABLE, useBrowserWrite } from '../hooks/useBrowserWrite'
 import { putWrite } from '../writeStore'
 import { writeCardRefreshMs } from '../model'
@@ -40,7 +41,7 @@ function List({ heading, items, tone }: { heading: string; items: readonly strin
   )
 }
 
-type Ports = { reads?: BrowserWriteReads; answers?: BrowserWriteAnswers; outbound?: BrowserWriteOutbound }
+type Ports = { reads?: BrowserWriteReads; answers?: BrowserWriteAnswers; outbound?: BrowserWriteOutbound; decisions?: BrowserStopDecisions }
 
 /**
  * A 「ブラウザ操作」 write card (agent-browser.md "Writing on the new path"): the values the AI proposed, each a person must
@@ -90,7 +91,22 @@ export const BrowserWriteCard = memo(function BrowserWriteCard({ companyId, card
       </div>
 
       {/* A stopped run: what it asks first (the operator's question with its two answers), then why it stopped, once. */}
-      {result && view.next && view.next.kind !== 'login' && <StopAsk next={view.next} companyId={companyId} host={view.siteLabel} say={say} screen={view.screen} />}
+      {/* A write outside the run's promise waits for the person (agent-browser.md "The run's promise"): nothing is sent until they answer. */}
+      {view.ask && (
+        <div data-promise-ask className="mt-2">
+          <Callout tone="warning">
+            <p className="text-body font-strong text-text">{WW.askHeadline}</p>
+            <p className="mt-1 text-small text-text-muted">{view.ask.line}</p>
+            <ul className="mt-1 list-disc pl-5 text-body text-text">{view.ask.items.map((s, i) => <li key={i} className="break-words">{s}</li>)}</ul>
+          </Callout>
+          <div className="mt-2 flex flex-wrap gap-2">
+            <Button variant="primary" size="sm" disabled={busy} onClick={() => press(() => (ports.answers ? allowBrowserWrite(companyId, cardId, true, ports.answers) : allowBrowserWrite(companyId, cardId, true)))}>{WW.askAllow}</Button>
+            <Button size="sm" disabled={busy} onClick={() => press(() => (ports.answers ? allowBrowserWrite(companyId, cardId, false, ports.answers) : allowBrowserWrite(companyId, cardId, false)))}>{WW.askDeny}</Button>
+          </div>
+        </div>
+      )}
+
+      {result && view.next && view.next.kind !== 'login' && <StopAsk next={view.next} companyId={companyId} cardId={cardId} host={view.siteLabel} say={say} screen={view.screen} decisions={ports.decisions} />}
       {result && <p role="status" className="mt-1 text-body font-strong text-text">{result.headline}</p>}
       {result && view.next?.kind === 'login' && <StopAsk next={view.next} companyId={companyId} host={view.siteLabel} screen={view.screen} />}
 
