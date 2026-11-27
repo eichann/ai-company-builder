@@ -17,7 +17,7 @@ import { BROWSER_COMPANY_ID_RE } from '../../../shared/browser-plans'
 import { BROWSER_BROWSE_LIMITS as BL, browseLogStep, type BrowserBrowseAction, type BrowserBrowseHistoryEntry, type BrowserBrowseStop, type BrowserBrowseSurface, type BrowserPageSnapshot } from '../../../shared/browser-browse'
 import {
   BROWSER_WORK_CARD_WORDS as CW, BROWSER_WORK_LIMITS as L, BROWSER_WORK_WORDS as W, afterReadTarget, beforeReadAddress, createdIdOf, parseWorkAnswer,
-  topFields, workBusyWords, workFrameOf, workMaterial, workPlanSentences, workPreviewStoppedCard, workResultCard, workRetrySentence, workWordsForAi,
+  topFields, workBusyWords, workEndAfterRefusals, workFrameOf, workMaterial, workPlanSentences, workPreviewStoppedCard, workResultCard, workRetrySentence, workWordsForAi,
   type AfterReadResult, type WorkAnswer, type WorkEnd, type WorkFrame, type WorkPlanValue, type WorkStopReason,
 } from '../../../shared/browser-frame-writes'
 import { browserNeverReadFits } from '../../../../shared/core/browser-frame-match'
@@ -453,10 +453,11 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
         }
       }
       const unreadAddresses = reads.filter(r => !r.after).map(r => r.pattern)
+      // A held write refused as outside the frames is why the operator then stopped: said first (incident 2026-11-27).
       const end: WorkEnd = writer.locked() && records.some(r => r.outcome === 'unknown') ? { kind: 'unknown' }
         : worked.kind === 'refused' ? { kind: 'stopped', why: worked.why }
-          : worked.kind === 'end' ? worked.end
-            : worked.answer.do === 'done' ? { kind: 'done' } : { kind: 'stopped', why: worked.answer.do === 'stop' ? worked.answer.why : 'blocked' }
+          : workEndAfterRefusals(worked.kind === 'end' ? worked.end
+            : worked.answer.do === 'done' ? { kind: 'done' } : { kind: 'stopped', why: worked.answer.do === 'stop' ? worked.answer.why : 'blocked' }, records.map(r => r.outcome))
       const answer = worked.kind === 'answer' ? worked.answer : null
       const checks = answer?.do === 'done' ? answer.checks : []
       e.card = workResultCard({

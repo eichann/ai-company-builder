@@ -22,7 +22,7 @@ import { readdirSync, readFileSync } from 'node:fs'
 import assert from 'node:assert/strict'
 import {
   BROWSER_WORK_CARD_WORDS as CW, BROWSER_WORK_WORDS as W, afterReadAddress, beforeReadAddress, createdIdOf, frameRequestFor, parseWorkAnswer,
-  pickFrame, readHeldWrite, sentFields, workFrameOf, workResultCard, workRetrySentence, workWordsForAi,
+  pickFrame, readHeldWrite, sentFields, workEndAfterRefusals, workFrameOf, workRefusedWriteLine, workResultCard, workRetrySentence, workWordsForAi,
   type HeldBody, type HeldPageWrite, type HeldPageWriteAnswer, type WorkFrame,
 } from '../shared/browser-frame-writes'
 import { readBrowserPageSnapshot, type BrowserBrowseSurface, type BrowserPageSnapshot } from '../shared/browser-browse'
@@ -412,7 +412,8 @@ test('a frame with an exact query: the held write fits only with exactly that ra
   assert.equal((await writer.hold(held(site, 'POST', '/labels?return', FORM, 'name=a'))).kind, 'fulfill')
   assert.deepEqual(site.requests, ['POST /labels?return name=a'])
   assert.deepEqual(calls.filter(c => c.startsWith('permit')), ['permit 1 {"method":"POST","path":"/labels?return","fields":{}}'])
-  assert.deepEqual(writer.records().map(r => [r.line, r.outcome]), [['POST （枠の外）', 'refused'], ['POST /labels?return', 'done']])
+  // The refused write's line names its address in the kept form: a name that carried a value as `name=…`, never the value.
+  assert.deepEqual(writer.records().map(r => [r.line, r.outcome]), [['POST /labels?return=…（枠の外）', 'refused'], ['POST /labels?return', 'done']])
 
   // A maker whose fixed query carries the id the site answers: not one the site made for this run — none reported.
   const maker = [frame({ frame: 1, path: '/plans', query: 'ref=p77', max: 1, left: 1 }), frame({ frame: 2, path: '/plans/{made:1}/items', max: 1, left: 1 })]
@@ -420,6 +421,42 @@ test('a frame with an exact query: the held write fits only with exactly that ra
   const w2 = writerWorld(maker)
   assert.equal((await w2.writer.hold(held(site2, 'POST', '/plans?ref=p77', FORM, 'title=x'))).kind, 'fulfill')
   assert.ok(w2.calls.includes('report 1 done'), JSON.stringify(w2.calls))
+})
+
+test('a frame whose query value is not fixed (`return={x}`): any one plain value fits, the permit carries it as sent, the card says （何かの値）', async () => {
+  const frames = [workFrameOf({ frame: 1, method: 'POST', path: '/labels', query: 'return={x}', fields: {}, max: 2, used: 0, left: 2 })]
+  assert.match(CW.frame(frames[0]), /\/labels\?return=（何かの値）（アドレスの \? のあとが「return=（何かの値）」の形のときだけ/)
+  for (const q of ['?return', '?return=', '?return=a%20b', '?return=1&x=2', '?x=2&return=1']) {
+    assert.deepEqual([q, pickFrame(frames, shape('POST', `https://${HOST}/labels${q}`, FORM, text('name=a')))], [q, { mismatch: 'query' }])
+  }
+  const site: Site = { requests: [], answer: ok201 }
+  const { writer, calls } = writerWorld(frames)
+  assert.equal((await writer.hold(held(site, 'POST', '/labels?return=folder-7', FORM, 'name=a'))).kind, 'fulfill')
+  assert.deepEqual(site.requests, ['POST /labels?return=folder-7 name=a'])
+  assert.deepEqual(calls.filter(c => c.startsWith('permit')), ['permit 1 {"method":"POST","path":"/labels?return=folder-7","fields":{}}'])
+  // The card's line is the frame's pattern in plain words, never the value sent.
+  assert.deepEqual(writer.records().map(r => [r.line, r.outcome]), [['POST /labels?return=（何かの値）', 'done']])
+})
+
+test('a refused write\'s line: the address in the kept form (digits {n}, other words {x}, `name=…` for a value), never a value; another host the bare words', () => {
+  assert.equal(workRefusedWriteLine('POST', `https://${HOST}/api/tags?return=88123`, HOST), 'POST /api/tags?return=…（枠の外）')
+  assert.equal(workRefusedWriteLine('POST', `https://${HOST}/api/tags/88123/Yamada?return&page=2#x`, HOST), 'POST /api/tags/{n}/{x}?return&page=…（枠の外）')
+  assert.equal(workRefusedWriteLine('PUT', `https://${HOST}/api/tags`, HOST), 'PUT /api/tags（枠の外）')
+  assert.equal(workRefusedWriteLine('POST', 'https://other.example.test/api/tags?return=1', HOST), 'POST （枠の外）')
+})
+
+test('why a run stopped: a write refused as outside the frames is said first, over the operator\'s later stop (incident 2026-11-27)', () => {
+  assert.equal(W.stoppedBy.refused, '止まりました：書き込みが承認した範囲に合わなかったため、送らずに止めました。')
+  for (const why of ['blocked', 'need-person', 'not-found'] as const) {
+    assert.deepEqual(workEndAfterRefusals({ kind: 'stopped', why }, ['refused']), { kind: 'stopped', why: 'refused' })
+    assert.deepEqual(workEndAfterRefusals({ kind: 'stopped', why }, ['done', 'site-refused']), { kind: 'stopped', why })
+  }
+  // The app's own stops, done and unknown are kept as they are.
+  for (const why of ['stop-button', 'timeout', 'network', 'need-login', 'ai-stopped'] as const) {
+    assert.deepEqual(workEndAfterRefusals({ kind: 'stopped', why }, ['refused']), { kind: 'stopped', why })
+  }
+  assert.deepEqual(workEndAfterRefusals({ kind: 'done' }, ['refused']), { kind: 'done' })
+  assert.deepEqual(workEndAfterRefusals({ kind: 'unknown' }, ['refused']), { kind: 'unknown' })
 })
 
 // ── The write task wired in main ────────────────────────────────────────────────────────────────────────────────────
@@ -724,6 +761,22 @@ test('a page write outside the plan during the work is refused; the after-read c
   // Bug 4: the soft words with the company's name for what it is compared to.
   assert.ok(card.checks.some(c => c.label === '「前の回」と違う項目があります。意図した変更か確かめてください。' && c.mark === 'ng'))
   assert.equal(card.sections.find(s => s.heading === CW.writes)?.rows.length, 2)
+})
+
+test('the incident of 2026-11-27: a write outside the frames, then the operator stuck → the AI and the card say the write did not fit, and the line names its address', async () => {
+  const { w, wiring, tool } = workWorld({
+    answers: ['{"do":"click","ref":2}'], // 自動保存: a write to /autosave, outside every frame; then the default stop `blocked`
+    frameStart: () => ({ kind: 'ok', value: started({ needsApproval: false }) }),
+  })
+  const said = await tool.execute({ site: HOST, task: 'x', skill: 'coupons', items: [] })
+  assert.deepEqual(w.site.requests, [], 'nothing reached the site')
+  assert.match(said, /書き込みが承認した範囲に合わなかったため、送らずに止めました/)
+  assert.doesNotMatch(said, /画面が先に進めませんでした/)
+  const view = wiring.card(COMPANY, FRAME_RUN)
+  assert.ok(view?.ok)
+  const card = readBrowserCard(view.view.card)!
+  assert.ok(card.headline.includes(W.stoppedBy.refused))
+  assert.deepEqual(card.sections.find(s => s.heading === CW.writes)?.rows.map(r => r.label), ['1. POST /autosave（枠の外）'])
 })
 
 test('the result card for an unknown write says what to check by hand; the AI hears 分からない', () => {

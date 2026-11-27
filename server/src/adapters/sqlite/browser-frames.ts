@@ -19,6 +19,18 @@ const toRun = (r: RunDb): FrameRunRow => ({
   expiresAt: r.expires_at, endedAt: r.ended_at,
 })
 
+/**
+ * A frame's query as the column keeps it (agent-browser.md "A query value not fixed"). The column's CHECK (added in place,
+ * so it cannot change) allows only `A–Z a–z 0–9 . _ ~ = & -`; a value placeholder (`={n}`, `={x}`, the whole value) is kept
+ * as `==n` / `==x` — a spelling the query grammar never allows (a value never begins with `=`), so the two forms never
+ * meet. An older server reading such a row asks the grammar, which refuses it: the frame then fits nothing (safe side).
+ */
+const PLACEHOLDER_STORED: ReadonlyArray<[string, string]> = [['={n}', '==n'], ['={x}', '==x']]
+export const storedFrameQuery = (query: string | null): string | null => (query === null ? null
+  : query.split('&').map(p => PLACEHOLDER_STORED.reduce((s, [from, to]) => (s.endsWith(from) && s.indexOf('=') === s.length - from.length ? s.slice(0, -from.length) + to : s), p)).join('&'))
+export const frameQueryFromStored = (stored: string | null): string | null => (stored === null ? null
+  : stored.split('&').map(p => PLACEHOLDER_STORED.reduce((s, [from, to]) => (s.endsWith(to) && s.indexOf('=') === s.length - to.length ? s.slice(0, -to.length) + from : s), p)).join('&'))
+
 type WriteDb = {
   seq: number; frame_idx: number; state: string; reason: string | null; permitted_at: string; permitted_mono_ms: number | null
   permitted_boot: string | null; settled_at: string | null
@@ -54,11 +66,11 @@ export function sqliteBrowserFrameRepository(conn: Database.Database, companyId:
         run.planHash, run.approvalTokenHash, run.state, run.approval, run.approvedAt, run.endReason, run.createdAt, run.expiresAt, run.endedAt,
       )
       const insert = conn.prepare('INSERT INTO browser_frames (company_id, run_id, idx, method, path, query, fields, max) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
-      for (const f of frames) insert.run(companyId, run.id, f.idx, f.method, f.path, f.query, f.fields, f.max)
+      for (const f of frames) insert.run(companyId, run.id, f.idx, f.method, f.path, storedFrameQuery(f.query), f.fields, f.max)
     },
     frames(runId) {
-      return conn.prepare('SELECT idx, method, path, query, fields, max, used FROM browser_frames WHERE company_id = ? AND run_id = ? ORDER BY idx')
-        .all(companyId, runId) as FrameRow[]
+      return (conn.prepare('SELECT idx, method, path, query, fields, max, used FROM browser_frames WHERE company_id = ? AND run_id = ? ORDER BY idx')
+        .all(companyId, runId) as FrameRow[]).map(f => ({ ...f, query: frameQueryFromStored(f.query) }))
     },
     writes(runId) {
       return (conn.prepare(`SELECT seq, frame_idx, state, reason, permitted_at, permitted_mono_ms, permitted_boot, settled_at

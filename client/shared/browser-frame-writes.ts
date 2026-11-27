@@ -16,7 +16,7 @@
  */
 import { outsideValue, type OutsideValue } from '../../shared/core/outside-text'
 import { browserFrameMismatch, browserFramePathFits, browserAdhocWritesProblem, type BrowserFrameMismatch, type BrowserFrameRequest, type BrowserMadeIds } from '../../shared/core/browser-frame-match'
-import { browserSkillDeclarationFrom, browserSkillWriteLine, type BrowserSkillWrite } from '../../shared/core/browser-skill'
+import { browserSkillDeclarationFrom, browserSkillQueryWords, browserSkillWriteLine, type BrowserSkillWrite } from '../../shared/core/browser-skill'
 import { isSensitiveFieldName } from '../../shared/core/browser-recording'
 import { browserRunAddressPattern, browserRunWriteMethod, type BrowserRunWriteOutcome, type BrowserRunWriteStep } from '../../shared/core/browser-run-log'
 import { BROWSER_CARD_CHECKED_BY_WORDS, type BrowserCard, type BrowserCardCheck, type BrowserCardRow, type BrowserCardSection, type BrowserCardValue } from '../../shared/core/browser-card'
@@ -629,7 +629,7 @@ export const BROWSER_WORK_WORDS = {
     'need-login': '止まりました：サイトのログインが必要です。開いた窓でログインしてから、もう一度頼んでください。',
     'need-person': '止まりました：人の判断が要る画面になったので、ブラウザ操作の係の AI が止まりました。',
     blocked: '止まりました：画面が先に進めませんでした。',
-    refused: '止まりました：承認された計画の外の書き込みは送りませんでした。',
+    refused: '止まりました：書き込みが承認した範囲に合わなかったため、送らずに止めました。',
     'not-approved': '止まりました：ユーザーが計画を任せなかった（やめた・時間切れ）ので、何も書いていません。',
     network: '止まりました：サーバーとの通信が途切れました。',
     'stop-button': '止まりました：止めるボタンが押されたか、相談が閉じられました。',
@@ -820,6 +820,39 @@ export function workResultCard(input: WorkCardInput): BrowserCard {
   }
 }
 
-/** A frame's write line for the card (the method, the path as the page sent it is never shown: only the frame's pattern). */
+/**
+ * A frame's write line for the card (the method, the path as the page sent it is never shown: only the frame's pattern; a
+ * query value placeholder in plain words, `browserSkillQueryWords`). A write outside every frame: `workRefusedWriteLine`.
+ */
 export const workWriteLine = (method: string, framePath: string | null, frameQuery: string | null = null): string =>
-  `${method} ${framePath === null ? '（枠の外）' : frameQuery === null ? framePath : `${framePath}?${frameQuery}`}`
+  `${method} ${framePath === null ? '（枠の外）' : frameQuery === null ? framePath : `${framePath}?${browserSkillQueryWords(frameQuery)}`}`
+
+/**
+ * The card's line of a held write refused as outside every frame (incident 2026-11-27: 「POST（枠の外）」 told nobody what
+ * the page had sent): the address in the recording's kept form (`browserRunAddressPattern`: digits `{n}`, other words
+ * `{x}`, query names only — never a value), a name that carried a value shown as `name=…`. Another host or an address
+ * that cannot be read: the bare 「（枠の外）」 as before.
+ */
+export function workRefusedWriteLine(method: string, url: string, host: string): string {
+  const pattern = browserRunAddressPattern(url, host)
+  if (pattern === null) return workWriteLine(method, null)
+  const at = pattern.indexOf('?')
+  if (at === -1) return `${method} ${pattern}（枠の外）`
+  const valued = new Set<string>()
+  try {
+    for (const [k, v] of new URL(url).searchParams) if (v !== '') valued.add(k)
+  } catch { /* the pattern was read from it: never here */ }
+  const names = pattern.slice(at + 1).split('&').map(k => (valued.has(k) ? `${k}=…` : k))
+  return `${method} ${pattern.slice(0, at)}?${names.join('&')}（枠の外）`
+}
+
+/**
+ * Why a write run stopped, as the AI and the card say it: a held write refused as outside the frames comes first when the
+ * operator then stopped on its own word (`blocked`, `need-person`, `not-found` — what the refusal led to), so the person
+ * hears 「承認した範囲に合わなかった」 rather than 「画面が先に進めませんでした」 (incident 2026-11-27). The app's own stops (a
+ * button, the time, the network…), `done` and `unknown` are kept as they are.
+ */
+export function workEndAfterRefusals(end: WorkEnd, outcomes: readonly BrowserRunWriteOutcome[]): WorkEnd {
+  if (end.kind !== 'stopped' || !outcomes.includes('refused')) return end
+  return end.why === 'blocked' || end.why === 'need-person' || end.why === 'not-found' ? { kind: 'stopped', why: 'refused' } : end
+}
