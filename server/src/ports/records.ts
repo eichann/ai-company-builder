@@ -330,6 +330,11 @@ export interface RecordRepository {
   aiTokenByHash(tokenHash: string): RecordAiTokenRow | null
   /** End one of the member's tokens; false when it is not theirs (or already ended). */
   revokeAiToken(userId: string, tokenId: string, at: string): boolean
+  /**
+   * End the member's live tokens of this consultation that are not bound to a run (a new turn's token
+   * replaces them: records.md "When the record tools are missing"); how many were ended.
+   */
+  revokeConversationAiTokens(userId: string, conversationId: string, at: string): number
   liveAiTokens(userId: string, now: string): number
   /** Forget tokens that expired before `before`. */
   pruneAiTokens(before: string): void

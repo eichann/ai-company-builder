@@ -705,6 +705,10 @@ export function sqliteRecordRepository(conn: Database.Database, companyId: strin
     revokeAiToken(userId, tokenId, at) {
       return conn.prepare('UPDATE record_ai_tokens SET revoked_at = ? WHERE company_id = ? AND user_id = ? AND id = ? AND revoked_at IS NULL').run(at, companyId, userId, tokenId).changes === 1
     },
+    revokeConversationAiTokens(userId, conversationId, at) {
+      return conn.prepare('UPDATE record_ai_tokens SET revoked_at = ? WHERE company_id = ? AND user_id = ? AND conversation_id = ? AND run_id IS NULL AND revoked_at IS NULL')
+        .run(at, companyId, userId, conversationId).changes
+    },
     liveAiTokens(userId, now) {
       return (conn.prepare('SELECT COUNT(*) AS n FROM record_ai_tokens WHERE company_id = ? AND user_id = ? AND revoked_at IS NULL AND expires_at > ?').get(companyId, userId, now) as { n: number }).n
     },

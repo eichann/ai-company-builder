@@ -1,7 +1,7 @@
 import { memo, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { UIMessage } from 'ai'
-import { Brain, CaretUp, CircleNotch, LinkSimple } from '@phosphor-icons/react'
+import { Brain, CaretUp, CircleNotch, Info, LinkSimple } from '@phosphor-icons/react'
 import type { ConsultationReference } from '../../../../shared/consultation-reference'
 import { ConsultationReferenceLink } from './ConsultationReference'
 import { MarkdownMessage } from './MarkdownMessage'
@@ -13,6 +13,7 @@ import { ReviewRequestCard } from './ReviewRequestCard'
 import { PLUGIN_OPERATION_PART_TYPE, readPluginOperationCard } from '../../../../shared/plugin-operations'
 import { MAIL_DRAFT_PART_TYPE, readMailDraftCard } from '../../../../shared/outbound-mail'
 import { FILE_LINKED_PART_TYPE, fileLinkedLine, readFileLinkedPart } from '../../../../shared/consultation-task'
+import { RECORD_TOOLS_MISSING_PART_TYPE, readRecordToolsMissingPart, recordToolsMissingLine } from '../../../../shared/record-tools-missing'
 import { MailDraftCard } from './MailDraftCard'
 import { DRIVE_OVERWRITE_PART_TYPE, readDriveOverwriteCard } from '../../../../shared/drive-overwrite'
 import { DriveOverwriteCard } from './DriveOverwriteCard'
@@ -176,6 +177,11 @@ export function AssistantMessageParts({ parts, isStreaming, markdown }: { parts:
         if (part.type === FILE_LINKED_PART_TYPE) {
           const linked = readFileLinkedPart((part as { data?: unknown }).data)
           return linked ? <p key={item.key} data-file-linked className="my-1 flex items-center gap-1 text-small text-gray-500 dark:text-zinc-400"><LinkSimple size={11} aria-hidden />{fileLinkedLine(linked)}</p> : null
+        }
+        // The turn's company-record tools could not be prepared: one line, live only (records.md "When the record tools are missing").
+        if (part.type === RECORD_TOOLS_MISSING_PART_TYPE) {
+          const missing = readRecordToolsMissingPart((part as { data?: unknown }).data)
+          return missing ? <p key={item.key} role="status" data-record-tools-missing className="my-1 flex items-start gap-1 text-small text-text-muted"><Info size={12} aria-hidden className="mt-0.5 shrink-0" />{recordToolsMissingLine(missing)}</p> : null
         }
         if (part.type === STEER_PART_TYPE) {
           const record = readSteerRecord((part as { data?: unknown }).data)

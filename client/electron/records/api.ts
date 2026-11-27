@@ -18,6 +18,7 @@
  */
 import { createHash } from 'crypto'
 import type { BoundRun } from './runs'
+import type { RecordToolsMissingReason } from '../../shared/record-tools-missing'
 
 export class RecordsApiError extends Error {
   /** The refusal's other fields (a plugin operation's `operation`, `current`, `fields`…); never a session or token. */
@@ -47,6 +48,8 @@ export interface RecordsApiDeps {
   onRunRefused?: (companyId: string, conversationId: string, run: BoundRun, status: number, code: string | undefined) => void
   /** Per request (default 20 s). */
   timeoutMs?: number
+  /** The pause before asking for a turn's token once more after a failure that may pass (default 500 ms). */
+  retryDelayMs?: number
   log?: Pick<Console, 'warn'>
 }
 
@@ -61,24 +64,76 @@ export interface RecordTurnAccess {
   /**
    * The server marked the token a turn the member started (records.md "The AI at the member's request"): the AI may
    * be offered the actions the type lets it run at the member's request. Absent = not marked (an older server, a run).
+   * Reads false once the turn's token was issued again (the new one is never marked).
    */
-  memberTurn?: boolean
+  readonly memberTurn?: boolean
   /** `timeoutMs`: this request's own limit (default the API's; a Drive upload takes longer). */
   call(method: 'GET' | 'POST' | 'PUT' | 'DELETE', path: string, body?: unknown, signal?: AbortSignal, opts?: { timeoutMs?: number }): Promise<unknown>
   /** Revoke the token (the turn ended). */
   close(): Promise<void>
 }
 
+export interface OpenTurnOptions {
+  conversationId: string; agent: string; scope: 'read' | 'act'; requireRun?: boolean; memberTurn?: boolean
+  /**
+   * The turn has the member present (a consultation, never an unattended step or run): an expired token may be issued
+   * again once. Absent = never (records.md "When the record tools are missing").
+   */
+  renewExpired?: boolean
+}
+
+/** How close to its end a token counts as expired for a renewal (the app's clock may be off from the server's). */
+export const RENEW_SKEW_MS = 5 * 60_000
+
+/** A turn's token, or why there is none (records.md "When the record tools are missing"). */
+export type RecordTurnOpening =
+  | { access: RecordTurnAccess }
+  /** `no-run`: a job's run asked with `requireRun` and its run is gone (no token on purpose). */
+  | { missing: RecordToolsMissingReason | 'no-run' }
+
 export interface RecordsApi {
   /**
-   * A token for one turn, or null when the company map is off for the company
-   * (or the member is signed out / offline: the turn simply has no record tools).
-   */
-  /**
+   * A token for one turn, or why not (the company map off for the company, the member signed out,
+   * offline, …). A failure that may pass (no answer, the server's own error) is asked once more.
    * `requireRun`: only with a run this app holds for the consultation (a scheduled job's): none → no token at all.
    * `memberTurn`: the turn was started by the member's own message — asked for an `act` token only, never with a run.
    */
-  openTurn(companyId: string, opts: { conversationId: string; agent: string; scope: 'read' | 'act'; requireRun?: boolean; memberTurn?: boolean }): Promise<RecordTurnAccess | null>
+  openTurnFor(companyId: string, opts: OpenTurnOptions): Promise<RecordTurnOpening>
+  /** `openTurnFor` without the reason: null when there is no token. */
+  openTurn(companyId: string, opts: OpenTurnOptions): Promise<RecordTurnAccess | null>
+}
+
+/** The token was refused as invalid (expired, revoked): records-ai answers 401 with this code. */
+const TOKEN_INVALID = 'RECORD_TOKEN_INVALID'
+export const RECORD_TOKEN_EXPIRED_MESSAGE = '記録の道具の期限が切れました。もう一度送ってください。'
+
+/**
+ * Ask once more when the first try failed in a way that may pass, and failed fast: a try that already
+ * used most of its time limit is not doubled (the member waits for the turn to start).
+ */
+export async function onceMore<T>(attempt: () => Promise<T>, mayPass: (outcome: T | Error) => boolean, opts: { quickMs: number; delayMs?: number }): Promise<T> {
+  const started = Date.now()
+  let first: T | Error
+  try { first = await attempt() } catch (error) { first = error instanceof Error ? error : new Error(String(error)) }
+  if (!mayPass(first) || Date.now() - started > opts.quickMs) {
+    if (first instanceof Error) throw first
+    return first
+  }
+  if (opts.delayMs) await new Promise(resolve => setTimeout(resolve, opts.delayMs))
+  return attempt()
+}
+
+/** Why a turn's tools could not be made from the error a read threw (`createRecordTools`). */
+export function missingReasonOf(error: unknown): RecordToolsMissingReason {
+  if (!(error instanceof RecordsApiError)) return 'unknown'
+  if (error.code === 'OFFLINE') return 'offline'
+  if (error.code === 'SERVER_ERROR') return 'server-error'
+  // The turn's own new token refused at once (ended by a newer turn of the consultation, or past its life).
+  if (error.code === TOKEN_INVALID) return 'try-again'
+  if (error.code === 'RECORDS_DISABLED') return 'disabled'
+  // A server without the AI's types route.
+  if (error.code === 'HTTP_404') return 'old-server'
+  return 'unknown'
 }
 
 /** The request as one text, keys sorted: what its idempotency key is made from. */
@@ -126,49 +181,106 @@ export function createRecordsApi(deps: RecordsApiDeps): RecordsApi {
     return { status: res.status, body }
   }
 
-  return {
-    async openTurn(companyId, opts) {
-      const root = base()
-      const cookies = deps.cookies()
-      if (!root || cookies.length === 0) return null
-      const run = deps.runOf?.(companyId, opts.conversationId) ?? null
-      // A job's run without its run (taken away just now): never an ordinary token.
-      if (opts.requireRun && !run) return null
-      // A run has nobody present: never asked as a member's turn (the server drops it there too).
-      const ask = { conversationId: opts.conversationId, agent: opts.agent, scope: opts.scope, ...(opts.memberTurn === true && !run && opts.scope === 'act' ? { memberTurn: true } : {}) }
-      let issued: { status: number; body: { data?: unknown } }
+  type Issued = { ok: true; token: string; tokenId: string; scope: 'read' | 'act'; memberTurn: boolean; expiresAtMs: number } | { ok: false; missing: RecordToolsMissingReason }
+
+  /** POST …/me/record-tokens with the member's session. */
+  async function issue(companyId: string, ask: Record<string, unknown>): Promise<Issued> {
+    const root = base()
+    const cookies = deps.cookies()
+    if (!root || cookies.length === 0) return { ok: false, missing: 'signed-out' }
+    let issued: { status: number; body: { data?: unknown; code?: string } }
+    try {
+      issued = await request(`${root}/api/companies/${encodeURIComponent(companyId)}/me/record-tokens`, {
+        method: 'POST',
+        headers: { Cookie: cookies.join('; '), 'Content-Type': 'application/json' },
+        body: JSON.stringify(ask),
+      })
+    } catch {
+      return { ok: false, missing: 'offline' }
+    }
+    const data = issued.body.data as { token?: string; tokenId?: string; scope?: 'read' | 'act'; memberTurn?: unknown; expiresAt?: unknown } | undefined
+    if (issued.status === 201 && data?.token && data.tokenId) {
+      // Unknown expiry (NaN) = never renewed.
+      const expiresAtMs = typeof data.expiresAt === 'string' ? Date.parse(data.expiresAt) : NaN
+      return { ok: true, token: data.token, tokenId: data.tokenId, scope: data.scope === 'act' ? 'act' : 'read', memberTurn: data.memberTurn === true, expiresAtMs }
+    }
+    if (issued.status === 401) return { ok: false, missing: 'signed-out' }
+    if (issued.status === 429) return { ok: false, missing: 'too-many' }
+    // The company map off for the company; a 404 without the code is a server without the route.
+    if (issued.status === 404) return { ok: false, missing: issued.body.code === 'RECORDS_DISABLED' ? 'disabled' : 'old-server' }
+    return { ok: false, missing: issued.status >= 500 ? 'server-error' : 'unknown' }
+  }
+
+  async function openTurnFor(companyId: string, opts: OpenTurnOptions): Promise<RecordTurnOpening> {
+    const root = base()
+    const run = deps.runOf?.(companyId, opts.conversationId) ?? null
+    // A job's run without its run (taken away just now): never an ordinary token.
+    if (opts.requireRun && !run) return { missing: 'no-run' }
+    // A run has nobody present: never asked as a member's turn (the server drops it there too).
+    const ask = { conversationId: opts.conversationId, agent: opts.agent, scope: opts.scope, ...(opts.memberTurn === true && !run && opts.scope === 'act' ? { memberTurn: true } : {}) }
+    const first = await onceMore(() => issue(companyId, run ? { ...ask, run } : ask),
+      outcome => !(outcome instanceof Error) && !outcome.ok && (outcome.missing === 'offline' || outcome.missing === 'server-error'),
+      { quickMs: timeoutMs / 2, delayMs: deps.retryDelayMs ?? 500 })
+    if (!first.ok) return { missing: first.missing }
+    const conversationId = opts.conversationId
+    let token = first.token
+    let tokenId = first.tokenId
+    let expiresAtMs = first.expiresAtMs
+    let renewed = false
+    const revoke = async (id: string) => {
       try {
-        issued = await request(`${root}/api/companies/${encodeURIComponent(companyId)}/me/record-tokens`, {
-          method: 'POST',
-          headers: { Cookie: cookies.join('; '), 'Content-Type': 'application/json' },
-          body: JSON.stringify(run ? { ...ask, run } : ask),
+        await request(`${root}/api/companies/${encodeURIComponent(companyId)}/me/record-tokens/${encodeURIComponent(id)}`, {
+          method: 'DELETE', headers: { Cookie: deps.cookies().join('; ') },
         })
-      } catch {
-        return null
-      }
-      const data = issued.body.data as { token?: string; tokenId?: string; scope?: 'read' | 'act'; memberTurn?: unknown } | undefined
-      if (issued.status !== 201 || !data?.token || !data.tokenId) return null
-      const token = data.token
-      const conversationId = opts.conversationId
-      const tokenId = data.tokenId
-      let closed = false
-      const send = (method: 'GET' | 'POST' | 'PUT' | 'DELETE', path: string, body: unknown, signal?: AbortSignal, ownTimeoutMs?: number) => request(`${root}/api/records-ai${path}`, {
-        method,
-        headers: {
-          Authorization: `Bearer ${token}`,
-          ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}),
-          ...(run && method !== 'GET' ? { 'Idempotency-Key': operationKeyOf(method, path, body) } : {}),
-        },
-        ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
-      }, signal, ownTimeoutMs)
-      return {
-        scope: data.scope === 'act' ? 'act' : 'read',
+      } catch { /* it expires on its own */ }
+    }
+    let closed = false
+    // An expired token is issued again once per turn (a turn longer than the token's life), only where the member is
+    // present (`renewExpired`) and never for a run's token (it ends with its run). Only a token past its expiry (within
+    // RENEW_SKEW_MS): one refused before it — ended because a newer turn of the consultation started — is never
+    // renewed, which would end that newer turn's token in turn. The new one never carries the member's-turn mark, so
+    // the AI's actions at the member's request stop for the rest of the turn (`memberTurn` reads false). Calls running
+    // side by side (the AI's parallel tool calls) share the one renewal: each repeats itself with the new token.
+    const renewable = opts.renewExpired === true && run === null
+    let renewal: Promise<boolean> | null = null
+    const renewedFrom = (used: string): Promise<boolean> => {
+      if (!renewable || closed) return Promise.resolve(false)
+      if (token !== used) return Promise.resolve(true)
+      if (renewal) return renewal.then(() => token !== used)
+      if (!(Date.now() >= expiresAtMs - RENEW_SKEW_MS)) return Promise.resolve(false)
+      renewal = issue(companyId, { conversationId: ask.conversationId, agent: ask.agent, scope: ask.scope }).then(next => {
+        if (!next.ok) return false
+        if (closed) { void revoke(next.tokenId); return false }
+        token = next.token
+        tokenId = next.tokenId
+        expiresAtMs = next.expiresAtMs
+        renewed = true
+        return true
+      })
+      return renewal
+    }
+    const send = (method: 'GET' | 'POST' | 'PUT' | 'DELETE', path: string, body: unknown, signal?: AbortSignal, ownTimeoutMs?: number, used = token) => request(`${root}/api/records-ai${path}`, {
+      method,
+      headers: {
+        Authorization: `Bearer ${used}`,
+        ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}),
+        ...(run && method !== 'GET' ? { 'Idempotency-Key': operationKeyOf(method, path, body) } : {}),
+      },
+      ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+    }, signal, ownTimeoutMs)
+    return {
+      access: {
+        scope: first.scope,
         boundToRun: run !== null,
-        memberTurn: data.memberTurn === true && run === null,
+        get memberTurn() { return first.memberTurn && run === null && !renewed },
         async call(method, path, body, signal, opts) {
           if (closed) throw new RecordsApiError('TURN_ENDED', 'この会話のターンは終わりました。')
           if (method !== 'GET' && deps.beforeWrite) await deps.beforeWrite(conversationId).catch(() => undefined)
-          let r = await send(method, path, body, signal, opts?.timeoutMs)
+          const used = token
+          let r = await send(method, path, body, signal, opts?.timeoutMs, used)
+          if (r.status === 401 && r.body.code === TOKEN_INVALID && await renewedFrom(used)) {
+            r = await send(method, path, body, signal, opts?.timeoutMs)
+          }
           // Done before with the same request: read back what it made instead of doing it again.
           const replay = r.status === 200 && (r.body.data as { replayed?: unknown } | undefined)?.replayed === true
             ? replayReadPath(path, (r.body.data as { ref?: { kind?: unknown; id?: unknown } | null }).ref ?? null) : null
@@ -178,6 +290,8 @@ export function createRecordsApi(deps: RecordsApiDeps): RecordsApi {
             try { deps.onRunRefused?.(companyId, conversationId, run, r.status, code) } catch { /* the tool's answer goes on */ }
           }
           if (r.status >= 500) throw new RecordsApiError('SERVER_ERROR', `サーバーでエラーが起きました（HTTP ${r.status}）。`)
+          // The token's own refusal in the member's words (the code stays: a job's run stops on it).
+          if (r.status === 401 && r.body.code === TOKEN_INVALID) throw new RecordsApiError(TOKEN_INVALID, RECORD_TOKEN_EXPIRED_MESSAGE)
           if (r.status < 200 || r.status >= 300) {
             const { error, code, ...details } = r.body
             throw new RecordsApiError(code || `HTTP_${r.status}`, error || `HTTP ${r.status}`, details)
@@ -187,13 +301,17 @@ export function createRecordsApi(deps: RecordsApiDeps): RecordsApi {
         async close() {
           if (closed) return
           closed = true
-          try {
-            await request(`${root}/api/companies/${encodeURIComponent(companyId)}/me/record-tokens/${encodeURIComponent(tokenId)}`, {
-              method: 'DELETE', headers: { Cookie: deps.cookies().join('; ') },
-            })
-          } catch { /* it expires on its own */ }
+          await revoke(tokenId)
         },
-      }
+      },
+    }
+  }
+
+  return {
+    openTurnFor,
+    async openTurn(companyId, opts) {
+      const opened = await openTurnFor(companyId, opts)
+      return 'access' in opened ? opened.access : null
     },
   }
 }

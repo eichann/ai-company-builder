@@ -45,7 +45,8 @@ import { startLoopbackMcp } from '../agents/loopback-mcp'
 import { shortText, type ToolDisplay } from '../../shared/tool-display'
 import { actionToolDisplay, pluginOperationDisplay, recordToolDisplay } from '../../shared/acb-tool-displays'
 import { AI_ASKED_INSTRUCTIONS, aiAskedDoneWords, type AiAskedCard, type AiAskedItem } from '../../shared/ai-asked'
-import { RecordsApiError, type RecordTurnAccess } from './api'
+import { ASKED_AFTER_RENEWAL } from '../../shared/record-tools-missing'
+import { onceMore, RecordsApiError, type RecordTurnAccess } from './api'
 import type { MailAttachmentRead } from './mail-attachments'
 import { RECORD_ID_RE } from '../../../shared/core/records'
 import { JOB_PROPOSAL_INSTRUCTIONS, JOB_PROPOSAL_PLACES_TOOL, jobCandidateSummaryForAi, jobProposalRefusalForAi, jobProposalToolSpecs } from './job-proposal-tools'
@@ -173,7 +174,7 @@ const LOOKUPS: RecordToolSpec[] = [
   {
     name: 'records_get', readOnly: true, schema: z.object({ id }).strict(),
     display: recordToolDisplay('records_get'),
-    description: '記録を1件、つながりと一緒に読む。version は操作のときの expectedVersion に使う。fromOldConnection: true の記録は前のつなぎ先から取り込んだもの（いまは使われていない）：操作も最新化もできない。links のうち path を持つものはつながったファイル（会社のフォルダの中のパス。名前だけで中身は入っていない）：中身が要るときは、ふだんの道具でそのファイルを読む（メンバーが見られるものだけ）。broken: true は「つながりが切れています」（ファイルが消えたか、たどれない場所へ移った）。local を持つものはメンバー本人の作業フォルダのファイル（そのフォルダの中のパス）：ふだんの道具で読む。drive を持つものは Google Drive のファイル：中身は drive_read（fileId）でだけ読む（メンバーが選んだファイルと、メンバーの drive_put で置いたファイルだけ読める。読めないときはメンバーに Drive で選び直してもらう）。people は答えに出てくる人（担当・依頼した人など）の id → 名前：メンバーには名前で、道具には id で。\nRead one record with its links; pass its `version` as `expectedVersion` when acting on it. A record with fromOldConnection: true came through an earlier connection and is no longer used: nothing can be run on it. Links with a `path` are linked files (company paths — names only, never contents): when you need what is in one, read it with your normal file tools (only what the member can read). A file link with broken: true is broken (the file was deleted, or moved where the link cannot follow). A link with `local` is a file in the working folder of the member themself (`path` inside it): read it with your normal file tools. A link with `drive` is a Google Drive file: read it only with drive_read(fileId) — it works only for files the member picked or the member\'s own drive_put made; otherwise ask the member to pick it again. `people` maps the person ids in the answer (assignee, requester…) to names: use the name when talking to the member, the id in tool calls.',
+    description: '記録を1件、つながりと一緒に読む。version は操作のときの expectedVersion に使う。fromOldConnection: true の記録は前のつなぎ先から取り込んだもの（いまは使われていない）：操作も最新化もできない。links のうち path を持つものはつながったファイル（会社のフォルダの中のパス。名前だけで中身は入っていない）：中身が要るときは、ふだんの道具でそのファイルを読む（メンバーが見られるものだけ）。broken: true は、会社のフォルダ（サーバー）にいまそのパスが無いこと：消えた、まだ同期されていない、.personal/ や非公開フォルダへ動いた、のどれかです（会社のフォルダの中で動かしたものは、同期のあと自動で新しい場所に付け替わります）。.personal/ の中へのつながりはサーバーから見えないので、いつも broken: true（または broken なし）になります。そのときは、メンバーの Mac にそのファイルがあるかを、ふだんのファイルの道具で確かめてください。local を持つものはメンバー本人の作業フォルダのファイル（そのフォルダの中のパス）：ふだんの道具で読む。drive を持つものは Google Drive のファイル：中身は drive_read（fileId）でだけ読む（メンバーが選んだファイルと、メンバーの drive_put で置いたファイルだけ読める。読めないときはメンバーに Drive で選び直してもらう）。people は答えに出てくる人（担当・依頼した人など）の id → 名前：メンバーには名前で、道具には id で。\nRead one record with its links; pass its `version` as `expectedVersion` when acting on it. A record with fromOldConnection: true came through an earlier connection and is no longer used: nothing can be run on it. Links with a `path` are linked files (company paths — names only, never contents): when you need what is in one, read it with your normal file tools (only what the member can read). A file link with broken: true means the path is not in the company folder on the server now: deleted, not synced yet, or moved into .personal/ or a private folder (a move inside the company folder follows on its own after the member syncs). A link into .personal/ is never visible to the server, so it always reads broken: true (or no broken at all) — check with your normal file tools whether the file is on the member\'s Mac. A link with `local` is a file in the working folder of the member themself (`path` inside it): read it with your normal file tools. A link with `drive` is a Google Drive file: read it only with drive_read(fileId) — it works only for files the member picked or the member\'s own drive_put made; otherwise ask the member to pick it again. `people` maps the person ids in the answer (assignee, requester…) to names: use the name when talking to the member, the id in tool calls.',
     request: input => ({ method: 'GET', path: `/item/${enc(String(input.id))}` }),
   },
   {
@@ -453,8 +454,8 @@ function fileLinkTools(typeNames: string[]): RecordToolSpec[] {
     {
       name: 'records_link_file', readOnly: false, schema,
       display: recordToolDisplay('records_link_file'),
-      description: `記録（${typeNames.join(', ')}）にファイルをつなぐ（作ったあとからでも）。メンバーが見られるファイルだけ。非公開フォルダの中のファイルは、外の記録にはつなげない。台帳に残り、人が取り消せる。\n` +
-        `Link a file to a record (${typeNames.join(', ')}) after it was made. Only files the member can read; never a file inside a private folder from a record outside it. Kept in the ledger; a person can undo it.`,
+      description: `記録（${typeNames.join(', ')}）にファイルをつなぐ（作ったあとからでも）。メンバーが見られるファイルだけ。.personal/ の中のファイルもつなげる（そのつながりはつないだメンバー本人にだけ見える）。非公開フォルダの中のファイルはつなげない。会社のフォルダの中で動かしたファイルのつながりは自動で付いていくので、つなぎ直さない。台帳に残り、人が取り消せる。\n` +
+        `Link a file to a record (${typeNames.join(', ')}) after it was made. Only files the member can read. A file inside .personal/ can be linked too (that link is seen only by the member who made it); a file inside a private folder cannot. A link to a file moved inside the company folder follows it on its own: do not link it again. Kept in the ledger; a person can undo it.`,
       request: input => ({ method: 'POST', path: `/item/${enc(String(input.id))}/file-links`, body: body(input) }),
     },
     {
@@ -848,12 +849,40 @@ const APPROVAL_LOOKUPS: RecordToolSpec[] = [
   },
 ]
 
+/** Moving a linked file (records.md "Links to files", "Links into .personal/"; gap report 2026-11-27 Bug B). */
+const FILE_MOVES_INSTRUCTIONS = `つながったファイルを動かすとき：会社のフォルダの中で部署から部署へ動かす・名前を変える（フォルダごとでも）なら、メンバーが同期したあと、つながりは新しい場所に自動で付け替わります（切れません。同期の前は前の場所のまま見えます。動かすときに中身を大きく書き換えると付け替わらないことがあるので、動かすのと直すのは分けてください）。次のときは付いていきません：.personal/ の中へ動かす（同期されないので、サーバーには消えたように見えます）、.personal/ の外へ出す、非公開フォルダの中へ動かす・中から出す。.personal/ への出し入れのあとは、records_unlink_file で前の場所を外し、records_link_file で新しい場所につなぎ直してください。.personal/ の中のファイルもつなげます（そのつながりは、つないだメンバー本人にだけ見えます）。非公開フォルダの中のファイルは、どの記録にもつなげません。動かす前に、つながりがどうなるかをメンバーにひとこと伝えてください。`
+
+/**
+ * What the member does in the app themself, with where (gap report 2026-11-27 Bug A #2): asked for one of
+ * these, the AI says where to press instead of 「つながっていません」. A row leaves the list when the AI
+ * gets a tool for it.
+ */
+export const SCREEN_ONLY_OPERATIONS: ReadonlyArray<{ what: string; where: string }> = [
+  { what: '見られる人を広げる（部署に出す・〇〇の人に見せる）', where: 'やることのカードの［部署に出す］／［〇〇の人に見せる］' },
+  { what: '操作を取り消す', where: '操作のすぐあとにカードに出る［取り消す］' },
+  { what: 'やることを引き受ける・受けられないと返す', where: 'やることのカードの［引き受ける］、「…」の［受けられない］' },
+  { what: 'やることをアーカイブする（中止）・アーカイブから戻す・やり直す', where: 'やることのカードの「…」の［アーカイブ］、アーカイブ済みのものは［戻す］' },
+  { what: '確かめる人・終わったら（知らせるだけ／確かめてもらう）を決める', where: 'やることのカードの「…」の［終わったら］（頼んだ人と管理者）' },
+  { what: '差し戻す', where: 'やることのカードの「…」の［差し戻す］（確かめる人だけ）' },
+  { what: '案件・プロジェクトから外す、記録どうしのつながりを外す', where: 'やることのカードの案件の欄の［外す］、記録のカードの「つながっているもの」の「…」の［つながりを外す］' },
+  { what: '案件・プロジェクトのなんのため・期限・責任者を変える、終える・やめる', where: '案件・プロジェクトのカードの［終える］と「…」（責任者と管理者・部署の管理役）' },
+  { what: '来た連絡を「済んだ」「取り込まない」にする', where: '来た連絡のカードの［済んだ］と「…」の［取り込まない］' },
+  { what: '決めたことの案を確かめる（そうです・違う）', where: '「議事録を確認する」のカードの［そうです］［違う］（決める立場の人だけ）' },
+  { what: '承認のお願いに答える', where: '承認のカード（承認する人が押します）' },
+  { what: '部署・メンバー・見られる人・非公開フォルダなど会社の設定', where: '管理画面（管理者が行います）' },
+]
+
+function screenOnlyInstructions(): string {
+  return `次の操作には、AI の道具がまだありません。頼まれたら「つながっていません」とは言わず、メンバーがアプリのどこで行うかを伝えてください：${SCREEN_ONLY_OPERATIONS.map(o => `${o.what}は${o.where}`).join('。')}。ここに無い操作でも、道具の一覧に無いものは同じように、アプリの画面で行う場所を伝えてください（分からなければ、そう言ってください）。`
+}
+
 const RECORDS_INSTRUCTIONS_BASE = `\n\n【会社の記録】${'`'}mcp__${RECORDS_SERVER}__*${'`'} は会社の記録（タスクなど）の道具です。記録（タスク・決めたことなど）はサーバーだけが持ちます。記録のファイルは作らず、作る・状態を変えるときは必ずこの道具を使ってください。見積・計画などの中身はふつうのファイルに書き、記録から links でつなぎます（作ったあとは records_link_file）。タスクの相談では、まず records_get でつながったファイル（links の path）を確かめ、必要なものを読んでください（メンバーが記録を入力欄に落として、その要約が渡されたときは、まずその要約で答え、足りないときだけ読みます）。期限は日付（YYYY-MM-DD）か、時刻つき（YYYY-MM-DDTHH:MM）です。担当などの人の欄は id で指定します。` +
   `記録の答えの people は、答えに出てくる人の id と名前の対応です（会社のメンバーだけ）。メンバーへの返事では人を名前で呼び（「佐藤さんの番です」）、id は見せないでください。people に無い id は、名前の分からない人です（会社のメンバーではないなど）。名前を推測せず、そう伝えてください。道具に人を渡すときは id を使います。` +
   `メンバーへの返事では、記録を件名と見分けのつく情報（担当・金額・取り込んだ日・更新した日など）で呼び、内部の id（deal-… などの記録の id、HubSpot などの外の番号、操作の id）は、聞かれない限り見せないでください。道具を呼ぶときは、これまでどおり id を使います。` +
   `fromOldConnection: true の記録は「${OLD_CONNECTION_LABEL}」です。使わず、話に出すときはそう添えてください。` +
   `メール（mail_* の道具）は下書きまでです。宛先は mail_recipients の ref で選び、アドレスを自分で書かないでください。送るのはメンバー本人がカードの「確かめて送る」から行います。AI からは送れないので、「送りました」とは言わないでください。前に出した下書きをもう一度見てもらいたいときは mail_draft_show でカードを出し直し、出し直すためだけに中身を直さないでください。提案書などの PDF を付けるときは mail_draft_create / mail_draft_update の attachments に会社フォルダの中のパスを渡します（PDF だけ。付けても送られず、メンバーがカードでファイルを開いて確かめてから送ります）。` +
   `タスクを AI が下ごしらえしてから渡すときは、records_create で state: "preparing" にして作り、確かめたこと・作った下書きを済ませてから task__finish_prep（prep_summary に何を確かめて何を作ったか、links.prepared に作ったメールの下書き・承認のお願いの id）で担当に渡します。期限が近い・うまくいかなかった・情報が足りないときは、抱え込まずに task__hand_over（note に理由、links.prepared にできている分）で早めに渡してください。タスクの完了と「引き受ける」「受けられない」は本人だけができます（AI はできません）。ほかの部署の人に頼んだタスクは「引き受け待ち」になり、担当が引き受けると担当の番になります。` +
+  FILE_MOVES_INSTRUCTIONS + screenOnlyInstructions() +
   ''
 
 /** The two paragraphs about 決めたこと: said only while that feature is on (records.md "Features on and off"). */
@@ -963,17 +992,24 @@ export interface RecordToolsOptions {
   now?: () => Date
 }
 
-export async function createRecordTools(access: RecordTurnAccess, signal?: AbortSignal, options: RecordToolsOptions = {}): Promise<RecordTools | null> {
+/**
+ * The turn's record tools. The type definitions are read once more after a failure that may pass (no
+ * answer, the server's own error); still unread, the token is ended and the read's error is thrown
+ * (`RecordsApiError`: its code says why — records.md "When the record tools are missing").
+ */
+export async function createRecordTools(access: RecordTurnAccess, signal?: AbortSignal, options: RecordToolsOptions = {}): Promise<RecordTools> {
   let types: TypeDefinition[]
   // 「使う機能」 rides on the types' answer; an older server sends none = everything on.
   let features: CompanyFeatures
   try {
-    const answer = await access.call('GET', '/types', undefined, signal) as { types?: Array<{ definition: TypeDefinition }>; features?: unknown }
+    const answer = await onceMore(() => access.call('GET', '/types', undefined, signal),
+      outcome => outcome instanceof RecordsApiError && (outcome.code === 'OFFLINE' || outcome.code === 'SERVER_ERROR') && !signal?.aborted,
+      { quickMs: 10_000 }) as { types?: Array<{ definition: TypeDefinition }>; features?: unknown }
     types = (answer.types ?? []).map(t => t.definition)
     features = featuresFrom(answer.features)
-  } catch {
+  } catch (error) {
     await access.close()
-    return null
+    throw error
   }
   // The running plugins' operations; none when the server has none (or is older).
   let plugins: PluginAiTools = { plugins: [] }
@@ -1058,6 +1094,8 @@ export async function createRecordTools(access: RecordTurnAccess, signal?: Abort
       const req = spec.request(parsed.data)
       if (spec.card) return runUpdate(spec.card, parsed.data, req)
       if (spec.approvalCard) return showApproval(req)
+      // The turn's token was issued again (past its life): the member's-turn mark is gone, say so in fixed words.
+      if (spec.askedCard && access.memberTurn !== true) return JSON.stringify(ASKED_AFTER_RENEWAL)
       if (spec.jobProposalCard) return makeJobCandidate(req)
       try {
         const minutesId = spec.name === MINUTES_READ_NAME ? String(parsed.data.id) : null

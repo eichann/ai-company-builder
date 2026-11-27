@@ -163,6 +163,29 @@ describe('what a record token can reach', () => {
     expect(await ai(token, 'POST', `/item/${theirId}/actions/start`, { expectedVersion: 1 })).toMatchObject({ status: 404 })
   })
 
+  it('a consultation\'s new turn ends its earlier turns\' tokens (an end the app could not report never piles up); other consultations, runs and members keep theirs', async () => {
+    const issue = async (user: string, conversationId: string, extra: Record<string, unknown> = {}) => {
+      currentUser.id = user
+      const res = await app.request(`/api/companies/${CO}/me/record-tokens`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ conversationId, agent: 'claude-code', scope: 'act', ...extra }),
+      })
+      expect(res.status).toBe(201)
+      return (await res.json() as { data: { token: string; tokenId: string } }).data
+    }
+    const first = await issue('u-owner', 'conv-turns')
+    const elsewhere = await issue('u-owner', 'conv-other')
+    const bobs = await issue('u-bob', 'conv-turns')
+    // A run-bound token of the same consultation (the run's own lifecycle) is left alone.
+    db.prepare("INSERT INTO record_ai_tokens (company_id, id, user_id, token_hash, scope, agent, conversation_id, created_at, expires_at, revoked_at, run_id, run_generation) VALUES (?, 'rt-run-tok', 'u-owner', 'h-run', 'act', 'claude-code', 'conv-turns', ?, ?, NULL, 'run-x', 1)")
+      .run(CO, ts(), new Date(Date.now() + 3_600_000).toISOString())
+    const second = await issue('u-owner', 'conv-turns')
+    expect((await ai(first.token, 'GET', '/my-turn')).status).toBe(401)
+    expect((await ai(second.token, 'GET', '/my-turn')).status).toBe(200)
+    expect((await ai(elsewhere.token, 'GET', '/my-turn')).status).toBe(200)
+    expect((await ai(bobs.token, 'GET', '/my-turn')).status).toBe(200)
+    expect((db.prepare("SELECT revoked_at FROM record_ai_tokens WHERE id = 'rt-run-tok'").get() as { revoked_at: string | null }).revoked_at).toBeNull()
+  })
+
   it('not after it is revoked, not for someone who left, not while the AI is stopped, never with a session', async () => {
     const a = await tokenFor('u-bob', 'read')
     expect((await session('u-bob', 'DELETE', `/me/record-tokens/${a.tokenId}`)).status).toBe(200)

@@ -345,7 +345,8 @@ request / status shapes and their checks, `closeStopsTheAI`), the window registr
   topic of 「相談する」. A tab re-reads it on a `patch` of its own conversation (`useChatHistory`
   `topicRecordId` state) for the topic chip (`TopicChip.tsx`; `tasks-ui.md` "Consultations centre
   on the task"). A reply's linked files are stored as `linkedFiles` (`data-file-linked`). Test:
-  `client/tests/consultation-task.test.ts`.
+  `client/tests/consultation-task.test.ts`. The line 「この回は、会社の記録…の道具なしで答えています」
+  (`data-record-tools-missing`, `records.md` "When the record tools are missing") is live only: never stored.
 - A message stores its tool calls only as `[Tool: name]` text (plus `toolLines`, see 「Tool rows」); what must survive a restart is a
   record next to `content`: `choicePrompts`, `steerInstructions` (both with `at`),
   `consultationReferences`, `droppedRecords` (records dropped on the input that went with it,

@@ -86,8 +86,10 @@ const C = `/api/companies/${CO}`
 const person = (user: string, method: string, path: string, body?: unknown) => call({ user, method, path: `${C}${path}`, body })
 const ai = (token: string, method: string, path: string, body?: unknown) => call({ token, method, path: `/api/records-ai/google/drive${path}`, body })
 
+// Each its own consultation: a new turn's token ends the earlier ones of the same consultation (records.md "Who is acting").
+let tokenTurns = 0
 async function tokenFor(user: string, scope: 'read' | 'act'): Promise<string> {
-  const r = await call({ user, method: 'POST', path: `${C}/me/record-tokens`, body: { conversationId: 'conv-drive', agent: 'claude-code', scope } })
+  const r = await call({ user, method: 'POST', path: `${C}/me/record-tokens`, body: { conversationId: `conv-drive-${++tokenTurns}`, agent: 'claude-code', scope } })
   if (r.status !== 201) throw new Error(JSON.stringify(r.body))
   return r.body.data.token
 }

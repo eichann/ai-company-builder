@@ -442,7 +442,9 @@ agent), renderer `SecondOpinionQuote.tsx`. Tests `client/tests/second-opinion.te
 `client/electron/records/` (`records.md` "Typed tools in the app"): generated from the type
 definitions each turn; Claude in-process (all in `allowedTools`), Codex loopback with look-ups
 only (registry `recordsMcp` / `recordActions`). They call the server with the turn's record
-token (never the session); the server records them as the AI's.
+token (never the session); the server records them as the AI's. Tools that could not be prepared
+are never silent: the AI is told the reason with the turn and the reply starts with one line
+(`records.md` "When the record tools are missing").
 A connector plugin's operations (HubSpot) are tools on the same server, and an update's outcome is
 a card in the reply with 「変更前の値を書き戻す」 for the person (`plugins.md` "The app").
 A member's proposal of a time job (`job_proposal_places`, `job_proposal_create`, `records/job-proposal-tools.ts`) is offered
