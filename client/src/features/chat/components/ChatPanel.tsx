@@ -53,6 +53,11 @@ interface ChatPanelProps {
   focus?: { recordId: string; title: string } | null
   /** The member's 今日のフォルダ now (company path; today-folder.ts), sent with each request. */
   todayFolder?: () => string | null
+  /**
+   * The list of consultations shown from the start. The app leaves it closed (owner FB 2026-11-27: open at
+   * the start, it hid the conversation in a narrow pane); preview pages that test the list open it.
+   */
+  listOpenAtStart?: boolean
 }
 
 const NO_AI_TURNS: readonly AiTurnCandidate[] = []
@@ -64,13 +69,13 @@ export function ChatPanel(props: ChatPanelProps) {
   return <CompanyChatPanel key={`${userId}:${companyId}`} userId={userId} {...props} />
 }
 
-function CompanyChatPanel({ userId, departmentPath, activeDepartment, slashCommands, paneId = 'chat', aiTurnQueue = NO_AI_TURNS, onAiTurnItems, features, focus, todayFolder }: ChatPanelProps & { userId: string }) {
+function CompanyChatPanel({ userId, departmentPath, activeDepartment, slashCommands, paneId = 'chat', aiTurnQueue = NO_AI_TURNS, onAiTurnItems, features, focus, todayFolder, listOpenAtStart = false }: ChatPanelProps & { userId: string }) {
   const { t } = useTranslation()
   const chatServer = useChatServer()
   const currentCompany = useAppStore((s) => s.currentCompany)
 
   const [panelRef, compact] = useIsNarrowerThan<HTMLDivElement>(680)
-  const [sidebarOpen, setSidebarOpen] = useState(true)
+  const [sidebarOpen, setSidebarOpen] = useState(listOpenAtStart)
   const [showSettings, setShowSettings] = useState(false)
 
   // The chat's working folder (ChatConversation: departmentPath || the company root).

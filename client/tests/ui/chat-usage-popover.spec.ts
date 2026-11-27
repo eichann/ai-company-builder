@@ -1,5 +1,5 @@
-// Owner report: hovering the chat header's usage meter (5時間 / 1週間) showed nothing. The header
-// clips its row to the pane (chat-narrow.spec.ts), and the details popover sat inside it. Guard:
+// Owner report: hovering the chat's usage meter (5時間 / 1週間) showed nothing: the details popover
+// sat inside a row that clips (the header then; the input's row since 2026-11-27). Guard:
 // at a wide and at the narrowest pane the popover opens on hover and focus, is really painted
 // (the topmost element at its centre), stays in the window, and closes on leave and Escape.
 import { test, expect, type Page } from '@playwright/test'
@@ -36,7 +36,7 @@ for (const width of [760, 290]) {
     await page.setViewportSize({ width: 1440, height: 900 })
     const state = await openPreview(page, 'chat-header', { width: String(width) })
     await closeNarrowList(page)
-    const meter = page.getByRole('banner').getByRole('button', { name: /^利用上限:/ })
+    const meter = page.locator('[data-composer-drop]').locator('visible=true').getByRole('button', { name: /^利用上限:/ })
     await expect(meter).toBeVisible()
 
     await meter.hover()

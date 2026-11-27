@@ -167,7 +167,8 @@ function UserMessageBubble({
           </div>
         </div>
       )}
-      <div className="relative rounded-2xl px-4 py-3 text-[14px] leading-relaxed bg-primary text-on-primary rounded-br-md">
+      {/* The member's own words: a quiet bubble on the right; the AI's reply is plain text (MessageParts). */}
+      <div data-user-bubble className="relative rounded-card px-4 py-2.5 text-[14px] leading-relaxed bg-surface-sunken text-text">
         {images && images.length > 0 && (
           <div className="flex gap-1.5 mb-2 flex-wrap">
             {images.map((url, i) => (
@@ -175,7 +176,7 @@ function UserMessageBubble({
                 key={i}
                 src={url}
                 alt=""
-                className="w-20 h-20 object-cover rounded-control border border-white/20"
+                className="w-20 h-20 object-cover rounded-control border border-[color:var(--color-border)]"
               />
             ))}
           </div>
@@ -236,10 +237,10 @@ const MessageItem = memo(function MessageItem({ message, isStreaming, timestamp,
         {/* Role indicator for assistant */}
         {!isUser && (
           <div className="flex items-center gap-2 mb-2">
-            <div className="w-5 h-5 rounded-md bg-primary flex items-center justify-center shadow-glow">
-              <Sparkle size={11} weight="fill" className="text-white" />
+            <div className="w-5 h-5 rounded-small bg-primary flex items-center justify-center">
+              <Sparkle size={11} weight="fill" className="text-on-primary" />
             </div>
-            <span className="text-caption font-medium tracking-wide uppercase text-gray-500 dark:text-zinc-400">
+            <span className="text-caption font-normal text-text-muted">
               {t('chat.assistant')}
             </span>
           </div>
@@ -262,7 +263,7 @@ const MessageItem = memo(function MessageItem({ message, isStreaming, timestamp,
 
         {/* Timestamp + action buttons */}
         {timestamp && (
-          <div className={`mt-1.5 flex items-center gap-1 text-[10px] text-gray-400 dark:text-zinc-500 ${isUser ? 'justify-end' : ''}`}>
+          <div className={`mt-1.5 flex items-center gap-1 text-caption font-normal text-text-subtle ${isUser ? 'justify-end' : ''}`}>
             <span>{timestamp.toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' })}</span>
             {!isUser && isLastAssistant && canRegenerate && (
               <button

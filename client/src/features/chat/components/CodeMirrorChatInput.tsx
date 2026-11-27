@@ -1,8 +1,7 @@
-import { memo, useCallback, useEffect, useId, useImperativeHandle, useRef, useState, type MutableRefObject } from 'react'
+import { memo, useCallback, useEffect, useId, useImperativeHandle, useRef, useState, type MutableRefObject, type ReactNode } from 'react'
 import { isolateHistory } from '@codemirror/commands'
 import { Transaction } from '@codemirror/state'
 import { EditorView } from '@codemirror/view'
-import { ArrowUp } from '@phosphor-icons/react'
 import { handleGhostKey, setSuggestion } from '../ghostSuggestion'
 import { suggestionDescription } from '../promptSuggestion'
 import { chatInputState, createChatInputCompartments, editableExtensions, measureToNextFrame, placeholderExtension } from '../chatInputEditor'
@@ -11,7 +10,7 @@ import { useLatestRef } from '../../../shared/hooks/useLatestRef'
 import { useSlashCommands } from '../hooks/useSlashCommands'
 import { SlashCommandDropdown, type SlashCommandItem } from './SlashCommandDropdown'
 import type { ChatTextInputApi } from '../hooks/useChatDraft'
-import { PRIMARY_ACTION } from '../../../shared/ui/buttonStyles'
+import { ComposerRow, SendButton } from './ComposerRow'
 
 interface CodeMirrorChatInputProps {
   initialDraft?: string
@@ -20,7 +19,11 @@ interface CodeMirrorChatInputProps {
   onSend: (text: string) => void
   disabled: boolean
   placeholder: string
-  hint: string
+  /** A short line in the input's row (only while a suggestion is offered); the placeholder says how to send. */
+  hint?: string
+  /** The input's row, left of the send button: voice input (start) and the model switch (end). */
+  toolsStart?: ReactNode
+  toolsEnd?: ReactNode
   onCompositionStateChange?: (isComposing: boolean) => void
   onInputActivity?: () => void
   slashCommands?: SlashCommandItem[]
@@ -42,6 +45,8 @@ export const CodeMirrorChatInput = memo(function CodeMirrorChatInput({
   disabled,
   placeholder,
   hint,
+  toolsStart,
+  toolsEnd,
   onCompositionStateChange,
   onInputActivity,
   slashCommands,
@@ -184,35 +189,14 @@ export const CodeMirrorChatInput = memo(function CodeMirrorChatInput({
         />
       )}
 
-      <div className="absolute -inset-px rounded-card bg-gradient-to-r from-selected-bg via-transparent to-selected-bg opacity-0 group-focus-within:opacity-100 transition-opacity blur-sm" />
-
-      <div className="relative flex items-end gap-2 p-2 rounded-card bg-gray-50 dark:bg-zinc-800 border border-gray-200 dark:border-zinc-700 shadow-glass group focus-within:border-focus-border transition-colors">
-        <div className="flex-1 text-gray-900 dark:text-zinc-100 min-h-[40px] max-h-[200px] overflow-hidden">
+      <div className="relative rounded-card bg-[var(--color-surface)] border border-border-control focus-within:border-focus-border transition-colors">
+        <div className="px-3 pt-2.5 text-text min-h-[40px] max-h-[200px] overflow-hidden">
           <div ref={editorHostRef} />
           <div id={suggestionId} className="sr-only" aria-live="polite">{suggestion ? suggestionDescription(suggestion) : ''}</div>
         </div>
-
-        <button
-          onClick={handleSend}
-          disabled={disabled}
-          aria-label="送る"
-          title="送る"
-          className={`
-            flex-shrink-0 w-9 h-9 rounded-control
-            disabled:cursor-not-allowed
-            flex items-center justify-center
-            transition-all duration-200
-            enabled:hover:shadow-glow enabled:hover:scale-[1.02]
-            active:scale-[0.98]
-            ${PRIMARY_ACTION}
-          `}
-        >
-          <ArrowUp size={18} weight="bold" className="text-white" />
-        </button>
-      </div>
-
-      <div className="absolute -bottom-5 left-3 text-[10px] text-gray-400 dark:text-zinc-500 opacity-60">
-        {hint}
+        <ComposerRow start={toolsStart} hint={hint} end={toolsEnd}>
+          <SendButton onClick={handleSend} disabled={disabled} />
+        </ComposerRow>
       </div>
     </div>
   )

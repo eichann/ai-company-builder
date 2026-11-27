@@ -22,7 +22,10 @@ interface ChatInputProps {
   onSend: (text: string, files?: File[], filePaths?: string[]) => void
   disabled: boolean
   placeholder: string
-  hint: string
+  /** Shown in the input's row (the suggestion's keys); the placeholder is the one line about sending. */
+  hint?: string
+  /** The right of the input's row, before send: the usage meter and the model switch. */
+  tools?: ReactNode
   onCompositionStateChange?: (isComposing: boolean) => void
   onInputActivity?: () => void
   slashCommands?: SlashCommandItem[]
@@ -44,7 +47,7 @@ interface ChatInputProps {
 }
 
 /**
- * The chat's composer: voice input, dropped files and images, and the text
+ * The chat's composer: voice input (its button in the input's row), dropped files and images, and the text
  * input (CodeMirror; a plain textarea with the `chatInputBare` perf flag).
  * Exported for the composer preview page (tests/chat-composer-ui.tsx).
  */
@@ -58,6 +61,7 @@ export const ChatInput = memo(function ChatInput({
   disabled,
   placeholder,
   hint,
+  tools,
   onCompositionStateChange,
   onInputActivity,
   slashCommands,
@@ -71,6 +75,8 @@ export const ChatInput = memo(function ChatInput({
   above,
 }: ChatInputProps) {
   const [voiceBusy, setVoiceBusy] = useState(false)
+  const [voicePanel, setVoicePanel] = useState<HTMLDivElement | null>(null)
+  const voice = apiRef && <VoiceInputControl editor={apiRef} active={voiceActive} pane={voicePane} scope={voiceScope} disabled={disabled} onBusy={setVoiceBusy} panelHost={voicePanel} />
   const isLegacyTextareaMode = isPerfCutEnabled('chatInputBare')
   const attachments = useComposerAttachments(onSend, onAttachmentsChange, onDropRecord)
   // The text input fills its own handle; the conversation gets it together with the attachments.
@@ -95,6 +101,8 @@ export const ChatInput = memo(function ChatInput({
       keepCursor={voiceBusy}
       placeholder={placeholder}
       hint={hint}
+      toolsStart={voice}
+      toolsEnd={tools}
       onCompositionStateChange={onCompositionStateChange}
       onInputActivity={onInputActivity}
       apiRef={textApiRef}
@@ -108,6 +116,8 @@ export const ChatInput = memo(function ChatInput({
       keepCursor={voiceBusy}
       placeholder={placeholder}
       hint={hint}
+      toolsStart={voice}
+      toolsEnd={tools}
       onCompositionStateChange={onCompositionStateChange}
       onInputActivity={onInputActivity}
       slashCommands={slashCommands}
@@ -127,7 +137,8 @@ export const ChatInput = memo(function ChatInput({
           : 'border-transparent'
       }`}
     >
-      {apiRef && <VoiceInputControl editor={apiRef} active={voiceActive} pane={voicePane} scope={voiceScope} disabled={disabled} onBusy={setVoiceBusy} />}
+      {/* The voice input's panel (recording, microphone settings, problems) opens here, above the input. */}
+      <div ref={setVoicePanel} data-voice-panel />
       {/* Drag overlay: says what dropping does — a file is read, a record becomes the topic. */}
       {attachments.drag && (
         <div data-drop-frame className="absolute inset-0 z-10 flex items-center justify-center rounded-card bg-selected-bg border-2 border-dashed border-primary pointer-events-none px-3 text-center">

@@ -59,10 +59,13 @@ const chatRequestBodies = (page: Page) => chat(page, c => c.requests.filter(r =>
 
 test.describe('a running turn', () => {
   test('Claude Code: subagent row with its live progress line, usage meter, stop button, model locked', async ({ page }) => {
-    await openPreview(page, 'chat-header')
+    await openPreview(page, 'chat-header', { list: 'open' })
     const header = page.getByRole('banner')
-    await expect(header.getByRole('button', { name: '利用上限: 5時間 24%、1週間 66%' })).toBeVisible()
-    await expect(header.getByRole('combobox').first()).toBeEnabled()
+    const row = composer(page)
+    await expect(row.getByRole('button', { name: '利用上限: 5時間 24%、1週間 66%' })).toBeVisible()
+    await row.getByRole('button', { name: /^モデルと考える強さ：/ }).click()
+    await expect(page.getByRole('menuitemradio', { name: 'Opus 5.5' })).toBeEnabled()
+    await page.keyboard.press('Escape')
     await send(page, '見積書を作って')
     await expect(page.getByRole('button', { name: /^手分けした作業 過去の見積書と価格表を調べる 作業 4 件（作業中 1）/ })).toBeVisible()
     const progress = '価格表の10月改定分と過去の見積書の単価を照らし合わせています'
@@ -71,11 +74,14 @@ test.describe('a running turn', () => {
     const working = page.getByRole('complementary', { name: 'AIへの相談' }).getByRole('region', { name: 'AIが作業中' })
     await expect(working.getByRole('button', { name: /^見積書を作って/ })).toContainText(progress)
     await expect(header.getByRole('button', { name: '停止' })).toBeVisible()
-    await expect(header.getByRole('combobox', { name: '応答中はモデルを変更できません' })).toBeDisabled()
+    await row.getByRole('button', { name: /^モデルと考える強さ：/ }).click()
+    await expect(page.getByRole('group', { name: 'モデル（応答中は変えられません）' }).getByRole('menuitemradio', { name: 'Opus 5.5' })).toBeDisabled()
+    // Claude Code's effort may still change: the next request takes it.
+    await expect(page.getByRole('menuitemradio', { name: 'High', exact: true })).toBeEnabled()
   })
 
   test('the send (↑) and stop (×) buttons carry names a screen reader reads', async ({ page }) => {
-    await openPreview(page, 'chat-header')
+    await openPreview(page, 'chat-header', { list: 'open' })
     await input(page).click()
     await page.keyboard.insertText('見積書を作って')
     await page.getByRole('button', { name: '送る', exact: true }).click()
@@ -83,25 +89,30 @@ test.describe('a running turn', () => {
   })
 
   test('Codex: its own model pickers, meter window, and no subagent progress line', async ({ page }) => {
-    await openPreview(page, 'chat-header', { agent: 'codex' })
-    const header = page.getByRole('banner')
-    await expect(header.getByRole('button', { name: '利用上限: 1週間 60%' })).toBeVisible()
-    await expect(header.getByRole('combobox', { name: 'Codexモデル' })).toHaveValue('gpt-5.5-codex')
+    await openPreview(page, 'chat-header', { list: 'open', agent: 'codex' })
+    const row = composer(page)
+    await expect(row.getByRole('button', { name: '利用上限: 1週間 60%' })).toBeVisible()
+    const models = row.getByRole('button', { name: /^モデルと考える強さ：/ })
+    await models.click()
+    await expect(page.getByRole('menuitemradio', { name: /codex/i, checked: true })).toBeVisible()
+    await page.keyboard.press('Escape')
     await send(page, '見積書を作って')
     await expect(page.getByRole('button', { name: /^手分けした作業 過去の見積書と価格表を調べる/ })).toBeVisible()
-    await expect(header.getByRole('combobox', { name: 'Codexモデル' })).toBeDisabled()
+    await models.click()
+    for (const item of await page.getByRole('menuitemradio').all()) await expect(item).toBeDisabled()
+    await page.keyboard.press('Escape')
     // The progress event arrives 300 ms after the rows; give it time to (not) show.
     await page.waitForTimeout(800)
     await expect(page.getByText('価格表の10月改定分と過去の見積書の単価を照らし合わせています')).toHaveCount(0)
   })
 
   test('the usage meter says "unknown" when the server has no snapshot', async ({ page }) => {
-    await openPreview(page, 'chat-header', { limits: 'unknown' })
-    await expect(page.getByRole('banner').getByRole('button', { name: '利用上限: 情報なし' })).toBeVisible()
+    await openPreview(page, 'chat-header', { list: 'open', limits: 'unknown' })
+    await expect(composer(page).getByRole('button', { name: '利用上限: 情報なし' })).toBeVisible()
   })
 
   test('streaming markdown: finished blocks keep their DOM nodes while only the tail grows', async ({ page }) => {
-    await openPreview(page, 'chat-header', { turn: 'manual' })
+    await openPreview(page, 'chat-header', { list: 'open', turn: 'manual' })
     await send(page, '手順を書いて')
     await turnStarted(page)
     await chat(page, c => { c.send({ type: 'text-start', id: 't1' }); c.text('t1', '## 手順\n\n最初に資料を集めます。\n\n') })
@@ -120,7 +131,7 @@ test.describe('a running turn', () => {
   })
 
   test('tool rows read in plain Japanese: the app\'s labels, repeated calls counted, a member\'s own tool muted, no raw ids', async ({ page }) => {
-    await openPreview(page, 'chat-header', { turn: 'manual' })
+    await openPreview(page, 'chat-header', { list: 'open', turn: 'manual' })
     await send(page, '決まったことを残して')
     await turnStarted(page)
     await chat(page, c => {
@@ -156,7 +167,7 @@ test.describe('a running turn', () => {
 
 test.describe('instructions while the AI works', () => {
   test('delivered: shown inside the running reply, nothing waits, the turn keeps running', async ({ page }) => {
-    await openPreview(page, 'chat-header', { turn: 'manual' })
+    await openPreview(page, 'chat-header', { list: 'open', turn: 'manual' })
     await send(page, '見積書を作って')
     await turnStarted(page)
     await send(page, '価格表は10月版で')
@@ -171,7 +182,7 @@ test.describe('instructions while the AI works', () => {
 
   for (const steerStatus of ['unavailable', 'not-delivered'] as const) {
     test(`${steerStatus}: waits above the input and goes out as the next message when the turn ends`, async ({ page }) => {
-      await openPreview(page, 'chat-header', { turn: 'manual' })
+      await openPreview(page, 'chat-header', { list: 'open', turn: 'manual' })
       await page.evaluate(status => { window.__acbChat.steerStatus = status }, steerStatus)
       await send(page, '見積書を作って')
       await turnStarted(page)
@@ -189,7 +200,7 @@ test.describe('instructions while the AI works', () => {
   }
 
   test('a waiting message can be taken back into the input; after a stop, waiting messages return to the input', async ({ page }) => {
-    await openPreview(page, 'chat-header', { turn: 'manual' })
+    await openPreview(page, 'chat-header', { list: 'open', turn: 'manual' })
     await chat(page, c => { c.steerStatus = 'unavailable' })
     await send(page, '見積書を作って')
     await turnStarted(page)
@@ -209,7 +220,7 @@ test.describe('instructions while the AI works', () => {
 
   test('a waiting message comes back whole: 取り消す and a stop return its images with its text, several in order', async ({ page }) => {
     // Only the text came back before: a pasted screenshot was lost.
-    await openPreview(page, 'chat-header', { turn: 'manual' })
+    await openPreview(page, 'chat-header', { list: 'open', turn: 'manual' })
     await chat(page, c => { c.steerStatus = 'unavailable' })
     await send(page, '見積書を作って')
     await turnStarted(page)
@@ -245,7 +256,7 @@ test.describe('instructions while the AI works', () => {
 
   test('images returned past the drop limit all stay when one more is dropped; the new one is refused with a notice', async ({ page }) => {
     // The drop limit cut the whole list to 4: two of the returned images went silently.
-    await openPreview(page, 'chat-header', { turn: 'manual' })
+    await openPreview(page, 'chat-header', { list: 'open', turn: 'manual' })
     await chat(page, c => { c.steerStatus = 'unavailable' })
     await send(page, '見積書を作って')
     await turnStarted(page)
@@ -276,7 +287,7 @@ test.describe('instructions while the AI works', () => {
 })
 
 test('a next-prompt suggestion is asked for after a finished turn and offered as ghost text', async ({ page }) => {
-  await openPreview(page, 'chat-header', { turn: 'manual' })
+  await openPreview(page, 'chat-header', { list: 'open', turn: 'manual' })
   await chat(page, c => { c.suggestion = 'はい、本文まで書いてください' })
   await send(page, '骨子を作って')
   await turnStarted(page)
@@ -291,7 +302,7 @@ test('a next-prompt suggestion is asked for after a finished turn and offered as
 // 「部署に出す案」 (share-proposals.ts, PR D): the AI's proposal is the app's card; only the member's press shares, at the version
 // the card was made from; it says where the task is now and where it would go; afterwards the buttons are gone. ［やめる］ shares nothing.
 test('「部署に出す案」: the card shares only when the member presses it, at the version the card was made from; やめる shares nothing', async ({ page }) => {
-  await openPreview(page, 'chat-header', { turn: 'manual' })
+  await openPreview(page, 'chat-header', { list: 'open', turn: 'manual' })
   await send(page, 'これを営業部に出して')
   await turnStarted(page)
   await chat(page, c => {
@@ -320,7 +331,7 @@ test('「部署に出す案」: the card shares only when the member presses it,
 })
 
 test('a choice question waits above the input of its own conversation, survives a tab switch, and is answered in place', async ({ page }) => {
-  await openPreview(page, 'chat-header', { turn: 'manual' })
+  await openPreview(page, 'chat-header', { list: 'open', turn: 'manual' })
   await send(page, '提案書を作って')
   await turnStarted(page)
   await chat(page, c => { c.send({ type: 'text-start', id: 't1' }); c.text('t1', '確認させてください。'); c.send({ type: 'text-end', id: 't1' }); c.ask() })
@@ -350,7 +361,7 @@ test('a choice question waits above the input of its own conversation, survives 
 })
 
 test('a reply that finishes while the member is elsewhere is marked 新着 at the top of 「開いている相談」 until they have looked at it and moved on', async ({ page }) => {
-  await openPreview(page, 'chat-header', { turn: 'manual' })
+  await openPreview(page, 'chat-header', { list: 'open', turn: 'manual' })
   await send(page, '議事録をまとめて')
   await turnStarted(page)
   const sidebar = page.getByRole('complementary', { name: 'AIへの相談' })
@@ -374,7 +385,7 @@ test('a reply that finishes while the member is elsewhere is marked 新着 at th
 })
 
 test('a new conversation left for another with nothing typed goes away; one with a draft stays', async ({ page }) => {
-  await openPreview(page, 'chat-header', { turn: 'manual' })
+  await openPreview(page, 'chat-header', { list: 'open', turn: 'manual' })
   const sidebar = page.getByRole('complementary', { name: 'AIへの相談' })
   const open = sidebar.getByRole('region', { name: '開いている相談' })
   const rows = open.locator('[data-conversation-id]')
@@ -414,7 +425,7 @@ test('a new conversation left for another with nothing typed goes away; one with
 test('a first message with an image still goes out when the member moves to another conversation while the image is read', async ({ page }) => {
   // The blank-tab check did not count a send still reading its images: the tab closed and the text and image were lost.
   await slowImageReads(page, 800)
-  await openPreview(page, 'chat-header', { turn: 'manual' })
+  await openPreview(page, 'chat-header', { list: 'open', turn: 'manual' })
   const sidebar = page.getByRole('complementary', { name: 'AIへの相談' })
   await expect(input(page)).toBeVisible()
   await input(page).click()
@@ -432,7 +443,7 @@ test('a first message with an image still goes out when the member moves to anot
 
 test('a new consultation started in the tab while an image is read does not get the earlier message; it comes back into the input', async ({ page }) => {
   await slowImageReads(page, 1500)
-  await openPreview(page, 'chat-header', { turn: 'manual' })
+  await openPreview(page, 'chat-header', { list: 'open', turn: 'manual' })
   await expect(input(page)).toBeVisible()
   await input(page).click()
   await page.keyboard.insertText('この画像の内容をまとめて')
@@ -464,7 +475,7 @@ test('a new consultation started in the tab while an image is read does not get 
 })
 
 test('a group heading folds its rows, stays folded after a reload, and a search still shows its matches', async ({ page }) => {
-  await openPreview(page, 'chat-header', { turn: 'manual', storage: 'keep' })
+  await openPreview(page, 'chat-header', { list: 'open', turn: 'manual', storage: 'keep' })
   const sidebar = page.getByRole('complementary', { name: 'AIへの相談' })
   const heading = sidebar.getByRole('button', { name: /^開いている相談/ })
   const row = sidebar.getByRole('button', { name: /^新しい相談/ })
@@ -496,7 +507,7 @@ test('a group heading folds its rows, stays folded after a reload, and a search 
 
 test('a group heading stays at the top of the list while its rows scroll under it', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 600 })
-  await openPreview(page, 'chat-header', { turn: 'manual', history: 'many' })
+  await openPreview(page, 'chat-header', { list: 'open', turn: 'manual', history: 'many' })
   const sidebar = page.getByRole('complementary', { name: 'AIへの相談' })
   const closed = sidebar.getByRole('button', { name: /^終わったもの/ })
   await expect(sidebar.getByRole('button', { name: /^終わった相談 15/ })).toBeAttached()
@@ -511,7 +522,7 @@ test('a group heading stays at the top of the list while its rows scroll under i
 })
 
 test('「確認をお願いします」: the AI asks for a review and stops; 「あなたの番」 until the member answers, files open in the editor', async ({ page }) => {
-  await openPreview(page, 'chat-header', { turn: 'manual' })
+  await openPreview(page, 'chat-header', { list: 'open', turn: 'manual' })
   await send(page, '企画書を書いて')
   await turnStarted(page)
   await chat(page, c => {
@@ -545,7 +556,7 @@ test.describe('a long restored conversation', () => {
   const list = (page: Page) => page.locator('.overflow-auto', { has: page.getByText(/^質問\d+: /) }).locator('visible=true')
 
   test('opens at the bottom with only the latest messages; 「以前のメッセージを表示」 adds a page without moving what is on screen', async ({ page }) => {
-    await openPreview(page, 'chat-header', { history: 'long' })
+    await openPreview(page, 'chat-header', { list: 'open', history: 'long' })
     const more = page.getByRole('button', { name: '以前のメッセージを表示（残り190件）' })
     await expect(more).toBeVisible({ timeout: 15_000 })
     await expect(userQuestions(page)).toHaveCount(25)
@@ -576,7 +587,7 @@ test.describe('a long restored conversation', () => {
   })
 
   test('a streaming reply follows the bottom, but not while the member has scrolled up to read', async ({ page }) => {
-    await openPreview(page, 'chat-header', { history: 'long', turn: 'manual' })
+    await openPreview(page, 'chat-header', { list: 'open', history: 'long', turn: 'manual' })
     await expect(userQuestions(page).last()).toHaveText(/^質問120: /, { timeout: 15_000 })
     const fromBottom = () => list(page).evaluate(el => el.scrollHeight - el.scrollTop - el.clientHeight)
     await send(page, '続きをお願いします')
@@ -604,7 +615,7 @@ test.describe('a long restored conversation', () => {
   // page at the list's unscrolled position (~10 000 px down), and the screen
   // was painted shifted after it. Everything in the list stays inside it.
   test('a card with screen-reader-only text that arrives live stays inside the message list', async ({ page }) => {
-    await openPreview(page, 'chat-header', { history: 'long', turn: 'manual' })
+    await openPreview(page, 'chat-header', { list: 'open', history: 'long', turn: 'manual' })
     await expect(userQuestions(page).last()).toHaveText(/^質問120: /, { timeout: 15_000 })
     await send(page, '確度を A にして')
     await turnStarted(page)
@@ -634,7 +645,7 @@ test.describe('a long restored conversation', () => {
   })
 
   test('both restored tabs are listed; switching keeps each tab\'s draft, keeps the other tab mounted and reopens at the latest message', async ({ page }) => {
-    await openPreview(page, 'chat-header', { history: 'long' })
+    await openPreview(page, 'chat-header', { list: 'open', history: 'long' })
     const sidebar = page.getByRole('complementary', { name: 'AIへの相談' })
     // Both restored tabs are idle: 「開いている相談」, marked.
     await expect(sidebar.getByRole('region', { name: '開いている相談' }).getByText('開いています')).toHaveCount(1)
@@ -662,7 +673,7 @@ test.describe('a long restored conversation', () => {
 })
 
 test('not signed in: 「ほかの AI を選ぶ（設定）」 on the setup screen opens the agent settings, and closing them returns to it', async ({ page }) => {
-  await openPreview(page, 'chat-header', { auth: 'none' })
+  await openPreview(page, 'chat-header', { list: 'open', auth: 'none' })
   const openSettings = page.getByRole('button', { name: 'ほかの AI を選ぶ（設定）' })
   await expect(page.getByText('Claude へのログインが必要です').first()).toBeVisible()
   const settings = page.getByRole('dialog', { name: '相談の設定' })
@@ -676,7 +687,7 @@ test('not signed in: 「ほかの AI を選ぶ（設定）」 on the setup scree
 })
 
 test('not signed in: 「Claude にログインする」 signs in where the chat runs, and the chat opens without a terminal', async ({ page }) => {
-  await openPreview(page, 'chat-header', { auth: 'none' })
+  await openPreview(page, 'chat-header', { list: 'open', auth: 'none' })
   await expect(page.getByText('ターミナル')).toHaveCount(0)
   await page.getByRole('button', { name: 'Claude にログインする' }).click()
   await expect(page.getByText('Claude へのログインが必要です')).toHaveCount(0)
@@ -688,7 +699,7 @@ test('not signed in: 「Claude にログインする」 signs in where the chat 
 })
 
 test('editing a message resends it like a normal send: saved first without the later messages, its file references kept', async ({ page }) => {
-  await openPreview(page, 'chat-header', { history: 'edit', turn: 'manual' })
+  await openPreview(page, 'chat-header', { list: 'open', history: 'edit', turn: 'manual' })
   const first = page.getByText('見積書を作って', { exact: true })
   await expect(first).toBeVisible({ timeout: 15_000 })
   await first.hover()
@@ -717,7 +728,7 @@ test('editing a message resends it like a normal send: saved first without the l
 
 // chat.newConsultation is what a skill's 実行 runs; chat.insertText fills the composer (commands.md).
 test('chat commands: a new consultation sends its message; inserted text waits in the composer; another pane is not reached', async ({ page }) => {
-  await openPreview(page, 'chat-header', { turn: 'manual' })
+  await openPreview(page, 'chat-header', { list: 'open', turn: 'manual' })
   const run = (id: string, args: Record<string, unknown>) =>
     page.evaluate(([id, args]) => (window as unknown as { __acbCommands: { run: (id: string, args: unknown) => Promise<unknown> } }).__acbCommands.run(id, args), [id, args] as const)
   const chatBodies = () => chat(page, c => c.requests.filter(r => r.path === '/api/chat').map(r => JSON.stringify(r.body)))
@@ -742,7 +753,7 @@ test('chat commands: a new consultation sends its message; inserted text waits i
 // 「相談する」 on a task (tasks-ui.md "Consulting about a task"): a new consultation keeps the task as
 // its main topic and has the AI read it by id; asked again, the member's consultation about it opens.
 test('「相談する」: a new consultation about the task names it by id and keeps it; one already about it is opened instead', async ({ page }) => {
-  await openPreview(page, 'chat-header', { history: 'edit', turn: 'manual' })
+  await openPreview(page, 'chat-header', { list: 'open', history: 'edit', turn: 'manual' })
   const run = (id: string, args: Record<string, unknown>) =>
     page.evaluate(([id, args]) => (window as unknown as { __acbCommands: { run: (id: string, args: unknown) => Promise<unknown> } }).__acbCommands.run(id, args), [id, args] as const)
   const chatBodies = () => chat(page, c => c.requests.filter(r => r.path === '/api/chat').length)
@@ -775,7 +786,7 @@ test('「相談する」: a new consultation about the task names it by id and k
 // 「会議のあと」 (4b-4 PR6-A): the card records its press before asking, so the pane must say it took the ask (else the press is
 // taken back), and what the card chose reaches the AI with 「この作業をする」.
 test('「この作業をする」 with what a card chose: the pane says it took it, and the detail reaches the AI', async ({ page }) => {
-  await openPreview(page, 'chat-header', { history: 'edit', turn: 'manual' })
+  await openPreview(page, 'chat-header', { list: 'open', history: 'edit', turn: 'manual' })
   await expect(page.getByText('単価を10月版にしました。').and(page.locator('p:not(.truncate)'))).toBeVisible({ timeout: 15_000 })
   const taken = await page.evaluate(() => (window as unknown as { __acbCommands: { run: (id: string, args: unknown) => Promise<unknown> } }).__acbCommands.run('chat.consultAbout', {
     recordId: 'task-0000aa', title: '11月24日の会議のたたき台を確かめる', purpose: 'work', detail: '反映する項目（JSON）：[{"項目":"確度","値":"A"}]',
@@ -789,7 +800,7 @@ test('「この作業をする」 with what a card chose: the pane says it took 
 
 // A business plugin's person step (plugin-steps.md): its procedure goes to the AI, not into the member's bubble.
 test('a person step\'s consultation sends the procedure to the AI and shows only a chip naming the step', async ({ page }) => {
-  await openPreview(page, 'chat-header', { history: 'edit', turn: 'manual' })
+  await openPreview(page, 'chat-header', { list: 'open', history: 'edit', turn: 'manual' })
   await expect(page.getByText('単価を10月版にしました。').and(page.locator('p:not(.truncate)'))).toBeVisible({ timeout: 15_000 })
   await page.evaluate(() => (window as unknown as { __acbCommands: { run: (id: string, args: unknown) => Promise<unknown> } }).__acbCommands.run('chat.newConsultation', {
     title: '見積を作る（11/2）', message: '手順「見積を作る」を、記録 deal-0000aa について一緒に進めたいです。\n-----\n見積書の型を使う\n-----',
@@ -811,7 +822,7 @@ test.describe('a consultation in its own window', () => {
   const status = (state: string, line: string, kind?: string) => ({ windows: [{ companyId: 'preview-company', sessionId: 'edit-history', status: { state, line, ...(kind ? { kind } : {}) } }] })
 
   test('the row action moves it out of the main window; the list then marks it and brings that window to the front', async ({ page }) => {
-    await openPreview(page, 'chat-header', { history: 'edit', turn: 'manual' })
+    await openPreview(page, 'chat-header', { list: 'open', history: 'edit', turn: 'manual' })
     await expect(reply(page)).toBeVisible({ timeout: 15_000 })
     await row(page).getByRole('button', { name: '別ウィンドウで開く' }).click()
     await expect.poll(() => chat(page, c => c.windows.opened)).toEqual(['edit-history'])
@@ -825,9 +836,10 @@ test.describe('a consultation in its own window', () => {
   })
 
   test('the other window\'s status drives the main list (AIが作業中, あなたの番), and a closed window returns it as an open consultation', async ({ page }) => {
-    await openPreview(page, 'chat-header', { history: 'edit', turn: 'manual' })
+    await openPreview(page, 'chat-header', { list: 'open', history: 'edit', turn: 'manual' })
     await expect(reply(page)).toBeVisible({ timeout: 15_000 })
-    await page.getByRole('banner').getByRole('button', { name: '別ウィンドウで開く' }).click()
+    await page.getByRole('banner').getByRole('button', { name: 'その他の操作' }).click()
+    await page.locator('.fixed.z-menu').getByRole('button', { name: '別ウィンドウで開く' }).click()
     await expect(row(page)).toContainText('別ウィンドウで表示中')
     await chat(page, c => c.windowChanged({ windows: [{ companyId: 'preview-company', sessionId: 'edit-history', status: { state: 'working', line: 'ファイルを読んでいます：営業部/見積書' } }] }))
     await expect(list(page).getByRole('region', { name: 'AIが作業中' }).locator('[data-conversation-id="edit-history"]')).toContainText('ファイルを読んでいます：営業部/見積書')
@@ -841,14 +853,20 @@ test.describe('a consultation in its own window', () => {
   })
 
   test('while its AI works here, it cannot be moved (the turn would stop)', async ({ page }) => {
-    await openPreview(page, 'chat-header', { history: 'edit', turn: 'manual' })
+    await openPreview(page, 'chat-header', { list: 'open', history: 'edit', turn: 'manual' })
     await expect(reply(page)).toBeVisible({ timeout: 15_000 })
     await send(page, '続けて')
     await turnStarted(page)
-    await expect(page.getByRole('banner').getByRole('button', { name: '別ウィンドウで開く' })).toBeDisabled()
     await expect(row(page).getByRole('button', { name: '別ウィンドウで開く' })).toBeDisabled()
+    // The header's 「…」 holds it too (drawn on the window, outside the list).
+    const headerItem = page.locator('.fixed.z-menu').getByRole('button', { name: '別ウィンドウで開く' })
+    await page.getByRole('banner').getByRole('button', { name: 'その他の操作' }).click()
+    await expect(headerItem).toBeDisabled()
+    await page.keyboard.press('Escape')
     await chat(page, c => c.finish())
-    await expect(page.getByRole('banner').getByRole('button', { name: '別ウィンドウで開く' })).toBeEnabled()
+    await page.getByRole('banner').getByRole('button', { name: 'その他の操作' }).click()
+    await expect(headerItem).toBeEnabled()
+    await page.keyboard.press('Escape')
     expect(await chat(page, c => c.windows.opened)).toEqual([])
   })
 })
@@ -861,7 +879,7 @@ test('an attached image that cannot be read stops the send and gives the typed t
       setTimeout(() => this.dispatchEvent(new ProgressEvent('error')), 0)
     }
   })
-  await openPreview(page, 'chat-header', { turn: 'manual' })
+  await openPreview(page, 'chat-header', { list: 'open', turn: 'manual' })
   await input(page).click()
   await page.keyboard.insertText('この画像の内容をまとめて')
   const data = await page.evaluateHandle(() => {
@@ -883,7 +901,7 @@ test.describe('two chat panes', () => {
   const paneInput = (page: Page, name: PaneName) => pane(page, name).locator('.cm-content[role="textbox"]').locator('visible=true')
 
   test('a consultation open in one pane is shown there, never opened in the other as well', async ({ page }) => {
-    await openPreview(page, 'chat-header', { history: 'edit', panes: '2', turn: 'manual' })
+    await openPreview(page, 'chat-header', { list: 'open', history: 'edit', panes: '2', turn: 'manual' })
     const left = pane(page, '左の欄')
     const right = pane(page, '右の欄')
     await expect(left.getByText('見積書を作って', { exact: true })).toBeVisible({ timeout: 15_000 })
@@ -902,7 +920,7 @@ test.describe('two chat panes', () => {
   })
 
   test('a chat command that names a pane reaches that pane\'s composer only', async ({ page }) => {
-    await openPreview(page, 'chat-header', { panes: '2', turn: 'manual' })
+    await openPreview(page, 'chat-header', { list: 'open', panes: '2', turn: 'manual' })
     const run = (id: string, args: Record<string, unknown>) =>
       page.evaluate(([id, args]) => (window as unknown as { __acbCommands: { run: (id: string, args: unknown) => Promise<unknown> } }).__acbCommands.run(id, args), [id, args] as const)
     await expect(paneInput(page, '右の欄')).toBeVisible()
@@ -915,7 +933,7 @@ test.describe('two chat panes', () => {
 
 test('a record open in the middle: its consultations on top (「この件の相談」), the full list unchanged below with the same rows marked', async ({ page }) => {
   // Owner 2026-11-26: opening a record never hides the list nor switches the consultation on screen.
-  await page.goto('/tests/chat-header-ui.html?history=record&focus=task-0000aa')
+  await page.goto('/tests/chat-header-ui.html?list=open&history=record&focus=task-0000aa')
   const list = page.getByRole('complementary', { name: 'AIへの相談' })
   const about = list.getByRole('region', { name: 'この件の相談' })
   await expect(about.getByRole('heading')).toHaveText('この件の相談（2）')
@@ -941,20 +959,20 @@ test('a record open in the middle: its consultations on top (「この件の相�
 })
 
 test('a record with no consultation: one quiet line, the full list stays; no record open: no section', async ({ page }) => {
-  await page.goto('/tests/chat-header-ui.html?history=record&focus=task-0000cc')
+  await page.goto('/tests/chat-header-ui.html?list=open&history=record&focus=task-0000cc')
   const list = page.getByRole('complementary', { name: 'AIへの相談' })
   await expect(list.getByRole('note', { name: 'この件の相談' })).toHaveText('この件の相談はまだありません')
   await expect(list.getByRole('region', { name: 'この件の相談' })).toHaveCount(0)
   await expect(list.locator('[data-conversation-id]')).toHaveCount(7)
   await expect(list.locator('[data-badge="selected"]')).toHaveCount(0)
-  await page.goto('/tests/chat-header-ui.html?history=record')
+  await page.goto('/tests/chat-header-ui.html?list=open&history=record')
   await expect(list.locator('[data-conversation-id]')).toHaveCount(7)
   await expect(list.getByRole('region', { name: 'この件の相談' })).toHaveCount(0)
   await expect(list.getByRole('note', { name: 'この件の相談' })).toHaveCount(0)
 })
 
 test('「AIに相談する」 while a record is open: the new consultation carries its chip above the input (stored with the first message); × leaves it unlinked', async ({ page }) => {
-  await page.goto('/tests/chat-header-ui.html?history=record&focus=task-0000aa&turn=manual')
+  await page.goto('/tests/chat-header-ui.html?list=open&history=record&focus=task-0000aa&turn=manual')
   const list = page.getByRole('complementary', { name: 'AIへの相談' })
   await list.getByRole('button', { name: 'AIに相談する' }).click()
   const chip = page.locator('[data-topic-chip="composer"]').locator('visible=true')
@@ -988,16 +1006,16 @@ test('the screenshots of 「この件の相談」 for the owner (SCREENSHOTS=<di
   await page.setViewportSize({ width: 1280, height: 760 })
   const shoot = (name: string) => page.screenshot({ path: `${dir}/${name}.png` })
   const list = page.getByRole('complementary', { name: 'AIへの相談' })
-  await page.goto('/tests/chat-header-ui.html?history=record&focus=task-0000aa&turn=manual')
+  await page.goto('/tests/chat-header-ui.html?list=open&history=record&focus=task-0000aa&turn=manual')
   await expect(list.getByRole('region', { name: 'この件の相談' })).toContainText('見積書の送り方')
   await shoot('a-record-open-2-related')
-  await page.goto('/tests/chat-header-ui.html?history=record&focus=task-0000cc&turn=manual')
+  await page.goto('/tests/chat-header-ui.html?list=open&history=record&focus=task-0000cc&turn=manual')
   await expect(list.getByRole('note', { name: 'この件の相談' })).toBeVisible()
   await shoot('b-record-open-0-related')
-  await page.goto('/tests/chat-header-ui.html?history=record&turn=manual')
+  await page.goto('/tests/chat-header-ui.html?list=open&history=record&turn=manual')
   await expect(list.locator('[data-conversation-id]')).toHaveCount(7)
   await shoot('c-no-record-open')
-  await page.goto('/tests/chat-header-ui.html?history=record&focus=task-0000aa&turn=manual')
+  await page.goto('/tests/chat-header-ui.html?list=open&history=record&focus=task-0000aa&turn=manual')
   await list.getByRole('button', { name: 'AIに相談する' }).click()
   const chip = page.locator('[data-topic-chip="composer"]').locator('visible=true')
   await expect(chip).toHaveText('このやること：見積書を作り直す')
@@ -1008,7 +1026,7 @@ test('the screenshots of 「この件の相談」 for the owner (SCREENSHOTS=<di
 })
 
 test('the search box finds consultations by the やること / 案件 they are about, live, never mid-IME, and Esc restores the list', async ({ page }) => {
-  await page.goto('/tests/chat-header-ui.html?history=many')
+  await page.goto('/tests/chat-header-ui.html?list=open&history=many')
   const list = page.getByRole('complementary', { name: 'AIへの相談' })
   const box = list.getByRole('textbox', { name: '相談を検索' })
   const count = list.locator('p[aria-live]')
@@ -1054,7 +1072,7 @@ test('the search box finds consultations by the やること / 案件 they are a
 // × takes the consultation off the task in main's history (topicRecordId: null) and the chip goes.
 // SCREENSHOTS=<dir> writes the chip with its line.
 test('the topic chip: the やること, a linked file\'s line in the reply, × takes it off', async ({ page }) => {
-  await openPreview(page, 'chat-header', { history: 'edit', topic: '1', turn: 'manual' })
+  await openPreview(page, 'chat-header', { list: 'open', history: 'edit', topic: '1', turn: 'manual' })
   const chip = page.locator('[data-topic-chip]')
   await expect(chip).toContainText('このやることについての相談：見積書を作り直す')
   await send(page, '見積のメモを作って')

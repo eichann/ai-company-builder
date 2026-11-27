@@ -261,7 +261,10 @@ installElectronAPI({
   onAgentInteractionClosed: interactionsClosed.subscribe,
   respondAgentInteraction: async (id, response) => { control.answered(id, response); return true },
   getPermissionMode: async () => 'auto',
-  getHandoff: async () => ({ status: 'waiting', message: '', canUpdate: false, pendingTurns: 0 }),
+  // ?handoff=saved: the consultation has a hand-off memo (its line under the header shows).
+  getHandoff: async () => params.get('handoff') === 'saved'
+    ? { status: 'saved', message: '最新のメモです。', canUpdate: true, pendingTurns: 0, updatedAt: '2026-11-27T12:30:00.000Z', provider: 'claude-code', markdown: '## 要点\n\n- 見積書は10月版の単価で作る' }
+    : { status: 'waiting', message: 'メモはまだありません。', canUpdate: false, pendingTurns: 0 },
   saveChatSession: async () => ({ status: 'saved', revision: 1 }) as ChatSaveReceipt,
   deleteChatSession: async (_company: string, id: string) => { aiTurns.deleted.push(id); return true },
   patchChatSession: async (_company: string, sessionId: string, patch) => { control.patches.push({ sessionId, ...patch }); return null },
@@ -271,8 +274,9 @@ installElectronAPI({
     return { status: 'saved', revision: 1 } as ChatSaveReceipt
   },
   voiceInput: {
-    capabilities: async () => ({ available: false, reason: 'プレビューでは音声入力を使えません', retryable: false }),
-    devices: async () => ({ ok: true, devices: [] }),
+    // ?voice=1: a PC where voice input works (one microphone), to see where its controls sit.
+    capabilities: async () => params.get('voice') === '1' ? { available: true } : ({ available: false, reason: 'プレビューでは音声入力を使えません', retryable: false }),
+    devices: async () => ({ ok: true, devices: params.get('voice') === '1' ? [{ id: 'mic-1', name: '内蔵マイク', isDefault: true }] : [] }),
     start: async () => {}, stop: async () => {}, cancel: async () => {},
     onEvent: () => noop, onLevel: () => noop, onState: () => noop,
   } as never,
@@ -477,17 +481,19 @@ function OpenRecordStandIn({ recordId }: { recordId: string | null }) {
 }
 
 const width = Number(params.get('width')) || 760
+// The list of consultations starts closed as in the app; ?list=open shows it from the start (the specs that test it).
+const listOpen = params.get('list') === 'open'
 createRoot(document.getElementById('root')!).render(params.get('panes') === '2'
   ? <div className="h-screen flex bg-gray-50 dark:bg-zinc-950">
-      <section aria-label="左の欄" className="h-full flex-1 min-w-0 border-r border-gray-200 dark:border-zinc-800"><ChatPanel departmentPath="/tmp/acb-preview" paneId="chat" /></section>
-      <section aria-label="右の欄" className="h-full flex-1 min-w-0"><ChatPanel departmentPath="/tmp/acb-preview" paneId="right" /></section>
+      <section aria-label="左の欄" className="h-full flex-1 min-w-0 border-r border-gray-200 dark:border-zinc-800"><ChatPanel departmentPath="/tmp/acb-preview" paneId="chat" listOpenAtStart={listOpen} /></section>
+      <section aria-label="右の欄" className="h-full flex-1 min-w-0"><ChatPanel departmentPath="/tmp/acb-preview" paneId="right" listOpenAtStart={listOpen} /></section>
     </div>
   : <div className="h-screen flex justify-end bg-gray-50 dark:bg-zinc-950">
       {(params.get('minutes') === '1' || autoTurn) && <AutoTurnList />}
       {params.get('tabs') === '1' && <MiddleTabs />}
       {recordHistory && <OpenRecordStandIn recordId={params.get('focus')} />}
       <div style={{ width }} className="h-full flex-shrink-0 border-l border-gray-200 dark:border-zinc-800">
-        <ChatPanel departmentPath="/tmp/acb-preview" aiTurnQueue={autoTurn ? [MINUTES_NOTICE] : undefined} onAiTurnItems={autoTurn ? view => showAiTurns(view) : undefined}
+        <ChatPanel departmentPath="/tmp/acb-preview" listOpenAtStart={listOpen} aiTurnQueue={autoTurn ? [MINUTES_NOTICE] : undefined} onAiTurnItems={autoTurn ? view => showAiTurns(view) : undefined}
           focus={params.get('focus') ? { recordId: params.get('focus')!, title: RECORD_TITLES[params.get('focus')!] ?? '見積書を作り直す' } : null} />
       </div>
     </div>,

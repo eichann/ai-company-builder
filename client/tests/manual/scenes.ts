@@ -89,7 +89,8 @@ const MARKS = { page: 'skill-layout', query: { companies: '2', manual: '1', fold
 const SIGN_IN = { page: 'sign-in', viewport: { width: 830, height: 620 } } as const
 
 // 「AIへの相談」 opens with its list over a narrow chat (as in the app): closed for a picture of the screen.
-const CLOSE_LIST: SceneStep = { click: 'role=complementary[name="AIへの相談"] >> role=button[name="AIへの相談の一覧を閉じる"]' }
+// The list of consultations starts closed (2026-11-27): a scene waits for the chat to be on screen.
+const CHAT_READY: SceneStep = { waitFor: 'role=button[name="AIへの相談の一覧を開閉"]' }
 const SALES_TAB = 'role=button[name="営業部" s]'
 const FILES_TAB = 'role=button[name="ファイル" s]'
 const SKILLS_TAB = 'role=button[name="Skill" s]'
@@ -106,7 +107,7 @@ const menuItem = (name: string) => `role=menuitem[name=/^${name}/]`
 /** One change's row in 「変更を確認」 (its file name, then 「変更を元に戻す」). */
 const PREVIEW_ROW = (name: string) => `role=dialog >> div.cursor-pointer:has(span[title$="${name}"])`
 const TITLE_BAR = 'header:has(button[aria-label="サーバーと同期"])'
-const SALES_FILES: SceneStep[] = [CLOSE_LIST, { click: SALES_TAB }, { click: FILES_TAB }]
+const SALES_FILES: SceneStep[] = [CHAT_READY, { click: SALES_TAB }, { click: FILES_TAB }]
 const VISIT_MEMO = 'role=button[name=/^訪問メモ_1123\\.md/]'
 const PROPOSAL = 'role=button[name=/^提案書_A社向け\\.md/]'
 const EDITOR = '.cm-content[data-language="markdown"]'
@@ -177,7 +178,7 @@ const DOC_TOOLBAR = 'role=toolbar[name="資料の表示"]'
 /** The chat's ［見る］ on the AI's line that wrote the HTML document. */
 const CHAT_SEE = `${CHAT_PANE} >> role=button[name="見る"]`
 const HTML_OPEN: SceneStep[] = [
-  CLOSE_LIST, ...ASK(HTML_REQUEST), { waitFor: CHAT_SEE }, { click: CHAT_SEE }, { waitFor: DOC_TOOLBAR },
+  CHAT_READY, ...ASK(HTML_REQUEST), { waitFor: CHAT_SEE }, { click: CHAT_SEE }, { waitFor: DOC_TOOLBAR },
   { click: FOLD_SIDE }, { click: 'role=button[name="左の欄 (⌘B)"]' }, { waitFor: DOC_PAGE }, SETTLE,
 ]
 const CHAT_HEADER = { page: 'chat-header', query: { limits: 'ok' } } as const
@@ -385,7 +386,7 @@ export const scenes: Scene[] = [
     id: 'department-not-downloaded',
     about: 'The 総務部 tab of a department not on this PC: ［ダウンロードして同期を開始］.',
     ...MAIN,
-    steps: [CLOSE_LIST, { click: 'role=button[name="総務部" s]' }, { waitFor: 'role=button[name="ダウンロードして同期を開始"]' }],
+    steps: [CHAT_READY, { click: 'role=button[name="総務部" s]' }, { waitFor: 'role=button[name="ダウンロードして同期を開始"]' }],
     crop: { region: { x: 0, y: 0, width: 860, height: 800 } },
     annotations: [
       { marker: { target: 'role=button[name="総務部" s]', label: '1' } },
@@ -415,7 +416,7 @@ export const scenes: Scene[] = [
     id: 'title-bar-zoom',
     about: 'The title bar’s sync button with its ▾ open (変更を確認してから同期), and あなたの丸.',
     ...MAIN,
-    steps: [CLOSE_LIST, { click: SYNC_MORE }],
+    steps: [CHAT_READY, { click: SYNC_MORE }],
     crop: { region: { x: 560, y: 0, width: 720, height: 150 } },
     annotations: [
       { box: SYNC }, { marker: { target: SYNC, label: '1', at: 'left' } },
@@ -427,7 +428,7 @@ export const scenes: Scene[] = [
     id: 'department-tabs',
     about: 'The department tabs: 全社, 営業部 (chosen) and 総務部 (not downloaded).',
     ...MAIN,
-    steps: [CLOSE_LIST, { click: SALES_TAB }],
+    steps: [CHAT_READY, { click: SALES_TAB }],
     crop: { region: { x: 0, y: 48, width: 480, height: 110 } },
     annotations: [
       { marker: { target: 'role=button[name="全社" s]', label: '1', at: 'below' } },
@@ -447,7 +448,7 @@ export const scenes: Scene[] = [
     id: 'left-tab-skills',
     about: 'The left pane’s Skill tab: 営業部’s Skill.',
     ...MAIN,
-    steps: [CLOSE_LIST, { click: SALES_TAB }, { click: SKILLS_TAB }, { waitFor: 'text=提案書の骨子を作る' }],
+    steps: [CHAT_READY, { click: SALES_TAB }, { click: SKILLS_TAB }, { waitFor: 'text=提案書の骨子を作る' }],
     crop: { region: { x: 0, y: 100, width: 560, height: 400 } },
     annotations: [{ box: SKILLS_TAB }, { marker: { target: SKILLS_TAB, label: '1' } }],
   },
@@ -455,7 +456,7 @@ export const scenes: Scene[] = [
     id: 'chat-area',
     about: '「AIへの相談」: the input and the list of consultations.',
     ...MAIN,
-    steps: [CLOSE_LIST],
+    steps: [CHAT_READY],
     crop: { target: CHAT_PANE, padding: 0 },
     annotations: [
       { box: '[aria-placeholder^="メッセージを入力"]' }, { marker: { target: '[aria-placeholder^="メッセージを入力"]', label: '1' } },
@@ -466,7 +467,7 @@ export const scenes: Scene[] = [
     id: 'reset-layout',
     about: '「画面をいつもの形に戻す」 in the member\'s menu (あなたの丸, right end of the title bar).',
     ...MAIN,
-    steps: [CLOSE_LIST, { click: ME }],
+    steps: [CHAT_READY, { click: ME }],
     crop: { region: { x: 840, y: 0, width: 440, height: 330 } },
     annotations: [{ box: menuItem('画面をいつもの形に戻す') }, { marker: { target: menuItem('画面をいつもの形に戻す'), label: '1', at: 'left' } }],
   },
@@ -565,7 +566,7 @@ export const scenes: Scene[] = [
     about: 'Just after pressing 「サーバーと同期」: the button turns while sync runs.',
     ...MAIN,
     query: { ...MAIN.query, sync: 'manual' },
-    steps: [CLOSE_LIST, { click: SYNC }],
+    steps: [CHAT_READY, { click: SYNC }],
     crop: { region: { x: 560, y: 0, width: 720, height: 110 } },
     annotations: [{ box: SYNC }, { note: { target: SYNC, text: '① 同期中（くるくる回ります）' } }],
   },
@@ -573,7 +574,7 @@ export const scenes: Scene[] = [
     id: 'sync-done',
     about: 'The notice after a sync with nothing to set aside: 同期が完了しました (it hides itself).',
     ...MAIN,
-    steps: [CLOSE_LIST, { click: SYNC }, { waitFor: 'text=同期が完了しました' }],
+    steps: [CHAT_READY, { click: SYNC }, { waitFor: 'text=同期が完了しました' }],
     crop: { region: { x: 640, y: 600, width: 640, height: 200 } },
     annotations: [{ box: 'text=同期が完了しました' }, { marker: { target: 'text=同期が完了しました', label: '1', at: 'left' } }],
   },
@@ -594,7 +595,7 @@ export const scenes: Scene[] = [
     id: 'sync-preview',
     about: '「変更を確認」: the two changes, undo, the 作業メモ and この内容で同期.',
     ...MAIN,
-    steps: [CLOSE_LIST, ...PREVIEW, { waitFor: 'role=dialog' }],
+    steps: [CHAT_READY, ...PREVIEW, { waitFor: 'role=dialog' }],
     crop: { target: 'role=dialog', padding: 24 },
     annotations: [
       { box: PREVIEW_ROW('訪問メモ_1123.md') }, { marker: { target: PREVIEW_ROW('訪問メモ_1123.md'), label: '1', at: 'left' } },
@@ -608,7 +609,7 @@ export const scenes: Scene[] = [
     id: 'sync-preview-diff',
     about: 'A change opened from 「変更を確認」: the line added to 訪問メモ_1123.md.',
     ...MAIN,
-    steps: [CLOSE_LIST, ...PREVIEW, { click: PREVIEW_ROW('訪問メモ_1123.md') }, { waitFor: 'text=次回：12/1 に見積を持って再訪問' }],
+    steps: [CHAT_READY, ...PREVIEW, { click: PREVIEW_ROW('訪問メモ_1123.md') }, { waitFor: 'text=次回：12/1 に見積を持って再訪問' }],
     crop: { region: { x: 0, y: 50, width: 1280, height: 210 } },
     annotations: [{ box: 'text=次回：12/1 に見積を持って再訪問' }, { marker: { target: 'text=次回：12/1 に見積を持って再訪問', label: '1', at: 'below' } }],
   },
@@ -616,7 +617,7 @@ export const scenes: Scene[] = [
     id: 'sync-revert-confirm',
     about: '「元に戻す」 on the added file: what will happen, and that the current content is kept.',
     ...MAIN,
-    steps: [CLOSE_LIST, ...PREVIEW, { click: `${PREVIEW_ROW('見積_下書き.md')} >> role=button[name="変更を元に戻す"]` }, { waitFor: 'text=変更を元に戻しますか？' }],
+    steps: [CHAT_READY, ...PREVIEW, { click: `${PREVIEW_ROW('見積_下書き.md')} >> role=button[name="変更を元に戻す"]` }, { waitFor: 'text=変更を元に戻しますか？' }],
     crop: { target: 'role=alertdialog', padding: 24 },
     annotations: [
       { marker: { target: 'text=/今の内容は［バックアップ履歴］に保存します/', label: '1', at: 'left' } },
@@ -635,7 +636,7 @@ export const scenes: Scene[] = [
     about: 'The notice when the server’s version was kept: it stays until closed, with 履歴を見る.',
     ...MAIN,
     query: { ...MAIN.query, result: 'conflict' },
-    steps: [CLOSE_LIST, { click: SYNC }, { waitFor: 'text=/1件のファイルは、ほかの人も同じところを変えていたため/' }],
+    steps: [CHAT_READY, { click: SYNC }, { waitFor: 'text=/1件のファイルは、ほかの人も同じところを変えていたため/' }],
     crop: { region: { x: 760, y: 560, width: 520, height: 240 } },
     annotations: [
       { marker: { target: 'text=/1件のファイルは、ほかの人も同じところを変えていたため/', label: '1', at: 'left' } },
@@ -646,7 +647,7 @@ export const scenes: Scene[] = [
     id: 'backup-history',
     about: '「バックアップ履歴」 with the kept version opened: the file, 復元 and the folder.',
     ...MAIN,
-    steps: [CLOSE_LIST, { click: ME }, { click: menuItem('バックアップ履歴') }, { click: 'text="ほかの人も同じところを変えていたため、サーバーの版を残したときのあなたの版"' }, { waitFor: 'role=button[name="復元"]' }],
+    steps: [CHAT_READY, { click: ME }, { click: menuItem('バックアップ履歴') }, { click: 'text="ほかの人も同じところを変えていたため、サーバーの版を残したときのあなたの版"' }, { waitFor: 'role=button[name="復元"]' }],
     crop: { region: { x: 768, y: 0, width: 512, height: 420 } },
     annotations: [
       { marker: { target: 'text="ほかの人も同じところを変えていたため、サーバーの版を残したときのあなたの版"', label: '1', at: 'left' } },
@@ -658,7 +659,7 @@ export const scenes: Scene[] = [
     id: 'backup-restore-confirm',
     about: '「復元」 asks first: the file is replaced, its current content kept in the backups.',
     ...MAIN,
-    steps: [CLOSE_LIST, { click: ME }, { click: menuItem('バックアップ履歴') }, { click: 'text="ほかの人も同じところを変えていたため、サーバーの版を残したときのあなたの版"' }, { click: 'role=button[name="復元"]' }, { waitFor: 'text=バックアップから復元しますか？' }],
+    steps: [CHAT_READY, { click: ME }, { click: menuItem('バックアップ履歴') }, { click: 'text="ほかの人も同じところを変えていたため、サーバーの版を残したときのあなたの版"' }, { click: 'role=button[name="復元"]' }, { waitFor: 'text=バックアップから復元しますか？' }],
     crop: { target: 'role=dialog', padding: 24 },
     annotations: [
       { marker: { target: 'text=/今の内容もこの履歴に保存してから置き換えます/', label: '1', at: 'left' } },
@@ -677,7 +678,7 @@ export const scenes: Scene[] = [
     about: 'Cancelled at 「編集できないファイルがあります」: sync stopped, the file named, nothing changed.',
     ...MAIN,
     query: { ...MAIN.query, result: 'denied' },
-    steps: [CLOSE_LIST, { click: SYNC }, { waitFor: 'text=/同期を中止しました/' }],
+    steps: [CHAT_READY, { click: SYNC }, { waitFor: 'text=/同期を中止しました/' }],
     crop: { region: { x: 760, y: 520, width: 520, height: 280 } },
     annotations: [{ marker: { target: 'text=/同期を中止しました/', label: '1', at: 'left' } }],
   },
@@ -686,7 +687,7 @@ export const scenes: Scene[] = [
     about: 'After 「元に戻して残りを同期」: that file put back, the member’s version in the backups.',
     ...MAIN,
     query: { ...MAIN.query, result: 'restored' },
-    steps: [CLOSE_LIST, { click: SYNC }, { waitFor: 'text=/元に戻しました/' }],
+    steps: [CHAT_READY, { click: SYNC }, { waitFor: 'text=/元に戻しました/' }],
     crop: { region: { x: 760, y: 560, width: 520, height: 240 } },
     annotations: [
       { marker: { target: 'text=/元に戻しました/', label: '1', at: 'left' } },
@@ -698,7 +699,7 @@ export const scenes: Scene[] = [
     about: 'The sync could not reach the server: the work stays on this PC, sent at the next sync.',
     ...MAIN,
     query: { ...MAIN.query, result: 'offline' },
-    steps: [CLOSE_LIST, { click: SYNC }, { waitFor: 'text=/サーバーに届けられませんでした/' }],
+    steps: [CHAT_READY, { click: SYNC }, { waitFor: 'text=/サーバーに届けられませんでした/' }],
     crop: { region: { x: 760, y: 600, width: 520, height: 200 } },
     annotations: [{ marker: { target: 'text=/サーバーに届けられませんでした/', label: '1', at: 'left' } }],
   },
@@ -707,7 +708,7 @@ export const scenes: Scene[] = [
     about: 'The sync button when automatic sync waits for the member (warning colour and mark).',
     ...MAIN,
     query: { ...MAIN.query, seed: JSON.stringify({ 'acb.autoSync.state:demo': JSON.stringify({ needsMember: true }) }) },
-    steps: [CLOSE_LIST],
+    steps: [CHAT_READY],
     crop: { region: { x: 560, y: 0, width: 720, height: 110 } },
     annotations: [{ box: SYNC_WAITS }, { note: { target: SYNC_WAITS, text: '① サーバーと同期（自動同期は止まっています）' } }],
   },
@@ -717,7 +718,7 @@ export const scenes: Scene[] = [
     id: 'tree-read-only',
     about: 'The 全社 tab: 総務部 marked 閲覧のみ for 山田さん.',
     ...MARKS,
-    steps: [CLOSE_LIST, { click: 'role=button[name="全社" s]' }, { click: FILES_TAB }, { click: '[data-tree-path$="/営業部"]' }, { waitFor: 'text=閲覧のみ' }],
+    steps: [CHAT_READY, { click: 'role=button[name="全社" s]' }, { click: FILES_TAB }, { click: '[data-tree-path$="/営業部"]' }, { waitFor: 'text=閲覧のみ' }],
     crop: { region: { x: 0, y: 100, width: 430, height: 200 } },
     annotations: [{ box: 'text=閲覧のみ' }, { marker: { target: 'text=閲覧のみ', label: '1', at: 'right' } }],
   },
@@ -725,7 +726,7 @@ export const scenes: Scene[] = [
     id: 'tree-marks',
     about: 'The 営業部 tab: a private folder (lock) and a folder not downloaded (未ダウンロード).',
     ...MARKS,
-    steps: [CLOSE_LIST, { click: SALES_TAB }, { click: FILES_TAB }, { waitFor: 'text=未ダウンロード' }],
+    steps: [CHAT_READY, { click: SALES_TAB }, { click: FILES_TAB }, { waitFor: 'text=未ダウンロード' }],
     crop: { region: { x: 0, y: 100, width: 430, height: 330 } },
     annotations: [
       { marker: { target: '[data-private-folder]', label: '1', at: 'right' } },
@@ -736,7 +737,7 @@ export const scenes: Scene[] = [
     id: 'tree-not-downloaded-menu',
     about: 'Right-clicking 過去資料 (not downloaded): ダウンロード.',
     ...MARKS,
-    steps: [CLOSE_LIST, { click: SALES_TAB }, { click: FILES_TAB }, { rightClick: 'role=button[name="過去資料（未ダウンロード）"]' }],
+    steps: [CHAT_READY, { click: SALES_TAB }, { click: FILES_TAB }, { rightClick: 'role=button[name="過去資料（未ダウンロード）"]' }],
     crop: { region: { x: 0, y: 100, width: 430, height: 400 } },
     annotations: [{ box: 'role=button[name="ダウンロード"] >> nth=-1' }, { marker: { target: 'role=button[name="ダウンロード"] >> nth=-1', label: '1', at: 'right' } }],
   },
@@ -744,7 +745,7 @@ export const scenes: Scene[] = [
     id: 'editor-read-only',
     about: 'A file of 総務部 opened: the 閲覧のみ notice above it.',
     ...MARKS,
-    steps: [CLOSE_LIST, { click: 'role=button[name="総務部" s]' }, { click: FILES_TAB }, { click: 'role=button[name=/^申請書のひな形\\.md/]' }, { waitFor: 'text=/このフォルダは閲覧のみです/' }],
+    steps: [CHAT_READY, { click: 'role=button[name="総務部" s]' }, { click: FILES_TAB }, { click: 'role=button[name=/^申請書のひな形\\.md/]' }, { waitFor: 'text=/このフォルダは閲覧のみです/' }],
     crop: { region: { x: 0, y: 100, width: 1000, height: 300 } },
     annotations: [{ box: 'text=/このフォルダは閲覧のみです/' }, { marker: { target: 'text=/このフォルダは閲覧のみです/', label: '1', at: 'below' } }],
   },
@@ -752,7 +753,7 @@ export const scenes: Scene[] = [
     id: 'tree-private-reader',
     about: 'Inside 提案前メモ (read by 3 people): the 非公開 band says how many.',
     ...MARKS,
-    steps: [CLOSE_LIST, { click: SALES_TAB }, { click: FILES_TAB }, { click: 'role=button[name=/^C社_検討メモ\\.md/]' }, { waitFor: 'text=/非公開：3人だけが見られます/' }],
+    steps: [CHAT_READY, { click: SALES_TAB }, { click: FILES_TAB }, { click: 'role=button[name=/^C社_検討メモ\\.md/]' }, { waitFor: 'text=/非公開：3人だけが見られます/' }],
     crop: { region: { x: 0, y: 100, width: 430, height: 330 } },
     annotations: [
       { box: 'text=/非公開：3人だけが見られます/' }, { marker: { target: 'text=/非公開：3人だけが見られます/', label: '1', at: 'below' } },
@@ -764,7 +765,7 @@ export const scenes: Scene[] = [
     about: 'The same 営業部 for someone who does not read 提案前メモ: it is not in the list at all.',
     ...MAIN,
     query: { ...MAIN.query, folders: 'other' },
-    steps: [CLOSE_LIST, { click: SALES_TAB }, { click: FILES_TAB }, { waitFor: 'text=未ダウンロード' }],
+    steps: [CHAT_READY, { click: SALES_TAB }, { click: FILES_TAB }, { waitFor: 'text=未ダウンロード' }],
     crop: { region: { x: 0, y: 100, width: 430, height: 330 } },
     annotations: [],
   },
@@ -867,7 +868,7 @@ export const scenes: Scene[] = [
     id: 'chat-history-list',
     about: 'The list of consultations: a new one, search, earlier ones to continue.',
     ...LIVE,
-    steps: [{ waitFor: 'text=見積の進め方の相談' }],
+    steps: [{ click: 'role=button[name="AIへの相談の一覧を開閉"]' }, { waitFor: 'text=見積の進め方の相談' }],
     crop: CHAT_CROP,
     annotations: [
       { marker: { target: 'role=button[name="AIに相談する"]', label: '1', at: 'left' } },
@@ -953,7 +954,7 @@ export const scenes: Scene[] = [
     id: 'skills-list',
     about: 'The 全社 tab’s Skill tab: the company’s two Skills, each with 実行 and 設定.',
     ...LIVE,
-    steps: [CLOSE_LIST, { click: 'role=button[name="全社" s]' }, { click: SKILLS_TAB }, { waitFor: 'text=thank-you-mail' }],
+    steps: [CHAT_READY, { click: 'role=button[name="全社" s]' }, { click: SKILLS_TAB }, { waitFor: 'text=thank-you-mail' }],
     crop: { region: { x: 0, y: 48, width: 860, height: 560 } },
     annotations: [
       { marker: { target: 'role=button[name="全社" s]', label: '1', at: 'below' } },
@@ -966,7 +967,7 @@ export const scenes: Scene[] = [
     id: 'skill-detail',
     about: 'A Skill’s 設定: what it does, its SKILL.md, この Skill を実行.',
     ...LIVE,
-    steps: [CLOSE_LIST, { click: 'role=button[name="全社" s]' }, { click: SKILLS_TAB }, { click: `${SKILL_CARD('thank-you-mail')} >> role=button[name="設定"]` }, { waitFor: 'text=Skill の設定' }, SETTLE],
+    steps: [CHAT_READY, { click: 'role=button[name="全社" s]' }, { click: SKILLS_TAB }, { click: `${SKILL_CARD('thank-you-mail')} >> role=button[name="設定"]` }, { waitFor: 'text=Skill の設定' }, SETTLE],
     crop: { region: { x: 0, y: 120, width: 1050, height: 680 } },
     annotations: [
       { box: 'role=button[name="この Skill を実行"]' }, { marker: { target: 'role=button[name="この Skill を実行"]', label: '1', at: 'left' } },
@@ -979,7 +980,7 @@ export const scenes: Scene[] = [
     id: 'skill-md-open',
     about: 'The Skill’s SKILL.md opened in the editor: the AI’s instructions in plain words.',
     ...LIVE,
-    steps: [CLOSE_LIST, { click: 'role=button[name="全社" s]' }, { click: SKILLS_TAB }, { click: `${SKILL_CARD('thank-you-mail')} >> role=button[name="設定"]` }, { click: 'role=button[name=/^SKILL\\.md/]' }, { waitFor: 'text=/件名は「本日のお打ち合わせのお礼」/' }, { click: FOLD_SIDE }, SETTLE],
+    steps: [CHAT_READY, { click: 'role=button[name="全社" s]' }, { click: SKILLS_TAB }, { click: `${SKILL_CARD('thank-you-mail')} >> role=button[name="設定"]` }, { click: 'role=button[name=/^SKILL\\.md/]' }, { waitFor: 'text=/件名は「本日のお打ち合わせのお礼」/' }, { click: FOLD_SIDE }, SETTLE],
     crop: { region: { x: 260, y: 120, width: 600, height: 380 } },
     annotations: [{ marker: { target: '.cm-line:has-text("1. 訪問メモを読み")', label: '1', at: 'left' } }],
   },
@@ -1003,7 +1004,7 @@ export const scenes: Scene[] = [
     steps: [...SALES_FILES, ...ASK('/thank-you-mail 訪問メモ_1123.md をもとにお願いします。'), { waitFor: 'text=/の手順どおりに/' }, SETTLE],
     crop: CHAT_CROP,
     annotations: [
-      { marker: { target: 'text=/^\\/thank-you-mail/', label: '1', at: 'left' } },
+      { marker: { target: '[data-user-bubble] >> text=/^\\/thank-you-mail/', label: '1', at: 'left' } },
       { box: 'role=button[name=/^Skill を使いました/]' }, { marker: { target: 'role=button[name=/^Skill を使いました/]', label: '2', at: 'left' } },
     ],
   },
@@ -1157,7 +1158,7 @@ export const scenes: Scene[] = [
     steps: [{ click: 'role=button[name="根拠を見る"]' }, SETTLE],
     crop: { region: { x: 0, y: 0, width: 830, height: 150 } },
     annotations: [
-      { marker: { target: 'text=/からAI が作りました/', label: '1', at: 'left' } },
+      { marker: { target: 'text=/から ?AI が作りました/', label: '1', at: 'left' } },
       { box: 'role=button[name="根拠をたたむ"] >> xpath=..' },
     ],
   },
@@ -1509,7 +1510,7 @@ export const scenes: Scene[] = [
     about: 'The main screen in the morning: ［受け箱］ in the title bar, the left tab ［やること］ and its list.',
     page: 'skill-layout',
     query: { companies: '2', manual: '1', tasks: 'manual' },
-    steps: [CLOSE_LIST, { click: SALES_TAB }, { click: TASKS_TAB }, { waitFor: 'text=セキュリティのチェックシートを埋める' }, SETTLE],
+    steps: [CHAT_READY, { click: SALES_TAB }, { click: TASKS_TAB }, { waitFor: 'text=セキュリティのチェックシートを埋める' }, SETTLE],
     annotations: [
       { box: '[data-inbox-button]' }, { marker: { target: '[data-inbox-button]', label: '1', at: 'below' } },
       { box: TASKS_TAB }, { marker: { target: TASKS_TAB, label: '2', at: 'right' } },
@@ -1520,7 +1521,7 @@ export const scenes: Scene[] = [
     id: 'chat-task-made',
     about: '「…をやることに入れて」 in 「AIへの相談」: the AI made it and says it is 「あなただけ」.',
     ...LIVE,
-    steps: [CLOSE_LIST, ...ASK('A社の見積を直す件を、月曜15時までのやることに入れて。'), { waitFor: 'text=/あなただけに見えるやることに入れました/' }, SETTLE],
+    steps: [CHAT_READY, ...ASK('A社の見積を直す件を、月曜15時までのやることに入れて。'), { waitFor: 'text=/あなただけに見えるやることに入れました/' }, SETTLE],
     crop: CHAT_CROP,
     annotations: [
       { box: 'role=button[name=/^記録を作りました/]' }, { marker: { target: 'role=button[name=/^記録を作りました/]', label: '1', at: 'left' } },
@@ -1531,7 +1532,7 @@ export const scenes: Scene[] = [
     id: 'chat-job-question',
     about: 'The third day with the same Skill: after the work, the AI asks once whether to make it a time job.',
     ...LIVE,
-    steps: [CLOSE_LIST, ...ASK('/weekly-report 今週の訪問メモから週報をまとめてください。'), { waitFor: 'text=/定期の仕事としてやりましょうか/' }, SETTLE],
+    steps: [CHAT_READY, ...ASK('/weekly-report 今週の訪問メモから週報をまとめてください。'), { waitFor: 'text=/定期の仕事としてやりましょうか/' }, SETTLE],
     crop: CHAT_CROP,
     annotations: [{ box: 'text=/定期の仕事としてやりましょうか/' }],
   },
@@ -1540,7 +1541,7 @@ export const scenes: Scene[] = [
     about: 'After 「はい」: the proposal card — when, what makes it run, what it does — ［これで管理者に出す］［やめる］.',
     ...LIVE,
     viewport: { width: 1280, height: 1800 },
-    steps: [CLOSE_LIST, ...ASK('はい。毎週月曜の朝9時にお願いします。'), { waitFor: 'role=button[name="これで管理者に出す"]' }, SETTLE,
+    steps: [CHAT_READY, ...ASK('はい。毎週月曜の朝9時にお願いします。'), { waitFor: 'role=button[name="これで管理者に出す"]' }, SETTLE,
       { run: "[...document.querySelectorAll('button')].find(b => b.textContent === 'これで管理者に出す')?.scrollIntoView({ block: 'center' })" }, SETTLE],
     crop: { target: 'role=button[name="これで管理者に出す"] >> xpath=ancestor::*[.//text()[contains(., "定期の仕事の案")]][1]', padding: { x: 32, y: 16 } },
     annotations: [
@@ -1956,7 +1957,7 @@ export const scenes: Scene[] = [
     id: 'find-palette',
     about: '⌘K 「名前で探す」 with 「訪問」 typed: the visit notes and an earlier consultation, each with its kind.',
     ...EXTRA_LIVE,
-    steps: [CLOSE_LIST, { press: 'ControlOrMeta+k' }, { fill: 'role=textbox[name="名前で探す"]', text: '訪問' }, { waitFor: 'role=option[name=/訪問メモの整理/]' }],
+    steps: [CHAT_READY, { press: 'ControlOrMeta+k' }, { fill: 'role=textbox[name="名前で探す"]', text: '訪問' }, { waitFor: 'role=option[name=/訪問メモの整理/]' }],
     crop: { target: 'role=dialog[name="探す"]', padding: { x: 40, y: 16 } },
     annotations: [
       { box: 'role=textbox[name="名前で探す"]' }, { marker: { target: 'role=textbox[name="名前で探す"]', label: '1', at: 'left' } },
@@ -1968,7 +1969,7 @@ export const scenes: Scene[] = [
     id: 'search-panel',
     about: 'The left 「探す」 tab with 「納期」: 営業部 only, ［全社で探す］, the period, and the lines found inside the files.',
     ...EXTRA,
-    steps: [CLOSE_LIST, { click: SALES_TAB }, { click: 'role=button[name="探す" s]' }, { fill: 'role=textbox[name="探す"]', text: '納期' }, { waitFor: 'role=region[name="中身で見つかったもの"]' }, SETTLE],
+    steps: [CHAT_READY, { click: SALES_TAB }, { click: 'role=button[name="探す" s]' }, { fill: 'role=textbox[name="探す"]', text: '納期' }, { waitFor: 'role=region[name="中身で見つかったもの"]' }, SETTLE],
     crop: { region: { x: 0, y: 120, width: 300, height: 440 } },
     annotations: [
       { marker: { target: 'role=textbox[name="探す"]', label: '1', at: 'right' } },
@@ -1992,7 +1993,7 @@ export const scenes: Scene[] = [
     id: 'layout-controls',
     about: 'The title bar\'s 「画面の形」: 左の欄 (⌘B) and AIチャット (⌘⇧C).',
     ...EXTRA,
-    steps: [CLOSE_LIST],
+    steps: [CHAT_READY],
     crop: { region: { x: 680, y: 0, width: 400, height: 110 } },
     annotations: [
       { box: 'role=button[name="左の欄 (⌘B)"]' }, { note: { target: 'role=button[name="左の欄 (⌘B)"]', text: '① 左の欄（⌘B）' } },
@@ -2076,7 +2077,7 @@ export const scenes: Scene[] = [
     id: 'chat-list-actions',
     about: '「AIへの相談」\'s list: search, and a row\'s ピン留め, 名前を編集, 別ウィンドウで開く, 相談を削除.',
     ...EXTRA_LIVE,
-    steps: [{ hover: 'role=button[name=/^A社へのお礼メール/]' }, SETTLE],
+    steps: [{ click: 'role=button[name="AIへの相談の一覧を開閉"]' }, { hover: 'role=button[name=/^A社へのお礼メール/]' }, SETTLE],
     crop: { target: 'role=complementary[name="AIへの相談"]', padding: { x: 40, y: 0 } },
     annotations: [
       { marker: { target: 'role=textbox[name="相談を検索"]', label: '1', at: 'left' } },
@@ -2199,7 +2200,7 @@ export const scenes: Scene[] = [
     about: 'One request: the AI searched the web, read a file of a department not downloaded and found an earlier consultation; the answer cites its sources.',
     ...EXTRA_LIVE,
     viewport: { width: 1280, height: 1000 },
-    steps: [CLOSE_LIST, ...ASK('A社の提案の前に、研修業界の最近の動きを Web で調べて、出どころもつけてください。取引先一覧と、前の B社の相談も見てまとめて。'), { waitFor: 'text=出どころ：' }, SETTLE],
+    steps: [CHAT_READY, ...ASK('A社の提案の前に、研修業界の最近の動きを Web で調べて、出どころもつけてください。取引先一覧と、前の B社の相談も見てまとめて。'), { waitFor: 'text=出どころ：' }, SETTLE],
     crop: CHAT_CROP,
     annotations: [
       { marker: { target: 'text=Webで調べました', label: '1', at: 'left' } },
@@ -2215,22 +2216,21 @@ export const scenes: Scene[] = [
   },
   {
     id: 'chat-header-model',
-    about: 'The consultation\'s header: the usage meter, the model, how hard it thinks, and 別ウィンドウで開く.',
+    about: 'The input\'s row: the usage meter and the one switch of the model and 考える強さ, opened.',
     ...CHAT_HEADER,
-    steps: [{ waitFor: 'role=button[name=/^利用上限/]' }],
-    crop: { target: 'role=banner', padding: { x: 16, y: 40 } },
+    steps: [{ waitFor: 'role=button[name=/^利用上限/]' }, { click: 'role=button[name=/^モデルと考える強さ：/]' }, { waitFor: 'role=menu[name="モデルと考える強さ"]' }, SETTLE],
+    crop: { region: { x: 521, y: 280, width: 759, height: 520 } },
     annotations: [
-      { marker: { target: 'role=button[name=/^利用上限/]', label: '1', at: 'below' } },
-      { marker: { target: 'role=banner >> role=combobox >> nth=0', label: '2', at: 'below' } },
-      { marker: { target: 'role=banner >> role=combobox >> nth=1', label: '3', at: 'below' } },
-      { box: 'role=banner >> role=button[name="別ウィンドウで開く"]' }, { marker: { target: 'role=banner >> role=button[name="別ウィンドウで開く"]', label: '4', at: 'below' } },
+      { marker: { target: '[data-composer-drop] >> role=button[name=/^利用上限/]', label: '1', at: 'below' } },
+      { box: 'role=button[name=/^モデルと考える強さ：/]' }, { marker: { target: 'role=button[name=/^モデルと考える強さ：/]', label: '2', at: 'below' } },
+      { marker: { target: 'role=menu[name="モデルと考える強さ"]', label: '3', at: 'left' } },
     ],
   },
   {
     id: 'chat-auth-settings',
     about: 'The consultation\'s settings: 認証方法を選択 — Claude Max / Pro, Codex（ChatGPTプラン）, API キー.',
     ...CHAT_HEADER,
-    steps: [{ waitFor: 'role=button[name=/^利用上限/]' }, { click: 'role=banner >> role=button >> nth=-1' }, { waitFor: 'text=Codex（ChatGPTプラン）' }, SETTLE],
+    steps: [{ waitFor: 'role=button[name=/^利用上限/]' }, { click: 'role=banner >> role=button[name="その他の操作"]' }, { click: 'role=button[name="相談の設定（使う AI）"]' }, { waitFor: 'text=Codex（ChatGPTプラン）' }, SETTLE],
     crop: { region: { x: 521, y: 355, width: 759, height: 345 } },
     annotations: [
       { marker: { target: 'text=Claude Max / Pro', label: '1', at: 'right' } },
@@ -2244,7 +2244,7 @@ export const scenes: Scene[] = [
     about: '［新しい Skill を追加］: 「新しい Skill を作成」, step 1 with the name and the folder name filled in.',
     ...EXTRA,
     steps: [
-      CLOSE_LIST, { click: SALES_TAB }, { click: SKILLS_TAB }, { click: 'role=button[name=/新しい Skill を追加/]' },
+      CHAT_READY, { click: SALES_TAB }, { click: SKILLS_TAB }, { click: 'role=button[name=/新しい Skill を追加/]' },
       { fill: 'role=textbox[name="例: 提案書作成"]', text: '見積の骨子' }, { fill: 'role=textbox[name="my-skill-name"]', text: 'estimate-outline' },
     ],
     crop: { target: 'role=dialog[name="新しい Skill を作成"]', padding: 16 },
@@ -2258,7 +2258,7 @@ export const scenes: Scene[] = [
     id: 'skill-private',
     about: 'The Skill 山田さん made: 「非公開 — あなただけ」 and ［公開する］ in its 設定.',
     ...EXTRA,
-    steps: [CLOSE_LIST, { click: SALES_TAB }, { click: SKILLS_TAB }, { click: 'role=button[name="非公開 (1)"]' }, { click: `${SKILL_CARD('estimate-outline')} >> role=button[name="設定"]` }, { waitFor: 'text=Skill の設定' }, SETTLE],
+    steps: [CHAT_READY, { click: SALES_TAB }, { click: SKILLS_TAB }, { click: 'role=button[name="非公開 (1)"]' }, { click: `${SKILL_CARD('estimate-outline')} >> role=button[name="設定"]` }, { waitFor: 'text=Skill の設定' }, SETTLE],
     crop: { region: { x: 0, y: 120, width: 1050, height: 560 } },
     annotations: [
       { box: 'xpath=//span[normalize-space()="— あなただけ"]/..' }, { marker: { target: 'xpath=//span[normalize-space()="— あなただけ"]/..', label: '1', at: 'left' } },
@@ -2365,7 +2365,7 @@ export const scenes: Scene[] = [
     about: 'After a sync: 提案前メモ taken off this PC because 山田さん may no longer read it.',
     ...MAIN,
     query: { ...MAIN.query, result: 'lost' },
-    steps: [CLOSE_LIST, { click: SYNC }, { waitFor: 'text=/手元から削除しました/' }],
+    steps: [CHAT_READY, { click: SYNC }, { waitFor: 'text=/手元から削除しました/' }],
     crop: { region: { x: 760, y: 520, width: 520, height: 280 } },
     annotations: [{ marker: { target: 'text=/手元から削除しました/', label: '1', at: 'left' } }],
   },
@@ -2447,7 +2447,7 @@ export const scenes: Scene[] = [
     about: 'A company without the shared folder: 「この PC だけで作業」 in the title bar, pressed.',
     ...MAIN,
     query: { ...MAIN.query, kind: 'none' },
-    steps: [CLOSE_LIST, { click: 'role=button[name="この PC だけで作業"]' }, { waitFor: 'role=note' }],
+    steps: [CHAT_READY, { click: 'role=button[name="この PC だけで作業"]' }, { waitFor: 'role=note' }],
     crop: { region: { x: 380, y: 0, width: 900, height: 220 } },
     annotations: [
       { box: 'role=button[name="この PC だけで作業"]' }, { marker: { target: 'role=button[name="この PC だけで作業"]', label: '1', at: 'left' } },
@@ -2459,7 +2459,7 @@ export const scenes: Scene[] = [
     about: 'A company without the shared folder: thank-you-mail is 「会社の Skill」, with ［自分用に直す］.',
     ...MAIN,
     query: { ...MAIN.query, kind: 'none' },
-    steps: [CLOSE_LIST, { click: 'role=button[name="全社" s]' }, { click: SKILLS_TAB }, { click: `${SKILL_CARD('thank-you-mail')} >> role=button[name="設定"]` }, { waitFor: 'text=/^会社の Skill（版/' }, SETTLE],
+    steps: [CHAT_READY, { click: 'role=button[name="全社" s]' }, { click: SKILLS_TAB }, { click: `${SKILL_CARD('thank-you-mail')} >> role=button[name="設定"]` }, { waitFor: 'text=/^会社の Skill（版/' }, SETTLE],
     crop: { region: { x: 0, y: 120, width: 1050, height: 560 } },
     annotations: [
       { box: 'text=/^会社の Skill（版/ >> xpath=..' }, { marker: { target: 'text=/^会社の Skill（版/ >> xpath=..', label: '1', at: 'left' } },
@@ -2506,7 +2506,7 @@ export const scenes: Scene[] = [
     id: 'title-bar-account',
     about: 'The right end of the title bar: 使い方, and あなたの丸 opened (設定, 表示, 言語, ログアウト).',
     ...MAIN,
-    steps: [CLOSE_LIST, { click: ME }],
+    steps: [CHAT_READY, { click: ME }],
     crop: { region: { x: 840, y: 0, width: 440, height: 330 } },
     annotations: [
       { box: 'role=button[name="使い方"]' }, { marker: { target: 'role=button[name="使い方"]', label: '1', at: 'left' } },
@@ -2520,7 +2520,7 @@ export const scenes: Scene[] = [
     id: 'manual-export',
     about: '［使い方］ opened in the middle: its tool bar with ［書き出す］.',
     ...MAIN,
-    steps: [CLOSE_LIST, { click: 'role=button[name="使い方"]' }, { waitFor: 'role=toolbar[name="使い方の表示"]' }],
+    steps: [CHAT_READY, { click: 'role=button[name="使い方"]' }, { waitFor: 'role=toolbar[name="使い方の表示"]' }],
     crop: { target: 'role=toolbar[name="使い方の表示"]', padding: 12 },
     annotations: [{ box: 'role=button[name="書き出す"]' }, { marker: { target: 'role=button[name="書き出す"]', label: '1', at: 'left' } }],
   },
@@ -2583,7 +2583,7 @@ scenes.push({
   // Tall enough for the whole consultation from the request down, starting just above it (no half bubble).
   viewport: { width: 1440, height: 1385 },
   steps: [
-    CLOSE_LIST, { click: 'role=button[name="左の欄 (⌘B)"]' },
+    CHAT_READY, { click: 'role=button[name="左の欄 (⌘B)"]' },
     ...ASK('業務の形の Skill で、見積を出す仕事を形にしたいです。'), { waitFor: 'text=最近の1件で、最初に何をしましたか？' },
     ...ASK('お客さんのメールを読んで、数量と納期をノートにメモしました。'), { waitFor: 'text=そのあと、何をしましたか？' },
     ...ASK('前回の見積を開いて、単価を写しました。'), { waitFor: 'text=穴の一覧' },
