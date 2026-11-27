@@ -19,6 +19,7 @@ import { docQuoteFoundOf, docReviewSelectionOf, docViewReviewOf, type CheckedRev
 import { drawQuotesCode, findQuoteCode, READ_SELECTION_CODE } from './review-world'
 import { blockedWebHost, docViewBounds, parseDocFrameUrl, docZoomFactor, DOC_BLOCKED_HOSTS_MAX, DOC_BLOCKED_PARTS_MAX, type DocViewBounds, type DocViewEvent } from '../../../shared/doc-frame'
 import { driveVideoIdsOf, driveVideoViewUrl } from '../../../shared/doc-drive-videos'
+import { driveFileIdFromLink } from '../../../../shared/core/google-drive'
 import { webLinkForBrowser } from '../../external-url'
 import type { KeyInput } from '../../../shared/commands/define'
 import type { DocFrames, OpenableDocument } from './protocol'
@@ -222,6 +223,12 @@ export function createDocViews(deps: DocViewsDeps) {
   /** View id → the Drive videos its own document embeds, as last served. */
   const videos = new Map<number, DriveVideos>()
   /**
+   * View id → Drive file addresses its page asked for while its document's videos were still being read:
+   * held back from the band's count until the read ends, then counted only when the id is not one of the
+   * document's videos (those are offered in ACB's player, so the blocked Drive embed is not a missing part).
+   */
+  const heldDrive = new Map<number, Array<{ key: string; host: string; id: string }>>()
+  /**
    * Tell the window the view's videos when what is offered changed: the list only while its main frame
    * shows the document (`onOwnPage`), else none; a reload serving the same file says nothing.
    */
@@ -247,6 +254,7 @@ export function createDocViews(deps: DocViewsDeps) {
     reading.delete(viewId)
     pages.delete(viewId)
     videos.delete(viewId)
+    heldDrive.delete(viewId)
     deps.players?.closeView(viewId)
     blocked.get(viewId)?.cancel?.()
     blocked.delete(viewId)
@@ -264,6 +272,18 @@ export function createDocViews(deps: DocViewsDeps) {
       tally.cancel = null
       tellBlocked(viewId)
     }, BLOCKED_INTERVAL_MS)
+  }
+  /** Count one blocked address (its SHA-256 `key`) for the view's band. */
+  const countBlocked = (viewId: number, key: string, host: string) => {
+    if ((blocked.get(viewId)?.urls.size ?? 0) >= DOC_BLOCKED_PARTS_MAX) return
+    let tally = blocked.get(viewId)
+    if (!tally) blocked.set(viewId, tally = { urls: new Set(), allHosts: new Set(), hosts: [], dirty: false, told: false, cancel: null })
+    if (tally.urls.has(key)) return
+    tally.urls.add(key)
+    tally.allHosts.add(host)
+    if (!tally.hosts.includes(host) && tally.hosts.length < DOC_BLOCKED_HOSTS_MAX) tally.hosts.push(host)
+    tally.dirty = true
+    tellBlocked(viewId)
   }
   // The shell's word that a view went. Still registered = nobody here closed it (its page
   // crashed, it was destroyed): its window is told, so the tab does not show an empty area.
@@ -296,15 +316,20 @@ export function createDocViews(deps: DocViewsDeps) {
       // Only internet addresses, and only their host ever leaves main.
       const host = blockedWebHost(url)
       if (!host) return
-      let tally = blocked.get(viewId)
-      if (!tally) blocked.set(viewId, tally = { urls: new Set(), allHosts: new Set(), hosts: [], dirty: false, told: false, cancel: null })
       const key = createHash('sha256').update(url).digest('base64')
-      if (tally.urls.has(key)) return
-      tally.urls.add(key)
-      tally.allHosts.add(host)
-      if (!tally.hosts.includes(host) && tally.hosts.length < DOC_BLOCKED_HOSTS_MAX) tally.hosts.push(host)
-      tally.dirty = true
-      tellBlocked(viewId)
+      // A Drive embed of one of the document's own videos is ACB's player's, not a missing part.
+      const driveId = host === 'drive.google.com' ? driveFileIdFromLink(url) : null
+      if (driveId !== null) {
+        const list = videos.get(viewId)
+        if (list?.reading) {
+          const held = heldDrive.get(viewId) ?? []
+          if (held.length < DOC_BLOCKED_PARTS_MAX) held.push({ key, host, id: driveId })
+          heldDrive.set(viewId, held)
+          return
+        }
+        if (list?.seen.has(driveId)) return
+      }
+      countBlocked(viewId, key, host)
     },
     onPageStart(viewId, url) {
       const view = views.get(viewId)
@@ -387,6 +412,10 @@ export function createDocViews(deps: DocViewsDeps) {
       for (const id of ids) if (list.seen.size < DRIVE_VIDEOS_SEEN_MAX) list.seen.add(id)
       list.reading = false
       tellVideos(viewId, list)
+      // Drive addresses held while reading: counted now unless the document's own videos name them.
+      const held = heldDrive.get(viewId)
+      heldDrive.delete(viewId)
+      for (const h of held ?? []) if (!list.seen.has(h.id)) countBlocked(viewId, h.key, h.host)
       const next = list.next
       list.next = null
       if (next && next.version !== list.version) readVideos(viewId, list, next.bytes, next.version)

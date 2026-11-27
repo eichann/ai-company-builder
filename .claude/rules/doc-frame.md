@@ -332,6 +332,12 @@ carrying a secret in its user name reached a local listener). Each document is s
   request first) and stays as a second source for a request that gets past the CSP. Not reported:
   preconnect, DNS prefetch, WebRTC, a popup, a link (the navigation lock; a link the member pressed
   is the A2 confirmation).
+- **A Drive embed ACB plays is not a missing part** (owner FB 2026-11-27: the band still warned about the
+  document's own Drive video): a blocked address on exactly `drive.google.com` whose file id (`driveFileIdFromLink`)
+  is one of the document's own videos (`seen`, from main's read of the served bytes) is not counted — ACB's player
+  shows it. While the document is still being read (`reading`) such an address is held and decided when the read
+  ends; any other Drive file and every other host are counted as before. Test: `doc-frame-drive-videos.test.ts`
+  「a blocked Drive embed of one of the document's own videos…」 (the skip and the hold each fail it when removed).
 - **Hosts only** (`views.ts` `onBlocked`, `blockedWebHost` in `client/shared/doc-frame.ts`): only
   `http` / `https` / `ws` / `wss`; the host lower case, punycode, no port, user name, path or query
   (an address can carry what the page holds); `file:` / `data:` / other schemes are not internet
