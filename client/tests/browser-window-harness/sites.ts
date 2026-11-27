@@ -103,6 +103,20 @@ const WORK_PAGE = `<!doctype html><meta charset="utf-8"><title>work</title><p>wo
   window.upload = () => { const f = new FormData(); f.append('name', 'u'); f.append('file', new Blob(['abc']), 'a.txt'); return fetch('/work/save', { method: 'POST', body: f }).then(r => r.status, () => 'failed') }
 </script>`
 
+/**
+ * A save button whose script sends its write a moment after the first press (as a page that checks the form first) and
+ * at once on any later press; the site answers slowly. A press while the first save is on its way must make no second
+ * save (the operator's press is not done while a held write is being sent: agent-browser.md "Writes within frames, in
+ * the app").
+ */
+const SLOW_SAVE_PAGE = `<!doctype html><meta charset="utf-8"><title>slow save</title>
+<button id="save" type="button">遅い保存</button>
+<script>
+  let pressed = 0
+  const send = () => fetch('/work/slow', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ n: pressed }) })
+  document.getElementById('save').addEventListener('click', () => { pressed++; if (pressed === 1) setTimeout(send, 2000); else send() })
+</script>`
+
 const RECORDING_PAGE = `<!doctype html><meta charset="utf-8"><title>orders</title>
 <label for="end">受付終了日</label><input id="end" name="end_date" type="text">
 <label for="pw">パスワード</label><input id="pw" name="login_pw" type="password">
@@ -299,6 +313,17 @@ export async function startSites(certDir: string, ports: { site: number; evil: n
       if (host === 'op.test' && url === '/work') {
         res.setHeader('content-type', 'text/html; charset=utf-8')
         res.end(WORK_PAGE)
+        return
+      }
+      if (host === 'op.test' && url === '/work-slow') {
+        res.setHeader('content-type', 'text/html; charset=utf-8')
+        res.end(SLOW_SAVE_PAGE)
+        return
+      }
+      if (host === 'op.test' && url === '/work/slow' && req.method === 'POST') {
+        const hit: WorkHit = { path: url, name: body, cookie: '', csrf: '', start: Date.now(), end: 0 }
+        state.work.push(hit)
+        setTimeout(() => { hit.end = Date.now(); res.writeHead(201, { 'content-type': 'application/json' }); res.end('{"id":7}') }, 2500)
         return
       }
       if (host === 'op.test' && url === '/work/save' && req.method === 'POST') {

@@ -31,6 +31,9 @@ import { createBrowserRecorder } from '../../shared/browser-recorder'
 import { browserRecordingProblem } from '../../../shared/core/browser-recording'
 import { newRecordingDigest } from '../../electron/features/browser/recording'
 import { createFrameWriter } from '../../electron/features/browser/frame-writes'
+import { wireBrowserWork } from '../../electron/features/browser/work'
+import { createBrowserContext } from '../../electron/features/browser/context'
+import type { PreviewOperator } from '../../electron/features/browser/preview'
 import type { BrowserLinesAnswer } from '../../electron/features/browser/lines-api'
 
 const dir = process.env.BROWSER_TEST_DIR!
@@ -201,6 +204,7 @@ async function run() {
   result.recording = await recordingScenarios(win, shell, site, js)
   result.browse = await browseScenarios(win, sites)
   result.work = await workScenarios(win, sites)
+  result.workPress = await workPressScenario(win, sites)
 
   // The login: a cookie and storage of the site, then cleared.
   await js(`document.cookie = 'sid=1; Secure; Max-Age=3600'; localStorage.setItem('k', 'v'); 1`)
@@ -622,6 +626,73 @@ async function workScenarios(win: BrowserShellWindow, sites: Sites) {
   out.records = writer.records().map(r => ({ line: r.line, outcome: r.outcome }))
   out.log = writer.log()
   out.work = sites.work.map(w => ({ ...w }))
+  await page.loadURL('https://op.test/').catch(() => {})
+  await wait(300)
+  return out
+}
+
+/**
+ * The write task wired (work.ts) on the real window: the operator presses a save whose page sends its write two seconds
+ * later to a site that answers after 2.5 s, then presses again while that write is being sent. The second press is not
+ * done (the app's own rule, not the operator's words), so the site gets one save — the frame allows two.
+ */
+async function workPressScenario(win: BrowserShellWindow, sites: Sites) {
+  const out: Record<string, unknown> = {}
+  const page = win.webContents
+  await page.loadURL('https://op.test/work-slow')
+  await wait(500)
+  const hitsBefore = sites.work.filter(w => w.path === '/work/slow').length
+  const RUN = `bf_${'d'.repeat(32)}`
+  const ok = (value: unknown): BrowserLinesAnswer => ({ kind: 'ok', value })
+  let permits = 0
+  const api = {
+    async runStart() { return ok({ runId: `bo_${'d'.repeat(32)}`, leaseMs: 120_000 }) },
+    async runContinue() { return ok({}) },
+    async runFinish() { return ok({}) },
+    async frameStart() {
+      return ok({
+        runId: RUN, state: 'open', endReason: null, host: 'op.test', source: 'skill', skill: 'slow', planHash: `sha256:${'e'.repeat(64)}`,
+        needsApproval: false, approval: 'pre_approved', createdAt: '', expiresAt: new Date(Date.now() + 3_600_000).toISOString(), endedAt: null,
+        frames: [{ frame: 1, method: 'POST', path: '/work/slow', fields: {}, max: 2, used: 0, left: 2 }], writes: [],
+        approvalToken: null, afterRead: [], neverRead: [],
+      })
+    },
+    async framePermit(_c: string, _r: string, body: { frame: number }) { permits++; return ok({ write: permits, frame: body.frame, permittedAt: new Date().toISOString(), validMs: 5000 }) },
+    async frameReport() { return ok({}) },
+    async frameEnd() { return ok({}) },
+    async frameGet() { return { kind: 'no-answer' } as BrowserLinesAnswer },
+  }
+  const histories: unknown[] = []
+  let step = 0
+  const operator: PreviewOperator = {
+    model: 'm',
+    async resolve() { return { ok: true, cli: { path: '/bin/true', pathDirs: [] } } },
+    async step(job) {
+      const m = job.material as { page: { elements: Array<{ ref: number; name: { outside: string } }> }; history: unknown[] }
+      histories.push(m.history)
+      const save = m.page.elements.find(e => e.name.outside === '遅い保存')?.ref ?? -1
+      step++
+      if (step === 1) return { ok: true, text: JSON.stringify({ do: 'click', ref: save }) }
+      // The first save's write is held about two seconds after the press: press again while it is being sent.
+      if (step === 2) { await wait(1500); return { ok: true, text: JSON.stringify({ do: 'click', ref: save }) } }
+      return { ok: true, text: JSON.stringify({ do: 'done', result: '済み', unread: [] }) }
+    },
+  }
+  const works = wireBrowserWork({
+    aiSwitch: () => true, userId: () => 'u-1', context: createBrowserContext({ userId: () => 'u-1', aiSwitch: () => true }),
+    stopped: () => false, window: () => win.browse, reader: () => ({ async read() { return { status: 404, body: '' } }, closed: () => false }),
+    registered: () => true, api: api as never, operator: () => operator, cliPath: () => '/bin/true', parentEnv: () => ({}),
+    writeStartMs: 300,
+  })
+  out.words = (await works.work({
+    companyId: 'company-1', conversationId: null, companyRoot: null, site: 'op.test', task: '保存する', skill: 'slow', items: [],
+    signal: new AbortController().signal, onCard: () => {},
+  })).words
+  // Anything the page might still send later would have gone by now.
+  await wait(3000)
+  out.hits = sites.work.filter(w => w.path === '/work/slow').length - hitsBefore
+  out.permits = permits
+  out.histories = histories
   await page.loadURL('https://op.test/').catch(() => {})
   await wait(300)
   return out

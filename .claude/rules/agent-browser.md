@@ -3720,11 +3720,15 @@ else. **No site word** anywhere (a fictional site in the tests).
   words (`WORK_WRITE_WHY_WORDS`: outside every frame, the frame used up, not this run's object, a file, unreadable,
   another host, the run over, no permit, stopped before sending). Nothing the page or the site sent (no value, path,
   status or text); the consultation AI never gets any of it. So the operator never sees a frame's `left` gone without a
-  write to show, and can tell which press each write came from. The material also carries **`writesSending`** (how many
-  are being sent). **A press while one is being sent is not ignored** (seen on a real window: the second press's write
-  queued behind the first and the site got the same save twice, with a frame of max 2), so the prompt says it plainly:
-  each press is sent as a new write while the frame has units left, twice is two writes and cannot be taken back, and
-  while `writesSending` is above 0 the operator presses nothing and answers `wait`. None of this changes what is sent, permitted or reported (`FramesLife.tla`'s app actions are unchanged:
+  write to show, and can tell which press each write came from.
+- **No press while a write is being sent — the app's rule, not the operator's words** (seen on a real window: a second
+  press while the first save was on its way queued behind it and the site got the same save twice, with a frame of max
+  2; owner: guarantee it by the mechanism, do not add instructions). In the work, while `writer.sending()` is above 0,
+  `operate` does not do a press, typing, choice or back (anything that could make another write); reading (`go`) and
+  `wait` pass. The refused action stands in the operator's history as `refused` with `why: 'sending'`, told in fixed
+  words (`WORK_NOT_PRESSED_WHILE_SENDING` 「送っている途中なので押していません」); the next look then waits for the write as
+  above. The old prompt sentence 「同じ保存を何度も押さないでください（書き込みは1回ずつしか送られません）」 is gone: it read as
+  "pressing again sends nothing", which was false. None of this changes what is sent, permitted or reported (`FramesLife.tla`'s app actions are unchanged:
   the operator is not modelled, and giving up mid-run is the model's `AppCrashes` / the server's time-out, as at the end).
 - **Kept for the card** (main's memory): each write's frame line (the frame's method and pattern — never the path the
   page sent), its outcome, the site's status when not a success, what it sent (`sentFields`: one value per field, never
@@ -3801,6 +3805,8 @@ between main's looks still counted (the page settles, its next write waited for)
 the frames → the operator still looks again at the limit, `idle` covering a write held while it waits, the material's
 words — each mutation-checked: no wait, no moment after the press, no idle wait, the old `idle`, no 「送っている途中」,
 no give-up, no moment after the answers, no settle, no limit, no frame / action / reason, a decided write not counted;
+a press while a write is being sent not done (also on the real window, `browser-window-electron.test.ts`: a fictional
+slow save pressed twice reaches the site once although its frame allows two — twice without the rule);
 kept on purpose (time only): the end not waiting twice after a give-up, the moment ending early once a write was held),
 `client/tests/browser-core-words.test.ts` (the tool, its schema and both prompts name no
 site), `server/tests/unit/browser-runs.test.ts` (`write: true` at 見るだけ / on a 見るだけ site refused; the joined lock —

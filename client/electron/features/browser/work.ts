@@ -220,6 +220,8 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
     frames: () => WorkFrame[] | null
     writes: () => WorkWriteSeen[]
     locked: () => boolean
+    /** How many held writes are being sent now (0 in the preview). */
+    sending?: () => number
     /** Counts the operator's actions (its history's numbering), so a held write says which one it followed. */
     actions?: { n: number }
     /**
@@ -297,6 +299,13 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
         return { kind: 'answer', answer }
       }
       const action: BrowserBrowseAction = answer
+      // While a held write is being sent, nothing that could make another write is done (a press queued behind it would
+      // be sent as a second write: seen on a real window): only reading (`go`) and waiting pass. Told in fixed words.
+      if ((o.sending?.() ?? 0) > 0 && action.do !== 'wait' && action.do !== 'go') {
+        history.push({ do: action.do, ...('ref' in action ? { ref: action.ref } : {}), outcome: 'refused', why: 'sending' })
+        if (o.actions) o.actions.n = history.length
+        continue
+      }
       // A press by position or a typing without a ref: what the window's hit-test finds there now; refused → nothing done.
       const aimed = aimedAction(action) ? (await o.win.aim?.(action)) ?? { ok: false as const, why: 'nothing' as const } : undefined
       if (aimed && !aimed.ok) { history.push({ do: action.do, outcome: 'refused', why: aimed.why }); if (o.actions) o.actions.n = history.length; continue }
@@ -669,6 +678,7 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
         task: o.task, items: o.items, steps: o.steps, adhoc: o.adhoc,
         frames: () => (typeof o.frames === 'function' ? o.frames() : o.frames),
         writes: () => writer?.seen() ?? [], locked: () => writer?.locked() ?? false, ...(o.actions ? { actions: o.actions } : {}),
+        ...(writer ? { sending: () => writer.sending() } : {}),
         settleWrites: (afterAction: boolean) => (writer ? settleWrites(writer, o.win, afterAction, o.cut.signal) : Promise.resolve(true)),
         cut: o.cut, trail: o.trail, budget, deadline, current: o.current, whyNot: o.whyNot, log,
       })
