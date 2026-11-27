@@ -7,7 +7,9 @@
  *
  * - The snapshot keeps the usable elements in `window.__acbBrowse` (the isolated world's own global) and answers JSON:
  *   the address, the title, the visible text (`innerText`, bounded) and the elements — visible ones only, a password
- *   field's value never read, a text field named by its label / placeholder only (never by what is in it).
+ *   field's value never read, a text field named by its label / placeholder only (never by what is in it) — and, as role
+ *   `item`, elements that act as controls without being one (a click handler, a pointer cursor, a list or tree item under a
+ *   clickable list); each with where it is on the screen (`box`) for the numbered marks of the operator's screen image.
  * - The element scripts find an element by its number in that list, and answer null when it is gone (another page).
  */
 import { BROWSER_BROWSE_LIMITS as L } from './browser-browse'
@@ -17,6 +19,8 @@ export const BROWSER_BROWSE_WORLD = 1207
 
 export const BROWSER_SNAPSHOT_SCRIPT = `(() => {
   const MAX_TEXT = ${L.pageText + 1}, MAX_EL = ${L.elements}, MAX_NAME = ${L.name}, MAX_OPTIONS = ${L.options}
+  const MAX_CLICKABLE = ${L.clickables}, MAX_SCAN = ${L.clickableScan}
+  const vw = window.innerWidth, vh = window.innerHeight
   const refs = []
   window.__acbBrowse = refs
   const clean = s => String(s == null ? '' : s).replace(/\\s+/g, ' ').trim().slice(0, MAX_NAME)
@@ -25,6 +29,13 @@ export const BROWSER_SNAPSHOT_SCRIPT = `(() => {
     if (r.width <= 0 || r.height <= 0) return false
     const cs = getComputedStyle(el)
     return cs.visibility !== 'hidden' && cs.display !== 'none'
+  }
+  // Where the element is on the screen now (CSS pixels of the viewport), or null when none of it is on screen: the
+  // numbered marks drawn on the operator's screen image.
+  const boxOf = el => {
+    const r = el.getBoundingClientRect()
+    if (r.right <= 0 || r.bottom <= 0 || r.left >= vw || r.top >= vh) return null
+    return [Math.round(r.left), Math.round(r.top), Math.round(r.width), Math.round(r.height)]
   }
   const roleOf = el => {
     const tag = el.tagName.toLowerCase()
@@ -99,10 +110,66 @@ export const BROWSER_SNAPSHOT_SCRIPT = `(() => {
     if (role === 'textbox' && !el.isContentEditable) item.value = clean(el.value)
     if (role === 'select') item.options = Array.from(el.options).slice(0, MAX_OPTIONS).map(o => clean(o.text))
     if (role === 'checkbox' || role === 'radio') item.checked = !!el.checked
+    const box = boxOf(el)
+    if (box) item.box = box
+    elements.push(item)
+  }
+  // Elements that act as controls without being one (a folder tree's rows, a card with a click handler): role \`item\`.
+  // Signs: an onclick attribute, tabindex >= 0, an interactive role the list above does not take, or the top of a
+  // cursor:pointer subtree (cursor is inherited: only the outermost element of each subtree is a candidate, so a row and
+  // each of its children are never all listed). A pointer subtree holding two or more list / tree items (event
+  // delegation on the list) gives its items instead. Never one inside a real control listed above, never the page itself
+  // or a container covering most of the screen, never one without its own words; each named by its own text only (a
+  // nested item's text is the nested item's). Bounded: MAX_CLICKABLE of them, the page's first MAX_SCAN elements looked at.
+  const listed = new Set(refs)
+  const insideControl = el => { for (let p = el.parentElement; p; p = p.parentElement) if (listed.has(p)) return true; return false }
+  const pointer = el => getComputedStyle(el).cursor === 'pointer'
+  const ITEM = 'li, tr, [role=treeitem], [role=listitem], [role=row], [role=option], [role=menuitem]'
+  const ownWords = el => {
+    const c = el.cloneNode(true)
+    c.querySelectorAll(ITEM + ', script, style, template, input, select, textarea, option').forEach(n => n.remove())
+    return clean(c.textContent || '')
+  }
+  const candidates = []
+  for (const el of document.querySelectorAll('[onclick], [tabindex]:not([tabindex^="-"]), [role=treeitem], [role=switch], [role=menuitemcheckbox], [role=menuitemradio]')) candidates.push(el)
+  const all = document.body ? document.body.getElementsByTagName('*') : []
+  for (let i = 0; i < all.length && i < MAX_SCAN; i++) {
+    const el = all[i]
+    if (pointer(el) && !(el.parentElement && pointer(el.parentElement))) {
+      const items = Array.from(el.querySelectorAll(ITEM)).filter(visible)
+      if (items.length >= 2) candidates.push(...items)
+      else candidates.push(el)
+    }
+  }
+  // In document order (an ancestor before what is inside it), each once.
+  const ordered = Array.from(new Set(candidates)).sort((a, b) => (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1))
+  const picked = new Set()
+  // Inside an element already picked: left out (its click is the picked one's), except an item inside an item (a tree's
+  // folder inside its parent folder: each is its own target, named by its own words).
+  const insidePicked = el => {
+    for (let p = el.parentElement; p; p = p.parentElement) if (picked.has(p) && !(p.matches(ITEM) && el.matches(ITEM))) return true
+    return false
+  }
+  let clickables = 0
+  for (const el of ordered) {
+    if (elements.length >= MAX_EL || clickables >= MAX_CLICKABLE) break
+    if (listed.has(el) || el === document.body || el === document.documentElement) continue
+    if (!visible(el) || insideControl(el) || insidePicked(el)) continue
+    const r = el.getBoundingClientRect()
+    if (r.width * r.height > 0.4 * vw * vh) continue
+    const name = ownWords(el) || clean(el.getAttribute('aria-label') || el.getAttribute('title') || '')
+    if (!name) continue
+    picked.add(el)
+    clickables++
+    const ref = refs.length
+    refs.push(el)
+    const item = { ref, role: 'item', name, logLabel: controlLabel(el) }
+    const box = boxOf(el)
+    if (box) item.box = box
     elements.push(item)
   }
   const text = document.body ? String(document.body.innerText || '') : ''
-  return JSON.stringify({ address: location.href, title: document.title, text: text.slice(0, MAX_TEXT), truncated: text.length >= MAX_TEXT, elements })
+  return JSON.stringify({ address: location.href, title: document.title, text: text.slice(0, MAX_TEXT), truncated: text.length >= MAX_TEXT, elements, viewport: [vw, vh] })
 })()`
 
 const element = (ref: number) => `(window.__acbBrowse || [])[${JSON.stringify(ref)}]`

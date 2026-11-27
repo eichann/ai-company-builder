@@ -229,8 +229,9 @@ const CLAUDE_CODE: AgentDescriptor<ClaudeModelId> = {
     // The operator chooses among a page's items: the strong model (no tools, one JSON answer per step).
     browserOperator: CLAUDE_CHAT_MODEL,
   },
-  // The version 「もう一方の AI に聞く」's closed start (the same flags) was checked on.
-  browserOperatorCli: { min: '2.1.316' },
+  // The oldest CLI the operator's closed start with its screen image (`--input-format stream-json`, an image block) was
+  // checked on (2.1.329–2.1.332 on the owner's Mac, 2026-11-27; agent-browser.md "The operator sees the screen").
+  browserOperatorCli: { min: '2.1.329' },
   brokerReservedServices: ['anthropic'],
   capabilities: {
     ownsConversation: true,

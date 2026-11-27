@@ -169,11 +169,14 @@ export function wireBrowserBrowse(deps: BrowserBrowseDeps) {
         const page: BrowserPageSnapshot | null = await win.snapshot()
         if (!current()) { outcome = 'stopped'; reason = whyNot(); return refused(W.interrupted) }
         if (!page) { reason = 'blocked'; return refused(W.failed) }
+        // The screen beside the text, its elements marked by number: for this step's operator only, then dropped.
+        const image = (await win.screenshot?.(page)) ?? null
+        if (!current()) { outcome = 'stopped'; reason = whyNot(); return refused(W.interrupted) }
         const left = deadline - now()
         if (left <= 0) { outcome = 'stopped'; reason = 'timeout'; return refused(W.interrupted) }
         const step = await operator.step({
           cli: resolved.cli, model: operator.model, signal: cut.signal, timeoutMs: Math.min(L.roundMs, left), parentEnv, prompt: 'browse',
-          material: browseMaterial({ task: input.task, items: input.items, page, history, notes, round }),
+          material: browseMaterial({ task: input.task, items: input.items, page, history, notes, round }), image,
         })
         if (!current()) { outcome = 'stopped'; reason = whyNot(); return refused(W.interrupted) }
         if (!step.ok) { reason = 'operator-failed'; return refused(W.failed) }

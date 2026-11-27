@@ -637,15 +637,22 @@ describe('room for a Skill run: the operator run\'s budget is the server\'s choi
   }
   const runRow = (id: string) => conn.prepare('SELECT state, reason, budget FROM browser_runs WHERE id = ?').get(id)
 
-  it('an approved company Skill\'s work gets the skill budget: 60 steps and 17 minutes; its preview stays standard', async () => {
+  it('an approved company Skill\'s work gets the skill budget: 60 steps and 17 minutes; its preview its own skill_preview allowance (40 steps), which never takes the work', async () => {
     put(yaml)
     await approveSkill('per_run')
     const runs = operatorRuns()
     const run = value(await frames.start(alice, { skill: SKILL }, PC))
-    // The preview (the frames run still waiting for the card): standard.
+    // The preview (the frames run still waiting for the card): skill_preview, its whole budget of steps and time.
     const preview = work(runs, run.runId)
-    expect(preview.budget).toBe('standard')
-    value(runs.finish(alice, preview.runId, { outcome: 'done', steps: [] }))
+    expect(preview.budget).toBe('skill_preview')
+    expect(preview.operateMs).toBe(BROWSER_RUN_BUDGETS.skill_preview.operateMs)
+    expect(stepsGiven(runs, preview.runId)).toBe(BROWSER_RUN_BUDGETS.skill_preview.steps)
+    expect(runRow(preview.runId)).toEqual({ state: 'timed_out', reason: 'rounds', budget: 'skill_preview' })
+    // The waiting frames run outlives a whole preview (it was made before it) and still waits for the card after it.
+    now += BROWSER_RUN_BUDGETS.skill_preview.runMs
+    expect(value(frames.get(alice, run.runId)).state).toBe('waiting')
+    // The work is still the first `skill` run of this frames run.
+    expect(conn.prepare("SELECT COUNT(*) AS n FROM browser_runs WHERE frame_run_id = ? AND budget = 'skill'").get(run.runId)).toEqual({ n: 0 })
     value(await approve(alice, run))
     const worked = work(runs, run.runId)
     expect(worked.budget).toBe('skill')
@@ -715,7 +722,7 @@ describe('room for a Skill run: the operator run\'s budget is the server\'s choi
     const madeAt = now
     const run = value(await frames.start(alice, { skill: SKILL }, PC))
     // Approved at the card's last moment, the work started 11 minutes later (slow reads before it).
-    now = madeAt + BROWSER_FRAME_TIMES.approve - 1_000
+    now = madeAt + BROWSER_FRAME_TIMES.approveSkill - 1_000
     value(await approve(alice, run))
     now += 11 * 60_000
     const late = work(runs, run.runId)

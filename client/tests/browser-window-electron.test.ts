@@ -468,6 +468,27 @@ test('the operator\'s window tools read only: a submit, a fetch button, a confir
   assert.ok(result.refusalLog.some(l => l.includes('file-chooser')), 'the file chooser was intercepted and refused')
 })
 
+test('the operator sees a folder tree driven by script alone: each item listed once (never the list and its spans), a press reaches the page\'s handler, a card that saves by fetch writes nothing; the screen is a JPEG with the marks on the pixels, never in the page', { skip }, () => {
+  const r = result.browse
+  assert.deepEqual(r.treeItems, ['▸キャンペーン', '▸未分類', '▸アーカイブ', 'すぐ反映（下書き）'])
+  assert.equal(r.folderClick, 'ok')
+  assert.match(String(r.treeShown), /キャンペーン の中身/)
+  assert.equal(r.cardClick, 'ok', 'the page saw the press on the card')
+  // The card's fetch POST, like every write of the run, never left the window.
+  assert.equal(r.treeEntered, true)
+  assert.deepEqual(r.treeWrites, [])
+  // The screen: a JPEG no wider than 1280 pixels; the folder's mark on its left edge, the page's own white inside it.
+  assert.equal(r.shotType, 'image/jpeg')
+  assert.equal(r.shotJpeg, 'ffd8ff')
+  const size = r.shotSize as { width: number; height: number }
+  assert.ok(size.width > 0 && size.width <= 1280 && size.height > 0, JSON.stringify(size))
+  const edge = r.markEdge as { r: number; g: number; b: number }
+  const inside = r.pageInside as { r: number; g: number; b: number }
+  assert.ok(edge.r > 150 && edge.g < 110 && edge.b < 110, `the mark's colour on the box's edge: ${JSON.stringify(edge)}`)
+  assert.ok(inside.r > 200 && inside.g > 200 && inside.b > 200, `the page itself inside the box: ${JSON.stringify(inside)}`)
+  assert.equal(r.treeDomAfterShot, r.treeDomBefore, 'neither the snapshot nor the screen changed the page\'s document')
+})
+
 test('a write run sends each page write once within the plan: the page\'s own cookie and CSRF, its answer without Set-Cookie, one at a time; outside the plan, a file, past the max, after a stop and after a lost answer nothing is sent', { skip }, () => {
   const r = result.work
   assert.equal(r.entered, true)

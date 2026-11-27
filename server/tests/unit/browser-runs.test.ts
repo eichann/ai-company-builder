@@ -258,6 +258,9 @@ describe('a run\'s budget of steps (shared/core/browser-run-budget.ts)', () => {
     initDatabase(before)
     expect(before.prepare("SELECT budget, steps FROM browser_runs WHERE id = 'bo_old'").get()).toEqual({ budget: 'standard', steps: 0 })
     expect(() => before.prepare("UPDATE browser_runs SET budget = 'skill' WHERE id = 'bo_old'").run()).toThrow(/only moves from running/)
+    // The budget a Skill run's preview gets ("Room for a Skill run") is one the upgraded table takes; an unknown one is not.
+    before.prepare("INSERT INTO browser_runs (company_id, id, user_id, host, state, started_at, lease_until, ended_at, budget) VALUES ('co-1', 'bo_prev', 'u', ?, 'done', ?, ?, ?, 'skill_preview')").run(HOST, iso(now), iso(now), iso(now))
+    expect(() => before.prepare("INSERT INTO browser_runs (company_id, id, user_id, host, state, started_at, lease_until, ended_at, budget) VALUES ('co-1', 'bo_big', 'u', ?, 'done', ?, ?, ?, 'large')").run(HOST, iso(now), iso(now), iso(now))).toThrow(/CHECK/)
     // A second start finds the trigger as it should be and leaves it (never dropped and made again at every start).
     const execs: string[] = []
     const exec = before.exec.bind(before)

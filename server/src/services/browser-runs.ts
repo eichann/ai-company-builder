@@ -18,7 +18,8 @@
  *   a crashed app frees the domain at the latest a lease later.
  * - **The budget** ("Room for a Skill run", shared/core/browser-run-budget.ts): chosen here at the start by the core's one
  *   rule `browserRunBudgetFor` from this server's own rows — `skill` only for a write task's run naming its member's
- *   frames run of an approved company Skill that is open; everything else `standard` — stored with the row (fixed by
+ *   frames run of an approved company Skill that is open, `skill_preview` for one naming it while it still waits (its
+ *   preview: an allowance of its own, never the work's); everything else `standard` — stored with the row (fixed by
  *   trigger) and answered. **Once per frames run**: a later write run naming a frames run that already had its `skill`
  *   run is refused (`BROWSER_RUN_WORK_TAKEN`; the check here and a partial unique index). Every continue takes one of its
  *   `steps` (compare-and-set): past them the run ends (`timed_out`, `rounds`).

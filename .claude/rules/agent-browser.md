@@ -2188,12 +2188,13 @@ every start stay. 6b connects every path but ships **off**; 6c turns it on for t
   it. `browser-preview.test.ts` fails while the constant is anything but `false`.
 - **The operator's start** (`electron/agents/claude-browser-operator.ts`, registry
   `capabilities.browserOperator` — Claude Code only —, `tasks.browserOperator`, `browserOperatorCli.min`
-  2.1.316; `browserOperatorOf(id)`): per request the app's `claude` is resolved **once** to its real path
+  2.1.329 — the oldest CLI the stream-json input with an image was checked on, "The operator sees the screen" —;
+  `browserOperatorOf(id)`): per request the app's `claude` is resolved **once** to its real path
   (a regular, executable file; `cli-missing`), its `--version` at least the floor (`cli-too-old`;
   unreadable too), and that path is used for every step — never looked up on PATH again. Each step is a
   fresh `claude -p --model <tasks.browserOperator> --safe-mode --tools "" --permission-mode dontAsk
   --strict-mcp-config --setting-sources "" --disable-slash-commands --no-session-persistence --max-turns 1
-  --output-format stream-json --verbose --system-prompt <BROWSER_OPERATOR_SYSTEM_PROMPT>`
+  --input-format stream-json --output-format stream-json --verbose --system-prompt <BROWSER_OPERATOR_SYSTEM_PROMPT>`
   (`browserOperatorArgs`), started with `spawnVoiceProcess(cli, args, { cwd, env }, { inheritEnv: false })`
   in a new empty folder (removed afterwards), in a process group of its own (`detached`; the whole group is SIGKILLed when a step ends, so nothing the
   CLI started outlives it) with an environment **built from nothing**
@@ -2202,8 +2203,9 @@ every start stay. 6b connects every path but ships **off**; 6c turns it on for t
   `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1`, `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`, `DISABLE_AUTOUPDATER=1`,
   and `HTTPS_PROXY` / `NO_PROXY` (either case) / `NODE_EXTRA_CA_CERTS` only when set — never `CLAUDE_CONFIG_DIR` (its
   users cannot use it: remaining limit), another `CLAUDE_CODE_*`, `CLAUDE_AGENT_SDK_*`, `XDG_*`,
-  `ANTHROPIC_*` or a key. The material goes as JSON on stdin; the SDK is not used (it cannot pass
-  `--safe-mode`).
+  `ANTHROPIC_*` or a key. The material goes on stdin as **one stream-json user message** (`operatorInput`): a text
+  block holding the material as JSON and, for the window tools only, the screen image as a base64 JPEG block ("The
+  operator sees the screen"); the SDK is not used (it cannot pass `--safe-mode`).
 - **Checked on every start** (`operatorInitProblem`, `readOperatorMessage`; any failure SIGKILLs and ends
   the request): one `system`/`init` (none, a second one, or anything but another `system` message before
   it → `init-mismatch`) with `tools` and `mcp_servers` empty arrays, `slash_commands` / `skills` empty
@@ -3234,7 +3236,7 @@ same switch as everything else (`BROWSER_AI_BUILD_SWITCH` / this PC's registrati
   typing only into a text field, never a password field; an option the select showed), `go` (a path of the domain: starts
   with `/`, no `//`, `\`, `#`, space or control), `back`, `wait` (1–5 s), `done { result, unread }` or `stop { why:
   not-found | need-person | blocked, unread }`. Anything else ends the run (`bad-answer`), nothing done. Any answer may
-  carry `notes` (≤ 2000): the operator's own working memory, handed back to it at the next step (each step is a fresh
+  carry `notes` (≤ 4000; 2000 until "The operator sees the screen"): the operator's own working memory, handed back to it at the next step (each step is a fresh
   process; Codex review), and `reason` (its short reason for the answer); both reach the member's card only, never the
   consultation AI ("The operator's trail on the card").
 - **Main acts** in the member's own window (controller `browseWindow`): `enter` puts it in `ai` mode with a decider that
@@ -3243,7 +3245,9 @@ same switch as everything else (`BROWSER_AI_BUILD_SWITCH` / this PC's registrati
   and a page cannot hold the window). The page is read and acted on from an **isolated world** (`BROWSER_BROWSE_WORLD`,
   `executeJavaScriptInIsolatedWorld`: the page's script cannot see the element list or replace the functions used): the
   snapshot is the address, title, visible text (`innerText`) and the visible usable elements — a text field named by its
-  label / placeholder only, **a password field's value never read**, a link's path only when it stays on the domain. Presses
+  label / placeholder only, **a password field's value never read**, a link's path only when it stays on the domain —,
+  and, as role `item`, elements that act as controls without being one, each with its box on the screen ("The operator
+  sees the screen"). Presses
   are the window's own trusted input (`sendInputEvent`, at the element's centre after two drawn frames) and typing goes
   through the `ai` gate's DevTools connection (`Input.insertText`; the window's one debugger owner, `command` only while the
   gate holds it), both only while the gate is ready. While the operator has the window it is kept as a shown page
@@ -3343,6 +3347,64 @@ append-only, values refused whole, a timed-out run's log, unknown reasons not ke
 fail), the continue's refusal, the AI's words, the registered-domain check, the AI stop, the server's grant, PC, stop,
 lease and same-PC checks.
 
+## The operator sees the screen (owner 2026-11-27: 「ブラウザ操作をするAIがポンコツ」)
+
+On Lステップ (a heavy SPA) the operator fumbled the search box and never pressed the left folder list of a landing page:
+it read only text, the list's rows were no "usable element" (no link or button: a click handler on the list), a Skill's
+preview had the 20-step budget, and its notes were 2000 characters. The model was not the limit; what it was shown was.
+
+- **The screen image** (`BrowserBrowseSurface.screenshot`, the shell's in `browser-window.ts`; the window tools only —
+  the read-only preview of declared reads has no page and gets none): after each step's snapshot, the page's viewport as drawn
+  (DevTools `Page.captureScreenshot` over the `ai` gate's own connection, only while it holds the window — `capturePage`
+  failed on a window behind others in the harness), resized to at most `BROWSER_BROWSE_LIMITS.imageWidth` (1280) pixels wide, JPEG at
+  `imageQuality` 70, sent beside the material in the operator's one stream-json message (`operatorInput`: one text block
+  — the material — and one image block; an image over `BROWSER_OPERATOR_IMAGE_MAX_BYTES` 1.5 MB is left out whole, the
+  step goes on with text). None (the window could not draw one) → text only. Checked on the real CLI 2.1.329, 2.1.330
+  and 2.1.332 (`claude -p … --tools '' --input-format stream-json` with an image block: the closed init unchanged, the
+  model reads the picture; with `--no-session-persistence` no project folder, history line or paste-cache file was
+  written under `~/.claude`), hence the floor 2.1.329.
+- **Memory only, the operator only**: the image's bytes live in main for the one step and go to the CLI's stdin — never
+  a file, a log, the run's log, the server, the card, the trail or the consultation AI's words (and never in the material
+  either). It shows what the page shows, which the operator already reads as text: the same isolation (I6). Its prompts
+  say that what the picture shows is outside text too (`OPERATOR_SCREEN_LINES`), as the JSON's `{ outside }` values are.
+- **Set-of-marks on the pixels** (`client/shared/browser-screen-marks.ts`, pure): each element with a box on the screen
+  gets a red outline and its `ref` number drawn **onto the captured bitmap** (`screenMarks` scales the page's CSS-pixel
+  boxes by the image's width over the viewport's; `drawScreenMarks`). Decision: numbers on the picture rather than
+  coordinates in the text — a model finds a number beside a box far more reliably than it maps coordinates onto a picture
+  — and on the pixels rather than as an overlay in the page, so the page's DOM is untouched (an SPA re-renders around an
+  overlay and its script could move or hide one). The snapshot carries each element's `box` and the `viewport`
+  (`readBrowserPageSnapshot` keeps only whole numbers of a sane size); the material does not repeat them.
+- **Elements that act as controls** (role `item`, `BROWSER_SNAPSHOT_SCRIPT`): after the real controls, elements with an
+  `onclick` attribute, `tabindex` ≥ 0, an interactive role the control list does not take (`treeitem`, `switch`,
+  `menuitemcheckbox`, `menuitemradio`), or the top of a `cursor: pointer` subtree (cursor is inherited: only the outermost
+  element of each subtree is a candidate). A pointer subtree holding two or more list or tree items (event delegation on
+  the list: Lステップ's folder tree) gives its items instead. Deduped: never one inside a listed control, never one inside
+  an `item` already listed (except an item inside an item: a folder inside its parent folder), never the page itself or
+  a container over 40 % of the screen, never one without its own words; named by its **own** words (a nested item's text
+  is the nested item's), in the kept caps (120 characters); at most `clickables` 150 of the 300 elements, the page's first
+  `clickableScan` 20 000 elements looked at. Their run-log label is the recording's control rule (a row's text never).
+- **No write guard moves**: a press on an `item` is the same trusted press as on a button (`act`, at the element's
+  centre); whatever the page's handler then sends is held or refused by the same `ai`-mode gate — every write refused in
+  a read run, held and decided against the frames in a write run, a never-read address refused — and the frames, permits
+  and the server's checks are untouched. Listing more kinds of elements changes what the operator can aim at, not what
+  the page may send.
+- **Notes** 4000 characters (were 2000; the trail on the card follows).
+- **Remaining limits** (said): the picture shows the page as drawn, names and values included, which the operator already
+  read as text (D6); an element covered by another (a modal) still gets its mark where its box is; an element with none
+  of the signs (a framework's handler on a plain `div` with the default cursor) is still not listed — the operator sees
+  it on the picture but cannot name it; capturing costs a fraction of a second per step.
+
+Tests: `client/tests/browser-screen-marks.test.ts` (a mark at its box scaled to the image, none off the screen or without a
+viewport, only sane boxes kept, the number and outline on the pixels, nothing outside the bitmap), `browser-operator.test.ts`
+(the exact arguments with `--input-format stream-json`; the material as one user message; the image beside it on stdin
+only — never an argument or a variable —; an image over the cap left out), `browser-browse.test.ts` and
+`browser-frame-writes.test.ts` (each step's operator gets that step's screen, in a read run and a write run's preview and
+work; never the consultation AI's words, the card, the run's log, the server, the site or the material; no screen → the
+text alone), `browser-window-electron.test.ts` (a fictional folder tree driven by script alone: its three folders and a
+clickable card listed once each, never the list, its spans or the card's focusable part; a press on a folder reaches the page's handler; the card's
+handler's fetch POST never leaves the window; the screen a JPEG ≤ 1280 wide with the mark's colour on the folder's edge
+and the page inside it; the page's document unchanged by the snapshot and the screen). Each guard mutation-checked.
+
 ## Writes within frames (step ⑤a of the redesign: the model and the server's state; the app's half is ⑤b)
 
 Design memo 「ブラウザ操作：記録から自動化へ」 §3 I3–I5 and its 「止まったら・2回動いたら・同時に動いたら」 list, §6, §7-2, §8,
@@ -3423,8 +3485,8 @@ core's write connection, the plan card and the after-read card).
   `BROWSER_REPORT_REASONS`. **There is no "sent" state on the server**: `permitted` already means "may be on its way" (the
   server cannot see the moment a request leaves; "not sent" is the app's word, said only before it leaves).
 - **Time** (judged on every touch): a write `permitted` and silent past permit + 5 s + 30 s **on both clocks** (as
-  "The clock fix") → `unknown`, the run locked; a run `waiting` ends after `BROWSER_FRAME_TIMES.approve` (10 min), any run
-  after `run` (30 min) — `expired`, its frames gone.
+  "The clock fix") → `unknown`, the run locked; a run `waiting` ends after `BROWSER_FRAME_TIMES.approve` (10 min; a Skill's `approveSkill`, 21: "Room for a Skill run"), any run
+  after `run` (40 min) — `expired`, its frames gone.
 - **End** (`POST …/:runId/end`): the run `ended`, its unused frames gone (the view's `left` is 0); a write still
   `permitted` is left to its report or time-out. **Leaving the company** (`memberLeft`, in the removal's transaction):
   every run of the member ends (`left`) and a write still `permitted` becomes `unknown` at once (nobody will report it) —
@@ -3495,7 +3557,7 @@ else. **No site word** anywhere (a fictional site in the tests).
   taken (the joined lock: the frames run cannot start while the preview's run holds the domain; Codex review) → **ad
   hoc**: `POST /browser-frame-runs { plan }` → **the plan card** (a waiting run) → ［任せる］ → **the work**: a new operator run naming the frames run, the
   page's writes handed to the writer → **the after-read** → the result card → the frames run ends (`end`) whatever
-  happened (an end or a finish lost to the network is kept and sent again: "Letting a domain go"). The AI's tool call waits for the card and the work (the card up to the server's 10 minutes counted from the frames run's start, each operator run within its budget: "Room for a Skill run"), then
+  happened (an end or a finish lost to the network is kept and sent again: "Letting a domain go"). The AI's tool call waits for the card and the work (the card up to the server's 10 minutes (a Skill's 21) counted from the frames run's start, each operator run within its budget: "Room for a Skill run"), then
   answers; the conversation goes on with its next step.
 - **Who may start one** (server): `POST /browser-runs { write: true }` asks the person's own level 変えてよい
   (`siteGrants.allows(…, 'write')`, `BROWSER_TYPE_NOT_GRANTED`) and the site's level allowing writes (`BROWSER_NOT_ALLOWED`)
@@ -3631,17 +3693,24 @@ shared by the preview and the work. **The one rule and every time it depends on*
 `server/tests/unit/browser-run-budget.test.ts` checks that they agree.
 
 - **Budgets** (per operator run, one `POST /browser-runs`): `standard` = 20 steps, the app operates ≤ 5 minutes, the server
-  holds the lock ≤ 6 minutes (unchanged: reading, every preview, an ad-hoc plan's work); `skill` = **60 steps, 15 minutes,
-  17 minutes** (the work of an approved company Skill). `runMs` − `operateMs` ≥ 60 s: room after the app stops operating
+  holds the lock ≤ 6 minutes (unchanged: reading, an ad-hoc plan's preview and work); `skill` = **60 steps, 15 minutes,
+  17 minutes** (the work of an approved company Skill); `skill_preview` = **40 steps, 10 minutes, 11 minutes** (that
+  Skill run's preview; owner 2026-11-27: a heavy site's preview ran out of 20 steps). `runMs` − `operateMs` ≥ 60 s: room after the app stops operating
   for a write on its way (≤ 45 s), giving the window back and the finish. `BROWSER_RUN_LIMITS.steps` (the log kept, 60)
-  is at least every budget's steps.
+  is at least every budget's steps. An older app that does not know a name the server answers runs it as `standard`
+  (fewer steps than the server allows: the safe side).
 - **Who decides** (`browserRunBudgetFor`, asked by the server only, at the start): `skill` only for a write task's run
   (`write: true`) naming its member's frames run (`frameRunId`, the joined lock's check) whose `source` is `skill` and whose
-  state is `open` (approved on the card, or a pre-approved version) — read from this server's own row
-  (`browserFrames.holderOn` answers its source and state). A Skill run's preview (its frames run still `waiting`), an
-  ad-hoc plan's work, a read task and a run naming nothing are `standard`. The request has no budget field (a body naming
+  state is `open` (approved on the card, or a pre-approved version); `skill_preview` for such a run while that frames run
+  is still `waiting` (its preview) — read from this server's own row (`browserFrames.holderOn` answers its source and
+  state). An ad-hoc plan's preview (it names no frames run) and work, a read task and a run naming nothing are `standard`.
+  **The preview is not the work**: `skill_preview` is an allowance of its own — the once-per-frames-run rule, its check
+  and its index count `skill` only, so a preview never takes the work's run (a second preview of a waiting frames run is
+  not refused: the frames run's wait bounds it). The request has no budget field (a body naming
   one is `BROWSER_BAD_RUN`). The choice is stored on the run (`browser_runs.budget`, additive with default `standard`,
-  `migrateBrowserRunBudget`; fixed by the trigger, which the migration replaces when the stored one differs — compared as
+  `migrateBrowserRunBudget`; its CHECK widened to `skill_preview` by one rebuild, `migrateBrowserRunPreviewBudget` — every
+  row kept, the table, indexes and trigger then exactly a new database's; a server rolled back below it reading a
+  `skill_preview` row fails that one run's `continue`, never another's; fixed by the trigger, which the migration replaces when the stored one differs — compared as
   SQLite keeps it, without `IF NOT EXISTS`, so a second start leaves it) and answered (`BrowserRunStarted.budget`; absent
   from an older server, and any name the app does not know, = `standard`: `browserRunBudget`).
 - **Once per frames run** (independent review of #857): the first write run that gets `skill` for a frames run is its
@@ -3664,28 +3733,35 @@ shared by the preview and the work. **The one rule and every time it depends on*
   it only grow by one while running): past them the run ends `timed_out` / `rounds` and the domain is free.
 - **The app follows the answer** (`work.ts`): each operator run's steps and its deadline (its own start + `operateMs`) come
   from the run's budget — a long preview takes nothing from the work. The card waits for ［任せる］ until the server would end
-  the waiting frames run: `BROWSER_FRAME_RUN_TIMES.approve` (10 minutes) counted from just before the frames run was asked
+  the waiting frames run: `browserFrameApproveMs` (10 minutes, a Skill's 21) counted from just before the frames run was asked
   for (`frameAskedAt`; a Skill's frames run is made before its preview, so the preview's minutes count), never longer.
   `BROWSER_BROWSE_LIMITS.rounds` / `totalMs` are the `standard` budget's (reading is unchanged).
-- **The frames run's times** (`BROWSER_FRAME_RUN_TIMES`, the server's `BROWSER_FRAME_TIMES` takes them): a waiting run ends
-  10 minutes after it was made, any run 30 minutes after. A Skill run whose work starts right after an approval at the
-  card's last moment fits whole (10 + 17 + 1 ≤ 30); one that starts later gets what is left, above.
-- **The AI's tool call** waits for all of it (preview ≤ 5, the card ≤ 10, the work ≤ 15 minutes, plus the after-read): the
+- **The frames run's times** (`BROWSER_FRAME_RUN_TIMES`, the server's `BROWSER_FRAME_TIMES` takes them;
+  `browserFrameApproveMs(source)` for the server's `endsAt` and the app's card alike): a waiting run ends 10 minutes after
+  it was made — **a Skill's 21** (made before its preview: the preview's 11 and then the card's 10) —, any run 40 minutes
+  after (30 before `skill_preview`). A Skill run whose work starts right after an approval at the card's last moment fits
+  whole (21 + 17 + 1 ≤ 40); one that starts later gets what is left, above. A preview started at once keeps its whole
+  budget (capped at the waiting frames run's end like any run naming it).
+- **The AI's tool call** waits for all of it (a Skill's preview ≤ 10 and the card until minute 21, the work ≤ 15 minutes,
+  plus the after-read): the
   in-process MCP tool of the consultation has no time limit of its own in the app.
 - **Not changed**: `FramesLife.tla` (times are abstract there; the steps' budget is not one of its rules), the frames,
   permits, reports and every gate.
 
-Tests: `server/tests/unit/browser-run-budget.test.ts` (the rule as a table; the times agree; the numbers),
+Tests: `server/tests/unit/browser-run-budget.test.ts` (the rule as a table, `skill_preview` for a waiting Skill run only;
+the times agree — a whole preview and the card's 10 minutes in a Skill's wait —; the numbers),
 `server/tests/unit/browser-frames.test.ts` "room for a Skill run" (the real frames and operator runs services: a per-run
-Skill's preview standard and its approved work 60 steps; a pre-approved Skill's lock lasting 17 minutes; an ad-hoc plan's
+Skill's preview `skill_preview` with its 40 steps and 10 minutes, its frames run still waiting after a whole preview, no
+`skill` run counted, and its approved work 60 steps; a pre-approved Skill's lock lasting 17 minutes; an ad-hoc plan's
 work, a read run naming an open Skill run and a run naming nothing standard — 20 steps, 6 minutes; no budget field in the
 request; the trigger keeps the budget, the frames run, the end and the step count; `skill` once per frames run, also by the
 index; a work started late ends with the frames run, too late refused), `server/tests/unit/browser-runs.test.ts` (20
-steps then `rounds`; a database from before the budget reads `standard` and ends with the same table and trigger as a new
-one; a second start does not drop the trigger),
+steps then `rounds`; a database from before the budget reads `standard`, takes `skill_preview` and no unknown name, and
+ends with the same table and trigger as a new one; a second start does not drop the trigger),
 `client/tests/browser-frame-writes.test.ts` (the work's steps follow the server's answer — 60 for `skill`, 20 for none,
 `standard` or an unknown name —; the deadline from the run's own start and never past the server's `operateMs`; 時間切れ
-words; the card's wait counted from the frames run's start). Each guard mutation-checked (28 mutations, all caught).
+words; the card's wait counted from the frames run's start — a Skill's card still up after a preview as long as an
+ad-hoc card's whole time). Each guard mutation-checked (28 mutations, all caught).
 
 ## Recovering from a failed write (a write the site refused; the person's answer about a write in doubt)
 
@@ -4181,7 +4257,7 @@ preview that ended without a plan made **no card at all**. Now the person's card
   log's own step (`browseLogStep`: the page pattern, the action and the label **in the recording's kept form** — a row's
   text never) plus the operator's reason; its own end (`done` / `plan` / `stop` + reason; none when the app ended the
   run); its last notes. Caps (`BROWSER_TRAIL_LIMITS`): reason 200, one line, no control / bidirectional / zero-width
-  character (`trailLine` = `cleanLabel`); notes 2000, line breaks kept (`trailNotes`); 60 steps shown, the rest counted;
+  character (`trailLine` = `cleanLabel`); notes 4000 (the answer's cap), line breaks kept (`trailNotes`); 60 steps shown, the rest counted;
   2 runs per card. `trailForCard` leaves out a run that did nothing. `readBrowserOperatorTrail` is the renderer's check:
   a trail off its shape or caps is left off the view (`readBrowserInspectionView`, `readBrowserWriteView`), the card
   still shows.
@@ -4201,6 +4277,23 @@ preview that ended without a plan made **no card at all**. Now the person's card
   書いたもの。確かめた事実ではありません）」 (`BROWSER_TRAIL_WORDS`), as React text only (no markup, no Markdown): per step
   the action's word, the label, the page pattern and the reason; 「止まった理由（係の AI の言葉）」; the notes. The fixed reason
   word stays the card's headline.
+- **An answer out of form** (production trial 2026-11-27: the operator found the folder and the edit page, then a
+  sensible plan was refused as `bad-answer` for a slip of form). Three parts:
+  - **Lenient where it is safe** (`parseWorkAnswer`'s plan): the card's words are **cut** to their caps with an ellipsis
+    (`summary` 1000, `affects` 500, a value's `label` 40 and `value` 200) instead of refusing the plan, and a Skill run's
+    `writes: null` reads as none (its frames are the server's). Still strict: unknown keys (`plan-keys`), every type, an
+    empty summary, the `unread` numbers, more than 10 values, a value that is not `{ label, value }`, an ad-hoc plan's
+    writes (null, empty or anything off: `plan-writes`, checked by the declaration's own rules as before), a Skill plan
+    naming writes (an empty list included), and every action, `done` and `stop` rule.
+  - **One re-ask** (`work.ts`): when an answer fails the parser, the operator is asked again once — the next of the run's
+    steps (its own `continue`, within the budget; never past it: at the last step the run ends on the slip) on the page as
+    it is then — with `retry` in its material: the app's fixed sentence naming the rule (`workRetrySentence`,
+    `BROWSER_ANSWER_PROBLEM_WORDS`), never the operator's own text. A second slip in a row ends the run (`bad-answer`); a
+    good answer in between resets it (one re-ask per slip). The read run (`browse.ts`) is unchanged.
+  - **Named on the card**: the run's trail records the rule (`BrowserTrailRun.problem`, a fixed code of
+    `BROWSER_ANSWER_PROBLEMS`; the renderer's check takes nothing else) and the card says
+    「アプリが止めました：係の AI の答えの形が決まりに合いませんでした（<the rule's fixed words>）。」 in place of the bare
+    「アプリが作業を終えました」.
 - **Remaining limits** (said): the reason and notes may hold what the page showed (names, values) — the card shows them
   to the member who ran the task, as the operator's summary already was; a stopped preview's `bo_` card opens in the
   main window only (the inspection card's IPC), not in a consultation's own window.
@@ -4210,8 +4303,12 @@ words and notes on the card and never in the AI's words or the finish body; the 
 with a Skill, leaves a `bo_` card with the fixed word and the trail, another member's none, cleared on sign-out; a write
 run's card with the preview's and the work's trails; the caps, unsafe characters, a non-string reason refused; the
 prompts; the renderer's check leaving a bad trail off while the card stays), `src/features/browser-plans/components/
-OperatorTrail.test.ts` (collapsed, labelled, nothing of it before the disclosure, markup escaped). Each guard
-mutation-checked (the trail on both cards, the stopped preview's card, the reason per step, every cap, the unsafe
+OperatorTrail.test.ts` (collapsed, labelled, nothing of it before the disclosure, markup escaped; the broken rule in fixed
+words), `browser-frame-writes.test.ts` (a Skill plan's `writes: null` taken, an ad-hoc one's refused; overlong words cut;
+keys, types, numbers and too many values still refused, each naming its rule; one re-ask with the fixed sentence and
+never the slip itself, each answer one of the run's steps; a second slip ends the run with the rule on the trail; no
+re-ask past the budget), `browser-operator-trail.test.ts` (a preview ended on two slips leaves a card naming the rule; the
+renderer takes only a known code). Each guard mutation-checked (the trail on both cards, the stopped preview's card, the reason per step, every cap, the unsafe
 characters, the renderer's line / notes / runs checks, the collapsed disclosure).
 
 ## Not yet (later PRs)

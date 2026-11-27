@@ -4,7 +4,8 @@
  * no tools, no MCP server (`--strict-mcp-config` with none given), no settings of the member's
  * (`--setting-sources ""`, `--safe-mode`), no slash commands, no session file, one turn — in a new
  * empty folder, with an environment built from nothing (`inheritEnv: false`, the 4th argument of
- * `spawnVoiceProcess`; `browserOperatorEnv`), the material as JSON on stdin.
+ * `spawnVoiceProcess`; `browserOperatorEnv`), the material as one stream-json user message on stdin (with the screen
+ * image beside it for the window tools: `operatorInput`).
  *
  * - The CLI is resolved once per request to its real path (a regular, executable file) and that
  *   path is used for every step: nothing is looked up on PATH again.
@@ -22,8 +23,8 @@ import { delimiter, dirname, join } from 'node:path'
 import { createInterface } from 'node:readline'
 import { compareCliVersions, parseCliVersion } from '../../shared/agents/cli-version'
 import {
-  BROWSER_OPERATOR_LIMITS, browserOperatorArgs, browserOperatorEnv, operatorInitProblem,
-  type BrowserOperatorFailure, type BrowserOperatorPrompt,
+  BROWSER_OPERATOR_IMAGE_MAX_BYTES, BROWSER_OPERATOR_LIMITS, browserOperatorArgs, browserOperatorEnv, operatorInitProblem,
+  type BrowserOperatorFailure, type BrowserOperatorImage, type BrowserOperatorPrompt,
 } from '../../shared/browser-operator'
 import { spawnVoiceProcess } from '../voice-process'
 
@@ -46,6 +47,24 @@ export interface BrowserOperatorStepJob {
   parentEnv: Readonly<Record<string, string | undefined>>
   /** Which fixed system prompt (the preview's when absent; the window tools': `browse`). Everything else is the same closed start. */
   prompt?: BrowserOperatorPrompt
+  /**
+   * The screen as the member's window shows it (the window tools only): sent beside the material on stdin and nowhere else
+   * — never a file, a log, the server or the consultation AI; dropped with the step.
+   */
+  image?: BrowserOperatorImage | null
+}
+
+/**
+ * The one stream-json line the operator's stdin gets (`--input-format stream-json`): a user message whose first block is
+ * the material as JSON text (data, never an instruction slot) and, when given, the screen image as a base64 JPEG block.
+ * An image over `BROWSER_OPERATOR_IMAGE_MAX_BYTES` is left out (the text alone still goes), never cut.
+ */
+export function operatorInput(material: unknown, image?: BrowserOperatorImage | null): string {
+  const content: unknown[] = [{ type: 'text', text: JSON.stringify(material) }]
+  if (image && image.mediaType === 'image/jpeg' && image.data.length > 0 && image.data.length <= BROWSER_OPERATOR_IMAGE_MAX_BYTES) {
+    content.push({ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: Buffer.from(image.data).toString('base64') } })
+  }
+  return `${JSON.stringify({ type: 'user', message: { role: 'user', content } })}\n`
 }
 
 export type BrowserOperatorStepResult = { ok: true; text: string } | { ok: false; code: BrowserOperatorFailure | 'cancelled' }
@@ -236,7 +255,7 @@ export async function runClaudeBrowserOperatorStep(job: BrowserOperatorStepJob, 
         else if (state.text === undefined) finish({ ok: false, code: 'bad-answer' })
         else finish({ ok: true, text: state.text })
       })
-      child.stdin.end(JSON.stringify(job.material))
+      child.stdin.end(operatorInput(job.material, job.image))
     })
   } finally {
     await fs.rm(cwd, { recursive: true, force: true }).catch(() => {})

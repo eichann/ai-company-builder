@@ -92,20 +92,25 @@ function world(over: Partial<World> = {}) {
     async enter() { w.entered++; return true },
     async leave() { w.left++ },
     async snapshot() { return page() },
+    // The screen of this moment, with a marker no other channel could carry by chance (memory only, for the operator).
+    async screenshot(p) { shots++; return { mediaType: 'image/jpeg', data: new TextEncoder().encode(`${SCREEN_MARKER}-${shots}-${p.elements.length}`) } },
     async act(action) { w.acted.push(action); return 'ok' },
     pageClean: () => true,
     closed: () => false,
   }
+  let shots = 0
   w.window = over.window === undefined ? surface : over.window
   let steps = 0
   const prompts: string[] = []
   const materials: unknown[] = []
+  const images: Array<string | null> = []
   const operator: PreviewOperator = {
     model: 'm',
     async resolve() { return { ok: true, cli: { path: '/bin/claude', pathDirs: [] } } },
     async step(job) {
       prompts.push(job.prompt ?? 'preview')
       materials.push(job.material)
+      images.push(job.image ? new TextDecoder().decode(job.image.data) : null)
       const n = steps++
       w.onStep?.(n)
       if (w.hold) await new Promise<void>(resolve => { if (job.signal.aborted) resolve(); else job.signal.addEventListener('abort', () => resolve(), { once: true }) })
@@ -123,10 +128,33 @@ function world(over: Partial<World> = {}) {
     companyId: COMPANY, conversationId: 'conv-1', site: HOST, task: input.task ?? '一覧の受付の終わりを並べて',
     items: input.items ?? ['受付の終わり', '定員'], signal: input.signal ?? new AbortController().signal,
   })
-  return { w, wiring, run, prompts, materials }
+  return { w, wiring, run, prompts, materials, images }
 }
 
+const SCREEN_MARKER = 'ACB-SCREEN-7c2e'
+
 const done = (result: string, unread: number[] = []) => JSON.stringify({ do: 'done', result, unread })
+
+test('the screen image reaches only the operator, the one of its own step: never the consultation AI\'s words, the card, the run\'s log or the material', async () => {
+  const { w, wiring, run, images, materials } = world({ answers: [JSON.stringify({ do: 'click', ref: 1 }), done(`まとめ ${PAGE_VALUE}`)] })
+  const r = await run()
+  assert.equal(r.kind, 'card')
+  // One image per step, made from that step's page (its element count), handed to that step's operator.
+  assert.deepEqual(images, [`${SCREEN_MARKER}-1-${page().elements.length}`, `${SCREEN_MARKER}-2-${page().elements.length}`])
+  const card = r.kind === 'card' ? wiring.card('u-1', COMPANY, r.runId) : undefined
+  assert.ok(card)
+  for (const [where, value] of [['words', r], ['card', card], ['finish', w.finished], ['server calls', w.calls], ['material', materials]] as const) {
+    assert.ok(!JSON.stringify(value).includes(SCREEN_MARKER), `no image in the ${where}`)
+  }
+})
+
+test('without a screen (the window could not draw one) the operator still gets the text: the run goes on', async () => {
+  const blind = world({ answers: [done('まとめ')] })
+  ;(blind.w.window as BrowserBrowseSurface).screenshot = async () => null
+  const r = await blind.run()
+  assert.equal(r.kind, 'card')
+  assert.deepEqual(blind.images, [null])
+})
 
 test('switched off, a domain not registered, no window: nothing asked of the server, the window or the operator', async () => {
   for (const over of [{ switchOn: false }, { registered: false }, { window: null as BrowserBrowseSurface | null }]) {
@@ -268,8 +296,12 @@ test('the operator\'s notes carry what it read to its next fresh step, and to no
   assert.ok(JSON.stringify(materials[1]).includes(NOTE))
   assert.ok(!JSON.stringify(materials[0]).includes('第1ページ'))
   assert.ok(!(r.kind === 'card' ? r.words : '').includes('第1ページ'))
-  // Notes of the wrong shape refuse the answer.
-  const bad = world({ answers: [JSON.stringify({ do: 'click', ref: 1, notes: 'x'.repeat(2001) })] })
+  // Long notes are the operator's working memory (up to 4000 characters); past that, or of the wrong shape, they refuse the answer.
+  const long = 'メ'.repeat(3999)
+  const kept = world({ answers: [JSON.stringify({ do: 'click', ref: 1, notes: long }), done('まとめ')] })
+  assert.equal((await kept.run()).kind, 'card')
+  assert.ok(JSON.stringify(kept.materials[1]).includes(long))
+  const bad = world({ answers: [JSON.stringify({ do: 'click', ref: 1, notes: 'x'.repeat(4001) })] })
   assert.deepEqual(await bad.run(), { kind: 'refused', words: W.failed })
   assert.equal(bad.w.acted.length, 0)
 })

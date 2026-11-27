@@ -1,4 +1,4 @@
-import { BROWSER_TRAIL_WORDS as W, type BrowserOperatorTrail, type BrowserTrailRun } from '../../../../shared/browser-operator-trail'
+import { BROWSER_ANSWER_PROBLEM_WORDS, BROWSER_TRAIL_WORDS as W, type BrowserOperatorTrail, type BrowserTrailRun } from '../../../../shared/browser-operator-trail'
 
 /**
  * The operator AI's own trail on the person's card (agent-browser.md "The operator's trail on the card"): what it did step
@@ -47,7 +47,7 @@ function TrailRun({ run, titled }: { run: BrowserTrailRun; titled: boolean }) {
       {run.end && run.end.kind !== 'stop' && (
         <p className="mt-1"><span className="text-text">{W.end[run.end.kind]}</span> — {run.end.reason ?? W.noReason}</p>
       )}
-      {!run.end && <p className="mt-1">{W.appEnded}</p>}
+      {!run.end && <p className="mt-1">{run.problem ? <span data-trail-problem>{W.problem(BROWSER_ANSWER_PROBLEM_WORDS[run.problem])}</span> : W.appEnded}</p>}
       {run.notes && (
         <div className="mt-1">
           <p className="font-strong">{W.notes}</p>

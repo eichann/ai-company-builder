@@ -17,19 +17,19 @@ import { BROWSER_COMPANY_ID_RE } from '../../../shared/browser-plans'
 import { BROWSER_BROWSE_LIMITS as BL, browseLogStep, type BrowserBrowseAction, type BrowserBrowseHistoryEntry, type BrowserBrowseStop, type BrowserBrowseSurface, type BrowserPageSnapshot } from '../../../shared/browser-browse'
 import {
   BROWSER_WORK_CARD_WORDS as CW, BROWSER_WORK_LIMITS as L, BROWSER_WORK_WORDS as W, afterReadTarget, beforeReadAddress, createdIdOf, parseWorkAnswer,
-  topFields, workBusyWords, workFrameOf, workMaterial, workPlanSentences, workPreviewStoppedCard, workResultCard, workWordsForAi,
+  topFields, workBusyWords, workFrameOf, workMaterial, workPlanSentences, workPreviewStoppedCard, workResultCard, workRetrySentence, workWordsForAi,
   type AfterReadResult, type WorkAnswer, type WorkEnd, type WorkFrame, type WorkPlanValue, type WorkStopReason,
 } from '../../../shared/browser-frame-writes'
 import { browserNeverReadFits } from '../../../../shared/core/browser-frame-match'
 import { browserSkillRef } from '../../../../shared/core/browser-skill'
 import { BROWSER_RUN_ID_RE, BROWSER_RUN_LIMITS, type BrowserRunEndReason, type BrowserRunLogStep, type BrowserRunOutcome, type BrowserRunWriteStep } from '../../../../shared/core/browser-run-log'
-import { browserRunBudget, type BrowserRunBudget } from '../../../../shared/core/browser-run-budget'
+import { browserFrameApproveMs, browserRunBudget, type BrowserRunBudget } from '../../../../shared/core/browser-run-budget'
 import type { BrowserFrameRunStart, BrowserFrameView } from '../../../../shared/types/browser-frames'
 import type { BrowserPreviewSurface } from '../../../shared/browser-runner'
 import { noWindowWords, type BrowserRunWindow } from '../../../shared/browser-operation'
 import type { BrowserWriteGetResult, BrowserWriteResultView, BrowserWriteView } from '../../../shared/browser-line-writes'
 import type { BrowserInspectionView } from '../../../shared/browser-inspection'
-import { createOperatorTrail, trailForCard, type BrowserTrailRun, type OperatorTrailRecorder } from '../../../shared/browser-operator-trail'
+import { answerProblemOf, createOperatorTrail, trailForCard, type BrowserTrailRun, type OperatorTrailRecorder } from '../../../shared/browser-operator-trail'
 import type { BrowserAiSwitch } from './ai-switch'
 import type { BrowserContext } from './context'
 import { createFrameWriter, type FrameWriteRecord, type FrameWriter } from './frame-writes'
@@ -217,6 +217,8 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
   }): Promise<{ kind: 'answer'; answer: Extract<WorkAnswer, { do: 'plan' | 'done' | 'stop' }> } | { kind: 'end'; reason: BrowserRunEndReason; end: WorkEnd }> {
     const history: BrowserBrowseHistoryEntry[] = []
     let notes = ''
+    // The app's one re-ask after an answer out of its form (fixed words), or null: one per slip, within the run's steps.
+    let retry: string | null = null
     const stopped = (why: WorkStopReason) => ({ kind: 'stopped' as const, why })
     for (let round = 1; round <= o.budget.steps; round++) {
       // A write that may have been sent without an answer: nothing more in this run.
@@ -228,6 +230,9 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
       const page: BrowserPageSnapshot | null = await o.win.snapshot()
       if (!o.current()) return { kind: 'end', reason: 'context-changed', end: stopped(o.whyNot()) }
       if (!page) return { kind: 'end', reason: 'blocked', end: stopped('blocked') }
+      // The screen beside the text, its elements marked by number: for this step's operator only, then dropped.
+      const image = (await o.win.screenshot?.(page)) ?? null
+      if (!o.current()) return { kind: 'end', reason: 'context-changed', end: stopped(o.whyNot()) }
       const left = o.deadline - now()
       if (left <= 0) return { kind: 'end', reason: 'timeout', end: stopped('timeout') }
       const step = await o.operator.step({
@@ -235,14 +240,23 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
         prompt: o.phase === 'preview' ? 'work-preview' : 'work',
         material: workMaterial({
           phase: o.phase, task: o.task, items: o.items, steps: o.steps, frames: o.frames(), page, history,
-          writes: o.writes().map(w => w.outcome), notes, round, rounds: o.budget.steps,
+          writes: o.writes().map(w => w.outcome), notes, round, rounds: o.budget.steps, retry,
         }),
+        image,
       })
       if (o.locked()) return { kind: 'end', reason: 'write-unknown', end: { kind: 'unknown' } }
       if (!o.current()) return { kind: 'end', reason: 'context-changed', end: stopped(o.whyNot()) }
       if (!step.ok) return { kind: 'end', reason: 'operator-failed', end: stopped('operator') }
       const parsed = parseWorkAnswer(step.text, { snapshot: page, items: o.items.length, phase: o.phase, adhoc: o.adhoc, domain: o.host })
-      if ('problem' in parsed) return { kind: 'end', reason: 'bad-answer', end: stopped('operator') }
+      if ('problem' in parsed) {
+        // Out of form: asked again once (the next of the run's steps, the same page, the rule it broke in fixed words);
+        // a second slip in a row ends the run, the card's trail naming the rule.
+        const problem = answerProblemOf(parsed.problem)
+        if (retry === null && round < o.budget.steps) { retry = workRetrySentence(problem); continue }
+        o.trail.problem(problem)
+        return { kind: 'end', reason: 'bad-answer', end: stopped('operator') }
+      }
+      retry = null
       if (parsed.notes !== undefined) notes = parsed.notes
       o.trail.notes(parsed.notes)
       const answer = parsed.answer
@@ -369,7 +383,7 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
       // The plan card: ［任せる］ (the one-time value, from here only) or ［やめる］, the turn's stop, or the server's 10 minutes.
       if (run.needsApproval) {
         const decision = await new Promise<'approved' | 'cancelled'>((resolve) => {
-          const timer = setTimeout(() => resolve('cancelled'), Math.max(0, frameAskedAt + L.approveMs - now()))
+          const timer = setTimeout(() => resolve('cancelled'), Math.max(0, frameAskedAt + browserFrameApproveMs(input.skill !== null ? 'skill' : 'adhoc') - now()))
           let onCut = () => {}
           const done = (d: 'approved' | 'cancelled') => { clearTimeout(timer); cut.signal.removeEventListener('abort', onCut); e.decide = null; resolve(d) }
           onCut = () => done('cancelled')

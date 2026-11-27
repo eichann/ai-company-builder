@@ -43,7 +43,7 @@ import { browserDeviceSchema } from './schema/browser-devices'
 import { browserRecordingSchema } from './schema/browser-recordings'
 import { browserSkillDraftSchema } from './schema/browser-skill-drafts'
 import { browserSkillSchema } from './schema/browser-skills'
-import { browserRunSchema, migrateBrowserRunBudget, migrateBrowserRunWriteSiteRefused } from './schema/browser-runs'
+import { browserRunSchema, migrateBrowserRunBudget, migrateBrowserRunPreviewBudget, migrateBrowserRunWriteSiteRefused } from './schema/browser-runs'
 import { browserFrameSchema, migrateBrowserFrameQuery, migrateBrowserFrameWriteRefused } from './schema/browser-frames'
 // lane C ▲
 // The migrations tests run on their own against older databases.
@@ -61,7 +61,7 @@ export { migrateSkillUseColumns } from './schema/skill-uses'
 export { migrateSecondOpinionSetting } from './schema/agents'
 export { migrateShelfHistoryRequester } from './schema/skill-shelf'
 export { migrateBrowserExecutionMonotonic, migrateBrowserPlanSummary } from './schema/browser-plans'
-export { migrateBrowserRunBudget, migrateBrowserRunWriteSiteRefused } from './schema/browser-runs'
+export { migrateBrowserRunBudget, migrateBrowserRunPreviewBudget, migrateBrowserRunWriteSiteRefused } from './schema/browser-runs'
 export { migrateBrowserFrameQuery, migrateBrowserFrameWriteRefused } from './schema/browser-frames'
 
 // Ensure data directory exists
@@ -210,6 +210,8 @@ export function initDatabase(conn: Database.Database = sqlite) {
   migrateBrowserPlanSummary(conn)
   // An operator run's budget and its step count (agent-browser.md "Room for a Skill run").
   migrateBrowserRunBudget(conn)
+  // A Skill run's preview has its own budget (agent-browser.md "Room for a Skill run"): the budget CHECK widened, once.
+  migrateBrowserRunPreviewBudget(conn)
   // A write the site refused (4xx) is its own state and step outcome (agent-browser.md "Recovering from a failed write").
   migrateBrowserFrameWriteRefused(conn)
   // A frame's exact query (agent-browser.md "A write with an exact query"): a nullable column, old rows = none.
