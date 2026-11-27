@@ -164,8 +164,9 @@ ReportLost(k) ==
     /\ rep' = [rep EXCEPT ![k] = "none"]
     /\ UNCHANGED <<srvVars, badSend, stopSend, ph, sends>>
 
-\* `end` (the person or the AI ends the run, the run's hour, leaving): the run ends and its unused frames vanish. A
-\* write still permitted is left to its report or time-out (it may be on its way).
+\* `end` (the person or the AI ends the run, the run's hour, leaving; also `settle`'s `work-ended`: an open Skill run whose
+\* one work run is over and that has no write permitted — a narrower case of this action, so no transition of its own):
+\* the run ends and its unused frames vanish. A write still permitted is left to its report or time-out (it may be on its way).
 RunEnds ==
     /\ exSt \in {"waiting", "open", "locked"}
     /\ exSt' = "ended"

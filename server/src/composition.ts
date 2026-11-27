@@ -330,6 +330,8 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     browserPolicy: member => agentBrowser.policyFor(member), aiStops: member => agentStops.policyFor(member),
     // One lock per company × domain across both kinds of run (step ⑤b); called only after construction.
     operatorRunOn: (companyId, host) => browserRuns.runningOn(companyId, host),
+    // A Skill run whose one work run is over lets the domain go at once (agent-browser.md "Letting a domain go").
+    workRunOver: (companyId, frameRunId) => browserRuns.workRunOver(companyId, frameRunId),
   })
   const browserPlans = createBrowserPlanService({
     ...shared, memberships: repos.memberships, tokenDigest: sha256TokenDigest, monotonic: systemMonotonicClock,

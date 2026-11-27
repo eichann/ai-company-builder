@@ -32,6 +32,11 @@
  * - **The end** (`end`, the run's time, leaving): the run `ended`, its unused frames gone. A write still `permitted` is left
  *   to its report or time-out (it may be on its way); leaving makes it `unknown` at once (nobody will report it).
  *
+ * - **The work over** (`settle`, agent-browser.md "Letting a domain go"): a Skill run allows one work run, so an `open`
+ *   Skill run whose work run is over (finished, refused, past its lease or hard end) and that has no write `permitted`
+ *   ends at once (`work-ended`) and frees the domain — never a `waiting` run (its card is up), never a `locked` one (a write
+ *   in doubt keeps the domain as before), never while a write may be on its way.
+ *
  * Time-outs are judged on every touch, never by a timer. Everything is the member's own session; another member's or
  * another company's run is the same 404 as one that does not exist.
  */
@@ -80,7 +85,13 @@ export interface BrowserFrameDeps {
    * Whether an operator run (services/browser-runs.ts, step ④) holds the domain now: step ⑤b joins the two locks, so a
    * frames run never starts while another run operates the domain. Absent: no operator runs (tests of ⑤a).
    */
-  operatorRunOn?: (companyId: string, host: string) => boolean
+  operatorRunOn?: (companyId: string, host: string) => { until: number } | null
+  /**
+   * Whether the run's one work run (its `skill` operator run, services/browser-runs.ts `workRunOver`) was started and is
+   * over — finished, refused, or past its lease or hard end. An open Skill run whose work is over and that has no write in
+   * flight can be used for nothing more, so it ends at once (`work-ended`) and lets the domain go. Absent: never.
+   */
+  workRunOver?: (companyId: string, frameRunId: string) => boolean
   /** Where a report that contradicts the person's answer is noted (ids and fixed words only; default console). */
   log?: Pick<Console, 'warn'>
 }
@@ -123,6 +134,9 @@ export const BROWSER_FRAME_WORDS = {
   confirmDone: 'この書き込みについては、もう答えてあります',
 } as const
 const W = BROWSER_FRAME_WORDS
+
+/** The end reason of a Skill run ended because its one work run is over (`settle`). */
+export const WORK_ENDED = 'work-ended'
 
 const RUN_ID_RE = /^bf_[0-9a-f]{32}$/
 const CONVERSATION_RE = /^[A-Za-z0-9_-]{1,100}$/
@@ -201,7 +215,12 @@ export function createBrowserFrameService(deps: BrowserFrameDeps) {
     repo(companyId).setRunState(run.id, run.state, 'ended', { endReason: reason, endedAt: iso(now) })
   }
 
-  /** `ServerSettlesUnknown` and the run's times, on every touch. */
+  /**
+   * `ServerSettlesUnknown`, the run's times and its work's end, on every touch. A Skill run allows one work run
+   * (`BROWSER_RUN_WORK_TAKEN`), so once that run is over an `open` run with no write `permitted` can permit nothing that
+   * matters any more: it ends (`work-ended`) instead of holding the domain to its hour. A write `permitted` (it may be on
+   * its way) or `unknown` (the run `locked`) keeps the run, and so the domain, as before.
+   */
   function settle(companyId: string, found: FrameRunRow, now: number): FrameRunRow {
     const r = repo(companyId)
     const inFlight = r.writes(found.id).find(w => w.state === 'permitted')
@@ -210,7 +229,15 @@ export function createBrowserFrameService(deps: BrowserFrameDeps) {
     }
     const run = r.run(found.id) as FrameRunRow
     if (run.state !== 'ended' && now >= endsAt(run)) endRun(companyId, run, 'expired', now)
+    else if (workOver(companyId, run)) endRun(companyId, run, WORK_ENDED, now)
     return r.run(found.id) as FrameRunRow
+  }
+
+  /** An open Skill run whose one work run is over, with no write `permitted` (`settle`). */
+  function workOver(companyId: string, run: FrameRunRow): boolean {
+    if (run.state !== 'open' || run.source !== 'skill' || !deps.workRunOver) return false
+    if (repo(companyId).writes(run.id).some(w => w.state === 'permitted')) return false
+    return deps.workRunOver(companyId, run.id)
   }
 
   function view(companyId: string, run: FrameRunRow): BrowserFrameRunView {
@@ -366,15 +393,20 @@ export function createBrowserFrameService(deps: BrowserFrameDeps) {
         for (const older of r.unsettledRunsOf(member.userId)) {
           if (older.state === 'waiting') endRun(member.companyId, older, 'superseded', now)
         }
+        // A busy answer says the latest the holder can keep the domain (`freeAt`), so the AI can say roughly when it frees up.
+        const busy = (until: number) => refuse('conflict', W.busy, { code: 'BROWSER_RUN_BUSY', freeAt: iso(until) })
         const holder = r.liveRunOn(f.host)
         if (holder) settle(member.companyId, holder, now)
-        if (r.liveRunOn(f.host)) return refuse('conflict', W.busy, { code: 'BROWSER_RUN_BUSY' })
+        const live = r.liveRunOn(f.host)
+        if (live) return busy(endsAt(live))
         // An ended run's write may still be on its way to this domain (its 5 s permit): the domain stays busy until that
         // write is recorded or times out, so two writes never travel to one site at once (independent review of ⑤a).
         for (const ended of r.runsInFlightOn(f.host)) settle(member.companyId, ended, now)
-        if (r.runsInFlightOn(f.host).length > 0) return refuse('conflict', W.busy, { code: 'BROWSER_RUN_BUSY' })
+        const flying = r.runsInFlightOn(f.host).flatMap(run => r.writes(run.id).filter(w => w.state === 'permitted'))
+        if (flying.length > 0) return busy(Math.max(...flying.map(w => ms(w.permittedAt) + BROWSER_FRAME_TIMES.permit + BROWSER_FRAME_TIMES.grace)))
         // An operator run (step ④) on this domain holds it too (step ⑤b: one lock across both kinds of run).
-        if (deps.operatorRunOn?.(member.companyId, f.host)) return refuse('conflict', W.busy, { code: 'BROWSER_RUN_BUSY' })
+        const operating = deps.operatorRunOn?.(member.companyId, f.host)
+        if (operating) return busy(operating.until)
         const approvalToken = f.preApproved ? null : ids.newToken()
         const run: FrameRunRow = {
           id: `bf_${ids.newToken().slice(0, 32)}`, userId: member.userId, host: f.host, deviceId: passed.value.deviceId,

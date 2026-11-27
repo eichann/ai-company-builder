@@ -41,6 +41,8 @@ export interface BrowserRunRepository {
   byId(id: string): BrowserRunRow | null
   /** Whether a `skill` run naming this frames run was ever started (at most one: the partial unique index). */
   skillRunOf(frameRunId: string): boolean
+  /** That `skill` run itself (the frames run's work), if one was started. */
+  skillRunFor(frameRunId: string): BrowserRunRow | null
   /** The `running` row of this domain, if any. */
   runningOn(host: string): BrowserRunRow | null
   /** One more step and the lease renewed, while the row runs and its steps are below `maxSteps` (compare-and-set). */

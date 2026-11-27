@@ -13,7 +13,7 @@ test('all ✓: every check marked ✓, the values the site showed, the shared-ac
   const state = await openPreview(page, 'browser-inspection-card', q())
   const card = cardOf(page)
   await expect(card).toContainText('点検した項目は、すべて確かめられました。')
-  await expect(card).toContainText('サイトから読み取った情報（AI には見せていません）')
+  await expect(card).toContainText('サイトから読み取った情報（相談の AI には渡していません）')
   await expect(card).toContainText('見本セミナー 第2回の申し込み')
   await expect(card).toContainText('https://example.invalid/follow/preview-2')
   const checks = card.locator('li[data-mark]')
@@ -66,7 +66,7 @@ test('after a restart or in another window: one plain sentence, no value', async
 test('a write run\'s card: the plan shows the key values read and ［任せる］／［やめる］; after ［任せる］ it moves on by itself to the after-read card with who checked each item', async ({ page }) => {
   const state = await openPreview(page, 'browser-inspection-card', q({ frame: '1' }))
   const card = page.getByRole('group', { name: 'ブラウザ操作：AI が書く作業' })
-  await expect(card).toContainText('下見で読んだ大事な値（AI には見せていません）')
+  await expect(card).toContainText('下見で読んだ大事な値（ブラウザ操作の係の AI がページから読んだ値です。相談の AI には渡していません。機械で確かめた値ではありません）')
   await expect(card).toContainText('秋のクーポン（番号 3001）')
   await expect(card.getByRole('button', { name: 'やめる' })).toBeVisible()
   await card.getByRole('button', { name: '任せる' }).click()

@@ -3350,7 +3350,7 @@ else. **No site word** anywhere (a fictional site in the tests).
   taken (the joined lock: the frames run cannot start while the preview's run holds the domain; Codex review) → **ad
   hoc**: `POST /browser-frame-runs { plan }` → **the plan card** (a waiting run) → ［任せる］ → **the work**: a new operator run naming the frames run, the
   page's writes handed to the writer → **the after-read** → the result card → the frames run ends (`end`) whatever
-  happened. The AI's tool call waits for the card and the work (the card up to the server's 10 minutes counted from the frames run's start, each operator run within its budget: "Room for a Skill run"), then
+  happened (an end or a finish lost to the network is kept and sent again: "Letting a domain go"). The AI's tool call waits for the card and the work (the card up to the server's 10 minutes counted from the frames run's start, each operator run within its budget: "Room for a Skill run"), then
   answers; the conversation goes on with its next step.
 - **Who may start one** (server): `POST /browser-runs { write: true }` asks the person's own level 変えてよい
   (`siteGrants.allows(…, 'write')`, `BROWSER_TYPE_NOT_GRANTED`) and the site's level allowing writes (`BROWSER_NOT_ALLOWED`)
@@ -3365,7 +3365,7 @@ else. **No site word** anywhere (a fictional site in the tests).
 - **The plan card (D1)** is the write card (`BrowserWriteView`, `BrowserWriteCard.tsx`, reference `bf_…` — the frames
   run's id — accepted by `readBrowserInspectionRef` and drawn by `BrowserInspectionCard`): the operator's summary, who
   else is affected, each frame in plain words with its count (`browserSkillWriteLine`), the key values read
-  (「下見で読んだ大事な値」, card only, never the AI), ［任せる］ (`browserLines:runWrite` with the plan's hash the card shows) and ［やめる］
+  (「下見で読んだ大事な値」 — read by the operator AI, never machine-checked, and the card says so —, card only, never the consultation AI), ［任せる］ (`browserLines:runWrite` with the plan's hash the card shows) and ［やめる］
   (`browserLines:cancelWrite`, new; from a window showing its consultation, "A card in its consultation's own window"; the
   run ends). **The one-time approval value** stays in the work
   wiring's memory: never in a view, a tool's answer or a log; ［任せる］ is the only path to `approve` (the AI's tools
@@ -3421,8 +3421,8 @@ else. **No site word** anywhere (a fictional site in the tests).
   「「{比べ元}」と違う項目があります。意図した変更か確かめてください。」 with the operator's name for what it compares to (default
   「比べ元」); for an unknown write, 「手でやること」: what to check on the site by hand, and that nothing is sent again. The
   renderer checks each row's shape (`readBrowserCard`); the labels' words are `BROWSER_CARD_CHECKED_BY_WORDS`.
-- **The consultation AI's words** (`workWordsForAi`): 済みました / 止まりました（a fixed reason: not found, needs a person,
-  blocked, refused outside the plan, interrupted, not approved）/ 分からない書き込みがあります / 読めなかったもの：its own
+- **The consultation AI's words** (`workWordsForAi`): 済みました / 止まりました（a fixed reason, one word per cause: "Letting
+  a domain go"）/ 分からない書き込みがあります / 読めなかったもの：its own
   headings by number and the unread after-read patterns. Never the page, the plan's words, a value, the hash or the
   approval value. **One write task per consultation turn** (`BROWSER_WORK_LIMITS.callsPerTurn`).
 - **Stop**: the turn's signal (the member's stop, closing the consultation, an administrator's stop), the AI stop asked
@@ -3788,6 +3788,82 @@ the column's trigger and CHECK; a database from before the column: its row reads
 `client/tests/browser-frame-writes.test.ts` (the view's query kept, absent = null; exact fit only; the permit's path; the
 card and result lines; an id the query carried never reported). Each guard mutation-checked; kept on purpose: the plan
 hash's query (the declaration hash already moves with it).
+
+## Letting a domain go, why a write run stopped, the Skill's steps as written (incident 2026-11-27)
+
+A company Skill's write run on a real site stopped in the app at step 7 (0 writes, no permits) at the moment the network
+to the server dropped. Its operator run's `finish` and the frames run's `end` never arrived: the operator run kept saying
+`running` past its lease, the frames run stayed `open`, and the domain was refused to every new request (「別の AI の作業が
+動いています」) until the frames run's 30 minutes. The card said one word for every stop, and the operator typed 〔〕 where the
+Skill wrote 【】.
+
+- **Ends lost to the network are sent again** (`client/electron/features/browser/pending-ends.ts`, one instance in
+  `main.ts`, injected into `work.ts` and `browse.ts`): a frames run's `end` and an operator run's `finish` that got **no
+  answer** (`sendEnd`) are kept in main's memory per member × company × run and sent again with back-off (2 s, 5 s, 15 s,
+  30 s, then every minute) until the server answers — **any** answer settles it: an ended run's `end` answers the run, a
+  second `finish` is refused `BROWSER_RUN_ENDED` and changes nothing (both idempotent on the server) — or until the run's
+  own time is over (a frames run: its `expiresAt`; an operator run: now + its lease), after which the server frees the
+  domain by itself. **Before the member's next task** on the company (`browser_work`, `browser_browse`), its kept ends
+  are sent once more and awaited, before anything is started. Sign-out drops them — also an end whose first try was
+  still on its way then (a generation counter, Codex review) — so another account's session never carries them. An end is one per run id; the body is the one first sent (the `site-refused` fallback included).
+- **The server lets a Skill run's domain go when its work is over** (`services/browser-frames.ts` `settle`, asked by
+  `holderOn`, start, permit, report, get and end; `BrowserFrameDeps.workRunOver` → `services/browser-runs.ts`
+  `workRunOver`, wired in `composition.ts`): a Skill run allows exactly one work run (`BROWSER_RUN_WORK_TAKEN`, "Room for
+  a Skill run"), so once that `skill` operator run is over — finished, refused, timed out, **or past its lease or hard
+  end** — an `open` Skill run with **no write `permitted`** can permit nothing that matters: it ends at once with the
+  fixed reason `work-ended` (`WORK_ENDED`) and the domain is free. **Never**: a `waiting` run (its card is up; a preview's
+  run is `standard`, not the work), a `locked` run (a write `unknown` keeps the domain to the hour, as before), a run with
+  a write `permitted` (it may be on its way: held until recorded or timed out), an open run whose work has not started
+  yet, an ad-hoc plan's run (no once-rule there: held to its hour as before — decision, safe side).
+- **Past its lease = ended, everywhere** (`services/browser-runs.ts`): a `running` operator run past its lease or hard end
+  is ended `timed_out` on every touch — the lock (`runningOn`, a start), a continue, the finish, the list (`GET
+  /browser-runs`) and `workRunOver` — so nothing reads it as still holding the domain.
+- **Busy says when it frees up**: `BROWSER_RUN_BUSY` from the frames run's start and the operator run's start carries
+  `freeAt` (ISO, additive; absent when unknown or from an older server): the latest the holder can keep the domain — a
+  frames run's end by its times, an operator run's hard end, an ended run's in-flight write's permit + 35 s. The app takes
+  only that ISO shape (`lines-api.ts`) and the consultation AI hears `BROWSER_WORK_WORDS.busyFor(n)` 「長くても約n分で空きます」
+  (`workBusyWords`, whole minutes rounded up), else `busy` as before. An upper bound: with the rule above it frees sooner.
+- **Why a write run stopped** (`WORK_STOP_REASONS`, `BROWSER_WORK_WORDS.stoppedBy`, the card's headline and the AI's
+  sentence alike; fixed words, never page text): `not-found`, `need-login` (the operator's new stop word for a login page;
+  `BROWSER_BROWSE_STOPS`, the run log's end reason too), `need-person` (the operator stopped: a person must decide),
+  `blocked`, `refused` (a write outside the plan), `not-approved`, `network` (the server out of reach: a continue
+  unanswered, a run's start unanswered), `stop-button` (the member's stop **or** the consultation closed: both end the
+  turn's request and the app cannot tell them apart — said as one), `ai-stopped` (the AI stop, asked first: an
+  administrator's stop also ends the turn), `timeout` (the operating time, or the server ending the run on its time),
+  `rounds`, `window-closed`, `context-changed` (the app's sign-in, company or setting), `operator` (the operator AI did
+  not answer in its form), `server-refused` (a continue refused: the setting, a level, this PC). The catch-all
+  「途中で止めました（…など）」 is gone from the write run (the read-only `browser_browse` keeps its own words for now).
+- **Who read what, on the cards**: the plan card's 「下見で読んだ大事な値」 says the operator AI read them from the page, that
+  the consultation AI does not get them, and that they are not machine-checked; the result card's summary is 「ブラウザ操作
+  の係の AI のまとめ」 with the same three facts, its checks 「ブラウザ操作の係の AI が確かめたこと」 and the row label
+  `BROWSER_CARD_CHECKED_BY_WORDS.ai` 「係の AI が確かめた（機械ではない）」; the read-only operator's card says the same; the
+  card body's heading 「サイトから読み取った情報（相談の AI には渡していません）」 (who read each part is said by its own
+  heading or row); a line inspection's (machine) 「アプリがサイトから読み取った情報」.
+- **The Skill's steps as written** (`workMaterial`): the page (address, title, text, element names, values, options), the
+  item headings and the operator's own notes stay outside text (`{ outside }`, 【】 → 〔〕). **A company Skill's steps**
+  (its `SKILL.md` and `site-notes.md`, company-reviewed text approved with the Skill) go as `steps: { skill }` and **the
+  task** (the request the consultation AI wrote for the member) as `task: { request }`, **as written** — no bracket
+  neutralization: the values the operator types come from them, never from the page. Each is its own JSON value (the
+  encoding is the fence: nothing inside a value can end it, which is also why neutralizing brackets inside JSON guarded
+  nothing). No Skill → `steps: null`. Both prompts say: what to do and the values to type come from `request` and `skill`,
+  as written, 【】 included; `outside` text is data, and its 〔〕 may be 【】 in the original. Checked elsewhere: no other
+  company text reaches the operator neutralized (the frames, after-read and never-read patterns are plain values; the
+  read-only operator has no Skill steps; its task stays `outside` — it types only search words).
+- **The model** (`FramesLife.tla`, README): unchanged — `work-ended` is `RunEnds` with a narrower guard (open, nothing
+  permitted), a resent `end` is an idempotent `RunEnds`; the lock across runs is left out as before. 264,480 states.
+
+Tests: `server/tests/unit/browser-frames.test.ts` "letting a domain go" (the incident: busy with `freeAt` until the work
+run's lease runs out, then free at once, the frames run `work-ended`, the operator run `timed_out` in the list, a late
+permit `BROWSER_RUN_ENDED`; a finished work run frees at once and a later `end` changes nothing; a write permitted holds
+until recorded, an unknown one to the hour; a pre-approved run before its work, a waiting card after its preview and an
+ad-hoc plan's work all held; both starts' busy `freeAt`), `server/tests/unit/browser-runs.test.ts` (a run past its lease
+listed `timed_out` with no other touch, `runningOn` null, `workRunOver` false with no work run),
+`client/tests/browser-domain-release.test.ts` (back-off until answered; a refusal settles; the run's own time stops the
+tries; flush only this member's and company's, awaited; sign-out drops all; the incident wired: both ends kept and sent
+before the next task's frames run; each stop's words in the card and the AI's sentence, all distinct; busy minutes and
+only an ISO `freeAt` taken; a Skill step and the task with 【】 reach the operator unchanged while the page's text and the
+notes are neutralized; the prompts; the card's who-read-what), `client/tests/ui/browser-inspection-card.spec.ts` (the
+headings). Each guard mutation-checked.
 
 ## Not yet (later PRs)
 

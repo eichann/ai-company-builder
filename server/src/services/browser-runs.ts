@@ -25,6 +25,9 @@
  * - **Never past the frames run** (`browserRunWindow`): a run naming a frames run ends (`ends_at`, fixed) no later than
  *   that frames run does, and the answer's `operateMs` tells the app how long it may operate; with less than a minute left
  *   it is refused (`BROWSER_RUN_TOO_LATE`).
+ * - **Past its lease = ended, everywhere** (agent-browser.md "Letting a domain go"): a running row past its lease or hard end
+ *   is ended `timed_out` on every touch — the lock (`runningOn`, start), a continue, the finish, the list, and the frames
+ *   run asking whether its work is over (`workRunOver`) — so nothing reads it as still holding the domain.
  * - **The log** (I8): only steps that pass `browserRunLogProblem` (page patterns, the fixed actions, labels already in
  *   the kept form): no value can be stored. Written once per run, append-only (trigger). The member sees their own runs,
  *   an owner / admin everyone's; another company's run is the same 404 as none.
@@ -158,8 +161,10 @@ export function createBrowserRunService(deps: BrowserRunDeps) {
         if (holder) settleTime(member.companyId, holder, now)
         // The frames run's lock (step ⑤b): the same domain is never operated by two runs at once.
         const framed = deps.frameRunOn ? deps.frameRunOn(member.companyId, host) : null
-        if (framed === 'busy' || (framed && (framed.runId !== frameRunId || framed.userId !== member.userId))) {
-          return refuse('conflict', W.busy, { code: 'BROWSER_RUN_BUSY' })
+        if (framed === 'busy') return refuse('conflict', W.busy, { code: 'BROWSER_RUN_BUSY' })
+        // `freeAt`: the latest the holder can keep the domain (its hard end), so the AI can say roughly when it frees up.
+        if (framed && (framed.runId !== frameRunId || framed.userId !== member.userId)) {
+          return refuse('conflict', W.busy, { code: 'BROWSER_RUN_BUSY', freeAt: iso(framed.endsAt) })
         }
         if (!framed && frameRunId) return refuse('conflict', W.ended, { code: 'BROWSER_RUN_ENDED' })
         // The budget: from this server's own frames run (its member's, the one named, checked just above), never the app's word.
@@ -176,7 +181,10 @@ export function createBrowserRunService(deps: BrowserRunDeps) {
           startedAt: iso(now), leaseUntil: iso(Math.min(now + BROWSER_RUN_LIMITS.leaseMs, window.endsAt)), endedAt: null, budget, steps: 0,
           frameRunId: named ? named.runId : null, endsAt: iso(window.endsAt),
         })
-        if (!inserted) return refuse('conflict', W.busy, { code: 'BROWSER_RUN_BUSY' })
+        if (!inserted) {
+          const still = r.runningOn(host)
+          return refuse('conflict', W.busy, { code: 'BROWSER_RUN_BUSY', ...(still ? { freeAt: iso(endOf(still)) } : {}) })
+        }
         return ok({ runId: id, leaseMs: BROWSER_RUN_LIMITS.leaseMs, budget, operateMs: window.operateMs })
       })
     },
@@ -255,10 +263,24 @@ export function createBrowserRunService(deps: BrowserRunDeps) {
       })
     },
 
-    /** Whether an operator run holds this domain now (a run past its time is ended first): the frames run's start asks it. */
-    runningOn(companyId: string, host: string): boolean {
+    /**
+     * Whether an operator run holds this domain now (a run past its lease or its hard end is ended first): the frames run's
+     * start asks it. `until`: the latest it can hold the domain (its hard end), for the busy answer's `freeAt`.
+     */
+    runningOn(companyId: string, host: string): { until: number } | null {
       const row = repo(companyId).runningOn(host)
-      return !!row && !settleTime(companyId, row, deps.clock.nowMs())
+      return row && !settleTime(companyId, row, deps.clock.nowMs()) ? { until: endOf(row) } : null
+    },
+
+    /**
+     * Whether the frames run's one work run (its `skill` run, at most one: "Room for a Skill run") was started and is over —
+     * finished, refused, timed out, or past its lease or hard end (ended here first: a run past its lease counts as ended
+     * everywhere). The frames service then lets the domain go at once (`holderOn`, `settle`) instead of at its hour.
+     */
+    workRunOver(companyId: string, frameRunId: string): boolean {
+      const row = repo(companyId).skillRunFor(frameRunId)
+      if (!row) return false
+      return row.state !== 'running' || settleTime(companyId, row, deps.clock.nowMs())
     },
 
     /** In removeMember's transaction: their running runs end (`left`), the lock goes. */

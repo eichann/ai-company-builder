@@ -21,7 +21,8 @@ import { sqliteTransactions } from '../../src/adapters/sqlite/transactions'
 import { sqliteMembershipRepository } from '../../src/adapters/sqlite/memberships'
 import { sha256TokenDigest } from '../../src/adapters/system'
 import { createBrowserSkillService, type BrowserSkillService } from '../../src/services/browser-skills'
-import { BROWSER_FRAME_TIMES, createBrowserFrameService, type BrowserFrameService } from '../../src/services/browser-frames'
+import { BROWSER_FRAME_TIMES, WORK_ENDED, createBrowserFrameService, type BrowserFrameService } from '../../src/services/browser-frames'
+import { BROWSER_RUN_LIMITS } from '../../../shared/core/browser-run-log'
 import { createBrowserRunService, type BrowserRunService } from '../../src/services/browser-runs'
 import { BROWSER_RUN_BUDGETS, BROWSER_RUN_MIN_OPERATE_MS } from '../../../shared/core/browser-run-budget'
 import type { BrowserSkillContent, BrowserSkillSource } from '../../src/ports/browser-skills'
@@ -102,7 +103,15 @@ beforeEach(() => {
     accounts: { byIds: list => new Map(list.map(id => [id, { name: id, email: `${id}@example.test` }])) },
     source, registeredHosts: () => policy.sites.map(s => s.host), sha256: sha,
   })
-  frames = createBrowserFrameService({
+  frames = makeFrames()
+})
+
+/** The frames service as each test builds it (`extra`: the operator runs joined, as composition.ts wires them). */
+function makeFrames(extra: Partial<Parameters<typeof createBrowserFrameService>[0]> = {}): BrowserFrameService {
+  const data = sqliteCompanyData(conn)
+  const clock = { now: () => iso(now), nowMs: () => now }
+  const ids = { newId: () => randomBytes(8).toString('hex'), newToken: () => randomBytes(32).toString('hex') }
+  return createBrowserFrameService({
     companyData: data, transactions: sqliteTransactions(conn), clock, ids, tokenDigest: sha256TokenDigest,
     monotonic: { bootId: 'boot-1', monoMs: () => now - monoBase },
     browserPolicy: () => policy,
@@ -115,8 +124,9 @@ beforeEach(() => {
       stillApproved: (m, s, h, a) => skills.stillApproved(m, s, h, a),
       runCardShown: (m, s, h, f) => skills.runCardShown(m, s, h, f),
     },
+    ...extra,
   })
-})
+}
 
 /** The card's ［任せる］: the plan's hash and the one-time value only the start's answer carried. */
 const approve = (m: Member, run: BrowserFrameRunStart, key: string | undefined = PC) =>
@@ -577,7 +587,7 @@ describe('step ⑤b: what the app is answered, one lock with the operator runs',
       devices: { check: (_m, key) => ({ ok: true, value: { deviceId: key === undefined ? null : `bd_${key}` } }) },
       siteGrants: { allows: () => true },
       skills: { approvedFrames: async () => { throw new Error('no skill here') }, stillApproved: () => false, runCardShown: () => {} },
-      operatorRunOn: () => operatorRunning,
+      operatorRunOn: () => (operatorRunning ? { until: now + 60_000 } : null),
     })
     expect(code(await withRuns.start(alice, { plan: adhoc }, PC))).toBe('BROWSER_RUN_BUSY')
     expect(withRuns.holderOn(CO, DOMAIN)).toBeNull()
@@ -730,6 +740,127 @@ describe('room for a Skill run: the operator run\'s budget is the server\'s choi
     expect(() => conn.prepare("UPDATE browser_runs SET frame_run_id = 'bf_x' WHERE id = ?").run(plain.runId)).toThrow(/only moves from running/)
     expect(() => conn.prepare('UPDATE browser_runs SET steps = steps + 2 WHERE id = ?').run(plain.runId)).toThrow(/only moves from running/)
     expect(() => conn.prepare('UPDATE browser_runs SET steps = steps - 1 WHERE id = ?').run(plain.runId)).toThrow(/CHECK|only moves from running/)
+  })
+})
+
+describe('letting a domain go: a Skill run whose one work run is over (agent-browser.md "Letting a domain go")', () => {
+  // The incident of 2026-11-27: the work run stopped in the app at the moment the network dropped; its finish never
+  // arrived, the operator run kept saying `running` past its lease and the open frames run held the domain to its hour.
+  let runs: BrowserRunService
+  let joined: BrowserFrameService
+  beforeEach(() => {
+    joined = makeFrames({
+      operatorRunOn: (companyId, host) => runs.runningOn(companyId, host),
+      workRunOver: (companyId, frameRunId) => runs.workRunOver(companyId, frameRunId),
+    })
+    runs = createBrowserRunService({
+      companyData: sqliteCompanyData(conn), transactions: sqliteTransactions(conn), clock: { now: () => iso(now), nowMs: () => now },
+      ids: { newId: () => randomBytes(8).toString('hex'), newToken: () => randomBytes(32).toString('hex') },
+      browserPolicy: () => policy, aiStops: () => ({ all: stopped, tools: [] }),
+      devices: { check: (_m, key) => ({ ok: true, value: { deviceId: key === undefined ? null : `bd_${key}` } }) },
+      siteGrants: { allows: (m, host, effect) => host === DOMAIN && (effect === 'read' ? level[m.userId] !== 'none' : level[m.userId] === 'write') },
+      frameRunOn: (companyId, host) => joined.holderOn(companyId, host),
+    })
+  })
+  const runState = (id: string) => conn.prepare('SELECT state, end_reason AS reason FROM browser_frame_runs WHERE id = ?').get(id)
+  const jpermit = (runId: string, frame: number) => joined.permit(alice, runId, { frame, request: FITS[frame] }, PC)
+  const jreport = (runId: string, write: number, result: string) => joined.report(alice, runId, { write, result }, PC)
+  async function skillWork() {
+    put(yaml)
+    await approveSkill('pre_approved')
+    const run = value(await joined.start(alice, { skill: SKILL }, PC))
+    const worked = value(runs.start(alice, { host: DOMAIN, frameRunId: run.runId, write: true }, PC))
+    expect(worked.budget).toBe('skill')
+    return { run, worked }
+  }
+
+  it('the work run lost with the network: busy (with when it frees) until its lease runs out, then free at once, not at the hour', async () => {
+    const { run, worked } = await skillWork()
+    // While the work run's lease lasts the domain is held, and the refusal says the latest it frees up.
+    now += BROWSER_RUN_LIMITS.leaseMs - 1
+    const busy = await joined.start(bob, { plan: adhoc }, PC)
+    expect(code(busy)).toBe('BROWSER_RUN_BUSY')
+    expect((busy as Refusal).body.freeAt).toBe(iso(T0 + BROWSER_FRAME_TIMES.run))
+    // Past the lease (no finish ever came): the operator run counts as ended, the frames run ends `work-ended`, the domain is free.
+    now += 1
+    const bobs = value(await joined.start(bob, { plan: adhoc }, PC))
+    expect(runState(run.runId)).toEqual({ state: 'ended', reason: WORK_ENDED })
+    expect(conn.prepare('SELECT state, reason FROM browser_runs WHERE id = ?').get(worked.runId)).toEqual({ state: 'timed_out', reason: 'timeout' })
+    expect(bobs.state).toBe('waiting')
+    // The ended run permits nothing (a late app asking gets "ended"); the list says the work run ended too.
+    expect(code(await jpermit(run.runId, 1))).toBe('BROWSER_RUN_ENDED')
+    expect(value(runs.list(alice)).runs.find(r => r.id === worked.runId)).toMatchObject({ state: 'timed_out', reason: 'timeout' })
+  })
+
+  it('a finished work run frees the domain at once (holderOn and the operator runs\' start), whatever the app does next', async () => {
+    const { run, worked } = await skillWork()
+    expect(joined.holderOn(CO, DOMAIN)).toMatchObject({ runId: run.runId })
+    value(runs.finish(alice, worked.runId, { outcome: 'stopped', reason: 'no-answer', steps: [] }))
+    expect(joined.holderOn(CO, DOMAIN)).toBeNull()
+    expect(runState(run.runId)).toEqual({ state: 'ended', reason: WORK_ENDED })
+    expect(value(runs.start(bob, { host: DOMAIN }, PC)).budget).toBe('standard')
+    // The app's own end afterwards (or again) changes nothing.
+    expect(value(joined.end(alice, run.runId))).toMatchObject({ state: 'ended', endReason: WORK_ENDED })
+  })
+
+  it('a write on its way keeps the domain until it is recorded; a write in doubt keeps it to the hour, as before', async () => {
+    const { run, worked } = await skillWork()
+    value(await jpermit(run.runId, 1))
+    value(runs.finish(alice, worked.runId, { outcome: 'stopped', steps: [] }))
+    // Permitted (it may be on its way): held, busy.
+    expect(joined.holderOn(CO, DOMAIN)).toMatchObject({ runId: run.runId })
+    expect(code(await joined.start(bob, { plan: adhoc }, PC))).toBe('BROWSER_RUN_BUSY')
+    // Unknown (the run locked): still held — never let go while a write is in doubt.
+    value(jreport(run.runId, 1, 'unknown'))
+    expect(joined.holderOn(CO, DOMAIN)).toMatchObject({ runId: run.runId, state: 'locked' })
+    now = T0 + BROWSER_FRAME_TIMES.run - 1
+    expect(code(await joined.start(bob, { plan: adhoc }, PC))).toBe('BROWSER_RUN_BUSY')
+    now += 1
+    expect(value(await joined.start(bob, { plan: adhoc }, PC)).state).toBe('waiting')
+    expect(runState(run.runId)).toEqual({ state: 'ended', reason: 'expired' })
+  })
+
+  it('a done write then the work\'s end: free; before the work starts, a waiting card or an ad-hoc plan: held as before', async () => {
+    const { run, worked } = await skillWork()
+    value(await jpermit(run.runId, 1))
+    value(jreport(run.runId, 1, 'done'))
+    expect(joined.holderOn(CO, DOMAIN)).toMatchObject({ runId: run.runId })
+    value(runs.finish(alice, worked.runId, { outcome: 'done', steps: [] }))
+    expect(joined.holderOn(CO, DOMAIN)).toBeNull()
+
+    // A pre-approved run whose work has not started yet: held.
+    const second = value(await joined.start(alice, { skill: SKILL }, PC))
+    now += 20 * 60_000
+    expect(joined.holderOn(CO, DOMAIN)).toMatchObject({ runId: second.runId, state: 'open' })
+    value(joined.end(alice, second.runId))
+    // A per-run Skill's card up after its preview finished: held (the card waits for the person).
+    await approveSkill('per_run')
+    const waiting = value(await joined.start(alice, { skill: SKILL }, PC))
+    const preview = value(runs.start(alice, { host: DOMAIN, frameRunId: waiting.runId, write: true }, PC))
+    value(runs.finish(alice, preview.runId, { outcome: 'done', steps: [] }))
+    expect(joined.holderOn(CO, DOMAIN)).toMatchObject({ runId: waiting.runId, state: 'waiting' })
+    value(joined.end(alice, waiting.runId))
+    // An ad-hoc plan's work (no once-rule there): held to its hour, as before.
+    const started = value(await joined.start(alice, { plan: adhoc }, PC))
+    const plan = value(await joined.approve(alice, started.runId, { planHash: started.planHash, approvalToken: started.approvalToken }, PC))
+    const adhocWork = value(runs.start(alice, { host: DOMAIN, frameRunId: plan.runId, write: true }, PC))
+    value(runs.finish(alice, adhocWork.runId, { outcome: 'done', steps: [] }))
+    expect(joined.holderOn(CO, DOMAIN)).toMatchObject({ runId: plan.runId, state: 'open' })
+  })
+
+  it('the busy answers say when the holder frees up at the latest', async () => {
+    const { worked } = await skillWork()
+    const refusedByFrames = runs.start(bob, { host: DOMAIN }, PC)
+    expect(code(refusedByFrames)).toBe('BROWSER_RUN_BUSY')
+    expect((refusedByFrames as Refusal).body.freeAt).toBe(iso(T0 + BROWSER_FRAME_TIMES.run))
+    value(runs.finish(alice, worked.runId, { outcome: 'done', steps: [] }))
+    // An operator run holding the domain: its hard end, from both kinds of start.
+    value(runs.start(alice, { host: DOMAIN }, PC))
+    const refused = runs.start(bob, { host: DOMAIN }, PC)
+    expect(code(refused)).toBe('BROWSER_RUN_BUSY')
+    expect((refused as Refusal).body.freeAt).toBe(iso(now + BROWSER_RUN_BUDGETS.standard.runMs))
+    const framesRefused = await joined.start(bob, { plan: adhoc }, PC)
+    expect((framesRefused as Refusal).body.freeAt).toBe(iso(now + BROWSER_RUN_BUDGETS.standard.runMs))
   })
 })
 

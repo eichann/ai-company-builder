@@ -25,9 +25,14 @@ import { BROWSER_RUN_ID_RE } from '../../../../shared/core/browser-run-log'
 import type { BrowserRunFinish } from '../../../../shared/types/browser-runs'
 
 /** A server answer (the same three kinds as the plans' client; this module never imports the old path's runner). */
-export type BrowserLinesAnswer = { kind: 'ok'; value: unknown } | { kind: 'refused'; code: string | null } | { kind: 'no-answer' }
+export type BrowserLinesAnswer =
+  | { kind: 'ok'; value: unknown }
+  /** `freeAt`: on a busy refusal, the latest the holder can keep the domain (the server's ISO time; absent from an older server). */
+  | { kind: 'refused'; code: string | null; freeAt?: string }
+  | { kind: 'no-answer' }
 
 const CODE_RE = /^[A-Z][A-Z0-9_]{0,63}$/
+const ISO_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/
 const EXEC_ID_RE = /^bw_[0-9a-f]{32}$/
 const SECRET_RE = /^[A-Za-z0-9_-]{32,200}$/
 const HASH_RE = /^sha256:[0-9a-f]{64}$/
@@ -123,7 +128,12 @@ export function createBrowserLinesHttp(deps: BrowserLinesHttpDeps): BrowserLines
       })
       const json = await res.json().catch(() => null) as Record<string, unknown> | null
       if (res.status >= 200 && res.status < 300 && json && json.data !== undefined) return { kind: 'ok', value: json.data }
-      if (res.status >= 400 && res.status < 500) return { kind: 'refused', code: typeof json?.code === 'string' && CODE_RE.test(json.code) ? json.code : null }
+      if (res.status >= 400 && res.status < 500) {
+        const code = typeof json?.code === 'string' && CODE_RE.test(json.code) ? json.code : null
+        // Only a time in the server's own shape (never any other text of the answer).
+        const freeAt = typeof json?.freeAt === 'string' && ISO_RE.test(json.freeAt) ? json.freeAt : undefined
+        return { kind: 'refused', code, ...(freeAt ? { freeAt } : {}) }
+      }
       return { kind: 'no-answer' }
     } catch {
       return { kind: 'no-answer' }

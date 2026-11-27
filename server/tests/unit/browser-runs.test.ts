@@ -192,6 +192,15 @@ describe('the lock: one run per company × domain', () => {
       .run(CO, HOST, iso(now), iso(now))).toThrow(/UNIQUE/)
   })
 
+  it('a run past its lease counts as ended everywhere: the list says so without any other touch, and its frames run\'s work is over', () => {
+    const r = value(start(alice))
+    now += BROWSER_RUN_LIMITS.leaseMs
+    expect(value(runs.list(alice)).runs.find(x => x.id === r.runId)).toMatchObject({ state: 'timed_out', reason: 'timeout' })
+    expect(runs.runningOn(CO, HOST)).toBeNull()
+    // A frames run's work run (none here) is not over before it exists.
+    expect(runs.workRunOver(CO, `bf_${'3'.repeat(32)}`)).toBe(false)
+  })
+
   it('a crashed run frees the domain once its lease runs out; a renewed one keeps it, up to the run\'s limit', () => {
     const r = value(start(alice))
     now += BROWSER_RUN_LIMITS.leaseMs - 1
@@ -411,8 +420,8 @@ describe('a write task\'s runs (step ⑤b): 変えてよい first, one lock with
     expect(refusal(runs.start(alice, { host: HOST, frameRunId: FRAME }, keys[alice.userId]))).toBe('conflict:BROWSER_RUN_ENDED')
     expect(value(start(alice)).runId).toMatch(/^bo_/)
     // The frames run's start asks this side: a running operator run holds the domain.
-    expect(runs.runningOn(CO, HOST)).toBe(true)
-    expect(runs.runningOn(CO, OTHER_HOST)).toBe(false)
+    expect(runs.runningOn(CO, HOST)).toEqual({ until: now + BROWSER_RUN_BUDGETS.standard.runMs })
+    expect(runs.runningOn(CO, OTHER_HOST)).toBeNull()
   })
 
   it('a run\'s write steps are kept and listed — the frame, method, path pattern and outcome only; a value anywhere refuses the whole finish', () => {

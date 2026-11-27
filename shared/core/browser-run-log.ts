@@ -70,7 +70,7 @@ export function browserRunLogProblem(steps: unknown): string | null {
 
 /** Fixed reason words a run may end with (the app's; the server keeps only a word of this list, else none). */
 export const BROWSER_RUN_END_REASONS = [
-  'not-found', 'need-person', 'blocked', 'stopped-by-person', 'ai-stopped', 'context-changed', 'window-closed',
+  'not-found', 'need-login', 'need-person', 'blocked', 'stopped-by-person', 'ai-stopped', 'context-changed', 'window-closed',
   'timeout', 'rounds', 'bad-answer', 'operator-failed', 'refused', 'no-answer', 'other-frames',
   // A write run (step ⑤b): a write that may have been sent without an answer; the plan not approved (dismissed, timed out).
   'write-unknown', 'not-approved',

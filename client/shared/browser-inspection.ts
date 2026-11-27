@@ -74,7 +74,8 @@ export const BROWSER_INSPECTION_CARD_WORDS = {
   badInput: '入力が正しくありません。',
   loading: '読み込んでいます…',
   readAt: '読み取った時刻',
-  siteValues: 'サイトから読み取った情報（AI には見せていません）',
+  /** Shared by every card body: who read each part is said by its own heading or row (アプリ・係の AI・機械で確かめた). */
+  siteValues: 'サイトから読み取った情報（相談の AI には渡していません）',
   checks: '確かめ',
   notes: 'サイトの注意',
   unreadable: BROWSER_CARD_MARK_WORDS.unreadable,
