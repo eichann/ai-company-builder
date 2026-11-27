@@ -57,7 +57,9 @@ in two halves, and the required check "Client tests (macOS)" is green only when 
 were skipped for a PR that does not touch them):
 
 - **"Client tests 1/2 (Linux)"**: every file not in the script's `MACOS` list (most of them).
-- **"Client tests 2/2 (macOS)"**: the `MACOS` list, then two Swift tests (`audio-level`,
+- **"Client tests 2/2 (macOS)"**: the `MACOS` list — the files that launch the real Electron app
+  (`*-electron.test.ts`) one at a time after the others (side by side their windows take the focus from
+  each other: the keyboard / focus checks failed in turns, 2026-11-27) —, then two Swift tests (`audio-level`,
   `input-route`). A file belongs there only when a Linux run would pass without guarding it:
   it spawns through the POSIX wrappers (`exec N>&-` through `/bin/sh`, dash on Ubuntu, fails on
   multi-digit fds), relies on FSEvents (recursive `fs.watch`), or asserts the case- and
