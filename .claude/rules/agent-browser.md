@@ -4012,7 +4012,7 @@ yet (PR 3) and nothing requests it for the company (PR 4).
   an older server's answer: `sent` as before), and the review screen's note says the member's own consultation AI reads it
   to make a draft (other people's AI does not).
 - **Table** `browser_skill_drafts` (`db/schema/browser-skill-drafts.ts`, **new table only**, behind the handle's
-  `browserSkillDrafts`): company, `bd_` + 32 hex, author (`user_id`), `name` (the Skill name rule, ≤ 64; unique per author),
+  `browserSkillDrafts`): company, `bd_` + 32 hex, author (`user_id`), `name` (the Skill name rule, ≤ 64; once among the author's drafts they can see — checked by the service in its transaction, no unique index: a draft past `delete_at` or from before a rejoin holds no name, Codex review),
   `domain`, `recording_ids` (JSON, the names stay after the recordings' 30 days), `base_declaration` and `base_notes` (each
   write's marks and id fields, what was left out — what the rule said, kept for the card and the request later),
   `declaration`, `steps` (`SKILL.md`, ≤ 32 KiB, CHECK), `version` (`sha256:` of the canonical JSON of `{ name,
@@ -4071,7 +4071,7 @@ the author after leaving and coming back: 404 and nothing listed; only own recor
 owner's create from a member's recording refused like none —; a recording past its 30 days no longer handed out; remake in
 order, one domain, ≤ 5, distinct, strict body; narrowing taken, anything wider refused with its problem — a write never
 recorded, a DELETE, a wide path, another domain, a target split past its budget —; the base and the author fixed by
-trigger; the version's compare-and-set; the name rule and once per author; `SKILL.md` 32 KB; 10 per person; 30 days moved by
+trigger; the version's compare-and-set; the name rule and once per author, free again once its draft expired or after a rejoin; `SKILL.md` 32 KB; 10 per person; 30 days moved by
 a change, left out and swept by the clock; deleting), `server/tests/unit/browser-frames.test.ts` 「a run of a source this
 build does not know」, `client/tests/browser-skill-draft-tool.test.ts` (only the drafts' routes with the session and never
 this PC's key; ids checked before any request; the recordings' lines one block of outside text, a label trying to close it

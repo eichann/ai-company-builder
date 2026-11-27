@@ -8,6 +8,8 @@
  *   fixed by trigger, so a later change of `declaration` can always be checked against them (never wider).
  * - `recording_ids` names the recordings it was made from (a JSON list); they go after 30 days, the names stay.
  * - `version` = sha256 of the canonical JSON of `{ name, declaration, steps }`; every change is a compare-and-set on it.
+ * - A name is once among the author's drafts they can see (the service, inside its transaction): a draft past its
+ *   `delete_at` or from before the author's current membership no longer holds its name (no unique index: it would).
  * - `delete_at` = the last change (or trial, a later PR) + 30 days: every read leaves out a row past it and the server
  *   clock deletes it.
  */
@@ -32,7 +34,7 @@ export const browserSkillDraftSchema = `
       CHECK (delete_at > updated_at),
       CHECK (length(CAST(steps AS BLOB)) <= 32768)
     );
-    CREATE UNIQUE INDEX IF NOT EXISTS idx_browser_skill_drafts_name ON browser_skill_drafts(company_id, user_id, name);
+    CREATE INDEX IF NOT EXISTS idx_browser_skill_drafts_name ON browser_skill_drafts(company_id, user_id, name);
     CREATE INDEX IF NOT EXISTS idx_browser_skill_drafts_user ON browser_skill_drafts(company_id, user_id, created_at);
     CREATE INDEX IF NOT EXISTS idx_browser_skill_drafts_delete ON browser_skill_drafts(company_id, delete_at);
     CREATE TRIGGER IF NOT EXISTS browser_skill_drafts_fixed BEFORE UPDATE ON browser_skill_drafts

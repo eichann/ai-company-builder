@@ -331,6 +331,25 @@ describe('changes: the version, the name, the size', () => {
   })
 })
 
+describe('a name held only by drafts the author can see (Codex review)', () => {
+  it('a draft past its 30 days but not swept yet, or from before the author came back, no longer holds its name', () => {
+    const old = draftOf(alice)
+    value(drafts.save(alice, old.id, { expectedVersion: old.version, name: 'order-note' }))
+    // Past its 30 days, before the clock's sweep: the name is free again for a new draft and a rename.
+    now = T0 + 31 * DAY
+    const sent = sendRecording(alice)
+    expect(code(drafts.create(alice, { recordingIds: [sent.id], name: 'order-note' }))).toBe('ok')
+    // Leaving and coming back: the drafts from before are not hers to see, nor their names.
+    leave(CO, alice.userId)
+    now = T0 + 32 * DAY
+    join(CO, alice.userId, 'member', iso(now))
+    now += 1000
+    const fresh = draftOf(alice)
+    expect(code(drafts.save(alice, fresh.id, { expectedVersion: fresh.version, name: 'order-note' }))).toBe('ok')
+    expect(value(drafts.list(alice)).drafts.map(d => d.name)).toEqual(['order-note'])
+  })
+})
+
 describe('30 days after the last change (D5)', () => {
   it('a change moves its day; past it every read leaves it out and the server clock deletes it', () => {
     const d = draftOf(alice)
