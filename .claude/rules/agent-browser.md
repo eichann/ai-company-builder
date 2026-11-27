@@ -3963,7 +3963,8 @@ preview that ended without a plan made **no card at all**. Now the person's card
   (a write run's `bf_` card, `work.ts`: the preview's run and the work's, read live while the card is up). **A write
   task's preview that ends without a plan** (the operator's stop, or the app ending it — rounds, a bad answer, a stop
   button…) now keeps a card named by the preview's operator run (`bo_`, `workPreviewStoppedCard`: 「下見の途中で止まりました。」
-  + the fixed `stoppedBy` word) with the trail, in the work wiring's memory (`previewCard`; main's `runCard` asks the
+  + the fixed `stoppedBy` word; the note pointing to the memo only when there is one — a preview the app ended before
+  any answer has neither) with the trail, in the work wiring's memory (`previewCard`; main's `runCard` asks the
   browse wiring first, then it), and puts its reference into the reply. A read run's endings without `done` / `stop`
   still make no card (as before).
 - **Outside text, the person's card only**: the operator reads page text, so everything it wrote is treated as outside

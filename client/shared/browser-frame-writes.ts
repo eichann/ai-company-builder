@@ -685,14 +685,14 @@ export const BROWSER_WORK_CARD_WORDS = {
  * The card of a write task's preview that ended without a plan (incident 2026-11-27: a `need-person` stop left the member
  * nothing to look at): the fixed reason word only. What the operator tried is the view's trail beside it.
  */
-export function workPreviewStoppedCard(end: WorkEnd): BrowserCard {
+export function workPreviewStoppedCard(end: WorkEnd, hasTrail: boolean): BrowserCard {
   return {
     title: BROWSER_WORK_CARD_WORDS.previewTitle,
     state: 'not_read',
     headline: `${BROWSER_WORK_CARD_WORDS.previewStopped} ${end.kind === 'stopped' ? BROWSER_WORK_WORDS.stoppedBy[end.why] : ''}`.trim(),
     sections: [],
     checks: [],
-    notes: [BROWSER_WORK_CARD_WORDS.previewNote],
+    notes: hasTrail ? [BROWSER_WORK_CARD_WORDS.previewNote] : [],
   }
 }
 const CW = BROWSER_WORK_CARD_WORDS

@@ -181,6 +181,18 @@ test('the incident: a write task\'s preview that stops (need-person) leaves the 
   }
 })
 
+test('a preview the app ended before the operator answered in its form still leaves a card, without a memo or a note pointing to one', async () => {
+  const { wiring, cards, work } = workWorld(['not json'], null)
+  const said = await work()
+  assert.equal(said.words.startsWith(WW.stoppedBy.operator), true, said.words)
+  assert.deepEqual(cards, [RUN])
+  const view = wiring.previewCard('u-1', COMPANY, RUN)
+  assert.ok(view)
+  assert.match(view.card.headline, /決まった形で答えられませんでした/)
+  assert.equal(view.trail, undefined)
+  assert.deepEqual(view.card.notes, [])
+})
+
 test('a write run\'s card carries the preview\'s trail and the work\'s, read live; never the AI\'s words or the log', async () => {
   const PLAN = JSON.stringify({ do: 'plan', summary: '作ります', affects: '', values: [], writes: [{ method: 'POST', path: '/coupons', max: 1 }], unread: [], reason: '一覧で作る先を見つけたため' })
   const { wiring, cards, finished, work } = workWorld([
@@ -258,6 +270,7 @@ test('the renderer takes a trail only in its shape and caps: past a cap or with 
     [{ ...good[0], steps: Array(BROWSER_TRAIL_LIMITS.steps + 1).fill(good[0].steps[0]) }],
     [good[0], good[0], good[0]],
     [{ ...good[0], phase: 'other' }],
+    [{ ...good[0], steps: [{ ...good[0].steps[0], page: '/a\n/b' }] }],
     [{ ...good[0], steps: [{ ...good[0].steps[0], action: 'submit' }] }],
   ]
   for (const b of bad) assert.equal(readBrowserOperatorTrail(b), null, JSON.stringify(b).slice(0, 80))

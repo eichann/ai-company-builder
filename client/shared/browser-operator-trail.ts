@@ -83,7 +83,7 @@ export function trailLine(v: unknown, max: number = L.reason): string | null {
 /** The operator's notes as the card shows them: line breaks kept, every other unsafe character dropped, cut; empty → null. */
 export function trailNotes(v: unknown): string | null {
   if (typeof v !== 'string') return null
-  const s = v.normalize('NFC').replace(/\r\n?/g, '\n').replace(UNSAFE_MULTILINE_RE, ' ').trim().slice(0, L.notes)
+  const s = v.normalize('NFC').replace(/\r\n?/g, '\n').replace(UNSAFE_MULTILINE_RE, ' ').trim().slice(0, L.notes).trim()
   return s === '' ? null : s
 }
 
@@ -133,7 +133,7 @@ export function readBrowserOperatorTrail(v: unknown): BrowserOperatorTrail | nul
     if (!Number.isSafeInteger(r.more) || (r.more as number) < 0) return null
     const steps: BrowserTrailStep[] = []
     for (const s of r.steps) {
-      if (!isMap(s) || !(BROWSER_RUN_ACTIONS as readonly unknown[]).includes(s.action) || typeof s.page !== 'string' || s.page.length > L.label) return null
+      if (!isMap(s) || !(BROWSER_RUN_ACTIONS as readonly unknown[]).includes(s.action) || typeof s.page !== 'string' || (s.page !== '' && !lineOrNull(s.page, L.label))) return null
       if (!lineOrNull(s.label, L.label) || !lineOrNull(s.reason, L.reason)) return null
       steps.push({ action: s.action as BrowserRunAction, page: s.page, label: s.label, reason: s.reason })
     }

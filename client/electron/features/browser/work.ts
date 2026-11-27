@@ -140,7 +140,7 @@ const trailOf = (trails: readonly OperatorTrailRecorder[]) => {
 
 /** A stopped preview's view: the fixed reason on the card, the operator's trail beside it. */
 const previewStoppedView = (host: string, end: WorkEnd, at: number, trail: BrowserTrailRun): BrowserInspectionView => ({
-  card: workPreviewStoppedCard(end), readAt: new Date(at).toISOString(), siteLabel: host, ...(trailForCard([trail]) ? { trail: [trail] } : {}),
+  card: workPreviewStoppedCard(end, trailForCard([trail]) !== null), readAt: new Date(at).toISOString(), siteLabel: host, ...(trailForCard([trail]) ? { trail: [trail] } : {}),
 })
 
 export function wireBrowserWork(deps: BrowserWorkDeps) {
