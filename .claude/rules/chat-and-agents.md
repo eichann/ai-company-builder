@@ -98,7 +98,7 @@ callers ask capabilities instead of branching on agent ids. Related: `chat-write
   only `privateFolderCommitMessages` (the API key). Voice formatting: the member's agent only.
 - Renderer: `agentCan(id, cap)`, `hasRateLimits(id)`, `agentShortLabel(id)`; subagent rows read
   `parentToolCallId` from any provider's metadata. Per-agent UI stays per agent on purpose: the
-  sign-in cards (`ChatAuthSettings.tsx`) and header model pickers (`ChatHeader.tsx`).
+  sign-in cards (`ChatAuthSettings.tsx`) and the model switch beside the input (`ModelMenu.tsx`).
 - Adding an agent: (1) its id in `AuthMode` (`client/shared/agent.ts`); (2) its descriptor in
   `shared/agents/registry.ts` (`AGENT_IDS` + `AGENTS`); (3) its connection in
   `electron/agents/<agent>.ts` (`AgentConnection`, plus one-shot / hand-off writers for the

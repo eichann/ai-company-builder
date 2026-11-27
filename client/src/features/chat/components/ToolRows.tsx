@@ -61,9 +61,9 @@ const TOOL_ICONS: Record<string, React.ComponentType<any>> = {
 
 function StatusIcon({ state }: { state: string }) {
   if (isRunningState(state)) return <CircleNotch size={14} className="animate-spin text-primary flex-shrink-0" />
-  if (state === 'output-available') return <Check size={14} weight="bold" className="text-green-500 flex-shrink-0" />
-  if (state === 'output-error') return <WarningCircle size={14} weight="fill" className="text-red-400 flex-shrink-0" />
-  return <CircleNotch size={14} className="text-gray-400 flex-shrink-0" />
+  if (state === 'output-available') return <Check size={14} weight="bold" className="text-success-icon flex-shrink-0" />
+  if (state === 'output-error') return <WarningCircle size={14} weight="fill" className="text-danger-icon flex-shrink-0" />
+  return <CircleNotch size={14} className="text-text-subtle flex-shrink-0" />
 }
 
 function ToolOutputDetail({ row }: { row: ToolRow }) {
@@ -71,7 +71,7 @@ function ToolOutputDetail({ row }: { row: ToolRow }) {
   return (
     <div className="mt-1 ml-8 text-xs animate-slide-up">
       {row.line.technical && (
-        <div className="mb-1 text-gray-400 dark:text-zinc-500">{t('chat.toolTechnicalName', { name: row.line.technical })}</div>
+        <div className="mb-1 text-text-muted">{t('chat.toolTechnicalName', { name: row.line.technical })}</div>
       )}
       {row.state === 'output-error' && row.errorText && (
         <div className="p-2 rounded-control bg-danger-bg border border-danger-border text-danger-text font-mono whitespace-pre-wrap">
@@ -79,7 +79,7 @@ function ToolOutputDetail({ row }: { row: ToolRow }) {
         </div>
       )}
       {row.state === 'output-available' && row.output != null && (
-        <div className="p-2 rounded-md bg-gray-50 dark:bg-zinc-800/50 border border-gray-200 dark:border-zinc-700 text-gray-600 dark:text-zinc-400 font-mono whitespace-pre-wrap max-h-48 overflow-auto">
+        <div className="p-2 rounded-control bg-bg border border-[color:var(--color-border)] text-text-muted font-mono whitespace-pre-wrap max-h-48 overflow-auto">
           {typeof row.output === 'string' ? row.output : JSON.stringify(row.output, null, 2)}
         </div>
       )}
@@ -108,27 +108,27 @@ const ToolInvocationPartView = memo(function ToolInvocationPartView({ row }: { r
 
   const muted = row.line.muted && !row.failure
   return (
-    <div className="my-1.5 animate-fade-in">
+    <div className="my-1.5">
       <div className="flex items-center gap-1 min-w-0">
       <button
         onClick={() => setIsExpanded(!isExpanded)}
         title={row.line.label}
-        className="flex items-center gap-2 text-xs hover:bg-gray-100 dark:hover:bg-zinc-800 px-2 py-1.5 rounded-control transition-colors flex-1 min-w-0 text-left"
+        className="flex items-center gap-2 text-small hover:bg-surface-sunken px-2 py-1.5 rounded-control transition-colors flex-1 min-w-0 text-left"
       >
         <StatusIcon state={row.failure ? 'output-error' : row.state} />
-        <IconComponent size={14} className="text-gray-500 dark:text-zinc-400 flex-shrink-0" />
-        <span className={`min-w-0 truncate ${row.failure ? 'font-medium text-red-500 dark:text-red-400' : muted ? 'text-gray-400 dark:text-zinc-500' : 'font-medium text-gray-700 dark:text-zinc-300'}`}>
+        <IconComponent size={14} className="text-text-muted flex-shrink-0" />
+        <span className={`min-w-0 truncate ${row.failure ? 'font-medium text-danger-text' : muted ? 'text-text-muted' : 'font-medium text-text'}`}>
           {rowText(row, t('chat.toolFailed'))}
         </span>
         {row.line.detail && (
-          <span className="text-gray-400 dark:text-zinc-500 truncate max-w-[240px]">
+          <span className="text-text-muted truncate max-w-[240px]">
             {row.line.detail}
           </span>
         )}
         {isFinished && (
           <CaretDown
             size={12}
-            className={`text-gray-400 ml-auto transition-transform ${isExpanded ? 'rotate-180' : ''}`}
+            className={`text-text-subtle ml-auto transition-transform ${isExpanded ? 'rotate-180' : ''}`}
           />
         )}
       </button>
@@ -151,7 +151,7 @@ const ToolInvocationPartView = memo(function ToolInvocationPartView({ row }: { r
 function ToolCountLabel({ count, running }: { count: number; running: number }) {
   const { t } = useTranslation()
   return (
-    <span className="text-gray-400 dark:text-zinc-500 flex-shrink-0">
+    <span className="text-text-muted flex-shrink-0">
       {t('chat.toolCount', { n: count })}
       {running > 0 && t('chat.toolRunningCount', { n: running })}
     </span>
@@ -166,7 +166,7 @@ function AgentProgressLine({ toolCallId }: { toolCallId: string }) {
   const summary = useAgentProgress(toolCallId)
   if (!summary) return null
   return (
-    <div className="ml-[3.25rem] -mt-0.5 mb-1 pr-2 text-caption font-normal text-gray-500 dark:text-zinc-400 truncate animate-fade-in" title={summary}>
+    <div className="ml-[3.25rem] -mt-0.5 mb-1 pr-2 text-caption font-normal text-text-muted truncate" title={summary}>
       {summary}
     </div>
   )
@@ -182,27 +182,27 @@ const AgentToolGroup = memo(function AgentToolGroup({ item }: { item: AgentItem 
   const isFinished = row.state === 'output-available' || row.state === 'output-error'
 
   return (
-    <div className="my-1.5 animate-fade-in">
+    <div className="my-1.5">
       <button
         onClick={() => setIsExpanded(!isExpanded)}
         aria-expanded={isExpanded}
-        className="flex items-center gap-2 text-xs hover:bg-gray-100 dark:hover:bg-zinc-800 px-2 py-1.5 rounded-control transition-colors w-full text-left"
+        className="flex items-center gap-2 text-small hover:bg-surface-sunken px-2 py-1.5 rounded-control transition-colors w-full text-left"
       >
         <StatusIcon state={row.state} />
-        <Robot size={14} className="text-gray-500 dark:text-zinc-400 flex-shrink-0" />
-        <span className="font-medium text-gray-700 dark:text-zinc-300 flex-shrink-0">{t('chat.subagent')}</span>
+        <Robot size={14} className="text-text-muted flex-shrink-0" />
+        <span className="font-medium text-text flex-shrink-0">{t('chat.subagent')}</span>
         {item.description && (
-          <span className="text-gray-500 dark:text-zinc-400 truncate">{item.description}</span>
+          <span className="text-text-muted truncate">{item.description}</span>
         )}
         <ToolCountLabel count={item.toolCount} running={item.runningCount} />
         <CaretDown
           size={12}
-          className={`text-gray-400 ml-auto flex-shrink-0 transition-transform ${isExpanded ? 'rotate-180' : ''}`}
+          className={`text-text-subtle ml-auto flex-shrink-0 transition-transform ${isExpanded ? 'rotate-180' : ''}`}
         />
       </button>
       {isRunningState(row.state) && <AgentProgressLine toolCallId={row.toolCallId} />}
       {isExpanded && (
-        <div className="ml-4 pl-2 border-l border-gray-200 dark:border-zinc-700/60">
+        <div className="ml-4 pl-2 border-l border-[color:var(--color-border)]">
           {hidden > 0 && (
             <button
               onClick={() => setShown(shown + GROUP_PAGE_SIZE)}
@@ -225,21 +225,21 @@ const SameToolGroup = memo(function SameToolGroup({ item }: { item: SameItem }) 
   const { row } = item
   const IconComponent = TOOL_ICONS[row.toolName] || (row.line.muted ? Wrench : Sparkle)
   return (
-    <div className="my-1.5 animate-fade-in">
+    <div className="my-1.5">
       <button
         onClick={() => setIsExpanded(!isExpanded)}
         aria-expanded={isExpanded}
-        className="flex items-center gap-2 text-xs hover:bg-gray-100 dark:hover:bg-zinc-800 px-2 py-1.5 rounded-control transition-colors w-full text-left"
+        className="flex items-center gap-2 text-small hover:bg-surface-sunken px-2 py-1.5 rounded-control transition-colors w-full text-left"
       >
         <StatusIcon state={row.state} />
-        <IconComponent size={14} className="text-gray-500 dark:text-zinc-400 flex-shrink-0" />
-        <span className={`min-w-0 truncate ${row.line.muted ? 'text-gray-400 dark:text-zinc-500' : 'font-medium text-gray-700 dark:text-zinc-300'}`}>
+        <IconComponent size={14} className="text-text-muted flex-shrink-0" />
+        <span className={`min-w-0 truncate ${row.line.muted ? 'text-text-muted' : 'font-medium text-text'}`}>
           {manyLine(row.line, item.rows.length)}
         </span>
-        <CaretDown size={12} className={`text-gray-400 ml-auto flex-shrink-0 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
+        <CaretDown size={12} className={`text-text-subtle ml-auto flex-shrink-0 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
       </button>
       {isExpanded && (
-        <div className="ml-4 pl-2 border-l border-gray-200 dark:border-zinc-700/60">
+        <div className="ml-4 pl-2 border-l border-[color:var(--color-border)]">
           {item.rows.map(r => <ToolInvocationPartView key={r.toolCallId} row={r} />)}
         </div>
       )}
@@ -272,17 +272,17 @@ export const ToolRunGroup = memo(function ToolRunGroup({ item }: { item: RunItem
       key="__run-summary"
       onClick={() => setIsExpanded(!isExpanded)}
       aria-expanded={isExpanded}
-      className="my-1.5 flex items-center gap-2 text-xs hover:bg-gray-100 dark:hover:bg-zinc-800 px-2 py-1.5 rounded-control transition-colors w-full text-left"
+      className="my-1.5 flex items-center gap-2 text-small hover:bg-surface-sunken px-2 py-1.5 rounded-control transition-colors w-full text-left"
     >
-      <ListChecks size={14} className="text-gray-500 dark:text-zinc-400 flex-shrink-0" />
+      <ListChecks size={14} className="text-text-muted flex-shrink-0" />
       <ToolCountLabel count={item.items.reduce((n, i) => n + (i.kind === 'same' ? i.rows.length : 1), 0)} running={item.runningCount} />
       <span className="text-link">
         {isExpanded ? t('chat.collapseTools') : t('chat.showHiddenTools', { n: hidden })}
       </span>
       {isExpanded ? (
-        <CaretUp size={12} className="text-gray-400 ml-auto flex-shrink-0" />
+        <CaretUp size={12} className="text-text-subtle ml-auto flex-shrink-0" />
       ) : (
-        <CaretDown size={12} className="text-gray-400 ml-auto flex-shrink-0" />
+        <CaretDown size={12} className="text-text-subtle ml-auto flex-shrink-0" />
       )}
     </button>
   )

@@ -1,5 +1,6 @@
 import { voiceShortcut, formatVoiceShortcut } from '../../voice/voiceShortcut'
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
+import { createPortal } from 'react-dom'
 import { useCommandHandler } from '../../../shared/commands/commands'
 import { useEventListener } from '../../../shared/hooks/useEventListener'
 import { useInterval } from '../../../shared/hooks/useInterval'
@@ -22,7 +23,13 @@ function VoiceInputCommand({ pane, onToggle }: { pane: string; onToggle: () => v
   return null
 }
 
-export function VoiceInputControl({ editor, active, pane, disabled, scope, onBusy }: {
+/**
+ * Voice input: a microphone button (and the microphone choice beside it) in the composer's row, with
+ * its explanation in the button's tooltip only (owner FB 2026-11-27: the 10 px hints on every
+ * composer were noise). What needs the member's eyes — recording, the level, the microphone settings,
+ * a problem, text that could not be inserted — opens above the input (`panelHost`).
+ */
+export function VoiceInputControl({ editor, active, pane, disabled, scope, onBusy, panelHost }: {
   editor: React.MutableRefObject<VoiceEditor | null>
   /** Its composer is the shown tab of its pane. */
   active: boolean
@@ -31,6 +38,8 @@ export function VoiceInputControl({ editor, active, pane, disabled, scope, onBus
   disabled: boolean
   scope: string
   onBusy: (busy: boolean) => void
+  /** Where the panel above the input is drawn (absent: right after the buttons). */
+  panelHost?: HTMLElement | null
 }) {
   const shortcut = useSyncExternalStore(voiceShortcut.subscribe, voiceShortcut.getSnapshot)
   const { devices, deviceError, deviceFailure, refreshing, selectedDevice, configured } = useSyncExternalStore(microphoneSelection.subscribe, microphoneSelection.getSnapshot)
@@ -117,39 +126,36 @@ export function VoiceInputControl({ editor, active, pane, disabled, scope, onBus
   // Rendered next to every message that asks the user to retry.
   const recheckButton = <button type="button" disabled={recheck.running} onClick={() => void voiceAvailability.recheck()}
     className="shrink-0 rounded-small border border-current px-2 py-0.5 font-medium disabled:opacity-50">{recheck.running ? '確認中…' : 'もう一度確認'}</button>
-  return <div className="px-2 pt-2 text-xs" aria-live="polite">
+  const shortcutText = formatVoiceShortcut(shortcut)
+  const buttonTitle = caps && !caps.available
+    ? caps.reason ?? '音声入力は使えません'
+    : phase === 'listening'
+      ? `${recordingDevice}で録音中。もう一度押すか ${shortcutText} で停止して、文章を整えます`
+      : `音声入力（${shortcutText}）：1回押すと開始・もう1回で停止。話した内容を AI で整えて入力します`
+  const buttons = <span className="inline-flex shrink-0 items-center">
     {active && <VoiceInputCommand pane={pane} onToggle={() => void startOrStop()} />}
-    <div className="flex items-center gap-2 flex-wrap">
-      <button type="button" onMouseDown={event => event.preventDefault()} onClick={() => void startOrStop()}
-        disabled={phase !== 'listening' && (busy || disabled || !caps?.available || !devices?.length || deviceMissing)}
-        title={caps?.reason ?? `音声入力（${formatVoiceShortcut(shortcut)}：開始／停止）`}
-        aria-label={phase === 'listening' ? '録音を停止して文章を整える' : '音声入力を開始'}
-        className={`flex items-center gap-1.5 rounded-md px-2 py-1.5 disabled:opacity-40 ${phase === 'listening' ? 'text-red-600 bg-red-50 dark:bg-red-950' : 'hover:bg-gray-100 dark:hover:bg-zinc-800'}`}>
-        {phase === 'listening' ? <Stop size={16} weight="fill" /> : <Microphone size={16} />}
-        {phase === 'listening' ? `録音中 ${seconds}秒・停止` : phase === 'preparing' ? 'マイクを準備中…' : phase === 'finalizing' ? '音声を認識中…' : phase === 'polishing' ? '文章を整えています…' : '音声入力'}
-      </button>
-      <kbd className="shrink-0 whitespace-nowrap rounded-small border border-gray-200 dark:border-zinc-700 px-1.5 py-0.5 font-sans text-xs leading-5 text-gray-600 dark:text-zinc-300" title="もう一度押すと停止">{formatVoiceShortcut(shortcut)}</kbd>
-      <span className="text-[10px] text-gray-400 dark:text-zinc-500 opacity-60">{phase === 'listening' ? 'もう1回押すと停止・整文' : '1回押すと開始・もう1回で停止'}</span>
-      {busy && <button type="button" onClick={cancel} aria-label="音声入力をキャンセル" className="p-1"><X size={16} /></button>}
-      {!busy && caps?.available && !rawText && <span className="text-[10px] text-gray-400 dark:text-zinc-500 opacity-60">話した内容をAIで整えて入力します</span>}
-      {!caps && checking && <span className="opacity-60">音声入力を確認中…</span>}
-      {caps && !caps.available && <span className="opacity-60">{caps.reason}</span>}
-      {caps && !caps.available && recheck.show && recheckButton}
-    </div>
-    {caps?.available && <button type="button" disabled={busy} aria-label="マイクを選択" aria-expanded={showDevices}
-      title={phase === 'listening' ? recordingDevice : deviceLabel}
+    <button type="button" onMouseDown={event => event.preventDefault()} onClick={() => void startOrStop()}
+      disabled={phase !== 'listening' && (busy || disabled || !caps?.available || !devices?.length || deviceMissing)}
+      title={buttonTitle}
+      aria-label={phase === 'listening' ? '録音を停止して文章を整える' : '音声入力を開始'}
+      className={`h-control-sm inline-flex items-center gap-1.5 rounded-control px-1.5 text-small disabled:opacity-disabled ${phase === 'listening' ? 'text-danger-text bg-danger-bg' : 'text-text-muted hover:bg-surface-sunken hover:text-text'}`}>
+      {phase === 'listening' ? <Stop size={16} weight="fill" /> : <Microphone size={16} />}
+      {phase === 'listening' ? `録音中 ${seconds}秒・停止` : phase === 'preparing' ? 'マイクを準備中…' : phase === 'finalizing' ? '音声を認識中…' : phase === 'polishing' ? '文章を整えています…' : null}
+    </button>
+    {busy && <button type="button" onClick={cancel} aria-label="音声入力をキャンセル" title="音声入力をキャンセル" className="h-control-sm px-1 rounded-control text-text-muted hover:bg-surface-sunken"><X size={14} /></button>}
+    {caps?.available && !busy && <button type="button" aria-label="マイクを選択" aria-expanded={showDevices}
+      title={`マイク：${deviceLabel}`}
       onClick={() => { setShowDevices(value => !value); void refreshDevices() }}
-      className="mt-1 mb-2 flex max-w-full items-center gap-1 rounded-small px-2 py-1 text-xs text-gray-600 dark:text-zinc-400 hover:bg-gray-100 dark:hover:bg-zinc-800 disabled:opacity-60">
-      <span className="truncate">{phase === 'listening' ? recordingDevice : deviceLabel}</span>
-      <CaretDown size={14} className={`shrink-0 transition-transform ${showDevices ? 'rotate-180' : ''}`} />
+      className="h-control-sm px-0.5 rounded-control text-text-subtle hover:bg-surface-sunken hover:text-text">
+      <CaretDown size={12} className={`transition-transform ${showDevices ? 'rotate-180' : ''}`} />
     </button>}
-    {caps?.available && !configured && !busy && <div className="my-2 flex items-center gap-2 flex-wrap rounded-md bg-amber-50 dark:bg-amber-950/40 px-3 py-2 text-amber-800 dark:text-amber-200">
-      <span>はじめに、自分の使うマイクを設定してください。</span>
-      <button type="button" className="underline font-medium" onClick={() => { setShowDevices(true); void refreshDevices() }}>マイクを設定</button>
-    </div>}
+  </span>
+  const panel = <div className="px-1 text-small empty:hidden" aria-live="polite">
+    {!caps && checking && <p className="my-1 text-text-muted">音声入力を確認中…</p>}
+    {caps && !caps.available && recheck.show && <p className="my-1 flex flex-wrap items-center gap-2 text-text-muted"><span>{caps.reason}</span>{recheckButton}</p>}
     {showDevices && <div className="my-2 rounded-control border border-gray-200 dark:border-zinc-700 p-3 space-y-2">
       <div className="flex items-center justify-between gap-2">
-        <span className="font-medium">マイク設定</span>
+        <span className="font-medium">{configured ? 'マイク設定' : 'はじめに、自分の使うマイクを選んでください'}</span>
         <button type="button" onClick={() => setShowDevices(false)} aria-label="マイク選択を閉じる"
           className="flex items-center gap-1 rounded-small px-2 py-1 hover:bg-gray-100 dark:hover:bg-zinc-800">
           <X size={14} /><span>閉じる</span>
@@ -200,4 +206,8 @@ export function VoiceInputControl({ editor, active, pane, disabled, scope, onBus
       <button type="button" className="ml-3 underline" onClick={() => { cancel(); setError('') }}>閉じる</button>
     </div>}
   </div>
+  return <>
+    {buttons}
+    {panelHost ? createPortal(panel, panelHost) : panel}
+  </>
 }

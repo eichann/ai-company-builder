@@ -241,7 +241,7 @@ test('an agent implementation is reached through the registry', () => {
  */
 const AGENT_ID_EXCEPTIONS: Record<string, string> = {
   'src/features/chat/components/ChatAuthSettings.tsx': 'per-agent sign-in cards',
-  'src/features/chat/components/ChatHeader.tsx': 'per-agent model pickers',
+  'src/features/chat/components/ModelMenu.tsx': 'per-agent model pickers (the switch beside the input)',
   'src/features/chat/hooks/useAgentAuth.ts': 'restores the saved sign-in per agent',
   'shared/rate-limits.ts': 'each agent reports its usage windows in its own shape',
   'electron/chat-server.ts': 'the legacy claudeSessionId history field',

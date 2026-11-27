@@ -45,7 +45,7 @@ async function finishTurn(page: Page) {
 }
 
 test('a やること tab dropped on the input: the consultation is about it, and the AI gets it with the next message only', async ({ page }) => {
-  await openPreview(page, 'chat-header', { tabs: '1', turn: 'manual' })
+  await openPreview(page, 'chat-header', { list: 'open', tabs: '1', turn: 'manual' })
   await dropOnInput(page, tab(page, /見積書を作り直す/), 'ここに落とすと、このやることの相談になります', 'chat-record-drop-frame')
 
   await expect(page.locator('[data-topic-chip]')).toContainText('このやることについての相談：見積書を作り直す')
@@ -70,7 +70,7 @@ test('a やること tab dropped on the input: the consultation is about it, and
 })
 
 test('a record dropped on a consultation about another one asks before switching', async ({ page }) => {
-  await openPreview(page, 'chat-header', { tabs: '1', turn: 'manual' })
+  await openPreview(page, 'chat-header', { list: 'open', tabs: '1', turn: 'manual' })
   await dropOnInput(page, tab(page, /見積書を作り直す/), 'ここに落とすと、このやることの相談になります')
   await dropOnInput(page, tab(page, /株式会社サンプル/), 'ここに落とすと、この案件の相談になります')
 
@@ -95,7 +95,7 @@ test('a record dropped on a consultation about another one asks before switching
 })
 
 test('a file tab dropped on the input is read by the AI as before, and sets no topic', async ({ page }) => {
-  await openPreview(page, 'chat-header', { tabs: '1', turn: 'manual' })
+  await openPreview(page, 'chat-header', { list: 'open', tabs: '1', turn: 'manual' })
   await dropOnInput(page, tab(page, /価格表\.pdf/), 'ここに落とすと、AI が読みます', 'chat-file-drop-frame')
   await expect(page.locator('[data-topic-chip]')).toHaveCount(0)
   await send(page, 'この価格表で')

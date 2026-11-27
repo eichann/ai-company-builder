@@ -92,16 +92,14 @@ const ThinkingBlock = memo(function ThinkingBlock({ content, isStreaming = false
 
 const TextPartView = memo(function TextPartView({ text, markdown, showCursor }: { text: string; markdown: boolean; showCursor: boolean }) {
   return (
-    <div className="relative rounded-2xl rounded-tl-md px-4 py-3 text-[14px] leading-relaxed bg-gray-100 dark:bg-zinc-800 text-gray-900 dark:text-zinc-100 border border-gray-200 dark:border-zinc-700 shadow-glass">
-      <div className="absolute inset-0 rounded-2xl rounded-tl-md bg-gradient-to-b from-white/[0.02] to-transparent pointer-events-none" />
-      <div className="relative break-words">
-        {markdown ? (
-          <MarkdownMessage content={text} />
-        ) : (
-          <div className="whitespace-pre-wrap">{text}</div>
-        )}
-        {showCursor && <StreamingCursor />}
-      </div>
+    // Like the Claude and ChatGPT apps: the AI's reply is plain text on the page, no bubble (owner FB 2026-11-27).
+    <div data-assistant-text className="break-words text-[14px] leading-relaxed text-text">
+      {markdown ? (
+        <MarkdownMessage content={text} />
+      ) : (
+        <div className="whitespace-pre-wrap">{text}</div>
+      )}
+      {showCursor && <StreamingCursor />}
     </div>
   )
 })

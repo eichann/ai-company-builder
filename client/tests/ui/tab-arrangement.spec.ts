@@ -72,7 +72,7 @@ test('a tab dragged in the bar moves (an insertion line shows where), never in a
 
 test('the drop target decides: in the bar a tab moves, on the consultation\'s input it is handed over and nothing moves', async ({ page }) => {
   // tests/chat-header-ui.tsx ?tabs=1: the real tab bar (with its arrangement) beside the real ChatPanel.
-  await openPreview(page, 'chat-header', { tabs: '1', turn: 'manual' })
+  await openPreview(page, 'chat-header', { list: 'open', tabs: '1', turn: 'manual' })
   await expect.poll(() => tabNames(page)).toEqual(['見積書を作り直す', '株式会社サンプル', '価格表.pdf'])
   await drag(page, bar(page).getByRole('tab', { name: /価格表/ }), recordTab(page, '見積書'), 'left', async () => {
     await expect(recordTab(page, '見積書')).toHaveAttribute('data-drop-line', 'before')

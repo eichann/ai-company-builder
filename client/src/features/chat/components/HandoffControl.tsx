@@ -1,12 +1,19 @@
 import ReactMarkdown from 'react-markdown'
-import { useEffect, useId, useRef, useState } from 'react'
+import { forwardRef, useEffect, useId, useImperativeHandle, useRef, useState } from 'react'
 import { Note, X } from '@phosphor-icons/react'
 import type { HandoffView } from '../../../../shared/handoff'
 import { agentShortLabel } from '../../../../shared/agents/registry'
 import { getHandoff, onHandoffChanged, updateHandoff } from '../api'
 import { PRIMARY_ACTION } from '../../../shared/ui/buttonStyles'
 
-export function HandoffControl({ companyId, sessionId, active = true }: { companyId: string; sessionId: string; active?: boolean }) {
+export interface HandoffControlHandle { open: () => void }
+
+/**
+ * The hand-off memo (引き継ぎメモ) of one consultation. Its line under the header shows only once a memo
+ * exists or is being made (owner FB 2026-11-27: 「未作成」 on every consultation was noise); the dialog
+ * always opens from the header's 「…」 (`open`), so updating it by hand stays possible before the first one.
+ */
+export const HandoffControl = forwardRef<HandoffControlHandle, { companyId: string; sessionId: string; active?: boolean }>(function HandoffControl({ companyId, sessionId, active = true }, ref) {
   const [view, setView] = useState<HandoffView | null>(null)
   const [error, setError] = useState('')
   const refreshRef = useRef<() => void>(() => {})
@@ -22,17 +29,20 @@ export function HandoffControl({ companyId, sessionId, active = true }: { compan
     return () => { alive = false; off() }
   }, [companyId, sessionId])
   useEffect(() => { if (!active) dialog.current?.close() }, [active])
+  const openDialog = () => { refreshRef.current(); dialog.current?.showModal() }
+  useImperativeHandle(ref, () => ({ open: openDialog }))
   async function update() {
     try { await updateHandoff(companyId, sessionId); setError('') }
     catch (e) { setError(e instanceof Error ? e.message : '更新を開始できませんでした') }
   }
   const label = view?.status === 'running' ? '整理中…' : view?.status === 'queued' ? '更新待ち' : view?.status === 'error' || error ? '更新を確認' : view?.status === 'unsupported' ? '未対応' : view?.updatedAt ? `${new Date(view.updatedAt).toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })} 保存` : '未作成'
   const recoveryLabel = view?.recovery?.status === 'recovering' ? '文脈を引き継いで再接続中…' : view?.recovery?.status === 'recovered' ? `${view.recovery.usedMemo ? 'メモと会話' : '保存した会話'}から再接続しました` : view?.recovery?.status === 'error' ? '再接続を完了できませんでした。履歴とメモは残っています。' : null
+  const lineShown = !!view?.updatedAt || view?.status === 'running' || view?.status === 'queued'
   return <>
-    <button type="button" onClick={() => { refreshRef.current(); dialog.current?.showModal() }} className="flex items-center gap-1 px-4 py-1 text-[10px] text-gray-400 hover:text-link" aria-label="引き継ぎメモを確認">
+    {lineShown && <button type="button" onClick={openDialog} className="flex items-center gap-1 px-4 py-1 text-caption font-normal text-text-muted hover:text-link" aria-label="引き継ぎメモを確認">
       <Note size={12} />引き継ぎメモ：{label}
-    </button>
-    {recoveryLabel && <p role="status" className="px-4 text-[10px] text-gray-500">{recoveryLabel}</p>}
+    </button>}
+    {recoveryLabel && <p role="status" className="px-4 text-caption font-normal text-text-muted">{recoveryLabel}</p>}
     <dialog ref={dialog} className="m-auto w-[min(var(--size-dialog-lg),90vw)] max-h-[85vh] rounded-card border border-[color:var(--color-border)] bg-surface-raised text-text shadow-dialog p-dialog backdrop:bg-scrim" aria-labelledby={titleId}>
       <div className="flex justify-between items-center gap-3"><h2 id={titleId} className="text-title">引き継ぎメモ</h2><button type="button" aria-label="引き継ぎメモを閉じる" onClick={() => dialog.current?.close()} className="p-2 rounded-small hover:bg-gray-100 dark:hover:bg-zinc-800"><X size={16} /></button></div>
       <p className="mt-2 text-xs text-gray-500">同じ相談を長く続けるための要点です。元の履歴は残ります。相談を閉じてもメモは残り、相談を削除するとメモも削除されます。</p>
@@ -50,4 +60,4 @@ export function HandoffControl({ companyId, sessionId, active = true }: { compan
       <p className="mt-2 text-[10px] text-gray-400">手動更新も利用量の上限内で実行します。AIの要約なので、重要な判断は元の履歴でも確認してください。</p>
     </dialog>
   </>
-}
+})

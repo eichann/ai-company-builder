@@ -368,8 +368,7 @@ fine), `color-opacity` (`bg-warning/10`).
   `cn()` keeping the type size; `jobBadge` by meaning; `problemBadge` / `PROBLEM_STOP` covering every
   problem, the amber badge and line painted in the warning set), `agent-stop.test.tsx` (the band's paused colours
   and who / when). `chat-panel.spec.ts` reads the 新着 dot by its name.
-- **Still to move** (later PRs): the app's other hand-made red / amber boxes and texts (`ChatHeader`'s
-  status dots, `RateLimitMeter`, `DiffViewer`, `ReviewSidePanel`, `MarkdownDiffView`, `BackupHistorySlideOver`,
+- **Still to move** (later PRs): the app's other hand-made red / amber boxes and texts (`RateLimitMeter`, `DiffViewer`, `ReviewSidePanel`, `MarkdownDiffView`, `BackupHistorySlideOver`,
   `TaskRow`'s CHIP and review mark, `QuickAdd` / `WaitParts` / `TagField` chips (pressable: the chip PR),
   `ChatSidebar`'s 「あなたの番」 heading and amber icons, the
   `ExternalChangeBanner` buttons), the admin's
@@ -414,8 +413,8 @@ fine), `color-opacity` (`bg-warning/10`).
   `link-hover` (dark: the lighter #6cb0ea, was #1264a3 on a dark surface); picked rows, chips,
   options → the `selected` set (`selected-bg`, `-border`, `-text`, `-icon`; the file tree's chosen row
   `selected-bg-hover`, a step stronger, because the tree sits on the grey side panel; its focus ring
-  shows on keyboard focus only); focus → `focus-ring` / `focus-border`; spinners, the chat's own
-  bubbles, avatar, typing dots and cursor, the rate meter's bar, drop outlines and the solid "on"
+  shows on keyboard focus only); focus → `focus-ring` / `focus-border`; spinners, the chat's
+  avatar (the member's own bubbles are `surface-sunken` since 2026-11-27, owner FB: quiet like the Claude app), typing dots and cursor, the rate meter's bar, drop outlines and the solid "on"
   toggles (`TaskListPanel` mode and tag, `QuickAdd`'s day) → `primary` (same blue as before; the
   proposal's table gives "on" the primary colour); `ThingIcon` task → `thing-task`. Admin: the indigo
   `brand` → `link` for links (`Button variant="link"` too), `selected-*` for chosen radio cards and

@@ -40,24 +40,36 @@ is in `chat-and-agents.md`. Full text: `docs/architecture/chat-and-agents.md`, `
 ## Chat panel layout (R6)
 
 `src/features/chat/components/`: `ChatPanel.tsx` (tabs, sidebar, settings overlay) → `ChatConversation.tsx`
-(one tab, `ChatPanelChat`, memo: hooks + composition) → `ChatHeader.tsx` (label, usage meter,
-per-agent model pickers, buttons; owns its width observer, `hooks/useHeaderFit.ts`, which reads the
-header's **border box** — set by the pane, never by what the header shows (measuring the content box
-made the narrow layout's padding undo itself every frame, owner FB 2026-11-26). As the pane narrows
-the header gives way in a fixed order: the meter to its fullest window, then to its bar alone (the %
-in its name and popover), then the pickers capped narrower, then the Markdown toggle and
-「別ウィンドウで開く」 into 「…」, then the effort picker into 「…」 (280 px, the pane's minimum). ＋, the
-list, settings and the model picker always stay; controls never overlap and nothing is drawn outside
-the pane: `tests/ui/chat-header-fit.spec.ts` (280–720 px, a resize settles, a running turn),
-`tests/ui/chat-narrow.spec.ts`; the header clips its row, so a popover from it — the usage
-meter's details, 「…」's menu (`ContextMenu`, fixed) — is drawn outside it (`src/shared/ui/HoverTooltip.tsx`:
-on `document.body`, fixed, kept in the window): `tests/ui/chat-usage-popover.spec.ts`), `ChatMessageList.tsx`
+(one tab, `ChatPanelChat`, memo: hooks + composition) → `ChatHeader.tsx` (the list toggle, the
+consultation's name, its state while a turn runs, stop, ＋ and 「…」 — nothing else; 「…」 holds
+引き継ぎメモ, the Markdown display, 「別ウィンドウで開く」 and the settings; the name truncates first, so
+the buttons stay inside the pane down to 280 px), `ModelMenu.tsx` (the one switch of the model and
+「考える強さ」, per agent, beside the input; never clipped), the usage meter (in the input's row; its details on `document.body`, fixed, kept in the window: `src/shared/ui/HoverTooltip.tsx`, `tests/ui/chat-usage-popover.spec.ts`), `ChatMessageList.tsx`
 (`MessageList`, `MessageItem`, `UserMessageBubble`), `ChatComposer.tsx` (`ChatInput`: voice input,
 dropped files and images in `ComposerAttachments.tsx`, and the text input
 `CodeMirrorChatInput.tsx` — its editor setup in `chatInputEditor.ts` — or the debug
 `LegacyTextareaChatInput.tsx`), `ToolApprovalBanner.tsx`, `QueuedSendList.tsx`,
 `ChatAuthGate.tsx`, `ChatAuthSettings.tsx`. Per-agent UI (sign-in cards, model pickers) is the
 one place an added agent brings its own controls; everything else asks the registry (`agentCan`).
+
+- **A quiet screen** (owner FB 2026-11-27, like the Claude and ChatGPT apps): the list of
+  consultations starts closed (`ChatPanel` `listOpenAtStart`, only preview pages pass it; opened
+  with the header's toggle, it sits beside the conversation, or over it in a pane under 680 px);
+  the header shows only the above; the input's frame holds one bottom row (`ComposerRow.tsx`: voice
+  input on the left, the usage meter, `ModelMenu` and send on the right; it wraps instead of
+  clipping); how to send is said once, in the placeholder (the row shows the suggestion's keys only
+  while one is offered); the voice input's explanation is its button's tooltip, and what needs the
+  member's eyes (recording, the level, the microphone settings, a problem) opens above the input
+  (`VoiceInputControl` `panelHost`); 「引き継ぎメモ：…」 shows under the header only once a memo
+  exists or is being made (`HandoffControl`, opened from 「…」 otherwise); the AI's reply is plain
+  text (no bubble), the member's own words a `surface-sunken` bubble; tool rows are drawn at full
+  strength (no fade) in `text` / `text-muted`. `useAgentModelSelection` returns one object while
+  nothing changes, so the composer's switch (memoised in `ChatPanelChat`) does not re-render
+  `ChatInput` per streamed chunk. Tests: `tests/ui/chat-screen.spec.ts` (list closed at the start,
+  the header's contents and fit at 280–720 px with a running turn, the switch whole and working
+  for both agents, the memo line, one line about sending, no bubble, tool rows' contrast);
+  `chat-header-ui.html?list=open` opens the list for the specs that test it, `?handoff=saved` gives
+  a memo, `?voice=1` a working microphone.
 
 - State lives in `hooks/`, one concern each: `useConversation`, `useChatDraft`,
   `useChatRequestContext` + `useChatTransport`, `useMessageAttachments` +
@@ -254,7 +266,7 @@ request / status shapes and their checks, `closeStopsTheAI`), the window registr
 `electron/features/chat-windows/registry.ts`, renderer `src/features/chat/chatWindows.ts`.
 
 - Entry points: 「別ウィンドウで開く」 on each row of 「AIへの相談」 (next to pin / rename /
-  delete), the same button in the chat header, and the command `chat.openInWindow { sessionId }`
+  delete), the same item in the chat header's 「…」, and the command `chat.openInWindow { sessionId }`
   (`commands.md`). All run `useMoveToWindow` (`features/chat/hooks/`), handled in `ChatPanel.tsx`.
 - **Never in two places.** Main keeps which window shows which conversation
   (`createChatWindowRegistry`: `claim` refuses a second window); opening one already shown

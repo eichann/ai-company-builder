@@ -1,7 +1,7 @@
 import type { PluginPersonStep, PluginRunStep } from '../../../../shared/ai-turn-steps/plugin'
 import type { JobRunStep } from '../../../../shared/ai-turn-steps/job'
 import type { AiTurnStep } from '../../../../shared/ai-turn-steps/registry'
-import { HandoffControl } from './HandoffControl'
+import { HandoffControl, type HandoffControlHandle } from './HandoffControl'
 import { AgentInteractionCard } from './AgentInteractionCard'
 import type { AuthMode, CodexStatus } from '../../../../shared/agent'
 import { agentCan } from '../../../../shared/agents/registry'
@@ -38,6 +38,9 @@ import { useDiscardBlankOnLeave } from '../hooks/useDiscardBlankOnLeave'
 import { useAgentModelSelection } from '../hooks/useAgentModelSelection'
 import { useRateLimitsRefresh, useStreamingChat } from '../hooks/useStreamingChat'
 import { ChatHeader } from './ChatHeader'
+import { ModelMenu } from './ModelMenu'
+import { RateLimitMeter } from './RateLimitMeter'
+import { hasRateLimits } from '../../../../shared/rate-limits'
 import { MessageList } from './ChatMessageList'
 import { ToolApprovalBanner } from './ToolApprovalBanner'
 import { ChatInput } from './ChatComposer'
@@ -112,10 +115,15 @@ export type ChatInputRequest =
 
 // Memoised: every tab stays mounted, and the parent re-renders on any tab's
 // title change or tab switch. Its props are stable (see CompanyChatPanel).
-export const ChatPanelChat = memo(function ChatPanelChat({ tabId, isShown, departmentPath, activeDepartment, chatServer, authMode, codexStatus, slashCommands, onShowSettings, onTitleChange, onNewTab, onToggleSidebar, sidebarOpen, initialSessionId, initialTopicRecordId, onSessionIdChange, onLeftBlank, inputRequest, onInputRequestConsumed, onOpenInWindow, standalone, paneId = 'chat', todayFolder }: ChatPanelChatProps) {
+export const ChatPanelChat = memo(function ChatPanelChat({ tabId, isShown, departmentPath, activeDepartment, chatServer, authMode, codexStatus, slashCommands, onShowSettings, onTitleChange: reportTitle, onNewTab, onToggleSidebar, sidebarOpen, initialSessionId, initialTopicRecordId, onSessionIdChange, onLeftBlank, inputRequest, onInputRequestConsumed, onOpenInWindow, standalone, paneId = 'chat', todayFolder }: ChatPanelChatProps) {
   const { t } = useTranslation()
   const currentCompany = useAppStore((state) => state.currentCompany)
   const models = useAgentModelSelection(authMode, codexStatus)
+  // The consultation's name for the header; the tab (the list, a window's title) is told as before.
+  const [title, setTitle] = useState('')
+  const reportTitleRef = useLatestRef(reportTitle)
+  const onTitleChange = useCallback((next: string) => { setTitle(next); reportTitleRef.current?.(next) }, [reportTitleRef])
+  const handoffRef = useRef<HandoffControlHandle>(null)
 
   // Which conversation this tab shows (refs read by the transport, onFinish
   // and the interaction lookup below — so this comes first).
@@ -490,6 +498,12 @@ export const ChatPanelChat = memo(function ChatPanelChat({ tabId, isShown, depar
     if (currentCompany?.id && sessionId) void patchChatSession(currentCompany.id, sessionId, { topicRecordId: null }).catch(() => {})
   }, [setTopic, appSessionIdRef, currentCompany?.id])
 
+  // The usage meter and the model switch in the input's row. Memoised: ChatInput is, and a streamed chunk re-renders this tab.
+  const composerTools = useMemo(() => <>
+    {hasRateLimits(authMode) && <RateLimitMeter provider={authMode} size="compact" />}
+    <ModelMenu authMode={authMode} codexStatus={codexStatus} models={models} modelLocked={modelLocked} />
+  </>, [authMode, codexStatus, models, modelLocked])
+
   // ============================================================================
   // Render
   // ============================================================================
@@ -498,20 +512,18 @@ export const ChatPanelChat = memo(function ChatPanelChat({ tabId, isShown, depar
     <div className="h-full flex flex-col bg-white dark:bg-zinc-900">
       {/* Header */}
       <ChatHeader
-        authMode={authMode}
+        title={title || t('chat.newChat')}
         status={status}
-        codexStatus={codexStatus}
-        models={models}
-        modelLocked={modelLocked}
         onStop={stop}
-        onNewChat={standalone ? undefined : onNewTab || (() => startNewChat())}
+        onNewChat={standalone ? undefined : onNewTab || (() => { void startNewChat().then(started => { if (started) setTitle('') }) })}
         onToggleSidebar={standalone ? undefined : onToggleSidebar}
         sidebarOpen={sidebarOpen}
         onShowSettings={onShowSettings}
         onOpenInWindow={onOpenInWindow ? () => { if (currentSessionId) onOpenInWindow(currentSessionId) } : undefined}
         openInWindowBlocked={running || !!pendingApproval || !!currentInteraction}
+        onShowHandoff={currentCompany?.id && appSessionIdRef.current ? () => handoffRef.current?.open() : undefined}
       />
-      {currentCompany?.id && appSessionIdRef.current && <HandoffControl companyId={currentCompany.id} sessionId={appSessionIdRef.current} active={isShown} />}
+      {currentCompany?.id && appSessionIdRef.current && <HandoffControl ref={handoffRef} companyId={currentCompany.id} sessionId={appSessionIdRef.current} active={isShown} />}
 
 
       {/* The topic chip says the same as a task's instruction chip, with × (consultation-task.ts). A new consultation's
@@ -574,9 +586,9 @@ export const ChatPanelChat = memo(function ChatPanelChat({ tabId, isShown, depar
       )}
 
       {/* Input Area */}
-      <div className="flex-shrink-0 border-t border-gray-200 dark:border-zinc-800">
+      <div className="flex-shrink-0">
         <QueuedSendList queuedSends={queuedSends} onCancel={cancelQueuedSend} />
-        <div className="p-4 pb-7">
+        <div className="px-3 pt-1 pb-3">
           <ChatInput
             initialDraft={draftInputRef.current}
             onDraftChange={handleDraftChange}
@@ -586,7 +598,8 @@ export const ChatPanelChat = memo(function ChatPanelChat({ tabId, isShown, depar
             onSend={handleSend}
             disabled={isRestoringSession || !historyReadyRef.current || deletedRef.current || models.agentUnavailable}
             placeholder={running ? t(agentCan(authMode, 'steering') ? 'chat.inputPlaceholderWorking' : 'chat.inputPlaceholderQueued') : t('chat.inputPlaceholder')}
-            hint={offeredSuggestion ? t('chat.suggestionHint') : t('chat.inputHint')}
+            hint={offeredSuggestion ? t('chat.suggestionHint') : undefined}
+            tools={composerTools}
             onCompositionStateChange={handleInputCompositionStateChange}
             onInputActivity={handleInputActivity}
             slashCommands={slashCommands}

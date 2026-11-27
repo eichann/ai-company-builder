@@ -26,7 +26,7 @@ const MINUTES_ID = 'minutes-0a1b2c3d4e5f60718293a4b5'
 const day = () => { const d = new Date('2026-11-05T06:00:00.000Z'); return `${d.getMonth() + 1}/${d.getDate()}` }
 
 test('a received minutes record runs by itself in a hidden consultation that is saved like a normal one', async ({ page }) => {
-  await openPreview(page, 'chat-header', { turn: 'manual', autoturn: '1' })
+  await openPreview(page, 'chat-header', { list: 'open', turn: 'manual', autoturn: '1' })
   const composer = page.locator('.cm-content[role="textbox"]').locator('visible=true')
   await expect(composer).toBeVisible()
 
@@ -62,7 +62,7 @@ test('a received minutes record runs by itself in a hidden consultation that is 
 })
 
 test('when another PC took the AI turn first, nothing is sent from this one', async ({ page }) => {
-  await openPreview(page, 'chat-header', { turn: 'manual', autoturn: 'taken' })
+  await openPreview(page, 'chat-header', { list: 'open', turn: 'manual', autoturn: 'taken' })
   await expect.poll(() => chat(page, c => c.aiTurns.claims.length), { timeout: 15_000 }).toBe(1)
   await page.waitForTimeout(4_000)
   expect(await chat(page, c => c.requests.filter(r => r.path === '/api/chat').length)).toBe(0)
@@ -75,7 +75,7 @@ test('when another PC took the AI turn first, nothing is sent from this one', as
 // Staging 2026-11-11: a job's place not synced yet was given back four times in nine seconds, which used up the
 // starts of the pass; the real claim came ten minutes later. A claim not won is no start and waits before it is asked again.
 test('a claim answered 「not yet」 waits before it is asked again, and its empty consultation is deleted', async ({ page }) => {
-  await openPreview(page, 'chat-header', { turn: 'manual', autoturn: 'later' })
+  await openPreview(page, 'chat-header', { list: 'open', turn: 'manual', autoturn: 'later' })
   await expect.poll(() => chat(page, c => c.aiTurns.claims.length), { timeout: 15_000 }).toBe(1)
   await page.waitForTimeout(9_000)
   expect(await chat(page, c => c.aiTurns.claims.length)).toBe(1)
@@ -85,7 +85,7 @@ test('a claim answered 「not yet」 waits before it is asked again, and its emp
 })
 
 test('a meeting that failed on an older build and was asked for again is given back and claimed, without pressing 「もう一度」', async ({ page }) => {
-  await openPreview(page, 'chat-header', { turn: 'manual', autoturn: 'asked-again' })
+  await openPreview(page, 'chat-header', { list: 'open', turn: 'manual', autoturn: 'asked-again' })
   await expect.poll(() => chat(page, c => c.aiTurns.claims.length), { timeout: 15_000 }).toBe(1)
   // The server's run goes first: a claim before it would be refused.
   expect(await chat(page, c => c.aiTurns.retried)).toEqual([MINUTES_ID])
@@ -93,7 +93,7 @@ test('a meeting that failed on an older build and was asked for again is given b
 })
 
 test('with Codex nothing is claimed or sent; the record says why and can be handed to the person', async ({ page }) => {
-  await openPreview(page, 'chat-header', { turn: 'manual', autoturn: '1', agent: 'codex' })
+  await openPreview(page, 'chat-header', { list: 'open', turn: 'manual', autoturn: '1', agent: 'codex' })
   await expect(page.getByRole('status', { name: 'AI の番の自動実行' })).toContainText('Claude Code が必要です', { timeout: 15_000 })
   const notice = page.getByRole('region', { name: 'AI の番' })
   await expect(notice).toContainText('AI では始められません')
@@ -106,7 +106,7 @@ test('with Codex nothing is claimed or sent; the record says why and can be hand
 })
 
 test('a failed run is handed to the person with the reason, and 「もう一度」 gives it back to the AI', async ({ page }) => {
-  await openPreview(page, 'chat-header', { turn: 'manual', autoturn: 'fail' })
+  await openPreview(page, 'chat-header', { list: 'open', turn: 'manual', autoturn: 'fail' })
   await expect.poll(() => chat(page, c => c.requests.filter(r => r.path === '/api/chat').length), { timeout: 15_000 }).toBe(1)
   const notice = page.getByRole('region', { name: 'AI の番' })
   await expect(notice).toContainText('AI が進めています')
@@ -124,7 +124,7 @@ test('a failed run is handed to the person with the reason, and 「もう一度�
 // Owner FB #28: the member ending the record closes its automatic consultations — also one kept open
 // after a failure — but never one holding the member's words.
 test('ending the record closes its automatic consultation that stayed open; one with the member’s draft stays', async ({ page }) => {
-  await openPreview(page, 'chat-header', { turn: 'manual', autoturn: 'fail' })
+  await openPreview(page, 'chat-header', { list: 'open', turn: 'manual', autoturn: 'fail' })
   await expect.poll(() => chat(page, c => c.requests.filter(r => r.path === '/api/chat').length), { timeout: 15_000 }).toBe(1)
   await chat(page, c => c.finish())
   await expect.poll(() => chat(page, c => c.aiTurns.settled), { timeout: 15_000 }).toEqual([MINUTES_ID])
@@ -154,7 +154,7 @@ test('ending the record closes its automatic consultation that stayed open; one 
 })
 
 test('ending the record keeps an automatic consultation the member wrote in', async ({ page }) => {
-  await openPreview(page, 'chat-header', { turn: 'manual', autoturn: 'fail' })
+  await openPreview(page, 'chat-header', { list: 'open', turn: 'manual', autoturn: 'fail' })
   await expect.poll(() => chat(page, c => c.requests.filter(r => r.path === '/api/chat').length), { timeout: 15_000 }).toBe(1)
   await chat(page, c => c.finish())
   await expect.poll(() => chat(page, c => c.aiTurns.settled), { timeout: 15_000 }).toEqual([MINUTES_ID])
@@ -203,7 +203,7 @@ async function dropOnComposer(page: Page, record: { id: string; title: string })
 }
 
 test('ending the record keeps an automatic consultation with an edit of its message open, and after the edit is sent', async ({ page }) => {
-  await openPreview(page, 'chat-header', { turn: 'manual', autoturn: 'fail' })
+  await openPreview(page, 'chat-header', { list: 'open', turn: 'manual', autoturn: 'fail' })
   const row = await failedAutomaticShown(page)
   const bubble = page.getByText('自動で始めた相談').locator('visible=true').locator('xpath=ancestor::div[contains(@class, "group")][1]')
   await bubble.hover()
@@ -230,7 +230,7 @@ test('ending the record keeps an automatic consultation whose message is still b
     w.__releaseImages = () => { for (const go of waiting.splice(0)) go() }
     FileReader.prototype.readAsDataURL = function (this: FileReader, blob: Blob) { waiting.push(() => read.call(this, blob)) }
   })
-  await openPreview(page, 'chat-header', { turn: 'manual', autoturn: 'fail' })
+  await openPreview(page, 'chat-header', { list: 'open', turn: 'manual', autoturn: 'fail' })
   const row = await failedAutomaticShown(page)
   await composerOf(page).click()
   await page.keyboard.insertText('この画像も見て')
@@ -257,7 +257,7 @@ test('a send still reading its image goes no further once the member closed its 
     w.__releaseImages = () => { for (const go of waiting.splice(0)) go() }
     FileReader.prototype.readAsDataURL = function (this: FileReader, blob: Blob) { waiting.push(() => read.call(this, blob)) }
   })
-  await openPreview(page, 'chat-header', { turn: 'manual', autoturn: 'fail' })
+  await openPreview(page, 'chat-header', { list: 'open', turn: 'manual', autoturn: 'fail' })
   const row = await failedAutomaticShown(page)
   await composerOf(page).click()
   await page.keyboard.insertText('この画像も見て')
@@ -278,7 +278,7 @@ test('a send still reading its image goes no further once the member closed its 
 })
 
 test('ending the record keeps an automatic consultation with a record waiting in its input, or a topic question open', async ({ page }) => {
-  await openPreview(page, 'chat-header', { turn: 'manual', autoturn: 'fail' })
+  await openPreview(page, 'chat-header', { list: 'open', turn: 'manual', autoturn: 'fail' })
   const row = await failedAutomaticShown(page)
   await dropOnComposer(page, { id: 'task-0000aa', title: '見積書を作り直す' })
   await expect(page.getByRole('button', { name: '見積書を作り直すを渡すのをやめる' })).toBeVisible()

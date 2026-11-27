@@ -19,7 +19,7 @@ const MINUTES_ID = 'minutes-0a1b2c3d4e5f60718293a4b5'
 const day = () => { const d = new Date('2026-11-05T06:00:00.000Z'); return `${d.getMonth() + 1}/${d.getDate()}` }
 
 test('「読み取る」 starts a consultation 「<件名> のあと」 linked to the minutes, and the deal choice links the chosen deal', async ({ page }) => {
-  await openPreview(page, 'chat-header', { turn: 'manual', minutes: '1' })
+  await openPreview(page, 'chat-header', { list: 'open', turn: 'manual', minutes: '1' })
   const notices = page.getByRole('region', { name: 'AI の番' })
   await expect(notices).toContainText('A社 商談')
   await expect(page.locator('.cm-content[role="textbox"]').locator('visible=true')).toBeVisible()
@@ -50,7 +50,7 @@ test('「読み取る」 starts a consultation 「<件名> のあと」 linked t
 })
 
 test('with Codex, 「読み取る」 says it is done in a Claude Code consultation and starts nothing', async ({ page }) => {
-  await openPreview(page, 'chat-header', { turn: 'manual', minutes: '1', agent: 'codex' })
+  await openPreview(page, 'chat-header', { list: 'open', turn: 'manual', minutes: '1', agent: 'codex' })
   await expect(page.locator('.cm-content[role="textbox"]').locator('visible=true')).toBeVisible()
   await page.getByRole('region', { name: 'AI の番' }).getByRole('button', { name: '自分で読み取る' }).click()
   await expect(page.getByRole('alert')).toContainText('議事録の読み取りは Claude Code の相談でできます')

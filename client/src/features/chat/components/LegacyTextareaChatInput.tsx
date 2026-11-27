@@ -1,7 +1,6 @@
-import { memo, useCallback, useEffect, useImperativeHandle, useRef, type MutableRefObject } from 'react'
-import { ArrowUp } from '@phosphor-icons/react'
+import { memo, useCallback, useEffect, useImperativeHandle, useRef, type MutableRefObject, type ReactNode } from 'react'
 import type { ChatTextInputApi } from '../hooks/useChatDraft'
-import { PRIMARY_ACTION } from '../../../shared/ui/buttonStyles'
+import { ComposerRow, SendButton } from './ComposerRow'
 
 interface LegacyTextareaChatInputProps {
   initialDraft?: string
@@ -10,7 +9,9 @@ interface LegacyTextareaChatInputProps {
   onSend: (text: string) => void
   disabled: boolean
   placeholder: string
-  hint: string
+  hint?: string
+  toolsStart?: ReactNode
+  toolsEnd?: ReactNode
   onCompositionStateChange?: (isComposing: boolean) => void
   onInputActivity?: () => void
   apiRef?: MutableRefObject<ChatTextInputApi | null>
@@ -25,6 +26,8 @@ export const LegacyTextareaChatInput = memo(function LegacyTextareaChatInput({
   disabled,
   placeholder,
   hint,
+  toolsStart,
+  toolsEnd,
   onCompositionStateChange,
   onInputActivity,
   apiRef,
@@ -89,7 +92,7 @@ export const LegacyTextareaChatInput = memo(function LegacyTextareaChatInput({
 
   return (
     <div className="relative">
-      <div className="flex items-end gap-2 p-2 rounded-md bg-white dark:bg-zinc-900 border border-gray-300 dark:border-zinc-700">
+      <div className="rounded-card bg-[var(--color-surface)] border border-border-control focus-within:border-focus-border">
         <textarea
           defaultValue={initialDraft}
           onInput={event => onDraftChange?.(event.currentTarget.value)}
@@ -105,30 +108,11 @@ export const LegacyTextareaChatInput = memo(function LegacyTextareaChatInput({
           autoCapitalize="off"
           data-gramm="false"
           rows={3}
-          className="
-            flex-1 bg-transparent text-[14px] text-gray-900 dark:text-zinc-100 placeholder-gray-400 dark:placeholder-zinc-500
-            resize-y outline-none py-2 px-2
-            disabled:opacity-50 disabled:cursor-not-allowed
-            min-h-[72px] max-h-[220px]
-          "
+          className="block w-full bg-transparent text-body text-text placeholder:text-text-subtle resize-y outline-none pt-2.5 px-3 disabled:opacity-disabled disabled:cursor-not-allowed min-h-[72px] max-h-[220px]"
         />
-        <button
-          onClick={handleSend}
-          disabled={disabled}
-          aria-label="送る"
-          title="送る"
-          className={`
-            flex-shrink-0 w-9 h-9 rounded-md
-            disabled:cursor-not-allowed
-            flex items-center justify-center
-            ${PRIMARY_ACTION}
-          `}
-        >
-          <ArrowUp size={18} weight="bold" />
-        </button>
-      </div>
-      <div className="absolute -bottom-5 left-3 text-[10px] text-gray-400 dark:text-zinc-500 opacity-60">
-        {hint}
+        <ComposerRow start={toolsStart} hint={hint} end={toolsEnd}>
+          <SendButton onClick={handleSend} disabled={disabled} />
+        </ComposerRow>
       </div>
     </div>
   )
