@@ -546,9 +546,8 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
         if (started.kind !== 'ok') return said(refusedWords(started, now()))
         frameRun = frameStartOf(started.value)
         if (!frameRun || frameRun.host !== host) return said(W.failed)
-        const earlier = await askEarlier(frameRun, input.task)
-        if (earlier) return stoppedBefore(earlier)
       }
+      // Checked before anything is asked of the member (an earlier write in doubt), so nobody answers for a run that cannot start.
       // The steps of exactly the Skill the server's frames come from (never the name the AI typed), and only exactly the text
       // the server sealed for that folder version: steps that differ, are missing or would be cut start nothing (agent-browser.md
       // "The operator works from the approved steps"). A company without the company folder has no copy here: no steps, as before.
@@ -571,8 +570,14 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
         }
         steps = checked.steps
       }
+      if (frameRun) {
+        const earlier = await askEarlier(frameRun, input.task)
+        if (earlier) return stoppedBefore(earlier)
+      }
       const person: WorkPerson = { said: input.said ?? [], values: input.values ?? [] }
-      const skillRun = frameRun !== null
+      // The consultation AI's request is withheld only when the Skill's steps are what the operator works from: a Skill with
+      // no steps here (none in it, or a company without the company folder) keeps the request, as before (Codex review).
+      const skillRun = steps !== null
       const neverRead = frameRun?.neverRead ?? []
       const neverReadFits = (pq: string) => neverRead.some(p => browserNeverReadFits(p, pq))
 

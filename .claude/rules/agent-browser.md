@@ -4799,9 +4799,11 @@ are not made worse.
 - **The order of sources, by the material** (`workMaterial`): `person` first — the person's own prohibitions and limits
   (`said`) and values (`values`), as they said them —, then `steps` (the Skill's sealed text), then `plan` (the work only:
   the preview's plan the person approved, `{ summary, affects, values }`; **`null` when there was no preview** — a
-  pre-approved Skill version), then `request`: the consultation AI's own words of the task **only without a Skill**
-  (`null` with one). So a step or a stop condition the consultation AI adds never reaches a Skill's operator; with a Skill
-  the task's sentence is the card's only. The prompts' one ranking line: `person.said` before `steps`.
+  pre-approved Skill version), then `request`: the consultation AI's own words of the task **only when no Skill steps are
+  handed** (`null` when they are; an ad-hoc task, a Skill with no steps, or a company without the company folder keeps it —
+  else the operator would have nothing to go on: Codex review). So a step or a stop condition the consultation AI writes
+  into the task never reaches an operator that has the Skill's steps; then the task's sentence is the card's only. The
+  prompts' one ranking line: `person.said` before `steps` (the owner's order).
 - **The tool** (`browser_work`, `inspect-tool.ts`): `said` (≤ 10, each ≤ 300, the person's words — never the AI's own
   steps or stops) and `values` (≤ 16 `{ label ≤ 40, value ≤ 200 }`), both optional, read strictly (`workPersonOf`: exact
   keys, no control character but a line break in `said`) else `badInput`; its description says the operator works from
@@ -4821,9 +4823,14 @@ are not made worse.
   edited here), `steps-missing` (sealed, none here: a department not downloaded), `steps-too-large`, `steps-unsealed`
   (no seal: an older server) — fixed words, 「始めませんでした…サイトには何も書いていません」. **A company without the
   company folder** has no copy on this PC: its operator gets no steps, as before (the shelf's steps for the app: "Not yet").
+  The check runs **before** the member is asked about an earlier write in doubt (the write ledger), so nobody answers for
+  a run that cannot start.
 - **Not covered** (said): the app's own text is trusted after the check (a modified app is outside what this protects);
   the seal says the text equals the server's copy of that version, not that a person read it (the approval's
-  `files_seen` and the per-run card do, as before).
+  `files_seen` and the per-run card do, as before). `said` / `values` are still written by the consultation AI: nothing
+  can prove they are the person's words, and `said` ranks above the steps — the frames still bound every write, and the
+  tool's description and field limits narrow it (independent review). A checkout that converts line endings
+  (`core.autocrlf=true`) or a step file stored as a link makes the copy differ for good: `steps-changed`, safe side.
 
 ## The stopped card shows the screen (same day)
 

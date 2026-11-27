@@ -78,8 +78,9 @@ const fail = (error: unknown) => {
   app.exit(1)
 }
 // The whole harness (the operator's window tools added ~20 s of scenarios on a quiet Mac, a write run ~10 s; a busy shared Mac took
-// 140 s): room for a busy runner.
-setTimeout(() => fail(new Error('the harness timed out')), 210_000)
+// 140 s; on a loaded shared Mac on 2026-11-28 the operator's window tools alone took 189 s; the completion regression adds
+// ~10 s): room for a busy runner.
+setTimeout(() => fail(new Error('the harness timed out')), 300_000)
 
 async function focusScenario(shell: ReturnType<typeof createBrowserWindowShell>, site: BrowserSiteSetting) {
   const appWindow = new BrowserWindow({ width: 300, height: 200, show: true })

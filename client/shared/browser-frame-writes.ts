@@ -643,12 +643,13 @@ export type WorkApprovedPlan = { summary: string; affects: string; values: reado
  * - `person`: what the person said — their prohibitions and limits (`said`) and values (`values`) — first;
  * - `steps`: the company Skill's steps, exactly the text the server sealed (null: no Skill, or none in it);
  * - `plan` (the work only): the preview's plan the person approved on the card, or null when there was no preview;
- * - `request`: the consultation AI's own words of the task — **only without a Skill** (an ad-hoc task has nothing else);
- *   with a Skill the consultation AI's additions never reach the operator (`null`).
+ * - `request`: the consultation AI's own words of the task — **only when no Skill's steps are handed** (an ad-hoc task, or a
+ *   Skill with no steps on this PC: nothing else says what to do); with them the consultation AI's additions never reach
+ *   the operator (`null`).
  */
 export function workMaterial(input: {
   phase: 'preview' | 'work'
-  /** The consultation AI's request: handed only when no Skill's steps are (`skill` false). */
+  /** The consultation AI's request: handed only when no Skill's steps are (`skill` false: no steps handed). */
   request: string
   person: WorkPerson
   skill: boolean

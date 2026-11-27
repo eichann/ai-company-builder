@@ -63,6 +63,10 @@ interface Opts {
   local?: string | 'none' | 'too-large' | null
   said?: string[]
   values?: Array<{ label: string; value: string }>
+  /** A company without the company folder (the Skill shelf): no copy of the steps on this PC. */
+  noFolder?: boolean
+  /** Earlier writes in doubt the start names (the write ledger asks the member about each before the work). */
+  doubts?: unknown[]
 }
 
 function world(o: Opts) {
@@ -99,12 +103,13 @@ function world(o: Opts) {
           needsApproval: waiting, approval: waiting ? null : 'pre_approved', createdAt: '', expiresAt: '', endedAt: null, frames: [{ frame: 1, method: 'POST', path: '/items', fields: {}, max: 1, used: 0, left: 1 }],
           writes: [], approvalToken: waiting ? TOKEN : null, afterRead: [], neverRead: [],
           ...(!adhoc && o.seal !== undefined ? { steps: o.seal } : {}),
+          ...(o.doubts ? { doubts: o.doubts } : {}),
         },
       } as BrowserLinesAnswer
     },
     async frameApprove() { calls.push('frameApprove'); return { kind: 'ok', value: {} } as BrowserLinesAnswer },
     async framePermit(_c: string, _r: string, body: { frame: number }) { calls.push('framePermit'); return { kind: 'ok', value: { write: 1, frame: body.frame, permittedAt: new Date().toISOString(), validMs: 5000 } } as BrowserLinesAnswer },
-    async frameGet() { return { kind: 'no-answer' } as BrowserLinesAnswer },
+    async frameGet() { calls.push('frameGet'); return { kind: 'no-answer' } as BrowserLinesAnswer },
     async frameConfirm() { return { kind: 'no-answer' } as BrowserLinesAnswer },
     async frameReport(_c: string, _r: string, body: unknown) { calls.push(`frameReport ${JSON.stringify(body)}`); return { kind: 'ok', value: {} } as BrowserLinesAnswer },
     async frameEnd() { calls.push('frameEnd'); return { kind: 'ok', value: {} } as BrowserLinesAnswer },
@@ -119,7 +124,7 @@ function world(o: Opts) {
   })
   const cards: string[] = []
   const tool = createBrowserWorkTool(input => wiring.work({
-    companyId: COMPANY, conversationId: 'conv-1', companyRoot: '/company', site: input.site, task: input.task, skill: input.skill, said: input.said, values: input.values, items: input.items,
+    companyId: COMPANY, conversationId: 'conv-1', companyRoot: o.noFolder ? null : '/company', site: input.site, task: input.task, skill: input.skill, said: input.said, values: input.values, items: input.items,
     signal: new AbortController().signal, onCard: id => cards.push(id),
   }), [HOST])
   const run = () => tool.execute({
@@ -164,6 +169,15 @@ test('with a Skill the operator works from the person\'s words and the sealed st
   await done
   assert.ok(String(adhoc.materials[0].request).includes(AI_ADDED))
   assert.equal(adhoc.materials[0].steps, null)
+  // A Skill with no steps to hand (none in it): the request stays the operator's words of the task (Codex review).
+  const bare = world({ answers: [CLICK, DONE], needsApproval: false, seal: { state: 'none' }, local: 'none' })
+  await bare.run()
+  assert.ok(String(bare.materials[0].request).includes('一覧の行をコピーして登録する'))
+  // A company without the company folder: no steps here, so the request is kept and the work starts as before.
+  const shelf = world({ answers: [CLICK, DONE], needsApproval: false, seal: sealOf(STEPS), noFolder: true })
+  assert.equal((await shelf.run()).startsWith(WW.done), true)
+  assert.equal(shelf.materials[0].steps, null)
+  assert.ok(String(shelf.materials[0].request).includes('一覧の行をコピーして登録する'))
 })
 
 test('a Skill\'s steps that are not exactly the sealed text start nothing: changed, missing, too large, or no seal', async () => {
@@ -190,6 +204,11 @@ test('a Skill\'s steps that are not exactly the sealed text start nothing: chang
       assert.deepEqual(w.cards, [FRAME_RUN])
     }
   }
+  // Checked before the member is asked anything: a run that cannot start never asks about an earlier write in doubt.
+  const doubt = { runId: `bf_${'e'.repeat(32)}`, write: 1, frame: { method: 'POST', path: '/items', fields: {} }, permittedAt: new Date().toISOString(), confirmableAt: new Date().toISOString() }
+  const asked = world({ answers: [], needsApproval: false, seal: sealOf(STEPS), local: `${STEPS}\n手元の手順`, doubts: [doubt] })
+  assert.equal(await asked.run(), workWordsForAi({ kind: 'stopped', why: 'steps-changed' }, [], []))
+  assert.equal(asked.calls.includes('frameGet'), false, asked.calls.join('\n'))
   // The same text on both sides, or no steps on either: it starts.
   const same = world({ answers: [CLICK, DONE], needsApproval: false, seal: sealOf(STEPS) })
   assert.equal((await same.run()).startsWith(WW.done), true)
@@ -285,7 +304,7 @@ test('the renderer takes a stop screen only in its exact shape and beside what t
 
 test('the tool takes the person\'s words only in their shape', async () => {
   assert.deepEqual(workPersonOf(undefined, undefined), { said: [], values: [] })
-  assert.deepEqual(workPersonOf(['既存は変えない\n登録の前で止めて'], [{ label: '回', value: '' }]), { said: ['既存は変えない\n登録の前で止めて'], values: [{ label: '回', value: '' }] })
+  assert.deepEqual(workPersonOf(['既存は変えない\n登録の前で止めて\t（タブも）'], [{ label: '回', value: '' }]), { said: ['既存は変えない\n登録の前で止めて\t（タブも）'], values: [{ label: '回', value: '' }] })
   for (const [said, values] of [
     ['x', undefined], [[''], undefined], [['a'.repeat(301)], undefined], [Array(11).fill('a'), undefined], [['a\u0000'], undefined],
     [undefined, [{ label: '', value: 'v' }]], [undefined, [{ label: 'l', value: 'v', extra: 1 }]], [undefined, [{ label: 'l', value: 1 }]],

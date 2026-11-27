@@ -107,7 +107,7 @@ before(async () => {
     let err = ''
     child.stdout.on('data', chunk => { out += chunk })
     child.stderr.on('data', chunk => { err += chunk })
-    const timer = setTimeout(() => { child.kill('SIGKILL'); reject(new Error(`the Electron harness did not finish:\n${out}\n${err.slice(-4000)}`)) }, 240_000)
+    const timer = setTimeout(() => { child.kill('SIGKILL'); reject(new Error(`the Electron harness did not finish:\n${out}\n${err.slice(-4000)}`)) }, 330_000)
     // `close`: the process exited and its output streams ended; the result file was renamed into place before.
     child.on('close', () => { clearTimeout(timer); resolve(`${out}\n${err.slice(-4000)}`) })
   })

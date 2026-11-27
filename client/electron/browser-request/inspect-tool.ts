@@ -140,9 +140,9 @@ export function createBrowserWorkTool(
   }
 }
 
-/** A string of the person's words: within its cap, no control character (a line break is kept as said). */
+/** A string of the person's words: within its cap, no control character (a tab and a line break are kept as said). */
 // eslint-disable-next-line no-control-regex
-const PERSON_TEXT_BAD_RE = /[\x00-\x09\x0b-\x1f\x7f-\x9f]/
+const PERSON_TEXT_BAD_RE = /[\x00-\x08\x0b-\x1f\x7f-\x9f]/
 const personText = (v: unknown, max: number): v is string => typeof v === 'string' && v.trim() !== '' && v.length <= max && !PERSON_TEXT_BAD_RE.test(v)
 
 /** The person's words as the tool takes them (`said`, `values`), each as given, or null when off their shape. */
