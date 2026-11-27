@@ -1,4 +1,5 @@
 import { memo, useState } from 'react'
+import { runCommand, useCommandAvailable } from '../../../shared/commands/commands'
 import { UsersThree } from '@phosphor-icons/react'
 import { Button } from '../../../shared/ui/primitives'
 import { STATE_BOX, type StateBoxTone } from '../../../shared/ui/stateStyles'
@@ -13,6 +14,7 @@ import { pressShareProposal, type ShareProposalPort } from '../api'
 export const ShareProposalCard = memo(function ShareProposalCard({ card, port }: { card: ShareProposalCardRef; port?: ShareProposalPort }) {
   const [busy, setBusy] = useState(false)
   const [outcome, setOutcome] = useState<{ tone: StateBoxTone; text: string; final: boolean } | null>(null)
+  const canOpen = useCommandAvailable('record.open')
 
   const press = async () => {
     if (busy) return
@@ -23,6 +25,7 @@ export const ShareProposalCard = memo(function ShareProposalCard({ card, port }:
       if (r.kind === 'done') setOutcome({ tone: 'ok', text: SHARE_PROPOSAL_WORDS.done(card.folder), final: true })
       else if (r.kind === 'already') setOutcome({ tone: 'info', text: SHARE_PROPOSAL_WORDS.already, final: true })
       else if (r.kind === 'gone') setOutcome({ tone: 'info', text: SHARE_PROPOSAL_WORDS.gone, final: true })
+      else if (r.kind === 'changed') setOutcome({ tone: 'warn', text: SHARE_PROPOSAL_WORDS.changed, final: true })
       else setOutcome({ tone: 'error', text: r.text, final: false })
     } finally {
       setBusy(false)
@@ -37,6 +40,8 @@ export const ShareProposalCard = memo(function ShareProposalCard({ card, port }:
         {SHARE_PROPOSAL_WORDS.heading}
       </div>
       <p className="mt-2 text-small text-text">{SHARE_PROPOSAL_WORDS.line(card.title, card.folder)}</p>
+      <p className="mt-1 text-small text-text-muted">{SHARE_PROPOSAL_WORDS.places(card.folder)}</p>
+      {canOpen && <Button size="sm" variant="ghost" className="mt-1" onClick={() => { void runCommand('record.open', { recordId: card.recordId }) }}>{SHARE_PROPOSAL_WORDS.open}</Button>}
       {outcome && <div role={outcome.tone === 'error' ? 'alert' : 'status'} className={`mt-2 rounded-control border px-2 py-1.5 text-small ${STATE_BOX[outcome.tone]}`}>{outcome.text}</div>}
       {!finished && (
         <div className="mt-2 flex flex-wrap items-center gap-2">

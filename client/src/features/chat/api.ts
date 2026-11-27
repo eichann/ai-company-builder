@@ -395,21 +395,24 @@ export async function undoAiAsked(companyId: string, recordId: string, version: 
 
 /**
  * 「部署に出す案」 (share-proposals.ts): ［部署に出す］ is the member's own press — the task read again now with their session
- * (still theirs alone? its version), then the app's `tasks:share` with that version. The AI has no path to it.
+ * (still theirs alone? still the version the card was made from?), then the app's `tasks:share` at exactly that version.
+ * The AI has no path to it.
  */
 export type ShareProposalPort = ElectronPort<'getRecordCard' | 'shareTask'>
 
-export type ShareProposalOutcome = { kind: 'done' } | { kind: 'already' } | { kind: 'gone' } | { kind: 'error'; text: string }
+export type ShareProposalOutcome = { kind: 'done' } | { kind: 'already' } | { kind: 'gone' } | { kind: 'changed' } | { kind: 'error'; text: string }
 
 export async function pressShareProposal(card: ShareProposalCardRef, port: ShareProposalPort = window.electronAPI): Promise<ShareProposalOutcome> {
   let now
   try { now = await port.getRecordCard(card.companyId, card.recordId) } catch { now = null }
   if (!now || !now.success) return now && 'notFound' in now && now.notFound ? { kind: 'gone' } : { kind: 'error', text: now && !now.success ? now.error : 'サーバーにつながりませんでした。もう一度お試しください。' }
   if (!now.card.record.personal) return { kind: 'already' }
-  if (typeof now.card.version !== 'number') return { kind: 'error', text: 'このやることの今の状態を読めませんでした。もう一度お試しください。' }
-  const r = await port.shareTask(card.companyId, card.recordId, card.folder, now.card.version)
+  // Shared exactly as the card was made (review of #896): changed since — by the AI or anyone — nothing is sent.
+  if (now.card.version !== card.version) return { kind: 'changed' }
+  const r = await port.shareTask(card.companyId, card.recordId, card.folder, card.version)
   if (r.success) return { kind: 'done' }
-  return r.code === 'NOT_PERSONAL' ? { kind: 'already' } : { kind: 'error', text: r.error }
+  if (r.code === 'NOT_PERSONAL') return { kind: 'already' }
+  return r.code === 'VERSION_CONFLICT' ? { kind: 'changed' } : { kind: 'error', text: r.error }
 }
 
 /** The record's state now, as the server answers it (null when it cannot be read): shown after a refused ［取り消す］. */

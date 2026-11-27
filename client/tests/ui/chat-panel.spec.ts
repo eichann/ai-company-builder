@@ -289,17 +289,18 @@ test('a next-prompt suggestion is asked for after a finished turn and offered as
 })
 
 // 「部署に出す案」 (share-proposals.ts, PR D): the AI's proposal is the app's card; only the member's press shares, at the version
-// read then; afterwards the buttons are gone. ［やめる］ shares nothing.
-test('「部署に出す案」: the card shares only when the member presses it, at the version read now; やめる shares nothing', async ({ page }) => {
+// the card was made from; it says where the task is now and where it would go; afterwards the buttons are gone. ［やめる］ shares nothing.
+test('「部署に出す案」: the card shares only when the member presses it, at the version the card was made from; やめる shares nothing', async ({ page }) => {
   await openPreview(page, 'chat-header', { turn: 'manual' })
   await send(page, 'これを営業部に出して')
   await turnStarted(page)
   await chat(page, c => {
-    c.send({ type: 'data-share-proposal', id: 'share-proposal-a', data: { id: 'a', companyId: 'co-1', conversationId: null, recordId: 'task-0123456789abcdef', title: '見積を直す', folder: '営業部', at: '2026-11-27T00:00:00.000Z' } })
+    c.send({ type: 'data-share-proposal', id: 'share-proposal-a', data: { id: 'a', companyId: 'co-1', conversationId: null, recordId: 'task-0123456789abcdef', title: '見積を直す', folder: '営業部', version: 3, at: '2026-11-27T00:00:00.000Z' } })
     c.finish()
   })
   const box = page.getByRole('group', { name: '部署に出す案（AI から）' })
   await expect(box).toContainText('やること「見積を直す」を「営業部」に出します')
+  await expect(box).toContainText('いま：あなただけ → 出す先：「営業部」')
   expect(await chat(page, c => c.shares)).toEqual([])
   await box.getByRole('button', { name: '部署に出す' }).click()
   await expect(box.getByRole('status')).toHaveText('「営業部」に出しました。')
@@ -309,7 +310,7 @@ test('「部署に出す案」: the card shares only when the member presses it,
   await send(page, 'もう一つ')
   await turnStarted(page)
   await chat(page, c => {
-    c.send({ type: 'data-share-proposal', id: 'share-proposal-b', data: { id: 'b', companyId: 'co-1', conversationId: null, recordId: 'task-0123456789abcdee', title: '別のやること', folder: '営業部', at: '2026-11-27T00:00:00.000Z' } })
+    c.send({ type: 'data-share-proposal', id: 'share-proposal-b', data: { id: 'b', companyId: 'co-1', conversationId: null, recordId: 'task-0123456789abcdee', title: '別のやること', folder: '営業部', version: 3, at: '2026-11-27T00:00:00.000Z' } })
     c.finish()
   })
   const second = page.getByRole('group', { name: '部署に出す案（AI から）' }).last()

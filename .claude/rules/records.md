@@ -1269,12 +1269,15 @@ unchanged (storage keeps that meaning; what a create may leave unsaid is "全社
 - **The AI proposes it, the member presses** (owner decision 2026-11-27, PR D; `client/shared/share-proposals.ts`): asked
   「部署に出して」 in a turn the member started, the AI's tool `records_propose_share { id, folder }` (offered only with
   `askedTurn`; `ASKED_AFTER_RENEWAL` after a token renewal) reads the task with the turn's token — it must be a やること
-  whose summary says `personal` — checks the folder is a company path (`shareFolderOf`: no `..`, not absolute, never inside
-  `.personal/`) and draws the card 「部署に出す案（AI から）」 (`data-share-proposal`, stored as `shareProposals`). **It writes
-  nothing and no AI route reaches `share`.** The card's ［部署に出す］ reads the task again with the member's session
-  (`getRecordCard`: still 「あなただけ」? its version) and shares through the app's `tasks:share` at that version — the
-  server decides exactly as for the task card's button; a task already shared says so and is not shared again; a refusal
-  shows the server's words. ［やめる］ changes nothing. Tests: `client/tests/share-proposals.test.ts`,
+  whose summary says `personal` — checks the folder is a company path (`shareFolderOf`: no `..`, not absolute, no `.personal` segment in any spelling
+  that lands on it — the core's `lookalikeKey`) and draws the card 「部署に出す案（AI から）」 (`data-share-proposal`, stored as
+  `shareProposals`) with the version it read. **It writes nothing and no AI route reaches `share`.** The card shows where
+  the task is now and where it would go (「いま：あなただけ → 出す先：「…」」) and ［やることを開く］ (`record.open`, where
+  available). Its ［部署に出す］ reads the task again with the member's session (`getRecordCard`: still 「あなただけ」? still
+  the card's version?) and shares through the app's `tasks:share` at exactly the card's version — changed since (by the
+  AI or anyone) or `VERSION_CONFLICT`, nothing is sent and the card says the task changed, to look at it first (review of
+  #896); the server decides exactly as for the task card's button; a task already shared says so and is not shared
+  again; a refusal shows the server's words. ［やめる］ changes nothing (a card left unanswered stops on the version). Tests: `client/tests/share-proposals.test.ts`,
   `tests/ui/chat-panel.spec.ts` 「「部署に出す案」…」.
 - Tests: `server/tests/unit/record-personal.test.ts` (another member, a manager, an admin and the
   company owner get a missing record's answers on every route; query / count / text / my-turn

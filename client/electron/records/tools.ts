@@ -1389,13 +1389,15 @@ export async function createRecordTools(access: RecordTurnAccess, signal?: Abort
     }
     // The read may itself have renewed the turn's token (past its life): the member's-turn mark is gone, no card.
     if (access.memberTurn !== true) return JSON.stringify(ASKED_AFTER_RENEWAL)
-    const record = (answer as { record?: { id?: unknown; type?: unknown; title?: unknown; personal?: unknown } } | undefined)?.record
+    const record = (answer as { record?: { id?: unknown; type?: unknown; title?: unknown; personal?: unknown; version?: unknown } } | undefined)?.record
     if (!record || record.type !== 'task' || typeof record.id !== 'string') return JSON.stringify({ error: '部署に出す案を出せるのは「やること」だけです。', code: 'NOT_A_TASK' })
     if (record.personal !== true) return JSON.stringify({ error: 'このやることは「あなただけ」ではありません（もう部署に出ているか、決まった人だけに見えるものです）。', code: 'NOT_PERSONAL' })
     if (!options.companyId) return JSON.stringify({ error: 'この相談では案を出せません。' })
+    // The version the card is made from: the press shares exactly this one (a task changed since is never shared unseen).
+    if (!Number.isInteger(record.version)) return JSON.stringify({ error: 'このやることの版を読めませんでした。' })
     const title = typeof record.title === 'string' && record.title.trim() ? record.title.trim().slice(0, 200) : '（件名なし）'
     try {
-      options.onShareProposal?.({ id: newId(), companyId: options.companyId, conversationId: options.conversationId ?? null, recordId: record.id, title, folder, at: now().toISOString() })
+      options.onShareProposal?.({ id: newId(), companyId: options.companyId, conversationId: options.conversationId ?? null, recordId: record.id, title, folder, version: record.version as number, at: now().toISOString() })
     } catch { /* the card is the only way to share it; without it nothing happens */ }
     return JSON.stringify({
       proposed: true, id: record.id, folder,

@@ -3,8 +3,10 @@
 // - the AI's tool shares nothing: it only reads the task with the turn's token and draws the card; it is offered only in a
 //   turn the member started, only for a やること seen by the member alone, only for a department folder;
 // - after a renewal of the turn's token (the member's-turn mark gone) it answers the fixed words;
-// - the card's press reads the task again with the member's session and shares it at the version read now through the
-//   app's own tasks:share; a task no longer 「あなただけ」 is never shared again; a refusal is shown in the server's words;
+// - the card carries the version the AI read; the press reads the task again with the member's session and shares it at
+//   exactly that version through the app's own tasks:share — changed since (or a version conflict), nothing is sent (review
+//   of #896); a task no longer 「あなただけ」 is never shared again; a refusal is shown in the server's words;
+// - the folder rule is the core's (`isPersonalPath`, `lookalikeKey`): `.PERSONAL` and look-alike spellings are refused;
 // - the card survives a save and a restart (stored as `shareProposals`, read strictly).
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
@@ -33,7 +35,7 @@ async function turn(opts: { memberTurn?: boolean; bound?: boolean; record?: Reco
     if (url.endsWith('/api/records-ai/plugins')) return json(200, { plugins: [] })
     if (url.endsWith('/api/records-ai/my-turn') && opts.expired && issued === 1) return new Response(JSON.stringify({ error: 'Unauthorized', code: 'RECORD_TOKEN_INVALID' }), { status: 401 })
     if (url.endsWith(`/api/records-ai/item/${TASK}`) && opts.expiresOnRead && issued === 1) return new Response(JSON.stringify({ error: 'Unauthorized', code: 'RECORD_TOKEN_INVALID' }), { status: 401 })
-    if (url.endsWith(`/api/records-ai/item/${TASK}`)) return json(200, { record: { id: TASK, type: 'task', title: '見積を直す', personal: true, ...opts.record } })
+    if (url.endsWith(`/api/records-ai/item/${TASK}`)) return json(200, { record: { id: TASK, type: 'task', title: '見積を直す', personal: true, version: 5, ...opts.record } })
     return json(200, {})
   }) as unknown as typeof globalThis.fetch
   const api = createRecordsApi({ baseUrl: () => 'https://acb.example.jp', cookies: () => ['s=1'], fetch, retryDelayMs: 0, runOf: () => (opts.bound ? { id: 'run-1', generation: 1 } : null) })
@@ -49,7 +51,7 @@ test('the AI only proposes: a card for the member\'s own 「あなただけ」 �
   const answer = JSON.parse(await t.tools.execute('records_propose_share', { id: TASK, folder: '営業部' })) as { proposed?: boolean; shown?: string }
   assert.equal(answer.proposed, true)
   assert.match(answer.shown!, /まだ出していません/)
-  assert.deepEqual(t.cards.map(c => [c.recordId, c.title, c.folder, c.companyId]), [[TASK, '見積を直す', '営業部', 'co']])
+  assert.deepEqual(t.cards.map(c => [c.recordId, c.title, c.folder, c.companyId, c.version]), [[TASK, '見積を直す', '営業部', 'co', 5]])
   // Nothing but reads reached the server (the share is the member's press through their session, never this token).
   assert.deepEqual(t.seen.filter(s => s.method !== 'GET' && !s.url.includes('/me/record-tokens')), [])
   // Never offered outside a member's turn (a plain or run-bound token).
@@ -65,7 +67,7 @@ test('never for a task others already see, nor another kind of record, nor a fol
   const other = await turn({ memberTurn: true, record: { type: 'project' } })
   assert.equal((JSON.parse(await other.tools.execute('records_propose_share', { id: TASK, folder: '営業部' })) as { code?: string }).code, 'NOT_A_TASK')
   const t = await turn({ memberTurn: true })
-  for (const folder of ['../営業部', '/Users/x', '営業部/.personal/inbox', 'https://x']) {
+  for (const folder of ['../営業部', '/Users/x', '営業部/.personal/inbox', 'https://x', '.PERSONAL', '営業部/.Personal', '営業部/．ｐｅｒｓｏｎａｌ/x', '.per\u200Bsonal']) {
     assert.equal((JSON.parse(await t.tools.execute('records_propose_share', { id: TASK, folder })) as { code?: string }).code, 'BAD_FOLDER', folder)
   }
   assert.equal(t.cards.length, 0)
@@ -85,7 +87,7 @@ test('after the turn\'s token was issued again (the member\'s-turn mark gone), t
   assert.equal(during.cards.length, 0)
 })
 
-const CARD: ShareProposalCardRef = { id: 'card-1', companyId: 'co', conversationId: 'conv-1', recordId: TASK, title: '見積を直す', folder: '営業部', at: '2026-11-27T00:00:00.000Z' }
+const CARD: ShareProposalCardRef = { id: 'card-1', companyId: 'co', conversationId: 'conv-1', recordId: TASK, title: '見積を直す', folder: '営業部', version: 7, at: '2026-11-27T00:00:00.000Z' }
 
 function port(state: { personal: boolean; version: number; notFound?: boolean; refusal?: { code: string; error: string } }) {
   const shared: Array<[string, string, string, number]> = []
@@ -101,7 +103,7 @@ function port(state: { personal: boolean; version: number; notFound?: boolean; r
   return { p, shared }
 }
 
-test('the member\'s press shares at the version read now; a task no longer 「あなただけ」 is never shared again; refusals in the server\'s words', async () => {
+test('the member\'s press shares at the card\'s version; a task no longer 「あなただけ」 is never shared again; refusals in the server\'s words', async () => {
   const ok = port({ personal: true, version: 7 })
   assert.deepEqual(await pressShareProposal(CARD, ok.p), { kind: 'done' })
   assert.deepEqual(ok.shared, [['co', TASK, '営業部', 7]])
@@ -115,6 +117,16 @@ test('the member\'s press shares at the version read now; a task no longer 「�
   assert.deepEqual(await pressShareProposal(CARD, port({ personal: true, version: 1, notFound: true }).p), { kind: 'gone' })
 })
 
+test('a task changed after the card was made is never shared: nothing is sent, the member is told to look at it first', async () => {
+  const changed = port({ personal: true, version: 8 })
+  assert.deepEqual(await pressShareProposal(CARD, changed.p), { kind: 'changed' })
+  assert.deepEqual(changed.shared, [])
+  // Changed between the press's read and the share: the server's version conflict reads the same way.
+  const raced = port({ personal: true, version: 7, refusal: { code: 'VERSION_CONFLICT', error: 'x' } })
+  assert.deepEqual(await pressShareProposal(CARD, raced.p), { kind: 'changed' })
+  assert.deepEqual(raced.shared, [['co', TASK, '営業部', 7]])
+})
+
 test('the card is kept with the reply and read back strictly', () => {
   const stored = uiMessageToSessionMessage({ id: 'a1', role: 'assistant', parts: [
     { type: 'text', text: 'カードから出せます。' }, { type: SHARE_PROPOSAL_PART_TYPE, id: 'share-proposal-card-1', data: CARD },
@@ -122,5 +134,5 @@ test('the card is kept with the reply and read back strictly', () => {
   assert.deepEqual(stored.shareProposals, [CARD])
   const restored = sessionMessageToUIMessage(stored)
   assert.ok(restored.parts.some(p => p.type === SHARE_PROPOSAL_PART_TYPE && JSON.stringify((p as { data?: unknown }).data) === JSON.stringify(CARD)))
-  for (const bad of [{ ...CARD, recordId: 'project-0123456789ab' }, { ...CARD, folder: '../x' }, { ...CARD, title: '' }]) assert.equal(readShareProposalCard(bad), undefined)
+  for (const bad of [{ ...CARD, recordId: 'project-0123456789ab' }, { ...CARD, folder: '../x' }, { ...CARD, title: '' }, { ...CARD, version: undefined }, { ...CARD, version: 1.5 }, { ...CARD, folder: '.PERSONAL' }]) assert.equal(readShareProposalCard(bad), undefined)
 })
