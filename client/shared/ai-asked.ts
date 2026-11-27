@@ -6,7 +6,7 @@
  * ［取り消す］ is the member's own generic undo of that entry, with their session (`tasks:undo`), never the AI.
  * Pure: types, limits, the reader of a stored / streamed card, and the AI's words.
  */
-import { AI_ASKED_PER_TURN } from '../../shared/core/record-types'
+import { AI_ASKED_PER_TURN, AI_ASKED_SETTING_WORDS } from '../../shared/core/record-types'
 import { RECORD_ID_RE } from '../../shared/core/records'
 import { pastTense } from './acb-tool-displays'
 
@@ -69,6 +69,10 @@ export function aiAskedUndoStaleText(stateNow: string | null): string {
   return `取り消せませんでした。もう取り消したか、このあと別の変更がありました。${stateNow ? `（いまは「${stateNow}」です）` : ''}`
 }
 
+/** 設定 → 自分の設定's description of 「AI に完了を頼めるようにする」 (`MySwitchesSection.tsx`): what it opens, from the one list. */
+export const AI_COMPLETES_SWITCH_TEXT = `AI との相談で「この7件を完了にして」のように頼むと、あなたの記録について AI が次のことをします：${AI_ASKED_SETTING_WORDS.join('・')}（それぞれ、画面であなたができるものだけ）。` +
+  '頼んだときだけで、AI が自分の判断ですることはありません。したことは相談の中に一覧で出て、そこから取り消せます。この設定はあなただけのものです。'
+
 /** The card's heading: closes and corrections (task version 16: 件名・目的を直す) land on the same card. */
 export const aiAskedHeading = (n: number) => `AI が頼まれてしたこと（${n}件）`
 
@@ -85,7 +89,7 @@ export const AI_ASKED_INSTRUCTIONS = '\n\n【メンバーに頼まれたとき�
   'メンバーが頼んだ「やること」の確かめる人・終わったら（task__set_reviewer・task__set_when_done）、メンバーが責任者のプロジェクトのなんのため・期限・責任者（project__set_purpose・project__set_due・project__set_owner。select: で読み込む）も、頼まれたときだけ。' +
   '件名・目的が古いと気づいたら、直してよいかを先に聞く。' +
   '頼まれていないのに自分の判断で使わない。どれを片づけるか迷うときは、先に一覧を見せて確かめる。' +
-  `1回のやりとりで ${AI_ASKED_PER_TURN} 件まで（取り消しも数える）。断られたら、返ってきた error の文をそのまま伝える（完了にする・終わりにする・もう返した・アーカイブ・引き受ける・済んだ は本人の設定がオフだと断られ、オンにできることがその文に書いてある）。` +
+  `1回のやりとりで ${AI_ASKED_PER_TURN} 件まで（取り消しも数える）。断られたら、返ってきた error の文をそのまま伝える（${AI_ASKED_SETTING_WORDS.join('・')} は本人の設定がオフだと断られ、オンにできることがその文に書いてある）。` +
   'したことは画面に取り消しボタン付きの一覧で出るので、返事ではその件数と「取り消すときはその一覧から」とだけ短く伝える。' +
   '\nOnly when the member explicitly asked in this conversation: complete their own やること / end their own 返事のお願い with those tools, ' +
   'or correct the title / purpose of a やること they are assigned to or asked for (task__retitle, task__set_purpose); ' +

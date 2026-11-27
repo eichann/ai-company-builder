@@ -331,4 +331,43 @@ describe('the requester\'s and the 責任者\'s settings at their request (task 
     expect(await ai(t, 'POST', `/item/${p}/actions/set_due`, { expectedVersion: 4, args: { due: '2026-12-31' } })).toMatchObject({ status: 403, body: { code: 'NOT_ALLOWED' } })
     expect((await session('u-bob', 'POST', `/records/item/${p}/undo`, { version: 4, expectedVersion: 4 })).status).toBe(200)
   })
+
+  it('責任者を替える: never to someone who cannot open it, on every path (review of #894); the new 責任者 is told', async () => {
+    await setOwn('u-bob', true)
+    // Bob's own プロジェクト (only he sees it): Carol cannot be its 責任者 — not on create, not by his press, not by his AI.
+    const made = await session('u-bob', 'POST', '/records/item', { type: 'project', title: 'ボブだけの', personal: true, fields: { owner: 'u-carol' } })
+    expect(made).toMatchObject({ status: 400, body: { code: 'OWNER_CANNOT_READ' } })
+    const own = (await session('u-bob', 'POST', '/records/item', { type: 'project', title: 'ボブだけの', personal: true, fields: { owner: 'u-bob' } })).body.data.record.id
+    expect(await session('u-bob', 'POST', `/records/item/${own}/actions/set_owner`, { expectedVersion: 1, args: { owner: 'u-carol' } })).toMatchObject({ status: 400, body: { code: 'OWNER_CANNOT_READ' } })
+    const { token: t } = await token('u-bob')
+    expect(await ai(t, 'POST', `/item/${own}/actions/set_owner`, { expectedVersion: 1, args: { owner: 'u-carol' } })).toMatchObject({ status: 400, body: { code: 'OWNER_CANNOT_READ' } })
+    expect((await session('u-bob', 'GET', `/records/item/${own}`)).body.data.record.version).toBe(1)
+    // One everyone sees: handed to Carol by his AI, and Carol is told.
+    const p = (await session('u-bob', 'POST', '/records/item', { type: 'project', title: 'みんなの', fields: { owner: 'u-bob' }, place: 'company' })).body.data.record.id
+    expect((await ai(t, 'POST', `/item/${p}/actions/set_owner`, { expectedVersion: 1, args: { owner: 'u-carol' } })).status).toBe(200)
+    const told = db.prepare('SELECT user_id FROM notifications WHERE company_id = ? AND record_id = ? AND record_version = 2').all(CO, p) as Array<{ user_id: string }>
+    expect(told.map(r => r.user_id)).toContain('u-carol')
+  })
+
+  it('nobody else\'s AI through a role or the fallback: an owner / admin or a 部署の管理役 who is not the 責任者, a reader of one with no 責任者', async () => {
+    await setOwn('u-owner', true)
+    await setOwn('u-carol', true)
+    db.prepare("INSERT OR IGNORE INTO departments (id, company_id, name, folder, created_at, updated_at) VALUES ('ask-sales', ?, '営業部', '営業部', ?, ?)").run(CO, ts(), ts())
+    db.prepare("INSERT OR IGNORE INTO department_managers (department_id, user_id, created_at) VALUES ('ask-sales', 'u-carol', ?)").run(ts())
+    const created = await session('u-bob', 'POST', '/records/item', { type: 'project', title: '営業部の', fields: { owner: 'u-bob' }, folder: '営業部' })
+    expect(created.status).toBe(201)
+    const p = created.body.data.record.id
+    // On screen they may (a role in `who`); their AI may not (the key names only the record's own 責任者).
+    const owners = await token('u-owner')
+    const managers = await token('u-carol')
+    for (const t of [owners.token, managers.token]) {
+      expect(await ai(t, 'POST', `/item/${p}/actions/set_due`, { expectedVersion: 1, args: { due: '2026-12-25' } })).toMatchObject({ status: 403, body: { code: 'NOT_ALLOWED' } })
+    }
+    expect((await session('u-carol', 'POST', `/records/item/${p}/actions/set_due`, { expectedVersion: 1, args: { due: '2026-12-25' } })).status).toBe(200)
+    // A プロジェクト with no 責任者: any reader may name one on screen (`who_fallback`), never their AI.
+    const none = (await session('u-bob', 'POST', '/records/item', { type: 'project', title: '責任者なし', fields: { owner: 'u-bob' }, place: 'company' })).body.data.record.id
+    db.prepare("UPDATE record_state SET fields = json_remove(fields, '$.owner') WHERE company_id = ? AND record_id = ?").run(CO, none)
+    expect(await ai(managers.token, 'POST', `/item/${none}/actions/set_owner`, { expectedVersion: 1, args: { owner: 'u-carol' } })).toMatchObject({ status: 403, body: { code: 'NOT_ALLOWED' } })
+    expect((await session('u-carol', 'POST', `/records/item/${none}/actions/set_owner`, { expectedVersion: 1, args: { owner: 'u-carol' } })).status).toBe(200)
+  })
 })

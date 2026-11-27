@@ -176,7 +176,8 @@
  * actions stay the 責任者's, an admin's or the department manager's. Version 3 (owner decision 2026-11-27, additive):
  * なんのため・期限・責任者 (`set_purpose`, `set_due`, `set_owner`) have `ai_on_request: [owner]` — the 責任者's own AI at
  * their request; なんのため is a correction of words (no setting), the others need the member's setting. 終える / やめる /
- * もう一度始める stay the person's.
+ * もう一度始める stay the person's. 責任者を替える tells the new 責任者 (`notify: owner`), who must be able to open it
+ * (`OWNER_CANNOT_READ`, every path).
  *
  * **The core never names a business plugin's type** (owner decision
  * 2026-11-01 night): what work belongs to links to the `bundle` interface
@@ -516,7 +517,7 @@ actions:
   finish:       { label: 終える, from: [active], to: done, who: [owner, admin, dept_manager], note: optional }
   cancel:       { label: やめる, from: [active], to: cancelled, who: [owner, admin, dept_manager], note: optional }
   reopen:       { label: もう一度始める, from: [done, cancelled], to: active, who: [owner, admin, dept_manager], note: optional }
-  set_owner:    { label: 責任者を替える, from: [active], who: [owner, admin, dept_manager], who_fallback: [anyone], args: { owner: person }, note: optional, ai_on_request: [owner] }
+  set_owner:    { label: 責任者を替える, from: [active], who: [owner, admin, dept_manager], who_fallback: [anyone], args: { owner: person }, notify: owner, note: optional, ai_on_request: [owner] }
   set_purpose:  { label: なんのためを書く, from: [active], who: [owner, admin, dept_manager], args: { purpose: text }, note: optional, ai_on_request: [owner] }
   set_due:      { label: 期限を変える, from: [active], who: [owner, admin, dept_manager], args: { due: date }, note: optional, ai_on_request: [owner] }
 ---

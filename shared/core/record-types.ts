@@ -402,10 +402,19 @@ export function aiAskedNeedsSetting(action: Parameters<typeof isCorrection>[0]):
  */
 export const AI_UNDO_WINDOW_MS = 24 * 60 * 60_000
 
+/**
+ * What the member's setting 「AI に完了を頼めるようにする」 opens to their AI, in the screens' words: the off sentence below,
+ * the AI's instructions and the setting's description in 設定 read this one list (a new `ai_on_request` action that needs
+ * the setting adds its words here).
+ */
+export const AI_ASKED_SETTING_WORDS: readonly string[] = [
+  '完了にする', '終わりにする', 'もう返した', 'アーカイブ', '済んだ', '引き受ける', '確かめる人', '終わったら', 'プロジェクトの期限', '責任者',
+]
+
 /** The refusals of the AI at the member's request: fixed sentences the AI relays as they are. */
 export const AI_ASKED_REFUSALS = {
   /** The member's own setting is off (asked only for an action that ends the record: `aiAskedNeedsSetting`). */
-  off: { code: 'AI_ASK_OFF', error: '「AI に完了を頼めるようにする」がオフのため、AI からは片づけや引き受けはできません（完了にする・終わりにする・もう返した・アーカイブ・済んだ・引き受ける）。設定の「自分の設定」でオンにすると、AI に頼めるようになります（それまではご自身で押してください）。' },
+  off: { code: 'AI_ASK_OFF', error: `「AI に完了を頼めるようにする」がオフのため、AI からはできません（${AI_ASKED_SETTING_WORDS.join('・')}）。設定の「自分の設定」でオンにすると、AI に頼めるようになります（それまではご自身で押してください）。` },
   /** The AI's undo outside a turn the member started (a plain token, a run). */
   undoNotAsked: { code: 'NOT_ALLOWED', error: '取り消しは、メンバー本人がこの会話で頼んだときだけ AI からできます。' },
   /** The AI's undo of someone else's change. */

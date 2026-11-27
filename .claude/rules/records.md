@@ -986,7 +986,7 @@ What a department makes as its 束ねるもの is decided **without a setting** 
 - **A まとまり always gets a 責任者** (owner FB #34): a create (`POST /records/item`, the AI's
   `records_create`) of a type implementing `bundle` with no `owner` (absent or null) sets `owner` to
   the member creating it — the person, or the member whose AI it is (the record token's member). An
-  owner named keeps the usual person check (a member of this company). Who may create and where it
+  owner named keeps the usual person check (a member of this company) and must be able to open it (400 `OWNER_CANNOT_READ`, also on 責任者を替える and 部署に出す; review of #894). Who may create and where it
   goes (private placement, readers, owner-only / members-only) are unchanged. The AI's instructions
   say to name the member (`PLACEMENT_WORDS`, `client/electron/records/tools.ts`). Test:
   `server/tests/unit/record-bundle-owner.test.ts` (the default for the AI and a person, a named one
@@ -2242,9 +2242,16 @@ to press each one. Now the member may let their own AI do exactly that, **in a c
   `set_due` (期限) and `set_owner` (責任者) `ai_on_request: [owner]` — each only what that person may do on screen today.
   なんのため is a correction of words (no setting); the others need the member's setting. Every engine rule stays: a 確かめる人
   who cannot read the task → `REVIEWER_CANNOT_READ`; `set_owner` hands the 責任者 over, after which the AI may change nothing
-  there (the field no longer holds the member). Never 終える / やめる / もう一度始める (the 案件 ends or starts by a person's press),
+  there (the field no longer holds the member), **tells the new 責任者** (`notify: owner`, project v3), and — on every path,
+  a person's create, share and action and the AI's (review of #894) — **a まとまり's 責任者 must be able to open it**
+  (the `bundle` interface's `owner`; 400 `OWNER_CANNOT_READ`, like `REVIEWER_CANNOT_READ`). Only the record's own 責任者:
+  an owner / admin or a 部署の管理役 who is not it gets nothing through their AI, nor a reader of one with no 責任者
+  (`who_fallback` is a person's press only). What the setting opens is one list (`AI_ASKED_SETTING_WORDS`): the off sentence,
+  `AI_ASKED_INSTRUCTIONS` and 設定's description (`AI_COMPLETES_SWITCH_TEXT`) all read it. Never 終える / やめる / もう一度始める (the 案件 ends or starts by a person's press),
   never a business plugin's 案件 (its own type). `PROJECT_VERSION` 3 moves the records at startup. Test:
-  `ai-asked-close.test.ts` 「the requester's and the 責任者's settings…」, `record-types.test.ts`, `client/tests/ai-asked.test.ts`.
+  `ai-asked-close.test.ts` 「the requester's and the 責任者's settings…」 (+ 「責任者を替える: never to someone who cannot open
+  it…」, 「nobody else's AI through a role or the fallback…」), `record-types.test.ts`, `client/tests/ai-asked.test.ts`
+  (the three texts from one list), `records-tools.test.ts` (the 案件 row).
 - Tests (daily operations): `server/tests/integration/ai-asked-close.test.ts` 「the daily operations…」 (アーカイブ only
   the requester's own and only with the setting / never a plain token; 引き受ける accepted as the member's, never another
   member's AI; 「取り消して」 own only, no admin reach, 24 hours, a plain token, the cap, its own asked 完了 with the setting,
@@ -2497,7 +2504,8 @@ complete and idempotent; the immutability trigger — mutation-checked).
   the AI said 「つながっていません」): `RECORDS_INSTRUCTIONS` lists the screen-only operations with
   where the member does them (`SCREEN_ONLY_OPERATIONS`, `tools.ts`: 部署に出す, someone else's or an older change's
   取り消す, 受けられない, アーカイブから戻す / やり直す, 差し戻す, つながりを外す (other than the 案件), a 案件's
-  終える / やめる / もう一度始める, 来た連絡's 取り込まない, そうです / 違う, approvals, the admin console) and tells the AI to say
+  終える / やめる / もう一度始める, a business plugin's 案件's なんのため・期限・責任者 (only the core プロジェクト's are the AI's),
+  来た連絡's 取り込まない, そうです / 違う, approvals, the admin console) and tells the AI to say
   where to press — never 「つながっていません」 — also for anything else it has no tool for. **A row
   leaves the list in the PR that gives the AI a tool for it.** Test: `records-tools.test.ts` 「an
   operation without an AI tool…」.

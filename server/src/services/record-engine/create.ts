@@ -16,7 +16,7 @@ import { DEFAULT_TASK_SETTINGS, replyTarget } from '../../../shared/core/task-se
 import { applyAcceptance } from './acceptance'
 import type { EngineContext } from './context'
 import { interfaceLinkMisses, interfaceLinkRefusal } from './links'
-import { ASSIGNEE_CANNOT_READ, REVIEWER_CANNOT_READ, bad, FILE_NOT_LINKABLE, fileLinksUnavailable, FOLDER_NOT_PLACEABLE, featureOffRefusal, LINK_TARGET_NOT_FOUND, PLACE_REQUIRED, AI_PLACE_REQUIRED, runFenceRefusal, TYPE_CREATED_BY_SERVICE } from './refusals'
+import { ASSIGNEE_CANNOT_READ, OWNER_CANNOT_READ, REVIEWER_CANNOT_READ, bad, FILE_NOT_LINKABLE, fileLinksUnavailable, FOLDER_NOT_PLACEABLE, featureOffRefusal, LINK_TARGET_NOT_FOUND, PLACE_REQUIRED, AI_PLACE_REQUIRED, runFenceRefusal, TYPE_CREATED_BY_SERVICE } from './refusals'
 import type { ActorInput } from './types'
 import { checkValue, provenance } from './values'
 import { MEETING_OUTPUT_KEY_MAX } from '../../../shared/core/meeting-outputs'
@@ -404,6 +404,9 @@ export function creating(ctx: EngineContext) {
       }
       if (typeof fields.reviewer === 'string' && !canRead(member.companyId, fields.reviewer, place)) {
         return bad(REVIEWER_CANNOT_READ, 'REVIEWER_CANNOT_READ')
+      }
+      if (def.implements.includes('bundle') && typeof fields.owner === 'string' && !canRead(member.companyId, fields.owner, place)) {
+        return bad(OWNER_CANNOT_READ, 'OWNER_CANNOT_READ')
       }
       // What an AI makes from a meeting is a candidate in the meeting's slot (出どころの枠, minutes.md
       // "Outputs made once"): the one place that decides new or already there is source-slot-candidates.

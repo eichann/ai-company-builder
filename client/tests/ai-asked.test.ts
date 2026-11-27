@@ -15,7 +15,8 @@ import assert from 'node:assert/strict'
 import os from 'node:os'
 import { createRecordsApi } from '../electron/records/api'
 import { createRecordTools } from '../electron/records/tools'
-import { AI_ASKED_PART_TYPE, aiAskedDoneWords, readAiAskedCard, type AiAskedCard } from '../shared/ai-asked'
+import { AI_ASKED_INSTRUCTIONS, AI_ASKED_PART_TYPE, AI_COMPLETES_SWITCH_TEXT, aiAskedDoneWords, readAiAskedCard, type AiAskedCard } from '../shared/ai-asked'
+import { AI_ASKED_REFUSALS, AI_ASKED_SETTING_WORDS, aiAskedNeedsSetting } from '../../shared/core/record-types'
 import { historyLines } from '../shared/record-views'
 import { coreTypeDefinitions } from '../../shared/core/core-types'
 import type { LedgerEntry } from '../../shared/core/record-ledger'
@@ -220,4 +221,21 @@ test('the chat server marks only a turn the member started with their own words'
   const ceiling = { pluginStepTools: () => ({ allowsRecordTool: () => true, builtinTools: [] }), stepWriteArea: async () => ({ nowhere: true, reads: [] }) }
   assert.deepEqual(await chatTurn({ appSessionId: 'conv-job-00001', aiTurnStep: 'job-procedure' }, ceiling), [false])
   assert.deepEqual(await chatTurn({ appSessionId: 'conv-step-0001' }, { stepWriteArea: async () => 'sales/.personal/deal-1' }), [false])
+})
+
+test('what the setting opens is said the same in its three places: the off sentence, the AI\'s instructions and 設定\'s description (review of #894)', () => {
+  for (const words of ['確かめる人', '終わったら', '期限', '責任者', 'アーカイブ', '引き受ける', '済んだ', '完了にする']) {
+    for (const [where, text] of [['off', AI_ASKED_REFUSALS.off.error], ['instructions', AI_ASKED_INSTRUCTIONS], ['設定', AI_COMPLETES_SWITCH_TEXT]] as const) {
+      assert.ok(text.includes(words), `${where}: ${words}`)
+    }
+  }
+  // Every core action that needs the setting is named by the list (its label's words).
+  const named = (label: string) => AI_ASKED_SETTING_WORDS.some(w => label.includes(w) || w.includes(label.replace(/(を決める|を替える|を変える|にする|する)$/, '')))
+  for (const def of coreTypeDefinitions()) {
+    for (const [name, a] of Object.entries(def.actions)) {
+      // A task's 中止 is 「アーカイブ」 on every screen.
+      const label = def.name === 'task' && name === 'cancel' ? 'アーカイブ' : a.label
+      if (a.aiOnRequest && aiAskedNeedsSetting(a)) assert.ok(named(label), `${def.name}: ${label}`)
+    }
+  }
 })
