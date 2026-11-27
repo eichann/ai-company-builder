@@ -2,8 +2,8 @@ import Database from 'better-sqlite3'
 import fs from 'fs'
 import { seedPermissionScopes } from '../adapters/sqlite/permission-store'
 import { migrateCompanyContents } from '../adapters/sqlite/record-contents'
-import { migrateCompanyBundleParts, migrateCompanyCoreInterfaceLinks, migrateCompanyDecisionVersion, migrateCompanyInteractionVersion, migrateCompanyOutsideTimes, migrateCompanyReplyRequestVersion, migrateCompanyTaskVersion } from '../adapters/sqlite/records'
-import { DECISION_VERSION, INTERACTION_VERSION, REPLY_REQUEST_VERSION, TASK_VERSION } from '../../shared/core/core-types'
+import { migrateCompanyBundleParts, migrateCompanyCoreInterfaceLinks, migrateCompanyDecisionVersion, migrateCompanyInteractionVersion, migrateCompanyOutsideTimes, migrateCompanyProjectVersion, migrateCompanyReplyRequestVersion, migrateCompanyTaskVersion } from '../adapters/sqlite/records'
+import { DECISION_VERSION, INTERACTION_VERSION, PROJECT_VERSION, REPLY_REQUEST_VERSION, TASK_VERSION } from '../../shared/core/core-types'
 import { APP_DB_PATH, DATA_DIR } from '../lib/config'
 import { agentSchema, migrateAgentEventSandbox, migrateSecondOpinionSetting } from './schema/agents'
 import { aiRunSchema, migrateAiRunColumns, migrateAiRunSubjects } from './schema/ai-runs'
@@ -182,6 +182,7 @@ export function initDatabase(conn: Database.Database = sqlite) {
   migrateDecisionVersion(conn)
   migrateReplyRequestVersion(conn)
   migrateInteractionVersion(conn)
+  migrateProjectVersion(conn)
   migrateConnectorProviders(conn)
   migrateGooglePicker(conn)
   migrateFixedPayloads(conn)
@@ -345,6 +346,15 @@ export function migrateInteractionVersion(conn: Database.Database): void {
   for (const { id } of conn.prepare('SELECT id FROM companies').all() as Array<{ id: string }>) {
     const moved = migrateCompanyInteractionVersion(conn, id, at)
     if (moved > 0 && conn === sqlite) console.log(`[records] interaction version ${INTERACTION_VERSION}: ${moved} record(s) moved in company ${id}`)
+  }
+}
+
+/** Every company's core プロジェクト move to the core project version (`PROJECT_VERSION`), idempotent. */
+export function migrateProjectVersion(conn: Database.Database): void {
+  const at = new Date().toISOString()
+  for (const { id } of conn.prepare('SELECT id FROM companies').all() as Array<{ id: string }>) {
+    const moved = migrateCompanyProjectVersion(conn, id, at)
+    if (moved > 0 && conn === sqlite) console.log(`[records] project version ${PROJECT_VERSION}: ${moved} record(s) moved in company ${id}`)
   }
 }
 

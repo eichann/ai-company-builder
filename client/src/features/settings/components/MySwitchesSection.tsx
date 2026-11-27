@@ -7,6 +7,7 @@
 import { SpinnerGap, WarningCircle } from '@phosphor-icons/react'
 import { Button, Callout, Card, SectionHeader, Switch } from '../../../shared/ui/primitives'
 import { companyHasMailOrChat, CONNECT_MAIL_CHAT_TEXT, WORK_SWITCH_COMPANY_OFF_TEXT, WORK_SWITCH_NAMES, type WorkSwitch } from '../../../../shared/work-switches'
+import { AI_COMPLETES_SWITCH_TEXT } from '../../../../shared/ai-asked'
 import { CALM } from '../../../../shared/thing-words'
 import { useWorkSwitches } from '../hooks/useWorkSwitches'
 import { MeetingAutoReadSetting } from './MeetingAutoReadSetting'
@@ -24,7 +25,7 @@ const SWITCHES: Array<{ key: WorkSwitch; title: string; text: string }> = [
   },
   {
     key: 'aiCompletes', title: WORK_SWITCH_NAMES.aiCompletes,
-    text: 'AI との相談で「この7件を完了にして」のように頼むと、あなたが担当のやることを AI が完了にし、返事のお願いを「終わりにする」「もう返した」にします。頼んだときだけで、AI が自分の判断ですることはありません。片づけたものは相談の中に一覧で出て、そこから取り消せます。この設定はあなただけのものです。',
+    text: AI_COMPLETES_SWITCH_TEXT,
   },
 ]
 

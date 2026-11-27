@@ -14,7 +14,7 @@ import { listLedgerValue, listSubjects } from './members'
 import { listedUserIds, onList, recordReader } from '../record-access'
 import { FULL_ACCESS_ROLES } from '../../../shared/core/permissions'
 import type { RecordSetSubject } from '../../ports/records'
-import { ASSIGNEE_CANNOT_READ, REVIEWER_CANNOT_READ, bad, conflict } from './refusals'
+import { ASSIGNEE_CANNOT_READ, OWNER_CANNOT_READ, REVIEWER_CANNOT_READ, bad, conflict } from './refusals'
 import type { ActorInput } from './types'
 import { NOTE_MAX, provenance } from './values'
 import type { TypeDefinition } from '../../../shared/core/record-types'
@@ -140,6 +140,9 @@ export function sharing(ctx: EngineContext) {
       }
       if (typeof current.fields.reviewer === 'string' && !canRead(member.companyId, current.fields.reviewer, place)) {
         return bad(REVIEWER_CANNOT_READ, 'REVIEWER_CANNOT_READ')
+      }
+      if (def.implements.includes('bundle') && typeof current.fields.owner === 'string' && !canRead(member.companyId, current.fields.owner, place)) {
+        return bad(OWNER_CANNOT_READ, 'OWNER_CANNOT_READ')
       }
       if (expected !== current.version) return conflict(STALE, 'VERSION_CONFLICT', { version: current.version })
       const at = clock.now()

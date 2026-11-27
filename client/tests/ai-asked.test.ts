@@ -15,7 +15,8 @@ import assert from 'node:assert/strict'
 import os from 'node:os'
 import { createRecordsApi } from '../electron/records/api'
 import { createRecordTools } from '../electron/records/tools'
-import { AI_ASKED_PART_TYPE, aiAskedDoneWords, readAiAskedCard, type AiAskedCard } from '../shared/ai-asked'
+import { AI_ASKED_INSTRUCTIONS, AI_ASKED_PART_TYPE, AI_COMPLETES_SWITCH_TEXT, aiAskedDoneWords, readAiAskedCard, type AiAskedCard } from '../shared/ai-asked'
+import { AI_ASKED_REFUSALS, AI_ASKED_SETTING_WORDS, aiAskedNeedsSetting } from '../../shared/core/record-types'
 import { historyLines } from '../shared/record-views'
 import { coreTypeDefinitions } from '../../shared/core/core-types'
 import type { LedgerEntry } from '../../shared/core/record-ledger'
@@ -25,7 +26,7 @@ import { latestMemberText } from '../shared/agents/second-opinion'
 
 const TOKEN = 'acb_rec_co.' + 'b'.repeat(64)
 const TASK = 'task-0123456789abcdef'
-const types = coreTypeDefinitions().filter(d => d.name === 'task' || d.name === 'reply_request' || d.name === 'interaction')
+const types = coreTypeDefinitions().filter(d => ['task', 'reply_request', 'interaction', 'project'].includes(d.name))
 
 async function turn(opts: { memberTurn?: boolean; serverMarks?: boolean; bound?: boolean; askedBy?: string | null } = {}) {
   const seen: Array<{ url: string; body: unknown }> = []
@@ -86,6 +87,10 @@ test('the asked-only description and instructions only for a marked token; other
   assert.match(marked.tools.instructions, /メンバーに頼まれたときだけ使える操作/)
   // Task 17 / interaction 9 (owner decision 2026-11-27): アーカイブ, 引き受ける, 済んだ and 「取り消して」 in a marked turn only.
   for (const name of ['task__cancel', 'task__accept', 'interaction__settle']) assert.ok(spec(marked.tools, name).askedCard, name)
+  // PR C (task 18, project 3): the requester's 確かめる人・終わったら and the 責任者's なんのため・期限・責任者 — never 終える.
+  for (const name of ['task__set_reviewer', 'task__set_when_done', 'project__set_purpose', 'project__set_due', 'project__set_owner']) assert.ok(spec(marked.tools, name).askedCard, name)
+  assert.ok(!spec(marked.tools, 'project__finish').askedCard)
+  assert.match(marked.tools.instructions, /task__set_reviewer/)
   assert.match(spec(marked.tools, 'task__cancel').description, /「アーカイブ」と呼ぶ/)
   assert.ok(spec(marked.tools, 'records_undo'))
   // 済んだ's settled_by is the server's (the person acting): never asked of the AI.
@@ -216,4 +221,21 @@ test('the chat server marks only a turn the member started with their own words'
   const ceiling = { pluginStepTools: () => ({ allowsRecordTool: () => true, builtinTools: [] }), stepWriteArea: async () => ({ nowhere: true, reads: [] }) }
   assert.deepEqual(await chatTurn({ appSessionId: 'conv-job-00001', aiTurnStep: 'job-procedure' }, ceiling), [false])
   assert.deepEqual(await chatTurn({ appSessionId: 'conv-step-0001' }, { stepWriteArea: async () => 'sales/.personal/deal-1' }), [false])
+})
+
+test('what the setting opens is said the same in its three places: the off sentence, the AI\'s instructions and 設定\'s description (review of #894)', () => {
+  for (const words of ['確かめる人', '終わったら', '期限', '責任者', 'アーカイブ', '引き受ける', '済んだ', '完了にする']) {
+    for (const [where, text] of [['off', AI_ASKED_REFUSALS.off.error], ['instructions', AI_ASKED_INSTRUCTIONS], ['設定', AI_COMPLETES_SWITCH_TEXT]] as const) {
+      assert.ok(text.includes(words), `${where}: ${words}`)
+    }
+  }
+  // Every core action that needs the setting is named by the list (its label's words).
+  const named = (label: string) => AI_ASKED_SETTING_WORDS.some(w => label.includes(w) || w.includes(label.replace(/(を決める|を替える|を変える|にする|する)$/, '')))
+  for (const def of coreTypeDefinitions()) {
+    for (const [name, a] of Object.entries(def.actions)) {
+      // A task's 中止 is 「アーカイブ」 on every screen.
+      const label = def.name === 'task' && name === 'cancel' ? 'アーカイブ' : a.label
+      if (a.aiOnRequest && aiAskedNeedsSetting(a)) assert.ok(named(label), `${def.name}: ${label}`)
+    }
+  }
 })

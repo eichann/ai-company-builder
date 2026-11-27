@@ -21,7 +21,7 @@ import { linkAllowed, type RecordReader } from '../record-access'
 import type { EngineContext } from './context'
 import { evidenceToWrite, refId } from './evidence'
 import { linkLedgerValue, MAX_LINK_TARGETS, withLinkTargets } from './links'
-import { ASSIGNEE_CANNOT_READ, MATERIAL_NOT_USABLE, REVIEWER_CANNOT_READ, bad, conflict, fileLinksUnavailable, OK_BY_CANNOT_READ, featureOffRefusal, runFenceRefusal, serviceStateOnly, STATE_CHANGED_BY_SERVICE } from './refusals'
+import { ASSIGNEE_CANNOT_READ, MATERIAL_NOT_USABLE, OWNER_CANNOT_READ, REVIEWER_CANNOT_READ, bad, conflict, fileLinksUnavailable, OK_BY_CANNOT_READ, featureOffRefusal, runFenceRefusal, serviceStateOnly, STATE_CHANGED_BY_SERVICE } from './refusals'
 import { callVia, type ActorInput } from './types'
 import { checkValue, NOTE_MAX, OK_REQUIRED, parseMaterials, parseOkStatement, provenance, REF_RE } from './values'
 
@@ -320,6 +320,10 @@ export function acting(ctx: EngineContext) {
       // 確かめる人 (set_reviewer, request_review): never someone whose turn would be a record they cannot open.
       if (typeof args.reviewer === 'string' && !canRead(member.companyId, args.reviewer, row)) {
         return bad(REVIEWER_CANNOT_READ, 'REVIEWER_CANNOT_READ')
+      }
+      // A まとまり's 責任者 (責任者を替える): never someone who cannot open what they are responsible for.
+      if (def.implements.includes('bundle') && typeof args.owner === 'string' && !canRead(member.companyId, args.owner, row)) {
+        return bad(OWNER_CANNOT_READ, 'OWNER_CANNOT_READ')
       }
 
       // Record links the action sets (`links` in its definition): readable live records of the link's type or interface.
