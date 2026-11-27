@@ -93,6 +93,14 @@ test('an expired token mid-turn is issued again once, without the member\'s-turn
   await opened.access.close()
   assert.ok(s.seen.some(x => x.method === 'DELETE' && x.url.endsWith('/me/record-tokens/tok-2')), 'the token in use is the one ended')
 
+  // The AI's calls side by side (codex review): one renewal for all of them, each repeated with the new token.
+  const expired = { status: 401, body: { error: 'Unauthorized', code: 'RECORD_TOKEN_INVALID' } }
+  const parallel = server({ call: [expired, expired, { status: 200, body: { data: { ok: 2 } } }] })
+  const both = await parallel.api.openTurnFor('co', ASK)
+  assert.ok('access' in both)
+  assert.deepEqual(await Promise.all([both.access.call('GET', '/my-turn'), both.access.call('GET', '/ai-turn')]), [{ ok: 2 }, { ok: 2 }])
+  assert.equal(parallel.issues().length, 2, 'one token at the start, one renewal')
+
   // Only once per turn: a second expiry is said in the member's words.
   const again = server({ call: [{ status: 401, body: { error: 'Unauthorized', code: 'RECORD_TOKEN_INVALID' } }] })
   const turn = await again.api.openTurnFor('co', ASK)

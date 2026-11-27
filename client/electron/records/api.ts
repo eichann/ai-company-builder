@@ -211,20 +211,6 @@ export function createRecordsApi(deps: RecordsApiDeps): RecordsApi {
     const conversationId = opts.conversationId
     let token = first.token
     let tokenId = first.tokenId
-    // An expired token is issued again once per turn (a turn longer than the token's life), only for a
-    // consultation's own token: a run's ends with its run. The new one never carries the member's-turn mark,
-    // so the AI's actions at the member's request stay within the first token's count.
-    let reissued = run !== null
-    let closed = false
-    const send = (method: 'GET' | 'POST' | 'PUT' | 'DELETE', path: string, body: unknown, signal?: AbortSignal, ownTimeoutMs?: number) => request(`${root}/api/records-ai${path}`, {
-      method,
-      headers: {
-        Authorization: `Bearer ${token}`,
-        ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}),
-        ...(run && method !== 'GET' ? { 'Idempotency-Key': operationKeyOf(method, path, body) } : {}),
-      },
-      ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
-    }, signal, ownTimeoutMs)
     const revoke = async (id: string) => {
       try {
         await request(`${root}/api/companies/${encodeURIComponent(companyId)}/me/record-tokens/${encodeURIComponent(id)}`, {
@@ -232,6 +218,34 @@ export function createRecordsApi(deps: RecordsApiDeps): RecordsApi {
         })
       } catch { /* it expires on its own */ }
     }
+    let closed = false
+    // An expired token is issued again once per turn (a turn longer than the token's life), only for a
+    // consultation's own token: a run's ends with its run. The new one never carries the member's-turn mark,
+    // so the AI's actions at the member's request stay within the first token's count. Calls running side by side
+    // (the AI's parallel tool calls) share the one renewal: each repeats itself with the new token, none issues another.
+    let renewal: Promise<boolean> | null = null
+    const renewedFrom = (used: string): Promise<boolean> => {
+      if (run !== null || closed) return Promise.resolve(false)
+      if (token !== used) return Promise.resolve(true)
+      if (renewal) return renewal.then(() => token !== used)
+      renewal = issue(companyId, { conversationId: ask.conversationId, agent: ask.agent, scope: ask.scope }).then(next => {
+        if (!next.ok) return false
+        if (closed) { void revoke(next.tokenId); return false }
+        token = next.token
+        tokenId = next.tokenId
+        return true
+      })
+      return renewal
+    }
+    const send = (method: 'GET' | 'POST' | 'PUT' | 'DELETE', path: string, body: unknown, signal?: AbortSignal, ownTimeoutMs?: number, used = token) => request(`${root}/api/records-ai${path}`, {
+      method,
+      headers: {
+        Authorization: `Bearer ${used}`,
+        ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}),
+        ...(run && method !== 'GET' ? { 'Idempotency-Key': operationKeyOf(method, path, body) } : {}),
+      },
+      ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+    }, signal, ownTimeoutMs)
     return {
       access: {
         scope: first.scope,
@@ -240,17 +254,10 @@ export function createRecordsApi(deps: RecordsApiDeps): RecordsApi {
         async call(method, path, body, signal, opts) {
           if (closed) throw new RecordsApiError('TURN_ENDED', 'この会話のターンは終わりました。')
           if (method !== 'GET' && deps.beforeWrite) await deps.beforeWrite(conversationId).catch(() => undefined)
-          let r = await send(method, path, body, signal, opts?.timeoutMs)
-          if (r.status === 401 && r.body.code === TOKEN_INVALID && !reissued && !closed) {
-            reissued = true
-            const next = await issue(companyId, { conversationId: ask.conversationId, agent: ask.agent, scope: ask.scope })
-            if (next.ok && !closed) {
-              token = next.token
-              tokenId = next.tokenId
-              r = await send(method, path, body, signal, opts?.timeoutMs)
-            } else if (next.ok) {
-              void revoke(next.tokenId)
-            }
+          const used = token
+          let r = await send(method, path, body, signal, opts?.timeoutMs, used)
+          if (r.status === 401 && r.body.code === TOKEN_INVALID && await renewedFrom(used)) {
+            r = await send(method, path, body, signal, opts?.timeoutMs)
           }
           // Done before with the same request: read back what it made instead of doing it again.
           const replay = r.status === 200 && (r.body.data as { replayed?: unknown } | undefined)?.replayed === true

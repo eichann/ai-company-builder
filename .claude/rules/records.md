@@ -2475,7 +2475,8 @@ earlier turn told the member 「この会話から記録の道具につながっ
   `RECORD_TOKEN_INVALID` issues the token again **once per turn** and repeats the call — only a
   consultation's token (a run's ends with its run: `job-runs.ts` stops on that code), never after the
   turn ended, and **without `memberTurn`**, so the AI's actions at the member's request stay within the
-  first token's count; `close` ends the token in use. A second one is said in the member's words
+  first token's count; `close` ends the token in use. Calls running side by side (the AI's parallel
+  tool calls) share the one renewal and each repeats itself with the new token (codex review). A second one is said in the member's words
   (「記録の道具の期限が切れました。もう一度送ってください。」, code unchanged).
 - **Older tokens of the consultation end** when a new one is issued ("Who is acting" above).
 - Tests: `client/tests/record-tools-missing.test.ts` (each reason and how often it is asked; the
