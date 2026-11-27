@@ -239,3 +239,23 @@ test('before sending the person hides a word everywhere and removes a host; the 
   assert.deepEqual(content.hosts, [])
   assert.equal(browserRecordingProblem(content, DOMAIN), null)
 })
+
+test('each send says whether its query was sent exactly as kept — names only, plain words, once — the only query a Skill\'s draft may name', () => {
+  const r = createBrowserRecorder({ domain: DOMAIN, digest: newRecordingDigest(), now: () => 0 })
+  const post = (id: string, path: string) => r.observe({ kind: 'request', id, method: 'POST', url: `https://${DOMAIN}${path}`, resourceType: 'XHR', hasBody: false })
+  post('a', '/api/labels?return')
+  post('b', '/api/labels?preview=false')
+  post('c', '/api/labels?preview=')
+  post('d', '/api/labels?a&a')
+  post('e', '/api/labels?%72eturn')
+  post('f', '/api/labels')
+  post('g', '/api/labels?return&full')
+  const content = r.content()
+  const sends = content.steps.filter((s): s is BrowserRecordedSend => s.kind === 'send')
+  assert.deepEqual(sends.map(s => [s.address, s.bareQuery]), [
+    ['/api/labels?return', true], ['/api/labels?preview', false], ['/api/labels?preview', false], ['/api/labels?a', false],
+    ['/api/labels?return', false], ['/api/labels', false], ['/api/labels?return&full', true],
+  ])
+  assert.equal(content.format, 2)
+  assert.equal(browserRecordingProblem(content, DOMAIN), null)
+})

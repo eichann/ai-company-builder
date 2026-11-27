@@ -8,7 +8,7 @@
  */
 import {
   BROWSER_RECORDING_FORMAT, BROWSER_RECORDING_LIMITS, browserAddressPattern, browserBodyFields, browserJsonShape, browserKeyPattern,
-  browserLabel, browserOtherHost, createBrowserValueSymbols, isSensitiveFieldName,
+  browserLabel, browserOtherHost, browserQueryKeptExactly, createBrowserValueSymbols, isSensitiveFieldName,
   type BrowserRecordingContent, type BrowserRecordingStep, type BrowserSentField, type BrowserRecordedSource,
 } from '../../shared/core/browser-recording'
 
@@ -154,7 +154,9 @@ export function createBrowserRecorder(deps: BrowserRecorderDeps) {
     }
     const { fields, override } = isRead(method) ? { fields: [] as BrowserSentField[], override: null } : fieldsOf(o.contentType, o.body, o.hasBody)
     const after = lastAction && deps.now() - lastAction.at <= AFTER_MS ? lastAction.id : null
-    const id = push({ kind: 'send', method, override, address, fields, status: null, answerKeys: null, after, count: 1 })
+    // Whether the query sent is exactly its kept form (names only): a Skill's draft may name only such a query.
+    const bareQuery = browserQueryKeptExactly(o.url, domain)
+    const id = push({ kind: 'send', method, override, address, fields, status: null, answerKeys: null, after, count: 1, bareQuery })
     if (id === null) return
     if (isRead(method)) reads.set(`${method} ${address}`, id)
     requests.set(o.id, { step: id, host: null })

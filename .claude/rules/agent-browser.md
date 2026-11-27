@@ -106,6 +106,8 @@ paths:
   - "admin/src/lib/agent-browser-recordings.ts"
   - "admin/tests/agent-browser-recordings.test.tsx"
   - "shared/core/browser-skill.ts"
+  - "shared/core/browser-skill-draft.ts"
+  - "server/tests/unit/browser-skill-draft.test.ts"
   - "shared/types/browser-skills.ts"
   - "server/src/routes/browser-skills.ts"
   - "server/src/services/browser-skills.ts"
@@ -2858,7 +2860,9 @@ never handed to the AI**: no AI route, record token, tool or prompt reads them.
   The labels of buttons, choices and fields (`browserLabel`: NFKC, whitespace collapsed, e-mail-like text → `{mail}`, an
   address → `{url}`, **every digit run** → `{n}`, ≤ 60); each value as a **symbol of this recording** (`値N`; `empty`,
   `secret` for a password field, `file` for an upload); requests: method, `_method` override (PUT / PATCH / DELETE),
-  address pattern, the body's field names and symbols (form, JSON key paths, multipart; an unreadable body → `null`),
+  address pattern, **whether its query was sent exactly as kept** (`bareQuery`, format 2: names only, plain words, once, in
+  order — `?return` true, `?preview=false` / `?a&a` / an encoding false; `browserQueryKeptExactly`; the only query a Skill's
+  draft may name, "A Skill's draft from a recording"), the body's field names and symbols (form, JSON key paths, multipart; an unreadable body → `null`),
   the answer's status and JSON key shape; the other hosts the window's pages asked for (`loaded` = one answered).
   **Inferred links are marked `推定`**: a request's `after` (the person's action within 3 s before it) and a value's `from`
   (the same value first seen in that step's answer, at that key; values of 2+ characters only). A GET of the same pattern is
@@ -2920,7 +2924,8 @@ never handed to the AI**: no AI route, record token, tool or prompt reads them.
   `POST /browser-recordings { domain, content }` + this PC's key header — this PC first (`devices.check`, the same first
   check as every plan step: an enabled registration, or the owner's transition exception), then the body, the member's
   setting 「使う」 with that domain registered (`BROWSER_NOT_ALLOWED`), and **the content exactly as the core writes it**
-  (`browserRecordingProblem`: every object exactly its keys, ids increasing, references only to earlier steps of the right
+  (`browserRecordingProblem`: format 1 — an app from before — or 2, whose every send carries `bareQuery`, true only beside
+  a query; every object exactly its keys, ids increasing, references only to earlier steps of the right
   kind, every address / label / key already in its kept form — so no digit run, `%`, `@`, query value or token rides in one —,
   every value a mark, no sensitive field, a password field only `secret`, other hosts valid and not the domain, ≤ 500 steps,
   ≤ 512 KiB; `BROWSER_RECORDING_BAD`, `BROWSER_RECORDING_TOO_LARGE`), and **at most 20 kept per member and company**
@@ -3862,6 +3867,68 @@ the column's trigger and CHECK; a database from before the column: its row reads
 `client/tests/browser-frame-writes.test.ts` (the view's query kept, absent = null; exact fit only; the permit's path; the
 card and result lines; an id the query carried never reported). Each guard mutation-checked; kept on purpose: the plan
 hash's query (the declaration hash already moves with it).
+
+## A Skill's draft from a recording (PR 1 of 4: the core's two rules; nothing calls them yet)
+
+Owner-approved flow 2026-11-27 (internal design memo 「記録からSkillの下書き_設計メモ」): a member records the work once with
+test material and sends it; a **draft** company Skill is made from it — `browser.yaml` by the core's deterministic rule below,
+`SKILL.md` by the member's own AI —, only its author may try it (the card every run), and an owner / admin approves it into a
+department's `.claude/skills/<name>/`. PR 1 is the rule only: no route, table, tool or screen uses it; the draft's storage, the
+AI reading the author's own recordings (a change of "Recordings are never handed to the AI" above, for its author only), the
+trial run and the request come in PRs 2–4.
+
+- **`browserSkillDraftFrom(recordings)`** (`shared/core/browser-skill-draft.ts`, pure, knows no site): 1–5 recordings of one
+  domain, each one the server's rule accepts (`browserRecordingProblem`), in the order made. Only sends with POST / PUT /
+  PATCH that the site answered **2xx** become write targets (a 3xx may be an expired session sent to the login page, having
+  done nothing — independent review); left out, each with a fixed reason
+  (`BROWSER_SKILL_DRAFT_WORDS.leftOut`): no answer, not taken, **the method DELETE or `_method=DELETE`** (`deletes`), a path
+  beginning with a placeholder or `/` alone (`wide-path`: the ad-hoc plan's rule), **a `{x}` anywhere that did not become
+  `{made}`** (`any-segment`: the recording masks `v2`, `save.php`, camelCase and every word the person hid to `{x}`, which
+  would fit any segment — independent review), a path the declaration cannot spell, a
+  query whose names are placeholders or name a method / login field (`query`), **a query the recording does not vouch for as
+  sent exactly** (`query-values`: format 1, or `bareQuery` false — the kept form drops values, so `?preview=false` kept as
+  `?preview` would otherwise permit a request never sent; Codex review of the memo), an override the declaration cannot say
+  (`override`). `max` is the most a target was sent **in one recording** (what one run did; never the sum over recordings,
+  independent review), ≤ 20. `bareQuery` is the app's word, as the whole recording is (made by its window from the person's
+  actions with this PC's key; an AI can neither make nor send one): a draft stays its author's until an owner / admin
+  approves it. `_method` PUT / PATCH
+  becomes the fixed field. **`{made:<id>}`** replaces a path's one placeholder when exactly one earlier create of the same
+  recording (a POST without override whose path holds no placeholder and whose answer carried `id` / `data.id`, the ids the
+  app reports) is there; never across recordings, never with two candidates, never a later create; beside a broader target of
+  the same method (`made-covered`) every link is dropped. It then fits only an id the site handed this run — whether the
+  endpoint mints its ids stays the reviewer's check at 「Skill の承認」, as for every `{made}`. **Marks** for the author and the
+  reviewer (fixed words, `BROWSER_SKILL_DRAFT_WORDS.marks`): `updates-existing` (PUT / PATCH / an override, or a placeholder
+  left unlinked), `id-in-body` (a create's body field whose last word ends in `id`, typed rather than taken from an earlier
+  answer and not empty, with the fields named: fixing its new-object value keeps the write from changing an existing one —
+  the hand-made Skill's `aid: "0"`), `may-delete` (a path segment or query name saying delete / remove / destroy / trash /
+  erase / purge / discard: a POST can delete too, so only the method DELETE is left out). The text has one spelling (flow
+  mappings, quoted strings, ids `w<n>`), the same recordings always give the same text, and the rule parses its own text
+  before answering (none rather than a guess). No draft: nothing, mixed domains, more than 5 recordings, no target, more than
+  16 targets.
+- **`browserSkillDraftCoveredProblem(draft, base)`**: a later change of a draft's declaration is taken only when it is no
+  wider than `base` (what the recordings gave): the same domain; each write covered by a base write — the same method, query
+  and `_method`, every fixed field of the base kept (more may be added), a path of the same length whose every segment is the
+  same, or narrower (`{x}` → a literal, `{n}` or `{made}`; `{n}` → digits or `{made}`; `{made}` → `{made}`), and **a draft
+  `{made:<k>}` still made by a write within the base's own maker** for that segment, or within a plain create of the base (a
+  POST without `_method` and without a placeholder) for a base `{n}` / `{x}` — never re-pointed at a write that updates an
+  existing thing and answers its id (independent review) —; **the uses of
+  the draft writes one base write covers, together, at most 20** (`too-many-uses`: one target split into many literal ones keeps
+  one budget; Codex review); never a delete, never a path beginning with a placeholder. `never_read`, `after_read` and the
+  account marker may be added (they only narrow). `max` may exceed what was recorded, up to 20: an ad-hoc plan's card allows
+  the same.
+- **Recordings of format 2** ("Recording" above): every send carries `bareQuery`; the server takes format 1 and 2, the app
+  writes 2. **Deploy the server before handing out the app**: an older server refuses a format-2 recording (`format`), and the
+  app keeps it for another try.
+
+Tests: `server/tests/unit/browser-skill-draft.test.ts` (the two Lステップ recordings' shapes — the tag's create with
+`?return`, the action's register, the route's create, the save of an existing route marked `updates-existing`, `aid` marked
+`id-in-body` — give exactly the expected text, and the hand-made `lstep-round-inflow` declaration is a change within it;
+every reason left out; a query only when vouched for (format 1 and `?preview=false` never); the server's check of format 2;
+`may-delete`; a 3xx not taken; a `{x}` left out unless it became `{made}`; max = the most in one recording; `{made}` only for one earlier create of the same recording, `data.id`, never a guess,
+dropped beside a broader target, the frame then fitting only what was made; 300 generated recordings: the text parses, is
+within itself, never deletes, each write one the person sent; the change rule: drops, reorders, narrowing, fixed fields, the
+shared budget, a `{made}` never re-pointed at an update, every refusal), `client/tests/browser-recorder.test.ts` (`bareQuery` for each kind of query; format 2 passes the
+server's check). Each guard mutation-checked (25 mutations; a malformed address beside `bareQuery` is refused, never thrown — Codex review).
 
 ## Letting a domain go, why a write run stopped, the Skill's steps as written (incident 2026-11-27)
 
