@@ -19,13 +19,20 @@
  * - **The frames** (`approvedFrames`, for step ⑤'s permit): built by the server from the approved declaration it read,
  *   re-checked on every call (a few git reads): the declaration valid, its domain registered by the company now, the
  *   approval in force for this very hash. Anything else is a refusal with a fixed code.
+ * - **Which Skill** ("Department Skills"): a Skill is its path — the company's `.claude/skills/<name>` or a department's
+ *   `<department>/.claude/skills/<name>` (two departments may each have one name) — and every approval row, run and
+ *   notice keys on it. A bare name means the company's (rows written before department Skills, an older admin page).
+ *   The AI may name a Skill by its name: `resolve` takes it only when exactly one Skill of that name is there for the
+ *   member, else refuses (`BROWSER_SKILL_AMBIGUOUS`) — never a guess. A department's Skill is used only by a member who
+ *   reads that place now (`readsPath`, the core's read rules), asked at every permit.
  */
 import {
-  BROWSER_SKILL_PROBLEM_WORDS, browserSkillDomainProblem, browserSkillFrames, browserSkillWriteLine, parseBrowserSkillDeclaration,
-  type BrowserSkillDeclaration, type BrowserSkillFrames, type BrowserSkillProblem,
+  BROWSER_SKILL_PATH_MAX, BROWSER_SKILL_PROBLEM_WORDS, browserSkillDomainProblem, browserSkillFrames, browserSkillPathOf, browserSkillPlaceWords, browserSkillWriteLine,
+  parseBrowserSkillDeclaration, parseBrowserSkillPath,
+  type BrowserSkillDeclaration, type BrowserSkillFrames, type BrowserSkillPlace, type BrowserSkillProblem,
 } from '../../shared/core/browser-skill'
 import { CONTENT_HASH_RE } from '../../shared/core/fixed-content'
-import { isValidSkillName } from '../../shared/core/names'
+import { isValidFolderName, isValidSkillName } from '../../shared/core/names'
 import {
   BROWSER_SKILL_APPROVAL_MODES, type BrowserSkillApprovalMode, type BrowserSkillStatus, type BrowserSkillsView, type BrowserSkillView,
 } from '../../shared/types/browser-skills'
@@ -50,6 +57,8 @@ export interface BrowserSkillDeps {
   registeredHosts(companyId: string): string[]
   /** sha256 (hex) of a text's UTF-8. */
   sha256(text: string): string
+  /** Does the member read this company path now (shared/core/permissions.ts `resolveAccess`)? A department Skill's use. */
+  readsPath(member: Member, path: string): boolean
   /** Tell these members' apps to read their notices again (the push channel). */
   noticesChanged?(companyId: string, userIds: string[]): void
 }
@@ -61,7 +70,7 @@ export interface BrowserSkillDeps {
  */
 export const BROWSER_SKILL_NOTICE_KIND = 'browser_shape_changed'
 export const BROWSER_SKILL_NOTICE_PREFIX = 'browser_skill:'
-const NOTICE_RE = /^browser_skill:(waiting|text):([a-z0-9][a-z0-9_-]*):[0-9a-f]{16}$/
+const NOTICE_RE = /^browser_skill:(waiting|text):(?:([^:/]+)\/)?([a-z0-9][a-z0-9_-]*):[0-9a-f]{16}$/
 
 export const BROWSER_SKILL_WORDS = Object.freeze({
   manageForbidden: 'Skill の承認は、オーナーと管理者だけができます。',
@@ -70,16 +79,27 @@ export const BROWSER_SKILL_WORDS = Object.freeze({
   notApproved: 'この Skill のいまの宣言は、まだ承認されていません。',
   changed: 'この Skill の宣言が、見ている間に変わりました。読み込み直してから、もう一度確かめてください。',
   notRevocable: 'この Skill には、取り消せる承認がありません。',
+  ambiguous: 'その名前の Skill が、全社と部署（または複数の部署）にあります。どれを使うか決められないので、動かしていません。Skill のパス（全社のものは .claude/skills/<名前>、部署のものは <部署のフォルダ>/.claude/skills/<名前>）で頼み直してください。',
 })
+/** How long a Skill a run names may be (a name or a path). */
+export const BROWSER_SKILL_REF_MAX = BROWSER_SKILL_PATH_MAX
 const W = BROWSER_SKILL_WORDS
 
-const skillPathOf = (name: string) => `.claude/skills/${name}`
+/**
+ * The Skill a request names: a Skill path, or a bare name meaning the company's `.claude/skills/<name>` (what approval rows,
+ * runs and an older admin page said before department Skills). Null: neither.
+ */
+export function browserSkillPlaceOf(skill: unknown): BrowserSkillPlace | null {
+  if (typeof skill !== 'string' || skill.length > BROWSER_SKILL_REF_MAX) return null
+  return isValidSkillName(skill) ? parseBrowserSkillPath(browserSkillPathOf(null, skill)) : parseBrowserSkillPath(skill.normalize('NFC'))
+}
 const isMap = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v)
 const exactKeys = (o: Record<string, unknown>, keys: readonly string[]) =>
   Object.keys(o).length === keys.length && keys.every(k => Object.prototype.hasOwnProperty.call(o, k))
 
 /** What the server makes of one Skill as it reads it now. */
 interface Judged {
+  place: BrowserSkillPlace
   content: BrowserSkillContent
   hash: string
   declaration: BrowserSkillDeclaration | null
@@ -88,6 +108,7 @@ interface Judged {
 
 /** What step ⑤ gets for a Skill whose declaration is approved. */
 export interface BrowserSkillApproved {
+  /** The Skill's path as the server's copy spells it (what the run keeps and hands back). */
   skill: string
   declarationHash: string
   /** The whole folder's fingerprint read now (hand it back to `runCardShown`). */
@@ -108,16 +129,26 @@ export function createBrowserSkillService(deps: BrowserSkillDeps) {
   const notFound = (): Refusal => refuse('not-found', W.notFound, { code: 'BROWSER_SKILL_NOT_FOUND' })
   const bad = (): Refusal => refuse('bad-request', W.badBody, { code: 'BROWSER_SKILL_BAD_REQUEST' })
 
-  function judge(companyId: string, content: BrowserSkillContent): Judged {
+  /** The Skill as the server read it, judged — null when what the source handed is no Skill path (never trusted). */
+  function judge(companyId: string, content: BrowserSkillContent): Judged | null {
+    const place = parseBrowserSkillPath(content.path)
+    if (!place) return null
     if (content.declaration === 'too-large') {
       // Never read whole, so nothing to hash: the folder's fingerprint keeps the key unique and never approvable.
-      return { content, hash: `sha256:${deps.sha256(`too-large\0${content.files}`)}`, declaration: null, problem: 'too-large' }
+      return { place, content, hash: `sha256:${deps.sha256(`too-large\0${content.files}`)}`, declaration: null, problem: 'too-large' }
     }
     const hash = `sha256:${deps.sha256(content.declaration)}`
     const parsed = parseBrowserSkillDeclaration(content.declaration)
-    if (!parsed.ok) return { content, hash, declaration: null, problem: parsed.problem }
-    return { content, hash, declaration: parsed.declaration, problem: browserSkillDomainProblem(parsed.declaration, deps.registeredHosts(companyId)) }
+    if (!parsed.ok) return { place, content, hash, declaration: null, problem: parsed.problem }
+    return { place, content, hash, declaration: parsed.declaration, problem: browserSkillDomainProblem(parsed.declaration, deps.registeredHosts(companyId)) }
   }
+  /** Read a Skill at its place and judge it (null: not there). */
+  async function readJudged(companyId: string, place: BrowserSkillPlace): Promise<Judged | null> {
+    const content = await deps.source.read(companyId, place.path)
+    return content ? judge(companyId, content) : null
+  }
+  /** May the member use this Skill? The company's: as before; a department's: only while they read its place. */
+  const mayUse = (member: Member, place: BrowserSkillPlace) => place.department === null || deps.readsPath(member, place.path)
 
   /** The approval in force for this hash: the skill's latest row, this hash, not revoked. */
   const inForce = (latest: BrowserSkillApprovalRow | null, hash: string): BrowserSkillApprovalRow | null =>
@@ -132,12 +163,14 @@ export function createBrowserSkillService(deps: BrowserSkillDeps) {
   }
 
   function viewOf(companyId: string, j: Judged): BrowserSkillView {
-    const latest = repo(companyId).latest(skillPathOf(j.content.name))
+    const latest = repo(companyId).latest(j.place.path)
     const approval = latest && latest.declarationHash === j.hash ? latest : null
     const names = approval ? deps.accounts.byIds([approval.approvedBy]) : new Map()
     const d = j.declaration
     return {
-      name: j.content.name,
+      name: j.place.name,
+      path: j.place.path,
+      department: j.place.department,
       declarationHash: j.hash,
       files: j.content.files,
       status: statusOf(j, latest),
@@ -172,12 +205,16 @@ export function createBrowserSkillService(deps: BrowserSkillDeps) {
     }
   }
   const short = (s: string) => deps.sha256(s).slice(0, 16)
+  /** A notice key's version part: the company's Skill as before; a department's also by its path (two may share a name). */
+  const keyPart = (place: BrowserSkillPlace, of: string) => short(place.department === null ? of : `${place.path}\0${of}`)
+  /** A notice key's Skill: its name, after its department folder for a department's (`営業/order-copy`; the text says it). */
+  const keyName = (place: BrowserSkillPlace) => (place.department === null ? place.name : `${place.department}/${place.name}`)
 
   /** 「手順が直りました」 once per folder version (the notice's dedupe key), when an approval in force has not seen this version. */
   function noticeTextChanged(companyId: string, j: Judged, except: string | null): void {
-    const approval = inForce(repo(companyId).latest(skillPathOf(j.content.name)), j.hash)
+    const approval = inForce(repo(companyId).latest(j.place.path), j.hash)
     if (!approval || approval.filesSeen === null || approval.filesSeen === j.content.files) return
-    tell(companyId, `${BROWSER_SKILL_NOTICE_PREFIX}text:${j.content.name}:${short(j.content.files)}`, except)
+    tell(companyId, `${BROWSER_SKILL_NOTICE_PREFIX}text:${keyName(j.place)}:${keyPart(j.place, j.content.files)}`, except)
   }
 
   /**
@@ -186,10 +223,11 @@ export function createBrowserSkillService(deps: BrowserSkillDeps) {
    * what is there (a later push or publish, read in another order) changes nothing: the later one is judged on its own.
    */
   function landed(companyId: string, by: { userId: string; role: string }, content: BrowserSkillLanded, current: BrowserSkillContent | null): void {
-    if (!current || current.files !== content.files) return
+    if (!current || current.files !== content.files || current.path !== content.path) return
     const j = judge(companyId, content)
+    if (!j) return
     const r = repo(companyId)
-    const path = skillPathOf(content.name)
+    const path = j.place.path
     const latest = r.latest(path)
     if (latest && latest.declarationHash === j.hash) {
       // The declaration is the approved one (or the revoked one): only the other files may have moved.
@@ -206,7 +244,7 @@ export function createBrowserSkillService(deps: BrowserSkillDeps) {
     // editor's pending declaration carried along by a pull --rebase, a revoked one — waits (independent review M1).
     const before = content.previousDeclaration
     const onApproved = before === null
-      ? latest === null
+      ? latest === null && newPathApprovable(r, j.hash, content.sameElsewhere)
       : before !== 'too-large' && latest !== null && latest.revokedAt === null && latest.declarationHash === `sha256:${deps.sha256(before)}`
     if (hasFullAccess(by.role) && onApproved) {
       r.insert({
@@ -220,9 +258,21 @@ export function createBrowserSkillService(deps: BrowserSkillDeps) {
     noticeWaiting(companyId, j, by.userId)
   }
 
+  /**
+   * A declaration new at its path (a new Skill — or one moved or copied from another path) counts as the owner / admin's
+   * approval only when it is no declaration someone is still waiting on or took back: every other path that held exactly
+   * it right before or after the change has it approved and in force (a move or copy of an approved Skill), every place
+   * could be looked into, and no approval of it was ever revoked anywhere in the company. Else it waits (coordinator's
+   * review of #879: moving or copying a pending or revoked declaration must not approve it).
+   */
+  function newPathApprovable(r: BrowserSkillApprovalRepository, hash: string, elsewhere: BrowserSkillLanded['sameElsewhere']): boolean {
+    if (!elsewhere.complete || r.everRevoked(hash)) return false
+    return elsewhere.paths.every(p => inForce(r.latest(p), hash) !== null)
+  }
+
   /** 「宣言が直されました…承認してください」 once per declaration version (the notice's dedupe key). */
   function noticeWaiting(companyId: string, j: Judged, except: string | null): void {
-    tell(companyId, `${BROWSER_SKILL_NOTICE_PREFIX}waiting:${j.content.name}:${short(j.hash)}`, except)
+    tell(companyId, `${BROWSER_SKILL_NOTICE_PREFIX}waiting:${keyName(j.place)}:${keyPart(j.place, j.hash)}`, except)
   }
 
   const later = (what: string, companyId: string, work: () => Promise<void>) => {
@@ -232,14 +282,15 @@ export function createBrowserSkillService(deps: BrowserSkillDeps) {
   }
 
   return {
-    /** GET /browser-skill-approvals (owner/admin): every company Skill with `browser.yaml`, as the server reads it now. */
+    /** GET /browser-skill-approvals (owner/admin): every company and department Skill with `browser.yaml`, as read now. */
     async list(member: Member): Promise<Outcome<BrowserSkillsView>> {
       if (!hasFullAccess(member.role)) return forbidden()
       const items: BrowserSkillView[] = []
-      for (const name of await deps.source.list(member.companyId)) {
-        const content = await deps.source.read(member.companyId, name)
-        if (!content) continue
-        const j = judge(member.companyId, content)
+      const listed = await deps.source.list(member.companyId)
+      for (const path of listed.paths) {
+        const place = parseBrowserSkillPath(path)
+        const j = place ? await readJudged(member.companyId, place) : null
+        if (!j) continue
         noticeTextChanged(member.companyId, j, null)
         const view = viewOf(member.companyId, j)
         // A waiting declaration whose notice a landing could not send (read in another order, past the push's limit, a
@@ -247,7 +298,8 @@ export function createBrowserSkillService(deps: BrowserSkillDeps) {
         if (view.status === 'waiting') noticeWaiting(member.companyId, j, null)
         items.push(view)
       }
-      return ok({ items })
+      // The page says plainly when not every place could be looked into (a Skill may be missing from it).
+      return ok({ items, complete: listed.complete })
     },
 
     /** POST /browser-skill-approvals { skill, declarationHash, files, mode } (owner/admin): approve exactly what was seen. */
@@ -255,29 +307,31 @@ export function createBrowserSkillService(deps: BrowserSkillDeps) {
       if (!hasFullAccess(member.role)) return forbidden()
       if (!isMap(body) || !exactKeys(body, ['skill', 'declarationHash', 'files', 'mode'])) return bad()
       const { skill, declarationHash, files, mode } = body
-      if (typeof skill !== 'string' || !isValidSkillName(skill)) return bad()
+      const place = browserSkillPlaceOf(skill)
+      if (!place) return bad()
       if (typeof declarationHash !== 'string' || !CONTENT_HASH_RE.test(declarationHash)) return bad()
       if (typeof files !== 'string' || files.length > 200) return bad()
       if (!(BROWSER_SKILL_APPROVAL_MODES as readonly unknown[]).includes(mode)) return bad()
-      const content = await deps.source.read(member.companyId, skill)
-      if (!content) return notFound()
-      const j = judge(member.companyId, content)
+      const j = await readJudged(member.companyId, place)
+      if (!j) return notFound()
+      const content = j.content
       if (j.problem) return refuse('conflict', BROWSER_SKILL_PROBLEM_WORDS[j.problem], { code: j.problem === 'not-registered' ? 'BROWSER_SKILL_DOMAIN_NOT_REGISTERED' : 'BROWSER_SKILL_BAD_DECLARATION' })
       if (j.hash !== declarationHash || content.files !== files) return refuse('conflict', W.changed, { code: 'BROWSER_SKILL_CHANGED' })
       // Approving is approving the version as a whole, as the page showed it: its files count as seen.
       repo(member.companyId).insert({
-        skillPath: skillPathOf(skill), declarationHash: j.hash, mode: mode as BrowserSkillApprovalMode, how: 'approved',
+        skillPath: j.place.path, declarationHash: j.hash, mode: mode as BrowserSkillApprovalMode, how: 'approved',
         approvedBy: member.userId, approvedAt: deps.clock.now(), filesSeen: content.files,
       })
       return ok(viewOf(member.companyId, j))
     },
 
-    /** POST /browser-skill-approvals/revoke { skill } (owner/admin): take the latest approval back. */
+    /** POST /browser-skill-approvals/revoke { skill } (owner/admin): take the latest approval back (`skill`: its path). */
     revoke(member: Member, body: unknown): Outcome<{ revoked: true }> {
       if (!hasFullAccess(member.role)) return forbidden()
-      if (!isMap(body) || !exactKeys(body, ['skill']) || typeof body.skill !== 'string' || !isValidSkillName(body.skill)) return bad()
+      const place = isMap(body) && exactKeys(body, ['skill']) ? browserSkillPlaceOf(body.skill) : null
+      if (!place) return bad()
       const r = repo(member.companyId)
-      const latest = r.latest(skillPathOf(body.skill))
+      const latest = r.latest(place.path)
       if (!latest || latest.revokedAt !== null || !r.revoke(latest.seq, deps.clock.now(), member.userId)) {
         return refuse('conflict', W.notRevocable, { code: 'BROWSER_SKILL_NOT_APPROVED' })
       }
@@ -285,25 +339,51 @@ export function createBrowserSkillService(deps: BrowserSkillDeps) {
     },
 
     /**
-     * Step ⑤'s question, asked at every permit: the frames the server builds from the approved declaration of this
-     * Skill, read now from the company's own copy — or why not. Never trusts anything the app holds.
+     * Which Skill a run's start means: a path as it is; a bare name only when exactly one Skill with `browser.yaml` of that
+     * name is there for this member (the company's, or a department's they read) — more than one →
+     * `BROWSER_SKILL_AMBIGUOUS`, never a guess; none → the not-found answer. Answers the Skill's path.
      */
-    async approvedFrames(member: Pick<Member, 'companyId'>, skill: string): Promise<Outcome<BrowserSkillApproved>> {
-      if (!isValidSkillName(skill)) return notFound()
-      const content = await deps.source.read(member.companyId, skill)
-      if (!content) return notFound()
-      const j = judge(member.companyId, content)
+    async resolve(member: Member, skill: string): Promise<Outcome<string>> {
+      if (skill.length > BROWSER_SKILL_REF_MAX) return notFound()
+      if (!isValidSkillName(skill)) {
+        const place = parseBrowserSkillPath(skill.normalize('NFC'))
+        return place ? ok(place.path) : notFound()
+      }
+      // Every Skill of that name, not the bounded list (a second one past its bound would be guessed away: Codex review).
+      const found = await deps.source.withName(member.companyId, skill)
+      const matches = found.paths
+        .map(parseBrowserSkillPath)
+        .filter((p): p is BrowserSkillPlace => p !== null && p.name === skill && mayUse(member, p))
+      if (matches.length === 0) return notFound()
+      // Two — or one, when some place could not be looked into (another may stand there) — is never a guess: give the path.
+      if (matches.length > 1 || !found.complete) return refuse('conflict', W.ambiguous, { code: 'BROWSER_SKILL_AMBIGUOUS' })
+      return ok(matches[0].path)
+    },
+
+    /**
+     * Step ⑤'s question, asked at every permit: the frames the server builds from the approved declaration of this
+     * Skill (its path; a bare name = the company's), read now from the company's own copy — or why not. A department's
+     * Skill only for a member who reads its place now (else the same answer as a missing one). Never trusts anything the
+     * app holds.
+     */
+    async approvedFrames(member: Member, skill: string): Promise<Outcome<BrowserSkillApproved>> {
+      const place = browserSkillPlaceOf(skill)
+      if (!place || !mayUse(member, place)) return notFound()
+      const j = await readJudged(member.companyId, place)
+      // Asked again of the path as the server's copy spells it: that is the place the approval and the read rules name.
+      if (!j || !mayUse(member, j.place)) return notFound()
+      const content = j.content
       if (j.problem || !j.declaration) {
         const problem = j.problem ?? 'not-object'
         return refuse('conflict', BROWSER_SKILL_PROBLEM_WORDS[problem], { code: problem === 'not-registered' ? 'BROWSER_SKILL_DOMAIN_NOT_REGISTERED' : 'BROWSER_SKILL_BAD_DECLARATION' })
       }
-      const approval = inForce(repo(member.companyId).latest(skillPathOf(skill)), j.hash)
+      const approval = inForce(repo(member.companyId).latest(j.place.path), j.hash)
       if (!approval) return refuse('conflict', W.notApproved, { code: 'BROWSER_SKILL_NOT_APPROVED' })
       // `filesSeen` null: approved by an owner / admin's own change, not yet run — the card once, nobody told.
       const textChanged = approval.filesSeen !== null && approval.filesSeen !== content.files
       if (textChanged) noticeTextChanged(member.companyId, j, null)
       return ok({
-        skill, declarationHash: j.hash, files: content.files, frames: browserSkillFrames(j.declaration), mode: approval.mode, approval: approval.seq,
+        skill: j.place.path, declarationHash: j.hash, files: content.files, frames: browserSkillFrames(j.declaration), mode: approval.mode, approval: approval.seq,
         textChanged, needsRunCard: approval.mode === 'per_run' || approval.filesSeen !== content.files,
       })
     },
@@ -312,18 +392,21 @@ export function createBrowserSkillService(deps: BrowserSkillDeps) {
      * Step ⑤'s second look inside its transaction (synchronous: no git read): the approval `approvedFrames` answered
      * (`approval`, its row) is still the skill's latest, in force, for exactly this declaration hash. `approvedFrames`
      * read before the transaction; this catches an approval revoked, superseded or given another mode in between (a
-     * `pre_approved` replaced by `per_run` is a new row: Codex review of ⑤a).
+     * `pre_approved` replaced by `per_run` is a new row: Codex review of ⑤a), and a department's Skill whose place the
+     * member no longer reads.
      */
-    stillApproved(member: Pick<Member, 'companyId'>, skill: string, declarationHash: string, approval: number): boolean {
-      if (!isValidSkillName(skill)) return false
-      return inForce(repo(member.companyId).latest(skillPathOf(skill)), declarationHash)?.seq === approval
+    stillApproved(member: Member, skill: string, declarationHash: string, approval: number): boolean {
+      const place = browserSkillPlaceOf(skill)
+      if (!place || !mayUse(member, place)) return false
+      return inForce(repo(member.companyId).latest(place.path), declarationHash)?.seq === approval
     },
 
     /** Step ⑤: the per-run card was shown for this version (`files` as `approvedFrames` gave it); false when the approval moved. */
     runCardShown(member: Pick<Member, 'companyId'>, skill: string, declarationHash: string, files: string): boolean {
-      if (!isValidSkillName(skill)) return false
+      const place = browserSkillPlaceOf(skill)
+      if (!place) return false
       const r = repo(member.companyId)
-      const approval = inForce(r.latest(skillPathOf(skill)), declarationHash)
+      const approval = inForce(r.latest(place.path), declarationHash)
       if (!approval) return false
       r.setFilesSeen(approval.seq, files)
       return true
@@ -336,7 +419,7 @@ export function createBrowserSkillService(deps: BrowserSkillDeps) {
     afterPush(companyId: string, by: { userId: string; role: string }, refUpdates: string): void {
       later('Reading a push for browser Skills failed', companyId, async () => {
         for (const content of await deps.source.pushed(companyId, refUpdates)) {
-          const current = await deps.source.read(companyId, content.name)
+          const current = await deps.source.read(companyId, content.path)
           // Synchronous from here: no other landing or approval runs between this read and the write.
           landed(companyId, by, content, current)
         }
@@ -348,15 +431,15 @@ export function createBrowserSkillService(deps: BrowserSkillDeps) {
       member: Member, item: { kind: string; departmentId: string | null; name: string },
       versions: { before: string | null; written: string; how: 'publish' | 'restore' | 'request' },
     ): void {
-      if (item.kind !== 'skill' || item.departmentId !== null) return
+      if (item.kind !== 'skill') return
       // Only the publisher's own upload counts as their change. Putting an earlier version back or publishing a member's
       // request lands a declaration nobody reviewed on 「Skill の承認」: it waits (independent review M2).
       const by = versions.how === 'publish' ? member : { userId: member.userId, role: 'member' }
       // Judged at exactly the version this member wrote, and only while it is still the current one (as a push).
       later('Reading a shelf Skill for browser Skills failed', member.companyId, async () => {
-        const content = await deps.source.shelfLanded(member.companyId, item.name, versions)
+        const content = await deps.source.shelfLanded(member.companyId, { departmentId: item.departmentId, name: item.name }, versions)
         if (!content) return
-        const current = await deps.source.read(member.companyId, item.name)
+        const current = await deps.source.read(member.companyId, content.path)
         landed(member.companyId, by, content, current)
       })
     },
@@ -366,9 +449,13 @@ export function createBrowserSkillService(deps: BrowserSkillDeps) {
       if (!hasFullAccess(member.role) || !dedupeKey) return null
       const m = NOTICE_RE.exec(dedupeKey)
       if (!m) return null
+      const department = m[2] ?? null
+      if (department !== null && !isValidFolderName(department)) return null
+      // Which Skill: its place too (two departments may each have one of this name).
+      const skill = `${browserSkillPlaceWords(department)}の Skill「${m[3]}」`
       return m[1] === 'waiting'
-        ? `ブラウザ操作：Skill「${m[2]}」の宣言（書き込み先など）が直されました。管理画面の「Skill の承認」で確かめて承認するまで、この Skill では書き込めません`
-        : `ブラウザ操作：Skill「${m[2]}」の手順が直りました。次に動かすときは、前もって承認していても、実行の前に確かめのカードが1回出ます`
+        ? `ブラウザ操作：${skill}の宣言（書き込み先など）が直されました。管理画面の「Skill の承認」で確かめて承認するまで、この Skill では書き込めません`
+        : `ブラウザ操作：${skill}の手順が直りました。次に動かすときは、前もって承認していても、実行の前に確かめのカードが1回出ます`
     },
   }
 }

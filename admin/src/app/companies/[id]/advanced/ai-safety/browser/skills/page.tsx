@@ -9,6 +9,7 @@ import { ConfirmDialog } from '@/components/app/confirm-dialog'
 import { EmptyState, ErrorState, ListSkeleton, PageHeader } from '@/components/app/states'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { Callout } from '@/components/ui/callout'
 import { Card, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import {
   SKILL_PER_RUN_NOTE,
@@ -18,10 +19,13 @@ import {
   SKILL_STATUS_BADGE,
   SKILL_STATUS_WORDS,
   SKILLS_EMPTY,
+  SKILLS_INCOMPLETE,
   SKILLS_INTRO,
   SKILLS_TITLE,
   howWords,
   skillActions,
+  skillLabel,
+  skillPlaceWords,
 } from '@/lib/agent-browser-skills'
 import { browserSkillsApi, type BrowserSkillApprovalMode, type BrowserSkillView } from '@/lib/api'
 import { useCompany } from '@/lib/company-context'
@@ -52,9 +56,9 @@ export default function BrowserSkillsPage() {
   }
 
   const approve = async (s: BrowserSkillView, mode: BrowserSkillApprovalMode) => {
-    setBusy(s.name)
+    setBusy(s.path)
     try {
-      await browserSkillsApi.approve(companyId, { skill: s.name, declarationHash: s.declarationHash, files: s.files, mode })
+      await browserSkillsApi.approve(companyId, { skill: s.path, declarationHash: s.declarationHash, files: s.files, mode })
       toast.success(mode === 'pre_approved' ? '前もって承認しました' : '承認しました')
     } catch (err) {
       toast.error('承認できませんでした', { description: describeError(err) })
@@ -65,7 +69,7 @@ export default function BrowserSkillsPage() {
   }
   const revoke = async (s: BrowserSkillView) => {
     try {
-      await browserSkillsApi.revoke(companyId, s.name)
+      await browserSkillsApi.revoke(companyId, s.path)
       toast.success('承認を取り消しました')
     } catch (err) {
       toast.error('取り消せませんでした', { description: describeError(err) })
@@ -85,6 +89,7 @@ export default function BrowserSkillsPage() {
         <ErrorState error={list.error} onRetry={list.reload} />
       ) : list.data ? (
         <div className="space-y-6 pb-4">
+          {list.data.complete === false && <Callout variant="warning">{SKILLS_INCOMPLETE}</Callout>}
           <Card>
             <CardHeader className="pb-4">
               <CardTitle className="flex items-center gap-2">
@@ -105,9 +110,10 @@ export default function BrowserSkillsPage() {
                   {list.data.items.map((s) => {
                     const can = skillActions(s.status)
                     return (
-                      <li key={s.name} data-skill={s.name} className="space-y-2 py-3">
+                      <li key={s.path} data-skill={s.path} className="space-y-2 py-3">
                         <div className="flex flex-wrap items-center gap-2">
                           <span className="font-mono font-semibold">{s.name}</span>
+                          <span className="text-small text-muted-foreground" data-place>{skillPlaceWords(s.department)}</span>
                           <Badge variant={SKILL_STATUS_BADGE[s.status]} data-status={s.status}>{SKILL_STATUS_WORDS[s.status]}</Badge>
                           {s.domain && <span className="break-all font-mono text-small text-muted-foreground">{s.domain}</span>}
                         </div>
@@ -115,7 +121,7 @@ export default function BrowserSkillsPage() {
                         {s.writes.length > 0 && (
                           <div>
                             <p className="text-small font-semibold">書いてよい送り先と回数</p>
-                            <ul aria-label={`${s.name} の書き込み先`} className="text-small">
+                            <ul aria-label={`${skillLabel(s)} の書き込み先`} className="text-small">
                               {s.writes.map((w) => <li key={w} className="break-all">{w}</li>)}
                             </ul>
                           </div>
@@ -140,7 +146,7 @@ export default function BrowserSkillsPage() {
                             <Button size="sm" variant="outline" disabled={busy !== null} onClick={() => void approve(s, 'pre_approved')}>前もって承認</Button>
                           )}
                           {can.revoke && (
-                            <Button size="sm" variant="outline" disabled={busy !== null} onClick={() => setRevoking(s)} aria-label={`${s.name} の承認を取り消す`}>取り消す</Button>
+                            <Button size="sm" variant="outline" disabled={busy !== null} onClick={() => setRevoking(s)} aria-label={`${skillLabel(s)} の承認を取り消す`}>取り消す</Button>
                           )}
                         </div>
                       </li>

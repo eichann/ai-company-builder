@@ -75,6 +75,7 @@ import { createTaskSettingsService } from './services/task-settings'
 import { createFeatureService } from './services/features'
 import { noticeTurnedOff } from '../shared/core/features'
 import { replyTarget } from '../shared/core/task-settings'
+import { resolveAccess } from '../shared/core/permissions'
 import { createWorkSwitches } from './services/work-switches'
 import { slackFeaturesOf } from './services/slack-client'
 
@@ -322,6 +323,11 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     source: browserSkillSource({ companyData: shared.companyData, hasCompanyFolder: companyFolders.has }),
     registeredHosts: companyId => agentBrowser.policyFor({ companyId, userId: '' }).sites.map(s => s.host),
     sha256: text => sha256TokenDigest.digest(text),
+    // A department Skill's use: the core's read rules for that path now (private folders and read-restricted places gate).
+    readsPath: (member, path) => {
+      const scopes = shared.companyData.forCompany(member.companyId).scopes.listWithRules()
+      return resolveAccess(member.companyId, member.userId, path, { getMemberRole: () => member.role, listScopes: () => scopes }).read
+    },
     noticesChanged: (companyId, userIds) => push.notify(companyId, userIds, { kind: 'notifications', version: shared.ids.newToken().slice(0, 32) }),
   })
   // Writes within frames (agent-browser.md "Writes within frames"): the frames from an approved Skill or the card's plan.

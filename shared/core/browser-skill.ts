@@ -26,10 +26,66 @@
  */
 import { normalizeBrowserHost } from './browser-operation'
 import { isSensitiveFieldName } from './browser-recording'
+import { isValidFolderName, isValidSkillName } from './names'
 import { isYamlMap, parseYamlLite, type YamlValue } from './yaml-lite'
 
 /** The file's name inside the Skill's folder. */
 export const BROWSER_SKILL_FILE = 'browser.yaml'
+
+/**
+ * Where a company Skill with a browser declaration may stand, and its identity (agent-browser.md "A Skill's browser
+ * declaration and its approval", "Department Skills"): the company's `.claude/skills/<name>`, or a department's
+ * `<department folder>/.claude/skills/<name>` — exactly the places Claude Code reads Skills from for a consultation
+ * (its working folder is the company folder or a department's, `settingSources: ['project']` reads `.claude/skills/`
+ * there and in its parents) and where the Skill shelf places a department's Skill (`shelfTargets`). Deeper folders and
+ * a private folder (its own repository) are not places of a browser Skill. Two departments may each have a Skill of
+ * one name: the path, never the name alone, tells them apart.
+ */
+export interface BrowserSkillPlace {
+  /** The department's folder (NFC, as stored), or null for the company's. */
+  department: string | null
+  name: string
+  /** `.claude/skills/<name>` or `<department>/.claude/skills/<name>`. */
+  path: string
+}
+
+const SKILL_PLACE_RE = /^(?:([^/]+)\/)?\.claude\/skills\/([^/]+)$/
+/** A Skill path's longest spelling (a folder name ≤ 255 bytes, a Skill name ≤ 64 characters). */
+export const BROWSER_SKILL_PATH_MAX = 400
+
+/** The path of a Skill at a place (`department` null: the company's). */
+export function browserSkillPathOf(department: string | null, name: string): string {
+  return department === null ? `.claude/skills/${name}` : `${department}/.claude/skills/${name}`
+}
+
+/**
+ * A Skill path as `browserSkillPathOf` spells it, or null: NFC, at most one department folder (a valid department folder
+ * name: never hidden, no slash), a valid Skill name. Nothing else — a deeper folder, `..`, a trailing slash — is one.
+ */
+export function parseBrowserSkillPath(path: unknown): BrowserSkillPlace | null {
+  if (typeof path !== 'string' || path.length === 0 || path.length > BROWSER_SKILL_PATH_MAX || path.normalize('NFC') !== path) return null
+  const m = SKILL_PLACE_RE.exec(path)
+  if (!m) return null
+  const department = m[1] ?? null
+  const name = m[2]
+  if (!isValidSkillName(name) || (department !== null && !isValidFolderName(department))) return null
+  return { department, name, path }
+}
+
+/** Where a Skill belongs, in the words the admin page and the notices say: 「全社」 or 「部署「<folder>」」. */
+export function browserSkillPlaceWords(department: string | null): string {
+  return department === null ? '全社' : `部署「${department}」`
+}
+
+/**
+ * A Skill as the AI names it: its name (`order-copy`) or its path (`営業/.claude/skills/order-copy`, in NFC) — or null.
+ * Which Skill a name means is the server's to say (only when exactly one is there for the member).
+ */
+export function browserSkillRef(skill: unknown): string | null {
+  if (typeof skill !== 'string' || skill.length === 0 || skill.length > BROWSER_SKILL_PATH_MAX) return null
+  if (isValidSkillName(skill)) return skill
+  return parseBrowserSkillPath(skill.normalize('NFC'))?.path ?? null
+}
 
 export const BROWSER_SKILL_LIMITS = Object.freeze({
   /** The file's size in UTF-8 bytes. */

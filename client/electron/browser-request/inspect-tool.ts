@@ -24,7 +24,7 @@ import { BROWSER_BROWSE_LIMITS, BROWSER_BROWSE_TOOL, BROWSER_BROWSE_WORDS as BW,
 import { normalizeBrowserHost } from '../../../shared/core/browser-operation'
 import type { BrowserBrowseOutcome } from '../features/browser/browse'
 import { BROWSER_WORK_LIMITS, BROWSER_WORK_TOOL, BROWSER_WORK_WORDS as KW, workHeading } from '../../shared/browser-frame-writes'
-import { isValidSkillName } from '../../../shared/core/names'
+import { browserSkillRef } from '../../../shared/core/browser-skill'
 
 export { BROWSER_INSPECT_TOOL, BROWSER_WRITE_TOOL, BROWSER_BROWSE_TOOL, BROWSER_WORK_TOOL }
 
@@ -78,14 +78,14 @@ export interface BrowserInspectTools {
 export const browserWorkSchema = z.object({
   site: z.string().describe('サイトのドメイン（下の一覧のどれか）。The registered domain, as listed in the description.'),
   task: z.string().describe('サイトでしてほしい作業を文で（1000字まで）。The task in words (1000 characters at most).'),
-  skill: z.string().optional().describe('会社の Skill を使うときだけ、その名前（.claude/skills/<名前>）。The company Skill to follow, if any.'),
+  skill: z.string().optional().describe('会社の Skill を使うときだけ、その名前、または Skill のパス（全社は .claude/skills/<名前>、部署は <部署のフォルダ>/.claude/skills/<名前>）。同じ名前の Skill が全社と部署や複数の部署にあるときはパスで。The company or department Skill to follow, if any: its name, or its path when the name is not unique.'),
   items: z.array(z.string()).optional().describe('読み取ってほしいものの見出し（10個まで、各40字まで）。読めなかったものは見出しで返る。'),
 })
 
 /** The work tool's description for one turn: the shared words, then the domains this company registered. */
 export function browserWorkDescription(domains: readonly string[]): string {
   return 'ユーザーにはっきり頼まれたとき、会社が登録したサイトで、書く作業（保存・作成など）を別の係の AI にしてもらう。' +
-    '会社の Skill があれば skill にその名前を入れる（Skill の手順と、管理者が承認した送り先の枠の中だけで書く）。Skill がなければ、係の AI が下見して計画を作り、ユーザーがカードで［任せる］を押したときだけ書く。' +
+    '会社や部署の Skill があれば skill にその名前（同じ名前がほかの部署にもあるときは Skill のパス）を入れる（Skill の手順と、管理者が承認した送り先の枠の中だけで書く）。Skill がなければ、係の AI が下見して計画を作り、ユーザーがカードで［任せる］を押したときだけ書く。' +
     'ユーザーがこのパソコンでそのサイトの窓を開いてログインしていて、そのサイトを「変えてよい」になっている必要がある。結果はカードとして相談に出て、ユーザーだけが見る。' +
     'あなたに返るのは決まった言葉（済みました／止まりました／分からない書き込みがあります／読めなかったもの：見出し）だけ。サイトの内容は見えないので推測して書かない。済んだら、相談や作業の次の段に進む。' +
     '1回に数分かかる（カードの承認を待つ間も）。\n' +
@@ -108,7 +108,8 @@ export function createBrowserWorkTool(
       const a = (args && typeof args === 'object' ? args : {}) as Record<string, unknown>
       if (typeof a.site !== 'string' || normalizeBrowserHost(a.site) !== a.site) return KW.badInput
       if (typeof a.task !== 'string' || a.task.trim() === '' || a.task.length > BROWSER_BROWSE_LIMITS.task) return KW.badInput
-      if (a.skill !== undefined && (typeof a.skill !== 'string' || !isValidSkillName(a.skill))) return KW.badInput
+      const skill = a.skill === undefined ? null : browserSkillRef(a.skill)
+      if (a.skill !== undefined && skill === null) return KW.badInput
       const given = a.items === undefined ? [] : a.items
       if (!Array.isArray(given) || given.length > BROWSER_BROWSE_LIMITS.items) return KW.badInput
       const items: string[] = []
@@ -119,7 +120,7 @@ export function createBrowserWorkTool(
       }
       calls++
       try {
-        return (await run({ site: a.site, task: a.task, skill: typeof a.skill === 'string' ? a.skill : null, items })).words
+        return (await run({ site: a.site, task: a.task, skill, items })).words
       } catch {
         return KW.failed
       }

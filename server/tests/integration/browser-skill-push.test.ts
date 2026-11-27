@@ -287,7 +287,7 @@ describe('the server\'s own copy at the pushed commit', () => {
     expect((await pushAs('tok-editor')).ok).toBe(true)
     // The owner's push, read after the editor's landed: still the owner's declaration.
     const read = await source.pushed(CO, `${first} ${second} refs/heads/main\n`)
-    expect(read.map(c => [c.name, c.declaration])).toEqual([[SKILL, yaml(4)]])
+    expect(read.map(c => [c.path, c.declaration])).toEqual([[PATH, yaml(4)]])
     // Another ref, a malformed line or a deletion reads nothing.
     expect(await source.pushed(CO, `${first} ${second} refs/heads/other\n`)).toEqual([])
     expect(await source.pushed(CO, `${first} ${'0'.repeat(40)} refs/heads/main\n`)).toEqual([])
@@ -345,5 +345,201 @@ describe('a company without the shared folder: whose publish it was', () => {
     await settled()
     expect(rowCount(SHELF_CO)).toBe(rows)
     expect(code(await services.browserSkills.approvedFrames(shelfOwner, SKILL))).toBe('BROWSER_SKILL_NOT_APPROVED')
+  })
+})
+
+describe('department Skills (agent-browser.md "Department Skills")', () => {
+  const SALES = '営業'
+  const SALES_PATH = `${SALES}/.claude/skills/${SKILL}`
+  const SUPPORT_PATH = `support/.claude/skills/${SKILL}`
+  const rowsAt = (companyId: string, path: string) =>
+    (db.prepare('SELECT approved_by, how FROM browser_skill_approvals WHERE company_id = ? AND skill_path = ? ORDER BY seq').all(companyId, path) as Array<{ approved_by: string; how: string }>)
+  const listed = async (companyId: string) => {
+    const r = await services.browserSkills.list({ companyId, userId: 'u-owner', role: 'owner' })
+    if (!r.ok) throw new Error(JSON.stringify(r.body))
+    return r.value.items
+  }
+
+  it('an owner\'s push of a department Skill is listed with its department and counts as approved; an editor\'s of another department waits', async () => {
+    const companyRows = rowsAt(CO, PATH).length
+    write(`${SALES_PATH}/SKILL.md`, '# copy an order (sales)\n')
+    write(`${SALES_PATH}/browser.yaml`, yaml(2))
+    // Deeper than a department folder: not a place of a browser Skill.
+    write(`${SALES}/sub/.claude/skills/deep-one/browser.yaml`, yaml(1))
+    commit()
+    expect((await pushAs('tok-owner')).ok).toBe(true)
+    await until(() => rowsAt(CO, SALES_PATH).length === 1, 'the department Skill recorded')
+    expect(rowsAt(CO, SALES_PATH)).toEqual([{ approved_by: 'u-owner', how: 'edited' }])
+    // The company's Skill of the same name took nothing from it.
+    expect(rowsAt(CO, PATH)).toHaveLength(companyRows)
+    const items = await listed(CO)
+    expect(items.filter(i => i.name === SKILL).map(i => [i.path, i.department])).toEqual([[PATH, null], [SALES_PATH, SALES]])
+    expect(items.some(i => i.name === 'deep-one')).toBe(false)
+    const frames = await services.browserSkills.approvedFrames(editor, SALES_PATH)
+    expect(frames.ok && frames.value).toMatchObject({ skill: SALES_PATH })
+    expect(frames.ok && frames.value.frames.writes[0].max).toBe(2)
+    // Two Skills of one name: the AI's name alone is refused, never guessed.
+    expect(code(await services.browserSkills.resolve(editor, SKILL))).toBe('BROWSER_SKILL_AMBIGUOUS')
+
+    // A skill editor (for the whole company) adds the same name in another department: it waits, the owner is told.
+    const told = noticeKeys(CO, 'u-owner').length
+    write(`${SUPPORT_PATH}/browser.yaml`, yaml(3))
+    commit()
+    expect((await pushAs('tok-editor')).ok).toBe(true)
+    await until(() => noticeKeys(CO, 'u-owner').length > told, 'the owner told')
+    expect(rowsAt(CO, SUPPORT_PATH)).toEqual([])
+    expect(code(await services.browserSkills.approvedFrames(owner, SUPPORT_PATH))).toBe('BROWSER_SKILL_NOT_APPROVED')
+    // Approving it on the page (by its path) approves that one only.
+    const support = (await listed(CO)).find(i => i.path === SUPPORT_PATH)!
+    expect(support.department).toBe('support')
+    const approved = await services.browserSkills.approve(owner, { skill: SUPPORT_PATH, declarationHash: support.declarationHash, files: support.files, mode: 'per_run' })
+    expect(approved.ok).toBe(true)
+    expect(rowsAt(CO, SUPPORT_PATH)).toEqual([{ approved_by: 'u-owner', how: 'approved' }])
+    expect(rowsAt(CO, SALES_PATH)).toHaveLength(1)
+  })
+
+  it('a Skill at a private folder\'s path is never listed or read, and its name appears nowhere', async () => {
+    // As if the company repository held files at a path that is (now) a private folder: they are not its Skills.
+    write('機密/.claude/skills/secret-plan/browser.yaml', yaml(1))
+    commit()
+    expect((await pushAs('tok-owner')).ok).toBe(true)
+    const before = await listed(CO)
+    expect(before.some(i => i.name === 'secret-plan')).toBe(true)
+    const now = new Date().toISOString()
+    db.prepare('INSERT INTO scope_repos (id, company_id, scope_id, created_at) VALUES (?, ?, ?, ?)').run('r-secret', CO, 's-secret', now)
+    db.prepare("INSERT INTO scopes (id, company_id, path, kind, repo_id, created_at) VALUES (?, ?, '機密', 'folder', ?, ?)").run('s-secret', CO, 'r-secret', now)
+    const after = await services.browserSkills.list(owner)
+    expect(JSON.stringify(after)).not.toContain('secret-plan')
+    expect(JSON.stringify(after)).not.toContain('機密')
+    expect(code(await services.browserSkills.approvedFrames(owner, '機密/.claude/skills/secret-plan'))).toBe('BROWSER_SKILL_NOT_FOUND')
+    expect(code(await services.browserSkills.resolve(owner, 'secret-plan'))).toBe('BROWSER_SKILL_NOT_FOUND')
+  })
+
+  it('a company without the shared folder: a department\'s shelf Skill, used only by who reads the department', async () => {
+    const dept = await services.departments.create(shelfOwner, { name: SALES, folder: SALES })
+    if (!dept.ok) throw new Error(JSON.stringify(dept.body))
+    const files = [
+      { path: 'SKILL.md', base64: Buffer.from('# copy (sales)\n').toString('base64') },
+      { path: 'browser.yaml', base64: Buffer.from(yaml(4)).toString('base64') },
+    ]
+    const r = services.skillShelf.publish(shelfOwner, { kind: 'skill', name: SKILL, departmentId: dept.value.id, expectedVersion: null, files })
+    if (!r.ok) throw new Error(JSON.stringify(r.body))
+    await until(() => rowsAt(SHELF_CO, SALES_PATH).length === 1, 'the owner\'s department publish recorded')
+    expect(rowsAt(SHELF_CO, SALES_PATH)).toEqual([{ approved_by: 'u-owner', how: 'edited' }])
+    const items = await listed(SHELF_CO)
+    expect(items.find(i => i.path === SALES_PATH)).toMatchObject({ department: SALES, name: SKILL })
+    const plain = { companyId: SHELF_CO, userId: 'u-plain', role: 'member' }
+    const frames = await services.browserSkills.approvedFrames(plain, SALES_PATH)
+    expect(frames.ok && frames.value.frames.writes[0].max).toBe(4)
+    // The department is made readable by its own people only: the plain member no longer uses its Skill.
+    services.permissionEditor.replaceRules(shelfOwner, SALES, [{ subjectType: 'everyone', subjectId: null, canRead: false, canWrite: false }])
+    expect(code(await services.browserSkills.approvedFrames(plain, SALES_PATH))).toBe('BROWSER_SKILL_NOT_FOUND')
+    // Their name alone now means the company's Skill of that name, the one they may use.
+    const which = await services.browserSkills.resolve(plain, SKILL)
+    expect(which.ok && which.value).toBe(`.claude/skills/${SKILL}`)
+    expect(code(await services.browserSkills.approvedFrames(shelfOwner, SALES_PATH))).toBe('ok')
+  })
+})
+
+describe('department Skills: the review of #879 (real git)', () => {
+  const rowsAt = (path: string) => (db.prepare('SELECT COUNT(*) AS n FROM browser_skill_approvals WHERE company_id = ? AND skill_path = ?').get(CO, path) as { n: number }).n
+
+  it('an owner moving or copying a pending declaration to another department does not approve it', async () => {
+    const from = `pending/.claude/skills/mover`
+    const moved = `moved/.claude/skills/mover`
+    const copied = `copied/.claude/skills/mover`
+    write(`${from}/browser.yaml`, yaml(8))
+    commit()
+    expect((await pushAs('tok-editor')).ok).toBe(true)
+    await until(() => noticeKeys(CO, 'u-owner').some(k => k.includes('pending/mover')), 'the owner told of the editor\'s Skill')
+    expect(rowsAt(from)).toBe(0)
+    // The owner moves it to another department (git mv): the old commit held it at `pending/`, still waiting.
+    git(['mv', 'pending', 'moved'], clone)
+    commit()
+    expect((await pushAs('tok-owner')).ok).toBe(true)
+    // The pusher is not told of their own change: give the after-push step its time, then nothing may be approved.
+    await new Promise(r => setTimeout(r, 2000))
+    expect(rowsAt(moved)).toBe(0)
+    expect(code(await services.browserSkills.approvedFrames(owner, moved))).toBe('BROWSER_SKILL_NOT_APPROVED')
+    // …and copies it: the same declaration still waits at `moved/`.
+    write(`${copied}/browser.yaml`, yaml(8))
+    commit()
+    expect((await pushAs('tok-owner')).ok).toBe(true)
+    // (as above)
+    await new Promise(r => setTimeout(r, 2000))
+    expect(rowsAt(copied)).toBe(0)
+    // A copy is the owner's own approval only when every place holding that declaration has it approved.
+    const approveAtPath = async (path: string) => {
+      const view = await services.browserSkills.list(owner)
+      const item = view.ok ? view.value.items.find(i => i.path === path) : undefined
+      expect((await services.browserSkills.approve(owner, { skill: path, declarationHash: item!.declarationHash, files: item!.files, mode: 'per_run' })).ok).toBe(true)
+    }
+    await approveAtPath(moved)
+    await approveAtPath(copied)
+    const again = `again/.claude/skills/mover`
+    write(`${again}/browser.yaml`, yaml(8))
+    commit()
+    expect((await pushAs('tok-owner')).ok).toBe(true)
+    await until(() => rowsAt(again) === 1, 'the copy of an approved one approved')
+  })
+
+  it('a company Skill folder without browser.yaml makes its name ambiguous for the AI', async () => {
+    write('.claude/skills/plain-one/SKILL.md', '# plain\n')
+    write('sales2/.claude/skills/plain-one/browser.yaml', yaml(1))
+    commit()
+    expect((await pushAs('tok-owner')).ok).toBe(true)
+    await until(() => rowsAt('sales2/.claude/skills/plain-one') === 1, 'the department one landed')
+    expect(code(await services.browserSkills.resolve(editor, 'plain-one'))).toBe('BROWSER_SKILL_AMBIGUOUS')
+    const listed = await services.browserSkills.list(owner)
+    expect(listed.ok && listed.value.items.some(i => i.path === '.claude/skills/plain-one')).toBe(false)
+  })
+})
+
+describe('department Skills: places the source cannot fully look into (adapter, real git)', () => {
+  /** A bare repository for `companyId` whose top folders are `folders`, each with `<folder>/.claude/skills/order-copy/browser.yaml`. */
+  function repoWith(companyId: string, folders: string[]) {
+    const bare = join(process.env.REPOS_DIR!, `${companyId}.git`)
+    git(['init', '-q', '--bare', '--initial-branch=main', bare])
+    // Plumbing (never core.precomposeunicode): a folder name is kept exactly as written, NFD included.
+    const run = (args: string[], input?: string) => execFileSync('git', ['-C', bare, ...args], { input, stdio: ['pipe', 'pipe', 'pipe'] }).toString().trim()
+    const blob = run(['hash-object', '-w', '--stdin'], yaml(1))
+    const skill = run(['mktree'], `100644 blob ${blob}\tbrowser.yaml\n`)
+    const skills = run(['mktree'], `040000 tree ${skill}\torder-copy\n`)
+    const claude = run(['mktree'], `040000 tree ${skills}\tskills\n`)
+    const dept = run(['mktree'], `040000 tree ${claude}\t.claude\n`)
+    const root = run(['mktree', '-z'], folders.map(f => `040000 tree ${dept}\t${f}\0`).join(''))
+    const commitId = run(['-c', 'user.name=t', '-c', 'user.email=t@example.com', 'commit-tree', root, '-m', 'skills'])
+    run(['update-ref', 'refs/heads/main', commitId])
+  }
+  const sourceOf = async () => {
+    const { browserSkillSource } = await import('../../src/adapters/browser-skill-source')
+    return browserSkillSource({ companyData: (await import('../../src/adapters/sqlite/company-data')).sqliteCompanyData(db), hasCompanyFolder: () => true })
+  }
+  const names = (n: number) => Array.from({ length: n }, (_, i) => `f${String(i).padStart(3, '0')}`)
+
+  it('exactly 500 top folders are all looked into; 501 are not, and a name is then never resolved alone', async () => {
+    repoWith('bsk-500', names(500))
+    repoWith('bsk-501', names(501))
+    const source = await sourceOf()
+    const five = await source.withName('bsk-500', 'order-copy')
+    expect(five.paths).toHaveLength(500)
+    expect(five.complete).toBe(true)
+    // The approval list holds at most 100 Skills: it says it is not complete.
+    expect((await source.list('bsk-500')).complete).toBe(false)
+    const over = await source.withName('bsk-501', 'order-copy')
+    expect(over.paths).toHaveLength(500)
+    expect(over.complete).toBe(false)
+  })
+
+  it('a top folder whose name is not NFC is not looked into, and the answer says it is not complete', async () => {
+    repoWith('bsk-nfd', ['営業', 'ガイド'.normalize('NFD')])
+    const source = await sourceOf()
+    const found = await source.withName('bsk-nfd', 'order-copy')
+    expect(found.paths).toEqual(['営業/.claude/skills/order-copy'])
+    expect(found.complete).toBe(false)
+    expect(await source.list('bsk-nfd')).toEqual({ paths: ['営業/.claude/skills/order-copy'], complete: false })
+    // Only NFC names: complete.
+    repoWith('bsk-nfc', ['営業', 'ガイド'])
+    expect((await source.withName('bsk-nfc', 'order-copy')).complete).toBe(true)
   })
 })

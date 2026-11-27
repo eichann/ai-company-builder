@@ -48,7 +48,6 @@ import { browserAdhocWritesProblem, browserFrameMismatch, BROWSER_FRAME_REQUEST_
 import { browserMadeFrom } from '../../shared/core/browser-skill'
 import { BROWSER_FRAME_RUN_TIMES } from '../../shared/core/browser-run-budget'
 import { canonicalJson } from '../../shared/core/fixed-content'
-import { isValidSkillName } from '../../shared/core/names'
 import type {
   BrowserFrameConfirmAnswer, BrowserFramePermit, BrowserFrameReportAnswer, BrowserFrameRunStart, BrowserFrameRunView, BrowserFrameWriteResult,
 } from '../../shared/types/browser-frames'
@@ -61,7 +60,7 @@ import { hashCanonical } from '../lib/content-hash'
 import type { Member } from './access'
 import type { BrowserDeviceGate } from './browser-devices'
 import type { BrowserSiteGrants } from './browser-site-grants'
-import type { BrowserSkillApproved, BrowserSkillService } from './browser-skills'
+import { BROWSER_SKILL_REF_MAX, type BrowserSkillApproved, type BrowserSkillService } from './browser-skills'
 import { ok, refuse, type Outcome, type Refusal } from './outcome'
 
 export interface BrowserFrameDeps {
@@ -80,7 +79,7 @@ export interface BrowserFrameDeps {
   /** The person's own level on the registered site (agent-browser.md "Who may use a site"). */
   siteGrants: Pick<BrowserSiteGrants, 'allows'>
   /** 「Skill の承認」 (services/browser-skills.ts): the frames of an approved declaration, read by the server. */
-  skills: Pick<BrowserSkillService, 'approvedFrames' | 'stillApproved' | 'runCardShown'>
+  skills: Pick<BrowserSkillService, 'resolve' | 'approvedFrames' | 'stillApproved' | 'runCardShown'>
   /**
    * Whether an operator run (services/browser-runs.ts, step ④) holds the domain now: step ⑤b joins the two locks, so a
    * frames run never starts while another run operates the domain. Absent: no operator runs (tests of ⑤a).
@@ -319,8 +318,12 @@ export function createBrowserFrameService(deps: BrowserFrameDeps) {
   async function framesOf(member: Member, body: Record<string, unknown>): Promise<Outcome<StartFrames>> {
     if (own(body, 'skill') === own(body, 'plan')) return bad()
     if (own(body, 'skill')) {
-      if (typeof body.skill !== 'string' || !isValidSkillName(body.skill)) return bad()
-      const approved = await deps.skills.approvedFrames(member, body.skill)
+      if (typeof body.skill !== 'string' || body.skill.length === 0 || body.skill.length > BROWSER_SKILL_REF_MAX) return bad()
+      // A Skill path, or a name only when exactly one Skill of it is there for this member (never a guess); the run keeps
+      // the path (two departments may each have a Skill of one name).
+      const which = await deps.skills.resolve(member, body.skill)
+      if (!which.ok) return which
+      const approved = await deps.skills.approvedFrames(member, which.value)
       if (!approved.ok) return approved
       const a = approved.value
       return ok({

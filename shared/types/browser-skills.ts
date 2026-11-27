@@ -26,8 +26,15 @@ export interface BrowserSkillApprovalInfo {
 }
 
 export interface BrowserSkillView {
-  /** The Skill's folder name (`.claude/skills/<name>`). */
+  /** The Skill's folder name. Two departments may each have one of this name: `path` tells them apart. */
   name: string
+  /**
+   * Which Skill it is: `.claude/skills/<name>` (the company's) or `<department folder>/.claude/skills/<name>` (a
+   * department's). Approving and revoking send it back as `skill`.
+   */
+  path: string
+  /** The department folder the Skill belongs to, or null for the company's. */
+  department: string | null
   /** `sha256:` of `browser.yaml` as the server read it: what an approval is for. */
   declarationHash: string
   /** The whole folder's version as the server read it (sent back with an approval: the version shown). */
@@ -49,10 +56,16 @@ export interface BrowserSkillView {
 /** GET /browser-skill-approvals (owner/admin). */
 export interface BrowserSkillsView {
   items: BrowserSkillView[]
+  /**
+   * Every place was looked into. False: too many top folders or Skills, or a folder whose name is not in NFC — a Skill
+   * may be missing from `items` (the page says so). Absent from an older server: read as true.
+   */
+  complete?: boolean
 }
 
 /** POST /browser-skill-approvals: approve exactly the declaration the admin saw. */
 export interface BrowserSkillApproveBody {
+  /** The Skill's path (`BrowserSkillView.path`); a bare name means the company's `.claude/skills/<name>`. */
   skill: string
   declarationHash: string
   files: string

@@ -379,6 +379,8 @@ interface WorkWorld {
   /** The wiring's clock (default: the real one), and what each operator step does to it. */
   now?: () => number
   onStep?: (prompt: string) => void
+  /** The Skill steps read from the company folder (by the Skill the server's frames run names); none: no company folder. */
+  skillSteps?: (skill: string) => string | null
 }
 
 function workWorld(over: Partial<WorkWorld> = {}) {
@@ -443,10 +445,11 @@ function workWorld(over: Partial<WorkWorld> = {}) {
     api: api as never, operator: () => operator, cliPath: () => '/bin/claude', parentEnv: () => ({}),
     ...(w.idleMaxMs !== undefined ? { idleMaxMs: w.idleMaxMs } : {}),
     ...(w.now ? { now: w.now } : {}),
+    ...(w.skillSteps ? { skillSteps: async (_root: string, skill: string) => w.skillSteps?.(skill) ?? null } : {}),
   })
   const cards: string[] = []
   const tool = createBrowserWorkTool(input => wiring.work({
-    companyId: COMPANY, conversationId: 'conv-1', companyRoot: null, site: input.site, task: input.task, skill: input.skill, items: input.items,
+    companyId: COMPANY, conversationId: 'conv-1', companyRoot: w.skillSteps ? '/company' : null, site: input.site, task: input.task, skill: input.skill, items: input.items,
     signal: new AbortController().signal, onCard: id => cards.push(id),
   }), [HOST])
   return { w, wiring, tool, cards }
@@ -904,4 +907,61 @@ test('a press whose answer was lost does not hold the card: the next press asks 
   await words
   assert.equal(w.calls.filter(c => c.startsWith('frameApprove')).length, 2)
   assert.equal(w.site.requests.length, 1)
+})
+
+// agent-browser.md "Department Skills": a Skill is its path; the AI may name it by its name or its path, the server says which.
+const DEPT_SKILL = '営業/.claude/skills/coupons'
+
+test('a department Skill: the AI\'s name or path goes to the server as given, and the steps are read from the Skill the server named', async () => {
+  const read: string[] = []
+  const dept = workWorld({
+    answers: [CLICK_SAVE, DONE_PLAIN],
+    frameStart: () => ({ kind: 'ok', value: { ...started({ needsApproval: false }), skill: DEPT_SKILL } }),
+    skillSteps: skill => { read.push(skill); return '# SKILL.md\n営業の手順' },
+  })
+  assert.equal((await dept.tool.execute({ site: HOST, task: 'いつものクーポン', skill: 'coupons' })).startsWith(W.done), true)
+  assert.ok(dept.w.calls.includes('frameStart {"skill":"coupons","conversationId":"conv-1"}'), dept.w.calls.join('\n'))
+  // Not the name the AI typed: the path the server's frames come from.
+  assert.deepEqual(read, [DEPT_SKILL])
+  // A path (also spelled in NFD) is sent as one NFC path.
+  const byPath = workWorld({ answers: [CLICK_SAVE, DONE_PLAIN], frameStart: () => ({ kind: 'ok', value: { ...started({ needsApproval: false }), skill: DEPT_SKILL } }) })
+  await byPath.tool.execute({ site: HOST, task: 'x', skill: DEPT_SKILL.normalize('NFD') })
+  assert.ok(byPath.w.calls.includes(`frameStart ${JSON.stringify({ skill: DEPT_SKILL, conversationId: 'conv-1' })}`), byPath.w.calls.join('\n'))
+})
+
+test('a Skill\'s steps are read from its own folder: a department\'s, the company\'s, nothing else', async () => {
+  const { mkdtempSync, mkdirSync, writeFileSync, rmSync } = await import('node:fs')
+  const { tmpdir } = await import('node:os')
+  const path = await import('node:path')
+  const { readBrowserSkillSteps } = await import('../electron/features/browser/skill-steps')
+  const root = mkdtempSync(path.join(tmpdir(), 'acb-skill-steps-'))
+  try {
+    for (const [dir, text] of [['.claude/skills/coupons', '全社の手順'], ['営業/.claude/skills/coupons', '営業の手順']] as const) {
+      mkdirSync(path.join(root, dir), { recursive: true })
+      writeFileSync(path.join(root, dir, 'SKILL.md'), text)
+    }
+    const inside = (p: string) => p
+    assert.match(await readBrowserSkillSteps(root, DEPT_SKILL, inside) ?? '', /営業の手順/)
+    assert.match(await readBrowserSkillSteps(root, '.claude/skills/coupons', inside) ?? '', /全社の手順/)
+    // An older server's bare name is the company's.
+    assert.match(await readBrowserSkillSteps(root, 'coupons', inside) ?? '', /全社の手順/)
+    for (const skill of ['../coupons', '営業/../.claude/skills/coupons', 'a/b/.claude/skills/coupons']) {
+      assert.equal(await readBrowserSkillSteps(root, skill, inside), null, skill)
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('a Skill name two Skills share: the server refuses and the AI is told to give the path; nothing is read or written', async () => {
+  const two = workWorld({ frameStart: () => ({ kind: 'refused', code: 'BROWSER_SKILL_AMBIGUOUS' }), skillSteps: () => { throw new Error('never read') } })
+  assert.equal(await two.tool.execute({ site: HOST, task: 'x', skill: 'coupons' }), W.skillAmbiguous)
+  assert.equal(two.w.site.requests.length, 0)
+  assert.equal(two.w.calls.some(c => c.startsWith('step ')), false)
+  // Neither a Skill name nor a Skill path: refused before anything is asked.
+  for (const skill of ['../x', 'a/b/.claude/skills/x', '営業/.claude/skills/X', '.hidden/.claude/skills/x']) {
+    const bad = workWorld({})
+    assert.equal(await bad.tool.execute({ site: HOST, task: 'x', skill }), W.badInput, skill)
+    assert.equal(bad.w.calls.length, 0, skill)
+  }
 })
