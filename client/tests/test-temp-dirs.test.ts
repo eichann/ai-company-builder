@@ -111,7 +111,8 @@ test('a child still writing in the folder is stopped before the folder goes', as
 test('the test files that left the most behind (kept logins, the document player) leave no temp folder', () => {
   const tmp = fs.realpathSync(makeTempDir('acb-temp-dirs-run-'))
   // Not as a child of this test runner (NODE_TEST_CONTEXT would make it report here instead of running on its own).
-  const { NODE_TEST_CONTEXT: _runner, ...env } = process.env
+  const env = { ...process.env }
+  delete env.NODE_TEST_CONTEXT
   for (const file of ['tests/browser-kept-logins.test.ts', 'tests/doc-player.test.ts']) {
     const run = spawnSync(process.execPath, ['--import', 'tsx', '--test', file], { cwd: clientDir, env: { ...env, TMPDIR: tmp, TMP: tmp, TEMP: tmp }, encoding: 'utf8', timeout: 240_000 })
     assert.equal(run.status, 0, `${file} passed:\n${run.stdout.slice(-2000)}\n${run.stderr.slice(-2000)}`)
