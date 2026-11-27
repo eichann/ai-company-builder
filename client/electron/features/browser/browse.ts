@@ -142,7 +142,8 @@ export function wireBrowserBrowse(deps: BrowserBrowseDeps) {
     const current = () => !cut.signal.aborted && stillCurrent() && !deps.stopped(companyId)
       && !win.closed() && deps.window(companyId, host) === win
     const whyNot = (): BrowserRunEndReason => (input.signal.aborted ? 'stopped-by-person' : deps.stopped(companyId) ? 'ai-stopped'
-      : win.closed() || deps.window(companyId, host) !== win ? 'window-closed' : now() >= deadline ? 'timeout' : 'context-changed')
+      : !stillCurrent() ? 'context-changed'
+        : win.closed() || deps.window(companyId, host) !== win ? 'window-closed' : now() >= deadline ? 'timeout' : 'context-changed')
     try {
       const parentEnv = deps.parentEnv()
       const resolved = await operator.resolve(deps.cliPath(), parentEnv)

@@ -160,6 +160,12 @@ test('a sign-in as another member while the window opens stops the run before th
   assert.equal(w.entered, 0)
 })
 
+test('an outage mid-run (the context moved, no window handed out) is logged as context-changed, never window-closed', async () => {
+  const { w, run } = world({ answers: ['{"do":"wait","seconds":1}'], onStep: () => { w.user = 'u-2'; w.window = null } })
+  await run()
+  assert.equal((w.finished[0] as { reason?: string }).reason, 'context-changed')
+})
+
 test('the AI stopped while the window opened: nothing is asked of the server', async () => {
   const { w, run } = world({ window: null, openWindow: (wd, surface) => { wd.window = surface; wd.stopped = true; return { kind: 'opened' } } })
   assert.deepEqual(await run(), { kind: 'refused', words: W.stopped })
@@ -177,7 +183,7 @@ test('no window and nothing to open: the words say so, and why when the app remo
 test('a login page in the window: the AI hears the plain sentence to log in in the window that opened', async () => {
   const { run } = world({ answers: ['{"do":"stop","why":"need-login","unread":[]}'] })
   const r = await run()
-  assert.match(r.kind === 'card' ? r.words : '', /サイトのログインが切れています。開いた窓でログインしてから、もう一度頼んでください/)
+  assert.match(r.kind === 'card' ? r.words : '', /サイトのログインが必要です。開いた窓でログインしてから、もう一度頼んでください/)
 })
 
 test('the server decides first: a PC not registered, 使わない, busy, the AI stopped → plain words, the window never entered', async () => {

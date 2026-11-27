@@ -195,10 +195,10 @@ export function wireBrowserInspections<E extends IpcInvokeEvent>(ipc: IpcRegistr
     if (deps.stopped(input.companyId)) return refused(W.stopped)
     // The context is taken before the wait for the window, so a sign-in or setting change meanwhile is seen (Codex review).
     const stillCurrent = deps.context.capture({ companyId: input.companyId, signal: input.signal })
-    const opened = await deps.openWindow?.(input.companyId, site.host, input.signal)
-    if (opened && deps.stopped(input.companyId)) return refused(W.stopped)
+    const windowFound = await deps.openWindow?.(input.companyId, site.host, input.signal)
+    if (windowFound && deps.stopped(input.companyId)) return refused(W.stopped)
     const win = deps.window(input.companyId, site.host)
-    if (!win || win.closed()) return refused(noWindowWords(W.noWindow, opened))
+    if (!win || win.closed()) return refused(noWindowWords(W.noWindow, windowFound))
 
     // The server's gate first: nothing is read unless it makes the plan (and no plan for a turn already stopped).
     if (!stillCurrent()) return refused(W.interrupted)

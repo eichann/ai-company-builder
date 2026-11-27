@@ -293,7 +293,7 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
     const current = () => !cut.signal.aborted && stillCurrent() && !deps.stopped(companyId) && !win.closed() && deps.window(companyId, host) === win
     // The AI stop first (an administrator's stop also ends the turn), then the member's stop or the consultation closed.
     const whyNot = (): WorkStopReason => (deps.stopped(companyId) ? 'ai-stopped' : input.signal.aborted ? 'stop-button'
-      : win.closed() || deps.window(companyId, host) !== win ? 'window-closed' : 'context-changed')
+      : !stillCurrent() ? 'context-changed' : win.closed() || deps.window(companyId, host) !== win ? 'window-closed' : 'context-changed')
     let frameRun: BrowserFrameRunStart | null = null
     let entry: Entry | null = null
     try {

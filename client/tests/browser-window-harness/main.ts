@@ -76,6 +76,31 @@ const fail = (error: unknown) => {
 // 140 s): room for a busy runner.
 setTimeout(() => fail(new Error('the harness timed out')), 210_000)
 
+async function focusScenario(shell: ReturnType<typeof createBrowserWindowShell>, site: BrowserSiteSetting) {
+  const appWindow = new BrowserWindow({ width: 300, height: 200, show: true })
+  await appWindow.loadURL('data:text/html,<input autofocus>')
+  app.focus({ steal: true })
+  appWindow.focus()
+  await wait(500)
+  const shown = async (inactive: boolean) => {
+    const partition = browserPartition(inactive ? 'focus-inactive' : 'focus-active', 'company-1', 'op.test')
+    trustTestCertificate(partition)
+    const win = shell.open({ partition, site, onClosed: () => {}, ...(inactive ? { inactive: true } : {}) })
+    await loaded(win)
+    await wait(800)
+    const answer = { visible: win.webContents.isDestroyed() ? false : BrowserWindow.fromWebContents(win.webContents)?.isVisible() ?? false, appKeepsKeyboard: BrowserWindow.getFocusedWindow() === appWindow }
+    win.close()
+    appWindow.focus()
+    await wait(300)
+    return answer
+  }
+  const before = BrowserWindow.getFocusedWindow() === appWindow
+  const inactive = await shown(true)
+  const active = await shown(false)
+  appWindow.destroy()
+  return { appFocusedFirst: before, inactive, active }
+}
+
 function loaded(win: BrowserShellWindow): Promise<void> {
   return new Promise(resolve => {
     if (!win.webContents.isLoading() && win.webContents.getURL()) { resolve(); return }
@@ -191,6 +216,11 @@ async function run() {
   result.afterClose = await ses.fetch('https://op.test/after-close').then(r => r.status, () => 'refused')
   await shell.clearPartition(partition)
   result.cookiesAfter = (await ses.cookies.get({})).length
+
+  // A window a run opens again is shown without taking the keyboard from the app's window (agent-browser.md "The window a
+  // run needs"); 「開いてログイン」's window takes it.
+  // A shell that shows its windows (the main one here keeps them hidden).
+  result.focus = await focusScenario(createBrowserWindowShell({ log: { warn() {} }, loginHelpers }), site)
 
   // A certificate the system does not trust is refused, never bypassed.
   const untrusted = browserPartition('user-1', 'company-1', 'untrusted.test')

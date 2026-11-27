@@ -320,6 +320,15 @@ test('a run reopens the window of a login kept on this PC (also one an earlier r
   upgraded.browser.policyAnswered('c1', policy('enforce'))
   assert.deepEqual(await upgraded.browser.windowForRun('c1', SITE.host, signal), { kind: 'opened' })
 
+  // The sandbox loosened while the server could not be reached: the next answer still says why.
+  const outage = world()
+  outage.browser.policyAnswered('c1', policy('enforce'))
+  outage.browser.open('c1', SITE.host)
+  outage.browser.policyFailed('c1')
+  outage.browser.policyAnswered('c1', policy('observe'))
+  await settle()
+  assert.deepEqual(await outage.browser.windowForRun('c1', SITE.host, signal), { kind: 'none', loginRemoved: true }, 'told after an outage too')
+
   const changed = world()
   changed.browser.policyAnswered('c1', policy('enforce'))
   changed.browser.open('c1', SITE.host)

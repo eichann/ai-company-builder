@@ -828,7 +828,8 @@ export function createBrowserWindowShell(options: {
       }
       // The title always names the site, whatever the page calls itself.
       win.on('page-title-updated', event => event.preventDefault())
-      if (options.show !== false) win.once('ready-to-show', () => win.show())
+      // A window a run opened again is shown without the keyboard: the member's typing stays where it was.
+      if (options.show !== false) win.once('ready-to-show', () => { if (spec.inactive) win.showInactive(); else win.show() })
       win.on('closed', () => {
         // A recording in progress is discarded with its window.
         pageDebugger.windowClosed()

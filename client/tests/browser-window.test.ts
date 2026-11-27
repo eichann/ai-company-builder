@@ -271,6 +271,8 @@ test('a run reopens the window of a site whose login this app run holds, through
   assert.deepEqual(await w.browser.windowForRun('c1', site.host, signal), { kind: 'opened' })
   assert.equal(w.opened.length, 2)
   assert.equal(w.opened[1].partition, browserPartition('user-1', 'c1', site.host), 'the same login, in memory')
+  assert.equal(w.opened[0].inactive, undefined, '「開いてログイン」 takes the keyboard')
+  assert.equal(w.opened[1].inactive, true, 'a window a run opened leaves the member\'s typing where it was')
   assert.ok(w.browser.runWindow('c1', site.host))
   assert.equal(w.loaded.length, 2, 'waits for the page each time a run asks')
 })

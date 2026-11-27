@@ -38,6 +38,11 @@ export interface BrowserWindowSpec {
   site: BrowserSiteSetting
   /** The window is gone (closed by the member or by the app). */
   onClosed: () => void
+  /**
+   * Shown without taking the keyboard (a window an AI run opened again: the member may be typing elsewhere in the app,
+   * agent-browser.md "The window a run needs"); absent = shown and focused, as 「開いてログイン」.
+   */
+  inactive?: boolean
 }
 
 export interface BrowserWindowHandle {
@@ -174,7 +179,10 @@ export function createBrowserController(deps: BrowserControllerDeps) {
     }
     return ok
   }
-  /** Opens (or, `focus`, brings forward) the member's window of a site their current valid policy lists; false: not listed. */
+  /**
+   * Opens the member's window of a site their current valid policy lists (false: not listed). `focus`: the member asked
+   * (「開いてログイン」) — a window already open comes forward and a new one takes the keyboard; otherwise (a run) neither.
+   */
   const openWindow = (companyId: string, host: string, how: { focus: boolean }): boolean => {
     const user = deps.userId()
     const site = sitesOf(companyId)?.find(s => s.host === host)
@@ -188,7 +196,10 @@ export function createBrowserController(deps: BrowserControllerDeps) {
     if (!keptPartition) partitions.set(partition, { userId: user, companyId, host })
     const entry: OpenWindow = {
       userId: user, companyId, host, partition,
-      handle: deps.shell.open({ partition, site, onClosed: () => { if (windows.get(partition) === entry) windows.delete(partition) } }),
+      handle: deps.shell.open({
+        partition, site, ...(how.focus ? {} : { inactive: true }),
+        onClosed: () => { if (windows.get(partition) === entry) windows.delete(partition) },
+      }),
     }
     windows.set(partition, entry)
     return true
@@ -255,7 +266,9 @@ export function createBrowserController(deps: BrowserControllerDeps) {
       const user = deps.userId()
       if (!user) return
       const had = known.delete(keyOf(user, companyId))
-      keptHosts.delete(keyOf(user, companyId))
+      // Which sites were kept stays through an outage (nothing opens meanwhile: `sitesOf` is gone), so the next answer
+      // that takes keeping away still tells a run why (`loginRemoved`).
+      if (detail?.refused) keptHosts.delete(keyOf(user, companyId))
       if (detail?.refused) {
         for (const win of [...windows.values()]) {
           if (win.userId === user && win.companyId === companyId) closeWindow(win)

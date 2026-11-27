@@ -451,8 +451,10 @@ the login is memory-only, which stays the rule ("Keeping a login on disk").
   registered site, the stop and, for the operator's two, the operator; before they look for the window): the open
   window (`open`); else, **only while this app run holds the member's login for a site their current valid policy
   lists** — its memory session used this run and not cleared (`partitions`), or, when it is kept now (`keepsNow`), a
-  kept folder loaded this run or on disk (`kept.held`) — one opened through `open`'s own path (`openWindow`: the
-  listed site, the partition rule; not brought to the front if already open), logged by host (`opened`); else
+  kept folder loaded this run or on disk (`kept.held`; so a login kept on this PC reopens too, also after a restart) —
+  one opened through `open`'s own path (`openWindow`: the listed site, the partition rule), **shown without taking the
+  keyboard** (`BrowserWindowSpec.inactive` → `showInactive`: the member's typing stays in the app; an open one is not
+  brought forward), logged by host (`opened`); else
   `none`. It waits for the page's first load (`whenLoaded`, the shell's, ≤ 20 s and never past the turn's signal);
   after that the run's own checks decide — the context is captured **before** the wait (a sign-in or setting change
   during it stops the run: Codex review) and the AI stop is asked again after it. A login made in memory before keeping
@@ -460,8 +462,11 @@ the login is memory-only, which stays the rule ("Keeping a login on disk").
   lists (its memory login was cleared with it), after 「ログインを消す」, for another account or a site never opened
   in this app run (the first time stays the member's ［開いてログイン］).
 - **A login form in the window** is the operator's `need-login` stop; its words (browse and work):
-  「止まりました：サイトのログインが切れています。開いた窓でログインしてから、もう一度頼んでください。」 — the member
+  「止まりました：サイトのログインが必要です。開いた窓でログインしてから、もう一度頼んでください。」 — the member
   only logs in, in the window that opened.
+- **An outage is not a closed window**: the run's log says `context-changed` when the context moved (a failed refresh
+  advances it), before asking about the window. Which sites were kept survives a failed refresh (only a refusal forgets
+  it), so a removal decided by the next answer is still said.
 - **Say why** (`noWindowWords`, `client/shared/browser-operation.ts`): when the app removed the site's kept login for
   safety (the sandbox or the level changed, an AI turn without the sandbox ran: `loginRemoved`, cleared when the member
   opens or clears the site), a run that finds no window says `BROWSER_WORDS.loginRemoved` before its `noWindow`. A
