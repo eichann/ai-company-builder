@@ -1,7 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
-import os from 'node:os'
 import path from 'node:path'
 import {
   CompanyWatcher,
@@ -11,6 +10,7 @@ import {
   type FileChange,
   type RawEventType,
 } from '../electron/company-watcher'
+import { makeTempDir } from '../../shared/testing/temp-dirs'
 
 const quiet = { warn: () => {}, log: () => {} }
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms))
@@ -201,7 +201,7 @@ async function waitFor(pred: () => boolean, timeoutMs = 3000): Promise<number> {
 }
 
 test('live: create / modify / replace-by-rename / delete files and images, nested folders; .git ignored', { timeout: 30000 }, async () => {
-  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'acb-watch-')))
+  const root = fs.realpathSync(makeTempDir('acb-watch-'))
   const { watcher, changes } = liveWatcher(root)
   await sleep(150) // let FSEvents start
   const has = (type: string, rel: string) => () => changes.some(c => c.type === type && c.path === path.join(root, rel))

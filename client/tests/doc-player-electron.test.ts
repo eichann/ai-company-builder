@@ -16,9 +16,9 @@ import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import { createRequire } from 'node:module'
 import fs from 'node:fs'
-import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { makeTempDir, stopWithTempDirs } from '../../shared/testing/temp-dirs'
 
 const clientDir = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
 const canRun = process.platform === 'darwin' || (process.platform === 'linux' && !!process.env.DISPLAY)
@@ -61,7 +61,7 @@ interface Result {
 }
 
 async function runHarness(scheme?: object): Promise<Result> {
-  const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'acb-doc-player-electron-')))
+  const dir = fs.realpathSync(makeTempDir('acb-doc-player-electron-'))
   const electron = createRequire(import.meta.url)('electron') as string
   const output = await new Promise<string>((resolve, reject) => {
     const child = spawn(electron, [path.join(clientDir, 'tests/doc-player-harness/main.ts')], {
@@ -69,12 +69,16 @@ async function runHarness(scheme?: object): Promise<Result> {
       env: { ...process.env, ELECTRON_RUN_AS_NODE: '', NODE_OPTIONS: '--import tsx', PLAYER_TEST_DIR: dir, ...(scheme ? { PLAYER_TEST_SCHEME: JSON.stringify(scheme) } : {}) },
       stdio: ['ignore', 'pipe', 'pipe'],
     })
+    stopWithTempDirs(child)
     let out = ''
     let err = ''
     child.stdout.on('data', chunk => { out += chunk })
     child.stderr.on('data', chunk => { err += chunk })
-    const timer = setTimeout(() => { child.kill('SIGKILL'); reject(new Error(`the Electron harness did not finish:\n${out}\n${err.slice(-4000)}`)) }, 150_000)
-    child.on('close', () => { clearTimeout(timer); resolve(`${out}\n${err.slice(-4000)}`) })
+    // On a timeout the child is killed and its end awaited before failing, so the folder it writes in can be
+    // removed after it (`shared/testing/temp-dirs.ts`).
+    let timedOut = false
+    const timer = setTimeout(() => { timedOut = true; child.kill('SIGKILL') }, 150_000)
+    child.on('close', () => { clearTimeout(timer); if (timedOut) reject(new Error(`the Electron harness did not finish:\n${out}\n${err.slice(-4000)}`)); else resolve(`${out}\n${err.slice(-4000)}`) })
   })
   const resultFile = path.join(dir, 'result.json')
   const text = fs.existsSync(resultFile) ? fs.readFileSync(resultFile, 'utf8') : null

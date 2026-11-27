@@ -5,9 +5,8 @@
  */
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from 'vitest'
 import { execFileSync } from 'child_process'
-import { mkdtempSync, readFileSync, rmSync } from 'fs'
+import { readFileSync, rmSync } from 'fs'
 import { join } from 'path'
-import { tmpdir } from 'os'
 
 const currentUser = vi.hoisted(() => ({ id: 'ps-owner' as string | null }))
 
@@ -30,6 +29,7 @@ import { db, initDatabase } from '../../src/db'
 import { companiesRoute } from '../../src/routes/companies'
 import { departmentsRoute } from '../../src/routes/departments'
 import { seedPermissionScopes, replaceDepartmentManagers } from '../../src/adapters/sqlite/permission-store'
+import { makeTempDir } from '../../shared/testing/temp-dirs'
 
 vi.setConfig({ testTimeout: 60_000, hookTimeout: 60_000 })
 
@@ -63,7 +63,7 @@ function countAll(conn: Database.Database): Record<string, number> {
 
 let tmp: string
 beforeAll(() => {
-  tmp = mkdtempSync(join(tmpdir(), 'acb-perm-schema-'))
+  tmp = makeTempDir('acb-perm-schema-')
 })
 afterAll(() => {
   rmSync(tmp, { recursive: true, force: true })

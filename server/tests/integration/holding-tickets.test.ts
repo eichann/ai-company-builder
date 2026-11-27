@@ -14,9 +14,8 @@
  */
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest'
 import { execFileSync } from 'child_process'
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'fs'
+import { mkdirSync, rmSync, writeFileSync } from 'fs'
 import { join } from 'path'
-import { tmpdir } from 'os'
 
 const currentUser = vi.hoisted(() => ({ id: 'u-owner' as string | null }))
 
@@ -56,6 +55,7 @@ import { configureBareRepo } from '../../src/routes/git'
 import { UntrackedReaderChangeError } from '../../src/lib/reader-change-gate'
 import type { CompanyDataSource } from '../../src/ports/company-data'
 import type { MembershipRepository } from '../../src/ports/memberships'
+import { makeTempDir } from '../../shared/testing/temp-dirs'
 
 vi.setConfig({ testTimeout: 120_000, hookTimeout: 120_000 })
 
@@ -116,7 +116,7 @@ function addMember(user: User, role: string) {
 }
 
 beforeAll(async () => {
-  workDir = mkdtempSync(join(tmpdir(), 'acb-holding-tickets-'))
+  workDir = makeTempDir('acb-holding-tickets-')
   const Database = (await import('better-sqlite3')).default
   const dbModule = await import('../../src/db')
   dbModule.initDatabase()

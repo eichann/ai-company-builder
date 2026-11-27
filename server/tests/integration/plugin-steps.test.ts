@@ -20,9 +20,8 @@
  * - another company: the record and the plugin are missing, no turns.
  */
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
-import { chmodSync, cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs'
+import { chmodSync, cpSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'fs'
 import { execFileSync } from 'child_process'
-import { tmpdir } from 'os'
 import { join } from 'path'
 import { randomBytes } from 'crypto'
 import type { AddressInfo } from 'net'
@@ -30,6 +29,7 @@ import { serve, type ServerType } from '@hono/node-server'
 import { createFakeHubSpot, type FakeHubSpot } from '../fakes/hubspot/fake-hubspot'
 import { enableSampleSales, putSampleHub } from '../helpers/plugin-packages'
 import { ensureCoreTypes } from '../../src/services/record-index'
+import { makeTempDir } from '../../shared/testing/temp-dirs'
 
 vi.setConfig({ testTimeout: 60_000, hookTimeout: 60_000 })
 
@@ -153,10 +153,10 @@ beforeAll(async () => {
   server = serve({ fetch: fake.app.fetch, port: 0, hostname: '127.0.0.1' })
   await new Promise(r => setTimeout(r, 50))
   const port = (server.address() as AddressInfo).port
-  kekDir = mkdtempSync(join(tmpdir(), 'acb-ps-kek-'))
+  kekDir = makeTempDir('acb-ps-kek-')
   writeFileSync(join(kekDir, 'kek'), randomBytes(32).toString('base64'))
   chmodSync(join(kekDir, 'kek'), 0o600)
-  shelfDir = mkdtempSync(join(tmpdir(), 'acb-ps-shelf-'))
+  shelfDir = makeTempDir('acb-ps-shelf-')
   putSampleHub(shelfDir)
   // Three contract-2 versions of the business plugin: 0.3.0 lets work pinned to 0.2.0 move at (deal, open).
   const base = join(shelfDir, 'sample-sales@0.1.0')
@@ -218,7 +218,7 @@ actions:
   const bare = companyRepoPath(CO)
   mkdirSync(bare, { recursive: true })
   git(bare, 'init', '-q', '--bare')
-  workDir = mkdtempSync(join(tmpdir(), 'acb-ps-work-'))
+  workDir = makeTempDir('acb-ps-work-')
   git(workDir, 'init', '-q')
   git(workDir, 'remote', 'add', 'origin', bare)
 })

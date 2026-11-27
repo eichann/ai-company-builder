@@ -12,11 +12,11 @@
  * - Token counts are read from streamed answers, also when a field is split across chunks.
  */
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest'
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'fs'
-import { tmpdir } from 'os'
+import { chmodSync, rmSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import { randomBytes } from 'crypto'
 import type { UpstreamClient } from '../../src/ports/upstream'
+import { makeTempDir } from '../../shared/testing/temp-dirs'
 
 vi.mock('../../src/lib/auth', () => ({
   getUserFromRequest: vi.fn().mockResolvedValue(null),
@@ -74,7 +74,7 @@ const lastEvent = () => {
 }
 
 beforeAll(async () => {
-  kekDir = mkdtempSync(join(tmpdir(), 'acb-rc-kek-'))
+  kekDir = makeTempDir('acb-rc-kek-')
   writeFileSync(join(kekDir, 'kek'), randomBytes(32).toString('base64'))
   chmodSync(join(kekDir, 'kek'), 0o600)
   process.env.BROKER_KEK_FILE = join(kekDir, 'kek')

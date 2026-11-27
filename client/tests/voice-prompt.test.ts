@@ -1,15 +1,15 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { readFileSync, rmSync, writeFileSync, existsSync } from 'node:fs'
 import path from 'node:path'
 import { composeVoicePrompt, DEFAULT_VOICE_INSTRUCTIONS, VOICE_FIXED_PROMPT, VOICE_INSTRUCTIONS_MAX_LENGTH, validateVoiceInstructions } from '../shared/voice-prompt'
 import { createVoicePromptStore } from '../electron/voice-prompt-store'
 import { VOICE_SYSTEM_PROMPT } from '../electron/voice-polisher'
 import { createVoiceFormatter } from '../electron/voice-formatter'
+import { makeTempDir } from '../../shared/testing/temp-dirs'
 
 function tempStore() {
-  const dir = mkdtempSync(path.join(tmpdir(), 'acb-voice-prompt-'))
+  const dir = makeTempDir('acb-voice-prompt-')
   const file = path.join(dir, 'voice-prompt.json')
   return { file, store: createVoicePromptStore(file), dispose: () => rmSync(dir, { recursive: true, force: true }) }
 }

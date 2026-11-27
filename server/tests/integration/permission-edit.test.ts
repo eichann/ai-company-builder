@@ -15,9 +15,8 @@
  */
 import { describe, it, expect, beforeAll, beforeEach, afterAll, vi } from 'vitest'
 import { execFileSync } from 'child_process'
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'fs'
+import { mkdirSync, rmSync, writeFileSync } from 'fs'
 import { join } from 'path'
-import { tmpdir } from 'os'
 
 const currentUser = vi.hoisted(() => ({ id: 'pe-owner' as string | null }))
 
@@ -41,6 +40,7 @@ import { permissionsRoute } from '../../src/routes/permissions'
 import { permissionRulesRoute } from '../../src/routes/permission-rules'
 import { parseScopePath } from '../../shared/core/names'
 import { replaceDepartmentManagers } from '../../src/adapters/sqlite/permission-store'
+import { makeTempDir } from '../../shared/testing/temp-dirs'
 
 vi.setConfig({ testTimeout: 30_000, hookTimeout: 60_000 })
 
@@ -97,7 +97,7 @@ beforeAll(() => {
 
   // The company repository: department folders with sub-folders, one stored
   // with an NFD name (what a Mac commits), and a hidden folder.
-  tmp = mkdtempSync(join(tmpdir(), 'pe-'))
+  tmp = makeTempDir('acb-pe-')
   const work = join(tmp, 'work')
   mkdirSync(work)
   git(['init', '-q', '-b', 'main'], work)

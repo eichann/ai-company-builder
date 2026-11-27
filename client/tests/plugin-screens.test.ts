@@ -5,7 +5,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
-import os from 'node:os'
 import path from 'node:path'
 import { pluginFingerprintV2 } from '../../shared/core/plugin-fingerprint'
 import type { DistributedPlugin } from '../../shared/types/plugins'
@@ -13,6 +12,7 @@ import { sha256Hex } from '../electron/features/plugins/fetch'
 import { createPluginFileServer } from '../electron/features/plugins/protocol'
 import { createPluginScreens, screensOfPackage } from '../electron/features/plugins/screens'
 import { createPluginPackageStore } from '../electron/features/plugins/store'
+import { makeTempDir } from '../../shared/testing/temp-dirs'
 
 const quiet = { warn: () => {}, info: () => {} }
 const FIXTURE = path.join(import.meta.dirname, 'fixtures', 'plugins', 'slots-sample')
@@ -59,7 +59,7 @@ test('a package\'s declaration gives the four slots; anything this app cannot sh
 })
 
 function world() {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'acb-plugin-screens-'))
+  const dir = makeTempDir('acb-plugin-screens-')
   const changed: string[] = []
   const store = createPluginPackageStore({
     dir: () => dir, userId: () => 'u1', log: quiet, onChanged: companyId => changed.push(companyId),

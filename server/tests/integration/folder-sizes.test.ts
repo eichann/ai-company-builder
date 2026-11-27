@@ -6,8 +6,7 @@
  */
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest'
 import { execFileSync } from 'child_process'
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'fs'
-import { tmpdir } from 'os'
+import { mkdirSync, rmSync, writeFileSync } from 'fs'
 import { dirname, join } from 'path'
 
 const currentUser = vi.hoisted(() => ({ id: 'fs-member' as string | null }))
@@ -27,6 +26,7 @@ vi.mock('../../src/lib/auth', () => ({
 import { Hono } from 'hono'
 import { db, initDatabase } from '../../src/db'
 import { folderSizesRoute } from '../../src/routes/folder-sizes'
+import { makeTempDir } from '../../shared/testing/temp-dirs'
 
 const app = new Hono()
 app.route('/api/companies/:companyId/folder-sizes', folderSizesRoute)
@@ -69,7 +69,7 @@ beforeAll(() => {
   db.prepare('INSERT INTO companies (id, name, slug, owner_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)').run(CO, CO, CO, 'fs-owner', ts(), ts())
   db.prepare('INSERT INTO memberships (id, user_id, company_id, role, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)').run('fs-m1', 'fs-member', CO, 'member', ts(), ts())
 
-  work = mkdtempSync(join(tmpdir(), 'acb-folder-sizes-'))
+  work = makeTempDir('acb-folder-sizes-')
   const bare = join(REPOS_DIR, `${CO}.git`)
   const env = { ...process.env, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: join(work, 'gitconfig'), GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@e', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@e' }
   writeFileSync(env.GIT_CONFIG_GLOBAL, '')

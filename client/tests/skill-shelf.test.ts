@@ -4,7 +4,6 @@
 import { test, mock } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
-import os from 'node:os'
 import path from 'node:path'
 import { createShelfClient, sha256Hex, verifyShelfContent } from '../electron/features/skill-shelf/client'
 import { SHELF_POLL_MS, createSkillShelfStore, readSkillFolder } from '../electron/features/skill-shelf/store'
@@ -14,8 +13,9 @@ import { createSkillUseReporter } from '../electron/services/skill-use-reporter'
 import { createWorkingFolders } from '../electron/services/working-folders'
 import { decideToolWrite, type WriteGuard } from '../electron/write-guard'
 import { SHELF_EDIT_CONFIRM, SHELF_EDITING_DETAIL, SHELF_PROMPT_MAX, mayPublishShelfSkill, shelfEditTexts, readShelfDeliveries, readShelfPublishing, readShelfRequests, shelfFixWithAi, shelfNewerText, shelfPlaceOfSkillFolder, shelfRefusalMessage, shelfRequestStateText, shelfVersionOf, type ShelfDelivery } from '../shared/skill-shelf'
+import { makeTempDir } from '../../shared/testing/temp-dirs'
 
-const tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'acb-shelf-')))
+const tmp = fs.realpathSync(makeTempDir('acb-shelf-'))
 process.on('exit', () => fs.rmSync(tmp, { recursive: true, force: true }))
 const quiet = { warn: () => {}, info: () => {} }
 const write = (file: string, text: string) => { fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, text) }

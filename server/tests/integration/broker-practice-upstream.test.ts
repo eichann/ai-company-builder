@@ -11,13 +11,13 @@
  *   are untouched; the admin view says so (`practice`).
  */
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest'
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'fs'
+import { chmodSync, rmSync, writeFileSync } from 'fs'
 import { createServer, type IncomingHttpHeaders, type Server } from 'http'
 import type { AddressInfo } from 'net'
-import { tmpdir } from 'os'
 import { join } from 'path'
 import { randomBytes } from 'crypto'
 import type { UpstreamClient, UpstreamRequest } from '../../src/ports/upstream'
+import { makeTempDir } from '../../shared/testing/temp-dirs'
 
 // lib/config reads BROKER_KEK_FILE when first imported: loaded in beforeAll, after it is set.
 let practiceUpstreamsFrom: typeof import('../../src/lib/config').practiceUpstreamsFrom
@@ -69,7 +69,7 @@ async function checkGoesTo(env: Record<string, string | undefined>): Promise<'pr
 }
 
 beforeAll(async () => {
-  kekDir = mkdtempSync(join(tmpdir(), 'acb-pu-kek-'))
+  kekDir = makeTempDir('acb-pu-kek-')
   writeFileSync(join(kekDir, 'kek'), randomBytes(32).toString('base64'))
   chmodSync(join(kekDir, 'kek'), 0o600)
   process.env.BROKER_KEK_FILE = join(kekDir, 'kek')

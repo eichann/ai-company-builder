@@ -12,11 +12,11 @@
  *   back inside /manual-admin/ only).
  */
 import { describe, it, expect, vi, beforeAll, afterAll, afterEach } from 'vitest'
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs'
-import { tmpdir } from 'os'
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import { request as httpRequest } from 'http'
 import type { AddressInfo } from 'net'
+import { makeTempDir } from '../../shared/testing/temp-dirs'
 
 type SessionUser = { id: string; email: string; name: string; image: null; emailVerified: boolean }
 // Who the request is signed in as (null: no session); each test sets it.
@@ -80,7 +80,7 @@ function writeSource(dir: string, pages: Record<string, string>) {
 }
 
 beforeAll(async () => {
-  root = mkdtempSync(join(tmpdir(), 'acb-manual-admin-'))
+  root = makeTempDir('acb-manual-admin-')
   site = join(root, 'admin-site')
   memberSite = join(root, 'member-site')
   const { buildManualSite } = await import('../../src/lib/manual-build')

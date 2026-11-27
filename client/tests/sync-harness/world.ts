@@ -48,6 +48,7 @@ import { readSparseConfig, setSparseExclusions, type SparseExclusionsResult } fr
 import { SCOPE_REPO_GITIGNORE } from '../../../server/src/lib/git-server/scope-repo'
 import { pathKey } from '../../shared/sparse-paths'
 import { privateBackupsDir } from '../../electron/sync/private-folders'
+import { makeTempDir } from '../../../shared/testing/temp-dirs'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 export const HOOK_PATH = path.resolve(HERE, '../../../server/src/templates/pre-receive-hook.sh')
@@ -283,7 +284,7 @@ export class World {
 
   /** Create a world; it is removed when the test ends (unless SYNC_HARNESS_KEEP is set). */
   static create(t: { after: (fn: () => void) => void } | null, options: WorldOptions): World {
-    const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'acb-sync-world-')))
+    const root = fs.realpathSync(makeTempDir('acb-sync-world-', { keep: !!process.env.SYNC_HARNESS_KEEP }))
     const world = new World(root, options)
     if (t) {
       t.after(() => {

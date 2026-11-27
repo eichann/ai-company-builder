@@ -67,6 +67,30 @@ were skipped for a PR that does not touch them):
   reason. A new test with a `process.platform === 'darwin'` branch, a real `/bin/sh` child
   through those wrappers, or file-system case/NFD behaviour goes on the list.
 
+## Temporary folders (all packages, harnesses included)
+
+2026-11-28: killed, timed-out and failed tests left ~8,500 `acb-*` folders (50 GB+, real-Electron
+Chromium profiles among them) in the system temp folder and the development Mac ran out of disk.
+
+- **Make a test's temp folder with `makeTempDir('acb-<name>-')`** (`shared/testing/temp-dirs.ts`; the
+  server reaches it through `server/shared`), never a bare `mkdtemp(Sync)` under `os.tmpdir()`. The
+  prefix starts with `acb-` (refused otherwise) and is the test's own (not a production prefix such as
+  `acb-operator-`). The folder goes when the process ends — normally, after a failure or an uncaught
+  exception, on SIGINT / SIGTERM / SIGHUP — and the first folder of a prefix in a run removes that
+  prefix's folders older than six hours (what a SIGKILL left; a run still going is younger, so never
+  touched; links are never followed). A folder inside one of these needs nothing more.
+- Still remove it as soon as the test is done (`after` / `t.after` / `finally`, or `removeTempDir`;
+  vitest: `afterAll`, as `server/tests/setup.ts` does for each file's `DATA_DIR`).
+- **A child process that writes in the folder** (a real-Electron harness's profile): register it with
+  `stopWithTempDirs(child)` right after `spawn`, and on a timeout kill it and fail only from its
+  `close` (never reject first and let the parent remove the folder under a running child).
+- A harness's "keep it to look at" switch passes `{ keep: true }` (`SYNC_HARNESS_KEEP`, `IPC_HARNESS_KEEP`).
+- **Never `pkill -f <pattern>` without the work folder in the pattern**: on the shared Mac it also kills
+  other people's test runs (2026-11-28), which then leave their folders. Stop your own process by its pid,
+  or match your worktree's path.
+- Test: `client/tests/test-temp-dirs.test.ts` (the sweep's limits; each way a process ends; a writing
+  child stopped first; `browser-kept-logins` and `doc-player` run under their own `TMPDIR` leave nothing).
+
 ## Renderer UI tests (Playwright)
 
 The preview pages `client/tests/*-ui.html` (+ `.tsx`) render the real React components with the

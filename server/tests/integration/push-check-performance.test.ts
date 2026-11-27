@@ -11,9 +11,8 @@
  */
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest'
 import { execFileSync, spawnSync } from 'child_process'
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from 'fs'
+import { rmSync, writeFileSync, mkdirSync } from 'fs'
 import { join, dirname } from 'path'
-import { tmpdir } from 'os'
 
 vi.mock('../../src/lib/auth', () => ({
   getUserFromRequest: vi.fn().mockResolvedValue(null),
@@ -25,6 +24,7 @@ vi.mock('../../src/lib/auth', () => ({
 }))
 
 import { configureBareRepo } from '../../src/routes/git'
+import { makeTempDir } from '../../shared/testing/temp-dirs'
 
 vi.setConfig({ testTimeout: 180_000, hookTimeout: 60_000 })
 
@@ -37,7 +37,7 @@ function git(args: string[], cwd?: string): string {
 let workDir: string
 
 beforeAll(() => {
-  workDir = mkdtempSync(join(tmpdir(), 'acb-push-perf-'))
+  workDir = makeTempDir('acb-push-perf-')
 })
 
 afterAll(() => {

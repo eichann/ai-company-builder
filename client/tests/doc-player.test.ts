@@ -9,7 +9,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
-import os from 'node:os'
 import path from 'node:path'
 import { AllowedRoots } from '../electron/allowed-roots'
 import { createDocFrames } from '../electron/features/doc-frames/protocol'
@@ -19,6 +18,7 @@ import { ACTION_GUARD_MS, createDrivePlayers, type DrivePlayerHooks, type DriveV
 import { drivePlayerPage, PLAYER_PAGE_CSP } from '../electron/features/doc-frames/player-page'
 import { embedPlacement, overlayPlacement, parseByteRange, parseContentRange, parseDrivePlayerUrl, drivePlayerRefusal, type DrivePlayerPlacement } from '../shared/doc-drive-player'
 import type { DocViewBounds, DocViewEvent } from '../shared/doc-frame'
+import { makeTempDir } from '../../shared/testing/temp-dirs'
 
 const A = 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA'
 const B = 'BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB'
@@ -92,7 +92,7 @@ function world(options: {
   /** The document's page never answers where its embeds are (its main thread busy). */
   busyPage?: boolean
 } = {}) {
-  const base = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'acb-doc-player-')))
+  const base = fs.realpathSync(makeTempDir('acb-doc-player-'))
   const root = path.join(base, 'company')
   fs.mkdirSync(path.join(root, '営業'), { recursive: true })
   fs.writeFileSync(path.join(root, '営業/report.html'), `<iframe src="${drive(A)}"></iframe><video src="${drive(B, '/view')}"></video><a href="other.html">次</a>`)

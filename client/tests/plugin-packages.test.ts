@@ -6,7 +6,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
-import os from 'node:os'
 import path from 'node:path'
 import { pluginFingerprintV2 } from '../../shared/core/plugin-fingerprint'
 import type { DistributedPlugin } from '../../shared/types/plugins'
@@ -14,6 +13,7 @@ import { parseDistributedPlugins } from '../shared/plugin-packages'
 import { createAgentPolicyStore } from '../electron/services/agent-policy-store'
 import { createPluginFetcher, sha256Hex, verifyPackage, type PluginFetchResult } from '../electron/features/plugins/fetch'
 import { createPluginPackageStore } from '../electron/features/plugins/store'
+import { makeTempDir } from '../../shared/testing/temp-dirs'
 
 const quiet = { log: () => {}, warn: () => {}, info: () => {} }
 const enc = (s: string) => new TextEncoder().encode(s)
@@ -64,7 +64,7 @@ test('the fetcher asks the package route with the session in a header', async ()
 })
 
 test('the store keeps what a company lists, removes what no company lists, and never keeps an unverified package', async () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'acb-plugins-'))
+  const dir = makeTempDir('acb-plugins-')
   try {
     let next: PluginFetchResult = { ok: true, files: FILES }
     const fetched: string[] = []

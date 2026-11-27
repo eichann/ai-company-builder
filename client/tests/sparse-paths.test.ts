@@ -2,7 +2,6 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
 import fs from 'node:fs'
-import os from 'node:os'
 import path from 'node:path'
 import {
   excludedFolderOf,
@@ -17,6 +16,7 @@ import {
 } from '../shared/sparse-paths'
 import { notDownloadedFolderFor, notDownloadedFolders } from '../electron/sync/not-downloaded'
 import { evaluateWrite } from '../shared/write-access'
+import { makeTempDir } from '../../shared/testing/temp-dirs'
 
 const NFD = (s: string) => s.normalize('NFD')
 
@@ -74,7 +74,7 @@ test('the agent message names the folder', () => {
 
 // The patterns are only useful if git reads them the way isNotDownloaded does.
 test('git checks out exactly what isNotDownloaded says is downloaded (real git, non-cone patterns)', () => {
-  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'acb-sparse-paths-')))
+  const root = fs.realpathSync(makeTempDir('acb-sparse-paths-'))
   try {
     const env = { ...process.env, GIT_CONFIG_GLOBAL: path.join(root, 'gitconfig'), GIT_CONFIG_NOSYSTEM: '1', GIT_TEMPLATE_DIR: path.join(root, 'tpl') }
     fs.mkdirSync(env.GIT_TEMPLATE_DIR)

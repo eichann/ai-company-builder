@@ -40,6 +40,7 @@ import type { BrowserLinesAnswer } from '../electron/features/browser/lines-api'
 import type { PreviewOperator } from '../electron/features/browser/preview'
 import type { BrowserWriteSteps } from '../shared/browser-runner'
 import type { BrowserWriteView } from '../shared/browser-line-writes'
+import { makeTempDir } from '../../shared/testing/temp-dirs'
 
 const HOST = 'shop.example.test'
 const COMPANY = 'company-1'
@@ -1369,11 +1370,10 @@ test('a department Skill: the AI\'s name or path goes to the server as given, an
 })
 
 test('a Skill\'s steps are read from its own folder: a department\'s, the company\'s, nothing else', async () => {
-  const { mkdtempSync, mkdirSync, writeFileSync, rmSync } = await import('node:fs')
-  const { tmpdir } = await import('node:os')
+  const { mkdirSync, writeFileSync, rmSync } = await import('node:fs')
   const path = await import('node:path')
   const { readBrowserSkillSteps } = await import('../electron/features/browser/skill-steps')
-  const root = mkdtempSync(path.join(tmpdir(), 'acb-skill-steps-'))
+  const root = makeTempDir('acb-skill-steps-')
   try {
     for (const [dir, text] of [['.claude/skills/coupons', '全社の手順'], ['営業/.claude/skills/coupons', '営業の手順']] as const) {
       mkdirSync(path.join(root, dir), { recursive: true })

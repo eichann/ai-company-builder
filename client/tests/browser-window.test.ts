@@ -7,7 +7,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
-import os from 'node:os'
 import path from 'node:path'
 import type { BrowserSiteSetting } from '../../shared/core/browser-operation'
 import type { AgentPolicy } from '../../shared/types/agent-sandbox'
@@ -23,6 +22,7 @@ import { removeLeftoverBrowserPartitions } from '../electron/features/browser/le
 import { isMainFrameSender, registerBrowserIpc } from '../electron/features/browser/ipc'
 import { createAgentPolicyStore } from '../electron/services/agent-policy-store'
 import type { IpcInvokeEvent, IpcRegistrar } from '../electron/ipc/registrar'
+import { makeTempDir } from '../../shared/testing/temp-dirs'
 
 const site: BrowserSiteSetting = { host: 'manager.example.net', level: 'write', assetHosts: ['cdn.example.net'] }
 const state = (over: Partial<BrowserWindowState> = {}): BrowserWindowState => ({ site, mode: 'human', aiGateReady: false, helpers: [], ...over })
@@ -125,9 +125,9 @@ test('a window\'s session is always in memory, one per account, company and site
 })
 
 test('a browser session an earlier build kept on disk is removed at start; nothing else is touched', () => {
-  const userData = fs.mkdtempSync(path.join(os.tmpdir(), 'acb-browser-start-'))
+  const userData = makeTempDir('acb-browser-start-')
   const partitions = path.join(userData, 'Partitions')
-  const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'acb-browser-outside-'))
+  const outside = makeTempDir('acb-browser-outside-')
   fs.mkdirSync(path.join(partitions, 'acb-browser-0123456789abcdef0123456789abcdef', 'Network'), { recursive: true })
   fs.writeFileSync(path.join(partitions, 'acb-browser-0123456789abcdef0123456789abcdef', 'Network', 'Cookies'), 'sid=1')
   fs.mkdirSync(path.join(partitions, 'ACB-Browser-old'))

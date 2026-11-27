@@ -1,18 +1,18 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
-import os from 'node:os'
 import path from 'node:path'
 import { ChatHistoryStore } from '../electron/chat-history-store'
 import { HandoffStore, fingerprint } from '../electron/handoff/store'
 import { HandoffService, handoffChunk } from '../electron/handoff/service'
 import { HANDOFF_HEADINGS, type HandoffRequest, type HandoffMetrics } from '../electron/handoff/contract'
 import type { ChatSession } from '../shared/chat-history'
+import { makeTempDir } from '../../shared/testing/temp-dirs'
 const memo = HANDOFF_HEADINGS.map(h => `## ${h}\n- 未確認`).join('\n\n')
 const metrics: HandoffMetrics = { provider: 'codex', model: 'test', setupMs: 0, saveMs: 1, totalMs: 2, inputTokens: 100, outputTokens: 20, toolCalls: 1 }
 const tick = () => new Promise(resolve => setTimeout(resolve, 25))
 function fixture(t: { after: (fn: () => void) => void }) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'acb-handoff-service-'))
+  const dir = makeTempDir('acb-handoff-service-')
   const history = new ChatHistoryStore(path.join(dir, 'history'))
   const store = new HandoffStore(path.join(dir, 'memos'), history)
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }))

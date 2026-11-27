@@ -20,12 +20,12 @@
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest'
 import { execFileSync } from 'child_process'
 import { putSampleHub } from '../helpers/plugin-packages'
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'fs'
+import { mkdirSync, rmSync, writeFileSync } from 'fs'
 import { dirname, join, resolve } from 'path'
-import { tmpdir } from 'os'
 import { randomBytes } from 'crypto'
 import { loadTypeShapes, type TypeShapes } from '../helpers/type-shape'
 import { JOB_ACCEPT_HEADER, JOB_ACCEPT_SEPARATE } from '../../shared/core/jobs'
+import { makeTempDir } from '../../shared/testing/temp-dirs'
 
 const currentUser = vi.hoisted(() => ({ id: 'ac-owner' as string | null }))
 
@@ -222,11 +222,11 @@ const git = (args: string[], cwd?: string) => execFileSync('git', args, { stdio:
 
 beforeAll(async () => {
   // The key broker on, with a throwaway KEK outside DATA_DIR (before the composition root loads).
-  const kekDir = mkdtempSync(join(tmpdir(), 'acb-admin-contract-kek-'))
+  const kekDir = makeTempDir('acb-admin-contract-kek-')
   writeFileSync(join(kekDir, 'kek'), randomBytes(32).toString('base64'), { mode: 0o600 })
   process.env.BROKER_KEK_FILE = join(kekDir, 'kek')
   // The plugin shelf (「つなぎ先」): one HubSpot-shaped package, also before the composition root loads.
-  const shelfDir = mkdtempSync(join(tmpdir(), 'acb-admin-contract-shelf-'))
+  const shelfDir = makeTempDir('acb-admin-contract-shelf-')
   putSampleHub(shelfDir)
   process.env.PLUGINS_DIR = shelfDir
   shapes = loadTypeShapes(
@@ -234,7 +234,7 @@ beforeAll(async () => {
     + `type Role = A.Role\n`
     + Object.entries(TYPES).map(([name, t]) => `export type T_${name} = ${t.replace(/\b([A-Z][A-Za-z]+)\b(?!["'])/g, (m) => (m === 'OUTDATED_CLIENTS' ? m : `A.${m}`))}`).join('\n'),
   )
-  workDir = mkdtempSync(join(tmpdir(), 'acb-admin-contract-'))
+  workDir = makeTempDir('acb-admin-contract-')
   const Database = (await import('better-sqlite3')).default
   const dbModule = await import('../../src/db')
   dbModule.initDatabase()

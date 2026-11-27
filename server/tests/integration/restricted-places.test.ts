@@ -33,9 +33,6 @@ vi.mock('../../src/lib/auth', () => ({
   },
 }))
 
-import { mkdtempSync } from 'fs'
-import { join } from 'path'
-import { tmpdir } from 'os'
 import { Hono } from 'hono'
 import { db, initDatabase } from '../../src/db'
 import { companiesRoute } from '../../src/routes/companies'
@@ -50,6 +47,7 @@ import { notificationsRoute } from '../../src/routes/notifications'
 import { setRepoGitTimeoutsForTests } from '../../src/adapters/git-repo-store'
 import { listScopesWithRules } from '../../src/adapters/sqlite/permission-store'
 import { services } from '../../src/composition'
+import { makeTempDir } from '../../shared/testing/temp-dirs'
 
 vi.setConfig({ testTimeout: 120_000, hookTimeout: 120_000 })
 
@@ -104,7 +102,7 @@ beforeAll(async () => {
   initDatabase()
   process.env.OPERATOR_USER_IDS = 'rp-owner'
   setRepoGitTimeoutsForTests({ local: 60_000, push: 120_000 })
-  process.env.GIT_TEMPLATE_DIR = mkdtempSync(join(tmpdir(), 'acb-rp-templates-'))
+  process.env.GIT_TEMPLATE_DIR = makeTempDir('acb-rp-templates-')
   const a = await call('POST', '/api/companies', { name: 'Restricted Co', folderKind: 'none' })
   expect(a.status).toBe(201)
   none = a.body.data.id

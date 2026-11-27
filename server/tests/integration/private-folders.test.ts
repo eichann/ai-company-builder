@@ -19,9 +19,8 @@
  */
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest'
 import { execFileSync, spawn } from 'child_process'
-import { existsSync, mkdtempSync, rmSync, statSync, symlinkSync, writeFileSync, mkdirSync } from 'fs'
+import { existsSync, rmSync, statSync, symlinkSync, writeFileSync, mkdirSync } from 'fs'
 import { join, dirname } from 'path'
-import { tmpdir } from 'os'
 import type { AddressInfo } from 'net'
 
 const currentUser = vi.hoisted(() => ({ id: 'u-owner' as string | null }))
@@ -40,6 +39,7 @@ vi.mock('../../src/lib/auth', () => ({
 }))
 
 import { configureBareRepo } from '../../src/routes/git'
+import { makeTempDir } from '../../shared/testing/temp-dirs'
 
 vi.setConfig({ testTimeout: 120_000, hookTimeout: 120_000 })
 
@@ -139,7 +139,7 @@ async function as(userId: User | null, method: string, path: string, body?: unkn
 const create = (user: User, input: Record<string, unknown>) => as(user, 'POST', `${base}/private-folders`, input)
 
 beforeAll(async () => {
-  workDir = mkdtempSync(join(tmpdir(), 'acb-private-folders-'))
+  workDir = makeTempDir('acb-private-folders-')
   const Database = (await import('better-sqlite3')).default
   const dbModule = await import('../../src/db')
   dbModule.initDatabase()

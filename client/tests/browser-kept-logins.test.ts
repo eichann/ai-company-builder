@@ -13,7 +13,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
-import os from 'node:os'
 import path from 'node:path'
 import type { BrowserSiteSetting } from '../../shared/core/browser-operation'
 import type { AgentPolicy, BrowserSiteLevel } from '../../shared/types/agent-sandbox'
@@ -28,6 +27,7 @@ import {
 } from '../electron/features/browser/kept-logins'
 import { removeLeftoverBrowserPartitions } from '../electron/features/browser/leftovers'
 import { createAgentPolicyStore, parseBrowserLevels } from '../electron/services/agent-policy-store'
+import { makeTempDir } from '../../shared/testing/temp-dirs'
 
 const SITE: BrowserSiteSetting = { host: 'manager.example.net', level: 'write', assetHosts: [] }
 const OTHER: BrowserSiteSetting = { host: 'desk.example.net', level: 'read', assetHosts: [] }
@@ -44,7 +44,7 @@ function policy(mode: 'enforce' | 'observe' | 'off', sites: BrowserSiteSetting[]
 }
 
 function world(options: { platformEncloses?: boolean; partitionsDir?: string; insideCompanyFolder?: (p: string) => boolean; before?: (userData: string) => void } = {}) {
-  const userData = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'acb-kept-')))
+  const userData = fs.realpathSync(makeTempDir('acb-kept-'))
   const partitions = options.partitionsDir ?? path.join(userData, 'Partitions')
   fs.mkdirSync(path.join(userData, 'Partitions'), { recursive: true })
   options.before?.(userData)
@@ -139,7 +139,7 @@ test('a window kept on disk reads and writes through sessions in memory only', (
 })
 
 test('at start a kept login stays (the policy decides); any other browser folder still goes', () => {
-  const userData = fs.mkdtempSync(path.join(os.tmpdir(), 'acb-kept-start-'))
+  const userData = makeTempDir('acb-kept-start-')
   const partitions = path.join(userData, 'Partitions')
   const name = keptLoginFolder('u', 'c', 'x.example.net')
   for (const folder of [name, name.toUpperCase(), 'acb-browser-0123456789abcdef0123456789abcdef', `${name}-x`]) fs.mkdirSync(path.join(partitions, folder), { recursive: true })
@@ -352,7 +352,7 @@ test('observe, no sandbox and an enforce turn whose company folder holds the app
 })
 
 test('a kept login that cannot be removed stops the turn (it never runs next to it)', async () => {
-  const blocked = fs.mkdtempSync(path.join(os.tmpdir(), 'acb-kept-blocked-'))
+  const blocked = makeTempDir('acb-kept-blocked-')
   const notAFolder = path.join(blocked, 'Partitions')
   fs.writeFileSync(notAFolder, 'x')
   const w = world({ partitionsDir: notAFolder })
@@ -421,7 +421,7 @@ test('the store says a refused policy (401 / 403 / 404) apart from no server or 
 // ---------------------------------------------------------------------------
 
 test('a link planted in place of the sessions\' folder: the link goes, its target stays, nothing is kept this run', () => {
-  const company = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'acb-kept-company-')))
+  const company = fs.realpathSync(makeTempDir('acb-kept-company-'))
   fs.writeFileSync(path.join(company, 'memo.md'), 'x')
   const w = world({ before: userData => {
     fs.rmSync(path.join(userData, 'Partitions'), { recursive: true })
@@ -437,7 +437,7 @@ test('a link planted in place of the sessions\' folder: the link goes, its targe
 })
 
 test('a link or a shared file planted inside a kept login\'s folder: the folder goes, nothing is kept this run', () => {
-  const company = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'acb-kept-company-')))
+  const company = fs.realpathSync(makeTempDir('acb-kept-company-'))
   for (const plant of [
     (folder: string) => fs.symlinkSync(company, path.join(folder, 'Network')),
     (folder: string) => { fs.writeFileSync(path.join(company, 'Cookies'), ''); fs.linkSync(path.join(company, 'Cookies'), path.join(folder, 'Cookies')) },
@@ -453,9 +453,10 @@ test('a link or a shared file planted inside a kept login\'s folder: the folder 
 })
 
 test('a link above the sessions\' folder (where it really is differs) is never used', () => {
-  const real = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'acb-kept-real-')))
-  fs.mkdirSync(path.join(real, 'Partitions'))
-  const link = `${real}-link`
+  const base = fs.realpathSync(makeTempDir('acb-kept-real-'))
+  const real = path.join(base, 'real')
+  fs.mkdirSync(path.join(real, 'Partitions'), { recursive: true })
+  const link = path.join(base, 'link')
   fs.symlinkSync(real, link)
   const kept = createKeptLogins({ partitionsDir: () => path.join(link, 'Partitions'), clearSession: async () => {}, platformEncloses: true, log: { warn() {} } })
   assert.equal(kept.partition('u', 'c', SITE.host), null)
@@ -464,7 +465,7 @@ test('a link above the sessions\' folder (where it really is differs) is never u
 })
 
 test('a removal never follows a link planted in place of the sessions\' folder', async () => {
-  const company = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'acb-kept-company-')))
+  const company = fs.realpathSync(makeTempDir('acb-kept-company-'))
   const lookalike = keptLoginFolder('someone', 'cx', 'x.example.net')
   fs.mkdirSync(path.join(company, lookalike))
   const w = world()
@@ -537,7 +538,7 @@ test('a managed `sandbox` (or a managed file that cannot be read) counts as "may
   assert.equal(managedSettingsTouchSandbox({ kind: 'plist', text: '<key>sandbox</key>' }), true)
   assert.equal(managedSettingsTouchSandbox({ kind: 'plist', text: '<key>permissions</key>' }), false)
 
-  const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'acb-managed-')))
+  const dir = fs.realpathSync(makeTempDir('acb-managed-'))
   const file = path.join(dir, 'managed-settings.json')
   const folder = path.join(dir, 'managed-settings.d')
   const sources = [{ kind: 'json' as const, path: file }, { kind: 'json' as const, path: folder, folder: true }]

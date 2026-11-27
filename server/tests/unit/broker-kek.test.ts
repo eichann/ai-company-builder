@@ -8,14 +8,14 @@
 import { afterAll, describe, expect, it } from 'vitest'
 import { execFile } from 'child_process'
 import { promisify } from 'util'
-import { chmodSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'fs'
-import { tmpdir } from 'os'
+import { chmodSync, readFileSync, rmSync, statSync, writeFileSync } from 'fs'
 import { join, resolve } from 'path'
 import { randomBytes } from 'crypto'
 import { loadKekFile } from '../../src/adapters/kek-file'
+import { makeTempDir } from '../../shared/testing/temp-dirs'
 
 const run = promisify(execFile)
-const dir = mkdtempSync(join(tmpdir(), 'acb-kek-'))
+const dir = makeTempDir('acb-kek-')
 const dataDir = join(dir, 'data')
 afterAll(() => rmSync(dir, { recursive: true, force: true }))
 

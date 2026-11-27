@@ -8,12 +8,12 @@
  * is refused with nothing written.
  */
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'fs'
+import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'fs'
 import { createHash, randomBytes } from 'crypto'
-import { tmpdir } from 'os'
 import { join } from 'path'
 import { execFileSync } from 'child_process'
 import Database from 'better-sqlite3'
+import { makeTempDir } from '../../shared/testing/temp-dirs'
 
 // Accounts are not part of an archive; the services only need a directory to exist.
 vi.mock('../../src/lib/auth', async () => {
@@ -65,7 +65,7 @@ function filesUnder(dir: string): string[] {
 }
 
 beforeAll(async () => {
-  work = mkdtempSync(join(tmpdir(), 'acb-archive-'))
+  work = makeTempDir('acb-archive-')
   writeFileSync(join(work, 'kek'), randomBytes(32).toString('base64'))
   chmodSync(join(work, 'kek'), 0o600)
   process.env.BROKER_KEK_FILE = join(work, 'kek')

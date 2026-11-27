@@ -7,7 +7,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
-import os from 'node:os'
 import path from 'node:path'
 import { AllowedRoots } from '../electron/allowed-roots'
 import { createDocFrames } from '../electron/features/doc-frames/protocol'
@@ -15,6 +14,7 @@ import { createDocViews, type DocViewHandle, type DocViewHooks, type DocViewPort
 import { registerDocViewsIpc } from '../electron/features/doc-frames/ipc'
 import { DOC_DRIVE_VIDEOS_MAX, driveVideoIdsOf, driveVideoViewUrl } from '../shared/doc-drive-videos'
 import { docFrameCsp, docFramePolicy, type DocViewEvent } from '../shared/doc-frame'
+import { makeTempDir } from '../../shared/testing/temp-dirs'
 
 const A = 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA'
 const B = 'BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB'
@@ -116,7 +116,7 @@ const MAIN = 1
 const OTHER_WINDOW = 2
 
 function world() {
-  const base = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'acb-doc-drive-')))
+  const base = fs.realpathSync(makeTempDir('acb-doc-drive-'))
   const root = path.join(base, 'company')
   const write = (rel: string, content: string) => {
     const target = path.join(root, ...rel.split('/'))

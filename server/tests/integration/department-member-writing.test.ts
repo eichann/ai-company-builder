@@ -16,9 +16,8 @@
  */
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest'
 import { execFileSync, spawn } from 'child_process'
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from 'fs'
+import { rmSync, writeFileSync, mkdirSync } from 'fs'
 import { join, dirname } from 'path'
-import { tmpdir } from 'os'
 import type { AddressInfo } from 'net'
 
 const currentUser = vi.hoisted(() => ({ id: null as string | null }))
@@ -37,6 +36,7 @@ vi.mock('../../src/lib/auth', () => ({
 }))
 
 import { WRITE_DENIED_RECOVERY_COMMIT_DATE } from '../../src/lib/client-version'
+import { makeTempDir } from '../../shared/testing/temp-dirs'
 
 vi.setConfig({ testTimeout: 180_000, hookTimeout: 180_000 })
 
@@ -128,7 +128,7 @@ function appIsCurrent(user: User) {
 }
 
 beforeAll(async () => {
-  workDir = mkdtempSync(join(tmpdir(), 'acb-dept-member-'))
+  workDir = makeTempDir('acb-dept-member-')
   const Database = (await import('better-sqlite3')).default
   const dbModule = await import('../../src/db')
   dbModule.initDatabase()

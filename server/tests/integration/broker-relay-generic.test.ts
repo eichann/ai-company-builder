@@ -20,11 +20,11 @@
  * - **No key value in any answer, log line or table; no token in any log line.**
  */
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest'
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'fs'
-import { tmpdir } from 'os'
+import { chmodSync, rmSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import { randomBytes } from 'crypto'
 import type { UpstreamClient, UpstreamRequest } from '../../src/ports/upstream'
+import { makeTempDir } from '../../shared/testing/temp-dirs'
 
 const currentUser = vi.hoisted(() => ({ id: 'gr-owner' as string | null }))
 
@@ -103,7 +103,7 @@ const CRM = { label: '顧客管理', baseUrl: 'https://api.crm.example.com/v2/',
 const everyone = { allDepartments: true, departmentIds: [], everyone: true, addUserIds: [], removeUserIds: [] }
 
 beforeAll(async () => {
-  kekDir = mkdtempSync(join(tmpdir(), 'acb-gr-kek-'))
+  kekDir = makeTempDir('acb-gr-kek-')
   writeFileSync(join(kekDir, 'kek'), randomBytes(32).toString('base64'))
   chmodSync(join(kekDir, 'kek'), 0o600)
   process.env.BROKER_KEK_FILE = join(kekDir, 'kek')

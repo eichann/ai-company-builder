@@ -24,7 +24,6 @@
 import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from 'vitest'
 import { existsSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'fs'
 import { join } from 'path'
-import { tmpdir } from 'os'
 
 const syncCalls = vi.hoisted(() => ({ count: 0, log: [] as string[] }))
 
@@ -85,6 +84,7 @@ import { db, initDatabase } from '../../src/db'
 import { companiesRoute } from '../../src/routes/companies'
 import { setRepoGitTimeoutsForTests } from '../../src/adapters/git-repo-store'
 import { departmentsRoute } from '../../src/routes/departments'
+import { makeTempDir } from '../../shared/testing/temp-dirs'
 
 vi.setConfig({ testTimeout: 300_000, hookTimeout: 300_000 })
 
@@ -162,7 +162,7 @@ let savedTemplateDir: string | undefined
 beforeAll(() => {
   initDatabase()
   process.env.OPERATOR_USER_IDS = 'cs-owner' // creating companies is for server operators
-  scratch = mkdtempSync(join(tmpdir(), 'acb-seed-'))
+  scratch = makeTempDir('acb-seed-')
   // A developer's global init.templateDir (e.g. git-secrets) would install
   // client-side hooks into new repositories and slow every git call down
   savedTemplateDir = process.env.GIT_TEMPLATE_DIR

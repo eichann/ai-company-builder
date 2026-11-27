@@ -16,9 +16,8 @@
  */
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest'
 import { execFileSync, spawn } from 'child_process'
-import { mkdtempSync, mkdirSync, renameSync, rmSync, writeFileSync } from 'fs'
+import { mkdirSync, renameSync, rmSync, writeFileSync } from 'fs'
 import { join, dirname } from 'path'
-import { tmpdir } from 'os'
 import type { AddressInfo } from 'net'
 
 const currentUser = vi.hoisted(() => ({ id: 'os-owner' as string | null }))
@@ -54,6 +53,7 @@ import { replaceDepartmentManagers, replaceScopeRules, sqlitePermissionRepositor
 import { resolveAccess } from '../../shared/core/permissions'
 import { resetOrphanedScopeCache } from '../../src/adapters/orphaned-scopes'
 import { services } from '../../src/composition'
+import { makeTempDir } from '../../shared/testing/temp-dirs'
 
 // git-http asks for the post-push check through the services; hold it at the gate.
 {
@@ -157,7 +157,7 @@ async function until(cond: () => boolean, ms = 15_000) {
 
 beforeAll(async () => {
   initDatabase()
-  workDir = mkdtempSync(join(tmpdir(), 'acb-orphans-'))
+  workDir = makeTempDir('acb-orphans-')
   const now = new Date().toISOString()
   const expires = new Date(Date.now() + 3600_000).toISOString()
   db.prepare('INSERT INTO companies (id, name, slug, owner_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)')

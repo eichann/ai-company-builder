@@ -15,8 +15,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { EventEmitter } from 'node:events'
 import { PassThrough } from 'node:stream'
-import { mkdtemp, mkdir, rm, symlink, writeFile } from 'node:fs/promises'
-import os from 'node:os'
+import { mkdir, rm, symlink, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import {
   SECOND_OPINION_PART_TYPE, askedTargets, cleanSecondOpinionAnswer, latestMemberText, readSecondOpinionRecord, secondOpinionTargetOf,
@@ -32,6 +31,7 @@ import { createPrivateReadState, decidePrivateWrite } from '../electron/private-
 import { acbToolDisplay } from '../shared/acb-tool-displays'
 import { sessionMessageToUIMessage, uiMessageToSessionMessage } from '../src/features/chat/chatSessionMessages'
 import type { UIMessage } from 'ai'
+import { makeTempDir } from '../../shared/testing/temp-dirs'
 
 // ---------------------------------------------------------------------------
 // A scripted `claude` process: it writes the given stream lines and records what it got.
@@ -159,7 +159,7 @@ test('the tool exists only in a turn whose member message names the other agent'
 // ---------------------------------------------------------------------------
 
 async function company() {
-  const base = await mkdtemp(path.join(os.tmpdir(), 'acb-second-'))
+  const base = makeTempDir('acb-second-')
   const root = path.join(base, 'company')
   await mkdir(path.join(root, '営業'), { recursive: true })
   await mkdir(path.join(root, '経営'), { recursive: true })

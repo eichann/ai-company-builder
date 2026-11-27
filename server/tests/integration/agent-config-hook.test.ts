@@ -10,9 +10,8 @@
  */
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest'
 import { execFileSync, spawnSync } from 'child_process'
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from 'fs'
+import { rmSync, writeFileSync, mkdirSync } from 'fs'
 import { join, dirname } from 'path'
-import { tmpdir } from 'os'
 
 vi.mock('../../src/lib/auth', () => ({
   getUserFromRequest: vi.fn().mockResolvedValue(null),
@@ -25,6 +24,7 @@ vi.mock('../../src/lib/auth', () => ({
 
 import { configureBareRepo } from '../../src/routes/git'
 import { agentConfigRuleApplies, AGENT_CONFIG_RECOVERY_COMMIT_DATE } from '../../src/lib/client-version'
+import { makeTempDir } from '../../shared/testing/temp-dirs'
 
 // Every real push starts the checker (node + tsx): seconds each on a loaded machine.
 vi.setConfig({ testTimeout: 300_000, hookTimeout: 60_000 })
@@ -132,7 +132,7 @@ const UNNAMED = [
   'x/.Agents/Config.toml',
 ]
 
-beforeAll(() => { workDir = mkdtempSync(join(tmpdir(), 'acb-agent-config-')) })
+beforeAll(() => { workDir = makeTempDir('acb-agent-config-') })
 afterAll(() => { rmSync(workDir, { recursive: true, force: true }) })
 
 describe('default-deny in .claude/ and .agents/', () => {

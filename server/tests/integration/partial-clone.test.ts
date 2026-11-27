@@ -19,9 +19,8 @@
  */
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest'
 import { execFileSync, spawn } from 'child_process'
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs'
+import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'fs'
 import { join, dirname } from 'path'
-import { tmpdir } from 'os'
 import type { AddressInfo } from 'net'
 
 vi.mock('../../src/lib/auth', () => ({
@@ -39,6 +38,7 @@ import { serve } from '@hono/node-server'
 import { db, initDatabase } from '../../src/db'
 import { configureBareRepo } from '../../src/routes/git'
 import { gitHttpRoute } from '../../src/routes/git-http'
+import { makeTempDir } from '../../shared/testing/temp-dirs'
 
 vi.setConfig({ testTimeout: 60_000, hookTimeout: 60_000 })
 
@@ -118,7 +118,7 @@ async function partialClone(name: string, cone: string[]): Promise<string> {
 
 beforeAll(async () => {
   initDatabase()
-  workDir = mkdtempSync(join(tmpdir(), 'acb-partial-clone-'))
+  workDir = makeTempDir('acb-partial-clone-')
   askPass = join(workDir, 'askpass.sh')
   writeFileSync(askPass, '#!/bin/sh\necho "$GIT_TOKEN"\n')
   chmodSync(askPass, 0o755)

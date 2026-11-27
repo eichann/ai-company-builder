@@ -18,8 +18,7 @@
  *   gets the same 404 as for a missing one; notices carry no content.
  */
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'fs'
-import { tmpdir } from 'os'
+import { chmodSync, rmSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import { randomBytes } from 'crypto'
 import type { AddressInfo } from 'net'
@@ -27,6 +26,7 @@ import { serve, type ServerType } from '@hono/node-server'
 import { createFakeHubSpot, type FakeHubSpot } from '../fakes/hubspot/fake-hubspot'
 import { enableSampleSales, putSampleHub } from '../helpers/plugin-packages'
 import { withRecordText } from '../helpers/record-text'
+import { makeTempDir } from '../../shared/testing/temp-dirs'
 
 vi.setConfig({ testTimeout: 60_000, hookTimeout: 60_000 })
 
@@ -97,10 +97,10 @@ beforeAll(async () => {
   server = serve({ fetch: fake.app.fetch, port: 0, hostname: '127.0.0.1' })
   await new Promise(r => setTimeout(r, 50))
   const port = (server.address() as AddressInfo).port
-  kekDir = mkdtempSync(join(tmpdir(), 'acb-op-kek-'))
+  kekDir = makeTempDir('acb-op-kek-')
   writeFileSync(join(kekDir, 'kek'), randomBytes(32).toString('base64'))
   chmodSync(join(kekDir, 'kek'), 0o600)
-  shelfDir = mkdtempSync(join(tmpdir(), 'acb-op-shelf-'))
+  shelfDir = makeTempDir('acb-op-shelf-')
   putSampleHub(shelfDir)
   // Staging's way: HubSpot's connections go to the fake on this machine (lib/config.ts).
   Object.assign(process.env, {

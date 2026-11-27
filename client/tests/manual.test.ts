@@ -13,7 +13,6 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import fs from 'node:fs'
-import os from 'node:os'
 import path from 'node:path'
 import { AllowedRoots } from '../electron/allowed-roots'
 import { createManualSite, type ManualSite } from '../electron/features/manual/site'
@@ -21,6 +20,7 @@ import { registerManualIpc } from '../electron/features/manual/ipc'
 import { createDocFrames } from '../electron/features/doc-frames/protocol'
 import { createDocViews, type DocViewHandle, type DocViewPort } from '../electron/features/doc-frames/views'
 import { MANUAL_WORDS } from '../shared/manual'
+import { makeTempDir } from '../../shared/testing/temp-dirs'
 
 const quiet = { warn: () => {} }
 const MAIN = 1
@@ -68,7 +68,7 @@ function fakeServer(site: ReturnType<typeof builtSite> | null, options: { offlin
 }
 
 function tmp(): string {
-  return fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'acb-manual-')))
+  return fs.realpathSync(makeTempDir('acb-manual-'))
 }
 
 function siteWith(server: ReturnType<typeof fakeServer>, cacheRoot: string, cookies: string[] = [SESSION]): ManualSite {

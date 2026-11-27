@@ -12,9 +12,9 @@ import { execFileSync, spawn } from 'node:child_process'
 import { createRequire } from 'node:module'
 import fs from 'node:fs'
 import net from 'node:net'
-import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { makeTempDir, stopWithTempDirs } from '../../shared/testing/temp-dirs'
 
 const clientDir = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
 const canRun = process.platform === 'darwin' || (process.platform === 'linux' && !!process.env.DISPLAY)
@@ -49,7 +49,7 @@ function freePort(): Promise<number> {
 
 before(async () => {
   if (!canRun) return
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'acb-write-detach-'))
+  const dir = makeTempDir('acb-write-detach-')
   fs.writeFileSync(path.join(dir, 'cert.cnf'), ['[req]', 'distinguished_name = dn', 'x509_extensions = ext', 'prompt = no', '[dn]', 'CN = op.test', '[ext]', 'subjectAltName = DNS:op.test'].join('\n'))
   execFileSync('openssl', ['req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-days', '2', '-keyout', path.join(dir, 'key.pem'), '-out', path.join(dir, 'cert.pem'), '-config', path.join(dir, 'cert.cnf')], { stdio: 'ignore' })
   const port = await freePort()
@@ -60,11 +60,15 @@ before(async () => {
       env: { ...process.env, ELECTRON_RUN_AS_NODE: '', NODE_OPTIONS: '--import tsx', BROWSER_TEST_DIR: dir, BROWSER_TEST_PORT: String(port) },
       stdio: ['ignore', 'pipe', 'pipe'],
     })
+    stopWithTempDirs(child)
     let out = ''
     child.stdout.on('data', chunk => { out += chunk })
     child.stderr.on('data', chunk => { out += chunk })
-    const timer = setTimeout(() => { child.kill('SIGKILL'); reject(new Error(`the Electron harness did not finish:\n${out.slice(-4000)}`)) }, 230_000)
-    child.on('close', () => { clearTimeout(timer); resolve(out.slice(-4000)) })
+    // On a timeout the child is killed and its end awaited before failing, so the folder it writes in can be
+    // removed after it (`shared/testing/temp-dirs.ts`).
+    let timedOut = false
+    const timer = setTimeout(() => { timedOut = true; child.kill('SIGKILL') }, 230_000)
+    child.on('close', () => { clearTimeout(timer); if (timedOut) reject(new Error(`the Electron harness did not finish:\n${out.slice(-4000)}`)); else resolve(out.slice(-4000)) })
   })
   const file = path.join(dir, 'result.json')
   const text = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : null

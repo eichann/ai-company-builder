@@ -1,10 +1,10 @@
 import { test, type TestContext } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
-import os from 'node:os'
 import path from 'node:path'
 import { ChatHistoryStore, atomicWrite, type ChatHistoryStoreOptions } from '../electron/chat-history-store'
 import type { ChatSession, ChatSaveResult } from '../shared/chat-history'
+import { makeTempDir } from '../../shared/testing/temp-dirs'
 
 const company = 'company-1'
 function session(id = 'chat-1', extra: Partial<ChatSession> = {}): ChatSession {
@@ -17,7 +17,7 @@ function saved(result: ChatSaveResult): ChatSession {
   return result.session
 }
 function fixture(t: TestContext, options: ChatHistoryStoreOptions = {}) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'acb-history-test-'))
+  const dir = makeTempDir('acb-history-test-')
   const store = new ChatHistoryStore(dir, options)
   t.after(async () => {
     await store.flush().catch(() => {})

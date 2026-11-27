@@ -18,9 +18,8 @@
  */
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest'
 import { execFileSync, spawnSync } from 'child_process'
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync, symlinkSync } from 'fs'
+import { rmSync, writeFileSync, mkdirSync, symlinkSync } from 'fs'
 import { join, dirname } from 'path'
-import { tmpdir } from 'os'
 
 vi.mock('../../src/lib/auth', () => ({
   getUserFromRequest: vi.fn().mockResolvedValue(null),
@@ -32,6 +31,7 @@ vi.mock('../../src/lib/auth', () => ({
 }))
 
 import { configureBareRepo } from '../../src/routes/git'
+import { makeTempDir } from '../../shared/testing/temp-dirs'
 
 vi.setConfig({ testTimeout: 180_000, hookTimeout: 60_000 })
 
@@ -151,7 +151,7 @@ const LOCATIONS = {
 } as const
 
 beforeAll(() => {
-  workDir = mkdtempSync(join(tmpdir(), 'acb-autorun-hook-'))
+  workDir = makeTempDir('acb-autorun-hook-')
 })
 
 afterAll(() => {

@@ -4,14 +4,14 @@
 // write guard (`writeArea`), judged on the path as written and where it lands on disk.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync } from 'fs'
-import { tmpdir } from 'os'
+import { mkdirSync, rmSync, symlinkSync } from 'fs'
 import path from 'path'
 import { checkWritePath, decideToolWrite, type WriteGuard } from '../electron/write-guard'
 import { insideDeliverableFolder } from '../../shared/core/plugin-step-runs'
+import { makeTempDir } from '../../shared/testing/temp-dirs'
 
 function world() {
-  const base = mkdtempSync(path.join(tmpdir(), 'acb-step-area-'))
+  const base = makeTempDir('acb-step-area-')
   const root = path.join(base, 'company')
   const outside = path.join(base, 'outside')
   mkdirSync(path.join(root, '営業部', '.personal', '提案書'), { recursive: true })

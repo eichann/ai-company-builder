@@ -1,13 +1,13 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { mkdtempSync, writeFileSync, readFileSync, existsSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { writeFileSync, readFileSync, existsSync, rmSync } from 'node:fs'
 import path from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
 import { VoiceHelperPool } from '../electron/voice-helper'
+import { makeTempDir } from '../../shared/testing/temp-dirs'
 
 test('idle helper does not start capture; start preserves device and stop finalizes once', async () => {
-  const dir = mkdtempSync(path.join(tmpdir(), 'voice-standby-'))
+  const dir = makeTempDir('acb-voice-standby-')
   const cli = path.join(dir, 'helper')
   const ready = path.join(dir, 'ready')
   const started = path.join(dir, 'started')

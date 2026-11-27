@@ -7,10 +7,10 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
 import fs from 'node:fs'
-import os from 'node:os'
 import path from 'node:path'
 import { simpleGit } from 'simple-git'
 import { findUnsharedLargeFiles } from '../electron/sync/large-files'
+import { makeTempDir } from '../../shared/testing/temp-dirs'
 
 /** simple-git 4 rejects an explicit env holding guarded keys (a developer's GIT_EDITOR); this test's env is its own. */
 const GUARD_OFF = (env: object) => ({ allowEnvironment: Object.keys(env), unsafe: { allowUnsafeEditor: true, allowUnsafeConfigPaths: true, allowUnsafeTemplateDir: true } })
@@ -18,7 +18,7 @@ const GUARD_OFF = (env: object) => ({ allowEnvironment: Object.keys(env), unsafe
 const LIMIT = 1024
 
 test('untracked files over the limit are listed, ignored or not; shared, small and local-folder files are not', async () => {
-  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'acb-unshared-large-')))
+  const root = fs.realpathSync(makeTempDir('acb-unshared-large-'))
   try {
     const env = { ...process.env, GIT_CONFIG_GLOBAL: path.join(root, 'gitconfig'), GIT_CONFIG_NOSYSTEM: '1', GIT_TEMPLATE_DIR: path.join(root, 'tpl') }
     fs.mkdirSync(env.GIT_TEMPLATE_DIR)

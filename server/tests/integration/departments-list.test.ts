@@ -17,9 +17,8 @@
  * (c) concurrent creates for one company are serialized and all succeed.
  */
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest'
-import { mkdtempSync, mkdirSync, readdirSync, rmSync, statSync, writeFileSync, existsSync } from 'fs'
+import { mkdirSync, readdirSync, rmSync, statSync, writeFileSync, existsSync } from 'fs'
 import { join, dirname } from 'path'
-import { tmpdir } from 'os'
 
 // Count synchronous child_process calls made by the server code under test.
 const syncCalls = vi.hoisted(() => ({ count: 0, log: [] as string[] }))
@@ -61,6 +60,7 @@ import { db, initDatabase } from '../../src/db'
 import { departmentsRoute } from '../../src/routes/departments'
 import { withCompanyLock } from '../../src/lib/company-lock'
 import { configureBareRepo } from '../../src/routes/git'
+import { makeTempDir } from '../../shared/testing/temp-dirs'
 
 // Every push runs the real pre-receive hook, which is slow on some hosts.
 vi.setConfig({ testTimeout: 300_000, hookTimeout: 300_000 })
@@ -198,7 +198,7 @@ const list = (companyId: string) => call('GET', `/api/companies/${companyId}/dep
 
 beforeAll(() => {
   initDatabase()
-  scratch = mkdtempSync(join(tmpdir(), 'acb-dept-list-'))
+  scratch = makeTempDir('acb-dept-list-')
 })
 
 afterAll(() => {

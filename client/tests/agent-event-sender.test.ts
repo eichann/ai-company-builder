@@ -1,12 +1,12 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
-import os from 'node:os'
 import path from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { AGENT_EVENTS_SEND_INTERVAL_MS, createAgentEventSender, safeSegment, type AgentEventSender, type SenderClock } from '../electron/services/agent-event-sender'
 import { createSession } from '../electron/services/session'
 import { parseAgentToolEvent, type AgentToolEvent } from '../../shared/types/agent-events'
+import { makeTempDir } from '../../shared/testing/temp-dirs'
 
 // ---------------------------------------------------------------------------
 // Fakes: a clock whose timers run only when the test advances it, and a
@@ -87,7 +87,7 @@ function event(over: Partial<AgentToolEvent> = {}): AgentToolEvent {
 }
 
 function setup(options: { user?: string | null; limits?: Parameters<typeof createAgentEventSender>[0]['limits']; dir?: string; fetch?: typeof fetch } = {}) {
-  const dir = options.dir ?? fs.mkdtempSync(path.join(os.tmpdir(), 'acb-agent-events-'))
+  const dir = options.dir ?? makeTempDir('acb-agent-events-')
   const time = fakeClock()
   const server = fakeServer()
   const session = createSession()

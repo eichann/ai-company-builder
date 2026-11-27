@@ -7,10 +7,10 @@
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { cpSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { APPROVED_FILE, CARRIED_FILE, CONNECTORS_DIR, approvedFileText, carriedFileText, currentRows, declarationHash, folderHash, mergeApproved } from '../scripts/browser-connectors'
+import { makeTempDir } from '../../shared/testing/temp-dirs'
 
 test('approved.json is what the script writes for the connector folders now', async () => {
   const existing = readFileSync(APPROVED_FILE, 'utf8')
@@ -32,7 +32,7 @@ test('every current declaration × checker folder has an approved row with its d
 })
 
 test('one changed byte anywhere in a site folder is another checker hash, kept beside the old row', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'acb-connectors-'))
+  const dir = makeTempDir('acb-connectors-')
   try {
     cpSync(CONNECTORS_DIR, dir, { recursive: true })
     const before = folderHash(join(dir, 'lstep'))

@@ -12,9 +12,8 @@
  */
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest'
 import { execFileSync, spawnSync } from 'child_process'
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from 'fs'
+import { rmSync, writeFileSync, mkdirSync } from 'fs'
 import { join, dirname } from 'path'
-import { tmpdir } from 'os'
 
 // The department route authenticates through lib/auth: act as the owner.
 vi.mock('../../src/lib/auth', () => ({
@@ -33,6 +32,7 @@ vi.mock('../../src/lib/auth', () => ({
 }))
 
 import { configureBareRepo } from '../../src/routes/git'
+import { makeTempDir } from '../../shared/testing/temp-dirs'
 
 vi.setConfig({ testTimeout: 60_000, hookTimeout: 60_000 })
 
@@ -108,7 +108,7 @@ function setup(seed: Record<string, string>): { bare: string; clone: string } {
 const remoteHead = (bare: string) => git(['-C', bare, 'rev-parse', 'main']).trim()
 
 beforeAll(() => {
-  workDir = mkdtempSync(join(tmpdir(), 'acb-personal-hook-'))
+  workDir = makeTempDir('acb-personal-hook-')
 })
 
 afterAll(() => {

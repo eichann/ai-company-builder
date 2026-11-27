@@ -7,11 +7,11 @@
  * leaves the relay alone.
  */
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest'
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'fs'
-import { tmpdir } from 'os'
+import { chmodSync, rmSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import { randomBytes } from 'crypto'
 import type { UpstreamClient } from '../../src/ports/upstream'
+import { makeTempDir } from '../../shared/testing/temp-dirs'
 
 vi.mock('../../src/lib/auth', () => ({
   getUserFromRequest: vi.fn().mockResolvedValue(null),
@@ -53,7 +53,7 @@ async function call() {
 const lastEvent = () => db.prepare('SELECT * FROM agent_events WHERE company_id = ? ORDER BY seq DESC LIMIT 1').get(CO)
 
 beforeAll(async () => {
-  kekDir = mkdtempSync(join(tmpdir(), 'acb-bs-kek-'))
+  kekDir = makeTempDir('acb-bs-kek-')
   writeFileSync(join(kekDir, 'kek'), randomBytes(32).toString('base64'))
   chmodSync(join(kekDir, 'kek'), 0o600)
   process.env.BROKER_KEK_FILE = join(kekDir, 'kek')

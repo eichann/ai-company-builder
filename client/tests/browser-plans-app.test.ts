@@ -8,7 +8,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
-import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { lstepConnector } from '../connectors/lstep'
@@ -25,6 +24,7 @@ import { wireBrowserPlans } from '../electron/features/browser/wire'
 import { browserRequestForTurn, createBrowserRequestTools } from '../electron/browser-request/tools'
 import type { BrowserApiAnswer } from '../electron/features/browser/runner'
 import type { IpcInvokeEvent, IpcRegistrar } from '../electron/ipc/registrar'
+import { makeTempDir } from '../../shared/testing/temp-dirs'
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '../..')
 const HOST = 'manager.linestep.net'
@@ -446,7 +446,7 @@ test('the build\'s combination is carried.json\'s row whose declaration hash is 
 test('as it ships (the build\'s switch off): ［任せる］, the request and the tool reach no site, no operator and no server', async () => {
   const handlers = new Map<string, (event: IpcInvokeEvent, ...args: unknown[]) => Promise<unknown>>()
   const ipc = { handle: (c: string, h: (event: IpcInvokeEvent, ...args: unknown[]) => Promise<unknown>) => { handlers.set(c, h) }, on() {} } as unknown as IpcRegistrar
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'acb-plans-'))
+  const dir = makeTempDir('acb-plans-')
   const touched: string[] = []
   try {
     const wired = wireBrowserPlans(ipc, {
@@ -491,7 +491,7 @@ test('as it ships (the build\'s switch off): ［任せる］, the request and th
 
 test('the request tool tells the AI of a site\'s operations only where the company registered the site (agent-browser.md "The tools\' words")', () => {
   const ipc = { handle() {}, on() {} } as unknown as IpcRegistrar
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'acb-plans-'))
+  const dir = makeTempDir('acb-plans-')
   try {
     const wired = wireBrowserPlans(ipc, {
       aiSwitch: () => true,

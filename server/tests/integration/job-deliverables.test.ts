@@ -16,8 +16,7 @@
  *   and so does the clock at the slot; choosing it again with 「受け取る」 makes the next one runnable.
  */
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'fs'
-import { tmpdir } from 'os'
+import { chmodSync, rmSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import { createHash, randomBytes } from 'crypto'
 import type { AddressInfo } from 'net'
@@ -25,6 +24,7 @@ import { serve, type ServerType } from '@hono/node-server'
 import { createFakeGoogle, type FakeGoogle } from '../fakes/google/fake-google'
 import { GOOGLE_SEED } from '../fakes/google/seed'
 import { keepDrivePicks } from '../helpers/drive-picks'
+import { makeTempDir } from '../../shared/testing/temp-dirs'
 
 vi.setConfig({ testTimeout: 60_000, hookTimeout: 120_000 })
 
@@ -149,7 +149,7 @@ beforeAll(async () => {
   google.addClient({ clientId: CLIENT_ID, clientSecret: SECRET, redirectUris: [REDIRECT] })
   googleServer = serve({ fetch: google.app.fetch, port: 0, hostname: '127.0.0.1' })
   await new Promise(r => setTimeout(r, 50))
-  kekDir = mkdtempSync(join(tmpdir(), 'acb-jobdrive-kek-'))
+  kekDir = makeTempDir('acb-jobdrive-kek-')
   writeFileSync(join(kekDir, 'kek'), randomBytes(32).toString('base64'))
   chmodSync(join(kekDir, 'kek'), 0o600)
   Object.assign(process.env, {

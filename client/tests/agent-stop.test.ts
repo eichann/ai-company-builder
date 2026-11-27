@@ -8,7 +8,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
-import os from 'node:os'
 import path from 'node:path'
 import type { LanguageModel } from 'ai'
 import { claudeCode } from 'ai-sdk-provider-claude-code'
@@ -24,6 +23,7 @@ import { createCodexConnection, type CodexTransport } from '../electron/agents/c
 import type { RpcMessage } from '../electron/agents/codex-rpc'
 import { createFileSystemTools } from '../electron/chat-tools'
 import { createToolEventTracker, type AgentToolEvent } from '../shared/agent-events'
+import { makeTempDir } from '../../shared/testing/temp-dirs'
 
 const V1 = 'a'.repeat(32)
 const V2 = 'b'.repeat(32)
@@ -218,7 +218,7 @@ function policyFetch(answers: Array<unknown | Error>) {
 const sandbox = { mode: 'off', allowedDomains: ['api.github.com'], deniedReadPaths: [], onUnavailable: 'record-only', source: 'company' }
 
 test('never received → nothing is stopped; once received, the last stop is kept across a restart, per account', async () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'acb-stop-'))
+  const dir = makeTempDir('acb-stop-')
   try {
     // Offline from the start: unknown → the turn runs.
     const offline = createAgentPolicyStore({ baseUrl: () => 'https://acb.example.jp', cookies: () => ['s=1'], userId: () => 'u1', dir: () => dir, fetch: policyFetch([new Error('offline')]).f, log: quiet })
@@ -269,7 +269,7 @@ test('no person present: never received → no automatic start; a consultation s
 })
 
 test('no person present: a stop restored from disk does not count until the server answers in this run', async () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'acb-stop-'))
+  const dir = makeTempDir('acb-stop-')
   try {
     let t = 1_000_000
     const opts = { baseUrl: () => 'https://acb.example.jp', cookies: () => ['s=1'], userId: () => 'u1', dir: () => dir, log: quiet, now: () => t }
@@ -662,7 +662,7 @@ test('hand-off memos: no memo is written while the AI is stopped, and no error i
   const { ChatHistoryStore } = await import('../electron/chat-history-store')
   const { HandoffStore } = await import('../electron/handoff/store')
   const { HandoffService } = await import('../electron/handoff/service')
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'acb-stop-handoff-'))
+  const dir = makeTempDir('acb-stop-handoff-')
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }))
   const history = new ChatHistoryStore(path.join(dir, 'history'))
   const store = new HandoffStore(path.join(dir, 'memos'), history)

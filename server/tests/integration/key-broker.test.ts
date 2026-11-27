@@ -14,10 +14,10 @@
  * - Without a KEK nothing can be registered (503 BROKER_OFF), the rest works.
  */
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest'
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'fs'
-import { tmpdir } from 'os'
+import { chmodSync, rmSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import { randomBytes } from 'crypto'
+import { makeTempDir } from '../../shared/testing/temp-dirs'
 
 const currentUser = vi.hoisted(() => ({ id: 'kb-owner' as string | null }))
 
@@ -82,7 +82,7 @@ const gemini = (over: Record<string, unknown> = {}) => ({
 
 beforeAll(async () => {
   // A KEK in a temp dir outside DATA_DIR, owner-only, before the composition root loads it.
-  kekDir = mkdtempSync(join(tmpdir(), 'acb-kb-kek-'))
+  kekDir = makeTempDir('acb-kb-kek-')
   const kekPath = join(kekDir, 'kek')
   writeFileSync(kekPath, randomBytes(32).toString('base64'))
   chmodSync(kekPath, 0o600)

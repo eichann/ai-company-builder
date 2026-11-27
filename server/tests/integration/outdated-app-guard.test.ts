@@ -13,9 +13,8 @@
  */
 import { describe, it, expect, beforeAll, beforeEach, afterAll, vi } from 'vitest'
 import { execFileSync } from 'child_process'
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'fs'
+import { mkdirSync, rmSync, writeFileSync } from 'fs'
 import { join } from 'path'
-import { tmpdir } from 'os'
 
 const currentUser = vi.hoisted(() => ({ id: 'og-owner' as string | null }))
 
@@ -39,6 +38,7 @@ import { replaceDepartmentManagers, replaceScopeRules, sqlitePermissionRepositor
 import { resolveAccess } from '../../shared/core/permissions'
 import { supportsWriteDeniedRecovery, WRITE_DENIED_RECOVERY_COMMIT_DATE, SKILL_FILE_RECOVERY_COMMIT_DATE, skillFileRuleApplies } from '../../src/lib/client-version'
 import { membersLosingWrite } from '../../src/lib/write-loss'
+import { makeTempDir } from '../../shared/testing/temp-dirs'
 
 vi.setConfig({ testTimeout: 30_000, hookTimeout: 60_000 })
 
@@ -116,7 +116,7 @@ beforeAll(() => {
   initDatabase() // seed scopes
   replaceDepartmentManagers(db, CO, ids.content, ['og-manager'], 'og-owner')
 
-  tmp = mkdtempSync(join(tmpdir(), 'og-'))
+  tmp = makeTempDir('acb-og-')
   const work = join(tmp, 'work')
   mkdirSync(work)
   git(['init', '-q', '-b', 'main'], work)

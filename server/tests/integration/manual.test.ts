@@ -13,11 +13,11 @@
  *   the same strict headers and nothing cached.
  */
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach, afterEach } from 'vitest'
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'fs'
-import { tmpdir } from 'os'
+import { mkdirSync, readFileSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import { request as httpRequest } from 'http'
 import type { AddressInfo } from 'net'
+import { makeTempDir } from '../../shared/testing/temp-dirs'
 
 // Who the request is signed in as (null: no session); each test sets it.
 const session = vi.hoisted(() => ({ user: null as null | { id: string; email: string; name: string; image: null; emailVerified: boolean } }))
@@ -56,7 +56,7 @@ function writeSource(dir: string, pages: Record<string, string>, images: Record<
 }
 
 beforeAll(async () => {
-  root = mkdtempSync(join(tmpdir(), 'acb-manual-'))
+  root = makeTempDir('acb-manual-')
   source = join(root, 'manual')
   site = join(root, 'site')
   writeSource(source, {

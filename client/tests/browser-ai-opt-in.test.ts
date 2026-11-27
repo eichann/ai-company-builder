@@ -7,7 +7,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
-import os from 'node:os'
 import path from 'node:path'
 import { execFileSync } from 'node:child_process'
 import { lstepConnector } from '../connectors/lstep'
@@ -15,6 +14,7 @@ import { BROWSER_AI_BUILD_SWITCH, BROWSER_AI_OPT_IN_FILE, browserAiOptInOn } fro
 import { createThisPcSwitch } from '../electron/features/browser/ai-switch'
 import { wireBrowserPlans } from '../electron/features/browser/wire'
 import type { IpcInvokeEvent, IpcRegistrar } from '../electron/ipc/registrar'
+import { makeTempDir } from '../../shared/testing/temp-dirs'
 
 const SERVER = 'https://acb.example'
 const USER = 'user_owner_1'
@@ -61,7 +61,7 @@ test('an opt-in turns it on only for its server, its signed-in member and until 
   assert.equal(on(optIn() + ' '.repeat(5000)), false, 'too large')
 })
 
-function tempDir() { return fs.mkdtempSync(path.join(os.tmpdir(), 'acb-optin-')) }
+function tempDir() { return makeTempDir('acb-optin-') }
 
 test('the switch reads this PC\'s file on every ask: none = off, written = on, removed = off at once; a link, a folder or a pipe never counts', { timeout: 20_000 }, () => {
   const dir = tempDir()

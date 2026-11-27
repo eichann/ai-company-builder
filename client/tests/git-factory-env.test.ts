@@ -5,13 +5,13 @@
 import { afterEach, before, describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
-import os from 'node:os'
 import path from 'node:path'
 import { execFileSync } from 'node:child_process'
 import { ambientEnv, createConfiguredGit } from '../electron/sync/git-factory'
+import { makeTempDir } from '../../shared/testing/temp-dirs'
 
 describe('createConfiguredGit with simple-git 4', () => {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'acb-git-factory-'))
+  const tmp = makeTempDir('acb-git-factory-')
   const saved = { ...process.env }
   before(() => {
     fs.mkdirSync(path.join(tmp, 'repo'))

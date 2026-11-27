@@ -7,12 +7,12 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
-import os from 'node:os'
 import path from 'node:path'
 import { execFileSync } from 'node:child_process'
 import { simpleGit } from 'simple-git'
 import type { SimpleGit } from 'simple-git'
 import { backUpBeforeServerOverwrite, findNestedGitRepos } from '../electron/sync/nested-repos'
+import { makeTempDir } from '../../shared/testing/temp-dirs'
 
 function git(cwd: string, ...args: string[]): string {
   return execFileSync('git', args, {
@@ -35,7 +35,7 @@ function nestedRepo(root: string, rel: string): void {
 
 /** A company checkout with `.gitignore` (committed) and `tracked` files committed with -f. */
 function checkout(t: { after: (fn: () => void) => void }, gitignore: string, tracked: string[] = []): string {
-  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'acb-nested-')))
+  const root = fs.realpathSync(makeTempDir('acb-nested-'))
   t.after(() => fs.rmSync(root, { recursive: true, force: true }))
   git(root, 'init', '-q', '-b', 'main')
   write(root, '.gitignore', gitignore)
@@ -103,7 +103,7 @@ test('the member\'s own exclusions are still reported, also inside an ignored fo
 })
 
 test('when git cannot answer, every folder is searched (asking is the safe side)', async t => {
-  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'acb-nested-')))
+  const root = fs.realpathSync(makeTempDir('acb-nested-'))
   t.after(() => fs.rmSync(root, { recursive: true, force: true }))
   // Not a repository: git fails, nothing counts as ignored.
   write(root, '.gitignore', 'big/\n')

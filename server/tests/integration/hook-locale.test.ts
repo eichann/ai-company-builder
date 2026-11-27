@@ -12,9 +12,8 @@
  */
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest'
 import { execFileSync, spawnSync } from 'child_process'
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync, readFileSync, chmodSync } from 'fs'
+import { rmSync, writeFileSync, mkdirSync, readFileSync, chmodSync } from 'fs'
 import { join } from 'path'
-import { tmpdir } from 'os'
 
 // git.ts transitively imports lib/auth, which requires AUTH_SECRET at import
 // time — mock it like the other integration tests do.
@@ -28,6 +27,7 @@ vi.mock('../../src/lib/auth', () => ({
 }))
 
 import { configureBareRepo } from '../../src/routes/git'
+import { makeTempDir } from '../../shared/testing/temp-dirs'
 
 vi.setConfig({ testTimeout: 60_000, hookTimeout: 60_000 })
 
@@ -97,7 +97,7 @@ const UTF8_LOCALES: Array<[string, Record<string, string>]> = [
 ]
 
 beforeAll(() => {
-  workDir = mkdtempSync(join(tmpdir(), 'acb-hook-locale-'))
+  workDir = makeTempDir('acb-hook-locale-')
 })
 
 afterAll(() => {

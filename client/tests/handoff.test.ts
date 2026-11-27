@@ -1,17 +1,17 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
-import os from 'node:os'
 import path from 'node:path'
 import { HandoffTrialStore } from '../electron/handoff/trial-store'
 import { HANDOFF_HEADINGS, validateHandoff, handoffInputText, saveHandoffArguments } from '../electron/handoff/contract'
 import { writeCodexHandoff } from '../electron/handoff/codex'
 import type { CodexTransport } from '../electron/agents/codex'
 import type { RpcMessage } from '../electron/agents/codex-rpc'
+import { makeTempDir } from '../../shared/testing/temp-dirs'
 const memo = HANDOFF_HEADINGS.map(h => `## ${h}\n- 未確認`).join('\n\n')
 
 test('delete removes memo, backup, cancels active jobs and rejects late writes after restart', t => {
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'acb-handoff-test-'))
+  const directory = makeTempDir('acb-handoff-test-')
   t.after(() => fs.rmSync(directory, { recursive: true, force: true }))
   const store = new HandoffTrialStore(directory)
   const first = store.begin(); first.save(memo); first.close()
@@ -31,7 +31,7 @@ test('delete removes memo, backup, cancels active jobs and rejects late writes a
   assert.equal(fs.existsSync(path.join(directory, 'handoff.backup.json')), false)
 })
 test('invalid, duplicate, closed and oversized saves cannot overwrite the last good memo', t => {
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'acb-handoff-test-'))
+  const directory = makeTempDir('acb-handoff-test-')
   t.after(() => fs.rmSync(directory, { recursive: true, force: true }))
   const store = new HandoffTrialStore(directory)
   const first = store.begin(); first.save(memo)
@@ -122,7 +122,7 @@ test('abort closes transport and refuses delayed callbacks; wrong thread/turn ca
 
 
 test('old local memo remains readable after restart without any native session', t => {
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'acb-handoff-test-'))
+  const directory = makeTempDir('acb-handoff-test-')
   t.after(() => fs.rmSync(directory, { recursive: true, force: true }))
   fs.writeFileSync(path.join(directory, 'handoff.json'), JSON.stringify({ schemaVersion: 1, updatedAt: '2000-01-01T00:00:00Z', markdown: memo }))
   assert.equal(new HandoffTrialStore(directory).read(), memo)

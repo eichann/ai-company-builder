@@ -16,7 +16,6 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { createHash } from 'crypto'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import { readMailAttachment } from '../electron/records/mail-attachments'
 import { createRecordsApi } from '../electron/records/api'
@@ -25,6 +24,7 @@ import { createOutboundMailApi } from '../electron/features/outbound-mail/ipc'
 import { readMailDraft } from '../shared/outbound-mail'
 import type { OutboundMailView } from '../../shared/types/outbound-mail'
 import type { TypeDefinition } from '../../shared/core/record-types'
+import { makeTempDir } from '../../shared/testing/temp-dirs'
 
 const TOKEN = 'acb_rec_co.' + 'a'.repeat(64)
 const SESSION = 'better-auth.session_token=SECRET.sig'
@@ -35,8 +35,8 @@ const sha = (b: Uint8Array) => createHash('sha256').update(b).digest('hex')
 const pdf = (text = 'x') => Buffer.from(`%PDF-1.7\n${text}\n%%EOF\n`)
 
 function company() {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'acb-mail-files-test-'))
-  const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'acb-mail-outside-'))
+  const root = makeTempDir('acb-mail-files-test-')
+  const outside = makeTempDir('acb-mail-outside-')
   const write = (rel: string, bytes: Uint8Array) => {
     const abs = path.join(root, ...rel.split('/'))
     fs.mkdirSync(path.dirname(abs), { recursive: true })
@@ -201,7 +201,7 @@ test('the card\'s send names the files shown (sha256 only); anything else never 
 })
 
 test('「開いて確かめる」: the bytes asked for, fetched with the session, saved apart and opened; other bytes are not opened', async () => {
-  const filesDir = fs.mkdtempSync(path.join(os.tmpdir(), 'acb-mail-open-test-'))
+  const filesDir = makeTempDir('acb-mail-open-test-')
   try {
     const bytes = pdf('the proposal')
     let answer = bytes

@@ -8,11 +8,11 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
-import os from 'node:os'
 import path from 'node:path'
 import { execFileSync } from 'node:child_process'
 import { simpleGit } from 'simple-git'
 import { parsePorcelainStatus, previewChanges, withScratchIndex } from '../electron/sync/preview'
+import { makeTempDir } from '../../shared/testing/temp-dirs'
 
 /** simple-git 4 rejects an explicit env holding guarded keys (a developer's GIT_EDITOR); this test's env is its own. */
 const GUARD_OFF = (env: object) => ({ allowEnvironment: Object.keys(env), unsafe: { allowUnsafeEditor: true } })
@@ -30,7 +30,7 @@ function write(root: string, rel: string, content: string): void {
 
 /** A checkout with 営業部 left out (non-cone sparse, as the app sets it). */
 function repo(): string {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'acb-preview-'))
+  const root = makeTempDir('acb-preview-')
   git(root, 'init', '-q', '-b', 'main')
   git(root, 'config', 'user.email', 't@example.com')
   git(root, 'config', 'user.name', 't')

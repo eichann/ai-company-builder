@@ -16,9 +16,8 @@
  */
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest'
 import { execFileSync, spawn, spawnSync } from 'child_process'
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync, symlinkSync, unlinkSync } from 'fs'
+import { rmSync, writeFileSync, mkdirSync, symlinkSync, unlinkSync } from 'fs'
 import { join, dirname } from 'path'
-import { tmpdir } from 'os'
 import type { AddressInfo } from 'net'
 
 // git.ts transitively imports lib/auth, which requires AUTH_SECRET at import
@@ -34,6 +33,7 @@ vi.mock('../../src/lib/auth', () => ({
 }))
 
 import { configureBareRepo } from '../../src/routes/git'
+import { makeTempDir } from '../../shared/testing/temp-dirs'
 
 // Each test drives several real git processes (and the hook) end to end.
 vi.setConfig({ testTimeout: 60_000, hookTimeout: 60_000 })
@@ -109,7 +109,7 @@ function setup(seed?: Record<string, string>): { bare: string; clone: string } {
 const remoteHead = (bare: string) => git(['-C', bare, 'rev-parse', 'main']).trim()
 
 beforeAll(() => {
-  workDir = mkdtempSync(join(tmpdir(), 'acb-protected-hook-'))
+  workDir = makeTempDir('acb-protected-hook-')
 })
 
 afterAll(() => {

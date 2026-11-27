@@ -15,8 +15,7 @@
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { execFileSync } from 'child_process'
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'fs'
-import { tmpdir } from 'os'
+import { mkdirSync, rmSync, writeFileSync } from 'fs'
 import { join } from 'path'
 
 vi.mock('../../src/lib/auth', () => ({
@@ -35,6 +34,7 @@ import { randomIds } from '../../src/adapters/system'
 import { departmentSkill, departmentSkills } from '../../src/lib/skill-trees'
 import { companyRepoPath } from '../../src/lib/config'
 import { JOB_SET_WATCH_OPENED } from '../../../shared/core/jobs'
+import { makeTempDir } from '../../shared/testing/temp-dirs'
 
 vi.setConfig({ testTimeout: 60_000, hookTimeout: 120_000 })
 
@@ -116,7 +116,7 @@ beforeAll(() => {
   rmSync(bare, { recursive: true, force: true })
   mkdirSync(bare, { recursive: true })
   git(bare, 'init', '-q', '--bare')
-  workDir = mkdtempSync(join(tmpdir(), 'acb-swp-work-'))
+  workDir = makeTempDir('acb-swp-work-')
   git(workDir, 'init', '-q')
   git(workDir, 'remote', 'add', 'origin', bare)
   skill(DEPT, 'sales-proposal-auto', DECISION)

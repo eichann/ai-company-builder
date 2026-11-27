@@ -8,7 +8,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
-import os from 'node:os'
 import path from 'node:path'
 import { execFileSync } from 'node:child_process'
 import { simpleGit, type SimpleGit } from 'simple-git'
@@ -26,6 +25,7 @@ import {
 } from '../electron/protected-config'
 import { renderPreReceiveHook } from '../../server/src/lib/git-server/hook'
 import { isServerRejection } from '../electron/sync/push-landed'
+import { makeTempDir } from '../../shared/testing/temp-dirs'
 
 // Rendered by the server's own installer (thin caller of the TypeScript push checker).
 const HOOK_SCRIPT = renderPreReceiveHook({ node: process.execPath })
@@ -48,7 +48,7 @@ function memberGit(dir: string, extraEnv: Record<string, string> = {}): SimpleGi
 }
 
 function setupServer(t: { after: (fn: () => void) => void }, legacy: Record<string, string> = {}) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'acb-protected-sync-'))
+  const root = makeTempDir('acb-protected-sync-')
   t.after(() => fs.rmSync(root, { recursive: true, force: true }))
   const bare = path.join(root, 'company.git')
   execFileSync('git', ['init', '-q', '--bare', '--initial-branch=main', bare])

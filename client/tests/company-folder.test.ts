@@ -6,7 +6,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
-import os from 'node:os'
 import path from 'node:path'
 import { execFileSync } from 'node:child_process'
 import {
@@ -20,6 +19,7 @@ import {
 } from '../electron/sync/company-folder'
 import { planFolderSetup, INSPECT_FAILED_MESSAGE } from '../src/features/company/folderPlan'
 import { checkRememberedCompany } from '../src/features/company/restore-company'
+import { makeTempDir } from '../../shared/testing/temp-dirs'
 
 const COMPANY = 'https://acb.example.com/api/git-http/c0ffee-123.git'
 
@@ -92,7 +92,7 @@ function git(cwd: string, ...args: string[]): string {
 }
 
 test('inspecting real folders: missing, empty, OS files only, user files, clone, repo inside another repo', async (t) => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'acb-company-folder-'))
+  const root = makeTempDir('acb-company-folder-')
   t.after(() => fs.rmSync(root, { recursive: true, force: true }))
   const run = (dir: string) => (args: string[]) => Promise.resolve().then(() => git(dir, ...args))
 

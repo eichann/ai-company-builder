@@ -20,7 +20,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import { AllowedRoots } from '../electron/allowed-roots'
 import { createRecordsApi } from '../electron/records/api'
@@ -28,6 +27,7 @@ import { createRecordTools } from '../electron/records/tools'
 import { createDrivePicking, createDriveTools, drivePutRequestKey, readLocalFileForDrive, type DrivePickingDeps } from '../electron/features/google/drive'
 import { recordToolProviders } from '../electron/records/tool-providers'
 import type { MyGoogle } from '../shared/google'
+import { makeTempDir } from '../../shared/testing/temp-dirs'
 
 const TOKEN = 'acb_rec_co.' + 'a'.repeat(64)
 const SESSION = 'better-auth.session_token=SECRET.sig'
@@ -108,7 +108,7 @@ async function tools(scope: 'read' | 'act', root: string | null, opts: { availab
 }
 
 function companyFolder(): string {
-  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'acb-drive-')))
+  const root = fs.realpathSync(makeTempDir('acb-drive-'))
   fs.mkdirSync(path.join(root, '営業部', '.personal'), { recursive: true })
   fs.writeFileSync(path.join(root, '営業部', 'ご提案.pdf'), PDF)
   fs.writeFileSync(path.join(root, '営業部', '.personal', 'ご提案.html'), '<p>提案</p>')
@@ -120,7 +120,7 @@ function companyFolder(): string {
   fs.writeFileSync(path.join(root, '営業部', '秘密の案件', '提案.pdf'), PDF)
   fs.mkdirSync(path.join(root, '人事'), { recursive: true })
   fs.writeFileSync(path.join(root, '人事', '評価.pdf'), PDF)
-  const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'acb-outside-'))
+  const outside = makeTempDir('acb-outside-')
   fs.writeFileSync(path.join(outside, 'secret.pdf'), PDF)
   fs.symlinkSync(path.join(outside, 'secret.pdf'), path.join(root, '営業部', 'link.pdf'))
   return root

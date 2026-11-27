@@ -5,10 +5,10 @@
  * verification have nullable timestamps): it must be accepted, or deploying blocks sign-in.
  */
 import { describe, it, expect, vi, afterEach } from 'vitest'
-import { mkdtempSync, mkdirSync, rmSync } from 'fs'
-import { tmpdir } from 'os'
+import { mkdirSync, rmSync } from 'fs'
 import { join } from 'path'
 import Database from 'better-sqlite3'
+import { makeTempDir } from '../../shared/testing/temp-dirs'
 
 const PRODUCTION_SHAPE = `
   CREATE TABLE user (id TEXT PRIMARY KEY, name TEXT NOT NULL, email TEXT NOT NULL, emailVerified INTEGER NOT NULL, image TEXT, createdAt TEXT NOT NULL, updatedAt TEXT NOT NULL);
@@ -25,7 +25,7 @@ afterEach(() => {
 })
 
 async function handlerWith(sql: string) {
-  const dir = mkdtempSync(join(tmpdir(), 'acb-auth-schema-'))
+  const dir = makeTempDir('acb-auth-schema-')
   dirs.push(dir)
   mkdirSync(join(dir, 'repos'))
   const db = new Database(join(dir, 'auth.sqlite'))

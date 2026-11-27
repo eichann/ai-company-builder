@@ -1,15 +1,15 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
-import os from 'node:os'
 import path from 'node:path'
 import { ChatHistoryStore } from '../electron/chat-history-store'
 import { HandoffStore, fingerprint } from '../electron/handoff/store'
 import { HANDOFF_HEADINGS } from '../electron/handoff/contract'
 import { ConsultationReferences } from '../electron/consultations/service'
 import { startReferenceMcp } from '../electron/consultations/mcp'
+import { makeTempDir } from '../../shared/testing/temp-dirs'
 function fixture(t: { after(fn:()=>void):void }) {
-  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'acb-reference-test-')); t.after(()=>fs.rmSync(dir,{recursive:true,force:true}))
+  const dir=makeTempDir('acb-reference-test-'); t.after(()=>fs.rmSync(dir,{recursive:true,force:true}))
   const history=new ChatHistoryStore(path.join(dir,'history')); const store=new HandoffStore(path.join(dir,'memos'),history)
   const add=(id:string,company='company',content='予算は12万円')=>history.save(company,{id,companyId:company,title:'桜 '+id,createdAt:'2026-01-01',updatedAt:'2026-01-01',messages:[{id:'u',role:'user',content,timestamp:'2026-01-01'}]})
   add('source'); add('current'); add('foreign','other')

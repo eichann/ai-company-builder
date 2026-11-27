@@ -12,10 +12,10 @@
  * - No `trust/` = no marker (an app then changes nothing) and an empty answer.
  */
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs'
-import { tmpdir } from 'os'
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import type { SignedEnvelope } from '../../../shared/core/plugin-trust-documents'
+import { makeTempDir } from '../../shared/testing/temp-dirs'
 
 vi.mock('../../src/lib/auth', () => ({
   getUserFromRequest: vi.fn().mockResolvedValue(null),
@@ -37,7 +37,7 @@ const previousUrl = process.env.PUBLIC_URL
 
 beforeAll(async () => {
   process.env.PUBLIC_URL = 'https://acb.example/'
-  shelf = mkdtempSync(join(tmpdir(), 'acb-pt-shelf-'))
+  shelf = makeTempDir('acb-pt-shelf-')
   const trust = join(shelf, 'trust')
   for (const sub of ['root', 'targets', 'freshness']) mkdirSync(join(trust, sub), { recursive: true })
   writeFileSync(join(trust, 'root', '1.json'), text('root-v1'))

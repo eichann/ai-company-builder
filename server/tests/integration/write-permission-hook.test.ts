@@ -12,9 +12,8 @@
  */
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest'
 import { execFileSync, spawn, spawnSync } from 'child_process'
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync, unlinkSync, renameSync } from 'fs'
+import { rmSync, writeFileSync, mkdirSync, unlinkSync, renameSync } from 'fs'
 import { join, dirname } from 'path'
-import { tmpdir } from 'os'
 import type { AddressInfo } from 'net'
 
 vi.mock('../../src/lib/auth', () => ({
@@ -27,6 +26,7 @@ vi.mock('../../src/lib/auth', () => ({
 }))
 
 import { configureBareRepo } from '../../src/routes/git'
+import { makeTempDir } from '../../shared/testing/temp-dirs'
 
 vi.setConfig({ testTimeout: 120_000, hookTimeout: 120_000 })
 
@@ -119,7 +119,7 @@ async function seed(files: Record<string, string>) {
 }
 
 beforeAll(async () => {
-  workDir = mkdtempSync(join(tmpdir(), 'acb-write-perm-'))
+  workDir = makeTempDir('acb-write-perm-')
   const Database = (await import('better-sqlite3')).default
   const dbModule = await import('../../src/db')
   dbModule.initDatabase()

@@ -1,13 +1,17 @@
 /**
  * Vitest global setup: create isolated temp DATA_DIR for integration tests.
- * Runs before each test file.
+ * Runs before each test file; the folder goes after the file's tests (and at the worker's end, or with the next
+ * run's sweep of folders over six hours old: `shared/testing/temp-dirs.ts`).
  */
-import { mkdtempSync, mkdirSync } from 'fs'
-import { tmpdir } from 'os'
+import { mkdirSync } from 'fs'
 import { join } from 'path'
 import Database from 'better-sqlite3'
+import { afterAll } from 'vitest'
+import { makeTempDir, removeTempDir } from '../shared/testing/temp-dirs'
 
-const testDataDir = mkdtempSync(join(tmpdir(), 'acb-test-'))
+const testDataDir = makeTempDir('acb-test-')
+// Registered first, so it runs after the file's own afterAll hooks (they may still close a database in it).
+afterAll(() => removeTempDir(testDataDir))
 
 // Set env vars BEFORE any route/db module is imported
 process.env.DATA_DIR = testDataDir

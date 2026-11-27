@@ -13,9 +13,9 @@
 import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from 'vitest'
 import { createHash } from 'crypto'
 import { execFileSync } from 'child_process'
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from 'fs'
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from 'fs'
 import { join } from 'path'
-import { tmpdir } from 'os'
+import { makeTempDir } from '../../shared/testing/temp-dirs'
 
 vi.mock('../../src/lib/auth', async () => {
   const Database = (await import('better-sqlite3')).default
@@ -163,7 +163,7 @@ beforeAll(async () => {
   for (const method of ['log', 'warn', 'error', 'info'] as const) {
     vi.spyOn(console, method).mockImplementation((...args: unknown[]) => { printed.push(args.map(String).join(' ')) })
   }
-  workDir = mkdtempSync(join(tmpdir(), 'acb-private-holding-'))
+  workDir = makeTempDir('acb-private-holding-')
   const dbModule = await import('../../src/db')
   dbModule.initDatabase()
   db = dbModule.db

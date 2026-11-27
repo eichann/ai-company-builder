@@ -7,8 +7,7 @@
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { execFileSync } from 'child_process'
-import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, rmSync, writeFileSync } from 'fs'
-import { tmpdir } from 'os'
+import { existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync, rmSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import {
   TrustToolError, checkSigningKey, installTrust, reviewedPackage, signFreshness, signRoot, signTargets, sshKeygenSigner, trustTime,
@@ -17,6 +16,7 @@ import { packageFingerprintV2 } from '../../src/adapters/plugin-collect'
 import { diskPluginTrustFiles } from '../../src/adapters/plugin-trust-files'
 import { nodePluginTrustCrypto as C } from '../../src/adapters/plugin-trust-crypto'
 import { companyTrustToServe } from '../../../shared/core/plugin-trust-distribution'
+import { makeTempDir } from '../../shared/testing/temp-dirs'
 
 const SERVER = 'https://acb.example'
 let work: string
@@ -26,7 +26,7 @@ const signWith = (name: string) => (text: string, _file: string, ns: string) => 
 const pkg = { id: 'lstep', version: '0.3.0', fingerprint: 'a'.repeat(64), commit: 'c'.repeat(40), tag: 'lstep@0.3.0' }
 
 beforeAll(() => {
-  work = mkdtempSync(join(tmpdir(), 'acb-trust-tools-'))
+  work = makeTempDir('acb-trust-tools-')
   mkdirSync(join(work, 'keys'))
   for (const n of ['root-1', 'root-2', 'root-3', 'root-4', 'root-5', 'fresh']) execFileSync('ssh-keygen', ['-q', '-t', 'ed25519', '-N', '', '-C', 'ACB TEST KEY', '-f', key(n)])
   execFileSync('ssh-keygen', ['-q', '-t', 'ecdsa', '-b', '256', '-N', '', '-C', 'ACB TEST KEY', '-f', key('targets')])

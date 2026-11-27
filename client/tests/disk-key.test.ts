@@ -5,9 +5,9 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
-import os from 'node:os'
 import path from 'node:path'
 import { diskKey, lookalikeKey } from '../../shared/core/paths'
+import { makeTempDir } from '../../shared/testing/temp-dirs'
 
 const SAME: Array<[string, string]> = [
   ['ſ', 's'], ['K', 'k'], ['ß', 'ss'], ['ẞ', 'ss'], ['ﬁ', 'fi'], ['ﬆ', 'st'], ['Ａ', 'ａ'], ['É', 'é'], ['Ⅰ', 'ⅰ'], ['Ⓐ', 'ⓐ'], ['ς', 'σ'], ['µ', 'μ'],
@@ -26,7 +26,7 @@ test('lookalikeKey is wider, for protected names only', () => {
 })
 
 test('on this Mac: every cased character lands where diskKey says', { skip: process.platform !== 'darwin' }, () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'acb-disk-key-'))
+  const dir = makeTempDir('acb-disk-key-')
   try {
     const wrong: string[] = []
     for (let cp = 0x80; cp <= 0x1FFFF; cp++) {

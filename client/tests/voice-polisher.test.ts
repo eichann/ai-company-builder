@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { mkdtempSync, writeFileSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { writeFileSync, rmSync } from 'node:fs'
 import path from 'node:path'
 import { polishVoice } from '../electron/voice-polisher'
+import { makeTempDir } from '../../shared/testing/temp-dirs'
 function fakeCli(body: string) {
-  const cwd = mkdtempSync(path.join(tmpdir(), 'acb-polisher-'))
+  const cwd = makeTempDir('acb-polisher-')
   const cli = path.join(cwd, 'cli')
   writeFileSync(cli, `#!${process.execPath}\n${body}`, { mode: 0o700 })
   return { cwd, cli, dispose: () => rmSync(cwd, { recursive: true, force: true }) }
