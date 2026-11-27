@@ -46,6 +46,7 @@ import { shortText, type ToolDisplay } from '../../shared/tool-display'
 import { actionToolDisplay, pluginOperationDisplay, recordToolDisplay } from '../../shared/acb-tool-displays'
 import { AI_ASKED_INSTRUCTIONS, aiAskedDoneWords, type AiAskedCard, type AiAskedItem } from '../../shared/ai-asked'
 import { ASKED_AFTER_RENEWAL } from '../../shared/record-tools-missing'
+import { shareFolderOf, type ShareProposalCardRef } from '../../shared/share-proposals'
 import { onceMore, RecordsApiError, type RecordTurnAccess } from './api'
 import type { MailAttachmentRead } from './mail-attachments'
 import { RECORD_ID_RE } from '../../../shared/core/records'
@@ -115,6 +116,8 @@ export interface RecordToolSpec extends RecordToolDescriptor {
   askedCard?: { label: string }
   /** Only in a turn the member started (`records_undo`): after a renewal of the turn's token, the fixed words instead. */
   askedTurnOnly?: true
+  /** 「部署に出す案」 (`records_propose_share`): the answer becomes the app's card; nothing is shared until the member presses it. */
+  shareProposal?: true
 }
 
 const id = z.string().regex(/^[a-z][a-z0-9_]{0,39}-[0-9a-z]{6,32}$/)
@@ -519,6 +522,23 @@ export function narrowCreateTypes<T extends RecordToolDescriptor>(spec: T, types
 }
 
 /**
+ * 「部署に出してよい？」: the AI never shares (見える範囲 widens for good); it proposes, and the member presses the card.
+ * Offered only in a turn the member started (`askedTurn`).
+ */
+const SHARE_PROPOSAL_TOOL: RecordToolSpec = {
+  name: 'records_propose_share', readOnly: true, askedTurnOnly: true, shareProposal: true,
+  schema: z.object({
+    id: id.describe('「あなただけ」のやることの id / the id of a やること only the member sees'),
+    folder: z.string().min(1).max(200).describe('出す先の部署のフォルダ（例「営業部」）。分からなければメンバーに聞く / the department folder to show it to; ask the member when unsure'),
+  }).strict(),
+  display: recordToolDisplay('records_propose_share'),
+  description: 'メンバー本人だけに見えるやること（「あなただけ」）を部署に出す案を、カードにして画面に出す。出すと部署の人に見え、「あなただけ」には戻せないので、AI は出さない：出すかどうかはメンバーがカードの［部署に出す］で決める。' +
+    'メンバーがこの会話で「部署に出して」「みんなに見せて」のように頼んだときだけ使う（自分の判断では使わない）。出す先が分からなければ先に聞く。カードを出したら「カードから出せます」とだけ伝え、「出しました」とは言わない。\n' +
+    'Propose showing a やること only the member sees to a department, as the app\'s card: you never share it (it widens who sees it, for good); the member decides with the card\'s button. Only when they asked in this conversation; never say it was shared.',
+  request: input => ({ method: 'GET', path: `/item/${enc(String(input.id))}` }),
+}
+
+/**
  * 「さっきの変更を取り消して」: the member's own recent change (themselves or their AI, at most a day old), in a turn they
  * started; the server decides each (records.md "The AI at the member's request"). Not on the turn's card: an undo is
  * itself the taking back (the member can do the change again from the screen).
@@ -891,7 +911,7 @@ const FILE_MOVES_INSTRUCTIONS = `つながったファイルを動かすとき�
  * gets a tool for it.
  */
 export const SCREEN_ONLY_OPERATIONS: ReadonlyArray<{ what: string; where: string }> = [
-  { what: '見られる人を広げる（部署に出す・〇〇の人に見せる）', where: 'やることのカードの［部署に出す］／［〇〇の人に見せる］' },
+  { what: '見られる人を広げる（部署に出す・〇〇の人に見せる）', where: 'やることのカードの［部署に出す］／［〇〇の人に見せる］（「あなただけ」のやることを部署に出すのは、頼まれたら records_propose_share で案のカードを出せる。押すのはメンバー）' },
   { what: 'ほかの人の変更・24時間より前の変更・AI がしてよい操作ではない変更（決めたことの確かめ、やり直す、戻す、やることにする など）を取り消す', where: '操作のすぐあとにカードに出る［取り消す］（自分の変更か管理者だけ）' },
   { what: 'Gmail の受信トレイから外れた・Gmail でもアーカイブした来た連絡を戻す', where: '来た連絡のカードや知らせの［元に戻す］' },
   { what: 'やることを受けられないと返す', where: 'やることのカードの「…」の［受けられない］' },
@@ -986,6 +1006,8 @@ export interface RecordToolsOptions {
   jobProposals?: boolean
   /** A job proposal candidate was made: the app's card for the reply (it reads the candidate with the session). */
   onJobProposalCard?: (card: JobProposalCardRef) => void
+  /** 「部署に出す案」: the app's card for the reply; only the member's press on it shares (share-proposals.ts). */
+  onShareProposal?: (card: ShareProposalCardRef) => void
   /** The AI ran an action at the member's request: the turn's one card (every item so far), pushed again with each. */
   onAskedClose?: (card: AiAskedCard) => void
   /** A mail draft was made or changed: its card for the reply. */
@@ -1064,6 +1086,8 @@ export async function createRecordTools(access: RecordTurnAccess, signal?: Abort
     ...LOOKUPS, ...(types.some(t => t.name === 'meeting') ? [minutesReadTool(features)] : []), ...(types.some(t => t.name === 'approval') ? APPROVAL_LOOKUPS : []),
     ...(access.scope === 'act' ? actionToolSpecs(types, { department: options.department, companyScreen: options.companyScreen, askedTurn }, features) : []), ...pluginToolSpecs(plugins, access.scope === 'act'), ...pluginCallToolSpecs(plugins), ...mail,
     ...(offersJobProposals ? jobProposalToolSpecs() : []),
+    // 「部署に出す」 widens who sees it and is never taken back: the AI only proposes it, in a turn the member started.
+    ...(askedTurn && options.onShareProposal && options.companyId ? [SHARE_PROPOSAL_TOOL] : []),
   ].filter(spec => toolAllowed(spec.name, features))
   const newId = options.newId ?? (() => crypto.randomUUID())
   const now = options.now ?? (() => new Date())
@@ -1130,6 +1154,7 @@ export async function createRecordTools(access: RecordTurnAccess, signal?: Abort
       if (spec.approvalCard) return showApproval(req)
       // The turn's token was issued again (past its life): the member's-turn mark is gone, say so in fixed words.
       if ((spec.askedCard || spec.askedTurnOnly) && access.memberTurn !== true) return JSON.stringify(ASKED_AFTER_RENEWAL)
+      if (spec.shareProposal) return proposeShare(parsed.data, req)
       if (spec.jobProposalCard) return makeJobCandidate(req)
       try {
         const minutesId = spec.name === MINUTES_READ_NAME ? String(parsed.data.id) : null
@@ -1350,6 +1375,36 @@ export async function createRecordTools(access: RecordTurnAccess, signal?: Abort
    * job_proposal_create: the server builds and pins the candidate; the card holds only its id (from the server's answer,
    * never the AI's input) and reads it with the member's session. Nothing is submitted here.
    */
+  /**
+   * 「部署に出す案」: the task read with the turn's token (only what the member may read) — it must be a やること seen by
+   * the member alone — then the app's card. Nothing is shared here: the card's ［部署に出す］ is the member's own press
+   * through `tasks:share` with their session, decided by the server (share-proposals.ts).
+   */
+  async function proposeShare(input: Record<string, unknown>, req: ReturnType<RecordToolSpec['request']>): Promise<string> {
+    const folder = shareFolderOf(input.folder)
+    if (!folder) return JSON.stringify({ error: '出す先は、会社のフォルダの中の部署のフォルダ（例「営業部」）で書いてください。', code: 'BAD_FOLDER' })
+    let answer: unknown
+    try { answer = await access.call(req.method, req.path, undefined, signal) } catch (error) {
+      return JSON.stringify(error instanceof RecordsApiError ? refusalForAi(error) : { error: 'このやることを読めませんでした。' })
+    }
+    // The read may itself have renewed the turn's token (past its life): the member's-turn mark is gone, no card.
+    if (access.memberTurn !== true) return JSON.stringify(ASKED_AFTER_RENEWAL)
+    const record = (answer as { record?: { id?: unknown; type?: unknown; title?: unknown; personal?: unknown; version?: unknown } } | undefined)?.record
+    if (!record || record.type !== 'task' || typeof record.id !== 'string') return JSON.stringify({ error: '部署に出す案を出せるのは「やること」だけです。', code: 'NOT_A_TASK' })
+    if (record.personal !== true) return JSON.stringify({ error: 'このやることは「あなただけ」ではありません（もう部署に出ているか、決まった人だけに見えるものです）。', code: 'NOT_PERSONAL' })
+    if (!options.companyId) return JSON.stringify({ error: 'この相談では案を出せません。' })
+    // The version the card is made from: the press shares exactly this one (a task changed since is never shared unseen).
+    if (!Number.isInteger(record.version)) return JSON.stringify({ error: 'このやることの版を読めませんでした。' })
+    const title = typeof record.title === 'string' && record.title.trim() ? record.title.trim().slice(0, 200) : '（件名なし）'
+    try {
+      options.onShareProposal?.({ id: newId(), companyId: options.companyId, conversationId: options.conversationId ?? null, recordId: record.id, title, folder, version: record.version as number, at: now().toISOString() })
+    } catch { /* the card is the only way to share it; without it nothing happens */ }
+    return JSON.stringify({
+      proposed: true, id: record.id, folder,
+      shown: '「部署に出す案」のカードを画面に出しました。出すかどうかはメンバーがカードで決めます（まだ出していません）。「出しました」とは言わない。 / The card is shown; nothing is shared until the member presses it.',
+    })
+  }
+
   async function makeJobCandidate(req: ReturnType<RecordToolSpec['request']>): Promise<string> {
     try {
       const answer = await access.call(req.method, req.path, req.body, signal) as { id?: unknown; definition?: { name?: unknown } } | undefined

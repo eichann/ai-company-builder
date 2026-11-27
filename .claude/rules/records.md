@@ -1266,6 +1266,19 @@ unchanged (storage keeps that meaning; what a create may leave unsaid is "全社
   (`VERSION_CONFLICT`). A task linked to a meeting answers `similar` when a live item of that meeting
   the member reads has a close title ("Task version 13": a hint, never a refusal). Already shared → 409 `NOT_PERSONAL`. **Never undone** (`NOT_UNDOABLE`:
   the folder's readers may have seen it); `place.*` changes never land in the server fields.
+- **The AI proposes it, the member presses** (owner decision 2026-11-27, PR D; `client/shared/share-proposals.ts`): asked
+  「部署に出して」 in a turn the member started, the AI's tool `records_propose_share { id, folder }` (offered only with
+  `askedTurn`; `ASKED_AFTER_RENEWAL` after a token renewal) reads the task with the turn's token — it must be a やること
+  whose summary says `personal` — checks the folder is a company path (`shareFolderOf`: no `..`, not absolute, no `.personal` segment in any spelling
+  that lands on it — the core's `lookalikeKey`) and draws the card 「部署に出す案（AI から）」 (`data-share-proposal`, stored as
+  `shareProposals`) with the version it read. **It writes nothing and no AI route reaches `share`.** The card shows where
+  the task is now and where it would go (「いま：あなただけ → 出す先：「…」」) and ［やることを開く］ (`record.open`, where
+  available). Its ［部署に出す］ reads the task again with the member's session (`getRecordCard`: still 「あなただけ」? still
+  the card's version?) and shares through the app's `tasks:share` at exactly the card's version — changed since (by the
+  AI or anyone) or `VERSION_CONFLICT`, nothing is sent and the card says the task changed, to look at it first (review of
+  #896); the server decides exactly as for the task card's button; a task already shared says so and is not shared
+  again; a refusal shows the server's words. ［やめる］ changes nothing (a card left unanswered stops on the version). Tests: `client/tests/share-proposals.test.ts`,
+  `tests/ui/chat-panel.spec.ts` 「「部署に出す案」…」.
 - Tests: `server/tests/unit/record-personal.test.ts` (another member, a manager, an admin and the
   company owner get a missing record's answers on every route; query / count / text / my-turn
   exclude it; links to it refused alike and links from it hidden; `set_bundle` into an owner-only
@@ -2502,7 +2515,8 @@ complete and idempotent; the immutability trigger — mutation-checked).
   `attachments` yet); the app assigning ids to new record files and repairing duplicates.
 - **What has no AI tool** (gap report 2026-11-27 Bug A #2: asked to do something it has no tool for,
   the AI said 「つながっていません」): `RECORDS_INSTRUCTIONS` lists the screen-only operations with
-  where the member does them (`SCREEN_ONLY_OPERATIONS`, `tools.ts`: 部署に出す, someone else's or an older change's
+  where the member does them (`SCREEN_ONLY_OPERATIONS`, `tools.ts`: 部署に出す (its 「あなただけ」 case also as the AI's
+  proposal card, "Owner-only records"), someone else's or an older change's
   取り消す, 受けられない, アーカイブから戻す / やり直す, 差し戻す, つながりを外す (other than the 案件), a 案件's
   終える / やめる / もう一度始める, a business plugin's 案件's なんのため・期限・責任者 (only the core プロジェクト's are the AI's),
   来た連絡's 取り込まない, そうです / 違う, approvals, the admin console) and tells the AI to say

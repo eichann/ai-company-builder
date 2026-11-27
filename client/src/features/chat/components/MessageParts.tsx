@@ -22,6 +22,8 @@ import { APPROVAL_PART_TYPE, readApprovalCardRef } from '../../../../shared/appr
 import { JOB_PROPOSAL_PART_TYPE, readJobProposalCardRef } from '../../../../shared/job-proposals'
 import { ApprovalCard } from './ApprovalCard'
 import { JobProposalCard } from './JobProposalCard'
+import { ShareProposalCard } from './ShareProposalCard'
+import { SHARE_PROPOSAL_PART_TYPE, readShareProposalCard } from '../../../../shared/share-proposals'
 import { AI_ASKED_PART_TYPE, readAiAskedCard } from '../../../../shared/ai-asked'
 import { AiAskedCardView } from './AiAskedCard'
 import { BROWSER_PLAN_PART_TYPE, readBrowserPlanCardRef } from '../../../../shared/browser-plans'
@@ -165,6 +167,10 @@ export function AssistantMessageParts({ parts, isStreaming, markdown }: { parts:
         if (part.type === MINUTES_BUNDLE_CHOICE_PART_TYPE) {
           const card = readMinutesBundleChoiceCard((part as { data?: unknown }).data)
           return card ? <MinutesBundleChoiceCard key={item.key} card={card} /> : null
+        }
+        if (part.type === SHARE_PROPOSAL_PART_TYPE) {
+          const card = readShareProposalCard((part as { data?: unknown }).data)
+          return card ? <ShareProposalCard key={item.key} card={card} /> : null
         }
         if (part.type === MAIL_DRAFT_PART_TYPE) {
           const card = readMailDraftCard((part as { data?: unknown }).data)

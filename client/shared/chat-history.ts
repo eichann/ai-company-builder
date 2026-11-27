@@ -6,6 +6,7 @@ import type { ReviewRecord } from './review-request'
 import type { PluginOperationCard } from './plugin-operations'
 import type { ApprovalCardRef } from './approvals'
 import type { JobProposalCardRef } from './job-proposals'
+import type { ShareProposalCardRef } from './share-proposals'
 import type { AiAskedCard } from './ai-asked'
 import type { BrowserPlanCardRef } from './browser-plans'
 import type { BrowserInspectionRef } from './browser-inspection'
@@ -41,6 +42,8 @@ export interface ChatSession {
     approvals?: ApprovalCardRef[]
     /** Job proposal candidates the AI made in this reply (job-proposals.ts): a reference; the card reads the candidate from the server. */
     jobProposals?: JobProposalCardRef[]
+    /** 「部署に出す案」 cards (share-proposals.ts): references the member's press reads again. */
+    shareProposals?: ShareProposalCardRef[]
     /** What the AI completed or ended at the member's request in this reply, with ［取り消す］ per item (ai-asked.ts). */
     aiAsked?: AiAskedCard[]
     /** 「ブラウザ操作」 plans made in this reply (browser-plans.ts): a reference; the card reads the plan from the server. */

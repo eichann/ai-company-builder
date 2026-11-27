@@ -136,6 +136,7 @@ export const ACB_TOOL_DISPLAYS: Readonly<Record<string, ToolDisplay>> = {
     return kind && title ? `${kind}「${title}」` : title
   }),
   [records('records_link_file')]: say('記録にファイルをつなぎました', '記録にファイルをつないでいます', '記録にファイルを {n} 件つなぎました', input => companyPath(input.path)),
+  [records('records_propose_share')]: say('部署に出す案をカードにしました', '部署に出す案を用意しています', '部署に出す案を {n} 件カードにしました'),
   [records('records_undo')]: say('頼まれた変更を取り消しました', '頼まれた変更を取り消しています', '頼まれた変更を {n} 件取り消しました'),
   [records('records_unlink_file')]: say('記録からファイルを外しました', '記録からファイルを外しています', '記録からファイルを {n} 件外しました', input => companyPath(input.path)),
   [records('minutes_read')]: say('議事録を読みました', '議事録を読んでいます', '議事録を {n} 回読みました'),

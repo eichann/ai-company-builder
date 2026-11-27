@@ -56,6 +56,7 @@ import { AGENT_PROGRESS_PART_TYPE } from '../shared/agent-progress'
 import { createChatTurns } from './chat-turns'
 import { turnToolEvents } from './agents/tool-events'
 import { FILE_LINKED_PART_TYPE, taskTopicInstructions, taskTopicOf } from '../shared/consultation-task'
+import { SHARE_PROPOSAL_PART_TYPE, type ShareProposalCardRef } from '../shared/share-proposals'
 import { RECORD_TOOLS_MISSING_PART_TYPE, recordToolsMissingInstructions, type RecordToolsMissingReason } from '../shared/record-tools-missing'
 import { droppedRecordIdsOf, droppedRecordsContext, recordTopicInstructions, withTextBeforeLatestUserMessage } from '../shared/record-drop'
 import { TOPIC_RECORD_RE } from '../shared/task-consult'
@@ -108,7 +109,7 @@ export interface ChatServerConfig extends AgentHost {
    * folder under `<department>/.personal/` its writes are held to this turn; null = an ordinary one.
    */
   stepWriteArea?: (companyId: string, conversationId: string) => Promise<string | WriteArea | null>
-  createRecordTools?: (request: { companyId: string; conversationId: string; agent: string; actions: boolean; requireRun?: boolean; memberTurn?: boolean; renewExpired?: boolean; onAskedClose?: (card: AiAskedCard) => void; companyRoot?: string; department?: string | null; companyScreen?: boolean; largeContext?: boolean; onOperationCard?: (card: PluginOperationCard) => void; onApprovalCard?: (card: ApprovalCardRef) => void; onBundleChoice?: (card: MinutesBundleChoiceCard) => void; onMailDraft?: (card: MailDraftCard) => void; onDriveOverwrite?: (card: DriveOverwriteCard) => void; jobProposals?: boolean; onJobProposalCard?: (card: JobProposalCardRef) => void }, signal: AbortSignal) => Promise<RecordTools | { unavailable: RecordToolsMissingReason | 'no-run' } | null>
+  createRecordTools?: (request: { companyId: string; conversationId: string; agent: string; actions: boolean; requireRun?: boolean; memberTurn?: boolean; renewExpired?: boolean; onAskedClose?: (card: AiAskedCard) => void; companyRoot?: string; department?: string | null; companyScreen?: boolean; largeContext?: boolean; onOperationCard?: (card: PluginOperationCard) => void; onApprovalCard?: (card: ApprovalCardRef) => void; onBundleChoice?: (card: MinutesBundleChoiceCard) => void; onMailDraft?: (card: MailDraftCard) => void; onDriveOverwrite?: (card: DriveOverwriteCard) => void; jobProposals?: boolean; onJobProposalCard?: (card: JobProposalCardRef) => void; onShareProposal?: (card: ShareProposalCardRef) => void }, signal: AbortSignal) => Promise<RecordTools | { unavailable: RecordToolsMissingReason | 'no-run' } | null>
   /**
    * The consultation's topic as stored (chat history): the task its new files are linked to
    * (consultation-task.ts). Read at each new file, so a task the AI made earlier in the turn counts.
@@ -634,6 +635,8 @@ export async function startChatServer(config: ChatServerConfig) {
           && latestMemberText(messages).trim() !== '',
         onAskedClose: card => injector.push({ type: AI_ASKED_PART_TYPE, id: `ai-asked-${card.id}`, data: card }),
         onJobProposalCard: card => injector.push({ type: JOB_PROPOSAL_PART_TYPE, id: `job-proposal-${card.id}`, data: card }),
+        // 「部署に出す案」 (share-proposals.ts): the app's own card; only the member's press shares.
+        onShareProposal: card => injector.push({ type: SHARE_PROPOSAL_PART_TYPE, id: `share-proposal-${card.id}`, data: card }),
       }, c.req.raw.signal)).catch(() => ({ unavailable: 'unknown' as const })) ?? { unavailable: 'unknown' as const }
       : undefined
     const allRecords = prepared && !('unavailable' in prepared) ? prepared : undefined

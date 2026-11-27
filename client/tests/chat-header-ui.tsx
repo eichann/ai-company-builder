@@ -189,6 +189,8 @@ const interactionsClosed = emitter<AgentInteractionRequest>()
 const windowChanges = emitter<ChatWindowsChange>()
 const windowCalls = { opened: [] as string[], focused: [] as string[] }
 const minutesLinks: Array<[string, string, string]> = []
+// 「部署に出す案」: what the card's press shared (company, task, folder, version) — the task reads as the member's alone, version 3.
+const shares: Array<[string, string, string, number]> = []
 const MINUTES_NOTICE: MinutesNotice = { id: 'minutes-0a1b2c3d4e5f60718293a4b5', title: 'A社 商談', meetingAt: '2026-11-05T06:00:00.000Z', version: 1 }
 const autoTurn = params.get('autoturn')
 const MEETING_ITEM: TaskListItem = {
@@ -214,6 +216,8 @@ installElectronAPI({
     return { ok: true }
   },
   linkMinutesBundle: async (companyId, minutesId, bundleId) => { minutesLinks.push([companyId, minutesId, bundleId]); return { success: true } },
+  getRecordCard: async (_companyId, recordId) => ({ success: true, card: { version: shares.length > 0 ? 4 : 3, record: { id: recordId, ...(shares.length > 0 ? {} : { personal: true as const }) } } } as never),
+  shareTask: async (companyId, recordId, folder, expectedVersion) => { shares.push([companyId, recordId, folder, expectedVersion]); return { success: true, recordId } },
   // The task list as main answers it: the received meeting waits in 「AI の番」.
   getTaskList: async () => ({ success: true, data: { available: true, listDepartmentIds: null, items: [MEETING_ITEM] } }),
   openChatWindow: async (sessionId) => {
@@ -351,6 +355,8 @@ const control = {
   windowChanged(change: ChatWindowsChange) { windowChanges.emit(change) },
   /** 「どのまとまりの会議ですか？」: what the card asked main to link (company, meeting, まとまり). */
   minutesLinks,
+  /** 「部署に出す案」: what the card's press shared (company, task, folder, version). */
+  shares,
   /** 「AI の番」 run automatically: the claims (company, record, version, conversation) and settles. */
   aiTurns,
   /** Files the chat asked the main screen to open (a review request's files). */

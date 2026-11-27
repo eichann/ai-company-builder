@@ -209,7 +209,7 @@ export function createChatServerConfig(deps: ChatServerConfigDeps): ChatServerCo
         instructions: companyFilesInstructions(notDownloaded),
       }
     },
-    createRecordTools: async ({ companyId, conversationId, agent, actions, requireRun, memberTurn, renewExpired, onAskedClose, companyRoot, department, companyScreen, largeContext, onOperationCard, onApprovalCard, onBundleChoice, onMailDraft, onDriveOverwrite, jobProposals, onJobProposalCard }, signal) => {
+    createRecordTools: async ({ companyId, conversationId, agent, actions, requireRun, memberTurn, renewExpired, onAskedClose, companyRoot, department, companyScreen, largeContext, onOperationCard, onApprovalCard, onBundleChoice, onMailDraft, onDriveOverwrite, jobProposals, onJobProposalCard, onShareProposal }, signal) => {
       const opened = await deps.records.openTurnFor(companyId, { conversationId, agent, scope: actions ? 'act' : 'read', ...(requireRun ? { requireRun } : {}), ...(memberTurn && actions ? { memberTurn } : {}), ...(renewExpired ? { renewExpired } : {}) })
       // No token: why, for the AI and the screen (records.md "When the record tools are missing").
       if ('missing' in opened) return { unavailable: opened.missing }
@@ -228,7 +228,7 @@ export function createChatServerConfig(deps: ChatServerConfigDeps): ChatServerCo
       }
       // A mail draft's PDFs are read here, in main, inside this consultation's company folder only.
       const readAttachment = companyRoot ? (file: string) => readMailAttachment(file, companyRoot) : undefined
-      return createRecordTools(access, signal, { companyId, conversationId, department, companyScreen, largeContext, onRecordChanged, onRecordCreated, onOperationCard, onApprovalCard, onBundleChoice, onMailDraft, jobProposals, onJobProposalCard, onAskedClose, toolProviders, readMailAttachment: readAttachment,
+      return createRecordTools(access, signal, { companyId, conversationId, department, companyScreen, largeContext, onRecordChanged, onRecordCreated, onOperationCard, onApprovalCard, onBundleChoice, onMailDraft, jobProposals, onJobProposalCard, onShareProposal, onAskedClose, toolProviders, readMailAttachment: readAttachment,
         ...(deps.jobMinutesRead ? { onMinutesText: (recordId: string, text: string, docVersion: string | null) => deps.jobMinutesRead?.(conversationId, recordId, text, docVersion) } : {}) })
         .catch(error => ({ unavailable: missingReasonOf(error) }))
     },
