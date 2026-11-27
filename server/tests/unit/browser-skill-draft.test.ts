@@ -159,12 +159,13 @@ describe('what is left out, and why', () => {
       send(13, 'PUT', '/api/orders/{n}', { override: 'PATCH' }),
       send(14, 'OTHER', '/api/orders'),
       send(15, 'POST', '/api/orders?preview'),
+      send(16, 'POST', '/api/orders', { status: 302 }), // an expired session sent to the login page: nothing done
     ])
     const d = draftOf([r])
     expect(d.declaration.writes.map(w => w.path)).toEqual(['/api/orders'])
     expect(d.leftOut.map(l => [l.step, l.reason])).toEqual([
       [2, 'not-taken'], [3, 'not-taken'], [4, 'no-answer'], [5, 'deletes'], [6, 'deletes'], [7, 'wide-path'], [8, 'wide-path'],
-      [9, 'wide-path'], [10, 'query'], [11, 'query'], [12, 'query'], [13, 'override'], [14, 'override'], [15, 'query-values'],
+      [9, 'wide-path'], [10, 'query'], [11, 'query'], [12, 'query'], [13, 'override'], [14, 'override'], [15, 'query-values'], [16, 'not-taken'],
     ])
     for (const l of d.leftOut) expect(BROWSER_SKILL_DRAFT_WORDS.leftOut[l.reason]).toBeTruthy()
   })
@@ -229,9 +230,10 @@ describe('what is left out, and why', () => {
 })
 
 describe('the targets', () => {
-  it('the same write seen again counts toward its max, across the recordings, at most 20', () => {
+  it('max is what one run did: the most a write was sent in one recording (never the sum over recordings), at most 20', () => {
     const items = Array.from({ length: 25 }, (_, i) => send(i + 1, 'POST', '/api/items'))
-    expect(draftOf([recording(SHOP, items.slice(0, 3)), recording(SHOP, items.slice(0, 2))]).declaration.writes[0].max).toBe(5)
+    expect(draftOf([recording(SHOP, items.slice(0, 3)), recording(SHOP, items.slice(0, 2))]).declaration.writes[0].max).toBe(3)
+    expect(draftOf([recording(SHOP, items.slice(0, 1)), recording(SHOP, items.slice(0, 1)), recording(SHOP, items.slice(0, 1))]).declaration.writes[0].max).toBe(1)
     expect(draftOf([recording(SHOP, items)]).declaration.writes[0].max).toBe(20)
   })
 
@@ -307,13 +309,25 @@ describe('`{made}`: what this run made', () => {
   })
 
   it('beside a broader target of the same method, the placeholders stay (a `{made}` frame there would mean nothing)', () => {
-    const d = draftOf([recording(SHOP, [
-      send(1, 'POST', '/api/plans', { answerKeys: ['id'] }),
-      send(2, 'POST', '/api/plans/{n}/items'),
-      send(3, 'POST', '/api/{x}/{n}/items'),
-    ])])
-    expect(d.declaration.writes.map(w => w.path)).toEqual(['/api/plans', '/api/plans/{n}/items', '/api/{x}/{n}/items'])
+    // The same path with a query, sent in another recording (so not linked), covers the `{made}` one: no link at all.
+    const d = draftOf([
+      recording(SHOP, [send(1, 'POST', '/api/plans', { answerKeys: ['id'] }), send(2, 'POST', '/api/plans/{n}/items')]),
+      recording(SHOP, [send(1, 'POST', '/api/plans/{n}/items?full', { bareQuery: true })]),
+    ])
+    expect(d.declaration.writes.map(w => w.path)).toEqual(['/api/plans', '/api/plans/{n}/items', '/api/plans/{n}/items'])
     expect(d.writes[1].marks).toEqual(['updates-existing'])
+  })
+
+  it('a `{x}` that does not become `{made}` leaves its write out: it would fit any segment (a masked or hidden word)', () => {
+    const d = draftOf([recording(SHOP, [
+      send(1, 'POST', '/api/{x}/tags'), // `/api/v2/tags`: `v2` is masked
+      send(2, 'POST', '/ajax/{x}'), // `/ajax/save.php`
+      send(3, 'POST', '/api/plans', { answerKeys: ['id'] }),
+      send(4, 'POST', '/api/plans/{x}/items'), // a token id this run made: kept as `{made}`
+    ])])
+    expect(d.declaration.writes.map(w => w.path)).toEqual(['/api/plans', '/api/plans/{made:1}/items'])
+    expect(d.leftOut).toEqual([{ recording: 0, step: 1, reason: 'any-segment' }, { recording: 0, step: 2, reason: 'any-segment' }])
+    expect(browserSkillDraftFrom([recording(SHOP, [send(1, 'POST', '/api/{x}')])])).toEqual({ ok: false, refusal: 'no-writes' })
   })
 })
 
@@ -352,7 +366,7 @@ describe('every draft is the person\'s own writes and always parses (generated r
       for (const w of draft.declaration.writes) {
         expect(w.method === 'DELETE' || w.fields._method === 'DELETE', `round ${round}`).toBe(false)
         // A write of the draft is one the person sent and the site took: the same method, override, query and path (but `{made}`).
-        const sent = steps.filter((s): s is BrowserRecordedSend => s.kind === 'send' && s.status !== null && s.status < 400)
+        const sent = steps.filter((s): s is BrowserRecordedSend => s.kind === 'send' && s.status !== null && s.status >= 200 && s.status < 300)
         const sameAddress = (address: string) => {
           const [path, query = null] = address.split('?')
           const got = path.split('/')
@@ -404,6 +418,26 @@ account_marker: { meta: shop-account-id }
     expect(change('  - { method: POST, path: "/api/orders/abc", query: "return", max: 1, fields: { _method: PATCH } }')).toEqual({ problem: 'not-covered', write: 1 })
     expect(change('  - { method: POST, path: "/api/plans/{n}/items", max: 1 }')).toEqual({ problem: 'not-covered', write: 1 })
     expect(change('  - { method: POST, path: "/api/plans/", max: 1 }')).toEqual({ problem: 'not-covered', write: 1 })
+  })
+
+  it('a `{made}` stays tied to a create: never re-pointed at a write that updates an existing thing (independent review)', () => {
+    const base = parsed(`domain: shop.example.test
+writes:
+  - { id: w1, method: POST, path: "/api/routes", max: 1 }
+  - { method: POST, path: "/api/routes/{made:w1}/save", max: 1 }
+  - { method: POST, path: "/api/routes/{n}", max: 1 }
+  - { method: POST, path: "/api/notes/{n}", max: 1 }
+`)
+    const within = (writes: string) => browserSkillDraftCoveredProblem(parsed(`domain: shop.example.test\nwrites:\n${writes}\n`), base)
+    // The reviewer's example: the save pointed at what an update of an existing route answered.
+    expect(within('  - { id: u, method: POST, path: "/api/routes/{n}", max: 1 }\n  - { method: POST, path: "/api/routes/{made:u}/save", max: 1 }'))
+      .toEqual({ problem: 'not-covered', write: 2 })
+    // The same maker kept (also renamed) is fine.
+    expect(within('  - { id: a, method: POST, path: "/api/routes", max: 1 }\n  - { method: POST, path: "/api/routes/{made:a}/save", max: 1 }')).toBeNull()
+    // `{n}` → `{made}` only when the maker is within a plain create of the base.
+    expect(within('  - { id: a, method: POST, path: "/api/routes", max: 1 }\n  - { method: POST, path: "/api/notes/{made:a}", max: 1 }')).toBeNull()
+    expect(within('  - { id: a, method: POST, path: "/api/routes/{n}", max: 1 }\n  - { method: POST, path: "/api/notes/{made:a}", max: 1 }'))
+      .toEqual({ problem: 'not-covered', write: 2 })
   })
 
   it('a fixed field of the base is kept: dropping or changing it is wider', () => {

@@ -89,7 +89,8 @@ export interface BrowserRecordedSend {
   /**
    * Format 2: the address's query is exactly its kept form — names only, each a plain word, once, in that order (`?return`)
    * — so a Skill's draft may name that very query (`browserQueryKeptExactly`). False with no query, a value (`?a=1`), an
-   * encoding, a name masked or seen twice. Absent in format 1 (unknown).
+   * encoding, a name masked or seen twice. Absent in format 1 (unknown). A read seen again only counts (`count`): its flag
+   * is the first one's (a draft reads writes only). The app's word, as the whole recording is.
    */
   bareQuery?: boolean
 }

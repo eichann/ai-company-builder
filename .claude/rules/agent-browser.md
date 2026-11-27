@@ -3879,13 +3879,19 @@ trial run and the request come in PRs 2–4.
 
 - **`browserSkillDraftFrom(recordings)`** (`shared/core/browser-skill-draft.ts`, pure, knows no site): 1–5 recordings of one
   domain, each one the server's rule accepts (`browserRecordingProblem`), in the order made. Only sends with POST / PUT /
-  PATCH that the site took (`browserWriteAnswerKind` `done`) become write targets; left out, each with a fixed reason
+  PATCH that the site answered **2xx** become write targets (a 3xx may be an expired session sent to the login page, having
+  done nothing — independent review); left out, each with a fixed reason
   (`BROWSER_SKILL_DRAFT_WORDS.leftOut`): no answer, not taken, **the method DELETE or `_method=DELETE`** (`deletes`), a path
-  beginning with a placeholder or `/` alone (`wide-path`: the ad-hoc plan's rule), a path the declaration cannot spell, a
+  beginning with a placeholder or `/` alone (`wide-path`: the ad-hoc plan's rule), **a `{x}` anywhere that did not become
+  `{made}`** (`any-segment`: the recording masks `v2`, `save.php`, camelCase and every word the person hid to `{x}`, which
+  would fit any segment — independent review), a path the declaration cannot spell, a
   query whose names are placeholders or name a method / login field (`query`), **a query the recording does not vouch for as
   sent exactly** (`query-values`: format 1, or `bareQuery` false — the kept form drops values, so `?preview=false` kept as
   `?preview` would otherwise permit a request never sent; Codex review of the memo), an override the declaration cannot say
-  (`override`). The same target seen again counts toward its `max` (≤ 20), across the recordings. `_method` PUT / PATCH
+  (`override`). `max` is the most a target was sent **in one recording** (what one run did; never the sum over recordings,
+  independent review), ≤ 20. `bareQuery` is the app's word, as the whole recording is (made by its window from the person's
+  actions with this PC's key; an AI can neither make nor send one): a draft stays its author's until an owner / admin
+  approves it. `_method` PUT / PATCH
   becomes the fixed field. **`{made:<id>}`** replaces a path's one placeholder when exactly one earlier create of the same
   recording (a POST without override whose path holds no placeholder and whose answer carried `id` / `data.id`, the ids the
   app reports) is there; never across recordings, never with two candidates, never a later create; beside a broader target of
@@ -3902,7 +3908,10 @@ trial run and the request come in PRs 2–4.
 - **`browserSkillDraftCoveredProblem(draft, base)`**: a later change of a draft's declaration is taken only when it is no
   wider than `base` (what the recordings gave): the same domain; each write covered by a base write — the same method, query
   and `_method`, every fixed field of the base kept (more may be added), a path of the same length whose every segment is the
-  same, or narrower (`{x}` → a literal, `{n}` or `{made}`; `{n}` → digits or `{made}`; `{made}` → `{made}`) —; **the uses of
+  same, or narrower (`{x}` → a literal, `{n}` or `{made}`; `{n}` → digits or `{made}`; `{made}` → `{made}`), and **a draft
+  `{made:<k>}` still made by a write within the base's own maker** for that segment, or within a plain create of the base (a
+  POST without `_method` and without a placeholder) for a base `{n}` / `{x}` — never re-pointed at a write that updates an
+  existing thing and answers its id (independent review) —; **the uses of
   the draft writes one base write covers, together, at most 20** (`too-many-uses`: one target split into many literal ones keeps
   one budget; Codex review); never a delete, never a path beginning with a placeholder. `never_read`, `after_read` and the
   account marker may be added (they only narrow). `max` may exceed what was recorded, up to 20: an ad-hoc plan's card allows
@@ -3915,11 +3924,11 @@ Tests: `server/tests/unit/browser-skill-draft.test.ts` (the two Lステップ re
 `?return`, the action's register, the route's create, the save of an existing route marked `updates-existing`, `aid` marked
 `id-in-body` — give exactly the expected text, and the hand-made `lstep-round-inflow` declaration is a change within it;
 every reason left out; a query only when vouched for (format 1 and `?preview=false` never); the server's check of format 2;
-`may-delete`; max across recordings; `{made}` only for one earlier create of the same recording, `data.id`, never a guess,
+`may-delete`; a 3xx not taken; a `{x}` left out unless it became `{made}`; max = the most in one recording; `{made}` only for one earlier create of the same recording, `data.id`, never a guess,
 dropped beside a broader target, the frame then fitting only what was made; 300 generated recordings: the text parses, is
 within itself, never deletes, each write one the person sent; the change rule: drops, reorders, narrowing, fixed fields, the
-shared budget, every refusal), `client/tests/browser-recorder.test.ts` (`bareQuery` for each kind of query; format 2 passes the
-server's check). Each guard mutation-checked (21 mutations; a malformed address beside `bareQuery` is refused, never thrown — Codex review).
+shared budget, a `{made}` never re-pointed at an update, every refusal), `client/tests/browser-recorder.test.ts` (`bareQuery` for each kind of query; format 2 passes the
+server's check). Each guard mutation-checked (25 mutations; a malformed address beside `bareQuery` is refused, never thrown — Codex review).
 
 ## Letting a domain go, why a write run stopped, the Skill's steps as written (incident 2026-11-27)
 

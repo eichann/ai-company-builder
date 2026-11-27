@@ -6,12 +6,17 @@
  * Two rules, one copy for the server and the app:
  *
  * - `browserSkillDraftFrom(recordings)`: the write targets the person really sent, as a declaration the core's parser reads.
- *   Only writes the site took (2xx / 3xx) count; a write with the method DELETE (or `_method=DELETE`), one whose address
- *   begins with a placeholder (it could be any path), one whose method override the declaration cannot say are left out,
- *   each with a fixed reason. **A query is named only when the recording says it was sent exactly as kept** (format 2's
+ *   Only writes the site took (2xx: a redirect may be an expired session sent to the login page) count; a write with the
+ *   method DELETE (or `_method=DELETE`), one whose address begins with a placeholder (it could be any path), one holding a
+ *   `{x}` that does not become `{made}` (it would fit any segment: a word the recording masked or the person hid), one whose
+ *   method override the declaration cannot say are left out, each with a fixed reason. `max` is the most a write was sent in
+ *   one recording (what one run did), never the sum over recordings. **A query is named only when the recording says it was
+ *   sent exactly as kept** (format 2's
  *   `bareQuery`: names only, plain words, once — `?return`); a query that carried a value, or one a format-1 recording
  *   cannot vouch for, leaves its write out (`query-values`): the kept form drops values, so naming it would permit a request
- *   the person never sent (Codex review of the design memo). `{made:<id>}` is put where a path's one placeholder most likely
+ *   the person never sent (Codex review of the design memo). `bareQuery` is the app's word, as the whole recording is (made
+ *   by the app's window from the person's own actions; an AI cannot make or send one): a draft stays its author's until an
+ *   owner / admin approves it. `{made:<id>}` is put where a path's one placeholder most likely
  *   holds what one earlier create of the same recording made (its answer carried `id` / `data.id`, the ids the app
  *   reports): it then fits only an id the site handed this run, never any number — whether that endpoint really mints its
  *   ids is the reviewer's check at 「Skill の承認」, as for every `{made}`. Each write carries marks for the person and the
@@ -21,14 +26,14 @@
  *   always give the same text, and that text always parses.
  * - `browserSkillDraftCoveredProblem(draft, base)`: a change of a draft's declaration is taken only when it is no wider
  *   than what was made from the recordings (`base`): each write fits one base write — the same method, query and method
- *   override, a path the same or narrower at every segment, every fixed field of the base kept —, the uses of the draft
+ *   override, a path the same or narrower at every segment, a `{made}` still made by a write within the base's own maker
+ *   (or, for a base `{n}` / `{x}`, within a plain create of the base), every fixed field of the base kept —, the uses of the draft
  *   writes a base write covers together at most 20 (one target split into many literal ones keeps one budget), never a
  *   delete, never a path beginning with a placeholder, the same domain. Reads (`never_read`, `after_read`) and the account
  *   marker may be added: they only narrow.
  */
 import { browserRecordingProblem, type BrowserRecordedSend, type BrowserRecordingContent } from './browser-recording'
 import { browserMadeSegmentPlace, browserSkillQueryProblem, BROWSER_SKILL_LIMITS, isBrowserSkillPath, parseBrowserSkillDeclaration, type BrowserSkillDeclaration, type BrowserSkillWrite } from './browser-skill'
-import { browserWriteAnswerKind } from './browser-frame-match'
 
 export const BROWSER_SKILL_DRAFT_LIMITS = Object.freeze({
   /** Recordings one draft is made from (the person's own, of one domain). */
@@ -36,7 +41,7 @@ export const BROWSER_SKILL_DRAFT_LIMITS = Object.freeze({
 })
 
 /** Why a recorded write is not in the draft: fixed words. */
-export type BrowserSkillDraftLeftOut = 'no-answer' | 'not-taken' | 'deletes' | 'wide-path' | 'bad-path' | 'query' | 'query-values' | 'override'
+export type BrowserSkillDraftLeftOut = 'no-answer' | 'not-taken' | 'deletes' | 'wide-path' | 'bad-path' | 'query' | 'query-values' | 'override' | 'any-segment'
 /** What the person and the reviewer are told about a write of the draft: fixed words. */
 export type BrowserSkillDraftMark = 'updates-existing' | 'id-in-body' | 'may-delete'
 /** Why no draft is made. */
@@ -77,6 +82,7 @@ export const BROWSER_SKILL_DRAFT_WORDS = Object.freeze({
     query: 'アドレスの ? のあとが決まりで書けない形の書き込みは入れていません。',
     'query-values': 'アドレスの ? のあとに値があった（または記録から分からない）書き込みは入れていません。',
     override: '決まりで書けない方法の書き込みは入れていません。',
+    'any-segment': 'アドレスに、どんな言葉にも合ってしまう段（記録で伏せた言葉など）がある書き込みは入れていません。',
   } satisfies Record<BrowserSkillDraftLeftOut, string>),
   refusals: Object.freeze({
     'not-a-recording': '記録の形が決まりに合っていません。',
@@ -96,6 +102,8 @@ interface DraftTarget {
   path: string
   query: string | null
   seen: Array<{ recording: number; step: number }>
+  /** How often it was sent in each recording (its `max` is the most in one: what one run of the work did). */
+  perRecording: Map<number, number>
   idFields: Set<string>
   /** The first time it was seen, in the order of the recordings and their steps. */
   first: number
@@ -107,7 +115,8 @@ interface DraftTarget {
 /** A recorded send as a write target, or why it is left out. */
 function targetOf(s: BrowserRecordedSend): { method: DraftTarget['method']; override: DraftTarget['override']; path: string; query: string | null } | BrowserSkillDraftLeftOut {
   if (s.status === null) return 'no-answer'
-  if (browserWriteAnswerKind(s.status) !== 'done') return 'not-taken'
+  // Only a 2xx: a redirect may be the site sending an expired session to its login page, having done nothing (review).
+  if (s.status < 200 || s.status > 299) return 'not-taken'
   if (s.method === 'DELETE' || s.override === 'DELETE') return 'deletes'
   if (s.method !== 'POST' && s.method !== 'PUT' && s.method !== 'PATCH') return 'override'
   if (s.override !== null && (s.method !== 'POST' || (s.override !== 'PUT' && s.override !== 'PATCH'))) return 'override'
@@ -180,18 +189,17 @@ export function browserSkillDraftFrom(recordings: readonly BrowserRecordingConte
       const key = JSON.stringify([t.method, t.override, t.path, t.query])
       let g = groups.get(key)
       if (!g) {
-        g = { ...t, seen: [], idFields: new Set(), first: order, answersId: false, recording }
+        g = { ...t, seen: [], perRecording: new Map(), idFields: new Set(), first: order, answersId: false, recording }
         groups.set(key, g)
         g.answersId = t.method === 'POST' && t.override === null && (s.answerKeys ?? []).some((k: string) => ANSWER_ID_KEYS.includes(k))
       }
       g.seen.push({ recording, step: s.id })
+      g.perRecording.set(recording, (g.perRecording.get(recording) ?? 0) + 1)
       for (const f of s.fields ?? []) if (f.from === null && f.value !== 'empty' && namesAnId(f.name)) g.idFields.add(f.name)
     }
   })
 
   const list = [...groups.values()].sort((a, b) => a.first - b.first)
-  if (list.length === 0) return { ok: false, refusal: 'no-writes' }
-  if (list.length > BROWSER_SKILL_LIMITS.writes) return { ok: false, refusal: 'too-many-writes' }
 
   // `{made}`: a path with exactly one placeholder, and exactly one earlier create of the same recording whose answer named an id.
   const madeBy = new Map<DraftTarget, DraftTarget>()
@@ -202,29 +210,43 @@ export function browserSkillDraftFrom(recordings: readonly BrowserRecordingConte
     if (makers.length === 1) madeBy.set(g, makers[0])
   }
 
-  const build = (links: ReadonlyMap<DraftTarget, DraftTarget>) => {
+  /**
+   * The targets kept with these links: a `{x}` left as it is would fit any segment (a word the recording masked — `v2`,
+   * `save.php`, camelCase — or one the person hid), so its write is left out unless the `{x}` became `{made}` (review).
+   */
+  const keptWith = (links: ReadonlyMap<DraftTarget, DraftTarget>) => list.filter(g => links.has(g) || !g.path.split('/').includes('{x}'))
+  const build = (links: ReadonlyMap<DraftTarget, DraftTarget>, kept: readonly DraftTarget[]) => {
     const ids = new Map<DraftTarget, string>()
-    for (const maker of links.values()) if (!ids.has(maker)) ids.set(maker, `w${list.indexOf(maker) + 1}`)
-    return declarationText(domain, list.map(g => {
+    for (const maker of links.values()) if (!ids.has(maker)) ids.set(maker, `w${kept.indexOf(maker) + 1}`)
+    return declarationText(domain, kept.map(g => {
       const maker = links.get(g)
       const path = maker ? g.path.split('/').map(seg => (isPlaceholder(seg) ? `{made:${ids.get(maker)}}` : seg)).join('/') : g.path
-      return { id: ids.get(g) ?? null, method: g.method, path, query: g.query, max: Math.min(g.seen.length, BROWSER_SKILL_LIMITS.max), override: g.override }
+      // What one run of the work did: the most it was sent in one recording, never the sum over recordings (review).
+      const max = Math.min(Math.max(...g.perRecording.values()), BROWSER_SKILL_LIMITS.max)
+      return { id: ids.get(g) ?? null, method: g.method, path, query: g.query, max, override: g.override }
     }))
   }
 
   let links: ReadonlyMap<DraftTarget, DraftTarget> = madeBy
-  let text = build(links)
+  let kept = keptWith(links)
+  if (kept.length === 0) return { ok: false, refusal: 'no-writes' }
+  if (kept.length > BROWSER_SKILL_LIMITS.writes) return { ok: false, refusal: 'too-many-writes' }
+  let text = build(links, kept)
   let parsed = parseBrowserSkillDeclaration(text)
   // A broader target of the same method beside a `{made}` one (`made-covered`): keep the placeholders instead.
   if (!parsed.ok && links.size > 0) {
     links = new Map()
-    text = build(links)
+    kept = keptWith(links)
+    if (kept.length === 0) return { ok: false, refusal: 'no-writes' }
+    text = build(links, kept)
     parsed = parseBrowserSkillDeclaration(text)
   }
   // The one spelling never fails to parse (every piece was checked above); if it ever does, no draft rather than a guess.
   if (!parsed.ok) return { ok: false, refusal: 'no-writes' }
+  for (const g of list) if (!kept.includes(g)) for (const s of g.seen) leftOut.push({ ...s, reason: 'any-segment' })
+  leftOut.sort((a, b) => a.recording - b.recording || a.step - b.step)
 
-  const writes = list.map((g, i): BrowserSkillDraftWriteNote => {
+  const writes = kept.map((g, i): BrowserSkillDraftWriteNote => {
     const linked = links.has(g)
     const changesExisting = !linked && (g.method !== 'POST' || g.override !== null || g.path.split('/').some(isPlaceholder))
     const creates = g.method === 'POST' && g.override === null
@@ -242,28 +264,46 @@ export function browserSkillDraftFrom(recordings: readonly BrowserRecordingConte
 
 export type BrowserSkillDraftChangeProblem = 'domain' | 'deletes' | 'wide-path' | 'not-covered' | 'too-many-uses'
 
-/** One segment of a draft's path within the base's segment at the same place. */
-function segmentWithin(draft: string, base: string): boolean {
+/** Both declarations, so a `{made:<n>}` segment can be followed to the write that makes it. */
+interface Within { draft: BrowserSkillDeclaration; base: BrowserSkillDeclaration }
+
+/** A write that only creates: a POST without `_method` whose path names no existing thing (no placeholder). */
+const plainCreate = (w: BrowserSkillWrite) => w.method === 'POST' && w.fields._method === undefined && !w.path.split('/').some(isPlaceholder)
+
+/**
+ * One segment of a draft's path within the base's segment at the same place. A draft `{made:<k>}` is "what this run made
+ * with the draft's k-th write", so its maker must be within the base's own maker for that segment (a base `{made:<m>}`), or
+ * within a plain create of the base (a base `{n}` / `{x}`) — never a write the draft merely named a maker (independent
+ * review: a maker whose path holds `{n}` would update an existing thing and hand its id on).
+ */
+function segmentWithin(ctx: Within, draft: string, base: string): boolean {
+  const madeDraft = browserMadeSegmentPlace(draft)
+  const madeBase = browserMadeSegmentPlace(base)
+  if (madeDraft !== null) {
+    const maker = ctx.draft.writes[madeDraft - 1]
+    if (!maker) return false
+    if (madeBase !== null) {
+      const baseMaker = ctx.base.writes[madeBase - 1]
+      return !!baseMaker && writeWithin(ctx, maker, baseMaker)
+    }
+    if (base !== '{n}' && base !== '{x}') return false
+    return ctx.base.writes.some(b => plainCreate(b) && writeWithin(ctx, maker, b))
+  }
+  // A draft `{made}` was decided above; a base `{made}` never equals anything else.
   if (draft === base) return true
-  const madeDraft = browserMadeSegmentPlace(draft) !== null
   if (base === '{x}') return draft !== '' && draft !== '{created}'
-  if (base === '{n}') return madeDraft || /^[0-9]+$/.test(draft)
-  // A base `{made}`: only another `{made}` (what this run made, by a create the draft also holds within the base).
-  if (browserMadeSegmentPlace(base) !== null) return madeDraft
+  if (base === '{n}') return /^[0-9]+$/.test(draft)
   return false
 }
 
-function pathWithin(draft: string, base: string): boolean {
-  const d = draft.split('/')
-  const b = base.split('/')
-  return d.length === b.length && d.every((seg, i) => segmentWithin(seg, b[i]))
-}
-
-function writeWithin(draft: BrowserSkillWrite, base: BrowserSkillWrite): boolean {
+function writeWithin(ctx: Within, draft: BrowserSkillWrite, base: BrowserSkillWrite): boolean {
   if (draft.method !== base.method || draft.query !== base.query) return false
   if (draft.fields._method !== base.fields._method) return false
   if (!Object.entries(base.fields).every(([k, v]) => draft.fields[k] === v)) return false
-  return pathWithin(draft.path, base.path)
+  const d = draft.path.split('/')
+  const b = base.path.split('/')
+  // A maker always stands before what it makes (the parser's rule), so following makers ends.
+  return d.length === b.length && d.every((seg, i) => segmentWithin(ctx, seg, b[i]))
 }
 
 /**
@@ -279,7 +319,7 @@ export function browserSkillDraftCoveredProblem(draft: BrowserSkillDeclaration, 
     if (w.method === 'DELETE' || w.fields._method === 'DELETE') return { problem: 'deletes', write }
     const first = w.path.split('/')[1] ?? ''
     if (first === '' || isPlaceholder(first)) return { problem: 'wide-path', write }
-    const covering = base.writes.flatMap((b, j) => (writeWithin(w, b) ? [j] : []))
+    const covering = base.writes.flatMap((b, j) => (writeWithin({ draft, base }, w, b) ? [j] : []))
     if (covering.length === 0) return { problem: 'not-covered', write }
     // One target split into many narrower ones keeps one budget: every base write that covers it counts its uses.
     for (const j of covering) {
