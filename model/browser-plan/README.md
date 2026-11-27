@@ -4,7 +4,8 @@ The life of one 「ブラウザ操作」 plan — register → approve → claim
 confirm — written in TLA+ (`PlanLife.tla`), with the rules it must keep. A second model,
 `StepsLife.tla`, is the **several-writes design** (generalization PR 1, below: "StepsLife"), kept as the
 model of the safe pattern. A third, `FramesLife.tla`, is **writes within frames** (redesign step ⑤a, below:
-"FramesLife"): free operation where only an upper bound per write target is known. The checker
+"FramesLife"): free operation where only an upper bound per write target is known. A fourth, `LedgerLife.tla`, is
+**the write ledger across requests** (below: "LedgerLife"): a write in doubt holds its target for every later run. The checker
 [tla-ts](https://www.npmjs.com/package/tla-ts) explores **every** reachable state and checks the
 rules in each. It catches what example-based tests miss: interleavings of two PCs, late network
 answers, crashes at any step, and clocks.
@@ -58,11 +59,11 @@ reachability rule, not a state formula: `reach.mjs` checks it on the checker's s
 
 ## What `check` verifies (numbers in `expected.txt`)
 
-1. Each real model (`model` lines: PlanLife, StepsLife, FramesLife) keeps every INVARIANT and has no dead
+1. Each real model (`model` lines: PlanLife, StepsLife, FramesLife, LedgerLife) keeps every INVARIANT and has no dead
    end; the rules checked are exactly `expected.txt`'s `rule <model>` lines (dropping one fails); a
    `CHECK_DEADLOCK` line is refused.
 2. Its distinct state count equals `states <model>` (today PlanLife **57,618**, StepsLife **28,320**,
-   FramesLife **264,480**): a guard against a checker that explores less than it should. **A ceiling**: the
+   FramesLife **264,480**, LedgerLife **132,387**): a guard against a checker that explores less than it should. **A ceiling**: the
    checker writes the whole state graph out as one string for `reach.mjs`, and a string cannot pass ~512 MB — about
    1,750 bytes a state, so roughly **290,000 states** (FramesLife's graph is 463 MB). A change that grows a model past
    that fails with `RangeError: Invalid string length`: narrow the model (as FramesLife's `RefusedOrNot`) rather than
@@ -298,6 +299,28 @@ keeps the write `unknown` and the answer apart, folded here into `cdone` / `cnot
   run's time limits as real durations (folded into `closed` and `RunEnds`), a server clock jump (PlanLife's;
   the server counts each write's window on both clocks all the same), the safe patterns (StepsLife).
 
+## LedgerLife: the write ledger across requests
+
+FramesLife's once-rules hold inside one run; a run ends (its hour, its end, leaving) and the next request is a new run.
+`LedgerLife.tla` is that sequence: three runs of one member, one after another (one run per company × domain at a time),
+each with at most one write to **one** target — the key of the ledger (company × domain × the member's outside account ×
+the target's hash; agent-browser.md "The write ledger across requests"). Inside a run FramesLife's steps are folded (a
+permit, the last check, the send, the report, a crash, a lost answer, the time-out to unknown, leaving). What it adds:
+`Permit` asks `LedgerGuard` — no write of **any** run to the target `permitted` / `unknown` with no answer of the person,
+ended runs included, never by time (`permit`'s `BROWSER_WRITE_IN_DOUBT`); a doubt ends only by the person's answer
+(`PersonConfirms`, truthful, past the window), a late sure report, or the app's read-back (`AppReadsBack`: reports `done`
+only when the write took effect — `readBackLanded`).
+
+Rules: R1 (at most one send per write), **R17 `R17_NoBlindDuplicate`** (two runs' writes to the target both took effect
+only when the later one was permitted with the earlier one's result known), **R18 `R18_DoneMeansLanded`** (`done` — the
+site's answer or the read-back — or 「済んでいた」 only for a write that took effect), R5 (「されていなかった」 stays true),
+R7. Variants: `BrokenLedgerDoubtExpires` (the check looks only at runs not ended: a doubt expires with its run's hour)
+→ R17; `BrokenLedgerReadBackGuess` (the read-back reports `done` without proof) → R18. 132,387 states.
+
+Left out (the code's tests): other targets and other accounts (they never meet the ledger's key), the start's question on
+the card (it only asks the person earlier than the permit's refusal would), more than one write per run and the operator
+(FramesLife), real durations.
+
 ## Drift: the model is copied by hand
 
 Nothing compares the model with the code mechanically: change the code and the model stays as it
@@ -326,6 +349,7 @@ was. What keeps them together:
 | `PlanLife.tla` / `PlanLife.cfg` | The model of today's one-write code, its rules, the checker's settings and the `\* REACH` line |
 | `StepsLife.tla` / `StepsLife.cfg` | The several-writes design (generalization PR 1), the same way |
 | `FramesLife.tla` / `FramesLife.cfg` | Writes within frames (redesign step ⑤a), the same way |
+| `LedgerLife.tla` / `LedgerLife.cfg` | The write ledger across requests, the same way |
 | `reach.mjs` | R7 on the state graph |
 | `expected.txt` | Rules, state count, each variant's expected result |
 | `broken/`, `limits/`, `holes/`, `proposals/` | The variants |

@@ -254,6 +254,8 @@ function sameFactValue(name: string, approved: unknown, now: unknown): boolean {
 export const BROWSER_REPORT_REASONS = [
   'off', 'fixed-mismatch', 'facts-changed', 'permit-refused', 'permit-unanswered', 'permit-late', 'context-changed', 'stopped',
   'no-answer', 'reread-failed', 'account-after', 'target-after', 'checker-problem', 'other-state',
+  // A write in doubt the app read back and found landed (agent-browser.md "The write ledger across requests").
+  'read-back',
 ] as const
 export type BrowserReportReason = typeof BROWSER_REPORT_REASONS[number]
 

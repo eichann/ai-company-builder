@@ -1332,6 +1332,9 @@ README in the folder.
 - **A third real model, `FramesLife.tla`** (redesign step ⑤a, "Writes within frames"): free operation within frames,
   its rules R1, R2, R4, R7, R10, R14–R16 and `broken/BrokenFrames*`; `StepsLife.tla` stays as the safe pattern's model.
   `server/src/services/browser-frames.ts` is in area `model`.
+- **A fourth real model, `LedgerLife.tla`** ("The write ledger across requests"): several runs one after another and one
+  target, its rules R1, R5, R7, R17 (no blind duplicate), R18 (done only if it landed) and `broken/BrokenLedger*`;
+  `client/electron/features/browser/work.ts` (the read-back) is in area `model` too.
 
 ## Executions with several writes (generalization PR 1: the state table and the model; PR 4 built the server's half)
 
@@ -4044,6 +4047,82 @@ page gets its error, the run goes on, the max holds; only the listed 4xx refused
 the wiring: a refused save then a corrected one; the card's answer from its time, sent with that write, never resending;
 only the card reaches it), `model/browser-plan/check`, permission matrix row + `CROSS`, `jobs-schema.test.ts`,
 `company-scoped-sql.test.ts`. Each guard mutation-checked.
+
+## The write ledger across requests (a write in doubt holds its target for every later run)
+
+Codex's external review, owner approved: the once-rules above hold **inside one run** only. A run ends (its hour, `end`,
+leaving), the next request is a new run, and "created, but the answer was lost" → "ask again tomorrow" put the same thing
+on the site twice: the old lock (`locked`) ended with its run. The ledger carries the doubt across runs, by mechanism —
+no word was added to the operator's prompt (owner: the AI is kept by mechanisms, not by sentences). No site word.
+
+- **The ledger** (`browser_write_ledger`, `db/schema/browser-frames.ts`, additive; the handle's `browserFrames`
+  `insertLedger` / `ledgerDoubts`): one row per **permitted** write, written in the permit's own transaction — company ×
+  registered domain × **outside account** × **target** (`sha256:` of `browserWriteTarget`: the method, the body's
+  `_method`, the path with its raw query — never kept as text; the frame's other fixed fields play no part), with its run,
+  write and time. What became of the write is its row in `browser_frame_writes` / `browser_frame_write_confirms`: done,
+  not sent, refused (known) or `permitted` / `unknown` with no answer (**a doubt**). Triggers: a row only beside its
+  `permitted` write with its run's member and domain (`browser_write_ledger_beside_write`, made again by the writes
+  table's rebuild, which renames that table), never updated, never removed while its run exists.
+- **The outside account** (`ledgerAccountOf`): the core knows no site's account marker, and each member's window holds
+  their own login (one partition per account × company × site), so the account is the member's login,
+  `member:<user id>`; its own column, so a site's reviewed account reader can name one later without changing the table.
+  Decision: two members sharing one outside login are two accounts here (each is held by their own doubts only).
+- **The guard** (`permit`, after the frame match, before the gate): a held write whose target has a doubt of this account
+  on this domain — **any run, ended or not, however old** — → 409 `BROWSER_WRITE_IN_DOUBT`, nothing taken, the run goes
+  on (another target is not held up). **No time limit**: neither the run's hour nor any clock lifts it.
+- **What ends a doubt**: (a) the person's answer, 「済んでいた」 or 「されていなかった」 — the existing `confirm` of that
+  earlier run ("Recovering from a failed write": past its window, the run's own PC, once); (b) the site's answer, late
+  (`report` `unknown` → `done` / `refused`, as before) or **read back by the app** (below). Leaving the company keeps it:
+  the write on its way becomes `unknown` (`memberLeft`) and stays in doubt for that member's account; nobody else's runs
+  are held up, and a member invited back is asked first.
+- **Asked before the operator works** (`start` answers `doubts`: the doubts whose frame `browserFramesMayMeet` one of the
+  new run's frames — the same method and `_method`, the query, segment by segment with placeholders — wider than the
+  permit's exact target on purpose; the earlier run and write, the frame, its times). The app (`work.ts` `askEarlier`)
+  shows them on this run's card one by one, before the preview of a Skill run or the plan card of an ad-hoc one, before
+  any operator step: headline `earlierDoubt` 「前回の結果が分からない書き込みがあります。…」, the frame line, and the card's
+  existing ［済んでいた］／［されていなかった］ (`browserLines:confirmWrite`; the entry's `inDoubt.runId` names the earlier run, so
+  `frameConfirm` / `frameGet` go to it). Every one answered 「されていなかった」 (or the site's answer found meanwhile) → the
+  work goes on as before. 「済んでいた」 → the request stops, nothing written (`earlier-done`: this request may be that same
+  write again — the consultation AI hears it and asks the person); no answer within the card's time (10 / 21 minutes from
+  the start) → `earlier-unknown`; the turn stopped → its own reason. A run whose frames meet no doubt asks nothing
+  (作業完遂性: only a write whose result nobody knows is asked about).
+- **The read-back** (`work.ts` `readBack`, `readBackLanded` in `client/shared/browser-frame-writes.ts`), so the person's
+  buttons are left for what is truly unknown: after the work, the write in doubt (the one with a permit) is read again at
+  **its very address** — only when a Skill's `after_read` names it, it was read right before that write, and no other
+  write of the run went there — and counts as landed only when **every** field it sent now reads exactly the sent value
+  **and** at least one read otherwise before (a state already so proves nothing), compared on the **whole** JSON answers,
+  each field a top-level plain value present on both sides (never the card's shortened rows: Codex review), and only for a
+  write whose body was read whole (`sentBodyWhole`: no repeated or nested field the comparison would miss). Then the app reports `done` with reason
+  `read-back` (`BROWSER_REPORT_REASONS`; a sure report: the run's own PC only) and, once the server took it, the card says
+  `readBackDone` and the AI hears `read-back` 「…読み直したところ、その書き込みは済んでいました…」. A create whose answer
+  was lost has no address to read (`{created}` is unknown), so it is always asked: that is the duplicate this ledger
+  exists for.
+- **The model**: `model/browser-plan/LedgerLife.tla` (README "LedgerLife"; R17, R18; `BrokenLedgerDoubtExpires` → R17,
+  `BrokenLedgerReadBackGuess` → R18). FramesLife is unchanged (inside a run nothing moved).
+- **Rolling back**: the table is additive. An older server neither writes nor reads it, so the guard is off there (as
+  today); rolled forward again, its rows are as they were and every doubt in them holds. An older app ignores `doubts`
+  (the permit still refuses the target, the write is not sent and the operator sees it as a write with no permit).
+- **Remaining limits** (said): the target is the exact address — a site that names one object by two addresses (a
+  trailing slash, another case, an alias, `05` for `5`) is two targets to the guard, though the start's question compares
+  patterns; the read-back proves the state, not its cause (someone else setting the very same values in between counts);
+  only the frames path keeps the ledger (the old one-write plans and the opened lines have their own target locks and
+  confirms, and neither reads it);
+  two members sharing one outside login are two accounts (above); a person who answers wrongly is believed (as for the
+  earlier card); the answer stays bound to the earlier run's PC ("Recovering from a failed write"), so a member who moved
+  to another PC cannot answer there (the guard then holds that target for them until they answer on that PC — the safe
+  side; an owner / admin path is not built).
+
+Tests: `server/tests/unit/browser-frames.test.ts` "the write ledger across requests" (days and a month later still
+refused — never by time —, another target goes on, a placeholder target: the same object held, another not, and the
+start names a frame that may meet; the person's answer either way, a late done / read-back / late refusal end it, a
+read-back from another PC ends nothing, another member and another company never mixed in, a member who left, the
+table's triggers and no path kept), `browser-frame-match.test.ts` (`browserWriteTarget`, `browserFramesMayMeet` both ways),
+`client/tests/browser-frame-writes.test.ts` (asked on the card before any operator step and answered on the earlier run,
+「済んでいた」 stops with nothing written, no answer in time / an answer held elsewhere / the turn stopped, two doubts in turn,
+none asked when the start names none, the read-back found landed — and not when the server did not take it, the body was
+not read whole, nothing changed or the value differs —, `readBackLanded` on whole answers (a cut value, a field absent
+before), `sentBodyWhole`), the writes table's rebuild re-making the ledger's trigger,
+`model/browser-plan/check`, `jobs-schema.test.ts`, `company-scoped-sql.test.ts`. Each guard mutation-checked.
 
 ## A card in its consultation's own window (［任せる］／［やめる］／［済んでいた］ from 「別ウィンドウで開く」)
 

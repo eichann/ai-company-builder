@@ -98,6 +98,23 @@ export interface BrowserFrameRunStart extends BrowserFrameRunView {
    */
   afterRead?: string[]
   neverRead?: string[]
+  /**
+   * The write ledger (agent-browser.md "The write ledger across requests"): earlier writes of this member on this domain
+   * whose result nobody knows (`unknown`, or still `permitted`, and not answered), of any earlier run however old, whose
+   * frame may meet one of this run's frames. The app asks the person about each (［済んでいた］／［されていなかった］, the
+   * earlier run's `confirm`) before the operator works; the server refuses a permit to the very same target until then
+   * (`BROWSER_WRITE_IN_DOUBT`). Empty when none; absent from an older server.
+   */
+  doubts?: BrowserFrameDoubt[]
+}
+
+/** An earlier write in doubt, as the start names it: its run and write, the frame it fitted, and from when it may be answered. */
+export interface BrowserFrameDoubt {
+  runId: string
+  write: number
+  frame: { method: 'POST' | 'PUT' | 'PATCH' | 'DELETE'; path: string; query?: string; fields: Record<string, string> }
+  permittedAt: string
+  confirmableAt: string
 }
 
 /** What the app read of the held write, sent with a permit: its shape only, never the body's other values. */

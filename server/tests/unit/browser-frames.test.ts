@@ -985,7 +985,7 @@ describe('recovering from a failed write: the site refused it; the person answer
     initDatabase(before)
     expect(before.prepare('SELECT state FROM browser_frame_writes').all()).toEqual([{ state: 'unknown' }])
     expect(before.prepare('SELECT outcome FROM browser_run_writes').all()).toEqual([{ outcome: 'done' }])
-    const shape = (c: Database.Database) => c.prepare("SELECT type, name, sql FROM sqlite_master WHERE tbl_name IN ('browser_frame_writes', 'browser_run_writes', 'browser_frame_made') ORDER BY type, name").all()
+    const shape = (c: Database.Database) => c.prepare("SELECT type, name, sql FROM sqlite_master WHERE tbl_name IN ('browser_frame_writes', 'browser_run_writes', 'browser_frame_made', 'browser_write_ledger') ORDER BY type, name").all()
     const fresh = new Database(':memory:')
     initDatabase(fresh)
     expect(shape(before)).toEqual(shape(fresh))
@@ -1304,5 +1304,152 @@ describe('a run of a source this build does not know (the rollback floor of the 
   it('a known source runs as before', async () => {
     const run = await openAdhoc()
     expect(code(await permit(run.runId, 1))).toBe('ok')
+  })
+})
+
+describe('the write ledger across requests (agent-browser.md "The write ledger across requests"; LedgerLife.tla)', () => {
+  const confirm = (runId: string, write: number, answer: string, m: Member = alice) => frames.confirm(m, runId, { write, answer }, PC)
+  const DAY = 24 * 60 * 60 * 1000
+  /** A run whose write on `frame` went out and whose answer was lost; then the run ends. */
+  async function lostAnswer(m: Member = alice, frame = 1): Promise<string> {
+    const run = await openAdhoc(m)
+    value(await permit(run.runId, frame, m))
+    value(report(run.runId, 1, 'unknown', m))
+    value(frames.end(m, run.runId))
+    return run.runId
+  }
+  const startAdhoc = async (m: Member = alice, plan: unknown = adhoc) => value(await frames.start(m, { plan }, PC))
+
+  it('a write in doubt blocks a permit to that very target in the next request, days later too: never by time', async () => {
+    const earlier = await lostAnswer()
+    now += 3 * DAY
+    const next = await startAdhoc()
+    expect(next.doubts).toEqual([{
+      runId: earlier, write: 1, frame: { method: 'POST', path: '/api/orders/register', fields: {} },
+      permittedAt: iso(T0), confirmableAt: iso(T0 + 35_000),
+    }])
+    value(await approve(alice, next))
+    expect(code(await permit(next.runId, 1))).toBe('BROWSER_WRITE_IN_DOUBT')
+    // Nothing taken, the run still open: the frame's units are untouched.
+    const seen = value(frames.get(alice, next.runId))
+    expect(seen).toMatchObject({ state: 'open' })
+    expect(seen.frames[0]).toMatchObject({ used: 0, left: 2 })
+    // A month later, past every run's hour: still refused.
+    value(frames.end(alice, next.runId))
+    now += 30 * DAY
+    const later = value(await approve(alice, await startAdhoc()))
+    expect(code(await permit(later.runId, 1))).toBe('BROWSER_WRITE_IN_DOUBT')
+  })
+
+  it('another target is not held up: the run goes on for it, and a run whose frames cannot meet the doubt is not asked', async () => {
+    await lostAnswer()
+    now += DAY
+    const next = await openAdhoc()
+    expect(code(await permit(next.runId, 1))).toBe('BROWSER_WRITE_IN_DOUBT')
+    expect(code(await permit(next.runId, 2))).toBe('ok')
+    value(report(next.runId, 1, 'done'))
+    value(frames.end(alice, next.runId))
+    const notesOnly = await startAdhoc(alice, { domain: DOMAIN, writes: [{ method: 'POST', path: '/api/orders/{n}/note', max: 1 }] })
+    expect(notesOnly.doubts).toEqual([])
+  })
+
+  it('a target named by a placeholder: the same object is held, another one is not; the start names a frame that may meet', async () => {
+    await lostAnswer(alice, 2) // a note on order 42 in doubt
+    now += DAY
+    const next = await startAdhoc(alice, { domain: DOMAIN, writes: [{ method: 'POST', path: '/api/orders/{x}/note', max: 2 }] })
+    expect(next.doubts?.map(d => d.frame.path)).toEqual(['/api/orders/{n}/note'])
+    value(await approve(alice, next))
+    expect(code(await permit(next.runId, 1, alice, { method: 'POST', path: '/api/orders/42/note', fields: {} }))).toBe('BROWSER_WRITE_IN_DOUBT')
+    expect(code(await permit(next.runId, 1, alice, { method: 'POST', path: '/api/orders/43/note', fields: {} }))).toBe('ok')
+  })
+
+  it('the person\'s answer ends the doubt — 済んでいた or されていなかった — and nothing of the earlier run moves', async () => {
+    const first = await lostAnswer()
+    now += DAY
+    value(confirm(first, 1, 'not_done'))
+    const next = await startAdhoc()
+    expect(next.doubts).toEqual([])
+    value(await approve(alice, next))
+    value(await permit(next.runId, 1))
+    value(report(next.runId, 1, 'unknown'))
+    value(frames.end(alice, next.runId))
+    now += DAY
+    value(confirm(next.runId, 1, 'done'))
+    expect(value(frames.get(alice, next.runId)).writes[0]).toMatchObject({ state: 'unknown', confirmed: { answer: 'done' } })
+    const third = await openAdhoc()
+    expect(code(await permit(third.runId, 1))).toBe('ok')
+  })
+
+  it('the site\'s answer ends it: a late done (also the app\'s read-back) or a late refusal', async () => {
+    const first = await lostAnswer()
+    value(frames.report(alice, first, { write: 1, result: 'done', reason: 'read-back' }, PC))
+    expect(conn.prepare('SELECT state, reason FROM browser_frame_writes WHERE company_id = ? AND run_id = ?').get(CO, first)).toEqual({ state: 'done', reason: 'read-back' })
+    const next = await openAdhoc()
+    expect(code(await permit(next.runId, 1))).toBe('ok')
+    value(report(next.runId, 1, 'unknown'))
+    value(frames.end(alice, next.runId))
+    value(report(next.runId, 1, 'refused'))
+    const third = await openAdhoc()
+    expect(code(await permit(third.runId, 1))).toBe('ok')
+  })
+
+  it('a read-back from another PC ends nothing (a sure report: the run\'s own PC only)', async () => {
+    const first = await lostAnswer()
+    expect(code(frames.report(alice, first, { write: 1, result: 'done', reason: 'read-back' }, 'other-pc'))).toBe('BROWSER_DEVICE_ELSEWHERE')
+    const next = await openAdhoc()
+    expect(code(await permit(next.runId, 1))).toBe('BROWSER_WRITE_IN_DOUBT')
+  })
+
+  it('another member\'s account and another company are never mixed in', async () => {
+    await lostAnswer(alice)
+    const bobs = await startAdhoc(bob)
+    expect(bobs.doubts).toEqual([])
+    value(await approve(bob, bobs))
+    expect(code(await permit(bobs.runId, 1, bob))).toBe('ok')
+    value(report(bobs.runId, 1, 'done', bob))
+    value(frames.end(bob, bobs.runId))
+    const theirs = value(await frames.start(otherOwner, { plan: adhoc }, PC))
+    expect(theirs.doubts).toEqual([])
+    value(await approve(otherOwner, theirs))
+    expect(code(await permit(theirs.runId, 1, otherOwner))).toBe('ok')
+    value(report(theirs.runId, 1, 'done', otherOwner))
+    // Alice's own doubt is still there.
+    expect((await startAdhoc(alice)).doubts).toHaveLength(1)
+  })
+
+  it('a member who leaves with a write on its way: in doubt for their account; nobody else is held up', async () => {
+    const run = await openAdhoc()
+    value(await permit(run.runId, 1))
+    frames.memberLeft(CO, alice.userId)
+    const bobs = value(await approve(bob, await startAdhoc(bob)))
+    expect(code(await permit(bobs.runId, 1, bob))).toBe('ok')
+    value(report(bobs.runId, 1, 'done', bob))
+    value(frames.end(bob, bobs.runId))
+    // Back in the company later: asked first, and refused until answered.
+    now += DAY
+    const back = await startAdhoc()
+    expect(back.doubts?.map(d => [d.runId, d.write])).toEqual([[run.runId, 1]])
+    value(await approve(alice, back))
+    expect(code(await permit(back.runId, 1))).toBe('BROWSER_WRITE_IN_DOUBT')
+  })
+
+  it('the ledger keeps the target\'s hash only (no path), only beside a permitted write, never changed or removed', async () => {
+    const run = await lostAnswer()
+    const rows = conn.prepare('SELECT * FROM browser_write_ledger WHERE company_id = ?').all(CO) as Array<Record<string, unknown>>
+    expect(rows).toHaveLength(1)
+    expect(rows[0]).toMatchObject({ run_id: run, seq: 1, user_id: alice.userId, host: DOMAIN, account: `member:${alice.userId}` })
+    expect(rows[0].target).toMatch(/^sha256:[0-9a-f]{64}$/)
+    expect(JSON.stringify(rows)).not.toContain('/api/orders')
+    expect(() => conn.prepare('UPDATE browser_write_ledger SET target = ? WHERE company_id = ?').run(`sha256:${'0'.repeat(64)}`, CO)).toThrow(/kept as written/)
+    expect(() => conn.prepare('DELETE FROM browser_write_ledger WHERE company_id = ?').run(CO)).toThrow(/kept as written/)
+    const insert = conn.prepare('INSERT INTO browser_write_ledger (company_id, run_id, seq, user_id, host, account, target, recorded_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+    // Not beside a write that is no longer permitted, nor for another member of the run.
+    expect(() => insert.run(CO, run, 2, alice.userId, DOMAIN, 'member:x', `sha256:${'1'.repeat(64)}`, iso(now))).toThrow(/beside its permitted write/)
+    const open = await openAdhoc()
+    value(await permit(open.runId, 2))
+    expect(conn.prepare('SELECT COUNT(*) AS n FROM browser_write_ledger WHERE company_id = ?').get(CO)).toEqual({ n: 2 })
+    // Beside a permitted write, but naming another member than the run's: refused before the key is even looked at.
+    expect(() => insert.run(CO, open.runId, 1, bob.userId, DOMAIN, 'member:x', `sha256:${'1'.repeat(64)}`, iso(now))).toThrow(/beside its permitted write/)
+    expect(() => insert.run(CO, open.runId, 1, alice.userId, 'elsewhere.example.test', 'member:x', `sha256:${'1'.repeat(64)}`, iso(now))).toThrow(/beside its permitted write/)
   })
 })

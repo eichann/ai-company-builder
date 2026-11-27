@@ -153,6 +153,45 @@ export function browserNeverReadFits(pattern: string, pathAndQuery: string): boo
   })
 }
 
+/**
+ * The write ledger (agent-browser.md "The write ledger across requests"): one write's **target** as the ledger keys it —
+ * the method, the body's `_method` (the method the site acts on) and the path with its raw query, exactly as the permit
+ * got them. The server hashes it (never kept as text); the frame's other fixed fields play no part, so two frames that
+ * differ only in a fixed field still name one target (the safe side).
+ */
+export function browserWriteTarget(request: BrowserFrameRequest): { method: string; override: string | null; path: string } {
+  const override = Object.prototype.hasOwnProperty.call(request.fields, '_method') ? request.fields._method : null
+  return { method: request.method, override, path: request.path }
+}
+
+type FrameShape = Pick<BrowserSkillWrite, 'method' | 'path' | 'query' | 'fields'>
+
+/**
+ * Could two frames address one target (the write ledger: a new run is asked about an earlier write in doubt before it
+ * writes, when one of its frames may meet the frame that write fitted)? The same method and `_method`; queries both
+ * absent, or equal, or either with a value placeholder; paths of as many segments, each pair the same literal, two
+ * placeholders, or a placeholder a literal fits (`{made:<n>}` counts as one that fits any plain segment: the safe side).
+ * Wider than "the same target" on purpose — the permit's exact check stays the guard; this only decides whether the
+ * person is asked before the operator works.
+ */
+export function browserFramesMayMeet(a: FrameShape, b: FrameShape): boolean {
+  if (a.method !== b.method || (a.fields._method ?? null) !== (b.fields._method ?? null)) return false
+  if ((a.query === null) !== (b.query === null)) return false
+  if (a.query !== null && b.query !== null && a.query !== b.query && !a.query.includes('{') && !b.query.includes('{')) return false
+  const x = a.path.split('/').slice(1)
+  const y = b.path.split('/').slice(1)
+  if (x.length !== y.length) return false
+  const meet = (p: string, q: string): boolean => {
+    if (p === q) return true
+    if (p === '' || q === '') return false
+    if (p.startsWith('{') && q.startsWith('{')) return true
+    if (p.startsWith('{')) return segmentFits(p, q, 'shape')
+    if (q.startsWith('{')) return segmentFits(q, p, 'shape')
+    return false
+  }
+  return x.every((p, i) => meet(p, y[i]))
+}
+
 function splitOnce(s: string): [string, string | null] {
   const q = s.indexOf('?')
   return q === -1 ? [s, null] : [s.slice(0, q), s.slice(q + 1)]

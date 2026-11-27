@@ -329,6 +329,51 @@ export function beforeReadAddress(pattern: string, heldPath: string | null): str
   return heldPath !== null && browserFramePathFits(pattern, heldPath) ? heldPath : null
 }
 
+/**
+ * The write ledger's machine check (agent-browser.md "The write ledger across requests"): did a write whose answer was
+ * lost land? Only when the very address it wrote to was read before it and again after, **every** field it sent now reads
+ * exactly the sent value, and **at least one** of them read otherwise before (so the read shows a change to what was sent,
+ * not a state that was already so). Compared on the **whole** answers (`before` / `after`: the JSON objects' texts, never
+ * the card's shortened rows — Codex review: a 300-character cut or a field past the card's 30 would pass for equal or
+ * changed), each field a top-level text, number or boolean, the changed one present before too. Anything less — nothing
+ * sent, a field missing or not plain, one value different, nothing changed, a read missing or not a JSON object — is no
+ * proof: the person is asked. The caller also requires the write's own body to be whole (`sentBodyWhole`).
+ */
+export function readBackLanded(sent: Readonly<Record<string, string>> | null, before: string | null, after: string | null): boolean {
+  const was = jsonObject(before)
+  const now = jsonObject(after)
+  if (!sent || !was || !now) return false
+  const fields = Object.entries(sent)
+  if (fields.length === 0) return false
+  const plain = (o: Record<string, unknown>, k: string): string | null => {
+    if (!Object.prototype.hasOwnProperty.call(o, k)) return null
+    const x = o[k]
+    return typeof x === 'string' ? x : typeof x === 'number' || typeof x === 'boolean' ? String(x) : null
+  }
+  return fields.every(([k, v]) => plain(now, k) === v) && fields.some(([k, v]) => { const b = plain(was, k); return b !== null && b !== v })
+}
+const jsonObject = (text: string | null): Record<string, unknown> | null => {
+  if (text === null) return null
+  try {
+    const v: unknown = JSON.parse(text)
+    return v && typeof v === 'object' && !Array.isArray(v) ? v as Record<string, unknown> : null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Whether `sentFields` holds the whole of what a held write said (the read-back may then speak for the write): every field
+ * but `_method` and the login / CSRF / session ones is one plain value — none repeated, none nested in JSON.
+ */
+export function sentBodyWhole(shape: HeldWriteShape): boolean {
+  for (const [k, values] of shape.fields) {
+    if (k === '_method' || isSensitiveFieldName(k)) continue
+    if (values.length !== 1 || values[0].includes('\u0000')) return false
+  }
+  return true
+}
+
 /** A page's JSON object as the card's rows: its top-level plain values (a list of plain values joined), at most 30. Null: not a JSON object. */
 export function topFields(answerText: string): Array<[string, string]> | null {
   let v: unknown
@@ -650,11 +695,14 @@ export function workWriteLogStep(input: { after: number; frame: number | null; m
  * reach (`network`), the member's stop or the consultation closed (`stop-button`: the app cannot tell the two apart — both
  * end the turn's request), the AI stop (`ai-stopped`), the run's time (`timeout`) or steps (`rounds`), the site's window
  * closed, the app's sign-in / company / setting changed (`context-changed`), the operator AI not answering in its form
- * (`operator`), and the server refusing to go on (`server-refused`: a setting, a level, this PC).
+ * (`operator`), and the server refusing to go on (`server-refused`: a setting, a level, this PC). The write ledger's two
+ * (agent-browser.md "The write ledger across requests"): an earlier write in doubt the person answered 「済んでいた」
+ * (`earlier-done`: this request may be that same write again, so nothing is written) or left unanswered (`earlier-unknown`);
+ * and a write whose answer was lost — the work stopped there — that the app's read-back then found landed (`read-back`).
  */
 export const WORK_STOP_REASONS = [
   'not-found', 'need-login', 'need-person', 'blocked', 'refused', 'not-approved', 'network', 'stop-button', 'ai-stopped', 'timeout',
-  'rounds', 'window-closed', 'context-changed', 'operator', 'server-refused',
+  'rounds', 'window-closed', 'context-changed', 'operator', 'server-refused', 'earlier-done', 'earlier-unknown', 'read-back',
 ] as const
 export type WorkStopReason = typeof WORK_STOP_REASONS[number]
 
@@ -699,6 +747,9 @@ export const BROWSER_WORK_WORDS = {
     'context-changed': '止まりました：アプリのサインイン・会社・設定が変わりました。',
     operator: '止まりました：ブラウザ操作の係の AI が、決まった形で答えられませんでした。',
     'server-refused': '止まりました：サーバーが続けることを断りました（会社の設定・許可・この PC の登録のどれかが変わりました）。',
+    'earlier-done': '止まりました：前に送って結果が分からなかった書き込みについて、ユーザーが「済んでいた」と答えました。同じものを二重に作らないよう、この作業ではサイトに何も書いていません。',
+    'earlier-unknown': '止まりました：前に送って結果が分からない書き込みがあり、ユーザーの答え（済んでいた／されていなかった）がなかったため、この作業ではサイトに何も書いていません。',
+    'read-back': '止まりました：書き込みの答えがサイトから来なかったため、作業をそこで止めました。読み直したところ、その書き込みは済んでいました（もう一度は送りません）。',
   } satisfies Record<WorkStopReason, string>,
   stoppedFooter: 'ユーザーにカードを見て、サイトの画面で確かめてもらってください。',
   /**
@@ -772,6 +823,10 @@ export const BROWSER_WORK_CARD_WORDS = {
   lateDone: 'あとからサイトの答えが届き、済んでいました。アプリはもう一度は送りません。',
   lateRefused: 'あとからサイトの答えが届き、受け付けられていませんでした（保存されていません）。続けるときは、相談で頼み直してください。',
   confirmSettledElsewhere: 'この書き込みは、もう答えが記録されています。サイトの画面で確かめてください。',
+  /** The write ledger: an earlier write in doubt, asked before this request writes anything. */
+  earlierDoubt: '前回の結果が分からない書き込みがあります。サイトの画面で確かめて、下で答えてください。答えるまで、この作業はサイトに書きません。',
+  /** The app read the address again and found what the write sent: machine-checked, so the person is not asked. */
+  readBackDone: '読み直したところ、送った値になっていました（機械で確かめた）。済んでいたとして記録しました。アプリはもう一度は送りません。',
   defaultCompared: '比べ元',
   previewTitle: 'ブラウザ操作：AI が書く作業の下見',
   previewStopped: '下見の途中で止まりました。サイトには何も書いていません。',
