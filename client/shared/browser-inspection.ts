@@ -11,7 +11,7 @@
 import { BROWSER_CARD_MARK_WORDS, type BrowserCard, type BrowserCardCheckedBy, type BrowserCardMark, type BrowserCardRow, type BrowserCardValue } from '../../shared/core/browser-card'
 import { BROWSER_REQUEST_SERVER, BROWSER_COMPANY_ID_RE } from './browser-plans'
 import { BROWSER_RUN_ID_RE } from '../../shared/core/browser-run-log'
-import { readBrowserOperatorTrail, type BrowserOperatorTrail } from './browser-operator-trail'
+import { readBrowserOperatorTrail, readBrowserStopNext, type BrowserOperatorTrail, type BrowserStopNext } from './browser-operator-trail'
 
 /** The consultation AI's inspection tool (`mcp__acb_browser__browser_inspect`; electron/browser-request/inspect-tool.ts). */
 export const BROWSER_INSPECT_TOOL = 'browser_inspect'
@@ -66,6 +66,11 @@ export interface BrowserInspectionView {
   siteLabel: string
   /** An operator run's own trail (outside text, the person's card only; agent-browser.md "The operator's trail on the card"). */
   trail?: BrowserOperatorTrail
+  /**
+   * What a write task's stopped preview asks of the member first (its question with ［そのまま進める］［やめる］, or
+   * ［開いてログイン］); absent: nothing (agent-browser.md "The stopped card asks one thing").
+   */
+  next?: BrowserStopNext
 }
 
 export type BrowserInspectionGetResult = { ok: true; view: BrowserInspectionView } | { ok: false; message: string }
@@ -82,6 +87,15 @@ export const BROWSER_INSPECTION_CARD_WORDS = {
   checks: '確かめ',
   notes: 'サイトの注意',
   unreadable: BROWSER_CARD_MARK_WORDS.unreadable,
+  /**
+   * The one explanation of who checked a row (機械で確かめた / 係の AI が確かめた / 確かめていない), folded, shown only on a
+   * card with such rows; each row carries its own mark (owner 2026-11-27: the explanation repeated in headings and a
+   * warning box on every card).
+   */
+  checkedBy: {
+    open: '「確かめた」の見分け方',
+    note: '「機械で確かめた」はアプリが送った値と読み直した値を比べたもの、「係の AI が確かめた」はブラウザ操作の係の AI がページを読んで判断したもの、「確かめていない」は誰も比べていないものです。',
+  },
 } as const
 
 const MARKS: readonly BrowserCardMark[] = ['ok', 'ng', 'unreadable', 'later']
@@ -158,7 +172,9 @@ export function readBrowserInspectionView(v: unknown): BrowserInspectionView | n
   if (!card) return null
   // A trail not in its shape or past its caps is left off (the card itself still shows).
   const trail = v.trail === undefined ? null : readBrowserOperatorTrail(v.trail)
-  return { card, readAt: v.readAt, siteLabel: v.siteLabel, ...(trail ? { trail } : {}) }
+  // So is a `next` off its shape (the card then asks nothing; its fixed reason still shows).
+  const next = v.next === undefined ? null : readBrowserStopNext(v.next)
+  return { card, readAt: v.readAt, siteLabel: v.siteLabel, ...(trail ? { trail } : {}), ...(next ? { next } : {}) }
 }
 
 /**

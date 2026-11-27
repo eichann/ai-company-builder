@@ -11,6 +11,7 @@ import { WRITE_CARD_UNREADABLE, useBrowserWrite } from '../hooks/useBrowserWrite
 import { putWrite } from '../writeStore'
 import { writeCardRefreshMs } from '../model'
 import { OperatorTrail } from './OperatorTrail'
+import { StopAsk } from './StopAsk'
 
 
 // Confirming and awaiting ［任せる］ are amber (the member's turn), a run in doubt is amber too (they check the site),
@@ -47,8 +48,12 @@ type Ports = { reads?: BrowserWriteReads; answers?: BrowserWriteAnswers; outboun
  * stopped card's four lists and, for a write in doubt, ［済んでいた］［されていなかった］ from its time. No resend anywhere.
  * `readCard` draws what was read (the inspection's body, handed in to keep the two files apart).
  */
-export const BrowserWriteCard = memo(function BrowserWriteCard({ companyId, cardId, readCard, ports = {} }: {
-  companyId: string; cardId: string; readCard: (view: BrowserInspectionView) => ReactNode; ports?: Ports
+export const BrowserWriteCard = memo(function BrowserWriteCard({ companyId, cardId, readCard, ports = {}, say }: {
+  companyId: string; cardId: string; ports?: Ports
+  /** Draws what was read; `headline` false once this card says its result (the reason is said once). */
+  readCard: (view: BrowserInspectionView, o: { headline: boolean }) => ReactNode
+  /** The conversation's send of the member's own message (the stopped card's answers); absent: no such button. */
+  say?: (text: string) => void
 }) {
   const { view, message, key } = useBrowserWrite(companyId, cardId, ports.reads)
   const [busy, setBusy] = useState(false)
@@ -83,6 +88,11 @@ export const BrowserWriteCard = memo(function BrowserWriteCard({ companyId, card
         <span className="text-title text-text">{view.title}</span>
         <span className="text-small text-text-muted">{view.siteLabel}</span>
       </div>
+
+      {/* A stopped run: what it asks first (the operator's question with its two answers), then why it stopped, once. */}
+      {result && view.next && view.next.kind !== 'login' && <StopAsk next={view.next} companyId={companyId} host={view.siteLabel} say={say} />}
+      {result && <p role="status" className="mt-1 text-body font-strong text-text">{result.headline}</p>}
+      {result && view.next?.kind === 'login' && <StopAsk next={view.next} companyId={companyId} host={view.siteLabel} />}
 
       {view.phase === 'confirming' && (
         <div className="mt-2">
@@ -128,7 +138,9 @@ export const BrowserWriteCard = memo(function BrowserWriteCard({ companyId, card
       </div>
 
       {view.phase === 'preparing' && <p role="status" className="mt-2 text-body text-text-muted">{W.preparing}</p>}
-      {view.card && readCard({ card: view.card, readAt: view.readAt ?? '', siteLabel: view.siteLabel })}
+      {/* What was read; a card left with nothing to say once its headline is this card's (a stop before any write) is not drawn. */}
+      {view.card && (view.card.headline !== result?.headline || view.card.sections.length > 0 || view.card.checks.length > 0 || view.card.notes.length > 0 || view.card.account)
+        && readCard({ card: view.card, readAt: view.readAt ?? '', siteLabel: view.siteLabel }, { headline: view.card.headline !== result?.headline })}
 
       {view.phase === 'ready' && view.contentHash && (
         <div className="mt-2 flex items-center gap-2">
@@ -146,7 +158,6 @@ export const BrowserWriteCard = memo(function BrowserWriteCard({ companyId, card
 
       {result && (
         <div className="mt-2">
-          <p role="status" className="text-body font-strong text-text">{result.headline}</p>
           <List heading={W.doneList} items={result.done} />
           <List heading={W.notDoneList} items={result.notDone} tone="muted" />
           <List heading={W.unknownList} items={result.unknown} />
@@ -164,11 +175,12 @@ export const BrowserWriteCard = memo(function BrowserWriteCard({ companyId, card
                 : result.confirm.from && <p className="mt-1 text-small text-text-muted">{W.confirmAt(time(result.confirm.from))}</p>}
             </div>
           )}
-          <p className="mt-2 text-small text-text-muted">{W.noResend}</p>
+          {/* The question's note under its buttons already says nothing done is sent again: said once. */}
+          {view.next?.kind !== 'decide' && <p className="mt-2 text-small text-text-muted">{W.noResend}</p>}
         </div>
       )}
 
-      {view.trail && <OperatorTrail trail={view.trail} />}
+      {view.trail && <OperatorTrail trail={view.trail} asked={view.next && view.next.kind !== 'login' ? view.next.question : null} />}
 
       {(view.message || message) && (
         <Callout tone="warning" className="mt-2"><span className="inline-flex items-start gap-1"><WarningCircle size={14} weight="fill" aria-hidden className="mt-0.5" />{view.message ?? message}</span></Callout>

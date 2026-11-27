@@ -11,6 +11,12 @@ export interface ReviewActions {
   confirm: () => void
   /** Puts the cursor in the composer to write what to change. */
   requestChanges: () => void
+  /**
+   * Sends `text` as the member's own message, through the composer's ordinary send (exactly as if they typed it): a card's
+   * answer buttons (「ブラウザ操作」's stopped card, agent-browser.md "The stopped card asks one thing"). Absent outside a
+   * conversation: such a card then shows no answer button.
+   */
+  say?: (text: string) => void
 }
 
 export const ReviewActionsContext = createContext<ReviewActions>({ confirm: () => {}, requestChanges: () => {} })

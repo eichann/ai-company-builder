@@ -20,6 +20,7 @@ import {
   BROWSER_OPERATOR_WORK_PROMPT, BROWSER_OPERATOR_WORK_PREVIEW_PROMPT, BROWSER_WORK_CARD_WORDS as CW, BROWSER_WORK_WORDS as W, WORK_STOP_REASONS,
   workBusyWords, workMaterial, workWordsForAi,
 } from '../shared/browser-frame-writes'
+import { BROWSER_INSPECTION_CARD_WORDS } from '../shared/browser-inspection'
 import { readBrowserPageSnapshot, type BrowserBrowseSurface, type BrowserPageSnapshot } from '../shared/browser-browse'
 import { createPendingEnds, PENDING_END_DELAYS_MS, sendEnd } from '../electron/features/browser/pending-ends'
 import { wireBrowserWork } from '../electron/features/browser/work'
@@ -321,6 +322,9 @@ test('a Skill\'s step with 【】 reaches the operator as written (the task too)
 test('the card says who read what: the operator AI read the preview\'s values and wrote the summary; not machine-checked', () => {
   assert.match(CW.summary, /ブラウザ操作の係の AI/)
   assert.match(CW.summary, /相談の AI には渡していません/)
-  assert.match(CW.summary, /機械で確かめた値ではありません/)
   assert.doesNotMatch(CW.summary, /AI には見せていません/)
+  // "Not machine-checked" is said once per card, folded, beside each row's own mark (owner 2026-11-27: never in every heading).
+  assert.doesNotMatch(CW.summary, /機械で確かめた/)
+  assert.doesNotMatch(CW.aiChecks, /機械で確かめた/)
+  assert.match(BROWSER_INSPECTION_CARD_WORDS.checkedBy.note, /「係の AI が確かめた」はブラウザ操作の係の AI がページを読んで判断したもの/)
 })

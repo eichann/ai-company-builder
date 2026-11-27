@@ -17,7 +17,7 @@ import { BROWSER_COMPANY_ID_RE } from '../../../shared/browser-plans'
 import { BROWSER_BROWSE_LIMITS as BL, aimedAction, browseLogStep, pageWithScreen, type BrowserBrowseAction, type BrowserBrowseHistoryEntry, type BrowserBrowseStop, type BrowserBrowseSurface, type BrowserPageSnapshot } from '../../../shared/browser-browse'
 import {
   BROWSER_WORK_CARD_WORDS as CW, BROWSER_WORK_LIMITS as L, BROWSER_WORK_WORDS as W, afterReadTarget, beforeReadAddress, createdIdOf, parseWorkAnswer,
-  topFields, workBusyWords, workEndAfterRefusals, workFrameOf, workMaterial, workPlanSentences, workPreviewStoppedCard, workResultCard, workRetrySentence, workWordsForAi,
+  topFields, workBusyWords, workEndAfterRefusals, workFrameOf, workMaterial, workPlanSentences, workPreviewStoppedCard, workResultCard, workRetrySentence, workStopNext, workWordsForAi,
   type AfterReadResult, type WorkAnswer, type WorkEnd, type WorkFrame, type WorkPlanValue, type WorkStopReason,
 } from '../../../shared/browser-frame-writes'
 import { browserNeverReadFits } from '../../../../shared/core/browser-frame-match'
@@ -29,7 +29,7 @@ import type { BrowserPreviewSurface } from '../../../shared/browser-runner'
 import { noWindowWords, type BrowserRunWindow } from '../../../shared/browser-operation'
 import type { BrowserWriteGetResult, BrowserWriteResultView, BrowserWriteView } from '../../../shared/browser-line-writes'
 import type { BrowserInspectionView } from '../../../shared/browser-inspection'
-import { answerProblemOf, createOperatorTrail, trailForCard, type BrowserTrailRun, type OperatorTrailRecorder } from '../../../shared/browser-operator-trail'
+import { answerProblemOf, createOperatorTrail, trailForCard, type BrowserStopNext, type BrowserTrailRun, type OperatorTrailRecorder } from '../../../shared/browser-operator-trail'
 import type { BrowserAiSwitch } from './ai-switch'
 import type { BrowserContext } from './context'
 import { createFrameWriter, type FrameWriteRecord, type FrameWriter } from './frame-writes'
@@ -111,6 +111,8 @@ interface Entry {
   pressing: Promise<unknown> | null
   /** The operator's trails (the preview's when there was one, the work's), read live for the card. */
   trails: OperatorTrailRecorder[]
+  /** What the stopped card asks of the member first (its question, or the window), or null. */
+  next: BrowserStopNext | null
 }
 
 /** A server refusal → the consultation AI's fixed words (busy: with roughly when the domain frees up, when the server said). */
@@ -144,10 +146,22 @@ const trailOf = (trails: readonly OperatorTrailRecorder[]) => {
   return trail ? { trail } : {}
 }
 
-/** A stopped preview's view: the fixed reason on the card, the operator's trail beside it. */
-const previewStoppedView = (host: string, end: WorkEnd, at: number, trail: BrowserTrailRun): BrowserInspectionView => ({
-  card: workPreviewStoppedCard(end, trailForCard([trail]) !== null), readAt: new Date(at).toISOString(), siteLabel: host, ...(trailForCard([trail]) ? { trail: [trail] } : {}),
+/**
+ * A stopped preview's view: what it asks of the member first (`next`), the fixed reason once, the operator's trail folded
+ * beside it.
+ */
+const previewStoppedView = (host: string, end: WorkEnd, at: number, trail: BrowserTrailRun, next: BrowserStopNext | null): BrowserInspectionView => ({
+  card: workPreviewStoppedCard(end), readAt: new Date(at).toISOString(), siteLabel: host, ...(trailForCard([trail]) ? { trail: [trail] } : {}),
+  ...(next ? { next } : {}),
 })
+
+/**
+ * What the operator asks the member when it stopped on its own word: its `question`, else its stop `reason` (an operator
+ * that put the question there, as every one did before the key existed: the incident of 2026-11-27). Outside text, kept for
+ * the member's card only (`workStopNext` keeps it only for `need-person`); never in the consultation AI's words or a log.
+ */
+const operatorQuestion = (answer: { question: string | null }, trail: OperatorTrailRecorder): string | null =>
+  answer.question ?? trail.view().end?.reason ?? null
 
 export function wireBrowserWork(deps: BrowserWorkDeps) {
   const now = deps.now ?? Date.now
@@ -169,7 +183,7 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
     return {
       title: CW.title, siteLabel: e.host, phase: e.phase, values: e.values.map((v, i) => ({ name: `v${i + 1}`, label: v.label, value: v.value, needsConfirm: false, confirmed: false })),
       sentences: [...e.sentences], card: e.card, readAt: e.readAt, contentHash: e.phase === 'ready' ? e.planHash : null, message: e.message,
-      result, ...(e.phase === 'ready' ? { cancellable: true } : {}), ...trailOf(e.trails),
+      result, ...(e.phase === 'ready' ? { cancellable: true } : {}), ...trailOf(e.trails), ...(e.next ? { next: e.next } : {}),
     }
   }
 
@@ -356,14 +370,19 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
         const previewEnd: WorkEnd | null = previewed.kind === 'end' ? previewed.end
           : previewed.answer.do === 'stop' ? { kind: 'stopped', why: previewed.answer.why }
             : previewed.answer.do === 'plan' ? null : { kind: 'stopped', why: 'operator' }
+        // Its operator's question (need-person) or the window (need-login) goes first on that card, never to the AI.
+        const previewNext = previewEnd && previewed.kind === 'answer' && previewed.answer.do === 'stop'
+          ? workStopNext(previewEnd, operatorQuestion(previewed.answer, previewTrail)) : previewEnd ? workStopNext(previewEnd, null) : null
+        let asked = false
         if (previewEnd && previewRan.runId && deps.userId() === userId) {
-          keepPreview(userId, companyId, previewRan.runId, previewStoppedView(host, previewEnd, now(), previewTrail.view()))
+          keepPreview(userId, companyId, previewRan.runId, previewStoppedView(host, previewEnd, now(), previewTrail.view(), previewNext))
           input.onCard(previewRan.runId)
+          asked = previewNext?.kind === 'decide'
         }
         // The preview's run must have let the domain go before the frames run starts (one lock across both, Codex review).
         if (!previewFinished.ok) return said(W.offline)
         if (previewed.kind === 'end') return said(workWordsForAi(previewed.end, input.items, []))
-        if (previewed.answer.do === 'stop') return said(workWordsForAi({ kind: 'stopped', why: previewed.answer.why }, input.items, previewed.answer.unread))
+        if (previewed.answer.do === 'stop') return said(workWordsForAi({ kind: 'stopped', why: previewed.answer.why }, input.items, previewed.answer.unread, [], asked))
         if (previewed.answer.do !== 'plan') return said(W.failed)
         plan = previewed.answer
         // [ad hoc] the frames from the plan, checked by the server with the declaration's rules; never pre-approvable.
@@ -380,7 +399,7 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
         userId, companyId, runId: run.runId, host, phase: run.needsApproval ? 'ready' : 'running', values: plan?.values ?? [],
         sentences: workPlanSentences({ summary: plan?.summary ?? input.task, affects: plan?.affects ?? '', frames: workFrames(run.frames) }),
         planHash: run.planHash, approvalToken: run.approvalToken, card: null, readAt: null, message: null, result: null, decide: null,
-        inDoubt: null, conversationId: input.conversationId, pressing: null, trails: plan ? [previewTrail, workTrail] : [workTrail],
+        inDoubt: null, conversationId: input.conversationId, pressing: null, trails: plan ? [previewTrail, workTrail] : [workTrail], next: null,
       }
       const e = entry
       keep(e)
@@ -402,7 +421,7 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
           // The card dismissed or its time over → not approved; anything else that ended the wait says its own reason.
           const why: WorkStopReason = decision === 'approved' || cut.signal.aborted ? whyNot() : 'not-approved'
           e.phase = 'failed'
-          e.message = decision === 'approved' ? null : CW.stopped
+          // The result's headline says why, once (no second box repeating that it stopped).
           e.result = resultOf({ kind: 'stopped', why }, [], null)
           return said(workWordsForAi({ kind: 'stopped', why }, input.items, []))
         }
@@ -474,13 +493,16 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
       e.readAt = new Date(now()).toISOString()
       e.phase = 'finished'
       e.result = resultOf(end, records, e.card.headline)
+      // The operator's question (need-person) or the window (need-login) first on the card; the AI hears only that it asks.
+      // After any held write the answers are not offered (a new run would start the work over: Codex review).
+      e.next = workStopNext(end, answer?.do === 'stop' ? operatorQuestion(answer, workTrail) : null, records.length)
       // The write in doubt the server knows (it had a permit): the person may answer about it on the card, past its window.
       const doubt = records.find(r => r.outcome === 'unknown' && typeof r.write === 'number')
       e.inDoubt = doubt ? { write: doubt.write as number, from: confirmableAt(doubt.permittedAt ?? null), line: doubt.line } : null
       // The server's own time for the answer (and whatever it already knows of that write) drives the card's buttons.
       if (e.inDoubt) await syncDoubt(e)
       const unread = answer && answer.do !== 'plan' ? answer.unread : []
-      return said(worked.kind === 'refused' ? worked.words : workWordsForAi(end, input.items, unread, unreadAddresses))
+      return said(worked.kind === 'refused' ? worked.words : workWordsForAi(end, input.items, unread, unreadAddresses, e.next?.kind === 'decide'))
     } finally {
       clearInterval(watchStop)
       input.signal.removeEventListener('abort', onTurn)
@@ -660,7 +682,7 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
     const unknown = records.filter(r => r.outcome === 'unknown').map(r => r.line)
     return {
       outcome: end.kind === 'done' ? 'succeeded' : end.kind === 'unknown' ? 'unknown' : records.some(r => r.outcome === 'done') ? 'partial' : 'stopped',
-      headline: headline ?? (end.kind === 'stopped' ? W.stoppedBy[end.why] : CW.stopped),
+      headline: headline ?? (end.kind === 'stopped' ? W.stoppedBy[end.why] : end.kind === 'unknown' ? CW.unknown : CW.done),
       done: records.filter(r => r.outcome === 'done').map(r => r.line),
       notDone: records.filter(r => r.outcome === 'not-sent' || r.outcome === 'refused' || r.outcome === 'site-refused').map(r => r.line),
       unknown,

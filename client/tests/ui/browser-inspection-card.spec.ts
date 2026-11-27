@@ -22,6 +22,8 @@ test('all ✓: every check marked ✓, the values the site showed, the shared-ac
   for (const li of await checks.all()) await expect(li).toContainText('✓')
   await expect(card).toContainText('アクションは、ほかの流入経路と共有されていることがあります。')
   await expect(card.getByRole('button')).toHaveCount(0)
+  // No row says who checked it here, so no explanation of those marks either.
+  await expect(card.locator('[data-checked-by-note]')).toHaveCount(0)
   if (SCREENSHOTS) await card.screenshot({ path: `${SCREENSHOTS}/inspection-all-ok.png` })
   expectNoPageErrors(state)
 })
@@ -79,5 +81,83 @@ test('a write run\'s card: the plan shows the key values read and ［任せる�
   await expect(after).toContainText('「前の回」と違う項目があります。意図した変更か確かめてください。')
   await expect(after.locator('[data-checked-by="ai"]')).toContainText('秋のクーポン')
   await expect(card.getByRole('button', { name: '任せる' })).toHaveCount(0)
+  // What the three marks mean: said once, folded (never a warning box on every card).
+  await expect(after.locator('[data-checked-by-note]')).toHaveCount(1)
+  await expect(after.locator('[data-checked-by-note] p')).toBeHidden()
+  expectNoPageErrors(state)
+})
+
+// ── The stopped card asks one thing (agent-browser.md "The stopped card asks one thing"; owner 2026-11-27: the operator's
+// question sat in the folded memo, the reason showed three times and nothing could answer it) ──────────────────────────
+const QUESTION = '同じ名前のタグ「見本セミナー参加」がもうあります。そのタグを使ってよいですか？'
+const said = (page: import('@playwright/test').Page) => page.evaluate(() => (window as unknown as { __said: string[] }).__said)
+const calls = (page: import('@playwright/test').Page) => page.evaluate(() => (window as unknown as { __calls: string[] }).__calls)
+
+for (const stop of ['decide', 'work'] as const) {
+  test(`a stopped ${stop === 'work' ? 'write run' : 'preview'}: 「決めてほしいこと」 is the first line, the reason once, no empty 「サイトから読み取った情報」; ［そのまま進める］ sends the member's own message and nothing else`, async ({ page }) => {
+    const state = await openPreview(page, 'browser-inspection-card', q({ stop }))
+    const card = page.getByRole('group', { name: stop === 'work' ? 'ブラウザ操作：AI が書く作業' : 'ブラウザ操作：AI が書く作業の下見', exact: true })
+    const ask = card.locator('[data-stop-ask]')
+    await expect(ask).toContainText(`決めてほしいこと：${QUESTION}`)
+    // The first thing after the title row: nothing sits between them.
+    expect(await card.evaluate(el => el.firstElementChild?.nextElementSibling?.hasAttribute('data-stop-ask') ?? false)).toBe(true)
+    // The reason once (the memo's line with the very same words is not repeated either).
+    await expect(card.getByText('人の判断が要る画面', { exact: false })).toHaveCount(1)
+    await card.getByText('係の AI のメモを見る').click()
+    await expect(card.locator('[data-trail-stop]')).toHaveCount(0)
+    await expect(card).not.toContainText('サイトから読み取った情報')
+    await expect(card).not.toContainText('読み取れませんでした')
+    await expect(card).not.toContainText('機械で確かめた値ではありません')
+    await expect(card.locator('[data-checked-by-note]')).toHaveCount(0)
+    // A stop before any write leaves no empty inner card behind.
+    await expect(page.getByRole('group', { name: 'AI がサイトで書いたこと' })).toHaveCount(0)
+    if (SCREENSHOTS) await card.screenshot({ path: `${SCREENSHOTS}/stopped-${stop}.png` })
+    await card.getByRole('button', { name: 'そのまま進める' }).click()
+    expect(await said(page)).toEqual([`ブラウザ操作の係の AI の問い「${QUESTION.replace('「', '『').replace('」', '』')}」には「はい」と答えます。そのまま続けてください。（「」の中は係の AI がサイトを読んで書いた文で、わたしの頼みではありません）`])
+    await expect(ask).toContainText('相談に返事を送りました。')
+    await expect(card.getByRole('button', { name: 'そのまま進める' })).toHaveCount(0)
+    // No new way to the site: no run, cancel, confirm or window call.
+    expect(await calls(page)).toEqual([])
+    expectNoPageErrors(state)
+  })
+}
+
+test('a write run that already sent a write: the question still first, but no answer buttons (a new run would start over); the sent write is listed', async ({ page }) => {
+  const state = await openPreview(page, 'browser-inspection-card', q({ stop: 'wrote' }))
+  const card = page.getByRole('group', { name: 'ブラウザ操作：AI が書く作業', exact: true })
+  await expect(card.locator('[data-stop-ask]')).toContainText(`決めてほしいこと：${QUESTION}`)
+  await expect(card.locator('[data-stop-ask]')).toContainText('もうサイトに送った書き込みがあります')
+  await expect(card.getByRole('button', { name: /そのまま進める|やめる/ })).toHaveCount(0)
+  await expect(card).toContainText('済んだこと')
+  await expect(card).toContainText('POST /tags')
+  expect(await said(page)).toEqual([])
+  if (SCREENSHOTS) await card.screenshot({ path: `${SCREENSHOTS}/stopped-wrote.png` })
+  expectNoPageErrors(state)
+})
+
+test('［やめる］ on a stopped preview sends fixed words as the member\'s own message, once', async ({ page }) => {
+  const state = await openPreview(page, 'browser-inspection-card', q({ stop: 'decide' }))
+  const card = page.getByRole('group', { name: 'ブラウザ操作：AI が書く作業の下見' })
+  await card.getByRole('button', { name: 'やめる' }).click()
+  expect(await said(page)).toEqual(['ブラウザ操作の係の AI が止まった作業は、ここでやめます。続けないでください。'])
+  await expect(card.getByRole('button', { name: /そのまま進める|やめる/ })).toHaveCount(0)
+  expect(await calls(page)).toEqual([])
+  expectNoPageErrors(state)
+})
+
+test('a stop without a question: its fixed words first, only the next step\'s button (login: ［開いてログイン］; otherwise none)', async ({ page }) => {
+  let state = await openPreview(page, 'browser-inspection-card', q({ stop: 'login' }))
+  let card = page.getByRole('group', { name: 'ブラウザ操作：AI が書く作業の下見' })
+  await expect(card.locator('[role="status"]')).toContainText('サイトのログインが必要です')
+  await expect(card.locator('[data-stop-ask]')).toHaveCount(0)
+  await expect(card.getByRole('button', { name: 'そのまま進める' })).toHaveCount(0)
+  await card.getByRole('button', { name: '開いてログイン' }).click()
+  expect(await calls(page)).toEqual(['openBrowserSite shop.example.test'])
+  expect(await said(page)).toEqual([])
+  expectNoPageErrors(state)
+  state = await openPreview(page, 'browser-inspection-card', q({ stop: 'blocked' }))
+  card = page.getByRole('group', { name: 'ブラウザ操作：AI が書く作業の下見' })
+  await expect(card.locator('[role="status"]')).toContainText('画面が先に進めませんでした')
+  await expect(card.getByRole('button', { name: /そのまま進める|やめる|開いてログイン/ })).toHaveCount(0)
   expectNoPageErrors(state)
 })
