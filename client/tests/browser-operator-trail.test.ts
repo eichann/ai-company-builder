@@ -313,7 +313,7 @@ test('a write run\'s preview keeps the operator\'s word for what has no ref; one
   assert.equal(cards.length, 1)
   assert.equal(wiring.previewCard('u-1', COMPANY, cards[0])?.trail?.[0].unlisted, UNLISTED)
   const ctx = { snapshot: page(), items: 0, phase: 'preview' as const, adhoc: false, domain: HOST }
-  assert.deepEqual(parseWorkAnswer(step({ do: 'back', unlisted: 4 }), ctx), { problem: 'unlisted' })
+  assert.deepEqual(parseWorkAnswer(step({ do: 'stop', why: 'need-person', unread: [], unlisted: 4 }), ctx), { problem: 'unlisted' })
   assert.deepEqual(parseBrowseAnswer(step({ do: 'back', unlisted: { x: 1 } }), { snapshot: page(), items: 0 }), { problem: 'unlisted' })
   const a = parseBrowseAnswer(step({ do: 'back', unlisted: `一行目\n${'あ'.repeat(300)}` }), { snapshot: page(), items: 0 })
   assert.ok('answer' in a && a.unlisted?.length === BROWSER_TRAIL_LIMITS.reason && !a.unlisted.includes('\n'))
