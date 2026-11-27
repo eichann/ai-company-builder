@@ -500,6 +500,8 @@ interface WorkWorld {
   abortAfterMs?: number
   frameConfirm: () => Promise<BrowserLinesAnswer>
   frameGet: () => Promise<BrowserLinesAnswer>
+  /** The server's answer to a read-back report (default: taken). */
+  readBackTaken?: boolean
   /** The wiring's clock (default: the real one), and what each operator step does to it. */
   now?: () => number
   onStep?: (prompt: string) => void
@@ -582,7 +584,10 @@ function workWorld(over: Partial<WorkWorld> = {}) {
     // Another run than this task's (the write ledger: an earlier request's write) is named in the call.
     async frameGet(_c: string, r: string) { w.calls.push(`frameGet${r === FRAME_RUN ? '' : ` @${r}`}`); return w.frameGet() },
     async frameConfirm(_c: string, r: string, body: { write: number; answer: string }) { w.calls.push(`frameConfirm ${body.write} ${body.answer}${r === FRAME_RUN ? '' : ` @${r}`}`); return w.frameConfirm() },
-    async frameReport(_c: string, _r: string, body: { result: string; reason?: string }) { w.calls.push(`frameReport ${body.result}${body.reason === 'read-back' ? ' read-back' : ''}`); return { kind: 'ok', value: {} } as BrowserLinesAnswer },
+    async frameReport(_c: string, _r: string, body: { result: string; reason?: string }) {
+      w.calls.push(`frameReport ${body.result}${body.reason === 'read-back' ? ' read-back' : ''}`)
+      return (body.reason === 'read-back' && w.readBackTaken === false ? { kind: 'refused', code: 'BROWSER_REPORT_CONFLICT' } : { kind: 'ok', value: {} }) as BrowserLinesAnswer
+    },
     async frameEnd() { w.calls.push('frameEnd'); return { kind: 'ok', value: {} } as BrowserLinesAnswer },
   }
   let steps = 0
@@ -1442,6 +1447,14 @@ test('no answer within the card\'s time, or the turn stopped: nothing written; e
   assert.equal(await words, workWordsForAi({ kind: 'stopped', why: 'earlier-unknown' }, [], []))
   assert.equal(late.w.site.requests.length, 0)
 
+  // The server already holds another answer (answered elsewhere): not known here to be されていなかった → nothing written.
+  const elsewhere = withDoubts([EARLIER], { frameConfirm: async () => ({ kind: 'refused', code: 'BROWSER_FRAME_CONFIRMED' }) })
+  const elsewhereWords = elsewhere.tool.execute({ site: HOST, task: 'x', skill: 'coupons' })
+  await untilAsked(elsewhere)
+  await elsewhere.wiring.confirm(COMPANY, FRAME_RUN, 'not_done')
+  assert.equal(await elsewhereWords, workWordsForAi({ kind: 'stopped', why: 'earlier-unknown' }, [], []))
+  assert.equal(elsewhere.w.calls.some(c => c.startsWith('step ')), false)
+
   const cut = withDoubts([EARLIER], { abortAfterMs: 60 })
   assert.equal(await cut.tool.execute({ site: HOST, task: 'x', skill: 'coupons' }), workWordsForAi({ kind: 'stopped', why: 'stop-button' }, [], []))
   assert.equal(cut.w.calls.some(c => c.startsWith('step ')), false)
@@ -1478,6 +1491,17 @@ test('the read-back: a write whose answer was lost is found done when its own ad
   assert.match(view?.result?.headline ?? '', /読み直したところ/)
   assert.equal(said, workWordsForAi({ kind: 'stopped', why: 'read-back' }, [], []))
   assert.equal(landed.w.site.requests.length, 1, 'never sent again')
+
+  // A read-back the server did not take counts for nothing: the person is asked as before.
+  const untaken = withDoubts([], {
+    site: { requests: [], answer: () => null }, readBackTaken: false,
+    frameStart: () => ({ kind: 'ok', value: started({ needsApproval: false, afterRead: ['/coupons'] }) }),
+    reads: { '/coupons': '{"title":"秋のクーポン"}' },
+  })
+  untaken.w.onStep = () => { untaken.w.reads['/coupons'] = '{"title":"冬のクーポン"}' }
+  assert.equal(await untaken.tool.execute({ site: HOST, task: 'x', skill: 'coupons' }), workWordsForAi({ kind: 'unknown' }, [], []))
+  assert.ok(untaken.w.calls.includes('frameReport done read-back'))
+  assert.ok(viewOf(untaken.wiring)?.result?.confirm, 'still asked')
 
   // Nothing changed (the value was already so), or the read differs: no proof → the person is asked as before.
   for (const [before, after] of [['冬のクーポン', '冬のクーポン'], ['秋のクーポン', '秋のクーポン']]) {
