@@ -495,6 +495,7 @@ test('the operator sees a folder tree driven by script alone: each item listed o
 
 test('a row menu appended at the end of a long page gets its refs first (production 2026-11-27): the elements are ordered before the cap — the open menu, then the screen, the rest last —, a press on its choice reaches the page, an element it covers has no mark', { skip }, () => {
   const r = result.browse
+  assert.equal(r.menuError, undefined)
   assert.equal(r.menuEntered, true)
   const list = r.menuList as { count: number; omitted: number; boxes: boolean[]; names: string[] }
   // More usable elements than the cap: the cap holds, and the rest is counted.
@@ -518,6 +519,7 @@ test('a row menu appended at the end of a long page gets its refs first (product
 
 test('pressing by position: a menu choice with no ref is pressed where the screen image shows it and logged by its label; a file field or its label, a point off the screen and a page that moved are refused; typing goes into the focused text field, never a password field', { skip }, () => {
   const r = result.browse
+  assert.equal(r.menuError, undefined)
   // The menu's third choice has no sign of a control: no ref — pressed by its place on the image, logged by its own label.
   const by = r.byPosition as { aimed: { ok: boolean; role: string; logLabel: string }; label: string | null; acted: string; listed: boolean }
   assert.equal(by.listed, false, 'it has no ref')

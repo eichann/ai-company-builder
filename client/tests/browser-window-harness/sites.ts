@@ -65,7 +65,7 @@ document.getElementById('card').addEventListener('click', () => { mark('card'); 
  */
 const MENU_PAGE = `<!doctype html><meta charset="utf-8"><title>routes</title>
 <style>body { margin: 0 } #side { position: fixed; left: 0; top: 0; width: 160px; height: 100vh; overflow: hidden; z-index: 5; background: #eee }
-#side a { display: block; font-size: 6px; line-height: 9px } #list { margin-left: 170px } .row { height: 30px; display: flex; gap: 8px; align-items: center }
+#side a { display: block; font-size: 6px; line-height: 9px } #list, #fields { margin-left: 170px } .row { height: 30px; display: flex; gap: 8px; align-items: center }
 .more { width: 40px } #pop { position: absolute; z-index: 20; background: #fff; border: 1px solid #888; width: 200px } #pop div { cursor: pointer; padding: 6px }</style>
 <div id="side">${Array.from({ length: 60 }, (_, i) => `<a href="/side/${i}">メニュー${i}</a>`).join('')}</div>
 <div id="note" style="position: fixed; right: 0; bottom: 0; width: 120px; height: 40px; z-index: 0; background: #ffd">お知らせ</div>
