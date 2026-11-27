@@ -14,7 +14,12 @@
  */
 import { normalizeBrowserHost } from './browser-operation'
 
-export const BROWSER_RECORDING_FORMAT = 1
+/**
+ * The format the app writes. 2 (2026-11-27, agent-browser.md "A Skill's draft from a recording"): every send also says
+ * whether its address's query was kept exactly (`bareQuery`). The server still takes format 1 (an app from before).
+ */
+export const BROWSER_RECORDING_FORMAT = 2
+export type BrowserRecordingFormat = 1 | 2
 /** A stored recording is deleted this many days after it was sent (owner decision D2). */
 export const BROWSER_RECORDING_DAYS = 30
 
@@ -81,11 +86,17 @@ export interface BrowserRecordedSend {
   after: number | null
   /** How many times this very read (GET of the same pattern) was seen. */
   count: number
+  /**
+   * Format 2: the address's query is exactly its kept form — names only, each a plain word, once, in that order (`?return`)
+   * — so a Skill's draft may name that very query (`browserQueryKeptExactly`). False with no query, a value (`?a=1`), an
+   * encoding, a name masked or seen twice. Absent in format 1 (unknown).
+   */
+  bareQuery?: boolean
 }
 export type BrowserRecordingStep = BrowserRecordedPage | BrowserRecordedClick | BrowserRecordedInput | BrowserRecordedSend
 
 export interface BrowserRecordingContent {
-  format: typeof BROWSER_RECORDING_FORMAT
+  format: BrowserRecordingFormat
   /** The operated host the recording was made on. */
   domain: string
   steps: BrowserRecordingStep[]
@@ -147,6 +158,21 @@ export function browserAddressPattern(url: string, domain: string): string | nul
   }
   const pattern = keys.length > 0 ? `${path}?${keys.join('&')}` : path
   return pattern.length <= BROWSER_RECORDING_LIMITS.address ? pattern : '/{x}'
+}
+
+/**
+ * True when the address's raw query is exactly what `browserAddressPattern` keeps of it (names only, plain words, once, in
+ * order: `?return`, `?a&b`), so the kept form says the very query that was sent. False with no query, an empty one, any value
+ * (`?a=1`, `?a=`), an encoding, a masked or repeated name, or another host.
+ */
+export function browserQueryKeptExactly(url: string, domain: string): boolean {
+  let u: URL
+  try { u = new URL(url) } catch { return false }
+  const pattern = browserAddressPattern(url, domain)
+  if (pattern === null) return false
+  const at = pattern.indexOf('?')
+  const raw = u.search.slice(1)
+  return at !== -1 && raw !== '' && raw === pattern.slice(at + 1)
 }
 
 /** A host of another address (for the hosts list), or null. */
@@ -273,6 +299,7 @@ export function browserBodyFields(contentType: string | undefined, body: string)
 
 // ── Checking a stored recording (the server's rule) ─────────────────────────
 
+const SEND_KEYS = ['id', 'kind', 'method', 'override', 'address', 'fields', 'status', 'answerKeys', 'after', 'count'] as const
 const METHODS = ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS', 'OTHER'] as const
 const OVERRIDES = ['PUT', 'PATCH', 'DELETE'] as const
 
@@ -325,7 +352,8 @@ const posInt = (v: unknown, max = Number.MAX_SAFE_INTEGER): v is number => typeo
 export function browserRecordingProblem(content: unknown, domain: string): string | null {
   if (normalizeBrowserHost(domain) !== domain) return 'domain'
   if (!isObj(content) || !exactKeys(content, ['format', 'domain', 'steps', 'hosts'])) return 'shape'
-  if (content.format !== BROWSER_RECORDING_FORMAT) return 'format'
+  if (content.format !== 1 && content.format !== 2) return 'format'
+  const sendKeys = content.format === 1 ? SEND_KEYS : [...SEND_KEYS, 'bareQuery']
   if (content.domain !== domain) return 'domain'
   const { steps, hosts } = content
   if (!Array.isArray(steps) || steps.length === 0 || steps.length > BROWSER_RECORDING_LIMITS.steps) return 'steps'
@@ -366,7 +394,9 @@ export function browserRecordingProblem(content: unknown, domain: string): strin
         if (!source(s.from, s.id)) return 'input'
         break
       case 'send': {
-        if (!exactKeys(s, ['id', 'kind', 'method', 'override', 'address', 'fields', 'status', 'answerKeys', 'after', 'count'])) return 'send'
+        if (!exactKeys(s, sendKeys)) return 'send'
+        // Format 2 says for every send whether its query was kept exactly; "exactly" needs a query.
+        if (content.format === 2 && (typeof s.bareQuery !== 'boolean' || (s.bareQuery && !(s.address as string).includes('?')))) return 'send'
         if (!(METHODS as readonly unknown[]).includes(s.method) || !(s.override === null || (OVERRIDES as readonly unknown[]).includes(s.override))) return 'send'
         if (!isBrowserAddressPattern(s.address)) return 'send'
         if (!(s.status === null || (typeof s.status === 'number' && Number.isInteger(s.status) && s.status >= 100 && s.status <= 599))) return 'send'
