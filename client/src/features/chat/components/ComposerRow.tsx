@@ -12,7 +12,7 @@ export function ComposerRow({ start, hint, end, children }: { start?: ReactNode;
     <div className="flex flex-wrap items-center gap-1 px-2 pb-2 pt-1">
       {start}
       {hint && <span data-composer-hint className="min-w-0 text-caption font-normal text-text-subtle">{hint}</span>}
-      <div className="ml-auto flex shrink-0 items-center gap-1">
+      <div className="ml-auto flex min-w-0 flex-wrap items-center justify-end gap-1">
         {end}
         {children}
       </div>

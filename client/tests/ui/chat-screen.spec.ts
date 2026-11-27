@@ -45,6 +45,14 @@ async function expectWhole(page: Page) {
   expect(box.x + box.width).toBeLessThanOrEqual(pane.x + pane.width + 0.5)
   const clipped = await sw.evaluate(button => [button, ...button.querySelectorAll('span')].some(e => e.scrollWidth > e.clientWidth + 0.5))
   expect(clipped, 'the model switch\'s label is not cut off').toBe(false)
+  // Every control of the input's row (voice, meter, switch, send) stays inside the pane: the row wraps instead.
+  for (const control of await composer(page).getByRole('button').all()) {
+    const b = await control.boundingBox()
+    if (!b || b.width === 0) continue
+    const name = await control.getAttribute('aria-label')
+    expect(b.x, `${name} starts inside the pane`).toBeGreaterThanOrEqual(pane.x - 0.5)
+    expect(b.x + b.width, `${name} ends inside the pane`).toBeLessThanOrEqual(pane.x + pane.width + 0.5)
+  }
 }
 
 test.beforeEach(async ({ page }) => { await page.setViewportSize({ width: 1440, height: 900 }) })
