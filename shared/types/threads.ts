@@ -12,6 +12,7 @@
  * missing or another company's one answer the same 404 `THREAD_NOT_FOUND`.
  */
 import type { OutboundChannel, OutboundMailState } from './outbound-mail'
+import type { WritingStyleKey } from './writing-style'
 
 export type ThreadChannel = 'email' | 'chat'
 
@@ -56,4 +57,10 @@ export interface ThreadView {
   unavailable: { reason: ThreadUnavailableReason; text: string; allow: 'google-inbox' | 'slack-read' | null } | null
   /** The member's own reply drafts to this 連絡 (newest first). */
   replies: ThreadReplyDraft[]
+  /**
+   * Which of the member's writing-style summaries fits a reply here (shared/core/writing-style.ts): the connector
+   * serving the role and whether the other side is inside the company. Absent / null: none fits (an older server,
+   * the connector has no `sent_samples`, it cannot tell); the AI then drafts as before.
+   */
+  writing?: WritingStyleKey | null
 }

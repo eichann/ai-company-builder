@@ -59,7 +59,7 @@ callers ask capabilities instead of branching on agent ids. Related: `chat-write
 - `client/shared/agents/registry.ts` (pure; main, renderer and tests import it): per agent id
   (`claude-code` / `codex` / `api-key`; `AuthMode` is an alias of `AgentId`) → labels, models
   (id, label, efforts, context, exact CLI string), defaults (Opus 5.5 + medium), the model per
-  job (`tasks`: chat / title / commitMessage / voice / handoff / webReader / secondOpinion / browserOperator), `askNames` (how a
+  job (`tasks`: chat / title / commitMessage / voice / writingStyle / handoff / webReader / secondOpinion / browserOperator), `askNames` (how a
   member names the agent in a message: 「Codex」「コーデックス」, 「Claude」「クロード」) and `capabilities`
   (ownsConversation, steering, promptSuggestions, choicePrompts, subagentProgress, rateLimits,
   imageInput, companyFilesMcp, references, writeGuard, privateReadGuard, handoff, oneShotText,
@@ -76,7 +76,7 @@ callers ask capabilities instead of branching on agent ids. Related: `chat-write
   company's key (the broker's relay), whatever agent the member uses: today `tagSuggest`
   (`tasks-ui.md` "Tag suggestions").
 - `client/electron/agents/registry.ts` is how each agent starts: `createAgentConnection(id,
-  host, profile?)`, `runOneShotText(id, request)` (commit messages, voice formatting),
+  host, profile?)`, `runOneShotText(id, request)` (commit messages, voice formatting, the writing-style summary: `writing-style.md`),
   `oneShotUnavailable(id, host)`, `writeAgentHandoff(id, request, host)`, `runWebReader(id,
   request)` (「Web で調べる」's reader, `web-research.md`).
   `client/tests/agent-registry-factories.test.ts`: every capability-gated factory an agent claims

@@ -687,6 +687,9 @@ const MATRIX: Row[] = [
   // The card's 元のスレッド (outbound-mail.md "Replies"): any member, only a record they read; a missing one is 404.
   r('GET /api/companies/:companyId/threads/:recordId', w => ({ path: `${C(w)}/threads/interaction-nosuch01` }), [404, 404, 404, 404, 404, 401]),
   r('GET /api/records-ai/threads/:recordId', () => ({ path: '/api/records-ai/threads/interaction-nosuch01' }), [401, 401, 401, 401, 401, 401], 'a session is not a record token'),
+  // 「返事の下書きを、わたしの書き方に合わせる」: the member's own sent messages, only through a connector serving a role now.
+  r('GET /api/companies/:companyId/me/writing-sources', w => ({ path: `${C(w)}/me/writing-sources` }), MEMBERS, 'the member\'s own sources (none while nothing is connected)'),
+  r('GET /api/companies/:companyId/me/writing-sources/:connectorId/samples', w => ({ path: `${C(w)}/me/writing-sources/nosuch/samples` }), [404, 404, 404, 404, 404, 401], 'no connector serves a role with the capability in this company'),
   // lane A ▲
   // lane B ▼
   // Matching people and companies (名寄せ, identity.md): any member, only records they can read;
@@ -1043,6 +1046,7 @@ const CROSS: CrossRow[] = [
  * other route with a parameter beyond the company must have a CROSS row.
  */
 const NOT_OBJECT_IDS: Record<string, string> = {
+  'GET /api/companies/:companyId/me/writing-sources/:connectorId/samples': 'a connector name: only the connector serving a role in this company now, read with the caller\'s own permission (writing-samples.test.ts)',
   'GET /api/companies/:companyId/me/plugin-steps/consultations/:conversationId': "the caller's own consultation id, looked up only among their own bindings in this company; anyone else's is null (plugin-steps.test.ts)",
   'GET /api/oauth/:provider/callback': 'a provider name, not an object: the company comes from the state, found only inside it (member-oauth.test.ts)',
   'PUT /api/companies/:companyId/browser-line-grants/:userId': 'gone since the site grants: 410 to owners / admins whatever the id, reading and writing nothing (browser-lines.test.ts); the site grants\' PUT has its CROSS row',

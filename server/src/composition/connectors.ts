@@ -37,6 +37,8 @@ import { createSlackEvents, type SlackSignal } from '../services/slack-events'
 import { createSlackNames } from '../services/slack-names'
 import { createSlackNotices } from '../services/slack-notices'
 import { createThreadService } from '../services/threads'
+import { createGoogleSentSamples } from '../services/google-writing'
+import { createWritingSamples } from '../services/writing-samples'
 import type { ReplySent } from '../services/outbound-mail'
 import type { ConnectorRoleChoiceRepository } from '../ports/connector-roles'
 import { createConnectorRoles } from '../services/connector-roles'
@@ -98,7 +100,7 @@ export function wireCoreConnectors(deps: CoreConnectorsWiringDeps) {
   // The inbox's source per connector (inbox.md "Receiving"): the server clock's poll reads Gmail through it.
   const inboxSources: Record<string, InboxSource> = { [BUILTIN_CONNECTORS.google.id]: googleMailInboxSource(googleMail, () => clock.nowMs()) }
 
-  return { connectorRoles, roleProviders, googleConnector, inboxSources }
+  return { connectorRoles, roleProviders, googleConnector, inboxSources, googleMail }
 }
 
 export type CoreConnectorsWiring = ReturnType<typeof wireCoreConnectors>
@@ -124,6 +126,8 @@ export interface ConnectorsLaneDeps {
   publicUrl(): string
   /** The member's own 受信を読む (services/work-switches.ts): Slack's signals only while it is on. */
   readsIncoming(companyId: string, userId: string): boolean
+  /** The company's own mail domains (the inbox's, lane B; called after construction only): 身内 by mail. */
+  internalDomains(companyId: string): readonly string[]
 }
 
 export function wireConnectorsLane(deps: ConnectorsLaneDeps) {
@@ -187,18 +191,36 @@ export function wireConnectorsLane(deps: ConnectorsLaneDeps) {
     },
   })
 
+  const emailOf = (_companyId: string, userId: string) => accounts.byIds([userId]).get(userId)?.email?.toLowerCase() ?? null
+
+  // 「返事の下書きを、わたしの書き方に合わせる」 (shared/core/writing-style.ts): the role capability 本人が送った文を読む.
+  // Each connector registers its own reader under its id; the core asks the role, never a service by name.
+  const writingSamples = createWritingSamples({
+    roles: deps.core.connectorRoles,
+    labelOf: id => Object.values(BUILTIN_CONNECTORS).find(c => c.id === id)?.label ?? id,
+  })
+  writingSamples.register(BUILTIN_CONNECTORS.google.id, createGoogleSentSamples({
+    mail: deps.core.googleMail,
+    ready: async (companyId, userId) => (await deps.core.inboxSources[BUILTIN_CONNECTORS.google.id].ready?.(companyId, userId)) === true,
+    internalDomains: companyId => deps.internalDomains(companyId),
+    emailOf,
+    nowMs: () => clock.nowMs(),
+  }))
+
   // The card's 元のスレッド (outbound-mail.md "Replies"): read now through the roles, with the viewer's own permission.
   const threads = createThreadService({
     companyData,
     mailReader: deps.core.roleProviders.mailReader,
     chatReader: deps.core.roleProviders.chatReader,
-    emailOf: (_companyId, userId) => accounts.byIds([userId]).get(userId)?.email?.toLowerCase() ?? null,
+    emailOf,
+    writingKeyOf: (member, role, thread) => writingSamples.keyForThread(member, role, thread),
   })
 
   return {
     connectorRoles: deps.core.connectorRoles,
     coreConnectors,
     threads,
+    writingSamples,
     slackConnector,
     slackEvents,
     /** Lane B subscribes here for Slack's signals (a DM, a mention, an @channel for a member). */

@@ -1054,6 +1054,11 @@ export function createInboxService(deps: InboxDeps) {
   return {
     settingsOf,
 
+    /** The company's own mail domains (the settings' and the members' own, never free mail): who is 身内 by mail. */
+    internalDomains(companyId: string): string[] {
+      return companyDomains(settingsOf(companyId), deps.memberAddresses(companyId).map(m => m.email))
+    },
+
     /** A core connector that serves the `mail` role's `read` registers how to list a member's messages. */
     registerSource(connectorId: string, source: InboxSource): void {
       if (sources.has(connectorId)) throw new Error(`Inbox source registered twice: ${connectorId}`)

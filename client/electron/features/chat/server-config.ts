@@ -12,7 +12,7 @@ import type { CompanyFilesApi } from '../../company-files/api'
 import { missingReasonOf, type RecordsApi } from '../../records/api'
 import { createRecordTools, type ExtraRecordTools } from '../../records/tools'
 import { readMailAttachment } from '../../records/mail-attachments'
-import { recordToolProviders } from '../../records/tool-providers'
+import { recordToolProviders, type RecordToolProviderDeps } from '../../records/tool-providers'
 import type { JobWriteArea } from '../../../shared/ai-turn-steps/job'
 import type { DrivePicking } from '../google/drive'
 import type { PathGuard } from '../ports'
@@ -95,6 +95,8 @@ export interface ChatServerConfigDeps {
   brokerTokens?: BrokerTokenStore
   /** Google Drive (features/google/drive.ts): the person's Picker; absent = no Drive tools. */
   drivePicking?: Pick<DrivePicking, 'pick'>
+  /** The member's own writing-style summary beside a thread read for a reply (features/writing-style); absent = none. */
+  writingStyle?: RecordToolProviderDeps['writingStyle']
   /** A scheduled job's run held for a consultation: its `job_report` (features/ai-turns/job-runs.ts); null otherwise. */
   jobReport?: (conversationId: string) => ((result: unknown) => Promise<string | null>) | null
   /** A scheduled job's run held for a consultation: where it may write (its deliverable area); null otherwise. */
