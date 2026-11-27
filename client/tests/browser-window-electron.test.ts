@@ -601,13 +601,12 @@ test('a write run sends each page write once within the plan: the page\'s own co
   for (const secret of ['csrf-777', 'sid=1', '"a"', '4242']) assert.equal(told.includes(secret), false, secret)
   const reports = (r.calls as Array<{ kind: string; body: { result?: string } }>).filter(c => c.kind === 'report').map(c => c.body.result)
   assert.deepEqual(reports, ['done', 'done', 'done', 'not_sent', 'unknown'])
-  // The DevTools connection gone while a save was held: the run's copy never went (at most the page's own original), the
-  // write is unknown and told so, the run locked.
-  assert.ok(work.filter(w => w.name === 'g').length <= 1, 'never two')
-  assert.deepEqual(r.detachedRecords, ['unknown'])
-  assert.equal(r.detachedLocked, true)
+  // The DevTools connection gone while a save was held: neither the run's copy nor the page's parked original reached the
+  // site, and the write is told not sent (its permit's unit used).
+  assert.equal(work.filter(w => w.name === 'g').length, 0)
+  assert.deepEqual(r.detachedRecords, ['not-sent'])
   const second = (r.calls as Array<{ kind: string; body: { result?: string } }>).filter(c => c.kind === 'report2').map(c => c.body.result)
-  assert.deepEqual(second, ['unknown'])
+  assert.deepEqual(second, ['not_sent'])
 })
 
 test('what a press did (the real-window probe of 2026-11-27): a ref whose row was re-used, a ref under a banner, a button whose words changed and an unlisted line whose words changed are never pressed; a press says what it reached; a confirm and an alert are told, the confirm cancelled; typing says what the field holds', { skip }, () => {

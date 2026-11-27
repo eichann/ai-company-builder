@@ -95,8 +95,12 @@ export interface BrowserWorkHooks {
   holdWrite(held: HeldPageWrite): Promise<HeldPageWriteAnswer>
   /** A read of the operated host the page or the operator must not make (a Skill's `never_read`). */
   neverRead(pathAndQuery: string): boolean
-  /** The window's DevTools connection went while a write was held (Chromium may then let the page's original go out). */
-  detached?(): void
+  /**
+   * The window's DevTools connection went while a write was held or parked: nothing more of the run is sent.
+   * `originalMayHaveGone`: a write the page made was not parked yet, so Chromium may have let it go out as the page made
+   * it (its outcome is then unknown); false: every original was parked and can no longer reach the site.
+   */
+  detached?(originalMayHaveGone: boolean): void
 }
 
 /** Why a held write is refused before any frame is asked (fixed words). */

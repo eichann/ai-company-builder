@@ -3752,11 +3752,28 @@ else. **No site word** anywhere (a fictional site in the tests).
   The held copy keeps the page's own headers but the connection's and the cookies (`HELD_DROPPED_HEADERS`, `proxy-*`,
   `sec-*`): its CSRF header goes as the page set it, its login is the window's cookies for exactly that address (the
   write session's `copyCookies`). **A held write is failed before the gate lets go** (`failHeld` in `setMode('human')`
-  before `Fetch.disable`: Chromium would otherwise send a paused request on its own). **The DevTools connection gone while
-  a write is held** (verified on Electron 45: Chromium then lets the paused original go out, past the request hook it
-  already passed): the run is told (`BrowserWorkHooks.detached` → `abandon('detached')`), every write held is kept
-  `unknown` and its copy is never sent — the write session's hook asks `aiGateReady` too, the writer is closed — and a
-  permitted one is reported `unknown`, never `not_sent` (independent review of #856).
+  before `Fetch.disable`: Chromium would otherwise send a paused request on its own).
+- **The page's original is parked before anything is awaited** (Codex review 2026-11-28, owner approved; measured on
+  Electron 45 with a fictional site, `browser-write-detach-electron.test.ts`): when the DevTools connection goes, Chromium
+  lets go of every request paused under Fetch, past the request hook it already passed — a `debugger.detach()`, and the
+  window closing for a `keepalive` write (it outlives its page). Before this, a cut before the permit sent the page's
+  unpermitted original to the site, and a cut while the run's copy was on its way or after its answer sent it **twice**
+  (copy + original); a reload, a navigation or a renderer crash cancel the original (no detach) and the copy alone went.
+  Now the first thing done with a page write at the request stage is `Fetch.continueRequest` pointing it at
+  `PARKED_WRITE_URL` (`https://acb-parked-write.invalid:1/`: port 1 is on Chromium's unsafe-port list, so it fails before
+  any connection, proxy or DNS; the change is not observable by the page) with `interceptResponse: true`; it pauses again
+  with that failure (`responseErrorReason`) and only then is it held and decided, and the page gets the copy's answer at
+  that pause (`Fetch.fulfillRequest`, as before). Released at any moment from then on, the original only fails. Measured,
+  cut before the permit / while the copy is on its way / after its answer, by detach, closing the window (keepalive),
+  reload: the site gets 0 / 1 / 1 — the permitted copy once or nothing, never the original (before: 1 original / 2 / 2
+  by detach, likewise for a keepalive by closing).
+- **The DevTools connection gone while a write is held or parked**: the run is told (`BrowserWorkHooks.detached(
+  originalMayHaveGone)`) and nothing more is sent (the write session's hook asks `aiGateReady` too). Every original was
+  parked (`false`, what the tests see): the work **closes** the writer (`close()`) — a held write not sent yet is
+  `not_sent` (a permit taken is reported so), one already on its way keeps its own result (the page then sees a failure);
+  a write the page made whose parking Chromium had not answered yet (`parking`: the command sent, no reply) may have gone
+  out as the page made it (`true`): `abandon('detached')` as before — every held write `unknown`, the run locked, a
+  permitted one reported `unknown`, never `not_sent` (independent review of #856).
 - **Deciding one** (`createFrameWriter`, in this order; each `refused` / `not-sent` fails the page's request): the run
   over, locked or stopped → not sent; `readHeldWrite` — another host, a body that is not a form, JSON or multipart text
   parts, **a part with a file**, `_method` twice, **a form body with a raw `;`** (some server stacks split on it, so the
@@ -3851,7 +3868,10 @@ else. **No site word** anywhere (a fictional site in the tests).
 - **Never read** (a Skill's `never_read`): the window's read rule refuses the page's and the operator's reads of the
   operated host that `browserNeverReadFits` names (its path pattern, and each query word it lists) during the preview and
   the work.
-- **Remaining limits** (said): the operator reads the page and may be misled by it — what it can do is bounded by the
+- **Remaining limits** (said): a page write whose pause Chromium reports at the very moment the DevTools connection goes —
+  before main has even seen the event, so it is neither held nor parked — goes out as the page made it, unknown to the run
+  (Chromium lets it go; no request hook sees it again). Not reproducible in a test; the window of time is one message
+  between Chromium and main; the operator reads the page and may be misled by it — what it can do is bounded by the
   domain and the frames, and its words reach only the member's card; what a write *contains* (which number, which date)
   is not checked by the machine beyond the frame's fixed fields — the plan card and the after-read card are where a
   person sees it (§8); a site that sets a new cookie on each save gets none back (decision of the runner's write
@@ -3878,8 +3898,8 @@ real window and a fictional site: a save sent once with the page's cookie and CS
 page without the site's cookie in the page or the window, two saves at once one after the other, an autosave outside
 the plan, an upload with a file, a never-read address, a save past the frame's max and a save whose permit came after
 the stop never reach the site, a lost answer reaches it once and nothing more is sent; no cookie, CSRF or value in a
-permit, a report or the log; the DevTools connection detached while a save is held: the run's copy never sent, at most
-the page's original arrives, the write unknown and reported so; the same file since the 2026-11-27 fix: a press whose page
+permit, a report or the log; the DevTools connection detached while a save is held: neither the run's copy nor the
+page's parked original arrives, the write not sent and reported so; the same file since the 2026-11-27 fix: a press whose page
 writes a moment later to a slow site → the next step's material shows it done beside the used unit, a press whose write
 gets no answer within the wait → unknown before the operator looks again (asked no more, pressed and permitted once), a
 write the page makes as it is read → shown as being sent then done, a write the page makes after the site's answer →
@@ -3893,12 +3913,20 @@ done (also on the real window, `browser-window-electron.test.ts`: a fictional sa
 press, pressed again at once, reaches the site once although its frame allows two — twice without the rule), a write held
 during a wait names the press before it, the member's stop cutting the wait (unknown at once);
 kept on purpose (time only): the end not waiting twice after a give-up, the moment ending early once a write was held),
+`client/tests/browser-write-detach-electron.test.ts` (a real window, a fictional site: a held fetch / form / keepalive
+write cut before the permit, while the copy is on its way and after its answer, by `debugger.detach()`, closing the window
+and a reload — the site gets the permitted copy once or nothing, never the page's original; cut before the permit the
+write is `not-sent` and reported `not_sent`; a write that reached the site never says not sent; uncut, the page still gets
+the site's answer — mutation-checked: holding without parking sends the original in 8 of the 9 cases), the work's
+`detached` wiring in `browser-frame-writes.test.ts` (parked → not sent, not parked yet → unknown; each branch
+mutation-checked; kept on purpose: the `parking` set itself, whose race no test can make),
 `client/tests/browser-core-words.test.ts` (the tool, its schema and both prompts name no
 site), `server/tests/unit/browser-runs.test.ts` (`write: true` at 見るだけ / on a 見るだけ site refused; the joined lock —
 only the member's run naming the frames run, `busy`, a run naming nothing → ended; write steps kept, listed, a value
 refused, append-only), `server/tests/unit/browser-frames.test.ts` (the start's `afterRead` / `neverRead`, not in `get`;
 no frames run while an operator run holds the domain; `holderOn`), `jobs-schema.test.ts`, `company-scoped-sql.test.ts`,
-the IPC inventory, `model/browser-plan/check` (FramesLife unchanged: the app is stricter, README). Each guard
+the IPC inventory, `model/browser-plan/check` (FramesLife unchanged: the app is stricter, README; the parking makes
+the code hold the model's assumption that only the run's send reaches the site — `SendNow` alone counts `sends`). Each guard
 mutation-checked (the serial chain, the last check, Set-Cookie, the frame's units, the file refusal, sensitive fields,
 unknown body kinds, the card's wait, the write task's start, bug 4's words, the machine label); kept on purpose as second
 layers: the writer's early "locked" check (`ready` refuses the same), the shell's Set-Cookie drop behind the writer's.

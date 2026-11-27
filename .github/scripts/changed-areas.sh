@@ -80,6 +80,7 @@ CLIENT_MAC=(
   client/tests/permission-mode.test.ts client/tests/sandbox-claude.test.ts
   client/tests/voice-helper.test.ts client/tests/voice-polisher.test.ts client/tests/voice-probe.test.ts
   client/tests/browser-window-electron.test.ts client/tests/browser-window-harness/ client/tests/browser-operator.test.ts
+  client/tests/browser-write-detach-electron.test.ts
   client/tests/doc-frame-electron.test.ts client/tests/doc-frame-harness/
   client/tests/doc-player-electron.test.ts client/tests/doc-player-harness/
   client/tests/cookie-encryption-electron.test.ts client/tests/cookie-encryption-harness/
