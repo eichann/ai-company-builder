@@ -533,8 +533,8 @@ const UNDO_TOOL: RecordToolSpec = {
   }).strict(),
   display: recordToolDisplay('records_undo'),
   description: 'メンバー本人の最近の変更（本人か、本人の AI がしたもの。24時間以内）を1つ取り消す。メンバーがこの会話ではっきり「取り消して」と頼んだときだけ使う（自分の判断では使わない）。' +
-    '先に records_history で、どの変更か（version）を確かめ、迷うときはメンバーに見せて確かめる。ほかの人の変更・古い変更・作ったこと・見せる範囲の変更は取り消せない（断られたら error の文をそのまま伝える）。\n' +
-    'Take back one recent change of the member\'s own (by them or their AI, within 24 hours), only when they explicitly asked in this conversation. Find the entry\'s version with records_history first; relay a refusal\'s error exactly.',
+    '先に records_history で、どの変更か（version）を確かめ、迷うときはメンバーに見せて確かめる。取り消せるのは、AI が自分でもしてよい操作（AI の道具がある操作）の変更だけ。ほかの人の変更・古い変更・作ったこと・見せる範囲の変更・決めたことの確かめ・やり直す・戻す・Gmail での片づけは取り消せない（断られたら error の文をそのまま伝える）。\n' +
+    'Take back one recent change of the member\'s own (by them or their AI, within 24 hours) whose action you may run yourself, only when they explicitly asked in this conversation. Find the entry\'s version with records_history first; relay a refusal\'s error exactly.',
   request: input => ({ method: 'POST', path: `/item/${enc(String(input.id))}/undo`, body: { version: input.version, expectedVersion: input.expectedVersion, ...(input.note !== undefined ? { note: input.note } : {}) } }),
 }
 
@@ -892,7 +892,8 @@ const FILE_MOVES_INSTRUCTIONS = `つながったファイルを動かすとき�
  */
 export const SCREEN_ONLY_OPERATIONS: ReadonlyArray<{ what: string; where: string }> = [
   { what: '見られる人を広げる（部署に出す・〇〇の人に見せる）', where: 'やることのカードの［部署に出す］／［〇〇の人に見せる］' },
-  { what: 'ほかの人の変更や、24時間より前の変更を取り消す', where: '操作のすぐあとにカードに出る［取り消す］（自分の変更か管理者だけ）' },
+  { what: 'ほかの人の変更・24時間より前の変更・AI がしてよい操作ではない変更（決めたことの確かめ、やり直す、戻す、やることにする など）を取り消す', where: '操作のすぐあとにカードに出る［取り消す］（自分の変更か管理者だけ）' },
+  { what: 'Gmail の受信トレイから外れた・Gmail でもアーカイブした来た連絡を戻す', where: '来た連絡のカードや知らせの［元に戻す］' },
   { what: 'やることを受けられないと返す', where: 'やることのカードの「…」の［受けられない］' },
   { what: 'アーカイブから戻す・やり直す', where: 'アーカイブ済みのやることのカードの［戻す］、完了したものは「…」の［やり直す］' },
   { what: '確かめる人・終わったら（知らせるだけ／確かめてもらう）を決める', where: 'やることのカードの「…」の［終わったら］（頼んだ人と管理者）' },

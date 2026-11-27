@@ -1,6 +1,6 @@
 /** Reversing an earlier ledger entry with a new one (records.md "The state engine"). */
 import { undoableByAssignee } from '../../../shared/core/core-types'
-import { AI_ASKED_PER_TURN, AI_ASKED_REFUSALS, AI_UNDO_WINDOW_MS } from '../../../shared/core/record-types'
+import { AI_ASKED_PER_TURN, AI_ASKED_REFUSALS, AI_UNDO_WINDOW_MS, aiAskedNeedsSetting, aiOnRequestField, viaOf, type ActionDef, type TypeDefinition } from '../../../shared/core/record-types'
 import { AskedLimitReached } from './act'
 import { FULL_ACCESS_ROLES } from '../../../shared/core/permissions'
 import { RECORD_TITLE_CHANGE, replayRecordState, type LedgerEntry, type LedgerValue } from '../../../shared/core/record-ledger'
@@ -18,7 +18,7 @@ import { followLinkName, followWords, linkedParents, placeWithin, WIDER_THAN_BUN
 import { isPlaceOrLinkChange, linkLedgerValue, linkTargetsOf, withLinkTargets } from './links'
 import { personalPathsSeen, scrubLedger } from './personal-links'
 import { bad, conflict, featureOffRefusal, serviceStateOnly, STATE_CHANGED_BY_SERVICE } from './refusals'
-import type { ActorInput } from './types'
+import { callVia, type ActorInput } from './types'
 import { NOTE_MAX, provenance } from './values'
 
 /** Whether an entry adds or removes a link target this member may not see. */
@@ -30,6 +30,26 @@ function changesUnseenTarget(entry: LedgerEntry, seen: ReadonlySet<string>): boo
     const moved = [...before.filter(t => !after.includes(t)), ...after.filter(t => !before.includes(t))]
     return moved.some(t => isOwnOnlyLinkTarget(t) && !seen.has(t))
   })
+}
+
+class AskedSettingOff extends Error {}
+
+/** Engine entries (not a type's action) the AI may take back: a file link, on a type that lets the AI act (as `fileLink`). */
+const AI_UNDOABLE_ENGINE_ACTIONS = ['link_file', 'unlink_file']
+
+/**
+ * Whether the member's own AI may take this entry back at their request: its action is one the AI may run itself on the
+ * record as it is now — `who` lists `ai`, or an `ai_on_request` action whose listed field holds the member — never one
+ * needing prior approval or one whose `via` leaves out the consultation; a file link on a type the AI acts on. Answers
+ * whether the member's own setting is needed too (`aiAskedNeedsSetting`), or null when the AI may not.
+ */
+function aiMayUndo(def: TypeDefinition | undefined, actionName: string, fields: Readonly<Record<string, unknown>>, userId: string, actor: ActorInput): { needsSetting: boolean } | null {
+  if (!def) return null
+  if (AI_UNDOABLE_ENGINE_ACTIONS.includes(actionName)) return Object.values(def.actions).some(a => a.who.includes('ai')) ? { needsSetting: false } : null
+  const action: ActionDef | undefined = Object.prototype.hasOwnProperty.call(def.actions, actionName) ? def.actions[actionName] : undefined
+  if (!action || action.approval === 'prior' || !viaOf(action).includes(callVia(actor))) return null
+  if (action.who.includes('ai')) return { needsSetting: false }
+  return aiOnRequestField(action, fields, userId) !== null ? { needsSetting: aiAskedNeedsSetting(action) } : null
 }
 
 export function undoing(ctx: EngineContext) {
@@ -75,9 +95,16 @@ export function undoing(ctx: EngineContext) {
       // The system's own entries its assignee may take back (UNDO_BY_ASSIGNEE: the inbox closing a mail
       // that left the mailbox inbox, or taking it out there — each told with ［元に戻す］).
       const assigneeMay = undoableByAssignee(row.type, target, now.fields.assignee, member.userId)
+      let undoNeedsSetting = false
       if (askedTurn) {
+        // The inbox's own entries its assignee may take back put mail back in Gmail: the person's ［元に戻す］ only.
+        if (assigneeMay) return refuse('forbidden', AI_ASKED_REFUSALS.undoMailbox.error, { code: AI_ASKED_REFUSALS.undoMailbox.code })
         if (target.actorId !== member.userId) return refuse('forbidden', AI_ASKED_REFUSALS.undoNotOwn.error, { code: AI_ASKED_REFUSALS.undoNotOwn.code })
         if (!(Date.parse(target.at) >= clock.nowMs() - AI_UNDO_WINDOW_MS)) return refuse('conflict', AI_ASKED_REFUSALS.undoTooOld.error, { code: AI_ASKED_REFUSALS.undoTooOld.code })
+        const may = aiMayUndo(currentTypes(records).get(row.type)?.definition, target.action, now.fields, member.userId, actor)
+        if (!may) return refuse('forbidden', AI_ASKED_REFUSALS.undoNotAiAction.error, { code: AI_ASKED_REFUSALS.undoNotAiAction.code })
+        undoNeedsSetting = may.needsSetting
+        if (undoNeedsSetting && ctx.deps.aiAskedOn?.(member.companyId, member.userId) !== true) return refuse('forbidden', AI_ASKED_REFUSALS.off.error, { code: AI_ASKED_REFUSALS.off.code })
       } else if (target.actorId !== member.userId && !FULL_ACCESS_ROLES.has(member.role) && !assigneeMay) return refuse('forbidden', '自分の変更か、管理者だけが取り消せます', { code: 'NOT_ALLOWED' })
       if (b.expectedVersion !== latest) return conflict('ほかの人が先に変えました。最新の状態を見てからもう一度お試しください', 'VERSION_CONFLICT', { version: latest })
       // `links.<name>` changes (a file linked, the meeting's まとまり) are compared with and restored to
@@ -148,6 +175,8 @@ export function undoing(ctx: EngineContext) {
       let written: boolean
       try {
         written = transactions.run(() => {
+          // The member's setting again, inside the write (turned off meanwhile: nothing written).
+          if (undoNeedsSetting && ctx.deps.aiAskedOn?.(member.companyId, member.userId) !== true) throw new AskedSettingOff()
           if (!records.writeState({ recordId: row.id, state: nextState, fields: JSON.stringify(nextFields), version: entry.version, updatedAt: at }, latest)) return false
           // One of the turn's `AI_ASKED_PER_TURN`, taken with the write (a write refused gives it back).
           if (askedTurn && !records.takeAskedAction(member.userId, askedTurn.tokenId, AI_ASKED_PER_TURN)) throw new AskedLimitReached()
@@ -158,6 +187,7 @@ export function undoing(ctx: EngineContext) {
         })
       } catch (error) {
         if (error instanceof AskedLimitReached) return refuse('conflict', AI_ASKED_REFUSALS.limit.error, { code: AI_ASKED_REFUSALS.limit.code })
+        if (error instanceof AskedSettingOff) return refuse('forbidden', AI_ASKED_REFUSALS.off.error, { code: AI_ASKED_REFUSALS.off.code })
         throw error
       }
       if (!written) return conflict('ほかの人が先に変えました。最新の状態を見てからもう一度お試しください', 'VERSION_CONFLICT')

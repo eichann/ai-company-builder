@@ -503,6 +503,27 @@ describe('「済んだ」 on a 確認待ち message (interaction 6, the assignee
     expect(handle().records.ledger(id).at(-1)).toMatchObject({ action: 'settle', actorId: 'u-alice', actorKind: 'ai', askedBy: 'u-alice' })
     ok(await engine.undo(m('u-alice'), person('u-alice'), id, { version: 3, expectedVersion: 3 }))
     expect(stateOf(id).state).toBe('unsure')
+    // Her AI may take back its own asked 「済んだ」 (an action it may run at her request, her setting on)…
+    ok(await engine.act(m('u-alice'), asked, id, 'settle', { expectedVersion: 4 }))
+    ok(await engine.undo(m('u-alice'), asked, id, { version: 5, expectedVersion: 5 }))
+    expect(stateOf(id).state).toBe('unsure')
+    // …never with her setting off (the undo would close nothing but reopens what the setting guards).
+    ok(await engine.act(m('u-alice'), asked, id, 'settle', { expectedVersion: 6 }))
+    askedOn.delete('u-alice')
+    expect(await engine.undo(m('u-alice'), asked, id, { version: 7, expectedVersion: 7 })).toMatchObject({ ok: false, body: { code: 'AI_ASK_OFF' } })
+    expect(stateOf(id).state).toBe('handled')
+  })
+
+  it('her AI never takes back 「やることにする」 she pressed (an action the AI may not run)', async () => {
+    const turn = { id: 'u-alice', kind: 'ai' as const, source: 'claude-code', conversationId: 'conv-ask', askedTurn: { tokenId: 'tok-take-up' } }
+    inbox.receive('a', 'u-alice', mail())
+    const [row] = interactions()
+    ok(inbox.judge(m('u-alice'), AI('u-alice'), row.id, { expectedVersion: 1, outcome: 'set_aside', reason: '宣伝' }))
+    ok(await engine.act(m('u-alice'), person('u-alice'), row.id, 'take_up', { expectedVersion: 2 }))
+    askedOn.add('u-alice')
+    const r = await engine.undo(m('u-alice'), turn, row.id, { version: 3, expectedVersion: 3 })
+    expect(r).toMatchObject({ ok: false, body: { code: 'NOT_ALLOWED' } })
+    expect(stateOf(row.id).state).toBe('received')
   })
 
   it('取り消す right after brings it back to 確認待ち; the thread going on takes the mark away (the AI judges again)', async () => {

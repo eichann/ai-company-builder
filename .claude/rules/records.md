@@ -1122,7 +1122,10 @@ under version 6 keep it and never wait (`since: 7`).
   `requested_by` in the body never makes it the assignee's own), else `requested_by`. The AI
   acting for the assignee (their own AI's `finish_prep`) is **not** accepting — except the assignee's own AI asked by
   them in their turn, for an action that moves the state (引き受ける, 完了: `askedByMember`, `acceptance.ts`; task 17,
-  "The AI at the member's request"); a correction of words at their request does not accept. Entering
+  "The AI at the member's request"; owner decision 2026-11-27, the member's setting required): so an asked 完了 from
+  引き受け待ち records `accepted_by` too, and the requester's 「引き受けました」 notice (`request_accepted`) is sent as for
+  the member's own press — an undo takes the acceptance back, never the notice. A correction of words at their request
+  does not accept. Entering
   `declined` forgets `accepted_by` (a `reopen` asks again); an `assign` from `declined` asks the
   new assignee like a new request (to `todo` or 引き受け待ち — before version 7 it stayed `declined`).
 - `accepted_by` is the engine's: a create naming it → 400 `BAD_VALUE`; no action has it as an
@@ -2216,17 +2219,30 @@ to press each one. Now the member may let their own AI do exactly that, **in a c
 - **「取り消して」** (`POST /api/records-ai/item/:recordId/undo { version, expectedVersion, note? }`, `aiActs`, tool
   `records_undo` offered only in a marked turn): the generic undo (`undo.ts`) with the AI's actor and three more limits —
   a token of a turn the member started, never a run's (else 403 `NOT_ALLOWED`, `AI_ASKED_REFUSALS.undoNotAsked`); **only
-  an entry whose actor is the member** (themselves or their AI — never an owner's / admin's reach over others, never the
-  inbox's entries the assignee may take back: `undoNotOwn`); at most `AI_UNDO_WINDOW_MS` (24 hours) old (409
-  `UNDO_TOO_OLD`). Every other rule of undo holds (`NOT_UNDOABLE` for a create, an undo or a `place.*` change,
+  an entry whose actor is the member** (themselves or their AI — never an owner's / admin's reach over others:
+  `undoNotOwn`); at most `AI_UNDO_WINDOW_MS` (24 hours) old (409 `UNDO_TOO_OLD`); **only an entry whose action the AI may
+  run itself on the record as it is now** (review of #892, `aiMayUndo` in `undo.ts`): `who` lists `ai`, or an
+  `ai_on_request` action whose listed field holds the member — then the member's setting is needed whenever that action
+  needs it (`aiAskedNeedsSetting`, read again in the write's transaction; else `AI_ASK_OFF`) — or a file link
+  (`link_file` / `unlink_file`) on a type the AI acts on; never an action with `approval: prior` or a `via` without the
+  consultation (`screen`), mirroring `act.ts`. So never a decision's confirm / reject / retract, `take_up`, `reopen`
+  (やり直す・戻す), `decline`, record links, nor a 案件's own actions (`undoNotAiAction`: 「この変更は AI からは取り消せません…
+  カードの［取り消す］か画面から」). **The inbox's own entries its assignee may take back** (`UNDO_BY_ASSIGNEE`: 受信トレイから
+  外れた, Gmail でもアーカイブした — the latter's undo puts the mail back in Gmail) are refused with `undoMailbox`, which
+  points to the card's / notice's ［元に戻す］ (chosen over letting the AI put mail back into Gmail). An asked 「済んだ」 the
+  AI undoes is the plain undo of that entry, as the person's: the mail already archived in Gmail stays archived until
+  the ［元に戻す］ of the inbox's own entry. Every other rule of undo holds (`NOT_UNDOABLE` for a create, an undo or a `place.*` change,
   `CHANGED_SINCE`, `WIDER_THAN_BUNDLE`). Counted toward the turn's `AI_ASKED_PER_TURN` with the write, the entry marked
   `askedBy`. No member setting (it ends nothing of its own; it puts back what the member had). **Not on the turn's card**:
   an undo cannot be undone (`NOT_UNDOABLE`), so its ［取り消す］ would only fail; the member does the change again on screen.
   After a renewal of the turn's token (`memberTurn` false) the tool answers `ASKED_AFTER_RENEWAL` like the others.
 - Tests (daily operations): `server/tests/integration/ai-asked-close.test.ts` 「the daily operations…」 (アーカイブ only
   the requester's own and only with the setting / never a plain token; 引き受ける accepted as the member's, never another
-  member's AI; 「取り消して」 own only, no admin reach, 24 hours, a plain token, the cap; 案件 off with null and undone),
-  `server/tests/unit/inbox.test.ts` 「her own AI in her own turn (interaction 9)」, `record-types.test.ts` (which actions
+  member's AI; 「取り消して」 own only, no admin reach, 24 hours, a plain token, the cap, its own asked 完了 with the setting,
+  never やり直す; 案件 off with null and undone), `server/tests/unit/inbox.test.ts` 「her own AI in her own turn (interaction
+  9)」 (its own asked 済んだ taken back, not with the setting off) and 「her AI never takes back 「やることにする」」,
+  `decision-confirm.test.ts` 「the AI's 「取り消して」 reaches only what the AI may do itself」 (そうです, `approval: prior`,
+  `via: [plugin]`), `inbox-archive.test.ts` (Gmail's archive only through ［元に戻す］), `record-types.test.ts` (which actions
   carry the key, additive versions), `client/tests/ai-asked.test.ts` (tools only in a marked turn, `settled_by` never
   asked, the undo route, not on the card), `src/features/tasks/cardActions.test.ts` (経緯 「AI が（本人の頼みで）アーカイブ
   しました」) — mutation-checked.

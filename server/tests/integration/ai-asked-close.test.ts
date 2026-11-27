@@ -243,6 +243,26 @@ describe('the daily operations at the member\'s request (task 17, owner decision
     expect((await record(old)).version).toBe(2)
   })
 
+  it('「取り消して」 only of an action the AI may run itself (review of #892): its own asked 完了 yes (with the setting), the member\'s やり直す never', async () => {
+    await setOwn('u-bob', true)
+    const id = await task('u-bob', '頼んで完了', { assignee: 'u-bob' })
+    const { token: t } = await token('u-bob')
+    expect((await complete(t, id, 1)).status).toBe(200)
+    // The setting off: the undo would reopen what it guards — refused.
+    await setOwn('u-bob', false)
+    expect(await ai(t, 'POST', `/item/${id}/undo`, { version: 2, expectedVersion: 2 })).toMatchObject({ status: 403, body: { code: 'AI_ASK_OFF' } })
+    await setOwn('u-bob', true)
+    expect((await ai(t, 'POST', `/item/${id}/undo`, { version: 2, expectedVersion: 2 })).status).toBe(200)
+    expect((await record(id)).state).toBe('todo')
+    // His own やり直す (reopen: not an action his AI may run) is never taken back by it.
+    expect((await session('u-bob', 'POST', `/records/item/${id}/actions/complete`, { expectedVersion: 3 })).status).toBe(200)
+    expect((await session('u-bob', 'POST', `/records/item/${id}/actions/reopen`, { expectedVersion: 4 })).status).toBe(200)
+    const r = await ai(t, 'POST', `/item/${id}/undo`, { version: 5, expectedVersion: 5 })
+    expect(r).toMatchObject({ status: 403, body: { code: 'NOT_ALLOWED' } })
+    expect(r.body.error).toContain('AI からは取り消せません')
+    expect((await record(id)).state).toBe('in_progress')
+  })
+
   it('「取り消して」 counts toward the turn\'s cap: past it, refused and nothing written', async () => {
     const { token: t, tokenId } = await token('u-bob')
     db.prepare('UPDATE record_ai_tokens SET asked_closes = ? WHERE company_id = ? AND id = ?').run(AI_ASKED_PER_TURN, CO, tokenId)

@@ -410,6 +410,14 @@ export const AI_ASKED_REFUSALS = {
   undoNotAsked: { code: 'NOT_ALLOWED', error: '取り消しは、メンバー本人がこの会話で頼んだときだけ AI からできます。' },
   /** The AI's undo of someone else's change. */
   undoNotOwn: { code: 'NOT_ALLOWED', error: 'AI が取り消せるのは、メンバー本人（またはその AI）の変更だけです。ほかの人の変更は、その人か管理者が取り消します。' },
+  /**
+   * The AI's undo of a change whose action the AI may not run itself (`who` without `ai`, and not an `ai_on_request` action
+   * the member holds now; a decision's そうです / 違う / 取り消す, やることにする, やり直す, 戻す…), one needing prior approval, or one
+   * whose `via` leaves out the member's consultation.
+   */
+  undoNotAiAction: { code: 'NOT_ALLOWED', error: 'この変更は AI からは取り消せません（AI がしてよい操作ではないため）。取り消すときは、カードの［取り消す］か画面から行ってください。' },
+  /** The AI's undo of the inbox's own entry the assignee may take back (受信トレイから外れた, Gmail でアーカイブした). */
+  undoMailbox: { code: 'NOT_ALLOWED', error: 'Gmail の受信トレイから外れた・Gmail でもアーカイブした、という変更は、AI からは戻せません。来た連絡のカードや知らせの［元に戻す］から戻してください（Gmail の受信トレイにも戻ります）。' },
   /** The AI's undo of a change older than `AI_UNDO_WINDOW_MS`. */
   undoTooOld: { code: 'UNDO_TOO_OLD', error: 'AI が取り消せるのは、この24時間の変更だけです。それより前の変更は、ご自身で画面から取り消すか、改めて操作してください。' },
   /** More than `AI_ASKED_PER_TURN` in one turn. */

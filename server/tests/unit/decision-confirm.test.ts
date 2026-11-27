@@ -290,3 +290,46 @@ describe('the definition', () => {
     expect(stored()).toBe(1)
   })
 })
+
+// The AI's undo at the member's request (records.md "The AI at the member's request", review of #892): only an action the AI
+// may run itself — never a decision's そうです, never one needing prior approval, never one whose `via` leaves out the consultation.
+describe('the AI\'s 「取り消して」 reaches only what the AI may do itself', () => {
+  const ASKED = { kind: 'ai' as const, source: 'claude-code', conversationId: 'conv-ask', askedTurn: { tokenId: 'tok-ask' } }
+  const MEMO_TYPE = '---\nlabel: メモ\nversion: 1\nstorage: server\nfields:\n  owner: { label: 持ち主, kind: person, source: server }\nlinks:\n  files: { label: ファイル, target: file, cardinality: many }\nstates: [open, closed]\ninitial: open\nfinal: [closed]\nactions:\n' +
+    '  close_prior: { label: 承認つきで閉じる, from: [open], to: closed, who: [anyone, ai], approval: prior }\n' +
+    '  close_plugin: { label: プラグインで閉じる, from: [open], to: closed, who: [anyone, ai], via: [plugin] }\n' +
+    '  close_plain: { label: 閉じる, from: [open], to: closed, who: [anyone, ai] }\n---\n'
+  function memo() {
+    const t = parseTypeFile('memo', MEMO_TYPE)
+    if (!t.ok) throw new Error(t.errors.join())
+    source.forCompany('a').records.insertTypeVersion({ name: 'memo', version: 1, definition: canonicalTypeJson(t.definition), source: 'file', commitSha: null, createdAt: TS })
+    return () => ok(engine.create(m('u-alice'), HUMAN, { type: 'memo', title: 'メモ' })).record.id
+  }
+
+  it('never a decision\'s 「そうです」 the member pressed themselves', async () => {
+    const d = await aiDecision({ bundle: deal('u-alice').id, meeting: meeting().id })
+    const done = ok(await act(m('u-alice'), HUMAN, d.id, 'confirm'))
+    const r = await engine.undo(m('u-alice'), ASKED, d.id, { version: done.entry!.version, expectedVersion: done.entry!.version })
+    expect(r).toMatchObject({ ok: false, body: { code: 'NOT_ALLOWED' } })
+    expect(!r.ok && (r.body as { error: string }).error).toContain('AI からは取り消せません')
+    expect((conn.prepare('SELECT state FROM record_state WHERE record_id = ?').get(d.id) as { state: string }).state).toBe('confirmed')
+  })
+
+  it('never an action needing prior approval, nor one only a plugin\'s screen may call; an ordinary one the AI may run, yes', async () => {
+    const newMemo = memo()
+    const prior = newMemo()
+    ok(await engine.act(m('u-alice'), HUMAN, prior, 'close_prior', { expectedVersion: 1 }))
+    expect(await engine.undo(m('u-alice'), ASKED, prior, { version: 2, expectedVersion: 2 })).toMatchObject({ ok: false, body: { code: 'NOT_ALLOWED' } })
+    const viaPlugin = newMemo()
+    ok(await engine.act(m('u-alice'), { ...HUMAN, via: { plugin: 'p', version: '1' } }, viaPlugin, 'close_plugin', { expectedVersion: 1 }))
+    expect(await engine.undo(m('u-alice'), ASKED, viaPlugin, { version: 2, expectedVersion: 2 })).toMatchObject({ ok: false, body: { code: 'NOT_ALLOWED' } })
+    const plain = newMemo()
+    ok(await engine.act(m('u-alice'), HUMAN, plain, 'close_plain', { expectedVersion: 1 }))
+    conn.prepare("INSERT INTO record_ai_tokens (company_id, id, user_id, token_hash, scope, agent, conversation_id, created_at, expires_at, revoked_at, member_turn) VALUES ('a', 'tok-ask', 'u-alice', 'h-ask', 'act', 'claude-code', 'conv-ask', ?, '2099-01-01T00:00:00.000Z', NULL, 1)").run(TS)
+    ok(await engine.undo(m('u-alice'), ASKED, plain, { version: 2, expectedVersion: 2 }))
+    // A file she linked on a type the AI acts on: her AI may take that link back too (it could link it itself).
+    const linked = newMemo()
+    ok(await engine.fileLink(m('u-alice'), HUMAN, linked, 'link', { path: '営業部/見積.md', expectedVersion: 1 }))
+    ok(await engine.undo(m('u-alice'), ASKED, linked, { version: 2, expectedVersion: 2 }))
+  })
+})
