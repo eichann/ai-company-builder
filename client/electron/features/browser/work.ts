@@ -494,7 +494,8 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
       e.phase = 'finished'
       e.result = resultOf(end, records, e.card.headline)
       // The operator's question (need-person) or the window (need-login) first on the card; the AI hears only that it asks.
-      e.next = workStopNext(end, answer?.do === 'stop' ? operatorQuestion(answer, workTrail) : null)
+      // After any held write the answers are not offered (a new run would start the work over: Codex review).
+      e.next = workStopNext(end, answer?.do === 'stop' ? operatorQuestion(answer, workTrail) : null, records.length)
       // The write in doubt the server knows (it had a permit): the person may answer about it on the card, past its window.
       const doubt = records.find(r => r.outcome === 'unknown' && typeof r.write === 'number')
       e.inDoubt = doubt ? { write: doubt.write as number, from: confirmableAt(doubt.permittedAt ?? null), line: doubt.line } : null

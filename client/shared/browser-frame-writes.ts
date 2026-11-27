@@ -651,8 +651,11 @@ export const BROWSER_WORK_WORDS = {
     'server-refused': '止まりました：サーバーが続けることを断りました（会社の設定・許可・この PC の登録のどれかが変わりました）。',
   } satisfies Record<WorkStopReason, string>,
   stoppedFooter: 'ユーザーにカードを見て、サイトの画面で確かめてもらってください。',
-  /** In place of the footer when the card asks the member to decide (its question is never in these words). */
-  askedFooter: 'カードに、人に決めてほしいことと［そのまま進める］［やめる］を出しました。ユーザーの返事を待ってください。返事で進めてよいと言われたら、決まったことを task に書き足して、もう一度頼んでください（済んだ書き込みは、もう一度は送られません）。',
+  /**
+   * In place of the footer when the card asks the member to decide (its question is never in these words). Only said for a
+   * run that wrote nothing (`workStopNext`): a new request starts that work over from the site's own state.
+   */
+  askedFooter: 'この作業では、サイトにまだ何も書いていません。カードに、人に決めてほしいことと［そのまま進める］［やめる］を出しました。ユーザーの返事を待ってください。返事で進めてよいと言われたら、決まったことを task に書き足して、もう一度頼んでください。',
   unread: (headings: readonly string[]) => `読めなかったもの：${headings.map(h => `「${h}」`).join('、')}`,
 } as const
 const WW = BROWSER_WORK_WORDS
@@ -702,7 +705,7 @@ export const BROWSER_WORK_CARD_WORDS = {
   // Who checked each row is its own mark (`BROWSER_CARD_CHECKED_BY_WORDS`) and the card's one folded line
   // (`BROWSER_INSPECTION_CARD_WORDS.checkedBy`): the headings no longer repeat it (owner 2026-11-27).
   aiChecks: 'ブラウザ操作の係の AI が確かめたこと',
-  summary: 'ブラウザ操作の係の AI のまとめ（係の AI がページを読んで書いたものです。相談の AI には渡していません）',
+  summary: 'ブラウザ操作の係の AI のまとめ（係の AI がページを読んで書いたもので、確かめた事実ではありません。相談の AI には渡していません）',
   done: '済みました。読み直した結果を確かめてください。',
   unknown: '分からない書き込みがあります。もう一度は送りません。下の「手でやること」を見て、サイトの画面で確かめてください。',
   /** After a stop's fixed reason: what the card then shows (nothing sent at all, or the sent and not sent apart). */
@@ -747,12 +750,17 @@ const CW = BROWSER_WORK_CARD_WORDS
  * operator's question for its own `need-person` stop (`decide`), the window for a `need-login` stop (`login`), else
  * nothing. Only the operator's own stop words ask: the app's stops (a refused write, the time, a button…) never do —
  * a `need-person` turned into `refused` by `workEndAfterRefusals` asks nothing.
+ *
+ * `held`: how many page writes this run held. The answers start the work over as a new run (Codex review): the once-rules
+ * hold within a run, not across runs, so after any write the card shows the question without them (`question`) and the
+ * member asks again in their own words, having seen what was written.
  */
-export function workStopNext(end: WorkEnd, question: string | null): BrowserStopNext | null {
+export function workStopNext(end: WorkEnd, question: string | null, held = 0): BrowserStopNext | null {
   if (end.kind !== 'stopped') return null
   if (end.why === 'need-login') return { kind: 'login' }
   const q = end.why === 'need-person' ? stopQuestion(question) : null
-  return q !== null ? { kind: 'decide', question: q } : null
+  if (q === null) return null
+  return held === 0 ? { kind: 'decide', question: q } : { kind: 'question', question: q }
 }
 
 /** The plan card's sentences: what will be done, who else is affected, each frame with its count. */

@@ -89,15 +89,17 @@ const frameView = (): BrowserWriteView => ({
 
 // `?stop=decide` | `login` | `blocked`: a write task's preview that stopped (a `bo_` card), asking the operator's question,
 // the window, or nothing; `?stop=work`: a write run (`bf_`) that stopped for a decision after ［任せる］ (agent-browser.md
-// "The stopped card asks one thing"). The answers go to the conversation's send (`window.__said`); every call that could
-// write or open anything is recorded (`window.__calls`).
+// "The stopped card asks one thing"); `?stop=wrote`: the same after the run already sent a write (the question, no answers).
+// The answers go to the conversation's send (`window.__said`); every call that could write or open anything is recorded
+// (`window.__calls`).
 const STOP = params.get('stop')
-const STOP_ID = STOP === 'work' ? `bf_${'5d'.repeat(16)}` : `bo_${'5d'.repeat(16)}`
+const WORK_STOP = STOP === 'work' || STOP === 'wrote'
+const STOP_ID = WORK_STOP ? `bf_${'5d'.repeat(16)}` : `bo_${'5d'.repeat(16)}`
 const QUESTION = '同じ名前のタグ「見本セミナー参加」がもうあります。そのタグを使ってよいですか？'
 const stopWhy = STOP === 'login' ? 'need-login' : STOP === 'blocked' ? 'blocked' : 'need-person'
 const stopNext: BrowserStopNext | undefined = STOP === 'login' ? { kind: 'login' } : STOP === 'decide' || STOP === 'work' ? { kind: 'decide', question: QUESTION } : undefined
 const stopTrail: BrowserOperatorTrail = [{
-  phase: STOP === 'work' ? 'work' : 'preview', steps: [{ action: 'click', page: '/tags', label: 'タグを作る', reason: 'タグの一覧を開くため' }], more: 0,
+  phase: WORK_STOP ? 'work' : 'preview', steps: [{ action: 'click', page: '/tags', label: 'タグを作る', reason: 'タグの一覧を開くため' }], more: 0,
   end: { kind: 'stop', reason: STOP === 'blocked' ? '保存ボタンが押せないため' : QUESTION }, notes: null,
 }]
 const stoppedPreview: BrowserInspectionView = {
@@ -105,11 +107,14 @@ const stoppedPreview: BrowserInspectionView = {
   ...(stopNext ? { next: stopNext } : {}),
 }
 const stoppedWork = (): BrowserWriteView => {
-  const card = workResultCard({ end: { kind: 'stopped', why: 'need-person' }, summary: null, writes: [], afterReads: [], checks: [], comparedName: null })
+  const wrote = STOP === 'wrote'
+  const writes = wrote ? [{ line: 'POST /tags', outcome: 'done' as const, status: null }] : []
+  const card = workResultCard({ end: { kind: 'stopped', why: 'need-person' }, summary: null, writes, afterReads: [], checks: [], comparedName: null })
   return {
     title: 'ブラウザ操作：AI が書く作業', siteLabel: 'shop.example.test', phase: 'finished', values: [], sentences: ['見本セミナーの申し込みに付けるタグを作ります'],
     card, readAt: new Date().toISOString(), contentHash: null, message: null,
-    result: { outcome: 'stopped', headline: card.headline, done: [], notDone: [], unknown: [], byHand: [], confirm: null }, trail: stopTrail, next: { kind: 'decide', question: QUESTION },
+    result: { outcome: wrote ? 'partial' : 'stopped', headline: card.headline, done: wrote ? ['POST /tags'] : [], notDone: [], unknown: [], byHand: [], confirm: null },
+    trail: stopTrail, next: { kind: wrote ? 'question' : 'decide', question: QUESTION },
   }
 }
 const calls: string[] = []
@@ -118,7 +123,7 @@ Object.assign(window, { __calls: calls, __said: said })
 
 installElectronAPI({
   getBrowserWriteCard: async () => {
-    if (STOP === 'work') return { ok: true, view: stoppedWork() }
+    if (WORK_STOP) return { ok: true, view: stoppedWork() }
     const v = frameView()
     if (frameStep === 'running') frameStep = 'finished'
     return { ok: true, view: v }

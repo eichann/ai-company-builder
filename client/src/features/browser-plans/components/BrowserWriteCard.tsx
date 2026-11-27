@@ -90,7 +90,7 @@ export const BrowserWriteCard = memo(function BrowserWriteCard({ companyId, card
       </div>
 
       {/* A stopped run: what it asks first (the operator's question with its two answers), then why it stopped, once. */}
-      {result && view.next?.kind === 'decide' && <StopAsk next={view.next} companyId={companyId} host={view.siteLabel} say={say} />}
+      {result && view.next && view.next.kind !== 'login' && <StopAsk next={view.next} companyId={companyId} host={view.siteLabel} say={say} />}
       {result && <p role="status" className="mt-1 text-body font-strong text-text">{result.headline}</p>}
       {result && view.next?.kind === 'login' && <StopAsk next={view.next} companyId={companyId} host={view.siteLabel} />}
 
@@ -180,7 +180,7 @@ export const BrowserWriteCard = memo(function BrowserWriteCard({ companyId, card
         </div>
       )}
 
-      {view.trail && <OperatorTrail trail={view.trail} asked={view.next?.kind === 'decide' ? view.next.question : null} />}
+      {view.trail && <OperatorTrail trail={view.trail} asked={view.next && view.next.kind !== 'login' ? view.next.question : null} />}
 
       {(view.message || message) && (
         <Callout tone="warning" className="mt-2"><span className="inline-flex items-start gap-1"><WarningCircle size={14} weight="fill" aria-hidden className="mt-0.5" />{view.message ?? message}</span></Callout>

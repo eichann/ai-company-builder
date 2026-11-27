@@ -106,7 +106,7 @@ export function InspectionBody({ view, companyId, say, headline = true }: { view
         <span className="text-title text-text">{card.title}</span>
         <span className="text-small text-text-muted">{view.siteLabel}</span>
       </div>
-      {next?.kind === 'decide' && companyId && <StopAsk next={next} companyId={companyId} host={view.siteLabel} say={say} />}
+      {next && next.kind !== 'login' && companyId && <StopAsk next={next} companyId={companyId} host={view.siteLabel} say={say} />}
       {headline && <p role="status" className="mt-1 text-body text-text">{card.headline}</p>}
       {next?.kind === 'login' && companyId && <StopAsk next={next} companyId={companyId} host={view.siteLabel} />}
 
@@ -159,7 +159,7 @@ export function InspectionBody({ view, companyId, say, headline = true }: { view
       </div>}
 
       {card.notes.map((n, i) => <Callout key={i} tone="warning" className="mt-2">{n}</Callout>)}
-      {view.trail && <OperatorTrail trail={view.trail} asked={next?.kind === 'decide' ? next.question : null} />}
+      {view.trail && <OperatorTrail trail={view.trail} asked={next && next.kind !== 'login' ? next.question : null} />}
     </section>
   )
 }

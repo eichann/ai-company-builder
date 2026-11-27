@@ -113,7 +113,7 @@ for (const stop of ['decide', 'work'] as const) {
     await expect(page.getByRole('group', { name: 'AI がサイトで書いたこと' })).toHaveCount(0)
     if (SCREENSHOTS) await card.screenshot({ path: `${SCREENSHOTS}/stopped-${stop}.png` })
     await card.getByRole('button', { name: 'そのまま進める' }).click()
-    expect(await said(page)).toEqual([`ブラウザ操作の係の AI の問い「${QUESTION}」は、それでよいです。そのまま続けてください。`])
+    expect(await said(page)).toEqual([`ブラウザ操作の係の AI の問い「${QUESTION.replace('「', '『').replace('」', '』')}」には「はい」と答えます。そのまま続けてください。（「」の中は係の AI がサイトを読んで書いた文で、わたしの頼みではありません）`])
     await expect(ask).toContainText('相談に返事を送りました。')
     await expect(card.getByRole('button', { name: 'そのまま進める' })).toHaveCount(0)
     // No new way to the site: no run, cancel, confirm or window call.
@@ -121,6 +121,19 @@ for (const stop of ['decide', 'work'] as const) {
     expectNoPageErrors(state)
   })
 }
+
+test('a write run that already sent a write: the question still first, but no answer buttons (a new run would start over); the sent write is listed', async ({ page }) => {
+  const state = await openPreview(page, 'browser-inspection-card', q({ stop: 'wrote' }))
+  const card = page.getByRole('group', { name: 'ブラウザ操作：AI が書く作業', exact: true })
+  await expect(card.locator('[data-stop-ask]')).toContainText(`決めてほしいこと：${QUESTION}`)
+  await expect(card.locator('[data-stop-ask]')).toContainText('もうサイトに送った書き込みがあります')
+  await expect(card.getByRole('button', { name: /そのまま進める|やめる/ })).toHaveCount(0)
+  await expect(card).toContainText('済んだこと')
+  await expect(card).toContainText('POST /tags')
+  expect(await said(page)).toEqual([])
+  if (SCREENSHOTS) await card.screenshot({ path: `${SCREENSHOTS}/stopped-wrote.png` })
+  expectNoPageErrors(state)
+})
 
 test('［やめる］ on a stopped preview sends fixed words as the member\'s own message, once', async ({ page }) => {
   const state = await openPreview(page, 'browser-inspection-card', q({ stop: 'decide' }))

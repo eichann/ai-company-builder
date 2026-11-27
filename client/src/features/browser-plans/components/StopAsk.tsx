@@ -30,7 +30,9 @@ export function StopAsk({ next, companyId, host, say }: { next: BrowserStopNext;
         <Question size={15} weight="bold" aria-hidden className="mt-0.5 shrink-0 text-warning-icon" />
         <span className="min-w-0 break-words"><span className="font-strong">{W.decide}：</span>{next.question}</span>
       </p>
-      {say && (sent
+      {/* The run already wrote something: no answer button (it would start the work over as a new run). */}
+      {next.kind === 'question' && <p className="mt-1 text-small text-text-muted">{W.askAgain}</p>}
+      {next.kind === 'decide' && say && (sent
         ? <p role="status" className="mt-1 text-small text-text-muted">{W.sent}</p>
         : (
           <>
