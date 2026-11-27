@@ -209,6 +209,8 @@ export interface BrowserBrowseSurface {
   aim?(action: BrowserBrowseAction): Promise<BrowserAim>
   /** One action, then the page settles; `failed` when it could not be done (gone element, refused address…). */
   act(action: BrowserBrowseAction, signal: AbortSignal): Promise<'ok' | 'failed'>
+  /** The page settles again (the same rule as after an action: a moment, then until it stops loading, ≤ `settleMs`). */
+  settled?(signal: AbortSignal): Promise<void>
   /** No frame the write gate does not see (as a run's `pageClean`). */
   pageClean(): boolean
   closed(): boolean
@@ -464,9 +466,12 @@ export const BROWSER_OPERATOR_BROWSE_PROMPT = [
 export interface BrowserBrowseHistoryEntry {
   do: BrowserBrowseAction['do']
   ref?: number
-  /** `refused`: a press by position or a typing without a ref the window refused (`why`), nothing done. */
+  /**
+   * `refused`: a press by position or a typing without a ref the window refused (`why`), nothing done; or, in a write
+   * run, an action the app did not do while a held write was being sent (`sending`: it could have made a second write).
+   */
   outcome: 'ok' | 'failed' | 'refused'
-  why?: BrowserAimRefusal
+  why?: BrowserAimRefusal | 'sending'
 }
 
 /** The material of one step: the request (outside text), the page now (outside text), the operator's own steps so far. */

@@ -1070,6 +1070,11 @@ export function createBrowserWindowShell(options: {
           await settle(signal, action.do === 'click' || action.do === 'back')
           return browseReady() ? 'ok' : 'failed'
         },
+        // After a write run's held writes were answered (the page goes on with the site's answer): the same settle.
+        async settled(signal) {
+          if (!browseReady() || signal.aborted) return
+          await settle(signal, false)
+        },
         pageClean,
         closed,
       }

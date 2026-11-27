@@ -3698,6 +3698,45 @@ else. **No site word** anywhere (a fictional site in the tests).
   unknown), the page still gets the answer. A report the server did not record (3 tries)
   locks the run too. **One at a time**: the next held write starts only once this one's report was recorded (a promise
   chain); a write held meanwhile waits paused.
+- **The operator looks again only once the page's writes are decided** (incident 2026-11-27: after a press the operator's
+  next material had no write and the frame's unit already used — the permit was taken, the site's answer not in yet — so
+  it could not tell whether its press had gone out and stopped). Before each look at the page in the work (`operate` →
+  `settleWrites`), all within one limit — the end's 45 s (`idleMaxMs`): right after a press, typing, a choice or back,
+  main watches for **`BROWSER_WORK_LIMITS.writeStartMs`** (1 s, one value for every site; never tuned per site) for a
+  write the page's script starts a moment later; every held write is recorded (`idle()`: until the chain stops growing,
+  so a write held during the wait counts too); **after the page got its answers it may go on** — main watches the same
+  moment again for a write it makes next (and waits for that one's record), as long as it goes on — a write that came and
+  went between two of main's looks counts too (`heldCount`: every write held in the run; Codex review); then **the page
+  settles** (`BrowserBrowseSurface.settled`, the window's rule after an action: a moment, then until it stops loading,
+  ≤ `settleMs`). **Past the limit, or the run cut** (the member's stop, the AI stop: the wait ends at once): a write still
+  on its way → `abandon('timeout')` as at the end — every held write
+  kept `unknown`, the run locked and closed, the operator not asked again, nothing sent again (the end then does not wait
+  a second time, `gaveUp`); **none on its way** (a page that keeps making refused writes) → the operator looks at the page
+  as it is. The preview holds no write and does not wait.
+- **What the operator is told of the writes** (`writer.seen()` → `workMaterial`'s `writes`, `WorkWriteSeen`): each held
+  write so far — the kept ones in order, then the ones **being sent** (held, not yet kept: 「送っている途中」, `sending:
+  true`, `WORK_WRITE_SENDING`) — with its number, **the frame it fitted** (`frame`, null when none), **the action it
+  followed** (`afterAction`: the number of the operator's history entry, which is numbered the same way; the last press,
+  typing, choice or back actually done — set before it, so its own write names it; a write held during a wait, a read or
+  a refused action names the press before it — independent review), the result's fixed words and, when it was not sent, **why** in fixed
+  words (`WORK_WRITE_WHY_WORDS`: outside every frame, the frame used up, not this run's object, a file, unreadable,
+  another host, the run over, no permit, stopped before sending). Nothing the page or the site sent (no value, path,
+  status or text); the consultation AI never gets any of it. So the operator never sees a frame's `left` gone without a
+  write to show, and can tell which press each write came from.
+- **No press while a held write is being sent, nor right after a press whose write has not come yet — the app's rule,
+  not the operator's words** (seen on a real window: a second press while the first save was on its way queued behind it
+  and the site got the same save twice, with a frame of max 2; owner: guarantee it by the mechanism, do not add
+  instructions). In the work, `operate` does not do a press, typing, choice or back (anything that could make another
+  write) **while `writer.sending()` is above 0**, nor **when the last such action has made no write yet and a write
+  comes before `BROWSER_WORK_LIMITS.pressGapMs`** (5 s after that action, one value for every site; the app watches
+  until then — usually already over, since the operator's own step takes longer; independent review: a page that starts
+  its write after main's moment would otherwise let a quick second press through). Reading (`go`) and `wait` pass. The refused action stands in the operator's history as `refused` with `why: 'sending'`, told in fixed
+  words (`WORK_NOT_PRESSED_WHILE_SENDING` 「送っている途中なので押していません」); the next look then waits for the write as
+  above. The old prompt sentence 「同じ保存を何度も押さないでください（書き込みは1回ずつしか送られません）」 is gone: it read as
+  "pressing again sends nothing", which was false. **Remaining limit** (said): a page that starts its write more than
+  `pressGapMs` after the press, with the operator pressing again in between, still gets the second press (each write is
+  still sent once and within the frame's units). None of this changes what is sent, permitted or reported (`FramesLife.tla`'s app actions are unchanged:
+  the operator is not modelled, and giving up mid-run is the model's `AppCrashes` / the server's time-out, as at the end).
 - **Kept for the card** (main's memory): each write's frame line (the frame's method and pattern — never the path the
   page sent), its outcome, the site's status when not a success, what it sent (`sentFields`: one value per field, never
   a login, CSRF or session field, `isSensitiveFieldName`) and, for a success, its answer text (what `{created}` is read
@@ -3764,7 +3803,21 @@ page without the site's cookie in the page or the window, two saves at once one 
 the plan, an upload with a file, a never-read address, a save past the frame's max and a save whose permit came after
 the stop never reach the site, a lost answer reaches it once and nothing more is sent; no cookie, CSRF or value in a
 permit, a report or the log; the DevTools connection detached while a save is held: the run's copy never sent, at most
-the page's original arrives, the write unknown and reported so), `client/tests/browser-core-words.test.ts` (the tool, its schema and both prompts name no
+the page's original arrives, the write unknown and reported so; the same file since the 2026-11-27 fix: a press whose page
+writes a moment later to a slow site → the next step's material shows it done beside the used unit, a press whose write
+gets no answer within the wait → unknown before the operator looks again (asked no more, pressed and permitted once), a
+write the page makes as it is read → shown as being sent then done, a write the page makes after the site's answer →
+waited for too, then the page settles, each write with its frame, action and reason, a fast write that came and went
+between main's looks still counted (the page settles, its next write waited for), a page that keeps writing outside
+the frames → the operator still looks again at the limit, `idle` covering a write held while it waits, the material's
+words — each mutation-checked: no wait, no moment after the press, no idle wait, the old `idle`, no 「送っている途中」,
+no give-up, no moment after the answers, no settle, no limit, no frame / action / reason, a decided write not counted;
+a press while a write is being sent not done, a press right after one whose write comes later waits for it and is not
+done (also on the real window, `browser-window-electron.test.ts`: a fictional save that sends two seconds after the
+press, pressed again at once, reaches the site once although its frame allows two — twice without the rule), a write held
+during a wait names the press before it, the member's stop cutting the wait (unknown at once);
+kept on purpose (time only): the end not waiting twice after a give-up, the moment ending early once a write was held),
+`client/tests/browser-core-words.test.ts` (the tool, its schema and both prompts name no
 site), `server/tests/unit/browser-runs.test.ts` (`write: true` at 見るだけ / on a 見るだけ site refused; the joined lock —
 only the member's run naming the frames run, `busy`, a run naming nothing → ended; write steps kept, listed, a value
 refused, append-only), `server/tests/unit/browser-frames.test.ts` (the start's `afterRead` / `neverRead`, not in `get`;

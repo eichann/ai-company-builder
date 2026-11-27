@@ -57,6 +57,7 @@ interface Result {
   recording: Record<string, unknown>
   browse: Record<string, unknown>
   work: Record<string, unknown>
+  workPress: Record<string, unknown>
   kept: Record<string, unknown>
   whenLoadedCut: boolean
   whenLoaded: boolean
@@ -547,6 +548,15 @@ test('pressing by position: a menu choice with no ref is pressed where the scree
   assert.deepEqual(r.pwAim, { ok: false, why: 'password' })
   assert.equal(r.pwTyped, 'failed')
   assert.equal(r.pwValue, '')
+})
+
+test('a write task on the real window: a press while a held write is being sent is not done, so the site gets one save although the frame allows two', { skip }, () => {
+  const r = result.workPress
+  assert.equal(r.hits, 1, JSON.stringify(r))
+  assert.equal(r.permits, 1)
+  // The operator was told in fixed words that its press was not done.
+  const last = (r.histories as Array<Array<{ do: string; outcome: string; result?: string }>>).at(-1) ?? []
+  assert.deepEqual(last.map(h => [h.do, h.outcome, h.result ?? null]), [['click', 'ok', null], ['click', 'refused', '送っている途中なので押していません']])
 })
 
 test('a write run sends each page write once within the plan: the page\'s own cookie and CSRF, its answer without Set-Cookie, one at a time; outside the plan, a file, past the max, after a stop and after a lost answer nothing is sent', { skip }, () => {

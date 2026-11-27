@@ -52,6 +52,17 @@ export const BROWSER_WORK_LIMITS = Object.freeze({
   afterValue: 300,
   /** A company Skill's steps handed to the operator. */
   steps: 20_000,
+  /**
+   * After the operator's press, typing or choice: how long main still watches for a write the page's script makes a
+   * moment later, before the next look at the page (one value for every site; then every held write is waited for).
+   */
+  writeStartMs: 1000,
+  /**
+   * A press, typing or choice that follows another such action which has made no write yet is done only once this long
+   * has passed since that one (a page may start its write seconds after the press): one value for every site; usually
+   * already over, since the operator's own step takes longer.
+   */
+  pressGapMs: 5000,
 })
 const L = BROWSER_WORK_LIMITS
 
@@ -514,7 +525,7 @@ export const BROWSER_OPERATOR_WORK_PROMPT = [
   ...ACTION_LINES,
   '{"do":"done","result":"<人に見せる、したことのまとめ。4000字まで>","unread":[<読めなかった items の番号>],"checks":[{"item":"<確かめた項目。60字まで>","before":"<前の値>","after":"<いまの値>","compared":"<比べ元の値>","ok":true|false}],"compared_name":"<比べ元の呼び名。40字まで>"}',
   WORK_STOP_LINE,
-  '保存や送信をしてよいのは、frames の枠に合う送り先だけです。枠に合わない書き込みはアプリが止めます。同じ保存を何度も押さないでください（書き込みは1回ずつしか送られません）。',
+  '保存や送信をしてよいのは、frames の枠に合う送り先だけです。枠に合わない書き込みはアプリが止めます。',
   'writes に「分からない」が出たら、それ以上は書かず stop（blocked）にしてください。',
   '書き終えたら、手順の「確かめること」をページで確かめ、checks に書いてから done にしてください。checks は人のカードにだけ出ます（AI が確かめた、と表示されます）。',
   ...COMMON_LINES,
@@ -525,9 +536,40 @@ export const WORK_WRITE_WORDS: Readonly<Record<BrowserRunWriteOutcome, string>> 
   done: '送りました（サイトが答えました）',
   'not-sent': '送っていません',
   unknown: '分からない（届いたか分かりません。もう書かないでください）',
-  refused: '枠に合わないので止めました（送っていません）',
+  refused: 'アプリが止めました（送っていません。理由は why）',
   'site-refused': 'サイトが受け付けませんでした（エラーで、保存されていません）。画面のエラーを見て直し、もう一度押せます（新しい書き込みとして枠を1回使います）',
 }
+
+/**
+ * A held write whose result is not kept yet (on its way to the site, or queued behind one): its permit — and the frame's
+ * unit — may already be taken, so the operator sees it beside the frames' `left` and never presses again for it.
+ */
+export const WORK_WRITE_SENDING = 'sending' as const
+export const WORK_WRITE_SENDING_WORDS = '送っている途中です（サイトの答えを待っています）'
+/** An action the app did not do because a held write was being sent (it could have made a second write). */
+export const WORK_NOT_PRESSED_WHILE_SENDING = '送っている途中なので押していません'
+export type WorkWriteState = BrowserRunWriteOutcome | typeof WORK_WRITE_SENDING
+
+/** Why a held write was not sent, as the operator is told it (the app's own reasons; never the site's or the page's words). */
+export const WORK_WRITE_WHY_WORDS = {
+  'outside-frames': '計画の枠のどれにも合わない書き込みでした',
+  'used-up': '合う枠の回数を使い切っていました',
+  'not-made-here': 'この作業で作ったもの以外への書き込みでした',
+  file: 'ファイルを送る書き込みでした（送れません）',
+  unreadable: '中身を読めない書き込みでした',
+  'other-host': '操作するサイトの外への書き込みでした',
+  'run-over': '作業が終わったか止められていたので送っていません',
+  'no-permit': '許可が出なかったか、作業が止まったので送っていません',
+  'stopped-before-send': '送る直前の確かめで止めました（送っていません）',
+} as const
+export type WorkWriteWhy = keyof typeof WORK_WRITE_WHY_WORDS
+
+/**
+ * One held write as the operator is told of it: its state (kept outcome or `sending`), the frame it fitted (null: none
+ * or not matched yet), after which of the operator's actions (its history's number; 0 = before any) it was held, and a
+ * refusal's or a not-sent write's fixed reason. Nothing the page or the site sent.
+ */
+export interface WorkWriteSeen { state: WorkWriteState; frame: number | null; afterAction: number; why: WorkWriteWhy | null }
 
 /**
  * The material of one step of a write run. **The page** (address, title, text, element names and values), the item
@@ -546,7 +588,8 @@ export function workMaterial(input: {
   frames: readonly WorkFrame[] | null
   page: BrowserPageSnapshot
   history: readonly BrowserBrowseHistoryEntry[]
-  writes: readonly BrowserRunWriteOutcome[]
+  /** Each held write so far: the kept ones, then the ones still being sent (`sending`). */
+  writes: readonly WorkWriteSeen[]
   notes: string
   round: number
   /** The run's budget of steps (the server's answer: browser-run-budget.ts). */
@@ -574,8 +617,15 @@ export function workMaterial(input: {
       ...(p.omitted ? { elementsLeftOut: p.omitted } : {}),
       ...(p.screen ? { screen: { width: p.screen[0], height: p.screen[1] } } : {}),
     },
-    history: input.history.map(h => ({ ...h })),
-    writes: input.writes.map((w, i) => ({ number: i + 1, result: WORK_WRITE_WORDS[w] })),
+    history: input.history.map((h, i) => (h.why === 'sending'
+      ? { number: i + 1, do: h.do, ...(h.ref !== undefined ? { ref: h.ref } : {}), outcome: h.outcome, result: WORK_NOT_PRESSED_WHILE_SENDING }
+      : { number: i + 1, ...h })),
+    writes: input.writes.map((w, i) => ({
+      number: i + 1, frame: w.frame, afterAction: w.afterAction,
+      result: w.state === WORK_WRITE_SENDING ? WORK_WRITE_SENDING_WORDS : WORK_WRITE_WORDS[w.state],
+      ...(w.state === WORK_WRITE_SENDING ? { sending: true } : {}),
+      ...(w.why ? { why: WORK_WRITE_WHY_WORDS[w.why] } : {}),
+    })),
     notes: o(input.notes),
     round: input.round,
     roundsLeft: input.rounds - input.round,
