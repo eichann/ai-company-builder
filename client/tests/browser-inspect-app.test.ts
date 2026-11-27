@@ -29,6 +29,7 @@ import type { BrowserPreviewSurface } from '../shared/browser-runner'
 import type { IpcInvokeEvent, IpcRegistrar } from '../electron/ipc/registrar'
 import { parsePluginManifest } from '../../shared/core/plugin-manifest'
 import { BROWSER_CATALOG_NONE } from '../shared/browser-tool-catalog'
+import { BROWSER_WORDS } from '../shared/browser-operation'
 
 const HOST = 'manager.linestep.net'
 const COMPANY = 'company-1'
@@ -80,13 +81,14 @@ interface Fake {
   reads: string[]
   other: string[]
   hosts: string[]
+  opens: string[]
   server: Array<{ method: string; path: string; body: unknown }>
   createAnswer: { status: number; body: unknown }
   onRead?: (address: string) => void
 }
 
 function fake(): Fake {
-  const f: Fake = { answers: new Map(), reads: [], other: [], hosts: [], server: [], createAnswer: { status: 201, body: { success: true, data: { id: PLAN } } } }
+  const f: Fake = { answers: new Map(), reads: [], other: [], hosts: [], opens: [], server: [], createAnswer: { status: 201, body: { success: true, data: { id: PLAN } } } }
   f.answers.set('/api/landings/501', mapShaped('landing', landing()))
   f.answers.set('/api/landings/400', mapShaped('landing', landing({ name: SOURCE_NAME, action_id: 7001, to_date: '2026-11-26' })))
   f.answers.set('/api/actions/7002', mapShaped('action_set', action([22])))
@@ -109,7 +111,7 @@ function surfaceOf(f: Fake): BrowserPreviewSurface {
   return surface
 }
 
-function harness(o: { on?: () => boolean; openedFile?: unknown; user?: () => string | null; stopped?: boolean; registered?: (companyId: string, host: string) => boolean } = {}) {
+function harness(o: { on?: () => boolean; openedFile?: unknown; user?: () => string | null; stopped?: boolean; registered?: (companyId: string, host: string) => boolean; reopens?: boolean } = {}) {
   const f = fake()
   const surface = surfaceOf(f)
   const handlers = new Map<string, (event: IpcInvokeEvent, ...args: unknown[]) => Promise<unknown>>()
@@ -124,11 +126,15 @@ function harness(o: { on?: () => boolean; openedFile?: unknown; user?: () => str
   const on = o.on ?? (() => true)
   const user = o.user ?? (() => 'user-1')
   const context = createBrowserContext({ userId: user, aiSwitch: on })
+  let shown = o.reopens === undefined
+
   const wiring = wireBrowserInspections(ipc, {
     aiSwitch: on, fromMainWindow: event => (event as { sender: { id: number } }).sender.id === 1,
     baseUrl: () => 'https://acb.example', cookies: () => ['s=1'], userId: user, context,
     stopped: () => o.stopped ?? false,
-    window: (_c, host) => { f.hosts.push(host); return surface },
+    window: (_c, host) => { f.hosts.push(host); return shown ? surface : null },
+    // The window starts closed when `reopens` is given; the controller's `windowForRun` opens it, or has nothing to open.
+    ...(o.reopens !== undefined ? { openWindow: async (_c: string, host: string) => { f.opens.push(host); shown = o.reopens!; return shown ? { kind: 'opened' as const } : { kind: 'none' as const, loginRemoved: true } } } : {}),
     siteLevel: (companyId, host) => ((o.registered ?? (() => true))(companyId, host) ? 'read' : null),
     sites: [{ map: site.map, readers: site.readers, addresses: site.addresses, account: site.account }],
     lines: LINES, declarations: [lstep.declaration], fetch: fetchFake,
@@ -181,6 +187,17 @@ test('a good inspection: the card holds the site\'s values for the member; the A
   assert.equal(shown.view.card.state, 'all_ok')
   assert.equal((await h.card(2)).ok, false, 'not from a consultation window')
   assert.equal((await h.card(1, `bl_${'b'.repeat(32)}`)).ok, false, 'not another plan')
+})
+
+test('an inspection whose window was closed opens it again on the reviewed host first; else says why there is none', async () => {
+  const h = harness({ reopens: true })
+  const words = await h.tool()!.execute(ASK)
+  assert.deepEqual(h.f.opens, [HOST])
+  assert.match(words, /✓/)
+  const none = harness({ reopens: false })
+  assert.equal(await none.tool()!.execute(ASK), `${BROWSER_WORDS.loginRemoved}${BROWSER_INSPECT_WORDS.noWindow}`)
+  assert.deepEqual(none.f.server, [])
+  assert.deepEqual(none.f.reads, [])
 })
 
 test('another member signed in sees no card; sign-out clears them', async () => {

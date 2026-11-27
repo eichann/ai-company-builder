@@ -1,6 +1,6 @@
 // Settings → 「ブラウザ操作」 (tests/download-folders-ui.tsx; agent-browser.md "The app's window"):
-// the item exists only while the member has a site, says the AI does not operate the window yet and
-// that the login is not kept, and says when 「ログインを消す」 failed. Which sites and when are main's
+// the item exists only while the member has a site, says in one line where the login lives (and why when it is
+// the sandbox), and says when 「ログインを消す」 failed. Which sites and when are main's
 // (tests/browser-window.test.ts).
 import { test, expect } from '@playwright/test'
 import { openPreview } from './helpers'
@@ -14,12 +14,12 @@ test('without a site the settings have no 「ブラウザ操作」', async ({ pa
   expect(errors).toEqual([])
 })
 
-test('a site the company allowed: open it; the notes say the AI does not use it and the login is not kept', async ({ page }) => {
+test('a site the company allowed: open it; the line says the login lasts until the app closes', async ({ page }) => {
   await openPreview(page, 'download-folders', { tab: 'mine', browser: '1' })
   await nav(page).getByRole('button', { name: 'ブラウザ操作' }).click()
   await expect(page.getByText('manager.example.net', { exact: true })).toBeVisible()
-  await expect(page.getByText(/AI はまだこの窓を操作しません。/)).toBeVisible()
-  await expect(page.getByText(/アプリを開き直すと、もう一度ログインが必要です。/)).toBeVisible()
+  await expect(page.getByText(/AI はまだこの窓を操作しません/)).toHaveCount(0)
+  await expect(page.getByText(/ログインはアプリを閉じるまで覚えています。アプリを開き直すと、もう一度ログインが必要です。/)).toBeVisible()
   await page.getByRole('button', { name: '開いてログイン' }).click()
   await expect.poll(() => page.evaluate(() => (window as unknown as { browserOpened?: string[] }).browserOpened)).toEqual(['manager.example.net'])
   await page.getByRole('button', { name: 'ログインを消す' }).click()
@@ -29,8 +29,14 @@ test('a site the company allowed: open it; the notes say the AI does not use it 
 test('a site whose login is kept on this PC says so (never 「もう一度ログインが必要」)', async ({ page }) => {
   await openPreview(page, 'download-folders', { tab: 'mine', browser: 'kept' })
   await nav(page).getByRole('button', { name: 'ブラウザ操作' }).click()
-  await expect(page.getByText(/ログインはこの PC に覚えておくので/)).toBeVisible()
+  await expect(page.getByText(/ログインはこの PC に残ります/)).toBeVisible()
   await expect(page.getByText(/もう一度ログインが必要です/)).toHaveCount(0)
+})
+
+test('a site whose login is not kept because the AI sandbox is not 囲う says so plainly', async ({ page }) => {
+  await openPreview(page, 'download-folders', { tab: 'mine', browser: 'observe' })
+  await nav(page).getByRole('button', { name: 'ブラウザ操作' }).click()
+  await expect(page.getByText(/ログインはアプリを閉じるまで覚えています（会社の「AI の囲い」が「囲う」ではないため、この PC には残しません）/)).toBeVisible()
 })
 
 test('「ログインを消す」 that could not clear says so (never 「消しました」)', async ({ page }) => {

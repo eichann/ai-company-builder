@@ -203,9 +203,11 @@ run's frames ("Writes within frames, in the app"). Owner decisions
 ## The app's window (PR 4: the member opens and logs in; the AI is not connected)
 
 A member whose policy is on with at least one site sees Settings → 「ブラウザ操作」 (group 「AI と連携」;
-the item is not there otherwise): each site with 「開いてログイン」 and 「ログインを消す」, and
-「AI はまだこの窓を操作しません。 アプリを開き直すと、もう一度ログインが必要です。」 (a kept site: `loginKept`
-instead, "Keeping a login on disk"). Words: `BROWSER_WORDS`
+the item is not there otherwise): each site with 「開いてログイン」 and 「ログインを消す」, and one line on where its
+login lives — `loginNotKept` 「ログインはアプリを閉じるまで覚えています。アプリを開き直すと、もう一度ログインが必要です。」,
+`loginNotKeptBySandbox` when the member's 「AI の囲い」 is not 囲う (`BrowserSiteView.notKeptBySandbox`: the last valid
+answer's sandbox mode), or `loginKept` 「ログインはこの PC に残ります…」 ("Keeping a login on disk"). The intro says a
+closed window opens by itself when the AI is asked ("The window a run needs"). Words: `BROWSER_WORDS`
 (`client/shared/browser-operation.ts`).
 
 - **Pieces.** `client/shared/browser-operation.ts` (pure: the IPC payloads, `decideWindowRequest`,
@@ -227,8 +229,14 @@ instead, "Keeping a login on disk"). Words: `BROWSER_WORDS`
   (`parseBrowserPolicy`, shared rules; invalid = left out = off) and reports every refresh without a
   valid answer (`onRefreshFailed`: no server, an error status, an answer that does not validate, a
   network failure). Unlike the sandbox part, the browser never runs on the last answer: a failure =
-  off until the next valid answer, the company's windows close (the memory login stays until the app
-  quits). `browser:sites` asks the server first (≤ 5 s); `browser:sites` and `browser:open` watch the
+  off until the next valid answer — nothing opens and no run finds a window (`siteNow`, `runWindow`,
+  `browseWindow`, `previewWindow`, `recordWindow` answer null, so an AI step in progress stops at its next
+  check and its gate refuses at once). **The member's open windows stay** on no server, a timeout, a 5xx or an
+  answer that does not validate (owner 2026-11-27: a brief network drop closed them and the member had to
+  log in again each time; in `human` mode the window is their own browsing, under the site's rules of the
+  last valid answer); the next valid answer closes any site it no longer lists. **A refusal** (401 / 403 /
+  404, `onRefreshFailed`'s `refused`) closes the company's windows (the memory login stays until the app
+  quits; kept ones go, "Keeping a login on disk"). `browser:sites` asks the server first (≤ 5 s); `browser:sites` and `browser:open` watch the
   company's push channel, so a change reaches open windows (and the 60 s check runs).
 - **Close and clear.** A valid answer that drops the site or turns the mode off closes its window and
   clears its login; sign-out closes every window and clears every login; a sign-in as another account
@@ -296,7 +304,8 @@ instead, "Keeping a login on disk"). Words: `BROWSER_WORDS`
 Tests: `client/tests/browser-window.test.ts` (the request, navigation, proxy, header and gate rules, the
 stop, the log by host, memory-only partition names, leftover session folders removed at start and a link
 never followed, nothing before a valid answer / for an older server / when off, an invalid `browser` =
-off, the host checked exactly and per company, a failed refresh closes windows, a removed site or mode
+off, the host checked exactly and per company, a failed refresh keeps the window but no run finds it and
+the same window is back on the next answer, a refusal closes the company's windows, a removed site or mode
 off closes and clears, a changed site reaches the window, sign-out / another account, 「ログインを消す」
 answers after the clear and says so when it failed, every failed refresh reported, the sender check, IPC
 from the main window only, an opened window watched) and `client/tests/browser-window-electron.test.ts`
@@ -403,8 +412,10 @@ The pieces:
   the next start keeps only until a valid answer, a sign-in or the first unenclosed turn judges them; "stopped for this
   run" is memory only (a restart starts keeping again: the remaining-limits stretch above).
 - Words: Settings shows `BROWSER_WORDS.loginKept` for a kept site (`BrowserSiteView.kept`: kept now, its partition not
-  removed earlier in this run — `kept.mayKeep` —, and no window of it already open in memory), else `loginNotKept`; the
-  admin's `BROWSER_LOGIN_NOTE` says who keeps it.
+  removed earlier in this run — `kept.mayKeep` —, and no window of it already open in memory), else
+  `loginNotKeptBySandbox` when the member's sandbox is not `enforce`, else `loginNotKept`; the admin's
+  `BROWSER_LOGIN_NOTE` says who keeps it. **This rule is unchanged by "The window a run needs"**: with the sandbox
+  `observe` a login is memory-only and does not survive a restart; Settings says so instead.
 
 Tests: `client/tests/browser-kept-logins.test.ts` (the rule; the place for both agents and the company folder; names and
 scopes; page-less sessions in memory; leftovers keep only exact kept names; kept for 囲う with a level, memory for observe
@@ -425,6 +436,46 @@ working folder or a managed `sandbox` → not enclosed; the managed settings' re
 stores the cookie encrypted, reads a store an unencrypted build wrote, and reads its own back after a restart; macOS,
 Chromium's mock keychain). Each guard mutation-checked (56 mutations; one equivalent: reading a managed-settings folder
 as a file is "unreadable", which counts too).
+
+## The window a run needs (owner 2026-11-27: 「毎回ログインが切れてる！」)
+
+After every stopped run the next request said 「このパソコンでサイトの窓が開いていません」 and the member had to reopen
+設定 → ブラウザ操作 → ［開いてログイン］ and log in again. Causes found: a refresh without a valid answer closed every
+window (fixed above, "Only a valid answer opens anything"); the operator's `leave` closes the window when the page cannot
+be loaded afresh under the gate (a slow page past `settleMs`, a DevTools detach) and `updateSite` / the window's proxy
+failing destroy it — both kept (safety), and covered by what follows; the member closing it. With the sandbox `observe`
+the login is memory-only, which stays the rule ("Keeping a login on disk").
+
+- **`controller.windowForRun(companyId, host, signal)`** (asked by `browser_browse`, `browser_work` and
+  `browser_inspect` — `openWindow` in `browse.ts`, `work.ts`, `inspect.ts`, wired in `main.ts` — after the switch, the
+  registered site, the stop and, for the operator's two, the operator; before they look for the window): the open
+  window (`open`); else, **only while this app run holds the member's login for a site their current valid policy
+  lists** — its memory session used this run and not cleared (`partitions`), or, when it is kept now (`keepsNow`), a
+  kept folder loaded this run or on disk (`kept.held`) — one opened through `open`'s own path (`openWindow`: the
+  listed site, the partition rule; not brought to the front if already open), logged by host (`opened`); else
+  `none`. It waits for the page's first load (`whenLoaded`, the shell's, ≤ 20 s and never past the turn's signal);
+  after that the run's own checks decide. Nothing is opened before a valid answer, for a site the policy no longer
+  lists (its memory login was cleared with it), after 「ログインを消す」, for another account or a site never opened
+  in this app run (the first time stays the member's ［開いてログイン］).
+- **A login form in the window** is the operator's `need-login` stop; its words (browse and work):
+  「止まりました：サイトのログインが切れています。開いた窓でログインしてから、もう一度頼んでください。」 — the member
+  only logs in, in the window that opened.
+- **Say why** (`noWindowWords`, `client/shared/browser-operation.ts`): when the app removed the site's kept login for
+  safety (the sandbox or the level changed, an AI turn without the sandbox ran: `loginRemoved`, cleared when the member
+  opens or clears the site), a run that finds no window says `BROWSER_WORDS.loginRemoved` before its `noWindow`. A
+  refusal or a site taken away answers `notAllowed` as before.
+- **A window the member closes** is destroyed as before (decision, the simplest that keeps the guards: a hidden window
+  would keep its page, timers and connections running unseen); the next run opens it again with the same memory login.
+
+Tests: `browser-window.test.ts` (offline keeps the window and gives the AI nothing, a refusal closes; a run reopens a held
+login through `open`'s path and waits for the page; nothing for a site never opened, no longer listed, mode off,
+another account or a cleared login; Settings' sandbox line), `browser-kept-logins.test.ts` (a kept login on disk opens in
+its kept session; none after an unenclosed turn or a sandbox change, with the reason; the reason gone once opened),
+`browser-browse.test.ts`, `browser-frame-writes.test.ts`, `browser-inspect-app.test.ts` (each opens first and goes on in
+the opened window; nothing opened when switched off or not registered; the words with and without the reason; the
+need-login sentence), `browser-window-electron.test.ts` (`whenLoaded` on a real window: true once loaded, false for a
+stopped run), `ui/browser-settings.spec.ts` (the three lines). Each guard mutation-checked; kept on purpose:
+`windowForRun`'s listed-site check (`openWindow` checks it again, and a dropped site's memory login is already cleared).
 
 ## The runner (PR 5a: built and tested; the AI cannot reach it)
 

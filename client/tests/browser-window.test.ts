@@ -149,18 +149,20 @@ const policy = (browser: unknown): AgentPolicy =>
 const on = (sites: BrowserSiteSetting[] = [site]) => ({ mode: 'on', sites, source: 'company' })
 
 function world(options: { clearFails?: boolean; slow?: boolean; developerAssetHosts?: boolean } = {}) {
-  const opened: Array<BrowserWindowSpec & { closed: boolean; site: BrowserSiteSetting }> = []
+  const opened: Array<BrowserWindowSpec & { closed: boolean; site: BrowserSiteSetting; close: () => void }> = []
+  const loaded: string[] = []
   const cleared: string[] = []
   let releaseClear: () => void = () => {}
   const shell: BrowserShell = {
     open(spec) {
-      const entry = { ...spec, closed: false }
+      const entry = { ...spec, closed: false, close() { entry.closed = true; spec.onClosed() } }
       opened.push(entry)
       return {
         focus() {},
-        close() { entry.closed = true; spec.onClosed() },
+        close: () => entry.close(),
         updateSite(next) { entry.site = next },
         run: { enterAi: async () => true, leaveAi: async () => {}, pageClean: () => true, request: async () => ({ status: 200, body: '' }), closed: () => entry.closed },
+        async whenLoaded() { loaded.push(spec.partition); return true },
       }
     },
     clearPartition(partition) {
@@ -172,7 +174,7 @@ function world(options: { clearFails?: boolean; slow?: boolean; developerAssetHo
   }
   let user: string | null = 'user-1'
   const browser = createBrowserController({ shell, userId: () => user, developerAssetHosts: options.developerAssetHosts, log: { warn() {} } })
-  return { browser, opened, cleared, setUser: (u: string | null) => { user = u }, release: () => releaseClear() }
+  return { browser, opened, cleared, loaded, setUser: (u: string | null) => { user = u }, release: () => releaseClear() }
 }
 
 test('a run finds only the signed-in member\'s open window of a site their current valid policy lists', () => {
@@ -226,14 +228,97 @@ test('the host the renderer names opens only when the current policy lists it ex
   assert.equal(w.opened.length, 1)
 })
 
-test('a failed refresh closes the windows and opens nothing until a valid answer', () => {
+test('a failed refresh (offline, a timeout, a 5xx) keeps the member\'s window but gives the AI nothing until a valid answer', async () => {
   const w = world()
   w.browser.policyAnswered('c1', policy(on()))
   w.browser.open('c1', site.host)
+  const surface = w.browser.runWindow('c1', site.host)
   w.browser.policyFailed('c1')
-  assert.equal(w.opened[0].closed, true)
+  assert.equal(w.opened[0].closed, false, 'a brief network drop must not close the member\'s window')
+  assert.equal(w.browser.runWindow('c1', site.host), null, 'no run finds it meanwhile')
+  assert.equal(w.browser.browseWindow('c1', site.host), null)
+  assert.equal(w.browser.siteNow('c1', site.host), null)
   assert.deepEqual(w.browser.sites('c1'), { sites: [] })
   assert.equal(w.browser.open('c1', site.host).ok, false)
+  assert.deepEqual(await w.browser.windowForRun('c1', site.host, new AbortController().signal), { kind: 'none', loginRemoved: false }, 'nothing opens either')
+  w.browser.policyAnswered('c1', policy(on()))
+  assert.equal(w.browser.runWindow('c1', site.host), surface, 'the same window once the server answers again')
+  assert.equal(w.opened.length, 1)
+})
+
+test('a refusal of the policy (401 / 403 / 404) closes the company\'s windows', () => {
+  const w = world()
+  w.browser.policyAnswered('c1', policy(on()))
+  w.browser.policyAnswered('c2', policy(on()))
+  w.browser.open('c1', site.host)
+  w.browser.open('c2', site.host)
+  w.browser.policyFailed('c1', { refused: true })
+  assert.equal(w.opened[0].closed, true)
+  assert.equal(w.opened[1].closed, false, 'only that company\'s')
+})
+
+test('a run reopens the window of a site whose login this app run holds, through 「開いてログイン」\'s own path', async () => {
+  const w = world()
+  const signal = new AbortController().signal
+  w.browser.policyAnswered('c1', policy(on()))
+  assert.deepEqual(await w.browser.windowForRun('c1', site.host, signal), { kind: 'none', loginRemoved: false }, 'never opened in this run: no login held')
+  assert.equal(w.opened.length, 0)
+  w.browser.open('c1', site.host)
+  assert.deepEqual(await w.browser.windowForRun('c1', site.host, signal), { kind: 'open' })
+  // The member closes it (or the app did, for safety): the memory login is still there.
+  w.opened[0].close()
+  assert.equal(w.browser.runWindow('c1', site.host), null)
+  assert.deepEqual(await w.browser.windowForRun('c1', site.host, signal), { kind: 'opened' })
+  assert.equal(w.opened.length, 2)
+  assert.equal(w.opened[1].partition, browserPartition('user-1', 'c1', site.host), 'the same login, in memory')
+  assert.ok(w.browser.runWindow('c1', site.host))
+  assert.equal(w.loaded.length, 2, 'waits for the page each time a run asks')
+})
+
+test('a run opens nothing for a site the policy no longer lists, another account\'s login or a login the member cleared', async () => {
+  const signal = new AbortController().signal
+  const other: BrowserSiteSetting = { host: 'other.example.net', level: 'read', assetHosts: [] }
+  const removed = world()
+  removed.browser.policyAnswered('c1', policy(on([site, other])))
+  removed.browser.open('c1', site.host)
+  removed.opened[0].close()
+  removed.browser.policyAnswered('c1', policy(on([other])))
+  assert.deepEqual(await removed.browser.windowForRun('c1', site.host, signal), { kind: 'none', loginRemoved: false })
+  removed.browser.policyAnswered('c1', policy(on([site, other])))
+  assert.equal((await removed.browser.windowForRun('c1', site.host, signal)).kind, 'none', 'its login was cleared with the site')
+  assert.equal(removed.opened.length, 1)
+
+  const off = world()
+  off.browser.policyAnswered('c1', policy(on()))
+  off.browser.open('c1', site.host)
+  off.opened[0].close()
+  off.browser.policyAnswered('c1', policy({ mode: 'off', sites: [site], source: 'company' }))
+  assert.equal((await off.browser.windowForRun('c1', site.host, signal)).kind, 'none')
+  assert.equal(await off.browser.windowForRun('c1', 'evil.example.org', signal).then(r => r.kind), 'none')
+  assert.equal(off.opened.length, 1)
+
+  const account = world()
+  account.browser.policyAnswered('c1', policy(on()))
+  account.browser.open('c1', site.host)
+  account.opened[0].close()
+  account.setUser('user-2')
+  account.browser.policyAnswered('c1', policy(on()))
+  assert.equal((await account.browser.windowForRun('c1', site.host, signal)).kind, 'none', 'another account holds no login of its own')
+
+  const cleared = world()
+  cleared.browser.policyAnswered('c1', policy(on()))
+  cleared.browser.open('c1', site.host)
+  await cleared.browser.clearLogin('c1', site.host)
+  assert.equal((await cleared.browser.windowForRun('c1', site.host, signal)).kind, 'none')
+  assert.equal(cleared.opened.length, 1)
+})
+
+test('Settings says where the login lives: in memory because the sandbox is not 囲う, or plainly in memory', () => {
+  const w = world()
+  w.browser.policyAnswered('c1', policy(on()))
+  assert.deepEqual(w.browser.sites('c1'), { sites: [{ host: site.host }] }, '囲う without a place to keep it: the plain memory line')
+  w.browser.policyAnswered('c1', { ...policy(on()), sandbox: { ...policy(on()).sandbox, mode: 'observe' } })
+  assert.deepEqual(w.browser.sites('c1'), { sites: [{ host: site.host, notKeptBySandbox: true }] })
 })
 
 test('a site removed or the mode turned off closes its window and clears its login', async () => {

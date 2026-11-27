@@ -99,6 +99,12 @@ async function run() {
   let closed = false
   const win = shell.open({ partition, site, onClosed: () => { closed = true } })
   const page = win.webContents
+  // A run that opened the window again waits for its first page (agent-browser.md "The window a run needs").
+  const cut = new AbortController()
+  cut.abort()
+  result.whenLoadedCut = await win.whenLoaded!(cut.signal)
+  result.whenLoaded = await win.whenLoaded!(new AbortController().signal)
+  result.whenLoadedUrl = page.getURL()
   await loaded(win)
   await wait(1500)
   const js = (code: string) => page.executeJavaScript(code, true).catch((error: unknown) => { throw new Error(`${String(error)} in: ${code.slice(0, 80)}`) })

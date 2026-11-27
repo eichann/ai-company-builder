@@ -38,7 +38,7 @@ export function BrowserSection({ companyId, sites }: { companyId: string; sites:
               </div>
             </div>
             <p className="text-small text-zinc-500 dark:text-zinc-400">
-              {BROWSER_WORDS.aiNotYet} {site.kept ? BROWSER_WORDS.loginKept : BROWSER_WORDS.loginNotKept}
+              {site.kept ? BROWSER_WORDS.loginKept : site.notKeptBySandbox ? BROWSER_WORDS.loginNotKeptBySandbox : BROWSER_WORDS.loginNotKept}
             </p>
             {message?.host === site.host && <p role="status" className="text-small text-zinc-600 dark:text-zinc-300">{message.text}</p>}
           </div>

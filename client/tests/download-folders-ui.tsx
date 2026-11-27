@@ -210,7 +210,7 @@ Object.assign(window, {
     gitBinaryStatus: async () => ({ bundled: true, binary: 'bundled' }),
     // 「ブラウザ操作」: `?browser=1` gives the member one site (else the company has it off); `?browser=clearFails` fails 「ログインを消す」;
     // `?browser=kept` keeps its login on this PC.
-    getBrowserSites: async () => ({ sites: params.get('browser') ? [{ host: 'manager.example.net', ...(params.get('browser') === 'kept' ? { kept: true } : {}) }] : [] }),
+    getBrowserSites: async () => ({ sites: params.get('browser') ? [{ host: 'manager.example.net', ...(params.get('browser') === 'kept' ? { kept: true } : params.get('browser') === 'observe' ? { notKeptBySandbox: true } : {}) }] : [] }),
     onBrowserChanged: () => () => {},
     openBrowserSite: async (_companyId: string, host: string) => { (window as unknown as { browserOpened: string[] }).browserOpened = [...((window as unknown as { browserOpened?: string[] }).browserOpened ?? []), host]; return { ok: true } },
     clearBrowserLogin: async () => (params.get('browser') === 'clearFails' ? { ok: false, message: 'ログインを消せませんでした。もう一度お試しください。' } : { ok: true }),

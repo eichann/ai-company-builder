@@ -58,6 +58,9 @@ interface Result {
   browse: Record<string, unknown>
   work: Record<string, unknown>
   kept: Record<string, unknown>
+  whenLoadedCut: boolean
+  whenLoaded: boolean
+  whenLoadedUrl: string
 }
 
 function freePort(): Promise<number> {
@@ -129,6 +132,12 @@ test('what the request hook cannot see goes nowhere either: preconnect, reports,
   // Not even a TCP connection to evil.test (a preconnect, a NEL report, TURN over TCP open one).
   assert.equal(result.evilConnections, 0)
   assert.equal(result.udpPackets, 0, 'no STUN datagram')
+})
+
+test('a run that opened the window waits until its first page has loaded (not past its signal)', { skip }, () => {
+  assert.equal(result.whenLoadedCut, false, 'a stopped run does not wait')
+  assert.equal(result.whenLoaded, true)
+  assert.equal(result.whenLoadedUrl, 'https://op.test/', 'the site\'s page is there when it answers')
 })
 
 test('the login lives in memory only: no session folder on disk', { skip }, () => {

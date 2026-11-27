@@ -1879,14 +1879,14 @@ export const scenes: Scene[] = [
   // 32章: ブラウザ操作 with a made-up 配信ツール (download-folders-ui ?tab=browser&browser=1, browser-plan-card-ui ?manual=1).
   {
     id: 'settings-browser',
-    about: '設定 →「ブラウザ操作」: the allowed site, ［開いてログイン］［ログインを消す］, 「AI はまだこの窓を操作しません。」.',
+    about: '設定 →「ブラウザ操作」: the allowed site, ［開いてログイン］［ログインを消す］, the line on where the login lives.',
     page: 'download-folders',
     query: { tab: 'browser', browser: '1', manual: '1', role: 'member' },
     viewport: { width: 1100, height: 700 },
     steps: [{ waitFor: 'role=button[name="開いてログイン"]' }, SETTLE],
     crop: { target: 'role=dialog', padding: 0 },
     annotations: [
-      { marker: { target: 'text=manager.example.net', label: '1', at: 'left' } },
+      { marker: { target: 'text="manager.example.net"', label: '1', at: 'left' } },
       { box: 'role=button[name="開いてログイン"]' }, { marker: { target: 'role=button[name="開いてログイン"]', label: '2', at: 'below' } },
       { box: 'role=button[name="ログインを消す"]' }, { marker: { target: 'role=button[name="ログインを消す"]', label: '3', at: 'below' } },
     ],

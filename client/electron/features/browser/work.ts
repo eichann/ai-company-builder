@@ -26,6 +26,7 @@ import { BROWSER_RUN_ID_RE, BROWSER_RUN_LIMITS, type BrowserRunEndReason, type B
 import { browserRunBudget, type BrowserRunBudget } from '../../../../shared/core/browser-run-budget'
 import type { BrowserFrameRunStart, BrowserFrameView } from '../../../../shared/types/browser-frames'
 import type { BrowserPreviewSurface } from '../../../shared/browser-runner'
+import { noWindowWords, type BrowserRunWindow } from '../../../shared/browser-operation'
 import type { BrowserWriteGetResult, BrowserWriteResultView, BrowserWriteView } from '../../../shared/browser-line-writes'
 import type { BrowserInspectionView } from '../../../shared/browser-inspection'
 import { createOperatorTrail, trailForCard, type BrowserTrailRun, type OperatorTrailRecorder } from '../../../shared/browser-operator-trail'
@@ -46,6 +47,11 @@ export interface BrowserWorkDeps {
   /** The same window's page-less read session (controller `previewWindow`): the after-reads, GET of exactly an address. */
   reader(companyId: string, host: string): BrowserPreviewSurface | null
   registered(companyId: string, host: string): boolean
+  /**
+   * The window a run needs (controller `windowForRun`, agent-browser.md "The window a run needs"): asked before the run
+   * looks for it, so a window closed meanwhile opens again by itself while this app run holds the member's login.
+   */
+  openWindow?(companyId: string, host: string, signal: AbortSignal): Promise<BrowserRunWindow>
   api: BrowserRunsApi & BrowserFramesApi
   operator(): PreviewOperator | null
   cliPath(): string
@@ -265,11 +271,12 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
     const host = input.site
     if (!deps.registered(companyId, host)) return said(W.notAllowed)
     if (deps.stopped(companyId)) return said(W.stopped)
-    const win = deps.window(companyId, host)
-    const reader = deps.reader(companyId, host)
-    if (!win || win.closed() || !reader) return said(W.noWindow)
     const operator = deps.operator()
     if (!operator) return said(W.noOperator)
+    const found = await deps.openWindow?.(companyId, host, input.signal)
+    const win = deps.window(companyId, host)
+    const reader = deps.reader(companyId, host)
+    if (!win || win.closed() || !reader) return said(noWindowWords(W.noWindow, found))
     const windowKey = `${companyId}\0${host}`
     if (busyWindows.has(windowKey)) return said(W.busy)
     const stillCurrent = deps.context.capture({ companyId, signal: input.signal })
