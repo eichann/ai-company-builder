@@ -795,8 +795,10 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
       const hooks = {
         holdWrite: writer ? (held: Parameters<FrameWriter['hold']>[0]) => writer.hold(held) : async () => ({ kind: 'fail' as const }),
         neverRead: o.neverReadFits,
-        // The window's DevTools connection went while a write was held: the page's original may have gone out on its own.
-        detached: () => writer?.abandon('detached'),
+        // The window's DevTools connection went while a write was held: nothing more is sent. Unknown only when a page's
+        // original may have gone out on its own (not parked yet); otherwise a held write not sent is not sent, one on its
+        // way keeps its own result (agent-browser.md "Writes within frames, in the app").
+        detached: (originalMayHaveGone: boolean) => { if (originalMayHaveGone) writer?.abandon('detached'); else writer?.close() },
       }
       if (!(await o.win.enter(() => deps.stopped(o.companyId) || !o.current(), hooks))) {
         reason = 'refused'

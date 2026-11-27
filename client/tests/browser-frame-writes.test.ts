@@ -498,6 +498,8 @@ interface WorkWorld {
   autosaveEveryMs?: number
   /** The member's stop (the turn's signal) comes this long after the task starts. */
   abortAfterMs?: number
+  /** Asked as each permit is asked, with the hooks the window was given (the window's DevTools connection going, say). */
+  onPermit?: (hooks: Parameters<BrowserBrowseSurface['enter']>[1]) => void
   frameConfirm: () => Promise<BrowserLinesAnswer>
   frameGet: () => Promise<BrowserLinesAnswer>
   /** The server's answer to a read-back report (default: taken). */
@@ -582,7 +584,7 @@ function workWorld(over: Partial<WorkWorld> = {}) {
     async runFinish(_c: string, _r: string, body: unknown) { const a = await w.runFinish(); w.calls.push(`runFinish ${JSON.stringify(body)}`); return a },
     async frameStart(_c: string, body: unknown) { w.calls.push(`frameStart ${JSON.stringify(body)}`); return w.frameStart(body) },
     async frameApprove(_c: string, _r: string, body: { planHash: string; approvalToken: string }) { w.calls.push(`frameApprove ${body.approvalToken === TOKEN}`); return w.frameApprove() },
-    async framePermit(_c: string, _r: string, body: { frame: number }) { w.calls.push('framePermit'); return { kind: 'ok', value: { write: ++permits, frame: body.frame, permittedAt: new Date((w.now ?? Date.now)()).toISOString(), validMs: 5000 } } as BrowserLinesAnswer },
+    async framePermit(_c: string, _r: string, body: { frame: number }) { w.calls.push('framePermit'); w.onPermit?.(hooks); return { kind: 'ok', value: { write: ++permits, frame: body.frame, permittedAt: new Date((w.now ?? Date.now)()).toISOString(), validMs: 5000 } } as BrowserLinesAnswer },
     // Another run than this task's (the write ledger: an earlier request's write) is named in the call.
     async frameGet(_c: string, r: string) { w.calls.push(`frameGet${r === FRAME_RUN ? '' : ` @${r}`}`); return w.frameGet() },
     async frameConfirm(_c: string, r: string, body: { write: number; answer: string }) { w.calls.push(`frameConfirm ${body.write} ${body.answer}${r === FRAME_RUN ? '' : ` @${r}`}`); return w.frameConfirm() },
@@ -928,6 +930,24 @@ test('the window\'s DevTools connection gone while a write is held: its copy is 
   assert.equal((await w.writer.hold(held(site, 'POST', '/coupons', FORM, 'name=b'))).kind, 'fail')
   assert.deepEqual(site.requests, [])
 })
+
+for (const originalMayHaveGone of [false, true]) {
+  test(`the window's DevTools connection gone while the work's write waits for its permit (its original ${originalMayHaveGone ? 'not parked yet' : 'parked'}): nothing is sent, and it is unknown only when the original may have gone`, async () => {
+    const { w, wiring, tool } = workWorld({
+      answers: [CLICK_SAVE, DONE_PLAIN],
+      frameStart: () => ({ kind: 'ok', value: started({ needsApproval: false }) }),
+      onPermit: hooks => hooks?.detached?.(originalMayHaveGone),
+    })
+    await tool.execute({ site: HOST, task: 'x', skill: 'coupons' })
+    assert.deepEqual(w.site.requests, [])
+    // The permit taken is reported: not sent when the original was parked (it can no longer reach the site), else unknown.
+    assert.deepEqual(w.calls.filter(c => c.startsWith('frameReport')), [originalMayHaveGone ? 'frameReport unknown' : 'frameReport not_sent'])
+    const view = wiring.card(COMPANY, FRAME_RUN)
+    assert.ok(view?.ok)
+    // The card: 「送っていません」 for a parked one; in doubt (checked by hand) only when the original may have gone.
+    assert.deepEqual([view.view.result?.notDone, view.view.result?.unknown], originalMayHaveGone ? [[], ['POST /coupons']] : [['POST /coupons'], []])
+  })
+}
 
 test('a form body with a raw `;` is refused (a server that splits on it would read another value)', () => {
   assert.deepEqual(readHeldWrite({ method: 'POST', url: `https://${HOST}/coupons`, host: HOST, contentType: FORM, body: text('type=note&title=x;type=admin') }), { ok: false, problem: 'unreadable' })

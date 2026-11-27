@@ -78,6 +78,21 @@ const heldHeaders = (headers: Record<string, string>): Array<[string, string]> =
   Object.entries(headers).filter(([k]) => { const n = k.toLowerCase(); return !HELD_DROPPED_HEADERS.has(n) && !n.startsWith('proxy-') && !n.startsWith('sec-') })
 /** A held write's body read at most (larger: not readable, refused). */
 const HELD_BODY_MAX = 1024 * 1024
+/**
+ * A redirect's `Location` made absolute against the address the page sent its write to. The page's request is answered at
+ * its parked pause, so Chromium would resolve a relative one against `PARKED_WRITE_URL` (a form's 303 to `/next` would
+ * land nowhere; independent review). An address that cannot be read is left as the site sent it.
+ */
+function fromPageAddress(location: string, pageUrl: string): string {
+  try { return new URL(location, pageUrl).href } catch { return location }
+}
+/**
+ * Where a held page write is pointed while the run decides it: port 1 is on Chromium's list of unsafe ports, so the
+ * request fails before any connection is made (no proxy, DNS or site sees it). Never observable by the page.
+ */
+const PARKED_WRITE_URL = 'https://acb-parked-write.invalid:1/'
+/** A request as DevTools Fetch pauses it (what the window reads of it). */
+interface PausedRequest { url: string; method: string; headers?: Record<string, string>; postData?: string; postDataEntries?: Array<{ bytes?: string }>; hasPostData?: boolean }
 /** Answer headers a fulfilled page request never gets: cookies (the site's are never handed back), and what no longer fits the decoded body. */
 const FULFILL_DROPPED_HEADERS = new Set(['set-cookie', 'set-cookie2', 'content-encoding', 'content-length', 'transfer-encoding'])
 
@@ -394,6 +409,12 @@ export function createBrowserWindowShell(options: {
     /** Requests whose answer is JSON (its key shape is read once it finished). */
     const jsonAnswers = new Set<string>()
     let mainFrameId: string | null = null
+    /** The page's writes parked (pointed at `PARKED_WRITE_URL`), until their failure pauses again and they are held. */
+    const parked = new Map<string, { request: PausedRequest; hold: NonNullable<BrowserAiGate['hold']> }>()
+    /** Parked writes whose `Fetch.continueRequest` Chromium has not answered yet (a detach now may let the original go). */
+    const parking = new Set<string>()
+    /** A parking Chromium refused since the connection was made (the connection may be going: its original may have gone). */
+    let parkingFailed = false
     const endRecording = (reason: 'closed' | 'lost') => {
       const r = recorder
       if (!r) return
@@ -483,12 +504,36 @@ export function createBrowserWindowShell(options: {
       }
       if (method !== 'Fetch.requestPaused') { onRecording(method, params); return }
       const requestId = params.requestId as string
-      const request = params.request as { url: string; method: string; headers?: Record<string, string>; postData?: string; postDataEntries?: Array<{ bytes?: string }>; hasPostData?: boolean }
+      // Paused at the response stage: only a parked write asks for that (`interceptResponse`); it is held now.
+      if (params.responseStatusCode !== undefined || params.responseErrorReason !== undefined) {
+        const original = parked.get(requestId)
+        parked.delete(requestId)
+        // Decided by the run it was parked for, only while that run's gate still holds the window.
+        if (original && state.site && state.mode === 'ai' && gate?.hold === original.hold) await holdPageWrite(requestId, original.request, original.hold)
+        else { try { await contents.debugger.sendCommand('Fetch.failRequest', { requestId, errorReason: 'BlockedByClient' }) } catch { /* gone */ } }
+        return
+      }
+      const request = params.request as PausedRequest
       // A write run (step ⑤b): the page's write is held, never continued; the run decides, main sends it once or not at all.
       if (state.mode === 'ai' && !isReadMethod(request.method)) { try { gate?.onPageWrite?.() } catch { /* changes nothing */ } }
       const hold = state.site && state.mode === 'ai' && gate?.hold
       if (hold && !isReadMethod(request.method)) {
-        await holdPageWrite(requestId, request, hold)
+        // Parked first, before anything is awaited: the page's request is pointed at an address that never connects
+        // (`PARKED_WRITE_URL`, an unsafe port: refused before any connection) and paused again with that failure. If the
+        // DevTools connection goes from here on (a detach, the gate let go), Chromium lets go of a request that can no
+        // longer reach the site — the page gets a failure, the site never the original (agent-browser.md "Writes within
+        // frames, in the app": the original never goes once parked). The page's answer is the copy's, given at that pause.
+        parked.set(requestId, { request, hold })
+        parking.add(requestId)
+        try {
+          await contents.debugger.sendCommand('Fetch.continueRequest', { requestId, url: PARKED_WRITE_URL, interceptResponse: true })
+          parking.delete(requestId)
+        } catch {
+          parking.delete(requestId)
+          parked.delete(requestId)
+          parkingFailed = true
+          try { await contents.debugger.sendCommand('Fetch.failRequest', { requestId, errorReason: 'BlockedByClient' }) } catch { /* gone */ }
+        }
         return
       }
       let allow = true
@@ -519,7 +564,7 @@ export function createBrowserWindowShell(options: {
     const heldIds = new Set<string>()
     async function holdPageWrite(
       requestId: string,
-      request: { url: string; method: string; headers?: Record<string, string>; postData?: string; postDataEntries?: Array<{ bytes?: string }>; hasPostData?: boolean },
+      request: PausedRequest,
       hold: NonNullable<BrowserAiGate['hold']>,
     ) {
       heldIds.add(requestId)
@@ -554,7 +599,8 @@ export function createBrowserWindowShell(options: {
         try {
           await contents.debugger.sendCommand('Fetch.fulfillRequest', {
             requestId, responseCode: answer.status,
-            responseHeaders: answer.headers.filter(([k]) => !FULFILL_DROPPED_HEADERS.has(k.toLowerCase())).map(([name, value]) => ({ name, value })),
+            responseHeaders: answer.headers.filter(([k]) => !FULFILL_DROPPED_HEADERS.has(k.toLowerCase()))
+              .map(([name, value]) => ({ name, value: answer.status >= 300 && answer.status < 400 && name.toLowerCase() === 'location' ? fromPageAddress(value, request.url) : value })),
             body: Buffer.from(answer.body).toString('base64'),
           })
         } catch { /* the page went away meanwhile */ }
@@ -570,12 +616,18 @@ export function createBrowserWindowShell(options: {
       }
     }
     const onDetach = () => {
-      // A write held now may be let go by Chromium on its own once the connection is gone: the run is told, so its copy is
-      // never sent and the write counts as unknown (independent review of #856).
-      const hadHeld = heldIds.size > 0
+      // Chromium lets go of every request paused here once the connection is gone. A parked write can no longer reach the
+      // site (it fails, the page sees a failure); only one whose parking Chromium had not answered yet may go out as the
+      // page made it. The run is told which (`BrowserWorkHooks.detached`): nothing more of it is sent either way, and a
+      // write is counted unknown only when its original may have gone (independent review of #856; the parking since the
+      // fix of the detach that let the original out).
+      const mayHaveGone = parking.size > 0 || parkingFailed
+      const hadWrite = heldIds.size > 0 || parked.size > 0 || mayHaveGone
       heldIds.clear()
+      parked.clear()
+      parking.clear()
       state.aiGateReady = false
-      if (hadHeld) { try { gate?.hold?.hooks.detached?.() } catch { /* the run's own failure */ } }
+      if (hadWrite) { try { gate?.hold?.hooks.detached?.(mayHaveGone) } catch { /* the run's own failure */ } }
       // Gone: the next attach adds the listeners again (never twice).
       try { contents.debugger.removeListener('message', onMessage); contents.debugger.removeListener('detach', onDetach) } catch { /* the window is gone */ }
       // The connection went away under a recording (the window is going, or another client took it): it is discarded.
@@ -601,6 +653,7 @@ export function createBrowserWindowShell(options: {
       pendingAttach = false
       if (contents.isDestroyed() || state.mode !== 'ai' || owner.holder() !== 'ai') return
       const dbg = connect()
+      parkingFailed = false
       await dbg.sendCommand('Fetch.enable', { patterns: [{ urlPattern: '*', requestStage: 'Request' }] })
       if (gate?.dismissDialogs) {
         await dbg.sendCommand('Page.enable')
@@ -631,6 +684,8 @@ export function createBrowserWindowShell(options: {
         // A held write is failed before Fetch lets go of the page's requests (step ⑤b: never sent on its own).
         await failHeld()
         try { await contents.debugger.sendCommand('Fetch.disable') } catch { /* detaching anyway */ }
+        parked.clear()
+        parking.clear()
       }
       disconnect()
     }
@@ -934,7 +989,7 @@ export function createBrowserWindowShell(options: {
       /** A write run's held write, sent once through the window's write session (exactly the page's request: step ⑤b). */
       const sendHeld = (request: SessionRequest, steps: BrowserWriteSteps): Promise<BrowserWriteOutcome> => {
         if (closed()) return Promise.resolve({ sent: false, stage: 'prepare' })
-        // Only while the gate still holds the page (a detached DevTools connection may have let the original go).
+        // Only while the gate still holds the page (the window's write gate gone: nothing more of the run is sent).
         const asks = (r: BrowserSessionRequest) => state.contentsId === contentsId && state.mode === 'ai' && state.aiGateReady && r.url === request.url && r.method === request.method
         return writeThroughSession(lanes, writeKey, writes, request, asks, steps, () => !closed())
       }

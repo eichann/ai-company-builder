@@ -710,7 +710,9 @@ async function workScenarios(win: BrowserShellWindow, sites: Sites) {
   // The writer the window's holds go to (a second one for the last scenario).
   let current = writer
   out.entered = await win.browse.enter(() => false, {
-    holdWrite: held => current.hold(held), neverRead: p => p.startsWith('/work/never'), detached: () => current.abandon('detached'),
+    holdWrite: held => current.hold(held), neverRead: p => p.startsWith('/work/never'),
+    // As the work wires it (work.ts): unknown only when a page's original may have gone out (not parked yet).
+    detached: mayHaveGone => { if (mayHaveGone) current.abandon('detached'); else current.close() },
   })
   out.save = await js(`save('a')`)
   out.both = await js(`Promise.all([save('b'), save('c')])`)
@@ -734,8 +736,9 @@ async function workScenarios(win: BrowserShellWindow, sites: Sites) {
   out.afterLost = await js(`save('f')`)
   const ses = page.session
   out.windowCookies = (await ses.cookies.get({ url: 'https://op.test/' })).map(c => c.name)
-  // The window's DevTools connection goes while a save is held (its permit on the way): the run's copy is never sent and
-  // the write is unknown; at most the page's own original reaches the site (independent review of #856).
+  // The window's DevTools connection goes while a save is held (its permit on the way): the page's original was parked, so
+  // nothing reaches the site — neither the run's copy nor the original — and the write is not sent
+  // (tests/browser-write-detach-electron.test.ts cuts it at every moment and in every way).
   const second = createFrameWriter({
     companyId: 'company-1', runId: `bf_${'c'.repeat(32)}`, host: 'op.test', going: () => true, stepsSoFar: () => 0,
     frames: [{ frame: 1, method: 'POST', path: '/work/save', query: null, fields: {}, max: 2, left: 2 }],
@@ -751,10 +754,8 @@ async function workScenarios(win: BrowserShellWindow, sites: Sites) {
   out.detachedSave = await Promise.race([detachedSave, wait(5000).then(() => 'no answer')])
   await wait(1500)
   out.detachedRecords = second.records().map(r => r.outcome)
-  out.detachedLocked = second.locked()
-  out.cookiesAfterDetach = (await ses.cookies.get({ url: 'https://op.test/' })).map(c => c.name)
   await win.browse.leave()
-  // The original's own answer (let go by Chromium) set its cookie: removed, so the later login tests count from the same start.
+  // Kept so the later login tests count from the same start, whatever set it.
   await ses.cookies.remove('https://op.test/', 'rotated')
   out.calls = calls.map(c => ({ kind: c.kind, body: c.body }))
   out.reportsBeforePermits = (() => {

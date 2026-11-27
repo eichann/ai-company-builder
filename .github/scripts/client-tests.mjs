@@ -42,6 +42,8 @@ const MACOS = {
   // A real Electron window (「ブラウザ操作」, agent-browser.md): Linux runners have no display, so
   // the test skips itself there and would pass without guarding anything.
   'tests/browser-window-electron.test.ts': 'launches the real Electron app, which needs a display',
+  // A held page write when the window's DevTools connection goes (agent-browser.md "Writes within frames, in the app"): same reason.
+  'tests/browser-write-detach-electron.test.ts': 'launches the real Electron app, which needs a display',
   // Cookies encrypted on disk by the fuse the shipped build flips (agent-browser.md "Keeping a login on disk"): a copy
   // of Electron with the fuse, macOS only (APFS clone, re-signed ad hoc); skipped elsewhere.
   'tests/cookie-encryption-electron.test.ts': 'flips the fuse on a macOS copy of Electron and launches it',
