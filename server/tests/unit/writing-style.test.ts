@@ -30,10 +30,10 @@ describe('the shape', () => {
   })
 
   it('drops anything personal, field by field', () => {
-    for (const bad of ['山田さん', '田中様へ', 'sato@div.example', '03-1234-5678', 'https://example.com/x', '〒100-0001', '千代田区丸の内1丁目', 'Smith様']) {
+    for (const bad of ['山田さん', '田中様へ', '山田部長', 'sato@div.example', '03-1234-5678', 'https://example.com/x', '〒100-0001', '千代田区丸の内1丁目', 'Smith様']) {
       expect(looksPersonal(bad), bad).toBe(true)
     }
-    for (const fine of ['お疲れさまです。', '皆様', 'お客様', 'ご担当者様', '部長', 'よろしくお願いいたします。', '承知しました']) {
+    for (const fine of ['お疲れさまです。', '皆様', 'お客様', 'ご担当者様', '部長', '仕様どおり', '御社の部長', 'よろしくお願いいたします。', '承知しました']) {
       expect(looksPersonal(fine), fine).toBe(false)
     }
     const p = parseWritingStyle({ ...style(), greeting: '山田さん、お疲れさまです。', phrases: ['承知しました', 'sato@div.example まで', '田中様によろしく'], notes: '署名に 03-1234-5678' })!

@@ -621,6 +621,7 @@ registerPluginScreensIpc(ipc, {
 const writingStyles = createWritingStyles({
   dir: () => path.join(userDataDir(), 'writing-style'),
   userId: session.userId,
+  session: session.cookies,
   server: createWritingSourcesApi({ baseUrl: getServerApiUrl, cookies: session.cookies }),
   summarize: createWritingSummarizer({
     settings: () => ({ authMode: config.authMode(), apiKey: apiKey.read() }),
@@ -978,7 +979,7 @@ app.whenReady().then(async () => {
       serverUrl: getServerApiUrl,
       brokerTokens,
       drivePicking,
-      writingStyle: (companyId, key) => writingStyles.forThread(companyId, key),
+      writingStyle: companyId => writingStyles.forTurn(companyId),
       paths: allowedRoots,
       requestInteraction: (request, appSessionId, signal) =>
         requestFromOwner(agentInteractions, webContentsForSession(appSessionId), request, appSessionId, signal),

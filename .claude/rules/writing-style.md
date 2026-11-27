@@ -60,15 +60,21 @@ none fits. Nothing of a message is stored or logged (threads integration test gr
   `neutralizeOutsideText` per message, `wrapOutsideText`), the prompt says they are data; only the last `<writing_style>`
   JSON is taken and checked (`readWritingStyleAnswer` → `parseWritingStyle`: the three choices required, texts one line and
   cut, **anything personal dropped field by field** — an address, a phone number, a URL, a postal address, a name with an
-  honorific; 皆様 / お客様 / ご担当者様 / 部長 stay). Never while an administrator stopped the AI.
+  honorific or a title (山田部長); 皆様 / お客様 / ご担当者様 / 部長 / 仕様 stay — and so is a field that reads as an
+  instruction (`findInstructionLikeText`) or names money or a secret (振込・口座・パスワード…): the summary is ACB's words
+  to the drafting AI, so nothing of a message may pass as one). Never while an administrator stopped the AI.
 - **Kept** in `<userData>/writing-style/<userId>/<companyId>.json` (owner-only, atomic): `enabled`, the summaries, a note.
-  Another account or company reads another file; a build whose account changed meanwhile writes nothing. Kept across a
-  sign-out like the consultations' history (per account); 「消す」 removes the file. Made again when older than a month
-  (`writingStyleStale`; looked at whenever a thread asks), never over a summary the member corrected (`edited`). Only
-  connectors readable at a build keep a summary.
+  Another account or company reads another file. **Bound to the sign-in** (`session`: the session's cookies array, new at
+  every sign-in): a build or a status read that saw another sign-in meanwhile — also the same account signed in again,
+  A → B → A — writes and answers nothing. Kept across a sign-out like the consultations' history (per account);
+  「消す」 removes the file, and a build started before it saves nothing (`generation`; 「作り直す」 then starts a new
+  one). Made again when older than a month (`writingStyleStale`; looked at when a thread asks, at most every
+  `REFRESH_RETRY_MS`), never over a summary the member corrected (`edited`). A connector no longer readable (409 / 404)
+  loses its summaries; a passing failure (offline, 5xx, the AI not answering) keeps the ones there.
 - **Used**: `inbox_read` (`features/inbox/tools.ts`, the AI's thread read before `mail_draft_create { interactionId }` —
   the inbox's triage and follow-up, a consultation about a 連絡) appends `writingStyleForAi` **after** the thread's
-  outside-text block, only while the member's check is on (`forThread`, via `recordToolProviders`' `writingStyle`).
+  outside-text block, as reference data, only while the member's check is on (`forTurn`, bound by `recordToolProviders`
+  when the turn starts to the member and sign-in it is for: a later sign-in gets nothing through it).
   Not yet: a new mail (`mail_recipients` without a thread).
 - IPC (main, the session stays there): `writingStyle:status` / `setEnabled` (on = build in the background) / `rebuild` /
   `update` (the member's correction, checked like the AI's) / `remove` (one, or all and the check off). The renderer's entry
@@ -79,4 +85,5 @@ Tests: `server/tests/unit/writing-style.test.ts` (shape, personal details, stand
 audience / machine mail / max), `server/tests/integration/threads.test.ts` (the samples route end to end against the fake
 Google: own words, 身内 / よそ, 受信を読む off → nothing sent to Google, the key on a mail thread, nothing kept),
 `client/tests/writing-style.test.ts` (outside text, the member's agent, per account and company, off / unreadable / AI
-stopped, a sign-in during a build, corrections, deletion, a month later, after the block) — guards mutation-checked.
+stopped, a sign-in during a build and A → B → A, a turn bound to its sign-in, deletion during a build, a passing failure,
+instruction and money words dropped, corrections, deletion, a month later, after the block) — guards mutation-checked.

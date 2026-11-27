@@ -127,6 +127,10 @@ describe('Gmail\'s reader of the member\'s own sent mail', () => {
     expect(ownWords('転送します。\n\n---------- Forwarded message ---------\nFrom: x')).toBe('転送します。')
     expect(ownWords('本文\n> 引用\nつづき')).toBe('本文\nつづき')
     expect(ownWords('本文です\n-- \n山田太郎\n03-1234-5678')).toBe('本文です')
+    // Gmail folds a long 「On … wrote:」 onto two lines; the name and address go too.
+    expect(ownWords('OK!\n\nOn Thu, Nov 27, 2026 at 10:00 AM Yamada Taro\n<yamada@a.example> wrote:\n> please')).toBe('OK!')
+    // A line of the member's own that ends with a colon is not an attribution.
+    expect(ownWords('以下の通りです：\n> 引用したい一文\n- 一つ目')).toBe('以下の通りです：\n- 一つ目')
   })
 
   it('身内 only when every other address is of the company\'s domains', () => {

@@ -14,8 +14,9 @@
  *   from every field (`writingStyleProblems` reads nothing as an instruction; `parseWritingStyle` drops
  *   what looks personal rather than refusing the whole summary).
  *
- * Pure: imports nothing (shared-core.md).
+ * Pure: imports only shared/core (shared-core.md).
  */
+import { findInstructionLikeText } from './instruction-like'
 
 export type WritingAudience = 'inside' | 'outside'
 export const WRITING_AUDIENCES: readonly WritingAudience[] = ['inside', 'outside']
@@ -80,7 +81,9 @@ export interface KeptWritingStyle {
 export type WritingStyleSet = Record<string, Partial<Record<WritingAudience, KeptWritingStyle>>>
 
 const CONNECTOR_ID = /^[a-z][a-z0-9_-]{0,39}$/
-export const isWritingConnectorId = (v: unknown): v is string => typeof v === 'string' && CONNECTOR_ID.test(v)
+/** Names an object already has (`constructor`…): never a key of a set, which is a plain object. */
+const RESERVED_IDS = new Set(['constructor', 'prototype', 'hasownproperty', 'tostring', 'valueof'])
+export const isWritingConnectorId = (v: unknown): v is string => typeof v === 'string' && CONNECTOR_ID.test(v) && !RESERVED_IDS.has(v)
 export const isWritingAudience = (v: unknown): v is WritingAudience => v === 'inside' || v === 'outside'
 
 // Personal details a summary must never carry (owner: 相手の名前・住所などを入れない).
@@ -90,9 +93,9 @@ const PHONE = /(?:\+?\d[\d\s()-]{8,}\d)/
 const POSTAL = /〒\s*\d|\b\d{3}-\d{4}\b/
 const ADDRESS = /[都道府県市区町村]\S{0,8}\d+(?:丁目|番地?|号)/
 // A name with an honorific: 「山田さん」「田中様」「Smith様」. Words for anyone (皆様, お客様, ご担当者様…) stay.
-const HONORIFIC = /([\p{Script=Han}\p{Script=Katakana}ー々A-Za-z]{1,12})(さん|様|さま|殿|氏|くん|君|ちゃん)/gu
+const HONORIFIC = /([\p{Script=Han}\p{Script=Katakana}ー々A-Za-z]{1,12})(さん|様|さま|殿|氏|くん|君|ちゃん|部長|課長|社長|係長|室長|専務|常務|先生)/gu
 // The captured word has no hiragana, so 「お客様」 is seen as 「客」+様 and 「ご担当者様」 as 「担当者」+様.
-const GENERIC_ADDRESSEES = ['皆', '客', '各位', '担当者', '担当', '先方', '得意', '関係者', '御中', '社長', '部長', '課長', '先生', '苦労', '世話']
+const GENERIC_ADDRESSEES = ['皆', '客', '各位', '担当者', '担当', '先方', '得意', '関係者', '御中', '社長', '部長', '課長', '先生', '苦労', '世話', '仕', '同', '模', '異', '有', '一', '左', '右', '貴社', '御社', '当社', '弊社']
 
 /** Whether a short text carries something personal (an address, a number, a person's name). */
 export function looksPersonal(text: string): boolean {
@@ -105,6 +108,9 @@ export function looksPersonal(text: string): boolean {
   return false
 }
 
+/** Money and secrets are what a message said, never how the member writes. */
+const NOT_A_HABIT = /振込|振り込|口座|送金|支払|請求|パスワード|暗証|カード番号/
+
 /** One line: NFC, control and line-separator characters out, trimmed, cut. */
 function line(v: unknown, max: number): string {
   if (typeof v !== 'string') return ''
@@ -113,10 +119,13 @@ function line(v: unknown, max: number): string {
   return Array.from(s).slice(0, max).join('')
 }
 
-/** A text field kept only when it carries nothing personal. */
+/**
+ * A text field kept only when it carries nothing personal and reads as no instruction (the summary is made from
+ * messages that may hold someone else's words, and it is handed to the drafting AI: `findInstructionLikeText`).
+ */
 function safe(v: unknown, max: number): string {
   const s = line(v, max)
-  return s && !looksPersonal(s) ? s : ''
+  return s && !looksPersonal(s) && !NOT_A_HABIT.test(s) && findInstructionLikeText(s).length === 0 ? s : ''
 }
 
 const oneOf = <T extends string>(list: readonly T[], v: unknown, fallback: T): T => (list as readonly unknown[]).includes(v) ? v as T : fallback

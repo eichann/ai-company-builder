@@ -41,6 +41,11 @@ export interface WritingStylesDeps {
   server: WritingSourcesPort
   /** The member's own AI, one tool-less call: the summary of one audience's messages, or null. */
   summarize: (samples: readonly WritingSample[], signal: AbortSignal) => Promise<WritingStyle | null>
+  /**
+   * Which sign-in this is (services/session.ts' cookies: a new array at every sign-in): a build or a turn started under
+   * one sign-in never reads or writes under another, also the same account signed in again (A → B → A).
+   */
+  session?: () => unknown
   /** False while an administrator has stopped the AI (agent-stop.md): nothing is summarized. */
   aiAllowed?: () => boolean
   now?: () => number
@@ -69,7 +74,9 @@ export function createWritingStyles(deps: WritingStylesDeps) {
   /** When a stale summary's making was last started from a thread read, per account and company (memory only). */
   const refreshTried = new Map<string, number>()
   /** Builds running, per account and company: one at a time. */
-  const building = new Map<string, Promise<void>>()
+  const building = new Map<string, { job: Promise<void>; generation: number }>()
+  /** Still the sign-in a piece of work started under. */
+  const sameSignIn = (userId: string, session: unknown) => deps.userId() === userId && (deps.session?.() ?? null) === session
 
   const fileOf = (userId: string, companyId: string): string | null =>
     ID.test(userId) && ID.test(companyId) ? path.join(deps.dir(), userId, `${companyId}.json`) : null
@@ -98,9 +105,13 @@ export function createWritingStyles(deps: WritingStylesDeps) {
   async function build(userId: string, companyId: string): Promise<void> {
     const key = `${userId}\u0000${companyId}`
     const running = building.get(key)
-    if (running) return running
     const startedAt = generation.get(key) ?? 0
-    const current = () => (generation.get(key) ?? 0) === startedAt
+    if (running) {
+      // One started before a 「消す」 saves nothing: this press makes them again after it.
+      return running.generation === startedAt ? running.job : running.job.then(() => build(userId, companyId))
+    }
+    const session = deps.session?.() ?? null
+    const current = () => (generation.get(key) ?? 0) === startedAt && sameSignIn(userId, session)
     const job = (async () => {
       if (deps.aiAllowed?.() === false) { save(userId, companyId, k => ({ ...k, note: NOTE.aiStopped })); return }
       const sources = await deps.server.sources(companyId)
@@ -139,7 +150,7 @@ export function createWritingStyles(deps: WritingStylesDeps) {
         }
       }
       // Never under another account: a sign-in meanwhile drops what this build made.
-      if (deps.userId() !== userId || !current()) return
+      if (!current()) return
       const readable = sources.sources.some(s => s.readable)
       const note = !readable ? NOTE.noSource : failed && made === 0 ? NOTE.aiFailed : few ? NOTE.fewMessages : NOTE.made
       save(userId, companyId, k => {
@@ -159,7 +170,7 @@ export function createWritingStyles(deps: WritingStylesDeps) {
       log.info(`[writing-style] made ${made} summaries`)
     })().catch(() => { log.warn('[writing-style] making the summaries failed') })
       .finally(() => building.delete(key))
-    building.set(key, job)
+    building.set(key, { job, generation: startedAt })
     return job
   }
 
@@ -171,9 +182,10 @@ export function createWritingStyles(deps: WritingStylesDeps) {
   async function status(companyId: string): Promise<WritingStyleStatus | null> {
     const userId = deps.userId()
     if (!userId || !ID.test(companyId)) return null
+    const session = deps.session?.() ?? null
     const sources = await deps.server.sources(companyId)
-    // Another account signed in meanwhile: never this one's summaries.
-    if (!sources || deps.userId() !== userId) return null
+    // Another sign-in meanwhile: never this one's summaries.
+    if (!sources || !sameSignIn(userId, session)) return null
     const kept = read(userId, companyId)
     const labelOf = (id: string) => sources.sources.find(s => s.connectorId === id)?.label ?? id
     return {
@@ -244,28 +256,33 @@ export function createWritingStyles(deps: WritingStylesDeps) {
     },
 
     /**
-     * What the drafting AI is handed beside a thread it reads for a reply: the signed-in member's own summary for the
-     * thread's connector and audience (or the other audience standing in), only while the check is on. A month-old one is
-     * made again in the background; this answer uses what is kept.
+     * What the drafting AI of one turn is handed beside a thread it reads for a reply, bound to the sign-in the turn
+     * started under (another sign-in since: nothing): the member's own summary for the thread's connector and audience
+     * (or the other audience standing in), only while the check is on. A month-old one is made again in the background
+     * (at most every `REFRESH_RETRY_MS`); this answer uses what is kept.
      */
-    forThread(companyId: string, key: WritingStyleKey | null | undefined): string | null {
+    forTurn(companyId: string): ((key: WritingStyleKey | null | undefined) => string | null) | null {
       const userId = deps.userId()
-      if (!userId || !key || !ID.test(companyId) || !isWritingConnectorId(key.connectorId) || !isWritingAudience(key.audience)) return null
-      const kept = read(userId, companyId)
-      if (!kept.enabled) return null
-      const tryKey = `${userId}\u0000${companyId}`
-      if (Object.values(kept.styles).some(by => WRITING_AUDIENCES.some(a => by[a] && writingStyleStale(by[a]!, now())))
-        && now() - (refreshTried.get(tryKey) ?? -Infinity) >= REFRESH_RETRY_MS) {
-        // Tried at most every few hours: a making that keeps failing never costs one AI call per thread read.
-        refreshTried.set(tryKey, now())
-        void build(userId, companyId)
+      if (!userId || !ID.test(companyId)) return null
+      const session = deps.session?.() ?? null
+      return key => {
+        if (!sameSignIn(userId, session) || !key || !isWritingConnectorId(key.connectorId) || !isWritingAudience(key.audience)) return null
+        const kept = read(userId, companyId)
+        if (!kept.enabled) return null
+        const tryKey = `${userId}\u0000${companyId}`
+        if (Object.values(kept.styles).some(by => WRITING_AUDIENCES.some(a => by[a] && writingStyleStale(by[a]!, now())))
+          && now() - (refreshTried.get(tryKey) ?? -Infinity) >= REFRESH_RETRY_MS) {
+          // Tried at most every few hours: a making that keeps failing never costs one AI call per thread read.
+          refreshTried.set(tryKey, now())
+          void build(userId, companyId)
+        }
+        const choice = chooseWritingStyle(kept.styles, key.connectorId, key.audience)
+        return choice ? writingStyleForAi(choice) : null
       }
-      const choice = chooseWritingStyle(kept.styles, key.connectorId, key.audience)
-      return choice ? writingStyleForAi(choice) : null
     },
 
     /** Tests: wait for a build started by `setEnabled` / `rebuild` / `forThread`. */
-    whenIdle: () => Promise.all([...building.values()]).then(() => undefined),
+    whenIdle: async () => { while (building.size > 0) await Promise.all([...building.values()].map(b => b.job)) },
   }
 }
 

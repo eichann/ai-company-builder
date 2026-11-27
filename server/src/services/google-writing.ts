@@ -33,7 +33,7 @@ export interface GoogleWritingDeps {
 
 // Where the member's own words end: the quoted conversation, a forwarded mail, a signature.
 const CUT_MARKERS: readonly RegExp[] = [
-  /^On .{1,300} wrote:\s*$/m,
+  /^On [^\n]{1,300}(?:\n[^\n]{0,200})? wrote:\s*$/m,
   /^\d{4}[年/-]\d{1,2}[月/-]\d{1,2}日?.{0,200}(?:書きました|wrote)[:：]?\s*$/m,
   /^.{0,100}(?:さんは|様は).{0,100}書きました[:：]?\s*$/m,
   /^-{2,}\s*(?:Original Message|Forwarded message|転送されたメッセージ|元のメッセージ)\s*-{2,}/im,
@@ -54,7 +54,8 @@ export function ownWords(text: string): string {
   if (firstQuote > 0) {
     let i = firstQuote - 1
     while (i > 0 && lines[i].trim() === '') i--
-    if (/[:：]\s*$/.test(lines[i])) lines.length = i
+    // Only a line that names someone (an address, a date or a time): 「以下の通りです：」 is the member's own.
+    if (/[:：]\s*$/.test(lines[i]) && /@|\d{1,2}:\d{2}|\d{4}[年/-]/.test(lines[i])) lines.length = i
   }
   const kept = lines.filter(l => !/^\s*>/.test(l)).join('\n')
   const trimmed = kept.replace(/\n{3,}/g, '\n\n').trim()
