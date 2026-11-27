@@ -226,3 +226,34 @@ test('返事待ち (task version 12): the card shows the 見込み and ［見込
   // Someone who may not change it (not requester nor assignee) gets no ［見込みを変える］.
   assert.equal(card(task('waiting', { assignee: 'u-tanaka', requested_by: BOSS, wait_until: '2026-11-06' })).wait?.canChange, false)
 })
+
+// Task version 16: 「件名・目的を直す」 is offered in place to the requester and the assignee of an open task — never
+// to anyone else, never on a finished one, never as a separate item of 「…」.
+test('件名・目的を直す: the requester and the assignee of an open task only, in place (not in 「…」)', () => {
+  assert.deepEqual(card(task('todo', { assignee: ME, requested_by: BOSS })).canEdit, { title: true, purpose: true })
+  assert.deepEqual(card(task('awaiting_acceptance', { assignee: 'u-tanaka', requested_by: ME })).canEdit, { title: true, purpose: true })
+  assert.deepEqual(card(task('todo', { assignee: 'u-tanaka', requested_by: BOSS })).canEdit, { title: false, purpose: false })
+  assert.deepEqual(card(task('done', { assignee: ME, requested_by: BOSS })).canEdit, { title: false, purpose: false })
+  const actions = card(task('todo', { assignee: ME, requested_by: BOSS })).actions.map(a => a.action)
+  assert.ok(!actions.includes('retitle') && !actions.includes('set_purpose'))
+  // An older server's type (no such actions): nothing offered.
+  const older = { ...defs.get('task')!, actions: Object.fromEntries(Object.entries(defs.get('task')!.actions).filter(([n]) => n !== 'retitle' && n !== 'set_purpose')) }
+  assert.deepEqual(card(task('todo', { assignee: ME, requested_by: BOSS }), { def: older }).canEdit, { title: false, purpose: false })
+})
+
+test('経緯 says 「件名を直しました（「前」→「後」）」, by the member or by the AI at their request, and what an undo brought back', () => {
+  const entries = [
+    { version: 5, action: 'retitle', actorId: ME, actorKind: 'human', at: '2026-11-05T02:00:00.000Z', note: '', fromState: 'todo', toState: 'todo',
+      changes: [{ field: 'record.title', before: '見積書', after: 'A社 見積書' }] },
+    { version: 6, action: 'retitle', actorId: ME, actorKind: 'ai', askedBy: ME, at: '2026-11-05T03:00:00.000Z', note: '', fromState: 'todo', toState: 'todo',
+      changes: [{ field: 'record.title', before: 'A社 見積書', after: 'A社 見積書（150万円）' }] },
+    { version: 7, action: 'undo', actorId: ME, actorKind: 'human', at: '2026-11-05T04:00:00.000Z', note: '', fromState: 'todo', toState: 'todo', reversesVersion: 6,
+      changes: [{ field: 'record.title', before: 'A社 見積書（150万円）', after: 'A社 見積書' }] },
+  ] as unknown as LedgerEntry[]
+  const lines = card(task('todo', { assignee: ME, requested_by: BOSS }), { entries }).history.map(h => h.text)
+  assert.deepEqual(lines, [
+    '佐藤：取り消しました（件名：「A社 見積書（150万円）」→「A社 見積書」）',
+    'AI が（本人の頼みで）件名を直しました（「A社 見積書」→「A社 見積書（150万円）」）',
+    '佐藤：件名を直しました（「見積書」→「A社 見積書」）',
+  ])
+})

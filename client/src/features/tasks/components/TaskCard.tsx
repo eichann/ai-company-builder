@@ -23,7 +23,8 @@ import { unlinkTypedFile } from '../../../shared/ipc/drive-links'
 import { useLinkDrop } from '../../../shared/hooks/useLinkDrop'
 import { LinkDropNotice } from '../../../shared/ui/LinkDropNotice'
 import { useTaskCard, type CardLook } from '../hooks/useTaskCard'
-import { whenDoneLine } from '../cardActions'
+import { editDoneWords, whenDoneLine, type TextEditSteps } from '../cardActions'
+import { TaskTextEdit } from './TaskTextEdit'
 import { companyNow } from '../model'
 import { RecordSourcePanel } from './RecordSourcePanel'
 import { ShareToDepartment, type ShareFolder } from './ShareToDepartment'
@@ -124,9 +125,12 @@ export interface JobPartContext {
 }
 
 /** What the member's last press left on the card. */
+/** The entry 取り消す reverses — and, for a press of several entries (件名と目的), the ones before it, newest first after it. */
+interface UndoTarget { recordId: string; version: number; earlier?: number[] }
+
 type Notice =
   /** `undo`: the ledger entry 取り消す reverses (on this task, or on the other record holding a link). */
-  | { kind: 'done'; text: string; undo: { recordId: string; version: number } | null }
+  | { kind: 'done'; text: string; undo: UndoTarget | null }
   | { kind: 'conflict'; since: number }
   /** 「似ているやることがあります」 after 部署に出す / 〇〇の人に見せる (the server named one; tasks-ui.md "Similar items"). */
   | { kind: 'similar'; similar: SimilarItem }
@@ -180,10 +184,34 @@ export function TaskCard({ companyId, rootPath, recordId, knownVersion, renderPr
     if (steps[steps.length - 1]?.action === 'complete') onEnded?.(recordId)
     return null
   })
-  const undo = (target: { recordId: string; version: number }) => change(async () => {
-    const r = await undoTaskAction(companyId, target.recordId, target.version, target.version)
-    setNotice(r.success ? { kind: 'done', text: '取り消しました', undo: null } : null)
-    return r.success ? null : r.error
+  const undo = (target: UndoTarget) => change(async () => {
+    // The newest entry first, each at the version the previous undo moved to.
+    let expected = target.version
+    for (const version of [target.version, ...[...(target.earlier ?? [])].reverse()]) {
+      const r = await undoTaskAction(companyId, target.recordId, version, expected)
+      if (!r.success) { setNotice(null); return r.error }
+      expected += 1
+    }
+    setNotice({ kind: 'done', text: '取り消しました', undo: null })
+    return null
+  })
+  // 「件名・目的を直す」 (task version 16): one entry per value changed, 取り消す reverses them all.
+  const editText = (steps: TextEditSteps) => change(async () => {
+    let at = version
+    const made: number[] = []
+    const undoOf = () => (made.length > 0 ? { recordId, version: made[made.length - 1], earlier: made.slice(0, -1) } : null)
+    for (const step of steps) {
+      const r = await actOnTask(companyId, recordId, { ...step, expectedVersion: at })
+      if (!r.success) {
+        if (r.code === 'VERSION_CONFLICT' && made.length === 0) { setNotice({ kind: 'conflict', since: at }); return '' }
+        if (made.length > 0) setNotice({ kind: 'done', text: editDoneWords(steps.slice(0, made.length)), undo: undoOf() })
+        return r.error
+      }
+      at += 1
+      made.push(at)
+    }
+    setNotice({ kind: 'done', text: editDoneWords(steps), undo: undoOf() })
+    return null
   })
   // A link between records set or taken off (the 案件's ［変える］［外す］, a row's 「つながりを外す」), with 取り消す.
   const recordLink = (source: string, input: RecordLinkInput, remove: boolean, done: string) => change(async () => {
@@ -278,7 +306,7 @@ export function TaskCard({ companyId, rootPath, recordId, knownVersion, renderPr
     : notice?.kind === 'done'
       ? <DoneNotice text={notice.text} busy={busy} onUndo={notice.undo ? () => void undo(notice.undo!) : null} />
       : null
-  return <><CardBody card={card} top={top} jobPart={jobPart} meetingTitle={meetingTitle} team={team ?? card.teamMode} review={review} tagField={tagField} rootPath={rootPath} busy={busy} shareFolders={card.record.personal ? shareFolders : []} onShare={share} onConsult={onConsult} onNudge={onNudge} consultations={consultations} onDetachConsultation={onDetachConsultation} renderPrepared={renderPrepared} renderSource={renderSource} renderSections={renderSections} onRun={runSteps}
+  return <><CardBody card={card} top={top} onEditText={editText} jobPart={jobPart} meetingTitle={meetingTitle} team={team ?? card.teamMode} review={review} tagField={tagField} rootPath={rootPath} busy={busy} shareFolders={card.record.personal ? shareFolders : []} onShare={share} onConsult={onConsult} onNudge={onNudge} consultations={consultations} onDetachConsultation={onDetachConsultation} renderPrepared={renderPrepared} renderSource={renderSource} renderSections={renderSections} onRun={runSteps}
     linkDrop={linkDrop} notDownloadedFolderOf={notDownloadedFolderOf}
     onLinkFile={sharedFolder ? p => fileLink(p, false) : null} onUnlinkFile={p => fileLink(p, true)} personalHere={personalHere}
     typedFiles={{ localFiles: !sharedFolder, localHere, onLinkDrive: (chosen?: TaskDriveChoice[]) => linkDrive(chosen ? { chosen } : undefined), onLinkDriveText: linkDriveText, drive: { usable: drive.usable, note: drive.note, hint: drive.hint, picking: drive.picking, onStop: drive.stop }, onUnlink: unlinkTarget,
@@ -329,6 +357,8 @@ interface BodyProps {
   jobPart?: ReactNode
   /** The linked meeting's name beside the date-only title (display only). */
   meetingTitle?: string | null
+  /** 「件名・目的を直す」: what changed is sent; a refusal's words or null. */
+  onEditText: (steps: TextEditSteps) => Promise<string | null>
   team: boolean
   rootPath: string
   busy: boolean
@@ -387,7 +417,7 @@ interface BodyProps {
   review: ReactNode
 }
 
-function CardBody({ card, top, jobPart, meetingTitle, team, rootPath, busy, renderPrepared, renderSource, renderSections, onRun, onRetry, onReconcile, linkDrop, notDownloadedFolderOf, onLinkFile, onUnlinkFile, personalHere, typedFiles, onNewFile, companyId, bundleWord, onCreateBundle, bundlePlaces, onShowToBundle, onUnlinkRecord, onSetBundle, onRemoveBundle, shareFolders, onShare, onConsult, onNudge, consultations, onDetachConsultation, tagField, review }: BodyProps) {
+function CardBody({ card, top, onEditText, jobPart, meetingTitle, team, rootPath, busy, renderPrepared, renderSource, renderSections, onRun, onRetry, onReconcile, linkDrop, notDownloadedFolderOf, onLinkFile, onUnlinkFile, personalHere, typedFiles, onNewFile, companyId, bundleWord, onCreateBundle, bundlePlaces, onShowToBundle, onUnlinkRecord, onSetBundle, onRemoveBundle, shareFolders, onShare, onConsult, onNudge, consultations, onDetachConsultation, tagField, review }: BodyProps) {
   const { record } = card
   const now = useMemo(() => companyNow(Date.now()), [])
   const [runError, setRunError] = useState<string | null>(null)
@@ -509,7 +539,10 @@ function CardBody({ card, top, jobPart, meetingTitle, team, rootPath, busy, rend
       {card.bundle && (record.personal || record.membersOnly) && <ShowToBundle bundle={card.bundle} busy={busy} onShow={onShowToBundle} />}
       <DueAndTags card={card} now={now} busy={busy} tagField={tagField}
         onPostpone={postpone ? due => void onRun([{ action: 'set_due', args: { due } }], card.names.requester && !card.roles.requester ? `期限を延ばしました。頼んだ${card.names.requester}さんに知らせました` : '期限を延ばしました') : null} />
-      {card.purpose && <p className="whitespace-pre-wrap [overflow-wrap:anywhere] text-body text-gray-600 dark:text-zinc-300"><span className="mr-1.5 text-caption font-normal text-gray-500">目的</span>{card.purpose}</p>}
+      {/* 目的, and 「件名・目的を直す」 for the requester / the assignee (task version 16). Not keyed by version: a reload
+          (someone else's change, a press half done) keeps the draft and the refusal in the form. */}
+      <TaskTextEdit key={record.id} title={record.title} purpose={card.purpose} canEdit={card.canEdit} busy={busy}
+        accepts={card.roles.assignee && record.state === 'awaiting_acceptance'} onSave={onEditText} />
       <ShareToDepartment folders={shareFolders} busy={busy} onShare={onShare} />
       {/* もとの連絡: only for a task that came from one (no read, no 「読み込んでいます」 on every task). */}
       <RecordSourcePanel record={record}>{card.fromIncoming ? renderSource(record) : null}</RecordSourcePanel>

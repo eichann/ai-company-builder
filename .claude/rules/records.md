@@ -212,7 +212,7 @@ missing or not a boolean is its default —, `TYPE_FEATURE`, `FEATURE_TOOLS`, `F
   (`file` / `server` / `either`), `place_follows` ("Following the parent's 見える範囲" below).
   Any other key is an error — there is no place for an
   expression, computed field, cascade, timer or outside send. `args` name server fields of the
-  same kind (an action sets them; nothing is computed).
+  same kind (an action sets them; nothing is computed) — or `title`, the record's own title ("Task version 16").
 - Versions (0.18-3): `compareTypeDefinitions` — adding is free but a changed definition needs a
   higher `version`; removing or renaming a field / link / state / action / interface, or
   changing a field's kind / source / target, a link's target / cardinality, or `storage`, or
@@ -608,6 +608,65 @@ A decision's `materials`, `precedents` / `supersedes` and an action's attached v
   replaced; moved exactly once, never before, with the line; もう少し待つ; the mark; old waiting tasks
   untouched; `waitCameBack` cases) — mutation-checked; `server-clock.test.ts`, `ai-runs.test.ts`.
 
+### Task version 16: 件名・目的を直す (owner decision 2026-11-27)
+
+Nobody could correct a task's 件名 or 目的 after it was made — not a person, not the chat AI. Additive over version 15:
+two actions, one generic piece of definition syntax, no new route.
+
+- **The record's own title as an action argument** (generic, `RECORD_TITLE_ARG` / `setsRecordTitle` in
+  `shared/core/record-types.ts`): an action's `args: { title: text }` on a type with `storage: server` names the
+  record's own title (`records.title`) — every record has one; a type's `title` field can only be `source: file`, so
+  there is no other meaning. The parser refuses it on `file` / `either` types and in any other kind. The engine
+  (`act.ts`) takes it through **the one title rule** `normalizeRecordTitle` (NFC, trimmed, 1–`RECORD_TITLE_MAX` (200)
+  characters, one line: no control or line-separator characters; else 400 `BAD_VALUE`, nothing written) — the same
+  rule the generic create now applies (`create.ts`: it also trims, and refuses a title with a line break, which it
+  stored before) and the service writer's create too, after folding a title taken from outside onto one line
+  (`titleOnOneLine`: each run of control / line-separator characters → one space, so a line break in an event name or
+  a mail subject never refuses what a service records). **Exceptions, kept as they were**: the external writer (a
+  plugin's import: NFC, cut at 200, the type's label when empty) and the inbox's `retitle` of its own placeholder — both
+  outside text a service must never drop. A title stored before the rule stays as it is until someone renames it.
+  It writes the row's title **inside the write's transaction, after the version's compare-and-set**
+  (`writeTitle`: the row read again there), and keeps the change in the ledger as `record.title`
+  (`RECORD_TITLE_CHANGE`, `shared/core/record-ledger.ts`: a dotted name no field can have, like `links.*` / `place.*`)
+  before / after. It never lands in the server fields (`isPlaceOrLinkChange`); a replay shows it. **Its texts are
+  content** (the content store keeps them; `record_ledger` holds references: `isContentChange` in
+  `adapters/sqlite/record-contents.ts`), so erasing a record erases them too. Version + 1 (`VERSION_CONFLICT`).
+  **Undo** is the generic one: `record.title` compared with the row's title now (`CHANGED_SINCE` otherwise) and written
+  back exactly as it was stored (also a title from before the rule: it was the record's title) — never an erased one
+  (「消去済み（…）」 before or after → 409 `TITLE_ERASED`). **The same title or 目的 again is no change**: a correction
+  (`isCorrection`) whose changes are empty writes nothing — no entry (`entry: null`), no new version, not one of the AI
+  turn's 20. Why an action argument and not a route of its own: `who`, `from`, `ai_on_request`, `via`, notes,
+  the ledger, undo, the AI's tool and the card's offer all exist for actions — one place, and a definition still says
+  only what the engine does (an argument is copied into what it names).
+- **Task**: `retitle` (件名を直す, `args: { title: text }`) and `set_purpose` (目的を直す, `args: { purpose: long_text }`; an
+  empty one clears it), each from every open state (todo, in_progress, review, waiting, preparing, declined,
+  awaiting_acceptance, proposed), `who: [requested_by, assignee]` (their delegate during an absence too, as for any
+  person field), `note: optional`, nobody told. **Two actions, not one**: a released app shows each in 「…」 as one
+  field it can fill (an action's args are all required), so it keeps working. Acting as the assignee on a request still
+  in 引き受け待ち accepts it, as every action of the assignee does ("Acceptance"); the card's form says so before the
+  press (「保存すると、このやることを引き受けたことになります。」) — chosen over a narrower `from` for the assignee,
+  which the definition format cannot say per person.
+- **Their AI only in a turn the member started** (`ai_on_request: [requested_by, assignee]`, "The AI at the member's
+  request": the member themself in that field, a token with `memberTurn`, never one bound to a run — so never 「AI の番」,
+  a plugin step's or a job's run; `via` is the default, so never a plugin's screen either). **No member setting**:
+  `aiAskedNeedsSetting` lets an action go without 「AI に完了を頼めるようにする」 only when it is **a correction of words**
+  (`isCorrection`, read from what the definition already says — no new key: no `to`, no record links, at least one
+  argument and every one text (the title, `text`, `long_text`), empty `notify` and `attach`, no `hand_to`, no
+  `ok_from`, `approval: none`, not a decision); every other `ai_on_request` action — a company's or a plugin's too —
+  still needs it. Correcting ends nothing, is recorded with `askedBy` and undone with ［取り消す］. It counts toward the
+  turn's cap like the others (`AI_ASKED_REFUSALS.limit` now says 「頼まれて変えられるのは」).
+- **No leaks**: an owner-only, a members-only (not listed) and another company's task answer exactly as a missing one
+  (the reader comes first); nothing logs a title.
+- **The app**: the card's 「件名・目的を直す」 (`tasks-ui.md` "The card"); 経緯 「件名を直しました（「前」→「後」）」
+  (`historyLines`); the AI's `task__retitle` / `task__set_purpose` (`client/electron/records/tools.ts`, the title as one
+  line ≤ 200).
+- Migration: `TASK_VERSION` 16 (the "Task version 9" mechanism). **No server rollback below it** without removing the stored task v16 definition first: an older engine reads `args: { title }` as a field and would store the title in the server fields (as plain text), leaving the record's title unchanged. Tests: `server/tests/integration/task-retitle.test.ts`
+  (rename / undo / CHANGED_SINCE; who; the title rule and the create's; stale version, a finished task; owner-only,
+  members-only, another company = missing; no title in rows or logs; the AI without the setting, never a plain or
+  run-bound token or another's task; 目的), `record-types.test.ts` (the argument's rules, the core actions additive,
+  `normalizeRecordTitle`, which `ai_on_request` actions need the setting), `client/tests/task-card.test.ts`,
+  `ai-asked.test.ts`, `src/features/tasks/cardActions.test.ts`, `tests/ui/task-card.spec.ts` — mutation-checked.
+
 ### Task version 14: a task follows its まとまり by declaration (owner decision 2026-11-23, step 2b)
 
 Additive over version 13: one key, `place_follows: bundle` ("Following the parent's 見える範囲"). What a
@@ -798,8 +857,8 @@ Additive over version 8 (who / from / notify / labels widened, one field, two ac
   entry carries `accepted_by` (`ACCEPTANCE.finishes`, `services/record-engine/acceptance.ts` with
   the action's `fromState`). The requester completing it does not.
 - **Migration** (`migrateTaskVersion` in `db/index.ts` → `adapters/sqlite/records.ts`
-  `migrateCompanyTaskVersion`, `TASK_VERSION` = the core task version, 15 since "The AI at the
-  member's request"; `REPLY_REQUEST_VERSION` 6 the same way for 返事のお願い): at startup, every company whose map has the task type stores that core version when
+  `migrateCompanyTaskVersion`, `TASK_VERSION` = the core task version, 16 since "Task version 16" (15: "The AI at the
+  member's request"); `REPLY_REQUEST_VERSION` 6 the same way for 返事のお願い): at startup, every company whose map has the task type stores that core version when
   nothing as new is stored, then every task's index row says it (`type_version`). No value changes, so no ledger entry. Idempotent.
 - Test: `server/tests/unit/record-task-v9.test.ts` (from 未着手 with no start made up, requester
   told and reopening; never from 準備中; the AI never; 確かめてから hands over from 未着手 and the
@@ -2118,7 +2177,7 @@ to press each one. Now the member may let their own AI do exactly that, **in a c
 
 - **Data, not code** (`ai_on_request`, `ActionDef.aiOnRequest`, `shared/core/record-types.ts`): an action key listing
   person fields **already in `who`** (parser error otherwise; never with `who: [system]`). Core: task v15 `complete`,
-  reply_request v6 `close` (終わりにする) and `replied_elsewhere` (もう返した) — each `ai_on_request: [assignee]`. `who`
+  reply_request v6 `close` (終わりにする) and `replied_elsewhere` (もう返した) — each `ai_on_request: [assignee]`; task v16 `retitle` / `set_purpose` with `[requested_by, assignee]` ("Task version 16"). `who`
   is unchanged (no `ai`), so a server or app that does not know the key keeps refusing the AI, `aiTurnStates` and
   「AI の番」 are unchanged, and a released app's tools still say 「本人が画面で」. Additive: `compareTypeDefinitions`
   finds nothing breaking; `TASK_VERSION` 15 and `REPLY_REQUEST_VERSION` 6 move the records at startup (the "Task
@@ -2134,7 +2193,8 @@ to press each one. Now the member may let their own AI do exactly that, **in a c
   設定 → 自分の設定 when the server answers it (`MyWorkSwitches.aiCompletes`, optional). Engine dep `aiAskedOn`
   (composition: `workSwitches.isOn(…, 'aiCompletes')`; absent = off). Off → 403 `AI_ASK_OFF` with the fixed sentence
   `AI_ASKED_REFUSALS.off` (「…AI からは片づけられません（完了にする・終わりにする・もう返した）。設定の「自分の設定」で
-  オンにすると…」), nothing written; the AI relays it.
+  オンにすると…」), nothing written; the AI relays it. **Not for a correction of words** (`aiAskedNeedsSetting` / `isCorrection`: only text
+  arguments, nothing else said of the action, "Task version 16"); task version 16's 件名を直す / 目的を直す need the turn alone ("Task version 16").
 - **Only a turn the member started** (how the server knows): `POST /me/record-tokens { …, memberTurn: true }` — the app
   says the turn started from the member's own words. The server keeps the mark (`record_ai_tokens.member_turn`) **only
   for an `act` token not bound to a run** (`record-ai-tokens.ts` `issue`; `authenticate` and `aiActor` drop it for a run
@@ -2167,12 +2227,12 @@ to press each one. Now the member may let their own AI do exactly that, **in a c
   sent by it.
 - **Outside text in a member's turn** (owner decision asked, safe side recorded): in such a conversation the AI also reads
   outside text (mail, minutes, the web), and the server cannot tell an instruction planted there from the member's
-  request. What limits it: only the member's own records (assignee), only these three actions, at most 20 a turn, each on
+  request. What limits it: only the member's own records (assignee; for 件名・目的 also the requester), only these actions (three that end, two that correct), at most 20 a turn, each on
   the card with ［取り消す］ and in 経緯 with `askedBy` and the conversation; a turn the app started (`appSent`) never counts.
-- **The chat**: in a marked turn the three tools say 「メンバーがはっきり頼んだときだけ」 and the turn gets
+- **The chat**: in a marked turn those tools say 「メンバーがはっきり頼んだときだけ」 and the turn gets
   `AI_ASKED_INSTRUCTIONS`; each success (the answer's `entry.askedBy`) joins **one card per turn** (`data-ai-asked`, the
-  same id pushed again with every item; stored as `aiAsked`, latest copy wins): 「AI が頼まれて片づけました（n件）」, one line
-  per record with ［取り消す］ (`AiAskedCard.tsx` → `tasks:undo` with the member's session at the entry's version; undone
+  same id pushed again with every item; stored as `aiAsked`, latest copy wins): 「AI が頼まれてしたこと（n件）」, one line
+  per record with ［取り消す］ (`AiAskedCard.tsx` → `tasks:undo` with the member's session at the entry's version — for every line, on `VERSION_CONFLICT` once more at the record's version now (`undoAiAsked`, task version 16: the AI changed the same record again in the turn, or anyone changed it since; the server still refuses with `CHANGED_SINCE` when that later change touched the same values); undone
   already or changed since — `AI_ASKED_UNDO_STALE_CODES` — it says so with the record's state now, read from the server).
 - Tests: `server/tests/integration/ai-asked-close.test.ts` (setting off by default and the member's alone, the fixed
   refusal, nothing written; the member's own task completed and recorded with who asked and the conversation, undone by

@@ -8,7 +8,7 @@ import { aiAskedStateNow, undoAiAsked, type AiAskedCardPort } from '../api'
 type ItemState = { kind: 'idle' } | { kind: 'busy' } | { kind: 'undone' } | { kind: 'stale'; text: string } | { kind: 'error'; text: string }
 
 /**
- * 「AI が頼まれて片づけました」 (client/shared/ai-asked.ts): what the AI completed or ended at the member's request in
+ * 「AI が頼まれてしたこと」 (client/shared/ai-asked.ts): what the AI completed or ended at the member's request in
  * one turn, drawn by the app — never from the AI's text — one line per record with ［取り消す］, the member's own undo.
  */
 export const AiAskedCardView = memo(function AiAskedCardView({ card, port }: { card: AiAskedCard; port?: AiAskedCardPort }) {

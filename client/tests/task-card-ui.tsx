@@ -54,6 +54,8 @@ const BUNDLE_TITLE = MANUAL ? 'A社 研修導入' : 'A社 問い合わせ対応�
 // `?theme=dark` for dark mode (the primary-action spec reads the main action in both themes).
 if (params.get('theme') === 'dark') document.documentElement.classList.add('dark')
 const done = params.get('task') === 'done'
+// `?task=legacy`: a request still 引き受け待ち whose title was stored on two lines before the title rule (task version 16).
+const LEGACY = params.get('task') === 'legacy'
 // `?setwatch=proceed|ask|gate|none`: a やること a set watch made (its id is the occurrence's), with the job's part as AppShell
 // composes it (jobs.md "The set watch (schema 5)" "The app (PR6)"); `none`: a job's やること with no judgement on the member's view.
 const SETWATCH = params.get('setwatch')
@@ -95,7 +97,7 @@ const typedLinks = [
 const rec = (id: string, type: string, title: string, state: string | null, fields: RecordSummary['fields'] = {}, extra: Partial<RecordSummary> = {}): RecordSummary =>
   ({ id, type, typeVersion: 1, title, summary: '', path: null, state, fields, version: 3, updatedAt: '2026-11-05T06:00:00.000Z', ...extra })
 const task = OWN ? rec(TASK_ID, 'task', '見積を直す', 'todo', { assignee: ME, requested_by: ME, when_done: 'notify', due: '2026-11-23T15:00', tags: '["営業"]' }, { personal: true })
-  : rec(TASK_ID, 'task', SETWATCH ? '11月24日の会議のたたき台を確かめる' : 'A社 見積書を 150万円 で作り直す', done ? 'done' : 'todo', {
+  : rec(TASK_ID, 'task', SETWATCH ? '11月24日の会議のたたき台を確かめる' : LEGACY ? 'A社 見積書\n（古い2行の件名）' : 'A社 見積書を 150万円 で作り直す', done ? 'done' : LEGACY ? 'awaiting_acceptance' : 'todo', {
     // 終わったら：確かめてから (task version 9): the assignee completes only by naming whose OK.
     // A set watch's やること is the member's own (no requester), so they complete it themselves.
     assignee: ME, ...(SETWATCH ? {} : { requested_by: 'u-abe', when_done: 'check' }), due: MANUAL ? '2026-11-24T17:00' : '2026-11-07T17:00', tags: '["営業","見積"]',
@@ -233,7 +235,7 @@ installElectronAPI({
     if (params.get('refuse') === 'complete' && input.action === 'complete') return { success: false, offline: true, code: null, error: 'サーバーに接続できませんでした。' }
     // A tag the server refuses: the card shows its words.
     if ((input.args?.tags as string[] | undefined)?.includes('禁止')) return { success: false, offline: false, code: 'BAD_VALUE', error: 'このタグは付けられません。' }
-    show('acted', `${input.action}@${input.expectedVersion}${input.note ? `:${input.note}` : ''}${input.ok ? `:ok=${input.ok.by ?? ''}/${input.ok.note ?? ''}` : ''}${input.args?.due ? `:due=${String(input.args.due)}` : ''}${input.args && 'waiting_on' in input.args ? `:on=${String(input.args.waiting_on)}` : ''}${input.args && 'wait_until' in input.args ? `:until=${String(input.args.wait_until)}` : ''}${input.args?.tags ? `:tags=${(input.args.tags as string[]).join('|')}` : ''}${['assignee', 'reviewer', 'when_done'].filter(k => input.args?.[k]).map(k => `:${k}=${String(input.args![k])}`).join('')}`)
+    show('acted', `${input.action}@${input.expectedVersion}${input.note ? `:${input.note}` : ''}${input.ok ? `:ok=${input.ok.by ?? ''}/${input.ok.note ?? ''}` : ''}${input.args?.due ? `:due=${String(input.args.due)}` : ''}${input.args && 'waiting_on' in input.args ? `:on=${String(input.args.waiting_on)}` : ''}${input.args && 'wait_until' in input.args ? `:until=${String(input.args.wait_until)}` : ''}${input.args?.tags ? `:tags=${(input.args.tags as string[]).join('|')}` : ''}${['assignee', 'reviewer', 'when_done', 'title'].filter(k => input.args?.[k]).map(k => `:${k}=${String(input.args![k])}`).join('')}${input.args && 'purpose' in input.args ? `:purpose=${String(input.args.purpose)}` : ''}`)
     return { success: true, recordId }
   },
   undoTaskAction: async (_c, recordId, version, expected) => { show('acted', `undo ${version}@${expected}`); return { success: true, recordId } },

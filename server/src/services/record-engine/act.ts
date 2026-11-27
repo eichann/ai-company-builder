@@ -1,9 +1,9 @@
 /** Running an action of a record's type: the engine's five duties (records.md "The state engine"). */
 import { FULL_ACCESS_ROLES, findPrivateScope } from '../../../shared/core/permissions'
 import { isSameOrAncestorPath } from '../../../shared/core/paths'
-import { actionWho, AI_ASKED_PER_TURN, AI_ASKED_REFUSALS, aiOnRequestField, INTERFACES, isSystemOnly, linkPersonWho, linkWhoName, OK_FIELDS, viaOf, type ActionDef, type TypeDefinition } from '../../../shared/core/record-types'
+import { actionWho, AI_ASKED_PER_TURN, AI_ASKED_REFUSALS, aiAskedNeedsSetting, aiOnRequestField, INTERFACES, isCorrection, isSystemOnly, linkPersonWho, linkWhoName, normalizeRecordTitle, OK_FIELDS, RECORD_TITLE_ARG, setsRecordTitle, viaOf, type ActionDef, type TypeDefinition } from '../../../shared/core/record-types'
 import { ROLE_WHO_PREFIX } from '../../../shared/core/plugin-roles'
-import type { LedgerAttachment, LedgerChange, LedgerDecision, LedgerEntry, LedgerValue } from '../../../shared/core/record-ledger'
+import { RECORD_TITLE_CHANGE, type LedgerAttachment, type LedgerChange, type LedgerDecision, type LedgerEntry, type LedgerValue } from '../../../shared/core/record-ledger'
 import { driveLinkTarget, fileLinkPath, RECORD_ID_RE } from '../../../shared/core/records'
 import { DRIVE_VERSION_NOT_FIXED, LOCAL_FILE_NOT_SHARED } from '../../../shared/core/company-folder'
 import type { RecordSummary } from '../../../shared/types/records'
@@ -121,6 +121,16 @@ function japanNow(ms: number): string {
   return `${p.year}-${p.month}-${p.day}T${p.hour}:${p.minute}`
 }
 
+/**
+ * The record's own title written inside an action's or an undo's transaction, after its compare-and-set on the
+ * version won: the row is read again there, so nothing read before the awaits is written back (task version 16).
+ */
+export function writeTitle(records: RecordRepository, recordId: string, title: string, at: string): void {
+  const fresh = records.byIds([recordId])[0]
+  if (!fresh || fresh.path !== null) throw new Error('a server record to retitle')
+  records.upsert({ ...fresh, title, updatedAt: at })
+}
+
 /** The per-turn cap reached inside the write's transaction: thrown to roll the write back (records.md "The AI at the member's request"). */
 class AskedLimitReached extends Error {}
 
@@ -201,7 +211,7 @@ export function acting(ctx: EngineContext) {
     },
 
     /** Run an action of the record's type. */
-    async act(member: Member, actor: ActorInput, recordId: string, actionName: string, body: unknown): Promise<Outcome<{ record: RecordSummary; entry: LedgerEntry }>> {
+    async act(member: Member, actor: ActorInput, recordId: string, actionName: string, body: unknown): Promise<Outcome<{ record: RecordSummary; entry: LedgerEntry | null }>> {
       const opened = open(member)
       if (!opened) return refuse('not-found', RECORDS_DISABLED.error, { code: RECORDS_DISABLED.code })
       const { records, reader } = opened
@@ -239,10 +249,12 @@ export function acting(ctx: EngineContext) {
       const withOk = !byWho && actor.kind === 'human' && (action.okFrom ?? []).some(w => current.fields[w] === member.userId)
       // …or, for the member's own AI, at their request (`ai_on_request`; records.md "The AI at the member's request"):
       // the record's field (never a delegate's) names the member and qualifies in `who` now, the token is a turn the
-      // member started (never a run's), and their own setting is on. The cap is counted in the write's transaction.
+      // member started (never a run's), and — for an action that ends the record (`aiAskedNeedsSetting`) — their own
+      // setting is on. The cap is counted in the write's transaction.
       const askedField = !byWho && actor.kind === 'ai' ? aiOnRequestField(action, current.fields, member.userId) : null
       const askedTurn = askedField && actor.askedTurn && !actor.runId ? actor.askedTurn : null
-      if (askedTurn && deps.aiAskedOn?.(member.companyId, member.userId) !== true) {
+      const askedNeedsSetting = askedTurn !== null && aiAskedNeedsSetting(action)
+      if (askedNeedsSetting && deps.aiAskedOn?.(member.companyId, member.userId) !== true) {
         return refuse('forbidden', AI_ASKED_REFUSALS.off.error, { code: AI_ASKED_REFUSALS.off.code })
       }
       if (!byWho && !withOk && !askedTurn) {
@@ -268,6 +280,10 @@ export function acting(ctx: EngineContext) {
       }
 
       const isMember = (id: string) => deps.isMember(member.companyId, id)
+      // 「件名を直す」 (task version 16): the record's own title, by the one rule a create follows; never a field.
+      const titleArg = setsRecordTitle(def, action)
+      if (titleArg && row.path !== null) return bad('この記録の件名はファイルに書かれています。ファイルを直してください', 'FILE_RECORD')
+      let nextTitle: string | null = null
       const rawArgs = (b.args ?? {}) as Record<string, unknown>
       if (typeof rawArgs !== 'object' || rawArgs === null || Array.isArray(rawArgs)) return bad('args must be an object')
       for (const k of Object.keys(rawArgs)) if (!(k in action.args)) return bad(`Unknown argument ${k}`)
@@ -287,6 +303,12 @@ export function acting(ctx: EngineContext) {
           continue
         }
         if (rawArgs[name] === undefined || rawArgs[name] === null) return bad(`${name} is required`, 'ARG_REQUIRED')
+        if (titleArg && name === RECORD_TITLE_ARG) {
+          const t = normalizeRecordTitle(rawArgs[name])
+          if ('error' in t) return bad(t.error, 'BAD_VALUE')
+          nextTitle = t.title
+          continue
+        }
         const v = checkValue(kind, rawArgs[name], def.fields[name]?.options, isMember)
         if (v !== null && typeof v === 'object') return bad(`${name}: ${v.error}`, 'BAD_VALUE')
         args[name] = v
@@ -451,6 +473,8 @@ export function acting(ctx: EngineContext) {
       }
       const changes: LedgerChange[] = []
       if (nextState !== current.state) changes.push({ field: 'state', before: current.state, after: nextState })
+      const retitled = nextTitle !== null && nextTitle !== row.title
+      if (retitled) changes.push({ field: RECORD_TITLE_CHANGE, before: row.title, after: nextTitle })
       for (const [field, after] of Object.entries(nextFields)) {
         const before = current.fields[field] ?? null
         if (before !== after) changes.push({ field, before, after })
@@ -479,6 +503,8 @@ export function acting(ctx: EngineContext) {
       // Duty 3: state and ledger together, only if nobody changed the record since `expectedVersion`.
       const expected = b.expectedVersion as number
       if (expected !== current.version) return conflict('ほかの人が先に変えました。最新の状態を見てからもう一度お試しください', 'VERSION_CONFLICT', { version: current.version })
+      // A correction that changes nothing (the same 件名, the same 目的): no entry, no new version, not one of the turn's.
+      if (isCorrection(action) && changes.length === 0) return ok({ record: summaryOf(records, row.id), entry: null })
       let written: boolean | ReturnType<typeof refuse>
       try {
         written = transactions.run(() => {
@@ -486,11 +512,12 @@ export function acting(ctx: EngineContext) {
           const fenced = runFenceRefusal(deps, member, actor)
           if (fenced) return fenced
           // The member's setting again, after those awaits: turned off meanwhile, nothing is written.
-          if (askedTurn && deps.aiAskedOn?.(member.companyId, member.userId) !== true) return refuse('forbidden', AI_ASKED_REFUSALS.off.error, { code: AI_ASKED_REFUSALS.off.code })
+          if (askedNeedsSetting && deps.aiAskedOn?.(member.companyId, member.userId) !== true) return refuse('forbidden', AI_ASKED_REFUSALS.off.error, { code: AI_ASKED_REFUSALS.off.code })
           if (!records.writeState({ recordId: row.id, state: nextState, fields: JSON.stringify(nextFields), version: entry.version, updatedAt: at }, expected)) return false
           // One of the turn's `AI_ASKED_PER_TURN`, taken with the write (a write refused gives it back).
           if (askedTurn && !records.takeAskedAction(member.userId, askedTurn.tokenId, AI_ASKED_PER_TURN)) throw new AskedLimitReached()
           if (nextLinks) records.replaceLinks(row.id, nextLinks)
+          if (retitled) writeTitle(records, row.id, nextTitle as string, at)
           records.appendLedger(entry)
           return true
         })

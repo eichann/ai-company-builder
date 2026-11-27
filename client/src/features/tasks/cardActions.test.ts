@@ -4,7 +4,7 @@ import { coreTypeDefinitions } from '../../../../shared/core/core-types'
 import type { LedgerEntry } from '../../../../shared/core/record-ledger'
 import type { RecordDetail, RecordSummary } from '../../../../shared/types/records'
 import { taskCardOf } from '../../../shared/task-card'
-import { actionHint, actionText, doneWords, leavingWords, placeActions, SELF_ASSIGN, WHEN_DONE, whenDoneLine, whenDoneSteps } from './cardActions'
+import { actionHint, actionText, doneWords, editDoneWords, editSteps, leavingWords, placeActions, SELF_ASSIGN, WHEN_DONE, whenDoneLine, whenDoneSteps } from './cardActions'
 
 const defs = new Map(coreTypeDefinitions().map(d => [d.name, d]))
 const ME = 'u-sato'
@@ -160,4 +160,17 @@ test('nobody holds it: 「自分が担当する」 heads the 「…」; with an 
   assert.equal(actionText(p.more[0], unassigned), '自分が担当する')
   assert.equal(unassigned.self.id, ME)
   assert.ok(!placeActions(card(task('todo', { assignee: 'u-tanaka', requested_by: ME })), false).more.some(a => a.action === SELF_ASSIGN))
+})
+
+// Task version 16: one entry per value that really changed (an untouched 目的 never writes an empty entry, a title
+// differing only in spaces is not a rename), and only what the member may change is sent.
+test('件名・目的を直す sends only what changed, trimmed, and only what the member may', () => {
+  const now = { title: '見積書', purpose: '提案に使う' }
+  const both = { title: true, purpose: true }
+  assert.deepEqual(editSteps(now, { title: ' 見積書 ', purpose: '提案に使う' }, both), [])
+  assert.deepEqual(editSteps(now, { title: 'A社 見積書', purpose: '提案に使う' }, both), [{ action: 'retitle', args: { title: 'A社 見積書' } }])
+  assert.deepEqual(editSteps(now, { title: '見積書', purpose: '' }, both), [{ action: 'set_purpose', args: { purpose: '' } }])
+  assert.deepEqual(editSteps({ title: '見積書', purpose: null }, { title: '見積書', purpose: '' }, both), [])
+  assert.deepEqual(editSteps(now, { title: 'A社', purpose: '別' }, { title: false, purpose: true }), [{ action: 'set_purpose', args: { purpose: '別' } }])
+  assert.equal(editDoneWords(editSteps(now, { title: 'A社', purpose: '別' }, both)), '件名と目的を直しました')
 })

@@ -373,13 +373,23 @@ export function retryAiTurn(companyId: string, recordId: string, writes: AiTurnW
 }
 
 /**
- * 「AI が頼まれて片づけました」 (ai-asked.ts): ［取り消す］ is the member's own generic undo of the AI's entry, with their
+ * 「AI が頼まれてしたこと」 (ai-asked.ts): ［取り消す］ is the member's own generic undo of the AI's entry, with their
  * session in main (`tasks:undo`) — the version it made, expected unchanged since. The AI has no path to it.
  */
 export type AiAskedCardPort = ElectronPort<'undoTaskAction' | 'getRecordCard'>
 
-export function undoAiAsked(companyId: string, recordId: string, version: number, port: AiAskedCardPort = window.electronAPI) {
-  return port.undoTaskAction(companyId, recordId, version, version)
+export async function undoAiAsked(companyId: string, recordId: string, version: number, port: AiAskedCardPort = window.electronAPI) {
+  const first = await port.undoTaskAction(companyId, recordId, version, version)
+  if (first.success || first.code !== 'VERSION_CONFLICT') return first
+  // A later entry of the same record (the AI fixed its 件名 and then its 目的, task version 16): undo this one at the
+  // version the record has now — the server still refuses when that later entry changed the same values (CHANGED_SINCE).
+  try {
+    const now = await port.getRecordCard(companyId, recordId)
+    const at = now.success ? now.card.version : undefined
+    return typeof at === 'number' && at > version ? await port.undoTaskAction(companyId, recordId, version, at) : first
+  } catch {
+    return first
+  }
 }
 
 /** The record's state now, as the server answers it (null when it cannot be read): shown after a refused ［取り消す］. */

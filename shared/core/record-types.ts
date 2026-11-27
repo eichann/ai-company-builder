@@ -331,15 +331,77 @@ export function aiOnRequestField(action: Pick<ActionDef, 'who' | 'whoUnless' | '
   return action.aiOnRequest.find(f => who.includes(f) && typeof fields[f] === 'string' && fields[f] === userId) ?? null
 }
 
+/**
+ * The record's own title as an action argument (task version 16 「件名を直す」, owner decision 2026-11-27): an
+ * action's `args: { title: text }` on a type stored on the server names the record's 件名 — what the title of
+ * every record is — never a server field (a type's `title` field can only be `source: file`, the heading of a
+ * record file). The engine writes it to the record and keeps the change in the ledger as `RECORD_TITLE_CHANGE`
+ * (record-ledger.ts).
+ */
+export const RECORD_TITLE_ARG = 'title'
+
+/** Whether `action` sets the record's own title (`RECORD_TITLE_ARG`) on a record of `def`. Pure. */
+export function setsRecordTitle(def: Pick<TypeDefinition, 'storage'>, action: Pick<ActionDef, 'args'>): boolean {
+  return Object.prototype.hasOwnProperty.call(action.args, RECORD_TITLE_ARG) && def.storage === 'server'
+}
+
+/** The longest title a record may have (a create and 「件名を直す」 alike). */
+export const RECORD_TITLE_MAX = 200
+
+/**
+ * A record's title as given by a person or an AI — one rule for a create and 「件名を直す」: a string, NFC,
+ * trimmed, 1–`RECORD_TITLE_MAX` characters, one line (no control or line-separator characters). The
+ * normalized title, or the problem (a fixed sentence: never the value). Pure.
+ */
+export function normalizeRecordTitle(value: unknown): { title: string } | { error: string } {
+  if (typeof value !== 'string') return { error: `title: 1–${RECORD_TITLE_MAX} characters` }
+  const title = value.normalize('NFC').trim()
+  if (title === '' || title.length > RECORD_TITLE_MAX) return { error: `title: 1–${RECORD_TITLE_MAX} characters` }
+  if (TAG_FORBIDDEN_RE.test(title)) return { error: 'title: one line' }
+  return { title }
+}
+
+/**
+ * A title the server's own services take from outside (a calendar event's name, a mail subject) folded onto one line —
+ * every run of control or line-separator characters becomes one space — before `normalizeRecordTitle`, so a line
+ * break never refuses what a service records. A person's and an AI's title are refused instead. Pure.
+ */
+export function titleOnOneLine(value: string): string {
+  return value.replace(new RegExp(`${TAG_FORBIDDEN_RE.source}+`, 'g'), ' ')
+}
+
 /** How many actions the AI may run at the member's request in one conversation turn (one record token). */
 export const AI_ASKED_PER_TURN = 20
 
+/**
+ * **A correction of words** (task version 16: 件名を直す, 目的を直す): an action that only rewrites text — no state
+ * change, no record links, at least one argument and every one of them text (the record's title, `text` or
+ * `long_text` fields), and nothing else said of it: nobody told (`notify`), no hand-over (`hand_to`), no attached
+ * files, no OK statement, no approval, not a decision. Read from what the definition already says, so a company's
+ * or a plugin's type gets no new key to learn and anything more than words is never one. Pure.
+ */
+export function isCorrection(action: Pick<ActionDef, 'to' | 'args' | 'links' | 'notify' | 'handTo' | 'attach' | 'okFrom' | 'approval' | 'decision'>): boolean {
+  const kinds = Object.values(action.args)
+  return action.to === null && (action.links?.length ?? 0) === 0 && kinds.length > 0 && kinds.every(k => k === 'text' || k === 'long_text')
+    && action.notify.length === 0 && action.handTo === null && action.attach.length === 0 && (action.okFrom?.length ?? 0) === 0
+    && action.approval === 'none' && !action.decision
+}
+
+/**
+ * Whether the member's own setting 「AI に完了を頼めるようにする」 governs an `ai_on_request` action: every one but a
+ * correction of words (`isCorrection`), which needs the turn the member started and nothing else — it ends nothing,
+ * is recorded and undone (owner decision 2026-11-27). Pure.
+ */
+export function aiAskedNeedsSetting(action: Parameters<typeof isCorrection>[0]): boolean {
+  return !isCorrection(action)
+}
+
 /** The refusals of the AI at the member's request: fixed sentences the AI relays as they are. */
 export const AI_ASKED_REFUSALS = {
-  /** The member's own setting is off. */
+  /** The member's own setting is off (asked only for an action that ends the record: `aiAskedNeedsSetting`). */
   off: { code: 'AI_ASK_OFF', error: '「AI に完了を頼めるようにする」がオフのため、AI からは片づけられません（完了にする・終わりにする・もう返した）。設定の「自分の設定」でオンにすると、AI に頼めるようになります（それまではご自身で押してください）。' },
   /** More than `AI_ASKED_PER_TURN` in one turn. */
-  limit: { code: 'AI_ASK_LIMIT', error: `AI が一度のやりとりで完了にできるのは ${AI_ASKED_PER_TURN} 件までです。続きは、もう一度頼んでください。` },
+  limit: { code: 'AI_ASK_LIMIT', error: `AI が一度のやりとりで頼まれて変えられるのは ${AI_ASKED_PER_TURN} 件までです。続きは、もう一度頼んでください。` },
 } as const
 
 /** The server fields an action with `ok_from` writes (whose OK it was / an OK from outside ACB). */
@@ -712,6 +774,14 @@ export function validateTypeDefinition(name: string, raw: YamlValue): TypeParseR
       else {
         for (const [arg, kind] of Object.entries(rawArgs)) {
           const field = fields[arg]
+          // The record's own title (件名), on a type stored on the server: `title: text` (task version 16).
+          if (arg === RECORD_TITLE_ARG) {
+            if (kind !== 'text') { err(`操作「${aname}」の引数「${arg}」（記録の件名）の種類は text です`); continue }
+            if (storage !== 'server') { err(`操作「${aname}」の引数「${arg}」（記録の件名）は storage: server の型だけに書けます（ファイルの記録の件名は、ファイルの見出しです）`); continue }
+            if (field && field.kind !== 'text') { err(`操作「${aname}」の引数「${arg}」（記録の件名）を決めるなら、欄「${arg}」の種類は text です`); continue }
+            args[arg] = 'text'
+            continue
+          }
           if (!field || field.source !== 'server') { err(`操作「${aname}」の引数「${arg}」は、同じ名前の欄（source: server）を決めるものです`); continue }
           if (kind !== field.kind) { err(`操作「${aname}」の引数「${arg}」の種類は欄と同じ ${field.kind} です`); continue }
           // Money is written only through an approval request (plugins.md "Money"): never by an action, so never through `ok_from`.

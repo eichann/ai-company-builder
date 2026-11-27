@@ -267,6 +267,18 @@ not awaited: `records.md` "Whose turn it was"). Order (owner: 成果物は相談
    cannot be made 「あなただけ」 again, and `tasks:share` → `POST …/share { folder, expectedVersion }`
    (`records.md` "Owner-only records"; main sends only a `fileLinkPath`-checked company folder; the
    server checks the owner and the folder). A task already shared offers nothing.
+   **「件名・目的を直す」** (task version 16, owner decision 2026-11-27; `TaskTextEdit.tsx`): under the 目的 line, for the
+   requester or the assignee of an open task (`card.canEdit` from the type's `retitle` / `set_purpose` and the member's
+   place; the two actions are not in 「…」, `NOT_ON_CARD`). Pressed, the title (one line, ≤ 200, line breaks turned into
+   spaces; checked with the core's `normalizeRecordTitle` only when the title is sent, so 目的 alone saves under a title
+   stored before the rule) and 目的 are edited in place; the assignee of a request still 引き受け待ち reads 「保存すると、
+   このやることを引き受けたことになります。」 in the form (`accepts`) — ［保存］ (Enter in
+   the title, never while an IME converts) / ［やめる］ (Esc). Only what changed is sent (`editSteps`: `retitle`, then
+   `set_purpose`, each at the version the previous one moved to; nothing changed sends nothing); the card says
+   「件名と目的を直しました」 with one ［取り消す］ that undoes every entry of the press, newest first. A refusal stays in the
+   form; someone else's change first is the usual conflict notice. An older server's type offers nothing. 経緯 says
+   「件名を直しました（「前」→「後」）」 (`historyLines`). Tests: `client/tests/task-card.test.ts`,
+   `src/features/tasks/cardActions.test.ts`, `tests/ui/task-card.spec.ts` 「件名・目的を直す…」.
 2. **AI が用意したもの** (a business plugin step's やること is also shown at the top of its record's —
    the deal's — card, with its files: `StepDeliverables`, `plugin-steps.md` "What the step made";
    one an automatic run made also gets 「続きをする」 above the card, `ContinueStepButton`):

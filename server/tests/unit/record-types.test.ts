@@ -31,11 +31,14 @@
  *   or dropping one is not breaking (a higher version, like any change) and it
  *   is absent from the definition when not written;
  * - `ai_on_request` names only person fields already in `who`; the core's task 15 / reply_request 6 add it
- *   without a breaking change, and `who` stays without `ai`.
+ *   without a breaking change, and `who` stays without `ai`;
+ * - an action's `title: text` names the record's own title (task 16): only on a type stored on the server, only
+ *   kind text (a type's `title` field can only be `source: file`); the core's 件名を直す / 目的を直す are additive;
+ *   only a correction of words (`isCorrection`) goes without the member's setting.
  */
 import { describe, expect, it } from 'vitest'
 import { parseYamlLite } from '../../../shared/core/yaml-lite'
-import { canonicalTypeJson, compareTypeDefinitions, normalizeTagsValue, parseTagsValue, parseTypeFile, TAG_MAX_LENGTH, TAGS_MAX_COUNT, type TypeDefinition } from '../../../shared/core/record-types'
+import { aiAskedNeedsSetting, canonicalTypeJson, compareTypeDefinitions, normalizeRecordTitle, normalizeTagsValue, setsRecordTitle, parseTagsValue, parseTypeFile, TAG_MAX_LENGTH, TAGS_MAX_COUNT, type TypeDefinition } from '../../../shared/core/record-types'
 import { newRecordId, parseRecordFile } from '../../../shared/core/records'
 import { companyExtensionConflicts } from '../../../shared/core/plugin-type-upgrade'
 import { CORE_TYPE_FILES, REPLY_REQUEST_VERSION, TASK_VERSION } from '../../../shared/core/core-types'
@@ -468,6 +471,61 @@ describe('how a state is shown (state_labels, owner decision 2026-11-24)', () =>
   })
 })
 
+/** The core task's text without version 16's two actions (件名を直す, 目的を直す). */
+const withoutV16 = (text: string) => text.replace(/^ {2}(retitle|set_purpose): .*\n/gm, '')
+
+describe('the record\'s own title as an action argument (task 16: 件名を直す)', () => {
+  const type = (storage: string, titleField = '  title: { label: 件名, kind: text, source: file }\n') => parseTypeFile('memo', `---
+label: メモ
+version: 1
+storage: ${storage}
+fields:
+${titleField}  note: { label: メモ, kind: text, source: server }
+states: [open]
+initial: open
+actions:
+  retitle: { label: 件名を直す, who: [anyone], args: { title: text } }
+---
+`)
+
+  it('only on a type stored on the server, only kind text; the record\'s title, not a field', () => {
+    const ok = type('server')
+    expect(ok.ok).toBe(true)
+    if (ok.ok) expect(setsRecordTitle(ok.definition, ok.definition.actions.retitle)).toBe(true)
+    // No title field at all is fine too (every record has a title).
+    expect(type('server', '').ok).toBe(true)
+    for (const storage of ['file', 'either']) expect(type(storage).ok).toBe(false)
+    expect(parseTypeFile('task', CORE_TYPE_FILES.task.replace('args: { title: text }', 'args: { title: long_text }')).ok).toBe(false)
+    // A title field of another kind cannot be set as the title.
+    expect(type('server', '  title: { label: 件名, kind: number, source: file }\n').ok).toBe(false)
+  })
+
+  it('the core\'s 件名を直す / 目的を直す: the requester and the assignee, their AI only when asked, from every open state; additive over 15', () => {
+    const task = parseTypeFile('task', CORE_TYPE_FILES.task)
+    if (!task.ok) throw new Error(task.errors.join('\n'))
+    const d = task.definition
+    for (const name of ['retitle', 'set_purpose']) {
+      expect(d.actions[name]).toMatchObject({ who: ['requested_by', 'assignee'], aiOnRequest: ['requested_by', 'assignee'], to: null })
+      expect(d.actions[name].who).not.toContain('ai')
+      expect(d.actions[name].from).toEqual(d.states.filter(s => !d.final.includes(s)))
+      expect(d.actions[name].via).toBeUndefined()
+    }
+    expect(setsRecordTitle(d, d.actions.retitle)).toBe(true)
+    expect(d.actions.set_purpose.args).toEqual({ purpose: 'long_text' })
+    const v15 = parseTypeFile('task', withoutV16(CORE_TYPE_FILES.task).replace(/^version: \d+$/m, 'version: 15'))
+    if (!v15.ok) throw new Error(v15.errors.join('\n'))
+    expect(compareTypeDefinitions(v15.definition, d)).toMatchObject({ changed: true, breaking: [], versionProblem: null })
+    expect(TASK_VERSION).toBe(16)
+  })
+
+  it('one title rule (a create and 件名を直す): NFC, trimmed, 1–200 characters, one line', () => {
+    expect(normalizeRecordTitle('  見積  ')).toEqual({ title: '見積' })
+    expect(normalizeRecordTitle('ガ'.normalize('NFD'))).toEqual({ title: 'ガ' })
+    expect(normalizeRecordTitle('あ'.repeat(200))).toEqual({ title: 'あ'.repeat(200) })
+    for (const bad of ['', '   ', 'あ'.repeat(201), 'a\nb', 'a\tb', 'a b', 'a\u0085b', null, 3]) expect(normalizeRecordTitle(bad)).toHaveProperty('error')
+  })
+})
+
 describe('ai_on_request (task 15, reply_request 6: the AI at the member\'s request)', () => {
   const core = (name: string) => {
     const text = CORE_TYPE_FILES[name]
@@ -478,7 +536,7 @@ describe('ai_on_request (task 15, reply_request 6: the AI at the member\'s reque
   /** The version before: the same text without the key, one version lower. */
   const before = (name: string, version: number) => {
     const { text } = core(name)
-    const parsed = parseTypeFile(name, text.replaceAll(', ai_on_request: [assignee]', '').replace(/^version: \d+$/m, `version: ${version}`))
+    const parsed = parseTypeFile(name, withoutV16(text).replaceAll(', ai_on_request: [assignee]', '').replace(/^version: \d+$/m, `version: ${version}`))
     if (!parsed.ok) throw new Error(parsed.errors.join('\n'))
     return parsed.definition
   }
@@ -486,23 +544,38 @@ describe('ai_on_request (task 15, reply_request 6: the AI at the member\'s reque
   it('the core declares it on exactly the assignee\'s 完了 / 終わりにする / もう返した, and the versions stay compatible (additive, a higher version)', () => {
     const task = core('task').def
     const rr = core('reply_request').def
-    expect(Object.entries(task.actions).filter(([, a]) => a.aiOnRequest).map(([n, a]) => [n, a.aiOnRequest])).toEqual([['complete', ['assignee']]])
+    expect(Object.entries(task.actions).filter(([, a]) => a.aiOnRequest).map(([n, a]) => [n, a.aiOnRequest])).toEqual([
+      ['complete', ['assignee']], ['retitle', ['requested_by', 'assignee']], ['set_purpose', ['requested_by', 'assignee']],
+    ])
+    // Only the closing ones need the member's own setting (task 16: correcting ends nothing).
+    expect(Object.entries(task.actions).filter(([, a]) => a.aiOnRequest && aiAskedNeedsSetting(a)).map(([n]) => n)).toEqual(['complete'])
+    expect(Object.entries(rr.actions).filter(([, a]) => a.aiOnRequest && aiAskedNeedsSetting(a)).map(([n]) => n).sort()).toEqual(['close', 'replied_elsewhere'])
+    // Only a correction of words goes without it — anything a company's or a plugin's type may declare else still needs it.
+    const words = { to: null, args: { title: 'text' as const, purpose: 'long_text' as const }, notify: [], handTo: null, attach: [], approval: 'none' as const, decision: false }
+    expect(aiAskedNeedsSetting(words)).toBe(false)
+    for (const more of [{ to: 'declined' }, { args: {} }, { args: { assignee: 'person' as const } }, { args: { due: 'date' as const } },
+      { args: { purpose: 'long_text' as const, due: 'date' as const } }, { links: ['bundle'] }, { notify: ['requested_by'] }, { handTo: 'assignee' },
+      { attach: ['files'] }, { okFrom: ['assignee'] }, { approval: 'undoable' as const }, { approval: 'prior' as const }, { decision: true }]) {
+      expect(aiAskedNeedsSetting({ ...words, ...more }), JSON.stringify(more)).toBe(true)
+    }
     expect(Object.entries(rr.actions).filter(([, a]) => a.aiOnRequest).map(([n, a]) => [n, a.aiOnRequest]).sort()).toEqual([['close', ['assignee']], ['replied_elsewhere', ['assignee']]])
     // `who` is unchanged, so an app or server that does not know the key still refuses the AI.
     expect(task.actions.complete.who).not.toContain('ai')
     expect(rr.actions.close.who).toEqual(['assignee'])
-    for (const [name, version] of [['task', 14], ['reply_request', 5]] as const) {
+    for (const [name, version] of [['task', 13], ['reply_request', 5]] as const) {
       expect(compareTypeDefinitions(before(name, version), core(name).def)).toMatchObject({ changed: true, breaking: [], versionProblem: null })
       // Dropping it again only narrows: not breaking either (a higher version, like any change).
-      expect(compareTypeDefinitions(core(name).def, { ...before(name, version), version: version + 2 }).breaking).toEqual([])
+      const keyDropped = parseTypeFile(name, core(name).text.replace(/, ai_on_request: \[[a-z_, ]+\]/g, '').replace(/^version: \d+$/m, `version: ${core(name).def.version + 1}`))
+      if (!keyDropped.ok) throw new Error(keyDropped.errors.join('\n'))
+      expect(compareTypeDefinitions(core(name).def, keyDropped.definition).breaking).toEqual([])
     }
     expect(TASK_VERSION).toBe(task.version)
     expect(REPLY_REQUEST_VERSION).toBe(rr.version)
   })
 
   it('absent when not written; only person fields already in `who`', () => {
-    expect(Object.values(before('task', 14).actions).some(a => 'aiOnRequest' in a)).toBe(false)
-    const withKey = (ask: string) => core('task').text.replace('ai_on_request: [assignee]', `ai_on_request: [${ask}]`)
+    expect(Object.values(before('task', 13).actions).some(a => 'aiOnRequest' in a)).toBe(false)
+    const withKey = (ask: string) => core('task').text.replace('ai_on_request: [assignee] }', `ai_on_request: [${ask}] }`)
     expect(parseTypeFile('task', withKey('assignee')).ok).toBe(true)
     for (const bad of ['next_actor', 'ai', 'admin', 'nobody']) expect(parseTypeFile('task', withKey(bad)).ok).toBe(false)
   })

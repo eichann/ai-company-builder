@@ -1,7 +1,7 @@
 /** Creating a record that lives on the server (records.md "The state engine"). */
 import { SERVICE_OWNED_TYPES } from '../../../shared/core/core-types'
 import { canReadPrivateScope, findPrivateScope, FULL_ACCESS_ROLES } from '../../../shared/core/permissions'
-import { noTurnStates } from '../../../shared/core/record-types'
+import { normalizeRecordTitle, noTurnStates } from '../../../shared/core/record-types'
 import type { LedgerChange, LedgerEntry, LedgerValue } from '../../../shared/core/record-ledger'
 import { fileLinkPath, newRecordId, RECORD_ID_RE } from '../../../shared/core/records'
 import { isSameOrAncestorPath, normalizeRepoPath, pathKey } from '../../../shared/core/paths'
@@ -195,7 +195,10 @@ export function creating(ctx: EngineContext) {
       const off = featureOffRefusal(deps.featureOff, member.companyId, def.name)
       if (off) return off
       if (def.storage === 'file') return bad('Records of this type are files: create the file', 'FILE_RECORD')
-      if (typeof b.title !== 'string' || b.title.trim() === '' || b.title.length > 200) return bad('title: 1–200 characters')
+      // One rule for a title, here and in 「件名を直す」 (task version 16): NFC, trimmed, 1–200 characters, one line.
+      const titled = normalizeRecordTitle(b.title)
+      if ('error' in titled) return bad(titled.error)
+      b.title = titled.title
       if (b.summary !== undefined && (typeof b.summary !== 'string' || b.summary.length > 300)) return bad('summary: up to 300 characters')
       // The item key of a meeting's output (minutes.md "Outputs made once"): one line, with a meeting link.
       if (b.key !== undefined && b.key !== null && (typeof b.key !== 'string' || b.key.trim() === '' || b.key.length > MEETING_OUTPUT_KEY_MAX || /[\r\n]/.test(b.key))) {

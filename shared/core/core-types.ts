@@ -33,6 +33,12 @@
  * Version 15 (owner decision 2026-11-26): `complete` has `ai_on_request: [assignee]` — see
  * reply_request v6 below.
  *
+ * Version 16 (owner decision 2026-11-27 「件名・目的を直す」, additive): `retitle` (件名を直す: the record's own
+ * title, `args: { title: text }` — `RECORD_TITLE_ARG`) and `set_purpose` (目的を直す: `purpose`), each from every
+ * open state, by the requester or the assignee (their delegate too), and by their own AI only in a turn the
+ * member started (`ai_on_request: [requested_by, assignee]` — no member setting: it ends nothing, is recorded and
+ * undone with the generic undo; `aiAskedNeedsSetting`). Nobody else, never a run or a plugin step.
+ *
  * Version 6 (core interfaces, owner decision 2026-11-01 night): the `customer`
  * link is gone — a task reaches its customer through its `bundle` — and a
  * task with no bundle may name its `counterpart` (相手) instead.
@@ -171,7 +177,7 @@ import { parseTypeFile, type TypeDefinition } from './record-types'
 export const CORE_TYPE_FILES: Record<string, string> = {
   task: `---
 label: タスク
-version: 15
+version: 16
 implements: [request]
 storage: server
 fields:
@@ -232,6 +238,8 @@ actions:
   dismiss:        { label: 要らない, from: [proposed, todo, awaiting_acceptance], to: dismissed, who: [requested_by, dept_manager, admin, link:meeting], note: optional }
   propose_again:  { label: 案に戻す, from: [dismissed], to: proposed, who: [requested_by, dept_manager, admin, link:meeting], note: optional }
   keep_apart:     { label: 別のもの, from: [proposed], who: [requested_by, dept_manager, admin, link:meeting], args: { apart_by: person }, note: optional }
+  retitle:        { label: 件名を直す, from: [todo, in_progress, review, waiting, preparing, declined, awaiting_acceptance, proposed], who: [requested_by, assignee], args: { title: text }, note: optional, ai_on_request: [requested_by, assignee] }
+  set_purpose:    { label: 目的を直す, from: [todo, in_progress, review, waiting, preparing, declined, awaiting_acceptance, proposed], who: [requested_by, assignee], args: { purpose: long_text }, note: optional, ai_on_request: [requested_by, assignee] }
 ---
 # タスク
 
@@ -673,7 +681,7 @@ export const ACCEPTANCE: Readonly<Record<string, {
  * `migrateCompanyTaskVersion`): the core definition of that version is stored first, then each task's
  * index row says it (no value changes, so no ledger entry).
  */
-export const TASK_VERSION = 15
+export const TASK_VERSION = 16
 
 /**
  * The reply_request version every 返事のお願い is moved to at startup (the `TASK_VERSION` mechanism:
