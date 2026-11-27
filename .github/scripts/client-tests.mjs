@@ -85,5 +85,14 @@ if (process.argv.includes('--list')) {
   console.log(files.join('\n'))
   process.exit(0)
 }
-const run = spawnSync('npx', ['tsx', '--test', ...files], { cwd: clientDir, stdio: 'inherit' })
-process.exit(run.status ?? 1)
+// The tests that launch the real Electron app (`*-electron.test.ts`) run one file at a time, after the
+// others: run side by side, their windows take the system's focus from each other, and the keyboard and
+// focus checks (doc-frame-electron, doc-player-electron) failed in turns on the shared macOS runners once
+// the player test (#881) added its windows (2026-11-27). The rest keep node's parallel run.
+const windowed = files.filter(f => f.endsWith('-electron.test.ts'))
+const rest = files.filter(f => !windowed.includes(f))
+const runs = [
+  rest.length > 0 ? spawnSync('npx', ['tsx', '--test', ...rest], { cwd: clientDir, stdio: 'inherit' }) : null,
+  windowed.length > 0 ? spawnSync('npx', ['tsx', '--test', '--test-concurrency=1', ...windowed], { cwd: clientDir, stdio: 'inherit' }) : null,
+]
+process.exit(runs.every(r => r === null || r.status === 0) ? 0 : 1)

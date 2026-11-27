@@ -227,7 +227,8 @@ const d = document.createElement('iframe'); d.src = ${JSON.stringify(drive(SCRIP
   // Paused at 0.5 s (it was sought to 0.8 s above): where it is when it is hidden.
   await pa.executeJavaScript('new Promise(r => { const v = document.querySelector("video"); v.onseeked = () => r(0); v.currentTime = 0.5; setTimeout(r, 3000) })', true).catch(() => {})
   views.place(viewId, win.webContents.id, null)
-  await wait(800)
+  // Waits until the player has paused itself (no <video> left), up to 10 s on a busy runner.
+  for (let i = 0; i < 100 && (await pa.executeJavaScript('!!document.querySelector("video")', true).catch(() => false)); i++) await wait(100)
   result.whileHidden = await pa.executeJavaScript('({ video: !!document.querySelector("video"), text: document.body.innerText })', true).catch(() => 'threw')
   views.place(viewId, win.webContents.id, area)
   await settle(() => visibleBounds().length >= 2)
