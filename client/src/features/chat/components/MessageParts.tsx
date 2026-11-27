@@ -1,4 +1,4 @@
-import { memo, useMemo, useState } from 'react'
+import { memo, useContext, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { UIMessage } from 'ai'
 import { Brain, CaretUp, CircleNotch, Info, LinkSimple } from '@phosphor-icons/react'
@@ -10,6 +10,7 @@ import { CHOICE_PART_TYPE, readChoiceRecord } from '../../../../shared/choice-pr
 import { STEER_PART_TYPE, readSteerRecord } from '../../../../shared/steer'
 import { REVIEW_PART_TYPE, readReviewRecord } from '../../../../shared/review-request'
 import { ReviewRequestCard } from './ReviewRequestCard'
+import { ReviewActionsContext } from '../review-context'
 import { PLUGIN_OPERATION_PART_TYPE, readPluginOperationCard } from '../../../../shared/plugin-operations'
 import { MAIL_DRAFT_PART_TYPE, readMailDraftCard } from '../../../../shared/outbound-mail'
 import { FILE_LINKED_PART_TYPE, fileLinkedLine, readFileLinkedPart } from '../../../../shared/consultation-task'
@@ -107,6 +108,8 @@ const TextPartView = memo(function TextPartView({ text, markdown, showCursor }: 
 
 export function AssistantMessageParts({ parts, isStreaming, markdown }: { parts: UIMessage['parts']; isStreaming: boolean; markdown: boolean }) {
   const plan = useMemo(() => planParts(parts), [parts])
+  // A 「ブラウザ操作」 stopped card's answer buttons send the member's own message through the conversation's send.
+  const { say } = useContext(ReviewActionsContext)
   const lastIndex = parts.length - 1
   // Searched once the reply has ended (not per streamed chunk): a "no key" answer → a 「自分の鍵」 card.
   const keyNeeds = useMemo(() => (isStreaming ? [] : brokerKeyNeedsOf(parts)), [parts, isStreaming])
@@ -162,7 +165,7 @@ export function AssistantMessageParts({ parts, isStreaming, markdown }: { parts:
         }
         if (part.type === BROWSER_INSPECTION_PART_TYPE) {
           const ref = readBrowserInspectionRef((part as { data?: unknown }).data)
-          return ref ? <BrowserInspectionCard key={item.key} companyId={ref.companyId} planId={ref.planId} /> : null
+          return ref ? <BrowserInspectionCard key={item.key} companyId={ref.companyId} planId={ref.planId} say={say} /> : null
         }
         if (part.type === MINUTES_BUNDLE_CHOICE_PART_TYPE) {
           const card = readMinutesBundleChoiceCard((part as { data?: unknown }).data)

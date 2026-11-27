@@ -8,6 +8,7 @@ import type { BrowserInspectionReads } from '../api'
 import { useBrowserInspection } from '../hooks/useBrowserInspection'
 import { BrowserWriteCard } from './BrowserWriteCard'
 import { OperatorTrail } from './OperatorTrail'
+import { StopAsk } from './StopAsk'
 
 // Everything ✓ is green; a ✗ or something unread asks the member to look at the site, so amber (design-system.md
 // 「止まっている」の色: something to do).
@@ -49,14 +50,20 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
  * checks' ✓ / ✗ / 「読み取れませんでした」 and the site's notes. Only the member sees these values (the AI gets the marks
  * only); main keeps them in memory, so after a restart the card says the result is gone. Nothing here can act on the site.
  */
-export const BrowserInspectionCard = memo(function BrowserInspectionCard({ companyId, planId, reads }: { companyId: string; planId: string; reads?: BrowserInspectionReads }) {
+export const BrowserInspectionCard = memo(function BrowserInspectionCard({ companyId, planId, reads, say }: {
+  companyId: string; planId: string; reads?: BrowserInspectionReads
+  /** The conversation's send of the member's own message (a stopped card's answer buttons); absent: no such button. */
+  say?: (text: string) => void
+}) {
   // A write card (`wp_…`, generalization PR 5c) shares the chat's reference; it draws what was read with this body.
   // A write run's card (`bf_…`, step ⑤b) is a write card too.
-  if (planId.startsWith('wp_') || planId.startsWith('bf_')) return <BrowserWriteCard companyId={companyId} cardId={planId} readCard={v => <InspectionBody view={v} />} />
-  return <InspectionCardOf companyId={companyId} planId={planId} reads={reads} />
+  if (planId.startsWith('wp_') || planId.startsWith('bf_')) {
+    return <BrowserWriteCard companyId={companyId} cardId={planId} say={say} readCard={(v, o) => <InspectionBody view={v} headline={o.headline} />} />
+  }
+  return <InspectionCardOf companyId={companyId} planId={planId} reads={reads} say={say} />
 })
 
-function InspectionCardOf({ companyId, planId, reads }: { companyId: string; planId: string; reads?: BrowserInspectionReads }) {
+function InspectionCardOf({ companyId, planId, reads, say }: { companyId: string; planId: string; reads?: BrowserInspectionReads; say?: (text: string) => void }) {
   const { view, message } = useBrowserInspection(companyId, planId, reads)
   if (!view) {
     return (
@@ -65,7 +72,7 @@ function InspectionCardOf({ companyId, planId, reads }: { companyId: string; pla
       </section>
     )
   }
-  return <InspectionBody view={view} />
+  return <InspectionBody view={view} companyId={companyId} say={say} />
 }
 
 /**
@@ -83,8 +90,15 @@ function BeforeAfter({ row }: { row: Extract<BrowserCardRow, { before: BrowserCa
   )
 }
 
-export function InspectionBody({ view }: { view: BrowserInspectionView }) {
+/**
+ * A card's body. A write task's stopped preview puts what it asks first (`view.next`: the operator's question with its two
+ * answers, or the window), then its fixed reason once; inside a write card that already says its result, `headline`
+ * false leaves the reason to that card (said once).
+ */
+export function InspectionBody({ view, companyId, say, headline = true }: { view: BrowserInspectionView; companyId?: string; say?: (text: string) => void; headline?: boolean }) {
   const { card } = view
+  const next = view.next
+  const checkedBy = card.sections.some(s => s.rows.some(r => 'before' in r && r.by !== undefined))
   return (
     <section role="group" aria-label={card.title} data-inspection-state={card.state} className={`my-2 rounded-card border p-3 ${STATE_BOX[FRAME[card.state]]}`}>
       <div className="flex flex-wrap items-center gap-2">
@@ -92,7 +106,9 @@ export function InspectionBody({ view }: { view: BrowserInspectionView }) {
         <span className="text-title text-text">{card.title}</span>
         <span className="text-small text-text-muted">{view.siteLabel}</span>
       </div>
-      <p role="status" className="mt-1 text-body text-text">{card.headline}</p>
+      {next?.kind === 'decide' && companyId && <StopAsk next={next} companyId={companyId} host={view.siteLabel} say={say} />}
+      {headline && <p role="status" className="mt-1 text-body text-text">{card.headline}</p>}
+      {next?.kind === 'login' && companyId && <StopAsk next={next} companyId={companyId} host={view.siteLabel} />}
 
       {card.checks.length > 0 && <div className="mt-2">
         <p className="text-small font-strong text-text-muted">{W.checks}</p>
@@ -133,10 +149,17 @@ export function InspectionBody({ view }: { view: BrowserInspectionView }) {
           </div>
         ))}
         {view.readAt && <dl className="mt-1"><Row label={W.readAt}>{time(view.readAt)}</Row></dl>}
+        {/* Who checked each row is its own mark; what the three marks mean is said once, folded. */}
+        {checkedBy && (
+          <details data-checked-by-note className="mt-1 text-small text-text-muted">
+            <summary className="cursor-pointer select-none">{W.checkedBy.open}</summary>
+            <p className="mt-1">{W.checkedBy.note}</p>
+          </details>
+        )}
       </div>}
 
       {card.notes.map((n, i) => <Callout key={i} tone="warning" className="mt-2">{n}</Callout>)}
-      {view.trail && <OperatorTrail trail={view.trail} />}
+      {view.trail && <OperatorTrail trail={view.trail} asked={next?.kind === 'decide' ? next.question : null} />}
     </section>
   )
 }

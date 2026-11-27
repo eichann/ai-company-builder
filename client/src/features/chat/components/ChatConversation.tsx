@@ -408,6 +408,7 @@ export const ChatPanelChat = memo(function ChatPanelChat({ tabId, isShown, depar
     pendingId: pendingReviewId,
     confirm: () => { void handleSend(REVIEW_CONFIRM_MESSAGE) },
     requestChanges: () => chatInputApiRef.current?.focus(),
+    say: (text: string) => { void handleSend(text) },
   }), [pendingReviewId, handleSend, chatInputApiRef])
 
   // chat.insertText: the text goes into the composer. chat.newConsultation (e.g. a skill's 実行):

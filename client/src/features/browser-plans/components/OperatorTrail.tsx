@@ -7,25 +7,29 @@ import { BROWSER_ANSWER_PROBLEM_WORDS, BROWSER_TRAIL_WORDS as W, type BrowserOpe
  * 「係の AI のメモを見る」, labelled as the operator's memo — not a checked fact —, shown as plain text only (React text,
  * never markup).
  */
-export function OperatorTrail({ trail }: { trail: BrowserOperatorTrail }) {
+export function OperatorTrail({ trail, asked = null }: {
+  trail: BrowserOperatorTrail
+  /** The question the card already puts first: a stop whose words are exactly it is not said again here. */
+  asked?: string | null
+}) {
   if (trail.length === 0) return null
   return (
     <details data-operator-trail className="mt-2 text-small text-text-muted">
       <summary className="cursor-pointer select-none">{W.open}</summary>
       <div className="mt-1 rounded-control border border-border bg-surface-raised p-2">
         <p className="font-strong text-text-muted">{W.heading}</p>
-        {trail.map((run, i) => <TrailRun key={i} run={run} titled={trail.length > 1} />)}
+        {trail.map((run, i) => <TrailRun key={i} run={run} titled={trail.length > 1} asked={asked} />)}
       </div>
     </details>
   )
 }
 
-function TrailRun({ run, titled }: { run: BrowserTrailRun; titled: boolean }) {
+function TrailRun({ run, titled, asked }: { run: BrowserTrailRun; titled: boolean; asked: string | null }) {
   const stopReason = run.end?.kind === 'stop' ? run.end.reason : null
   return (
     <div className="mt-2" data-trail-phase={run.phase}>
       {titled && <p className="font-strong text-text">{W.phase[run.phase]}</p>}
-      {run.end?.kind === 'stop' && (
+      {run.end?.kind === 'stop' && !(asked !== null && stopReason === asked) && (
         <p className="mt-1 text-text" data-trail-stop>
           {W.stopReason}：{stopReason ?? W.noReason}
         </p>

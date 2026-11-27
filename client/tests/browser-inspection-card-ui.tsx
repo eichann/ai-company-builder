@@ -16,6 +16,9 @@ import { BROWSER_INSPECTION_CARD_WORDS, BROWSER_INSPECTION_PART_TYPE, type Brows
 import type { BrowserWriteView } from '../shared/browser-line-writes'
 import type { BrowserCard, BrowserCardValue } from '../../shared/core/browser-card'
 import { installElectronAPI } from './ui/fixtures/electron-api'
+import { ReviewActionsContext, type ReviewActions } from '../src/features/chat/review-context'
+import { workPreviewStoppedCard, workResultCard } from '../shared/browser-frame-writes'
+import type { BrowserOperatorTrail, BrowserStopNext } from '../shared/browser-operator-trail'
 
 const params = new URLSearchParams(location.search)
 if (params.get('theme') === 'dark') document.documentElement.classList.add('dark')
@@ -84,25 +87,65 @@ const frameView = (): BrowserWriteView => ({
   contentHash: frameStep === 'ready' ? HASH : null, message: null, result: null, ...(frameStep === 'ready' ? { cancellable: true } : {}),
 })
 
+// `?stop=decide` | `login` | `blocked`: a write task's preview that stopped (a `bo_` card), asking the operator's question,
+// the window, or nothing; `?stop=work`: a write run (`bf_`) that stopped for a decision after ［任せる］ (agent-browser.md
+// "The stopped card asks one thing"). The answers go to the conversation's send (`window.__said`); every call that could
+// write or open anything is recorded (`window.__calls`).
+const STOP = params.get('stop')
+const STOP_ID = STOP === 'work' ? `bf_${'5d'.repeat(16)}` : `bo_${'5d'.repeat(16)}`
+const QUESTION = '同じ名前のタグ「見本セミナー参加」がもうあります。そのタグを使ってよいですか？'
+const stopWhy = STOP === 'login' ? 'need-login' : STOP === 'blocked' ? 'blocked' : 'need-person'
+const stopNext: BrowserStopNext | undefined = STOP === 'login' ? { kind: 'login' } : STOP === 'decide' || STOP === 'work' ? { kind: 'decide', question: QUESTION } : undefined
+const stopTrail: BrowserOperatorTrail = [{
+  phase: STOP === 'work' ? 'work' : 'preview', steps: [{ action: 'click', page: '/tags', label: 'タグを作る', reason: 'タグの一覧を開くため' }], more: 0,
+  end: { kind: 'stop', reason: STOP === 'blocked' ? '保存ボタンが押せないため' : QUESTION }, notes: null,
+}]
+const stoppedPreview: BrowserInspectionView = {
+  card: workPreviewStoppedCard({ kind: 'stopped', why: stopWhy }), readAt: new Date().toISOString(), siteLabel: 'shop.example.test', trail: stopTrail,
+  ...(stopNext ? { next: stopNext } : {}),
+}
+const stoppedWork = (): BrowserWriteView => {
+  const card = workResultCard({ end: { kind: 'stopped', why: 'need-person' }, summary: null, writes: [], afterReads: [], checks: [], comparedName: null })
+  return {
+    title: 'ブラウザ操作：AI が書く作業', siteLabel: 'shop.example.test', phase: 'finished', values: [], sentences: ['見本セミナーの申し込みに付けるタグを作ります'],
+    card, readAt: new Date().toISOString(), contentHash: null, message: null,
+    result: { outcome: 'stopped', headline: card.headline, done: [], notDone: [], unknown: [], byHand: [], confirm: null }, trail: stopTrail, next: { kind: 'decide', question: QUESTION },
+  }
+}
+const calls: string[] = []
+const said: string[] = []
+Object.assign(window, { __calls: calls, __said: said })
+
 installElectronAPI({
   getBrowserWriteCard: async () => {
+    if (STOP === 'work') return { ok: true, view: stoppedWork() }
     const v = frameView()
     if (frameStep === 'running') frameStep = 'finished'
     return { ok: true, view: v }
   },
-  runBrowserWrite: async (_c, _id, hash) => { if (hash === HASH) frameStep = 'running'; return { ok: true, view: frameView() } },
-  cancelBrowserWrite: async () => { frameStep = 'cancelled'; return { ok: true, view: frameView() } },
-  getBrowserInspection: async () => (state === 'gone' ? { ok: false, message: BROWSER_INSPECTION_CARD_WORDS.gone }
+  runBrowserWrite: async (_c, _id, hash) => { calls.push('runBrowserWrite'); if (hash === HASH) frameStep = 'running'; return { ok: true, view: frameView() } },
+  cancelBrowserWrite: async () => { calls.push('cancelBrowserWrite'); frameStep = 'cancelled'; return { ok: true, view: frameView() } },
+  confirmBrowserWrite: async () => { calls.push('confirmBrowserWrite'); return { ok: false, message: 'x' } },
+  confirmBrowserWriteValue: async () => { calls.push('confirmBrowserWriteValue'); return { ok: false, message: 'x' } },
+  runBrowserPlan: async () => { calls.push('runBrowserPlan'); return { ok: false, message: 'x' } as never },
+  cancelBrowserPlan: async () => { calls.push('cancelBrowserPlan'); return { ok: false, message: 'x' } as never },
+  openBrowserSite: async (_c, host) => { calls.push(`openBrowserSite ${host}`); return { ok: true } as never },
+  getBrowserInspection: async () => (STOP ? { ok: true, view: stoppedPreview } : state === 'gone' ? { ok: false, message: BROWSER_INSPECTION_CARD_WORDS.gone }
     : state === 'other-window' ? { ok: false, message: BROWSER_INSPECTION_CARD_WORDS.notMainWindow } : { ok: true, view }),
 })
 
+const actions: ReviewActions = { confirm: () => {}, requestChanges: () => {}, say: (text: string) => { said.push(text) } }
+
 function Preview() {
-  const ref: BrowserInspectionRef = { id: PLAN, companyId: 'co-preview', conversationId: 'conv-1', planId: PLAN, at: new Date().toISOString() }
-  const parts = [{ type: 'text', text: '流入経路を点検しました。結果はカードを見てください。' }, { type: BROWSER_INSPECTION_PART_TYPE, id: `browser-inspection-${PLAN}`, data: ref }] as UIMessage['parts']
+  const id = STOP ? STOP_ID : PLAN
+  const ref: BrowserInspectionRef = { id, companyId: 'co-preview', conversationId: 'conv-1', planId: id, at: new Date().toISOString() }
+  const parts = [{ type: 'text', text: '流入経路を点検しました。結果はカードを見てください。' }, { type: BROWSER_INSPECTION_PART_TYPE, id: `browser-inspection-${id}`, data: ref }] as UIMessage['parts']
   return (
     <main className="min-h-screen bg-bg p-8 text-text">
       <p className="mb-4 text-small text-text-muted">表示確認用の人工データ。本番の相談やサイトには接続しません。</p>
-      <section className="mx-auto max-w-xl"><AssistantMessageParts parts={parts} isStreaming={false} markdown /></section>
+      <ReviewActionsContext.Provider value={actions}>
+        <section className="mx-auto max-w-xl"><AssistantMessageParts parts={parts} isStreaming={false} markdown /></section>
+      </ReviewActionsContext.Provider>
     </main>
   )
 }
