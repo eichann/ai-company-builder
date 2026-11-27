@@ -931,8 +931,9 @@ async function workFlowScenario(win: BrowserShellWindow, sites: Sites) {
     stopped: () => false, window: () => win.browse, reader: () => ({ async read() { return { status: 404, body: '' } }, closed: () => false }),
     registered: () => true, api: api as never, operator: () => operator, cliPath: () => '/bin/true', parentEnv: () => ({}),
     skillSteps: async () => ({ kind: 'text', text: STEPS }),
-    writeStartMs: 300, pressGapMs: 1500,
+    writeStartMs: 200, pressGapMs: 300,
   })
+  const started = Date.now()
   const working = works.work({
     companyId: 'company-1', conversationId: null, companyRoot: '/company', site: 'op.test', task: '秋の回をコピーして冬の回を登録して', skill: 'flow', items: [],
     said: ['元の行は変えない'], values: [{ label: '名前', value: '【冬の回】' }, { label: '日付', value: '2026-12-03' }],
@@ -944,6 +945,7 @@ async function workFlowScenario(win: BrowserShellWindow, sites: Sites) {
     await wait(50)
   }
   out.words = (await working).words
+  out.ms = Date.now() - started
   await wait(500)
   out.flow = sites.flow.map(f => ({ ...f }))
   out.calls = calls
