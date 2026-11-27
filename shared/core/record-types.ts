@@ -396,10 +396,30 @@ export function aiAskedNeedsSetting(action: Parameters<typeof isCorrection>[0]):
   return !isCorrection(action)
 }
 
+/**
+ * The member's own AI taking back one of the member's recent changes at their request (records.md "The AI at the
+ * member's request", 「取り消して」): only an entry the member made (themselves or their AI) at most this long ago.
+ */
+export const AI_UNDO_WINDOW_MS = 24 * 60 * 60_000
+
 /** The refusals of the AI at the member's request: fixed sentences the AI relays as they are. */
 export const AI_ASKED_REFUSALS = {
   /** The member's own setting is off (asked only for an action that ends the record: `aiAskedNeedsSetting`). */
-  off: { code: 'AI_ASK_OFF', error: '「AI に完了を頼めるようにする」がオフのため、AI からは片づけられません（完了にする・終わりにする・もう返した）。設定の「自分の設定」でオンにすると、AI に頼めるようになります（それまではご自身で押してください）。' },
+  off: { code: 'AI_ASK_OFF', error: '「AI に完了を頼めるようにする」がオフのため、AI からは片づけや引き受けはできません（完了にする・終わりにする・もう返した・アーカイブ・済んだ・引き受ける）。設定の「自分の設定」でオンにすると、AI に頼めるようになります（それまではご自身で押してください）。' },
+  /** The AI's undo outside a turn the member started (a plain token, a run). */
+  undoNotAsked: { code: 'NOT_ALLOWED', error: '取り消しは、メンバー本人がこの会話で頼んだときだけ AI からできます。' },
+  /** The AI's undo of someone else's change. */
+  undoNotOwn: { code: 'NOT_ALLOWED', error: 'AI が取り消せるのは、メンバー本人（またはその AI）の変更だけです。ほかの人の変更は、その人か管理者が取り消します。' },
+  /**
+   * The AI's undo of a change whose action the AI may not run itself (`who` without `ai`, and not an `ai_on_request` action
+   * the member holds now; a decision's そうです / 違う / 取り消す, やることにする, やり直す, 戻す…), one needing prior approval, or one
+   * whose `via` leaves out the member's consultation.
+   */
+  undoNotAiAction: { code: 'NOT_ALLOWED', error: 'この変更は AI からは取り消せません（AI がしてよい操作ではないため）。取り消すときは、カードの［取り消す］か画面から行ってください。' },
+  /** The AI's undo of the inbox's own entry the assignee may take back (受信トレイから外れた, Gmail でアーカイブした). */
+  undoMailbox: { code: 'NOT_ALLOWED', error: 'Gmail の受信トレイから外れた・Gmail でもアーカイブした、という変更は、AI からは戻せません。来た連絡のカードや知らせの［元に戻す］から戻してください（Gmail の受信トレイにも戻ります）。' },
+  /** The AI's undo of a change older than `AI_UNDO_WINDOW_MS`. */
+  undoTooOld: { code: 'UNDO_TOO_OLD', error: 'AI が取り消せるのは、この24時間の変更だけです。それより前の変更は、ご自身で画面から取り消すか、改めて操作してください。' },
   /** More than `AI_ASKED_PER_TURN` in one turn. */
   limit: { code: 'AI_ASK_LIMIT', error: `AI が一度のやりとりで頼まれて変えられるのは ${AI_ASKED_PER_TURN} 件までです。続きは、もう一度頼んでください。` },
 } as const

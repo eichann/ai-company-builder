@@ -2,8 +2,8 @@ import Database from 'better-sqlite3'
 import fs from 'fs'
 import { seedPermissionScopes } from '../adapters/sqlite/permission-store'
 import { migrateCompanyContents } from '../adapters/sqlite/record-contents'
-import { migrateCompanyBundleParts, migrateCompanyCoreInterfaceLinks, migrateCompanyDecisionVersion, migrateCompanyOutsideTimes, migrateCompanyReplyRequestVersion, migrateCompanyTaskVersion } from '../adapters/sqlite/records'
-import { DECISION_VERSION, REPLY_REQUEST_VERSION, TASK_VERSION } from '../../shared/core/core-types'
+import { migrateCompanyBundleParts, migrateCompanyCoreInterfaceLinks, migrateCompanyDecisionVersion, migrateCompanyInteractionVersion, migrateCompanyOutsideTimes, migrateCompanyReplyRequestVersion, migrateCompanyTaskVersion } from '../adapters/sqlite/records'
+import { DECISION_VERSION, INTERACTION_VERSION, REPLY_REQUEST_VERSION, TASK_VERSION } from '../../shared/core/core-types'
 import { APP_DB_PATH, DATA_DIR } from '../lib/config'
 import { agentSchema, migrateAgentEventSandbox, migrateSecondOpinionSetting } from './schema/agents'
 import { aiRunSchema, migrateAiRunColumns, migrateAiRunSubjects } from './schema/ai-runs'
@@ -181,6 +181,7 @@ export function initDatabase(conn: Database.Database = sqlite) {
   migrateTaskVersion(conn)
   migrateDecisionVersion(conn)
   migrateReplyRequestVersion(conn)
+  migrateInteractionVersion(conn)
   migrateConnectorProviders(conn)
   migrateGooglePicker(conn)
   migrateFixedPayloads(conn)
@@ -335,6 +336,15 @@ export function migrateReplyRequestVersion(conn: Database.Database): void {
   for (const { id } of conn.prepare('SELECT id FROM companies').all() as Array<{ id: string }>) {
     const moved = migrateCompanyReplyRequestVersion(conn, id, at)
     if (moved > 0 && conn === sqlite) console.log(`[records] reply_request version ${REPLY_REQUEST_VERSION}: ${moved} record(s) moved in company ${id}`)
+  }
+}
+
+/** Every company's 来た連絡 move to the core interaction version (`INTERACTION_VERSION`), idempotent. */
+export function migrateInteractionVersion(conn: Database.Database): void {
+  const at = new Date().toISOString()
+  for (const { id } of conn.prepare('SELECT id FROM companies').all() as Array<{ id: string }>) {
+    const moved = migrateCompanyInteractionVersion(conn, id, at)
+    if (moved > 0 && conn === sqlite) console.log(`[records] interaction version ${INTERACTION_VERSION}: ${moved} record(s) moved in company ${id}`)
   }
 }
 

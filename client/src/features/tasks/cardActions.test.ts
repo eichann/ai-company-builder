@@ -129,6 +129,9 @@ test('アーカイブ in 経緯: 「〇〇さんがアーカイブしました�
   ] as unknown as LedgerEntry[]
   const c = card(task('in_progress', { assignee: 'u-tanaka', requested_by: ME }), [], entries)
   assert.deepEqual(c.history.map(h => h.text), ['佐藤さんがアーカイブから戻しました', '佐藤さんがアーカイブしました（もう要らない）'])
+  // Task 17: the member's own AI archiving at their request is said as such (never as the AI's own choice).
+  const asked = [{ ...entries[0], actorKind: 'ai', askedBy: ME }] as unknown as LedgerEntry[]
+  assert.deepEqual(card(task('cancelled', { assignee: 'u-tanaka', requested_by: ME }), [], asked).history.map(h => h.text), ['AI が（本人の頼みで）アーカイブしました（もう要らない）'])
 })
 
 test('「終わったら」 is one item instead of 確かめる人を決める and 終わったらを決める; its chooser sets the person and 確かめてから together', () => {

@@ -15,7 +15,7 @@ import type {
   RecordRow, RecordStateRow, RecordTypeRow,
   MeetingEventRow,
 } from '../../ports/records'
-import { BUNDLE_PART_ENDED_ACTION, coreTypeDefinitions, DECISION_VERSION, MIGRATION_ACTOR, OUTSIDE_TIME_ACTION, REPLY_REQUEST_VERSION, TASK_VERSION } from '../../../shared/core/core-types'
+import { BUNDLE_PART_ENDED_ACTION, coreTypeDefinitions, DECISION_VERSION, INTERACTION_VERSION, MIGRATION_ACTOR, OUTSIDE_TIME_ACTION, REPLY_REQUEST_VERSION, TASK_VERSION } from '../../../shared/core/core-types'
 import { canonicalTypeJson } from '../../../shared/core/record-types'
 import { driveLinkTarget } from '../../../shared/core/records'
 import { CONTENT_REF_PREFIX } from '../../../shared/core/record-contents'
@@ -272,6 +272,11 @@ export function migrateCompanyDecisionVersion(conn: Database.Database, companyId
 /** The same for 返事のお願い (reply_request version 6: `ai_on_request`, `REPLY_REQUEST_VERSION`). Additive. */
 export function migrateCompanyReplyRequestVersion(conn: Database.Database, companyId: string, at: string): number {
   return migrateCompanyCoreTypeVersion(conn, companyId, 'reply_request', REPLY_REQUEST_VERSION, at)
+}
+
+/** The same for 来た連絡 (interaction version 9: `ai_on_request` on 「済んだ」, `INTERACTION_VERSION`). Additive. */
+export function migrateCompanyInteractionVersion(conn: Database.Database, companyId: string, at: string): number {
+  return migrateCompanyCoreTypeVersion(conn, companyId, 'interaction', INTERACTION_VERSION, at)
 }
 
 /** One core type's records moved to `version` (the core definition stored first when missing). */

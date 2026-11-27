@@ -303,6 +303,12 @@ describe('ACB → Gmail: the owner closed it here (opt-in)', () => {
     const entry = ledger(s.id).at(-1)!
     expect(entry).toMatchObject({ action: 'archived_there', actorId: 'acb:inbox', note: 'Gmail でもアーカイブしました' })
     expect(notices()).toContainEqual({ userId: 'u-alice', kind: 'mail_archived' })
+    // Her AI cannot put it back (review of #892): the card's / notice's ［元に戻す］ does, said in those words.
+    const byAi = await engine.undo(m('u-alice'), { id: 'u-alice', kind: 'ai', source: 'claude-code', conversationId: 'conv-ask', askedTurn: { tokenId: 'tok-x' } }, s.id, { version: entry.version, expectedVersion: entry.version })
+    expect(byAi).toMatchObject({ ok: false, body: { code: 'NOT_ALLOWED' } })
+    expect(!byAi.ok && (byAi.body as { error: string }).error).toContain('［元に戻す］')
+    await inbox.whenIdle()
+    expect(archiveCalls).toHaveLength(1)
     // ［元に戻す］: her undo of the inbox's entry puts the thread back in her inbox.
     ok(await engine.undo(m('u-alice'), person('u-alice'), s.id, { version: entry.version, expectedVersion: entry.version }))
     await inbox.whenIdle()

@@ -480,6 +480,7 @@ const MATRIX: Row[] = [
   r('GET /api/records-ai/item/:recordId/history', () => ({ path: '/api/records-ai/item/deal-nosuch01/history' }), [401, 401, 401, 401, 401, 401], 'a session is not a record token'),
   r('POST /api/records-ai/item', () => ({ path: '/api/records-ai/item', body: {} }), [401, 401, 401, 401, 401, 401], 'a session is not a record token'),
   r('POST /api/records-ai/item/:recordId/actions/:action', () => ({ path: '/api/records-ai/item/deal-nosuch01/actions/start', body: {} }), [401, 401, 401, 401, 401, 401], 'a session is not a record token'),
+  r('POST /api/records-ai/item/:recordId/undo', () => ({ path: '/api/records-ai/item/deal-nosuch01/undo', body: {} }), [401, 401, 401, 401, 401, 401], 'a session is not a record token'),
   r('GET /api/companies/:companyId/records/item/:recordId/versions/:version', w => ({ path: `${C(w)}/records/item/deal-nosuch01/versions/1` }), [404, 404, 404, 404, 404, 401]),
 
   // Key broker (「API キー」)
@@ -1066,6 +1067,7 @@ const NOT_OBJECT_IDS: Record<string, string> = {
   'GET /api/records-ai/item/:recordId': 'the AI\'s routes: the company comes from the record token, never from the URL (another company\'s record: tests/integration/record-tokens.test.ts)',
   'GET /api/records-ai/item/:recordId/history': 'the AI\'s routes: the company comes from the record token, never from the URL',
   'POST /api/records-ai/item/:recordId/actions/:action': 'the AI\'s routes: the company comes from the record token, never from the URL (record-tokens.test.ts)',
+  'POST /api/records-ai/item/:recordId/undo': 'the AI\'s routes: the company comes from the record token, never from the URL (ai-asked-close.test.ts)',
   'POST /api/records-ai/item/:recordId/file-links': 'the AI\'s routes: the company comes from the record token, never from the URL (another company\'s record: record-tokens.test.ts)',
   'POST /api/records-ai/item/:recordId/file-links/remove': 'the AI\'s routes: the company comes from the record token, never from the URL',
   'POST /api/records-ai/plugins/:pluginId/records/:recordId/operations/:operation': 'the AI\'s routes: the company comes from the record token, never from the URL (plugin-operations.test.ts)',

@@ -188,8 +188,9 @@ export function okWords(actor: string, okBy: string | null, okNote: string | nul
  * 「佐藤さんがアーカイブから戻しました」. The type still calls the action 中止する (`cancel`); the
  * words are the app's, so released apps and the type's version are untouched.
  */
-export function archiveLine(e: Pick<LedgerEntry, 'action' | 'note' | 'fromState'>, who: string | undefined): string | null {
-  const person = !who ? 'メンバーが' : who === 'AI' ? 'AI が' : `${who}さんが`
+export function archiveLine(e: Pick<LedgerEntry, 'action' | 'note' | 'fromState' | 'askedBy'>, who: string | undefined): string | null {
+  // The member's own AI at their request (task 17): said as such, like every such line (`aiAskedHistoryText`).
+  const person = !who ? 'メンバーが' : who === 'AI' ? (e.askedBy ? 'AI が（本人の頼みで）' : 'AI が') : `${who}さんが`
   if (e.action === 'cancel') return `${person}アーカイブしました${e.note ? `（${e.note}）` : ''}`
   if (e.action === 'reopen' && e.fromState === 'cancelled') return `${person}アーカイブから戻しました${e.note ? `（${e.note}）` : ''}`
   return null

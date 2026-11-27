@@ -1,5 +1,7 @@
 /** Reversing an earlier ledger entry with a new one (records.md "The state engine"). */
 import { undoableByAssignee } from '../../../shared/core/core-types'
+import { AI_ASKED_PER_TURN, AI_ASKED_REFUSALS, AI_UNDO_WINDOW_MS, aiAskedNeedsSetting, aiOnRequestField, viaOf, type ActionDef, type TypeDefinition } from '../../../shared/core/record-types'
+import { AskedLimitReached } from './act'
 import { FULL_ACCESS_ROLES } from '../../../shared/core/permissions'
 import { RECORD_TITLE_CHANGE, replayRecordState, type LedgerEntry, type LedgerValue } from '../../../shared/core/record-ledger'
 import { ERASED_PREFIX } from '../../../shared/core/record-contents'
@@ -16,7 +18,7 @@ import { followLinkName, followWords, linkedParents, placeWithin, WIDER_THAN_BUN
 import { isPlaceOrLinkChange, linkLedgerValue, linkTargetsOf, withLinkTargets } from './links'
 import { personalPathsSeen, scrubLedger } from './personal-links'
 import { bad, conflict, featureOffRefusal, serviceStateOnly, STATE_CHANGED_BY_SERVICE } from './refusals'
-import type { ActorInput } from './types'
+import { callVia, type ActorInput } from './types'
 import { NOTE_MAX, provenance } from './values'
 
 /** Whether an entry adds or removes a link target this member may not see. */
@@ -30,11 +32,38 @@ function changesUnseenTarget(entry: LedgerEntry, seen: ReadonlySet<string>): boo
   })
 }
 
+class AskedSettingOff extends Error {}
+
+/** Engine entries (not a type's action) the AI may take back: a file link, on a type that lets the AI act (as `fileLink`). */
+const AI_UNDOABLE_ENGINE_ACTIONS = ['link_file', 'unlink_file']
+
+/**
+ * Whether the member's own AI may take this entry back at their request: its action is one the AI may run itself on the
+ * record as it is now — `who` lists `ai`, or an `ai_on_request` action whose listed field holds the member — never one
+ * needing prior approval or one whose `via` leaves out the consultation; a file link on a type the AI acts on. Answers
+ * whether the member's own setting is needed too (`aiAskedNeedsSetting`), or null when the AI may not.
+ */
+function aiMayUndo(def: TypeDefinition | undefined, actionName: string, fields: Readonly<Record<string, unknown>>, userId: string, actor: ActorInput): { needsSetting: boolean } | null {
+  if (!def) return null
+  if (AI_UNDOABLE_ENGINE_ACTIONS.includes(actionName)) return Object.values(def.actions).some(a => a.who.includes('ai')) ? { needsSetting: false } : null
+  const action: ActionDef | undefined = Object.prototype.hasOwnProperty.call(def.actions, actionName) ? def.actions[actionName] : undefined
+  if (!action || action.approval === 'prior' || !viaOf(action).includes(callVia(actor))) return null
+  if (action.who.includes('ai')) return { needsSetting: false }
+  return aiOnRequestField(action, fields, userId) !== null ? { needsSetting: aiAskedNeedsSetting(action) } : null
+}
+
 export function undoing(ctx: EngineContext) {
   const { transactions, clock, open, tell, summaryOf } = ctx
   return {
-    /** Reverse an earlier entry (a new entry; nothing is rewritten). Its actor or an owner/admin. */
+    /**
+     * Reverse an earlier entry (a new entry; nothing is rewritten). Its actor or an owner/admin — or the member's own
+     * AI at their request (records.md "The AI at the member's request"): only in a turn they started (never a run),
+     * only an entry the member made (themselves or their AI; never an admin's reach over others, never the inbox's
+     * entries the assignee may take back), at most `AI_UNDO_WINDOW_MS` old, counted toward the turn's cap.
+     */
     undo(member: Member, actor: ActorInput, recordId: string, body: unknown): Outcome<{ record: RecordSummary; entry: LedgerEntry }> {
+      const askedTurn = actor.kind === 'ai' && actor.askedTurn && !actor.runId ? actor.askedTurn : null
+      if (actor.kind === 'ai' && !askedTurn) return refuse('forbidden', AI_ASKED_REFUSALS.undoNotAsked.error, { code: AI_ASKED_REFUSALS.undoNotAsked.code })
       const opened = open(member)
       if (!opened) return refuse('not-found', RECORDS_DISABLED.error, { code: RECORDS_DISABLED.code })
       const { records, reader } = opened
@@ -66,7 +95,17 @@ export function undoing(ctx: EngineContext) {
       // The system's own entries its assignee may take back (UNDO_BY_ASSIGNEE: the inbox closing a mail
       // that left the mailbox inbox, or taking it out there — each told with ［元に戻す］).
       const assigneeMay = undoableByAssignee(row.type, target, now.fields.assignee, member.userId)
-      if (target.actorId !== member.userId && !FULL_ACCESS_ROLES.has(member.role) && !assigneeMay) return refuse('forbidden', '自分の変更か、管理者だけが取り消せます', { code: 'NOT_ALLOWED' })
+      let undoNeedsSetting = false
+      if (askedTurn) {
+        // The inbox's own entries its assignee may take back put mail back in Gmail: the person's ［元に戻す］ only.
+        if (assigneeMay) return refuse('forbidden', AI_ASKED_REFUSALS.undoMailbox.error, { code: AI_ASKED_REFUSALS.undoMailbox.code })
+        if (target.actorId !== member.userId) return refuse('forbidden', AI_ASKED_REFUSALS.undoNotOwn.error, { code: AI_ASKED_REFUSALS.undoNotOwn.code })
+        if (!(Date.parse(target.at) >= clock.nowMs() - AI_UNDO_WINDOW_MS)) return refuse('conflict', AI_ASKED_REFUSALS.undoTooOld.error, { code: AI_ASKED_REFUSALS.undoTooOld.code })
+        const may = aiMayUndo(currentTypes(records).get(row.type)?.definition, target.action, now.fields, member.userId, actor)
+        if (!may) return refuse('forbidden', AI_ASKED_REFUSALS.undoNotAiAction.error, { code: AI_ASKED_REFUSALS.undoNotAiAction.code })
+        undoNeedsSetting = may.needsSetting
+        if (undoNeedsSetting && ctx.deps.aiAskedOn?.(member.companyId, member.userId) !== true) return refuse('forbidden', AI_ASKED_REFUSALS.off.error, { code: AI_ASKED_REFUSALS.off.code })
+      } else if (target.actorId !== member.userId && !FULL_ACCESS_ROLES.has(member.role) && !assigneeMay) return refuse('forbidden', '自分の変更か、管理者だけが取り消せます', { code: 'NOT_ALLOWED' })
       if (b.expectedVersion !== latest) return conflict('ほかの人が先に変えました。最新の状態を見てからもう一度お試しください', 'VERSION_CONFLICT', { version: latest })
       // `links.<name>` changes (a file linked, the meeting's まとまり) are compared with and restored to
       // the link rows themselves: a rename the indexer followed changed them without an entry.
@@ -131,14 +170,26 @@ export function undoing(ctx: EngineContext) {
         recordId: row.id, version: latest + 1, action: 'undo', fromState: now.state, toState: nextState, actorId: member.userId,
         actorKind: actor.kind, actorSource: actor.source ?? null, at, note, changes, attachments: [], decision: null, isDecision: false,
         typeVersion: row.typeVersion, reversesVersion: target.version, ...provenance(actor),
+        ...(askedTurn ? { askedBy: member.userId } : {}),
       }
-      const written = transactions.run(() => {
-        if (!records.writeState({ recordId: row.id, state: nextState, fields: JSON.stringify(nextFields), version: entry.version, updatedAt: at }, latest)) return false
-        if (nextLinks) records.replaceLinks(row.id, nextLinks)
-        if (nextTitle !== null) writeTitle(records, row.id, nextTitle, at)
-        records.appendLedger(entry)
-        return true
-      })
+      let written: boolean
+      try {
+        written = transactions.run(() => {
+          // The member's setting again, inside the write (turned off meanwhile: nothing written).
+          if (undoNeedsSetting && ctx.deps.aiAskedOn?.(member.companyId, member.userId) !== true) throw new AskedSettingOff()
+          if (!records.writeState({ recordId: row.id, state: nextState, fields: JSON.stringify(nextFields), version: entry.version, updatedAt: at }, latest)) return false
+          // One of the turn's `AI_ASKED_PER_TURN`, taken with the write (a write refused gives it back).
+          if (askedTurn && !records.takeAskedAction(member.userId, askedTurn.tokenId, AI_ASKED_PER_TURN)) throw new AskedLimitReached()
+          if (nextLinks) records.replaceLinks(row.id, nextLinks)
+          if (nextTitle !== null) writeTitle(records, row.id, nextTitle, at)
+          records.appendLedger(entry)
+          return true
+        })
+      } catch (error) {
+        if (error instanceof AskedLimitReached) return refuse('conflict', AI_ASKED_REFUSALS.limit.error, { code: AI_ASKED_REFUSALS.limit.code })
+        if (error instanceof AskedSettingOff) return refuse('forbidden', AI_ASKED_REFUSALS.off.error, { code: AI_ASKED_REFUSALS.off.code })
+        throw error
+      }
       if (!written) return conflict('ほかの人が先に変えました。最新の状態を見てからもう一度お試しください', 'VERSION_CONFLICT')
       tell(member, [nextFields.next_actor], { type: row.type, entry, fields: nextFields })
       // The services' follow-up of an undo (the inbox puts a mail back in the mailbox inbox).

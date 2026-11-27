@@ -617,5 +617,9 @@ test('an operation without an AI tool: the AI says where in the app to do it, ne
   const { api } = fakeServer('act')
   const tools = await createRecordTools((await api.openTurn('co', { conversationId: 'c', agent: 'claude-code', scope: 'act' }))!)
   assert.match(tools.instructions, /「つながっていません」とは言わず、メンバーがアプリのどこで行うかを伝えて/)
-  for (const where of ['［部署に出す］', '［取り消す］', '［アーカイブ］', '［終わったら］', '［済んだ］']) assert.ok(tools.instructions.includes(where), where)
+  for (const where of ['［部署に出す］', '［受けられない］', '［終わったら］', '［取り込まない］']) assert.ok(tools.instructions.includes(where), where)
+  // What the AI may now do at the member's request (task 17) is no longer sent to the screen.
+  for (const gone of ['「…」の［アーカイブ］', '［済んだ］と', 'やることの案件の欄の［外す］']) assert.ok(!tools.instructions.includes(gone), gone)
+  // 案件 taken off with set_bundle: the tool says null does it.
+  assert.match(tools.specs.find(s => s.name === 'task__set_bundle')!.description, /null を渡す/)
 })
