@@ -519,9 +519,9 @@ export const BROWSER_OPERATOR_WORK_PROMPT = [
   ...ACTION_LINES,
   '{"do":"done","result":"<人に見せる、したことのまとめ。4000字まで>","unread":[<読めなかった items の番号>],"checks":[{"item":"<確かめた項目。60字まで>","before":"<前の値>","after":"<いまの値>","compared":"<比べ元の値>","ok":true|false}],"compared_name":"<比べ元の呼び名。40字まで>"}',
   WORK_STOP_LINE,
-  '保存や送信をしてよいのは、frames の枠に合う送り先だけです。枠に合わない書き込みはアプリが止めます。同じ保存を何度も押さないでください（書き込みは1回ずつしか送られません）。',
+  '保存や送信をしてよいのは、frames の枠に合う送り先だけです。枠に合わない書き込みはアプリが止めます。押すたびに、枠の回数が残っていれば新しい書き込みとして送られます。同じ保存を2回押せば、サイトに2件届き、取り消せません。',
   'writes に「分からない」が出たら、それ以上は書かず stop（blocked）にしてください。',
-  'writes に「送っている途中」（sending）があるときは、同じ保存を押し直さず wait で待ってください（答えが来ると次の回で結果に変わります）。',
+  'writesSending が 1 以上のとき（writes に sending: true の「送っている途中」があるとき）は、何も押さずに wait で待ってください。押せば、その書き込みは途中のものの後ろに並んで2回目として送られ、取り消せません。答えが来ると次の回で結果に変わります。',
   'writes の各項目には、合った枠（frame。合わなかったときは null）、どの操作のあとに出た書き込みか（afterAction：history の number）、送らなかった理由（why）が付きます。',
   '書き終えたら、手順の「確かめること」をページで確かめ、checks に書いてから done にしてください。checks は人のカードにだけ出ます（AI が確かめた、と表示されます）。',
   ...COMMON_LINES,
@@ -612,6 +612,8 @@ export function workMaterial(input: {
       ...(p.screen ? { screen: { width: p.screen[0], height: p.screen[1] } } : {}),
     },
     history: input.history.map((h, i) => ({ number: i + 1, ...h })),
+    // How many held writes are still being sent: the prompt tells the operator to wait, never press, while this is above 0.
+    writesSending: input.writes.filter(w => w.state === WORK_WRITE_SENDING).length,
     writes: input.writes.map((w, i) => ({
       number: i + 1, frame: w.frame, afterAction: w.afterAction,
       result: w.state === WORK_WRITE_SENDING ? WORK_WRITE_SENDING_WORDS : WORK_WRITE_WORDS[w.state],

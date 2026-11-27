@@ -3720,8 +3720,11 @@ else. **No site word** anywhere (a fictional site in the tests).
   words (`WORK_WRITE_WHY_WORDS`: outside every frame, the frame used up, not this run's object, a file, unreadable,
   another host, the run over, no permit, stopped before sending). Nothing the page or the site sent (no value, path,
   status or text); the consultation AI never gets any of it. So the operator never sees a frame's `left` gone without a
-  write to show, and can tell which press each write came from. The prompt says not to press again on 「送っている途中」
-  but to `wait`. None of this changes what is sent, permitted or reported (`FramesLife.tla`'s app actions are unchanged:
+  write to show, and can tell which press each write came from. The material also carries **`writesSending`** (how many
+  are being sent). **A press while one is being sent is not ignored** (seen on a real window: the second press's write
+  queued behind the first and the site got the same save twice, with a frame of max 2), so the prompt says it plainly:
+  each press is sent as a new write while the frame has units left, twice is two writes and cannot be taken back, and
+  while `writesSending` is above 0 the operator presses nothing and answers `wait`. None of this changes what is sent, permitted or reported (`FramesLife.tla`'s app actions are unchanged:
   the operator is not modelled, and giving up mid-run is the model's `AppCrashes` / the server's time-out, as at the end).
 - **Kept for the card** (main's memory): each write's frame line (the frame's method and pattern — never the path the
   page sent), its outcome, the site's status when not a success, what it sent (`sentFields`: one value per field, never

@@ -21,7 +21,7 @@ import { test } from 'node:test'
 import { readdirSync, readFileSync } from 'node:fs'
 import assert from 'node:assert/strict'
 import {
-  BROWSER_WORK_CARD_WORDS as CW, BROWSER_WORK_WORDS as W, afterReadAddress, beforeReadAddress, createdIdOf, frameRequestFor, parseWorkAnswer,
+  BROWSER_OPERATOR_WORK_PROMPT, BROWSER_WORK_CARD_WORDS as CW, BROWSER_WORK_WORDS as W, afterReadAddress, beforeReadAddress, createdIdOf, frameRequestFor, parseWorkAnswer,
   WORK_WRITE_SENDING, WORK_WRITE_SENDING_WORDS, WORK_WRITE_WHY_WORDS, WORK_WRITE_WORDS, pickFrame, readHeldWrite, sentFields, workEndAfterRefusals, workMaterial, workFrameOf, workRefusedWriteLine, workResultCard, workRetrySentence, workWordsForAi,
   type HeldBody, type HeldPageWrite, type HeldPageWriteAnswer, type WorkFrame,
 } from '../shared/browser-frame-writes'
@@ -816,6 +816,11 @@ test('a write the page makes as the operator looks again is shown to it as being
   await tool.execute({ site: HOST, task: 'x', skill: 'coupons' })
   const seen = w.materials.map(writesSeen)
   assert.deepEqual(seen[1]?.writes, [WORK_WRITE_SENDING_WORDS], JSON.stringify(seen))
+  // The state the work prompt tells the operator to wait on (never press: a press would be sent as a second write) is
+  // in the material, and the prompt names that very field.
+  assert.equal((w.materials[1] as { writesSending: number }).writesSending, 1)
+  assert.equal((w.materials[2] as { writesSending: number }).writesSending, 0)
+  assert.ok(BROWSER_OPERATOR_WORK_PROMPT.includes('writesSending'))
   // Before the next look main waits for it: then it is the site's answer.
   assert.deepEqual(seen[2], { phase: 'work', writes: ['送りました（サイトが答えました）'], left: [0] }, JSON.stringify(seen))
   assert.equal(w.site.requests.length, 1)
