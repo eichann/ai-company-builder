@@ -563,6 +563,7 @@ async function verifyScenarios(win: BrowserShellWindow) {
   }
   /** The operator's answer to press the middle of an element by position, parsed as the loop does, on the page shown now. */
   const pointAt = async (id: string) => {
+    await js(`document.getElementById(${JSON.stringify(id)}).scrollIntoView({ block: 'center' }); 1`)
     const snap = await win.browse.snapshot()
     const shot = snap ? await win.browse.screenshot?.(snap) : null
     const at = snap ? pageWithScreen(snap, shot ?? null) : null
@@ -600,6 +601,8 @@ async function verifyScenarios(win: BrowserShellWindow) {
     out.stopper = await press('送る', 'stopper')
     await clear()
     // 2. A banner over the button after the snapshot: refused as covered; neither the button nor the banner is pressed.
+    // Centred first (where a press scrolls it), so the banner lies over it where it will be pressed, whatever the window's size.
+    await js("document.getElementById('save').scrollIntoView({ block: 'center', inline: 'center' }); 1")
     const save = await refOf('保存する')
     await js('cover(); 1')
     out.covered = await win.browse.act({ do: 'click', ref: save }, signal)
