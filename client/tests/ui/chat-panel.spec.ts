@@ -21,6 +21,7 @@ type Control = {
   opened: string[]
   windows: { opened: string[]; focused: string[] }
   windowChanged(change: unknown): void
+  shares: Array<[string, string, string, number]>
 }
 declare global { interface Window { __acbChat: Control } }
 
@@ -285,6 +286,36 @@ test('a next-prompt suggestion is asked for after a finished turn and offered as
   await chat(page, c => c.finish())
   await expect(page.locator('.cm-ghost-suggestion')).toHaveText('はい、本文まで書いてください')
   expect((await paths(page)).some(p => p.startsWith('/api/prompt-suggestion/'))).toBe(true)
+})
+
+// 「部署に出す案」 (share-proposals.ts, PR D): the AI's proposal is the app's card; only the member's press shares, at the version
+// read then; afterwards the buttons are gone. ［やめる］ shares nothing.
+test('「部署に出す案」: the card shares only when the member presses it, at the version read now; やめる shares nothing', async ({ page }) => {
+  await openPreview(page, 'chat-header', { turn: 'manual' })
+  await send(page, 'これを営業部に出して')
+  await turnStarted(page)
+  await chat(page, c => {
+    c.send({ type: 'data-share-proposal', id: 'share-proposal-a', data: { id: 'a', companyId: 'co-1', conversationId: null, recordId: 'task-0123456789abcdef', title: '見積を直す', folder: '営業部', at: '2026-11-27T00:00:00.000Z' } })
+    c.finish()
+  })
+  const box = page.getByRole('group', { name: '部署に出す案（AI から）' })
+  await expect(box).toContainText('やること「見積を直す」を「営業部」に出します')
+  expect(await chat(page, c => c.shares)).toEqual([])
+  await box.getByRole('button', { name: '部署に出す' }).click()
+  await expect(box.getByRole('status')).toHaveText('「営業部」に出しました。')
+  expect(await chat(page, c => c.shares)).toEqual([['co-1', 'task-0123456789abcdef', '営業部', 3]])
+  await expect(box.getByRole('button')).toHaveCount(0)
+
+  await send(page, 'もう一つ')
+  await turnStarted(page)
+  await chat(page, c => {
+    c.send({ type: 'data-share-proposal', id: 'share-proposal-b', data: { id: 'b', companyId: 'co-1', conversationId: null, recordId: 'task-0123456789abcdee', title: '別のやること', folder: '営業部', at: '2026-11-27T00:00:00.000Z' } })
+    c.finish()
+  })
+  const second = page.getByRole('group', { name: '部署に出す案（AI から）' }).last()
+  await second.getByRole('button', { name: 'やめる' }).click()
+  await expect(second.getByRole('status')).toContainText('出さないことにしました')
+  expect((await chat(page, c => c.shares)).length).toBe(1)
 })
 
 test('a choice question waits above the input of its own conversation, survives a tab switch, and is answered in place', async ({ page }) => {

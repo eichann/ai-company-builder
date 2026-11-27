@@ -6,6 +6,7 @@ import { REVIEW_PART_TYPE, readReviewRecord, type ReviewRecord } from '../../../
 import { PLUGIN_OPERATION_PART_TYPE, readPluginOperationCard, type PluginOperationCard } from '../../../shared/plugin-operations'
 import { APPROVAL_PART_TYPE, readApprovalCardRef, type ApprovalCardRef } from '../../../shared/approvals'
 import { JOB_PROPOSAL_PART_TYPE, readJobProposalCardRef, type JobProposalCardRef } from '../../../shared/job-proposals'
+import { SHARE_PROPOSAL_PART_TYPE, readShareProposalCard, type ShareProposalCardRef } from '../../../shared/share-proposals'
 import { AI_ASKED_PART_TYPE, readAiAskedCard, type AiAskedCard } from '../../../shared/ai-asked'
 import { BROWSER_PLAN_PART_TYPE, readBrowserPlanCardRef, type BrowserPlanCardRef } from '../../../shared/browser-plans'
 import { BROWSER_INSPECTION_PART_TYPE, readBrowserInspectionRef, type BrowserInspectionRef } from '../../../shared/browser-inspection'
@@ -39,6 +40,7 @@ export function uiMessageToSessionMessage(msg: UIMessage, timestamp: Date): Sess
   const pluginOperations: PluginOperationCard[] = []
   const approvals: ApprovalCardRef[] = []
   const jobProposals: JobProposalCardRef[] = []
+  const shareProposals: ShareProposalCardRef[] = []
   const aiAsked: AiAskedCard[] = []
   const browserPlans: BrowserPlanCardRef[] = []
   const browserInspections: BrowserInspectionRef[] = []
@@ -56,6 +58,11 @@ export function uiMessageToSessionMessage(msg: UIMessage, timestamp: Date): Sess
     if (part.type === APPROVAL_PART_TYPE) {
       const ref = readApprovalCardRef((part as { data?: unknown }).data)
       if (ref && !approvals.some(a => a.id === ref.id)) { approvals.push(ref); cardOrder.push(`approval-${ref.id}`) }
+      continue
+    }
+    if (part.type === SHARE_PROPOSAL_PART_TYPE) {
+      const ref = readShareProposalCard((part as { data?: unknown }).data)
+      if (ref && !shareProposals.some(j => j.id === ref.id)) { shareProposals.push(ref); cardOrder.push(`share-proposal-${ref.id}`) }
       continue
     }
     if (part.type === JOB_PROPOSAL_PART_TYPE) {
@@ -149,6 +156,7 @@ export function uiMessageToSessionMessage(msg: UIMessage, timestamp: Date): Sess
     ...(pluginOperations.length ? { pluginOperations } : {}),
     ...(approvals.length ? { approvals } : {}),
     ...(jobProposals.length ? { jobProposals } : {}),
+    ...(shareProposals.length ? { shareProposals } : {}),
     ...(aiAsked.length ? { aiAsked } : {}),
     ...(browserPlans.length ? { browserPlans } : {}),
     ...(browserInspections.length ? { browserInspections } : {}),
@@ -207,6 +215,10 @@ export function sessionMessageToUIMessage(msg: SessionMessage): UIMessage {
   for (const stored of msg.approvals || []) {
     const ref = readApprovalCardRef(stored)
     if (ref) cards.push({ type: APPROVAL_PART_TYPE, id: `approval-${ref.id}`, data: ref })
+  }
+  for (const stored of msg.shareProposals || []) {
+    const ref = readShareProposalCard(stored)
+    if (ref) cards.push({ type: SHARE_PROPOSAL_PART_TYPE, id: `share-proposal-${ref.id}`, data: ref })
   }
   for (const stored of msg.jobProposals || []) {
     const ref = readJobProposalCardRef(stored)

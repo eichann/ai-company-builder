@@ -2,6 +2,7 @@
 // (src/shared/ipc/electron-api.ts), one per capability. Every function takes
 // its port as the last parameter, defaulting to window.electronAPI.
 import type { ElectronAPI, ElectronPort } from '../../shared/ipc/electron-api'
+import type { ShareProposalCardRef } from '../../../shared/share-proposals'
 
 /** Reading the chat history on this computer: summaries, one conversation, body search, changes. */
 export type ChatHistoryReads = ElectronPort<'getChatSessionSummaries' | 'getChatSession' | 'searchChatSessions' | 'onChatHistoryChanged'>
@@ -390,6 +391,25 @@ export async function undoAiAsked(companyId: string, recordId: string, version: 
   } catch {
     return first
   }
+}
+
+/**
+ * 「部署に出す案」 (share-proposals.ts): ［部署に出す］ is the member's own press — the task read again now with their session
+ * (still theirs alone? its version), then the app's `tasks:share` with that version. The AI has no path to it.
+ */
+export type ShareProposalPort = ElectronPort<'getRecordCard' | 'shareTask'>
+
+export type ShareProposalOutcome = { kind: 'done' } | { kind: 'already' } | { kind: 'gone' } | { kind: 'error'; text: string }
+
+export async function pressShareProposal(card: ShareProposalCardRef, port: ShareProposalPort = window.electronAPI): Promise<ShareProposalOutcome> {
+  let now
+  try { now = await port.getRecordCard(card.companyId, card.recordId) } catch { now = null }
+  if (!now || !now.success) return now && 'notFound' in now && now.notFound ? { kind: 'gone' } : { kind: 'error', text: now && !now.success ? now.error : 'サーバーにつながりませんでした。もう一度お試しください。' }
+  if (!now.card.record.personal) return { kind: 'already' }
+  if (typeof now.card.version !== 'number') return { kind: 'error', text: 'このやることの今の状態を読めませんでした。もう一度お試しください。' }
+  const r = await port.shareTask(card.companyId, card.recordId, card.folder, now.card.version)
+  if (r.success) return { kind: 'done' }
+  return r.code === 'NOT_PERSONAL' ? { kind: 'already' } : { kind: 'error', text: r.error }
 }
 
 /** The record's state now, as the server answers it (null when it cannot be read): shown after a refused ［取り消す］. */

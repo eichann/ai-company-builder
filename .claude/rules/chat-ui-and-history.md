@@ -355,7 +355,8 @@ request / status shapes and their checks, `closeStopsTheAI`), the window registr
   `data-plugin-operation` parts; `plugins.md` "The app"), `secondOpinions` (the other AI's answer,
 「Codex の答えを全部見る」, `chat-and-agents.md`), `minutesDealChoices`
   (「どの案件の議事録ですか？」, `minutes.md` "The app"), `mailDrafts` (the mail card, `data-mail-draft`,
-  `outbound-mail.md`), `browserPlans` (a 「ブラウザ操作」 plan's card, `data-browser-plan`, a reference only:
+  `outbound-mail.md`), `shareProposals` (「部署に出す案」, `data-share-proposal`, a reference only: the press reads the task
+  again, `records.md` "Owner-only records"), `browserPlans` (a 「ブラウザ操作」 plan's card, `data-browser-plan`, a reference only:
   the card reads the server, `agent-browser.md`), `browserInspections` (a 「ブラウザ操作」 inspection's card,
   `data-browser-inspection`, a reference only: main holds the card in memory, so after a restart it says the result is
   gone, `agent-browser.md` "The inspection in the chat"). The app's cards come back after the text in

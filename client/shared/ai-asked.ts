@@ -86,6 +86,7 @@ export const AI_ASKED_INSTRUCTIONS = '\n\n【メンバーに頼まれたとき�
   '担当か頼んだ人がメンバー本人の「やること」の件名・目的を直す（task__retitle・task__set_purpose）のも同じで、頼まれたときだけ。' +
   'メンバーが頼んだ「やること」のアーカイブ（task__cancel。画面の言葉は「アーカイブ」）、メンバーに頼まれた「やること」を引き受ける（task__accept）、' +
   '担当がメンバーの「来た連絡」を「済んだ」にする（interaction__settle。ToolSearch の select: で読み込む）、メンバー本人の24時間以内の変更を取り消す（records_undo。先に records_history で version を確かめる）も、頼まれたときだけ。' +
+  '「あなただけ」のやることを部署に出してと頼まれたら、出さずに records_propose_share で「部署に出す案」のカードを出す（見える人が広がり元に戻せないので、押すのはメンバー。「出しました」とは言わない）。' +
   'メンバーが頼んだ「やること」の確かめる人・終わったら（task__set_reviewer・task__set_when_done）、メンバーが責任者のプロジェクトのなんのため・期限・責任者（project__set_purpose・project__set_due・project__set_owner。select: で読み込む）も、頼まれたときだけ。' +
   '件名・目的が古いと気づいたら、直してよいかを先に聞く。' +
   '頼まれていないのに自分の判断で使わない。どれを片づけるか迷うときは、先に一覧を見せて確かめる。' +
