@@ -65,6 +65,8 @@ export interface BrowserWorkDeps {
   idleMaxMs?: number
   /** How long main watches for a write the page starts after an action (default `BROWSER_WORK_LIMITS.writeStartMs`; tests shorten it). */
   writeStartMs?: number
+  /** How long after a press that made no write yet the next press waits (default `BROWSER_WORK_LIMITS.pressGapMs`; tests shorten it). */
+  pressGapMs?: number
   /** Ends the server did not hear (a lost `end` / `finish`): retried, and flushed before this member's next task. */
   pendingEnds?: PendingEnds
 }
@@ -222,6 +224,14 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
     locked: () => boolean
     /** How many held writes are being sent now (0 in the preview). */
     sending?: () => number
+    /**
+     * Before a press, typing or choice that follows one which has made no write yet (`since`: the writes held so far when
+     * that one was done; `at`: when): waits until `pressGapMs` after it for a write the page may still start. True when a
+     * write came meanwhile (the press is then not done: the operator sees it first).
+     */
+    writeCameLate?: (since: number, at: number) => Promise<boolean>
+    /** Every write held in the run so far (what a press's later write is told apart by). */
+    heldCount?: () => number
     /** Counts the operator's actions (its history's numbering), so a held write says which one it followed. */
     actions?: { n: number }
     /**
@@ -247,6 +257,8 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
     const stopped = (why: WorkStopReason) => ({ kind: 'stopped' as const, why })
     // Whether the last thing done was an action that may make the page write (a press, typing, a choice, back).
     let acted = false
+    // The last such action actually done: the writes held so far then, and when (a later press waits for its write).
+    let lastPress: { since: number; at: number } | null = null
     for (let round = 1; round <= o.budget.steps; round++) {
       // The page's writes are decided before the operator sees the page again, so its material never shows a frame's unit
       // taken without the write's result (incident 2026-11-27: the operator could not tell whether its press was sent).
@@ -299,36 +311,49 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
         return { kind: 'answer', answer }
       }
       const action: BrowserBrowseAction = answer
-      // While a held write is being sent, nothing that could make another write is done (a press queued behind it would
-      // be sent as a second write: seen on a real window): only reading (`go`) and waiting pass. Told in fixed words.
-      if ((o.sending?.() ?? 0) > 0 && action.do !== 'wait' && action.do !== 'go') {
+      const mayWrite = action.do !== 'wait' && action.do !== 'go'
+      // After the held writes: while one is being sent, nothing that could make another write is done (a press queued
+      // behind it would be sent as a second write: seen on a real window); a press after one that has made no write yet
+      // first waits, up to `pressGapMs` after it, for a write that page may still start — one that comes is shown first.
+      // Only reading (`go`) and waiting pass. Told in fixed words.
+      if (mayWrite && ((o.sending?.() ?? 0) > 0 || (lastPress && (o.heldCount?.() ?? 0) === lastPress.since && await o.writeCameLate?.(lastPress.since, lastPress.at)))) {
         history.push({ do: action.do, ...('ref' in action ? { ref: action.ref } : {}), outcome: 'refused', why: 'sending' })
-        if (o.actions) o.actions.n = history.length
         continue
       }
       // A press by position or a typing without a ref: what the window's hit-test finds there now; refused → nothing done.
       const aimed = aimedAction(action) ? (await o.win.aim?.(action)) ?? { ok: false as const, why: 'nothing' as const } : undefined
-      if (aimed && !aimed.ok) { history.push({ do: action.do, outcome: 'refused', why: aimed.why }); if (o.actions) o.actions.n = history.length; continue }
+      if (aimed && !aimed.ok) { history.push({ do: action.do, outcome: 'refused', why: aimed.why }); continue }
       const logStep = browseLogStep(action, page, o.host, aimed)
       if (o.log.length < BROWSER_RUN_LIMITS.steps) o.log.push(logStep)
       o.trail.step(logStep, parsed.reason)
-      // Counted before the action, so a write its press makes says it followed this one.
-      if (o.actions) o.actions.n = history.length + 1
+      // A write names the last action that could have made it: set before a press, typing, choice or back is done (a write
+      // held during a wait, a read or a refused action names the press before it).
+      if (mayWrite) {
+        if (o.actions) o.actions.n = history.length + 1
+        lastPress = { since: o.heldCount?.() ?? 0, at: performance.now() }
+      }
       const done = await o.win.act(action, o.cut.signal)
-      acted = action.do !== 'wait' && action.do !== 'go'
+      acted = mayWrite
       history.push({ do: action.do, ...('ref' in action ? { ref: action.ref } : {}), outcome: done })
     }
     return { kind: 'end', reason: 'rounds', end: stopped('rounds') }
   }
 
-  /** Until every write the writer holds is recorded, or `ms` passed (false). */
-  async function idleWithin(writer: FrameWriter, ms: number): Promise<boolean> {
+  /** Until every write the writer holds is recorded, or `ms` passed or the run was cut (false). */
+  async function idleWithin(writer: FrameWriter, ms: number, signal?: AbortSignal): Promise<boolean> {
     let timer: ReturnType<typeof setTimeout> | undefined
+    let onCut = () => {}
     const idle = await Promise.race([
       writer.idle().then(() => true),
-      new Promise<false>(resolve => { timer = setTimeout(() => resolve(false), Math.max(0, ms)) }),
+      new Promise<false>(resolve => {
+        timer = setTimeout(() => resolve(false), Math.max(0, ms))
+        onCut = () => resolve(false)
+        if (signal?.aborted) resolve(false)
+        else signal?.addEventListener('abort', onCut, { once: true })
+      }),
     ])
     clearTimeout(timer)
+    signal?.removeEventListener('abort', onCut)
     return idle
   }
 
@@ -370,17 +395,26 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
       const since = writer.heldCount()
       if (watch) await watchForWrite(writer, since, Math.min(moment, left()), signal)
       if (writer.sending() > 0) {
-        if (!(await idleWithin(writer, left()))) {
-          if (writer.sending() > 0) { writer.abandon('timeout'); return false }
-          break
-        }
+        if (!(await idleWithin(writer, left(), signal))) break
       } else if (writer.heldCount() === since) break
       // The page got answers (or refusals): it may go on with another write — the same moment again, within the limit.
       answered = true
       watch = left() > 0
     }
+    // Past the limit or cut by a stop with a write still on its way: given up as at the end (unknown, the run locked).
+    if (writer.sending() > 0 && (left() <= 0 || signal.aborted)) { writer.abandon('timeout'); return false }
     if (answered && !signal.aborted) await win.settled?.(signal)
     return true
+  }
+
+  /**
+   * Before a press that follows one which has made no write yet: watches until `pressGapMs` after that press for a write
+   * the page may still start (none held since `since`). True when one came (then the press is not done this round).
+   */
+  async function writeCameLate(writer: FrameWriter, since: number, at: number, signal: AbortSignal): Promise<boolean> {
+    const rest = at + (deps.pressGapMs ?? L.pressGapMs) - performance.now()
+    if (rest > 0) await watchForWrite(writer, since, rest, signal)
+    return writer.heldCount() !== since
   }
 
   /** The consultation AI's write task. Off: nothing asked, started or sent. Its words only: never the page's text. */
@@ -678,7 +712,10 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
         task: o.task, items: o.items, steps: o.steps, adhoc: o.adhoc,
         frames: () => (typeof o.frames === 'function' ? o.frames() : o.frames),
         writes: () => writer?.seen() ?? [], locked: () => writer?.locked() ?? false, ...(o.actions ? { actions: o.actions } : {}),
-        ...(writer ? { sending: () => writer.sending() } : {}),
+        ...(writer ? {
+          sending: () => writer.sending(), heldCount: () => writer.heldCount(),
+          writeCameLate: (since: number, at: number) => writeCameLate(writer, since, at, o.cut.signal),
+        } : {}),
         settleWrites: (afterAction: boolean) => (writer ? settleWrites(writer, o.win, afterAction, o.cut.signal) : Promise.resolve(true)),
         cut: o.cut, trail: o.trail, budget, deadline, current: o.current, whyNot: o.whyNot, log,
       })

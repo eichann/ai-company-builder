@@ -633,8 +633,9 @@ async function workScenarios(win: BrowserShellWindow, sites: Sites) {
 
 /**
  * The write task wired (work.ts) on the real window: the operator presses a save whose page sends its write two seconds
- * later to a site that answers after 2.5 s, then presses again while that write is being sent. The second press is not
- * done (the app's own rule, not the operator's words), so the site gets one save — the frame allows two.
+ * later (after main's moment) to a site that answers after 2.5 s, then presses again at once — before that write is even
+ * held. The app waits for the first press's write before a second press and does not do it (its own rule, not the
+ * operator's words), so the site gets one save — the frame allows two.
  */
 async function workPressScenario(win: BrowserShellWindow, sites: Sites) {
   const out: Record<string, unknown> = {}
@@ -673,8 +674,9 @@ async function workPressScenario(win: BrowserShellWindow, sites: Sites) {
       const save = m.page.elements.find(e => e.name.outside === '遅い保存')?.ref ?? -1
       step++
       if (step === 1) return { ok: true, text: JSON.stringify({ do: 'click', ref: save }) }
-      // The first save's write is held about two seconds after the press: press again while it is being sent.
-      if (step === 2) { await wait(1500); return { ok: true, text: JSON.stringify({ do: 'click', ref: save }) } }
+      // At once: the first save's write is not held yet (the page sends it two seconds after the press). The app waits for
+      // it before this press (up to `pressGapMs` after the first) and does not do the press: no timing of the operator's.
+      if (step === 2) return { ok: true, text: JSON.stringify({ do: 'click', ref: save }) }
       return { ok: true, text: JSON.stringify({ do: 'done', result: '済み', unread: [] }) }
     },
   }

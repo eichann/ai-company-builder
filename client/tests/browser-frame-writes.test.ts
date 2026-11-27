@@ -484,6 +484,8 @@ interface WorkWorld {
   idleMaxMs?: number
   /** How long main watches for a write the page starts after a press (the real value is a second; short here). */
   writeStartMs?: number
+  /** How long after a press that made no write yet the next press waits (the real value is 5 s; short here). */
+  pressGapMs?: number
   /** The page's script makes the write this long after the press (the press itself returns at once). */
   writeDelayMs?: number
   /** The site takes this long to answer a write. */
@@ -494,6 +496,8 @@ interface WorkWorld {
   followUpMs?: number
   /** After a press the page keeps making a write outside the frames every this many ms (a runaway autosave). */
   autosaveEveryMs?: number
+  /** The member's stop (the turn's signal) comes this long after the task starts. */
+  abortAfterMs?: number
   frameConfirm: () => Promise<BrowserLinesAnswer>
   frameGet: () => Promise<BrowserLinesAnswer>
   /** The wiring's clock (default: the real one), and what each operator step does to it. */
@@ -601,14 +605,19 @@ function workWorld(over: Partial<WorkWorld> = {}) {
     api: api as never, operator: () => operator, cliPath: () => '/bin/claude', parentEnv: () => ({}),
     ...(w.idleMaxMs !== undefined ? { idleMaxMs: w.idleMaxMs } : {}),
     writeStartMs: w.writeStartMs ?? 20,
+    pressGapMs: w.pressGapMs ?? 50,
     ...(w.now ? { now: w.now } : {}),
     ...(w.skillSteps ? { skillSteps: async (_root: string, skill: string) => w.skillSteps?.(skill) ?? null } : {}),
   })
   const cards: string[] = []
-  const tool = createBrowserWorkTool(input => wiring.work({
-    companyId: COMPANY, conversationId: 'conv-1', companyRoot: w.skillSteps ? '/company' : null, site: input.site, task: input.task, skill: input.skill, items: input.items,
-    signal: new AbortController().signal, onCard: id => cards.push(id),
-  }), [HOST])
+  const tool = createBrowserWorkTool(input => {
+    const turn = new AbortController()
+    if (w.abortAfterMs !== undefined) setTimeout(() => turn.abort(), w.abortAfterMs)
+    return wiring.work({
+      companyId: COMPANY, conversationId: 'conv-1', companyRoot: w.skillSteps ? '/company' : null, site: input.site, task: input.task, skill: input.skill, items: input.items,
+      signal: turn.signal, onCard: id => cards.push(id),
+    })
+  }, [HOST])
   return { w, wiring, tool, cards, stopAutosave: () => { stopAutosave = true } }
 }
 
@@ -836,6 +845,45 @@ test('while a write is being sent the app does not press for the operator (a sec
   assert.deepEqual(seen.writes.map(x => x.result), [WORK_WRITE_WORDS.done], 'the next look came once the write was decided')
   assert.equal(w.site.requests.length, 1, 'the save went once')
   assert.equal(w.calls.filter(c => c === 'framePermit').length, 1)
+})
+
+test('a press whose page writes only later (after main\'s moment): the next press waits for it, up to the gap after the first press, and is not done — the site gets one save', async () => {
+  const { w, tool } = workWorld({
+    answers: [CLICK_SAVE, CLICK_SAVE, DONE_PLAIN], writeStartMs: 100, writeDelayMs: 600, siteDelayMs: 300, pressGapMs: 3000,
+    frameStart: () => ({ kind: 'ok', value: started({ needsApproval: false }) }),
+  })
+  await tool.execute({ site: HOST, task: 'x', skill: 'coupons' })
+  // The first look came before the page wrote (no write yet); the second press waited for it and was not done.
+  assert.deepEqual(w.materials.map(writesSeen)[1].writes, [])
+  assert.deepEqual(w.calls.filter(c => c.startsWith('act')), ['act click'])
+  const seen = w.materials[2] as { history: Array<{ do: string; outcome: string; result?: string }>; writes: Array<{ result: string; afterAction: number }> }
+  assert.deepEqual(seen.history.map(h => [h.do, h.outcome, h.result ?? null]), [['click', 'ok', null], ['click', 'refused', WORK_NOT_PRESSED_WHILE_SENDING]])
+  assert.deepEqual(seen.writes.map(x => [x.result, x.afterAction]), [[WORK_WRITE_WORDS.done, 1]])
+  assert.equal(w.site.requests.length, 1)
+})
+
+test('a write held during a wait names the press before it, not the wait', async () => {
+  const { w, tool } = workWorld({
+    answers: ['{"do":"click","ref":2}', '{"do":"wait","seconds":1}', '{"do":"wait","seconds":1}', DONE_PLAIN], saveOnSnapshot: 3, siteDelayMs: 300,
+    frameStart: () => ({ kind: 'ok', value: started({ needsApproval: false }) }),
+  })
+  await tool.execute({ site: HOST, task: 'x', skill: 'coupons' })
+  const writes = (w.materials[2] as { writes: Array<{ afterAction: number; sending?: true }> }).writes
+  assert.deepEqual(writes.map(x => [x.afterAction, x.sending ?? false]), [[1, false], [1, true]])
+})
+
+test('the member\'s stop cuts the wait for a write on its way: given up as unknown at once, never waited for the whole limit', async () => {
+  const { w, wiring, tool } = workWorld({
+    answers: [CLICK_SAVE, DONE_PLAIN], pressDoesNotWait: true, sendHangs: true, idleMaxMs: 30_000, abortAfterMs: 300,
+    frameStart: () => ({ kind: 'ok', value: started({ needsApproval: false }) }),
+  })
+  const at = Date.now()
+  const said = await tool.execute({ site: HOST, task: 'x', skill: 'coupons' })
+  assert.ok(Date.now() - at < 5000, `ended in ${Date.now() - at} ms`)
+  assert.equal(said, workWordsForAi({ kind: 'unknown' }, [], []))
+  assert.equal(w.materials.length, 1)
+  const view = wiring.card(COMPANY, FRAME_RUN)
+  assert.ok(view?.ok && view.view.result?.outcome === 'unknown')
 })
 
 test('the writer\'s idle waits for a write the page holds while it waits', async () => {

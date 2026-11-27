@@ -57,6 +57,12 @@ export const BROWSER_WORK_LIMITS = Object.freeze({
    * moment later, before the next look at the page (one value for every site; then every held write is waited for).
    */
   writeStartMs: 1000,
+  /**
+   * A press, typing or choice that follows another such action which has made no write yet is done only once this long
+   * has passed since that one (a page may start its write seconds after the press): one value for every site; usually
+   * already over, since the operator's own step takes longer.
+   */
+  pressGapMs: 5000,
 })
 const L = BROWSER_WORK_LIMITS
 
