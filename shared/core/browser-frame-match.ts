@@ -18,9 +18,11 @@
  * a frame with one fits only an address whose raw query (everything after the first `?`) is **byte for byte** the declared
  * one — no decoding, no reordering, so an encoding trick, `;`, `+`, a fragment, a repeated or extra key, `key=` for `key`
  * or another order is simply another string. The declared query is the parser's one canonical spelling
- * (`browserSkillQueryProblem`), asked again here: a frame whose query is not one fits nothing.
+ * (`browserSkillQueryProblem`), asked again here: a frame whose query is not one fits nothing. **A value placeholder**
+ * (`key={n}` / `key={x}`, agent-browser.md "A query value not fixed") fits one sent value of its kind, 1–64 plain
+ * characters — never an empty or encoded one; everything else stays exact (`browserSkillQueryFits`).
  */
-import { browserMadeSegmentPlace, browserSkillQueryProblem, type BrowserSkillWrite } from './browser-skill'
+import { browserMadeSegmentPlace, browserSkillQueryFits, browserSkillQueryProblem, type BrowserSkillWrite } from './browser-skill'
 
 export interface BrowserFrameRequest {
   /** The request's method as sent (upper case). */
@@ -91,7 +93,7 @@ export function browserFrameMismatch(frame: BrowserSkillWrite, request: BrowserF
   if (typeof request.path !== 'string' || request.path.length > BROWSER_FRAME_REQUEST_LIMITS.path) return 'path'
   const [path, query] = splitOnce(request.path)
   if (!pathFits(frame.path, path, made)) return pathFits(frame.path, path, 'shape') ? 'made' : 'path'
-  if (frame.query === null ? query !== null : browserSkillQueryProblem(frame.query) !== null || query !== frame.query) return 'query'
+  if (frame.query === null ? query !== null : browserSkillQueryProblem(frame.query) !== null || query === null || !browserSkillQueryFits(frame.query, query)) return 'query'
   const declared = frame.fields._method
   const sent = Object.prototype.hasOwnProperty.call(request.fields, '_method') ? request.fields._method : undefined
   if (declared !== sent) return 'method-override'

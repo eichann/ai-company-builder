@@ -145,6 +145,30 @@ describe('a request with a query (agent-browser.md "A write with an exact query"
     for (const q of ['_method=DELETE', 'a%20b', 'a;b', 'a&a', 'a=']) expect([q, browserFrameMismatch(frame('/a', {}, 'POST', q), at(`/a?${q}`))]).toEqual([q, 'query'])
   })
 
+  it('a value not fixed ("A query value not fixed"): one plain value of its kind, everything else as exact as before', () => {
+    const x = frame('/api/tags', {}, 'POST', 'return={x}')
+    for (const p of ['/api/tags?return=1', '/api/tags?return=folder-7.v2_~', `/api/tags?return=${'a'.repeat(64)}`]) expect([p, browserFrameMismatch(x, at(p))]).toEqual([p, null])
+    for (const p of [
+      '/api/tags', '/api/tags?', '/api/tags?return', '/api/tags?return=', // missing or empty: never fits
+      '/api/tags?return=%31', '/api/tags?return=a%20b', '/api/tags?return=a+b', '/api/tags?return=a;b', '/api/tags?return=a#b', '/api/tags?return=a/b', '/api/tags?return=ä',
+      '/api/tags?return=a=b', `/api/tags?return=${'a'.repeat(65)}`,
+      '/api/tags?return=1&x', '/api/tags?x&return=1', '/api/tags?return=1&return=2', '/api/tags?Return=1', '/api/tags?%72eturn=1', // keys exact
+      '/api/tags?return=1&_method=DELETE', '/api/tags?return={x}x', '/api/tags?returnx', '/api/tags?return1',
+    ]) expect([p, browserFrameMismatch(x, at(p))]).toEqual([p, 'query'])
+    // `{n}`: digits only.
+    const n = frame('/api/tags', {}, 'POST', 'page={n}')
+    expect(browserFrameMismatch(n, at('/api/tags?page=12'))).toBeNull()
+    for (const p of ['/api/tags?page=1a', '/api/tags?page=', '/api/tags?page=-1', '/api/tags?page=%31']) expect([p, browserFrameMismatch(n, at(p))]).toEqual([p, 'query'])
+    // Two keys: the declared order, a literal beside a placeholder compared byte for byte.
+    const two = frame('/api/tags', {}, 'POST', 'kind=label&return={x}')
+    expect(browserFrameMismatch(two, at('/api/tags?kind=label&return=7'))).toBeNull()
+    for (const p of ['/api/tags?return=7&kind=label', '/api/tags?kind=Label&return=7', '/api/tags?kind=label', '/api/tags?kind=label&return=7&return=8']) {
+      expect([p, browserFrameMismatch(two, at(p))]).toEqual([p, 'query'])
+    }
+    // A frame holding a placeholder where the grammar refuses one (a name) fits nothing.
+    expect(browserFrameMismatch(frame('/api/tags', {}, 'POST', '{x}=1'), at('/api/tags?a=1'))).toBe('query')
+  })
+
   it('an AI-written plan carries no query', () => {
     expect(browserAdhocWritesProblem([frame('/api/a', {}, 'POST', 'return')])).toBe('query')
     expect(browserAdhocWritesProblem([frame('/api/a')])).toBeNull()

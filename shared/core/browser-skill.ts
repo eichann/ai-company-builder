@@ -17,6 +17,7 @@
  * **An exact query** (agent-browser.md "A write with an exact query"): a write target may carry `query`, the raw query
  * string its address must carry **exactly** (`key` or `key=value` plain words joined by `&`, in the declared order, each key
  * once, never a method override or a login / CSRF / session name). Without it, an address with any query fits nothing.
+ * A value may be `{n}` or `{x}` (agent-browser.md "A query value not fixed"): one sent value of that kind, never empty.
  *
  * **What this run made** (agent-browser.md "Writes only to what this run made"): a write target may carry an `id`, and a
  * later target's path one `{made:<id>}` segment — that segment then fits only an id the named target's own write returned
@@ -178,7 +179,7 @@ export const BROWSER_SKILL_PROBLEM_WORDS: Readonly<Record<BrowserSkillProblem, s
   'bad-path': '書き込み先のアドレスの書き方が決まりに合っていません。',
   'bad-max': '書き込み先の回数は 1〜20 にしてください。',
   'bad-fields': '書き込み先の決まった項目の書き方が決まりに合っていません。',
-  'bad-query': '書き込み先のアドレスの後ろ（?のあと、query）は、「名前」か「名前=値」（英数字と . _ ~ - だけ）を & でつないだもの（5つまで、同じ名前は1回）にしてください。method やログイン・合言葉にかかわる名前は書けません。',
+  'bad-query': '書き込み先のアドレスの後ろ（?のあと、query）は、「名前」か「名前=値」（英数字と . _ ~ - だけ。決まっていない値は {n}（数字）か {x}）を & でつないだもの（5つまで、同じ名前は1回）にしてください。method やログイン・合言葉にかかわる名前は書けません。',
   'bad-override': '_method は POST の書き込み先にだけ、PUT・PATCH・DELETE のどれかで書けます。',
   'duplicate-write': '同じ書き込み先が2回書かれています。',
   'bad-write-id': '書き込み先の名前（id）は、英小文字で始まる英小文字・数字・ハイフン（32文字まで）で、ほかと重ならないようにしてください。',
@@ -236,6 +237,53 @@ const LITERAL_SEGMENT_RE = /^[A-Za-z0-9._~-]+$/
 const QUERY_WORD_RE = /^[A-Za-z0-9._~-]+$/
 
 /**
+ * A declared query value that is not fixed (agent-browser.md "A query value not fixed"): `{n}` (digits) or `{x}` (one plain
+ * word), always the whole value of a `key=` part.
+ */
+export const BROWSER_SKILL_QUERY_PLACEHOLDERS = ['{n}', '{x}'] as const
+export const isBrowserSkillQueryPlaceholder = (v: string): boolean => (BROWSER_SKILL_QUERY_PLACEHOLDERS as readonly string[]).includes(v)
+/** What a value placeholder fits in a sent address: never empty, never encoded (no `%`, `+`, `;`, `#`, `=`), ≤ 64. */
+const QUERY_PLACEHOLDER_FITS: Readonly<Record<string, RegExp>> = Object.freeze({ '{n}': /^[0-9]{1,64}$/, '{x}': /^[A-Za-z0-9._~-]{1,64}$/ })
+
+/**
+ * Does a sent raw query (everything after the first `?`) fit a declared one (the grammar's: `browserSkillQueryProblem`)?
+ * Without a placeholder: the identical string, byte for byte. With one: the same number of `&` parts in the same order,
+ * each name byte for byte, an `=` exactly where the declaration has one, a literal value byte for byte and a placeholder
+ * value as `QUERY_PLACEHOLDER_FITS` says — so another order, an extra / missing / repeated key, an empty or encoded value,
+ * `;`, `+`, `#` or a second `=` never fit.
+ */
+export function browserSkillQueryFits(declared: string, sent: string): boolean {
+  if (declared === sent) return true
+  const want = declared.split('&')
+  const got = sent.split('&')
+  if (want.length !== got.length) return false
+  return want.every((w, i) => {
+    const g = got[i]
+    const wa = w.indexOf('=')
+    const ga = g.indexOf('=')
+    if (wa === -1 || ga === -1) return w === g
+    if (w.slice(0, wa) !== g.slice(0, ga)) return false
+    const wv = w.slice(wa + 1)
+    const fits = isBrowserSkillQueryPlaceholder(wv) ? QUERY_PLACEHOLDER_FITS[wv] : null
+    return fits === null ? wv === g.slice(ga + 1) : fits.test(g.slice(ga + 1))
+  })
+}
+
+/** True when a declared query has a value placeholder (`key={n}` / `key={x}`). */
+export const browserSkillQueryHasPlaceholder = (query: string): boolean =>
+  query.split('&').some(p => p.includes('=') && isBrowserSkillQueryPlaceholder(p.slice(p.indexOf('=') + 1)))
+
+/** A declared query in plain words for a card: a placeholder value said as （何かの数字） / （何かの値）, never a guess. */
+export function browserSkillQueryWords(query: string): string {
+  return query.split('&').map((part) => {
+    const at = part.indexOf('=')
+    if (at === -1) return part
+    const v = part.slice(at + 1)
+    return `${part.slice(0, at + 1)}${v === '{n}' ? '（何かの数字）' : v === '{x}' ? '（何かの値）' : v}`
+  }).join('&')
+}
+
+/**
  * A path pattern: `/` + segments, each a plain literal (not `.` / `..`) or a placeholder (`{n}`, `{x}`, and `{created}`
  * only where allowed); a trailing `/` is kept; a query only where allowed (`key` or `key=value`, plain words).
  */
@@ -270,7 +318,8 @@ export function isBrowserSkillPath(s: unknown, allow: { query?: boolean; created
  * once (A–Z folded: a site may read `Return` and `return` alike); `key=` (an empty value) is refused — a bare `key` is the
  * only way to say "present without a value", so the two can never be confused; **no key naming a method** (`_method`,
  * `X-HTTP-Method-Override`, `method`… anything containing `method`, A–Z folded: an override never rides in the address)
- * and no login, CSRF or session name (`isSensitiveFieldName`). Null when it is one.
+ * and no login, CSRF or session name (`isSensitiveFieldName`). **A value may be a placeholder** (agent-browser.md "A query
+ * value not fixed"): `{n}` or `{x}`, the whole value — never part of one, never a name. Null when it is one.
  */
 export function browserSkillQueryProblem(q: unknown): 'bad-query' | null {
   if (typeof q !== 'string' || q.length === 0 || q.length > BROWSER_SKILL_LIMITS.writeQuery) return 'bad-query'
@@ -281,7 +330,7 @@ export function browserSkillQueryProblem(q: unknown): 'bad-query' | null {
     const at = part.indexOf('=')
     const key = at === -1 ? part : part.slice(0, at)
     const value = at === -1 ? null : part.slice(at + 1)
-    if (!QUERY_WORD_RE.test(key) || (value !== null && !QUERY_WORD_RE.test(value))) return 'bad-query'
+    if (!QUERY_WORD_RE.test(key) || (value !== null && !QUERY_WORD_RE.test(value) && !isBrowserSkillQueryPlaceholder(value))) return 'bad-query'
     const folded = key.replace(/[A-Z]/g, c => c.toLowerCase())
     if (keys.has(folded) || folded.includes('method') || isSensitiveFieldName(key)) return 'bad-query'
     keys.add(folded)
@@ -483,6 +532,9 @@ export function browserSkillWriteLine(write: BrowserSkillWrite): string {
   const fixed = Object.entries(write.fields).map(([k, v]) => `${k}=${v}`)
   const made = browserMadeFrom(write.path)
   const only = made === null ? '' : `（この作業の中で、${made}つ目の書き込み先で作ったものにだけ）`
-  const query = write.query === null ? '' : `?${write.query}（アドレスの ? のあとが「${write.query}」とまったく同じときだけ）`
+  const shown = write.query === null ? '' : browserSkillQueryWords(write.query)
+  const query = write.query === null ? ''
+    : browserSkillQueryHasPlaceholder(write.query) ? `?${shown}（アドレスの ? のあとが「${shown}」の形のときだけ。（何かの…）のところの値は決まっていません）`
+      : `?${write.query}（アドレスの ? のあとが「${write.query}」とまったく同じときだけ）`
   return `${write.path}${query} に${what}：${write.max}回まで${only}${fixed.length > 0 ? `（決まった項目：${fixed.join('、')}）` : ''}`
 }

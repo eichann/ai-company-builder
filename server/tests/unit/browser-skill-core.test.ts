@@ -289,6 +289,33 @@ describe('a write with an exact query (agent-browser.md "A write with an exact q
   })
 })
 
+describe('a query value not fixed (agent-browser.md "A query value not fixed": `{n}` / `{x}` as a value)', () => {
+  const one = (query: string) => `domain: shop.example.test\nwrites:\n  - { method: POST, path: /api/tags, query: ${JSON.stringify(query)}, max: 1 }\n`
+
+  it.each([
+    ['return={x}', true],
+    ['return={n}', true],
+    ['a=1&return={x}&b', true],
+    ['a={n}&b={x}', true],
+    ['{x}', false], ['{x}=1', false], ['{n}={x}', false], ['return&{x}', false], // a placeholder is never a name
+    ['return={x}x', false], ['return=x{x}', false], ['return={X}', false], ['return={made:1}', false], ['return={created}', false], ['return={}', false], ['return={k}', false],
+    ['return={x}&return={n}', false], // a key twice
+    ['_method={x}', false], ['csrf={x}', false], ['session={n}', false], // never an override or a login name
+    ['return={x}=1', false],
+  ])('%s → %s', (query, ok) => {
+    expect(browserSkillQueryProblem(query)).toBe(ok ? null : 'bad-query')
+    expect(problemOf(one(query))).toBe(ok ? null : 'bad-query')
+  })
+
+  it('the card says which value is not fixed, in plain words', () => {
+    const r = parseBrowserSkillDeclaration(one('return={x}&n={n}&fixed=1'))
+    if (!r.ok) throw new Error(r.problem)
+    expect(browserSkillWriteLine(r.declaration.writes[0])).toBe(
+      '/api/tags?return=（何かの値）&n=（何かの数字）&fixed=1（アドレスの ? のあとが「return=（何かの値）&n=（何かの数字）&fixed=1」の形のときだけ。（何かの…）のところの値は決まっていません） に送る（作る・保存する）：1回まで',
+    )
+  })
+})
+
 describe('where a browser Skill stands (agent-browser.md "Department Skills")', () => {
   it('the company\'s and one department folder\'s `.claude/skills/<name>`, nothing deeper or stranger', () => {
     expect(parseBrowserSkillPath('.claude/skills/order-copy')).toEqual({ department: null, name: 'order-copy', path: '.claude/skills/order-copy' })

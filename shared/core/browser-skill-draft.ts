@@ -12,10 +12,10 @@
  *   method override the declaration cannot say are left out, each with a fixed reason. `max` is the most a write was sent in
  *   one recording (what one run did), never the sum over recordings. **A query is named only when the recording says it was
  *   sent exactly as kept** (format 2's
- *   `bareQuery`: names only, plain words, once — `?return`); a query that carried a value, or one a format-1 recording
- *   cannot vouch for, leaves its write out (`query-values`): the kept form drops values, so naming it would permit a request
- *   the person never sent (Codex review of the design memo). `bareQuery` is the app's word, as the whole recording is (made
- *   by the app's window from the person's own actions; an AI cannot make or send one): a draft stays its author's until an
+ *   `bareQuery`: names only, plain words, once — `?return`); a query sent with values (`bareQuery` false) is named with a
+ *   value placeholder per name (`?return={x}`, marked `query-value-open`: the kept form drops values, so a fixed value would
+ *   be a guess — incident 2026-11-27), and one a format-1 recording cannot vouch for leaves its write out (`query-values`).
+ *   `bareQuery` is the app's word, as the whole recording is (made by the app's window from the person's own actions; an AI cannot make or send one): a draft stays its author's until an
  *   owner / admin approves it. `{made:<id>}` is put where a path's one placeholder most likely
  *   holds what one earlier create of the same recording made (its answer carried `id` / `data.id`, the ids the app
  *   reports): it then fits only an id the site handed this run, never any number — whether that endpoint really mints its
@@ -33,7 +33,7 @@
  *   marker may be added: they only narrow.
  */
 import { browserRecordingProblem, type BrowserRecordedSend, type BrowserRecordingContent } from './browser-recording'
-import { browserMadeSegmentPlace, browserSkillQueryProblem, BROWSER_SKILL_LIMITS, isBrowserSkillPath, parseBrowserSkillDeclaration, type BrowserSkillDeclaration, type BrowserSkillWrite } from './browser-skill'
+import { browserMadeSegmentPlace, browserSkillQueryHasPlaceholder, browserSkillQueryProblem, BROWSER_SKILL_LIMITS, isBrowserSkillPath, parseBrowserSkillDeclaration, type BrowserSkillDeclaration, type BrowserSkillWrite } from './browser-skill'
 
 export const BROWSER_SKILL_DRAFT_LIMITS = Object.freeze({
   /** Recordings one draft is made from (the person's own, of one domain). */
@@ -43,7 +43,7 @@ export const BROWSER_SKILL_DRAFT_LIMITS = Object.freeze({
 /** Why a recorded write is not in the draft: fixed words. */
 export type BrowserSkillDraftLeftOut = 'no-answer' | 'not-taken' | 'deletes' | 'wide-path' | 'bad-path' | 'query' | 'query-values' | 'override' | 'any-segment'
 /** What the person and the reviewer are told about a write of the draft: fixed words. */
-export type BrowserSkillDraftMark = 'updates-existing' | 'id-in-body' | 'may-delete'
+export type BrowserSkillDraftMark = 'updates-existing' | 'id-in-body' | 'may-delete' | 'query-value-open'
 /** Why no draft is made. */
 export type BrowserSkillDraftRefusal = 'not-a-recording' | 'domains' | 'too-many-recordings' | 'no-writes' | 'too-many-writes'
 
@@ -72,6 +72,7 @@ export const BROWSER_SKILL_DRAFT_WORDS = Object.freeze({
     'updates-existing': 'すでにあるものを変える書き込みです。',
     'id-in-body': '送る中身に番号らしい欄があります。新しく作るときの値を決めておくと、すでにあるものを変えられなくなります。',
     'may-delete': 'アドレスに「消す」にあたる言葉があります。消す書き込みかもしれません。',
+    'query-value-open': 'アドレスの ? のあとの値は記録に残していないので、（何かの値）としています。どんな値でも合います。決まった値なら、その値に直してください。',
   } satisfies Record<BrowserSkillDraftMark, string>),
   leftOut: Object.freeze({
     'no-answer': 'サイトから答えがなかった書き込みは入れていません。',
@@ -80,7 +81,7 @@ export const BROWSER_SKILL_DRAFT_WORDS = Object.freeze({
     'wide-path': 'どこにでも書ける形のアドレスは入れていません。',
     'bad-path': '決まりで書けない形のアドレスは入れていません。',
     query: 'アドレスの ? のあとが決まりで書けない形の書き込みは入れていません。',
-    'query-values': 'アドレスの ? のあとに値があった（または記録から分からない）書き込みは入れていません。',
+    'query-values': 'アドレスの ? のあとをどう送ったか記録から分からない（前の形の記録の）書き込みは入れていません。',
     override: '決まりで書けない方法の書き込みは入れていません。',
     'any-segment': 'アドレスに、どんな言葉にも合ってしまう段（記録で伏せた言葉など）がある書き込みは入れていません。',
   } satisfies Record<BrowserSkillDraftLeftOut, string>),
@@ -127,10 +128,14 @@ function targetOf(s: BrowserRecordedSend): { method: DraftTarget['method']; over
   if (!isBrowserSkillPath(path)) return 'bad-path'
   let query: string | null = null
   if (at !== -1) {
-    // Only a query the recording vouches for as sent exactly (format 2): the kept form drops values and repeats.
-    if (s.bareQuery !== true) return 'query-values'
-    query = s.address.slice(at + 1)
-    if (query.split('&').some(isPlaceholder) || browserSkillQueryProblem(query)) return 'query'
+    // A format-1 recording cannot say how the query was sent: left out. Format 2 says it (`bareQuery`): sent exactly as kept
+    // (names only) → as it is; with values (`false`) → each name with a value placeholder, `key={x}`: the recording keeps no
+    // value, so none is guessed (incident 2026-11-27: `?return=<a value>`).
+    if (s.bareQuery !== true && s.bareQuery !== false) return 'query-values'
+    const kept = s.address.slice(at + 1)
+    // A masked name (`{x}`, `{k}`) is never a name the grammar takes: left out as `query` below.
+    query = s.bareQuery ? kept : kept.split('&').map(k => `${k}={x}`).join('&')
+    if (browserSkillQueryProblem(query)) return 'query'
   }
   return { method: s.method, override: s.override as DraftTarget['override'], path, query }
 }
@@ -138,7 +143,7 @@ function targetOf(s: BrowserRecordedSend): { method: DraftTarget['method']; over
 /** A path segment or query name that says delete / remove (`bulk-delete`, `remove_item`): a POST may delete too. */
 const DELETE_WORD_RE = /(^|[-_])(delete|remove|destroy|trash|erase|purge|discard)([-_]|$)/i
 const saysDelete = (path: string, query: string | null) =>
-  [...path.split('/'), ...(query === null ? [] : query.split('&'))].some(w => DELETE_WORD_RE.test(w))
+  [...path.split('/'), ...(query === null ? [] : query.split(/[&=]/))].some(w => DELETE_WORD_RE.test(w))
 
 /** A body field's last word ends with `id` (`aid`, `group_id`, `items[{n}][id]`): it may name an existing thing. */
 const namesAnId = (name: string) => /id$/i.test(name.split(/[.[\]]+/).filter(Boolean).pop() ?? '')
@@ -255,6 +260,7 @@ export function browserSkillDraftFrom(recordings: readonly BrowserRecordingConte
     if (changesExisting) marks.push('updates-existing')
     if (idFields.length > 0) marks.push('id-in-body')
     if (saysDelete(g.path, g.query)) marks.push('may-delete')
+    if (g.query !== null && browserSkillQueryHasPlaceholder(g.query)) marks.push('query-value-open')
     return { write: i + 1, marks, idFields, seen: g.seen }
   })
   return { ok: true, draft: { text, declaration: parsed.declaration, writes, leftOut } }

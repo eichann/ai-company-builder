@@ -3961,8 +3961,9 @@ writes:
   `+`, `;`, `#`, `?`, space, no empty part), so no character has two spellings; **`key=` (an empty value) is refused** — a
   bare `key` is the only way to say "present without a value"; a key once (A–Z folded); **no key containing `method`**
   (A–Z folded: `_method`, `X-HTTP-Method-Override`, `_HttpMethod`… — an override never rides in the address, I4) and no
-  login / CSRF / session name (`isSensitiveFieldName`). Anything else → `bad-query`. Values are fixed words: no
-  placeholder or wildcard exists in a query. The path itself still never holds a `?` (`bad-path`).
+  login / CSRF / session name (`isSensitiveFieldName`). Anything else → `bad-query`. A value is a fixed word or — since
+  "A query value not fixed" below — exactly `{n}` / `{x}`; a name never holds a placeholder. The path itself still never
+  holds a `?` (`bad-path`).
 - **The parsed write** (`BrowserSkillWrite.query: string | null`, **required in the type**, so no copy of a frame can drop
   it — a frame that lost its query would let the same path through without one). The same path with and without a query,
   or with two queries, are separate targets (the duplicate check includes it). `{n}`, `{x}`, `{made:<id>}` and every path
@@ -4014,6 +4015,59 @@ the column's trigger and CHECK; a database from before the column: its row reads
 `client/tests/browser-frame-writes.test.ts` (the view's query kept, absent = null; exact fit only; the permit's path; the
 card and result lines; an id the query carried never reported). Each guard mutation-checked; kept on purpose: the plan
 hash's query (the declaration hash already moves with it).
+
+### A query value not fixed (`key={x}` / `key={n}`; production incident 2026-11-27)
+
+A company Skill declared `{ method: POST, path: /api/tags, query: "return", max: 1 }`; on the real site ［作成］ sends
+`POST /api/tags?return=<a value>`. The format-2 recording said `bareQuery: false`, but a recording keeps no value, so
+nobody could write the exact query: the held write was refused as outside the frame (nothing sent) and the run stopped,
+saying 「画面が先に進めませんでした」. Generic (no site word in the core):
+
+- **The grammar** (`browserSkillQueryProblem`): a part's **value** may be exactly `{n}` (1–64 ASCII digits) or `{x}` (1–64
+  of `A–Z a–z 0–9 . _ ~ -`), the whole value (`return={x}x`, `{X}`, `{made:1}`, `{k}` refused). A **name** never is
+  (`{x}`, `{x}=1` refused) and stays exact; every other rule holds: 1–5 parts, a name once, no override / login / CSRF /
+  session name, ≤ 100 characters.
+- **The match** (`browserSkillQueryFits`, asked by `browserFrameMismatch` — the server's permit and the app's pre-check
+  alike): a declaration without a placeholder is still the identical string; with one, the same number of `&` parts in the
+  declared order, each name byte for byte, an `=` exactly where declared, a literal value byte for byte and a placeholder
+  value of its kind. So an empty value (`?return=`), a bare name (`?return`), an encoded value (`%41`), `+`, `;`, `#`,
+  a second `=`, `/`, non-ASCII, over 64, a missing / extra / repeated / reordered name and `_method` never fit (`query`).
+- **Stored** (`browser_frames.query`): its CHECK (added in place, unchangeable without a rebuild) allows only the plain
+  alphabet, so the adapter keeps a placeholder value as `==n` / `==x` (`storedFrameQuery` / `frameQueryFromStored`,
+  `adapters/sqlite/browser-frames.ts`) — a spelling the grammar never makes (a value never begins with `=`). A server
+  rolled back reads `return==x`, which its grammar refuses: that frame fits nothing (the safe side).
+- **Approval**: `return` → `return={x}` is another `browser.yaml`, so another declaration hash: approved anew, and a run on
+  the old one ends at its next permit (tested).
+- **The card** (`browserSkillWriteLine`, `browserSkillQueryWords`): 「/api/tags?return=（何かの値）（アドレスの ? のあとが
+  「return=（何かの値）」の形のときだけ。（何かの…）のところの値は決まっていません） に送る…」 (`{n}` → （何かの数字）); the
+  result card's line `POST /api/tags?return=（何かの値）` — never the value sent.
+- **The draft** ("A Skill's draft from a recording"): a recorded write with `bareQuery: false` is no longer left out — each
+  kept name becomes `name={x}` (`?kind&return` → `kind={x}&return={x}`), marked `query-value-open` (the words say the value
+  is not kept and fits any; fix it to the fixed value when there is one). D8 holds: no value is stored, only placeholders. A
+  masked name (`{x}` in the kept query) is still left out (`query`); a format-1 recording still cannot say how its query was
+  sent (`query-values`).
+- **Why the run stopped** (`workEndAfterRefusals`, `client/shared/browser-frame-writes.ts`, applied in `work.ts`): when a
+  held write was refused as outside the frames (`refused`) and the operator then stopped on `blocked`, `need-person` or
+  `not-found`, the reason is `refused` — the AI's fixed sentence and the card's headline say
+  「止まりました：書き込みが承認した範囲に合わなかったため、送らずに止めました。」. The app's own stops (a button, the time, the
+  network, the login…), `done` and `unknown` are kept.
+- **The refused write's line** (`workRefusedWriteLine`): its address in the recording's kept form (`browserRunAddressPattern`:
+  digits `{n}`, other words `{x}`, query names only) with `name=…` where the name carried a value —
+  `POST /api/tags?return=…（枠の外）`; another host or an unreadable address: `POST （枠の外）` as before. The member's card
+  only, as every write line.
+- **Rolling back the app**: an older app's core treats `return={x}` as a literal string, so it never fits a real request
+  (refused, nothing sent); deploy the server first, as for every frame rule.
+- **The model** (FramesLife): unchanged — a placeholder only changes which writes fit a frame, a precondition of `AppAsks`.
+
+Tests: `browser-skill-core.test.ts` (accept / refuse table: values, a placeholder as a name, in part of a value, other
+placeholders, a name twice, override / login names; the card's words), `browser-frame-match.test.ts` (any one plain value;
+empty, bare, encoded, `+`, `;`, `#`, `/`, non-ASCII, `=`, over 64, extra / missing / repeated / reordered names, another
+case; `{n}` digits only; two names with a literal beside; a placeholder as a name fits nothing), `browser-frames.test.ts`
+(the permit with a value, every near miss taking no unit, the stored spelling; `return` → `return={x}` needs approving
+again and ends the old run), `browser-skill-draft.test.ts` (`bareQuery` false → `{x}` per name, marked, the frame fitting
+the real request; a masked name left out; the generated recordings), `client/tests/browser-frame-writes.test.ts` (the app
+fits and permits `?return=<value>`, the card's （何かの値）; the refused line's kept form; the stop reason as a table and the
+incident end to end). Each guard mutation-checked.
 
 ## A Skill's draft from a recording (PRs 1–2 of 4: the core's two rules; the draft kept for its author's AI)
 

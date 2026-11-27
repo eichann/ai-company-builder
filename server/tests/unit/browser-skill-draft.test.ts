@@ -162,10 +162,11 @@ describe('what is left out, and why', () => {
       send(16, 'POST', '/api/orders', { status: 302 }), // an expired session sent to the login page: nothing done
     ])
     const d = draftOf([r])
-    expect(d.declaration.writes.map(w => w.path)).toEqual(['/api/orders'])
+    // Step 15's query was sent with a value (`bareQuery` false): its name with a value placeholder ("A query value not fixed").
+    expect(d.declaration.writes.map(w => [w.path, w.query])).toEqual([['/api/orders', null], ['/api/orders', 'preview={x}']])
     expect(d.leftOut.map(l => [l.step, l.reason])).toEqual([
       [2, 'not-taken'], [3, 'not-taken'], [4, 'no-answer'], [5, 'deletes'], [6, 'deletes'], [7, 'wide-path'], [8, 'wide-path'],
-      [9, 'wide-path'], [10, 'query'], [11, 'query'], [12, 'query'], [13, 'override'], [14, 'override'], [15, 'query-values'], [16, 'not-taken'],
+      [9, 'wide-path'], [10, 'query'], [11, 'query'], [12, 'query'], [13, 'override'], [14, 'override'], [16, 'not-taken'],
     ])
     for (const l of d.leftOut) expect(BROWSER_SKILL_DRAFT_WORDS.leftOut[l.reason]).toBeTruthy()
   })
@@ -201,6 +202,29 @@ describe('what is left out, and why', () => {
     for (const address of [null, 7, ['/a?b'], { includes: 1 }]) {
       expect(browserRecordingProblem({ format: 2, domain: SHOP, hosts: [], steps: steps({ address, bareQuery: true }) }, SHOP)).toBe('send')
     }
+  })
+
+  it('a query sent with values (`bareQuery` false: the incident of 2026-11-27) is named with `{x}` per name, marked, and fits any one value', () => {
+    // Lステップ's ［作成］ sent `POST /api/tags?return=<a value>`; the recording keeps `?return` and says it was not bare.
+    const d = draftOf([recording(LSTEP, [
+      send(1, 'POST', '/api/tags?return', { status: 204, bareQuery: false }),
+      send(2, 'POST', '/api/labels?kind&return', { bareQuery: false }),
+      send(3, 'POST', '/api/notes?return', { bareQuery: true }),
+    ])])
+    expect(d.declaration.writes.map(w => [w.path, w.query])).toEqual([['/api/tags', 'return={x}'], ['/api/labels', 'kind={x}&return={x}'], ['/api/notes', 'return']])
+    expect(d.text).toContain('query: "return={x}"')
+    expect(d.writes.map(w => w.marks.includes('query-value-open'))).toEqual([true, true, false])
+    expect(BROWSER_SKILL_DRAFT_WORDS.marks['query-value-open']).toContain('（何かの値）')
+    expect(d.leftOut).toEqual([])
+    // The frame fits the real request whatever the value, and never a bare name or an empty value.
+    const tags = d.declaration.writes[0]
+    expect(browserFrameMismatch(tags, { method: 'POST', path: '/api/tags?return=1', fields: {} })).toBeNull()
+    expect(browserFrameMismatch(tags, { method: 'POST', path: '/api/tags?return', fields: {} })).toBe('query')
+    expect(browserFrameMismatch(tags, { method: 'POST', path: '/api/tags?return=', fields: {} })).toBe('query')
+    // A masked name is never named, values or not; a name that says delete is still marked.
+    const masked = draftOf([recording(SHOP, [send(1, 'POST', '/api/a?{x}', { bareQuery: false }), send(2, 'POST', '/api/b?purge', { bareQuery: false })])])
+    expect(masked.leftOut).toEqual([{ recording: 0, step: 1, reason: 'query' }])
+    expect(masked.writes[0].marks).toEqual(['may-delete', 'query-value-open'])
   })
 
   it('a write whose address says delete or remove is marked: only the method DELETE is left out', () => {
@@ -367,16 +391,19 @@ describe('every draft is the person\'s own writes and always parses (generated r
         expect(w.method === 'DELETE' || w.fields._method === 'DELETE', `round ${round}`).toBe(false)
         // A write of the draft is one the person sent and the site took: the same method, override, query and path (but `{made}`).
         const sent = steps.filter((s): s is BrowserRecordedSend => s.kind === 'send' && s.status !== null && s.status >= 200 && s.status < 300)
-        const sameAddress = (address: string) => {
+        const sameAddress = (s: BrowserRecordedSend) => {
+          const address = s.address
           const [path, query = null] = address.split('?')
           const got = path.split('/')
           const want = w.path.split('/')
-          return query === w.query && got.length === want.length
+          // Sent exactly as kept: the names as they are; sent with values: each name with `{x}`, never a value.
+          const named = query === null ? null : s.bareQuery ? query : query.split('&').map(k => `${k}={x}`).join('&')
+          return named === w.query && got.length === want.length
             && want.every((seg, i) => seg === got[i] || (/^\{made:[0-9]+\}$/.test(seg) && (got[i] === '{n}' || got[i] === '{x}')))
         }
         // …and a query only from a send whose query the recording vouched for.
-        expect(sent.some(s => s.method === w.method && (s.override ?? undefined) === w.fields._method && sameAddress(s.address)
-          && (w.query === null || s.bareQuery === true)), `round ${round}: ${w.path}`).toBe(true)
+        expect(sent.some(s => s.method === w.method && (s.override ?? undefined) === w.fields._method && sameAddress(s)
+          && (w.query === null || typeof s.bareQuery === 'boolean')), `round ${round}: ${w.path}`).toBe(true)
       }
     }
     expect(drafted).toBeGreaterThan(150)

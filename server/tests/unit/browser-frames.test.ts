@@ -1175,6 +1175,28 @@ describe('frames: a write with an exact query (agent-browser.md "A write with an
     expect(next.planHash).not.toBe(run.planHash)
   })
 
+  it('a value not fixed (`return={x}`, "A query value not fixed"): one plain value fits, near misses take nothing; stored and read back as declared', async () => {
+    const run = await openQuery('return={x}')
+    expect(run.frames[0].query).toBe('return={x}')
+    // The column keeps its alphabet (its CHECK cannot change): the placeholder is kept in a spelling the grammar never makes.
+    expect(conn.prepare('SELECT query FROM browser_frames WHERE company_id = ? AND run_id = ? AND idx = 1').get(CO, run.runId)).toEqual({ query: 'return==x' })
+    for (const path of ['/api/labels', '/api/labels?return', '/api/labels?return=', '/api/labels?return=%41', '/api/labels?return=a+b', '/api/labels?return=a;b',
+      '/api/labels?return=a&x=1', '/api/labels?x=1&return=a', '/api/labels?return=a&return=b', '/api/labels?Return=a', '/api/labels?return=a=b',
+      `/api/labels?return=${'a'.repeat(65)}`, '/api/labels?return=a&_method=DELETE']) {
+      expect([path, ...reason(await permit(run.runId, 1, alice, at(path)))]).toEqual([path, 'BROWSER_FRAME_MISMATCH', 'query'])
+    }
+    expect(value(frames.get(alice, run.runId)).frames.map(f => f.used)).toEqual([0, 0])
+    expect(value(await permit(run.runId, 1, alice, at('/api/labels?return=folder-7.v2'))).frame).toBe(1)
+  })
+
+  it('a placeholder value is another declaration than the bare name: approved anew', async () => {
+    const run = await openQuery('return')
+    put(queryYaml('return={x}'))
+    expect(code(await permit(run.runId, 1, alice, at('/api/labels?return')))).toBe('BROWSER_SKILL_NOT_APPROVED')
+    expect(value(frames.get(alice, run.runId)).state).toBe('ended')
+    expect(code(await frames.start(alice, { skill: SKILL }, PC))).toBe('BROWSER_SKILL_NOT_APPROVED')
+  })
+
   it('an ad-hoc plan (the AI wrote it) may carry no query', async () => {
     const plan = { domain: DOMAIN, writes: [{ method: 'POST', path: '/api/labels', query: 'return', max: 1 }] }
     expect(code(await frames.start(alice, { plan }, PC))).toBe('BROWSER_FRAME_BAD_PLAN')

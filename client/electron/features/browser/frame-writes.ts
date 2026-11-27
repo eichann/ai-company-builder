@@ -19,7 +19,7 @@
 // page's own retry is a new hold that needs a new unit. A write held when the run stops or the window goes is failed,
 // never sent. No Electron; the HTTP client and the clocks are injected.
 import {
-  createdIdOf, pickFrame, readHeldWrite, sentFields, workWriteLogStep, workWriteLine,
+  createdIdOf, pickFrame, readHeldWrite, sentFields, workRefusedWriteLine, workWriteLogStep, workWriteLine,
   type HeldPageWrite, type HeldPageWriteAnswer, type HeldWriteShape, type WorkFrame,
 } from '../../../shared/browser-frame-writes'
 import { browserMadeFrom } from '../../../../shared/core/browser-skill'
@@ -145,7 +145,7 @@ export function createFrameWriter(deps: FrameWriterDeps) {
     // Outside every frame (an autosave, another target, a frame used up): refused, never asked for.
     const picked = pickFrame(deps.frames, shape, made)
     if ('mismatch' in picked) {
-      keep({ line: workWriteLine(shape.method, null), outcome: 'refused', status: null, sent: null, path: null, answerText: null }, 'refused')
+      keep({ line: workRefusedWriteLine(shape.method, held.url, deps.host), outcome: 'refused', status: null, sent: null, path: null, answerText: null }, 'refused')
       return fail
     }
     const { frame, request } = picked
