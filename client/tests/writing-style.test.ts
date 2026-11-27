@@ -167,3 +167,50 @@ test('the drafting AI gets the summary after the thread block, never inside it',
   assert.ok(footerAt > 0 && styleAt > footerAt)
   assert.equal(threadForAi(thread, { recordId: 'interaction-abc123' } as unknown as InboxItemView).includes('本人の書き方'), false)
 })
+
+const ONE_SOURCE = async (): Promise<WritingSourcesView> => ({ sources: [{ connectorId: 'mailco', label: 'メール', readable: true }] })
+
+test('「消す」 while a build is still running stays removed', async () => {
+  const w = world()
+  let release: () => void = () => {}
+  const gate = new Promise<void>(r => { release = r })
+  const slow = createWritingStyles({
+    dir: () => w.dir, userId: () => w.user.id, log: quiet,
+    server: { sources: ONE_SOURCE, samples: async (_c, id) => ({ ok: true, value: { connectorId: id, samples: samples(6, 6) } }) },
+    summarize: async () => { await gate; return STYLE },
+  })
+  await slow.setEnabled('co-a', true)
+  await slow.remove('co-a')
+  release()
+  await slow.whenIdle()
+  assert.equal(fs.existsSync(path.join(w.dir, 'u-sato', 'co-a.json')), false)
+})
+
+test('the server failing for a while keeps the summaries; no longer readable takes them away', async () => {
+  const w = world()
+  await w.styles.setEnabled('co-a', true)
+  await w.styles.whenIdle()
+  const answering = (status: number) => createWritingStyles({
+    dir: () => w.dir, userId: () => w.user.id, log: quiet, summarize: async () => STYLE,
+    server: { sources: ONE_SOURCE, samples: async () => ({ ok: false, status }) as never },
+  })
+  const flaky = answering(503)
+  await flaky.rebuild('co-a')
+  await flaky.whenIdle()
+  assert.equal((await w.styles.status('co-a'))!.styles.length, 2)
+  const gone = answering(409)
+  await gone.rebuild('co-a')
+  await gone.whenIdle()
+  assert.equal((await w.styles.status('co-a'))!.styles.length, 0)
+})
+
+test('status never answers for an account that signed out while the server was asked', async () => {
+  const w = world()
+  await w.styles.setEnabled('co-a', true)
+  await w.styles.whenIdle()
+  const switching = createWritingStyles({
+    dir: () => w.dir, userId: () => w.user.id, log: quiet, summarize: async () => STYLE,
+    server: { sources: async () => { w.user.id = 'u-tanaka'; return ONE_SOURCE() }, samples: async () => null },
+  })
+  assert.equal(await switching.status('co-a'), null)
+})

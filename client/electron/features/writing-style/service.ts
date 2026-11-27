@@ -64,6 +64,8 @@ const empty = (): KeptFile => ({ version: 1, enabled: false, styles: {}, note: n
 export function createWritingStyles(deps: WritingStylesDeps) {
   const now = deps.now ?? (() => Date.now())
   const log = deps.log ?? console
+  /** Bumped by 「消す」: a build started before it saves nothing (its summaries would come back). */
+  const generation = new Map<string, number>()
   /** When a stale summary's making was last started from a thread read, per account and company (memory only). */
   const refreshTried = new Map<string, number>()
   /** Builds running, per account and company: one at a time. */
@@ -97,37 +99,47 @@ export function createWritingStyles(deps: WritingStylesDeps) {
     const key = `${userId}\u0000${companyId}`
     const running = building.get(key)
     if (running) return running
+    const startedAt = generation.get(key) ?? 0
+    const current = () => (generation.get(key) ?? 0) === startedAt
     const job = (async () => {
       if (deps.aiAllowed?.() === false) { save(userId, companyId, k => ({ ...k, note: NOTE.aiStopped })); return }
       const sources = await deps.server.sources(companyId)
-      if (!sources) { save(userId, companyId, k => ({ ...k, note: NOTE.offline })); return }
+      if (!sources) { if (current()) save(userId, companyId, k => ({ ...k, note: NOTE.offline })); return }
       // A summary the member corrected by hand is theirs: never made again over it.
       const before = read(userId, companyId)
       const styles: WritingStyleSet = {}
       let few = false
       let failed = false
       let made = 0
+      // Pairs whose making failed for a passing reason (offline, the server or the AI not answering): the kept one stays.
+      const keepOld = new Set<string>()
       const controller = new AbortController()
       for (const source of sources.sources) {
         if (!source.readable || !isWritingConnectorId(source.connectorId)) continue
         const r = await deps.server.samples(companyId, source.connectorId)
-        if (!r || !r.ok) { failed = failed || !r; continue }
+        // 409 / 404: no longer readable or served — its summaries go. Anything else passes: they stay.
+        if (!r || (!r.ok && r.status !== 409 && r.status !== 404)) {
+          failed = true
+          for (const a of WRITING_AUDIENCES) keepOld.add(`${source.connectorId}:${a}`)
+          continue
+        }
+        if (!r.ok) continue
         const samples = r.value.samples
         const audiences = audiencesToSummarize(samples)
         if (audiences.length < WRITING_AUDIENCES.length) few = true
         for (const audience of audiences) {
           if (before.styles[source.connectorId]?.[audience]?.edited) continue
-          if (deps.aiAllowed?.() === false) { failed = true; break }
+          if (deps.aiAllowed?.() === false) { failed = true; keepOld.add(`${source.connectorId}:${audience}`); continue }
           const mine = samples.filter(s => s.audience === audience)
           let style: WritingStyle | null = null
           try { style = await deps.summarize(mine, controller.signal) } catch { style = null }
-          if (!style) { failed = true; continue }
+          if (!style) { failed = true; keepOld.add(`${source.connectorId}:${audience}`); continue }
           ;(styles[source.connectorId] ??= {})[audience] = { style, madeAt: new Date(now()).toISOString(), sampleCount: mine.length, edited: false }
           made++
         }
       }
       // Never under another account: a sign-in meanwhile drops what this build made.
-      if (deps.userId() !== userId) return
+      if (deps.userId() !== userId || !current()) return
       const readable = sources.sources.some(s => s.readable)
       const note = !readable ? NOTE.noSource : failed && made === 0 ? NOTE.aiFailed : few ? NOTE.fewMessages : NOTE.made
       save(userId, companyId, k => {
@@ -138,7 +150,7 @@ export function createWritingStyles(deps: WritingStylesDeps) {
           for (const a of WRITING_AUDIENCES) {
             const old = k.styles[s.connectorId]?.[a]
             const fresh = styles[s.connectorId]?.[a]
-            const pick = old?.edited ? old : fresh ?? (failed ? old : undefined)
+            const pick = old?.edited ? old : fresh ?? (keepOld.has(`${s.connectorId}:${a}`) ? old : undefined)
             if (pick) (next[s.connectorId] ??= {})[a] = pick
           }
         }
@@ -160,7 +172,8 @@ export function createWritingStyles(deps: WritingStylesDeps) {
     const userId = deps.userId()
     if (!userId || !ID.test(companyId)) return null
     const sources = await deps.server.sources(companyId)
-    if (!sources) return null
+    // Another account signed in meanwhile: never this one's summaries.
+    if (!sources || deps.userId() !== userId) return null
     const kept = read(userId, companyId)
     const labelOf = (id: string) => sources.sources.find(s => s.connectorId === id)?.label ?? id
     return {
@@ -211,6 +224,9 @@ export function createWritingStyles(deps: WritingStylesDeps) {
     async remove(companyId: string, connectorId?: unknown, audience?: unknown): Promise<WritingStyleStatus | null | 'bad'> {
       const userId = deps.userId()
       if (!userId || !ID.test(companyId)) return 'bad'
+      // A build still running would bring back what is removed now.
+      const key = `${userId}\u0000${companyId}`
+      generation.set(key, (generation.get(key) ?? 0) + 1)
       if (connectorId === undefined) {
         const file = fileOf(userId, companyId)
         try { if (file) fs.rmSync(file, { force: true }) } catch { log.warn('[writing-style] the summaries could not be removed') }
