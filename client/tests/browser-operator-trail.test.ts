@@ -167,7 +167,7 @@ test('the incident: a write task\'s preview that stops (need-person) leaves the 
     assert.deepEqual(cards, [RUN])
     const view = wiring.previewCard('u-1', COMPANY, RUN)
     assert.ok(view, `a card for ${skill ?? 'ad hoc'}`)
-    assert.match(view.card.headline, /人の判断が要る画面/)
+    assert.match(view.card.headline, /本人に決めてほしいことがある/)
     assert.deepEqual(view.trail?.[0].steps.map(s => [s.action, s.label, s.reason]), [['click', '検索する', REASON_CLICK]])
     assert.deepEqual(view.trail?.[0].end, { kind: 'stop', reason: REASON_STOP })
     assert.equal(view.trail?.[0].notes, NOTES)
@@ -251,10 +251,11 @@ test('a reason is one line without unsafe characters, cut at 200; not a string r
   assert.equal(trailForCard([createOperatorTrail('work').view()]), null, 'a run that did nothing shows no memo')
 })
 
-test('the prompts ask for the reason and say it goes to the person\'s card only', () => {
+test('the prompts ask for the reason and the notes (where they are shown is the app\'s, not said)', () => {
   for (const p of [BROWSER_OPERATOR_BROWSE_PROMPT, BROWSER_OPERATOR_WORK_PREVIEW_PROMPT, BROWSER_OPERATOR_WORK_PROMPT]) {
     assert.match(p, /"reason":"/)
-    assert.match(p, /reason は人のカードにだけ/)
+    assert.match(p, /"notes":"/)
+    assert.doesNotMatch(p, /人のカードにだけ|相談の AI には渡りません/)
   }
 })
 
@@ -328,7 +329,7 @@ test('a write run\'s preview keeps the operator\'s word for what has no ref; one
 
 test('the prompts say the elements come in priority order (open overlays first) and how to name what has no ref', () => {
   for (const p of [BROWSER_OPERATOR_BROWSE_PROMPT, BROWSER_OPERATOR_WORK_PREVIEW_PROMPT, BROWSER_OPERATOR_WORK_PROMPT]) {
-    assert.match(p, /開いているメニュー・ポップアップ・ダイアログの中の要素が先/)
+    assert.match(p, /開いているメニュー・ダイアログの中が先/)
     assert.match(p, /elementsLeftOut/)
     assert.match(p, /"unlisted":"/)
   }

@@ -543,3 +543,58 @@ describe('department Skills: places the source cannot fully look into (adapter, 
     expect((await source.withName('bsk-nfc', 'order-copy')).complete).toBe(true)
   })
 })
+
+describe('a Skill\'s steps at the folder version the frames come from (agent-browser.md "The operator works from the approved steps")', () => {
+  /** A bare repository whose company Skill `steps-seal` holds `browser.yaml` and the given step files; returns the commit. */
+  function commitSkill(companyId: string, files: Record<string, string>, parent?: string): string {
+    const bare = join(process.env.REPOS_DIR!, `${companyId}.git`)
+    if (!existsSync(bare)) git(['init', '-q', '--bare', '--initial-branch=main', bare])
+    const run = (args: string[], input?: string | Buffer) => execFileSync('git', ['-C', bare, ...args], { input, stdio: ['pipe', 'pipe', 'pipe'] }).toString().trim()
+    const entries = Object.entries({ 'browser.yaml': yaml(1), ...files }).sort(([a], [b]) => (a < b ? -1 : 1))
+      .map(([name, text]) => `100644 blob ${run(['hash-object', '-w', '--stdin'], Buffer.from(text, 'utf8'))}\t${name}\n`).join('')
+    const skill = run(['mktree'], entries)
+    const skills = run(['mktree'], `040000 tree ${skill}\tsteps-seal\n`)
+    const claude = run(['mktree'], `040000 tree ${skills}\tskills\n`)
+    const root = run(['mktree'], `040000 tree ${claude}\t.claude\n`)
+    const commitId = run(['-c', 'user.name=t', '-c', 'user.email=t@example.com', 'commit-tree', root, ...(parent ? ['-p', parent] : []), '-m', 'steps'])
+    run(['update-ref', 'refs/heads/main', commitId])
+    return commitId
+  }
+
+  it('git: the step files as stored, bound to the version read — a later push never changes what an earlier version gives', async () => {
+    const { browserSkillSource } = await import('../../src/adapters/browser-skill-source')
+    const source = browserSkillSource({ companyData: (await import('../../src/adapters/sqlite/company-data')).sqliteCompanyData(db), hasCompanyFolder: () => true })
+    const first = commitSkill('bsk-steps', { 'SKILL.md': '# 手順\r\n1. 【コピー】する\n\n', 'site-notes.md': 'メモ\n', 'other.md': 'not a step' })
+    const v1 = await source.read('bsk-steps', '.claude/skills/steps-seal')
+    expect(await source.stepFiles('bsk-steps', v1!)).toEqual([
+      { name: 'SKILL.md', text: '# 手順\r\n1. 【コピー】する\n\n' },
+      { name: 'site-notes.md', text: 'メモ\n' },
+    ])
+    commitSkill('bsk-steps', { 'SKILL.md': '# 手順 v2\n' }, first)
+    const v2 = await source.read('bsk-steps', '.claude/skills/steps-seal')
+    expect(v2!.files).not.toBe(v1!.files)
+    expect(await source.stepFiles('bsk-steps', v2!)).toEqual([{ name: 'SKILL.md', text: '# 手順 v2\n' }])
+    // The earlier version still gives its own text.
+    expect((await source.stepFiles('bsk-steps', v1!))?.[0]).toEqual({ name: 'SKILL.md', text: '# 手順\r\n1. 【コピー】する\n\n' })
+    // Over the limit: never read in part.
+    commitSkill('bsk-steps', { 'SKILL.md': 'x'.repeat(64 * 1024 + 1) })
+    const big = await source.read('bsk-steps', '.claude/skills/steps-seal')
+    expect(await source.stepFiles('bsk-steps', big!)).toEqual([{ name: 'SKILL.md', tooLarge: true }])
+    // Not an object id: cannot be read.
+    expect(await source.stepFiles('bsk-steps', { path: '.claude/skills/steps-seal', files: 'git:not-an-id' })).toBeNull()
+  })
+
+  it('the shelf: the step files of exactly the version named; the seal is the hash of the text the operator gets', async () => {
+    const files = [
+      { path: 'SKILL.md', base64: Buffer.from('# 棚の手順\n').toString('base64') },
+      { path: 'browser.yaml', base64: Buffer.from(yaml(1)).toString('base64') },
+    ]
+    const r = services.skillShelf.publish(shelfOwner, { kind: 'skill', name: 'steps-seal', departmentId: null, expectedVersion: null, files })
+    if (!r.ok) throw new Error(JSON.stringify(r.body))
+    const path = '.claude/skills/steps-seal'
+    const seal = await services.browserSkills.stepsSeal(shelfOwner, path, `shelf:${r.value.item.version}`)
+    const { createHash } = await import('crypto')
+    expect(seal).toEqual({ state: 'sealed', hash: `sha256:${createHash('sha256').update('# SKILL.md\n# 棚の手順\n', 'utf8').digest('hex')}` })
+    expect(await services.browserSkills.stepsSeal(shelfOwner, path, 'shelf:no-such-version')).toBeNull()
+  })
+})

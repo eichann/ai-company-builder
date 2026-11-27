@@ -58,6 +58,7 @@ interface Result {
   browse: Record<string, unknown>
   work: Record<string, unknown>
   workPress: Record<string, unknown>
+  workFlow: Record<string, unknown>
   verify: Record<string, unknown>
   kept: Record<string, unknown>
   whenLoadedCut: boolean
@@ -558,6 +559,26 @@ test('a write task on the real window: a press while a held write is being sent 
   // The operator was told in fixed words that its press was not done.
   const last = (r.histories as Array<Array<{ do: string; outcome: string; result?: string }>>).at(-1) ?? []
   assert.deepEqual(last.map(h => [h.do, h.outcome, h.result ?? null]), [['click', 'ok', null], ['click', 'refused', '送っている途中なので押していません']])
+})
+
+test('the completion regression: a company Skill\'s copy-and-register task runs to the end on the real window, and exactly its two writes reach the site, each in its frame, once', { skip }, () => {
+  const r = result.workFlow
+  assert.match(String(r.words), /^済みました/, JSON.stringify(r))
+  // Exactly the two writes, in order, with the setting chosen again and the person's own values as written.
+  assert.deepEqual(r.flow, [
+    { path: '/flow/copy', body: JSON.stringify({ source: 12, setting: 'B設定' }) },
+    { path: '/flow/items/99', body: JSON.stringify({ name: '【冬の回】', date: '2026-12-03' }) },
+  ])
+  assert.deepEqual((r.calls as string[]).filter(c => c.startsWith('permit') || c.startsWith('report') || c === 'approve'), [
+    'approve', 'permit 1 /flow/copy', 'report done', 'permit 2 /flow/items/99', 'report done',
+  ])
+  // The work had the person's words, the sealed steps and the approved plan — and not the consultation AI's request.
+  for (const m of r.workMaterials as Array<{ person: unknown; steps: unknown; plan: unknown; request: unknown }>) {
+    assert.deepEqual(m.person, { said: ['元の行は変えない'], values: [{ label: '名前', value: '【冬の回】' }, { label: '日付', value: '2026-12-03' }] })
+    assert.match(String(m.steps), /B設定/)
+    assert.deepEqual(m.plan, { summary: '秋の回をコピーして登録します', affects: 'なし', values: [{ label: 'コピー元', value: '秋の回' }] })
+    assert.equal(m.request, null)
+  }
 })
 
 test('a write run sends each page write once within the plan: the page\'s own cookie and CSRF, its answer without Set-Cookie, one at a time; outside the plan, a file, past the max, after a stop and after a lost answer nothing is sent', { skip }, () => {

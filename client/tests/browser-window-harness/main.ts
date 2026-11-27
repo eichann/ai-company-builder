@@ -206,6 +206,7 @@ async function run() {
   result.browse = await browseScenarios(win, sites)
   result.work = await workScenarios(win, sites)
   result.workPress = await workPressScenario(win, sites)
+  result.workFlow = await workFlowScenario(win, sites)
   result.verify = await verifyScenarios(win)
 
   // The login: a cookie and storage of the site, then cleared.
@@ -837,6 +838,118 @@ async function workPressScenario(win: BrowserShellWindow, sites: Sites) {
   out.permits = permits
   out.histories = histories
   await page.loadURL('https://op.test/').catch(() => {})
+  await wait(300)
+  return out
+}
+
+/**
+ * The completion regression (agent-browser.md "The operator works from the approved steps"): a company Skill's write task
+ * on a generic copy-and-register flow (sites.ts `/flow`) through the real window, the real wiring (work.ts, frame-writes,
+ * the window's held writes) and a scripted operator — no model. The preview answers a plan, the card is approved, the work
+ * opens a row's menu, copies, chooses the setting again in the dialog and decides (the page writes the copy), types the
+ * person's name and date on the copy's page and registers (the page writes again), then is done. Exactly the two writes,
+ * each within its frame and once, must reach the site: any later guard that stops this flow fails it.
+ */
+async function workFlowScenario(win: BrowserShellWindow, sites: Sites) {
+  const out: Record<string, unknown> = {}
+  await win.webContents.loadURL('https://op.test/flow')
+  await wait(300)
+  const RUN = `bf_${'f'.repeat(32)}`
+  const PLAN = `sha256:${'f'.repeat(64)}`
+  const STEPS = '# SKILL.md\n1. 一覧の行のメニューから「コピー」\n2. 設定を「B設定」に選び直して「決定」\n3. 名前と日付を入れて「登録」'
+  const ok = (value: unknown): BrowserLinesAnswer => ({ kind: 'ok', value })
+  const calls: string[] = []
+  let permits = 0
+  const api = {
+    async runStart() { calls.push('runStart'); return ok({ runId: `bo_${'f'.repeat(32)}`, leaseMs: 120_000 }) },
+    async runContinue() { return ok({}) },
+    async runFinish() { return ok({}) },
+    async frameStart() {
+      return ok({
+        runId: RUN, state: 'waiting', endReason: null, host: 'op.test', source: 'skill', skill: '.claude/skills/flow', planHash: PLAN,
+        needsApproval: true, approval: null, createdAt: '', expiresAt: new Date(Date.now() + 3_600_000).toISOString(), endedAt: null,
+        frames: [
+          { frame: 1, method: 'POST', path: '/flow/copy', fields: {}, max: 1, used: 0, left: 1 },
+          { frame: 2, method: 'POST', path: '/flow/items/{n}', fields: {}, max: 1, used: 0, left: 1 },
+        ],
+        writes: [], approvalToken: 'a'.repeat(64), afterRead: [], neverRead: [],
+        steps: { state: 'sealed', hash: `sha256:${crypto.createHash('sha256').update(STEPS, 'utf8').digest('hex')}` },
+      })
+    },
+    async frameApprove() { calls.push('approve'); return ok({}) },
+    async framePermit(_c: string, _r: string, body: { frame: number; request: { path: string } }) { calls.push(`permit ${body.frame} ${body.request.path}`); permits++; return ok({ write: permits, frame: body.frame, permittedAt: new Date().toISOString(), validMs: 5000 }) },
+    async frameReport(_c: string, _r: string, body: { result: string }) { calls.push(`report ${body.result}`); return ok({}) },
+    async frameEnd() { return ok({}) },
+    async frameGet() { return { kind: 'no-answer' } as BrowserLinesAnswer },
+  }
+  type Material = {
+    phase: string
+    person: { said: string[]; values: Array<{ label: string; value: string }> }
+    steps: string | null
+    plan?: unknown
+    request: string | null
+    page: { text: { outside: string }; elements: Array<{ ref: number; role: string; name: { outside: string } }> }
+  }
+  const materials: Material[] = []
+  const done = { menu: false, copy: false, selected: false, decided: false, name: false, date: false, registered: false }
+  const operator: PreviewOperator = {
+    model: 'm',
+    async resolve() { return { ok: true, cli: { path: '/bin/true', pathDirs: [] } } },
+    async step(job) {
+      const m = job.material as Material
+      materials.push(m)
+      const answer = (o: unknown) => ({ ok: true as const, text: JSON.stringify(o) })
+      if (job.prompt === 'work-preview') {
+        return answer({ do: 'plan', summary: '秋の回をコピーして登録します', affects: 'なし', values: [{ label: 'コピー元', value: '秋の回' }], unread: [] })
+      }
+      const el = (name: string) => m.page.elements.find(e => e.name.outside === name)
+      const value = (label: string) => m.person.values.find(v => v.label === label)?.value ?? ''
+      if (done.registered && m.page.text.outside.includes('登録しました')) return answer({ do: 'done', result: '登録しました', unread: [] })
+      const register = el('登録')
+      if (register) {
+        if (!done.name) { done.name = true; return answer({ do: 'type', ref: el('名前')?.ref, text: value('名前') }) }
+        if (!done.date) { done.date = true; return answer({ do: 'type', ref: el('日付')?.ref, text: value('日付') }) }
+        if (!done.registered) { done.registered = true; return answer({ do: 'click', ref: register.ref }) }
+        return answer({ do: 'wait', seconds: 1 })
+      }
+      if (done.decided) return answer({ do: 'wait', seconds: 1 })
+      const decide = el('決定')
+      if (decide) {
+        if (!done.selected) { done.selected = true; return answer({ do: 'select', ref: el('設定')?.ref, option: 'B設定' }) }
+        done.decided = true
+        return answer({ do: 'click', ref: decide.ref })
+      }
+      const copy = el('コピー')
+      if (copy && !done.copy) { done.copy = true; return answer({ do: 'click', ref: copy.ref }) }
+      const menu = el('メニュー')
+      if (menu && !done.menu) { done.menu = true; return answer({ do: 'click', ref: menu.ref }) }
+      return answer({ do: 'stop', why: 'blocked', unread: [] })
+    },
+  }
+  const works = wireBrowserWork({
+    aiSwitch: () => true, userId: () => 'u-1', context: createBrowserContext({ userId: () => 'u-1', aiSwitch: () => true }),
+    stopped: () => false, window: () => win.browse, reader: () => ({ async read() { return { status: 404, body: '' } }, closed: () => false }),
+    registered: () => true, api: api as never, operator: () => operator, cliPath: () => '/bin/true', parentEnv: () => ({}),
+    skillSteps: async () => ({ kind: 'text', text: STEPS }),
+    writeStartMs: 300, pressGapMs: 1500,
+  })
+  const working = works.work({
+    companyId: 'company-1', conversationId: null, companyRoot: '/company', site: 'op.test', task: '秋の回をコピーして冬の回を登録して', skill: 'flow', items: [],
+    said: ['元の行は変えない'], values: [{ label: '名前', value: '【冬の回】' }, { label: '日付', value: '2026-12-03' }],
+    signal: new AbortController().signal, onCard: () => {},
+  })
+  for (let i = 0; i < 600; i++) {
+    const card = works.card('company-1', RUN)
+    if (card?.ok && card.view.phase === 'ready') { await works.approve('company-1', RUN, PLAN); break }
+    await wait(50)
+  }
+  out.words = (await working).words
+  await wait(500)
+  out.flow = sites.flow.map(f => ({ ...f }))
+  out.calls = calls
+  out.done = done
+  out.workMaterials = materials.filter(m => m.phase === 'work').map(m => ({ person: m.person, steps: m.steps, plan: m.plan, request: m.request }))
+  await win.webContents.loadURL('https://op.test/').catch(() => {})
   await wait(300)
   return out
 }

@@ -22,7 +22,7 @@ import type { BrowserMap } from '../../shared/core/browser-map'
 import type { BrowserOpenedLine } from '../../shared/core/browser-opened'
 import type { BrowserLineWrite } from '../../shared/core/browser-write-line'
 import type { BrowserGateDecision, BrowserRunGateHooks } from './browser-runner'
-import { readBrowserOperatorTrail, readBrowserStopNext, type BrowserOperatorTrail, type BrowserStopNext } from './browser-operator-trail'
+import { readBrowserOperatorTrail, readBrowserStopNext, readBrowserStopScreen, type BrowserOperatorTrail, type BrowserStopNext, type BrowserStopScreen } from './browser-operator-trail'
 
 /** A form write's value source: the written object's id, its parent's id, or the value the line adds. */
 export type BrowserFormValueSource = '{id}' | '{parent}' | '{value}'
@@ -319,6 +319,8 @@ export interface BrowserWriteView {
   trail?: BrowserOperatorTrail
   /** What a write run that stopped asks of the member first (agent-browser.md "The stopped card asks one thing"); absent: nothing. */
   next?: BrowserStopNext
+  /** The screen when it stopped to ask (beside `next` only; memory only: agent-browser.md "The stopped card shows the screen"). */
+  screen?: BrowserStopScreen
 }
 
 export type BrowserWriteGetResult = { ok: true; view: BrowserWriteView } | { ok: false; message: string }
@@ -361,9 +363,11 @@ export function readBrowserWriteView(v: unknown, readCard: (c: unknown) => Brows
   const trail = x.trail === undefined ? null : readBrowserOperatorTrail(x.trail)
   // So is a `next` off its shape (the card then asks nothing; its fixed reason still shows).
   const next = x.next === undefined ? null : readBrowserStopNext(x.next)
+  // The stop screen only beside what the card asks, and only in its exact shape (else left off; the card still shows).
+  const screen = next && x.screen !== undefined ? readBrowserStopScreen(x.screen) : null
   return {
     title: x.title, siteLabel: x.siteLabel, phase: x.phase as BrowserWriteCardPhase, values, sentences: [...x.sentences], card,
     readAt: x.readAt as string | null, contentHash: x.contentHash as string | null, message: x.message as string | null, result,
-    ...(x.cancellable === true ? { cancellable: true } : {}), ...(trail ? { trail } : {}), ...(next ? { next } : {}),
+    ...(x.cancellable === true ? { cancellable: true } : {}), ...(trail ? { trail } : {}), ...(next ? { next } : {}), ...(screen ? { screen } : {}),
   }
 }

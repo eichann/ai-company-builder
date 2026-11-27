@@ -13,16 +13,18 @@
 // One lock per company × domain on the server joins the frames run and the operator's runs (each run names its frames run).
 // The page's text, the plan's words, the values read and the site's answers go to the member's card only (kept here in
 // memory, per signed-in member); the consultation AI gets `workWordsForAi`. No Electron.
+import { createHash } from 'node:crypto'
 import { BROWSER_COMPANY_ID_RE } from '../../../shared/browser-plans'
-import { BROWSER_BROWSE_LIMITS as BL, aimedAction, browseHistoryEntry, browseLogStep, pageWithScreen, type BrowserBrowseAction, type BrowserBrowseHistoryEntry, type BrowserBrowseStop, type BrowserBrowseSurface, type BrowserPageSnapshot } from '../../../shared/browser-browse'
+import { BROWSER_BROWSE_LIMITS as BL, aimedAction, browseHistoryEntry, browseLogStep, pageWithScreen, type BrowserBrowseAction, type BrowserBrowseHistoryEntry, type BrowserBrowseStop, type BrowserBrowseSurface, type BrowserOperatorImage, type BrowserPageSnapshot } from '../../../shared/browser-browse'
 import {
   BROWSER_WORK_CARD_WORDS as CW, BROWSER_WORK_LIMITS as L, BROWSER_WORK_WORDS as W, afterReadTarget, beforeReadAddress, createdIdOf, parseWorkAnswer,
   readBackLanded, topFields, workBusyWords, workEndAfterRefusals, workFrameOf, workMaterial, workPlanSentences, workPreviewStoppedCard, workResultCard, workRetrySentence, workStopNext,
   workWordsForAi, workWriteLine,
-  type AfterReadResult, type WorkAnswer, type WorkEnd, type WorkFrame, type WorkPlanValue, type WorkStopReason, type WorkWriteSeen,
+  type AfterReadResult, type WorkAnswer, type WorkApprovedPlan, type WorkEnd, type WorkFrame, type WorkPerson, type WorkPlanValue, type WorkStopReason, type WorkWriteSeen,
 } from '../../../shared/browser-frame-writes'
 import { browserNeverReadFits } from '../../../../shared/core/browser-frame-match'
 import { browserSkillRef } from '../../../../shared/core/browser-skill'
+import { browserSkillStepsCheck, type BrowserSkillStepsText } from '../../../../shared/core/browser-skill-steps'
 import { BROWSER_RUN_ID_RE, BROWSER_RUN_LIMITS, type BrowserRunEndReason, type BrowserRunLogStep, type BrowserRunOutcome, type BrowserRunWriteStep } from '../../../../shared/core/browser-run-log'
 import { browserFrameApproveMs, browserRunBudget, type BrowserRunBudget } from '../../../../shared/core/browser-run-budget'
 import type { BrowserFrameRunStart, BrowserFrameView } from '../../../../shared/types/browser-frames'
@@ -30,7 +32,7 @@ import type { BrowserPreviewSurface } from '../../../shared/browser-runner'
 import { noWindowWords, type BrowserRunWindow } from '../../../shared/browser-operation'
 import type { BrowserWriteGetResult, BrowserWriteResultView, BrowserWriteView } from '../../../shared/browser-line-writes'
 import type { BrowserInspectionView } from '../../../shared/browser-inspection'
-import { answerProblemOf, createOperatorTrail, trailForCard, type BrowserStopNext, type BrowserTrailRun, type OperatorTrailRecorder } from '../../../shared/browser-operator-trail'
+import { answerProblemOf, browserStopScreen, createOperatorTrail, trailForCard, type BrowserStopNext, type BrowserStopScreen, type BrowserTrailRun, type OperatorTrailRecorder } from '../../../shared/browser-operator-trail'
 import type { BrowserAiSwitch } from './ai-switch'
 import type { BrowserContext } from './context'
 import { createFrameWriter, type FrameWriteRecord, type FrameWriter } from './frame-writes'
@@ -57,8 +59,11 @@ export interface BrowserWorkDeps {
   operator(): PreviewOperator | null
   cliPath(): string
   parentEnv(): Readonly<Record<string, string | undefined>>
-  /** A company or department Skill's steps (its SKILL.md and site notes) from the member's company folder, by the Skill's path; null when there is none. */
-  skillSteps?(companyRoot: string, skill: string): Promise<string | null>
+  /**
+   * A company or department Skill's steps (its SKILL.md and site notes, joined by the core's rule) from the member's company
+   * folder, by the Skill's path; null when the path is no Skill place. Checked against the server's seal before use.
+   */
+  skillSteps?(companyRoot: string, skill: string): Promise<BrowserSkillStepsText | null>
   busyWindows?: Set<string>
   now?: () => number
   monoMs?: () => number
@@ -79,6 +84,9 @@ export interface BrowserWorkInput {
   site: string
   task: string
   skill: string | null
+  /** What the person said: their prohibitions and limits, and values (the operator's first source; absent = none). */
+  said?: readonly string[]
+  values?: ReadonlyArray<{ label: string; value: string }>
   items: readonly string[]
   signal: AbortSignal
   /** Puts the card's reference (the frames run's id) into the reply. */
@@ -123,6 +131,8 @@ interface Entry {
   trails: OperatorTrailRecorder[]
   /** What the stopped card asks of the member first (its question, or the window), or null. */
   next: BrowserStopNext | null
+  /** The screen the operator last looked at when it stopped to ask (beside `next` only; memory only). */
+  screen: BrowserStopScreen | null
 }
 
 /** A server refusal → the consultation AI's fixed words (busy: with roughly when the domain frees up, when the server said). */
@@ -149,6 +159,9 @@ const frameStartOf = (v: unknown): BrowserFrameRunStart | null => {
   return r && typeof r.runId === 'string' && /^bf_[0-9a-f]{32}$/.test(r.runId) && Array.isArray(r.frames) && typeof r.planHash === 'string' ? r : null
 }
 const workFrames = (frames: readonly BrowserFrameView[]): WorkFrame[] => frames.map(workFrameOf)
+const sha256 = (text: string) => createHash('sha256').update(text, 'utf8').digest('hex')
+/** The screen the operator stopped on, as its card keeps it (memory only). */
+const stopScreen = (image: BrowserOperatorImage | null | undefined) => browserStopScreen(image, bytes => Buffer.from(bytes).toString('base64'))
 /** A short wait that ends at once when the run is cut. */
 const pause = (ms: number, signal: AbortSignal): Promise<void> => new Promise((resolve) => {
   const timer = setTimeout(done, ms)
@@ -166,9 +179,9 @@ const trailOf = (trails: readonly OperatorTrailRecorder[]) => {
  * A stopped preview's view: what it asks of the member first (`next`), the fixed reason once, the operator's trail folded
  * beside it.
  */
-const previewStoppedView = (host: string, end: WorkEnd, at: number, trail: BrowserTrailRun, next: BrowserStopNext | null): BrowserInspectionView => ({
+const previewStoppedView = (host: string, end: WorkEnd, at: number, trail: BrowserTrailRun, next: BrowserStopNext | null, screen: BrowserStopScreen | null): BrowserInspectionView => ({
   card: workPreviewStoppedCard(end), readAt: new Date(at).toISOString(), siteLabel: host, ...(trailForCard([trail]) ? { trail: [trail] } : {}),
-  ...(next ? { next } : {}),
+  ...(next ? { next, ...(screen ? { screen } : {}) } : {}),
 })
 
 /**
@@ -199,7 +212,7 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
     return {
       title: CW.title, siteLabel: e.host, phase: e.phase, values: e.values.map((v, i) => ({ name: `v${i + 1}`, label: v.label, value: v.value, needsConfirm: false, confirmed: false })),
       sentences: [...e.sentences], card: e.card, readAt: e.readAt, contentHash: e.phase === 'ready' ? e.planHash : null, message: e.message,
-      result, ...(e.phase === 'ready' ? { cancellable: true } : {}), ...trailOf(e.trails), ...(e.next ? { next: e.next } : {}),
+      result, ...(e.phase === 'ready' ? { cancellable: true } : {}), ...trailOf(e.trails), ...(e.next ? { next: e.next, ...(e.screen ? { screen: e.screen } : {}) } : {}),
     }
   }
 
@@ -228,8 +241,13 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
     cli: PreviewOperatorCli
     parentEnv: Readonly<Record<string, string | undefined>>
     task: string
+    person: WorkPerson
     items: readonly string[]
     steps: string | null
+    /** A Skill's run: the consultation AI's request is not handed to the operator. */
+    skill: boolean
+    /** The work's approved plan (null: no preview). */
+    plan: WorkApprovedPlan | null
     adhoc: boolean
     frames: () => WorkFrame[] | null
     writes: () => WorkWriteSeen[]
@@ -261,7 +279,7 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
     /** Why `current()` said no (the AI stop, the member's stop or the consultation closed, the window, the context). */
     whyNot: () => WorkStopReason
     log: BrowserRunLogStep[]
-  }): Promise<{ kind: 'answer'; answer: Extract<WorkAnswer, { do: 'plan' | 'done' | 'stop' }> } | { kind: 'end'; reason: BrowserRunEndReason; end: WorkEnd }> {
+  }): Promise<{ kind: 'answer'; answer: Extract<WorkAnswer, { do: 'plan' | 'done' | 'stop' }>; screen: BrowserOperatorImage | null } | { kind: 'end'; reason: BrowserRunEndReason; end: WorkEnd }> {
     const history: BrowserBrowseHistoryEntry[] = []
     let notes = ''
     // The app's one re-ask after an answer out of its form (fixed words), or null: one per slip, within the run's steps.
@@ -296,7 +314,7 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
         cli: o.cli, model: o.operator.model, signal: o.cut.signal, timeoutMs: Math.min(BL.roundMs, left), parentEnv: o.parentEnv,
         prompt: o.phase === 'preview' ? 'work-preview' : 'work',
         material: workMaterial({
-          phase: o.phase, task: o.task, items: o.items, steps: o.steps, frames: o.frames(), page, history,
+          phase: o.phase, request: o.task, person: o.person, skill: o.skill, items: o.items, steps: o.steps, plan: o.plan, frames: o.frames(), page, history,
           writes: o.writes(), notes, round, rounds: o.budget.steps, retry,
         }),
         image,
@@ -320,7 +338,8 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
       const answer = parsed.answer
       if (answer.do === 'plan' || answer.do === 'done' || answer.do === 'stop') {
         o.trail.end(answer.do, parsed.reason)
-        return { kind: 'answer', answer }
+        // The screen this answer was given on: what a stopped card shows the member (memory only).
+        return { kind: 'answer', answer, screen: image }
       }
       const action: BrowserBrowseAction = answer
       const mayWrite = action.do !== 'wait' && action.do !== 'go'
@@ -492,7 +511,7 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
           userId, companyId, runId: run.runId, host, phase: 'preparing', values: [],
           sentences: workPlanSentences({ summary, affects: '', frames: workFrames(run.frames) }),
           planHash: null, approvalToken: null, card: null, readAt: null, message: null, result: null, decide: null,
-          inDoubt: null, doubtSettled: null, conversationId: input.conversationId, pressing: null, trails: [], next: null,
+          inDoubt: null, doubtSettled: null, conversationId: input.conversationId, pressing: null, trails: [], next: null, screen: null,
         }
         entry = e
         keep(e)
@@ -530,9 +549,30 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
         const earlier = await askEarlier(frameRun, input.task)
         if (earlier) return stoppedBefore(earlier)
       }
-      // The steps of exactly the Skill the server's frames come from (never the name the AI typed).
-      const steps = frameRun?.skill && input.companyRoot && deps.skillSteps
-        ? (await deps.skillSteps(input.companyRoot, frameRun.skill).catch(() => null))?.slice(0, L.steps) ?? null : null
+      // The steps of exactly the Skill the server's frames come from (never the name the AI typed), and only exactly the text
+      // the server sealed for that folder version: steps that differ, are missing or would be cut start nothing (agent-browser.md
+      // "The operator works from the approved steps"). A company without the company folder has no copy here: no steps, as before.
+      let steps: string | null = null
+      if (frameRun?.skill && input.companyRoot && deps.skillSteps) {
+        const local = await deps.skillSteps(input.companyRoot, frameRun.skill).catch(() => null)
+        const checked = browserSkillStepsCheck(frameRun.steps, local, sha256)
+        if (!checked.ok) {
+          const failed = frameRun
+          if (!entry) {
+            entry = {
+              userId, companyId, runId: failed.runId, host, phase: 'failed', values: [], sentences: workPlanSentences({ summary: input.task, affects: '', frames: workFrames(failed.frames) }),
+              planHash: null, approvalToken: null, card: null, readAt: null, message: null, result: null, decide: null,
+              inDoubt: null, doubtSettled: null, conversationId: input.conversationId, pressing: null, trails: [], next: null, screen: null,
+            }
+            keep(entry)
+          }
+          if (!cardShown) { input.onCard(failed.runId); cardShown = true }
+          return stoppedBefore(checked.problem)
+        }
+        steps = checked.steps
+      }
+      const person: WorkPerson = { said: input.said ?? [], values: input.values ?? [] }
+      const skillRun = frameRun !== null
       const neverRead = frameRun?.neverRead ?? []
       const neverReadFits = (pq: string) => neverRead.some(p => browserNeverReadFits(p, pq))
 
@@ -545,7 +585,7 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
         const previewFinished = { ok: false }
         const previewRan: { runId: string | null } = { runId: null }
         const previewed = await runOperator({
-          phase: 'preview', userId, companyId, host, win, operator, cli: resolved.cli, task: input.task, items: input.items, steps,
+          phase: 'preview', userId, companyId, host, win, operator, cli: resolved.cli, task: input.task, person, skill: skillRun, plan: null, items: input.items, steps,
           adhoc: frameRun === null, frames: frameRun ? workFrames(frameRun.frames) : null, frameRunId: frameRun?.runId ?? null,
           cut, current, whyNot, conversation, neverReadFits, writer: null, trail: previewTrail, finished: previewFinished, ran: previewRan,
         })
@@ -560,7 +600,8 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
           ? workStopNext(previewEnd, operatorQuestion(previewed.answer, previewTrail)) : previewEnd ? workStopNext(previewEnd, null) : null
         let asked = false
         if (previewEnd && previewRan.runId && deps.userId() === userId) {
-          keepPreview(userId, companyId, previewRan.runId, previewStoppedView(host, previewEnd, now(), previewTrail.view(), previewNext))
+          const shot = previewed.kind === 'answer' ? stopScreen(previewed.screen) : null
+          keepPreview(userId, companyId, previewRan.runId, previewStoppedView(host, previewEnd, now(), previewTrail.view(), previewNext, shot))
           input.onCard(previewRan.runId)
           asked = previewNext?.kind === 'decide'
         }
@@ -586,7 +627,7 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
         userId, companyId, runId: run.runId, host, phase: run.needsApproval ? 'ready' : 'running', values: plan?.values ?? [],
         sentences: workPlanSentences({ summary: plan?.summary ?? input.task, affects: plan?.affects ?? '', frames: workFrames(run.frames) }),
         planHash: run.planHash, approvalToken: run.approvalToken, card: null, readAt: null, message: null, result: null, decide: null,
-        inDoubt: null, doubtSettled: null, conversationId: input.conversationId, pressing: null, trails: plan ? [previewTrail, workTrail] : [workTrail], next: null,
+        inDoubt: null, doubtSettled: null, conversationId: input.conversationId, pressing: null, trails: plan ? [previewTrail, workTrail] : [workTrail], next: null, screen: null,
       }
       const e = entry
       keep(e)
@@ -653,8 +694,10 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
           }
         },
       })
+      // The plan the person approved on the card goes to the work as its material; none → no preview (a pre-approved Skill).
+      const approvedPlan: WorkApprovedPlan | null = plan ? { summary: plan.summary, affects: plan.affects, values: plan.values } : null
       const worked = await runOperator({
-        phase: 'work', userId, companyId, host, win, operator, cli: resolved.cli, task: input.task, items: input.items, steps,
+        phase: 'work', userId, companyId, host, win, operator, cli: resolved.cli, task: input.task, person, skill: skillRun, plan: approvedPlan, items: input.items, steps,
         adhoc: run.source === 'adhoc', frames: () => writer.frames(), frameRunId: run.runId, cut, current, whyNot, conversation,
         neverReadFits, writer, log: workLog, trail: workTrail, actions,
       })
@@ -715,6 +758,8 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
       // The operator's question (need-person) or the window (need-login) first on the card; the AI hears only that it asks.
       // After any held write the answers are not offered (a new run would start the work over: Codex review).
       e.next = workStopNext(end, answer?.do === 'stop' ? operatorQuestion(answer, workTrail) : null, records.length)
+      // The screen it stopped on goes beside what the card asks (memory only, this member's card).
+      e.screen = e.next && worked.kind === 'answer' ? stopScreen(worked.screen) : null
       // The write in doubt the server knows (it had a permit): the person may answer about it on the card, past its window.
       const doubt = records.find(r => r.outcome === 'unknown' && typeof r.write === 'number')
       e.inDoubt = doubt ? { write: doubt.write as number, from: confirmableAt(doubt.permittedAt ?? null), line: doubt.line } : null
@@ -749,6 +794,9 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
     operator: PreviewOperator
     cli: PreviewOperatorCli
     task: string
+    person: WorkPerson
+    skill: boolean
+    plan: WorkApprovedPlan | null
     items: readonly string[]
     steps: string | null
     adhoc: boolean
@@ -768,7 +816,7 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
     /** Set to the operator run's id once the server gave it (a stopped preview's card is named by it). */
     ran?: { runId: string | null }
   }): Promise<
-    | { kind: 'answer'; answer: Extract<WorkAnswer, { do: 'plan' | 'done' | 'stop' }> }
+    | { kind: 'answer'; answer: Extract<WorkAnswer, { do: 'plan' | 'done' | 'stop' }>; screen: BrowserOperatorImage | null }
     | { kind: 'end'; reason: BrowserRunEndReason; end: WorkEnd }
     | { kind: 'refused'; words: string; why: WorkStopReason }
   > {
@@ -806,7 +854,7 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
       }
       const got = await operate({
         phase: o.phase, companyId: o.companyId, browseRunId, host: o.host, win: o.win, operator: o.operator, cli: o.cli, parentEnv: deps.parentEnv(),
-        task: o.task, items: o.items, steps: o.steps, adhoc: o.adhoc,
+        task: o.task, person: o.person, skill: o.skill, plan: o.plan, items: o.items, steps: o.steps, adhoc: o.adhoc,
         frames: () => (typeof o.frames === 'function' ? o.frames() : o.frames),
         writes: () => writer?.seen() ?? [], locked: () => writer?.locked() ?? false, ...(o.actions ? { actions: o.actions } : {}),
         ...(writer ? {

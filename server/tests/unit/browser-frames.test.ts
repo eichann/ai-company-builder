@@ -69,9 +69,15 @@ const source: BrowserSkillSource = {
   read: async (companyId, path) => store[companyId]?.[path] ?? null,
   pushed: async () => [],
   shelfLanded: async () => null,
+  // Each folder version's step files, as `put` wrote them (null: that version cannot be read).
+  stepFiles: async (_companyId, content) => (content.files in stepFiles ? stepFiles[content.files] : null),
 }
+/** The step files of each folder version (`SKILL.md` holds the text `put` was given). */
+let stepFiles: Record<string, Array<{ name: 'SKILL.md' | 'site-notes.md'; text: string } | { name: 'SKILL.md' | 'site-notes.md'; tooLarge: true }> | null> = {}
 function put(declaration: string, text = 'v1', path = SKILL_P) {
-  store[CO] = { ...(store[CO] ?? {}), [path]: { path, declaration, files: `git:${sha(`${path}\0${declaration}\0${text}`).slice(0, 40)}` } }
+  const files = `git:${sha(`${path}\0${declaration}\0${text}`).slice(0, 40)}`
+  store[CO] = { ...(store[CO] ?? {}), [path]: { path, declaration, files } }
+  stepFiles[files] = [{ name: 'SKILL.md', text }]
 }
 async function approveSkill(mode: 'per_run' | 'pre_approved', path = SKILL_P) {
   const item = (await skills.list(owner) as { ok: true; value: { items: Array<{ path: string; declarationHash: string; files: string }> } }).value.items.find(i => i.path === path)!
@@ -97,6 +103,7 @@ beforeEach(() => {
   now = T0
   monoBase = T0
   store = {}
+  stepFiles = {}
   policy = { mode: 'on', sites: [{ host: DOMAIN, level: 'write', assetHosts: [] }] }
   stopped = false
   level = { [alice.userId]: 'write', [bob.userId]: 'write', [owner.userId]: 'write', [otherOwner.userId]: 'write' }
@@ -133,6 +140,7 @@ function makeFrames(extra: Partial<Parameters<typeof createBrowserFrameService>[
       approvedFrames: async (m, s) => { const r = await skills.approvedFrames(m, s); betweenReadAndWrite?.(); return r },
       stillApproved: (m, s, h, a) => skills.stillApproved(m, s, h, a),
       runCardShown: (m, s, h, f) => skills.runCardShown(m, s, h, f),
+      stepsSeal: (m, s, f) => skills.stepsSeal(m, s, f),
     },
     ...extra,
   })
@@ -451,6 +459,30 @@ describe('frames: a run of free operation', () => {
     expect(code(await permit(run.runId, 1))).toBe('BROWSER_SKILL_CHANGED')
   })
 
+  it('a Skill run\'s start seals its steps at the folder version its frames come from; unreadable starts nothing; an ad-hoc plan has none', async () => {
+    put(yaml, '手順 v1')
+    await approveSkill('pre_approved')
+    const run = value(await frames.start(alice, { skill: SKILL }, PC))
+    // Exactly the text the app hands the operator: `# SKILL.md\n<text>`.
+    expect(run.steps).toEqual({ state: 'sealed', hash: `sha256:${sha('# SKILL.md\n手順 v1')}` })
+    value(frames.end(alice, run.runId))
+    // Too large on the server: said so (the app does not start).
+    stepFiles[store[CO][SKILL_P].files] = [{ name: 'SKILL.md', tooLarge: true }]
+    const large = value(await frames.start(alice, { skill: SKILL }, PC))
+    expect(large.steps).toEqual({ state: 'too-large' })
+    value(frames.end(alice, large.runId))
+    // No step files: none.
+    stepFiles[store[CO][SKILL_P].files] = []
+    const none = value(await frames.start(alice, { skill: SKILL }, PC))
+    expect(none.steps).toEqual({ state: 'none' })
+    value(frames.end(alice, none.runId))
+    // That version cannot be read: nothing is started (never a seal of something else).
+    stepFiles[store[CO][SKILL_P].files] = null
+    expect(code(await frames.start(alice, { skill: SKILL }, PC))).toBe('BROWSER_SKILL_CHANGED')
+    const adhocRun = value(await frames.start(alice, { plan: adhoc }, PC))
+    expect('steps' in adhocRun).toBe(false)
+  })
+
   it('a pre-approved Skill needs no card; a per-run one does', async () => {
     put(yaml)
     await approveSkill('per_run')
@@ -596,7 +628,7 @@ describe('step ⑤b: what the app is answered, one lock with the operator runs',
       monotonic: { bootId: 'boot-1', monoMs: () => now - monoBase }, browserPolicy: () => policy, aiStops: () => ({ all: false, tools: [] }),
       devices: { check: (_m, key) => ({ ok: true, value: { deviceId: key === undefined ? null : `bd_${key}` } }) },
       siteGrants: { allows: () => true },
-      skills: { resolve: async () => { throw new Error('no skill here') }, approvedFrames: async () => { throw new Error('no skill here') }, stillApproved: () => false, runCardShown: () => {} },
+      skills: { resolve: async () => { throw new Error('no skill here') }, approvedFrames: async () => { throw new Error('no skill here') }, stillApproved: () => false, runCardShown: () => {}, stepsSeal: async () => null },
       operatorRunOn: () => (operatorRunning ? { until: now + 60_000 } : null),
     })
     expect(code(await withRuns.start(alice, { plan: adhoc }, PC))).toBe('BROWSER_RUN_BUSY')

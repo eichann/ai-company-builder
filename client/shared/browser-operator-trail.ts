@@ -230,8 +230,35 @@ export function readBrowserOperatorTrail(v: unknown): BrowserOperatorTrail | nul
  */
 export type BrowserStopNext = { kind: 'decide' | 'question'; question: string } | { kind: 'login' }
 
+/**
+ * The screen at the moment a write task stopped to ask (agent-browser.md "The stopped card shows the screen"): the image the
+ * operator last looked at, so the member sees what it saw. Held only in main's memory with its card and handed to the
+ * renderer's card through the card's IPC (memory again): never in the chat history, on disk, at the server or in any AI's
+ * words; gone when the app quits or the member signs out.
+ */
+export interface BrowserStopScreen { mediaType: 'image/jpeg'; base64: string }
+
+/** The largest stop screen a card carries (base64 characters; a larger one is left off the card). */
+export const BROWSER_STOP_SCREEN_MAX = 4 * 1024 * 1024
+const BASE64_RE = /^[A-Za-z0-9+/]+={0,2}$/
+
+/** A stop screen as main keeps it for its card, or null when there is none to show (empty, too large). */
+export function browserStopScreen(image: { mediaType: string; data: Uint8Array } | null | undefined, toBase64: (bytes: Uint8Array) => string): BrowserStopScreen | null {
+  if (!image || image.mediaType !== 'image/jpeg' || image.data.length === 0) return null
+  const base64 = toBase64(image.data)
+  return base64.length <= BROWSER_STOP_SCREEN_MAX ? { mediaType: 'image/jpeg', base64 } : null
+}
+
+/** A stop screen as the renderer is handed it (exact keys, a JPEG in plain base64 within its cap), or null. */
+export function readBrowserStopScreen(v: unknown): BrowserStopScreen | null {
+  if (!isMap(v) || Object.keys(v).length !== 2 || v.mediaType !== 'image/jpeg' || typeof v.base64 !== 'string') return null
+  return v.base64.length > 0 && v.base64.length <= BROWSER_STOP_SCREEN_MAX && v.base64.length % 4 === 0 && BASE64_RE.test(v.base64) ? { mediaType: 'image/jpeg', base64: v.base64 } : null
+}
+
 export const BROWSER_STOP_WORDS = {
   decide: '決めてほしいこと',
+  /** The stop screen's caption and its image's text alternative. */
+  screen: '止まったときの画面（ブラウザ操作の係の AI が見ていたもの）',
   proceed: 'そのまま進める',
   cancel: 'やめる',
   openSite: '開いてログイン',

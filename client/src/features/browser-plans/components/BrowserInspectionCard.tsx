@@ -106,9 +106,9 @@ export function InspectionBody({ view, companyId, say, headline = true }: { view
         <span className="text-title text-text">{card.title}</span>
         <span className="text-small text-text-muted">{view.siteLabel}</span>
       </div>
-      {next && next.kind !== 'login' && companyId && <StopAsk next={next} companyId={companyId} host={view.siteLabel} say={say} />}
+      {next && next.kind !== 'login' && companyId && <StopAsk next={next} companyId={companyId} host={view.siteLabel} say={say} screen={view.screen} />}
       {headline && <p role="status" className="mt-1 text-body text-text">{card.headline}</p>}
-      {next?.kind === 'login' && companyId && <StopAsk next={next} companyId={companyId} host={view.siteLabel} />}
+      {next?.kind === 'login' && companyId && <StopAsk next={next} companyId={companyId} host={view.siteLabel} screen={view.screen} />}
 
       {card.checks.length > 0 && <div className="mt-2">
         <p className="text-small font-strong text-text-muted">{W.checks}</p>

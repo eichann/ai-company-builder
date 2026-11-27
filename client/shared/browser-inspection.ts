@@ -11,7 +11,7 @@
 import { BROWSER_CARD_MARK_WORDS, type BrowserCard, type BrowserCardCheckedBy, type BrowserCardMark, type BrowserCardRow, type BrowserCardValue } from '../../shared/core/browser-card'
 import { BROWSER_REQUEST_SERVER, BROWSER_COMPANY_ID_RE } from './browser-plans'
 import { BROWSER_RUN_ID_RE } from '../../shared/core/browser-run-log'
-import { readBrowserOperatorTrail, readBrowserStopNext, type BrowserOperatorTrail, type BrowserStopNext } from './browser-operator-trail'
+import { readBrowserOperatorTrail, readBrowserStopNext, readBrowserStopScreen, type BrowserOperatorTrail, type BrowserStopNext, type BrowserStopScreen } from './browser-operator-trail'
 
 /** The consultation AI's inspection tool (`mcp__acb_browser__browser_inspect`; electron/browser-request/inspect-tool.ts). */
 export const BROWSER_INSPECT_TOOL = 'browser_inspect'
@@ -71,6 +71,8 @@ export interface BrowserInspectionView {
    * ［開いてログイン］); absent: nothing (agent-browser.md "The stopped card asks one thing").
    */
   next?: BrowserStopNext
+  /** The screen when it stopped to ask (beside `next` only; memory only: agent-browser.md "The stopped card shows the screen"). */
+  screen?: BrowserStopScreen
 }
 
 export type BrowserInspectionGetResult = { ok: true; view: BrowserInspectionView } | { ok: false; message: string }
@@ -174,7 +176,9 @@ export function readBrowserInspectionView(v: unknown): BrowserInspectionView | n
   const trail = v.trail === undefined ? null : readBrowserOperatorTrail(v.trail)
   // So is a `next` off its shape (the card then asks nothing; its fixed reason still shows).
   const next = v.next === undefined ? null : readBrowserStopNext(v.next)
-  return { card, readAt: v.readAt, siteLabel: v.siteLabel, ...(trail ? { trail } : {}), ...(next ? { next } : {}) }
+  // The stop screen only beside what the card asks, and only in its exact shape (else left off; the card still shows).
+  const screen = next && v.screen !== undefined ? readBrowserStopScreen(v.screen) : null
+  return { card, readAt: v.readAt, siteLabel: v.siteLabel, ...(trail ? { trail } : {}), ...(next ? { next } : {}), ...(screen ? { screen } : {}) }
 }
 
 /**

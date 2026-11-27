@@ -1,3 +1,5 @@
+import type { BrowserSkillStepFile } from '../../shared/core/browser-skill-steps'
+
 /**
  * 「Skill の承認」 (agent-browser.md "A Skill's browser declaration and its approval"). Two ports:
  *
@@ -89,4 +91,10 @@ export interface BrowserSkillSource {
    * against the version current before it (null: none).
    */
   shelfLanded(companyId: string, item: { departmentId: string | null; name: string }, versions: { before: string | null; written: string }): Promise<BrowserSkillLanded | null>
+  /**
+   * The Skill's step files (`SKILL.md`, `site-notes.md`: shared/core/browser-skill-steps.ts) at exactly the folder version
+   * `content.files` names (`git:<tree>` / `shelf:<version>`), each as its text or too large to read whole (over
+   * `BROWSER_SKILL_STEPS_LIMITS.fileBytes`); a file not there is left out. Null when that version cannot be read.
+   */
+  stepFiles(companyId: string, content: Pick<BrowserSkillContent, 'path' | 'files'>): Promise<BrowserSkillStepFile[] | null>
 }

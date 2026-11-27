@@ -1,3 +1,5 @@
+import type { BrowserSkillStepsSeal } from '../core/browser-skill-steps'
+
 /**
  * API shapes of 「ブラウザ操作」's writes within frames (redesign step ⑤a; agent-browser.md "Writes within frames"). The
  * server decides every value here; the app (step ⑤b) only sends what the routes ask for. Rules:
@@ -106,6 +108,12 @@ export interface BrowserFrameRunStart extends BrowserFrameRunView {
    * (`BROWSER_WRITE_IN_DOUBT`). Empty when none; absent from an older server.
    */
   doubts?: BrowserFrameDoubt[]
+  /**
+   * A Skill run's steps sealed at the folder version its frames come from (shared/core/browser-skill-steps.ts): the app hands
+   * the operator its copy of the Skill's steps only when it is exactly that text. Absent for an ad-hoc plan and from an older
+   * server (the app then does not start a Skill's work).
+   */
+  steps?: BrowserSkillStepsSeal
 }
 
 /** An earlier write in doubt, as the start names it: its run and write, the frame it fitted, and from when it may be answered. */

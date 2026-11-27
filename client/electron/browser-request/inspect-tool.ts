@@ -84,8 +84,10 @@ export interface BrowserInspectTools {
 
 export const browserWorkSchema = z.object({
   site: z.string().describe('サイトのドメイン（下の一覧のどれか）。The registered domain, as listed in the description.'),
-  task: z.string().describe('サイトでしてほしい作業を文で（1000字まで）。The task in words (1000 characters at most).'),
+  task: z.string().describe('サイトでしてほしい作業を一文で（1000字まで。カードに出る。Skill を使うときは係の AI には渡らない）。The task in one sentence; with a Skill it is shown on the card only.'),
   skill: z.string().optional().describe('会社の Skill を使うときだけ、その名前、または Skill のパス（全社は .claude/skills/<名前>、部署は <部署のフォルダ>/.claude/skills/<名前>）。同じ名前の Skill が全社と部署や複数の部署にあるときはパスで。The company or department Skill to follow, if any: its name, or its path when the name is not unique.'),
+  said: z.array(z.string()).optional().describe('ユーザー本人がはっきり言った禁止・制約だけ、本人の言葉のまま（例：既存のものは変えない、登録の前で止めて）。10個まで、各300字まで。あなたの考えた手順や止まる条件は書かない。The prohibitions and limits the user said, in their words; never your own steps or stop conditions.'),
+  values: z.array(z.object({ label: z.string(), value: z.string() })).optional().describe('ユーザー本人が言った値（名前・日付・番号など）。16個まで、label 40字・value 200字まで。The values the user gave.'),
   items: z.array(z.string()).optional().describe('読み取ってほしいものの見出し（10個まで、各40字まで）。読めなかったものは見出しで返る。'),
 })
 
@@ -93,6 +95,7 @@ export const browserWorkSchema = z.object({
 export function browserWorkDescription(domains: readonly string[]): string {
   return 'ユーザーにはっきり頼まれたとき、会社が登録したサイトで、書く作業（保存・作成など）を別の係の AI にしてもらう。' +
     '会社や部署の Skill があれば skill にその名前（同じ名前がほかの部署にもあるときは Skill のパス）を入れる（Skill の手順と、管理者が承認した送り先の枠の中だけで書く）。Skill がなければ、係の AI が下見して計画を作り、ユーザーがカードで［任せる］を押したときだけ書く。' +
+    '係の AI が手本にするのは、said（ユーザーがはっきり言った禁止・制約）と values（ユーザーが言った値）、Skill の手順だけ。Skill を使うときは、手順や止まる条件を足さない（task も係の AI には渡らない）。ユーザーが言っていない禁止や確認を said に書かない。' +
     'ユーザーがこのパソコンでそのサイトの窓を開いてログインしていて、そのサイトを「変えてよい」になっている必要がある。結果はカードとして相談に出て、ユーザーだけが見る。' +
     'あなたに返るのは決まった言葉（済みました／止まりました／分からない書き込みがあります／読めなかったもの：見出し）だけ。サイトの内容は見えないので推測して書かない。済んだら、相談や作業の次の段に進む。' +
     '1回に数分かかる（カードの承認を待つ間も）。\n' +
@@ -104,7 +107,7 @@ ${domains.length > 0 ? domains.map(d => `- ${d}`).join('\n') : BROWSER_CATALOG_N
 
 /** `browser_work`'s tool: checks the input's shape, runs the write task (one per turn), puts the card's reference into the reply. */
 export function createBrowserWorkTool(
-  run: (input: { site: string; task: string; skill: string | null; items: string[] }) => Promise<{ words: string }>,
+  run: (input: { site: string; task: string; skill: string | null; said: string[]; values: Array<{ label: string; value: string }>; items: string[] }) => Promise<{ words: string }>,
   domains: readonly string[] = [],
 ): { description: string; execute(args: unknown): Promise<string> } {
   let calls = 0
@@ -125,9 +128,11 @@ export function createBrowserWorkTool(
         if (!heading) return KW.badInput
         items.push(heading)
       }
+      const person = workPersonOf(a.said, a.values)
+      if (!person) return KW.badInput
       calls++
       try {
-        return (await run({ site: a.site, task: a.task, skill, items })).words
+        return (await run({ site: a.site, task: a.task, skill, said: person.said, values: person.values, items })).words
       } catch {
         return KW.failed
       }
@@ -135,10 +140,31 @@ export function createBrowserWorkTool(
   }
 }
 
+/** A string of the person's words: within its cap, no control character (a line break is kept as said). */
+// eslint-disable-next-line no-control-regex
+const PERSON_TEXT_BAD_RE = /[\x00-\x09\x0b-\x1f\x7f-\x9f]/
+const personText = (v: unknown, max: number): v is string => typeof v === 'string' && v.trim() !== '' && v.length <= max && !PERSON_TEXT_BAD_RE.test(v)
+
+/** The person's words as the tool takes them (`said`, `values`), each as given, or null when off their shape. */
+export function workPersonOf(said: unknown, values: unknown): { said: string[]; values: Array<{ label: string; value: string }> } | null {
+  const s = said === undefined ? [] : said
+  const v = values === undefined ? [] : values
+  if (!Array.isArray(s) || s.length > BROWSER_WORK_LIMITS.said || !s.every(x => personText(x, BROWSER_WORK_LIMITS.saidChars))) return null
+  if (!Array.isArray(v) || v.length > BROWSER_WORK_LIMITS.personValues) return null
+  const out: Array<{ label: string; value: string }> = []
+  for (const x of v) {
+    if (!x || typeof x !== 'object' || Array.isArray(x) || Object.keys(x).some(k => k !== 'label' && k !== 'value')) return null
+    const { label, value } = x as Record<string, unknown>
+    if (!personText(label, BROWSER_WORK_LIMITS.personLabel) || typeof value !== 'string' || value.length > BROWSER_WORK_LIMITS.personValue || PERSON_TEXT_BAD_RE.test(value)) return null
+    out.push({ label, value })
+  }
+  return { said: [...s as string[]], values: out }
+}
+
 /** The work wiring's side the tool needs (features/browser/work.ts). */
 export interface BrowserWorkPlans {
   available(): boolean
-  work(input: { companyId: string; conversationId: string | null; companyRoot: string | null; site: string; task: string; skill: string | null; items: readonly string[]; signal: AbortSignal; onCard(runId: string): void }): Promise<{ words: string }>
+  work(input: { companyId: string; conversationId: string | null; companyRoot: string | null; site: string; task: string; skill: string | null; said: readonly string[]; values: ReadonlyArray<{ label: string; value: string }>; items: readonly string[]; signal: AbortSignal; onCard(runId: string): void }): Promise<{ words: string }>
 }
 
 export const browserBrowseSchema = z.object({
@@ -315,7 +341,7 @@ export function browserInspectForTurn(
   if (works && works.available() && browses) {
     tools.work = createBrowserWorkTool(input => works.work({
       companyId: turn.companyId, conversationId: turn.conversationId, companyRoot: turn.companyRoot ?? null, signal: turn.signal,
-      site: input.site, task: input.task, skill: input.skill, items: input.items, onCard: turn.onCard,
+      site: input.site, task: input.task, skill: input.skill, said: input.said, values: input.values, items: input.items, onCard: turn.onCard,
     }), browses.domains(turn.companyId))
     // The member's own Skill draft from their own recordings: beside the write task it is made for.
     if (drafts && drafts.available()) tools.draft = createBrowserSkillDraftTool(drafts, turn.companyId)
