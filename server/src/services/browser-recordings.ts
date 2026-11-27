@@ -33,7 +33,8 @@ import type { Transactions } from '../ports/transactions'
 import { hasFullAccess, type Member } from './access'
 import type { BrowserDeviceGate } from './browser-devices'
 import type { BrowserSiteGrants } from './browser-site-grants'
-import type { BrowserSkillDraftService } from './browser-skill-drafts'
+import { BROWSER_SKILL_DRAFT_SERVER_WORDS, type BrowserSkillDraftService, type DraftOnSend } from './browser-skill-drafts'
+import { logError } from '../lib/error-log'
 import { ok, refuse, type Outcome, type Refusal } from './outcome'
 
 export interface BrowserRecordingDeps {
@@ -101,7 +102,7 @@ export function createBrowserRecordingService(deps: BrowserRecordingDeps) {
       if (problem === 'size') return refuse('too-large', W.tooLarge, { code: 'BROWSER_RECORDING_TOO_LARGE' })
       if (problem) return refuse('bad-request', W.badBody, { code: 'BROWSER_RECORDING_BAD', problem })
       const content = body.content as BrowserRecordingContent
-      // The recording and its draft together: never a recording whose draft was lost halfway (design memo §7 "止まったら").
+      // The recording and its draft together: never a draft without its recording; a draft that fails is left out.
       return deps.transactions.run((): Outcome<BrowserRecordingSent> => {
         const at = deps.clock.nowMs()
         if (repo(member.companyId).countOf(member.userId, iso(at)) >= BROWSER_RECORDING_PER_MEMBER) {
@@ -112,7 +113,14 @@ export function createBrowserRecordingService(deps: BrowserRecordingDeps) {
           content: JSON.stringify(content), createdAt: iso(at), deleteAt: iso(at + BROWSER_RECORDING_DAYS * DAY_MS),
         }
         repo(member.companyId).insert(row)
-        const draft = deps.drafts.makeOnSend(member, { id: row.id, content, createdAtMs: at })
+        // A savepoint: a failure while making the draft keeps the recording, without a draft (review of #889).
+        let draft: DraftOnSend
+        try {
+          draft = deps.transactions.run(() => deps.drafts.makeOnSend(member, { id: row.id, content, createdAtMs: at }))
+        } catch (error) {
+          logError('browser-recordings', 'making a Skill draft failed; the recording is kept without one', error)
+          draft = { draftId: null, note: BROWSER_SKILL_DRAFT_SERVER_WORDS.failed }
+        }
         return ok({ ...summaries(member, [row])[0], draftId: draft.draftId, draftNote: draft.note })
       })
     },

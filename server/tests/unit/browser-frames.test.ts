@@ -1262,6 +1262,16 @@ describe('a run of a source this build does not know (the rollback floor of the 
     expect(value(frames.get(alice, started.runId))).toMatchObject({ state: 'ended', endReason: 'unknown-source' })
   })
 
+  it('a locked one (a write in doubt) keeps the domain to its hour, as for every source (review of #889)', async () => {
+    const run = await openAdhoc()
+    expect(code(await permit(run.runId, 1))).toBe('ok')
+    expect(code(await report(run.runId, 1, 'unknown'))).toBe('ok')
+    asLaterBuildsSource(run.runId, 'draft')
+    expect(value(frames.get(alice, run.runId))).toMatchObject({ state: 'locked', endReason: null })
+    expect(frames.holderOn(CO, DOMAIN)).not.toBeNull()
+    expect(code(await permit(run.runId, 1))).toBe('BROWSER_RUN_AFTER_UNKNOWN')
+  })
+
   it('a known source runs as before', async () => {
     const run = await openAdhoc()
     expect(code(await permit(run.runId, 1))).toBe('ok')

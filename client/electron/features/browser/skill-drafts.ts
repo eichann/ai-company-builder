@@ -23,7 +23,7 @@ const isMap = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 
 
 export function createBrowserSkillDraftsHttp(deps: BrowserSkillDraftsHttpDeps) {
   const doFetch = deps.fetch ?? fetch
-  async function call<T>(companyId: string, method: 'GET' | 'POST' | 'PUT', path: string, body?: unknown): Promise<DraftsAnswer<T>> {
+  async function call<T>(companyId: string, method: 'GET' | 'POST' | 'PUT' | 'DELETE', path: string, body?: unknown): Promise<DraftsAnswer<T>> {
     const base = deps.baseUrl().replace(/\/+$/, '')
     const cookies = deps.cookies()
     if (!base || cookies.length === 0 || !BROWSER_COMPANY_ID_RE.test(companyId)) return { kind: 'no-answer' }
@@ -65,7 +65,11 @@ export function createBrowserSkillDraftsHttp(deps: BrowserSkillDraftsHttpDeps) {
       const p = draftPath(draftId)
       return p ? call(companyId, 'PUT', p, body) : { kind: 'no-answer' }
     },
-    remake: (companyId: string, body: { recordingIds: string[]; name?: string }) => call<BrowserSkillDraftDetail>(companyId, 'POST', '', body),
+    remake: (companyId: string, body: { recordingIds: string[]; name?: string; replaces?: string }) => call<BrowserSkillDraftDetail>(companyId, 'POST', '', body),
+    async remove(companyId: string, draftId: string): Promise<DraftsAnswer<{ deleted: true }>> {
+      const p = draftPath(draftId)
+      return p ? call(companyId, 'DELETE', p) : { kind: 'no-answer' }
+    },
   }
 }
 export type BrowserSkillDraftsHttp = ReturnType<typeof createBrowserSkillDraftsHttp>

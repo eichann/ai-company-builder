@@ -40,8 +40,8 @@ export const BROWSER_RECORDING_MAIN_WORDS = {
   sent: '記録を送りました。管理者に「記録を送りました」と伝えてください。',
   /** The server made a Skill's draft from it (agent-browser.md "A Skill's draft from a recording"). */
   sentWithDraft: '記録を送りました。Skill の下書きができました。相談に戻って、AI に「記録を送った」と伝えてください。',
-  /** The server kept it without a draft, and said why (its own plain sentence). */
-  sentWithoutDraft: (why: string) => `記録を送りました。${why}`,
+  /** The server kept it without a draft, and said why (its own plain sentence); the admins' path stays as before. */
+  sentWithoutDraft: (why: string) => `記録を送りました。管理者に「記録を送りました」と伝えてください。${why}`,
   discarded: '記録を捨てました。',
   closed: 'サイトの窓を閉じたので、記録を捨てました。',
   lost: 'サイトの窓とのつながりが切れたので、記録を捨てました。',

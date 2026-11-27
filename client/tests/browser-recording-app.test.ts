@@ -150,7 +150,8 @@ test('the send\'s answer says whether a Skill draft was made (agent-browser.md "
 
   const cases: Array<[BrowserRecordingSendAnswer, string]> = [
     [{ kind: 'ok', draft: { made: true, note: 'x' } }, W.sentWithDraft],
-    [{ kind: 'ok', draft: { made: false, note: '下書きは作りませんでした（…）' } }, W.sentWithoutDraft('下書きは作りませんでした（…）')],
+    // No draft: the admins' path is still said, then why (review of #889).
+    [{ kind: 'ok', draft: { made: false, note: '下書きは作りませんでした（…）' } }, '記録を送りました。管理者に「記録を送りました」と伝えてください。下書きは作りませんでした（…）'],
     [{ kind: 'ok', draft: { made: false, note: null } }, W.sent],
     [{ kind: 'ok', draft: null }, W.sent],
   ]

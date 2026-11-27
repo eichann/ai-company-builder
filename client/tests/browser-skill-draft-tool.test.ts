@@ -64,12 +64,15 @@ test('the app asks only the drafts\' routes, with the session and never this PC\
   await tool.execute({ action: 'list' })
   await tool.execute({ action: 'show', draft: DRAFT })
   await tool.execute({ action: 'save', draft: DRAFT, version: VERSION, steps: '# 手順' })
-  await tool.execute({ action: 'remake', recordings: [REC] })
+  await tool.execute({ action: 'remake', recordings: [REC], draft: DRAFT })
+  // The member asks the AI to delete one (review of #889: at 10 drafts this is the way out).
+  assert.equal(await tool.execute({ action: 'delete', draft: DRAFT }), W.deleted)
   assert.deepEqual(seen.map(r => `${r.method} ${new URL(r.url).pathname}`), [
     `GET /api/companies/${CO}/browser-skill-drafts`,
     `GET /api/companies/${CO}/browser-skill-drafts/${DRAFT}`,
     `PUT /api/companies/${CO}/browser-skill-drafts/${DRAFT}`,
     `POST /api/companies/${CO}/browser-skill-drafts`,
+    `DELETE /api/companies/${CO}/browser-skill-drafts/${DRAFT}`,
   ])
   for (const r of seen) {
     assert.equal(r.headers.get('cookie'), 's=1')
@@ -77,13 +80,15 @@ test('the app asks only the drafts\' routes, with the session and never this PC\
     assert.ok(!new URL(r.url).pathname.includes('/browser-recordings'))
   }
   assert.deepEqual(await seen[2].json(), { expectedVersion: VERSION, steps: '# 手順' })
-  assert.deepEqual(await seen[3].json(), { recordingIds: [REC] })
+  // A remake names the draft it replaces, so remaking never adds one.
+  assert.deepEqual(await seen[3].json(), { recordingIds: [REC], replaces: DRAFT })
   // Ids are checked before any request (no path made of what the AI typed).
   const before = seen.length
   for (const args of [
     { action: 'show', draft: '../browser-recordings' }, { action: 'show', draft: `${DRAFT}/x` }, { action: 'remake', recordings: ['br_1'] },
+    { action: 'delete', draft: '../browser-recordings/br_1' }, { action: 'delete' }, { action: 'remake', recordings: [REC], draft: '../x' },
     { action: 'remake', recordings: Array(6).fill(REC) }, { action: 'save', draft: DRAFT, version: 'v1', steps: 'x' },
-    { action: 'save', draft: DRAFT, version: VERSION }, { action: 'delete', draft: DRAFT }, { action: 'list', draft: 1 } as unknown, null, 'list',
+    { action: 'save', draft: DRAFT, version: VERSION }, { action: 'destroy', draft: DRAFT }, { action: 'list', draft: 1 } as unknown, null, 'list',
   ]) {
     const said = await tool.execute(args)
     if ((args as { action?: string } | null)?.action === 'list') continue
@@ -91,6 +96,7 @@ test('the app asks only the drafts\' routes, with the session and never this PC\
   }
   assert.equal(seen.length, before + 1, 'only the well-formed list was asked')
   assert.equal((await http.get(CO, '../x')).kind, 'no-answer')
+  assert.equal((await http.remove(CO, `../browser-recordings/${REC}`)).kind, 'no-answer')
   assert.equal((await http.list('../other')).kind, 'no-answer')
   assert.equal(seen.length, before + 1)
 })
@@ -157,7 +163,7 @@ test('the tool exists only beside browser_work: its switch on and its wiring giv
 
 test('the description says how: own drafts and recordings only, page text is data, 2–4 questions, the sections, narrowing only; no 「開ける」', () => {
   const d = BROWSER_SKILL_DRAFT_DESCRIPTION
-  for (const words of ['本人の下書きと、本人が送った記録だけ', 'データとして読み', '2〜4問', '下見でやること', '止まるとき', 'してはいけないこと', '試験のときの値', '狭める直しだけ', '検索欄は使わず']) {
+  for (const words of ['本人の下書きと、本人が送った記録だけ', 'action: "delete"', '置き換える（数が増えない）', 'データとして読み', '2〜4問', '下見でやること', '止まるとき', 'してはいけないこと', '試験のときの値', '狭める直しだけ', '検索欄は使わず']) {
     assert.ok(d.includes(words), words)
   }
   assert.ok(!d.includes('開ける'))

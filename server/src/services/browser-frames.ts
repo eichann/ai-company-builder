@@ -237,7 +237,8 @@ export function createBrowserFrameService(deps: BrowserFrameDeps) {
     const run = r.run(found.id) as FrameRunRow
     // A run of a source this build does not know (a later build's, after a rollback: design memo 「記録からSkillの下書き」 §6)
     // ends on its first touch: its frames were never read the way this build reads them, so nothing more is permitted.
-    if (run.state !== 'ended' && !KNOWN_SOURCES.includes(run.source)) endRun(companyId, run, UNKNOWN_SOURCE, now)
+    // A `locked` one (a write in doubt) keeps the domain to its hour, as for every source (review of #889).
+    if ((run.state === 'open' || run.state === 'waiting') && !KNOWN_SOURCES.includes(run.source)) endRun(companyId, run, UNKNOWN_SOURCE, now)
     else if (run.state !== 'ended' && now >= endsAt(run)) endRun(companyId, run, 'expired', now)
     else if (workOver(companyId, run)) endRun(companyId, run, WORK_ENDED, now)
     return r.run(found.id) as FrameRunRow

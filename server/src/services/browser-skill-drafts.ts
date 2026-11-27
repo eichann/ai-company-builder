@@ -13,8 +13,10 @@
  * - **The frame never widens** (I2, I6): `base_declaration` is what `browserSkillDraftFrom` made from recordings the server
  *   stored itself (fixed by trigger); a change of `declaration` is taken only when `browserSkillDraftCoveredProblem` says
  *   it is no wider (no DELETE, no path beginning with a placeholder, one budget per recorded target).
- * - **Made when a recording is sent** (`makeOnSend`, inside the recording's own transaction) when it holds a write the
- *   rule keeps; or again from 1–5 of the author's own recordings of one domain (`create`).
+ * - **Made when a recording is sent** (`makeOnSend`, inside the recording's own transaction, in a savepoint: a failure
+ *   keeps the recording without a draft) when it holds a write the rule keeps; or again from 1–5 of the author's own
+ *   recordings of one domain (`create`), **replacing** one of the author's drafts when asked (`replaces`): the work split
+ *   over two recordings becomes one draft without adding one.
  * - **At most 10 per person** (D5); each goes 30 days after its last change (`delete_at`; every read leaves it out, the
  *   server clock deletes it). Not in a company archive.
  * - **Every change is a compare-and-set on the version** (`expectedVersion`): the AI and the screen changing it at the same
@@ -61,7 +63,8 @@ export const BROWSER_SKILL_DRAFT_SERVER_WORDS = Object.freeze({
   notFound: 'この下書きは見つかりません（消されたか、30日が過ぎました）。',
   badBody: '頼み方の形が正しくありません。',
   recordingNotFound: '指定した記録が見つかりません（あなたが送った記録で、30日以内のものだけを使えます）。',
-  tooMany: `下書きは、ひとり${L.perMember}件までです。要らない下書きを消してから、もう一度お試しください。`,
+  tooMany: `下書きは、ひとり${L.perMember}件までです。要らない下書きを消すよう AI に頼むか、30日たつと消えます。`,
+  failed: '下書きは作れませんでした。あとで相談の AI に、この記録から下書きを作り直すよう頼めます。',
   changed: '下書きが、ほかの所で直されました。読み直してから、もう一度直してください。',
   badName: `名前は、半角の小文字・数字・「-」「_」で、${L.name}字までにしてください（先頭は小文字か数字）。`,
   nameTaken: '同じ名前の下書きが、もうあります。別の名前にしてください。',
@@ -135,15 +138,16 @@ export function createBrowserSkillDraftService(deps: BrowserSkillDraftDeps) {
    * A new draft from recordings already checked to be the author's own (in the order given), or why none is made. Called
    * inside a transaction (the count, the name and the insert together).
    */
-  function insertFrom(member: Member, since: string, sources: ReadonlyArray<{ id: string; content: BrowserRecordingContent }>, name: string | null, atMs: number): Outcome<BrowserSkillDraftRow> {
+  function insertFrom(member: Member, since: string, sources: ReadonlyArray<{ id: string; content: BrowserRecordingContent }>, name: string | null, atMs: number, replaces: string | null = null): Outcome<BrowserSkillDraftRow> {
     const at = iso(atMs)
     const made = browserSkillDraftFrom(sources.map(s => s.content))
     if (!made.ok) return refuse('conflict', W.noDraft(made.refusal), { code: 'BROWSER_SKILL_DRAFT_NONE', refusal: made.refusal })
     const repo = drafts(member.companyId)
-    if (repo.countOf(member.userId, at, since) >= L.perMember) return refuse('conflict', W.tooMany, { code: 'BROWSER_SKILL_DRAFT_LIMIT' })
+    // The draft it replaces is gone once this one is in: it neither counts nor holds its name.
+    if (repo.countOf(member.userId, at, since) - (replaces ? 1 : 0) >= L.perMember) return refuse('conflict', W.tooMany, { code: 'BROWSER_SKILL_DRAFT_LIMIT' })
     const id = `bd_${deps.ids.newToken().slice(0, 32)}`
     const draftName = name ?? `draft-${id.slice(3, 9)}`
-    if (repo.nameTaken(member.userId, draftName, at, since, null)) return refuse('conflict', W.nameTaken, { code: 'BROWSER_SKILL_DRAFT_NAME_TAKEN' })
+    if (repo.nameTaken(member.userId, draftName, at, since, replaces)) return refuse('conflict', W.nameTaken, { code: 'BROWSER_SKILL_DRAFT_NAME_TAKEN' })
     const row: BrowserSkillDraftRow = {
       id, userId: member.userId, name: draftName, domain: made.draft.declaration.domain,
       recordingIds: JSON.stringify(sources.map(s => s.id)), baseDeclaration: made.draft.text, baseNotes: JSON.stringify(notesOf(made.draft)),
@@ -151,6 +155,7 @@ export function createBrowserSkillDraftService(deps: BrowserSkillDraftDeps) {
       createdAt: at, updatedAt: at, deleteAt: iso(atMs + L.days * DAY_MS),
     }
     repo.insert(row)
+    if (replaces) repo.delete(member.userId, replaces)
     return ok(row)
   }
 
@@ -179,9 +184,13 @@ export function createBrowserSkillDraftService(deps: BrowserSkillDraftDeps) {
       })
     },
 
-    /** POST /browser-skill-drafts { recordingIds, name? }: a new draft from 1–5 of the author's own recordings (in the order sent). */
+    /**
+     * POST /browser-skill-drafts { recordingIds, name?, replaces? }: a new draft from 1–5 of the author's own recordings (in
+     * the order sent); with `replaces` (one of the author's own drafts) that draft goes in the same transaction.
+     */
     create(member: Member, body: unknown): Outcome<BrowserSkillDraftDetail> {
-      if (!isMap(body) || !Object.keys(body).every(k => k === 'recordingIds' || k === 'name')) return bad()
+      if (!isMap(body) || !Object.keys(body).every(k => k === 'recordingIds' || k === 'name' || k === 'replaces')) return bad()
+      if (body.replaces !== undefined && (typeof body.replaces !== 'string' || !DRAFT_ID_RE.test(body.replaces))) return bad()
       const ids = body.recordingIds
       if (!Array.isArray(ids) || ids.length === 0 || ids.length > BROWSER_SKILL_DRAFT_LIMITS.recordings
         || !ids.every(id => typeof id === 'string') || new Set(ids).size !== ids.length) return bad()
@@ -198,7 +207,10 @@ export function createBrowserSkillDraftService(deps: BrowserSkillDraftDeps) {
           if (!s) return refuse('not-found', W.recordingNotFound, { code: 'BROWSER_RECORDING_NOT_FOUND' })
           sources.push(s)
         }
-        const made = insertFrom(member, since, sources, (body.name as string | undefined) ?? null, atMs)
+        const replaces = (body.replaces as string | undefined) ?? null
+        // Only one of the author's own drafts can be replaced; anyone else's is the same answer as none.
+        if (replaces && !drafts(member.companyId).byId(member.userId, replaces, at, since)) return missing()
+        const made = insertFrom(member, since, sources, (body.name as string | undefined) ?? null, atMs, replaces)
         if (!made.ok) return made
         return ok(detail(member, made.value, since, at))
       })

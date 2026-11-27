@@ -816,9 +816,11 @@ const MATRIX: Row[] = [
  * object (`other(w)`) and once with an id that exists nowhere (`missing`);
  * both answers must be the same.
  */
-interface CrossRow { route: string; req: (w: World, id: string) => Req; other: (w: World) => string; missing?: string }
+/** `inBody`: the object is named in the request's body, not its URL (run like any row, not counted as a URL id). */
+interface CrossRow { route: string; req: (w: World, id: string) => Req; other: (w: World) => string; missing?: string; inBody?: true }
 const NO_SUCH_ID = '00000000-0000-4000-8000-00000000c0de'
 const x = (route: string, req: CrossRow['req'], other: CrossRow['other'], missing?: string): CrossRow => ({ route, req, other, missing })
+const xBody = (route: string, req: CrossRow['req'], other: CrossRow['other'], missing?: string): CrossRow => ({ route, req, other, missing, inBody: true })
 const D = (w: World, id: string) => `${C(w)}/departments/${id}`
 const GIT_SCOPE = (w: World, id: string) => `/api/git-http/${w.co}/scopes/${id}.git`
 
@@ -1024,6 +1026,8 @@ const CROSS: CrossRow[] = [
   x('POST /api/companies/:companyId/browser-devices/:deviceId/revoke', (w, id) => ({ path: `${C(w)}/browser-devices/${id}/revoke` }), w => w.other.browserDevice, NO_SUCH_DEVICE),
   x('GET /api/companies/:companyId/browser-recordings/:recordingId', (w, id) => ({ path: `${C(w)}/browser-recordings/${id}` }), w => w.other.browserRecording, NO_SUCH_RECORDING),
   x('DELETE /api/companies/:companyId/browser-recordings/:recordingId', (w, id) => ({ path: `${C(w)}/browser-recordings/${id}` }), w => w.other.browserRecording, NO_SUCH_RECORDING),
+  // Another company's recording named to make a draft from: the same 404 as a recording that exists nowhere.
+  xBody('POST /api/companies/:companyId/browser-skill-drafts', (w, id) => ({ path: `${C(w)}/browser-skill-drafts`, body: { recordingIds: [id] } }), w => w.other.browserRecording, NO_SUCH_RECORDING),
   x('GET /api/companies/:companyId/browser-skill-drafts/:draftId', (w, id) => ({ path: `${C(w)}/browser-skill-drafts/${id}` }), w => w.other.browserSkillDraft, NO_SUCH_DRAFT),
   x('PUT /api/companies/:companyId/browser-skill-drafts/:draftId', (w, id) => ({ path: `${C(w)}/browser-skill-drafts/${id}`, body: { expectedVersion: `sha256:${'1'.repeat(64)}`, steps: 'x' } }), w => w.other.browserSkillDraft, NO_SUCH_DRAFT),
   x('DELETE /api/companies/:companyId/browser-skill-drafts/:draftId', (w, id) => ({ path: `${C(w)}/browser-skill-drafts/${id}` }), w => w.other.browserSkillDraft, NO_SUCH_DRAFT),
@@ -1499,7 +1503,7 @@ describe('permission matrix', () => {
     for (const route of app.routes as Array<{ method: string; path: string }>) {
       if (route.method !== 'ALL' && objectParams(route.path).length > 0) withIds.add(`${route.method} ${route.path}`)
     }
-    const covered = new Set([...CROSS.map(row => row.route), ...Object.keys(NOT_OBJECT_IDS)])
+    const covered = new Set([...CROSS.filter(row => !row.inBody).map(row => row.route), ...Object.keys(NOT_OBJECT_IDS)])
     expect([...withIds].filter(k => !covered.has(k)), 'routes with an object id but no cross-company row').toEqual([])
     expect([...covered].filter(k => !withIds.has(k)), 'cross-company rows for routes that no longer take an id').toEqual([])
   })

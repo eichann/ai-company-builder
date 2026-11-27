@@ -3,7 +3,9 @@
  * "A Skill's draft from a recording"; design memo 「記録からSkillの下書き」 I1, I2, I5, I6, D2, D5, D9), against a real
  * database, the real recordings and PC services. The site is fictional.
  *
- * Guards (each mutation-checked): the draft is made with the recording in one transaction (a failure stores neither);
+ * Guards (each mutation-checked): the draft is made with the recording, in a savepoint (a failure keeps the recording
+ * without a draft, never a draft without its recording); a remake can replace one of the author's own drafts (never
+ * anyone else's), so the 10 never fill up by remaking;
  * a draft is its author's alone — another member, an owner, an admin, another company, the author after leaving and
  * coming back get the same 404 and list nothing; only the author's own recordings (sent while a member this time, still
  * kept) are read or used — an owner who reads every recording in the admin console cannot make a draft from someone
@@ -22,7 +24,7 @@ import { sha256TokenDigest } from '../../src/adapters/system'
 import { createBrowserDeviceService, type BrowserDeviceService } from '../../src/services/browser-devices'
 import { createBrowserRecordingService, type BrowserRecordingService } from '../../src/services/browser-recordings'
 import { createBrowserSiteGrants } from '../../src/services/browser-site-grants'
-import { BROWSER_SKILL_DRAFT_SERVER_LIMITS, createBrowserSkillDraftService, type BrowserSkillDraftService } from '../../src/services/browser-skill-drafts'
+import { BROWSER_SKILL_DRAFT_SERVER_LIMITS, BROWSER_SKILL_DRAFT_SERVER_WORDS, createBrowserSkillDraftService, type BrowserSkillDraftService } from '../../src/services/browser-skill-drafts'
 import { browserRecordingProblem, type BrowserRecordedSend, type BrowserRecordingContent, type BrowserRecordingStep } from '../../../shared/core/browser-recording'
 import { browserSkillDraftFrom } from '../../../shared/core/browser-skill-draft'
 import type { BrowserOperationSettings } from '../../../shared/core/browser-operation'
@@ -157,17 +159,26 @@ describe('made when a recording is sent', () => {
     expect(value(recordings.get(alice, sent.id)).id).toBe(sent.id)
   })
 
-  it('the recording and its draft are one transaction: a failure while making the draft stores neither', () => {
-    build(() => { throw new Error('halfway') })
-    expect(() => recordings.send(alice, pcOf(alice), { domain: DOMAIN, content: ORDER() })).toThrow('halfway')
-    expect(value(recordings.list(alice)).items).toEqual([])
+  it('a failure while making the draft keeps the recording, without a draft and with nothing of the draft half-written', () => {
+    build((m, rec) => {
+      // Half a draft written, then a failure: the savepoint takes the half back.
+      drafts.makeOnSend(m, rec)
+      throw new Error('halfway')
+    })
+    const sent = value(recordings.send(alice, pcOf(alice), { domain: DOMAIN, content: ORDER() }))
+    expect(sent).toMatchObject({ draftId: null, draftNote: BROWSER_SKILL_DRAFT_SERVER_WORDS.failed })
+    expect(value(recordings.list(alice)).items.map(r => r.id)).toEqual([sent.id])
+    expect(value(drafts.list(alice)).drafts).toEqual([])
+    expect(conn.prepare('SELECT COUNT(*) AS n FROM browser_skill_drafts').get()).toEqual({ n: 0 })
   })
 
   it(`at most ${BROWSER_SKILL_DRAFT_SERVER_LIMITS.perMember} drafts per person: the recording is still kept (the company's too), without a draft`, () => {
     for (let i = 0; i < BROWSER_SKILL_DRAFT_SERVER_LIMITS.perMember; i++) sendRecording(alice)
     const sent = sendRecording(alice)
     expect(sent.draftId).toBeNull()
-    expect(sent.draftNote).toContain('ひとり10件まで')
+    // The way out is said: ask the AI to delete one, or wait for the 30 days.
+    expect(sent.draftNote).toBe(BROWSER_SKILL_DRAFT_SERVER_WORDS.tooMany)
+    expect(sent.draftNote).toContain('要らない下書きを消すよう AI に頼むか、30日たつと消えます')
     expect(code(drafts.create(alice, { recordingIds: [sent.id] }))).toBe('BROWSER_SKILL_DRAFT_LIMIT')
     // Another person has their own room.
     expect(sendRecording(bob).draftId).not.toBeNull()
@@ -252,6 +263,39 @@ describe('made again from own recordings (remake)', () => {
     expect(code(drafts.create(alice, { recordingIds: [first.id, first.id] }))).toBe('BROWSER_SKILL_DRAFT_BAD')
     expect(code(drafts.create(alice, { recordingIds: [first.id], extra: 1 }))).toBe('BROWSER_SKILL_DRAFT_BAD')
     expect(code(drafts.create(alice, { recordingIds: [first.id], name: 'Bad Name' }))).toBe('BROWSER_SKILL_DRAFT_BAD_NAME')
+  })
+})
+
+describe('a remake replaces a draft (review of #889: remaking never fills the 10)', () => {
+  it('the replaced draft goes in the same step; at 10 a remake still works; its name may be kept', () => {
+    const first = sendRecording(alice, recording([send(1, 'POST', '/api/tags', { status: 201 })]))
+    const second = sendRecording(alice)
+    const old = value(drafts.get(alice, first.draftId as string))
+    value(drafts.save(alice, old.id, { expectedVersion: old.version, name: 'order-note' }))
+    for (let i = 0; i < 8; i++) sendRecording(alice)
+    expect(value(drafts.list(alice)).drafts).toHaveLength(10)
+    const made = value(drafts.create(alice, { recordingIds: [first.id, second.id], name: 'order-note', replaces: old.id }))
+    const ids = value(drafts.list(alice)).drafts.map(d => d.id)
+    expect(ids).toHaveLength(10)
+    expect(ids).toContain(made.id)
+    expect(ids).not.toContain(old.id)
+    // Without `replaces` the 10 still hold.
+    expect(code(drafts.create(alice, { recordingIds: [first.id] }))).toBe('BROWSER_SKILL_DRAFT_LIMIT')
+  })
+
+  it('only one of the author\'s own drafts: anyone else\'s, or one that is gone, is the same 404 and nothing changes', () => {
+    const mine = sendRecording(alice)
+    const bobs = draftOf(bob)
+    const ownerReplacing = drafts.create(owner, { recordingIds: [sendRecording(owner).id], replaces: bobs.id })
+    expect(code(ownerReplacing)).toBe('BROWSER_SKILL_DRAFT_NOT_FOUND')
+    expect(code(drafts.create(alice, { recordingIds: [mine.id], replaces: bobs.id }))).toBe('BROWSER_SKILL_DRAFT_NOT_FOUND')
+    expect(code(drafts.create(alice, { recordingIds: [mine.id], replaces: `bd_${'0'.repeat(32)}` }))).toBe('BROWSER_SKILL_DRAFT_NOT_FOUND')
+    expect(code(drafts.create(alice, { recordingIds: [mine.id], replaces: 'x' }))).toBe('BROWSER_SKILL_DRAFT_BAD')
+    expect(value(drafts.get(bob, bobs.id)).id).toBe(bobs.id)
+    // A draft that cannot be made replaces nothing.
+    const readOnly = sendRecording(alice, READ_ONLY())
+    expect(code(drafts.create(alice, { recordingIds: [readOnly.id], replaces: mine.draftId }))).toBe('BROWSER_SKILL_DRAFT_NONE')
+    expect(value(drafts.get(alice, mine.draftId as string)).id).toBe(mine.draftId)
   })
 })
 

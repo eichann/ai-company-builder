@@ -3,7 +3,8 @@
  * Every route answers the member's own drafts and recordings only: nobody else's, owners and admins included.
  *
  *   GET    /browser-skill-drafts            → BrowserSkillDraftsList
- *   POST   /browser-skill-drafts            { recordingIds, name? } → BrowserSkillDraftDetail (made again from own recordings)
+ *   POST   /browser-skill-drafts            { recordingIds, name?, replaces? } → BrowserSkillDraftDetail (made again from own
+ *                                            recordings; `replaces`: one of the author's drafts, gone in the same step)
  *   GET    /browser-skill-drafts/:draftId   → BrowserSkillDraftDetail
  *   PUT    /browser-skill-drafts/:draftId   { expectedVersion, name?, declaration?, steps? } → BrowserSkillDraftDetail
  *   DELETE /browser-skill-drafts/:draftId   → { deleted: true }

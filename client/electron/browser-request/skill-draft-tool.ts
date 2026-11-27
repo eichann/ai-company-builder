@@ -16,8 +16,8 @@ import type { DraftsAnswer } from '../features/browser/skill-drafts'
 export { BROWSER_SKILL_DRAFT_TOOL }
 
 export const browserSkillDraftSchema = z.object({
-  action: z.enum(BROWSER_SKILL_DRAFT_ACTIONS).describe('list（一覧）／ show（中身を読む）／ save（直す）／ remake（記録から作り直す）'),
-  draft: z.string().optional().describe('下書きの id（bd_ で始まる）。show と save で使う。'),
+  action: z.enum(BROWSER_SKILL_DRAFT_ACTIONS).describe('list（一覧）／ show（中身を読む）／ save（直す）／ remake（記録から作り直す）／ delete（消す）'),
+  draft: z.string().optional().describe('下書きの id（bd_ で始まる）。show・save・delete で使う。remake では置き換える下書き。'),
   version: z.string().optional().describe('save のとき：show で読んだ版（sha256: で始まる）。'),
   name: z.string().optional().describe('Skill の名前（半角の小文字・数字・-・_、64字まで）。save と remake で使える。'),
   steps: z.string().optional().describe('save のとき：SKILL.md の全文。'),
@@ -34,7 +34,8 @@ export interface BrowserSkillDraftPlans {
   list(companyId: string): Promise<Answer<BrowserSkillDraftsList>>
   get(companyId: string, draftId: string): Promise<Answer<BrowserSkillDraftDetail>>
   save(companyId: string, draftId: string, body: { expectedVersion: string; name?: string; steps?: string; declaration?: string }): Promise<Answer<BrowserSkillDraftDetail>>
-  remake(companyId: string, body: { recordingIds: string[]; name?: string }): Promise<Answer<BrowserSkillDraftDetail>>
+  remake(companyId: string, body: { recordingIds: string[]; name?: string; replaces?: string }): Promise<Answer<BrowserSkillDraftDetail>>
+  remove(companyId: string, draftId: string): Promise<Answer<{ deleted: true }>>
 }
 
 function refusedWords(a: Exclude<Answer<unknown>, { kind: 'ok' }>): string {
@@ -74,8 +75,14 @@ export function createBrowserSkillDraftTool(plans: BrowserSkillDraftPlans, compa
             return a.kind === 'ok' ? `${W.saved(a.value.version)}\n\n${draftDetailWords(a.value)}` : refusedWords(a)
           }
           case 'remake': {
-            const a = await plans.remake(companyId, { recordingIds: input.recordings, ...(input.name !== undefined ? { name: input.name } : {}) })
+            const a = await plans.remake(companyId, {
+              recordingIds: input.recordings, ...(input.name !== undefined ? { name: input.name } : {}), ...(input.replaces !== undefined ? { replaces: input.replaces } : {}),
+            })
             return a.kind === 'ok' ? draftDetailWords(a.value) : refusedWords(a)
+          }
+          case 'delete': {
+            const a = await plans.remove(companyId, input.draft)
+            return a.kind === 'ok' ? W.deleted : refusedWords(a)
           }
         }
       } catch {
