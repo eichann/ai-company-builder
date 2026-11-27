@@ -1387,6 +1387,8 @@ export async function createRecordTools(access: RecordTurnAccess, signal?: Abort
     try { answer = await access.call(req.method, req.path, undefined, signal) } catch (error) {
       return JSON.stringify(error instanceof RecordsApiError ? refusalForAi(error) : { error: 'このやることを読めませんでした。' })
     }
+    // The read may itself have renewed the turn's token (past its life): the member's-turn mark is gone, no card.
+    if (access.memberTurn !== true) return JSON.stringify(ASKED_AFTER_RENEWAL)
     const record = (answer as { record?: { id?: unknown; type?: unknown; title?: unknown; personal?: unknown } } | undefined)?.record
     if (!record || record.type !== 'task' || typeof record.id !== 'string') return JSON.stringify({ error: '部署に出す案を出せるのは「やること」だけです。', code: 'NOT_A_TASK' })
     if (record.personal !== true) return JSON.stringify({ error: 'このやることは「あなただけ」ではありません（もう部署に出ているか、決まった人だけに見えるものです）。', code: 'NOT_PERSONAL' })

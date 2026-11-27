@@ -18,7 +18,7 @@ import { sessionMessageToUIMessage, uiMessageToSessionMessage } from '../src/fea
 const TASK = 'task-0123456789abcdef'
 const types = coreTypeDefinitions().filter(d => d.name === 'task')
 
-async function turn(opts: { memberTurn?: boolean; bound?: boolean; record?: Record<string, unknown>; expired?: boolean } = {}) {
+async function turn(opts: { memberTurn?: boolean; bound?: boolean; record?: Record<string, unknown>; expired?: boolean; expiresOnRead?: boolean } = {}) {
   const seen: Array<{ url: string; method: string }> = []
   const json = (status: number, data: unknown) => new Response(JSON.stringify({ success: true, data }), { status })
   let issued = 0
@@ -32,6 +32,7 @@ async function turn(opts: { memberTurn?: boolean; bound?: boolean; record?: Reco
     if (url.endsWith('/api/records-ai/types')) return json(200, { types: types.map(definition => ({ definition })) })
     if (url.endsWith('/api/records-ai/plugins')) return json(200, { plugins: [] })
     if (url.endsWith('/api/records-ai/my-turn') && opts.expired && issued === 1) return new Response(JSON.stringify({ error: 'Unauthorized', code: 'RECORD_TOKEN_INVALID' }), { status: 401 })
+    if (url.endsWith(`/api/records-ai/item/${TASK}`) && opts.expiresOnRead && issued === 1) return new Response(JSON.stringify({ error: 'Unauthorized', code: 'RECORD_TOKEN_INVALID' }), { status: 401 })
     if (url.endsWith(`/api/records-ai/item/${TASK}`)) return json(200, { record: { id: TASK, type: 'task', title: '見積を直す', personal: true, ...opts.record } })
     return json(200, {})
   }) as unknown as typeof globalThis.fetch
@@ -77,6 +78,11 @@ test('after the turn\'s token was issued again (the member\'s-turn mark gone), t
   assert.equal(t.access.memberTurn, false)
   assert.equal((JSON.parse(await t.tools.execute('records_propose_share', { id: TASK, folder: '営業部' })) as { code?: string }).code, 'TURN_RENEWED')
   assert.equal(t.cards.length, 0)
+  // The tool's own read renews it (codex review): checked again after the read, still no card.
+  const during = await turn({ memberTurn: true, expired: true, expiresOnRead: true })
+  assert.equal((JSON.parse(await during.tools.execute('records_propose_share', { id: TASK, folder: '営業部' })) as { code?: string }).code, 'TURN_RENEWED')
+  assert.equal(during.access.memberTurn, false)
+  assert.equal(during.cards.length, 0)
 })
 
 const CARD: ShareProposalCardRef = { id: 'card-1', companyId: 'co', conversationId: 'conv-1', recordId: TASK, title: '見積を直す', folder: '営業部', at: '2026-11-27T00:00:00.000Z' }
