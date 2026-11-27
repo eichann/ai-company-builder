@@ -56,11 +56,16 @@ const NOTE = {
   offline: 'サーバーにつながらないため、まとめを作れませんでした。',
 } as const
 
+/** A stale summary is made again from a thread read at most this often. */
+export const REFRESH_RETRY_MS = 6 * 60 * 60 * 1000
+
 const empty = (): KeptFile => ({ version: 1, enabled: false, styles: {}, note: null })
 
 export function createWritingStyles(deps: WritingStylesDeps) {
   const now = deps.now ?? (() => Date.now())
   const log = deps.log ?? console
+  /** When a stale summary's making was last started from a thread read, per account and company (memory only). */
+  const refreshTried = new Map<string, number>()
   /** Builds running, per account and company: one at a time. */
   const building = new Map<string, Promise<void>>()
 
@@ -232,7 +237,13 @@ export function createWritingStyles(deps: WritingStylesDeps) {
       if (!userId || !key || !ID.test(companyId) || !isWritingConnectorId(key.connectorId) || !isWritingAudience(key.audience)) return null
       const kept = read(userId, companyId)
       if (!kept.enabled) return null
-      if (Object.values(kept.styles).some(by => WRITING_AUDIENCES.some(a => by[a] && writingStyleStale(by[a]!, now())))) void build(userId, companyId)
+      const tryKey = `${userId}\u0000${companyId}`
+      if (Object.values(kept.styles).some(by => WRITING_AUDIENCES.some(a => by[a] && writingStyleStale(by[a]!, now())))
+        && now() - (refreshTried.get(tryKey) ?? -Infinity) >= REFRESH_RETRY_MS) {
+        // Tried at most every few hours: a making that keeps failing never costs one AI call per thread read.
+        refreshTried.set(tryKey, now())
+        void build(userId, companyId)
+      }
       const choice = chooseWritingStyle(kept.styles, key.connectorId, key.audience)
       return choice ? writingStyleForAi(choice) : null
     },
