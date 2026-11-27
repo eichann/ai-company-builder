@@ -208,8 +208,9 @@ test('in ai mode no write reaches the operated host without an approving step; r
   assert.equal(w.websocket, 'refused')
   assert.equal(w.read, 200)
   // (The runner's own writes, to /line/…, are the next tests'.)
-  // (The recording's page saves through its own fetch, as a person does: the recording tests' own; a write run's, /work/…, the last test's.)
-  const writes = hitsTo('op.test').filter(h => h.method !== 'GET' && !h.path.startsWith('/line/') && !h.path.startsWith('/rec-') && !h.path.startsWith('/work/'))
+  // (The recording's page saves through its own fetch, as a person does: the recording tests' own; a write run's, /work/…, the last test's;
+  // the completion regression's, /flow/…, its own.)
+  const writes = hitsTo('op.test').filter(h => h.method !== 'GET' && !h.path.startsWith('/line/') && !h.path.startsWith('/rec-') && !h.path.startsWith('/work/') && !h.path.startsWith('/flow/'))
   // Only the member's own (human mode) writes and the one approved write arrived: no beacon, form, XHR, WebSocket.
   assert.deepEqual(writes.map(h => `${h.method} ${h.path} ${h.body}`), ['POST /human-save h', 'POST /ai-ok approved', 'POST /human-again h'])
   assert.equal(hitsTo('op.test').some(h => h.method === 'UPGRADE'), false)
