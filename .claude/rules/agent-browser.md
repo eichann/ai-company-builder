@@ -3065,7 +3065,10 @@ with it yet. The company's Skills and the departments' ("Department Skills" belo
   `.claude/skills/` only, as before). The git source finds them with one `ls-tree -d` of the shared branch's top folders
   and one `ls-tree -r` / `diff-tree` over `.claude/skills/` and each `<folder>/.claude/skills/` (async, ≤ 500 folders,
   ≤ 100 Skills); the shelf source takes items with a department too (`<department folder as stored>/.claude/skills/<name>`;
-  a department gone → none).
+  a department gone → none). **Whether every place was looked into** (`BrowserSkillPaths.complete`): false with more
+  than 500 top folders (exactly 500 is complete), more than 100 Skills on the list, git failing, or a top folder that
+  would be a department folder once in NFC but is not written in NFC (a Mac commit without precomposed Unicode: not looked
+  into). The admin page says so above the list (`BrowserSkillsView.complete`, `SKILLS_INCOMPLETE`).
 - **Never a private folder's**: its files are in its own scope repository, which nothing here reads; and a path at or
   under a private folder's path (`privateFolders.paths()`, compared by `pathKey`) is left out of `list`, `read` and
   `pushed` even if the company repository held one, so its name is in no answer (decision on the safe side: a Skill
@@ -3074,19 +3077,22 @@ with it yet. The company's Skills and the departments' ("Department Skills" belo
   `BrowserSkillContent.path`, the admin's `BrowserSkillView.path` (+ `department`) and the approve / revoke body's `skill`.
   **A bare name means the company's** (`browserSkillPlaceOf`): rows written before (`.claude/skills/<name>`), a run started
   before, an older admin page — all keep their meaning. Two departments' Skills of one name are two Skills: approving,
-  revoking, the frames and the notices never cross (a department Skill's notice key hashes its path with the version:
-  `browser_skill:waiting:<name>:<16 hex>` stays one per Skill and version; its text names the Skill by name).
+  revoking, the frames and the notices never cross (a department Skill's notice key is
+  `browser_skill:waiting:<department>/<name>:<16 hex>`, its hex also hashing the path; the company's keeps
+  `browser_skill:waiting:<name>:<16 hex>`; the text says where: 「部署「営業」の Skill「…」」 / 「全社の Skill「…」」,
+  `browserSkillPlaceWords`).
   Renaming a department moves its Skills' paths, so they need approving again (safe side).
 - **The AI names it by name or path** (`browser_work`'s `skill`, `browserSkillRef`): the app sends it as given (a path
-  in NFC); the server's `resolve` takes a name only when exactly **one** Skill with `browser.yaml` of that name is there
-  **for this member** (the company's, or a department's they read) — two → 409 `BROWSER_SKILL_AMBIGUOUS` (the AI gets
+  in NFC); the server's `resolve` takes a name only when exactly **one** Skill folder of that name is there **for this
+  member** (the company's, or a department's they read) — **with or without `browser.yaml`** (the AI sees a SKILL.md-only
+  Skill too: a company `.claude/skills/coupons` without a declaration never lets `coupons` mean a department's, review of
+  #879) — two → 409 `BROWSER_SKILL_AMBIGUOUS` (the AI gets
   `BROWSER_WORK_WORDS.skillAmbiguous`: give the path, or ask the person), none → `BROWSER_SKILL_NOT_FOUND`. Never a
   guess, never a preference for the department on screen. The name is looked up in every place (`BrowserSkillSource.withName`,
   not the admin list's bound of 100: a second Skill past it would be guessed away — Codex review); when some place could
-  not be looked into (over 500 top folders, git failing) even one match is refused the same way. An older app that sends
+  not be looked into (`complete` false, above) even one match is refused the same way. An older app that sends
   a bare name meant for the company's Skill is now refused while a department the member reads has one of that name too
-  (its words: the generic 「使えません」; safe side). A top folder whose name is not NFC (a Mac commit without precomposed
-  Unicode) is not looked into: its Skills are not listed (safe side, known). The run keeps the resolved path, and the app reads the
+  (its words: the generic 「使えません」; safe side). The run keeps the resolved path, and the app reads the
   operator's steps (SKILL.md, site-notes.md) from **that** path in the member's company folder
   (`features/browser/skill-steps.ts`; after the frames run started, never from the AI's word).
 - **Who uses it**: a department's Skill only by a member who **reads its path now** (`BrowserSkillDeps.readsPath`,
@@ -3097,6 +3103,14 @@ with it yet. The company's Skills and the departments' ("Department Skills" belo
   admin. **Whose change**: unchanged — the pusher's company role as git-http authenticated it, or the shelf publisher's;
   a department's 部署の管理役 or 「Skill を直せる人」 is not an owner / admin, so their change to a department Skill's
   declaration waits like any other.
+- **A declaration new at its path** (a new Skill, or one an owner / admin moved or copied there) counts as their approval
+  only when it is nobody's pending or taken-back declaration (review of #879; `newPathApprovable`): every other Skill path
+  that held exactly the same `browser.yaml` right before or right after the change (`BrowserSkillLanded.sameElsewhere`:
+  the push's old and new commits by blob id, `sameBlobAt`; on the shelf the other items' current versions) has it approved
+  and in force, every place could be looked into, and no approval of that hash was ever revoked in the company
+  (`BrowserSkillApprovalRepository.everRevoked`). Else it waits like a skill editor's change. So moving or copying a
+  pending declaration, or putting a revoked one back at another path, approves nothing; copying an approved one (every
+  copy approved) does.
 
 Tests: `server/tests/unit/browser-skill-core.test.ts` (the shape, unknown keys, sizes in UTF-8 bytes, YAML anchors and
 duplicate keys, the path grammar, `_method`, sensitive fields, duplicates, the domain, the frozen frames, the plain words),
@@ -3121,7 +3135,7 @@ listed, a deeper one never listed, an editor's waits, approval by path; a privat
 its name in no answer; the shelf's department item and a read-restricted department), `client/tests/browser-frame-writes.test.ts`
 (the AI's name or NFC path sent as given, the steps read from the server's path, `skillAmbiguous`, bad references refused
 before anything; `readBrowserSkillSteps` reads only the Skill's own folder), `admin/tests/agent-browser-skills.test.tsx`
-(two departments' rows, each approving by its path).
+(two departments' rows, each approving by its path; the incomplete list said). The review of #879: `browser-skills.test.ts` "department Skills: the review of #879" (a SKILL.md-only company Skill makes a name ambiguous; the list's `complete`; a pending declaration moved or copied and a revoked one put back wait, an approved one copied is approved; the notice's department), `browser-skill-push.test.ts` (real git: a move and a copy of a pending declaration, a copy of an approved one; a SKILL.md-only company folder; exactly 500 top folders complete, 501 not; a non-NFC top folder makes the answer incomplete).
 Each guard mutation-checked.
 
 ## The operator's window tools (step ④ of the redesign: the operator reads a registered domain freely; writes stay refused)

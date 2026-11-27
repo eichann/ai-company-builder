@@ -50,13 +50,19 @@ let svc: BrowserSkillService
 let reads: Record<string, string[]>
 /** Whether the server's copy could look into every place for a name (false: some were left out). */
 let everyPlaceRead: boolean
+/** Skill folders with no `browser.yaml` (a SKILL.md only), by company: the AI sees them, the approval list does not. */
+let plainFolders: Record<string, string[]>
 const iso = (ms: number) => new Date(ms).toISOString()
 const sha = (t: string) => createHash('sha256').update(t, 'utf8').digest('hex')
 
 /** The server's own copy, as a test sets it (the real one is git or the shelf). */
 const source: BrowserSkillSource = {
-  list: async companyId => Object.keys(store[companyId] ?? {}).sort(),
-  withName: async (companyId, name) => ({ paths: Object.keys(store[companyId] ?? {}).filter(p => p.endsWith(`/${name}`)).sort(), complete: everyPlaceRead }),
+  list: async companyId => ({ paths: Object.keys(store[companyId] ?? {}).sort(), complete: everyPlaceRead }),
+  // Every Skill folder of the name: those with `browser.yaml` (the store) and those without (`plainFolders`).
+  withName: async (companyId, name) => ({
+    paths: [...Object.keys(store[companyId] ?? {}), ...(plainFolders[companyId] ?? [])].filter(p => p.endsWith(`/${name}`)).sort(),
+    complete: everyPlaceRead,
+  }),
   read: async (companyId, path) => store[companyId]?.[path] ?? null,
   pushed: async () => [],
   shelfLanded: async () => null,
@@ -69,10 +75,13 @@ function put(companyId: string, skill: string, declaration: string, text = 'v1')
   return content
 }
 /** A change landed by `by` (what afterPush / shelfChanged hand the service, without waiting for them). */
-async function land(by: Member, declaration: string, text = 'v1', opts: { thenCurrent?: () => void; path?: string } = {}) {
+async function land(by: Member, declaration: string, text = 'v1', opts: { thenCurrent?: () => void; path?: string; elsewhere?: { paths: string[]; complete: boolean } } = {}) {
   const path = opts.path ?? P
   const before = store[by.companyId]?.[path]?.declaration ?? null
-  const content = { ...put(by.companyId, path, declaration, text), declarationChanged: before !== declaration, previousDeclaration: before }
+  const content = {
+    ...put(by.companyId, path, declaration, text), declarationChanged: before !== declaration, previousDeclaration: before,
+    sameElsewhere: opts.elsewhere ?? { paths: [], complete: true },
+  }
   // Another change landing after this one, before it is read (the server reads its copy again: `current`).
   opts.thenCurrent?.()
   // `landed` is internal: reach it the way a push does, through a stand-in pushed() list.
@@ -108,6 +117,7 @@ beforeEach(() => {
   store = {}
   reads = { [editor.userId]: [SALES] }
   everyPlaceRead = true
+  plainFolders = {}
   svc = createBrowserSkillService({
     companyData: sqliteCompanyData(conn),
     clock: { now: () => iso(now), nowMs: () => now },
@@ -419,7 +429,7 @@ describe('department Skills (a Skill is its path)', () => {
     await land(editor, yaml(5), 'v1', { path: SUPPORT_P })
     const waiting = noticesOf(owner.userId).filter(n => n.k.startsWith('browser_skill:waiting:'))
     expect(waiting.length - before).toBe(2)
-    for (const n of waiting) expect(n.k).toMatch(/^browser_skill:waiting:order-copy:[0-9a-f]{16}$/)
+    for (const n of waiting) expect(n.k).toMatch(/^browser_skill:waiting:(営業|support)\/order-copy:[0-9a-f]{16}$/)
   })
 
   it('a name the AI gives is taken only when exactly one Skill of it is there for the member; two are refused, never guessed', async () => {
@@ -446,7 +456,7 @@ describe('department Skills (a Skill is its path)', () => {
     put(CO, SALES_P, yaml(1))
     put(CO, SUPPORT_P, yaml(1))
     const was = source.list
-    source.list = async () => [SALES_P]
+    source.list = async () => ({ paths: [SALES_P], complete: true })
     try {
       expect(code(await svc.resolve(owner, SKILL))).toBe('BROWSER_SKILL_AMBIGUOUS')
     } finally {
@@ -508,5 +518,78 @@ describe('department Skills (a Skill is its path)', () => {
       expect(code(await svc.approve(owner, { skill, declarationHash: `sha256:${'0'.repeat(64)}`, files: 'git:0', mode: 'per_run' })), skill).toBe('BROWSER_SKILL_BAD_REQUEST')
       expect(code(await svc.approvedFrames(owner, skill)), skill).toBe('BROWSER_SKILL_NOT_FOUND')
     }
+  })
+})
+
+describe('department Skills: the review of #879', () => {
+  it('a company Skill without browser.yaml still makes its name ambiguous (the AI sees it): never silently another department\'s', async () => {
+    put(CO, SALES_P, yaml(1))
+    value(await approveAt(owner, SALES_P, 'pre_approved'))
+    // `.claude/skills/order-copy` holds only a SKILL.md: not on the approval list, but the AI may mean it.
+    plainFolders[CO] = [P]
+    expect(value(await svc.list(owner)).items.map(i => i.path)).toEqual([SALES_P])
+    expect(code(await svc.resolve(editor, SKILL))).toBe('BROWSER_SKILL_AMBIGUOUS')
+    // A department folder without it counts the same, and a member who cannot read it is not asked about it.
+    plainFolders[CO] = [SUPPORT_P]
+    expect(code(await svc.resolve(owner, SKILL))).toBe('BROWSER_SKILL_AMBIGUOUS')
+    expect(value(await svc.resolve(editor, SKILL))).toBe(SALES_P)
+  })
+
+  it('the approval list says when not every place could be looked into', async () => {
+    put(CO, SKILL, yaml(1))
+    expect(value(await svc.list(owner)).complete).toBe(true)
+    everyPlaceRead = false
+    expect(value(await svc.list(owner)).complete).toBe(false)
+  })
+
+  it('an owner / admin moving or copying a pending declaration to a new path does not approve it', async () => {
+    // A skill editor's declaration waits at 営業.
+    await land(editor, yaml(5), 'v1', { path: SALES_P })
+    expect(code(await svc.approvedFrames(owner, SALES_P))).toBe('BROWSER_SKILL_NOT_APPROVED')
+    // An owner moves it (before the push it stood at 営業) — still waiting at the new path.
+    delete store[CO][SALES_P]
+    await land(owner, yaml(5), 'v1', { path: SUPPORT_P, elsewhere: { paths: [SALES_P], complete: true } })
+    expect(code(await svc.approvedFrames(owner, SUPPORT_P))).toBe('BROWSER_SKILL_NOT_APPROVED')
+    // A copy of it to a third place: also waiting.
+    const third = `経理/.claude/skills/${SKILL}`
+    await land(admin, yaml(5), 'v1', { path: third, elsewhere: { paths: [SUPPORT_P], complete: true } })
+    expect(code(await svc.approvedFrames(owner, third))).toBe('BROWSER_SKILL_NOT_APPROVED')
+    expect(conn.prepare('SELECT COUNT(*) AS n FROM browser_skill_approvals WHERE company_id = ?').get(CO)).toEqual({ n: 0 })
+    // Not every place looked into: waits too, even for a declaration nobody had.
+    await land(owner, yaml(6), 'v1', { path: `人事/.claude/skills/${SKILL}`, elsewhere: { paths: [], complete: false } })
+    expect(code(await svc.approvedFrames(owner, `人事/.claude/skills/${SKILL}`))).toBe('BROWSER_SKILL_NOT_APPROVED')
+  })
+
+  it('an owner / admin copying an approved declaration to a new path approves the copy; a brand-new one too', async () => {
+    put(CO, SALES_P, yaml(2))
+    value(await approveAt(owner, SALES_P))
+    await land(admin, yaml(2), 'v1', { path: SUPPORT_P, elsewhere: { paths: [SALES_P], complete: true } })
+    expect(value(await svc.approvedFrames(owner, SUPPORT_P))).toMatchObject({ skill: SUPPORT_P })
+    await land(owner, yaml(7), 'v1', { path: `経理/.claude/skills/${SKILL}` })
+    expect(code(await svc.approvedFrames(owner, `経理/.claude/skills/${SKILL}`))).toBe('ok')
+  })
+
+  it('a declaration whose approval was ever taken back is not approved again by an owner / admin putting it at a new path', async () => {
+    put(CO, SALES_P, yaml(3))
+    value(await approveAt(owner, SALES_P))
+    value(svc.revoke(owner, { skill: SALES_P }))
+    // Moved by an admin: the old path is gone, the new one is new — still the revoked declaration.
+    delete store[CO][SALES_P]
+    await land(admin, yaml(3), 'v1', { path: SUPPORT_P })
+    expect(code(await svc.approvedFrames(owner, SUPPORT_P))).toBe('BROWSER_SKILL_NOT_APPROVED')
+    expect(value(await svc.list(owner)).items.find(i => i.path === SUPPORT_P)?.status).toBe('waiting')
+  })
+
+  it('a notice names the Skill\'s department; the company\'s says 全社', async () => {
+    await land(editor, yaml(5), 'v1', { path: SALES_P })
+    await land(editor, yaml(5), 'v1')
+    const keys = noticesOf(owner.userId).map(n => n.k).filter(k => k.startsWith('browser_skill:waiting:'))
+    const sales = keys.find(k => k.includes(`${SALES}/`))!
+    expect(sales).toMatch(/^browser_skill:waiting:営業\/order-copy:[0-9a-f]{16}$/)
+    expect(svc.noticeText(owner, sales)).toContain('部署「営業」の Skill「order-copy」の宣言')
+    const company = keys.find(k => k !== sales)!
+    expect(svc.noticeText(owner, company)).toContain('全社の Skill「order-copy」の宣言')
+    // A key naming no department folder is shown as nothing.
+    expect(svc.noticeText(owner, 'browser_skill:waiting:.x/order-copy:0123456789abcdef')).toBeNull()
   })
 })

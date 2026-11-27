@@ -70,10 +70,13 @@ async function readAt(repo: string, treeish: string, place: BrowserSkillPlace): 
 
 /**
  * The pathspecs of every place a browser Skill may stand at `treeishes`: the company's `.claude/skills/` and each
- * top-level folder's (one level only; a name that is no department folder name is not looked into).
+ * top-level folder's (one level only; a name that is no department folder name is not looked into). `complete` false when
+ * a folder that could be a department's was left out: more than `MAX_FOLDERS`, or a name not in NFC (a Mac commit
+ * without precomposed Unicode) — a name lookup then refuses rather than guesses.
  */
-async function skillPathspecs(repo: string, treeishes: readonly string[]): Promise<string[]> {
+async function skillPathspecs(repo: string, treeishes: readonly string[]): Promise<{ specs: string[]; complete: boolean }> {
   const folders = new Set<string>()
+  let skipped = false
   for (const treeish of treeishes) {
     const out = await gitAsync(['-C', repo, 'ls-tree', '-z', '-d', treeish], GIT)
     for (const entry of out.split('\0')) {
@@ -81,15 +84,21 @@ async function skillPathspecs(repo: string, treeishes: readonly string[]): Promi
       if (tab < 0) continue
       const name = entry.slice(tab + 1)
       if (isValidFolderName(name) && name.normalize('NFC') === name) folders.add(name)
+      else if (isValidFolderName(name.normalize('NFC'))) skipped = true
     }
   }
-  return [`${SKILLS}/`, ...[...folders].sort().slice(0, MAX_FOLDERS).map(f => `${f}/${SKILLS}/`)]
+  const sorted = [...folders].sort()
+  return {
+    specs: [`${SKILLS}/`, ...sorted.slice(0, MAX_FOLDERS).map(f => `${f}/${SKILLS}/`)],
+    complete: !skipped && sorted.length <= MAX_FOLDERS,
+  }
 }
-/** Were all top-level folders looked into (`skillPathspecs` takes at most `MAX_FOLDERS`)? */
-const allFoldersIn = (specs: readonly string[]) => specs.length - 1 < MAX_FOLDERS
 
-/** The Skill places among paths (relative to the repository root): a file directly in a Skill folder, or deeper. */
-function placesIn(paths: string[], onlyWithDeclaration: boolean, privatePaths: readonly string[]): BrowserSkillPlace[] {
+/**
+ * The Skill places among paths (relative to the repository root): with `onlyWithDeclaration`, a `browser.yaml` directly
+ * in a Skill folder; else any file in one, at any depth. Sorted, at most `limit` (`complete` false when cut).
+ */
+function placesIn(paths: string[], onlyWithDeclaration: boolean, privatePaths: readonly string[], limit = MAX_SKILLS): { places: BrowserSkillPlace[]; complete: boolean } {
   const out = new Map<string, BrowserSkillPlace>()
   for (const p of paths) {
     const at = p.indexOf(`${SKILLS}/`)
@@ -101,7 +110,8 @@ function placesIn(paths: string[], onlyWithDeclaration: boolean, privatePaths: r
     if (!place || insidePrivate(privatePaths, place.path)) continue
     out.set(place.path, place)
   }
-  return [...out.values()].sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0)).slice(0, MAX_SKILLS)
+  const sorted = [...out.values()].sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0))
+  return { places: sorted.slice(0, limit), complete: sorted.length <= limit }
 }
 
 export function browserSkillSource(deps: { companyData: CompanyDataSource; hasCompanyFolder(companyId: string): boolean }): BrowserSkillSource {
@@ -118,6 +128,30 @@ export function browserSkillSource(deps: { companyData: CompanyDataSource; hasCo
   function placeOf(companyId: string, path: string): BrowserSkillPlace | null {
     const place = parseBrowserSkillPath(path)
     return place && !insidePrivate(privatePaths(companyId), place.path) ? place : null
+  }
+
+  /**
+   * The other Skill paths whose `browser.yaml` is exactly `blob` at `treeishes` (where a new declaration was moved or
+   * copied from), and whether every place was looked into.
+   */
+  async function sameBlobAt(repo: string, treeishes: readonly string[], blob: string, self: string, privates: readonly string[]): Promise<{ paths: string[]; complete: boolean }> {
+    const paths = new Set<string>()
+    let complete = true
+    for (const treeish of treeishes) {
+      const specs = await skillPathspecs(repo, [treeish])
+      complete &&= specs.complete
+      // Object ids beside the names: `<mode> blob <id>\t<path>`.
+      const out = await gitAsync(['-C', repo, 'ls-tree', '-r', '-z', treeish, '--', ...specs.specs], GIT)
+      const same: string[] = []
+      for (const entry of out.split('\0')) {
+        const tab = entry.indexOf('\t')
+        if (tab < 0) continue
+        const [, kind, object] = entry.slice(0, tab).split(' ')
+        if (kind === 'blob' && object === blob) same.push(entry.slice(tab + 1))
+      }
+      for (const place of placesIn(same, true, privates, Infinity).places) if (place.path !== self) paths.add(place.path)
+    }
+    return { paths: [...paths].sort(), complete }
   }
 
   /** A shelf place's department: null for the company's, its row for a department's (undefined: none such). */
@@ -163,39 +197,41 @@ export function browserSkillSource(deps: { companyData: CompanyDataSource; hasCo
       if (git) {
         try {
           const specs = await skillPathspecs(git.repo, [git.ref])
-          const out = await gitAsync(['-C', git.repo, 'ls-tree', '-r', '-z', '--name-only', git.ref, '--', ...specs], GIT)
-          return placesIn(out.split('\0'), true, privatePaths(companyId)).map(p => p.path)
+          const out = await gitAsync(['-C', git.repo, 'ls-tree', '-r', '-z', '--name-only', git.ref, '--', ...specs.specs], GIT)
+          const found = placesIn(out.split('\0'), true, privatePaths(companyId))
+          return { paths: found.places.map(p => p.path), complete: specs.complete && found.complete }
         } catch {
-          return []
+          return { paths: [], complete: false }
         }
       }
-      if (deps.hasCompanyFolder(companyId)) return []
-      const shelf = deps.companyData.forCompany(companyId).skillShelf
-      return shelf.items()
+      if (deps.hasCompanyFolder(companyId)) return { paths: [], complete: false }
+      const all = deps.companyData.forCompany(companyId).skillShelf.items()
         .filter(i => i.kind === 'skill' && i.currentVersion !== null)
         .map(i => shelfRead(companyId, i)?.path ?? null)
         .filter((p): p is string => p !== null)
         .sort()
-        .slice(0, MAX_SKILLS)
+      return { paths: all.slice(0, MAX_SKILLS), complete: all.length <= MAX_SKILLS }
     },
 
     async withName(companyId, name) {
       const git = await repoOf(companyId)
       if (git) {
         try {
-          // Every place by that name, none left out by the list's bound: only `browser.yaml` of the Skill asked for.
+          // Every Skill folder of that name — with or without `browser.yaml`: the AI sees both, so both make a name
+          // ambiguous — none left out by the list's bound.
           const specs = await skillPathspecs(git.repo, [git.ref])
-          const out = await gitAsync(['-C', git.repo, 'ls-tree', '-r', '-z', '--name-only', git.ref, '--', ...specs.map(s => `${s}${name}/${BROWSER_SKILL_FILE}`)], GIT)
-          const paths = placesIn(out.split('\0'), true, privatePaths(companyId)).filter(p => p.name === name).map(p => p.path)
-          return { paths, complete: allFoldersIn(specs) }
+          const out = await gitAsync(['-C', git.repo, 'ls-tree', '-r', '-z', '--name-only', git.ref, '--', ...specs.specs.map(s => `${s}${name}/`)], GIT)
+          const found = placesIn(out.split('\0'), false, privatePaths(companyId), Infinity)
+          return { paths: found.places.filter(p => p.name === name).map(p => p.path), complete: specs.complete }
         } catch {
           return { paths: [], complete: false }
         }
       }
-      if (deps.hasCompanyFolder(companyId)) return { paths: [], complete: true }
+      if (deps.hasCompanyFolder(companyId)) return { paths: [], complete: false }
+      // The shelf: every Skill item of that name handed out now, with or without `browser.yaml`.
       const paths = deps.companyData.forCompany(companyId).skillShelf.items()
         .filter(i => i.kind === 'skill' && i.name === name && i.currentVersion !== null)
-        .map(i => shelfRead(companyId, i)?.path ?? null)
+        .map(i => shelfPathOf(companyId, i))
         .filter((p): p is string => p !== null)
         .sort()
       return { paths, complete: true }
@@ -217,10 +253,22 @@ export function browserSkillSource(deps: { companyData: CompanyDataSource; hasCo
       // Exactly the version this publish wrote, whatever is current by now.
       const content = shelfRead(companyId, item, versions.written)
       if (!content) return null
-      const row = deps.companyData.forCompany(companyId).skillShelf.itemAt('skill', item.departmentId, item.name)
+      const shelf = deps.companyData.forCompany(companyId).skillShelf
+      const row = shelf.itemAt('skill', item.departmentId, item.name)
       const before = row && versions.before ? shelfDeclaration(companyId, row.id, versions.before) : null
       const after = row ? shelfDeclaration(companyId, row.id, versions.written) : null
-      return { ...content, declarationChanged: before !== after, previousDeclaration: before === null ? null : declarationText(before) }
+      // A declaration new here: the other Skill items handing out exactly the same one (where it was copied from).
+      const elsewhere = before === null && after !== null
+        ? shelf.items()
+          .filter(i => i.kind === 'skill' && i.id !== row?.id && i.currentVersion !== null && shelfDeclaration(companyId, i.id, i.currentVersion) === after)
+          .map(i => shelfPathOf(companyId, i))
+          .filter((p): p is string => p !== null)
+          .sort()
+        : []
+      return {
+        ...content, declarationChanged: before !== after, previousDeclaration: before === null ? null : declarationText(before),
+        sameElsewhere: { paths: elsewhere, complete: true },
+      }
     },
 
     async pushed(companyId, refUpdates) {
@@ -231,29 +279,38 @@ export function browserSkillSource(deps: { companyData: CompanyDataSource; hasCo
       for (const line of refUpdates.split('\n')) {
         const [oldId, newId, ref, ...rest] = line.trim().split(' ')
         if (rest.length > 0 || ref !== git.ref || !OBJECT_RE.test(oldId ?? '') || !OBJECT_RE.test(newId ?? '') || ZERO_RE.test(newId)) continue
+        const created = ZERO_RE.test(oldId)
         let paths: string[]
         try {
-          const created = ZERO_RE.test(oldId)
           const specs = await skillPathspecs(git.repo, created ? [newId] : [oldId, newId])
           paths = created
-            ? (await gitAsync(['-C', git.repo, 'ls-tree', '-r', '-z', '--name-only', newId, '--', ...specs], GIT)).split('\0')
-            : (await gitAsync(['-C', git.repo, 'diff-tree', '-r', '-z', '--no-renames', '--name-only', oldId, newId, '--', ...specs], GIT)).split('\0')
+            ? (await gitAsync(['-C', git.repo, 'ls-tree', '-r', '-z', '--name-only', newId, '--', ...specs.specs], GIT)).split('\0')
+            : (await gitAsync(['-C', git.repo, 'diff-tree', '-r', '-z', '--no-renames', '--name-only', oldId, newId, '--', ...specs.specs], GIT)).split('\0')
         } catch {
           continue
         }
-        for (const place of placesIn(paths, false, privates)) {
+        for (const place of placesIn(paths, false, privates).places) {
           // Read at the pushed commit: what this pusher landed, whatever came after it.
           const content = await readAt(git.repo, newId, place)
           if (!content) continue
           // Did this push touch the declaration itself (an added file counts), or only the other files?
           const file = `${place.path}/${BROWSER_SKILL_FILE}`
-          const before = ZERO_RE.test(oldId) ? null : await entryOf(git.repo, oldId, file, 'blob')
+          const before = created ? null : await entryOf(git.repo, oldId, file, 'blob')
           const after = await entryOf(git.repo, newId, file, 'blob')
           // What the declaration was before this push: an owner / admin's change counts as approval only on top of an
           // approved one (independent review M1: a pull --rebase carries a skill editor's pending lines along).
           const previousDeclaration = before === null ? null : await blobText(git.repo, before)
           if (before !== null && previousDeclaration === null) continue
-          out.push({ ...content, declarationChanged: before !== after, previousDeclaration })
+          // New here: where else the very same declaration stood before or after this push (a move or a copy).
+          let sameElsewhere = { paths: [] as string[], complete: true }
+          if (before === null && after !== null) {
+            try {
+              sameElsewhere = await sameBlobAt(git.repo, created ? [newId] : [oldId, newId], after, place.path, privates)
+            } catch {
+              sameElsewhere = { paths: [], complete: false }
+            }
+          }
+          out.push({ ...content, declarationChanged: before !== after, previousDeclaration, sameElsewhere })
         }
       }
       return out.slice(0, MAX_SKILLS)

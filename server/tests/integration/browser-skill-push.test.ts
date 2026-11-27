@@ -440,3 +440,106 @@ describe('department Skills (agent-browser.md "Department Skills")', () => {
     expect(code(await services.browserSkills.approvedFrames(shelfOwner, SALES_PATH))).toBe('ok')
   })
 })
+
+describe('department Skills: the review of #879 (real git)', () => {
+  const rowsAt = (path: string) => (db.prepare('SELECT COUNT(*) AS n FROM browser_skill_approvals WHERE company_id = ? AND skill_path = ?').get(CO, path) as { n: number }).n
+
+  it('an owner moving or copying a pending declaration to another department does not approve it', async () => {
+    const from = `pending/.claude/skills/mover`
+    const moved = `moved/.claude/skills/mover`
+    const copied = `copied/.claude/skills/mover`
+    write(`${from}/browser.yaml`, yaml(8))
+    commit()
+    expect((await pushAs('tok-editor')).ok).toBe(true)
+    await until(() => noticeKeys(CO, 'u-owner').some(k => k.includes('pending/mover')), 'the owner told of the editor\'s Skill')
+    expect(rowsAt(from)).toBe(0)
+    // The owner moves it to another department (git mv): the old commit held it at `pending/`, still waiting.
+    git(['mv', 'pending', 'moved'], clone)
+    commit()
+    expect((await pushAs('tok-owner')).ok).toBe(true)
+    // The pusher is not told of their own change: give the after-push step its time, then nothing may be approved.
+    await new Promise(r => setTimeout(r, 2000))
+    expect(rowsAt(moved)).toBe(0)
+    expect(code(await services.browserSkills.approvedFrames(owner, moved))).toBe('BROWSER_SKILL_NOT_APPROVED')
+    // …and copies it: the same declaration still waits at `moved/`.
+    write(`${copied}/browser.yaml`, yaml(8))
+    commit()
+    expect((await pushAs('tok-owner')).ok).toBe(true)
+    // (as above)
+    await new Promise(r => setTimeout(r, 2000))
+    expect(rowsAt(copied)).toBe(0)
+    // A copy is the owner's own approval only when every place holding that declaration has it approved.
+    const approveAtPath = async (path: string) => {
+      const view = await services.browserSkills.list(owner)
+      const item = view.ok ? view.value.items.find(i => i.path === path) : undefined
+      expect((await services.browserSkills.approve(owner, { skill: path, declarationHash: item!.declarationHash, files: item!.files, mode: 'per_run' })).ok).toBe(true)
+    }
+    await approveAtPath(moved)
+    await approveAtPath(copied)
+    const again = `again/.claude/skills/mover`
+    write(`${again}/browser.yaml`, yaml(8))
+    commit()
+    expect((await pushAs('tok-owner')).ok).toBe(true)
+    await until(() => rowsAt(again) === 1, 'the copy of an approved one approved')
+  })
+
+  it('a company Skill folder without browser.yaml makes its name ambiguous for the AI', async () => {
+    write('.claude/skills/plain-one/SKILL.md', '# plain\n')
+    write('sales2/.claude/skills/plain-one/browser.yaml', yaml(1))
+    commit()
+    expect((await pushAs('tok-owner')).ok).toBe(true)
+    await until(() => rowsAt('sales2/.claude/skills/plain-one') === 1, 'the department one landed')
+    expect(code(await services.browserSkills.resolve(editor, 'plain-one'))).toBe('BROWSER_SKILL_AMBIGUOUS')
+    const listed = await services.browserSkills.list(owner)
+    expect(listed.ok && listed.value.items.some(i => i.path === '.claude/skills/plain-one')).toBe(false)
+  })
+})
+
+describe('department Skills: places the source cannot fully look into (adapter, real git)', () => {
+  /** A bare repository for `companyId` whose top folders are `folders`, each with `<folder>/.claude/skills/order-copy/browser.yaml`. */
+  function repoWith(companyId: string, folders: string[]) {
+    const bare = join(process.env.REPOS_DIR!, `${companyId}.git`)
+    git(['init', '-q', '--bare', '--initial-branch=main', bare])
+    // Plumbing (never core.precomposeunicode): a folder name is kept exactly as written, NFD included.
+    const run = (args: string[], input?: string) => execFileSync('git', ['-C', bare, ...args], { input, stdio: ['pipe', 'pipe', 'pipe'] }).toString().trim()
+    const blob = run(['hash-object', '-w', '--stdin'], yaml(1))
+    const skill = run(['mktree'], `100644 blob ${blob}\tbrowser.yaml\n`)
+    const skills = run(['mktree'], `040000 tree ${skill}\torder-copy\n`)
+    const claude = run(['mktree'], `040000 tree ${skills}\tskills\n`)
+    const dept = run(['mktree'], `040000 tree ${claude}\t.claude\n`)
+    const root = run(['mktree', '-z'], folders.map(f => `040000 tree ${dept}\t${f}\0`).join(''))
+    const commitId = run(['-c', 'user.name=t', '-c', 'user.email=t@example.com', 'commit-tree', root, '-m', 'skills'])
+    run(['update-ref', 'refs/heads/main', commitId])
+  }
+  const sourceOf = async () => {
+    const { browserSkillSource } = await import('../../src/adapters/browser-skill-source')
+    return browserSkillSource({ companyData: (await import('../../src/adapters/sqlite/company-data')).sqliteCompanyData(db), hasCompanyFolder: () => true })
+  }
+  const names = (n: number) => Array.from({ length: n }, (_, i) => `f${String(i).padStart(3, '0')}`)
+
+  it('exactly 500 top folders are all looked into; 501 are not, and a name is then never resolved alone', async () => {
+    repoWith('bsk-500', names(500))
+    repoWith('bsk-501', names(501))
+    const source = await sourceOf()
+    const five = await source.withName('bsk-500', 'order-copy')
+    expect(five.paths).toHaveLength(500)
+    expect(five.complete).toBe(true)
+    // The approval list holds at most 100 Skills: it says it is not complete.
+    expect((await source.list('bsk-500')).complete).toBe(false)
+    const over = await source.withName('bsk-501', 'order-copy')
+    expect(over.paths).toHaveLength(500)
+    expect(over.complete).toBe(false)
+  })
+
+  it('a top folder whose name is not NFC is not looked into, and the answer says it is not complete', async () => {
+    repoWith('bsk-nfd', ['営業', 'ガイド'.normalize('NFD')])
+    const source = await sourceOf()
+    const found = await source.withName('bsk-nfd', 'order-copy')
+    expect(found.paths).toEqual(['営業/.claude/skills/order-copy'])
+    expect(found.complete).toBe(false)
+    expect(await source.list('bsk-nfd')).toEqual({ paths: ['営業/.claude/skills/order-copy'], complete: false })
+    // Only NFC names: complete.
+    repoWith('bsk-nfc', ['営業', 'ガイド'])
+    expect((await source.withName('bsk-nfc', 'order-copy')).complete).toBe(true)
+  })
+})

@@ -56,6 +56,11 @@ export interface BrowserSkillView {
 /** GET /browser-skill-approvals (owner/admin). */
 export interface BrowserSkillsView {
   items: BrowserSkillView[]
+  /**
+   * Every place was looked into. False: too many top folders or Skills, or a folder whose name is not in NFC — a Skill
+   * may be missing from `items` (the page says so). Absent from an older server: read as true.
+   */
+  complete?: boolean
 }
 
 /** POST /browser-skill-approvals: approve exactly the declaration the admin saw. */

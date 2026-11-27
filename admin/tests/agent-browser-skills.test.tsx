@@ -131,4 +131,18 @@ describe('Skill の承認', () => {
     await waitFor(() => expect(calls.filter((c) => c.method === 'POST')).toHaveLength(1))
     expect(calls.find((c) => c.method === 'POST')?.body).toEqual({ skill: 'support/.claude/skills/order-copy', declarationHash: HASH, files: 'git:support', mode: 'per_run' })
   })
+
+  it('says plainly when the server could not look into every place; nothing said when it could (or an older server says nothing)', async () => {
+    stubApi(ownerCapabilities, { [`GET ${base}/browser-skill-approvals`]: { body: ok({ items: [waiting], complete: false }) } })
+    const { unmount } = renderInCompany(<BrowserSkillsPage />)
+    expect(await screen.findByText(/すべての場所を確かめられませんでした/)).toBeInTheDocument()
+    unmount()
+    for (const body of [{ items: [waiting], complete: true }, { items: [waiting] }]) {
+      stubApi(ownerCapabilities, { [`GET ${base}/browser-skill-approvals`]: { body: ok(body) } })
+      const r = renderInCompany(<BrowserSkillsPage />)
+      await screen.findAllByText('order-copy')
+      expect(screen.queryByText(/すべての場所を確かめられませんでした/)).toBeNull()
+      r.unmount()
+    }
+  })
 })

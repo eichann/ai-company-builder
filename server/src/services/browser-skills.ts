@@ -27,12 +27,12 @@
  *   reads that place now (`readsPath`, the core's read rules), asked at every permit.
  */
 import {
-  BROWSER_SKILL_PATH_MAX, BROWSER_SKILL_PROBLEM_WORDS, browserSkillDomainProblem, browserSkillFrames, browserSkillPathOf, browserSkillWriteLine,
+  BROWSER_SKILL_PATH_MAX, BROWSER_SKILL_PROBLEM_WORDS, browserSkillDomainProblem, browserSkillFrames, browserSkillPathOf, browserSkillPlaceWords, browserSkillWriteLine,
   parseBrowserSkillDeclaration, parseBrowserSkillPath,
   type BrowserSkillDeclaration, type BrowserSkillFrames, type BrowserSkillPlace, type BrowserSkillProblem,
 } from '../../shared/core/browser-skill'
 import { CONTENT_HASH_RE } from '../../shared/core/fixed-content'
-import { isValidSkillName } from '../../shared/core/names'
+import { isValidFolderName, isValidSkillName } from '../../shared/core/names'
 import {
   BROWSER_SKILL_APPROVAL_MODES, type BrowserSkillApprovalMode, type BrowserSkillStatus, type BrowserSkillsView, type BrowserSkillView,
 } from '../../shared/types/browser-skills'
@@ -70,7 +70,7 @@ export interface BrowserSkillDeps {
  */
 export const BROWSER_SKILL_NOTICE_KIND = 'browser_shape_changed'
 export const BROWSER_SKILL_NOTICE_PREFIX = 'browser_skill:'
-const NOTICE_RE = /^browser_skill:(waiting|text):([a-z0-9][a-z0-9_-]*):[0-9a-f]{16}$/
+const NOTICE_RE = /^browser_skill:(waiting|text):(?:([^:/]+)\/)?([a-z0-9][a-z0-9_-]*):[0-9a-f]{16}$/
 
 export const BROWSER_SKILL_WORDS = Object.freeze({
   manageForbidden: 'Skill の承認は、オーナーと管理者だけができます。',
@@ -207,12 +207,14 @@ export function createBrowserSkillService(deps: BrowserSkillDeps) {
   const short = (s: string) => deps.sha256(s).slice(0, 16)
   /** A notice key's version part: the company's Skill as before; a department's also by its path (two may share a name). */
   const keyPart = (place: BrowserSkillPlace, of: string) => short(place.department === null ? of : `${place.path}\0${of}`)
+  /** A notice key's Skill: its name, after its department folder for a department's (`営業/order-copy`; the text says it). */
+  const keyName = (place: BrowserSkillPlace) => (place.department === null ? place.name : `${place.department}/${place.name}`)
 
   /** 「手順が直りました」 once per folder version (the notice's dedupe key), when an approval in force has not seen this version. */
   function noticeTextChanged(companyId: string, j: Judged, except: string | null): void {
     const approval = inForce(repo(companyId).latest(j.place.path), j.hash)
     if (!approval || approval.filesSeen === null || approval.filesSeen === j.content.files) return
-    tell(companyId, `${BROWSER_SKILL_NOTICE_PREFIX}text:${j.place.name}:${keyPart(j.place, j.content.files)}`, except)
+    tell(companyId, `${BROWSER_SKILL_NOTICE_PREFIX}text:${keyName(j.place)}:${keyPart(j.place, j.content.files)}`, except)
   }
 
   /**
@@ -242,7 +244,7 @@ export function createBrowserSkillService(deps: BrowserSkillDeps) {
     // editor's pending declaration carried along by a pull --rebase, a revoked one — waits (independent review M1).
     const before = content.previousDeclaration
     const onApproved = before === null
-      ? latest === null
+      ? latest === null && newPathApprovable(r, j.hash, content.sameElsewhere)
       : before !== 'too-large' && latest !== null && latest.revokedAt === null && latest.declarationHash === `sha256:${deps.sha256(before)}`
     if (hasFullAccess(by.role) && onApproved) {
       r.insert({
@@ -256,9 +258,21 @@ export function createBrowserSkillService(deps: BrowserSkillDeps) {
     noticeWaiting(companyId, j, by.userId)
   }
 
+  /**
+   * A declaration new at its path (a new Skill — or one moved or copied from another path) counts as the owner / admin's
+   * approval only when it is no declaration someone is still waiting on or took back: every other path that held exactly
+   * it right before or after the change has it approved and in force (a move or copy of an approved Skill), every place
+   * could be looked into, and no approval of it was ever revoked anywhere in the company. Else it waits (coordinator's
+   * review of #879: moving or copying a pending or revoked declaration must not approve it).
+   */
+  function newPathApprovable(r: BrowserSkillApprovalRepository, hash: string, elsewhere: BrowserSkillLanded['sameElsewhere']): boolean {
+    if (!elsewhere.complete || r.everRevoked(hash)) return false
+    return elsewhere.paths.every(p => inForce(r.latest(p), hash) !== null)
+  }
+
   /** 「宣言が直されました…承認してください」 once per declaration version (the notice's dedupe key). */
   function noticeWaiting(companyId: string, j: Judged, except: string | null): void {
-    tell(companyId, `${BROWSER_SKILL_NOTICE_PREFIX}waiting:${j.place.name}:${keyPart(j.place, j.hash)}`, except)
+    tell(companyId, `${BROWSER_SKILL_NOTICE_PREFIX}waiting:${keyName(j.place)}:${keyPart(j.place, j.hash)}`, except)
   }
 
   const later = (what: string, companyId: string, work: () => Promise<void>) => {
@@ -272,7 +286,8 @@ export function createBrowserSkillService(deps: BrowserSkillDeps) {
     async list(member: Member): Promise<Outcome<BrowserSkillsView>> {
       if (!hasFullAccess(member.role)) return forbidden()
       const items: BrowserSkillView[] = []
-      for (const path of await deps.source.list(member.companyId)) {
+      const listed = await deps.source.list(member.companyId)
+      for (const path of listed.paths) {
         const place = parseBrowserSkillPath(path)
         const j = place ? await readJudged(member.companyId, place) : null
         if (!j) continue
@@ -283,7 +298,8 @@ export function createBrowserSkillService(deps: BrowserSkillDeps) {
         if (view.status === 'waiting') noticeWaiting(member.companyId, j, null)
         items.push(view)
       }
-      return ok({ items })
+      // The page says plainly when not every place could be looked into (a Skill may be missing from it).
+      return ok({ items, complete: listed.complete })
     },
 
     /** POST /browser-skill-approvals { skill, declarationHash, files, mode } (owner/admin): approve exactly what was seen. */
@@ -433,9 +449,13 @@ export function createBrowserSkillService(deps: BrowserSkillDeps) {
       if (!hasFullAccess(member.role) || !dedupeKey) return null
       const m = NOTICE_RE.exec(dedupeKey)
       if (!m) return null
+      const department = m[2] ?? null
+      if (department !== null && !isValidFolderName(department)) return null
+      // Which Skill: its place too (two departments may each have one of this name).
+      const skill = `${browserSkillPlaceWords(department)}の Skill「${m[3]}」`
       return m[1] === 'waiting'
-        ? `ブラウザ操作：Skill「${m[2]}」の宣言（書き込み先など）が直されました。管理画面の「Skill の承認」で確かめて承認するまで、この Skill では書き込めません`
-        : `ブラウザ操作：Skill「${m[2]}」の手順が直りました。次に動かすときは、前もって承認していても、実行の前に確かめのカードが1回出ます`
+        ? `ブラウザ操作：${skill}の宣言（書き込み先など）が直されました。管理画面の「Skill の承認」で確かめて承認するまで、この Skill では書き込めません`
+        : `ブラウザ操作：${skill}の手順が直りました。次に動かすときは、前もって承認していても、実行の前に確かめのカードが1回出ます`
     },
   }
 }

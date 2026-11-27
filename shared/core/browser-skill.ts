@@ -72,6 +72,11 @@ export function parseBrowserSkillPath(path: unknown): BrowserSkillPlace | null {
   return { department, name, path }
 }
 
+/** Where a Skill belongs, in the words the admin page and the notices say: 「全社」 or 「部署「<folder>」」. */
+export function browserSkillPlaceWords(department: string | null): string {
+  return department === null ? '全社' : `部署「${department}」`
+}
+
 /**
  * A Skill as the AI names it: its name (`order-copy`) or its path (`営業/.claude/skills/order-copy`, in NFC) — or null.
  * Which Skill a name means is the server's to say (only when exactly one is there for the member).

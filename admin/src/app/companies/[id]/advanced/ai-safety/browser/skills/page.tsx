@@ -9,6 +9,7 @@ import { ConfirmDialog } from '@/components/app/confirm-dialog'
 import { EmptyState, ErrorState, ListSkeleton, PageHeader } from '@/components/app/states'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { Callout } from '@/components/ui/callout'
 import { Card, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import {
   SKILL_PER_RUN_NOTE,
@@ -18,6 +19,7 @@ import {
   SKILL_STATUS_BADGE,
   SKILL_STATUS_WORDS,
   SKILLS_EMPTY,
+  SKILLS_INCOMPLETE,
   SKILLS_INTRO,
   SKILLS_TITLE,
   howWords,
@@ -87,6 +89,7 @@ export default function BrowserSkillsPage() {
         <ErrorState error={list.error} onRetry={list.reload} />
       ) : list.data ? (
         <div className="space-y-6 pb-4">
+          {list.data.complete === false && <Callout variant="warning">{SKILLS_INCOMPLETE}</Callout>}
           <Card>
             <CardHeader className="pb-4">
               <CardTitle className="flex items-center gap-2">

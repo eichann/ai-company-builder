@@ -37,6 +37,10 @@ export function sqliteBrowserSkillApprovalRepository(conn: Database.Database, co
           .run(at, by, companyId, seq).changes === 1
       })()
     },
+    everRevoked(declarationHash) {
+      return conn.prepare('SELECT 1 FROM browser_skill_approvals WHERE company_id = ? AND declaration_hash = ? AND revoked_at IS NOT NULL LIMIT 1')
+        .get(companyId, declarationHash) !== undefined
+    },
     setFilesSeen(seq, files) {
       conn.prepare('UPDATE browser_skill_approvals SET files_seen = ? WHERE company_id = ? AND seq = ?').run(files, companyId, seq)
     },

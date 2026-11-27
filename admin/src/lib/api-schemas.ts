@@ -363,7 +363,7 @@ export const browserRecordingSchema = topLevel<BrowserRecordingDetail>({
 })
 export const browserRecordingDeletedSchema = topLevel<{ deleted: true }>({ deleted: z.literal(true) })
 // 「Skill の承認」 (shared/types/browser-skills.ts)
-export const browserSkillsSchema = topLevel<BrowserSkillsView>({ items: list })
+export const browserSkillsSchema = topLevel<BrowserSkillsView>({ items: list, complete: z.optional(z.boolean()) })
 export const browserSkillSchema = topLevel<BrowserSkillView>({
   name: str, path: str, department: nullableStr, declarationHash: str, files: str,
   status: z.enum(['waiting', 'approved', 'pre_approved', 'text_changed', 'revoked', 'invalid']),

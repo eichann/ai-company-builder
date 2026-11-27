@@ -29,6 +29,8 @@ export interface BrowserSkillApprovalRepository {
   /** Revoke row `seq` when it is still the skill's latest and not revoked; false otherwise. */
   revoke(seq: number, at: string, by: string): boolean
   setFilesSeen(seq: number, files: string): void
+  /** Was a declaration of this hash ever approved and taken back, at any path of the company? */
+  everRevoked(declarationHash: string): boolean
 }
 
 /** One Skill as the server's own copy holds it. */
@@ -49,6 +51,18 @@ export interface BrowserSkillLanded extends BrowserSkillContent {
   declarationChanged: boolean
   /** `browser.yaml` right before this change (null: there was none; `too-large`: never read whole). */
   previousDeclaration: string | null
+  /**
+   * For a declaration new at this path (`previousDeclaration` null): the other Skill paths that held exactly the same
+   * `browser.yaml` right before or right after this change — where it was moved or copied from (`complete` false: not every
+   * place could be looked into). An owner / admin's change approves a new path only when each of them is approved for it.
+   */
+  sameElsewhere: { paths: string[]; complete: boolean }
+}
+
+/** Paths, and whether every place was looked into (false: too many folders or Skills, or a folder name not read). */
+export interface BrowserSkillPaths {
+  paths: string[]
+  complete: boolean
 }
 
 export interface BrowserSkillSource {
@@ -56,12 +70,12 @@ export interface BrowserSkillSource {
    * The company's and its departments' Skills that carry `browser.yaml`, by path (sorted, bounded) — never one inside a
    * private folder (its own repository; its name must not leak).
    */
-  list(companyId: string): Promise<string[]>
+  list(companyId: string): Promise<BrowserSkillPaths>
   /**
-   * Every Skill with `browser.yaml` of this name — the company's and each department's —, not bounded like `list`
-   * (`resolve` must see them all to refuse a name two share). `complete` false: some place could not be looked into.
+   * Every Skill folder of this name — the company's and each department's, **with or without `browser.yaml`** (the AI sees
+   * both) —, not bounded like `list` (`resolve` must see them all to refuse a name two share).
    */
-  withName(companyId: string, name: string): Promise<{ paths: string[]; complete: boolean }>
+  withName(companyId: string, name: string): Promise<BrowserSkillPaths>
   /** One Skill now, by its path (null: no such Skill, no `browser.yaml` in it, not a Skill path, or a private folder's). */
   read(companyId: string, path: string): Promise<BrowserSkillContent | null>
   /**

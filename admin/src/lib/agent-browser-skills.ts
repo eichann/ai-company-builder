@@ -1,5 +1,6 @@
 // The words of 「Skill の承認」 (agent-browser.md "A Skill's browser declaration and its approval"). No site word here: a
 // Skill's name, domain and addresses are the company's data, shown as they are.
+import { browserSkillPlaceWords } from '../../../shared/core/browser-skill'
 import type { BrowserSkillStatus } from '../../../shared/types/browser-skills'
 import type { BadgeVariant } from '@/components/ui/badge'
 
@@ -51,7 +52,10 @@ export function skillActions(status: BrowserSkillStatus): { approve: boolean; pr
 export const howWords = (how: 'approved' | 'edited') => (how === 'edited' ? '宣言を直したので承認' : '承認')
 
 /** Where a Skill belongs: the whole company's, or a department folder's (two departments may each have one name). */
-export const skillPlaceWords = (department: string | null) => (department === null ? '全社' : `部署「${department}」`)
+export const skillPlaceWords = browserSkillPlaceWords
+
+/** Said above the list when the server could not look into every place (too many folders or Skills, a folder name it skips). */
+export const SKILLS_INCOMPLETE = 'すべての場所を確かめられませんでした（フォルダや Skill が多すぎるか、読めない名前のフォルダがあります）。ここに出ていない Skill があるかもしれません。'
 
 /** A row's name for screen readers: its name and where it belongs. */
 export const skillLabel = (s: { name: string; department: string | null }) => `${s.name}（${skillPlaceWords(s.department)}）`
