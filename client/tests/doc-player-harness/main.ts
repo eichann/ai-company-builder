@@ -169,23 +169,26 @@ const d = document.createElement('iframe'); d.src = ${JSON.stringify(drive(SCRIP
     .map(v => v as unknown as { webContents: WebContents; getBounds(): { x: number; y: number; width: number; height: number }; getVisible(): boolean })
     .filter(v => v.webContents && !v.webContents.isDestroyed() && v.webContents.id !== viewId)
   const visibleBounds = () => playerViews().filter(v => v.getVisible()).map(v => v.getBounds()).sort((a, b) => a.x - b.x)
-  const settle = async (until: () => boolean) => { for (let i = 0; i < 60 && !until(); i++) await wait(50); await wait(200) }
-  await settle(() => visibleBounds().length === 2)
+  // Waits on the condition itself, up to 10 s (shared CI runners are slow), then a little for the last move.
+  const settle = async (until: () => boolean) => { for (let i = 0; i < 200 && !until(); i++) await wait(50); await wait(200) }
+  /** The players are exactly at these rectangles (what the test asserts), not just some of them. */
+  const placedAt = (want: Array<{ x: number; y: number; width: number; height: number }>) => () => JSON.stringify(visibleBounds()) === JSON.stringify(want)
+  await settle(placedAt([{ x: 120, y: 230, width: 320, height: 180 }, { x: 480, y: 430, width: 240, height: 135 }]))
   result.placedAtZoom1 = visibleBounds()
   // Scrolled by 100 px: the player follows the embed.
   await doc.executeJavaScript('window.scrollTo(0, 100)', true).catch(() => 'threw')
-  await settle(() => visibleBounds().some(b => b.y === area.y + 100))
+  await settle(placedAt([{ x: 120, y: 130, width: 320, height: 180 }, { x: 480, y: 330, width: 240, height: 135 }]))
   result.placedScrolled = visibleBounds()
   // The document's own zoom 1.5 (scrolled back to the top).
   await doc.executeJavaScript('window.scrollTo(0, 0)', true).catch(() => 'threw')
   views.zoom(viewId, win.webContents.id, 1.5)
-  await settle(() => visibleBounds().some(b => b.width === 480))
+  await settle(placedAt([{ x: 170, y: 330, width: 480, height: 270 }]))
   result.placedAtZoom15 = visibleBounds()
   views.zoom(viewId, win.webContents.id, 1)
   // Cut by the area's bottom edge: the player covers only what is inside, its video keeps its size.
   await doc.executeJavaScript('window.scrollTo(0, 0)', true).catch(() => 'threw')
   views.place(viewId, win.webContents.id, { ...area, height: 300 })
-  await settle(() => visibleBounds().some(b => b.height === 100))
+  await settle(placedAt([{ x: 120, y: 230, width: 320, height: 100 }]))
   result.placedCut = visibleBounds()
   views.place(viewId, win.webContents.id, area)
   await settle(() => visibleBounds().length === 2 && visibleBounds().some(b => b.height === 180))
