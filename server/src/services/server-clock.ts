@@ -23,7 +23,8 @@
  * 0. looks for suspicious activity (「気になる動き」, `securitySweep`, security-alerts.md), records on or off;
  * H. closes holding tickets past their 30 days (`expireHoldingTickets`, private-folders.md "Access removed") and keeps the
  *    holding place's retention (`sweepHolding`: items left unfinished, waiting past 30 days, their contents), records on or off;
- * R. deletes 「ブラウザ操作」 recordings past their 30 days (`expireBrowserRecordings`, agent-browser.md "Recording"), records on or off;
+ * R. deletes 「ブラウザ操作」 recordings past their 30 days (`expireBrowserRecordings`, agent-browser.md "Recording") and Skill drafts past
+ *    theirs (`expireBrowserSkillDrafts`, "A Skill's draft from a recording"), records on or off;
  * 5. finds each member's meetings of the last days on their calendar (`pollMeetings`,
  *    minutes.md "Meetings for their attendees": ids and versions, never the minutes' text).
  * J. makes scheduled jobs' occurrences (`makeOccurrences`, jobs.md "The clock"), first, for every
@@ -88,6 +89,8 @@ export interface ServerClockDeps {
   expireHoldingTickets?: (companyId: string) => number
   /** 「ブラウザ操作」 recordings past their 30 days (agent-browser.md "Recording"): the number deleted. Every company. */
   expireBrowserRecordings?: (companyId: string) => number
+  /** Skill drafts past their 30 days (agent-browser.md "A Skill's draft from a recording"). */
+  expireBrowserSkillDrafts?: (companyId: string) => number
   /** The holding place's retention (private-folders.md "Holding: the member's upload"): items expired or removed. Every company. */
   sweepHolding?: (companyId: string) => Promise<number>
   /** Start the jobs' runner (services/job-occurrences.ts `createJobRunner`): never awaited by the clock. */
@@ -119,6 +122,7 @@ export interface ClockRun {
   holdingSwept: number
   /** 「ブラウザ操作」 recordings deleted after their 30 days. */
   recordingsDeleted: number
+  draftsDeleted: number
   failedCompanies: number
 }
 
@@ -174,6 +178,7 @@ export function createServerClock(deps: ServerClockDeps) {
     if (deps.expireHoldingTickets) run.ticketsExpired += deps.expireHoldingTickets(companyId)
     if (deps.sweepHolding) run.holdingSwept += await deps.sweepHolding(companyId)
     if (deps.expireBrowserRecordings) run.recordingsDeleted += deps.expireBrowserRecordings(companyId)
+    if (deps.expireBrowserSkillDrafts) run.draftsDeleted += deps.expireBrowserSkillDrafts(companyId)
     if (deps.securitySweep) run.alerts += await deps.securitySweep(companyId)
     deps.driveSweep?.(companyId)
     const handle = deps.companyData.forCompany(companyId)
@@ -218,7 +223,7 @@ export function createServerClock(deps: ServerClockDeps) {
      * jobs' part (`ran: false`).
      */
     async runOnce(): Promise<ClockRun> {
-      const run: ClockRun = { ran: false, moved: 0, notices: 0, expired: 0, mailRead: 0, meetingsFound: 0, alerts: 0, occurrences: 0, interrupted: 0, ticketsExpired: 0, holdingSwept: 0, recordingsDeleted: 0, failedCompanies: 0 }
+      const run: ClockRun = { ran: false, moved: 0, notices: 0, expired: 0, mailRead: 0, meetingsFound: 0, alerts: 0, occurrences: 0, interrupted: 0, ticketsExpired: 0, holdingSwept: 0, recordingsDeleted: 0, draftsDeleted: 0, failedCompanies: 0 }
       // Scheduled jobs first, with their own guard: a pass whose slow work (mail, calendar) still hangs
       // never keeps a later run from making occurrences or starting the runner.
       await jobsPass(run)
@@ -251,8 +256,8 @@ export function createServerClock(deps: ServerClockDeps) {
       } finally {
         running = false
       }
-      if (run.moved + run.notices + run.expired + run.mailRead + run.meetingsFound + run.alerts + run.occurrences + run.interrupted + run.ticketsExpired + run.holdingSwept + run.recordingsDeleted + run.failedCompanies > 0) {
-        log(`[server-clock] moved ${run.moved}, notices ${run.notices}, expired ${run.expired}, mail read ${run.mailRead}, meetings ${run.meetingsFound}, alerts ${run.alerts}, occurrences ${run.occurrences}${run.interrupted ? `, interrupted sends ${run.interrupted}` : ''}${run.ticketsExpired ? `, holding tickets expired ${run.ticketsExpired}` : ''}${run.holdingSwept ? `, holding items expired or removed ${run.holdingSwept}` : ''}${run.recordingsDeleted ? `, browser recordings deleted ${run.recordingsDeleted}` : ''}${run.failedCompanies ? `, ${run.failedCompanies} company(ies) failed` : ''}`)
+      if (run.moved + run.notices + run.expired + run.mailRead + run.meetingsFound + run.alerts + run.occurrences + run.interrupted + run.ticketsExpired + run.holdingSwept + run.recordingsDeleted + run.draftsDeleted + run.failedCompanies > 0) {
+        log(`[server-clock] moved ${run.moved}, notices ${run.notices}, expired ${run.expired}, mail read ${run.mailRead}, meetings ${run.meetingsFound}, alerts ${run.alerts}, occurrences ${run.occurrences}${run.interrupted ? `, interrupted sends ${run.interrupted}` : ''}${run.ticketsExpired ? `, holding tickets expired ${run.ticketsExpired}` : ''}${run.holdingSwept ? `, holding items expired or removed ${run.holdingSwept}` : ''}${run.recordingsDeleted ? `, browser recordings deleted ${run.recordingsDeleted}` : ''}${run.draftsDeleted ? `, Skill drafts deleted ${run.draftsDeleted}` : ''}${run.failedCompanies ? `, ${run.failedCompanies} company(ies) failed` : ''}`)
       }
       return run
     },

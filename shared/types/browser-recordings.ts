@@ -28,6 +28,17 @@ export interface BrowserRecordingSummary {
   mine: boolean
 }
 
+/**
+ * POST /browser-recordings' answer: the summary, plus the Skill's draft made from it (agent-browser.md "A Skill's draft
+ * from a recording"; additive — an older app reads the summary only).
+ */
+export interface BrowserRecordingSent extends BrowserRecordingSummary {
+  /** The draft made from this recording, or null (no write the rule keeps, or the sender has 10 drafts). */
+  draftId: string | null
+  /** What happened to the draft, in plain Japanese for the sender. */
+  draftNote: string
+}
+
 /** GET /browser-recordings: the sender's own; an owner / admin: every recording of the company. Newest first. */
 export interface BrowserRecordingsList {
   items: BrowserRecordingSummary[]

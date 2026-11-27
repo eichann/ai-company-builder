@@ -7,7 +7,7 @@
  */
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { BROWSER_RECORDING_MAIN_WORDS as W, createBrowserRecordings, createBrowserRecordingsHttp } from '../electron/features/browser/recording'
+import { BROWSER_RECORDING_MAIN_WORDS as W, createBrowserRecordings, createBrowserRecordingsHttp, type BrowserRecordingSendAnswer } from '../electron/features/browser/recording'
 import type { BrowserRecordingObserver, BrowserRecordSurface } from '../shared/browser-recorder'
 import { BROWSER_DEVICE_HEADER } from '../../shared/core/browser-device'
 import { browserRecordingProblem } from '../../shared/core/browser-recording'
@@ -25,6 +25,7 @@ function world(opts: { startOk?: boolean; mayRecord?: boolean; sites?: string[] 
   }
   const sent: Array<{ companyId: string; body: unknown }> = []
   let answer: 'ok' | 'refused' | 'none' = 'ok'
+  let okAnswer: BrowserRecordingSendAnswer = { kind: 'ok', draft: null }
   const changed: string[] = []
   let user: string | null = 'u-1'
   const sites = opts.sites ?? [HOST]
@@ -38,7 +39,7 @@ function world(opts: { startOk?: boolean; mayRecord?: boolean; sites?: string[] 
     api: {
       async send(companyId, body) {
         sent.push({ companyId, body: JSON.parse(JSON.stringify(body)) })
-        return answer === 'ok' ? { kind: 'ok' } : answer === 'refused' ? { kind: 'refused', message: 'このサイトは、いまは記録できません。' } : { kind: 'no-answer' }
+        return answer === 'ok' ? okAnswer : answer === 'refused' ? { kind: 'refused', message: 'このサイトは、いまは記録できません。' } : { kind: 'no-answer' }
       },
     },
     changed: companyId => changed.push(companyId),
@@ -49,6 +50,7 @@ function world(opts: { startOk?: boolean; mayRecord?: boolean; sites?: string[] 
     recordings, sent, changed, observe, typed,
     end: (reason: 'closed' | 'lost') => observer?.ended(reason),
     answer: (a: typeof answer) => { answer = a },
+    okWith: (a: BrowserRecordingSendAnswer) => { okAnswer = a },
     signOut: () => { user = null },
     stopped: () => stopped,
   }
@@ -127,12 +129,42 @@ test('this PC\'s key rides only on the send, with the session; nothing goes with
     fetch: (async (url: string, init: RequestInit) => { seen.push(new Request(url, init)); return new Response(JSON.stringify({ success: true, data: {} }), { status: 201 }) }) as typeof fetch,
   })
   const content = { format: 1 as const, domain: HOST, steps: [{ id: 1, kind: 'page' as const, address: '/' }], hosts: [] }
-  assert.deepEqual(await http.send(CO, { domain: HOST, content }), { kind: 'ok' })
+  assert.deepEqual(await http.send(CO, { domain: HOST, content }), { kind: 'ok', draft: null })
   assert.equal(seen[0].headers.get(BROWSER_DEVICE_HEADER), 'v1.key')
   assert.equal(seen[0].headers.get('cookie'), 's=1')
   assert.equal(new URL(seen[0].url).pathname, `/api/companies/${CO}/browser-recordings`)
   const none = createBrowserRecordingsHttp({ baseUrl: () => 'https://acb.example.test', cookies: () => [], deviceKey: () => 'v1.key', fetch: (async () => { throw new Error('asked') }) as typeof fetch })
   assert.deepEqual(await none.send(CO, { domain: HOST, content }), { kind: 'no-answer' })
+})
+
+test('the send\'s answer says whether a Skill draft was made (agent-browser.md "A Skill\'s draft from a recording"); an older server\'s answer reads as before', async () => {
+  const content = { format: 2 as const, domain: HOST, steps: [{ id: 1, kind: 'page' as const, address: '/' }], hosts: [] }
+  const answerOf = async (data: unknown) => createBrowserRecordingsHttp({
+    baseUrl: () => 'https://acb.example.test', cookies: () => ['s=1'], deviceKey: () => 'v1.key',
+    fetch: (async () => new Response(JSON.stringify({ success: true, data }), { status: 201 })) as typeof fetch,
+  }).send(CO, { domain: HOST, content })
+  assert.deepEqual(await answerOf({ id: 'br_1', draftId: `bd_${'a'.repeat(32)}`, draftNote: 'できました' }), { kind: 'ok', draft: { made: true, note: 'できました' } })
+  assert.deepEqual(await answerOf({ id: 'br_1', draftId: null, draftNote: 'なし' }), { kind: 'ok', draft: { made: false, note: 'なし' } })
+  assert.deepEqual(await answerOf({ id: 'br_1', draftId: null, draftNote: 'x'.repeat(201) }), { kind: 'ok', draft: { made: false, note: null } })
+  assert.deepEqual(await answerOf({ id: 'br_1' }), { kind: 'ok', draft: null })
+
+  const cases: Array<[BrowserRecordingSendAnswer, string]> = [
+    [{ kind: 'ok', draft: { made: true, note: 'x' } }, W.sentWithDraft],
+    // No draft: the admins' path is still said, then why (review of #889).
+    [{ kind: 'ok', draft: { made: false, note: '下書きは作りませんでした（…）' } }, '記録を送りました。管理者に「記録を送りました」と伝えてください。下書きは作りませんでした（…）'],
+    [{ kind: 'ok', draft: { made: false, note: null } }, W.sent],
+    [{ kind: 'ok', draft: null }, W.sent],
+  ]
+  for (const [answer, said] of cases) {
+    const w = world()
+    w.okWith(answer)
+    await w.recordings.start(CO, HOST)
+    w.typed('2026-12-03')
+    await w.recordings.stop(CO)
+    await w.recordings.send(CO)
+    assert.equal(w.sent.length, 1)
+    assert.equal((w.recordings.view(CO) as { message: string | null }).message, said)
+  }
 })
 
 test('discarded or stopped while it is still starting: the window is let go once the start finishes (never left held)', async () => {
@@ -146,7 +178,7 @@ test('discarded or stopped while it is still starting: the window is let go once
     }
     const recordings = createBrowserRecordings({
       windows: { open: () => ({ ok: true }), recordWindow: () => surface },
-      userId: () => 'u-1', mayRecord: () => true, api: { send: async () => ({ kind: 'ok' }) }, changed: () => {},
+      userId: () => 'u-1', mayRecord: () => true, api: { send: async () => ({ kind: 'ok', draft: null }) }, changed: () => {},
     })
     const starting = recordings.start(CO, HOST)
     await (press === 'discard' ? recordings.discard(CO) : recordings.stop(CO))

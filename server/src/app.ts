@@ -73,6 +73,7 @@ import { browserLineReportRoute, browserLinesRoute } from './routes/browser-line
 import { browserRunsRoute } from './routes/browser-runs'
 import { browserDevicesRoute } from './routes/browser-devices'
 import { browserRecordingsRoute } from './routes/browser-recordings'
+import { browserSkillDraftsRoute } from './routes/browser-skill-drafts'
 import { browserSkillsRoute } from './routes/browser-skills'
 import { browserFramesRoute } from './routes/browser-frames'
 // lane C ▲
@@ -265,6 +266,7 @@ app.route('/api', browserReportRoute)
 app.route('/api/companies/:companyId', browserLinesRoute)
 app.route('/api/companies/:companyId', browserDevicesRoute)
 app.route('/api/companies/:companyId', browserRecordingsRoute)
+app.route('/api/companies/:companyId', browserSkillDraftsRoute)
 app.route('/api/companies/:companyId', browserSkillsRoute)
 app.route('/api', browserLineReportRoute)
 app.route('/api/companies/:companyId', browserRunsRoute)

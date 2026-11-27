@@ -60,6 +60,7 @@ import type { BrowserPlanRepository } from './browser-plans'
 import type { BrowserLineRepository } from './browser-lines'
 import type { BrowserDeviceRepository } from './browser-devices'
 import type { BrowserRecordingRepository } from './browser-recordings'
+import type { BrowserSkillDraftRepository } from './browser-skill-drafts'
 import type { BrowserSkillApprovalRepository } from './browser-skills'
 import type { BrowserRunRepository } from './browser-runs'
 import type { BrowserFrameRepository } from './browser-frames'
@@ -132,6 +133,8 @@ export interface CompanyData {
   readonly browserDevices: BrowserDeviceRepository
   /** 「ブラウザ操作」 recordings members sent (ports/browser-recordings.ts, agent-browser.md "Recording"). */
   readonly browserRecordings: BrowserRecordingRepository
+  /** Skill drafts made from a member's own recordings, each its author's alone (ports/browser-skill-drafts.ts, agent-browser.md "A Skill's draft from a recording"). */
+  readonly browserSkillDrafts: BrowserSkillDraftRepository
   /** 「Skill の承認」: which version of a company Skill's `browser.yaml` is approved (ports/browser-skills.ts, agent-browser.md). */
   readonly browserSkills: BrowserSkillApprovalRepository
   /** The operator's runs of 「ブラウザ操作」 and their log (ports/browser-runs.ts, agent-browser.md "The operator's window tools"). */

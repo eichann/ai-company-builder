@@ -41,6 +41,7 @@ import { browserPlanSchema, migrateBrowserExecutionMonotonic, migrateBrowserPlan
 import { browserLineSchema } from './schema/browser-lines'
 import { browserDeviceSchema } from './schema/browser-devices'
 import { browserRecordingSchema } from './schema/browser-recordings'
+import { browserSkillDraftSchema } from './schema/browser-skill-drafts'
 import { browserSkillSchema } from './schema/browser-skills'
 import { browserRunSchema, migrateBrowserRunBudget, migrateBrowserRunWriteSiteRefused } from './schema/browser-runs'
 import { browserFrameSchema, migrateBrowserFrameQuery, migrateBrowserFrameWriteRefused } from './schema/browser-frames'
@@ -126,6 +127,8 @@ const SCHEMA = [
   browserDeviceSchema,
   // 「ブラウザ操作」 recordings (agent-browser.md "Recording"): a new table only.
   browserRecordingSchema,
+  // Skill drafts from a member's own recordings (agent-browser.md "A Skill's draft from a recording"): a new table only.
+  browserSkillDraftSchema,
   // 「Skill の承認」 (agent-browser.md "A Skill's browser declaration and its approval"): a new table only.
   browserSkillSchema,
   // The operator's runs and their log (agent-browser.md "The operator's window tools"): new tables only.

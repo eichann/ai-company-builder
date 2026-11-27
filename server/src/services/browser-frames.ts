@@ -134,6 +134,14 @@ export const BROWSER_FRAME_WORDS = {
 } as const
 const W = BROWSER_FRAME_WORDS
 
+/**
+ * The sources this build reads a run's frames from. A row naming any other (written by a later build that knows more, then
+ * rolled back) ends on its first touch with `UNKNOWN_SOURCE` — the rollback floor of PR 3's draft runs (design memo
+ * 「記録からSkillの下書き」 §6, Codex point 8): without it a `draft` run would read here as an ad-hoc plan's, already approved.
+ */
+const KNOWN_SOURCES: readonly string[] = ['skill', 'adhoc']
+export const UNKNOWN_SOURCE = 'unknown-source'
+
 /** The end reason of a Skill run ended because its one work run is over (`settle`). */
 export const WORK_ENDED = 'work-ended'
 
@@ -227,7 +235,11 @@ export function createBrowserFrameService(deps: BrowserFrameDeps) {
       r.setRunState(found.id, 'open', 'locked', {})
     }
     const run = r.run(found.id) as FrameRunRow
-    if (run.state !== 'ended' && now >= endsAt(run)) endRun(companyId, run, 'expired', now)
+    // A run of a source this build does not know (a later build's, after a rollback: design memo 「記録からSkillの下書き」 §6)
+    // ends on its first touch: its frames were never read the way this build reads them, so nothing more is permitted.
+    // A `locked` one (a write in doubt) keeps the domain to its hour, as for every source (review of #889).
+    if ((run.state === 'open' || run.state === 'waiting') && !KNOWN_SOURCES.includes(run.source)) endRun(companyId, run, UNKNOWN_SOURCE, now)
+    else if (run.state !== 'ended' && now >= endsAt(run)) endRun(companyId, run, 'expired', now)
     else if (workOver(companyId, run)) endRun(companyId, run, WORK_ENDED, now)
     return r.run(found.id) as FrameRunRow
   }

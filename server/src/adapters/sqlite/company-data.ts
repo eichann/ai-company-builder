@@ -40,6 +40,7 @@ import { sqliteBrowserPlanRepository } from './browser-plans'
 import { sqliteBrowserLineRepository } from './browser-lines'
 import { sqliteBrowserDeviceRepository } from './browser-devices'
 import { sqliteBrowserRecordingRepository } from './browser-recordings'
+import { sqliteBrowserSkillDraftRepository } from './browser-skill-drafts'
 import { sqliteBrowserSkillApprovalRepository } from './browser-skills'
 import { sqliteBrowserRunRepository } from './browser-runs'
 import { sqliteBrowserFrameRepository } from './browser-frames'
@@ -111,6 +112,7 @@ export function sqliteCompanyData(conn: Database.Database, options: { readerChan
         browserLines: sqliteBrowserLineRepository(conn, companyId),
         browserDevices: sqliteBrowserDeviceRepository(conn, companyId),
         browserRecordings: sqliteBrowserRecordingRepository(conn, companyId),
+        browserSkillDrafts: sqliteBrowserSkillDraftRepository(conn, companyId),
         browserSkills: sqliteBrowserSkillApprovalRepository(conn, companyId),
         browserRuns: sqliteBrowserRunRepository(conn, companyId),
         browserFrames: sqliteBrowserFrameRepository(conn, companyId),

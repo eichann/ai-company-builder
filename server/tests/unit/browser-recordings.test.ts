@@ -20,6 +20,7 @@ import { sha256TokenDigest } from '../../src/adapters/system'
 import { createBrowserDeviceService, type BrowserDeviceService } from '../../src/services/browser-devices'
 import { createBrowserRecordingService, type BrowserRecordingService } from '../../src/services/browser-recordings'
 import { createBrowserSiteGrants, type BrowserSiteGrants } from '../../src/services/browser-site-grants'
+import { createBrowserSkillDraftService } from '../../src/services/browser-skill-drafts'
 import type { BrowserOperationSettings } from '../../../shared/core/browser-operation'
 import {
   BROWSER_RECORDING_LIMITS, browserAddressPattern, browserJsonShape, browserKeyPattern, browserLabel, browserRecordingProblem, type BrowserRecordingContent,
@@ -103,7 +104,8 @@ beforeEach(() => {
   svc = createBrowserRecordingService({
     companyData: data, clock, ids, memberships,
     accounts: { byIds: ids => new Map(ids.map(id => [id, { name: `Name ${id}`, email: `${id}@example.com` }])) },
-    siteGrants: grants, devices: dev.gate,
+    siteGrants: grants, devices: dev.gate, transactions: sqliteTransactions(conn),
+    drafts: createBrowserSkillDraftService({ companyData: data, clock, ids, memberships, transactions: sqliteTransactions(conn) }),
   })
 })
 

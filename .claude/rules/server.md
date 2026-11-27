@@ -105,7 +105,8 @@ src/cli/           operator commands (generate-broker-kek.ts, company-archive.ts
   private folder's repository must be unchanged afterwards. A route with an object parameter
   and no `CROSS` row fails the test, unless it is in `NOT_OBJECT_IDS` with its reason (invitation
   link tokens, the relay, service names that set this company's own row). A new endpoint that
-  takes an id gets its `CROSS` row in the same PR.
+  takes an id gets its `CROSS` row in the same PR. An id named in the body can have a row too (`xBody`, `inBody`: run the
+  same way, not counted as a URL id) — `POST /browser-skill-drafts`' recordings.
 
 ## Route guards (2026-11-02, required before the next release)
 
@@ -333,6 +334,9 @@ GET  /api/config                                  setup state (no auth)
                               GET|DELETE /browser-recordings/:recordingId (the sender or owner/admin)
                                                                              browser-recordings.ts
                                                                 (記録: agent-browser.md "Recording")
+                              GET|POST /browser-skill-drafts, GET|PUT|DELETE /browser-skill-drafts/:draftId (the author's
+                              own only: owners / admins read no one else's)  browser-skill-drafts.ts
+                                                                (下書き: agent-browser.md "A Skill's draft from a recording")
                               GET|POST /browser-skill-approvals, POST /browser-skill-approvals/revoke (owner/admin)
                                                                              browser-skills.ts
                                                                 (Skill の承認: agent-browser.md "A Skill's browser declaration and its approval")

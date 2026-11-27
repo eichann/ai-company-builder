@@ -31,13 +31,17 @@ export const BROWSER_RECORDING_MAIN_WORDS = {
   recordNote: 'いつもの作業を、サイトの窓で1回通してやってください。押したボタンと入力した欄の見出し、開いたページの形だけを記録します。入力した値・パスワード・ログインの情報は記録しません。',
   recording: (host: string, lines: number) => `${host} を記録しています（${lines}行）。作業が終わったら［記録を止める］を押してください。`,
   namesWarning: 'ボタンや欄の見出し、ページのアドレスに、お客さまなどの名前が入っていることがあります。送る前に下の「伏せる言葉」で、名前を押して伏せてください。要らない行は［消す］で消せます。',
-  reviewNote: '送った記録は、あなたと会社のオーナー・管理者だけが見られ、30日で消えます。',
+  reviewNote: '送った記録は、あなたと会社のオーナー・管理者だけが見られ、30日で消えます。あなたの相談の AI も、Skill の下書きを作るために読みます（ほかの人の AI は読みません）。',
   full: '長いので、ここで記録を止めました（500行まで）。',
   reviewTitle: (host: string) => `送る前に確かめてください（${host}）`,
   wordsTitle: '伏せる言葉（押すと、すべての行で {x} になります）',
   hostsTitle: '窓が読み込もうとした、ほかのサイト',
   estimated: (text: string) => `（推定）${text}`,
   sent: '記録を送りました。管理者に「記録を送りました」と伝えてください。',
+  /** The server made a Skill's draft from it (agent-browser.md "A Skill's draft from a recording"). */
+  sentWithDraft: '記録を送りました。Skill の下書きができました。相談に戻って、AI に「記録を送った」と伝えてください。',
+  /** The server kept it without a draft, and said why (its own plain sentence); the admins' path stays as before. */
+  sentWithoutDraft: (why: string) => `記録を送りました。管理者に「記録を送りました」と伝えてください。${why}`,
   discarded: '記録を捨てました。',
   closed: 'サイトの窓を閉じたので、記録を捨てました。',
   lost: 'サイトの窓とのつながりが切れたので、記録を捨てました。',
@@ -53,7 +57,10 @@ export const BROWSER_RECORDING_MAIN_WORDS = {
 const W = BROWSER_RECORDING_MAIN_WORDS
 
 /** The server's answer to a send. */
-export type BrowserRecordingSendAnswer = { kind: 'ok' } | { kind: 'refused'; message: string | null } | { kind: 'no-answer' }
+export type BrowserRecordingSendAnswer =
+  | { kind: 'ok'; draft: { made: boolean; note: string | null } | null }
+  | { kind: 'refused'; message: string | null }
+  | { kind: 'no-answer' }
 
 export interface BrowserRecordingsHttpDeps {
   baseUrl: () => string
@@ -81,7 +88,13 @@ export function createBrowserRecordingsHttp(deps: BrowserRecordingsHttpDeps) {
           signal: AbortSignal.timeout(deps.timeoutMs ?? 30_000),
         })
         const json = await res.json().catch(() => null) as Record<string, unknown> | null
-        if (res.status >= 200 && res.status < 300) return { kind: 'ok' }
+        if (res.status >= 200 && res.status < 300) {
+          // The draft made from it (additive: an older server answers neither key, and the sentence stays as before).
+          const data = json?.data as Record<string, unknown> | undefined
+          if (!data || !('draftId' in data)) return { kind: 'ok', draft: null }
+          const note = typeof data.draftNote === 'string' && data.draftNote.length <= 200 ? data.draftNote : null
+          return { kind: 'ok', draft: { made: typeof data.draftId === 'string', note } }
+        }
         // The server's sentence is plain Japanese for the member; anything else is not shown.
         if (res.status >= 400 && res.status < 500) return { kind: 'refused', message: typeof json?.error === 'string' && json.error.length <= 200 ? json.error : null }
         return { kind: 'no-answer' }
@@ -250,7 +263,7 @@ export function createBrowserRecordings(deps: BrowserRecordingsDeps) {
       try { result = await deps.api.send(companyId, { domain: s.host, content: s.content }) } finally { s.sending = false }
       if (current(companyId) !== s) return answer(companyId)
       if (result.kind === 'ok') {
-        discard(s, W.sent)
+        discard(s, !result.draft ? W.sent : result.draft.made ? W.sentWithDraft : result.draft.note ? W.sentWithoutDraft(result.draft.note) : W.sent)
         return answer(companyId)
       }
       s.message = result.kind === 'refused' && result.message ? W.refused(result.message) : W.sendFailed

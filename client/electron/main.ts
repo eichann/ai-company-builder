@@ -120,6 +120,7 @@ import { createRegisteredPcSwitch, createThisPcSwitch } from './features/browser
 import { createBrowserDevice, createBrowserDeviceKey } from './features/browser/device'
 import { registerBrowserDeviceIpc } from './features/browser/device-ipc'
 import { createBrowserRecordings, createBrowserRecordingsHttp } from './features/browser/recording'
+import { createBrowserSkillDraftsHttp } from './features/browser/skill-drafts'
 import { registerBrowserRecordingIpc } from './features/browser/recording-ipc'
 import { BROWSER_AI_OPT_IN_FILE } from '../shared/browser-ai'
 import { lstepConnector } from '../connectors/lstep'
@@ -953,6 +954,9 @@ app.whenReady().then(async () => {
         browse: input => browserBrowses.browse(input),
       },
       browserWorks: { available: browserWorks.available, work: input => browserWorks.work(input) },
+      // The member's own Skill drafts from their own recordings (agent-browser.md "A Skill's draft from a recording"):
+      // the session only, beside `browser_work`.
+      browserSkillDrafts: { available: browserWorks.available, ...createBrowserSkillDraftsHttp({ baseUrl: getServerApiUrl, cookies: session.cookies }) },
       browserWrites,
       agentStop: agentControl.stop,
       serverUrl: getServerApiUrl,

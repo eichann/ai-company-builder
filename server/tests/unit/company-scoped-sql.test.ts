@@ -209,6 +209,7 @@ const HANDLE_TABLES: Record<string, string[]> = {
   browser_device_history: ['adapters/sqlite/browser-devices.ts'],
   browser_plan_devices: ['adapters/sqlite/browser-devices.ts'],
   browser_recordings: ['adapters/sqlite/browser-recordings.ts'],
+  browser_skill_drafts: ['adapters/sqlite/browser-skill-drafts.ts'],
   browser_skill_approvals: ['adapters/sqlite/browser-skills.ts'],
   // The operator's runs (agent-browser.md "The operator's window tools").
   browser_runs: ['adapters/sqlite/browser-runs.ts'],
@@ -243,6 +244,7 @@ const HANDLE_FACTORIES = [
   'sqliteBrowserLineRepository',
   'sqliteBrowserDeviceRepository',
   'sqliteBrowserRecordingRepository',
+  'sqliteBrowserSkillDraftRepository',
   'sqliteBrowserSkillApprovalRepository',
   'sqliteBrowserRunRepository',
   'sqliteBrowserFrameRepository',

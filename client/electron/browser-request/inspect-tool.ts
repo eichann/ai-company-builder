@@ -25,6 +25,7 @@ import { normalizeBrowserHost } from '../../../shared/core/browser-operation'
 import type { BrowserBrowseOutcome } from '../features/browser/browse'
 import { BROWSER_WORK_LIMITS, BROWSER_WORK_TOOL, BROWSER_WORK_WORDS as KW, workHeading } from '../../shared/browser-frame-writes'
 import { browserSkillRef } from '../../../shared/core/browser-skill'
+import { createBrowserSkillDraftTool, type BrowserSkillDraftPlans } from './skill-draft-tool'
 
 export { BROWSER_INSPECT_TOOL, BROWSER_WRITE_TOOL, BROWSER_BROWSE_TOOL, BROWSER_WORK_TOOL }
 
@@ -73,6 +74,12 @@ export interface BrowserInspectTools {
    * words only; it waits for the card's ［任せる］ (or a pre-approved Skill) and the work, then answers.
    */
   work?: { description: string; execute(args: unknown): Promise<string> }
+  /**
+   * `browser_skill_draft` (agent-browser.md "A Skill's draft from a recording", PR 2): the member's own Skill draft made
+   * from their own recordings — read it and change it (the server refuses anything wider than the recordings gave). Given
+   * with `browser_work` only.
+   */
+  draft?: { description: string; execute(args: unknown): Promise<string> }
 }
 
 export const browserWorkSchema = z.object({
@@ -291,6 +298,7 @@ export function browserInspectForTurn(
   writes?: BrowserWritePlans,
   browses?: BrowserBrowsePlans,
   works?: BrowserWorkPlans,
+  drafts?: BrowserSkillDraftPlans,
 ): BrowserInspectTools | undefined {
   if (!plans || !plans.inspectAvailable()) return undefined
   const inspect = createBrowserInspectTools(input => plans.inspect({
@@ -309,6 +317,8 @@ export function browserInspectForTurn(
       companyId: turn.companyId, conversationId: turn.conversationId, companyRoot: turn.companyRoot ?? null, signal: turn.signal,
       site: input.site, task: input.task, skill: input.skill, items: input.items, onCard: turn.onCard,
     }), browses.domains(turn.companyId))
+    // The member's own Skill draft from their own recordings: beside the write task it is made for.
+    if (drafts && drafts.available()) tools.draft = createBrowserSkillDraftTool(drafts, turn.companyId)
   }
   if (!writes || !writes.writeAvailable()) return tools
   return {

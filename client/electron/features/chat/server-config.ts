@@ -45,6 +45,7 @@ import type { SkillShelfStore } from '../skill-shelf/store'
 import { taskTopicOf, topicAfterTaskMade } from '../../../shared/consultation-task'
 import { browserRequestForTurn, type BrowserRequestPlans } from '../../browser-request/tools'
 import { browserInspectForTurn, type BrowserBrowsePlans, type BrowserInspectPlans, type BrowserWorkPlans, type BrowserWritePlans } from '../../browser-request/inspect-tool'
+import type { BrowserSkillDraftPlans } from '../../browser-request/skill-draft-tool'
 
 export interface ChatServerConfigDeps {
   config: ConfigStore
@@ -78,6 +79,8 @@ export interface ChatServerConfigDeps {
   browserBrowses?: BrowserBrowsePlans
   /** Its write task on a registered domain (features/browser/work.ts, step ⑤b): `browser_work` exists only while the same switch is on. */
   browserWorks?: BrowserWorkPlans
+  /** The member's own Skill drafts (features/browser/skill-drafts.ts): `browser_skill_draft` exists only beside `browser_work`. */
+  browserSkillDrafts?: BrowserSkillDraftPlans
   /** Cancel a conversation's pending choice cards (agent-interactions.ts). */
   cancelChoicePrompts: (appSessionId: string) => void
   /** The AI action log (services/agent-events.ts). */
@@ -255,7 +258,7 @@ export function createChatServerConfig(deps: ChatServerConfigDeps): ChatServerCo
     requestInteraction: deps.requestInteraction,
     runAppCommand: deps.runAppCommand,
     createBrowserRequest: turn => browserRequestForTurn(deps.browserPlans, turn),
-    createBrowserInspect: turn => browserInspectForTurn(deps.browserInspections, turn, deps.browserWrites, deps.browserBrowses, deps.browserWorks),
+    createBrowserInspect: turn => browserInspectForTurn(deps.browserInspections, turn, deps.browserWrites, deps.browserBrowses, deps.browserWorks, deps.browserSkillDrafts),
     requestToolApproval: (toolName, toolInput, toolUseId, appSessionId, reason) => deps.toolApprovals.request(toolName, toolInput, toolUseId, appSessionId, reason),
     cancelInteractions: appSessionId => {
       deps.toolApprovals.cancel(appSessionId)

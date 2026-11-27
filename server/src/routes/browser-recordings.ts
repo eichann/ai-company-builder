@@ -1,6 +1,7 @@
 /**
  * 「ブラウザ操作」 の記録 (agent-browser.md "Recording"). Rules: services/browser-recordings.ts; shapes:
- * shared/types/browser-recordings.ts. A person's session only (no record-token route: recordings never reach the AI).
+ * shared/types/browser-recordings.ts. A person's session only (no record-token route; no AI tool calls these: an owner / admin
+ * reads everyone's here — the sender's own AI reads the sender's own through routes/browser-skill-drafts.ts).
  *
  * Mounted at /api/companies/:companyId:
  *   POST   /browser-recordings                 + this PC's key header; { domain, content }: send one recording
