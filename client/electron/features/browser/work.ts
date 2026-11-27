@@ -391,18 +391,21 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
     const moment = deps.writeStartMs ?? L.writeStartMs
     let watch = afterAction
     let answered = false
+    // The wait for a write's record ran out (the limit or a stop): decided here, never by reading the clock again — a
+    // timer may fire a moment before `performance.now()` reaches the limit (CI, Linux).
+    let ranOut = false
     while (!signal.aborted) {
       const since = writer.heldCount()
       if (watch) await watchForWrite(writer, since, Math.min(moment, left()), signal)
       if (writer.sending() > 0) {
-        if (!(await idleWithin(writer, left(), signal))) break
+        if (!(await idleWithin(writer, left(), signal))) { ranOut = true; break }
       } else if (writer.heldCount() === since) break
       // The page got answers (or refusals): it may go on with another write — the same moment again, within the limit.
       answered = true
       watch = left() > 0
     }
     // Past the limit or cut by a stop with a write still on its way: given up as at the end (unknown, the run locked).
-    if (writer.sending() > 0 && (left() <= 0 || signal.aborted)) { writer.abandon('timeout'); return false }
+    if (writer.sending() > 0 && (ranOut || signal.aborted)) { writer.abandon('timeout'); return false }
     if (answered && !signal.aborted) await win.settled?.(signal)
     return true
   }
