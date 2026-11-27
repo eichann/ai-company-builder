@@ -3705,7 +3705,8 @@ else. **No site word** anywhere (a fictional site in the tests).
   main watches for **`BROWSER_WORK_LIMITS.writeStartMs`** (1 s, one value for every site; never tuned per site) for a
   write the page's script starts a moment later; every held write is recorded (`idle()`: until the chain stops growing,
   so a write held during the wait counts too); **after the page got its answers it may go on** — main watches the same
-  moment again for a write it makes next (and waits for that one's record), as long as it goes on; then **the page
+  moment again for a write it makes next (and waits for that one's record), as long as it goes on — a write that came and
+  went between two of main's looks counts too (`heldCount`: every write held in the run; Codex review); then **the page
   settles** (`BrowserBrowseSurface.settled`, the window's rule after an action: a moment, then until it stops loading,
   ≤ `settleMs`). **Past the limit**: a write still on its way → `abandon('timeout')` as at the end — every held write
   kept `unknown`, the run locked and closed, the operator not asked again, nothing sent again (the end then does not wait
@@ -3792,11 +3793,12 @@ the page's original arrives, the write unknown and reported so; the same file si
 writes a moment later to a slow site → the next step's material shows it done beside the used unit, a press whose write
 gets no answer within the wait → unknown before the operator looks again (asked no more, pressed and permitted once), a
 write the page makes as it is read → shown as being sent then done, a write the page makes after the site's answer →
-waited for too, then the page settles, each write with its frame, action and reason, a page that keeps writing outside
+waited for too, then the page settles, each write with its frame, action and reason, a fast write that came and went
+between main's looks still counted (the page settles, its next write waited for), a page that keeps writing outside
 the frames → the operator still looks again at the limit, `idle` covering a write held while it waits, the material's
 words — each mutation-checked: no wait, no moment after the press, no idle wait, the old `idle`, no 「送っている途中」,
-no give-up, no moment after the answers, no settle, no limit, no frame / action / reason; kept on purpose: the end not
-waiting twice after a give-up (time only)),
+no give-up, no moment after the answers, no settle, no limit, no frame / action / reason, a decided write not counted;
+kept on purpose (time only): the end not waiting twice after a give-up, the moment ending early once a write was held),
 `client/tests/browser-core-words.test.ts` (the tool, its schema and both prompts name no
 site), `server/tests/unit/browser-runs.test.ts` (`write: true` at 見るだけ / on a 見るだけ site refused; the joined lock —
 only the member's run naming the frames run, `busy`, a run naming nothing → ended; write steps kept, listed, a value

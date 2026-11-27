@@ -115,6 +115,8 @@ export function createFrameWriter(deps: FrameWriterDeps) {
   interface Held { method: string; path: string; line: string; frame: number | null; recorded: boolean; write: number | null; permittedAt: string | null; afterAction: number }
   type Kept = Omit<FrameWriteRecord, 'frame' | 'afterAction' | 'why'> & { why?: WorkWriteWhy }
   const pending = new Set<Held>()
+  /** Every write held in this run (a write that came and went between two looks still counts). */
+  let heldSoFar = 0
 
   const keepRecord = (h: Held, r: Kept, outcome: BrowserRunWriteOutcome) => {
     pending.delete(h)
@@ -248,6 +250,7 @@ export function createFrameWriter(deps: FrameWriterDeps) {
       try { path = new URL(held.url).pathname } catch { /* kept as / */ }
       const h: Held = { method: held.method.toUpperCase(), path, line: workWriteLine(held.method.toUpperCase(), null), frame: null, recorded: false, write: null, permittedAt: null, afterAction: deps.actionsSoFar?.() ?? 0 }
       pending.add(h)
+      heldSoFar++
       const next = chain.then(() => decide(held, h), () => decide(held, h))
       chain = next.catch(() => undefined)
       return next.catch((): HeldPageWriteAnswer => {
@@ -284,6 +287,8 @@ export function createFrameWriter(deps: FrameWriterDeps) {
     },
     /** Writes held and not yet kept (on their way, or queued behind one): the operator is told they are being sent. */
     sending: () => pending.size,
+    /** How many writes were held in this run so far (activity, also of one already decided). */
+    heldCount: () => heldSoFar,
     /**
      * Every write held so far as the operator is told of it: the kept ones in order, then the ones being sent — the frame
      * (once matched), the action it followed, the outcome or `sending`, a refusal's fixed reason. No value, path or text.

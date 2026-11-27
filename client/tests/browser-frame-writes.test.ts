@@ -553,7 +553,9 @@ function workWorld(over: Partial<WorkWorld> = {}) {
           const timer = setInterval(() => { if (stopAutosave) clearInterval(timer); else void pageHooks.holdWrite(held(w.site, 'POST', '/autosave', JSON_TYPE, '{}')) }, w.autosaveEveryMs)
         }
         if (w.followUpMs !== undefined) {
-          void pageHooks.holdWrite(page).then(() => setTimeout(() => { void pageHooks.holdWrite(held(w.site, 'POST', '/autosave', JSON_TYPE, '{}')) }, w.followUpMs))
+          const save = () => { void pageHooks.holdWrite(page).then(() => setTimeout(() => { void pageHooks.holdWrite(held(w.site, 'POST', '/autosave', JSON_TYPE, '{}')) }, w.followUpMs)) }
+          if (w.writeDelayMs !== undefined) setTimeout(save, w.writeDelayMs)
+          else save()
           return 'ok'
         }
         if (w.writeDelayMs !== undefined) { setTimeout(() => { void pageHooks.holdWrite(page) }, w.writeDelayMs); return 'ok' }
@@ -777,6 +779,19 @@ test('the page goes on after the site\'s answer: a write it makes next is waited
   assert.deepEqual(w.calls.slice(i + 1).filter(c => c === 'settled' || c.startsWith('step')).slice(0, 2), ['settled', 'step work'])
   // The history the operator reads is numbered the same way.
   assert.equal(((w.materials[1] as { history: Array<{ number: number }> }).history[0]).number, 1)
+})
+
+test('a write that comes and goes between two looks of main still counts: the page settles and its next write is waited for (Codex review)', async () => {
+  // A fast site: the save is held 100 ms after the press and answered at once; the page's next write comes 300 ms later.
+  const { w, tool } = workWorld({
+    answers: [CLICK_SAVE, DONE_PLAIN], writeStartMs: 500, writeDelayMs: 100, followUpMs: 300,
+    frameStart: () => ({ kind: 'ok', value: started({ needsApproval: false }) }),
+  })
+  await tool.execute({ site: HOST, task: 'x', skill: 'coupons' })
+  const results = (w.materials[1] as { writes: Array<{ result: string }> }).writes.map(x => x.result)
+  assert.deepEqual(results, [WORK_WRITE_WORDS.done, WORK_WRITE_WORDS.refused])
+  const i = w.calls.indexOf('act click')
+  assert.deepEqual(w.calls.slice(i + 1).filter(c => c === 'settled' || c.startsWith('step')).slice(0, 2), ['settled', 'step work'])
 })
 
 test('a page that keeps writing (outside the frames) does not hold the operator past the limit; with nothing on its way it looks at the page as it is', async () => {

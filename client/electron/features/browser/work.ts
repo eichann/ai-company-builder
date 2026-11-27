@@ -334,10 +334,10 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
     return idle
   }
 
-  /** Watches up to `ms` for a write the page holds (returns early once one is held or the run is cut). */
-  async function watchForWrite(writer: FrameWriter, ms: number, signal: AbortSignal): Promise<void> {
+  /** Watches up to `ms` for a write the page holds (returns early once one was held since `since`, or the run is cut). */
+  async function watchForWrite(writer: FrameWriter, since: number, ms: number, signal: AbortSignal): Promise<void> {
     const until = performance.now() + ms
-    while (writer.sending() === 0 && !signal.aborted && performance.now() < until) {
+    while (writer.heldCount() === since && !signal.aborted && performance.now() < until) {
       await new Promise<void>(resolve => setTimeout(resolve, Math.min(50, Math.max(0, until - performance.now()))))
     }
   }
@@ -347,8 +347,9 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
    * within one limit (`idleMaxMs`, the end's 45 s): right after an action that may make the page write, a moment
    * (`writeStartMs`, one value for every site) for the page's script to start it; every held write recorded; after the
    * page got its answers, the same moment again for a write it makes next (and its record), as long as it goes on; then
-   * the page settles (the window's rule after an action). Past the limit: a write still on its way is given up (unknown,
-   * the run locked: false); none on its way → the operator looks at the page as it is.
+   * the page settles (the window's rule after an action). A write that came and went between two looks counts as one
+   * (`heldCount`: Codex review). Past the limit: a write still on its way is given up (unknown, the run locked: false);
+   * none on its way → the operator looks at the page as it is.
    */
   async function settleWrites(writer: FrameWriter, win: BrowserBrowseSurface, afterAction: boolean, signal: AbortSignal): Promise<boolean> {
     const limit = performance.now() + (deps.idleMaxMs ?? IDLE_MAX_MS)
@@ -357,12 +358,15 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
     let watch = afterAction
     let answered = false
     while (!signal.aborted) {
-      if (watch) await watchForWrite(writer, Math.min(moment, left()), signal)
-      if (writer.sending() === 0) break
-      if (!(await idleWithin(writer, left()))) {
-        if (writer.sending() > 0) { writer.abandon('timeout'); return false }
-        break
-      }
+      const since = writer.heldCount()
+      if (watch) await watchForWrite(writer, since, Math.min(moment, left()), signal)
+      if (writer.sending() > 0) {
+        if (!(await idleWithin(writer, left()))) {
+          if (writer.sending() > 0) { writer.abandon('timeout'); return false }
+          break
+        }
+      } else if (writer.heldCount() === since) break
+      // The page got answers (or refusals): it may go on with another write — the same moment again, within the limit.
       answered = true
       watch = left() > 0
     }
