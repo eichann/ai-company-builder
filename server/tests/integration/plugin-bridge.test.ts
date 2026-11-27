@@ -16,9 +16,9 @@
  *   screens, one without `run` for a run-bound AI.
  */
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
-import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs'
-import { tmpdir } from 'os'
+import { cpSync, readFileSync, rmSync, writeFileSync } from 'fs'
 import { join } from 'path'
+import { makeTempDir } from '../../shared/testing/temp-dirs'
 
 const currentUser = vi.hoisted(() => ({ id: null as string | null }))
 vi.mock('../../src/lib/auth', () => ({
@@ -80,7 +80,7 @@ async function call(user: string, path: string, body: unknown) {
 }
 
 beforeAll(async () => {
-  shelfDir = mkdtempSync(join(tmpdir(), 'acb-pb-shelf-'))
+  shelfDir = makeTempDir('acb-pb-shelf-')
   putFlow('0.2.0', { ui: true })
   putFlow('0.3.0', { ui: false })
   process.env.PLUGINS_DIR = shelfDir

@@ -16,8 +16,7 @@
  */
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest'
 import { execFileSync } from 'child_process'
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'fs'
-import { tmpdir } from 'os'
+import { mkdirSync, rmSync, writeFileSync } from 'fs'
 import { dirname, join } from 'path'
 
 const currentUser = vi.hoisted(() => ({ id: 'u-owner' as string | null }))
@@ -41,6 +40,7 @@ import { ensureCompanyScope, listScopesWithRules } from '../../src/adapters/sqli
 import { privateRepoPath } from '../../src/lib/private-folders'
 import { createPrivateFolder } from '../../src/adapters/private-folders'
 import { buildView, parseRequestPath, searchFiles, withSearchSlot, CompanyFilesError } from '../../src/lib/company-files'
+import { makeTempDir } from '../../shared/testing/temp-dirs'
 
 vi.setConfig({ testTimeout: 60_000, hookTimeout: 120_000 })
 
@@ -95,7 +95,7 @@ let hrCommit: string
 let execCommit: string
 
 beforeAll(async () => {
-  work = mkdtempSync(join(tmpdir(), 'acb-company-files-'))
+  work = makeTempDir('acb-company-files-')
   gitEnv = {
     ...process.env, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: join(work, 'gitconfig'),
     GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@e', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@e',

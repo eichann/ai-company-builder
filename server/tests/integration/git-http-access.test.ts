@@ -16,9 +16,8 @@
  */
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest'
 import { execFileSync, spawn } from 'child_process'
-import { mkdtempSync, rmSync, writeFileSync } from 'fs'
+import { rmSync, writeFileSync } from 'fs'
 import { join } from 'path'
-import { tmpdir } from 'os'
 import type { AddressInfo } from 'net'
 
 vi.mock('../../src/lib/auth', () => ({
@@ -31,6 +30,7 @@ vi.mock('../../src/lib/auth', () => ({
 }))
 
 import { configureBareRepo } from '../../src/routes/git'
+import { makeTempDir } from '../../shared/testing/temp-dirs'
 
 vi.setConfig({ testTimeout: 120_000, hookTimeout: 120_000 })
 
@@ -96,7 +96,7 @@ function gitClient(args: string[], cwd: string, token: string): Promise<{ ok: bo
 }
 
 beforeAll(async () => {
-  workDir = mkdtempSync(join(tmpdir(), 'acb-git-http-access-'))
+  workDir = makeTempDir('acb-git-http-access-')
   const Database = (await import('better-sqlite3')).default
   const dbModule = await import('../../src/db')
   dbModule.initDatabase()

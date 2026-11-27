@@ -37,10 +37,10 @@
  * with its reason).
  */
 import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest'
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'fs'
-import { tmpdir } from 'os'
+import { chmodSync, rmSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import { randomBytes } from 'crypto'
+import { makeTempDir } from '../../shared/testing/temp-dirs'
 
 const USER_HEADER = 'x-matrix-user'
 
@@ -1108,10 +1108,10 @@ let app: any
 let world: World
 let kekDir: string
 // The plugin shelf, read when the composition is first imported (in seed()).
-const shelfDir = mkdtempSync(join(tmpdir(), 'acb-matrix-shelf-'))
+const shelfDir = makeTempDir('acb-matrix-shelf-')
 process.env.PLUGINS_DIR = shelfDir
 // The user manual as the image builds it (server.md "The user manual"): the repository's own manual/.
-const manualSite = join(mkdtempSync(join(tmpdir(), 'acb-matrix-manual-')), 'site')
+const manualSite = join(makeTempDir('acb-matrix-manual-'), 'site')
 process.env.MANUAL_DIR = manualSite
 // The administrator guide as the image builds it (server.md "The administrator guide"): manual-admin/.
 const manualAdminSite = join(join(manualSite, '..'), 'admin-site')
@@ -1468,7 +1468,7 @@ beforeAll(async () => {
   const { buildManualSite } = await import('../../src/lib/manual-build')
   buildManualSite(join(__dirname, '../../../manual'), manualSite, join(__dirname, '../../shared/design-tokens'), 'manual')
   buildManualSite(join(__dirname, '../../../manual-admin'), manualAdminSite, join(__dirname, '../../shared/design-tokens'), 'manual-admin')
-  kekDir = mkdtempSync(join(tmpdir(), 'acb-matrix-kek-'))
+  kekDir = makeTempDir('acb-matrix-kek-')
   writeFileSync(join(kekDir, 'kek'), randomBytes(32).toString('base64'))
   chmodSync(join(kekDir, 'kek'), 0o600)
   process.env.BROKER_KEK_FILE = join(kekDir, 'kek')

@@ -4,10 +4,10 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
-import os from 'node:os'
 import path from 'node:path'
 import { createApiKeyStore, type SecretBox } from '../electron/services/api-key-store.ts'
 import { createConfigStore } from '../electron/services/config-store.ts'
+import { makeTempDir } from '../../shared/testing/temp-dirs'
 
 const FAKE_KEY = 'sk-ant-FAKE-unit-test-key-ABCD'
 
@@ -25,7 +25,7 @@ function fakeBox(): SecretBox & { on: boolean } {
 }
 
 function world(initial?: object) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'acb-api-key-'))
+  const dir = makeTempDir('acb-api-key-')
   const file = path.join(dir, 'config.json')
   if (initial) fs.writeFileSync(file, JSON.stringify(initial))
   const box = fakeBox()

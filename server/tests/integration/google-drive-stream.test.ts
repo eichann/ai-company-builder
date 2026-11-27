@@ -15,14 +15,14 @@
  * - one AI-action-log line per viewing session with the bytes served, none per range; no file id or name in any log.
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'fs'
-import { tmpdir } from 'os'
+import { chmodSync, rmSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import { randomBytes } from 'crypto'
 import type { AddressInfo } from 'net'
 import { serve, type ServerType } from '@hono/node-server'
 import { createFakeGoogle, type FakeGoogle } from '../fakes/google/fake-google'
 import { defaultGoogleSeed, GOOGLE_SEED } from '../fakes/google/seed'
+import { makeTempDir } from '../../shared/testing/temp-dirs'
 
 vi.setConfig({ testTimeout: 60_000, hookTimeout: 60_000 })
 
@@ -137,7 +137,7 @@ beforeAll(async () => {
   google.setDriveFileBytes(OTHER_VIDEO, BYTES)
   googleServer = serve({ fetch: google.app.fetch, port: 0, hostname: '127.0.0.1' })
   await new Promise(r => setTimeout(r, 50))
-  kekDir = mkdtempSync(join(tmpdir(), 'acb-drive-stream-kek-'))
+  kekDir = makeTempDir('acb-drive-stream-kek-')
   writeFileSync(join(kekDir, 'kek'), randomBytes(32).toString('base64'))
   chmodSync(join(kekDir, 'kek'), 0o600)
   Object.assign(process.env, {

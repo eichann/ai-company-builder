@@ -12,16 +12,17 @@
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { chmodSync, lstatSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { chmodSync, lstatSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { createAppGit, ensureAskPass } from '../electron/services/app-git'
+import { makeTempDir } from '../../shared/testing/temp-dirs'
 
 const posix = process.platform !== 'win32'
 const EXPECTED = posix ? '#!/bin/sh\necho "$GIT_TOKEN"\n' : '@echo %GIT_TOKEN%\r\n'
 
 function withDir(run: (appGitDir: string) => void | Promise<void>) {
-  const base = mkdtempSync(path.join(tmpdir(), 'acb-askpass-'))
+  const base = makeTempDir('acb-askpass-')
   return Promise.resolve(run(path.join(base, 'git'))).finally(() => rmSync(base, { recursive: true, force: true }))
 }
 
@@ -64,7 +65,7 @@ test('loosened permissions are tightened again (nobody else may write it)', { sk
 }))
 
 test('the app\'s git is given the checked helper', () => withDir(async appGitDir => {
-  const repo = mkdtempSync(path.join(tmpdir(), 'acb-askpass-repo-'))
+  const repo = makeTempDir('acb-askpass-repo-')
   try {
     const helper = ensureAskPass(appGitDir)
     writeFileSync(helper, 'tampered')

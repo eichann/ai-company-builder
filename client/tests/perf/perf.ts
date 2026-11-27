@@ -7,8 +7,8 @@
 // that stopped capping, a cache that stopped caching), not small drifts.
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
-import os from 'node:os'
 import path from 'node:path'
+import { makeTempDir } from '../../../shared/testing/temp-dirs'
 
 export function budget(name: string, value: number, unit: string, max: number): void {
   const shown = Number.isInteger(value) ? String(value) : value.toFixed(2)
@@ -25,7 +25,7 @@ export async function timeMs<T>(fn: () => T | Promise<T>): Promise<{ ms: number;
 
 /** A scratch directory under the OS temp dir (realpath: macOS /var → /private/var). */
 export function scratch(prefix: string): { dir: string; cleanup: () => void } {
-  const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), `acb-perf-${prefix}-`)))
+  const dir = fs.realpathSync(makeTempDir(`acb-perf-${prefix}-`))
   return { dir, cleanup: () => fs.rmSync(dir, { recursive: true, force: true }) }
 }
 

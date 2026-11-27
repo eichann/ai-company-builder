@@ -18,8 +18,7 @@
  *   in any log line.
  */
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'fs'
-import { tmpdir } from 'os'
+import { chmodSync, rmSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import { createHash, randomBytes } from 'crypto'
 import type { AddressInfo } from 'net'
@@ -31,6 +30,7 @@ import { enableSampleSales, putSampleHub } from '../helpers/plugin-packages'
 import { withRecordText } from '../helpers/record-text'
 import { holdPoints } from '../helpers/hold'
 import { awaitReplyDefault } from '../../../shared/core/mail'
+import { makeTempDir } from '../../shared/testing/temp-dirs'
 
 vi.setConfig({ testTimeout: 60_000, hookTimeout: 60_000 })
 
@@ -128,10 +128,10 @@ beforeAll(async () => {
   hub.addKey(HUB_KEY)
   hubServer = serve({ fetch: hub.app.fetch, port: 0, hostname: '127.0.0.1' })
   await new Promise(r => setTimeout(r, 50))
-  kekDir = mkdtempSync(join(tmpdir(), 'acb-mail-kek-'))
+  kekDir = makeTempDir('acb-mail-kek-')
   writeFileSync(join(kekDir, 'kek'), randomBytes(32).toString('base64'))
   chmodSync(join(kekDir, 'kek'), 0o600)
-  shelfDir = mkdtempSync(join(tmpdir(), 'acb-mail-shelf-'))
+  shelfDir = makeTempDir('acb-mail-shelf-')
   putSampleHub(shelfDir)
   Object.assign(process.env, {
     BROKER_KEK_FILE: join(kekDir, 'kek'), PLUGINS_DIR: shelfDir, PUBLIC_URL: PUBLIC, ACB_ALLOW_FAKE_UPSTREAMS: '1',

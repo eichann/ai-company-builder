@@ -13,9 +13,8 @@
  */
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest'
 import { execFileSync, spawn } from 'child_process'
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'fs'
+import { mkdirSync, rmSync, writeFileSync } from 'fs'
 import { join, dirname } from 'path'
-import { tmpdir } from 'os'
 import type { AddressInfo } from 'net'
 
 const currentUser = vi.hoisted(() => ({ id: 'u-owner' as string | null }))
@@ -49,6 +48,7 @@ const { activeMembersBuildCheck, areActiveMembersOnBuild } = services.clientActi
 const recordClientActivity = services.clientActivity.record
 const resetClientActivityThrottle = services.clientActivity.resetThrottleForTests
 import { compareClientVersions, parseClientVersion } from '../../src/lib/client-version'
+import { makeTempDir } from '../../shared/testing/temp-dirs'
 
 vi.setConfig({ testTimeout: 60_000, hookTimeout: 60_000 })
 
@@ -115,7 +115,7 @@ function gitAs(userId: string, args: string[], cwd: string, version?: string): P
 
 beforeAll(async () => {
   initDatabase()
-  workDir = mkdtempSync(join(tmpdir(), 'acb-client-activity-'))
+  workDir = makeTempDir('acb-client-activity-')
   const now = new Date().toISOString()
   const expires = new Date(Date.now() + 3600_000).toISOString()
   db.prepare('INSERT INTO companies (id, name, slug, owner_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)')

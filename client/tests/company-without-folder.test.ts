@@ -5,14 +5,13 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
-import os from 'node:os'
-import path from 'node:path'
 import { decideToolWrite, type WriteGuard } from '../electron/write-guard'
 import { answeredCompanyFolderKind } from '../shared/company-folder'
 import { checkRememberedCompany } from '../src/features/company/restore-company'
 import type { WriteAccess } from '../shared/write-access'
 import { createChatServerConfig, type ChatServerConfigDeps } from '../electron/features/chat/server-config'
 import { createWorkingFolders } from '../electron/services/working-folders'
+import { makeTempDir } from '../../shared/testing/temp-dirs'
 
 const ROOT = '/Users/me/作業'
 const ACCESS: WriteAccess = { version: 'v1', role: 'member', all: false, scopes: [{ path: '', write: true }, { path: '営業部', write: false }] }
@@ -61,7 +60,7 @@ test('without the shared folder the app\'s own rules stay: agent config, a step\
     assert.equal(viaShell.deny && viaShell.code, 'agent-config', `bash ${rel}`)
   }
   // (Judged where it lands on disk too, so the folder is a real one here.)
-  const disk = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'acb-none-')))
+  const disk = fs.realpathSync(makeTempDir('acb-none-'))
   const step: WriteGuard = { ...guard('none'), root: disk, writeArea: { folder: '提案書' } }
   const outside = decideToolWrite(step, 'Write', { file_path: `${disk}/営業部/メモ.md`, content: 'x' }, disk)
   assert.equal(outside.deny && outside.code, 'deliverable-folder')

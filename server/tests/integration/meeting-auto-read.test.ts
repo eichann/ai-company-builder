@@ -26,8 +26,7 @@
  *   started or claimed, never another person's press.
  */
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'fs'
-import { tmpdir } from 'os'
+import { chmodSync, rmSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import { randomBytes } from 'crypto'
 import type { AddressInfo } from 'net'
@@ -35,6 +34,7 @@ import { serve, type ServerType } from '@hono/node-server'
 import { createFakeGoogle, type FakeGoogle } from '../fakes/google/fake-google'
 import { defaultGoogleSeed, GOOGLE_SEED, type GoogleSeed } from '../fakes/google/seed'
 import { withRecordText } from '../helpers/record-text'
+import { makeTempDir } from '../../shared/testing/temp-dirs'
 
 vi.setConfig({ testTimeout: 90_000, hookTimeout: 120_000 })
 
@@ -181,7 +181,7 @@ beforeAll(async () => {
   google = createFakeGoogle({ seed: seed() })
   google.addClient({ clientId: CLIENT_ID, clientSecret: SECRET, redirectUris: [REDIRECT] })
   googleServer = await new Promise<ServerType>(resolve => { const s = serve({ fetch: google.app.fetch, port: 0, hostname: '127.0.0.1' }, () => resolve(s)) })
-  kekDir = mkdtempSync(join(tmpdir(), 'acb-ar-kek-'))
+  kekDir = makeTempDir('acb-ar-kek-')
   writeFileSync(join(kekDir, 'kek'), randomBytes(32).toString('base64'))
   chmodSync(join(kekDir, 'kek'), 0o600)
   Object.assign(process.env, {

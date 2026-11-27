@@ -10,7 +10,6 @@ import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
 import fs from 'node:fs'
 import fsp from 'node:fs/promises'
-import os from 'node:os'
 import path from 'node:path'
 import { AllowedRoots } from '../electron/allowed-roots'
 import { createDocFrames, type DocFrameDeps } from '../electron/features/doc-frames/protocol'
@@ -22,13 +21,14 @@ import {
 } from '../shared/doc-frame'
 import { COMMANDS } from '../shared/commands/catalog'
 import type { CommandDefinition, KeyInput } from '../shared/commands/define'
+import { makeTempDir } from '../../shared/testing/temp-dirs'
 
 const quiet = { warn: () => {} }
 const TOKEN = 'a'.repeat(32)
 const MAIN = 1
 
 function world(options: { notDownloaded?: string[] } = {}) {
-  const base = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'acb-doc-frame-')))
+  const base = fs.realpathSync(makeTempDir('acb-doc-frame-'))
   const root = path.join(base, 'company')
   const write = (rel: string, content: string | Buffer = 'x') => {
     const target = path.join(root, ...rel.split('/'))

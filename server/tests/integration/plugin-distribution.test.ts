@@ -15,12 +15,12 @@
  *   conflict is reported (409) and nothing is stored over it.
  */
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
-import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs'
+import { cpSync, readFileSync, rmSync, writeFileSync } from 'fs'
 import { createHash } from 'crypto'
-import { tmpdir } from 'os'
 import { join } from 'path'
 import { pluginFingerprintV2 } from '../../../shared/core/plugin-fingerprint'
 import { canonicalTypeJson, parseTypeFile } from '../../../shared/core/record-types'
+import { makeTempDir } from '../../shared/testing/temp-dirs'
 
 vi.mock('../../src/lib/auth', () => ({
   getUserFromRequest: vi.fn().mockResolvedValue(null),
@@ -60,7 +60,7 @@ const stop = (lines: string) => writeFileSync(join(shelfDir, 'stopped'), lines)
 const unstop = () => rmSync(join(shelfDir, 'stopped'), { force: true })
 
 beforeAll(async () => {
-  shelfDir = mkdtempSync(join(tmpdir(), 'acb-pd-shelf-'))
+  shelfDir = makeTempDir('acb-pd-shelf-')
   putFlow('0.1.0')
   putFlow('0.2.0')
   // A newer version whose deal type goes past a company's extension (EXT).

@@ -17,8 +17,7 @@
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { cpSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { readBrowserThing, type BrowserThingResult } from '../../shared/core/browser-map'
 import { evaluateBrowserReadLine, type BrowserReadFacts } from '../../shared/core/browser-read-line'
@@ -34,6 +33,7 @@ import { createLstepReminderStepChecker } from '../connectors/lstep/reminder-ste
 import { LSTEP_DECLARATION } from '../connectors/lstep/declaration'
 import { MAPS_DIR, OPENED_FILE, mapReadersHash } from '../scripts/browser-opened'
 import { CONNECTORS_DIR } from '../scripts/browser-connectors'
+import { makeTempDir } from '../../shared/testing/temp-dirs'
 
 const { map, readers } = lstepMap()
 const line = LINES.find(l => l.name === 'step_template_add')!
@@ -275,7 +275,7 @@ test('the new path holds the old path\'s lock key for the same step', () => {
 })
 
 test('the map\'s reader fingerprint covers the old checker it reads with (a change there needs a new map version)', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'acb-map-readers-'))
+  const dir = makeTempDir('acb-map-readers-')
   try {
     cpSync(join(CONNECTORS_DIR, 'lstep'), join(dir, 'lstep'), { recursive: true })
     const before = mapReadersHash(join(MAPS_DIR, 'lstep'), 'lstep', dir)

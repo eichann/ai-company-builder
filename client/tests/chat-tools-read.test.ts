@@ -5,12 +5,12 @@
 import { test, after } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
-import os from 'node:os'
 import path from 'node:path'
 import { execFileSync } from 'node:child_process'
 import { createFileSystemTools, createSkillTools } from '../electron/chat-tools'
+import { makeTempDir } from '../../shared/testing/temp-dirs'
 
-const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'acb-chat-tools-'))
+const dir = makeTempDir('acb-chat-tools-')
 after(() => fs.rmSync(dir, { recursive: true, force: true }))
 
 type Exec = (input: { path: string }, options: { toolCallId: string; messages: [] }) => Promise<string>

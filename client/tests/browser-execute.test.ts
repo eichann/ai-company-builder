@@ -13,7 +13,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
-import os from 'node:os'
 import path from 'node:path'
 import { createThisPcSwitch } from '../electron/features/browser/ai-switch'
 import { createBrowserContext } from '../electron/features/browser/context'
@@ -29,6 +28,7 @@ import { lstepConnector } from '../connectors/lstep'
 import type { BrowserFact } from '../../shared/core/browser-plans'
 import type { PluginBrowser } from '../../shared/core/plugin-browser-declaration'
 import { fakePlansServer, type FakeServerFaults } from './browser-plans-fake'
+import { makeTempDir } from '../../shared/testing/temp-dirs'
 
 const HOST = 'manager.linestep.net'
 const COMPANY = 'company-1'
@@ -435,7 +435,7 @@ test('a stop, a closed window or a changed context between the permit and the se
 })
 
 test('this PC\'s opt-in removed between the permit and the send (the switch and context as main composes them): failed, nothing sent', async () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'acb-optin-run-'))
+  const dir = makeTempDir('acb-optin-run-')
   try {
     const file = path.join(dir, BROWSER_AI_OPT_IN_FILE)
     fs.writeFileSync(file, JSON.stringify({ browserAi: 'this-pc', server: 'https://acb.example', userId: 'u1', until: new Date(Date.now() + 86_400_000).toISOString() }))

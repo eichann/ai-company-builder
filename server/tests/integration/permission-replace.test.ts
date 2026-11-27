@@ -15,9 +15,8 @@
  */
 import { describe, it, expect, beforeAll, beforeEach, afterAll, vi } from 'vitest'
 import { execFileSync } from 'child_process'
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'fs'
+import { mkdirSync, rmSync, writeFileSync } from 'fs'
 import { join } from 'path'
-import { tmpdir } from 'os'
 
 const currentUser = vi.hoisted(() => ({ id: 'rp-owner' as string | null }))
 
@@ -40,6 +39,7 @@ import { permissionsRoute } from '../../src/routes/permissions'
 import { permissionRulesRoute } from '../../src/routes/permission-rules'
 import { replaceDepartmentManagers, replaceScopeRules, sqlitePermissionRepository } from '../../src/adapters/sqlite/permission-store'
 import { resolveAccess, type SubjectType } from '../../shared/core/permissions'
+import { makeTempDir } from '../../shared/testing/temp-dirs'
 
 vi.setConfig({ testTimeout: 30_000, hookTimeout: 60_000 })
 
@@ -99,7 +99,7 @@ beforeAll(() => {
   initDatabase() // seed scopes
   replaceDepartmentManagers(db, CO, ids.content, ['rp-manager'], 'rp-owner')
 
-  tmp = mkdtempSync(join(tmpdir(), 'rp-'))
+  tmp = makeTempDir('acb-rp-')
   const work = join(tmp, 'work')
   mkdirSync(work)
   git(['init', '-q', '-b', 'main'], work)

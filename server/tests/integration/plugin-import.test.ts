@@ -21,8 +21,7 @@
  *   other plugin are refused with nothing asked outside.
  */
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
-import { chmodSync, cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs'
-import { tmpdir } from 'os'
+import { chmodSync, cpSync, readFileSync, rmSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import { randomBytes } from 'crypto'
 import { execFile } from 'child_process'
@@ -31,6 +30,7 @@ import { createFakeHubSpot, type FakeHubSpot } from '../fakes/hubspot/fake-hubsp
 import { fakeUpstream } from '../helpers/fake-upstream'
 import { PLUGIN_FIXTURES, enableSampleSales, putSampleHub } from '../helpers/plugin-packages'
 import { withRecordText } from '../helpers/record-text'
+import { makeTempDir } from '../../shared/testing/temp-dirs'
 
 vi.mock('../../src/lib/auth', () => ({
   getUserFromRequest: vi.fn().mockResolvedValue(null),
@@ -91,11 +91,11 @@ const recordOf = (externalId: string) => (db.prepare("SELECT record_id FROM plug
 
 beforeAll(async () => {
   for (const m of ['log', 'warn', 'error'] as const) vi.spyOn(console, m).mockImplementation((...a: unknown[]) => { logged.push(a.map(String).join(' ')) })
-  kekDir = mkdtempSync(join(tmpdir(), 'acb-im-kek-'))
+  kekDir = makeTempDir('acb-im-kek-')
   writeFileSync(join(kekDir, 'kek'), randomBytes(32).toString('base64'))
   chmodSync(join(kekDir, 'kek'), 0o600)
   process.env.BROKER_KEK_FILE = join(kekDir, 'kek')
-  shelfDir = mkdtempSync(join(tmpdir(), 'acb-im-shelf-'))
+  shelfDir = makeTempDir('acb-im-shelf-')
   putSampleHub(shelfDir)
 
   fake = createFakeHubSpot()

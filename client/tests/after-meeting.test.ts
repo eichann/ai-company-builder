@@ -2,11 +2,11 @@
 // only the run's own folder, files read as data.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync, readFileSync, realpathSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { mkdirSync, rmSync, symlinkSync, writeFileSync, readFileSync, realpathSync } from 'node:fs'
 import path from 'node:path'
 import { createAfterMeetingApi } from '../electron/features/after-meeting/ipc'
 import { itemKey, readProposalFile, readResultFile, type AfterMeetingChange, type HandedItem } from '../shared/after-meeting'
+import { makeTempDir } from '../../shared/testing/temp-dirs'
 
 const OCC = `occ.${'a'.repeat(32)}`
 const FOLDER = '営業/.personal/提案書/2026-11-24_A社'
@@ -25,7 +25,7 @@ const HANDED: Record<string, HandedItem> = {
 const press = (id: string, ...keys: string[]): AfterMeetingChange => ({ kind: 'apply', id, keys, items: keys.map(k => HANDED[k]) })
 
 function world(t: { after: (fn: () => void) => void }, opts: { types?: unknown; folder?: string; file?: unknown; fetch?: typeof fetch } = {}) {
-  const base = realpathSync(mkdtempSync(path.join(tmpdir(), 'acb-after-meeting-')))
+  const base = realpathSync(makeTempDir('acb-after-meeting-'))
   t.after(() => rmSync(base, { recursive: true, force: true }))
   const root = path.join(base, 'company')
   const runDir = path.join(root, ...FOLDER.split('/'))

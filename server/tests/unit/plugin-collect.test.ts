@@ -8,11 +8,11 @@
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { execFileSync } from 'child_process'
-import { cpSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'fs'
-import { tmpdir } from 'os'
+import { cpSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import { collectPlugins, packageFingerprintV2, parsePluginsLock, type LockEntry } from '../../src/adapters/plugin-collect'
 import { diskPluginShelf } from '../../src/adapters/plugin-shelf'
+import { makeTempDir } from '../../shared/testing/temp-dirs'
 
 const FLOW = join(__dirname, '../fixtures/plugins/sample-flow')
 let tmp: string
@@ -22,7 +22,7 @@ let shelf: string
 const git = (...args: string[]) => execFileSync('git', ['-C', repo, '-c', 'user.name=t', '-c', 'user.email=t@t', ...args], { stdio: 'pipe' })
 
 beforeEach(() => {
-  tmp = mkdtempSync(join(tmpdir(), 'acb-collect-test-'))
+  tmp = makeTempDir('acb-collect-test-')
   repo = join(tmp, 'repo')
   shelf = join(tmp, 'shelf')
   mkdirSync(shelf)

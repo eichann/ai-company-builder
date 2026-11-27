@@ -14,14 +14,14 @@
  * - the answer has counts and flags only, never an attendee's address.
  */
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'fs'
-import { tmpdir } from 'os'
+import { chmodSync, rmSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import { randomBytes } from 'crypto'
 import type { AddressInfo } from 'net'
 import { serve, type ServerType } from '@hono/node-server'
 import { createFakeGoogle, type FakeGoogle } from '../fakes/google/fake-google'
 import { defaultGoogleSeed, GOOGLE_SEED } from '../fakes/google/seed'
+import { makeTempDir } from '../../shared/testing/temp-dirs'
 
 vi.setConfig({ testTimeout: 60_000, hookTimeout: 120_000 })
 
@@ -102,7 +102,7 @@ beforeAll(async () => {
   google.addClient({ clientId: CLIENT_ID, clientSecret: SECRET, redirectUris: [REDIRECT] })
   googleServer = await listen(google.app.fetch)
 
-  kekDir = mkdtempSync(join(tmpdir(), 'acb-cal-kek-'))
+  kekDir = makeTempDir('acb-cal-kek-')
   writeFileSync(join(kekDir, 'kek'), randomBytes(32).toString('base64'))
   chmodSync(join(kekDir, 'kek'), 0o600)
   Object.assign(process.env, {

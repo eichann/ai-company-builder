@@ -14,7 +14,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import { AllowedRoots } from '../electron/allowed-roots'
 import { createRecordsApi } from '../electron/records/api'
@@ -22,6 +21,7 @@ import { createRecordTools } from '../electron/records/tools'
 import { createDriveTools } from '../electron/features/google/drive'
 import { createGoogleApi } from '../electron/features/google/ipc'
 import { DRIVE_PUT_ASK_WORDS, driveAudienceLines, driveOverwriteOutcome, readDriveOverwriteCard, type DriveOverwriteCard } from '../shared/drive-overwrite'
+import { makeTempDir } from '../../shared/testing/temp-dirs'
 
 const TOKEN = 'acb_rec_co.' + 'a'.repeat(64)
 const SESSION = 'better-auth.session_token=SECRET.sig'
@@ -46,7 +46,7 @@ async function setup(opts: { put: { status: number; body: unknown }; privateSour
   }) as unknown as typeof globalThis.fetch
   const api = createRecordsApi({ baseUrl: () => 'https://acb.example.jp', cookies: () => [SESSION], fetch })
   const access = await api.openTurn('co', { conversationId: 'conv-1', agent: 'claude-code', scope: 'act' })
-  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'acb-drive-audience-')))
+  const root = fs.realpathSync(makeTempDir('acb-drive-audience-'))
   fs.mkdirSync(path.join(root, '営業部', '非公開の案件'), { recursive: true })
   fs.mkdirSync(path.join(root, '.personal', 'job'), { recursive: true })
   fs.writeFileSync(path.join(root, '営業部', '見積.pdf'), '%PDF-1.7\n% quote\n%%EOF\n')

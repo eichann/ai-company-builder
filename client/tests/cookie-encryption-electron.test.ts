@@ -13,9 +13,9 @@ import assert from 'node:assert/strict'
 import { execFileSync, spawn } from 'node:child_process'
 import { createRequire } from 'node:module'
 import fs from 'node:fs'
-import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
+import { makeTempDir, stopWithTempDirs } from '../../shared/testing/temp-dirs'
 
 const clientDir = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
 const require = createRequire(import.meta.url)
@@ -38,9 +38,14 @@ function run(electron: string, dir: string, set: string | null): Promise<{ read:
       env: { ...process.env, ELECTRON_RUN_AS_NODE: '', NODE_OPTIONS: `--import ${tsx}`, COOKIE_TEST_DIR: dir, COOKIE_TEST_SET: set ?? '' },
       stdio: 'ignore',
     })
-    const timer = setTimeout(() => { child.kill('SIGKILL'); reject(new Error('the harness did not finish')) }, 60_000)
+    stopWithTempDirs(child)
+    // On a timeout the child is killed and its end awaited before failing, so the folder it writes in can be
+    // removed after it (`shared/testing/temp-dirs.ts`).
+    let timedOut = false
+    const timer = setTimeout(() => { timedOut = true; child.kill('SIGKILL') }, 60_000)
     child.on('close', () => {
       clearTimeout(timer)
+      if (timedOut) { reject(new Error('the harness did not finish')); return }
       const file = path.join(dir, 'result.json')
       if (!fs.existsSync(file)) { reject(new Error('no result')); return }
       const result = JSON.parse(fs.readFileSync(file, 'utf8')) as { read: string | null; error?: string }
@@ -65,7 +70,7 @@ function cookieRow(dir: string): { file: string; value: string; encrypted: strin
 }
 
 test('with the fuse a cookie is stored encrypted; a store an unencrypted build wrote is still read', { skip: canRun ? false : 'macOS only' }, async () => {
-  const work = fs.mkdtempSync(path.join(os.tmpdir(), 'acb-cookie-enc-'))
+  const work = makeTempDir('acb-cookie-enc-')
   try {
     const plain = require('electron') as string
     // A copy of this checkout's Electron with the fuse flipped as electron-builder flips it (APFS clone: cheap).

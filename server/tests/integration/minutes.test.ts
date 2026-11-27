@@ -18,8 +18,7 @@
  * - Google stopped (the company switch) or no permission → nothing is read; records off → 404.
  */
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'fs'
-import { tmpdir } from 'os'
+import { chmodSync, rmSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import { randomBytes } from 'crypto'
 import type { AddressInfo } from 'net'
@@ -30,6 +29,7 @@ import { createFakeHubSpot, ALL_FAKE_SCOPES, type FakeHubSpot } from '../fakes/h
 import { enableSampleSales, putSampleHub } from '../helpers/plugin-packages'
 import { withRecordText } from '../helpers/record-text'
 import { MINUTES_TEXT_MAX, MINUTES_TEXT_PAGED_MAX } from '../../../shared/core/minutes'
+import { makeTempDir } from '../../shared/testing/temp-dirs'
 
 vi.setConfig({ testTimeout: 90_000, hookTimeout: 120_000 })
 
@@ -149,10 +149,10 @@ beforeAll(async () => {
   googleServer = await listen(google.app.fetch)
   hubspotServer = await listen(hubspot.app.fetch)
 
-  kekDir = mkdtempSync(join(tmpdir(), 'acb-mn-kek-'))
+  kekDir = makeTempDir('acb-mn-kek-')
   writeFileSync(join(kekDir, 'kek'), randomBytes(32).toString('base64'))
   chmodSync(join(kekDir, 'kek'), 0o600)
-  shelfDir = mkdtempSync(join(tmpdir(), 'acb-mn-shelf-'))
+  shelfDir = makeTempDir('acb-mn-shelf-')
   putSampleHub(shelfDir)
   Object.assign(process.env, {
     BROKER_KEK_FILE: join(kekDir, 'kek'), PLUGINS_DIR: shelfDir, PUBLIC_URL: PUBLIC, ACB_ALLOW_FAKE_UPSTREAMS: '1',

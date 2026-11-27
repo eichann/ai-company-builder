@@ -12,9 +12,8 @@
  */
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest'
 import { execFileSync, spawnSync } from 'child_process'
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from 'fs'
+import { rmSync, writeFileSync, mkdirSync } from 'fs'
 import { join, dirname } from 'path'
-import { tmpdir } from 'os'
 
 // git.ts transitively imports lib/auth, which requires AUTH_SECRET at import
 // time — mock it like the other integration tests do.
@@ -28,6 +27,7 @@ vi.mock('../../src/lib/auth', () => ({
 }))
 
 import { configureBareRepo } from '../../src/routes/git'
+import { makeTempDir } from '../../shared/testing/temp-dirs'
 
 vi.setConfig({ testTimeout: 120_000, hookTimeout: 60_000 })
 
@@ -97,7 +97,7 @@ function setup(files: Record<string, string> = { 'README.md': 'hi\n' }): { bare:
 }
 
 beforeAll(() => {
-  workDir = mkdtempSync(join(tmpdir(), 'acb-secret-scan-'))
+  workDir = makeTempDir('acb-secret-scan-')
 })
 
 afterAll(() => {

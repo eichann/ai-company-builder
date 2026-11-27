@@ -8,7 +8,6 @@
 import { describe, it, beforeEach, afterEach } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
-import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { nodePluginTrustCrypto as C } from '../electron/features/plugins/trust-crypto'
@@ -20,6 +19,7 @@ import { refreshTrustOnMarker } from '../electron/features/agent-control/wire'
 import { parseAgentPolicy } from '../electron/services/agent-policy-store'
 import { parsePluginTrustDocuments, type PluginTrustDocuments } from '../../shared/core/plugin-trust-distribution'
 import type { SignedEnvelope } from '../../shared/core/plugin-trust-documents'
+import { makeTempDir } from '../../shared/testing/temp-dirs'
 
 const FIX = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures/plugin-trust')
 const DOCS = JSON.parse(fs.readFileSync(path.join(FIX, 'documents.json'), 'utf8')) as Record<string, SignedEnvelope>
@@ -28,7 +28,7 @@ const NOW = Date.parse('2026-11-21T12:00:00Z')
 const SERVER = 'https://acb.example'
 
 let dir: string
-beforeEach(() => { dir = fs.mkdtempSync(path.join(os.tmpdir(), 'acb-trust-store-')) })
+beforeEach(() => { dir = makeTempDir('acb-trust-store-') })
 afterEach(() => { fs.rmSync(dir, { recursive: true, force: true }) })
 
 const silent = { warn: () => {}, info: () => {} }

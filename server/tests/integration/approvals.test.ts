@@ -22,14 +22,14 @@
  *   request without creating anything, only for the requester or an approver.
  */
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'fs'
-import { tmpdir } from 'os'
+import { chmodSync, rmSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import { randomBytes } from 'crypto'
 import type { AddressInfo } from 'net'
 import { serve, type ServerType } from '@hono/node-server'
 import { createFakeHubSpot, type FakeHubSpot } from '../fakes/hubspot/fake-hubspot'
 import { enableSampleSales, putSampleHub } from '../helpers/plugin-packages'
+import { makeTempDir } from '../../shared/testing/temp-dirs'
 
 vi.setConfig({ testTimeout: 60_000, hookTimeout: 60_000 })
 
@@ -118,10 +118,10 @@ beforeAll(async () => {
   server = serve({ fetch: fake.app.fetch, port: 0, hostname: '127.0.0.1' })
   await new Promise(r => setTimeout(r, 50))
   const port = (server.address() as AddressInfo).port
-  kekDir = mkdtempSync(join(tmpdir(), 'acb-ap-kek-'))
+  kekDir = makeTempDir('acb-ap-kek-')
   writeFileSync(join(kekDir, 'kek'), randomBytes(32).toString('base64'))
   chmodSync(join(kekDir, 'kek'), 0o600)
-  shelfDir = mkdtempSync(join(tmpdir(), 'acb-ap-shelf-'))
+  shelfDir = makeTempDir('acb-ap-shelf-')
   putSampleHub(shelfDir)
   Object.assign(process.env, {
     BROKER_KEK_FILE: join(kekDir, 'kek'), PLUGINS_DIR: shelfDir, ACB_ALLOW_FAKE_UPSTREAMS: '1', ACB_FAKE_HUBSPOT_URL: `http://127.0.0.1:${port}`,

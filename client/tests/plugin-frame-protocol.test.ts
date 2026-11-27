@@ -6,13 +6,13 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
-import os from 'node:os'
 import path from 'node:path'
 import { pluginFingerprintV2 } from '../../shared/core/plugin-fingerprint'
 import { sha256Hex } from '../electron/features/plugins/fetch'
 import { createPluginFileServer } from '../electron/features/plugins/protocol'
 import { createPluginPackageStore } from '../electron/features/plugins/store'
 import { parsePluginFrameUrl, pluginFrameUrl } from '../shared/plugin-bridge'
+import { makeTempDir } from '../../shared/testing/temp-dirs'
 
 const quiet = { warn: () => {}, info: () => {} }
 const enc = (s: string) => new TextEncoder().encode(s)
@@ -26,7 +26,7 @@ const FILES = [
 const FP = pluginFingerprintV2(FILES, sha256Hex)
 
 function world() {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'acb-plugin-frame-'))
+  const root = makeTempDir('acb-plugin-frame-')
   const write = (name: string, files: typeof FILES) => {
     for (const f of files) {
       const target = path.join(root, name, ...f.path.split('/'))
@@ -125,7 +125,7 @@ test('a folder that no longer matches its fingerprint, or a file changed after t
 })
 
 test('the store answers a kept package only while a company of the signed-in account lists it', async () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'acb-plugin-kept-'))
+  const dir = makeTempDir('acb-plugin-kept-')
   let user: string | null = 'u1'
   const files = FILES.map(f => ({ path: f.path, bytes: f.bytes }))
   const store = createPluginPackageStore({ dir: () => dir, userId: () => user, fetchPackage: async () => ({ ok: true, files }), log: quiet })

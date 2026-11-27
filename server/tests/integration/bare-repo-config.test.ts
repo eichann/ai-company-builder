@@ -10,9 +10,8 @@
  */
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest'
 import { execFileSync } from 'child_process'
-import { mkdtempSync, rmSync, existsSync, statSync, writeFileSync } from 'fs'
+import { rmSync, existsSync, statSync, writeFileSync } from 'fs'
 import { join } from 'path'
-import { tmpdir } from 'os'
 
 // git.ts transitively imports lib/auth, which requires AUTH_SECRET at import
 // time — mock it like the other integration tests do (auth is unused here).
@@ -26,6 +25,7 @@ vi.mock('../../src/lib/auth', () => ({
 }))
 
 import { configureBareRepo } from '../../src/routes/git'
+import { makeTempDir } from '../../shared/testing/temp-dirs'
 
 // beforeAll runs ~10 real git commands; the default 10s hook timeout is too
 // tight when the other git-heavy hook suites run in parallel.
@@ -41,7 +41,7 @@ describe('configureBareRepo', () => {
   let clone: string
 
   beforeAll(() => {
-    workDir = mkdtempSync(join(tmpdir(), 'acb-bare-config-'))
+    workDir = makeTempDir('acb-bare-config-')
     bareRepo = join(workDir, 'company.git')
     git(['init', '--bare', '--initial-branch=main', bareRepo])
     configureBareRepo(bareRepo)

@@ -13,9 +13,9 @@
  * they do not break the admin, but show where its types lag behind.
  */
 import ts from 'typescript'
-import { mkdtempSync, rmSync, writeFileSync } from 'fs'
+import { rmSync, writeFileSync } from 'fs'
 import { join } from 'path'
-import { tmpdir } from 'os'
+import { makeTempDir } from '../../shared/testing/temp-dirs'
 
 export interface ShapeReport {
   /** Mismatches: the admin would read a field that is missing or of another type. */
@@ -33,7 +33,7 @@ export interface TypeShapes {
  * and return a checker for its exported type aliases `T_<name>`.
  */
 export function loadTypeShapes(source: string): TypeShapes {
-  const dir = mkdtempSync(join(tmpdir(), 'acb-type-shape-'))
+  const dir = makeTempDir('acb-type-shape-')
   const file = join(dir, 'shapes.ts')
   writeFileSync(file, source)
   const program = ts.createProgram([file], {

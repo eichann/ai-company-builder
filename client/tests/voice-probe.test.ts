@@ -1,13 +1,13 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { mkdtempSync, writeFileSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { writeFileSync, rmSync } from 'node:fs'
 import path from 'node:path'
 import { listDevices, probeCapabilities, PROBE_MESSAGES } from '../electron/voice-probe'
+import { makeTempDir } from '../../shared/testing/temp-dirs'
 
 // Fake helpers speak the acb-speech stdout protocol. `body` runs as node.
 function withHelper(body: string, run: (cli: string) => Promise<void>) {
-  const dir = mkdtempSync(path.join(tmpdir(), 'voice-probe-'))
+  const dir = makeTempDir('acb-voice-probe-')
   const cli = path.join(dir, 'helper')
   writeFileSync(cli, `#!${process.execPath}\nconst out = v => console.log(JSON.stringify(v));\n${body}\n`, { mode: 0o700 })
   return run(cli).finally(() => rmSync(dir, { recursive: true, force: true }))

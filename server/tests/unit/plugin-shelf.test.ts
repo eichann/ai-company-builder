@@ -12,16 +12,16 @@
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { createHash } from 'crypto'
-import { chmodSync, cpSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'fs'
-import { tmpdir } from 'os'
+import { chmodSync, cpSync, mkdirSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import { diskPluginShelf } from '../../src/adapters/plugin-shelf'
 import { createPluginShelf } from '../../src/services/plugin-shelf'
+import { makeTempDir } from '../../shared/testing/temp-dirs'
 
 const FIXTURES = join(__dirname, '../fixtures/plugins')
 let root: string
 
-beforeEach(() => { root = mkdtempSync(join(tmpdir(), 'acb-shelf-')) })
+beforeEach(() => { root = makeTempDir('acb-shelf-') })
 afterEach(() => rmSync(root, { recursive: true, force: true }))
 
 const put = (fixture: string, dir: string) => cpSync(join(FIXTURES, fixture), join(root, dir), { recursive: true })

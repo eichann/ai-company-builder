@@ -30,6 +30,7 @@ import { drivePickRefusedText, hasDriveFolderLink } from '../../shared/core/goog
 import { DRIVE_TURNED_OFF_TEXT, driveLinkView, googleSectionView, type MyGoogle } from '../shared/google'
 import { linkedDriveFileOf } from '../shared/drive-links'
 import type { DriveAiStatus } from '../../shared/types/google-drive'
+import { makeTempDir } from '../../shared/testing/temp-dirs'
 
 const FOLDER = 'fake-folder-proposals-0001'
 const OLD = 'fake-upload-old-report-0001'
@@ -74,9 +75,8 @@ async function driveTools(access: RecordTurnAccess, pickResult: DrivePickResult 
 
 test('A: an overwrite asks about that one file, however many puts came after it (never a list it fell out of)', async () => {
   const fs = await import('fs')
-  const os = await import('os')
   const path = await import('path')
-  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'acb-drive-ux-')))
+  const root = fs.realpathSync(makeTempDir('acb-drive-ux-'))
   fs.writeFileSync(path.join(root, 'r.pdf'), '%PDF-1.7\n%%EOF\n')
   const { AllowedRoots } = await import('../electron/allowed-roots')
   const roots = new AllowedRoots()
@@ -160,9 +160,8 @@ test('D / H: what was not usable is counted with its reasons; a folder seen outs
 
 test('F / G: an unknown put gives its put id and a read-only check; done but not linked to the やること is said', async () => {
   const fs = await import('fs')
-  const os = await import('os')
   const path = await import('path')
-  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'acb-drive-ux-')))
+  const root = fs.realpathSync(makeTempDir('acb-drive-ux-'))
   fs.writeFileSync(path.join(root, 'r.pdf'), '%PDF-1.7\n%%EOF\n')
   const { AllowedRoots } = await import('../electron/allowed-roots')
   const roots = new AllowedRoots()
@@ -205,9 +204,8 @@ test('K: a read says what it did not cover (cut at 200,000 characters, a sheet\'
 
 test('L: a Markdown that cannot become a Google document names the way out (as a file), never stripping on its own', async () => {
   const fs = await import('fs')
-  const os = await import('os')
   const path = await import('path')
-  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'acb-drive-ux-')))
+  const root = fs.realpathSync(makeTempDir('acb-drive-ux-'))
   fs.writeFileSync(path.join(root, '報告.md'), '# 報告\n\n![図](https://example.com/a.png)\n')
   const { AllowedRoots } = await import('../electron/allowed-roots')
   const roots = new AllowedRoots()

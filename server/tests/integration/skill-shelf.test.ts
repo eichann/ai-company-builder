@@ -42,9 +42,6 @@ vi.mock('../../src/lib/auth', () => ({
 }))
 
 import { createHash } from 'crypto'
-import { mkdtempSync } from 'fs'
-import { join } from 'path'
-import { tmpdir } from 'os'
 import { Hono } from 'hono'
 import { db, initDatabase } from '../../src/db'
 import { companiesRoute } from '../../src/routes/companies'
@@ -54,6 +51,7 @@ import { groupsRoute } from '../../src/routes/groups'
 import { skillEditorsRoute } from '../../src/routes/skill-editors'
 import { skillShelfRoute } from '../../src/routes/skill-shelf'
 import { setRepoGitTimeoutsForTests } from '../../src/adapters/git-repo-store'
+import { makeTempDir } from '../../shared/testing/temp-dirs'
 
 vi.setConfig({ testTimeout: 120_000, hookTimeout: 120_000 })
 
@@ -119,7 +117,7 @@ beforeAll(async () => {
   initDatabase()
   process.env.OPERATOR_USER_IDS = 'sh-owner'
   setRepoGitTimeoutsForTests({ local: 60_000, push: 120_000 })
-  process.env.GIT_TEMPLATE_DIR = mkdtempSync(join(tmpdir(), 'acb-sh-templates-'))
+  process.env.GIT_TEMPLATE_DIR = makeTempDir('acb-sh-templates-')
   const a = await call('POST', '/api/companies', { name: 'Shelf Co', folderKind: 'none' })
   expect(a.status).toBe(201)
   none = a.body.data.id

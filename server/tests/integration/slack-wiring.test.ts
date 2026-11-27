@@ -14,14 +14,14 @@
  * - the events receiver checks the company's own signing secret.
  */
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest'
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'fs'
-import { tmpdir } from 'os'
+import { chmodSync, rmSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import { randomBytes } from 'crypto'
 import type { AddressInfo } from 'net'
 import { serve, type ServerType } from '@hono/node-server'
 import { createFakeSlack, defaultSlackSeed, signEvent, type FakeSlack } from '../fakes/slack/fake-slack'
 import type { UpstreamClient, UpstreamRequest } from '../../src/ports/upstream'
+import { makeTempDir } from '../../shared/testing/temp-dirs'
 
 let practiceUpstreamsFrom: typeof import('../../src/lib/config').practiceUpstreamsFrom
 
@@ -59,7 +59,7 @@ async function servicesFor(env: Record<string, string | undefined>) {
 }
 
 beforeAll(async () => {
-  kekDir = mkdtempSync(join(tmpdir(), 'acb-sw-kek-'))
+  kekDir = makeTempDir('acb-sw-kek-')
   writeFileSync(join(kekDir, 'kek'), randomBytes(32).toString('base64'))
   chmodSync(join(kekDir, 'kek'), 0o600)
   process.env.BROKER_KEK_FILE = join(kekDir, 'kek')

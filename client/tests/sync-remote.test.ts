@@ -6,11 +6,11 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
-import os from 'node:os'
 import path from 'node:path'
 import { execFileSync } from 'node:child_process'
 import { simpleGit } from 'simple-git'
 import { configureOrigin, ensurePromisorConfig, hasPromisorPacks, setRemoteUrl } from '../electron/sync/remote'
+import { makeTempDir } from '../../shared/testing/temp-dirs'
 
 const quiet = { log: () => {}, warn: () => {}, error: () => {} }
 
@@ -29,7 +29,7 @@ function config(cwd: string, key: string): string {
 
 /** A server with two departments and a partial clone that checked out only 営業部. */
 function partialClone(): { root: string; url: string; clone: string } {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'acb-remote-'))
+  const root = makeTempDir('acb-remote-')
   const bare = path.join(root, 'server.git')
   git(root, 'init', '-q', '--bare', '-b', 'main', bare)
   git(bare, 'config', 'uploadpack.allowFilter', 'true')
@@ -85,7 +85,7 @@ test('setRemoteUrl / configureOrigin change only the URL, never the promisor con
 })
 
 test('setRemoteUrl adds origin when missing, and fills in a section that has no URL', async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'acb-remote-'))
+  const root = makeTempDir('acb-remote-')
   try {
     git(root, 'init', '-q')
     const g = simpleGit(root)

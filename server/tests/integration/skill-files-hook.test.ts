@@ -10,9 +10,8 @@
  */
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest'
 import { execFileSync, spawnSync } from 'child_process'
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync, renameSync, unlinkSync } from 'fs'
+import { rmSync, writeFileSync, mkdirSync, renameSync, unlinkSync } from 'fs'
 import { join, dirname } from 'path'
-import { tmpdir } from 'os'
 
 vi.mock('../../src/lib/auth', () => ({
   getUserFromRequest: vi.fn().mockResolvedValue(null),
@@ -24,6 +23,7 @@ vi.mock('../../src/lib/auth', () => ({
 }))
 
 import { configureBareRepo } from '../../src/routes/git'
+import { makeTempDir } from '../../shared/testing/temp-dirs'
 
 // Every real push starts the checker (node + tsx): seconds each on a loaded machine.
 vi.setConfig({ testTimeout: 300_000, hookTimeout: 60_000 })
@@ -128,7 +128,7 @@ const SCRIPT = '.claude/skills/report/make.py'
 const SALES_SCRIPT = '営業部/.claude/skills/report/make.py'
 const MEMBER: Pusher = { role: 'member' }
 
-beforeAll(() => { workDir = mkdtempSync(join(tmpdir(), 'acb-skill-files-')) })
+beforeAll(() => { workDir = makeTempDir('acb-skill-files-') })
 afterAll(() => { rmSync(workDir, { recursive: true, force: true }) })
 
 /** Change `paths` on top of a seeded repository and push them as `p`. */

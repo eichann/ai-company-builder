@@ -4,13 +4,13 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
-import os from 'node:os'
 import { execFileSync, spawnSync } from 'node:child_process'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
   lintSource, compareToBaseline, parseBaseline, formatBaseline, RULE_IDS,
 } from '../../shared/design-tokens/design-lint.mjs'
+import { makeTempDir } from '../../shared/testing/temp-dirs'
 
 const examples = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../shared/design-tokens/lint-examples')
 const lintExample = (name: string) => lintSource(fs.readFileSync(path.join(examples, name), 'utf8'), name)
@@ -122,7 +122,7 @@ test('a rename or a split moves counts between files without counting as growth'
 })
 
 test('--update writes a rename, refuses growth; --base fails when the committed baseline was raised', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'design-lint-'))
+  const root = makeTempDir('acb-design-lint-')
   const tokens = path.join(root, 'shared/design-tokens')
   const write = (rel: string, text: string) => { fs.mkdirSync(path.dirname(path.join(root, rel)), { recursive: true }); fs.writeFileSync(path.join(root, rel), text) }
   for (const f of ['design-lint.mjs', 'theme.css']) write(`shared/design-tokens/${f}`, fs.readFileSync(path.join(examples, '..', f), 'utf8'))

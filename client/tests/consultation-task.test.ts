@@ -12,8 +12,6 @@
 import { test, type TestContext } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
-import os from 'node:os'
-import path from 'node:path'
 import { newFilesOfCall, taskTopicInstructions, taskTopicOf, topicAfterTaskMade } from '../shared/consultation-task'
 import type { ToolEventTracker } from '../shared/agent-events'
 import { watchNewFiles } from '../electron/agents/tool-events'
@@ -23,6 +21,7 @@ import type { ChatSession } from '../shared/chat-history'
 import { createRecordsApi } from '../electron/records/api'
 import { createRecordTools } from '../electron/records/tools'
 import { coreTypeDefinitions } from '../../shared/core/core-types'
+import { makeTempDir } from '../../shared/testing/temp-dirs'
 
 const ROOT = '/Users/me/会社'
 
@@ -90,7 +89,7 @@ test('a created file is told once the call finished ok — not for a refused or 
 })
 
 function history(t: TestContext) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'acb-topic-test-'))
+  const dir = makeTempDir('acb-topic-test-')
   const store = new ChatHistoryStore(dir)
   t.after(async () => { await store.flush().catch(() => {}); fs.rmSync(dir, { recursive: true, force: true }) })
   return store

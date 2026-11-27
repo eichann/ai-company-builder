@@ -16,14 +16,14 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { execFileSync } from 'child_process'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import { createRecordsApi } from '../electron/records/api'
 import { createSkillUseReporter, locateCompanySkill } from '../electron/services/skill-use-reporter'
 import { withSkillSightings } from '../electron/chat-server'
 import { skillLoadedBy, type AgentToolEvent, type SkillUseSighting } from '../shared/agent-events'
+import { makeTempDir } from '../../shared/testing/temp-dirs'
 
-const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'acb-skill-uses-'))
+const tmp = makeTempDir('acb-skill-uses-')
 process.on('exit', () => fs.rmSync(tmp, { recursive: true, force: true }))
 const env = { ...process.env, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@x', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@x', GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1' }
 const sh = (cwd: string, args: string[]) => execFileSync('git', args, { cwd, env, stdio: 'pipe' }).toString()

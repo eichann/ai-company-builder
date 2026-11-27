@@ -25,10 +25,10 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'fs'
 import { dirname, join } from 'path'
-import { tmpdir } from 'os'
 import { execFileSync } from 'child_process'
 import { localRepoStore } from '../../src/adapters/git-repo-store'
 import { companyRepoPath } from '../../src/lib/config'
+import { makeTempDir } from '../../shared/testing/temp-dirs'
 
 // Every push runs the real pre-receive hook, which is slow on some hosts.
 const SLOW = 300_000
@@ -123,7 +123,7 @@ function withHook(companyId: string, script: string): () => void {
 let savedTemplateDir: string | undefined
 
 beforeAll(() => {
-  scratch = mkdtempSync(join(tmpdir(), 'acb-dept-commits-'))
+  scratch = makeTempDir('acb-dept-commits-')
   // A developer's global init.templateDir would install client-side hooks
   savedTemplateDir = process.env.GIT_TEMPLATE_DIR
   process.env.GIT_TEMPLATE_DIR = mkdtempSync(join(scratch, 'templates-'))

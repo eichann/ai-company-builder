@@ -8,9 +8,8 @@
  */
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest'
 import { execFileSync } from 'child_process'
-import { mkdtempSync, mkdirSync, rmSync, unlinkSync, writeFileSync } from 'fs'
+import { mkdirSync, rmSync, unlinkSync, writeFileSync } from 'fs'
 import { join } from 'path'
-import { tmpdir } from 'os'
 
 vi.mock('../../src/lib/auth', () => ({
   getUserFromRequest: vi.fn().mockResolvedValue({
@@ -26,6 +25,7 @@ vi.mock('../../src/lib/auth', () => ({
 import { Hono } from 'hono'
 import { db, initDatabase } from '../../src/db'
 import { departmentsRoute } from '../../src/routes/departments'
+import { makeTempDir } from '../../shared/testing/temp-dirs'
 
 vi.setConfig({ testTimeout: 120_000, hookTimeout: 120_000 })
 
@@ -49,7 +49,7 @@ function addCompany(id: string) {
 
 beforeAll(() => {
   initDatabase()
-  scratch = mkdtempSync(join(tmpdir(), 'acb-dept-fail-'))
+  scratch = makeTempDir('acb-dept-fail-')
 })
 
 afterAll(() => {

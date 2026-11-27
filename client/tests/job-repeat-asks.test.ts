@@ -17,9 +17,10 @@ import { JOB_PROPOSAL_CREATE_TOOL } from '../electron/records/job-proposal-tools
 import { JOB_REPEAT_ASK_QUESTION, readRepeatFile, repeatAskInstructions } from '../shared/job-repeat-asks'
 import { isSkillUseName } from '../../shared/core/skill-uses'
 import type { AgentToolEvent } from '../shared/agent-events'
+import { makeTempDir } from '../../shared/testing/temp-dirs'
 
 function world() {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'acb-repeat-'))
+  const dir = makeTempDir('acb-repeat-')
   const company = path.join(dir, 'company')
   const skill = (name: string, under = company) => {
     fs.mkdirSync(path.join(under, '.claude', 'skills', name), { recursive: true })

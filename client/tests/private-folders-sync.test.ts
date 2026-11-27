@@ -5,7 +5,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
-import os from 'node:os'
 import path from 'node:path'
 import { cloneUrlAllowed, privateBackupsDir, readPrivateExcludes, safeScopeDir, sameScopeRemote, writePrivateExcludes } from '../electron/sync/private-folders'
 import { readNestedRepoExcludes, writeNestedRepoExcludes } from '../electron/sync/nested-repos'
@@ -14,6 +13,7 @@ import { parseReservedPathRejection } from '../electron/sync/reserved-path'
 import { simpleGit } from 'simple-git'
 import { excludedCloneMessage, removeExcludedClone } from '../electron/sync/private-sync'
 import type { SyncDeps } from '../electron/sync/types'
+import { makeTempDir } from '../../shared/testing/temp-dirs'
 
 const scope = { cloneUrl: 'https://acb.example.com/api/git-http/c1/scopes/s1.git', clonePath: '/api/git-http/c1/scopes/s1.git' }
 
@@ -33,8 +33,8 @@ test('clone URL: only the company server, the server clone path, never options o
 })
 
 test('safeScopeDir refuses a symlinked or file ancestor and paths leaving the company folder', t => {
-  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'acb-safe-')))
-  const outside = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'acb-out-')))
+  const root = fs.realpathSync(makeTempDir('acb-safe-'))
+  const outside = fs.realpathSync(makeTempDir('acb-out-'))
   t.after(() => { fs.rmSync(root, { recursive: true, force: true }); fs.rmSync(outside, { recursive: true, force: true }) })
   fs.mkdirSync(path.join(root, '営業部'))
   assert.equal(safeScopeDir(root, '営業部/顧客/秘密'), path.join(root, '営業部', '顧客', '秘密'))
@@ -94,7 +94,7 @@ test('path checker: a path that will be a file is asked as one (refused above a 
 })
 
 test('the managed excludes block keeps the member\'s own lines', t => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'acb-excl-'))
+  const root = makeTempDir('acb-excl-')
   t.after(() => fs.rmSync(root, { recursive: true, force: true }))
   fs.mkdirSync(path.join(root, '.git', 'info'), { recursive: true })
   fs.writeFileSync(path.join(root, '.git', 'info', 'exclude'), '# mine\n*.log\n')
@@ -106,7 +106,7 @@ test('the managed excludes block keeps the member\'s own lines', t => {
 })
 
 test('the private-folder and nested-repository blocks of .git/info/exclude never clobber each other', t => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'acb-excl-'))
+  const root = makeTempDir('acb-excl-')
   t.after(() => fs.rmSync(root, { recursive: true, force: true }))
   const file = path.join(root, '.git', 'info', 'exclude')
   fs.mkdirSync(path.dirname(file), { recursive: true })
@@ -151,7 +151,7 @@ test('[RESERVED_PATH] section: paths and the reason lines, verbatim', () => {
 })
 
 test('a left-out private folder\'s clone is not removed when git cannot say what changed in it', async t => {
-  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'acb-excluded-')))
+  const root = fs.realpathSync(makeTempDir('acb-excluded-'))
   t.after(() => fs.rmSync(root, { recursive: true, force: true }))
   const dir = path.join(root, '人事', '評価')
   fs.mkdirSync(dir, { recursive: true })
@@ -165,7 +165,7 @@ test('a left-out private folder\'s clone is not removed when git cannot say what
 
 /** A pushed clone at 人事/評価 with an ignored `.personal/` holding a.md and open/b.md. */
 async function excludedCloneWorld(t: { after: (fn: () => void) => void }) {
-  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'acb-excluded-')))
+  const root = fs.realpathSync(makeTempDir('acb-excluded-'))
   t.after(() => fs.rmSync(root, { recursive: true, force: true }))
   const dir = path.join(root, '人事', '評価')
   fs.mkdirSync(dir, { recursive: true })

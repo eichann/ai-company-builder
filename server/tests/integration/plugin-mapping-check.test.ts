@@ -12,13 +12,13 @@
  * - A key HubSpot refuses → "could not ask", and the key value is nowhere.
  */
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'fs'
-import { tmpdir } from 'os'
+import { chmodSync, rmSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import { randomBytes } from 'crypto'
 import { createFakeHubSpot, type FakeHubSpot } from '../fakes/hubspot/fake-hubspot'
 import { fakeUpstream } from '../helpers/fake-upstream'
 import { enableSampleSales, putSampleHub } from '../helpers/plugin-packages'
+import { makeTempDir } from '../../shared/testing/temp-dirs'
 
 vi.mock('../../src/lib/auth', () => ({
   getUserFromRequest: vi.fn().mockResolvedValue(null),
@@ -60,11 +60,11 @@ const check = (who: Json, body: unknown) => services.pluginMappingCheck.check(wh
 
 beforeAll(async () => {
   for (const m of ['log', 'warn', 'error'] as const) vi.spyOn(console, m).mockImplementation((...a: unknown[]) => { logged.push(a.map(String).join(' ')) })
-  kekDir = mkdtempSync(join(tmpdir(), 'acb-mc-kek-'))
+  kekDir = makeTempDir('acb-mc-kek-')
   writeFileSync(join(kekDir, 'kek'), randomBytes(32).toString('base64'))
   chmodSync(join(kekDir, 'kek'), 0o600)
   process.env.BROKER_KEK_FILE = join(kekDir, 'kek')
-  shelfDir = mkdtempSync(join(tmpdir(), 'acb-mc-shelf-'))
+  shelfDir = makeTempDir('acb-mc-shelf-')
   putSampleHub(shelfDir)
 
   fake = createFakeHubSpot()

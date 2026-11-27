@@ -14,7 +14,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import type { UIMessage } from 'ai'
 import { AllowedRoots } from '../electron/allowed-roots'
@@ -24,6 +23,7 @@ import { createDriveTools } from '../electron/features/google/drive'
 import { createGoogleApi } from '../electron/features/google/ipc'
 import { DRIVE_OVERWRITE_PART_TYPE, DRIVE_OVERWRITE_WORDS, driveOverwriteOutcome, readDriveOverwriteCard, type DriveOverwriteCard } from '../shared/drive-overwrite'
 import { sessionMessageToUIMessage, uiMessageToSessionMessage } from '../src/features/chat/chatSessionMessages'
+import { makeTempDir } from '../../shared/testing/temp-dirs'
 
 const TOKEN = 'acb_rec_co.' + 'a'.repeat(64)
 const SESSION = 'better-auth.session_token=SECRET.sig'
@@ -47,7 +47,7 @@ async function driveTools(put: PutAnswer, onCard?: (card: DriveOverwriteCard) =>
   }) as unknown as typeof globalThis.fetch
   const api = createRecordsApi({ baseUrl: () => 'https://acb.example.jp', cookies: () => [SESSION], fetch })
   const access = await api.openTurn('co', { conversationId: 'conv-1', agent: 'claude-code', scope: 'act' })
-  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'acb-drive-continue-')))
+  const root = fs.realpathSync(makeTempDir('acb-drive-continue-'))
   fs.mkdirSync(path.join(root, '営業部'), { recursive: true })
   fs.writeFileSync(path.join(root, '営業部', '面談報告書.md'), '# 面談報告書（直しを取り込んだ）\n')
   const roots = new AllowedRoots()

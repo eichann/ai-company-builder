@@ -23,10 +23,10 @@
  */
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest'
 import { execFileSync, spawn, spawnSync } from 'child_process'
-import { mkdirSync, mkdtempSync, rmSync, unlinkSync, writeFileSync } from 'fs'
+import { mkdirSync, rmSync, unlinkSync, writeFileSync } from 'fs'
 import { dirname, join } from 'path'
-import { tmpdir } from 'os'
 import type { AddressInfo } from 'net'
+import { makeTempDir } from '../../shared/testing/temp-dirs'
 
 const currentUser = vi.hoisted(() => ({ id: null as string | null }))
 vi.mock('../../src/lib/auth', () => ({
@@ -106,7 +106,7 @@ async function api(user: string | null, method: string, path: string, body?: unk
 const titles = (r: { body: { data?: Record<string, unknown> } }) => ((r.body.data?.records ?? []) as Array<{ title: string }>).map(x => x.title).sort()
 
 beforeAll(async () => {
-  workDir = mkdtempSync(join(tmpdir(), 'acb-records-'))
+  workDir = makeTempDir('acb-records-')
   const Database = (await import('better-sqlite3')).default
   const dbModule = await import('../../src/db')
   dbModule.initDatabase()

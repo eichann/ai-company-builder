@@ -6,14 +6,14 @@
  * verify the same bytes. Each guard is mutation-checked (the rule lists them).
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'fs'
-import { tmpdir } from 'os'
+import { mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import { companyTrustFiles, companyTrustToServe, trustServerOf, type CompanyTrustTexts } from '../../../shared/core/plugin-trust-distribution'
 import type { SignedEnvelope } from '../../../shared/core/plugin-trust-documents'
 import { nodePluginTrustCrypto as C } from '../../src/adapters/plugin-trust-crypto'
 import { diskPluginTrustFiles } from '../../src/adapters/plugin-trust-files'
 import { createPluginTrustService } from '../../src/services/plugin-trust'
+import { makeTempDir } from '../../shared/testing/temp-dirs'
 
 const FIX = join(__dirname, '../../../client/tests/fixtures/plugin-trust/documents.json')
 const DOCS = JSON.parse(readFileSync(FIX, 'utf8')) as Record<string, SignedEnvelope>
@@ -80,7 +80,7 @@ describe('what a company\'s members are handed', () => {
 
 describe('the operator\'s trust/ folder on disk', () => {
   let dir: string
-  beforeEach(() => { dir = mkdtempSync(join(tmpdir(), 'acb-trust-files-')) })
+  beforeEach(() => { dir = makeTempDir('acb-trust-files-') })
   afterEach(() => rmSync(dir, { recursive: true, force: true }))
 
   function place(base: string) {

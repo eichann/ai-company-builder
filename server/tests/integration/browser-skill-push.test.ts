@@ -10,9 +10,8 @@
  */
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest'
 import { execFileSync, spawn, spawnSync } from 'child_process'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs'
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'fs'
 import { dirname, join } from 'path'
-import { tmpdir } from 'os'
 import type { AddressInfo } from 'net'
 
 vi.mock('../../src/lib/auth', () => ({
@@ -25,6 +24,7 @@ vi.mock('../../src/lib/auth', () => ({
 }))
 
 import { configureBareRepo } from '../../src/routes/git'
+import { makeTempDir } from '../../shared/testing/temp-dirs'
 
 // Every real push starts the checker (node + tsx): seconds each on a loaded machine.
 vi.setConfig({ testTimeout: 300_000, hookTimeout: 120_000 })
@@ -97,7 +97,7 @@ const noticeKeys = (companyId: string, userId: string) => {
 const code = (r: { ok: boolean; body?: { code?: unknown } }) => (r.ok ? 'ok' : r.body?.code)
 
 beforeAll(async () => {
-  workDir = mkdtempSync(join(tmpdir(), 'acb-browser-skill-push-'))
+  workDir = makeTempDir('acb-browser-skill-push-')
   const Database = (await import('better-sqlite3')).default
   const dbModule = await import('../../src/db')
   dbModule.initDatabase()

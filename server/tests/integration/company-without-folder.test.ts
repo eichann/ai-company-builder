@@ -29,7 +29,6 @@ vi.mock('../../src/lib/auth', () => ({
 import { execFileSync } from 'child_process'
 import { existsSync, mkdtempSync, rmSync } from 'fs'
 import { join } from 'path'
-import { tmpdir } from 'os'
 import Database from 'better-sqlite3'
 import { Hono } from 'hono'
 import { db, initDatabase } from '../../src/db'
@@ -45,6 +44,7 @@ import { recordsRoute } from '../../src/routes/records'
 import { setPrivateFoldersClientCutoffForTests } from '../../src/lib/client-version'
 import { setRepoGitTimeoutsForTests } from '../../src/adapters/git-repo-store'
 import { services } from '../../src/composition'
+import { makeTempDir } from '../../shared/testing/temp-dirs'
 
 vi.setConfig({ testTimeout: 120_000, hookTimeout: 120_000 })
 
@@ -96,7 +96,7 @@ beforeAll(async () => {
   initDatabase()
   process.env.OPERATOR_USER_IDS = 'nf-owner'
   setRepoGitTimeoutsForTests({ local: 60_000, push: 120_000 })
-  scratch = mkdtempSync(join(tmpdir(), 'acb-no-folder-'))
+  scratch = makeTempDir('acb-no-folder-')
   savedTemplateDir = process.env.GIT_TEMPLATE_DIR
   process.env.GIT_TEMPLATE_DIR = mkdtempSync(join(scratch, 'templates-'))
   // A released app syncs private folders (else POST /private-folders refuses before anything else).

@@ -21,8 +21,7 @@
  *   and a call never reaches `operations`, which a released app turns into tools.
  */
 import { createHash } from 'crypto'
-import { cpSync, existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync } from 'fs'
-import { tmpdir } from 'os'
+import { cpSync, existsSync, readFileSync, readdirSync, rmSync, statSync } from 'fs'
 import { join, relative } from 'path'
 import { describe, expect, it } from 'vitest'
 import { diskPluginShelf } from '../../src/adapters/plugin-shelf'
@@ -30,6 +29,7 @@ import { createPluginShelf } from '../../src/services/plugin-shelf'
 import {
   PLUGIN_CONTRACT_V3, combineUse, pluginFingerprintV2, validatePluginPackage, type PluginManifest, type PluginPackage,
 } from '../../../shared/core/plugins'
+import { makeTempDir } from '../../shared/testing/temp-dirs'
 
 const FIXTURES = join(__dirname, '../fixtures/plugins')
 const sha256Hex = (d: Uint8Array | string) => createHash('sha256').update(d).digest('hex')
@@ -113,7 +113,7 @@ describe('plugin contract 3: what a connector declares', () => {
     if (!use.ok) throw new Error(use.errors.join('\n'))
     for (const key of ['calling', 'calls', 'events', 'polls']) expect(use.value.manifest).not.toHaveProperty(key)
 
-    const root = mkdtempSync(join(tmpdir(), 'acb-v3-'))
+    const root = makeTempDir('acb-v3-')
     try {
       cpSync(join(FIXTURES, 'sample-hub'), join(root, 'sample-hub@0.1.0'), { recursive: true })
       cpSync(join(FIXTURES, 'sample-portal'), join(root, 'sample-portal@1.0.0'), { recursive: true })

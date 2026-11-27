@@ -24,8 +24,7 @@
  *   "unreadable" — in the answer and the log, never a body or the key.
  */
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
-import { chmodSync, cpSync, mkdtempSync, rmSync, writeFileSync } from 'fs'
-import { tmpdir } from 'os'
+import { chmodSync, cpSync, rmSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import { randomBytes } from 'crypto'
 import type { AddressInfo } from 'net'
@@ -36,6 +35,7 @@ import { PLUGIN_FIXTURES } from '../helpers/plugin-packages'
 import { citeLink } from '../../../shared/core/plugins'
 import { createPluginConnector } from '../../src/services/plugin-connector'
 import { ACB_USER_AGENT } from '../../src/adapters/upstream-https'
+import { makeTempDir } from '../../shared/testing/temp-dirs'
 
 vi.setConfig({ testTimeout: 60_000, hookTimeout: 60_000 })
 
@@ -85,10 +85,10 @@ beforeAll(async () => {
   server = serve({ fetch: fake.fetch, port: 0, hostname: '127.0.0.1' })
   await new Promise(r => setTimeout(r, 50))
   const port = (server.address() as AddressInfo).port
-  kekDir = mkdtempSync(join(tmpdir(), 'acb-pc-kek-'))
+  kekDir = makeTempDir('acb-pc-kek-')
   writeFileSync(join(kekDir, 'kek'), randomBytes(32).toString('base64'))
   chmodSync(join(kekDir, 'kek'), 0o600)
-  shelfDir = mkdtempSync(join(tmpdir(), 'acb-pc-shelf-'))
+  shelfDir = makeTempDir('acb-pc-shelf-')
   cpSync(join(PLUGIN_FIXTURES, 'sample-portal'), join(shelfDir, 'sample-portal@1.0.0'), { recursive: true })
   cpSync(join(PLUGIN_FIXTURES, 'sample-portal-care'), join(shelfDir, 'sample-portal-care@0.1.0'), { recursive: true })
   Object.assign(process.env, {

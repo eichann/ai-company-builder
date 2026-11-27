@@ -18,10 +18,10 @@
  * - The key value never appears in an answer or the history.
  */
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
-import { chmodSync, cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs'
-import { tmpdir } from 'os'
+import { chmodSync, cpSync, readFileSync, rmSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import { randomBytes } from 'crypto'
+import { makeTempDir } from '../../shared/testing/temp-dirs'
 
 vi.mock('../../src/lib/auth', () => ({
   getUserFromRequest: vi.fn().mockResolvedValue(null),
@@ -109,11 +109,11 @@ policy:
 `
 
 beforeAll(async () => {
-  kekDir = mkdtempSync(join(tmpdir(), 'acb-pl-kek-'))
+  kekDir = makeTempDir('acb-pl-kek-')
   writeFileSync(join(kekDir, 'kek'), randomBytes(32).toString('base64'))
   chmodSync(join(kekDir, 'kek'), 0o600)
   process.env.BROKER_KEK_FILE = join(kekDir, 'kek')
-  shelfDir = mkdtempSync(join(tmpdir(), 'acb-pl-shelf-'))
+  shelfDir = makeTempDir('acb-pl-shelf-')
   putHubPackage('crm-hub@0.0.5')
   putHubPackage('crm-hub@0.1.0')
   putHubPackage('crm-hub@0.2.0')

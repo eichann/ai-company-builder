@@ -8,7 +8,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
-import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { BROWSER_DEVICE_HEADER, BROWSER_DEVICE_WORDS, parseBrowserDeviceKey } from '../../shared/core/browser-device'
@@ -18,6 +17,7 @@ import { createRegisteredPcSwitch } from '../electron/features/browser/ai-switch
 import { createBrowserPlansHttp } from '../electron/features/browser/plans-api'
 import { createBrowserLinesHttp } from '../electron/features/browser/lines-api'
 import type { SecretBox } from '../electron/services/api-key-store'
+import { makeTempDir } from '../../shared/testing/temp-dirs'
 
 const SERVER = 'https://acb.example'
 const CO = 'co-1'
@@ -39,7 +39,7 @@ function box(over: Partial<SecretBox> = {}): SecretBox & { sealed: number } {
 }
 
 function tempFile() {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'acb-pc-key-'))
+  const dir = makeTempDir('acb-pc-key-')
   return { dir, file: browserDeviceKeyFile(dir, SERVER) }
 }
 
@@ -81,7 +81,7 @@ test('the key is made once and kept only encrypted: no plain key on disk, read b
     // A restart: the same key back from the keychain.
     assert.equal(createBrowserDeviceKey({ box: box(), dir: () => dir, server: () => SERVER }).header(), key)
     // A link in the key's place (pointing at a sealed key elsewhere) is not followed.
-    const elsewhere = fs.mkdtempSync(path.join(os.tmpdir(), 'acb-pc-key-link-'))
+    const elsewhere = makeTempDir('acb-pc-key-link-')
     try {
       fs.renameSync(file, path.join(elsewhere, 'sealed'))
       fs.symlinkSync(path.join(elsewhere, 'sealed'), file)

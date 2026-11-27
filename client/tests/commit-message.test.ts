@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { mkdtempSync, writeFileSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { writeFileSync, rmSync } from 'node:fs'
 import path from 'node:path'
 import {
   buildCommitMessageInput, commitMessageProviders, createCommitMessageGenerator, defaultCommitMessageAdapter,
@@ -10,6 +9,7 @@ import {
 import type { AuthMode } from '../shared/agent'
 import type { AgentId } from '../shared/agents/registry'
 import type { OneShotTextRequest } from '../electron/agents/registry'
+import { makeTempDir } from '../../shared/testing/temp-dirs'
 
 // Fakes per agent, keyed by the short names the calls are logged under.
 type Fake = (request: OneShotTextRequest) => Promise<string>
@@ -191,7 +191,7 @@ test('input is capped and marked truncated', () => {
 })
 
 function fakeCli(body: string) {
-  const cwd = mkdtempSync(path.join(tmpdir(), 'acb-commit-msg-'))
+  const cwd = makeTempDir('acb-commit-msg-')
   const cli = path.join(cwd, 'cli')
   writeFileSync(cli, `#!${process.execPath}\n${body}`, { mode: 0o700 })
   return { cwd, cli, dispose: () => rmSync(cwd, { recursive: true, force: true }) }

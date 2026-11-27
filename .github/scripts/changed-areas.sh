@@ -54,6 +54,7 @@ SYNC=(
   shared/core/skill-autorun.ts shared/core/skill-shelf.ts shared/core/secret-patterns.ts
   shared/core/client-version.ts
   shared/types/private-folders.ts shared/package.json shared/tsconfig.json
+  shared/testing/
   .github/scripts/sync-shard.mjs
 )
 # Client node tests on Linux (most of client/tests/*.test.ts and the colocated
@@ -109,7 +110,7 @@ PERF=(
   client/shared/agents/ client/shared/chat-history-summary.ts client/shared/sparse-paths.ts client/shared/task-consult.ts
   client/src/features/chat/ client/src/features/files/ client/src/shared/lib/
   ':(glob)client/tsconfig*.json' client/package.json shared/core/paths.ts
-  shared/core/instruction-like.ts shared/core/outside-text.ts shared/core/calendar.ts
+  shared/core/instruction-like.ts shared/core/outside-text.ts shared/core/calendar.ts shared/testing/
 )
 UNIVERSAL=(client/scripts/universal-git.mjs client/package.json)
 # shared/design-tokens/ (the design tokens, their Tailwind bridges and the design lint) is under

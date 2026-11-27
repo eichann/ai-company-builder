@@ -2,16 +2,16 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
 import fs from 'node:fs'
-import os from 'node:os'
 import path from 'node:path'
 import {
   GREP_LINE_CHARS, GREP_MAX_PER_FILE, GREP_MAX_TOTAL,
   companySearchScope, gitLogArgs, grepCompany, listCompanyFiles, normalizeSearchFolder, parseGitLog, trimMatchLine,
   type GitCommand,
 } from '../electron/git-search'
+import { makeTempDir } from '../../shared/testing/temp-dirs'
 
 function sandbox() {
-  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'acb-git-search-')))
+  const root = fs.realpathSync(makeTempDir('acb-git-search-'))
   const env = { ...process.env, GIT_CONFIG_GLOBAL: path.join(root, 'gitconfig'), GIT_CONFIG_NOSYSTEM: '1', GIT_TEMPLATE_DIR: path.join(root, 'tpl') }
   fs.mkdirSync(env.GIT_TEMPLATE_DIR)
   fs.writeFileSync(env.GIT_CONFIG_GLOBAL, '[user]\n\tname = t\n\temail = t@example.com\n[init]\n\tdefaultBranch = main\n')

@@ -16,13 +16,13 @@
  *   own — a script's through the relay — kept as is.
  */
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest'
-import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs'
+import { chmodSync, readFileSync, rmSync, writeFileSync } from 'fs'
 import { createServer, type Server } from 'https'
 import { execFileSync } from 'child_process'
-import { tmpdir } from 'os'
 import { join } from 'path'
 import { randomBytes } from 'crypto'
 import type { AddressInfo } from 'net'
+import { makeTempDir } from '../../shared/testing/temp-dirs'
 
 vi.mock('../../src/lib/auth', () => ({
   getUserFromRequest: vi.fn().mockResolvedValue(null),
@@ -43,7 +43,7 @@ const hits: Array<{ host?: string; key?: string; auth?: string; path?: string; u
 const logs: string[] = []
 
 beforeAll(async () => {
-  dir = mkdtempSync(join(tmpdir(), 'acb-rh-'))
+  dir = makeTempDir('acb-rh-')
   // A certificate for HOST only (the test's own CA = itself).
   execFileSync('openssl', ['req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-days', '1', '-subj', `/CN=${HOST}`,
     '-addext', `subjectAltName=DNS:${HOST}`, '-keyout', join(dir, 'key.pem'), '-out', join(dir, 'cert.pem')], { stdio: 'ignore' })

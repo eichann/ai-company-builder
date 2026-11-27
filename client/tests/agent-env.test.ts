@@ -1,7 +1,6 @@
 import { test, afterEach } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
-import os from 'node:os'
 import path from 'node:path'
 import {
   ACB_SET_KEYS, agentEnv, buildAgentEnv, configureAgentEnv, isDeniedName, normalizePassthroughNames,
@@ -11,6 +10,7 @@ import { spawnAgentProcess } from '../electron/agents/process'
 import { runClaudeOneShot } from '../electron/claude-oneshot'
 import { getCodexStatus } from '../electron/agents/codex'
 import { createClaudeConnection } from '../electron/agents/claude'
+import { makeTempDir } from '../../shared/testing/temp-dirs'
 
 afterEach(() => resetAgentEnvForTests())
 
@@ -115,7 +115,7 @@ test('an unreadable pass-through setting means no extras', () => {
 const posix = process.platform !== 'win32'
 
 function scratch() {
-  return fs.mkdtempSync(path.join(os.tmpdir(), 'acb-agent-env-'))
+  return makeTempDir('acb-agent-env-')
 }
 
 /** A fake CLI that writes its environment to `dump` and prints `stdout`. */

@@ -5,8 +5,7 @@
 // done. A fake company server answers the turns, the claim (with the pin), the step on the record.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'fs'
-import { tmpdir } from 'os'
+import { mkdirSync, rmSync, writeFileSync } from 'fs'
 import path from 'path'
 import { createAiTurnClaims, type AiTurnClaimsDeps } from '../electron/features/ai-turns/claims'
 import { createProcedureReader } from '../electron/features/ai-turns/procedures'
@@ -16,6 +15,7 @@ import { createPersonStepBinder, registerPluginStepsIpc } from '../electron/feat
 import { buildChatRequestBody, type ChatRequestSources } from '../src/features/chat/chatRequestBody'
 import type { IpcRegistrar } from '../electron/ipc/registrar'
 import { parsePluginStepTurns, pluginStepToolAccess, type PluginStepProcedurePin } from '../shared/ai-turn-steps/plugin'
+import { makeTempDir } from '../../shared/testing/temp-dirs'
 
 const COMPANY = 'acme'
 const DEAL = 'deal-0a1b2c3d4e5f'
@@ -152,7 +152,7 @@ test('settle: the record left the step\'s state → done; still there → tried 
 })
 
 test('the procedure on this PC: the pinned package file only inside its folder; a company Skill from the pinned tree', async () => {
-  const dir = mkdtempSync(path.join(tmpdir(), 'acb-procedures-'))
+  const dir = makeTempDir('acb-procedures-')
   try {
     const folder = path.join(dir, 'sample-sales@0.1.0')
     mkdirSync(path.join(folder, 'steps'), { recursive: true })

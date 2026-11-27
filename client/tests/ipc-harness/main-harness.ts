@@ -20,11 +20,11 @@
 import { register } from 'node:module'
 import { execFileSync } from 'node:child_process'
 import fs from 'node:fs'
-import os from 'node:os'
 import path from 'node:path'
 import net from 'node:net'
 import { fileURLToPath } from 'node:url'
 import { BrowserWindow, app, detachedSender, fake, type FakeIpcEvent, type FakeWebContents } from './fake-electron.ts'
+import { makeTempDir } from '../../../shared/testing/temp-dirs'
 
 export const SERVER_URL = 'http://acb-server.test'
 
@@ -104,7 +104,7 @@ let loaded: MainHarness | null = null
 
 export async function loadMain(options: { config?: Record<string, unknown> } = {}): Promise<MainHarness> {
   if (loaded) return loaded
-  const base = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'acb-ipc-')))
+  const base = fs.realpathSync(makeTempDir('acb-ipc-', { keep: !!process.env.IPC_HARNESS_KEEP }))
   const userData = path.join(base, 'userData')
   const documents = path.join(base, 'Documents')
   fs.mkdirSync(userData, { recursive: true })

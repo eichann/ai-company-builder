@@ -5,8 +5,7 @@
  * app never enforces (Windows).
  */
 import { test } from 'node:test'
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { mkdirSync, rmSync, symlinkSync } from 'node:fs'
 import path from 'node:path'
 import assert from 'node:assert/strict'
 import type { claudeCode } from 'ai-sdk-provider-claude-code'
@@ -15,6 +14,7 @@ import type { TurnSandbox } from '../electron/agents/connection'
 import type { WriteGuard } from '../electron/write-guard'
 import { SANDBOX_MESSAGES, decideTurnSandbox, resolveSandbox, sandboxPlatform } from '../shared/agents/sandbox-policy'
 import { AGENTS } from '../shared/agents/registry'
+import { makeTempDir } from '../../shared/testing/temp-dirs'
 
 const HOME = '/Users/member'
 const COMPANY = `${HOME}/Documents/AI Company Builder/acme`
@@ -181,7 +181,7 @@ test('a command refused writing a Skill file in the company folder: the AI is se
 })
 
 test('a Skill path that a link takes out of the company folder keeps the usual handling', async () => {
-  const top = mkdtempSync(path.join(tmpdir(), 'acb-skill-link-'))
+  const top = makeTempDir('acb-skill-link-')
   try {
     const company = path.join(top, 'company')
     mkdirSync(path.join(company, '.claude/skills/x'), { recursive: true })

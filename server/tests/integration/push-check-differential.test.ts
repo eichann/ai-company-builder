@@ -20,7 +20,6 @@ import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest'
 import { execFileSync, spawnSync } from 'child_process'
 import { chmodSync, copyFileSync, mkdtempSync, rmSync, writeFileSync } from 'fs'
 import { join } from 'path'
-import { tmpdir } from 'os'
 
 vi.mock('../../src/lib/auth', () => ({
   getUserFromRequest: vi.fn().mockResolvedValue(null),
@@ -32,6 +31,7 @@ vi.mock('../../src/lib/auth', () => ({
 }))
 
 import { renderPreReceiveHook } from '../../src/lib/git-server'
+import { makeTempDir } from '../../shared/testing/temp-dirs'
 
 vi.setConfig({ testTimeout: 600_000, hookTimeout: 60_000 })
 
@@ -266,7 +266,7 @@ function tree(base: Tree, changes: Record<string, Entry | null>): Tree {
 }
 
 beforeAll(() => {
-  workDir = mkdtempSync(join(tmpdir(), 'acb-push-diff-'))
+  workDir = makeTempDir('acb-push-diff-')
   newHook = join(workDir, 'pre-receive.new')
   writeFileSync(newHook, renderPreReceiveHook())
   chmodSync(newHook, 0o755)

@@ -9,11 +9,11 @@
  * database, then lets the held one finish. Production code has no hook for this.
  */
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
-import { chmodSync, cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs'
-import { tmpdir } from 'os'
+import { chmodSync, cpSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import { randomBytes } from 'crypto'
 import { holdPoints } from '../helpers/hold'
+import { makeTempDir } from '../../shared/testing/temp-dirs'
 
 vi.mock('../../src/lib/auth', () => ({
   getUserFromRequest: vi.fn().mockResolvedValue(null),
@@ -96,11 +96,11 @@ async function connectorOn(c: Awaited<ReturnType<typeof company>>) {
 }
 
 beforeAll(async () => {
-  kekDir = mkdtempSync(join(tmpdir(), 'acb-race-kek-'))
+  kekDir = makeTempDir('acb-race-kek-')
   writeFileSync(join(kekDir, 'kek'), randomBytes(32).toString('base64'))
   chmodSync(join(kekDir, 'kek'), 0o600)
   process.env.BROKER_KEK_FILE = join(kekDir, 'kek')
-  shelfDir = mkdtempSync(join(tmpdir(), 'acb-race-shelf-'))
+  shelfDir = makeTempDir('acb-race-shelf-')
   putHubPackage('crm-hub@0.0.5')
   putHubPackage('crm-hub@0.1.0')
   putHubPackage('crm-hub@0.2.0')

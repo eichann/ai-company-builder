@@ -1,16 +1,16 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
-import os from 'node:os'
 import path from 'node:path'
 import {
   GITIGNORE_UNION_ATTRIBUTE,
   dropUnionDuplicates,
   ensureGitignoreUnionMerge,
 } from '../electron/sync/gitignore-merge'
+import { makeTempDir } from '../../shared/testing/temp-dirs'
 
 test('ensureGitignoreUnionMerge declares the attribute once and keeps existing lines', () => {
-  const gitDir = fs.mkdtempSync(path.join(os.tmpdir(), 'acb-attr-'))
+  const gitDir = makeTempDir('acb-attr-')
   try {
     const file = path.join(gitDir, 'info', 'attributes')
     assert.equal(ensureGitignoreUnionMerge(gitDir), true) // creates info/

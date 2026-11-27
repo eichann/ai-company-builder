@@ -17,9 +17,8 @@
  */
 import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest'
 import { execFileSync } from 'child_process'
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from 'fs'
+import { rmSync, writeFileSync, mkdirSync } from 'fs'
 import { join } from 'path'
-import { tmpdir } from 'os'
 import type { AddressInfo } from 'net'
 
 // u-attacker: a member of their own company only. u-dotted: also has a
@@ -39,6 +38,7 @@ vi.mock('../../src/lib/auth', () => ({
 }))
 
 import { isValidFolderName } from '../../shared/core/names'
+import { makeTempDir } from '../../shared/testing/temp-dirs'
 
 vi.setConfig({ testTimeout: 60_000, hookTimeout: 120_000 })
 
@@ -96,7 +96,7 @@ function requestsFor(id: string): Array<[label: string, run: () => ReturnType<ty
 }
 
 beforeAll(async () => {
-  workDir = mkdtempSync(join(tmpdir(), 'acb-path-traversal-'))
+  workDir = makeTempDir('acb-path-traversal-')
   const Database = (await import('better-sqlite3')).default
   const dbModule = await import('../../src/db')
   dbModule.initDatabase()

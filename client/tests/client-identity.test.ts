@@ -1,8 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
-import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { chmodSync, existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { createAppGit } from '../electron/services/app-git'
@@ -14,6 +13,7 @@ import {
   gitIdentityConfig,
   installServerFetchIdentity,
 } from '../electron/client-identity'
+import { makeTempDir } from '../../shared/testing/temp-dirs'
 
 const root = fileURLToPath(new URL('..', import.meta.url))
 const git = (args: string[]) => execFileSync('git', args, { cwd: root }).toString().trim()
@@ -36,7 +36,7 @@ test('build identity = package version + short commit + commit date, dev runs ma
 
 test('the identity is embedded into the bundled main-process module', async () => {
   const info = computeBuildInfo({ root, dev: false })
-  const outDir = mkdtempSync(path.join(tmpdir(), 'acb-identity-build-'))
+  const outDir = makeTempDir('acb-identity-build-')
   try {
     await build({
       configFile: false,
@@ -78,7 +78,7 @@ test('createGit passes the identity headers to git as http.extraHeader', async (
 
   // What git itself sees through the app's createGit (services/app-git.ts on
   // sync/git-factory.ts): the identity headers after the guarded settings.
-  const appGitDir = mkdtempSync(path.join(tmpdir(), 'acb-app-git-'))
+  const appGitDir = makeTempDir('acb-app-git-')
   try {
     const git = appGitWith(root, appGitDir, process.env)
     assert.deepEqual((await git.raw(['config', '--get-all', 'http.extraHeader'])).trim().split('\n'), config.map(c => c.slice('http.extraHeader='.length)))
@@ -100,7 +100,7 @@ test('createGit passes the identity headers to git as http.extraHeader', async (
 // This editor records that it ran and fails, so a regression shows up as a
 // failed rebase and a marker file rather than a hang.
 test('sync never opens an editor when continuing a rebase, whatever editor the environment names', async () => {
-  const dir = mkdtempSync(path.join(tmpdir(), 'acb-git-editor-'))
+  const dir = makeTempDir('acb-git-editor-')
   try {
     const marker = path.join(dir, 'editor-was-opened')
     const editor = path.join(dir, 'editor.sh')

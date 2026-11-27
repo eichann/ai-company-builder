@@ -4,7 +4,6 @@
 // databases first — or keeps the version it has when the config cannot be read.
 import { execFileSync } from 'child_process'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 // @ts-expect-error -- plain ESM modules without type declarations (staging/ is not a package)
@@ -13,9 +12,10 @@ import * as kit from '../../../staging/lib/kit.mjs'
 import { followProduction } from '../../../staging/bootstrap.mjs'
 // @ts-expect-error -- see above
 import { markProduction } from '../../../staging/mark-production.mjs'
+import { makeTempDir } from '../../shared/testing/temp-dirs'
 
 let tmp: string
-beforeEach(() => { tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'acb-staging-kit-test-')) })
+beforeEach(() => { tmp = makeTempDir('acb-staging-kit-test-') })
 afterEach(() => { fs.rmSync(tmp, { recursive: true, force: true }) })
 
 const mode = (p: string) => fs.statSync(p).mode & 0o777

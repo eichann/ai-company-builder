@@ -15,11 +15,11 @@
  * - Size limit; streaming passthrough; plain-Japanese refusals.
  */
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest'
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'fs'
-import { tmpdir } from 'os'
+import { chmodSync, rmSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import { randomBytes } from 'crypto'
 import type { UpstreamClient, UpstreamRequest } from '../../src/ports/upstream'
+import { makeTempDir } from '../../shared/testing/temp-dirs'
 
 vi.mock('../../src/lib/auth', () => ({
   getUserFromRequest: vi.fn().mockResolvedValue(null),
@@ -86,7 +86,7 @@ const tokenFor = (services_: string[], department: string | null = null) =>
   services.brokerTokens.issue(member, { conversationId: 'conv-relay', services: services_, department }).value.token as string
 
 beforeAll(async () => {
-  kekDir = mkdtempSync(join(tmpdir(), 'acb-rl-kek-'))
+  kekDir = makeTempDir('acb-rl-kek-')
   writeFileSync(join(kekDir, 'kek'), randomBytes(32).toString('base64'))
   chmodSync(join(kekDir, 'kek'), 0o600)
   process.env.BROKER_KEK_FILE = join(kekDir, 'kek')

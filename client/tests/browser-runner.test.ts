@@ -8,7 +8,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
-import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createRunGate, encodeForm, parseBrowserRunPlan } from '../shared/browser-runner'
@@ -18,6 +17,7 @@ import { lstepConnector } from '../connectors/lstep'
 import { LSTEP_DECLARATION } from '../connectors/lstep/declaration'
 import { createLstepReminderStepChecker, LSTEP_REMINDER_STEP_CHECKER } from '../connectors/lstep/reminder-step'
 import { createBrowserRunRecords } from '../electron/features/browser/run-records'
+import { makeTempDir } from '../../shared/testing/temp-dirs'
 
 const clientDir = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
 const HOST = 'manager.linestep.net'
@@ -315,7 +315,7 @@ test('the bundled declaration passes the core\'s checks, names a reviewed checke
 // ---------------------------------------------------------------------------
 
 test('the run record survives a restart and an unreadable one refuses every run', () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'acb-browser-runs-'))
+  const dir = makeTempDir('acb-browser-runs-')
   try {
     const file = path.join(dir, 'runs.json')
     const records = createBrowserRunRecords(file, { warn: () => {} })

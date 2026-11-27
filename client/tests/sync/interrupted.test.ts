@@ -7,7 +7,6 @@
 import { describe, test, type TestContext } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
-import os from 'node:os'
 import path from 'node:path'
 import { World, type Member, type SyncOutcome } from '../sync-harness/world'
 import { settleAndCheck } from '../sync-harness/invariants'
@@ -15,6 +14,7 @@ import { privateBackupsDir } from '../../electron/sync/private-folders'
 import { INDEX_LOCK_STALE_MS, REPOSITORY_BUSY_MESSAGE, REPOSITORY_RECORD_MESSAGE, RECOVERY_FAILED_MESSAGE, RECOVERY_UNREADABLE_MESSAGE, lockFailureMessage, nestedRepoInTheWayMessage, recoveryBackupFailedMessage } from '../../electron/sync/interrupted'
 import { readLsofAnswer } from '../../electron/sync/live-git'
 import { spawn } from 'node:child_process'
+import { makeTempDir } from '../../../shared/testing/temp-dirs'
 
 const CONCURRENCY = Number(process.env.SYNC_HARNESS_CONCURRENCY) || 4
 const scenario = (name: string, fn: (t: TestContext) => Promise<void>) => test(name, { timeout: 10 * 60_000 }, fn)
@@ -833,7 +833,7 @@ describe('a leftover index.lock', { concurrency: CONCURRENCY }, () => {
   })
 
   scenario('a git inside a nested repository works on that repository: it does not hold this one back', () => {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'acb-live-git-'))
+    const root = makeTempDir('acb-live-git-')
     fs.mkdirSync(path.join(root, 'clone', '.git'), { recursive: true })
     fs.mkdirSync(path.join(root, 'clone', 'in'))
     assert.equal(readLsofAnswer(null, `n${root}/clone/in\n`, root), 'no')

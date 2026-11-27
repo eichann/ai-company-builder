@@ -10,7 +10,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync, mkdirSync, realpathSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs'
+import { mkdirSync, realpathSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { createAiTurnClaims } from '../electron/features/ai-turns/claims'
@@ -23,6 +23,7 @@ import type { JobGrant } from '../../shared/core/jobs'
 import { OUTSIDE_TITLE_NOTE } from '../../shared/core/outside-text'
 import { aiTurnQueue } from '../shared/ai-turn-steps/registry'
 import { freshLog, handUrgent } from '../src/features/chat/aiTurns'
+import { makeTempDir } from '../../shared/testing/temp-dirs'
 
 const COMPANY = 'acme'
 const OCC = `occ.${'1'.repeat(32)}`
@@ -345,7 +346,7 @@ test('the server takes the run away (a pause, the stop, another PC): the renew\'
 })
 
 test('the write guard: a job writes only in its grant\'s place, or nowhere; it reads only its grant\'s places', () => {
-  const root = realpathSync(mkdtempSync(path.join(os.tmpdir(), 'acb-job-guard-')))
+  const root = realpathSync(makeTempDir('acb-job-guard-'))
   try {
     mkdirSync(path.join(root, '人事部', '面談'), { recursive: true })
     mkdirSync(path.join(root, '営業部'), { recursive: true })
@@ -384,7 +385,7 @@ test('a Japanese deliverable folder (owner decision 2026-11-23): the turn runs, 
   for (const folder of ['..', '../営業部', '面談/報告', '.personal', 'ガイド'.normalize('NFD'), '面談 報告', 'a​b']) {
     assert.equal(parseJobTurn(turn({ grant: { ...GRANT, writes: { area: 'deliverable', place: '人事部', folder } } })), null, JSON.stringify(folder))
   }
-  const root = realpathSync(mkdtempSync(path.join(os.tmpdir(), 'acb-job-guard-ja-')))
+  const root = realpathSync(makeTempDir('acb-job-guard-ja-'))
   try {
     mkdirSync(path.join(root, '人事部', '.personal', '面談レポート'), { recursive: true })
     mkdirSync(path.join(root, '営業部'), { recursive: true })
@@ -413,7 +414,7 @@ test('a Japanese deliverable folder (owner decision 2026-11-23): the turn runs, 
 })
 
 test('new files in the shared folder: by what is reachable, never by commit dates; only once this PC has what the server has', async () => {
-  const tmp = realpathSync(mkdtempSync(path.join(os.tmpdir(), 'acb-job-git-')))
+  const tmp = realpathSync(makeTempDir('acb-job-git-'))
   try {
     const env = { ...process.env, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@example.com', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@example.com' }
     const run = (cwd: string, args: string[], extra: Record<string, string> = {}) => execFileSync('git', args, { cwd, encoding: 'utf8', env: { ...env, ...extra } })
@@ -499,7 +500,7 @@ test('new files in the shared folder: by what is reachable, never by commit date
 })
 
 test('new files in a working folder (no git): by their time, within the window', async () => {
-  const work = realpathSync(mkdtempSync(path.join(os.tmpdir(), 'acb-job-work-')))
+  const work = realpathSync(makeTempDir('acb-job-work-'))
   try {
     const since = '2026-06-01T00:00:00.000Z'
     mkdirSync(path.join(work, '人事部', '面談', '.personal'), { recursive: true })
@@ -519,7 +520,7 @@ test('new files in a working folder (no git): by their time, within the window',
 })
 
 test('new files in a working folder are read on the server\'s clock: a PC clock off by minutes misses nothing, and an unknown or far-off one checks nothing', async () => {
-  const work = realpathSync(mkdtempSync(path.join(os.tmpdir(), 'acb-job-clock-')))
+  const work = realpathSync(makeTempDir('acb-job-clock-'))
   try {
     const dir = path.join(work, '人事部', '面談')
     mkdirSync(dir, { recursive: true })

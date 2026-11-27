@@ -11,9 +11,8 @@
  */
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest'
 import { execFileSync, spawn } from 'child_process'
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'fs'
+import { mkdirSync, rmSync, writeFileSync } from 'fs'
 import { join, dirname } from 'path'
-import { tmpdir } from 'os'
 import type { AddressInfo } from 'net'
 
 const currentUser = vi.hoisted(() => ({ id: 'pa-owner' as string | null }))
@@ -43,6 +42,7 @@ import { gitHttpRoute } from '../../src/routes/git-http'
 import { services } from '../../src/composition'
 import { replaceDepartmentManagers } from '../../src/adapters/sqlite/permission-store'
 import { parseHookRejections, sidebandMessages } from '../../src/lib/push-rejections'
+import { makeTempDir } from '../../shared/testing/temp-dirs'
 
 vi.setConfig({ testTimeout: 60_000, hookTimeout: 60_000 })
 
@@ -412,7 +412,7 @@ describe('git-http records rejected pushes', () => {
   }
 
   beforeAll(async () => {
-    workDir = mkdtempSync(join(tmpdir(), 'acb-push-rejections-'))
+    workDir = makeTempDir('acb-push-rejections-')
     addCompany(RC, 'rj-owner')
     const expires = new Date(Date.now() + 3600_000).toISOString()
     const authDb = new Database(join(process.env.DATA_DIR!, 'auth.sqlite'))

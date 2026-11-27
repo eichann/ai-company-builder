@@ -18,8 +18,7 @@
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { execFileSync } from 'child_process'
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'fs'
-import { tmpdir } from 'os'
+import { mkdirSync, rmSync, writeFileSync } from 'fs'
 import { join } from 'path'
 
 const currentUser = vi.hoisted(() => ({ id: null as string | null }))
@@ -55,6 +54,7 @@ import { departmentSkill } from '../../src/lib/skill-trees'
 import { MINUTES_ACTOR, MINUTES_REVIEW_KEY } from '../../../shared/core/core-types'
 import { JOB_MINUTES_ROUTE, JOB_SET_WATCH_OPENED, type JobSetTrigger } from '../../../shared/core/jobs'
 import { turnTiming } from '../../../shared/core/turn-timing'
+import { makeTempDir } from '../../shared/testing/temp-dirs'
 
 vi.setConfig({ testTimeout: 60_000, hookTimeout: 120_000 })
 
@@ -207,7 +207,7 @@ beforeAll(async () => {
   const bare = companyRepoPath(CO)
   mkdirSync(bare, { recursive: true })
   git(bare, 'init', '-q', '--bare')
-  workDir = mkdtempSync(join(tmpdir(), 'acb-ss-work-'))
+  workDir = makeTempDir('acb-ss-work-')
   git(workDir, 'init', '-q')
   git(workDir, 'remote', 'add', 'origin', bare)
   putSkills()

@@ -14,10 +14,10 @@
  *   their own tokens.
  */
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest'
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'fs'
-import { tmpdir } from 'os'
+import { chmodSync, rmSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import { randomBytes } from 'crypto'
+import { makeTempDir } from '../../shared/testing/temp-dirs'
 
 const currentUser = vi.hoisted(() => ({ id: 'bt-owner' as string | null }))
 
@@ -68,7 +68,7 @@ async function call(user: string | null, method: string, path: string, body?: un
 const issue = (user: string, body: Record<string, unknown> = {}) => call(user, 'POST', `${BASE}/me/broker-tokens`, { conversationId: 'conv-1', department: '営業部', ...body })
 
 beforeAll(async () => {
-  kekDir = mkdtempSync(join(tmpdir(), 'acb-bt-kek-'))
+  kekDir = makeTempDir('acb-bt-kek-')
   writeFileSync(join(kekDir, 'kek'), randomBytes(32).toString('base64'))
   chmodSync(join(kekDir, 'kek'), 0o600)
   process.env.BROKER_KEK_FILE = join(kekDir, 'kek')

@@ -20,6 +20,7 @@ import { browserOperatorArgs, BROWSER_OPERATOR_SYSTEM_PROMPT, operatorInitProble
 import { BROWSER_OPERATOR_BROWSE_PROMPT } from '../shared/browser-browse'
 import { AGENTS } from '../shared/agents/registry'
 import { browserOperatorOf } from '../electron/agents/registry'
+import { makeTempDir } from '../../shared/testing/temp-dirs'
 
 const MODEL = AGENTS['claude-code'].tasks.browserOperator!
 const FLOOR = AGENTS['claude-code'].browserOperatorCli!.min
@@ -77,7 +78,7 @@ const PARENT = {
 }
 
 before(() => {
-  dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'acb-operator-test-')))
+  dir = fs.realpathSync(makeTempDir('acb-operator-test-'))
   fs.mkdirSync(path.join(dir, 'bin'))
   for (const name of ['claude-a', 'claude-b']) {
     fs.writeFileSync(path.join(dir, 'bin', name), FAKE(name))
