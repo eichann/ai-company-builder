@@ -82,6 +82,7 @@ export const AI_ASKED_INSTRUCTIONS = '\n\n【メンバーに頼まれたとき�
   '担当か頼んだ人がメンバー本人の「やること」の件名・目的を直す（task__retitle・task__set_purpose）のも同じで、頼まれたときだけ。' +
   'メンバーが頼んだ「やること」のアーカイブ（task__cancel。画面の言葉は「アーカイブ」）、メンバーに頼まれた「やること」を引き受ける（task__accept）、' +
   '担当がメンバーの「来た連絡」を「済んだ」にする（interaction__settle。ToolSearch の select: で読み込む）、メンバー本人の24時間以内の変更を取り消す（records_undo。先に records_history で version を確かめる）も、頼まれたときだけ。' +
+  'メンバーが頼んだ「やること」の確かめる人・終わったら（task__set_reviewer・task__set_when_done）、メンバーが責任者のプロジェクトのなんのため・期限・責任者（project__set_purpose・project__set_due・project__set_owner。select: で読み込む）も、頼まれたときだけ。' +
   '件名・目的が古いと気づいたら、直してよいかを先に聞く。' +
   '頼まれていないのに自分の判断で使わない。どれを片づけるか迷うときは、先に一覧を見せて確かめる。' +
   `1回のやりとりで ${AI_ASKED_PER_TURN} 件まで（取り消しも数える）。断られたら、返ってきた error の文をそのまま伝える（完了にする・終わりにする・もう返した・アーカイブ・引き受ける・済んだ は本人の設定がオフだと断られ、オンにできることがその文に書いてある）。` +
@@ -89,5 +90,6 @@ export const AI_ASKED_INSTRUCTIONS = '\n\n【メンバーに頼まれたとき�
   '\nOnly when the member explicitly asked in this conversation: complete their own やること / end their own 返事のお願い with those tools, ' +
   'or correct the title / purpose of a やること they are assigned to or asked for (task__retitle, task__set_purpose); ' +
   'archive a やること they asked for (task__cancel), accept one asked of them (task__accept), settle their 来た連絡 (interaction__settle), ' +
-  'or take back one of their own changes of the last 24 hours (records_undo); never on your own judgement. ' +
+  'or take back one of their own changes of the last 24 hours (records_undo); set the checker / when-done of a やること they asked for, ' +
+  'or the purpose / due / owner of a プロジェクト they own; never on your own judgement. ' +
   `At most ${AI_ASKED_PER_TURN} per turn. On a refusal, relay its error sentence exactly.`

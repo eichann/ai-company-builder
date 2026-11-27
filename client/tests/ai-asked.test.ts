@@ -25,7 +25,7 @@ import { latestMemberText } from '../shared/agents/second-opinion'
 
 const TOKEN = 'acb_rec_co.' + 'b'.repeat(64)
 const TASK = 'task-0123456789abcdef'
-const types = coreTypeDefinitions().filter(d => d.name === 'task' || d.name === 'reply_request' || d.name === 'interaction')
+const types = coreTypeDefinitions().filter(d => ['task', 'reply_request', 'interaction', 'project'].includes(d.name))
 
 async function turn(opts: { memberTurn?: boolean; serverMarks?: boolean; bound?: boolean; askedBy?: string | null } = {}) {
   const seen: Array<{ url: string; body: unknown }> = []
@@ -86,6 +86,10 @@ test('the asked-only description and instructions only for a marked token; other
   assert.match(marked.tools.instructions, /メンバーに頼まれたときだけ使える操作/)
   // Task 17 / interaction 9 (owner decision 2026-11-27): アーカイブ, 引き受ける, 済んだ and 「取り消して」 in a marked turn only.
   for (const name of ['task__cancel', 'task__accept', 'interaction__settle']) assert.ok(spec(marked.tools, name).askedCard, name)
+  // PR C (task 18, project 3): the requester's 確かめる人・終わったら and the 責任者's なんのため・期限・責任者 — never 終える.
+  for (const name of ['task__set_reviewer', 'task__set_when_done', 'project__set_purpose', 'project__set_due', 'project__set_owner']) assert.ok(spec(marked.tools, name).askedCard, name)
+  assert.ok(!spec(marked.tools, 'project__finish').askedCard)
+  assert.match(marked.tools.instructions, /task__set_reviewer/)
   assert.match(spec(marked.tools, 'task__cancel').description, /「アーカイブ」と呼ぶ/)
   assert.ok(spec(marked.tools, 'records_undo'))
   // 済んだ's settled_by is the server's (the person acting): never asked of the AI.

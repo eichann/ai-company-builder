@@ -41,7 +41,7 @@ import { parseYamlLite } from '../../../shared/core/yaml-lite'
 import { aiAskedNeedsSetting, canonicalTypeJson, compareTypeDefinitions, normalizeRecordTitle, normalizeTagsValue, setsRecordTitle, parseTagsValue, parseTypeFile, TAG_MAX_LENGTH, TAGS_MAX_COUNT, type TypeDefinition } from '../../../shared/core/record-types'
 import { newRecordId, parseRecordFile } from '../../../shared/core/records'
 import { companyExtensionConflicts } from '../../../shared/core/plugin-type-upgrade'
-import { CORE_TYPE_FILES, INTERACTION_VERSION, REPLY_REQUEST_VERSION, TASK_VERSION } from '../../../shared/core/core-types'
+import { CORE_TYPE_FILES, INTERACTION_VERSION, PROJECT_VERSION, REPLY_REQUEST_VERSION, TASK_VERSION } from '../../../shared/core/core-types'
 
 const TASK = `---
 label: タスク
@@ -473,7 +473,9 @@ describe('how a state is shown (state_labels, owner decision 2026-11-24)', () =>
 
 /** The core task's text without version 16's two actions (件名を直す, 目的を直す). */
 /** Task 17 / interaction 9 (「AI の毎日の操作」): the keys on アーカイブ・引き受ける・済んだ taken away again. */
-const withoutV17 = (text: string) => text.replace(/^( {2}(cancel|accept|settle): .*), ai_on_request: \[[a-z_]+\] \}$/gm, '$1 }')
+/** Task 18 / project 3 (PR C: the requester's and the 責任者's settings) taken away again. */
+const withoutV18 = (text: string) => text.replace(/^( {2}(set_when_done|set_reviewer|set_owner|set_purpose|set_due): .*), ai_on_request: \[[a-z_]+\] \}$/gm, '$1 }')
+const withoutV17 = (text: string) => withoutV18(text).replace(/^( {2}(cancel|accept|settle): .*), ai_on_request: \[[a-z_]+\] \}$/gm, '$1 }')
 const withoutV16 = (text: string) => withoutV17(text).replace(/^ {2}(retitle|set_purpose): .*\n/gm, '')
 
 describe('the record\'s own title as an action argument (task 16: 件名を直す)', () => {
@@ -547,15 +549,28 @@ describe('ai_on_request (task 15, reply_request 6: the AI at the member\'s reque
     const task = core('task').def
     const rr = core('reply_request').def
     expect(Object.entries(task.actions).filter(([, a]) => a.aiOnRequest).map(([n, a]) => [n, a.aiOnRequest])).toEqual([
-      ['complete', ['assignee']], ['cancel', ['requested_by']], ['accept', ['assignee']], ['retitle', ['requested_by', 'assignee']], ['set_purpose', ['requested_by', 'assignee']],
+      ['complete', ['assignee']], ['cancel', ['requested_by']], ['accept', ['assignee']], ['set_when_done', ['requested_by']], ['set_reviewer', ['requested_by']],
+      ['retitle', ['requested_by', 'assignee']], ['set_purpose', ['requested_by', 'assignee']],
     ])
+    // Project 3 (PR C): なんのため・期限・責任者 by the 責任者's own AI — never 終える / やめる / もう一度始める.
+    const project = core('project').def
+    expect(Object.entries(project.actions).filter(([, a]) => a.aiOnRequest).map(([n, a]) => [n, a.aiOnRequest])).toEqual([
+      ['set_owner', ['owner']], ['set_purpose', ['owner']], ['set_due', ['owner']],
+    ])
+    // なんのため is a correction of words (no setting); 期限・責任者 need the member's setting.
+    expect(Object.entries(project.actions).filter(([, a]) => a.aiOnRequest && aiAskedNeedsSetting(a)).map(([n]) => n)).toEqual(['set_owner', 'set_due'])
+    expect(PROJECT_VERSION).toBe(project.version)
+    const p2 = parseTypeFile('project', withoutV18(CORE_TYPE_FILES.project).replace(/^version: \d+$/m, 'version: 2'))
+    if (!p2.ok) throw new Error(p2.errors.join())
+    expect(compareTypeDefinitions(p2.definition, project)).toMatchObject({ changed: true, breaking: [], versionProblem: null })
     // Task 17 / interaction 9 (「AI の毎日の操作」): アーカイブ by the one who asked, 引き受ける and 済んだ by the assignee — never 受けられない,
     // 取り込まない, 差し戻す or anything that widens who sees it.
     const interaction = core('interaction').def
     expect(Object.entries(interaction.actions).filter(([, a]) => a.aiOnRequest).map(([n, a]) => [n, a.aiOnRequest])).toEqual([['settle', ['assignee']]])
-    for (const n of ['decline', 'send_back', 'reopen', 'assign', 'set_reviewer', 'set_when_done', 'adopt', 'dismiss']) expect(task.actions[n].aiOnRequest, n).toBeUndefined()
+    for (const n of ['decline', 'send_back', 'reopen', 'assign', 'adopt', 'dismiss']) expect(task.actions[n].aiOnRequest, n).toBeUndefined()
+    for (const n of ['finish', 'cancel', 'reopen']) expect(core('project').def.actions[n].aiOnRequest, n).toBeUndefined()
     // Only the closing / accepting ones need the member's own setting (task 16: correcting ends nothing).
-    expect(Object.entries(task.actions).filter(([, a]) => a.aiOnRequest && aiAskedNeedsSetting(a)).map(([n]) => n)).toEqual(['complete', 'cancel', 'accept'])
+    expect(Object.entries(task.actions).filter(([, a]) => a.aiOnRequest && aiAskedNeedsSetting(a)).map(([n]) => n)).toEqual(['complete', 'cancel', 'accept', 'set_when_done', 'set_reviewer'])
     expect(aiAskedNeedsSetting(interaction.actions.settle)).toBe(true)
     expect(Object.entries(rr.actions).filter(([, a]) => a.aiOnRequest && aiAskedNeedsSetting(a)).map(([n]) => n).sort()).toEqual(['close', 'replied_elsewhere'])
     // Only a correction of words goes without it — anything a company's or a plugin's type may declare else still needs it.
@@ -582,6 +597,9 @@ describe('ai_on_request (task 15, reply_request 6: the AI at the member\'s reque
     expect(INTERACTION_VERSION).toBe(interaction.version)
     // Task 17 over 16 and interaction 9 over 8 only add the keys.
     const v16 = parseTypeFile('task', withoutV17(CORE_TYPE_FILES.task).replace(/^version: \d+$/m, 'version: 16'))
+    const v17 = parseTypeFile('task', withoutV18(CORE_TYPE_FILES.task).replace(/^version: \d+$/m, 'version: 17'))
+    if (!v17.ok) throw new Error('parse 17')
+    expect(compareTypeDefinitions(v17.definition, task)).toMatchObject({ changed: true, breaking: [], versionProblem: null })
     const v8 = parseTypeFile('interaction', withoutV17(CORE_TYPE_FILES.interaction).replace(/^version: \d+$/m, 'version: 8'))
     if (!v16.ok || !v8.ok) throw new Error('parse')
     expect(Object.values(v16.definition.actions).filter(a => a.aiOnRequest).length).toBe(3)

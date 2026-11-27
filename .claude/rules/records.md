@@ -862,7 +862,8 @@ Additive over version 8 (who / from / notify / labels widened, one field, two ac
     completes stating whose OK (`ok_by` / `ok_note`), the OK-giver is told and may reopen, exactly
     as "Completing on someone's OK". On a 知らせるだけ task an OK statement is `OK_NOT_EXPECTED`.
   - `set_when_done` (args `when_done`) and `set_reviewer` (args `reviewer`): the requester or an
-    admin, never the assignee or the AI, from every non-final state but review.
+    admin, never the assignee; their AI only as the requester's own at their request (task 18, "The AI at the member's
+    request"), from every non-final state but review.
   - **確かめる人 must be able to open the task**: a `reviewer` set on create, by `set_reviewer` or
     by `request_review` who cannot read the record → 400 `REVIEWER_CANNOT_READ` (as the assignee's
     `ASSIGNEE_CANNOT_READ`; never names the place, nothing written), so the checker's turn is
@@ -871,7 +872,7 @@ Additive over version 8 (who / from / notify / labels widened, one field, two ac
   entry carries `accepted_by` (`ACCEPTANCE.finishes`, `services/record-engine/acceptance.ts` with
   the action's `fromState`). The requester completing it does not.
 - **Migration** (`migrateTaskVersion` in `db/index.ts` → `adapters/sqlite/records.ts`
-  `migrateCompanyTaskVersion`, `TASK_VERSION` = the core task version, 17 since "The daily operations" (16: "Task version
+  `migrateCompanyTaskVersion`, `TASK_VERSION` = the core task version, 18 since "The requester's and the 責任者's settings" (17: "The daily operations", 16: "Task version
   16", 15: "The AI at the member's request"); `REPLY_REQUEST_VERSION` 6 and `INTERACTION_VERSION` 9 the same way for
   返事のお願い and 来た連絡): at startup, every company whose map has the task type stores that core version when
   nothing as new is stored, then every task's index row says it (`type_version`). No value changes, so no ledger entry. Idempotent.
@@ -977,7 +978,7 @@ What a department makes as its 束ねるもの is decided **without a setting** 
   a company needing both is the plugin's question then).
 - Every other department makes the core's ordinary kind, core type **`project`** (version 2,
   implements `bundle`: `owner`, `purpose`, `due`; links `counterpart`, `files`; active → done /
-  cancelled and back, by the owner, an admin or the department's manager; anyone may create one),
+  cancelled and back, by the owner, an admin or the department's manager; anyone may create one; version 3: なんのため・期限・責任者 also by the 責任者's own AI at their request, "The AI at the member's request"),
   `CORE_BUNDLE_TYPE`. Version 2 (owner FB #34, 2026-11-13) adds `who_fallback: [anyone]` to
   `set_owner` (責任者を替える) only: while no 責任者 who reads it is named (one the AI made before
   creates named the creator), any member who reads it may name one — never the AI, never 終える /
@@ -2236,6 +2237,14 @@ to press each one. Now the member may let their own AI do exactly that, **in a c
   `askedBy`. No member setting (it ends nothing of its own; it puts back what the member had). **Not on the turn's card**:
   an undo cannot be undone (`NOT_UNDOABLE`), so its ［取り消す］ would only fail; the member does the change again on screen.
   After a renewal of the turn's token (`memberTurn` false) the tool answers `ASKED_AFTER_RENEWAL` like the others.
+- **The requester's and the 責任者's settings** (task v18, project v3, owner decision 2026-11-27 PR C): task `set_reviewer`
+  (確かめる人) and `set_when_done` (終わったら) `ai_on_request: [requested_by]`; the core プロジェクト's `set_purpose` (なんのため),
+  `set_due` (期限) and `set_owner` (責任者) `ai_on_request: [owner]` — each only what that person may do on screen today.
+  なんのため is a correction of words (no setting); the others need the member's setting. Every engine rule stays: a 確かめる人
+  who cannot read the task → `REVIEWER_CANNOT_READ`; `set_owner` hands the 責任者 over, after which the AI may change nothing
+  there (the field no longer holds the member). Never 終える / やめる / もう一度始める (the 案件 ends or starts by a person's press),
+  never a business plugin's 案件 (its own type). `PROJECT_VERSION` 3 moves the records at startup. Test:
+  `ai-asked-close.test.ts` 「the requester's and the 責任者's settings…」, `record-types.test.ts`, `client/tests/ai-asked.test.ts`.
 - Tests (daily operations): `server/tests/integration/ai-asked-close.test.ts` 「the daily operations…」 (アーカイブ only
   the requester's own and only with the setting / never a plain token; 引き受ける accepted as the member's, never another
   member's AI; 「取り消して」 own only, no admin reach, 24 hours, a plain token, the cap, its own asked 完了 with the setting,
@@ -2487,8 +2496,8 @@ complete and idempotent; the immutability trigger — mutation-checked).
 - **What has no AI tool** (gap report 2026-11-27 Bug A #2: asked to do something it has no tool for,
   the AI said 「つながっていません」): `RECORDS_INSTRUCTIONS` lists the screen-only operations with
   where the member does them (`SCREEN_ONLY_OPERATIONS`, `tools.ts`: 部署に出す, someone else's or an older change's
-  取り消す, 受けられない, アーカイブから戻す / やり直す, 終わったら, 差し戻す, つながりを外す (other than the 案件), a 案件's
-  なんのため・期限・責任者・終える, 来た連絡's 取り込まない, そうです / 違う, approvals, the admin console) and tells the AI to say
+  取り消す, 受けられない, アーカイブから戻す / やり直す, 差し戻す, つながりを外す (other than the 案件), a 案件's
+  終える / やめる / もう一度始める, 来た連絡's 取り込まない, そうです / 違う, approvals, the admin console) and tells the AI to say
   where to press — never 「つながっていません」 — also for anything else it has no tool for. **A row
   leaves the list in the PR that gives the AI a tool for it.** Test: `records-tools.test.ts` 「an
   operation without an AI tool…」.

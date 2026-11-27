@@ -285,3 +285,50 @@ describe('the daily operations at the member\'s request (task 17, owner decision
     expect((await session('u-bob', 'POST', `/records/item/${id}/undo`, { version: 3, expectedVersion: 3 })).status).toBe(200)
   })
 })
+
+describe('the requester\'s and the 責任者\'s settings at their request (task 18, project 3; PR C)', () => {
+  it('確かめる人・終わったら: only the requester\'s own AI, with their setting; never the assignee\'s; a 確かめる人 who cannot read it is refused as always', async () => {
+    await setOwn('u-bob', false)
+    const id = await task('u-bob', 'キャロルに頼む', { assignee: 'u-carol' })
+    const { token: t } = await token('u-bob')
+    let v = (await record(id)).version
+    expect(await ai(t, 'POST', `/item/${id}/actions/set_when_done`, { expectedVersion: v, args: { when_done: 'check' } })).toMatchObject({ status: 403, body: { code: 'AI_ASK_OFF' } })
+    await setOwn('u-bob', true)
+    expect((await ai(t, 'POST', `/item/${id}/actions/set_when_done`, { expectedVersion: v, args: { when_done: 'check' } })).status).toBe(200)
+    v = (await record(id)).version
+    expect((await ai(t, 'POST', `/item/${id}/actions/set_reviewer`, { expectedVersion: v, args: { reviewer: 'u-owner' } })).status).toBe(200)
+    const after = (await session('u-bob', 'GET', `/records/item/${id}`)).body.data.record
+    expect(after.fields).toMatchObject({ when_done: 'check', reviewer: 'u-owner' })
+    expect((await history('u-bob', id)).at(-1)).toMatchObject({ action: 'set_reviewer', actorKind: 'ai', askedBy: 'u-bob' })
+    // Carol (the assignee) is no requester: her AI never.
+    await setOwn('u-carol', true)
+    const carols = await token('u-carol')
+    v = (await record(id)).version
+    expect(await ai(carols.token, 'POST', `/item/${id}/actions/set_when_done`, { expectedVersion: v, args: { when_done: 'notify' } })).toMatchObject({ status: 403, body: { code: 'NOT_ALLOWED' } })
+    // A plain token never.
+    const plain = await token('u-bob', {})
+    expect(await ai(plain.token, 'POST', `/item/${id}/actions/set_when_done`, { expectedVersion: v, args: { when_done: 'notify' } })).toMatchObject({ status: 403, body: { code: 'NOT_ALLOWED' } })
+    // An owner-only task of his: a 確かめる人 who cannot read it is refused (the engine's own rule, unchanged).
+    const own = (await session('u-bob', 'POST', '/records/item', { type: 'task', title: '自分だけ', personal: true, fields: { assignee: 'u-bob' } })).body.data.record.id
+    expect(await ai(t, 'POST', `/item/${own}/actions/set_reviewer`, { expectedVersion: 1, args: { reviewer: 'u-carol' } })).toMatchObject({ status: 400, body: { code: 'REVIEWER_CANNOT_READ' } })
+  })
+
+  it('a プロジェクト\'s なんのため (no setting: words)・期限・責任者 (setting) by its 責任者\'s own AI only; never 終える; once handed over, no more', async () => {
+    await setOwn('u-bob', false)
+    const p = (await session('u-bob', 'POST', '/records/item', { type: 'project', title: 'ボブのプロジェクト', fields: { owner: 'u-bob' }, place: 'company' })).body.data.record.id
+    const { token: t } = await token('u-bob')
+    expect((await ai(t, 'POST', `/item/${p}/actions/set_purpose`, { expectedVersion: 1, args: { purpose: '新しいお客さんを増やす' } })).status).toBe(200)
+    expect(await ai(t, 'POST', `/item/${p}/actions/set_due`, { expectedVersion: 2, args: { due: '2026-12-25' } })).toMatchObject({ status: 403, body: { code: 'AI_ASK_OFF' } })
+    await setOwn('u-bob', true)
+    expect((await ai(t, 'POST', `/item/${p}/actions/set_due`, { expectedVersion: 2, args: { due: '2026-12-25' } })).status).toBe(200)
+    expect(await ai(t, 'POST', `/item/${p}/actions/finish`, { expectedVersion: 3 })).toMatchObject({ status: 403, body: { code: 'NOT_ALLOWED' } })
+    await setOwn('u-carol', true)
+    const carols = await token('u-carol')
+    expect(await ai(carols.token, 'POST', `/item/${p}/actions/set_due`, { expectedVersion: 3, args: { due: '2026-12-31' } })).toMatchObject({ status: 403, body: { code: 'NOT_ALLOWED' } })
+    expect((await ai(t, 'POST', `/item/${p}/actions/set_owner`, { expectedVersion: 3, args: { owner: 'u-carol' } })).status).toBe(200)
+    expect((await history('u-bob', p)).at(-1)).toMatchObject({ action: 'set_owner', actorKind: 'ai', askedBy: 'u-bob' })
+    // No longer the 責任者: his AI may not change it any more; he takes his own change back on screen.
+    expect(await ai(t, 'POST', `/item/${p}/actions/set_due`, { expectedVersion: 4, args: { due: '2026-12-31' } })).toMatchObject({ status: 403, body: { code: 'NOT_ALLOWED' } })
+    expect((await session('u-bob', 'POST', `/records/item/${p}/undo`, { version: 4, expectedVersion: 4 })).status).toBe(200)
+  })
+})

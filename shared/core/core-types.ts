@@ -44,6 +44,9 @@
  * turn they started, on a task they asked for / are asked to do, with their setting on (records.md "The AI at the
  * member's request"). An accept at their request counts as theirs (`acceptance.ts`).
  *
+ * Version 18 (owner decision 2026-11-27, PR C, additive): `set_reviewer` (確かめる人) and `set_when_done` (終わったら)
+ * have `ai_on_request: [requested_by]` — the requester's own AI at their request, with their setting on.
+ *
  * Version 6 (core interfaces, owner decision 2026-11-01 night): the `customer`
  * link is gone — a task reaches its customer through its `bundle` — and a
  * task with no bundle may name its `counterpart` (相手) instead.
@@ -170,7 +173,10 @@
  * only the fallback. Anyone may create one (no service owns it). Version 2 (owner FB #34,
  * 2026-11-13): `set_owner` has `who_fallback: [anyone]` — while no 責任者 who reads it is named
  * (an older one the AI made without an owner), any member who reads it may name one; the other
- * actions stay the 責任者's, an admin's or the department manager's.
+ * actions stay the 責任者's, an admin's or the department manager's. Version 3 (owner decision 2026-11-27, additive):
+ * なんのため・期限・責任者 (`set_purpose`, `set_due`, `set_owner`) have `ai_on_request: [owner]` — the 責任者's own AI at
+ * their request; なんのため is a correction of words (no setting), the others need the member's setting. 終える / やめる /
+ * もう一度始める stay the person's.
  *
  * **The core never names a business plugin's type** (owner decision
  * 2026-11-01 night): what work belongs to links to the `bundle` interface
@@ -184,7 +190,7 @@ import { parseTypeFile, type TypeDefinition } from './record-types'
 export const CORE_TYPE_FILES: Record<string, string> = {
   task: `---
 label: タスク
-version: 17
+version: 18
 implements: [request]
 storage: server
 fields:
@@ -239,8 +245,8 @@ actions:
   set_tags:       { label: タグを付ける, who: [requested_by, assignee, ai], args: { tags: tags } }
   set_wait_until: { label: 見込みの日時を決める, who: [requested_by, assignee, ai], args: { wait_until: date }, note: optional }
   set_bundle:     { label: まとまりに入れる, who: [requested_by, assignee, ai], links: [bundle], note: optional }
-  set_when_done:  { label: 終わったらを決める, from: [todo, in_progress, waiting, preparing, declined, awaiting_acceptance], who: [requested_by, admin], args: { when_done: choice }, notify: assignee, note: optional }
-  set_reviewer:   { label: 確かめる人を決める, from: [todo, in_progress, waiting, preparing, declined, awaiting_acceptance], who: [requested_by, admin], args: { reviewer: person }, notify: reviewer, note: optional }
+  set_when_done:  { label: 終わったらを決める, from: [todo, in_progress, waiting, preparing, declined, awaiting_acceptance], who: [requested_by, admin], args: { when_done: choice }, notify: assignee, note: optional, ai_on_request: [requested_by] }
+  set_reviewer:   { label: 確かめる人を決める, from: [todo, in_progress, waiting, preparing, declined, awaiting_acceptance], who: [requested_by, admin], args: { reviewer: person }, notify: reviewer, note: optional, ai_on_request: [requested_by] }
   adopt:          { label: 足す, from: [proposed], to: todo, who: [requested_by, dept_manager, admin, link:meeting], notify: assignee, note: optional, hand_to: assignee }
   dismiss:        { label: 要らない, from: [proposed, todo, awaiting_acceptance], to: dismissed, who: [requested_by, dept_manager, admin, link:meeting], note: optional }
   propose_again:  { label: 案に戻す, from: [dismissed], to: proposed, who: [requested_by, dept_manager, admin, link:meeting], note: optional }
@@ -493,7 +499,7 @@ actions:
 `,
   project: `---
 label: プロジェクト
-version: 2
+version: 3
 implements: [bundle]
 storage: server
 fields:
@@ -510,9 +516,9 @@ actions:
   finish:       { label: 終える, from: [active], to: done, who: [owner, admin, dept_manager], note: optional }
   cancel:       { label: やめる, from: [active], to: cancelled, who: [owner, admin, dept_manager], note: optional }
   reopen:       { label: もう一度始める, from: [done, cancelled], to: active, who: [owner, admin, dept_manager], note: optional }
-  set_owner:    { label: 責任者を替える, from: [active], who: [owner, admin, dept_manager], who_fallback: [anyone], args: { owner: person }, note: optional }
-  set_purpose:  { label: なんのためを書く, from: [active], who: [owner, admin, dept_manager], args: { purpose: text }, note: optional }
-  set_due:      { label: 期限を変える, from: [active], who: [owner, admin, dept_manager], args: { due: date }, note: optional }
+  set_owner:    { label: 責任者を替える, from: [active], who: [owner, admin, dept_manager], who_fallback: [anyone], args: { owner: person }, note: optional, ai_on_request: [owner] }
+  set_purpose:  { label: なんのためを書く, from: [active], who: [owner, admin, dept_manager], args: { purpose: text }, note: optional, ai_on_request: [owner] }
+  set_due:      { label: 期限を変える, from: [active], who: [owner, admin, dept_manager], args: { due: date }, note: optional, ai_on_request: [owner] }
 ---
 # プロジェクト
 
@@ -688,7 +694,7 @@ export const ACCEPTANCE: Readonly<Record<string, {
  * `migrateCompanyTaskVersion`): the core definition of that version is stored first, then each task's
  * index row says it (no value changes, so no ledger entry).
  */
-export const TASK_VERSION = 17
+export const TASK_VERSION = 18
 
 /**
  * The reply_request version every 返事のお願い is moved to at startup (the `TASK_VERSION` mechanism:
@@ -701,6 +707,12 @@ export const REPLY_REQUEST_VERSION = 6
  * `ai_on_request` to `settle` (records.md "The AI at the member's request").
  */
 export const INTERACTION_VERSION = 9
+
+/**
+ * The project version every core プロジェクト is moved to at startup (the `TASK_VERSION` mechanism). Version 3 only adds
+ * `ai_on_request: [owner]` to なんのため・期限・責任者 (records.md "The AI at the member's request").
+ */
+export const PROJECT_VERSION = 3
 
 /**
  * The decision version every decision is moved to at startup (decision version 6, the
