@@ -41,6 +41,44 @@ const BROWSER_RUN_WRITES_NO_DELETE = `CREATE TRIGGER IF NOT EXISTS browser_run_w
       SELECT RAISE(ABORT, 'a browser run log is append-only');
     END`
 
+/**
+ * The budgets a run may have (shared/core/browser-run-budget.ts `BROWSER_RUN_BUDGET_NAMES`; `skill_preview` since a Skill
+ * run's preview got its own allowance): the table of a new database and the rebuild that widened an older one
+ * (`migrateBrowserRunPreviewBudget`).
+ */
+const BROWSER_RUN_BUDGET_CHECK = "CHECK (budget IN ('standard', 'skill', 'skill_preview'))"
+/**
+ * The runs' table with every column (a new database is made whole; an older one gets the later columns from
+ * `migrateBrowserRunBudget` and is rebuilt to this text once its budget CHECK must widen).
+ */
+const BROWSER_RUNS_TABLE = `CREATE TABLE IF NOT EXISTS browser_runs (
+      company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+      id TEXT NOT NULL,
+      user_id TEXT NOT NULL,
+      host TEXT NOT NULL,
+      device_id TEXT,
+      conversation_id TEXT,
+      state TEXT NOT NULL CHECK (state IN ('running', 'done', 'stopped', 'failed', 'timed_out', 'refused', 'left')),
+      reason TEXT,
+      started_at TEXT NOT NULL,
+      lease_until TEXT NOT NULL,
+      ended_at TEXT,
+      log_written INTEGER NOT NULL DEFAULT 0 CHECK (log_written IN (0, 1)),
+      budget TEXT NOT NULL DEFAULT 'standard' ${BROWSER_RUN_BUDGET_CHECK},
+      steps INTEGER NOT NULL DEFAULT 0 CHECK (steps >= 0),
+      frame_run_id TEXT,
+      ends_at TEXT,
+      PRIMARY KEY (company_id, id),
+      CHECK ((state = 'running') = (ended_at IS NULL))
+    );`
+const BROWSER_RUNS_LOCK_INDEX = "CREATE UNIQUE INDEX IF NOT EXISTS idx_browser_runs_lock ON browser_runs(company_id, host) WHERE state = 'running'"
+const BROWSER_RUNS_STARTED_INDEX = 'CREATE INDEX IF NOT EXISTS idx_browser_runs_started ON browser_runs(company_id, started_at)'
+const BROWSER_RUNS_SKILL_ONCE_INDEX = "CREATE UNIQUE INDEX IF NOT EXISTS idx_browser_runs_skill_once ON browser_runs(company_id, frame_run_id) WHERE budget = 'skill'"
+const BROWSER_RUNS_COLUMNS = [
+  'company_id', 'id', 'user_id', 'host', 'device_id', 'conversation_id', 'state', 'reason', 'started_at', 'lease_until',
+  'ended_at', 'log_written', 'budget', 'steps', 'frame_run_id', 'ends_at',
+] as const
+
 /** The trigger as SQLite keeps it in `sqlite_master` (it drops `IF NOT EXISTS`): what the migration compares with. */
 const BROWSER_RUNS_FIXED_TRIGGER_STORED = BROWSER_RUNS_FIXED_TRIGGER.replace('CREATE TRIGGER IF NOT EXISTS ', 'CREATE TRIGGER ')
 
@@ -60,24 +98,9 @@ const BROWSER_RUNS_FIXED_TRIGGER_STORED = BROWSER_RUNS_FIXED_TRIGGER.replace('CR
  *   Never a value. Append-only like the log.
  */
 export const browserRunSchema = `
-    CREATE TABLE IF NOT EXISTS browser_runs (
-      company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
-      id TEXT NOT NULL,
-      user_id TEXT NOT NULL,
-      host TEXT NOT NULL,
-      device_id TEXT,
-      conversation_id TEXT,
-      state TEXT NOT NULL CHECK (state IN ('running', 'done', 'stopped', 'failed', 'timed_out', 'refused', 'left')),
-      reason TEXT,
-      started_at TEXT NOT NULL,
-      lease_until TEXT NOT NULL,
-      ended_at TEXT,
-      log_written INTEGER NOT NULL DEFAULT 0 CHECK (log_written IN (0, 1)),
-      PRIMARY KEY (company_id, id),
-      CHECK ((state = 'running') = (ended_at IS NULL))
-    );
-    CREATE UNIQUE INDEX IF NOT EXISTS idx_browser_runs_lock ON browser_runs(company_id, host) WHERE state = 'running';
-    CREATE INDEX IF NOT EXISTS idx_browser_runs_started ON browser_runs(company_id, started_at);
+    ${BROWSER_RUNS_TABLE}
+    ${BROWSER_RUNS_LOCK_INDEX};
+    ${BROWSER_RUNS_STARTED_INDEX};
     ${BROWSER_RUNS_FIXED_TRIGGER};
 
     CREATE TABLE IF NOT EXISTS browser_run_log (
@@ -115,16 +138,37 @@ export const browserRunSchema = `
  */
 export function migrateBrowserRunBudget(conn: Database.Database): void {
   const cols = new Set((conn.prepare('PRAGMA table_info(browser_runs)').all() as Array<{ name: string }>).map(c => c.name))
+  // The column as it was first added (the budgets of that build); `migrateBrowserRunPreviewBudget` then rebuilds the table
+  // to a new database's, so an upgraded database ends exactly like a new one.
   if (!cols.has('budget')) conn.exec("ALTER TABLE browser_runs ADD COLUMN budget TEXT NOT NULL DEFAULT 'standard' CHECK (budget IN ('standard', 'skill'))")
   if (!cols.has('steps')) conn.exec('ALTER TABLE browser_runs ADD COLUMN steps INTEGER NOT NULL DEFAULT 0 CHECK (steps >= 0)')
   if (!cols.has('frame_run_id')) conn.exec('ALTER TABLE browser_runs ADD COLUMN frame_run_id TEXT')
   if (!cols.has('ends_at')) conn.exec('ALTER TABLE browser_runs ADD COLUMN ends_at TEXT')
-  conn.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_browser_runs_skill_once ON browser_runs(company_id, frame_run_id) WHERE budget = 'skill'")
+  conn.exec(BROWSER_RUNS_SKILL_ONCE_INDEX)
   const trigger = conn.prepare("SELECT sql FROM sqlite_master WHERE type = 'trigger' AND name = 'browser_runs_fixed'").get() as { sql: string } | undefined
   if (trigger?.sql !== BROWSER_RUNS_FIXED_TRIGGER_STORED) {
     conn.exec('DROP TRIGGER IF EXISTS browser_runs_fixed')
     conn.exec(BROWSER_RUNS_FIXED_TRIGGER)
   }
+}
+
+/**
+ * The budget `skill_preview` (agent-browser.md "Room for a Skill run": a Skill run's preview has its own allowance): a
+ * `browser_runs` whose budget CHECK predates it is rebuilt once to the table a new database has (every row and rowid kept,
+ * its indexes and the fixed-columns trigger made again from the same texts). After `migrateBrowserRunBudget`. Idempotent.
+ */
+export function migrateBrowserRunPreviewBudget(conn: Database.Database): boolean {
+  return rebuildTableFor(conn, {
+    table: 'browser_runs',
+    marker: "'skill_preview'",
+    create: BROWSER_RUNS_TABLE,
+    after: [BROWSER_RUNS_LOCK_INDEX, BROWSER_RUNS_STARTED_INDEX, BROWSER_RUNS_SKILL_ONCE_INDEX, BROWSER_RUNS_FIXED_TRIGGER],
+    drop: [
+      'DROP TRIGGER IF EXISTS browser_runs_fixed', 'DROP INDEX IF EXISTS idx_browser_runs_lock',
+      'DROP INDEX IF EXISTS idx_browser_runs_started', 'DROP INDEX IF EXISTS idx_browser_runs_skill_once',
+    ],
+    columns: BROWSER_RUNS_COLUMNS,
+  })
 }
 
 /** The write steps' outcome `site-refused`: a `browser_run_writes` made before it is rebuilt once (every row kept). Idempotent. */

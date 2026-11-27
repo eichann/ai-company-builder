@@ -8,7 +8,7 @@
 // its own self-signed certificate for the three test hosts, on the test session only
 // (`setCertificateVerifyProc`, matched by fingerprint and host); `untrusted.test` is served with the
 // same certificate but not trusted here, so the window's own refusal of a bad certificate is seen.
-import { app, BrowserWindow, session } from 'electron'
+import { app, BrowserWindow, nativeImage, session } from 'electron'
 import crypto from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
@@ -402,6 +402,45 @@ async function browseScenarios(win: BrowserShellWindow, sites: Sites) {
   await wait(5500)
   out.writes = sites.hits.filter(h => h.method !== 'GET' && h.method !== 'HEAD').slice(writesBefore).map(h => `${h.method} ${h.host}${h.path}`)
   out.evilHits = sites.hits.filter(h => h.host === 'evil.test' && h.path.startsWith('/browse')).length
+  // A folder tree driven by script alone (no link or button): its items are listed once each as `item`, a press on one
+  // reaches the page's handler, and a card whose handler saves by fetch writes nothing (the gate holds every write).
+  // Its own run of the operator (entered again), so nothing of it touches the presses above.
+  out.treeEntered = await win.browse.enter(() => false)
+  const treeWritesBefore = sites.hits.filter(h => h.method !== 'GET' && h.method !== 'HEAD').length
+  await win.browse.act({ do: 'go', path: '/browse-tree' }, signal)
+  const domSize = () => page.executeJavaScript(`document.documentElement.outerHTML.length`, true)
+  const before = await domSize()
+  const tree = await win.browse.snapshot()
+  out.treeItems = tree?.elements.filter(e => e.role === 'item').map(e => e.name)
+  out.treeLogLabels = tree?.elements.filter(e => e.role === 'item').map(e => e.logLabel)
+  out.treeNames = tree?.elements.map(e => e.name)
+  out.treeViewport = tree?.viewport
+  // The operator's screen: a JPEG at most 1280 wide, the folder's mark drawn on its box (the mark's colour at its edge).
+  if (tree) {
+    const shot = await win.browse.screenshot?.(tree)
+    const image = shot ? nativeImage.createFromBuffer(Buffer.from(shot.data)) : null
+    out.shotType = shot?.mediaType
+    out.shotJpeg = shot ? Buffer.from(shot.data).subarray(0, 3).toString('hex') : ''
+    out.shotSize = image?.getSize()
+    const folder = tree.elements.find(e => e.name === '▸キャンペーン')
+    if (image && folder?.box && tree.viewport) {
+      const { width } = image.getSize()
+      const bitmap = image.toBitmap()
+      const scale = width / tree.viewport[0]
+      const at = (x: number, y: number) => { const o = (Math.round(y) * width + Math.round(x)) * 4; return { r: bitmap[o + 2], g: bitmap[o + 1], b: bitmap[o] } }
+      out.markEdge = at(folder.box[0] * scale + 1, (folder.box[1] + folder.box[3] / 2) * scale)
+      out.pageInside = at((folder.box[0] + folder.box[2] - 4) * scale, (folder.box[1] + folder.box[3] / 2) * scale)
+    }
+  }
+  // The marks are drawn on the captured pixels: the page's document is as it was before the snapshot and the screen.
+  out.treeDomBefore = before
+  out.treeDomAfterShot = await domSize()
+  out.folderClick = await press('▸キャンペーン', 'f1')
+  out.treeShown = (await win.browse.snapshot())?.text
+  out.cardClick = await press('すぐ反映（下書き）', 'card')
+  await win.browse.leave()
+  await wait(500)
+  out.treeWrites = sites.hits.filter(h => h.method !== 'GET' && h.method !== 'HEAD').slice(treeWritesBefore).map(h => `${h.method} ${h.host}${h.path}`)
   await page.loadURL('https://op.test/')
   await wait(500)
   return out

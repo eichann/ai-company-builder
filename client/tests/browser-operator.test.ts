@@ -15,6 +15,7 @@ import path from 'node:path'
 import {
   readOperatorMessage, resolveClaudeBrowserOperatorCli, runClaudeBrowserOperatorStep, type BrowserOperatorCli,
 } from '../electron/agents/claude-browser-operator'
+import { BROWSER_OPERATOR_IMAGE_MAX_BYTES } from '../shared/browser-operator'
 import { browserOperatorArgs, BROWSER_OPERATOR_SYSTEM_PROMPT, operatorInitProblem } from '../shared/browser-operator'
 import { BROWSER_OPERATOR_BROWSE_PROMPT } from '../shared/browser-browse'
 import { AGENTS } from '../shared/agents/registry'
@@ -58,7 +59,7 @@ const answer = (text: string) => ({ type: 'result', subtype: 'success', is_error
 const STOP = JSON.stringify({ do: 'stop', why: 'not-found', question: '' })
 
 function scenario(s: { version?: string; lines?: unknown[]; init?: Record<string, unknown>; sleepMs?: number; grandchild?: boolean }) {
-  fs.writeFileSync(path.join(dir, 'bin', 'scenario.json'), JSON.stringify({ version: '2.1.320 (Claude Code)', lines: ['$INIT', answer(STOP)], ...s }))
+  fs.writeFileSync(path.join(dir, 'bin', 'scenario.json'), JSON.stringify({ version: '2.1.330 (Claude Code)', lines: ['$INIT', answer(STOP)], ...s }))
   fs.rmSync(path.join(dir, 'bin', 'calls.jsonl'), { force: true })
 }
 function calls(): Array<{ script: string; argv: string[]; cwd: string; env: Record<string, string>; stdin: string }> {
@@ -95,6 +96,13 @@ async function resolved(): Promise<BrowserOperatorCli> {
 const step = (cli: BrowserOperatorCli, material: unknown = { m: 1 }, timeoutMs = 20_000, signal = new AbortController().signal) =>
   runClaudeBrowserOperatorStep({ cli, model: MODEL, material, signal, timeoutMs, parentEnv: PARENT })
 
+/** What the fake CLI read on stdin: the one stream-json user message. */
+function userMessage(stdin: string): { type: string; message: { role: string; content: Array<Record<string, unknown>> } } {
+  const lines = stdin.split('\n').filter(Boolean)
+  assert.equal(lines.length, 1, 'exactly one stream-json message')
+  return JSON.parse(lines[0])
+}
+
 test('the operator starts with exactly the closed arguments, in a fresh empty folder, with an environment built from nothing', async () => {
   scenario({})
   const cli = await resolved()
@@ -106,7 +114,7 @@ test('the operator starts with exactly the closed arguments, in a fresh empty fo
   assert.deepEqual(browserOperatorArgs(MODEL), [
     '-p', '--model', MODEL, '--safe-mode', '--tools', '', '--permission-mode', 'dontAsk', '--strict-mcp-config',
     '--setting-sources', '', '--disable-slash-commands', '--no-session-persistence', '--max-turns', '1',
-    '--output-format', 'stream-json', '--verbose', '--system-prompt', BROWSER_OPERATOR_SYSTEM_PROMPT,
+    '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose', '--system-prompt', BROWSER_OPERATOR_SYSTEM_PROMPT,
   ])
   // The window tools' start (agent-browser.md "The operator's window tools") is the same closed start — still no tool —
   // with only its own fixed prompt.
@@ -114,7 +122,8 @@ test('the operator starts with exactly the closed arguments, in a fresh empty fo
   assert.deepEqual(browse.slice(0, -1), browserOperatorArgs(MODEL).slice(0, -1))
   assert.equal(browse.at(-1), BROWSER_OPERATOR_BROWSE_PROMPT)
   assert.equal(browse[browse.indexOf('--tools') + 1], '')
-  assert.equal(call.stdin, JSON.stringify({ request: 'material' }), 'the material is data on stdin')
+  // The material is data on stdin: one user message holding it as JSON text, and nothing else (no image for the preview).
+  assert.deepEqual(userMessage(call.stdin), { type: 'user', message: { role: 'user', content: [{ type: 'text', text: JSON.stringify({ request: 'material' }) }] } })
   // The final environment the child got: the table, plus what /bin/sh itself sets.
   const shellOwn = new Set(['PWD', 'SHLVL', '_', 'OLDPWD', '__CF_USER_TEXT_ENCODING'])
   const env = Object.fromEntries(Object.entries(call.env).filter(([k]) => !shellOwn.has(k)))
@@ -133,6 +142,32 @@ test('the operator starts with exactly the closed arguments, in a fresh empty fo
   // Each step its own folder.
   await step(cli)
   assert.notEqual(calls()[1].cwd, call.cwd)
+})
+
+test('the screen image goes to the operator\'s stdin beside the material and nowhere else: no file in its folders, no argument, no variable; one over the cap is left out', async () => {
+  scenario({})
+  const cli = await resolved()
+  // A JPEG-like body with a marker no other channel could carry by chance.
+  const marker = Buffer.from('ACB-SCREEN-MARKER-9f31')
+  const data = new Uint8Array(Buffer.concat([Buffer.from([0xff, 0xd8, 0xff]), marker, Buffer.alloc(2048, 7)]))
+  const result = await runClaudeBrowserOperatorStep({ cli, model: MODEL, material: { page: 'p' }, signal: new AbortController().signal, timeoutMs: 20_000, parentEnv: PARENT, prompt: 'browse', image: { mediaType: 'image/jpeg', data } })
+  assert.deepEqual(result, { ok: true, text: STOP })
+  const [call] = calls()
+  const content = userMessage(call.stdin).message.content
+  assert.deepEqual(content[0], { type: 'text', text: JSON.stringify({ page: 'p' }) })
+  assert.deepEqual(content[1], { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: Buffer.from(data).toString('base64') } })
+  assert.equal(content.length, 2)
+  const b64 = Buffer.from(data).toString('base64').slice(0, 40)
+  assert.ok(!call.argv.join(' ').includes(b64) && !JSON.stringify(call.env).includes(b64), 'never an argument or a variable')
+  // Its working folder and TMPDIR are gone; nothing of the image was written anywhere under them meanwhile either (the
+  // fake wrote only its own record outside them).
+  assert.equal(fs.existsSync(call.cwd), false)
+  assert.equal(fs.existsSync(call.env.TMPDIR), false)
+  // An image over the cap is left out whole (the step still goes, with the text alone), never cut.
+  scenario({})
+  const big = new Uint8Array(BROWSER_OPERATOR_IMAGE_MAX_BYTES + 1)
+  await runClaudeBrowserOperatorStep({ cli, model: MODEL, material: { page: 'p' }, signal: new AbortController().signal, timeoutMs: 20_000, parentEnv: PARENT, prompt: 'browse', image: { mediaType: 'image/jpeg', data: big } })
+  assert.deepEqual(userMessage(calls()[0].stdin).message.content.map(c => c.type), ['text'])
 })
 
 test('the CLI is fixed to its real path for the whole request: a PATH or link changed meanwhile is not used', async () => {

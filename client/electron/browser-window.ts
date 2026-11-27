@@ -22,7 +22,7 @@
 // The window's DevTools connection has one holder at a time (`createPageDebugger`): the `ai`-mode gate, or a recording
 // the person makes (agent-browser.md "Recording": observe only, the person's requests go out as in `human` mode).
 import net from 'node:net'
-import { BrowserWindow, net as electronNet, session, type Session, type WebContents, type WebFrameMain } from 'electron'
+import { BrowserWindow, nativeImage, net as electronNet, session, type Session, type WebContents, type WebFrameMain } from 'electron'
 import type { BrowserSiteSetting } from '../../shared/core/browser-operation'
 import { exploreAddressProblem, type BrowserLoginHelper } from '../../shared/core/plugin-browser-declaration'
 import {
@@ -38,6 +38,7 @@ import {
 } from '../shared/browser-recorder'
 import { readBrowserPageSnapshot, sameDomainPath, BROWSER_BROWSE_LIMITS, type BrowserBrowseSurface } from '../shared/browser-browse'
 import { BROWSER_BROWSE_WORLD, BROWSER_SNAPSHOT_SCRIPT, browseFocusScript, browsePointScript, browseSelectScript } from '../shared/browser-browse-script'
+import { drawScreenMarks, screenMarks } from '../shared/browser-screen-marks'
 import { BrowserNotSentError, createSessionLanes, exactRead, throughSession, writeThroughSession, type PagelessSession, type SessionAnswer, type SessionRequest } from './features/browser/read-session'
 import type { BrowserWorkHooks, HeldBody, HeldPageWriteAnswer } from '../shared/browser-frame-writes'
 import type { BrowserWriteOutcome, BrowserWriteSteps } from '../shared/browser-runner'
@@ -666,10 +667,12 @@ export function createBrowserWindowShell(options: {
       active: () => recorder !== null,
     }
     /** One DevTools command for the operator's window tools: only while the `ai` gate holds the connection and is ready. */
-    const command = async (method: string, params: Record<string, unknown>): Promise<boolean> => {
-      if (contents.isDestroyed() || owner.holder() !== 'ai' || state.mode !== 'ai' || !state.aiGateReady || !contents.debugger.isAttached()) return false
-      try { await contents.debugger.sendCommand(method, params); return true } catch { return false }
+    const commandAnswer = async (method: string, params: Record<string, unknown>): Promise<unknown> => {
+      if (contents.isDestroyed() || owner.holder() !== 'ai' || state.mode !== 'ai' || !state.aiGateReady || !contents.debugger.isAttached()) return null
+      try { return (await contents.debugger.sendCommand(method, params)) ?? {} } catch { return null }
     }
+    /** The same, saying only whether it was done. */
+    const command = async (method: string, params: Record<string, unknown>): Promise<boolean> => (await commandAnswer(method, params)) !== null
     /** The page's first load (the one an `ai` gate waits for before attaching): true once it happened, false at `ms` or the signal. */
     const firstLoaded = (signal: AbortSignal, ms: number): Promise<boolean> => new Promise(resolve => {
       if (loaded) { resolve(true); return }
@@ -688,7 +691,7 @@ export function createBrowserWindowShell(options: {
       contents.once('destroyed', onAbort)
       firstLoad.push(() => done(true))
     })
-    return { setMode, record, command, firstLoaded, windowClosed: () => endRecording('closed') }
+    return { setMode, record, command, commandAnswer, firstLoaded, windowClosed: () => endRecording('closed') }
   }
 
   return {
@@ -974,6 +977,34 @@ export function createBrowserWindowShell(options: {
         async snapshot() {
           const text = await inWorld(BROWSER_SNAPSHOT_SCRIPT)
           return state.site ? readBrowserPageSnapshot(text, state.site.host) : null
+        },
+        // The screen for the operator (agent-browser.md "The operator sees the screen"): the page's viewport as drawn
+        // (DevTools `Page.captureScreenshot` over the gate's connection), made at most `imageWidth` wide, the snapshot's numbered marks drawn onto the pixels (never into the page),
+        // as JPEG — in memory only: never written to disk, logged or sent anywhere but the operator's stdin.
+        async screenshot(page) {
+          if (!browseReady()) return null
+          try {
+            // Through the gate's own DevTools connection (the page's viewport as drawn; works for a window behind others
+            // too, where capturePage may fail), only while the gate holds the window.
+            let timer: ReturnType<typeof setTimeout> | undefined
+            const answer = await Promise.race([
+              pageDebugger.commandAnswer('Page.captureScreenshot', { format: 'png', captureBeyondViewport: false }),
+              new Promise<null>(resolve => { timer = setTimeout(() => resolve(null), 5_000) }),
+            ]).finally(() => clearTimeout(timer))
+            const data = (answer as { data?: unknown } | null)?.data
+            if (typeof data !== 'string' || !browseReady()) return null
+            const captured = nativeImage.createFromBuffer(Buffer.from(data, 'base64'))
+            if (captured.isEmpty()) return null
+            const size = captured.getSize()
+            const image = size.width > BROWSER_BROWSE_LIMITS.imageWidth ? captured.resize({ width: BROWSER_BROWSE_LIMITS.imageWidth, quality: 'good' }) : captured
+            const { width, height } = image.getSize()
+            const bitmap = image.toBitmap()
+            drawScreenMarks(bitmap, width, height, screenMarks(page, width, height))
+            const jpeg = nativeImage.createFromBitmap(bitmap, { width, height }).toJPEG(BROWSER_BROWSE_LIMITS.imageQuality)
+            return jpeg.length > 0 ? { mediaType: 'image/jpeg' as const, data: new Uint8Array(jpeg) } : null
+          } catch {
+            return null
+          }
         },
         async act(action, signal) {
           if (!browseReady() || signal.aborted) return 'failed'

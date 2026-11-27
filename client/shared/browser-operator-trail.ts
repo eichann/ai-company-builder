@@ -18,8 +18,8 @@ import { cleanLabel } from './browser-page'
 export const BROWSER_TRAIL_LIMITS = Object.freeze({
   /** The operator's reason for one step, and for stopping (one line). */
   reason: 200,
-  /** Its working notes as the card shows them (they are ≤ 2000 as it writes them). */
-  notes: 2000,
+  /** Its working notes as the card shows them (they are ≤ 4000 as it writes them: `BROWSER_BROWSE_LIMITS.notes`). */
+  notes: 4000,
   /** Steps shown per run (the largest budget's steps; more are counted, not shown). */
   steps: 60,
   /** A kept-form label or page pattern (already bounded by the run log's rules). */
@@ -43,6 +43,42 @@ export interface BrowserTrailStep {
   reason: string | null
 }
 
+/**
+ * Why the app refused an operator's answer (`parseBrowseAnswer` / `parseWorkAnswer`'s problem), in fixed words: told back
+ * to the operator once in its re-ask, and named on the card's trail when the run then ends on it (`bad-answer`). The
+ * words are the app's, never the operator's.
+ */
+export const BROWSER_ANSWER_PROBLEMS = [
+  'not-json', 'shape', 'keys', 'notes', 'reason', 'ref', 'text', 'option', 'path', 'seconds', 'done', 'stop',
+  'plan', 'plan-keys', 'plan-summary', 'plan-affects', 'plan-unread', 'plan-values', 'plan-value', 'plan-writes',
+] as const
+export type BrowserAnswerProblem = typeof BROWSER_ANSWER_PROBLEMS[number]
+export const BROWSER_ANSWER_PROBLEM_WORDS: Readonly<Record<BrowserAnswerProblem, string>> = {
+  'not-json': '答えが JSON 1つではありませんでした',
+  shape: '答えに "do" がないか、知らない "do" でした',
+  keys: '答えに決まりにない項目があるか、要る項目がありませんでした',
+  notes: 'notes が文字でないか、長すぎました',
+  reason: 'reason が文字ではありませんでした',
+  ref: 'ref が画面にない要素か、その操作に合わない要素でした',
+  text: '入れる文字が長すぎるか、使えない文字がありました',
+  option: 'option が、その select の options にありませんでした',
+  path: 'go の path が、このサイトのアドレスの形ではありませんでした',
+  seconds: 'wait の seconds が 1〜5 ではありませんでした',
+  done: 'done の形が決まりに合いませんでした',
+  stop: 'stop の形が決まりに合いませんでした（why は決まった言葉のどれか）',
+  plan: 'plan は、いまの段階では出せません',
+  'plan-keys': 'plan に決まりにない項目がありました',
+  'plan-summary': 'plan の summary がないか、文字ではありませんでした',
+  'plan-affects': 'plan の affects が文字ではありませんでした',
+  'plan-unread': 'plan の unread の番号が正しくありませんでした',
+  'plan-values': 'plan の values が一覧でないか、多すぎました（10個まで）',
+  'plan-value': 'plan の values の1つが {"label":"…","value":"…"} の形ではありませんでした',
+  'plan-writes': 'plan の writes が決まりに合いませんでした',
+}
+/** A parser's problem as one of the fixed codes (anything else: `shape`). */
+export const answerProblemOf = (problem: string): BrowserAnswerProblem =>
+  ((BROWSER_ANSWER_PROBLEMS as readonly string[]).includes(problem) ? problem as BrowserAnswerProblem : 'shape')
+
 export interface BrowserTrailRun {
   phase: BrowserTrailPhase
   steps: BrowserTrailStep[]
@@ -52,6 +88,8 @@ export interface BrowserTrailRun {
   end: { kind: BrowserTrailEnd; reason: string | null } | null
   /** Its last working notes, or null. */
   notes: string | null
+  /** When the app ended the run on an answer out of its form: which rule it broke (a fixed code; absent otherwise). */
+  problem?: BrowserAnswerProblem
 }
 
 export type BrowserOperatorTrail = BrowserTrailRun[]
@@ -68,6 +106,7 @@ export const BROWSER_TRAIL_WORDS = {
   more: (n: number) => `ほかに ${n} 回の操作（表示していません）`,
   notes: '係の AI の覚え書き',
   noSteps: '操作はしていません。',
+  problem: (words: string) => `アプリが止めました：係の AI の答えの形が決まりに合いませんでした（${words}）。`,
 } as const
 
 // eslint-disable-next-line no-control-regex
@@ -96,6 +135,7 @@ export function createOperatorTrail(phase: BrowserTrailPhase) {
   let more = 0
   let end: BrowserTrailRun['end'] = null
   let notes: string | null = null
+  let problem: BrowserAnswerProblem | null = null
   return {
     step(log: BrowserRunLogStep, reason: unknown): void {
       if (steps.length >= L.steps) { more++; return }
@@ -105,8 +145,10 @@ export function createOperatorTrail(phase: BrowserTrailPhase) {
     },
     end(kind: BrowserTrailEnd, reason: unknown): void { end = { kind, reason: trailLine(reason) } },
     notes(v: unknown): void { if (v !== undefined) notes = trailNotes(v) },
+    /** The app ended the run on an answer out of its form (`bad-answer`): which rule, in fixed words. */
+    problem(code: BrowserAnswerProblem): void { problem = code },
     view(): BrowserTrailRun {
-      return { phase, steps: steps.map(s => ({ ...s })), more, end: end ? { ...end } : null, notes }
+      return { phase, steps: steps.map(s => ({ ...s })), more, end: end ? { ...end } : null, notes, ...(problem ? { problem } : {}) }
     },
   }
 }
@@ -114,7 +156,7 @@ export type OperatorTrailRecorder = ReturnType<typeof createOperatorTrail>
 
 /** The runs that did anything (a step, an end of its own, notes), for a card; none → null (the card shows no memo). */
 export function trailForCard(runs: readonly BrowserTrailRun[]): BrowserOperatorTrail | null {
-  const shown = runs.filter(r => r.steps.length > 0 || r.more > 0 || r.end !== null || r.notes !== null).slice(0, L.runs)
+  const shown = runs.filter(r => r.steps.length > 0 || r.more > 0 || r.end !== null || r.notes !== null || r.problem !== undefined).slice(0, L.runs)
   return shown.length > 0 ? shown : null
 }
 
@@ -143,7 +185,8 @@ export function readBrowserOperatorTrail(v: unknown): BrowserOperatorTrail | nul
       end = { kind: r.end.kind as BrowserTrailEnd, reason: r.end.reason }
     }
     if (!(r.notes === null || (typeof r.notes === 'string' && trailNotes(r.notes) === r.notes))) return null
-    runs.push({ phase: r.phase as BrowserTrailPhase, steps, more: r.more as number, end, notes: r.notes })
+    if (r.problem !== undefined && !(BROWSER_ANSWER_PROBLEMS as readonly unknown[]).includes(r.problem)) return null
+    runs.push({ phase: r.phase as BrowserTrailPhase, steps, more: r.more as number, end, notes: r.notes, ...(r.problem !== undefined ? { problem: r.problem as BrowserAnswerProblem } : {}) })
   }
   return runs
 }

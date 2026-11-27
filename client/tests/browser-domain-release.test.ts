@@ -268,8 +268,8 @@ test('each stop says its own fixed words in the card and the AI\'s sentence', as
   // The site's login, the operator's own word.
   const login = world({ answers: ['{"do":"stop","why":"need-login","unread":[]}'] })
   assert.equal(await login.run(), workWordsForAi({ kind: 'stopped', why: 'need-login' }, [], []))
-  // The operator not answering in its form, or not answering at all.
-  const garbled = world({ answers: ['not json'] })
+  // The operator not answering in its form (asked again once), or not answering at all.
+  const garbled = world({ answers: ['not json', 'not json either'] })
   assert.equal(await garbled.run(), workWordsForAi({ kind: 'stopped', why: 'operator' }, [], []))
   const silent = world({ stepFails: true })
   assert.equal(await silent.run(), workWordsForAi({ kind: 'stopped', why: 'operator' }, [], []))

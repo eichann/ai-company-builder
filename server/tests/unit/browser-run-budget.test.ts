@@ -5,7 +5,7 @@
  * and work fit in its frames run's life; the log keeps every step a budget allows.
  */
 import { describe, expect, it } from 'vitest'
-import { BROWSER_FRAME_RUN_TIMES, BROWSER_RUN_BUDGETS, BROWSER_RUN_MIN_OPERATE_MS, browserRunBudget, browserRunBudgetFor, browserRunWindow } from '../../../shared/core/browser-run-budget'
+import { BROWSER_FRAME_RUN_TIMES, BROWSER_RUN_BUDGETS, BROWSER_RUN_MIN_OPERATE_MS, browserFrameApproveMs, browserRunBudget, browserRunBudgetFor, browserRunWindow } from '../../../shared/core/browser-run-budget'
 import { BROWSER_RUN_LIMITS } from '../../../shared/core/browser-run-log'
 import { BROWSER_FRAME_TIMES } from '../../src/services/browser-frames'
 
@@ -13,12 +13,15 @@ import { BROWSER_FRAME_TIMES } from '../../src/services/browser-frames'
 const AFTER_OPERATING_MS = 60_000
 
 describe('which budget a run gets', () => {
-  it('only a write task\'s run naming an open company Skill\'s frames run gets `skill`', () => {
+  it('only a write task\'s run naming an open company Skill\'s frames run gets `skill`; the same frames run still waiting gets `skill_preview`', () => {
     expect(browserRunBudgetFor({ write: true, frameRun: { source: 'skill', state: 'open' } })).toBe('skill')
-    expect(browserRunBudgetFor({ write: true, frameRun: { source: 'skill', state: 'waiting' } })).toBe('standard')
+    expect(browserRunBudgetFor({ write: true, frameRun: { source: 'skill', state: 'waiting' } })).toBe('skill_preview')
     expect(browserRunBudgetFor({ write: true, frameRun: { source: 'skill', state: 'locked' } })).toBe('standard')
+    expect(browserRunBudgetFor({ write: true, frameRun: { source: 'skill', state: 'ended' } })).toBe('standard')
     expect(browserRunBudgetFor({ write: true, frameRun: { source: 'adhoc', state: 'open' } })).toBe('standard')
+    expect(browserRunBudgetFor({ write: true, frameRun: { source: 'adhoc', state: 'waiting' } })).toBe('standard')
     expect(browserRunBudgetFor({ write: false, frameRun: { source: 'skill', state: 'open' } })).toBe('standard')
+    expect(browserRunBudgetFor({ write: false, frameRun: { source: 'skill', state: 'waiting' } })).toBe('standard')
     expect(browserRunBudgetFor({ write: true, frameRun: null })).toBe('standard')
   })
 
@@ -26,6 +29,7 @@ describe('which budget a run gets', () => {
     expect(browserRunBudget(undefined)).toBe(BROWSER_RUN_BUDGETS.standard)
     expect(browserRunBudget('large')).toBe(BROWSER_RUN_BUDGETS.standard)
     expect(browserRunBudget('skill')).toBe(BROWSER_RUN_BUDGETS.skill)
+    expect(browserRunBudget('skill_preview')).toBe(BROWSER_RUN_BUDGETS.skill_preview)
   })
 })
 
@@ -46,22 +50,33 @@ describe('the times agree', () => {
   })
 
   it('a Skill run whose work starts right after an approval at the card\'s last moment still has its whole budget before the frames run ends', () => {
-    expect(BROWSER_FRAME_RUN_TIMES.approve + BROWSER_RUN_BUDGETS.skill.runMs + AFTER_OPERATING_MS).toBeLessThanOrEqual(BROWSER_FRAME_RUN_TIMES.run)
-    // Its preview is standard and ends before the card's time does.
-    expect(BROWSER_RUN_BUDGETS.standard.runMs).toBeLessThan(BROWSER_FRAME_RUN_TIMES.approve)
+    expect(browserFrameApproveMs('skill') + BROWSER_RUN_BUDGETS.skill.runMs + AFTER_OPERATING_MS).toBeLessThanOrEqual(BROWSER_FRAME_RUN_TIMES.run)
+    expect(browserFrameApproveMs('adhoc') + BROWSER_RUN_BUDGETS.skill.runMs + AFTER_OPERATING_MS).toBeLessThanOrEqual(BROWSER_FRAME_RUN_TIMES.run)
     // The server's frames service uses these very times.
-    expect([BROWSER_FRAME_TIMES.approve, BROWSER_FRAME_TIMES.run]).toEqual([BROWSER_FRAME_RUN_TIMES.approve, BROWSER_FRAME_RUN_TIMES.run])
+    expect([BROWSER_FRAME_TIMES.approve, BROWSER_FRAME_TIMES.approveSkill, BROWSER_FRAME_TIMES.run])
+      .toEqual([BROWSER_FRAME_RUN_TIMES.approve, BROWSER_FRAME_RUN_TIMES.approveSkill, BROWSER_FRAME_RUN_TIMES.run])
+  })
+
+  it('a Skill\'s frames run (made before its preview) waits for its whole preview budget and then still gives the card the ad-hoc card\'s time', () => {
+    // The preview's run is capped at the waiting frames run's end: a preview started at once keeps its whole budget…
+    expect(browserRunWindow(BROWSER_RUN_BUDGETS.skill_preview, 0, browserFrameApproveMs('skill')))
+      .toEqual({ endsAt: BROWSER_RUN_BUDGETS.skill_preview.runMs, operateMs: BROWSER_RUN_BUDGETS.skill_preview.operateMs })
+    // …and the card still has at least what an ad-hoc plan's card has after it.
+    expect(browserFrameApproveMs('skill') - BROWSER_RUN_BUDGETS.skill_preview.runMs).toBeGreaterThanOrEqual(BROWSER_FRAME_RUN_TIMES.approve)
+    // An ad-hoc plan's frames run is made after its (standard) preview: its wait is the card's alone.
+    expect(browserFrameApproveMs('adhoc')).toBe(BROWSER_FRAME_RUN_TIMES.approve)
   })
 
   it('the run log keeps every step a budget allows', () => {
     for (const b of Object.values(BROWSER_RUN_BUDGETS)) expect(b.steps).toBeLessThanOrEqual(BROWSER_RUN_LIMITS.steps)
   })
 
-  it('today\'s numbers (stated in the PR): standard 20 steps / 5 min / 6 min, skill 60 / 15 / 17, frames 10 / 30 min', () => {
+  it('today\'s numbers (stated in the PR): standard 20 steps / 5 min / 6 min, skill 60 / 15 / 17, skill_preview 40 / 10 / 11, frames 10 (a Skill\'s 21) / 40 min', () => {
     expect(BROWSER_RUN_BUDGETS).toEqual({
       standard: { steps: 20, operateMs: 300_000, runMs: 360_000 },
       skill: { steps: 60, operateMs: 900_000, runMs: 1_020_000 },
+      skill_preview: { steps: 40, operateMs: 600_000, runMs: 660_000 },
     })
-    expect(BROWSER_FRAME_RUN_TIMES).toEqual({ approve: 600_000, run: 1_800_000 })
+    expect(BROWSER_FRAME_RUN_TIMES).toEqual({ approve: 600_000, approveSkill: 1_260_000, run: 2_400_000 })
   })
 })

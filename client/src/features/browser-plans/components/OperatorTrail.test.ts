@@ -5,7 +5,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import React from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { BROWSER_TRAIL_WORDS as W, type BrowserOperatorTrail } from '../../../../shared/browser-operator-trail'
+import { BROWSER_ANSWER_PROBLEM_WORDS, BROWSER_TRAIL_WORDS as W, type BrowserOperatorTrail } from '../../../../shared/browser-operator-trail'
 import { InspectionBody } from './BrowserInspectionCard'
 
 const TRAIL: BrowserOperatorTrail = [{
@@ -35,6 +35,13 @@ test('the card shows the operator\'s memo collapsed, labelled as its own words, 
   assert.ok(memo.includes('&lt;img src=x onerror=alert(1)&gt;'))
   assert.ok(memo.includes(`${W.stopReason}：確認の画面で、どちらの回か決められないため`))
   assert.ok(memo.includes('押した「検索する」'))
+})
+
+test('a run the app ended on an answer out of form names the rule it broke, in the app\'s fixed words', () => {
+  const ended: BrowserOperatorTrail = [{ phase: 'preview', steps: [], more: 0, end: null, notes: null, problem: 'plan-unread' }]
+  const html = renderToStaticMarkup(React.createElement(InspectionBody, { view: { card, readAt: '2026-11-27T00:00:00.000Z', siteLabel: 'shop.example.test', trail: ended } }))
+  assert.ok(html.includes(W.problem(BROWSER_ANSWER_PROBLEM_WORDS['plan-unread'])))
+  assert.equal(html.includes(W.appEnded), false)
 })
 
 test('a card without a trail shows no memo', () => {

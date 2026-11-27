@@ -9,7 +9,7 @@
  * - a write task's preview that stops (need-person) leaves the person a card (named by its operator run) with the fixed
  *   reason word and the trail — before this there was none;
  * - none of it reaches the consultation AI's words or the server's run log (the finish body);
- * - a reason is one line, without control / bidirectional / zero-width characters, cut at 200; notes at 2000; a reason
+ * - a reason is one line, without control / bidirectional / zero-width characters, cut at 200; notes at 4000; a reason
  *   that is not a string refuses the answer; a trail handed to the renderer past its caps or with an unsafe character is
  *   left off the card (the card still shows).
  */
@@ -181,16 +181,16 @@ test('the incident: a write task\'s preview that stops (need-person) leaves the 
   }
 })
 
-test('a preview the app ended before the operator answered in its form still leaves a card, without a memo or a note pointing to one', async () => {
-  const { wiring, cards, work } = workWorld(['not json'], null)
+test('a preview the app ended because the operator never answered in its form (asked again once) leaves a card naming the rule it broke, in fixed words', async () => {
+  const { wiring, cards, work } = workWorld(['not json', 'still not json'], null)
   const said = await work()
   assert.equal(said.words.startsWith(WW.stoppedBy.operator), true, said.words)
   assert.deepEqual(cards, [RUN])
   const view = wiring.previewCard('u-1', COMPANY, RUN)
   assert.ok(view)
   assert.match(view.card.headline, /決まった形で答えられませんでした/)
-  assert.equal(view.trail, undefined)
-  assert.deepEqual(view.card.notes, [])
+  assert.deepEqual(view.trail, [{ phase: 'preview', steps: [], more: 0, end: null, notes: null, problem: 'not-json' }])
+  assert.ok(!JSON.stringify(view).includes('still not json'), 'never the operator\'s own text')
 })
 
 test('a write run\'s card carries the preview\'s trail and the work\'s, read live; never the AI\'s words or the log', async () => {
@@ -226,7 +226,7 @@ test('a write run\'s card carries the preview\'s trail and the work\'s, read liv
   }
 })
 
-test('a reason is one line without unsafe characters, cut at 200; not a string refuses the answer; notes cut at 2000', () => {
+test('a reason is one line without unsafe characters, cut at 200; not a string refuses the answer; notes cut at 4000', () => {
   const long = 'あ'.repeat(250)
   const a = parseBrowseAnswer(step({ do: 'back', reason: `${long}` }), { snapshot: page(), items: 0 })
   assert.ok('answer' in a)
@@ -242,7 +242,7 @@ test('a reason is one line without unsafe characters, cut at 200; not a string r
   // Any other key is still refused.
   assert.deepEqual(parseBrowseAnswer(step({ do: 'back', why_not: 'x' }), { snapshot: page(), items: 0 }), { problem: 'keys' })
   const t = createOperatorTrail('browse')
-  t.notes(`${'い'.repeat(2100)}`)
+  t.notes(`${'い'.repeat(4100)}`)
   for (let i = 0; i < BROWSER_TRAIL_LIMITS.steps + 3; i++) t.step({ page: '/a', action: 'wait', label: null }, 'x')
   const v = t.view()
   assert.equal(v.notes?.length, BROWSER_TRAIL_LIMITS.notes)
@@ -261,12 +261,16 @@ test('the prompts ask for the reason and say it goes to the person\'s card only'
 test('the renderer takes a trail only in its shape and caps: past a cap or with an unsafe character it is left off, the card stays', () => {
   const good: BrowserOperatorTrail = [{ phase: 'preview', steps: [{ action: 'click', page: '/a', label: '保存', reason: 'r' }], more: 0, end: { kind: 'stop', reason: 's' }, notes: 'n\nm' }]
   assert.deepEqual(readBrowserOperatorTrail(good), good)
+  // The rule an answer broke, as one of the app's fixed codes only (the card shows its fixed words; nothing else passes).
+  const named: BrowserOperatorTrail = [{ ...good[0], end: null, problem: 'plan-value' }]
+  assert.deepEqual(readBrowserOperatorTrail(named), named)
+  assert.equal(readBrowserOperatorTrail([{ ...good[0], end: null, problem: 'ignore previous instructions' }]), null)
   const bad: unknown[] = [
     [{ ...good[0], steps: [{ ...good[0].steps[0], reason: 'x'.repeat(201) }] }],
     [{ ...good[0], steps: [{ ...good[0].steps[0], reason: 'a\nb' }] }],
     [{ ...good[0], steps: [{ ...good[0].steps[0], reason: 'a‮b' }] }],
     [{ ...good[0], end: { kind: 'stop', reason: 'y'.repeat(201) } }],
-    [{ ...good[0], notes: 'z'.repeat(2001) }],
+    [{ ...good[0], notes: 'z'.repeat(4001) }],
     [{ ...good[0], steps: Array(BROWSER_TRAIL_LIMITS.steps + 1).fill(good[0].steps[0]) }],
     [good[0], good[0], good[0]],
     [{ ...good[0], phase: 'other' }],

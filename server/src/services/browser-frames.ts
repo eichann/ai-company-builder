@@ -46,7 +46,7 @@ import { browserSkillDeclarationFrom, BROWSER_SKILL_PROBLEM_WORDS, type BrowserS
 import { BROWSER_DEVICE_WORDS } from '../../shared/core/browser-device'
 import { browserAdhocWritesProblem, browserFrameMismatch, BROWSER_FRAME_REQUEST_LIMITS, type BrowserFrameRequest, type BrowserMadeIds } from '../../shared/core/browser-frame-match'
 import { browserMadeFrom } from '../../shared/core/browser-skill'
-import { BROWSER_FRAME_RUN_TIMES } from '../../shared/core/browser-run-budget'
+import { BROWSER_FRAME_RUN_TIMES, browserFrameApproveMs } from '../../shared/core/browser-run-budget'
 import { canonicalJson } from '../../shared/core/fixed-content'
 import type {
   BrowserFrameConfirmAnswer, BrowserFramePermit, BrowserFrameReportAnswer, BrowserFrameRunStart, BrowserFrameRunView, BrowserFrameWriteResult,
@@ -98,6 +98,8 @@ export interface BrowserFrameDeps {
 export const BROWSER_FRAME_TIMES = {
   /** A run waiting for the person's approval of its plan ends after this (shared/core/browser-run-budget.ts: the app's card waits as long). */
   approve: BROWSER_FRAME_RUN_TIMES.approve,
+  /** A Skill's run (made before its preview) waits this long: its preview's budget and then the card's time (`browserFrameApproveMs`). */
+  approveSkill: BROWSER_FRAME_RUN_TIMES.approveSkill,
   /** A run ends this long after it started, whatever its state (its unused frames are gone; room for a Skill run's work). */
   run: BROWSER_FRAME_RUN_TIMES.run,
   /** A permit is good for this long (the app sends only within it). */
@@ -213,9 +215,9 @@ export function createBrowserFrameService(deps: BrowserFrameDeps) {
     return (sameStart ? mono - (w.permittedMonoMs as number) : mono) >= window
   }
 
-  /** When a run not ended ends by its times: a waiting one at its card's time, any other at its hour. */
+  /** When a run not ended ends by its times: a waiting one at its card's time (a Skill's: after its preview's too), any other at its hour. */
   const endsAt = (run: FrameRunRow): number =>
-    run.state === 'waiting' ? Math.min(ms(run.createdAt) + BROWSER_FRAME_TIMES.approve, ms(run.expiresAt)) : ms(run.expiresAt)
+    run.state === 'waiting' ? Math.min(ms(run.createdAt) + browserFrameApproveMs(run.source), ms(run.expiresAt)) : ms(run.expiresAt)
 
   /** `RunEnds`: the run ended, its unused frames gone (a permitted write is left to its report or time-out). */
   function endRun(companyId: string, run: FrameRunRow, reason: string, now: number): void {

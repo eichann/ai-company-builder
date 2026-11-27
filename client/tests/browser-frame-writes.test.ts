@@ -22,7 +22,7 @@ import { readdirSync, readFileSync } from 'node:fs'
 import assert from 'node:assert/strict'
 import {
   BROWSER_WORK_CARD_WORDS as CW, BROWSER_WORK_WORDS as W, afterReadAddress, beforeReadAddress, createdIdOf, frameRequestFor, parseWorkAnswer,
-  pickFrame, readHeldWrite, sentFields, workFrameOf, workResultCard, workWordsForAi,
+  pickFrame, readHeldWrite, sentFields, workFrameOf, workResultCard, workRetrySentence, workWordsForAi,
   type HeldBody, type HeldPageWrite, type HeldPageWriteAnswer, type WorkFrame,
 } from '../shared/browser-frame-writes'
 import { readBrowserPageSnapshot, type BrowserBrowseSurface, type BrowserPageSnapshot } from '../shared/browser-browse'
@@ -129,6 +129,77 @@ test('the operator\'s answers are read strictly: a plan only in the preview, an 
   assert.deepEqual(parseWorkAnswer(plan(), { ...ctx, phase: 'work', adhoc: false }), { problem: 'plan' })
   assert.deepEqual(parseWorkAnswer('{"do":"done","result":"x","unread":[]}', { ...ctx, phase: 'preview', adhoc: false }), { problem: 'done' })
   assert.deepEqual(parseWorkAnswer('{"do":"done","result":"x","unread":[],"extra":1}', { ...ctx, phase: 'work', adhoc: false }), { problem: 'done' })
+})
+
+test('a plan\'s slips of form are taken where that is safe: a Skill run\'s writes null as none, overlong words cut with an ellipsis; keys, types, numbers and an ad-hoc plan\'s writes stay strict', () => {
+  const ctx = { snapshot: null, items: 2, domain: HOST, phase: 'preview' as const }
+  const plan = (over: Record<string, unknown>) => JSON.stringify({ do: 'plan', summary: 'クーポンを1つ作ります', affects: '', values: [], unread: [], ...over })
+  // `writes: null` on a Skill run (its frames are the server's) reads as none; on an ad-hoc run it is still refused.
+  const skill = parseWorkAnswer(plan({ writes: null }), { ...ctx, adhoc: false })
+  assert.ok('answer' in skill && skill.answer.do === 'plan' && skill.answer.writes === null)
+  assert.deepEqual(parseWorkAnswer(plan({ writes: null }), { ...ctx, adhoc: true }), { problem: 'plan-writes' })
+  assert.deepEqual(parseWorkAnswer(plan({ writes: [] }), { ...ctx, adhoc: false }), { problem: 'plan-writes' })
+  // Overlong words for the card are cut to their caps (the long action list of the production trial), never refused.
+  const long = parseWorkAnswer(plan({ summary: 'あ'.repeat(1500), affects: 'い'.repeat(600), values: [{ label: 'う'.repeat(50), value: `${'え'.repeat(300)}末尾` }] }), { ...ctx, adhoc: false })
+  assert.ok('answer' in long && long.answer.do === 'plan')
+  const p = long.answer as Extract<typeof long.answer, { do: 'plan' }>
+  assert.equal(p.summary.length, 1000)
+  assert.ok(p.summary.endsWith('…'))
+  assert.equal(p.affects.length, 500)
+  assert.equal(p.values[0].label.length, 40)
+  assert.equal(p.values[0].value.length, 200)
+  assert.ok(p.values[0].value.endsWith('…') && !p.values[0].value.includes('末尾'))
+  // A cut never leaves half a character (a surrogate pair stays whole or goes).
+  const emoji = parseWorkAnswer(plan({ summary: '😀'.repeat(600) }), { ...ctx, adhoc: false })
+  assert.ok('answer' in emoji && emoji.answer.do === 'plan')
+  const cutSummary = (emoji.answer as Extract<typeof emoji.answer, { do: 'plan' }>).summary
+  assert.ok(cutSummary.length <= 1000 && /^(😀)+…$/u.test(cutSummary), cutSummary.slice(-4))
+  // What still refuses, each naming its rule: an unknown key, a wrong type, an empty summary, a bad number, too many values.
+  assert.deepEqual(parseWorkAnswer(plan({ extra: 1 }), { ...ctx, adhoc: false }), { problem: 'plan-keys' })
+  assert.deepEqual(parseWorkAnswer(plan({ summary: 3 }), { ...ctx, adhoc: false }), { problem: 'plan-summary' })
+  assert.deepEqual(parseWorkAnswer(plan({ summary: '  ' }), { ...ctx, adhoc: false }), { problem: 'plan-summary' })
+  assert.deepEqual(parseWorkAnswer(plan({ affects: ['x'] }), { ...ctx, adhoc: false }), { problem: 'plan-affects' })
+  assert.deepEqual(parseWorkAnswer(plan({ unread: [3] }), { ...ctx, adhoc: false }), { problem: 'plan-unread' })
+  assert.deepEqual(parseWorkAnswer(plan({ values: new Array(11).fill({ label: 'a', value: 'b' }) }), { ...ctx, adhoc: false }), { problem: 'plan-values' })
+  assert.deepEqual(parseWorkAnswer(plan({ values: [{ label: 'a', value: 2 }] }), { ...ctx, adhoc: false }), { problem: 'plan-value' })
+  assert.deepEqual(parseWorkAnswer(plan({ values: [{ label: 'a', value: 'b', note: 'c' }] }), { ...ctx, adhoc: false }), { problem: 'plan-value' })
+})
+
+test('an answer out of form is asked again once, within the run\'s steps, with the app\'s fixed words; a second slip ends the run and the card\'s trail names the rule', async () => {
+  // A slip, then a good plan: the card comes, and the re-ask told only the rule, in the app's words.
+  const once = workWorld({ answers: [JSON.stringify({ do: 'plan', summary: 'x', values: [], unread: [], color: 'red' }), SKILL_PLAN], frameStart: () => ({ kind: 'ok', value: started({ needsApproval: true }) }) })
+  const running = once.tool.execute({ site: HOST, task: 'いつものクーポン', skill: 'coupons' })
+  try {
+    for (let i = 0; i < 100 && once.cards.length === 0; i++) await new Promise(resolve => setTimeout(resolve, 5))
+    assert.deepEqual(once.cards, [FRAME_RUN], 'the plan of the second answer reached the card')
+    assert.equal(once.w.materials.length, 2)
+    assert.equal((once.w.materials[0] as { retry?: unknown }).retry, undefined)
+    assert.equal((once.w.materials[1] as { retry?: unknown }).retry, workRetrySentence('plan-keys'))
+    assert.ok(!JSON.stringify(once.w.materials[1]).includes('red'), 'never the operator\'s own slip')
+    // Each answer is one of the run's steps (the server was asked before each).
+    assert.equal(once.w.continues, 2)
+  } finally {
+    // The card waits for ［任せる］ (minutes): let it go whatever was asserted, so the test never hangs on it.
+    once.wiring.cancel(COMPANY, FRAME_RUN)
+    await Promise.race([running, new Promise(resolve => setTimeout(resolve, 1000).unref())])
+  }
+
+  // Two slips in a row: the run ends (bad-answer), the stopped preview's card names the rule in fixed words.
+  const twice = workWorld({ answers: ['not json at all', JSON.stringify({ do: 'plan', summary: '', values: [], unread: [] })], frameStart: () => ({ kind: 'ok', value: started({ needsApproval: true }) }) })
+  const said = await twice.tool.execute({ site: HOST, task: 'いつものクーポン', skill: 'coupons' })
+  assert.equal(said, workWordsForAi({ kind: 'stopped', why: 'operator' }, [], []))
+  assert.equal(twice.w.materials.length, 2)
+  assert.ok(String(twice.w.calls.find(c => c.startsWith('runFinish'))).includes('bad-answer'))
+  const card = twice.wiring.previewCard('u-1', COMPANY, `bo_${'a'.repeat(32)}`)
+  assert.equal(card?.trail?.[0].problem, 'plan-summary')
+  assert.equal(readBrowserCard(card?.card) !== null, true)
+  // Out of form at the last of the run's steps: no re-ask past the budget — the run ends on the slip, named, not on rounds.
+  const steps = BROWSER_RUN_BUDGETS.standard.steps
+  const last = workWorld({ answers: [...new Array(steps - 1).fill('{"do":"wait","seconds":1}'), 'nope'], frameStart: () => ({ kind: 'ok', value: started({ needsApproval: true }) }) })
+  await last.tool.execute({ site: HOST, task: 'いつものクーポン', skill: 'coupons' })
+  assert.equal(last.w.materials.length, steps)
+  assert.ok(String(last.w.calls.find(c => c.startsWith('runFinish'))).includes('bad-answer'))
+  assert.equal(last.wiring.previewCard('u-1', COMPANY, `bo_${'a'.repeat(32)}`)?.trail?.[0].problem, 'not-json')
 })
 
 // ── The writer: one at a time, once, never past a frame ─────────────────────────────────────────────────────────────
@@ -383,11 +454,19 @@ interface WorkWorld {
   skillSteps?: (skill: string) => string | null
   /** The window starts closed; the controller's `windowForRun` opens it (true) or has nothing to open (false). */
   reopens?: boolean
+  /** The screen image each operator step got (decoded), in order. */
+  images: Array<string | null>
+  /** The material each operator step got, in order. */
+  materials: unknown[]
+  /** How often the server was asked before a step (`continue`). */
+  continues: number
 }
+
+const SCREEN_MARKER = 'ACB-SCREEN-4b9d'
 
 function workWorld(over: Partial<WorkWorld> = {}) {
   const w: WorkWorld = {
-    calls: [], answers: [], site: { requests: [], answer: ok201 }, reads: {},
+    calls: [], answers: [], site: { requests: [], answer: ok201 }, reads: {}, images: [], materials: [], continues: 0,
     frameStart: body => ({ kind: 'ok', value: started({ needsApproval: true, adhoc: 'plan' in (body as object) }) }),
     runStart: () => ({ kind: 'ok', value: { runId: `bo_${'a'.repeat(32)}`, leaseMs: 120_000 } }),
     runFinish: async () => ({ kind: 'ok', value: {} }),
@@ -399,11 +478,14 @@ function workWorld(over: Partial<WorkWorld> = {}) {
     ...over,
   }
   let permits = 0
+  let shots = 0
   let hooks: Parameters<BrowserBrowseSurface['enter']>[1]
   const surface: BrowserBrowseSurface = {
     async enter(_stopped, work) { hooks = work; w.calls.push('enter'); return true },
     async leave() { w.calls.push('leave') },
     async snapshot() { return snapshot() },
+    // The screen of this moment (memory only, for the operator): a marker no other channel could carry by chance.
+    async screenshot() { return { mediaType: 'image/jpeg', data: new TextEncoder().encode(`${SCREEN_MARKER}-${++shots}`) } },
     async act(action) {
       w.calls.push(`act ${action.do}`)
       // 保存 makes the page's write (to the frame), 自動保存 one outside it.
@@ -420,7 +502,7 @@ function workWorld(over: Partial<WorkWorld> = {}) {
   }
   const api = {
     async runStart(_c: string, body: { host: string; write?: true; frameRunId?: string }) { w.calls.push(`runStart ${body.write ? 'write' : ''} ${body.frameRunId ?? ''}`.trim()); return w.runStart(body) },
-    async runContinue() { return { kind: 'ok', value: {} } as BrowserLinesAnswer },
+    async runContinue() { w.continues++; return { kind: 'ok', value: {} } as BrowserLinesAnswer },
     async runFinish(_c: string, _r: string, body: unknown) { const a = await w.runFinish(); w.calls.push(`runFinish ${JSON.stringify(body)}`); return a },
     async frameStart(_c: string, body: unknown) { w.calls.push(`frameStart ${JSON.stringify(body)}`); return w.frameStart(body) },
     async frameApprove(_c: string, _r: string, body: { planHash: string; approvalToken: string }) { w.calls.push(`frameApprove ${body.approvalToken === TOKEN}`); return w.frameApprove() },
@@ -436,6 +518,8 @@ function workWorld(over: Partial<WorkWorld> = {}) {
     async resolve() { return { ok: true, cli: { path: '/bin/claude', pathDirs: [] } } },
     async step(job) {
       w.calls.push(`step ${job.prompt}`)
+      w.images.push(job.image ? new TextDecoder().decode(job.image.data) : null)
+      w.materials.push(job.material)
       w.onStep?.(job.prompt)
       return { ok: true, text: w.answers[steps++] ?? '{"do":"stop","why":"blocked","unread":[]}' }
     },
@@ -473,6 +557,18 @@ const SKILL_PLAN = JSON.stringify({ do: 'plan', summary: 'クーポンを作り�
 const CLICK_SAVE = '{"do":"click","ref":1}'
 const DONE_PLAIN = JSON.stringify({ do: 'done', result: '作りました', unread: [] })
 const DONE = JSON.stringify({ do: 'done', result: `${INJECTION} 冬のクーポン 4242 を作りました`, unread: [2], checks: [{ item: '名前', before: '秋のクーポン', after: '冬のクーポン', compared: '秋のクーポン', ok: false }], compared_name: '前の回' })
+
+test('the screen image reaches only the operator, in the preview and the work alike: never the card, the consultation AI\'s words, the server or the site', async () => {
+  const { w, wiring, tool, cards } = workWorld({ answers: [PLAN, CLICK_SAVE, DONE] })
+  const words = tool.execute({ site: HOST, task: 'クーポンを作って', items: ['名前', '番号'] })
+  for (let i = 0; i < 50 && cards.length === 0; i++) await new Promise(resolve => setTimeout(resolve, 5))
+  await wiring.approve(COMPANY, FRAME_RUN, PLAN_HASH)
+  const said = await words
+  assert.deepEqual(w.images, [`${SCREEN_MARKER}-1`, `${SCREEN_MARKER}-2`, `${SCREEN_MARKER}-3`], 'each step its own screen')
+  for (const [where, value] of [['words', said], ['card', wiring.card(COMPANY, FRAME_RUN)], ['server calls', w.calls], ['site', w.site.requests]] as const) {
+    assert.ok(!JSON.stringify(value).includes(SCREEN_MARKER), `no image in the ${where}`)
+  }
+})
 
 test('an ad-hoc plan writes only after the card\'s ［任せる］: the AI\'s path cannot approve, the value never leaves the wiring', async () => {
   const { w, wiring, tool, cards } = workWorld({ answers: [PLAN, CLICK_SAVE, DONE] })
@@ -695,12 +791,26 @@ test('the work operates no longer than the server said (never past the frames ru
   assert.equal(late.w.site.requests.length, 0)
 })
 
+test('a Skill\'s card still waits after a preview as long as an ad-hoc card\'s whole time: its frames run was made before the preview, and the server keeps it waiting for the preview\'s budget too', async () => {
+  let t = 1_000_000
+  const long = workWorld({
+    now: () => t,
+    onStep: prompt => { if (prompt === 'work-preview') t += BROWSER_FRAME_RUN_TIMES.approve },
+    answers: [SKILL_PLAN], frameStart: () => ({ kind: 'ok', value: started({ needsApproval: true }) }),
+  })
+  const running = long.tool.execute({ site: HOST, task: 'いつものクーポン', skill: 'coupons' })
+  const said = await Promise.race([running, new Promise<string>(resolve => setTimeout(() => resolve('still waiting'), 300).unref())])
+  assert.equal(said, 'still waiting', 'the card is still up for ［任せる］')
+  assert.equal(long.wiring.cancel(COMPANY, FRAME_RUN)?.ok, true, '［やめる］ still reaches the waiting card')
+  assert.equal(await running, workWordsForAi({ kind: 'stopped', why: 'not-approved' }, [], []))
+})
+
 test('the card waits no longer than the server keeps the frames run waiting: counted from when the run was asked for, so a long preview leaves less', async () => {
   let t = 1_000_000
   const late = workWorld({
     now: () => t,
-    // The preview's one step takes the whole of the server's approval time.
-    onStep: prompt => { if (prompt === 'work-preview') t += BROWSER_FRAME_RUN_TIMES.approve },
+    // The preview's one step takes the whole of the server's approval time (a Skill's: its preview budget and the card's).
+    onStep: prompt => { if (prompt === 'work-preview') t += BROWSER_FRAME_RUN_TIMES.approveSkill },
     answers: [SKILL_PLAN], frameStart: () => ({ kind: 'ok', value: started({ needsApproval: true }) }),
   })
   const said = await Promise.race([

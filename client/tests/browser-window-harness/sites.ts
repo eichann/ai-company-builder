@@ -38,6 +38,25 @@ const BROWSE_PAGE = `<!doctype html><meta charset="utf-8"><title>events</title>
 <script>document.addEventListener('click', e => { (window.__clicks = window.__clicks || []).push(e.target.id || e.target.tagName) }, true)</script>`
 
 /**
+ * A fictional folder tree driven by script alone (agent-browser.md "The operator sees the screen"): no link or button —
+ * the list has a pointer cursor and one click handler for its items (event delegation), each item made of spans; a card (a focusable part inside it)
+ * whose click handler saves by fetch (a write the gate must hold back however the press reached it); a tree item whose
+ * label is data (never a run-log label) and a visible file input with a tabindex (never listed: no file chooser).
+ */
+const TREE_PAGE = `<!doctype html><meta charset="utf-8"><title>folders</title>
+<style>#tree { cursor: pointer; list-style: none } #card { cursor: pointer; border: 1px solid #888; width: 200px }</style>
+<div id="side"><ul id="tree"><li data-f="1"><span>▸</span><span>キャンペーン</span></li><li data-f="2"><span>▸</span><span>未分類</span></li><li data-f="3"><span>▸</span><span>アーカイブ</span></li></ul></div>
+<div id="card"><span>すぐ反映</span><span tabindex="0">（下書き）</span></div>
+<div role="treeitem" aria-label="秘密のフォルダ 88123">秘密のフォルダ 88123</div>
+<input id="upload" type="file" tabindex="0" aria-label="アップロード" style="cursor: pointer">
+<p id="shown">フォルダを選んでください</p>
+<script>
+const mark = id => (window.__clicks = window.__clicks || []).push(id)
+document.getElementById('tree').addEventListener('click', e => { const li = e.target.closest('li'); if (!li) return; document.getElementById('shown').textContent = li.textContent.replace('▸', '') + ' の中身'; mark('f' + li.dataset.f) })
+document.getElementById('card').addEventListener('click', () => { mark('card'); fetch('/browse-tree-save', { method: 'POST', body: 't' }) })
+</script>`
+
+/**
  * A write run (agent-browser.md "Writes within frames, in the app"): the page's own script saves by fetch with a CSRF
  * header and body field (the answer sets a cookie the page must never get), makes a write whose answer is lost, an
  * autosave outside the plan, an upload with a file, and reads an address the run must not read.
@@ -266,6 +285,11 @@ export async function startSites(certDir: string, ports: { site: number; evil: n
       if (host === 'op.test' && url === '/work/lost') { state.work.push({ path: url, name: '', cookie: '', csrf: '', start: Date.now(), end: 0 }); req.socket.destroy(); return }
       // A page that never answers (the operator's navigation must still end when stopped).
       if (host === 'op.test' && url === '/browse-hang') return
+      if (host === 'op.test' && url === '/browse-tree') {
+        res.setHeader('content-type', 'text/html; charset=utf-8')
+        res.end(TREE_PAGE)
+        return
+      }
       if (host === 'op.test' && (url === '/browse' || url === '/browse-next')) {
         res.setHeader('content-type', 'text/html; charset=utf-8')
         res.end(url === '/browse' ? BROWSE_PAGE : '<!doctype html><meta charset="utf-8"><title>next</title><p>次のページ</p>')
