@@ -7,7 +7,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { drawScreenMarks, markLabelSize, screenMarks } from '../shared/browser-screen-marks'
-import { readBrowserPageSnapshot } from '../shared/browser-browse'
+import { browseMaterial, readBrowserPageSnapshot } from '../shared/browser-browse'
 
 const HOST = 'shop.example.test'
 
@@ -75,4 +75,28 @@ test('the number is drawn on the pixels at the box\'s corner, the outline on its
   const short = new Uint8Array(10).fill(1)
   drawScreenMarks(short, 10, 10, [{ ref: 1, x: 0, y: 0, w: 5, h: 5 }])
   assert.deepEqual(Array.from(short), new Array(10).fill(1))
+})
+
+test('the first element\'s mark is drawn on top (the snapshot lists an open menu\'s elements first): where two overlap, the first one\'s label shows', () => {
+  const width = 120
+  const height = 80
+  const bitmap = new Uint8Array(width * height * 4).fill(255)
+  // ref 0 (the menu's choice) and ref 8 (the row behind it) share a corner: the 0's label must not be painted over.
+  drawScreenMarks(bitmap, width, height, [{ ref: 0, x: 20, y: 40, w: 60, h: 30 }, { ref: 8, x: 20, y: 40, w: 60, h: 30 }])
+  const px = (x: number, y: number) => Array.from(bitmap.subarray((y * width + x) * 4, (y * width + x) * 4 + 4))
+  const label = markLabelSize(0)
+  // The 0's middle row lights its left and right cells and leaves its centre dark; an 8 lights the centre of its middle row.
+  assert.deepEqual(px(20 + 2 + 4, 40 - label.h + 2 + 6 + 1), [0x20, 0x20, 0xe0, 0xff])
+})
+
+test('the snapshot counts the usable elements left out past the cap (told to the operator as elementsLeftOut)', () => {
+  const many = Array.from({ length: 405 }, (_, i) => ({ ref: i, role: 'button', name: `b${i}`, logLabel: '' }))
+  const page = readBrowserPageSnapshot(JSON.stringify({ address: 'https://shop.example.test/a', title: 't', text: '', elements: many, omitted: 20, viewport: [1000, 500] }), 'shop.example.test')!
+  assert.equal(page.elements.length, 400)
+  assert.equal(page.omitted, 25)
+  const material = browseMaterial({ task: 't', items: [], page, history: [], round: 0 }) as { page: { elementsLeftOut?: number } }
+  assert.equal(material.page.elementsLeftOut, 25)
+  const none = readBrowserPageSnapshot(JSON.stringify({ address: 'https://shop.example.test/a', title: 't', text: '', elements: [], omitted: -3 }), 'shop.example.test')!
+  assert.equal(none.omitted, undefined)
+  assert.equal((browseMaterial({ task: 't', items: [], page: none, history: [], round: 0 }) as { page: Record<string, unknown> }).page.elementsLeftOut, undefined)
 })

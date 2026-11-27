@@ -23,9 +23,10 @@ import type { BrowserLinesAnswer, BrowserRunsApi } from '../electron/features/br
 import type { PreviewOperator } from '../electron/features/browser/preview'
 import { browserInspectForTurn, browserBrowseDescription } from '../electron/browser-request/inspect-tool'
 import {
-  BROWSER_BROWSE_WORDS as W, browseLogStep, parseBrowseAnswer, readBrowserPageSnapshot,
-  type BrowserBrowseAction, type BrowserBrowseSurface, type BrowserPageSnapshot,
+  BROWSER_BROWSE_LIMITS, BROWSER_BROWSE_WORDS as W, BROWSER_OPERATOR_BROWSE_PROMPT, browseLogStep, pageWithScreen, parseBrowseAnswer, readBrowserAim, readBrowserPageSnapshot,
+  type BrowserAim, type BrowserBrowseAction, type BrowserBrowseSurface, type BrowserPageSnapshot,
 } from '../shared/browser-browse'
+import { BROWSER_OPERATOR_WORK_PREVIEW_PROMPT, BROWSER_OPERATOR_WORK_PROMPT } from '../shared/browser-frame-writes'
 import { browserRunLogProblem } from '../../shared/core/browser-run-log'
 import { readBrowserCard } from '../shared/browser-inspection'
 import { BROWSER_CATALOG_NONE } from '../shared/browser-tool-catalog'
@@ -417,4 +418,89 @@ test('the snapshot and the log step: a password value never kept, another site\'
   assert.deepEqual(browseLogStep({ do: 'go', path: '/entries/88123' }, page(), HOST), { page: '/entries/{n}', action: 'go', label: null })
   assert.deepEqual(browseLogStep({ do: 'click', ref: 6 }, page(), HOST), { page: '/events?page&q', action: 'click', label: null }, 'a row\'s text is never a stored label')
   assert.ok('problem' in parseBrowseAnswer('{"do":"wait","seconds":9}', { snapshot: p, items: 0 }))
+})
+
+// ── Pressing by position (owner 2026-11-27: the operator points at the screen image; agent-browser.md "Pressing by position")
+
+/** The page with a viewport of 1000 × 600 CSS pixels; its screen image 500 × 300 (half: a downscale, a pixel ratio). */
+function viewed(): BrowserPageSnapshot {
+  return { ...page(), viewport: [1000, 600] }
+}
+const shot = (bytes = 10) => ({ mediaType: 'image/jpeg' as const, data: new Uint8Array(bytes), width: 500, height: 300 })
+
+test('a press by position is given in the screen image\'s pixels and mapped onto the viewport; never without the image the operator got, never outside it, never with a ref too', () => {
+  const at = pageWithScreen(viewed(), shot())
+  assert.deepEqual(at.screen, [500, 300])
+  const ctx = { snapshot: at, items: 0 }
+  assert.deepEqual(parseBrowseAnswer('{"do":"click","x":250,"y":150}', ctx), { answer: { do: 'click', x: 501, y: 301 } })
+  assert.deepEqual(parseBrowseAnswer('{"do":"click","x":0,"y":0}', ctx), { answer: { do: 'click', x: 1, y: 1 } })
+  assert.deepEqual(parseBrowseAnswer('{"do":"click","x":499,"y":299}', ctx), { answer: { do: 'click', x: 999, y: 599 } })
+  for (const bad of ['{"do":"click","x":500,"y":10}', '{"do":"click","x":10,"y":300}', '{"do":"click","x":-1,"y":10}', '{"do":"click","x":1.5,"y":10}',
+    '{"do":"click","x":"10","y":10}', '{"do":"click","x":10}', '{"do":"click","ref":1,"x":10,"y":10}']) {
+    assert.deepEqual(parseBrowseAnswer(bad, ctx), { problem: 'point' }, bad)
+  }
+  assert.deepEqual(parseBrowseAnswer('{"do":"click"}', ctx), { problem: 'ref' })
+  // No image this step, an image the operator was not sent (over the cap), or no viewport: no press by position.
+  for (const p of [viewed(), pageWithScreen(viewed(), null), pageWithScreen(viewed(), shot(BROWSER_BROWSE_LIMITS.imageMaxBytes + 1)), pageWithScreen(page(), shot())]) {
+    assert.equal(p.screen, undefined)
+    assert.deepEqual(parseBrowseAnswer('{"do":"click","x":10,"y":10}', { snapshot: p, items: 0 }), { problem: 'point' })
+  }
+  // A size the page itself claims is never taken: only main's image sets it.
+  assert.equal(pageWithScreen({ ...viewed(), screen: [9, 9] }, null).screen, undefined)
+  // Typing without a ref: the focused field (the window checks it); the text's caps as ever.
+  assert.deepEqual(parseBrowseAnswer('{"do":"type","text":"山田"}', ctx), { answer: { do: 'type', text: '山田' } })
+  assert.deepEqual(parseBrowseAnswer(`{"do":"type","text":"${'あ'.repeat(201)}"}`, ctx), { problem: 'text' })
+})
+
+function pointWorld(aim: BrowserBrowseSurface['aim'], answers: string[]) {
+  const t = world({ answers })
+  const s = t.w.window as BrowserBrowseSurface
+  s.snapshot = async () => viewed()
+  s.screenshot = async () => shot()
+  if (aim) s.aim = aim
+  else delete s.aim
+  return t
+}
+
+test('a press by position is logged with the label of what the window\'s hit-test found (as a ref\'s), never a row\'s text; a refused one does nothing and tells the operator why', async () => {
+  const asked: BrowserBrowseAction[] = []
+  const hits: BrowserAim[] = [{ ok: true, role: 'item', logLabel: 'コピーを作成' }, { ok: false, why: 'file' }, { ok: true, role: 'textbox', logLabel: '検索' }]
+  const { w, run, materials } = pointWorld(async a => { asked.push(a); return hits.shift()! }, [
+    '{"do":"click","x":100,"y":50}', '{"do":"click","x":10,"y":10}', '{"do":"type","text":"山田"}', done('まとめ'),
+  ])
+  const r = await run()
+  assert.equal(r.kind, 'card')
+  // The file field was never pressed; the others were, each after the hit-test.
+  assert.deepEqual(w.acted, [{ do: 'click', x: 201, y: 101 }, { do: 'type', text: '山田' }])
+  assert.equal(asked.length, 3)
+  // The run log keeps the label the hit-test gave (the recording's kept form), never the typed text.
+  const steps = w.finished[0].steps as Array<{ action: string; label: string | null }>
+  assert.deepEqual(steps.map(s => [s.action, s.label]), [['click', 'コピーを作成'], ['type', '検索']])
+  assert.equal(JSON.stringify(w.finished).includes('山田'), false)
+  // The operator hears the refusal and why at its next step.
+  const history = (materials[2] as { history: unknown[] }).history
+  assert.deepEqual(history[1], { do: 'click', outcome: 'refused', why: 'file' })
+  // And the image's size, to measure its press in.
+  assert.deepEqual((materials[0] as { page: { screen: unknown } }).page.screen, { width: 500, height: 300 })
+})
+
+test('a window without the hit-test refuses every press by position and typing without a ref', async () => {
+  const { w, run, materials } = pointWorld(undefined, ['{"do":"click","x":100,"y":50}', '{"do":"type","text":"x"}', done('まとめ')])
+  await run()
+  assert.deepEqual(w.acted, [])
+  assert.deepEqual((materials[2] as { history: unknown[] }).history, [{ do: 'click', outcome: 'refused', why: 'nothing' }, { do: 'type', outcome: 'refused', why: 'nothing' }])
+})
+
+test('the hit-test\'s answer is read strictly: an unknown refusal or shape is "nothing"; a label is one line, capped', () => {
+  assert.deepEqual(readBrowserAim('{"ok":false,"why":"file"}'), { ok: false, why: 'file' })
+  assert.deepEqual(readBrowserAim('{"ok":false,"why":"whatever"}'), { ok: false, why: 'nothing' })
+  assert.deepEqual(readBrowserAim('not json'), { ok: false, why: 'nothing' })
+  assert.deepEqual(readBrowserAim(null), { ok: false, why: 'nothing' })
+  assert.deepEqual(readBrowserAim(JSON.stringify({ ok: true, role: 'banner', logLabel: `a\nb${'x'.repeat(300)}` })), { ok: true, role: 'other', logLabel: `a b${'x'.repeat(117)}` })
+  // The prompts say how to press by position and type without a ref, both operators.
+  for (const p of [BROWSER_OPERATOR_BROWSE_PROMPT, BROWSER_OPERATOR_WORK_PREVIEW_PROMPT, BROWSER_OPERATOR_WORK_PROMPT]) {
+    assert.match(p, /"do":"click","x":/)
+    assert.match(p, /\{"do":"type","text":/)
+    assert.match(p, /page\.screen/)
+  }
 })

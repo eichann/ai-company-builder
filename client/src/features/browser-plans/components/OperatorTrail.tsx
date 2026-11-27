@@ -30,6 +30,11 @@ function TrailRun({ run, titled }: { run: BrowserTrailRun; titled: boolean }) {
           {W.stopReason}：{stopReason ?? W.noReason}
         </p>
       )}
+      {run.unlisted && (
+        <p className="mt-1 text-text" data-trail-unlisted>
+          {W.unlisted}：{run.unlisted}
+        </p>
+      )}
       {run.steps.length === 0 && run.more === 0
         ? <p className="mt-1">{W.noSteps}</p>
         : (

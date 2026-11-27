@@ -12,7 +12,7 @@ import {
   type BrowserExploreRead, type BrowserOperation,
 } from '../../shared/core/plugin-browser-declaration'
 import type { BrowserExploreItem } from './browser-runner'
-import { BROWSER_OPERATOR_BROWSE_PROMPT } from './browser-browse'
+import { BROWSER_BROWSE_LIMITS, BROWSER_OPERATOR_BROWSE_PROMPT } from './browser-browse'
 export type { BrowserOperatorImage } from './browser-browse'
 import { BROWSER_OPERATOR_WORK_PREVIEW_PROMPT, BROWSER_OPERATOR_WORK_PROMPT } from './browser-frame-writes'
 
@@ -115,7 +115,7 @@ export function browserOperatorEnv(parent: Readonly<Record<string, string | unde
 }
 
 /** The largest image the operator is sent (bytes, before base64): a bigger one is left out, never cut. */
-export const BROWSER_OPERATOR_IMAGE_MAX_BYTES = 1_500_000
+export const BROWSER_OPERATOR_IMAGE_MAX_BYTES = BROWSER_BROWSE_LIMITS.imageMaxBytes
 
 const isStringArray = (v: unknown): v is string[] => Array.isArray(v) && v.every(x => typeof x === 'string')
 

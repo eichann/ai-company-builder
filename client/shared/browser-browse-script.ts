@@ -10,6 +10,10 @@
  *   field's value never read, a text field named by its label / placeholder only (never by what is in it) — and, as role
  *   `item`, elements that act as controls without being one (a click handler, a pointer cursor, a list or tree item under a
  *   clickable list); each with where it is on the screen (`box`) for the numbered marks of the operator's screen image.
+ *   **Ordered before the cap** (production 2026-11-27: a row's popup menu, appended last in the page, got no ref): an open
+ *   overlay's elements first (a menu, listbox, dialog, popover, a popper / portal container, a floating layer new since the
+ *   previous snapshot), then what is on the screen, then the rest in document order, what is behind an open modal last;
+ *   the refs follow that order, and an element an open overlay covers (or behind an open modal) gets no mark.
  * - The element scripts find an element by its number in that list, and answer null when it is gone (another page).
  */
 import { BROWSER_BROWSE_LIMITS as L } from './browser-browse'
@@ -19,10 +23,12 @@ export const BROWSER_BROWSE_WORLD = 1207
 
 export const BROWSER_SNAPSHOT_SCRIPT = `(() => {
   const MAX_TEXT = ${L.pageText + 1}, MAX_EL = ${L.elements}, MAX_NAME = ${L.name}, MAX_OPTIONS = ${L.options}
-  const MAX_CLICKABLE = ${L.clickables}, MAX_SCAN = ${L.clickableScan}
+  const MAX_CLICKABLE = ${L.clickables}, MAX_SCAN = ${L.clickableScan}, MAX_POOL = ${L.elementPool}, SCAN_TAIL = ${L.scanTail}
   const vw = window.innerWidth, vh = window.innerHeight
   const refs = []
   window.__acbBrowse = refs
+  // The positioned layers the previous snapshot of this document saw (null on its first: nothing counts as new then).
+  const seenLayers = window.__acbLayers || null
   const clean = s => String(s == null ? '' : s).replace(/\\s+/g, ' ').trim().slice(0, MAX_NAME)
   const visible = el => {
     const r = el.getBoundingClientRect()
@@ -95,33 +101,83 @@ export const BROWSER_SNAPSHOT_SCRIPT = `(() => {
     if (['textbox', 'password', 'select', 'checkbox', 'radio'].includes(role) && !el.isContentEditable) return fieldLabel(el)
     return controlLabel(el)
   }
-  const sel = 'a[href],button,input,select,textarea,summary,[role=button],[role=link],[role=tab],[role=menuitem],[role=checkbox],[role=radio],[role=option],[contenteditable=""],[contenteditable=true]'
-  const elements = []
-  for (const el of document.querySelectorAll(sel)) {
-    if (elements.length >= MAX_EL) break
-    if (el.disabled || !visible(el)) continue
-    const role = roleOf(el)
-    // Never a hidden input, and never a file chooser (the operator must not open a dialog of this computer).
-    if (el.tagName.toLowerCase() === 'input' && ['hidden', 'file'].includes((el.getAttribute('type') || '').toLowerCase())) continue
-    const ref = refs.length
-    refs.push(el)
-    const item = { ref, role, name: nameOf(el, role), logLabel: logLabelOf(el, role) }
-    if (role === 'link') item.href = el.href
-    if (role === 'textbox' && !el.isContentEditable) item.value = clean(el.value)
-    if (role === 'select') item.options = Array.from(el.options).slice(0, MAX_OPTIONS).map(o => clean(o.text))
-    if (role === 'checkbox' || role === 'radio') item.checked = !!el.checked
-    const box = boxOf(el)
-    if (box) item.box = box
-    elements.push(item)
+
+  // ── What matters first (production 2026-11-27: a row's popup menu, appended last, got no ref past the cap) ──────────
+  // Open overlays — menus, listboxes, dialogs, popovers, a popper or portal container, a positioned layer with a z-index
+  // that was not there at the previous snapshot — come first; then what is on the screen; then the rest of the page in
+  // document order; what sits behind an open modal last. The cap applies after this order.
+  const positioned = cs => cs.position === 'fixed' || cs.position === 'absolute'
+  const OVERLAY_ROLE = '[role=menu], [role=listbox], [role=dialog], [role=alertdialog], [aria-modal="true"], dialog[open], [popover]'
+  const OVERLAY = OVERLAY_ROLE + ', [data-popper-placement], [class*="dropdown-menu"], [class*="popover"], [class*="popper"], [class*="menu__content"], [class*="portal"]'
+  // A class-named container counts only when it floats (absolute / fixed): a trigger named like one does not.
+  const overlayRoot = r => visible(r) && (r.matches(OVERLAY_ROLE) || positioned(getComputedStyle(r)))
+  const overlayCache = new Map()
+  const overlayOf = el => {
+    if (overlayCache.has(el)) return overlayCache.get(el)
+    let found = null
+    for (let r = el.closest(OVERLAY); r; r = r.parentElement ? r.parentElement.closest(OVERLAY) : null) if (overlayRoot(r)) { found = r; break }
+    overlayCache.set(el, found)
+    return found
   }
+  // The nearest absolute / fixed ancestor with a z-index above 0 (a floating layer), or null.
+  const layerCache = new Map()
+  const layerOf = el => {
+    const path = []
+    let found = null
+    for (let p = el; p && p !== document.body && p !== document.documentElement; p = p.parentElement) {
+      if (layerCache.has(p)) { found = layerCache.get(p); break }
+      path.push(p)
+      const cs = getComputedStyle(p)
+      if (positioned(cs) && cs.zIndex !== 'auto' && Number(cs.zIndex) > 0) { found = p; break }
+    }
+    for (const q of path) layerCache.set(q, found)
+    return found
+  }
+  const layersNow = new Set()
+  // Every shown floating layer the bounded scan met (also one with nothing usable in it): what the screen image shows.
+  const floatLayers = new Set()
+  const newLayer = el => { const l = layerOf(el); if (l) layersNow.add(l); return !!l && seenLayers !== null && !seenLayers.has(l) }
+  const modals = []
+  for (const m of document.querySelectorAll('[aria-modal="true"], dialog')) {
+    let modal = m.getAttribute('aria-modal') === 'true'
+    try { modal = modal || m.matches(':modal') } catch { /* an engine without :modal */ }
+    if (modal && visible(m)) modals.push(m)
+  }
+  const overlayRoots = Array.from(document.querySelectorAll(OVERLAY)).filter(overlayRoot)
+  // A list of the page's elements looked at in a bounded way: its first MAX_SCAN and its last SCAN_TAIL (a popup is
+  // usually appended at the end of the page).
+  const bounded = function* (list) {
+    const n = list.length
+    for (let i = 0; i < n && i < MAX_SCAN; i++) yield list[i]
+    for (let i = Math.max(MAX_SCAN, n - SCAN_TAIL); i < n; i++) yield list[i]
+  }
+
+  const sel = 'a[href],button,input,select,textarea,summary,[role=button],[role=link],[role=tab],[role=menuitem],[role=checkbox],[role=radio],[role=option],[contenteditable=""],[contenteditable=true]'
+  const controls = []
+  const listed = new Set()
+  const takeControl = el => {
+    if (listed.has(el) || controls.length >= MAX_POOL) return
+    if (el.disabled || !visible(el)) return
+    // Never a hidden input, and never a file chooser (the operator must not open a dialog of this computer).
+    if (el.tagName.toLowerCase() === 'input' && ['hidden', 'file'].includes((el.getAttribute('type') || '').toLowerCase())) return
+    listed.add(el)
+    controls.push(el)
+  }
+  // An open overlay's controls first, so no bound of the page's size ever leaves them out.
+  for (const root of overlayRoots) {
+    if (root.matches(sel)) takeControl(root)
+    for (const el of root.querySelectorAll(sel)) takeControl(el)
+  }
+  for (const el of bounded(document.querySelectorAll(sel))) takeControl(el)
+
   // Elements that act as controls without being one (a folder tree's rows, a card with a click handler): role \`item\`.
   // Signs: an onclick attribute, tabindex >= 0, an interactive role the list above does not take, or the top of a
   // cursor:pointer subtree (cursor is inherited: only the outermost element of each subtree is a candidate, so a row and
   // each of its children are never all listed). A pointer subtree holding two or more list / tree items (event
   // delegation on the list) gives its items instead. Never one inside a real control listed above, never the page itself
   // or a container covering most of the screen, never one without its own words; each named by its own text only (a
-  // nested item's text is the nested item's). Bounded: MAX_CLICKABLE of them, the page's first MAX_SCAN elements looked at.
-  const listed = new Set(refs)
+  // nested item's text is the nested item's). Bounded: the page's first MAX_SCAN and last SCAN_TAIL elements looked at,
+  // and every open overlay's.
   const insideControl = el => { for (let p = el.parentElement; p; p = p.parentElement) if (listed.has(p)) return true; return false }
   const pointer = el => getComputedStyle(el).cursor === 'pointer'
   const ITEM = 'li, tr, [role=treeitem], [role=listitem], [role=row], [role=option], [role=menuitem]'
@@ -140,20 +196,28 @@ export const BROWSER_SNAPSHOT_SCRIPT = `(() => {
     walk(el)
     return clean(out)
   }
+  const MARKED = '[onclick], [tabindex]:not([tabindex^="-"]), [role=treeitem], [role=switch], [role=menuitemcheckbox], [role=menuitemradio]'
   const candidates = []
-  const marked = document.querySelectorAll('[onclick], [tabindex]:not([tabindex^="-"]), [role=treeitem], [role=switch], [role=menuitemcheckbox], [role=menuitemradio]')
-  for (let i = 0; i < marked.length && i < MAX_SCAN; i++) candidates.push(marked[i])
-  const all = document.body ? document.body.getElementsByTagName('*') : []
-  for (let i = 0; i < all.length && i < MAX_SCAN; i++) {
-    const el = all[i]
-    if (pointer(el) && !(el.parentElement && pointer(el.parentElement))) {
+  const pointerTop = el => {
+    const cs = getComputedStyle(el)
+    if (positioned(cs) && cs.zIndex !== 'auto' && Number(cs.zIndex) > 0 && visible(el)) floatLayers.add(el)
+    if (cs.cursor === 'pointer' && !(el.parentElement && pointer(el.parentElement))) {
       const items = Array.from(el.querySelectorAll(ITEM)).slice(0, MAX_CLICKABLE * 2).filter(visible)
       if (items.length >= 2) candidates.push(...items)
       else candidates.push(el)
     }
   }
+  for (const root of overlayRoots) {
+    if (root.matches(MARKED)) candidates.push(root)
+    for (const el of bounded(root.querySelectorAll(MARKED))) candidates.push(el)
+    pointerTop(root)
+    for (const el of bounded(root.getElementsByTagName('*'))) pointerTop(el)
+  }
+  for (const el of bounded(document.querySelectorAll(MARKED))) candidates.push(el)
+  for (const el of bounded(document.body ? document.body.getElementsByTagName('*') : [])) pointerTop(el)
+  const before = (a, b) => (a === b ? 0 : a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1)
   // In document order (an ancestor before what is inside it), each once.
-  const ordered = Array.from(new Set(candidates)).sort((a, b) => (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1))
+  const ordered = Array.from(new Set(candidates)).sort(before)
   const picked = new Set()
   // Inside an element already picked: left out (its click is the picked one's), except an item inside an item (a tree's
   // folder inside its parent folder: each is its own target, named by its own words).
@@ -161,9 +225,9 @@ export const BROWSER_SNAPSHOT_SCRIPT = `(() => {
     for (let p = el.parentElement; p; p = p.parentElement) if (picked.has(p) && !(p.matches(ITEM) && el.matches(ITEM))) return true
     return false
   }
-  let clickables = 0
+  const items = []
   for (const el of ordered) {
-    if (elements.length >= MAX_EL || clickables >= MAX_CLICKABLE) break
+    if (items.length >= MAX_POOL) break
     if (listed.has(el) || el === document.body || el === document.documentElement) continue
     // A native control the list above left out on purpose (a file chooser, a hidden or disabled one) stays out.
     if (el.matches('input, select, textarea, button, option, a[href], [disabled]')) continue
@@ -173,17 +237,135 @@ export const BROWSER_SNAPSHOT_SCRIPT = `(() => {
     const name = ownWords(el) || clean(el.getAttribute('aria-label') || el.getAttribute('title') || '')
     if (!name) continue
     picked.add(el)
-    clickables++
+    items.push({ el, name })
+  }
+
+  // The order, then the cap: tier 0 an open overlay's (or a layer new since the previous snapshot), 1 on the screen, 2
+  // the rest, 3 behind an open modal; document order within a tier. At most MAX_EL, of them at most MAX_CLICKABLE items.
+  const tierOf = el => {
+    const fresh = newLayer(el)
+    if (overlayOf(el) || fresh) return 0
+    if (modals.length > 0 && !modals.some(m => m.contains(el))) return 3
+    return boxOf(el) ? 1 : 2
+  }
+  const pool = controls.map(el => ({ el, item: null, tier: tierOf(el) })).concat(items.map(it => ({ el: it.el, item: it, tier: tierOf(it.el) })))
+  pool.sort((a, b) => a.tier - b.tier || before(a.el, b.el))
+  const chosen = []
+  let clickables = 0
+  for (const c of pool) {
+    if (chosen.length >= MAX_EL) break
+    if (c.item) { if (clickables >= MAX_CLICKABLE) continue; clickables++ }
+    chosen.push(c)
+  }
+  // A mark only where the element can be seen: none behind an open modal, none where an open overlay covers its centre.
+  const overlayOpen = pool.some(c => c.tier === 0)
+  const shownBox = c => {
+    const box = boxOf(c.el)
+    if (!box || c.tier === 3) return null
+    if (c.tier !== 0 && overlayOpen) {
+      const x = Math.min(Math.max(box[0] + box[2] / 2, 0), vw - 1), y = Math.min(Math.max(box[1] + box[3] / 2, 0), vh - 1)
+      const top = document.elementFromPoint(x, y)
+      if (top && top !== c.el && !c.el.contains(top) && !top.contains(c.el) && (overlayOf(top) || (layerOf(top) && seenLayers !== null && !seenLayers.has(layerOf(top))))) return null
+    }
+    return box
+  }
+  const elements = []
+  for (const c of chosen) {
+    const el = c.el
     const ref = refs.length
     refs.push(el)
-    const item = { ref, role: 'item', name, logLabel: controlLabel(el) }
-    const box = boxOf(el)
+    let item
+    if (c.item) item = { ref, role: 'item', name: c.item.name, logLabel: controlLabel(el) }
+    else {
+      const role = roleOf(el)
+      item = { ref, role, name: nameOf(el, role), logLabel: logLabelOf(el, role) }
+      if (role === 'link') item.href = el.href
+      if (role === 'textbox' && !el.isContentEditable) item.value = clean(el.value)
+      if (role === 'select') item.options = Array.from(el.options).slice(0, MAX_OPTIONS).map(o => clean(o.text))
+      if (role === 'checkbox' || role === 'radio') item.checked = !!el.checked
+    }
+    const box = shownBox(c)
     if (box) item.box = box
     elements.push(item)
   }
+  for (const l of layersNow) floatLayers.add(l)
+  window.__acbLayers = new WeakSet(floatLayers)
+
+  // ── The hit-test of a press by position and of typing without a ref (browseAimScript; agent-browser.md "Pressing by
+  // position"): the same rules as this list, against the layout this snapshot — and the screen image made right after
+  // it — showed. Kept in the isolated world (the page's script cannot see or replace it).
+  const shownAt = { sx: window.scrollX, sy: window.scrollY, vw, vh, roots: overlayRoots.slice(), layers: floatLayers,
+    boxes: chosen.filter(c => boxOf(c.el)).map(c => [c.el, c.el.getBoundingClientRect()]) }
+  const near = (a, b) => Math.abs(a - b) <= 2
+  // The page moved since: scrolled, resized, an overlay opened or closed, or an element shown on the screen moved or went.
+  const moved = () => {
+    if (window.scrollX !== shownAt.sx || window.scrollY !== shownAt.sy || window.innerWidth !== shownAt.vw || window.innerHeight !== shownAt.vh) return true
+    for (const [el, r] of shownAt.boxes) {
+      if (!el.isConnected) return true
+      const n = el.getBoundingClientRect()
+      if (!near(n.left, r.left) || !near(n.top, r.top) || !near(n.width, r.width) || !near(n.height, r.height)) return true
+    }
+    const roots = Array.from(document.querySelectorAll(OVERLAY)).filter(overlayRoot)
+    return roots.length !== shownAt.roots.length || roots.some(r => !shownAt.roots.includes(r))
+  }
+  const FRAME = 'iframe, frame, object, embed'
+  const fileField = el => el.matches('input') && (el.getAttribute('type') || '').toLowerCase() === 'file'
+  const no = why => ({ ok: false, why })
+  const itemSet = new Set(items.map(it => it.el))
+  const aimAt = (x, y) => {
+    if (!(x >= 0 && y >= 0 && x < window.innerWidth && y < window.innerHeight)) return no('outside')
+    if (moved()) return no('moved')
+    // The page now, not the snapshot's cached ancestry: an element that became a floating layer since must be seen as one
+    // (Codex review).
+    layerCache.clear()
+    overlayCache.clear()
+    const top = document.elementFromPoint(x, y)
+    if (!top || top === document.documentElement || top === document.body) return no('nothing')
+    // A floating layer the screen image did not show (appeared since): the point may be on something else now.
+    const layer = layerOf(top)
+    if (layer && !shownAt.layers.has(layer)) return no('moved')
+    if (top.closest(FRAME)) return no('frame')
+    if (fileField(top) || top.closest('input[type=file i]')) return no('file')
+    const label = top.closest('label')
+    if (label && label.control && fileField(label.control)) return no('file')
+    let target = null
+    for (let p = top; p && !target; p = p.parentElement) if (listed.has(p) || itemSet.has(p)) target = p
+    if (!target) target = top.closest(sel) || top
+    if (fileField(target)) return no('file')
+    const role = listed.has(target) || target.matches(sel) ? roleOf(target) : 'item'
+    return { ok: true, role, logLabel: role === 'item' ? controlLabel(target) : logLabelOf(target, role) }
+  }
+  const aimFocus = () => {
+    const a = document.activeElement
+    if (!a || a === document.body || a === document.documentElement) return no('nothing')
+    if (a.matches(FRAME)) return no('frame')
+    if (fileField(a)) return no('file')
+    const role = roleOf(a)
+    if (role === 'password') return no('password')
+    if (role !== 'textbox' || a.disabled || a.readOnly) return no('not-editable')
+    return { ok: true, role, logLabel: logLabelOf(a, role) }
+  }
+  window.__acbAim = { at: aimAt, focus: aimFocus }
   const text = document.body ? String(document.body.innerText || '') : ''
-  return JSON.stringify({ address: location.href, title: document.title, text: text.slice(0, MAX_TEXT), truncated: text.length >= MAX_TEXT, elements, viewport: [vw, vh] })
+  return JSON.stringify({ address: location.href, title: document.title, text: text.slice(0, MAX_TEXT), truncated: text.length >= MAX_TEXT, elements, omitted: pool.length - chosen.length, viewport: [vw, vh] })
 })()`
+
+/**
+ * The hit-test of a press by position (a point of the viewport, CSS pixels) or of typing without a ref (the focused
+ * element), run in the isolated world against the last snapshot (`window.__acbAim`, made by `BROWSER_SNAPSHOT_SCRIPT`);
+ * answers `{ ok, role, logLabel }` or `{ ok: false, why }` as JSON. Null for an action that is neither.
+ */
+export function browseAimScript(action: { do: string; x?: number; y?: number; ref?: number }): string | null {
+  let call: string
+  if (action.do === 'click' && action.ref === undefined && Number.isFinite(action.x) && Number.isFinite(action.y)) call = `a.at(${JSON.stringify(action.x)}, ${JSON.stringify(action.y)})`
+  else if (action.do === 'type' && action.ref === undefined) call = 'a.focus()'
+  else return null
+  return `(() => {
+  const a = window.__acbAim
+  if (!a) return JSON.stringify({ ok: false, why: 'nothing' })
+  try { return JSON.stringify(${call}) } catch { return JSON.stringify({ ok: false, why: 'nothing' }) }
+})()`
+}
 
 const element = (ref: number) => `(window.__acbBrowse || [])[${JSON.stringify(ref)}]`
 

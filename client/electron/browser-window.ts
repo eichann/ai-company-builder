@@ -36,8 +36,8 @@ import {
   BROWSER_RECORDING_BINDING, BROWSER_RECORDING_SCRIPT, BROWSER_RECORDING_WINDOW_TITLE, BROWSER_RECORDING_WORLD, createPageDebuggerOwner,
   type BrowserRecordingObservation, type BrowserRecordingObserver, type BrowserRecordSurface,
 } from '../shared/browser-recorder'
-import { readBrowserPageSnapshot, sameDomainPath, BROWSER_BROWSE_LIMITS, type BrowserBrowseSurface } from '../shared/browser-browse'
-import { BROWSER_BROWSE_WORLD, BROWSER_SNAPSHOT_SCRIPT, browseFocusScript, browsePointScript, browseSelectScript } from '../shared/browser-browse-script'
+import { readBrowserAim, readBrowserPageSnapshot, sameDomainPath, BROWSER_BROWSE_LIMITS, type BrowserAim, type BrowserBrowseAction, type BrowserBrowseSurface } from '../shared/browser-browse'
+import { BROWSER_BROWSE_WORLD, BROWSER_SNAPSHOT_SCRIPT, browseAimScript, browseFocusScript, browsePointScript, browseSelectScript } from '../shared/browser-browse-script'
 import { drawScreenMarks, screenMarks } from '../shared/browser-screen-marks'
 import { BrowserNotSentError, createSessionLanes, exactRead, throughSession, writeThroughSession, type PagelessSession, type SessionAnswer, type SessionRequest } from './features/browser/read-session'
 import type { BrowserWorkHooks, HeldBody, HeldPageWriteAnswer } from '../shared/browser-frame-writes'
@@ -868,6 +868,10 @@ export function createBrowserWindowShell(options: {
           clearTimeout(timer)
         }
       }
+      const aimNow = async (action: BrowserBrowseAction): Promise<BrowserAim> => {
+        const code = browseAimScript(action)
+        return code === null ? { ok: false, why: 'nothing' } : readBrowserAim(await inWorld(code))
+      }
       const pause = (ms: number, signal: AbortSignal) => new Promise<void>(resolve => {
         if (signal.aborted) { resolve(); return }
         const timer = setTimeout(done, ms)
@@ -1001,16 +1005,30 @@ export function createBrowserWindowShell(options: {
             const bitmap = image.toBitmap()
             drawScreenMarks(bitmap, width, height, screenMarks(page, width, height))
             const jpeg = nativeImage.createFromBitmap(bitmap, { width, height }).toJPEG(BROWSER_BROWSE_LIMITS.imageQuality)
-            return jpeg.length > 0 ? { mediaType: 'image/jpeg' as const, data: new Uint8Array(jpeg) } : null
+            return jpeg.length > 0 ? { mediaType: 'image/jpeg' as const, data: new Uint8Array(jpeg), width, height } : null
           } catch {
             return null
           }
         },
+        // A press by position / a typing without a ref: the isolated world's hit-test against the snapshot it made (never
+        // the page's script): a point off the viewport, a frame, a file field or its label, a password field, nothing
+        // editable focused, or a page that moved since the snapshot is refused (agent-browser.md "Pressing by position").
+        aim: aimNow,
         async act(action, signal) {
           if (!browseReady() || signal.aborted) return 'failed'
           if (action.do !== 'wait') actedOnPage = true
           switch (action.do) {
             case 'click': {
+              if (!('ref' in action)) {
+                // By position: hit-tested again right before the press; the press lands on that very point.
+                if (!(await aimNow(action)).ok || !browseReady()) return 'failed'
+                const x = Math.round(action.x)
+                const y = Math.round(action.y)
+                contents.sendInputEvent({ type: 'mouseMove', x, y })
+                contents.sendInputEvent({ type: 'mouseDown', x, y, button: 'left', clickCount: 1 })
+                contents.sendInputEvent({ type: 'mouseUp', x, y, button: 'left', clickCount: 1 })
+                break
+              }
               const at = await inWorld(browsePointScript(action.ref))
               let point: { x: number; y: number } | null = null
               try { point = typeof at === 'string' ? JSON.parse(at) as { x: number; y: number } : null } catch { point = null }
@@ -1025,7 +1043,9 @@ export function createBrowserWindowShell(options: {
               break
             }
             case 'type':
-              if ((await inWorld(browseFocusScript(action.ref))) !== true) return 'failed'
+              // Without a ref: into the element that has the focus, only when it is a text field (never a password or file).
+              if (!('ref' in action)) { if (!(await aimNow(action)).ok) return 'failed' }
+              else if ((await inWorld(browseFocusScript(action.ref))) !== true) return 'failed'
               if (!(await pageDebugger.command('Input.insertText', { text: action.text }))) return 'failed'
               break
             case 'select':

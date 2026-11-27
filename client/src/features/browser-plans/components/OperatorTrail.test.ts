@@ -48,3 +48,11 @@ test('a card without a trail shows no memo', () => {
   const html = renderToStaticMarkup(React.createElement(InspectionBody, { view: { card, readAt: '2026-11-27T00:00:00.000Z', siteLabel: 'shop.example.test' } }))
   assert.equal(html.includes('<details'), false)
 })
+
+test('the operator\'s word for what it saw on the screen without a ref is shown inside the memo, as text', () => {
+  const trail: BrowserOperatorTrail = [{ ...TRAIL[0], unlisted: '<b>メニュー</b>の［コピーを作成］' }]
+  const html = renderToStaticMarkup(React.createElement(InspectionBody, { view: { card, readAt: '2026-11-27T00:00:00.000Z', siteLabel: 'shop.example.test', trail } }))
+  const [shown, memo] = html.split('<details')
+  assert.equal(shown.includes('コピーを作成'), false)
+  assert.ok(memo.includes(`${W.unlisted}：&lt;b&gt;メニュー&lt;/b&gt;の［コピーを作成］`))
+})

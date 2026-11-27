@@ -11,7 +11,7 @@
 // `browseWindow`, the policy store's stop, the session's HTTP client, the context and the operator.
 import { BROWSER_COMPANY_ID_RE } from '../../../shared/browser-plans'
 import {
-  BROWSER_BROWSE_LIMITS as L, BROWSER_BROWSE_WORDS as W, browseCard, browseLogStep, browseMaterial, browseWordsForAi, parseBrowseAnswer,
+  BROWSER_BROWSE_LIMITS as L, BROWSER_BROWSE_WORDS as W, aimedAction, browseCard, browseLogStep, browseMaterial, browseWordsForAi, pageWithScreen, parseBrowseAnswer,
   type BrowserBrowseAction, type BrowserBrowseHistoryEntry, type BrowserBrowseStop, type BrowserBrowseSurface, type BrowserPageSnapshot,
 } from '../../../shared/browser-browse'
 import type { BrowserInspectionView } from '../../../shared/browser-inspection'
@@ -166,11 +166,13 @@ export function wireBrowserBrowse(deps: BrowserBrowseDeps) {
         // The server asks again before every step: the PC, the setting, the stop, the person's level; the lease renewed.
         const going = await deps.api.runContinue(companyId, runId)
         if (going.kind !== 'ok') { outcome = 'stopped'; reason = going.kind === 'no-answer' ? 'no-answer' : 'refused'; return refused(refusedWords(going)) }
-        const page: BrowserPageSnapshot | null = await win.snapshot()
+        const shown: BrowserPageSnapshot | null = await win.snapshot()
         if (!current()) { outcome = 'stopped'; reason = whyNot(); return refused(W.interrupted) }
-        if (!page) { reason = 'blocked'; return refused(W.failed) }
-        // The screen beside the text, its elements marked by number: for this step's operator only, then dropped.
-        const image = (await win.screenshot?.(page)) ?? null
+        if (!shown) { reason = 'blocked'; return refused(W.failed) }
+        // The screen beside the text, its elements marked by number: for this step's operator only, then dropped. Its size
+        // goes with the page (a press by position is measured in its pixels).
+        const image = (await win.screenshot?.(shown)) ?? null
+        const page = pageWithScreen(shown, image)
         if (!current()) { outcome = 'stopped'; reason = whyNot(); return refused(W.interrupted) }
         const left = deadline - now()
         if (left <= 0) { outcome = 'stopped'; reason = 'timeout'; return refused(W.interrupted) }
@@ -185,6 +187,7 @@ export function wireBrowserBrowse(deps: BrowserBrowseDeps) {
         const answer = parsed.answer
         if (parsed.notes !== undefined) notes = parsed.notes
         trail.notes(parsed.notes)
+        trail.unlisted(parsed.unlisted)
         if (answer.do === 'done' || answer.do === 'stop') {
           trail.end(answer.do, parsed.reason)
           const end = answer.do === 'done' ? { kind: 'done' as const, result: answer.result } : { kind: 'stopped' as const, why: answer.why as BrowserBrowseStop }
@@ -199,7 +202,10 @@ export function wireBrowserBrowse(deps: BrowserBrowseDeps) {
           return { kind: 'card', runId, words: browseWordsForAi(end.kind === 'done' ? { kind: 'done' } : { kind: 'stopped', why: end.why }, input.items, answer.unread) }
         }
         const action: BrowserBrowseAction = answer
-        const logStep = browseLogStep(action, page, host)
+        // A press by position or a typing without a ref: what the window's hit-test finds there now; refused → nothing done.
+        const aimed = aimedAction(action) ? (await win.aim?.(action)) ?? { ok: false as const, why: 'nothing' as const } : undefined
+        if (aimed && !aimed.ok) { history.push({ do: action.do, outcome: 'refused', why: aimed.why }); continue }
+        const logStep = browseLogStep(action, page, host, aimed)
         if (steps.length < BROWSER_RUN_LIMITS.steps) steps.push(logStep)
         trail.step(logStep, parsed.reason)
         const done = await win.act(action, cut.signal)

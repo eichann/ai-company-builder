@@ -60,7 +60,8 @@ export function markLabelSize(ref: number): { w: number; h: number } {
 
 /**
  * Draws each mark onto a BGRA bitmap of `width` × `height` in place: a 2-pixel outline and, at its top-left corner (above
- * the box when there is room), its number in white on the mark's colour. Pixels outside the bitmap are never touched.
+ * the box when there is room), its number in white on the mark's colour. Pixels outside the bitmap are never touched. The
+ * first mark is drawn last (on top): `marks` follow the snapshot's priority order, an open overlay's elements first.
  */
 export function drawScreenMarks(bitmap: Uint8Array, width: number, height: number, marks: readonly BrowserScreenMark[]): void {
   if (bitmap.length < width * height * 4) return
@@ -72,7 +73,8 @@ export function drawScreenMarks(bitmap: Uint8Array, width: number, height: numbe
   const fill = (x: number, y: number, w: number, h: number, c: readonly number[]) => {
     for (let j = 0; j < h; j++) for (let i = 0; i < w; i++) put(x + i, y + j, c)
   }
-  for (const m of marks) {
+  // The last drawn is on top: the page's elements come in priority order (an open menu's first), so they are drawn last.
+  for (const m of [...marks].reverse()) {
     fill(m.x, m.y, m.w, 2, MARK)
     fill(m.x, m.y + m.h - 1, m.w, 2, MARK)
     fill(m.x, m.y, 2, m.h, MARK)

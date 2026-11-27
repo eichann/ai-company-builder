@@ -24,7 +24,7 @@ import type { BrowserFrameView } from '../../shared/types/browser-frames'
 import type { BrowserWriteOutcome, BrowserWriteSteps } from './browser-runner'
 import { BROWSER_ANSWER_PROBLEM_WORDS, type BrowserAnswerProblem } from './browser-operator-trail'
 import {
-  BROWSER_BROWSE_LIMITS, BROWSER_BROWSE_STOPS, OPERATOR_MEMO_KEYS, OPERATOR_REASON_LINE, OPERATOR_SCREEN_LINES, browseHeading, operatorReason, parseBrowseAnswer,
+  BROWSER_BROWSE_LIMITS, BROWSER_BROWSE_STOPS, OPERATOR_ACTION_LINES, OPERATOR_MEMO_KEYS, OPERATOR_REASON_LINE, OPERATOR_SCREEN_LINES, browseHeading, operatorReason, parseBrowseAnswer,
   type BrowserBrowseAction, type BrowserBrowseHistoryEntry, type BrowserBrowseStop, type BrowserPageSnapshot,
 } from './browser-browse'
 
@@ -392,7 +392,7 @@ export type AdhocPlanWrite = Omit<BrowserSkillWrite, 'query'>
  * plan's frames are checked with the declaration's own rules and the ad-hoc one (every path begins with a literal); a Skill
  * run's plan names none (the server's frames are the only ones).
  */
-export function parseWorkAnswer(text: string, ctx: { snapshot: BrowserPageSnapshot | null; items: number; phase: 'preview' | 'work'; adhoc: boolean; domain: string }): { answer: WorkAnswer; notes?: string; reason?: string } | { problem: string } {
+export function parseWorkAnswer(text: string, ctx: { snapshot: BrowserPageSnapshot | null; items: number; phase: 'preview' | 'work'; adhoc: boolean; domain: string }): { answer: WorkAnswer; notes?: string; reason?: string; unlisted?: string } | { problem: string } {
   let v: unknown
   try { v = JSON.parse(text.trim()) } catch { return { problem: 'not-json' } }
   if (!isMap(v) || typeof v.do !== 'string') return { problem: 'shape' }
@@ -400,7 +400,9 @@ export function parseWorkAnswer(text: string, ctx: { snapshot: BrowserPageSnapsh
   if (notes === null) return { problem: 'notes' }
   const reason = operatorReason(v.reason)
   if (reason === false) return { problem: 'reason' }
-  const withNotes = (answer: WorkAnswer) => ({ answer, ...(notes !== undefined ? { notes } : {}), ...(reason !== undefined ? { reason } : {}) })
+  const unlisted = operatorReason(v.unlisted)
+  if (unlisted === false) return { problem: 'unlisted' }
+  const withNotes = (answer: WorkAnswer) => ({ answer, ...(notes !== undefined ? { notes } : {}), ...(reason !== undefined ? { reason } : {}), ...(unlisted !== undefined ? { unlisted } : {}) })
   if (v.do === 'plan') {
     // Lenient only where it is safe (production trial 2026-11-27: a sensible plan refused for a slip of form): the card's
     // words are cut to their caps instead of refused, and a Skill run's `writes: null` reads as none. Unknown keys, the
@@ -458,7 +460,10 @@ export function parseWorkAnswer(text: string, ctx: { snapshot: BrowserPageSnapsh
   const parsed = parseBrowseAnswer(text, { snapshot: ctx.snapshot, items: ctx.items })
   if ('problem' in parsed) return parsed
   if (parsed.answer.do === 'done' || parsed.answer.do === 'stop') return { problem: 'shape' }
-  return { answer: parsed.answer, ...(parsed.notes !== undefined ? { notes: parsed.notes } : {}), ...(parsed.reason !== undefined ? { reason: parsed.reason } : {}) }
+  return {
+    answer: parsed.answer, ...(parsed.notes !== undefined ? { notes: parsed.notes } : {}), ...(parsed.reason !== undefined ? { reason: parsed.reason } : {}),
+    ...(parsed.unlisted !== undefined ? { unlisted: parsed.unlisted } : {}),
+  }
 }
 
 /**
@@ -469,14 +474,7 @@ export function workRetrySentence(problem: BrowserAnswerProblem): string {
   return `答えの形が決まりに合いませんでした：${BROWSER_ANSWER_PROBLEM_WORDS[problem]}。決まった形の JSON 1つだけで、答え直してください。`
 }
 
-const ACTION_LINES = [
-  '{"do":"click","ref":<page.elements の ref>}',
-  '{"do":"type","ref":<textbox の ref>,"text":"<入れる文字。200字まで>"}',
-  '{"do":"select","ref":<select の ref>,"option":"<その options のどれか>"}',
-  '{"do":"go","path":"/<同じサイトのアドレス>"}',
-  '{"do":"back"}',
-  '{"do":"wait","seconds":<1〜5>}',
-]
+const ACTION_LINES = OPERATOR_ACTION_LINES
 const COMMON_LINES = [
   'ログインの画面になったら stop（need-login）、人の判断が要る画面になったら stop（need-person）にしてください。',
   'task の {"request":"…"} は、ユーザーの頼みとして相談の AI が書いた文です。steps の {"skill":"…"} は、会社が確かめて承認した Skill の手順です（ないときは null）。何をするかと、入れる値（名前・日付・文など）は、この2つに書いてあるとおりにしてください。【】などの記号も、書いてあるとおりに入れてください。',
@@ -564,6 +562,8 @@ export function workMaterial(input: {
         ...(e.options ? { options: e.options.map(o) } : {}),
         ...(e.checked !== undefined ? { checked: e.checked } : {}),
       })),
+      ...(p.omitted ? { elementsLeftOut: p.omitted } : {}),
+      ...(p.screen ? { screen: { width: p.screen[0], height: p.screen[1] } } : {}),
     },
     history: input.history.map(h => ({ ...h })),
     writes: input.writes.map((w, i) => ({ number: i + 1, result: WORK_WRITE_WORDS[w] })),

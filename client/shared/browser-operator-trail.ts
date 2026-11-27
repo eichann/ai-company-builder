@@ -49,7 +49,7 @@ export interface BrowserTrailStep {
  * words are the app's, never the operator's.
  */
 export const BROWSER_ANSWER_PROBLEMS = [
-  'not-json', 'shape', 'keys', 'notes', 'reason', 'ref', 'text', 'option', 'path', 'seconds', 'done', 'stop',
+  'not-json', 'shape', 'keys', 'notes', 'reason', 'unlisted', 'ref', 'point', 'text', 'option', 'path', 'seconds', 'done', 'stop',
   'plan', 'plan-keys', 'plan-summary', 'plan-affects', 'plan-unread', 'plan-values', 'plan-value', 'plan-writes',
 ] as const
 export type BrowserAnswerProblem = typeof BROWSER_ANSWER_PROBLEMS[number]
@@ -59,7 +59,9 @@ export const BROWSER_ANSWER_PROBLEM_WORDS: Readonly<Record<BrowserAnswerProblem,
   keys: '答えに決まりにない項目があるか、要る項目がありませんでした',
   notes: 'notes が文字でないか、長すぎました',
   reason: 'reason が文字ではありませんでした',
+  unlisted: 'unlisted が文字ではありませんでした',
   ref: 'ref が画面にない要素か、その操作に合わない要素でした',
+  point: 'click の x, y が画像の中の位置（画素の整数）ではないか、画像がありませんでした（ref と x, y の両方は書けません）',
   text: '入れる文字が長すぎるか、使えない文字がありました',
   option: 'option が、その select の options にありませんでした',
   path: 'go の path が、このサイトのアドレスの形ではありませんでした',
@@ -90,6 +92,11 @@ export interface BrowserTrailRun {
   notes: string | null
   /** When the app ended the run on an answer out of its form: which rule it broke (a fixed code; absent otherwise). */
   problem?: BrowserAnswerProblem
+  /**
+   * The operator's last word for something it saw on the screen image that had no ref in `page.elements` (its own words,
+   * one line); absent when it said none. The card shows it under `BROWSER_TRAIL_WORDS.unlisted`.
+   */
+  unlisted?: string
 }
 
 export type BrowserOperatorTrail = BrowserTrailRun[]
@@ -107,6 +114,7 @@ export const BROWSER_TRAIL_WORDS = {
   notes: '係の AI の覚え書き',
   noSteps: '操作はしていません。',
   problem: (words: string) => `アプリが止めました：係の AI の答えの形が決まりに合いませんでした（${words}）。`,
+  unlisted: '画面にはあるが押せる部品として拾えなかった（係の AI の言葉）',
 } as const
 
 // eslint-disable-next-line no-control-regex
@@ -136,6 +144,7 @@ export function createOperatorTrail(phase: BrowserTrailPhase) {
   let end: BrowserTrailRun['end'] = null
   let notes: string | null = null
   let problem: BrowserAnswerProblem | null = null
+  let unlisted: string | null = null
   return {
     step(log: BrowserRunLogStep, reason: unknown): void {
       if (steps.length >= L.steps) { more++; return }
@@ -147,8 +156,13 @@ export function createOperatorTrail(phase: BrowserTrailPhase) {
     notes(v: unknown): void { if (v !== undefined) notes = trailNotes(v) },
     /** The app ended the run on an answer out of its form (`bad-answer`): which rule, in fixed words. */
     problem(code: BrowserAnswerProblem): void { problem = code },
+    /** The operator said something on the screen has no ref (`unlisted`): its last such words are kept. */
+    unlisted(v: unknown): void { const line = trailLine(v); if (line !== null) unlisted = line },
     view(): BrowserTrailRun {
-      return { phase, steps: steps.map(s => ({ ...s })), more, end: end ? { ...end } : null, notes, ...(problem ? { problem } : {}) }
+      return {
+        phase, steps: steps.map(s => ({ ...s })), more, end: end ? { ...end } : null, notes, ...(problem ? { problem } : {}),
+        ...(unlisted !== null ? { unlisted } : {}),
+      }
     },
   }
 }
@@ -156,7 +170,7 @@ export type OperatorTrailRecorder = ReturnType<typeof createOperatorTrail>
 
 /** The runs that did anything (a step, an end of its own, notes), for a card; none → null (the card shows no memo). */
 export function trailForCard(runs: readonly BrowserTrailRun[]): BrowserOperatorTrail | null {
-  const shown = runs.filter(r => r.steps.length > 0 || r.more > 0 || r.end !== null || r.notes !== null || r.problem !== undefined).slice(0, L.runs)
+  const shown = runs.filter(r => r.steps.length > 0 || r.more > 0 || r.end !== null || r.notes !== null || r.problem !== undefined || r.unlisted !== undefined).slice(0, L.runs)
   return shown.length > 0 ? shown : null
 }
 
@@ -186,7 +200,11 @@ export function readBrowserOperatorTrail(v: unknown): BrowserOperatorTrail | nul
     }
     if (!(r.notes === null || (typeof r.notes === 'string' && trailNotes(r.notes) === r.notes))) return null
     if (r.problem !== undefined && !(BROWSER_ANSWER_PROBLEMS as readonly unknown[]).includes(r.problem)) return null
-    runs.push({ phase: r.phase as BrowserTrailPhase, steps, more: r.more as number, end, notes: r.notes, ...(r.problem !== undefined ? { problem: r.problem as BrowserAnswerProblem } : {}) })
+    if (r.unlisted !== undefined && !(typeof r.unlisted === 'string' && lineOrNull(r.unlisted, L.reason))) return null
+    runs.push({
+      phase: r.phase as BrowserTrailPhase, steps, more: r.more as number, end, notes: r.notes, ...(r.problem !== undefined ? { problem: r.problem as BrowserAnswerProblem } : {}),
+      ...(r.unlisted !== undefined ? { unlisted: r.unlisted as string } : {}),
+    })
   }
   return runs
 }

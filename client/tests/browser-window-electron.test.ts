@@ -493,6 +493,62 @@ test('the operator sees a folder tree driven by script alone: each item listed o
   assert.equal(r.treeDomAfterShot, r.treeDomBefore, 'neither the snapshot nor the screen changed the page\'s document')
 })
 
+test('a row menu appended at the end of a long page gets its refs first (production 2026-11-27): the elements are ordered before the cap — the open menu, then the screen, the rest last —, a press on its choice reaches the page, an element it covers has no mark', { skip }, () => {
+  const r = result.browse
+  assert.equal(r.menuError, undefined)
+  assert.equal(r.menuEntered, true)
+  const list = r.menuList as { count: number; omitted: number; boxes: boolean[]; names: string[] }
+  // More usable elements than the cap: the cap holds, and the rest is counted.
+  assert.equal(list.count, 400)
+  assert.ok(list.omitted > 0, JSON.stringify(list.omitted))
+  // Every element on the screen comes before any off the screen; the rows at the end (off the screen) are the ones cut.
+  const firstOff = list.boxes.indexOf(false)
+  assert.ok(firstOff > 0, 'some on the screen')
+  assert.equal(list.boxes.slice(firstOff).includes(true), false, 'nothing on the screen after the first one off it')
+  assert.ok(list.names.includes('経路0') && list.names.includes('その他1'), 'the first rows are there')
+  assert.equal(list.names.includes('その他399'), false, 'the last row, off the screen, is left out first')
+  assert.equal(r.moreClick, 'ok')
+  // The menu's two choices are the first refs, with their marks.
+  const open = r.menuOpen as { first: Array<{ ref: number; role: string; name: string; box: boolean }>; count: number; coveredBox: unknown; coveredListed: boolean }
+  assert.deepEqual(open.first, [{ ref: 0, role: 'item', name: 'コピーを作成', box: true }, { ref: 1, role: 'item', name: '削除', box: true }])
+  assert.equal(open.count, 400)
+  assert.equal(open.coveredListed, true)
+  assert.equal(open.coveredBox, null, 'no mark on what the open menu covers')
+  assert.equal(r.copyClick, 'ok', 'the press on 「コピーを作成」 reached the page')
+})
+
+test('pressing by position: a menu choice with no ref is pressed where the screen image shows it and logged by its label; a file field or its label, a point off the screen and a page that moved are refused; typing goes into the focused text field, never a password field', { skip }, () => {
+  const r = result.browse
+  assert.equal(r.menuError, undefined)
+  // The menu's third choice has no sign of a control: no ref — pressed by its place on the image, logged by its own label.
+  const by = r.byPosition as { aimed: { ok: boolean; role: string; logLabel: string }; label: string | null; acted: string; listed: boolean }
+  assert.equal(by.listed, false, 'it has no ref')
+  assert.equal(by.aimed.ok, true, JSON.stringify(by))
+  assert.equal(by.label, '共有する')
+  assert.equal(by.acted, 'ok')
+  assert.equal(r.byPositionSeen, true, 'the page saw the press')
+  // A file field and its label: refused before anything is pressed (no file chooser can open).
+  assert.deepEqual((r.fileLabel as { aimed: unknown }).aimed, { ok: false, why: 'file' })
+  assert.deepEqual((r.fileField as { aimed: unknown }).aimed, { ok: false, why: 'file' })
+  assert.equal(r.fileSeen, false)
+  // Off the screen: the parser refuses a point outside the image; the window one outside the viewport.
+  assert.deepEqual(r.offParsed, { problem: 'point' })
+  assert.deepEqual(r.offAim, { ok: false, why: 'outside' })
+  // The page moved after its snapshot and screen: the press is refused (the operator sees the page again).
+  assert.deepEqual(r.movedAim, { ok: false, why: 'moved' })
+  // An element that became a floating layer after the snapshot (same box): the image did not show it on top — refused.
+  assert.deepEqual(r.layerAim, { ok: false, why: 'moved' })
+  // Typing into the focused field: the text field takes it, logged by its label; a password field never.
+  assert.equal((r.memoPress as { acted: string }).acted, 'ok')
+  assert.deepEqual(r.typeAim, { ok: true, role: 'textbox', logLabel: 'メモ' })
+  assert.equal(r.typed, 'ok')
+  assert.equal(r.memoValue, 'こんにちは')
+  assert.equal((r.pwPress as { acted: string }).acted, 'ok')
+  assert.deepEqual(r.pwAim, { ok: false, why: 'password' })
+  assert.equal(r.pwTyped, 'failed')
+  assert.equal(r.pwValue, '')
+})
+
 test('a write run sends each page write once within the plan: the page\'s own cookie and CSRF, its answer without Set-Cookie, one at a time; outside the plan, a file, past the max, after a stop and after a lost answer nothing is sent', { skip }, () => {
   const r = result.work
   assert.equal(r.entered, true)
