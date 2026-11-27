@@ -70,6 +70,7 @@ const LATER_TABLES = [
   'browser_plan_devices',
   // agent-browser.md "Recording": the recordings members sent.
   'browser_recordings',
+  'browser_skill_drafts',
   // agent-browser.md "A Skill's browser declaration and its approval": which version of a Skill's declaration is approved.
   'browser_skill_approvals',
   // agent-browser.md "The operator's window tools": the operator's runs and their log.

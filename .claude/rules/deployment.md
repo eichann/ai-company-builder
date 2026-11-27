@@ -366,6 +366,17 @@ is the first build whose server makes plans of writes — but only of an approve
 owner's test write (PR 7): deploy it only on top of PR 4 in production, and from the first plan of writes on, never below
 PR 4.
 
+### Browser operation: a Skill's draft and its trial runs (design memo 「記録からSkillの下書き」 §6)
+
+**The build of PR 2 (`feat/browser-skill-drafts`) must be in production before PR 3's (a draft's trial run, frames run
+`source = 'draft'`); once PR 3's build has run, never roll production back below PR 2.** Why: a build before PR 2 reads
+a frames run's `source` without checking it and re-reads the declaration only for `skill`, so a `draft` run left behind
+would be permitted as if it were an ad-hoc plan already approved on the card (Codex point 8 on the memo). PR 2 ends a run
+of any source it does not know on its first touch (`services/browser-frames.ts` `KNOWN_SOURCES`, end reason
+`unknown-source`): nothing more is permitted and the domain is free. Guard: `server/tests/unit/browser-frames.test.ts`
+「a run of a source this build does not know」. PR 2's own table (`browser_skill_drafts`) is additive and unread before it:
+rolling back below PR 2 before PR 3 ever ran is fine (the drafts are then unreachable until it is back).
+
 ### Browser operation: the server before the app (writes the site refused)
 
 Since "Recovering from a failed write" (`agent-browser.md`) the app reports a write the site refused (`refused`) and the

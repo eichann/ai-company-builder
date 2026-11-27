@@ -2909,8 +2909,10 @@ grant alone not enough, 見るだけ / 使わない / the default refused at reg
 Owner decisions 2026-11-25 (internal design memo 「ブラウザ操作：記録から自動化へ」 §3 I7–I9, §4, §10 「記録」, §11 `browser_recordings`,
 §12 row ③, D2, D3): a member who knows the work presses 「記録する」 on a site in Settings › 「ブラウザ操作」, does the work once in
 the site's window, stops, looks through the lines, deletes what they do not want and presses ［送る］. The company's owners /
-admins (the FDE enters a company as an admin) read it in the admin console and build a company Skill from it. **Recordings are
-never handed to the AI**: no AI route, record token, tool or prompt reads them.
+admins (the FDE enters a company as an admin) read it in the admin console and build a company Skill from it. **A recording
+reaches an AI only as its sender's own** (since "A Skill's draft from a recording" PR 2, owner decision D1): the sender's
+consultation AI reads the sender's own recordings through the drafts' routes; no record token, and no AI tool calls the
+routes below, where an owner / admin reads everyone's.
 
 - **What is kept** (`shared/core/browser-recording.ts`, pure, the one copy the app writes with and the server checks with;
   tightened after the independent review of this PR): **a word is kept only as a plain lowercase ASCII word** joined by
@@ -2979,7 +2981,8 @@ never handed to the AI**: no AI route, record token, tool or prompt reads them.
   line count, ［記録を止める］ ［捨てる］; then 「送る前に確かめてください」 with, first, **the warning that names of customers
   may appear and how to hide them**, each line (ページ / 押した / 入力した / 送った, the core's `browserRecordingLine`,
   `（推定）…` under it) with ［消す］, 「伏せる言葉」 (each hideable word, one press hides it everywhere), the other hosts with
-  ［消す］, ［送る］ ［捨てる］ and that it is seen only by the sender and the company's owners / admins and goes in 30 days.
+  ［消す］, ［送る］ ［捨てる］ and that it is seen only by the sender and the company's owners / admins and goes in 30 days, and
+  that the sender's own consultation AI reads it to make a Skill's draft (other people's AI does not).
 - **The server** (`routes/browser-recordings.ts` → `services/browser-recordings.ts` → the handle's `browserRecordings`,
   `ports/browser-recordings.ts`, `adapters/sqlite/browser-recordings.ts`, table `browser_recordings` in
   `db/schema/browser-recordings.ts`, **new table only**: company, `br_` + 32 hex, sender, domain, lines, the content as JSON,
@@ -3931,14 +3934,14 @@ the column's trigger and CHECK; a database from before the column: its row reads
 card and result lines; an id the query carried never reported). Each guard mutation-checked; kept on purpose: the plan
 hash's query (the declaration hash already moves with it).
 
-## A Skill's draft from a recording (PR 1 of 4: the core's two rules; nothing calls them yet)
+## A Skill's draft from a recording (PRs 1–2 of 4: the core's two rules; the draft kept for its author's AI)
 
 Owner-approved flow 2026-11-27 (internal design memo 「記録からSkillの下書き_設計メモ」): a member records the work once with
 test material and sends it; a **draft** company Skill is made from it — `browser.yaml` by the core's deterministic rule below,
 `SKILL.md` by the member's own AI —, only its author may try it (the card every run), and an owner / admin approves it into a
-department's `.claude/skills/<name>/`. PR 1 is the rule only: no route, table, tool or screen uses it; the draft's storage, the
-AI reading the author's own recordings (a change of "Recordings are never handed to the AI" above, for its author only), the
-trial run and the request come in PRs 2–4.
+department's `.claude/skills/<name>/`. PR 1 is the rule; PR 2 (below) keeps the draft on the server and lets the author's
+own AI read it with the author's own recordings and write its `SKILL.md`; the trial run (PR 3) and the request (PR 4) are
+later.
 
 - **`browserSkillDraftFrom(recordings)`** (`shared/core/browser-skill-draft.ts`, pure, knows no site): 1–5 recordings of one
   domain, each one the server's rule accepts (`browserRecordingProblem`), in the order made. Only sends with POST / PUT /
@@ -3992,6 +3995,90 @@ dropped beside a broader target, the frame then fitting only what was made; 300 
 within itself, never deletes, each write one the person sent; the change rule: drops, reorders, narrowing, fixed fields, the
 shared budget, a `{made}` never re-pointed at an update, every refusal), `client/tests/browser-recorder.test.ts` (`bareQuery` for each kind of query; format 2 passes the
 server's check). Each guard mutation-checked (25 mutations; a malformed address beside `bareQuery` is refused, never thrown — Codex review).
+
+### PR 2: the draft stored, read and changed by its author's own AI
+
+The server keeps a draft per recording it can make one from; the member's own consultation AI reads it — and only the
+member's own recordings — through a new tool, asks the member 2–4 questions and writes the `SKILL.md`. Nothing runs a draft
+yet (PR 3) and nothing requests it for the company (PR 4).
+
+- **Made when a recording is sent** (`services/browser-recordings.ts` `send` → `services/browser-skill-drafts.ts`
+  `makeOnSend`, **one transaction**: never a recording whose draft was lost halfway): when `browserSkillDraftFrom` gives a
+  draft and the sender has room, a row with the rule's text as `base_declaration` and `declaration`, empty `steps`, the
+  name `draft-<6 hex>`. The answer (`BrowserRecordingSent`, additive: an older app reads the summary only) adds `draftId`
+  and `draftNote` (plain Japanese: made, or why not — no write the rule keeps, or 10 drafts already). The recording is kept
+  either way (it is the company's too: its admins read it). The app's sentence after ［送る］ (`BROWSER_RECORDING_MAIN_WORDS`
+  `sentWithDraft` 「…Skill の下書きができました。相談に戻って、AI に「記録を送った」と伝えてください。」, `sentWithoutDraft(note)`;
+  an older server's answer: `sent` as before), and the review screen's note says the member's own consultation AI reads it
+  to make a draft (other people's AI does not).
+- **Table** `browser_skill_drafts` (`db/schema/browser-skill-drafts.ts`, **new table only**, behind the handle's
+  `browserSkillDrafts`): company, `bd_` + 32 hex, author (`user_id`), `name` (the Skill name rule, ≤ 64; unique per author),
+  `domain`, `recording_ids` (JSON, the names stay after the recordings' 30 days), `base_declaration` and `base_notes` (each
+  write's marks and id fields, what was left out — what the rule said, kept for the card and the request later),
+  `declaration`, `steps` (`SKILL.md`, ≤ 32 KiB, CHECK), `version` (`sha256:` of the canonical JSON of `{ name,
+  declaration, steps }`), `tried_version` (null until PR 3), `created_at`, `updated_at`, `delete_at`. A trigger keeps the
+  author, domain, recordings, base and creation fixed. **Every repository method takes the author** (no method reads or
+  changes another person's draft). **Not in a company archive** (`ARCHIVE_EXCLUDED_TABLES`).
+- **Whose** (D9, I5): the author alone, while a member this time (`created_at` ≥ their membership's). Another member, an
+  owner, an admin, another company's id, a draft past `delete_at`, the author after leaving and coming back: the same 404
+  `BROWSER_SKILL_DRAFT_NOT_FOUND`, and nothing of it listed. 「Skill の承認」, the Skills' name resolution and
+  `approvedFrames` never read this table (a draft is not a company Skill until PR 4 places it).
+- **What the AI may read** (I1, D1 — the change of "Recording"'s rule that no AI reads a recording): through these
+  routes only, the author's own recordings — sent while a member this time, still kept — in their stored kept form (no
+  value). `GET /browser-skill-drafts` lists the author's own recordings (an owner's too: never the company's, which the
+  admin console's `GET /browser-recordings` shows them); a draft's `sources` are the author's own of its `recording_ids`;
+  `POST /browser-skill-drafts` takes only the author's own (anyone else's is the same 404 as none,
+  `BROWSER_RECORDING_NOT_FOUND`). No record token, and no AI tool calls the recordings' own routes.
+- **Routes** (`routes/browser-skill-drafts.ts`, `companyMember`, the session only; shapes `shared/types/browser-skill-drafts.ts`):
+  `GET /browser-skill-drafts` (`{ drafts, recordings }`), `POST /browser-skill-drafts { recordingIds (1–5, distinct, in the
+  order given, one domain), name? }` (made again from own recordings: the work split over two recordings, as the
+  Lステップ route's 「タグを作る」 and 「コピーする」), `GET|PUT|DELETE /browser-skill-drafts/:draftId`. PUT `{ expectedVersion,
+  name?, declaration?, steps? }` (exactly these keys, at least one change): the version must be the one read, else 409
+  `BROWSER_SKILL_DRAFT_CHANGED` with the current `version` (the AI and a later screen changing it at once); a declaration
+  must parse (`BROWSER_SKILL_DRAFT_BAD_DECLARATION`) and be **no wider than `base_declaration`**
+  (`browserSkillDraftCoveredProblem`; `BROWSER_SKILL_DRAFT_WIDER` with the `problem` and the `write`: I2, I6); a name by the
+  rule (`BROWSER_SKILL_DRAFT_BAD_NAME`), not another draft's of the author (`BROWSER_SKILL_DRAFT_NAME_TAKEN`); `steps` ≤ 32
+  KiB (`BROWSER_SKILL_DRAFT_TOO_LARGE`, also the route's body limit). A change moves `delete_at` to 30 days on.
+- **10 per person, 30 days** (D5): a create past 10 is 409 `BROWSER_SKILL_DRAFT_LIMIT`; a send past 10 keeps the
+  recording without a draft and says so. Every read leaves out a row past `delete_at`; the server clock deletes them
+  (`expireBrowserSkillDrafts`, `ClockRun.draftsDeleted`).
+- **The tool** `browser_skill_draft` on `acb_browser` (`client/electron/browser-request/skill-draft-tool.ts`, words and checks
+  `client/shared/browser-skill-drafts.ts`, the HTTP `client/electron/features/browser/skill-drafts.ts`): given **only beside
+  `browser_work`** (its switch on, the wiring given: `browserInspectForTurn`; Claude Code only, never an unattended step),
+  `action` `list` / `show` / `save` / `remake`. Main calls the drafts' routes with the member's session — never this PC's
+  key, never `/browser-recordings` —, and checks a draft / recording id and the company id before any request (no path from
+  the AI's words). `show` hands the draft (`browser.yaml`, the base when it differs, the marks' and left-out fixed words,
+  `SKILL.md` **as written**: its 【】 are the member's) and then **every recording's lines as one block of outside text**
+  (`browserRecordingLine` in `wrapOutsideText`: a label's 【】 → 〔〕, it cannot close the block). Answers are fixed words
+  (`BROWSER_SKILL_DRAFT_AI_WORDS`) and the server's own plain sentences (≤ 200); 20 calls per turn. The description (plain
+  Japanese, no 「開ける」) says how: read the member's own draft and recordings, ask 2–4 questions (what changes each time,
+  what must not change, the test names), write `SKILL.md` with the standard sections the hand-made `lstep-round-inflow`
+  taught — what it does, what to ask for, **the preview: read only, type nothing, press no saving button (named), no search
+  box, browse by folder**, the steps, when to stop, what never to do, the test values — and only narrow `browser.yaml`.
+  The tool row: 「Skill の下書きを読み書きしました」 (`acb-tool-displays.ts`).
+- **The rollback floor for PR 3** (Codex point 8 on the memo): a frames run whose `source` this build does not know ends on
+  its first touch (`services/browser-frames.ts` `settle`, `KNOWN_SOURCES` `skill` / `adhoc`, end reason `unknown-source`):
+  a later build's `draft` run left behind is never permitted as an ad-hoc plan. `deployment.md` "a Skill's draft and its
+  trial runs".
+- **Remaining limits** (said): `SKILL.md` goes back to the AI as written, so a label the AI copied into it from a recording
+  is no longer marked as page text (it is the member's draft, read by the member's own AI); a label may name a customer the
+  member saw (as before, hidden before sending is the member's choice); a modified app could forge a recording (out of
+  scope, D10).
+
+Tests (PR 2): `server/tests/unit/browser-skill-drafts.test.ts` (made with the recording, one transaction — a failure stores
+neither —, none from a read-only recording and why; the author alone — another member, an owner, an admin, another company,
+the author after leaving and coming back: 404 and nothing listed; only own recordings listed, used and handed out — an
+owner's create from a member's recording refused like none —; a recording past its 30 days no longer handed out; remake in
+order, one domain, ≤ 5, distinct, strict body; narrowing taken, anything wider refused with its problem — a write never
+recorded, a DELETE, a wide path, another domain, a target split past its budget —; the base and the author fixed by
+trigger; the version's compare-and-set; the name rule and once per author; `SKILL.md` 32 KB; 10 per person; 30 days moved by
+a change, left out and swept by the clock; deleting), `server/tests/unit/browser-frames.test.ts` 「a run of a source this
+build does not know」, `client/tests/browser-skill-draft-tool.test.ts` (only the drafts' routes with the session and never
+this PC's key; ids checked before any request; the recordings' lines one block of outside text, a label trying to close it
+neutralized, `SKILL.md` as written; refusal words; the call budget; the tool only beside `browser_work`; the description),
+`client/tests/browser-recording-app.test.ts` (the send's sentence with and without a draft, an older server), permission
+matrix rows + `CROSS`, `company-scoped-sql.test.ts`, `jobs-schema.test.ts`, `company-archive.test.ts`. Each guard
+mutation-checked.
 
 ## Letting a domain go, why a write run stopped, the Skill's steps as written (incident 2026-11-27)
 

@@ -65,6 +65,7 @@ import { createBrowserLineService } from './services/browser-lines'
 import { createBrowserSiteGrants } from './services/browser-site-grants'
 import { createBrowserDeviceService } from './services/browser-devices'
 import { createBrowserRecordingService } from './services/browser-recordings'
+import { createBrowserSkillDraftService } from './services/browser-skill-drafts'
 import { BROWSER_SKILL_NOTICE_PREFIX, createBrowserSkillService } from './services/browser-skills'
 import { browserSkillSource } from './adapters/browser-skill-source'
 import { createBrowserRunService } from './services/browser-runs'
@@ -314,8 +315,10 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     onChange: companyId => agentPolicy.announce(companyId),
   })
   // 「ブラウザ操作」 recordings (agent-browser.md "Recording"): this PC's check and who may use the site (at least 見るだけ).
+  // A Skill's draft from the member's own recordings (agent-browser.md "A Skill's draft from a recording"): its author's alone.
+  const browserSkillDrafts = createBrowserSkillDraftService({ ...shared, memberships: repos.memberships })
   const browserRecordings = createBrowserRecordingService({
-    ...shared, memberships: repos.memberships, siteGrants: browserSiteGrants, devices: browserDevices.gate,
+    ...shared, memberships: repos.memberships, siteGrants: browserSiteGrants, devices: browserDevices.gate, drafts: browserSkillDrafts,
   })
   // 「Skill の承認」 (agent-browser.md "A Skill's browser declaration and its approval"): the server's own copy of the Skills.
   const browserSkills = createBrowserSkillService({
@@ -935,6 +938,7 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
       expireHoldingTickets: companyId => holdingTickets.expire(companyId),
       // 「ブラウザ操作」 recordings past their 30 days (agent-browser.md "Recording"): every company.
       expireBrowserRecordings: companyId => browserRecordings.expire(companyId),
+      expireBrowserSkillDrafts: companyId => browserSkillDrafts.expire(companyId),
       // The holding place's retention (private-folders.md "Holding: the member's upload"): every company.
       // First a take-in a stopped process left halfway is settled (private-folders.md "Holding: review").
       sweepHolding: async companyId => { await holdingReview.settleStale(companyId); return privateHolding.sweep(companyId) },
@@ -972,6 +976,7 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     browserSiteGrants,
     browserDevices,
     browserRecordings,
+    browserSkillDrafts,
     browserSkills,
     browserRuns,
     browserFrames,

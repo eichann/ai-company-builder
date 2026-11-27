@@ -142,6 +142,8 @@ interface World {
     browserDevice: string
     /** A 「ブラウザ操作」 recording the other company's member sent (agent-browser.md "Recording"). */
     browserRecording: string
+    /** A Skill draft the other company's member made from their recording (agent-browser.md "A Skill's draft from a recording"). */
+    browserSkillDraft: string
     /** An operator run of the other company's member, running (agent-browser.md "The operator's window tools"). */
     browserRun: string
     /** A holding ticket and item of the other company's member (private-folders.md "Holding: the member's upload"). */
@@ -190,6 +192,8 @@ const NO_SUCH_DEVICE = `bd_${'0'.repeat(32)}`
 const OTHER_DEVICE = `bd_${'e'.repeat(32)}`
 const NO_SUCH_RECORDING = `br_${'0'.repeat(32)}`
 const OTHER_RECORDING = `br_${'e'.repeat(32)}`
+const NO_SUCH_DRAFT = `bd_${'0'.repeat(32)}`
+const OTHER_DRAFT = `bd_${'e'.repeat(32)}`
 const NO_SUCH_RUN = `bo_${'0'.repeat(32)}`
 const OTHER_RUN = `bo_${'e'.repeat(32)}`
 const NO_SUCH_HOLDING = '00000000-0000-4000-8000-0000000401d0'
@@ -778,6 +782,13 @@ const MATRIX: Row[] = [
   r('GET /api/companies/:companyId/browser-recordings', w => ({ path: `${C(w)}/browser-recordings` }), MEMBERS),
   r('GET /api/companies/:companyId/browser-recordings/:recordingId', w => ({ path: `${C(w)}/browser-recordings/${NO_SUCH_RECORDING}` }), [404, 404, 404, 404, 404, 401]),
   r('DELETE /api/companies/:companyId/browser-recordings/:recordingId', w => ({ path: `${C(w)}/browser-recordings/${NO_SUCH_RECORDING}` }), [404, 404, 404, 404, 404, 401]),
+  // A Skill's draft from the member's own recordings (agent-browser.md "A Skill's draft from a recording"): every member
+  // their own; nobody else's, owners and admins included.
+  r('GET /api/companies/:companyId/browser-skill-drafts', w => ({ path: `${C(w)}/browser-skill-drafts` }), MEMBERS),
+  r('POST /api/companies/:companyId/browser-skill-drafts', w => ({ path: `${C(w)}/browser-skill-drafts`, body: { x: 1 } }), [400, 400, 400, 400, 404, 401]),
+  r('GET /api/companies/:companyId/browser-skill-drafts/:draftId', w => ({ path: `${C(w)}/browser-skill-drafts/${NO_SUCH_DRAFT}` }), [404, 404, 404, 404, 404, 401]),
+  r('PUT /api/companies/:companyId/browser-skill-drafts/:draftId', w => ({ path: `${C(w)}/browser-skill-drafts/${NO_SUCH_DRAFT}`, body: { x: 1 } }), [404, 404, 404, 404, 404, 401]),
+  r('DELETE /api/companies/:companyId/browser-skill-drafts/:draftId', w => ({ path: `${C(w)}/browser-skill-drafts/${NO_SUCH_DRAFT}` }), [404, 404, 404, 404, 404, 401]),
   // 「Skill の承認」 (agent-browser.md "A Skill's browser declaration and its approval"): owners / admins only (a body that is
   // no approval → 400 after the role check); the Skill is named in the body, so no CROSS row (no object id in the URL).
   r('GET /api/companies/:companyId/browser-skill-approvals', w => ({ path: `${C(w)}/browser-skill-approvals` }), [200, 200, 403, 403, 404, 401]),
@@ -1013,6 +1024,9 @@ const CROSS: CrossRow[] = [
   x('POST /api/companies/:companyId/browser-devices/:deviceId/revoke', (w, id) => ({ path: `${C(w)}/browser-devices/${id}/revoke` }), w => w.other.browserDevice, NO_SUCH_DEVICE),
   x('GET /api/companies/:companyId/browser-recordings/:recordingId', (w, id) => ({ path: `${C(w)}/browser-recordings/${id}` }), w => w.other.browserRecording, NO_SUCH_RECORDING),
   x('DELETE /api/companies/:companyId/browser-recordings/:recordingId', (w, id) => ({ path: `${C(w)}/browser-recordings/${id}` }), w => w.other.browserRecording, NO_SUCH_RECORDING),
+  x('GET /api/companies/:companyId/browser-skill-drafts/:draftId', (w, id) => ({ path: `${C(w)}/browser-skill-drafts/${id}` }), w => w.other.browserSkillDraft, NO_SUCH_DRAFT),
+  x('PUT /api/companies/:companyId/browser-skill-drafts/:draftId', (w, id) => ({ path: `${C(w)}/browser-skill-drafts/${id}`, body: { expectedVersion: `sha256:${'1'.repeat(64)}`, steps: 'x' } }), w => w.other.browserSkillDraft, NO_SUCH_DRAFT),
+  x('DELETE /api/companies/:companyId/browser-skill-drafts/:draftId', (w, id) => ({ path: `${C(w)}/browser-skill-drafts/${id}` }), w => w.other.browserSkillDraft, NO_SUCH_DRAFT),
   x('POST /api/companies/:companyId/browser-runs/:runId/continue', (w, id) => ({ path: `${C(w)}/browser-runs/${id}/continue` }), w => w.other.browserRun, NO_SUCH_RUN),
   x('POST /api/companies/:companyId/browser-runs/:runId/finish', (w, id) => ({ path: `${C(w)}/browser-runs/${id}/finish`, body: { outcome: 'done', steps: [] } }), w => w.other.browserRun, NO_SUCH_RUN),
   x('PUT /api/companies/:companyId/browser-type-grants/:userId', (w, id) => ({ path: `${C(w)}/browser-type-grants/${id}`, body: { connector: 'lstep', operation: 'reminder_step_add_template', declarationHash: `sha256:${'a'.repeat(64)}`, allowed: true } }), w => w.other.member, 'pm-nobody'),
@@ -1317,6 +1331,10 @@ async function seed(): Promise<World> {
   // A 「ブラウザ操作」 recording the other company's member sent (rows as adapters/sqlite/browser-recordings.ts writes them).
   db.prepare(`INSERT INTO browser_recordings (company_id, id, user_id, domain, lines, content, created_at, delete_at) VALUES (?, ?, ?, 'shop.example.test', 1, '{}', ?, '2100-01-01T00:00:00.000Z')`)
     .run(other, OTHER_RECORDING, otherMember, expires)
+  // A Skill draft the other company's member made (rows as adapters/sqlite/browser-skill-drafts.ts writes them).
+  db.prepare(`INSERT INTO browser_skill_drafts (company_id, id, user_id, name, domain, recording_ids, base_declaration, base_notes, declaration, steps, version, tried_version, created_at, updated_at, delete_at)
+    VALUES (?, ?, ?, 'draft-other', 'shop.example.test', ?, 'x', '{}', 'x', '', ?, NULL, ?, ?, '2100-01-01T00:00:00.000Z')`)
+    .run(other, OTHER_DRAFT, otherMember, JSON.stringify([OTHER_RECORDING]), `sha256:${'1'.repeat(64)}`, expires, expires)
   // An operator run of the other company's member, running (rows as adapters/sqlite/browser-runs.ts writes them).
   db.prepare(`INSERT INTO browser_runs (company_id, id, user_id, host, state, started_at, lease_until) VALUES (?, ?, ?, 'shop.example.com', 'running', ?, '2100-01-01T00:00:00.000Z')`)
     .run(other, OTHER_RUN, otherMember, expires)
@@ -1408,6 +1426,7 @@ async function seed(): Promise<World> {
       browserFrameRun: OTHER_FRAME_RUN,
       browserDevice: OTHER_DEVICE,
       browserRecording: OTHER_RECORDING,
+      browserSkillDraft: OTHER_DRAFT,
       browserRun: OTHER_RUN,
 
     },

@@ -333,6 +333,9 @@ GET  /api/config                                  setup state (no auth)
                               GET|DELETE /browser-recordings/:recordingId (the sender or owner/admin)
                                                                              browser-recordings.ts
                                                                 (記録: agent-browser.md "Recording")
+                              GET|POST /browser-skill-drafts, GET|PUT|DELETE /browser-skill-drafts/:draftId (the author's
+                              own only: owners / admins read no one else's)  browser-skill-drafts.ts
+                                                                (下書き: agent-browser.md "A Skill's draft from a recording")
                               GET|POST /browser-skill-approvals, POST /browser-skill-approvals/revoke (owner/admin)
                                                                              browser-skills.ts
                                                                 (Skill の承認: agent-browser.md "A Skill's browser declaration and its approval")

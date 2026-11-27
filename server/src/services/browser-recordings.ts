@@ -14,21 +14,26 @@
  *   read, so a role taken away counts at once. A sender who left: the recording stays for the company until its 30 days.
  * - **Deleting**: the sender (as above) or an owner / admin, any time; the row and its content go. The server clock
  *   deletes every recording past its 30 days (`expire`), and every read leaves one out even before that.
- * - Recordings are never handed to the AI: no AI route, record token or tool reads them.
+ * - **A draft of a Skill** is made in the same transaction from a recording that holds a write the rule keeps
+ *   (services/browser-skill-drafts.ts `makeOnSend`; agent-browser.md "A Skill's draft from a recording"): the answer adds
+ *   `draftId` and a sentence. A recording is handed to an AI only as its sender's own, through the drafts' routes (D1):
+ *   no record token, and no AI tool calls the routes here, where an owner / admin reads everyone's.
  */
 import {
   BROWSER_RECORDING_DAYS, browserRecordingProblem, type BrowserRecordingContent,
 } from '../../shared/core/browser-recording'
 import { normalizeBrowserHost } from '../../shared/core/browser-operation'
-import type { BrowserRecordingDetail, BrowserRecordingsList, BrowserRecordingSummary } from '../../shared/types/browser-recordings'
+import type { BrowserRecordingDetail, BrowserRecordingSent, BrowserRecordingsList, BrowserRecordingSummary } from '../../shared/types/browser-recordings'
 import type { AccountDirectory } from '../ports/accounts'
 import type { BrowserRecordingHead, BrowserRecordingRepository } from '../ports/browser-recordings'
 import type { Clock, IdGenerator } from '../ports/clock'
 import type { CompanyDataSource } from '../ports/company-data'
 import type { MembershipRepository } from '../ports/memberships'
+import type { Transactions } from '../ports/transactions'
 import { hasFullAccess, type Member } from './access'
 import type { BrowserDeviceGate } from './browser-devices'
 import type { BrowserSiteGrants } from './browser-site-grants'
+import type { BrowserSkillDraftService } from './browser-skill-drafts'
 import { ok, refuse, type Outcome, type Refusal } from './outcome'
 
 export interface BrowserRecordingDeps {
@@ -41,6 +46,9 @@ export interface BrowserRecordingDeps {
   siteGrants: Pick<BrowserSiteGrants, 'allows'>
   /** This PC's check (the first check of every plan step: an enabled registration, or the owner's exception). */
   devices: Pick<BrowserDeviceGate, 'check'>
+  transactions: Transactions
+  /** The Skill's draft made from the recording, in the same transaction (agent-browser.md "A Skill's draft from a recording"). */
+  drafts: Pick<BrowserSkillDraftService, 'makeOnSend'>
 }
 
 export const BROWSER_RECORDING_LIST_LIMIT = 200
@@ -81,7 +89,7 @@ export function createBrowserRecordingService(deps: BrowserRecordingDeps) {
 
   return {
     /** POST /browser-recordings { domain, content } + this PC's key header. */
-    send(member: Member, deviceKey: string | undefined, body: unknown): Outcome<BrowserRecordingSummary> {
+    send(member: Member, deviceKey: string | undefined, body: unknown): Outcome<BrowserRecordingSent> {
       const pc = deps.devices.check(member, deviceKey, null)
       if (!pc.ok) return pc
       if (!isMap(body) || Object.keys(body).length !== 2 || typeof body.domain !== 'string') return refuse('bad-request', W.badBody, { code: 'BROWSER_RECORDING_BAD' })
@@ -93,16 +101,20 @@ export function createBrowserRecordingService(deps: BrowserRecordingDeps) {
       if (problem === 'size') return refuse('too-large', W.tooLarge, { code: 'BROWSER_RECORDING_TOO_LARGE' })
       if (problem) return refuse('bad-request', W.badBody, { code: 'BROWSER_RECORDING_BAD', problem })
       const content = body.content as BrowserRecordingContent
-      const at = deps.clock.nowMs()
-      if (repo(member.companyId).countOf(member.userId, iso(at)) >= BROWSER_RECORDING_PER_MEMBER) {
-        return refuse('conflict', W.tooMany, { code: 'BROWSER_RECORDING_LIMIT' })
-      }
-      const row = {
-        id: `br_${deps.ids.newToken().slice(0, 32)}`, userId: member.userId, domain, lines: content.steps.length,
-        content: JSON.stringify(content), createdAt: iso(at), deleteAt: iso(at + BROWSER_RECORDING_DAYS * DAY_MS),
-      }
-      repo(member.companyId).insert(row)
-      return ok(summaries(member, [row])[0])
+      // The recording and its draft together: never a recording whose draft was lost halfway (design memo §7 "止まったら").
+      return deps.transactions.run((): Outcome<BrowserRecordingSent> => {
+        const at = deps.clock.nowMs()
+        if (repo(member.companyId).countOf(member.userId, iso(at)) >= BROWSER_RECORDING_PER_MEMBER) {
+          return refuse('conflict', W.tooMany, { code: 'BROWSER_RECORDING_LIMIT' })
+        }
+        const row = {
+          id: `br_${deps.ids.newToken().slice(0, 32)}`, userId: member.userId, domain, lines: content.steps.length,
+          content: JSON.stringify(content), createdAt: iso(at), deleteAt: iso(at + BROWSER_RECORDING_DAYS * DAY_MS),
+        }
+        repo(member.companyId).insert(row)
+        const draft = deps.drafts.makeOnSend(member, { id: row.id, content, createdAtMs: at })
+        return ok({ ...summaries(member, [row])[0], draftId: draft.draftId, draftNote: draft.note })
+      })
     },
 
     /** GET /browser-recordings: an owner / admin every recording of the company; anyone else their own. */

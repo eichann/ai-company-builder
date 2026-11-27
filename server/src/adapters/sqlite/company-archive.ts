@@ -28,6 +28,7 @@ type Conn = Database.Database
 export const ARCHIVE_EXCLUDED_TABLES: Record<string, string> = {
   broker_tokens: 'short-lived relay tokens (minutes): a restore must not bring any back',
   browser_recordings: 'kept 30 days at most and read only by their sender and the admins of that time (agent-browser.md "Recording"): an archive must not keep them longer',
+  browser_skill_drafts: 'a draft is its author\'s alone and goes 30 days after its last change, like the recordings it was made from (agent-browser.md "A Skill\'s draft from a recording"): an archive must not keep it longer',
 }
 
 /** Columns whose value is a bearer secret: replaced in the archive, with the reason. */

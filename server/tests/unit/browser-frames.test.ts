@@ -1237,3 +1237,33 @@ describe('frames: a department Skill (agent-browser.md "Department Skills")', ()
     expect(code(await frames.start(alice, { skill: 'a/b/.claude/skills/x' }, PC))).toBe('BROWSER_SKILL_NOT_FOUND')
   })
 })
+
+describe('a run of a source this build does not know (the rollback floor of the drafts\' runs)', () => {
+  /** A row a later build wrote (its table rebuilt with another source allowed), read by this build after a rollback. */
+  function asLaterBuildsSource(runId: string, source: string) {
+    conn.exec('DROP TRIGGER browser_frame_runs_fixed')
+    conn.pragma('ignore_check_constraints = ON')
+    conn.prepare('UPDATE browser_frame_runs SET source = ? WHERE id = ?').run(source, runId)
+    conn.pragma('ignore_check_constraints = OFF')
+  }
+
+  it('an open run of an unknown source ends on its first touch and permits nothing; the domain is free again', async () => {
+    const run = await openAdhoc()
+    asLaterBuildsSource(run.runId, 'draft')
+    expect(code(await permit(run.runId, 1))).toBe('BROWSER_RUN_ENDED')
+    expect(value(frames.get(alice, run.runId))).toMatchObject({ state: 'ended', endReason: 'unknown-source' })
+    expect(frames.holderOn(CO, DOMAIN)).toBeNull()
+  })
+
+  it('a waiting one ends too: its card can no longer approve it', async () => {
+    const started = value(await frames.start(alice, { plan: adhoc }, PC))
+    asLaterBuildsSource(started.runId, 'draft')
+    expect(code(await approve(alice, started))).toBe('BROWSER_RUN_ENDED')
+    expect(value(frames.get(alice, started.runId))).toMatchObject({ state: 'ended', endReason: 'unknown-source' })
+  })
+
+  it('a known source runs as before', async () => {
+    const run = await openAdhoc()
+    expect(code(await permit(run.runId, 1))).toBe('ok')
+  })
+})
