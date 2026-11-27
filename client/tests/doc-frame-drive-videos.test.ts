@@ -19,6 +19,7 @@ import { docFrameCsp, docFramePolicy, type DocViewEvent } from '../shared/doc-fr
 const A = 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA'
 const B = 'BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB'
 const C = 'CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC'
+const E = 'EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE'
 const file = (id: string, rest = '/view') => `https://drive.google.com/file/d/${id}${rest}`
 const ids = (html: string) => driveVideoIdsOf(html).ids
 
@@ -324,4 +325,28 @@ test('a listener that throws never stops the document being served', async () =>
   w.frames.onDocumentServed(() => { throw new Error('boom') })
   const answer = await w.frames.serve({ url: w.shownUrl.get(viewId)!, method: 'GET' })
   assert.equal(answer.status, 200)
+})
+
+test('a blocked Drive embed of one of the document\'s own videos is not counted as a missing internet part (ACB\'s player shows it); any other Drive file or host still is', async () => {
+  const w = world()
+  const viewId = await w.open()
+  const hooks = w.hooksOf.get(viewId)!
+  const blockedCounts = () => w.events.filter(([, e]) => e.kind === 'blocked').map(([, e]) => (e as { count: number }).count)
+  hooks.onBlocked(viewId, file(B, '/preview'))
+  hooks.onBlocked(viewId, file(A, '/view?usp=sharing'))
+  assert.deepEqual(blockedCounts(), [], 'the document\'s own Drive videos are ACB\'s player\'s')
+  hooks.onBlocked(viewId, file(C, '/preview'))
+  hooks.onBlocked(viewId, 'https://cdn.example/lib.js')
+  w.flush()
+  assert.equal(blockedCounts().at(-1), 2, 'a Drive file the document does not embed, and another host, are counted')
+  // While the document is being read again (an auto refresh after an edit), a Drive embed waits for the
+  // read; then only what the document does not embed is counted (a page load starts a new tally).
+  w.write('営業/report.html', `<iframe src="${file(A, '/preview')}"></iframe><iframe src="${file(E, '/preview')}"></iframe><p>直しました</p>`)
+  await w.load(viewId, w.shownUrl.get(viewId)!)
+  const before = blockedCounts().length
+  hooks.onBlocked(viewId, file(E, '/preview'))
+  hooks.onBlocked(viewId, file('DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD', '/preview'))
+  assert.equal(blockedCounts().length, before, 'nothing counted while the document is still being read')
+  w.flush()
+  assert.equal(blockedCounts().at(-1), 1, 'after the read: the video the edit added is not counted, another Drive file is')
 })
