@@ -284,3 +284,52 @@ test('the renderer takes a trail only in its shape and caps: past a cap or with 
   assert.equal(view.trail, undefined)
   assert.ok(BROWSER_TRAIL_WORDS.heading.includes('確かめた事実ではありません'))
 })
+
+// ── Something on the screen without a ref (production 2026-11-27: a row's popup menu showed on the screen image but had
+// no ref; the operator could only stop) ─────────────────────────────────────────────────────────────────────────────
+
+const UNLISTED = '行の「…」で開いたメニューの［コピーを作成］'
+
+test('the operator can say what it sees on the screen without a ref: the card shows 「画面にはあるが押せる部品として拾えなかった」 with its words; never the AI\'s words or the log', async () => {
+  const { wiring, finished, run } = browseWorld([
+    step({ do: 'click', ref: 1, reason: REASON_CLICK }),
+    step({ do: 'stop', why: 'need-person', unread: [], reason: REASON_STOP, unlisted: UNLISTED }),
+  ])
+  const r = await run()
+  assert.equal(r.kind, 'card')
+  const trail = wiring.card('u-1', COMPANY, RUN)?.trail
+  assert.equal(trail?.[0].unlisted, UNLISTED)
+  assert.equal(BROWSER_TRAIL_WORDS.unlisted.startsWith('画面にはあるが押せる部品として拾えなかった'), true)
+  assert.deepEqual(readBrowserOperatorTrail(JSON.parse(JSON.stringify(trail))), trail, 'the renderer takes it')
+  if (r.kind === 'card') assert.equal(r.words.includes(UNLISTED), false)
+  assert.equal(JSON.stringify(finished).includes('コピーを作成'), false)
+})
+
+test('a write run\'s preview keeps the operator\'s word for what has no ref; one that is not a string refuses the answer; the renderer takes only one line', async () => {
+  const { wiring, cards, work } = workWorld([
+    step({ do: 'stop', why: 'need-person', unread: [], reason: REASON_STOP, unlisted: UNLISTED }),
+  ], null)
+  await work()
+  assert.equal(cards.length, 1)
+  assert.equal(wiring.previewCard('u-1', COMPANY, cards[0])?.trail?.[0].unlisted, UNLISTED)
+  const ctx = { snapshot: page(), items: 0, phase: 'preview' as const, adhoc: false, domain: HOST }
+  assert.deepEqual(parseWorkAnswer(step({ do: 'back', unlisted: 4 }), ctx), { problem: 'unlisted' })
+  assert.deepEqual(parseBrowseAnswer(step({ do: 'back', unlisted: { x: 1 } }), { snapshot: page(), items: 0 }), { problem: 'unlisted' })
+  const a = parseBrowseAnswer(step({ do: 'back', unlisted: `一行目\n${'あ'.repeat(300)}` }), { snapshot: page(), items: 0 })
+  assert.ok('answer' in a && a.unlisted?.length === BROWSER_TRAIL_LIMITS.reason && !a.unlisted.includes('\n'))
+  const good: BrowserOperatorTrail = [{ phase: 'browse', steps: [], more: 0, end: { kind: 'stop', reason: null }, notes: null, unlisted: UNLISTED }]
+  assert.deepEqual(readBrowserOperatorTrail(good), good)
+  for (const bad of ['a\nb', 'x'.repeat(201), 3]) assert.equal(readBrowserOperatorTrail([{ ...good[0], unlisted: bad }]), null, String(bad))
+  // A run whose only word is that one still shows on the card.
+  const t = createOperatorTrail('preview')
+  t.unlisted(UNLISTED)
+  assert.equal(trailForCard([t.view()])?.[0].unlisted, UNLISTED)
+})
+
+test('the prompts say the elements come in priority order (open overlays first) and how to name what has no ref', () => {
+  for (const p of [BROWSER_OPERATOR_BROWSE_PROMPT, BROWSER_OPERATOR_WORK_PREVIEW_PROMPT, BROWSER_OPERATOR_WORK_PROMPT]) {
+    assert.match(p, /開いているメニュー・ポップアップ・ダイアログの中の要素が先/)
+    assert.match(p, /elementsLeftOut/)
+    assert.match(p, /"unlisted":"/)
+  }
+})

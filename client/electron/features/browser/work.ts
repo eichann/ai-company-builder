@@ -14,7 +14,7 @@
 // The page's text, the plan's words, the values read and the site's answers go to the member's card only (kept here in
 // memory, per signed-in member); the consultation AI gets `workWordsForAi`. No Electron.
 import { BROWSER_COMPANY_ID_RE } from '../../../shared/browser-plans'
-import { BROWSER_BROWSE_LIMITS as BL, browseLogStep, type BrowserBrowseAction, type BrowserBrowseHistoryEntry, type BrowserBrowseStop, type BrowserBrowseSurface, type BrowserPageSnapshot } from '../../../shared/browser-browse'
+import { BROWSER_BROWSE_LIMITS as BL, aimedAction, browseLogStep, pageWithScreen, type BrowserBrowseAction, type BrowserBrowseHistoryEntry, type BrowserBrowseStop, type BrowserBrowseSurface, type BrowserPageSnapshot } from '../../../shared/browser-browse'
 import {
   BROWSER_WORK_CARD_WORDS as CW, BROWSER_WORK_LIMITS as L, BROWSER_WORK_WORDS as W, afterReadTarget, beforeReadAddress, createdIdOf, parseWorkAnswer,
   topFields, workBusyWords, workEndAfterRefusals, workFrameOf, workMaterial, workPlanSentences, workPreviewStoppedCard, workResultCard, workRetrySentence, workWordsForAi,
@@ -227,11 +227,13 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
       if (!o.win.pageClean()) return { kind: 'end', reason: 'other-frames', end: stopped('blocked') }
       const going = await deps.api.runContinue(o.companyId, o.browseRunId)
       if (going.kind !== 'ok') return { kind: 'end', reason: going.kind === 'no-answer' ? 'no-answer' : 'refused', end: stopped(continueStop(going)) }
-      const page: BrowserPageSnapshot | null = await o.win.snapshot()
+      const shown: BrowserPageSnapshot | null = await o.win.snapshot()
       if (!o.current()) return { kind: 'end', reason: 'context-changed', end: stopped(o.whyNot()) }
-      if (!page) return { kind: 'end', reason: 'blocked', end: stopped('blocked') }
-      // The screen beside the text, its elements marked by number: for this step's operator only, then dropped.
-      const image = (await o.win.screenshot?.(page)) ?? null
+      if (!shown) return { kind: 'end', reason: 'blocked', end: stopped('blocked') }
+      // The screen beside the text, its elements marked by number: for this step's operator only, then dropped. Its size
+      // goes with the page (a press by position is measured in its pixels).
+      const image = (await o.win.screenshot?.(shown)) ?? null
+      const page = pageWithScreen(shown, image)
       if (!o.current()) return { kind: 'end', reason: 'context-changed', end: stopped(o.whyNot()) }
       const left = o.deadline - now()
       if (left <= 0) return { kind: 'end', reason: 'timeout', end: stopped('timeout') }
@@ -259,13 +261,17 @@ export function wireBrowserWork(deps: BrowserWorkDeps) {
       retry = null
       if (parsed.notes !== undefined) notes = parsed.notes
       o.trail.notes(parsed.notes)
+      o.trail.unlisted(parsed.unlisted)
       const answer = parsed.answer
       if (answer.do === 'plan' || answer.do === 'done' || answer.do === 'stop') {
         o.trail.end(answer.do, parsed.reason)
         return { kind: 'answer', answer }
       }
       const action: BrowserBrowseAction = answer
-      const logStep = browseLogStep(action, page, o.host)
+      // A press by position or a typing without a ref: what the window's hit-test finds there now; refused → nothing done.
+      const aimed = aimedAction(action) ? (await o.win.aim?.(action)) ?? { ok: false as const, why: 'nothing' as const } : undefined
+      if (aimed && !aimed.ok) { history.push({ do: action.do, outcome: 'refused', why: aimed.why }); continue }
+      const logStep = browseLogStep(action, page, o.host, aimed)
       if (o.log.length < BROWSER_RUN_LIMITS.steps) o.log.push(logStep)
       o.trail.step(logStep, parsed.reason)
       const done = await o.win.act(action, o.cut.signal)

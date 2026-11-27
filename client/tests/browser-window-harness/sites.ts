@@ -57,6 +57,38 @@ document.getElementById('card').addEventListener('click', () => { mark('card'); 
 </script>`
 
 /**
+ * A fictional long list with a row menu (agent-browser.md "The operator sees the screen", production 2026-11-27): a fixed
+ * sidebar of 60 links and 400 rows, each with a link and a 「…」 button, far more than the element cap; a row's 「…」
+ * appends, at the very end of the page, a floating layer (absolute, z-index, no role or known class) whose two choices
+ * are plain divs with a pointer cursor, and a third with no sign of a control at all (no ref: pressed by position). The layer
+ * covers the second row's 「…」. Above the rows: a file field with its label, a text field and a password field.
+ */
+const MENU_PAGE = `<!doctype html><meta charset="utf-8"><title>routes</title>
+<style>body { margin: 0 } #side { position: fixed; left: 0; top: 0; width: 160px; height: 100vh; overflow: hidden; z-index: 5; background: #eee }
+#side a { display: block; font-size: 6px; line-height: 9px } #list { margin-left: 170px } .row { height: 30px; display: flex; gap: 8px; align-items: center }
+.more { width: 40px } #pop { position: absolute; z-index: 20; background: #fff; border: 1px solid #888; width: 200px } #pop div { cursor: pointer; padding: 6px }</style>
+<div id="side">${Array.from({ length: 60 }, (_, i) => `<a href="/side/${i}">メニュー${i}</a>`).join('')}</div>
+<div id="fields"><label id="uplabel" for="up">ファイルを添付</label><input id="up" type="file"> <input id="memo" aria-label="メモ"> <input id="pw" type="password" aria-label="合言葉"></div>
+<div id="list">${Array.from({ length: 400 }, (_, i) => `<div class="row"><a href="/route/${i}">経路${i}</a><button class="more" type="button" aria-label="その他${i}" data-i="${i}">…</button></div>`).join('')}</div>
+<script>
+const mark = id => (window.__clicks = window.__clicks || []).push(id)
+document.getElementById('up').addEventListener('click', () => mark('up'))
+document.getElementById('list').addEventListener('click', e => {
+  const b = e.target.closest('button.more'); if (!b) return
+  mark('more' + b.dataset.i)
+  const old = document.getElementById('pop'); if (old) old.remove()
+  const pop = document.createElement('div'); pop.id = 'pop'
+  const r = b.getBoundingClientRect()
+  pop.style.left = (r.left + window.scrollX - 100) + 'px'; pop.style.top = (r.bottom + window.scrollY + 2) + 'px'
+  pop.innerHTML = '<div id="copy">コピーを作成</div><div id="del">削除</div><p id="share" aria-label="共有する" style="cursor: default; margin: 0; padding: 6px">共有する</p>'
+  pop.querySelector('#copy').addEventListener('click', () => mark('copy'))
+  pop.querySelector('#share').addEventListener('click', () => mark('share'))
+  pop.querySelector('#del').addEventListener('click', () => mark('del'))
+  document.body.appendChild(pop)
+})
+</script>`
+
+/**
  * A write run (agent-browser.md "Writes within frames, in the app"): the page's own script saves by fetch with a CSRF
  * header and body field (the answer sets a cookie the page must never get), makes a write whose answer is lost, an
  * autosave outside the plan, an upload with a file, and reads an address the run must not read.
@@ -285,6 +317,11 @@ export async function startSites(certDir: string, ports: { site: number; evil: n
       if (host === 'op.test' && url === '/work/lost') { state.work.push({ path: url, name: '', cookie: '', csrf: '', start: Date.now(), end: 0 }); req.socket.destroy(); return }
       // A page that never answers (the operator's navigation must still end when stopped).
       if (host === 'op.test' && url === '/browse-hang') return
+      if (host === 'op.test' && url === '/browse-menu') {
+        res.setHeader('content-type', 'text/html; charset=utf-8')
+        res.end(MENU_PAGE)
+        return
+      }
       if (host === 'op.test' && url === '/browse-tree') {
         res.setHeader('content-type', 'text/html; charset=utf-8')
         res.end(TREE_PAGE)

@@ -21,6 +21,7 @@ import { browserLoginHelpers, createBrowserCheckerRegistry, createBrowserConnect
 import { lstepConnector } from '../../connectors/lstep'
 import { LSTEP_DECLARATION } from '../../connectors/lstep/declaration'
 import { browserReadPartition, browserWritePartition } from '../../shared/browser-operation'
+import { browseLogStep, pageWithScreen, parseBrowseAnswer } from '../../shared/browser-browse'
 import { createRunGate, encodeForm, FORM_CONTENT_TYPE, type BrowserChecker, type BrowserRunSurface, type BrowserStepRecord } from '../../shared/browser-runner'
 import { readBrowserFacts } from '../../shared/browser-facts'
 import { parseBrowserHtml } from '../../electron/features/browser/html'
@@ -441,6 +442,74 @@ async function browseScenarios(win: BrowserShellWindow, sites: Sites) {
   await win.browse.leave()
   await wait(500)
   out.treeWrites = sites.hits.filter(h => h.method !== 'GET' && h.method !== 'HEAD').slice(treeWritesBefore).map(h => `${h.method} ${h.host}${h.path}`)
+  // A long list whose row menu is appended last (production 2026-11-27): the elements are ordered before the cap — the
+  // open menu first, then what is on the screen —, so the menu's choices get refs and a press on one reaches the page.
+  out.menuEntered = await win.browse.enter(() => false)
+  await win.browse.act({ do: 'go', path: '/browse-menu' }, signal)
+  const list = await win.browse.snapshot()
+  out.menuList = list && {
+    count: list.elements.length, omitted: list.omitted ?? 0,
+    // Every element on the screen is listed, before any off the screen; the last rows (off the screen) are the ones left out.
+    boxes: list.elements.map(e => !!e.box),
+    names: list.elements.map(e => e.name),
+  }
+  out.moreClick = await press('その他1', 'more1')
+  const menu = await win.browse.snapshot()
+  out.menuOpen = menu && {
+    first: menu.elements.slice(0, 2).map(e => ({ ref: e.ref, role: e.role, name: e.name, box: !!e.box })),
+    count: menu.elements.length,
+    // The second row's 「…」 lies under the menu: listed, but no mark where the menu covers it.
+    coveredBox: menu.elements.find(e => e.name === 'その他2')?.box ?? null,
+    coveredListed: menu.elements.some(e => e.name === 'その他2'),
+  }
+  out.copyClick = await press('コピーを作成', 'copy')
+  // Pressing by position (the screen image's pixels): what has no ref is pressed where the image shows it; the window's
+  // hit-test refuses a file field or its label, a point off the screen and a page that moved since its snapshot.
+  const cssBox = async (id: string) => JSON.parse(String(await page.executeJavaScript(`JSON.stringify(document.getElementById(${JSON.stringify(id)}).getBoundingClientRect())`, true))) as { x: number; y: number; width: number; height: number }
+  const shown = async () => {
+    const snap = await win.browse.snapshot()
+    const shot = snap ? await win.browse.screenshot?.(snap) : null
+    return snap ? pageWithScreen(snap, shot ?? null) : null
+  }
+  /** The operator's answer to press the middle of an element, in the screen image's pixels, as the loop runs it. */
+  const pressAt = async (id: string, dx = 0) => {
+    const at = await shown()
+    const b = await cssBox(id)
+    if (!at?.screen || !at.viewport) return { problem: 'no screen' }
+    const sx = at.screen[0] / at.viewport[0]
+    const sy = at.screen[1] / at.viewport[1]
+    const parsed = parseBrowseAnswer(JSON.stringify({ do: 'click', x: Math.floor((b.x + b.width / 2 + dx) * sx), y: Math.floor((b.y + b.height / 2) * sy) }), { snapshot: at, items: 0 })
+    if ('problem' in parsed) return { problem: parsed.problem }
+    const aimed = await win.browse.aim!(parsed.answer)
+    const log = aimed.ok ? browseLogStep(parsed.answer, at, 'op.test', aimed) : null
+    const acted = aimed.ok ? await win.browse.act(parsed.answer, signal) : null
+    return { aimed, label: log?.label ?? null, acted, listed: at.elements.some(e => e.name === '共有する') }
+  }
+  out.byPosition = await pressAt('share')
+  out.byPositionSeen = (await pressed()).includes('share')
+  out.fileLabel = await pressAt('uplabel')
+  out.fileField = await pressAt('up')
+  out.fileSeen = (await pressed()).includes('up')
+  // Off the screen: the parser refuses a point outside the image, the hit-test one outside the viewport.
+  const offAt = await shown()
+  out.offParsed = offAt?.screen ? parseBrowseAnswer(JSON.stringify({ do: 'click', x: offAt.screen[0], y: 5 }), { snapshot: offAt, items: 0 }) : null
+  out.offAim = offAt?.viewport ? await win.browse.aim!({ do: 'click', x: offAt.viewport[0] + 5, y: 5 }) : null
+  // The page moved between the snapshot (and its screen) and the press: refused as moved, nothing pressed.
+  const beforeShift = await shown()
+  const memo = await cssBox('memo')
+  await page.executeJavaScript(`document.getElementById('fields').insertAdjacentHTML('beforebegin', '<div style="height: 50px">お知らせ</div>')`, true)
+  out.movedAim = beforeShift ? await win.browse.aim!({ do: 'click', x: memo.x + 5, y: memo.y + 5 }) : null
+  // Typing into the field that has the focus (pressed by position first); a password field is never typed into.
+  out.memoPress = await pressAt('memo')
+  const typeAnswer = parseBrowseAnswer(JSON.stringify({ do: 'type', text: 'こんにちは' }), { snapshot: await shown(), items: 0 })
+  out.typeAim = 'answer' in typeAnswer ? await win.browse.aim!(typeAnswer.answer) : typeAnswer
+  out.typed = 'answer' in typeAnswer ? await win.browse.act(typeAnswer.answer, signal) : null
+  out.memoValue = await page.executeJavaScript(`document.getElementById('memo').value`, true)
+  out.pwPress = await pressAt('pw')
+  out.pwAim = 'answer' in typeAnswer ? await win.browse.aim!(typeAnswer.answer) : null
+  out.pwTyped = 'answer' in typeAnswer ? await win.browse.act(typeAnswer.answer, signal) : null
+  out.pwValue = await page.executeJavaScript(`document.getElementById('pw').value`, true)
+  await win.browse.leave()
   await page.loadURL('https://op.test/')
   await wait(500)
   return out

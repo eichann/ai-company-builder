@@ -3220,7 +3220,7 @@ instruction in words (「この一覧の受付の終わりを並べて」); writ
 same switch as everything else (`BROWSER_AI_BUILD_SWITCH` / this PC's registration or opt-in).
 
 - **Pieces.** `client/shared/browser-browse.ts` (pure: the limits `BROWSER_BROWSE_LIMITS` — the `standard` budget's 20 steps and 5 minutes ("Room for a Skill run"), 90 s each
-  in all, a page's text ≤ 30 000 characters, ≤ 300 elements —, the snapshot `BrowserPageSnapshot` and its check
+  in all, a page's text ≤ 30 000 characters, ≤ 400 elements, in priority order ("The operator sees the screen") —, the snapshot `BrowserPageSnapshot` and its check
   `readBrowserPageSnapshot`, the actions, `parseBrowseAnswer`, the operator's fixed prompt `BROWSER_OPERATOR_BROWSE_PROMPT`,
   `browseMaterial`, `browseLogStep`, the consultation AI's words `BROWSER_BROWSE_WORDS` / `browseWordsForAi`, the member's card
   `browseCard`, the window port `BrowserBrowseSurface`); `client/shared/browser-browse-script.ts` (the page scripts, plain
@@ -3233,7 +3233,8 @@ same switch as everything else (`BROWSER_AI_BUILD_SWITCH` / this PC's registrati
   `--max-turns 1`, every init check — with only its system prompt chosen from two fixed ones (`browserOperatorArgs(model,
   'browse')`, a closed choice: nothing else can be passed). It has **no tool**: its "window tools" are its answer, exactly
   one JSON object per step — `click` / `type` / `select` (an element `ref` of the page it was just shown, of a fitting role:
-  typing only into a text field, never a password field; an option the select showed), `go` (a path of the domain: starts
+  typing only into a text field, never a password field; an option the select showed; since "Pressing by position" also a
+  press at a point of the screen image and typing into the focused field), `go` (a path of the domain: starts
   with `/`, no `//`, `\`, `#`, space or control), `back`, `wait` (1–5 s), `done { result, unread }` or `stop { why:
   not-found | need-person | blocked, unread }`. Anything else ends the run (`bad-answer`), nothing done. Any answer may
   carry `notes` (≤ 4000; 2000 until "The operator sees the screen"): the operator's own working memory, handed back to it at the next step (each step is a fresh
@@ -3383,10 +3384,36 @@ preview had the 20-step budget, and its notes were 2000 characters. The model wa
   review). Deduped: never one inside a listed control, never one inside
   an `item` already listed (except an item inside an item: a folder inside its parent folder), never the page itself or
   a container over 40 % of the screen, never one without its own words; named by its **own** words (a nested item's text
-  is the nested item's), in the kept caps (120 characters); at most `clickables` 150 of the 300 elements; each scan (the marked elements, the pointer
-  subtrees) looks at no more than `clickableScan` 20 000 elements, a list's items at no more than 300; its words read in
+  is the nested item's), in the kept caps (120 characters); at most `clickables` 200 of the 400 elements; each scan (the marked elements, the pointer
+  subtrees) looks at no more than the page's first `clickableScan` 20 000 and last `scanTail` 2000 elements (and every
+  open overlay's), a list's items at no more than 400; its words read in
   place (never a copy: no custom element's constructor runs, no image loads; independent review). Their run-log label is the recording's control rule — a row's, list item's or
   tree item's text never (`rowLike` now also takes `[role=treeitem]`; Codex review).
+- **What matters first, then the cap** (production incident 2026-11-27: on Lステップ's route list a row's 「…」 menu showed
+  ［コピーを作成］［削除］ on the screen image, but the sidebar and the rows had used up the 300 refs in document order and
+  the menu, appended last, got none; the operator stopped with `need-person`). `BROWSER_SNAPSHOT_SCRIPT` gathers every
+  candidate first (each kind ≤ `elementPool` 2000; an open overlay's controls and items before the page's, so no bound
+  of a page's size leaves them out), orders them, and only then applies `elements` 400 / `clickables` 200. Tiers, document
+  order within each: **0** inside an open overlay — the nearest of `[role=menu|listbox|dialog|alertdialog]`,
+  `[aria-modal=true]`, `dialog[open]`, `[popover]` that is shown, or a class-named popper / portal / dropdown / popover
+  container that floats (absolute / fixed; a trigger named like one does not count) — or inside a **floating layer new
+  since the previous snapshot** (the nearest absolute / fixed ancestor with a z-index above 0 that the previous snapshot
+  of this document did not see: `window.__acbLayers` in the isolated world, so a page's script cannot touch it; on a
+  document's first snapshot nothing is new); **1** on the screen (`box`); **2** the rest of the page; **3** behind an
+  open modal (`aria-modal` / `:modal`) — last, and never marked. The refs follow that order (an open menu's choices are
+  ref 0, 1, …), so the material lists them first; the number left out is `omitted`, told to the operator as
+  `page.elementsLeftOut`. **Marks**: an element whose centre an open overlay covers gets no box (`elementFromPoint`, in
+  the isolated world), nor one behind a modal; the marks are drawn in reverse so the first (an overlay's) is on top. The
+  prompts (`OPERATOR_SCREEN_LINES`, both operators) say the order and that the menu's elements come first. The refs stay
+  stable within a step as before (one list per snapshot, `window.__acbBrowse`). Decision: a heuristic order rather than
+  a larger cap alone (400 costs a few kilobytes of material; a long page can still exceed any cap), and the order says
+  nothing about what may be pressed — the gate decides every write as before.
+- **"It is on the screen but has no number"** (`unlisted`, both operators' answers, `OPERATOR_MEMO_KEYS`): any answer may
+  carry `"unlisted":"<what it sees>"` (one line, ≤ 200, `operatorReason`'s rule; not a string → `unlisted`, the answer
+  refused). The trail keeps its last such words (`BrowserTrailRun.unlisted`; the renderer's check takes one line only) and
+  the card shows 「画面にはあるが押せる部品として拾えなかった（係の AI の言葉）：…」 (`BROWSER_TRAIL_WORDS.unlisted`) inside
+  the collapsed memo — outside text like the rest of the trail: never the consultation AI's words or the run log. The
+  prompt (`OPERATOR_UNLISTED_LINE`) says to stop with `need-person` when it cannot go on without it.
 - **No write guard moves**: a press on an `item` is the same trusted press as on a button (`act`, at the element's
   centre); whatever the page's handler then sends is held or refused by the same `ai`-mode gate — every write refused in
   a read run, held and decided against the frames in a write run, a never-read address refused — and the frames, permits
@@ -3394,7 +3421,9 @@ preview had the 20-step budget, and its notes were 2000 characters. The model wa
   the page may send.
 - **Notes** 4000 characters (were 2000; the trail on the card follows).
 - **Remaining limits** (said): the picture shows the page as drawn, names and values included, which the operator already
-  read as text (D6); an element covered by another (a modal) still gets its mark where its box is; an element with none
+  read as text (D6); an element covered by something that is no overlay of the list above (a non-floating banner) still
+  gets its mark where its box is; a popup that is neither a listed overlay nor a new floating layer (a static block the page
+  inserts in the flow) is ordered as any other element (on the screen: tier 1); an element with none
   of the signs (a framework's handler on a plain `div` with the default cursor) is still not listed — the operator sees
   it on the picture but cannot name it; capturing costs a fraction of a second per step.
 
@@ -3408,7 +3437,62 @@ text alone), `browser-window-electron.test.ts` (a fictional folder tree driven b
 clickable card and a tree item listed once each, never the list, its spans or the card's focusable part, no run-log
 label from any of them, never a visible file input with a tabindex; a press on a folder reaches the page's handler; the card's
 handler's fetch POST never leaves the window; the screen a JPEG ≤ 1280 wide with the mark's colour on the folder's edge
-and the page inside it; the page's document unchanged by the snapshot and the screen). Each guard mutation-checked.
+and the page inside it; the page's document unchanged by the snapshot and the screen; **the incident** — a fictional list of
+a fixed sidebar and 400 rows (more than the cap) whose row 「…」 appends a floating menu at the end of the page: before it
+opens every element on the screen comes before any off it and the last rows are the ones left out, counted; once open its
+two choices are ref 0 and 1 with marks, the row it covers has no mark, and a press on ［コピーを作成］ reaches the page),
+`browser-screen-marks.test.ts` (the first mark drawn on top; `omitted` read and told as `elementsLeftOut`),
+`browser-operator-trail.test.ts` (`unlisted` on a read run's and a write preview's card, never in the AI's words or the
+log; not a string refused; one line, capped; the prompts say the order and the word), `OperatorTrail.test.ts` (shown in
+the memo as text). Each guard mutation-checked.
+
+## Pressing by position (owner 2026-11-27: the operator points at the screen image, not only at a ref)
+
+After the same incident (a menu choice on the screen image with no ref), the owner approved letting the operator press
+**where the image shows something**, beside the refs. The element list stays (prioritised: "The operator sees the screen")
+and a ref stays the surer way; a position is for what is visible but has no ref.
+
+- **The answers** (`OPERATOR_ACTION_LINES`, both operators' prompts): `{"do":"click","x":…,"y":…}` in the **screen image's
+  pixels** (whole numbers inside the image; never with a `ref`, `point` otherwise), and `{"do":"type","text":…}` without a
+  ref — into the element that has the focus now (pressed first), the same caps as typing by ref. The material carries the
+  image's size (`page.screen`); the prompt says to prefer a ref and what a refusal's `why` means.
+- **The image's size is main's** (`pageWithScreen`): the shell's screenshot answers its `width` / `height`; the loop
+  (`browse.ts`, `work.ts`) sets `screen` on the step's page only for an image the operator really gets (JPEG, ≤
+  `imageMaxBytes`, which `BROWSER_OPERATOR_IMAGE_MAX_BYTES` now reads) and a page with a viewport — a size the page claims is
+  dropped. No image → no press by position that step (`point`).
+- **Mapped by the parser** (`parseBrowseAnswer`): image pixel → viewport CSS pixel by the image's width / height over the
+  viewport's (which takes in the downscale to 1280 and the screen's pixel ratio: the capture is in device pixels); the
+  action carries the CSS point.
+- **The hit-test** (`aim`, the shell's; `browseAimScript` → `window.__acbAim`, made by `BROWSER_SNAPSHOT_SCRIPT` in the
+  isolated world, so the page's script can neither see nor replace it): asked by the loop before the action is logged, and
+  again by `act` right before the press or the typing. **Refused** (`BROWSER_AIM_REFUSALS`, told to the operator in its
+  `history` as `{ outcome: 'refused', why }`, nothing done, nothing logged): `outside` (off the viewport), `moved` (since
+  the snapshot — and the screen image made right after it — the page scrolled or resized, an overlay opened or closed, an
+  element shown on the screen moved more than 2 px or went, or the point is on a floating layer the image did not show:
+  the operator gets the next snapshot instead), `frame` (an `iframe` / `frame` / `object` / `embed` there: the hit-test
+  cannot see inside it, a cross-origin one above all — every frame, the safe side), `file` (a file field or a label of one:
+  no file chooser ever opens), `nothing`; for typing, `password` (a password field is never typed into by the operator),
+  `file`, `frame`, `not-editable` (the focus is on no text field: `roleOf` = textbox, not disabled or read-only). A window
+  without `aim` refuses both.
+- **Logged as a ref's press**: the run log and the trail take the label of what the hit-test found — the nearest listed
+  element containing the point, else the nearest control, else the element there, through the recording's label rules
+  (`logLabelOf` / `controlLabel`: a row's or list item's text never; a link's never) — via `browseLogStep(…, aimed)`. What
+  was typed is never kept.
+- **Safety is unchanged**: how a press is aimed was never the security boundary. A press by position is the same trusted
+  input as a press by ref; whatever the page then sends is held or refused by the same `ai`-mode gate (every write refused
+  in a read run; held and decided against the frames and the server's permits in a write run; a never-read address
+  refused), and the file-chooser interception stays (the `file` refusal only spares the attempt).
+- **Remaining limits** (said): an element inside a shadow root is hit-tested at its host (a file field inside one is
+  caught by the interception, not by `file`); the layout check compares the listed elements on the screen and the
+  overlays — a change elsewhere (a picture swapped under the point) is not seen; a frame of the same site is refused too.
+
+Tests: `browser-window-electron.test.ts` (a real window: a menu choice with no ref pressed by its place on the screen image
+and logged by its own label; a file field and its label refused, never pressed; a point off the image refused by the
+parser and off the viewport by the hit-test; a page that moved after its snapshot refused; typing into the focused text
+field, logged by its label; a password field never typed into), `browser-browse.test.ts` (the mapping and every refusal of
+the parser, no press by position without the image the operator got, a page's own size dropped; the loop logs the hit-test's
+label, never the typed text, and tells a refusal and why; a window without the hit-test refuses; the hit-test's answer read
+strictly; the prompts). Each guard mutation-checked.
 
 ## Writes within frames (step ⑤a of the redesign: the model and the server's state; the app's half is ⑤b)
 
@@ -4313,6 +4397,8 @@ preview that ended without a plan made **no card at all**. Now the person's card
   text has its own key). `operatorReason` (`client/shared/browser-browse.ts`, also used by `parseWorkAnswer`): absent →
   none; a string → one line, cut at 200 (a long reason costs its end, never the run); anything else → the answer is not
   in its form (`reason`, the run ends as for any bad answer). `notes` are now shown on the card too (the prompts say so).
+  `unlisted` (what it sees on the screen with no ref) follows the same rule and shows in the memo ("The operator sees the
+  screen").
   Inner objects of an answer (a plan's values, a done's checks) take neither key.
 - **One place** (`client/shared/browser-operator-trail.ts`): `createOperatorTrail(phase)` records, per action, the run
   log's own step (`browseLogStep`: the page pattern, the action and the label **in the recording's kept form** — a row's
