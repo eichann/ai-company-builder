@@ -9,7 +9,7 @@ import assert from 'node:assert/strict'
 import os from 'node:os'
 import { MockLanguageModelV3 } from 'ai/test'
 import { simulateReadableStream } from 'ai'
-import { createRecordsApi, missingReasonOf } from '../electron/records/api'
+import { createRecordsApi, missingReasonOf, RecordsApiError } from '../electron/records/api'
 import { createRecordTools } from '../electron/records/tools'
 import { coreTypeDefinitions } from '../../shared/core/core-types'
 import { readRecordToolsMissingPart, recordToolsMissingInstructions } from '../shared/record-tools-missing'
@@ -21,7 +21,14 @@ interface Seen { url: string; method: string; headers: Record<string, string>; b
 type Answer = { status: number; body?: unknown } | 'network'
 
 /** A server answering each path from a queue (the last answer repeats); records what it was asked. */
-function server(answers: { issue?: Answer[]; types?: Answer[]; call?: Answer[] }, opts: { run?: boolean } = {}) {
+const PAST = '2000-01-01T00:00:00.000Z'
+const FUTURE = '2999-01-01T00:00:00.000Z'
+
+/**
+ * `expiresAt(n)`: the n-th token's expiry as the server answers it (default: the first already past, as a turn past
+ * the token's life; later ones ahead). `holdIssue(n)`: the n-th issue answers only when the promise settles.
+ */
+function server(answers: { issue?: Answer[]; types?: Answer[]; call?: Answer[] }, opts: { run?: boolean; expiresAt?: (n: number) => string; holdIssue?: (n: number) => Promise<void> | undefined } = {}) {
   const seen: Seen[] = []
   const queues = { issue: [...(answers.issue ?? [])], types: [...(answers.types ?? [])], call: [...(answers.call ?? [])] }
   let issued = 0
@@ -36,8 +43,11 @@ function server(answers: { issue?: Answer[]; types?: Answer[]; call?: Answer[] }
       const a = next(queues.issue, { status: 201 })
       if (a !== 'network' && a.status === 201 && !a.body) {
         issued += 1
+        const n = issued
+        await opts.holdIssue?.(n)
         const ask = JSON.parse(init.body as string) as { memberTurn?: boolean }
-        return new Response(JSON.stringify({ data: { token: TOKEN(issued), tokenId: `tok-${issued}`, scope: 'act', expiresAt: 'x', memberTurn: ask.memberTurn === true } }), { status: 201 })
+        const expiresAt = opts.expiresAt ? opts.expiresAt(n) : n === 1 ? PAST : FUTURE
+        return new Response(JSON.stringify({ data: { token: TOKEN(n), tokenId: `tok-${n}`, scope: 'act', expiresAt, memberTurn: ask.memberTurn === true } }), { status: 201 })
       }
       return reply(a)
     }
@@ -53,7 +63,7 @@ function server(answers: { issue?: Answer[]; types?: Answer[]; call?: Answer[] }
   return { api, seen, issues: () => seen.filter(s => s.url.endsWith('/me/record-tokens')) }
 }
 
-const ASK = { conversationId: 'conv-1', agent: 'claude-code', scope: 'act' as const }
+const ASK = { conversationId: 'conv-1', agent: 'claude-code', scope: 'act' as const, renewExpired: true }
 
 test('a token that could not be had says why, and a failure that may pass is asked once more', async () => {
   const cases: Array<[Answer[], string, number]> = [
@@ -114,6 +124,54 @@ test('an expired token mid-turn is issued again once, without the member\'s-turn
   assert.ok('access' in bound)
   await assert.rejects(bound.access.call('GET', '/my-turn'), (e: Error & { code?: string }) => e.code === 'RECORD_TOKEN_INVALID')
   assert.equal(run.issues().length, 1)
+
+  // Nobody present (an unattended step: no `renewExpired`): never issued again either.
+  const unattended = server({ call: [expired] })
+  const step = await unattended.api.openTurnFor('co', { ...ASK, renewExpired: undefined })
+  assert.ok('access' in step)
+  await assert.rejects(step.access.call('GET', '/my-turn'), (e: Error & { code?: string }) => e.code === 'RECORD_TOKEN_INVALID')
+  assert.equal(unattended.issues().length, 1)
+})
+
+test('a token refused before its expiry (ended because a newer turn started) is never renewed: the newer turn keeps its token', async () => {
+  const expired = { status: 401, body: { error: 'Unauthorized', code: 'RECORD_TOKEN_INVALID' } }
+  const s = server({ call: [expired] }, { expiresAt: () => FUTURE })
+  const older = await s.api.openTurnFor('co', ASK)
+  assert.ok('access' in older)
+  await assert.rejects(older.access.call('GET', '/my-turn'), (e: Error & { code?: string }) => e.code === 'RECORD_TOKEN_INVALID')
+  assert.equal(s.issues().length, 1, 'no new token: issuing one would end the newer turn\'s')
+})
+
+test('the turn ending while its renewal is on the way: the new token is ended as soon as it comes, and never used', async () => {
+  let release!: () => void
+  const held = new Promise<void>(resolve => { release = resolve })
+  const expired = { status: 401, body: { error: 'Unauthorized', code: 'RECORD_TOKEN_INVALID' } }
+  const s = server({ call: [expired] }, { holdIssue: n => (n === 2 ? held : undefined) })
+  const opened = await s.api.openTurnFor('co', ASK)
+  assert.ok('access' in opened)
+  const pending = opened.access.call('GET', '/my-turn').then(() => 'answered', (e: Error & { code?: string }) => e.code)
+  while (s.issues().length < 2) await new Promise(resolve => setImmediate(resolve))
+  await opened.access.close()
+  release()
+  assert.equal(await pending, 'RECORD_TOKEN_INVALID')
+  for (let i = 0; i < 20 && !s.seen.some(x => x.method === 'DELETE' && x.url.endsWith('/tok-2')); i++) await new Promise(resolve => setImmediate(resolve))
+  assert.ok(s.seen.some(x => x.method === 'DELETE' && x.url.endsWith('/me/record-tokens/tok-2')), 'the token issued after the end is ended')
+  assert.ok(!s.seen.some(x => x.headers.Authorization === `Bearer ${TOKEN(2)}`), 'and never used')
+})
+
+test('after a renewal, the AI\'s actions at the member\'s request stop, in words that say to send again (never 「AI からはできません」)', async () => {
+  const expired = { status: 401, body: { error: 'Unauthorized', code: 'RECORD_TOKEN_INVALID' } }
+  const s = server({ call: [expired, { status: 200, body: { data: { items: [] } } }] })
+  const opened = await s.api.openTurnFor('co', { ...ASK, memberTurn: true })
+  assert.ok('access' in opened)
+  const tools = await createRecordTools(opened.access)
+  assert.ok(tools.specs.some(t => t.name === 'task__complete'), 'offered in a turn the member started')
+  await tools.execute('records_my_turn', {})
+  assert.equal(opened.access.memberTurn, false)
+  const answer = JSON.parse(await tools.execute('task__complete', { id: 'task-abcdef12', expectedVersion: 1 })) as { code?: string; error?: string }
+  assert.equal(answer.code, 'TURN_RENEWED')
+  assert.match(answer.error!, /もう一度送って/)
+  assert.ok(!s.seen.some(x => x.url.endsWith('/actions/complete')), 'the server is not asked')
 })
 
 test('the type definitions are read once more after a blip; still unread, the token is ended and the reason is the read\'s', async () => {
@@ -128,13 +186,15 @@ test('the type definitions are read once more after a blip; still unread, the to
   assert.ok('access' in turn)
   const error = await createRecordTools(turn.access).then(() => null, (e: unknown) => e)
   assert.equal(missingReasonOf(error), 'offline')
+  // The turn's own new token refused at once: send again, not 「ログインが切れています」.
+  assert.equal(missingReasonOf(new RecordsApiError('RECORD_TOKEN_INVALID', 'x')), 'try-again')
   assert.equal(down.seen.filter(x => x.url.endsWith('/api/records-ai/types')).length, 2)
   assert.ok(down.seen.some(x => x.method === 'DELETE' && x.url.endsWith('/me/record-tokens/tok-1')))
 })
 
 const usage = { inputTokens: { total: 1, noCache: 1, cacheRead: 0, cacheWrite: 0 }, outputTokens: { total: 1, text: 1, reasoning: 0 } }
 
-async function turnWith(createRecordTools: () => Promise<unknown>) {
+async function turnWith(createRecordTools: (request: { renewExpired?: boolean }) => Promise<unknown>, extra: Record<string, unknown> = {}) {
   const { startChatServer } = await import('../electron/chat-server')
   let system = ''
   const server = await startChatServer({
@@ -157,7 +217,7 @@ async function turnWith(createRecordTools: () => Promise<unknown>) {
   try {
     const res = await fetch(`http://127.0.0.1:${server.port}/api/chat`, {
       method: 'POST', headers: { Authorization: `Bearer ${server.authToken}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ messages: [{ id: 'm', role: 'user', parts: [{ type: 'text', text: 'やることの件名を直して' }] }], companyId: 'co', companyRootPath: os.tmpdir(), workingDirectory: os.tmpdir(), appSessionId: 'conv-missing-01' }),
+      body: JSON.stringify({ messages: [{ id: 'm', role: 'user', parts: [{ type: 'text', text: 'やることの件名を直して' }] }], companyId: 'co', companyRootPath: os.tmpdir(), workingDirectory: os.tmpdir(), appSessionId: 'conv-missing-01', ...extra }),
     })
     stream = await res.text()
   } finally { server.server.close() }
@@ -181,6 +241,13 @@ test('tools still missing: the AI is told why with the turn, and the reply start
   const fine = await turnWith(async () => ({ specs: [{ name: 'records_get' }], instructions: '', close: async () => {}, execute: async () => '', readTask: async () => null }))
   assert.doesNotMatch(fine.system, /用意できませんでした/)
   assert.doesNotMatch(fine.stream, /data-record-tools-missing/)
+})
+
+test('an expired token is renewed only where the member is present: asked for a consultation\'s turn, never for an unattended step', async () => {
+  const asked: Array<boolean | undefined> = []
+  await turnWith(async request => { asked.push(request.renewExpired); return { unavailable: 'offline' } })
+  await turnWith(async request => { asked.push(request.renewExpired); return { unavailable: 'offline' } }, { aiTurnStep: 'minutes-reading' })
+  assert.deepEqual(asked, [true, undefined])
 })
 
 test('the screen line is drawn only for a known failure, never for a company without records', () => {

@@ -64,15 +64,26 @@ export interface RecordTurnAccess {
   /**
    * The server marked the token a turn the member started (records.md "The AI at the member's request"): the AI may
    * be offered the actions the type lets it run at the member's request. Absent = not marked (an older server, a run).
+   * Reads false once the turn's token was issued again (the new one is never marked).
    */
-  memberTurn?: boolean
+  readonly memberTurn?: boolean
   /** `timeoutMs`: this request's own limit (default the API's; a Drive upload takes longer). */
   call(method: 'GET' | 'POST' | 'PUT' | 'DELETE', path: string, body?: unknown, signal?: AbortSignal, opts?: { timeoutMs?: number }): Promise<unknown>
   /** Revoke the token (the turn ended). */
   close(): Promise<void>
 }
 
-export interface OpenTurnOptions { conversationId: string; agent: string; scope: 'read' | 'act'; requireRun?: boolean; memberTurn?: boolean }
+export interface OpenTurnOptions {
+  conversationId: string; agent: string; scope: 'read' | 'act'; requireRun?: boolean; memberTurn?: boolean
+  /**
+   * The turn has the member present (a consultation, never an unattended step or run): an expired token may be issued
+   * again once. Absent = never (records.md "When the record tools are missing").
+   */
+  renewExpired?: boolean
+}
+
+/** How close to its end a token counts as expired for a renewal (the app's clock may be off from the server's). */
+export const RENEW_SKEW_MS = 5 * 60_000
 
 /** A turn's token, or why there is none (records.md "When the record tools are missing"). */
 export type RecordTurnOpening =
@@ -117,7 +128,8 @@ export function missingReasonOf(error: unknown): RecordToolsMissingReason {
   if (!(error instanceof RecordsApiError)) return 'unknown'
   if (error.code === 'OFFLINE') return 'offline'
   if (error.code === 'SERVER_ERROR') return 'server-error'
-  if (error.code === TOKEN_INVALID) return 'signed-out'
+  // The turn's own new token refused at once (ended by a newer turn of the consultation, or past its life).
+  if (error.code === TOKEN_INVALID) return 'try-again'
   if (error.code === 'RECORDS_DISABLED') return 'disabled'
   // A server without the AI's types route.
   if (error.code === 'HTTP_404') return 'old-server'
@@ -169,7 +181,7 @@ export function createRecordsApi(deps: RecordsApiDeps): RecordsApi {
     return { status: res.status, body }
   }
 
-  type Issued = { ok: true; token: string; tokenId: string; scope: 'read' | 'act'; memberTurn: boolean } | { ok: false; missing: RecordToolsMissingReason }
+  type Issued = { ok: true; token: string; tokenId: string; scope: 'read' | 'act'; memberTurn: boolean; expiresAtMs: number } | { ok: false; missing: RecordToolsMissingReason }
 
   /** POST …/me/record-tokens with the member's session. */
   async function issue(companyId: string, ask: Record<string, unknown>): Promise<Issued> {
@@ -186,9 +198,11 @@ export function createRecordsApi(deps: RecordsApiDeps): RecordsApi {
     } catch {
       return { ok: false, missing: 'offline' }
     }
-    const data = issued.body.data as { token?: string; tokenId?: string; scope?: 'read' | 'act'; memberTurn?: unknown } | undefined
+    const data = issued.body.data as { token?: string; tokenId?: string; scope?: 'read' | 'act'; memberTurn?: unknown; expiresAt?: unknown } | undefined
     if (issued.status === 201 && data?.token && data.tokenId) {
-      return { ok: true, token: data.token, tokenId: data.tokenId, scope: data.scope === 'act' ? 'act' : 'read', memberTurn: data.memberTurn === true }
+      // Unknown expiry (NaN) = never renewed.
+      const expiresAtMs = typeof data.expiresAt === 'string' ? Date.parse(data.expiresAt) : NaN
+      return { ok: true, token: data.token, tokenId: data.tokenId, scope: data.scope === 'act' ? 'act' : 'read', memberTurn: data.memberTurn === true, expiresAtMs }
     }
     if (issued.status === 401) return { ok: false, missing: 'signed-out' }
     if (issued.status === 429) return { ok: false, missing: 'too-many' }
@@ -211,6 +225,8 @@ export function createRecordsApi(deps: RecordsApiDeps): RecordsApi {
     const conversationId = opts.conversationId
     let token = first.token
     let tokenId = first.tokenId
+    let expiresAtMs = first.expiresAtMs
+    let renewed = false
     const revoke = async (id: string) => {
       try {
         await request(`${root}/api/companies/${encodeURIComponent(companyId)}/me/record-tokens/${encodeURIComponent(id)}`, {
@@ -219,20 +235,26 @@ export function createRecordsApi(deps: RecordsApiDeps): RecordsApi {
       } catch { /* it expires on its own */ }
     }
     let closed = false
-    // An expired token is issued again once per turn (a turn longer than the token's life), only for a
-    // consultation's own token: a run's ends with its run. The new one never carries the member's-turn mark,
-    // so the AI's actions at the member's request stay within the first token's count. Calls running side by side
-    // (the AI's parallel tool calls) share the one renewal: each repeats itself with the new token, none issues another.
+    // An expired token is issued again once per turn (a turn longer than the token's life), only where the member is
+    // present (`renewExpired`) and never for a run's token (it ends with its run). Only a token past its expiry (within
+    // RENEW_SKEW_MS): one refused before it — ended because a newer turn of the consultation started — is never
+    // renewed, which would end that newer turn's token in turn. The new one never carries the member's-turn mark, so
+    // the AI's actions at the member's request stop for the rest of the turn (`memberTurn` reads false). Calls running
+    // side by side (the AI's parallel tool calls) share the one renewal: each repeats itself with the new token.
+    const renewable = opts.renewExpired === true && run === null
     let renewal: Promise<boolean> | null = null
     const renewedFrom = (used: string): Promise<boolean> => {
-      if (run !== null || closed) return Promise.resolve(false)
+      if (!renewable || closed) return Promise.resolve(false)
       if (token !== used) return Promise.resolve(true)
       if (renewal) return renewal.then(() => token !== used)
+      if (!(Date.now() >= expiresAtMs - RENEW_SKEW_MS)) return Promise.resolve(false)
       renewal = issue(companyId, { conversationId: ask.conversationId, agent: ask.agent, scope: ask.scope }).then(next => {
         if (!next.ok) return false
         if (closed) { void revoke(next.tokenId); return false }
         token = next.token
         tokenId = next.tokenId
+        expiresAtMs = next.expiresAtMs
+        renewed = true
         return true
       })
       return renewal
@@ -250,7 +272,7 @@ export function createRecordsApi(deps: RecordsApiDeps): RecordsApi {
       access: {
         scope: first.scope,
         boundToRun: run !== null,
-        memberTurn: first.memberTurn && run === null,
+        get memberTurn() { return first.memberTurn && run === null && !renewed },
         async call(method, path, body, signal, opts) {
           if (closed) throw new RecordsApiError('TURN_ENDED', 'この会話のターンは終わりました。')
           if (method !== 'GET' && deps.beforeWrite) await deps.beforeWrite(conversationId).catch(() => undefined)

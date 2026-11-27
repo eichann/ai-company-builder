@@ -9,7 +9,7 @@
  */
 
 /** Why the tools are missing. `disabled` is no failure: the company does not use records (no line on screen). */
-export type RecordToolsMissingReason = 'offline' | 'signed-out' | 'too-many' | 'old-server' | 'server-error' | 'unknown' | 'disabled'
+export type RecordToolsMissingReason = 'offline' | 'signed-out' | 'too-many' | 'old-server' | 'server-error' | 'try-again' | 'unknown' | 'disabled'
 
 const REASONS: Record<RecordToolsMissingReason, { why: string; fix: string }> = {
   offline: { why: 'サーバーにつながりませんでした', fix: 'もう一度送ると直ることが多いです' },
@@ -17,6 +17,7 @@ const REASONS: Record<RecordToolsMissingReason, { why: string; fix: string }> = 
   'too-many': { why: '記録の道具を同時に使いすぎています', fix: '1分ほど待ってから、もう一度送ってください' },
   'old-server': { why: '会社のサーバーの版が古く、記録の道具に対応していません', fix: '管理者にサーバーの更新を頼んでください' },
   'server-error': { why: 'サーバーで問題が起きました', fix: 'もう一度送ると直ることが多いです。続くときは管理者に伝えてください' },
+  'try-again': { why: '記録の道具の準備が途中で切れました', fix: 'もう一度送ってください' },
   unknown: { why: '用意の途中で問題が起きました', fix: 'もう一度送ると直ることが多いです' },
   disabled: { why: 'この会社では記録の機能を使っていません', fix: '管理者が管理画面の「詳しい設定 › 仕事の進め方」の「記録とやることの一覧を使う」でオンにできます' },
 }
@@ -36,6 +37,13 @@ export function recordToolsMissingInstructions(reason: RecordToolsMissingReason)
   }
   return `\n\n【会社の記録の道具】この回は、会社の記録（やること・案件・決めたことなど）の道具を用意できませんでした（理由：${why}）。前の回で使えた記録の道具が見当たらないのは、このためです。この回は記録を読むことも変えることもできません。記録について頼まれたら、「つながっていません」とだけ言わず、理由と直し方を一言で伝えてください（例：「${why}。${fix}。」）。`
 }
+
+/**
+ * An action at the member's request after the turn's token was issued again (a turn past the token's life): the new
+ * token never carries the member's-turn mark, so the tool says this instead of asking the server (records.md "When the
+ * record tools are missing").
+ */
+export const ASKED_AFTER_RENEWAL = { error: 'この回は長くなったため、頼まれた操作はここではもうできません。もう一度送ってから頼んでください。', code: 'TURN_RENEWED' } as const
 
 /** The chat part that says so at the start of the reply: `{ reason }` (live only; never stored). */
 export const RECORD_TOOLS_MISSING_PART_TYPE = 'data-record-tools-missing'

@@ -434,7 +434,8 @@ nothing to anyone else. It links a Drive file or a file of the member's own PC i
   `.personal/` files link (the link is the linker's alone) while a private folder's files link to no
   record, and to tell the member before moving. `records_get`'s description says `broken: true` is
   "not on the server now" (deleted, not synced, moved into `.personal/` or a private folder) and that a
-  `.personal/` link always reads broken (check the member's Mac with the file tools);
+  `.personal/` link always reads `broken: true` (or carries no `broken`: git could not tell) — check the
+  member's Mac with the file tools;
   `records_link_file`'s says the same about `.personal/`, private folders and moves;
   `taskTopicInstructions` that a moved file is not linked by itself. Test:
   `client/tests/records-tools.test.ts` 「moving a linked file…」, `consultation-task.test.ts`.
@@ -2472,12 +2473,19 @@ earlier turn told the member 「この会話から記録の道具につながっ
   no failure: the AI is told records are off there and where an admin turns them on, the screen says
   nothing; an unattended step gets the AI paragraph only.
 - **An expired token mid-turn** (a turn past the token's 120 minutes): a call answered 401
-  `RECORD_TOKEN_INVALID` issues the token again **once per turn** and repeats the call — only a
-  consultation's token (a run's ends with its run: `job-runs.ts` stops on that code), never after the
-  turn ended, and **without `memberTurn`**, so the AI's actions at the member's request stay within the
-  first token's count; `close` ends the token in use. Calls running side by side (the AI's parallel
+  `RECORD_TOKEN_INVALID` issues the token again **once per turn** and repeats the call — only where the
+  member is present (`renewExpired`, never an unattended step or a run: `job-runs.ts` stops on that code),
+  only when the token is really past its `expiresAt` from the issue answer (`RENEW_SKEW_MS`, 5 minutes;
+  a token refused before it — ended because a newer turn of the consultation started — is never renewed,
+  which would end the newer turn's token), never after the turn ended, and **without `memberTurn`**: the
+  AI's actions at the member's request **stop for the rest of the turn** (`RecordTurnAccess.memberTurn`
+  reads false; the tool answers `ASKED_AFTER_RENEWAL` 「…もう一度送ってから頼んでください。」 without asking
+  the server). `close` ends the token in use, and a renewal still in flight when the turn ends is ended
+  as soon as it is issued. Calls running side by side (the AI's parallel
   tool calls) share the one renewal and each repeats itself with the new token (codex review). A second one is said in the member's words
   (「記録の道具の期限が切れました。もう一度送ってください。」, code unchanged).
+- A types read refused with `RECORD_TOKEN_INVALID` (the turn's new token ended at once) is `try-again`
+  (「もう一度送ってください」), not `signed-out`.
 - **Older tokens of the consultation end** when a new one is issued ("Who is acting" above).
 - Tests: `client/tests/record-tools-missing.test.ts` (each reason and how often it is asked; the
   re-issue once, without the mark, never for a run, the token in use ended; the types read again and

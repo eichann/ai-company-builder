@@ -209,8 +209,8 @@ export function createChatServerConfig(deps: ChatServerConfigDeps): ChatServerCo
         instructions: companyFilesInstructions(notDownloaded),
       }
     },
-    createRecordTools: async ({ companyId, conversationId, agent, actions, requireRun, memberTurn, onAskedClose, companyRoot, department, companyScreen, largeContext, onOperationCard, onApprovalCard, onBundleChoice, onMailDraft, onDriveOverwrite, jobProposals, onJobProposalCard }, signal) => {
-      const opened = await deps.records.openTurnFor(companyId, { conversationId, agent, scope: actions ? 'act' : 'read', ...(requireRun ? { requireRun } : {}), ...(memberTurn && actions ? { memberTurn } : {}) })
+    createRecordTools: async ({ companyId, conversationId, agent, actions, requireRun, memberTurn, renewExpired, onAskedClose, companyRoot, department, companyScreen, largeContext, onOperationCard, onApprovalCard, onBundleChoice, onMailDraft, onDriveOverwrite, jobProposals, onJobProposalCard }, signal) => {
+      const opened = await deps.records.openTurnFor(companyId, { conversationId, agent, scope: actions ? 'act' : 'read', ...(requireRun ? { requireRun } : {}), ...(memberTurn && actions ? { memberTurn } : {}), ...(renewExpired ? { renewExpired } : {}) })
       // No token: why, for the AI and the screen (records.md "When the record tools are missing").
       if ('missing' in opened) return { unavailable: opened.missing }
       const access = opened.access

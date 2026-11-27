@@ -108,7 +108,7 @@ export interface ChatServerConfig extends AgentHost {
    * folder under `<department>/.personal/` its writes are held to this turn; null = an ordinary one.
    */
   stepWriteArea?: (companyId: string, conversationId: string) => Promise<string | WriteArea | null>
-  createRecordTools?: (request: { companyId: string; conversationId: string; agent: string; actions: boolean; requireRun?: boolean; memberTurn?: boolean; onAskedClose?: (card: AiAskedCard) => void; companyRoot?: string; department?: string | null; companyScreen?: boolean; largeContext?: boolean; onOperationCard?: (card: PluginOperationCard) => void; onApprovalCard?: (card: ApprovalCardRef) => void; onBundleChoice?: (card: MinutesBundleChoiceCard) => void; onMailDraft?: (card: MailDraftCard) => void; onDriveOverwrite?: (card: DriveOverwriteCard) => void; jobProposals?: boolean; onJobProposalCard?: (card: JobProposalCardRef) => void }, signal: AbortSignal) => Promise<RecordTools | { unavailable: RecordToolsMissingReason | 'no-run' } | null>
+  createRecordTools?: (request: { companyId: string; conversationId: string; agent: string; actions: boolean; requireRun?: boolean; memberTurn?: boolean; renewExpired?: boolean; onAskedClose?: (card: AiAskedCard) => void; companyRoot?: string; department?: string | null; companyScreen?: boolean; largeContext?: boolean; onOperationCard?: (card: PluginOperationCard) => void; onApprovalCard?: (card: ApprovalCardRef) => void; onBundleChoice?: (card: MinutesBundleChoiceCard) => void; onMailDraft?: (card: MailDraftCard) => void; onDriveOverwrite?: (card: DriveOverwriteCard) => void; jobProposals?: boolean; onJobProposalCard?: (card: JobProposalCardRef) => void }, signal: AbortSignal) => Promise<RecordTools | { unavailable: RecordToolsMissingReason | 'no-run' } | null>
   /**
    * The consultation's topic as stored (chat history): the task its new files are linked to
    * (consultation-task.ts). Read at each new file, so a task the AI made earlier in the turn counts.
@@ -608,6 +608,8 @@ export async function startChatServer(config: ChatServerConfig) {
         companyId, conversationId: appSessionId || crypto.randomUUID(), agent: authMode, actions: can.recordActions, companyRoot: companyRootPath || undefined,
         // A scheduled job's run: its token only with the run main holds (never an ordinary one).
         ...(requestedStep === JOB_PC_STEP ? { requireRun: true } : {}),
+        // An expired token is issued again only where the member is present: never an unattended step or run.
+        ...(!aiTurnStep && requestedStep === undefined ? { renewExpired: true } : {}),
         // The department on screen: where a request for someone else goes (records.md "Where the AI puts a request").
         department: activeDepartment?.folder ?? null,
         // The 全社 tab of a consultation the member is in (never an unattended run or a step): 全社 said on purpose.
